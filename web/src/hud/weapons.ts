@@ -49,12 +49,13 @@ import type { HudDesign } from './design';
 import type { Aspect } from './units';
 import { screenW } from './units';
 import { buildTrees, pcGet, CLEAR_TEXTURE, WEAPON_BOX_ENTRY, weaponBoxTexture } from './build';
-import { WEAPON_BOX_COLOUR } from './design';
+import { WEAPON_BOX_COLOUR, WEAPON_BOX_IMAGE, WEAPON_ICONS, weaponIconId, weaponImageKind } from './design';
 import { kvFind, kvGet, type KvNode } from './kv';
-import { artImage, colourOf, fillFontText, fontFace, hatch, isMissing, rgbaOf, scratchCanvas, setFont, tinted } from './render';
+import { artImage, colourOf, fillFontText, fontFace, hatch, isMissing, rgbaOf, scratchCanvas, setFont, storedImage, tinted } from './render';
 import { baseOf } from './base';
 import { importedMaterial } from './importArt';
 import { EQUIP_ICON_SIZE } from './art/index';
+import { WEAPON_GROW, WEAPON_KEY_DEFAULTS } from './weaponColumn';
 
 interface Rect { x: number; y: number; w: number; h: number }
 
@@ -84,11 +85,13 @@ export interface WeaponSlot {
   art: string | null;
   /** A generated flat or rounded box: its "r g b a" colour, drawn over the frame instead of art. */
   fill?: { color: string; rounded: boolean };
+  /** An Image box: the id of its upload in the design's images, nine-sliced over the frame instead of art. */
+  image?: string;
   /**
    * tint: the colour the icon is multiplied by, or null to draw it as it is.
    * hidden: its mod_textures.txt entry points at the clear texture.
    */
-  icon: Rect & { name: string; tint: string | null; hidden?: boolean };
+  icon: Rect & { name: string; tint: string | null; hidden?: boolean; upload?: string };
   texts: WeaponText[];
 }
 
@@ -105,12 +108,24 @@ const SAMPLE_ITEMS: { icon: string; has: boolean }[] = [
   { icon: 'icon/equip/pills', has: true },
 ];
 
-/** The box art, both slot kinds: a scalable panel drawn at this alpha (180 of 255) in white. */
+/**
+ * The box art, both slot kinds: a scalable panel drawn at this alpha (180 of
+ * 255) in white. Generated flat and rounded boxes draw at it too, active and
+ * inactive: slice 2.F launch P (/home/volence/l4d/hud/probe-2f/RESULTS.md,
+ * shots p/shots/p/p-a.png and p-g.png) drew a 255 0 0 255 active and a
+ * 0 0 255 255 inactive box as the game blending in linear light at 180/255:
+ * red 222 over a backdrop red of 83, blue 219 over a backdrop blue of 29, the
+ * zero channels about half the backdrop. Probe S4's "about 0.55, no
+ * multiplier" assumed a gamma-space blend; the same linear model fits its
+ * pixels (166 red, 36 green for a 128-alpha box). The canvas blends in gamma
+ * space, so no single alpha matches the game over every backdrop; 180/255 is
+ * the game's own number, kept.
+ */
 export const BOX_ALPHA = 180 / 255;
 /** The art's corners, in texels of its 128-texel texture, kept square when the box stretches. */
 const SRC_CORNER = 16;
 /** The active slot's size, against the others. */
-const GROW = 1.2;
+const GROW = WEAPON_GROW;
 
 /**
  * The paint's other unit. Box pads, corners and the gaps between slots are
@@ -122,16 +137,11 @@ const unit640 = (aspect: Aspect) => screenW(aspect) / 640;
 
 /**
  * The defaults client.dll registers for each key, used when a file leaves
- * one out. Neither preset gives PistolAmmoFont, so the pistol's clip and
- * the primary's reserve are always in HudAmmo.
+ * one out (weaponColumn.ts, shared with the build). Neither preset gives
+ * PistolAmmoFont, so the pistol's clip and the primary's reserve are always
+ * in HudAmmo.
  */
-const DEFAULTS: Record<string, string> = {
-  PrimaryWeaponsYPos: '0', PrimaryWeaponBoxWide: '0', PrimaryWeaponBoxTall: '0', PrimaryWeaponTall: '0',
-  PrimaryWeaponAmmoX: '0', ReserveAmmoYPos: '0', PistolBoxWide: '0', PistolBoxTall: '0',
-  RightSideIndent: '10', IconSize: '32',
-  PrimaryAmmoFont: 'FrameTitle', PistolAmmoFont: 'HudAmmo',
-  ReserveAmmoColor: '128 128 128 255', InactiveItemColor: '100 100 100 255',
-};
+const DEFAULTS = WEAPON_KEY_DEFAULTS;
 
 /** A HudWeaponSelection key as the generated file has it, or the dll's default when the file leaves it out. */
 export function weaponKey(design: HudDesign, key: string): string { return keys(design)(key); }
@@ -212,12 +222,29 @@ export function weaponSlots(design: HudDesign, aspect: Aspect, panelWide: number
     const box = active ? 'boxActive' : 'boxInactive';
     const art = file(WEAPON_BOX_ENTRY[box]);
     const style = design.weapons?.[box];
-    const fill = art === weaponBoxTexture(box) && style && style.kind !== 'hidden'
+    const generated = art === weaponBoxTexture(box) && style;
+    const image = generated && style.kind === 'image' && design.images[WEAPON_BOX_IMAGE[box]] ? WEAPON_BOX_IMAGE[box] : undefined;
+    const fill = generated && (style.kind === 'flat' || style.kind === 'rounded')
       ? { color: style.color ?? WEAPON_BOX_COLOUR[box], rounded: style.kind === 'rounded' } : undefined;
     return {
       frame: { x: b.x - pad, y: b.y - pad, w: b.w + 2 * pad, h: b.h + 2 * pad }, corner: (active ? 8 : 4) * u,
-      art: art === CLEAR_TEXTURE || fill ? null : art, ...(fill ? { fill } : {}),
+      art: art === CLEAR_TEXTURE || fill || image ? null : art, ...(fill ? { fill } : {}), ...(image ? { image } : {}),
     };
+  };
+  // An entry the generated mod_textures.txt points at its own upload (weaponsPass), and that upload's id.
+  const uploadOf = (entry: string) => {
+    const id = weaponIconId(entry);
+    return file(entry) === `vgui/hud/hudeditor/${entry}` && design.images[id] ? id : undefined;
+  };
+  /**
+   * The sample's picture for a slot: its own entry, unless only another
+   * entry the slot can hold has an upload, which is then shown instead, so
+   * an upload for the M16 is seen without switching the sample gun.
+   */
+  const sampleIcon = (preferred: string, others: string[]) => {
+    const entry = uploadOf(preferred) || !others.some(uploadOf) ? preferred : others.find(uploadOf)!;
+    const id = uploadOf(entry);
+    return { name: entry.replaceAll('_', '/'), ...(id ? { upload: id } : {}) };
   };
 
   // The primary weapon: its icon PrimaryWeaponTall high (times 1.2 when
@@ -230,15 +257,19 @@ export function weaponSlots(design: HudDesign, aspect: Aspect, panelWide: number
     const active = held === 'primary';
     const f = active ? GROW : 1;
     const box = boxAt(y, n('PrimaryWeaponBoxWide'), n('PrimaryWeaponBoxTall'), active);
+    const gun = sampleIcon('icon_equip_pumpshotgun', WEAPON_ICONS.filter((e) => weaponImageKind(e) === 'gun'));
     const ih = n('PrimaryWeaponTall') * f;
-    const iw = cellAspect('icon/equip/pumpshotgun') * ih;
+    // An upload is drawn at its own cell's aspect, the rect weaponsPass wrote
+    // (/home/volence/l4d/hud/probe-phase2-rest/r4/shots/r4/r4-a.png, r4-b.png).
+    const cell = gun.upload ? iconCell(design, gun.name.replaceAll('/', '_')) : undefined;
+    const iw = (cell && cell.h > 0 ? cell.w / cell.h : cellAspect(gun.name)) * ih;
     const clipFont = get('PrimaryAmmoFont');
     const reserveFont = get('PistolAmmoFont');
     const clipTop = y + (box.h - fontFace(design, clipFont).tall) / 2;
     const ammoX = panelWide - n('PrimaryWeaponAmmoX');
     slots.push({
       kind: 'primary', active, box, ...frameOf(box, active),
-      icon: { name: 'icon/equip/pumpshotgun', tint: null, ...(hidden('icon/equip/pumpshotgun') ? { hidden: true } : {}),
+      icon: { ...gun, tint: null, ...(hidden(gun.name) ? { hidden: true } : {}),
         x: panelWide - iw - indent, y: y - ih / 2, w: iw, h: ih },
       texts: [
         { text: WEAPON_SAMPLE.clip, font: clipFont, colour: null, align: 'right', x: ammoX - (active ? 5 : 0) - u, y: clipTop },
@@ -250,15 +281,17 @@ export function weaponSlots(design: HudDesign, aspect: Aspect, panelWide: number
   }
 
   // The pistol: its icon a square as tall as the box, one 640-unit in from
-  // the box's right edge; the clip ends two 640-units left of the icon.
+  // the box's right edge, an upload too whatever its shape (r4/shots/r4/r4-c.png);
+  // the clip ends two 640-units left of the icon.
   {
+    const pistol = sampleIcon('icon_equip_dualpistols', ['icon_equip_pistol']);
     const active = held === 'pistol';
     const box = boxAt(y, n('PistolBoxWide'), n('PistolBoxTall'), active);
     const iconX = panelWide - indent - box.h - u;
     const font = get('PistolAmmoFont');
     slots.push({
       kind: 'pistol', active, box, ...frameOf(box, active),
-      icon: { name: 'icon/equip/dualpistols', tint: null, ...(hidden('icon/equip/dualpistols') ? { hidden: true } : {}), x: iconX, y, w: box.h, h: box.h },
+      icon: { ...pistol, tint: null, ...(hidden(pistol.name) ? { hidden: true } : {}), x: iconX, y, w: box.h, h: box.h },
       texts: [{ text: WEAPON_SAMPLE.pistolClip, font, colour: null, align: 'right', x: iconX - 2 * u, y: y + (box.h - fontFace(design, font).tall) / 2 }],
     });
     y += box.h + 2 * u;
@@ -271,9 +304,11 @@ export function weaponSlots(design: HudDesign, aspect: Aspect, panelWide: number
     const active = held === 'item' && i === 0;
     const size = n('IconSize');
     const box = boxAt(y, size, size, active);
+    // The throwable slot shows a pipe bomb upload when the molotov has none.
+    const pic = sampleIcon(item.icon.replaceAll('/', '_'), i === 0 ? ['icon_equip_pipebomb'] : []);
     slots.push({
       kind: 'item', active, box, ...frameOf(box, active),
-      icon: { name: item.icon, tint: item.has ? null : get('InactiveItemColor'), ...(hidden(item.icon) ? { hidden: true } : {}), ...box },
+      icon: { ...pic, tint: item.has ? null : get('InactiveItemColor'), ...(hidden(pic.name) ? { hidden: true } : {}), ...box },
       texts: [],
     });
     y += box.h + 2 * u;
@@ -285,11 +320,13 @@ export function weaponSlots(design: HudDesign, aspect: Aspect, panelWide: number
  * CHudTexture::DrawSelfScalableCorners: the texture's 16-texel corners drawn
  * `corner` pixels square, its edges stretched between them, its middle
  * stretched to fill, so a box of any size keeps round corners and an even rim.
+ * A ScalableImagePanel draws the same way with its own src_corner (texels),
+ * which the kill notice box passes (mock.ts).
  */
-function drawNineSlice(ctx: CanvasRenderingContext2D, img: CanvasImageSource, tw: number, th: number,
-  x: number, y: number, w: number, h: number, corner: number) {
-  const sx = [0, SRC_CORNER, tw - SRC_CORNER], sw = [SRC_CORNER, tw - 2 * SRC_CORNER, SRC_CORNER];
-  const sy = [0, SRC_CORNER, th - SRC_CORNER], sh = [SRC_CORNER, th - 2 * SRC_CORNER, SRC_CORNER];
+export function drawNineSlice(ctx: CanvasRenderingContext2D, img: CanvasImageSource, tw: number, th: number,
+  x: number, y: number, w: number, h: number, corner: number, src = SRC_CORNER) {
+  const sx = [0, src, tw - src], sw = [src, tw - 2 * src, src];
+  const sy = [0, src, th - src], sh = [src, th - 2 * src, src];
   const dx = [x, x + corner, x + w - corner], dw = [corner, w - 2 * corner, corner];
   const dy = [y, y + corner, y + h - corner], dh = [corner, h - 2 * corner, corner];
   for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) ctx.drawImage(img, sx[c], sy[r], sw[c], sh[r], dx[c], dy[r], dw[c], dh[r]);
@@ -312,7 +349,18 @@ export function drawWeapons(ctx: CanvasRenderingContext2D, design: HudDesign, or
     const ownBox = key && s.art ? importedMaterial(key, s.art, scratchCanvas) : null;
     // The upload's .vmt may point at a texture it does not carry; the game then draws the stock one it names.
     const box = s.art && !(ownBox && 'src' in ownBox) ? artImage(ownBox && 'stock' in ownBox ? ownBox.stock : s.art, onAsset) : undefined;
-    if (s.fill) {
+    const boxUpload = s.image ? design.images[s.image] : undefined;
+    const boxPic = boxUpload ? storedImage(boxUpload, onAsset) : undefined;
+    if (boxUpload) {
+      // The game nine-slices an uploaded box like the stock art, 16-texel
+      // corners kept square (/home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/weap-d.png).
+      if (boxPic) {
+        ctx.save();
+        ctx.globalAlpha *= BOX_ALPHA;
+        drawNineSlice(ctx, boxPic.img, boxUpload.w, boxUpload.h, frame.x, frame.y, frame.w, frame.h, s.corner * k);
+        ctx.restore();
+      }
+    } else if (s.fill) {
       // The generated texture is the colour edge to edge, its corners cut
       // round by one 16-texel corner for Rounded, nine-sliced over the frame
       // like the art, so the fill is the frame with round corners s.corner big.
@@ -338,11 +386,27 @@ export function drawWeapons(ctx: CanvasRenderingContext2D, design: HudDesign, or
     } else if (s.art && isMissing(s.art)) hatch(ctx, { name: s.art, kind: 'image', visible: true, ...frame });
 
     const icon = px(s.icon);
+    const upload = s.icon.upload && !s.icon.hidden ? design.images[s.icon.upload] : undefined;
     // An imported HUD that repoints an icon's cell at its own texture shows its own art, cut from that cell.
-    const cellOf = key && !s.icon.hidden ? iconCell(design, s.icon.name.replaceAll('/', '_')) : undefined;
+    const cellOf = key && !s.icon.hidden && !upload ? iconCell(design, s.icon.name.replaceAll('/', '_')) : undefined;
     const ownIcon = key && cellOf ? importedMaterial(key, cellOf.file, scratchCanvas) : null;
-    const img = s.icon.hidden || (ownIcon && 'src' in ownIcon) ? undefined : artImage(s.icon.name, onAsset);
-    if (cellOf && ownIcon && 'src' in ownIcon) {
+    const img = s.icon.hidden || upload || (ownIcon && 'src' in ownIcon) ? undefined : artImage(s.icon.name, onAsset);
+    if (upload) {
+      // Drawn in its own colours, an item the player lacks multiplied by
+      // InactiveItemColor as stock icons are (r1/shots/crops/weap-a.png).
+      const pic = storedImage(upload, onAsset);
+      if (pic) {
+        ctx.save();
+        let src: CanvasImageSource = pic.img;
+        if (s.icon.tint) {
+          const [r, g, b, a] = rgbaOf(design, s.icon.tint);
+          if (r < 255 || g < 255 || b < 255) src = tinted(pic.img, pic.key, r, g, b, upload.w, upload.h);
+          ctx.globalAlpha *= a / 255;
+        }
+        ctx.drawImage(src, icon.x, icon.y, icon.w, icon.h);
+        ctx.restore();
+      }
+    } else if (cellOf && ownIcon && 'src' in ownIcon) {
       ctx.save();
       let src: CanvasImageSource = ownIcon.src;
       if (s.icon.tint) {

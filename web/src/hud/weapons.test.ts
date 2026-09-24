@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { weaponSlots, drawWeapons, iconCell, WEAPON_SAMPLE, BOX_ALPHA } from './weapons';
 import { _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
-import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
+import { DEFAULT_DESIGN, validateDesign, weaponIconId, type HudDesign } from './design';
 import { registerImport, unregisterImport } from './base';
 import { _resetImportedArt } from './importArt';
 import { sampleHud, fakeCanvas, recordingCtx } from './importFixtures';
 import { decodeText } from './text';
 import { encodeVTF } from '../vpk';
+import { buildTrees } from './build';
+import { kvFind, kvGet } from './kv';
 import { artUrl } from './art';
 import { screenW } from './units';
 import { canvasFont, fontCell } from './fonts';
@@ -287,6 +289,17 @@ describe('the weapon edits in the preview', () => {
     for (const f of fills) { expect(f.fill).toBe('rgba(10,20,30,1)'); near(f.alpha, BOX_ALPHA); }
   });
 
+  it('draws a generated active box at the same 180/255 as every other box (probe 2F launch P)', () => {
+    // /home/volence/l4d/hud/probe-2f/p/shots/p/p-a.png and p-g.png (RESULTS.md, X8): a flat 255 0 0 255
+    // active box and a 0 0 255 255 inactive box both draw as the game blending in linear light at
+    // alpha 0.706 (180/255): red 222 over a backdrop red of 83, blue 219 over a backdrop blue of 29.
+    // Probe S4's "no multiplier" assumed a gamma-space blend; the same model fits its pixels too.
+    const d = design({ weapons: { boxActive: { kind: 'flat', color: '255 0 0 128' } } });
+    const fills = drawn(d).filter((c) => c.m === 'fillRect' && String(c.fill).startsWith('rgba(255,0,0,'));
+    expect(fills).toHaveLength(1);
+    near(fills[0].alpha, BOX_ALPHA);
+  });
+
   it('draws a rounded box with its corners round by one corner of the art, in the default colour when none is set', () => {
     const d = design({ weapons: { boxActive: { kind: 'rounded' } } });
     const slots = weaponSlots(d, '16:9', 100);
@@ -319,6 +332,122 @@ describe('the weapon edits in the preview', () => {
     const text = drawn(d).filter((c) => c.m === 'fillText');
     expect(text.map((c) => c.font)).toEqual([30, 12, 12].map((t) => canvasFont('Trade Gothic Bold', 0, t * k)));
   });
+});
+
+describe('weapon uploads in the preview', () => {
+  // /home/volence/l4d/hud/probe-phase2-rest/r4/shots/r4/r4-a..c.png: a gun upload is PrimaryWeaponTall high
+  // at its own aspect, right-aligned; a pistol upload a square as tall as its box whatever its shape;
+  // r1/shots/crops/weap-a.png: an item the player lacks is multiplied by InactiveItemColor.
+  const k = 2;
+  const origin = { x: 1000, y: 300 };
+  const at = (r: { x: number; y: number; w: number; h: number }) => [origin.x + r.x * k, origin.y + r.y * k, r.w * k, r.h * k];
+  const PNG = (tag: string) => btoa(tag);
+  const withUploads = (icons: Record<string, [number, number]>, extra: Partial<HudDesign> = {}) => {
+    const images: HudDesign['images'] = {};
+    const map: Record<string, string> = {};
+    for (const [entry, [w, h]] of Object.entries(icons)) {
+      const id = weaponIconId(entry);
+      images[id] = { w, h, png: PNG(id) };
+      map[entry] = id;
+    }
+    return design({ ...extra, images: { ...images, ...extra.images }, weapons: { ...extra.weapons, icons: map } });
+  };
+
+  it("draws a gun upload as wide as its own aspect, not the shotgun cell's", () => {
+    const wide = weaponSlots(withUploads({ icon_equip_pumpshotgun: [192, 64] }), '16:9', 100)[0].icon;
+    nearBox(wide, 100 - 72 - 10, 10 - 12, 72, 24);
+    expect(wide.upload).toBe('wiconPumpshotgun');
+    const square = weaponSlots(withUploads({ icon_equip_pumpshotgun: [64, 64] }), '16:9', 100)[0].icon;
+    nearBox(square, 100 - 24 - 10, 10 - 12, 24, 24);
+    const narrow = weaponSlots(withUploads({ icon_equip_pumpshotgun: [16, 64] }), '16:9', 100)[0].icon;
+    near(narrow.w, 6);
+  });
+
+  it('shows the gun that has an upload when the shotgun has none, so the upload can be seen', () => {
+    const icon = weaponSlots(withUploads({ icon_equip_machinegun: [128, 64] }), '16:9', 100)[0].icon;
+    expect(icon.name).toBe('icon/equip/machinegun');
+    expect(icon.upload).toBe('wiconMachinegun');
+    near(icon.w, 2 * icon.h);
+    // The shotgun's own upload wins: it is the sample gun.
+    expect(weaponSlots(withUploads({ icon_equip_machinegun: [128, 64], icon_equip_pumpshotgun: [64, 64] }), '16:9', 100)[0].icon.name)
+      .toBe('icon/equip/pumpshotgun');
+    // A hidden gun picture shows no upload.
+    const hidden = weaponSlots(withUploads({ icon_equip_machinegun: [128, 64] }, { weapons: { weaponIcons: false } }), '16:9', 100)[0].icon;
+    expect([hidden.name, hidden.hidden, hidden.upload]).toEqual(['icon/equip/pumpshotgun', true, undefined]);
+  });
+
+  it('draws a pistol upload square, as tall as its box, whatever its shape', () => {
+    const slots = weaponSlots(withUploads({ icon_equip_dualpistols: [64, 64] }), '16:9', 100);
+    nearBox(slots[1].icon, 100 - 10 - 24 - U, slots[1].box.y, 24, 24);
+    expect(slots[1].icon.upload).toBe('wiconDualpistols');
+    const single = weaponSlots(withUploads({ icon_equip_pistol: [64, 64] }), '16:9', 100)[1].icon;
+    expect([single.name, single.upload]).toEqual(['icon/equip/pistol', 'wiconPistol']);
+  });
+
+  it('dims an item upload the sample player lacks by InactiveItemColor, and shows the pipe bomb upload in the throwable slot', () => {
+    const slots = weaponSlots(withUploads({ icon_equip_medkit: [64, 64], icon_equip_pipebomb: [64, 64] }), '16:9', 100);
+    expect(slots.slice(2).map((s) => [s.icon.name, s.icon.upload ?? null, s.icon.tint])).toEqual([
+      ['icon/equip/pipebomb', 'wiconPipebomb', null],
+      ['icon/equip/medkit', 'wiconMedkit', '90 90 90 255'],
+      ['icon/equip/pills', null, null],
+    ]);
+  });
+
+  it('draws each upload from its stored picture at the icon rect', () => {
+    const d = withUploads({ icon_equip_pumpshotgun: [192, 64], icon_equip_pills: [64, 64] });
+    const slots = weaponSlots(d, '16:9', 100);
+    const { ctx, calls } = recCtx();
+    drawWeapons(ctx, d, origin, k, 100);
+    const from = (id: string) => calls.filter((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === `data:image/png;base64,${PNG(id)}`);
+    expect(from('wiconPumpshotgun').map((c) => c.a.slice(1))).toEqual([at(slots[0].icon)]);
+    expect(from('wiconPills').map((c) => c.a.slice(1))).toEqual([at(slots[4].icon)]);
+    // The shotgun's stock art is not drawn under it.
+    expect(calls.some((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === artUrl('icon/equip/pumpshotgun'))).toBe(false);
+  });
+
+  it('nine-slices an Image box from its upload with 16-texel corners, at the box alpha (r1/shots/crops/weap-d.png)', () => {
+    const png = PNG('weaponBoxActive');
+    SIZES[`data:image/png;base64,${png}`] = [128, 128];
+    const d = design({ images: { weaponBoxActive: { w: 128, h: 128, png } }, weapons: { boxActive: { kind: 'image' } } });
+    const slots = weaponSlots(d, '16:9', 100);
+    expect([slots[0].art, slots[0].fill, slots[0].image]).toEqual([null, undefined, 'weaponBoxActive']);
+    const { ctx, calls } = recCtx();
+    drawWeapons(ctx, d, origin, k, 100);
+    const pieces = calls.filter((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === `data:image/png;base64,${png}`);
+    expect(pieces).toHaveLength(9);
+    const [fx, fy] = at(slots[0].frame);
+    const c = slots[0].corner * k;
+    expect(pieces[0].a.slice(1)).toEqual([0, 0, 16, 16, fx, fy, c, c]);
+    for (const p of pieces) near(p.alpha, BOX_ALPHA);
+  });
+});
+
+describe('the weapons panel fits its column (task W5)', () => {
+  // Whatever the edits, every box frame and icon the preview draws, in each held state, lies inside the panel the
+  // generator wrote: the game clips at the panel (/home/volence/l4d/hud/probe-phase2-rest/r2/shots/crops/weap-ab.png).
+  const cases: Record<string, Partial<HudDesign>> = {
+    stock: {},
+    wideBox: { weapons: { primaryBoxW: 150, pistolBoxW: 90 } },
+    tallItems: { weapons: { itemSize: 60, iconTall: 40 } },
+    pistolGrown: { weapons: { pistolBoxH: 80, indent: 40 } },
+    fourByOne: { images: { wiconPumpshotgun: { w: 256, h: 64, png: 'AAAA' } }, weapons: { icons: { icon_equip_pumpshotgun: 'wiconPumpshotgun' } } },
+  };
+  for (const [name, patch] of Object.entries(cases)) {
+    it(`keeps every slot inside the built panel: ${name}`, () => {
+      const d = design(patch);
+      const panel = kvFind(buildTrees(d)('scripts/hudlayout.res'), ['HudWeaponSelection'])!;
+      const wide = parseFloat(kvGet(panel, 'wide')!);
+      const tall = parseFloat(kvGet(panel, 'tall')!);
+      for (const held of ['primary', 'pistol', 'item'] as const) {
+        for (const s of weaponSlots(d, '16:9', wide, held)) {
+          for (const r of [s.frame, s.icon]) {
+            expect(r.x, `${name} ${held} ${s.kind} x`).toBeGreaterThanOrEqual(-1e-6);
+            expect(r.y + r.h, `${name} ${held} ${s.kind} bottom`).toBeLessThanOrEqual(tall + 1e-6);
+          }
+        }
+      }
+    });
+  }
 });
 
 describe("an imported HUD's own weapon art", () => {

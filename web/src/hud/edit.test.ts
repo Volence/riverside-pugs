@@ -1,24 +1,35 @@
 import { describe, it, expect } from 'vitest';
 import {
+  withWeaponUpload, resetWeaponUpload, patchWeapons,
   nudge, nudgeCards, freeInPlace, cardBoxes, placeCards, alignCards, hasOverrides, elementsTouched, resetElement, withTeamDir, placeCard, patchChild,
   placeChild, nudgeChild, resizeChild, resetChild,
   startsOf, moveChildren, placeChildren, scaleChildren, cornerFactor, anchorOf, alignChildren, setChildrenVisible, resetChildren,
-  placeElement, moveElements, moveCards, alignElements, scaleElement, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
+  placeElement, moveElements, moveCards, alignElements, scaleElement, setScale, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
   ammoOnly, withImport, withPreset, hasLayoutEdits,
+  splatterKind, patchSplatter, withSplatterImage, resetSplatter, panelClamp, raiseChild, resetChildKey, setFit, rowGapSlider, setRowGap,
 } from './edit';
 import { buildHud, buildTrees } from './build';
 import { weaponSlots } from './weapons';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
-import { DEFAULT_DESIGN, newDesign } from './design';
+import { DEFAULT_DESIGN, newDesign, baseTeam, validateDesign, weaponUploadSize, type HudDesign } from './design';
 import { DEFAULT_STATE } from '../crosshair/draw';
 import type { CrosshairArt } from '../crosshair/model';
-import { formatPos, parsePos } from './units';
-import { teamCardRects, elementRect, cardChild, isFreeTeam } from './build';
+import { formatPos, parsePos, screenW } from './units';
+import { teamCardRects, elementRect, cardChild, isFreeTeam, panelChild, elementFitShift, teamLayout } from './build';
+import { elementById } from './elements';
+import { childDef } from './children';
 import { elementFrame } from './selection';
+
+/**
+ * DEFAULT_DESIGN as it was before your own health fitted by default (slice
+ * 2.F G2), the way a design saved then still loads: the tests below pin
+ * numbers of the unfitted 125 x 91 own panel.
+ */
+const UNFIT: HudDesign = { ...DEFAULT_DESIGN, elements: { teamColumn: { fit: true } } };
 
 describe('nudge', () => {
   it('starts from the base position the first time', () => {
-    const d = nudge(DEFAULT_DESIGN, 'ownHealth', -10, 0);
+    const d = nudge(UNFIT, 'ownHealth', -10, 0);
     expect(d.elements.ownHealth).toEqual({ x: 718, y: 389 });
   });
   it('does nothing to an element that cannot move', () => {
@@ -30,7 +41,7 @@ describe('nudge', () => {
   // far off screen. This pins that nudge shares the same floor, the same
   // way repeated arrow-key presses would call it.
   it('keeps at least 8 units of the element on screen, however far it is pushed, matching the drag clamp', () => {
-    let d = DEFAULT_DESIGN;
+    let d = UNFIT;
     for (let i = 0; i < 200; i++) d = nudge(d, 'ownHealth', -10, -10);
     // ownHealth is 125x91 HUD units at 16:9 (853 wide): clampSpan's 8-unit
     // floor caps x at 8 - 125 and y at 8 - 91.
@@ -38,7 +49,7 @@ describe('nudge', () => {
   });
 
   it('also clamps on the far side', () => {
-    let d = DEFAULT_DESIGN;
+    let d = UNFIT;
     for (let i = 0; i < 200; i++) d = nudge(d, 'ownHealth', 10, 10);
     expect(d.elements.ownHealth).toEqual({ x: 853 - 8, y: 480 - 8 });
   });
@@ -71,6 +82,7 @@ describe('what counts as an edit', () => {
     const moved = { ...DEFAULT_DESIGN, elements: { ...DEFAULT_DESIGN.elements, chat: { x: 5 } } };
     expect(elementsTouched(moved)).toBe(true);
     expect(hasOverrides({ ...DEFAULT_DESIGN, hideGameCrosshair: true }, null)).toBe(true);
+    expect(hasOverrides({ ...DEFAULT_DESIGN, pickupFlyIn: false }, null)).toBe(true);
   });
 
   // A design whose only change is picking a crosshair (the default is
@@ -100,6 +112,12 @@ describe('what counts as an edit', () => {
     const d = { ...DEFAULT_DESIGN, elements: { teamColumn: { gap: 40 }, chat: { x: 5 } } };
     expect(resetElement(d, 'teamColumn').elements.teamColumn).toEqual({ fit: true });
     expect(resetElement(d, 'chat').elements.chat).toBeUndefined();
+  });
+
+  it('counts a splatter as an override, and keeps splatters across a preset switch', () => {
+    const d = { ...structuredClone(DEFAULT_DESIGN), splatters: { splatTop: { kind: 'fade' as const } } };
+    expect(hasOverrides(d, null)).toBe(true);
+    expect(withPreset(d, 'modern', true).splatters).toEqual({ splatTop: { kind: 'fade' } });
   });
 });
 
@@ -177,7 +195,8 @@ describe('moving a teammate card child', () => {
 
   it('resizes from any handle, the opposite edge staying put', () => {
     const head = { x: 13, y: 38, w: 23, h: 23, visible: true };
-    const health = { x: 37, y: 52, w: 96, h: 7, visible: true };
+    // The bar starts where the game draws it, at the item row's 39 (probe X15); the block's own x is 37.
+    const health = { x: 39, y: 52, w: 96, h: 7, visible: true };
     expect(resizeChild(DEFAULT_DESIGN, 'Health', health, 'w', -10, 0).children.teamColumn!.Health).toEqual({ w: 106, h: 7, x: 27 });
     expect(resizeChild(DEFAULT_DESIGN, 'Health', health, 'n', 0, -3).children.teamColumn!.Health).toEqual({ w: 96, h: 10, y: 49 });
     expect(resizeChild(DEFAULT_DESIGN, 'Head', head, 'nw', -5, -2).children.teamColumn!.Head).toEqual({ w: 28, h: 28, x: 8, y: 33 });
@@ -230,7 +249,7 @@ describe('nudgeCards', () => {
     expect(nudgeCards(free, [0], 5, 0).elements.teamColumn!.slots![0]).toEqual({ x: 5, y: 405 });
     let d = free;
     for (let i = 0; i < 200; i++) d = nudgeCards(d, [0], -10, 0);
-    expect(teamCardRects(d, d.aspect)[0].x).toBe(8 - 121);
+    expect(teamCardRects(d, d.aspect)[0].x).toBe(8 - 122);
   });
 
   it('switches a Row team to Free first, so the nudge moves one card', () => {
@@ -261,24 +280,25 @@ describe('resetChild', () => {
 });
 
 describe('moving several pieces', () => {
-  // Stock, fitted: Head (13, 38, 23 x 23), Health (37, 52, 96 x 7), in the unfitted 150 x 150 card.
+  // Stock, fitted: Head (13, 38, 23 x 23), Health (37, 52, 96 x 7, drawn at the item row's 39), in the
+  // unfitted 150 x 150 card. The item row follows the bar's x: the card revive trap, below.
   const both = ['Head', 'Health'];
 
   it('moves every piece by the same amount', () => {
     const d = moveChildren(DEFAULT_DESIGN, both, startsOf(DEFAULT_DESIGN, both), 5, -2);
-    expect(d.children.teamColumn).toEqual({ Head: { x: 18, y: 36 }, Health: { x: 42, y: 50 } });
+    expect(d.children.teamColumn).toEqual({ Head: { x: 18, y: 36 }, Health: { x: 42, y: 50 }, Items: { x: 44 } });
   });
 
   it('clamps the group as one, so the pieces keep their spacing at the card edge', () => {
     const s = startsOf(DEFAULT_DESIGN, both);
-    expect(moveChildren(DEFAULT_DESIGN, both, s, -100, -100).children.teamColumn).toEqual({ Head: { x: 0, y: 0 }, Health: { x: 24, y: 14 } });
-    // The health bar reaches the right edge first: 150 - 96 - 37 = 17 is all the room there is.
-    expect(moveChildren(DEFAULT_DESIGN, both, s, 100, 0).children.teamColumn).toEqual({ Head: { x: 30, y: 38 }, Health: { x: 54, y: 52 } });
+    expect(moveChildren(DEFAULT_DESIGN, both, s, -100, -100).children.teamColumn).toEqual({ Head: { x: 0, y: 0 }, Health: { x: 24, y: 14 }, Items: { x: 26 } });
+    // The health bar reaches the right edge first: drawn at 39, 150 - 96 - 39 = 15 is all the room there is.
+    expect(moveChildren(DEFAULT_DESIGN, both, s, 100, 0).children.teamColumn).toEqual({ Head: { x: 28, y: 38 }, Health: { x: 52, y: 52 }, Items: { x: 54 } });
   });
 
   it('places the group by its box', () => {
     const d = placeChildren(DEFAULT_DESIGN, both, 20, 40);
-    expect(d.children.teamColumn).toEqual({ Head: { x: 20, y: 40 }, Health: { x: 44, y: 54 } });
+    expect(d.children.teamColumn).toEqual({ Head: { x: 20, y: 40 }, Health: { x: 44, y: 54 }, Items: { x: 46 } });
   });
 
   it('never moves a piece with nothing to start from (an addable child not yet in the file)', () => {
@@ -295,7 +315,9 @@ describe('scaling several pieces', () => {
     const d = scaleChildren(DEFAULT_DESIGN, names, startsOf(DEFAULT_DESIGN, names), { x: 13, y: 38 }, 0.5);
     expect(d.children.teamColumn).toEqual({
       Head: { w: 12, h: 12, x: 13, y: 38 },
-      Health: { w: 48, h: 4, x: 25, y: 45 },
+      // The bar scales from where it is drawn (39): 13 + 26 / 2 = 26 for the row, its own block 2 left of it.
+      Health: { w: 48, h: 4, x: 24, y: 45 },
+      Items: { x: 26 },
       Name: { w: 60, h: 6, fontSize: 6, x: 13, y: 49 },
     });
   });
@@ -314,7 +336,9 @@ describe('scaling several pieces', () => {
       expect(c.y + c.h, n).toBeLessThanOrEqual(150);
     }
     expect(d.children.teamColumn!.Head).toMatchObject({ w: 46, h: 46 });
-    expect(d.children.teamColumn!.Health).toEqual({ w: 150, h: 14, x: 0, y: 66 });
+    // The drawn bar (the item row's x) stops at the card's left edge; its own block keeps the file's 2 units left of it.
+    expect(d.children.teamColumn!.Health).toEqual({ w: 150, h: 14, x: -2, y: 66 });
+    expect(d.children.teamColumn!.Items).toEqual({ x: 0 });
   });
 
   it('turns a corner drag into one factor, the larger change winning', () => {
@@ -363,7 +387,7 @@ describe('element edits', () => {
 
   it('moves several elements by the same amount from where they started', () => {
     const starts = { chat: { x: 10, y: 275, w: 320, h: 120 }, ownHealth: { x: 728, y: 389, w: 125, h: 91 } };
-    const d = moveElements(DEFAULT_DESIGN, ['chat', 'ownHealth'], starts, -5, 10);
+    const d = moveElements(UNFIT, ['chat', 'ownHealth'], starts, -5, 10);
     expect(d.elements.chat).toEqual({ x: 5, y: 285 });
     expect(d.elements.ownHealth).toEqual({ x: 723, y: 399 });
   });
@@ -372,7 +396,7 @@ describe('element edits', () => {
     const free = withTeamDir(DEFAULT_DESIGN, 'free');
     const starts = { 0: teamCardRects(free, free.aspect)[0] };
     expect(teamCardRects(moveCards(free, [0], starts, 100, -200), free.aspect)[0]).toMatchObject({ x: 113, y: 241 });
-    expect(teamCardRects(moveCards(free, [0], starts, -5000, 0), free.aspect)[0].x).toBe(8 - 121);
+    expect(teamCardRects(moveCards(free, [0], starts, -5000, 0), free.aspect)[0].x).toBe(8 - 122);
   });
 
   it('rounds a moved Free card to whole units too, since it stores through placeCard', () => {
@@ -416,7 +440,7 @@ describe('element edits', () => {
     within(a[2].x, r[2].x);
     expect(a[2].y).toBe(r[2].y);
     const edge = teamCardRects(moveCards(D, [0, 1], { 0: r[0], 1: r[1] }, -5000, 0), D.aspect);
-    expect(edge[0].x).toBe(8 - 121);
+    expect(edge[0].x).toBe(8 - 122);
     expect(edge[1].x - edge[0].x).toBe(140);
   });
 
@@ -462,12 +486,13 @@ describe('element edits', () => {
   it('scales an element by a corner, proportionally, from the opposite corner, clamped 0.5 to 2', () => {
     const start = { rect: { x: 728, y: 389, w: 125, h: 91 }, scale: 1 };
     // Dragging the top-left corner out by half: the bottom-right corner stays on the screen's.
-    expect(scaleElement(DEFAULT_DESIGN, 'ownHealth', start, 'nw', -62.5, -45.5).elements.ownHealth).toEqual({ scale: 1.5, x: 666, y: 344 });
-    // The bottom-right corner: the element keeps its own position (and its file anchor).
-    expect(scaleElement(DEFAULT_DESIGN, 'ownHealth', start, 'se', 125, 0).elements.ownHealth).toEqual({ scale: 2 });
-    expect(scaleElement(DEFAULT_DESIGN, 'ownHealth', start, 'se', 1000, 0).elements.ownHealth).toEqual({ scale: 2 });
-    expect(scaleElement(DEFAULT_DESIGN, 'ownHealth', start, 'se', -1000, 0).elements.ownHealth).toEqual({ scale: 0.5 });
-    expect(scaleElement(DEFAULT_DESIGN, 'chat', start, 'se', 10, 10)).toBe(DEFAULT_DESIGN);
+    expect(scaleElement(UNFIT, 'ownHealth', start, 'nw', -62.5, -45.5).elements.ownHealth).toEqual({ scale: 1.5, x: 666, y: 344 });
+    // The bottom-right corner: the element keeps its own position (and its file anchor) while it shrinks;
+    // grown past the screen's right and bottom edges it is placed back inside (plan decision 8, task L4).
+    expect(scaleElement(UNFIT, 'ownHealth', start, 'se', 125, 0).elements.ownHealth).toEqual({ scale: 2, x: 603, y: 298 });
+    expect(scaleElement(UNFIT, 'ownHealth', start, 'se', 1000, 0).elements.ownHealth).toEqual({ scale: 2, x: 603, y: 298 });
+    expect(scaleElement(UNFIT, 'ownHealth', start, 'se', -1000, 0).elements.ownHealth).toEqual({ scale: 0.5 });
+    expect(scaleElement(UNFIT, 'chat', start, 'se', 10, 10)).toBe(UNFIT);
   });
 
   it('resizes a free-size element from any handle, 20 units at least', () => {
@@ -507,8 +532,15 @@ describe('edits for any selection', () => {
     expect(nudgeSelection(DEFAULT_DESIGN, { kind: 'none' }, 1, 1)).toBe(DEFAULT_DESIGN);
   });
 
+  it('nudges an infected card by moving its whole row: the game places every card itself (plan Task 13)', () => {
+    const moved = nudgeSelection(DEFAULT_DESIGN, { kind: 'cards', cards: [1], panel: 'infectedRow' }, 3, -2);
+    expect(moved).toEqual(nudgeSelection(DEFAULT_DESIGN, { kind: 'elements', ids: ['infectedRow'] }, 3, -2));
+    expect(moved.elements.infectedRow).toMatchObject({ x: 3, y: 403 });
+    expect(moved.elements.teamColumn).toEqual(DEFAULT_DESIGN.elements.teamColumn);
+  });
+
   it('hides elements and pieces, never a card, and skips an element with no Visible control', () => {
-    const els = hideSelection(DEFAULT_DESIGN, { kind: 'elements', ids: ['chat', 'ownHealth', 'xhair'] });
+    const els = hideSelection(UNFIT, { kind: 'elements', ids: ['chat', 'ownHealth', 'xhair'] });
     expect(els.elements.chat).toEqual({ visible: false });
     expect(els.elements.ownHealth).toEqual({ visible: false });
     expect(els.elements.xhair).toBeUndefined();
@@ -651,5 +683,511 @@ describe('moving a design onto an imported HUD and off it', () => {
     const edited = withPreset({ ...on, elements: { chat: { x: 8 } } }, 'modern', false);
     expect(edited.elements).toEqual({ chat: { x: 8 } });
     expect(withPreset({ ...on, elements: { chat: { x: 8 } } }, 'modern', true).elements).toEqual(DEFAULT_DESIGN.elements);
+  });
+});
+
+describe('splatter edits', () => {
+  const base = () => structuredClone(DEFAULT_DESIGN);
+  const hiddenBg = (d: HudDesign) => d.children.teamColumn?.BackgroundImage?.visible === false;
+
+  it("makes the teammate splatter's None the child's hide, and any other kind shows it again", () => {
+    const none = patchSplatter(base(), 'splatTeam', { kind: 'none' });
+    expect(hiddenBg(none)).toBe(true);
+    expect(none.splatters?.splatTeam).toBeUndefined();
+    expect(splatterKind(none, 'splatTeam')).toBe('none');
+    const fade = patchSplatter(none, 'splatTeam', { kind: 'fade' });
+    expect(hiddenBg(fade)).toBe(false);
+    expect(fade.children.teamColumn?.BackgroundImage).toBeUndefined();   // no empty override left behind
+    expect(splatterKind(fade, 'splatTeam')).toBe('fade');
+  });
+
+  it("keeps a Fade colour through None, and makes a scratch's None its child's hide", () => {
+    const d = patchSplatter(patchSplatter(base(), 'splatTop', { kind: 'fade', color: '1 2 3 4' }), 'splatTop', { kind: 'none' });
+    expect(d.splatters?.splatTop).toEqual({ kind: 'fade', color: '1 2 3 4' });
+    expect(d.children.ownHealth?.HealthbarTextureTop).toEqual({ visible: false });
+    expect(splatterKind(d, 'splatTop')).toBe('none');
+    const back = patchSplatter(d, 'splatTop', { kind: 'fade' });
+    expect(back.children.ownHealth).toBeUndefined();   // no empty override left behind
+    expect(splatterKind(back, 'splatTop')).toBe('fade');
+  });
+
+  it('never stores None for a scratch', () => {
+    const d = patchSplatter(base(), 'splatBottom', { kind: 'none' });
+    expect(d.splatters?.splatBottom).toBeUndefined();
+    expect(splatterKind(d, 'splatBottom')).toBe('none');
+  });
+
+  it('reads a scratch hidden in Layers as None, and Reset shows it again', () => {
+    const d = setChildrenVisible(base(), ['HealthbarTextureTop'], false, 'ownHealth');
+    expect(splatterKind(d, 'splatTop')).toBe('none');
+    expect(splatterKind(d, 'splatBottom')).toBe('stock');
+    const reset = resetSplatter(d, 'splatTop');
+    expect(splatterKind(reset, 'splatTop')).toBe('stock');
+    expect(reset.children.ownHealth).toBeUndefined();
+  });
+
+  it('stores an upload at the texture size and switches the splatter to Image', () => {
+    const d = withSplatterImage(base(), 'splatTop', 'AAAA');
+    expect(d.images.splatTop).toEqual({ w: 256, h: 64, png: 'AAAA' });
+    expect(d.splatters?.splatTop?.kind).toBe('image');
+  });
+
+  it('resets to stock: no style, no stored image, and the teammate splatter shown', () => {
+    let d = withSplatterImage(base(), 'splatTeam', 'AAAA');
+    d = patchChild(d, 'BackgroundImage', { visible: false, color: '255 255 255 100' });
+    d = resetSplatter(d, 'splatTeam');
+    expect(d.splatters).toBeUndefined();
+    expect(d.images.splatTeam).toBeUndefined();
+    expect(d.children.teamColumn?.BackgroundImage).toEqual({ color: '255 255 255 100' });   // only the hide goes
+  });
+});
+
+describe('child edits name their panel', () => {
+  it('stores an edit under the panel it was made in', () => {
+    const d = patchChild(structuredClone(DEFAULT_DESIGN), 'Head', { x: 4 }, 'teamColumn');
+    expect(d.children.teamColumn?.Head).toEqual({ x: 4 });
+    expect(patchChild(structuredClone(DEFAULT_DESIGN), 'Head', { x: 4 })).toEqual(d);
+  });
+  it('clamps teammate pieces inside the unfitted card, as before', () => {
+    expect(panelClamp(structuredClone(DEFAULT_DESIGN), 'teamColumn')).toEqual(baseTeam('stock').card);
+  });
+  it('brings pieces to the front and sends them to the back of their file', () => {
+    // Stock teammatepanel.res: Voice, Name and Status at zpos 3 are the highest, BackgroundImage at -1 the lowest; Head has none (0).
+    const d = structuredClone(DEFAULT_DESIGN);
+    expect(raiseChild(d, ['Head'], 'front').children.teamColumn?.Head?.z).toBe(4);
+    const back = raiseChild(d, ['Head', 'Name'], 'back');
+    // One below BackgroundImage would be -2, the card background's zpos: the floor is that background + 1.
+    expect([back.children.teamColumn?.Head?.z, back.children.teamColumn?.Name?.z]).toEqual([-1, -1]);
+  });
+  it('never sends a piece under the background the build injects', () => {
+    // Review M1: HudEdCardBg sits at -2; going below it hid the piece.
+    const d = { ...structuredClone(DEFAULT_DESIGN), styles: { panelBg: { kind: 'flat' as const } } };
+    expect(raiseChild(d, ['Head'], 'back').children.teamColumn?.Head?.z).toBe(-1);
+    // Modern's own panel: ModBg at -5 is the lowest, HudEdOwnBg injects at -5 too; the floor is -4.
+    const own = { ...withPreset(structuredClone(DEFAULT_DESIGN), 'modern', true), styles: { ownBg: { kind: 'flat' as const } } };
+    expect(buildTrees(own)('resource/ui/hud/localplayerpanel.res').some((n) => n.key === 'HudEdOwnBg')).toBe(true);
+    expect(raiseChild(own, ['Head'], 'back', 'ownHealth').children.ownHealth?.Head?.z).toBe(-4);
+  });
+  it('leaves the injected blocks and the hidden revive anchor out of the zpos list', () => {
+    // Modern ships bar 34 and down picture 0, so unfitted the build adds the hidden Items anchor (no zpos, so 0).
+    const own = { ...withPreset(structuredClone(DEFAULT_DESIGN), 'modern', true), elements: {} };
+    expect(buildTrees(own)('resource/ui/hud/localplayerpanel.res').some((n) => n.key === 'Items')).toBe(true);
+    // With every registered piece moving, only ModBg (-5) is left: front is -4, not 1 from the anchor.
+    const all = ['Head', 'Health', 'HealthIcon', 'HealthNumber', 'HealthbarTextureTop', 'HealthbarTextureBottom', 'Incapacitated', 'DuckingIcon'];
+    expect(raiseChild(own, all, 'front', 'ownHealth').children.ownHealth?.Head?.z).toBe(-4);
+    // The card's HudEdSplatter stand-in and HudEdCardBg do not count either.
+    // The card's HudEdCardBg does not count either: with every card piece moving nothing is left to measure.
+    const card = { ...structuredClone(DEFAULT_DESIGN), styles: { panelBg: { kind: 'flat' as const } } };
+    const allCard = ['Head', 'Health', 'Name', 'Items', 'Status', 'BackgroundImage', 'Incapacitated', 'Dead', 'Voice'];
+    expect(raiseChild(card, allCard, 'front')).toBe(card);
+  });
+});
+
+describe('resetChildKey (review M2: Use the file\'s value)', () => {
+  it('removes just that key, keeping the rest of the piece\'s edits', () => {
+    // x 40 is the drawn x (the item row's), so the bar's own block goes to 38.
+    const d = patchChild(structuredClone(DEFAULT_DESIGN), 'Health', { x: 40, keys: { inset: '1', monochrome_color: '1 2 3 255' } });
+    expect(resetChildKey(d, 'Health', 'inset').children.teamColumn?.Health).toEqual({ x: 38, keys: { monochrome_color: '1 2 3 255' } });
+  });
+  it('drops an emptied keys object, then an emptied piece and panel', () => {
+    const d = patchChild(structuredClone(DEFAULT_DESIGN), 'Health', { keys: { inset: '1' } }, 'ownHealth');
+    expect(resetChildKey(d, 'Health', 'inset', 'ownHealth').children).toEqual({});
+    const e = patchChild(structuredClone(DEFAULT_DESIGN), 'Health', { x: 3, keys: { inset: '1' } });
+    expect(resetChildKey(e, 'Health', 'inset').children.teamColumn?.Health).toEqual({ x: 1 });
+  });
+  it('gives the design back unchanged when the key is not set', () => {
+    const d = structuredClone(DEFAULT_DESIGN);
+    expect(resetChildKey(d, 'Health', 'inset')).toBe(d);
+  });
+});
+
+describe('setFit', () => {
+  it('turns fit on and off and gives back the elements exactly', () => {
+    const d = structuredClone(UNFIT);
+    const on = setFit(d, 'ownHealth', true);
+    expect(on.elements.ownHealth).toEqual({ fit: true });
+    expect(setFit(on, 'ownHealth', false).elements).toEqual(d.elements);
+  });
+  it('keeps a moved panel where it was through the toggle', () => {
+    const d = { ...structuredClone(DEFAULT_DESIGN), elements: { ownHealth: { x: 20, y: 380 } } };
+    expect(setFit(d, 'ownHealth', true).elements.ownHealth).toEqual({ x: 20, y: 380, fit: true });
+    expect(setFit(setFit(d, 'ownHealth', true), 'ownHealth', false).elements).toEqual(d.elements);
+  });
+});
+
+describe('the card bar and the item row move sideways together (the card revive trap)', () => {
+  // client.dll 1023f5df..1023f6da, the player panel class shared by your own panel and the cards: after a
+  // revive the game sets a card's Health x to its Items child's x. Stock has the bar at 37 and the items at
+  // 39, so a bar or item row dragged on its own would jump after a revive; the two keep the stock offset.
+  const at = (d: HudDesign, n: string) => panelChild(d, 'teamColumn', n)!;
+  // The file's own offset: the bar's block x (ownX) against the row's. The bar's x is the row's, where the game draws it.
+  const offset = (d: HudDesign) => at(d, 'Items').x - at(d, 'Health').ownX!;
+  for (const [label, base] of [['unfitted', { ...structuredClone(DEFAULT_DESIGN), elements: {} }], ['fitted', structuredClone(UNFIT)]] as const) {
+    it(`${label}: dragging the bar moves the item row by the same x, and not its y`, () => {
+      const d0 = base as HudDesign;
+      const was = offset(d0), itemsY = at(d0, 'Items').y;
+      const d = placeChild(d0, 'Health', at(d0, 'Health').x + 10, at(d0, 'Health').y + 5);
+      expect(at(d, 'Health').x).toBe(at(d0, 'Health').x + 10);
+      expect(offset(d)).toBe(was);
+      expect(at(d, 'Items').y).toBe(itemsY);
+    });
+    it(`${label}: dragging the item row moves the bar, and a nudge, the X box and a group move keep the offset`, () => {
+      const d0 = base as HudDesign;
+      const was = offset(d0);
+      expect(offset(placeChild(d0, 'Items', at(d0, 'Items').x - 6, at(d0, 'Items').y))).toBe(was);
+      expect(offset(nudgeChild(d0, 'Health', 3, 0))).toBe(was);
+      expect(offset(patchChild(d0, 'Items', { x: 70 }))).toBe(was);
+      const both = ['Health', 'Items'];
+      const moved = moveChildren(d0, both, startsOf(d0, both), 5, 0);
+      expect([at(moved, 'Health').x, at(moved, 'Items').x]).toEqual([at(d0, 'Health').x + 5, at(d0, 'Items').x + 5]);
+    });
+  }
+  it('stock keeps 37 and 39, and the bar\'s x is 39, where the game draws it (probe X15)', () => {
+    const d = { ...structuredClone(DEFAULT_DESIGN), elements: {} };
+    expect([at(d, 'Health').x, at(d, 'Health').ownX, at(d, 'Items').x]).toEqual([39, 37, 39]);
+    // The X box takes the drawn x: 50 puts the bar at 50 in game, the block at 48 with the row at 50.
+    expect(patchChild(d, 'Health', { x: 50 }).children.teamColumn).toEqual({ Health: { x: 48 }, Items: { x: 50 } });
+    expect(at(patchChild(d, 'Health', { x: 50 }), 'Health').x).toBe(50);
+  });
+  it('turns a bar x edit with no move into its own x, never the drawn one (a W change through the left handle)', () => {
+    const d = { ...structuredClone(DEFAULT_DESIGN), elements: {} };
+    expect(patchChild(d, 'Health', { x: 39, w: 80 }).children.teamColumn).toEqual({ Health: { x: 37, w: 80 } });
+  });
+  it('falls back to the bar\'s own x on a design whose file has no item row\'s partner to move', () => {
+    // The own panel is not linked: its bar x is stored as given.
+    expect(patchChild(structuredClone(DEFAULT_DESIGN), 'Health', { x: 40 }, 'ownHealth').children.ownHealth).toEqual({ Health: { x: 40 } });
+  });
+  it('resets the partner\'s x with the piece, keeping its other edits', () => {
+    const d = patchChild(patchChild({ ...structuredClone(DEFAULT_DESIGN), elements: {} }, 'Items', { fontSize: 20 }), 'Health', { x: 50 });
+    expect(d.children.teamColumn).toEqual({ Health: { x: 48 }, Items: { fontSize: 20, x: 50 } });
+    expect(resetChild(d, 'Health').children.teamColumn).toEqual({ Items: { fontSize: 20 } });
+    expect(resetChild(patchChild(d, 'Health', { y: 3 }), 'Items').children.teamColumn).toEqual({ Health: { y: 3 } });
+  });
+  it('leaves your own panel alone: its Items is the build\'s hidden anchor, placed at the bar', () => {
+    const d = patchChild(structuredClone(DEFAULT_DESIGN), 'Health', { x: 40 }, 'ownHealth');
+    expect(d.children.ownHealth).toEqual({ Health: { x: 40 } });
+  });
+  it('explains the link on both pieces', () => {
+    for (const n of ['Health', 'Items']) expect(childDef('teamColumn', n)!.note, n).toMatch(/revive/);
+  });
+});
+
+describe('placing a fitted infected health', () => {
+  it('lands where it is asked on screen, the fit offset kept out of the stored position', () => {
+    const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: { siHealth: { fit: true } } };
+    const moved = placeElement(d, 'siHealth', 300, 200);
+    const r = elementRect(moved, 'siHealth', moved.aspect);
+    // A centre token on the 853.33-wide screen reads back to the half unit, as any placed element does.
+    expect(Math.abs(r.x - 300)).toBeLessThanOrEqual(0.5);
+    expect(r.y).toBe(200);
+    // Stored where the unfitted container would sit: fit off and on show the same pieces in the same place.
+    // 49, not 50: 49 draws at 299.5, which the X box shows as the 300 asked for; 50 draws at 300.5, shown 301.
+    expect(moved.elements.siHealth).toMatchObject({ x: 49, y: 200 });
+  });
+
+  it('nudges from where it is drawn', () => {
+    const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: { siHealth: { fit: true } } };
+    const before = elementRect(d, 'siHealth', d.aspect);
+    const after = elementRect(nudge(d, 'siHealth', -5, 0), 'siHealth', d.aspect);
+    expect(Math.abs(after.x - (before.x - 5))).toBeLessThanOrEqual(1);
+    expect(after.y).toBe(before.y);
+  });
+});
+
+describe('a fitted infected health at the screen edges', () => {
+  for (const k of [1, 2]) {
+    it(`reaches the left edge as any element does, 8 units kept on screen, at scale ${k}`, () => {
+      const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: { siHealth: { fit: true, scale: k, x: 50, y: 200 } } };
+      const w = elementRect(d, 'siHealth', d.aspect).w;
+      const moved = placeElement(d, 'siHealth', -10000, -10000);
+      const r = elementRect(moved, 'siHealth', moved.aspect);
+      expect([r.x, r.y]).toEqual([8 - w, 8 - r.h]);
+      // Stored less the fit offset, below the unfitted -200 floor, and kept by the validator.
+      expect(moved.elements.siHealth!.x).toBeLessThan(-200);
+      expect(validateDesign(moved).elements.siHealth).toEqual(moved.elements.siHealth);
+    });
+  }
+  it('still holds an unfitted element to the validator\'s -200', () => {
+    expect(placeElement(DEFAULT_DESIGN, 'chat', -900, 0).elements.chat!.x).toBe(-200);
+  });
+});
+
+describe('arrow presses at a centre-anchored place', () => {
+  // Stored 300 in 16:9 writes c-126 (300 - 426.5, the half rounded up), which reads back at 300.5.
+  for (const id of ['chat', 'siHealth', 'ownHealth', 'progressBar', 'abilityRing']) {
+    it(`moves ${id} exactly one unit on the axis pressed and never the other`, () => {
+      let d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: { [id]: { x: 300, y: 200 } } };
+      expect(elementRect(d, id, d.aspect).x % 1).toBe(0.5);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [-1, 0], [0, 1], [0, -1], [1, 0]]) {
+        const before = elementRect(d, id, d.aspect);
+        d = nudge(d, id, dx, dy);
+        const after = elementRect(d, id, d.aspect);
+        expect([after.x - before.x, after.y - before.y], `${dx},${dy}`).toEqual([dx, dy]);
+      }
+      expect(d.elements[id]).toMatchObject({ x: 300, y: 200 });
+    });
+  }
+});
+
+describe('a fitted infected health at any scale (one fit shift in build and edit)', () => {
+  const SCALES = [1, 1.25, 1.33, 0.75, 1.5, 2];
+  // Stored at 50, 200: on screen at every scale (stock's r387 is off the right edge at 2).
+  const at = (k: number, aspect: HudDesign['aspect']): HudDesign => (
+    { ...structuredClone(DEFAULT_DESIGN), aspect, elements: { siHealth: { fit: true, scale: k, x: 50, y: 200 } } }
+  );
+  const rect = (d: HudDesign) => elementRect(d, 'siHealth', d.aspect);
+  for (const aspect of ['16:9', '4:3'] as const) for (const k of SCALES) {
+    it(`moves exactly one unit per arrow press and never the other axis at scale ${k}, ${aspect}`, () => {
+      let d = at(k, aspect);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 0], [1, 0], [-1, 0]]) {
+        const before = rect(d);
+        d = nudge(d, 'siHealth', dx, dy);
+        const after = rect(d);
+        expect([after.x - before.x, after.y - before.y], `${dx},${dy}`).toEqual([dx, dy]);
+      }
+    });
+    it(`keeps its place when the X or Y box's own value is typed back at scale ${k}, ${aspect}`, () => {
+      const d = at(k, aspect);
+      const r = rect(d);
+      expect(rect(placeElement(d, 'siHealth', Math.round(r.x), r.y))).toMatchObject({ x: r.x, y: r.y });
+      expect(rect(placeElement(d, 'siHealth', r.x, Math.round(r.y)))).toMatchObject({ x: r.x, y: r.y });
+    });
+    it(`leaves the fit box's corner where it was when Fit is toggled at scale ${k}, ${aspect}`, () => {
+      const on = at(k, aspect);
+      const off = setFit(on, 'siHealth', false);
+      const shift = elementFitShift(on, 'siHealth');
+      // 853 wide, a centre token reads back at the half unit (the game's own
+      // arithmetic), and the fitted container is centred here; 640 is exact.
+      const slack = aspect === '16:9' ? 0.5 : 0;
+      expect(Math.abs(rect(on).x - (rect(off).x + shift.x))).toBeLessThanOrEqual(slack);
+      expect(rect(on).y).toBe(rect(off).y + shift.y);
+    });
+  }
+});
+
+describe('editing your infected health on the Boomer preview (plan decision 3)', () => {
+  const BOOMER = 'resource/ui/hud/boomerhealth.res';
+  const plain: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: {} };
+  it('stores a drag of the Boomer\'s bar in the Hunter\'s frame: moved the same', () => {
+    const starts = startsOf(plain, ['Health'], 'siHealth', BOOMER);
+    expect(starts.Health).toMatchObject({ x: 322, w: 64 });
+    const d = moveChildren(plain, ['Health'], starts, 10, 0, 'siHealth', BOOMER);
+    expect(d.children.siHealth?.Health).toMatchObject({ x: 262, y: 69 });
+    expect(panelChild(d, 'siHealth', 'Health', BOOMER)).toMatchObject({ x: 332, y: 69 });
+  });
+  it('stores a widening of the Boomer\'s bar in proportion to the Hunter\'s', () => {
+    const start = startsOf(plain, ['Health'], 'siHealth', BOOMER).Health;
+    const d = resizeChild(plain, 'Health', start, 'e', 5, 0, false, 'siHealth', BOOMER);
+    expect(d.children.siHealth?.Health?.w).toBe(132 + Math.round(5 * 132 / 64));
+    expect(panelChild(d, 'siHealth', 'Health', BOOMER)!.w).toBe(69);
+    // 10 more on the Boomer is 21 on the Hunter, whose bar would then run to 405 of the 400 container: it stops inside.
+    const far = resizeChild(plain, 'Health', start, 'e', 10, 0, false, 'siHealth', BOOMER);
+    expect(252 + far.children.siHealth!.Health!.w!).toBeLessThanOrEqual(400);
+  });
+  it('nudges a piece selected on the Boomer in the Boomer\'s frame, as a drag there does', () => {
+    // Hunter bar at 316 puts the Boomer's at 386, its right edge on the 450 clamp box's.
+    const d: HudDesign = { ...plain, children: { siHealth: { Health: { x: 316 } } } };
+    const sel = { kind: 'children' as const, names: ['Health'], card: 0, panel: 'siHealth' };
+    const nudged = nudgeSelection(d, sel, 5, 0, BOOMER);
+    expect(nudged).toEqual(moveChildren(d, ['Health'], startsOf(d, ['Health'], 'siHealth', BOOMER), 5, 0, 'siHealth', BOOMER));
+    expect(panelChild(nudged, 'siHealth', 'Health', BOOMER)!.x).toBe(386);
+  });
+  it('takes an X box typed on the Boomer as the Boomer\'s own x', () => {
+    const d = patchChild(plain, 'Health', { x: 300 }, 'siHealth', BOOMER);
+    expect(d.children.siHealth?.Health?.x).toBe(230);
+    expect(panelChild(d, 'siHealth', 'Health', BOOMER)!.x).toBe(300);
+  });
+  it('leaves an edit on the Hunter (or with no file) as it is', () => {
+    expect(patchChild(plain, 'Health', { x: 300, w: 90 }, 'siHealth', 'resource/ui/hud/hunterhealth.res').children.siHealth?.Health).toEqual({ x: 300, w: 90 });
+    expect(patchChild(plain, 'Health', { x: 300, w: 90 }, 'siHealth').children.siHealth?.Health).toEqual({ x: 300, w: 90 });
+  });
+});
+
+describe('moving your infected health\'s pieces keeps every linked class inside the container', () => {
+  // HudZombieHealth, 400 x 100 on stock, clips (probe Q11). The Hunter bar is
+  // 252,69 132 wide, the Boomer's 322,69 64 wide (delta rule: +70, half the width).
+  const HUNTER = 'resource/ui/hud/hunterhealth.res', BOOMER = 'resource/ui/hud/boomerhealth.res';
+  const plain: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: {} };
+  const inside = (d: HudDesign, name: string) => {
+    for (const f of [HUNTER, 'resource/ui/hud/smokerhealth.res', BOOMER]) {
+      const c = panelChild(d, 'siHealth', name, f)!;
+      expect(c.x, f).toBeGreaterThanOrEqual(0);
+      expect(c.y, f).toBeGreaterThanOrEqual(0);
+      expect(c.x + c.w, f).toBeLessThanOrEqual(400);
+      expect(c.y + c.h, f).toBeLessThanOrEqual(100);
+    }
+  };
+  it('clamps to the container, not the frame that overhangs it', () => {
+    expect(panelClamp(plain, 'siHealth')).toEqual({ w: 400, h: 100 });
+    expect(panelClamp({ ...plain, preset: 'modern' }, 'siHealth')).toEqual({ w: 150, h: 34 });
+  });
+  it('stops a drag on the Boomer where the Hunter bar meets the left edge', () => {
+    const d = placeChild(plain, 'Health', -1000, 69, 'siHealth', BOOMER);
+    expect(d.children.siHealth?.Health?.x).toBe(0);
+    expect(panelChild(d, 'siHealth', 'Health', BOOMER)!.x).toBe(70);
+    inside(d, 'Health');
+  });
+  it('stops a drag on the Hunter where the Boomer bar meets the right edge', () => {
+    const d = placeChild(plain, 'Health', 1000, 1000, 'siHealth', HUNTER);
+    expect(d.children.siHealth?.Health).toMatchObject({ x: 400 - 64 - 70, y: 100 - 13 });
+    inside(d, 'Health');
+  });
+  it('moves a group and nudges on either view inside every class', () => {
+    for (const f of [HUNTER, BOOMER]) {
+      const names = ['Health', 'HealthNumber'];
+      const d = moveChildren(plain, names, startsOf(plain, names, 'siHealth', f), -1000, 1000, 'siHealth', f);
+      for (const n of names) inside(d, n);
+      const sel = { kind: 'children' as const, names, card: 0, panel: 'siHealth' };
+      let e = plain;
+      for (let i = 0; i < 300; i++) e = nudgeSelection(e, sel, -1, 0, f);
+      for (const n of names) inside(e, n);
+      expect(e.children.siHealth?.Health?.x).toBe(0);
+    }
+  });
+  it('lets the Hunter frame, already past the container, move back in but no further out', () => {
+    const start = startsOf(plain, ['BackgroundImage'], 'siHealth', HUNTER);
+    expect(moveChildren(plain, ['BackgroundImage'], start, -1, 0, 'siHealth', HUNTER).children.siHealth?.BackgroundImage?.x).toBe(249);
+    expect(moveChildren(plain, ['BackgroundImage'], start, 5, 0, 'siHealth', HUNTER).children.siHealth?.BackgroundImage?.x ?? 250).toBe(250);
+    expect(moveChildren(plain, ['BackgroundImage'], start, 0, -3, 'siHealth', HUNTER).children.siHealth?.BackgroundImage?.y ?? 0).toBe(0);
+  });
+  it('stops a widening where the first linked class would be cut', () => {
+    const hs = startsOf(plain, ['Health'], 'siHealth', HUNTER).Health;
+    const wide = resizeChild(plain, 'Health', hs, 'e', 1000, 0, false, 'siHealth', HUNTER);
+    inside(wide, 'Health');
+    expect(panelChild(wide, 'siHealth', 'Health', HUNTER)!.x + panelChild(wide, 'siHealth', 'Health', HUNTER)!.w).toBe(400);
+    const bs = startsOf(plain, ['Health'], 'siHealth', BOOMER).Health;
+    const left = resizeChild(plain, 'Health', bs, 'w', -1000, 0, false, 'siHealth', BOOMER);
+    inside(left, 'Health');
+    const sq = startsOf(plain, ['DuckingIcon'], 'siHealth', BOOMER).DuckingIcon;
+    inside(resizeChild(plain, 'DuckingIcon', sq, 'se', 1000, 1000, false, 'siHealth', BOOMER), 'DuckingIcon');
+  });
+  it('aligns pieces seen on the Boomer by the Boomer\'s rects', () => {
+    // Boomer: bar 322..386, number 335..385. Right-aligned there, the bar's right edge meets 386 and stays.
+    const d = alignChildren(plain, ['Health', 'HealthNumber'], 'right', 'siHealth', BOOMER);
+    const bar = panelChild(d, 'siHealth', 'Health', BOOMER)!, num = panelChild(d, 'siHealth', 'HealthNumber', BOOMER)!;
+    expect([bar.x + bar.w, num.x + num.w]).toEqual([386, 386]);
+  });
+  it('scales a group inside every class', () => {
+    const names = ['Health', 'HealthNumber', 'DuckingIcon'];
+    for (const f of [HUNTER, BOOMER]) {
+      const starts = startsOf(plain, names, 'siHealth', f);
+      const d = scaleChildren(plain, names, starts, { x: 0, y: 0 }, 3, 'siHealth', f);
+      for (const n of names) inside(d, n);
+    }
+  });
+});
+
+describe('the infected row\'s Gap slider', () => {
+  const plain: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: {} };
+  const row = elementById('infectedRow')!;
+  it('shows the stock gap, -116, inside its range, and takes it back without moving a card', () => {
+    const g = rowGapSlider(plain);
+    expect(g.value).toBe(-116);
+    expect(g.min).toBeLessThanOrEqual(-116);
+    expect(g.max).toBe(200);
+    expect(teamLayout(setRowGap(plain, g.value), row).spacing).toBe(140);
+  });
+  it('goes down to a pitch of one unit, never zero or less', () => {
+    const g = rowGapSlider(plain);
+    expect(teamLayout(setRowGap(plain, g.min), row).spacing).toBe(1);
+  });
+  it('shows a fitted card\'s gap as it is, and drops a stale spacing once set', () => {
+    const fitted: HudDesign = { ...plain, elements: { infectedRow: { fit: true, spacing: 124 } } };
+    expect(rowGapSlider(fitted).value).toBe(Math.round(teamLayout(fitted, row).gap!));
+    expect(setRowGap(fitted, 7).elements.infectedRow).toEqual({ fit: true, gap: 7 });
+  });
+});
+
+describe('placing a fitted infected row (plan Task 11)', () => {
+  it('stores the unfitted container, so a drop where it is drawn moves nothing', () => {
+    // The fit moves CHudZombieTeamDisplay down by the card's 10-unit offset (build.ts rowLayout).
+    const d = { ...structuredClone(DEFAULT_DESIGN), elements: { infectedRow: { fit: true } } } as HudDesign;
+    const r = elementRect(d, 'infectedRow', d.aspect);
+    expect(r.y).toBe(415);
+    const moved = placeElement(d, 'infectedRow', r.x, r.y);
+    expect(elementRect(moved, 'infectedRow', moved.aspect)).toMatchObject({ x: r.x, y: r.y });
+    expect(moved.elements.infectedRow).toMatchObject({ x: 0, y: 405 });
+  });
+});
+
+describe('a scaled panel stays on screen (plan decision 8)', () => {
+  const W = screenW(DEFAULT_DESIGN.aspect);
+  const inside = (d: HudDesign, id: string) => {
+    const f = elementFrame(d, id);
+    expect(f.x, `${id} left`).toBeGreaterThanOrEqual(0);
+    expect(f.y, `${id} top`).toBeGreaterThanOrEqual(0);
+    expect(f.x + f.w, `${id} right`).toBeLessThanOrEqual(W);
+    expect(f.y + f.h, `${id} bottom`).toBeLessThanOrEqual(480);
+  };
+
+  it('moves your own health back inside when the Scale slider takes it to 2', () => {
+    const next = setScale(DEFAULT_DESIGN, 'ownHealth', 2);
+    expect(next.elements.ownHealth?.scale).toBe(2);
+    inside(next, 'ownHealth');
+  });
+
+  it('leaves a panel that still fits where it is, stored place and file anchor alike', () => {
+    const placed = placeElement(DEFAULT_DESIGN, 'ownHealth', 300, 200);
+    const next = setScale(placed, 'ownHealth', 1.2);
+    expect(next.elements.ownHealth).toEqual({ ...placed.elements.ownHealth, scale: 1.2 });
+    // Shrinking a panel on its file anchor never moves it (the stock frames overhang a few units already).
+    const small = setScale(DEFAULT_DESIGN, 'abilityRing', 0.8);
+    expect(small.elements.abilityRing).toEqual({ scale: 0.8 });
+    expect(setScale(DEFAULT_DESIGN, 'abilityRing', 1)).toEqual({ ...DEFAULT_DESIGN, elements: { ...DEFAULT_DESIGN.elements, abilityRing: { scale: 1 } } });
+  });
+
+  it('moves your infected health back inside after a bottom-right handle drag to 2', () => {
+    const frame = elementFrame(DEFAULT_DESIGN, 'siHealth');
+    const next = scaleElement(DEFAULT_DESIGN, 'siHealth', { rect: frame, scale: 1 }, 'se', frame.w * 2, frame.h * 2);
+    expect(next.elements.siHealth?.scale).toBe(2);
+    inside(next, 'siHealth');
+  });
+
+  it('keeps a top-left handle drag as it was: the opposite corner stays put', () => {
+    const start = { rect: { x: 728, y: 389, w: 125, h: 91 }, scale: 1 };
+    expect(scaleElement(UNFIT, 'ownHealth', start, 'nw', -62.5, -45.5).elements.ownHealth).toEqual({ scale: 1.5, x: 666, y: 344 });
+  });
+
+  it('keeps an element that cannot scale unchanged', () => {
+    expect(setScale(DEFAULT_DESIGN, 'chat', 2)).toBe(DEFAULT_DESIGN);
+  });
+});
+
+describe('weapon uploads', () => {
+  const pic = (w: number, h: number) => ({ w, h, png: 'AAAA' });
+
+  it('stores an icon upload under its entry own id and names it in the weapons', () => {
+    const d = withWeaponUpload(structuredClone(DEFAULT_DESIGN), 'icon_equip_machinegun', pic(192, 64));
+    expect(d.images.wiconMachinegun).toEqual(pic(192, 64));
+    expect(d.weapons?.icons).toEqual({ icon_equip_machinegun: 'wiconMachinegun' });
+    // What the page stores is what a reload keeps.
+    expect(validateDesign(JSON.parse(JSON.stringify(d))).weapons).toEqual(d.weapons);
+  });
+
+  it('stores a box upload and makes the box an Image', () => {
+    const d = withWeaponUpload(structuredClone(DEFAULT_DESIGN), 'boxInactive', pic(128, 128));
+    expect(d.images.weaponBoxInactive).toEqual(pic(128, 128));
+    expect(d.weapons?.boxInactive).toEqual({ kind: 'image' });
+  });
+
+  it('resets an upload back to the game art, leaving no empty weapons behind', () => {
+    const one = withWeaponUpload(structuredClone(DEFAULT_DESIGN), 'icon_equip_pills', pic(64, 64));
+    const back = resetWeaponUpload(one, 'icon_equip_pills');
+    expect(back.images).toEqual({});
+    expect(back.weapons).toBeUndefined();
+    const box = resetWeaponUpload(withWeaponUpload(structuredClone(DEFAULT_DESIGN), 'boxActive', pic(128, 128)), 'boxActive');
+    expect([box.images, box.weapons]).toEqual([{}, undefined]);
+    // A box that is no longer an Image keeps its own style.
+    const flat = patchWeapons(withWeaponUpload(structuredClone(DEFAULT_DESIGN), 'boxActive', pic(128, 128)), { boxActive: { kind: 'flat' } });
+    expect(resetWeaponUpload(flat, 'boxActive').weapons).toEqual({ boxActive: { kind: 'flat' } });
+  });
+
+  it('sizes an upload by decision 5: guns 64 tall at their shape up to 4:1, the rest square', () => {
+    expect(weaponUploadSize('icon_equip_machinegun', 300, 100)).toEqual({ w: 192, h: 64 });
+    expect(weaponUploadSize('icon_equip_machinegun', 2000, 100)).toEqual({ w: 256, h: 64 });
+    expect(weaponUploadSize('icon_equip_uzi', 10, 400)).toEqual({ w: 16, h: 64 });
+    expect(weaponUploadSize('icon_equip_pistol', 300, 100)).toEqual({ w: 64, h: 64 });
+    expect(weaponUploadSize('icon_equip_pills', 30, 100)).toEqual({ w: 64, h: 64 });
+    expect(weaponUploadSize('boxActive', 30, 100)).toEqual({ w: 128, h: 128 });
   });
 });

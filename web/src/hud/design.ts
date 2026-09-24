@@ -12,9 +12,12 @@ import type { Aspect } from './units';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { elementById } from './elements';
 import { SLOTS } from './slots';
-import { TEAM_PANEL, CONTENT_CHILDREN, type ChildDef } from './children';
+import { TEAM_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, panelOfFile, maxInset, childPath, type ChildDef, type KeyDef } from './children';
+import { probe, type ProbeId } from './probes';
 import { MAX_IMAGE_B64, MAX_IMAGE_SIDE } from './limits';
+import { clampBarKeys } from './progress';
 import { readArt, type CrosshairArt } from '../crosshair/model';
+import { SPLATTERS, splatterDef, type SplatterId, type SplatterStyle } from './splatter';
 
 export type TeamDir = 'row' | 'column' | 'free';
 /**
@@ -33,26 +36,44 @@ export interface ElementOverride {
   /** 'free' is the survivor team's only; validateDesign keeps it only with four `slots`. */
   dir?: TeamDir;
   /**
-   * The infected row's HorizPanelSpacing, final units. The survivor team used
-   * this too before `gap`; validateDesign migrates it and never keeps it there.
+   * The infected row's HorizPanelSpacing, final units, from before the row
+   * had `gap`: kept, byte for byte, until a gap replaces it. The survivor
+   * team used this too; validateDesign migrates it there and never keeps it.
    */
   spacing?: number;
-  /** Survivor team, Row and Column: units between two cards at scale 1. */
+  /** Survivor team (Row and Column) and the infected row: units between two cards at scale 1. */
   gap?: number;
-  /** Survivor team: shrink the card to its content. Absent means off, so a saved design renders as it was. */
+  /** Survivor team, the infected row: shrink the card to its content. Absent means off, so a saved design renders as it was. */
   fit?: boolean;
   /** Survivor team, Free: the four cards' positions. Kept when leaving Free, so coming back restores them. */
   slots?: CardSlot[];
   /**
-   * Validated and reserved, not live. The spec's own HudDesign declares these
-   * three, so they are validated and clamped here and a design that carries
-   * them survives a round trip, but no pass in build.ts reads any of them and
-   * no registry entry in elements.ts lists them as a prop, so no control
-   * writes them either.
+   * Validated and reserved, not live, except on the kill notices. The spec's
+   * own HudDesign declares these three, so they are validated and clamped
+   * here and a design that carries them survives a round trip. The kill
+   * notices' `color` (all five rows' fgcolor_override, plan decision 2) and
+   * `fontSize` (their font, gate K5) are live: build.ts noticePass writes
+   * them. The chat's `fontSize` (ChatFont's size) and `bg` (the open box,
+   * gate C2) are live too: build.ts chatPass. No pass reads them on any
+   * other element.
    */
   color?: string; bg?: string;
   fontSize?: number;
+  /** Keys of the element's own hudlayout.res block that its registry entry declares, as the text the file takes. */
+  keys?: Record<string, string>;
+  /**
+   * The kill notices' box (label4background): a flat colour, or none. Absent
+   * means the preset's own art. Kept on killNotices only.
+   */
+  noticeBox?: NoticeBox;
 }
+/**
+ * The kill notice box restyled: 'flat' a generated texture in `color`,
+ * 'none' a clear one (build.ts noticePass).
+ */
+export interface NoticeBox { kind: 'flat' | 'none'; color?: string }
+/** The flat notice box's colour when none is picked: black, about as dark as the stock box's middle. */
+export const NOTICE_BOX_COLOUR = '0 0 0 160';
 /**
  * One child of a card file (v2 spec, "The data model"). Numbers are unscaled,
  * in the card file's own unfitted frame: fitPass shifts them and the element's
@@ -68,6 +89,10 @@ export interface ChildOverride {
   color?: string;
   /** Addable children: present in the file or not. Absent means as the preset's file has it. */
   on?: boolean;
+  /** Keys the child's registry entry declares (KeyDef), as the text the file takes. */
+  keys?: Record<string, string>;
+  /** The block's zpos, a whole number in -50..50. Absent means as the preset's file has it. */
+  z?: number;
 }
 export interface StyleOverride { kind: 'stock' | 'flat' | 'rounded' | 'image'; color?: string }
 
@@ -78,7 +103,97 @@ export interface StyleOverride { kind: 'stock' | 'flat' | 'rounded' | 'image'; c
  * rounded_background_noborder, which works from a normal addon (probe B,
  * 2026-09-23). No 'stock' is ever stored: absent means stock.
  */
-export interface WeaponBoxStyle { kind: 'hidden' | 'flat' | 'rounded'; color?: string }
+export interface WeaponBoxStyle { kind: 'hidden' | 'flat' | 'rounded' | 'image'; color?: string }
+
+/**
+ * The icon_equip_* entries of mod_textures.txt the weapon selection draws
+ * (weapons.ts's header): WEAPON_ICONS every gun the primary and pistol slots
+ * can hold, ITEM_ICONS the throwables, medkit and pills. build.ts re-exports
+ * both; they live here so validateDesign can check an upload against them.
+ */
+export const WEAPON_ICONS = ['icon_equip_pumpshotgun', 'icon_equip_uzi', 'icon_equip_autoshotgun', 'icon_equip_rifle',
+  'icon_equip_machinegun', 'icon_equip_dualpistols', 'icon_equip_pistol'];
+export const ITEM_ICONS = ['icon_equip_molotov', 'icon_equip_pipebomb', 'icon_equip_medkit', 'icon_equip_pills'];
+const PISTOL_ICONS = ['icon_equip_pistol', 'icon_equip_dualpistols'];
+/**
+ * How the game draws an entry's upload
+ * (/home/volence/l4d/hud/probe-phase2-rest/r4/shots/r4/r4-a..c.png): a gun
+ * PrimaryWeaponTall high at the upload's own aspect, a pistol a square as
+ * tall as its box whatever its shape, an item an IconSize square.
+ */
+export type WeaponImageKind = 'gun' | 'pistol' | 'item';
+export function weaponImageKind(entry: string): WeaponImageKind | undefined {
+  if (PISTOL_ICONS.includes(entry)) return 'pistol';
+  if (WEAPON_ICONS.includes(entry)) return 'gun';
+  return ITEM_ICONS.includes(entry) ? 'item' : undefined;
+}
+/** The `images` id an entry's upload is stored under: icon_equip_machinegun is wiconMachinegun. */
+export function weaponIconId(entry: string): string {
+  const stem = entry.replace(/^icon_equip_/, '');
+  return `wicon${stem[0].toUpperCase()}${stem.slice(1)}`;
+}
+/** The `images` ids of the two box uploads. */
+export const WEAPON_BOX_IMAGE = { boxActive: 'weaponBoxActive', boxInactive: 'weaponBoxInactive' } as const;
+/**
+ * The texel sizes a weapon upload is redrawn at in the browser before it is
+ * stored (plan decision 5): a gun 64 tall and as wide as its aspect, from a
+ * quarter to four times its height (so a sliver cannot make a screen-wide
+ * icon), a pistol or item 64 square, a box 128 square so its 16-texel
+ * corners nine-slice as the stock art's do (r1/shots/crops/weap-d.png).
+ */
+export const WEAPON_ICON_TEXELS = 64;
+export const WEAPON_GUN_MAX_W = 256;
+export const WEAPON_GUN_MIN_W = 16;
+export const WEAPON_BOX_TEXELS = 128;
+/**
+ * The texels an upload for `target` (a weapon icon entry, or a box) is
+ * redrawn at, from the picked picture's own size: a gun keeps its aspect
+ * at 64 tall, held between a quarter and four times as wide.
+ */
+export function weaponUploadSize(target: string, srcW: number, srcH: number): { w: number; h: number } {
+  if (target === 'boxActive' || target === 'boxInactive') return { w: WEAPON_BOX_TEXELS, h: WEAPON_BOX_TEXELS };
+  if (weaponImageKind(target) !== 'gun') return { w: WEAPON_ICON_TEXELS, h: WEAPON_ICON_TEXELS };
+  const aspect = srcW > 0 && srcH > 0 ? srcW / srcH : 1;
+  return { w: Math.min(WEAPON_GUN_MAX_W, Math.max(WEAPON_GUN_MIN_W, Math.round(WEAPON_ICON_TEXELS * aspect))), h: WEAPON_ICON_TEXELS };
+}
+/** Whether a stored picture under `id` is a weapon upload at a size the build takes; undefined for an id that is no weapon upload's. */
+export function weaponImageFits(id: string, w: number, h: number): boolean | undefined {
+  if (id === WEAPON_BOX_IMAGE.boxActive || id === WEAPON_BOX_IMAGE.boxInactive) return w === WEAPON_BOX_TEXELS && h === WEAPON_BOX_TEXELS;
+  const entry = [...WEAPON_ICONS, ...ITEM_ICONS].find((e) => weaponIconId(e) === id);
+  if (!entry) return undefined;
+  if (weaponImageKind(entry) === 'gun') return h === WEAPON_ICON_TEXELS && w >= WEAPON_GUN_MIN_W && w <= WEAPON_GUN_MAX_W;
+  return w === WEAPON_ICON_TEXELS && h === WEAPON_ICON_TEXELS;
+}
+/**
+ * The voice icon uploads (plan task T2): an `images` id to the
+ * mod_textures.txt entry it repoints, voice_self the microphone you see
+ * while you talk (HudVoiceSelfStatus), voice_player the icon the game
+ * draws for a talking teammate. The upload itself is the switch: a stored
+ * picture under the id is used, none means the game's glyph. Probe V1
+ * (/home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/voice-g.png) saw
+ * voice_self drawn from a texture cell in full colour.
+ */
+export const VOICE_ICONS: Readonly<Record<string, string>> = { voiceSelf: 'voice_self', voicePlayer: 'voice_player' };
+/**
+ * The voice icon uploads waiting on a probe: voice_player (the teammate
+ * talking icon) was never drawn with one client, so it stays behind gate
+ * P2 (probes.ts). A closed gate hides the control, drops a stored picture
+ * and builds nothing for it.
+ */
+const VOICE_ICON_GATES: Readonly<Record<string, ProbeId>> = { voicePlayer: 'P2' };
+/** Whether the voice icon upload `id` is offered and built today. */
+export function voiceIconOpen(id: string): boolean {
+  const gate = VOICE_ICON_GATES[id];
+  return !gate || probe(gate);
+}
+/** A voice icon is redrawn at 64 x 64 texels before it is stored (plan decision 5). */
+export const VOICE_ICON_TEXELS = 64;
+/** Whether a stored picture under `id` is a voice icon at the size the build takes; undefined for an id that is no voice icon's. */
+export function voiceImageFits(id: string, w: number, h: number): boolean | undefined {
+  if (!(id in VOICE_ICONS)) return undefined;
+  return voiceIconOpen(id) && w === VOICE_ICON_TEXELS && h === VOICE_ICON_TEXELS;
+}
+
 /** Box colours when a flat or rounded box carries none: the old Advanced weapon box slots' defaults. */
 export const WEAPON_BOX_COLOUR = { boxActive: '40 40 40 215', boxInactive: '0 0 0 130' } as const;
 
@@ -131,6 +246,12 @@ export type WeaponsOverride = { [K in WeaponNumKey]?: number } & {
   weaponIcons?: boolean;
   /** false hides the throwable, medkit and pills pictures. */
   itemIcons?: boolean;
+  /**
+   * Uploaded pictures: a WEAPON_ICONS or ITEM_ICONS entry to its picture's
+   * id in `images` (always weaponIconId(entry)). weaponIcons or itemIcons
+   * false still hides them; the uploads stay, for when the pictures return.
+   */
+  icons?: Record<string, string>;
 };
 export interface UploadedImage { w: number; h: number; png: string }
 /**
@@ -176,6 +297,20 @@ export interface HudDesign {
   hideGameCrosshair?: boolean;
   /** The weapon selection's own keys, boxes and icons. Absent means the preset's. */
   weapons?: WeaponsOverride;
+  /**
+   * The damage splatters (splatter.ts): kind 'stock', 'none', 'fade' or
+   * 'image', a Fade colour, and Keep my colours (the scratches only).
+   * splatTeam never stores 'none': its None is the BackgroundImage child's
+   * hide. An Image's picture lives in `images` under the same id. Absent
+   * means every splatter is stock.
+   */
+  splatters?: Partial<Record<SplatterId, SplatterStyle>>;
+  /**
+   * false switches off the item pickup fly-in (the picked-up item's icon
+   * flying to the weapon selection): build.ts pickupPass. Absent means the
+   * game's own animation; true is never stored.
+   */
+  pickupFlyIn?: false;
 }
 
 /**
@@ -183,9 +318,21 @@ export interface HudDesign {
  * starts fitted: a saved design without `fit` stays unfitted (validateDesign
  * never adds it), so only designs made from here on start with it.
  */
+/**
+ * A new design fits the teammate cards and your own health panel. Your own
+ * fit came with probe Q2 (slice 2.F G2, /home/volence/l4d/hud/probe-phase2/
+ * RESULTS.md: LocalPlayer clips its children and never paints its image,
+ * b1/shots/crops/own-a.png), and moves nothing on screen; a design saved
+ * without it stays as saved. It was held back once (ccc87af7): launch R
+ * showed a fitted bar moved after an incap, because game code puts the bar
+ * at the down picture's x. The fit rule now starts the down picture at the
+ * bar (build.ts downLeft), and launch X14 (/home/volence/l4d/hud/probe-2f/
+ * x14, parity/x14-incap-own.png) showed a fitted bar in place through two
+ * incap and revive cycles, so the default came back.
+ */
 export const DEFAULT_DESIGN: HudDesign = {
   v: 1, name: 'my_hud', preset: 'stock', advanced: false, aspect: '16:9', font: 'preset',
-  crosshair: 'none', elements: { teamColumn: { fit: true } }, styles: {}, images: {}, children: {},
+  crosshair: 'none', elements: { teamColumn: { fit: true }, ownHealth: { fit: true } }, styles: {}, images: {}, children: {},
 };
 
 /**
@@ -237,7 +384,39 @@ export function clampOverride(key: RangeKey, value: number): number {
   return Math.min(hi, Math.max(lo, value));
 }
 
-const CHILD_RANGES = { x: [-64, 512], y: [-64, 512], w: [1, 512], h: [1, 512], fontSize: [6, 64] } as const;
+/**
+ * The stored x and y of an element whose fit moves its own container (your
+ * infected health, fitted: build.ts fitSi; the fitted infected row). Those
+ * numbers are the unfitted container's, which is drawn the fit offset away,
+ * so the drag's on-screen clamp can store far below -200 (a fitted infected
+ * health at the left edge stores its drawn 8 - w less the offset, up to the
+ * whole screen at scale 2). The floor leaves room for an offset of the
+ * widest scale across the whole screen; placeElement clamps where it is
+ * drawn, and this only keeps what that stores.
+ */
+const FIT_POS_RANGES = { x: [RANGES.x[0] - 2 * 853, RANGES.x[1]], y: [RANGES.y[0] - 2 * 480, RANGES.y[1]] } as const;
+
+/**
+ * The infected row's gap, which unlike the survivor team's may be negative:
+ * code places card i at i x HorizPanelSpacing, and the stock card, 256 wide
+ * at a 140 pitch, overlaps its neighbour by 116 (gap -116). The floor is a
+ * pitch of one unit for the widest card a piece can make (512); the Gap
+ * slider stops at the viewed card's own (edit.ts rowGapSlider), and
+ * build.ts's rowLayout never writes a pitch below 1.
+ */
+const ROW_GAP = [1 - 512, RANGES.gap[1]] as const;
+export const clampRowGap = (v: number): number => Math.min(ROW_GAP[1], Math.max(ROW_GAP[0], v));
+
+/** Whether an element's fit moves its container, so its x and y take FIT_POS_RANGES. */
+export const fitMovesContainer = (id: string, fit: boolean | undefined): boolean => fit === true && (id === 'siHealth' || id === 'infectedRow');
+
+/** clampOverride for a stored x or y, the fitted range where the fit moves the container. */
+export function clampPos(key: 'x' | 'y', value: number, fitted: boolean): number {
+  const [lo, hi] = fitted ? FIT_POS_RANGES[key] : RANGES[key];
+  return Math.min(hi, Math.max(lo, value));
+}
+
+const CHILD_RANGES = { x: [-64, 512], y: [-64, 512], w: [1, 512], h: [1, 512], fontSize: [6, 64], z: [-50, 50] } as const;
 export type ChildRangeKey = keyof typeof CHILD_RANGES;
 
 /** clampOverride's twin for a child's numbers, shared by validateDesign and the child number boxes for the same reason. */
@@ -277,9 +456,48 @@ function childOverride(def: ChildDef, raw: unknown): ChildOverride {
     if (side !== undefined) { out.w = side; out.h = side; }
   }
   if (def.font) { const f = n('fontSize'); if (f !== undefined) out.fontSize = f; }
-  if (def.colour) { const c = colour(raw.color); if (c) out.color = c; }
+  // A colour whose effect waits on a probe is dropped until the probe passes,
+  // so a flag that flips back off clears it too (plan decision 10).
+  if (def.colour && (!def.colourGate || probe(def.colourGate))) { const c = colour(raw.color); if (c) out.color = c; }
   if (def.addable && typeof raw.on === 'boolean') out.on = raw.on;
+  const z = n('z');
+  if (z !== undefined) out.z = Math.round(z);
+  const keys = validKeys(def.keys, raw.keys);
+  if (keys) out.keys = keys;
   return out;
+}
+
+/**
+ * The keys of `raw` that `defs` declares, as the text the file takes: a
+ * colour as "r g b a", a whole number clamped to its range, a bool as "1" or
+ * "0", an enum as one of its options' values. A key whose probe has not passed is dropped like an undeclared one,
+ * because the build writes only what the registry offers today. Undefined
+ * when nothing survives, so an empty `keys` is never stored.
+ */
+export function validKeys(defs: readonly KeyDef[] | undefined, raw: unknown): Record<string, string> | undefined {
+  if (!defs || !isObj(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const def of defs) {
+    if (def.gate && !probe(def.gate)) continue;
+    const v = raw[def.key];
+    if (def.type === 'colour') {
+      const c = colour(v);
+      if (c) out[def.key] = c;
+    } else if (def.type === 'int') {
+      const num = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+      if (!Number.isFinite(num)) continue;
+      let i = Math.round(num);
+      if (def.range) i = Math.min(def.range[1], Math.max(def.range[0], i));
+      out[def.key] = String(i);
+    } else if (def.type === 'enum') {
+      const hit = typeof v === 'string' ? def.options?.find((o) => o.value === v.toLowerCase()) : undefined;
+      if (hit) out[def.key] = hit.value;
+    } else {
+      if (v === true || v === '1' || v === 1) out[def.key] = '1';
+      else if (v === false || v === '0' || v === 0) out[def.key] = '0';
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -335,22 +553,46 @@ export function baseTeam(key: BaseKey): BaseTeam {
 export interface Box { x: number; y: number; w: number; h: number }
 
 /**
+ * The x the game draws a panel's health bar at, read from the panel file's
+ * own children (`nodes`, in whatever frame the caller holds them): its
+ * barAnchor child's xpos (the teammate card's Items), or undefined when the
+ * panel has no anchor or the file lacks that child (an imported card), and
+ * the bar is drawn at its own xpos. client.dll 1023f5df..1023f6da; probe
+ * X15 (/home/volence/l4d/hud/probe-2f/x15/RESULTS.md): the stock card bar,
+ * xpos 37, is drawn at the item row's 39 from the start of the map.
+ */
+export function drawnBarX(nodes: KvNode[], panel: { barAnchor?: string } | undefined): number | undefined {
+  if (!panel?.barAnchor) return undefined;
+  const a = kvFind(nodes, [panel.barAnchor]);
+  const x = a ? parseFloat(kvGet(a, 'xpos') ?? '') : NaN;
+  return Number.isFinite(x) ? x : undefined;
+}
+
+/** Whether a child is the health bar the game re-places (drawnBarX): the block named Health. */
+export const isBar = (name: string): boolean => name.toLowerCase() === 'health';
+
+/**
  * The teammate card's content: the union of the visible steady-state
  * children (Head, Health, Name, Items, and HealthNumber and Status when
- * present). State art and decoration never count. Null when every one is
- * hidden, which fitPass treats as "keep the file's card" rather than write a
- * 0 x 0 card. On stock this is x 13..134, y 36..72: 121 x 36. It lives here,
- * not in build.ts, because the spacing migration below needs the preset's
- * own fitted card too.
+ * present), each where the game draws it: the health bar at the panel's bar
+ * anchor's x (drawnBarX: a card's bar at its Items x, probe X15), so the
+ * fitted card never clips the bar. State art and decoration never count.
+ * Null when every one is hidden, which fitPass treats as "keep the file's
+ * card" rather than write a 0 x 0 card. On stock this is x 13..135 (the bar
+ * drawn 39..135), y 36..72: 122 x 36. It lives here, not in build.ts,
+ * because the spacing migration below needs the preset's own fitted card
+ * too. `panel` names the anchor: the teammate card's by default.
  */
-export function contentBox(nodes: KvNode[]): Box | null {
-  const content = new Set(CONTENT_CHILDREN.map((n) => n.toLowerCase()));
+export function contentBox(nodes: KvNode[], names: readonly string[] = CONTENT_CHILDREN, panel: { barAnchor?: string } = TEAM_PANEL): Box | null {
+  const content = new Set(names.map((n) => n.toLowerCase()));
   const num = (v: string | undefined) => { const n = parseFloat(v ?? ''); return Number.isFinite(n) ? n : 0; };
+  const barX = drawnBarX(nodes, panel);
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const n of nodes) {
     if (typeof n.value === 'string' || !content.has(n.key.toLowerCase())) continue;
     if ((kvGet(n, 'visible') ?? '1') === '0') continue;
-    const x = num(kvGet(n, 'xpos')), y = num(kvGet(n, 'ypos')), w = num(kvGet(n, 'wide')), h = num(kvGet(n, 'tall'));
+    const x = barX !== undefined && isBar(n.key) ? barX : num(kvGet(n, 'xpos'));
+    const y = num(kvGet(n, 'ypos')), w = num(kvGet(n, 'wide')), h = num(kvGet(n, 'tall'));
     if (w <= 0 || h <= 0) continue;
     x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h);
   }
@@ -358,7 +600,7 @@ export function contentBox(nodes: KvNode[]): Box | null {
 }
 
 const BASE_CONTENT = new Map<BaseKey, Box | null>();
-/** The base's own card, fitted with no inside edits: stock 121 x 36, Modern 113 x 26. */
+/** The base's own card, fitted with no inside edits: stock 122 x 36, Modern 113 x 26. */
 export function baseContent(key: BaseKey): Box | null {
   if (!BASE_CONTENT.has(key)) {
     BASE_CONTENT.set(key, contentBox(baseTree(key, TEAM_PANEL.file)));
@@ -422,25 +664,70 @@ function element(id: string, raw: unknown, key: BaseKey): ElementOverride {
   const out: ElementOverride = {};
   if (!isObj(raw)) return out;
   const team = id === 'teamColumn';
+  const infected = id === 'infectedRow';
   if (typeof raw.visible === 'boolean') out.visible = raw.visible;
   for (const k of Object.keys(RANGES) as RangeKey[]) {
-    // The survivor team's spacing is migrated to gap in teamFields; gap means nothing anywhere else.
-    if ((team && k === 'spacing') || (!team && k === 'gap')) continue;
+    // The survivor team's spacing is migrated to gap in teamFields; gap means
+    // nothing but on the two teams.
+    if ((team && k === 'spacing') || (!team && !infected && k === 'gap')) continue;
     const v = raw[k];
-    if (typeof v === 'number' && Number.isFinite(v)) out[k] = clampOverride(k, v);
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    out[k] = k === 'x' || k === 'y' ? clampPos(k, v, fitMovesContainer(id, raw.fit === true))
+      : infected && k === 'gap' ? clampRowGap(v) : clampOverride(k, v);
   }
-  if (raw.dir === 'row' || raw.dir === 'column') out.dir = raw.dir;
+  // The infected row is only ever a row: the game lays its cards out
+  // HorizPanelSpacing apart and reads no vertical key (probe RESULTS, dll 0x10247a70).
+  if (raw.dir === 'row' || (raw.dir === 'column' && !infected)) out.dir = raw.dir;
   if (team) teamFields(raw, out, key);
+  // The infected row is spaced by its gap (plan Task 11, decision 5). A
+  // saved design's `spacing` (the old HorizPanelSpacing, final units) is
+  // kept as it is while no gap replaces it, not migrated: its bytes are
+  // pinned (download.golden.test.ts), and the stock card, 256 wide at a
+  // 140 pitch, overlaps, so no gap of 0 or more could give the same pitch.
+  // The fit is opt-in, kept only as a real boolean.
+  if (infected) {
+    if (out.gap !== undefined) delete out.spacing;
+    if (typeof raw.fit === 'boolean') out.fit = raw.fit;
+  }
+  // Your own health's fit rests on probe Q2 (B1 a): LocalPlayer must clip
+  // its children and paint nothing of its own, or a smaller panel would
+  // show or hide the wrong things. Kept only once that gate passes, and
+  // only as a real boolean; never added.
+  if (id === 'ownHealth' && typeof raw.fit === 'boolean' && probe('Q2')) out.fit = raw.fit;
+  // Your infected health's fit (build.ts fitSi) rests on probe Q11, which
+  // passed: HudZombieHealth clips its children
+  // (/home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/br-bce.png).
+  // Opt-in, so kept only as a real boolean; never added.
+  if (id === 'siHealth' && typeof raw.fit === 'boolean') out.fit = raw.fit;
   const c = colour(raw.color); if (c) out.color = c;
   const b = colour(raw.bg); if (b) out.bg = b;
+  // The kill notices' text size waits on gate K5 (probes.ts): row 0's font
+  // was never seen in game, so a stored size is dropped while it is closed.
+  if (id === 'killNotices' && !probe('K5')) delete out.fontSize;
+  // The open chat's box colour waits on gate C2: the probe never got the
+  // chat open (/home/volence/l4d/hud/probe-phase2-rest/RESULTS.md, C2).
+  if (id === 'chat' && !probe('C2')) delete out.bg;
+  if (id === 'killNotices' && isObj(raw.noticeBox) && (raw.noticeBox.kind === 'flat' || raw.noticeBox.kind === 'none')) {
+    const box: NoticeBox = { kind: raw.noticeBox.kind };
+    const bc = colour(raw.noticeBox.color);
+    if (bc && box.kind === 'flat') box.color = bc;
+    out.noticeBox = box;
+  }
+  const keys = validKeys(elementById(id)?.keys, raw.keys);
+  if (keys) out.keys = keys;
+  // The game places the peril notice across; only its height is kept.
+  if (elementById(id)?.moveAxis === 'y') delete out.x;
   return out;
 }
 
 function boxStyle(v: unknown): WeaponBoxStyle | undefined {
-  if (!isObj(v) || (v.kind !== 'hidden' && v.kind !== 'flat' && v.kind !== 'rounded')) return undefined;
+  if (!isObj(v) || (v.kind !== 'hidden' && v.kind !== 'flat' && v.kind !== 'rounded' && v.kind !== 'image')) return undefined;
+  // An Image box with no picture stored (a share link carries none) keeps its
+  // kind, as a splatter does: the page says "No picture yet", and the build
+  // and the preview draw the game's box until one is uploaded.
   const out: WeaponBoxStyle = { kind: v.kind };
   const c = colour(v.color);
-  if (c && v.kind !== 'hidden') out.color = c;
+  if (c && (v.kind === 'flat' || v.kind === 'rounded')) out.color = c;
   return out;
 }
 
@@ -452,7 +739,7 @@ function boxStyle(v: unknown): WeaponBoxStyle | undefined {
  * an uploaded image, which the new setting cannot carry, is dropped. A design
  * not in advanced mode never shipped those styles, so they are dropped too.
  */
-function weaponsOf(raw: unknown, oldStyles: unknown, advanced: boolean): WeaponsOverride | undefined {
+function weaponsOf(raw: unknown, oldStyles: unknown, advanced: boolean, images: Record<string, UploadedImage>): WeaponsOverride | undefined {
   const w = isObj(raw) ? raw : {};
   const out: WeaponsOverride = {};
   for (const k of [...Object.keys(WEAPON_KEYS), 'clipFont', 'pistolFont'] as (WeaponNumKey | 'clipFont' | 'pistolFont')[]) {
@@ -470,7 +757,22 @@ function weaponsOf(raw: unknown, oldStyles: unknown, advanced: boolean): Weapons
   }
   if (typeof w.weaponIcons === 'boolean') out.weaponIcons = w.weaponIcons;
   if (typeof w.itemIcons === 'boolean') out.itemIcons = w.itemIcons;
+  if (isObj(w.icons)) {
+    const icons: Record<string, string> = {};
+    for (const [entry, id] of Object.entries(w.icons)) {
+      if (!weaponImageKind(entry) || id !== weaponIconId(entry) || !images[id]) continue;
+      icons[entry] = id;
+    }
+    if (Object.keys(icons).length) out.icons = icons;
+  }
   return Object.keys(out).length ? out : undefined;
+}
+
+/** The weapon pictures the design ships: every named icon upload, and each Image box's. */
+export function weaponImagesInUse(d: HudDesign): Set<string> {
+  const w = d.weapons;
+  return new Set([...Object.values(w?.icons ?? {}),
+    ...(['boxActive', 'boxInactive'] as const).filter((b) => w?.[b]?.kind === 'image').map((b) => WEAPON_BOX_IMAGE[b])]);
 }
 
 export function validateDesign(raw: unknown): HudDesign {
@@ -496,6 +798,7 @@ export function validateDesign(raw: unknown): HudDesign {
   // it becomes 'addon'. The boolean is read here and never kept.
   d.crosshair = oneOf(raw.crosshair, ['bundle', 'addon', 'none'] as const, raw.xhair === false ? 'none' : 'addon');
   if (raw.hideGameCrosshair === true) d.hideGameCrosshair = true;
+  if (raw.pickupFlyIn === false) d.pickupFlyIn = false;
   const art = readArt(raw.xhairArt);
   if (art) d.xhairArt = art;
   if (isObj(raw.elements)) for (const [id, v] of Object.entries(raw.elements)) {
@@ -512,29 +815,131 @@ export function validateDesign(raw: unknown): HudDesign {
     const c = colour(v.color); if (c) s.color = c;
     d.styles[id] = s;
   }
+  // Every splatter's None is its child's hide, one flag that Layers and
+  // Delete already use, so it is never stored here (plan decision 4). The
+  // teammate splatter never stored it; a scratch saved before this did, and
+  // loads as the hide below, once the stored children are read, with the
+  // kind back to stock so a Fade colour it kept waits for the next Fade.
+  // Both paths end in the same hard hide, so the download does not change.
+  const noneHides: SplatterId[] = [];
+  if (isObj(raw.splatters)) {
+    const out: Partial<Record<SplatterId, SplatterStyle>> = {};
+    for (const def of SPLATTERS) {
+      const v = raw.splatters[def.id];
+      if (!isObj(v)) continue;
+      let kind = oneOf(v.kind, ['stock', 'none', 'fade', 'image'] as const, 'stock');
+      if (kind === 'none') {
+        if (def.route === 'standIn') continue;
+        noneHides.push(def.id);
+        kind = 'stock';
+      }
+      const s: SplatterStyle = { kind };
+      const c = colour(v.color); if (c) s.color = c;
+      if (def.healthTint && v.keepColours === true) s.keepColours = true;
+      out[def.id] = s;
+    }
+    if (Object.keys(out).length) d.splatters = out;
+  }
   if (isObj(raw.images)) for (const [id, v] of Object.entries(raw.images)) {
-    if (!ID.test(id) || !isSlot(id) || !isObj(v)) continue;
+    if (!ID.test(id) || !isObj(v)) continue;
     const { w, h, png } = v;
     if (typeof w !== 'number' || typeof h !== 'number' || typeof png !== 'string') continue;
     if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1) continue;
+    // A weapon upload must be the texel size it was drawn at (decision 5),
+    // which is also the size the build encodes and the cell rect it writes.
+    const weapon = weaponImageFits(id, w, h);
+    const voice = voiceImageFits(id, w, h);
+    if (weapon === false || voice === false || (weapon === undefined && voice === undefined && !(isSlot(id) || splatterDef(id)))) continue;
+    // A splatter image must be its texture's exact size: the preview draws the
+    // stored PNG and the build encodes it at the texture size, so only that
+    // size can be both.
+    const splat = splatterDef(id);
+    if (splat && (w !== splat.size.w || h !== splat.size.h)) continue;
     if (w > MAX_IMAGE_SIDE || h > MAX_IMAGE_SIDE || png.length > MAX_IMAGE_B64) continue;
     if (!/^[A-Za-z0-9+/=]+$/.test(png)) continue;
     d.images[id] = { w, h, png };
   }
-  const weapons = weaponsOf(raw.weapons, raw.styles, d.advanced);
+  const weapons = weaponsOf(raw.weapons, raw.styles, d.advanced, d.images);
   if (weapons) d.weapons = weapons;
-  const team = isObj(raw.children) ? raw.children[TEAM_PANEL.panelId] : undefined;
-  if (isObj(team)) {
+  // An icon picture nothing names is dropped: nothing would ever ship it. A
+  // box's picture is kept through a switch to another box style, as a
+  // splatter's is through a switch of kind, so switching back brings it
+  // back; only an Image box ships it (weaponsPass).
+  const named = weaponImagesInUse(d);
+  const boxPictures = new Set<string>(Object.values(WEAPON_BOX_IMAGE));
+  for (const id of Object.keys(d.images)) {
+    if (weaponImageFits(id, 1, 1) !== undefined && !named.has(id) && !boxPictures.has(id)) delete d.images[id];
+  }
+  // Every registered panel's children, by the same rules; a panel the
+  // registry does not have has nothing to apply to. Names match exactly, as
+  // the teammate card always did, so a stored name is the block's own.
+  if (isObj(raw.children)) for (const panel of PANEL_CHILDREN) {
+    const stored = raw.children[panel.panelId];
+    if (!isObj(stored)) continue;
     const kids: Record<string, ChildOverride> = {};
-    for (const [name, v] of Object.entries(team)) {
-      const def = TEAM_PANEL.children.find((c) => c.name === name);
-      if (!def) continue;
+    for (const [name, v] of Object.entries(stored)) {
+      const def = panel.children.find((c) => c.name === name);
+      // A piece waiting on a closed probe keeps nothing, so a gate that flips back off clears it.
+      if (!def || (def.gate && !probe(def.gate))) continue;
       const o = childOverride(def, v);
+      clampInset(d, panel.file, def, o);
+      if (panel.panelId === 'progressBar' && def.name === 'Bar') clampProgressBar(d, panel.file, def, o);
       if (Object.keys(o).length) kids[name] = o;
     }
-    if (Object.keys(kids).length) d.children[TEAM_PANEL.panelId] = kids;
+    if (Object.keys(kids).length) d.children[panel.panelId] = kids;
+  }
+  for (const id of noneHides) {
+    const def = splatterDef(id)!;
+    const panel = panelOfFile(def.file);
+    if (!panel) continue;
+    const kids = d.children[panel.panelId] ?? {};
+    d.children[panel.panelId] = { ...kids, [def.block]: { ...kids[def.block], visible: false } };
   }
   return d;
+}
+
+/**
+ * A bar's inset, cut so the bar keeps a unit of fill (maxInset) at the
+ * design's own tall, else the base file's. An imported base that is not
+ * registered yet cannot be read here; the build cuts it again anyway.
+ */
+function clampInset(d: HudDesign, file: string, def: ChildDef, o: ChildOverride) {
+  const raw = o.keys?.inset;
+  if (def.kind !== 'bar' || raw === undefined) return;
+  let tall = o.h;
+  if (tall === undefined) {
+    try {
+      const n = kvFind(baseTree(baseOf(d), file), childPath(def.name));
+      const t = parseFloat((n && kvGet(n, 'tall')) ?? '');
+      if (Number.isFinite(t)) tall = t;
+    } catch { /* an imported base not registered yet */ }
+  }
+  if (tall !== undefined) o.keys = { ...o.keys, inset: String(Math.min(Number(raw), maxInset(tall))) };
+}
+
+/**
+ * The use bar's border and gap, cut by probe Q22's rule (progress.ts
+ * clampBarKeys) at the design's own tall, else the base file's: a stored
+ * key is cut, one the design leaves alone stays the file's. Reads the
+ * file's value for a key the design does not set, since the rule weighs
+ * all three together.
+ */
+function clampProgressBar(d: HudDesign, file: string, def: ChildDef, o: ChildOverride) {
+  const k = o.keys;
+  if (!k || (k.gap === undefined && k.border_thickness === undefined && k.shadow_thickness === undefined)) return;
+  let node: KvNode | undefined;
+  try { node = kvFind(baseTree(baseOf(d), file), childPath(def.name)); } catch { return; }
+  const fileNum = (key: string, dflt: number) => { const v = parseFloat((node && kvGet(node, key)) ?? ''); return Number.isFinite(v) ? v : dflt; };
+  const tall = o.h ?? fileNum('tall', NaN);
+  if (!Number.isFinite(tall)) return;
+  const cut = clampBarKeys({
+    border: k.border_thickness !== undefined ? Number(k.border_thickness) : fileNum('border_thickness', 1),
+    gap: k.gap !== undefined ? Number(k.gap) : fileNum('gap', 1),
+    shadow: k.shadow_thickness !== undefined ? Number(k.shadow_thickness) : fileNum('shadow_thickness', 1),
+  }, tall);
+  o.keys = { ...k,
+    ...(k.border_thickness !== undefined ? { border_thickness: String(cut.border) } : {}),
+    ...(k.gap !== undefined ? { gap: String(cut.gap) } : {}) };
 }
 
 const KEY = 'hud';
@@ -543,8 +948,12 @@ export function loadDesign(fresh: () => HudDesign = () => structuredClone(DEFAUL
   try { const raw = localStorage.getItem(KEY); return raw ? validateDesign(JSON.parse(raw)) : fresh(); }
   catch { return fresh(); }
 }
-export function saveDesign(d: HudDesign): void {
-  try { localStorage.setItem(KEY, JSON.stringify(d)); } catch { /* a convenience, not worth surfacing */ }
+/**
+ * False when the browser refused (storage full or blocked): the page warns,
+ * since a design with its uploads can outgrow what localStorage keeps.
+ */
+export function saveDesign(d: HudDesign): boolean {
+  try { localStorage.setItem(KEY, JSON.stringify(d)); return true; } catch { return false; }
 }
 
 async function pipe(bytes: Uint8Array, stream: CompressionStream | DecompressionStream): Promise<Uint8Array> {

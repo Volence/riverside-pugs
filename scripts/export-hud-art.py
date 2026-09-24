@@ -23,7 +23,7 @@ Requires the game installed at the Steam path below. Never run this on a server.
 """
 import io, json, math, os, re, struct, sys
 import vpk
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 from srctools.vtf import VTF
 
 PAK = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/pak01_dir.vpk')
@@ -31,6 +31,7 @@ VFONT = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dea
 RESOURCE = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/resource')
 ROBOTO = os.path.join(os.path.dirname(__file__), '..', 'web', 'src', 'hud', 'base', 'fonts', 'RobotoCondensed-Regular.ttf')
 MOD_TEXTURES = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/scripts/mod_textures.txt')
+HUD_TEXTURES = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/scripts/hud_textures.txt')
 OUT = os.path.join(os.path.dirname(__file__), '..', 'web', 'src', 'hud', 'art')
 CAP = 1_000_000
 
@@ -54,7 +55,49 @@ MATERIALS = [
     # state panels the advanced-mode slots can restyle (drawn nowhere yet, exported so the index is complete)
     'vgui/s_panel_dead',
     'vgui/s_panel_biker_incap', 'vgui/s_panel_manager_incap', 'vgui/s_panel_namvet_incap', 'vgui/s_panel_teenangst_incap',
+    # the own health panel: the crouch icon is DuckingIcon's art, named by localplayerpanel.res;
+    # the outline is HealthPanel's frame, named by client.dll (probe B1 Q3 and the B13 parity
+    # shots: the game draws it around the own bar with the fill inset inside it)
+    'vgui/hud/crouch_survivor', 'vgui/hud/s_healthbar_outline',
+    # your infected health's crouch icon: DuckingIcon's art, named by hunterhealth.res,
+    # smokerhealth.res and boomerhealth.res
+    'vgui/hud/crouch_infected',
+    # the kill notice box, named by pzdamagerecordpanel.res label4background (probe B2 f)
+    'vgui/hud/scalablepanel_bgblack_outlinegrey',
+    # the ability timer: pz_charge_bg is set by code on AbilityTimerHud.res BackgroundImage,
+    # the class icons on AbilityImage (their red rings are in the textures), pz_charge_meter is
+    # Progress's fg_image. The Hunter's icon is pz_charge_lunge (the leaping Hunter the game
+    # draws, probe-phase2/b13/compare/stock-infected-bottom.png); pz_charge_pounce is unused.
+    'vgui/hud/pz_charge_bg', 'vgui/hud/pz_charge_meter',
+    'vgui/hud/pz_charge_lunge', 'vgui/hud/pz_charge_smoker', 'vgui/hud/pz_charge_boomer', 'vgui/hud/pz_charge_tank',
+    # the ability marker around the infected crosshair: HudCrosshair's own CircularProgressBar,
+    # which code gives HUD/PZ_charge_crosshair (client.dll 0x10240e55, probe Q16a)
+    'vgui/hud/pz_charge_crosshair',
+    # the infected teammate card's class icon: code sets hud/ZombieTeamImage_<class> on PlayerImage
+    # (client.dll strings beside ZombieTeamDisplayPlayer.res); a ghost's hud/GhostTeamImage_<class>
+    # is a material over the same texture with a pulsing alpha, so no texture of its own
+    'vgui/hud/zombieteamimage_hunter', 'vgui/hud/zombieteamimage_smoker',
+    'vgui/hud/zombieteamimage_boomer', 'vgui/hud/zombieteamimage_tank',
 ]
+
+# Materials drawn by a two-texture shader: the material name -> its second
+# texture, which the shader multiplies into the first. pz_charge_meter.vmt is
+# UnlitTwoTexture with $texture2 vgui/hud/PZ_charge_meter_motion, a red
+# swirl the vmt's proxies turn slowly, so the meter the game draws is red
+# with an orange glint (probe Q15, probe-phase2-infected/b10/shots/crops/
+# progress-f-zoom.png: R 176, G 3, B 1 at the lit arc), not the base
+# texture's orange (206 152 73). The PNG is the product at rest.
+TWO_TEXTURE = {
+    'vgui/hud/pz_charge_meter': 'vgui/hud/pz_charge_meter_motion',
+}
+
+# Cells of scripts/hud_textures.txt (loose in the install): index name -> entry.
+# The infected crosshair is PZ_crosshair_open, a 32 x 32 cell of
+# sprites/crosshairs that the game draws at its own pixels, 32 x 32 at 1080p
+# (probe B9 v2, b9/shots-v2/b9v2/b9v2-d.png: x 944 to 975, y 524 to 555).
+HUD_CELLS = {
+    'icon/pz_crosshair_open': 'pz_crosshair_open',
+}
 
 # The item icons: index name -> ToolBox character. The characters are the ones
 # client.dll writes into the teammate card's Items label (the function that
@@ -83,6 +126,17 @@ EQUIP = {
     'icon/equip/molotov': 'icon_equip_molotov',
     'icon/equip/medkit': 'icon_equip_medkit',
     'icon/equip/pills': 'icon_equip_pills',
+    # not a weapon: the use/heal bar's AwardIcon (progressbar.res "icon" "icon_healing"), a cell of the same sheet
+    'icon/healing': 'icon_healing',
+    # not a weapon either: the infected card's dead skull, drawn by client.dll at SkullIconPlacement
+    # (the name icon_skull sits beside that block's name in its strings; probe Q19)
+    'icon/skull': 'icon_skull',
+    # the spawn panel's ClassImage: client.dll sets tip_<class> by class (its CHudGhostPanel string run names
+    # tip_smoker, tip_hunter, tip_boomer), cells of vgui/tipgraphic (probe G4, probe-phase2-rest/r3/shots/r3/r3-a.png);
+    # the too-far panel's SurvivorsImage draws the same class picture, not its file's tip_crouch (r6/shots/r6/r6-a.png)
+    'icon/tip_hunter': 'tip_hunter',
+    'icon/tip_smoker': 'tip_smoker',
+    'icon/tip_boomer': 'tip_boomer',
 }
 # The stock HUD's faces: the name clientscheme.res gives each -> its vfont
 # in the install and the file it is written to here. The name must be the one
@@ -251,6 +305,26 @@ def texture_cells(text: str) -> dict[str, dict[str, str]]:
         cells[name.lower()] = keys; i += 1
     return cells
 
+def export_hud_cells(pak) -> dict[str, bytes]:
+    """
+    Each HUD_CELLS entry cut from its sprite sheet where hud_textures.txt says,
+    at the sheet's own pixels (the same cutter as export_equip).
+    """
+    cells = texture_cells(open(HUD_TEXTURES, encoding='latin-1').read())
+    pngs: dict[str, bytes] = {}
+    for name, entry in HUD_CELLS.items():
+        c = cells[entry]
+        sheet = c['file'].lower().replace('\\', '/')
+        img = VTF.read(io.BytesIO(pak['materials/%s.vtf' % sheet].read())).get().to_PIL().convert('RGBA')
+        x, y, w, h = (int(c[k]) for k in ('x', 'y', 'width', 'height'))
+        img = img.crop((x, y, x + w, y + h))
+        if img.getbbox() is None:
+            sys.exit('refusing: %s (%s) is empty on %s' % (entry, name, sheet))
+        buf = io.BytesIO(); img.save(buf, 'PNG', optimize=True)
+        pngs[name] = buf.getvalue()
+        print('  %-48s %4dx%-4d %6d bytes  (%s)' % (name, w, h, len(buf.getvalue()), entry))
+    return pngs
+
 def export_equip(pak) -> tuple[dict[str, bytes], dict[str, tuple[int, int]]]:
     """
     Each weapon selection icon, cut from its sheet where mod_textures.txt says,
@@ -286,6 +360,13 @@ def main() -> int:
     for name in MATERIALS:
         raw = pak['materials/%s.vtf' % name].read()
         img = VTF.read(io.BytesIO(raw)).get().to_PIL().convert('RGBA')
+        if name in TWO_TEXTURE:
+            second = VTF.read(io.BytesIO(pak['materials/%s.vtf' % TWO_TEXTURE[name]].read())).get().to_PIL().convert('RGBA')
+            if second.size != img.size:
+                second = second.resize(img.size, Image.BILINEAR)
+            r1, g1, b1, a1 = img.split()
+            r2, g2, b2, _ = second.split()
+            img = Image.merge('RGBA', (ImageChops.multiply(r1, r2), ImageChops.multiply(g1, g2), ImageChops.multiply(b1, b2), a1))
         buf = io.BytesIO(); img.save(buf, 'PNG', optimize=True)
         data = buf.getvalue()
         total += len(data)
@@ -295,7 +376,8 @@ def main() -> int:
         print('  %-48s %4dx%-4d %6d bytes' % (name, img.width, img.height, len(data)))
     glyphs, advances, space = export_glyphs()
     equip, equip_sizes = export_equip(pak)
-    for name, data in {**glyphs, **equip}.items():
+    hud_cells = export_hud_cells(pak)
+    for name, data in {**glyphs, **equip, **hud_cells}.items():
         total += len(data)
         if total > CAP:
             sys.exit('refusing: total exceeds %d bytes at %s' % (CAP, name))

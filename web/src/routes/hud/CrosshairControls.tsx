@@ -113,6 +113,10 @@ function HideGame({ design, edit }: { design: HudDesign; edit: Edit }) {
         <span>Hide the game's crosshair</span>
       </label>
       <p class="muted hud__note">Hides the game's own crosshair so an image crosshair can replace it.</p>
+      {/* Probe Q16b (/home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/centre-bcef.png): never_draw on HudCrosshair takes its ability marker too. */}
+      {design.hideGameCrosshair && (
+        <p class="muted hud__note hud__warn">This also removes the ability marker on the infected side.</p>
+      )}
       {design.crosshair === 'none' && design.hideGameCrosshair && (
         <p class="muted hud__note hud__warn">With no custom crosshair and the game's hidden, there will be no crosshair at all.</p>
       )}

@@ -7,19 +7,21 @@ import { baseFile, BASE_PATHS } from './base';
 const root = (preset: 'stock' | 'modern', file: string) => parseKv(baseFile(preset, file))[0].value as KvNode[];
 
 describe('ELEMENTS', () => {
-  it('has unique ids and the twelve elements', () => {
+  it('has unique ids and the twenty-three elements', () => {
     const ids = ELEMENTS.map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids.sort()).toEqual(['abilityRing', 'chat', 'ghostPanel', 'infectedRow', 'killNotices', 'ownHealth',
-      'progressBar', 'siHealth', 'tankPanel', 'teamColumn', 'weaponSelection', 'xhair'].sort());
+    expect(ids.sort()).toEqual(['abilityMarker', 'abilityRing', 'chat', 'finaleMeter', 'ghostPanel', 'holdoutTimer', 'infectedRow', 'infectedVoice',
+      'killNotices', 'leavingArea', 'ownHealth', 'ownMic', 'perilNotice', 'progressBar', 'siHealth', 'spawnCountdown', 'tankPanel', 'teamColumn',
+      'voiceList', 'vote', 'weaponSelection', 'xhair', 'zombiePanel'].sort());
   });
 
   for (const preset of ['stock', 'modern'] as const) {
-    it(`every key exists in ${preset} hudlayout.res`, () => {
-      const layout = root(preset, 'scripts/hudlayout.res');
+    it(`every key exists in ${preset} hudlayout.res, or in the element's own file`, () => {
       for (const e of ELEMENTS) {
         if (e.id === 'xhair') continue;            // added by the generator, absent from stock
-        expect(kvFind(layout, [e.key]), e.id).toBeDefined();
+        const file = root(preset, e.file ?? 'scripts/hudlayout.res');
+        expect(kvFind(file, [e.key]), e.id).toBeDefined();
+        for (const b of e.moveWith ?? []) expect(kvFind(file, [b]), `${e.id} ${b}`).toBeDefined();
       }
     });
   }
@@ -83,9 +85,10 @@ describe('ELEMENTS', () => {
 describe('SLOTS', () => {
   it('points every target at a real image key in the stock file', () => {
     for (const s of SLOTS) for (const t of s.targets) {
-      // The card background is a child fitPass injects into the card file, so
-      // it is in no base file; build.test.ts pins that it is written.
-      if (t.path[0] === 'HudEdCardBg') continue;
+      // The card and own health backgrounds are children fitPass injects into
+      // their panel files, so they are in no base file; build.test.ts pins
+      // that they are written.
+      if (t.path[0] === 'HudEdCardBg' || t.path[0] === 'HudEdOwnBg') continue;
       const panel = kvFind(root('stock', t.file), t.path);
       expect(panel, `${s.id}: ${t.file} ${t.path.join('/')}`).toBeDefined();
       // Finding the panel is not enough: the key itself must name a real
@@ -99,5 +102,31 @@ describe('SLOTS', () => {
   // neither skip the check entirely.
   it('marks every slot with no normal-mode route advanced only', () => {
     for (const s of SLOTS) if (s.targets.length === 0) expect(s.advancedOnly, s.id).toBe(true);
+  });
+});
+
+describe('the ability timer element (plan Task 6)', () => {
+  it('scales with its pieces and carries the three state colours, ungated', () => {
+    const el = elementById('abilityRing')!;
+    expect(el.resize).toBe('scale');
+    expect(el.children).toEqual(['resource/ui/hud/abilitytimerhud.res']);
+    // The game's own spelling, "surpressed". Probe Q15 (/home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/ring-all.png).
+    expect(el.keys?.map((k) => k.key)).toEqual(['ability_ready_color', 'ability_charging_color', 'ability_surpressed_color']);
+    for (const k of el.keys!) { expect(k.type, k.key).toBe('colour'); expect(k.gate, k.key).toBeUndefined(); }
+  });
+});
+
+describe('the ability marker element (plan Task 8)', () => {
+  it('is HudCrosshair\'s ability keys, placed by the game at the screen centre, ungated', () => {
+    // Probe Q16a (/home/volence/l4d/hud/probe-phase2-infected/b9/shots-v2/crops/centre-af.png): the
+    // marker is HudCrosshair's own child, a box of 32 + 2 x ability_size screen pixels (probe B15), coloured by its keys.
+    const el = elementById('abilityMarker')!;
+    expect(el).toMatchObject({ side: 'infected', key: 'HudCrosshair', move: false, resize: 'none', mockPos: { x: 'c', y: 'c' } });
+    expect(el.keys?.map((k) => k.key)).toEqual(['ability_size', 'ability_ready_color', 'ability_charging_color',
+      'ability_surpressed_color', 'ability_attack_color', 'ability_attack_color_colorblind']);
+    const size = el.keys![0];
+    expect(size).toMatchObject({ type: 'int', range: [4, 64], label: 'Size (pixels)' });
+    for (const k of el.keys!.slice(1)) expect(k.type, k.key).toBe('colour');
+    for (const k of el.keys!) expect(k.gate, k.key).toBeUndefined();
   });
 });

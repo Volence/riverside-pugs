@@ -31,9 +31,20 @@ export interface StyleSlot {
  */
 const CARD_BG = { file: 'resource/ui/hud/teammatepanel.res', path: ['HudEdCardBg'], key: 'image' };
 
+/**
+ * Your own health background, the same way. LocalPlayer's own `image`
+ * (localplayerdisplay.res) is never painted (probe Q2, B1 a: the magenta
+ * image did not show), so the slot targets a child the build injects into
+ * the panel file: HudEdOwnBg, which exists only when this slot is restyled.
+ * Modern's ModBg is the proof that a child there paints.
+ */
+const OWN_BG = { file: 'resource/ui/hud/localplayerpanel.res', path: ['HudEdOwnBg'], key: 'image' };
+
 export const SLOTS: StyleSlot[] = [
   { id: 'panelBg', label: 'Survivor panel background', advancedOnly: false, size: { w: 32, h: 32 },
     targets: [CARD_BG], stockNames: [], defaultColor: '0 0 0 140' },
+  { id: 'ownBg', label: 'Your health background', advancedOnly: false, size: { w: 32, h: 32 },
+    targets: [OWN_BG], stockNames: [], defaultColor: '0 0 0 140' },
   { id: 'incapPanel', label: 'Incapacitated panel', advancedOnly: true, size: { w: 256, h: 256 },
     targets: [], stockNames: ['biker', 'manager', 'namvet', 'teenangst'].map((c) => `vgui/s_panel_${c}_incap`),
     defaultColor: '95 22 22 205' },

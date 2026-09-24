@@ -49,6 +49,35 @@ export const EQUIP_ICONS: readonly string[] = [
   'icon/equip/pumpshotgun', 'icon/equip/dualpistols', 'icon/equip/molotov', 'icon/equip/medkit', 'icon/equip/pills',
 ];
 
+/** The use/heal bar's icon: mod_textures.txt icon_healing, cut from vgui/hud/iconsheet by the export script. */
+export const HEALING_ICON = 'icon/healing';
+
+/**
+ * The infected crosshair: hud_textures.txt's PZ_crosshair_open, a 32 x 32
+ * cell of sprites/crosshairs, cut by the export script. A cell, not a
+ * material, so it is named like the icons.
+ */
+export const CROSSHAIR_OPEN = 'icon/pz_crosshair_open';
+
+/**
+ * The infected card's dead skull: mod_textures.txt icon_skull, a 64 x 64 cell
+ * of vgui/hud/iconsheet, which client.dll draws at SkullIconPlacement while
+ * that player is dead (probe Q19). Cut by the export script like the icons.
+ */
+export const SKULL_ICON = 'icon/skull';
+
+/**
+ * The spawn panel's class picture: code sets tip_<class> on ClassImage (the
+ * CHudGhostPanel string run names tip_smoker, tip_hunter, tip_boomer), a
+ * 128 x 128 cell of vgui/tipgraphic that mod_textures.txt cuts; the too-far
+ * panel draws the same picture (probe Z1, probe-phase2-rest/r6/shots/r6/r6-a.png).
+ * No Tank: a Tank is never a ghost.
+ */
+export const tipImage = (cls: 'hunter' | 'smoker' | 'boomer'): string => `icon/tip_${cls}`;
+
+/** The infected card's class icon, which code sets on PlayerImage: hud/ZombieTeamImage_<class>. */
+export const zombieTeamImage = (cls: string): string => `vgui/hud/zombieteamimage_${cls}`;
+
 /** Every material the renderer can ask for, and the item and weapon icons. art.test.ts holds the index to this list. */
 export const NEEDED_MATERIALS: readonly string[] = [
   'vgui/s_panel_biker', 'vgui/s_panel_manager', 'vgui/s_panel_namvet', 'vgui/s_panel_teenangst',
@@ -63,6 +92,30 @@ export const NEEDED_MATERIALS: readonly string[] = [
   'vgui/hud/scalablepanel_bgmidgrey', 'vgui/hud/scalablepanel_bgmidgrey_glow',
   'vgui/s_panel_dead',
   'vgui/s_panel_biker_incap', 'vgui/s_panel_manager_incap', 'vgui/s_panel_namvet_incap', 'vgui/s_panel_teenangst_incap',
+  // The own health panel: DuckingIcon's art (named by localplayerpanel.res), and HealthPanel's
+  // bar outline (named by client.dll; probe B1 Q3 showed the fill sits inset inside it).
+  'vgui/hud/crouch_survivor', 'vgui/hud/s_healthbar_outline',
+  // Your infected health's crouch icon: DuckingIcon's art, named by the Hunter, Smoker and Boomer files.
+  'vgui/hud/crouch_infected',
+  // The kill notice box: pzdamagerecordpanel.res label4background names it, and the game draws
+  // it behind a notice (probe B2, probe-phase2/b2/shots-kill/b2-killnotice/b2-f.png).
+  'vgui/hud/scalablepanel_bgblack_outlinegrey',
+  // The ability timer: code sets pz_charge_bg on AbilityTimerHud.res BackgroundImage (the black
+  // splat behind the ring, probe-phase2/b3/shots-rerun/b3-rerun/b3-b.png), each class's icon on
+  // AbilityImage (the red rings are part of those textures), and the file names the meter as
+  // Progress's fg_image. The Hunter's is pz_charge_lunge: the unused pz_charge_pounce is not it.
+  'vgui/hud/pz_charge_bg', 'vgui/hud/pz_charge_meter',
+  'vgui/hud/pz_charge_lunge', 'vgui/hud/pz_charge_smoker', 'vgui/hud/pz_charge_boomer', 'vgui/hud/pz_charge_tank',
+  // The ability marker round the infected crosshair: HudCrosshair's own CircularProgressBar, which
+  // code gives HUD/PZ_charge_crosshair (client.dll 0x10240e55, probe Q16a), and the crosshair itself.
+  'vgui/hud/pz_charge_crosshair', CROSSHAIR_OPEN,
+  // The infected teammate card: each class's icon (a ghost's is the same texture, faint) and the dead skull.
+  'vgui/hud/zombieteamimage_hunter', 'vgui/hud/zombieteamimage_smoker', 'vgui/hud/zombieteamimage_boomer', 'vgui/hud/zombieteamimage_tank',
+  SKULL_ICON,
+  // The use/heal bar's AwardIcon (progressbar.res "icon" "icon_healing", a cell of vgui/hud/iconsheet).
+  HEALING_ICON,
+  // The spawn and too-far panels' class picture (tip_<class>, cells of vgui/tipgraphic).
+  tipImage('hunter'), tipImage('smoker'), tipImage('boomer'),
   ...ITEM_ICONS,
   ...EQUIP_ICONS,
 ];
