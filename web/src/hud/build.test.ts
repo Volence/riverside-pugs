@@ -1697,3 +1697,24 @@ describe('the inset keeps a unit of fill (review L1)', () => {
     expect(kvGet(bar({ keys: { inset: '1' } }), 'inset')).toBe('1');
   });
 });
+
+describe("panelChild reports a card's health bar at the x the game draws it (probe X15)", () => {
+  // /home/volence/l4d/hud/probe-2f/x15/RESULTS.md: the game draws a card's Health at its Items child's x.
+  it('gives the item row\'s x as the bar\'s x, and the block\'s own x as ownX, unfitted and fitted', () => {
+    for (const d of [design({}), structuredClone(DEFAULT_DESIGN)]) {
+      const bar = panelChild(d, 'teamColumn', 'Health')!, items = panelChild(d, 'teamColumn', 'Items')!;
+      expect(bar.x).toBe(items.x);
+      expect([bar.x, bar.ownX, bar.y, bar.w, bar.h]).toEqual([39, 37, 52, 96, 7]);
+    }
+  });
+  it('has no ownX where the game draws the block at its own x: your own panel, any other piece', () => {
+    // Modern's card has the bar and the row both at 32: anchored all the same.
+    expect(panelChild(design({ preset: 'modern' }), 'teamColumn', 'Health')).toMatchObject({ x: 32, ownX: 32 });
+    expect(panelChild(design({}), 'ownHealth', 'Health')!.ownX).toBeUndefined();
+    expect(panelChild(design({}), 'teamColumn', 'Items')!.ownX).toBeUndefined();
+  });
+  it('keeps the file bytes: the written bar is still at its own xpos', () => {
+    const nodes = tree(buildHud(design({})), CARD_FILE);
+    expect(kvGet(kvFind(nodes, ['Health'])!, 'xpos')).toBe('37');
+  });
+});

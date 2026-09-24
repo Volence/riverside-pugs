@@ -126,6 +126,17 @@ export interface PanelChildren {
    * for the special infected health files.
    */
   linked?: { file: string; rule: 'same' | 'delta' }[];
+  /**
+   * The child whose x the game draws this panel's health bar at, instead of
+   * the bar's own xpos, when the file has one. client.dll's player panel
+   * update (1023f5df..1023f6da) sets Health's x to the Items child's x
+   * whenever the down picture is hidden, from the first update of the map;
+   * probe X15 (/home/volence/l4d/hud/probe-2f/x15/RESULTS.md) saw a card bar
+   * dragged alone never move in game. design.ts's drawnBarX reads it for the
+   * preview, the hit tests, the fit box and the X box. Your own panel has
+   * none: its Items is the build's hidden anchor at the bar's own x.
+   */
+  barAnchor?: string;
 }
 
 const block = (key: string, pairs: [string, string][]): KvNode => ({ key, value: pairs.map(([k, v]) => ({ key: k, value: v })) });
@@ -184,6 +195,7 @@ export const TEAM_PANEL: PanelChildren = {
   panelId: 'teamColumn',
   file: 'resource/ui/hud/teammatepanel.res',
   repeat: 'cards',
+  barAnchor: 'Items',
   children: [
     { name: 'Head', label: 'Portrait', kind: 'image', role: 'content', box: 'square', move: true, font: false, colour: false,
       hideIn: ['down', 'dead'] },

@@ -159,7 +159,7 @@ export function childAt(
   let decor: { name: string; card: number; area: number } | null = null;
   for (const [i, c] of panelBoxes(design, panel).entries()) {
     if (!inside(c, ux, uy)) continue;
-    for (const r of childRects(design, panel, { x: c.x, y: c.y }, 1)) {
+    for (const r of childRects(design, panel, { x: c.x, y: c.y }, 1, state)) {
       const def = childDef(panel, r.name);
       if (!def || !r.visible || hiddenInState(panel, r.name, state) || !inside(r, ux, uy)) continue;
       // The painter numbers the teammate cards; a single panel draws with no card.

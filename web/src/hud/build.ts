@@ -18,7 +18,7 @@ import { SLOTS } from './slots';
 import { flatTexture, roundedTexture, vmtFor, parseColour } from './textures';
 import { decodeText, encodeText } from './text';
 import {
-  baseTeam, contentBox, WEAPON_KEYS, WEAPON_BOX_COLOUR, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir,
+  baseTeam, contentBox, drawnBarX, isBar, WEAPON_KEYS, WEAPON_BOX_COLOUR, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir,
   type WeaponNumKey,
 } from './design';
 import { panelChildren, panelOfFile, childDef, maxInset, TEAM_PANEL, OWN_PANEL, type ChildDef, type PanelChildren } from './children';
@@ -976,8 +976,13 @@ export function cardFrame(design: HudDesign): CardFrame {
 }
 
 export interface CardChild { x: number; y: number; w: number; h: number; visible: boolean; fontTall?: number; color?: string }
-/** A panel child as cardChild reports one, plus its typed file keys and its zpos as the file has them. */
-export interface PanelChild extends CardChild { keys?: Record<string, string>; z?: number }
+/**
+ * A panel child as cardChild reports one, plus its typed file keys and its
+ * zpos as the file has them, and, for a health bar the game draws at its
+ * panel's anchor's x (drawnBarX: a teammate card's bar, at its Items x),
+ * the block's own x in `ownX`, `x` then being the drawn x.
+ */
+export interface PanelChild extends CardChild { keys?: Record<string, string>; z?: number; ownX?: number }
 
 /**
  * One panel child as the side panel shows it and a drag starts from: after
@@ -1014,14 +1019,18 @@ export function panelChild(design: HudDesign, panelId: string, name: string): Pa
   const keys: Record<string, string> = {};
   for (const k of def?.keys ?? []) { const v = pcGet(n, k.key); if (v !== undefined) keys[k.key] = v; }
   const z = parseFloat(kvGet(n, 'zpos') ?? '');
+  // A card's bar is drawn at its Items x (probe X15): that is the x the X box shows and a gesture starts from.
+  const drawn = isBar(name) ? drawnBarX(work.tree(panel.file), panel) : undefined;
+  const own = num(kvGet(n, 'xpos')) + shift.x;
   return {
-    x: num(kvGet(n, 'xpos')) + shift.x, y: num(kvGet(n, 'ypos')) + shift.y,
+    x: drawn !== undefined ? drawn + shift.x : own, y: num(kvGet(n, 'ypos')) + shift.y,
     w: num(kvGet(n, 'wide')), h: num(kvGet(n, 'tall')),
     visible: (kvGet(n, 'visible') ?? '1') !== '0',
     ...(Number.isFinite(tall) ? { fontTall: tall } : {}),
     ...(raw && /^\d+ \d+ \d+ \d+$/.test(raw) ? { color: raw } : {}),
     ...(Object.keys(keys).length ? { keys } : {}),
     ...(Number.isFinite(z) ? { z } : {}),
+    ...(drawn !== undefined ? { ownX: own } : {}),
   };
 }
 

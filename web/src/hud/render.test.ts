@@ -9,7 +9,7 @@ import { artUrl } from './art';
 import { fadeTexture } from './textures';
 import { cssFamily, fontCell, _resetImportFaces } from './fonts';
 import { registerImport, unregisterImport, baseFile } from './base';
-import { sampleHud, fakeCanvas, recordingCtx, hostileFont, type HostileFontKind } from './importFixtures';
+import { sampleHud, fakeCanvas, recordingCtx, hostileFont, dropBlock, type HostileFontKind } from './importFixtures';
 import { _resetImportedArt } from './importArt';
 import { TEAM_PANEL } from './children';
 import { _setProbe } from './probes';
@@ -86,6 +86,17 @@ const instantImage = (url: string) => ({ src: url, complete: true, naturalWidth:
 
 beforeEach(() => { _resetAssetCache(); _setImageFactory(instantImage); });
 
+/**
+ * A child's rect as the downloaded file makes the game draw it: its own
+ * numbers, except a teammate card's Health, whose x is its Items child's
+ * (probe X15, /home/volence/l4d/hud/probe-2f/x15/RESULTS.md).
+ */
+function fileRect(nodes: KvNode[], n: KvNode, panelId: string): number[] {
+  const own = ['xpos', 'ypos', 'wide', 'tall'].map((key) => parseFloat(kvGet(n, key) ?? '0') || 0);
+  const items = panelId === 'teamColumn' && n.key === 'Health' ? kvFind(nodes, ['Items']) : undefined;
+  return items ? [parseFloat(kvGet(items, 'xpos')!), ...own.slice(1)] : own;
+}
+
 describe('childRects', () => {
   it('reads every child of the teammate card from the generated file, scaled and offset', () => {
     const d = design({ elements: { teamColumn: { scale: 1.5 } } });
@@ -95,7 +106,8 @@ describe('childRects', () => {
     const health = kvFind(written, ['Health'])!;
     const r = rects.find((c) => c.name === 'Health')!;
     expect(r.kind).toBe('bar');
-    expect(r.x).toBe(100 + parseFloat(kvGet(health, 'xpos')!) * k);
+    // A card's bar is drawn at its item row's x (probe X15), below.
+    expect(r.x).toBe(100 + parseFloat(kvGet(kvFind(written, ['Items'])!, 'xpos')!) * k);
     expect(r.y).toBe(200 + parseFloat(kvGet(health, 'ypos')!) * k);
     expect(r.w).toBe(parseFloat(kvGet(health, 'wide')!) * k);
     expect(r.h).toBe(parseFloat(kvGet(health, 'tall')!) * k);
@@ -125,7 +137,7 @@ describe('childRects', () => {
           const r = rects.find((c) => c.name === n.key);
           const at = `${preset} ${fit} ${panelId} ${n.key}`;
           expect(r, at).toBeDefined();
-          expect([r!.x, r!.y, r!.w, r!.h], at).toEqual(['xpos', 'ypos', 'wide', 'tall'].map((key) => parseFloat(kvGet(n, key) ?? '0') || 0));
+          expect([r!.x, r!.y, r!.w, r!.h], at).toEqual(fileRect(nodes, n, panelId));
         }
       }
     }
@@ -159,11 +171,67 @@ describe('childRects', () => {
         expect(rects.length, `${preset} ${dir}`).toBe(nodes.length);
         for (const n of nodes) {
           const r = rects.find((c) => c.name === n.key)!;
-          expect([r.x, r.y, r.w, r.h], `${preset} ${dir} ${n.key}`)
-            .toEqual(['xpos', 'ypos', 'wide', 'tall'].map((key) => parseFloat(kvGet(n, key) ?? '0') || 0));
+          expect([r.x, r.y, r.w, r.h], `${preset} ${dir} ${n.key}`).toEqual(fileRect(nodes, n, 'teamColumn'));
         }
       }
     }
+  });
+});
+
+describe("a teammate card's health bar is where the game draws it (probe X15)", () => {
+  // /home/volence/l4d/hud/probe-2f/x15/RESULTS.md: the game draws a card's Health at its Items child's x
+  // from the first frame of the map (client.dll 1023f5df..1023f6da), and at the down picture's x while down.
+  const O = { x: 10, y: 20 };
+  const at = (d: HudDesign, panel: string, name: string, state?: SurvivorState) =>
+    childRects(d, panel, O, 2, state).find((c) => c.name === name)!;
+
+  it('reports the stock card bar at the item row\'s x (39), not its own xpos (37), size and y unchanged', () => {
+    const d = design({});
+    const bar = at(d, 'teamColumn', 'Health'), items = at(d, 'teamColumn', 'Items');
+    expect(bar.x).toBe(items.x);
+    expect([bar.x, bar.y, bar.w, bar.h]).toEqual([10 + 39 * 2, 20 + 52 * 2, 96 * 2, 7 * 2]);
+  });
+
+  it('follows the item row wherever the file has it, fitted and scaled too', () => {
+    // A saved design from before the link: the bar alone at 54, the row left at 26 (X15's unlinked VPK).
+    const d = design({ elements: { teamColumn: { fit: true, scale: 1.5 } }, children: { teamColumn: { Health: { x: 54 } } } });
+    const written = parseKv(text(buildHud(d), PANEL_FILE.teamColumn))[0].value as KvNode[];
+    expect(at(d, 'teamColumn', 'Health').x).toBe(O.x + parseFloat(kvGet(kvFind(written, ['Items'])!, 'xpos')!) * 2);
+  });
+
+  it('draws the healthy bar there', () => {
+    const d = design({});
+    const bar = at(d, 'teamColumn', 'Health');
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, d, 'teamColumn', O, 2, { card: 1 });
+    const outline = calls.find((c) => c.m === 'drawImage' && c.a.length === 5 && c.a[3] === bar.w && c.a[4] === bar.h);
+    expect(outline?.a.slice(1)).toEqual([bar.x, bar.y, bar.w, bar.h]);
+  });
+
+  it('reports the bar at the down picture\'s x in the Down state, on a card and on your own panel', () => {
+    for (const panel of ['teamColumn', 'ownHealth']) {
+      const d = design({ children: { ownHealth: { Incapacitated: { x: 4 } } } });
+      const pic = at(d, panel, 'Incapacitated');
+      const down = at(d, panel, 'Health', 'down');
+      expect(down.x, panel).toBe(pic.x);
+      expect(down.y, panel).toBe(at(d, panel, 'Health').y);
+      expect(at(d, panel, 'Health', 'hurt').x, panel).toBe(at(d, panel, 'Health').x);
+    }
+  });
+
+  it('leaves your own panel\'s bar at its own x: its Items is the build\'s anchor at the bar', () => {
+    const d = design({ children: { ownHealth: { Health: { x: 40 } } } });
+    expect(at(d, 'ownHealth', 'Health').x).toBe(O.x + 40 * 2);
+  });
+
+  describe('an imported card with no Items child', () => {
+    const ID = '6'.repeat(64);
+    afterEach(() => { unregisterImport(ID); });
+    it('falls back to the bar\'s own x', () => {
+      registerImport(ID, sampleHud({ 'resource/ui/hud/teammatepanel.res': dropBlock(baseFile('stock', 'resource/ui/hud/teammatepanel.res'), 'Items') }));
+      const d = validateDesign({ v: 1, preset: 'imported', imported: { id: ID, name: 'e' }, crosshair: 'none' });
+      expect(at(d, 'teamColumn', 'Health').x).toBe(O.x + 37 * 2);
+    });
   });
 });
 

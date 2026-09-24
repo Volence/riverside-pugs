@@ -26,7 +26,7 @@
  * own-health panel's scratch overlays are tinted with the health colour, not
  * drawn raw (the drawColor branch in drawImageChild, below).
  */
-import type { HudDesign } from './design';
+import { drawnBarX, isBar, type HudDesign } from './design';
 import { buildTrees } from './build';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { artUrl, normaliseMaterial } from './art';
@@ -198,12 +198,23 @@ function orderedChildren(nodes: KvNode[]): KvNode[] {
     .map((x) => x.n);
 }
 
-export function childRects(design: HudDesign, panelId: string, origin: PanelBox, k: number): ChildRect[] {
+/**
+ * A panel's children as drawn, in draw order, from the generated tree: at
+ * origin, k canvas pixels to a unit. The health bar is reported where the
+ * game draws it, not at its own xpos: at the down picture's x in the Down
+ * state (DOWN_MOVES_BAR), and otherwise at the panel's bar anchor's x (a
+ * teammate card's Items, drawnBarX; probe X15), so the drawing, the hit
+ * tests, the selection frames and the snap guides all put it there.
+ */
+export function childRects(design: HudDesign, panelId: string, origin: PanelBox, k: number, state?: SurvivorState | PreviewState): ChildRect[] {
   const file = PANEL_FILE[panelId];
   if (!file) throw new Error(`No inside-editable panel ${panelId}`);
-  return orderedChildren(buildTrees(design)(file)).map((n) => ({
+  const tree = buildTrees(design)(file);
+  const pic = state !== undefined && previewOf(state).survivor === 'down' && DOWN_MOVES_BAR.has(panelId) ? kvFind(tree, ['Incapacitated']) : undefined;
+  const barX = pic ? num(kvGet(pic, 'xpos')) : drawnBarX(tree, panelChildren(panelId));
+  return orderedChildren(tree).map((n) => ({
     name: n.key, kind: kindOf(n),
-    x: origin.x + num(kvGet(n, 'xpos')) * k, y: origin.y + num(kvGet(n, 'ypos')) * k,
+    x: origin.x + (barX !== undefined && isBar(n.key) ? barX : num(kvGet(n, 'xpos'))) * k, y: origin.y + num(kvGet(n, 'ypos')) * k,
     w: num(kvGet(n, 'wide')) * k, h: num(kvGet(n, 'tall')) * k,
     visible: (kvGet(n, 'visible') ?? '1') !== '0',
   }));
@@ -1023,16 +1034,16 @@ function drawBar(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: numb
  * x: the teammate card's item row, and on your own panel the hidden anchor
  * build.ts's reviveAnchorPass adds at the bar's own x.
  */
-const DOWN_MOVES_BAR = new Set(['ownHealth', 'teamColumn']);
+export const DOWN_MOVES_BAR: ReadonlySet<string> = new Set(['ownHealth', 'teamColumn']);
 
 export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: string, origin: PanelBox, k: number, opts0: DrawOpts = {}): void {
   const opts: DrawOpts = { ...opts0, panelRgb: panelColour(design, panelId) };
   const view = previewOf(opts.state);
   const nodes = orderedChildren(buildTrees(design)(PANEL_FILE[panelId]));
-  const rects = childRects(design, panelId, origin, k);
-  const downX = view.survivor === 'down' && DOWN_MOVES_BAR.has(panelId) ? rects.find((c) => c.name.toLowerCase() === 'incapacitated')?.x : undefined;
+  // The bar where the game draws it in this state (childRects).
+  const rects = childRects(design, panelId, origin, k, view);
   for (const [i, n] of nodes.entries()) {
-    const r = downX !== undefined && n.key.toLowerCase() === 'health' ? { ...rects[i], x: downX } : rects[i];
+    const r = rects[i];
     const lname = n.key.toLowerCase();
     if (!r.visible || hiddenInState(panelId, lname, view)) continue;
     let alpha = 1;

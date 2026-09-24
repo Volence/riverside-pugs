@@ -301,12 +301,17 @@ function childAt(design: HudDesign, panel: string, name: string): CardChild | nu
  * they always did.
  */
 export function patchChild(design: HudDesign, name: string, p: Partial<ChildOverride>, panel = 'teamColumn'): HudDesign {
-  const next = mergeChild(design, name, p, panel);
   const mate = LINKED_X[panel]?.[name.toLowerCase()];
-  if (p.x === undefined || !mate) return next;
+  if (p.x === undefined || !mate) return mergeChild(design, name, p, panel);
   const was = panelChild(design, panel, name), other = panelChild(design, panel, mate);
-  if (!was || !other || p.x === was.x) return next;
-  return mergeChild(next, mate, { x: clampChild('x', Math.round(other.x + p.x - was.x)) }, panel);
+  if (!was || !other) return mergeChild(design, name, p, panel);
+  // x is the drawn x, which panelChild reports (a card bar's is its Items x):
+  // the move is a delta, applied to each block's own x, so the pair keeps
+  // the file's offset and the bar lands at the x asked for.
+  const dx = p.x - was.x;
+  const next = mergeChild(design, name, { ...p, x: clampChild('x', Math.round((was.ownX ?? was.x) + dx)) }, panel);
+  if (dx === 0) return next;
+  return mergeChild(next, mate, { x: clampChild('x', Math.round((other.ownX ?? other.x) + dx)) }, panel);
 }
 
 function mergeChild(design: HudDesign, name: string, p: Partial<ChildOverride>, panel: string): HudDesign {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_DESIGN, type HudDesign, type Box } from './design';
-import { teamCardRects, cardFrame } from './build';
+import { teamCardRects, cardFrame, panelChild } from './build';
 import { childRects, type CardState } from './render';
 import { withTeamDir, patchChild } from './edit';
 import { panelBoxes } from './mock';
@@ -17,9 +17,10 @@ const plain: Mods = { shift: false, ctrl: false };
 const shift: Mods = { shift: true, ctrl: false };
 const ctrl: Mods = { shift: false, ctrl: true };
 // Card 2 of the fitted stock row is drawn at (153, 441), 121 x 36. Its
-// portrait covers (153, 443) to (176, 466), its health bar (177, 457) to
-// (273, 464); (273, 442) is on the card but on no other piece, only the
-// splatter, the lowest-priority target there.
+// portrait covers (153, 443) to (176, 466), its health bar (179, 457) to
+// (275, 464), drawn at its item row's x (probe X15); (273, 442) is on the
+// card but on no other piece, only the splatter, the lowest-priority target
+// there.
 const HEAD2 = { x: 164, y: 454 };
 const HEALTH2 = { x: 200, y: 460 };
 const SPLATTER2 = { x: 273, y: 442 };
@@ -304,7 +305,8 @@ describe('what the canvas draws for a selection', () => {
   });
 
   it("boxes several pieces in the card they were picked in", () => {
-    expect(selectionBox(D, { kind: 'children', names: ['Head', 'Health'], card: 1 })).toEqual({ x: 153, y: 443, w: 120, h: 23 });
+    // The bar is framed where the game draws it, at the item row's x (probe X15): 2 units right of its own xpos.
+    expect(selectionBox(D, { kind: 'children', names: ['Head', 'Health'], card: 1 })).toEqual({ x: 153, y: 443, w: 122, h: 23 });
     expect(selectionBox(D, NONE)).toBeNull();
   });
 
@@ -380,7 +382,7 @@ describe('snap targets', () => {
   it('snaps a piece to the unfitted card and the other drawn pieces', () => {
     expect(pieceTargets(D, 'healthy', ['Head'])).toEqual([
       { x: 0, y: 0, w: 150, h: 150 },
-      { x: 37, y: 52, w: 96, h: 7 }, { x: 13, y: 60, w: 120, h: 12 },
+      { x: 39, y: 52, w: 96, h: 7 }, { x: 13, y: 60, w: 120, h: 12 },
       { x: 39, y: 36, w: 50, h: 14 }, { x: 64, y: 38, w: 70, h: 12 },
     ]);
   });
@@ -441,5 +443,37 @@ describe('the children level names its panel', () => {
   it('climbs from a single panel\'s pieces straight to its element', () => {
     expect(climb({ kind: 'children', names: ['Health'], card: 0, panel: 'ownHealth' })).toEqual({ kind: 'elements', ids: ['ownHealth'] });
     expect(selectedIds({ kind: 'children', names: ['Health'], card: 0, panel: 'ownHealth' })).toEqual(['ownHealth']);
+  });
+});
+
+describe("a card's health bar is framed, hit and snapped to where the game draws it (probe X15)", () => {
+  // /home/volence/l4d/hud/probe-2f/x15/RESULTS.md: at the item row's x, and at the down picture's x while down.
+  const bar: Selection = { kind: 'children', names: ['Health'], card: 1 };
+  const drawn = (state: CardState) => {
+    const c = teamCardRects(D, D.aspect)[1];
+    return childRects(D, 'teamColumn', { x: c.x, y: c.y }, 1, state).find((r) => r.name === 'Health')!;
+  };
+
+  it('frames the healthy bar at the item row\'s x, the down bar at the down picture\'s x', () => {
+    for (const state of ['healthy', 'hurt', 'down'] as const) {
+      const r = drawn(state);
+      expect(selectionFrames(D, bar, state)[1], state).toEqual({ x: r.x, y: r.y, w: r.w, h: r.h });
+      expect(selectionBox(D, bar, state), state).toEqual({ x: r.x, y: r.y, w: r.w, h: r.h });
+    }
+    expect(drawn('down').x).not.toBe(drawn('healthy').x);
+  });
+
+  it('hits the bar where it is drawn, not at its own xpos', () => {
+    const r = drawn('healthy');
+    // One unit left of the drawn bar is inside the block's own box (2 units left) but not on the bar.
+    expect(hitAt(D, 'survivor', 'healthy', r.x - 1, r.y + 3).child).not.toBe('Health');
+    expect(hitAt(D, 'survivor', 'healthy', r.x + r.w - 1, r.y + 3)).toMatchObject({ child: 'Health', card: 1 });
+  });
+
+  it('snaps to the bar where it is drawn, and to the down picture\'s x while down', () => {
+    expect(pieceTargets(D, 'healthy', ['Head'])).toContainEqual({ x: 39, y: 52, w: 96, h: 7 });
+    const pic = panelChild(D, 'teamColumn', 'Incapacitated')!;
+    expect(pic.x).not.toBe(39);
+    expect(pieceTargets(D, 'down', ['Head'])).toContainEqual({ x: pic.x, y: 52, w: 96, h: 7 });
   });
 });

@@ -573,14 +573,14 @@ export default function Hud() {
     if (locked) return;
     try {
       const hovered = hover && !press.current ? targetOf(design, hover.hit, hover.ctrl, sel) : NONE;
-      const box = selectionBox(design, sel);
+      const box = selectionBox(design, sel, preview);
       drawHud(ctx, w, h, design, side, selectedIds(sel), () => setImgTick((t) => t + 1), {
         state: preview,
         held,
-        frames: selectionFrames(design, sel),
+        frames: selectionFrames(design, sel, preview),
         box,
         handles: box ? handlesFor(design, sel).map((hd) => handlePoint(box, hd)) : [],
-        hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered), label: selectionLabel(hovered) },
+        hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered, preview), label: selectionLabel(hovered) },
         marquee,
         guides,
       });
@@ -695,7 +695,7 @@ export default function Hud() {
 
   /** The selection's handle under the point, if any: the nearest within HANDLE_SLACK_PX screen pixels. */
   const handleUnder = (d: HudDesign, ux: number, uy: number): Handle | null => {
-    const box = selectionBox(d, sel);
+    const box = selectionBox(d, sel, preview);
     const c = canvas.current;
     if (!box || !c) return null;
     const slack = (HANDLE_SLACK_PX * SCREEN_H) / c.getBoundingClientRect().height;

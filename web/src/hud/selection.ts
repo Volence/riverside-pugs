@@ -21,11 +21,11 @@
  * panel (one file, one box on screen) has no card level: its pieces use
  * card 0 and climb straight to its element.
  */
-import { baseTeam, type Box, type HudDesign } from './design';
+import { baseTeam, isBar, type Box, type HudDesign } from './design';
 import { baseOf, baseTree } from './base';
 import { elementById } from './elements';
 import { panelChild, panelFrame, elementRect, isFreeTeam, teamCardRects, type CardFrame } from './build';
-import { childRects, hiddenInState, type ChildRect, type PreviewState, type SurvivorState } from './render';
+import { childRects, hiddenInState, previewOf, DOWN_MOVES_BAR, type ChildRect, type PreviewState, type SurvivorState } from './render';
 import { childAt, elementTargets, hitTest, inside, panelBoxes, TEAM_CARDS, visibleElements, type Side } from './mock';
 import { childDef, panelChildren } from './children';
 import { kvFind, kvGet } from './kv';
@@ -215,7 +215,7 @@ export function drawnPieces(design: HudDesign, state: State, panel = 'teamColumn
 
 /** The drawn pieces of one of a panel's boxes with their rects, in registry order. */
 function piecesIn(design: HudDesign, state: State, card: Box, panel: string): (Box & { name: string })[] {
-  const rects = childRects(design, panel, { x: card.x, y: card.y }, 1);
+  const rects = childRects(design, panel, { x: card.x, y: card.y }, 1, state);
   return drawnPieces(design, state, panel).flatMap((name) => {
     const r = rects.find((x) => x.name === name);
     return r ? [{ name, ...plain(r) }] : [];
@@ -375,8 +375,13 @@ function pieceFrame(design: HudDesign, r: ChildRect, panel: string): Box {
   return { x: r.x, y: r.y, w: Math.round(c.w * k), h: Math.round(c.h * k) };
 }
 
-/** One outline per selected thing as drawn: an element's frame, the Free Teammates' cards, each picked card, a piece in every box of its panel. */
-export function selectionFrames(design: HudDesign, sel: Selection): Box[] {
+/**
+ * One outline per selected thing as drawn: an element's frame, the Free
+ * Teammates' cards, each picked card, a piece in every box of its panel. A
+ * piece is framed where the preview draws it in `state` (childRects: the
+ * health bar sits at the down picture's x while down).
+ */
+export function selectionFrames(design: HudDesign, sel: Selection, state?: State): Box[] {
   switch (sel.kind) {
     case 'none': return [];
     case 'elements': return sel.ids.flatMap((id) => (id === 'teamColumn' && isFreeTeam(design) ? drawnCards(design) : [elementFrame(design, id)]));
@@ -386,22 +391,22 @@ export function selectionFrames(design: HudDesign, sel: Selection): Box[] {
     }
     case 'children': {
       const panel = panelOf(sel);
-      return panelBoxes(design, panel).flatMap((c) => childRects(design, panel, { x: c.x, y: c.y }, 1)
+      return panelBoxes(design, panel).flatMap((c) => childRects(design, panel, { x: c.x, y: c.y }, 1, state)
         .filter((r) => sel.names.includes(r.name)).map((r) => pieceFrame(design, r, panel)));
     }
   }
 }
 
-/** The box the handles sit on: for pieces, around them in the card (or single panel box) they were picked in. */
-export function selectionBox(design: HudDesign, sel: Selection): Box | null {
+/** The box the handles sit on: for pieces, around them in the card (or single panel box) they were picked in, as drawn in `state`. */
+export function selectionBox(design: HudDesign, sel: Selection, state?: State): Box | null {
   if (sel.kind === 'children') {
     const panel = panelOf(sel);
     // Every teammate card, the fourth included (Free lists it), not only the three drawn.
     const c = panel === 'teamColumn' ? teamCardRects(design, design.aspect)[sel.card] : panelBoxes(design, panel)[sel.card];
     if (!c) return null;
-    return unionBox(childRects(design, panel, { x: c.x, y: c.y }, 1).filter((r) => sel.names.includes(r.name)).map((r) => pieceFrame(design, r, panel)));
+    return unionBox(childRects(design, panel, { x: c.x, y: c.y }, 1, state).filter((r) => sel.names.includes(r.name)).map((r) => pieceFrame(design, r, panel)));
   }
-  return unionBox(selectionFrames(design, sel));
+  return unionBox(selectionFrames(design, sel, state));
 }
 
 /**
@@ -480,15 +485,18 @@ export function panelClamp(design: HudDesign, panel: string): { w: number; h: nu
  * What moving pieces snap to, in the panel file's unfitted frame (the frame
  * a ChildOverride is stored in): the panel's clamp box (panelClamp; for the
  * teammate card the unfitted card, which is what the Phase 1 drag clamps
- * to), and the other drawn pieces.
+ * to), and the other drawn pieces, each where it is drawn in `state`
+ * (panelChild's x, which for a card's bar is its item row's; in the Down
+ * state the bar is at the down picture's x, as childRects has it).
  */
 export function pieceTargets(design: HudDesign, state: State, moving: string[], panel = 'teamColumn'): Box[] {
   const p = panelClamp(design, panel);
   const out: Box[] = [{ x: 0, y: 0, w: p.w, h: p.h }];
+  const pic = previewOf(state).survivor === 'down' ? panelChild(design, panel, 'Incapacitated') : null;
   for (const name of drawnPieces(design, state, panel)) {
     if (moving.includes(name)) continue;
     const c = panelChild(design, panel, name);
-    if (c) out.push({ x: c.x, y: c.y, w: c.w, h: c.h });
+    if (c) out.push({ x: pic && isBar(name) && DOWN_MOVES_BAR.has(panel) ? pic.x : c.x, y: c.y, w: c.w, h: c.h });
   }
   return out;
 }

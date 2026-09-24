@@ -830,9 +830,10 @@ describe('Hud page', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
     clickAt(canvas, 24, 454);
-    // Moved 10 right the portrait's centre is 2.5 short of the health bar's left edge (37), so it snaps there.
-    dragFrom(canvas, [24, 454], [34, 454], {});
-    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('26');
+    // Moved 12 right the portrait's centre is 2.5 short of the health bar's left edge (39, where the game
+    // draws it: the item row's x, probe X15), so it snaps there: 39 - 11.5 = 27.5, rounded to 28.
+    dragFrom(canvas, [24, 454], [36, 454], {});
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('28');
   });
 
   it('cancels a drag with Escape, putting everything back and recording nothing', () => {
@@ -1133,10 +1134,10 @@ describe('Hud page', () => {
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('13');
     dragFrom(canvas, [24, 454], [29, 454]);
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('18');
-    // The health bar moved too: it now starts at 42.
+    // The health bar moved too: drawn at the item row's x (probe X15), it now starts at 44.
     clickAt(canvas, 65, 460);
     expect(screen.getByText('Health bar', { selector: 'legend' })).toBeTruthy();
-    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('42');
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('44');
   });
 
   it('picks the pieces a Shift+drag box touches', () => {
@@ -1178,10 +1179,10 @@ describe('Hud page', () => {
     clickAt(canvas, 24, 454);
     clickAt(canvas, 60, 460, { shiftKey: true });
     fireEvent.click(screen.getByRole('button', { name: 'Align right' }));
-    // Their box ends at 133 (the bar's right edge): the portrait moves to 110.
+    // Their box ends at 135 (the bar's right edge, drawn from the item row's 39): the portrait moves to 112.
     fireEvent.click(screen.getByLabelText('Visible'));
     fireEvent.click(team().getByRole('button', { name: 'Portrait' }));
-    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('110');
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('112');
     expect((screen.getByLabelText('Visible') as HTMLInputElement).checked).toBe(false);
   });
 

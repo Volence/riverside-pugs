@@ -192,7 +192,8 @@ describe('moving a teammate card child', () => {
 
   it('resizes from any handle, the opposite edge staying put', () => {
     const head = { x: 13, y: 38, w: 23, h: 23, visible: true };
-    const health = { x: 37, y: 52, w: 96, h: 7, visible: true };
+    // The bar starts where the game draws it, at the item row's 39 (probe X15); the block's own x is 37.
+    const health = { x: 39, y: 52, w: 96, h: 7, visible: true };
     expect(resizeChild(DEFAULT_DESIGN, 'Health', health, 'w', -10, 0).children.teamColumn!.Health).toEqual({ w: 106, h: 7, x: 27 });
     expect(resizeChild(DEFAULT_DESIGN, 'Health', health, 'n', 0, -3).children.teamColumn!.Health).toEqual({ w: 96, h: 10, y: 49 });
     expect(resizeChild(DEFAULT_DESIGN, 'Head', head, 'nw', -5, -2).children.teamColumn!.Head).toEqual({ w: 28, h: 28, x: 8, y: 33 });
@@ -276,8 +277,8 @@ describe('resetChild', () => {
 });
 
 describe('moving several pieces', () => {
-  // Stock, fitted: Head (13, 38, 23 x 23), Health (37, 52, 96 x 7), in the unfitted 150 x 150 card.
-  // The item row (39) follows the bar's x: the card revive trap, below.
+  // Stock, fitted: Head (13, 38, 23 x 23), Health (37, 52, 96 x 7, drawn at the item row's 39), in the
+  // unfitted 150 x 150 card. The item row follows the bar's x: the card revive trap, below.
   const both = ['Head', 'Health'];
 
   it('moves every piece by the same amount', () => {
@@ -288,8 +289,8 @@ describe('moving several pieces', () => {
   it('clamps the group as one, so the pieces keep their spacing at the card edge', () => {
     const s = startsOf(DEFAULT_DESIGN, both);
     expect(moveChildren(DEFAULT_DESIGN, both, s, -100, -100).children.teamColumn).toEqual({ Head: { x: 0, y: 0 }, Health: { x: 24, y: 14 }, Items: { x: 26 } });
-    // The health bar reaches the right edge first: 150 - 96 - 37 = 17 is all the room there is.
-    expect(moveChildren(DEFAULT_DESIGN, both, s, 100, 0).children.teamColumn).toEqual({ Head: { x: 30, y: 38 }, Health: { x: 54, y: 52 }, Items: { x: 56 } });
+    // The health bar reaches the right edge first: drawn at 39, 150 - 96 - 39 = 15 is all the room there is.
+    expect(moveChildren(DEFAULT_DESIGN, both, s, 100, 0).children.teamColumn).toEqual({ Head: { x: 28, y: 38 }, Health: { x: 52, y: 52 }, Items: { x: 54 } });
   });
 
   it('places the group by its box', () => {
@@ -311,8 +312,9 @@ describe('scaling several pieces', () => {
     const d = scaleChildren(DEFAULT_DESIGN, names, startsOf(DEFAULT_DESIGN, names), { x: 13, y: 38 }, 0.5);
     expect(d.children.teamColumn).toEqual({
       Head: { w: 12, h: 12, x: 13, y: 38 },
-      Health: { w: 48, h: 4, x: 25, y: 45 },
-      Items: { x: 27 },
+      // The bar scales from where it is drawn (39): 13 + 26 / 2 = 26 for the row, its own block 2 left of it.
+      Health: { w: 48, h: 4, x: 24, y: 45 },
+      Items: { x: 26 },
       Name: { w: 60, h: 6, fontSize: 6, x: 13, y: 49 },
     });
   });
@@ -331,7 +333,9 @@ describe('scaling several pieces', () => {
       expect(c.y + c.h, n).toBeLessThanOrEqual(150);
     }
     expect(d.children.teamColumn!.Head).toMatchObject({ w: 46, h: 46 });
-    expect(d.children.teamColumn!.Health).toEqual({ w: 150, h: 14, x: 0, y: 66 });
+    // The drawn bar (the item row's x) stops at the card's left edge; its own block keeps the file's 2 units left of it.
+    expect(d.children.teamColumn!.Health).toEqual({ w: 150, h: 14, x: -2, y: 66 });
+    expect(d.children.teamColumn!.Items).toEqual({ x: 0 });
   });
 
   it('turns a corner drag into one factor, the larger change winning', () => {
@@ -770,14 +774,15 @@ describe('child edits name their panel', () => {
 
 describe('resetChildKey (review M2: Use the file\'s value)', () => {
   it('removes just that key, keeping the rest of the piece\'s edits', () => {
+    // x 40 is the drawn x (the item row's), so the bar's own block goes to 38.
     const d = patchChild(structuredClone(DEFAULT_DESIGN), 'Health', { x: 40, keys: { inset: '1', monochrome_color: '1 2 3 255' } });
-    expect(resetChildKey(d, 'Health', 'inset').children.teamColumn?.Health).toEqual({ x: 40, keys: { monochrome_color: '1 2 3 255' } });
+    expect(resetChildKey(d, 'Health', 'inset').children.teamColumn?.Health).toEqual({ x: 38, keys: { monochrome_color: '1 2 3 255' } });
   });
   it('drops an emptied keys object, then an emptied piece and panel', () => {
     const d = patchChild(structuredClone(DEFAULT_DESIGN), 'Health', { keys: { inset: '1' } }, 'ownHealth');
     expect(resetChildKey(d, 'Health', 'inset', 'ownHealth').children).toEqual({});
     const e = patchChild(structuredClone(DEFAULT_DESIGN), 'Health', { x: 3, keys: { inset: '1' } });
-    expect(resetChildKey(e, 'Health', 'inset').children.teamColumn?.Health).toEqual({ x: 3 });
+    expect(resetChildKey(e, 'Health', 'inset').children.teamColumn?.Health).toEqual({ x: 1 });
   });
   it('gives the design back unchanged when the key is not set', () => {
     const d = structuredClone(DEFAULT_DESIGN);
@@ -804,7 +809,8 @@ describe('the card bar and the item row move sideways together (the card revive 
   // revive the game sets a card's Health x to its Items child's x. Stock has the bar at 37 and the items at
   // 39, so a bar or item row dragged on its own would jump after a revive; the two keep the stock offset.
   const at = (d: HudDesign, n: string) => panelChild(d, 'teamColumn', n)!;
-  const offset = (d: HudDesign) => at(d, 'Items').x - at(d, 'Health').x;
+  // The file's own offset: the bar's block x (ownX) against the row's. The bar's x is the row's, where the game draws it.
+  const offset = (d: HudDesign) => at(d, 'Items').x - at(d, 'Health').ownX!;
   for (const [label, base] of [['unfitted', { ...structuredClone(DEFAULT_DESIGN), elements: {} }], ['fitted', structuredClone(UNFIT)]] as const) {
     it(`${label}: dragging the bar moves the item row by the same x, and not its y`, () => {
       const d0 = base as HudDesign;
@@ -825,14 +831,24 @@ describe('the card bar and the item row move sideways together (the card revive 
       expect([at(moved, 'Health').x, at(moved, 'Items').x]).toEqual([at(d0, 'Health').x + 5, at(d0, 'Items').x + 5]);
     });
   }
-  it('stock keeps 37 and 39', () => {
+  it('stock keeps 37 and 39, and the bar\'s x is 39, where the game draws it (probe X15)', () => {
     const d = { ...structuredClone(DEFAULT_DESIGN), elements: {} };
-    expect([at(d, 'Health').x, at(d, 'Items').x]).toEqual([37, 39]);
-    expect(patchChild(d, 'Health', { x: 50 }).children.teamColumn).toEqual({ Health: { x: 50 }, Items: { x: 52 } });
+    expect([at(d, 'Health').x, at(d, 'Health').ownX, at(d, 'Items').x]).toEqual([39, 37, 39]);
+    // The X box takes the drawn x: 50 puts the bar at 50 in game, the block at 48 with the row at 50.
+    expect(patchChild(d, 'Health', { x: 50 }).children.teamColumn).toEqual({ Health: { x: 48 }, Items: { x: 50 } });
+    expect(at(patchChild(d, 'Health', { x: 50 }), 'Health').x).toBe(50);
+  });
+  it('turns a bar x edit with no move into its own x, never the drawn one (a W change through the left handle)', () => {
+    const d = { ...structuredClone(DEFAULT_DESIGN), elements: {} };
+    expect(patchChild(d, 'Health', { x: 39, w: 80 }).children.teamColumn).toEqual({ Health: { x: 37, w: 80 } });
+  });
+  it('falls back to the bar\'s own x on a design whose file has no item row\'s partner to move', () => {
+    // The own panel is not linked: its bar x is stored as given.
+    expect(patchChild(structuredClone(DEFAULT_DESIGN), 'Health', { x: 40 }, 'ownHealth').children.ownHealth).toEqual({ Health: { x: 40 } });
   });
   it('resets the partner\'s x with the piece, keeping its other edits', () => {
     const d = patchChild(patchChild({ ...structuredClone(DEFAULT_DESIGN), elements: {} }, 'Items', { fontSize: 20 }), 'Health', { x: 50 });
-    expect(d.children.teamColumn).toEqual({ Health: { x: 50 }, Items: { fontSize: 20, x: 52 } });
+    expect(d.children.teamColumn).toEqual({ Health: { x: 48 }, Items: { fontSize: 20, x: 50 } });
     expect(resetChild(d, 'Health').children.teamColumn).toEqual({ Items: { fontSize: 20 } });
     expect(resetChild(patchChild(d, 'Health', { y: 3 }), 'Items').children.teamColumn).toEqual({ Health: { y: 3 } });
   });

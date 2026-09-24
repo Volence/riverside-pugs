@@ -399,6 +399,25 @@ export function baseTeam(key: BaseKey): BaseTeam {
 export interface Box { x: number; y: number; w: number; h: number }
 
 /**
+ * The x the game draws a panel's health bar at, read from the panel file's
+ * own children (`nodes`, in whatever frame the caller holds them): its
+ * barAnchor child's xpos (the teammate card's Items), or undefined when the
+ * panel has no anchor or the file lacks that child (an imported card), and
+ * the bar is drawn at its own xpos. client.dll 1023f5df..1023f6da; probe
+ * X15 (/home/volence/l4d/hud/probe-2f/x15/RESULTS.md): the stock card bar,
+ * xpos 37, is drawn at the item row's 39 from the start of the map.
+ */
+export function drawnBarX(nodes: KvNode[], panel: { barAnchor?: string } | undefined): number | undefined {
+  if (!panel?.barAnchor) return undefined;
+  const a = kvFind(nodes, [panel.barAnchor]);
+  const x = a ? parseFloat(kvGet(a, 'xpos') ?? '') : NaN;
+  return Number.isFinite(x) ? x : undefined;
+}
+
+/** Whether a child is the health bar the game re-places (drawnBarX): the block named Health. */
+export const isBar = (name: string): boolean => name.toLowerCase() === 'health';
+
+/**
  * The teammate card's content: the union of the visible steady-state
  * children (Head, Health, Name, Items, and HealthNumber and Status when
  * present). State art and decoration never count. Null when every one is
