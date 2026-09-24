@@ -33,6 +33,15 @@ describe('the imported HUD store', () => {
     expect('dropped' in (await s.list())[1]).toBe(false);
   });
 
+  it('keeps which community entry an import came from, and lists it', async () => {
+    const s = memoryStore();
+    await s.put({ ...hud('a', 1), community: { entryId: 7 } });
+    expect((await s.get('a'))!.community).toEqual({ entryId: 7 });
+    expect((await s.list())[0].community).toEqual({ entryId: 7 });
+    await s.put(hud('b', 2));
+    expect('community' in (await s.list())[1]).toBe(false);
+  });
+
   it('passes on the reason when IndexedDB will not open', async () => {
     const failing = { open: () => { const r: Record<string, unknown> = {}; queueMicrotask(() => { r.error = new Error('blocked'); (r.onerror as () => void)?.(); }); return r; } } as unknown as IDBFactory;
     await expect(indexedDbStore(failing).list()).rejects.toThrow('blocked');
