@@ -5,6 +5,7 @@ import { buildHud } from './build';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { artUrl } from './art';
+import { fadeTexture } from './textures';
 import { cssFamily, fontCell, _resetImportFaces } from './fonts';
 import { registerImport, unregisterImport, baseFile } from './base';
 import { sampleHud, fakeCanvas, recordingCtx, hostileFont, type HostileFontKind } from './importFixtures';
@@ -755,5 +756,66 @@ describe("an imported HUD's own textures", () => {
     const { ctx, calls } = recordingCtx();
     drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1);
     expect(drawnFrom(calls).some((s) => s.rec)).toBe(false);
+  });
+});
+
+describe('custom splatter', () => {
+  const TEAM = { x: 0, y: 0 };
+  const draws = (calls: ReturnType<typeof recCtx>['calls']) => calls.filter((c) => c.m === 'drawImage');
+
+  it('draws a Fade from exactly the pixels the download ships, at the stand-in rect, at full strength', () => {
+    const { factory, made } = fakeCanvas();
+    _setCanvasFactory(factory);
+    try {
+      const d = design({ splatters: { splatTeam: { kind: 'fade', color: '200 0 0 255' } } });
+      const stand = childRects(d, 'teamColumn', TEAM, 1).find((c) => c.name === 'HudEdSplatter')!;
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, d, 'teamColumn', TEAM, 1, { card: 0 });
+      const fade = made.find((m) => m.w === 512 && m.h === 256)!;
+      expect(fade.pixels).toEqual(fadeTexture(512, 256, '200 0 0 255'));
+      const hit = draws(calls).find((c) => c.a[1] === stand.x && c.a[2] === stand.y && c.a[3] === stand.w && c.a[4] === stand.h)!;
+      expect(hit.alpha).toBe(1);                                  // no SPLATTER_ALPHA: the stand-in is not code-managed
+    } finally { _setCanvasFactory(null); }
+  });
+
+  it('draws nothing for the stock splatter underneath, now at alpha 0', () => {
+    const d = design({ splatters: { splatTeam: { kind: 'fade' } } });
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, d, 'teamColumn', TEAM, 1, { card: 0 });
+    expect(draws(calls).some((c) => (c.a[0] as HTMLImageElement).src === artUrl('vgui/hud/healthbar_bg_1'))).toBe(false);
+  });
+
+  it('draws an uploaded picture from the stored PNG, and the stock art when no picture is stored', () => {
+    const png = 'iVBORw0KGgo=';
+    const withPic = design({ splatters: { splatTeam: { kind: 'image' } }, images: { splatTeam: { w: 512, h: 256, png } } });
+    const a = recCtx();
+    drawPanel(a.ctx, withPic, 'teamColumn', TEAM, 1, { card: 0 });
+    expect(draws(a.calls).some((c) => (c.a[0] as HTMLImageElement).src === `data:image/png;base64,${png}`)).toBe(true);
+    const b = recCtx();
+    drawPanel(b.ctx, design({ splatters: { splatTeam: { kind: 'image' } } }), 'teamColumn', TEAM, 1, { card: 0 });
+    expect(draws(b.calls).find((c) => (c.a[0] as HTMLImageElement).src === artUrl('vgui/hud/healthbar_bg_1'))!.alpha).toBeCloseTo(0.35);
+  });
+
+  it("draws each card's own stock splatter, as client.dll picks healthbar_bg_N by slot", () => {
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, design({}), 'teamColumn', TEAM, 1, { card: 1 });
+    expect(draws(calls).some((c) => (c.a[0] as HTMLImageElement).src === artUrl('vgui/hud/healthbar_bg_2'))).toBe(true);
+  });
+
+  it('tints a scratch upload by health, and not with Keep my colours', () => {
+    const scratch = recCtx();
+    _setCanvasFactory((w, h) => ({ width: w, height: h, getContext: () => scratch.ctx }) as unknown as HTMLCanvasElement);
+    try {
+      const png = 'iVBORw0KGgo=';
+      const img = { splatTop: { w: 256, h: 64, png } };
+      drawPanel(recCtx().ctx, design({ splatters: { splatTop: { kind: 'image' } }, images: img }), 'ownHealth', TEAM, 1);
+      const green = scratch.calls.filter((c) => c.m === 'fillRect' && c.op === 'multiply' && c.fill === 'rgb(10,177,50)').length;
+      expect(green).toBe(2);                                      // the uploaded top and the stock bottom, both health green
+      scratch.calls.length = 0;
+      _resetAssetCache(); _setImageFactory(instantImage);
+      drawPanel(recCtx().ctx, design({ splatters: { splatTop: { kind: 'image', keepColours: true } }, images: img }), 'ownHealth', TEAM, 1);
+      // Only HealthbarTextureBottom (stock, tinted) makes a multiply now; the kept-colour top makes none.
+      expect(scratch.calls.filter((c) => c.m === 'fillRect' && c.op === 'multiply')).toHaveLength(1);
+    } finally { _setCanvasFactory(null); }
   });
 });

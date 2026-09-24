@@ -36,6 +36,7 @@ import { canvasFont, fontCell, importedFace, loadFace, type FontCell } from './f
 import { baseOf, onUnregister } from './base';
 import { importedMaterial, _resetImportedArt } from './importArt';
 import { addLinear } from './additive';
+import { splatterForMaterial, fadePixels, splatterDef, type SplatterDef, type SplatterId } from './splatter';
 
 export type ChildKind = 'image' | 'label' | 'bar' | 'other';
 export interface ChildRect { name: string; kind: ChildKind; x: number; y: number; w: number; h: number; visible: boolean }
@@ -87,7 +88,7 @@ const DEAD_NAME_ALPHA = 0.5;
 
 /**
  * The stock teammate card's BackgroundImage is a black splatter texture
- * (hud/healthbar_bg_N, one file per team colour) sitting at zpos -1 behind
+ * (hud/healthbar_bg_N, one texture per card slot, set by client.dll) sitting at zpos -1 behind
  * the whole card. Probe T6 showed it faintly at full health, so it is drawn
  * at SPLATTER_ALPHA rather than hidden. Scoped to the teamColumn panel and to
  * images actually named healthbar_bg_*, so it never touches the infected
@@ -100,6 +101,10 @@ const DEAD_NAME_ALPHA = 0.5;
  * on top of that tint's own alpha rather than standing in for it, so a
  * player's chosen colour still shows only at the game's faint strength, the
  * same way the tint and this alpha compose on the stock infected card.
+ *
+ * The factor applies only to this code-managed stock splatter. A custom
+ * splatter's stand-in (HudEdSplatter, splatter.ts) is a plain ImagePanel the
+ * game draws at its drawColor alone, so it draws at full strength.
  */
 const SPLATTER_ALPHA = 0.35;
 
@@ -438,8 +443,45 @@ export function tinted(img: CanvasImageSource, key: string, r: number, g: number
   return c;
 }
 
+/**
+ * The picture a custom splatter draws from: a Fade made from exactly the
+ * pixels the build writes into its .vtf (fadePixels), or the stored PNG the
+ * build encodes. Undefined when the splatter is not custom, its picture is
+ * still loading, or there is no scratch canvas to make a Fade on (happy-dom).
+ * The key is unique per picture, so tinted()'s cache never mixes two of them.
+ */
+const fades = new Map<string, HTMLCanvasElement>();
+export function splatterSource(design: HudDesign, id: SplatterId, onAsset?: () => void): { src: CanvasImageSource; key: string } | undefined {
+  const def = splatterDef(id);
+  const style = design.splatters?.[id];
+  if (!def || !style) return undefined;
+  if (style.kind === 'fade') {
+    const colour = style.color ?? def.defaultColor;
+    const key = `splat|${id}|fade|${colour}`;
+    let c = fades.get(key);
+    if (!c) {
+      const made = canvasFactory(def.size.w, def.size.h);
+      const t = made?.getContext('2d');
+      if (!made || !t) return undefined;
+      const data = t.createImageData(def.size.w, def.size.h);
+      data.data.set(fadePixels(def, style));
+      t.putImageData(data, 0, 0);
+      fades.set(key, made);
+      c = made;
+    }
+    return { src: c, key };
+  }
+  const stored = design.images[id];
+  if (style.kind === 'image' && stored) {
+    const url = `data:image/png;base64,${stored.png}`;
+    const img = urlImage(url, onAsset);
+    return img ? { src: img, key: `splat|${id}|${url}` } : undefined;
+  }
+  return undefined;
+}
+
 /** Test seam: forget every loaded image, tint and warned-about material. */
-export function _resetAssetCache(): void { images.clear(); missing.clear(); tints.clear(); urls.clear(); warnedNoIcons = false; _resetImportedArt(); }
+export function _resetAssetCache(): void { images.clear(); missing.clear(); tints.clear(); urls.clear(); fades.clear(); warnedNoIcons = false; _resetImportedArt(); }
 
 export function hatch(ctx: CanvasRenderingContext2D, r: ChildRect) {
   ctx.save();
@@ -495,10 +537,18 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
     return;
   }
   if (image) {
-    const material = normaliseMaterial(image);
+    let material = normaliseMaterial(image);
     if (material.startsWith('vgui/hud/hudeditor/')) {
+      const splat = splatterForMaterial(material);
+      if (splat) { drawSplatter(ctx, design, n, r, k, opts, splat); return; }
       drawSlotStyle(ctx, design, material.slice('vgui/hud/hudeditor/'.length), r);   // false: an upload; the game shows it, we cannot yet
       return;
+    }
+    // client.dll sets card N's splatter to hud/healthbar_bg_N whatever the
+    // file says (spec 2026-09-24-hud-editor-custom-splatter-design.md, "What
+    // the game does"), so each card draws its own slot's texture.
+    if (n.key === 'BackgroundImage' && opts.card !== undefined && /^vgui\/hud\/healthbar_bg_\d+$/.test(material)) {
+      material = `vgui/hud/healthbar_bg_${(opts.card % 4) + 1}`;
     }
     // An imported HUD's own material first; the stock art where it has none.
     const key = baseOf(design);
@@ -520,9 +570,13 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
  * decoded texture both come through here, so they draw alike.
  */
 function drawTexture(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: number, opts: DrawOpts,
-  src0: CanvasImageSource, w: number, h: number, key: string, additive: boolean) {
+  src0: CanvasImageSource, w: number, h: number, key: string, additive: boolean, vertexColour = true) {
   let [tr, tg, tb, ta] = parseColour(kvGet(n, 'drawColor') ?? '255 255 255 255');
+  if (ta === 0) return;                                                // the engine draws nothing at alpha 0 (the stock splatter under a stand-in)
   if (HEALTH_TINT_CHILDREN.has(n.key.toLowerCase())) [tr, tg, tb] = sampleHealthRgb(opts);   // game code's colour, over the file's
+  // A material without $vertexcolor (Keep my colours) takes no RGB from the
+  // draw colour at all, the file's or code's; only the alpha still applies.
+  if (!vertexColour) tr = tg = tb = 255;
   const src = tr < 255 || tg < 255 || tb < 255 ? tinted(src0, key, tr, tg, tb, w, h) : src0;
   const dest = (kvGet(n, 'scaleImage') ?? '0') !== '0' ? r : { ...r, w: w * k, h: h * k };   // unscaled: texture pixels are HUD units
   const paint = (c: CanvasRenderingContext2D) => c.drawImage(src, dest.x, dest.y, dest.w, dest.h);
@@ -530,6 +584,19 @@ function drawTexture(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: 
   ctx.globalAlpha *= ta / 255;
   if (additive) paintAdditive(ctx, dest, paint); else paint(ctx);
   ctx.restore();
+}
+
+/**
+ * A custom splatter: the stand-in on a teammate card, or a repointed scratch.
+ * It goes through drawTexture like the stock art, so drawColor, the health
+ * tint and stretching match; Keep my colours drops the RGB tint, as the
+ * build's .vmt drops $vertexcolor.
+ */
+function drawSplatter(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts, def: SplatterDef) {
+  const style = design.splatters?.[def.id];
+  const got = splatterSource(design, def.id, opts.onAsset);
+  if (!style || !got) return;
+  drawTexture(ctx, n, r, k, opts, got.src, def.size.w, def.size.h, got.key, false, !(def.healthTint && style.keepColours));
 }
 
 function sampleText(n: KvNode, opts: DrawOpts): string {
