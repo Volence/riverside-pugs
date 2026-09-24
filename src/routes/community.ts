@@ -9,7 +9,7 @@ import { getPlayer } from '../players.js';
 import type { CommunityStore } from '../community/store.js';
 import {
   checkCrosshairArt, checkDescription, checkHudDesign, checkImport, checkPreview, checkTitle,
-  COMMUNITY_XHAIR_CAPS, IMPORT_MAX_BYTES,
+  COMMUNITY_XHAIR_CAPS, IMPORT_MAX_BYTES, PREVIEW_MAX_BYTES,
 } from '../community/validate.js';
 import {
   countLive, ENTRY_KINDS, entryRow, fileLive, fileReferenced, getEntry, insertEntry, like, likeCount,
@@ -39,6 +39,26 @@ const REMOVE_REASON_MAX = 200;
 const MB = 2 ** 20;
 /** The meta field holds the design (2 MB at most) plus the short text fields. */
 const META_MAX_BYTES = 2.5 * MB;
+
+/** HUD uploads the server takes at once, across every player. */
+const HUD_UPLOADS_AT_ONCE = 2;
+const PREVIEW_TOO_BIG = 'The preview is over 1.5 MB.';
+
+/**
+ * A file part's bytes, or null once they pass `cap`: from there the rest is
+ * read and dropped, so the parser moves on without the part ever being held.
+ */
+async function readCapped(stream: AsyncIterable<Buffer>, cap: number): Promise<Buffer | null> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  let over = false;
+  for await (const chunk of stream) {
+    if (over) continue;
+    size += chunk.length;
+    if (size > cap) { over = true; chunks.length = 0; } else chunks.push(chunk);
+  }
+  return over ? null : Buffer.concat(chunks);
+}
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -96,6 +116,9 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
     }
     return null;
   };
+
+  /** Players with a HUD upload in flight. */
+  const hudUploads = new Set<string>();
 
   const idOf = (raw: string): number | null => (/^[1-9][0-9]{0,15}$/.test(raw) ? Number(raw) : null);
   const notFound = (reply: FastifyReply) => reply.code(404).send({ error: 'no such entry' });
@@ -178,7 +201,28 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
     const me = requireActive(req, reply);
     if (!me) return reply;
     if (!uploadsOn()) return reply.code(403).send({ error: 'Sharing is switched off right now.' });
+    // The caps before a byte of the body is read, so a player who cannot
+    // share costs the server no upload; the insert checks them again inside
+    // its transaction.
+    const early = capProblem(me, 'hud');
+    if (early) return reply.code(early.status).send({ error: early.error });
+    // One upload in flight per player, and a few across the site: each can
+    // hold up to 20 MB in memory while it is checked.
+    if (hudUploads.has(me)) {
+      return reply.code(409).send({ error: 'Your last HUD share is still uploading; wait for it to finish.' });
+    }
+    if (hudUploads.size >= HUD_UPLOADS_AT_ONCE) {
+      return reply.code(429).send({ error: 'Other HUD shares are uploading right now; try again in a moment.' });
+    }
+    hudUploads.add(me);
+    try {
+      return await shareHud(me, req, reply);
+    } finally {
+      hudUploads.delete(me);
+    }
+  });
 
+  const shareHud = async (me: string, req: FastifyRequest, reply: FastifyReply) => {
     // Every part is read to its end before anything is refused, so a refusal
     // never leaves a file stream half consumed under the parser.
     let meta: string | null = null;
@@ -186,6 +230,7 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
     let vpk: Buffer | null = null;
     let odd = false;
     let truncated = false;
+    let previewTooBig = false;
     try {
       for await (const part of req.parts()) {
         if (part.type === 'field') {
@@ -194,11 +239,19 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
           else meta = String(part.value);
           continue;
         }
-        const buf = await part.toBuffer();
-        if (part.file.truncated) truncated = true;
-        else if (part.fieldname === 'preview' && preview === null) preview = buf;
-        else if (part.fieldname === 'import' && vpk === null) vpk = buf;
-        else odd = true;
+        if (part.fieldname === 'preview' && preview === null && !previewTooBig) {
+          // Streamed under its own cap, far below the 20 MB the parser allows an import.
+          const buf = await readCapped(part.file, PREVIEW_MAX_BYTES);
+          if (buf === null) previewTooBig = true;
+          else preview = buf;
+        } else if (part.fieldname === 'import' && vpk === null) {
+          const buf = await part.toBuffer();
+          if (part.file.truncated) truncated = true;
+          else vpk = buf;
+        } else {
+          odd = true;
+          await readCapped(part.file, 0);
+        }
       }
     } catch (err) {
       // The parser's own limits (a third file, a second field) and malformed
@@ -210,6 +263,7 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
       }
       throw err;
     }
+    if (previewTooBig) return reply.code(413).send({ error: PREVIEW_TOO_BIG });
     if (truncated) return reply.code(413).send({ error: 'The share is over its size limits.' });
     if (odd || meta === null) return reply.code(400).send({ error: 'The share is not in the form the site sends.' });
 
@@ -240,11 +294,6 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
       if (!imp.ok) return reply.code(imp.status).send({ error: imp.error });
       imported = { id: imp.value.id };
     }
-
-    // The caps before any write, so a refused share costs no disk; the insert
-    // below checks them again inside its transaction.
-    const early = capProblem(me, 'hud');
-    if (early) return reply.code(early.status).send({ error: early.error });
 
     const store = opts.store();
     const previewSha = createHash('sha256').update(preview).digest('hex');
@@ -292,7 +341,7 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
       undo();
       throw err;
     }
-  });
+  };
 
   /**
    * The stored files. Anyone may fetch one a live entry uses; staff may fetch
