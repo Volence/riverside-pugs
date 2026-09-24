@@ -6,7 +6,7 @@ import { confirm } from '../components/Confirm';
 import { drawBackdrop, type Backdrop } from '../crosshair/draw';
 import { savedArt } from '../crosshair/saved';
 import { importedCrosshair } from '../crosshair/texture';
-import type { CrosshairArt } from '../crosshair/model';
+import { readArt, type CrosshairArt } from '../crosshair/model';
 import {
   loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, newDesign, usableCrosshair,
   type HudDesign, type StyleOverride, type Box,
@@ -21,7 +21,7 @@ import { drawHud, visibleElements, type Side } from '../hud/mock';
 import type { CardState } from '../hud/render';
 import type { WeaponHeld } from '../hud/weapons';
 import { SLOTS, type StyleSlot } from '../hud/slots';
-import { registerImport, unregisterImport, hasImport } from '../hud/base';
+import { registerImport, unregisterImport, hasImport, importedFiles } from '../hud/base';
 import { readHudUpload, hudId } from '../hud/upload';
 import { importProblem } from '../hud/importCheck';
 import { hudStore, type HudMeta } from '../hud/hudStore';
@@ -47,6 +47,11 @@ import { LayersPanel } from './hud/LayersPanel';
 import { Toolbar, type PresetChoice } from './hud/Toolbar';
 import { endsOn, typedInto, hexOf, alphaPct, withHex, withAlphaPct, type Edit, type EditMode } from './hud/controls';
 import { assetsFor, decodeUpload } from '../hud/assets';
+import { communityApi, ApiError } from '../api';
+import type { Session } from '../hooks/useLiveState';
+import { ShareDialog, type SharePrepared } from '../components/ShareDialog';
+import { prepareHudShare, renderPreview } from '../community/publish';
+import { openCommunityImport, SAFETY_FAILED, KEPT_FOR_SESSION } from '../community/open';
 
 // Moved to hud/assets.ts so the community page can build a download without
 // this page; re-exported so existing imports keep working.
@@ -197,7 +202,25 @@ function leftOut(paths: string[], lead: string): string {
 
 const modsOf = (e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }): Mods => ({ shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
 
-export default function Hud() {
+/** A community entry id from the query string, or null when it is not one. */
+function entryParam(name: string): { raw: string | null; id: number | null } {
+  const q = new URLSearchParams(location.search);
+  const raw = q.get(name);
+  if (raw === null) return { raw, id: null };
+  q.delete(name);
+  const rest = q.toString();
+  // Used once, like #d= and ?from=crosshair: a reload must not ask again.
+  history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash);
+  return { raw, id: /^[1-9][0-9]{0,15}$/.test(raw) ? Number(raw) : null };
+}
+
+/** An entry fetch's failure, as one status line. */
+const entryError = (err: unknown) => (err instanceof ApiError && err.status === 404
+  ? 'That community entry was removed.'
+  : err instanceof Error ? err.message : String(err));
+
+/** The session is optional so the page still renders on its own (tests, and a route that passes none): no session reads as signed out. */
+export default function Hud({ session = { kind: 'anonymous' } }: { session?: Session } = {}) {
   // The crosshair saved on the Crosshair page, read once: a new design
   // carries a copy of it, and a design saved before designs carried their
   // own adopts it (usableCrosshair). From then on the design's own
@@ -501,7 +524,8 @@ export default function Hud() {
     let live = true;
     (async () => {
       const hud = await hudStore().get(id).catch(() => undefined);
-      if (hud && !hasImport(id)) registerImport(id, hud.files);
+      // A community import registers with its flag again: the registry forgot it on reload.
+      if (hud && !hasImport(id)) registerImport(id, hud.files, { community: !!hud.community });
       if (live) { setTriedLoad(id); setImportTick((t) => t + 1); }
     })();
     return () => { live = false; };
@@ -526,6 +550,105 @@ export default function Hud() {
     setSel({ kind: 'elements', ids: ['xhair'] });
     setStatus(replaced ? `${FROM_PAGE} Undo brings back the one it had.` : FROM_PAGE);
   }, []);
+
+  // Mount only: the community page's Open in the HUD editor lands here with
+  // ?community=<id>. The entry's design is read like any design (validateDesign),
+  // and one on an imported HUD first has its files fetched and checked
+  // (openCommunityImport), so nothing applies until the base it names is in.
+  // Then the same question a share link asks, and one undoable step.
+  useEffect(() => {
+    const { raw, id } = entryParam('community');
+    if (raw === null) return undefined;
+    if (id === null) { setStatus('That community link is damaged.'); return undefined; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const entry = await communityApi.get(id);
+        if (cancelled) return;
+        if (entry.kind !== 'hud') throw new Error('That community entry is not a HUD.');
+        const next = usableCrosshair(validateDesign(entry.design), saved);
+        let note = '';
+        if (next.preset === 'imported') {
+          // The server tied the design to the entry's import; a design naming
+          // any other id could reach a HUD this browser imported privately.
+          if (!next.imported || next.imported.id !== entry.importId) throw new Error(SAFETY_FAILED);
+          const opened = await openCommunityImport(entry);
+          if (cancelled) return;
+          const bytes = [...(importedFiles(`imported:${opened.id}`)?.values() ?? [])].reduce((n, d) => n + d.length, 0);
+          const meta: HudMeta = { id: opened.id, name: opened.name, bytes, added: Date.now(), community: { entryId: entry.id } };
+          setImports((l) => (l.some((m) => m.id === opened.id) ? l : [...l, meta]));
+          setImportTick((t) => t + 1);
+          if (!opened.kept) note = KEPT_FOR_SESSION;
+        }
+        let load = true;
+        if (hasOverrides(current.current, saved)) {
+          load = await confirm({
+            title: 'Load the HUD design from this link? It will replace the one saved on this browser.',
+            confirmLabel: 'Load link', cancelLabel: 'Keep mine',
+          });
+        }
+        if (cancelled || !load) return;
+        edit(() => next);
+        dropPicks();
+        setStatus(`Opened ${entry.title} from the community page. Undo brings back the design you had.${note}`);
+      } catch (err) {
+        if (!cancelled) setStatus(entryError(err));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Mount only: a community crosshair's Use in my HUD lands here with
+  // ?xhair=<id>. It goes into the design as ?from=crosshair's does: one step,
+  // selected, so Undo gives back the crosshair the design had.
+  useEffect(() => {
+    const { raw, id } = entryParam('xhair');
+    if (raw === null) return undefined;
+    if (id === null) { setStatus('That community link is damaged.'); return undefined; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const entry = await communityApi.get(id);
+        if (cancelled) return;
+        const art = entry.kind === 'crosshair' ? readArt(entry.art) : null;
+        if (!art) throw new Error('This crosshair cannot be drawn.');
+        edit((d) => ({ ...d, crosshair: 'bundle', xhairArt: art }));
+        setSel({ kind: 'elements', ids: ['xhair'] });
+        setStatus(`${entry.title} is in this HUD now, and goes into its download. Undo brings back the crosshair it had.`);
+      } catch (err) {
+        if (!cancelled) setStatus(entryError(err));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Share to community: which dialog is open, and the kept set a HUD share
+  // registered to draw its preview (see closeShare).
+  const [sharing, setSharing] = useState<'hud' | 'crosshair' | null>(null);
+  const shareKept = useRef<string | null>(null);
+  const prepareShare = async (): Promise<SharePrepared> => {
+    const d = current.current;
+    const hud = await prepareHudShare(validateDesign(d));
+    if (hud.design.imported) shareKept.current = hud.design.imported.id;
+    return { kind: 'hud', name: d.name, hud, preview: await renderPreview(hud.design) };
+  };
+  const prepareCrosshair = async (): Promise<SharePrepared> => {
+    const d = current.current;
+    const art = d.crosshair === 'bundle' ? readArt(d.xhairArt) : null;
+    if (!art) throw new Error('Choose Custom and make a crosshair to share one.');
+    return { kind: 'crosshair', name: '', art };
+  };
+  // prepareHudShare leaves an import's filtered set registered, for the
+  // preview. The design never moves onto it, so once the dialog closes it is
+  // dropped again, unless the page uses it anyway: the design's own import,
+  // or one of this browser's.
+  const closeShare = () => {
+    const kept = shareKept.current;
+    shareKept.current = null;
+    setSharing(null);
+    const cur = current.current;
+    if (kept && cur.imported?.id !== kept && !imports.some((m) => m.id === kept)) unregisterImport(kept);
+  };
 
   const pointerUnits = (e: { clientX: number; clientY: number }) => toUnits(e, canvas.current!.getBoundingClientRect());
 
@@ -826,7 +949,7 @@ export default function Hud() {
       if (!hasImport(choice.id)) {
         const hud = await hudStore().get(choice.id).catch(() => undefined);
         if (!hud) { setStatus('That imported HUD is no longer in this browser.'); return; }
-        registerImport(hud.id, hud.files);
+        registerImport(hud.id, hud.files, { community: !!hud.community });
         setImportTick((t) => t + 1);
       }
       if (cur.preset === 'imported' && cur.imported?.id === choice.id) return;
@@ -854,13 +977,17 @@ export default function Hud() {
     try {
       const upload = await readHudUpload(file.name, new Uint8Array(await file.arrayBuffer()));
       const id = await hudId(upload.files);
-      registerImport(id, upload.files);
+      // The same bytes may be stored already as a community import (an id is
+      // its files' hash): a private re-import keeps that marker, and with it
+      // the build's allowlist check, rather than quietly dropping both.
+      const community = (await hudStore().get(id).catch(() => undefined))?.community;
+      registerImport(id, upload.files, { community: !!community });
       // Built and drawn once, off screen, before it is kept: a HUD that
       // would throw on the page is refused here, and freed again.
       const problem = importProblem(id);
       if (problem) { unregisterImport(id); throw new Error(problem); }
       const bytes = [...upload.files.values()].reduce((n, d) => n + d.length, 0);
-      const meta: HudMeta = { id, name: upload.name, bytes, added: Date.now(), dropped: upload.dropped };
+      const meta: HudMeta = { id, name: upload.name, bytes, added: Date.now(), dropped: upload.dropped, ...(community ? { community } : {}) };
       let kept = true;
       try { await hudStore().put({ ...meta, files: upload.files }); } catch { kept = false; }
       // This session's list is the store's plus anything only in memory.
@@ -1026,6 +1153,13 @@ export default function Hud() {
   return (
     <div class="page page--wide">
       <PageHeader eyebrow="Tool" title="HUD Editor" />
+      {sharing && (
+        <ShareDialog
+          kind={sharing} session={session}
+          prepare={sharing === 'hud' ? prepareShare : prepareCrosshair}
+          onShared={() => {}} onClose={closeShare}
+        />
+      )}
 
       <div class="hud">
         <Panel class="hud__layerpanel">
@@ -1055,6 +1189,7 @@ export default function Hud() {
             imports={imports} locked={locked}
             onImportFile={(f) => { void importHud(f); }}
             onRemoveImport={(id) => { void removeImport(id); }}
+            onShare={() => setSharing('hud')}
           />
           {banner && (
             <p class="hud__warn" role="status">
@@ -1092,7 +1227,7 @@ export default function Hud() {
           {/* The crosshair builder is too wide for the side panel, so while the crosshair is selected it opens here, under the canvas. */}
           {!locked && xhairSelected && (
             <Guard key={imp?.id ?? design.preset} onError={designFailed}>
-              <CrosshairBuilderPanel design={design} edit={edit} end={endGesture} onClose={() => setSel(NONE)} />
+              <CrosshairBuilderPanel design={design} edit={edit} end={endGesture} onClose={() => setSel(NONE)} onShare={() => setSharing('crosshair')} />
             </Guard>
           )}
         </Panel>

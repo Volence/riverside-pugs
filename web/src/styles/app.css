@@ -299,6 +299,7 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .hud__xhairbelow { margin-top: var(--sp-4); padding-top: var(--sp-4); border-top: 1px solid var(--border); }
 .hud__xhairhead { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-3); }
 .hud__xhairhead h3 { margin: 0; }
+.hud__xhairacts { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 .hud__xhairbody { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
 /* Presets span the top as one row of buttons; Shape, Colour and Outline sit
  * side by side below them, as many to a row as fit, one column on a phone.
@@ -2498,6 +2499,17 @@ tbody tr.is-lifted td { opacity: 0.55; }
   font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.1em; text-transform: uppercase;
   color: var(--text-muted);
 }
+/* The Share to community dialog: the confirm modal's panel, a little wider for the preview. */
+.share { width: min(40rem, 100%); }
+.share__form { display: grid; gap: var(--sp-3); margin-top: var(--sp-3); }
+.share__preview { display: block; width: 100%; height: auto; border: 1px solid var(--border); }
+.share__field { display: grid; gap: var(--sp-1); }
+.share__field input, .share__field textarea { width: 100%; box-sizing: border-box; min-width: 0; }
+.share__check { display: flex; gap: var(--sp-2); align-items: flex-start; }
+.share__cap p, .share__left p { margin: 0; }
+.share__cap ul, .share__left ul { margin: var(--sp-1) 0 0; padding-left: var(--sp-5); overflow-wrap: anywhere; }
+.share__left { color: var(--text-muted); }
+.share .modal__actions { margin-top: var(--sp-2); }
 @media (max-width: 640px) {
   .ccards { grid-template-columns: minmax(0, 1fr); }
   .community__bar { gap: var(--sp-2); }

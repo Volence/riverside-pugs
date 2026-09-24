@@ -84,8 +84,8 @@ export function AppRoutes(
       <Route path="/match/:id" component={MatchDetail} me={me} staff={staff} />
       <Route path="/maps" component={Maps} />
       <Route path="/custom-campaigns" component={CustomCampaigns} />
-      <Route path="/crosshair" component={Crosshair} />
-      <Route path="/hud" component={Hud} />
+      <Route path="/crosshair" component={Crosshair} session={session} />
+      <Route path="/hud" component={Hud} session={session} />
       <Route path="/community" component={Community} session={session} />
       <Route path="/community/:id" component={CommunityEntry} session={session} />
       <Route path="/replay/file/:name" component={ReplayPage} />

@@ -3,6 +3,8 @@ import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/pr
 import { Crosshair } from './Crosshair';
 import Hud from './Hud';
 import { TEX } from '../crosshair/draw';
+import { ConfirmHost } from '../components/Confirm';
+import { communityApi, type CommunityEntryDetail } from '../api';
 
 const PNG = 'data:image/png;base64,UE5H';
 
@@ -153,5 +155,53 @@ describe('Crosshair page', () => {
     render(<Hud />);
     expect(screen.getByText('Custom crosshair', { selector: 'legend' })).toBeTruthy();
     expect(screen.getByText(/your uploaded crosshair/i)).toBeTruthy();
+  });
+});
+
+describe('the Crosshair page and the community page', () => {
+  const entry = (art: unknown): CommunityEntryDetail => ({
+    id: 7, kind: 'crosshair', title: 'Ring', description: '', createdAt: '2026-09-24T01:00:00.000Z',
+    author: { steamid: '76561190000000001', name: 'alice', avatar: null }, likes: 0, likedByMe: false, art,
+  });
+  const BUILT = { kind: 'built', state: { shape: 'circle', radius: 9, color: '#ffe14d', len: 7, thick: 2, gap: 3, dot: 2, round: false, alpha: 100, outline: 1, oalpha: 80, backdrop: 'scene', res: '1080' } };
+  const show = () => render(<><ConfirmHost /><Crosshair /></>);
+
+  it('has Share to community..., which asks a signed-out viewer to sign in', () => {
+    render(<Crosshair />);
+    fireEvent.click(screen.getByRole('button', { name: 'Share to community...' }));
+    expect(screen.getByText('Sign in with Steam to share.')).toBeTruthy();
+  });
+
+  it('with ?community= asks before replacing the saved crosshair, then shows and saves the entry', async () => {
+    localStorage.setItem('xhair', JSON.stringify({ shape: 'dot', color: '#ffffff' }));
+    vi.spyOn(communityApi, 'get').mockResolvedValue(entry(BUILT));
+    history.replaceState(null, '', '/crosshair?community=7');
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: 'Use this one' }));
+    await waitFor(() => expect((screen.getByRole('slider', { name: 'Radius' }) as HTMLInputElement).value).toBe('9'));
+    expect(communityApi.get).toHaveBeenCalledWith(7);
+    expect(location.search).toBe('');
+    await waitFor(() => expect(JSON.parse(localStorage.getItem('xhair')!)).toMatchObject({ shape: 'circle', radius: 9, color: '#ffe14d' }));
+  });
+
+  it('with ?community= keeps the saved crosshair on Keep mine', async () => {
+    localStorage.setItem('xhair', JSON.stringify({ shape: 'dot', color: '#ffffff' }));
+    vi.spyOn(communityApi, 'get').mockResolvedValue(entry(BUILT));
+    history.replaceState(null, '', '/crosshair?community=7');
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep mine' }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(JSON.parse(localStorage.getItem('xhair')!)).toMatchObject({ shape: 'dot' });
+  });
+
+  it('with ?community= on an image keeps the PNG as the saved image, on the image shape', async () => {
+    stubCanvas();
+    const loaded = stubImages();
+    vi.spyOn(communityApi, 'get').mockResolvedValue(entry({ kind: 'image', png: PNG, w: 64, h: 64 }));
+    history.replaceState(null, '', '/crosshair?community=7');
+    show();
+    await waitFor(() => expect(JSON.parse(localStorage.getItem('xhair')!).shape).toBe('image'));
+    expect(JSON.parse(localStorage.getItem('xhairImage')!)).toEqual({ png: PNG, w: 64, h: 64 });
+    await waitFor(() => expect(loaded).toContain(PNG));
   });
 });
