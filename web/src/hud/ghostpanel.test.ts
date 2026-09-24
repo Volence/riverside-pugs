@@ -1,7 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { GHOST_PANEL, panelChildren } from './children';
 import { elementById } from './elements';
-import { buildHud, buildTrees } from './build';
+import { buildHud, buildTrees, elementRect } from './build';
+import { drawHud, hitTest } from './mock';
+import { _setImageFactory, _resetAssetCache, DEFAULT_PREVIEW, type PreviewState } from './render';
+import { artUrl } from './art';
 import { validateDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
@@ -79,5 +82,88 @@ describe('the spawn panel registry (plan task G1)', () => {
     expect(['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(bg, k))).toEqual(['20', '10', '660', '220']);
     const el = kvFind(buildTrees(d)('scripts/hudlayout.res'), ['HudGhostPanel'])!;
     expect([kvGet(el, 'wide'), kvGet(el, 'tall')]).toEqual(['700', '310']);
+  });
+});
+
+describe('the spawn panel drawn from its file (plan task G2)', () => {
+  const K = 2.25;
+  const GHOST = { ...DEFAULT_PREVIEW, infected: 'ghost' as const };
+  function calls(design: ReturnType<typeof validateDesign>, state: PreviewState = GHOST) {
+    _setImageFactory((url) => ({ src: url, complete: true, naturalWidth: 128, naturalHeight: 128, onload: null, onerror: null }) as unknown as HTMLImageElement);
+    const out: { m: string; a: unknown[]; fill: string }[] = [];
+    const t: Record<string | symbol, unknown> = {
+      fillStyle: '', strokeStyle: '', font: '', textAlign: 'left', textBaseline: 'alphabetic', globalAlpha: 1, lineWidth: 1,
+      canvas: { width: 1920, height: 1080, getContext: () => null },
+      measureText: (s: string) => ({ width: s.length * 10 }),
+    };
+    for (const m of ['clearRect', 'fillRect', 'strokeRect', 'fillText', 'drawImage', 'putImageData', 'beginPath', 'rect', 'clip', 'arc', 'stroke',
+      'fill', 'save', 'restore', 'setLineDash', 'moveTo', 'lineTo', 'closePath', 'roundRect']) t[m] = () => {};
+    const ctx = new Proxy(t, {
+      get: (o, k) => (typeof o[k] === 'function'
+        ? (...a: unknown[]) => { out.push({ m: String(k), a, fill: String(o.fillStyle) }); return (o[k] as (...x: unknown[]) => unknown)(...a); }
+        : o[k]),
+      set: (o, k, v) => { o[k] = v; return true; },
+    }) as unknown as CanvasRenderingContext2D;
+    drawHud(ctx, 1920, 1080, design, 'infected', null, undefined, { state });
+    _setImageFactory(null);
+    return out;
+  }
+  const texts = (c: { m: string; a: unknown[]; fill: string }[]) => c.filter((x) => x.m === 'fillText');
+  const text = (c: { m: string; a: unknown[]; fill: string }[], s: string) => texts(c).find((x) => x.a[0] === s);
+
+  beforeEach(() => { _resetAssetCache(); });
+
+  it('draws the class, the title and the two warnings in the panel\'s Text and Warning colours (r3-a)', () => {
+    const d = validateDesign({ v: 1, elements: { ghostPanel: { keys: { WhiteText: '0 255 255 255', RedText: '255 255 0 255' } } } });
+    const all = calls(d);
+    expect(text(all, 'HUNTER')!.fill).toBe('rgba(0,255,255,1)');
+    expect(text(all, 'Choose Spawn Location')!.fill).toBe('rgba(0,255,255,1)');
+    expect(text(all, "Can't spawn here")!.fill).toBe('rgba(255,255,0,1)');
+    expect(text(all, 'This is a restricted area')!.fill).toBe('rgba(255,255,0,1)');
+  });
+
+  it('draws the stock colours when the panel keeps its file ones: grey text, red warnings (b13 ghost.png)', () => {
+    const all = calls(validateDesign({ v: 1 }));
+    expect(text(all, 'HUNTER')!.fill).toBe('rgba(192,192,192,1)');
+    expect(text(all, "Can't spawn here")!.fill).toBe('rgba(246,5,5,1)');
+  });
+
+  it('puts the lines, the class picture and the box where the file says, as r3-a measured', () => {
+    const d = validateDesign({ v: 1, children: { ghostPanel: { ClassName: { x: 150 }, ClassImage: { x: 240, y: 20, w: 60, h: 60 } } } });
+    const r = elementRect(d, 'ghostPanel', d.aspect);
+    const all = calls(d, { ...GHOST, siClass: 'smoker' });
+    // The panel at c-175, c10: about 566, 562.5 px. SMOKER's ink starts at x 906 in r3-a (the text origin plus the glyph's bearing).
+    expect(Math.abs(r.x * K - 566.25)).toBeLessThanOrEqual(0.5);
+    // The origin, 150 units in: 903.75 px, the ink 2 px later.
+    expect(Math.abs((text(all, 'SMOKER')!.a[1] as number) - 903.75)).toBeLessThanOrEqual(1);
+    // The lines at x 95 units: 780 px, ink from x 781 in r3-a.
+    expect(Math.abs((text(all, 'Choose Spawn Location')!.a[1] as number) - 780)).toBeLessThanOrEqual(1);
+    const pic = all.find((x) => x.m === 'drawImage' && (x.a[0] as HTMLImageElement).src === artUrl('icon/tip_smoker'))!;
+    expect(pic.a.slice(1)).toEqual([(r.x + 240) * K, (r.y + 20) * K, 60 * K, 60 * K]);
+  });
+
+  it('draws the rounded box in its colour at the Background block (x 589 to 1331, y 573 to 820 px in b13 ghost.png)', () => {
+    const d = validateDesign({ v: 1, children: { ghostPanel: { Background: { keys: { bgcolor_override: '0 0 128 200' } } } } });
+    const all = calls(d);
+    const box = all.find((x) => x.m === 'roundRect')!.a as number[];
+    // The game's box: dark from x 589 (x 588 partly) to 1330, y 573 to 819.
+    for (const [got, want] of [[box[0], 588.75], [box[1], 573.75], [box[2], 742.5], [box[3], 247.5]]) expect(Math.abs(got - want)).toBeLessThanOrEqual(1);
+    expect(all.some((x) => x.m === 'fill' && x.fill === `rgba(0,0,128,${200 / 255})`)).toBe(true);
+  });
+
+  it('shows only while you are a ghost, and is picked only then', () => {
+    const d = validateDesign({ v: 1 });
+    expect(text(calls(d, DEFAULT_PREVIEW), 'HUNTER')).toBeUndefined();
+    expect(text(calls(d, { ...DEFAULT_PREVIEW, infected: 'dead' }), 'HUNTER')).toBeUndefined();
+    const r = elementRect(d, 'ghostPanel', d.aspect);
+    expect(hitTest(d, 'infected', r.x + r.w - 20, r.y + 20, GHOST)).toBe('ghostPanel');
+    expect(hitTest(d, 'infected', r.x + r.w - 20, r.y + 20, DEFAULT_PREVIEW)).not.toBe('ghostPanel');
+  });
+
+  it('scales every piece with the element', () => {
+    const d = validateDesign({ v: 1, elements: { ghostPanel: { scale: 2 } } });
+    const r = elementRect(d, 'ghostPanel', d.aspect);
+    const pic = calls(d).find((x) => x.m === 'drawImage' && (x.a[0] as HTMLImageElement).src === artUrl('icon/tip_hunter'))!;
+    expect(pic.a.slice(1)).toEqual([(r.x + 30) * K, (r.y + 20) * K, 170 * K, 170 * K]);
   });
 });

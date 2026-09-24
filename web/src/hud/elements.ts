@@ -38,6 +38,12 @@ export interface HudElement {
   props: Prop[];
   /** Keys of the element's own hudlayout.res block the game reads (slice 2.3 fills them). */
   keys?: KeyDef[];
+  /**
+   * An infected element the game shows only in these states of yours (the
+   * spawn panel only as a ghost): the preview draws it, and a click picks
+   * it, only when the page shows one of them. Layers reaches it always.
+   */
+  shownIn?: ('alive' | 'ghost' | 'dead')[];
 }
 
 /**
@@ -157,7 +163,7 @@ export const ELEMENTS: HudElement[] = [
    * WhiteText cyan, RedText yellow), and a line's own colour is ignored (G2).
    */
   { id: 'ghostPanel', label: 'Spawn / ghost panel', side: 'infected', key: 'HudGhostPanel', move: true, resize: 'scale',
-    children: ['resource/ui/hudghostpanel.res'], props: ['visible'],
+    children: ['resource/ui/hudghostpanel.res'], props: ['visible'], shownIn: ['ghost'],
     keys: [
       { key: 'WhiteText', label: 'Text colour', type: 'colour', unsetLabel: 'File colour',
         evidence: 'client.dll CHudGhostPanel run: m_clrWhite|WhiteText; probe G1, probe-phase2-rest/r3/shots/r3/r3-a.png (cyan lines)',

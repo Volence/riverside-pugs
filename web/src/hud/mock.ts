@@ -16,10 +16,10 @@ import { ELEMENTS, elementById, type HudElement } from './elements';
 import type { Guide } from './guides';
 import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHasElement, pcGet, MARKER_PX_PER_UNIT, NOTICE_BOX_TEXTURE } from './build';
 import { baseOf } from './base';
-import { kvFind, kvGet } from './kv';
+import { kvFind, kvGet, type KvNode } from './kv';
 import { SCREEN_H, parseSize, parsePos, screenW } from './units';
 import { PROGRESS_LABEL, paintLinearOver, drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
-import { normaliseMaterial, HEALING_ICON, CROSSHAIR_OPEN } from './art';
+import { normaliseMaterial, HEALING_ICON, CROSSHAIR_OPEN, tipImage } from './art';
 import { barGeometry, clampBarKeys } from './progress';
 import { canvasFont, fontCell, importedFace, loadFace } from './fonts';
 import { drawArt } from '../crosshair/model';
@@ -71,6 +71,11 @@ function rectFor(design: HudDesign, id: string): Rect & { visible: boolean } {
   return elementRect(design, id, design.aspect);
 }
 
+/** Whether the preview shows an element in the page's state: an infected one the game shows only as a ghost, say (HudElement.shownIn). */
+export function shownInState(el: HudElement, state?: SurvivorState | PreviewState): boolean {
+  return !el.shownIn || el.shownIn.includes(previewOf(state).infected);
+}
+
 /** Card 4 shows only while spectating a full team: never drawn, never a target. */
 export const TEAM_CARDS = 3;
 
@@ -78,11 +83,11 @@ export const TEAM_CARDS = 3;
  *  inside a larger container (the crosshair inside the whole screen, say)
  *  stays selectable. In Free the teammates' container covers the screen, so
  *  there the three drawn cards are the targets instead of the container. */
-export function hitTest(design: HudDesign, side: Side, ux: number, uy: number): string | null {
+export function hitTest(design: HudDesign, side: Side, ux: number, uy: number, state?: SurvivorState | PreviewState): string | null {
   let best: { id: string; area: number } | null = null;
   for (const el of visibleElements(side, design)) {
     const r = rectFor(design, el.id);
-    if (!r.visible) continue;
+    if (!r.visible || !shownInState(el, state)) continue;
     const targets = elementTargets(design, el.id, r);
     for (const t of targets) {
       if (!inside(t, ux, uy)) continue;
@@ -797,13 +802,105 @@ function paintGameCrosshair(ctx: CanvasRenderingContext2D, pxW: number, pxH: num
   ctx.drawImage(img, pxW / 2 - s / 2, pxH / 2 - s / 2, s, s);
 }
 
-function paintGhostPanel(ctx: CanvasRenderingContext2D, r: Rect) {
-  ctx.fillStyle = 'rgba(0,0,0,0.4)';
-  ctx.fillRect(r.x, r.y, r.w, r.h);
-  ctx.textAlign = 'center';
-  text(ctx, 'You will spawn as a', r.x + r.w / 2, r.y + r.h / 2 - 8, 13, '#e8e8e8');
-  text(ctx, 'Hunter in 12', r.x + r.w / 2, r.y + r.h / 2 + 12, 13, '#e8e8e8');
-  ctx.textAlign = 'left';
+const GHOST = 'resource/ui/hudghostpanel.res';
+/**
+ * PaintBackgroundType 2's corner, in HUD units: the stock box's corner
+ * curves over about 7 px at 1080p
+ * (/home/volence/l4d/hud/probe-phase2/b13/b13-stock/infected/ghost.png,
+ * x 589 to 596 along its top rows).
+ */
+const ROUNDED_CORNER = 7 / 2.25;
+
+/**
+ * A panel's box as VGUI paints it: bgcolor_override over the scene in
+ * linear light (the stock ghost box, 0 0 0 at 245 over 183 217 233, reads
+ * 35 45 50 in b13 ghost.png, which only a linear blend gives), with rounded
+ * corners for PaintBackgroundType 2.
+ */
+function paintPanelBox(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, box: Rect, k: number) {
+  const colour = pcGet(n, 'bgcolor_override');
+  if (colour === undefined) return;
+  const rounded = pcGet(n, 'PaintBackgroundType') === '2';
+  const fill = (c: CanvasRenderingContext2D) => {
+    c.fillStyle = colourOf(design, colour);
+    if (rounded && typeof c.roundRect === 'function') { c.beginPath(); c.roundRect(box.x, box.y, box.w, box.h, ROUNDED_CORNER * k); c.fill(); }
+    else c.fillRect(box.x, box.y, box.w, box.h);
+  };
+  paintLinearOver(ctx, box, fill, () => fill(ctx));
+}
+
+/**
+ * One of a status panel's labels: in its file font, at its place, its cell
+ * at the top for a north alignment and centred otherwise, as drawLabel
+ * (render.ts) places a Label, in the colour game code gives it.
+ */
+function paintPanelLabel(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, box: Rect, k: number, s: string, colour: string, clip: Rect, onAsset?: () => void) {
+  const cell = setFont(ctx, design, pcGet(n, 'font') ?? '', k, onAsset);
+  const align = (pcGet(n, 'textAlignment') ?? 'west').toLowerCase();
+  let x = box.x;
+  if (align.includes('east')) { ctx.textAlign = 'right'; x = box.x + box.w; }
+  else if (align.includes('center')) { ctx.textAlign = 'center'; x = box.x + box.w / 2; }
+  else ctx.textAlign = 'left';
+  const top = align.startsWith('north') ? box.y : align.startsWith('south') ? box.y + box.h - cell.cell : box.y + (box.h - cell.cell) / 2;
+  ctx.fillStyle = colour;
+  fillFontText(ctx, cell, s, x, top + cell.ascent, top, clip);
+}
+
+/** A block of a status panel file, in canvas pixels inside `r`, from the generated tree (so already scaled). */
+function blockRect(n: KvNode, r: Rect, k: number, W: number): Rect {
+  return {
+    x: r.x + parsePos(pcGet(n, 'xpos') ?? '0', W) * k, y: r.y + parsePos(pcGet(n, 'ypos') ?? '0', SCREEN_H) * k,
+    w: parseSize(pcGet(n, 'wide') ?? '0', W) * k, h: parseSize(pcGet(n, 'tall') ?? '0', SCREEN_H) * k,
+  };
+}
+
+/** The class a ghost or a too-far panel shows: the page's, but a Tank is never a ghost, so the Hunter stands in. */
+const tipClass = (state: PreviewState): 'hunter' | 'smoker' | 'boomer' => (state.siClass === 'tank' ? 'hunter' : state.siClass);
+
+/**
+ * The lines the spawn panel shows in its sample state, the one the stock
+ * ghost shot has (/home/volence/l4d/hud/probe-phase2/b13/b13-stock/infected/ghost.png):
+ * the class, "Choose Spawn Location" and a spawn refused in a restricted
+ * area. Code writes them (resource/left4dead_english.txt) and colours each
+ * with the panel's WhiteText or RedText (probe G1, r3-a); SpawnLabel and
+ * SpawnBind show only once you can spawn (r5-a), so the sample leaves them out.
+ */
+const GHOST_LINES: { name: string; text: (s: PreviewState) => string; red: boolean }[] = [
+  { name: 'ClassName', text: (s) => tipClass(s).toUpperCase(), red: false },
+  { name: 'SelectSpawn', text: () => 'Choose Spawn Location', red: false },
+  { name: 'Ready', text: () => "Can't spawn here", red: true },
+  { name: 'Info', text: () => 'This is a restricted area', red: true },
+];
+
+/**
+ * The spawn (ghost) panel drawn from its files (hudghostpanel.res and
+ * HudGhostPanel's two colour keys, through buildTrees), only while you are
+ * a ghost: the backdrop box (paintPanelBox), the class picture (tip_<class>,
+ * stretched as scaleImage 1 has it) and the sample lines. Clipped to the
+ * element, as VGUI clips a panel's children.
+ */
+function paintGhostPanel(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view: HudView = {}) {
+  const state = previewOf(view.state);
+  const trees = buildTrees(design);
+  const nodes = trees(GHOST);
+  const layout = kvFind(trees('scripts/hudlayout.res'), ['HudGhostPanel']);
+  const white = colourOf(design, (layout && pcGet(layout, 'WhiteText')) ?? '255 255 255 255');
+  const red = colourOf(design, (layout && pcGet(layout, 'RedText')) ?? '255 0 0 255');
+  const W = screenW(design.aspect);
+  const shown = (name: string) => { const n = kvFind(nodes, [name]); return n && pcGet(n, 'visible') !== '0' ? n : undefined; };
+  clipToRect(ctx, r, () => {
+    ctx.save();
+    const bg = shown('Background');
+    if (bg) paintPanelBox(ctx, design, bg, blockRect(bg, r, k, W), k);
+    const pic = shown('ClassImage');
+    const img = pic && artImage(tipImage(tipClass(state)), onAsset);
+    if (pic && img) { const b = blockRect(pic, r, k, W); ctx.drawImage(img, b.x, b.y, b.w, b.h); }
+    for (const line of GHOST_LINES) {
+      const n = shown(line.name);
+      if (n) paintPanelLabel(ctx, design, n, blockRect(n, r, k, W), k, line.text(state), line.red ? red : white, r, onAsset);
+    }
+    ctx.restore();
+  });
 }
 
 function paintTankPanel(ctx: CanvasRenderingContext2D, r: Rect) {
@@ -962,7 +1059,7 @@ export function drawHud(
 
     const r: Rect = { x: u.x * k, y: u.y * k, w: u.w * k, h: u.h * k };
     const paint = PAINTERS[el.id];
-    if (!paint) continue;
+    if (!paint || !shownInState(el, view.state)) continue;
 
     if (hidden) {
       ctx.save();

@@ -131,6 +131,12 @@ EQUIP = {
     # not a weapon either: the infected card's dead skull, drawn by client.dll at SkullIconPlacement
     # (the name icon_skull sits beside that block's name in its strings; probe Q19)
     'icon/skull': 'icon_skull',
+    # the spawn panel's ClassImage: client.dll sets tip_<class> by class (its CHudGhostPanel string run names
+    # tip_smoker, tip_hunter, tip_boomer), cells of vgui/tipgraphic (probe G4, probe-phase2-rest/r3/shots/r3/r3-a.png);
+    # the too-far panel's SurvivorsImage draws the same class picture, not its file's tip_crouch (r6/shots/r6/r6-a.png)
+    'icon/tip_hunter': 'tip_hunter',
+    'icon/tip_smoker': 'tip_smoker',
+    'icon/tip_boomer': 'tip_boomer',
 }
 # The stock HUD's faces: the name clientscheme.res gives each -> its vfont
 # in the install and the file it is written to here. The name must be the one

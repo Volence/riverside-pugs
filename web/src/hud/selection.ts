@@ -92,7 +92,7 @@ const plain = ({ x, y, w, h }: Box): Box => ({ x, y, w, h });
 const drawnCards = (design: HudDesign): Box[] => teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).map(plain);
 
 export function hitAt(design: HudDesign, side: Side, state: State, ux: number, uy: number): Hit {
-  const element = hitTest(design, side, ux, uy);
+  const element = hitTest(design, side, ux, uy, state);
   if (!element || !panelChildren(element)) return { element, card: null, child: null };
   const piece = childAt(design, state, ux, uy, element);
   // Only a panel repeated per card has a card level; a single panel's piece is in its one box.

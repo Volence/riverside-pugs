@@ -66,6 +66,15 @@ export const CROSSHAIR_OPEN = 'icon/pz_crosshair_open';
  */
 export const SKULL_ICON = 'icon/skull';
 
+/**
+ * The spawn panel's class picture: code sets tip_<class> on ClassImage (the
+ * CHudGhostPanel string run names tip_smoker, tip_hunter, tip_boomer), a
+ * 128 x 128 cell of vgui/tipgraphic that mod_textures.txt cuts; the too-far
+ * panel draws the same picture (probe Z1, probe-phase2-rest/r6/shots/r6/r6-a.png).
+ * No Tank: a Tank is never a ghost.
+ */
+export const tipImage = (cls: 'hunter' | 'smoker' | 'boomer'): string => `icon/tip_${cls}`;
+
 /** The infected card's class icon, which code sets on PlayerImage: hud/ZombieTeamImage_<class>. */
 export const zombieTeamImage = (cls: string): string => `vgui/hud/zombieteamimage_${cls}`;
 
@@ -105,6 +114,8 @@ export const NEEDED_MATERIALS: readonly string[] = [
   SKULL_ICON,
   // The use/heal bar's AwardIcon (progressbar.res "icon" "icon_healing", a cell of vgui/hud/iconsheet).
   HEALING_ICON,
+  // The spawn and too-far panels' class picture (tip_<class>, cells of vgui/tipgraphic).
+  tipImage('hunter'), tipImage('smoker'), tipImage('boomer'),
   ...ITEM_ICONS,
   ...EQUIP_ICONS,
 ];

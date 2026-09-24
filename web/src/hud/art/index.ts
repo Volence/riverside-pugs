@@ -14,6 +14,9 @@ export const ART: Record<string, string> = {
   'icon/item/pipebomb': 'icon-item-pipebomb.png',
   'icon/pz_crosshair_open': 'icon-pz_crosshair_open.png',
   'icon/skull': 'icon-skull.png',
+  'icon/tip_boomer': 'icon-tip_boomer.png',
+  'icon/tip_hunter': 'icon-tip_hunter.png',
+  'icon/tip_smoker': 'icon-tip_smoker.png',
   'vgui/healthbar_green': 'vgui-healthbar_green.png',
   'vgui/healthbar_grey': 'vgui-healthbar_grey.png',
   'vgui/healthbar_orange': 'vgui-healthbar_orange.png',
@@ -79,6 +82,9 @@ export const EQUIP_ICON_SIZE: Record<string, [number, number]> = {
   'icon/equip/pumpshotgun': [192, 64],
   'icon/healing': [64, 64],
   'icon/skull': [64, 64],
+  'icon/tip_boomer': [128, 128],
+  'icon/tip_hunter': [128, 128],
+  'icon/tip_smoker': [128, 128],
 };
 
 // The stock text faces: the name clientscheme.res gives each -> its TrueType file in this folder.
@@ -101,4 +107,4 @@ export const FONT_METRICS: Record<string, FontMetrics> = {
   'Verdana': { unitsPerEm: 2048, winAscent: 2059, winDescent: 430 },
 };
 
-export const ART_TOTAL_BYTES = 643242;
+export const ART_TOTAL_BYTES = 683059;
