@@ -124,7 +124,12 @@ export function analyzeRound(
     const fids = windows.map((w) => w.fidelity);
     const scoreable = windows.filter((w) => w.travel >= TUNING.MIN_TRAVEL);
     const hidden = hiddenMetrics(frames, slot, prior, los);
-    hiddenClips.set(slot, pickClips(hidden.windows, (w) => w.lagFidelity));
+    // Clips come from the same scoreable windows as fidSum/scoreable above,
+    // not every hidden window: a window under MIN_TRAVEL never contributed to
+    // the score, so it should never become a clip either, however high its
+    // lagFidelity.
+    const hiddenScoreable = hidden.windows.filter((w) => w.travel >= TUNING.MIN_TRAVEL);
+    hiddenClips.set(slot, pickClips(hiddenScoreable, (w) => w.lagFidelity));
     metrics.set(slot, {
       fidMax: fids.length ? Math.max(...fids) : 0,
       fidP95: p95(fids),
