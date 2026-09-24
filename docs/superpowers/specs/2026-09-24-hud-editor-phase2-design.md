@@ -325,7 +325,7 @@ Items 13, 16, 20 to 24, 26, 27 and 35 re-marked after plan task V3 (in-game evid
 | 24 | voice list, own mic | **Done** for your microphone (move, size, picture upload; M-verify). Voice lists: move and hide only, never seen (they list other players); the voice list row keys and the teammate talking icon upload (`voice_player`) wait on gate P2 (a second player talking), closed |
 | 25 | server (SourceMod) menu | **Open**, deferred (section 6) |
 | 26 | vote panel | **Done** (move, hide, background colour; M-verify) |
-| 27 | minor panels | kill notices **done** incl. text size and alignment (gate K5 passed, V1a); too-far box and Tank offer box **done** (gate Z3 passed, V1b; the preview draws the too-far box only); peril, leaving area, finale meter: move and hide only, never seen; captions, damage arcs, history: not started |
+| 27 | minor panels | kill notices **done** incl. text size and alignment (gate K5 passed, V1a); too-far box and Tank offer box **done** (gate Z3 passed, V1b; the preview draws the too-far box only); peril, leaving area, finale meter: move and hide only, never seen; captions, damage arcs, history: not started. The hard hide of all nine slice 2.5 to 2.8 elements that show with one client was seen in game against a same-steps control (`/home/volence/l4d/hud/probe-phase2-rest/hide-verify/RESULTS.md`) |
 | 28 | kill feed | **Done** (removed) |
 | 29 | image tint on image children | **Partly done** (teammate splatter opacity); slices 2.1 to 2.4 add it wherever the game honours `drawColor` |
 | 30 | decoration rectangles | **Partly done** (card background child); `HudEdOwnBg` in 2.1; a general "add a rectangle" is deferred |
