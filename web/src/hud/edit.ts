@@ -820,3 +820,19 @@ export function resetSplatter(d: HudDesign, id: SplatterId): HudDesign {
   const c = splatChild(id);
   return c ? showChild(next, c.name, c.panel) : next;
 }
+
+/**
+ * Fit a single panel (your own health) to what it shows, or stop: sets or
+ * removes `elements[id].fit`, and the element entry itself when nothing
+ * else is left in it, so on then off gives back the elements exactly. The
+ * stored x/y stay as they are: fit re-places the panel inside an unchanged
+ * container. The teammate card keeps its own path.
+ */
+export function setFit(design: HudDesign, id: string, on: boolean): HudDesign {
+  const { fit: _old, ...rest } = design.elements[id] ?? {};
+  const elements = { ...design.elements };
+  if (on) elements[id] = { ...rest, fit: true };
+  else if (Object.keys(rest).length) elements[id] = rest;
+  else delete elements[id];
+  return { ...design, elements };
+}

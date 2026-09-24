@@ -26,7 +26,7 @@ import { baseOf, baseTree } from './base';
 import { elementById } from './elements';
 import { panelChild, panelFrame, elementRect, isFreeTeam, teamCardRects, type CardFrame } from './build';
 import { childRects, hiddenInState, type ChildRect, type PreviewState, type SurvivorState } from './render';
-import { childAt, hitTest, inside, panelBoxes, TEAM_CARDS, visibleElements, type Side } from './mock';
+import { childAt, elementTargets, hitTest, inside, panelBoxes, TEAM_CARDS, visibleElements, type Side } from './mock';
 import { childDef, panelChildren } from './children';
 import { kvFind, kvGet } from './kv';
 import { screenW, SCREEN_H } from './units';
@@ -224,7 +224,7 @@ function piecesIn(design: HudDesign, state: State, card: Box, panel: string): (B
 
 /** An element's targets on screen: the Free teammates are their three cards, anything else its own rect. */
 function sectionRects(design: HudDesign, id: string): Box[] {
-  return id === 'teamColumn' && isFreeTeam(design) ? drawnCards(design) : [plain(elementRect(design, id, design.aspect))];
+  return elementTargets(design, id, plain(elementRect(design, id, design.aspect))).map(plain);
 }
 
 /**
@@ -344,6 +344,11 @@ export function selectedIds(sel: Selection): string[] {
  */
 export function elementFrame(design: HudDesign, id: string): Box {
   if (id === 'teamColumn' && !isFreeTeam(design)) return unionBox(drawnCards(design))!;
+  // A fitted single panel (your own health) is framed by the panel it draws.
+  if (id !== 'teamColumn' && design.elements[id]?.fit) {
+    const [box] = panelBoxes(design, id);
+    if (box) return plain(box);
+  }
   return plain(elementRect(design, id, design.aspect));
 }
 

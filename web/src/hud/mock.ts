@@ -80,7 +80,7 @@ export function hitTest(design: HudDesign, side: Side, ux: number, uy: number): 
   for (const el of visibleElements(side, design)) {
     const r = rectFor(design, el.id);
     if (!r.visible) continue;
-    const targets = el.id === 'teamColumn' && isFreeTeam(design) ? teamCardRects(design, design.aspect).slice(0, TEAM_CARDS) : [r];
+    const targets = elementTargets(design, el.id, r);
     for (const t of targets) {
       if (!inside(t, ux, uy)) continue;
       const area = t.w * t.h;
@@ -88,6 +88,22 @@ export function hitTest(design: HudDesign, side: Side, ux: number, uy: number): 
     }
   }
   return best ? best.id : null;
+}
+
+/**
+ * Where an element is on screen for a click, a box select and a snap: the
+ * three drawn cards for the Free teammates (their container covers the
+ * screen), the fitted panel for a single panel that is fitted (your own
+ * health: fit re-places LocalPlayer inside an unchanged container, and the
+ * cut-away part of the container draws nothing), else the element's rect.
+ */
+export function elementTargets(design: HudDesign, id: string, r: Box = rectFor(design, id)): Box[] {
+  if (id === 'teamColumn') return isFreeTeam(design) ? teamCardRects(design, design.aspect).slice(0, TEAM_CARDS) : [r];
+  if (design.elements[id]?.fit) {
+    const boxes = panelBoxes(design, id);
+    if (boxes.length) return boxes;
+  }
+  return [r];
 }
 
 /**
@@ -177,8 +193,9 @@ function parentPanel(design: HudDesign, file: string, key: string, k: number): R
 
 /** The player's own health panel lives in LocalPlayer, which localplayerdisplay.res places inside the element. */
 function paintOwnHealth(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
-  const p = parentPanel(design, 'resource/ui/hud/localplayerdisplay.res', 'LocalPlayer', k);
-  const local = { x: r.x + p.x, y: r.y + p.y, w: p.w, h: p.h };
+  // The same box the hit test and the outline use (panelBoxes), in canvas pixels.
+  const [p] = panelBoxes(design, 'ownHealth');
+  const local = { x: p.x * k, y: p.y * k, w: p.w * k, h: p.h * k };
   clipToRect(ctx, r, () => clipToRect(ctx, local, () => drawPanel(ctx, design, 'ownHealth', { x: local.x, y: local.y }, k, { onAsset })));
 }
 

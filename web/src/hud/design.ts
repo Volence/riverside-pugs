@@ -483,6 +483,11 @@ function element(id: string, raw: unknown, key: BaseKey): ElementOverride {
   }
   if (raw.dir === 'row' || raw.dir === 'column') out.dir = raw.dir;
   if (team) teamFields(raw, out, key);
+  // Your own health's fit rests on probe Q2 (B1 a): LocalPlayer must clip
+  // its children and paint nothing of its own, or a smaller panel would
+  // show or hide the wrong things. Kept only once that gate passes, and
+  // only as a real boolean; never added.
+  if (id === 'ownHealth' && typeof raw.fit === 'boolean' && probe('Q2')) out.fit = raw.fit;
   const c = colour(raw.color); if (c) out.color = c;
   const b = colour(raw.bg); if (b) out.bg = b;
   const keys = validKeys(elementById(id)?.keys, raw.keys);

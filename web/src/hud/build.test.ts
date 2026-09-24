@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { buildHud, elementRect, pcSet, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame, panelChild, panelFrame, writeKeys } from './build';
 import { parsePos, screenW } from './units';
-import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride } from './design';
-import { parseKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
+import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride, type ChildOverride } from './design';
+import { parseKv, writeKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { elementById } from './elements';
 import { PANEL_FILE, childRects } from './render';
+import { panelBoxes } from './mock';
 import { crosshairFiles } from '../crosshair/vpk';
 import { decodeVTF } from '../vpk/read';
 import { TEX } from '../crosshair/draw';
@@ -1427,5 +1428,66 @@ describe('the generator, per panel', () => {
     writeKeys(b, { xpos: '10' });
     const lines = (b.value as KvNode[]).filter((n) => n.key === 'xpos');
     expect(lines.map((n) => [n.value, n.cond])).toEqual([['39', '[$OSX]'], ['10', '[$WINDOWS]']]);
+  });
+});
+
+describe('fitting your own health panel', () => {
+  const OWN = 'resource/ui/hud/localplayerpanel.res';
+  const DISPLAY = 'resource/ui/hud/localplayerdisplay.res';
+  const rectOf = (n: KvNode) => ['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(n, k));
+  const own = (o: ElementOverride, kids: Record<string, ChildOverride> = {}, preset: 'stock' | 'modern' = 'stock') =>
+    design({ preset, elements: { ownHealth: o }, children: Object.keys(kids).length ? { ownHealth: kids } : {} });
+
+  it('keeps what the stock panel shows: content, the scratches and the crouch icon, cut to LocalPlayer', () => {
+    const t = buildTrees(own({ fit: true }));
+    expect(rectOf(kvFind(t(DISPLAY), ['LocalPlayer'])!)).toEqual(['0', '32', '130', '53']);
+  });
+  it('shrinks to the spec box once the decoration and the crouch icon are hidden', () => {
+    const hidden = { HealthbarTextureTop: { visible: false }, HealthbarTextureBottom: { visible: false } };
+    expect(rectOf(kvFind(buildTrees(own({ fit: true }, hidden))(DISPLAY), ['LocalPlayer'])!)).toEqual(['0', '32', '122', '47']);
+    expect(rectOf(kvFind(buildTrees(own({ fit: true }, { ...hidden, DuckingIcon: { visible: false } }))(DISPLAY), ['LocalPlayer'])!))
+      .toEqual(['0', '48', '122', '31']);
+  });
+  it('fits Modern to its content and stretches its fill to match', () => {
+    const t = buildTrees(own({ fit: true }, {}, 'modern'));
+    expect(rectOf(kvFind(t(DISPLAY), ['LocalPlayer'])!)).toEqual(['3', '3', '114', '28']);
+    expect(rectOf(kvFind(t(OWN), ['ModBg'])!)).toEqual(['0', '0', '114', '28']);
+  });
+  it('keeps the file panel when nothing is left to fit to', () => {
+    const all = Object.fromEntries(['Head', 'Health', 'HealthIcon', 'HealthNumber', 'HealthbarTextureTop', 'HealthbarTextureBottom', 'DuckingIcon']
+      .map((n) => [n, { visible: false }]));
+    expect(rectOf(kvFind(buildTrees(own({ fit: true }, all))(DISPLAY), ['LocalPlayer'])!)).toEqual(['0', '0', '130', '85']);
+  });
+  for (const scale of [1, 2]) {
+    it(`moves nothing on screen by fitting alone, at scale ${scale}`, () => {
+      const at = (d: HudDesign) => {
+        const [box] = panelBoxes(d, 'ownHealth');
+        return Object.fromEntries(childRects(d, 'ownHealth', box, 1)
+          .filter((r) => r.name !== 'Incapacitated').map((r) => [r.name, [r.x, r.y, r.w, r.h]]));
+      };
+      expect(at(own({ fit: true, scale }))).toEqual(at(own({ scale })));
+    });
+  }
+  it('squares the down picture at the panel width with its band centred', () => {
+    const n = kvFind(buildTrees(own({ fit: true }))(OWN), ['Incapacitated'])!;
+    expect(rectOf(n)).toEqual(['0', '-22', '130', '130']);
+  });
+  it('shifts the PC line of a conditional key and leaves the Mac one', () => {
+    const block = kvFind(buildTrees(own({ fit: true }))(OWN), ['HealthNumber'])!;
+    expect(kvGet(block, 'xpos')).toBe('36');
+    expect(kvGet(block, 'ypos')).toBe('16');
+    const mac = (block.value as KvNode[]).find((n) => n.key === 'xpos' && n.cond === '[$OSX]');
+    expect(mac?.value).toBe('39');
+  });
+  it('leaves the container block alone', () => {
+    // layoutPass always parses hudlayout.res, so the file ships either way; the block must not differ.
+    const block = (d: HudDesign) => writeKv([kvFind(tree(buildHud(d), 'scripts/hudlayout.res'), ['CHudLocalPlayerDisplay'])!]);
+    expect(block(own({ fit: true, x: 20, y: 380 }))).toBe(block(own({ x: 20, y: 380 })));
+  });
+  it('reads a piece back in the unfitted frame, as the side panel shows it', () => {
+    expect(panelChild(own({ fit: true }), 'ownHealth', 'Head')).toMatchObject({ x: 0, y: 54, w: 25, h: 25 });
+  });
+  it('leaves an unfitted panel exactly as the file has it', () => {
+    expect(text(buildHud(own({ x: 20, y: 380 })), DISPLAY)).toBeUndefined();
   });
 });

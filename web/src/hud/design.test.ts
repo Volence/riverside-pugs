@@ -460,6 +460,17 @@ describe('children of every registered panel', () => {
       for (const q of ['Q1', 'Q3', 'Q5', 'Q8'] as const) _setProbe(q, null);
     }
   });
+  it('keeps your own health fit only once probe Q2 passes, and never adds it', () => {
+    const raw = { v: 1, elements: { ownHealth: { fit: true, x: 20 } } };
+    expect(validateDesign(raw).elements.ownHealth).toEqual({ x: 20 });
+    expect(validateDesign({ v: 1 }).elements.ownHealth).toBeUndefined();
+    try {
+      _setProbe('Q2', true);
+      expect(validateDesign(raw).elements.ownHealth).toEqual({ x: 20, fit: true });
+      expect(validateDesign({ v: 1, elements: { ownHealth: { fit: 'yes' } } }).elements.ownHealth).toBeUndefined();
+      expect(validateDesign({ v: 1 }).elements.ownHealth).toBeUndefined();
+    } finally { _setProbe('Q2', null); }
+  });
   it('drops element keys no element declares yet', () => {
     expect(validateDesign({ v: 1, elements: { chat: { x: 5, keys: { foo: '1' } } } }).elements.chat).toEqual({ x: 5 });
   });

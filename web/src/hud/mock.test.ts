@@ -463,4 +463,22 @@ describe('panelBoxes', () => {
   it('gives nothing for a panel the registry does not have', () => {
     expect(panelBoxes(DEFAULT_DESIGN, 'chat')).toEqual([]);
   });
+  it("gives your own health's LocalPlayer inside the element, following the fit", () => {
+    const at = { ...structuredClone(DEFAULT_DESIGN), elements: { ownHealth: { x: 20, y: 380 } } };
+    const r = elementRect(at, 'ownHealth', at.aspect);
+    expect(panelBoxes(at, 'ownHealth')).toEqual([{ x: r.x, y: r.y, w: 130, h: 85 }]);
+    const fitted = { ...at, elements: { ownHealth: { x: 20, y: 380, fit: true } } };
+    expect(panelBoxes(fitted, 'ownHealth')).toEqual([{ x: r.x, y: r.y + 32, w: 130, h: 53 }]);
+  });
+});
+
+describe('hitTest on a fitted own health panel', () => {
+  it('misses the empty top of the container that fit cut away, and hits the panel', () => {
+    const d = { ...structuredClone(DEFAULT_DESIGN), elements: {} };
+    const r = elementRect(d, 'ownHealth', d.aspect);
+    const fitted = { ...d, elements: { ownHealth: { fit: true } } };
+    expect(hitTest(d, 'survivor', r.x + 5, r.y + 10)).toBe('ownHealth');
+    expect(hitTest(fitted, 'survivor', r.x + 5, r.y + 10)).toBeNull();
+    expect(hitTest(fitted, 'survivor', r.x + 5, r.y + 40)).toBe('ownHealth');
+  });
 });

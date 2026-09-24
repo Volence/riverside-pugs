@@ -21,7 +21,7 @@ import {
   baseTeam, contentBox, WEAPON_KEYS, WEAPON_BOX_COLOUR, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir,
   type WeaponNumKey,
 } from './design';
-import { panelChildren, panelOfFile, childDef, TEAM_PANEL, type ChildDef } from './children';
+import { panelChildren, panelOfFile, childDef, TEAM_PANEL, OWN_PANEL, type ChildDef, type PanelChildren } from './children';
 import { crosshairFiles } from '../crosshair/vpk';
 import {
   SPLATTERS, SPLAT_STAND_IN, splatterDef, splatterActive, splatterImageKey, splatterMaterial, fadePixels, type SplatterDef, type SplatterId,
@@ -409,23 +409,9 @@ function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: C
  */
 function fitStateArt(nodes: KvNode[], edits: Record<string, ChildOverride>, card: { w: number; h: number }) {
   const at = (name: string) => kvFind(nodes, [name]);
-  const square = (name: string, side: number) => {
-    const n = at(name);
-    if (!n) return undefined;
-    const e = edits[name] ?? {};
-    const s = e.w ?? side;
-    kvSet(n, 'wide', String(Math.round(s))); kvSet(n, 'tall', String(Math.round(s)));
-    return { n, e, s };
-  };
-  const BAND_CENTRE = 95 / 256;
-  for (const name of ['Incapacitated', 'Dead']) {
-    const piece = square(name, card.w);
-    if (!piece) continue;
-    if (piece.e.x === undefined) kvSet(piece.n, 'xpos', '0');
-    if (piece.e.y === undefined) kvSet(piece.n, 'ypos', String(Math.round(card.h / 2 - BAND_CENTRE * piece.s)));
-  }
+  for (const name of ['Incapacitated', 'Dead']) squareBand(nodes, edits, name, card);
   const voice = Math.min(card.h, 16);
-  const voicePiece = square('Voice', voice);
+  const voicePiece = squarePiece(nodes, edits, 'Voice', voice);
   if (voicePiece) {
     if (voicePiece.e.x === undefined) kvSet(voicePiece.n, 'xpos', String(Math.round(card.w - voicePiece.s)));
     if (voicePiece.e.y === undefined) kvSet(voicePiece.n, 'ypos', '0');
@@ -438,11 +424,125 @@ function fitStateArt(nodes: KvNode[], edits: Record<string, ChildOverride>, card
     if (e.w === undefined) kvSet(splatter, 'wide', String(card.w));
     if (e.h === undefined) kvSet(splatter, 'tall', String(Math.round(card.w / 2)));
   }
-  const fill = at('ModBg');
-  if (fill) {
-    kvSet(fill, 'xpos', '0'); kvSet(fill, 'ypos', '0');
-    kvSet(fill, 'wide', String(card.w)); kvSet(fill, 'tall', String(card.h));
+  stretchFill(nodes, card);
+}
+
+/** A state picture squared at `side`, or the player's own width when they sized it. */
+function squarePiece(nodes: KvNode[], edits: Record<string, ChildOverride>, name: string, side: number) {
+  const n = kvFind(nodes, [name]);
+  if (!n) return undefined;
+  const e = edits[name] ?? {};
+  const s = e.w ?? side;
+  kvSet(n, 'wide', String(Math.round(s))); kvSet(n, 'tall', String(Math.round(s)));
+  return { n, e, s };
+}
+
+/**
+ * The Down or Dead picture of a fitted panel, the band rule above: a square
+ * at the panel width, at x 0, its band (texture y ~95 of 256) on the
+ * panel's vertical centre. Shared by the teammate card and your own health.
+ */
+function squareBand(nodes: KvNode[], edits: Record<string, ChildOverride>, name: string, panel: { w: number; h: number }) {
+  const BAND_CENTRE = 95 / 256;
+  const piece = squarePiece(nodes, edits, name, panel.w);
+  if (!piece) return;
+  if (piece.e.x === undefined) kvSet(piece.n, 'xpos', '0');
+  if (piece.e.y === undefined) kvSet(piece.n, 'ypos', String(Math.round(panel.h / 2 - BAND_CENTRE * piece.s)));
+}
+
+/** Modern's ModBg, the fill that paints a whole panel, over the fitted panel exactly. */
+function stretchFill(nodes: KvNode[], panel: { w: number; h: number }) {
+  const fill = kvFind(nodes, ['ModBg']);
+  if (!fill) return;
+  kvSet(fill, 'xpos', '0'); kvSet(fill, 'ypos', '0');
+  kvSet(fill, 'wide', String(panel.w)); kvSet(fill, 'tall', String(panel.h));
+}
+
+/** Every top-level child moved up and left by `by`: the fit shift, on the lines the PC reads. */
+function shiftNodes(nodes: KvNode[], by: { x: number; y: number }) {
+  for (const n of nodes) {
+    if (typeof n.value === 'string') continue;
+    for (const [key, d] of [['xpos', by.x], ['ypos', by.y]] as const) {
+      const v = parseFloat(kvGet(n, key) ?? '');
+      if (Number.isFinite(v)) kvSet(n, key, String(v - d));
+    }
   }
+}
+
+/**
+ * The box a panel fits to: the union of its visible content children and
+ * of its visible `fitPlace: 'keep'` children, each keep piece cut to
+ * `frame` first (the file's own panel rect), so a decoration can never grow
+ * the panel past what the game showed before (plan decision 1). A piece cut
+ * to nothing counts nothing. Null when nothing is left. The teammate card
+ * has no keep pieces, so its box is contentBox's, as it always was.
+ */
+function fitBox(nodes: KvNode[], panel: PanelChildren, frame: Box | null): Box | null {
+  const content = panel.children.filter((c) => c.role === 'content').map((c) => c.name);
+  const boxes: Box[] = [];
+  const main = contentBox(nodes, content);
+  if (main) boxes.push(main);
+  for (const def of panel.children) {
+    if (def.fitPlace !== 'keep') continue;
+    const piece = contentBox(nodes, [def.name]);
+    if (!piece) continue;
+    const cut = frame ? intersect(piece, frame) : piece;
+    if (cut) boxes.push(cut);
+  }
+  if (!boxes.length) return null;
+  const x0 = Math.min(...boxes.map((b) => b.x)), y0 = Math.min(...boxes.map((b) => b.y));
+  const x1 = Math.max(...boxes.map((b) => b.x + b.w)), y1 = Math.max(...boxes.map((b) => b.y + b.h));
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+function intersect(a: Box, b: Box): Box | null {
+  const x0 = Math.max(a.x, b.x), y0 = Math.max(a.y, b.y);
+  const x1 = Math.min(a.x + a.w, b.x + b.w), y1 = Math.min(a.y + a.h, b.y + b.h);
+  return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+}
+
+/** A single panel's frame block as the base file has it (LocalPlayer: stock 0, 0, 130 x 85). */
+function baseFrameRect(design: HudDesign, panel: PanelChildren): Box | null {
+  if (!panel.frame || panel.frame === 'hudlayout') return null;
+  const n = kvFind(baseTree(baseOf(design), panel.frame.file), [panel.frame.block]);
+  if (!n) return null;
+  return { x: num(kvGet(n, 'xpos')), y: num(kvGet(n, 'ypos')), w: num(kvGet(n, 'wide')), h: num(kvGet(n, 'tall')) };
+}
+
+/** Your own health's fit box, on the panel file as the edits left it; the keep pieces are cut to the file's LocalPlayer. */
+function ownContent(work: Work, design: HudDesign): Box | null {
+  const frame = baseFrameRect(design, OWN_PANEL);
+  // The keep pieces are in the panel file's own frame, which starts at the
+  // frame block's top-left, so the cut is the frame's size at 0, 0.
+  return fitBox(work.tree(OWN_PANEL.file), OWN_PANEL, frame && { x: 0, y: 0, w: frame.w, h: frame.h });
+}
+
+/**
+ * Fit your own health panel (plan decisions 1 and 2). Every child shifts
+ * by the box's top-left and LocalPlayer, in localplayerdisplay.res, is
+ * placed at that same offset and sized to the box, so fitting alone moves
+ * nothing on screen. The container, hudlayout.res's
+ * CHudLocalPlayerDisplay, is not touched: a stored element position means
+ * the same with fit on and off, as the teammate card's container does.
+ * LocalPlayer is written unscaled: scalePass scales the whole file, since
+ * the element lists it. Probe Q2 (B1 a) showed LocalPlayer clips its
+ * children, which is what makes the smaller panel cut what it no longer
+ * covers.
+ */
+function fitOwn(work: Work, design: HudDesign) {
+  if (design.elements.ownHealth?.fit !== true) return;
+  const box = ownContent(work, design);
+  const frame = OWN_PANEL.frame !== 'hudlayout' ? OWN_PANEL.frame : undefined;
+  const block = frame && work.optional(frame.file, [frame.block]);
+  if (!box || !block) return;                                      // nothing to fit to: the file's panel stays
+  const nodes = work.tree(OWN_PANEL.file);
+  shiftNodes(nodes, box);
+  const size = { w: box.w, h: box.h };
+  squareBand(nodes, design.children.ownHealth ?? {}, 'Incapacitated', size);
+  stretchFill(nodes, size);
+  const base = baseFrameRect(design, OWN_PANEL) ?? { x: 0, y: 0, w: 0, h: 0 };
+  kvSet(block, 'xpos', String(base.x + box.x)); kvSet(block, 'ypos', String(base.y + box.y));
+  kvSet(block, 'wide', String(box.w)); kvSet(block, 'tall', String(box.h));
 }
 
 const CARD_BG = 'HudEdCardBg';
@@ -490,15 +590,9 @@ function fitTeam(work: Work, design: HudDesign) {
   if (!fit && !bg) return;
   const nodes = work.tree(CARD);
   let size = baseTeam(baseOf(design)).card;
-  const box = fit ? contentBox(nodes) : null;
+  const box = fit ? fitBox(nodes, TEAM_PANEL, null) : null;
   if (box) {
-    for (const n of nodes) {
-      if (typeof n.value === 'string') continue;
-      for (const [key, d] of [['xpos', box.x], ['ypos', box.y]] as const) {
-        const v = parseFloat(kvGet(n, key) ?? '');
-        if (Number.isFinite(v)) kvSet(n, key, String(v - d));
-      }
-    }
+    shiftNodes(nodes, box);
     size = { w: box.w, h: box.h };
     fitStateArt(nodes, design.children?.teamColumn ?? {}, size);
   }
@@ -507,13 +601,14 @@ function fitTeam(work: Work, design: HudDesign) {
 
 /**
  * A panel's fit rule: `content` measures the box fit shrinks the panel to,
- * on the panel file as childPass left it (panelWork keeps it for panelFrame,
+ * with the panel file as childPass left it (panelWork keeps it for panelFrame,
  * panelChild and teamLayout); `apply` is the rule's own fitPass step. One
  * entry per panel that can be fitted, keyed by panel id.
  */
-interface FitRule { content: (nodes: KvNode[]) => Box | null; apply: (work: Work, design: HudDesign) => void }
+interface FitRule { content: (work: Work, design: HudDesign) => Box | null; apply: (work: Work, design: HudDesign) => void }
 const FIT_RULES: Record<string, FitRule> = {
-  teamColumn: { content: (nodes) => contentBox(nodes), apply: fitTeam },
+  teamColumn: { content: (work) => fitBox(work.tree(CARD), TEAM_PANEL, null), apply: fitTeam },
+  ownHealth: { content: ownContent, apply: fitOwn },
 };
 
 /** Every panel's fit rule, in turn. */
@@ -682,10 +777,7 @@ function panelWork(design: HudDesign) {
     const work = new Work(baseOf(design));
     childPass(work, design);
     const boxes: Record<string, Box | null> = {};
-    for (const [id, rule] of Object.entries(FIT_RULES)) {
-      const panel = panelChildren(id);
-      boxes[id] = panel ? rule.content(work.tree(panel.file)) : null;
-    }
+    for (const [id, rule] of Object.entries(FIT_RULES)) boxes[id] = rule.content(work, design);
     fitPass(work, design);
     w = { work, boxes };
     PANEL_WORK.set(design, w);

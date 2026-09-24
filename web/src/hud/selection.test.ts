@@ -288,6 +288,15 @@ describe('what the canvas draws for a selection', () => {
     expect(elementFrame(D, 'chat')).toEqual(selectionBox(D, { kind: 'elements', ids: ['chat'] }));
   });
 
+  it('frames your own health by its fitted panel when fitted, else by its element', () => {
+    const d = { ...structuredClone(D), elements: { ownHealth: { x: 20, y: 380 } } };
+    expect(elementFrame(d, 'ownHealth')).toEqual(selectionBox(d, { kind: 'elements', ids: ['ownHealth'] }));
+    const r = elementFrame(d, 'ownHealth');
+    const fitted = { ...d, elements: { ownHealth: { x: 20, y: 380, fit: true } } };
+    expect(elementFrame(fitted, 'ownHealth')).toEqual(panelBoxes(fitted, 'ownHealth')[0]);
+    expect(elementFrame(fitted, 'ownHealth')).not.toEqual(r);
+  });
+
   it('frames each picked card where it is drawn, in Row as in Free', () => {
     const rects = teamCardRects(D, D.aspect).map(({ x, y, w, h }) => ({ x, y, w, h }));
     expect(selectionFrames(D, { kind: 'cards', cards: [0, 2] })).toEqual([rects[0], rects[2]]);

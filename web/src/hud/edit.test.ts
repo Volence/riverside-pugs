@@ -5,7 +5,7 @@ import {
   startsOf, moveChildren, placeChildren, scaleChildren, cornerFactor, anchorOf, alignChildren, setChildrenVisible, resetChildren,
   placeElement, moveElements, moveCards, alignElements, scaleElement, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
   ammoOnly, withImport, withPreset, hasLayoutEdits,
-  splatterKind, patchSplatter, withSplatterImage, resetSplatter, panelClamp, raiseChild,
+  splatterKind, patchSplatter, withSplatterImage, resetSplatter, panelClamp, raiseChild, setFit,
 } from './edit';
 import { buildHud, buildTrees } from './build';
 import { weaponSlots } from './weapons';
@@ -735,5 +735,19 @@ describe('child edits name their panel', () => {
     // A card background the build injected counts too: it sits at -2, so Send to back goes below it.
     const withBg = { ...d, styles: { panelBg: { kind: 'flat' as const } } };
     expect(raiseChild(withBg, ['Head'], 'back').children.teamColumn?.Head?.z).toBe(-3);
+  });
+});
+
+describe('setFit', () => {
+  it('turns fit on and off and gives back the elements exactly', () => {
+    const d = structuredClone(DEFAULT_DESIGN);
+    const on = setFit(d, 'ownHealth', true);
+    expect(on.elements.ownHealth).toEqual({ fit: true });
+    expect(setFit(on, 'ownHealth', false).elements).toEqual(d.elements);
+  });
+  it('keeps a moved panel where it was through the toggle', () => {
+    const d = { ...structuredClone(DEFAULT_DESIGN), elements: { ownHealth: { x: 20, y: 380 } } };
+    expect(setFit(d, 'ownHealth', true).elements.ownHealth).toEqual({ x: 20, y: 380, fit: true });
+    expect(setFit(setFit(d, 'ownHealth', true), 'ownHealth', false).elements).toEqual(d.elements);
   });
 });
