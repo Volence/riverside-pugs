@@ -18,7 +18,7 @@ import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHas
 import { baseOf } from './base';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H, parseSize, parsePos, screenW } from './units';
-import { PROGRESS_LABEL, drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
+import { PROGRESS_LABEL, paintLinearOver, drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
 import { normaliseMaterial, HEALING_ICON, CROSSHAIR_OPEN } from './art';
 import { barGeometry, clampBarKeys } from './progress';
 import { canvasFont, fontCell, importedFace, loadFace } from './fonts';
@@ -566,8 +566,11 @@ function paintKillNotices(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
       const y = r.y + ypos * k + (tall * k - bgTall) / 2;
       if (img) drawNineSlice(ctx, img, img.naturalWidth, img.naturalHeight, left - pad, y, textW + 2 * pad, bgTall, corner, src);
       else if (own?.kind === 'flat') {
-        ctx.fillStyle = colourOf(design, own.color ?? NOTICE_BOX_COLOUR);
-        ctx.fillRect(left - pad, y, textW + 2 * pad, bgTall);
+        // Blended in linear light, as the game does: 0 0 255 at 160 over
+        // 105 88 61 drew 62 50 210 (/home/volence/l4d/hud/probe-phase2-rest/k-verify/shots/k/k-f.png).
+        const box = { x: left - pad, y, w: textW + 2 * pad, h: bgTall };
+        const fill = (c: CanvasRenderingContext2D) => { c.fillStyle = colourOf(design, own.color ?? NOTICE_BOX_COLOUR); c.fillRect(box.x, box.y, box.w, box.h); };
+        paintLinearOver(ctx, box, fill, () => fill(ctx));
       }
     }
     ctx.fillStyle = colourOf(design, kvGet(n, 'fgcolor_override'));

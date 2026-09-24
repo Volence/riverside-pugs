@@ -6,7 +6,7 @@ import { elementById } from './elements';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { PROBES, _setProbe } from './probes';
-import { _setImageFactory, _resetAssetCache } from './render';
+import { _setImageFactory, _resetAssetCache, _setCanvasFactory } from './render';
 import { screenW } from './units';
 import { decodeVTF } from '../vpk/read';
 
@@ -213,5 +213,35 @@ describe('the kill notice box in the preview', () => {
     expect(all.filter((c) => c.m === 'fillRect' && (c.a[1] as number) >= r.y * 2.25 && (c.a[1] as number) < (r.y + r.h) * 2.25
       && (c.a[0] as number) < (r.x + r.w) * 2.25)).toEqual([]);
     expect(all.some((c) => c.m === 'fillText' && c.a[0] === NOTICE)).toBe(true);
+  });
+});
+
+describe('the flat notice box blends in linear light, as the game does', () => {
+  it('paints the box over the scene through the linear blend (k-verify k-f: 0 0 255 160 over 105 88 61 drew 62 50 210)', () => {
+    // An sRGB blend would give 39 33 183; the game's pixels are the linear-light blend.
+    const d = validateDesign({ v: 1, elements: { killNotices: { noticeBox: { kind: 'flat', color: '0 0 255 160' } } } });
+    const scratch: { m: string; a: unknown[]; fill: string }[] = [];
+    const off: Record<string, unknown> = { globalAlpha: 1, fillStyle: '' };
+    for (const m of ['translate', 'fillRect']) off[m] = (...a: unknown[]) => scratch.push({ m, a, fill: String(off.fillStyle) });
+    for (const m of ['drawImage', 'save', 'restore', 'fillText', 'beginPath', 'rect', 'clip', 'setTransform', 'scale', 'clearRect']) off[m] = () => {};
+    off.measureText = (t: string) => ({ width: t.length * 10 });
+    off.getImageData = (_x: number, _y: number, w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) });
+    off.putImageData = () => {};
+    _setCanvasFactory((w, h) => ({ width: w, height: h, getContext: () => off }) as unknown as HTMLCanvasElement);
+    const main: Record<string | symbol, unknown> = {
+      fillStyle: '', strokeStyle: '', font: '', textAlign: 'left', textBaseline: 'alphabetic', globalAlpha: 1, lineWidth: 1,
+      canvas: { width: 1920, height: 1080, getContext: () => null },
+      measureText: (t: string) => ({ width: t.length * 10 }),
+      getImageData: (_x: number, _y: number, w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+    };
+    const direct: string[] = [];
+    for (const m of ['clearRect', 'strokeRect', 'fillText', 'drawImage', 'putImageData', 'beginPath', 'rect', 'clip', 'arc', 'stroke',
+      'fill', 'save', 'restore', 'setLineDash', 'moveTo', 'lineTo', 'closePath', 'roundRect', 'setTransform', 'translate', 'scale']) main[m] = () => {};
+    main.fillRect = () => { direct.push(String(main.fillStyle)); };
+    try { drawHud(main as unknown as CanvasRenderingContext2D, 1920, 1080, d, 'survivor', null); }
+    finally { _setCanvasFactory(null); }
+    const blue = `rgba(0,0,255,${160 / 255})`;
+    expect(scratch.some((c) => c.m === 'fillRect' && c.fill === blue)).toBe(true);
+    expect(direct).not.toContain(blue);
   });
 });
