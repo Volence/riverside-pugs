@@ -1,9 +1,9 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/preact';
 import { LocationProvider } from 'preact-iso';
 import { AppRoutes } from './AppRoutes';
 
-afterEach(() => { cleanup(); history.replaceState(null, '', '/'); });
+afterEach(() => { cleanup(); history.replaceState(null, '', '/'); vi.unstubAllGlobals(); });
 
 /** The site's real route table, mounted at a URL. Signed out, so nothing
  *  behind a session fetches anything. */
@@ -32,5 +32,14 @@ describe('the site route table', () => {
   it('still has a 404 for a path that is not a route', async () => {
     open('/not-a-page');
     expect(await screen.findByText('Page not found')).toBeTruthy();
+  });
+  it('mounts the community page and an entry page', async () => {
+    // Nothing behind them is running here: every fetch is a 404.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
+    const first = open('/community');
+    expect(await screen.findByText('Shared HUDs and crosshairs')).toBeTruthy();
+    first.unmount();
+    open('/community/5');
+    expect(await screen.findByText('This entry was removed.')).toBeTruthy();
   });
 });

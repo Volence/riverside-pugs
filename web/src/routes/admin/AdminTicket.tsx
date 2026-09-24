@@ -125,6 +125,7 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
                 <span class="muted"> · {fmtTime(r.createdAt)}</span>
                 {r.matchId !== null && <> · <a href={`/match/${r.matchId}`}>#{r.matchId}{r.campaign ? ` ${campaignName(r.campaign)}` : ''}</a></>}
                 {r.matchId !== null && r.moment && <> · <a href={`/match/${r.matchId}?ordinal=${r.moment.ordinal}&half=${r.moment.half}&t=${r.moment.tMs}`}>replay moment</a></>}
+                {r.entry && <> · shared {r.entry.kind === 'hud' ? 'HUD' : 'crosshair'} <a href={`/community/${r.entry.id}`}>{r.entry.title}</a>{r.entry.removed ? ' (removed)' : ''}</>}
                 {open && <> · <button class="chip" type="button" disabled={busy}
                   onClick={() => run(async () => { setChatUrl((await modApi.contactReporter(t.id, r.id)).url); })}>Contact reporter</button></>}
               </p>

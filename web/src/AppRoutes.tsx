@@ -24,6 +24,10 @@ import { HelpConsistency } from './routes/HelpConsistency';
 
 // The HUD editor carries ~170 KB of base HUD files, so it stays out of the main bundle.
 const Hud = lazy(() => import('./routes/Hud'));
+// The community pages draw crosshairs and fetch on mount; lazy like the editor so
+// neither weighs on the first load of the pages people land on most.
+const Community = lazy(() => import('./routes/Community'));
+const CommunityEntry = lazy(() => import('./routes/CommunityEntry'));
 
 /** The 404.
  *
@@ -82,6 +86,8 @@ export function AppRoutes(
       <Route path="/custom-campaigns" component={CustomCampaigns} />
       <Route path="/crosshair" component={Crosshair} />
       <Route path="/hud" component={Hud} />
+      <Route path="/community" component={Community} session={session} />
+      <Route path="/community/:id" component={CommunityEntry} session={session} />
       <Route path="/replay/file/:name" component={ReplayPage} />
       <Route path="/map/:map" component={MapDetail} />
       <Route path="/player/:steamid" component={Profile} session={session} refresh={refresh} />
