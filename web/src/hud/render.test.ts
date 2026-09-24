@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { childRects, drawPanel, setFont, PANEL_FILE, hiddenInState, previewOf, DEFAULT_PREVIEW, ITEM_ROW, itemRowStart, paintAdditive, healthRgb, _setImageFactory, _setCanvasFactory, _resetAssetCache, _cacheSizes, splatterSource, tinted, type SurvivorState } from './render';
+import { childRects, drawPanel, setFont, PANEL_FILE, hiddenInState, previewOf, DEFAULT_PREVIEW, ITEM_ROW, itemRowStart, paintAdditive, paintLinearOver, healthRgb, _setImageFactory, _setCanvasFactory, _resetAssetCache, _cacheSizes, splatterSource, tinted, type SurvivorState } from './render';
 import { linearOverAlpha } from './additive';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { buildHud } from './build';
@@ -657,6 +657,48 @@ describe('the teammate card states', () => {
       drawPanel(ctx, flat, 'teamColumn', { x: 5, y: 7 }, 2, { card: 0, state });
       expect(calls.some((c) => c.m === 'fillRect' && c.fill === 'rgba(255,0,0,1)'), state).toBe(true);
     }
+  });
+});
+
+describe('paintLinearOver', () => {
+  it('blends the art over the scene in linear light off screen, then draws the result back through the clip', () => {
+    // The scene: 2 x 1 at 47 grey. The art alone: skull grey 129 at 156 over the left pixel, nothing on the right.
+    const drawn: unknown[][] = [];
+    const main = {
+      globalAlpha: 0.5, canvas: { width: 100, height: 100 },
+      getImageData: (x: number, y: number, w: number, h: number) => {
+        expect([x, y, w, h]).toEqual([10, 20, 2, 1]);
+        return { data: new Uint8ClampedArray([47, 47, 47, 255, 47, 47, 47, 255]) };
+      },
+      putImageData: () => { throw new Error('putImageData ignores the clip; the result goes back through drawImage'); },
+      save: () => {}, restore: () => {}, setTransform: (...a: unknown[]) => drawn.push(['setTransform', ...a]),
+      drawImage: (...a: unknown[]) => drawn.push(['drawImage', ...a]),
+    };
+    let wrote: Uint8ClampedArray | undefined;
+    const painted: unknown[] = [];
+    const off = {
+      globalAlpha: 1,
+      translate: (x: number, y: number) => painted.push(['translate', x, y]),
+      getImageData: () => ({ data: new Uint8ClampedArray([129, 129, 129, 156, 0, 0, 0, 0]) }),
+      putImageData: (d: { data: Uint8ClampedArray }) => { wrote = d.data; },
+    };
+    const canvas = { width: 2, height: 1, getContext: () => off };
+    _setCanvasFactory(() => canvas as unknown as HTMLCanvasElement);
+    try {
+      paintLinearOver(main as unknown as CanvasRenderingContext2D, { x: 10.4, y: 20.2, w: 1.2, h: 0.5 }, (c) => { painted.push(['paint', c === (off as unknown), c.globalAlpha]); }, () => { throw new Error('no fallback'); });
+    } finally { _setCanvasFactory(null); }
+    expect(painted).toEqual([['translate', -10, -20], ['paint', true, 0.5]]);
+    expect([...wrote!]).toEqual([106, 106, 106, 255, 47, 47, 47, 255]);
+    expect(drawn).toEqual([['setTransform', 1, 0, 0, 1, 0, 0], ['drawImage', canvas, 10, 20]]);
+  });
+
+  it('takes the fallback where pixels cannot be read', () => {
+    const { ctx, calls } = recCtx();
+    Object.assign(ctx, { canvas: () => undefined });
+    let fell = false;
+    paintLinearOver(ctx, { x: 0, y: 0, w: 5, h: 5 }, (c) => c.fillText('x', 0, 0), () => { fell = true; });
+    expect(fell).toBe(true);
+    expect(calls.some((c) => c.m === 'fillText')).toBe(false);
   });
 });
 

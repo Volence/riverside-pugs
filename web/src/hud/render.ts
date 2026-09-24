@@ -36,7 +36,7 @@ import { SLOTS } from './slots';
 import { canvasFont, fontCell, importedFace, loadFace, type FontCell } from './fonts';
 import { baseOf, onUnregister } from './base';
 import { importedMaterial, _resetImportedArt } from './importArt';
-import { addLinear, linearOverAlpha } from './additive';
+import { addLinear, overLinear, linearOverAlpha } from './additive';
 import { panelChildren, childDef, type SurvivorState } from './children';
 import { elementById } from './elements';
 import { probe } from './probes';
@@ -288,6 +288,39 @@ export function paintAdditive(ctx: CanvasRenderingContext2D, box: { x: number; y
   const scene = ctx.getImageData(x0, y0, x1 - x0, y1 - y0);
   addLinear(scene.data, glyphs.data);
   ctx.putImageData(scene, x0, y0);
+}
+
+/**
+ * Paints something over the scene with the game's normal blend in linear
+ * light (overLinear): `paint` draws it alone on a scratch canvas in the
+ * scene's coordinates, that is blended over the scene's pixels there, and
+ * the result goes back through drawImage at identity, so the caller's clip
+ * still cuts it (putImageData, as paintAdditive uses, ignores the clip, and
+ * the fitted card clips its squared state art). `fallback` draws it where
+ * pixels cannot be read (a test stub, no canvas of known size).
+ */
+export function paintLinearOver(ctx: CanvasRenderingContext2D, box: { x: number; y: number; w: number; h: number }, paint: (c: CanvasRenderingContext2D) => void, fallback: () => void): void {
+  const readable = typeof ctx.getImageData === 'function' && Number.isFinite(ctx.canvas?.width) && Number.isFinite(ctx.canvas?.height);
+  if (!readable) { fallback(); return; }
+  const x0 = Math.max(0, Math.floor(box.x)), y0 = Math.max(0, Math.floor(box.y));
+  const x1 = Math.min(ctx.canvas.width, Math.ceil(box.x + box.w)), y1 = Math.min(ctx.canvas.height, Math.ceil(box.y + box.h));
+  if (x1 <= x0 || y1 <= y0) return;                                  // wholly off the canvas
+  const off = canvasFactory(x1 - x0, y1 - y0);
+  const octx = off?.getContext('2d') as CanvasRenderingContext2D | null | undefined;
+  if (!off || !octx || typeof octx.getImageData !== 'function' || typeof octx.putImageData !== 'function') { fallback(); return; }
+  octx.globalAlpha = ctx.globalAlpha;
+  octx.translate(-x0, -y0);
+  paint(octx);
+  let art: ImageData, scene: ImageData;
+  try { art = octx.getImageData(0, 0, x1 - x0, y1 - y0); scene = ctx.getImageData(x0, y0, x1 - x0, y1 - y0); }
+  catch { fallback(); return; }                                      // a tainted canvas
+  overLinear(scene.data, art.data);
+  octx.putImageData(scene, 0, 0);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.drawImage(off, x0, y0);
+  ctx.restore();
 }
 
 /**
@@ -692,7 +725,11 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
     const material = lname === 'dead' ? 'vgui/s_panel_dead' : `${portraitFor(opts)}_incap`;
     const img = artImage(material, opts.onAsset);
     if (!img) { if (missing.has(material)) hatch(ctx, r); return; }
-    ctx.drawImage(lname === 'dead' ? linearOverArt(img, material) : img, r.x, r.y, r.w, r.h);
+    if (lname !== 'dead') { ctx.drawImage(img, r.x, r.y, r.w, r.h); return; }
+    // The dead art in linear light, skull and band alike (X12); the alpha
+    // remap, exact for its black band only, where pixels cannot be read.
+    paintLinearOver(ctx, r, (c) => c.drawImage(img, r.x, r.y, r.w, r.h),
+      () => ctx.drawImage(linearOverArt(img, material), r.x, r.y, r.w, r.h));
     return;
   }
   if (image) {
