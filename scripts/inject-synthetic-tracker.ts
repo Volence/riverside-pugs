@@ -54,7 +54,7 @@ const num = (name: string, fallback: number): number => {
 };
 const hidden = args.includes('--hidden');
 if (files.length === 0) {
-  console.error('usage: inject-synthetic-tracker.ts <replay.rpl> [more.rpl ...] [--slot N] [--ghost N] [--lag MS] [--noise DEG] [--tau MS] [--seed N] [--out FILE] [--sweep]');
+  console.error('usage: inject-synthetic-tracker.ts <replay.rpl> [more.rpl ...] [--slot N] [--ghost N] [--lag MS] [--noise DEG] [--tau MS] [--seed N] [--out FILE] [--hidden] [--sweep]');
   process.exit(2);
 }
 
