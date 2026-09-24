@@ -588,6 +588,9 @@ function splatterPass(work: Work, design: HudDesign, assets: BuildAssets, out: V
   for (const def of SPLATTERS) {
     const style = design.splatters?.[def.id];
     if (!style || style.kind === 'stock') continue;
+    // A row splatterProblem disables (a preset switch can leave a stale entry
+    // on it) ships nothing: the preset's own hide stands, with no texture.
+    if (splatterProblem(design, def.id)) continue;
     // Every skip comes before work.optional: loading the file marks it
     // touched, so an inactive entry would ship an unchanged copy of it.
     if (style.kind !== 'none') {

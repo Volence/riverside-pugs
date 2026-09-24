@@ -152,6 +152,16 @@ describe('splatterProblem', () => {
     expect(splatterProblem(design({ preset: 'modern' }), 'splatTop')).toBe('This preset hides the scratches.');
     expect(splatterProblem(design({ preset: 'modern' }), 'splatTeam')).toBeNull();
   });
+  it('writes nothing for a stale entry a preset switch left on a row the preset hides', () => {
+    const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+    const modern = (patch: Partial<HudDesign> = {}) => buildHud(design({ preset: 'modern', crosshair: 'none', ...patch }), { fonts });
+    const plain = modern();
+    for (const kind of ['fade', 'none'] as const) {
+      const files = modern({ splatters: { splatTop: { kind }, splatBottom: { kind } } });
+      expect(files.some((f) => f.path.includes('hudeditor/splat'))).toBe(false);
+      expect(text(files, OWN)).toBe(text(plain, OWN));
+    }
+  });
   it('names the missing block on an imported HUD, and writes nothing there', () => {
     const card = new TextDecoder('latin1').decode(sampleHud().get(CARD)!);
     registerImport(ID, sampleHud({ [CARD]: latin1(dropBlock(card, 'BackgroundImage')) }));
