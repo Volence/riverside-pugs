@@ -242,4 +242,21 @@ describe('metricDetail', () => {
       '41/2', '41/1', '42/2', '80/1', '80/2',
     ]);
   });
+
+  it('leaves out event and normal rows of rounds from before the event markers', () => {
+    const db = setup();
+    const row = db.prepare("INSERT INTO round_metrics VALUES (?, 0, ?, 'round.phase_share', 'event', ?, 5)");
+    for (let id = 1; id <= 80; id++) for (const half of [1, 2]) row.run(id, half, id > 40 ? 1 : 0);
+    // Only side B's rounds carry per-round stats (pug-match 0.3.9+).
+    db.prepare('UPDATE round_metric_context SET has_stats = 1 WHERE match_id > 40').run();
+    const d = metricDetail(db, 'round.phase_share', 'event', A, B);
+    expect(d.trend.every((t) => t.side === 'b')).toBe(true);
+    expect(d.trend).toHaveLength(40);
+    expect(d.perPatch).toEqual([
+      { patchId: 1, label: 'Old', value: null, matches: 0 },
+      { patchId: 2, label: 'New', value: 0.2, matches: 40 },
+    ]);
+    expect(d.perMap).toEqual([]);
+    expect(d.examples.every((e) => e.matchId > 40)).toBe(true);
+  });
 });

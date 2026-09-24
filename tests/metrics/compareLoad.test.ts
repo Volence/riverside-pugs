@@ -51,6 +51,26 @@ describe('loadSide', () => {
     expect(q.samples.get(rowKey('round.saferoom', 'tank'))).toHaveLength(1);
   });
 
+  it('drops event and normal rows of rounds from before the plugin sent event markers', () => {
+    // A round with no per-round stats (has_stats = 0) predates pug-match
+    // 0.3.9, which brought panic and finale markers in the same release: its
+    // event time is unknown, so its "event" share reads 0 and its event
+    // stretches are counted as "normal". Neither is comparable to a round
+    // that has markers. Tank and witch phases come from the replay and stay.
+    const db = setup();
+    const row = db.prepare('INSERT INTO round_metrics VALUES (?, ?, ?, ?, ?, ?, ?)');
+    for (const mid of [1, 2]) {
+      row.run(mid, 0, 1, 'round.phase_share', 'event', 0, 5);
+      row.run(mid, 0, 1, 'round.phase_share', 'normal', 3, 5);
+      row.run(mid, 0, 1, 'round.phase_share', 'witch', 1, 5);
+    }
+    db.prepare('UPDATE round_metric_context SET has_stats = 1 WHERE match_id = 2 AND ordinal = 0').run();
+    const d = loadSide(db, { patchIds: [1], origin: 'all', maps: null }, ['event', 'normal', 'witch']);
+    expect(d.samples.get(rowKey('round.phase_share', 'event'))).toHaveLength(1);
+    expect(d.samples.get(rowKey('round.phase_share', 'normal'))).toHaveLength(1);
+    expect(d.samples.get(rowKey('round.phase_share', 'witch'))).toHaveLength(2);
+  });
+
   it('is empty for patches with no rounds', () => {
     const d = loadSide(setup(), { patchIds: [2], origin: 'all', maps: null }, ['all']);
     expect(d.summary).toMatchObject({ matches: 0, rounds: 0, meanMu: null, historical: false });
