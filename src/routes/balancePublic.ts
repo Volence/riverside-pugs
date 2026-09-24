@@ -3,7 +3,8 @@ import type { DB } from '../db.js';
 import { makeRequireAdmin } from './guards.js';
 import { logAdmin } from '../admin/audit.js';
 import { loadBalanceKnobs, type BalanceKnobs } from '../balanceKnobs.js';
-import { listPublished, publicEntry, publishPatch } from '../balancePublic.js';
+import { listPublished, publicEntry, publishPatch, type KnobLabels } from '../balancePublic.js';
+import { withEffectiveIgnored } from '../balanceIgnore.js';
 
 export interface BalancePublicRouteOpts { db: DB; knobsPath?: string }
 
@@ -25,18 +26,21 @@ export async function balancePublicRoutes(app: FastifyInstance, opts: BalancePub
     console.error('[balance] public page: knobs.json failed to load, showing raw names:', err);
   }
 
+  // Per request: the site ignore list can change while the process runs.
+  const labels = (): KnobLabels => withEffectiveIgnored(db, knobs ?? { cvars: [], files: [], dirs: [], versionless: [] });
+
   app.get('/api/balance/patches', async () => ({ patches: listPublished(db) }));
 
   app.get('/api/balance/patches/:id', async (req, reply) => {
     const id = idOf(req);
-    const e = id === null ? null : publicEntry(db, id, { knobs });
+    const e = id === null ? null : publicEntry(db, id, { knobs: labels() });
     return e ?? reply.code(404).send({ error: 'no such patch' });
   });
 
   app.get('/api/admin/balance/patches/:id/public', async (req, reply) => {
     if (!requireAdmin(req, reply)) return reply;
     const id = idOf(req);
-    const e = id === null ? null : publicEntry(db, id, { knobs, preview: true });
+    const e = id === null ? null : publicEntry(db, id, { knobs: labels(), preview: true });
     return e ?? reply.code(404).send({ error: 'no such patch' });
   });
 

@@ -5,6 +5,7 @@ import { KNOBS, LIVE, sight } from './balanceFixtures.js';
 import {
   activeRollout, applyKnobs, confirmOnSighting, ensureServerRows, expectedPatchFor, listRollouts, markFailed, markWritten,
 } from '../src/balanceRollouts.js';
+import { previewKnobs } from '../src/balanceControl.js';
 
 type DB = ReturnType<typeof openDb>;
 let db: DB;
@@ -22,6 +23,15 @@ const apply = (values: unknown, name: unknown = 'Tank 7500', notes: unknown = 't
   applyKnobs(db, KNOBS, { values, name, notes, adminId: ADMIN, now: '2026-09-24 10:00:00' });
 
 describe('applyKnobs', () => {
+  it('reusing a pending patch makes it balance; a folded one is refused', () => {
+    const preview = previewKnobs(db, KNOBS, { z_tank_health: '7500' });
+    db.prepare("INSERT INTO balance_patches (fingerprint, source, inputs_json, first_seen_at, triage) VALUES (?, 'detected', '{}', '2026-09-24 03:00:00', 'pending')").run(preview.fingerprint);
+    expect(apply({ z_tank_health: '7500' })).toMatchObject({ ok: true, reused: true });
+    expect(db.prepare('SELECT triage FROM balance_patches WHERE fingerprint = ?').get(preview.fingerprint)).toEqual({ triage: 'balance' });
+    db.prepare("UPDATE balance_patches SET triage = 'folded', folded_into = 1 WHERE fingerprint = ?").run(preview.fingerprint);
+    expect(apply({ z_tank_health: '7500' })).toMatchObject({ ok: false, status: 409, error: expect.stringMatching(/folded/) });
+  });
+
   it('creates an announced patch with the predicted inventory, then a rollout with a row per enabled server', () => {
     db.prepare('UPDATE servers SET enabled = 0 WHERE id = ?').run(s2);
     const r = apply({ z_tank_health: 7500 });

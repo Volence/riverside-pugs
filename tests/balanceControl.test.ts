@@ -7,6 +7,7 @@ import {
   renderBalanceCfg, restoreValues, validateDraft,
 } from '../src/balanceControl.js';
 import { KNOBS, LIVE, sight } from './balanceFixtures.js';
+import { foldInto } from '../src/balanceFold.js';
 
 type DB = ReturnType<typeof openDb>;
 
@@ -20,6 +21,13 @@ beforeEach(() => {
 });
 
 describe('baseInventory', () => {
+  it('predicts from the sighted patch, not the patch it was folded into', () => {
+    const a = sight(db, 1, s1, LIVE);
+    const b = sight(db, 2, s1, { ...LIVE, 'p:x_noise.smx': '1.a' }, 'queue', '2026-09-24 02:00:00');
+    foldInto(db, b.patchId, a.patchId);
+    expect(baseInventory(db)!.patchId).toBe(b.patchId);
+  });
+
   it('is the patch of the latest queue round, never an in-game one', () => {
     expect(baseInventory(db)).toBeNull();
     const q = sight(db, 1, s1, LIVE);

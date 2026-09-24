@@ -50,11 +50,16 @@ describe('publishPatch', () => {
     expect(publishPatch(db, 3, true)).toEqual({ ok: false, status: 400, error: expect.stringMatching(/counted round/) });
     expect(publishPatch(db, 99, true)).toEqual({ ok: false, status: 404, error: 'no such patch' });
   });
-  it('refuses a merged patch: its config is the one it was merged into, so it would compare a config with itself', () => {
-    db.prepare("UPDATE balance_patches SET name = 'Dup', notes = 'n', fingerprint = NULL WHERE id = 3").run();
+  it('refuses a pending patch: triage it first', () => {
+    db.prepare("UPDATE balance_patches SET name = 'New', notes = 'n', triage = 'pending' WHERE id = 3").run();
+    addMatches(db, 3, 1, '2026-09-21');
+    expect(publishPatch(db, 3, true)).toEqual({ ok: false, status: 400, error: expect.stringMatching(/triage it first/) });
+  });
+  it('refuses a folded patch: its config counts as the one it was folded into, so it would compare a config with itself', () => {
+    db.prepare("UPDATE balance_patches SET name = 'Dup', notes = 'n', triage = 'folded', folded_into = 2 WHERE id = 3").run();
     addMatches(db, 3, 1, '2026-09-21');
     expect(listPatches(db).find((p) => p.id === 3)!.merged).toBe(true);
-    expect(publishPatch(db, 3, true)).toEqual({ ok: false, status: 400, error: expect.stringMatching(/merged/) });
+    expect(publishPatch(db, 3, true)).toEqual({ ok: false, status: 400, error: expect.stringMatching(/folded/) });
     expect(listPublished(db)).toEqual([]);
     // Unpublishing one published before it was merged still works.
     db.prepare("UPDATE balance_patches SET published_at = '2026-09-22 00:00:00' WHERE id = 3").run();
