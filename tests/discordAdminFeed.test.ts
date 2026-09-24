@@ -180,6 +180,12 @@ describe('admin feed', () => {
     expect(text(3)).toContain('Match #9 aborted for no-shows.');
   });
 
+  it('a problem with a link renders it against the public URL', async () => {
+    publishAdminEvent({ kind: 'problem', text: 'Balance config changed.', link: { label: 'Triage it', path: '/admin/balance/patches' } });
+    await feed.idle();
+    expect(text(0)).toContain('Balance config changed. [Triage it](https://pug.test/admin/balance/patches)');
+  });
+
   it('names both the steam identity and the linked discord account, and never pings', async () => {
     logAdmin(db, ADMIN, 'ban', IDS[3], { reason: 'throwing', minutes: 1440 });
     await feed.idle();

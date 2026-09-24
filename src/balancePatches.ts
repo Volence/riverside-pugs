@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { DB } from './db.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { currentOrdinal } from './liveView.js';
+import { foldInto, resolvePatch } from './balanceFold.js';
 
 type Inventory = Record<string, string>;
 
@@ -61,7 +62,13 @@ export function recordBalanceSighting(db: DB, s: {
    *  sighting is the change the panel made, so it updates the state without
    *  an alert. */
   expectedPatchId?: number | null;
-}): { patchId: number; newPatch: boolean; serverChanged: boolean } {
+}): {
+  /** The patch whose fingerprint was seen (a rollout's patch is always one). */
+  patchId: number;
+  /** The patch the round counts for: patchId, or where patchId is folded into. */
+  effectivePatchId: number;
+  newPatch: boolean; serverChanged: boolean;
+} {
   const inventory = withoutIgnored(s.inventory, s.ignored ?? []);
   // SQLite's datetime('now') format, so it sorts against match_rounds.started_at.
   const now = s.now ?? new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -69,19 +76,26 @@ export function recordBalanceSighting(db: DB, s: {
   const invJson = JSON.stringify(Object.fromEntries(Object.entries(inventory).sort()));
 
   return db.transaction(() => {
+    const prev = s.serverId === null ? undefined
+      : db.prepare('SELECT patch_id, inventory_json FROM balance_server_state WHERE server_id = ?')
+        .get(s.serverId) as { patch_id: number; inventory_json: string } | undefined;
     let newPatch = false;
     let row = db.prepare('SELECT id FROM balance_patches WHERE fingerprint = ?').get(fp) as { id: number } | undefined;
     if (!row) {
+      // Every new detected config waits for an admin's triage; it remembers
+      // the patch this server was on, the default it is judged against.
       const id = Number(db.prepare(
-        "INSERT INTO balance_patches (fingerprint, source, inputs_json, first_seen_at) VALUES (?, 'detected', ?, ?)",
-      ).run(fp, invJson, now).lastInsertRowid);
+        "INSERT INTO balance_patches (fingerprint, source, inputs_json, first_seen_at, triage, came_from_patch_id) VALUES (?, 'detected', ?, ?, 'pending', ?)",
+      ).run(fp, invJson, now, prev ? resolvePatch(db, prev.patch_id) : null).lastInsertRowid);
       row = { id };
       newPatch = true;
     }
     const patchId = row.id;
+    // A folded patch's rounds count for the patch it was folded into.
+    const effectivePatchId = resolvePatch(db, patchId);
 
-    db.prepare('UPDATE match_rounds SET patch_id = ? WHERE match_id = ? AND ordinal = ? AND half = ?')
-      .run(patchId, s.matchId, currentOrdinal(db, s.matchId), s.half);
+    db.prepare('UPDATE match_rounds SET patch_id = ?, sighted_patch_id = ? WHERE match_id = ? AND ordinal = ? AND half = ?')
+      .run(effectivePatchId, patchId, s.matchId, currentOrdinal(db, s.matchId), s.half);
 
     let serverChanged = false;
     if (s.serverId !== null) {
@@ -89,8 +103,6 @@ export function recordBalanceSighting(db: DB, s: {
                   VALUES (?, ?, ?, ?)
                   ON CONFLICT (patch_id, server_id) DO UPDATE SET last_seen_at = excluded.last_seen_at`)
         .run(patchId, s.serverId, now, now);
-      const prev = db.prepare('SELECT patch_id, inventory_json FROM balance_server_state WHERE server_id = ?')
-        .get(s.serverId) as { patch_id: number; inventory_json: string } | undefined;
       // The stored inventory may predate a plugin joining the ignored list;
       // compare it the way the fingerprint sees it, so that alone never alerts.
       const prevJson = prev && sameAfterIgnored(prev.inventory_json, invJson, s.ignored ?? []) ? invJson : prev?.inventory_json;
@@ -115,11 +127,15 @@ export function recordBalanceSighting(db: DB, s: {
             SELECT number FROM (
               SELECT id, ROW_NUMBER() OVER (ORDER BY first_seen_at, id) AS number FROM balance_patches
             ) WHERE id = ?`).get(patchId) as { number: number }).number;
-          publishAdminEvent({ kind: 'problem', text: alertText(db, s.serverId, patchNumber, newPatch, prev, inventory) });
+          const pending = (db.prepare('SELECT triage FROM balance_patches WHERE id = ?').get(patchId) as { triage: string | null }).triage === 'pending';
+          publishAdminEvent({
+            kind: 'problem', text: alertText(db, s.serverId, patchNumber, newPatch, pending, prev, inventory),
+            ...(pending ? { link: { label: 'Triage it', path: '/admin/balance/patches' } } : {}),
+          });
         }
       }
     }
-    return { patchId, newPatch, serverChanged };
+    return { patchId, effectivePatchId, newPatch, serverChanged };
   })();
 }
 
@@ -288,12 +304,12 @@ export function editPatch(db: DB, id: number, p: { name?: string | null; notes?:
   return true;
 }
 
-function alertText(db: DB, serverId: number, patchNumber: number, newPatch: boolean,
+function alertText(db: DB, serverId: number, patchNumber: number, newPatch: boolean, pending: boolean,
   prev: { inventory_json: string } | undefined, inv: Inventory): string {
   const name = serverName(db, serverId);
   const head = newPatch
-    ? `Balance config on ${name} is a new patch (#${patchNumber}, unnamed; name it in Admin > Balance > Patches).`
-    : `Balance config on ${name} changed (still patch #${patchNumber}).`;
+    ? `Balance config on ${name} is a new patch (#${patchNumber}, needs triage).`
+    : `Balance config on ${name} changed (still patch #${patchNumber}${pending ? ', needs triage' : ''}).`;
   const vsOwn = prev ? ` Changed: ${formatDiff(diffInventories(JSON.parse(prev.inventory_json) as Inventory, inv))}.` : ' First sighting.';
   const others = db.prepare('SELECT server_id, inventory_json FROM balance_server_state WHERE server_id != ?')
     .all(serverId) as { server_id: number; inventory_json: string }[];

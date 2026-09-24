@@ -18,7 +18,8 @@ export type AdminEvent =
   | { kind: 'admin_action'; adminId: string; action: string; target: string; detail: Record<string, unknown> }
   | { kind: 'penalty'; steamid: string; penalty: 'ready_fail' | 'no_show'; matchId: number | null }
   | { kind: 'account'; steamid: string; what: 'linked' | 'activated'; discordName?: string }
-  | { kind: 'problem'; text: string; matchId?: number }
+  // `link` is a site path the Discord poster turns into a link.
+  | { kind: 'problem'; text: string; matchId?: number; link?: { label: string; path: string } }
   | { kind: 'abandon'; steamid: string; matchId: number; minutes: number }
   // The live board's clocks. low_allowance: a dropped player is nearly out of
   // reconnect time, once per drop, so an admin can hold the clock before it
