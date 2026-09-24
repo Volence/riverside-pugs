@@ -71,7 +71,7 @@ describe('the lilac timeline summary, reason beside the flag', () => {
     expect(summary()).toMatch(/14 perfect hops in a row/);
   });
 
-  it('says an aimlock\'s target and adds the through-walls caveat for a survivor target', () => {
+  it('says an aimlock\'s target and hedges the through-walls caveat when lself_team is unknown', () => {
     lilac('aimlock', 'maxd=45 totd=90 taps=6 taps1=5 ltarget_team=2 ltarget_class=0 ltarget_ghost=0');
     const s = summary();
     expect(s).toMatch(/Locked onto a survivor/);
@@ -80,6 +80,34 @@ describe('the lilac timeline summary, reason beside the flag', () => {
       /Our measurement over the 1\.5 s before: biggest one-tick aim change 45 degrees, total 90 degrees, 6 trigger presses, 5 of them one tick long\./,
     );
     expect(s).not.toMatch(/LilAC's reason/);
+  });
+
+  it('a survivor target never gets the ghost suffix, even when ltarget_ghost=1', () => {
+    lilac('aimlock', 'maxd=45 totd=90 taps=6 taps1=5 ltarget_team=2 ltarget_class=0 ltarget_ghost=1');
+    expect(summary()).toMatch(/Locked onto a survivor\./);
+    expect(summary()).not.toMatch(/ghost/i);
+  });
+
+  it('hedges the same way when lself_team is explicitly -1 (unknown)', () => {
+    lilac('aimlock', 'maxd=45 totd=90 taps=6 taps1=5 ltarget_team=2 ltarget_class=0 ltarget_ghost=0 lself_team=-1');
+    expect(summary()).toMatch(/infected players see survivors through walls in L4D, so this can be legitimate if the flagged player was infected/i);
+  });
+
+  it('states the caveat as fact when lself_team says the flagged player was infected', () => {
+    lilac('aimlock', 'maxd=45 totd=90 taps=6 taps1=5 ltarget_team=2 ltarget_class=0 ltarget_ghost=0 lself_team=3');
+    const s = summary();
+    expect(s).toMatch(/Locked onto a survivor/);
+    expect(s).toMatch(/infected players see survivors through walls in L4D/i);
+    // No longer hedged: the flagged player's own team is known, so this
+    // should read as fact, not as a maybe.
+    expect(s).not.toMatch(/can be legitimate if the flagged player was infected/i);
+  });
+
+  it('drops the caveat entirely when lself_team says the flagged player was a survivor', () => {
+    lilac('aimlock', 'maxd=45 totd=90 taps=6 taps1=5 ltarget_team=2 ltarget_class=0 ltarget_ghost=0 lself_team=2');
+    const s = summary();
+    expect(s).toMatch(/Locked onto a survivor/);
+    expect(s).not.toMatch(/through walls/i);
   });
 
   it('names the infected class and a ghost, with no caveat for an infected target', () => {
@@ -128,6 +156,25 @@ describe('L4DL over the wire, end to end', () => {
       .toEqual({ detail: 'lflags=2 ldelta=12.3 ltd=470.5 maxd=80.2 totd=200.5 taps=10 taps1=8' });
     const [item] = playerTimeline(db, P, STAFF);
     expect(item.summary).toMatch(/LilAC's reason: Autoshoot, Total-Delta\./);
+  });
+
+  it('stores lself_team appended at the end of an aimlock line and states the caveat as fact', async () => {
+    const port = await freeUdpPort();
+    addServer(db, { name: 'dallas', host: '127.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    app = await buildServer({ config: { ...loadConfig({}), devMode: false, logListenPort: port }, db });
+    await send(
+      port,
+      `L4DL id=${P} cheat=6 banned=0 maxd=45.0 totd=90.0 taps=6 taps1=5 `
+      + 'ltarget_team=2 ltarget_class=0 ltarget_ghost=0 lself_team=3',
+    );
+    await settle();
+    expect(db.prepare("SELECT detail FROM integrity_flags").get()).toEqual({
+      detail: 'maxd=45 totd=90 taps=6 taps1=5 ltarget_team=2 ltarget_class=0 ltarget_ghost=0 lself_team=3',
+    });
+    const [item] = playerTimeline(db, P, STAFF);
+    expect(item.summary).toMatch(/Locked onto a survivor/);
+    expect(item.summary).toMatch(/infected players see survivors through walls in L4D/i);
+    expect(item.summary).not.toMatch(/can be legitimate if the flagged player was infected/i);
   });
 
   it('stores an empty detail for a flag with no reason fields, same as before', async () => {

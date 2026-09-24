@@ -64,16 +64,32 @@ function reasonSentences(kind: string, detail: string): string {
 
   if (kind === 'aimlock' && f.ltarget_team !== undefined && f.ltarget_team >= 0) {
     if (f.ltarget_team === 2) {
-      const ghost = f.ltarget_ghost === 1 ? ' (a ghost)' : '';
-      sentences.push(`Locked onto a survivor${ghost}.`);
-      // We only know the TARGET's side. Without the flagged player's own
-      // team on this row, the caveat is phrased off the target alone: L4D
-      // shows survivors to infected through walls by design, so this can be
-      // a legitimate lock rather than a cheat, and only if the flagged
-      // player was actually playing infected at the time.
-      sentences.push(
-        'Infected players see survivors through walls in L4D, so this can be legitimate if the flagged player was infected.',
-      );
+      // No "(a ghost)" here: a ghost is an INFECTED state (a dead infected
+      // player waiting to respawn), so it can never describe a survivor
+      // target. That suffix only ever makes sense on the infected branch.
+      sentences.push('Locked onto a survivor.');
+      // Round 1 fix, 2026-09-24: lself_team is the flagged CLIENT's own
+      // team, reported fresh by the plugin (not cached/stale, since the
+      // client is always still connected when Report() runs). It lets the
+      // caveat say what actually happened instead of only ever hedging off
+      // the target's side:
+      //   - lself_team === 3 (infected): the flagged player WAS infected, so
+      //     this reads as a fact, not a maybe.
+      //   - lself_team === 2 (survivor): a survivor cannot see another
+      //     survivor through a wall, so the caveat does not apply at all.
+      //   - absent or -1 (unknown; an old plugin, or the reason went stale):
+      //     the only honest phrasing left is the old hedge.
+      if (f.lself_team === 3) {
+        sentences.push(
+          'The flagged player was infected, and infected players see survivors through walls in L4D, so this can be legitimate.',
+        );
+      } else if (f.lself_team === undefined || f.lself_team === -1) {
+        sentences.push(
+          'Infected players see survivors through walls in L4D, so this can be legitimate if the flagged player was infected.',
+        );
+      }
+      // f.lself_team === 2, or any other known-not-infected value: no
+      // caveat, since we know it does not apply.
     } else if (f.ltarget_team === 3) {
       const cls = f.ltarget_class !== undefined ? classNameOf(f.ltarget_class) : 'unknown';
       const ghost = f.ltarget_ghost === 1 ? ' (a ghost)' : '';

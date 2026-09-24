@@ -125,6 +125,29 @@ describe('L4DL lilac flag line', () => {
         expect(parse(STAMP + line)).toBeNull();
       });
     }
+
+    // Round 1 fix, 2026-09-24: the flagged client's own team, so the site is
+    // no longer stuck hedging off the target's side alone.
+    it('parses the flagged player\'s own team (lself_team)', () => {
+      expect(parse(STAMP + `${AIMLOCK_BODY} lself_team=3`)).toMatchObject({
+        reason: { ltarget_team: 2, lself_team: 3 },
+      });
+    });
+
+    it('accepts the -1 unknown sentinel for lself_team', () => {
+      expect(parse(STAMP + `${AIMLOCK_BODY} lself_team=-1`)).toMatchObject({ reason: { lself_team: -1 } });
+    });
+
+    it('has no lself_team at all when the plugin did not send one', () => {
+      const ev = parse(STAMP + AIMLOCK_BODY);
+      expect((ev as unknown as { reason: Record<string, unknown> }).reason).not.toHaveProperty('lself_team');
+    });
+
+    for (const bad of ['lself_team=4', 'lself_team=-2', 'lself_team=1.5']) {
+      it(`rejects the whole line when ${bad} is malformed`, () => {
+        expect(parse(STAMP + `${AIMLOCK_BODY} ${bad}`)).toBeNull();
+      });
+    }
   });
 
   describe('the bhop reason (cheat 4)', () => {

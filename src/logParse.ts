@@ -42,13 +42,22 @@ export interface DemoSync { tick: number; hz: number }
  *  aimbot, aimlock and bhop, straight off Little Anti-Cheat's own forwards.
  *  Every field is individually optional because the three cheats each fill a
  *  different subset: aimbot has lflags/ldelta/ltd, aimlock has the
- *  ltarget_* trio, bhop has lbhops/ljump, and maxd/totd/taps/taps1 are shared
- *  by aimbot and aimlock. -1 is LilAC's own "unknown/stale" value, a valid
- *  parsed value on every field that carries it, never a guess. */
+ *  ltarget_* trio plus lself_team, bhop has lbhops/ljump, and
+ *  maxd/totd/taps/taps1 are shared by aimbot and aimlock. -1 is LilAC's own
+ *  "unknown/stale" value, a valid parsed value on every field that carries
+ *  it, never a guess.
+ *
+ *  lself_team is the flagged CLIENT's own team (round 1 fix, 2026-09-24):
+ *  ltarget_team alone can only ever hedge the L4D through-walls caveat ("the
+ *  target is a survivor, so this COULD be legitimate IF the flagged player
+ *  was infected"), because it says nothing about the flagged player's own
+ *  side. With lself_team the site can tell a real infected-sees-through-walls
+ *  lock (lself_team 3, target a survivor) apart from a survivor locking onto
+ *  another survivor (lself_team 2, no caveat makes sense at all). */
 export interface LilacReason {
   lflags?: number; ldelta?: number; ltd?: number; maxd?: number; totd?: number;
   taps?: number; taps1?: number; lbhops?: number; ljump?: number;
-  ltarget_team?: number; ltarget_class?: number; ltarget_ghost?: number;
+  ltarget_team?: number; ltarget_class?: number; ltarget_ghost?: number; lself_team?: number;
 }
 
 export type LogEvent =
@@ -257,10 +266,16 @@ function measureOf(s: string | undefined): number | null {
 /** Field order the plugin itself formats them in: aimbot's, then aimlock's
  *  (maxd/totd/taps/taps1 are the two shared ones), then bhop's, then
  *  aimlock's target trio. A reason only ever has one cheat's subset, so this
- *  single fixed order reproduces any of the three shapes unchanged. */
+ *  single fixed order reproduces any of the three shapes unchanged.
+ *  `lself_team` is appended LAST (round 1 fix, 2026-09-24) rather than beside
+ *  the target trio it logically belongs with, so a detail string stored by
+ *  the previous plugin version (with no lself_team) stays byte-identical to
+ *  what this order would have produced for it, and the reverse-parser in
+ *  admin/timeline/lilac.ts (which reads key=value pairs, not positions)
+ *  needs no change either way. */
 const REASON_FIELD_ORDER: (keyof LilacReason)[] = [
   'lflags', 'ldelta', 'ltd', 'maxd', 'totd', 'taps', 'taps1',
-  'lbhops', 'ljump', 'ltarget_team', 'ltarget_class', 'ltarget_ghost',
+  'lbhops', 'ljump', 'ltarget_team', 'ltarget_class', 'ltarget_ghost', 'lself_team',
 ];
 
 /** The canonical string integrity_flags.detail stores for a lilac_flag with a
@@ -428,6 +443,7 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     setInt('ltarget_team', -1, 3);
     setInt('ltarget_class', -1, 8);
     setInt('ltarget_ghost', -1, 1);
+    setInt('lself_team', -1, 3);
     if (bad) return null;
 
     return {
