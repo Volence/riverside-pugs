@@ -1,5 +1,6 @@
 import type { DB } from './db.js';
 import { withoutIgnored } from './balancePatches.js';
+import { resolvePatch } from './balanceFold.js';
 import type { BalanceKnobs } from './balanceKnobs.js';
 import { compareSides } from './metrics/compare/compare.js';
 import { memo, parseSideParams } from './metrics/compare/cache.js';
@@ -61,19 +62,20 @@ export function listPublished(db: DB): PublicPatch[] {
 export type PublishResult = { ok: true } | { ok: false; status: 400 | 404; error: string };
 
 export function publishPatch(db: DB, id: number, published: boolean, now: string = nowSql()): PublishResult {
-  const row = db.prepare(`SELECT name, notes, published_at, (source = 'detected' AND fingerprint IS NULL) AS merged
+  const row = db.prepare(`SELECT name, notes, published_at, COALESCE(triage, 'balance') AS triage
     FROM balance_patches WHERE id = ?`).get(id) as
-    { name: string | null; notes: string; published_at: string | null; merged: number } | undefined;
+    { name: string | null; notes: string; published_at: string | null; triage: string } | undefined;
   if (!row) return { ok: false, status: 404, error: 'no such patch' };
   if (!published) {
     db.prepare('UPDATE balance_patches SET published_at = NULL WHERE id = ?').run(id);
     return { ok: true };
   }
-  // A merged patch (see listPatches) runs the config of the patch it was
-  // merged into: as its own public entry it would diff and compare that
-  // config against itself. Publish the patch it was merged into instead.
-  if (row.merged === 1) {
-    return { ok: false, status: 400, error: 'this patch was merged into another one; publish that patch instead' };
+  // Only a balance patch is public. A folded patch's rounds count for the
+  // patch it was folded into: as its own entry it would compare that config
+  // against itself. Publish the patch it was folded into instead.
+  if (row.triage === 'pending') return { ok: false, status: 400, error: 'triage it first: publish only a balance patch' };
+  if (row.triage === 'folded') {
+    return { ok: false, status: 400, error: 'this patch was folded into another one; publish that patch instead' };
   }
   const p = patchTimeline(db).find((x) => x.id === id)!;
   const missing = [
@@ -217,7 +219,9 @@ export function publicEntry(db: DB, id: number, opts: { knobs: KnobLabels | null
       approximate: r.banners.approximate, rows,
     };
   }
-  const live = line[line.length - 1].id === id
-    || db.prepare('SELECT 1 FROM balance_server_state WHERE patch_id = ? LIMIT 1').get(id) !== undefined;
+  // A server's state holds the patch it reported; one folded into this patch counts.
+  const onServers = (db.prepare('SELECT patch_id FROM balance_server_state').all() as { patch_id: number }[])
+    .some((st) => resolvePatch(db, st.patch_id) === id);
+  const live = line[line.length - 1].id === id || onServers;
   return { ...strip(self), live, previous: base ? { id: base.id, name: base.name } : null, status, changes, changesUnavailable, effect };
 }

@@ -45,6 +45,10 @@ export function applyKnobs(db: DB, knobs: BalanceKnobs, req: {
     const reused = preview.existingPatch !== null;
     if (preview.existingPatch) {
       const p = preview.existingPatch;
+      if (p.triage === 'folded') {
+        return { ok: false, status: 409, preview,
+          error: `This config was folded into another patch as not a balance change. Unfold patch #${p.number} in the Patches tab first.` };
+      }
       patchId = p.id;
       if (!p.name) {
         if (!name) return { ok: false, status: 400, error: 'This config is an unnamed patch: give it a name.', preview };
@@ -55,14 +59,16 @@ export function applyKnobs(db: DB, knobs: BalanceKnobs, req: {
         db.prepare('UPDATE balance_patches SET notes = ? WHERE id = ?').run(notes, patchId);
         notesSet = true;
       }
+      // Choosing this config in the panel is deciding it is a balance patch.
+      db.prepare("UPDATE balance_patches SET triage = 'balance' WHERE id = ? AND triage = 'pending'").run(patchId);
     } else {
       if (!name) return { ok: false, status: 400, error: 'A new patch needs a name.', preview };
       if (!notes) return { ok: false, status: 400, error: 'A new patch needs notes saying what changed and why.', preview };
       const base = db.prepare('SELECT inputs_json FROM balance_patches WHERE id = ?').get(preview.base.patchId) as { inputs_json: string };
       const inv = predictInventory(JSON.parse(base.inputs_json) as Inventory, knobs, preview.values);
       const invJson = JSON.stringify(Object.fromEntries(Object.entries(inv).sort()));
-      patchId = Number(db.prepare(`INSERT INTO balance_patches (fingerprint, name, notes, source, inputs_json, first_seen_at, reviewed)
-        VALUES (?, ?, ?, 'announced', ?, ?, 1)`).run(preview.fingerprint, name, notes, invJson, now).lastInsertRowid);
+      patchId = Number(db.prepare(`INSERT INTO balance_patches (fingerprint, name, notes, source, inputs_json, first_seen_at, reviewed, triage)
+        VALUES (?, ?, ?, 'announced', ?, ?, 1, 'balance')`).run(preview.fingerprint, name, notes, invJson, now).lastInsertRowid);
       notesSet = true;
     }
     const patchName = (db.prepare('SELECT name FROM balance_patches WHERE id = ?').get(patchId) as { name: string | null }).name;

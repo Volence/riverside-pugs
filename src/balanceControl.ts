@@ -11,13 +11,15 @@ import { diffInventories, fingerprintOf, formatDiff, withoutIgnored } from './ba
 export type Inventory = Record<string, string>;
 
 /** The inventory the prediction starts from: the patch on the most recent
- *  round of a queue match. Queue matches always run the pinned PUG config;
+ *  round of a queue match, as sighted (the config the servers actually ran,
+ *  not the patch it was folded into, so the predicted fingerprint matches
+ *  what they will report). Queue matches always run the pinned PUG config;
  *  balance_server_state may hold a 2v2 or auto-tracked casual inventory. */
 export function baseInventory(db: DB): { patchId: number; inventory: Inventory } | null {
   const row = db.prepare(`
     SELECT p.id, p.inputs_json FROM match_rounds r
     JOIN matches m ON m.id = r.match_id
-    JOIN balance_patches p ON p.id = r.patch_id
+    JOIN balance_patches p ON p.id = COALESCE(r.sighted_patch_id, r.patch_id)
     WHERE m.origin = 'queue' AND p.inputs_json IS NOT NULL
     ORDER BY r.started_at DESC, r.match_id DESC, r.ordinal DESC, r.half DESC
     LIMIT 1`).get() as { id: number; inputs_json: string } | undefined;
@@ -144,7 +146,7 @@ export interface KnobPreview {
   missing: string[];
   blocking: { serverId: number; name: string; diff: string }[];
   fingerprint: string | null;
-  existingPatch: { id: number; number: number; name: string | null; notes: string; source: string } | null;
+  existingPatch: { id: number; number: number; name: string | null; notes: string; source: string; triage: 'pending' | 'balance' | 'folded' } | null;
 }
 
 export function previewKnobs(db: DB, knobs: BalanceKnobs, raw: unknown): KnobPreview {
@@ -160,8 +162,8 @@ export function previewKnobs(db: DB, knobs: BalanceKnobs, raw: unknown): KnobPre
   let existingPatch: KnobPreview['existingPatch'] = null;
   if (base && errors.length === 0 && missing.length === 0) {
     fingerprint = fingerprintOf(predictInventory(base.inventory, knobs, values), knobs.versionless);
-    const p = db.prepare('SELECT id, name, notes, source FROM balance_patches WHERE fingerprint = ?').get(fingerprint) as
-      { id: number; name: string | null; notes: string; source: string } | undefined;
+    const p = db.prepare("SELECT id, name, notes, source, COALESCE(triage, 'balance') AS triage FROM balance_patches WHERE fingerprint = ?").get(fingerprint) as
+      { id: number; name: string | null; notes: string; source: string; triage: 'pending' | 'balance' | 'folded' } | undefined;
     if (p) existingPatch = { ...p, number: patchNumber(db, p.id) };
   }
   return {

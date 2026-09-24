@@ -8,6 +8,7 @@ import { loadConfig } from '../src/config.js';
 import { addServer } from '../src/serverPool.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import { KNOBS, LIVE, sight } from './balanceFixtures.js';
+import { addIgnored } from '../src/balanceIgnore.js';
 
 const ADMIN = '76561198000000009';
 
@@ -33,6 +34,8 @@ describe('balance knob API', () => {
 
   it('lists adjustable knobs with current values, base and restorable patches', async () => {
     const { a, cookies } = await app();
+    // The sighted patch starts pending; only a balance patch can be restored from.
+    db.prepare("UPDATE balance_patches SET triage = 'balance'").run();
     const res = await a.inject({ method: 'GET', url: '/api/admin/balance/knobs', cookies });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -81,6 +84,24 @@ describe('balance knob API', () => {
     const { a, cookies } = await app();
     const res = await a.inject({ method: 'GET', url: '/api/admin/balance/knobs/restore/1', cookies });
     expect(res.json().values.z_tank_health).toBe('8000');
+  });
+
+  it('restore lists only balance patches', async () => {
+    const { a, cookies } = await app();
+    db.prepare("UPDATE balance_patches SET triage = 'pending'").run();
+    const body = (await a.inject({ method: 'GET', url: '/api/admin/balance/knobs', cookies })).json() as { restorable: unknown[] };
+    expect(body.restorable).toEqual([]);
+  });
+
+  it('a plugin on the site ignore list never blocks an apply', async () => {
+    const s2 = addServer(db, { name: 'chicago', host: '10.0.0.2', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    sight(db, 2, s2, { ...LIVE, 'p:x_noise.smx': '1.a' }, 'in_game');
+    const { a, cookies } = await app();
+    const before = (await a.inject({ method: 'GET', url: '/api/admin/balance/knobs', cookies })).json() as { blocking: unknown[] };
+    expect(before.blocking).toHaveLength(1);
+    addIgnored(db, ['x_noise.smx'], { reason: 'r', by: ADMIN, now: 'x' });
+    const after = (await a.inject({ method: 'GET', url: '/api/admin/balance/knobs', cookies })).json() as { blocking: unknown[] };
+    expect(after.blocking).toEqual([]);
   });
 
   it('refuses a non-admin on every route', async () => {
