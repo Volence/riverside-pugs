@@ -1057,6 +1057,12 @@ describe('moving your infected health\'s pieces keeps every linked class inside 
     const sq = startsOf(plain, ['DuckingIcon'], 'siHealth', BOOMER).DuckingIcon;
     inside(resizeChild(plain, 'DuckingIcon', sq, 'se', 1000, 1000, false, 'siHealth', BOOMER), 'DuckingIcon');
   });
+  it('aligns pieces seen on the Boomer by the Boomer\'s rects', () => {
+    // Boomer: bar 322..386, number 335..385. Right-aligned there, the bar's right edge meets 386 and stays.
+    const d = alignChildren(plain, ['Health', 'HealthNumber'], 'right', 'siHealth', BOOMER);
+    const bar = panelChild(d, 'siHealth', 'Health', BOOMER)!, num = panelChild(d, 'siHealth', 'HealthNumber', BOOMER)!;
+    expect([bar.x + bar.w, num.x + num.w]).toEqual([386, 386]);
+  });
   it('scales a group inside every class', () => {
     const names = ['Health', 'HealthNumber', 'DuckingIcon'];
     for (const f of [HUNTER, BOOMER]) {

@@ -721,16 +721,16 @@ export function alignedAt(r: Box, box: Box, how: Align): { x: number; y: number 
   }
 }
 
-/** Align pieces against the box around them, through placeChild's clamp. */
-export function alignChildren(design: HudDesign, names: string[], how: Align, panel = 'teamColumn'): HudDesign {
-  const starts = startsOf(design, names, panel);
+/** Align pieces against the box around them, through placeChild's clamp, in the file they are seen in. */
+export function alignChildren(design: HudDesign, names: string[], how: Align, panel = 'teamColumn', file?: string): HudDesign {
+  const starts = startsOf(design, names, panel, file);
   const box = unionBox(Object.values(starts));
   if (!box) return design;
   let d = design;
   for (const [n, s] of Object.entries(starts)) {
     if (!childDef(panel, n)?.move) continue;
     const at = alignedAt(s, box, how);
-    d = placeChild(d, n, at.x, at.y, panel);
+    d = placeChild(d, n, at.x, at.y, panel, file);
   }
   return d;
 }

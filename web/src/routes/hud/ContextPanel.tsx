@@ -689,7 +689,7 @@ export function PiecesControls(
           <input type="number" value={Math.round(box.y)} onInput={(e) => place('y', e)} {...endsOn(end)} />
         </label>
       </div>
-      <AlignRow onAlign={(how) => edit((d) => alignChildren(d, names, how, panel))} />
+      <AlignRow onAlign={(how) => edit((d) => alignChildren(d, names, how, panel, file))} />
       <label class="hud__check">
         <input
           type="checkbox" checked={allVisible}
