@@ -691,6 +691,20 @@ describe('drawHud delegates panels to the renderer', () => {
     expect(draw(DEFAULT_PREVIEW).rects).toContainEqual([r.x * k, r.y * k, r.w * k, r.h * k]);
   });
 
+  it('draws your infected health only while spawned: none as a ghost or dead (probe B14)', () => {
+    // /home/volence/l4d/hud/probe-phase2-infected/b14/shots/b14/b14-a.png (ghost) and b14-g.png (dead): no
+    // panel, where the preview drew it (parity/b14-ghost.png, b14-dead.png).
+    _setImageFactory(instant);
+    const texts = (state: PreviewState) => {
+      const out: string[] = [];
+      drawHud(fakeCtx(() => {}, undefined, out), 853, 480, { ...DEFAULT_DESIGN, elements: { infectedRow: { visible: false } } }, 'infected', null, undefined, { state });
+      return out;
+    };
+    expect(texts(DEFAULT_PREVIEW)).toContain('250');
+    expect(texts({ ...DEFAULT_PREVIEW, infected: 'ghost' })).not.toContain('250');
+    expect(texts({ ...DEFAULT_PREVIEW, infected: 'dead' })).not.toContain('250');
+  });
+
   it('clips each panel to its real parent, the rect VGUI clips its children to', () => {
     // ownHealth's children live inside LocalPlayer (localplayerdisplay.res), each teammate card's inside
     // TeamPlayerN (teamdisplayhud.res). Both sizes are read here from the generator's own trees.

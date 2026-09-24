@@ -587,8 +587,11 @@ function paintInfectedRow(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
  * (render.ts panelFile: the Hunter's for the Hunter and the Tank), clipped to
  * HudZombieHealth as the game clips it (probe Q11,
  * /home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/br-bce.png).
+ * Only on a spawned infected: the game shows none as a ghost or dead (probe
+ * B14, b14/shots/b14/b14-a.png and b14-g.png).
  */
 function paintSiHealth(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view: HudView = {}) {
+  if (previewOf(view.state).infected !== 'alive') return;
   clipToRect(ctx, r, () => drawPanel(ctx, design, 'siHealth', { x: r.x, y: r.y }, k, { onAsset, state: view.state }));
 }
 
