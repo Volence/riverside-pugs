@@ -1810,3 +1810,107 @@ describe('one infected health edit lands in the Hunter, Smoker and Boomer files'
     } finally { unregisterImport(ID); }
   });
 });
+
+/**
+ * Fitting your infected health (plan decisions 1 and 2): the container,
+ * HudZombieHealth, shrinks to what the three live files show and moves by the
+ * same amount, and every piece in those files shifts back, so fitting alone
+ * moves nothing on screen. Probe Q11 (b10/shots/crops/br-bce.png): the
+ * container clips its children, so a smaller container cuts what it no
+ * longer covers.
+ */
+describe('fitting your infected health', () => {
+  const HUNTER = 'resource/ui/hud/hunterhealth.res', SMOKER = 'resource/ui/hud/smokerhealth.res', BOOMER = 'resource/ui/hud/boomerhealth.res';
+  const LAYOUT_FILE = 'scripts/hudlayout.res';
+  const W = screenW('16:9');
+  const si = (o: ElementOverride, kids: Record<string, ChildOverride> = {}, preset: 'stock' | 'modern' = 'stock') =>
+    design({ preset, elements: { siHealth: o }, children: Object.keys(kids).length ? { siHealth: kids } : {} });
+  const container = (d: HudDesign) => kvFind(buildTrees(d)(LAYOUT_FILE), ['HudZombieHealth'])!;
+  const rectOf = (n: KvNode) => ['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(n, k));
+
+  it('fits stock to the Hunter and Boomer frames: (250,0) 150 x 100, and the container moves the same 250 right', () => {
+    const d = si({ fit: true });
+    expect(rectOf(container(d))).toEqual(['r137', 'r100', '150', '100']);
+    expect(panelFrame(d, 'siHealth').shift).toEqual({ x: 250, y: 0 });
+  });
+
+  it('shifts every piece in the three live files by the box\'s top-left', () => {
+    const t = buildTrees(si({ fit: true }));
+    const x = (f: string, n: string) => kvGet(kvFind(t(f), [n])!, 'xpos');
+    expect([x(HUNTER, 'Health'), x(HUNTER, 'BackgroundImage'), x(HUNTER, 'HealthNumber'), x(HUNTER, 'DuckingIcon')]).toEqual(['2', '0', '85', '70']);
+    expect([x(SMOKER, 'Health'), x(SMOKER, 'BackgroundImage')]).toEqual(['2', '0']);
+    expect([x(BOOMER, 'Health'), x(BOOMER, 'BackgroundImage')]).toEqual(['72', '70']);
+  });
+
+  it('scales the fitted container and its offset with the element', () => {
+    const d = si({ fit: true, scale: 1.5 });
+    const c = container(d);
+    expect([kvGet(c, 'wide'), kvGet(c, 'tall')]).toEqual(['225', '150']);
+    expect(parsePos(kvGet(c, 'xpos')!, W)).toBe(parsePos('r387', W) + 250 * 1.5);
+  });
+
+  it('moves the fitted container from where the player put the element', () => {
+    const d = si({ fit: true, x: 100, y: 300 });
+    const c = container(d);
+    // A centre token on the 853.33-wide screen reads back to the half unit.
+    expect(Math.abs(parsePos(kvGet(c, 'xpos')!, W) - 350)).toBeLessThanOrEqual(0.5);
+    expect(parsePos(kvGet(c, 'ypos')!, 480)).toBe(300);
+  });
+
+  for (const scale of [1, 1.5]) {
+    it(`moves nothing on screen by fitting alone, at scale ${scale}`, () => {
+      const at = (d: HudDesign) => {
+        const r = elementRect(d, 'siHealth', d.aspect);
+        const t = buildTrees(d);
+        return Object.fromEntries([HUNTER, SMOKER, BOOMER].flatMap((f) => ['BackgroundImage', 'Health', 'HealthNumber', 'DuckingIcon'].map((n) => {
+          const b = kvFind(t(f), [n])!;
+          return [`${f} ${n}`, [r.x + parseFloat(kvGet(b, 'xpos')!), r.y + parseFloat(kvGet(b, 'ypos')!), kvGet(b, 'wide'), kvGet(b, 'tall')]];
+        })));
+      };
+      const fitted = at(si({ fit: true, scale })), plain = at(si({ scale }));
+      for (const [k, v] of Object.entries(plain)) {
+        const f = fitted[k];
+        expect(Math.abs((f[0] as number) - (v[0] as number)), k).toBeLessThanOrEqual(1);
+        expect(Math.abs((f[1] as number) - (v[1] as number)), k).toBeLessThanOrEqual(1);
+        expect([f[2], f[3]], k).toEqual([v[2], v[3]]);
+      }
+    });
+  }
+
+  it('reports the fitted container as the element\'s rect, where the preview clips it', () => {
+    const r = elementRect(si({ fit: true }), 'siHealth', '16:9');
+    expect([r.x, r.y, r.w, r.h]).toEqual([W - 137, 380, 150, 100]);
+  });
+
+  it('shrinks to the bars, numbers and crouch icon once the frame is hidden, and to the spec box without the icon', () => {
+    const noFrame = si({ fit: true }, { BackgroundImage: { visible: false } });
+    expect(panelFrame(noFrame, 'siHealth').shift).toEqual({ x: 252, y: 42 });
+    expect([kvGet(container(noFrame), 'wide'), kvGet(container(noFrame), 'tall')]).toEqual(['134', '40']);
+    const bare = si({ fit: true }, { BackgroundImage: { visible: false }, DuckingIcon: { visible: false } });
+    expect(panelFrame(bare, 'siHealth').shift).toEqual({ x: 252, y: 49 });
+    expect([kvGet(container(bare), 'wide'), kvGet(container(bare), 'tall')]).toEqual(['134', '33']);
+  });
+
+  it('fits Modern to its content and stretches its fill in all three files', () => {
+    const d = si({ fit: true }, {}, 'modern');
+    // Health 8,25 134x5; number 8,3 100x20; crouch icon 134,4 12x12; the frame is 0 x 0.
+    expect(panelFrame(d, 'siHealth').shift).toEqual({ x: 8, y: 3 });
+    expect([kvGet(container(d), 'wide'), kvGet(container(d), 'tall')]).toEqual(['138', '27']);
+    for (const f of [HUNTER, SMOKER, BOOMER]) expect(rectOf(kvFind(buildTrees(d)(f), ['ModBg'])!), f).toEqual(['0', '0', '138', '27']);
+  });
+
+  it('reads a piece back in the unfitted Hunter frame, as the side panel shows it', () => {
+    expect(panelChild(si({ fit: true }), 'siHealth', 'Health')).toMatchObject({ x: 252, y: 69, w: 132, h: 13 });
+  });
+
+  it('keeps the file\'s container when nothing is left to fit to', () => {
+    const all = Object.fromEntries(['BackgroundImage', 'Health', 'HealthNumber', 'DuckingIcon'].map((n) => [n, { visible: false }]));
+    expect(rectOf(container(si({ fit: true }, all)))).toEqual(['r387', 'r100', '400', '100']);
+  });
+
+  it('leaves the container and the files alone with fit off', () => {
+    const files = buildHud(si({ scale: 1 }));
+    for (const f of [HUNTER, SMOKER, BOOMER]) expect(text(files, f), f).toBeUndefined();
+    expect(rectOf(kvFind(layoutOf(files), ['HudZombieHealth'])!)).toEqual(['r387', 'r100', '400', '100']);
+  });
+});

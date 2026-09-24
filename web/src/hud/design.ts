@@ -524,6 +524,11 @@ function element(id: string, raw: unknown, key: BaseKey): ElementOverride {
   // show or hide the wrong things. Kept only once that gate passes, and
   // only as a real boolean; never added.
   if (id === 'ownHealth' && typeof raw.fit === 'boolean' && probe('Q2')) out.fit = raw.fit;
+  // Your infected health's fit (build.ts fitSi) rests on probe Q11, which
+  // passed: HudZombieHealth clips its children
+  // (/home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/br-bce.png).
+  // Opt-in, so kept only as a real boolean; never added.
+  if (id === 'siHealth' && typeof raw.fit === 'boolean') out.fit = raw.fit;
   const c = colour(raw.color); if (c) out.color = c;
   const b = colour(raw.bg); if (b) out.bg = b;
   const keys = validKeys(elementById(id)?.keys, raw.keys);

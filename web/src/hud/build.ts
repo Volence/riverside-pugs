@@ -22,7 +22,7 @@ import {
   type WeaponNumKey,
 } from './design';
 import {
-  panelChildren, panelOfFile, childDef, maxInset, linkedValue, TEAM_PANEL, OWN_PANEL, type ChildDef, type PanelChildren, type LinkRect, type LinkRule,
+  panelChildren, panelOfFile, childDef, maxInset, linkedValue, TEAM_PANEL, OWN_PANEL, SI_PANEL, type ChildDef, type PanelChildren, type LinkRect, type LinkRule,
 } from './children';
 import { crosshairFiles } from '../crosshair/vpk';
 import {
@@ -645,6 +645,97 @@ function reviveAnchorPass(work: Work) {
   ].map(([key, value]) => ({ key, value })) });
 }
 
+/** Your infected health's three live files: the Hunter's (the Tank reads it too), then its linked Smoker and Boomer files. */
+const SI_FILES = [SI_PANEL.file, ...(SI_PANEL.linked ?? []).map((l) => l.file)];
+
+/**
+ * HudZombieHealth as the base file sizes it (stock 400 x 100, Modern
+ * 150 x 34), at 0, 0: the frame the three files' pieces sit in, which is what
+ * a keep piece is cut to. Null when the base lacks the block (an import).
+ */
+function siContainer(design: HudDesign): Box | null {
+  const el = elementById(SI_PANEL.panelId)!;
+  const n = kvFind(baseTree(baseOf(design), LAYOUT), [el.key]);
+  if (!n) return null;
+  return { x: 0, y: 0, w: parseSize(kvGet(n, 'wide') ?? '0', screenW(design.aspect)), h: parseSize(kvGet(n, 'tall') ?? '0', SCREEN_H) };
+}
+
+/**
+ * Your infected health's fit box: the union of the three live files' boxes
+ * (fitBox, the keep pieces, the frame and the crouch icon, cut to the base
+ * container), on the files as the edits left them. Stock: the Hunter frame
+ * at 250,0 200 x 100 cut to 400 wide, the Boomer frame at 320, the bars,
+ * numbers and crouch icon inside, so (250,0) 150 x 100 (plan decision 1).
+ * The zombiehealthleft_* files are never child-edited and never counted.
+ */
+function siContent(work: Work, design: HudDesign): Box | null {
+  const cut = siContainer(design);
+  const boxes = SI_FILES.map((f) => fitBox(work.tree(f), SI_PANEL, cut)).filter((b): b is Box => !!b);
+  if (!boxes.length) return null;
+  const x0 = Math.min(...boxes.map((b) => b.x)), y0 = Math.min(...boxes.map((b) => b.y));
+  const x1 = Math.max(...boxes.map((b) => b.x + b.w)), y1 = Math.max(...boxes.map((b) => b.y + b.h));
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/**
+ * Fit your infected health (plan decision 2). Every piece of the three live
+ * files shifts by the box's top-left, Modern's fill is stretched over the
+ * box as on your own panel, and the container, HudZombieHealth, is sized to
+ * the box and moved right and down by the box's offset at the element's
+ * scale, so fitting alone moves nothing on screen (stock r387 becomes r137).
+ * The position starts from the token layoutPass left (the player's move, or
+ * the file's own), and is written back through formatPos, the anchor rule
+ * layoutPass uses. The size is written unscaled: scalePass multiplies the
+ * container with the rest. The two zombiehealthleft_* files are not shifted:
+ * they keep today's scale-only treatment. Probe Q11
+ * (/home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/br-bce.png)
+ * showed the container clips, which is what makes the smaller one cut what
+ * it no longer covers. Opt-in: absent means off (unlike your own health,
+ * the fit moves the container anchor players already placed).
+ */
+function fitSi(work: Work, design: HudDesign) {
+  const o = design.elements[SI_PANEL.panelId];
+  if (o?.fit !== true) return;
+  const el = elementById(SI_PANEL.panelId)!;
+  if (!baseHasElement(work.key, el)) return;
+  const box = siContent(work, design);
+  if (!box) return;                                                // nothing to fit to: the file's container stays
+  const container = work.panel(LAYOUT, [el.key]);
+  for (const f of SI_FILES) {
+    const nodes = work.tree(f);
+    shiftNodes(nodes, box);
+    stretchFill(nodes, box);
+  }
+  const k = o.scale ?? 1, W = screenW(design.aspect);
+  const x = parsePos(kvGet(container, 'xpos') ?? '0', W) + box.x * k;
+  const y = parsePos(kvGet(container, 'ypos') ?? '0', SCREEN_H) + box.y * k;
+  kvSet(container, 'xpos', formatPos(x, box.w * k, W));
+  kvSet(container, 'ypos', formatPos(y, box.h * k, SCREEN_H));
+  kvSet(container, 'wide', String(box.w));
+  kvSet(container, 'tall', String(box.h));
+}
+
+/**
+ * How far a fitted element's container is drawn from its stored position:
+ * the fit box's offset at the element's scale, for a panel framed by its
+ * own hudlayout.res block (your infected health), else 0, 0. A stored x and
+ * y mean the unfitted container's place, so fit on and off keep every piece
+ * where it was; edit.ts's placeElement takes a drawn position and stores it
+ * less this.
+ */
+export function elementFitShift(design: HudDesign, id: string): { x: number; y: number } {
+  if (!fitsContainer(design, id)) return { x: 0, y: 0 };
+  const box = panelWork(design).boxes[id]!;
+  const k = design.elements[id]?.scale ?? 1;
+  return { x: Math.round(box.x * k), y: Math.round(box.y * k) };
+}
+
+/** Whether a fit rule moves and sizes this element's own hudlayout.res block: fitted, framed by it, and with something to fit to. */
+function fitsContainer(design: HudDesign, id: string): boolean {
+  const panel = panelChildren(id);
+  return !!panel && panel.frame === 'hudlayout' && design.elements[id]?.fit === true && !!panelWork(design).boxes[id];
+}
+
 /**
  * The background a fitted panel carries: the style slot that restyles it,
  * the child the build injects for it, and that child's zpos (under every
@@ -715,10 +806,12 @@ function fitTeam(work: Work, design: HudDesign) {
  * the background child it injects. One entry per panel that can be fitted,
  * keyed by panel id.
  */
-interface FitRule { content: (work: Work, design: HudDesign) => Box | null; apply: (work: Work, design: HudDesign) => void; bg: PanelBg }
+interface FitRule { content: (work: Work, design: HudDesign) => Box | null; apply: (work: Work, design: HudDesign) => void; bg?: PanelBg }
 const FIT_RULES: Record<string, FitRule> = {
   teamColumn: { content: (work) => fitBox(work.tree(CARD), TEAM_PANEL, null), apply: fitTeam, bg: CARD_BG },
   ownHealth: { content: ownContent, apply: fitOwn, bg: OWN_BG },
+  // No background slot of its own (yet): nothing is injected.
+  siHealth: { content: siContent, apply: fitSi },
 };
 
 /**
@@ -727,7 +820,7 @@ const FIT_RULES: Record<string, FitRule> = {
  * Send to back keeps every piece above it, so a background added later
  * never covers a piece either.
  */
-export const panelBgZpos = (panelId: string): number | undefined => FIT_RULES[panelId]?.bg.zpos;
+export const panelBgZpos = (panelId: string): number | undefined => FIT_RULES[panelId]?.bg?.zpos;
 
 /** Every panel's fit rule, in turn. */
 function fitPass(work: Work, design: HudDesign) {
@@ -1481,7 +1574,7 @@ function stylePass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkF
     // injects: a flat one is a plain fillcolor and needs no texture, and one
     // fitPass did not inject (an Image style with no upload) has nothing to
     // point at.
-    if (Object.values(FIT_RULES).some((r) => r.bg.slot === slot.id)) {
+    if (Object.values(FIT_RULES).some((r) => r.bg?.slot === slot.id)) {
       const bg = panelBackground(design, slot.id);
       if (!bg || 'fill' in bg) continue;
     }
@@ -1813,6 +1906,16 @@ export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
   // registry's mockSize. mockSize stands in only while the file is untouched
   // and the real container is wider than anything it shows.
   const box = t?.container ?? { w: p.w * k, h: p.h * k };
+  // A container its fit rule moved and sized (your infected health) is
+  // where, and as big as, the generated file has it.
+  if (fitsContainer(design, id)) {
+    const c = kvFind(buildTrees(design)(LAYOUT), [el.key])!;
+    const W = screenW(aspect);
+    return {
+      x: parsePos(kvGet(c, 'xpos') ?? '0', W), y: parsePos(kvGet(c, 'ypos') ?? '0', SCREEN_H),
+      w: parseSize(kvGet(c, 'wide') ?? '0', W), h: parseSize(kvGet(c, 'tall') ?? '0', SCREEN_H), visible,
+    };
+  }
   return { x: parsePos(xTok, screenW(aspect)), y: parsePos(yTok, SCREEN_H), w: box.w, h: box.h, visible };
 }
 

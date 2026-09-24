@@ -495,3 +495,20 @@ describe('children of every registered panel', () => {
     expect(validateDesign({ v: 1, elements: { chat: { x: 5, keys: { foo: '1' } } } }).elements.chat).toEqual({ x: 5 });
   });
 });
+
+describe('fit on your infected health', () => {
+  it('keeps a stored fit on siHealth as a real boolean, and never adds one', () => {
+    expect(validateDesign({ v: 1, elements: { siHealth: { fit: true } } }).elements.siHealth).toEqual({ fit: true });
+    expect(validateDesign({ v: 1, elements: { siHealth: { fit: false } } }).elements.siHealth).toEqual({ fit: false });
+    expect(validateDesign({ v: 1, elements: { siHealth: { fit: 'yes' } } }).elements.siHealth).toBeUndefined();
+    expect(validateDesign({ v: 1, elements: { siHealth: { scale: 1.5 } } }).elements.siHealth).toEqual({ scale: 1.5 });
+    // Opt-in: a new design does not fit it (fit moves the container a player placed).
+    expect(DEFAULT_DESIGN.elements.siHealth).toBeUndefined();
+  });
+
+  it('drops fit on an element that has no fit rule', () => {
+    for (const id of ['abilityRing', 'chat', 'ghostPanel', 'weaponSelection']) {
+      expect(validateDesign({ v: 1, elements: { [id]: { fit: true } } }).elements[id], id).toBeUndefined();
+    }
+  });
+});

@@ -860,3 +860,24 @@ describe('the card bar and the item row move sideways together (the card revive 
     for (const n of ['Health', 'Items']) expect(childDef('teamColumn', n)!.note, n).toMatch(/revive/);
   });
 });
+
+describe('placing a fitted infected health', () => {
+  it('lands where it is asked on screen, the fit offset kept out of the stored position', () => {
+    const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: { siHealth: { fit: true } } };
+    const moved = placeElement(d, 'siHealth', 300, 200);
+    const r = elementRect(moved, 'siHealth', moved.aspect);
+    // A centre token on the 853.33-wide screen reads back to the half unit, as any placed element does.
+    expect(Math.abs(r.x - 300)).toBeLessThanOrEqual(0.5);
+    expect(r.y).toBe(200);
+    // Stored where the unfitted container would sit: fit off and on show the same pieces in the same place.
+    expect(moved.elements.siHealth).toMatchObject({ x: 50, y: 200 });
+  });
+
+  it('nudges from where it is drawn', () => {
+    const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: { siHealth: { fit: true } } };
+    const before = elementRect(d, 'siHealth', d.aspect);
+    const after = elementRect(nudge(d, 'siHealth', -5, 0), 'siHealth', d.aspect);
+    expect(Math.abs(after.x - (before.x - 5))).toBeLessThanOrEqual(1);
+    expect(after.y).toBe(before.y);
+  });
+});

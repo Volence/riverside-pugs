@@ -15,7 +15,7 @@ import {
 } from './design';
 import { screenW, SCREEN_H } from './units';
 import { elementById } from './elements';
-import { elementRect, teamLayout, teamCardRects, isFreeTeam, panelChild, buildTrees, panelBgZpos, type CardChild } from './build';
+import { elementRect, elementFitShift, teamLayout, teamCardRects, isFreeTeam, panelChild, buildTrees, panelBgZpos, type CardChild } from './build';
 import { childDef, panelChildren, panelOfFile } from './children';
 import { kvGet } from './kv';
 import { unionBox, CORNERS, type Handle } from './guides';
@@ -646,8 +646,10 @@ export function placeElement(design: HudDesign, id: string, x: number, y: number
   if (!el || !el.move || (id === 'teamColumn' && isFreeTeam(design))) return design;
   const r = elementRect(design, id, design.aspect);
   const o = design.elements[id];
-  const px = clampOverride('x', Math.round(clampSpan(x, r.w, screenW(design.aspect), 8)));
-  const py = clampOverride('y', Math.round(clampSpan(y, r.h, SCREEN_H, 8)));
+  // A fitted container is drawn its fit offset from the stored position (build.ts elementFitShift).
+  const shift = elementFitShift(design, id);
+  const px = clampOverride('x', Math.round(clampSpan(x, r.w, screenW(design.aspect), 8)) - shift.x);
+  const py = clampOverride('y', Math.round(clampSpan(y, r.h, SCREEN_H, 8)) - shift.y);
   return { ...design, elements: { ...design.elements, [id]: { ...o, x: px, y: py } } };
 }
 
