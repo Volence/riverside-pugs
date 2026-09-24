@@ -266,6 +266,27 @@ export function clampOverride(key: RangeKey, value: number): number {
   return Math.min(hi, Math.max(lo, value));
 }
 
+/**
+ * The stored x and y of an element whose fit moves its own container (your
+ * infected health, fitted: build.ts fitSi; the fitted infected row). Those
+ * numbers are the unfitted container's, which is drawn the fit offset away,
+ * so the drag's on-screen clamp can store far below -200 (a fitted infected
+ * health at the left edge stores its drawn 8 - w less the offset, up to the
+ * whole screen at scale 2). The floor leaves room for an offset of the
+ * widest scale across the whole screen; placeElement clamps where it is
+ * drawn, and this only keeps what that stores.
+ */
+const FIT_POS_RANGES = { x: [RANGES.x[0] - 2 * 853, RANGES.x[1]], y: [RANGES.y[0] - 2 * 480, RANGES.y[1]] } as const;
+
+/** Whether an element's fit moves its container, so its x and y take FIT_POS_RANGES. */
+export const fitMovesContainer = (id: string, fit: boolean | undefined): boolean => fit === true && (id === 'siHealth' || id === 'infectedRow');
+
+/** clampOverride for a stored x or y, the fitted range where the fit moves the container. */
+export function clampPos(key: 'x' | 'y', value: number, fitted: boolean): number {
+  const [lo, hi] = fitted ? FIT_POS_RANGES[key] : RANGES[key];
+  return Math.min(hi, Math.max(lo, value));
+}
+
 const CHILD_RANGES = { x: [-64, 512], y: [-64, 512], w: [1, 512], h: [1, 512], fontSize: [6, 64], z: [-50, 50] } as const;
 export type ChildRangeKey = keyof typeof CHILD_RANGES;
 
@@ -518,7 +539,8 @@ function element(id: string, raw: unknown, key: BaseKey): ElementOverride {
     // nothing but on the two teams.
     if ((team && k === 'spacing') || (!team && !infected && k === 'gap')) continue;
     const v = raw[k];
-    if (typeof v === 'number' && Number.isFinite(v)) out[k] = clampOverride(k, v);
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    out[k] = k === 'x' || k === 'y' ? clampPos(k, v, fitMovesContainer(id, raw.fit === true)) : clampOverride(k, v);
   }
   // The infected row is only ever a row: the game lays its cards out
   // HorizPanelSpacing apart and reads no vertical key (probe RESULTS, dll 0x10247a70).

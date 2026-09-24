@@ -10,7 +10,7 @@
  * canvas draws.
  */
 import {
-  clampOverride, clampChild, DEFAULT_DESIGN, newDesign,
+  clampOverride, clampChild, clampPos, fitMovesContainer, DEFAULT_DESIGN, newDesign,
   type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type Box, type WeaponsOverride, type ImportedRef,
 } from './design';
 import { screenW, SCREEN_H } from './units';
@@ -701,8 +701,12 @@ export function placeElement(design: HudDesign, id: string, x: number, y: number
   const shift = elementFitShift(design, id);
   const guess = { x: Math.round(want.x - shift.x), y: Math.round(want.y - shift.y) };
   const at = drawnAt(design, id, guess.x, guess.y);
-  const px = clampOverride('x', storedFor(want.x, at.x - guess.x));
-  const py = clampOverride('y', storedFor(want.y, at.y - guess.y));
+  // want is already held on screen; the stored range is the fitted one
+  // where the fit moves the container, so that clamp never pulls a fitted
+  // panel back from the left or top edge (design.ts FIT_POS_RANGES).
+  const fitted = fitMovesContainer(id, o?.fit);
+  const px = clampPos('x', storedFor(want.x, at.x - guess.x), fitted);
+  const py = clampPos('y', storedFor(want.y, at.y - guess.y), fitted);
   return { ...design, elements: { ...design.elements, [id]: { ...o, x: px, y: py } } };
 }
 

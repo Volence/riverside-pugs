@@ -10,7 +10,7 @@ import {
 import { buildHud, buildTrees } from './build';
 import { weaponSlots } from './weapons';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
-import { DEFAULT_DESIGN, newDesign, baseTeam, type HudDesign } from './design';
+import { DEFAULT_DESIGN, newDesign, baseTeam, validateDesign, type HudDesign } from './design';
 import { DEFAULT_STATE } from '../crosshair/draw';
 import type { CrosshairArt } from '../crosshair/model';
 import { formatPos, parsePos } from './units';
@@ -887,6 +887,24 @@ describe('placing a fitted infected health', () => {
     const after = elementRect(nudge(d, 'siHealth', -5, 0), 'siHealth', d.aspect);
     expect(Math.abs(after.x - (before.x - 5))).toBeLessThanOrEqual(1);
     expect(after.y).toBe(before.y);
+  });
+});
+
+describe('a fitted infected health at the screen edges', () => {
+  for (const k of [1, 2]) {
+    it(`reaches the left edge as any element does, 8 units kept on screen, at scale ${k}`, () => {
+      const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: { siHealth: { fit: true, scale: k, x: 50, y: 200 } } };
+      const w = elementRect(d, 'siHealth', d.aspect).w;
+      const moved = placeElement(d, 'siHealth', -10000, -10000);
+      const r = elementRect(moved, 'siHealth', moved.aspect);
+      expect([r.x, r.y]).toEqual([8 - w, 8 - r.h]);
+      // Stored less the fit offset, below the unfitted -200 floor, and kept by the validator.
+      expect(moved.elements.siHealth!.x).toBeLessThan(-200);
+      expect(validateDesign(moved).elements.siHealth).toEqual(moved.elements.siHealth);
+    });
+  }
+  it('still holds an unfitted element to the validator\'s -200', () => {
+    expect(placeElement(DEFAULT_DESIGN, 'chat', -900, 0).elements.chat!.x).toBe(-200);
   });
 });
 
