@@ -23,6 +23,11 @@ describe('balance formatting', () => {
     expect(fmtChange('tank.lifetime_s', { diff: 12, rel: 0.12, lo: 2, hi: 23 })).toEqual({ main: '+12%', range: '[+2 s, +23 s]' });
     expect(fmtChange('tank.spawns', { diff: null, rel: null, lo: null, hi: null })).toEqual({ main: 'n/a', range: '' });
   });
+  it('formats per-minute rates as plain numbers, not minutes', () => {
+    expect(fmtValue('si.pins_per_min', 3.022)).toBe('3.02');
+    expect(fmtValue('round.length_min', 4.14)).toBe('4.1 min');
+    expect(fmtChange('si.pins_per_min', { diff: 0.456, rel: null, lo: 0.1, hi: 0.823 })).toEqual({ main: '+0.46', range: '[+0.1, +0.82]' });
+  });
   it('handles near-zero values without sign', () => {
     expect(fmtChange('tank.lifetime_s', { diff: -0.2, rel: -0.001, lo: null, hi: null }).main).toBe('0%');
     expect(fmtChange('tank.spawns', { diff: -0.001, rel: null, lo: null, hi: null }).main).toBe('0');

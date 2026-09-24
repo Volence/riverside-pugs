@@ -1619,6 +1619,11 @@ body.is-theater { overflow: hidden; }
 .admin-status--invited, .admin-status--reserved, .admin-status--live { color: var(--rating); }
 .admin-warn { color: var(--loss); }
 
+/* Balance patches: the Public page block on the detail panel (publish state,
+ * Publish/Unpublish, and the Preview button's rendered public entry). */
+.admin-preview { border: 1px solid var(--border); padding: var(--sp-3) var(--sp-4); margin-top: var(--sp-3); }
+.admin-preview__result { margin-top: var(--sp-3); border-top: 1px solid var(--border); padding-top: var(--sp-3); }
+
 /* Balance compare: patch-group controls, banners, per-row verdict and the
  * Task 8 quick-check placeholder. */
 .verdict--real { color: var(--win); font-weight: 600; }
@@ -2236,4 +2241,29 @@ tbody tr.is-lifted td { opacity: 0.55; }
 @media (max-width: 480px) {
   .chatlog__line { grid-template-columns: 3rem 1fr; }
   .chatlog__msg { grid-column: 2; }
+}
+
+/* Balance patch notes (/balance). --rating is this site's warning/accent
+ * colour: the admin balance desk already uses it for .balance-banner and
+ * .verdict--too_early, so the public banner matches it. */
+.patch-notes { white-space: pre-line; }
+.patch-banner { border-left: 3px solid var(--rating); padding-left: 0.6rem; }
+.patch-row--real td:last-child { font-weight: 600; }
+/* Fixed column widths so every topic's table lines up with the next. */
+.patch-table { table-layout: fixed; width: 100%; }
+.patch-table th:nth-child(1) { width: 30%; }
+.patch-table th:nth-child(2), .patch-table th:nth-child(3) { width: 10%; }
+.patch-table th:nth-child(4) { width: 12%; }
+.patch-table td { overflow-wrap: anywhere; }
+/* Phones: one block per row. The metric in bold, then "before -> after" and
+ * the change on one line, then the sentence, with no horizontal scroll. */
+@media (max-width: 640px) {
+  .patch-table, .patch-table tbody, .patch-table tr { display: block; width: 100%; }
+  .patch-table thead { display: none; }
+  .patch-table tr { padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+  .patch-table td { display: inline; padding: 0; border: 0; }
+  .patch-table td.patch-table__metric { display: block; font-weight: 600; }
+  .patch-table td.patch-table__before::after { content: " \2192 "; }
+  .patch-table td.patch-table__change:not(:empty) { margin-left: 0.5rem; }
+  .patch-table td.patch-table__sentence { display: block; margin-top: 0.25rem; }
 }

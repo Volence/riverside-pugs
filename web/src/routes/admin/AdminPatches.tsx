@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import { adminApi, type PatchDetail, type PatchSummary } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel } from '../../components/bits';
+import { AdminPatchPublic } from './AdminPatchPublic';
 import { fmtTime, useAction } from './useAction';
 
 const label = (p: { number: number; name: string | null }) => p.name ?? `Unnamed patch ${p.number}`;
@@ -48,7 +49,7 @@ export function AdminPatches() {
         {!patches.error && (
           <div class="table-wrap">
             <table class="admin-table">
-              <thead><tr><th>#</th><th>Name</th><th>Source</th><th>Since</th><th>Rounds</th><th>Servers</th><th /></tr></thead>
+              <thead><tr><th>#</th><th>Name</th><th>Source</th><th>Since</th><th>Rounds</th><th>Servers</th><th>Public</th><th /></tr></thead>
               <tbody>
                 {(patches.data?.patches ?? []).map((p) => (
                   <tr key={p.id} class={!p.reviewed && p.source === 'detected' ? 'admin-warn' : ''}>
@@ -58,6 +59,7 @@ export function AdminPatches() {
                     <td>{fmtTime(p.firstSeenAt)}</td>
                     <td>{p.source === 'announced' && p.rounds === 0 ? 'never played' : p.rounds}</td>
                     <td>{p.servers.map((s) => s.name).join(', ')}</td>
+                    <td>{p.publishedAt && <span class="admin-tag">public</span>}</td>
                     <td><button class="btn" type="button" disabled={busy} onClick={() => openDetail(p)}>Details</button></td>
                   </tr>
                 ))}
@@ -83,6 +85,9 @@ export function AdminPatches() {
             />
             <button class="btn" type="submit" disabled={busy}>Save and mark reviewed</button>
           </form>
+          <AdminPatchPublic
+            key={open.id} patch={open} run={run} busy={busy}
+            listRow={patches.data?.patches.find((p) => p.id === open.id)} />
           {open.diffVsPrevious
             ? <ul class="admin-list">
               {open.diffVsPrevious.added.map((k) => <li key={`a${k}`}>added {k}</li>)}

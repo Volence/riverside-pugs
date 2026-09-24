@@ -8,6 +8,7 @@ export const defs: MetricDef[] = [
   {
     id: 'pace.si_damage_per_min', group: 'pace', version: 3,
     description: 'Damage special infected dealt to standing survivors per playing minute.',
+    public: { label: 'Special infected damage per minute' },
     compute: (c) => {
       if (!c.hasStats || !c.timeline) return null;
       const m = c.timeline.minutes('all');

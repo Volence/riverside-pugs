@@ -33,6 +33,7 @@ export const defs: MetricDef[] = [
   {
     id: 'witch.crown_rate', group: 'witch', version: 2,
     description: 'Crowns (one-shot witch kills) per witch.',
+    public: { label: 'Witches crowned' },
     compute: (c) => (c.skillDetect ? perWitch(c, sideStat(c, 'survivor', 'crowns')) : null),
   },
   {
@@ -43,6 +44,7 @@ export const defs: MetricDef[] = [
   {
     id: 'witch.startle_rate', group: 'witch', version: 2,
     description: 'Share of witches that got startled.',
+    public: { label: 'Witches startled' },
     compute: (c) => perWitch(c, kind(c, 'witch_aggro').length),
   },
   {

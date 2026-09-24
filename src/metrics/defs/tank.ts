@@ -75,6 +75,7 @@ export const defs: MetricDef[] = [
   {
     id: 'tank.killed_rate', group: 'tank', version: 4,
     description: 'Share of tanks the survivors killed.',
+    public: { label: 'Tanks killed by survivors' },
     compute: (c) => {
       const n = tankCount(c);
       if (n === 0) return null;
@@ -95,6 +96,7 @@ export const defs: MetricDef[] = [
   {
     id: 'tank.lifetime_killed_s', group: 'tank', version: 1,
     description: 'Seconds a tank lived, counting only tanks the survivors killed (not cut short by the round ending).',
+    public: { label: 'How long a killed tank lasted (s)' },
     compute: (c) => {
       const iv = c.timeline?.tank ?? [];
       const kills = survivorKills(c).filter((e) => e.tMs >= 0);
@@ -110,6 +112,7 @@ export const defs: MetricDef[] = [
   {
     id: 'tank.damage_per_tank', group: 'tank', version: 2,
     description: 'Damage the tank dealt to survivors, per tank.',
+    public: { label: 'Damage dealt per tank' },
     compute: (c) => (c.hasStats ? perTank(sideStat(c, 'infected', 'dmg_as_tank'), c) : null),
   },
   {
@@ -125,6 +128,7 @@ export const defs: MetricDef[] = [
   {
     id: 'tank.incaps_caused', group: 'tank', version: 3,
     description: 'Survivor incaps caused by the tank player, per tank.',
+    public: { label: 'Survivor incaps per tank' },
     compute: (c) => perTank(byTank(c, 'incap').length, c),
   },
   {
