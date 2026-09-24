@@ -68,6 +68,45 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
 
 const INSTALL_FAQ: { q: string; a: preact.ComponentChildren }[] = [
   {
+    q: "I don't want to run the pack's left4dead.exe",
+    a: <>The pack's exe is there for one reason: it may use 4 GB of memory, and Steam's may
+      only use 2 GB. The L4D2 maps need more than 2 GB, so on Steam's exe they crash with "Out
+      of memory or address space". The catch is that the pack's exe is an older build, not
+      Steam's with one change, so you cannot easily check what is in it. You can give your
+      own exe the same permission instead, and that is a one-byte change you can check:
+      <ol class="howto">
+        <li>In step 3, drag in everything except <code>left4dead.exe</code>.</li>
+        <li>
+          In the Left 4 Dead folder from step 2, right-click an empty spot and pick{' '}
+          <strong>Open in Terminal</strong>. On Windows 10 it is <strong>File</strong>, then{' '}
+          <strong>Open Windows PowerShell</strong>.
+        </li>
+        <li>
+          Paste this and press Enter. It keeps your original as{' '}
+          <code>left4dead.exe.bak</code> and does nothing if the exe is already done.
+          <pre class="launch-opts"><code>{`& {
+  $exe = Join-Path (Get-Location) 'left4dead.exe'
+  $b = [IO.File]::ReadAllBytes($exe)
+  $pe = [BitConverter]::ToInt32($b, 0x3C)
+  if ($b[$pe] -ne 0x50 -or $b[$pe+1] -ne 0x45) { throw 'Not a Windows program. Are you in the Left 4 Dead folder?' }
+  if ($b[$pe+22] -band 0x20) { 'left4dead.exe already has the flag. Nothing to do.'; return }
+  Copy-Item $exe "$exe.bak" -Force
+  $b[$pe+22] = $b[$pe+22] -bor 0x20
+  [IO.File]::WriteAllBytes($exe, $b)
+  'Done. left4dead.exe can now use 4 GB. The original is left4dead.exe.bak.'
+}`}</code></pre>
+        </li>
+        <li>
+          Check it: <code>fc.exe /b left4dead.exe.bak left4dead.exe</code>. It should list
+          exactly one difference, <code>000000FE: 02 22</code>, and nothing else.
+        </li>
+      </ol>
+      Steam's <strong>Verify integrity of game files</strong> and any L4D1 update put Steam's
+      exe back, so run it again after either. Verify also resets{' '}
+      <code>left4dead\gameinfo.txt</code>, which turns the map pack off, so redo step 3 after
+      it too.</>,
+  },
+  {
     q: 'I already have L4D2 maps installed',
     a: <>Delete the old <code>left4dead_dlc4</code> folder first. If <code>thelaststand.vpk</code>{' '}
       or <code>[L4D] Campaign pack l4d2.vpk</code> are in <code>left4dead\addons</code>, delete
@@ -159,11 +198,16 @@ export function HowToPlay({ session }: { session: Session }) {
           </p>
         </Panel>
         <Panel>
-          <h3>Installing the map pack</h3>
+          <h3>Installing the L4D2 map pack</h3>
           <p>
-            Some campaigns are L4D2 maps ported to L4D1. They are not part of a normal
-            install, so before you can join a match on one, install the map pack once.
-            It stays installed after that.
+            This pack is only for the L4D2 campaigns ported to L4D1: Dead Center, Dark
+            Carnival, Swamp Fever, Hard Rain, The Parish, Passifice, Cold Stream and The Last
+            Stand. They are not part of a normal install, so before you can join a match on
+            one, install the pack once. It stays installed after that.
+          </p>
+          <p class="muted">
+            Custom campaigns are not in it. Each of those is its own download on the{' '}
+            <a href="/custom-campaigns">Custom campaigns</a> page.
           </p>
           <ol class="howto">
             <li>
@@ -181,6 +225,8 @@ export function HowToPlay({ session }: { session: Session }) {
               Open the zip you downloaded, then drag everything inside it into that folder, and
               click <strong>Yes</strong> when it asks about replacing files. When it is done you
               will have a new <code>left4dead_dlc4</code> folder sitting next to <code>left4dead</code>.
+              This includes a <code>left4dead.exe</code> that lets the game use more memory; if
+              you would rather not run someone else's exe, see below.
             </li>
             <li>
               <strong class="howto-warn">Turn your Shader Detail down, or these maps will crash your game.</strong>{' '}
