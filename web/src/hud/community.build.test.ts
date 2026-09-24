@@ -84,6 +84,18 @@ describe('a community import at build', () => {
     expect(() => buildHud(designOn(id))).toThrow('This community HUD would ship a file outside the HUD folders: cfg/autoexec.cfg');
   });
 
+  it("community build always writes the editor's addoninfo", () => {
+    // An addoninfo.txt can reach a community layer only through a stale
+    // store or a bug; the build still ships the editor's own, not that one.
+    const id = freshId();
+    const files = shareableHudFiles(sampleHud()).kept;
+    files.set('addoninfo.txt', latin1('"AddonInfo" { "addontitle" "not the editor" "addonContent_Script" "1" }'));
+    registerImport(id, files, { community: true });
+    const got = new Map(buildHud(designOn(id)).map((f) => [f.path, f.data]));
+    const plain = new Map(buildHud(validateDesign({ v: 1, name: 'x', preset: 'stock', crosshair: 'none' })).map((f) => [f.path, f.data]));
+    expect(got.get('addoninfo.txt')).toEqual(plain.get('addoninfo.txt'));
+  });
+
   it("passes a private import's own files through, as the import spec promised", () => {
     const id = freshId();
     const files = withCfg();
