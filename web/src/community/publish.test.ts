@@ -170,6 +170,25 @@ describe('renderPreview on the in-game backdrops', () => {
     expect(calls.some(([m, a]) => m === 'fillText' && a[0] === 'TOO FAR FROM THE SURVIVORS')).toBe(false);
   });
 
+  it('shows on the survivor side exactly what a Healthy survivor always sees: no use bar, no occasional panel', async () => {
+    FakeImage.auto = 'load';
+    const { calls } = stubCanvas();
+    const hud = vi.spyOn(mock, 'drawHud');
+    for (const preset of ['stock', 'modern'] as const) {
+      const d = validateDesign({ v: 1, name: 'x', preset, aspect: '16:9' });
+      await renderPreview(d, 'survivor', { quietMs: 5, maxMs: 50 });
+      const view = hud.mock.calls.at(-1)![7]!;
+      expect(hud.mock.calls.at(-1)![5]).toBeNull();
+      const shown = mock.visibleElements('survivor', d).filter((el) => mock.shownInState(el, view.state)).map((el) => el.id);
+      // Your health, the teammates, the weapons and the crosshair are always up; the chat and the
+      // kill notices are the everyday stand-ins both sides show. The mic, vote, voice list, survival
+      // timer, finale meter, peril notice and wait-for-teammates warning come and go.
+      expect(shown.sort(), preset).toEqual(['chat', 'killNotices', 'ownHealth', 'teamColumn', 'weaponSelection', 'xhair']);
+    }
+    // The use bar shows in the game only while you heal, revive or are revived.
+    expect(calls.some(([m, a]) => m === 'fillText' && a[0] === 'HEALING YOURSELF')).toBe(false);
+  });
+
   it('waits for the backdrop before it draws anything', async () => {
     FakeImage.auto = null;
     const { calls } = stubCanvas();

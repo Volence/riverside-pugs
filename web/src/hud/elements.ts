@@ -105,10 +105,14 @@ export const ELEMENTS: HudElement[] = [
    * and a map's timed button (CButtonTimed::UseTimed, which checks no team;
    * a spawned infected can use an entity only if the map flags it for them,
    * CTerrorPlayer::IsUseableEntity, and no probe has seen one). Offered on
-   * the infected side, its sample drew over the spawn panel.
+   * the infected side, its sample drew over the spawn panel. As the game
+   * shows it only for those few seconds, it is an occasional panel: drawn
+   * only with Occasional panels on or while it (or a piece) is selected.
    */
   { id: 'progressBar', label: 'Use / revive bar', side: 'survivor', key: 'HudProgressBar', move: true, resize: 'scale',
-    children: ['resource/ui/hud/progressbar.res'], mockSize: { stock: { w: 228, h: 24 }, modern: { w: 228, h: 24 } }, props: ['visible'] },
+    children: ['resource/ui/hud/progressbar.res'], mockSize: { stock: { w: 228, h: 24 }, modern: { w: 228, h: 24 } }, props: ['visible'],
+    occasional: true,
+    note: 'Shown while you heal yourself or a teammate, revive or help someone up, or are being healed or revived, and while you hold a timed button.' },
   /**
    * The game's real kill/incap feed: CHudPZDamageRecordPanel, whose
    * hudlayout panel is HudPZDamageRecord (stock and Modern share the same

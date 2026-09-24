@@ -123,7 +123,8 @@ describe('drag', () => {
     const b = elementFrame(big, 'progressBar');
     const p = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
     expect(p.x > f.x && p.x < f.x + f.w && p.y > f.y && p.y < f.y + f.h).toBe(true);
-    const hit = hitAt(big, 'survivor', 'healthy', p.x, p.y);
+    // With Occasional panels on, as the use bar is drawn (and picked) only then.
+    const hit = hitAt(big, 'survivor', { ...DEFAULT_PREVIEW, occasional: true }, p.x, p.y);
     expect(hit.element).toBe('progressBar');
     expect(dragIntent(big, own, hit, plain, null, p)).toEqual({ kind: 'move', sel: own });
     // With nothing selected, and outside the selected frame, the element under the point still wins.
@@ -205,10 +206,13 @@ describe('box and Ctrl+A', () => {
     expect(selectAll(D, 'survivor', 'healthy', piece)).toEqual({ kind: 'children', names: ['Head', 'Health', 'Name', 'Items', 'Status'], card: 1 });
     expect(selectAll(D, 'survivor', 'down', piece)).toEqual({ kind: 'children', names: ['Health', 'Name', 'Items', 'Status', 'Incapacitated'], card: 1 });
     expect(selectAll({ ...D, crosshair: 'addon' }, 'survivor', 'healthy', NONE)).toEqual({ kind: 'elements',
-      ids: ['ownHealth', 'teamColumn', 'weaponSelection', 'chat', 'progressBar', 'killNotices', 'xhair'] });
+      ids: ['ownHealth', 'teamColumn', 'weaponSelection', 'chat', 'killNotices', 'xhair'] });
     // With crosshair 'none' there is no xHair element to select.
     expect(selectAll(D, 'survivor', 'healthy', NONE)).toEqual({ kind: 'elements',
-      ids: ['ownHealth', 'teamColumn', 'weaponSelection', 'chat', 'progressBar', 'killNotices'] });
+      ids: ['ownHealth', 'teamColumn', 'weaponSelection', 'chat', 'killNotices'] });
+    // The use bar is an occasional panel: it counts only with Occasional panels on.
+    expect(selectAll(D, 'survivor', { ...DEFAULT_PREVIEW, occasional: true }, NONE)).toMatchObject({ kind: 'elements' });
+    expect((selectAll(D, 'survivor', { ...DEFAULT_PREVIEW, occasional: true }, NONE) as { ids: string[] }).ids).toContain('progressBar');
   });
 
   it('never counts a hidden piece or decoration as drawn', () => {

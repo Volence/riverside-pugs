@@ -1192,10 +1192,11 @@ describe('Hud page', () => {
     expect(screen.getByText('5 pieces in the teammate card', { selector: 'legend' })).toBeTruthy();
     clickAt(canvas, 426, 100);
     fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
-    // Six: ownHealth, teamColumn, weaponSelection, chat, progressBar and
-    // killNotices; with no crosshair saved on the Crosshair page, a new
-    // design has crosshair 'none', and no xHair to select.
-    expect(screen.getByText('6 elements', { selector: 'legend' })).toBeTruthy();
+    // Five: ownHealth, teamColumn, weaponSelection, chat and killNotices (the
+    // use bar is an occasional panel, not drawn with the toggle off); with no
+    // crosshair saved on the Crosshair page, a new design has crosshair 'none',
+    // and no xHair to select.
+    expect(screen.getByText('5 elements', { selector: 'legend' })).toBeTruthy();
   });
 
   it('aligns several pieces, and hides them all', () => {
