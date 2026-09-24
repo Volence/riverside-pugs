@@ -5,8 +5,8 @@ import { withTeamDir } from './edit';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
 import { baseFile, registerImport, unregisterImport } from './base';
 import { sampleHud } from './importFixtures';
-import { artUrl } from './art';
-import { buildTrees, elementRect, teamCardRects } from './build';
+import { artUrl, CROSSHAIR_OPEN } from './art';
+import { buildTrees, elementRect, teamCardRects, markerBox, markerPx } from './build';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H } from './units';
 import { DEFAULT_STATE, PX_AT_1080 } from '../crosshair/draw';
@@ -574,6 +574,71 @@ describe('drawHud delegates panels to the renderer', () => {
       const r = elementRect(d, 'abilityRing', d.aspect);
       const [icon] = drawsOf(calls, 'vgui/hud/pz_charge_lunge');
       expect(icon.a.slice(1)).toEqual([(r.x + 5) * K, (r.y + 5) * K, 46 * K, 46 * K]);
+    });
+  });
+
+  describe('the ability marker and the infected crosshair (plan Task 9)', () => {
+    const K = 2.25;
+    function calls(design: HudDesign, state: PreviewState = DEFAULT_PREVIEW) {
+      _setImageFactory((url) => ({ src: url, complete: true, naturalWidth: 64, naturalHeight: 64, onload: null, onerror: null }) as unknown as HTMLImageElement);
+      const out: { m: string; a: unknown[] }[] = [];
+      const base = fakeCtx(() => {}) as unknown as Record<string | symbol, unknown>;
+      const ctx = new Proxy(base, {
+        get: (t, k) => (typeof t[k] === 'function'
+          ? (...a: unknown[]) => { out.push({ m: String(k), a }); return (t[k] as (...x: unknown[]) => unknown)(...a); }
+          : t[k]),
+        set: (t, k, v) => { t[k] = v; return true; },
+      }) as unknown as CanvasRenderingContext2D;
+      drawHud(ctx, 1920, 1080, design, 'infected', null, undefined, { state });
+      _setImageFactory(null);
+      return out;
+    }
+    const src = (c: { a: unknown[] }) => (c.a[0] as { src?: string }).src;
+    const draws = (cs: { m: string; a: unknown[] }[], m: string) => cs.filter((c) => c.m === 'drawImage' && src(c) === artUrl(m));
+    const marker = (size: number, extra: Record<string, string> = {}) =>
+      validateDesign({ v: 1, elements: { abilityMarker: { keys: { ability_size: size, ...extra } } } });
+    const centred = (c: { a: unknown[] }) => [(c.a[1] as number) + (c.a[3] as number) / 2, (c.a[2] as number) + (c.a[4] as number) / 2];
+
+    it('draws PZ_charge_crosshair centred on the screen at its size in screen pixels, in the ready colour', () => {
+      // /home/volence/l4d/hud/probe-phase2-infected/b9/shots-v2/crops/centre-af.png (c, d): a green ring round
+      // the crosshair, centred at (959.5, 539.5), with ability_size 40 and ability_ready_color 0 255 0.
+      const d = marker(40, { ability_ready_color: '255 255 255 255' });
+      const [m] = draws(calls(d), 'vgui/hud/pz_charge_crosshair');
+      const want = markerBox(d, d.aspect);
+      expect(m.a.slice(1)).toEqual([want.x * K, want.y * K, want.w * K, want.h * K]);
+      // The editor's 16:9 screen is 853 units, 1919.25 px at 1080p: its centre is 0.375 px left of the game's.
+      for (const v of centred(m)) expect(Math.abs(v - (v > 700 ? 960 : 540))).toBeLessThanOrEqual(0.5);
+      expect(want.w * K).toBeCloseTo(markerPx(40), 6);         // screen pixels, whatever the design's scale
+      expect(markerPx(20)).toBeLessThan(markerPx(40));
+    });
+
+    it('draws the game\'s own crosshair, PZ_crosshair_open, 32 px square at the centre (b9v2-d: x 944 to 975)', () => {
+      const cs = calls(DEFAULT_DESIGN);
+      const [x] = draws(cs, CROSSHAIR_OPEN);
+      expect(x.a.slice(1)).toEqual([960 - 16, 540 - 16, 32, 32]);
+      expect(draws(calls(DEFAULT_DESIGN, { ...DEFAULT_PREVIEW, infected: 'ghost' }), CROSSHAIR_OPEN)).toHaveLength(1);
+    });
+
+    it('draws no marker while not ready, a partial one while recharging, and none as a ghost or dead', () => {
+      // client.dll 0x102412d6: below full progress the marker takes the charging colour and its arc shows the
+      // progress, so a standing Hunter (no progress) draws nothing (centre-af.png b).
+      const d = marker(40);
+      expect(draws(calls(d, { ...DEFAULT_PREVIEW, ability: 'notReady' }), 'vgui/hud/pz_charge_crosshair')).toEqual([]);
+      const cs = calls(d, { ...DEFAULT_PREVIEW, ability: 'recharging' });
+      expect(draws(cs, 'vgui/hud/pz_charge_crosshair')).toHaveLength(1);
+      const arc = cs.find((c) => c.m === 'arc' && Math.abs((c.a[0] as number) - 960) <= 0.5 && Math.abs((c.a[1] as number) - 540) <= 0.5)!;
+      expect(arc.a[4]).toBeCloseTo(-Math.PI / 2 - 0.4 * 2 * Math.PI, 9);
+      for (const infected of ['ghost', 'dead'] as const) {
+        expect(draws(calls(d, { ...DEFAULT_PREVIEW, infected }), 'vgui/hud/pz_charge_crosshair'), infected).toEqual([]);
+      }
+      expect(draws(calls(d, { ...DEFAULT_PREVIEW, infected: 'dead' }), CROSSHAIR_OPEN)).toEqual([]);
+    });
+
+    it('draws neither with the game\'s crosshair hidden (probe Q16b, b10/shots/crops/centre-bcef.png)', () => {
+      const d = { ...marker(40), hideGameCrosshair: true };
+      const cs = calls(d);
+      expect(draws(cs, 'vgui/hud/pz_charge_crosshair')).toEqual([]);
+      expect(draws(cs, CROSSHAIR_OPEN)).toEqual([]);
     });
   });
 

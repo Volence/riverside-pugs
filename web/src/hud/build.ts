@@ -1975,15 +1975,24 @@ export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
 export const MARKER_PX_PER_UNIT = 1080 / SCREEN_H;
 
 /**
- * The ability marker's box, HUD units, centred on the screen: 2 x
- * ability_size screen pixels square (the dll's box, probe Q16a), read from
- * the generated HudCrosshair, at 1080p. The element's rect, so a click, a
- * frame and the painter all use the same box.
+ * The ability marker's box in screen pixels for an ability_size. client.dll
+ * (0x102410fc) sets the marker's bounds to the rect it is handed grown by
+ * ability_size on every side: w + 2 x size. MARKER_BASE_PX is that rect's
+ * width at 1080p.
+ */
+export const MARKER_BASE_PX = 0;
+export const markerPx = (size: number): number => MARKER_BASE_PX + 2 * Math.max(0, size);
+
+/**
+ * The ability marker's box, HUD units, centred on the screen: markerPx of
+ * the generated HudCrosshair's ability_size (plain screen pixels, probe
+ * Q16a) at 1080p. The element's rect, so a click, a frame and the painter
+ * all use the same box.
  */
 export function markerBox(design: HudDesign, aspect: Aspect): { x: number; y: number; w: number; h: number } {
   const c = kvFind(buildTrees(design)(LAYOUT), ['HudCrosshair']);
-  const px = Math.max(0, parseFloat((c && pcGet(c, 'ability_size')) ?? '0') || 0);
-  const s = (2 * px) / MARKER_PX_PER_UNIT;
+  const size = parseFloat((c && pcGet(c, 'ability_size')) ?? '0') || 0;
+  const s = markerPx(size) / MARKER_PX_PER_UNIT;
   return { x: screenW(aspect) / 2 - s / 2, y: SCREEN_H / 2 - s / 2, w: s, h: s };
 }
 

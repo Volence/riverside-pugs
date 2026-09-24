@@ -14,12 +14,12 @@
 import type { Box, HudDesign } from './design';
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import type { Guide } from './guides';
-import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHasElement, pcGet } from './build';
+import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHasElement, pcGet, MARKER_PX_PER_UNIT } from './build';
 import { baseOf } from './base';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H, parseSize, parsePos } from './units';
 import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
-import { normaliseMaterial, HEALING_ICON } from './art';
+import { normaliseMaterial, HEALING_ICON, CROSSHAIR_OPEN } from './art';
 import { barGeometry, clampBarKeys } from './progress';
 import { canvasFont, fontCell, importedFace, loadFace } from './fonts';
 import { drawArt } from '../crosshair/model';
@@ -610,26 +610,47 @@ const ABILITY_CHARGE = 0.4;
  * as VGUI clips a panel's children: the background's bottom 10 units fall
  * outside the 70-tall element.
  */
+/** One piece of ability art, tinted by a state colour at its alpha, stretched to its box. */
+function paintTintedArt(ctx: CanvasRenderingContext2D, material: string, box: Rect, rgba: [number, number, number, number], onAsset?: () => void) {
+  const img = artImage(material, onAsset);
+  if (!img) return;
+  const [tr, tg, tb, ta] = rgba;
+  ctx.save();
+  ctx.globalAlpha *= ta / 255;
+  const src = tr < 255 || tg < 255 || tb < 255 ? tinted(img, material, tr, tg, tb) : img;
+  ctx.drawImage(src, box.x, box.y, box.w, box.h);
+  ctx.restore();
+}
+
+/**
+ * A CircularProgressBar's lit share: the box's art cut to a wedge from 12
+ * o'clock counter-clockwise over `frac` of the turn, as the ability timer's
+ * meter fills in game (probe Q15,
+ * /home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/progress-f-zoom.png).
+ */
+function inArc(ctx: CanvasRenderingContext2D, box: Rect, frac: number, draw: () => void) {
+  const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.arc(cx, cy, Math.max(box.w, box.h), -Math.PI / 2, -Math.PI / 2 - frac * 2 * Math.PI, true);
+  ctx.closePath();
+  ctx.clip();
+  draw();
+  ctx.restore();
+}
+
 function paintAbilityRing(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view: HudView = {}) {
   const state = previewOf(view.state);
   if (state.infected !== 'alive') return;
   const trees = buildTrees(design);
   const layout = kvFind(trees('scripts/hudlayout.res'), ['CHudAbilityTimer']);
   const colourKey = state.ability === 'ready' ? 'ability_ready_color' : 'ability_charging_color';
-  const [tr, tg, tb, ta] = rgbaOf(design, (layout && pcGet(layout, colourKey)) ?? '255 255 255 255');
+  const rgba = rgbaOf(design, (layout && pcGet(layout, colourKey)) ?? '255 255 255 255');
   const kids = trees(ABILITY).filter((n) => typeof n.value !== 'string')
     .map((n, i) => ({ n, i, z: parseFloat(pcGet(n, 'zpos') ?? '0') || 0 }))
     .sort((a, b) => a.z - b.z || a.i - b.i);
-  /** One piece's art, tinted by the state colour at its alpha, stretched to its box. */
-  const paint = (material: string, box: Rect) => {
-    const img = artImage(material, onAsset);
-    if (!img) return;
-    ctx.save();
-    ctx.globalAlpha *= ta / 255;
-    const src = tr < 255 || tg < 255 || tb < 255 ? tinted(img, material, tr, tg, tb) : img;
-    ctx.drawImage(src, box.x, box.y, box.w, box.h);
-    ctx.restore();
-  };
+  const paint = (material: string, box: Rect) => paintTintedArt(ctx, material, box, rgba, onAsset);
   clipToRect(ctx, r, () => {
     for (const { n } of kids) {
       if (pcGet(n, 'visible') === '0') continue;
@@ -643,18 +664,52 @@ function paintAbilityRing(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
         const material = normaliseMaterial(pcGet(n, 'fg_image') ?? 'HUD/PZ_charge_meter');
         if (state.ability === 'notReady') continue;
         if (state.ability === 'ready') { paint(material, box); continue; }
-        const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.arc(cx, cy, Math.max(box.w, box.h), -Math.PI / 2, -Math.PI / 2 - ABILITY_CHARGE * 2 * Math.PI, true);
-        ctx.closePath();
-        ctx.clip();
-        paint(material, box);
-        ctx.restore();
+        inArc(ctx, box, ABILITY_CHARGE, () => paint(material, box));
       }
     }
   });
+}
+
+/**
+ * The ability marker round the infected crosshair: PZ_charge_crosshair
+ * stretched to the element's rect (build.ts markerBox, sized in screen
+ * pixels at 1080p), tinted by HudCrosshair's state colour. client.dll's
+ * update (0x1024124c on) shows it only for a spawned infected with an
+ * ability, sets its progress to the ability's, and colours it: the
+ * suppressed colour when suppressed, the charging colour below full
+ * progress (so a standing Hunter, with none, draws nothing: probe Q16a,
+ * /home/volence/l4d/hud/probe-phase2-infected/b9/shots-v2/crops/centre-af.png b),
+ * else the ready colour, or the attack colour with a survivor in reach.
+ * The preview's Recharging draws the ring's sample share. Never drawn with
+ * the game's crosshair hidden: never_draw takes the whole HudCrosshair
+ * (probe Q16b, b10/shots/crops/centre-bcef.png).
+ */
+function paintAbilityMarker(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, _k: number, onAsset?: () => void, view: HudView = {}) {
+  const state = previewOf(view.state);
+  if (design.hideGameCrosshair || state.infected !== 'alive' || state.ability === 'notReady') return;
+  const c = kvFind(buildTrees(design)('scripts/hudlayout.res'), ['HudCrosshair']);
+  const key = state.ability === 'ready' ? 'ability_ready_color' : 'ability_charging_color';
+  const rgba = rgbaOf(design, (c && pcGet(c, key)) ?? '255 255 255 255');
+  const paint = () => paintTintedArt(ctx, 'vgui/hud/pz_charge_crosshair', r, rgba, onAsset);
+  if (state.ability === 'ready') paint(); else inArc(ctx, r, ABILITY_CHARGE, paint);
+}
+
+/**
+ * The game's own infected crosshair, PZ_crosshair_open (a hud_textures.txt
+ * cell of sprites/crosshairs), drawn untinted at 32 x 32 screen pixels on
+ * the centre, as probe B9 v2 measured it at 1080p
+ * (/home/volence/l4d/hud/probe-phase2-infected/b9/shots-v2/b9v2/b9v2-d.png:
+ * x 944 to 975, y 524 to 555; a ghost has it too, b9v2-a). Not an element:
+ * the only file control over it is Hide the game's crosshair. The owner's
+ * own config has crosshair 0, under which the game draws neither this nor
+ * the marker.
+ */
+function paintGameCrosshair(ctx: CanvasRenderingContext2D, pxW: number, pxH: number, design: HudDesign, onAsset: (() => void) | undefined, view: HudView) {
+  if (design.hideGameCrosshair || previewOf(view.state).infected === 'dead') return;
+  const img = artImage(CROSSHAIR_OPEN, onAsset);
+  if (!img) return;
+  const s = (32 / MARKER_PX_PER_UNIT) * (pxH / SCREEN_H);
+  ctx.drawImage(img, pxW / 2 - s / 2, pxH / 2 - s / 2, s, s);
 }
 
 function paintGhostPanel(ctx: CanvasRenderingContext2D, r: Rect) {
@@ -685,6 +740,7 @@ const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: 
   infectedRow: paintInfectedRow,
   siHealth: paintSiHealth,
   abilityRing: paintAbilityRing,
+  abilityMarker: paintAbilityMarker,
   ghostPanel: paintGhostPanel,
   tankPanel: paintTankPanel,
 };
@@ -812,6 +868,7 @@ export function drawHud(
   // A hidden element is still drawn, dimmed, while it is selected, so the
   // player can see what they are editing; every outline comes from `view`.
   const picked: readonly string[] = selected === null ? [] : typeof selected === 'string' ? [selected] : selected;
+  if (side === 'infected') paintGameCrosshair(ctx, pxW, pxH, design, onAsset, view);
 
   for (const el of visibleElements(side, design)) {
     const u = rectFor(design, el.id);
