@@ -61,6 +61,6 @@
     "l4d_cvarwatch.smx", "l4d_consistency.smx", "l4d_tickstats.smx", "l4d_ping.smx"
   ],
   "ignored": [
-    "l4d2_spec_stays_spec.smx"
+    "l4d2_spec_stays_spec.smx", "l4d_tvwatch.smx"
   ]
 }
