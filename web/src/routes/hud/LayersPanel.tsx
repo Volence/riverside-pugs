@@ -86,7 +86,7 @@ export function LayersPanel(
         const target: Selection = { kind: 'elements', ids: [el.id] };
         const reg = panelChildren(el.id);
         return (
-          <div key={el.id}>
+          <div key={el.id} role="group" aria-label={`Layers: ${el.label}`}>
             <Row
               label={el.label} depth={0} active={isIn(sel, target)} hidden={!elementRect(design, el.id, design.aspect).visible}
               onPick={(shift) => onPick(target, shift)}

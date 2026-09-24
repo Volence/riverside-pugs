@@ -160,7 +160,56 @@ export const TEAM_PANEL: PanelChildren = {
   ],
 };
 
-export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL];
+const OWN_STATE = 'The game decides when this one shows. Pick it above the canvas to see it.';
+const SCRATCH_NOTE = 'The game tints these by health. Change their art under Splatter, below the canvas.';
+
+/**
+ * The player's own health panel (localplayerpanel.res), one panel framed by
+ * localplayerdisplay.res's LocalPlayer. Probe batch B1 (2026-09-24,
+ * /home/volence/l4d/hud/probe-phase2/RESULTS.md) answered the gated
+ * controls; the gates in probes.ts still flip in their own tasks, so these
+ * entries only say what the answers mean for each control:
+ * - Q1 yes: monochrome_color tints the WHOLE panel (fill, number, cross and
+ *   scratches), in every health state, so the control is a panel colour.
+ * - Q3 yes: inset moves the fill inside the bar outline.
+ * - Q5 no: the cross takes the panel's health colour whatever the file says,
+ *   so its colour gate never opens.
+ * - Q8 yes: the crouch icon keeps a file tint and shows only while crouched.
+ * ModBg (Modern's fill) stays unregistered: the fit rule sizes it by name,
+ * and ownBg is the player's background control.
+ */
+export const OWN_PANEL: PanelChildren = {
+  panelId: 'ownHealth',
+  file: 'resource/ui/hud/localplayerpanel.res',
+  frame: { file: 'resource/ui/hud/localplayerdisplay.res', block: 'LocalPlayer' },
+  repeat: 'single',
+  children: [
+    // Q9 is unasked: hiding the portrait when down is the teammate card's reading.
+    { name: 'Head', label: 'Portrait', kind: 'image', role: 'content', box: 'square', move: true, font: false, colour: false,
+      hideIn: ['down'], note: 'The game picks the portrait by character.' },
+    { name: 'Health', label: 'Health bar', kind: 'bar', role: 'content', box: 'wh', move: true, font: false, colour: false,
+      keys: [
+        { key: 'monochrome_color', label: 'Panel colour', type: 'colour', gate: 'Q1',
+          evidence: 'client.dll HealthPanel run: m_monochromeColor|monochrome_color' },
+        { key: 'inset', label: 'Inset', type: 'int', range: [0, 8], gate: 'Q3', evidence: 'client.dll HealthPanel run: m_inset|inset' },
+      ],
+      note: 'The game fills the bar by health.' },
+    { name: 'HealthIcon', label: 'Health cross', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true,
+      colourGate: 'Q5', note: 'The game colours this by health.' },
+    { name: 'HealthNumber', label: 'Health number', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: false,
+      note: 'The game colours this by health.' },
+    { name: 'HealthbarTextureTop', label: 'Scratches, top', kind: 'image', role: 'decor', box: 'wh', move: true, font: false, colour: false,
+      art: 'splatter', fitPlace: 'keep', note: SCRATCH_NOTE },
+    { name: 'HealthbarTextureBottom', label: 'Scratches, bottom', kind: 'image', role: 'decor', box: 'wh', move: true, font: false, colour: false,
+      art: 'splatter', fitPlace: 'keep', note: SCRATCH_NOTE },
+    { name: 'Incapacitated', label: 'Down picture', kind: 'image', role: 'state', box: 'square', move: true, font: false, colour: false,
+      stateArt: 'down', note: OWN_STATE },
+    { name: 'DuckingIcon', label: 'Crouch icon', kind: 'image', role: 'state', box: 'square', move: true, font: false, colour: true,
+      colourGate: 'Q8', stateArt: 'crouched', fitPlace: 'keep', note: OWN_STATE },
+  ],
+};
+
+export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL];
 export const panelChildren = (panelId: string): PanelChildren | undefined => PANEL_CHILDREN.find((p) => p.panelId === panelId);
 export const teamChild = (name: string): ChildDef | undefined => TEAM_PANEL.children.find((c) => c.name === name);
 

@@ -208,8 +208,9 @@ describe('clampOverride', () => {
 describe('validateDesign, the teammate card children', () => {
   const kids = (raw: unknown) => validateDesign({ v: 1, children: raw }).children;
 
-  it('keeps only the teammate card, only registry children, and clamps their numbers', () => {
-    expect(kids({ ownHealth: { Head: { x: 1 } } })).toEqual({});
+  it('keeps only registered panels, only registry children, and clamps their numbers', () => {
+    // ownHealth is registered since Phase 2 (its own tests are under "children of every registered panel").
+    expect(kids({ siHealth: { Head: { x: 1 } } })).toEqual({});
     expect(kids({ teamColumn: { Nope: { x: 1 }, Head: { x: 9999, y: -9999, junk: 1 } } }))
       .toEqual({ teamColumn: { Head: { x: 512, y: -64 } } });
   });
@@ -427,6 +428,22 @@ describe('children of every registered panel', () => {
   it('keeps a zpos as a whole number in -50..50, and never keys a child does not declare', () => {
     const d = validateDesign({ v: 1, children: { teamColumn: { Head: { z: 99.4 }, Name: { z: -3, keys: { font: 'x' } } } } });
     expect(d.children.teamColumn).toEqual({ Head: { z: 50 }, Name: { z: -3 } });
+  });
+  it('drops your own health gated values while their probes are off, and keeps them once they pass', () => {
+    const raw = { v: 1, children: { ownHealth: {
+      HealthIcon: { color: '0 0 255 255' }, DuckingIcon: { color: '255 0 255 255' },
+      Health: { x: 4, keys: { monochrome_color: '255 0 255 255', inset: 3 } },
+    } } };
+    expect(validateDesign(raw).children.ownHealth).toEqual({ Health: { x: 4 } });
+    try {
+      _setProbe('Q1', true); _setProbe('Q3', true); _setProbe('Q5', true); _setProbe('Q8', true);
+      expect(validateDesign(raw).children.ownHealth).toEqual({
+        HealthIcon: { color: '0 0 255 255' }, DuckingIcon: { color: '255 0 255 255' },
+        Health: { x: 4, keys: { monochrome_color: '255 0 255 255', inset: '3' } },
+      });
+    } finally {
+      for (const q of ['Q1', 'Q3', 'Q5', 'Q8'] as const) _setProbe(q, null);
+    }
   });
   it('drops element keys no element declares yet', () => {
     expect(validateDesign({ v: 1, elements: { chat: { x: 5, keys: { foo: '1' } } } }).elements.chat).toEqual({ x: 5 });

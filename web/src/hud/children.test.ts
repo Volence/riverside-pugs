@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { TEAM_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, FIT_SQUARED, childDef, panelOfFile } from './children';
+import { TEAM_PANEL, OWN_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, FIT_SQUARED, childDef, panelOfFile } from './children';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { SPLATTERS } from './splatter';
@@ -14,8 +14,8 @@ const CONTROL: Record<string, string> = { image: 'imagepanel', label: 'label', b
  * the way elements.test.ts pins element keys to hudlayout.res.
  */
 describe('the teammate card registry', () => {
-  it('covers only the teammate card in this phase', () => {
-    expect(PANEL_CHILDREN.map((p) => p.panelId)).toEqual(['teamColumn']);
+  it('covers the teammate card and your own health', () => {
+    expect(PANEL_CHILDREN.map((p) => p.panelId)).toEqual(['teamColumn', 'ownHealth']);
     expect(TEAM_PANEL.file).toBe('resource/ui/hud/teammatepanel.res');
   });
 
@@ -126,5 +126,85 @@ describe('the per-panel registry', () => {
       if (c.fitPlace) expect(c.role, c.name).not.toBe('content');
       if (c.colourGate) expect(c.colour, c.name).toBe(true);
     }
+  });
+});
+
+/** Pinned to both presets' localplayerpanel.res, as the teammate entries are to teammatepanel.res. */
+describe('the own health registry', () => {
+  const own = (preset: 'stock' | 'modern') => parseKv(baseFile(preset, OWN_PANEL.file))[0].value as KvNode[];
+  const by = (n: string) => OWN_PANEL.children.find((c) => c.name === n)!;
+
+  it('is one panel in localplayerpanel.res, framed by LocalPlayer', () => {
+    expect(OWN_PANEL.panelId).toBe('ownHealth');
+    expect(OWN_PANEL.file).toBe('resource/ui/hud/localplayerpanel.res');
+    expect(OWN_PANEL.repeat).toBe('single');
+    expect(OWN_PANEL.frame).toEqual({ file: 'resource/ui/hud/localplayerdisplay.res', block: 'LocalPlayer' });
+    expect(panelOfFile(OWN_PANEL.file)).toBe(OWN_PANEL);
+  });
+
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`finds every child in the ${preset} file, the scratches too where they ship as visible 0`, () => {
+      for (const def of OWN_PANEL.children) expect(kvFind(own(preset), [def.name]), `${preset} ${def.name}`).toBeDefined();
+    });
+
+    it(`matches each child's kind to its ControlName in ${preset}`, () => {
+      for (const def of OWN_PANEL.children) {
+        const control = (kvGet(kvFind(own(preset), [def.name])!, 'ControlName') ?? '').toLowerCase();
+        expect(control, `${preset} ${def.name}`).toBe(CONTROL[def.kind]);
+      }
+    });
+
+    it(`gives every label child a font the ${preset} scheme defines`, () => {
+      for (const def of OWN_PANEL.children.filter((c) => c.kind === 'label')) {
+        const font = kvGet(kvFind(own(preset), [def.name])!, 'font');
+        expect(font, `${preset} ${def.name}`).toBeDefined();
+        expect(kvFind(scheme(preset), ['Fonts', font!]), `${preset} ${def.name} ${font}`).toBeDefined();
+      }
+    });
+
+    it(`keeps square art square in ${preset}, or leaves it to the fit rule`, () => {
+      for (const def of OWN_PANEL.children.filter((c) => c.box === 'square')) {
+        const block = kvFind(own(preset), [def.name])!;
+        const square = kvGet(block, 'wide') === kvGet(block, 'tall');
+        expect(square || def.name === 'Incapacitated', `${preset} ${def.name}`).toBe(true);
+      }
+    });
+
+    it(`frames the panel with a real LocalPlayer block in ${preset}`, () => {
+      const frame = OWN_PANEL.frame as { file: string; block: string };
+      const display = parseKv(baseFile(preset, frame.file))[0].value as KvNode[];
+      expect(kvGet(kvFind(display, [frame.block])!, 'ControlName')).toBe('LocalPlayerPanel');
+    });
+  }
+
+  it('leaves the scratches art to the splatter work', () => {
+    expect(OWN_PANEL.children.filter((c) => c.art === 'splatter').map((c) => c.name)).toEqual(['HealthbarTextureTop', 'HealthbarTextureBottom']);
+    for (const n of ['HealthbarTextureTop', 'HealthbarTextureBottom']) expect(by(n).note, n).toMatch(/under Splatter/);
+  });
+
+  it('gates exactly the controls the game may ignore', () => {
+    const gated = OWN_PANEL.children.flatMap((c) => [
+      ...(c.keys ?? []).filter((k) => k.gate).map((k) => `${c.name}.${k.key}:${k.gate}`),
+      ...(c.colourGate ? [`${c.name}.colour:${c.colourGate}`] : []),
+    ]);
+    expect(gated).toEqual(['Health.monochrome_color:Q1', 'Health.inset:Q3', 'HealthIcon.colour:Q5', 'DuckingIcon.colour:Q8']);
+    // Every other own piece offers no colour at all: code colours them by health.
+    for (const def of OWN_PANEL.children) if (!def.colourGate) expect(def.colour, def.name).toBe(false);
+  });
+
+  it('calls the monochrome key a panel colour, because it tints the whole panel (probe B1 Q1)', () => {
+    expect(by('Health').keys!.find((k) => k.key === 'monochrome_color')!.label).toMatch(/panel/i);
+  });
+
+  it('says in data when the state pieces show and what Down hides', () => {
+    expect(by('Incapacitated').stateArt).toBe('down');
+    expect(by('DuckingIcon').stateArt).toBe('crouched');
+    expect(by('Head').hideIn).toEqual(['down']);
+    expect(OWN_PANEL.children.filter((c) => c.fitPlace === 'keep').map((c) => c.name))
+      .toEqual(['HealthbarTextureTop', 'HealthbarTextureBottom', 'DuckingIcon']);
+  });
+
+  it('never touches the Modern fill, which the fit rule sizes by name', () => {
+    expect(childDef('ownHealth', 'ModBg')).toBeUndefined();
   });
 });

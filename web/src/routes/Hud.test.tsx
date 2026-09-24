@@ -57,6 +57,10 @@ function indexOf(hay: Uint8Array, needle: Uint8Array): number {
 }
 
 /** happy-dom lays nothing out: a 1:1 box makes client pixels HUD units. */
+/** One element's rows in Layers: your own health lists pieces named like the teammate card's. */
+const layer = (label: string) => within(screen.getByRole('group', { name: `Layers: ${label}` }));
+const team = () => layer('Teammates');
+
 const unitCanvas = (container: Element) => {
   const canvas = container.querySelector('canvas') as HTMLCanvasElement;
   canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 853, height: 480, right: 853, bottom: 480, x: 0, y: 0, toJSON() {} }) as DOMRect;
@@ -83,12 +87,12 @@ describe('Hud page', () => {
   it('lists the teammate card pieces in Layers, and adds the health number on stock', () => {
     render(<Hud />);
     for (const label of ['Portrait', 'Health bar', 'Name', 'Item icons', 'Status text', 'Damage splatter', 'Down picture', 'Dead picture', 'Voice icon']) {
-      expect(screen.getByRole('button', { name: label }), label).toBeTruthy();
+      expect(team().getByRole('button', { name: label }), label).toBeTruthy();
     }
-    expect(screen.getByText('shown when down')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Health number' })).toBeNull();
+    expect(team().getByText('shown when down')).toBeTruthy();
+    expect(team().queryByRole('button', { name: 'Health number' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '＋ Health number' }));
-    expect(screen.getByRole('button', { name: 'Health number' })).toBeTruthy();
+    expect(team().getByRole('button', { name: 'Health number' })).toBeTruthy();
     expect(screen.getByText('Health number', { selector: 'legend' })).toBeTruthy();
     expect(screen.getByText("Edits inside a card apply to every teammate's card.")).toBeTruthy();
   });
@@ -105,7 +109,7 @@ describe('Hud page', () => {
   it('drops a picked child when the preset changes', async () => {
     render(<Hud />);
     fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Portrait' }));
+    fireEvent.click(team().getByRole('button', { name: 'Portrait' }));
     expect(screen.getByText('Reset this child')).toBeTruthy();
     fireEvent.change(screen.getByRole('combobox', { name: /preset/i }), { target: { value: 'modern' } });
     await waitFor(() => expect(screen.getByText('Reset this element')).toBeTruthy());
@@ -117,18 +121,18 @@ describe('Hud page', () => {
     fireEvent.input(screen.getByLabelText('X'), { target: { value: '90' } });
     fireEvent.click(screen.getByText('Reset this child'));
     // The move is gone and the number is still there: back at the template's x 103.
-    expect(screen.getByRole('button', { name: 'Health number' })).toBeTruthy();
+    expect(team().getByRole('button', { name: 'Health number' })).toBeTruthy();
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('103');
   });
 
   it('shows one Size box for the portrait and writes both sides', () => {
     render(<Hud />);
     fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Portrait' }));
+    fireEvent.click(team().getByRole('button', { name: 'Portrait' }));
     expect(screen.queryByLabelText('W')).toBeNull();
     fireEvent.input(screen.getByLabelText('Size'), { target: { value: '30' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Name' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Portrait' }));
+    fireEvent.click(team().getByRole('button', { name: 'Name' }));
+    fireEvent.click(team().getByRole('button', { name: 'Portrait' }));
     expect((screen.getByLabelText('Size') as HTMLInputElement).value).toBe('30');
   });
 
@@ -164,8 +168,8 @@ describe('Hud page', () => {
     expect(row().classList.contains('hud__layer--hidden')).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Show Chat' }));
     expect(row().classList.contains('hud__layer--hidden')).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: 'Hide Portrait' }));
-    expect(screen.getByRole('button', { name: 'Portrait' }).closest('.hud__layer')!.classList.contains('hud__layer--hidden')).toBe(true);
+    fireEvent.click(team().getByRole('button', { name: 'Hide Portrait' }));
+    expect(team().getByRole('button', { name: 'Portrait' }).closest('.hud__layer')!.classList.contains('hud__layer--hidden')).toBe(true);
   });
 
   it('selects from Layers, Shift+click adding, and lists the cards in every layout, card 4 in Free only', () => {
@@ -933,7 +937,7 @@ describe('Hud page', () => {
     clickAt(canvas, 60, 460, { shiftKey: true });
     // Portrait and bar together span (13, 443) to (133, 466): drag the bottom-right corner to half size.
     dragFrom(canvas, [133, 466], [73, 454.5]);
-    fireEvent.click(screen.getByRole('button', { name: 'Portrait' }));
+    fireEvent.click(team().getByRole('button', { name: 'Portrait' }));
     expect((screen.getByLabelText('Size') as HTMLInputElement).value).toBe('12');
   });
 
@@ -1170,7 +1174,7 @@ describe('Hud page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Align right' }));
     // Their box ends at 133 (the bar's right edge): the portrait moves to 110.
     fireEvent.click(screen.getByLabelText('Visible'));
-    fireEvent.click(screen.getByRole('button', { name: 'Portrait' }));
+    fireEvent.click(team().getByRole('button', { name: 'Portrait' }));
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('110');
     expect((screen.getByLabelText('Visible') as HTMLInputElement).checked).toBe(false);
   });
@@ -1217,7 +1221,7 @@ describe('Hud page', () => {
     expect(screen.getByText('Save your HUD')).toBeTruthy();
   });
 
-  const hiddenRow = (label: string) => screen.getByRole('button', { name: label }).closest('.hud__layer')!.classList.contains('hud__layer--hidden');
+  const hiddenRow = (label: string, scope: Pick<typeof screen, 'getByRole'> = screen) => scope.getByRole('button', { name: label }).closest('.hud__layer')!.classList.contains('hud__layer--hidden');
 
   it('opens a menu on right-click for the piece under the pointer, and Hide hides it', () => {
     const { container } = render(<Hud />);
@@ -1228,7 +1232,7 @@ describe('Hud page', () => {
     expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Hide' }));
     expect(screen.queryByRole('menu')).toBeNull();
-    expect(hiddenRow('Portrait')).toBe(true);
+    expect(hiddenRow('Portrait', team())).toBe(true);
     expect((screen.getByLabelText('Visible') as HTMLInputElement).checked).toBe(false);
   });
 
@@ -1239,8 +1243,8 @@ describe('Hud page', () => {
     clickAt(canvas, 60, 460, { shiftKey: true });
     fireEvent.contextMenu(canvas, { clientX: 60, clientY: 460 });
     fireEvent.click(screen.getByRole('menuitem', { name: 'Hide' }));
-    expect(hiddenRow('Portrait')).toBe(true);
-    expect(hiddenRow('Health bar')).toBe(true);
+    expect(hiddenRow('Portrait', team())).toBe(true);
+    expect(hiddenRow('Health bar', team())).toBe(true);
   });
 
   it('offers Select whole card for a piece, and only Select Teammates for a card, in any layout', () => {
@@ -1281,11 +1285,15 @@ describe('Hud page', () => {
     await waitFor(() => expect(JSON.parse(localStorage.getItem('hud') ?? '{}').children?.teamColumn?.Head?.z).toBe(-2));
   });
 
-  it('lists the survivor Layers exactly as before the pieces went per panel', () => {
+  it('lists the survivor Layers as before the pieces went per panel, with your own health pieces under it', () => {
     const { container } = render(<Hud />);
     const rows = Array.from(container.querySelectorAll('.hud__layer')).map((r) => [r.className.replace('hud__layer ', ''), r.textContent]);
     expect(rows).toEqual([
-      ['hud__layer--d0', 'Your health'], ['hud__layer--d0', 'Teammates'],
+      ['hud__layer--d0', 'Your health'],
+      ['hud__layer--d1', 'Portrait'], ['hud__layer--d1', 'Health bar'], ['hud__layer--d1', 'Health cross'], ['hud__layer--d1', 'Health number'],
+      ['hud__layer--d1', 'Scratches, top'], ['hud__layer--d1', 'Scratches, bottom'],
+      ['hud__layer--d1', 'Down pictureshown when down'], ['hud__layer--d1', 'Crouch iconshown when crouched'],
+      ['hud__layer--d0', 'Teammates'],
       ['hud__layer--d1', 'Card 1'], ['hud__layer--d1', 'Card 2'], ['hud__layer--d1', 'Card 3'],
       ['hud__layer--d1', 'Portrait'], ['hud__layer--d1', 'Health bar'], ['hud__layer--d1', 'Name'], ['hud__layer--d1', '＋ Health number'],
       ['hud__layer--d1', 'Item icons'], ['hud__layer--d1', 'Status text'], ['hud__layer--d1', 'Damage splatter'],
@@ -1296,9 +1304,27 @@ describe('Hud page', () => {
     ]);
   });
 
+  it('edits a piece of your own health from Layers, offering none of the controls its probes have not proven', () => {
+    render(<Hud />);
+    fireEvent.click(layer('Your health').getByRole('button', { name: 'Health bar' }));
+    expect(screen.getByText('Health bar', { selector: 'legend' })).toBeTruthy();
+    expect(screen.getByText('The game fills the bar by health.')).toBeTruthy();
+    expect(screen.queryByText("Edits inside a card apply to every teammate's card.")).toBeNull();
+    for (const l of ['X', 'Y', 'W', 'H']) expect(screen.getByLabelText(l), l).toBeTruthy();
+    expect(screen.queryByText('Panel colour')).toBeNull();
+    expect(screen.queryByText('Inset')).toBeNull();
+    // Probe B1 Q5: the game colours the cross by health whatever the file says.
+    fireEvent.click(layer('Your health').getByRole('button', { name: 'Health cross' }));
+    expect(screen.getByLabelText('Text size')).toBeTruthy();
+    expect(screen.queryByLabelText('Health cross colour')).toBeNull();
+    fireEvent.click(layer('Your health').getByRole('button', { name: 'Crouch icon' }));
+    expect(screen.queryByLabelText('Crouch icon colour')).toBeNull();
+    expect(screen.queryByLabelText('Crouch icon tint')).toBeNull();
+  });
+
   it('keeps the teammate child controls saying the edit applies to every card, and going back to the Teammates', () => {
     render(<Hud />);
-    fireEvent.click(screen.getByRole('button', { name: 'Portrait' }));
+    fireEvent.click(team().getByRole('button', { name: 'Portrait' }));
     expect(screen.getByText("Edits inside a card apply to every teammate's card.")).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Back to Teammates' }));
     expect(screen.getByText('Teammates', { selector: 'legend' })).toBeTruthy();
@@ -1355,7 +1381,7 @@ describe('Hud page', () => {
   it('shows every Layers row its name, with a state note on its own line under it', () => {
     render(<Hud />);
     for (const [label, note] of [['Down picture', 'shown when down'], ['Dead picture', 'shown when dead'], ['Voice icon', 'shown when talking']]) {
-      const name = screen.getByRole('button', { name: label });
+      const name = team().getByRole('button', { name: label });
       const text = name.closest('.hud__layertext');
       expect(text, label).toBeTruthy();
       expect(within(text as HTMLElement).getByText(note)).toBeTruthy();

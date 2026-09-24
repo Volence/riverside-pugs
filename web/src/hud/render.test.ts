@@ -518,10 +518,11 @@ describe('the teammate card states', () => {
     expect(srcs(calls).some((u) => /icon-item-/.test(u))).toBe(false);
   });
 
-  it('hides by state only on the teammate card', () => {
+  it('hides by state on the registered panels', () => {
     expect(hiddenInState('teamColumn', 'Head', 'down')).toBe(true);
     expect(hiddenInState('teamColumn', 'Incapacitated', 'down')).toBe(false);
-    expect(hiddenInState('ownHealth', 'Incapacitated', 'down')).toBe(true);
+    expect(hiddenInState('ownHealth', 'Incapacitated', 'down')).toBe(false);
+    expect(hiddenInState('siHealth', 'Incapacitated', 'down')).toBe(true);
     expect(hiddenInState('teamColumn', 'Voice', 'healthy')).toBe(true);
   });
 
@@ -885,8 +886,20 @@ describe('the preview state', () => {
     for (const def of TEAM_PANEL.children) expect(hiddenInState('teamColumn', def.name, 'hurt'), def.name).toBe(hiddenInState('teamColumn', def.name, 'healthy'));
   });
   it('keeps the old always-hidden list for panels the registry does not have yet', () => {
-    for (const n of ['DuckingIcon', 'Incapacitated', 'SpawnTimeLabel', 'SkullIconPlacement']) expect(hiddenInState('ownHealth', n, 'healthy'), n).toBe(true);
-    expect(hiddenInState('ownHealth', 'Head', 'down')).toBe(false);
+    for (const n of ['DuckingIcon', 'Incapacitated', 'SpawnTimeLabel', 'SkullIconPlacement']) expect(hiddenInState('siHealth', n, 'healthy'), n).toBe(true);
+  });
+  it('shows your own health pieces by the registry: crouch icon when crouched, down art when down', () => {
+    expect(hiddenInState('ownHealth', 'DuckingIcon', 'healthy')).toBe(true);
+    expect(hiddenInState('ownHealth', 'DuckingIcon', { ...DEFAULT_PREVIEW, crouched: true })).toBe(false);
+    for (const s of ['healthy', 'hurt', 'dead'] as const) expect(hiddenInState('ownHealth', 'Incapacitated', s), s).toBe(true);
+    expect(hiddenInState('ownHealth', 'Incapacitated', 'down')).toBe(false);
+    // Q9 default: the portrait gives way to the down art, as on a teammate card.
+    expect(hiddenInState('ownHealth', 'Head', 'down')).toBe(true);
+    for (const s of ['healthy', 'hurt'] as const) {
+      for (const n of ['Head', 'Health', 'HealthIcon', 'HealthNumber', 'HealthbarTextureTop', 'HealthbarTextureBottom']) {
+        expect(hiddenInState('ownHealth', n, s), `${s} ${n}`).toBe(false);
+      }
+    }
   });
   it('leaves an unregistered piece of a registered panel alone (the card background, the splatter stand-in)', () => {
     expect(hiddenInState('teamColumn', 'HudEdCardBg', 'dead')).toBe(false);

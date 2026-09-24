@@ -14,6 +14,7 @@ import { elementById, type HudElement } from '../../hud/elements';
 import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam } from '../../hud/build';
 import { baseOf } from '../../hud/base';
 import { childDef, panelChildren } from '../../hud/children';
+import { probe } from '../../hud/probes';
 import {
   cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild,
   startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, patchWeapons, ammoOnly,
@@ -446,7 +447,8 @@ export function ChildControls(
           <span />
         </label>
       )}
-      {def.colour && (
+      {/* A colour the game may repaint waits for its probe, as validateDesign does (probes.ts). */}
+      {def.colour && (!def.colourGate || probe(def.colourGate)) && (
         <div class="hud__stylerow">
           <span class="hud__stylerow-label">{colourWord}</span>
           {!def.opacityOnly && (
