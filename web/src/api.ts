@@ -872,6 +872,14 @@ export interface PatchSummary {
   plugins?: string[];
   onlyPluginsChanged?: boolean;
 }
+export interface FleetSig { size: number; sha256: string | null }
+export interface FleetCellView { sig: FleetSig | null; label: 'repo' | 'base' | 'neither' | 'missing' | 'unread'; highlight: boolean; sizeOnly: boolean }
+export interface FleetRowView {
+  path: string; area: 'plugins' | 'configs' | 'data' | 'gamedata' | 'extensions' | 'stripper' | 'other';
+  repo: FleetSig | null; base: FleetSig | null; cells: Record<number, FleetCellView>; patchedEverywhere: boolean; differs: boolean;
+}
+export interface FleetBox { serverId: number; name: string; enabled: boolean; readAt: string | null; attemptAt: string | null; error: string | null; pending: boolean }
+export interface FleetState { repo: { label: string; at: string } | null; base: { label: string; at: string } | null; boxes: FleetBox[]; rows: FleetRowView[] }
 export interface IgnoredPlugin { file: string; reason: string; addedBy: string | null; addedAt: string | null; source: 'site' | 'knobs' }
 export type TriageBody = { decision: 'balance'; name: string; notes: string } | { decision: 'fold'; into: number }
   | { decision: 'ignore'; into: number; plugins: string[] };
@@ -1510,6 +1518,8 @@ export const adminApi = {
   balanceRollouts: (signal?: AbortSignal) => get<{ rollouts: RolloutSummary[] }>('/api/admin/balance/rollouts', signal),
   balancePublicPreview: (id: number, signal?: AbortSignal) => get<PublicEntry>(`/api/admin/balance/patches/${id}/public`, signal),
   publishBalancePatch: (id: number, published: boolean) => post(`/api/admin/balance/patches/${id}/publish`, { published }),
+  fleet: (signal?: AbortSignal) => get<FleetState>('/api/admin/fleet', signal),
+  fleetCheck: (body: { serverId: number } | { all: true }) => post<{ states: Record<number, string> }>('/api/admin/fleet/check', body),
   triageBalancePatch: (id: number, body: TriageBody) => post<{ ok: true; target?: number }>(`/api/admin/balance/patches/${id}/triage`, body),
   unfoldBalancePatch: (id: number) => post<{ ok: true }>(`/api/admin/balance/patches/${id}/unfold`, {}),
   balanceIgnoredPlugins: (signal?: AbortSignal) => get<{ plugins: IgnoredPlugin[] }>('/api/admin/balance/ignored-plugins', signal),
