@@ -23,11 +23,18 @@ import type { RoundMetrics } from './round.js';
  *  R_MAX, and scored at read time against a per-map calibration, with the team
  *  gap; RoundMetrics lost occZ, teamRank and teamGap and gained occ, windows,
  *  scoreable and fidSum. Pools and shares of the aim prior are versioned, so
- *  this bump also rebuilds every prior as the rounds are re-measured. */
-export const ANALYZER_VERSION = 4;
+ *  this bump also rebuilds every prior as the rounds are re-measured.
+ *
+ *  5: line of sight (plan 2 of the spawned-infected spec). Rounds carry
+ *  losKnown, fidLagSum and the hidden metrics D, E and F; hidden tracking
+ *  windows become `hidden_track` clips scored by the lag search. Ghost scores
+ *  are unchanged in meaning, but a version 4 board mixed with version 5 rows
+ *  would show hidden columns for some players and not others for no reason a
+ *  reader could see, so the whole history is re-measured. */
+export const ANALYZER_VERSION = 5;
 
 export interface RoundKey { matchId: number; ordinal: number; half: number }
-export interface SaveRow { slot: number; steamid: string; metrics: RoundMetrics; clips: TrackWindow[] }
+export interface SaveRow { slot: number; steamid: string; metrics: RoundMetrics; clips: TrackWindow[]; hiddenClips?: TrackWindow[] }
 
 const countsToJson = (m: Map<string, number>): string => JSON.stringify([...m]);
 const countsFromJson = (s: string): Map<string, number> => new Map(JSON.parse(s) as [string, number][]);
@@ -59,7 +66,18 @@ export function saveRound(db: DB, key: RoundKey, rows: SaveRow[]): void {
       for (const c of r.clips) {
         insClip.run(
           key.matchId, key.ordinal, key.half, r.slot, r.steamid, c.startMs, c.endMs,
-          'ghost_track', c.fidelity, JSON.stringify({ ghostSlot: c.ghostSlot, meanErr: c.meanErr, meanDist: c.meanDist, travel: c.travel }),
+          'ghost_track', c.fidelity,
+          JSON.stringify({ ghostSlot: c.ghostSlot, meanErr: c.meanErr, meanDist: c.meanDist, travel: c.travel, lagFidelity: c.lagFidelity, lagMs: c.lagMs }),
+          ANALYZER_VERSION,
+        );
+      }
+      // Scored by the lag search, which is metric D's own score. `fidelityLag0`
+      // rides along so a reviewer can see how much of the score the lag made.
+      for (const c of r.hiddenClips ?? []) {
+        insClip.run(
+          key.matchId, key.ordinal, key.half, r.slot, r.steamid, c.startMs, c.endMs,
+          'hidden_track', c.lagFidelity,
+          JSON.stringify({ infectedSlot: c.ghostSlot, cls: c.targetCls, lagMs: c.lagMs, fidelityLag0: c.fidelity, meanErr: c.meanErr, meanDist: c.meanDist, travel: c.travel }),
           ANALYZER_VERSION,
         );
       }
