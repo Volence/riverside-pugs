@@ -5,7 +5,7 @@ import { openDb } from '../src/db.js';
 import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
 import { addServer } from '../src/serverPool.js';
-import { fingerprintOf } from '../src/balancePatches.js';
+import { fingerprintOf, withoutIgnored } from '../src/balancePatches.js';
 import { loadBalanceKnobs } from '../src/balanceKnobs.js';
 
 // Copied verbatim from tests/logAuthWiring.test.ts.
@@ -129,7 +129,7 @@ describe('balance lines end to end', () => {
     close = () => app.close();
     const knobs = loadBalanceKnobs();
     expect(db.prepare('SELECT id, fingerprint FROM balance_patches ORDER BY id').all()).toEqual([
-      { id: 1, fingerprint: fingerprintOf(inv, knobs.versionless, knobs.ignored) },
+      { id: 1, fingerprint: fingerprintOf(withoutIgnored(inv, knobs.ignored ?? []), knobs.versionless) },
       { id: 2, fingerprint: null },
     ]);
   });

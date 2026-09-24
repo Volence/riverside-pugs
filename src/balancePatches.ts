@@ -20,6 +20,17 @@ export function withoutIgnored(inv: Inventory, ignored: string[]): Inventory {
   return Object.fromEntries(Object.entries(inv).filter(([k]) => !skip.has(k)));
 }
 
+/** Whether a stored inventory, read as JSON, equals `invJson` once the
+ *  ignored plugins are dropped from it. Unreadable JSON is never equal. */
+function sameAfterIgnored(storedJson: string, invJson: string, ignored: string[]): boolean {
+  try {
+    const inv = withoutIgnored(JSON.parse(storedJson) as Inventory, ignored);
+    return JSON.stringify(Object.fromEntries(Object.entries(inv).sort())) === invJson;
+  } catch {
+    return false;
+  }
+}
+
 export function diffInventories(a: Inventory, b: Inventory) {
   const added = Object.keys(b).filter((k) => !(k in a)).sort();
   const removed = Object.keys(a).filter((k) => !(k in b)).sort();
@@ -76,13 +87,17 @@ export function recordBalanceSighting(db: DB, s: {
         .run(patchId, s.serverId, now, now);
       const prev = db.prepare('SELECT patch_id, inventory_json FROM balance_server_state WHERE server_id = ?')
         .get(s.serverId) as { patch_id: number; inventory_json: string } | undefined;
-      if (prev && prev.inventory_json === invJson && prev.patch_id !== patchId) {
+      // The stored inventory may predate a plugin joining the ignored list;
+      // compare it the way the fingerprint sees it, so that alone never alerts.
+      const prevJson = prev && sameAfterIgnored(prev.inventory_json, invJson, s.ignored ?? []) ? invJson : prev?.inventory_json;
+      if (prev && prevJson === invJson && (prev.patch_id !== patchId || prev.inventory_json !== invJson)) {
         // Same inventory, different patch: the boot refingerprint merged the
         // patch this server was on into an older one. Nothing about the box
         // changed, so follow the patch silently rather than alert.
-        db.prepare('UPDATE balance_server_state SET patch_id = ? WHERE server_id = ?').run(patchId, s.serverId);
+        db.prepare('UPDATE balance_server_state SET patch_id = ?, inventory_json = ? WHERE server_id = ?')
+          .run(patchId, invJson, s.serverId);
       }
-      if (!prev || prev.inventory_json !== invJson) {
+      if (!prev || prevJson !== invJson) {
         serverChanged = true;
         db.prepare(`INSERT INTO balance_server_state (server_id, patch_id, inventory_json, since) VALUES (?, ?, ?, ?)
                     ON CONFLICT (server_id) DO UPDATE SET patch_id = excluded.patch_id,
@@ -137,7 +152,7 @@ export function refingerprintPatches(db: DB, versionless: string[], ignored: str
     for (const r of rows) {
       let fp: string;
       try {
-        fp = fingerprintOf(JSON.parse(r.inputs_json) as Inventory, versionless, ignored);
+        fp = fingerprintOf(withoutIgnored(JSON.parse(r.inputs_json) as Inventory, ignored), versionless);
       } catch {
         continue; // unreadable inputs: leave the patch exactly as it is
       }

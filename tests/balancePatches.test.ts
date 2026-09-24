@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../src/db.js';
 import { addServer } from '../src/serverPool.js';
 import { subscribeAdminEvents } from '../src/adminFeed.js';
-import { diffInventories, fingerprintOf, formatDiff, listPatches, recordBalanceSighting, refingerprintPatches } from '../src/balancePatches.js';
+import { diffInventories, fingerprintOf, formatDiff, listPatches, recordBalanceSighting, refingerprintPatches, withoutIgnored } from '../src/balancePatches.js';
 
 const INV = { 'c:z_tank_health': '4000', 'p:l4d_skypounce.smx': '100.aaaa0001', 'p:pug-match.smx': '200.bbbb0001' };
 
@@ -146,7 +146,7 @@ describe('refingerprintPatches', () => {
     expect(problems).toHaveLength(1);
     expect(problems[0]).toMatch(new RegExp(`#2 \\(id ${newer.patchId}\\) into #1 \\(id ${older.patchId}\\)`));
     const fp = (id: number) => (db.prepare('SELECT fingerprint FROM balance_patches WHERE id = ?').get(id) as { fingerprint: string | null }).fingerprint;
-    expect(fp(older.patchId)).toBe(fingerprintOf(INV, [], [SPEC]));
+    expect(fp(older.patchId)).toBe(fingerprintOf(withoutIgnored(INV, [SPEC]), []));
     expect(fp(newer.patchId)).toBeNull();
     // Rounds already tagged with the merged patch stay tagged.
     expect(db.prepare('SELECT patch_id FROM match_rounds WHERE half = 2').get()).toEqual({ patch_id: newer.patchId });
@@ -171,7 +171,7 @@ describe('refingerprintPatches', () => {
     const r = refingerprintPatches(db, [], [SPEC]);
     expect(r).toEqual({ updated: 1, merged: [] });
     expect(db.prepare('SELECT fingerprint FROM balance_patches WHERE id = ?').get(only.patchId))
-      .toEqual({ fingerprint: fingerprintOf(withSpec, [], [SPEC]) });
+      .toEqual({ fingerprint: fingerprintOf(withoutIgnored(withSpec, [SPEC]), []) });
     expect(problems).toHaveLength(0);
   });
 });
