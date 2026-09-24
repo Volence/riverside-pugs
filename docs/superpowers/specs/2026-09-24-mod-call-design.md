@@ -76,7 +76,7 @@ The two SteamID columns carry no foreign key (a caller may have no account), lik
 
 `ticket_reports` gains a nullable `source` column (`site`, `discord`, `button`, `game`); only the in-game path sets it in this work, the others stay null. The ticket timeline shows "from in game" when it is `game`.
 
-**Folding:** a new call folds into an earlier call when the earlier one is unhandled, not itself folded, less than 5 minutes old, on the same server, and either (a) both target the same player, or (b) both are targetless (`team`, `general`, `none`). A folded call stores `folded_into`, edits the parent card to list every caller ("3 calls: A, B, C", reasons and texts appended), and does not ping. It still files its own ticket report when it qualifies, which the ticket system folds into the open case.
+**Folding:** a new call folds into an earlier call when the earlier one is unhandled, not itself folded, less than 5 minutes old, on the same server, and either (a) both target the same player (any reason), or (b) both are targetless (`team`, `general`, `none`) with the same reason. A folded call stores `folded_into`, edits the parent card to list every caller ("3 calls: A, B, C", reasons and texts appended), and does not ping. It still files its own ticket report when it qualifies, which the ticket system folds into the open case.
 
 **Rate cap per caller:** a caller with more than 5 unfolded calls in the past hour is stored and posted with `pinged = 0` and a "not pinged: rate cap" line on the card.
 

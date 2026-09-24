@@ -122,14 +122,20 @@ export function handleModCall(
     }
 
     // `server_id IS ?` so a call with no server folds with others like it.
+    // A call about a named player folds into an earlier call about that same
+    // player regardless of reason (a second complaint about someone is still
+    // one situation to look at). A targetless call (team/general/none) has no
+    // player to anchor on, so it only folds with an earlier targetless call
+    // that shares the same reason: otherwise unrelated things like a toxic
+    // team call and a "server broke" call would fold into one card.
     const since = new Date(now.getTime() - FOLD_WINDOW_MS).toISOString();
     const parent = db.prepare(
       `SELECT id FROM mod_calls
         WHERE folded_into IS NULL AND handled_at IS NULL AND post_state IN ('pending', 'posted')
           AND server_id IS ? AND created_at > ?
-          AND ${target !== null ? "target_kind = 'player' AND target_steamid = ?" : "target_kind != 'player'"}
+          AND ${target !== null ? "target_kind = 'player' AND target_steamid = ?" : "target_kind != 'player' AND reason = ?"}
         ORDER BY id DESC LIMIT 1`,
-    ).get(...(target !== null ? [serverId, since, target] : [serverId, since])) as { id: number } | undefined;
+    ).get(...(target !== null ? [serverId, since, target] : [serverId, since, ev.reason])) as { id: number } | undefined;
 
     if (parent) {
       foldedInto = parent.id;
