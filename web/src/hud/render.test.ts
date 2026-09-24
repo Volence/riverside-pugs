@@ -1600,3 +1600,34 @@ describe('tinted: a multiply that keeps every pixel\'s own alpha', () => {
     expect([...out!]).toEqual([0, 80, 0, 50, 0, 0, 0, 255, 0, 100, 0, 255]);
   });
 });
+
+describe('the dead infected card skull (X-B14a)', () => {
+  afterEach(() => { _setCanvasFactory(null); });
+
+  it('draws the skull multiplied to 98 98 98, its alpha untouched', () => {
+    // /home/volence/l4d/hud/probe-phase2-rest/r3/shots/r3/r3-l.png: icon_skull repointed to quadrants drew
+    // white as 98 98 98, red as 98 0 0; the alpha-128 white blended as a half-alpha 98.
+    const white = new Uint8ClampedArray([255, 255, 255, 255, 255, 0, 0, 255, 255, 255, 255, 128, 0, 0, 0, 0]);
+    _setImageFactory((url) => ({ ...instantImage(url), px: white }) as unknown as HTMLImageElement);
+    _setCanvasFactory((w, h) => {
+      let buf = new Uint8ClampedArray(w * h * 4);
+      const t = {
+        globalCompositeOperation: 'source-over', fillStyle: '',
+        drawImage: (img: { px?: Uint8ClampedArray }) => { if (img.px) buf = new Uint8ClampedArray(img.px); },
+        fillRect: () => {},
+        getImageData: () => ({ data: new Uint8ClampedArray(buf), width: w, height: h }),
+        putImageData: (d: { data: Uint8ClampedArray }) => { buf = new Uint8ClampedArray(d.data); },
+      };
+      return { width: w, height: h, getContext: () => t, get px() { return buf; } } as unknown as HTMLCanvasElement;
+    });
+    const d = design({});
+    const { ctx, calls } = recCtx();
+    const state = { ...DEFAULT_PREVIEW, infected: 'dead' as const };
+    drawPanel(ctx, d, 'infectedRow', { x: 10, y: 20 }, 2, { card: 0, state });
+    const skull = childRects(d, 'infectedRow', { x: 10, y: 20 }, 2, state).find((r) => r.name === 'SkullIconPlacement')!;
+    const hit = calls.find((c) => c.m === 'drawImage' && c.a[1] === skull.x && c.a[2] === skull.y)!;
+    expect(hit).toBeDefined();
+    const drawn = (hit.a[0] as { px?: Uint8ClampedArray }).px;
+    expect(drawn && [...drawn]).toEqual([98, 98, 98, 255, 98, 0, 0, 255, 98, 98, 98, 128, 0, 0, 0, 0]);
+  });
+});

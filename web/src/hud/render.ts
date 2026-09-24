@@ -864,16 +864,29 @@ function drawClassIcon(ctx: CanvasRenderingContext2D, r: ChildRect, opts: DrawOp
  * Q19, bl-abeg.png e), and AbilityProgress, the CircularProgressBar whose
  * fg_image (stock HUD/PZ_charge_meter) the preview draws whole, as a ready
  * ring (bl-abeg.png g). The meter's UnlitTwoTexture material takes no colour
- * (probe B15), so neither is tinted.
+ * (probe B15), so it is not tinted.
+ *
+ * The skull is drawn opaque, multiplied by 98 98 98 (SKULL_TINT): with
+ * icon_skull repointed to colour quadrants the game drew white as 98 98 98,
+ * red as 98 0 0, green as 0 98 0, and an alpha-128 white as 70, a half-alpha
+ * 98 in linear light over black
+ * (/home/volence/l4d/hud/probe-phase2-rest/r3/shots/r3/r3-l.png). Over the
+ * lit floor it is flat 98 while the floor round it reads 53 46 33, so it is
+ * a tint, not an alpha
+ * (/home/volence/l4d/hud/probe-phase2-infected/b14/shots/b14/b14-g.png).
+ * client.dll's skull draw (0x10247fb0) passes a white member colour; the 98
+ * is applied further down and was not found, so the measurement stands.
  */
+const SKULL_TINT: [number, number, number] = [98, 98, 98];
 function drawCardArt(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, opts: DrawOpts) {
   const lname = n.key.toLowerCase();
-  const material = lname === 'skulliconplacement' ? SKULL_ICON
+  const skull = lname === 'skulliconplacement';
+  const material = skull ? SKULL_ICON
     : lname === 'abilityprogress' ? normaliseMaterial(kvGet(n, 'fg_image') ?? 'hud/pz_charge_meter') : undefined;
   if (!material || r.w <= 0 || r.h <= 0) return;
   const img = artImage(material, opts.onAsset);
   if (!img) { if (missing.has(material)) hatch(ctx, r); return; }
-  ctx.drawImage(img, r.x, r.y, r.w, r.h);
+  ctx.drawImage(skull ? tinted(img, material, ...SKULL_TINT) : img, r.x, r.y, r.w, r.h);
 }
 
 function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts, panelId?: string) {
