@@ -1797,6 +1797,9 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .queue-block { margin-top: var(--sp-3); }
 
 .howto { margin: 0; padding-left: 1.25rem; display: grid; gap: var(--sp-2); }
+/* A grid item will not shrink below its content by default, so a long code
+   block in a step would stretch the step past the panel instead of scrolling. */
+.howto > li { min-width: 0; }
 /* Shader Detail crash warning in the map pack install steps. Borrows
    .error's color since it is the same "this will hurt you" red, but not its
    font-size: this is a preventive warning read before anything has gone
@@ -1807,6 +1810,10 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .faq details { border-bottom: 1px solid var(--border); padding: var(--sp-3) 0; }
 .faq summary { cursor: pointer; color: var(--text-bright); font-family: var(--font-label); letter-spacing: 0.04em; }
 .faq details p { margin: var(--sp-2) 0 0; color: var(--text); }
+/* An answer long enough to need a list or a code block cannot live inside a
+   <p>, so it gets a div and brings its own paragraphs. */
+.faq__answer { color: var(--text); }
+.faq__answer > .howto { margin-top: var(--sp-2); }
 
 .season-picker { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.12em; }
 
