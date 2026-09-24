@@ -32,7 +32,13 @@ export const TITLE_MAX = 40;
 export const DESCRIPTION_MAX_CHARS = 280;
 export const DESCRIPTION_MAX_LINES = 4;
 export const DESIGN_MAX_BYTES = 2 * MB;
-export const PREVIEW_MAX_BYTES = 1.5 * MB;
+/**
+ * A preview is a 960 x 540 PNG at most (16:9), whose raw RGBA is 2,073,600
+ * bytes plus a filter byte a row. The cap sits above that, so no PNG a
+ * browser encodes from a real preview canvas is ever refused, even one over
+ * a busy in-game backdrop (measured in Chrome: 0.74 to 0.96 MB).
+ */
+export const PREVIEW_MAX_BYTES = 2.5 * MB;
 /** The editor's own import cap is 50 MB; sharing has the allowlist's lower one. */
 export const IMPORT_MAX_BYTES = 20 * MB;
 /** Entries readVPK reads from an import before refusing it: the set cap and a margin, so the set cap's own sentence still shows. */
@@ -255,13 +261,17 @@ export const PREVIEW_SIZE: Record<Aspect, { w: number; h: number }> = {
   '4:3': { w: 720, h: 540 },
 };
 
-/** A preview PNG of the design's aspect at 540 tall, at most 1.5 MB. */
-export function checkPreview(bytes: Uint8Array, aspect: Aspect): Checked<{ w: number; h: number }> {
-  if (bytes.length > PREVIEW_MAX_BYTES) return tooBig('The preview is over 1.5 MB.');
+/**
+ * A preview PNG of the design's aspect at 540 tall, at most 2.5 MB. The
+ * survivor side's and the infected side's go through the same check; `what`
+ * names which one a refusal is about.
+ */
+export function checkPreview(bytes: Uint8Array, aspect: Aspect, what = 'The preview'): Checked<{ w: number; h: number }> {
+  if (bytes.length > PREVIEW_MAX_BYTES) return tooBig(`${what} is over 2.5 MB.`);
   const size = pngSize(bytes);
-  if (!size) return bad('The preview is not a PNG.');
+  if (!size) return bad(`${what} is not a PNG.`);
   const want = PREVIEW_SIZE[aspect];
-  if (size.w !== want.w || size.h !== want.h) return bad(`The preview must be ${want.w} x ${want.h} for ${aspect}.`);
+  if (size.w !== want.w || size.h !== want.h) return bad(`${what} must be ${want.w} x ${want.h} for ${aspect}.`);
   return pass(size);
 }
 

@@ -358,6 +358,8 @@ interface HudShare {
   design?: object;
   importId?: string;
   preview?: Uint8Array | null;
+  /** The infected side's preview, sent as `previewInfected` when given. */
+  infected?: Uint8Array | null;
   vpk?: Uint8Array | null;
 }
 function hudForm(o: HudShare = {}): FormData {
@@ -370,6 +372,7 @@ function hudForm(o: HudShare = {}): FormData {
   form.set('meta', JSON.stringify(meta));
   const preview = o.preview === undefined ? png(960, 540) : o.preview;
   if (preview) form.set('preview', new Blob([preview as BlobPart], { type: 'image/png' }), 'preview.png');
+  if (o.infected) form.set('previewInfected', new Blob([o.infected as BlobPart], { type: 'image/png' }), 'preview-infected.png');
   if (o.vpk) form.set('import', new Blob([o.vpk as BlobPart]), 'base.vpk');
   return form;
 }
@@ -406,6 +409,66 @@ describe('sharing a HUD', () => {
     expect(file.headers['content-security-policy']).toBe("default-src 'none'; sandbox");
     expect(file.headers['cache-control']).toBe('public, max-age=3600');
     expect(new Uint8Array(file.rawPayload)).toEqual(preview);
+  });
+
+  it('shares the infected side\'s preview too, and serves it as safely', async () => {
+    const preview = png(960, 540, 11);
+    const infected = png(960, 540, 12);
+    const res = await shareHud(A, { preview, infected });
+    expect(res.statusCode).toBe(200);
+    const { id } = res.json();
+    const url = `/api/community/files/previews/${sha(infected)}.png`;
+    const entry = (await list(null, 'kind=hud')).json().entries[0];
+    expect(entry).toMatchObject({ id, previewUrl: `/api/community/files/previews/${sha(preview)}.png`, previewInfectedUrl: url });
+    expect((await get(null, `/api/community/${id}`)).json().previewInfectedUrl).toBe(url);
+    expect((await inject(A, 'GET', '/api/community/mine')).json().entries[0].previewInfectedUrl).toBe(url);
+    const file = await get(null, url);
+    expect(file.statusCode).toBe(200);
+    expect(file.headers['content-type']).toBe('image/png');
+    expect(file.headers['x-content-type-options']).toBe('nosniff');
+    expect(file.headers['content-security-policy']).toBe("default-src 'none'; sandbox");
+    expect(new Uint8Array(file.rawPayload)).toEqual(infected);
+    expect(filesIn('previews').sort()).toEqual([`${sha(preview)}.png`, `${sha(infected)}.png`].sort());
+    const row = db.prepare('SELECT preview_infected, bytes, payload FROM community_entries WHERE id = ?').get(id) as
+      { preview_infected: string; bytes: number; payload: string };
+    expect(row.preview_infected).toBe(sha(infected));
+    expect(row.bytes).toBe(Buffer.byteLength(row.payload) + preview.length + infected.length);
+  });
+
+  it('takes a share with only the survivor preview, as before', async () => {
+    const res = await shareHud(A, { preview: png(960, 540, 13) });
+    expect(res.statusCode).toBe(200);
+    expect((await list(null, 'kind=hud')).json().entries[0].previewInfectedUrl).toBeNull();
+    expect((await get(null, `/api/community/${res.json().id}`)).json().previewInfectedUrl).toBeNull();
+  });
+
+  it('refuses a bad infected preview, naming it, and writes nothing', async () => {
+    const wrong = await shareHud(A, { infected: png(720, 540) });
+    expect(wrong.statusCode).toBe(400);
+    expect(wrong.json().error).toBe('The infected preview must be 960 x 540 for 16:9.');
+    const notPng = await shareHud(A, { infected: text('<html>not a png at all</html>') });
+    expect(notPng.statusCode).toBe(400);
+    expect(notPng.json().error).toBe('The infected preview is not a PNG.');
+    const big = await shareHud(A, { infected: png(960, 540, 3 * MB) });
+    expect(big.statusCode).toBe(413);
+    expect(big.json().error).toBe('The infected preview is over 2.5 MB.');
+    const twice = hudForm({ infected: png(960, 540, 1) });
+    twice.append('previewInfected', new Blob([png(960, 540, 2) as BlobPart]), 'again.png');
+    expect((await app.inject({ method: 'POST', url: '/api/community/huds', cookies: cookie[A], payload: twice })).statusCode).toBe(400);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM community_entries').get()).toEqual({ n: 0 });
+    expect(filesIn('previews')).toEqual([]);
+  });
+
+  it('counts the infected preview against the budget', async () => {
+    setSetting(db, 'community_store_mb', '100');
+    mkdirSync(join(dir, 'previews'), { recursive: true });
+    const filler = join(dir, 'previews', 'filler.bin');
+    writeFileSync(filler, '');
+    truncateSync(filler, 100 * MB - 3000);
+    // The survivor shot alone fits; with the infected one it does not.
+    expect((await shareHud(A, { title: 'Fits', preview: png(960, 540, 1024) })).statusCode).toBe(200);
+    const res = await shareHud(B, { title: 'Too much', preview: png(960, 540, 1026), infected: png(960, 540, 1025) });
+    expect(res.statusCode).toBe(507);
   });
 
   it('shares a design on an imported HUD, and stores a shared import once', async () => {
@@ -578,10 +641,14 @@ describe('sharing a HUD', () => {
     const files = stockFiles();
     const id = await hudId(files);
     const preview = png(960, 540, 5);
-    const res = await shareHud(A, { design: onImport(id), importId: id, vpk: vpkOf(files), preview });
+    const infected = png(960, 540, 6);
+    const res = await shareHud(A, { design: onImport(id), importId: id, vpk: vpkOf(files), preview, infected });
     const entryId = res.json().id;
     await inject(A, 'DELETE', `/api/community/${entryId}`);
-    const urls = [`/api/community/files/previews/${sha(preview)}.png`, `/api/community/files/imports/${id}.vpk`];
+    const urls = [
+      `/api/community/files/previews/${sha(preview)}.png`, `/api/community/files/previews/${sha(infected)}.png`,
+      `/api/community/files/imports/${id}.vpk`,
+    ];
     for (const url of urls) {
       expect((await get(null, url)).statusCode).toBe(404);
       expect((await get(B, url)).statusCode).toBe(404);
@@ -682,9 +749,9 @@ describe('HUD share limits before the body is read', () => {
   });
 
   it('refuses an oversized preview as it streams, before the details are read', async () => {
-    const res = await shareHud(A, { title: 'x', preview: png(960, 540, 2 * MB) });
+    const res = await shareHud(A, { title: 'x', preview: png(960, 540, 3 * MB) });
     expect(res.statusCode).toBe(413);
-    expect(res.json().error).toBe('The preview is over 1.5 MB.');
+    expect(res.json().error).toBe('The preview is over 2.5 MB.');
   });
 });
 

@@ -15,8 +15,32 @@ describe('community schema', () => {
     expect(columns(db, 'community_entries')).toEqual([
       'id', 'kind', 'author_id', 'title', 'description', 'payload', 'preset', 'aspect', 'advanced',
       'import_id', 'import_name', 'preview', 'bytes', 'created_at', 'deleted_at', 'deleted_by',
-      'delete_reason', 'purged_at',
+      'delete_reason', 'purged_at', 'preview_infected',
     ]);
+  });
+
+  it('adds preview_infected to a table made before it, keeping the rows', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'community-schema-'));
+    try {
+      const path = join(dir, 'pug.db');
+      const first = openDb(path);
+      first.exec('DROP INDEX IF EXISTS idx_community_preview_infected');
+      first.exec('ALTER TABLE community_entries DROP COLUMN preview_infected');
+      first.prepare("INSERT INTO players (steamid, name) VALUES ('76561198000000001', 'a')").run();
+      first.prepare(
+        `INSERT INTO community_entries (kind, author_id, title, payload, preview, created_at)
+         VALUES ('hud', '76561198000000001', 'Old', '{}', ?, '2026-09-24T00:00:00.000Z')`,
+      ).run('a'.repeat(64));
+      expect(columns(first, 'community_entries')).not.toContain('preview_infected');
+      first.close();
+      const db = openDb(path);
+      expect(columns(db, 'community_entries')).toContain('preview_infected');
+      expect(db.prepare('SELECT preview, preview_infected FROM community_entries').get())
+        .toEqual({ preview: 'a'.repeat(64), preview_infected: null });
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('creates community_likes keyed on entry and player', () => {

@@ -52,7 +52,8 @@ const HUD_UPLOADS_AT_ONCE = 2;
  */
 const UPLOAD_TIMEOUT_MS = 120_000;
 const TOO_SLOW = 'The share took too long to upload; try again.';
-const PREVIEW_TOO_BIG = 'The preview is over 1.5 MB.';
+const PREVIEW_TOO_BIG = 'The preview is over 2.5 MB.';
+const INFECTED_TOO_BIG = 'The infected preview is over 2.5 MB.';
 
 /**
  * A file part's bytes, or null once they pass `cap`: from there the rest is
@@ -80,12 +81,12 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
 
   // Registered inside this plugin, so the limits apply to these routes only.
   // throwFileSizeLimit: false leaves an oversized file as part.file.truncated,
-  // turned into a 413 below, as campaignRoutes does. One field (meta) and two
-  // files (preview, import) are all a share ever holds; anything past that
-  // fails in the parser before it is buffered.
+  // turned into a 413 below, as campaignRoutes does. One field (meta) and
+  // three files (preview, previewInfected, import) are all a share ever holds;
+  // anything past that fails in the parser before it is buffered.
   await app.register(multipart, {
     throwFileSizeLimit: false,
-    limits: { fileSize: IMPORT_MAX_BYTES, files: 2, fields: 1, fieldSize: META_MAX_BYTES, parts: 3 },
+    limits: { fileSize: IMPORT_MAX_BYTES, files: 3, fields: 1, fieldSize: META_MAX_BYTES, parts: 4 },
   });
 
   const now = opts.now ?? (() => new Date());
@@ -204,8 +205,10 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
   /**
    * A HUD share: multipart with `meta` (a JSON string of { title,
    * description, permission, design, importId? }, where design is itself the
-   * design's JSON string, as the editor saves it), `preview` (the PNG), and
-   * `import` (the VPK, only for a design on an imported HUD).
+   * design's JSON string, as the editor saves it), `preview` (the survivor
+   * side's PNG), `previewInfected` (the infected side's PNG; optional, so a
+   * page loaded before it existed can still share), and `import` (the VPK,
+   * only for a design on an imported HUD).
    *
    * Everything is checked before the disk is touched. checkImport is the whole
    * check on the VPK (the allowlist, the canonical layout, the ids); nothing
@@ -221,7 +224,8 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
     const early = capProblem(me, 'hud');
     if (early) return reply.code(early.status).send({ error: early.error });
     // One upload in flight per player, and a few across the site: each can
-    // hold up to 20 MB in memory while it is checked.
+    // hold up to 27.5 MB in memory while it is checked (the 2.5 MB meta, two
+    // 2.5 MB previews and the 20 MB import).
     if (hudUploads.has(me)) {
       return reply.code(409).send({ error: 'Your last HUD share is still uploading; wait for it to finish.' });
     }
@@ -253,10 +257,12 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
     // never leaves a file stream half consumed under the parser.
     let meta: string | null = null;
     let preview: Buffer | null = null;
+    let infected: Buffer | null = null;
     let vpk: Buffer | null = null;
     let odd = false;
     let truncated = false;
     let previewTooBig = false;
+    let infectedTooBig = false;
     try {
       for await (const part of req.parts()) {
         if (part.type === 'field') {
@@ -270,6 +276,10 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
           const buf = await readCapped(part.file, PREVIEW_MAX_BYTES);
           if (buf === null) previewTooBig = true;
           else preview = buf;
+        } else if (part.fieldname === 'previewInfected' && infected === null && !infectedTooBig) {
+          const buf = await readCapped(part.file, PREVIEW_MAX_BYTES);
+          if (buf === null) infectedTooBig = true;
+          else infected = buf;
         } else if (part.fieldname === 'import' && vpk === null) {
           const buf = await part.toBuffer();
           if (part.file.truncated) truncated = true;
@@ -294,6 +304,7 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
       throw err;
     }
     if (previewTooBig) return reply.code(413).send({ error: PREVIEW_TOO_BIG });
+    if (infectedTooBig) return reply.code(413).send({ error: INFECTED_TOO_BIG });
     if (truncated) return reply.code(413).send({ error: 'The share is over its size limits.' });
     if (odd || meta === null) return reply.code(400).send({ error: 'The share is not in the form the site sends.' });
 
@@ -317,6 +328,10 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
     if (preview === null) return reply.code(400).send({ error: 'The preview is missing.' });
     const shot = checkPreview(preview, design.value.aspect);
     if (!shot.ok) return reply.code(shot.status).send({ error: shot.error });
+    if (infected !== null) {
+      const inf = checkPreview(infected, design.value.aspect, 'The infected preview');
+      if (!inf.ok) return reply.code(inf.status).send({ error: inf.error });
+    }
     let imported: { id: string } | null = null;
     if (vpk !== null) {
       // checkHudDesign has already tied the design's imported.id to importId.
@@ -328,8 +343,11 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
     const store = opts.store();
     const previewSha = createHash('sha256').update(preview).digest('hex');
     const newPreview = !store.has('preview', previewSha);
+    const infectedSha = infected === null ? null : createHash('sha256').update(infected).digest('hex');
+    const newInfected = infected !== null && infectedSha !== previewSha && !store.has('preview', infectedSha!);
     const newImport = imported !== null && !store.has('import', imported.id);
-    const incoming = (newPreview ? preview.length : 0) + (newImport && vpk ? vpk.length : 0);
+    const incoming = (newPreview ? preview.length : 0) + (newInfected ? infected!.length : 0)
+      + (newImport && vpk ? vpk.length : 0);
     // A share that reuses files already stored adds nothing, so no budget
     // or disk floor can refuse it.
     if (incoming > 0 && !(await store.canTake(incoming))) return reply.code(507).send({ error: SHELF_FULL });
@@ -346,6 +364,8 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
     try {
       const p = store.putPreview(preview);
       if (p.wrote) wrote.push({ kind: 'preview', name: p.name });
+      const q = infected === null ? null : store.putPreview(infected);
+      if (q?.wrote) wrote.push({ kind: 'preview', name: q.name });
       let blobBytes = 0;
       if (imported && vpk) {
         const w = store.putImport(imported.id, vpk);
@@ -360,7 +380,8 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
             kind: 'hud', authorId: me, title: title.value, description: description.value, payload,
             preset: design.value.preset, aspect: design.value.aspect, advanced: design.value.advanced,
             importId: imported?.id ?? null, importName: design.value.importName, preview: p.name,
-            bytes: Buffer.byteLength(payload) + preview.length + blobBytes, createdAt: now(),
+            previewInfected: q?.name ?? null,
+            bytes: Buffer.byteLength(payload) + preview.length + (infected?.length ?? 0) + blobBytes, createdAt: now(),
           }),
         };
       })();

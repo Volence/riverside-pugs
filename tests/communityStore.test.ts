@@ -104,11 +104,11 @@ describe('sweepCommunity', () => {
     db.prepare("INSERT INTO players (steamid, name, status) VALUES (?, 'a', 'active')").run(A);
   });
 
-  const insert = (o: { preview?: string | null; importId?: string | null; deletedDaysAgo?: number }) =>
+  const insert = (o: { preview?: string | null; infected?: string | null; importId?: string | null; deletedDaysAgo?: number }) =>
     Number(db.prepare(
-      `INSERT INTO community_entries (kind, author_id, title, payload, preview, import_id, created_at, deleted_at, deleted_by)
-       VALUES ('hud', ?, 't', '{"v":1}', ?, ?, ?, ?, ?)`,
-    ).run(A, o.preview ?? null, o.importId ?? null, daysAgo(60),
+      `INSERT INTO community_entries (kind, author_id, title, payload, preview, preview_infected, import_id, created_at, deleted_at, deleted_by)
+       VALUES ('hud', ?, 't', '{"v":1}', ?, ?, ?, ?, ?, ?)`,
+    ).run(A, o.preview ?? null, o.infected ?? null, o.importId ?? null, daysAgo(60),
       o.deletedDaysAgo === undefined ? null : daysAgo(o.deletedDaysAgo),
       o.deletedDaysAgo === undefined ? null : A).lastInsertRowid);
   const row = (id: number) => db.prepare('SELECT payload, purged_at FROM community_entries WHERE id = ?').get(id) as { payload: string; purged_at: string | null };
@@ -137,6 +137,33 @@ describe('sweepCommunity', () => {
     expect(s.readImport(hex('2'))).not.toBeNull();
     expect(s.readPreview(p1)).toBeNull();
     expect(s.readPreview(p2)).not.toBeNull();
+  });
+
+  it('purges a tombstone\'s infected preview with it', () => {
+    const s = make();
+    const p = s.putPreview(Buffer.from('surv')).name;
+    const q = s.putPreview(Buffer.from('inf')).name;
+    insert({ preview: p, infected: q, deletedDaysAgo: 31 });
+    sweepCommunity(db, s, NOW);
+    expect(s.readPreview(p)).toBeNull();
+    expect(s.readPreview(q)).toBeNull();
+  });
+
+  it('keeps an infected preview a live entry uses, however old the file', () => {
+    const s = make();
+    const p = s.putPreview(Buffer.from('surv-live')).name;
+    const q = s.putPreview(Buffer.from('inf-live')).name;
+    const shared = s.putPreview(Buffer.from('both')).name;
+    for (const n of [p, q, shared]) age(join(dir, 'previews', `${n}.png`), 5 * 86_400_000);
+    insert({ preview: p, infected: q });
+    // One entry's survivor shot is another's infected one: a purge of the
+    // first must not take it from the second.
+    insert({ preview: shared, deletedDaysAgo: 40 });
+    insert({ preview: p, infected: shared });
+    sweepCommunity(db, s, NOW);
+    expect(s.readPreview(p)).not.toBeNull();
+    expect(s.readPreview(q)).not.toBeNull();
+    expect(s.readPreview(shared)).not.toBeNull();
   });
 
   it('leaves a tombstone younger than 30 days alone', () => {
