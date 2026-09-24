@@ -2249,3 +2249,21 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .patch-notes { white-space: pre-line; }
 .patch-banner { border-left: 3px solid var(--rating); padding-left: 0.6rem; }
 .patch-row--real td:last-child { font-weight: 600; }
+/* Fixed column widths so every topic's table lines up with the next. */
+.patch-table { table-layout: fixed; width: 100%; }
+.patch-table th:nth-child(1) { width: 30%; }
+.patch-table th:nth-child(2), .patch-table th:nth-child(3) { width: 10%; }
+.patch-table th:nth-child(4) { width: 12%; }
+.patch-table td { overflow-wrap: anywhere; }
+/* Phones: one block per row. The metric in bold, then "before -> after" and
+ * the change on one line, then the sentence, with no horizontal scroll. */
+@media (max-width: 640px) {
+  .patch-table, .patch-table tbody, .patch-table tr { display: block; width: 100%; }
+  .patch-table thead { display: none; }
+  .patch-table tr { padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+  .patch-table td { display: inline; padding: 0; border: 0; }
+  .patch-table td.patch-table__metric { display: block; font-weight: 600; }
+  .patch-table td.patch-table__before::after { content: " \2192 "; }
+  .patch-table td.patch-table__change:not(:empty) { margin-left: 0.5rem; }
+  .patch-table td.patch-table__sentence { display: block; margin-top: 0.25rem; }
+}

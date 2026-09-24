@@ -114,7 +114,7 @@ describe('AdminPatches', () => {
       id: 2, number: 2, name: 'Unnamed patch 2', notes: 'Measured change: tanks die faster now.',
       source: 'detected', approximate: false, firstRound: null, lastRound: null,
       matches: 0, rounds: 0, publishedAt: null,
-      previous: null, status: 'no_rounds', changes: null, changesUnavailable: null, effect: null,
+      previous: null, status: 'no_rounds', changes: null, changesUnavailable: null, live: true, effect: null,
     };
     mockAdmin.balancePublicPreview.mockResolvedValue(previewEntry);
     mockAdmin.publishBalancePatch.mockRejectedValueOnce(new ApiError(400, 'publishing needs notes'));

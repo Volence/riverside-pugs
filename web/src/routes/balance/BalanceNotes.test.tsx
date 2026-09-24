@@ -26,7 +26,7 @@ const comparedEntry: PublicEntry = {
     knobs: [{ label: 'Tank base health', from: '8000', to: '7500' }],
     pluginsAdded: [], pluginsRemoved: [], pluginsUpdated: [], files: [],
   },
-  changesUnavailable: null,
+  changesUnavailable: null, live: true,
   effect: {
     a: { matches: 60, rounds: 200 }, b: { matches: 60, rounds: 200 },
     skill: 'differs', approximate: false,
@@ -43,6 +43,12 @@ const comparedEntry: PublicEntry = {
       { metric: 'weapons.hold.smg', group: 'weapons', label: 'Time holding the Uzi',
         a: null, b: null, diff: null, rel: null, lo: null, hi: null,
         verdict: 'no_data', moreMatches: null, nA: 40, nB: 0, noSharedMaps: false },
+      { metric: 'hunter.skeet_rate', group: 'hunter', label: 'Hunters skeeted',
+        a: null, b: null, diff: null, rel: null, lo: null, hi: null,
+        verdict: 'no_data', moreMatches: null, nA: 0, nB: 0, noSharedMaps: false },
+      { metric: 'smoker.pull_rate', group: 'smoker', label: 'Smoker pulls per spawn',
+        a: null, b: null, diff: null, rel: null, lo: null, hi: null,
+        verdict: 'no_data', moreMatches: null, nA: 0, nB: 0, noSharedMaps: false },
     ],
   },
 };
@@ -52,7 +58,7 @@ const historicalEntry: PublicEntry = {
   source: 'historical', approximate: true,
   firstRound: '2026-01-01T00:00:00', lastRound: '2026-01-01T00:00:00',
   matches: 30, rounds: 100, publishedAt: '2026-01-02T00:00:00',
-  previous: null, status: 'first', changes: null, changesUnavailable: 'first', effect: null,
+  previous: null, status: 'first', changes: null, changesUnavailable: 'first', live: false, effect: null,
 };
 
 const noRoundsEntry: PublicEntry = {
@@ -62,7 +68,7 @@ const noRoundsEntry: PublicEntry = {
   matches: 0, rounds: 0, publishedAt: '2026-09-20T00:00:00',
   previous: { id: 2, name: 'Launch patch' }, status: 'no_rounds',
   changes: { knobs: [], pluginsAdded: [], pluginsRemoved: [], pluginsUpdated: [], files: [] },
-  changesUnavailable: null,
+  changesUnavailable: null, live: true,
   effect: null,
 };
 
@@ -93,15 +99,29 @@ describe('BalanceNotes', () => {
     expect(screen.getByText(/Measured change: Tanks killed by survivors went from 62% to 71%/)).toBeTruthy();
     expect(screen.getByText('No clear change: within normal variation.')).toBeTruthy();
     expect(screen.getByText(/about 12 more matches needed/)).toBeTruthy();
+    expect(screen.getByText('120 matches, 400 rounds', { exact: false })).toBeTruthy();
+    expect(screen.getByText(/Compared with Launch patch: 60 matches before, 60 matches after\./)).toBeTruthy();
     expect(screen.getByText('Not measured for this patch.')).toBeTruthy();
     expect(screen.getByText(/players, not the patch/)).toBeTruthy();
     expect(screen.getByText('Tank base health: from 8000 to 7500')).toBeTruthy();
 
-    // The historical entry.
-    expect(screen.getByText('approximate')).toBeTruthy();
-    // Shown twice: the historical entry has no recorded settings to diff
-    // AND nothing earlier to compare against, and both read the same way.
-    expect(screen.getAllByText(/First tracked patch/).length).toBeGreaterThanOrEqual(1);
+    // Rows measured on neither side leave the tables for one muted line, and a
+    // topic left with no rows gets no table; a row with one side stays.
+    const tableText = [...container.querySelectorAll('table.patch-table')].map((t) => t.textContent).join('|');
+    expect(tableText).not.toMatch(/Hunters skeeted|Smoker pulls per spawn/);
+    expect(tableText).toMatch(/Time holding the Uzi/);
+    expect(screen.getByText('Not measured for either patch: Hunters skeeted, Smoker pulls per spawn.')).toBeTruthy();
+    const topics = [...container.querySelectorAll('h5')].map((h) => h.textContent);
+    expect(topics).not.toContain('Hunter');
+    expect(topics).not.toContain('Smoker');
+
+    // The historical entry: a separate chip after a gap.
+    const chip = container.querySelector('.patch-meta .chip')!;
+    expect(chip.textContent).toBe('approximate');
+    expect(chip.parentElement!.textContent).toMatch(/100 rounds approximate$/);
+    // "What changed" and "Measured effect" each say it their own way.
+    expect(screen.getByText('First tracked patch, so there is no earlier patch to list changes against.')).toBeTruthy();
+    expect(screen.getByText('First tracked patch: nothing earlier to compare with.')).toBeTruthy();
 
     // The no-rounds entry.
     expect(screen.getByText('No rounds yet.')).toBeTruthy();
@@ -130,9 +150,36 @@ describe('PatchEntryView', () => {
       source: 'detected', approximate: false,
       firstRound: null, lastRound: null, matches: 0, rounds: 0, publishedAt: '2026-01-01T00:00:00',
       previous: { id: 8, name: 'Even older' }, status: 'no_rounds',
-      changes: null, changesUnavailable: 'previous_unrecorded', effect: null,
+      changes: null, changesUnavailable: 'previous_unrecorded', live: false, effect: null,
     };
     render(<PatchEntryView entry={entry} />);
     expect(screen.getByText(/previous patch predates recorded settings/)).toBeTruthy();
+  });
+
+  it('says no settings were recorded for an unrecorded patch', () => {
+    render(<PatchEntryView entry={{ ...comparedEntry, changes: null, changesUnavailable: 'unrecorded' }} />);
+    expect(screen.getByText('No list of settings was recorded for this patch. See the notes above.')).toBeTruthy();
+  });
+
+  it('a compared entry no longer live says too few matches were measured, not a countdown', () => {
+    render(<PatchEntryView entry={{ ...comparedEntry, live: false }} />);
+    expect(screen.getByText('Too early to tell: too few matches were measured on these patches to tell.')).toBeTruthy();
+    expect(screen.queryByText(/more matches needed/)).toBeNull();
+  });
+
+  it('says 1 match, not 1 matches', () => {
+    const effect = { ...comparedEntry.effect!, a: { matches: 1, rounds: 2 }, b: { matches: 53, rounds: 106 } };
+    const { container } = render(<PatchEntryView entry={{ ...comparedEntry, matches: 1, rounds: 8, effect }} />);
+    expect(container.querySelector('.patch-meta')!.textContent).toMatch(/1 match, 8 rounds/);
+    expect(screen.getByText('Compared with Launch patch: 1 match before, 53 matches after.')).toBeTruthy();
+    render(<PatchEntryView entry={{ ...noRoundsEntry, matches: 1, rounds: 1 }} />);
+    expect(screen.getByText(/1 match, 1 round$/)).toBeTruthy();
+  });
+
+  it('stacks rows on phones: every cell carries its column label', () => {
+    const { container } = render(<PatchEntryView entry={comparedEntry} />);
+    const cells = [...container.querySelectorAll('table.patch-table tbody td')];
+    expect(cells.length).toBeGreaterThan(0);
+    expect(cells.every((td) => td.getAttribute('data-label'))).toBe(true);
   });
 });

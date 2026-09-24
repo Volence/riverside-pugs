@@ -964,9 +964,11 @@ export interface PublicEntry extends PublicPatch {
   previous: { id: number; name: string } | null;
   status: 'compared' | 'first' | 'no_rounds';
   changes: PublicChanges | null;
-  /** Why `changes` is null: this patch is historical, the baseline has no recorded
-   *  inputs, or there is no baseline. */
-  changesUnavailable: 'historical' | 'previous_unrecorded' | 'first' | null;
+  /** Why `changes` is null: this patch is historical, this patch or the baseline
+   *  has no recorded inputs, or there is no baseline. */
+  changesUnavailable: 'historical' | 'unrecorded' | 'previous_unrecorded' | 'first' | null;
+  /** The newest patch in the public timeline, or one a server is running now. */
+  live: boolean;
   effect: {
     a: { matches: number; rounds: number }; b: { matches: number; rounds: number };
     skill: 'differs' | 'unavailable' | null; approximate: boolean; rows: PublicRow[];
