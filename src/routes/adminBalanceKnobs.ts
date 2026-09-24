@@ -52,7 +52,7 @@ export async function adminBalanceKnobRoutes(app: FastifyInstance, opts: KnobRou
     const r = applyKnobs(db, knobs, { values: b.values ?? {}, name: b.name, notes: b.notes, adminId });
     if (!r.ok) return reply.code(r.status).send({ error: r.error, preview: r.preview });
     logAdmin(db, adminId, 'balance_apply', r.rolloutId, {
-      patchId: r.patchId, reused: r.reused, changes: r.preview.diff.map((d) => `${d.cvar} ${d.from} -> ${d.to}`),
+      patchId: r.patchId, reused: r.reused, name: r.name, notesSet: r.notesSet, changes: r.preview.diff.map((d) => `${d.cvar} ${d.from} -> ${d.to}`),
     });
     void writer?.sync();
     return { ok: true, rolloutId: r.rolloutId, patchId: r.patchId, reused: r.reused };

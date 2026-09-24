@@ -7,7 +7,10 @@ import {
 /** SQLite's datetime('now') format, so it sorts against the other balance times. */
 const sqlNow = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 
-export type ApplyResult = { ok: true; rolloutId: number; patchId: number; reused: boolean; preview: KnobPreview }
+/** `name` is the patch's name after the apply; `notesSet` says whether this
+ *  apply wrote the notes (always for a new patch, only when they were empty
+ *  for a reused one). */
+export type ApplyResult = { ok: true; rolloutId: number; patchId: number; reused: boolean; name: string | null; notesSet: boolean; preview: KnobPreview }
   | { ok: false; status: 400 | 409; error: string; preview?: KnobPreview };
 
 export interface RolloutRow {
@@ -38,15 +41,20 @@ export function applyKnobs(db: DB, knobs: BalanceKnobs, req: {
     if (notes.length > 2000) return { ok: false, status: 400, error: 'Notes are up to 2000 characters.', preview };
 
     let patchId: number;
+    let notesSet = false;
     const reused = preview.existingPatch !== null;
     if (preview.existingPatch) {
       const p = preview.existingPatch;
       patchId = p.id;
       if (!p.name) {
         if (!name) return { ok: false, status: 400, error: 'This config is an unnamed patch: give it a name.', preview };
-        db.prepare('UPDATE balance_patches SET name = ? WHERE id = ?').run(name, patchId);
+        // Naming a patch in the panel is reviewing it, as a new patch is.
+        db.prepare('UPDATE balance_patches SET name = ?, reviewed = 1 WHERE id = ?').run(name, patchId);
       }
-      if (!p.notes && notes) db.prepare('UPDATE balance_patches SET notes = ? WHERE id = ?').run(notes, patchId);
+      if (!p.notes && notes) {
+        db.prepare('UPDATE balance_patches SET notes = ? WHERE id = ?').run(notes, patchId);
+        notesSet = true;
+      }
     } else {
       if (!name) return { ok: false, status: 400, error: 'A new patch needs a name.', preview };
       if (!notes) return { ok: false, status: 400, error: 'A new patch needs notes saying what changed and why.', preview };
@@ -55,6 +63,7 @@ export function applyKnobs(db: DB, knobs: BalanceKnobs, req: {
       const invJson = JSON.stringify(Object.fromEntries(Object.entries(inv).sort()));
       patchId = Number(db.prepare(`INSERT INTO balance_patches (fingerprint, name, notes, source, inputs_json, first_seen_at, reviewed)
         VALUES (?, ?, ?, 'announced', ?, ?, 1)`).run(preview.fingerprint, name, notes, invJson, now).lastInsertRowid);
+      notesSet = true;
     }
     const patchName = (db.prepare('SELECT name FROM balance_patches WHERE id = ?').get(patchId) as { name: string | null }).name;
     const content = renderBalanceCfg(knobs, preview.values, { number: patchNumber(db, patchId), name: patchName });
@@ -62,7 +71,7 @@ export function applyKnobs(db: DB, knobs: BalanceKnobs, req: {
     const rolloutId = Number(db.prepare(`INSERT INTO balance_rollouts (patch_id, values_json, content, created_by, created_at)
       VALUES (?, ?, ?, ?, ?)`).run(patchId, JSON.stringify(preview.values), content, req.adminId, now).lastInsertRowid);
     ensureServerRows(db, rolloutId);
-    return { ok: true, rolloutId, patchId, reused, preview };
+    return { ok: true, rolloutId, patchId, reused, name: patchName, notesSet, preview };
   })();
 }
 

@@ -55,10 +55,12 @@ describe('applyKnobs', () => {
     const r = apply({}, 'Current config', 'baseline check');
     if (!r.ok) throw new Error(r.error);
     expect(r.reused).toBe(true);
-    expect(db.prepare('SELECT source, name, notes FROM balance_patches WHERE id = ?').get(r.patchId))
-      .toEqual({ source: 'detected', name: 'Current config', notes: 'baseline check' });
+    expect(r).toMatchObject({ name: 'Current config', notesSet: true });
+    expect(db.prepare('SELECT source, name, notes, reviewed FROM balance_patches WHERE id = ?').get(r.patchId))
+      .toEqual({ source: 'detected', name: 'Current config', notes: 'baseline check', reviewed: 1 });
     const again = apply({}, 'Other name', 'other notes');
     if (!again.ok) throw new Error(again.error);
+    expect(again).toMatchObject({ name: 'Current config', notesSet: false });
     expect(db.prepare('SELECT name, notes FROM balance_patches WHERE id = ?').get(r.patchId)).toEqual({ name: 'Current config', notes: 'baseline check' });
   });
 

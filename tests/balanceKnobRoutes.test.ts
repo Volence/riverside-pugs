@@ -56,7 +56,9 @@ describe('balance knob API', () => {
       payload: { values: { z_tank_health: 7500 }, name: 'Tank 7500', notes: 'lower tank HP' } });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ ok: true, reused: false });
-    expect(db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'balance_apply'").get()).toEqual({ n: 1 });
+    const audit = db.prepare("SELECT detail FROM admin_actions WHERE action = 'balance_apply'").all() as { detail: string }[];
+    expect(audit.length).toBe(1);
+    expect(JSON.parse(audit[0].detail)).toMatchObject({ reused: false, name: 'Tank 7500', notesSet: true, changes: ['z_tank_health 8000 -> 7500'] });
     const list = await a.inject({ method: 'GET', url: '/api/admin/balance/rollouts', cookies });
     // The fixture server has no addons_dir configured, so the writer's
     // fire-and-forget sync() (kicked off by the apply route) runs and fails
