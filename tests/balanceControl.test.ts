@@ -79,6 +79,12 @@ describe('validateDraft', () => {
       .toEqual(['Flow min must not be above Flow max']);
     expect(validateDraft(KNOBS, 'nope', cur).errors).toEqual(['values must be an object']);
   });
+  it('re-validates a value carried over from current, unless the draft sets it', () => {
+    const bad = { ...cur, z_tank_health: '12000' };
+    expect(validateDraft(KNOBS, { versus_boss_flow_min: '0.15' }, bad).errors)
+      .toEqual(['Tank health: current value 12000 is outside the safe range; set it in this draft']);
+    expect(validateDraft(KNOBS, { z_tank_health: '9000' }, bad)).toEqual({ values: { ...cur, z_tank_health: '9000' }, errors: [] });
+  });
 });
 
 describe('renderBalanceCfg', () => {
@@ -92,6 +98,17 @@ describe('renderBalanceCfg', () => {
         'sm_cvar versus_boss_flow_max "0.90"',
         '',
       ].join('\n'));
+  });
+
+  it('strips anything but plain text from the patch name in the header', () => {
+    const v = { z_tank_health: '7500', versus_boss_flow_min: '0.10', versus_boss_flow_max: '0.90' };
+    const lines = renderBalanceCfg(KNOBS, v, { number: 3, name: 'x; quit "y' }).split('\n');
+    expect(lines[1]).toBe('// Values here override the deploy repo. Patch #3 x quit y.');
+    const all = lines.join('\n');
+    expect(all).not.toContain(';');
+    expect(all.split('"').length - 1).toBe(6); // only the three sm_cvar value pairs
+    expect(renderBalanceCfg(KNOBS, v, { number: 3, name: ' ;"\n ' }).split('\n')[1])
+      .toBe('// Values here override the deploy repo. Patch #3 unnamed.');
   });
 });
 
@@ -107,6 +124,26 @@ describe('previewKnobs', () => {
     expect(q.groupsChanged).toEqual(['tank', 'bosses']);
     expect(q.existingPatch).toBeNull();
     expect(q.fingerprint).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('has no fingerprint and no existing patch when a knob is missing from the base', () => {
+    const { ['c:z_tank_health']: _gone, ...rest } = LIVE;
+    sight(db, 1, s1, rest);
+    const p = previewKnobs(db, KNOBS, {});
+    expect(p.missing).toEqual(['z_tank_health']);
+    expect(p.fingerprint).toBeNull();
+    expect(p.existingPatch).toBeNull();
+  });
+
+  it('numbers the base and the existing patch in time order, not by id', () => {
+    // Patch id 1 is first seen last (03:00), patch id 2 first (01:00): numbers #2 and #1.
+    const later = sight(db, 1, s1, { ...LIVE, 'c:z_tank_health': '7500' }, 'queue', '2026-09-24 03:00:00');
+    const earlier = sight(db, 2, s2, LIVE, 'queue', '2026-09-24 01:00:00');
+    expect([later.patchId, earlier.patchId]).toEqual([1, 2]);
+    const p = previewKnobs(db, KNOBS, {});
+    expect(p.base).toEqual({ patchId: later.patchId, number: 2 });
+    expect(p.existingPatch?.id).toBe(earlier.patchId);
+    expect(p.existingPatch?.number).toBe(1);
   });
 
   it('has no fingerprint without a base', () => {
