@@ -122,10 +122,36 @@ public void OnClientDisconnect(int client)
 	ResetRing(client);
 }
 
+/**
+ * A player carries across a chapter change (same match, new map), but
+ * GetGameTickCount() and GetGameTime() both restart near zero on the new
+ * map. Without this, a leftover ring entry (or cached LilAC reason) from the
+ * previous map keeps its huge old tick/time value; a detection in the first
+ * seconds of the new chapter would then compare the new map's small "now"
+ * against that huge stale value; see ComputeAimMetrics for why that reads as
+ * "very fresh" instead of "wildly stale" unless guarded against. Forgetting
+ * everything here is what stops two maps' angles (or reasons) from blending
+ * into one report.
+ */
+public void OnMapStart()
+{
+	for (int i = 1; i <= MaxClients; i++) {
+		ResetRing(i);
+		ResetReasons(i);
+	}
+}
+
 void ResetRing(int client)
 {
 	g_ringHead[client] = 0;
 	g_ringCount[client] = 0;
+}
+
+void ResetReasons(int client)
+{
+	g_fAimbotStoredAt[client] = -1.0;
+	g_fBhopStoredAt[client] = -1.0;
+	g_fAimlockStoredAt[client] = -1.0;
 }
 
 public void lilac_cheater_detected(int client, int cheat)
@@ -250,14 +276,22 @@ void ComputeAimMetrics(int client, float &maxd, float &totd, int &taps, int &tap
 	float prevA0 = 0.0, prevA1 = 0.0;
 	int prevAtk = 0;
 	// Pending press edge waiting to see the NEXT usercmd, to know if it was
-	// released within one usercmd. -1 means nothing pending.
-	int pendingTapIndex = -1;
-	int seen = 0;
+	// released within one usercmd.
+	bool pendingTap = false;
 
 	for (int i = 0; i < count; i++) {
 		int pos = (oldest + i) % RING_SIZE;
 		int tick = g_ringTick[client][pos];
-		if (nowTick - tick > windowTicks) continue; // outside the window, older entry
+		// Defence in depth for the chapter-change case (see OnMapStart): a
+		// leftover entry from the previous map has a tick value from a
+		// different, unrelated counter. Once the new map's tickcount is
+		// running, such an entry's tick is LARGER than nowTick (the old map
+		// ran for longer before the change than the new one has been up),
+		// which would make nowTick - tick negative and never > windowTicks,
+		// wrongly reading as "within the window". OnMapStart resetting the
+		// ring is the real fix; this is a second check in case that reset
+		// is ever bypassed.
+		if (tick > nowTick || nowTick - tick > windowTicks) continue; // outside the window
 
 		float a0 = g_ringAngle0[client][pos];
 		float a1 = g_ringAngle1[client][pos];
@@ -270,14 +304,14 @@ void ComputeAimMetrics(int client, float &maxd, float &totd, int &taps, int &tap
 			totd += d;
 			if (d > maxd) maxd = d;
 
-			if (pendingTapIndex >= 0) {
+			if (pendingTap) {
 				// This is the usercmd right after a press edge: settle it.
 				if (atk == 0) taps1++;
-				pendingTapIndex = -1;
+				pendingTap = false;
 			}
 			if (atk == 1 && prevAtk == 0) {
 				taps++;
-				pendingTapIndex = seen; // wait for the next entry to settle it
+				pendingTap = true; // wait for the next entry to settle it
 			}
 		}
 
@@ -285,7 +319,6 @@ void ComputeAimMetrics(int client, float &maxd, float &totd, int &taps, int &tap
 		prevA1 = a1;
 		prevAtk = atk;
 		havePrev = true;
-		seen++;
 	}
 	// A press pending at the end of the window (still held, or the ring ran
 	// out) never got to see its next usercmd, so it is deliberately NOT
@@ -299,12 +332,13 @@ void ComputeAimMetrics(int client, float &maxd, float &totd, int &taps, int &tap
  * forged by a player typing it. There is no name field: the only identity on
  * the line is a steamid, so a crafted name has nothing to impersonate.
  *
- * Longest realistic extra suffix (aimbot/aimlock, all-fields worst case) is
- * well under 100 bytes; the base line is well under 60. Both are far inside
- * PugLog's budget: PugLog formats into a 1024 byte buffer, reserving
- * PUGLOG_TRAILER_ROOM (48 bytes, see pug-logauth.inc) for its own
- * " lseq=.." / " mac=.." trailer, so this line has ~976 usable bytes and
- * uses a small fraction of that.
+ * PugLog formats into a 1024 byte buffer, reserving PUGLOG_TRAILER_ROOM
+ * (48 bytes, see pug-logauth.inc) for its own " lseq=.." / " mac=.."
+ * trailer, so this line has ~976 usable bytes. Even a pathological worst
+ * case (every %d at its 11-character sign+digits extreme, every %.1f a
+ * generous 20 characters) puts the longest extra suffix (aimlock, seven
+ * fields) at under 200 bytes and the base id/cheat/banned line at under 90,
+ * leaving hundreds of bytes of margin against the 976 byte budget.
  */
 void Report(int client, int cheat, bool banned)
 {
