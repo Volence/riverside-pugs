@@ -963,7 +963,7 @@ export default function Hud() {
     const s = sel;
     // Only the survivor cards go Free; an infected card's nudge moves its row (edit.ts nudgeSelection).
     if (s.kind === 'cards' && panelOf(s) === 'teamColumn') noteFree();
-    edit((d) => nudgeSelection(d, s, delta[0], delta[1]), { nudge: selectionKey(s) });
+    edit((d) => nudgeSelection(d, s, delta[0], delta[1], s.kind === 'children' ? panelFile(panelOf(s), preview) : undefined), { nudge: selectionKey(s) });
   };
 
   /**

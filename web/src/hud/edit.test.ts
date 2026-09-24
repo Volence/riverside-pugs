@@ -977,6 +977,14 @@ describe('editing your infected health on the Boomer preview (plan decision 3)',
     expect(d.children.siHealth?.Health?.w).toBe(132 + Math.round(10 * 132 / 64));
     expect(panelChild(d, 'siHealth', 'Health', BOOMER)!.w).toBe(74);
   });
+  it('nudges a piece selected on the Boomer in the Boomer\'s frame, as a drag there does', () => {
+    // Hunter bar at 316 puts the Boomer's at 386, its right edge on the 450 clamp box's.
+    const d: HudDesign = { ...plain, children: { siHealth: { Health: { x: 316 } } } };
+    const sel = { kind: 'children' as const, names: ['Health'], card: 0, panel: 'siHealth' };
+    const nudged = nudgeSelection(d, sel, 5, 0, BOOMER);
+    expect(nudged).toEqual(moveChildren(d, ['Health'], startsOf(d, ['Health'], 'siHealth', BOOMER), 5, 0, 'siHealth', BOOMER));
+    expect(panelChild(nudged, 'siHealth', 'Health', BOOMER)!.x).toBe(386);
+  });
   it('takes an X box typed on the Boomer as the Boomer\'s own x', () => {
     const d = patchChild(plain, 'Health', { x: 300 }, 'siHealth', BOOMER);
     expect(d.children.siHealth?.Health?.x).toBe(230);

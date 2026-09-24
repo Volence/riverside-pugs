@@ -838,13 +838,18 @@ export function resizeElement(
   return { ...design, elements: { ...design.elements, [id]: next } };
 }
 
-/** Arrow keys: move whatever is selected by (dx, dy), through each level's own clamp. */
-export function nudgeSelection(design: HudDesign, sel: Selection, dx: number, dy: number): HudDesign {
+/**
+ * Arrow keys: move whatever is selected by (dx, dy), through each level's
+ * own clamp. `file` is the file pieces are seen in (render.ts panelFile:
+ * your infected health shown as the Boomer), so a nudge clamps in the frame
+ * the player sees, as a drag there does.
+ */
+export function nudgeSelection(design: HudDesign, sel: Selection, dx: number, dy: number, file?: string): HudDesign {
   switch (sel.kind) {
     case 'elements': return sel.ids.reduce((d, id) => nudge(d, id, dx, dy), design);
     // The infected cards have no place of their own (code puts card i at i x HorizPanelSpacing): their row moves.
     case 'cards': return panelOf(sel) === 'teamColumn' ? nudgeCards(design, sel.cards, dx, dy) : nudge(design, panelOf(sel), dx, dy);
-    case 'children': return moveChildren(design, sel.names, startsOf(design, sel.names, panelOf(sel)), dx, dy, panelOf(sel));
+    case 'children': return moveChildren(design, sel.names, startsOf(design, sel.names, panelOf(sel), file), dx, dy, panelOf(sel), file);
     default: return design;
   }
 }
