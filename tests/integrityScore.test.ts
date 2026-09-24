@@ -359,8 +359,12 @@ describe('the hidden columns', () => {
   });
 
   it('keeps F at n/a under MIN_REVEALS even with enough rounds', () => {
-    const [a] = aggregate(losRows('p', 8, hid({ reveals: 2, revealOn: 2 })));
+    const [a] = aggregate(losRows('p', 8, hid({
+      reveals: 2, revealOn: 2,
+      byClass: { ...hid().byClass, hunter: { ...hid().byClass.hunter, reveals: 2, revealOn: 2 } },
+    })));
     expect(a.revealShare).toBeNull();
+    expect(a.byClass.hunter.revealShare).toBeNull();
   });
 
   it('treats a version 4 row as no line of sight, not as zero', () => {
