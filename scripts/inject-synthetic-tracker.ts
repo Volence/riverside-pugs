@@ -18,6 +18,8 @@
  *   --tau MS      how slowly that error moves; 0 is white noise (default 300)
  *   --seed N                                 (default 1)
  *   --out FILE    where to write             (default: the OS temp directory)
+ *   --hidden      follow a spawned infected hidden from the team (metric D)
+ *                 instead of a ghost
  *   --sweep       no file; a table over a grid of lag, noise and tau, pooled
  *                 over every replay given
  *
@@ -32,8 +34,10 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { encodeFrame, encodeHeader, parseReplay, slotInfected, type Frame, type Replay } from '../src/replayFormat.js';
 import { TUNING } from '../src/integrity/constants.js';
 import { pickClips, trackWindows } from '../src/integrity/ghostTrack.js';
+import { hiddenTrackWindows } from '../src/integrity/hidden.js';
+import { losView, isSpawnedTarget } from '../src/integrity/los.js';
 import { decodeRound } from '../src/integrity/run.js';
-import { busiestPair, injectTracker, type TrackerOpts } from '../src/integrity/synthetic.js';
+import { busiestHiddenPair, busiestPair, injectTracker, type TrackerOpts } from '../src/integrity/synthetic.js';
 
 const args = process.argv.slice(2);
 const files = args.filter((a, i) => !a.startsWith('--') && !(args[i - 1] ?? '').match(/^--(slot|ghost|lag|noise|tau|seed|out)$/));
@@ -48,6 +52,7 @@ const num = (name: string, fallback: number): number => {
   if (!Number.isFinite(n)) { console.error(`--${name} wants a number, got "${v}"`); process.exit(2); }
   return n;
 };
+const hidden = args.includes('--hidden');
 if (files.length === 0) {
   console.error('usage: inject-synthetic-tracker.ts <replay.rpl> [more.rpl ...] [--slot N] [--ghost N] [--lag MS] [--noise DEG] [--tau MS] [--seed N] [--out FILE] [--sweep]');
   process.exit(2);
@@ -69,9 +74,15 @@ interface Score { formed: number; scoreable: number; fids: number[]; clips: numb
 function score(bytes: Uint8Array, slot: number, ghostSlot: number): Score {
   const round = decodeRound(bytes);
   if (!round) throw new Error('the injected replay did not decode');
-  const windows = trackWindows(round.frames, slot).filter((w) => w.ghostSlot === ghostSlot);
+  const windows = (hidden ? hiddenTrackWindows(round.frames, slot, losView(round.header)) : trackWindows(round.frames, slot))
+    .filter((w) => w.ghostSlot === ghostSlot);
   const scoreable = windows.filter((w) => w.travel >= TUNING.MIN_TRAVEL);
-  return { formed: windows.length, scoreable: scoreable.length, fids: scoreable.map((w) => w.fidelity), clips: pickClips(windows).length };
+  return {
+    formed: windows.length,
+    scoreable: scoreable.length,
+    fids: scoreable.map((w) => (hidden ? w.lagFidelity : w.fidelity)),
+    clips: (hidden ? pickClips(windows, (w) => w.lagFidelity) : pickClips(windows)).length,
+  };
 }
 
 const q = (xs: number[], p: number): number => {
@@ -102,7 +113,8 @@ for (const path of files) {
   const replay = parseReplay(readFileSync(path));
   if (!replay) { console.error(`${path}: not a replay this build can read, skipped`); continue; }
   const survivors = replay.header.slots.flatMap((id, slot) => (id && !slotInfected(replay.header, slot) ? [slot] : []));
-  const auto = busiestPair(replay.frames, survivors);
+  if (hidden && !replay.header.losKnown) { console.error(`${path}: records no line of sight, skipped`); continue; }
+  const auto = hidden ? busiestHiddenPair(replay.frames, survivors, losView(replay.header)) : busiestPair(replay.frames, survivors);
   const slot = opt('slot') !== undefined ? num('slot', 0) : auto?.slot;
   const ghostSlot = opt('ghost') !== undefined ? num('ghost', 0) : auto?.ghostSlot;
   if (slot === undefined || ghostSlot === undefined) { console.error(`${path}: no survivor and ghost were ever eligible together, skipped`); continue; }
@@ -124,7 +136,7 @@ if (args.includes('--sweep')) {
   for (const o of grid) {
     const total: Score = { formed: 0, scoreable: 0, fids: [], clips: 0 };
     for (const l of loaded) {
-      const s = score(encodeReplay(l.replay, injectTracker(l.replay.frames, l.slot, l.ghostSlot, o)), l.slot, l.ghostSlot);
+      const s = score(encodeReplay(l.replay, injectTracker(l.replay.frames, l.slot, l.ghostSlot, o, hidden ? isSpawnedTarget : undefined)), l.slot, l.ghostSlot);
       total.formed += s.formed; total.scoreable += s.scoreable; total.fids.push(...s.fids); total.clips += s.clips;
     }
     table.push(row({ tau: o.noiseTauMs, lag: o.lagMs, noise: o.noiseDeg }, total));
@@ -141,7 +153,7 @@ if (files.some((f) => dirname(resolve(f)) === dirname(out))) {
   console.error(`refusing to write ${out}: that is a directory a replay was read from`);
   process.exit(2);
 }
-const bytes = encodeReplay(l.replay, injectTracker(l.replay.frames, l.slot, l.ghostSlot, o));
+const bytes = encodeReplay(l.replay, injectTracker(l.replay.frames, l.slot, l.ghostSlot, o, hidden ? isSpawnedTarget : undefined));
 writeFileSync(out, bytes);
 console.log(`${basename(l.path)}: survivor slot ${l.slot} now follows ghost slot ${l.ghostSlot}, lag ${o.lagMs} ms, noise ${o.noiseDeg} deg RMS (tau ${o.noiseTauMs} ms), seed ${o.seed}`);
 console.log(`written to ${out}`);
