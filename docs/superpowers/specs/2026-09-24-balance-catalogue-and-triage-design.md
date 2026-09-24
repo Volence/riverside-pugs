@@ -70,6 +70,17 @@ game servers:
    confirmed on the first match), written only between matches, followed by a
    restart when the box is empty.
 
+**Fleet view.** One table: a row per plugin and per config / data file, a column
+per box, differences highlighted, each cell named by the release that shipped that
+file ("l4d_skypounce 0.4.0, release 11") or "not from any release" for a
+hand-copied file, with "bring this box up to the current release". Today's
+per-server inventories already cover plugins (size.hash per file, reported at each
+PUG go-live; the 2026-09-24 snapshot shows Dallas on a different pug-match build,
+81639 bytes, than Chicago and Riverside #3, 81241, and Riverside #4 never
+reporting). The view also checks a box on demand by reading its files over the
+transport, so an idle box is not days stale, and it covers ignored and versionless
+plugins, which the fingerprint deliberately hides.
+
 The knob panel becomes one kind of release (values only), with one history of
 everything sent to the servers and rollback to any earlier release. Risks to
 design for: the site gains write access to whole game server trees, so it needs a
