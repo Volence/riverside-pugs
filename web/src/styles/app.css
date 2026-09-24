@@ -402,6 +402,8 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .hud__band { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--text-muted); opacity: .6; }
 .hud__band--on { color: var(--text); opacity: 1; }
 .hud__band-chip { width: 1.4em; height: .7em; border-radius: 999px; outline: 1px solid var(--border); }
+.hud__band-btn { display: inline-flex; align-items: center; gap: var(--sp-1); background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+.hud__band-btn:hover { color: var(--text); }
 .hud__band--on .hud__band-chip { outline: 2px solid var(--text); }
 .hud__stylerow select {
   background: var(--surface-2);
@@ -1459,6 +1461,8 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .tabs__tab.is-active { color: var(--text); border-color: var(--border); border-bottom-color: var(--accent); }
 /* The HUD section's strip (HUD editor, Crosshair, Community) heads its three
  * pages. A poster title under it needs air, or the strip reads as part of it. */
+.hudtabs__feedback { margin-left: auto; align-self: center; padding: 0 var(--sp-2); font-size: var(--fs-label); color: var(--text-muted); white-space: nowrap; }
+.hudtabs__feedback:hover { color: var(--text); }
 .hudtabs + .page-head, .hudtabs + .sr-only + .page-head { margin-top: var(--sp-5); }
 .tabs__count {
   margin-left: 0.4em;

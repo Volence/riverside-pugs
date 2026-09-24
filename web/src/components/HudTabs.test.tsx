@@ -1,8 +1,11 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/preact';
 import { HudTabs, hudTabFor } from './HudTabs';
+import { api } from '../api';
 
-afterEach(cleanup);
+// The feedback link asks the site for its Discord invite: no network in a test.
+beforeEach(() => { vi.spyOn(api, 'site').mockResolvedValue({ discordEnabled: false, discordInviteUrl: null, requireDiscord: false }); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe('HudTabs', () => {
   it('links each tool at its own route, in order', () => {
@@ -20,6 +23,18 @@ describe('HudTabs', () => {
     const current = screen.getAllByRole('link').filter((a) => a.getAttribute('aria-current') === 'page');
     expect(current.map((a) => a.textContent)).toEqual(['Crosshair']);
     expect(current[0].classList.contains('is-active')).toBe(true);
+  });
+
+  it('offers feedback on the Discord, and nothing while the site has no invite', async () => {
+    vi.spyOn(api, 'site').mockResolvedValue({ discordEnabled: true, discordInviteUrl: 'https://discord.gg/x', requireDiscord: true });
+    render(<HudTabs active="hud" />);
+    const a = await screen.findByRole('link', { name: /send feedback on Discord/ });
+    expect(a.getAttribute('href')).toBe('https://discord.gg/x');
+    cleanup();
+    vi.spyOn(api, 'site').mockResolvedValue({ discordEnabled: false, discordInviteUrl: null, requireDiscord: false });
+    render(<HudTabs active="hud" />);
+    await Promise.resolve();
+    expect(screen.queryByRole('link', { name: /feedback/ })).toBeNull();
   });
 
   it('is a named navigation landmark, not a tablist of buttons', () => {

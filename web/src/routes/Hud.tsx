@@ -1401,7 +1401,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
           )}
           {!locked && (
             <Guard key={imp?.id ?? design.preset} onError={designFailed}>
-              <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} onWentFree={() => setStatus(WENT_FREE)} preview={preview} />
+              <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} onWentFree={() => setStatus(WENT_FREE)} preview={preview} onPreview={setPreview} />
             </Guard>
           )}
         </Panel>
