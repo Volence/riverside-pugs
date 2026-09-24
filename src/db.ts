@@ -705,6 +705,39 @@ CREATE TABLE IF NOT EXISTS steam_signal_alerts (
   at TEXT NOT NULL,
   PRIMARY KEY (player_id, kind, marker)
 );
+
+-- In-game /mod calls (src/modCalls.ts). One row per call, whether or not it
+-- became a ticket or reached Discord. No foreign key on either SteamID: a
+-- caller or a target may have no account. Both follow a merge through
+-- mergePlayers' PLAIN list.
+CREATE TABLE IF NOT EXISTS mod_calls (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at            TEXT    NOT NULL,
+  server_id             INTEGER,
+  match_id              INTEGER,
+  map                   TEXT,
+  map_ordinal           INTEGER,
+  half                  INTEGER,
+  t_ms                  INTEGER,
+  caller_steamid        TEXT    NOT NULL,
+  caller_team           INTEGER,
+  target_kind           TEXT    NOT NULL CHECK (target_kind IN ('player', 'team', 'general', 'none')),
+  target_steamid        TEXT,
+  reason                TEXT    NOT NULL,
+  text                  TEXT    NOT NULL DEFAULT '',
+  via                   TEXT    NOT NULL DEFAULT 'game',
+  ticket_id             INTEGER,
+  folded_into           INTEGER REFERENCES mod_calls(id),
+  pinged                INTEGER NOT NULL DEFAULT 0,
+  post_state            TEXT    NOT NULL DEFAULT 'pending' CHECK (post_state IN ('pending', 'posted', 'skipped', 'folded')),
+  note                  TEXT    NOT NULL DEFAULT '',
+  discord_message_id    TEXT,
+  handled_by_discord_id TEXT,
+  handled_at            TEXT
+);
+CREATE INDEX IF NOT EXISTS mod_calls_created ON mod_calls (created_at);
+CREATE INDEX IF NOT EXISTS mod_calls_caller ON mod_calls (caller_steamid, created_at);
+CREATE INDEX IF NOT EXISTS mod_calls_pending ON mod_calls (post_state) WHERE post_state = 'pending';
 `;
 
 export const DEFAULT_SETTINGS: Record<string, string> = {
@@ -715,6 +748,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   discord_webhook_url: '',
   discord_queue_thresholds: JSON.stringify([4, 6]),
   discord_pug_role_id: '',
+  mod_call_role_id: '',
+  mod_calls_enabled: '1',
   // Empty: guild membership alone activates a linked player. A role id: the
   // member must also hold that role.
   discord_required_role_id: '',
@@ -1106,6 +1141,9 @@ export function openDb(path: string): DB {
   // the first open of an old database throw. No foreign key: ALTER TABLE
   // cannot add one, and a purged entry keeps its row anyway.
   ensureColumn(db, 'ticket_reports', 'community_entry_id', 'INTEGER');
+  // Where a report came from. Only the in-game /mod path sets it (src/modCalls.ts);
+  // null means one of the older surfaces, which never recorded it.
+  ensureColumn(db, 'ticket_reports', 'source', 'TEXT');
   // Who is on the game server right now, one row per rostered player, written
   // from PLAYER connect, LEAVE and RETURN and from the plugin's own answer to
   // an admin clock action (src/presence.ts). `since` is when the current state
