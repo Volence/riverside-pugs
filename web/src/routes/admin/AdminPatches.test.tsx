@@ -16,8 +16,8 @@ const { AdminPatches } = await import('./AdminPatches');
 afterEach(cleanup);
 
 const patches: PatchSummary[] = [
-  { id: 1, number: 1, name: 'Baseline', notes: '', source: 'historical', firstSeenAt: '2000-01-01 00:00:00', reviewed: true, rounds: 900, countedRounds: 850, servers: [] },
-  { id: 2, number: 2, name: null, notes: 'watch this one', source: 'detected', firstSeenAt: '2026-09-24 01:00:00', reviewed: false, rounds: 3, countedRounds: 0, servers: [] },
+  { id: 1, number: 1, name: 'Baseline', notes: '', source: 'historical', firstSeenAt: '2000-01-01 00:00:00', reviewed: true, rounds: 900, countedRounds: 850, servers: [], publishedAt: null },
+  { id: 2, number: 2, name: null, notes: 'watch this one', source: 'detected', firstSeenAt: '2026-09-24 01:00:00', reviewed: false, rounds: 3, countedRounds: 0, servers: [], publishedAt: null },
 ];
 
 const drift: DriftRow[] = [
