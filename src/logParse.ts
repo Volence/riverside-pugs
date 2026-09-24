@@ -38,6 +38,19 @@ export interface Phase {
  *  t_ms into the round is demo tick `tick + round(t_ms * hz / 1000)`. */
 export interface DemoSync { tick: number; hz: number }
 
+/** The reason fields l4d_lilac_report 0.2.0+ adds onto an L4DL line for
+ *  aimbot, aimlock and bhop, straight off Little Anti-Cheat's own forwards.
+ *  Every field is individually optional because the three cheats each fill a
+ *  different subset: aimbot has lflags/ldelta/ltd, aimlock has the
+ *  ltarget_* trio, bhop has lbhops/ljump, and maxd/totd/taps/taps1 are shared
+ *  by aimbot and aimlock. -1 is LilAC's own "unknown/stale" value, a valid
+ *  parsed value on every field that carries it, never a guess. */
+export interface LilacReason {
+  lflags?: number; ldelta?: number; ltd?: number; maxd?: number; totd?: number;
+  taps?: number; taps1?: number; lbhops?: number; ljump?: number;
+  ltarget_team?: number; ltarget_class?: number; ltarget_ghost?: number;
+}
+
 export type LogEvent =
   | { kind: 'match_start'; token: string; map: string }
   | { kind: 'map_result'; token: string; map: string; a: number; b: number }
@@ -137,7 +150,10 @@ export type LogEvent =
   // cancelled loading screen looks like. `secs` is -1 when the plugin could
   // not read the connection time.
   | { kind: 'signon_drop'; steamid: string; secs: number; forced: number; name: string }
-  | { kind: 'lilac_flag'; steamid: string; cheat: number; banned: boolean }
+  // `reason` is the extra fields l4d_lilac_report 0.2.0+ adds for aimbot,
+  // aimlock and bhop, straight off Little Anti-Cheat's own forwards. Absent
+  // for every other cheat and for an older plugin, which sends none of them.
+  | { kind: 'lilac_flag'; steamid: string; cheat: number; banned: boolean; reason?: LilacReason }
   // A client setting that matters for fairness, from l4d_cvarwatch.smx: once
   // per connection, only when the value is out of bounds. Only cpu_level so
   // far (0 thins smoke, fire and the boomer cloud enough to see through).
@@ -217,6 +233,42 @@ function demoSyncOf(rest: Record<string, string>): { demo?: DemoSync } {
   const hz = intOf(rest.hz);
   if (tick === null || hz === null || tick < 0 || hz <= 0 || hz > 1000) return {};
   return { demo: { tick, hz } };
+}
+
+function intRange(s: string | undefined, min: number, max: number): number | null {
+  const v = intOf(s);
+  return v === null || v < min || v > max ? null : v;
+}
+
+function floatOf(s: string | undefined): number | null {
+  if (s === undefined || !/^-?\d+(\.\d+)?$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** LilAC's degree measurements (ldelta/ltd/maxd/totd): -1 for "unknown/stale",
+ *  else a plausible reading. Anything else is refused rather than guessed at. */
+function measureOf(s: string | undefined): number | null {
+  const v = floatOf(s);
+  if (v === null) return null;
+  return v === -1 || (v >= 0 && v <= 100000) ? v : null;
+}
+
+/** Field order the plugin itself formats them in: aimbot's, then aimlock's
+ *  (maxd/totd/taps/taps1 are the two shared ones), then bhop's, then
+ *  aimlock's target trio. A reason only ever has one cheat's subset, so this
+ *  single fixed order reproduces any of the three shapes unchanged. */
+const REASON_FIELD_ORDER: (keyof LilacReason)[] = [
+  'lflags', 'ldelta', 'ltd', 'maxd', 'totd', 'taps', 'taps1',
+  'lbhops', 'ljump', 'ltarget_team', 'ltarget_class', 'ltarget_ghost',
+];
+
+/** The canonical string integrity_flags.detail stores for a lilac_flag with a
+ *  reason: every field that was on the line, `key=value`, space separated, in
+ *  the order above. Built from the parsed numbers, not the original text, so
+ *  `12.30` and `12.3` store identically. */
+export function lilacReasonDetail(r: LilacReason): string {
+  return REASON_FIELD_ORDER.filter((k) => r[k] !== undefined).map((k) => `${k}=${r[k]}`).join(' ');
 }
 
 function teamOf(s: string | undefined): 'a' | 'b' | null {
@@ -339,7 +391,49 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     if (!steamid) return null;
     if (cheat === null || cheat < 0 || cheat >= LILAC_CHEAT_MAX) return null;
     if (banned !== '0' && banned !== '1') return null;
-    return { kind: 'lilac_flag', steamid, cheat, banned: banned === '1' };
+
+    // Every extra field is optional: 0.2.0+ sends a subset depending on
+    // `cheat` (aimbot/aimlock/bhop), an older plugin sends none at all, and a
+    // field that IS present but out of range rejects the whole line, same as
+    // every other rule here. Ranges are LilAC/l4d_lilac_report's own: -1 is
+    // its "unknown/stale" sentinel, never a guess.
+    const reason: LilacReason = {};
+    let hasReason = false;
+    let bad = false;
+    const setInt = (key: keyof LilacReason, min: number, max: number): void => {
+      const raw = f[key];
+      if (raw === undefined) return;
+      const v = intRange(raw, min, max);
+      if (v === null) { bad = true; return; }
+      reason[key] = v;
+      hasReason = true;
+    };
+    const setMeasure = (key: 'ldelta' | 'ltd' | 'maxd' | 'totd'): void => {
+      const raw = f[key];
+      if (raw === undefined) return;
+      const v = measureOf(raw);
+      if (v === null) { bad = true; return; }
+      reason[key] = v;
+      hasReason = true;
+    };
+    setInt('lflags', -1, 15);
+    setMeasure('ldelta');
+    setMeasure('ltd');
+    setMeasure('maxd');
+    setMeasure('totd');
+    setInt('taps', 0, 1000);
+    setInt('taps1', 0, 1000);
+    setInt('lbhops', 0, 1000);
+    setInt('ljump', -1, 100000);
+    setInt('ltarget_team', -1, 3);
+    setInt('ltarget_class', -1, 8);
+    setInt('ltarget_ghost', -1, 1);
+    if (bad) return null;
+
+    return {
+      kind: 'lilac_flag', steamid, cheat, banned: banned === '1',
+      ...(hasReason ? { reason } : {}),
+    };
   }
 
   // Client settings from l4d_cvarwatch.smx. Anchored like L4DL, and the value
