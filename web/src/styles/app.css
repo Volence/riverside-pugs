@@ -354,6 +354,13 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .hud__stylerow input[type='color'] { width: 40px; height: 28px; padding: 2px; background: var(--surface-2); border: 1px solid var(--border); }
 .hud__stylerow input[type='range'] { width: 100px; accent-color: var(--accent); }
 .hud__stylerow .hud__file { margin: 0; }
+/* A Splatter row's hint, health options and messages sit on their own line under its controls. */
+.hud__splatfull { flex: 1 1 100%; margin: 0; }
+/* A scratch at the three health colours: small canvases with a label under each, wrapping on a phone. */
+.hud__tintstrip { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin-top: var(--sp-2); }
+.hud__tintstrip figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); }
+.hud__tintstrip canvas { width: 64px; height: 16px; background: var(--surface-2); border: 1px solid var(--border); }
+.hud__tintstrip figcaption { font-size: var(--fs-dense); color: var(--text-muted); }
 
 .hud__advtoggle { margin-top: var(--sp-3); }
 

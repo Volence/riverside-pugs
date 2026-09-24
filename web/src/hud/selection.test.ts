@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_DESIGN, type HudDesign, type Box } from './design';
-import { teamCardRects, cardFrame } from './build';
-import { childRects, type CardState } from './render';
+import { teamCardRects, cardFrame, panelChild, elementRect } from './build';
+import { childRects, DEFAULT_PREVIEW, type CardState, type PreviewState } from './render';
 import { withTeamDir, patchChild } from './edit';
+import { panelBoxes } from './mock';
 import {
   NONE, TEAMMATES, hitAt, targetOf, clickSelect, dragIntent, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
-  sanitize, selectedIds, selectionFrames, selectionBox, handlesFor, handlePoint, handleAt, pieceTargets, sectionTargets,
-  pieceGuideToScreen, menuActions, drawnPieces, elementFrame, isPicked, pick, cardsOf, type Selection, type Mods,
+  sanitize, selectedIds, selectionFrames, selectionBox, handlesFor, handlePoint, handlePoints, handleAt, pieceTargets, sectionTargets,
+  pieceGuideToScreen, menuActions, drawnPieces, elementFrame, isPicked, pick, cardsOf, panelOf, type Selection, type Mods,
 } from './selection';
 import { unionBox } from './guides';
 
@@ -16,9 +17,10 @@ const plain: Mods = { shift: false, ctrl: false };
 const shift: Mods = { shift: true, ctrl: false };
 const ctrl: Mods = { shift: false, ctrl: true };
 // Card 2 of the fitted stock row is drawn at (153, 441), 121 x 36. Its
-// portrait covers (153, 443) to (176, 466), its health bar (177, 457) to
-// (273, 464); (273, 442) is on the card but on no other piece, only the
-// splatter, the lowest-priority target there.
+// portrait covers (153, 443) to (176, 466), its health bar (179, 457) to
+// (275, 464), drawn at its item row's x (probe X15); (273, 442) is on the
+// card but on no other piece, only the splatter, the lowest-priority target
+// there.
 const HEAD2 = { x: 164, y: 454 };
 const HEALTH2 = { x: 200, y: 460 };
 const SPLATTER2 = { x: 273, y: 442 };
@@ -287,6 +289,15 @@ describe('what the canvas draws for a selection', () => {
     expect(elementFrame(D, 'chat')).toEqual(selectionBox(D, { kind: 'elements', ids: ['chat'] }));
   });
 
+  it('frames your own health by its fitted panel when fitted, else by its element', () => {
+    const d = { ...structuredClone(D), elements: { ownHealth: { x: 20, y: 380 } } };
+    expect(elementFrame(d, 'ownHealth')).toEqual(selectionBox(d, { kind: 'elements', ids: ['ownHealth'] }));
+    const r = elementFrame(d, 'ownHealth');
+    const fitted = { ...d, elements: { ownHealth: { x: 20, y: 380, fit: true } } };
+    expect(elementFrame(fitted, 'ownHealth')).toEqual(panelBoxes(fitted, 'ownHealth')[0]);
+    expect(elementFrame(fitted, 'ownHealth')).not.toEqual(r);
+  });
+
   it('frames each picked card where it is drawn, in Row as in Free', () => {
     const rects = teamCardRects(D, D.aspect).map(({ x, y, w, h }) => ({ x, y, w, h }));
     expect(selectionFrames(D, { kind: 'cards', cards: [0, 2] })).toEqual([rects[0], rects[2]]);
@@ -294,7 +305,8 @@ describe('what the canvas draws for a selection', () => {
   });
 
   it("boxes several pieces in the card they were picked in", () => {
-    expect(selectionBox(D, { kind: 'children', names: ['Head', 'Health'], card: 1 })).toEqual({ x: 153, y: 443, w: 120, h: 23 });
+    // The bar is framed where the game draws it, at the item row's x (probe X15): 2 units right of its own xpos.
+    expect(selectionBox(D, { kind: 'children', names: ['Head', 'Health'], card: 1 })).toEqual({ x: 153, y: 443, w: 122, h: 23 });
     expect(selectionBox(D, NONE)).toBeNull();
   });
 
@@ -370,7 +382,7 @@ describe('snap targets', () => {
   it('snaps a piece to the unfitted card and the other drawn pieces', () => {
     expect(pieceTargets(D, 'healthy', ['Head'])).toEqual([
       { x: 0, y: 0, w: 150, h: 150 },
-      { x: 37, y: 52, w: 96, h: 7 }, { x: 13, y: 60, w: 120, h: 12 },
+      { x: 39, y: 52, w: 96, h: 7 }, { x: 13, y: 60, w: 120, h: 12 },
       { x: 39, y: 36, w: 50, h: 14 }, { x: 64, y: 38, w: 70, h: 12 },
     ]);
   });
@@ -378,7 +390,7 @@ describe('snap targets', () => {
   it('snaps a section to the screen and the other visible elements of the side', () => {
     const got = sectionTargets(D, 'survivor', { kind: 'elements', ids: ['chat'] });
     expect(got[0]).toEqual({ x: 0, y: 0, w: 853, h: 480 });
-    expect(got).toContainEqual({ x: 728, y: 389, w: 125, h: 91 });
+    expect(got).toContainEqual({ x: 728, y: 421, w: 130, h: 53 });   // your own health, fitted by default (slice 2.F G2)
     expect(got).not.toContainEqual({ x: 10, y: 275, w: 320, h: 120 });
     const cards = teamCardRects(FREE, FREE.aspect);
     const free = sectionTargets(FREE, 'survivor', { kind: 'cards', cards: [1, 2] });
@@ -397,7 +409,7 @@ describe('snap targets', () => {
 describe('the right-click menu', () => {
   it('offers what applies to the selection', () => {
     expect(menuActions({ kind: 'elements', ids: ['chat'] })).toEqual(['hide', 'reset']);
-    expect(menuActions({ kind: 'children', names: ['Head'], card: 0 })).toEqual(['hide', 'reset', 'selectCard', 'selectTeam']);
+    expect(menuActions({ kind: 'children', names: ['Head'], card: 0 })).toEqual(['hide', 'reset', 'front', 'back', 'selectCard', 'selectTeam']);
     expect(menuActions({ kind: 'cards', cards: [0] })).toEqual(['selectTeam']);
     expect(menuActions({ kind: 'cards', cards: [0, 1] })).toEqual(['selectTeam']);
     expect(menuActions(NONE)).toEqual([]);
@@ -411,5 +423,166 @@ describe('targetOf', () => {
     expect(targetOf(D, hit, true)).toEqual({ kind: 'cards', cards: [1] });
     // With that card already picked, a Ctrl+click (and so the Ctrl hover) goes to the Teammates.
     expect(targetOf(D, hit, true, { kind: 'cards', cards: [1] })).toEqual(TEAMMATES);
+  });
+});
+
+describe('the children level names its panel', () => {
+  it('leaves the panel out for the teammate card, so old selections still compare equal', () => {
+    const [c] = panelBoxes(D, 'teamColumn');
+    const hit = hitAt(D, 'survivor', 'healthy', c.x + 1, c.y + 1);
+    const t = targetOf(D, hit);
+    expect(t.kind).toBe('children');
+    if (t.kind === 'children') expect('panel' in t).toBe(false);
+    expect(panelOf({})).toBe('teamColumn');
+  });
+  it('never mixes pieces of two panels in a Shift pick', () => {
+    const a: Selection = { kind: 'children', names: ['Head'], card: 0 };
+    const b: Selection = { kind: 'children', names: ['Health'], card: 0, panel: 'ownHealth' };
+    expect(pick(a, b, true)).toEqual(b);
+  });
+  it('climbs from a single panel\'s pieces straight to its element', () => {
+    expect(climb({ kind: 'children', names: ['Health'], card: 0, panel: 'ownHealth' })).toEqual({ kind: 'elements', ids: ['ownHealth'] });
+    expect(selectedIds({ kind: 'children', names: ['Health'], card: 0, panel: 'ownHealth' })).toEqual(['ownHealth']);
+  });
+});
+
+describe("a card's health bar is framed, hit and snapped to where the game draws it (probe X15)", () => {
+  // /home/volence/l4d/hud/probe-2f/x15/RESULTS.md: at the item row's x, and at the down picture's x while down.
+  const bar: Selection = { kind: 'children', names: ['Health'], card: 1 };
+  const drawn = (state: CardState) => {
+    const c = teamCardRects(D, D.aspect)[1];
+    return childRects(D, 'teamColumn', { x: c.x, y: c.y }, 1, state).find((r) => r.name === 'Health')!;
+  };
+
+  it('frames the healthy bar at the item row\'s x, the down bar at the down picture\'s x', () => {
+    for (const state of ['healthy', 'hurt', 'down'] as const) {
+      const r = drawn(state);
+      expect(selectionFrames(D, bar, state)[1], state).toEqual({ x: r.x, y: r.y, w: r.w, h: r.h });
+      expect(selectionBox(D, bar, state), state).toEqual({ x: r.x, y: r.y, w: r.w, h: r.h });
+    }
+    expect(drawn('down').x).not.toBe(drawn('healthy').x);
+  });
+
+  it('hits the bar where it is drawn, not at its own xpos', () => {
+    const r = drawn('healthy');
+    // One unit left of the drawn bar is inside the block's own box (2 units left) but not on the bar.
+    expect(hitAt(D, 'survivor', 'healthy', r.x - 1, r.y + 3).child).not.toBe('Health');
+    expect(hitAt(D, 'survivor', 'healthy', r.x + r.w - 1, r.y + 3)).toMatchObject({ child: 'Health', card: 1 });
+  });
+
+  it('snaps to the bar where it is drawn, and to the down picture\'s x while down', () => {
+    expect(pieceTargets(D, 'healthy', ['Head'])).toContainEqual({ x: 39, y: 52, w: 96, h: 7 });
+    const pic = panelChild(D, 'teamColumn', 'Incapacitated')!;
+    expect(pic.x).not.toBe(39);
+    expect(pieceTargets(D, 'down', ['Head'])).toContainEqual({ x: pic.x, y: 52, w: 96, h: 7 });
+  });
+});
+
+describe('the pieces of your infected health on the canvas', () => {
+  const plain: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: {} };
+  const boomer: PreviewState = { ...DEFAULT_PREVIEW, siClass: 'boomer' };
+  it('are hit where the class shown draws them', () => {
+    const r = elementRect(plain, 'siHealth', plain.aspect);
+    // The Boomer's bar is at 322..386; the Hunter's 252..384: x 385 is on the Boomer's alone.
+    const at = { x: r.x + 385, y: r.y + 75 };
+    expect(hitAt(plain, 'infected', boomer, at.x, at.y)).toMatchObject({ element: 'siHealth', child: 'Health' });
+    expect(hitAt(plain, 'infected', DEFAULT_PREVIEW, r.x + 300, at.y)).toMatchObject({ element: 'siHealth', child: 'Health' });
+    expect(hitAt(plain, 'infected', boomer, r.x + 300, at.y).child).not.toBe('Health');
+  });
+  it('frame a piece where the class shown draws it, and snap to the others there', () => {
+    const r = elementRect(plain, 'siHealth', plain.aspect);
+    const sel = { kind: 'children' as const, names: ['Health'], card: 0, panel: 'siHealth' };
+    expect(selectionFrames(plain, sel, boomer)).toEqual([{ x: r.x + 322, y: r.y + 69, w: 64, h: 13 }]);
+    const t = pieceTargets(plain, boomer, ['HealthNumber'], 'siHealth');
+    expect(t).toContainEqual({ x: 322, y: 69, w: 64, h: 13 });
+  });
+});
+
+describe('the infected cards are a selection level, and moving one moves the row (plan Task 13)', () => {
+  // Fitted with gap 10: the container moves 10 down (r75 + 10 = 415), the cards are 133 x 64 at 0, 143, 286.
+  const F: HudDesign = { ...DEFAULT_DESIGN, elements: { ...DEFAULT_DESIGN.elements, infectedRow: { fit: true, gap: 10 } } };
+  const at = (p: { x: number; y: number }, state: PreviewState = DEFAULT_PREVIEW) => hitAt(F, 'infected', state, p.x, p.y);
+  const card = (i: number) => panelBoxes(F, 'infectedRow')[i];
+  // Card 2's class icon (PlayerImage 9, 13 24 x 24 after the fit), and a spot on card 2 no piece covers
+  // (right of the 128-wide backdrop, above the name).
+  const ICON2 = () => ({ x: card(1).x + 20, y: card(1).y + 25 });
+  const EMPTY2 = () => ({ x: card(1).x + 130, y: card(1).y + 5 });
+  const CARD2: Selection = { kind: 'cards', cards: [1], panel: 'infectedRow' };
+  const ROW: Selection = { kind: 'elements', ids: ['infectedRow'] };
+
+  it('finds the card under the pointer, and the piece in it', () => {
+    expect(card(1)).toEqual({ x: 143, y: 415, w: 133, h: 64 });
+    expect(at(ICON2())).toEqual({ element: 'infectedRow', card: 1, child: 'PlayerImage' });
+    expect(at(EMPTY2())).toEqual({ element: 'infectedRow', card: 1, child: null });
+  });
+
+  it('climbs piece, card, row with Ctrl, and a click on a card\'s empty space picks the card', () => {
+    const piece = clickSelect(F, NONE, at(ICON2()), plain);
+    expect(piece).toEqual({ kind: 'children', names: ['PlayerImage'], card: 1, panel: 'infectedRow' });
+    expect(clickSelect(F, piece, at(ICON2()), ctrl)).toEqual(CARD2);
+    expect(clickSelect(F, CARD2, at(ICON2()), ctrl)).toEqual(ROW);
+    expect(clickSelect(F, NONE, at(EMPTY2()), plain)).toEqual(CARD2);
+    expect(cardsOf([1], 'infectedRow')).toEqual(CARD2);
+    expect(cardsOf([1])).toEqual({ kind: 'cards', cards: [1] });
+    // Shift adds a card of the same row; a survivor card never mixes in.
+    const both = clickSelect(F, CARD2, hitAt(F, 'infected', DEFAULT_PREVIEW, card(0).x + 130, card(0).y + 5), shift);
+    expect(both).toEqual({ kind: 'cards', cards: [0, 1], panel: 'infectedRow' });
+    expect(pick(cardsOf([0]), CARD2, true)).toEqual(CARD2);
+  });
+
+  it('Escape climbs a piece to its card and a card to the row; the breadcrumb names the row', () => {
+    expect(climb({ kind: 'children', names: ['NameLabel'], card: 2, panel: 'infectedRow' })).toEqual(cardsOf([2], 'infectedRow'));
+    expect(climb(CARD2)).toEqual(ROW);
+    expect(breadcrumb(CARD2).map((c) => c.label)).toEqual(['Infected teammates', 'Card 2']);
+    expect(breadcrumb(CARD2)[0].sel).toEqual(ROW);
+    expect(breadcrumb({ kind: 'children', names: ['NameLabel'], card: 2, panel: 'infectedRow' }).map((c) => c.label))
+      .toEqual(['Infected teammates', 'Card 3', 'Name']);
+  });
+
+  it('a drag on a card, or on picked cards, moves the whole row: the game places every card itself', () => {
+    expect(dragIntent(F, NONE, at(EMPTY2()), plain)).toEqual({ kind: 'move', sel: ROW });
+    expect(dragIntent(F, CARD2, at(EMPTY2()), plain)).toEqual({ kind: 'move', sel: ROW });
+    expect(isPicked(F, CARD2, at(EMPTY2()))).toBe(true);
+  });
+
+  it('frames, ids, sanitising and the menu know the row\'s cards', () => {
+    expect(selectionFrames(F, CARD2)).toEqual([card(1)]);
+    expect(selectedIds(CARD2)).toEqual(['infectedRow']);
+    expect(sanitize(F, 'infected', CARD2)).toBe(CARD2);
+    expect(sanitize(F, 'survivor', CARD2)).toEqual(NONE);
+    expect(sanitize(F, 'infected', { kind: 'cards', cards: [3], panel: 'infectedRow' })).toEqual(ROW);   // never a fourth
+    expect(menuActions({ kind: 'children', names: ['NameLabel'], card: 0, panel: 'infectedRow' })).toContain('selectCard');
+    expect(menuActions(CARD2)).toEqual(['selectTeam']);
+    // Moving the survivor cards' snap targets leave out only the picked cards of that panel.
+    expect(sectionTargets(F, 'infected', CARD2)).toContainEqual(card(0));
+    expect(sectionTargets(F, 'infected', CARD2)).not.toContainEqual(card(1));
+  });
+});
+
+describe('handles never leave the canvas (task L5)', () => {
+  // A Free teammate card or an imported HUD's panel can run past the right edge (the scale clamp, L4, does not move them).
+  const bounds = { w: 853, h: 480, half: 2 };
+  const box = { x: 800, y: 440, w: 100, h: 60 };            // right edge at 900, bottom at 500
+  const corners = ['nw', 'ne', 'se', 'sw'] as const;
+
+  it('pins each handle square inside the canvas, against the edge it ran past', () => {
+    const pts = handlePoints(box, [...corners], bounds);
+    for (const p of pts) {
+      expect(p.x - bounds.half).toBeGreaterThanOrEqual(0);
+      expect(p.x + bounds.half).toBeLessThanOrEqual(bounds.w);
+      expect(p.y - bounds.half).toBeGreaterThanOrEqual(0);
+      expect(p.y + bounds.half).toBeLessThanOrEqual(bounds.h);
+    }
+    expect(pts).toEqual([{ x: 800, y: 440 }, { x: 851, y: 440 }, { x: 851, y: 478 }, { x: 800, y: 478 }]);
+  });
+
+  it('leaves a handle already inside where it is', () => {
+    expect(handlePoints({ x: 10, y: 10, w: 100, h: 50 }, ['se'], bounds)).toEqual([{ x: 110, y: 60 }]);
+    expect(handlePoints(box, ['se'])).toEqual([handlePoint(box, 'se')]);
+  });
+
+  it('hit-tests the same pinned squares', () => {
+    expect(handleAt(box, [...corners], 851, 478, 3, bounds)).toBe('se');
+    expect(handleAt(box, [...corners], 900, 500, 3, bounds)).toBeNull();
   });
 });

@@ -14,48 +14,54 @@ import {
 import { screenW, SCREEN_H } from '../hud/units';
 import { elementById } from '../hud/elements';
 import {
-  elementRect, teamLayout, teamCardRects, cardFrame, isFreeTeam, packHud, importedHasXhair,
+  elementRect, teamLayout, teamCardRects, panelFrame, isFreeTeam, packHud, importedHasXhair, splatterProblem,
   type BuildReport, type CardChild,
 } from '../hud/build';
-import { drawHud, visibleElements, type Side } from '../hud/mock';
-import type { CardState } from '../hud/render';
+import { drawHud, visibleElements, panelBoxes, HANDLE_PX, type Side } from '../hud/mock';
+import { DEFAULT_PREVIEW, panelFile, type PreviewState } from '../hud/render';
 import type { WeaponHeld } from '../hud/weapons';
 import { SLOTS, type StyleSlot } from '../hud/slots';
+import { SPLATTERS, type SplatterDef } from '../hud/splatter';
 import { registerImport, unregisterImport, hasImport, importedFiles } from '../hud/base';
 import { readHudUpload, hudId } from '../hud/upload';
 import { importProblem } from '../hud/importCheck';
 import { hudStore, type HudMeta } from '../hud/hudStore';
 import * as undoStack from '../hud/history';
-import { teamChild } from '../hud/children';
+import { childDef } from '../hud/children';
 import {
   hasOverrides, withImport, withPreset, hasLayoutEdits,
   moveElements, moveCards, cardStarts, freeInPlace, moveChildren, startsOf, nudgeSelection,
   resizeBox, resizeElement, scaleElement, resizeChild, scaleChildren, cornerFactor, anchorOf,
-  setSelectionVisible, patchChild, hideSelection, resetSelection,
+  setSelectionVisible, patchChild, hideSelection, resetSelection, raiseChild,
+  patchSplatter, withSplatterImage, resetSplatter, splatterKind,
 } from '../hud/edit';
 import { snapMove, snapEdges, unionBox, type Guide, type Snap, type Handle } from '../hud/guides';
 import {
   NONE, TEAMMATES, cardsOf, hitAt, targetOf, pick, clickSelect, dragIntent, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
   sanitize, selectionKey, selectedIds, selectionFrames, sectionTargets, pieceTargets, pieceGuideToScreen,
-  selectionBox, handlesFor, handlePoint, handleAt, isPicked, menuActions, elementFrame,
+  selectionBox, handlesFor, handlePoints, handleAt, isPicked, menuActions, elementFrame, panelOf,
   type Selection, type Hit, type Mods, type Crumb, type MenuAction,
 } from '../hud/selection';
 import { ContextMenu } from './hud/ContextMenu';
 import { ContextPanel } from './hud/ContextPanel';
 import { CrosshairBuilderPanel } from './hud/CrosshairControls';
 import { LayersPanel } from './hud/LayersPanel';
+import { SplatterRow } from './hud/SplatterControls';
 import { Toolbar, type PresetChoice } from './hud/Toolbar';
 import { endsOn, typedInto, hexOf, alphaPct, withHex, withAlphaPct, type Edit, type EditMode } from './hud/controls';
-import { assetsFor, decodeUpload } from '../hud/assets';
+import { assetsFor, assetSize } from '../hud/assets';
+import { decodeUpload } from './hud/decode';
 import { communityApi, ApiError } from '../api';
 import type { Session } from '../hooks/useLiveState';
 import { ShareDialog, type SharePrepared } from '../components/ShareDialog';
 import { prepareHudShare, renderPreview } from '../community/publish';
 import { openCommunityImport, SAFETY_FAILED, KEPT_FOR_SESSION } from '../community/open';
 
-// Moved to hud/assets.ts so the community page can build a download without
-// this page; re-exported so existing imports keep working.
-export { assetsFor, decodeUpload };
+// assetsFor and assetSize moved to hud/assets.ts so the community page can
+// build a download without this page; re-exported so existing imports keep
+// working. decodeUpload and halvingSteps live in ./hud/decode.
+export { assetsFor, assetSize };
+export { halvingSteps, decodeUpload } from './hud/decode';
 
 /**
  * Convert a pointer position (client coordinates, as PointerEvent carries
@@ -139,27 +145,50 @@ interface Press { cx: number; cy: number; ux: number; uy: number; mods: Mods; hi
 type Drag =
   | { kind: 'elements'; ids: string[]; starts: Record<string, Box> }
   | { kind: 'cards'; cards: number[]; starts: Record<number, Box> }
-  | { kind: 'children'; names: string[]; card: number; starts: Record<string, CardChild> }
+  | { kind: 'children'; names: string[]; card: number; panel: string; starts: Record<string, CardChild> }
   | { kind: 'box' }
   | { kind: 'resizeElement'; id: string; handle: Handle; start: Box }
   | { kind: 'scaleElement'; id: string; handle: Handle; start: Box; scale: number }
-  | { kind: 'resizePiece'; name: string; card: number; handle: Handle; start: CardChild }
-  | { kind: 'scalePieces'; names: string[]; handle: Handle; starts: Record<string, CardChild>; box: Box };
+  | { kind: 'resizePiece'; name: string; card: number; panel: string; handle: Handle; start: CardChild }
+  | { kind: 'scalePieces'; names: string[]; panel: string; handle: Handle; starts: Record<string, CardChild>; box: Box };
+
+/**
+ * The screen box a piece's guides are drawn in: its teammate card (every
+ * card, the fourth included, which Free lists, as selectionBox has it), or
+ * a single panel's one box.
+ */
+const pieceBox = (d: HudDesign, panel: string, card: number): Box | undefined =>
+  (panel === 'teamColumn' ? teamCardRects(d, d.aspect)[card] : panelBoxes(d, panel)[card]);
 
 /** A press and release within this many screen pixels is a click; anything further is a drag. */
 const CLICK_PX = 3;
 const NO_SNAP: Snap = { dx: 0, dy: 0, guides: [] };
 /** How near a handle the pointer must be, in screen pixels, whatever the canvas scale. */
 const HANDLE_SLACK_PX = 5;
+/**
+ * The canvas in HUD units and a handle square's half size there (mock.ts
+ * HANDLE_PX, fixed in canvas pixels), so the handles are drawn and hit-tested
+ * pinned inside the canvas (selection.ts handlePoints, task L5).
+ */
+const handleBounds = (pxW: number, pxH: number) => {
+  const h = pxH || 1;
+  return { w: (pxW * SCREEN_H) / h, h: SCREEN_H, half: (HANDLE_PX / 2) * SCREEN_H / h };
+};
 const RESIZE_CURSOR: Record<Handle, string> = {
   n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
   ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize',
 };
 const MENU_LABELS: Record<MenuAction, string> = {
-  hide: 'Hide', reset: 'Reset', selectCard: 'Select whole card', selectTeam: 'Select Teammates',
+  hide: 'Hide', reset: 'Reset', front: 'Bring to front', back: 'Send to back', selectCard: 'Select whole card', selectTeam: 'Select Teammates',
 };
+/** A menu item's text: 'selectTeam' names the element another panel's cards or pieces climb to. */
+const menuLabel = (a: MenuAction, s: Selection): string => (a === 'selectTeam' && (s.kind === 'children' || s.kind === 'cards') && panelOf(s) !== 'teamColumn'
+  ? `Select ${elementById(panelOf(s))?.label ?? 'panel'}`
+  : MENU_LABELS[a]);
 /** Said on the status line when moving a card takes a Row or Column team into Free. */
 const WENT_FREE = 'Teammates switched to Free layout';
+/** Said on the status line when localStorage refuses the design, most often over its quota with uploads in it. */
+const TOO_BIG = 'This design is too big for this browser to keep. Remove an uploaded image, or use Export to save it as a file.';
 /** Said on the status line when the Crosshair page's button brings its crosshair in. */
 const FROM_PAGE = 'Your crosshair from the Crosshair page is in this HUD now, and goes into its download.';
 /** Said on the status line when a stored 'bundle' choice loses its crosshair, below. */
@@ -348,10 +377,13 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
   const xhairSelected = sel.kind === 'elements' && sel.ids.length === 1 && sel.ids[0] === 'xhair';
   // A new design wholesale (another preset, an import, a share link) keeps
   // an element selection and climbs cards or pieces to the Teammates.
-  const dropPicks = () => setSel((s) => (s.kind === 'cards' || s.kind === 'children' ? TEAMMATES : s));
-  // Which state the teammate cards are previewed in. Game code picks it in
-  // game; this only changes the picture, never the design or the file.
-  const [cardState, setCardState] = useState<CardState>('healthy');
+  const dropPicks = () => setSel((s) => ((s.kind === 'children' || s.kind === 'cards') && panelOf(s) !== 'teamColumn'
+    ? { kind: 'elements', ids: [panelOf(s)] }
+    : s.kind === 'cards' || s.kind === 'children' ? TEAMMATES : s));
+  // Which state the survivor panels are previewed in (health, crouched, and
+  // the infected side's states). Game code picks it in game; this only
+  // changes the picture, never the design or the file.
+  const [preview, setPreview] = useState<PreviewState>(DEFAULT_PREVIEW);
   const [held, setHeld] = useState<WeaponHeld>('primary');
   const [backdrop, setBackdrop] = useState<Backdrop>('scene');
   // On load only: a design's own crosshair choice is loaded and coerced
@@ -380,7 +412,28 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       try { return isFreeTeam(current.current) ? m : ''; } catch { return ''; }
     });
   }
+  const [tooBig, setTooBig] = useState(false);
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
+  // A splatter's upload error is about the picture that failed; once the
+  // row's entry changes (Reset, a new kind, an Undo or a successful upload)
+  // it no longer applies, so it goes. A failed upload changes no design, so
+  // it does not clear its own error.
+  const splatSeen = useRef<Record<string, unknown[]>>({});
+  useEffect(() => {
+    const gone: string[] = [];
+    for (const def of SPLATTERS) {
+      const now = [splatterKind(design, def.id), design.splatters?.[def.id], design.images[def.id]];
+      const was = splatSeen.current[def.id];
+      if (was && now.some((v, i) => v !== was[i])) gone.push(def.id);
+      splatSeen.current[def.id] = now;
+    }
+    if (gone.length) {
+      setUploadErrors((u) => {
+        if (!gone.some((id) => id in u)) return u;
+        const n = { ...u }; for (const id of gone) delete n[id]; return n;
+      });
+    }
+  }, [design]);
   // What the pointer is over while nothing is pressed, and whether Ctrl is
   // held: the hover outline shows exactly what a click would pick.
   const [hover, setHover] = useState<{ hit: Hit; ctrl: boolean } | null>(null);
@@ -437,14 +490,14 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     if (locked) return;
     try {
       const hovered = hover && !press.current ? targetOf(design, hover.hit, hover.ctrl, sel) : NONE;
-      const box = selectionBox(design, sel);
+      const box = selectionBox(design, sel, preview);
       drawHud(ctx, w, h, design, side, selectedIds(sel), () => setImgTick((t) => t + 1), {
-        state: cardState,
+        state: preview,
         held,
-        frames: selectionFrames(design, sel),
+        frames: selectionFrames(design, sel, preview),
         box,
-        handles: box ? handlesFor(design, sel).map((hd) => handlePoint(box, hd)) : [],
-        hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered), label: selectionLabel(hovered) },
+        handles: box ? handlePoints(box, handlesFor(design, sel), handleBounds(w, h)) : [],
+        hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered, preview), label: selectionLabel(hovered) },
         marquee,
         guides,
       });
@@ -453,7 +506,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize);
       designFailed(e);
     }
-  }, [design, side, sel, backdrop, imgTick, cardState, held, hover, guides, marquee, locked]);
+  }, [design, side, sel, backdrop, imgTick, preview, held, hover, guides, marquee, locked]);
 
   // A selection the design or the side no longer has is trimmed or dropped:
   // after an undo, an import, a removed health number, a layout change.
@@ -469,8 +522,11 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
   // Resetting this timer on each change coalesces a burst (a drag, a
   // held-down arrow key, a slider) into one write once motion settles,
   // while a single change still lands within 300ms either way.
+  // A refused save (over quota, most often from uploaded images) is said on
+  // a line of its own, so a download or a copied link, which set the status
+  // line, cannot hide it; it goes once a later save succeeds.
   useEffect(() => {
-    const t = setTimeout(() => saveDesign(design), 300);
+    const t = setTimeout(() => { setTooBig(!saveDesign(design)); }, 300);
     return () => clearTimeout(t);
   }, [design]);
 
@@ -654,11 +710,13 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
 
   /** The selection's handle under the point, if any: the nearest within HANDLE_SLACK_PX screen pixels. */
   const handleUnder = (d: HudDesign, ux: number, uy: number): Handle | null => {
-    const box = selectionBox(d, sel);
+    const box = selectionBox(d, sel, preview);
     const c = canvas.current;
     if (!box || !c) return null;
-    const slack = (HANDLE_SLACK_PX * SCREEN_H) / c.getBoundingClientRect().height;
-    return handleAt(box, handlesFor(d, sel), ux, uy, slack);
+    // The backing store is 1:1 with the CSS box (the draw effect), so the box's size is the canvas's.
+    const rect = c.getBoundingClientRect();
+    const slack = (HANDLE_SLACK_PX * SCREEN_H) / rect.height;
+    return handleAt(box, handlesFor(d, sel), ux, uy, slack, handleBounds(rect.width, rect.height));
   };
 
   /** What a handle drag resizes, from where everything is now. */
@@ -672,13 +730,14 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
         : { kind: 'scaleElement', id, handle, start: elementFrame(d, id), scale: d.elements[id]?.scale ?? 1 };
     }
     if (sel.kind === 'children') {
-      const starts = startsOf(d, sel.names);
+      const panel = panelOf(sel);
+      const starts = startsOf(d, sel.names, panel, panelFile(panel, preview));
       if (sel.names.length === 1) {
         const start = starts[sel.names[0]];
-        return start ? { kind: 'resizePiece', name: sel.names[0], card: sel.card, handle, start } : null;
+        return start ? { kind: 'resizePiece', name: sel.names[0], card: sel.card, panel, handle, start } : null;
       }
       const box = unionBox(Object.values(starts));
-      return box ? { kind: 'scalePieces', names: sel.names, handle, starts, box } : null;
+      return box ? { kind: 'scalePieces', names: sel.names, panel, handle, starts, box } : null;
     }
     return null;
   };
@@ -692,7 +751,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     endGesture();
     const { ux, uy } = pointerUnits(e);
     const d = current.current;
-    press.current = { cx: e.clientX, cy: e.clientY, ux, uy, mods: modsOf(e), hit: hitAt(d, side, cardState, ux, uy), handle: handleUnder(d, ux, uy), moved: false };
+    press.current = { cx: e.clientX, cy: e.clientY, ux, uy, mods: modsOf(e), hit: hitAt(d, side, preview, ux, uy), handle: handleUnder(d, ux, uy), moved: false };
     drag.current = null;
     setHover(null);
   };
@@ -706,7 +765,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
           return [id, { x, y, w, h }];
         })) };
       case 'cards': return { kind: 'cards', cards: s.cards, starts: cardStarts(d, s.cards) };
-      case 'children': return { kind: 'children', names: s.names, card: s.card, starts: startsOf(d, s.names) };
+      case 'children': return { kind: 'children', names: s.names, card: s.card, panel: panelOf(s), starts: startsOf(d, s.names, panelOf(s), panelFile(panelOf(s), preview)) };
       default: return null;
     }
   };
@@ -750,33 +809,33 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       return;
     }
     if (d.kind === 'resizePiece') {
-      const f = cardFrame(cur);
+      const f = panelFrame(cur, d.panel);
       const dx = dux / f.k, dy = duy / f.k;
-      const snaps = teamChild(d.name)?.box === 'wh' && !alt && !shift;
-      const s = snaps ? snapEdges(resizeBox(d.start, d.handle, dx, dy, false, 1), d.handle, pieceTargets(cur, cardState, [d.name])) : NO_SNAP;
-      const card = teamCardRects(cur, cur.aspect)[d.card];
-      setGuides(s.guides.map((g) => pieceGuideToScreen(g, card, f)));
-      edit((x) => resizeChild(x, d.name, d.start, d.handle, dx + s.dx, dy + s.dy, shift), 'gesture');
+      const snaps = childDef(d.panel, d.name)?.box === 'wh' && !alt && !shift;
+      const s = snaps ? snapEdges(resizeBox(d.start, d.handle, dx, dy, false, 1), d.handle, pieceTargets(cur, preview, [d.name], d.panel)) : NO_SNAP;
+      const card = pieceBox(cur, d.panel, d.card);
+      setGuides(card ? s.guides.map((g) => pieceGuideToScreen(g, card, f)) : []);
+      edit((x) => resizeChild(x, d.name, d.start, d.handle, dx + s.dx, dy + s.dy, shift, d.panel, panelFile(d.panel, preview)), 'gesture');
       return;
     }
     if (d.kind === 'scalePieces') {
-      const f = cardFrame(cur);
+      const f = panelFrame(cur, d.panel);
       const k = cornerFactor(d.box, d.handle, dux / f.k, duy / f.k);
-      edit((x) => scaleChildren(x, d.names, d.starts, anchorOf(d.box, d.handle), k), 'gesture');
+      edit((x) => scaleChildren(x, d.names, d.starts, anchorOf(d.box, d.handle), k, d.panel, panelFile(d.panel, preview)), 'gesture');
       return;
     }
     if (d.kind === 'children') {
       // Pieces are stored unscaled in the card file's unfitted frame: the
       // pointer delta is divided by the scale, the snap is found in that
       // frame, and its guides are drawn where the pieces are drawn.
-      const f = cardFrame(cur);
+      const f = panelFrame(cur, d.panel);
       const dx = dux / f.k, dy = duy / f.k;
       const start = unionBox(Object.values(d.starts));
       if (!start) return;
-      const s = alt ? NO_SNAP : snapMove({ ...start, x: start.x + dx, y: start.y + dy }, pieceTargets(cur, cardState, d.names));
-      const card = teamCardRects(cur, cur.aspect)[d.card];
-      setGuides(s.guides.map((g) => pieceGuideToScreen(g, card, f)));
-      edit((x) => moveChildren(x, d.names, d.starts, dx + s.dx, dy + s.dy), 'gesture');
+      const s = alt ? NO_SNAP : snapMove({ ...start, x: start.x + dx, y: start.y + dy }, pieceTargets(cur, preview, d.names, d.panel));
+      const card = pieceBox(cur, d.panel, d.card);
+      setGuides(card ? s.guides.map((g) => pieceGuideToScreen(g, card, f)) : []);
+      edit((x) => moveChildren(x, d.names, d.starts, dx + s.dx, dy + s.dy, d.panel, panelFile(d.panel, preview)), 'gesture');
       return;
     }
     const moving: Selection = d.kind === 'cards' ? cardsOf(d.cards) : { kind: 'elements', ids: d.ids };
@@ -797,7 +856,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       const d = current.current;
       // The previous object back when nothing it names changed, so a pointer
       // wandering over one piece does not redraw the canvas on every move.
-      const hit = hitAt(d, side, cardState, ux, uy), ctrl = e.ctrlKey || e.metaKey;
+      const hit = hitAt(d, side, preview, ux, uy), ctrl = e.ctrlKey || e.metaKey;
       setHover((h) => (h && h.ctrl === ctrl && h.hit.element === hit.element && h.hit.card === hit.card && h.hit.child === hit.child
         ? h : { hit, ctrl }));
       const over = handleUnder(d, ux, uy);
@@ -826,7 +885,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     if (!p.moved) { setSel((s) => clickSelect(current.current, s, p.hit, p.mods)); return; }
     if (d?.kind === 'box') {
       const { ux, uy } = pointerUnits(e);
-      setSel(boxSelect(current.current, side, cardState, { x: p.ux, y: p.uy }, { x: ux, y: uy }));
+      setSel(boxSelect(current.current, side, preview, { x: p.ux, y: p.uy }, { x: ux, y: uy }));
       return;
     }
     endGesture();
@@ -859,7 +918,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     if (press.current) return;
     const d = current.current;
     const { ux, uy } = pointerUnits(e);
-    const hit = hitAt(d, side, cardState, ux, uy);
+    const hit = hitAt(d, side, preview, ux, uy);
     const target = targetOf(d, hit);
     if (target.kind === 'none') { setMenu(null); return; }
     const acting = isPicked(d, sel, hit) ? sel : target;
@@ -871,8 +930,9 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
   const runMenu = (a: MenuAction, s: Selection) => {
     if (a === 'hide') edit((d) => hideSelection(d, s));
     else if (a === 'reset') edit((d) => resetSelection(d, s));
-    else if (a === 'selectCard' && s.kind === 'children') setSel(cardsOf([s.card]));
-    else if (a === 'selectTeam') setSel(TEAMMATES);
+    else if ((a === 'front' || a === 'back') && s.kind === 'children') edit((d) => raiseChild(d, s.names, a, panelOf(s)));
+    else if (a === 'selectCard' && s.kind === 'children') setSel(cardsOf([s.card], panelOf(s)));
+    else if (a === 'selectTeam') setSel((s.kind === 'children' || s.kind === 'cards') && panelOf(s) !== 'teamColumn' ? { kind: 'elements', ids: [panelOf(s)] } : TEAMMATES);
   };
 
   // Arrows nudge (Shift by 10), Escape climbs or cancels a drag, Tab and
@@ -906,7 +966,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
 
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
       e.preventDefault();
-      setSel((s) => selectAll(current.current, side, cardState, s));
+      setSel((s) => selectAll(current.current, side, preview, s));
       return;
     }
 
@@ -918,8 +978,9 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     if (!delta || sel.kind === 'none') return;
     e.preventDefault();
     const s = sel;
-    if (s.kind === 'cards') noteFree();
-    edit((d) => nudgeSelection(d, s, delta[0], delta[1]), { nudge: selectionKey(s) });
+    // Only the survivor cards go Free; an infected card's nudge moves its row (edit.ts nudgeSelection).
+    if (s.kind === 'cards' && panelOf(s) === 'teamColumn') noteFree();
+    edit((d) => nudgeSelection(d, s, delta[0], delta[1], s.kind === 'children' ? panelFile(panelOf(s), preview) : undefined), { nudge: selectionKey(s) });
   };
 
   /**
@@ -1036,6 +1097,20 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       }));
     } catch (err) {
       setUploadErrors((u) => ({ ...u, [slot.id]: (err as Error).message }));
+    }
+  };
+
+  // As onSlotUpload: drawn at the splatter's texture size, errors kept per row.
+  const onSplatterUpload = async (def: SplatterDef, file: File) => {
+    try {
+      const { png } = await decodeUpload(file, def.size.w, def.size.h);
+      setUploadErrors((u) => {
+        if (!(def.id in u)) return u;
+        const n = { ...u }; delete n[def.id]; return n;
+      });
+      edit((d) => withSplatterImage(d, def.id, png));
+    } catch (err) {
+      setUploadErrors((u) => ({ ...u, [def.id]: (err as Error).message }));
     }
   };
 
@@ -1167,18 +1242,18 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
             design={design} side={side} sel={sel}
             onPick={(t, shift) => setSel((s) => pick(s, t, shift))}
             onVisible={(t, v) => edit((d) => setSelectionVisible(d, t, v))}
-            onAdd={(name) => { edit((d) => patchChild(d, name, { on: true })); setSel({ kind: 'children', names: [name], card: 0 }); }}
+            onAdd={(name, panel) => { edit((d) => patchChild(d, name, { on: true }, panel)); setSel({ kind: 'children', names: [name], card: 0, ...(panel === 'teamColumn' ? {} : { panel }) }); }}
             onKeyDown={onKeyDown}
           /></Guard>}
         </Panel>
 
         <Panel class="hud__stage">
           <Toolbar
-            design={design} side={side} cardState={cardState} held={held} backdrop={backdrop} shotError={uploadErrors.shot}
+            design={design} side={side} preview={preview} held={held} backdrop={backdrop} shotError={uploadErrors.shot}
             canUndo={canUndo} canRedo={hist.current.future.length > 0}
             onUndo={doUndo} onRedo={doRedo}
             onSide={(s) => { setSide(s); setSel(NONE); }}
-            onState={setCardState}
+            onPreview={setPreview}
             onHeld={setHeld}
             onPreset={(p) => { void changePreset(p); }}
             onAspect={(a) => edit((d) => ({ ...d, aspect: a }))}
@@ -1219,7 +1294,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
             {menu && (
               <ContextMenu
                 x={menu.x} y={menu.y} onClose={(refocus) => { setMenu(null); if (refocus) canvas.current?.focus(); }}
-                items={menuActions(menu.sel).map((a) => ({ label: MENU_LABELS[a], run: () => runMenu(a, menu.sel) }))}
+                items={menuActions(menu.sel).map((a) => ({ label: menuLabel(a, menu.sel), run: () => runMenu(a, menu.sel) }))}
               />
             )}
           </div>
@@ -1235,7 +1310,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
         <Panel class="hud__side">
           {!locked && (
             <Guard key={imp?.id ?? design.preset} onError={designFailed}>
-              <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} onWentFree={() => setStatus(WENT_FREE)} />
+              <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} onWentFree={() => setStatus(WENT_FREE)} preview={preview} />
             </Guard>
           )}
         </Panel>
@@ -1268,6 +1343,25 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
             key={slot.id} slot={slot} style={design.styles[slot.id]} error={uploadErrors[slot.id]}
             onChange={(p, mode) => patchStyle(slot.id, p, mode)} onEnd={endGesture}
             onUpload={(f) => { void onSlotUpload(slot, f); }}
+          />
+        ))}
+        </fieldset>
+      </Panel>
+
+      <Panel>
+        <h3>Splatter</h3>
+        <p class="muted hud__note">
+          Splatter art is flat in the game's files: pick None, a Fade, or your own picture. Your own picture shows on
+          all four teammate cards, and also while a teammate is down or dead.
+        </p>
+        <fieldset class="hud__fieldset" disabled={locked}>
+        {SPLATTERS.map((def) => (
+          <SplatterRow
+            key={def.id} def={def} design={design} imported={design.preset === 'imported'}
+            problem={locked ? null : splatterProblem(design, def.id)} error={uploadErrors[def.id]}
+            onChange={(p, mode) => edit((d) => patchSplatter(d, def.id, p), mode)} onEnd={endGesture}
+            onUpload={(f) => { void onSplatterUpload(def, f); }}
+            onReset={() => edit((d) => resetSplatter(d, def.id))}
           />
         ))}
         </fieldset>
@@ -1316,6 +1410,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
           </label>
         </div>
 
+        {tooBig && <p class="muted hud__status">{TOO_BIG}</p>}
         {status && <p class="muted hud__status">{status}</p>}
         {!locked && fitEmpty() && (
           <p class="muted hud__status">Every part of the teammate card is hidden, so it keeps its full size instead of fitting.</p>

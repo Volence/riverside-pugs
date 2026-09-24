@@ -8,8 +8,9 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inflateSync } from 'node:zlib';
 import { ART, ART_TOTAL_BYTES, ICON_ADVANCE, ICON_SPACE, EQUIP_ICON_SIZE, FONT_FILES, FONT_METRICS } from './art/index';
-import { artUrl, normaliseMaterial, NEEDED_MATERIALS, ITEM_ICONS, EQUIP_ICONS } from './art';
+import { artUrl, normaliseMaterial, NEEDED_MATERIALS, ITEM_ICONS, EQUIP_ICONS, CROSSHAIR_OPEN, SKULL_ICON } from './art';
 import { buildHud } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { SLOTS } from './slots';
@@ -73,6 +74,36 @@ describe('the art index', () => {
     expect(vdmx.slice(at32, at32 + 3)).toEqual([32, 32, -8]);
     expect(FONT_METRICS['Roboto Condensed'].vdmx).toBeUndefined();
   });
+  it('has the ability marker and the infected crosshair the game draws at the screen centre (probe Q16a)', () => {
+    expect(NEEDED_MATERIALS).toContain('vgui/hud/pz_charge_crosshair');
+    expect(CROSSHAIR_OPEN).toBe('icon/pz_crosshair_open');
+    expect(NEEDED_MATERIALS).toContain(CROSSHAIR_OPEN);
+    // hud_textures.txt PZ_crosshair_open: a 32 x 32 cell of sprites/crosshairs.
+    expect(pngRgba(ART[CROSSHAIR_OPEN]).w).toBe(32);
+  });
+  it('has the infected card\'s class icons and its dead skull (client.dll strings beside ZombieTeamDisplayPlayer.res)', () => {
+    // hud/ZombieTeamImage_<class> on PlayerImage (a ghost's GhostTeamImage_<class> material draws the same
+    // texture at a pulsing alpha), and mod_textures.txt icon_skull, a 64 x 64 cell of vgui/hud/iconsheet,
+    // at SkullIconPlacement (probe Q19, /home/volence/l4d/hud/probe-phase2-infected/b9/shots/crops/bl-abeg.png e).
+    for (const c of ['hunter', 'smoker', 'boomer', 'tank']) {
+      expect(NEEDED_MATERIALS, c).toContain(`vgui/hud/zombieteamimage_${c}`);
+      expect(pngRgba(ART[`vgui/hud/zombieteamimage_${c}`]).w, c).toBe(64);
+    }
+    expect(SKULL_ICON).toBe('icon/skull');
+    expect(NEEDED_MATERIALS).toContain(SKULL_ICON);
+    expect(EQUIP_ICON_SIZE[SKULL_ICON]).toEqual([64, 64]);
+  });
+  it('exports the meter as the game shades it: the base times its red motion texture, not the base\'s orange', () => {
+    // pz_charge_meter.vmt is UnlitTwoTexture with $texture2 PZ_charge_meter_motion. In game the lit
+    // arc samples R 176, G 3, B 1 (/home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/progress-f-zoom.png);
+    // the base texture alone averages 226 159 70 over the ring.
+    const { w, px } = pngRgba(ART['vgui/hud/pz_charge_meter']);
+    let r = 0, g = 0, n = 0;
+    for (let i = 0; i < px.length; i += 4) if (px[i + 3] > 200) { r += px[i]; g += px[i + 1]; n++; }
+    expect(w).toBe(128);
+    expect(r / n).toBeGreaterThan(120);
+    expect(g / n).toBeLessThan(50);                   // red, not orange
+  });
   it('stays under the size cap', () => {
     expect(ART_TOTAL_BYTES).toBeLessThan(1_000_000);
   });
@@ -119,8 +150,10 @@ describe('the art boundary', () => {
   it('walks every module build.ts reaches', () => {
     // The crosshair modules draw, check and pack the player's own crosshair, never Valve's art.
     // src/hudFiles.ts is the community allowlist and src/vpkWrite.ts the VPK writer; neither has any imports.
+    // probes.ts is the probe gates, a leaf that imports nothing; weaponColumn.ts the weapon column's reach, another;
+    // progress.ts the use bar's border and gap rule, a third.
     expect(modules).toEqual(['../../../src/hudFiles.ts', '../../../src/vpkWrite.ts', '../crosshair/draw.ts', '../crosshair/model.ts', '../crosshair/vpk.ts', '../vpk/index.ts', '../vpk/zip.ts', 'base/index.ts', 'build.ts', 'children.ts', 'design.ts', 'elements.ts',
-      'kv.ts', 'limits.ts', 'slots.ts', 'text.ts', 'textures.ts', 'units.ts']);
+      'kv.ts', 'limits.ts', 'probes.ts', 'progress.ts', 'slots.ts', 'splatter.ts', 'text.ts', 'textures.ts', 'units.ts', 'weaponColumn.ts']);
   });
 
   // The exported fonts are Valve's too. A download carries the player's own
@@ -179,3 +212,35 @@ describe('the art boundary', () => {
     }
   }
 });
+
+/**
+ * The pixels of one exported PNG (8-bit RGBA, as PIL writes them): enough of
+ * a decoder to check a colour without a new dependency.
+ */
+function pngRgba(file: string): { w: number; h: number; px: Uint8Array } {
+  const buf = readFileSync(fileURLToPath(new URL(`./art/${file}`, import.meta.url)));
+  let o = 8, w = 0, h = 0;
+  const idat: Buffer[] = [];
+  while (o < buf.length) {
+    const len = buf.readUInt32BE(o), type = buf.toString('latin1', o + 4, o + 8), body = buf.subarray(o + 8, o + 8 + len);
+    if (type === 'IHDR') {
+      w = body.readUInt32BE(0); h = body.readUInt32BE(4);
+      if (body[8] !== 8 || body[9] !== 6) throw new Error(`${file}: not 8-bit RGBA`);
+    } else if (type === 'IDAT') idat.push(body);
+    o += 12 + len;
+  }
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = w * 4, px = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)];
+    for (let x = 0; x < stride; x++) {
+      const v = raw[y * (stride + 1) + 1 + x];
+      const a = x >= 4 ? px[y * stride + x - 4] : 0, b = y > 0 ? px[(y - 1) * stride + x] : 0;
+      const c = x >= 4 && y > 0 ? px[(y - 1) * stride + x - 4] : 0;
+      const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+      const pred = [0, a, b, (a + b) >> 1, pa <= pb && pa <= pc ? a : pb <= pc ? b : c][f];
+      px[y * stride + x] = (v + pred) & 255;
+    }
+  }
+  return { w, h, px };
+}

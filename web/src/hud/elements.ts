@@ -10,6 +10,8 @@
  * against the real base files.
  */
 
+import type { KeyDef } from './children';
+
 /**
  * Only 'visible' is live in v1. 'color', 'bg' and 'fontSize' are the reserved
  * ElementOverride fields design.ts validates: every entry below lists
@@ -21,8 +23,16 @@ export type Prop = 'visible' | 'color' | 'bg' | 'fontSize';
 export interface HudElement {
   id: string; label: string;
   side: 'survivor' | 'infected' | 'both';
-  /** The hudlayout.res panel that places it. */
+  /** The hudlayout.res panel that places it (or the block in `file` that does). */
   key: string;
+  /**
+   * The file whose `key` block places the element, when that is not
+   * hudlayout.res: the spawn countdown's labels live in
+   * spectatorinfected.res, a full-screen panel with no hudlayout block.
+   */
+  file?: string;
+  /** Blocks of `file` a move and a hide take along with `key`, keeping their offset from it. */
+  moveWith?: string[];
   move: boolean;
   resize: 'free' | 'scale' | 'none';
   /** resource/ui files whose contents scale with it. */
@@ -32,9 +42,37 @@ export interface HudElement {
   /** Size used for hit-testing and the mock when the container is bigger than what it shows. */
   mockSize?: Partial<Record<'stock' | 'modern', { w: number; h: number }>>;
   /** Elements the game places itself (move: false): where the preview draws them, as position tokens. */
-  mockPos?: { x: string; y: string };
+  mockPos?: { x?: string; y?: string };
   props: Prop[];
+  /** Keys of the element's own hudlayout.res block the game reads (slice 2.3 fills them). */
+  keys?: KeyDef[];
+  /**
+   * An infected element the game shows only in these states of yours (the
+   * spawn panel only as a ghost): the preview draws it, and a click picks
+   * it, only when the page shows one of them. Layers reaches it always.
+   */
+  shownIn?: ('alive' | 'ghost' | 'dead')[];
+  /** An infected element the game shows only for these classes (the frustration meter, only a Tank's). */
+  shownFor?: ('hunter' | 'smoker' | 'boomer' | 'tank')[];
+  /**
+   * A panel the game shows only now and then (while you talk, during a
+   * vote, in survival): drawn over the rest it would hide what a player
+   * sees all the time, so the preview draws it and a click picks it only
+   * with the page's "Occasional panels" on (PreviewState.occasional), or
+   * while it is selected. Layers reaches it always.
+   */
+  occasional?: true;
+  /** Said under the element's controls: when the game shows it, what was and was not seen. */
+  note?: string;
+  /**
+   * An element whose block has only a ypos (the peril notice): the game
+   * places it across, so only its height moves, and no xpos is ever written.
+   */
+  moveAxis?: 'y';
 }
+
+/** Said of a panel no probe has seen, which needs another player to show. */
+const UNSEEN = 'not seen in our tests (it needs a second player)';
 
 /**
  * The special infected health files the game reads. The Tank reads
@@ -55,8 +93,22 @@ export const ELEMENTS: HudElement[] = [
   { id: 'weaponSelection', label: 'Weapons', side: 'survivor', key: 'HudWeaponSelection', move: true, resize: 'none',
     children: [], props: ['visible'] },
   { id: 'chat', label: 'Chat', side: 'both', key: 'HudChat', move: true, resize: 'free', children: [], props: ['visible'] },
-  { id: 'progressBar', label: 'Use / revive bar', side: 'both', key: 'HudProgressBar', move: true, resize: 'none',
-    children: [], mockSize: { stock: { w: 228, h: 24 }, modern: { w: 228, h: 24 } }, props: ['visible'] },
+  /**
+   * The use / revive bar. A scale reaches its pieces (progressbar.res,
+   * children.ts PROGRESS_PANEL). mockSize is the stock content's size, for
+   * picking the element; its pieces are framed and clipped by the real
+   * 300 x 45 container (mock.ts panelBoxes), as the game clips them.
+   *
+   * Survivor only: every label the bar carries is a heal, revive or help-up
+   * (client.dll's #L4D_progress_* strings), and server.so starts it only
+   * from CTerrorPlayer::StartHealing and StartReviving, the first aid kit,
+   * and a map's timed button (CButtonTimed::UseTimed, which checks no team;
+   * a spawned infected can use an entity only if the map flags it for them,
+   * CTerrorPlayer::IsUseableEntity, and no probe has seen one). Offered on
+   * the infected side, its sample drew over the spawn panel.
+   */
+  { id: 'progressBar', label: 'Use / revive bar', side: 'survivor', key: 'HudProgressBar', move: true, resize: 'scale',
+    children: ['resource/ui/hud/progressbar.res'], mockSize: { stock: { w: 228, h: 24 }, modern: { w: 228, h: 24 } }, props: ['visible'] },
   /**
    * The game's real kill/incap feed: CHudPZDamageRecordPanel, whose
    * hudlayout panel is HudPZDamageRecord (stock and Modern share the same
@@ -65,9 +117,20 @@ export const ELEMENTS: HudElement[] = [
    * in by game code, not by any base file, so it carries no children entry
    * here; mock.ts reads that file's own numbers straight through buildTrees
    * for the preview instead.
+   *
+   * Its alignment is the block's own label_textalign, which the game applies
+   * to every row (probe K1, /home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/notices-ijkl.png:
+   * east puts the notice at the panel's right edge). Its colour, text size
+   * and box are ElementOverride fields that build.ts noticePass writes into
+   * pzdamagerecordpanel.res.
    */
   { id: 'killNotices', label: 'Kill / incap notices', side: 'both', key: 'HudPZDamageRecord', move: true, resize: 'free',
-    children: [], props: ['visible'] },
+    children: [], props: ['visible'],
+    keys: [
+      { key: 'label_textalign', label: 'Alignment', type: 'enum',
+        options: [{ value: 'west', label: 'Left' }, { value: 'center', label: 'Centre' }, { value: 'east', label: 'Right' }],
+        evidence: 'client.dll CHudPZDamageRecordPanel run: label_textalign; probe K1 r1/shots/crops/notices-ijkl.png (east: right edge)' },
+    ] },
   { id: 'xhair', label: 'Custom crosshair', side: 'both', key: 'xHair', move: false, resize: 'none', children: [], props: [] },
   { id: 'infectedRow', label: 'Infected teammates', side: 'infected', key: 'CHudZombieTeamDisplay', move: true, resize: 'scale',
     children: ['resource/ui/hud/zombieteamdisplayplayer.res'],
@@ -75,11 +138,183 @@ export const ELEMENTS: HudElement[] = [
     mockSize: { stock: { w: 430, h: 75 }, modern: { w: 380, h: 31 } }, props: ['visible'] },
   { id: 'siHealth', label: 'Your infected health', side: 'infected', key: 'HudZombieHealth', move: true, resize: 'scale',
     children: SI_HEALTH, props: ['visible'] },
-  { id: 'abilityRing', label: 'Ability timer', side: 'infected', key: 'CHudAbilityTimer', move: true, resize: 'none',
-    children: [], props: ['visible'] },
-  { id: 'ghostPanel', label: 'Spawn / ghost panel', side: 'infected', key: 'HudGhostPanel', move: true, resize: 'none',
-    children: [], props: ['visible'] },
+  /**
+   * The ability timer. A scale reaches its three pieces (abilitytimerhud.res),
+   * and its 80 x 70 block keeps clipping the 80 x 80 backdrop's bottom 10
+   * units, as the game does. Its three state colours tint the icon and the
+   * backdrop (probe Q15, /home/volence/l4d/hud/probe-phase2-infected/b9/shots/crops/br-bcd.png);
+   * the meter's material draws no colour (B15, b15/shots/b15/b15-e.png). The
+   * suppressed one was never seen drawn.
+   */
+  { id: 'abilityRing', label: 'Ability timer', side: 'infected', key: 'CHudAbilityTimer', move: true, resize: 'scale',
+    children: ['resource/ui/hud/abilitytimerhud.res'], props: ['visible'],
+    keys: [
+      { key: 'ability_ready_color', label: 'Ready colour', type: 'colour', unsetLabel: 'Game colour',
+        evidence: 'client.dll CHudAbilityTimer run: ability_ready_color; b10/shots/crops/ring-all.png, b9/shots/crops/br-bcd.png (magenta when ready)' },
+      { key: 'ability_charging_color', label: 'Charging colour', type: 'colour', unsetLabel: 'Game colour',
+        evidence: 'client.dll CHudAbilityTimer run: ability_charging_color; b10/shots/crops/ring-all.png, b9/shots/crops/br-bcd.png (cyan while charging)',
+        note: 'Shown while the ability is not ready (a standing Hunter) and while the meter refills. The meter itself keeps its own red.' },
+      { key: 'ability_surpressed_color', label: 'Suppressed colour', type: 'colour', unsetLabel: 'Game colour',
+        evidence: 'client.dll CHudAbilityTimer run: ability_surpressed_color (the game\'s spelling)',
+        note: 'Rarely shown: no probe produced the suppressed state.' },
+    ] },
+  /**
+   * The ring round the infected crosshair: HudCrosshair's own child
+   * AbilityProgress, a CircularProgressBar code gives HUD/PZ_charge_crosshair
+   * (client.dll 0x10240e55). Probe Q16a
+   * (/home/volence/l4d/hud/probe-phase2-infected/b9/shots-v2/crops/centre-af.png):
+   * its size and colours are HudCrosshair's ability keys, and it draws only
+   * with the crosshair cvar on. ability_size is in screen pixels (the dll
+   * reads it as int, not proportional_int) and grows a 32 px rect on every
+   * side: the box is 32 + 2 x ability_size px at 1080p (probe B15,
+   * build.ts markerPx). The game centres it, so it
+   * does not move; hiding it writes a 0 size and clear colours, never a hard
+   * hide of HudCrosshair, which would remove the crosshair too (build.ts
+   * markerHide). The attack colours need a survivor in reach and the
+   * suppressed one was never produced; the dll proves each is read.
+   */
+  { id: 'abilityMarker', label: 'Ability marker', side: 'infected', key: 'HudCrosshair', move: false, resize: 'none',
+    children: [], mockPos: { x: 'c', y: 'c' }, props: ['visible'],
+    keys: [
+      { key: 'ability_size', label: 'Size (pixels)', type: 'int', range: [4, 64],
+        evidence: 'client.dll CHudTerrorCrosshair run: m_abilitySize|ability_size (int), the marker rect grown by it on every side; probe B15: box 32 + 2 x size px at 1080p (size 40: 112 px, b9/shots-v2/b9v2/b9v2-d.png; size 20: 70.5 px, b15/shots/b15/b15-c.png)' },
+      { key: 'ability_ready_color', label: 'Ready colour', type: 'colour', unsetLabel: 'Game colour',
+        evidence: 'client.dll CHudTerrorCrosshair run: ability_ready_color; b9/shots-v2/crops/centre-af.png (green when ready)' },
+      { key: 'ability_charging_color', label: 'Charging colour', type: 'colour', unsetLabel: 'Game colour',
+        evidence: 'client.dll CHudTerrorCrosshair run: ability_charging_color' },
+      { key: 'ability_surpressed_color', label: 'Suppressed colour', type: 'colour', unsetLabel: 'Game colour',
+        evidence: 'client.dll CHudTerrorCrosshair run: ability_surpressed_color (the game\'s spelling)',
+        note: 'Rarely shown: no probe produced the suppressed state.' },
+      { key: 'ability_attack_color', label: 'Attack colour', type: 'colour', unsetLabel: 'Game colour',
+        evidence: 'client.dll CHudTerrorCrosshair run: m_abilityShouldAttack|ability_attack_color',
+        note: 'Shown when a survivor is in reach.' },
+      { key: 'ability_attack_color_colorblind', label: 'Attack colour (colour-blind mode)', type: 'colour', unsetLabel: 'Game colour',
+        evidence: 'client.dll CHudTerrorCrosshair run: m_abilityShouldAttack_ColorBlind|ability_attack_color_colorblind',
+        note: 'The colour-blind variant of the attack colour.' },
+    ] },
+  /**
+   * The spawn (ghost) panel. A scale reaches its pieces (hudghostpanel.res,
+   * children.ts GHOST_PANEL). Its two colour keys colour every status line:
+   * probe G1 (/home/volence/l4d/hud/probe-phase2-rest/r3/shots/r3/r3-a.png,
+   * WhiteText cyan, RedText yellow), and a line's own colour is ignored (G2).
+   */
+  { id: 'ghostPanel', label: 'Spawn / ghost panel', side: 'infected', key: 'HudGhostPanel', move: true, resize: 'scale',
+    children: ['resource/ui/hudghostpanel.res'], props: ['visible'], shownIn: ['ghost'],
+    keys: [
+      { key: 'WhiteText', label: 'Text colour', type: 'colour', unsetLabel: 'File colour',
+        evidence: 'client.dll CHudGhostPanel run: m_clrWhite|WhiteText; probe G1, probe-phase2-rest/r3/shots/r3/r3-a.png (cyan lines)',
+        note: 'The class name, the title and "Ready to spawn".' },
+      { key: 'RedText', label: 'Warning colour', type: 'colour', unsetLabel: 'File colour',
+        evidence: 'client.dll CHudGhostPanel run: m_clrRed|RedText; probe G1, probe-phase2-rest/r3/shots/r3/r3-a.png (yellow warnings)',
+        note: 'Why you cannot spawn here ("Can\'t spawn here", "This is a restricted area").' },
+    ] },
+  /**
+   * The too-far and Tank takeover panel: code shows zombiepanel.res's
+   * TooFarFromSurvivors box when a spawned infected strays far from the
+   * survivors, or its TankTakeover box when you are offered the Tank. Probe
+   * Z1 (/home/volence/l4d/hud/probe-phase2-rest/r6/shots/r6/r6-a.png) saw
+   * the too-far box move with HudZombiePanel; a ghost never showed it
+   * (r3-c, r5-a), so the preview draws it only while you are spawned.
+   */
+  { id: 'zombiePanel', label: 'Too far / Tank offer', side: 'infected', key: 'HudZombiePanel', move: true, resize: 'none',
+    children: [], props: ['visible'], shownIn: ['alive'] },
+  /**
+   * The dead infected's spawn countdown: spectatorinfected.res's
+   * InfectedState, where code writes "You will enter Spawn Mode in N
+   * seconds", with SpawnModeLabel ("YOU ARE DEAD") moved and hidden along.
+   * The addon copy of the file is read (probe Q23,
+   * /home/volence/l4d/hud/probe-phase2-infected/b9/shots/b9/b9-e.png); the
+   * colour and text size go on InfectedState (build.ts countdownPass), the
+   * plain Label keys proven on every other panel.
+   */
+  { id: 'spawnCountdown', label: 'Spawn countdown', side: 'infected', key: 'InfectedState', file: 'resource/ui/spectatorinfected.res',
+    moveWith: ['SpawnModeLabel'], move: true, resize: 'none', children: [], props: ['visible'], shownIn: ['dead'] },
+  /**
+   * The Tank's frustration meter: moves and hides now; its pieces
+   * (frustrationmeter.res, children.ts FRUST_PANEL) wait on gate T1, as no
+   * probe has seen it drawn. The preview draws it for a spawned Tank only.
+   */
+  /**
+   * Your own microphone: HudVoiceSelfStatus, which draws mod_textures.txt's
+   * voice_self while you talk. Probe V2
+   * (/home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/voice-g.png)
+   * saw it moved to c-24, 60 and sized 48 x 48; with voice_self repointed to
+   * a texture (V1) the upload fills that box.
+   */
+  { id: 'ownMic', label: 'Your microphone', side: 'both', key: 'HudVoiceSelfStatus', move: true, resize: 'free',
+    children: [], props: ['visible'], occasional: true,
+    note: 'Shown while you talk.' },
+  /**
+   * The vote panel: CHudVote, which holds votehud.res's boxes. Probe VO
+   * (/home/volence/l4d/hud/probe-phase2-rest/r4/shots/r4/r4-e.png, after
+   * `callvote ChangeDifficulty Normal`) saw it moved to c-100, 60 and the
+   * VoteActive box take its bgcolor_override (purple); the box is VoteActive's
+   * 200 x 140 at the panel's corner, so that is the element's size. Its
+   * colour is the element's `bg` (build.ts votePass).
+   */
+  { id: 'vote', label: 'Vote', side: 'both', key: 'CHudVote', move: true, resize: 'none',
+    children: [], props: ['visible'], occasional: true,
+    mockSize: { stock: { w: 200, h: 140 }, modern: { w: 200, h: 140 } },
+    note: 'Shown while a vote runs (someone called one from the Esc menu or the console).' },
+  /**
+   * The survival timer: HudHoldoutTimer. Probe H1
+   * (/home/volence/l4d/hud/probe-phase2-rest/r2/shots/r2/r2-g.png, map
+   * l4d_hospital02_subway survival) saw it drawn at the moved place, before
+   * and after the start.
+   */
+  { id: 'holdoutTimer', label: 'Survival timer', side: 'survivor', key: 'HudHoldoutTimer', move: true, resize: 'none',
+    children: [], props: ['visible'], occasional: true,
+    note: 'Survival only: the round time and the next medal. Never shown in campaign or versus.' },
+  /**
+   * The panels seen only with other players (plan task M2, decision 3):
+   * move and hide only, which every hudlayout panel tried honours
+   * (/home/volence/l4d/hud/probe-phase2-rest/RESULTS.md: V3, IV, FM1, LA1
+   * and the peril notice were never seen with one client).
+   *
+   * The voice list: HudVoiceStatus lists other players while they talk
+   * (with voice_loopback your own voice never enters it, r1-g). Its row
+   * keys are the ones client.dll reads beside it (m_NameFont, item_tall,
+   * item_wide, item_spacing); as the list was never drawn, they wait on
+   * gate P2 (probes.ts) and the panel is move and hide only until then
+   * (plan decision 3).
+   */
+  { id: 'voiceList', label: 'Voice list', side: 'both', key: 'HudVoiceStatus', move: true, resize: 'none',
+    children: [], props: ['visible'], occasional: true,
+    note: `Lists the other players while they talk; ${UNSEEN}.`,
+    keys: [
+      { key: 'item_tall', label: 'Row height', type: 'int', range: [4, 64], gate: 'P2',
+        evidence: 'client.dll voice status run (HudVoiceSelfStatus, text_font, item_tall, item_wide, item_spacing); stock 15' },
+      { key: 'item_wide', label: 'Row width', type: 'int', range: [20, 400], gate: 'P2',
+        evidence: 'client.dll voice status run (item_wide); stock 120' },
+      { key: 'item_spacing', label: 'Row gap', type: 'int', range: [0, 40], gate: 'P2',
+        evidence: 'client.dll voice status run (item_spacing); stock 2' },
+    ] },
+  /** The infected voice panel: HudInfectedVOIP lists your infected teammates while they talk (r3-b: your own loopback voice shows only the mic). */
+  { id: 'infectedVoice', label: 'Infected voice', side: 'infected', key: 'HudInfectedVOIP', move: true, resize: 'none',
+    children: [], props: ['visible'], occasional: true,
+    note: `Lists your infected teammates while they talk; ${UNSEEN}.` },
+  /**
+   * The finale meter: HudFinaleMeter. FM1 (r2-i..k, r4-j..k) never got a
+   * finale started, so whether L4D1 draws it on PC at all is unknown.
+   */
+  { id: 'finaleMeter', label: 'Finale meter', side: 'survivor', key: 'HudFinaleMeter', move: true, resize: 'none',
+    children: [], props: ['visible'], occasional: true,
+    note: 'Shown during a finale; not seen in our tests (the finale never started there), and it may not show on PC at all.' },
+  /**
+   * The peril notice ("A TEAMMATE IS IN TROUBLE", #L4D_teammate_is_in_peril):
+   * client.dll shows it on player_ledge_grab. Its block has only a ypos, so
+   * the game places it across and only its height moves (moveAxis). The
+   * preview centres a 240 x 20 stand-in.
+   */
+  { id: 'perilNotice', label: 'Teammate in trouble', side: 'survivor', key: 'CHudTeamMateInPerilNotice', move: true, resize: 'none',
+    children: [], props: ['visible'], occasional: true, moveAxis: 'y',
+    mockPos: { x: 'c-120' }, mockSize: { stock: { w: 240, h: 20 }, modern: { w: 240, h: 20 } },
+    note: `Shown when a teammate hangs from a ledge; ${UNSEEN}. Only its height moves: the game places it across.` },
+  /** The leaving-area warning ("PLEASE WAIT FOR YOUR TEAMMATES", #L4D_s_team_ready_please_wait): LA1 never saw it. */
+  { id: 'leavingArea', label: 'Wait for teammates', side: 'survivor', key: 'HudLeavingAreaWarning', move: true, resize: 'none',
+    children: [], props: ['visible'], occasional: true,
+    note: `Shown when you try to leave the start area while teammates are still loading; ${UNSEEN}.` },
   { id: 'tankPanel', label: 'Tank frustration', side: 'infected', key: 'HudFrustrationMeter', move: true, resize: 'none',
-    children: [], props: ['visible'] },
+    children: [], props: ['visible'], shownIn: ['alive'], shownFor: ['tank'] },
 ];
 export const elementById = (id: string) => ELEMENTS.find((e) => e.id === id);

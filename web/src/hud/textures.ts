@@ -1,6 +1,7 @@
 /** Pixel generators for HUD art. Plain arrays in, RGBA out, so they need no canvas and no DOM. */
+/** A "r g b [a]" colour, split on any run of whitespace, as a hand-written HUD may pad or double it. */
 export function parseColour(c: string): [number, number, number, number] {
-  const p = c.split(' ').map((n) => Math.min(255, Math.max(0, parseInt(n, 10) || 0)));
+  const p = c.trim().split(/\s+/).map((n) => Math.min(255, Math.max(0, parseInt(n, 10) || 0)));
   return [p[0] ?? 0, p[1] ?? 0, p[2] ?? 0, p[3] ?? 255];
 }
 
@@ -26,6 +27,32 @@ export function roundedTexture(w: number, h: number, colour: string, radius: num
   return out;
 }
 
-export function vmtFor(materialName: string): string {
-  return `UnlitGeneric\n{\n\t$basetexture "${materialName.toLowerCase()}"\n\t$translucent 1\n\t$vertexcolor 1\n\t$vertexalpha 1\n\t$ignorez 1\n\t$no_fullbright 1\n\t$nomip 1\n}\n`;
+/**
+ * The Fade splatter: the colour at its own alpha on the left edge, fading
+ * linearly to clear at the right, the same on every row, so it reads as a
+ * clean bar behind a card or a health bar whatever height the panel shows.
+ */
+export function fadeTexture(w: number, h: number, colour: string): Uint8ClampedArray {
+  const [r, g, b, a] = parseColour(colour);
+  const out = new Uint8ClampedArray(w * h * 4);
+  for (let x = 0; x < w; x++) {
+    const alpha = Math.round(a * (1 - (x + 0.5) / w));
+    for (let y = 0; y < h; y++) {
+      const i = (y * w + x) * 4;
+      out[i] = r; out[i + 1] = g; out[i + 2] = b; out[i + 3] = alpha;
+    }
+  }
+  return out;
+}
+
+/**
+ * `vertexColor: false` leaves out `$vertexcolor 1`. Without it the engine
+ * ignores the draw colour's RGB (keeping its alpha), which is how "Keep my
+ * colours" stops client.dll's health tint on the scratches. That is unproven
+ * in game until the in-game check of the custom splatter plan. The default
+ * output is what every existing download ships and must not change.
+ */
+export function vmtFor(materialName: string, opts: { vertexColor?: boolean } = {}): string {
+  const vc = opts.vertexColor !== false ? '\t$vertexcolor 1\n' : '';
+  return `UnlitGeneric\n{\n\t$basetexture "${materialName.toLowerCase()}"\n\t$translucent 1\n${vc}\t$vertexalpha 1\n\t$ignorez 1\n\t$no_fullbright 1\n\t$nomip 1\n}\n`;
 }
