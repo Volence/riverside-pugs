@@ -1162,12 +1162,21 @@ export type FileAction =
   | 'note' | 'looked_at' | 'open_ticket'
   | 'ban' | 'timeout' | 'merge' | 'sign_out' | 'waive' | 'staff_flags' | 'review_round' | 'steam_refresh';
 
-/** The analyzer board's columns for one player. A sort key, never a claim. */
+export type InfectedClass = 'smoker' | 'boomer' | 'hunter';
+export interface ClassScores { hiddenShare: number | null; hiddenOccZ: number | null; revealShare: number | null }
+
+/** The analyzer board's columns for one player. A sort key, never a claim.
+ *  Mirrors src/admin/analyzerRanks.ts. The hidden columns (D, E, F) are shown
+ *  beside the rank and are not part of it. */
 export interface AnalyzerRank {
   steamid: string; ranked: boolean; rank: number | null; of: number;
   rounds: number; eligibleRounds: number; clips: number;
   trackShare: number | null; occZ: number | null; teamGap: number | null;
   pFid: number | null; pOcc: number | null; pGap: number | null; composite: number | null;
+  losRounds: number; hiddenShare: number | null; hiddenOccZ: number | null;
+  reveals: number; revealShare: number | null;
+  pHidden: number | null; pHiddenOcc: number | null; pReveal: number | null;
+  byClass: Record<InfectedClass, ClassScores>;
 }
 
 export interface FileReview {
