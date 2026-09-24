@@ -982,3 +982,85 @@ player-controlled (not bot) SI. On the local test server, or staged per section 
    should sum to the line's `sidmg=`.
 5. Optional: trigger a car alarm or a crescendo button on a real map and see
    `ROUND_MARK kind=panic` from a natural panic, not a forced one.
+
+## Balance control panel verification
+
+Run 2026-09-24 on the same isolated instance (`/home/volence/l4d1-ds-skyprobe/server`,
+127.0.0.1:27045, `-insecure -nomaster +sv_lan 1`), with `pug-match.smx` built
+from the branch. Question: does a value the site writes to `cfg/pug_balance.cfg`
+come back in the plugin's `c:` items byte for byte, and does the site's
+predicted fingerprint equal the real one?
+
+### Recipe
+
+Setup and teardown as in "Balance inventory verification" above, plus: back up
+`cfg/rotoblin_pug_4v4_map.cfg` (and `cfg/pug_balance.cfg` if one exists), append
+the hook exactly as the owner runbook adds it, at the very end of the map config:
+
+    //-----------------------------------------
+    // Balance knobs set from riversidepug.com (Admin > Balance > Knobs). The site
+    // writes cfg/pug_balance.cfg; it must never be committed here. Must stay last.
+    exec pug_balance.cfg
+
+and write each draft with the site's own code: a scratch `tsx` script calling
+`renderBalanceCfg(loadBalanceKnobs(), validateDraft(knobs, draft, baselines).values,
+{ number: 0, name: 'rig' })`, copied to `cfg/pug_balance.cfg`. Then, for each
+draft, a fresh fake match the way the backend starts one:
+
+    sm_pug_abort <previous token>
+    exec pug_match
+    sm_pug_debug 1
+    sm_pug_min_orient 1
+    sm_pug_match 99N <32 hex token> l4d_hospital01_apartment
+    sm_pug_roster "76561198000000001:a"   # ... 1-4 on a, 5-8 on b
+    changelevel l4d_hospital01_apartment
+    sb_add                               # x4
+    sm_forcestart
+
+Use a 32 hex character token, so the game log lines (`left4dead/logs/L127_*.log`)
+go straight through `parseLogDatagram` and `BalanceAssembler` with no rewriting.
+Real fingerprint: `fingerprintOf(withoutIgnored(sighting, ignored), versionless)`.
+Predicted: `fingerprintOf(predictInventory(A, knobs, draft), versionless)`, with
+A the baseline sighting. Afterwards restore the map config, delete
+`pug_balance.cfg` if it was not there before, and delete the run's
+`left4dead/replays/pug_<token>_*.rpl` files.
+
+How the file gets run: `rotoblin_pug_4v4.cfg` sets `l4d_ready_server_cfg
+"rotoblin_pug_4v4_map.cfg"`, and l4dready execs that file in every
+`OnMapStart`; `exec pug_match` also runs it once directly. On every map load
+the SM log shows the chain setting `versus_boss_flow_max 0.90` and then
+`pug_balance.cfg` setting the draft's value in the same second. Nothing in
+`cfg/sourcemod/` (plugin autoexec configs, which run later) sets any of the 16
+knobs, on this instance or in the deploy repo.
+
+### Result: all pass
+
+| Run | Draft | `c:` strings | Predicted fp | Real fp |
+|---|---|---|---|---|
+| 1 | baseline (A) | 16/16 equal | 10acfaf57a8ab35b | 10acfaf57a8ab35b |
+| 2 | B: `z_tank_health 7500`, `versus_boss_flow_min 0.15` | 16/16 equal | 8ce5644d1313f1c8 | 8ce5644d1313f1c8 |
+| 3 | C: `versus_boss_flow_min 0.10`, `versus_boss_flow_max 0.85` | 16/16 equal | a17d0fa09f167283 | a17d0fa09f167283 |
+| 4 | every knob at `min` | 16/16 equal | 25e74e29c690b7ce | 25e74e29c690b7ce |
+| 5 | every knob at `max` | 16/16 equal | a7fbb6bf3a21d931 | a7fbb6bf3a21d931 |
+
+- Floats keep their written form: `0.10`, `0.15`, `0.30`, `0.70`, `0.85` and
+  `0.90` came back as written, never `0.100000`. No bound was clamped or
+  rewritten, so no range in `balance/knobs.json` needed to shrink.
+- Run 3 followed run 2 with a `changelevel` only (no `exec pug_match`), so the
+  map-load path (l4dready `OnMapStart`) is what applied it.
+- `l4d_antibaiter_delay` is 9999 in this instance's (older) config chain and
+  came back as the draft's 15, 10 or 30: the file set it, not the chain.
+- Apart from the knob values, every inventory key was identical across the
+  five sightings (290 items each), so only the knobs moved the fingerprint.
+- Nothing re-asserts a knob after the configs: in run 5 all 16 values read
+  back unchanged with `sm_cvar <name>` about a minute into the live round
+  (after a forced panic and a spawned hunter) and again after half 2 went
+  live, and half 2's sighting had the same fingerprint as half 1.
+- `pug_balance.cfg` deleted, then `changelevel`: the console prints
+  `exec: couldn't exec pug_balance.cfg` and every knob falls back to the
+  config chain's value (this instance's chain sets all 16).
+
+Not covered here: the production chain itself (this instance's copy of
+`rotoblin_pug_4v4_map.cfg` predates the votes block, which sets no knob), and
+the web app writing the file over each box's transport. Both are steps 2 to 5
+of the owner runbook.
