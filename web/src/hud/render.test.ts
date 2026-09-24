@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { childRects, drawPanel, setFont, PANEL_FILE, hiddenInState, previewOf, DEFAULT_PREVIEW, ITEM_ROW, itemRowStart, paintAdditive, paintLinearOver, healthRgb, shownKey, panelColour, _setImageFactory, _setCanvasFactory, _resetAssetCache, _cacheSizes, splatterSource, tinted, type SurvivorState } from './render';
+import { childRects, drawPanel, setFont, PANEL_FILE, panelFile, type PreviewState, hiddenInState, previewOf, DEFAULT_PREVIEW, ITEM_ROW, itemRowStart, paintAdditive, paintLinearOver, healthRgb, shownKey, panelColour, _setImageFactory, _setCanvasFactory, _resetAssetCache, _cacheSizes, splatterSource, tinted, type SurvivorState } from './render';
 import { linearOverAlpha } from './additive';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { buildHud } from './build';
@@ -1337,6 +1337,101 @@ describe('your own health in every preview state', () => {
         drawPanel(b.ctx, withTint({ ownHealth: { Health: { keys: { monochrome_color: '255 0 255 255' } } } }), 'ownHealth', O, 1);
         expect(draws(b.calls, TOP).map((c) => c[0])).toEqual([MAGENTA]);
       });
+    });
+  });
+
+  describe('your infected health, as the class the preview picks (plan Task 4)', () => {
+    const SI = (siClass: PreviewState['siClass'], more: Partial<PreviewState> = {}): PreviewState => ({ ...DEFAULT_PREVIEW, siClass, ...more });
+    const siBar = (d: HudDesign, s: PreviewState) => childRects(d, 'siHealth', O, 1, s).find((r) => r.name === 'Health')!;
+    afterEach(() => { _setProbe('Q24', null); });
+
+    it('draws from the class\'s own file: the Boomer\'s, the Smoker\'s, and the Hunter\'s for the Hunter and the Tank', () => {
+      expect(panelFile('siHealth', SI('boomer'))).toBe('resource/ui/hud/boomerhealth.res');
+      expect(panelFile('siHealth', SI('smoker'))).toBe('resource/ui/hud/smokerhealth.res');
+      expect(panelFile('siHealth', SI('hunter'))).toBe('resource/ui/hud/hunterhealth.res');
+      // Probe B11: the Tank reads hunterhealth.res (/home/volence/l4d/hud/probe-phase2-infected/b9/shots/b9/b9-l.png).
+      expect(panelFile('siHealth', SI('tank'))).toBe('resource/ui/hud/hunterhealth.res');
+      expect(panelFile('siHealth')).toBe('resource/ui/hud/hunterhealth.res');
+      expect(panelFile('ownHealth', SI('boomer'))).toBe(PANEL_FILE.ownHealth);
+    });
+
+    it('draws the Boomer\'s bar at the Boomer file\'s rect, full and green, with its sample health', () => {
+      // Stock boomerhealth.res Health: 322,69 64 x 13. The SI bar is green at full health, not red
+      // (/home/volence/l4d/hud/probe-phase2-infected/b9/shots/b9/b9-b.png,
+      // /home/volence/l4d/hud/probe-phase2/b13/b13-stock/infected/hunter.png).
+      const { draws } = tintRig();
+      const d = design({});
+      expect(siBar(d, SI('boomer'))).toMatchObject({ x: O.x + 322, y: O.y + 69, w: 64, h: 13 });
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, d, 'siHealth', O, 1, { state: SI('boomer') });
+      expect(draws(calls, WHITE)).toEqual([[`rgb(${healthRgb(250, 250, false).join(',')})`, O.x + 324, O.y + 71, 60, 9]]);
+      expect(draws(calls, GREY)).toEqual([]);
+      expect(calls.filter((c) => c.m === 'fillText').map((c) => c.a[0])).toEqual(['50']);
+    });
+
+    it('shows each class\'s own full health in the number', () => {
+      for (const [siClass, n] of [['hunter', '250'], ['smoker', '250'], ['boomer', '50'], ['tank', '6000']] as const) {
+        const { ctx, calls } = recCtx();
+        drawPanel(ctx, design({}), 'siHealth', O, 1, { state: SI(siClass) });
+        expect(calls.filter((c) => c.m === 'fillText').map((c) => c.a[0]), siClass).toEqual([n]);
+      }
+    });
+
+    it('keeps the bar full and green whatever survivor state is picked', () => {
+      const { draws } = tintRig();
+      const d = design({});
+      const r = siBar(d, SI('hunter'));
+      for (const survivor of ['hurt', 'down', 'dead'] as const) {
+        const { ctx, calls } = recCtx();
+        drawPanel(ctx, d, 'siHealth', O, 1, { state: SI('hunter', { survivor }) });
+        expect(draws(calls, WHITE), survivor).toEqual([[GREEN, r.x + 2, r.y + 2, r.w - 4, r.h - 4]]);
+      }
+    });
+
+    it('draws the infected crouch icon at its rect only while crouched', () => {
+      const d = design({});
+      const r = childRects(d, 'siHealth', O, 1, SI('hunter')).find((c) => c.name === 'DuckingIcon')!;
+      const icon = artUrl('vgui/hud/crouch_infected')!;
+      expect(icon).toBeTruthy();
+      const up = recCtx();
+      drawPanel(up.ctx, d, 'siHealth', O, 1, { state: SI('hunter') });
+      expect(imageAt(up.calls, icon)).toHaveLength(0);
+      const down = recCtx();
+      drawPanel(down.ctx, d, 'siHealth', O, 1, { state: SI('hunter', { crouched: true }) });
+      expect(imageAt(down.calls, icon).map((c) => c.a.slice(1))).toEqual([[r.x, r.y, r.w, r.h]]);
+    });
+
+    it('tints the frame by its colour, and draws no frame when it is hidden', () => {
+      // Probe Q12 (/home/volence/l4d/hud/probe-phase2-infected/b9/shots/crops/br-bcd.png): the frame takes drawColor.
+      const { draws } = tintRig();
+      const FRAME = artUrl('vgui/hud/pz_healthbar_250')!;
+      const tint = validateDesign({ v: 1, children: { siHealth: { BackgroundImage: { color: '0 255 0 255' } } } });
+      const a = recCtx();
+      drawPanel(a.ctx, tint, 'siHealth', O, 1, { state: SI('hunter') });
+      expect(draws(a.calls, FRAME)).toEqual([['rgb(0,255,0)', O.x + 250, O.y, 200, 100]]);
+      const hid = validateDesign({ v: 1, children: { siHealth: { BackgroundImage: { visible: false } } } });
+      const b = recCtx();
+      drawPanel(b.ctx, hid, 'siHealth', O, 1, { state: SI('hunter') });
+      expect(draws(b.calls, FRAME)).toEqual([]);
+    });
+
+    it('does not draw a bar colour while gate Q24 is closed', () => {
+      const { draws } = tintRig();
+      _setProbe('Q24', false);
+      expect(validateDesign({ v: 1, children: { siHealth: { Health: { keys: { monochrome_color: '255 0 255 255' } } } } }).children.siHealth?.Health?.keys?.monochrome_color).toBeUndefined();
+      // Even a design that carries one (as the build would write it) is drawn in the game's green.
+      const d = design({ children: { siHealth: { Health: { keys: { monochrome_color: '255 0 255 255' } } } } });
+      const r = siBar(d, SI('hunter'));
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, d, 'siHealth', O, 1, { state: SI('hunter') });
+      expect(draws(calls, WHITE)).toEqual([[GREEN, r.x + 2, r.y + 2, r.w - 4, r.h - 4]]);
+    });
+
+    it('draws every class\'s pieces where its own file has them after an edit, the Boomer\'s in proportion', () => {
+      const d = design({ children: { siHealth: { Health: { w: 112, y: 60 } } } });
+      expect(siBar(d, SI('hunter'))).toMatchObject({ x: O.x + 252, y: O.y + 60, w: 112 });
+      expect(siBar(d, SI('smoker'))).toMatchObject({ x: O.x + 252, y: O.y + 60, w: 112 });
+      expect(siBar(d, SI('boomer'))).toMatchObject({ x: O.x + 322, y: O.y + 60, w: 54 });
     });
   });
 });

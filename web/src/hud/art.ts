@@ -69,6 +69,8 @@ export const NEEDED_MATERIALS: readonly string[] = [
   // The own health panel: DuckingIcon's art (named by localplayerpanel.res), and HealthPanel's
   // bar outline (named by client.dll; probe B1 Q3 showed the fill sits inset inside it).
   'vgui/hud/crouch_survivor', 'vgui/hud/s_healthbar_outline',
+  // Your infected health's crouch icon: DuckingIcon's art, named by the Hunter, Smoker and Boomer files.
+  'vgui/hud/crouch_infected',
   // The kill notice box: pzdamagerecordpanel.res label4background names it, and the game draws
   // it behind a notice (probe B2, probe-phase2/b2/shots-kill/b2-killnotice/b2-f.png).
   'vgui/hud/scalablepanel_bgblack_outlinegrey',

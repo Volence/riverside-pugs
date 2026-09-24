@@ -1129,12 +1129,18 @@ export interface PanelChild extends CardChild { keys?: Record<string, string>; z
  * `z` the block's zpos when it is a number.
  * Null when the panel is not registered or the block is not in the file (an
  * addable child that is off).
+ *
+ * `file` reads the piece in one of the panel's linked files instead (your
+ * infected health shown as the Smoker or the Boomer), in that file's own
+ * frame: the numbers the game draws it at there, which edit.ts maps back to
+ * the stored frame through unlinkedValue.
  */
-export function panelChild(design: HudDesign, panelId: string, name: string): PanelChild | null {
+export function panelChild(design: HudDesign, panelId: string, name: string, file?: string): PanelChild | null {
   const panel = panelChildren(panelId);
   if (!panel) return null;
   const { work, boxes } = panelWork(design);
-  const n = kvFind(work.tree(panel.file), [name]);
+  const src = file && panel.linked?.some((l) => l.file === file) ? file : panel.file;
+  const n = kvFind(work.tree(src), [name]);
   if (!n) return null;
   const box = boxes[panelId];
   const shift = design.elements[panelId]?.fit && box ? box : { x: 0, y: 0 };
@@ -1153,7 +1159,7 @@ export function panelChild(design: HudDesign, panelId: string, name: string): Pa
   for (const k of def?.keys ?? []) { const v = pcGet(n, k.key); if (v !== undefined) keys[k.key] = v; }
   const z = parseFloat(kvGet(n, 'zpos') ?? '');
   // A card's bar is drawn at its Items x (probe X15): that is the x the X box shows and a gesture starts from.
-  const drawn = isBar(name) ? drawnBarX(work.tree(panel.file), panel) : undefined;
+  const drawn = isBar(name) ? drawnBarX(work.tree(src), panel) : undefined;
   const own = num(kvGet(n, 'xpos')) + shift.x;
   return {
     x: drawn !== undefined ? drawn + shift.x : own, y: num(kvGet(n, 'ypos')) + shift.y,

@@ -58,6 +58,9 @@ MATERIALS = [
     # the outline is HealthPanel's frame, named by client.dll (probe B1 Q3 and the B13 parity
     # shots: the game draws it around the own bar with the fill inset inside it)
     'vgui/hud/crouch_survivor', 'vgui/hud/s_healthbar_outline',
+    # your infected health's crouch icon: DuckingIcon's art, named by hunterhealth.res,
+    # smokerhealth.res and boomerhealth.res
+    'vgui/hud/crouch_infected',
     # the kill notice box, named by pzdamagerecordpanel.res label4background (probe B2 f)
     'vgui/hud/scalablepanel_bgblack_outlinegrey',
     # the ability timer: pz_charge_bg is set by code on AbilityTimerHud.res BackgroundImage,

@@ -550,9 +550,14 @@ function paintInfectedRow(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
   });
 }
 
-/** Six infected share one card at six placements; the preview shows the Hunter's. */
-function paintSiHealth(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
-  clipToRect(ctx, r, () => drawPanel(ctx, design, 'siHealth', { x: r.x, y: r.y }, k, { onAsset }));
+/**
+ * Your infected health, drawn from the file of the class the page picks
+ * (render.ts panelFile: the Hunter's for the Hunter and the Tank), clipped to
+ * HudZombieHealth as the game clips it (probe Q11,
+ * /home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/br-bce.png).
+ */
+function paintSiHealth(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view: HudView = {}) {
+  clipToRect(ctx, r, () => drawPanel(ctx, design, 'siHealth', { x: r.x, y: r.y }, k, { onAsset, state: view.state }));
 }
 
 const ABILITY = 'resource/ui/hud/abilitytimerhud.res';

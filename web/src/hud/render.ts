@@ -76,13 +76,39 @@ export interface DrawOpts {
 
 const SCHEME = 'resource/clientscheme.res';
 
-/** The file each inside-editable panel draws from. siHealth is five files that are one card at five placements; the Hunter's is the one shown. */
+/** The file each inside-editable panel draws from by default. Your infected health's depends on the class shown: panelFile. */
 export const PANEL_FILE: Record<string, string> = {
   ownHealth: 'resource/ui/hud/localplayerpanel.res',
   teamColumn: 'resource/ui/hud/teammatepanel.res',
   siHealth: 'resource/ui/hud/hunterhealth.res',
   infectedRow: 'resource/ui/hud/zombieteamdisplayplayer.res',
 };
+
+/**
+ * Your infected health's file for each class: the Hunter's, which the Tank
+ * reads too (probe B11,
+ * /home/volence/l4d/hud/probe-phase2-infected/b9/shots/b9/b9-l.png), and the
+ * Smoker's and the Boomer's, which the build keeps linked to it (build.ts
+ * linkedBlocks). The zombiehealthleft_* files are never shown.
+ */
+const SI_FILE: Record<PreviewState['siClass'], string> = {
+  hunter: 'resource/ui/hud/hunterhealth.res', tank: 'resource/ui/hud/hunterhealth.res',
+  smoker: 'resource/ui/hud/smokerhealth.res', boomer: 'resource/ui/hud/boomerhealth.res',
+};
+
+/**
+ * Each class's health at spawn, the number the preview shows full: the
+ * Hunter's and the Smoker's 250, the Boomer's 50 and the Tank's 6000
+ * (b9-b, b9-g, b9-j, b9-l). The panel is drawn full: nothing on the
+ * infected side has a Hurt state.
+ */
+const SI_HEALTH: Record<PreviewState['siClass'], number> = { hunter: 250, smoker: 250, boomer: 50, tank: 6000 };
+
+/** The file a panel is drawn from in this preview state: your infected health's is the class's own. */
+export function panelFile(panelId: string, state?: SurvivorState | PreviewState): string {
+  if (panelId === 'siHealth') return SI_FILE[previewOf(state).siClass];
+  return PANEL_FILE[panelId];
+}
 
 /**
  * Game code decides when these show, on panels the child registry does not
@@ -207,7 +233,7 @@ function orderedChildren(nodes: KvNode[]): KvNode[] {
  * tests, the selection frames and the snap guides all put it there.
  */
 export function childRects(design: HudDesign, panelId: string, origin: PanelBox, k: number, state?: SurvivorState | PreviewState): ChildRect[] {
-  const file = PANEL_FILE[panelId];
+  const file = panelFile(panelId, state);
   if (!file) throw new Error(`No inside-editable panel ${panelId}`);
   const tree = buildTrees(design)(file);
   const pic = state !== undefined && previewOf(state).survivor === 'down' && DOWN_MOVES_BAR.has(panelId) ? kvFind(tree, ['Incapacitated']) : undefined;
@@ -442,8 +468,10 @@ export function panelColour(design: HudDesign, panelId: string): [number, number
  * number, the cross, the scratches) reads this one function, so no piece
  * can disagree with another.
  */
-function sampleHealthRgb(opts: DrawOpts): [number, number, number] {
+function sampleHealthRgb(opts: DrawOpts, panelId?: string): [number, number, number] {
   if (opts.panelRgb) return opts.panelRgb;
+  // Your infected health is drawn full: green (b9/shots/b9/b9-b.png), whatever the survivor state.
+  if (panelId === 'siHealth') return healthRgb(1, 1, false);
   const s = previewOf(opts.state).survivor;
   return healthRgb(s === 'hurt' ? HURT_HEALTH : 100, 100, s === 'down');
 }
@@ -823,8 +851,9 @@ function drawSplatter(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNod
   drawTexture(ctx, n, r, k, opts, got.src, def.size.w, def.size.h, got.key, false, !(def.healthTint && style.keepColours));
 }
 
-function sampleText(n: KvNode, opts: DrawOpts): string {
+function sampleText(n: KvNode, opts: DrawOpts, panelId?: string): string {
   const t = kvGet(n, 'labelText') ?? '';
+  if (t === '%HealthNumber%' && panelId === 'siHealth') return String(SI_HEALTH[previewOf(opts.state).siClass]);
   if (t === '%HealthNumber%') {
     const s = previewOf(opts.state).survivor;
     return s === 'down' ? '299' : s === 'hurt' ? String(HURT_HEALTH) : '100';   // down, the number is the incap health (probe T7)
@@ -848,9 +877,9 @@ function sampleText(n: KvNode, opts: DrawOpts): string {
  * which needs no drawn text to click.
  */
 export function labelDrawsNothing(design: HudDesign, panelId: string, name: string, opts: DrawOpts): boolean {
-  const n = kvFind(buildTrees(design)(PANEL_FILE[panelId]), [name]);
+  const n = kvFind(buildTrees(design)(panelFile(panelId, opts.state)), [name]);
   if (!n || kindOf(n) !== 'label' || n.key.toLowerCase() === 'items') return false;
-  return !sampleText(n, opts);
+  return !sampleText(n, opts, panelId);
 }
 
 /**
@@ -952,7 +981,7 @@ function drawItemStandIns(ctx: CanvasRenderingContext2D, r: ChildRect, s: number
 
 function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: string, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
   if (n.key.toLowerCase() === 'items') { drawItems(ctx, design, n, r, k, opts); return; }
-  const s = sampleText(n, opts);
+  const s = sampleText(n, opts, panelId);
   if (!s) return;
   ctx.save();
   // Scheme tall is already scaled by scalePass when the parent was.
@@ -1006,10 +1035,10 @@ function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: st
  * sampleHealthRgb hands the outline and the fill (and every other health
  * piece of the panel) in place of the health colour.
  */
-function drawBar(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
+function drawBar(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: number, opts: DrawOpts, panelId?: string) {
   const s = previewOf(opts.state).survivor;
-  const frac = s === 'hurt' ? HURT_HEALTH / 100 : 1;
-  const [hr, hg, hb] = sampleHealthRgb(opts);
+  const frac = s === 'hurt' && panelId !== 'siHealth' ? HURT_HEALTH / 100 : 1;
+  const [hr, hg, hb] = sampleHealthRgb(opts, panelId);
   const outline = artImage('vgui/hud/s_healthbar_outline', opts.onAsset);
   if (outline) ctx.drawImage(tinted(outline, 'vgui/hud/s_healthbar_outline', hr, hg, hb), r.x, r.y, r.w, r.h);
   const insetRaw = probe('Q3') ? kvGet(n, 'inset') : undefined;
@@ -1039,7 +1068,7 @@ export const DOWN_MOVES_BAR: ReadonlySet<string> = new Set(['ownHealth', 'teamCo
 export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: string, origin: PanelBox, k: number, opts0: DrawOpts = {}): void {
   const opts: DrawOpts = { ...opts0, panelRgb: panelColour(design, panelId) };
   const view = previewOf(opts.state);
-  const nodes = orderedChildren(buildTrees(design)(PANEL_FILE[panelId]));
+  const nodes = orderedChildren(buildTrees(design)(panelFile(panelId, view)));
   // The bar where the game draws it in this state (childRects).
   const rects = childRects(design, panelId, origin, k, view);
   for (const [i, n] of nodes.entries()) {
@@ -1053,7 +1082,7 @@ export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, pane
     switch (r.kind) {
       case 'image': drawImageChild(ctx, design, n, r, k, opts); break;
       case 'label': drawLabel(ctx, design, panelId, n, r, k, opts); break;
-      case 'bar': drawBar(ctx, n, r, k, opts); break;
+      case 'bar': drawBar(ctx, n, r, k, opts, panelId); break;
       default: break;                                                // Panel, CircularProgressBar: nothing to show
     }
     if (alpha !== 1) ctx.restore();

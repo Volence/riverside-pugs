@@ -1914,3 +1914,14 @@ describe('fitting your infected health', () => {
     expect(rectOf(kvFind(layoutOf(files), ['HudZombieHealth'])!)).toEqual(['r387', 'r100', '400', '100']);
   });
 });
+
+describe('a piece of your infected health, read in the class file the preview shows', () => {
+  const BOOMER = 'resource/ui/hud/boomerhealth.res';
+  it('reads the Boomer file\'s own numbers, fitted or not', () => {
+    const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: {}, children: { siHealth: { Health: { w: 112 } } } };
+    expect(panelChild(d, 'siHealth', 'Health', BOOMER)).toMatchObject({ x: 322, y: 69, w: 54, h: 13 });
+    expect(panelChild(d, 'siHealth', 'Health')).toMatchObject({ x: 252, y: 69, w: 112, h: 13 });
+    const fitted: HudDesign = { ...d, elements: { siHealth: { fit: true } } };
+    expect(panelChild(fitted, 'siHealth', 'Health', BOOMER)).toMatchObject({ x: 322, y: 69, w: 54, h: 13 });
+  });
+});

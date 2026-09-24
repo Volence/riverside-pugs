@@ -17,6 +17,7 @@ export const ART: Record<string, string> = {
   'vgui/healthbar_orange': 'vgui-healthbar_orange.png',
   'vgui/healthbar_red': 'vgui-healthbar_red.png',
   'vgui/healthbar_white': 'vgui-healthbar_white.png',
+  'vgui/hud/crouch_infected': 'vgui-hud-crouch_infected.png',
   'vgui/hud/crouch_survivor': 'vgui-hud-crouch_survivor.png',
   'vgui/hud/detail_scratches_bottom_1': 'vgui-hud-detail_scratches_bottom_1.png',
   'vgui/hud/detail_scratches_top_1': 'vgui-hud-detail_scratches_top_1.png',
@@ -92,4 +93,4 @@ export const FONT_METRICS: Record<string, FontMetrics> = {
   'Verdana': { unitsPerEm: 2048, winAscent: 2059, winDescent: 430 },
 };
 
-export const ART_TOTAL_BYTES = 621175;
+export const ART_TOTAL_BYTES = 624647;

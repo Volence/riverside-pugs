@@ -532,13 +532,31 @@ describe('drawHud delegates panels to the renderer', () => {
       return { texts, bars: srcs.filter((s) => s === green).length };
     };
     const all = draw(DEFAULT_DESIGN);
-    expect(all.texts).toContain('100');                      // siHealth's sample HealthNumber
+    expect(all.texts).toContain('250');                      // siHealth's sample HealthNumber: the Hunter's full health
     // infectedRow only: zombieteamdisplayplayer.res's NameLabel, which siHealth's
     // file (hunterhealth.res) does not have, so these can only come from its cards.
     for (const n of ['Francis', 'Louis', 'Zoey']) expect(all.texts).toContain(n);
     // And one health bar per card: the same design with infectedRow hidden draws three fewer.
     const without = draw({ ...DEFAULT_DESIGN, elements: { infectedRow: { visible: false } } });
     expect(all.bars - without.bars).toBe(3);
+  });
+
+  it('draws your infected health as the class the view picks, clipped to its container', () => {
+    // Probe Q11 (/home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/br-bce.png): HudZombieHealth clips its children.
+    _setImageFactory(instant);
+    const draw = (state: PreviewState) => {
+      const texts: string[] = [];
+      const rects: number[][] = [];
+      const ctx = fakeCtx(() => {}, undefined, texts);
+      ctx.rect = ((...a: number[]) => { rects.push(a); }) as typeof ctx.rect;
+      drawHud(ctx, 853, 480, { ...DEFAULT_DESIGN, elements: { infectedRow: { visible: false } } }, 'infected', null, undefined, { state });
+      return { texts, rects };
+    };
+    expect(draw({ ...DEFAULT_PREVIEW, siClass: 'boomer' }).texts).toContain('50');
+    expect(draw({ ...DEFAULT_PREVIEW, siClass: 'tank' }).texts).toContain('6000');
+    const k = 480 / SCREEN_H;
+    const r = elementRect(DEFAULT_DESIGN, 'siHealth', DEFAULT_DESIGN.aspect);
+    expect(draw(DEFAULT_PREVIEW).rects).toContainEqual([r.x * k, r.y * k, r.w * k, r.h * k]);
   });
 
   it('clips each panel to its real parent, the rect VGUI clips its children to', () => {
