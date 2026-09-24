@@ -4,9 +4,10 @@ import type { SpectateInfo } from '../api';
 /**
  * Watch a live match on SourceTV.
  *
- * Public: the broadcast runs on a delay (30 seconds today), which is what stops
- * a spectator relaying anything useful to a player, so the connect details do
- * not need hiding. Collapsed by default so it never competes with the match.
+ * Public by the owner's call. Until 2026-09-24 a 30 second delay stopped a
+ * spectator relaying anything useful; since then SourceTV is live (delay 0) and
+ * every SourceTV spectator is recorded instead, which the text says. Collapsed
+ * by default so it never competes with the match.
  */
 export function SpectatePanel({ spectate }: { spectate: SpectateInfo }) {
   const [open, setOpen] = useState(false);
@@ -36,8 +37,9 @@ export function SpectatePanel({ spectate }: { spectate: SpectateInfo }) {
   return (
     <div class="connect spectate">
       <p class="connect__how">
-        Watch in game. The broadcast is {spectate.delay} seconds behind, so you cannot
-        use it to help a team.
+        {spectate.delay > 0
+          ? <>Watch in game. The broadcast is {spectate.delay} seconds behind, so you cannot use it to help a team.</>
+          : <>Watch in game, live. Everyone who watches on SourceTV is recorded.</>}
       </p>
       <div class="connect__line">
         <code>{line}</code>

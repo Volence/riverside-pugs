@@ -1036,6 +1036,70 @@ describe('drawScene', () => {
     expect(calls.filter((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + ARC_GAP)).toHaveLength(0);
   });
 
+  // Owner report, 2026-09-18: with the camera zoomed, the names of players
+  // standing just off the LEFT edge of the stage showed up clipped against
+  // that edge ("owerMu$tache", "aker"), stacked on top of each other and of
+  // the HUD, with no avatar anywhere near them. A label is drawn to the RIGHT
+  // of its avatar, so an avatar a few pixels off the left edge leaves its
+  // whole label on screen; off the other three edges the label goes with it,
+  // which is why the orphans only ever collected on the left.
+  describe('labels of players the camera cannot see', () => {
+    const names = { a: 'Offscreen', b: 'Onscreen', c: 'Straddling' };
+    const slots = ['a', 'b', 'c', '', '', '', '', ''];
+    const labelTexts = (
+      players: PlayerSample[], shift?: { x: number; y: number },
+    ) => {
+      const { transform, view } = identityScene();
+      const { texts, ctx } = stubCtx();
+      drawScene(ctx, {
+        transform, view, backdrop: null, trail: [], players, entities: [],
+        show: { ci: true, entities: true, names: true },
+        width: 1280, height: 794, portraits: {}, version: 3,
+        names, slots, followSlot: null, entitiesPrev: [], witchStartled: false,
+        tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(), shift,
+      });
+      return texts.map((t) => t.text).filter((t) => t in { Offscreen: 1, Onscreen: 1, Straddling: 1 });
+    };
+
+    it('draws no label for an avatar wholly off the left edge, whose label would otherwise sit on screen', () => {
+      // Screen x -30 with a radius of 11: the disc ends at -19, the label
+      // starts at about -2, so every letter of it would be visible.
+      expect(labelTexts([
+        player({ slot: 0, x: -30, y: -300 }),
+        player({ slot: 1, x: 640, y: -300 }),
+      ])).toEqual(['Onscreen']);
+    });
+
+    it('keeps the label of an avatar that is still partly on screen', () => {
+      expect(labelTexts([player({ slot: 2, x: -5, y: -300 })])).toEqual(['Straddling']);
+    });
+
+    it('drops labels past every edge, not only the left', () => {
+      expect(labelTexts([
+        player({ slot: 0, x: 1300, y: -300 }),
+        player({ slot: 1, x: 640, y: 30 }),
+        player({ slot: 2, x: 640, y: -830 }),
+      ])).toEqual([]);
+    });
+
+    it('judges visibility after the follow camera translate, not before it', () => {
+      // The follow camera translates the context rather than the view, so a
+      // point is on screen when it lands inside the canvas AFTER the shift.
+      // Raw x 1400 is past the right edge until a -300 shift brings it to
+      // 1100; raw x 200 is on screen until the same shift takes it to -100.
+      expect(labelTexts([
+        player({ slot: 1, x: 1400, y: -300 }),
+        player({ slot: 0, x: 200, y: -300 }),
+      ], { x: -300, y: 0 })).toEqual(['Onscreen']);
+    });
+
+    it('applies to a ghost label too', () => {
+      expect(labelTexts([
+        player({ slot: 0, x: -30, y: -300, state: STATE.PRESENT | STATE.GHOST }),
+      ])).toEqual([]);
+    });
+  });
+
   it('draws a downed survivor a small danger arc, not the closed green ring the raw pool gave', () => {
     const { transform, view } = identityScene();
 

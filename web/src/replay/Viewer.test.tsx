@@ -1,6 +1,8 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, cleanup, screen, fireEvent, act } from '@testing-library/preact';
-import { Viewer, isDefaultCamera, edgeTop, EDGE_TOP_MIN } from './Viewer';
+import { Viewer, isDefaultCamera, edgeTop, EDGE_TOP_MIN, isPortraitAspect, portraitVars, PORTRAIT_ASPECT } from './Viewer';
+import { OVERVIEWS } from '../../../src/mapOverviews';
+import { mapAspect } from './useMapLayer';
 import { FREE, TEAM } from './camera';
 import { STATE, type Frame, type ReplayHeader } from '../../../src/replayFormat';
 import type { HitItem } from './hitTest';
@@ -13,7 +15,11 @@ const HEADER: ReplayHeader = {
   infectedMask: 0,
   sidesKnown: false,
 };
+// Swapped per test by the portrait layout tests; every other test runs on a
+// map with no overview, which gets the landscape DEFAULT_ASPECT.
+let headerMap = HEADER.map;
 const NAMES = { A: 'bill', B: 'zoey', C: 'francis', D: 'louis', E: 'smk', F: 'boom', G: 'hunt', H: 'tank' };
+let sourceOverride: Record<string, unknown> = {};
 
 // 8000/10000 give the hover/click tests below an endMs far past
 // BOOKMARK_LEAD_MS (3000), so a seek's lead-in is never clamped to the round
@@ -34,7 +40,10 @@ vi.mock('./source', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./source')>();
   return {
     ...actual,
-    useReplaySource: () => ({ header: HEADER, frames: frames(), closed: true, tooNew: false, error: null }),
+    useReplaySource: () => ({
+      header: { ...HEADER, map: headerMap }, frames: frames(), closed: true, tooNew: false, error: null, phase: null, behindSinceMs: null,
+      ...sourceOverride,
+    }),
   };
 });
 
@@ -80,6 +89,8 @@ afterEach(() => {
   mockHits = [];
   mockShift = { x: 0, y: 0 };
   tooltipRenders = 0;
+  headerMap = HEADER.map;
+  sourceOverride = {};
 });
 
 function mount(timeline: TimelineEntry[] = DEFAULT_TIMELINE, seekMs?: number) {
@@ -327,6 +338,13 @@ describe('Viewer deep link seek', () => {
     const scrub = container.querySelector('.scrub__range') as HTMLInputElement;
     expect(scrub.value).toBe('0');
   });
+
+  it('writes its clock into momentRef, so a control outside it can ask what moment is on screen', () => {
+    const momentRef = { current: -1 };
+    const { container } = render(<Viewer spec={{ kind: 'file', name: 'x' }} names={NAMES} timeline={[]} seekMs={8000} momentRef={momentRef} />);
+    expect((container.querySelector('.scrub__range') as HTMLInputElement).value).toBe('8000');
+    expect(momentRef.current).toBe(8000);
+  });
 });
 
 describe('isDefaultCamera', () => {
@@ -362,5 +380,90 @@ describe('edgeTop', () => {
   it('pushes the columns clear when the chrome has wrapped', () => {
     expect(edgeTop(190)).toBeGreaterThan(190);
     expect(edgeTop(260)).toBeGreaterThan(260);
+  });
+});
+
+describe('Viewer portrait layout', () => {
+  const PORTRAIT = 'l4d_vs_airport03_garage';
+
+  it('splits the shipped maps at PORTRAIT_ASPECT with a gap either side of it', () => {
+    // The threshold sits in the empty band between the tallest portrait map
+    // (hospital03, 0.92) and the squarest landscape one (hospital01, 1.05),
+    // so no shipped map is within a rounding error of changing layout.
+    const aspects = Object.keys(OVERVIEWS).map((m) => mapAspect({ ...HEADER, map: m }));
+    const portrait = aspects.filter(isPortraitAspect);
+    expect(portrait.length).toBe(4);
+    expect(Math.max(...portrait)).toBeLessThan(PORTRAIT_ASPECT - 0.05);
+    expect(Math.min(...aspects.filter((a) => !isPortraitAspect(a)))).toBeGreaterThan(PORTRAIT_ASPECT + 0.03);
+    expect(isPortraitAspect(mapAspect({ ...HEADER, map: PORTRAIT }))).toBe(true);
+  });
+
+  it('puts the controls, filters, rail and panels in a column beside a portrait map', () => {
+    headerMap = PORTRAIT;
+    const { container } = mount();
+    const root = container.querySelector('.replay') as HTMLElement;
+    expect(root.classList.contains('replay--portrait')).toBe(true);
+    const main = container.querySelector('.replay__main') as HTMLElement;
+    // The frame and the column are the two tracks of the side layout.
+    expect([...main.children].map((c) => c.className)).toEqual(['replay__frame', 'replay__side']);
+    const side = container.querySelector('.replay__side') as HTMLElement;
+    expect([...side.children].map((c) => c.className)).toEqual([
+      'replay__slot replay__slot--controls',
+      'replay__slot replay__slot--filters',
+      'replay__slot replay__slot--rail',
+      'replay__slot replay__slot--hud',
+    ]);
+    expect(side.querySelector('.hud-strip')).not.toBeNull();
+    // The width cap moved to the stylesheet, which picks side or stacked by
+    // viewport width from the variables on the main element.
+    const stage = container.querySelector('.replay__stage') as HTMLElement;
+    expect(stage.style.maxWidth).toBe('');
+    expect(stage.style.aspectRatio).not.toBe('');
+    expect(main.style.getPropertyValue('--side-max-w')).toContain('100vh');
+    expect(main.style.getPropertyValue('--stacked-max-w')).toContain('78vh');
+  });
+
+  it('leaves a landscape map exactly as it was', () => {
+    const { container } = mount();
+    expect(container.querySelector('.replay--portrait')).toBeNull();
+    expect(container.querySelector('.replay__main')).toBeNull();
+    const stage = container.querySelector('.replay__stage') as HTMLElement;
+    expect(stage.style.maxWidth).toContain('78vh');
+    // Filters, frame, rail, controls, panels, in that order, as direct children.
+    const root = container.querySelector('.replay') as HTMLElement;
+    expect([...root.children].map((c) => c.className.split(' ')[0])).toEqual([
+      'replay__filters', 'replay__frame', 'replay__rail', 'replay__controls', 'replay__toolbar', 'hud-strip',
+    ]);
+  });
+
+  it('gives the side stage nearly the whole viewport height, the stacked one the old cap', () => {
+    const v = portraitVars(0.75);
+    expect(v['--side-max-w']).toBe('calc((100vh - 32px) * 0.75)');
+    expect(v['--side-frame-w']).toBe('calc(calc((100vh - 32px) * 0.75) + 54px)');
+    expect(v['--stacked-max-w']).toMatch(/^min\(\d+px, calc\(78vh \* 0\.75\)\)$/);
+  });
+
+  it('still enters theater from a portrait map', () => {
+    headerMap = PORTRAIT;
+    const { container } = mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Theater' }));
+    expect(container.querySelector('.replay--theater')).not.toBeNull();
+    expect(container.querySelector('.replay__main')).toBeNull();
+    act(() => { fireEvent.keyDown(window, { key: 'Escape' }); });
+    expect(container.querySelector('.replay--portrait .replay__side')).not.toBeNull();
+  });
+});
+
+describe('Viewer live with nothing to draw yet', () => {
+  it('says the live view is catching up instead of loading for ever', () => {
+    sourceOverride = { header: null, frames: [], closed: false, behindSinceMs: Date.now() - 5_000 };
+    render(<Viewer spec={{ kind: 'live-match', matchId: 1 }} live names={NAMES} />);
+    expect(screen.getByText('Live view is catching up')).toBeTruthy();
+  });
+
+  it('still says loading for a saved replay with no header yet', () => {
+    sourceOverride = { header: null, frames: [] };
+    render(<Viewer spec={{ kind: 'file', name: 'x' }} names={NAMES} />);
+    expect(screen.getByText('Loading replay...')).toBeTruthy();
   });
 });

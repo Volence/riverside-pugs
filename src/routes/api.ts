@@ -98,8 +98,9 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
    *  built to be public and publicBans still returns nothing an ordinary
    *  player should not see, so opening it up again is this one guard. */
   app.get('/api/bans', async (req, reply) => {
-    if (!makeRequireAdmin(db)(req, reply)) return reply;
+    const adminId = makeRequireAdmin(db)(req, reply);
+    if (!adminId) return reply;
     const { q } = req.query as { q?: string };
-    return { bans: publicBans(db, typeof q === 'string' ? q.slice(0, 64) : '') };
+    return { bans: publicBans(db, adminId, typeof q === 'string' ? q.slice(0, 64) : '') };
   });
 }

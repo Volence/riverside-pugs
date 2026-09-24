@@ -154,6 +154,7 @@ function paint(canvas: HTMLCanvasElement | null, p: ReplayCanvasProps, clock: Bu
     tMs: t,
     nowMs: now,
     hits,
+    shift,
   });
   ctx.restore();
   p.hitsRef.current = hits;

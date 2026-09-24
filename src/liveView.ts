@@ -1,5 +1,6 @@
 import { publishAdminEvent } from './adminFeed.js';
 import { spectateFor, type SpectateInfo } from './spectate.js';
+import { sameName } from './identity.js';
 import type { DB } from './db.js';
 import { statDef } from './statKeys.js';
 import type { LogEvent, Phase } from './logParse.js';
@@ -14,6 +15,10 @@ export const STALE_AFTER_MS = 120_000;
 export interface LivePlayer {
   steamid: string;
   name: string;
+  /** Their linked Discord display name, when it differs from `name`: Steam
+   *  and Discord names drift apart, and a viewer watching voice channels
+   *  needs both to tell who is who. Null when unlinked or the same name. */
+  discordName: string | null;
   /** Cosmetic counters from the UDP feed. Empty until the first LIVESTAT
    *  arrives, and missing keys mean "not measured", never zero. */
   stats: Record<string, number>;
@@ -56,6 +61,9 @@ export interface MatchPause {
   endedAt: string | null;
   /** Whole seconds, or null while the pause is still open. */
   seconds: number | null;
+  /** Who typed !pause, from pug-match 0.3.5 on. Null for every older pause,
+   *  a disconnect pause and an admin's: never inferred from the team. */
+  calledBy: string | null;
 }
 export interface MatchReadyup {
   mapOrdinal: number;
@@ -253,6 +261,13 @@ export function recordPhase(db: DB, token: string, phase: Phase): void {
     && (prev.phase_team ?? null) === phase.team && Boolean(prev.phase_leave) === phase.leave;
 
   if (sameState && sameIds(prevUnready, unready)) {
+    // A repeat can name the caller the opening line did not carry (that line
+    // was lost, and this is the heartbeat). Only ever fills a blank.
+    if (phase.state === 'paused' && phase.by) {
+      db.prepare(
+        'UPDATE match_pauses SET called_by = ? WHERE match_id = ? AND ended_at IS NULL AND called_by IS NULL',
+      ).run(phase.by, id);
+    }
     touch(db, id);
     return;
   }
@@ -301,9 +316,9 @@ export function recordPhase(db: DB, token: string, phase: Phase): void {
       .get(id, ordinal) as { half: number | null };
     if (phase.state === 'paused') {
       db.prepare(
-        `INSERT INTO match_pauses (match_id, map_ordinal, half, team, leave_pause, started_at)
-         VALUES (?, ?, ?, ?, ?, datetime('now'))`,
-      ).run(id, ordinal, round.half, phase.team, phase.leave ? 1 : 0);
+        `INSERT INTO match_pauses (match_id, map_ordinal, half, team, leave_pause, started_at, called_by)
+         VALUES (?, ?, ?, ?, ?, datetime('now'), ?)`,
+      ).run(id, ordinal, round.half, phase.team, phase.leave ? 1 : 0, phase.by ?? null);
     } else {
       db.prepare(
         `INSERT INTO match_readyups (match_id, map_ordinal, half, started_at, last_unready)
@@ -349,10 +364,12 @@ export function readyupsFor(db: DB, matchId: number): MatchReadyup[] {
 
 /**
  * Who is slow to ready, across every finished ready-up of every match that
- * still counts. Sorted by how often they were the last one, then by total
- * seconds, so a repeat offender is at the top.
+ * still counts. Everybody, not a top few: the admin table re-sorts in the
+ * browser by share of ready-ups they were last for, by average and by total,
+ * and a cut made here by one of those orders would hide the top of the
+ * others. The limit is a backstop against an unbounded payload, not a ranking.
  */
-export function slowToReady(db: DB, limit = 25): SlowToReady[] {
+export function slowToReady(db: DB, limit = 1000): SlowToReady[] {
   return db
     .prepare(
       `SELECT rp.player_id AS steamid, COALESCE(p.name, rp.player_id) AS name,
@@ -390,19 +407,58 @@ export function phaseFor(db: DB, matchId: number): LivePhase | null {
   };
 }
 
+/** The round the plugin says is being played. See roundInProgress. */
+export interface RoundInProgress { ordinal: number; half: number; sinceMs: number }
+
+/**
+ * The round being played right now, or null between rounds.
+ *
+ * The newest round row, only while it has started and not ended, only while
+ * the reported phase is live or paused, and only while the match itself is
+ * still state 'live'. The phase check bounds a lost ROUND_END datagram to at
+ * most thirty seconds, but only for as long as the server keeps reporting: a
+ * match that dies mid-round (see noShow.ts and the lost-dump path in
+ * server.ts, both of which leave match_live in place on purpose) stops
+ * getting heartbeats yet keeps whatever phase it last reported forever, so
+ * the match-state check is what actually closes the window once the match is
+ * marked aborted. The live viewer compares this with the round whose bytes
+ * it is reading, which is how the page knows it is behind.
+ */
+export function roundInProgress(db: DB, matchId: number): RoundInProgress | null {
+  const phase = phaseFor(db, matchId);
+  if (!phase || (phase.state !== 'live' && phase.state !== 'paused')) return null;
+  const row = db
+    .prepare(
+      `SELECT r.ordinal, r.half, r.started_at, r.ended_at
+         FROM match_rounds r
+         JOIN matches m ON m.id = r.match_id
+        WHERE r.match_id = ? AND m.state = 'live'
+        ORDER BY r.ordinal DESC, r.half DESC LIMIT 1`,
+    )
+    .get(matchId) as { ordinal: number; half: number; started_at: string | null; ended_at: string | null } | undefined;
+  if (!row || row.started_at === null || row.ended_at !== null) return null;
+  // A restarted half gets no new row here: recordRoundStart inserts with ON
+  // CONFLICT DO NOTHING, so the existing (match_id, ordinal, half) row is left
+  // as whatever it already was. If that row was already ended, this reports
+  // no round in progress until the next round genuinely starts, which is
+  // failing safe rather than reporting a round that may already be stale.
+  return { ordinal: row.ordinal, half: row.half, sinceMs: sqliteToMs(row.started_at) };
+}
+
 /** Every pause of a match, oldest first. Survives clearLive on purpose. */
 export function pausesFor(db: DB, matchId: number): MatchPause[] {
   const rows = db
     .prepare(
-      `SELECT map_ordinal, half, team, leave_pause, started_at, ended_at
+      `SELECT map_ordinal, half, team, leave_pause, started_at, ended_at, called_by
        FROM match_pauses WHERE match_id = ? ORDER BY id`,
     )
     .all(matchId) as {
       map_ordinal: number; half: number | null; team: 'a' | 'b' | null;
-      leave_pause: number; started_at: string; ended_at: string | null;
+      leave_pause: number; started_at: string; ended_at: string | null; called_by: string | null;
     }[];
   return rows.map((r) => ({
     team: r.team ?? null,
+    calledBy: r.called_by,
     leave: Boolean(r.leave_pause),
     mapOrdinal: r.map_ordinal,
     half: r.half,
@@ -495,7 +551,7 @@ export interface RoundRow {
 /** Which map this round belongs to: however many have already finished.
  *  Same derivation recordLiveEvent uses for map_ordinal, and for the same
  *  reason: nothing on the wire carries it. */
-function currentOrdinal(db: DB, matchId: number): number {
+export function currentOrdinal(db: DB, matchId: number): number {
   const done = db
     .prepare('SELECT COUNT(*) AS n FROM match_live_maps WHERE match_id = ?')
     .get(matchId) as { n: number };
@@ -806,7 +862,13 @@ export function eventsFor(db: DB, matchId: number, limit = LIVE_EVENT_LIMIT): {
  *  that pair to a file server-side. The token bytes in the replay header are
  *  zeroed on the way out by routes/replays.ts, so the file contents do not
  *  leak it either. */
-export function getLiveMatches(db: DB): LiveMatch[] {
+/** `showDiscordNames` defaults to false: /api/live has no session at all, and
+ *  the only safe default for an anonymous, unauthenticated payload is to
+ *  leave a player's linked Discord name out of it. The route decides when to
+ *  pass true, after checking the viewer is a signed-in player in good
+ *  standing (see routes/guards.ts makeOptionalViewer / standing.ts
+ *  inGoodStanding); this function never re-derives that itself. */
+export function getLiveMatches(db: DB, showDiscordNames = false): LiveMatch[] {
   const matches = db
     .prepare(
       `SELECT m.id, m.campaign, m.server_id AS serverId, l.current_map AS currentMap, l.last_seen AS lastSeen
@@ -819,7 +881,7 @@ export function getLiveMatches(db: DB): LiveMatch[] {
   if (matches.length === 0) return [];
 
   const playersOf = db.prepare(
-    `SELECT mp.player_id AS steamid, p.name, mp.team
+    `SELECT mp.player_id AS steamid, p.name, p.discord_name AS discordName, mp.team
      FROM match_players mp JOIN players p ON p.steamid = mp.player_id
      WHERE mp.match_id = ? ORDER BY mp.player_id`,
   );
@@ -840,7 +902,7 @@ export function getLiveMatches(db: DB): LiveMatch[] {
 
   const now = Date.now();
   return matches.map((m) => {
-    const ps = playersOf.all(m.id) as { steamid: string; name: string; team: 'a' | 'b' }[];
+    const ps = playersOf.all(m.id) as { steamid: string; name: string; discordName: string | null; team: 'a' | 'b' }[];
     const rawMaps = mapsOf.all(m.id) as Omit<LiveMap, 'stats'>[];
     const byMap = mapStatsFor(db, m.id);
     const maps: LiveMap[] = rawMaps.map((mp) => ({ ...mp, stats: byMap.get(mp.ordinal) ?? {} }));
@@ -854,8 +916,10 @@ export function getLiveMatches(db: DB): LiveMatch[] {
       }
     }
     const nameOf = (id: string) => ps.find((p) => p.steamid === id)?.name ?? id;
-    const named = (p: { steamid: string; name: string }): LivePlayer => ({
-      steamid: p.steamid, name: p.name, stats: statsBy.get(p.steamid) ?? {},
+    const named = (p: { steamid: string; name: string; discordName: string | null }): LivePlayer => ({
+      steamid: p.steamid, name: p.name,
+      discordName: showDiscordNames && p.discordName && !sameName(p.name, p.discordName) ? p.discordName : null,
+      stats: statsBy.get(p.steamid) ?? {},
     });
     return {
       id: m.id,

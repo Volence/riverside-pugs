@@ -157,6 +157,50 @@ export type HoldAnnotation = 'wheel-like' | 'fixed-hold' | 'variable-hold' | 'no
 
 export const MIN_HOLDS_TO_ANNOTATE = 4;
 
+/** Whether a detection note says scroll wheel. Wheel binds are legal (owner's
+ *  ruling, 2026-09-22): such a detection is kept on the file but is not
+ *  evidence, and the admin channel is not told. Notes start with the hold
+ *  annotation, so a suffix like ", plugin 0.1.0 capture" does not matter. */
+export const isWheel = (note: string): boolean => note.startsWith('wheel-like');
+
+/**
+ * The note a wheel-like detection gets instead when its rate is too steady for
+ * a hand-spun wheel. NOT a wheel for isWheel, so it stays evidence.
+ *
+ * Measured on prod 2026-09-22. Icy Inferno, a known wheel player: gaps of 1 to
+ * 20+ ticks, 0 of 70 long bursts steady and 6% of short ones, because a spun
+ * wheel comes in quick runs of notches with a gap while the finger resets.
+ * Bellingham, flagged wheel-like: 6 or 7 ticks for 60+ presses, 41 of 43 long
+ * bursts steady and 70% of short ones, never slowing down. One-tick taps at a
+ * fixed rate is a rapid-fire bind or mouse auto-fire, not a wheel.
+ */
+export const STEADY_TAPS = 'steady-taps';
+
+/** Share of a burst's gaps within one tick of its median for it to count as
+ *  steady. One tick either way is the aliasing any flat rate shows. */
+export const STEADY_SHARE = 0.85;
+export const STEADY_MIN_INTERVALS = 6;
+
+export function isSteadyBurst(intervals: readonly number[]): boolean {
+  if (intervals.length < STEADY_MIN_INTERVALS) return false;
+  const sorted = [...intervals].sort((a, b) => a - b);
+  const n = sorted.length;
+  const median = n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
+  let near = 0;
+  for (const t of intervals) if (Math.abs(t - median) <= 1) near++;
+  return near / n >= STEADY_SHARE;
+}
+
+/** More than half of a detection's bursts steady. Strictly more: with two
+ *  bursts a wheel player at 6% per burst would otherwise be caught one time in
+ *  nine; needing both makes it about one in three hundred. */
+export function mostlySteady(bursts: readonly (readonly number[])[]): boolean {
+  if (bursts.length === 0) return false;
+  let steady = 0;
+  for (const b of bursts) if (isSteadyBurst(b)) steady++;
+  return steady * 2 > bursts.length;
+}
+
 export function holdAnnotation(holds: readonly number[] | null | undefined): HoldAnnotation {
   const h = holdStats(holds);
   if (!h || h.n < MIN_HOLDS_TO_ANNOTATE) return 'no-hold-data';

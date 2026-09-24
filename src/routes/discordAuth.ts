@@ -122,7 +122,7 @@ export async function discordAuthRoutes(app: FastifyInstance, opts: DiscordAuthO
       console.error('[discord] oauth callback failed:', err);
       return back('failed');
     }
-    const linked = linkDiscord(db, steamid, user.id, user.globalName ?? user.username);
+    const linked = linkDiscord(db, steamid, user.id, user.globalName ?? user.username, { adminSteamIds: config.adminSteamIds });
     if (!linked.ok) return back(linked.error === 'discord_taken' ? 'taken' : linked.error);
     announceLink(steamid, user.globalName ?? user.username, linked);
     await applyGate(db, api!, steamid);
@@ -153,7 +153,7 @@ export async function discordAuthRoutes(app: FastifyInstance, opts: DiscordAuthO
     // read and the spend awaits, so the two cannot be interleaved.
     const spent = peekLinkCode(db, code);
     if (!spent) return reply.code(400).send({ error: 'invalid_code' });
-    const linked = linkDiscord(db, steamid, spent.discordId, spent.discordName);
+    const linked = linkDiscord(db, steamid, spent.discordId, spent.discordName, { adminSteamIds: config.adminSteamIds });
     if (!linked.ok) return reply.code(409).send({ error: linked.error });
     consumeLinkCode(db, code);
     announceLink(steamid, spent.discordName, linked);

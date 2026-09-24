@@ -49,6 +49,15 @@ describe('settings schema', () => {
     expect(validateSetting('not_a_setting', '1').ok).toBe(false);
   });
 
+  // A moderator's Discord timeout cap comes from this same setting (see
+  // discordSanctions.ts checkDiscordSanction), so its help text must say so
+  // rather than only describing the server ban it was named for.
+  it('says the mod ban cap also bounds a moderator\'s Discord timeouts', () => {
+    const def = SETTINGS_SCHEMA.find((d) => d.key === 'ticket_mod_ban_max_minutes');
+    expect(def?.help).toMatch(/time out a Discord-only person/);
+    expect(def?.help).toMatch(/28 day/);
+  });
+
   // The default is only reached by a caller with no registry to consult, and
   // that caller must still fail closed on a campaign that needs an install
   // check: a dlc4 campaign is not automatically safe just because nobody

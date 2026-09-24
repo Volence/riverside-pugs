@@ -2,8 +2,18 @@ import type { ComponentChildren } from 'preact';
 import type { MatchResult } from '../api';
 import { deltaClass, fmtDelta, RESULT_LABEL, sparklinePoints } from '../format';
 
-export function PlayerLink({ steamid, name }: { steamid: string; name: string }) {
-  return <a href={`/player/${encodeURIComponent(steamid)}`}>{name}</a>;
+/** Steam and Discord names drift apart (a "mira" in game can be a "br1" in
+ *  voice chat), so the link carries the Discord name too whenever it says
+ *  something the Steam name does not: absent, or the same name read the
+ *  other way, adds nothing and is left off. */
+export function PlayerLink({ steamid, name, discordName }: { steamid: string; name: string; discordName?: string | null }) {
+  const differs = discordName && discordName.trim().toLowerCase() !== name.trim().toLowerCase();
+  return (
+    <>
+      <a href={`/player/${encodeURIComponent(steamid)}`}>{name}</a>
+      {differs && <span class="muted"> (Discord: {discordName})</span>}
+    </>
+  );
 }
 
 export function SrDelta({ value }: { value: number }) {
@@ -20,8 +30,8 @@ export function ResultChip({ result }: { result: MatchResult }) {
   );
 }
 
-export function Panel({ children, class: cls = '' }: { children: ComponentChildren; class?: string }) {
-  return <section class={`panel ${cls}`}>{children}</section>;
+export function Panel({ children, class: cls = '', id }: { children: ComponentChildren; class?: string; id?: string }) {
+  return <section class={`panel ${cls}`} id={id}>{children}</section>;
 }
 
 export function Empty({ children }: { children: ComponentChildren }) {

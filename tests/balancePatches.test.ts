@@ -1,0 +1,197 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { openDb } from '../src/db.js';
+import { addServer } from '../src/serverPool.js';
+import { subscribeAdminEvents } from '../src/adminFeed.js';
+import { diffInventories, fingerprintOf, formatDiff, listPatches, recordBalanceSighting, refingerprintPatches, withoutIgnored } from '../src/balancePatches.js';
+
+const INV = { 'c:z_tank_health': '4000', 'p:l4d_skypounce.smx': '100.aaaa0001', 'p:pug-match.smx': '200.bbbb0001' };
+
+describe('fingerprintOf', () => {
+  it('ignores key order', () => {
+    const b = { 'p:pug-match.smx': '200.bbbb0001', 'p:l4d_skypounce.smx': '100.aaaa0001', 'c:z_tank_health': '4000' };
+    expect(fingerprintOf(INV, [])).toBe(fingerprintOf(b, []));
+    expect(fingerprintOf(INV, [])).toMatch(/^[0-9a-f]{16}$/);
+  });
+  it('changes on any value change', () => {
+    expect(fingerprintOf({ ...INV, 'c:z_tank_health': '3750' }, [])).not.toBe(fingerprintOf(INV, []));
+  });
+  it('ignores the version but not the presence of a versionless plugin', () => {
+    const v = ['pug-match.smx'];
+    expect(fingerprintOf({ ...INV, 'p:pug-match.smx': '999.ffff0000' }, v)).toBe(fingerprintOf(INV, v));
+    const { ['p:pug-match.smx']: _gone, ...without } = INV;
+    expect(fingerprintOf(without, v)).not.toBe(fingerprintOf(INV, v));
+  });
+});
+
+describe('diffInventories', () => {
+  it('reports added, removed and changed keys', () => {
+    const d = diffInventories({ a: '1', b: '2' }, { b: '3', c: '4' });
+    expect(d).toEqual({ added: ['c'], removed: ['a'], changed: [{ key: 'b', from: '2', to: '3' }] });
+    expect(formatDiff(d)).toBe('added c; removed a; b 2 -> 3');
+  });
+});
+
+describe('recordBalanceSighting', () => {
+  let db: ReturnType<typeof openDb>;
+  let problems: string[];
+  let unsub: () => void;
+  beforeEach(() => {
+    db = openDb(':memory:');
+    db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
+    db.prepare("INSERT INTO matches (id, season_id, state, campaign, token) VALUES (1, 1, 'live', 'x', ?)").run('b'.repeat(32));
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team) VALUES (1, 0, 1, 'a')").run();
+    addServer(db, { name: 'dallas', host: '10.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    addServer(db, { name: 'chicago', host: '10.0.0.2', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    problems = [];
+    unsub = subscribeAdminEvents((e) => { if (e.kind === 'problem') problems.push(e.text); });
+  });
+  afterEach(() => unsub());
+
+  it('creates a detected patch, tags the round and alerts once', () => {
+    const r = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: [] });
+    expect(r).toMatchObject({ newPatch: true, serverChanged: true });
+    const round = db.prepare('SELECT patch_id FROM match_rounds WHERE match_id = 1').get() as { patch_id: number };
+    expect(round.patch_id).toBe(r.patchId);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/dallas/);
+
+    const again = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: [] });
+    expect(again).toMatchObject({ patchId: r.patchId, newPatch: false, serverChanged: false });
+    expect(problems).toHaveLength(1);
+  });
+
+  it('reports what changed and which servers now differ', () => {
+    recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: [] });
+    recordBalanceSighting(db, { matchId: 1, serverId: 2, half: 1, inventory: INV, versionless: [] });
+    problems.length = 0;
+    const changed = { ...INV, 'p:l4d_itemlimiter.smx': '50.cccc0001' };
+    const r = recordBalanceSighting(db, { matchId: 1, serverId: 2, half: 1, inventory: changed, versionless: [] });
+    expect(r.newPatch).toBe(true);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/chicago/);
+    expect(problems[0]).toMatch(/added p:l4d_itemlimiter\.smx/);
+    expect(problems[0]).toMatch(/differs from dallas/);
+  });
+
+  it('alerts with the time-ordered patch number, not the row id', () => {
+    // First sighting gets row id 1 but a LATER first_seen_at than the one below.
+    recordBalanceSighting(db, {
+      matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: [], now: '2026-06-01 00:00:00',
+    });
+    problems.length = 0;
+
+    // Second sighting is a different inventory (a new patch), so it gets row
+    // id 2, but its first_seen_at is EARLIER, so it ranks #1 on the admin
+    // page (ROW_NUMBER OVER (ORDER BY first_seen_at, id)). The alert must
+    // name it #1, not #2.
+    const changed = { ...INV, 'p:l4d_itemlimiter.smx': '50.cccc0001' };
+    const r = recordBalanceSighting(db, {
+      matchId: 1, serverId: 2, half: 1, inventory: changed, versionless: [], now: '2020-01-01 00:00:00',
+    });
+    expect(r.patchId).toBe(2);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/new patch \(#1,/);
+    expect(problems[0]).not.toMatch(/#2/);
+  });
+
+  it('alerts on a versionless plugin update without making a new patch', () => {
+    const v = ['pug-match.smx'];
+    const first = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: v });
+    problems.length = 0;
+    const bumped = { ...INV, 'p:pug-match.smx': '201.bbbb0002' };
+    const r = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: bumped, versionless: v });
+    expect(r).toMatchObject({ patchId: first.patchId, newPatch: false, serverChanged: true });
+    expect(problems[0]).toMatch(/pug-match\.smx/);
+  });
+
+  it('drops an ignored plugin: same patch, no alert, not stored', () => {
+    const ig = ['l4d2_spec_stays_spec.smx'];
+    const first = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: [], ignored: ig });
+    problems.length = 0;
+    const withSpec = { ...INV, 'p:l4d2_spec_stays_spec.smx': '8284.82ba5f50' };
+    const r = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 2, inventory: withSpec, versionless: [], ignored: ig });
+    expect(r).toMatchObject({ patchId: first.patchId, newPatch: false, serverChanged: false });
+    expect(problems).toHaveLength(0);
+    const stored = db.prepare('SELECT inventory_json FROM balance_server_state WHERE server_id = 1').get() as { inventory_json: string };
+    expect(stored.inventory_json).not.toMatch(/spec_stays/);
+  });
+});
+
+describe('refingerprintPatches', () => {
+  let db: ReturnType<typeof openDb>;
+  let problems: string[];
+  let unsub: () => void;
+  const SPEC = 'l4d2_spec_stays_spec.smx';
+  const withSpec = { ...INV, [`p:${SPEC}`]: '10.aaaa0001' };
+  beforeEach(() => {
+    db = openDb(':memory:');
+    db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
+    db.prepare("INSERT INTO matches (id, season_id, state, campaign, token) VALUES (1, 1, 'live', 'x', ?)").run('e'.repeat(32));
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team) VALUES (1, 0, 1, 'a'), (1, 0, 2, 'b')").run();
+    addServer(db, { name: 'dallas', host: '10.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    problems = [];
+    unsub = subscribeAdminEvents((e) => { if (e.kind === 'problem') problems.push(e.text); });
+  });
+  afterEach(() => unsub());
+
+  it('collapses patches that differ only by a now-ignored plugin into the older one, once', () => {
+    // Recorded before the plugin was on the ignored list: two patches.
+    const older = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: [], now: '2026-09-01 00:00:00' });
+    const newer = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 2, inventory: withSpec, versionless: [], now: '2026-09-02 00:00:00' });
+    expect(newer.newPatch).toBe(true);
+    problems.length = 0;
+
+    const r = refingerprintPatches(db, [], [SPEC]);
+    expect(r.merged).toEqual([{ keep: older.patchId, into: [newer.patchId] }]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(new RegExp(`#2 \\(id ${newer.patchId}\\) into #1 \\(id ${older.patchId}\\)`));
+    const fp = (id: number) => (db.prepare('SELECT fingerprint FROM balance_patches WHERE id = ?').get(id) as { fingerprint: string | null }).fingerprint;
+    expect(fp(older.patchId)).toBe(fingerprintOf(withoutIgnored(INV, [SPEC]), []));
+    expect(fp(newer.patchId)).toBeNull();
+    // Rounds already tagged with the merged patch stay tagged.
+    expect(db.prepare('SELECT patch_id FROM match_rounds WHERE half = 2').get()).toEqual({ patch_id: newer.patchId });
+
+    // A second run with the same lists is a no-op.
+    const before = db.prepare('SELECT id, fingerprint FROM balance_patches ORDER BY id').all();
+    expect(refingerprintPatches(db, [], [SPEC])).toEqual({ updated: 0, merged: [] });
+    expect(db.prepare('SELECT id, fingerprint FROM balance_patches ORDER BY id').all()).toEqual(before);
+    expect(problems).toHaveLength(1);
+
+    // The next sighting of the unchanged box lands on the keeper, and the
+    // server's state row follows it without an alert.
+    const next = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 2, inventory: withSpec, versionless: [], ignored: [SPEC] });
+    expect(next).toMatchObject({ patchId: older.patchId, newPatch: false, serverChanged: false });
+    expect(db.prepare('SELECT patch_id FROM balance_server_state WHERE server_id = 1').get()).toEqual({ patch_id: older.patchId });
+    expect(problems).toHaveLength(1);
+  });
+
+  it('updates a still-unique fingerprint in place without an alert', () => {
+    const only = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: withSpec, versionless: [] });
+    problems.length = 0;
+    const r = refingerprintPatches(db, [], [SPEC]);
+    expect(r).toEqual({ updated: 1, merged: [] });
+    expect(db.prepare('SELECT fingerprint FROM balance_patches WHERE id = ?').get(only.patchId))
+      .toEqual({ fingerprint: fingerprintOf(withoutIgnored(withSpec, [SPEC]), []) });
+    expect(problems).toHaveLength(0);
+  });
+});
+
+describe('listPatches countedRounds', () => {
+  it('counts only computed rounds of completed, non-voided matches; rounds counts everything', () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
+    db.prepare("INSERT INTO balance_patches (id, name, source, first_seen_at) VALUES (1, 'P', 'detected', '2026-09-01 00:00:00')").run();
+    const match = db.prepare("INSERT INTO matches (id, season_id, state, campaign, voided_at) VALUES (?, 1, ?, 'x', ?)");
+    match.run(1, 'completed', null);
+    match.run(2, 'completed', '2026-09-02 00:00:00');
+    match.run(3, 'live', null);
+    for (const id of [1, 2, 3]) {
+      db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, patch_id) VALUES (?, 0, 1, 'a', 1), (?, 0, 2, 'b', 1)").run(id, id);
+      db.prepare(`INSERT INTO round_metric_context (match_id, ordinal, half, patch_id, has_replay, has_stats, engine, computed_at)
+        VALUES (?, 0, 1, 1, 0, 0, 'e', 'n'), (?, 0, 2, 1, 0, 0, 'e', 'n')`).run(id, id);
+    }
+    const [p] = listPatches(db);
+    expect(p.rounds).toBe(6);
+    expect(p.countedRounds).toBe(2);
+  });
+});

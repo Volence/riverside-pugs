@@ -184,7 +184,11 @@ export const TUNING = {
    *  changes disagree with the bearing's even when it is following well. Scoring
    *  each window at the best of a few whole-frame lags would be the fix, and is
    *  a change of metric, not of threshold. */
-  CLIP_MIN: 0.7,
+  /** Set by the owner on 2026-09-23. No real player in history has scored above
+   *  0.261, while simulated wallhackers reach 0.7 in only 7 to 17% of rounds, so
+   *  0.7 missed most cheaters for no gain. 0.4 still flags nobody in history.
+   *  Revisit after the calibration session (spec section 6). */
+  CLIP_MIN: 0.4,
   /** Most clips kept per player-round. */
   CLIPS_PER_ROUND: 5,
 } as const;

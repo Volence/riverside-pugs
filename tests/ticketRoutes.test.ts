@@ -78,6 +78,13 @@ describe('filing over HTTP', () => {
   it('the old admin report routes are gone', async () => {
     expect((await get(ADMIN, '/api/admin/reports')).statusCode).toBe(404);
   });
+
+  it('the match page route carries a replay moment through', async () => {
+    const r = await post(R1, `/api/matches/${matchId}/reports`, { targetId: ACCUSED, category: 'cheating', text: 'here', moment: { ordinal: 2, half: 1, tMs: 61500 } });
+    expect(r.statusCode).toBe(200);
+    expect(db.prepare('SELECT map_ordinal, half, t_ms FROM ticket_reports').get()).toEqual({ map_ordinal: 2, half: 1, t_ms: 61500 });
+    expect((await post(R2, `/api/matches/${matchId}/reports`, { targetId: ACCUSED, category: 'cheating', text: '', moment: { ordinal: 2 } })).statusCode).toBe(400);
+  });
 });
 
 describe('working tickets over HTTP', () => {
@@ -122,15 +129,21 @@ describe('working tickets over HTTP', () => {
     expect((await get(OWNER, '/api/mod/tickets')).statusCode).toBe(200);
   });
 
-  it('the detail carries reports with the moment, events, the case file and the viewer cap', async () => {
+  it('the detail carries reports with the moment, events, the case file, the summary and the viewer cap', async () => {
     const d = (await get(MOD, `/api/mod/tickets/${id}`)).json();
     expect(d.ticket).toMatchObject({ id, targetId: ACCUSED, status: 'open' });
     expect(d.reports.map((r: { reporterId: string }) => r.reporterId).sort()).toEqual([R1, R2].sort());
     expect(d.reports.find((r: { reporterId: string }) => r.reporterId === R1)).toMatchObject({ matchId, campaign: 'dead_air', moment: { ordinal: 2, half: 1, tMs: 61500 } });
     expect(d.events.map((e: { kind: string }) => e.kind)).toEqual(['opened', 'report_attached']);
     expect(d.caseFile).toMatchObject({ steamid: ACCUSED, bans: [], tickets: [{ id }] });
+    expect(d.summary).toMatchObject({ steamid: ACCUSED, bans: 0, fileUrl: `/admin/people/${ACCUSED}` });
     expect(d.viewer).toEqual({ isAdmin: false, banCapMinutes: 10080 });
     expect((await get(ADMIN, `/api/mod/tickets/${id}`)).json().viewer).toEqual({ isAdmin: true, banCapMinutes: null });
+  });
+
+  it('says the Discord discussion is not configured when it is not', async () => {
+    const d = (await get(MOD, `/api/mod/tickets/${id}`)).json();
+    expect(d.discussion).toEqual({ state: 'unconfigured', surface: null, url: null });
   });
 
   it('claim, ban, close and reopen work and are audited', async () => {
@@ -171,8 +184,8 @@ describe('working tickets over HTTP', () => {
 });
 
 describe('restricted tickets over HTTP', () => {
-  it('a ticket about a mod is invisible to that mod and to everyone off the list, and its audit rows stay off the feed', async () => {
-    await file(R1, { targetId: MOD, category: 'toxicity', text: 'abusive' });
+  it('a restricted ticket about a mod is invisible to that mod and to everyone off the list, and its audit rows stay off the feed', async () => {
+    await file(R1, { targetId: MOD, category: 'unsafe', text: 'abusive' });
     const id = (db.prepare('SELECT id FROM tickets').get() as { id: number }).id;
     for (const who of [MOD, MOD2, ADMIN]) {
       expect((await get(who, '/api/mod/tickets')).json().tickets).toEqual([]);
@@ -205,7 +218,7 @@ describe('restricted tickets over HTTP', () => {
   });
 
   it('audit rows about a restricted ticket reach only its access list', async () => {
-    await file(R1, { targetId: MOD, category: 'toxicity', text: 'abusive' });
+    await file(R1, { targetId: MOD, category: 'unsafe', text: 'abusive' });
     const id = (db.prepare('SELECT id FROM tickets').get() as { id: number }).id;
     expect((await post(OWNER, `/api/mod/tickets/${id}/claim`, { claim: true })).statusCode).toBe(200);
     expect((await post(OWNER, `/api/mod/tickets/${id}/close`, { outcome: 'no_action', note: 'nothing in it' })).statusCode).toBe(200);
@@ -218,26 +231,25 @@ describe('restricted tickets over HTTP', () => {
     expect(await ticketRows(MOD)).toEqual([]);
   });
 
-  it('promoting a player restricts the open ticket about them', async () => {
+  it('promoting a player leaves the open ticket about them ordinary and hides it from them', async () => {
     await file(R1, { targetId: R2, category: 'griefing', text: 'threw' });
     const id = (db.prepare('SELECT id FROM tickets').get() as { id: number }).id;
-    expect((await get(MOD, `/api/mod/tickets/${id}`)).statusCode).toBe(200);
     expect((await post(OWNER, `/api/admin/players/${R2}/mod`, { isMod: true })).statusCode).toBe(200);
-    expect(db.prepare('SELECT restricted FROM tickets WHERE id = ?').get(id)).toEqual({ restricted: 1 });
-    expect((await get(MOD, `/api/mod/tickets/${id}`)).statusCode).toBe(404);
-    expect((await get(OWNER, `/api/mod/tickets/${id}`)).json().events.map((e: { kind: string }) => e.kind))
-      .toEqual(['opened', 'restricted']);
+    expect(db.prepare('SELECT restricted FROM tickets WHERE id = ?').get(id)).toEqual({ restricted: 0 });
+    expect((await get(MOD, `/api/mod/tickets/${id}`)).statusCode).toBe(200);
+    // Promoting R2 ends their sessions (src/routes/admin.ts): re-sign-in, as
+    // they would have to for real, before checking what they can see.
+    cookie[R2] = authedCookie(app, db, R2);
+    expect((await get(R2, `/api/mod/tickets/${id}`)).statusCode).toBe(404);
+    expect((await get(OWNER, `/api/mod/tickets/${id}`)).json().events.map((e: { kind: string }) => e.kind)).toEqual(['opened']);
   });
 
-  it('promoting a player with both flavours open leaves one restricted ticket holding both reports', async () => {
+  it('promoting a player with both flavours open leaves both tickets as they were', async () => {
     await file(R1, { targetId: R2, category: 'griefing', text: 'threw' });
     await file(R1, { targetId: R2, category: 'unsafe', text: 'threats' });
-    const normalId = (db.prepare('SELECT id FROM tickets WHERE restricted = 0').get() as { id: number }).id;
-    const restrictedId = (db.prepare('SELECT id FROM tickets WHERE restricted = 1').get() as { id: number }).id;
+    const before = db.prepare('SELECT id, restricted FROM tickets ORDER BY id').all();
     expect((await post(OWNER, `/api/admin/players/${R2}/admin`, { isAdmin: true })).statusCode).toBe(200);
-    expect(db.prepare('SELECT id FROM tickets').all()).toEqual([{ id: restrictedId }]);
-    expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_reports WHERE ticket_id = ?').get(restrictedId)).toEqual({ n: 2 });
-    expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_reports WHERE ticket_id = ?').get(normalId)).toEqual({ n: 0 });
+    expect(db.prepare('SELECT id, restricted FROM tickets ORDER BY id').all()).toEqual(before);
     expect(db.pragma('foreign_key_check')).toEqual([]);
   });
 
@@ -251,7 +263,7 @@ describe('restricted tickets over HTTP', () => {
     expect((await get(MOD2, '/api/mod/tickets')).json().tickets).toEqual([]);
   });
 
-  it('a ban issued from a restricted ticket is withheld from a case file opened via a different ticket', async () => {
+  it('a ban issued from a restricted ticket is withheld from a case file and summary opened via a different ticket', async () => {
     await file(R1, { targetId: ACCUSED, category: 'unsafe', text: 'weapon threat' });
     const restrictedId = (db.prepare('SELECT id FROM tickets WHERE restricted = 1').get() as { id: number }).id;
     expect((await post(OWNER, `/api/mod/tickets/${restrictedId}/ban`, { reason: 'sensitive detail', minutes: 60 })).statusCode).toBe(200);
@@ -269,9 +281,18 @@ describe('restricted tickets over HTTP', () => {
     expect(JSON.stringify(modBody.caseFile.activeBan)).not.toContain('sensitive detail');
     expect(JSON.stringify(modBody.caseFile.activeBan)).not.toContain(OWNER);
     expect(modBody.caseFile.tickets.map((t: { id: number }) => t.id)).not.toContain(restrictedId);
+    expect(modBody.summary.bans).toBe(1);
+    expect(modBody.summary.activeBan).toMatchObject({ reason: 'Withheld (restricted ticket)', createdByName: null });
+    expect(modBody.summary.activeBan.createdBy).toBeFalsy();
+    expect(JSON.stringify(modBody.summary)).not.toContain('sensitive detail');
+    expect(JSON.stringify(modBody.summary)).not.toContain(OWNER);
+    // The summary carries counts rather than ticket ids, so the restricted
+    // ticket cannot be inferred from it at all.
+    expect(JSON.stringify(modBody.summary)).not.toContain(`"${restrictedId}"`);
 
     const ownerBody = (await get(OWNER, `/api/mod/tickets/${normalId}`)).json();
     expect(ownerBody.caseFile.bans[0]).toMatchObject({ reason: 'sensitive detail', createdBy: OWNER });
     expect(ownerBody.caseFile.tickets.map((t: { id: number }) => t.id)).toContain(restrictedId);
+    expect(ownerBody.summary.activeBan).toMatchObject({ reason: 'sensitive detail', createdBy: OWNER });
   });
 });

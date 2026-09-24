@@ -715,8 +715,12 @@ td.campaign-cell { box-shadow: inset 4px 0 0 var(--campaign, transparent); }
   pointer-events: none;
 }
 .ctile > * { position: relative; z-index: 1; }
-button.ctile { cursor: pointer; }
-button.ctile:hover { border-color: var(--text-muted); }
+button.ctile, a.ctile { cursor: pointer; }
+button.ctile:hover, a.ctile:hover { border-color: var(--text-muted); }
+a.ctile { text-decoration: none; }
+/* A campaign's table, landed on from its tile: a little room above it. */
+.campaign-table { scroll-margin-top: var(--sp-6); }
+.campaigns-more { margin: var(--sp-4) 0; }
 .ctile.is-active { border-color: var(--rule); box-shadow: 0 0 0 1px var(--rule); }
 .ctile.is-muted { opacity: 0.55; }
 .ctile__name {
@@ -838,6 +842,14 @@ button.ctile:hover { border-color: var(--text-muted); }
 }
 .delta--up { color: var(--win); }
 .delta--down { color: var(--loss); }
+/* Beside a name in the versus header: no column to line up with there, and
+ * the label font's letter spacing would stretch the digits. */
+.versus__names .delta {
+  min-width: 0;
+  vertical-align: middle;
+  letter-spacing: 0;
+  font-family: var(--font-body);
+}
 
 /* W/L/D glyph. The letter is the information; the color reinforces it. */
 .result {
@@ -1415,6 +1427,56 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .replay__sprocket--l { border-right: 1px solid #0b0908; }
 .replay__sprocket--r { border-left: 1px solid #0b0908; }
 .replay__stage { position: relative; width: 100%; touch-action: pan-y; cursor: grab; }
+
+/* Portrait maps (aspect under PORTRAIT_ASPECT in Viewer.tsx). Stacked by
+   default, in the landscape layout's own order: the side column dissolves
+   and each slot's `order` interleaves it with the frame again. The widths
+   come in as custom properties from portraitVars. */
+.replay__main { display: flex; flex-direction: column; gap: var(--sp-3); }
+.replay__side { display: contents; }
+.replay__slot { min-width: 0; }
+.replay__slot--filters { order: -1; }
+.replay__slot--rail { order: 1; }
+.replay__slot--controls { order: 2; }
+.replay__slot--hud { order: 3; }
+.replay--portrait .replay__stage { max-width: var(--stacked-max-w); }
+/* Room for the column: the stage beside it takes nearly the whole viewport
+   height instead of STAGE_MAX_VH, and the frame's track shrinks (never
+   below zero) when the page is narrower than the stage wants. */
+@media (min-width: 1000px) {
+  .replay__main {
+    display: grid;
+    grid-template-columns: minmax(0, var(--side-frame-w)) var(--side-col-w);
+    justify-content: center;
+    align-items: start;
+    gap: var(--sp-4);
+    /* Wider than the page when the viewport has the room, centred on it by
+       the negative margin. Kept inside the page, the column's 336px came out
+       of a stage the 1120px page already capped, and on a tall screen the
+       map ended up SMALLER than stacked (airport03 at 1920x1300: 684px wide
+       against 754). The margins beside the page are exactly the empty space
+       the layout exists to use. 64px under 100vw keeps a gutter either side
+       and room for a scrollbar, so the page never scrolls sideways. Not a
+       transform: that would make this the containing block for anything
+       position: fixed inside it. */
+    --main-w: min(calc(100vw - 64px), calc(var(--side-frame-w) + var(--side-col-w) + var(--sp-4)));
+    width: var(--main-w);
+    margin-left: calc((100% - var(--main-w)) / 2);
+  }
+  .replay__side { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+  .replay--portrait .replay__stage { max-width: var(--side-max-w); }
+  /* In the column, DOM order: the controls first, where they cannot be
+     pushed about by a rail that grows as the round plays. */
+  .replay__side > .replay__slot { order: 0; }
+  .replay__side .replay__rail { max-height: 24rem; }
+  /* A row's label beside its first card wraps the rest under it, ragged;
+     in a column this narrow the label goes on its own line instead. */
+  .replay__side .hud-row { flex-direction: column; align-items: stretch; }
+  .replay__side .hud-row__label { align-self: flex-start; min-width: 0; }
+  /* .hudp's 10rem flex-basis is a WIDTH in a row; in a column it would be a
+     10rem height. */
+  .replay__side .hudp { flex: none; }
+}
 .replay__stage.is-dragging { cursor: grabbing; }
 .replay__sep { width: 1px; height: 20px; background: var(--border); margin: 0 var(--sp-1); }
 .replay__canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
@@ -1676,6 +1738,10 @@ body.is-theater { overflow: hidden; }
 /* ---------- admin ---------- */
 
 .page--admin { max-width: 1320px; }
+/* The sections of a desk, as chips under the desk tabs. Wraps rather than
+ * scrolls: four of them do not fit a phone in one line, and a section you
+ * cannot see is a section nobody opens. */
+.admin-sections { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-bottom: var(--sp-3); }
 .admin-body { margin-top: var(--sp-4); }
 .admin-split { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--sp-5); align-items: start; }
 .admin-split--even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
@@ -1728,6 +1794,16 @@ body.is-theater { overflow: hidden; }
 .admin-table--servers .admin-form { flex-wrap: nowrap; }
 .admin-table--servers .admin-form input { flex: 0 1 auto; width: 7rem; }
 .admin-table td, .admin-table th { white-space: nowrap; }
+/* Recent results: eight ready-up lines of "0:14 on map 1, last <two names>"
+ * held on one line each pushed the Void button out of the panel, behind a
+ * scroll bar that sat at the bottom of a long table. The two list columns may
+ * wrap; and because a phone is narrower than any wrapping can fix, the action
+ * column stays pinned to the right edge while the rest scrolls under it. */
+.admin-table--recent .admin-pauses { white-space: normal; min-width: 11rem; }
+/* The pin itself, as a modifier: Needs a look has the same shape and the same
+ * problem, its Looked at button being the column a phone scrolls away. */
+.admin-table--pin-last td:last-child,
+.admin-table--pin-last th:last-child { position: sticky; right: 0; background: var(--surface); }
 .admin-table tr.is-clickable { cursor: pointer; }
 .admin-tag {
   margin-left: 0.5em; padding: 0 0.35em; border: 1px solid var(--rating); color: var(--rating);
@@ -1739,10 +1815,25 @@ body.is-theater { overflow: hidden; }
 .admin-status--invited, .admin-status--reserved, .admin-status--live { color: var(--rating); }
 .admin-warn { color: var(--loss); }
 
-.admin-detail section { margin-top: var(--sp-5); }
-.admin-detail h4 { margin: 0 0 var(--sp-2); }
-.admin-detail__head h3 { margin: 0; }
-.admin-detail__head p { margin: var(--sp-1) 0 0; }
+/* Balance compare: patch-group controls, banners, per-row verdict and the
+ * Task 8 quick-check placeholder. */
+.verdict--real { color: var(--win); font-weight: 600; }
+.verdict--too_early { color: var(--rating); }
+.verdict--noise { color: var(--text-muted); }
+.verdict--no_data { color: var(--text-muted); font-style: italic; }
+.balance-controls { display: flex; flex-wrap: wrap; gap: var(--sp-4); align-items: flex-start; }
+.balance-side { display: flex; flex-direction: column; gap: var(--sp-1); max-height: 12rem; overflow-y: auto; }
+.balance-banner { border-left: 3px solid var(--rating); padding: var(--sp-2) var(--sp-3); background: var(--surface-2); }
+.balance-check { padding: var(--sp-3); background: var(--surface-2); }
+.balance-map { margin-top: var(--sp-3); }
+.balance-map__row { margin-bottom: var(--sp-3); font-size: var(--fs-dense); }
+.balance-map__bar { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: 3px; }
+.balance-map__bar .bar__track { flex: 1; }
+.balance-map__side { width: 1.5ch; color: var(--text-muted); font-weight: 600; }
+/* The previous comparison stays on screen while the next one loads, dimmed
+ * so it does not read as the answer to the new selection. */
+.balance-table.is-stale { opacity: 0.5; transition: opacity 0.15s; }
+
 .admin-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
 .admin-ban { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; justify-content: space-between; }
 .admin-ban p { margin: 0; }
@@ -1754,12 +1845,6 @@ body.is-theater { overflow: hidden; }
 .admin-merge__plan { border-left: 2px solid var(--rule); padding-left: var(--sp-4); margin-top: var(--sp-3); }
 .admin-merge__plan p { margin: 0 0 var(--sp-2); }
 .admin-merge__plan ul { margin: 0 0 var(--sp-3); padding-left: var(--sp-5); }
-.admin-aliases ul { margin: var(--sp-2) 0 var(--sp-4); padding-left: var(--sp-5); }
-.admin-aliases li { margin-bottom: var(--sp-2); }
-.admin-shared { border-left: 2px solid var(--border); padding-left: var(--sp-4); margin-bottom: var(--sp-4); }
-.admin-shared p { margin: 0 0 var(--sp-2); }
-.admin-shared ul { margin: 0 0 var(--sp-2); padding-left: var(--sp-5); }
-.admin-shared li { margin-bottom: var(--sp-1); }
 
 /* The launch-options line is long and must be copyable in one piece, so it
    scrolls sideways rather than wrapping into something you cannot select. */
@@ -1772,15 +1857,8 @@ body.is-theater { overflow: hidden; }
 }
 .launch-opts code { white-space: pre; }
 
-/* Public ban list. A lifted or expired ban stays on the page and recedes,
-   rather than being removed: the record is the point. */
-.ban-search { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
-.ban-search input { flex: 1 1 16rem; min-width: 0; }
-.ban-reason { max-width: 42ch; white-space: normal; word-break: break-word; }
-.ban-by { white-space: nowrap; }
-.ban-steamid { font-size: 0.78em; }
-.ban-state { font-family: var(--font-label); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.12em; }
-.ban-state--on { color: var(--loss); }
+/* Ban list. A lifted or expired ban stays on the page and recedes, rather
+   than being removed: the record is the point. */
 tbody tr.is-lifted td { opacity: 0.55; }
 .admin-list { list-style: none; margin: var(--sp-2) 0 0; padding: 0; font-size: var(--fs-dense); }
 .admin-list li { padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
@@ -1805,6 +1883,76 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .admin-checks { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
 .admin-checks label, .admin-toggle { display: inline-flex; gap: var(--sp-2); align-items: center; }
 @media (max-width: 640px) { .admin-setting { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---- Player File (People desk) ---- */
+
+.file { display: flex; flex-direction: column; gap: var(--sp-3); }
+.file-head { display: flex; gap: var(--sp-3); align-items: flex-start; flex-wrap: wrap; }
+.file-head__avatar { width: 56px; height: 56px; border-radius: 2px; }
+.file-head h2 { margin: 0; display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
+.file-head .admin-actions { margin-left: auto; margin-top: 0; }
+.file-glance { margin-top: var(--sp-3); font-size: var(--fs-dense); }
+.file-glance p { margin: var(--sp-1) 0; }
+.file-section h3 { margin-top: 0; }
+
+/* One neutral badge for every source, the same shape as .titletag: colouring
+   "LilAC" differently from "note" would read as a severity, and nothing on
+   this page is a verdict. */
+.source-badge {
+  font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-muted);
+  border: 1px solid var(--border-strong); border-radius: 2px;
+  padding: 0 var(--sp-1); white-space: nowrap;
+}
+
+.timeline__chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-bottom: var(--sp-2); }
+.timeline { list-style: none; margin: 0; padding: 0; font-size: var(--fs-dense); }
+.timeline__row {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.5rem;
+  padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere;
+}
+.timeline__when { white-space: nowrap; }
+.timeline__text { flex: 1 1 18rem; }
+
+@media (max-width: 480px) {
+  /* The header's action chips wrap under the name on a phone rather than
+     pushing the avatar and name into a squeeze to stay on one line. */
+  .file-head .admin-actions { margin-left: 0; }
+}
+
+/* ---------- admin: live board ---------- */
+
+.live-card { padding: var(--sp-4); }
+/* The card the admin feed linked to. */
+.live-card.is-target { border-color: var(--accent); }
+.live-card__line { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: baseline; }
+.live-card__line h3 { margin: 0; }
+.live-card__clocks { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin: var(--sp-2) 0 var(--sp-3); font-size: var(--fs-dense); }
+.live-clock.is-low { color: var(--loss); }
+.live-clock.is-held { color: var(--rating); }
+.live-card__teams { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-5); }
+@media (max-width: 900px) { .live-card__teams { grid-template-columns: minmax(0, 1fr); } }
+
+.live-roster { list-style: none; margin: 0; padding: 0; }
+/* name | status | actions | the reserved sub slot. The last column has a
+ * fixed width and nothing in it, so the day a sub button arrives the other
+ * three do not move. */
+.live-row {
+  display: grid; grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr) auto 6rem;
+  gap: var(--sp-2); align-items: center; padding: var(--sp-2) 0; border-bottom: 1px solid var(--border);
+}
+.live-row--connected .live-row__status { color: var(--win); }
+.live-row--never_connected .live-row__status, .live-row--dropped .live-row__status { color: var(--text); }
+.live-row__left { font-size: 1.15em; }
+.live-row__left.is-low { color: var(--loss); }
+.live-row__left.is-held { color: var(--rating); }
+.live-row__reason { display: block; font-size: var(--fs-dense); }
+.live-row__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: flex-end; }
+@media (max-width: 640px) {
+  .live-row { grid-template-columns: minmax(0, 1fr); }
+  .live-row__actions { justify-content: flex-start; }
+  .live-row__sub { display: none; }
+}
 
 /* ---------- report dialog (match page) ---------- */
 
@@ -2252,3 +2400,36 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .ticket-row:hover, .ticket-row:focus-visible { background: rgba(255, 255, 255, 0.04); }
 .ticket-row__id { font-variant-numeric: tabular-nums; opacity: 0.7; }
 .ticket-restricted { border-left: 3px solid #de4e40; padding-left: 0.75rem; margin: 0.75rem 0; }
+.ticket-timeline { list-style: none; margin: 0; padding: 0; }
+.ticket-event { padding: var(--sp-2) 0; }
+.ticket-msg { padding: var(--sp-3) 0; border-bottom: 1px solid var(--border); }
+.ticket-msg p { margin: 0 0 var(--sp-2); }
+.ticket-msg blockquote { margin: 0 0 var(--sp-2); padding-left: var(--sp-3); border-left: 2px solid var(--rule); color: var(--text); overflow-wrap: anywhere; white-space: pre-wrap; }
+.ticket-msg--reporter blockquote { border-left-color: #c9a45c; }
+.ticket-files { list-style: none; margin: 0 0 var(--sp-2); padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: flex-end; }
+.ticket-file { overflow-wrap: anywhere; }
+.ticket-file--gone { opacity: 0.7; }
+.ticket-thumb { display: block; max-width: min(240px, 100%); max-height: 180px; border: 1px solid var(--border); border-radius: 4px; }
+
+/* Staff chat log on a finished match. Team colors are the versus header's:
+ * Team A in the survivor teal, Team B in the infected red. */
+.chatlog__lines { list-style: none; margin: 0; padding: 0; max-height: 32rem; overflow-y: auto; }
+.chatlog__line {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(6rem, 10rem) 1fr;
+  gap: var(--sp-2);
+  padding: 2px var(--sp-1);
+}
+.chatlog__where { margin-top: var(--sp-2); padding: 0 var(--sp-1); font-size: var(--fs-dense); }
+.chatlog__who { overflow-wrap: anywhere; }
+.chatlog__who--a { color: var(--win); }
+.chatlog__who--b { color: var(--accent); }
+.chatlog__msg { overflow-wrap: anywhere; }
+.chatlog__line.is-mine {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+@media (max-width: 480px) {
+  .chatlog__line { grid-template-columns: 3rem 1fr; }
+  .chatlog__msg { grid-column: 2; }
+}

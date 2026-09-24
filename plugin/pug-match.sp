@@ -15,7 +15,7 @@
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.3.3"
+#define PLUGIN_VERSION "0.3.11"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -155,6 +155,8 @@ char g_sRosterName[MAX_ROSTER][64];
  *  No match, self-started or not, kicks a non-rostered player; the rostered
  *  eight are placed by Timer_TeamLock and anyone else may spectate. */
 bool g_bSelfStarted;
+// l4d2_spec_stays_spec was not running when the last map ended; see OnMapStart.
+bool g_bSpecStaysWasOff;
 
 /** Monotonic per-match counter stamped on every EVENT line. UDP can deliver
  *  the same datagram twice, and an event feed that double-counts a deadly
@@ -290,6 +292,8 @@ bool g_bHasBoomLanded;
 // calls), so the include must sit below them.
 #include "pug-logauth.inc"
 #include "pug-stats.inc"
+#include "pug-balance.inc"
+#include "pug-roundstats.inc"
 
 // ---------- replay recording ----------
 ConVar g_cvReplayHz;                     // 0 = off. Instant rcon kill switch, no reload.
@@ -298,6 +302,7 @@ ConVar g_cvReplayDir;                    // directory, relative to the game dir
 ConVar g_cvReplayMaxMb;                  // per-round byte cap, a runaway bound
 ConVar g_cvReplayAfterEnd;               // 1 = keep recording after the finale ends the match
 ConVar g_cvReplayStandalone;             // 1 = record rounds with no tracked match at all (!mix nights)
+ConVar g_cvReplayLos;                    // 1 = record survivor-to-infected line of sight in frame bytes 6-7
 /** Whether the last standalone round we recorded was on a campaign's first map.
  *  Used to notice the transition INTO a new campaign exactly once, rather than
  *  on both halves of that campaign's opening map. */
@@ -324,6 +329,12 @@ int g_iRplLastKeyMs;
  *  cannot catch one, and the timer repeats, so without this a single bad
  *  netprop read would fill the log ten times a second for the whole match. */
 bool g_bRplSampling;
+// Line of sight, fixed per round at replay open (the header flag must match
+// every frame). Rank of each slot on its side, the numbering frame bytes 6-7
+// use; -1 for none. See src/replayFormat.ts sideRanks, which must agree.
+bool g_bRplLos;
+int g_iRplSurvRank[RPL_SLOTS];
+int g_iRplInfRank[RPL_SLOTS];
 /** Whether m_survivorCharacter exists on this build's send table, resolved
  *  once against a real client rather than assumed.
  *
@@ -352,6 +363,13 @@ int g_iRplFrameNo;
  *  backend recorded. */
 int g_iRplMapSeq;
 int g_iRplBuf[RPL_FRAME_MAX];            // one byte per cell, written in one call
+/** The live push's identity for the open file (LivePushOpen's answer), or 0
+ *  when the file has none yet. RplClose hands it to LivePushClose. */
+int g_iRplPushRound;
+
+// Live push of the round being recorded. Below the replay globals because it
+// reads g_State; see the include for why everything in it is optional.
+#include "pug-livepush.inc"
 
 // Staging knobs. Both default to production behaviour; they exist so the plugin
 // can be exercised on a test instance without eight people in the server.
@@ -382,7 +400,11 @@ public void OnPluginStart()
 	RegServerCmd("sm_pug_abort", Cmd_Abort, "sm_pug_abort <token>");
 	RegServerCmd("sm_pug_dump", Cmd_Dump, "sm_pug_dump <token> [nonce]");
 	RegServerCmd("sm_pug_status", Cmd_Status, "sm_pug_status - current plugin state, for debugging");
+	RegAdminCmd("sm_pug_los", Cmd_Los, ADMFLAG_ROOT, "sm_pug_los <viewer> <target> - line of sight per point, bots allowed; for testing");
+	RegAdminCmd("sm_pug_los_bench", Cmd_LosBench, ADMFLAG_ROOT, "sm_pug_los_bench <count> - time RplCanSee between the first survivor and infected found");
 	RegServerCmd("sm_pug_setid", Cmd_SetId, "sm_pug_setid <token> <matchid> - backend assigns the match id for a self-started match");
+	RegServerCmd("sm_pug_leave", Cmd_Leave, "sm_pug_leave <token> <steamid64> hold|release|add <seconds>|end");
+	RegServerCmd("sm_pug_endkick_now", Cmd_EndKickNow, "sm_pug_endkick_now - run the end-of-match kick now, before the backend restarts the box");
 
 	// The in-game entry point. RegAdminCmd, not RegServerCmd: this one is meant
 	// to be typed as !load_4v4p in chat, which server commands cannot be.
@@ -441,12 +463,16 @@ No config exec and no restart: it tracks the game already being played. Implies 
 	g_cvReplayStandalone = CreateConVar("sm_pug_replay_standalone", "1",
 		"1 = record any round that goes live even with no tracked PUG match, e.g. a !mix night. Recording only; emits nothing to the backend.",
 		FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	g_cvReplayLos = CreateConVar("sm_pug_replay_los", "1",
+		"1 = record which spawned infected each survivor could see, in every replay frame. Read at round start.",
+		FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	g_cvReplayAfterEnd = CreateConVar("sm_pug_replay_after_end", "1",
 		"1 = keep recording replays after the finale has ended the match. Recording only; no ROUND_START, no scoring.",
 		FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	g_cvReplayMaxMb = CreateConVar("sm_pug_replay_max_mb", "64",
 		"Per-round replay size cap in MB. A runaway bound, not a budget: a full round is 10 to 15 MB.",
 		FCVAR_NOTIFY, true, 1.0, true, 512.0);
+	LivePushInit();
 
 	g_hRplEnts = new ArrayList();
 	g_hRplIndexT = new ArrayList();
@@ -521,6 +547,14 @@ No config exec and no restart: it tracks the game already being played. Implies 
 		LogMessage("pug-match: event 'choke_start' does not exist on this engine; tongue_clears cannot be distinguished and will not be counted.");
 	if (!HookEventEx("player_say", Event_PlayerSay))
 		LogError("pug: player_say not hooked; chat will not be captured");
+	if (!HookEventEx("player_changename", Event_PlayerChangeName))
+		LogError("pug: player_changename not hooked; renames will not reach the conduct alerts");
+	if (!HookEventEx("create_panic_event", Event_PanicMark))
+		LogMessage("[pug] create_panic_event not on this engine; no panic markers");
+	if (!HookEventEx("finale_start", Event_FinaleStartMark))
+		LogMessage("[pug] finale_start not on this engine");
+	if (!HookEventEx("finale_radio_start", Event_FinaleRadioMark))
+		LogMessage("[pug] finale_radio_start not on this engine");
 
 	// Persistent repeating timers (no TIMER_FLAG_NO_MAPCHANGE, since they must survive changelevel).
 	CreateTimer(30.0, Timer_Heartbeat, _, TIMER_REPEAT);
@@ -544,11 +578,13 @@ No config exec and no restart: it tracks the game already being played. Implies 
 public void OnLibraryAdded(const char[] name)
 {
 	if (StrEqual(name, "readyup")) g_bReadyUpAvailable = true;
+	LivePushLibrary(name, true);
 }
 
 public void OnLibraryRemoved(const char[] name)
 {
 	if (StrEqual(name, "readyup")) g_bReadyUpAvailable = false;
+	LivePushLibrary(name, false);
 }
 
 /** Plugin unload/reload: close whatever replay is open rather than leaving it
@@ -728,9 +764,8 @@ int CountAliveSurvivors()
  *  the team lock timer may have flipped g_iPugSide by the time this is called. */
 void EmitRoundEnd(int half, const char[] surv, int score, int alive)
 {
-	// Before anything else: a pending quad is only answerable now, and the
-	// answer has to land in the stats this round's dump will carry.
-	QuadSettle();
+	// The pending quad is settled in Event_RoundEnd, BEFORE g_bRoundEnded
+	// latches, not here: see the comment there.
 	if (surv[0] != '\0')
 	{
 		// map= rides along for the same reason ROUND_START carries it: the
@@ -806,6 +841,47 @@ void SanitizeChat(char[] text, int maxlen)
 	text[w] = '\0';
 }
 
+/** Conduct alerts (src/conductFlags.ts on the backend).
+ *
+ *  PUGSAY carries every human's chat and PUGNAME every human's name, on
+ *  connect and on each rename, whether or not a match is tracked. Token-less
+ *  like PUGNET, so the marker opens the line where no player text can reach,
+ *  and the player's text is LAST so nothing typed into it can overwrite the
+ *  steamid in front of it. That ordering is why these exist at all: the
+ *  engine's own say and "changed name" lines put the player-controlled name
+ *  FIRST, and a name can be built to look like somebody else's steamid. */
+void EmitConductSay(int client, Event event)
+{
+	if (!IsClientInGame(client) || IsFakeClient(client)) return;
+	char id[32];
+	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) return;
+	char text[256];
+	event.GetString("text", text, sizeof(text));
+	SanitizeChat(text, sizeof(text));
+	if (text[0] == '\0') return;
+	PugLog("PUGSAY steamid=%s team=%d msg=%s", id, GetClientTeam(client), text);
+}
+
+void EmitConductName(const char[] id, const char[] event, const char[] rawName)
+{
+	char nm[256];
+	strcopy(nm, sizeof(nm), rawName);
+	SanitizeChat(nm, sizeof(nm));
+	if (nm[0] == '\0') return;
+	PugLog("PUGNAME steamid=%s event=%s name=%s", id, event, nm);
+}
+
+public void Event_PlayerChangeName(Event event, const char[] name, bool dontBroadcast)
+{
+	int client = GetClientOfUserId(event.GetInt("userid"));
+	if (client < 1 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client)) return;
+	char id[32];
+	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) return;
+	char newName[MAX_NAME_LENGTH];
+	event.GetString("newname", newName, sizeof(newName));
+	EmitConductName(id, "change", newName);
+}
+
 /** Chat is captured for any tracked match, NOT gated on StatsActive().
  *
  *  That gate exists to keep counters from moving between rounds and during
@@ -818,9 +894,14 @@ void SanitizeChat(char[] text, int maxlen)
  *  spectator or admin must never appear in the match record. */
 public void Event_PlayerSay(Event event, const char[] name, bool dontBroadcast)
 {
-	if (g_State == MS_None) return;
 	int client = GetClientOfUserId(event.GetInt("userid"));
 	if (client < 1 || client > MaxClients) return;
+
+	// Every human's chat for the conduct alerts, match or not, roster or not,
+	// BEFORE the gates below. See EmitConductSay.
+	EmitConductSay(client, event);
+
+	if (g_State == MS_None) return;
 	int slot = g_iClientRoster[client];
 	if (slot < 0) return;
 
@@ -1051,7 +1132,9 @@ void RplOpen()
 	p = RplU16(p, 0);                          // reserved, pads token to 12
 	p = RplStr(p, g_sToken, 32);
 	p = RplStr(p, g_sCurrentMap, 32);
-	p = RplU32(p, GetTime());
+	// Kept: the live push names the round by this same value.
+	int startedUnix = GetTime();
+	p = RplU32(p, startedUnix);
 	p = RplU32(p, 0);                          // indexOffset, patched at close
 	p = RplU32(p, 0);                          // indexCount, patched at close
 	// Which roster entries get the eight slots the format carries.
@@ -1135,6 +1218,24 @@ void RplOpen()
 	}
 	p = RplU8(p, infectedMask);                // 156: infected slot mask
 	p = RplU8(p, 1);                           // 157: mask is filled
+
+	// Line of sight (158). Ranks follow the mask just written, occupied slots
+	// in slot order, four per side at most: exactly what sideRanks() in
+	// src/replayFormat.ts computes from the header, so a reader needs nothing
+	// but the header to know which bit means which pair.
+	g_bRplLos = g_cvReplayLos.BoolValue;
+	{
+		int ns = 0, ni = 0;
+		for (int slot = 0; slot < RPL_SLOTS; slot++)
+		{
+			g_iRplSurvRank[slot] = -1;
+			g_iRplInfRank[slot] = -1;
+			if (rplSlotRoster[slot] < 0) continue;
+			if (infectedMask & (1 << slot)) { if (ni < 4) g_iRplInfRank[slot] = ni++; }
+			else if (ns < 4) g_iRplSurvRank[slot] = ns++;
+		}
+	}
+	p = RplU8(p, g_bRplLos ? 1 : 0);           // 158: frames carry line of sight
 	while (p < RPL_HEADER_BYTES) p = RplU8(p, 0);
 
 	// Reset BEFORE the write, not after: a failed header write goes straight to
@@ -1148,6 +1249,7 @@ void RplOpen()
 	g_bRplSampling = false;                    // a previous round's abort is not this round's
 	g_hRplIndexT.Clear();
 	g_hRplIndexOff.Clear();
+	g_iRplPushRound = 0;                       // a failed write below closes no push round
 
 	if (!WriteFile(g_hReplay, g_iRplBuf, RPL_HEADER_BYTES, 1))
 	{
@@ -1155,6 +1257,10 @@ void RplOpen()
 		RplFail();
 		return;
 	}
+	// Only after the header is safely on disk: a failed write goes to RplFail
+	// above and this round is never pushed at all.
+	g_iRplPushRound = LivePushOpen(g_sToken, g_iRplMapSeq, g_iHalf, startedUnix);
+	LivePushAppend(g_iRplBuf, RPL_HEADER_BYTES);
 
 	RplResolveSurvivorCharProp();
 
@@ -1257,12 +1363,17 @@ void RplClose()
 			if (p + RPL_INDEX_RECORD > RPL_FRAME_MAX)
 			{
 				if (!WriteFile(g_hReplay, g_iRplBuf, p, 1)) { ok = false; break; }
+				LivePushAppend(g_iRplBuf, p);
 				p = 0;
 			}
 			p = RplU32(p, g_hRplIndexT.Get(i));
 			p = RplU32(p, g_hRplIndexOff.Get(i));
 		}
-		if (ok && p > 0 && !WriteFile(g_hReplay, g_iRplBuf, p, 1)) ok = false;
+		if (ok && p > 0)
+		{
+			if (!WriteFile(g_hReplay, g_iRplBuf, p, 1)) ok = false;
+			else LivePushAppend(g_iRplBuf, p);
+		}
 	}
 
 	if (ok)
@@ -1279,6 +1390,12 @@ void RplClose()
 		}
 	}
 	if (!ok) LogError("pug: replay close incomplete; the file is still playable, seeking will be slow");
+	// The header patches above are not appends, so the push carries their
+	// values and the site writes them into its copy. Only when every write
+	// succeeded; otherwise the copy stays exactly as unpatched as the file.
+	LivePushClose(g_iRplPushRound, ok, count > 0 ? indexOffset : 0, count, g_iReplayFrames,
+		indexOffset + count * RPL_INDEX_RECORD);
+	g_iRplPushRound = 0;
 
 	delete g_hReplay;
 	g_hReplay = null;
@@ -1354,6 +1471,135 @@ int RplWeaponId(const char[] cls)
 	if (StrEqual(cls, "weapon_first_aid_kit"))   return 9;
 	if (StrEqual(cls, "weapon_pain_pills"))      return 10;
 	return 0;
+}
+
+// ---------- line of sight (frame bytes 6-7) ----------
+
+/** An allowlist of what blocks sight: the world, and entities that are drawn
+ *  and solid (props, doors, breakables, func_wall/func_rotating/func_brush).
+ *  Everything else passes: players, common infected (a common walking between
+ *  a survivor and a hunter is not a wall), weapons and ammo piles, and
+ *  invisible entities such as env_player_blocker and triggers. The direction
+ *  matters: an invisible blocker must never make a visible infected count as
+ *  hidden, because "hidden" is what would wrongly flag a player who aimed at
+ *  it. */
+public bool RplLosFilter(int ent, int mask, any viewer)
+{
+	if (ent == 0) return true;
+	if (ent <= MaxClients || !IsValidEntity(ent)) return false;
+	char cls[32];
+	GetEntityClassname(ent, cls, sizeof(cls));
+	return StrContains(cls, "prop_") == 0
+		|| StrContains(cls, "func_door") == 0
+		|| StrContains(cls, "func_breakable") == 0
+		|| StrContains(cls, "func_wall") == 0
+		|| StrContains(cls, "func_rotating") == 0
+		|| StrEqual(cls, "func_brush");
+}
+
+bool RplLosClear(const float from[3], const float to[3], int viewer)
+{
+	// MASK_VISIBLE leaves out CONTENTS_WINDOW and CONTENTS_GRATE, so glass,
+	// fences and grates do not block, as they do not block a player's view.
+	TR_TraceRayFilter(from, to, MASK_VISIBLE, RayType_EndPoint, RplLosFilter, viewer);
+	return !TR_DidHit();
+}
+
+/** Visible when any of three points is: eye, chest, feet. Generous on purpose,
+ *  so an infected whose head clears a wall counts as seen and aiming at it can
+ *  never count as aiming through a wall. */
+bool RplCanSee(int viewer, int target)
+{
+	float eye[3], org[3], pt[3];
+	GetClientEyePosition(viewer, eye);
+	GetClientEyePosition(target, pt);
+	if (RplLosClear(eye, pt, viewer)) return true;
+	GetClientAbsOrigin(target, org);
+	pt = org; pt[2] += 36.0;
+	if (RplLosClear(eye, pt, viewer)) return true;
+	pt = org; pt[2] += 8.0;
+	return RplLosClear(eye, pt, viewer);
+}
+
+bool RplLosViewer(int c)
+{
+	return IsPlayerAlive(c) && GetClientTeam(c) == TEAM_SURVIVOR
+		&& !GetEntProp(c, Prop_Send, "m_isIncapacitated")
+		&& !GetEntProp(c, Prop_Send, "m_isHangingFromLedge");
+}
+
+bool RplLosTarget(int c)
+{
+	return IsPlayerAlive(c) && GetClientTeam(c) == TEAM_INFECTED && !RplIsGhost(c)
+		&& GetEntProp(c, Prop_Send, "m_zombieClass") != ZC_TANK;
+}
+
+/** The 16 bits for one frame. slotClient is the sampler's slot to client map
+ *  (0 for an empty slot). */
+int RplLosBits(const int[] slotClient)
+{
+	int bits = 0;
+	for (int s = 0; s < RPL_SLOTS; s++)
+	{
+		int sr = g_iRplSurvRank[s], sc = slotClient[s];
+		if (sr < 0 || sc == 0 || !RplLosViewer(sc)) continue;
+		for (int i = 0; i < RPL_SLOTS; i++)
+		{
+			int ir = g_iRplInfRank[i], ic = slotClient[i];
+			if (ir < 0 || ic == 0 || !RplLosTarget(ic)) continue;
+			// The survivor this infected is pinning obviously knows where it is,
+			// so the pair counts as seen; recording it as 0 would look exactly
+			// like "hidden", the direction that could wrongly flag a teammate.
+			if (g_iPinnedBy[sc] == ic) { bits |= 1 << (sr * 4 + ir); continue; }
+			if (RplCanSee(sc, ic)) bits |= 1 << (sr * 4 + ir);
+		}
+	}
+	return bits;
+}
+
+public Action Cmd_Los(int client, int args)
+{
+	if (args < 2) { ReplyToCommand(client, "usage: sm_pug_los <viewer> <target>"); return Plugin_Handled; }
+	char a[64], b[64];
+	GetCmdArg(1, a, sizeof(a));
+	GetCmdArg(2, b, sizeof(b));
+	int v = FindTarget(client, a, false, false), t = FindTarget(client, b, false, false);
+	if (v < 1 || t < 1) return Plugin_Handled;
+	float eye[3], org[3], pt[3];
+	GetClientEyePosition(v, eye);
+	GetClientEyePosition(t, pt);
+	bool head = RplLosClear(eye, pt, v);
+	GetClientAbsOrigin(t, org);
+	pt = org; pt[2] += 36.0;
+	bool chest = RplLosClear(eye, pt, v);
+	pt = org; pt[2] += 8.0;
+	bool feet = RplLosClear(eye, pt, v);
+	ReplyToCommand(client, "LOS %N -> %N: head=%d chest=%d feet=%d visible=%d dist=%.0f",
+		v, t, head, chest, feet, head || chest || feet, GetVectorDistance(eye, org));
+	return Plugin_Handled;
+}
+
+public Action Cmd_LosBench(int client, int args)
+{
+	int n = 1000;
+	if (args >= 1) { char s[16]; GetCmdArg(1, s, sizeof(s)); n = StringToInt(s); }
+	if (n < 1) n = 1;
+	if (n > 100000) n = 100000;
+	int v = 0, t = 0;
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		if (!IsClientInGame(c) || !IsPlayerAlive(c)) continue;
+		if (v == 0 && GetClientTeam(c) == TEAM_SURVIVOR) v = c;
+		if (t == 0 && GetClientTeam(c) == TEAM_INFECTED && !RplIsGhost(c)) t = c;
+	}
+	if (v == 0 || t == 0) { ReplyToCommand(client, "need a living survivor and a spawned infected"); return Plugin_Handled; }
+	int seen = 0;
+	float start = GetEngineTime();
+	for (int i = 0; i < n; i++) if (RplCanSee(v, t)) seen++;
+	float us = (GetEngineTime() - start) * 1000000.0 / float(n);
+	ReplyToCommand(client, "LOSBENCH %N -> %N: %d calls, %.1f us each, visible %d of %d; a full frame is at most 16 calls = %.0f us",
+		v, t, n, us, seen, n, us * 16.0);
+	return Plugin_Handled;
 }
 
 public Action Timer_RplFrame(Handle timer)
@@ -1558,7 +1804,7 @@ public Action Timer_RplFrame(Handle timer)
 	// Patch the frame header now that the count is known.
 	RplU32(0, tMs);
 	RplU16(4, entCount);
-	RplU16(6, 0);
+	RplU16(6, g_bRplLos ? RplLosBits(slotClient) : 0);
 
 	// One call for the whole frame. No FlushFile, ever: the page cache serves
 	// a tailing reader on this box, and a 10Hz flush is the most direct way to
@@ -1572,6 +1818,7 @@ public Action Timer_RplFrame(Handle timer)
 	}
 	g_iReplayFrames++;
 	g_iReplayBytes += p;
+	LivePushAppend(g_iRplBuf, p);
 
 	// The plugin's half of the disk protection. SourceMod exposes no
 	// disk-free-space native, so the backend owns the real free-space floor
@@ -2369,6 +2616,27 @@ bool NonceOk(const char[] nonce)
  *  This is the "what does the plugin actually think right now" command: state,
  *  roster with live connection and side, the orientation mapping and the vote
  *  that produced it, per-map results so far, and the pending-finalize flag. */
+/**
+ * The backend restarts a box between matches with `quit`, and that used to
+ * land before the end-of-match kick's first pass: players saw "Server
+ * shutting down" instead of the result. The backend now sends this first.
+ *
+ * The pending result is the kick message when there is one. When there is
+ * none (a cancelled match, or the kick already ran and someone reconnected)
+ * anyone still here is told plainly why they are leaving.
+ */
+public Action Cmd_EndKickNow(int args)
+{
+	char reason[128];
+	if (g_sEndKickReason[0] != '\0') strcopy(reason, sizeof(reason), g_sEndKickReason);
+	else strcopy(reason, sizeof(reason), "Match over. The server is restarting; queue again on the site.");
+	int present = CountHumans();
+	KickHumans(reason);
+	CancelEndKick();
+	PrintToServer("pug-match: endkick_now kicked=%d", present);
+	return Plugin_Handled;
+}
+
 public Action Cmd_Status(int args)
 {
 	DumpLine("STATUS state=%s match=%d token=%s campaign=%s map=%s stopAfterMap=%s",
@@ -2384,6 +2652,7 @@ public Action Cmd_Status(int args)
 		g_iHalfScoreA, g_iHalfScoreB, g_bPendingFinalize ? 1 : 0, g_bReadyUpAvailable ? 1 : 0);
 	DumpLine("STATUS selfStarted=%d teamLock=%d recordDemos=%d",
 		g_bSelfStarted ? 1 : 0, TeamLockActive() ? 1 : 0, g_cvRecordDemos.BoolValue ? 1 : 0);
+	LivePushStatus();
 
 	int straight, inverted;
 	OrientationVote(straight, inverted);
@@ -2650,7 +2919,13 @@ public void OnClientPostAdminCheck(int client)
 	//
 	// The backend never stores the address; it keeps an HMAC of it. See
 	// src/playerNetworks.ts.
-	if (haveId) EmitClientNet(client, id);
+	if (haveId)
+	{
+		EmitClientNet(client, id);
+		char nm[MAX_NAME_LENGTH];
+		GetClientName(client, nm, sizeof(nm));
+		EmitConductName(id, "connect", nm);
+	}
 
 	if (g_State == MS_None) return;
 	if (!haveId)
@@ -2825,6 +3100,14 @@ public void OnMapEnd()
 	// (not its own ForceChangeLevel) is correctly abandoned here rather than
 	// left to KillTimer a freed handle on the next map's CancelTeardown().
 	CancelTeardown();
+	g_bSpecStaysWasOff = !SpecStaysLoaded();
+}
+
+/** l4d2_spec_stays_spec is loaded and running. */
+static bool SpecStaysLoaded()
+{
+	Handle pl = FindPluginByFile("l4d2_spec_stays_spec.smx");
+	return pl != null && GetPluginStatus(pl) == Plugin_Running;
 }
 
 /**
@@ -2904,6 +3187,14 @@ public void OnMapStart()
 	RplClose();
 
 	GetCurrentMap(g_sCurrentMap, sizeof(g_sCurrentMap));
+	// A self-started match that is still waiting for its first go-live takes
+	// its campaign from the map it will actually be played on. Without this,
+	// !load_4v4p followed by a changelevel kept the OLD map as the campaign,
+	// and the "campaign changed" check below ended the match the moment its
+	// second map loaded (match 144, 2026-09-23: loaded on Dead Air, played on
+	// I Hate Mountains, ended after one map).
+	if (g_State == MS_Pending && g_bSelfStarted)
+		strcopy(g_sCampaign, sizeof(g_sCampaign), g_sCurrentMap);
 	g_iHalfScoreA = 0;
 	g_iHalfScoreB = 0;
 	g_iRound1Logical = 0;
@@ -2941,6 +3232,19 @@ public void OnMapStart()
 		EndMatchNow("finale loaded");
 
 	if (g_State == MS_Pending || g_State == MS_Live) StartMatchDemo();
+
+	// pug_match.cfg unloads l4d2_spec_stays_spec because it fights the team
+	// lock, but server_custom_convars.cfg leaves plugin loading unlocked on
+	// every map, so SourceMod loads it straight back at each changelevel and
+	// the unload only ever held for map 1. Keep it off for the rest of a match
+	// that started with it off; the backend loads it back on release, so a
+	// match that ends with it loaded stays that way. ServerCommand runs next
+	// frame, long before anyone spawns; the balance scan below may still list
+	// it, which the site ignores (balance/knobs.json "ignored").
+	if ((g_State == MS_Pending || g_State == MS_Live) && g_bSpecStaysWasOff && SpecStaysLoaded())
+		ServerCommand("sm plugins unload l4d2_spec_stays_spec.smx");
+
+	BalanceScanStatic();
 }
 
 /** Fill the roster arrays from whoever is on a team right now, WITHOUT starting
@@ -3098,6 +3402,9 @@ public void OnRoundIsLive()
 		if (surv[0] == '\0') EmitPug("ROUND_START map=%s half=%d", g_sCurrentMap, g_iHalf);
 		else EmitPug("ROUND_START map=%s half=%d surv=%s", g_sCurrentMap, g_iHalf, surv);
 
+		EmitBalance();
+		RoundStatsBegin();
+
 		RosterLateJoiners();
 		CheckRosterMismatch();
 		RplOpen();
@@ -3202,6 +3509,13 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 		}
 		return;
 	}
+	// Settle a pending quad FIRST, while StatsActive() is still true. It used
+	// to be settled in EmitRoundEnd, which runs after the latch below, so
+	// AddStat's StatsActive() gate threw every confirmed quad away: from the
+	// round-end rewrite (836dfec, 2026-09-18) to this fix, not one quad cap
+	// or times_quadded was recorded on any server. It must also precede
+	// EmitRoundStats, so the quad lands in this round's ROUND_STAT delta.
+	QuadSettle();
 	g_bRoundEnded = true;
 	bool second = view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound"));
 	int survPug = ObserveSurvivorPugTeam();
@@ -3211,6 +3525,7 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 	// rewrites g_iHalf and the team lock timer can flip g_iPugSide before
 	// Timer_ReadScore's retry chain (2-8s out) ever fires. See EmitRoundEnd.
 	int half = g_iHalf;
+	EmitRoundStats(half);
 	char survEnd[2];
 	SurvSideOf(survPug, survEnd, sizeof(survEnd));
 	// Captured here for the same reason as half and survEnd: by the time the
@@ -3602,6 +3917,9 @@ public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 	if (IsInfectedClient(victim) && GetEntProp(victim, Prop_Send, "m_zombieClass") == ZC_TANK)
 	{
 		AddStat(attacker, PS_TankDamage, damage);
+		char wpnT[32];
+		event.GetString("weapon", wpnT, sizeof(wpnT));
+		RoundWpnAdd(attacker, wpnT, WS_TankDmg, damage);
 	}
 
 	// SI damage: player-controlled smoker/boomer/hunter. Tank excluded
@@ -3638,6 +3956,9 @@ public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 	else if (siVictim && remaining > 0)
 	{
 		g_iStatSiDmg[slot] += damage;
+		char wpnS[32];
+		event.GetString("weapon", wpnS, sizeof(wpnS));
+		RoundWpnAdd(attacker, wpnS, WS_SiDmg, damage);
 	}
 }
 
@@ -3737,7 +4058,14 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
 	if (slot == -1 || !IsSurvivorClient(attacker) || !IsInfectedClient(victim) || IsFakeClient(victim)) return;
 	if (GetEntProp(victim, Prop_Send, "m_zombieClass") == ZC_TANK) return;
 	g_iStatSiKill[slot]++;
+	char wpnK[32];
+	event.GetString("weapon", wpnK, sizeof(wpnK));
+	RoundWpnAdd(attacker, wpnK, WS_SiKill, 1);
 	g_iStatSiDmg[slot] += g_iLastHealth[victim]; // overkill remainder
+	// Credited to the killing weapon too, before the remainder is zeroed, so
+	// the per-weapon w_*_sidmg columns sum to sidmg exactly, matching the
+	// invariant already kept for PS_DamageAsSi's dmg_as_* split.
+	RoundWpnAdd(attacker, wpnK, WS_SiDmg, g_iLastHealth[victim]);
 	g_iLastHealth[victim] = 0;
 }
 
@@ -3749,6 +4077,8 @@ public void Event_InfectedDeath(Event event, const char[] name, bool dontBroadca
 	int slot = g_iClientRoster[attacker];
 	if (slot == -1 || !IsSurvivorClient(attacker)) return;
 	g_iStatCk[slot]++;
+	if (event.GetBool("blast")) RoundWpnAdd(attacker, "pipe_bomb", WS_CiKill, 1);
+	else RoundWpnAddActive(attacker, WS_CiKill, 1);
 }
 
 public void Event_ReviveSuccess(Event event, const char[] name, bool dontBroadcast)

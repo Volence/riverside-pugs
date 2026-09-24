@@ -18,3 +18,8 @@ shots/
 # The 4x overview layers: 182 files and ~944 MB, served from R2 rather than git.
 # Regenerate with tools/convert-overviews.sh, upload with scripts/upload-overviews.ts.
 web/public/overviews/
+
+# skypounce rig and playtest build output
+plugin/skypounce/**/*.smx
+plugin/skypounce/**/*.log
+plugin/skypounce/**/__pycache__/

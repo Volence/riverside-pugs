@@ -182,6 +182,30 @@ describe('LogListener: token-less lines are admitted by source address alone', (
     expect(denied).toEqual([]);
   });
 
+  // PUGTV is the same one-line kind list as PUGNET: no token, admitted by
+  // source address alone. Twin of the PUGNET case above.
+  it('delivers PUGTV from an allowed source and drops it from anywhere else', async () => {
+    const line = 'PUGTV event=join slot=3 ip=203.0.113.7 cc=US name=Watcher';
+
+    const allowed: LogEvent[] = [];
+    listener = new LogListener((ev) => allowed.push(ev));
+    let port = await listener.listen(0, '127.0.0.1');
+    listener.allowMatchCreateFrom('127.0.0.1');
+    await send(port, line);
+    await settle();
+    expect(allowed).toEqual([
+      { kind: 'sourcetv', event: 'join', slot: 3, ip: '203.0.113.7', country: 'US', name: 'Watcher' },
+    ]);
+
+    await listener.close();
+    const denied: LogEvent[] = [];
+    listener = new LogListener((ev) => denied.push(ev));
+    port = await listener.listen(0, '127.0.0.1');
+    await send(port, line);
+    await settle();
+    expect(denied).toEqual([]);
+  });
+
   it('admits them through the per-datagram predicate too', async () => {
     // A game server added to the database after boot is only known to the
     // predicate, never to the fixed set.
@@ -253,6 +277,21 @@ describe('LogListener: the sender port rides along', () => {
     await new Promise((r) => setTimeout(r, 60));
     c.close();
     expect(got).toEqual([from]);
+  });
+});
+
+describe('LogListener: client settings', () => {
+  it('admits an L4DV line only from a game server address, like every token-less line', async () => {
+    const got: LogEvent[] = [];
+    listener = new LogListener((ev) => got.push(ev));
+    const port = await listener.listen(0, '127.0.0.1');
+    await send(port, 'L4DV id=76561198030413993 cvar=cpu_level value=0');
+    await new Promise((r) => setTimeout(r, 60));
+    expect(got).toEqual([]);
+    listener.allowMatchCreateFrom('127.0.0.1');
+    await send(port, 'L4DV id=76561198030413993 cvar=cpu_level value=0');
+    await new Promise((r) => setTimeout(r, 60));
+    expect(got).toMatchObject([{ kind: 'cvar_flag', cvar: 'cpu_level', value: 0 }]);
   });
 });
 

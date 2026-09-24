@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 /** Discord application + bot. Null when any required piece is missing, which
  *  is the tested default: the site then behaves exactly as it did before
  *  Discord existed. The lobby channel is optional here because linking works
@@ -54,6 +55,16 @@ export interface Config {
    *  and for the same reason as missionsDir: a path guessed from another path
    *  is how you write a lot of wrong behavior into a place nothing reads it. */
   dlc4MissionsDir: string;
+  /** Where files posted in ticket threads are kept: outside the web root,
+   *  under random names, served only through the ticket's own access check.
+   *  Deliberately NOT part of the 6 hourly database backup: removing a file
+   *  has to remove every copy the system holds. */
+  ticketAttachmentsDir: string;
+  /** Where live replay bytes pushed by the game servers are kept while a
+   *  round is played. The site's own directory, not the replay directory: on
+   *  Dallas the plugin writes its own file into that one, and a pushed copy
+   *  beside it must never race it. Created on first push. */
+  replayLiveDir: string;
   discord: DiscordConfig | null;
   twitch: TwitchConfig | null;
 }
@@ -83,10 +94,11 @@ export function missingDirs(cfg: Config): { name: string; path: string }[] {
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
+  const dbPath = env.DB_PATH ?? 'data/pug.db';
   return {
     port: Number(env.PORT ?? 8080),
     publicUrl: env.PUBLIC_URL ?? 'http://localhost:8080',
-    dbPath: env.DB_PATH ?? 'data/pug.db',
+    dbPath,
     cookieSecret: env.COOKIE_SECRET ?? 'dev-secret-change-me',
     adminSteamIds: (env.ADMIN_STEAMIDS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     devMode: env.DEV_MODE === '1',
@@ -98,6 +110,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     addonsDir: env.ADDONS_DIR ?? '',
     missionsDir: env.MISSIONS_DIR ?? '',
     dlc4MissionsDir: env.DLC4_MISSIONS_DIR ?? '',
+    ticketAttachmentsDir: env.TICKET_ATTACHMENTS_DIR?.trim() || join(dirname(dbPath), 'ticket-attachments'),
+    replayLiveDir: env.REPLAY_LIVE_DIR?.trim() || join(dirname(dbPath), 'replays-live'),
     discord: loadDiscord(env),
     twitch: loadTwitch(env),
   };

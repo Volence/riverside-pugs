@@ -102,6 +102,8 @@ describe('admin matches', () => {
     expect(o.recent[0].readyups).toMatchObject([{ lastUnready: [IDS[5]] }]);
     expect(typeof o.recent[0].readyups[0].seconds).toBe('number');
     expect(o.slowToReady).toMatchObject([{ steamid: IDS[5], readyups: 1, timesLast: 1 }]);
+    // Capture health moved here from the People queue, beside the servers.
+    expect(o.captureHealth).toMatchObject({ bursts: 0, detections: 0, lilacFlags: 0 });
   });
 
   it('void needs a reason, drops the match, recomputes later ratings, and is audited', async () => {

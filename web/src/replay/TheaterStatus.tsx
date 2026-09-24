@@ -14,7 +14,7 @@ export function zoomLabel(zoom: number): string {
  * ReplayHud while in theater. Purely presentational.
  */
 export function TheaterStatus(
-  { tMs, endMs, counts, zoom, live, closed, phase = null, names = {} }: {
+  { tMs, endMs, counts, zoom, live, closed, phase = null, names = {}, behindSinceMs = null }: {
     tMs: number;
     endMs: number;
     counts: { survivors: number; commons: number; specials: number };
@@ -23,6 +23,7 @@ export function TheaterStatus(
     closed: boolean;
     phase?: LivePhase | null;
     names?: Record<string, string>;
+    behindSinceMs?: number | null;
   },
 ) {
   return (
@@ -33,8 +34,10 @@ export function TheaterStatus(
       <span class="tstat__item">{counts.commons} common</span>
       <span class="tstat__item">{counts.specials} specials</span>
       <span class="tstat__item">{zoomLabel(zoom)}</span>
-      {liveStatusText(live, closed, tMs, endMs, phase, Date.now(), names) && (
-        <span class="tstat__item tstat__item--live">{liveStatusText(live, closed, tMs, endMs, phase, Date.now(), names)}</span>
+      {liveStatusText(live, closed, tMs, endMs, phase, Date.now(), names, behindSinceMs) && (
+        <span class="tstat__item tstat__item--live">
+          {liveStatusText(live, closed, tMs, endMs, phase, Date.now(), names, behindSinceMs)}
+        </span>
       )}
     </div>
   );

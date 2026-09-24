@@ -9,6 +9,10 @@
  *
  *   npx tsx scripts/check-campaign-collisions.ts                 # ADDONS_DIR from .env
  *   ADDONS_DIR=/path/to/left4dead/addons npx tsx scripts/check-campaign-collisions.ts
+ *   npx tsx scripts/check-campaign-collisions.ts --list consistency/configs/l4d_consistency.batch2.cfg
+ *
+ * --list checks against a list other than the shipped one, which is how a list
+ * that is not live yet (batch 2, group 6) is cleared BEFORE it is promoted.
  *
  * Read-only: it opens the database to label VPKs with their campaign and
  * writes nothing. Exits 0 when nothing collides, 1 when something does or a
@@ -26,7 +30,12 @@ if (!config.addonsDir) {
   console.error('No ADDONS_DIR configured; nothing to check.');
   process.exit(2);
 }
-const forced = loadConsistencyList();
+const listArg = process.argv.indexOf('--list');
+if (listArg >= 0 && !process.argv[listArg + 1]) {
+  console.error('--list needs a path');
+  process.exit(2);
+}
+const forced = listArg >= 0 ? loadConsistencyList(process.argv[listArg + 1]) : loadConsistencyList();
 if (!forced) process.exit(2); // the loader has already said why
 
 const db = openDb(config.dbPath);

@@ -1,4 +1,5 @@
 import type { DB } from '../db.js';
+import { captureHealth } from '../integrityFlags.js';
 import type { ServerReleaser } from '../serverRelease.js';
 import { pausesFor, readyupsFor, slowToReady } from '../liveView.js';
 import { archiveAborted } from '../matchArchive.js';
@@ -83,7 +84,9 @@ export function adminOverview(db: DB, logAuth?: LogAuth) {
        WHERE b.reason = ? ORDER BY b.id LIMIT 1`,
     ).get(`Abandoned match #${m.id}`) as { name: string } | undefined)?.name ?? null,
   }));
-  return { open, servers, recent, aborted, voided, slowToReady: slowToReady(db) };
+  // The anti-cheat capture pipeline's health sits with the servers it comes
+  // from, not on the People queue, which is about people.
+  return { open, servers, recent, aborted, voided, slowToReady: slowToReady(db), captureHealth: captureHealth(db) };
 }
 
 export type ActionResult = { ok: true } | { ok: false; status: number; error: string };

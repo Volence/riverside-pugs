@@ -106,3 +106,53 @@ describe('PUGNET parsing', () => {
       .toBeNull();
   });
 });
+
+describe('PUGTV parsing', () => {
+  const parse = (line: string) => parseLogDatagram(Buffer.from(line, 'utf8'));
+
+  it('reads a well-formed join line, upper-casing the country', () => {
+    expect(parse('PUGTV event=join slot=3 ip=203.0.113.7 cc=us name=some name here'))
+      .toEqual({ kind: 'sourcetv', event: 'join', slot: 3, ip: '203.0.113.7', country: 'US', name: 'some name here' });
+  });
+
+  it('nulls a country that is not two letters', () => {
+    expect(parse('PUGTV event=join slot=3 ip=203.0.113.7 cc=usa name=bob'))
+      .toMatchObject({ kind: 'sourcetv', event: 'join', country: null });
+  });
+
+  // name= is last and takes the rest of the line, so a spectator whose name is
+  // built to look like real fields cannot move the join onto another slot,
+  // address or country: those are read from BEFORE the first name=.
+  it('keeps slot, ip and cc from the real fields when the NAME contains fake ones', () => {
+    expect(parse('PUGTV event=join slot=3 ip=203.0.113.7 cc=US name=eviltwin slot=9 ip=1.2.3.4 cc=RU'))
+      .toEqual({
+        kind: 'sourcetv', event: 'join', slot: 3, ip: '203.0.113.7', country: 'US',
+        name: 'eviltwin slot=9 ip=1.2.3.4 cc=RU',
+      });
+  });
+
+  // reason is free text too, so it is taken from between reason= and the
+  // first  name=, the same treatment MATCH_ROSTER gives name=. A name built
+  // to contain " reason=x" cannot reach back and rewrite the real reason.
+  it('parses a leave line with a multi-word reason and a name containing " reason="', () => {
+    expect(parse('PUGTV event=leave slot=3 reason=Disconnect by user. name=eviltwin reason=x'))
+      .toEqual({ kind: 'sourcetv', event: 'leave', slot: 3, reason: 'Disconnect by user.', name: 'eviltwin reason=x' });
+  });
+
+  it('parses start and stop, which carry no other fields', () => {
+    expect(parse('PUGTV event=start')).toEqual({ kind: 'sourcetv', event: 'start' });
+    expect(parse('PUGTV event=stop')).toEqual({ kind: 'sourcetv', event: 'stop' });
+  });
+
+  it('rejects a malformed address, a missing slot, or a negative slot', () => {
+    expect(parse('PUGTV event=join slot=3 ip=abc cc=US name=bob')).toBeNull();
+    expect(parse('PUGTV event=join ip=203.0.113.7 cc=US name=bob')).toBeNull();
+    expect(parse('PUGTV event=join slot=-1 ip=203.0.113.7 cc=US name=bob')).toBeNull();
+  });
+
+  // Same protection PUGNET has: no token, so the marker must be the first
+  // thing after the engine's stamp, which no player-controlled text can be.
+  it('is not forgeable from chat, where the marker cannot be first', () => {
+    expect(parse('"bob<2><STEAM_1:0:5><Survivor>" say "PUGTV event=start"')).toBeNull();
+  });
+});

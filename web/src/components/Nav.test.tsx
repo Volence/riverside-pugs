@@ -82,6 +82,23 @@ describe('Nav', () => {
     logout.mockRestore();
   });
 
+  // The ban list is a People screen inside the panel. It had a nav entry of its
+  // own for a while, which only duplicated a screen the panel already owns.
+  it('keeps Bans out of the nav and sends moderators in through the panel', () => {
+    const mod = { steamid: '1', name: 'mod', avatar: null, status: 'active', isAdmin: false, isMod: true };
+    const { unmount } = render(
+      <LocationProvider><Nav session={{ kind: 'active', me: mod }} state={null} /></LocationProvider>,
+    );
+    expect(screen.queryByRole('link', { name: 'Bans' })).toBeNull();
+    expect((screen.getByRole('link', { name: 'Moderation' }) as HTMLAnchorElement).getAttribute('href'))
+      .toBe('/admin');
+    unmount();
+    const player = { steamid: '2', name: 'alice', avatar: null, status: 'active', isAdmin: false };
+    render(<LocationProvider><Nav session={{ kind: 'active', me: player }} state={null} /></LocationProvider>);
+    expect(screen.queryByRole('link', { name: 'Bans' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Moderation' })).toBeNull();
+  });
+
   it('offers it to a pending or banned account too, and to nobody signed out', () => {
     const me = { steamid: '1', name: 'alice', avatar: null, status: 'banned', isAdmin: false };
     const { unmount } = render(

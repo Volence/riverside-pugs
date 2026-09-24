@@ -4,6 +4,9 @@ import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { addServer, getServer } from '../src/serverPool.js';
+import { setSetting } from '../src/settings.js';
+import { AdminFeedPoster } from '../src/discord/adminFeedPoster.js';
+import { FakeTransport } from './fakes/fakeTransport.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 
 const ADMIN = '76561199000000000';
@@ -101,5 +104,30 @@ describe('admin: log signing per server', () => {
     const audit = JSON.stringify(db.prepare('SELECT * FROM admin_actions').all());
     expect(audit).toContain('server_log_secret');
     expect(audit).not.toContain(secret);
+  });
+
+  it('keeps the secret out of a failed push, which names the command it timed out on', async () => {
+    // The same shape as the clock control leak: RconClient.exec puts the
+    // command into its timeout message, and here the command is the secret.
+    setSetting(db, 'discord_admin_channel_id', 'admins');
+    const transport = new FakeTransport();
+    const feed = new AdminFeedPoster({ db, transport, publicUrl: 'https://pug.test' });
+    feed.start();
+    try {
+      await post(`/api/admin/servers/${serverId}/log-secret`);
+      const secret = getServer(db, serverId)!.log_secret!;
+      pushAnswers = new Error(`rcon exec timeout: sm_pug_log_secret "${secret}"`);
+      const res = await post(`/api/admin/servers/${serverId}/log-secret`);
+      await feed.idle();
+
+      expect(res.statusCode).toBe(502);
+      const audit = JSON.stringify(db.prepare('SELECT * FROM admin_actions').all());
+      const posted = JSON.stringify(transport.messages.map((m) => m.payload));
+      for (const seen of [res.body, audit, posted]) expect(seen).not.toContain(secret);
+      expect(res.json().error).toContain('could not reach chicago: rcon exec timeout');
+      expect(audit).toContain('rcon exec timeout');
+    } finally {
+      feed.stop();
+    }
   });
 });

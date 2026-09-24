@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { api, ApiError, type Me, type StateSnapshot } from '../api';
+import { eventName, TICKETS_EVENT } from './useTicketNudge';
 
 export type Session =
   | { kind: 'loading' }
@@ -66,7 +67,15 @@ export function useLiveState(): {
       if (closed) return;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(`${proto}://${location.host}/ws`);
-      ws.onmessage = () => refreshRef.current();
+      ws.onmessage = (m) => {
+        // 'tickets' is for ticket pages, goes only to staff, and says nothing
+        // about the queue: pass it on and leave the live state alone.
+        if (eventName(m.data) === 'tickets') {
+          window.dispatchEvent(new Event(TICKETS_EVENT));
+          return;
+        }
+        refreshRef.current();
+      };
       ws.onclose = () => {
         if (!closed) retry = setTimeout(connect, 2000);
       };

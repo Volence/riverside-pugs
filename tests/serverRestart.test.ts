@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { addServer, getServer, markLive, setRestartAfterMatch, type ServerRow } from '../src/serverPool.js';
 import { ServerReleaser } from '../src/serverRelease.js';
-import { rconRestarter, restartsAfterMatch, type ServerRestarter } from '../src/serverRestart.js';
+import { kickThenQuit, rconRestarter, restartsAfterMatch, type ServerRestarter } from '../src/serverRestart.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 
 let db: DB;
@@ -155,5 +155,24 @@ describe('ServerReleaser with a restart', () => {
     // sm_pug_abort, the password restore and the spec plugin reload all ride
     // on the cleanup connection. Quitting first would lose them.
     expect(order).toEqual(['cleanup', 'restart']);
+  });
+});
+
+describe('kickThenQuit', () => {
+  it('kicks with the result before quitting, so players see who won', async () => {
+    const sent: string[] = [];
+    await kickThenQuit({ exec: async (c) => { sent.push(c); return ''; } }, 'Dallas', 0);
+    expect(sent).toEqual(['sm_pug_endkick_now', 'quit']);
+  });
+
+  it('still quits when the kick fails', async () => {
+    const sent: string[] = [];
+    const exec = async (c: string) => {
+      sent.push(c);
+      if (c !== 'quit') throw new Error('connection reset');
+      return '';
+    };
+    await kickThenQuit({ exec }, 'Dallas', 0);
+    expect(sent).toEqual(['sm_pug_endkick_now', 'quit']);
   });
 });

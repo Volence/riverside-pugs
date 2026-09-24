@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { ICY_WHEEL } from './fixtures/wheelSamples.js';
 import { openDb, type DB } from '../src/db.js';
 import { captureHealth, recentFlagFeed, recordIntegrityFlag } from '../src/integrityFlags.js';
 import { recordInputBurst } from '../src/inputBursts.js';
@@ -52,6 +53,18 @@ describe('recentFlagFeed', () => {
     expect(feed[0].kind).toBe('pounce_spam');
     expect(feed[0].severity).toBe('low');
     expect(feed[1].source).toBe('lilac');
+  });
+
+  it('leaves out scroll-wheel detections, which are allowed', () => {
+    for (let i = 0; i < 2; i++) {
+      recordInputBurst(db, {
+        matchId: 2, serverId: 1, steamid: A, kind: 'fire', weapon: 'weapon_pistol', airPresses: 0, groundTicks: 0,
+        serverTick: 1, clientTick: 0, intervals: ICY_WHEEL,
+        holds: Array.from({ length: ICY_WHEEL.length + 1 }, () => 1), wire: 2,
+      });
+    }
+    expect((db.prepare('SELECT note FROM input_detections').get() as { note: string }).note).toBe('wheel-like');
+    expect(recentFlagFeed(db)).toEqual([]);
   });
 
   it('is empty, not broken, when nothing has been flagged', () => {

@@ -17,6 +17,7 @@ function header(over: Partial<ReplayHeader> = {}): ReplayHeader {
     slots: ['76561198000000001', '76561198000000002', '', '', '', '', '', ''],
     infectedMask: 0,
     sidesKnown: false,
+    losKnown: false,
     ...over,
   };
 }

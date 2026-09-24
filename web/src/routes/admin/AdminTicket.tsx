@@ -1,55 +1,95 @@
 import { useState } from 'preact/hooks';
-import { modApi, type TicketDetail, type TicketEvent } from '../../api';
+import { modApi, type TicketDiscussion, type DiscordSanction } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
+import { useTicketNudge } from '../../hooks/useTicketNudge';
 import { campaignName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction } from './useAction';
 import { reportLine } from './AdminTickets';
+import { FileSummary } from './file/FileSummary';
+import { TicketTimeline } from './TicketTimeline';
 
 const OUTCOMES = [['action_taken', 'Action taken'], ['warned', 'Warned'], ['no_action', 'No action'], ['invalid', 'Invalid report']] as const;
 const LENGTHS: [minutes: number | null, label: string][] = [
   [60, '1 hour'], [1440, '1 day'], [4320, '3 days'], [10080, '7 days'], [43200, '30 days'], [null, 'Permanent'],
 ];
+// Discord's own timeout ceiling, unrelated to the server ban's 30-day option
+// above: a Discord timeout can run up to 28 days, and unlike a ban has no
+// Permanent choice at all.
+const DISCORD_TIMEOUT_MAX_MINUTES = 40320;
+const TIMEOUT_LENGTHS: [minutes: number, label: string][] = [
+  [60, '1 hour'], [1440, '1 day'], [4320, '3 days'], [10080, '7 days'], [20160, '14 days'], [40320, '28 days'],
+];
 
-const eventText = (e: TicketEvent): string => {
-  const who = e.actorName ?? 'A player';
-  switch (e.kind) {
-    case 'opened': return e.actorId ? `${who} opened the ticket` : 'Opened by a report';
-    case 'report_attached': return 'Another report came in';
-    case 'note': return `${who}: ${String(e.detail.text ?? '')}`;
-    case 'claimed': return `${who} claimed it`;
-    case 'unclaimed': return `${who} released it`;
-    case 'restricted': return `${who} restricted it`;
-    case 'unrestricted': return `${who} lifted the restriction`;
-    case 'access_added': return `${who} gave someone access`;
-    case 'banned': return `${who} banned the player: ${String(e.detail.reason ?? '')}`;
-    case 'closed': return `${who} closed it: ${String(e.detail.outcome ?? '').replace(/_/g, ' ')}${e.detail.note ? ` (${String(e.detail.note)})` : ''}`;
-    case 'reopened': return `${who} reopened it`;
-    default: return `${who}: ${e.kind.replace(/_/g, ' ')}`;
+/** One Discord sanction as a line. A redacted row (a restricted ticket this
+ *  viewer is off) has no issuer: no "by" clause rather than a dangling one. */
+export function sanctionText(s: DiscordSanction): string {
+  const by = s.createdByName || s.createdBy || '';
+  const what = s.kind === 'ban' ? 'Banned from the Discord' : `Timed out until ${fmtTime(s.until!)}`;
+  const state = s.liftedAt ? ` (lifted ${fmtTime(s.liftedAt)})` : s.active ? '' : ' (ended)';
+  return `${what}${by ? ` by ${by}` : ''}: ${s.reason}${state}`;
+}
+
+/** What to say about Discord, in plain words, for each state. */
+function Discussion({ d }: { d: TicketDiscussion }) {
+  if (d.state === 'ready') {
+    return (
+      <p class="muted">
+        The discussion is in Discord{d.surface === 'private' ? ', in a private thread' : ''}.{' '}
+        {d.url ? <a href={d.url} target="_blank" rel="noreferrer">Open the staff thread in Discord</a> : null}
+      </p>
+    );
   }
-};
+  const text = d.state === 'unconfigured' ? 'Discord discussion is not configured. An admin can set the tickets forum in Settings; until then this ticket is worked here.'
+    : d.state === 'pending' ? 'The Discord thread for this ticket has not been made yet. The bot makes it within a few minutes of being online.'
+      : d.state === 'restricted' ? 'Restricted tickets have no Discord thread. Work it here: linked people on its access list are DMed a link to this page.'
+        : 'This ticket has no Discord thread.';
+  return <p class="muted">{text}</p>;
+}
 
 export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => void; onOpen: (id: number) => void }) {
   const { data, error, reload } = useFetch((s) => modApi.ticket(id, s), [id]);
   const { busy, error: actionError, run } = useAction(reload);
+  useTicketNudge(reload);
   const [outcome, setOutcome] = useState('');
   const [note, setNote] = useState('');
   const [reason, setReason] = useState('');
   const [minutes, setMinutes] = useState('1440');
   const [grant, setGrant] = useState('');
+  const [tell, setTell] = useState(true);
+  const [chatUrl, setChatUrl] = useState<string | null>(null);
 
   if (error) return <Panel><button class="chip" type="button" onClick={onBack}>Back to tickets</button><Empty>No such ticket.</Empty></Panel>;
   if (!data) return <Panel><p class="muted">Loading...</p></Panel>;
   const { ticket: t, caseFile: c } = data;
   const cap = data.viewer.banCapMinutes;
   const lengths = LENGTHS.filter(([m]) => cap === null || (m !== null && m <= cap));
+  // Its own list, not LENGTHS: the server ban's 30-day option is not one of
+  // Discord's choices, and Discord's own 28-day maximum IS a choice here,
+  // above the 7-day ceiling LENGTHS happens to have. A moderator's cap still
+  // holds, never above Discord's own ceiling.
+  const timeoutCap = Math.min(cap ?? DISCORD_TIMEOUT_MAX_MINUTES, DISCORD_TIMEOUT_MAX_MINUTES);
+  const timeoutLengths = TIMEOUT_LENGTHS.filter(([m]) => m <= timeoutCap);
+  // The shared `minutes` state defaults to '1440' for the ban form, which is
+  // not always one of timeoutLengths (a moderator capped under a day, say).
+  // Fall back to the largest allowed length at or under a day, or failing
+  // that the first (smallest) option, so the select never shows a value it
+  // would not actually submit.
+  const timeoutDefault = (() => {
+    const notOverADay = timeoutLengths.filter(([m]) => m <= 1440);
+    const pick = notOverADay.length > 0 ? notOverADay[notOverADay.length - 1] : timeoutLengths[0];
+    return pick ? String(pick[0]) : '';
+  })();
+  const timeoutMinutes = timeoutLengths.some(([m]) => String(m) === minutes) ? minutes : timeoutDefault;
   const open = t.status === 'open';
 
   return (
     <Panel>
       <button class="chip" type="button" onClick={onBack}>Back to tickets</button>
       <h3>
-        #{t.id} <a href={`/player/${t.targetId}`}>{t.targetName ?? t.targetId}</a>
+        #{t.id} {t.targetId
+          ? <a href={`/player/${t.targetId}`}>{t.targetName ?? t.targetId}</a>
+          : <span title={`Discord member ${t.targetDiscordId}`}>{t.targetName ?? 'Discord member'} <small>(Discord only)</small></span>}
         {t.restricted && <span class="admin-tag">Restricted</span>}
         <span class="admin-tag">{open ? 'open' : `closed: ${(t.outcome ?? '').replace(/_/g, ' ')}`}</span>
       </h3>
@@ -58,7 +98,7 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
 
       {t.restricted && (
         <section class="ticket-restricted">
-          <p>Only the people listed here can see this ticket. Anyone with the Discord Administrator permission can read every channel on the Discord server, so keep the discussion of this one off Discord if that includes the accused.</p>
+          <p>Only the people listed here can see this ticket. It has no Discord thread, so keep the discussion on this page.</p>
           <ul class="admin-list">{data.access.map((a) => <li key={a.steamid}>{a.name}</li>)}</ul>
           {data.accessCandidates.length > 0 && (
             <div class="admin-form">
@@ -79,25 +119,41 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
           {data.reports.map((r) => (
             <li key={r.id} class="admin-report">
               <p>
-                <strong>{r.category}</strong> from <a href={`/player/${r.reporterId}`}>{r.reporterName ?? r.reporterId}</a>
+                <strong>{r.category}</strong> from {r.reporterId
+                  ? <a href={`/player/${r.reporterId}`}>{r.reporterName ?? r.reporterId}</a>
+                  : <span title={`Discord member ${r.reporterDiscordId}`}>{r.reporterName ?? 'a Discord member'} <small>(Discord only)</small></span>}
                 <span class="muted"> · {fmtTime(r.createdAt)}</span>
                 {r.matchId !== null && <> · <a href={`/match/${r.matchId}`}>#{r.matchId}{r.campaign ? ` ${campaignName(r.campaign)}` : ''}</a></>}
                 {r.matchId !== null && r.moment && <> · <a href={`/match/${r.matchId}?ordinal=${r.moment.ordinal}&half=${r.moment.half}&t=${r.moment.tMs}`}>replay moment</a></>}
+                {open && <> · <button class="chip" type="button" disabled={busy}
+                  onClick={() => run(async () => { setChatUrl((await modApi.contactReporter(t.id, r.id)).url); })}>Contact reporter</button></>}
               </p>
               {r.text && <blockquote>{r.text}</blockquote>}
             </li>
           ))}
         </ul>
+        {chatUrl && <p><a href={chatUrl} target="_blank" rel="noreferrer">Open the chat with the reporter in Discord</a></p>}
       </section>
 
+      {data.summary && <FileSummary s={data.summary} />}
+
+      {/* The case file stays for good, because a moderator on a restricted
+          ticket about a colleague gets no summary and this is then the only
+          record of the accused they can see. It must not repeat the summary
+          when there IS one: both open with the same heading and the same
+          status line, so the page read as two "About <name>" blocks
+          disagreeing with each other. */}
       {c && (
         <section>
-          <h4>About {c.name}</h4>
-          <p class="muted">{c.status} · SR {c.sr ?? 'n/a'} · {c.games} games{c.activeBan ? ` · banned: ${c.activeBan.reason}` : ''}{c.timeout ? ` · queue timeout, ${c.timeout.offenses} offenses` : ''}</p>
+          <h4>{data.summary ? 'Case file' : `About ${c.name}`}</h4>
+          {!data.summary && (
+            <p class="muted">{c.status} · SR {c.sr ?? 'n/a'} · {c.games} games{c.activeBan ? ` · banned: ${c.activeBan.reason}` : ''}{c.timeout ? ` · queue timeout, ${c.timeout.offenses} offenses` : ''}</p>
+          )}
           <ul class="admin-list">
             <li>{c.bans.length} ban{c.bans.length === 1 ? '' : 's'} on record, {c.penalties.length} penalt{c.penalties.length === 1 ? 'y' : 'ies'}, {c.inputFlags.length} input flag{c.inputFlags.length === 1 ? '' : 's'}</li>
             {c.aliases.length > 0 && <li>{c.aliases.length} merged second account{c.aliases.length === 1 ? '' : 's'}</li>}
             {c.sharesAddressWith.length > 0 && <li>Shares a connection with: {c.sharesAddressWith.map((s) => s.name).join(', ')}</li>}
+            {(c.discordSanctions ?? []).map((s) => <li key={`ds${s.id}`}>{sanctionText(s)}</li>)}
           </ul>
           {c.tickets.filter((o) => o.id !== t.id).length > 0 && (
             <>
@@ -115,12 +171,52 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
         </section>
       )}
 
+      {data.discordSanctions.length > 0 && (
+        <section>
+          <h4>Discord sanctions</h4>
+          <ul class="admin-list">
+            {data.discordSanctions.map((s) => (
+              <li key={s.id}>
+                {sanctionText(s)}
+                {s.active && s.ticketId !== null && data.viewer.isAdmin && (
+                  <button class="chip" type="button" disabled={busy} onClick={() => run(() => modApi.liftDiscordSanction(s.id), {
+                    title: `Lift this Discord ${s.kind}?`, body: 'The bot lifts it in Discord.', confirmLabel: 'Lift',
+                  })}>Lift</button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {(data.reporterChats ?? []).length > 0 && (
+        <section>
+          <h4>Reporter chats</h4>
+          <p class="muted">Private Discord threads with the people who reported. Anyone with the Discord Administrator permission, or Manage Threads on the tickets channel, can read them.</p>
+          <ul class="admin-list">
+            {data.reporterChats!.map((c) => (
+              <li key={c.id}>
+                {c.reporterName} · {c.state}
+                {c.url && <> · <a href={c.url} target="_blank" rel="noreferrer">Open in Discord</a></>}
+                {c.state === 'open' && open && <> <button class="chip" type="button" disabled={busy} onClick={() => run(() => modApi.joinChats(t.id))}>Join</button></>}
+                {c.state === 'open' && <> <button class="chip" type="button" disabled={busy} onClick={() => run(() => modApi.endChat(t.id, c.id), {
+                  title: 'End this chat?', body: 'The reporter is taken out of the thread and it is locked. While the report is open they can start it again.', confirmLabel: 'End chat',
+                })}>End chat</button></>}
+                {' '}<button class="chip" type="button" disabled={busy} onClick={() => run(() => modApi.removeEverything(t.id, c.id), {
+                  title: `Remove everything from ${c.reporterName}?`,
+                  body: 'Every message they wrote in this ticket is removed for good, here and in Discord, with its files, and their chat is ended. This cannot be undone.',
+                  confirmLabel: 'Remove everything', danger: true,
+                })}>Remove everything from this person</button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section>
         <h4>Timeline</h4>
-        <ul class="admin-list">
-          {data.events.map((e) => <li key={e.id}><span class="muted">{fmtTime(e.createdAt)}</span> {eventText(e)}</li>)}
-        </ul>
-        <p class="muted">The moderators' discussion will appear here once the Discord forum is connected.</p>
+        <TicketTimeline ticketId={t.id} events={data.events} messages={data.messages} busy={busy} run={run} />
+        <Discussion d={data.discussion} />
       </section>
 
       <section>
@@ -140,31 +236,69 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
 
         {open && (
           <>
-            {t.restricted && (
+            {t.restricted && t.targetId && (
               <p class="muted">The ban reason is shown to the player and in the ban list, so keep it general and leave the details in this ticket.</p>
             )}
-            <div class="admin-form">
-              <input value={reason} maxLength={500} placeholder="Ban reason" aria-label="Ban reason" onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
-              <select value={minutes} aria-label="Ban length" onChange={(e) => setMinutes((e.target as HTMLSelectElement).value)}>
-                {lengths.map(([m, label]) => <option key={label} value={m === null ? '' : String(m)}>{label}</option>)}
-              </select>
-              <button class="btn" type="button" disabled={busy || !reason.trim()}
-                onClick={() => run(() => modApi.ban(t.id, reason.trim(), minutes === '' ? null : Number(minutes)), {
-                  title: `Ban ${t.targetName ?? t.targetId}?`,
-                  body: 'They are removed from the queue and banned on every game server. The ban is linked to this ticket.',
-                  confirmLabel: 'Ban',
-                  danger: true,
-                }).then(() => setReason(''))}>
-                Ban
-              </button>
-            </div>
+            {t.restricted && !t.targetId && t.targetDiscordId && (
+              <p class="muted">The reason goes to Discord's audit log, which more people can read than this ticket, so keep it general and leave the details here.</p>
+            )}
+            {t.targetId && (
+              <div class="admin-form">
+                <input value={reason} maxLength={500} placeholder="Ban reason" aria-label="Ban reason" onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
+                <select value={minutes} aria-label="Ban length" onChange={(e) => setMinutes((e.target as HTMLSelectElement).value)}>
+                  {lengths.map(([m, label]) => <option key={label} value={m === null ? '' : String(m)}>{label}</option>)}
+                </select>
+                <button class="btn" type="button" disabled={busy || !reason.trim()}
+                  onClick={() => run(() => modApi.ban(t.id, reason.trim(), minutes === '' ? null : Number(minutes)), {
+                    title: `Ban ${t.targetName ?? t.targetId ?? 'this person'}?`,
+                    body: 'They are removed from the queue and banned on every game server. The ban is linked to this ticket.',
+                    confirmLabel: 'Ban',
+                    danger: true,
+                  }).then(() => setReason(''))}>
+                  Ban
+                </button>
+              </div>
+            )}
+            {!t.targetId && t.targetDiscordId && (
+              <>
+                <div class="admin-form">
+                  <input value={reason} maxLength={500} placeholder="Reason (goes to Discord's audit log)" aria-label="Discord sanction reason"
+                    onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
+                  <select value={timeoutMinutes} aria-label="Timeout length" onChange={(e) => setMinutes((e.target as HTMLSelectElement).value)}>
+                    {timeoutLengths.map(([m, label]) => <option key={label} value={String(m)}>{label}</option>)}
+                  </select>
+                  <button class="btn" type="button" disabled={busy || !reason.trim() || timeoutLengths.length === 0}
+                    onClick={() => run(() => modApi.discordSanction(t.id, 'timeout', Number(timeoutMinutes), reason.trim()), {
+                      title: `Time out ${t.targetName ?? 'this person'} in Discord?`,
+                      body: 'The bot times them out in the Discord server. They cannot talk until it ends or an admin lifts it.',
+                      confirmLabel: 'Time out',
+                      danger: true,
+                    }).then(() => setReason(''))}>
+                    Time out
+                  </button>
+                  {data.viewer.isAdmin && (
+                    <button class="btn" type="button" disabled={busy || !reason.trim()}
+                      onClick={() => run(() => modApi.discordSanction(t.id, 'ban', null, reason.trim()), {
+                        title: `Ban ${t.targetName ?? 'this person'} from the Discord?`,
+                        body: 'The bot bans them from the Discord server. It lasts until an admin lifts it here.',
+                        confirmLabel: 'Ban from Discord',
+                        danger: true,
+                      }).then(() => setReason(''))}>
+                      Ban from Discord
+                    </button>
+                  )}
+                </div>
+                <p class="muted">A timeout or ban lifted by hand in Discord is not noticed here: lift it on this page too.</p>
+              </>
+            )}
             <div class="admin-form">
               <select value={outcome} aria-label="Outcome" onChange={(e) => setOutcome((e.target as HTMLSelectElement).value)}>
                 <option value="">Outcome...</option>
                 {OUTCOMES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
               </select>
               <input value={note} maxLength={1000} placeholder="Closing note (staff only)" aria-label="Closing note" onInput={(e) => setNote((e.target as HTMLInputElement).value)} />
-              <button class="btn" type="button" disabled={busy || !outcome} onClick={() => run(() => modApi.close(t.id, outcome, note))}>Close ticket</button>
+              <label><input type="checkbox" checked={tell} onChange={(e) => setTell((e.target as HTMLInputElement).checked)} /> Tell the reporters it is closed</label>
+              <button class="btn" type="button" disabled={busy || !outcome} onClick={() => run(() => modApi.close(t.id, outcome, note, tell))}>Close ticket</button>
             </div>
           </>
         )}

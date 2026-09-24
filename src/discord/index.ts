@@ -26,6 +26,14 @@ export interface BotDeps {
   onConnected?: (transport: BotTransport) => void | Promise<void>;
   /** Buttons outside the queue flow, by custom_id prefix (e.g. 'r:' for report cards). */
   extraButtons?: Record<string, (i: Extract<BotInteraction, { kind: 'button' }>) => Promise<InteractionReply>>;
+  /** Modal submits outside the queue flow, by custom_id prefix, the same way. */
+  extraModals?: Record<string, (i: Extract<BotInteraction, { kind: 'modal' }>) => Promise<InteractionReply>>;
+  /** Which buttons answer with a modal. Handed to the transport, which has to
+   *  know before it runs the handler: see BotTransport.onInteraction. */
+  opensModal?: (customId: string) => boolean;
+  /** Message context menu commands, by exact name. The names are what gets
+   *  registered; the handler gets ids only, never the message's content. */
+  messageCommands?: Record<string, (i: Extract<BotInteraction, { kind: 'message_command' }>) => Promise<InteractionReply>>;
   commands?: {
     defs: SlashCommandDef[];
     handle: (i: Extract<BotInteraction, { kind: 'command' }>) => Promise<InteractionReply>;
@@ -63,12 +71,23 @@ export async function startBot(deps: BotDeps): Promise<RunningBot | null> {
       if (prefix) return deps.extraButtons![prefix](i);
       return handleButton(controllerDeps, i);
     }
+    if (i.kind === 'modal') {
+      const prefix = Object.keys(deps.extraModals ?? {}).find((p) => i.customId.startsWith(p));
+      if (prefix) return deps.extraModals![prefix](i);
+      return { ephemeral: true, payload: { content: 'That form no longer does anything.', embeds: [], components: [] } };
+    }
+    if (i.kind === 'message_command') {
+      const run = deps.messageCommands?.[i.name];
+      if (run) return run(i);
+      return { ephemeral: true, payload: { content: 'That command no longer does anything.', embeds: [], components: [] } };
+    }
     if (deps.commands) return deps.commands.handle(i);
     return { ephemeral: true, payload: { content: 'Unknown command.', embeds: [], components: [] } };
-  });
-  if (deps.commands) {
-    await transport.registerCommands(deps.commands.defs).catch((err) =>
-      console.error('[discord] registering slash commands failed:', err));
+  }, { opensModal: deps.opensModal });
+  const messageCommands = Object.keys(deps.messageCommands ?? {}).map((name) => ({ name }));
+  if (deps.commands || messageCommands.length > 0) {
+    await transport.registerCommands(deps.commands?.defs ?? [], messageCommands).catch((err) =>
+      console.error('[discord] registering commands failed:', err));
   }
 
   if (deps.membership) {

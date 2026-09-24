@@ -38,12 +38,17 @@ void PauseAllowInternal()
 	g_bPauseInternal = true;
 }
 
+#define PAUSE_BY_WINDOW 5.0      // seconds a !pause request may take to become a pause and still be credited
+
 ConVar g_cvPauseSeconds;
 ConVar g_cvPauseLimit;
 
 int g_iPauseUsed[3];          // [1] pug team a, [2] pug team b
 int g_iPausePendingTeam;      // team whose sm_pause we allowed and have not yet seen take effect
 int g_iPauseOwner;            // team charged for the pause in progress; 0 = none or not chargeable
+char g_sPausePendingBy[24];   // SteamID64 of the rostered player whose sm_pause we let through
+float g_fPausePendingAt;      // engine time g_sPausePendingBy was taken
+char g_sPauseBy[24];          // who called the pause in progress; empty = unknown, a disconnect or an admin
 bool g_bPauseSeen;            // whether the game was paused on the previous tick
 float g_fPauseStarted;        // engine time the current pause began
 float g_fPauseHeld;           // seconds the ceiling clock has been held while a player is absent
@@ -79,6 +84,8 @@ void PauseReset()
 	g_iPauseUsed[2] = 0;
 	g_iPausePendingTeam = 0;
 	g_iPauseOwner = 0;
+	g_sPausePendingBy[0] = '\0';
+	g_sPauseBy[0] = '\0';
 	g_bPauseSeen = false;
 	g_fPauseStarted = 0.0;
 	g_fPauseHeld = 0.0;
@@ -120,7 +127,6 @@ public Action Listener_PugPause(int client, const char[] command, int argc)
 	// Outside a live match there is nothing to budget, and during ready-up
 	// Rotoblin refuses anyway. Leave both to it.
 	if (g_State != MS_Live || InReadyUp()) return Plugin_Continue;
-	if (PauseLimit() <= 0) return Plugin_Continue;
 
 	if (client <= 0 || client > MaxClients || !IsClientInGame(client)) return Plugin_Continue;
 	int slot = g_iClientRoster[client];
@@ -134,6 +140,16 @@ public Action Listener_PugPause(int client, const char[] command, int argc)
 	// nothing should be charged or refused here.
 	if (LeaveRotoblinPaused()) return Plugin_Continue;
 
+	// Who asked, for the pause ledger. Taken before the budget check so it is
+	// known with the budget off too; a refused pause below never begins, so
+	// a stale value here is overwritten by the next request or cleared when a
+	// pause starts.
+	if (!GetClientAuthId(client, AuthId_SteamID64, g_sPausePendingBy, sizeof(g_sPausePendingBy)))
+		g_sPausePendingBy[0] = '\0';
+	g_fPausePendingAt = GetEngineTime();
+
+	if (PauseLimit() <= 0) return Plugin_Continue;
+
 	if (PauseRemaining(team) <= 0)
 	{
 		char name[16];
@@ -141,6 +157,9 @@ public Action Listener_PugPause(int client, const char[] command, int argc)
 		PrintToChatAll("\x04[PUG]\x01 %s has used all \x05%d\x01 pauses for this campaign. Ask an admin if something has actually gone wrong.",
 			name, PauseLimit());
 		EmitPug("PAUSE_REFUSED team=%d used=%d limit=%d", team, g_iPauseUsed[team], PauseLimit());
+		// No pause is coming from this request, so nothing may be credited to
+		// it: an admin's forcepause a moment later is not this player's.
+		g_sPausePendingBy[0] = '\0';
 		return Plugin_Handled;
 	}
 
@@ -183,6 +202,11 @@ static void PauseClockTick()
 		// has a reconnect allowance that is allowed to outlast it.
 		g_iPauseOwner = g_bLeavePaused ? 0 : g_iPausePendingTeam;
 		g_iPausePendingTeam = 0;
+		// Only a request from the last few seconds: one Rotoblin refused
+		// without pausing must not be pinned on a later, unrelated pause.
+		if (g_bLeavePaused || GetEngineTime() - g_fPausePendingAt > PAUSE_BY_WINDOW) g_sPauseBy[0] = '\0';
+		else strcopy(g_sPauseBy, sizeof(g_sPauseBy), g_sPausePendingBy);
+		g_sPausePendingBy[0] = '\0';
 		if (g_iPauseOwner == 1 || g_iPauseOwner == 2)
 		{
 			g_iPauseUsed[g_iPauseOwner]++;
@@ -212,6 +236,7 @@ static void PauseClockTick()
 			g_bPauseSeen = false;
 			g_iPauseOwner = 0;
 			g_iPausePendingTeam = 0;
+			g_sPauseBy[0] = '\0';
 		}
 		return;
 	}
@@ -242,6 +267,7 @@ static void PauseClockTick()
 		LeaveUnpauseNow();
 		g_bPauseSeen = false;
 		g_iPauseOwner = 0;
+		g_sPauseBy[0] = '\0';
 		return;
 	}
 
@@ -295,8 +321,8 @@ static void PhaseCurrent(char[] out, int len)
 
 /** The phase fields under `key` (PHASE uses state=, HEARTBEAT uses phase=).
  *  A pause also says who is charged (1 = a, 2 = b, 0 = nobody: a disconnect
- *  pause or an admin), the ceiling in seconds (0 = none), and whether the
- *  leave module called it. */
+ *  pause or an admin), the ceiling in seconds (0 = none), whether the leave
+ *  module called it, and, when known, the SteamID64 of who typed !pause. */
 void PhaseFields(const char[] key, char[] out, int len)
 {
 	char state[16];
@@ -305,6 +331,9 @@ void PhaseFields(const char[] key, char[] out, int len)
 	{
 		Format(out, len, "%s=%s team=%d limit=%d leave=%d",
 			key, state, g_iPauseOwner, g_cvPauseSeconds.IntValue, g_bLeavePaused ? 1 : 0);
+		// Who typed !pause, only when known: the backend never guesses one
+		// from the team, so an absent field is the honest "unknown".
+		if (g_sPauseBy[0] != '\0') Format(out, len, "%s by=%s", out, g_sPauseBy);
 	}
 	else if (StrEqual(state, "readyup"))
 	{

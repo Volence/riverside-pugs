@@ -79,24 +79,65 @@ function readInfo(dir: string, filename: string, nowMs: number): ReplayFileInfo 
   };
 }
 
-/** Every replay on disk, grouped by the session token in its filename.
+/**
+ * Which of two copies of the same round to read: the replay directory's
+ * (`own`) or the live directory's (`live`).
  *
- *  Never throws. A missing or unreadable directory yields no sessions,
- *  because a browse page returning empty is a far better failure than a
- *  browse page returning 500. */
-export function listSessions(dir: string, nowMs: number, db?: DB): ReplaySession[] {
-  if (!dir) return [];
+ * A round's identity is its header's `startedUnix`, not its byte count. An
+ * aborted round and a restart reuse the same filename, and a pull job can
+ * bring the aborted round's file into the replay directory after the live
+ * copy has already been truncated and restarted for the new round (Task 1).
+ * While the new round is still short, comparing bytes alone would keep
+ * serving the old one, and once the new round grows past the old round's
+ * length a `since` cursor would splice the new round's frames onto the old
+ * file's tail. So: when the two disagree on `startedUnix`, the newer round
+ * wins outright, regardless of length. Only when `startedUnix` matches (the
+ * ordinary case of one round's file growing in two places) does length
+ * decide, and there the replay directory wins a tie, as elsewhere.
+ */
+function furtherInfo(own: ReplayFileInfo, live: ReplayFileInfo): ReplayFileInfo {
+  if (live.startedUnix !== own.startedUnix) {
+    return live.startedUnix > own.startedUnix ? live : own;
+  }
+  return live.bytes > own.bytes ? live : own;
+}
+
+/** Every replay in one directory, keyed by filename. */
+function infosIn(dir: string, nowMs: number): Map<string, ReplayFileInfo> {
+  const out = new Map<string, ReplayFileInfo>();
+  if (!dir) return out;
   let names: string[];
   try {
     names = readdirSync(dir);
   } catch {
-    return [];
+    return out;
+  }
+  for (const name of names) {
+    const info = readInfo(dir, name, nowMs);
+    if (info) out.set(name, info);
+  }
+  return out;
+}
+
+/** Every replay on disk, grouped by the session token in its filename.
+ *
+ *  With a live directory, a round present in both is represented by whichever
+ *  copy `furtherInfo` picks: the newer round by `startedUnix` regardless of
+ *  length, or on a matching `startedUnix` the copy with more bytes, the
+ *  replay directory's on a tie. See `furtherInfo` and `resolveFurther`.
+ *
+ *  Never throws. A missing or unreadable directory yields no sessions,
+ *  because a browse page returning empty is a far better failure than a
+ *  browse page returning 500. */
+export function listSessions(dir: string, nowMs: number, db?: DB, liveDir = ''): ReplaySession[] {
+  const infos = infosIn(dir, nowMs);
+  for (const [name, live] of infosIn(liveDir, nowMs)) {
+    const own = infos.get(name);
+    infos.set(name, own ? furtherInfo(own, live) : live);
   }
 
   const byToken = new Map<string, ReplayFileInfo[]>();
-  for (const name of names) {
-    const info = readInfo(dir, name, nowMs);
-    if (!info) continue;
+  for (const info of infos.values()) {
     const list = byToken.get(info.token);
     if (list) list.push(info);
     else byToken.set(info.token, [info]);
@@ -144,12 +185,15 @@ export function listSessions(dir: string, nowMs: number, db?: DB): ReplaySession
  * first file rather than nothing: the client needs the header's map name and
  * slot roster before it can render at all, and the header carries no
  * positions, so there is nothing to hold back.
+ *
+ * A live directory, when given, is merged in as listSessions describes.
  */
 export function currentFileFor(
   dir: string, token: string, nowMs: number, db?: DB, delayMs: number = DEFAULT_DELAY_MS,
+  liveDir = '',
 ): ReplayFileInfo | null {
-  if (!dir || !TOKEN_RE.test(token)) return null;
-  const session = listSessions(dir, nowMs, db).find((s) => s.token === token);
+  if ((!dir && !liveDir) || !TOKEN_RE.test(token)) return null;
+  const session = listSessions(dir, nowMs, db, liveDir).find((s) => s.token === token);
   if (!session || session.files.length === 0) return null;
   const cutoffUnixMs = nowMs - Math.max(0, delayMs);
   for (let i = session.files.length - 1; i >= 0; i--) {
@@ -183,4 +227,31 @@ export function resolveByName(
   const info = readInfo(dir, filename, nowMs);
   if (!info) return null;
   return { path, info };
+}
+
+/**
+ * Resolve a round by name in both the replay directory and the live
+ * directory, and take the copy `furtherInfo` picks: the newer round by
+ * `startedUnix` regardless of length, or on a matching `startedUnix` the
+ * longer copy, the replay directory winning a tie.
+ *
+ * The `startedUnix` rule is what keeps an aborted-and-restarted round (same
+ * filename, a pull job can land the old round's file in the replay directory
+ * after the live copy was truncated and restarted for the new one) from
+ * being served as the old round while it is short and then having the new
+ * round's frames spliced onto its tail once it grows past. The byte rule is
+ * what lets the pulled final file take over from the pushed copy the moment
+ * it is as long, and what keeps Dallas, where the plugin's own growing file
+ * and the pushed copy sit side by side, from ever making the viewer go
+ * backwards. Both lookups go through resolveByName, so both get its path
+ * hardening.
+ */
+export function resolveFurther(
+  replayDir: string, liveDir: string, filename: string, nowMs: number,
+): { path: string; info: ReplayFileInfo } | null {
+  const own = resolveByName(replayDir, filename, nowMs);
+  const live = liveDir ? resolveByName(liveDir, filename, nowMs) : null;
+  if (!own) return live;
+  if (!live) return own;
+  return furtherInfo(own.info, live.info) === live.info ? live : own;
 }
