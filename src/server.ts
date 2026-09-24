@@ -28,6 +28,7 @@ import { onSourceTv } from './sourcetvSessions.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { activeTimeout } from './penalties.js';
 import { adminRoutes } from './routes/admin.js';
+import { adminBalanceKnobRoutes } from './routes/adminBalanceKnobs.js';
 import { isWheel } from './inputStats.js';
 import { peopleRoutes } from './routes/people.js';
 import { banMessage, liftExpiredBans } from './admin/players.js';
@@ -1481,6 +1482,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       ? (steamid) => refreshSteamSignals(signalDeps, [steamid], { sharing: true })
       : undefined,
   });
+  // Balance control panel. Loaded again here rather than reusing the log
+  // listener's copy, which exists only outside dev mode; a failure disables
+  // the panel (503) and nothing else.
+  let panelKnobs: BalanceKnobs | null = null;
+  try {
+    panelKnobs = loadBalanceKnobs(deps.balanceKnobsPath);
+  } catch (err) {
+    console.error('[balance] knob panel disabled, balance/knobs.json failed to load:', err);
+  }
+  await app.register(adminBalanceKnobRoutes, { db: deps.db, knobs: panelKnobs, writer: deps.config.devMode ? undefined : balanceWriter });
   await app.register(peopleRoutes, { db: deps.db });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(replayRoutes, {
