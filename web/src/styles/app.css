@@ -2481,6 +2481,15 @@ tbody tr.is-lifted td { opacity: 0.55; }
 }
 .ticket-row:hover, .ticket-row:focus-visible { background: rgba(255, 255, 255, 0.04); }
 .ticket-row__id { font-variant-numeric: tabular-nums; opacity: 0.7; }
+
+/* In-game calls. A folded call sits one step in under the call it joined,
+ * as it does on the Discord card. */
+.admin-warning { color: var(--loss); border-left: 3px solid var(--loss); padding-left: 0.75rem; margin: 0.75rem 0; }
+.calls { list-style: none; margin: 0; padding: 0; }
+.calls--folded { margin-left: var(--sp-4); border-left: 2px solid var(--rule); padding-left: var(--sp-3); }
+.call-row { padding: 0.6rem 0.25rem; border-bottom: 1px solid var(--border); }
+.call-row p { margin: 0 0 var(--sp-1); overflow-wrap: anywhere; }
+.call-row blockquote { margin: 0 0 var(--sp-1); padding-left: var(--sp-3); border-left: 2px solid var(--rule); overflow-wrap: anywhere; white-space: pre-wrap; }
 .ticket-restricted { border-left: 3px solid #de4e40; padding-left: 0.75rem; margin: 0.75rem 0; }
 .ticket-timeline { list-style: none; margin: 0; padding: 0; }
 .ticket-event { padding: var(--sp-2) 0; }
