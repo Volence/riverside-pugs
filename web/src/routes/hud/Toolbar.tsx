@@ -40,6 +40,9 @@ const ABILITY_STATES: { key: PreviewState['ability']; label: string }[] = [
   { key: 'ready', label: 'Ready' }, { key: 'notReady', label: 'Not ready' }, { key: 'recharging', label: 'Recharging' },
 ];
 
+/** What Show yourself is: a picture of a console setting, never written into the download. */
+const SHOW_SELF_NOTE = 'Preview only: the game shows your own card with the console setting hud_zombieteam_showself 1, which is not part of the HUD file.';
+
 /** What the preview survivor holds: the game moves the weapon numbers when this changes. */
 const HELD: { key: WeaponHeld; label: string }[] = [
   { key: 'primary', label: 'Gun' }, { key: 'pistol', label: 'Pistol' }, { key: 'item', label: 'Item' },
@@ -134,6 +137,15 @@ export function Toolbar(p: ToolbarProps) {
       </button>
       {p.side === 'survivor' && (
         <Tabs label="Holding" tabs={HELD} active={p.held} onSelect={(k) => p.onHeld(k as WeaponHeld)} />
+      )}
+      {/* Your own infected card: client.dll counts the local player among the cards only with this console setting. */}
+      {p.side === 'infected' && (
+        <button
+          type="button" class="btn btn--ghost btn--sm" aria-pressed={!!p.preview.showSelf} title={SHOW_SELF_NOTE}
+          onClick={() => p.onPreview({ ...p.preview, showSelf: !p.preview.showSelf })}
+        >
+          Show yourself
+        </button>
       )}
       <span class="hud__tbsep" aria-hidden="true" />
 

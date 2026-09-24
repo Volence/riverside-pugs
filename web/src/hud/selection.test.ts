@@ -497,3 +497,64 @@ describe('the pieces of your infected health on the canvas', () => {
     expect(t).toContainEqual({ x: 322, y: 69, w: 64, h: 13 });
   });
 });
+
+describe('the infected cards are a selection level, and moving one moves the row (plan Task 13)', () => {
+  // Fitted with gap 10: the container moves 10 down (r75 + 10 = 415), the cards are 133 x 64 at 0, 143, 286.
+  const F: HudDesign = { ...DEFAULT_DESIGN, elements: { ...DEFAULT_DESIGN.elements, infectedRow: { fit: true, gap: 10 } } };
+  const at = (p: { x: number; y: number }, state: PreviewState = DEFAULT_PREVIEW) => hitAt(F, 'infected', state, p.x, p.y);
+  const card = (i: number) => panelBoxes(F, 'infectedRow')[i];
+  // Card 2's class icon (PlayerImage 9, 13 24 x 24 after the fit), and a spot on card 2 no piece covers
+  // (right of the 128-wide backdrop, above the name).
+  const ICON2 = () => ({ x: card(1).x + 20, y: card(1).y + 25 });
+  const EMPTY2 = () => ({ x: card(1).x + 130, y: card(1).y + 5 });
+  const CARD2: Selection = { kind: 'cards', cards: [1], panel: 'infectedRow' };
+  const ROW: Selection = { kind: 'elements', ids: ['infectedRow'] };
+
+  it('finds the card under the pointer, and the piece in it', () => {
+    expect(card(1)).toEqual({ x: 143, y: 415, w: 133, h: 64 });
+    expect(at(ICON2())).toEqual({ element: 'infectedRow', card: 1, child: 'PlayerImage' });
+    expect(at(EMPTY2())).toEqual({ element: 'infectedRow', card: 1, child: null });
+  });
+
+  it('climbs piece, card, row with Ctrl, and a click on a card\'s empty space picks the card', () => {
+    const piece = clickSelect(F, NONE, at(ICON2()), plain);
+    expect(piece).toEqual({ kind: 'children', names: ['PlayerImage'], card: 1, panel: 'infectedRow' });
+    expect(clickSelect(F, piece, at(ICON2()), ctrl)).toEqual(CARD2);
+    expect(clickSelect(F, CARD2, at(ICON2()), ctrl)).toEqual(ROW);
+    expect(clickSelect(F, NONE, at(EMPTY2()), plain)).toEqual(CARD2);
+    expect(cardsOf([1], 'infectedRow')).toEqual(CARD2);
+    expect(cardsOf([1])).toEqual({ kind: 'cards', cards: [1] });
+    // Shift adds a card of the same row; a survivor card never mixes in.
+    const both = clickSelect(F, CARD2, hitAt(F, 'infected', DEFAULT_PREVIEW, card(0).x + 130, card(0).y + 5), shift);
+    expect(both).toEqual({ kind: 'cards', cards: [0, 1], panel: 'infectedRow' });
+    expect(pick(cardsOf([0]), CARD2, true)).toEqual(CARD2);
+  });
+
+  it('Escape climbs a piece to its card and a card to the row; the breadcrumb names the row', () => {
+    expect(climb({ kind: 'children', names: ['NameLabel'], card: 2, panel: 'infectedRow' })).toEqual(cardsOf([2], 'infectedRow'));
+    expect(climb(CARD2)).toEqual(ROW);
+    expect(breadcrumb(CARD2).map((c) => c.label)).toEqual(['Infected teammates', 'Card 2']);
+    expect(breadcrumb(CARD2)[0].sel).toEqual(ROW);
+    expect(breadcrumb({ kind: 'children', names: ['NameLabel'], card: 2, panel: 'infectedRow' }).map((c) => c.label))
+      .toEqual(['Infected teammates', 'Card 3', 'Name']);
+  });
+
+  it('a drag on a card, or on picked cards, moves the whole row: the game places every card itself', () => {
+    expect(dragIntent(F, NONE, at(EMPTY2()), plain)).toEqual({ kind: 'move', sel: ROW });
+    expect(dragIntent(F, CARD2, at(EMPTY2()), plain)).toEqual({ kind: 'move', sel: ROW });
+    expect(isPicked(F, CARD2, at(EMPTY2()))).toBe(true);
+  });
+
+  it('frames, ids, sanitising and the menu know the row\'s cards', () => {
+    expect(selectionFrames(F, CARD2)).toEqual([card(1)]);
+    expect(selectedIds(CARD2)).toEqual(['infectedRow']);
+    expect(sanitize(F, 'infected', CARD2)).toBe(CARD2);
+    expect(sanitize(F, 'survivor', CARD2)).toEqual(NONE);
+    expect(sanitize(F, 'infected', { kind: 'cards', cards: [3], panel: 'infectedRow' })).toEqual(ROW);   // never a fourth
+    expect(menuActions({ kind: 'children', names: ['NameLabel'], card: 0, panel: 'infectedRow' })).toContain('selectCard');
+    expect(menuActions(CARD2)).toEqual(['selectTeam']);
+    // Moving the survivor cards' snap targets leave out only the picked cards of that panel.
+    expect(sectionTargets(F, 'infected', CARD2)).toContainEqual(card(0));
+    expect(sectionTargets(F, 'infected', CARD2)).not.toContainEqual(card(1));
+  });
+});

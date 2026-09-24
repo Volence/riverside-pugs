@@ -820,7 +820,8 @@ export function resizeElement(
 export function nudgeSelection(design: HudDesign, sel: Selection, dx: number, dy: number): HudDesign {
   switch (sel.kind) {
     case 'elements': return sel.ids.reduce((d, id) => nudge(d, id, dx, dy), design);
-    case 'cards': return nudgeCards(design, sel.cards, dx, dy);
+    // The infected cards have no place of their own (code puts card i at i x HorizPanelSpacing): their row moves.
+    case 'cards': return panelOf(sel) === 'teamColumn' ? nudgeCards(design, sel.cards, dx, dy) : nudge(design, panelOf(sel), dx, dy);
     case 'children': return moveChildren(design, sel.names, startsOf(design, sel.names, panelOf(sel)), dx, dy, panelOf(sel));
     default: return design;
   }

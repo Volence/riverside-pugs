@@ -2,7 +2,8 @@
  * The Layers list, left of the canvas: every element of the current side in
  * registry order, with an eye that shows or hides it, struck through while
  * hidden. The Teammates expand to their cards (the three drawn, and in
- * Free the fourth, which shows only while spectating), and every element
+ * Free the fourth, which shows only while spectating), the Infected
+ * teammates to their three, and every element
  * with a child registry entry expands to its pieces (the teammate card's,
  * splatter included), which
  * makes this the one way to reach a hidden, tiny or state-only piece (the
@@ -27,7 +28,7 @@ const WHEN: Record<StateArt, string> = {
 /** Whether one row's target is part of the selection. */
 function isIn(sel: Selection, target: Selection): boolean {
   if (sel.kind === 'elements' && target.kind === 'elements') return sel.ids.includes(target.ids[0]);
-  if (sel.kind === 'cards' && target.kind === 'cards') return sel.cards.includes(target.cards[0]);
+  if (sel.kind === 'cards' && target.kind === 'cards') return panelOf(sel) === panelOf(target) && sel.cards.includes(target.cards[0]);
   if (sel.kind === 'children' && target.kind === 'children') return panelOf(sel) === panelOf(target) && sel.names.includes(target.names[0]);
   return false;
 }
@@ -77,9 +78,10 @@ export function LayersPanel(
     onKeyDown: (e: KeyboardEvent) => void;
   },
 ) {
-  // A piece picked here keeps the teammate card the selection was in, for the handles and the breadcrumb.
-  const card = sel.kind === 'children' && panelOf(sel) === 'teamColumn' ? sel.card : sel.kind === 'cards' ? sel.cards[0] : 0;
-  const cards = Array.from({ length: pickableCards(design) }, (_, i) => i);
+  // A piece picked here keeps the card the selection was in (of its own panel), for the handles and the breadcrumb.
+  const cardIn = (panel: string) => (sel.kind === 'children' && panelOf(sel) === panel ? sel.card
+    : sel.kind === 'cards' && panelOf(sel) === panel ? sel.cards[0] : 0);
+  const cardsOfPanel = (panel: string) => Array.from({ length: pickableCards(design, panel) }, (_, i) => i);
   return (
     <nav class="hud__layers" aria-label="Layers" onKeyDown={onKeyDown}>
       <p class="eyebrow">{side === 'survivor' ? 'Survivor HUD' : 'Infected HUD'}</p>
@@ -93,8 +95,8 @@ export function LayersPanel(
               onPick={(shift) => onPick(target, shift)}
               onEye={el.props.includes('visible') ? (v) => onVisible(target, v) : undefined}
             />
-            {el.id === 'teamColumn' && cards.map((i) => {
-              const t = cardsOf([i]);
+            {reg?.repeat === 'cards' && cardsOfPanel(el.id).map((i) => {
+              const t = cardsOf([i], el.id);
               return <Row key={`card${i}`} label={`Card ${i + 1}`} depth={1} active={isIn(sel, t)} hidden={false} onPick={(shift) => onPick(t, shift)} />;
             })}
             {reg?.children.map((def) => {
@@ -107,8 +109,8 @@ export function LayersPanel(
                 ) : null;
               }
               const t: Selection = el.id === 'teamColumn'
-                ? { kind: 'children', names: [def.name], card }
-                : { kind: 'children', names: [def.name], card: 0, panel: el.id };
+                ? { kind: 'children', names: [def.name], card: cardIn(el.id) }
+                : { kind: 'children', names: [def.name], card: cardIn(el.id), panel: el.id };
               return (
                 <Row
                   key={def.name} label={def.label} depth={1} active={isIn(sel, t)} hidden={!info.visible} note={def.stateArt && WHEN[def.stateArt]}

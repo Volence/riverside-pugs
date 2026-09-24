@@ -2444,3 +2444,52 @@ describe('The ability timer on the page', () => {
     expect(screen.getByText('Hunter: not ready while standing (no meter), ready while crouched. After any ability the icon takes the charging colour while the meter refills.')).toBeTruthy();
   });
 });
+
+describe('The infected cards on the page (plan Task 13)', () => {
+  const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
+  const toInfected = () => fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+
+  it('lists Card 1 to 3 under Infected teammates, then the pieces', () => {
+    render(<Hud />);
+    toInfected();
+    const row = layer('Infected teammates');
+    for (const label of ['Card 1', 'Card 2', 'Card 3', 'Backdrop', 'Class icon', 'Health bar', 'Name', 'Spawn time']) {
+      expect(row.getByRole('button', { name: label }), label).toBeTruthy();
+    }
+    expect(row.queryByRole('button', { name: 'Card 4' })).toBeNull();
+    fireEvent.click(row.getByRole('button', { name: 'Card 2' }));
+    expect(screen.getByText('Infected card 2', { selector: 'legend' })).toBeTruthy();
+    expect(screen.getByText(/The game places every infected card itself/)).toBeTruthy();
+    // Back up to the row from the card.
+    fireEvent.click(screen.getByRole('button', { name: 'Select Infected teammates' }));
+    expect(screen.getByLabelText('Fit the card to its contents')).toBeTruthy();
+  });
+
+  it('says in the row\'s panel that a column is impossible and that bots never get a card', () => {
+    render(<Hud />);
+    toInfected();
+    fireEvent.click(screen.getByRole('button', { name: 'Infected teammates' }));
+    expect(screen.getByText('The game lays infected cards in a row; a column is impossible.')).toBeTruthy();
+    expect(screen.getByText('The game shows only human teammates here, at most 3 cards; bots never get one.')).toBeTruthy();
+  });
+
+  it('nudges the whole row when an infected card is picked', async () => {
+    render(<Hud />);
+    toInfected();
+    fireEvent.click(layer('Infected teammates').getByRole('button', { name: 'Card 2' }));
+    fireEvent.keyDown(layer('Infected teammates').getByRole('button', { name: 'Card 2' }), { key: 'ArrowRight' });
+    await waitFor(() => expect(saved().elements?.infectedRow).toMatchObject({ x: 1 }));
+  });
+
+  it('offers Show yourself on the infected side, a preview of hud_zombieteam_showself 1 and not part of the file', () => {
+    render(<Hud />);
+    expect(screen.queryByRole('button', { name: 'Show yourself' })).toBeNull();
+    toInfected();
+    const b = screen.getByRole('button', { name: 'Show yourself' });
+    expect(b.getAttribute('aria-pressed')).toBe('false');
+    expect(b.getAttribute('title')).toBe('Preview only: the game shows your own card with the console setting hud_zombieteam_showself 1, which is not part of the HUD file.');
+    fireEvent.click(b);
+    expect(screen.getByRole('button', { name: 'Show yourself' }).getAttribute('aria-pressed')).toBe('true');
+    expect(saved().elements?.infectedRow).toBeUndefined();
+  });
+});

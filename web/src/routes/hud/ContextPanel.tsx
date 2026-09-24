@@ -95,6 +95,10 @@ export function TeamControls(
             />
             <span>Fit the card to its contents</span>
           </label>
+          {/* client.dll 0x10247a70 places card i at (i x HorizPanelSpacing, 0) and reads no vertical key;
+              0x10247b70 skips every fake player, and makes exactly three card panels (probe RESULTS.md). */}
+          <p class="muted hud__note">The game lays infected cards in a row; a column is impossible.</p>
+          <p class="muted hud__note">The game shows only human teammates here, at most 3 cards; bots never get one.</p>
         </>
       )}
       {team.file && (
@@ -800,6 +804,23 @@ export function CardsControls(
   );
 }
 
+/**
+ * An infected card: nothing of its own to edit. The game places card i at
+ * i x HorizPanelSpacing inside the row (client.dll 0x10247a70), so a card
+ * cannot move alone; moving it moves the row, and its pieces are edited in
+ * every card at once.
+ */
+function InfectedCardControls({ cards, onRow, rowLabel }: { cards: number[]; onRow: () => void; rowLabel: string }) {
+  return (
+    <Field legend={cards.length === 1 ? `Infected card ${cards[0] + 1}` : `${cards.length} infected cards`}>
+      <p class="muted hud__note">
+        The game places every infected card itself, side by side in the row: drag or nudge a card to move the whole row, and pick a piece to edit it in every card.
+      </p>
+      <button type="button" class="btn btn--ghost btn--sm" onClick={onRow}>{`Select ${rowLabel}`}</button>
+    </Field>
+  );
+}
+
 /** The right-hand panel: only what the selection can do. */
 export function ContextPanel(
   { design, sel, edit, end, onSelect, onWentFree, preview = DEFAULT_PREVIEW }: {
@@ -821,6 +842,10 @@ export function ContextPanel(
         ? <ElementControls design={design} edit={edit} end={end} id={sel.ids[0]} preview={preview} />
         : <ElementsControls design={design} edit={edit} ids={sel.ids} />;
     case 'cards':
+      if (panelOf(sel) !== 'teamColumn') {
+        const row = panelOf(sel);
+        return <InfectedCardControls cards={sel.cards} rowLabel={elementById(row)!.label} onRow={() => onSelect({ kind: 'elements', ids: [row] })} />;
+      }
       return sel.cards.length === 1
         ? <CardControls design={design} edit={edit} end={end} card={sel.cards[0]} onWentFree={onWentFree} />
         : <CardsControls design={design} edit={edit} end={end} cards={sel.cards} onWentFree={onWentFree} />;

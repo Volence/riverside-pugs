@@ -283,8 +283,8 @@ const RESIZE_CURSOR: Record<Handle, string> = {
 const MENU_LABELS: Record<MenuAction, string> = {
   hide: 'Hide', reset: 'Reset', front: 'Bring to front', back: 'Send to back', selectCard: 'Select whole card', selectTeam: 'Select Teammates',
 };
-/** A menu item's text: 'selectTeam' names the element a single panel's pieces climb to. */
-const menuLabel = (a: MenuAction, s: Selection): string => (a === 'selectTeam' && s.kind === 'children' && panelOf(s) !== 'teamColumn'
+/** A menu item's text: 'selectTeam' names the element another panel's cards or pieces climb to. */
+const menuLabel = (a: MenuAction, s: Selection): string => (a === 'selectTeam' && (s.kind === 'children' || s.kind === 'cards') && panelOf(s) !== 'teamColumn'
   ? `Select ${elementById(panelOf(s))?.label ?? 'panel'}`
   : MENU_LABELS[a]);
 /** Said on the status line when moving a card takes a Row or Column team into Free. */
@@ -461,7 +461,7 @@ export default function Hud() {
   const xhairSelected = sel.kind === 'elements' && sel.ids.length === 1 && sel.ids[0] === 'xhair';
   // A new design wholesale (another preset, an import, a share link) keeps
   // an element selection and climbs cards or pieces to the Teammates.
-  const dropPicks = () => setSel((s) => (s.kind === 'children' && panelOf(s) !== 'teamColumn'
+  const dropPicks = () => setSel((s) => ((s.kind === 'children' || s.kind === 'cards') && panelOf(s) !== 'teamColumn'
     ? { kind: 'elements', ids: [panelOf(s)] }
     : s.kind === 'cards' || s.kind === 'children' ? TEAMMATES : s));
   // Which state the survivor panels are previewed in (health, crouched, and
@@ -914,8 +914,8 @@ export default function Hud() {
     if (a === 'hide') edit((d) => hideSelection(d, s));
     else if (a === 'reset') edit((d) => resetSelection(d, s));
     else if ((a === 'front' || a === 'back') && s.kind === 'children') edit((d) => raiseChild(d, s.names, a, panelOf(s)));
-    else if (a === 'selectCard' && s.kind === 'children') setSel(cardsOf([s.card]));
-    else if (a === 'selectTeam') setSel(s.kind === 'children' && panelOf(s) !== 'teamColumn' ? { kind: 'elements', ids: [panelOf(s)] } : TEAMMATES);
+    else if (a === 'selectCard' && s.kind === 'children') setSel(cardsOf([s.card], panelOf(s)));
+    else if (a === 'selectTeam') setSel((s.kind === 'children' || s.kind === 'cards') && panelOf(s) !== 'teamColumn' ? { kind: 'elements', ids: [panelOf(s)] } : TEAMMATES);
   };
 
   // Arrows nudge (Shift by 10), Escape climbs or cancels a drag, Tab and
@@ -961,7 +961,8 @@ export default function Hud() {
     if (!delta || sel.kind === 'none') return;
     e.preventDefault();
     const s = sel;
-    if (s.kind === 'cards') noteFree();
+    // Only the survivor cards go Free; an infected card's nudge moves its row (edit.ts nudgeSelection).
+    if (s.kind === 'cards' && panelOf(s) === 'teamColumn') noteFree();
     edit((d) => nudgeSelection(d, s, delta[0], delta[1]), { nudge: selectionKey(s) });
   };
 

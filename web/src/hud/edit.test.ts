@@ -528,6 +528,13 @@ describe('edits for any selection', () => {
     expect(nudgeSelection(DEFAULT_DESIGN, { kind: 'none' }, 1, 1)).toBe(DEFAULT_DESIGN);
   });
 
+  it('nudges an infected card by moving its whole row: the game places every card itself (plan Task 13)', () => {
+    const moved = nudgeSelection(DEFAULT_DESIGN, { kind: 'cards', cards: [1], panel: 'infectedRow' }, 3, -2);
+    expect(moved).toEqual(nudgeSelection(DEFAULT_DESIGN, { kind: 'elements', ids: ['infectedRow'] }, 3, -2));
+    expect(moved.elements.infectedRow).toMatchObject({ x: 3, y: 403 });
+    expect(moved.elements.teamColumn).toEqual(DEFAULT_DESIGN.elements.teamColumn);
+  });
+
   it('hides elements and pieces, never a card, and skips an element with no Visible control', () => {
     const els = hideSelection(UNFIT, { kind: 'elements', ids: ['chat', 'ownHealth', 'xhair'] });
     expect(els.elements.chat).toEqual({ visible: false });

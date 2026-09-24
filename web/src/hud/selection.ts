@@ -20,6 +20,11 @@
  * teammate card so every Phase 1 selection still compares equal. A single
  * panel (one file, one box on screen) has no card level: its pieces use
  * card 0 and climb straight to its element.
+ *
+ * The infected cards are a level too (plan Task 13), named by `panel` like
+ * the pieces, but the game places every one of them itself, i x
+ * HorizPanelSpacing inside the row (client.dll 0x10247a70): there is no Free,
+ * so a drag or a nudge of an infected card moves the whole row.
  */
 import { baseTeam, isBar, type Box, type HudDesign } from './design';
 import { baseOf, baseTree } from './base';
@@ -35,12 +40,12 @@ import { ALL_HANDLES, CORNERS, unionBox, type Guide, type Handle } from './guide
 export type Selection =
   | { kind: 'none' }
   | { kind: 'elements'; ids: string[] }
-  | { kind: 'cards'; cards: number[] }
+  | { kind: 'cards'; cards: number[]; panel?: string }
   | { kind: 'children'; names: string[]; card: number; panel?: string };
 
 type State = SurvivorState | PreviewState;
 
-/** The panel a pieces selection belongs to: absent means the teammate card. */
+/** The panel a pieces or cards selection belongs to: absent means the teammate card. */
 export const panelOf = (sel: { panel?: string }): string => sel.panel ?? 'teamColumn';
 
 /** A pieces selection, naming its panel only when it is not the teammate card. */
@@ -53,9 +58,20 @@ const hasCards = (panel: string) => panelChildren(panel)?.repeat === 'cards';
 export const NONE: Selection = { kind: 'none' };
 export const TEAMMATES: Selection = { kind: 'elements', ids: ['teamColumn'] };
 
-/** A card selection, sorted and without repeats, so two that pick the same cards are equal. */
-export function cardsOf(cards: number[]): Selection {
-  return { kind: 'cards', cards: [...new Set(cards)].sort((a, b) => a - b) };
+/** A card selection, sorted and without repeats, so two that pick the same cards are equal; it names its panel unless the teammate card. */
+export function cardsOf(cards: number[], panel = 'teamColumn'): Selection {
+  return { kind: 'cards', cards: [...new Set(cards)].sort((a, b) => a - b), ...(panel === 'teamColumn' ? {} : { panel }) };
+}
+
+/** The element a panel's cards and pieces climb to: the Teammates for the survivor card. */
+const elementOf = (panel: string): Selection => (panel === 'teamColumn' ? TEAMMATES : { kind: 'elements', ids: [panel] });
+
+/**
+ * What a move of this selection moves: the infected cards cannot move one
+ * by one (code places each at i x HorizPanelSpacing), so their row does.
+ */
+function movable(sel: Selection): Selection {
+  return sel.kind === 'cards' && panelOf(sel) !== 'teamColumn' ? elementOf(panelOf(sel)) : sel;
 }
 
 /**
@@ -63,8 +79,8 @@ export function cardsOf(cards: number[]): Selection {
  * the fourth as well, which shows only while spectating a full team and is
  * reachable only from Layers, where Free lists it.
  */
-export function pickableCards(design: HudDesign): number {
-  return isFreeTeam(design) ? 4 : TEAM_CARDS;
+export function pickableCards(design: HudDesign, panel = 'teamColumn'): number {
+  return panel === 'teamColumn' && isFreeTeam(design) ? 4 : TEAM_CARDS;
 }
 
 export interface Mods { shift: boolean; ctrl: boolean }
@@ -79,13 +95,17 @@ export function hitAt(design: HudDesign, side: Side, state: State, ux: number, u
   const element = hitTest(design, side, ux, uy);
   if (!element || !panelChildren(element)) return { element, card: null, child: null };
   const piece = childAt(design, state, ux, uy, element);
-  // Only the teammate card has a card level; a single panel's piece is in its one box.
-  if (element !== 'teamColumn') return { element, card: piece ? piece.card : null, child: piece ? piece.name : null };
-  const card = piece ? piece.card : drawnCards(design).findIndex((c) => inside(c, ux, uy));
+  // Only a panel repeated per card has a card level; a single panel's piece is in its one box.
+  if (!hasCards(element)) return { element, card: piece ? piece.card : null, child: piece ? piece.name : null };
+  // The infected cards overlap while unfitted (256 wide, 140 apart), and a later card draws over an earlier one.
+  const boxes = element === 'teamColumn' ? drawnCards(design) : panelBoxes(design, element);
+  const under = boxes.map((c, i) => (inside(c, ux, uy) ? i : -1)).filter((i) => i >= 0);
+  const card = piece ? piece.card : element === 'teamColumn' ? (under[0] ?? -1) : (under[under.length - 1] ?? -1);
   return { element, card: card >= 0 ? card : null, child: piece ? piece.name : null };
 }
 
-const sameCards = (sel: Selection, card: number) => sel.kind === 'cards' && sel.cards.length === 1 && sel.cards[0] === card;
+const sameCards = (sel: Selection, card: number, panel: string) =>
+  sel.kind === 'cards' && panelOf(sel) === panel && sel.cards.length === 1 && sel.cards[0] === card;
 
 /**
  * The thing a click picks: the deepest level under the pointer (a drawn
@@ -99,10 +119,10 @@ export function targetOf(design: HudDesign, hit: Hit, ctrl = false, sel: Selecti
   if (!hit.element) return NONE;
   const levels: Selection[] = [];
   if (hit.child) levels.push(piecesSel([hit.child], hit.card ?? 0, hit.element));
-  if (hit.element === 'teamColumn' && hit.card !== null) levels.push(cardsOf([hit.card]));
+  if (hasCards(hit.element) && hit.card !== null) levels.push(cardsOf([hit.card], hit.element));
   levels.push({ kind: 'elements', ids: [hit.element] });
   if (!ctrl || levels.length === 1) return levels[0];
-  return hit.card !== null && levels[1].kind === 'cards' && sameCards(sel, hit.card) ? levels[2] : levels[1];
+  return hit.card !== null && levels[1].kind === 'cards' && sameCards(sel, hit.card, hit.element) ? levels[2] : levels[1];
 }
 
 function toggle(list: string[], item: string): string[] {
@@ -123,9 +143,9 @@ export function pick(sel: Selection, target: Selection, shift: boolean): Selecti
     const ids = toggle(sel.ids, target.ids[0]);
     return ids.length ? { kind: 'elements', ids } : NONE;
   }
-  if (sel.kind === 'cards' && target.kind === 'cards') {
+  if (sel.kind === 'cards' && target.kind === 'cards' && panelOf(sel) === panelOf(target)) {
     const cards = target.cards.reduce((list, c) => (list.includes(c) ? list.filter((x) => x !== c) : [...list, c]), sel.cards);
-    return cards.length ? cardsOf(cards) : NONE;
+    return cards.length ? cardsOf(cards, panelOf(sel)) : NONE;
   }
   if (sel.kind === 'children' && target.kind === 'children' && panelOf(sel) === panelOf(target)) {
     const names = toggle(sel.names, target.names[0]);
@@ -140,8 +160,9 @@ export function pick(sel: Selection, target: Selection, shift: boolean): Selecti
  * the cards rather than starting a selection of pieces.
  */
 export function clickSelect(design: HudDesign, sel: Selection, hit: Hit, mods: Mods): Selection {
-  const onCard = hit.element === 'teamColumn' && hit.card !== null;
-  const target = mods.shift && sel.kind === 'cards' && onCard ? cardsOf([hit.card!]) : targetOf(design, hit, mods.ctrl, sel);
+  const onCard = hit.element !== null && hasCards(hit.element) && hit.card !== null;
+  const target = mods.shift && sel.kind === 'cards' && onCard && panelOf(sel) === hit.element
+    ? cardsOf([hit.card!], hit.element!) : targetOf(design, hit, mods.ctrl, sel);
   return pick(sel, target, mods.shift);
 }
 
@@ -155,7 +176,7 @@ export function isPicked(design: HudDesign, sel: Selection, hit: Hit): boolean {
   switch (sel.kind) {
     case 'elements':
       return hit.element !== null && sel.ids.includes(hit.element) && !(hit.element === 'teamColumn' && isFreeTeam(design));
-    case 'cards': return hit.element === 'teamColumn' && hit.card !== null && sel.cards.includes(hit.card);
+    case 'cards': return hit.element === panelOf(sel) && hit.card !== null && sel.cards.includes(hit.card);
     case 'children': return hit.child !== null && hit.element === panelOf(sel) && sel.names.includes(hit.child);
     default: return false;
   }
@@ -191,7 +212,7 @@ export function dragIntent(
 ): Intent {
   if (handle) return { kind: 'resize', handle };
   if (mods.shift) return { kind: 'box' };
-  if (isPicked(design, sel, hit) || insideSelected(design, sel, at)) return { kind: 'move', sel };
+  if (isPicked(design, sel, hit) || insideSelected(design, sel, at)) return { kind: 'move', sel: movable(sel) };
   if (!hit.element) return { kind: 'none' };
   if (hit.element === 'teamColumn' && hit.card !== null) return { kind: 'move', sel: cardsOf([hit.card]) };
   if (hit.element === 'teamColumn' && isFreeTeam(design)) return { kind: 'none' };
@@ -262,8 +283,8 @@ export function selectAll(design: HudDesign, side: Side, state: State, sel: Sele
 
 /** Escape: pieces climb to the card they were picked in (a single panel's to its element), cards to the Teammates, anything else to nothing. */
 export function climb(sel: Selection): Selection {
-  if (sel.kind === 'children') return hasCards(panelOf(sel)) ? cardsOf([sel.card]) : { kind: 'elements', ids: [panelOf(sel)] };
-  if (sel.kind === 'cards') return TEAMMATES;
+  if (sel.kind === 'children') return hasCards(panelOf(sel)) ? cardsOf([sel.card], panelOf(sel)) : { kind: 'elements', ids: [panelOf(sel)] };
+  if (sel.kind === 'cards') return elementOf(panelOf(sel));
   return NONE;
 }
 
@@ -271,17 +292,17 @@ export interface Crumb { label: string; sel: Selection }
 
 /** The path shown at the canvas corner: each segment selects its level. */
 export function breadcrumb(sel: Selection): Crumb[] {
-  const team: Crumb = { label: elementById('teamColumn')!.label, sel: TEAMMATES };
+  const team = (panel: string): Crumb => ({ label: elementById(panel)!.label, sel: elementOf(panel) });
   switch (sel.kind) {
     case 'none': return [];
     case 'elements':
       return [{ label: sel.ids.length === 1 ? elementById(sel.ids[0])!.label : `${sel.ids.length} elements`, sel }];
-    case 'cards': return [team, { label: sel.cards.length === 1 ? `Card ${sel.cards[0] + 1}` : `${sel.cards.length} cards`, sel }];
+    case 'cards': return [team(panelOf(sel)), { label: sel.cards.length === 1 ? `Card ${sel.cards[0] + 1}` : `${sel.cards.length} cards`, sel }];
     case 'children': {
       const panel = panelOf(sel);
       const leaf: Crumb = { label: sel.names.length === 1 ? childDef(panel, sel.names[0])!.label : `${sel.names.length} pieces`, sel };
       if (!hasCards(panel)) return [{ label: elementById(panel)!.label, sel: { kind: 'elements', ids: [panel] } }, leaf];
-      return [team, { label: `Card ${sel.card + 1}`, sel: cardsOf([sel.card]) }, leaf];
+      return [team(panel), { label: `Card ${sel.card + 1}`, sel: cardsOf([sel.card], panel) }, leaf];
     }
   }
 }
@@ -308,10 +329,11 @@ export function sanitize(design: HudDesign, side: Side, sel: Selection): Selecti
       return ids.length === sel.ids.length ? sel : ids.length ? { kind: 'elements', ids } : NONE;
     }
     case 'cards': {
-      // Card 4 is a level only in Free, where Layers lists it.
-      if (side !== 'survivor') return NONE;
-      const cards = sel.cards.filter((c) => c < pickableCards(design));
-      return cards.length === sel.cards.length ? sel : cards.length ? cardsOf(cards) : TEAMMATES;
+      // Card 4 is a level only in Free, where Layers lists it; the infected row never has one.
+      const panel = panelOf(sel);
+      if (side !== elementById(panel)?.side || !onSide(panel)) return NONE;
+      const cards = sel.cards.filter((c) => c < pickableCards(design, panel));
+      return cards.length === sel.cards.length ? sel : cards.length ? cardsOf(cards, panel) : elementOf(panel);
     }
     case 'children': {
       const panel = panelOf(sel);
@@ -331,7 +353,7 @@ export function selectionKey(sel: Selection): string {
 export function selectedIds(sel: Selection): string[] {
   if (sel.kind === 'elements') return sel.ids;
   if (sel.kind === 'children') return [panelOf(sel)];
-  return sel.kind === 'none' ? [] : ['teamColumn'];
+  return sel.kind === 'none' ? [] : [panelOf(sel)];
 }
 
 /**
@@ -386,8 +408,8 @@ export function selectionFrames(design: HudDesign, sel: Selection, state?: State
     case 'none': return [];
     case 'elements': return sel.ids.flatMap((id) => (id === 'teamColumn' && isFreeTeam(design) ? drawnCards(design) : [elementFrame(design, id)]));
     case 'cards': {
-      const rects = teamCardRects(design, design.aspect);
-      return sel.cards.map((c) => plain(rects[c]));
+      const rects = panelOf(sel) === 'teamColumn' ? teamCardRects(design, design.aspect) : panelBoxes(design, panelOf(sel));
+      return sel.cards.filter((c) => rects[c]).map((c) => plain(rects[c]));
     }
     case 'children': {
       const panel = panelOf(sel);
@@ -509,7 +531,7 @@ export function sectionTargets(design: HudDesign, side: Side, sel: Selection): B
     if (sel.kind === 'elements' && sel.ids.includes(el.id)) continue;
     if (!elementRect(design, el.id, design.aspect).visible) continue;
     const rects = sectionRects(design, el.id);
-    out.push(...(el.id === 'teamColumn' && sel.kind === 'cards' ? rects.filter((_, i) => !sel.cards.includes(i)) : rects));
+    out.push(...(sel.kind === 'cards' && el.id === panelOf(sel) ? rects.filter((_, i) => !sel.cards.includes(i)) : rects));
   }
   return out;
 }
@@ -534,7 +556,7 @@ export function menuActions(sel: Selection): MenuAction[] {
   switch (sel.kind) {
     case 'elements': return ['hide', 'reset'];
     case 'cards': return ['selectTeam'];
-    case 'children': return panelOf(sel) === 'teamColumn'
+    case 'children': return hasCards(panelOf(sel))
       ? ['hide', 'reset', 'front', 'back', 'selectCard', 'selectTeam']
       : ['hide', 'reset', 'front', 'back', 'selectTeam'];
     default: return [];
