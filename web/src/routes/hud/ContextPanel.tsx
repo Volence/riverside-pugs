@@ -11,9 +11,9 @@ import {
 import { weaponKey } from '../../hud/weapons';
 import { fontFace } from '../../hud/render';
 import { elementById, type HudElement } from '../../hud/elements';
-import { elementRect, teamLayout, cardChild, baseHasChild, isFreeTeam } from '../../hud/build';
+import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam } from '../../hud/build';
 import { baseOf } from '../../hud/base';
-import { teamChild } from '../../hud/children';
+import { childDef, panelChildren } from '../../hud/children';
 import {
   cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild,
   startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, patchWeapons, ammoOnly,
@@ -21,7 +21,7 @@ import {
 } from '../../hud/edit';
 import { unionBox } from '../../hud/guides';
 import { CrosshairControls } from './CrosshairControls';
-import { TEAMMATES, type Selection } from '../../hud/selection';
+import { TEAMMATES, panelOf, type Selection } from '../../hud/selection';
 import {
   Slider, SliderNum, Field, patchNum, endsOn, hexOf, alphaPct, withHex, withAlphaPct, type Edit, type EditMode, type Patch,
 } from './controls';
@@ -367,23 +367,28 @@ export function ElementControls(
   );
 }
 
+/** Said under a teammate piece's controls: one file is loaded for every card. */
+const EVERY_CARD = "Edits inside a card apply to every teammate's card.";
+/** Whether a panel's file is loaded once per teammate card. */
+const repeatsCards = (panel: string): boolean => panelChildren(panel)?.repeat === 'cards';
+
 /**
- * The controls for one child of the teammate card, built only from its
- * registry entry. Numbers are unscaled units in the card file's own frame
- * (what a ChildOverride stores), read back through cardChild so a child
- * with no edits shows real numbers. Square art gets one Size; labels a text
+ * The controls for one child of a registered panel (the teammate card by
+ * default), built only from its registry entry. Numbers are unscaled units
+ * in the panel file's own frame (what a ChildOverride stores), read back
+ * through panelChild so a child with no edits shows real numbers. Square art gets one Size; labels a text
  * size and, where the game honours it, a colour.
  */
 export function ChildControls(
-  { design, edit, end, name, onBack }: {
-    design: HudDesign; edit: Edit; end: () => void; name: string; onBack: () => void;
+  { design, edit, end, name, onBack, panel = 'teamColumn' }: {
+    design: HudDesign; edit: Edit; end: () => void; name: string; onBack: () => void; panel?: string;
   },
 ) {
-  const def = teamChild(name);
-  const info = cardChild(design, name);
+  const def = childDef(panel, name);
+  const info = panelChild(design, panel, name);
   if (!def || !info) return null;
-  const o = design.children.teamColumn?.[name] ?? {};
-  const patch = (p: Partial<ChildOverride>, mode: EditMode = 'step') => edit((d) => patchChild(d, name, p), mode);
+  const o = design.children[panel]?.[name] ?? {};
+  const patch = (p: Partial<ChildOverride>, mode: EditMode = 'step') => edit((d) => patchChild(d, name, p, panel), mode);
   // The same guard and clamp as patchNum, through the child table.
   const num = (e: Event, key: ChildRangeKey, to: (n: number) => Partial<ChildOverride>) => {
     const n = parseFloat((e.target as HTMLInputElement).value);
@@ -395,7 +400,7 @@ export function ChildControls(
   // image (a flat-colour texture, where an RGB tint would draw no visible difference) drops the word
   // entirely for just "Opacity", since there is no swatch to name.
   const colourWord = def.opacityOnly ? 'Opacity' : def.kind === 'image' ? 'Tint' : 'Colour';
-  const reset = () => edit((d) => resetChild(d, name));
+  const reset = () => edit((d) => resetChild(d, name, panel));
 
   return (
     <Field legend={def.label}>
@@ -459,14 +464,14 @@ export function ChildControls(
         </div>
       )}
       {def.note && <p class="muted hud__note">{def.note}</p>}
-      <p class="muted hud__note">Edits inside a card apply to every teammate's card.</p>
-      {def.addable && !baseHasChild(baseOf(design), name) && (
-        <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={() => edit((d) => patchChild(d, name, { on: false }))}>
+      {repeatsCards(panel) && <p class="muted hud__note">{EVERY_CARD}</p>}
+      {def.addable && !baseHasChild(baseOf(design), name, panel) && (
+        <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={() => edit((d) => patchChild(d, name, { on: false }, panel))}>
           {`Remove the ${def.label.toLowerCase()}`}
         </button>
       )}
       <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this child</button>
-      <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={onBack}>Back to Teammates</button>
+      <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={onBack}>{`Back to ${elementById(panel)?.label ?? 'Teammates'}`}</button>
     </Field>
   );
 }
@@ -493,25 +498,29 @@ function AlignRow({ onAlign }: { onAlign: (how: Align) => void }) {
 }
 
 /**
- * Several pieces of the teammate card: the group's X and Y (the box around
- * them, in the card file's frame, moving all of them), Align, Visible for
- * all and Reset all. Every edit is the one card file, so every card follows.
+ * Several pieces of one panel (the teammate card by default): the group's X
+ * and Y (the box around them, in the panel file's frame, moving all of
+ * them), Align, Visible for all and Reset all. On the teammate card every
+ * edit is the one card file, so every card follows.
  */
-export function PiecesControls({ design, edit, end, names }: { design: HudDesign; edit: Edit; end: () => void; names: string[] }) {
-  const box = unionBox(Object.values(startsOf(design, names)));
+export function PiecesControls(
+  { design, edit, end, names, panel = 'teamColumn' }: { design: HudDesign; edit: Edit; end: () => void; names: string[]; panel?: string },
+) {
+  const box = unionBox(Object.values(startsOf(design, names, panel)));
   if (!box) return null;
-  const allVisible = names.every((n) => cardChild(design, n)?.visible);
+  const allVisible = names.every((n) => panelChild(design, panel, n)?.visible);
   const place = (key: 'x' | 'y', e: Event) => {
     const n = parseFloat((e.target as HTMLInputElement).value);
     if (!Number.isFinite(n)) return;
     edit((d) => {
-      const b = unionBox(Object.values(startsOf(d, names)));
-      return b ? placeChildren(d, names, key === 'x' ? n : b.x, key === 'y' ? n : b.y) : d;
+      const b = unionBox(Object.values(startsOf(d, names, panel)));
+      return b ? placeChildren(d, names, key === 'x' ? n : b.x, key === 'y' ? n : b.y, panel) : d;
     }, 'gesture');
   };
+  const where = panel === 'teamColumn' ? 'the teammate card' : (elementById(panel)?.label ?? panel);
   return (
-    <Field legend={`${names.length} pieces in the teammate card`}>
-      <p class="muted hud__note">Edits inside a card apply to every teammate's card.</p>
+    <Field legend={`${names.length} pieces in ${where}`}>
+      {repeatsCards(panel) && <p class="muted hud__note">{EVERY_CARD}</p>}
       <div class="hud__row2">
         <label class="hud__field">
           <span>X</span>
@@ -522,15 +531,15 @@ export function PiecesControls({ design, edit, end, names }: { design: HudDesign
           <input type="number" value={Math.round(box.y)} onInput={(e) => place('y', e)} {...endsOn(end)} />
         </label>
       </div>
-      <AlignRow onAlign={(how) => edit((d) => alignChildren(d, names, how))} />
+      <AlignRow onAlign={(how) => edit((d) => alignChildren(d, names, how, panel))} />
       <label class="hud__check">
         <input
           type="checkbox" checked={allVisible}
-          onChange={(e) => { const v = (e.target as HTMLInputElement).checked; edit((d) => setChildrenVisible(d, names, v)); }}
+          onChange={(e) => { const v = (e.target as HTMLInputElement).checked; edit((d) => setChildrenVisible(d, names, v, panel)); }}
         />
         <span>Visible</span>
       </label>
-      <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={() => edit((d) => resetChildren(d, names))}>Reset all</button>
+      <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={() => edit((d) => resetChildren(d, names, panel))}>Reset all</button>
     </Field>
   );
 }
@@ -665,7 +674,12 @@ export function ContextPanel(
         : <CardsControls design={design} edit={edit} end={end} cards={sel.cards} onWentFree={onWentFree} />;
     case 'children':
       return sel.names.length === 1
-        ? <ChildControls design={design} edit={edit} end={end} name={sel.names[0]} onBack={() => onSelect(TEAMMATES)} />
-        : <PiecesControls design={design} edit={edit} end={end} names={sel.names} />;
+        ? (
+          <ChildControls
+            design={design} edit={edit} end={end} name={sel.names[0]} panel={panelOf(sel)}
+            onBack={() => onSelect(panelOf(sel) === 'teamColumn' ? TEAMMATES : { kind: 'elements', ids: [panelOf(sel)] })}
+          />
+        )
+        : <PiecesControls design={design} edit={edit} end={end} names={sel.names} panel={panelOf(sel)} />;
   }
 }

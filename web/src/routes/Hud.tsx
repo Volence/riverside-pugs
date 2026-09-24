@@ -14,10 +14,10 @@ import {
 import { screenW, SCREEN_H } from '../hud/units';
 import { elementById } from '../hud/elements';
 import {
-  elementRect, teamLayout, teamCardRects, cardFrame, isFreeTeam, packHud, importedHasXhair, splatterProblem,
+  elementRect, teamLayout, teamCardRects, panelFrame, isFreeTeam, packHud, importedHasXhair, splatterProblem,
   type BuildAssets, type BuildReport, type CardChild,
 } from '../hud/build';
-import { drawHud, visibleElements, type Side } from '../hud/mock';
+import { drawHud, visibleElements, panelBoxes, type Side } from '../hud/mock';
 import type { CardState } from '../hud/render';
 import type { WeaponHeld } from '../hud/weapons';
 import { SLOTS, type StyleSlot } from '../hud/slots';
@@ -27,19 +27,19 @@ import { readHudUpload, hudId } from '../hud/upload';
 import { importProblem } from '../hud/importCheck';
 import { hudStore, type HudMeta } from '../hud/hudStore';
 import * as undoStack from '../hud/history';
-import { teamChild } from '../hud/children';
+import { childDef } from '../hud/children';
 import {
   hasOverrides, withImport, withPreset, hasLayoutEdits,
   moveElements, moveCards, cardStarts, freeInPlace, moveChildren, startsOf, nudgeSelection,
   resizeBox, resizeElement, scaleElement, resizeChild, scaleChildren, cornerFactor, anchorOf,
-  setSelectionVisible, patchChild, hideSelection, resetSelection,
+  setSelectionVisible, patchChild, hideSelection, resetSelection, raiseChild,
   patchSplatter, withSplatterImage, resetSplatter, splatterKind,
 } from '../hud/edit';
 import { snapMove, snapEdges, unionBox, type Guide, type Snap, type Handle } from '../hud/guides';
 import {
   NONE, TEAMMATES, cardsOf, hitAt, targetOf, pick, clickSelect, dragIntent, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
   sanitize, selectionKey, selectedIds, selectionFrames, sectionTargets, pieceTargets, pieceGuideToScreen,
-  selectionBox, handlesFor, handlePoint, handleAt, isPicked, menuActions, elementFrame,
+  selectionBox, handlesFor, handlePoint, handleAt, isPicked, menuActions, elementFrame, panelOf,
   type Selection, type Hit, type Mods, type Crumb, type MenuAction,
 } from '../hud/selection';
 import { ContextMenu } from './hud/ContextMenu';
@@ -256,12 +256,20 @@ interface Press { cx: number; cy: number; ux: number; uy: number; mods: Mods; hi
 type Drag =
   | { kind: 'elements'; ids: string[]; starts: Record<string, Box> }
   | { kind: 'cards'; cards: number[]; starts: Record<number, Box> }
-  | { kind: 'children'; names: string[]; card: number; starts: Record<string, CardChild> }
+  | { kind: 'children'; names: string[]; card: number; panel: string; starts: Record<string, CardChild> }
   | { kind: 'box' }
   | { kind: 'resizeElement'; id: string; handle: Handle; start: Box }
   | { kind: 'scaleElement'; id: string; handle: Handle; start: Box; scale: number }
-  | { kind: 'resizePiece'; name: string; card: number; handle: Handle; start: CardChild }
-  | { kind: 'scalePieces'; names: string[]; handle: Handle; starts: Record<string, CardChild>; box: Box };
+  | { kind: 'resizePiece'; name: string; card: number; panel: string; handle: Handle; start: CardChild }
+  | { kind: 'scalePieces'; names: string[]; panel: string; handle: Handle; starts: Record<string, CardChild>; box: Box };
+
+/**
+ * The screen box a piece's guides are drawn in: its teammate card (every
+ * card, the fourth included, which Free lists, as selectionBox has it), or
+ * a single panel's one box.
+ */
+const pieceBox = (d: HudDesign, panel: string, card: number): Box | undefined =>
+  (panel === 'teamColumn' ? teamCardRects(d, d.aspect)[card] : panelBoxes(d, panel)[card]);
 
 /** A press and release within this many screen pixels is a click; anything further is a drag. */
 const CLICK_PX = 3;
@@ -273,8 +281,12 @@ const RESIZE_CURSOR: Record<Handle, string> = {
   ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize',
 };
 const MENU_LABELS: Record<MenuAction, string> = {
-  hide: 'Hide', reset: 'Reset', selectCard: 'Select whole card', selectTeam: 'Select Teammates',
+  hide: 'Hide', reset: 'Reset', front: 'Bring to front', back: 'Send to back', selectCard: 'Select whole card', selectTeam: 'Select Teammates',
 };
+/** A menu item's text: 'selectTeam' names the element a single panel's pieces climb to. */
+const menuLabel = (a: MenuAction, s: Selection): string => (a === 'selectTeam' && s.kind === 'children' && panelOf(s) !== 'teamColumn'
+  ? `Select ${elementById(panelOf(s))?.label ?? 'panel'}`
+  : MENU_LABELS[a]);
 /** Said on the status line when moving a card takes a Row or Column team into Free. */
 const WENT_FREE = 'Teammates switched to Free layout';
 /** Said on the status line when localStorage refuses the design, most often over its quota with uploads in it. */
@@ -449,7 +461,9 @@ export default function Hud() {
   const xhairSelected = sel.kind === 'elements' && sel.ids.length === 1 && sel.ids[0] === 'xhair';
   // A new design wholesale (another preset, an import, a share link) keeps
   // an element selection and climbs cards or pieces to the Teammates.
-  const dropPicks = () => setSel((s) => (s.kind === 'cards' || s.kind === 'children' ? TEAMMATES : s));
+  const dropPicks = () => setSel((s) => (s.kind === 'children' && panelOf(s) !== 'teamColumn'
+    ? { kind: 'elements', ids: [panelOf(s)] }
+    : s.kind === 'cards' || s.kind === 'children' ? TEAMMATES : s));
   // Which state the teammate cards are previewed in. Game code picks it in
   // game; this only changes the picture, never the design or the file.
   const [cardState, setCardState] = useState<CardState>('healthy');
@@ -698,13 +712,14 @@ export default function Hud() {
         : { kind: 'scaleElement', id, handle, start: elementFrame(d, id), scale: d.elements[id]?.scale ?? 1 };
     }
     if (sel.kind === 'children') {
-      const starts = startsOf(d, sel.names);
+      const panel = panelOf(sel);
+      const starts = startsOf(d, sel.names, panel);
       if (sel.names.length === 1) {
         const start = starts[sel.names[0]];
-        return start ? { kind: 'resizePiece', name: sel.names[0], card: sel.card, handle, start } : null;
+        return start ? { kind: 'resizePiece', name: sel.names[0], card: sel.card, panel, handle, start } : null;
       }
       const box = unionBox(Object.values(starts));
-      return box ? { kind: 'scalePieces', names: sel.names, handle, starts, box } : null;
+      return box ? { kind: 'scalePieces', names: sel.names, panel, handle, starts, box } : null;
     }
     return null;
   };
@@ -732,7 +747,7 @@ export default function Hud() {
           return [id, { x, y, w, h }];
         })) };
       case 'cards': return { kind: 'cards', cards: s.cards, starts: cardStarts(d, s.cards) };
-      case 'children': return { kind: 'children', names: s.names, card: s.card, starts: startsOf(d, s.names) };
+      case 'children': return { kind: 'children', names: s.names, card: s.card, panel: panelOf(s), starts: startsOf(d, s.names, panelOf(s)) };
       default: return null;
     }
   };
@@ -776,33 +791,33 @@ export default function Hud() {
       return;
     }
     if (d.kind === 'resizePiece') {
-      const f = cardFrame(cur);
+      const f = panelFrame(cur, d.panel);
       const dx = dux / f.k, dy = duy / f.k;
-      const snaps = teamChild(d.name)?.box === 'wh' && !alt && !shift;
-      const s = snaps ? snapEdges(resizeBox(d.start, d.handle, dx, dy, false, 1), d.handle, pieceTargets(cur, cardState, [d.name])) : NO_SNAP;
-      const card = teamCardRects(cur, cur.aspect)[d.card];
-      setGuides(s.guides.map((g) => pieceGuideToScreen(g, card, f)));
-      edit((x) => resizeChild(x, d.name, d.start, d.handle, dx + s.dx, dy + s.dy, shift), 'gesture');
+      const snaps = childDef(d.panel, d.name)?.box === 'wh' && !alt && !shift;
+      const s = snaps ? snapEdges(resizeBox(d.start, d.handle, dx, dy, false, 1), d.handle, pieceTargets(cur, cardState, [d.name], d.panel)) : NO_SNAP;
+      const card = pieceBox(cur, d.panel, d.card);
+      setGuides(card ? s.guides.map((g) => pieceGuideToScreen(g, card, f)) : []);
+      edit((x) => resizeChild(x, d.name, d.start, d.handle, dx + s.dx, dy + s.dy, shift, d.panel), 'gesture');
       return;
     }
     if (d.kind === 'scalePieces') {
-      const f = cardFrame(cur);
+      const f = panelFrame(cur, d.panel);
       const k = cornerFactor(d.box, d.handle, dux / f.k, duy / f.k);
-      edit((x) => scaleChildren(x, d.names, d.starts, anchorOf(d.box, d.handle), k), 'gesture');
+      edit((x) => scaleChildren(x, d.names, d.starts, anchorOf(d.box, d.handle), k, d.panel), 'gesture');
       return;
     }
     if (d.kind === 'children') {
       // Pieces are stored unscaled in the card file's unfitted frame: the
       // pointer delta is divided by the scale, the snap is found in that
       // frame, and its guides are drawn where the pieces are drawn.
-      const f = cardFrame(cur);
+      const f = panelFrame(cur, d.panel);
       const dx = dux / f.k, dy = duy / f.k;
       const start = unionBox(Object.values(d.starts));
       if (!start) return;
-      const s = alt ? NO_SNAP : snapMove({ ...start, x: start.x + dx, y: start.y + dy }, pieceTargets(cur, cardState, d.names));
-      const card = teamCardRects(cur, cur.aspect)[d.card];
-      setGuides(s.guides.map((g) => pieceGuideToScreen(g, card, f)));
-      edit((x) => moveChildren(x, d.names, d.starts, dx + s.dx, dy + s.dy), 'gesture');
+      const s = alt ? NO_SNAP : snapMove({ ...start, x: start.x + dx, y: start.y + dy }, pieceTargets(cur, cardState, d.names, d.panel));
+      const card = pieceBox(cur, d.panel, d.card);
+      setGuides(card ? s.guides.map((g) => pieceGuideToScreen(g, card, f)) : []);
+      edit((x) => moveChildren(x, d.names, d.starts, dx + s.dx, dy + s.dy, d.panel), 'gesture');
       return;
     }
     const moving: Selection = d.kind === 'cards' ? cardsOf(d.cards) : { kind: 'elements', ids: d.ids };
@@ -897,8 +912,9 @@ export default function Hud() {
   const runMenu = (a: MenuAction, s: Selection) => {
     if (a === 'hide') edit((d) => hideSelection(d, s));
     else if (a === 'reset') edit((d) => resetSelection(d, s));
+    else if ((a === 'front' || a === 'back') && s.kind === 'children') edit((d) => raiseChild(d, s.names, a, panelOf(s)));
     else if (a === 'selectCard' && s.kind === 'children') setSel(cardsOf([s.card]));
-    else if (a === 'selectTeam') setSel(TEAMMATES);
+    else if (a === 'selectTeam') setSel(s.kind === 'children' && panelOf(s) !== 'teamColumn' ? { kind: 'elements', ids: [panelOf(s)] } : TEAMMATES);
   };
 
   // Arrows nudge (Shift by 10), Escape climbs or cancels a drag, Tab and
@@ -1196,7 +1212,7 @@ export default function Hud() {
             design={design} side={side} sel={sel}
             onPick={(t, shift) => setSel((s) => pick(s, t, shift))}
             onVisible={(t, v) => edit((d) => setSelectionVisible(d, t, v))}
-            onAdd={(name) => { edit((d) => patchChild(d, name, { on: true })); setSel({ kind: 'children', names: [name], card: 0 }); }}
+            onAdd={(name, panel) => { edit((d) => patchChild(d, name, { on: true }, panel)); setSel({ kind: 'children', names: [name], card: 0, ...(panel === 'teamColumn' ? {} : { panel }) }); }}
             onKeyDown={onKeyDown}
           /></Guard>}
         </Panel>
@@ -1247,7 +1263,7 @@ export default function Hud() {
             {menu && (
               <ContextMenu
                 x={menu.x} y={menu.y} onClose={(refocus) => { setMenu(null); if (refocus) canvas.current?.focus(); }}
-                items={menuActions(menu.sel).map((a) => ({ label: MENU_LABELS[a], run: () => runMenu(a, menu.sel) }))}
+                items={menuActions(menu.sel).map((a) => ({ label: menuLabel(a, menu.sel), run: () => runMenu(a, menu.sel) }))}
               />
             )}
           </div>

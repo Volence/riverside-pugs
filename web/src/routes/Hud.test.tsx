@@ -1224,7 +1224,7 @@ describe('Hud page', () => {
     const canvas = unitCanvas(container);
     fireEvent.contextMenu(canvas, { clientX: 24, clientY: 454 });
     expect(screen.getByRole('menu')).toBeTruthy();
-    expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Hide', 'Reset', 'Select whole card', 'Select Teammates']);
+    expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Hide', 'Reset', 'Bring to front', 'Send to back', 'Select whole card', 'Select Teammates']);
     expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Hide' }));
     expect(screen.queryByRole('menu')).toBeNull();
@@ -1247,7 +1247,7 @@ describe('Hud page', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
     fireEvent.contextMenu(canvas, { clientX: 24, clientY: 454 });
-    expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Hide', 'Reset', 'Select whole card', 'Select Teammates']);
+    expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Hide', 'Reset', 'Bring to front', 'Send to back', 'Select whole card', 'Select Teammates']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Select whole card' }));
     expect(screen.getByText('Teammate card 1', { selector: 'legend' })).toBeTruthy();
     // (133, 442) is on card 1, on the splatter but no other piece: with the card already the
@@ -1266,7 +1266,42 @@ describe('Hud page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
     fireEvent.change(screen.getByRole('combobox', { name: /^Layout/ }), { target: { value: 'free' } });
     fireEvent.contextMenu(canvas, { clientX: 24, clientY: 454 });
-    expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Hide', 'Reset', 'Select whole card', 'Select Teammates']);
+    expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Hide', 'Reset', 'Bring to front', 'Send to back', 'Select whole card', 'Select Teammates']);
+  });
+
+  it('offers Bring to front and Send to back for a piece, and Send to back saves a zpos under the lowest in the card file', async () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.contextMenu(canvas, { clientX: 24, clientY: 454 });
+    const items = screen.getAllByRole('menuitem').map((b) => b.textContent);
+    expect(items).toContain('Bring to front');
+    expect(items).toContain('Send to back');
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Send to back' }));
+    // Stock teammatepanel.res: BackgroundImage at -1 is the lowest zpos in the file.
+    await waitFor(() => expect(JSON.parse(localStorage.getItem('hud') ?? '{}').children?.teamColumn?.Head?.z).toBe(-2));
+  });
+
+  it('lists the survivor Layers exactly as before the pieces went per panel', () => {
+    const { container } = render(<Hud />);
+    const rows = Array.from(container.querySelectorAll('.hud__layer')).map((r) => [r.className.replace('hud__layer ', ''), r.textContent]);
+    expect(rows).toEqual([
+      ['hud__layer--d0', 'Your health'], ['hud__layer--d0', 'Teammates'],
+      ['hud__layer--d1', 'Card 1'], ['hud__layer--d1', 'Card 2'], ['hud__layer--d1', 'Card 3'],
+      ['hud__layer--d1', 'Portrait'], ['hud__layer--d1', 'Health bar'], ['hud__layer--d1', 'Name'], ['hud__layer--d1', '＋ Health number'],
+      ['hud__layer--d1', 'Item icons'], ['hud__layer--d1', 'Status text'], ['hud__layer--d1', 'Damage splatter'],
+      ['hud__layer--d1', 'Down pictureshown when down'], ['hud__layer--d1', 'Dead pictureshown when dead'],
+      ['hud__layer--d1 hud__layer--hidden', 'Voice iconshown when talking'],
+      ['hud__layer--d0', 'Weapons'], ['hud__layer--d0', 'Chat'], ['hud__layer--d0', 'Use / revive bar'], ['hud__layer--d0', 'Kill / incap notices'],
+      ['hud__layer--d0 hud__layer--hidden', 'Custom crosshair'],
+    ]);
+  });
+
+  it('keeps the teammate child controls saying the edit applies to every card, and going back to the Teammates', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Portrait' }));
+    expect(screen.getByText("Edits inside a card apply to every teammate's card.")).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Teammates' }));
+    expect(screen.getByText('Teammates', { selector: 'legend' })).toBeTruthy();
   });
 
   it('closes the menu with Escape or a press elsewhere, and opens none over empty screen', () => {

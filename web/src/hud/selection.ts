@@ -507,14 +507,22 @@ export function pieceGuideToScreen(g: Guide, card: Box, f: CardFrame): Guide {
   return g.axis === 'x' ? { axis: 'x', at: X(g.at), from: Y(g.from), to: Y(g.to) } : { axis: 'y', at: Y(g.at), from: X(g.from), to: X(g.to) };
 }
 
-export type MenuAction = 'hide' | 'reset' | 'selectCard' | 'selectTeam';
+export type MenuAction = 'hide' | 'reset' | 'front' | 'back' | 'selectCard' | 'selectTeam';
 
-/** The right-click menu for a selection. A card cannot be hidden alone, and has no reset of its own. */
+/**
+ * The right-click menu for a selection. A card cannot be hidden alone, and
+ * has no reset of its own. Pieces also go to the front or the back of their
+ * file (edit.ts's raiseChild). A single panel has no card level, so its
+ * pieces climb straight to the element ('selectTeam' selects the panel's
+ * element, whatever it is).
+ */
 export function menuActions(sel: Selection): MenuAction[] {
   switch (sel.kind) {
     case 'elements': return ['hide', 'reset'];
     case 'cards': return ['selectTeam'];
-    case 'children': return ['hide', 'reset', 'selectCard', 'selectTeam'];
+    case 'children': return panelOf(sel) === 'teamColumn'
+      ? ['hide', 'reset', 'front', 'back', 'selectCard', 'selectTeam']
+      : ['hide', 'reset', 'front', 'back', 'selectTeam'];
     default: return [];
   }
 }

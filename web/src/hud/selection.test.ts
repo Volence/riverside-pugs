@@ -398,7 +398,7 @@ describe('snap targets', () => {
 describe('the right-click menu', () => {
   it('offers what applies to the selection', () => {
     expect(menuActions({ kind: 'elements', ids: ['chat'] })).toEqual(['hide', 'reset']);
-    expect(menuActions({ kind: 'children', names: ['Head'], card: 0 })).toEqual(['hide', 'reset', 'selectCard', 'selectTeam']);
+    expect(menuActions({ kind: 'children', names: ['Head'], card: 0 })).toEqual(['hide', 'reset', 'front', 'back', 'selectCard', 'selectTeam']);
     expect(menuActions({ kind: 'cards', cards: [0] })).toEqual(['selectTeam']);
     expect(menuActions({ kind: 'cards', cards: [0, 1] })).toEqual(['selectTeam']);
     expect(menuActions(NONE)).toEqual([]);
