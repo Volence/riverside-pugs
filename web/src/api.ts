@@ -1454,6 +1454,8 @@ export interface CommunityEntry {
   advanced?: boolean;
   importName?: string | null;
   previewUrl?: string | null;
+  /** HUDs only: the infected side's preview; null on entries shared before there was one. */
+  previewInfectedUrl?: string | null;
 }
 
 /** One entry with its payload, from GET /api/community/:id. */

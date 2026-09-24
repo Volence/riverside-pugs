@@ -4,7 +4,7 @@
  * Download on the right. The existing controls, gathered in one place.
  */
 import { Tabs } from '../../components/bits';
-import type { Backdrop } from '../../crosshair/draw';
+import { GAME_BACKDROPS, type Backdrop, type GameBackdrop } from '../../crosshair/draw';
 import type { HudDesign } from '../../hud/design';
 import type { Aspect } from '../../hud/units';
 import type { Side } from '../../hud/mock';
@@ -12,8 +12,10 @@ import type { PreviewState, SurvivorState } from '../../hud/render';
 import type { WeaponHeld } from '../../hud/weapons';
 import { useRef, useState } from 'preact/hooks';
 
+/** Real in-game shots first (the default is the side's own, SIDE_BACKDROP), then the drawn and flat ones. */
+const GAME: GameBackdrop[] = ['survivor-hilltop', 'survivor-subway', 'infected-hunter', 'infected-ghost'];
 const BACKDROPS: [Backdrop, string][] = [
-  ['scene', 'Saferoom'], ['dark', 'Dark'], ['bright', 'Bright'], ['grey', 'Grey'], ['shot', 'My screenshot'],
+  ['scene', 'Drawn saferoom'], ['dark', 'Dark'], ['bright', 'Bright'], ['grey', 'Grey'], ['shot', 'My screenshot'],
 ];
 
 const SURVIVOR_STATES: { key: SurvivorState; label: string }[] = [
@@ -202,7 +204,12 @@ export function Toolbar(p: ToolbarProps) {
       <label>
         Backdrop{' '}
         <select value={p.backdrop} onChange={(e) => p.onBackdrop((e.target as HTMLSelectElement).value as Backdrop)}>
-          {BACKDROPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          <optgroup label="In game">
+            {GAME.map((v) => <option key={v} value={v}>{GAME_BACKDROPS[v].label}</option>)}
+          </optgroup>
+          <optgroup label="Plain">
+            {BACKDROPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </optgroup>
         </select>
       </label>
       {p.backdrop === 'shot' && (

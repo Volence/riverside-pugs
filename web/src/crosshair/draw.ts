@@ -1,7 +1,9 @@
 /** Crosshair geometry, shared by the live preview and the exported texture. */
 
 export type Shape = 'cross' | 'crossdot' | 't' | 'dot' | 'circle' | 'circledot' | 'image';
-export type Backdrop = 'scene' | 'dark' | 'bright' | 'grey' | 'shot';
+/** A real in-game shot with the HUD off: web/public/hud-backdrops/, from /home/volence/l4d/hud/backdrops/ (its README says where each was taken). */
+export type GameBackdrop = 'survivor-hilltop' | 'survivor-subway' | 'infected-hunter' | 'infected-ghost';
+export type Backdrop = 'scene' | 'dark' | 'bright' | 'grey' | 'shot' | GameBackdrop;
 export type Res = '768' | '1080' | '1440' | '2160';
 
 export interface CrosshairState {
@@ -121,19 +123,97 @@ export function drawCrosshair(
   }
 }
 
+/** The in-game shots, all 1920 x 1080 JPEGs. */
+export const GAME_BACKDROPS: Record<GameBackdrop, { src: string; label: string }> = {
+  'survivor-hilltop': { src: '/hud-backdrops/survivor-hilltop.jpg', label: 'Survivor: forest' },
+  'survivor-subway': { src: '/hud-backdrops/survivor-subway.jpg', label: 'Survivor: saferoom' },
+  'infected-hunter': { src: '/hud-backdrops/infected-hunter.jpg', label: 'Infected: Hunter' },
+  'infected-ghost': { src: '/hud-backdrops/infected-ghost.jpg', label: 'Infected: ghost' },
+};
+
+/**
+ * The shot each side is previewed on when nobody picked one: the HUD editor's
+ * default and the shared previews'. The Hunter rather than the ghost for
+ * infected, because the ghost shot has a smeared band over the hands along
+ * its bottom edge, right where the HUD sits.
+ */
+export const SIDE_BACKDROP: Record<'survivor' | 'infected', GameBackdrop> = {
+  survivor: 'survivor-hilltop',
+  infected: 'infected-hunter',
+};
+
+export function isGameBackdrop(kind: string): kind is GameBackdrop {
+  return Object.hasOwn(GAME_BACKDROPS, kind);
+}
+
+interface GameShot { img: HTMLImageElement; state: 'loading' | 'ready' | 'failed'; waiting: (() => void)[] }
+const shots = new Map<GameBackdrop, GameShot>();
+
+function shotOf(kind: GameBackdrop): GameShot {
+  let s = shots.get(kind);
+  if (s) return s;
+  const img = new Image();
+  const shot: GameShot = { img, state: 'loading', waiting: [] };
+  const settle = (state: 'ready' | 'failed') => {
+    shot.state = state;
+    const waiting = shot.waiting;
+    shot.waiting = [];
+    for (const f of waiting) f();
+  };
+  img.onload = () => settle('ready');
+  img.onerror = () => settle('failed');
+  img.src = GAME_BACKDROPS[kind].src;
+  shots.set(kind, shot);
+  s = shot;
+  return s;
+}
+
+/** The shot once it has loaded, or null (and `onLoad` runs once it does). Loaded once per page. */
+export function gameBackdropImage(kind: GameBackdrop, onLoad?: () => void): HTMLImageElement | null {
+  const s = shotOf(kind);
+  if (s.state === 'ready') return s.img;
+  if (s.state === 'loading' && onLoad) s.waiting.push(onLoad);
+  return null;
+}
+
+/** The shot, waited for; null when it cannot load. */
+export function loadGameBackdrop(kind: GameBackdrop): Promise<HTMLImageElement | null> {
+  const s = shotOf(kind);
+  if (s.state !== 'loading') return Promise.resolve(s.state === 'ready' ? s.img : null);
+  return new Promise((resolve) => s.waiting.push(() => resolve(s.state === 'ready' ? s.img : null)));
+}
+
+/** Tests only: forget every loaded shot. */
+export function resetGameBackdrops(): void {
+  shots.clear();
+}
+
+/** Draw `img` (iw x ih) to cover the canvas, centred, cropping what is over. */
+function cover(ctx: CanvasRenderingContext2D, w: number, h: number, img: CanvasImageSource, iw: number, ih: number): void {
+  const r = Math.max(w / iw, h / ih);
+  const sw = iw * r;
+  const sh = ih * r;
+  ctx.drawImage(img, (w - sw) / 2, (h - sh) / 2, sw, sh);
+}
+
 /** The preview background. `shot` is a user-supplied screenshot; `scene` is a
  *  drawn stand-in for a saferoom, so the crosshair can be judged against both
- *  a light wall and a dark floor at once. */
+ *  a light wall and a dark floor at once; a GameBackdrop is a real in-game
+ *  shot, drawn dark until it has loaded, when `onLoad` runs so the caller
+ *  can paint again. */
 export function drawBackdrop(
   ctx: CanvasRenderingContext2D, w: number, h: number,
   kind: Backdrop, shotImage: CanvasImageSource | null, shotSize: { w: number; h: number } | null,
+  onLoad?: () => void,
 ): void {
   if (kind === 'shot' && shotImage && shotSize) {
-    const r = Math.max(w / shotSize.w, h / shotSize.h);
-    const sw = shotSize.w * r;
-    const sh = shotSize.h * r;
-    ctx.drawImage(shotImage, (w - sw) / 2, (h - sh) / 2, sw, sh);
+    cover(ctx, w, h, shotImage, shotSize.w, shotSize.h);
     return;
+  }
+  if (isGameBackdrop(kind)) {
+    const img = gameBackdropImage(kind, onLoad);
+    if (img) { cover(ctx, w, h, img, img.naturalWidth || 1920, img.naturalHeight || 1080); return; }
+    kind = 'dark';
   }
   const flat: Partial<Record<Backdrop, string>> = { dark: '#17161a', bright: '#c9c2b2', grey: '#7a7a7a' };
   const f = flat[kind];

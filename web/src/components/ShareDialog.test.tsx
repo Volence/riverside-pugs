@@ -32,12 +32,13 @@ const hudPrepared = (left: string[] = []): SharePrepared => ({
   kind: 'hud', name: '',
   hud: { design: validateDesign({ v: 1, name: 'mine', preset: 'modern' }), importFiles: null, left },
   preview: new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }),
+  previewInfected: new Blob([new Uint8Array([137, 80, 78, 71, 1])], { type: 'image/png' }),
 });
 
 beforeEach(() => {
   for (const fn of Object.values(mockCommunity)) fn.mockReset();
   mockCommunity.mine.mockResolvedValue(mine());
-  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview');
+  vi.spyOn(URL, 'createObjectURL').mockImplementation((b) => ((b as Blob).size === 5 ? 'blob:infected' : 'blob:preview'));
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -81,7 +82,7 @@ describe('the share dialog', () => {
   it('does not count an entry staff removed toward the cap', async () => {
     mockCommunity.mine.mockResolvedValue(mine([entry(4, 'First one'), { ...entry(5, 'Gone one'), removedByStaff: 'rude' }]));
     open();
-    await screen.findByAltText('The preview that will be shared');
+    await screen.findByAltText(/preview that will be shared/);
     expect(screen.queryByText(/already/)).toBeNull();
   });
 
@@ -93,13 +94,15 @@ describe('the share dialog', () => {
 
   it('shows the preview it will upload', async () => {
     open();
-    const img = await screen.findByAltText('The preview that will be shared') as HTMLImageElement;
+    const img = await screen.findByAltText(/preview that will be shared/) as HTMLImageElement;
     expect(img.getAttribute('src')).toBe('blob:preview');
+    fireEvent.click(screen.getByRole('button', { name: 'Infected' }));
+    expect((screen.getByAltText(/preview that will be shared, infected side/) as HTMLImageElement).getAttribute('src')).toBe('blob:infected');
   });
 
   it('keeps Share off until the title has 3 characters and the box is ticked', async () => {
     open();
-    await screen.findByAltText('The preview that will be shared');
+    await screen.findByAltText(/preview that will be shared/);
     expect(shareBtn().disabled).toBe(true);
     fireEvent.input(title(), { target: { value: 'ab' } });
     tick();
@@ -119,7 +122,7 @@ describe('the share dialog', () => {
     mockCommunity.shareHud.mockResolvedValue({ id: 42 });
     const onShared = vi.fn();
     open({ onShared });
-    await screen.findByAltText('The preview that will be shared');
+    await screen.findByAltText(/preview that will be shared/);
     fireEvent.input(title(), { target: { value: 'Clean one' } });
     fireEvent.input(screen.getByLabelText('Description'), { target: { value: 'Tidy.' } });
     tick();
@@ -130,6 +133,8 @@ describe('the share dialog', () => {
     expect(form).toBeInstanceOf(FormData);
     const meta = JSON.parse(form.get('meta') as string);
     expect(meta).toMatchObject({ title: 'Clean one', description: 'Tidy.', permission: true });
+    expect((form.get('preview') as Blob).size).toBe(4);
+    expect((form.get('previewInfected') as Blob).size).toBe(5);
     expect(onShared).toHaveBeenCalledWith(42);
   });
 
@@ -144,13 +149,13 @@ describe('the share dialog', () => {
     fireEvent.click(shareBtn());
     await screen.findByText(/Shared\. See it on the/);
     expect(mockCommunity.shareCrosshair).toHaveBeenCalledWith({ title: 'Tiny dot', description: '', art, permission: true });
-    expect(screen.queryByAltText('The preview that will be shared')).toBeNull();
+    expect(screen.queryByAltText(/preview that will be shared/)).toBeNull();
   });
 
   it("shows the server's refusal in .error", async () => {
     mockCommunity.shareHud.mockRejectedValue(new ApiError(400, 'That title is not allowed here.'));
     const { container } = open();
-    await screen.findByAltText('The preview that will be shared');
+    await screen.findByAltText(/preview that will be shared/);
     fireEvent.input(title(), { target: { value: 'Clean one' } });
     tick();
     fireEvent.click(shareBtn());

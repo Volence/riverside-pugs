@@ -1,5 +1,8 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { prepareHudShare, renderPreview, buildHudForm, PREVIEW_SIZE } from './publish';
+import { prepareHudShare, renderPreview, renderPreviews, buildHudForm, PREVIEW_SIZE } from './publish';
+import * as mock from '../hud/mock';
+import { DEFAULT_PREVIEW } from '../hud/render';
+import { resetGameBackdrops } from '../crosshair/draw';
 import { registerImport, unregisterImport, hasImport } from '../hud/base';
 import * as importCheck from '../hud/importCheck';
 import { validateDesign, type HudDesign } from '../hud/design';
@@ -14,7 +17,27 @@ afterEach(() => {
   used.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  resetGameBackdrops();
+  FakeImage.made = [];
 });
+
+/** An Image that loads (or fails) only when the test says so. */
+class FakeImage {
+  static made: FakeImage[] = [];
+  static auto: 'load' | 'error' | null = 'load';
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  naturalWidth = 1920;
+  naturalHeight = 1080;
+  private s = '';
+  constructor() { FakeImage.made.push(this); }
+  get src() { return this.s; }
+  set src(v: string) {
+    this.s = v;
+    const how = FakeImage.auto;
+    if (how) setTimeout(() => (how === 'load' ? this.onload?.() : this.onerror?.()), 0);
+  }
+}
 
 const modern = (): HudDesign => validateDesign({ v: 1, name: 'mine', preset: 'modern' });
 async function onImport(files: Map<string, Uint8Array>): Promise<HudDesign> {
@@ -58,14 +81,17 @@ describe('prepareHudShare', () => {
   });
 });
 
-/** happy-dom has no 2D context: a do-nothing one, and a toBlob that hands back a PNG-typed blob. */
+/** happy-dom has no 2D context: a do-nothing one that logs its calls, and a toBlob that hands back a PNG-typed blob. */
 function stubCanvas() {
   const made: HTMLCanvasElement[] = [];
   const blobTypes: (string | undefined)[] = [];
+  const calls: [string, unknown[]][] = [];
+  vi.stubGlobal('Image', FakeImage);
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement) {
     made.push(this);
     return new Proxy({}, {
-      get: (_t, k) => (k === 'canvas' ? this : (..._a: unknown[]) => {
+      get: (_t, k) => (k === 'canvas' ? this : (...a: unknown[]) => {
+        calls.push([String(k), a]);
         if (k === 'measureText') return { width: 10 };
         if (k === 'getImageData') return { data: new Uint8ClampedArray(4) };
         if (k === 'createLinearGradient' || k === 'createRadialGradient' || k === 'createPattern') return { addColorStop() {} };
@@ -76,22 +102,89 @@ function stubCanvas() {
   } as never);
   vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(function (this: HTMLCanvasElement, cb: BlobCallback, type?: string) {
     blobTypes.push(type);
+    calls.push(['toBlob', []]);
     cb(new Blob([new Uint8Array([0x89, 0x50])], { type: type ?? 'image/png' }));
   } as never);
-  return { made, blobTypes };
+  return { made, blobTypes, calls };
 }
+
+const lastDrawImage = (calls: [string, unknown[]][]) => {
+  const upTo = calls.findIndex(([k]) => k === 'toBlob');
+  return calls.slice(0, upTo).filter(([k, a]) => k === 'drawImage' && a[0] instanceof FakeImage).pop()?.[1];
+};
 
 describe('renderPreview', () => {
   for (const [aspect, w] of [['16:9', 960], ['4:3', 720], ['16:10', 864]] as const) {
     it(`draws ${aspect} at ${w}x540 and exports a PNG`, async () => {
       const { made, blobTypes } = stubCanvas();
-      const blob = await renderPreview(validateDesign({ v: 1, name: 'x', preset: 'stock', aspect }), { quietMs: 5, maxMs: 50 });
+      const blob = await renderPreview(validateDesign({ v: 1, name: 'x', preset: 'stock', aspect }), 'survivor', { quietMs: 5, maxMs: 50 });
       expect(PREVIEW_SIZE[aspect]).toEqual({ w, h: 540 });
       expect(blob.type).toBe('image/png');
       expect(blobTypes).toEqual(['image/png']);
       expect(made.some((c) => c.width === w && c.height === 540)).toBe(true);
     });
   }
+});
+
+describe('renderPreview on the in-game backdrops', () => {
+  const stock = () => validateDesign({ v: 1, name: 'x', preset: 'stock', aspect: '16:9' });
+
+  it('draws the survivor side on the forest shot, Healthy and holding the gun', async () => {
+    FakeImage.auto = 'load';
+    const { calls } = stubCanvas();
+    const hud = vi.spyOn(mock, 'drawHud');
+    await renderPreview(stock(), 'survivor', { quietMs: 5, maxMs: 50 });
+    const img = FakeImage.made.find((i) => i.src === '/hud-backdrops/survivor-hilltop.jpg');
+    expect(img).toBeTruthy();
+    expect(lastDrawImage(calls)).toEqual([img, 0, 0, 960, 540]);
+    expect(hud.mock.calls.at(-1)!.slice(4, 5)).toEqual(['survivor']);
+    expect(hud.mock.calls.at(-1)![7]).toEqual({ state: 'healthy', held: 'primary' });
+  });
+
+  it('draws the infected side on the Hunter shot, a spawned Hunter with its ability ready', async () => {
+    FakeImage.auto = 'load';
+    const { calls } = stubCanvas();
+    const hud = vi.spyOn(mock, 'drawHud');
+    await renderPreview(stock(), 'infected', { quietMs: 5, maxMs: 50 });
+    const img = FakeImage.made.find((i) => i.src === '/hud-backdrops/infected-hunter.jpg');
+    expect(lastDrawImage(calls)).toEqual([img, 0, 0, 960, 540]);
+    expect(hud.mock.calls.at(-1)![4]).toBe('infected');
+    expect(hud.mock.calls.at(-1)![7]).toEqual({ state: DEFAULT_PREVIEW });
+    expect(DEFAULT_PREVIEW).toMatchObject({ infected: 'alive', siClass: 'hunter', ability: 'ready' });
+  });
+
+  it('waits for the backdrop before it draws anything', async () => {
+    FakeImage.auto = null;
+    const { calls } = stubCanvas();
+    let done = false;
+    const p = renderPreview(stock(), 'survivor', { quietMs: 5, maxMs: 50 }).then((b) => { done = true; return b; });
+    await new Promise((r) => setTimeout(r, 80));
+    expect(done).toBe(false);
+    expect(calls.some(([k]) => k === 'fillRect' || k === 'drawImage')).toBe(false);
+    FakeImage.made[0]!.onload!();
+    await p;
+    expect(lastDrawImage(calls)?.[0]).toBe(FakeImage.made[0]);
+  });
+
+  it('falls back to the drawn saferoom when the shot cannot load', async () => {
+    FakeImage.auto = 'error';
+    const { calls, blobTypes } = stubCanvas();
+    await renderPreview(stock(), 'infected', { quietMs: 5, maxMs: 50 });
+    expect(blobTypes).toEqual(['image/png']);
+    expect(calls.some(([k]) => k === 'createLinearGradient')).toBe(true);
+    expect(lastDrawImage(calls)).toBeUndefined();
+  });
+
+  it('renderPreviews makes both sides', async () => {
+    FakeImage.auto = 'load';
+    const { blobTypes } = stubCanvas();
+    const hud = vi.spyOn(mock, 'drawHud');
+    const both = await renderPreviews(stock(), { quietMs: 5, maxMs: 50 });
+    expect(both.survivor).toBeInstanceOf(Blob);
+    expect(both.infected).toBeInstanceOf(Blob);
+    expect(blobTypes).toEqual(['image/png', 'image/png']);
+    expect(new Set(hud.mock.calls.map((c) => c[4]))).toEqual(new Set(['survivor', 'infected']));
+  });
 });
 
 describe('buildHudForm', () => {
@@ -101,6 +194,8 @@ describe('buildHudForm', () => {
     const d = modern();
     const form = buildHudForm({ title: 'Clean', description: 'd', permission: true, prepared: { design: d, importFiles: null, left: [] }, preview });
     expect([...form.keys()]).toEqual(['meta', 'preview']);
+    const both = buildHudForm({ title: 'Clean', description: 'd', permission: true, prepared: { design: d, importFiles: null, left: [] }, preview, previewInfected: preview });
+    expect([...both.keys()]).toEqual(['meta', 'preview', 'previewInfected']);
     const meta = JSON.parse(form.get('meta') as string);
     expect(meta).toEqual({ title: 'Clean', description: 'd', permission: true, design: JSON.stringify(d) });
     expect(form.get('preview')).toBeInstanceOf(Blob);
