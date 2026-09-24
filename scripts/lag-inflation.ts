@@ -37,7 +37,8 @@ const ghost0: number[] = [], ghostLag: number[] = [], hidden: number[] = [];
 const lags = new Map<number, number>();
 let withLos = 0;
 for (const path of files) {
-  const round = decodeRound(readFileSync(path));
+  let round;
+  try { round = decodeRound(readFileSync(path)); } catch { round = null; }
   if (!round) { console.error(`${path}: not readable, skipped`); continue; }
   const los = losView(round.header);
   if (los.known) withLos++;
