@@ -60,7 +60,8 @@ export function AdminPatches() {
             <table class="admin-table">
               <thead><tr><th>#</th><th>Name</th><th>Source</th><th>Since</th><th>Rounds</th><th>Servers</th><th>Public</th><th /></tr></thead>
               <tbody>
-                {list.filter((p) => triageOf(p) !== 'folded').flatMap((p) => {
+                {/* Newest first: the patch that matters is the latest one. */}
+                {[...list].reverse().filter((p) => triageOf(p) !== 'folded').flatMap((p) => {
                   const folded = list.filter((f) => triageOf(f) === 'folded' && f.foldedInto === p.id);
                   const main = (
                   <tr key={p.id} class={!p.reviewed && p.source === 'detected' ? 'admin-warn' : ''}>
