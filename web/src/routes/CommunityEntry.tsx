@@ -47,7 +47,8 @@ export function CommunityEntry({ id, session }: { id: string; session: Session }
         </p>
       )}
       {/* A removed entry is shown to staff as evidence, without the actions a
-          live one has: nothing is left to like, remove or open. */}
+          live one has: nothing is left to like, remove, open or download
+          (CommunityCard leaves those off a removed entry). */}
       {removed
         ? <CommunityCard entry={data} session={{ kind: 'anonymous' }} size="large" />
         : <CommunityCard entry={data} session={session} size="large" />}
