@@ -55,7 +55,7 @@ describe('gameValues', () => {
   let db: ReturnType<typeof openDb>;
   let s1: number;
   const INV = (tank: string, extra: Record<string, string> = {}) => ({
-    'c:z_tank_health': tank, 'c:tongue_drag_damage_amount': '0', 'p:l4d_skypounce.smx': '1.a',
+    'c:z_tank_health': tank, 'c:tongue_drag_damage_amount': '0', 'p:optional/l4d_skypounce.smx': '1.a',
     'w:weapon_smg.Damage': 'default', 'w:weapon_smg.SpreadPerShot': '0.22', ...extra,
   });
   beforeEach(() => {
