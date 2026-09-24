@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildHud, elementRect, pcSet, HIDE_FRAMES, hardHide, baseHasElement, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame, panelChild, panelFrame, writeKeys } from './build';
+import { buildHud, elementRect, pcSet, HIDE_FRAMES, CODE_SHOWN, hardHide, baseHasElement, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame, panelChild, panelFrame, writeKeys } from './build';
 import { parsePos, screenW } from './units';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride, type ChildOverride } from './design';
 import { parseKv, writeKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
@@ -1601,5 +1601,38 @@ describe('hiding an element hides it in game (probe B2 and B3: visible 0 alone h
     const plain = parseKv('"B"\n{\n"ControlName" "Label"\n"wide" "40"\n}\n')[0];
     hardHide(plain);
     expect(kvGet(plain, 'auto_wide_tocontents')).toBeUndefined();
+  });
+});
+
+describe('a hidden piece the game re-shows is moved out of its panel (probe 2F launch P)', () => {
+  // /home/volence/l4d/hud/probe-2f/p/shots/cards.png (from p-a.png and p-f.png): the teammate Name
+  // written visible 0 and 0 x 0 still drew its text at the card's bottom left, so game code shows it
+  // and sizes it to the name. Every other hidden piece stayed gone. A panel clips its children
+  // (probe Q2, /home/volence/l4d/hud/probe-phase2/b1/shots/crops/own-a.png), so the name goes far left of the card.
+  const CARD = 'resource/ui/hud/teammatepanel.res';
+  const hideName = (extra: Partial<HudDesign> = {}) => design({ children: { teamColumn: { Name: { visible: false } } } as HudDesign['children'], ...extra });
+
+  it('lists the teammate Name only', () => {
+    expect(CODE_SHOWN).toEqual({ teamColumn: ['Name'] });
+  });
+
+  it('writes a hidden Name at xpos -2000, still 0 x 0 and visible 0', () => {
+    const n = kvFind(tree(buildHud(hideName()), CARD), ['Name'])!;
+    expect(['xpos', 'visible', 'wide', 'tall'].map((k) => kvGet(n, k))).toEqual(['-2000', '0', '0', '0']);
+  });
+
+  it('keeps it out of the card when the card is fitted and scaled', () => {
+    const n = kvFind(tree(buildHud(hideName({ elements: { teamColumn: { fit: true, scale: 1.5 } } })), CARD), ['Name'])!;
+    expect(kvGet(n, 'xpos')).toBe('-2000');
+  });
+
+  it('is download-only: the preview and the side panel keep the file place', () => {
+    const d = hideName();
+    expect(kvGet(kvFind(buildTrees(d)(CARD), ['Name'])!, 'xpos')).toBe('13');
+    expect(panelChild(d, 'teamColumn', 'Name')).toMatchObject({ x: 13 });
+  });
+
+  it('leaves a shown Name where the file has it', () => {
+    expect(kvGet(kvFind(tree(buildHud(design({})), CARD), ['Name'])!, 'xpos')).toBe('13');
   });
 });

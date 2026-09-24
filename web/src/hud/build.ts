@@ -693,6 +693,39 @@ export const HIDE_FRAMES: Readonly<Record<string, readonly { file: string; block
 };
 
 /**
+ * Pieces game code shows and sizes itself, so a hidden one needs more than
+ * hardHide. Launch P of the slice 2.F probes
+ * (/home/volence/l4d/hud/probe-2f/p/shots/cards.png, from p-a.png and
+ * p-f.png) wrote every card and own-panel piece visible 0 and 0 x 0: all
+ * stayed gone except the teammate Name, whose text still drew at its place.
+ * The game cannot undo its parent's clip (probe Q2,
+ * /home/volence/l4d/hud/probe-phase2/b1/shots/crops/own-a.png), so
+ * codeShownPass moves such a piece CODE_SHOWN_X units left of its panel,
+ * further than any name is wide.
+ */
+export const CODE_SHOWN: Readonly<Record<string, readonly string[]>> = { teamColumn: ['Name'] };
+const CODE_SHOWN_X = '-2000';
+
+/**
+ * Download-only, like elementHidePass and for the same reason: the side
+ * panel and the preview read a hidden piece's place from buildTrees, and
+ * must keep showing the file's own. It runs after scalePass, so no multiply
+ * touches the number (it only has to be far out, not exact).
+ */
+function codeShownPass(work: Work, design: HudDesign) {
+  for (const [panelId, names] of Object.entries(CODE_SHOWN)) {
+    const panel = panelChildren(panelId);
+    const kids = design.children[panelId];
+    if (!panel || !kids) continue;
+    for (const name of names) {
+      if (kids[name]?.visible !== false) continue;
+      const b = work.optional(panel.file, [name]);
+      if (b) pcSet(b, 'xpos', CODE_SHOWN_X);
+    }
+  }
+}
+
+/**
  * Hard-hides every hidden element. Probes B2 and B3
  * (/home/volence/l4d/hud/probe-phase2/RESULTS.md; shots b2/shots/b2/b2-a.png
  * to e, b2/shots-kill/b2-killnotice/b2-f.png, b3/shots-rerun/b3-rerun/b3-a.png
@@ -1527,6 +1560,8 @@ export interface BuildReport { replaced: string[] }
  * - `elementHidePass` runs after `teamPass` and `scalePass`, since both write
  *   sizes it must zero, and only here: buildTrees skips it, so the preview
  *   keeps a hidden element whole (its own doc comment).
+ * - `codeShownPass` runs after `scalePass` and only here, for the same
+ *   reasons: it moves a hidden piece the game re-shows out of its panel.
  */
 export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: BuildReport): VpkFile[] {
   const key = baseOf(design);
@@ -1541,6 +1576,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   teamPass(work, design);
   scalePass(work, design);
   elementHidePass(work, design);
+  codeShownPass(work, design);
   fontPass(work, design, assets, extra);
   stylePass(work, design, assets, extra);
   crosshairPass(design, assets, extra);
