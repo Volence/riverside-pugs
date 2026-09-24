@@ -11,8 +11,21 @@ describe('PUGCALL parsing', () => {
   it('reads a full call, text last', () => {
     expect(parse(full())).toEqual({
       kind: 'call', steamid: P, target: T, callerTeam: 2, reason: 'cheating',
-      matchId: 42, ordinal: 3, half: 2, tMs: 61234, via: 'game', text: 'aimlocking through walls',
+      matchId: 42, ordinal: 3, half: 2, tMs: 61234, via: 'game', map: null, text: 'aimlocking through walls',
     });
+  });
+
+  it('reads the map the plugin names, so a call outside a match still has one', () => {
+    expect(parse(full(' map=l4d_vs_hospital01_apartment'))).toMatchObject({ map: 'l4d_vs_hospital01_apartment' });
+  });
+
+  it('drops a map value that is not a plain map name', () => {
+    expect(parse(full(' map=bad*map'))).toMatchObject({ map: null, reason: 'cheating' });
+    expect(parse(full(` map=${'a'.repeat(65)}`))).toMatchObject({ map: null });
+  });
+
+  it('never takes the map from inside the text', () => {
+    expect(parse(full('', 'x map=l4d_vs_farm05_cornfield'))).toMatchObject({ map: null, text: 'x map=l4d_vs_farm05_cornfield' });
   });
 
   it('never takes a field from inside the text', () => {

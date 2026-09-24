@@ -11,7 +11,7 @@ let matchId: number;
 let serverId: number;
 
 const ev = (over: Partial<ModCallEvent> = {}): ModCallEvent => ({
-  kind: 'call', steamid: IDS[0], target: IDS[5], callerTeam: 2, reason: 'cheating',
+  kind: 'call', steamid: IDS[0], target: IDS[5], callerTeam: 2, reason: 'cheating', map: null,
   matchId, ordinal: 1, half: 1, tMs: 5000, via: 'game', text: 'walls', ...over,
 });
 const at = (msFromStart: number) => new Date(Date.UTC(2026, 8, 24, 20, 0, 0) + msFromStart);
