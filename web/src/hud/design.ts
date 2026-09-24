@@ -129,8 +129,19 @@ export const WEAPON_ICON_TEXELS = 64;
 export const WEAPON_GUN_MAX_W = 256;
 export const WEAPON_GUN_MIN_W = 16;
 export const WEAPON_BOX_TEXELS = 128;
-/** Whether a stored picture under `id` is a weapon upload at a size the build takes. */
-function weaponImageFits(id: string, w: number, h: number): boolean | undefined {
+/**
+ * The texels an upload for `target` (a weapon icon entry, or a box) is
+ * redrawn at, from the picked picture's own size: a gun keeps its aspect
+ * at 64 tall, held between a quarter and four times as wide.
+ */
+export function weaponUploadSize(target: string, srcW: number, srcH: number): { w: number; h: number } {
+  if (target === 'boxActive' || target === 'boxInactive') return { w: WEAPON_BOX_TEXELS, h: WEAPON_BOX_TEXELS };
+  if (weaponImageKind(target) !== 'gun') return { w: WEAPON_ICON_TEXELS, h: WEAPON_ICON_TEXELS };
+  const aspect = srcW > 0 && srcH > 0 ? srcW / srcH : 1;
+  return { w: Math.min(WEAPON_GUN_MAX_W, Math.max(WEAPON_GUN_MIN_W, Math.round(WEAPON_ICON_TEXELS * aspect))), h: WEAPON_ICON_TEXELS };
+}
+/** Whether a stored picture under `id` is a weapon upload at a size the build takes; undefined for an id that is no weapon upload's. */
+export function weaponImageFits(id: string, w: number, h: number): boolean | undefined {
   if (id === WEAPON_BOX_IMAGE.boxActive || id === WEAPON_BOX_IMAGE.boxInactive) return w === WEAPON_BOX_TEXELS && h === WEAPON_BOX_TEXELS;
   const entry = [...WEAPON_ICONS, ...ITEM_ICONS].find((e) => weaponIconId(e) === id);
   if (!entry) return undefined;
@@ -687,6 +698,13 @@ function weaponsOf(raw: unknown, oldStyles: unknown, advanced: boolean, images: 
   return Object.keys(out).length ? out : undefined;
 }
 
+/** The weapon pictures the design ships: every named icon upload, and each Image box's. */
+export function weaponImagesInUse(d: HudDesign): Set<string> {
+  const w = d.weapons;
+  return new Set([...Object.values(w?.icons ?? {}),
+    ...(['boxActive', 'boxInactive'] as const).filter((b) => w?.[b]?.kind === 'image').map((b) => WEAPON_BOX_IMAGE[b])]);
+}
+
 export function validateDesign(raw: unknown): HudDesign {
   if (!isObj(raw) || raw.v !== 1) return structuredClone(DEFAULT_DESIGN);
   const d: HudDesign = structuredClone(DEFAULT_DESIGN);
@@ -773,8 +791,7 @@ export function validateDesign(raw: unknown): HudDesign {
   if (weapons) d.weapons = weapons;
   // A weapon picture nothing names is dropped, as the old weapon box slots'
   // were: nothing would ever ship it.
-  const named = new Set([...Object.values(weapons?.icons ?? {}),
-    ...(['boxActive', 'boxInactive'] as const).filter((b) => weapons?.[b]?.kind === 'image').map((b) => WEAPON_BOX_IMAGE[b])]);
+  const named = weaponImagesInUse(d);
   for (const id of Object.keys(d.images)) if (weaponImageFits(id, 1, 1) !== undefined && !named.has(id)) delete d.images[id];
   // Every registered panel's children, by the same rules; a panel the
   // registry does not have has nothing to apply to. Names match exactly, as

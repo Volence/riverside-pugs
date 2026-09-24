@@ -67,3 +67,22 @@ describe('assetsFor and stored splatter pictures', () => {
     expect(assets.images?.splatBottom).toBeUndefined();
   });
 });
+
+describe('assetSize for weapon pictures', () => {
+  it("redraws a gun picture at its own stored shape, and pistol, item and box pictures at their fixed size", () => {
+    expect(assetSize('wiconMachinegun', { w: 192, h: 64 })).toEqual({ w: 192, h: 64 });
+    expect(assetSize('wiconPills', { w: 64, h: 64 })).toEqual({ w: 64, h: 64 });
+    expect(assetSize('weaponBoxActive', { w: 128, h: 128 })).toEqual({ w: 128, h: 128 });
+  });
+  it('refuses a stored size the design would not keep', () => {
+    expect(assetSize('wiconMachinegun', { w: 999, h: 64 })).toBeNull();
+    expect(assetSize('wiconPistol', { w: 128, h: 64 })).toBeNull();
+    expect(assetSize('wiconMachinegun')).toBeNull();
+  });
+  it('decodes no weapon picture nothing names', async () => {
+    // As above: a decode attempt would hang in happy-dom, so resolving is the proof.
+    const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), weapons: { boxActive: { kind: 'flat' } },
+      images: { wiconUzi: { w: 128, h: 64, png: 'iVBORw0KGgo=' }, weaponBoxActive: { w: 128, h: 128, png: 'iVBORw0KGgo=' } } };
+    expect((await assetsFor(d)).images).toEqual({});
+  });
+});

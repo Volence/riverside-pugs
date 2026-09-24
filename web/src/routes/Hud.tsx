@@ -8,7 +8,7 @@ import { savedArt } from '../crosshair/saved';
 import { artPixels, importedCrosshair } from '../crosshair/texture';
 import type { CrosshairArt } from '../crosshair/model';
 import {
-  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, newDesign, usableCrosshair,
+  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, newDesign, usableCrosshair, weaponImageFits, weaponImagesInUse,
   type HudDesign, type StyleOverride, type Box,
 } from '../hud/design';
 import { screenW, SCREEN_H } from '../hud/units';
@@ -49,6 +49,7 @@ import { LayersPanel } from './hud/LayersPanel';
 import { SplatterRow } from './hud/SplatterControls';
 import { Toolbar, type PresetChoice } from './hud/Toolbar';
 import { endsOn, typedInto, hexOf, alphaPct, withHex, withAlphaPct, type Edit, type EditMode } from './hud/controls';
+import { decodeUpload } from './hud/decode';
 import regularUrl from '../hud/base/fonts/RobotoCondensed-Regular.ttf?url';
 import boldUrl from '../hud/base/fonts/RobotoCondensed-Bold.ttf?url';
 
@@ -64,47 +65,7 @@ export function toUnits(e: { clientX: number; clientY: number }, rect: DOMRect):
   return { ux: (e.clientX - rect.left) * k, uy: (e.clientY - rect.top) * k };
 }
 
-/**
- * The sizes a big picture passes through on its way down to w x h: each side
- * halves while it is over twice its target, so no single draw shrinks by more
- * than half and the browser's filter keeps the detail a one-step shrink of a
- * photo would alias away. The final draw to w x h is not listed.
- */
-export function halvingSteps(sw: number, sh: number, w: number, h: number): { w: number; h: number }[] {
-  const steps: { w: number; h: number }[] = [];
-  while (sw > w * 2 || sh > h * 2) {
-    if (sw > w * 2) sw = Math.ceil(sw / 2);
-    if (sh > h * 2) sh = Math.ceil(sh / 2);
-    steps.push({ w: sw, h: sh });
-  }
-  return steps;
-}
-
-/**
- * Decode any image the browser can read, fit it to the slot, and keep a PNG
- * copy for the saved design. A big picture comes down in halving steps
- * (halvingSteps), each drawn at the high smoothing quality.
- */
-export async function decodeUpload(file: Blob, w: number, h: number) {
-  if (file.size > 4_000_000) throw new Error('That image is over 4 MB.');
-  const bmp = await createImageBitmap(file).catch(() => { throw new Error('That file is not an image the browser can read.'); });
-  let src: CanvasImageSource = bmp;
-  for (const step of halvingSteps(bmp.width, bmp.height, w, h)) {
-    const s = document.createElement('canvas'); s.width = step.w; s.height = step.h;
-    const sctx = s.getContext('2d')!;
-    sctx.imageSmoothingQuality = 'high';
-    sctx.drawImage(src, 0, 0, step.w, step.h);
-    src = s;
-  }
-  const c = document.createElement('canvas'); c.width = w; c.height = h;
-  const ctx = c.getContext('2d')!;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(src, 0, 0, w, h);
-  bmp.close();
-  const png = c.toDataURL('image/png').split(',')[1];
-  if (png.length > 1_400_000) throw new Error('That image is too detailed to store. Try a smaller one.');
-  return { rgba: ctx.getImageData(0, 0, w, h).data, png };
-}
+export { halvingSteps, decodeUpload } from './hud/decode';
 
 /** `fetch` only rejects on a network error, not on a 404 or 500: an unchecked
  *  response would let an error page's HTML sail through as if it were the
@@ -119,9 +80,17 @@ async function fontBytes(u: string, filename: string): Promise<Uint8Array> {
   return new Uint8Array(await res.arrayBuffer());
 }
 
-/** The texture size an uploaded image is redrawn at: a style slot's, else a splatter's, else null (not an upload the build takes). */
-export function assetSize(id: string): { w: number; h: number } | null {
-  return SLOTS.find((s) => s.id === id)?.size ?? splatterDef(id)?.size ?? null;
+/**
+ * The texture size an uploaded image is redrawn at: a style slot's, else a
+ * splatter's, else a weapon picture's, else null (not an upload the build
+ * takes). A gun picture's width is its own shape's, so it comes from the
+ * stored record, and only when that is a size validateDesign keeps
+ * (weaponImageFits): the size the build writes into its cell rect.
+ */
+export function assetSize(id: string, stored?: { w: number; h: number }): { w: number; h: number } | null {
+  const fixed = SLOTS.find((s) => s.id === id)?.size ?? splatterDef(id)?.size;
+  if (fixed) return fixed;
+  return stored && weaponImageFits(id, stored.w, stored.h) ? { w: stored.w, h: stored.h } : null;
 }
 
 /**
@@ -155,14 +124,17 @@ export async function assetsFor(design: HudDesign): Promise<BuildAssets> {
   const entries = Object.entries(design.images);
   if (entries.length) {
     const images: Record<string, Uint8ClampedArray> = {};
+    const weaponsInUse = weaponImagesInUse(design);
     for (const [id, stored] of entries) {
-      const size = assetSize(id);
+      const size = assetSize(id, stored);
       if (!size) continue;
+      // A weapon picture ships only while something names it (weaponsPass).
+      if (weaponImageFits(id, 1, 1) !== undefined && !weaponsInUse.has(id)) continue;
       // A splatter keeps its picture through a switch to another kind, but
       // only an Image ships it (splatterPass), so only that one is decoded.
       if (splatterDef(id) && design.splatters?.[id as SplatterId]?.kind !== 'image') continue;
       const { w, h } = size;
-      const label = SLOTS.find((s) => s.id === id)?.label ?? splatterDef(id)?.label ?? id;
+      const label = SLOTS.find((s) => s.id === id)?.label ?? splatterDef(id)?.label ?? 'A weapon picture';
       const img = new Image();
       await new Promise<void>((resolve, reject) => {
         img.onload = () => resolve();

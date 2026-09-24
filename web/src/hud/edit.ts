@@ -12,6 +12,7 @@
 import {
   clampOverride, clampChild, clampPos, clampRowGap, fitMovesContainer, DEFAULT_DESIGN, newDesign,
   type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type Box, type WeaponsOverride, type ImportedRef,
+  type UploadedImage, WEAPON_BOX_IMAGE, weaponIconId,
 } from './design';
 import { screenW, SCREEN_H } from './units';
 import { elementById } from './elements';
@@ -164,6 +165,34 @@ export function patchWeapons(d: HudDesign, p: Partial<WeaponsOverride>): HudDesi
   const out: HudDesign = { ...d, weapons: weapons as WeaponsOverride };
   if (!Object.keys(weapons).length) delete out.weapons;
   return out;
+}
+
+/**
+ * Store a weapon upload, already redrawn at its texels (weaponUploadSize),
+ * and use it: an icon entry's picture goes under weaponIconId(entry) and is
+ * named in weapons.icons; a box's under WEAPON_BOX_IMAGE and the box becomes
+ * an Image. One design in, one out: a single undo step.
+ */
+export function withWeaponUpload(d: HudDesign, target: string, img: UploadedImage): HudDesign {
+  if (target === 'boxActive' || target === 'boxInactive') {
+    return patchWeapons({ ...d, images: { ...d.images, [WEAPON_BOX_IMAGE[target]]: img } }, { [target]: { kind: 'image' } });
+  }
+  const id = weaponIconId(target);
+  return patchWeapons({ ...d, images: { ...d.images, [id]: img } }, { icons: { ...d.weapons?.icons, [target]: id } });
+}
+
+/** Back to the game's art: the stored picture gone, and an Image box back to stock. */
+export function resetWeaponUpload(d: HudDesign, target: string): HudDesign {
+  const images = { ...d.images };
+  if (target === 'boxActive' || target === 'boxInactive') {
+    delete images[WEAPON_BOX_IMAGE[target]];
+    const p = d.weapons?.[target]?.kind === 'image' ? { [target]: undefined } : {};
+    return patchWeapons({ ...d, images }, p);
+  }
+  delete images[weaponIconId(target)];
+  const icons = { ...d.weapons?.icons };
+  delete icons[target];
+  return patchWeapons({ ...d, images }, { icons: Object.keys(icons).length ? icons : undefined });
 }
 
 /**

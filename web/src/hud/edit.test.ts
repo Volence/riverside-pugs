@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  withWeaponUpload, resetWeaponUpload, patchWeapons,
   nudge, nudgeCards, freeInPlace, cardBoxes, placeCards, alignCards, hasOverrides, elementsTouched, resetElement, withTeamDir, placeCard, patchChild,
   placeChild, nudgeChild, resizeChild, resetChild,
   startsOf, moveChildren, placeChildren, scaleChildren, cornerFactor, anchorOf, alignChildren, setChildrenVisible, resetChildren,
@@ -10,7 +11,7 @@ import {
 import { buildHud, buildTrees } from './build';
 import { weaponSlots } from './weapons';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
-import { DEFAULT_DESIGN, newDesign, baseTeam, validateDesign, type HudDesign } from './design';
+import { DEFAULT_DESIGN, newDesign, baseTeam, validateDesign, weaponUploadSize, type HudDesign } from './design';
 import { DEFAULT_STATE } from '../crosshair/draw';
 import type { CrosshairArt } from '../crosshair/model';
 import { formatPos, parsePos, screenW } from './units';
@@ -1148,5 +1149,44 @@ describe('a scaled panel stays on screen (plan decision 8)', () => {
 
   it('keeps an element that cannot scale unchanged', () => {
     expect(setScale(DEFAULT_DESIGN, 'chat', 2)).toBe(DEFAULT_DESIGN);
+  });
+});
+
+describe('weapon uploads', () => {
+  const pic = (w: number, h: number) => ({ w, h, png: 'AAAA' });
+
+  it('stores an icon upload under its entry own id and names it in the weapons', () => {
+    const d = withWeaponUpload(structuredClone(DEFAULT_DESIGN), 'icon_equip_machinegun', pic(192, 64));
+    expect(d.images.wiconMachinegun).toEqual(pic(192, 64));
+    expect(d.weapons?.icons).toEqual({ icon_equip_machinegun: 'wiconMachinegun' });
+    // What the page stores is what a reload keeps.
+    expect(validateDesign(JSON.parse(JSON.stringify(d))).weapons).toEqual(d.weapons);
+  });
+
+  it('stores a box upload and makes the box an Image', () => {
+    const d = withWeaponUpload(structuredClone(DEFAULT_DESIGN), 'boxInactive', pic(128, 128));
+    expect(d.images.weaponBoxInactive).toEqual(pic(128, 128));
+    expect(d.weapons?.boxInactive).toEqual({ kind: 'image' });
+  });
+
+  it('resets an upload back to the game art, leaving no empty weapons behind', () => {
+    const one = withWeaponUpload(structuredClone(DEFAULT_DESIGN), 'icon_equip_pills', pic(64, 64));
+    const back = resetWeaponUpload(one, 'icon_equip_pills');
+    expect(back.images).toEqual({});
+    expect(back.weapons).toBeUndefined();
+    const box = resetWeaponUpload(withWeaponUpload(structuredClone(DEFAULT_DESIGN), 'boxActive', pic(128, 128)), 'boxActive');
+    expect([box.images, box.weapons]).toEqual([{}, undefined]);
+    // A box that is no longer an Image keeps its own style.
+    const flat = patchWeapons(withWeaponUpload(structuredClone(DEFAULT_DESIGN), 'boxActive', pic(128, 128)), { boxActive: { kind: 'flat' } });
+    expect(resetWeaponUpload(flat, 'boxActive').weapons).toEqual({ boxActive: { kind: 'flat' } });
+  });
+
+  it('sizes an upload by decision 5: guns 64 tall at their shape up to 4:1, the rest square', () => {
+    expect(weaponUploadSize('icon_equip_machinegun', 300, 100)).toEqual({ w: 192, h: 64 });
+    expect(weaponUploadSize('icon_equip_machinegun', 2000, 100)).toEqual({ w: 256, h: 64 });
+    expect(weaponUploadSize('icon_equip_uzi', 10, 400)).toEqual({ w: 16, h: 64 });
+    expect(weaponUploadSize('icon_equip_pistol', 300, 100)).toEqual({ w: 64, h: 64 });
+    expect(weaponUploadSize('icon_equip_pills', 30, 100)).toEqual({ w: 64, h: 64 });
+    expect(weaponUploadSize('boxActive', 30, 100)).toEqual({ w: 128, h: 128 });
   });
 });

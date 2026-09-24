@@ -4,15 +4,17 @@
  * the generator, so a freshly reset thing shows real numbers.
  */
 import { Fragment } from 'preact';
+import { useState } from 'preact/hooks';
 import {
-  clampOverride, clampChild, clampWeapon, WEAPON_KEYS, WEAPON_BOX_COLOUR,
+  clampOverride, clampChild, clampWeapon, WEAPON_KEYS, WEAPON_BOX_COLOUR, WEAPON_BOX_IMAGE, WEAPON_ICONS, ITEM_ICONS,
+  weaponImageKind, weaponUploadSize,
   type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type ChildRangeKey,
   type WeaponNumKey, type WeaponsOverride, type WeaponBoxStyle,
 } from '../../hud/design';
 import { weaponKey } from '../../hud/weapons';
 import { fontFace, shownKey, healthRgb, panelFile, DEFAULT_PREVIEW, type PreviewState } from '../../hud/render';
 import { elementById, type HudElement } from '../../hud/elements';
-import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam, buildTrees, pcGet, pieceMovableIn } from '../../hud/build';
+import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam, buildTrees, pcGet, pieceMovableIn, WEAPON_ICON_LABELS, ITEM_ICON_LABELS } from '../../hud/build';
 import { kvFind } from '../../hud/kv';
 import { baseOf } from '../../hud/base';
 import { childDef, panelChildren, maxInset, type KeyDef } from '../../hud/children';
@@ -20,11 +22,12 @@ import { probe } from '../../hud/probes';
 import {
   cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild, resetChildKey, rowGapSlider, setRowGap,
   startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, patchWeapons, ammoOnly, setFit,
-  resetElementKey, setScale,
+  resetElementKey, setScale, withWeaponUpload, resetWeaponUpload,
   type Align,
 } from '../../hud/edit';
 import { unionBox } from '../../hud/guides';
 import { CrosshairControls } from './CrosshairControls';
+import { decodeUpload } from './decode';
 import { TEAMMATES, panelOf, type Selection } from '../../hud/selection';
 import {
   Slider, SliderNum, Field, patchNum, endsOn, hexOf, alphaPct, withHex, withAlphaPct, type Edit, type EditMode, type Patch,
@@ -164,7 +167,26 @@ const WEAPON_ROWS: { group: string; rows: { field: WeaponNumKey | 'clipFont' | '
 
 const BOX_KINDS: { kind: 'stock' | WeaponBoxStyle['kind']; label: string }[] = [
   { kind: 'stock', label: 'Game' }, { kind: 'hidden', label: 'Hidden' }, { kind: 'flat', label: 'Flat colour' }, { kind: 'rounded', label: 'Rounded colour' },
+  { kind: 'image', label: 'Image' },
 ];
+
+/** A file input that hands its one picked file on and clears itself, so the same file can be picked again. */
+function PickFile({ label, onFile }: { label: string; onFile: (f: File) => void }) {
+  return (
+    <label class="hud__file hud__file--inline">
+      <span class="btn btn--ghost btn--sm">Choose image</span>
+      <input
+        type="file" accept="image/*" aria-label={label}
+        onChange={(e) => {
+          const input = e.target as HTMLInputElement;
+          const f = input.files?.[0];
+          if (f) onFile(f);
+          input.value = '';
+        }}
+      />
+    </label>
+  );
+}
 
 /** A colour swatch and an opacity slider over one raw "r g b a" value, as a child's colour row has. */
 function ColourRow({ label, value, onPick, end }: { label: string; value: string; onPick: (c: string) => void; end: () => void }) {
@@ -193,6 +215,37 @@ function ColourRow({ label, value, onPick, end }: { label: string; value: string
  */
 function WeaponControls({ design, edit, end }: { design: HudDesign; edit: Edit; end: () => void }) {
   const w = design.weapons ?? {};
+  const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
+  /**
+   * Redraw a picked picture at its texels (plan decision 5, weaponUploadSize)
+   * and store it as one undo step; an error stays on its row until the next try.
+   */
+  const upload = async (target: string, f: File) => {
+    try {
+      const { png, w: tw, h: th } = await decodeUpload(f, (sw, sh) => weaponUploadSize(target, sw, sh));
+      setUploadErrors((u) => { const n = { ...u }; delete n[target]; return n; });
+      edit((d) => withWeaponUpload(d, target, { w: tw, h: th, png }), 'step');
+    } catch (err) {
+      setUploadErrors((u) => ({ ...u, [target]: (err as Error).message }));
+    }
+  };
+  const pictureRow = (entry: string, label: string) => {
+    const has = !!w.icons?.[entry];
+    return (
+      <div key={entry} class="hud__stylerow hud__weaponpic" role="group" aria-label={label}>
+        <span class="hud__stylerow-label">{label}{has ? ' (yours)' : ''}</span>
+        <PickFile label={`${label} picture`} onFile={(f) => { void upload(entry, f); }} />
+        <button
+          type="button" class="btn btn--ghost btn--sm" aria-label={`Reset ${label} picture`} disabled={!has}
+          onClick={() => edit((d) => resetWeaponUpload(d, entry), 'step')}
+        >
+          Reset
+        </button>
+        {weaponImageKind(entry) === 'pistol' && <p class="muted hud__note">Drawn square, as tall as the pistol box, whatever the picture's shape.</p>}
+        {uploadErrors[entry] && <p class="error">{uploadErrors[entry]}</p>}
+      </div>
+    );
+  };
   const patch = (p: Partial<WeaponsOverride>, mode: EditMode = 'gesture') => edit((d) => patchWeapons(d, p), mode);
   const value = (field: WeaponNumKey | 'clipFont' | 'pistolFont') => {
     if (field === 'clipFont') return fontFace(design, weaponKey(design, 'PrimaryAmmoFont')).tall;
@@ -232,8 +285,15 @@ function WeaponControls({ design, edit, end }: { design: HudDesign; edit: Edit; 
           </select>
           <span />
         </label>
-        {s && s.kind !== 'hidden' && (
+        {s && (s.kind === 'flat' || s.kind === 'rounded') && (
           <ColourRow label={label} value={colour} end={end} onPick={(c) => patch({ [box]: { kind: s.kind, color: c } })} />
+        )}
+        {s?.kind === 'image' && (
+          <div class="hud__stylerow">
+            <PickFile label={`${label} image`} onFile={(f) => { void upload(box, f); }} />
+            {!design.images[WEAPON_BOX_IMAGE[box]] && <p class="muted hud__note">No picture yet (share links do not carry pictures), showing the game's box.</p>}
+            {uploadErrors[box] && <p class="error">{uploadErrors[box]}</p>}
+          </div>
         )}
       </>
     );
@@ -259,6 +319,16 @@ function WeaponControls({ design, edit, end }: { design: HudDesign; edit: Edit; 
       <p class="eyebrow hud__note">Boxes</p>
       {boxRow('boxActive', 'Active box')}
       {boxRow('boxInactive', 'Other boxes')}
+      <p class="muted hud__note">
+        An Image box is stretched like the game's own: its outer 16 pixels of 128 stay as they are at the corners.
+      </p>
+      <p class="eyebrow hud__note">Pictures</p>
+      <p class="muted hud__note">
+        Your pictures keep their colours. A gun is drawn as tall as Gun picture height, in your picture's own shape
+        (up to four times as wide as tall); items are square, and one you are not carrying is dimmed by Empty item slot.
+      </p>
+      {WEAPON_ICONS.map((e) => pictureRow(e, WEAPON_ICON_LABELS[e]))}
+      {ITEM_ICONS.map((e) => pictureRow(e, ITEM_ICON_LABELS[e]))}
       <label class="hud__check">
         <input
           type="checkbox" checked={w.weaponIcons !== false}
