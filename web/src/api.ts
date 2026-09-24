@@ -1430,6 +1430,66 @@ export const adminApi = {
     get<MetricDetail>(`/api/admin/balance/metric?${compareParams(q)}&metric=${encodeURIComponent(metric)}&phase=${encodeURIComponent(phase)}`, signal),
 };
 
+// ---------- community ----------
+
+export type CommunityKind = 'hud' | 'crosshair';
+
+/** One shared HUD or crosshair, as the gallery lists it (src/community/entries.ts). */
+export interface CommunityEntry {
+  id: number;
+  kind: CommunityKind;
+  title: string;
+  description: string;
+  author: { steamid: string; name: string; avatar: string | null };
+  likes: number;
+  likedByMe: boolean;
+  createdAt: string;
+  /** Crosshairs only: the CrosshairArt, untrusted until readArt has read it. */
+  art?: unknown;
+  /** HUDs only. */
+  preset?: string | null;
+  aspect?: string | null;
+  advanced?: boolean;
+  importName?: string | null;
+  previewUrl?: string | null;
+}
+
+/** One entry with its payload, from GET /api/community/:id. */
+export interface CommunityEntryDetail extends CommunityEntry {
+  /** HUDs only: the design, untrusted until validateDesign has read it. */
+  design?: unknown;
+  importId?: string | null;
+  /** Staff only, on a removed entry. */
+  removed?: { by: string | null; reason: string | null; at: string };
+}
+
+export interface CommunityList { entries: CommunityEntry[]; page: number; pageSize: number; total: number }
+export interface CommunityMine {
+  entries: (CommunityEntry & { removedByStaff: string | null })[];
+  caps: { huds: number; crosshairs: number; perDay: number; sharedToday: number };
+}
+export interface CommunityListQuery { kind: CommunityKind; sort?: 'new' | 'top'; page?: number; author?: string }
+
+export const communityApi = {
+  list: (q: CommunityListQuery, signal?: AbortSignal) => {
+    const p = new URLSearchParams({ kind: q.kind, sort: q.sort ?? 'new', page: String(q.page ?? 0) });
+    if (q.author) p.set('author', q.author);
+    return get<CommunityList>(`/api/community?${p}`, signal);
+  },
+  get: (id: number, signal?: AbortSignal) => get<CommunityEntryDetail>(`/api/community/${id}`, signal),
+  mine: (signal?: AbortSignal) => get<CommunityMine>('/api/community/mine', signal),
+  shareCrosshair: (body: { title: string; description: string; art: unknown; permission: boolean }) =>
+    post<{ id: number }>('/api/community/crosshairs', body),
+  /** Multipart: meta, preview and (on an imported HUD) import; see community/publish.ts's buildHudForm. */
+  shareHud: (form: FormData) => post<{ id: number }>('/api/community/huds', form),
+  like: (id: number) => put<{ likes: number; likedByMe: boolean }>(`/api/community/${id}/like`, {}),
+  unlike: (id: number) => del<{ likes: number; likedByMe: boolean }>(`/api/community/${id}/like`),
+  /** Staff: take an entry down, with the reason its author is shown. */
+  remove: (id: number, reason: string) => post<{ ok: true }>(`/api/community/${id}/remove`, { reason }),
+  /** The author's own delete. */
+  delete: (id: number) => del<{ ok: true }>(`/api/community/${id}`),
+};
+
 /** A second of a round: which map of the match, which half, how far in. */
 export interface ReportMoment { ordinal: number; half: number; tMs: number }
 
@@ -1482,7 +1542,7 @@ export const api = {
     get<ReportEligibility>(`/api/matches/${matchId}/report-eligibility`, signal),
   report: (matchId: number, targetId: string, category: string, text: string, moment?: ReportMoment) =>
     post(`/api/matches/${matchId}/reports`, moment ? { targetId, category, text, moment } : { targetId, category, text }),
-  fileReport: (body: { targetId: string; category: string; text: string; matchId?: number; moment?: ReportMoment }) =>
+  fileReport: (body: { targetId: string; category: string; text: string; matchId?: number; moment?: ReportMoment; entryId?: number }) =>
     post('/api/reports', body),
   myReports: (signal?: AbortSignal) => get<{ reports: MyReport[] }>('/api/reports/mine', signal),
   reportChat: (reportId: number) => post<{ ok: true; url: string }>(`/api/reports/${reportId}/chat`),
