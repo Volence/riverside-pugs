@@ -1225,17 +1225,20 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   // An imported HUD: every file of the upload, then the edited files over
   // them, then the generated ones (a font copy, a texture, the crosshair),
   // which replace an upload file at the same path and are reported. The
-  // upload's own addoninfo.txt is kept; one without gets the editor's.
+  // upload's own addoninfo.txt is kept; one without gets the editor's. A
+  // community HUD always gets the editor's: the allowlist refuses the
+  // author's, so one found in the layer came from somewhere else.
+  const community = isCommunityImport(key);
   const out = new Map<string, Uint8Array>(layer);
   for (const f of edited) out.set(f.path, f.data);
   const replaced = new Set<string>();
   for (const f of extra) { if (layer.has(f.path)) replaced.add(f.path); out.set(f.path, f.data); }
-  if (!out.has('addoninfo.txt')) out.set('addoninfo.txt', enc(addonInfo(design.name)));
+  if (community || !out.has('addoninfo.txt')) out.set('addoninfo.txt', enc(addonInfo(design.name)));
   if (report) report.replaced = [...replaced].sort();
   // A community HUD was checked against the allowlist on the way in; this is
   // the last line, so a generated path or a stale store can never put, say,
   // a cfg/ file into someone else's game. addoninfo.txt is the editor's own.
-  if (isCommunityImport(key)) {
+  if (community) {
     const bad = [...out.keys()].find((p) => p !== 'addoninfo.txt' && hudPathProblem(p) !== null);
     if (bad) throw new Error(`This community HUD would ship a file outside the HUD folders: ${bad}`);
   }
