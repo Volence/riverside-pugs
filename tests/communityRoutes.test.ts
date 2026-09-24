@@ -618,6 +618,20 @@ describe('HUD share limits before the body is read', () => {
     expect(res.json().error).toBe('You are sharing 2 HUDs already. Delete one to share another.');
   });
 
+  it('refuses a body cut off mid-part as not the form the site sends, not a 500', async () => {
+    const res = new Response(hudForm({ title: 'Cut short', preview: png(960, 540, 1) }));
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const cut = await app.inject({
+      method: 'POST', url: '/api/community/huds', cookies: cookie[A],
+      headers: { 'content-type': res.headers.get('content-type')! },
+      payload: Buffer.from(bytes.subarray(0, Math.floor(bytes.length / 2))),
+    });
+    expect(cut.statusCode).toBe(400);
+    expect(cut.json().error).toBe('The share is not in the form the site sends.');
+    // Nothing was kept, and the player's upload slot is free again.
+    expect((await shareHud(A, { title: 'Whole one', preview: png(960, 540, 2) })).statusCode).toBe(200);
+  });
+
   it('allows one HUD upload in flight per player, and two across the site', async () => {
     const a = await held(A, { title: 'Held A', preview: png(960, 540, 1) });
     const again = await shareHud(A, { title: 'Second A', preview: png(960, 540, 2) });

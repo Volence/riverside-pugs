@@ -60,6 +60,9 @@ async function readCapped(stream: AsyncIterable<Buffer>, cap: number): Promise<B
   return over ? null : Buffer.concat(chunks);
 }
 
+/** @fastify/busboy's messages for a multipart body that is truncated or not multipart. */
+const BUSBOY_MALFORMED = /^(Unexpected end of multipart data|Multipart: Boundary not found|Boundary required|Malformed)/;
+
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 export async function communityRoutes(app: FastifyInstance, opts: CommunityRouteOpts): Promise<void> {
@@ -259,7 +262,11 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
       // bodies. Its messages are not the house's one-liners, so say it here.
       const status = (err as { statusCode?: number }).statusCode;
       if (status === 413) return reply.code(413).send({ error: 'The share is over its size limits.' });
-      if (typeof status === 'number' && status >= 400 && status < 500) {
+      // Busboy's own errors on a body cut short or broken (a dropped
+      // connection, a hand-made request) carry no status at all, and would
+      // otherwise be a 500 for what is the sender's fault.
+      const malformed = !status && BUSBOY_MALFORMED.test((err as Error).message ?? '');
+      if (malformed || (typeof status === 'number' && status >= 400 && status < 500)) {
         return reply.code(400).send({ error: 'The share is not in the form the site sends.' });
       }
       throw err;
