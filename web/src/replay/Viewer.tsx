@@ -27,6 +27,7 @@ import { tooltipText } from './tooltipText';
 import { ReplayTooltip } from './ReplayTooltip';
 import { StatsPanel } from './StatsPanel';
 import { bookmarkSeekMs, type TimelineEntry } from './timeline';
+import type { DemoSync } from './demoTick';
 
 /**
  * How much of the viewport height the map may take.
@@ -139,9 +140,11 @@ export function edgeTop(chromeHeight: number): number {
 }
 
 export function Viewer(
-  { spec, live = false, names = NO_NAMES, timeline, seekMs, momentRef }:
+  { spec, live = false, names = NO_NAMES, timeline, demo = null, seekMs, momentRef }:
   {
     spec: ReplaySpec; live?: boolean; names?: Record<string, string>; timeline?: TimelineEntry[];
+    /** Where this round sits in the match's SourceTV demo, when known. */
+    demo?: DemoSync | null;
     seekMs?: number;
     /** Written on every render with the clock the viewer is showing, in
      *  milliseconds into the round, so a control OUTSIDE the viewer (the
@@ -459,6 +462,7 @@ export function Viewer(
       slots={header.slots}
       names={names}
       timeline={timeline}
+      demo={demo}
       zoom={camera.cam.zoom}
       setZoom={camera.setZoom}
     />
@@ -472,6 +476,7 @@ export function Viewer(
       seek={playback.seek}
       names={names}
       selected={selected}
+      demo={demo}
     />
   );
 
@@ -520,6 +525,7 @@ export function Viewer(
         {rail && <div class="theater__rail">{rail}</div>}
         <TheaterStatus
           tMs={playback.tMs}
+          demo={demo}
           endMs={endMs}
           counts={counts}
           zoom={camera.cam.zoom}

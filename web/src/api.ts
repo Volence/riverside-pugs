@@ -3,6 +3,7 @@
  *  it changes here. 4a introduces no new endpoints and alters no existing one. */
 
 import type { TimelineEntry } from './replay/timeline';
+import type { DemoSync } from './replay/demoTick';
 
 export type Team = 'a' | 'b';
 export type Winner = Team | 'draw';
@@ -1536,7 +1537,7 @@ export const api = {
   replayLive: (token: string, signal?: AbortSignal) =>
     get<{ filename: string; closed: boolean }>(`/api/replays/live/${encodeURIComponent(token)}`, signal),
   replayTimeline: (matchId: number, ordinal: number, half: number, signal?: AbortSignal) =>
-    get<{ entries: TimelineEntry[] }>(`/api/replays/timeline/${matchId}/${ordinal}/${half}`, signal),
+    get<{ entries: TimelineEntry[]; demo?: DemoSync | null }>(`/api/replays/timeline/${matchId}/${ordinal}/${half}`, signal),
   map: (map: string, signal?: AbortSignal) =>
     get<MapDetail>(`/api/maps/${encodeURIComponent(map)}`, signal),
   match: (id: string, signal?: AbortSignal) =>

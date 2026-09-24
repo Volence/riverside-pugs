@@ -18,6 +18,19 @@ describe('TheaterStatus', () => {
     expect(screen.getByText('2x')).toBeTruthy();
   });
 
+  it('shows the demo tick at the playhead only when the round has a demo sync', () => {
+    const counts = { survivors: 0, commons: 0, specials: 0 };
+    const { rerender } = render(
+      <TheaterStatus tMs={65000} endMs={200000} counts={counts} zoom={1} live={false} closed />,
+    );
+    expect(screen.queryByText(/^tick /)).toBeNull();
+    rerender(
+      <TheaterStatus tMs={65000} endMs={200000} counts={counts} zoom={1} live={false} closed
+        demo={{ tick: 250, hz: 100 }} />,
+    );
+    expect(screen.getByText('tick 6750')).toBeTruthy();
+  });
+
   it('flags a live round', () => {
     render(
       <TheaterStatus tMs={0} endMs={0} counts={{ survivors: 0, commons: 0, specials: 0 }}

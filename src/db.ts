@@ -1182,6 +1182,10 @@ export function openDb(path: string): DB {
   db.exec('CREATE INDEX IF NOT EXISTS match_rounds_patch ON match_rounds(patch_id)');
   ensureColumn(db, 'match_rounds', 'variant', 'TEXT');
   ensureColumn(db, 'match_rounds', 'skill_detect', 'INTEGER');
+  // Where the half went live in its map's SourceTV demo, and the tickrate
+  // that converts the round's t_ms to demo ticks (see DemoSync in logParse).
+  ensureColumn(db, 'match_rounds', 'demo_tick', 'INTEGER');
+  ensureColumn(db, 'match_rounds', 'demo_hz', 'INTEGER');
   ensureColumn(db, 'matches', 'origin', "TEXT CHECK (origin IN ('queue','in_game'))");
   db.prepare(ORIGIN_BACKFILL_SQL).run();
 
