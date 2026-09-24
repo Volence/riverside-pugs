@@ -11,6 +11,7 @@ import { registerImport, unregisterImport, baseFile } from './base';
 import { sampleHud, fakeCanvas, recordingCtx, hostileFont, type HostileFontKind } from './importFixtures';
 import { _resetImportedArt } from './importArt';
 import { TEAM_PANEL } from './children';
+import { _setProbe } from './probes';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -915,5 +916,114 @@ describe('the preview state', () => {
   });
   it('leaves an unregistered piece of a registered panel alone (the card background, the splatter stand-in)', () => {
     expect(hiddenInState('teamColumn', 'HudEdCardBg', 'dead')).toBe(false);
+  });
+});
+
+describe('your own health in every preview state', () => {
+  const O = { x: 10, y: 20 };
+  const srcOf = (c: { a: unknown[] }) => (c.a[0] as HTMLImageElement).src;
+  const imageAt = (calls: { m: string; a: unknown[] }[], url: string) => calls.filter((c) => c.m === 'drawImage' && srcOf(c) === url);
+  const bar = (d: HudDesign, k: number) => childRects(d, 'ownHealth', O, k).find((r) => r.name === 'Health')!;
+  const hurt = { ...DEFAULT_PREVIEW, survivor: 'hurt' as const };
+  afterEach(() => { _setProbe('Q1', null); _setProbe('Q3', null); _setCanvasFactory(null); });
+
+  it('draws Hurt as 40 health: the number in orange on your panel and on a teammate card, the scratches tinted orange', () => {
+    const own = recCtx();
+    drawPanel(own.ctx, design({}), 'ownHealth', O, 1, { state: hurt });
+    expect(own.calls.find((c) => c.m === 'fillText' && c.a[0] === '40')!.fill).toBe('rgba(216,146,12,1)');
+    const team = recCtx();
+    drawPanel(team.ctx, design({ children: { teamColumn: { HealthNumber: { on: true } } } }), 'teamColumn', O, 1, { card: 1, state: 'hurt' });
+    expect(team.calls.find((c) => c.m === 'fillText' && c.a[0] === '40')!.fill).toBe('rgba(216,146,12,1)');
+    const scratch = recCtx();
+    _setCanvasFactory(() => ({ width: 1, height: 1, getContext: () => scratch.ctx }) as unknown as HTMLCanvasElement);
+    drawPanel(recCtx().ctx, design({}), 'ownHealth', O, 1, { state: hurt });
+    const multiplies = scratch.calls.filter((c) => c.m === 'fillRect' && c.op === 'multiply');
+    expect(multiplies.length).toBeGreaterThanOrEqual(2);
+    for (const m of multiplies) expect(m.fill).toBe('rgb(216,146,12)');
+  });
+
+  it('fills a hurt bar 40 percent in orange from the left, and draws the empty rest dark grey', () => {
+    // The plumbing plan's decision 12 said the rest is undrawn; probe S-hurt
+    // (b1v3 own-hurt) showed it drawn, a dark shaded grey, so the rest is healthbar_grey.
+    const d = design({});
+    const r = bar(d, 2);
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, d, 'ownHealth', O, 2, { state: hurt });
+    expect(imageAt(calls, artUrl('vgui/healthbar_orange')!).map((c) => c.a.slice(1))).toEqual([[r.x, r.y, r.w * 0.4, r.h]]);
+    expect(imageAt(calls, artUrl('vgui/healthbar_grey')!).map((c) => c.a.slice(1))).toEqual([[r.x + r.w * 0.4, r.y, r.w * 0.6, r.h]]);
+    expect(imageAt(calls, artUrl('vgui/healthbar_green')!)).toHaveLength(0);
+  });
+
+  it('draws Healthy and Down bars as before: green full, red full', () => {
+    const d = design({});
+    const r = bar(d, 1);
+    for (const [state, art] of [['healthy', 'vgui/healthbar_green'], ['down', 'vgui/healthbar_red']] as const) {
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, d, 'ownHealth', O, 1, { state });
+      expect(imageAt(calls, artUrl(art)!).map((c) => c.a.slice(1)), state).toEqual([[r.x, r.y, r.w, r.h]]);
+      expect(imageAt(calls, artUrl('vgui/healthbar_grey')!), state).toHaveLength(0);
+    }
+  });
+
+  it('draws you down: your incap art, no portrait, 299 in the incap red', () => {
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, design({}), 'ownHealth', O, 1, { state: 'down' });
+    expect(imageAt(calls, artUrl('vgui/s_panel_namvet_incap')!)).toHaveLength(1);
+    expect(imageAt(calls, artUrl('vgui/s_panel_namvet')!)).toHaveLength(0);
+    expect(calls.find((c) => c.m === 'fillText' && c.a[0] === '299')!.fill).toBe('rgba(161,25,25,1)');
+  });
+
+  it('draws the crouch icon at its rect only while crouched', () => {
+    const d = design({});
+    const r = childRects(d, 'ownHealth', O, 1).find((c) => c.name === 'DuckingIcon')!;
+    const up = recCtx();
+    drawPanel(up.ctx, d, 'ownHealth', O, 1, { state: DEFAULT_PREVIEW });
+    expect(imageAt(up.calls, artUrl('vgui/hud/crouch_survivor')!)).toHaveLength(0);
+    const down = recCtx();
+    drawPanel(down.ctx, d, 'ownHealth', O, 1, { state: { ...DEFAULT_PREVIEW, crouched: true } });
+    const icon = imageAt(down.calls, artUrl('vgui/hud/crouch_survivor')!);
+    expect(icon).toHaveLength(1);
+    expect(icon[0].a[1]).toBe(r.x);
+    expect(icon[0].a[2]).toBe(r.y);
+  });
+
+  it('tints the bar with monochrome_color while gate Q1 is open, and draws the stock bar while it is closed', () => {
+    // Probe Q1 (b1 own-a, own-c) showed the colour tints the shaded bar
+    // texture rather than painting it flat, so the preview tints healthbar_white.
+    const d = design({ children: { ownHealth: { Health: { keys: { monochrome_color: '255 0 255 255' } } } } });
+    const r = bar(d, 1);
+    const scratch = recCtx();
+    const made: unknown[] = [];
+    _setCanvasFactory(() => { const c = { width: 1, height: 1, getContext: () => scratch.ctx }; made.push(c); return c as unknown as HTMLCanvasElement; });
+    _setProbe('Q1', true);
+    for (const [state, w] of [[DEFAULT_PREVIEW, r.w], [hurt, r.w * 0.4]] as const) {
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, d, 'ownHealth', O, 1, { state });
+      // The tint is made once and cached, so the first draw makes it.
+      expect(scratch.calls.some((c) => c.m === 'fillRect' && c.op === 'multiply' && c.fill === 'rgb(255,0,255)')).toBe(true);
+      const fills = calls.filter((c) => c.m === 'drawImage' && made.includes(c.a[0]) && c.a[1] === r.x && c.a[2] === r.y);
+      expect(fills.map((c) => c.a.slice(1))).toEqual([[r.x, r.y, w, r.h]]);
+      expect(imageAt(calls, artUrl('vgui/healthbar_green')!)).toHaveLength(0);
+      expect(imageAt(calls, artUrl('vgui/healthbar_orange')!)).toHaveLength(0);
+    }
+    _setProbe('Q1', false);
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, d, 'ownHealth', O, 1);
+    expect(imageAt(calls, artUrl('vgui/healthbar_green')!).map((c) => c.a.slice(1))).toEqual([[r.x, r.y, r.w, r.h]]);
+  });
+
+  it('draws the outline and insets the fill by the inset while gate Q3 is open', () => {
+    const d = design({ children: { ownHealth: { Health: { keys: { inset: '3' } } } } });
+    const r = bar(d, 2);
+    _setProbe('Q3', true);
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, d, 'ownHealth', O, 2);
+    expect(imageAt(calls, artUrl('vgui/hud/s_healthbar_outline')!).map((c) => c.a.slice(1))).toEqual([[r.x, r.y, r.w, r.h]]);
+    expect(imageAt(calls, artUrl('vgui/healthbar_green')!).map((c) => c.a.slice(1))).toEqual([[r.x + 6, r.y + 6, r.w - 12, r.h - 12]]);
+    _setProbe('Q3', false);
+    const closed = recCtx();
+    drawPanel(closed.ctx, d, 'ownHealth', O, 2);
+    expect(imageAt(closed.calls, artUrl('vgui/hud/s_healthbar_outline')!)).toHaveLength(0);
+    expect(imageAt(closed.calls, artUrl('vgui/healthbar_green')!).map((c) => c.a.slice(1))).toEqual([[r.x, r.y, r.w, r.h]]);
   });
 });

@@ -39,6 +39,7 @@ import { importedMaterial, _resetImportedArt } from './importArt';
 import { addLinear } from './additive';
 import { panelChildren, childDef, type SurvivorState } from './children';
 import { elementById } from './elements';
+import { probe } from './probes';
 import { splatterForMaterial, fadePixels, splatterDef, type SplatterDef, type SplatterId } from './splatter';
 
 export type ChildKind = 'image' | 'label' | 'bar' | 'other';
@@ -330,9 +331,13 @@ export function healthRgb(health: number, maxHealth: number, incap: boolean): [n
 const HEALTH_PANELS = new Set(['ownHealth', 'teamColumn']);
 const HEALTH_LABELS = new Set(['healthnumber', 'healthicon']);
 
-/** The preview's sample: full health, or down (incapacitated) on a teammate card shown down. */
+/** The health the Hurt preview samples: 40 of 100, in the orange band. */
+const HURT_HEALTH = 40;
+
+/** The preview's sample: full health, 40 when hurt, or down (incapacitated). */
 function sampleHealthRgb(opts: DrawOpts): [number, number, number] {
-  return healthRgb(100, 100, previewOf(opts.state).survivor === 'down');
+  const s = previewOf(opts.state).survivor;
+  return healthRgb(s === 'hurt' ? HURT_HEALTH : 100, 100, s === 'down');
 }
 
 // --- images: the exported art, or a slot texture the design generated ---
@@ -675,7 +680,10 @@ function drawSplatter(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNod
 
 function sampleText(n: KvNode, opts: DrawOpts): string {
   const t = kvGet(n, 'labelText') ?? '';
-  if (t === '%HealthNumber%') return previewOf(opts.state).survivor === 'down' ? '299' : '100';   // down, the number is the incap health (probe T7)
+  if (t === '%HealthNumber%') {
+    const s = previewOf(opts.state).survivor;
+    return s === 'down' ? '299' : s === 'hurt' ? String(HURT_HEALTH) : '100';   // down, the number is the incap health (probe T7)
+  }
   const lname = n.key.toLowerCase();
   if (t === '' && (lname === 'name' || lname === 'namelabel')) return opts.card === undefined ? 'Bill' : CARD_NAMES[opts.card % CARD_NAMES.length];
   return t;
@@ -820,16 +828,49 @@ function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: st
 }
 
 /**
- * The health bar: the whole rect, stock green at 100 health, or red at the
- * incap sample when the preview shows a down teammate. The game draws bar
- * fills in code and never reads the healthbar_* textures (probe T8), so
- * there is nothing a design can restyle here.
+ * The health bar. The fill is 1 at Healthy and Down and 0.4 at Hurt, from
+ * the left, in the stock bar art: green, orange when hurt, red when down.
+ * The empty part of a hurt bar is drawn too, in healthbar_grey: probe
+ * S-hurt (b1v3 own-hurt) showed it a dark shaded grey, which overturns the
+ * plumbing plan's decision 12 ("nothing drawn in the rest").
+ *
+ * Two file keys on the block change it, each only while its probe gate is
+ * open (the build writes them either way when a design carries them):
+ * monochrome_color (Q1, B1 shots a and c) tints the shaded healthbar_white
+ * texture in that colour, as the game tints rather than paints flat; inset
+ * (Q3, B1 shot a) draws s_healthbar_outline at the rect and the fill inset
+ * by that many units on every side. Slice 2.F Task X9 redraws the bar
+ * entirely the game's way (outline and default inset always).
  */
-function drawBar(ctx: CanvasRenderingContext2D, r: ChildRect, opts: DrawOpts) {
-  const down = previewOf(opts.state).survivor === 'down';
-  const img = artImage(down ? 'vgui/healthbar_red' : 'vgui/healthbar_green', opts.onAsset);
-  if (img) ctx.drawImage(img, r.x, r.y, r.w, r.h);
-  else { ctx.fillStyle = down ? 'rgba(192,28,0,0.9)' : 'rgba(76,217,100,0.9)'; ctx.fillRect(r.x, r.y, r.w, r.h); }
+function drawBar(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
+  const s = previewOf(opts.state).survivor;
+  const frac = s === 'hurt' ? HURT_HEALTH / 100 : 1;
+  const insetRaw = probe('Q3') ? kvGet(n, 'inset') : undefined;
+  let box: { x: number; y: number; w: number; h: number } = r;
+  if (insetRaw !== undefined) {
+    const outline = artImage('vgui/hud/s_healthbar_outline', opts.onAsset);
+    if (outline) ctx.drawImage(outline, r.x, r.y, r.w, r.h);
+    const m = num(insetRaw) * k;
+    box = { x: r.x + m, y: r.y + m, w: Math.max(0, r.w - 2 * m), h: Math.max(0, r.h - 2 * m) };
+  }
+  const fillW = box.w * frac;
+  const mono = probe('Q1') ? kvGet(n, 'monochrome_color') : undefined;
+  if (mono !== undefined) {
+    const white = artImage('vgui/healthbar_white', opts.onAsset);
+    if (white) {
+      const [cr, cg, cb] = parseColour(mono);
+      ctx.drawImage(tinted(white, 'vgui/healthbar_white', cr, cg, cb), box.x, box.y, fillW, box.h);
+    }
+  } else {
+    const art = s === 'down' ? 'vgui/healthbar_red' : s === 'hurt' ? 'vgui/healthbar_orange' : 'vgui/healthbar_green';
+    const img = artImage(art, opts.onAsset);
+    if (img) ctx.drawImage(img, box.x, box.y, fillW, box.h);
+    else { ctx.fillStyle = `rgba(${sampleHealthRgb(opts).join(',')},0.9)`; ctx.fillRect(box.x, box.y, fillW, box.h); }
+  }
+  if (frac < 1) {
+    const grey = artImage('vgui/healthbar_grey', opts.onAsset);
+    if (grey) ctx.drawImage(grey, box.x + fillW, box.y, box.w - fillW, box.h);
+  }
 }
 
 export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: string, origin: PanelBox, k: number, opts: DrawOpts = {}): void {
@@ -847,7 +888,7 @@ export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, pane
     switch (r.kind) {
       case 'image': drawImageChild(ctx, design, n, r, k, opts); break;
       case 'label': drawLabel(ctx, design, panelId, n, r, k, opts); break;
-      case 'bar': drawBar(ctx, r, opts); break;
+      case 'bar': drawBar(ctx, n, r, k, opts); break;
       default: break;                                                // Panel, CircularProgressBar: nothing to show
     }
     if (alpha !== 1) ctx.restore();

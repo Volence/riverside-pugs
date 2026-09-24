@@ -9,7 +9,7 @@ import { kvFind, kvGet } from './kv';
 import { SCREEN_H } from './units';
 import { DEFAULT_STATE, PX_AT_1080 } from '../crosshair/draw';
 import { PNG_PREFIX } from '../crosshair/model';
-import { _setImageFactory, _resetAssetCache, childRects } from './render';
+import { _setImageFactory, _resetAssetCache, childRects, DEFAULT_PREVIEW, type PreviewState } from './render';
 import { canvasFont } from './fonts';
 
 /**
@@ -480,5 +480,20 @@ describe('hitTest on a fitted own health panel', () => {
     expect(hitTest(d, 'survivor', r.x + 5, r.y + 10)).toBe('ownHealth');
     expect(hitTest(fitted, 'survivor', r.x + 5, r.y + 10)).toBeNull();
     expect(hitTest(fitted, 'survivor', r.x + 5, r.y + 40)).toBe('ownHealth');
+  });
+});
+
+describe('drawHud passes the preview state to your own health', () => {
+  it('draws the crouch icon when the view is crouched', () => {
+    _setImageFactory((url) => ({ src: url, complete: true, naturalWidth: 64, naturalHeight: 64, onload: null, onerror: null }) as unknown as HTMLImageElement);
+    const srcs = (state?: PreviewState) => {
+      const got: string[] = [];
+      const ctx = fakeCtx(() => {});
+      ctx.drawImage = ((img: HTMLImageElement) => { got.push(img.src); }) as unknown as typeof ctx.drawImage;
+      drawHud(ctx, 853, 480, DEFAULT_DESIGN, 'survivor', null, undefined, { state });
+      return got;
+    };
+    expect(srcs()).not.toContain(artUrl('vgui/hud/crouch_survivor'));
+    expect(srcs({ ...DEFAULT_PREVIEW, crouched: true })).toContain(artUrl('vgui/hud/crouch_survivor'));
   });
 });

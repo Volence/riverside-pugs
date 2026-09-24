@@ -192,11 +192,11 @@ function parentPanel(design: HudDesign, file: string, key: string, k: number): R
 }
 
 /** The player's own health panel lives in LocalPlayer, which localplayerdisplay.res places inside the element. */
-function paintOwnHealth(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
+function paintOwnHealth(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view: HudView = {}) {
   // The same box the hit test and the outline use (panelBoxes), in canvas pixels.
   const [p] = panelBoxes(design, 'ownHealth');
   const local = { x: p.x * k, y: p.y * k, w: p.w * k, h: p.h * k };
-  clipToRect(ctx, r, () => clipToRect(ctx, local, () => drawPanel(ctx, design, 'ownHealth', { x: local.x, y: local.y }, k, { onAsset })));
+  clipToRect(ctx, r, () => clipToRect(ctx, local, () => drawPanel(ctx, design, 'ownHealth', { x: local.x, y: local.y }, k, { onAsset, state: view.state })));
 }
 
 interface CardRect { x: number; y: number; w: number; h: number }
