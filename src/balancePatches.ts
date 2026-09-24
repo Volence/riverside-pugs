@@ -151,14 +151,18 @@ const patchNumbers = (db: DB): Map<number, number> => new Map((db.prepare(
  *
  *  Only detected patches that still hold a fingerprint and have inputs are
  *  recomputed. A fingerprint that stays unique is updated in place. When two
- *  or more patches now hash the same, the oldest (first_seen_at, then id)
- *  keeps the fingerprint and the others are set to NULL: they keep their
- *  already-tagged rounds and their history, but new sightings go to the
- *  keeper. If the new fingerprint is already held by a patch this step does
- *  not recompute (an announced patch, say), that holder keeps it and every
- *  recomputed patch landing on it is merged into it. One admin 'problem'
- *  event lists all the merges. A NULLed patch is skipped on the next run, so
- *  running this again with the same lists changes nothing and posts nothing.
+ *  or more patches now hash the same, the oldest balance patch (else the
+ *  oldest; first_seen_at, then id) keeps the fingerprint and the others are
+ *  set to NULL and folded into it: their rounds count for the keeper and new
+ *  sightings go to it. If the new fingerprint is already held by a patch
+ *  this step does not recompute (an announced patch, say), that holder keeps
+ *  it and every recomputed patch landing on it is folded into it. One admin
+ *  'problem' event lists all the merges. A NULLed patch is skipped on the
+ *  next run, so running this again with the same lists changes nothing and
+ *  posts nothing. Merged patches from before triage (triage NULL) are folded
+ *  into the holder of their fingerprint here, or become balance.
+ *
+ *  Also run when an admin adds or removes a plugin on the site ignore list.
  *
  *  Called from buildServer right after balance/knobs.json loads (that is
  *  where the lists are known; openDb has no knobs). */
@@ -166,10 +170,11 @@ export function refingerprintPatches(db: DB, versionless: string[], ignored: str
   publish: (e: { kind: 'problem'; text: string }) => void = publishAdminEvent,
 ): { updated: number; merged: { keep: number; into: number[] }[] } {
   return db.transaction(() => {
-    const rows = db.prepare(`SELECT id, fingerprint, inputs_json, first_seen_at FROM balance_patches
+    const rows = db.prepare(`SELECT id, fingerprint, inputs_json, first_seen_at, triage FROM balance_patches
       WHERE source = 'detected' AND inputs_json IS NOT NULL AND fingerprint IS NOT NULL
-      ORDER BY first_seen_at, id`).all() as { id: number; fingerprint: string; inputs_json: string; first_seen_at: string }[];
+      ORDER BY first_seen_at, id`).all() as { id: number; fingerprint: string; inputs_json: string; first_seen_at: string; triage: string | null }[];
     const mine = new Set(rows.map((r) => r.id));
+    const triageOf = new Map(rows.map((r) => [r.id, r.triage ?? 'balance']));
     const groups = new Map<string, number[]>();
     for (const r of rows) {
       let fp: string;
@@ -188,7 +193,11 @@ export function refingerprintPatches(db: DB, versionless: string[], ignored: str
     const merged: { keep: number; into: number[] }[] = [];
     for (const [fp, ids] of groups) {
       const holder = holderOf.get(fp) as { id: number } | undefined;
-      const keep = holder && !mine.has(holder.id) ? holder.id : ids[0];
+      // A balance patch keeps the fingerprint over an older pending or folded
+      // one, so ignoring a plugin in triage never folds the balance patch
+      // into the one being triaged.
+      const keep = holder && !mine.has(holder.id) ? holder.id
+        : ids.find((id) => triageOf.get(id) === 'balance') ?? ids[0];
       for (const id of ids) want.set(id, id === keep ? fp : null);
       const others = ids.filter((id) => id !== keep);
       if (others.length > 0) merged.push({ keep, into: others });
@@ -199,12 +208,36 @@ export function refingerprintPatches(db: DB, versionless: string[], ignored: str
     const setFp = db.prepare('UPDATE balance_patches SET fingerprint = ? WHERE id = ?');
     for (const [id] of changed) setFp.run(null, id);
     for (const [id, fp] of changed) if (fp !== null) setFp.run(fp, id);
+    // A merge is a fold: the merged patch's rounds now count for the keeper.
+    for (const m of merged) {
+      for (const id of m.into) {
+        if (resolvePatch(db, m.keep) === id) continue; // the keeper is already folded into it: one patch already
+        foldInto(db, id, m.keep);
+      }
+    }
+    // Merged patches from before triage existed (the openDb backfill leaves
+    // them NULL): fold each into whoever holds its fingerprint now, else call
+    // it balance, as it was treated before.
+    const leftovers = db.prepare(`SELECT id, inputs_json FROM balance_patches
+      WHERE source = 'detected' AND fingerprint IS NULL AND triage IS NULL AND inputs_json IS NOT NULL`)
+      .all() as { id: number; inputs_json: string }[];
+    for (const l of leftovers) {
+      let holder: { id: number } | undefined;
+      try {
+        holder = holderOf.get(fingerprintOf(withoutIgnored(JSON.parse(l.inputs_json) as Inventory, ignored), versionless)) as { id: number } | undefined;
+      } catch {
+        holder = undefined;
+      }
+      if (holder && resolvePatch(db, holder.id) !== l.id) foldInto(db, l.id, holder.id);
+      else db.prepare("UPDATE balance_patches SET triage = 'balance' WHERE id = ?").run(l.id);
+    }
+    db.prepare("UPDATE balance_patches SET triage = 'balance' WHERE source = 'detected' AND fingerprint IS NULL AND triage IS NULL").run();
     if (merged.length > 0) {
       const num = patchNumbers(db);
       const tag = (id: number) => `#${num.get(id)} (id ${id})`;
       const text = 'Balance patches merged after the versionless/ignored plugin lists changed: '
         + merged.map((m) => `${m.into.map(tag).join(', ')} into ${tag(m.keep)}`).join('; ')
-        + '. The merged patches keep the rounds already tagged with them; new rounds go to the patch they were merged into.';
+        + '. The merged patches are folded into the patch they were merged into: their rounds now count for it.';
       console.warn(`[balance] ${text}`);
       publish({ kind: 'problem', text });
     }
