@@ -529,9 +529,21 @@ function hardHide(block: KvNode) {
   pcSet(block, 'wide', '0');
   pcSet(block, 'tall', '0');
   if ((kvGet(block, 'ControlName') ?? '').toLowerCase() === 'imagepanel') {
-    const [r, g, b] = (kvGet(block, 'drawColor') ?? '255 255 255 255').split(' ');
-    kvSet(block, 'drawColor', `${r} ${g} ${b} 0`);
+    kvSet(block, 'drawColor', clearOf(kvGet(block, 'drawColor') ?? '255 255 255 255'));
   }
+}
+
+/**
+ * A drawColor at alpha 0 with its RGB kept. The value is split on any run of
+ * whitespace, so doubled or padded spaces from a hand-written HUD read right.
+ * A value that is not three or four numbers (a scheme colour name such as
+ * "Black") has no RGB to keep, so it becomes fully clear black.
+ */
+function clearOf(colour: string): string {
+  const parts = colour.trim().split(/\s+/);
+  if ((parts.length !== 3 && parts.length !== 4) || !parts.every((p) => /^-?\d+(\.\d+)?$/.test(p))) return '0 0 0 0';
+  const [r, g, b] = parts;
+  return `${r} ${g} ${b} 0`;
 }
 
 /**
@@ -547,7 +559,6 @@ function hardHide(block: KvNode) {
  */
 function insertStandIn(nodes: KvNode[], stock: KvNode, def: SplatterDef) {
   const colour = kvGet(stock, 'drawColor') ?? '255 255 255 255';
-  const [r, g, b] = colour.split(' ');
   const pairs: [string, string][] = [
     ['ControlName', 'ImagePanel'], ['fieldName', SPLAT_STAND_IN],
     ['xpos', pcGet(stock, 'xpos') ?? '0'], ['ypos', pcGet(stock, 'ypos') ?? '0'],
@@ -556,7 +567,7 @@ function insertStandIn(nodes: KvNode[], stock: KvNode, def: SplatterDef) {
     ['image', splatterImageKey(def.id)], ['drawColor', colour],
   ];
   nodes.splice(nodes.indexOf(stock) + 1, 0, { key: SPLAT_STAND_IN, value: pairs.map(([key, value]) => ({ key, value })) });
-  kvSet(stock, 'drawColor', `${r} ${g} ${b} 0`);
+  kvSet(stock, 'drawColor', clearOf(colour));
 }
 
 /**

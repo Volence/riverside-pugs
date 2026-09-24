@@ -108,6 +108,28 @@ describe('splatterPass, the scratches', () => {
   });
 });
 
+describe('the alpha-0 drawColor of a stand-in and a hard hide', () => {
+  const ID = '6'.repeat(64);
+  afterEach(() => { unregisterImport(ID); });
+  const withColour = (c: string) => {
+    const card = baseFile('stock', CARD).replace('"hud/healthbar_bg_1"', `"hud/healthbar_bg_1"\r\n\t\t"drawColor"\t"${c}"`);
+    registerImport(ID, sampleHud({ [CARD]: card }));
+    return (patch: Partial<HudDesign>) => ({ ...design({ preset: 'imported', imported: { id: ID, name: 'x' } }), ...patch });
+  };
+  const stockAlpha = (files: { path: string; data: Uint8Array }[]) => kvGet(kvFind(tree(files, CARD), ['BackgroundImage'])!, 'drawColor');
+
+  it('reads a colour with doubled or padded spaces', () => {
+    const d = withColour(' 10  20\t30 200 ');
+    expect(stockAlpha(buildHud(d({ splatters: { splatTeam: { kind: 'fade' } } })))).toBe('10 20 30 0');
+    expect(stockAlpha(buildHud(d({ children: { teamColumn: { BackgroundImage: { visible: false } } } })))).toBe('10 20 30 0');
+  });
+  it('writes 0 0 0 0 for a scheme colour name rather than mangling it', () => {
+    const d = withColour('Black');
+    expect(stockAlpha(buildHud(d({ splatters: { splatTeam: { kind: 'fade' } } })))).toBe('0 0 0 0');
+    expect(stockAlpha(buildHud(d({ children: { teamColumn: { BackgroundImage: { visible: false } } } })))).toBe('0 0 0 0');
+  });
+});
+
 describe('splatterProblem', () => {
   const ID = '7'.repeat(64);
   afterEach(() => { unregisterImport(ID); });
