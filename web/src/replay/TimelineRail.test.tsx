@@ -23,6 +23,22 @@ function mount(selected: string | null, tMs: number, seek = vi.fn()) {
   return { ...r, seek };
 }
 
+describe('TimelineRail, demo ticks', () => {
+  it('shows each entry\'s demo tick when the round has a demo sync, and none without', () => {
+    const { container } = render(
+      <TimelineRail timeline={T} tMs={0} toggles={DEFAULT_TOGGLES} seek={vi.fn()} names={NAMES} selected="A"
+        demo={{ tick: 1000, hz: 100 }} />,
+    );
+    const ticks = [...container.querySelectorAll('.replay__entry-tick')].map((t) => t.textContent);
+    // The boom at 1000 ms is demo tick 1000 + 100.
+    expect(ticks).toContain('1100');
+    expect(container.querySelector('.replay__entry-tick')?.getAttribute('title')).toMatch(/demo_gototick \d+/);
+    cleanup();
+    const bare = mount('A', 0);
+    expect(bare.container.querySelector('.replay__entry-tick')).toBeNull();
+  });
+});
+
 describe('TimelineRail, nobody selected', () => {
   it('shows the rolling window with names resolved on every id', () => {
     const { container } = mount(null, 35000);

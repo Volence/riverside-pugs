@@ -353,6 +353,21 @@ describe('round lines', () => {
     });
   });
 
+  it('carries the demo tick and tickrate on both round lines (0.3.12)', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_START map=m half=2 surv=a demotick=41870 hz=100`))).toEqual({
+      kind: 'round_start', token: TOKEN, map: 'm', half: 2, surv: 'a', demo: { tick: 41870, hz: 100 },
+    });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END map=m half=2 surv=b score=412 alive=3 demotick=41870 hz=100`)))
+      .toMatchObject({ kind: 'round_end', score: 412, demo: { tick: 41870, hz: 100 } });
+  });
+
+  it('drops a malformed demo sync but keeps the round', () => {
+    for (const bad of ['demotick=12', 'hz=100', 'demotick=-5 hz=100', 'demotick=12 hz=0', 'demotick=x hz=100']) {
+      const ev = parseLogDatagram(framed(`PUG ${TOKEN} ROUND_START map=m half=1 surv=a ${bad}`));
+      expect(ev).toEqual({ kind: 'round_start', token: TOKEN, map: 'm', half: 1, surv: 'a' });
+    }
+  });
+
   it('parses a ROUND_END from an older plugin that carries no map', () => {
     expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END half=2 surv=b score=412`))).toEqual({
       kind: 'round_end', token: TOKEN, map: null, half: 2, surv: 'b', score: 412, alive: null,

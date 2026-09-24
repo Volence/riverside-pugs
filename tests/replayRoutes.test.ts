@@ -640,7 +640,7 @@ describe('GET /api/replays/timeline/:matchId/:ordinal/:half', () => {
     await app2.ready();
 
     const res = await app2.inject({ url: '/api/replays/timeline/1/0/1' });
-    const body = res.json() as { entries: Record<string, unknown>[] };
+    const body = res.json() as { entries: Record<string, unknown>[]; demo: unknown };
     expect(body.entries).toEqual([
       { seq: 1, tMs: 5000, kind: 'event', event: 'pounce', actor: 'A', target: 'B', value: 20 },
       { seq: 2, tMs: 6000, kind: 'chat', actor: 'A', team: 'survivor', text: 'nice' },
@@ -649,6 +649,15 @@ describe('GET /api/replays/timeline/:matchId/:ordinal/:half', () => {
     // seventeen-digit id is not a name and the client now composes the
     // sentence itself.
     expect(body.entries[0]).not.toHaveProperty('text');
+    // No round row with a demo tick: the viewer shows no demo ticks at all.
+    expect(body.demo).toBeNull();
+
+    db.prepare(
+      `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, demo_tick, demo_hz)
+       VALUES (1, 0, 1, 'a', 1234, 100)`,
+    ).run();
+    const again = await app2.inject({ url: '/api/replays/timeline/1/0/1' });
+    expect((again.json() as { demo: unknown }).demo).toEqual({ tick: 1234, hz: 100 });
     await app2.close();
   });
 

@@ -68,6 +68,7 @@ import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
 import { cheatName, cvarActOf, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
+import { lilacReasonDetail } from './logParse.js';
 import { inputThresholds, recordInputBurst, recordInputCap } from './inputBursts.js';
 import { resolveServerBySource, isKnownServerAddress, type ServerRow } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
@@ -723,7 +724,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             // spectator, and there is one row per event rather than thousands.
             const stored = recordIntegrityFlag(deps.db, {
               matchId, serverId, steamid: ev.steamid, source: 'lilac',
-              kind, severity: ev.banned ? 'banned' : 'suspected', detail: '',
+              kind, severity: ev.banned ? 'banned' : 'suspected',
+              detail: ev.reason ? lilacReasonDetail(ev.reason) : '',
             });
             if (stored) {
               publishAdminEvent({
