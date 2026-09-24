@@ -145,15 +145,69 @@ int ModCall_TriggerEnd(const char[] text, const char[] trigger)
 }
 
 /** A client's SteamID64 for a call. Steam-validated, except on a LAN server
- *  (sv_lan 1), where Steam never validates anyone and the strict form would
- *  refuse every call. Only the local test server runs sv_lan 1; every live
- *  server runs 0, so there the id is always the validated one. */
+ *  (sv_lan 1), where Steam never validates anyone and the engine has no
+ *  Steam account for the client at all, so even the unvalidated SteamID64
+ *  fails. There the old STEAM_X:Y:Z form still exists and is converted by
+ *  hand. Only the local test server runs sv_lan 1; every live server runs 0,
+ *  so there the id is always the validated one. */
 bool ModCall_AuthId(int client, char[] id, int maxlen)
 {
 	static ConVar lan = null;
 	if (lan == null) lan = FindConVar("sv_lan");
-	bool validate = lan == null || !lan.BoolValue;
-	return GetClientAuthId(client, AuthId_SteamID64, id, maxlen, validate);
+	if (lan == null || !lan.BoolValue) return GetClientAuthId(client, AuthId_SteamID64, id, maxlen);
+	if (GetClientAuthId(client, AuthId_SteamID64, id, maxlen, false)) return true;
+	char steam2[32];
+	if (!GetClientAuthId(client, AuthId_Steam2, steam2, sizeof(steam2), false)) return false;
+	return ModCall_Steam2To64(steam2, id, maxlen);
+}
+
+/** STEAM_X:Y:Z to SteamID64: 76561197960265728 + Z*2 + Y. Done in decimal
+ *  strings because Z*2 can pass the 32-bit int range. */
+bool ModCall_Steam2To64(const char[] steam2, char[] out, int maxlen)
+{
+	char parts[3][16];
+	if (StrContains(steam2, "STEAM_") != 0) return false;
+	if (ExplodeString(steam2[6], ":", parts, sizeof(parts), sizeof(parts[])) != 3) return false;
+	int y = StringToInt(parts[1]);
+	if (y != 0 && y != 1) return false;
+	char base[] = "76561197960265728";
+	// 2Z + Y, as a decimal string: double Z digit by digit, then add Y.
+	char z[16];
+	strcopy(z, sizeof(z), parts[2]);
+	int zl = strlen(z);
+	if (zl == 0 || zl > 10) return false;
+	char add[16];
+	int carry = y;
+	int digits[16];
+	int n = 0;
+	for (int i = zl - 1; i >= 0; i--)
+	{
+		if (z[i] < '0' || z[i] > '9') return false;
+		int d = (view_as<int>(z[i]) - '0') * 2 + carry;
+		digits[n++] = d % 10;
+		carry = d / 10;
+	}
+	if (carry > 0) digits[n++] = carry;
+	for (int i = 0; i < n; i++) add[i] = view_as<char>('0' + digits[n - 1 - i]);
+	add[n] = '\0';
+	// base + add, right-aligned.
+	int bl = strlen(base);
+	char sum[24];
+	int c = 0;
+	int ai = n - 1;
+	for (int i = bl - 1; i >= 0; i--)
+	{
+		int extra = 0;
+		if (ai >= 0) extra = view_as<int>(add[ai]) - '0';
+		int d = view_as<int>(base[i]) - '0' + c + extra;
+		ai--;
+		sum[i] = view_as<char>('0' + d % 10);
+		c = d / 10;
+	}
+	sum[bl] = '\0';
+	if (c != 0 || ai >= 0) return false;
+	strcopy(out, maxlen, sum);
+	return true;
 }
 
 void ModCall_Open(int client, const char[] upfront)
