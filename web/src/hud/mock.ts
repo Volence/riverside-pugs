@@ -539,7 +539,11 @@ function paintKillNotices(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
     const xpos = parseFloat(kvGet(n, 'xpos') ?? '0');
     const ypos = parseFloat(kvGet(n, 'ypos') ?? '0');
     const tall = parseFloat(kvGet(n, 'tall') ?? '15');
-    const wide = parseSize(kvGet(n, 'wide') ?? '0', r.w / k);
+    // An 'f' wide is the screen's width less the number, not the panel's
+    // (VGUI's alignScreenWide): in game the east notice ends at the row's
+    // right edge, 10 + 10 + (853.33 - 40) units, x 1875 px
+    // (/home/volence/l4d/hud/probe-phase2-rest/k-verify/measure.txt, k-f).
+    const wide = parseSize(kvGet(n, 'wide') ?? '0', screenW(design.aspect));
     // The row's font at its own size, its cell centred in the row as a
     // Label centres it, the glyphs hanging from the cell's top.
     const cell = setFont(ctx, design, kvGet(n, 'font') ?? '', k, onAsset);

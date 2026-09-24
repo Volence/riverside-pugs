@@ -9,7 +9,7 @@ import { artUrl, CROSSHAIR_OPEN, SKULL_ICON } from './art';
 import { buildTrees, elementRect, teamCardRects, teamLayout, markerBox, markerPx } from './build';
 import { elementById } from './elements';
 import { kvFind, kvGet } from './kv';
-import { SCREEN_H } from './units';
+import { SCREEN_H, screenW } from './units';
 import { DEFAULT_STATE, PX_AT_1080 } from '../crosshair/draw';
 import { PNG_PREFIX } from '../crosshair/model';
 import { _setImageFactory, _setCanvasFactory, _resetAssetCache, childRects, DEFAULT_PREVIEW, type PreviewState } from './render';
@@ -303,7 +303,7 @@ describe('drawHud delegates panels to the renderer', () => {
           expect(text.align).toBe(want);
           const r = elementRect(d, 'killNotices', d.aspect);
           const row = kvFind(buildTrees(d)('resource/ui/hud/pzdamagerecordpanel.res'), ['recordlabel0'])!;
-          const wide = r.w - 40;                                          // wide f40
+          const wide = screenW(d.aspect) - 40;                            // wide f40: the screen's width less 40 (k-verify k-f)
           const xpos = parseFloat(kvGet(row, 'xpos')!);
           const at = align === 'east' ? (r.x + xpos + wide) * 2.25 : (r.x + xpos + wide / 2) * 2.25;
           expect(text.a[1] as number).toBeCloseTo(at, 6);

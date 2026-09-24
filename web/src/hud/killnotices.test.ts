@@ -7,6 +7,7 @@ import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { PROBES, _setProbe } from './probes';
 import { _setImageFactory, _resetAssetCache } from './render';
+import { screenW } from './units';
 import { decodeVTF } from '../vpk/read';
 
 /**
@@ -119,7 +120,11 @@ describe('the kill notice preview follows the edits', () => {
     const r = elementRect(d, 'killNotices', d.aspect);
     const row = kvFind(buildTrees(d)(PZ), ['recordlabel0'])!;
     const xpos = parseFloat(kvGet(row, 'xpos')!);
-    expect(t.a[1] as number).toBeCloseTo((r.x + xpos + (r.w - 40)) * 2.25, 6);   // wide f40
+    // wide f40 is the SCREEN's width less 40, not the panel's: in game the east notice's ink ends at x 1872 px
+    // (/home/volence/l4d/hud/probe-phase2-rest/k-verify/measure.txt, k-f), the row's right edge at
+    // 10 + 10 + (853.33 - 40) = 833.3 units = 1875 px; the panel's width would put it at 1830.
+    expect(t.a[1] as number).toBeCloseTo((r.x + xpos + (screenW(d.aspect) - 40)) * 2.25, 6);
+    expect(Math.abs((t.a[1] as number) - 1875)).toBeLessThan(2);
   });
 });
 
