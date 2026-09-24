@@ -79,7 +79,12 @@ import { RconClient as RealRcon } from './rcon.js';
 import type { ServerQuery } from './leaveControl.js';
 import { ServerBanSync, type ServerExec } from './serverBans.js';
 import { ServerAdminSync } from './serverAdmins.js';
-import { kickThenQuit, rconRestarter, type ServerRestarter } from './serverRestart.js';
+import { kickThenQuit, parseHumans, rconRestarter, type ServerRestarter } from './serverRestart.js';
+import { DeployRepo } from './deployRepo.js';
+import { ReleaseEngine } from './releaseEngine.js';
+import { ReleaseService } from './releaseService.js';
+import { adminReleaseRoutes } from './routes/adminReleases.js';
+import type { TreeWriter } from './fleetWrite.js';
 import { LogListener, type LogMeta } from './logListener.js';
 import { LogAuth, pushLogSecret } from './logAuth.js';
 import { SelfStartedMatches } from './selfStarted.js';
@@ -139,6 +144,10 @@ export interface ServerDeps {
   serverExec?: ServerExec;
   /** Injected in tests so nothing ever asks a real box to quit. */
   serverRestarter?: ServerRestarter;
+  /** Tests inject a fake box writer for releases. */
+  releaseWriter?: (s: ServerRow) => TreeWriter | null;
+  /** Tests inject the player count a release waits on before restarting. */
+  releaseHumans?: (s: ServerRow) => Promise<number>;
   /** Free bytes on the addons filesystem, for the campaign upload disk-floor
    *  check. Injected in tests; built from a real statfs on config.addonsDir
    *  otherwise, same as orchestrator and serverCleaner. */
@@ -543,6 +552,23 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const balanceWriter = new BalanceRolloutWriter({ db: deps.db, transport: deps.balanceTransport });
   // Fleet view: read-only readings of every box's managed files.
   const fleetReader = deps.fleetReader ?? new FleetReader({ db: deps.db });
+  // Releases (2b): the deploy repo's commits sent to the boxes from the site.
+  // Built before the releaser, whose between-matches hook gives a box waiting
+  // for a release its turn. The engine refuses every deploy in dev mode.
+  const deployRepo = new DeployRepo({ url: deps.config.deployRepoUrl, dir: deps.config.deployRepoDir, keyPath: deps.config.deployRepoKey });
+  const humansOn = async (server: ServerRow): Promise<number> => {
+    const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+    try {
+      await rcon.connect();
+      return parseHumans(await rcon.exec('status'));
+    } finally {
+      rcon.close();
+    }
+  };
+  const releaseEngine = new ReleaseEngine({
+    db: deps.db, blob: (id) => deployRepo.blob(id), writer: deps.releaseWriter, restarter, humans: deps.releaseHumans ?? humansOn,
+    releasesDir: deps.config.releasesDir, devMode: deps.config.devMode,
+  });
 
   const releaser = new ServerReleaser(deps.db, deps.serverCleaner ?? (async (server, token, opts) => {
     const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
@@ -598,7 +624,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     } finally {
       rcon.close();
     }
-  }), restarter, deps.config.devMode ? null : (server) => balanceWriter.writeForRelease(server.id));
+  }), restarter, deps.config.devMode ? null : async (server) => {
+    await balanceWriter.writeForRelease(server.id);
+    await releaseEngine.forRelease(server.id);
+  });
 
   // Every enabled box mirrors the website's bans. Built here, next to the
   // releaser, because both are the backend reaching into a game server
@@ -1189,6 +1218,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     balanceWriter.start();
     void balanceWriter.verifyAll();
     fleetReader.start();
+    releaseEngine.start();
     fleetReader.tick(); // boxes never read, or stale, get read once at boot
   }
 
@@ -1452,6 +1482,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     adminSync.stop();
     balanceWriter.stop();
     fleetReader.stop();
+    releaseEngine.stop();
     if (logListener) await logListener.close();
     // Where each server's replay check had got to. Best effort: the caller may
     // already have closed the database, and a few seconds of position is all
@@ -1512,6 +1543,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(balancePublicRoutes, { db: deps.db, knobsPath: deps.balanceKnobsPath });
   await app.register(adminFleetRoutes, { db: deps.db, fleetDir: deps.config.fleetDir, reader: fleetReader });
+  await app.register(adminReleaseRoutes, {
+    db: deps.db, repo: deployRepo, service: new ReleaseService({ db: deps.db, repo: deployRepo, knobs: panelKnobs }),
+    engine: releaseEngine, devMode: deps.config.devMode,
+  });
+  // Tests drive the engine's tick directly.
+  app.decorate('releaseEngine', releaseEngine);
   await app.register(replayRoutes, {
     db: deps.db, replayDir: deps.config.replayDir, liveDir: deps.config.replayLiveDir, r2,
   });
