@@ -42,4 +42,113 @@ describe('L4DL lilac flag line', () => {
   it('refuses a missing field', () => {
     expect(parse(STAMP + 'L4DL id=76561198030288393 banned=0')).toBeNull();
   });
+
+  // An old plugin (pre-0.2.0) sends none of the extra reason fields at all.
+  // The line must still parse to exactly what it always did: no `reason`.
+  it('an old-format line with no reason fields parses as before, with no reason', () => {
+    const ev = parse(STAMP + BODY);
+    expect(ev).toMatchObject({ kind: 'lilac_flag', steamid: '76561198030288393', cheat: 5, banned: false });
+    expect(ev).not.toHaveProperty('reason');
+  });
+
+  describe('the aimbot reason (cheat 5)', () => {
+    const AIMBOT_BODY = `${BODY} lflags=2 ldelta=12.3 ltd=470.5 maxd=80.2 totd=200.5 taps=10 taps1=8`;
+
+    it('parses every field', () => {
+      expect(parse(STAMP + AIMBOT_BODY)).toMatchObject({
+        kind: 'lilac_flag', cheat: 5,
+        reason: { lflags: 2, ldelta: 12.3, ltd: 470.5, maxd: 80.2, totd: 200.5, taps: 10, taps1: 8 },
+      });
+    });
+
+    it('accepts the -1 unknown sentinel on every measurement', () => {
+      const line = AIMBOT_BODY
+        .replace('lflags=2', 'lflags=-1')
+        .replace('ldelta=12.3', 'ldelta=-1.0')
+        .replace('ltd=470.5', 'ltd=-1.0')
+        .replace('maxd=80.2', 'maxd=-1.0')
+        .replace('totd=200.5', 'totd=-1.0');
+      expect(parse(STAMP + line)).toMatchObject({
+        reason: { lflags: -1, ldelta: -1, ltd: -1, maxd: -1, totd: -1 },
+      });
+    });
+
+    for (const bad of [
+      'lflags=16', 'lflags=-2', 'lflags=1.5',
+      'ldelta=-2', 'ldelta=100001', 'ldelta=nope',
+      'ltd=-2', 'ltd=100001',
+      'maxd=-2', 'maxd=100001',
+      'totd=-2', 'totd=100001',
+      'taps=-1', 'taps=1001', 'taps=1.5',
+      'taps1=-1', 'taps1=1001',
+    ]) {
+      it(`rejects the whole line when ${bad} is malformed`, () => {
+        const [key] = bad.split('=');
+        const re = new RegExp(`${key}=[^\\s]+`);
+        const line = AIMBOT_BODY.replace(re, bad);
+        expect(parse(STAMP + line)).toBeNull();
+      });
+    }
+  });
+
+  describe('the aimlock reason (cheat 6)', () => {
+    const AIMLOCK_BODY = 'L4DL id=76561198030288393 cheat=6 banned=0 maxd=45.0 totd=90.0 taps=6 taps1=5 '
+      + 'ltarget_team=2 ltarget_class=0 ltarget_ghost=0';
+
+    it('parses every field, with no lflags/ldelta/ltd (aimbot-only fields)', () => {
+      const ev = parse(STAMP + AIMLOCK_BODY);
+      expect(ev).toMatchObject({
+        kind: 'lilac_flag', cheat: 6,
+        reason: {
+          maxd: 45, totd: 90, taps: 6, taps1: 5,
+          ltarget_team: 2, ltarget_class: 0, ltarget_ghost: 0,
+        },
+      });
+      expect((ev as unknown as { reason: Record<string, unknown> }).reason).not.toHaveProperty('lflags');
+    });
+
+    it('parses an infected target with the -1 unknown sentinel for ghost', () => {
+      const line = AIMLOCK_BODY
+        .replace('ltarget_team=2', 'ltarget_team=3')
+        .replace('ltarget_class=0', 'ltarget_class=3')
+        .replace('ltarget_ghost=0', 'ltarget_ghost=-1');
+      expect(parse(STAMP + line)).toMatchObject({
+        reason: { ltarget_team: 3, ltarget_class: 3, ltarget_ghost: -1 },
+      });
+    });
+
+    for (const bad of ['ltarget_team=4', 'ltarget_team=-2', 'ltarget_class=9', 'ltarget_class=-2', 'ltarget_ghost=2', 'ltarget_ghost=-2']) {
+      it(`rejects the whole line when ${bad} is malformed`, () => {
+        const [key] = bad.split('=');
+        const re = new RegExp(`${key}=[^\\s]+`);
+        const line = AIMLOCK_BODY.replace(re, bad);
+        expect(parse(STAMP + line)).toBeNull();
+      });
+    }
+  });
+
+  describe('the bhop reason (cheat 4)', () => {
+    const BHOP_BODY = 'L4DL id=76561198030288393 cheat=4 banned=0 lbhops=14 ljump=22';
+
+    it('parses every field', () => {
+      expect(parse(STAMP + BHOP_BODY)).toMatchObject({
+        kind: 'lilac_flag', cheat: 4, reason: { lbhops: 14, ljump: 22 },
+      });
+    });
+
+    it('accepts the -1 unknown sentinel on ljump but not lbhops', () => {
+      expect(parse(STAMP + BHOP_BODY.replace('ljump=22', 'ljump=-1')))
+        .toMatchObject({ reason: { ljump: -1 } });
+      expect(parse(STAMP + BHOP_BODY.replace('lbhops=14', 'lbhops=-1'))).toBeNull();
+    });
+
+    for (const bad of ['lbhops=1001', 'lbhops=-2', 'ljump=100001', 'ljump=-2']) {
+      it(`rejects the whole line when ${bad} is malformed`, () => {
+        const [key] = bad.split('=');
+        const re = new RegExp(`${key}=[^\\s]+`);
+        const line = BHOP_BODY.replace(re, bad);
+        expect(parse(STAMP + line)).toBeNull();
+      });
+    }
+  });
 });
