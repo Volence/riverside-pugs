@@ -325,8 +325,9 @@ export const SI_PANEL: PanelChildren = {
  * - Q14: code sets the backdrop's art (HUD/PZ_charge_bg) over the file's
  *   image (b9/shots/crops/br-bcd.png): its place, size and visibility are
  *   still the file's, its picture is not.
- * - Q15: the element's state colours tint all three pieces, so none takes a
- *   colour of its own here.
+ * - Q15: the element's state colours tint the icon and the backdrop (the
+ *   meter's material draws no colour, B15 b15/shots/b15/b15-e.png), so no
+ *   piece takes a colour of its own here.
  * - S-ring: Progress follows a square resize (b10, Progress 30 x 30), so
  *   every piece sizes square.
  * Code picks AbilityImage's icon by class (pz_charge_lunge, _smoker,

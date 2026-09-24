@@ -353,7 +353,7 @@ export function ElementControls(
       {id === 'abilityMarker' && (
         <p class="muted hud__note">Shown only with the game's crosshair on (crosshair 1). Sized in screen pixels: smaller on a bigger screen. The attack colours show when a survivor is in reach.</p>
       )}
-      {id === 'abilityRing' && <p class="muted hud__note">Hunter: not ready while standing (no meter), ready while crouched. After any ability the meter refills in the charging colour.</p>}
+      {id === 'abilityRing' && <p class="muted hud__note">Hunter: not ready while standing (no meter), ready while crouched. After any ability the icon takes the charging colour while the meter refills.</p>}
 
       {el.move && !free && (
         <div class="hud__row2">

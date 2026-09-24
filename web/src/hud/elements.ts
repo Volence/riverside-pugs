@@ -82,9 +82,10 @@ export const ELEMENTS: HudElement[] = [
   /**
    * The ability timer. A scale reaches its three pieces (abilitytimerhud.res),
    * and its 80 x 70 block keeps clipping the 80 x 80 backdrop's bottom 10
-   * units, as the game does. Its three state colours tint all three pieces
-   * (probe Q15, /home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/ring-all.png
-   * and b9/shots/crops/br-bcd.png); the suppressed one was never seen drawn.
+   * units, as the game does. Its three state colours tint the icon and the
+   * backdrop (probe Q15, /home/volence/l4d/hud/probe-phase2-infected/b9/shots/crops/br-bcd.png);
+   * the meter's material draws no colour (B15, b15/shots/b15/b15-e.png). The
+   * suppressed one was never seen drawn.
    */
   { id: 'abilityRing', label: 'Ability timer', side: 'infected', key: 'CHudAbilityTimer', move: true, resize: 'scale',
     children: ['resource/ui/hud/abilitytimerhud.res'], props: ['visible'],
@@ -93,7 +94,7 @@ export const ELEMENTS: HudElement[] = [
         evidence: 'client.dll CHudAbilityTimer run: ability_ready_color; b10/shots/crops/ring-all.png, b9/shots/crops/br-bcd.png (magenta when ready)' },
       { key: 'ability_charging_color', label: 'Charging colour', type: 'colour', unsetLabel: 'Game colour',
         evidence: 'client.dll CHudAbilityTimer run: ability_charging_color; b10/shots/crops/ring-all.png, b9/shots/crops/br-bcd.png (cyan while charging)',
-        note: 'Shown while the ability is not ready (a standing Hunter) and while the meter refills.' },
+        note: 'Shown while the ability is not ready (a standing Hunter) and while the meter refills. The meter itself keeps its own red.' },
       { key: 'ability_surpressed_color', label: 'Suppressed colour', type: 'colour', unsetLabel: 'Game colour',
         evidence: 'client.dll CHudAbilityTimer run: ability_surpressed_color (the game\'s spelling)',
         note: 'Rarely shown: no probe produced the suppressed state.' },

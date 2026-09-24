@@ -2062,9 +2062,15 @@ export const MARKER_PX_PER_UNIT = 1080 / SCREEN_H;
  * The ability marker's box in screen pixels for an ability_size. client.dll
  * (0x102410fc) sets the marker's bounds to the rect it is handed grown by
  * ability_size on every side: w + 2 x size. MARKER_BASE_PX is that rect's
- * width at 1080p.
+ * width at 1080p: the crosshair's 32 px cell. Measured: the ring's outer
+ * edge (half-intensity crossing through the centre) is 73.7 px across at
+ * size 40 (/home/volence/l4d/hud/probe-phase2-infected/b9/shots-v2/b9v2/b9v2-d.png)
+ * and 46.3 px at size 20 (b15/shots/b15/b15-c.png and -d); the texture's
+ * ring is 0.657 of its box, so the boxes are 112 and 70.5 px: 32 + 2 x size
+ * within a pixel. Whether the 32 grows with the resolution is not known
+ * (both shots are 1080p).
  */
-export const MARKER_BASE_PX = 0;
+export const MARKER_BASE_PX = 32;
 export const markerPx = (size: number): number => MARKER_BASE_PX + 2 * Math.max(0, size);
 
 /**

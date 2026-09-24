@@ -526,7 +526,11 @@ describe('drawHud delegates panels to the renderer', () => {
       expect(calls.indexOf(arc)).toBeLessThan(calls.indexOf(meter));
     });
 
-    it('tints the icon, the backdrop and the meter alike by the state\'s colour (probe Q15)', () => {
+    it('tints the icon and the backdrop by the state\'s colour, and never the meter (probe Q15, B15)', () => {
+      // The meter's material is UnlitTwoTexture, which draws no vertex colour: in
+      // /home/volence/l4d/hud/probe-phase2-infected/b15/shots/b15/b15-e.png (a Smoker 1.3 s into its cooldown, the
+      // stock charging colour 127 grey) the lit arc samples 202 88 58 at x 1784, as bright as the ready meter in
+      // b15-d, where the grey would halve it; client.dll 0x10228168 does set the colour, the shader ignores it.
       // /home/volence/l4d/hud/probe-phase2-infected/b9/shots/crops/br-bcd.png (magenta ready, cyan charging on
       // the icon and the ring art) and b10/shots/crops/ring-all.png (meter R 203 ready, R 101 charging with the
       // stock 127 grey): all three pieces take the state colour.
@@ -551,12 +555,12 @@ describe('drawHud delegates panels to the renderer', () => {
             .filter((e) => ring.has(e.src)).map((e) => `${e.src.split('/').pop()} ${e.fill}`).sort();
         } finally { _setCanvasFactory(null); }
       };
-      const names = (fill: string) => ['pz_charge_bg', 'pz_charge_lunge', 'pz_charge_meter'].map((m) => `${artUrl(`vgui/hud/${m}`)!.split('/').pop()} ${fill}`).sort();
+      const names = (fill: string) => ['pz_charge_bg', 'pz_charge_lunge'].map((m) => `${artUrl(`vgui/hud/${m}`)!.split('/').pop()} ${fill}`).sort();
       expect(tints(DEFAULT_PREVIEW)).toEqual(names('rgb(255,0,255)'));
       expect(tints({ ...DEFAULT_PREVIEW, ability: 'recharging' })).toEqual(names('rgb(0,255,255)'));
       // Not ready: the icon and the backdrop in the charging colour, and no meter at all.
       _resetAssetCache();                                              // the tints above are cached by colour
-      expect(tints({ ...DEFAULT_PREVIEW, ability: 'notReady' })).toEqual(names('rgb(0,255,255)').filter((n) => !n.includes('meter')));
+      expect(tints({ ...DEFAULT_PREVIEW, ability: 'notReady' })).toEqual(names('rgb(0,255,255)'));
     });
 
     it('draws nothing while you are a ghost or dead: the game shows it only on a spawned infected', () => {
@@ -609,13 +613,16 @@ describe('drawHud delegates panels to the renderer', () => {
       // The editor's 16:9 screen is 853 units, 1919.25 px at 1080p: its centre is 0.375 px left of the game's.
       for (const v of centred(m)) expect(Math.abs(v - (v > 700 ? 960 : 540))).toBeLessThanOrEqual(0.5);
       expect(want.w * K).toBeCloseTo(markerPx(40), 6);         // screen pixels, whatever the design's scale
-      expect(markerPx(20)).toBeLessThan(markerPx(40));
+      // The texture's ring is 0.657 of its box; in game the ring is 73.7 px across at size 40 (b9v2-d.png)
+      // and 46.3 px at size 20 (/home/volence/l4d/hud/probe-phase2-infected/b15/shots/b15/b15-c.png).
+      expect(Math.abs(markerPx(40) * 0.657 - 73.7)).toBeLessThan(1.5);
+      expect(Math.abs(markerPx(20) * 0.657 - 46.3)).toBeLessThan(1.5);
     });
 
-    it('draws the game\'s own crosshair, PZ_crosshair_open, 32 px square at the centre (b9v2-d: x 944 to 975)', () => {
+    it('draws the game\'s own crosshair, PZ_crosshair_open, in a 34 px box at the centre (b9v2-d: its circle x 944 to 975)', () => {
       const cs = calls(DEFAULT_DESIGN);
       const [x] = draws(cs, CROSSHAIR_OPEN);
-      expect(x.a.slice(1)).toEqual([960 - 16, 540 - 16, 32, 32]);
+      expect(x.a.slice(1)).toEqual([960 - 17, 540 - 17, 34, 34]);
       expect(draws(calls(DEFAULT_DESIGN, { ...DEFAULT_PREVIEW, infected: 'ghost' }), CROSSHAIR_OPEN)).toHaveLength(1);
     });
 

@@ -591,10 +591,14 @@ const ABILITY_CHARGE = 0.4;
  * centre of the 80 x 80 background, not of the 80 x 70 element.
  *
  * Probe Q15 (/home/volence/l4d/hud/probe-phase2-infected/RESULTS.md):
- * - the state colour tints all three pieces: the icon (magenta ready, cyan
- *   charging in b9/shots/crops/br-bcd.png), the backdrop's ring art, and the
- *   meter (b10/shots/crops/ring-all.png: R 203 ready, R 101 charging with
- *   the stock 127 grey);
+ * - the state colour tints the icon (magenta ready, cyan charging in
+ *   b9/shots/crops/br-bcd.png) and the backdrop's ring art. client.dll
+ *   (0x10228108 on) sets it on the meter as well, but the meter's material
+ *   is UnlitTwoTexture, which draws no vertex colour: in B15
+ *   (b15/shots/b15/b15-e.png, a Smoker recharging under the stock 127 grey)
+ *   the lit arc samples 202 88 58, as bright as the ready meter (b15-d), so
+ *   the preview draws it untinted. Q15's "R 101 charging" was a dark spot of
+ *   the meter's turning glint, not a tint;
  * - ready, the meter is whole; recharging, it is lit from 12 o'clock
  *   counter-clockwise for the charged share (progress-f-zoom.png; a
  *   clockwise drain would draw the same shape, so this is exact either way);
@@ -661,10 +665,12 @@ function paintAbilityRing(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
       if (name === 'backgroundimage') paint('vgui/hud/pz_charge_bg', box);
       else if (name === 'abilityimage') paint(ABILITY_ICON[state.siClass], box);
       else if (name === 'progress') {
+        // Never tinted: see the note above.
         const material = normaliseMaterial(pcGet(n, 'fg_image') ?? 'HUD/PZ_charge_meter');
+        const meter = () => paintTintedArt(ctx, material, box, [255, 255, 255, 255], onAsset);
         if (state.ability === 'notReady') continue;
-        if (state.ability === 'ready') { paint(material, box); continue; }
-        inArc(ctx, box, ABILITY_CHARGE, () => paint(material, box));
+        if (state.ability === 'ready') { meter(); continue; }
+        inArc(ctx, box, ABILITY_CHARGE, meter);
       }
     }
   });
@@ -696,19 +702,21 @@ function paintAbilityMarker(ctx: CanvasRenderingContext2D, r: Rect, design: HudD
 
 /**
  * The game's own infected crosshair, PZ_crosshair_open (a hud_textures.txt
- * cell of sprites/crosshairs), drawn untinted at 32 x 32 screen pixels on
+ * cell of sprites/crosshairs, 32 texels), drawn untinted in a 34 px box on
  * the centre, as probe B9 v2 measured it at 1080p
  * (/home/volence/l4d/hud/probe-phase2-infected/b9/shots-v2/b9v2/b9v2-d.png:
- * x 944 to 975, y 524 to 555; a ghost has it too, b9v2-a). Not an element:
+ * the circle's texel 1 lands on x 944 and texel 29 on 973 to 975, so a
+ * texel is about 1.07 px; a ghost has it too, b9v2-a). Not an element:
  * the only file control over it is Hide the game's crosshair. The owner's
  * own config has crosshair 0, under which the game draws neither this nor
  * the marker.
  */
+const CROSSHAIR_PX = 34;
 function paintGameCrosshair(ctx: CanvasRenderingContext2D, pxW: number, pxH: number, design: HudDesign, onAsset: (() => void) | undefined, view: HudView) {
   if (design.hideGameCrosshair || previewOf(view.state).infected === 'dead') return;
   const img = artImage(CROSSHAIR_OPEN, onAsset);
   if (!img) return;
-  const s = (32 / MARKER_PX_PER_UNIT) * (pxH / SCREEN_H);
+  const s = (CROSSHAIR_PX / MARKER_PX_PER_UNIT) * (pxH / SCREEN_H);
   ctx.drawImage(img, pxW / 2 - s / 2, pxH / 2 - s / 2, s, s);
 }
 

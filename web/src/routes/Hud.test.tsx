@@ -2441,6 +2441,6 @@ describe('The ability timer on the page', () => {
     }
     expect(screen.queryByRole('tab', { name: 'Charging' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Ability timer' }));
-    expect(screen.getByText('Hunter: not ready while standing (no meter), ready while crouched. After any ability the meter refills in the charging colour.')).toBeTruthy();
+    expect(screen.getByText('Hunter: not ready while standing (no meter), ready while crouched. After any ability the icon takes the charging colour while the meter refills.')).toBeTruthy();
   });
 });
