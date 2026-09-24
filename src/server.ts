@@ -88,6 +88,7 @@ import {
 import { BalanceAssembler } from './balanceAssembler.js';
 import { loadBalanceKnobs, BALANCE_KNOBS_PATH, type BalanceKnobs } from './balanceKnobs.js';
 import { recordBalanceSighting, refingerprintPatches } from './balancePatches.js';
+import { expectedPatchFor, confirmOnSighting } from './balanceRollouts.js';
 import { recordRoundMark, recordRoundStat, recordRoundStatsEnd, resetRoundLines } from './roundStatLines.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
 import { recordPresenceLine, sweepPresence } from './presence.js';
@@ -966,10 +967,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             if (!inv || !m || !balanceKnobs) return;
             // The match knows its server; the source address is the fallback
             // (Riverside #3 and #4 share one IP, see resolveServerBySource).
-            recordBalanceSighting(deps.db, {
-              matchId: m.id, serverId: m.server_id ?? serverOf(source, meta), half: ev.half,
+            const serverId = m.server_id ?? serverOf(source, meta);
+            const r = recordBalanceSighting(deps.db, {
+              matchId: m.id, serverId, half: ev.half,
               inventory: inv, versionless: balanceKnobs.versionless, ignored: balanceKnobs.ignored,
+              expectedPatchId: serverId !== null ? expectedPatchFor(deps.db, serverId) : null,
             });
+            if (serverId !== null) confirmOnSighting(deps.db, { serverId, patchId: r.patchId });
             return;
           }
           else if (ev.kind === 'round_stat' || ev.kind === 'round_stats_end' || ev.kind === 'round_mark') {
