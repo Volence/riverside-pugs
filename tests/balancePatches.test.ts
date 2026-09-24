@@ -138,6 +138,29 @@ describe('recordBalanceSighting', () => {
       .toEqual({ patch_id: a.patchId, sighted_patch_id: b.patchId });
   });
 
+  it('a watch-list-only change folds into the previous patch without an alert, on every box', () => {
+    const a = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: [] });
+    recordBalanceSighting(db, { matchId: 1, serverId: 2, half: 1, inventory: INV, versionless: [] });
+    problems.length = 0;
+    const grown = { ...INV, 'w:weapon_smg.SpreadPerShot': '0.22', 'c:z_new': '5' };
+    const b = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: grown, versionless: [] });
+    expect(b).toMatchObject({ newPatch: true, effectivePatchId: a.patchId });
+    expect(db.prepare('SELECT triage, folded_into FROM balance_patches WHERE id = ?').get(b.patchId)).toEqual({ triage: 'folded', folded_into: a.patchId });
+    const c = recordBalanceSighting(db, { matchId: 1, serverId: 2, half: 1, inventory: grown, versionless: [] });
+    expect(c).toMatchObject({ patchId: b.patchId, effectivePatchId: a.patchId });
+    expect(problems).toEqual([]);
+  });
+
+  it('a changed value or a new plugin still asks for triage', () => {
+    recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: [] });
+    problems.length = 0;
+    const v = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: { ...INV, 'c:z_tank_health': '1', 'c:z_new': '5' }, versionless: [] });
+    expect(db.prepare('SELECT triage FROM balance_patches WHERE id = ?').get(v.patchId)).toEqual({ triage: 'pending' });
+    const p = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: { ...INV, 'c:z_tank_health': '1', 'c:z_new': '5', 'p:x.smx': '1.a' }, versionless: [] });
+    expect(db.prepare('SELECT triage FROM balance_patches WHERE id = ?').get(p.patchId)).toEqual({ triage: 'pending' });
+    expect(problems).toHaveLength(2);
+  });
+
   it('stays quiet for the patch a rollout expects on that server', () => {
     // server 1 seen on inventory A, then on B which is the expected patch
     const a = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: { 'c:a': '1' }, versionless: [] });
