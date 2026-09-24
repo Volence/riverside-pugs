@@ -338,6 +338,10 @@ export function ElementControls(
 
       {id === 'siHealth' && <p class="muted hud__note">{siHealthNote(preview.siClass)}</p>}
       {/* Probe Q15 (/home/volence/l4d/hud/probe-phase2-infected/RESULTS.md): the Smoker, Boomer and Tank spawn ready. */}
+      {/* Probe Q16a (/home/volence/l4d/hud/probe-phase2-infected/RESULTS.md): the marker draws only with the crosshair cvar on, at ability_size screen pixels. */}
+      {id === 'abilityMarker' && (
+        <p class="muted hud__note">Shown only with the game's crosshair on (crosshair 1). Sized in screen pixels: smaller on a bigger screen. The attack colours show when a survivor is in reach.</p>
+      )}
       {id === 'abilityRing' && <p class="muted hud__note">Hunter: not ready while standing (no meter), ready while crouched. After any ability the meter refills in the charging colour.</p>}
 
       {el.move && !free && (

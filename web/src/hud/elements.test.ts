@@ -7,10 +7,10 @@ import { baseFile, BASE_PATHS } from './base';
 const root = (preset: 'stock' | 'modern', file: string) => parseKv(baseFile(preset, file))[0].value as KvNode[];
 
 describe('ELEMENTS', () => {
-  it('has unique ids and the twelve elements', () => {
+  it('has unique ids and the thirteen elements', () => {
     const ids = ELEMENTS.map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids.sort()).toEqual(['abilityRing', 'chat', 'ghostPanel', 'infectedRow', 'killNotices', 'ownHealth',
+    expect(ids.sort()).toEqual(['abilityMarker', 'abilityRing', 'chat', 'ghostPanel', 'infectedRow', 'killNotices', 'ownHealth',
       'progressBar', 'siHealth', 'tankPanel', 'teamColumn', 'weaponSelection', 'xhair'].sort());
   });
 
@@ -111,5 +111,20 @@ describe('the ability timer element (plan Task 6)', () => {
     // The game's own spelling, "surpressed". Probe Q15 (/home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/ring-all.png).
     expect(el.keys?.map((k) => k.key)).toEqual(['ability_ready_color', 'ability_charging_color', 'ability_surpressed_color']);
     for (const k of el.keys!) { expect(k.type, k.key).toBe('colour'); expect(k.gate, k.key).toBeUndefined(); }
+  });
+});
+
+describe('the ability marker element (plan Task 8)', () => {
+  it('is HudCrosshair\'s ability keys, placed by the game at the screen centre, ungated', () => {
+    // Probe Q16a (/home/volence/l4d/hud/probe-phase2-infected/b9/shots-v2/crops/centre-af.png): the
+    // marker is HudCrosshair's own child, sized by ability_size in plain pixels and coloured by its keys.
+    const el = elementById('abilityMarker')!;
+    expect(el).toMatchObject({ side: 'infected', key: 'HudCrosshair', move: false, resize: 'none', mockPos: { x: 'c', y: 'c' } });
+    expect(el.keys?.map((k) => k.key)).toEqual(['ability_size', 'ability_ready_color', 'ability_charging_color',
+      'ability_surpressed_color', 'ability_attack_color', 'ability_attack_color_colorblind']);
+    const size = el.keys![0];
+    expect(size).toMatchObject({ type: 'int', range: [4, 64], label: 'Size (pixels)' });
+    for (const k of el.keys!.slice(1)) expect(k.type, k.key).toBe('colour');
+    for (const k of el.keys!) expect(k.gate, k.key).toBeUndefined();
   });
 });

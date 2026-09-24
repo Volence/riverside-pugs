@@ -1610,7 +1610,8 @@ describe('the revive anchor on your own panel (client.dll: the bar goes back to 
 describe('hiding an element hides it in game (probe B2 and B3: visible 0 alone hid nothing)', () => {
   // /home/volence/l4d/hud/probe-phase2/RESULTS.md, B2 and B3: every element tested came back with visible 0 only.
   const size = (n: KvNode) => [kvGet(n, 'visible'), kvGet(n, 'wide'), kvGet(n, 'tall')];
-  const hideable = ELEMENTS.filter((e) => e.id !== 'xhair' && e.props.includes('visible'));
+  // The marker shares the game's crosshair block, so it is hidden by its own keys instead (plan Task 8, below).
+  const hideable = ELEMENTS.filter((e) => e.id !== 'xhair' && e.id !== 'abilityMarker' && e.props.includes('visible'));
 
   for (const preset of ['stock', 'modern'] as const) {
     for (const el of hideable) {
@@ -1953,5 +1954,47 @@ describe('the ability timer: scale, pieces and state colours (plan Task 6)', () 
     expect([kvGet(bg, 'visible'), kvGet(bg, 'wide'), kvGet(bg, 'tall')]).toEqual(['0', '0', '0']);
     const modern = validateDesign({ v: 1, preset: 'modern' });
     expect(rect(block(modern, ABILITY, 'BackgroundImage'))).toEqual(['0', '0', '0', '0']);
+  });
+});
+
+describe('the ability marker: HudCrosshair\'s ability keys (plan Task 8)', () => {
+  const LAYOUT = 'scripts/hudlayout.res';
+  const text = (d: HudDesign) => new TextDecoder('latin1').decode(buildHud(d).find((f) => f.path === LAYOUT)!.data);
+  /** The HudCrosshair block's text in the download: the block runs to the next top-level block. */
+  const crosshairBlocks = (d: HudDesign) => [...text(d).matchAll(/\n\t"?HudCrosshair"?\s*\r?\n\t\{([\s\S]*?)\r?\n\t\}/g)].map((m) => m[1]);
+  it('writes the marker keys and never_draw into one HudCrosshair block', () => {
+    const d = validateDesign({ v: 1, hideGameCrosshair: true,
+      elements: { abilityMarker: { keys: { ability_size: 30, ability_ready_color: '0 255 0 255' } } } });
+    const blocks = crosshairBlocks(d);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatch(/"?never_draw"?\s+"1"/);
+    expect(blocks[0]).toMatch(/"ability_size"\s+"30"/);
+    expect(blocks[0].match(/ability_ready_color/g)).toHaveLength(1);
+    expect(blocks[0]).toMatch(/"ability_ready_color"\s+"0 255 0 255"/);
+  });
+  it('hides the marker by its size and colours, never by a hard hide that would take the crosshair too', () => {
+    // Probe Q16b (/home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/centre-bcef.png): never_draw on
+    // HudCrosshair removes the crosshair and the marker together, and a 0 x 0 HudCrosshair would too.
+    const d = validateDesign({ v: 1, elements: { abilityMarker: { visible: false, keys: { ability_ready_color: '0 255 0 255' } } } });
+    const c = kvFind(buildTrees(d)(LAYOUT), ['HudCrosshair'])!;
+    const hidden = kvFind(parseKv(text(d))[0].value as KvNode[], ['HudCrosshair'])!;
+    for (const n of [hidden]) {
+      expect(kvGet(n, 'visible')).toBe('1');
+      expect(kvGet(n, 'wide')).toBe('640');
+      expect(kvGet(n, 'tall')).toBe('480');
+      expect(kvGet(n, 'never_draw')).toBeUndefined();
+      expect(kvGet(n, 'ability_size')).toBe('0');
+      for (const k of ['ability_ready_color', 'ability_charging_color', 'ability_surpressed_color', 'ability_attack_color', 'ability_attack_color_colorblind']) {
+        expect(kvGet(n, k)?.split(' ')[3], k).toBe('0');
+      }
+      expect(kvGet(n, 'ability_ready_color')).toBe('0 255 0 0');           // its RGB kept
+    }
+    // The preview's tree keeps the marker whole, as every hidden element's (elementHidePass is download-only).
+    expect(kvGet(c, 'ability_size')).toBe('17');
+  });
+  it('leaves an untouched design\'s HudCrosshair exactly as the preset has it', () => {
+    const base = kvFind(parseKv(baseFile('stock', LAYOUT))[0].value as KvNode[], ['HudCrosshair'])!;
+    const built = kvFind(parseKv(text(validateDesign({ v: 1 })))[0].value as KvNode[], ['HudCrosshair'])!;
+    expect(built).toEqual(base);
   });
 });

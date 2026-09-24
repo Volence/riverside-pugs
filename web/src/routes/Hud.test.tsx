@@ -1025,6 +1025,26 @@ describe('Hud page', () => {
     expect(box().checked).toBe(true);
   });
 
+  it('warns that hiding the game\'s crosshair removes the ability marker too (probe Q16b)', () => {
+    // /home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/centre-bcef.png: never_draw, no marker.
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Custom crosshair' }));
+    const warning = 'This also removes the ability marker on the infected side.';
+    expect(screen.queryByText(warning)).toBeNull();
+    fireEvent.click(screen.getByLabelText("Hide the game's crosshair"));
+    expect(screen.getByText(warning)).toBeTruthy();
+  });
+
+  it('offers the ability marker\'s size in pixels and its colours, and says when the game shows it', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ability marker' }));
+    expect(screen.getByText("Shown only with the game's crosshair on (crosshair 1). Sized in screen pixels: smaller on a bigger screen. The attack colours show when a survivor is in reach.")).toBeTruthy();
+    expect(screen.getByText('Size (pixels)')).toBeTruthy();
+    expect(screen.getByLabelText('Attack colour colour')).toBeTruthy();
+    expect(screen.queryByText('X')).toBeNull();                   // the game centres it
+  });
+
   it('lets any file be picked for Import a HUD, so a renamed one like my_hud.vpk.orig is not hidden', () => {
     render(<Hud />);
     // No accept filter: a file that is not a HUD is refused by the import's own error message.

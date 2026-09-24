@@ -189,7 +189,9 @@ function layoutPass(work: Work, design: HudDesign) {
     // before the switch) has nothing to land on.
     if (!o || el.id === 'xhair' || !baseHasElement(work.key, el)) continue;
     const panel = work.panel(LAYOUT, [el.key]);
-    if (o.visible !== undefined) kvSet(panel, 'visible', o.visible ? '1' : '0');
+    // The marker's block is the game's crosshair: its visible stays the
+    // crosshair's, and elementHidePass hides the marker by its own keys.
+    if (o.visible !== undefined && el.id !== MARKER) kvSet(panel, 'visible', o.visible ? '1' : '0');
     if (o.keys) {
       for (const key of Object.keys(o.keys)) {
         if (!el.keys?.some((k) => k.key === key)) throw new Error(`${LAYOUT}: ${el.key} takes no key ${key}`);
@@ -969,10 +971,30 @@ function codeShownPass(work: Work, design: HudDesign) {
 function elementHidePass(work: Work, design: HudDesign) {
   for (const el of ELEMENTS) {
     if (el.id === 'xhair' || design.elements[el.id]?.visible !== false || !baseHasElement(work.key, el)) continue;
+    if (el.id === MARKER) { markerHide(work.panel(LAYOUT, [el.key]), el); continue; }
     hardHide(work.panel(LAYOUT, [el.key]));
     for (const f of HIDE_FRAMES[el.id] ?? []) {
       for (const name of f.blocks) { const b = work.optional(f.file, [name]); if (b) hardHide(b); }
     }
+  }
+}
+
+/** The ability marker's element id: its block is HudCrosshair, the game's crosshair itself. */
+export const MARKER = 'abilityMarker';
+
+/**
+ * Hides the ability marker without touching the crosshair it shares a block
+ * with: a 0 ability_size and every ability colour at alpha 0 (the RGB kept).
+ * A hard hide of HudCrosshair (0 x 0, or never_draw, probe Q16b,
+ * /home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/centre-bcef.png)
+ * would remove the game's crosshair as well. Colour keys the block lacks
+ * (stock has no attack colours) are added clear, since the dll reads them
+ * all. Not yet seen in game: the plan's Task 14 checks it.
+ */
+function markerHide(block: KvNode, el: HudElement) {
+  for (const k of el.keys ?? []) {
+    if (k.key === 'ability_size') pcSet(block, k.key, '0');
+    else if (k.type === 'colour') pcSet(block, k.key, clearOf(pcGet(block, k.key) ?? '0 0 0 0'));
   }
 }
 
@@ -1914,6 +1936,7 @@ export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
   const o = design.elements[id] ?? {};
   if (id === 'xhair') return { x: screenW(aspect) / 2 - 13, y: SCREEN_H / 2 - 13, w: 26, h: 26, visible: design.crosshair !== 'none' };
   const panel = work.panel(LAYOUT, [el.key]);
+  if (id === MARKER) return { ...markerBox(design, aspect), visible: o.visible ?? true };
   const base = baseRect(panel, el, baseOf(design), design.aspect);
   const p = placed(o, base, el, design.aspect);
   const k = el.resize === 'scale' ? o.scale ?? 1 : 1;
@@ -1941,6 +1964,27 @@ export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
     };
   }
   return { x: parsePos(xTok, screenW(aspect)), y: parsePos(yTok, SCREEN_H), w: box.w, h: box.h, visible };
+}
+
+/**
+ * Screen pixels per HUD unit on the 1920 x 1080 screen the preview stands
+ * for (1080 / 480): the ability marker is sized in plain pixels (probe Q16a),
+ * so its box in units depends on the resolution, and the preview picks this
+ * one, the one every probe shot was taken at.
+ */
+export const MARKER_PX_PER_UNIT = 1080 / SCREEN_H;
+
+/**
+ * The ability marker's box, HUD units, centred on the screen: 2 x
+ * ability_size screen pixels square (the dll's box, probe Q16a), read from
+ * the generated HudCrosshair, at 1080p. The element's rect, so a click, a
+ * frame and the painter all use the same box.
+ */
+export function markerBox(design: HudDesign, aspect: Aspect): { x: number; y: number; w: number; h: number } {
+  const c = kvFind(buildTrees(design)(LAYOUT), ['HudCrosshair']);
+  const px = Math.max(0, parseFloat((c && pcGet(c, 'ability_size')) ?? '0') || 0);
+  const s = (2 * px) / MARKER_PX_PER_UNIT;
+  return { x: screenW(aspect) / 2 - s / 2, y: SCREEN_H / 2 - s / 2, w: s, h: s };
 }
 
 /**

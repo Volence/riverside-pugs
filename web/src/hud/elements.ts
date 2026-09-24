@@ -98,6 +98,38 @@ export const ELEMENTS: HudElement[] = [
         evidence: 'client.dll CHudAbilityTimer run: ability_surpressed_color (the game\'s spelling)',
         note: 'Rarely shown: no probe produced the suppressed state.' },
     ] },
+  /**
+   * The ring round the infected crosshair: HudCrosshair's own child
+   * AbilityProgress, a CircularProgressBar code gives HUD/PZ_charge_crosshair
+   * (client.dll 0x10240e55). Probe Q16a
+   * (/home/volence/l4d/hud/probe-phase2-infected/b9/shots-v2/crops/centre-af.png):
+   * its size and colours are HudCrosshair's ability keys, ability_size is
+   * plain screen pixels (the dll reads it as int, not proportional_int), and
+   * it draws only with the crosshair cvar on. The game centres it, so it
+   * does not move; hiding it writes a 0 size and clear colours, never a hard
+   * hide of HudCrosshair, which would remove the crosshair too (build.ts
+   * markerHide). The attack colours need a survivor in reach and the
+   * suppressed one was never produced; the dll proves each is read.
+   */
+  { id: 'abilityMarker', label: 'Ability marker', side: 'infected', key: 'HudCrosshair', move: false, resize: 'none',
+    children: [], mockPos: { x: 'c', y: 'c' }, props: ['visible'],
+    keys: [
+      { key: 'ability_size', label: 'Size (pixels)', type: 'int', range: [4, 64],
+        evidence: 'client.dll CHudTerrorCrosshair run: m_abilitySize|ability_size (int); b9/shots-v2/crops/centre-af.png (size 40: a 72 px ring)' },
+      { key: 'ability_ready_color', label: 'Ready colour', type: 'colour', unsetLabel: 'Game colour',
+        evidence: 'client.dll CHudTerrorCrosshair run: ability_ready_color; b9/shots-v2/crops/centre-af.png (green when ready)' },
+      { key: 'ability_charging_color', label: 'Charging colour', type: 'colour', unsetLabel: 'Game colour',
+        evidence: 'client.dll CHudTerrorCrosshair run: ability_charging_color' },
+      { key: 'ability_surpressed_color', label: 'Suppressed colour', type: 'colour', unsetLabel: 'Game colour',
+        evidence: 'client.dll CHudTerrorCrosshair run: ability_surpressed_color (the game\'s spelling)',
+        note: 'Rarely shown: no probe produced the suppressed state.' },
+      { key: 'ability_attack_color', label: 'Attack colour', type: 'colour', unsetLabel: 'Game colour',
+        evidence: 'client.dll CHudTerrorCrosshair run: m_abilityShouldAttack|ability_attack_color',
+        note: 'Shown when a survivor is in reach.' },
+      { key: 'ability_attack_color_colorblind', label: 'Attack colour (colour-blind mode)', type: 'colour', unsetLabel: 'Game colour',
+        evidence: 'client.dll CHudTerrorCrosshair run: m_abilityShouldAttack_ColorBlind|ability_attack_color_colorblind',
+        note: 'The colour-blind variant of the attack colour.' },
+    ] },
   { id: 'ghostPanel', label: 'Spawn / ghost panel', side: 'infected', key: 'HudGhostPanel', move: true, resize: 'none',
     children: [], props: ['visible'] },
   { id: 'tankPanel', label: 'Tank frustration', side: 'infected', key: 'HudFrustrationMeter', move: true, resize: 'none',

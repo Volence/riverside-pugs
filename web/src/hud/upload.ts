@@ -112,7 +112,7 @@ const nameOf = (fileName: string, root: string) => {
  * TextureData.
  */
 const SHAPES: { path: string; blocks: string[]; required?: string[] }[] = [
-  { path: LAYOUT, blocks: [...ELEMENTS.map((e) => e.key), 'HudCrosshair'] },
+  { path: LAYOUT, blocks: [...new Set([...ELEMENTS.map((e) => e.key), 'HudCrosshair'])] },
   { path: 'resource/ui/hud/teamdisplayhud.res', blocks: ['TeamPlayer1', 'TeamPlayer2', 'TeamPlayer3', 'TeamPlayer4'] },
   // Every registered panel's children, and a panel's own frame block when it
   // has one in a file (a 'hudlayout' frame is its element's block, above).
