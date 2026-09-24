@@ -47,6 +47,17 @@ export interface PruneResult {
  * space floor too costs nothing a disk would notice. A re-analysis that no
  * longer flags the round deletes its clips and releases it.
  *
+ * A replay is also not eligible, under either reason, while the balance
+ * metrics job still has to read it: a finished round of a completed, unvoided
+ * match with no metrics yet, or whose metrics were computed before the replay
+ * arrived (`has_replay = 0` and `replay_seen = 0`, the rounds the job picks
+ * up again). The job reads the replay once and never again, and it waits
+ * while any match is live, so on a busy night with the disk under the floor
+ * this prune used to win: on 2026-09-24, 26 rounds lost their replay metrics
+ * for good. Once the job has read the file, or tried to (`replay_seen = 1`),
+ * the hold lifts. The backlog is at most a night's rounds, about a megabyte
+ * each.
+ *
  * With R2 configured (`opts.requireOffloaded`), a replay is only ever
  * eligible once `match_replays.r2_key` is set, under either reason. On
  * 2026-09-23 the free space floor rule deleted 559 replays that existed
@@ -75,6 +86,13 @@ export function planPrune(
                          WHERE c.match_id = r.match_id AND c.ordinal = r.ordinal AND c.half = r.half)
         AND NOT EXISTS (SELECT 1 FROM integrity_reviews v
                          WHERE v.match_id = r.match_id AND v.ordinal = r.ordinal AND v.half = r.half)
+        AND NOT (m.state = 'completed' AND m.voided_at IS NULL AND EXISTS (
+              SELECT 1 FROM match_rounds mr
+                LEFT JOIN round_metric_context c
+                  ON c.match_id = mr.match_id AND c.ordinal = mr.ordinal AND c.half = mr.half
+               WHERE mr.match_id = r.match_id AND mr.ordinal = r.ordinal AND mr.half = r.half
+                 AND mr.ended_at IS NOT NULL
+                 AND (c.match_id IS NULL OR (c.has_replay = 0 AND c.replay_seen = 0))))
       ORDER BY ageBasis ASC, r.ordinal ASC, r.half ASC`,
   ).all(opts.requireOffloaded ? 1 : 0) as (PruneCandidate & { ageBasis: string })[];
 

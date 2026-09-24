@@ -150,6 +150,59 @@ describe('planPrune', () => {
     });
   });
 
+  // The balance metrics job reads a round's replay once, after the match. With
+  // R2 on and the disk under the floor, production pruned replays within
+  // hours, before the job (which waits while any match is live) got to them:
+  // those rounds were then computed without their replay, for good.
+  describe('rounds still waiting on balance metrics', () => {
+    const matchOf = (filename: string) =>
+      (db.prepare('SELECT match_id AS id FROM match_replays WHERE filename = ?').get(filename) as { id: number }).id;
+    const addRound = (matchId: number, ordinal: number, ended = true) => db.prepare(
+      `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, started_at, ended_at)
+       VALUES (?, ?, 1, 'a', '2026-09-01 00:00:00', ?)`,
+    ).run(matchId, ordinal, ended ? '2026-09-01 00:05:00' : null);
+    const addContext = (matchId: number, ordinal: number, hasReplay: number, replaySeen: number) => db.prepare(
+      `INSERT INTO round_metric_context (match_id, ordinal, half, has_replay, has_stats, replay_seen, engine, computed_at)
+       VALUES (?, ?, 1, ?, 0, ?, 'e', 'n')`,
+    ).run(matchId, ordinal, hasReplay, replaySeen);
+
+    it('holds a finished round with no metrics yet, by window and by floor', () => {
+      const waiting = seedReplay(400, 1, 5e9);
+      const plain = seedReplay(400, 2, 5e9);
+      addRound(matchOf(waiting), 1);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(planPrune(db, dir, new Date(), 90, 500e9, 10e9).map((c) => c.filename)).toEqual([plain]);
+      expect(planPrune(db, dir, new Date(), 9999, 0, 1e9).map((c) => c.filename)).toEqual([plain]);
+      warn.mockRestore();
+    });
+
+    it('holds a round whose metrics were computed before its replay arrived', () => {
+      const waiting = seedReplay(400, 1);
+      addRound(matchOf(waiting), 1);
+      addContext(matchOf(waiting), 1, 0, 0);
+      expect(planPrune(db, dir, new Date(), 90, 500e9, 10e9)).toEqual([]);
+    });
+
+    it('releases the round once the job has read its replay, or tried to', () => {
+      const done = seedReplay(400, 1);
+      const unreadable = seedReplay(400, 2);
+      addRound(matchOf(done), 1);
+      addContext(matchOf(done), 1, 1, 1);
+      addRound(matchOf(unreadable), 2);
+      addContext(matchOf(unreadable), 2, 0, 1);
+      expect(planPrune(db, dir, new Date(), 90, 500e9, 10e9).map((c) => c.filename).sort()).toEqual([done, unreadable].sort());
+    });
+
+    it('does not hold rounds the job never computes: voided matches, unfinished rounds', () => {
+      const voided = seedReplay(400, 1);
+      db.prepare("UPDATE matches SET voided_at = datetime('now') WHERE id = ?").run(matchOf(voided));
+      addRound(matchOf(voided), 1);
+      const unfinished = seedReplay(400, 2);
+      addRound(matchOf(unfinished), 2, false);
+      expect(planPrune(db, dir, new Date(), 90, 500e9, 10e9).map((c) => c.filename).sort()).toEqual([voided, unfinished].sort());
+    });
+  });
+
   it('takes the oldest first when free space is below the floor, even inside the window', () => {
     // The floor overrides the retention window, because a full disk stops the
     // game server, which matters more than keeping a three week old replay.
