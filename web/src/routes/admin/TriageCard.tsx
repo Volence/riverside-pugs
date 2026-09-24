@@ -37,7 +37,7 @@ export function TriageCard({ patch, targets, run, busy }: {
       {patch.onlyPluginsChanged && (
         <p class="balance-banner">Only plugins changed. Probably not a balance change, but plugin updates can be (sky pounce 0.4.0 was).</p>
       )}
-      <form class="admin-form" onSubmit={(e) => {
+      <form class="admin-form admin-form--stack" onSubmit={(e) => {
         e.preventDefault();
         void run(() => adminApi.triageBalancePatch(patch.id, { decision: 'balance', name: name.trim(), notes }));
       }}>

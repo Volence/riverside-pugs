@@ -232,7 +232,8 @@ describe('AdminPatches triage', () => {
     mockAdmin.unfoldBalancePatch.mockResolvedValue({ ok: true });
     mockAdmin.removeIgnoredPlugin.mockResolvedValue({ ok: true });
     render(<AdminPatches />);
-    expect(await screen.findByText((_, el) => el?.tagName === 'TD' && /includes 1 folded config: plugin added l4d_tvwatch/.test(el.textContent ?? ''))).toBeTruthy();
+    expect(await screen.findByText(/Includes 1 folded config/)).toBeTruthy();
+    expect(screen.getByText('#3: plugin added l4d_tvwatch')).toBeTruthy();
     expect(screen.queryByText('Unnamed patch 3')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Unfold patch 3' }));
     await waitFor(() => expect(mockAdmin.unfoldBalancePatch).toHaveBeenCalledWith(3));

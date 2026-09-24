@@ -80,14 +80,16 @@ export function AdminPatches() {
                     <tr key={`${p.id}-folded`}>
                       <td />
                       <td colSpan={7} class="muted">
-                        includes {folded.length} folded config{folded.length === 1 ? '' : 's'}:{' '}
-                        {folded.map((f, i) => (
-                          <span key={f.id}>
-                            {i > 0 && '; '}{foldedLine(f)}{' '}
-                            <button class="btn btn--ghost btn--sm" type="button" disabled={busy} aria-label={`Unfold patch ${f.number}`}
-                              onClick={() => void run(() => adminApi.unfoldBalancePatch(f.id))}>Unfold</button>
-                          </span>
-                        ))}
+                        Includes {folded.length} folded config{folded.length === 1 ? '' : 's'}:
+                        <ul class="patch-folded">
+                          {folded.map((f) => (
+                            <li key={f.id}>
+                              <span>#{f.number}: {foldedLine(f)}</span>
+                              <button class="btn btn--ghost btn--sm" type="button" disabled={busy} aria-label={`Unfold patch ${f.number}`}
+                                onClick={() => void run(() => adminApi.unfoldBalancePatch(f.id))}>Unfold</button>
+                            </li>
+                          ))}
+                        </ul>
                       </td>
                     </tr>
                   )];
@@ -121,7 +123,7 @@ export function AdminPatches() {
       {open && (
         <Panel>
           <h3>{label(open)}</h3>
-          <form class="admin-form" onSubmit={(e) => {
+          <form class="admin-form admin-form--stack" onSubmit={(e) => {
             e.preventDefault();
             void run(() => adminApi.editBalancePatch(open.id, { name: name.trim() || null, notes, reviewed: true })).then(() => setOpen(null));
           }}>
