@@ -684,7 +684,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // server id (serverOf's result), not the plugin-reported ev.matchId,
       // which is the plugin's own tracked match and can be stale. Same join
       // getLiveMatches (liveView.ts) uses to pair a server with its live
-      // match's current map, which recordRoundStart keeps current.
+      // match's current map, which recordRoundStart keeps current. Only the
+      // fallback: the plugin names its own map on the line, which also covers
+      // a call outside a match; this fills in for an older plugin.
       const currentMapOf = (serverId: number | null): string | null => {
         if (serverId === null) return null;
         return (deps.db.prepare(
@@ -826,7 +828,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // must not take down the listener that also carries match_end.
           try {
             const sid = serverOf(source, meta);
-            handleModCall(deps.db, ev, sid, { adminSteamIds: deps.config.adminSteamIds, map: currentMapOf(sid) });
+            handleModCall(deps.db, ev, sid, { adminSteamIds: deps.config.adminSteamIds, map: ev.map ?? currentMapOf(sid) });
           } catch (err) {
             console.error('[modcall] failed to handle a call:', err);
           }

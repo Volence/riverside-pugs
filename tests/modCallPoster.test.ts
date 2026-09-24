@@ -11,7 +11,7 @@ const ROLE = '1551114695010816040';
 let db: DB; let t: FakeTransport; let poster: ModCallPoster; let matchId: number; let serverId: number;
 
 const ev = (over: Partial<ModCallEvent> = {}): ModCallEvent => ({
-  kind: 'call', steamid: IDS[0], target: IDS[5], callerTeam: 2, reason: 'cheating',
+  kind: 'call', steamid: IDS[0], target: IDS[5], callerTeam: 2, reason: 'cheating', map: null,
   matchId, ordinal: 1, half: 1, tMs: 5000, via: 'game', text: 'walls **bold** @everyone', ...over,
 });
 const call = (over: Partial<ModCallEvent> = {}) => handleModCall(db, ev(over), serverId, { adminSteamIds: [], map: 'l4d_hospital01_apartment' });

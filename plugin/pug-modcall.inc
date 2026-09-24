@@ -307,10 +307,15 @@ void ModCall_Send(int client, const char[] rawDetails, bool notify = true)
 	strcopy(details, sizeof(details), rawDetails);
 	SanitizeChat(details, sizeof(details));
 
+	// The map rides on the line so a call outside a match still says where
+	// it came from. Before text=, which must stay last.
+	char map[64];
+	GetCurrentMap(map, sizeof(map));
+
 	char line[512];
-	Format(line, sizeof(line), "PUGCALL steamid=%s target=%s tteam=%d reason=%s match=%d ord=%d half=%d tms=%d via=game text=%s",
+	Format(line, sizeof(line), "PUGCALL steamid=%s target=%s tteam=%d reason=%s match=%d ord=%d half=%d tms=%d via=game map=%s text=%s",
 		caller, g_sCallTarget[client], GetClientTeam(client), g_sCallReason[client],
-		g_iMatchId, g_iRplMapSeq, g_iHalf, RoundMs(), details);
+		g_iMatchId, g_iRplMapSeq, g_iHalf, RoundMs(), map, details);
 	PugLog("%s", line);
 	LogMessage("[modcall] %s", line);
 

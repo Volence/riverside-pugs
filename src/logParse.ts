@@ -181,10 +181,12 @@ export type LogEvent =
   // An in-game /mod call (src/modCalls.ts). `target` is a SteamID64 or one of
   // the targetless words the plugin sends when the caller did not aim at a
   // player. `matchId`/`ordinal`/`half`/`tMs` are the round moment, present
-  // only inside a match or a round the way PHASE fields are.
+  // only inside a match or a round the way PHASE fields are. `map` is the
+  // server's current map as the plugin saw it, so a call outside a match
+  // still says where it came from; null from an older plugin.
   | { kind: 'call'; steamid: string; target: string; callerTeam: number | null; reason: ModCallReason;
       matchId: number | null; ordinal: number | null; half: number | null; tMs: number | null;
-      via: 'game' | 'tv'; text: string };
+      via: 'game' | 'tv'; map: string | null; text: string };
 
 /** Parse `key=val key=val` pairs from the remainder of a PUG line. */
 /** The phase fields shared by PHASE and HEARTBEAT. Plugin team numbers are
@@ -447,8 +449,11 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     const ord = intOf(head.ord);
     const half = intOf(head.half);
     const tms = intOf(head.tms);
+    // Optional: a plugin older than the field sends none. A value that is not
+    // a plain map name is dropped rather than refusing the whole call.
+    const map = head.map !== undefined && /^[A-Za-z0-9_.-]{1,64}$/.test(head.map) ? head.map : null;
     return {
-      kind: 'call', steamid, target, reason: reason as ModCallReason, via, text,
+      kind: 'call', steamid, target, reason: reason as ModCallReason, via, map, text,
       callerTeam: team !== null && team >= 0 && team <= 3 ? team : null,
       matchId: match !== null && match > 0 ? match : null,
       ordinal: ord !== null && ord >= 0 ? ord : null,
