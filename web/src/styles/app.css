@@ -1634,6 +1634,14 @@ body.is-theater { overflow: hidden; }
 .balance-side { display: flex; flex-direction: column; gap: var(--sp-1); max-height: 12rem; overflow-y: auto; }
 .balance-banner { border-left: 3px solid var(--rating); padding: var(--sp-2) var(--sp-3); background: var(--surface-2); }
 .balance-check { padding: var(--sp-3); background: var(--surface-2); }
+/* Triage card: name, then a full-width notes box, then the button. */
+.admin-form--stack { flex-direction: column; align-items: stretch; }
+.admin-form--stack input { flex: 0 0 auto; }
+.admin-form--stack textarea { font: inherit; min-height: 6rem; resize: vertical; }
+.admin-form--stack .btn { align-self: flex-start; }
+/* Folded configs under their target patch: one per line, Unfold at the end. */
+.patch-folded { list-style: none; margin: var(--sp-1) 0 0; padding: 0; }
+.patch-folded li { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: 2px 0; }
 .balance-map { margin-top: var(--sp-3); }
 .balance-map__row { margin-bottom: var(--sp-3); font-size: var(--fs-dense); }
 .balance-map__bar { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: 3px; }
