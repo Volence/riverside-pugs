@@ -123,6 +123,16 @@ describe('the alpha-0 drawColor of a stand-in and a hard hide', () => {
     expect(stockAlpha(buildHud(d({ splatters: { splatTeam: { kind: 'fade' } } })))).toBe('10 20 30 0');
     expect(stockAlpha(buildHud(d({ children: { teamColumn: { BackgroundImage: { visible: false } } } })))).toBe('10 20 30 0');
   });
+  it("draws the stand-in white at the stock alpha, so an imported HUD's dark tint cannot blacken the custom art", () => {
+    const d = withColour('0 0 0 200');
+    const stand = (files: { path: string; data: Uint8Array }[]) => kvGet(kvFind(tree(files, CARD), ['HudEdSplatter'])!, 'drawColor');
+    expect(stand(buildHud(d({ splatters: { splatTeam: { kind: 'fade' } } })))).toBe('255 255 255 200');
+    expect(stand(buildHud(d({ splatters: { splatTeam: { kind: 'fade' } },
+      children: { teamColumn: { BackgroundImage: { color: '0 0 0 90' } } } })))).toBe('255 255 255 90');
+    // The preview draws from buildTrees, the same splatterPass: it shows the same white.
+    expect(kvGet(kvFind(buildTrees(d({ splatters: { splatTeam: { kind: 'fade' } } }))(CARD), ['HudEdSplatter'])!, 'drawColor')).toBe('255 255 255 200');
+    expect(stand(buildHud(withColour('Black')({ splatters: { splatTeam: { kind: 'fade' } } })))).toBe('255 255 255 255');
+  });
   it('writes 0 0 0 0 for a scheme colour name rather than mangling it', () => {
     const d = withColour('Black');
     expect(stockAlpha(buildHud(d({ splatters: { splatTeam: { kind: 'fade' } } })))).toBe('0 0 0 0');

@@ -15,7 +15,7 @@ import { parseKv, writeKv, kvFind, kvGet, kvSet, pcApplies, type KvNode } from '
 import { parsePos, parseSize, formatPos, scaleToken, screenW, SCREEN_H, type Aspect } from './units';
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import { SLOTS } from './slots';
-import { flatTexture, roundedTexture, vmtFor } from './textures';
+import { flatTexture, roundedTexture, vmtFor, parseColour } from './textures';
 import { decodeText, encodeText } from './text';
 import {
   baseTeam, contentBox, WEAPON_KEYS, WEAPON_BOX_COLOUR, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir,
@@ -556,6 +556,10 @@ function clearOf(colour: string): string {
  * an ImagePanel of its own that the game does not know about and so leaves
  * alone. The stock one keeps its size and visibility, which game code
  * manages, and only loses its alpha: the same alpha 0 that hardHide relies on.
+ * The stand-in draws white at the stock alpha (the player's own opacity edit
+ * included, as childPass has run): the custom art carries its own colours,
+ * and an imported HUD's dark tint (say 0 0 0 200) would multiply it to black
+ * with no control on the row to undo it.
  */
 function insertStandIn(nodes: KvNode[], stock: KvNode, def: SplatterDef) {
   const colour = kvGet(stock, 'drawColor') ?? '255 255 255 255';
@@ -564,7 +568,7 @@ function insertStandIn(nodes: KvNode[], stock: KvNode, def: SplatterDef) {
     ['xpos', pcGet(stock, 'xpos') ?? '0'], ['ypos', pcGet(stock, 'ypos') ?? '0'],
     ['wide', pcGet(stock, 'wide') ?? '0'], ['tall', pcGet(stock, 'tall') ?? '0'],
     ['zpos', pcGet(stock, 'zpos') ?? '-1'], ['visible', '1'], ['enabled', '1'], ['scaleImage', '1'],
-    ['image', splatterImageKey(def.id)], ['drawColor', colour],
+    ['image', splatterImageKey(def.id)], ['drawColor', `255 255 255 ${parseColour(colour)[3]}`],
   ];
   nodes.splice(nodes.indexOf(stock) + 1, 0, { key: SPLAT_STAND_IN, value: pairs.map(([key, value]) => ({ key, value })) });
   kvSet(stock, 'drawColor', clearOf(colour));
