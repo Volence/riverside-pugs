@@ -10,6 +10,16 @@ export interface SideData { summary: SideSummary; samples: Map<string, MatchSamp
 export const rowKey = (metric: string, phase: Phase) => `${metric}|${phase}`;
 const UNKNOWN_MAP = '(unknown map)';
 
+/** WHERE fragment over rm (round_metrics) and c: keep a round's 'event' and
+ *  'normal' rows only when the round has per-round stats. Panic and finale
+ *  markers came in the same plugin release as per-round stats (pug-match
+ *  0.3.9), so a round without stats has no markers: its event time is
+ *  unknown, its event share reads 0 and its event stretches are counted as
+ *  normal play. Comparing those rows with a marked round's would show the
+ *  plugin release, not a balance change. Filtered here rather than at compute
+ *  time so rounds kept frozen on an older engine are covered too. */
+export const PHASE_KNOWN_SQL = "(rm.phase NOT IN ('event', 'normal') OR c.has_stats = 1)";
+
 /** WHERE fragment over c (round_metric_context) and m (matches). */
 export function sideFilterSql(q: SideQuery): { sql: string; params: (string | number)[] } {
   const params: (string | number)[] = [];
@@ -44,7 +54,7 @@ export function loadSide(db: DB, q: SideQuery, phases: Phase[]): SideData {
     FROM round_metrics rm
     JOIN round_metric_context c ON c.match_id = rm.match_id AND c.ordinal = rm.ordinal AND c.half = rm.half
     JOIN matches m ON m.id = rm.match_id
-    WHERE ${f.sql} AND rm.phase IN (${phases.map(() => '?').join(',')})
+    WHERE ${f.sql} AND ${PHASE_KNOWN_SQL} AND rm.phase IN (${phases.map(() => '?').join(',')})
     GROUP BY rm.match_id, map, rm.metric, rm.phase
     ORDER BY rm.match_id`).all(...f.params, ...phases) as
     { matchId: number; map: string; metric: string; phase: Phase; num: number; den: number }[];

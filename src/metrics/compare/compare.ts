@@ -1,7 +1,7 @@
 import type { DB } from '../../db.js';
 import { METRICS } from '../registry.js';
 import { SUB_PHASES, type Phase } from '../types.js';
-import { loadSide, rowKey, sideFilterSql } from './load.js';
+import { loadSide, PHASE_KNOWN_SQL, rowKey, sideFilterSql } from './load.js';
 import {
   benjaminiHochberg, bootstrapDiff, FDR, inverseNormalCdf, mapWeights, matchesNeeded, mulberry32, REAL_MIN_MATCHES, REPS, SEED,
   sharedMaps, verdictOf, weightedValue, type Verdict,
@@ -164,7 +164,7 @@ export function metricDetail(db: DB, metric: string, phase: Phase, a: SideQuery,
       FROM round_metrics rm
       JOIN round_metric_context c ON c.match_id = rm.match_id AND c.ordinal = rm.ordinal AND c.half = rm.half
       JOIN matches m ON m.id = rm.match_id
-      WHERE ${f.sql} AND rm.metric = ? AND rm.phase = ?
+      WHERE ${f.sql} AND ${PHASE_KNOWN_SQL} AND rm.metric = ? AND rm.phase = ?
       GROUP BY m.id`).all(...f.params, metric, phase) as { matchId: number; endedAt: string; patchId: number | null; num: number; den: number }[])
       .filter((r) => r.den > 0)
       .map((r): TrendPoint => ({ matchId: r.matchId, endedAt: r.endedAt, patchId: r.patchId, side, value: r.num / r.den }));
@@ -183,7 +183,7 @@ export function metricDetail(db: DB, metric: string, phase: Phase, a: SideQuery,
       FROM round_metrics rm
       JOIN round_metric_context c ON c.match_id = rm.match_id AND c.ordinal = rm.ordinal AND c.half = rm.half
       JOIN matches m ON m.id = rm.match_id
-      WHERE ${pf.sql} AND rm.metric = ? AND rm.phase = ?
+      WHERE ${pf.sql} AND ${PHASE_KNOWN_SQL} AND rm.metric = ? AND rm.phase = ?
       GROUP BY c.patch_id`).all(...pf.params, metric, phase) as { patchId: number; num: number; den: number; matches: number }[])
     .map((r) => [r.patchId, r] as const));
   const perPatch: PatchValue[] = boundaries.map((b) => {
@@ -196,7 +196,7 @@ export function metricDetail(db: DB, metric: string, phase: Phase, a: SideQuery,
       FROM round_metrics rm
       JOIN round_metric_context c ON c.match_id = rm.match_id AND c.ordinal = rm.ordinal AND c.half = rm.half
       JOIN matches m ON m.id = rm.match_id
-      WHERE ${f.sql} AND rm.metric = ? AND rm.phase = ?
+      WHERE ${f.sql} AND ${PHASE_KNOWN_SQL} AND rm.metric = ? AND rm.phase = ?
       GROUP BY map`).all(...f.params, metric, phase) as { map: string; num: number; den: number; rounds: number }[])
       .map((r) => [r.map, r] as const));
   const ma = byMap(fa), mb = byMap(fb);
@@ -210,7 +210,7 @@ export function metricDetail(db: DB, metric: string, phase: Phase, a: SideQuery,
       FROM round_metrics rm
       JOIN round_metric_context c ON c.match_id = rm.match_id AND c.ordinal = rm.ordinal AND c.half = rm.half
       JOIN matches m ON m.id = rm.match_id
-      WHERE ${fb.sql} AND rm.metric = ? AND rm.phase = ? AND rm.den > 0
+      WHERE ${fb.sql} AND ${PHASE_KNOWN_SQL} AND rm.metric = ? AND rm.phase = ? AND rm.den > 0
       ORDER BY value, rm.match_id DESC, rm.ordinal, rm.half`).all(...fb.params, metric, phase) as ExampleRound[];
   const picks = [...bRounds.slice(-3).reverse(), ...bRounds.slice(0, 2)];
   const seen = new Set<string>();
