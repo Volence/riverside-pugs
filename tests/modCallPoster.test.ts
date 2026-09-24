@@ -129,4 +129,16 @@ describe('ModCallPoster', () => {
     expect(p.embeds[0].description).not.toContain('> ');
     expect(p.components[0].map((b) => b.label)).not.toContain('Ticket');
   });
+
+  it('skips a pending call instead of posting it once calls are turned off', async () => {
+    setSetting(db, 'discord_admin_channel_id', '');
+    const row = call(); await poster.idle();
+    setSetting(db, 'mod_calls_enabled', '0');
+    setSetting(db, 'discord_admin_channel_id', 'admins');
+    await poster.retryNow();
+    expect(inAdmin()).toHaveLength(0);
+    const after = db.prepare('SELECT post_state, note FROM mod_calls WHERE id = ?').get(row.id) as { post_state: string; note: string };
+    expect(after.post_state).toBe('skipped');
+    expect(after.note).toMatch(/Calls are turned off$/);
+  });
 });

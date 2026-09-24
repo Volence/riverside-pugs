@@ -91,6 +91,14 @@ export class ModCallPoster {
       return;
     }
     if (row.post_state !== 'pending') return;
+    // Off means posts nothing, including calls that were waiting on Discord or
+    // a blank channel when an admin switched it off. Skipped, not left pending,
+    // so turning calls back on does not flush a backlog of stale pings.
+    if (getSetting(db, 'mod_calls_enabled') === '0') {
+      const note = row.note ? `${row.note}. Calls are turned off` : 'Calls are turned off';
+      db.prepare("UPDATE mod_calls SET post_state = 'skipped', note = ? WHERE id = ?").run(note, id);
+      return;
+    }
     // Blank channel: left pending. The site's banner says calls are not
     // reaching Discord, and the retry pass posts it once the channel is set.
     const channelId = getSetting(db, 'discord_admin_channel_id') ?? '';
