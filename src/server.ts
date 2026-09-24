@@ -172,6 +172,8 @@ export interface ServerDeps {
   /** Free bytes on the community store's disk, for its 12 GB floor. Injected
    *  in tests; a real statfs on config.communityDir otherwise. */
   communityFreeBytes?: () => Promise<number>;
+  /** How long a HUD share may take to upload. Injected in tests; two minutes otherwise. */
+  communityUploadTimeoutMs?: number;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -1491,7 +1493,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     freeBytes: deps.communityFreeBytes,
     maxBytes: () => settingNumber(deps.db, 'community_store_mb', 1024, { min: 100, max: 20000, integer: true }) * 2 ** 20,
   });
-  await app.register(communityRoutes, { db: deps.db, store: getCommunityStore });
+  await app.register(communityRoutes, { db: deps.db, store: getCommunityStore, uploadTimeoutMs: deps.communityUploadTimeoutMs });
 
   // Purge community tombstones past their 30 days, once at start and then
   // daily. With no community folder yet nothing was ever written, so only
