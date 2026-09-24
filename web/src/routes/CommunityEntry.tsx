@@ -43,7 +43,7 @@ export function CommunityEntry({ id, session }: { id: string; session: Session }
         <p class="community__removed" role="note">
           {removed.by === data.author.steamid
             ? 'Deleted by its author.'
-            : <>Removed by <a href={`/player/${encodeURIComponent(removed.by ?? '')}`}>{removed.by ?? 'staff'}</a>: {removed.reason ?? 'no reason given'}</>}
+            : <>Removed by <a href={`/player/${encodeURIComponent(removed.by ?? '')}`}>{removed.byName || removed.by || 'staff'}</a>: {removed.reason ?? 'no reason given'}</>}
         </p>
       )}
       {/* A removed entry is shown to staff as evidence, without the actions a

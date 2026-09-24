@@ -55,6 +55,12 @@ describe('the community entry page', () => {
     expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
   });
 
+  it("names the staff member who removed it when the server knows the name", async () => {
+    mockCommunity.get.mockResolvedValue(entry({ removed: { by: '9', byName: 'ModMan', reason: 'offensive preview', at: '2026-09-24T02:00:00.000Z' } }));
+    show(MOD);
+    expect((await screen.findByRole('link', { name: 'ModMan' })).getAttribute('href')).toBe('/player/9');
+  });
+
   it('says an author deleted their own entry', async () => {
     mockCommunity.get.mockResolvedValue(entry({ removed: { by: '76561190000000001', reason: null, at: '2026-09-24T02:00:00.000Z' } }));
     show(MOD);

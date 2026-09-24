@@ -252,6 +252,14 @@ describe('delete', () => {
     expect(staff.json()).toMatchObject({ id, removed: { by: A, reason: null } });
     expect((await list(null)).json().entries).toHaveLength(0);
   });
+
+  it("names who removed an entry on staff's view, not only their steamid", async () => {
+    db.prepare("UPDATE players SET name = 'ModMan' WHERE steamid = ?").run(MOD);
+    const id = await shareId(A);
+    expect((await inject(MOD, 'POST', `/api/community/${id}/remove`, { reason: 'rude' })).statusCode).toBe(200);
+    const staff = (await inject(MOD, 'GET', `/api/community/${id}`)).json();
+    expect(staff.removed).toMatchObject({ by: MOD, byName: 'ModMan', reason: 'rude' });
+  });
 });
 
 describe('mine', () => {
