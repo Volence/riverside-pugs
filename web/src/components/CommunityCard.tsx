@@ -128,6 +128,9 @@ export function CommunityCard(
   const staff = session.kind === 'active' && (session.me.isAdmin || session.me.isMod === true);
   const href = `/community/${entry.id}`;
   const badge = isHud ? baseBadge(entry) : null;
+  // A removed entry reaches the page only for staff, as evidence: shown, never
+  // opened, downloaded or liked, so a take-down never lands in a browser.
+  const removed = 'removed' in entry && !!entry.removed;
 
   // The build code is most of the HUD editor, so it loads on the first
   // Download, never with the gallery. A HUD needs its design, which the
@@ -197,9 +200,11 @@ export function CommunityCard(
             ? <img class="ccard__avatar" src={entry.author.avatar} alt="" loading="lazy" />
             : <span class="ccard__avatar ccard__avatar--blank" />}
           <PlayerLink steamid={entry.author.steamid} name={entry.author.name} />
-          <Likes entry={entry} session={session} />
+          {removed
+            ? <span class="ccard__likes muted">{`${entry.likes} ${entry.likes === 1 ? 'like' : 'likes'}`}</span>
+            : <Likes entry={entry} session={session} />}
         </div>
-        <div class="ccard__actions">
+        {!removed && <div class="ccard__actions">
           {isHud ? (
             <>
               <a class="btn btn--sm" href={`/hud?community=${entry.id}`}>Open in the HUD editor</a>
@@ -212,7 +217,7 @@ export function CommunityCard(
               <a class="btn btn--ghost btn--sm" href={`/hud?xhair=${entry.id}`}>Use in my HUD</a>
             </>
           )}
-        </div>
+        </div>}
         {status && <p class={status.ok ? 'muted ccard__status' : 'error ccard__status'}>{status.text}</p>}
         {(session.kind === 'active' && !own) || staff || own ? (
           <div class="ccard__mod">

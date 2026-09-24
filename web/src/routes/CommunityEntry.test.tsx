@@ -55,6 +55,15 @@ describe('the community entry page', () => {
     expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
   });
 
+  it('shows staff a removed entry as evidence only: no open, download or like', async () => {
+    mockCommunity.get.mockResolvedValue(entry({ removed: { by: '9', reason: 'offensive preview', at: '2026-09-24T02:00:00.000Z' } }));
+    show(MOD);
+    expect(await screen.findByRole('heading', { name: 'Clean Modern' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Open in the HUD editor' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Download' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Like/ })).toBeNull();
+  });
+
   it("names the staff member who removed it when the server knows the name", async () => {
     mockCommunity.get.mockResolvedValue(entry({ removed: { by: '9', byName: 'ModMan', reason: 'offensive preview', at: '2026-09-24T02:00:00.000Z' } }));
     show(MOD);
