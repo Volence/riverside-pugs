@@ -69,7 +69,9 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
 const INSTALL_FAQ: { q: string; a: preact.ComponentChildren }[] = [
   {
     q: "I don't want to run the pack's left4dead.exe",
-    a: <><p>The pack's exe is there for one reason: it may use 4 GB of memory, and Steam's may
+    a: <><p>On Linux or Steam Deck, leave it out and you are done. Proton already lets every
+      game use 4 GB, so there is nothing to patch.</p>
+      <p>The pack's exe is there for one reason: it may use 4 GB of memory, and Steam's may
       only use 2 GB. The L4D2 maps need more than 2 GB, so on Steam's exe they crash with "Out
       of memory or address space". The catch is that the pack's exe is an older build, not
       Steam's with one change, so you cannot easily check what is in it. You can give your
