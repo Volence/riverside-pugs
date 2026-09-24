@@ -7,7 +7,7 @@ import { Fragment } from 'preact';
 import { useState } from 'preact/hooks';
 import {
   clampOverride, clampChild, clampWeapon, WEAPON_KEYS, WEAPON_BOX_COLOUR, WEAPON_BOX_IMAGE, WEAPON_ICONS, ITEM_ICONS,
-  weaponImageKind, weaponUploadSize, NOTICE_BOX_COLOUR, type NoticeBox,
+  weaponImageKind, weaponUploadSize, VOICE_ICON_TEXELS, NOTICE_BOX_COLOUR, type NoticeBox,
   type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type ChildRangeKey,
   type WeaponNumKey, type WeaponsOverride, type WeaponBoxStyle,
 } from '../../hud/design';
@@ -22,7 +22,7 @@ import { probe } from '../../hud/probes';
 import {
   cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild, resetChildKey, rowGapSlider, setRowGap,
   startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, patchWeapons, ammoOnly, setFit,
-  resetElementKey, setScale, withWeaponUpload, resetWeaponUpload,
+  resetElementKey, setScale, withWeaponUpload, resetWeaponUpload, withVoiceUpload, resetVoiceUpload,
   type Align,
 } from '../../hud/edit';
 import { unionBox } from '../../hud/guides';
@@ -524,6 +524,7 @@ export function ElementControls(
       {id === 'chat' && <ChatControls design={design} edit={edit} end={end} patch={patch} />}
       {id === 'spawnCountdown' && <CountdownControls design={design} edit={edit} end={end} patch={patch} />}
       {id === 'vote' && <VoteControls design={design} edit={edit} end={end} patch={patch} />}
+      {id === 'ownMic' && <VoiceIconControls design={design} edit={edit} />}
 
       {/* The crosshair has no element settings of its own to reset: its choice and art are undone like any edit. */}
       {id !== 'xhair' && <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this element</button>}
@@ -662,6 +663,49 @@ function CountdownControls({ design, edit, end, patch }: { design: HudDesign; ed
           Use the file size
         </button>
       )}
+    </>
+  );
+}
+
+/**
+ * The two voice icon uploads (plan task T2), each redrawn at 64 x 64
+ * (plan decision 5) and stored as one undo step: your own microphone, which
+ * probe V1 saw drawn from an upload
+ * (/home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/voice-g.png), and
+ * the teammate talking icon, which no probe has seen (it needs a second
+ * player). An error stays on its row until the next try.
+ */
+function VoiceIconControls({ design, edit }: { design: HudDesign; edit: Edit }) {
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const upload = async (id: string, f: File) => {
+    try {
+      const { png } = await decodeUpload(f, VOICE_ICON_TEXELS, VOICE_ICON_TEXELS);
+      setErrors((u) => { const n = { ...u }; delete n[id]; return n; });
+      edit((d) => withVoiceUpload(d, id, { w: VOICE_ICON_TEXELS, h: VOICE_ICON_TEXELS, png }), 'step');
+    } catch (err) {
+      setErrors((u) => ({ ...u, [id]: (err as Error).message }));
+    }
+  };
+  const row = (id: string, label: string, note?: string) => (
+    <div key={id} class="hud__stylerow hud__weaponpic" role="group" aria-label={label}>
+      <span class="hud__stylerow-label">{label}{design.images[id] ? ' (yours)' : ''}</span>
+      <PickFile label={`${label} picture`} onFile={(f) => { void upload(id, f); }} />
+      <button
+        type="button" class="btn btn--ghost btn--sm" aria-label={`Reset ${label}`} disabled={!design.images[id]}
+        onClick={() => edit((d) => resetVoiceUpload(d, id), 'step')}
+      >
+        Reset
+      </button>
+      {note && <p class="muted hud__note">{note}</p>}
+      {errors[id] && <p class="error">{errors[id]}</p>}
+    </div>
+  );
+  return (
+    <>
+      <p class="eyebrow hud__note">Pictures</p>
+      <p class="muted hud__note">Your pictures keep their colours and fill the box.</p>
+      {row('voiceSelf', 'Your microphone icon')}
+      {row('voicePlayer', 'Teammate talking icon', 'Shown when a teammate talks; not seen in our tests (needs a second player).')}
     </>
   );
 }

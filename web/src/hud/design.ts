@@ -164,6 +164,24 @@ export function weaponImageFits(id: string, w: number, h: number): boolean | und
   if (weaponImageKind(entry) === 'gun') return h === WEAPON_ICON_TEXELS && w >= WEAPON_GUN_MIN_W && w <= WEAPON_GUN_MAX_W;
   return w === WEAPON_ICON_TEXELS && h === WEAPON_ICON_TEXELS;
 }
+/**
+ * The voice icon uploads (plan task T2): an `images` id to the
+ * mod_textures.txt entry it repoints, voice_self the microphone you see
+ * while you talk (HudVoiceSelfStatus), voice_player the icon the game
+ * draws for a talking teammate. The upload itself is the switch: a stored
+ * picture under the id is used, none means the game's glyph. Probe V1
+ * (/home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/voice-g.png) saw
+ * voice_self drawn from a texture cell in full colour.
+ */
+export const VOICE_ICONS: Readonly<Record<string, string>> = { voiceSelf: 'voice_self', voicePlayer: 'voice_player' };
+/** A voice icon is redrawn at 64 x 64 texels before it is stored (plan decision 5). */
+export const VOICE_ICON_TEXELS = 64;
+/** Whether a stored picture under `id` is a voice icon at the size the build takes; undefined for an id that is no voice icon's. */
+export function voiceImageFits(id: string, w: number, h: number): boolean | undefined {
+  if (!(id in VOICE_ICONS)) return undefined;
+  return w === VOICE_ICON_TEXELS && h === VOICE_ICON_TEXELS;
+}
+
 /** Box colours when a flat or rounded box carries none: the old Advanced weapon box slots' defaults. */
 export const WEAPON_BOX_COLOUR = { boxActive: '40 40 40 215', boxInactive: '0 0 0 130' } as const;
 
@@ -817,7 +835,8 @@ export function validateDesign(raw: unknown): HudDesign {
     // A weapon upload must be the texel size it was drawn at (decision 5),
     // which is also the size the build encodes and the cell rect it writes.
     const weapon = weaponImageFits(id, w, h);
-    if (weapon === false || (weapon === undefined && !(isSlot(id) || splatterDef(id)))) continue;
+    const voice = voiceImageFits(id, w, h);
+    if (weapon === false || voice === false || (weapon === undefined && voice === undefined && !(isSlot(id) || splatterDef(id)))) continue;
     // A splatter image must be its texture's exact size: the preview draws the
     // stored PNG and the build encodes it at the texture size, so only that
     // size can be both.

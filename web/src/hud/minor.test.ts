@@ -264,3 +264,52 @@ describe('the panels seen only with other players (plan task M2)', () => {
     expect(calls(d, 'survivor', DEFAULT_PREVIEW).some((x) => x.m === 'fillText' && x.a[0] === 'Zoey' && (x.a[1] as number) >= r.x * K)).toBe(false);
   });
 });
+
+/**
+ * The voice icon uploads (plan task T2). Probe V1
+ * (/home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/voice-g.png):
+ * voice_self, a font glyph entry in mod_textures.txt, repointed to a
+ * texture cell draws the texture in full colour in the mic's box.
+ */
+describe('the voice icon uploads (plan task T2)', () => {
+  beforeEach(() => { _resetAssetCache(); });
+  const PNG = 'iVBORw0KGgo=';
+  const withIcons = (ids: string[], size = 64) => validateDesign({ v: 1, images: Object.fromEntries(ids.map((id) => [id, { w: size, h: size, png: PNG }])) });
+  const px = new Uint8ClampedArray(64 * 64 * 4).fill(200);
+  const modtex = (files: { path: string; data: Uint8Array }[]) => {
+    const f = files.find((x) => x.path === 'scripts/mod_textures.txt');
+    return f ? parseKv(new TextDecoder('latin1').decode(f.data))[0].value as KvNode[] : undefined;
+  };
+
+  it('keeps a 64 x 64 upload for either icon, and drops any other size', () => {
+    expect(Object.keys(withIcons(['voiceSelf', 'voicePlayer']).images).sort()).toEqual(['voicePlayer', 'voiceSelf']);
+    expect(withIcons(['voiceSelf'], 32).images).toEqual({});
+  });
+
+  it('points voice_self and voice_player at their uploads, a 64 x 64 cell, losing the glyph', () => {
+    const d = withIcons(['voiceSelf', 'voicePlayer']);
+    const files = buildHud(d, { images: { voiceSelf: px, voicePlayer: px } });
+    const cells = kvFind(modtex(files)!, ['TextureData'])!.value as KvNode[];
+    for (const [entry, name] of [['voice_self', 'voice_self'], ['voice_player', 'voice_player']]) {
+      const e = kvFind(cells, [entry])!;
+      expect((e.value as KvNode[]).map((n) => [n.key, n.value])).toEqual([
+        ['file', `vgui/hud/hudeditor/${name}`], ['x', '0'], ['y', '0'], ['width', '64'], ['height', '64']]);
+      expect(files.some((f) => f.path === `materials/vgui/hud/hudeditor/${name}.vtf`)).toBe(true);
+      expect(files.some((f) => f.path === `materials/vgui/hud/hudeditor/${name}.vmt`)).toBe(true);
+    }
+    // Another glyph entry stays the game's.
+    expect(kvGet(kvFind(cells, ['voice_teammate'])!, 'font')).toBeDefined();
+  });
+
+  it('ships no mod_textures.txt without an upload, and says which picture could not be read', () => {
+    expect(modtex(buildHud(validateDesign({ v: 1 })))).toBeUndefined();
+    expect(() => buildHud(withIcons(['voiceSelf']), {})).toThrow(/Your microphone icon/);
+  });
+
+  it('draws the upload in the mic box in the preview', () => {
+    const d = withIcons(['voiceSelf']);
+    const r = elementRect(d, 'ownMic', d.aspect);
+    const pic = calls(d, 'survivor').find((x) => x.m === 'drawImage' && String((x.a[0] as HTMLImageElement).src).endsWith(PNG))!;
+    expect(pic.a.slice(1)).toEqual([r.x * K, r.y * K, 24 * K, 24 * K]);
+  });
+});

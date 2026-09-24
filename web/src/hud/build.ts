@@ -19,7 +19,7 @@ import { flatTexture, roundedTexture, vmtFor, parseColour } from './textures';
 import { decodeText, encodeText } from './text';
 import {
   baseTeam, contentBox, drawnBarX, isBar, NOTICE_BOX_COLOUR, WEAPON_KEYS, WEAPON_BOX_COLOUR, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir,
-  type WeaponNumKey, WEAPON_ICONS, ITEM_ICONS, WEAPON_BOX_IMAGE, weaponImageKind,
+  type WeaponNumKey, WEAPON_ICONS, ITEM_ICONS, WEAPON_BOX_IMAGE, weaponImageKind, VOICE_ICONS, VOICE_ICON_TEXELS,
 } from './design';
 import {
   panelChildren, panelOfFile, childDef, childPath, maxInset, linkedValue, TEAM_PANEL, OWN_PANEL, SI_PANEL, ZCARD_PANEL, type ChildDef, type PanelChildren, type LinkRect, type LinkRule,
@@ -2135,6 +2135,34 @@ function weaponsPass(work: Work, design: HudDesign, assets: BuildAssets | null, 
   fitWeaponPanel(work, design, panel, cells);
 }
 
+/** What each voice upload is called in an error naming it. */
+const VOICE_LABELS: Record<string, string> = { voiceSelf: 'Your microphone icon', voicePlayer: 'Teammate talking icon' };
+
+/**
+ * The voice icon uploads (plan task T2): each stored picture ships as
+ * materials/vgui/hud/hudeditor/<entry>.vtf and its mod_textures.txt entry
+ * (a font glyph in every preset) becomes a 64 x 64 cell of it, the form
+ * probe V1 drew (/home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/voice-g.png).
+ * `assets` null is the preview: the entry is pointed and no pixels are
+ * asked for. An imported HUD lacking the entry is skipped.
+ */
+function voicePass(work: Work, design: HudDesign, assets: BuildAssets | null, out: VpkFile[]) {
+  for (const [id, entry] of Object.entries(VOICE_ICONS)) {
+    const stored = design.images[id];
+    if (!stored) continue;
+    const name = `vgui/hud/hudeditor/${entry}`;
+    if (assets) {
+      const px = assets.images?.[id];
+      if (!px || px.length !== VOICE_ICON_TEXELS * VOICE_ICON_TEXELS * 4) throw new Error(`${VOICE_LABELS[id]}: the uploaded picture could not be read. Upload it again, or reset it.`);
+      out.push({ path: `materials/${name}.vtf`, data: encodeVTF(VOICE_ICON_TEXELS, VOICE_ICON_TEXELS, px) }, { path: `materials/${name}.vmt`, data: enc(vmtFor(name)) });
+    }
+    const cells = work.optional(MODTEX, ['TextureData']);
+    const e = cells && kvFind(cells.value as KvNode[], [entry]);
+    if (!e) { if (work.imported) continue; throw new Error(`${MODTEX}: no ${entry}`); }
+    pointCell(e, name, VOICE_ICON_TEXELS, VOICE_ICON_TEXELS);
+  }
+}
+
 /**
  * Grow HudWeaponSelection to the column it draws (plan decision 1, task
  * W5): the game clips numbers and icons at the panel's edges
@@ -2276,6 +2304,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   const extra: VpkFile[] = [];
   layoutPass(work, design);
   weaponsPass(work, design, assets, extra);
+  voicePass(work, design, assets, extra);
   noticePass(work, design, extra);
   countdownPass(work, design);
   votePass(work, design);
@@ -2363,6 +2392,7 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
     const discard: VpkFile[] = [];
     layoutPass(work, design);
     weaponsPass(work, design, null, discard);
+    voicePass(work, design, null, discard);
     noticePass(work, design, null);
     countdownPass(work, design);
     votePass(work, design);

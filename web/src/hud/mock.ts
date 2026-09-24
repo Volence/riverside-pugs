@@ -18,7 +18,7 @@ import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHas
 import { baseOf } from './base';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { SCREEN_H, parseSize, parsePos, screenW } from './units';
-import { PROGRESS_LABEL, labelTextColour, paintLinearOver, drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
+import { PROGRESS_LABEL, labelTextColour, paintLinearOver, drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, storedImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
 import { normaliseMaterial, HEALING_ICON, CROSSHAIR_OPEN, tipImage } from './art';
 import { barGeometry, clampBarKeys } from './progress';
 import { canvasFont, fontCell, importedFace, loadFace } from './fonts';
@@ -1046,7 +1046,14 @@ function paintSpawnCountdown(ctx: CanvasRenderingContext2D, _r: Rect, design: Hu
  * draws a plain microphone shape as tall as the box's shorter side, at its
  * top left.
  */
-function paintOwnMic(ctx: CanvasRenderingContext2D, r: Rect) {
+function paintOwnMic(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, _k: number, onAsset?: () => void) {
+  // An upload (plan task T2) fills the box, as the repointed cell did in probe V1 (r1/shots/crops/voice-g.png: 48 x 48 units).
+  const own = design.images.voiceSelf;
+  if (own) {
+    const img = storedImage(own, onAsset);
+    if (img) ctx.drawImage(img.img, r.x, r.y, r.w, r.h);
+    return;
+  }
   const s = Math.min(r.w, r.h);
   const cx = r.x + s / 2;
   ctx.save();

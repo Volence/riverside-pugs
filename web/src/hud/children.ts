@@ -243,7 +243,8 @@ export const TEAM_PANEL: PanelChildren = {
       stateArt: 'down' },
     { name: 'Dead', label: 'Dead picture', kind: 'image', role: 'state', box: 'square', move: true, font: false, colour: false, note: STATE_NOTE,
       stateArt: 'dead' },
-    { name: 'Voice', label: 'Voice icon', kind: 'other', role: 'state', box: 'square', move: true, font: false, colour: false, note: STATE_NOTE,
+    { name: 'Voice', label: 'Voice icon', kind: 'other', role: 'state', box: 'square', move: true, font: false, colour: false,
+      note: 'Shown when a teammate talks; not seen in our tests (needs a second player). Its picture can be uploaded on Your microphone.',
       stateArt: 'talking' },
   ],
 };

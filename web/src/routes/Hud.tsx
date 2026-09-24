@@ -8,7 +8,7 @@ import { savedArt } from '../crosshair/saved';
 import { artPixels, importedCrosshair } from '../crosshair/texture';
 import type { CrosshairArt } from '../crosshair/model';
 import {
-  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, newDesign, usableCrosshair, weaponImageFits, weaponImagesInUse,
+  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, newDesign, usableCrosshair, weaponImageFits, weaponImagesInUse, VOICE_ICONS, VOICE_ICON_TEXELS,
   type HudDesign, type StyleOverride, type Box,
 } from '../hud/design';
 import { screenW, SCREEN_H } from '../hud/units';
@@ -88,7 +88,8 @@ async function fontBytes(u: string, filename: string): Promise<Uint8Array> {
  * (weaponImageFits): the size the build writes into its cell rect.
  */
 export function assetSize(id: string, stored?: { w: number; h: number }): { w: number; h: number } | null {
-  const fixed = SLOTS.find((s) => s.id === id)?.size ?? splatterDef(id)?.size;
+  const fixed = SLOTS.find((s) => s.id === id)?.size ?? splatterDef(id)?.size
+    ?? (id in VOICE_ICONS ? { w: VOICE_ICON_TEXELS, h: VOICE_ICON_TEXELS } : undefined);
   if (fixed) return fixed;
   return stored && weaponImageFits(id, stored.w, stored.h) ? { w: stored.w, h: stored.h } : null;
 }
@@ -134,7 +135,7 @@ export async function assetsFor(design: HudDesign): Promise<BuildAssets> {
       // only an Image ships it (splatterPass), so only that one is decoded.
       if (splatterDef(id) && design.splatters?.[id as SplatterId]?.kind !== 'image') continue;
       const { w, h } = size;
-      const label = SLOTS.find((s) => s.id === id)?.label ?? splatterDef(id)?.label ?? 'A weapon picture';
+      const label = SLOTS.find((s) => s.id === id)?.label ?? splatterDef(id)?.label ?? (id in VOICE_ICONS ? 'A voice icon' : 'A weapon picture');
       const img = new Image();
       await new Promise<void>((resolve, reject) => {
         img.onload = () => resolve();

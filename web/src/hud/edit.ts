@@ -196,6 +196,20 @@ export function resetWeaponUpload(d: HudDesign, target: string): HudDesign {
 }
 
 /**
+ * Store a voice icon upload (plan task T2), already redrawn at 64 x 64, or
+ * take it away: the picture under its id is the whole setting
+ * (design.ts VOICE_ICONS). One design out: a single undo step.
+ */
+export function withVoiceUpload(d: HudDesign, id: string, img: UploadedImage): HudDesign {
+  return { ...d, images: { ...d.images, [id]: img } };
+}
+export function resetVoiceUpload(d: HudDesign, id: string): HudDesign {
+  const images = { ...d.images };
+  delete images[id];
+  return { ...d, images };
+}
+
+/**
  * The "Ammo only" look: probe B's values, which the owner saw in game on
  * 2026-09-23 as "8 128 30" on one line just right of the crosshair. The
  * panel sits at c-10, c-12 (its 100 wide is both presets' own); the boxes
