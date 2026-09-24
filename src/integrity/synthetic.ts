@@ -89,17 +89,28 @@ export function injectTracker(
   });
 }
 
+/** The shared loop behind `busiestPair` and `busiestHiddenPair`: for each
+ *  survivor slot, `scan` hands every target slot it paired with to `on`, and
+ *  whichever (slot, target) pairing racked up the most frames wins. */
+function busiestBy(
+  survivorSlots: number[], scan: (slot: number, onPass: (targetSlot: number) => void) => void,
+): { slot: number; ghostSlot: number; pairs: number } | null {
+  let best: { slot: number; ghostSlot: number; pairs: number } | null = null;
+  for (const slot of survivorSlots) {
+    const n = new Map<number, number>();
+    scan(slot, (targetSlot) => n.set(targetSlot, (n.get(targetSlot) ?? 0) + 1));
+    for (const [ghostSlot, pairs] of n) if (!best || pairs > best.pairs) best = { slot, ghostSlot, pairs };
+  }
+  return best;
+}
+
 /** The survivor and ghost with the most eligible frames between them: the pair
  *  an injection has the most room to show up in. Null when no pair ever
  *  cleared the gates, which is a round the detector could not have run in. */
 export function busiestPair(frames: Frame[], survivorSlots: number[]): { slot: number; ghostSlot: number; pairs: number } | null {
-  let best: { slot: number; ghostSlot: number; pairs: number } | null = null;
-  for (const slot of survivorSlots) {
-    const n = new Map<number, number>();
-    scanPairs(frames, slot, (_s, g) => n.set(g.slot, (n.get(g.slot) ?? 0) + 1));
-    for (const [ghostSlot, pairs] of n) if (!best || pairs > best.pairs) best = { slot, ghostSlot, pairs };
-  }
-  return best;
+  return busiestBy(survivorSlots, (slot, on) => {
+    scanPairs(frames, slot, (_s, g) => on(g.slot));
+  });
 }
 
 /** The survivor and spawned infected with the most hidden-from-team frames
@@ -107,11 +118,7 @@ export function busiestPair(frames: Frame[], survivorSlots: number[]): { slot: n
 export function busiestHiddenPair(
   frames: Frame[], survivorSlots: number[], los: LosView,
 ): { slot: number; ghostSlot: number; pairs: number } | null {
-  let best: { slot: number; ghostSlot: number; pairs: number } | null = null;
-  for (const slot of survivorSlots) {
-    const n = new Map<number, number>();
-    scanHidden(frames, slot, los, (_s, t) => n.set(t.slot, (n.get(t.slot) ?? 0) + 1));
-    for (const [ghostSlot, pairs] of n) if (!best || pairs > best.pairs) best = { slot, ghostSlot, pairs };
-  }
-  return best;
+  return busiestBy(survivorSlots, (slot, on) => {
+    scanHidden(frames, slot, los, (_s, t) => on(t.slot));
+  });
 }
