@@ -71,6 +71,26 @@ describe('Knobs', () => {
       values: { z_tank_health: '8000', versus_boss_flow_min: '0.15' }, name: 'Back to 8000', notes: 'revert' }));
   });
 
+  it('shows both name and notes inputs for a reused patch with neither set, and applies with them', async () => {
+    mockAdmin.balanceKnobs.mockResolvedValue(state);
+    mockAdmin.balanceKnobsPreview.mockResolvedValue(preview({
+      existingPatch: { id: 6, number: 6, name: null, notes: '', source: 'detected' },
+    }));
+    mockAdmin.balanceKnobsApply.mockResolvedValue({ ok: true, rolloutId: 3, patchId: 6, reused: true });
+    render(<Knobs />);
+    await screen.findByText('Tank base health');
+    fireEvent.click(screen.getByText('Preview'));
+    await screen.findByText(/Matches existing patch/);
+    expect(screen.getByLabelText('Patch name')).toBeTruthy();
+    expect(screen.getByLabelText('Patch notes')).toBeTruthy();
+    fireEvent.input(screen.getByLabelText('Patch name'), { target: { value: 'Reused patch' } });
+    fireEvent.input(screen.getByLabelText('Patch notes'), { target: { value: 'why this' } });
+    fireEvent.input(screen.getByLabelText('Type the patch name to confirm'), { target: { value: 'Reused patch' } });
+    fireEvent.click(screen.getByText('Apply to all servers'));
+    await waitFor(() => expect(mockAdmin.balanceKnobsApply).toHaveBeenCalledWith({
+      values: { z_tank_health: '8000', versus_boss_flow_min: '0.15' }, name: 'Reused patch', notes: 'why this' }));
+  });
+
   it('blocking servers disable apply and are listed', async () => {
     mockAdmin.balanceKnobs.mockResolvedValue({ ...state, blocking: [{ serverId: 2, name: 'chicago', diff: 'added p:x.smx' }] });
     render(<Knobs />);
