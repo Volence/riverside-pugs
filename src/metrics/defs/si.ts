@@ -118,6 +118,9 @@ export const defs: MetricDef[] = [
       const m = c.timeline.minutes('all');
       return m > 0 ? { all: { num: sideStat(c, 'survivor', 'sikill'), den: m } } : null;
     } },
-  { id: 'si.quad_caps', group: 'si', version: 1, description: 'Rounds where all four survivors were pinned at once and nobody recovered.',
-    compute: (c) => (c.hasStats ? single(sideStat(c, 'infected', 'quad_caps')) : null) },
+  // One per round at most: a confirmed quad cap ends the round, and the plugin
+  // credits quad_caps to every infected player in it (four per quad), so the
+  // side total is not the count. Version 1 summed it and stored 4 per quad.
+  { id: 'si.quad_caps', group: 'si', version: 2, description: 'Rounds where all four survivors were pinned at once and nobody recovered.',
+    compute: (c) => (c.hasStats ? single(sideStat(c, 'infected', 'quad_caps') > 0 ? 1 : 0) : null) },
 ];
