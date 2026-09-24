@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Panel } from '../components/bits';
-import { PageHeader } from '../components/PageHeader';
+import { HudTabs } from '../components/HudTabs';
 import {
   DEFAULT_STATE, GAME_BACKDROPS, PX_AT_1080, RES_SCALE, TEX,
   drawBackdrop, drawCrosshair,
@@ -223,7 +223,9 @@ export function Crosshair({ session = { kind: 'anonymous' } }: { session?: Sessi
 
   return (
     <div class="page page--wide">
-      <PageHeader eyebrow="Tool" title="Crosshair Maker" />
+      {/* The tab strip names the page, so the title is for screen readers only. */}
+      <HudTabs active="crosshair" />
+      <h2 class="sr-only">Crosshair maker</h2>
       {sharing && (
         <ShareDialog kind="crosshair" session={session} prepare={prepareShare} onShared={() => {}} onClose={() => setSharing(false)} />
       )}

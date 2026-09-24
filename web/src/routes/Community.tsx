@@ -4,6 +4,7 @@ import type { Session } from '../hooks/useLiveState';
 import { useFetch } from '../hooks/useFetch';
 import { Empty, Panel, Tabs } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { HudTabs } from '../components/HudTabs';
 import { CommunityCard } from '../components/CommunityCard';
 
 /**
@@ -28,7 +29,8 @@ export function Community({ session }: { session: Session }) {
 
   return (
     <div class="page page--wide community">
-      <PageHeader eyebrow="Community" title="Shared HUDs and crosshairs" />
+      <HudTabs active="community" />
+      <PageHeader title="Shared HUDs and crosshairs" />
       <p class="muted community__lede">
         Made in the <a href="/hud">HUD editor</a> and the <a href="/crosshair">crosshair maker</a>. Share your own with
         Share to community in either one. Every download is built in your browser from the design, so a shared HUD can

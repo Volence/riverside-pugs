@@ -1397,6 +1397,9 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 }
 .tabs__tab:hover { color: var(--text); }
 .tabs__tab.is-active { color: var(--text); border-color: var(--border); border-bottom-color: var(--accent); }
+/* The HUD section's strip (HUD editor, Crosshair, Community) heads its three
+ * pages. A poster title under it needs air, or the strip reads as part of it. */
+.hudtabs + .page-head, .hudtabs + .sr-only + .page-head { margin-top: var(--sp-5); }
 .tabs__count {
   margin-left: 0.4em;
   padding: 0 0.4em;

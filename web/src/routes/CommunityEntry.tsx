@@ -3,6 +3,7 @@ import type { Session } from '../hooks/useLiveState';
 import { useFetch } from '../hooks/useFetch';
 import { Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { HudTabs } from '../components/HudTabs';
 import { CommunityCard } from '../components/CommunityCard';
 
 const ID = /^[1-9][0-9]{0,15}$/;
@@ -19,7 +20,13 @@ export function CommunityEntry({ id, session }: { id: string; session: Session }
     [id],
   );
 
-  const header = <PageHeader eyebrow="Community" title={data ? (data.kind === 'hud' ? 'Shared HUD' : 'Shared crosshair') : 'Shared entry'} />;
+  // A shared entry sits under the Community tab of the HUD section.
+  const header = (
+    <>
+      <HudTabs active="community" />
+      <PageHeader title={data ? (data.kind === 'hud' ? 'Shared HUD' : 'Shared crosshair') : 'Shared entry'} />
+    </>
+  );
   if (error) {
     return (
       <div class="page page--wide community">
