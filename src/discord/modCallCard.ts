@@ -2,6 +2,7 @@ import type { DB } from '../db.js';
 import { discordLabel, escapeName, identityOf } from '../identity.js';
 import { foldedCalls, REASON_LABELS, type ModCallRow } from '../modCalls.js';
 import { getSetting } from '../settings.js';
+import { hasStaffFlag } from '../tickets/store.js';
 import { spectateFor } from '../spectate.js';
 import { spectateConnectLine } from './controller.js';
 import type { ActionRow, MessagePayload } from './transport.js';
@@ -31,26 +32,50 @@ function fit(head: string[], children: string[], tail: string[]): string {
 }
 
 /**
+ * A person on the card. Staff click through a linked Discord; with none
+ * linked, the Steam profile is the next best way to find out who this is.
+ * The steamid is a SteamID64 (the parser admits nothing else), so it is safe
+ * inside the link.
+ */
+function personLine(db: DB, steamid: string): string {
+  const id = identityOf(db, steamid);
+  if (id.discordId) return discordLabel(id);
+  return `**${escapeName(id.steamName)}** ([Steam](https://steamcommunity.com/profiles/${id.steamid}))`;
+}
+
+/**
  * The admin channel card for one in-game call and every call folded into it.
  *
  * Pure: it reads the database and returns the payload, and the poster decides
  * when to send or edit. Everything a player typed or is named is escaped, and
  * the only mention the payload permits is the mod call role, so a name like
  * "@everyone" or "<@123>" in a caller's text is shown and never pings. Caller
- * and target show as <@id> so staff can click through, but mentionUserIds
- * stays empty: nobody named on the card is notified by it.
+ * and target show as <@id> (or a Steam profile link) so staff can click
+ * through, but mentionUserIds stays empty: nobody named on the card is
+ * notified by it.
  */
 export function renderModCallCard(db: DB, call: ModCallRow, publicUrl: string): MessagePayload {
   const children = foldedCalls(db, call.id);
   const handled = call.handled_at !== null;
-  const who = (steamid: string) => discordLabel(identityOf(db, steamid));
-  const ticketUrl = call.ticket_id !== null ? `${publicUrl}/admin/people/tickets/${call.ticket_id}` : null;
+  const who = (steamid: string) => personLine(db, steamid);
+  // A call about a staff member is read in the admin channel by that staff
+  // member too. The ticket system keeps the accused out of every surface, so
+  // the card says only what happened and where: no caller, no details and no
+  // ticket link. The site's calls page, which hides the call from its subject,
+  // has the rest.
+  const aboutStaff = call.target_kind === 'player' && call.target_steamid !== null
+    && hasStaffFlag(db, identityOf(db, call.target_steamid).steamid);
+  const ticketUrl = call.ticket_id !== null && !aboutStaff ? `${publicUrl}/admin/people/tickets/${call.ticket_id}` : null;
 
   const lines: string[] = [];
-  lines.push(`Caller: ${who(call.caller_steamid)}${call.via === 'tv' ? ' on SourceTV' : ''}`);
-  if (call.target_kind === 'player' && call.target_steamid) lines.push(`About: ${who(call.target_steamid)}`);
-  else if (call.target_kind === 'team') lines.push('About: their own team');
-  else if (call.target_kind === 'general') lines.push('About: the whole server');
+  if (aboutStaff) {
+    lines.push('About a staff member: details are on the site.', `[In-game calls](${publicUrl}/admin/people/calls)`);
+  } else {
+    lines.push(`Caller: ${who(call.caller_steamid)}${call.via === 'tv' ? ' on SourceTV' : ''}`);
+    if (call.target_kind === 'player' && call.target_steamid) lines.push(`About: ${who(call.target_steamid)}`);
+    else if (call.target_kind === 'team') lines.push('About: their own team');
+    else if (call.target_kind === 'general') lines.push('About: the whole server');
+  }
 
   const server = call.server_id !== null
     ? (db.prepare('SELECT name FROM servers WHERE id = ?').get(call.server_id) as { name: string } | undefined)
@@ -60,13 +85,14 @@ export function renderModCallCard(db: DB, call: ModCallRow, publicUrl: string): 
   if (call.match_id !== null) where += ` · match [#${call.match_id}](${publicUrl}/match/${call.match_id})`;
   lines.push(where);
 
-  if (call.text.trim() !== '') lines.push(call.text.split('\n').map((l) => `> ${escapeName(l)}`).join('\n'));
+  if (!aboutStaff && call.text.trim() !== '') lines.push(call.text.split('\n').map((l) => `> ${escapeName(l)}`).join('\n'));
   if (ticketUrl) lines.push(`Ticket [#${call.ticket_id}](${ticketUrl})`);
   // The note says why there is no ticket, or that the rate cap held back the
   // ping; it can sit beside a ticket, so it is not an either/or.
   if (call.note) lines.push(escapeName(call.note));
 
   const childLines = children.map((c) => {
+    if (aboutStaff) return `+ ${REASON_LABELS[c.reason]}`;
     const said = c.text.trim() !== '' ? ` "${escapeName(c.text)}"` : '';
     return `+ ${who(c.caller_steamid)}: ${REASON_LABELS[c.reason]}${said}`;
   });

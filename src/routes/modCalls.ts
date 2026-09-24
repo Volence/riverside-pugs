@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify';
+import { resolveAlias } from '../aliases.js';
 import type { DB } from '../db.js';
 import { identityOf, plainLabel } from '../identity.js';
 import { foldedCalls, REASON_LABELS, type ModCallRow } from '../modCalls.js';
 import { getSetting } from '../settings.js';
+import { canSeeTicket, getTicketRow } from '../tickets/store.js';
 import { makeRequireMod } from './guards.js';
 
 export interface ModCallView {
@@ -24,7 +26,13 @@ export const CALLS_LIMIT = 200;
  * The In-game calls desk: every stored /mod call, for mods and admins alike
  * (the same guard as tickets). A call folded into another's card is listed
  * under that parent and never on its own, as on the Discord card. Open means
- * nobody has pressed Handling it yet.
+ * nobody has pressed Handling it yet, and leaves out a call that was skipped
+ * because calls were off: nobody is going to press anything for it.
+ *
+ * The ticket system's rule holds here too: the accused never sees a case
+ * about themselves. A call about the viewer is left out, parent or folded,
+ * and a ticket the viewer may not open (about them, or restricted without
+ * them on its list) is not even linked, as the ticket routes answer 404.
  */
 export async function modCallRoutes(app: FastifyInstance, opts: { db: DB }): Promise<void> {
   const { db } = opts;
@@ -34,7 +42,15 @@ export async function modCallRoutes(app: FastifyInstance, opts: { db: DB }): Pro
   // (a staff member who never signed in on the site) is shown raw.
   const byDiscord = db.prepare('SELECT steamid FROM players WHERE discord_id = ? LIMIT 1');
 
-  const view = (c: ModCallRow, folded: ModCallView[]): ModCallView => {
+  const aboutViewer = (me: string, c: ModCallRow) =>
+    c.target_steamid !== null && resolveAlias(db, c.target_steamid) === me;
+  const ticketFor = (me: string, id: number | null): number | null => {
+    if (id === null) return null;
+    const t = getTicketRow(db, id);
+    return t && canSeeTicket(db, t, me) ? id : null;
+  };
+
+  const view = (me: string, c: ModCallRow, folded: ModCallView[]): ModCallView => {
     let handledBy: string | null = null;
     if (c.handled_by_discord_id !== null) {
       const p = byDiscord.get(c.handled_by_discord_id) as { steamid: string } | undefined;
@@ -51,19 +67,24 @@ export async function modCallRoutes(app: FastifyInstance, opts: { db: DB }): Pro
         kind: c.target_kind, steamid: c.target_steamid,
         name: c.target_steamid !== null ? plainLabel(identityOf(db, c.target_steamid)) : null,
       },
-      text: c.text, ticketId: c.ticket_id, note: c.note, postState: c.post_state, pinged: c.pinged === 1,
+      text: c.text, ticketId: ticketFor(me, c.ticket_id), note: c.note, postState: c.post_state, pinged: c.pinged === 1,
       handledBy, handledAt: c.handled_at, folded,
     };
   };
 
   app.get('/api/mod/calls', async (req, reply) => {
-    if (!requireMod(req, reply)) return reply;
+    const viewer = requireMod(req, reply);
+    if (!viewer) return reply;
+    const me = resolveAlias(db, viewer);
     const filter = (req.query as { filter?: string }).filter === 'all' ? 'all' : 'open';
     const parents = db.prepare(
-      `SELECT * FROM mod_calls WHERE folded_into IS NULL ${filter === 'open' ? 'AND handled_at IS NULL' : ''}
+      `SELECT * FROM mod_calls WHERE folded_into IS NULL
+         ${filter === 'open' ? "AND handled_at IS NULL AND post_state != 'skipped'" : ''}
         ORDER BY id DESC LIMIT ${CALLS_LIMIT}`,
     ).all() as ModCallRow[];
-    const calls = parents.map((p) => view(p, foldedCalls(db, p.id).map((c) => view(c, []))));
+    const shown = (c: ModCallRow) => !aboutViewer(me, c);
+    const calls = parents.filter(shown)
+      .map((p) => view(me, p, foldedCalls(db, p.id).filter(shown).map((c) => view(me, c, []))));
     const discordReady = (getSetting(db, 'discord_admin_channel_id') ?? '') !== ''
       && getSetting(db, 'mod_calls_enabled') === '1';
     return { calls, discordReady };
