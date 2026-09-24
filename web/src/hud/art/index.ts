@@ -16,6 +16,7 @@ export const ART: Record<string, string> = {
   'vgui/healthbar_orange': 'vgui-healthbar_orange.png',
   'vgui/healthbar_red': 'vgui-healthbar_red.png',
   'vgui/healthbar_white': 'vgui-healthbar_white.png',
+  'vgui/hud/crouch_survivor': 'vgui-hud-crouch_survivor.png',
   'vgui/hud/detail_scratches_bottom_1': 'vgui-hud-detail_scratches_bottom_1.png',
   'vgui/hud/detail_scratches_top_1': 'vgui-hud-detail_scratches_top_1.png',
   'vgui/hud/healthbar_bg_1': 'vgui-hud-healthbar_bg_1.png',
@@ -27,6 +28,7 @@ export const ART: Record<string, string> = {
   'vgui/hud/pz_healthbar_250': 'vgui-hud-pz_healthbar_250.png',
   'vgui/hud/pz_healthbar_3000': 'vgui-hud-pz_healthbar_3000.png',
   'vgui/hud/pz_healthbar_50': 'vgui-hud-pz_healthbar_50.png',
+  'vgui/hud/s_healthbar_outline': 'vgui-hud-s_healthbar_outline.png',
   'vgui/hud/scalablepanel_bgmidgrey': 'vgui-hud-scalablepanel_bgmidgrey.png',
   'vgui/hud/scalablepanel_bgmidgrey_glow': 'vgui-hud-scalablepanel_bgmidgrey_glow.png',
   'vgui/s_panel_background': 'vgui-s_panel_background.png',
@@ -81,4 +83,4 @@ export const FONT_METRICS: Record<string, FontMetrics> = {
   'Verdana': { unitsPerEm: 2048, winAscent: 2059, winDescent: 430 },
 };
 
-export const ART_TOTAL_BYTES = 405959;
+export const ART_TOTAL_BYTES = 411181;

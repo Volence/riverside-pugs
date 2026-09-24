@@ -63,6 +63,9 @@ export const NEEDED_MATERIALS: readonly string[] = [
   'vgui/hud/scalablepanel_bgmidgrey', 'vgui/hud/scalablepanel_bgmidgrey_glow',
   'vgui/s_panel_dead',
   'vgui/s_panel_biker_incap', 'vgui/s_panel_manager_incap', 'vgui/s_panel_namvet_incap', 'vgui/s_panel_teenangst_incap',
+  // The own health panel: DuckingIcon's art (named by localplayerpanel.res), and HealthPanel's
+  // bar outline (named by client.dll; probe B1 Q3 showed the fill sits inset inside it).
+  'vgui/hud/crouch_survivor', 'vgui/hud/s_healthbar_outline',
   ...ITEM_ICONS,
   ...EQUIP_ICONS,
 ];

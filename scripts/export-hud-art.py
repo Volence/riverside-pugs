@@ -54,6 +54,10 @@ MATERIALS = [
     # state panels the advanced-mode slots can restyle (drawn nowhere yet, exported so the index is complete)
     'vgui/s_panel_dead',
     'vgui/s_panel_biker_incap', 'vgui/s_panel_manager_incap', 'vgui/s_panel_namvet_incap', 'vgui/s_panel_teenangst_incap',
+    # the own health panel: the crouch icon is DuckingIcon's art, named by localplayerpanel.res;
+    # the outline is HealthPanel's frame, named by client.dll (probe B1 Q3 and the B13 parity
+    # shots: the game draws it around the own bar with the fill inset inside it)
+    'vgui/hud/crouch_survivor', 'vgui/hud/s_healthbar_outline',
 ]
 
 # The item icons: index name -> ToolBox character. The characters are the ones
