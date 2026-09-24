@@ -20,6 +20,7 @@ import {
 import { drawHud, visibleElements, panelBoxes, HANDLE_PX, type Side } from '../hud/mock';
 import { DEFAULT_PREVIEW, panelFile, type PreviewState } from '../hud/render';
 import type { WeaponHeld } from '../hud/weapons';
+import { closeUpRegion } from '../hud/closeup';
 import { SLOTS, type StyleSlot } from '../hud/slots';
 import { SPLATTERS, type SplatterDef } from '../hud/splatter';
 import { registerImport, unregisterImport, hasImport, importedFiles } from '../hud/base';
@@ -74,6 +75,9 @@ export function toUnits(e: { clientX: number; clientY: number }, rect: DOMRect):
   const k = SCREEN_H / rect.height;
   return { ux: (e.clientX - rect.left) * k, uy: (e.clientY - rect.top) * k };
 }
+
+/** How wide the close-up's sharp render may get, in pixels: past this a redraw costs more than it shows. */
+const CLOSEUP_RENDER_W = 2600;
 
 /**
  * One row of the styles panel: a kind, a colour and an opacity slider that
@@ -453,6 +457,9 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
   const [menu, setMenu] = useState<{ x: number; y: number; sel: Selection } | null>(null);
 
   const canvas = useRef<HTMLCanvasElement>(null);
+  // The close-up of the selection in the side panel, and the sharp full-size render it crops from.
+  const zoom = useRef<HTMLCanvasElement>(null);
+  const zoomBuf = useRef<HTMLCanvasElement | null>(null);
   // The reader's own screenshot for the "My screenshot" backdrop. A ref
   // rather than state, like Crosshair.tsx's `shot`: it is never rendered
   // directly, only drawn into the canvas, so a re-render is driven by the
@@ -517,6 +524,43 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       designFailed(e);
     }
   }, [design, side, sel, backdrop, imgTick, preview, held, hover, guides, marquee, locked]);
+
+  // The close-up: the HUD drawn again, sharp, at up to CLOSEUP_RENDER_W wide (the
+  // additive text painter works only untransformed, so no zoomed transform),
+  // and the part around the selection copied into the side panel's view.
+  // Debounced, so a drag redraws it once it pauses, not every frame.
+  const hasCloseUp = !locked && !xhairSelected && sel.kind !== 'none';
+  useEffect(() => {
+    if (!hasCloseUp) return;
+    const t = setTimeout(() => {
+      const z = zoom.current, c = canvas.current;
+      const zctx = z?.getContext('2d');
+      if (!z || !c || !zctx) return;
+      const box = selectionBox(design, sel, preview);
+      if (!box) return;
+      const zr = z.getBoundingClientRect();
+      const vw = Math.max(1, Math.round(zr.width)), vh = Math.max(1, Math.round(zr.height));
+      if (z.width !== vw || z.height !== vh) { z.width = vw; z.height = vh; }
+      const k = c.height / SCREEN_H;
+      const r = closeUpRegion({ x: box.x * k, y: box.y * k, w: box.w * k, h: box.h * k }, c.width, c.height, vw, vh);
+      const scale = Math.max(1, Math.min(r.zoom, CLOSEUP_RENDER_W / c.width));
+      const bw = Math.round(c.width * scale), bh = Math.round(c.height * scale);
+      const buf = zoomBuf.current ?? (zoomBuf.current = document.createElement('canvas'));
+      if (buf.width !== bw || buf.height !== bh) { buf.width = bw; buf.height = bh; }
+      const bctx = buf.getContext('2d');
+      if (!bctx) return;
+      try {
+        const shotSize = shot.current ? { w: shot.current.naturalWidth, h: shot.current.naturalHeight } : null;
+        drawBackdrop(bctx, bw, bh, backdrop, shot.current, shotSize);
+        drawHud(bctx, bw, bh, design, side, selectedIds(sel), undefined, { state: preview, held, frames: selectionFrames(design, sel, preview) });
+      } catch { return; }                                              // the main canvas reports it
+      zctx.fillStyle = '#000';
+      zctx.fillRect(0, 0, vw, vh);
+      zctx.imageSmoothingQuality = 'high';
+      zctx.drawImage(buf, r.x * scale, r.y * scale, r.w * scale, r.h * scale, 0, 0, vw, vh);
+    }, 60);
+    return () => clearTimeout(t);
+  }, [hasCloseUp, design, side, sel, backdrop, imgTick, preview, held]);
 
   // A selection the design or the side no longer has is trimmed or dropped:
   // after an undo, an import, a removed health number, a layout change.
@@ -1349,6 +1393,12 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
         </Panel>
 
         <Panel class="hud__side">
+          {hasCloseUp && (
+            <figure class="hud__closeup">
+              <canvas ref={zoom} aria-label="Close-up of the selection" />
+              <figcaption class="muted">Close-up</figcaption>
+            </figure>
+          )}
           {!locked && (
             <Guard key={imp?.id ?? design.preset} onError={designFailed}>
               <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} onWentFree={() => setStatus(WENT_FREE)} preview={preview} />

@@ -2605,3 +2605,8 @@ tbody tr.is-lifted td { opacity: 0.55; }
   .ccards { grid-template-columns: minmax(0, 1fr); }
   .community__bar { gap: var(--sp-2); }
 }
+
+/* The close-up of the selection, top of the side panel: the canvas's view of it, enlarged. */
+.hud__closeup { margin: 0 0 var(--sp-3); }
+.hud__closeup canvas { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; border: 1px solid var(--border); }
+.hud__closeup figcaption { margin-top: var(--sp-1); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: .06em; }
