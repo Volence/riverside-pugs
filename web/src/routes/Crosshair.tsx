@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import {
-  DEFAULT_STATE, PX_AT_1080, RES_SCALE, TEX,
+  DEFAULT_STATE, GAME_BACKDROPS, PX_AT_1080, RES_SCALE, TEX,
   drawBackdrop, drawCrosshair,
-  type Backdrop, type CrosshairState, type Res,
+  type Backdrop, type CrosshairState, type GameBackdrop, type Res,
 } from '../crosshair/draw';
 import { CrosshairBuilder, Field } from '../crosshair/Builder';
 import { crosshairAddonFromPixels, saveBytes } from '../crosshair/download';
@@ -42,8 +42,10 @@ function saveTexture(img: HTMLImageElement) {
   saveImage({ png: c.toDataURL('image/png'), w: TEX, h: TEX });
 }
 
+/** The HUD editor's backdrops: its real in-game shots first (the default is CROSSHAIR_BACKDROP), then the drawn and flat ones. */
+const GAME: GameBackdrop[] = ['survivor-hilltop', 'survivor-subway', 'infected-hunter', 'infected-ghost'];
 const BACKDROPS: [Backdrop, string][] = [
-  ['scene', 'Saferoom'], ['dark', 'Dark'], ['bright', 'Bright'],
+  ['scene', 'Drawn saferoom'], ['dark', 'Dark'], ['bright', 'Bright'],
   ['grey', 'Grey'], ['shot', 'My screenshot'],
 ];
 const RESOLUTIONS: [Res, string][] = [
@@ -163,7 +165,9 @@ export function Crosshair({ session = { kind: 'anonymous' } }: { session?: Sessi
     const h = Math.round(w * 9 / 16);
     if (p.width !== w || p.height !== h) { p.width = w; p.height = h; }
     const sz = shot.current ? { w: shot.current.width, h: shot.current.height } : null;
-    drawBackdrop(pctx, w, h, state.backdrop, shot.current, sz);
+    // The shot at its own size on the chosen screen, like the crosshair; once
+    // an in-game shot has loaded, the tick paints again.
+    drawBackdrop(pctx, w, h, state.backdrop, shot.current, sz, () => setImgTick((n) => n + 1), RES_SCALE[state.res]);
     pctx.imageSmoothingEnabled = true;
     drawCrosshair(pctx, w / 2, h / 2, RES_SCALE[state.res], state, imported.current);
 
@@ -263,6 +267,9 @@ export function Crosshair({ session = { kind: 'anonymous' } }: { session?: Sessi
                 value={state.backdrop}
                 onChange={(e) => set({ backdrop: (e.target as HTMLSelectElement).value as Backdrop })}
               >
+                <optgroup label="In game">
+                  {GAME.map((v) => <option key={v} value={v}>{GAME_BACKDROPS[v].label}</option>)}
+                </optgroup>
                 {BACKDROPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </label>

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 import type { CommunityEntry } from '../api';
 import type { Session } from '../hooks/useLiveState';
-import { TEX } from '../crosshair/draw';
+import { TEX, resetGameBackdrops } from '../crosshair/draw';
 
 const { mockCommunity, mockApi, mockDownload } = vi.hoisted(() => ({
   mockCommunity: { list: vi.fn(), get: vi.fn(), like: vi.fn(), unlike: vi.fn(), remove: vi.fn(), delete: vi.fn(), mine: vi.fn() },
@@ -64,6 +64,8 @@ afterEach(() => {
   document.removeEventListener('click', stay);
   history.replaceState(null, '', '/');
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  resetGameBackdrops();
 });
 
 describe('the community page', () => {
@@ -101,6 +103,31 @@ describe('the community page', () => {
     expect(mockCommunity.list).toHaveBeenLastCalledWith({ kind: 'crosshair', sort: 'new', page: 0 }, expect.anything());
     expect(container.querySelectorAll('canvas.ccard__xhair').length).toBe(2);
     await waitFor(() => expect(calls).toContain('arc'));
+  });
+
+  it('draws crosshairs on the drawn saferoom until the forest shot loads, then on the shot', async () => {
+    const calls = stubCanvas();
+    const images: { src: string; onload: (() => void) | null }[] = [];
+    vi.stubGlobal('Image', class {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      naturalWidth = 1920; naturalHeight = 1080;
+      src = '';
+      constructor() { images.push(this); }
+    });
+    mockCommunity.list.mockResolvedValue(page([xhair()]));
+    history.replaceState(null, '', '/community?kind=crosshair');
+    show(ANON);
+    await screen.findByText('Tiny dot');
+    await waitFor(() => expect(calls).toContain('createLinearGradient'));
+    expect(calls).not.toContain('drawImage');
+    const shot = images.find((i) => i.src === '/hud-backdrops/survivor-hilltop.jpg');
+    expect(shot).toBeTruthy();
+    calls.length = 0;
+    shot!.onload!();
+    await waitFor(() => expect(calls).toContain('drawImage'));
+    expect(calls).not.toContain('createLinearGradient');
+    expect(calls).toContain('arc');
   });
 
   it('sorts by Top', async () => {

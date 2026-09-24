@@ -107,11 +107,14 @@ const LIMITS: Record<NumKey, readonly [number, number]> = {
   len: [0, 30], thick: [0.5, 10], gap: [0, 30], dot: [0.5, 16],
   radius: [1, 40], alpha: [10, 100], outline: [0, 4], oalpha: [0, 100],
 };
-const BACKDROPS: readonly string[] = ['scene', 'dark', 'bright', 'grey', 'shot'];
+/** web/src/crosshair/draw.ts: the drawn and flat backdrops, then GAME_BACKDROPS. */
+const BACKDROPS: readonly string[] = [
+  'scene', 'dark', 'bright', 'grey', 'shot', 'survivor-hilltop', 'survivor-subway', 'infected-hunter', 'infected-ghost',
+];
 const RESES: readonly string[] = ['768', '1080', '1440', '2160'];
 const DEFAULT_STATE: CrosshairState = {
   shape: 'cross', len: 7, thick: 2, gap: 3, dot: 2, radius: 8, round: false,
-  color: '#39ff5a', alpha: 100, outline: 1, oalpha: 80, backdrop: 'scene', res: '1080',
+  color: '#39ff5a', alpha: 100, outline: 1, oalpha: 80, backdrop: 'survivor-hilltop', res: '1080',
 };
 const PNG_PREFIX = 'data:image/png;base64,';
 

@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/preact';
 import { Crosshair } from './Crosshair';
 import Hud from './Hud';
-import { TEX } from '../crosshair/draw';
+import { TEX, resetGameBackdrops } from '../crosshair/draw';
 import { ConfirmHost } from '../components/Confirm';
 import { communityApi, type CommunityEntryDetail } from '../api';
 
@@ -55,6 +55,7 @@ afterEach(() => {
   history.replaceState(null, '', '/');
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  resetGameBackdrops();
 });
 
 const openInHud = () => screen.getByRole('link', { name: 'Open in the HUD editor' });
@@ -155,6 +156,49 @@ describe('Crosshair page', () => {
     render(<Hud />);
     expect(screen.getByText('Custom crosshair', { selector: 'legend' })).toBeTruthy();
     expect(screen.getByText(/your uploaded crosshair/i)).toBeTruthy();
+  });
+});
+
+describe('the Crosshair page backdrop', () => {
+  const pick = () => screen.getByRole('combobox', { name: /backdrop/i }) as HTMLSelectElement;
+  const drawsOn = (calls: ReturnType<typeof stubCanvas>, cls: string) =>
+    calls.filter((c) => c.canvas.classList.contains(cls) && c.m === 'drawImage');
+
+  it('offers the in-game shots, then the drawn saferoom and the flat ones, and opens on the forest', () => {
+    render(<Crosshair />);
+    const group = pick().querySelector('optgroup[label="In game"]')!;
+    expect([...group.querySelectorAll('option')].map((o) => o.value))
+      .toEqual(['survivor-hilltop', 'survivor-subway', 'infected-hunter', 'infected-ghost']);
+    expect([...pick().options].map((o) => o.textContent)).toContain('Drawn saferoom');
+    expect(pick().value).toBe('survivor-hilltop');
+  });
+
+  it('keeps the drawn saferoom for a browser that saved it before', () => {
+    localStorage.setItem('xhair', JSON.stringify({ shape: 'dot', backdrop: 'scene' }));
+    render(<Crosshair />);
+    expect(pick().value).toBe('scene');
+    expect(pick().selectedOptions[0]!.textContent).toBe('Drawn saferoom');
+  });
+
+  it('paints the shot once it loads, and the 4x zoom copies the same middle of the preview', async () => {
+    const calls = stubCanvas();
+    const loaded = stubImages();
+    render(<Crosshair />);
+    expect(loaded).toContain('/hud-backdrops/survivor-hilltop.jpg');
+    await waitFor(() => expect(drawsOn(calls, 'xh__canvas').length).toBeGreaterThan(0));
+    const zooms = drawsOn(calls, 'xh__zoom');
+    const last = zooms[zooms.length - 1]!.a;
+    expect(last[0]).toBeInstanceOf(HTMLCanvasElement);
+    expect((last[0] as HTMLElement).classList.contains('xh__canvas')).toBe(true);
+    expect(last.slice(3)).toEqual([64, 64, 0, 0, 256, 256]);
+  });
+
+  it('switches to the drawn saferoom and back', () => {
+    render(<Crosshair />);
+    fireEvent.change(pick(), { target: { value: 'scene' } });
+    expect(JSON.parse(localStorage.getItem('xhair')!).backdrop).toBe('scene');
+    fireEvent.change(pick(), { target: { value: 'survivor-subway' } });
+    expect(JSON.parse(localStorage.getItem('xhair')!).backdrop).toBe('survivor-subway');
   });
 });
 

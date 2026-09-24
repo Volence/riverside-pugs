@@ -13,7 +13,7 @@
  * side panel's zoom and the exported texture all go through it, so none of
  * them can disagree with the others.
  */
-import { DEFAULT_STATE, PX_AT_1080, drawCrosshair, type CrosshairState, type Shape, type Backdrop, type Res } from './draw';
+import { DEFAULT_STATE, PX_AT_1080, drawCrosshair, isGameBackdrop, type CrosshairState, type Shape, type Backdrop, type Res } from './draw';
 import { MAX_IMAGE_B64, MAX_IMAGE_SIDE } from '../hud/limits';
 
 export type CrosshairArt =
@@ -31,6 +31,7 @@ export const LIMITS: Record<NumKey, readonly [number, number, number]> = {
 };
 
 const BACKDROPS: readonly Backdrop[] = ['scene', 'dark', 'bright', 'grey', 'shot'];
+const isBackdrop = (v: unknown): v is Backdrop => typeof v === 'string' && (BACKDROPS.includes(v as Backdrop) || isGameBackdrop(v));
 const RESES: readonly Res[] = ['768', '1080', '1440', '2160'];
 export const PNG_PREFIX = 'data:image/png;base64,';
 
@@ -51,7 +52,7 @@ export function readState(raw: unknown): CrosshairState | null {
   const out: CrosshairState = {
     ...DEFAULT_STATE,
     shape: s.shape as Shape, round: s.round, color: s.color,
-    backdrop: BACKDROPS.includes(s.backdrop as Backdrop) ? s.backdrop as Backdrop : DEFAULT_STATE.backdrop,
+    backdrop: isBackdrop(s.backdrop) ? s.backdrop : DEFAULT_STATE.backdrop,
     res: RESES.includes(s.res as Res) ? s.res as Res : DEFAULT_STATE.res,
   };
   for (const [k, [lo, hi]] of Object.entries(LIMITS) as [NumKey, readonly [number, number, number]][]) {

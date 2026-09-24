@@ -22,9 +22,18 @@ export interface CrosshairState {
   res: Res;
 }
 
+/**
+ * The shot a crosshair is judged on when nobody picked one: the Crosshair
+ * page's default and every community crosshair card's. The forest rather
+ * than the subway saferoom: its middle is a dark forest behind a lit white
+ * shirt, so a crosshair is seen against both at once, where the saferoom's
+ * middle is one flat wall (compared with the green default on 2026-09-24).
+ */
+export const CROSSHAIR_BACKDROP: GameBackdrop = 'survivor-hilltop';
+
 export const DEFAULT_STATE: CrosshairState = {
   shape: 'cross', len: 7, thick: 2, gap: 3, dot: 2, radius: 8, round: false,
-  color: '#39ff5a', alpha: 100, outline: 1, oalpha: 80, backdrop: 'scene', res: '1080',
+  color: '#39ff5a', alpha: 100, outline: 1, oalpha: 80, backdrop: CROSSHAIR_BACKDROP, res: '1080',
 };
 
 /** Exported texture size, and the HUD element size in 640x480 VGUI units that
@@ -188,9 +197,10 @@ export function resetGameBackdrops(): void {
   shots.clear();
 }
 
-/** Draw `img` (iw x ih) to cover the canvas, centred, cropping what is over. */
-function cover(ctx: CanvasRenderingContext2D, w: number, h: number, img: CanvasImageSource, iw: number, ih: number): void {
-  const r = Math.max(w / iw, h / ih);
+/** Draw `img` (iw x ih) to cover the canvas, centred, cropping what is over,
+ *  and at least `minScale` canvas pixels per image pixel. */
+function cover(ctx: CanvasRenderingContext2D, w: number, h: number, img: CanvasImageSource, iw: number, ih: number, minScale = 0): void {
+  const r = Math.max(w / iw, h / ih, minScale);
   const sw = iw * r;
   const sh = ih * r;
   ctx.drawImage(img, (w - sw) / 2, (h - sh) / 2, sw, sh);
@@ -200,19 +210,32 @@ function cover(ctx: CanvasRenderingContext2D, w: number, h: number, img: CanvasI
  *  drawn stand-in for a saferoom, so the crosshair can be judged against both
  *  a light wall and a dark floor at once; a GameBackdrop is a real in-game
  *  shot, drawn dark until it has loaded, when `onLoad` runs so the caller
- *  can paint again. */
+ *  can paint again.
+ *
+ *  Without `k` a shot covers the canvas, as the HUD editor shows a whole
+ *  screen. With `k`, drawCrosshair's pixels per 1080p screen pixel, a shot
+ *  (taken as a whole screen, its height that screen's) is drawn at the size
+ *  it has on that screen, centred, so the crosshair and what is around it
+ *  agree on size: the Crosshair page's preview and its 4x zoom, and the
+ *  community cards. It still never leaves the canvas uncovered. */
 export function drawBackdrop(
   ctx: CanvasRenderingContext2D, w: number, h: number,
   kind: Backdrop, shotImage: CanvasImageSource | null, shotSize: { w: number; h: number } | null,
-  onLoad?: () => void,
+  onLoad?: () => void, k?: number,
 ): void {
+  const at = (ih: number) => (k ? k * 1080 / ih : 0);
   if (kind === 'shot' && shotImage && shotSize) {
-    cover(ctx, w, h, shotImage, shotSize.w, shotSize.h);
+    cover(ctx, w, h, shotImage, shotSize.w, shotSize.h, at(shotSize.h));
     return;
   }
   if (isGameBackdrop(kind)) {
     const img = gameBackdropImage(kind, onLoad);
-    if (img) { cover(ctx, w, h, img, img.naturalWidth || 1920, img.naturalHeight || 1080); return; }
+    if (img) {
+      const iw = img.naturalWidth || 1920;
+      const ih = img.naturalHeight || 1080;
+      cover(ctx, w, h, img, iw, ih, at(ih));
+      return;
+    }
     kind = 'dark';
   }
   const flat: Partial<Record<Backdrop, string>> = { dark: '#17161a', bright: '#c9c2b2', grey: '#7a7a7a' };

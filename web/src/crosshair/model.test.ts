@@ -22,6 +22,12 @@ describe('readState', () => {
     }
   });
 
+  it('keeps an in-game backdrop, and the drawn saferoom a state saved before them', () => {
+    expect(readState({ backdrop: 'survivor-subway' })?.backdrop).toBe('survivor-subway');
+    expect(readState({ backdrop: 'infected-ghost' })?.backdrop).toBe('infected-ghost');
+    expect(readState({ backdrop: 'scene' })?.backdrop).toBe('scene');
+  });
+
   it('falls back to the default preview backdrop and resolution, which never reach the texture', () => {
     expect(readState({ backdrop: 'moon', res: '99' })).toEqual(DEFAULT_STATE);
   });

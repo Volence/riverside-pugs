@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
   drawBackdrop, gameBackdropImage, loadGameBackdrop, resetGameBackdrops, GAME_BACKDROPS, SIDE_BACKDROP, isGameBackdrop,
+  CROSSHAIR_BACKDROP, DEFAULT_STATE,
 } from './draw';
 
 /** An Image that loads (or fails) only when the test says so. */
@@ -85,5 +86,41 @@ describe('game backdrops', () => {
     FakeImage.made[1]!.onerror!();
     expect(await q).toBeNull();
     expect(gameBackdropImage('infected-ghost')).toBeNull();
+  });
+});
+
+describe('the crosshair backdrop', () => {
+  it('defaults to the forest shot, for the maker and the community cards alike', () => {
+    expect(CROSSHAIR_BACKDROP).toBe('survivor-hilltop');
+    expect(DEFAULT_STATE.backdrop).toBe(CROSSHAIR_BACKDROP);
+  });
+
+  it('with a scale, draws a game shot at its own pixels on that screen, centred, so the crosshair and the shot agree on size', () => {
+    vi.stubGlobal('Image', FakeImage);
+    gameBackdropImage('survivor-hilltop');
+    FakeImage.made[0]!.onload!();
+    const r = recorder();
+    drawBackdrop(r.ctx, 960, 540, 'survivor-hilltop', null, null, undefined, 1);
+    expect(r.calls.find(([k]) => k === 'drawImage')?.[1]).toEqual([FakeImage.made[0], -480, -270, 1920, 1080]);
+    // 1.5 screen pixels per 1080p pixel: a 96 square shows the middle 64 x 64 of the shot.
+    const c = recorder();
+    drawBackdrop(c.ctx, 96, 96, 'survivor-hilltop', null, null, undefined, 1.5);
+    expect(c.calls.find(([k]) => k === 'drawImage')?.[1]).toEqual([FakeImage.made[0], -1392, -762, 2880, 1620]);
+  });
+
+  it('never leaves the canvas uncovered: a small scale falls back to covering it', () => {
+    vi.stubGlobal('Image', FakeImage);
+    gameBackdropImage('survivor-subway');
+    FakeImage.made[0]!.onload!();
+    const r = recorder();
+    drawBackdrop(r.ctx, 960, 540, 'survivor-subway', null, null, undefined, 0.25);
+    expect(r.calls.find(([k]) => k === 'drawImage')?.[1]).toEqual([FakeImage.made[0], 0, 0, 960, 540]);
+  });
+
+  it('with a scale, takes a screenshot as one of that screen: 1440 lines at 2560 x 1440 are 1:1', () => {
+    const img = {} as CanvasImageSource;
+    const r = recorder();
+    drawBackdrop(r.ctx, 1000, 500, 'shot', img, { w: 2560, h: 1440 }, undefined, 4 / 3);
+    expect(r.calls.find(([k]) => k === 'drawImage')?.[1]).toEqual([img, -780, -470, 2560, 1440]);
   });
 });
