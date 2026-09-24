@@ -203,13 +203,17 @@ export function childRects(design: HudDesign, panelId: string, origin: PanelBox,
  * boldness lives in the face itself, which the preview draws in the exported
  * font of that name, so the weight is kept as the file says.
  */
-export function fontFace(design: HudDesign, name: string): { tall: number; face: string; weight: number; additive: boolean } {
+export function fontFace(design: HudDesign, name: string): { tall: number; face: string; weight: number; additive: boolean; dropShadow: boolean } {
   const fonts = kvFind(buildTrees(design)(SCHEME), ['Fonts', name]);
   const first = fonts && typeof fonts.value !== 'string' ? fonts.value.find((s) => typeof s.value !== 'string') : undefined;
-  if (!first) return { tall: 12, face: '', weight: 0, additive: false };
+  if (!first) return { tall: 12, face: '', weight: 0, additive: false, dropShadow: false };
   let face = kvGet(first, 'name') ?? '';
   if (design.font === 'roboto' && /^Trade Gothic( Bold)?$/i.test(face)) face = 'Roboto Condensed';
-  return { tall: num(kvGet(first, 'tall'), 12), face, weight: num(kvGet(first, 'weight')), additive: num(kvGet(first, 'additive')) !== 0 };
+  return {
+    tall: num(kvGet(first, 'tall'), 12), face, weight: num(kvGet(first, 'weight')), additive: num(kvGet(first, 'additive')) !== 0,
+    // The game draws such a font's glyphs over a black copy one pixel right and down (the chat's and the use/heal bar's label).
+    dropShadow: num(kvGet(first, 'dropshadow')) !== 0,
+  };
 }
 
 /**

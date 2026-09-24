@@ -644,6 +644,15 @@ and `children: ['resource/ui/hud/progressbar.res']`.
 (`#L4D_progress_heal_friend`, `resource/left4dead_english.txt`) in its font, `AwardIcon` as the
 `icon_healing` iconsheet cell (`mod_textures.txt:782`). The exact border/gap geometry is Q22.
 
+**Answered in slice 2.F (task X6).** The preview now draws this from `progressbar.res` through
+`web/src/hud/progress.ts` (`barGeometry`): the ring is the Bar's rect less the shadow on its right
+and bottom, the shadow is two strips pushed out by its thickness, each thickness is cut to whole
+pixels, and the sample is "HEALING YOURSELF" at 0.4 (the B13 mid-heal shots), not the guess above.
+The Bar's `border_thickness` and `gap` controls go through `progress.ts` `clampBarKeys` against the
+Bar's `tall`, in `validateDesign` and in the control's max, and a Bar resize that would break
+`2 * (border + gap) + shadow < tall` clamps the gap first (probe Q22,
+`probe-phase2/b1/shots/crops/bar-d.png`).
+
 **Build output.** `progressbar.res`, `hudlayout.res` (`HudProgressBar`).
 
 ### 3.7 Slice 2.7: ghost panel, too-far / Tank takeover, Tank frustration

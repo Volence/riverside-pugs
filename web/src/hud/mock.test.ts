@@ -369,6 +369,86 @@ describe('drawHud delegates panels to the renderer', () => {
     });
   });
 
+  describe('the use/heal bar', () => {
+    /** drawHud at 1920 x 1080 (2.25 px a unit) with every call and its fill recorded, art loaded at once. */
+    function barCalls(design: HudDesign) {
+      _setImageFactory((url) => ({ src: url, complete: true, naturalWidth: 64, naturalHeight: 64, onload: null, onerror: null }) as unknown as HTMLImageElement);
+      const calls: { m: string; a: unknown[]; fill: string }[] = [];
+      const base = fakeCtx(() => {}) as unknown as Record<string | symbol, unknown>;
+      const ctx = new Proxy(base, {
+        get: (t, k) => (typeof t[k] === 'function'
+          ? (...a: unknown[]) => { calls.push({ m: String(k), a, fill: String(t.fillStyle) }); return (t[k] as (...x: unknown[]) => unknown)(...a); }
+          : t[k]),
+        set: (t, k, v) => { t[k] = v; return true; },
+      }) as unknown as CanvasRenderingContext2D;
+      drawHud(ctx, 1920, 1080, design, 'survivor', null);
+      _setImageFactory(null);
+      return calls;
+    }
+    const K = 2.25;
+
+    it('draws progressbar.res: the healing icon, the label and the bar at its fill, as the game does (probe B13 heal)', () => {
+      // /home/volence/l4d/hud/probe-phase2/b13/b13-stock/heal/mid-heal.png: icon x 708 to 760, y 562 to 614;
+      // "HEALING YOURSELF"; bar ring x 767 to 1214, y 595 to 610, 2 px border, 2 px gap, fill to x 946 of an
+      // inner 771 to 1210 (0.4), a 2 px black shadow right and below. No slab.
+      const d = DEFAULT_DESIGN;
+      const r = elementRect(d, 'progressBar', d.aspect);
+      const calls = barCalls(d);
+      const icon = calls.find((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === artUrl('icon/healing'))!;
+      expect(icon.a.slice(1)).toEqual([(r.x + 2) * K, r.y * K, 24 * K, 24 * K]);
+      expect(calls.some((c) => c.m === 'fillText' && c.a[0] === 'HEALING YOURSELF')).toBe(true);
+      // On whole pixels, as the game places it: the element's pixel, then the child's offset, each cut.
+      const bx = Math.floor(r.x * K) + Math.floor(28 * K), by = Math.floor(r.y * K) + Math.floor(15 * K);
+      const fills = calls.filter((c) => c.m === 'fillRect');
+      // The ring: four white strips, 2 px (1 unit, cut to whole pixels) thick, round the rect less the shadow.
+      const white = fills.filter((c) => c.fill === 'rgba(255,255,255,1)').map((c) => c.a as number[]);
+      expect(white).toContainEqual([bx, by, 200 * K - 2, 2]);
+      // The fill: 4 px in (border 2 + gap 2), 0.4 of the inner width.
+      const inner = 200 * K - 2 - 8;
+      expect(white).toContainEqual([bx + 4, by + 4, inner * 0.4, 8 * K - 2 - 8]);
+      // The shadow, black, right and below.
+      const black = fills.filter((c) => c.fill === 'rgba(0,0,0,1)').map((c) => c.a as number[]);
+      expect(black).toContainEqual([bx + 200 * K - 2, by + 2, 2, 8 * K - 2]);
+      expect(black).toContainEqual([bx + 2, by + 8 * K - 2, 200 * K - 2, 2]);
+      // Nothing wider than the Bar: the old slab filled the element.
+      for (const c of fills) expect(c.a[2] as number).toBeLessThanOrEqual(200 * K);
+    });
+
+    it('draws the file\'s content, not the element\'s width, for a HUD whose element is wider (the owner\'s)', () => {
+      // The owner's hudlayout.res: HudProgressBar xpos 0, ypos r24, wide 300, tall 45, and no progressbar.res, so
+      // the stock one (228 units of content) draws inside a 300-wide element (b13-owner/heal/mid-heal.png: bar
+      // x 63 to 510 px).
+      const id = '9'.repeat(64);
+      const layout = baseFile('stock', 'scripts/hudlayout.res')
+        .replace(/("fieldName" "HudProgressBar"\s*"xpos"\s*)"c-114"(\s*"ypos"\s*)"c10"/, '$1"0"$2"r24"');
+      expect(layout).toContain('"r24"');
+      registerImport(id, sampleHud({ 'scripts/hudlayout.res': layout }));
+      try {
+        const d = validateDesign({ v: 1, preset: 'imported', imported: { id, name: 'o' }, crosshair: 'none' });
+        const r = elementRect(d, 'progressBar', d.aspect);
+        expect([r.x, r.w]).toEqual([0, 300]);
+        const fills = barCalls(d).filter((c) => c.m === 'fillRect').map((c) => c.a as number[]);
+        const right = Math.max(...fills.map((a) => a[0] + a[2]));
+        expect(right).toBeCloseTo(Math.floor(28 * K) + 200 * K, 6);   // 228 units, the offset cut to whole pixels
+      } finally { unregisterImport(id); }
+    });
+
+    it('draws only the border when an imported file\'s border and gap eat the bar, as the game does (probe Q22)', () => {
+      const id = 'a1'.repeat(32);
+      const bar = baseFile('stock', 'resource/ui/hud/progressbar.res')
+        .replace(/"gap"\s*"1"/, '"gap" "3"').replace(/"border_thickness"\s*"1"/, '"border_thickness" "3"');
+      registerImport(id, sampleHud({ 'resource/ui/hud/progressbar.res': bar }));
+      try {
+        const d = validateDesign({ v: 1, preset: 'imported', imported: { id, name: 'q' }, crosshair: 'none' });
+        const r = elementRect(d, 'progressBar', d.aspect);
+        const bx = Math.floor(r.x * K) + Math.floor(28 * K), by = Math.floor(r.y * K) + Math.floor(15 * K);
+        const white = barCalls(d).filter((c) => c.m === 'fillRect' && c.fill === 'rgba(255,255,255,1)').map((c) => c.a as number[]);
+        expect(white).toContainEqual([bx, by, 200 * K - 2, 6]);     // the ring, 3 units cut to 6 px
+        expect(white.filter((a) => a[1] > by + 6 && a[1] < by + 8 * K - 8)).toEqual([]);   // nothing inside it
+      } finally { unregisterImport(id); }
+    });
+  });
+
   it('draws siHealth and infectedRow from their generated files on the infected side', () => {
     _setImageFactory(instant);
     const green = artUrl('vgui/healthbar_green')!;

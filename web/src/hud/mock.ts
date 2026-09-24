@@ -18,8 +18,9 @@ import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHas
 import { baseOf } from './base';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H, parseSize, parsePos } from './units';
-import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, artImage, colourOf, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
-import { normaliseMaterial } from './art';
+import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, artImage, colourOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
+import { normaliseMaterial, HEALING_ICON } from './art';
+import { barGeometry, clampBarKeys } from './progress';
 import { canvasFont, fontCell, importedFace, loadFace } from './fonts';
 import { drawArt } from '../crosshair/model';
 import { childDef, panelChildren } from './children';
@@ -353,11 +354,91 @@ function paintChat(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k:
   }));
 }
 
-function paintProgressBar(ctx: CanvasRenderingContext2D, r: Rect) {
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  ctx.fillRect(r.x, r.y, r.w, r.h);
-  ctx.fillStyle = '#e8c23c';
-  ctx.fillRect(r.x, r.y, r.w * 0.5, r.h);
+const PROGRESS = 'resource/ui/hud/progressbar.res';
+/**
+ * The sample fill: 0.4, what probe-phase2/b13/b13-stock/heal/mid-heal.png
+ * shows (fill x 771 to 946 of an inner 771 to 1210).
+ */
+const PROGRESS_SAMPLE = 0.4;
+
+/**
+ * The use/heal bar drawn from its file (progressbar.res through buildTrees),
+ * as the game draws it in probe-phase2/b13/b13-stock/heal/mid-heal.png:
+ * AwardIcon's icon_healing (code sets the icon by action; the preview shows
+ * the self-heal the B13 shots show), BarLabel's "HEALING YOURSELF" (code
+ * fills it with #L4D_progress_heal from resource/left4dead_english.txt) in
+ * its font, centred in its row as a Label centres it, and Bar through
+ * progress.ts's barGeometry at PROGRESS_SAMPLE. Subtext is blank.
+ *
+ * The content is the file's, not the element's: the owner's HUD makes
+ * HudProgressBar 300 wide and ships no progressbar.res, so the stock one's
+ * 228 units of content draw inside it (b13-owner/heal/mid-heal.png, bar
+ * x 63 to 510 px), which the old slab, filling the element, got wrong.
+ *
+ * Each thickness is cut to whole pixels, as the game draws it (1 unit is
+ * 2 px at 1080, not 2.25). Stock and Modern keys go through clampBarKeys
+ * first (the editor keeps its own files inside probe Q22's rule); an
+ * imported file is drawn as written, so a border and gap that eat the bar
+ * show the border alone, as they do in game (b1/shots/crops/bar-d.png).
+ * Clipped to the element, as VGUI clips the children to their panel.
+ */
+function paintProgressBar(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
+  const nodes = buildTrees(design)(PROGRESS);
+  const rectOf = (name: string) => {
+    const n = kvFind(nodes, [name]);
+    if (!n) return null;
+    const W = r.w / k;
+    const u = { x: parsePos(pcGet(n, 'xpos') ?? '0', W), y: parsePos(pcGet(n, 'ypos') ?? '0', SCREEN_H), w: parseSize(pcGet(n, 'wide') ?? '0', W), h: parseSize(pcGet(n, 'tall') ?? '0', SCREEN_H) };
+    return { n, u, px: { x: r.x + u.x * k, y: r.y + u.y * k, w: u.w * k, h: u.h * k } };
+  };
+  clipToRect(ctx, r, () => {
+    ctx.save();
+    const icon = rectOf('AwardIcon');
+    if (icon && pcGet(icon.n, 'visible') !== '0') {
+      const img = artImage(HEALING_ICON, onAsset);
+      if (img) ctx.drawImage(img, icon.px.x, icon.px.y, icon.px.w, icon.px.h);
+    }
+    const label = rectOf('BarLabel');
+    if (label && pcGet(label.n, 'visible') !== '0') {
+      const font = pcGet(label.n, 'font') ?? '';
+      const cell = setFont(ctx, design, font, k, onAsset);
+      ctx.textAlign = 'left';
+      const top = label.px.y + (label.px.h - cell.cell) / 2;
+      const text = 'HEALING YOURSELF';
+      if (fontFace(design, font).dropShadow) {
+        ctx.fillStyle = 'rgba(0,0,0,1)';
+        fillFontText(ctx, cell, text, label.px.x + 1, top + cell.ascent + 1, top + 1, r);
+      }
+      ctx.fillStyle = colourOf(design, pcGet(label.n, 'fgcolor_override'));
+      fillFontText(ctx, cell, text, label.px.x, top + cell.ascent, top, r);
+    }
+    const bar = rectOf('Bar');
+    if (bar && pcGet(bar.n, 'visible') !== '0') {
+      const key = (name: string, d: number) => { const v = parseFloat(pcGet(bar.n, name) ?? ''); return Number.isFinite(v) ? v : d; };
+      const raw = { border: key('border_thickness', 1), gap: key('gap', 1), shadow: key('shadow_thickness', 1) };
+      const keys = design.preset === 'imported' ? raw : clampBarKeys(raw, bar.u.h);
+      const px = (v: number) => Math.floor(v * k + 1e-9);
+      // The game places the bar on whole pixels (the panel's, then the child's offset, each cut), so its
+      // one- and two-pixel lines land crisp: mid-heal.png's ring starts at y 595 = 562 + 33, not 596.25.
+      const at = { x: Math.floor(r.x) + px(bar.u.x), y: Math.floor(r.y) + px(bar.u.y), w: bar.px.w, h: bar.px.h };
+      const g = barGeometry(at, { border: px(keys.border), gap: px(keys.gap), shadow: px(keys.shadow) }, PROGRESS_SAMPLE);
+      const fillRect = (b: { x: number; y: number; w: number; h: number }, colour: string | undefined) => {
+        ctx.fillStyle = colourOf(design, colour);
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+      };
+      for (const s of g.shadow) fillRect(s, pcGet(bar.n, 'shadow_color') ?? '0 0 0 255');
+      if (g.border) {
+        const { x, y, w, h } = g.border, t = g.borderWidth, c = pcGet(bar.n, 'border_color');
+        fillRect({ x, y, w, h: t }, c);
+        fillRect({ x, y: y + h - t, w, h: t }, c);
+        fillRect({ x, y: y + t, w: t, h: h - 2 * t }, c);
+        fillRect({ x: x + w - t, y: y + t, w: t, h: h - 2 * t }, c);
+      }
+      if (g.fill) fillRect(g.fill, pcGet(bar.n, 'fill_color'));
+      if (g.empty) fillRect(g.empty, pcGet(bar.n, 'empty_color') ?? '0 0 0 0');
+    }
+    ctx.restore();
+  });
 }
 
 const PZ_RECORD = 'resource/ui/hud/pzdamagerecordpanel.res';
