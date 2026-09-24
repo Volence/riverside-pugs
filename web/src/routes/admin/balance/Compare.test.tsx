@@ -39,6 +39,20 @@ function renderAt(search = '') {
 }
 
 describe('Compare', () => {
+  it('hides folded patches, tags pending ones and never defaults to a pending one', async () => {
+    history.replaceState(null, '', '/admin/balance');
+    mockAdmin.balancePatches.mockResolvedValue({ patches: [
+      { ...patches[0], triage: 'balance' }, { ...patches[1], triage: 'balance' },
+      { ...patches[1], id: 3, number: 3, name: 'Pend', triage: 'pending' },
+      { ...patches[1], id: 4, number: 4, name: 'Gone', triage: 'folded', foldedInto: 1, merged: true },
+    ] });
+    mockAdmin.balanceCompare.mockResolvedValue(result);
+    render(<LocationProvider><Compare /></LocationProvider>);
+    expect((await screen.findAllByText(/Pend .*needs triage/)).length).toBe(2); // once per side
+    expect(screen.queryByText(/Gone/)).toBeNull();
+    await waitFor(() => expect(mockAdmin.balanceCompare).toHaveBeenCalledWith(expect.objectContaining({ a: [1], b: [2] }), expect.anything()));
+  });
+
   it('defaults to newest vs previous and shows the ranked rows with verdicts', async () => {
     renderAt();
     await waitFor(() => expect(screen.getByText('hunter.skeet_rate description')).toBeTruthy());

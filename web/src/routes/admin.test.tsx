@@ -21,7 +21,7 @@ const { mockAdmin, mockApi, mockPeople, mockMod } = vi.hoisted(() => ({
     integrityJob: vi.fn(),
     campaigns: vi.fn(), uploadCampaign: vi.fn(), publishCampaign: vi.fn(),
     reinstallCampaign: vi.fn(), deleteCampaign: vi.fn(), setMapsToPlay: vi.fn(),
-    balancePatches: vi.fn(), balanceDrift: vi.fn(), balancePatch: vi.fn(), editBalancePatch: vi.fn(),
+    balancePatches: vi.fn(), balanceDrift: vi.fn(), balanceIgnoredPlugins: vi.fn(), balancePatch: vi.fn(), editBalancePatch: vi.fn(),
   },
   mockApi: { reportEligibility: vi.fn(), report: vi.fn() },
   // The People desk is where a moderator lands, so a shell test reaches its
@@ -645,6 +645,7 @@ describe('the panel shell', () => {
   it('renders the patches page under the Balance desk', async () => {
     mockAdmin.balancePatches.mockResolvedValue({ patches: [] });
     mockAdmin.balanceDrift.mockResolvedValue({ servers: [] });
+    mockAdmin.balanceIgnoredPlugins.mockResolvedValue({ plugins: [] });
     renderAdmin('/admin/balance/patches');
     expect(screen.getByRole('tab', { name: 'Balance' })).toBeTruthy();
     expect(await screen.findByText('Server drift')).toBeTruthy();

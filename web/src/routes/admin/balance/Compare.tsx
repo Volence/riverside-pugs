@@ -13,7 +13,8 @@ const PHASE_FILTERS = ['any', 'all', 'tank', 'witch', 'event', 'normal'] as cons
 const patchName = (p: PatchSummary) => p.name ?? `Unnamed patch ${p.number}`;
 /** The picker shows the rounds the comparison would actually use, not every
  *  tagged round (the Patches tab keeps that raw total). */
-const patchLabel = (p: PatchSummary) => `${patchName(p)} (${p.countedRounds} rounds counted)`;
+const patchLabel = (p: PatchSummary) =>
+  `${patchName(p)} (${p.countedRounds} rounds counted)${p.triage === 'pending' ? ' · needs triage' : ''}`;
 
 /** Picks two groups of patches and shows every metric's verdict against them,
  *  Ranked or grouped By topic. The row-click expansion (QuickCheck) is a
@@ -32,11 +33,12 @@ const patchLabel = (p: PatchSummary) => `${patchName(p)} (${p.countedRounds} rou
 export function Compare() {
   const { route } = useLocation();
   const patches = useFetch((s) => adminApi.balancePatches(s), []);
-  const list = patches.data?.patches ?? [];
+  // A folded patch is not offered at all: its rounds count for the patch it
+  // was folded into. A pending one is offered, tagged, so a change can be
+  // looked at before deciding, but is never a default side.
+  const list = (patches.data?.patches ?? []).filter((p) => p.triage !== 'folded' && !p.merged);
   const oldestFirst = list.map((p) => p.id);
-  // A merged patch is never a default side: its config is the one it was
-  // merged into, so "previous vs latest" would compare a config with itself.
-  const q = readCompareQuery(location.search, oldestFirst, list.filter((p) => p.countedRounds > 0 && !p.merged).map((p) => p.id));
+  const q = readCompareQuery(location.search, oldestFirst, list.filter((p) => p.countedRounds > 0 && p.triage !== 'pending').map((p) => p.id));
   const set = (next: Partial<CompareQueryWithView>) => route(`/admin/balance${writeCompareQuery({ ...q, ...next })}`, true);
   const ready = list.length > 0 && q.a.length > 0 && q.b.length > 0;
   const same = ready && q.a.length === q.b.length && q.a.every((id) => q.b.includes(id));
