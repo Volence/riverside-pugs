@@ -38,6 +38,10 @@
 //      scale 1.5 with a ready colour; the marker at ability_size 30, green,
 //      so the reader sees the three linked SI files, the card file and the
 //      HudCrosshair keys. The same edits probe B14 checked in game.
+//   u: a stock design with weapon uploads (plan phase2-rest, task W2): the M16
+//      icon a 192x64 band (red, green, blue thirds), the pills a 64x64 of
+//      quadrants, the active box a 128x128 of yellow corners, so the reader
+//      sees the repointed cells with the uploads' own rects and the VTFs.
 // Unset (or any other value) keeps the original default: sample (a).
 import { it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -109,6 +113,22 @@ it('writes a sample VPK or zip for the Python/unzip readers', () => {
       images: { splatTeam: { w: 512, h: 256, png: PNG }, splatTop: { w: 256, h: 64, png: PNG } } });
     if (!d.images.splatTeam || !d.images.splatTop) throw new Error('sample s lost its stored pictures in validateDesign');
     writeFileSync(process.env.HUD_VPK_OUT, packHud(d, { images: { splatTeam: quadrants(), splatTop: stripes() } }).bytes);
+    return;
+  }
+  if (sample === 'u') {
+    const tex = (w: number, h: number, f: (x: number, y: number) => number[]) => {
+      const px = new Uint8ClampedArray(w * h * 4);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) px.set(f(x, y), (y * w + x) * 4);
+      return px;
+    };
+    const band = tex(192, 64, (x) => [x < 64 ? 255 : 0, x >= 64 && x < 128 ? 255 : 0, x >= 128 ? 255 : 0, 255]);
+    const quad = tex(64, 64, (x, y) => (y < 32 ? (x < 32 ? [255, 255, 255, 255] : [255, 0, 0, 255]) : (x < 32 ? [0, 255, 0, 255] : [255, 255, 255, 128])));
+    const box = tex(128, 128, (x, y) => ((x < 16 || x >= 112) && (y < 16 || y >= 112) ? [255, 255, 0, 255] : [0, 255, 255, 255]));
+    const d = validateDesign({ v: 1, preset: 'stock',
+      images: { wiconMachinegun: { w: 192, h: 64, png: PNG }, wiconPills: { w: 64, h: 64, png: PNG }, weaponBoxActive: { w: 128, h: 128, png: PNG } },
+      weapons: { boxActive: { kind: 'image' }, icons: { icon_equip_machinegun: 'wiconMachinegun', icon_equip_pills: 'wiconPills' } } });
+    if (Object.keys(d.weapons?.icons ?? {}).length !== 2 || d.weapons?.boxActive?.kind !== 'image') throw new Error('sample u lost its uploads in validateDesign');
+    writeFileSync(process.env.HUD_VPK_OUT, packHud(d, { images: { wiconMachinegun: band, wiconPills: quad, weaponBoxActive: box } }).bytes);
     return;
   }
   if (sample === 'o') {

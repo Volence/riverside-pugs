@@ -27,6 +27,29 @@ if os.environ.get('HUD_SAMPLE') == 's':
     assert '$vertexcolor' not in vmt.lower(), vmt
     card = pak['resource/ui/hud/teammatepanel.res'].read().decode('latin1')
     assert 'HudEdSplatter' in card and 'hud/hudeditor/splatteam' in card, card
+if os.environ.get('HUD_SAMPLE') == 'u':
+    # Sample u: weapon icon and box uploads, the cells and textures read by srctools.
+    from srctools.keyvalues import Keyvalues
+    from srctools.vtf import VTF
+    kv = Keyvalues.parse(pak['scripts/mod_textures.txt'].read().decode('latin1'))
+    cells = next(iter(kv)).find_key('TextureData')
+    def cell(name):
+        b = cells.find_key(name)
+        return {k: b[k] for k in ('file', 'x', 'y', 'width', 'height')}
+    assert cell('icon_equip_machinegun') == {'file': 'vgui/hud/hudeditor/icon_equip_machinegun', 'x': '0', 'y': '0', 'width': '192', 'height': '64'}, cell('icon_equip_machinegun')
+    assert cell('icon_equip_pills') == {'file': 'vgui/hud/hudeditor/icon_equip_pills', 'x': '0', 'y': '0', 'width': '64', 'height': '64'}, cell('icon_equip_pills')
+    assert cell('rounded_background_glow') == {'file': 'vgui/hud/hudeditor/weaponboxactive', 'x': '0', 'y': '0', 'width': '128', 'height': '128'}
+    assert cell('icon_equip_rifle')['file'] == 'vgui/hud/iconsheet'
+    for n, size, at, want in (('icon_equip_machinegun', (192, 64), (150, 10), (0, 0, 255, 255)),
+                              ('icon_equip_pills', (64, 64), (40, 5), (255, 0, 0, 255)),
+                              ('weaponboxactive', (128, 128), (2, 2), (255, 255, 0, 255))):
+        tex = VTF.read(io.BytesIO(pak[f'materials/vgui/hud/hudeditor/{n}.vtf'].read()))
+        assert (tex.width, tex.height) == size, (n, tex.width, tex.height)
+        tex.load()
+        px = tex.get()[at]
+        assert (px.r, px.g, px.b, px.a) == want, (n, px)
+        assert f'materials/vgui/hud/hudeditor/{n}.vmt' in names
+    print('sample u: cells and textures ok')
 if os.environ.get('HUD_SAMPLE') == 'o':
     # Sample o: your own health fitted, scaled 1.5, with piece edits and a
     # rounded "Your health background", read by srctools, not by our own parser.

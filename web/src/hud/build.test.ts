@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildHud, elementRect, panelWork, pcSet, HIDE_FRAMES, CODE_SHOWN, hardHide, baseHasElement, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame, panelChild, panelFrame, writeKeys } from './build';
+import { buildHud, elementRect, panelWork, pcSet, HIDE_FRAMES, CODE_SHOWN, hardHide, baseHasElement, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame, panelChild, panelFrame, writeKeys, pointCell } from './build';
 import { parsePos, screenW } from './units';
 import { DEFAULT_DESIGN, validateDesign, contentBox, type HudDesign, type ElementOverride, type ChildOverride } from './design';
 import { parseKv, writeKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
@@ -1457,6 +1457,72 @@ describe('buildHud, the weapon selection', () => {
     const files = buildHud(design({ weapons: { weaponIcons: false, itemIcons: false, boxActive: { kind: 'hidden' }, boxInactive: { kind: 'hidden' } } }));
     expect(files.filter((f) => f.path === 'materials/vgui/hud/hudeditor/clear.vtf')).toHaveLength(1);
     expect(new Set(files.map((f) => f.path)).size).toBe(files.length);
+  });
+
+  /** A stored upload's record and its decoded pixels, a colour per texel column so a stretch or crop would show. */
+  const upload = (w: number, h: number) => ({
+    stored: { w, h, png: 'AAAA' },
+    px: new Uint8ClampedArray(w * h * 4).map((_, i) => (i % 4 === 3 ? 255 : ((i >> 2) % w) & 0xff)),
+  });
+  const cellOf = (nodes: KvNode[], name: string) => {
+    const e = kvFind(nodes, [name])!;
+    return Object.fromEntries((e.value as KvNode[]).map((n) => [n.key.toLowerCase(), n.value]));
+  };
+
+  it("ships an uploaded gun icon as its own texture, its cell the upload's own rect", () => {
+    const m16 = upload(192, 64);
+    const d = design({ images: { wiconMachinegun: m16.stored }, weapons: { icons: { icon_equip_machinegun: 'wiconMachinegun' } } });
+    const files = buildHud(d, { images: { wiconMachinegun: m16.px } });
+    expect(cellOf(entries(files), 'icon_equip_machinegun')).toEqual({
+      file: 'vgui/hud/hudeditor/icon_equip_machinegun', x: '0', y: '0', width: '192', height: '64',
+    });
+    const vtf = decodeVTF(files.find((f) => f.path === 'materials/vgui/hud/hudeditor/icon_equip_machinegun.vtf')!.data);
+    expect([vtf.w, vtf.h]).toEqual([192, 64]);
+    expect([...vtf.rgba]).toEqual([...m16.px]);
+    expect(text(files, 'materials/vgui/hud/hudeditor/icon_equip_machinegun.vmt')).toContain('vgui/hud/hudeditor/icon_equip_machinegun');
+    // Every other entry is the game's own.
+    expect(cellOf(entries(files), 'icon_equip_rifle').file).toBe('vgui/hud/iconsheet');
+  });
+
+  it('ships an Image box as a 128-texel texture and keeps the 0 0 128 128 rect', () => {
+    const box = upload(128, 128);
+    const d = design({ images: { weaponBoxActive: box.stored }, weapons: { boxActive: { kind: 'image' } } });
+    const files = buildHud(d, { images: { weaponBoxActive: box.px } });
+    expect(cellOf(entries(files), 'rounded_background_glow')).toEqual({
+      file: 'vgui/hud/hudeditor/weaponboxactive', x: '0', y: '0', width: '128', height: '128',
+    });
+    const vtf = decodeVTF(files.find((f) => f.path === 'materials/vgui/hud/hudeditor/weaponboxactive.vtf')!.data);
+    expect([vtf.w, vtf.h, ...vtf.rgba.slice(0, 8)]).toEqual([128, 128, ...box.px.slice(0, 8)]);
+  });
+
+  it('turns a font glyph entry into a texture cell: file and rect in, font and character out', () => {
+    const e = parseKv('"voice_self" { "font" "L4D_Icons_large" "character" "V" }')[0];
+    pointCell(e, 'vgui/hud/hudeditor/voice_self', 64, 64);
+    expect((e.value as KvNode[]).map((n) => [n.key, n.value])).toEqual([
+      ['file', 'vgui/hud/hudeditor/voice_self'], ['x', '0'], ['y', '0'], ['width', '64'], ['height', '64'],
+    ]);
+  });
+
+  it('lets the hide switches win over an upload', () => {
+    const uzi = upload(128, 64);
+    const pills = upload(64, 64);
+    const d = design({ images: { wiconUzi: uzi.stored, wiconPills: pills.stored },
+      weapons: { weaponIcons: false, itemIcons: false, icons: { icon_equip_uzi: 'wiconUzi', icon_equip_pills: 'wiconPills' } } });
+    const files = buildHud(d, { images: { wiconUzi: uzi.px, wiconPills: pills.px } });
+    expect(fileOf(entries(files), 'icon_equip_uzi')).toBe('vgui/hud/hudeditor/clear');
+    expect(fileOf(entries(files), 'icon_equip_pills')).toBe('vgui/hud/hudeditor/clear');
+    expect(files.some((f) => f.path.includes('icon_equip_'))).toBe(false);
+  });
+
+  it('refuses to build an upload whose pixels it was not given, naming the picture', () => {
+    const d = design({ images: { wiconUzi: upload(128, 64).stored }, weapons: { icons: { icon_equip_uzi: 'wiconUzi' } } });
+    expect(() => buildHud(d)).toThrow('Uzi');
+  });
+
+  it('gives the preview the upload cells the download carries', () => {
+    const uzi = upload(128, 64);
+    const d = design({ images: { wiconUzi: uzi.stored }, weapons: { icons: { icon_equip_uzi: 'wiconUzi' } } });
+    expect(buildTrees(d)(MODTEX)).toEqual(parseKv(text(buildHud(d, { images: { wiconUzi: uzi.px } }), MODTEX)!)[0].value);
   });
 
   it('gives the preview the same mod_textures.txt the download carries', () => {

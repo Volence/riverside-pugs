@@ -19,7 +19,7 @@ import { flatTexture, roundedTexture, vmtFor, parseColour } from './textures';
 import { decodeText, encodeText } from './text';
 import {
   baseTeam, contentBox, drawnBarX, isBar, WEAPON_KEYS, WEAPON_BOX_COLOUR, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir,
-  type WeaponNumKey,
+  type WeaponNumKey, WEAPON_ICONS, ITEM_ICONS, WEAPON_BOX_IMAGE,
 } from './design';
 import {
   panelChildren, panelOfFile, childDef, maxInset, linkedValue, TEAM_PANEL, OWN_PANEL, SI_PANEL, ZCARD_PANEL, type ChildDef, type PanelChildren, type LinkRect, type LinkRule,
@@ -1804,9 +1804,11 @@ function stylePass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkF
  * The flashlight cells are not the weapon selection's and are left alone.
  */
 export const WEAPON_BOX_ENTRY = { boxActive: 'rounded_background_glow', boxInactive: 'rounded_background_noborder' } as const;
-export const WEAPON_ICONS = ['icon_equip_pumpshotgun', 'icon_equip_uzi', 'icon_equip_autoshotgun', 'icon_equip_rifle',
-  'icon_equip_machinegun', 'icon_equip_dualpistols', 'icon_equip_pistol'];
-export const ITEM_ICONS = ['icon_equip_molotov', 'icon_equip_pipebomb', 'icon_equip_medkit', 'icon_equip_pills'];
+export { WEAPON_ICONS, ITEM_ICONS };
+/** What the editor calls each item's icon entry. */
+export const ITEM_ICON_LABELS: Record<string, string> = {
+  icon_equip_molotov: 'Molotov', icon_equip_pipebomb: 'Pipe bomb', icon_equip_medkit: 'Medkit', icon_equip_pills: 'Pills',
+};
 /** What the editor calls each gun's icon entry (the names in WEAPON_ICONS' comment). */
 export const WEAPON_ICON_LABELS: Record<string, string> = {
   icon_equip_pumpshotgun: 'Pump shotgun', icon_equip_uzi: 'Uzi', icon_equip_autoshotgun: 'Auto shotgun',
@@ -1858,7 +1860,30 @@ function baseFontTall(key: BaseKey, font: string): number | undefined {
  * everything else, each entry's cell rect included, is the game's own file.
  * The file ships only when a box or a picture is not stock.
  */
-function weaponsPass(work: Work, design: HudDesign, out: VpkFile[]) {
+/**
+ * Point a mod_textures.txt entry at a whole texture of w x h texels: its
+ * file and a rect from 0, 0 at the texture's own size, so the game cuts
+ * exactly the upload (/home/volence/l4d/hud/probe-phase2-rest/r4/shots/crops/weap-abc.png).
+ * A font glyph entry (font and character, as voice_self is) loses both and
+ * gains the rect, the form probe V1 drew (r1/shots/crops/voice-g.png).
+ */
+export function pointCell(entry: KvNode, file: string, w: number, h: number) {
+  const kids = (entry.value as KvNode[]).filter((n) => !['font', 'character'].includes(n.key.toLowerCase()));
+  entry.value = kids;
+  for (const [k, v] of [['file', file], ['x', '0'], ['y', '0'], ['width', String(w)], ['height', String(h)]]) kvSet(entry, k, v);
+}
+
+/**
+ * What an upload's label is, for an error naming it.
+ */
+const uploadLabel = (entry: string) => WEAPON_ICON_LABELS[entry] ?? ITEM_ICON_LABELS[entry] ?? entry;
+
+/**
+ * `assets` null is the preview (buildTrees): the cells are pointed from the
+ * stored size alone and no pixels are asked for, so the trees are the
+ * download's.
+ */
+function weaponsPass(work: Work, design: HudDesign, assets: BuildAssets | null, out: VpkFile[]) {
   const w = design.weapons;
   if (!w) return;
   const panel = work.optional(LAYOUT, ['HudWeaponSelection']);
@@ -1879,25 +1904,49 @@ function weaponsPass(work: Work, design: HudDesign, out: VpkFile[]) {
     for (const leaf of leaves) useFontCopy(work, leaf, `t${tall}`, () => tall);
   }
 
-  const repoint: [string, string][] = [];
+  // entry, texture, and for an upload its own w x h rect
+  const repoint: [string, string, { w: number; h: number }?][] = [];
+  /** An upload's texture under its entry's own name, or false with no stored picture. */
+  const uploaded = (entry: string, id: string, name: string, label: string): boolean => {
+    const stored = design.images[id];
+    if (!stored) return false;
+    if (assets) {
+      const px = assets.images?.[id];
+      if (!px || px.length !== stored.w * stored.h * 4) throw new Error(`${label}: the uploaded picture could not be read. Upload it again, or reset it.`);
+      out.push({ path: `materials/${name}.vtf`, data: encodeVTF(stored.w, stored.h, px) }, { path: `materials/${name}.vmt`, data: enc(vmtFor(name)) });
+    }
+    repoint.push([entry, name, { w: stored.w, h: stored.h }]);
+    return true;
+  };
   for (const box of ['boxActive', 'boxInactive'] as const) {
     const s = w[box];
     if (!s) continue;
     if (s.kind === 'hidden') { repoint.push([WEAPON_BOX_ENTRY[box], CLEAR_TEXTURE]); continue; }
+    if (s.kind === 'image') {
+      uploaded(WEAPON_BOX_ENTRY[box], WEAPON_BOX_IMAGE[box], weaponBoxTexture(box), box === 'boxActive' ? 'Held box' : 'Other boxes');
+      continue;
+    }
     const colour = s.color ?? WEAPON_BOX_COLOUR[box];
     const rgba = s.kind === 'rounded' ? roundedTexture(BOX_TEXELS, BOX_TEXELS, colour, BOX_CORNER) : flatTexture(BOX_TEXELS, BOX_TEXELS, colour);
     const name = weaponBoxTexture(box);
     out.push({ path: `materials/${name}.vtf`, data: encodeVTF(BOX_TEXELS, BOX_TEXELS, rgba) }, { path: `materials/${name}.vmt`, data: enc(vmtFor(name)) });
     repoint.push([WEAPON_BOX_ENTRY[box], name]);
   }
-  if (w.weaponIcons === false) for (const n of WEAPON_ICONS) repoint.push([n, CLEAR_TEXTURE]);
-  if (w.itemIcons === false) for (const n of ITEM_ICONS) repoint.push([n, CLEAR_TEXTURE]);
+  // A hide switch wins over the uploads it covers, which then ship nothing.
+  for (const [list, on] of [[WEAPON_ICONS, w.weaponIcons !== false], [ITEM_ICONS, w.itemIcons !== false]] as const) {
+    for (const n of list) {
+      if (!on) { repoint.push([n, CLEAR_TEXTURE]); continue; }
+      const id = w.icons?.[n];
+      if (id) uploaded(n, id, `vgui/hud/hudeditor/${n}`, uploadLabel(n));
+    }
+  }
   if (!repoint.length) return;
   const cells = work.panel(MODTEX, ['TextureData']);
-  for (const [entry, file] of repoint) {
+  for (const [entry, file, rect] of repoint) {
     const e = kvFind(cells.value as KvNode[], [entry]);
     if (!e) { if (work.imported) continue; throw new Error(`${MODTEX}: no ${entry}`); }
-    kvSet(e, 'file', file);
+    if (rect) pointCell(e, file, rect.w, rect.h);
+    else kvSet(e, 'file', file);
   }
   if (repoint.some(([, file]) => file === CLEAR_TEXTURE)) {
     out.push({ path: `materials/${CLEAR_TEXTURE}.vtf`, data: encodeVTF(CLEAR_TEXELS, CLEAR_TEXELS, new Uint8ClampedArray(CLEAR_TEXELS * CLEAR_TEXELS * 4)) },
@@ -1990,7 +2039,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   const work = new Work(key);
   const extra: VpkFile[] = [];
   layoutPass(work, design);
-  weaponsPass(work, design, extra);
+  weaponsPass(work, design, assets, extra);
   childPass(work, design);
   fitPass(work, design);
   hidePass(work, design);
@@ -2072,7 +2121,7 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
     work = new Work(baseOf(design));
     const discard: VpkFile[] = [];
     layoutPass(work, design);
-    weaponsPass(work, design, discard);
+    weaponsPass(work, design, null, discard);
     childPass(work, design);
     fitPass(work, design);
     hidePass(work, design);
