@@ -47,6 +47,11 @@ export class ServerReleaser {
     /** Absent in tests and on an install that never restarts anything, in
      *  which case `restart` is a no-op however the boxes are configured. */
     private restarter: ServerRestarter | null = null,
+    /** Runs after the rcon cleanup and before the restart, for every release.
+     *  The balance writer puts a pending pug_balance.cfg here, so the new
+     *  values land between matches and the restart loads them. Failures are
+     *  logged and never stop the release. */
+    private beforeRestart: ((server: ServerRow) => Promise<void>) | null = null,
   ) {}
 
   /** Called when a box frees, so a match waiting for one can claim it. */
@@ -111,6 +116,14 @@ export class ServerReleaser {
         // A dead rcon target must never wedge the queue: the waiters still
         // fire below even when the cleanup fails.
         console.error(`[serverRelease] could not clean up ${server.name}:`, err);
+      })
+      .then(async () => {
+        if (!this.beforeRestart) return;
+        try {
+          await this.beforeRestart(server);
+        } catch (err) {
+          console.error(`[serverRelease] before-restart step failed on ${server.name}:`, err);
+        }
       })
       .then(async () => {
         if (!restarting) return;

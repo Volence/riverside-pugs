@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { openDb } from '../src/db.js';
 import { addServer, getServer, markLive, markOffline } from '../src/serverPool.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from '../src/serverRelease.js';
+import type { ServerRestarter } from '../src/serverRestart.js';
 
 function seedServer(db: ReturnType<typeof openDb>): number {
   return addServer(db, {
@@ -162,6 +163,31 @@ describe('ServerReleaser', () => {
     releaser.release(id, { teardown: true });
     await new Promise((r) => setImmediate(r));
     expect(seen).toEqual([true]);
+  });
+
+  it('runs the before-restart hook after the cleanup and before the restart', async () => {
+    const db = openDb(':memory:');
+    const id = seedServer(db);
+    markLive(db, id);
+    db.prepare('UPDATE servers SET restart_after_match = 1 WHERE id = ?').run(id);
+    const order: string[] = [];
+    const restarter: ServerRestarter = { restart: async () => { order.push('restart'); return true; } };
+    const releaser = new ServerReleaser(db, async () => { order.push('clean'); }, restarter,
+      async (s) => { order.push(`hook:${s.id}`); });
+    releaser.release(id, { restart: true });
+    await releaser.settled();
+    expect(order).toEqual(['clean', `hook:${id}`, 'restart']);
+    expect(getServer(db, id)!.status).toBe('idle');
+  });
+
+  it('a hook that throws still restarts and frees the box', async () => {
+    const db = openDb(':memory:');
+    const id = seedServer(db);
+    markLive(db, id);
+    const releaser = new ServerReleaser(db, async () => {}, null, async () => { throw new Error('ftp down'); });
+    releaser.release(id);
+    await releaser.settled();
+    expect(getServer(db, id)!.status).toBe('idle');
   });
 });
 
