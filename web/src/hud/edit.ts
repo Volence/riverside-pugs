@@ -15,7 +15,7 @@ import {
 } from './design';
 import { screenW, SCREEN_H } from './units';
 import { elementById } from './elements';
-import { elementRect, teamLayout, teamCardRects, isFreeTeam, panelChild, buildTrees, type CardChild } from './build';
+import { elementRect, teamLayout, teamCardRects, isFreeTeam, panelChild, buildTrees, panelBgZpos, type CardChild } from './build';
 import { childDef, panelChildren, panelOfFile } from './children';
 import { kvGet } from './kv';
 import { unionBox, CORNERS, type Handle } from './guides';
@@ -552,21 +552,29 @@ export function resetChildren(design: HudDesign, names: string[], panel = 'teamC
  * "Bring to front" and "Send to back" (plan decision 5): the pieces go one
  * above the highest zpos in the panel's file, or one below the lowest, not
  * one step, since several pieces often share a zpos and a single step would
- * be ambiguous. The file is read as buildTrees has it, so a block the build
- * injects (the card background, the splatter stand-in) counts; the pieces
- * being moved do not, and a block with no zpos counts as 0, which is what
- * the game gives it. Every piece gets the same zpos, through the
- * validator's -50..50 clamp.
+ * be ambiguous. The file is read as buildTrees has it, but the blocks the
+ * build injects do not count: the backgrounds (HudEdCardBg at -2,
+ * HudEdOwnBg at -5), the splatter stand-in (HudEdSplatter, which copies
+ * BackgroundImage's zpos anyway) and the hidden Items revive anchor in a
+ * panel where Items is no piece of its own. The pieces being moved do not
+ * count either, and a block with no zpos counts as 0, which is what the
+ * game gives it. Send to back never goes below the panel's injected
+ * background + 1, with or without a background in this design, so a
+ * background never covers a piece (panelBgZpos). Every piece gets the same
+ * zpos, through the validator's -50..50 clamp.
  */
 export function raiseChild(design: HudDesign, names: string[], to: 'front' | 'back', panel = 'teamColumn'): HudDesign {
   const reg = panelChildren(panel);
   if (!reg) return design;
   const moving = new Set(names.map((n) => n.toLowerCase()));
+  const injected = (key: string) => key.toLowerCase().startsWith('huded') || (key.toLowerCase() === 'items' && !childDef(panel, key));
   const zs = buildTrees(design)(reg.file)
-    .filter((n) => typeof n.value !== 'string' && !moving.has(n.key.toLowerCase()))
+    .filter((n) => typeof n.value !== 'string' && !moving.has(n.key.toLowerCase()) && !injected(n.key))
     .map((n) => { const z = parseFloat(kvGet(n, 'zpos') ?? ''); return Number.isFinite(z) ? z : 0; });
   if (!zs.length) return design;
-  const z = clampChild('z', to === 'front' ? Math.max(...zs) + 1 : Math.min(...zs) - 1);
+  const bg = panelBgZpos(panel);
+  const back = Math.min(...zs) - 1;
+  const z = clampChild('z', to === 'front' ? Math.max(...zs) + 1 : bg === undefined ? back : Math.max(back, bg + 1));
   return names.filter((n) => childDef(panel, n)).reduce((d, n) => patchChild(d, n, { z }, panel), design);
 }
 

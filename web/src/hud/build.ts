@@ -668,6 +668,14 @@ const FIT_RULES: Record<string, FitRule> = {
   ownHealth: { content: ownContent, apply: fitOwn, bg: OWN_BG },
 };
 
+/**
+ * The zpos of the background child the build injects into a panel's file
+ * (HudEdCardBg, HudEdOwnBg), whether or not this design has one: edit.ts's
+ * Send to back keeps every piece above it, so a background added later
+ * never covers a piece either.
+ */
+export const panelBgZpos = (panelId: string): number | undefined => FIT_RULES[panelId]?.bg.zpos;
+
 /** Every panel's fit rule, in turn. */
 function fitPass(work: Work, design: HudDesign) {
   for (const rule of Object.values(FIT_RULES)) rule.apply(work, design);

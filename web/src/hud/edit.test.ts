@@ -738,10 +738,30 @@ describe('child edits name their panel', () => {
     const d = structuredClone(DEFAULT_DESIGN);
     expect(raiseChild(d, ['Head'], 'front').children.teamColumn?.Head?.z).toBe(4);
     const back = raiseChild(d, ['Head', 'Name'], 'back');
-    expect([back.children.teamColumn?.Head?.z, back.children.teamColumn?.Name?.z]).toEqual([-2, -2]);
-    // A card background the build injected counts too: it sits at -2, so Send to back goes below it.
-    const withBg = { ...d, styles: { panelBg: { kind: 'flat' as const } } };
-    expect(raiseChild(withBg, ['Head'], 'back').children.teamColumn?.Head?.z).toBe(-3);
+    // One below BackgroundImage would be -2, the card background's zpos: the floor is that background + 1.
+    expect([back.children.teamColumn?.Head?.z, back.children.teamColumn?.Name?.z]).toEqual([-1, -1]);
+  });
+  it('never sends a piece under the background the build injects', () => {
+    // Review M1: HudEdCardBg sits at -2; going below it hid the piece.
+    const d = { ...structuredClone(DEFAULT_DESIGN), styles: { panelBg: { kind: 'flat' as const } } };
+    expect(raiseChild(d, ['Head'], 'back').children.teamColumn?.Head?.z).toBe(-1);
+    // Modern's own panel: ModBg at -5 is the lowest, HudEdOwnBg injects at -5 too; the floor is -4.
+    const own = { ...withPreset(structuredClone(DEFAULT_DESIGN), 'modern', true), styles: { ownBg: { kind: 'flat' as const } } };
+    expect(buildTrees(own)('resource/ui/hud/localplayerpanel.res').some((n) => n.key === 'HudEdOwnBg')).toBe(true);
+    expect(raiseChild(own, ['Head'], 'back', 'ownHealth').children.ownHealth?.Head?.z).toBe(-4);
+  });
+  it('leaves the injected blocks and the hidden revive anchor out of the zpos list', () => {
+    // Modern ships bar 34 and down picture 0, so unfitted the build adds the hidden Items anchor (no zpos, so 0).
+    const own = { ...withPreset(structuredClone(DEFAULT_DESIGN), 'modern', true), elements: {} };
+    expect(buildTrees(own)('resource/ui/hud/localplayerpanel.res').some((n) => n.key === 'Items')).toBe(true);
+    // With every registered piece moving, only ModBg (-5) is left: front is -4, not 1 from the anchor.
+    const all = ['Head', 'Health', 'HealthIcon', 'HealthNumber', 'HealthbarTextureTop', 'HealthbarTextureBottom', 'Incapacitated', 'DuckingIcon'];
+    expect(raiseChild(own, all, 'front', 'ownHealth').children.ownHealth?.Head?.z).toBe(-4);
+    // The card's HudEdSplatter stand-in and HudEdCardBg do not count either.
+    // The card's HudEdCardBg does not count either: with every card piece moving nothing is left to measure.
+    const card = { ...structuredClone(DEFAULT_DESIGN), styles: { panelBg: { kind: 'flat' as const } } };
+    const allCard = ['Head', 'Health', 'Name', 'Items', 'Status', 'BackgroundImage', 'Incapacitated', 'Dead', 'Voice'];
+    expect(raiseChild(card, allCard, 'front')).toBe(card);
   });
 });
 
