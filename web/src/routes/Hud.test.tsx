@@ -2279,6 +2279,19 @@ describe('Your own health on the page', () => {
     expect(screen.getByText('Recolours the bar and the number on every card.')).toBeTruthy();
   });
 
+  it('shows the game colour of the state previewed on an unset health colour, with its three bands', () => {
+    render(<Hud />);
+    fireEvent.click(layer('Teammates').getByRole('button', { name: 'Health bar' }));
+    const swatch = () => (screen.getByLabelText('Panel colour colour') as HTMLInputElement).value;
+    const lit = () => screen.getByLabelText("The game's health colours").querySelector('.hud__band--on')!.textContent;
+    expect(screen.getByLabelText("The game's health colours").querySelectorAll('li')).toHaveLength(3);
+    expect([swatch(), lit()]).toEqual(['#0ab132', 'Above 50']);
+    fireEvent.click(screen.getByRole('tab', { name: 'Hurt' }));
+    expect([swatch(), lit()]).toEqual(['#d8920c', '16 to 50']);
+    fireEvent.click(screen.getByRole('tab', { name: 'Down' }));
+    expect([swatch(), lit()]).toEqual(['#a11919', '15 or less, or down']);
+  });
+
   it('offers the Inset on your health bar and on the teammate bar, and saves it (probe Q3)', async () => {
     // /home/volence/l4d/hud/probe-phase2/RESULTS.md Q3: inset 3 moves the fill 6 px inside the outline (b1v2 a).
     render(<Hud />);
