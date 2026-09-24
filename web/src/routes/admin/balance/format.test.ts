@@ -28,6 +28,11 @@ describe('balance formatting', () => {
     expect(fmtChange('tank.spawns', { diff: -0.001, rel: null, lo: null, hi: null }).main).toBe('0');
     expect(fmtChange('tank.lifetime_s', { diff: 12, rel: 0.12, lo: -0.001, hi: 23 }).range).toBe('[0 s, +23 s]');
   });
+  it('keeps the minus sign on negative non-share changes and ranges', () => {
+    expect(fmtChange('tank.lifetime_s', { diff: -12, rel: -0.12, lo: -23, hi: -2 })).toEqual({ main: '-12%', range: '[-23 s, -2 s]' });
+    expect(fmtChange('round.length_min', { diff: -1.24, rel: null, lo: -2.06, hi: 0.3 })).toEqual({ main: '-1.2 min', range: '[-2.1 min, +0.3 min]' });
+    expect(fmtChange('tank.spawns', { diff: -0.5, rel: null, lo: -0.9, hi: -0.1 })).toEqual({ main: '-0.5', range: '[-0.9, -0.1]' });
+  });
   it('says match or matches as the number needs', () => {
     expect(fmtMoreMatches(1)).toBe('1 more match');
     expect(fmtMoreMatches(60)).toBe('60 more matches');

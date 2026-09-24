@@ -26,17 +26,13 @@ export function fmtValue(id: string, v: number | null): string {
 export function fmtChange(id: string, r: { diff: number | null; rel: number | null; lo: number | null; hi: number | null }): { main: string; range: string } {
   if (r.diff === null) return { main: 'n/a', range: '' };
 
+  // Round the magnitude so a tiny value reads "0" rather than "-0", then take
+  // the sign from v itself: the magnitude alone always read "+".
   const formatUnit = (v: number): string => {
-    if (id.endsWith('_s')) {
-      const rounded = Math.round(Math.abs(v));
-      return `${sign(rounded)}${rounded} s`;
-    }
-    if (id.endsWith('_min')) {
-      const rounded = Number(trim(Math.abs(v), 1));
-      return `${sign(rounded)}${rounded} min`;
-    }
-    const rounded = Number(trim(Math.abs(v), 2));
-    return `${sign(rounded)}${rounded}`;
+    const signed = (mag: number) => `${mag === 0 ? '' : sign(v)}${mag}`;
+    if (id.endsWith('_s')) return `${signed(Math.round(Math.abs(v)))} s`;
+    if (id.endsWith('_min')) return `${signed(Number(trim(Math.abs(v), 1)))} min`;
+    return signed(Number(trim(Math.abs(v), 2)));
   };
 
   if (isShareMetric(id)) {
