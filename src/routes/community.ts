@@ -300,7 +300,9 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
     const newPreview = !store.has('preview', previewSha);
     const newImport = imported !== null && !store.has('import', imported.id);
     const incoming = (newPreview ? preview.length : 0) + (newImport && vpk ? vpk.length : 0);
-    if (!(await store.canTake(incoming))) return reply.code(507).send({ error: SHELF_FULL });
+    // A share that reuses files already stored adds nothing, so no budget
+    // or disk floor can refuse it.
+    if (incoming > 0 && !(await store.canTake(incoming))) return reply.code(507).send({ error: SHELF_FULL });
 
     // Only what this request itself wrote is undone on a failure, and even
     // that only when no row has come to use it meanwhile (a second share of
@@ -364,9 +366,11 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
       reply
         .header('X-Content-Type-Options', 'nosniff')
         .header('Content-Security-Policy', "default-src 'none'; sandbox")
-        // Content addressed, so a live file never changes; a staff view of a
-        // removed one must not linger in any cache.
-        .header('Cache-Control', live ? 'public, max-age=31536000, immutable' : 'no-store');
+        // Content addressed, so a live file never changes, but it can stop
+        // being live (a delete or a staff removal): an hour's cache lets a
+        // removal take effect. A staff view of a removed one must not linger
+        // in any cache.
+        .header('Cache-Control', live ? 'public, max-age=3600' : 'no-store');
       if (kind === 'preview') return reply.type('image/png').send(bytes);
       return reply
         .type('application/octet-stream')
