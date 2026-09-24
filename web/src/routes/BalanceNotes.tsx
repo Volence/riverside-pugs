@@ -9,7 +9,8 @@ import { PatchEntryView } from './balance/PatchEntryView';
 function PatchPanel({ id }: { id: number }) {
   const { data, error } = useFetch((s) => api.balancePatch(id, s), [id]);
   return (
-    <Panel>
+    // Anchored so the Game values page can link a change to its patch.
+    <Panel id={`patch-${id}`}>
       {error ? (
         <Empty>Could not load this patch.</Empty>
       ) : !data ? (
@@ -38,6 +39,7 @@ export function BalanceNotes() {
           A measured change is a difference between the games played before and after a patch. It
           can also come from who was playing and which maps were played, so read it next to the notes.
         </p>
+        <p><a href="/balance/values">Game values</a>: every balance setting as it is now, next to vanilla.</p>
       </PageHeader>
 
       {error ? (
