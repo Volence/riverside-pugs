@@ -1,6 +1,9 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent, waitFor, within, act } from '@testing-library/preact';
-import { _setImageFactory, _resetAssetCache } from '../hud/render';
+import { _setImageFactory, _resetAssetCache, childRects } from '../hud/render';
+import { panelBoxes } from '../hud/mock';
+import { _setProbe } from '../hud/probes';
+import { panelChild } from '../hud/build';
 import { toUnits } from './Hud';
 import Hud from './Hud';
 import { readFileSync } from 'node:fs';
@@ -13,7 +16,7 @@ import { memoryStore, _setHudStore, type HudStore } from '../hud/hudStore';
 import { unregisterImport, baseFile } from '../hud/base';
 import { hudId } from '../hud/upload';
 import { sampleHud, asList, dropBlock } from '../hud/importFixtures';
-import { encodeShare, validateDesign } from '../hud/design';
+import { encodeShare, validateDesign, type HudDesign } from '../hud/design';
 
 // A switch for the tests of the page's own safety net: with it on, the
 // import checks find nothing wrong, so a broken import gets as far as the
@@ -1993,11 +1996,15 @@ describe('Splatter', () => {
 
   it('says so when the design is too big for this browser to keep', async () => {
     render(<Hud />);
-    vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError'); });
-    fireEvent.change(kindOf(TOP), { target: { value: 'fade' } });
-    await waitFor(() => expect(screen.getByText(
-      'This design is too big for this browser to keep. Remove an uploaded image, or use Export to save it as a file.',
-    )).toBeTruthy());
+    // Restored here, not left to the file's vi.restoreAllMocks: that does not
+    // undo a spy on happy-dom's localStorage, and every later test's saves failed.
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError'); });
+    try {
+      fireEvent.change(kindOf(TOP), { target: { value: 'fade' } });
+      await waitFor(() => expect(screen.getByText(
+        'This design is too big for this browser to keep. Remove an uploaded image, or use Export to save it as a file.',
+      )).toBeTruthy());
+    } finally { spy.mockRestore(); }
   });
 
   it('says an Image with no picture shows stock, with no tint strip or Colour by health', () => {
@@ -2053,5 +2060,153 @@ describe('Splatter', () => {
     expect(kindOf(BOTTOM).value).toBe('fade');
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
     expect(kindOf(BOTTOM).value).toBe('stock');
+  });
+});
+
+describe('Your own health on the page', () => {
+  afterEach(() => { for (const id of ['Q1', 'Q2', 'Q3', 'Q5'] as const) _setProbe(id, null); _resetAssetCache(); });
+  const own = () => layer('Your health');
+  const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
+  /** A 2D context stand-in recording what the page draws: fillText strings and positions, drawImage sources. */
+  const recordDraws = () => {
+    _resetAssetCache();
+    _setImageFactory((url) => ({ src: url, complete: true, naturalWidth: 64, naturalHeight: 64, onload: null, onerror: null }) as unknown as HTMLImageElement);
+    const texts: { s: string; x: number; y: number }[] = [];
+    const images: string[] = [];
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement) {
+      const canvas = this;
+      return new Proxy({}, {
+        get: (_t, k) => {
+          if (k === 'canvas') return canvas;
+          return (...a: unknown[]) => {
+            if (k === 'fillText') texts.push({ s: a[0] as string, x: a[1] as number, y: a[2] as number });
+            if (k === 'drawImage') images.push((a[0] as HTMLImageElement).src);
+            if (k === 'getImageData') return { data: new Uint8ClampedArray(4) };
+            if (k === 'measureText') return { width: 10 };
+            if (k === 'createLinearGradient' || k === 'createRadialGradient') return { addColorStop() {} };
+            return undefined;
+          };
+        },
+        set: () => true,
+      }) as never;
+    } as never);
+    return { texts, images };
+  };
+  /** Where your own health's Health bar sits on the unit canvas, as the page's default design draws it. */
+  const ownBar = () => {
+    const d = validateDesign({ v: 1 });
+    const [box] = panelBoxes(d, 'ownHealth');
+    return childRects(d, 'ownHealth', box, 1).find((r) => r.name === 'Health')!;
+  };
+
+  it('offers Healthy, Hurt, Down and Dead, and Hurt draws your health number as 40', () => {
+    const { texts } = recordDraws();
+    render(<Hud />);
+    const tabs = screen.getAllByRole('tab').map((t) => t.textContent);
+    expect(tabs).toEqual(expect.arrayContaining(['Healthy', 'Hurt', 'Down', 'Dead']));
+    expect(tabs.indexOf('Hurt')).toBe(tabs.indexOf('Healthy') + 1);
+    expect(texts.some((t) => t.s === '40')).toBe(false);
+    fireEvent.click(screen.getByRole('tab', { name: 'Hurt' }));
+    expect(screen.getByRole('tab', { name: 'Hurt' }).getAttribute('aria-selected')).toBe('true');
+    expect(texts.some((t) => t.s === '40')).toBe(true);
+  });
+
+  it('toggles Crouched, and the preview draws the crouch icon while it is on', () => {
+    const { images } = recordDraws();
+    render(<Hud />);
+    const crouched = () => screen.getByRole('button', { name: 'Crouched' });
+    expect(crouched().getAttribute('aria-pressed')).toBe('false');
+    expect(images.some((s) => /crouch_survivor/.test(s))).toBe(false);
+    fireEvent.click(crouched());
+    expect(crouched().getAttribute('aria-pressed')).toBe('true');
+    expect(images.some((s) => /crouch_survivor/.test(s))).toBe(true);
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    expect(screen.queryByRole('button', { name: 'Crouched' })).toBeNull();
+  });
+
+  it('lists every piece of your own health in Layers, with the state notes', () => {
+    render(<Hud />);
+    for (const label of ['Portrait', 'Health bar', 'Health cross', 'Health number', 'Scratches, top', 'Scratches, bottom', 'Down picture', 'Crouch icon']) {
+      expect(own().getByRole('button', { name: label }), label).toBeTruthy();
+    }
+    expect(own().getByText('shown when down')).toBeTruthy();
+    expect(own().getByText('shown when crouched')).toBeTruthy();
+  });
+
+  it('shows the bar its box and note, and the Panel colour and Inset only once their probes pass', async () => {
+    render(<Hud />);
+    fireEvent.click(own().getByRole('button', { name: 'Health bar' }));
+    for (const l of ['X', 'Y', 'W', 'H']) expect(screen.getByLabelText(l), l).toBeTruthy();
+    expect(screen.getByText('The game fills the bar by health.')).toBeTruthy();
+    expect(screen.queryByText('Panel colour')).toBeNull();
+    expect(screen.queryByLabelText('Inset')).toBeNull();
+    cleanup();
+    _setProbe('Q1', true); _setProbe('Q3', true);
+    render(<Hud />);
+    fireEvent.click(layer('Your health').getByRole('button', { name: 'Health bar' }));
+    expect(screen.getByText('Panel colour')).toBeTruthy();
+    expect(screen.getByLabelText('Panel colour colour')).toBeTruthy();
+    const inset = screen.getByLabelText('Inset') as HTMLInputElement;
+    expect(inset.min).toBe('0');
+    expect(inset.max).toBe('8');
+    fireEvent.input(inset, { target: { value: '3' } });
+    fireEvent.blur(inset);
+    await waitFor(() => expect(saved().children?.ownHealth?.Health?.keys?.inset).toBe('3'));
+    fireEvent.input(screen.getByLabelText('Panel colour colour'), { target: { value: '#ff00ff' } });
+    await waitFor(() => expect(saved().children?.ownHealth?.Health?.keys?.monochrome_color).toBe('255 0 255 255'));
+  });
+
+  it('never offers the health cross a colour: probe Q5 showed the game ignores it', () => {
+    // Plumbing Task 16 asked for a Colour control here once Q5 passed; Q5 failed (slice 2.F G4), so it never shows.
+    render(<Hud />);
+    fireEvent.click(own().getByRole('button', { name: 'Health cross' }));
+    expect(screen.getByLabelText('Text size')).toBeTruthy();
+    expect(screen.queryByLabelText('Health cross colour')).toBeNull();
+  });
+
+  it('offers Fit only once probe Q2 passes, and fitting moves nothing on the canvas', async () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Your health' }));
+    expect(screen.queryByLabelText('Fit the panel to its contents')).toBeNull();
+    cleanup();
+    _setProbe('Q2', true);
+    const { texts } = recordDraws();
+    const { container } = render(<Hud />);
+    unitCanvas(container);
+    fireEvent.click(screen.getByRole('button', { name: 'Your health' }));
+    const number = () => texts.filter((t) => t.s === '100').at(-1)!;
+    const before = number();
+    const fit = screen.getByLabelText('Fit the panel to its contents') as HTMLInputElement;
+    expect(fit.checked).toBe(false);
+    fireEvent.click(fit);
+    await waitFor(() => expect(saved().elements?.ownHealth?.fit).toBe(true));
+    expect((screen.getByLabelText('Fit the panel to its contents') as HTMLInputElement).checked).toBe(true);
+    const after = number();
+    expect(after.x).toBeCloseTo(before.x, 6);
+    expect(after.y).toBeCloseTo(before.y, 6);
+  });
+
+  it('drags the Health bar on the canvas, saving its place in the file frame, and offers the piece menu for one panel', async () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    const r = ownBar();
+    // A quarter in, clear of the selection's resize handles (the mid-edge ones sit over a thin bar's centre).
+    const at: [number, number] = [r.x + r.w / 4, r.y + r.h / 2];
+    clickAt(canvas, ...at);
+    expect(screen.getByText('Health bar', { selector: 'legend' })).toBeTruthy();
+    dragFrom(canvas, at, [at[0] + 10, at[1] - 5]);
+    const stock = panelChild(validateDesign({ v: 1 }), 'ownHealth', 'Health')!;
+    await waitFor(() => expect(saved().children?.ownHealth?.Health).toMatchObject({ x: stock.x + 10, y: stock.y - 5 }));
+    fireEvent.contextMenu(canvas, { clientX: at[0] + 10, clientY: at[1] - 5 });
+    expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Hide', 'Reset', 'Bring to front', 'Send to back', 'Select Your health']);
+  });
+
+  it('lists the scratches as hidden on Modern, which ships them at visible 0, and their Visible box off', async () => {
+    render(<Hud />);
+    fireEvent.change(screen.getByRole('combobox', { name: /preset/i }), { target: { value: 'modern' } });
+    await waitFor(() => expect(own().getByRole('button', { name: 'Scratches, top' }).closest('.hud__layer')!.classList.contains('hud__layer--hidden')).toBe(true));
+    expect(own().getByRole('button', { name: 'Scratches, bottom' }).closest('.hud__layer')!.classList.contains('hud__layer--hidden')).toBe(true);
+    fireEvent.click(own().getByRole('button', { name: 'Scratches, top' }));
+    expect((screen.getByLabelText('Visible') as HTMLInputElement).checked).toBe(false);
   });
 });

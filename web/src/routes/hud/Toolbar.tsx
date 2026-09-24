@@ -8,7 +8,7 @@ import type { Backdrop } from '../../crosshair/draw';
 import type { HudDesign } from '../../hud/design';
 import type { Aspect } from '../../hud/units';
 import type { Side } from '../../hud/mock';
-import type { CardState } from '../../hud/render';
+import type { PreviewState, SurvivorState } from '../../hud/render';
 import type { WeaponHeld } from '../../hud/weapons';
 import { useRef, useState } from 'preact/hooks';
 
@@ -16,8 +16,8 @@ const BACKDROPS: [Backdrop, string][] = [
   ['scene', 'Saferoom'], ['dark', 'Dark'], ['bright', 'Bright'], ['grey', 'Grey'], ['shot', 'My screenshot'],
 ];
 
-const CARD_STATES: { key: CardState; label: string }[] = [
-  { key: 'healthy', label: 'Healthy' }, { key: 'down', label: 'Down' }, { key: 'dead', label: 'Dead' },
+const SURVIVOR_STATES: { key: SurvivorState; label: string }[] = [
+  { key: 'healthy', label: 'Healthy' }, { key: 'hurt', label: 'Hurt' }, { key: 'down', label: 'Down' }, { key: 'dead', label: 'Dead' },
 ];
 
 /** What the preview survivor holds: the game moves the weapon numbers when this changes. */
@@ -31,10 +31,10 @@ export type PresetChoice = 'stock' | 'modern' | { id: string };
 const presetValue = (d: HudDesign) => (d.preset === 'imported' && d.imported ? `imported:${d.imported.id}` : d.preset);
 
 export interface ToolbarProps {
-  design: HudDesign; side: Side; cardState: CardState; held: WeaponHeld; backdrop: Backdrop; shotError?: string;
+  design: HudDesign; side: Side; preview: PreviewState; held: WeaponHeld; backdrop: Backdrop; shotError?: string;
   canUndo: boolean; canRedo: boolean;
   onUndo: () => void; onRedo: () => void;
-  onSide: (s: Side) => void; onState: (s: CardState) => void; onHeld: (h: WeaponHeld) => void;
+  onSide: (s: Side) => void; onPreview: (s: PreviewState) => void; onHeld: (h: WeaponHeld) => void;
   onPreset: (p: PresetChoice) => void; onAspect: (a: Aspect) => void; onBackdrop: (b: Backdrop) => void;
   onShot: (e: Event) => void; onFont: (f: 'preset' | 'roboto') => void; onDownload: () => void;
   /** This browser's imports, for the Preset select. */
@@ -82,7 +82,19 @@ export function Toolbar(p: ToolbarProps) {
         active={p.side} onSelect={(k) => p.onSide(k as Side)}
       />
       {p.side === 'survivor' && (
-        <Tabs tabs={CARD_STATES.map((s) => ({ key: s.key, label: s.label }))} active={p.cardState} onSelect={(k) => p.onState(k as CardState)} />
+        <Tabs
+          tabs={SURVIVOR_STATES.map((s) => ({ key: s.key, label: s.label }))} active={p.preview.survivor}
+          onSelect={(k) => p.onPreview({ ...p.preview, survivor: k as SurvivorState })}
+        />
+      )}
+      {/* Crouching is shown alongside any survivor state: the game draws the crouch icon whatever the health. */}
+      {p.side === 'survivor' && (
+        <button
+          type="button" class="btn btn--ghost btn--sm" aria-pressed={p.preview.crouched}
+          onClick={() => p.onPreview({ ...p.preview, crouched: !p.preview.crouched })}
+        >
+          Crouched
+        </button>
       )}
       {p.side === 'survivor' && (
         <Tabs label="Holding" tabs={HELD} active={p.held} onSelect={(k) => p.onHeld(k as WeaponHeld)} />

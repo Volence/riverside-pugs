@@ -18,7 +18,7 @@ import {
   type BuildAssets, type BuildReport, type CardChild,
 } from '../hud/build';
 import { drawHud, visibleElements, panelBoxes, type Side } from '../hud/mock';
-import type { CardState } from '../hud/render';
+import { DEFAULT_PREVIEW, type PreviewState } from '../hud/render';
 import type { WeaponHeld } from '../hud/weapons';
 import { SLOTS, type StyleSlot } from '../hud/slots';
 import { splatterDef, SPLATTERS, type SplatterDef, type SplatterId } from '../hud/splatter';
@@ -464,9 +464,10 @@ export default function Hud() {
   const dropPicks = () => setSel((s) => (s.kind === 'children' && panelOf(s) !== 'teamColumn'
     ? { kind: 'elements', ids: [panelOf(s)] }
     : s.kind === 'cards' || s.kind === 'children' ? TEAMMATES : s));
-  // Which state the teammate cards are previewed in. Game code picks it in
-  // game; this only changes the picture, never the design or the file.
-  const [cardState, setCardState] = useState<CardState>('healthy');
+  // Which state the survivor panels are previewed in (health, crouched, and
+  // the infected side's states). Game code picks it in game; this only
+  // changes the picture, never the design or the file.
+  const [preview, setPreview] = useState<PreviewState>(DEFAULT_PREVIEW);
   const [held, setHeld] = useState<WeaponHeld>('primary');
   const [backdrop, setBackdrop] = useState<Backdrop>('scene');
   // On load only: a design's own crosshair choice is loaded and coerced
@@ -574,7 +575,7 @@ export default function Hud() {
       const hovered = hover && !press.current ? targetOf(design, hover.hit, hover.ctrl, sel) : NONE;
       const box = selectionBox(design, sel);
       drawHud(ctx, w, h, design, side, selectedIds(sel), () => setImgTick((t) => t + 1), {
-        state: cardState,
+        state: preview,
         held,
         frames: selectionFrames(design, sel),
         box,
@@ -588,7 +589,7 @@ export default function Hud() {
       drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize);
       designFailed(e);
     }
-  }, [design, side, sel, backdrop, imgTick, cardState, held, hover, guides, marquee, locked]);
+  }, [design, side, sel, backdrop, imgTick, preview, held, hover, guides, marquee, locked]);
 
   // A selection the design or the side no longer has is trimmed or dropped:
   // after an undo, an import, a removed health number, a layout change.
@@ -733,7 +734,7 @@ export default function Hud() {
     endGesture();
     const { ux, uy } = pointerUnits(e);
     const d = current.current;
-    press.current = { cx: e.clientX, cy: e.clientY, ux, uy, mods: modsOf(e), hit: hitAt(d, side, cardState, ux, uy), handle: handleUnder(d, ux, uy), moved: false };
+    press.current = { cx: e.clientX, cy: e.clientY, ux, uy, mods: modsOf(e), hit: hitAt(d, side, preview, ux, uy), handle: handleUnder(d, ux, uy), moved: false };
     drag.current = null;
     setHover(null);
   };
@@ -794,7 +795,7 @@ export default function Hud() {
       const f = panelFrame(cur, d.panel);
       const dx = dux / f.k, dy = duy / f.k;
       const snaps = childDef(d.panel, d.name)?.box === 'wh' && !alt && !shift;
-      const s = snaps ? snapEdges(resizeBox(d.start, d.handle, dx, dy, false, 1), d.handle, pieceTargets(cur, cardState, [d.name], d.panel)) : NO_SNAP;
+      const s = snaps ? snapEdges(resizeBox(d.start, d.handle, dx, dy, false, 1), d.handle, pieceTargets(cur, preview, [d.name], d.panel)) : NO_SNAP;
       const card = pieceBox(cur, d.panel, d.card);
       setGuides(card ? s.guides.map((g) => pieceGuideToScreen(g, card, f)) : []);
       edit((x) => resizeChild(x, d.name, d.start, d.handle, dx + s.dx, dy + s.dy, shift, d.panel), 'gesture');
@@ -814,7 +815,7 @@ export default function Hud() {
       const dx = dux / f.k, dy = duy / f.k;
       const start = unionBox(Object.values(d.starts));
       if (!start) return;
-      const s = alt ? NO_SNAP : snapMove({ ...start, x: start.x + dx, y: start.y + dy }, pieceTargets(cur, cardState, d.names, d.panel));
+      const s = alt ? NO_SNAP : snapMove({ ...start, x: start.x + dx, y: start.y + dy }, pieceTargets(cur, preview, d.names, d.panel));
       const card = pieceBox(cur, d.panel, d.card);
       setGuides(card ? s.guides.map((g) => pieceGuideToScreen(g, card, f)) : []);
       edit((x) => moveChildren(x, d.names, d.starts, dx + s.dx, dy + s.dy, d.panel), 'gesture');
@@ -838,7 +839,7 @@ export default function Hud() {
       const d = current.current;
       // The previous object back when nothing it names changed, so a pointer
       // wandering over one piece does not redraw the canvas on every move.
-      const hit = hitAt(d, side, cardState, ux, uy), ctrl = e.ctrlKey || e.metaKey;
+      const hit = hitAt(d, side, preview, ux, uy), ctrl = e.ctrlKey || e.metaKey;
       setHover((h) => (h && h.ctrl === ctrl && h.hit.element === hit.element && h.hit.card === hit.card && h.hit.child === hit.child
         ? h : { hit, ctrl }));
       const over = handleUnder(d, ux, uy);
@@ -867,7 +868,7 @@ export default function Hud() {
     if (!p.moved) { setSel((s) => clickSelect(current.current, s, p.hit, p.mods)); return; }
     if (d?.kind === 'box') {
       const { ux, uy } = pointerUnits(e);
-      setSel(boxSelect(current.current, side, cardState, { x: p.ux, y: p.uy }, { x: ux, y: uy }));
+      setSel(boxSelect(current.current, side, preview, { x: p.ux, y: p.uy }, { x: ux, y: uy }));
       return;
     }
     endGesture();
@@ -900,7 +901,7 @@ export default function Hud() {
     if (press.current) return;
     const d = current.current;
     const { ux, uy } = pointerUnits(e);
-    const hit = hitAt(d, side, cardState, ux, uy);
+    const hit = hitAt(d, side, preview, ux, uy);
     const target = targetOf(d, hit);
     if (target.kind === 'none') { setMenu(null); return; }
     const acting = isPicked(d, sel, hit) ? sel : target;
@@ -948,7 +949,7 @@ export default function Hud() {
 
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
       e.preventDefault();
-      setSel((s) => selectAll(current.current, side, cardState, s));
+      setSel((s) => selectAll(current.current, side, preview, s));
       return;
     }
 
@@ -1219,11 +1220,11 @@ export default function Hud() {
 
         <Panel class="hud__stage">
           <Toolbar
-            design={design} side={side} cardState={cardState} held={held} backdrop={backdrop} shotError={uploadErrors.shot}
+            design={design} side={side} preview={preview} held={held} backdrop={backdrop} shotError={uploadErrors.shot}
             canUndo={canUndo} canRedo={hist.current.future.length > 0}
             onUndo={doUndo} onRedo={doRedo}
             onSide={(s) => { setSide(s); setSel(NONE); }}
-            onState={setCardState}
+            onPreview={setPreview}
             onHeld={setHeld}
             onPreset={(p) => { void changePreset(p); }}
             onAspect={(a) => edit((d) => ({ ...d, aspect: a }))}

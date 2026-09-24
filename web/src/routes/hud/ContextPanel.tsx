@@ -13,11 +13,11 @@ import { fontFace } from '../../hud/render';
 import { elementById, type HudElement } from '../../hud/elements';
 import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam } from '../../hud/build';
 import { baseOf } from '../../hud/base';
-import { childDef, panelChildren } from '../../hud/children';
+import { childDef, panelChildren, type KeyDef } from '../../hud/children';
 import { probe } from '../../hud/probes';
 import {
   cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild,
-  startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, patchWeapons, ammoOnly,
+  startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, patchWeapons, ammoOnly, setFit,
   type Align,
 } from '../../hud/edit';
 import { unionBox } from '../../hud/guides';
@@ -360,6 +360,17 @@ export function ElementControls(
 
       <TeamControls design={design} edit={edit} end={end} el={el} o={o} patch={patch} />
 
+      {/* Fit re-places LocalPlayer to what it shows; it waits for probe Q2 (does LocalPlayer clip and paint nothing?), as validateDesign does. */}
+      {id === 'ownHealth' && probe('Q2') && (
+        <label class="hud__check">
+          <input
+            type="checkbox" checked={o.fit === true}
+            onChange={(e) => edit((d) => setFit(d, id, (e.target as HTMLInputElement).checked))}
+          />
+          <span>Fit the panel to its contents</span>
+        </label>
+      )}
+
       {id === 'weaponSelection' && <WeaponControls design={design} edit={edit} end={end} />}
 
       {/* The crosshair has no element settings of its own to reset: its choice and art are undone like any edit. */}
@@ -465,6 +476,13 @@ export function ChildControls(
           />
         </div>
       )}
+      {def.keys?.filter((k) => !k.gate || probe(k.gate)).map((k) => (
+        <KeyControl
+          key={k.key} def={k} end={end}
+          value={o.keys?.[k.key] ?? info.keys?.[k.key] ?? keyDefault(k)}
+          onValue={(v, mode) => patch({ keys: { ...o.keys, [k.key]: v } }, mode)}
+        />
+      ))}
       {def.note && <p class="muted hud__note">{def.note}</p>}
       {repeatsCards(panel) && <p class="muted hud__note">{EVERY_CARD}</p>}
       {def.addable && !baseHasChild(baseOf(design), name, panel) && (
@@ -475,6 +493,48 @@ export function ChildControls(
       <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this child</button>
       <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={onBack}>{`Back to ${elementById(panel)?.label ?? 'Teammates'}`}</button>
     </Field>
+  );
+}
+
+/** What a typed file key shows when neither the design nor the file sets it. */
+function keyDefault(k: KeyDef): string {
+  if (k.type === 'colour') return '255 255 255 255';
+  if (k.type === 'int') return String(k.range?.[0] ?? 0);
+  return '0';
+}
+
+/**
+ * One typed file key of a child (a KeyDef): a colour as a swatch and an
+ * opacity, a number within its range, or a checkbox. Only keys whose probe
+ * gate has passed reach here; the value is the file's text, as the
+ * generator writes it.
+ */
+function KeyControl({ def, value, onValue, end }: {
+  def: KeyDef; value: string; onValue: (v: string, mode?: EditMode) => void; end: () => void;
+}) {
+  if (def.type === 'colour') return <ColourRow label={def.label} value={value} end={end} onPick={(c) => onValue(c, 'gesture')} />;
+  if (def.type === 'bool') {
+    return (
+      <label class="hud__check">
+        <input type="checkbox" checked={value !== '0'} onChange={(e) => onValue((e.target as HTMLInputElement).checked ? '1' : '0')} />
+        <span>{def.label}</span>
+      </label>
+    );
+  }
+  const [lo, hi] = def.range ?? [-Infinity, Infinity];
+  return (
+    <label class="hud__row">
+      <span>{def.label}</span>
+      <input
+        type="number" min={def.range?.[0]} max={def.range?.[1]} value={value}
+        onInput={(e) => {
+          const n = parseInt((e.target as HTMLInputElement).value, 10);
+          if (Number.isFinite(n)) onValue(String(Math.min(hi, Math.max(lo, n))), 'gesture');
+        }}
+        {...endsOn(end)}
+      />
+      <span />
+    </label>
   );
 }
 
