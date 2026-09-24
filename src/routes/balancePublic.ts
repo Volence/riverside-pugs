@@ -5,8 +5,10 @@ import { logAdmin } from '../admin/audit.js';
 import { loadBalanceKnobs, type BalanceKnobs } from '../balanceKnobs.js';
 import { listPublished, publicEntry, publishPatch, type KnobLabels } from '../balancePublic.js';
 import { withEffectiveIgnored } from '../balanceIgnore.js';
+import { loadCatalogue, type Catalogue } from '../balanceCatalogue.js';
+import { gameValues } from '../balanceValues.js';
 
-export interface BalancePublicRouteOpts { db: DB; knobsPath?: string }
+export interface BalancePublicRouteOpts { db: DB; knobsPath?: string; cataloguePath?: string }
 
 const idOf = (req: { params: unknown }): number | null => {
   const raw = (req.params as { id: string }).id;
@@ -28,6 +30,18 @@ export async function balancePublicRoutes(app: FastifyInstance, opts: BalancePub
 
   // Per request: the site ignore list can change while the process runs.
   const labels = (): KnobLabels => withEffectiveIgnored(db, knobs ?? { cvars: [], files: [], dirs: [], versionless: [] });
+
+  // The Game values page (sub-project 4). A broken catalogue disables it (503).
+  let catalogue: Catalogue | null = null;
+  try { catalogue = loadCatalogue(opts.cataloguePath); } catch (err) {
+    console.error('[balance] values page disabled, balance/catalogue.json failed to load:', err);
+  }
+  const noCatalogue = { error: 'balance/catalogue.json failed to load' };
+  app.get('/api/balance/values', async (_req, reply) => (catalogue ? gameValues(db, catalogue, { admin: false }) : reply.code(503).send(noCatalogue)));
+  app.get('/api/admin/balance/values', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    return catalogue ? gameValues(db, catalogue, { admin: true }) : reply.code(503).send(noCatalogue);
+  });
 
   app.get('/api/balance/patches', async () => ({ patches: listPublished(db) }));
 

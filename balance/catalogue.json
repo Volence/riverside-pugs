@@ -1,0 +1,1057 @@
+{
+  "_comment": "Balance catalogue: the values and rules the public Game values page shows, and the extra values the plugin watches. Drafted 2026-09-24 while the owner was away: labels, rule wording and vanilla values need the owner's review. Vanilla values for game cvars are the engine defaults read from a local L4D1 dedicated server; plugin cvars have none.",
+  "groups": [
+    {
+      "id": "survivors",
+      "label": "Survivors"
+    },
+    {
+      "id": "common",
+      "label": "Common infected and hordes"
+    },
+    {
+      "id": "tank",
+      "label": "Tank"
+    },
+    {
+      "id": "witch",
+      "label": "Witch"
+    },
+    {
+      "id": "hunter",
+      "label": "Hunter"
+    },
+    {
+      "id": "smoker",
+      "label": "Smoker"
+    },
+    {
+      "id": "boomer",
+      "label": "Boomer"
+    },
+    {
+      "id": "si",
+      "label": "Special infected"
+    },
+    {
+      "id": "items",
+      "label": "Items and weapon limits"
+    },
+    {
+      "id": "weapons",
+      "label": "Weapon stats"
+    },
+    {
+      "id": "director",
+      "label": "Bosses"
+    },
+    {
+      "id": "scoring",
+      "label": "Scoring"
+    },
+    {
+      "id": "map",
+      "label": "Maps"
+    }
+  ],
+  "values": [
+    {
+      "id": "survivor_limit",
+      "group": "survivors",
+      "label": "Survivors per team",
+      "source": "cvar",
+      "vanilla": "4"
+    },
+    {
+      "id": "survivor_max_incapacitated_count",
+      "group": "survivors",
+      "label": "Incaps before black and white",
+      "source": "cvar",
+      "vanilla": "2"
+    },
+    {
+      "id": "survivor_revive_duration",
+      "group": "survivors",
+      "label": "Revive time",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "5"
+    },
+    {
+      "id": "survivor_revive_health",
+      "group": "survivors",
+      "label": "Health after a revive",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "30"
+    },
+    {
+      "id": "survivor_ledge_grab_health",
+      "group": "survivors",
+      "label": "Ledge hang health",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "300"
+    },
+    {
+      "id": "pain_pills_decay_rate",
+      "group": "survivors",
+      "label": "Temporary health decay",
+      "source": "cvar",
+      "unit": "HP/s",
+      "vanilla": "0.27"
+    },
+    {
+      "id": "ammo_buckshot_max",
+      "group": "survivors",
+      "label": "Shotgun reserve ammo",
+      "source": "cvar",
+      "vanilla": "128"
+    },
+    {
+      "id": "ammo_smg_max",
+      "group": "survivors",
+      "label": "Uzi reserve ammo",
+      "source": "cvar",
+      "vanilla": "480"
+    },
+    {
+      "id": "ammo_assaultrifle_max",
+      "group": "survivors",
+      "label": "Rifle reserve ammo",
+      "source": "cvar",
+      "vanilla": "360"
+    },
+    {
+      "id": "ammo_huntingrifle_max",
+      "group": "survivors",
+      "label": "Hunting rifle reserve ammo",
+      "source": "cvar",
+      "vanilla": "150"
+    },
+    {
+      "id": "l4d_smg_reload_clip_time",
+      "group": "survivors",
+      "label": "Uzi reload time",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "l4d2_reload_speed_uzi",
+      "group": "survivors",
+      "label": "Uzi reload speed setting",
+      "source": "cvar"
+    },
+    {
+      "id": "rotoblin_melee_penalty",
+      "group": "survivors",
+      "label": "Shove fatigue",
+      "source": "cvar"
+    },
+    {
+      "id": "z_gun_survivor_friend_push",
+      "group": "survivors",
+      "label": "Friendly shoves push teammates",
+      "source": "cvar",
+      "vanilla": "1"
+    },
+    {
+      "id": "sv_gravity",
+      "group": "survivors",
+      "label": "Gravity",
+      "source": "cvar",
+      "vanilla": "800",
+      "note": "Set by TickrateFixes."
+    },
+    {
+      "id": "z_common_limit",
+      "group": "common",
+      "label": "Common infected limit",
+      "source": "cvar",
+      "vanilla": "30",
+      "note": "Set by l4dready when the round goes live."
+    },
+    {
+      "id": "z_mega_mob_size",
+      "group": "common",
+      "label": "Panic event horde size",
+      "source": "cvar",
+      "vanilla": "50",
+      "note": "Set by l4dready when the round goes live."
+    },
+    {
+      "id": "z_mob_spawn_min_size",
+      "group": "common",
+      "label": "Horde size (min)",
+      "source": "cvar",
+      "vanilla": "10"
+    },
+    {
+      "id": "z_mob_spawn_max_size",
+      "group": "common",
+      "label": "Horde size (max)",
+      "source": "cvar",
+      "vanilla": "30"
+    },
+    {
+      "id": "z_mob_spawn_min_interval_normal",
+      "group": "common",
+      "label": "Time between hordes (min)",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "90"
+    },
+    {
+      "id": "z_mob_spawn_max_interval_normal",
+      "group": "common",
+      "label": "Time between hordes (max)",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "180"
+    },
+    {
+      "id": "l4d_antibaiter_delay",
+      "group": "common",
+      "label": "Anti-bait: stall time before a horde",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "l4d_antibaiter_horde_timer",
+      "group": "common",
+      "label": "Anti-bait horde timer",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "l4d_antibaiter_progress",
+      "group": "common",
+      "label": "Anti-bait: progress that counts as moving",
+      "source": "cvar"
+    },
+    {
+      "id": "z_brawl_chance",
+      "group": "common",
+      "label": "Commons fighting each other",
+      "source": "cvar",
+      "vanilla": "2"
+    },
+    {
+      "id": "z_must_wander",
+      "group": "common",
+      "label": "Commons always wander",
+      "source": "cvar",
+      "vanilla": "0"
+    },
+    {
+      "id": "car_alarm_distance",
+      "group": "common",
+      "label": "Car alarm trigger distance",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "750"
+    },
+    {
+      "id": "z_tank_health",
+      "group": "tank",
+      "label": "Tank health",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "4000",
+      "note": "Versus multiplies this by the tank health multiplier below."
+    },
+    {
+      "id": "versus_tank_bonus_health",
+      "group": "tank",
+      "label": "Tank versus health multiplier",
+      "source": "cvar",
+      "unit": "x",
+      "vanilla": "1.5"
+    },
+    {
+      "id": "z_tank_speed_vs",
+      "group": "tank",
+      "label": "Tank speed (versus)",
+      "source": "cvar",
+      "vanilla": "210"
+    },
+    {
+      "id": "z_tank_burning_lifetime",
+      "group": "tank",
+      "label": "Tank burn time",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "75"
+    },
+    {
+      "id": "l4d_tank_burn_cap",
+      "group": "tank",
+      "label": "Tank burn damage cap",
+      "source": "cvar"
+    },
+    {
+      "id": "z_frustration_spawn_delay",
+      "group": "tank",
+      "label": "Frustration: grace after spawning",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "10"
+    },
+    {
+      "id": "z_frustration_los_delay",
+      "group": "tank",
+      "label": "Frustration: time without sight",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "2"
+    },
+    {
+      "id": "tank_ground_pound_duration",
+      "group": "tank",
+      "label": "Punch recovery time",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "1.5"
+    },
+    {
+      "id": "tank_control_disable",
+      "group": "tank",
+      "label": "Random tank pick",
+      "source": "cvar",
+      "vanilla": "0"
+    },
+    {
+      "id": "z_tank_damage_slow_min_range",
+      "group": "tank",
+      "label": "Tank slowed by damage within (min)",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "200"
+    },
+    {
+      "id": "z_tank_damage_slow_max_range",
+      "group": "tank",
+      "label": "Tank slowed by damage within (max)",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "400"
+    },
+    {
+      "id": "z_witch_health",
+      "group": "witch",
+      "label": "Witch health",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "1000"
+    },
+    {
+      "id": "z_witch_speed",
+      "group": "witch",
+      "label": "Witch speed",
+      "source": "cvar",
+      "vanilla": "300"
+    },
+    {
+      "id": "z_witch_anger_rate",
+      "group": "witch",
+      "label": "Witch anger rate",
+      "source": "cvar",
+      "vanilla": "0.2"
+    },
+    {
+      "id": "z_witch_personal_space",
+      "group": "witch",
+      "label": "Witch personal space",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "100"
+    },
+    {
+      "id": "z_witch_flashlight_range",
+      "group": "witch",
+      "label": "Witch flashlight range",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "400"
+    },
+    {
+      "id": "z_witch_damage_per_kill_hit",
+      "group": "witch",
+      "label": "Witch damage per hit",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "30"
+    },
+    {
+      "id": "l4d_witch_unstuck_mode",
+      "group": "witch",
+      "label": "Witch unstuck mode",
+      "source": "cvar"
+    },
+    {
+      "id": "z_pounce_damage",
+      "group": "hunter",
+      "label": "Pounce damage",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "5"
+    },
+    {
+      "id": "z_pounce_damage_interval",
+      "group": "hunter",
+      "label": "Pounce damage interval",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "0.5"
+    },
+    {
+      "id": "z_pounce_damage_interrupt",
+      "group": "hunter",
+      "label": "Damage to interrupt a pounce (skeet)",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "50"
+    },
+    {
+      "id": "pounceuncap_maxdamage",
+      "group": "hunter",
+      "label": "Maximum pounce damage",
+      "source": "cvar",
+      "unit": "HP"
+    },
+    {
+      "id": "z_hunter_max_pounce_bonus_damage",
+      "group": "hunter",
+      "label": "Maximum pounce bonus damage",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "24",
+      "note": "Derived by pounce_maxdamage."
+    },
+    {
+      "id": "z_pounce_stumble_radius",
+      "group": "hunter",
+      "label": "Pounce stumble radius",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "0"
+    },
+    {
+      "id": "hunter_pz_claw_dmg",
+      "group": "hunter",
+      "label": "Hunter scratch damage",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "6"
+    },
+    {
+      "id": "versus_shove_hunter_fov",
+      "group": "hunter",
+      "label": "Shove angle vs hunter",
+      "source": "cvar",
+      "unit": "deg",
+      "vanilla": "90"
+    },
+    {
+      "id": "versus_shove_hunter_fov_pouncing",
+      "group": "hunter",
+      "label": "Shove angle vs pouncing hunter",
+      "source": "cvar",
+      "unit": "deg",
+      "vanilla": "45"
+    },
+    {
+      "id": "z_hunter_lunge_stagger_time",
+      "group": "hunter",
+      "label": "Lunge stagger time",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "1"
+    },
+    {
+      "id": "z_pounce_door_damage",
+      "group": "hunter",
+      "label": "Pounce damage to doors",
+      "source": "cvar",
+      "vanilla": "500"
+    },
+    {
+      "id": "stop_wallkicking_enable",
+      "group": "hunter",
+      "label": "Wallkicks blocked",
+      "source": "cvar"
+    },
+    {
+      "id": "l4d_skypounce_enable",
+      "group": "hunter",
+      "label": "Sky pounce fix on",
+      "source": "cvar"
+    },
+    {
+      "id": "l4d_skypounce_mode",
+      "group": "hunter",
+      "label": "Sky pounce fix mode",
+      "source": "cvar"
+    },
+    {
+      "id": "tongue_hit_delay",
+      "group": "smoker",
+      "label": "Tongue cooldown",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "20"
+    },
+    {
+      "id": "tongue_break_from_damage_amount",
+      "group": "smoker",
+      "label": "Damage to break a tongue",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "50"
+    },
+    {
+      "id": "tongue_choke_damage_amount",
+      "group": "smoker",
+      "label": "Choke damage",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "10"
+    },
+    {
+      "id": "tongue_choke_damage_interval",
+      "group": "smoker",
+      "label": "Choke damage interval",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "1"
+    },
+    {
+      "id": "tongue_drag_damage_amount",
+      "group": "smoker",
+      "label": "Drag damage",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "3",
+      "note": "Applied by l4d_smoker_drag_damage_interval, so the game setting reads 0.",
+      "hideLive": true
+    },
+    {
+      "id": "tongue_drag_first_damage",
+      "group": "smoker",
+      "label": "First drag damage",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "3.0"
+    },
+    {
+      "id": "tongue_drag_first_damage_interval",
+      "group": "smoker",
+      "label": "First drag damage delay",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "1.0"
+    },
+    {
+      "id": "tongue_drag_damage_interval",
+      "group": "smoker",
+      "label": "Drag damage interval",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "1.0"
+    },
+    {
+      "id": "tongue_release_fatigue_penalty",
+      "group": "smoker",
+      "label": "Shove fatigue after a tongue release",
+      "source": "cvar",
+      "vanilla": "2500"
+    },
+    {
+      "id": "z_versus_smoker_limit",
+      "group": "smoker",
+      "label": "Smokers per team",
+      "source": "cvar",
+      "vanilla": "1"
+    },
+    {
+      "id": "z_vomit_interval",
+      "group": "boomer",
+      "label": "Vomit cooldown",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "30"
+    },
+    {
+      "id": "z_vomit_range",
+      "group": "boomer",
+      "label": "Vomit range",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "300"
+    },
+    {
+      "id": "z_exploding_shove_min",
+      "group": "boomer",
+      "label": "Shoves to pop a boomer (min)",
+      "source": "cvar",
+      "vanilla": "4"
+    },
+    {
+      "id": "z_exploding_shove_max",
+      "group": "boomer",
+      "label": "Shoves to pop a boomer (max)",
+      "source": "cvar",
+      "vanilla": "5"
+    },
+    {
+      "id": "z_versus_boomer_limit",
+      "group": "boomer",
+      "label": "Boomers per team",
+      "source": "cvar",
+      "vanilla": "1"
+    },
+    {
+      "id": "z_max_player_zombies",
+      "group": "si",
+      "label": "Infected players",
+      "source": "cvar",
+      "vanilla": "4"
+    },
+    {
+      "id": "z_ghost_delay_min",
+      "group": "si",
+      "label": "Spawn timer (min)",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "20"
+    },
+    {
+      "id": "z_ghost_delay_max",
+      "group": "si",
+      "label": "Spawn timer (max)",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "30"
+    },
+    {
+      "id": "z_ghost_delay_minspawn",
+      "group": "si",
+      "label": "Minimum ghost spawn delay",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "3"
+    },
+    {
+      "id": "z_respawn_interval",
+      "group": "si",
+      "label": "Respawn interval",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "10"
+    },
+    {
+      "id": "z_max_stagger_duration",
+      "group": "si",
+      "label": "Maximum stagger time",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "6"
+    },
+    {
+      "id": "z_door_pound_damage",
+      "group": "si",
+      "label": "Door damage per hit",
+      "source": "cvar",
+      "vanilla": "60"
+    },
+    {
+      "id": "sm_3ht1s_percent_chance",
+      "group": "si",
+      "label": "Quad cap chance",
+      "source": "cvar",
+      "unit": "%"
+    },
+    {
+      "id": "rotoblin_health_style",
+      "group": "items",
+      "label": "Health item style",
+      "source": "cvar"
+    },
+    {
+      "id": "rotoblin_weapon_style",
+      "group": "items",
+      "label": "Weapon style",
+      "source": "cvar"
+    },
+    {
+      "id": "rotoblin_enable_throwables",
+      "group": "items",
+      "label": "Throwables on",
+      "source": "cvar"
+    },
+    {
+      "id": "rotoblin_enable_cannisters",
+      "group": "items",
+      "label": "Gas cans and propane on",
+      "source": "cvar"
+    },
+    {
+      "id": "rotoblin_limit_pumpshotgun",
+      "group": "items",
+      "label": "Pump shotgun limit",
+      "source": "cvar",
+      "note": "-1 means no limit."
+    },
+    {
+      "id": "rotoblin_limit_autoshotgun",
+      "group": "items",
+      "label": "Auto shotgun limit",
+      "source": "cvar"
+    },
+    {
+      "id": "rotoblin_limit_smg",
+      "group": "items",
+      "label": "Uzi limit",
+      "source": "cvar"
+    },
+    {
+      "id": "rotoblin_limit_rifle",
+      "group": "items",
+      "label": "Rifle limit",
+      "source": "cvar"
+    },
+    {
+      "id": "rotoblin_limit_huntingrifle",
+      "group": "items",
+      "label": "Hunting rifle limit",
+      "source": "cvar"
+    },
+    {
+      "id": "director_pain_pill_density",
+      "group": "items",
+      "label": "Pill density",
+      "source": "cvar",
+      "vanilla": "6.48"
+    },
+    {
+      "id": "director_convert_pills",
+      "group": "items",
+      "label": "Kits converted to pills",
+      "source": "cvar",
+      "vanilla": "1"
+    },
+    {
+      "id": "director_vs_convert_pills",
+      "group": "items",
+      "label": "Kits converted to pills (versus)",
+      "source": "cvar",
+      "vanilla": "0.5"
+    },
+    {
+      "id": "director_pistol_density",
+      "group": "items",
+      "label": "Pistol density",
+      "source": "cvar",
+      "vanilla": "4"
+    },
+    {
+      "id": "l4d_remove_pipebombs",
+      "group": "items",
+      "label": "Pipe bombs removed",
+      "source": "cvar"
+    },
+    {
+      "id": "versus_tank_chance",
+      "group": "director",
+      "label": "Tank chance",
+      "source": "cvar",
+      "vanilla": "0.75"
+    },
+    {
+      "id": "versus_witch_chance",
+      "group": "director",
+      "label": "Witch chance",
+      "source": "cvar",
+      "vanilla": "0.75"
+    },
+    {
+      "id": "versus_boss_flow_min",
+      "group": "director",
+      "label": "Boss spawn flow (min)",
+      "source": "cvar",
+      "vanilla": "0.1"
+    },
+    {
+      "id": "versus_boss_flow_max",
+      "group": "director",
+      "label": "Boss spawn flow (max)",
+      "source": "cvar",
+      "vanilla": "0.9"
+    },
+    {
+      "id": "versus_boss_spawning",
+      "group": "director",
+      "label": "Bosses spawn in versus",
+      "source": "cvar",
+      "vanilla": "1"
+    },
+    {
+      "id": "vs_score_pp_health",
+      "group": "scoring",
+      "label": "Score per point of health",
+      "source": "cvar",
+      "vanilla": "0.5"
+    },
+    {
+      "id": "vs_score_pp_healthbuffer",
+      "group": "scoring",
+      "label": "Score per point of temporary health",
+      "source": "cvar",
+      "vanilla": "0.25"
+    },
+    {
+      "id": "l4d_saferoom_lock",
+      "group": "map",
+      "label": "Saferoom lock on",
+      "source": "cvar"
+    },
+    {
+      "id": "weapon_smg.Damage",
+      "group": "weapons",
+      "label": "Uzi damage",
+      "source": "weapon",
+      "vanilla": "20"
+    },
+    {
+      "id": "weapon_smg.SpreadPerShot",
+      "group": "weapons",
+      "label": "Uzi spread per shot",
+      "source": "weapon",
+      "vanilla": "0.32"
+    },
+    {
+      "id": "weapon_smg.MaxMovementSpread",
+      "group": "weapons",
+      "label": "Uzi spread while moving",
+      "source": "weapon",
+      "vanilla": "3.0"
+    },
+    {
+      "id": "weapon_smg.RangeModifier",
+      "group": "weapons",
+      "label": "Uzi range falloff",
+      "source": "weapon",
+      "vanilla": "0.84"
+    }
+  ],
+  "rules": [
+    {
+      "id": "quadcaps",
+      "group": "si",
+      "text": "Quad caps: after a boomer dies, the next wave can be all hunters (see the chance above); boomer and smoker limits drop to 0 for it.",
+      "when": {
+        "plugin": "l4d_QuadCaps.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "pounce_max",
+      "group": "hunter",
+      "text": "Long pounces deal up to the maximum pounce damage above.",
+      "when": {
+        "plugin": "pounce_maxdamage.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "no_deadstops",
+      "group": "hunter",
+      "text": "Hunters cannot be deadstopped (shoved out of the air) mid-pounce.",
+      "when": {
+        "plugin": "l4d_no_hunter_deadstops.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "skypounce",
+      "group": "hunter",
+      "text": "Sky pounce fix: pounces from high ledges count their damage correctly.",
+      "when": {
+        "plugin": "l4d_skypounce.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "godframes",
+      "group": "survivors",
+      "text": "Survivors get short invulnerability after being freed from a special infected, and hittable damage is controlled.",
+      "when": {
+        "plugin": "l4d_godframes_and_hittable_control.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "tongue_timer",
+      "group": "smoker",
+      "text": "Tongue cooldown is shorter when the tongue is cleared: 8 s after a tank clears it, 4 s after a survivor does.",
+      "when": {
+        "plugin": "l4d_tongue_timer.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "drag_interval",
+      "group": "smoker",
+      "text": "Drag damage is applied by a plugin at its own interval.",
+      "when": {
+        "plugin": "l4d_smoker_drag_damage_interval.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "huntingrifle_nerf",
+      "group": "weapons",
+      "text": "Hunting rifle: slower fire rate and switch time.",
+      "when": {
+        "plugin": "l4d_versus_nerf_huntingrifle.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "slowdown",
+      "group": "survivors",
+      "text": "Water slows survivors (170, or 220 while a tank is up); gunfire does not slow special infected.",
+      "when": {
+        "plugin": "l4d_slowdown_control.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "antibaiter",
+      "group": "common",
+      "text": "Anti-bait: stalling in place for too long calls a horde.",
+      "when": {
+        "plugin": "l4d_antibaiter.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "tankrage",
+      "group": "tank",
+      "text": "Tank rage: the tank's frustration is frozen for a few seconds after it attacks.",
+      "when": {
+        "plugin": "l4d2_tankrage.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "rock_lagcomp",
+      "group": "tank",
+      "text": "Tank rocks can be shot out of the air, with lag compensation.",
+      "when": {
+        "plugin": "l4d_rock_lagcomp.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "no_escape_tank",
+      "group": "director",
+      "text": "No tank on the escape (rescue) run.",
+      "when": {
+        "plugin": "l4d_NoEscapeTank.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "no_rescue_first_tank",
+      "group": "director",
+      "text": "No first finale tank.",
+      "when": {
+        "plugin": "l4d_NoRescueFirstTank.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "bash_kills",
+      "group": "si",
+      "text": "Shoves do not kill hunters or smokers outright.",
+      "when": {
+        "plugin": "l4d_bash_kills.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "si_ffblock",
+      "group": "si",
+      "text": "Special infected cannot hurt each other.",
+      "when": {
+        "plugin": "l4d2_si_ffblock.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "nobhaps",
+      "group": "survivors",
+      "text": "Bunny hopping is blocked.",
+      "when": {
+        "plugin": "l4d_nobhaps.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "pistol_delay",
+      "group": "weapons",
+      "text": "Pistols have a minimum delay between shots (0.175 s, 0.1 s dual).",
+      "when": {
+        "plugin": "l4d2_pistol_delay.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "saferoom_lock",
+      "group": "map",
+      "text": "The end saferoom door stays locked while a tank or witch is alive.",
+      "when": {
+        "plugin": "l4d_saferoom_lock.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "tank_burn_cap",
+      "group": "tank",
+      "text": "Fire damage to the tank is capped.",
+      "when": {
+        "plugin": "l4d_tank_burn_cap.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "remove_pipebombs",
+      "group": "items",
+      "text": "Pipe bombs are removed from the map.",
+      "when": {
+        "cvar": "l4d_remove_pipebombs",
+        "equals": "1"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "witch_unstuck",
+      "group": "witch",
+      "text": "A witch stuck on geometry is moved free.",
+      "when": {
+        "plugin": "l4d_witch_unstuck.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "tank_stumble_door",
+      "group": "tank",
+      "text": "A tank punch or rock stumbles survivors behind doors.",
+      "when": {
+        "plugin": "l4d_tank_stumble_door.smx"
+      },
+      "reviewed": false
+    }
+  ]
+}

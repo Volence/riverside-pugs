@@ -1,0 +1,122 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+import { openDb } from '../src/db.js';
+import { addServer } from '../src/serverPool.js';
+import { loadCatalogue, watchKnobs, type Catalogue } from '../src/balanceCatalogue.js';
+import { gameValues } from '../src/balanceValues.js';
+import { renderWatchFile } from '../src/balanceWatch.js';
+import { KNOBS, sight } from './balanceFixtures.js';
+
+const CAT: Catalogue = {
+  groups: [{ id: 'tank', label: 'Tank' }, { id: 'hunter', label: 'Hunter' }, { id: 'weapons', label: 'Weapon stats' }],
+  values: [
+    { id: 'z_tank_health', group: 'tank', label: 'Tank health', source: 'cvar', unit: 'HP', vanilla: '4000' },
+    { id: 'z_new_thing', group: 'tank', label: 'New thing', source: 'cvar' },
+    { id: 'tongue_drag_damage_amount', group: 'hunter', label: 'Drag', source: 'cvar', note: 'plugin', hideLive: true },
+    { id: 'weapon_smg.Damage', group: 'weapons', label: 'Uzi damage', source: 'weapon', vanilla: '20' },
+    { id: 'weapon_smg.SpreadPerShot', group: 'weapons', label: 'Uzi spread', source: 'weapon', vanilla: '0.32' },
+  ],
+  rules: [
+    { id: 'sky', group: 'hunter', text: 'Sky pounce fix.', when: { plugin: 'l4d_skypounce.smx' }, reviewed: true },
+    { id: 'draft', group: 'hunter', text: 'Draft rule.', when: { plugin: 'l4d_skypounce.smx' }, reviewed: false },
+    { id: 'off', group: 'tank', text: 'Not loaded.', when: { plugin: 'nope.smx' }, reviewed: true },
+    { id: 'cv', group: 'tank', text: 'Cvar rule.', when: { cvar: 'z_tank_health', equals: '8000' }, reviewed: true },
+  ],
+};
+
+describe('loadCatalogue', () => {
+  it('loads the real catalogue', () => {
+    const c = loadCatalogue();
+    expect(c.values.length).toBeGreaterThan(100);
+    expect(c.rules.every((r) => r.reviewed === false)).toBe(true);
+  });
+  it('refuses bad entries', () => {
+    const bad = (patch: Partial<Catalogue>) => () => loadCatalogue('', { ...CAT, ...patch });
+    expect(bad({ values: [...CAT.values, CAT.values[0]] })).toThrow(/duplicate/);
+    expect(bad({ values: [{ id: 'x', group: 'nope', label: 'X', source: 'cvar' }] })).toThrow(/unknown group/);
+    expect(bad({ values: [{ id: 'weapon_smg', group: 'weapons', label: 'X', source: 'weapon' }] })).toThrow(/bad weapon/);
+    expect(bad({ rules: [{ id: 'r', group: 'tank', text: 't', when: { cvar: 'x' } as never, reviewed: true }] })).toThrow(/when/);
+  });
+});
+
+describe('watchKnobs', () => {
+  it('adds catalogue cvars (deduplicated) and weapon keys to the watch file', () => {
+    const text = renderWatchFile(watchKnobs(KNOBS, CAT));
+    const cvars = text.split('\n').filter((l) => l.startsWith('cvar '));
+    expect(cvars.filter((l) => l === 'cvar z_tank_health')).toHaveLength(1);
+    expect(cvars).toContain('cvar z_new_thing');
+    expect(text).toContain('weapon weapon_smg Damage\n');
+  });
+});
+
+describe('gameValues', () => {
+  let db: ReturnType<typeof openDb>;
+  let s1: number;
+  const INV = (tank: string, extra: Record<string, string> = {}) => ({
+    'c:z_tank_health': tank, 'c:tongue_drag_damage_amount': '0', 'p:l4d_skypounce.smx': '1.a',
+    'w:weapon_smg.Damage': 'default', 'w:weapon_smg.SpreadPerShot': '0.22', ...extra,
+  });
+  beforeEach(() => {
+    db = openDb(':memory:');
+    db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
+    s1 = addServer(db, { name: 'dallas', host: '10.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    const a = sight(db, 1, s1, INV('7000'), 'queue', '2026-09-20 00:00:00');
+    db.prepare("UPDATE balance_patches SET triage = 'balance', name = 'Base', published_at = '2026-09-20' WHERE id = ?").run(a.patchId);
+    const b = sight(db, 2, s1, INV('8000'), 'queue', '2026-09-22 00:00:00');
+    db.prepare("UPDATE balance_patches SET triage = 'balance', name = 'Tank 8000' WHERE id = ?").run(b.patchId);
+  });
+
+  it('reports current values, vanilla, hidden, not reported, and weapon defaults', () => {
+    const g = gameValues(db, CAT, { admin: false });
+    const tank = g.groups.find((x) => x.id === 'tank')!;
+    expect(tank.values[0]).toMatchObject({ id: 'z_tank_health', value: '8000', vanilla: '4000', differsFromVanilla: true, status: 'reported' });
+    expect(tank.values[1]).toMatchObject({ id: 'z_new_thing', value: null, status: 'not_reported' });
+    const hunter = g.groups.find((x) => x.id === 'hunter')!;
+    expect(hunter.values[0]).toMatchObject({ status: 'hidden', value: null, note: 'plugin' });
+    const w = g.groups.find((x) => x.id === 'weapons')!;
+    expect(w.values[0]).toMatchObject({ value: '20', differsFromVanilla: false });
+    expect(w.values[1]).toMatchObject({ value: '0.22', differsFromVanilla: true });
+  });
+
+  it('dates the last change and names it only when published (public)', () => {
+    const pub = gameValues(db, CAT, { admin: false }).groups[0].values[0];
+    expect(pub.lastChange).toEqual({ at: '2026-09-22 00:00:00', patch: null });
+    const adm = gameValues(db, CAT, { admin: true }).groups[0].values[0];
+    expect(adm.lastChange).toMatchObject({ patch: { name: 'Tank 8000' } });
+    db.prepare("UPDATE balance_patches SET published_at = 'x' WHERE name = 'Tank 8000'").run();
+    expect(gameValues(db, CAT, { admin: false }).groups[0].values[0].lastChange!.patch).toMatchObject({ name: 'Tank 8000', number: 2 });
+    expect(gameValues(db, CAT, { admin: false }).groups[2].values[1].lastChange).toBeNull();
+  });
+
+  it('shows reviewed active rules publicly; every rule, tagged, for admins', () => {
+    const pub = gameValues(db, CAT, { admin: false });
+    expect(pub.groups.find((x) => x.id === 'hunter')!.rules.map((r) => r.id)).toEqual(['sky']);
+    expect(pub.groups.find((x) => x.id === 'tank')!.rules.map((r) => r.id)).toEqual(['cv']);
+    const adm = gameValues(db, CAT, { admin: true });
+    expect(adm.groups.find((x) => x.id === 'hunter')!.rules).toEqual([
+      { id: 'sky', text: 'Sky pounce fix.', active: true, draft: false },
+      { id: 'draft', text: 'Draft rule.', active: true, draft: true },
+    ]);
+    expect(adm.groups.find((x) => x.id === 'tank')!.rules.find((r) => r.id === 'off')).toMatchObject({ active: false });
+  });
+});
+
+describe('values routes', () => {
+  it('public and admin shapes', async () => {
+    const { buildServer } = await import('../src/server.js');
+    const { loadConfig } = await import('../src/config.js');
+    const { authedCookie, stubOrchestrator } = await import('./helpers.js');
+    const db = openDb(':memory:');
+    const a = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {} });
+    const pub = await a.inject({ method: 'GET', url: '/api/balance/values' });
+    expect(pub.statusCode).toBe(200);
+    const body = pub.json() as { asOf: null; groups: { id: string; rules: unknown[] }[] };
+    expect(body.asOf).toBeNull();
+    expect(body.groups.find((g) => g.id === 'tank')).toBeTruthy();
+    expect(body.groups.every((g) => g.rules.length === 0)).toBe(true); // every rule is a draft
+    expect((await a.inject({ method: 'GET', url: '/api/admin/balance/values' })).statusCode).toBe(401);
+    const cookies = await authedCookie(a, db, '76561198000000009');
+    db.prepare("UPDATE players SET is_admin = 1 WHERE steamid = '76561198000000009'").run();
+    const adm = (await a.inject({ method: 'GET', url: '/api/admin/balance/values', cookies })).json() as { groups: { rules: { draft: boolean }[] }[] };
+    expect(adm.groups.flatMap((g) => g.rules).length).toBeGreaterThan(20);
+  });
+});
