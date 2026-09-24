@@ -35,7 +35,6 @@ import { applyLeaveState, isRostered } from '../presence.js';
 import { LEAVE_ACTIONS, LEAVE_ADD_MAX_S, leaveCommand, parseLeaveReply, type LeaveAction, type ServerQuery } from '../leaveControl.js';
 import { buildLiveBoard, type VoiceLookup } from '../admin/liveBoard.js';
 import { redactSecrets } from '../redact.js';
-import { editPatch, listPatches, patchDetail, serverDrift } from '../balancePatches.js';
 import { compareSides, metricDetail } from '../metrics/compare/compare.js';
 import { memo, parseSideParams } from '../metrics/compare/cache.js';
 import { METRICS } from '../metrics/registry.js';
@@ -759,23 +758,6 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     return { actions: recentActions(db, adminId) };
   });
 
-  // Balance patches (balance analytics piece 1).
-  app.get('/api/admin/balance/patches', async (req, reply) => {
-    if (!requireAdmin(req, reply)) return reply;
-    return { patches: listPatches(db) };
-  });
-
-  app.get('/api/admin/balance/patches/:id', async (req, reply) => {
-    if (!requireAdmin(req, reply)) return reply;
-    const d = patchDetail(db, Number((req.params as { id: string }).id));
-    return d ?? reply.code(404).send({ error: 'no such patch' });
-  });
-
-  app.get('/api/admin/balance/drift', async (req, reply) => {
-    if (!requireAdmin(req, reply)) return reply;
-    return { servers: serverDrift(db) };
-  });
-
   app.get('/api/admin/balance/compare', async (req, reply) => {
     if (!requireAdmin(req, reply)) return reply;
     const q = req.query as Record<string, unknown>;
@@ -800,30 +782,5 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const phase = q.phase as Phase;
     if (!(['all', ...SUB_PHASES] as string[]).includes(String(phase))) return reply.code(400).send({ error: 'unknown phase' });
     return memo(db, `metric|${metric}|${phase}|${JSON.stringify(sides)}`, () => metricDetail(db, metric, phase, sides.a, sides.b));
-  });
-
-  app.post('/api/admin/balance/patches/:id', async (req, reply) => {
-    const adminId = requireAdmin(req, reply);
-    if (!adminId) return reply;
-    const id = Number((req.params as { id: string }).id);
-    const b = (req.body ?? {}) as { name?: unknown; notes?: unknown; reviewed?: unknown };
-    const edit: { name?: string | null; notes?: string; reviewed?: boolean } = {};
-    if (b.name !== undefined) {
-      if (b.name !== null && (typeof b.name !== 'string' || b.name.trim().length > 60)) {
-        return reply.code(400).send({ error: 'a patch name is up to 60 characters' });
-      }
-      edit.name = b.name === null || b.name.trim() === '' ? null : b.name.trim();
-    }
-    if (b.notes !== undefined) {
-      if (typeof b.notes !== 'string' || b.notes.length > 2000) return reply.code(400).send({ error: 'notes are up to 2000 characters' });
-      edit.notes = b.notes;
-    }
-    if (b.reviewed !== undefined) {
-      if (typeof b.reviewed !== 'boolean') return reply.code(400).send({ error: 'reviewed is true or false' });
-      edit.reviewed = b.reviewed;
-    }
-    if (!editPatch(db, id, edit)) return reply.code(404).send({ error: 'no such patch' });
-    logAdmin(db, adminId, 'edit_patch', id, edit);
-    return { ok: true };
   });
 }
