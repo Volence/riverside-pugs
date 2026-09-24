@@ -215,22 +215,5 @@ function finish(name: string, files: Map<string, Uint8Array>, dropped: string[])
   return { name, files, dropped: dropped.sort() };
 }
 
-/**
- * The HUD's identity: SHA-256 of its canonical file list, every path in
- * sorted order followed by its length and its bytes. The same HUD imported
- * twice, from a .vpk or a zip, is one id, so it is one stored entry, and a
- * design that names an id can never open against different files.
- */
-export async function hudId(files: ReadonlyMap<string, Uint8Array>): Promise<string> {
-  const enc = new TextEncoder();
-  const parts: Uint8Array[] = [];
-  for (const path of [...files.keys()].sort()) {
-    const data = files.get(path)!;
-    parts.push(enc.encode(`${path}\0${data.length}\0`), data);
-  }
-  const all = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let o = 0;
-  for (const p of parts) { all.set(p, o); o += p.length; }
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', all));
-  return [...digest].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
+// Shared with the server, which recomputes it for every community upload.
+export { hudId } from '../../../src/hudFiles';
