@@ -53,6 +53,7 @@ export function GameValuesView({ data, admin }: { data: GameValues; admin: boole
                   {r.text}
                   {admin && r.draft && <> <span class="admin-tag">draft rule</span></>}
                   {admin && !r.active && <> <span class="admin-tag">not active</span></>}
+                  {admin && (r.missing?.length ?? 0) > 0 && <> <span class="admin-tag">waiting for {r.missing!.join(', ')}</span></>}
                 </li>
               ))}
             </ul>

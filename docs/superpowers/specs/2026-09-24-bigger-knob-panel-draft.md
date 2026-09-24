@@ -44,7 +44,22 @@ gameplay and risk calls for the owner, so nothing here has been implemented.
    (the direction's "one history of everything sent to the servers"), each
    with its undo.
 
-## Questions for the owner (needed before a spec)
+## Owner answers (2026-09-24)
+
+- **Q6 (which values are knobs):** any catalogue value can be adjustable. The
+  site is the balance platform; only brand-new additions (new plugins, new
+  files) come in through the deploy repo. Each knob still needs a safe range.
+- **Q7 (plugin toggles):** every balance plugin that can be toggled, **plus
+  their own settings** as knobs.
+- **Q8 (how changes reach servers):** through the release pipeline, and the
+  change is **pushed to git**: an apply is not a quick tweak, it requires a
+  deploy. Implies the site commits knob and toggle changes to the deploy repo
+  (a write deploy key, or a bot account) and deploys that commit as a release,
+  so git stays the one record of what the servers run.
+- **Q9 (weapon file):** the site takes it over when weapon knobs exist; the
+  deploy repo drops it then.
+
+## Questions for the owner (the original list, answered above)
 
 1. Which values become knobs, and what are their safe ranges? (The current 14
    are a starting point; the catalogue has 108 values.)

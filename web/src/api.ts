@@ -910,7 +910,7 @@ export interface GameValueView {
 }
 export interface GameValues {
   asOf: { patchId: number; number: number } | null;
-  groups: { id: string; label: string; values: GameValueView[]; rules: { id: string; text: string; active: boolean; draft: boolean }[] }[];
+  groups: { id: string; label: string; values: GameValueView[]; rules: { id: string; text: string; active: boolean; draft: boolean; missing?: string[] }[] }[];
 }
 export interface IgnoredPlugin { file: string; reason: string; addedBy: string | null; addedAt: string | null; source: 'site' | 'knobs' }
 export type TriageBody = { decision: 'balance'; name: string; notes: string } | { decision: 'fold'; into: number }

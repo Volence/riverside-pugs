@@ -278,16 +278,18 @@
     {
       "id": "z_tank_burning_lifetime",
       "group": "tank",
-      "label": "Tank burn time",
+      "label": "Time for fire to kill a tank",
       "source": "cvar",
       "unit": "s",
-      "vanilla": "75"
+      "vanilla": "75",
+      "note": "A lit tank burns to death in this time whatever its health, unless a burn cap is on."
     },
     {
       "id": "l4d_tank_burn_cap",
       "group": "tank",
       "label": "Tank burn damage cap",
-      "source": "cvar"
+      "source": "cvar",
+      "note": "0 means off: fire burns the tank to death."
     },
     {
       "id": "z_frustration_spawn_delay",
@@ -415,7 +417,7 @@
     {
       "id": "pounceuncap_maxdamage",
       "group": "hunter",
-      "label": "Maximum pounce damage",
+      "label": "Maximum DP (damage pounce) damage",
       "source": "cvar",
       "unit": "HP"
     },
@@ -532,7 +534,7 @@
       "source": "cvar",
       "unit": "HP",
       "vanilla": "3",
-      "note": "Applied by l4d_smoker_drag_damage_interval, so the game setting reads 0.",
+      "note": "Applied by l4d_smoker_drag_damage_interval, 1 HP per tick in our config; the game setting reads 0 because the plugin takes it over.",
       "hideLive": true
     },
     {
@@ -667,9 +669,10 @@
     {
       "id": "sm_3ht1s_percent_chance",
       "group": "si",
-      "label": "Quad cap chance",
+      "label": "Chance the wave after a last boomer is 3 hunters + 1 smoker",
       "source": "cvar",
-      "unit": "%"
+      "unit": "%",
+      "note": "%"
     },
     {
       "id": "rotoblin_health_style",
@@ -842,22 +845,757 @@
       "label": "Uzi range falloff",
       "source": "weapon",
       "vanilla": "0.84"
+    },
+    {
+      "id": "z_exploding_health",
+      "group": "boomer",
+      "label": "Boomer health",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "50"
+    },
+    {
+      "id": "z_exploding_speed",
+      "group": "boomer",
+      "label": "Boomer speed",
+      "source": "cvar",
+      "vanilla": "175"
+    },
+    {
+      "id": "z_vomit_duration",
+      "group": "boomer",
+      "label": "Vomit duration",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "1.5"
+    },
+    {
+      "id": "z_vomit_velocity",
+      "group": "boomer",
+      "label": "Vomit speed",
+      "source": "cvar",
+      "vanilla": "1700.0"
+    },
+    {
+      "id": "z_vomit_fatigue",
+      "group": "boomer",
+      "label": "Vomit fatigue",
+      "source": "cvar",
+      "vanilla": "3000"
+    },
+    {
+      "id": "z_exploding_splat_radius",
+      "group": "boomer",
+      "label": "Explosion bile radius",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "200"
+    },
+    {
+      "id": "z_exploding_force",
+      "group": "boomer",
+      "label": "Explosion force",
+      "source": "cvar",
+      "vanilla": "5000"
+    },
+    {
+      "id": "z_exploding_inner_radius",
+      "group": "boomer",
+      "label": "Explosion inner radius",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "130"
+    },
+    {
+      "id": "z_exploding_outer_radius",
+      "group": "boomer",
+      "label": "Explosion outer radius",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "200"
+    },
+    {
+      "id": "boomer_pz_claw_dmg",
+      "group": "boomer",
+      "label": "Boomer scratch damage",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "4"
+    },
+    {
+      "id": "z_hunter_health",
+      "group": "hunter",
+      "label": "Hunter health",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "250"
+    },
+    {
+      "id": "z_hunter_speed",
+      "group": "hunter",
+      "label": "Hunter speed",
+      "source": "cvar",
+      "vanilla": "300"
+    },
+    {
+      "id": "z_lunge_power",
+      "group": "hunter",
+      "label": "Pounce power",
+      "source": "cvar",
+      "vanilla": "600"
+    },
+    {
+      "id": "z_lunge_up",
+      "group": "hunter",
+      "label": "Pounce lift",
+      "source": "cvar",
+      "vanilla": "200"
+    },
+    {
+      "id": "z_pounce_damage_range_min",
+      "group": "hunter",
+      "label": "DP: distance where extra damage starts",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "500"
+    },
+    {
+      "id": "z_pounce_damage_range_max",
+      "group": "hunter",
+      "label": "DP: distance for full damage",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "1000"
+    },
+    {
+      "id": "z_gas_health",
+      "group": "smoker",
+      "label": "Smoker health",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "250"
+    },
+    {
+      "id": "z_gas_speed",
+      "group": "smoker",
+      "label": "Smoker speed",
+      "source": "cvar",
+      "vanilla": "210"
+    },
+    {
+      "id": "tongue_range",
+      "group": "smoker",
+      "label": "Tongue range",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "750"
+    },
+    {
+      "id": "tongue_miss_delay",
+      "group": "smoker",
+      "label": "Cooldown after a missed tongue",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "15"
+    },
+    {
+      "id": "tongue_fly_speed",
+      "group": "smoker",
+      "label": "Tongue speed",
+      "source": "cvar",
+      "vanilla": "1000"
+    },
+    {
+      "id": "tongue_vertical_choke_height",
+      "group": "smoker",
+      "label": "Height at which a pull turns into a choke",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "40"
+    },
+    {
+      "id": "tongue_victim_max_speed",
+      "group": "smoker",
+      "label": "Drag speed",
+      "source": "cvar",
+      "vanilla": "175"
+    },
+    {
+      "id": "tongue_dropping_to_ground_time",
+      "group": "smoker",
+      "label": "Drop time after a tongue breaks",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "2"
+    },
+    {
+      "id": "smoker_pz_claw_dmg",
+      "group": "smoker",
+      "label": "Smoker scratch damage",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "4"
+    },
+    {
+      "id": "z_tank_attack_interval",
+      "group": "tank",
+      "label": "Time between punches",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "1.5"
+    },
+    {
+      "id": "vs_tank_damage",
+      "group": "tank",
+      "label": "Punch damage (versus)",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "24"
+    },
+    {
+      "id": "z_tank_throw_force",
+      "group": "tank",
+      "label": "Rock throw force",
+      "source": "cvar",
+      "vanilla": "800"
+    },
+    {
+      "id": "z_tank_rock_radius",
+      "group": "tank",
+      "label": "Rock hit radius",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "100"
+    },
+    {
+      "id": "z_tank_throw_interval",
+      "group": "tank",
+      "label": "Time between rock throws",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "5"
+    },
+    {
+      "id": "z_tank_incapacitated_health",
+      "group": "tank",
+      "label": "Tank health when survivors are all down",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "5000"
+    },
+    {
+      "id": "z_witch_burn_time",
+      "group": "witch",
+      "label": "Time for fire to kill a witch",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "15"
+    },
+    {
+      "id": "z_witch_berserk_range",
+      "group": "witch",
+      "label": "Witch startle range",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "200"
+    },
+    {
+      "id": "z_witch_attack_range",
+      "group": "witch",
+      "label": "Witch attack range",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "60"
+    },
+    {
+      "id": "z_witch_relax_rate",
+      "group": "witch",
+      "label": "Witch calm-down rate",
+      "source": "cvar",
+      "vanilla": "0.05"
+    },
+    {
+      "id": "z_health",
+      "group": "common",
+      "label": "Common infected health",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "50"
+    },
+    {
+      "id": "z_speed",
+      "group": "common",
+      "label": "Common infected speed",
+      "source": "cvar",
+      "vanilla": "250"
+    },
+    {
+      "id": "z_attack_flow_range",
+      "group": "common",
+      "label": "Commons attack within",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "1500"
+    },
+    {
+      "id": "first_aid_heal_percent",
+      "group": "survivors",
+      "label": "First aid heals",
+      "source": "cvar",
+      "unit": "fraction of missing health",
+      "vanilla": "0.8"
+    },
+    {
+      "id": "first_aid_kit_use_duration",
+      "group": "survivors",
+      "label": "First aid use time",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "5"
+    },
+    {
+      "id": "first_aid_kit_max_heal",
+      "group": "survivors",
+      "label": "First aid heals up to",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "100"
+    },
+    {
+      "id": "pain_pills_health_value",
+      "group": "survivors",
+      "label": "Pills give",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "50"
+    },
+    {
+      "id": "survivor_incap_health",
+      "group": "survivors",
+      "label": "Incapacitated health",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "300"
+    },
+    {
+      "id": "survivor_incap_decay_rate",
+      "group": "survivors",
+      "label": "Incapacitated health lost per second",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "3"
+    },
+    {
+      "id": "survivor_limp_health",
+      "group": "survivors",
+      "label": "Limp below",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "40"
+    },
+    {
+      "id": "survivor_friendly_fire_factor_normal",
+      "group": "survivors",
+      "label": "Friendly fire damage factor",
+      "source": "cvar",
+      "vanilla": "0.1"
+    },
+    {
+      "id": "survivor_crouch_speed",
+      "group": "survivors",
+      "label": "Crouch speed",
+      "source": "cvar",
+      "vanilla": "75"
+    },
+    {
+      "id": "survivor_burn_factor_normal",
+      "group": "survivors",
+      "label": "Fire damage factor",
+      "source": "cvar",
+      "vanilla": "0.2"
+    },
+    {
+      "id": "inferno_damage",
+      "group": "survivors",
+      "label": "Fire damage",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "40"
+    },
+    {
+      "id": "inferno_flame_lifetime",
+      "group": "survivors",
+      "label": "Fire duration",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "15"
+    },
+    {
+      "id": "z_ghost_travel_distance",
+      "group": "si",
+      "label": "Ghost travel distance",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "1000"
+    },
+    {
+      "id": "z_spawn_safety_range",
+      "group": "si",
+      "label": "Minimum spawn distance from survivors",
+      "source": "cvar",
+      "unit": "units",
+      "vanilla": "550"
+    },
+    {
+      "id": "z_ghost_speed",
+      "group": "si",
+      "label": "Ghost speed",
+      "source": "cvar",
+      "vanilla": "450"
+    },
+    {
+      "id": "tank_burn_duration_vs",
+      "group": "tank",
+      "label": "Tank burn duration (versus)",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "30"
+    },
+    {
+      "id": "pipe_bomb_timer_duration",
+      "group": "items",
+      "label": "Pipe bomb fuse",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "6"
+    },
+    {
+      "id": "gfc_hunter_duration",
+      "group": "survivors",
+      "label": "Godframes after a pounce ends",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "gfc_smoker_duration",
+      "group": "survivors",
+      "label": "Godframes after a smoker lets go",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "gfc_revive_duration",
+      "group": "survivors",
+      "label": "Godframes after a revive",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "gfc_common_extra_time",
+      "group": "survivors",
+      "label": "Extra time before commons can hurt",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "gfc_ff_extra_time",
+      "group": "survivors",
+      "label": "Extra time before friendly fire can hurt",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "gfc_common_zc_flags",
+      "group": "survivors",
+      "label": "Extra common protection applies after (1 hunter, 2 smoker, 4 revive)",
+      "source": "cvar"
+    },
+    {
+      "id": "gfc_FF_zc_flags",
+      "group": "survivors",
+      "label": "Extra friendly-fire protection applies after (1 hunter, 2 smoker, 4 revive)",
+      "source": "cvar"
+    },
+    {
+      "id": "gfc_hittable_override",
+      "group": "survivors",
+      "label": "Hittables ignore godframes",
+      "source": "cvar"
+    },
+    {
+      "id": "gfc_witch_override",
+      "group": "survivors",
+      "label": "Witch ignores godframes",
+      "source": "cvar"
+    },
+    {
+      "id": "l4d_slowdown_water_survivors_run",
+      "group": "survivors",
+      "label": "Water run speed",
+      "source": "cvar",
+      "vanilla": "220"
+    },
+    {
+      "id": "l4d_slowdown_water_survivors_run_during_tank",
+      "group": "survivors",
+      "label": "Water run speed during a tank",
+      "source": "cvar",
+      "vanilla": "220"
+    },
+    {
+      "id": "l4d_slowdown_gunfire_si",
+      "group": "si",
+      "label": "Gunfire slowdown on special infected",
+      "source": "cvar"
+    },
+    {
+      "id": "l4d_slowdown_gunfire_tank",
+      "group": "tank",
+      "label": "Gunfire slowdown on the tank",
+      "source": "cvar"
+    },
+    {
+      "id": "hunter_ground_m2_godframes",
+      "group": "hunter",
+      "label": "Shove immunity after a hunter lands",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "l4d_skypounce_cooldown",
+      "group": "hunter",
+      "label": "Sky pounce: no-attack time",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "l4d_skypounce_pitch_min",
+      "group": "hunter",
+      "label": "Sky pounce: angle from",
+      "source": "cvar",
+      "unit": "deg"
+    },
+    {
+      "id": "l4d_skypounce_pitch_max",
+      "group": "hunter",
+      "label": "Sky pounce: angle to",
+      "source": "cvar",
+      "unit": "deg"
+    },
+    {
+      "id": "l4d_skypounce_allow",
+      "group": "hunter",
+      "label": "Sky pounce: pounces off the sky per flight (mode 2)",
+      "source": "cvar"
+    },
+    {
+      "id": "l4d_tongue_delay_survivor",
+      "group": "smoker",
+      "label": "Tongue cooldown after a quick clear by survivors",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "3"
+    },
+    {
+      "id": "l4d_tongue_delay_tank",
+      "group": "smoker",
+      "label": "Tongue cooldown after a quick clear by the tank",
+      "source": "cvar",
+      "unit": "s",
+      "vanilla": "3"
+    },
+    {
+      "id": "l4d2_tankrage_flowpercent",
+      "group": "tank",
+      "label": "Rage freeze: every % of the map survivors run back",
+      "source": "cvar",
+      "unit": "%"
+    },
+    {
+      "id": "l4d2_tankrage_freezetime",
+      "group": "tank",
+      "label": "Rage freeze: seconds per step",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "sm_rock_hitbox",
+      "group": "tank",
+      "label": "Rock hitbox follows the rock",
+      "source": "cvar"
+    },
+    {
+      "id": "sm_rock_hitbox_radius",
+      "group": "tank",
+      "label": "Rock hitbox radius",
+      "source": "cvar",
+      "unit": "units"
+    },
+    {
+      "id": "sm_rock_lagcomp",
+      "group": "tank",
+      "label": "Rock lag compensation",
+      "source": "cvar"
+    },
+    {
+      "id": "tank_punch_getup_scale",
+      "group": "tank",
+      "label": "Get-up time after a punch (scale)",
+      "source": "cvar",
+      "unit": "x"
+    },
+    {
+      "id": "l4d2_antirock_protect_time",
+      "group": "tank",
+      "label": "Rock protection after the tank spawns",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "l4d_hunter_no_bash_kills",
+      "group": "si",
+      "label": "Shoves cannot kill hunters",
+      "source": "cvar"
+    },
+    {
+      "id": "l4d_smoker_no_bash_kills",
+      "group": "si",
+      "label": "Shoves cannot kill smokers",
+      "source": "cvar"
+    },
+    {
+      "id": "l4d_boomer_no_bash_kills",
+      "group": "si",
+      "label": "Shoves cannot kill boomers",
+      "source": "cvar"
+    },
+    {
+      "id": "l4d2_block_infected_ff",
+      "group": "si",
+      "label": "Infected cannot hurt each other",
+      "source": "cvar"
+    },
+    {
+      "id": "l4d2_infected_ff_allow_tank",
+      "group": "si",
+      "label": "Except the tank",
+      "source": "cvar"
+    },
+    {
+      "id": "si_restore_ratio",
+      "group": "si",
+      "label": "Health kept by a despawned special infected",
+      "source": "cvar",
+      "unit": "fraction"
+    },
+    {
+      "id": "l4d_huntingrifle_fire_rate",
+      "group": "weapons",
+      "label": "Hunting rifle fire rate",
+      "source": "cvar",
+      "unit": "x",
+      "vanilla": "1.0"
+    },
+    {
+      "id": "l4dbeta_huntingrifle_swtichtime",
+      "group": "weapons",
+      "label": "Hunting rifle switch time",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "l4dbeta_huntingrifle_empty_reloadtime",
+      "group": "weapons",
+      "label": "Hunting rifle empty reload",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "l4d_huntingrifle_tank_dmg",
+      "group": "weapons",
+      "label": "Hunting rifle damage to the tank",
+      "source": "cvar",
+      "unit": "HP",
+      "vanilla": "90"
+    },
+    {
+      "id": "l4d_huntingrifle_hunter_chest_multi",
+      "group": "weapons",
+      "label": "Hunting rifle: hunter chest multiplier",
+      "source": "cvar",
+      "unit": "x",
+      "vanilla": "1.0"
+    },
+    {
+      "id": "l4d_huntingrifle_hunter_Stomach_multi",
+      "group": "weapons",
+      "label": "Hunting rifle: hunter stomach multiplier",
+      "source": "cvar",
+      "unit": "x",
+      "vanilla": "1.0"
+    },
+    {
+      "id": "l4d_pistol_delay_single",
+      "group": "weapons",
+      "label": "Pistol: minimum time between shots",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "l4d_pistol_delay_dualies",
+      "group": "weapons",
+      "label": "Dual pistols: minimum time between shots",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "l4d_witch_unstuck_time",
+      "group": "witch",
+      "label": "Unstuck: seconds without progress",
+      "source": "cvar",
+      "unit": "s"
+    },
+    {
+      "id": "l4d_witch_unstuck_progress",
+      "group": "witch",
+      "label": "Unstuck: progress that counts as moving",
+      "source": "cvar",
+      "unit": "units"
+    },
+    {
+      "id": "l4d_witch_unstuck_hop",
+      "group": "witch",
+      "label": "Unstuck: longest hop",
+      "source": "cvar",
+      "unit": "units"
+    },
+    {
+      "id": "l4d_saferoom_lock_tank",
+      "group": "map",
+      "label": "Saferoom locked while a tank is alive",
+      "source": "cvar"
+    },
+    {
+      "id": "l4d_saferoom_lock_witch",
+      "group": "map",
+      "label": "Saferoom locked while a witch is alive",
+      "source": "cvar"
     }
   ],
   "rules": [
     {
       "id": "quadcaps",
       "group": "si",
-      "text": "Quad caps: after a boomer dies, the next wave can be all hunters (see the chance above); boomer and smoker limits drop to 0 for it.",
+      "text": "If the boomer dies last, the next wave is {sm_3ht1s_percent_chance}% likely to be 3 hunters + 1 smoker, otherwise 4 hunters.",
       "when": {
         "plugin": "l4d_QuadCaps.smx"
       },
       "reviewed": false
     },
     {
-      "id": "pounce_max",
+      "id": "dp",
       "group": "hunter",
-      "text": "Long pounces deal up to the maximum pounce damage above.",
+      "text": "Damage pounces (DPs): pounce damage grows with distance from {z_pounce_damage_range_min} units, up to {pounceuncap_maxdamage} damage at {z_pounce_damage_range_max} units or more.",
       "when": {
         "plugin": "pounce_maxdamage.smx"
       },
@@ -866,25 +1604,36 @@
     {
       "id": "no_deadstops",
       "group": "hunter",
-      "text": "Hunters cannot be deadstopped (shoved out of the air) mid-pounce.",
+      "text": "Hunters cannot be deadstopped (shoved out of the air) mid-pounce, and cannot be shoved for {hunter_ground_m2_godframes} s after landing.",
       "when": {
         "plugin": "l4d_no_hunter_deadstops.smx"
       },
       "reviewed": false
     },
     {
-      "id": "skypounce",
+      "id": "skypounce_1",
       "group": "hunter",
-      "text": "Sky pounce fix: pounces from high ledges count their damage correctly.",
+      "text": "Sky pounce limit: a hunter that starts a pounce at a flat, ceiling-skimming angle ({l4d_skypounce_pitch_min} to {l4d_skypounce_pitch_max} degrees down) cannot attack again in the air for {l4d_skypounce_cooldown} s, which stops chaining pounces off the map's sky.",
       "when": {
-        "plugin": "l4d_skypounce.smx"
+        "cvar": "l4d_skypounce_mode",
+        "equals": "1"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "skypounce_2",
+      "group": "hunter",
+      "text": "Sky pounce limit: a hunter can pounce off the map's sky {l4d_skypounce_allow} time per flight.",
+      "when": {
+        "cvar": "l4d_skypounce_mode",
+        "equals": "2"
       },
       "reviewed": false
     },
     {
       "id": "godframes",
       "group": "survivors",
-      "text": "Survivors get short invulnerability after being freed from a special infected, and hittable damage is controlled.",
+      "text": "Godframes (survivors take no damage): {gfc_hunter_duration} s after a hunter's pounce ends, {gfc_smoker_duration} s after a smoker lets go, {gfc_revive_duration} s after a revive. After a smoker lets go, commons still cannot hurt for a further {gfc_common_extra_time} s and friendly fire for a further {gfc_ff_extra_time} s. Hittables and the witch always ignore godframes.",
       "when": {
         "plugin": "l4d_godframes_and_hittable_control.smx"
       },
@@ -893,25 +1642,25 @@
     {
       "id": "tongue_timer",
       "group": "smoker",
-      "text": "Tongue cooldown is shorter when the tongue is cleared: 8 s after a tank clears it, 4 s after a survivor does.",
+      "text": "If survivors clear a tongue instantly, before it starts dragging or choking, the smoker's cooldown is {l4d_tongue_delay_survivor} s ({l4d_tongue_delay_tank} s if the tank clears it) instead of the normal {tongue_hit_delay} s.",
       "when": {
         "plugin": "l4d_tongue_timer.smx"
       },
       "reviewed": false
     },
     {
-      "id": "drag_interval",
+      "id": "drag",
       "group": "smoker",
-      "text": "Drag damage is applied by a plugin at its own interval.",
+      "text": "Drag damage: {tongue_drag_first_damage} HP after the first {tongue_drag_first_damage_interval} s, then 1 HP every {tongue_drag_damage_interval} s.",
       "when": {
         "plugin": "l4d_smoker_drag_damage_interval.smx"
       },
       "reviewed": false
     },
     {
-      "id": "huntingrifle_nerf",
+      "id": "huntingrifle",
       "group": "weapons",
-      "text": "Hunting rifle: slower fire rate and switch time.",
+      "text": "Hunting rifle (limit {rotoblin_limit_huntingrifle}; 0 means it is not available): fire rate x{l4d_huntingrifle_fire_rate}, {l4dbeta_huntingrifle_swtichtime} s switch time, {l4dbeta_huntingrifle_empty_reloadtime} s empty reload; {l4d_huntingrifle_tank_dmg} damage to the tank, x{l4d_huntingrifle_hunter_chest_multi} to a hunter's chest and x{l4d_huntingrifle_hunter_Stomach_multi} to its stomach.",
       "when": {
         "plugin": "l4d_versus_nerf_huntingrifle.smx"
       },
@@ -920,7 +1669,7 @@
     {
       "id": "slowdown",
       "group": "survivors",
-      "text": "Water slows survivors (170, or 220 while a tank is up); gunfire does not slow special infected.",
+      "text": "Water slows survivors to {l4d_slowdown_water_survivors_run} ({l4d_slowdown_water_survivors_run_during_tank} while a tank is up). Gunfire does not slow special infected or the tank.",
       "when": {
         "plugin": "l4d_slowdown_control.smx"
       },
@@ -929,7 +1678,7 @@
     {
       "id": "antibaiter",
       "group": "common",
-      "text": "Anti-bait: stalling in place for too long calls a horde.",
+      "text": "Anti-bait: if the survivors make no progress for {l4d_antibaiter_delay} s, a {l4d_antibaiter_horde_timer} s countdown appears on screen, and a horde comes when it runs out unless they move forward.",
       "when": {
         "plugin": "l4d_antibaiter.smx"
       },
@@ -938,7 +1687,7 @@
     {
       "id": "tankrage",
       "group": "tank",
-      "text": "Tank rage: the tank's frustration is frozen for a few seconds after it attacks.",
+      "text": "Tank rage freeze: when survivors run back, the tank's rage meter freezes for {l4d2_tankrage_freezetime} s for every {l4d2_tankrage_flowpercent}% of the map they retreat, so running back does not cost the tank control.",
       "when": {
         "plugin": "l4d2_tankrage.smx"
       },
@@ -947,25 +1696,16 @@
     {
       "id": "rock_lagcomp",
       "group": "tank",
-      "text": "Tank rocks can be shot out of the air, with lag compensation.",
+      "text": "Tank rocks can always be shot out of the air. Here the rock's hitbox (radius {sm_rock_hitbox_radius}) moves with the rock and is lag compensated, so shots that look like hits count.",
       "when": {
         "plugin": "l4d_rock_lagcomp.smx"
       },
       "reviewed": false
     },
     {
-      "id": "no_escape_tank",
+      "id": "finale_tanks",
       "group": "director",
-      "text": "No tank on the escape (rescue) run.",
-      "when": {
-        "plugin": "l4d_NoEscapeTank.smx"
-      },
-      "reviewed": false
-    },
-    {
-      "id": "no_rescue_first_tank",
-      "group": "director",
-      "text": "No first finale tank.",
+      "text": "Finales: no first finale tank and no tank on the escape run, so a finale has its usual tank earlier in the map and one tank once the finale starts.",
       "when": {
         "plugin": "l4d_NoRescueFirstTank.smx"
       },
@@ -974,16 +1714,16 @@
     {
       "id": "bash_kills",
       "group": "si",
-      "text": "Shoves do not kill hunters or smokers outright.",
+      "text": "Shoves cannot kill hunters or smokers.",
       "when": {
         "plugin": "l4d_bash_kills.smx"
       },
       "reviewed": false
     },
     {
-      "id": "si_ffblock",
+      "id": "si_ff",
       "group": "si",
-      "text": "Special infected cannot hurt each other.",
+      "text": "Special infected cannot damage each other, except the tank. They can still scratch each other, which pushes them and can clear a smoker's pull.",
       "when": {
         "plugin": "l4d2_si_ffblock.smx"
       },
@@ -1001,7 +1741,7 @@
     {
       "id": "pistol_delay",
       "group": "weapons",
-      "text": "Pistols have a minimum delay between shots (0.175 s, 0.1 s dual).",
+      "text": "Pistols have a minimum time between shots: {l4d_pistol_delay_single} s, or {l4d_pistol_delay_dualies} s with dual pistols.",
       "when": {
         "plugin": "l4d2_pistol_delay.smx"
       },
@@ -1019,35 +1759,37 @@
     {
       "id": "tank_burn_cap",
       "group": "tank",
-      "text": "Fire damage to the tank is capped.",
+      "text": "Fire damage to the tank is capped at {l4d_tank_burn_cap} per round; then the fire goes out.",
       "when": {
-        "plugin": "l4d_tank_burn_cap.smx"
+        "cvar": "l4d_tank_burn_cap",
+        "notEquals": "0"
       },
       "reviewed": false
     },
     {
-      "id": "remove_pipebombs",
+      "id": "throwables",
       "group": "items",
-      "text": "Pipe bombs are removed from the map.",
+      "text": "Pipe bombs and molotovs are removed from the map.",
       "when": {
-        "cvar": "l4d_remove_pipebombs",
-        "equals": "1"
+        "cvar": "rotoblin_enable_throwables",
+        "equals": "0"
       },
       "reviewed": false
     },
     {
       "id": "witch_unstuck",
       "group": "witch",
-      "text": "A witch stuck on geometry is moved free.",
+      "text": "A chasing witch that makes no progress ({l4d_witch_unstuck_progress} units in {l4d_witch_unstuck_time} s) because she is stuck on the map is nudged free or hops past the obstacle.",
       "when": {
-        "plugin": "l4d_witch_unstuck.smx"
+        "cvar": "l4d_witch_unstuck_mode",
+        "equals": "2"
       },
       "reviewed": false
     },
     {
       "id": "tank_stumble_door",
       "group": "tank",
-      "text": "A tank punch or rock stumbles survivors behind doors.",
+      "text": "Doors do not stumble the tank. In vanilla, shutting a door on a tank stumbles it for several seconds.",
       "when": {
         "plugin": "l4d_tank_stumble_door.smx"
       },
