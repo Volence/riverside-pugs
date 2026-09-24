@@ -114,17 +114,23 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .xh { display: grid; grid-template-columns: 340px 1fr; gap: var(--sp-4); align-items: start; }
 .xh__controls { display: flex; flex-direction: column; gap: var(--sp-4); }
 
-.xh__group { border: 1px solid var(--border); padding: var(--sp-3) var(--sp-4) var(--sp-4); margin: 0; }
+/* min-inline-size: a fieldset otherwise sizes to its content's min-content and overflows its column. */
+.xh__group { border: 1px solid var(--border); padding: var(--sp-3) var(--sp-4) var(--sp-4); margin: 0; min-inline-size: 0; }
 .xh__group legend { padding: 0 var(--sp-2); }
 
 /* Label, control, readout. The readout column is fixed so the sliders all
  * start and end at the same x, which is what makes the stack scannable. */
-.xh__row { display: grid; grid-template-columns: 5.5rem 1fr 2.5rem; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); }
+.xh__row { display: grid; grid-template-columns: 5.5rem minmax(6rem, 1fr) 2.5rem; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); }
 .xh__row > span:first-child { font-size: var(--fs-dense); color: var(--text-muted); }
 .xh__row output { text-align: right; font-size: var(--fs-dense); }
-.xh__row input[type='range'] { width: 100%; accent-color: var(--accent); }
+/* The control column never goes below 6rem, and nor do the controls in it:
+ * squeezed into a narrow box the sliders shrank to nubs and the Shape select
+ * too narrow to show its value. A group too narrow for that is laid out
+ * wider (or in one column) by whatever holds it, never squeezed. */
+.xh__row input[type='range'] { width: 100%; min-width: 6rem; accent-color: var(--accent); }
 .xh__row select, .xh__row input[type='text'] {
   width: 100%;
+  min-width: 6rem;
   background: var(--surface-2);
   color: var(--text);
   border: 1px solid var(--border);
@@ -148,7 +154,7 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 /* The native file input is unstylable across browsers, so it is hidden and
  * the label around it does the work. */
 .xh__file { display: block; margin-top: var(--sp-2); font-size: var(--fs-dense); color: var(--text-muted); cursor: pointer; }
-.xh__file input[type='file'] { display: block; margin-top: var(--sp-2); font-size: var(--fs-label); color: var(--text-muted); }
+.xh__file input[type='file'] { display: block; max-width: 100%; margin-top: var(--sp-2); font-size: var(--fs-label); color: var(--text-muted); }
 .xh__file--inline { margin: 0; }
 .xh__file--inline input[type='file'] { display: none; }
 
