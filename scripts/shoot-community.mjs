@@ -47,6 +47,9 @@ class Browser {
     this.name = name;
     this.port = port;
     this.dl = join(OUT, 'dl', name);
+    // Emptied first: Chrome overwrites a same-named file from an earlier run,
+    // which waitDownload would never see as new.
+    rmSync(this.dl, { recursive: true, force: true });
     mkdirSync(this.dl, { recursive: true });
     const profile = join(OUT, 'profiles', name);
     rmSync(profile, { recursive: true, force: true });
@@ -245,6 +248,35 @@ function checkVpk(file, label) {
   return files;
 }
 
+/** Width, height and byte size of a PNG at `url`, read in the page from its IHDR. */
+const pngInfo = (br, url) => br.ev(`fetch(${JSON.stringify(url)}).then(async (r) => {
+  const b = new Uint8Array(await r.arrayBuffer()); const v = new DataView(b.buffer);
+  const sig = b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
+  return { status: r.status, sig, w: sig ? v.getUint32(16) : 0, h: sig ? v.getUint32(20) : 0, bytes: b.length };
+})`);
+const PREVIEW_CAP = 2.5 * 1024 * 1024;
+
+/** Both sides' previews of a shared HUD: present, 960 x 540 PNGs, under the cap. */
+async function checkPreviews(br, id, label) {
+  const e = await br.ev(`fetch('/api/community/${id}').then((r) => r.json())`);
+  check(!!e.previewUrl && !!e.previewInfectedUrl, `${label}: the entry has a survivor and an infected preview`);
+  for (const [side, url] of [['survivor', e.previewUrl], ['infected', e.previewInfectedUrl]]) {
+    if (!url) continue;
+    const i = await pngInfo(br, url);
+    check(i.status === 200 && i.sig && i.w === 960 && i.h === 540 && i.bytes < PREVIEW_CAP,
+      `${label}: ${side} preview is a ${i.w} x ${i.h} PNG of ${(i.bytes / 1024).toFixed(0)} KB`);
+  }
+  return e;
+}
+
+/** Click a Survivor / Infected toggle inside `root` (an expression) and wait for that side's image. */
+async function pickSide(br, root, side, label) {
+  const name = side === 'infected' ? 'Infected' : 'Survivor';
+  await br.ev(`[...${root}.querySelectorAll('.sidepv button')].find((x) => x.textContent.trim() === ${JSON.stringify(name)}).click()`);
+  return br.waitFor(`(() => { const r = ${root}; const btn = [...r.querySelectorAll('.sidepv button')].find((x) => x.textContent.trim() === ${JSON.stringify(name)});
+    const img = r.querySelector('img'); return btn?.getAttribute('aria-pressed') === 'true' && img?.alt.endsWith(${JSON.stringify(`${side} side`)}) && img.complete && img.naturalWidth > 0 ? img.getAttribute('src') : null; })()`, `${label}: the ${side} preview`);
+}
+
 const cardExpr = (title) => `[...document.querySelectorAll('article.ccard')].find((c) => c.querySelector('.ccard__title')?.textContent.trim() === ${JSON.stringify(title)})`;
 
 const STOCK_DESIGN = {
@@ -290,10 +322,30 @@ async function submitShare(br) {
 try {
   await Promise.all([a.start(), b.start(), s.start()]);
 
+  // A repeat run on the same scratch database would meet A's share caps (2
+  // HUDs, 6 shares a day), so they are raised here. Earlier entries stay:
+  // one shared before infected previews existed shows no toggle.
+  {
+    const w = new Database(DB_PATH);
+    w.prepare("UPDATE settings SET value = '5' WHERE key = 'community_huds_per_player'").run();
+    w.prepare("UPDATE settings SET value = '5' WHERE key = 'community_crosshairs_per_player'").run();
+    w.prepare("UPDATE settings SET value = '50' WHERE key = 'community_shares_per_day'").run();
+    w.close();
+  }
+
   // ------------------------------------------------------------------ A shares
   step('A: share a crosshair from the crosshair maker');
   await a.go('/');
   await a.login(A);
+  // Entries left by an earlier run on this database are deleted as A, so the
+  // HUD cap never refuses this run's shares; one without an infected preview
+  // (shared before there was one) is kept for the no-toggle check below.
+  {
+    const mine = await a.ev(`fetch('/api/community/mine').then((r) => r.json())`);
+    const stale = mine.entries.filter((e) => e.removedByStaff === null && (e.kind === 'crosshair' || e.previewInfectedUrl));
+    for (const e of stale) await a.ev(`fetch('/api/community/${e.id}', { method: 'DELETE' }).then((r) => r.status)`);
+    if (stale.length) ok(`deleted ${stale.length} entries of A's from earlier runs`);
+  }
   await a.ev(`localStorage.setItem('xhair', ${JSON.stringify(JSON.stringify(XHAIR_STATE))})`);
   await a.go('/crosshair');
   await share(a, 'button.xh__share', 'Share to community', TITLES.xhair, 'A red cross, a bit wider than stock.');
@@ -307,10 +359,20 @@ try {
   await a.waitFor(`!!document.querySelector('canvas')`, 'the editor canvas');
   await share(a, 'button.hud__share', 'Share to community', TITLES.stock, 'Stock with the health moved in and chat hidden.');
   await a.waitFor(`document.querySelector('.share__preview')?.complete && document.querySelector('.share__preview').naturalWidth > 0`, 'the share preview');
+  check(await a.ev(`document.querySelectorAll('.share__form .sidepv button').length === 2`), 'the share dialog has a Survivor / Infected toggle');
   await a.shoot('hud-share-dialog', null);
+  {
+    const dlg = `document.querySelector('.share__form')`;
+    const survivorSrc = await a.ev(`${dlg}.querySelector('img').getAttribute('src')`);
+    const infectedSrc = await pickSide(a, dlg, 'infected', 'share dialog');
+    check(infectedSrc !== survivorSrc, 'the dialog shows a different image for the infected side');
+    await a.shoot('hud-share-dialog-infected', null);
+    await pickSide(a, dlg, 'survivor', 'share dialog');
+  }
   r = await submitShare(a);
   check(r.txt.includes('Shared.') && r.id > 0, `stock HUD shared as entry ${r.id}`);
   ids.stock = r.id;
+  await checkPreviews(a, ids.stock, 'stock HUD');
 
   step('A: import a HUD file and share it');
   await a.setFile('input[aria-label="Import a HUD file"]', FIXTURE);
@@ -329,6 +391,7 @@ try {
   check(r.txt.includes('Shared.') && r.id > 0, `imported HUD shared as entry ${r.id}`);
   const aImported = JSON.parse(await a.ev(`localStorage.getItem('hud')`));
   ids.imported = r.id;
+  await checkPreviews(a, ids.imported, 'imported HUD');
 
   // ------------------------------------------------------------------ B browses
   step('B: browse /community');
@@ -340,6 +403,30 @@ try {
   check(await b.ev(`${cardExpr(TITLES.imported)}.querySelector('.ccard__badge')?.textContent.startsWith('Imported: ')`), 'the imported HUD card carries its Imported badge');
   check(await b.ev(`[...document.querySelectorAll('img.ccard__preview')].every((i) => i.complete && i.naturalWidth > 0)`), 'every HUD preview image loaded');
   await b.shoot('community-huds', '/community', { before: () => b.waitFor(`document.querySelectorAll('img.ccard__preview').length >= 2`, 'previews') });
+
+  step('B: the Survivor / Infected toggle on the gallery and the entry page');
+  {
+    const list = await b.ev(`fetch('/api/community?kind=hud').then((r) => r.json())`);
+    const byId = new Map(list.entries.map((e) => [e.id, e]));
+    for (const key of ['stock', 'imported']) {
+      const card = cardExpr(TITLES[key]);
+      check(await b.ev(`${card}.querySelectorAll('.sidepv button[aria-pressed]').length === 2`), `the ${key} card has the toggle`);
+      const src = await pickSide(b, card, 'infected', `${key} card`);
+      check(src === byId.get(ids[key])?.previewInfectedUrl, `the ${key} card shows its infected preview`);
+    }
+    const older = list.entries.filter((e) => !e.previewInfectedUrl);
+    if (older.length) {
+      const card = `[...document.querySelectorAll('article.ccard')].find((c) => c.querySelector('.ccard__title a')?.getAttribute('href') === '/community/${older[0].id}')`;
+      check(await b.ev(`!!${card} && ${card}.querySelectorAll('.sidepv').length === 0`), `an entry shared before infected previews (${older[0].id}) shows no toggle`);
+    }
+    // Every card to the infected side, at both widths (no reload between them).
+    await b.shoot('community-huds-infected', null, {
+      before: () => b.ev(`[...document.querySelectorAll('.sidepv')].forEach((g) => [...g.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Infected').click())`)
+        .then(() => b.waitFor(`[...document.querySelectorAll('img.ccard__preview')].every((i) => i.complete && i.naturalWidth > 0)`, 'the infected previews')),
+    });
+    await b.shoot('entry-page-survivor', `/community/${ids.stock}`, { before: () => b.waitFor(`document.querySelector('img.ccard__preview')?.naturalWidth > 0`, 'the entry preview') });
+    await b.shoot('entry-page-infected', null, { before: () => pickSide(b, `document.querySelector('article.ccard')`, 'infected', 'entry page') });
+  }
   await b.shoot('community-crosshairs', '/community?kind=crosshair', { before: () => b.waitFor(`document.querySelectorAll('canvas.ccard__xhair').length >= 1`, 'the crosshair card') });
   check(await b.ev(`!!${cardExpr(TITLES.xhair)}`), 'the crosshair is on the Crosshairs tab');
 

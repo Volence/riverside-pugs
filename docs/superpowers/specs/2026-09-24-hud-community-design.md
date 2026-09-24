@@ -38,7 +38,9 @@ A HUD entry has up to three parts:
    content-addressed blob keyed by the import's `hudId` (the SHA-256 the HUD upload feature already
    computes). Two players who share edits of the same imported HUD share one blob. Stock and Modern
    designs have no blob, because their base files ship with the site.
-3. **A preview PNG**, drawn in the author's browser when they share, by the editor's own renderer.
+3. **Two preview PNGs**, survivor side and infected side, drawn in the author's browser when they share, by
+   the editor's own renderer over real in-game shots (see "Two previews on in-game backdrops"). Entries shared
+   before the infected one existed have the survivor one alone.
 
 A prebuilt `.vpk` of the HUD is **never** stored or served. Every download is rebuilt in the downloader's
 browser by the existing `buildHud`/`packHud` path from the design plus the import's files. The files that
@@ -183,7 +185,7 @@ lower cap.
 | Title | 3 to 40 characters, one line |
 | Description | at most 280 characters and 4 lines; no links (`profileFields`' `LINKISH` rule) |
 | Design JSON | 2 MB |
-| Preview PNG | 1.5 MB, one of 960x540, 864x540 or 720x540 (16:9, 16:10, 4:3 at 540 tall) |
+| Preview PNG (each side) | 2.5 MB, one of 960x540, 864x540 or 720x540 (16:9, 16:10, 4:3 at 540 tall) |
 | Crosshair image | 128 x 128, 100 KB of base64 |
 | Images inside a design | the editor's existing caps (512 a side, `MAX_IMAGE_B64`), and each must be a real PNG (signature and IHDR checked) |
 
@@ -225,7 +227,7 @@ token was blanked on 2026-09-23. It would add a second failure mode for no gain 
 
 ### Budget
 
-- **Worst case per player:** 2 x (20 MB import + 2 MB design + 1.5 MB preview), about 47 MB. A typical
+- **Worst case per player:** 2 x (20 MB import + 2 MB design + 2 x 2.5 MB previews), about 54 MB. A typical
   editor HUD on Stock or Modern is under 1 MB.
 - **Total store cap:** the `community_store_mb` setting, default **1024 MB**. Sharing a HUD that would
   pass it is refused with "The community shelf is full right now."
@@ -293,8 +295,9 @@ says "You are sharing 2 HUDs already. Delete one to share another", links to the
 
 **The preview** is drawn once, off screen, into a canvas of the design's aspect at 540 tall:
 
-1. `drawBackdrop` with the `scene` backdrop, as the editor's canvas starts.
-2. `drawHud` for the survivor side, Healthy, holding the gun, with nothing selected.
+1. `drawBackdrop` with the side's in-game shot, once it has loaded (the drawn `scene` if it cannot).
+2. `drawHud` for that side in the editor's default state, with nothing selected. This is done twice, once
+   per side; see "Two previews on in-game backdrops".
 3. `drawHud` repaints every time its `onAsset` callback fires, until no asset has arrived for 300 ms
    (capped at 3 s), and it waits for `document.fonts.ready`.
 4. The result is exported with `canvas.toBlob('image/png')`.
@@ -350,7 +353,7 @@ CREATE TABLE IF NOT EXISTS community_entries (
   advanced INTEGER NOT NULL DEFAULT 0,
   import_id TEXT,                          -- hud on an imported base: the blob's hudId
   import_name TEXT,
-  preview TEXT,                            -- hud: sha256 hex of the preview PNG
+  preview TEXT,                            -- hud: sha256 hex of the survivor side's preview PNG
   bytes INTEGER NOT NULL DEFAULT 0,        -- payload + preview + blob (if this entry wrote it), for the cap
   created_at TEXT NOT NULL,
   deleted_at TEXT,
@@ -362,6 +365,8 @@ CREATE INDEX IF NOT EXISTS idx_community_list ON community_entries (kind, delete
 CREATE INDEX IF NOT EXISTS idx_community_author ON community_entries (author_id, deleted_at);
 CREATE INDEX IF NOT EXISTS idx_community_import ON community_entries (import_id);
 CREATE INDEX IF NOT EXISTS idx_community_preview ON community_entries (preview);
+-- Added later by ALTER TABLE, so it sits last: preview_infected TEXT (the infected side's preview, NULL on
+-- older entries), with idx_community_preview_infected.
 
 CREATE TABLE IF NOT EXISTS community_likes (
   entry_id INTEGER NOT NULL REFERENCES community_entries(id),
@@ -406,7 +411,7 @@ registered inside this plugin only.
 | `GET /api/community/mine` | active | The caller's live entries plus staff-removed tombstones (with the reason), and the caps. |
 | `GET /api/community/:id` | anyone | One live entry with its payload. Staff also get removed ones, with the removal. |
 | `POST /api/community/crosshairs` | active | JSON `{ title, description, art, permission: true }`. Body limit 256 KB. |
-| `POST /api/community/huds` | active | Multipart. Parts: `meta` (JSON `{ title, description, permission, design, importId? }`), `preview` (PNG), `import` (VPK, only when the design is on an imported base). Limits: 3 parts, 20 MB per file. |
+| `POST /api/community/huds` | active | Multipart. Parts: `meta` (JSON `{ title, description, permission, design, importId? }`), `preview` (the survivor side's PNG), `previewInfected` (the infected side's PNG, optional), `import` (VPK, only when the design is on an imported base). Limits: 4 parts, 3 files, 20 MB per file, each preview streamed under its own 2.5 MB cap. |
 | `DELETE /api/community/:id` | author | Tombstone, `deleted_by` = author. |
 | `POST /api/community/:id/remove` | mod or admin | `{ reason }` (required, at most 200 characters). Tombstone, then `logAdmin(db, staff, 'community_remove', author, { entryId, kind, title, reason })`. |
 | `PUT /api/community/:id/like`, `DELETE /api/community/:id/like` | active, not the author | Idempotent. |
@@ -443,7 +448,7 @@ These live in `src/community/validate.ts`.
 
   The server then writes `name` to `safeName(title)`, which it ports, and stores the re-serialized JSON.
 - **Preview:** a PNG signature, IHDR dimensions matching the design's aspect at 540 tall, and at most
-  1.5 MB.
+  2.5 MB. The infected side's preview, when sent, gets the same check, and a refusal names it.
 - **Import:** see "Where the list is enforced", step 2.
 
 ### Writing
@@ -525,6 +530,43 @@ likes and drops the survivor's self-like.
 - the Profile panel shows only with entries.
 
 **Headless check:** see the plan's last task.
+
+## Two previews on in-game backdrops (added 2026-09-24)
+
+A shared HUD carries two previews, the survivor side and the infected side, each drawn on a real HUD-off
+game shot rather than the drawn saferoom.
+
+- **Backdrops.** Four 1920x1080 JPEGs from `/home/volence/l4d/hud/backdrops/` (its README says where each
+  was taken) are static assets under `web/public/hud-backdrops/`: `survivor-hilltop`, `survivor-subway`,
+  `infected-hunter` and `infected-ghost`. They are also choices in the HUD editor's Backdrop picker, under
+  "In game", above the drawn and flat ones (the drawn one is now labelled "Drawn saferoom").
+- **Side defaults** (`SIDE_BACKDROP` in `web/src/crosshair/draw.ts`): survivor-hilltop for survivors,
+  infected-hunter for infected. Not infected-ghost: that shot has a smeared band over the hands along the
+  bottom, right where the HUD sits.
+- **Editor default.** Until the player picks a backdrop, the editor shows the side's own shot and follows
+  the Survivor / Infected tabs, so what they see is what a share will show. Once they pick one, it sticks
+  across both sides. The choice is not saved, as before.
+- **What each preview shows.** Survivor: Healthy, holding the gun. Infected: `DEFAULT_PREVIEW`, a spawned
+  Hunter with the ability Ready and the default infected states. Both at the design's aspect, 540 tall.
+  `renderPreview` waits for the backdrop image before it draws anything; if it cannot load, the drawn
+  saferoom stands in so a share still works.
+- **Size.** Measured in Chrome, a 960x540 PNG over these shots is 0.74 to 0.96 MB, under the old 1.5 MB cap
+  but with thin margin once a busy HUD is on top. The cap is now 2.5 MB, above the raw RGBA size of a
+  960x540 canvas (2,073,600 bytes plus a filter byte a row), so no PNG a browser encodes from a real preview
+  can ever be refused. Kept as PNG rather than JPEG or WebP: no new format to validate or serve, and old
+  entries need no second code path. The multipart limits went from 3 parts and 2 files to 4 and 3; one
+  upload can hold 27.5 MB in memory (meta 2.5, previews 2 x 2.5, import 20), two at once 55 MB. The cost is
+  gallery weight, about 0.9 MB per card shown (only the side on show loads, lazily); JPEG would cut that
+  about tenfold if it ever matters.
+- **Server.** A nullable `preview_infected` column (sha256 hex), added by `ALTER TABLE` so old databases and
+  old entries keep working, with its own index. Both sides' files live in `previews/` under their own hash
+  and are served by the same hex-only route with the same `nosniff` and sandbox CSP headers. A file is live,
+  referenced and kept by the sweep when any row names it in either column (one entry's survivor shot can
+  be another's infected one). The list, entry and `mine` APIs carry `previewInfectedUrl` (null when absent).
+- **UI.** The gallery card, the entry page and the share dialog show a small Survivor / Infected toggle over
+  the preview's top-right corner, only when the infected preview exists: two buttons with `aria-pressed`,
+  in the badges' dark plate. A profile's compact card is a link as a whole, so it shows the survivor side
+  only. Crosshair entries are unchanged.
 
 ## Out of scope
 
