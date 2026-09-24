@@ -65,6 +65,10 @@ export interface Config {
    *  Dallas the plugin writes its own file into that one, and a pushed copy
    *  beside it must never race it. Created on first push. */
   replayLiveDir: string;
+  /** Where the community page keeps shared files: imports/<hudId>.vpk and
+   *  previews/<sha256>.png. Beside the database like ticket attachments, and
+   *  so under data/, which deploy-web.sh already excludes. */
+  communityDir: string;
   discord: DiscordConfig | null;
   twitch: TwitchConfig | null;
 }
@@ -112,6 +116,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     dlc4MissionsDir: env.DLC4_MISSIONS_DIR ?? '',
     ticketAttachmentsDir: env.TICKET_ATTACHMENTS_DIR?.trim() || join(dirname(dbPath), 'ticket-attachments'),
     replayLiveDir: env.REPLAY_LIVE_DIR?.trim() || join(dirname(dbPath), 'replays-live'),
+    communityDir: env.COMMUNITY_DIR?.trim() || join(dirname(dbPath), 'community'),
     discord: loadDiscord(env),
     twitch: loadTwitch(env),
   };

@@ -13,6 +13,7 @@ describe('openDb', () => {
       'admin_actions',
       'balance_patch_servers', 'balance_patches', 'balance_server_state',
       'bans', 'campaign_play_rules',
+      'community_entries', 'community_likes',
       'custom_campaign_chapters', 'custom_campaign_installs', 'custom_campaigns',
       'discord_link_codes', 'discord_link_history', 'discord_messages', 'discord_sanctions', 'discord_voice', 'discord_voice_origin',
       'endorsements',

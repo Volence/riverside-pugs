@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { ensureTicketSchema } from './tickets/schema.js';
+import { ensureCommunitySchema } from './community/schema.js';
 import { migrateLegacyReports } from './tickets/migrate.js';
 import { widenTicketIdentity } from './tickets/identityMigration.js';
 
@@ -802,6 +803,14 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // and that many matches played at all.
   endorse_title_min: '5',
   endorse_title_min_games: '10',
+  // The community page (HUDs and crosshairs players share). Off refuses new
+  // shares only; browsing, downloads and likes keep working.
+  community_uploads: '1',
+  community_huds_per_player: '2',
+  community_crosshairs_per_player: '2',
+  // Deletes count too, so delete-and-reshare cannot churn the disk.
+  community_shares_per_day: '6',
+  community_store_mb: '1024',
 };
 
 /** A match whose roster came from the site was made by the queue; anything
@@ -1056,6 +1065,8 @@ export function openDb(path: string): DB {
     note        TEXT NOT NULL DEFAULT ''
   )`);
   db.exec('CREATE INDEX IF NOT EXISTS player_reviews_steamid ON player_reviews (steamid, reviewed_at)');
+  // Before tickets: ticket_reports.community_entry_id, added below, points at it.
+  ensureCommunitySchema(db);
   ensureTicketSchema(db);
   // When a report was said in Discord: in its ticket's thread, or as a line
   // in the admin channel while no forum is set. NULL means "not yet", which
@@ -1088,6 +1099,13 @@ export function openDb(path: string): DB {
   // One-time backfill: every report already sitting on a restricted ticket
   // was always meant to be held, whether or not it predates this column.
   if (feedHeldIsNew) db.exec('UPDATE ticket_reports SET feed_held = 1 WHERE ticket_id IN (SELECT id FROM tickets WHERE restricted = 1)');
+  // The shared HUD or crosshair a report is about, when it is about one.
+  // After widenTicketIdentity and migrateLegacyReports on purpose: that
+  // rebuild copies a fixed column list (identityMigration.ts REPORTS_OLD) and
+  // refuses a column it does not know, so adding this before it would make
+  // the first open of an old database throw. No foreign key: ALTER TABLE
+  // cannot add one, and a purged entry keeps its row anyway.
+  ensureColumn(db, 'ticket_reports', 'community_entry_id', 'INTEGER');
   // Who is on the game server right now, one row per rostered player, written
   // from PLAYER connect, LEAVE and RETURN and from the plugin's own answer to
   // an admin clock action (src/presence.ts). `since` is when the current state
