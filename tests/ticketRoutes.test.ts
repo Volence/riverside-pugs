@@ -87,6 +87,26 @@ describe('filing over HTTP', () => {
   });
 });
 
+describe('reports about a shared entry', () => {
+  it('carry the entry in the ticket detail, and show when staff removed it', async () => {
+    const entryId = Number(db.prepare(
+      `INSERT INTO community_entries (kind, author_id, title, payload, created_at)
+       VALUES ('crosshair', ?, 'Loud cross', '{}', '2026-09-24T00:00:00.000Z')`,
+    ).run(ACCUSED).lastInsertRowid);
+    expect((await file(R1, { targetId: ACCUSED, category: 'toxicity', text: '', entryId })).statusCode).toBe(200);
+    expect((await file(R2, { targetId: ACCUSED, category: 'griefing', text: '' })).statusCode).toBe(200);
+    const id = (db.prepare('SELECT id FROM tickets').get() as { id: number }).id;
+
+    const before = (await get(MOD, `/api/mod/tickets/${id}`)).json();
+    expect(before.reports[0].entry).toEqual({ id: entryId, kind: 'crosshair', title: 'Loud cross', removed: false });
+    expect(before.reports[1].entry).toBeNull();
+
+    expect((await post(MOD, `/api/community/${entryId}/remove`, { reason: 'offensive' })).statusCode).toBe(200);
+    const after = (await get(MOD, `/api/mod/tickets/${id}`)).json();
+    expect(after.reports[0].entry).toEqual({ id: entryId, kind: 'crosshair', title: 'Loud cross', removed: true });
+  });
+});
+
 describe('working tickets over HTTP', () => {
   let id: number;
   beforeEach(async () => {
