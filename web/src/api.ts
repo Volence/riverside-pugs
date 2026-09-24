@@ -887,6 +887,22 @@ export interface FleetRowView {
 }
 export interface FleetBox { serverId: number; name: string; enabled: boolean; readAt: string | null; attemptAt: string | null; error: string | null; pending: boolean }
 export interface FleetState { repo: { label: string; at: string } | null; base: { label: string; at: string } | null; boxes: FleetBox[]; rows: FleetRowView[] }
+export interface ReleaseBoxView { serverId: number; name: string; state: string; error: string | null; updatedAt: string }
+export interface ReleaseSummaryView {
+  id: number; kind: 'deploy' | 'undo'; undoOf: number | null; commit: string; short: string; state: string;
+  createdBy: string; createdAt: string; deployedBy: string | null; deployedAt: string | null; canaryServerId: number | null;
+  balance: { decision: string; name: string | null; notes: string | null } | null; backupsExpired: boolean;
+  boxes: ReleaseBoxView[];
+}
+export interface ReleaseReviewView extends ReleaseSummaryView {
+  subject: string | null; github: string | null; invalid: string[]; suggestion: 'not_balance' | 'possibly_balance';
+  perBox: { serverId: number; name: string; lines: string[]; warnings: string[]; deployable: boolean }[];
+  groups: { servers: string[]; lines: string[] }[];
+}
+export interface ReleaseOverview {
+  commits: { hash: string; short: string; subject: string; author: string; at: string; releaseId: number | null }[];
+  releases: ReleaseSummaryView[]; inFlight: number | null; devMode: boolean; fetchError: string | null;
+}
 export interface IgnoredPlugin { file: string; reason: string; addedBy: string | null; addedAt: string | null; source: 'site' | 'knobs' }
 export type TriageBody = { decision: 'balance'; name: string; notes: string } | { decision: 'fold'; into: number }
   | { decision: 'ignore'; into: number; plugins: string[] };
@@ -1527,6 +1543,14 @@ export const adminApi = {
   publishBalancePatch: (id: number, published: boolean) => post(`/api/admin/balance/patches/${id}/publish`, { published }),
   fleet: (signal?: AbortSignal) => get<FleetState>('/api/admin/fleet', signal),
   fleetCheck: (body: { serverId: number } | { all: true }) => post<{ states: Record<number, string> }>('/api/admin/fleet/check', body),
+  releases: (signal?: AbortSignal) => get<ReleaseOverview>('/api/admin/releases', signal),
+  releasesRefresh: () => post<ReleaseOverview>('/api/admin/releases/refresh', {}),
+  releaseStage: (commit: string) => post<{ id: number }>('/api/admin/releases/stage', { commit }),
+  release: (id: number, signal?: AbortSignal) => get<ReleaseReviewView>(`/api/admin/releases/${id}`, signal),
+  releaseDeploy: (id: number, body: { targets: number[]; canary: number | null; balance: { decision: 'balance' | 'not_balance' | 'later'; name?: string; notes?: string } }) =>
+    post<{ ok: true }>(`/api/admin/releases/${id}/deploy`, body),
+  releaseContinue: (id: number) => post<{ ok: true }>(`/api/admin/releases/${id}/continue`, {}),
+  releaseUndo: (id: number, servers?: number[]) => post<{ id: number }>(`/api/admin/releases/${id}/undo`, servers ? { servers } : {}),
   triageBalancePatch: (id: number, body: TriageBody) => post<{ ok: true; target?: number }>(`/api/admin/balance/patches/${id}/triage`, body),
   unfoldBalancePatch: (id: number) => post<{ ok: true }>(`/api/admin/balance/patches/${id}/unfold`, {}),
   balanceIgnoredPlugins: (signal?: AbortSignal) => get<{ plugins: IgnoredPlugin[] }>('/api/admin/balance/ignored-plugins', signal),

@@ -13,6 +13,7 @@ import { AdminSeasons } from './admin/AdminSeasons';
 import { AdminPatches } from './admin/AdminPatches';
 import { Compare } from './admin/balance/Compare';
 import { AdminFleet } from './admin/AdminFleet';
+import { AdminDeploy } from './admin/AdminDeploy';
 import { Knobs } from './admin/balance/Knobs';
 import { AdminCampaigns } from './admin/AdminCampaigns';
 import { PeopleSearch } from './admin/PeopleSearch';
@@ -123,6 +124,7 @@ export function Admin({ session }: { session: Session }) {
         )}
         {r.desk === 'setup' && r.section === 'campaigns' && <AdminCampaigns />}
         {r.desk === 'setup' && r.section === 'fleet' && <AdminFleet />}
+        {r.desk === 'setup' && r.section === 'deploy' && <AdminDeploy />}
         {r.desk === 'setup' && r.section === 'seasons' && <AdminSeasons />}
         {r.desk === 'setup' && r.section === 'settings' && <AdminSettings />}
         {r.desk === 'setup' && r.section === 'audit' && <AdminAudit />}

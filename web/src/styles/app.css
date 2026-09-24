@@ -1639,6 +1639,10 @@ body.is-theater { overflow: hidden; }
 .fleet-table code { overflow-wrap: anywhere; font-size: var(--fs-dense); }
 .fleet-table td { white-space: nowrap; }
 .fleet-table td:first-child { white-space: normal; min-width: 16rem; }
+/* Deploy page: commit rows and review groups. */
+.deploy-commit { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); }
+.deploy-group h4 { margin: var(--sp-3) 0 var(--sp-1); }
+.deploy-history { border-top: 1px solid var(--border); padding-top: var(--sp-2); margin-top: var(--sp-2); }
 /* Triage card: name, then a full-width notes box, then the button. */
 .admin-form--stack { flex-direction: column; align-items: stretch; }
 .admin-form--stack input { flex: 0 0 auto; }
