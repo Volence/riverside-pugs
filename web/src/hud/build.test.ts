@@ -1925,3 +1925,33 @@ describe('a piece of your infected health, read in the class file the preview sh
     expect(panelChild(fitted, 'siHealth', 'Health', BOOMER)).toMatchObject({ x: 322, y: 69, w: 54, h: 13 });
   });
 });
+
+describe('the ability timer: scale, pieces and state colours (plan Task 6)', () => {
+  const ABILITY = 'resource/ui/hud/abilitytimerhud.res';
+  const block = (d: HudDesign, file: string, name: string) => kvFind(buildTrees(d)(file), [name])!;
+  const rect = (n: KvNode) => ['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(n, k));
+  const plain = (p: Partial<HudDesign> = {}): HudDesign => ({ ...structuredClone(DEFAULT_DESIGN), elements: {}, ...p });
+  it('scales every piece and the element block by its scale', () => {
+    const d = plain({ elements: { abilityRing: { scale: 1.5 } } });
+    expect(rect(block(d, ABILITY, 'BackgroundImage'))).toEqual(['0', '0', '120', '120']);
+    expect(rect(block(d, ABILITY, 'AbilityImage'))).toEqual(['15', '15', '90', '90']);
+    expect(rect(block(d, ABILITY, 'Progress'))).toEqual(['15', '15', '90', '90']);
+    const el = block(d, 'scripts/hudlayout.res', 'CHudAbilityTimer');
+    expect([kvGet(el, 'wide'), kvGet(el, 'tall')]).toEqual(['120', '105']);
+  });
+  it('writes a state colour over the stock line, never a second one', () => {
+    const d = validateDesign({ v: 1, elements: { abilityRing: { keys: { ability_ready_color: '255 0 255 255' } } } });
+    const text = new TextDecoder('latin1').decode(buildHud(d).find((f) => f.path === 'scripts/hudlayout.res')!.data);
+    const at = text.indexOf('"CHudAbilityTimer"');
+    const blockText = text.slice(at, text.indexOf('if_split_screen_left', at));
+    expect(blockText.match(/ability_ready_color/g)).toHaveLength(1);
+    expect(blockText).toMatch(/"ability_ready_color"\s+"255 0 255 255"/);
+  });
+  it('hard-hides a hidden backdrop, and leaves Modern\'s own hidden one alone when untouched', () => {
+    const d = validateDesign({ v: 1, children: { abilityRing: { BackgroundImage: { visible: false } } } });
+    const bg = block(d, ABILITY, 'BackgroundImage');
+    expect([kvGet(bg, 'visible'), kvGet(bg, 'wide'), kvGet(bg, 'tall')]).toEqual(['0', '0', '0']);
+    const modern = validateDesign({ v: 1, preset: 'modern' });
+    expect(rect(block(modern, ABILITY, 'BackgroundImage'))).toEqual(['0', '0', '0', '0']);
+  });
+});

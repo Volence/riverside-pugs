@@ -102,3 +102,14 @@ describe('SLOTS', () => {
     for (const s of SLOTS) if (s.targets.length === 0) expect(s.advancedOnly, s.id).toBe(true);
   });
 });
+
+describe('the ability timer element (plan Task 6)', () => {
+  it('scales with its pieces and carries the three state colours, ungated', () => {
+    const el = elementById('abilityRing')!;
+    expect(el.resize).toBe('scale');
+    expect(el.children).toEqual(['resource/ui/hud/abilitytimerhud.res']);
+    // The game's own spelling, "surpressed". Probe Q15 (/home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/ring-all.png).
+    expect(el.keys?.map((k) => k.key)).toEqual(['ability_ready_color', 'ability_charging_color', 'ability_surpressed_color']);
+    for (const k of el.keys!) { expect(k.type, k.key).toBe('colour'); expect(k.gate, k.key).toBeUndefined(); }
+  });
+});

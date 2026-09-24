@@ -486,6 +486,22 @@ export function resetChildKey(d: HudDesign, name: string, key: string, panel = '
   return { ...d, children };
 }
 
+/**
+ * "Use the file's value" on one of an element's own keys (the ability
+ * timer's state colours): that key's edit goes, and an emptied keys object
+ * and element override go too, as resetChildKey leaves a piece.
+ */
+export function resetElementKey(d: HudDesign, id: string, key: string): HudDesign {
+  const o = d.elements[id];
+  if (o?.keys?.[key] === undefined) return d;
+  const { [key]: _gone, ...keys } = o.keys;
+  const { keys: _old, ...rest } = o;
+  const next = Object.keys(keys).length ? { ...rest, keys } : rest;
+  const elements = { ...d.elements };
+  if (Object.keys(next).length) elements[id] = next; else delete elements[id];
+  return { ...d, elements };
+}
+
 // --- several pieces of one panel at once ---
 
 /** Where each named piece is now, in the unfitted frame: what a gesture starts from. Pieces the file lacks are left out. */

@@ -79,8 +79,24 @@ export const ELEMENTS: HudElement[] = [
     mockSize: { stock: { w: 430, h: 75 }, modern: { w: 380, h: 31 } }, props: ['visible'] },
   { id: 'siHealth', label: 'Your infected health', side: 'infected', key: 'HudZombieHealth', move: true, resize: 'scale',
     children: SI_HEALTH, props: ['visible'] },
-  { id: 'abilityRing', label: 'Ability timer', side: 'infected', key: 'CHudAbilityTimer', move: true, resize: 'none',
-    children: [], props: ['visible'] },
+  /**
+   * The ability timer. A scale reaches its three pieces (abilitytimerhud.res),
+   * and its 80 x 70 block keeps clipping the 80 x 80 backdrop's bottom 10
+   * units, as the game does. Its three state colours tint all three pieces
+   * (probe Q15, /home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/ring-all.png
+   * and b9/shots/crops/br-bcd.png); the suppressed one was never seen drawn.
+   */
+  { id: 'abilityRing', label: 'Ability timer', side: 'infected', key: 'CHudAbilityTimer', move: true, resize: 'scale',
+    children: ['resource/ui/hud/abilitytimerhud.res'], props: ['visible'],
+    keys: [
+      { key: 'ability_ready_color', label: 'Ready colour', type: 'colour', unsetLabel: 'Game colour',
+        evidence: 'client.dll CHudAbilityTimer run: ability_ready_color; b10/shots/crops/ring-all.png, b9/shots/crops/br-bcd.png (magenta when ready)' },
+      { key: 'ability_charging_color', label: 'Charging colour', type: 'colour', unsetLabel: 'Game colour',
+        evidence: 'client.dll CHudAbilityTimer run: ability_charging_color; b10/shots/crops/ring-all.png, b9/shots/crops/br-bcd.png (cyan while charging)' },
+      { key: 'ability_surpressed_color', label: 'Suppressed colour', type: 'colour', unsetLabel: 'Game colour',
+        evidence: 'client.dll CHudAbilityTimer run: ability_surpressed_color (the game\'s spelling)',
+        note: 'Rarely shown: no probe produced the suppressed state.' },
+    ] },
   { id: 'ghostPanel', label: 'Spawn / ghost panel', side: 'infected', key: 'HudGhostPanel', move: true, resize: 'none',
     children: [], props: ['visible'] },
   { id: 'tankPanel', label: 'Tank frustration', side: 'infected', key: 'HudFrustrationMeter', move: true, resize: 'none',

@@ -312,6 +312,35 @@ export const SI_PANEL: PanelChildren = {
   ],
 };
 
+/**
+ * The ability timer's pieces (abilitytimerhud.res), framed by its
+ * hudlayout.res block, CHudAbilityTimer, which the element scales with them.
+ * Probe answers, /home/volence/l4d/hud/probe-phase2-infected/RESULTS.md:
+ * - Q14: code sets the backdrop's art (HUD/PZ_charge_bg) over the file's
+ *   image (b9/shots/crops/br-bcd.png): its place, size and visibility are
+ *   still the file's, its picture is not.
+ * - Q15: the element's state colours tint all three pieces, so none takes a
+ *   colour of its own here.
+ * - S-ring: Progress follows a square resize (b10, Progress 30 x 30), so
+ *   every piece sizes square.
+ * Code picks AbilityImage's icon by class (pz_charge_lunge, _smoker,
+ * _boomer, _tank).
+ */
+export const ABILITY_PANEL: PanelChildren = {
+  panelId: 'abilityRing',
+  file: 'resource/ui/hud/abilitytimerhud.res',
+  repeat: 'single',
+  frame: 'hudlayout',
+  children: [
+    { name: 'BackgroundImage', label: 'Backdrop', kind: 'image', role: 'decor', box: 'square', move: true, font: false, colour: false,
+      note: 'The game picks this picture; you can move, size or hide it.' },
+    { name: 'AbilityImage', label: 'Class icon', kind: 'image', role: 'content', box: 'square', move: true, font: false, colour: false,
+      note: 'The game picks the icon by class.' },
+    { name: 'Progress', label: 'Recharge meter', kind: 'other', role: 'content', box: 'square', move: true, font: false, colour: false,
+      note: 'The game fills this as your ability recharges.' },
+  ],
+};
+
 /** A block's rect, as a linked rule reads it from a base file. */
 export interface LinkRect { x: number; y: number; w: number; h: number }
 export type LinkRule = 'same' | 'delta';
@@ -347,7 +376,7 @@ function mapLinked<T>(rule: LinkRule, key: string, v: T, a: LinkRect, b: LinkRec
   }
 }
 
-export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL];
+export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL];
 export const panelChildren = (panelId: string): PanelChildren | undefined => PANEL_CHILDREN.find((p) => p.panelId === panelId);
 export const teamChild = (name: string): ChildDef | undefined => TEAM_PANEL.children.find((c) => c.name === name);
 

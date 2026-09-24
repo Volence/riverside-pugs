@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { TEAM_PANEL, OWN_PANEL, SI_PANEL, PANEL_CHILDREN, panelChildren, CONTENT_CHILDREN, FIT_SQUARED, childDef, panelOfFile, maxInset, linkedValue, unlinkedValue, type KeyDef } from './children';
+import { TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, PANEL_CHILDREN, panelChildren, CONTENT_CHILDREN, FIT_SQUARED, childDef, panelOfFile, maxInset, linkedValue, unlinkedValue, type KeyDef } from './children';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { SPLATTERS } from './splatter';
@@ -14,8 +14,8 @@ const CONTROL: Record<string, string> = { image: 'imagepanel', label: 'label', b
  * the way elements.test.ts pins element keys to hudlayout.res.
  */
 describe('the teammate card registry', () => {
-  it('covers the teammate card, your own health and your infected health', () => {
-    expect(PANEL_CHILDREN.map((p) => p.panelId)).toEqual(['teamColumn', 'ownHealth', 'siHealth']);
+  it('covers the teammate card, your own health, your infected health and the ability timer', () => {
+    expect(PANEL_CHILDREN.map((p) => p.panelId)).toEqual(['teamColumn', 'ownHealth', 'siHealth', 'abilityRing']);
     expect(TEAM_PANEL.file).toBe('resource/ui/hud/teammatepanel.res');
   });
 
@@ -368,5 +368,31 @@ describe('linked files: the Hunter frame mapped to the Smoker and Boomer files',
     }
     expect(unlinkedValue('delta', 'x', 332, hunter, boomer)).toBe(262);
     expect(unlinkedValue('delta', 'w', 74, hunter, boomer)).toBe(Math.round(74 * 132 / 64));
+  });
+});
+
+describe('the ability timer\'s pieces (plan Task 6)', () => {
+  const file = (preset: 'stock' | 'modern') => parseKv(baseFile(preset, ABILITY_PANEL.file))[0].value as KvNode[];
+  const by = (n: string) => ABILITY_PANEL.children.find((c) => c.name === n)!;
+  it('is the single abilitytimerhud.res, framed by its hudlayout.res block', () => {
+    expect(panelChildren('abilityRing')).toBe(ABILITY_PANEL);
+    expect(ABILITY_PANEL.file).toBe('resource/ui/hud/abilitytimerhud.res');
+    expect(ABILITY_PANEL.repeat).toBe('single');
+    expect(ABILITY_PANEL.frame).toBe('hudlayout');
+    expect(ABILITY_PANEL.children.map((c) => c.name)).toEqual(['BackgroundImage', 'AbilityImage', 'Progress']);
+  });
+  it('names blocks both presets have', () => {
+    for (const preset of ['stock', 'modern'] as const) {
+      for (const def of ABILITY_PANEL.children) expect(kvFind(file(preset), [def.name]), `${preset} ${def.name}`).toBeDefined();
+    }
+  });
+  it('moves, sizes square and hides each piece; code picks the backdrop\'s picture and the icon', () => {
+    // Probe Q14 (/home/volence/l4d/hud/probe-phase2-infected/b9/shots/crops/br-bcd.png): code sets PZ_charge_bg over the file's image.
+    expect(by('BackgroundImage')).toMatchObject({ kind: 'image', role: 'decor', box: 'square', move: true, colour: false });
+    expect(by('BackgroundImage').note).toBe('The game picks this picture; you can move, size or hide it.');
+    expect(by('AbilityImage')).toMatchObject({ kind: 'image', role: 'content', box: 'square', move: true, colour: false });
+    expect(by('AbilityImage').note).toBe('The game picks the icon by class.');
+    expect(by('Progress')).toMatchObject({ kind: 'other', role: 'content', box: 'square', move: true, colour: false });
+    expect(by('Progress').note).toBe('The game fills this as your ability recharges.');
   });
 });

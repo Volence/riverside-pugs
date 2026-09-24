@@ -2388,3 +2388,22 @@ describe('Your infected health on the page', () => {
     await waitFor(() => expect(saved().children?.siHealth?.Health?.w).toBe(132 + Math.round(10 * 132 / 64)));
   });
 });
+
+describe('The ability timer on the page', () => {
+  const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
+  it('shows the three state colours from the file, writes a pick, and lists its pieces', async () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ability timer' }));
+    expect(screen.getAllByLabelText('Scale').length).toBeGreaterThan(0);
+    const ready = screen.getByLabelText('Ready colour colour') as HTMLInputElement;
+    expect(ready.value).toBe('#ffffff');
+    expect((screen.getByLabelText('Charging colour colour') as HTMLInputElement).value).toBe('#7f7f7f');
+    expect(screen.getByText('Rarely shown: no probe produced the suppressed state.')).toBeTruthy();
+    fireEvent.input(ready, { target: { value: '#ff00ff' } });
+    await waitFor(() => expect(saved().elements?.abilityRing?.keys?.ability_ready_color).toBe('255 0 255 255'));
+    fireEvent.click(screen.getByRole('button', { name: "Ready colour: use the file's value" }));
+    await waitFor(() => expect(saved().elements?.abilityRing?.keys).toBeUndefined());
+    for (const label of ['Backdrop', 'Class icon', 'Recharge meter']) expect(layer('Ability timer').getByRole('button', { name: label }), label).toBeTruthy();
+  });
+});

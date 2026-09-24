@@ -82,6 +82,7 @@ export const PANEL_FILE: Record<string, string> = {
   teamColumn: 'resource/ui/hud/teammatepanel.res',
   siHealth: 'resource/ui/hud/hunterhealth.res',
   infectedRow: 'resource/ui/hud/zombieteamdisplayplayer.res',
+  abilityRing: 'resource/ui/hud/abilitytimerhud.res',
 };
 
 /**

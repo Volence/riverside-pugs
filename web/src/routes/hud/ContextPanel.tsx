@@ -12,13 +12,15 @@ import {
 import { weaponKey } from '../../hud/weapons';
 import { fontFace, shownKey, healthRgb, panelFile, DEFAULT_PREVIEW, type PreviewState } from '../../hud/render';
 import { elementById, type HudElement } from '../../hud/elements';
-import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam } from '../../hud/build';
+import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam, buildTrees, pcGet } from '../../hud/build';
+import { kvFind } from '../../hud/kv';
 import { baseOf } from '../../hud/base';
 import { childDef, panelChildren, maxInset, type KeyDef } from '../../hud/children';
 import { probe } from '../../hud/probes';
 import {
   cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild, resetChildKey,
   startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, patchWeapons, ammoOnly, setFit,
+  resetElementKey,
   type Align,
 } from '../../hud/edit';
 import { unionBox } from '../../hud/guides';
@@ -386,12 +388,38 @@ export function ElementControls(
         </label>
       )}
 
+      {/* The element block's own keys (the ability timer's state colours), shown as the file has them. */}
+      {el.keys?.filter((k) => !k.gate || probe(k.gate)).map((k) => (
+        <Fragment key={k.key}>
+          <KeyControl
+            def={k} end={end}
+            value={shownKey(design, k, o.keys?.[k.key] ?? elementKey(design, el.key, k.key))}
+            onValue={(v, mode) => patch({ keys: { ...o.keys, [k.key]: v } }, mode)}
+          />
+          {k.note && <p class="muted hud__note">{k.note}</p>}
+          {o.keys?.[k.key] !== undefined && (
+            <button
+              type="button" class="btn btn--ghost btn--sm" aria-label={`${k.label}: use the file's value`}
+              onClick={() => edit((d) => resetElementKey(d, id, k.key))}
+            >
+              Use the file's value
+            </button>
+          )}
+        </Fragment>
+      ))}
+
       {id === 'weaponSelection' && <WeaponControls design={design} edit={edit} end={end} />}
 
       {/* The crosshair has no element settings of its own to reset: its choice and art are undone like any edit. */}
       {id !== 'xhair' && <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this element</button>}
     </Field>
   );
+}
+
+/** An element key as the base file has it (the design's own edit is left out): what "Use the file's value" goes back to. */
+function elementKey(design: HudDesign, block: string, key: string): string | undefined {
+  const n = kvFind(buildTrees({ ...design, elements: {} })('scripts/hudlayout.res'), [block]);
+  return n ? pcGet(n, key) : undefined;
 }
 
 /** Said under a teammate piece's controls: one file is loaded for every card. */
