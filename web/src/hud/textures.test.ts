@@ -5,6 +5,10 @@ const px = (t: Uint8ClampedArray, w: number, x: number, y: number) => [...t.slic
 
 describe('textures', () => {
   it('parses a colour string', () => { expect(parseColour('40 40 40 215')).toEqual([40, 40, 40, 215]); });
+  it('parses a colour with doubled, tabbed or padded spaces', () => {
+    expect(parseColour(' 10  20\t30 200 ')).toEqual([10, 20, 30, 200]);
+    expect(parseColour('1 2 3')).toEqual([1, 2, 3, 255]);
+  });
 
   it('fills a flat texture', () => {
     const t = flatTexture(4, 2, '10 20 30 40');

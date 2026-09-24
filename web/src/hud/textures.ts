@@ -1,6 +1,7 @@
 /** Pixel generators for HUD art. Plain arrays in, RGBA out, so they need no canvas and no DOM. */
+/** A "r g b [a]" colour, split on any run of whitespace, as a hand-written HUD may pad or double it. */
 export function parseColour(c: string): [number, number, number, number] {
-  const p = c.split(' ').map((n) => Math.min(255, Math.max(0, parseInt(n, 10) || 0)));
+  const p = c.trim().split(/\s+/).map((n) => Math.min(255, Math.max(0, parseInt(n, 10) || 0)));
   return [p[0] ?? 0, p[1] ?? 0, p[2] ?? 0, p[3] ?? 255];
 }
 
