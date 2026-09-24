@@ -15,8 +15,10 @@
  * scripts/hudlayout.res (the xHair ImagePanel that draws it lives there),
  * so a crosshair addon and a HUD addon fight over that file and the first in
  * addonlist.txt wins; the in-game Add-ons menu cannot reorder them. The
- * legacy 'addon' choice still writes the element for such an addon, and is
- * offered only to a design that already has it. Without the addon its
+ * 'addon' choice writes the element and no texture, so a player who swaps
+ * crosshair addons in and out keeps one HUD listed above them all; it was
+ * hidden from new designs until a player asked for exactly that on
+ * 2026-09-24. Without the addon its
  * texture, vgui/hud/altcrosshair, is in no pak01, so the element shows the
  * magenta and black missing-texture checker, as the owner saw in game on
  * 2026-09-23.
@@ -57,13 +59,16 @@ function CrosshairZoom({ art, size, label, cls }: { art: CrosshairArt; size: num
 const CHOICES: { id: CrosshairChoice; label: string; says: string }[] = [
   { id: 'bundle', label: 'Custom', says: 'Your crosshair ships inside this HUD. No crosshair addon needed.' },
   { id: 'none', label: 'Game default', says: "No custom crosshair: the game's own crosshair shows." },
-  { id: 'addon', label: 'Separate crosshair addon (legacy)', says: 'Leaves room for a crosshair addon you already use to draw it.' },
+  {
+    id: 'addon', label: 'My own crosshair addon',
+    says: 'This HUD draws whichever crosshair addon you have installed, so you can swap crosshair .vpk files without making a new HUD.',
+  },
 ];
 
 /** The crosshair a design draws: only a Custom one has any. */
 const artOf = (design: HudDesign) => (design.crosshair === 'bundle' ? design.xhairArt : undefined);
 
-/** Custom, Game default (and the legacy addon choice, only for a design that already has it), one line each. */
+/** Custom, Game default and My own crosshair addon, one line each. */
 function Choice({ design, edit }: { design: HudDesign; edit: Edit }) {
   // Custom with no crosshair yet starts from the builder's defaults, so a 'bundle' always has one.
   const choose = (c: CrosshairChoice) => edit((d) => (d.crosshair === c ? d : {
@@ -71,7 +76,7 @@ function Choice({ design, edit }: { design: HudDesign; edit: Edit }) {
   }));
   return (
     <>
-      {CHOICES.filter((c) => c.id !== 'addon' || design.crosshair === 'addon').map((c) => (
+      {CHOICES.map((c) => (
         <div key={c.id}>
           <label class="hud__check">
             <input type="radio" name="hud-crosshair" value={c.id} checked={design.crosshair === c.id} onChange={() => choose(c.id)} />
@@ -92,7 +97,8 @@ function HideGame({ design, edit }: { design: HudDesign; edit: Edit }) {
         <p class="muted hud__note hud__warn">
           {/* Advanced mode mounts ahead of every addon from gameinfo.txt, so there the order takes care of itself. */}
           {!design.advanced && <>The crosshair addon ships its own layout file, so this HUD must be listed above it in{' '}
-          <code>left4dead/addonlist.txt</code>; the in-game Add-ons menu cannot change the order. </>}
+          <code>left4dead/addonlist.txt</code>: with the game closed, move this HUD's line above every crosshair's. The
+          in-game Add-ons menu cannot change the order. </>}
           Without the addon the crosshair shows as a magenta and black checker. Choose Custom to put your crosshair in
           this HUD instead.
         </p>

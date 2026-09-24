@@ -314,7 +314,8 @@ export function Crosshair({ session = { kind: 'anonymous' } }: { session?: Sessi
             {status && <p class="muted xh__status">{status}</p>}
             <p class="muted xh__status">
               Planning a custom HUD too? A crosshair addon and a HUD addon fight over the same file, so bring your
-              crosshair into the HUD editor instead: it goes into the HUD's download.
+              crosshair into the HUD editor instead: it goes into the HUD's download. Swap between several crosshair
+              addons? Choose My own crosshair addon in the HUD editor instead.
             </p>
             <a class="btn btn--ghost btn--block xh__tohud" href="/hud?from=crosshair" onClick={openInHud}>Open in the HUD editor</a>
             <button type="button" class="btn btn--ghost btn--block xh__share" onClick={() => setSharing(true)}>Share to community...</button>
