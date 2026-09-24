@@ -56,9 +56,14 @@ function reasonSentences(kind: string, detail: string): string {
 
   if ((kind === 'aimbot' || kind === 'aimlock')
       && f.maxd !== undefined && f.totd !== undefined && f.taps !== undefined && f.taps1 !== undefined) {
+    // "single-input"/"held for a single input", not "one-tick": the plugin's
+    // ring buffer is fed by OnPlayerRunCmdPre, so it measures per usercmd
+    // (one client input), not per server tick. The two are not the same
+    // thing, and a tick-rate change would make "one-tick" actively wrong.
+    const presses = f.taps === 1 ? 'trigger press' : 'trigger presses';
     sentences.push(
-      `Our measurement over the 1.5 s before: biggest one-tick aim change ${f.maxd} degrees, `
-      + `total ${f.totd} degrees, ${f.taps} trigger presses, ${f.taps1} of them one tick long.`,
+      `Our measurement over the 1.5 s before: biggest single-input aim change ${f.maxd} degrees, `
+      + `total ${f.totd} degrees, ${f.taps} ${presses}, ${f.taps1} of them held for a single input.`,
     );
   }
 
