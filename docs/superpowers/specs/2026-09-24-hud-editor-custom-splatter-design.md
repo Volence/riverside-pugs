@@ -254,3 +254,53 @@ my colours on:
 
 Per-card art, the infected card's background, generated splatter shapes, own-health insides editing
 (Phase 2), and the preview/pak01 shadowing issue for imported HUDs noted above.
+
+## In-game result
+
+Checked 2026-09-24 03:15 to 03:19 with the unattended harness on the owner's L4D1 client, scenarios
+`survivor-hurt` (you at 20 HP, teammates dead / incapacitated / 35 HP) and `survivor-full` (100 HP,
+three healthy teammates), 1920 x 1080. Three downloads were built by the page itself (headless Chrome
+driving the real controls), each on the Stock preset at 16:9. Kit, previews, shots and crops:
+`/home/volence/l4d/hud/test-splatter-2026-09-24/` (README there lists what each VPK holds). Every run
+exited 0 with the restore verified (19 files back to their pre-run sha256), and the game was gone
+after each run.
+
+**Result: all four checks pass. Keep my colours works and stays.**
+
+1. **The stand-in draws, at full strength, and the stock splatter is gone: PASS.**
+   `A-image-tinted.vpk` (Image `team.png`: opaque cyan / magenta stripes). On healthy cards the
+   game draws exactly 0 255 255 and 255 0 255, and the stripe edges land within 1 px of the
+   preview's (`runs/A/survivor-full/full-2.png`, row y 1005). No faint factor, no black stock
+   splatter. The Fade (`B-fade-keepcolours.vpk`, cyan at alpha 230) also draws on every card.
+2. **Top scratch is the upload times the health colour: PASS.** `top.png` (white, alpha steps)
+   measures 217 147 4 at 20 HP (expected orange 216 146 12) and 3 178 46 at 100 HP (expected green
+   10 177 50); the preview's full-health draw is 10 177 50. The alpha steps show as in the preview.
+   The white checker on the bottom scratch is tinted the same way.
+3. **Keep my colours: PASS.** With `$vertexcolor` left out of the `.vmt`, the bottom scratch
+   (`bottom-colour.png`) measures exactly 0 64 255 and 255 230 0 at both 20 HP and 100 HP, and the
+   magenta Fade on the top scratch stays magenta (about 242 2 242 at its left end) at both healths.
+   A tinted result would have been about 216 0 12 when hurt. So dropping `$vertexcolor` does stop
+   client.dll's health tint, and the option stays.
+4. **No missing-texture checker: PASS.** No magenta pixel above the HUD rows in any of the 12 shots;
+   in the HUD rows the only magenta is the test art. `C-team-none.vpk` has none at all.
+
+Other findings:
+
+- **Down and dead cards show the custom splatter, as the spec expected** (decision 3). Dead: the
+  stripes show under the skull, darkened by the dead art. Incapacitated: the red incap art covers
+  nearly all of the card, and only thin slivers of the splatter show at its edges. Both look
+  acceptable: the card still reads as dead or down. The preview agrees in shape, but on the dead
+  card it dims the splatter more than the game (a cyan stripe reads 0 168 168 in game against
+  0 99..119 in the preview's Dead state), so the preview's dead overlay is too dark over custom art.
+  That is cosmetic; a follow-up could lighten the preview's dead overlay to match.
+  Crop: `runs/A/crop-dead-incap-game-vs-preview.png`.
+- **Fade strength**: at the left edge the game matches the preview; along the fade the game stays
+  somewhat stronger than the preview (card 3 at x 880: game 35 117 115, preview 55 94 86 over a
+  similar dark backdrop). The backdrops differ, so this is not an exact factor, only that the game's
+  fade reads a little longer. Not worth a change now.
+- **None still hides**: `C-team-none.vpk` (Image uploaded, then None) ships no stand-in and no
+  texture; no splatter shows behind any card in any state, and the stock scratches are tinted by
+  health as before. Crop: `runs/C/crop-hurt-full-preview.png`.
+- Shots: `runs/{A,B,C}/survivor-hurt/{hurt-splatter,hurt-settled}.png` and
+  `runs/{A,B,C}/survivor-full/{full-1,full-2}.png`; comparison crops `runs/A/crop-hud-*.png`,
+  `runs/B/crop-hurt-full-preview.png` (rows: hurt, full, preview).
