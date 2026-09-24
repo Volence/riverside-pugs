@@ -197,11 +197,25 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 
 .hud { display: grid; grid-template-columns: 190px minmax(0, 1fr) 320px; gap: var(--sp-4); align-items: start; }
 
-.hud__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); font-size: var(--fs-dense); color: var(--text-muted); }
+/* Two rows: the HUD (goes into the download), then the Preview (never does). */
+.hud__toolbar { display: flex; flex-direction: column; margin-bottom: var(--sp-4); font-size: var(--fs-dense); color: var(--text-muted); }
+.hud__tbrow { display: grid; grid-template-columns: 4.5rem 1fr; align-items: start; padding: var(--sp-2) 0; }
+/* Wrapped controls line up under the row's own, not under its heading. */
+.hud__tbbody { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.hud__tbrow + .hud__tbrow { border-top: 1px solid var(--border); }
+.hud__tbhead { padding-top: 6px; font-family: var(--font-display, inherit); font-size: var(--fs-label); letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+.hud__tbend { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+/* In the toolbar a tab strip is a compact segmented control: joined, no strip underline. */
+.hud__toolbar .tabs { margin: 0; border: 0; gap: 0; overflow: visible; }
+.hud__toolbar .tabs__tab, .hud__toolbar .btn--ghost { min-height: 30px; padding: 2px var(--sp-3); font-size: var(--fs-label); }
+.hud__toolbar .tabs__tab + .tabs__tab { margin-left: -1px; }
+.hud__toolbar .tabs__tab.is-active { background: var(--surface-2); color: var(--text-bright, var(--text)); border-color: var(--border); box-shadow: inset 0 -2px 0 var(--accent); }
+/* A toggle (Crouched, Occasional panels, Show yourself) says on or off with a dot. */
+.hud__toolbar .btn--ghost[aria-pressed]::before { content: ''; width: 7px; height: 7px; border-radius: 50%; border: 1px solid currentColor; }
+.hud__toolbar .btn--ghost[aria-pressed='true'] { color: var(--text); border-color: var(--accent); }
+.hud__toolbar .btn--ghost[aria-pressed='true']::before { background: var(--accent); border-color: var(--accent); }
 .hud__toolbar select { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font: inherit; font-size: var(--fs-dense); }
 .hud__tbsep { width: 1px; align-self: stretch; background: var(--border); }
-/* Download sits at the right end of the toolbar, whatever wraps before it. */
-.hud__download { margin-left: auto; }
 
 /* The backing store is sized to this box every draw, 1:1, so it must never be
  * scaled by CSS after the fact. touch-action: none is what lets a drag win
