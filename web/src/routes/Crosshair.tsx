@@ -399,7 +399,7 @@ export function Crosshair({ session = { kind: 'anonymous' } }: { session?: Sessi
         <p class="muted">
           The .vpk contains the crosshair texture (<code>materials/vgui/hud/altcrosshair</code>) and a copy
           of the stock HUD layout with one extra image element that draws it at screen centre. The
-          Modern HUD addon already has that element, so if you run it the layout in this file is ignored
+          Riverside Modern HUD already has that element, so if you run it the layout in this file is ignored
           and only the texture is used.
         </p>
       </Panel>
