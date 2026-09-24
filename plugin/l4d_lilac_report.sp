@@ -336,9 +336,10 @@ void ComputeAimMetrics(int client, float &maxd, float &totd, int &taps, int &tap
  * (48 bytes, see pug-logauth.inc) for its own " lseq=.." / " mac=.."
  * trailer, so this line has ~976 usable bytes. Even a pathological worst
  * case (every %d at its 11-character sign+digits extreme, every %.1f a
- * generous 20 characters) puts the longest extra suffix (aimlock, seven
- * fields) at under 200 bytes and the base id/cheat/banned line at under 90,
- * leaving hundreds of bytes of margin against the 976 byte budget.
+ * generous 20 characters) puts the longest extra suffix (aimlock, now eight
+ * fields with lself_team) at under 200 bytes and the base id/cheat/banned
+ * line at under 90, leaving hundreds of bytes of margin against the 976 byte
+ * budget.
  */
 void Report(int client, int cheat, bool banned)
 {
@@ -385,9 +386,18 @@ void Report(int client, int cheat, bool banned)
 				ttClass = g_iAimlockTargetClass[client];
 				ttGhost = g_iAimlockTargetGhost[client];
 			}
+			// The flagged CLIENT's own team, read fresh right here rather than
+			// cached: unlike the target, client is guaranteed to still be a
+			// valid connected player at this point (checked at the top of
+			// Report()), so there is nothing to go stale. This is what lets the
+			// site tell a legitimate infected-sees-survivors-through-walls lock
+			// apart from a survivor locking onto another survivor, instead of
+			// only ever hedging off the target's side.
+			int selfTeam = (client > 0 && client <= MaxClients && IsClientInGame(client))
+				? GetClientTeam(client) : -1;
 			FormatEx(extra, sizeof(extra),
-				" maxd=%.1f totd=%.1f taps=%d taps1=%d ltarget_team=%d ltarget_class=%d ltarget_ghost=%d",
-				maxd, totd, taps, taps1, ttTeam, ttClass, ttGhost);
+				" maxd=%.1f totd=%.1f taps=%d taps1=%d ltarget_team=%d ltarget_class=%d ltarget_ghost=%d lself_team=%d",
+				maxd, totd, taps, taps1, ttTeam, ttClass, ttGhost, selfTeam);
 		}
 	} else if (cheat == CHEAT_BHOP) {
 		int bhops = -1, jumpTicks = -1;
