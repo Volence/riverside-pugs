@@ -855,6 +855,8 @@ export interface PatchSummary {
   /** Rounds the comparison uses: computed rounds of completed, non-voided matches. */
   countedRounds: number;
   servers: { serverId: number; name: string; lastSeenAt: string }[];
+  /** When this patch was published to the public page, null while unpublished. */
+  publishedAt: string | null;
 }
 export interface PatchDetail extends PatchSummary {
   inputs: Record<string, string> | null;
@@ -927,6 +929,48 @@ function compareParams(q: CompareQuery): string {
   const p = new URLSearchParams({ a: q.a.join(','), b: q.b.join(','), origin: q.origin, phases: q.phases });
   if (q.maps.length) p.set('maps', q.maps.join(','));
   return p.toString();
+}
+
+/** Mirrors src/balancePublic.ts PublicPatch. */
+export interface PublicPatch {
+  id: number; number: number; name: string; notes: string;
+  source: 'announced' | 'detected' | 'historical';
+  /** The patch itself is a historical reconstruction. */
+  approximate: boolean;
+  /** First and last counted round (match_rounds.started_at, falling back to matches.ended_at). */
+  firstRound: string | null; lastRound: string | null;
+  matches: number; rounds: number;
+  publishedAt: string | null;
+}
+
+/** Mirrors src/balancePublic.ts PublicChanges. */
+export interface PublicChanges {
+  knobs: { label: string; from: string; to: string }[];
+  pluginsAdded: string[]; pluginsRemoved: string[]; pluginsUpdated: string[];
+  /** Watched config files and the per-map stripper directory that differ, by label. */
+  files: string[];
+}
+
+/** Mirrors src/balancePublic.ts PublicRow. */
+export interface PublicRow {
+  metric: string; group: string; label: string;
+  a: number | null; b: number | null; diff: number | null; rel: number | null; lo: number | null; hi: number | null;
+  verdict: Verdict; moreMatches: number | null; nA: number; nB: number; noSharedMaps: boolean;
+}
+
+/** Mirrors src/balancePublic.ts PublicEntry. */
+export interface PublicEntry extends PublicPatch {
+  /** The baseline: nearest earlier published patch with counted rounds. */
+  previous: { id: number; name: string } | null;
+  status: 'compared' | 'first' | 'no_rounds';
+  changes: PublicChanges | null;
+  /** Why `changes` is null: this patch is historical, the baseline has no recorded
+   *  inputs, or there is no baseline. */
+  changesUnavailable: 'historical' | 'previous_unrecorded' | 'first' | null;
+  effect: {
+    a: { matches: number; rounds: number }; b: { matches: number; rounds: number };
+    skill: 'differs' | 'unavailable' | null; approximate: boolean; rows: PublicRow[];
+  } | null;
 }
 
 /** These mirror the DB rows exactly, because the admin campaigns route
@@ -1425,6 +1469,8 @@ export const adminApi = {
   balanceDrift: (signal?: AbortSignal) => get<{ servers: DriftRow[] }>('/api/admin/balance/drift', signal),
   editBalancePatch: (id: number, body: { name?: string | null; notes?: string; reviewed?: boolean }) =>
     post(`/api/admin/balance/patches/${id}`, body),
+  balancePublicPreview: (id: number, signal?: AbortSignal) => get<PublicEntry>(`/api/admin/balance/patches/${id}/public`, signal),
+  publishBalancePatch: (id: number, published: boolean) => post(`/api/admin/balance/patches/${id}/publish`, { published }),
   balanceCompare: (q: CompareQuery, signal?: AbortSignal) => get<CompareResult>(`/api/admin/balance/compare?${compareParams(q)}`, signal),
   balanceMetric: (q: CompareQuery, metric: string, phase: string, signal?: AbortSignal) =>
     get<MetricDetail>(`/api/admin/balance/metric?${compareParams(q)}&metric=${encodeURIComponent(metric)}&phase=${encodeURIComponent(phase)}`, signal),
@@ -1450,6 +1496,8 @@ export const api = {
     get<{ names: Record<string, string> }>('/api/campaigns/names', signal),
   customCampaigns: (signal?: AbortSignal) =>
     get<{ campaigns: CustomCampaignRow[] }>('/api/campaigns/custom', signal),
+  balancePatches: (signal?: AbortSignal) => get<{ patches: PublicPatch[] }>('/api/balance/patches', signal),
+  balancePatch: (id: number, signal?: AbortSignal) => get<PublicEntry>(`/api/balance/patches/${id}`, signal),
   replayLive: (token: string, signal?: AbortSignal) =>
     get<{ filename: string; closed: boolean }>(`/api/replays/live/${encodeURIComponent(token)}`, signal),
   replayTimeline: (matchId: number, ordinal: number, half: number, signal?: AbortSignal) =>
