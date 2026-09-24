@@ -68,7 +68,11 @@ export function previewOf(s?: SurvivorState | PreviewState): PreviewState {
   return typeof s === 'string' ? { ...DEFAULT_PREVIEW, survivor: s } : s;
 }
 
-export interface DrawOpts { card?: number; onAsset?: () => void; state?: SurvivorState | PreviewState }
+export interface DrawOpts {
+  card?: number; onAsset?: () => void; state?: SurvivorState | PreviewState;
+  /** Set by drawPanel from the panel's own tree (panelColour); callers leave it out. */
+  panelRgb?: [number, number, number];
+}
 
 const SCHEME = 'resource/clientscheme.res';
 
@@ -338,8 +342,35 @@ const HEALTH_LABELS = new Set(['healthnumber', 'healthicon']);
 /** The health the Hurt preview samples: 40 of 100, in the orange band. */
 const HURT_HEALTH = 40;
 
-/** The preview's sample: full health, 40 when hurt, or down (incapacitated). */
+/**
+ * The panel colour: the monochrome_color of the panel's Health block in the
+ * generated tree, while gate Q1 is open; else undefined. Probe Q1
+ * (/home/volence/l4d/hud/probe-phase2/RESULTS.md, B1 shots a and c, b1v3
+ * cards-hurt.png) answered YES, whole panel: it recolours the own bar fill,
+ * its outline, the HealthNumber, the HealthIcon cross and the scratches, in
+ * every health state (it tints the shaded bar texture, it does not paint
+ * flat); on teammate cards the bar and the number, the down card included.
+ * So it is one colour for the whole panel (plan decision 5), and it replaces
+ * the health colour everywhere the health colour is used.
+ */
+export function panelColour(design: HudDesign, panelId: string): [number, number, number] | undefined {
+  if (!HEALTH_PANELS.has(panelId) || !probe('Q1')) return undefined;
+  const n = kvFind(buildTrees(design)(PANEL_FILE[panelId]), ['Health']);
+  const v = n ? kvGet(n, 'monochrome_color') : undefined;
+  if (v === undefined) return undefined;
+  const [r, g, b] = parseColour(v);
+  return [r, g, b];
+}
+
+/**
+ * The colour code gives a health panel's pieces: the panel colour when the
+ * panel has one, before any state rule; else the preview's sample health,
+ * full, 40 when hurt, or down (incapacitated). Every user (the bar, the
+ * number, the cross, the scratches) reads this one function, so no piece
+ * can disagree with another.
+ */
 function sampleHealthRgb(opts: DrawOpts): [number, number, number] {
+  if (opts.panelRgb) return opts.panelRgb;
   const s = previewOf(opts.state).survivor;
   return healthRgb(s === 'hurt' ? HURT_HEALTH : 100, 100, s === 'down');
 }
@@ -861,7 +892,9 @@ function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: st
  *
  * Two file keys change it, each only while its probe gate is open (the build
  * writes them either way when a design carries them): inset (Q3) sets the
- * inset in units, and monochrome_color (Q1) tints the fill in its colour.
+ * inset in units, and monochrome_color (Q1) is the panel colour, which
+ * sampleHealthRgb hands the outline and the fill (and every other health
+ * piece of the panel) in place of the health colour.
  */
 function drawBar(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
   const s = previewOf(opts.state).survivor;
@@ -873,10 +906,8 @@ function drawBar(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: numb
   const m = (insetRaw !== undefined ? num(insetRaw, STOCK_BAR_INSET) : STOCK_BAR_INSET) * k;
   const box = { x: r.x + m, y: r.y + m, w: Math.max(0, r.w - 2 * m), h: Math.max(0, r.h - 2 * m) };
   const fillW = box.w * frac;
-  const mono = probe('Q1') ? kvGet(n, 'monochrome_color') : undefined;
-  const [cr, cg, cb] = mono !== undefined ? parseColour(mono) : [hr, hg, hb];
   const white = artImage('vgui/healthbar_white', opts.onAsset);
-  if (white && fillW > 0) ctx.drawImage(tinted(white, 'vgui/healthbar_white', cr, cg, cb), box.x, box.y, fillW, box.h);
+  if (white && fillW > 0) ctx.drawImage(tinted(white, 'vgui/healthbar_white', hr, hg, hb), box.x, box.y, fillW, box.h);
   if (frac < 1) {
     const grey = artImage('vgui/healthbar_grey', opts.onAsset);
     if (grey) ctx.drawImage(grey, box.x + fillW, box.y, box.w - fillW, box.h);
@@ -886,7 +917,8 @@ function drawBar(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: numb
 /** HealthPanel's inset when the file gives none: 2 units, 4 px at 1080p (b13/compare/stock-own.png, b1 Q3). */
 const STOCK_BAR_INSET = 2;
 
-export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: string, origin: PanelBox, k: number, opts: DrawOpts = {}): void {
+export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: string, origin: PanelBox, k: number, opts0: DrawOpts = {}): void {
+  const opts: DrawOpts = { ...opts0, panelRgb: panelColour(design, panelId) };
   const view = previewOf(opts.state);
   const nodes = orderedChildren(buildTrees(design)(PANEL_FILE[panelId]));
   const rects = childRects(design, panelId, origin, k);

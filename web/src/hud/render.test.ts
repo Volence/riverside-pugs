@@ -1098,4 +1098,82 @@ describe('your own health in every preview state', () => {
     drawPanel(ctx, d, 'ownHealth', O, 1);
     expect(draws(calls, WHITE)).toEqual([[GREEN, r.x + 2, r.y + 2, r.w - 4, r.h - 4]]);
   });
+
+  describe('the panel colour (probe Q1: monochrome_color recolours the whole panel)', () => {
+    // /home/volence/l4d/hud/probe-phase2/RESULTS.md Q1: monochrome_color recolours the own bar fill, its
+    // outline, the HealthNumber, the HealthIcon cross and the scratches, in every health state, tinting the
+    // shaded texture; on teammate cards the bar and the number, down card included.
+    // Shots: b1/shots/crops/own-a.png, own-c.png; b1v3/shots/crops/cards-hurt.png.
+    const MAGENTA = 'rgb(255,0,255)';
+    const TOP = artUrl('vgui/hud/detail_scratches_top_1')!;
+    const BOTTOM = artUrl('vgui/hud/detail_scratches_bottom_1')!;
+    const ownMono = design({ children: { ownHealth: { Health: { keys: { monochrome_color: '255 0 255 255' } } } } });
+    const text = (calls: { m: string; a: unknown[]; fill: string }[], s: string) => calls.find((c) => c.m === 'fillText' && c.a[0] === s);
+
+    it('draws the fill, outline, number, cross and both scratches in it, Healthy, Hurt and Down', () => {
+      // Deliberately replaces plumbing Task 15's flat-fill Gated bar test (X10).
+      const { draws } = tintRig();
+      _setProbe('Q1', true);
+      for (const [state, number] of [['healthy', '100'], ['hurt', '40'], ['down', '299']] as const) {
+        const { ctx, calls } = recCtx();
+        drawPanel(ctx, ownMono, 'ownHealth', O, 1, { state });
+        for (const url of [OUTLINE, WHITE, TOP, BOTTOM]) {
+          const got = draws(calls, url);
+          expect(got.length, `${state} ${url}`).toBe(1);
+          expect(got[0][0], `${state} ${url}`).toBe(MAGENTA);
+        }
+        expect(text(calls, number)!.fill, state).toBe('rgba(255,0,255,1)');   // the colour changes, the value does not
+        expect(text(calls, ',')!.fill, state).toBe('rgba(255,0,255,1)');      // the cross is "," in the ToolBox face
+      }
+    });
+
+    it('draws a teammate card\'s bar and number in it, the down card too, and leaves the name alone', () => {
+      const { draws } = tintRig();
+      _setProbe('Q1', true);
+      const d = design({ children: { teamColumn: { HealthNumber: { on: true }, Health: { keys: { monochrome_color: '0 255 255 255' } } } } });
+      const plain = recCtx();
+      drawPanel(plain.ctx, design({}), 'teamColumn', O, 1, { card: 0 });
+      for (const [state, number] of [['healthy', '100'], ['down', '299']] as const) {
+        const { ctx, calls } = recCtx();
+        drawPanel(ctx, d, 'teamColumn', O, 1, { card: 0, state });
+        expect(draws(calls, OUTLINE).map((c) => c[0]), state).toEqual(['rgb(0,255,255)']);
+        expect(draws(calls, WHITE).map((c) => c[0]), state).toEqual(['rgb(0,255,255)']);
+        expect(text(calls, number)!.fill, state).toBe('rgba(0,255,255,1)');
+        expect(text(calls, 'Francis')!.fill, state).toBe(text(plain.calls, 'Francis')!.fill);
+      }
+    });
+
+    it('is dropped on load and not drawn while gate Q1 is closed', () => {
+      const { draws } = tintRig();
+      _setProbe('Q1', false);
+      expect(validateDesign(JSON.parse(JSON.stringify(ownMono))).children?.ownHealth?.Health?.keys?.monochrome_color).toBeUndefined();
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, ownMono, 'ownHealth', O, 1, { state: hurt });
+      expect(draws(calls, WHITE)[0][0]).toBe(ORANGE);
+      expect(text(calls, '40')!.fill).toBe('rgba(216,146,12,1)');
+    });
+
+    describe('Q4: a file drawColor on the top scratch changes nothing', () => {
+      // /home/volence/l4d/hud/probe-phase2/b1v2/shots/crops/ownbig-a.png, ownbig-c.png: the file's
+      // drawColor on HealthbarTextureTop is ignored; code tints it by health, or by the panel colour.
+      const ID = 'a'.repeat(64);
+      afterEach(() => { unregisterImport(ID); _resetImportedArt(); });
+      const withTint = (children?: HudDesign['children']) => {
+        const own = baseFile('stock', 'resource/ui/hud/localplayerpanel.res')
+          .replace(/("HealthbarTextureTop"\s*\{)/, '$1\r\n\t\t"drawColor"\t"255 255 0 255"');
+        registerImport(ID, sampleHud({ 'resource/ui/hud/localplayerpanel.res': own }));
+        return validateDesign({ v: 1, preset: 'imported', imported: { id: ID, name: 'q4' }, crosshair: 'none', children });
+      };
+      it('tints it by health without a panel colour, and by the panel colour with one', () => {
+        const { draws } = tintRig();
+        _setProbe('Q1', true);
+        const a = recCtx();
+        drawPanel(a.ctx, withTint(), 'ownHealth', O, 1);
+        expect(draws(a.calls, TOP).map((c) => c[0])).toEqual([GREEN]);
+        const b = recCtx();
+        drawPanel(b.ctx, withTint({ ownHealth: { Health: { keys: { monochrome_color: '255 0 255 255' } } } }), 'ownHealth', O, 1);
+        expect(draws(b.calls, TOP).map((c) => c[0])).toEqual([MAGENTA]);
+      });
+    });
+  });
 });

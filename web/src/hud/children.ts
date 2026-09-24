@@ -33,6 +33,8 @@ export interface KeyDef {
   evidence: string;
   /** The control waits for this probe to pass (probes.ts). */
   gate?: ProbeId;
+  /** Shown under the control. */
+  note?: string;
 }
 
 export type ChildKind = 'image' | 'label' | 'bar' | 'other';
@@ -133,6 +135,22 @@ const HEALTH_NUMBER = block('HealthNumber', [
 
 const STATE_NOTE = 'The game decides when this one shows. Pick Down or Dead above the canvas to see it.';
 
+/**
+ * monochrome_color and inset on a HealthPanel (the own bar and each card's).
+ * Probe Q1 (/home/volence/l4d/hud/probe-phase2/RESULTS.md, B1 shots a and c,
+ * b1v3 cards-hurt.png) showed monochrome_color is one colour for the whole
+ * panel in every health state, down included: on the own panel the bar, its
+ * outline, the number, the cross and the scratches, on a card the bar and the
+ * number (plan decision 5). Q3 was proven on the own bar; the card's Health is
+ * the same HealthPanel class with the one m_inset read, and B13 shows the same
+ * default frame and inset on cards (plan decision 6).
+ */
+const MONO_EVIDENCE = 'client.dll HealthPanel run: m_monochromeColor|monochrome_color';
+const healthKeys = (note: string, insetEvidence: string): KeyDef[] => [
+  { key: 'monochrome_color', label: 'Panel colour', type: 'colour', gate: 'Q1', evidence: MONO_EVIDENCE, note },
+  { key: 'inset', label: 'Inset', type: 'int', range: [0, 8], gate: 'Q3', evidence: insetEvidence },
+];
+
 export const TEAM_PANEL: PanelChildren = {
   panelId: 'teamColumn',
   file: 'resource/ui/hud/teammatepanel.res',
@@ -141,7 +159,9 @@ export const TEAM_PANEL: PanelChildren = {
     { name: 'Head', label: 'Portrait', kind: 'image', role: 'content', box: 'square', move: true, font: false, colour: false,
       hideIn: ['down', 'dead'] },
     { name: 'Health', label: 'Health bar', kind: 'bar', role: 'content', box: 'wh', move: true, font: false, colour: false,
-      hideIn: ['dead'] },
+      hideIn: ['dead'],
+      keys: healthKeys('Recolours the bar and the number on every card.',
+        'client.dll HealthPanel run: m_inset|inset (one HealthPanel class with the own bar, where probe Q3 proved it; B13 shows the same default inset on cards)') },
     { name: 'Name', label: 'Name', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true },
     { name: 'HealthNumber', label: 'Health number', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: false,
       addable: { template: HEALTH_NUMBER, after: 'Name' }, note: 'The game colours this by health.', hideIn: ['dead'] },
@@ -161,7 +181,7 @@ export const TEAM_PANEL: PanelChildren = {
 };
 
 const OWN_STATE = 'The game decides when this one shows. Pick it above the canvas to see it.';
-const SCRATCH_NOTE = 'The game tints these by health. Change their art under Splatter, below the canvas.';
+const SCRATCH_NOTE = 'The game tints these by health, or the panel colour. Change their art under Splatter, below the canvas.';
 
 /**
  * The player's own health panel (localplayerpanel.res), one panel framed by
@@ -188,11 +208,8 @@ export const OWN_PANEL: PanelChildren = {
     { name: 'Head', label: 'Portrait', kind: 'image', role: 'content', box: 'square', move: true, font: false, colour: false,
       hideIn: ['down'], note: 'The game picks the portrait by character.' },
     { name: 'Health', label: 'Health bar', kind: 'bar', role: 'content', box: 'wh', move: true, font: false, colour: false,
-      keys: [
-        { key: 'monochrome_color', label: 'Panel colour', type: 'colour', gate: 'Q1',
-          evidence: 'client.dll HealthPanel run: m_monochromeColor|monochrome_color' },
-        { key: 'inset', label: 'Inset', type: 'int', range: [0, 8], gate: 'Q3', evidence: 'client.dll HealthPanel run: m_inset|inset' },
-      ],
+      keys: healthKeys('Recolours the whole panel: bar, number, cross and scratches, in every health state.',
+        'client.dll HealthPanel run: m_inset|inset'),
       note: 'The game fills the bar by health.' },
     { name: 'HealthIcon', label: 'Health cross', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true,
       colourGate: 'Q5', note: 'The game colours this by health.' },

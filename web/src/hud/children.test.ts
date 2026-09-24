@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { TEAM_PANEL, OWN_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, FIT_SQUARED, childDef, panelOfFile } from './children';
+import { TEAM_PANEL, OWN_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, FIT_SQUARED, childDef, panelOfFile, type KeyDef } from './children';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { SPLATTERS } from './splatter';
@@ -206,5 +206,28 @@ describe('the own health registry', () => {
 
   it('never touches the Modern fill, which the fit rule sizes by name', () => {
     expect(childDef('ownHealth', 'ModBg')).toBeUndefined();
+  });
+});
+
+describe('the panel colour and inset keys (probes Q1 and Q3, slice 2.F X10)', () => {
+  const own = (n: string) => OWN_PANEL.children.find((c) => c.name === n)!;
+  const team = (n: string) => TEAM_PANEL.children.find((c) => c.name === n)!;
+  const key = (keys: KeyDef[] | undefined, k: string) => keys!.find((x) => x.key === k)!;
+
+  it('labels monochrome_color "Panel colour" on both, with the note of what it recolours', () => {
+    // RESULTS.md Q1: the whole own panel (bar, number, cross, scratches) in every state; on cards the bar and number.
+    expect(key(own('Health').keys, 'monochrome_color')).toMatchObject({
+      label: 'Panel colour', gate: 'Q1', note: 'Recolours the whole panel: bar, number, cross and scratches, in every health state.' });
+    expect(key(team('Health').keys, 'monochrome_color')).toMatchObject({
+      label: 'Panel colour', type: 'colour', gate: 'Q1', note: 'Recolours the bar and the number on every card.' });
+  });
+
+  it('offers the inset on a teammate card too, one HealthPanel class with the own bar', () => {
+    expect(key(team('Health').keys, 'inset')).toMatchObject({ type: 'int', range: [0, 8], gate: 'Q3' });
+    expect(key(team('Health').keys, 'inset').evidence).toMatch(/HealthPanel/);
+  });
+
+  it('says the scratches take the panel colour too', () => {
+    for (const n of ['HealthbarTextureTop', 'HealthbarTextureBottom']) expect(own(n).note, n).toMatch(/or the panel colour/);
   });
 });
