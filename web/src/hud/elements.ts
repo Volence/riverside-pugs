@@ -104,9 +104,11 @@ export const ELEMENTS: HudElement[] = [
    * AbilityProgress, a CircularProgressBar code gives HUD/PZ_charge_crosshair
    * (client.dll 0x10240e55). Probe Q16a
    * (/home/volence/l4d/hud/probe-phase2-infected/b9/shots-v2/crops/centre-af.png):
-   * its size and colours are HudCrosshair's ability keys, ability_size is
-   * plain screen pixels (the dll reads it as int, not proportional_int), and
-   * it draws only with the crosshair cvar on. The game centres it, so it
+   * its size and colours are HudCrosshair's ability keys, and it draws only
+   * with the crosshair cvar on. ability_size is in screen pixels (the dll
+   * reads it as int, not proportional_int) and grows a 32 px rect on every
+   * side: the box is 32 + 2 x ability_size px at 1080p (probe B15,
+   * build.ts markerPx). The game centres it, so it
    * does not move; hiding it writes a 0 size and clear colours, never a hard
    * hide of HudCrosshair, which would remove the crosshair too (build.ts
    * markerHide). The attack colours need a survivor in reach and the
@@ -116,7 +118,7 @@ export const ELEMENTS: HudElement[] = [
     children: [], mockPos: { x: 'c', y: 'c' }, props: ['visible'],
     keys: [
       { key: 'ability_size', label: 'Size (pixels)', type: 'int', range: [4, 64],
-        evidence: 'client.dll CHudTerrorCrosshair run: m_abilitySize|ability_size (int); b9/shots-v2/crops/centre-af.png (size 40: a 72 px ring)' },
+        evidence: 'client.dll CHudTerrorCrosshair run: m_abilitySize|ability_size (int), the marker rect grown by it on every side; probe B15: box 32 + 2 x size px at 1080p (size 40: 112 px, b9/shots-v2/b9v2/b9v2-d.png; size 20: 70.5 px, b15/shots/b15/b15-c.png)' },
       { key: 'ability_ready_color', label: 'Ready colour', type: 'colour', unsetLabel: 'Game colour',
         evidence: 'client.dll CHudTerrorCrosshair run: ability_ready_color; b9/shots-v2/crops/centre-af.png (green when ready)' },
       { key: 'ability_charging_color', label: 'Charging colour', type: 'colour', unsetLabel: 'Game colour',

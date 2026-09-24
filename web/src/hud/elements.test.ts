@@ -117,7 +117,7 @@ describe('the ability timer element (plan Task 6)', () => {
 describe('the ability marker element (plan Task 8)', () => {
   it('is HudCrosshair\'s ability keys, placed by the game at the screen centre, ungated', () => {
     // Probe Q16a (/home/volence/l4d/hud/probe-phase2-infected/b9/shots-v2/crops/centre-af.png): the
-    // marker is HudCrosshair's own child, sized by ability_size in plain pixels and coloured by its keys.
+    // marker is HudCrosshair's own child, a box of 32 + 2 x ability_size screen pixels (probe B15), coloured by its keys.
     const el = elementById('abilityMarker')!;
     expect(el).toMatchObject({ side: 'infected', key: 'HudCrosshair', move: false, resize: 'none', mockPos: { x: 'c', y: 'c' } });
     expect(el.keys?.map((k) => k.key)).toEqual(['ability_size', 'ability_ready_color', 'ability_charging_color',
