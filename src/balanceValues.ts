@@ -1,5 +1,5 @@
 import type { DB } from './db.js';
-import type { Catalogue, CatalogueValue } from './balanceCatalogue.js';
+import { placeholders, type Catalogue, type CatalogueValue } from './balanceCatalogue.js';
 import { baseInventory, patchNumber } from './balanceControl.js';
 import { resolvePatch } from './balanceFold.js';
 
@@ -22,7 +22,11 @@ export interface ValueView {
    *  `patch` is null when the patch is not public (public view). */
   lastChange: { at: string; patch: { id: number; number: number; name: string } | null } | null;
 }
-export interface RuleView { id: string; text: string; active: boolean; draft: boolean }
+export interface RuleView {
+  id: string; text: string; active: boolean; draft: boolean;
+  /** Placeholders the servers do not report yet (shown as "?"). */
+  missing: string[];
+}
 export interface GroupView { id: string; label: string; values: ValueView[]; rules: RuleView[] }
 export interface GameValues { asOf: { patchId: number; number: number } | null; groups: GroupView[] }
 
@@ -76,15 +80,32 @@ export function gameValues(db: DB, cat: Catalogue, opts: { admin: boolean }): Ga
     };
   };
 
-  const ruleActive = (w: Catalogue['rules'][number]['when']) =>
-    'plugin' in w ? inv[`p:${w.plugin}`] !== undefined : inv[`c:${w.cvar}`] !== undefined && same(inv[`c:${w.cvar}`], w.equals);
+  const ruleActive = (w: Catalogue['rules'][number]['when']) => {
+    if ('plugin' in w) return inv[`p:${w.plugin}`] !== undefined;
+    const v = inv[`c:${w.cvar}`];
+    if (v === undefined) return false;
+    return 'equals' in w ? same(v, w.equals) : !same(v, w.notEquals);
+  };
+  const byValueId = new Map(cat.values.map((v) => [v.id, v]));
+  /** Fill {id} placeholders from the reported values; the ids it could not fill. */
+  const render = (text: string): { text: string; missing: string[] } => {
+    const missing: string[] = [];
+    const out = text.replace(/\{([^{}]+)\}/g, (_m, id: string) => {
+      const v = byValueId.get(id);
+      const raw = v ? inv[keyOf(v)] : undefined;
+      if (raw === undefined || raw === 'default') { missing.push(id); return '?'; }
+      return raw;
+    });
+    return { text: out, missing };
+  };
 
   const groups = cat.groups.map((g): GroupView => ({
     id: g.id, label: g.label,
     values: cat.values.filter((v) => v.group === g.id).map(valueView),
     rules: cat.rules.filter((r) => r.group === g.id)
-      .map((r) => ({ id: r.id, text: r.text, active: ruleActive(r.when), draft: !r.reviewed }))
-      .filter((r) => opts.admin || (r.active && !r.draft)),
+      .map((r) => { const t = render(r.text); return { id: r.id, text: t.text, active: ruleActive(r.when), draft: !r.reviewed, missing: t.missing }; })
+      // Publicly, a rule shows only once every number in it is reported.
+      .filter((r) => opts.admin || (r.active && !r.draft && r.missing.length === 0)),
   })).filter((g) => g.values.length > 0 || g.rules.length > 0);
 
   return { asOf: base ? { patchId: base.patchId, number: patchNumber(db, base.patchId) } : null, groups };

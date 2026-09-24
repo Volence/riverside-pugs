@@ -16,7 +16,9 @@ export interface CatalogueValue {
 }
 export interface CatalogueRule {
   id: string; group: string; text: string;
-  when: { plugin: string } | { cvar: string; equals: string };
+  when: { plugin: string } | { cvar: string; equals: string } | { cvar: string; notEquals: string };
+  /** `{id}` placeholders name catalogue values and are filled in with what
+   *  the servers report, so the text follows the numbers. */
   /** Only reviewed rules are public; drafts show on the admin preview. */
   reviewed: boolean;
 }
@@ -24,6 +26,11 @@ export interface Catalogue {
   groups: { id: string; label: string }[];
   values: CatalogueValue[];
   rules: CatalogueRule[];
+}
+
+/** The `{id}` placeholders in a rule's text. */
+export function placeholders(text: string): string[] {
+  return [...text.matchAll(/\{([^{}]+)\}/g)].map((m) => m[1]);
 }
 
 export const CATALOGUE_PATH = fileURLToPath(new URL('../balance/catalogue.json', import.meta.url));
@@ -54,8 +61,11 @@ export function loadCatalogue(path: string = CATALOGUE_PATH, raw?: unknown): Cat
     ruleIds.add(r.id);
     const w = r.when as Record<string, unknown>;
     const ok = (typeof w.plugin === 'string' && PLUGIN_RE.test(w.plugin))
-      || (typeof w.cvar === 'string' && CVAR_RE.test(w.cvar) && typeof w.equals === 'string');
-    if (!ok) throw new Error(`catalogue: rule ${r.id} needs when.plugin or when.cvar + when.equals`);
+      || (typeof w.cvar === 'string' && CVAR_RE.test(w.cvar) && (typeof w.equals === 'string' || typeof w.notEquals === 'string'));
+    if (!ok) throw new Error(`catalogue: rule ${r.id} needs when.plugin, or when.cvar with equals or notEquals`);
+    for (const t of placeholders(r.text)) {
+      if (!ids.has(t)) throw new Error(`catalogue: rule ${r.id} uses {${t}}, which is not a catalogue value`);
+    }
     if (typeof r.reviewed !== 'boolean') throw new Error(`catalogue: rule ${r.id} needs reviewed true or false`);
   }
   return c;

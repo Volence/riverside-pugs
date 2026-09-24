@@ -19,7 +19,9 @@ const CAT: Catalogue = {
     { id: 'sky', group: 'hunter', text: 'Sky pounce fix.', when: { plugin: 'l4d_skypounce.smx' }, reviewed: true },
     { id: 'draft', group: 'hunter', text: 'Draft rule.', when: { plugin: 'l4d_skypounce.smx' }, reviewed: false },
     { id: 'off', group: 'tank', text: 'Not loaded.', when: { plugin: 'nope.smx' }, reviewed: true },
-    { id: 'cv', group: 'tank', text: 'Cvar rule.', when: { cvar: 'z_tank_health', equals: '8000' }, reviewed: true },
+    { id: 'cv', group: 'tank', text: 'Tank has {z_tank_health} HP.', when: { cvar: 'z_tank_health', equals: '8000' }, reviewed: true },
+    { id: 'ne', group: 'tank', text: 'Not 7000.', when: { cvar: 'z_tank_health', notEquals: '7000' }, reviewed: true },
+    { id: 'miss', group: 'tank', text: 'Needs {z_new_thing}.', when: { plugin: 'l4d_skypounce.smx' }, reviewed: true },
   ],
 };
 
@@ -35,6 +37,7 @@ describe('loadCatalogue', () => {
     expect(bad({ values: [{ id: 'x', group: 'nope', label: 'X', source: 'cvar' }] })).toThrow(/unknown group/);
     expect(bad({ values: [{ id: 'weapon_smg', group: 'weapons', label: 'X', source: 'weapon' }] })).toThrow(/bad weapon/);
     expect(bad({ rules: [{ id: 'r', group: 'tank', text: 't', when: { cvar: 'x' } as never, reviewed: true }] })).toThrow(/when/);
+    expect(bad({ rules: [{ id: 'r', group: 'tank', text: 'uses {nope}', when: { plugin: 'a.smx' }, reviewed: true }] })).toThrow(/not a catalogue value/);
   });
 });
 
@@ -90,13 +93,16 @@ describe('gameValues', () => {
   it('shows reviewed active rules publicly; every rule, tagged, for admins', () => {
     const pub = gameValues(db, CAT, { admin: false });
     expect(pub.groups.find((x) => x.id === 'hunter')!.rules.map((r) => r.id)).toEqual(['sky']);
-    expect(pub.groups.find((x) => x.id === 'tank')!.rules.map((r) => r.id)).toEqual(['cv']);
+    const tankRules = pub.groups.find((x) => x.id === 'tank')!.rules;
+    expect(tankRules.map((r) => r.id)).toEqual(['cv', 'ne']); // 'miss' waits for its value
+    expect(tankRules[0].text).toBe('Tank has 8000 HP.');
     const adm = gameValues(db, CAT, { admin: true });
     expect(adm.groups.find((x) => x.id === 'hunter')!.rules).toEqual([
-      { id: 'sky', text: 'Sky pounce fix.', active: true, draft: false },
-      { id: 'draft', text: 'Draft rule.', active: true, draft: true },
+      { id: 'sky', text: 'Sky pounce fix.', active: true, draft: false, missing: [] },
+      { id: 'draft', text: 'Draft rule.', active: true, draft: true, missing: [] },
     ]);
     expect(adm.groups.find((x) => x.id === 'tank')!.rules.find((r) => r.id === 'off')).toMatchObject({ active: false });
+    expect(adm.groups.find((x) => x.id === 'tank')!.rules.find((r) => r.id === 'miss')).toMatchObject({ text: 'Needs ?.', missing: ['z_new_thing'] });
   });
 });
 
