@@ -1,0 +1,217 @@
+import type { DB } from '../db.js';
+
+/**
+ * The community tables' queries, kept pure (a db in, rows out) so the routes
+ * stay thin and the rules here can be tested without HTTP.
+ *
+ * Nothing that lists entries ever selects a HUD's payload: a design can be
+ * 2 MB, and a page of 24 of them would be most of 50 MB for a gallery that
+ * shows only previews. A crosshair's payload is its art, a few hundred bytes
+ * (100 KB at the very most), and the gallery draws it live, so lists carry it.
+ */
+
+export type EntryKind = 'hud' | 'crosshair';
+export const ENTRY_KINDS: readonly EntryKind[] = ['hud', 'crosshair'];
+export const PAGE_SIZE = 24;
+export const MAX_PAGE = 100;
+
+export interface EntryAuthor { steamid: string; name: string; avatar: string | null }
+
+export interface EntrySummary {
+  id: number;
+  kind: EntryKind;
+  title: string;
+  description: string;
+  author: EntryAuthor;
+  likes: number;
+  likedByMe: boolean;
+  createdAt: string;
+  /** Crosshairs only: the CrosshairArt, drawn live by the gallery. */
+  art?: unknown;
+  /** HUDs only. */
+  preset?: string | null;
+  aspect?: string | null;
+  advanced?: boolean;
+  importName?: string | null;
+  previewUrl?: string | null;
+}
+
+export interface EntryDetail extends EntrySummary {
+  /** HUDs only: the stored design JSON, parsed. Null once purged. */
+  design?: unknown;
+  importId?: string | null;
+  /** Staff only, on a tombstone. */
+  removed?: { by: string | null; reason: string | null; at: string };
+}
+
+export interface MineEntry extends EntrySummary {
+  /** The staff reason when staff removed it; null for a live entry. */
+  removedByStaff: string | null;
+}
+
+interface Row {
+  id: number; kind: EntryKind; author_id: string; title: string; description: string; payload: string;
+  preset: string | null; aspect: string | null; advanced: number; import_id: string | null;
+  import_name: string | null; preview: string | null; created_at: string; deleted_at: string | null;
+  deleted_by: string | null; delete_reason: string | null;
+  name: string; avatar: string | null; likes: number; liked: number;
+}
+
+// Every read goes through these columns. The payload is selected only for
+// crosshairs (CASE), so a list query never reads a design off disk pages.
+const COLUMNS = (payload: 'crosshair-only' | 'all') => `
+  e.id, e.kind, e.author_id, e.title, e.description,
+  ${payload === 'all' ? 'e.payload' : "CASE WHEN e.kind = 'crosshair' THEN e.payload ELSE '' END AS payload"},
+  e.preset, e.aspect, e.advanced, e.import_id, e.import_name, e.preview, e.created_at,
+  e.deleted_at, e.deleted_by, e.delete_reason,
+  p.name, p.avatar,
+  (SELECT COUNT(*) FROM community_likes l WHERE l.entry_id = e.id) AS likes,
+  EXISTS (SELECT 1 FROM community_likes l WHERE l.entry_id = e.id AND l.player_id = @viewer) AS liked`;
+
+function parse(json: string): unknown {
+  if (!json) return null;
+  try { return JSON.parse(json); } catch { return null; }
+}
+
+export function previewUrl(sha: string | null): string | null {
+  return sha ? `/api/community/files/previews/${sha}.png` : null;
+}
+
+function summary(r: Row): EntrySummary {
+  const base: EntrySummary = {
+    id: r.id, kind: r.kind, title: r.title, description: r.description,
+    author: { steamid: r.author_id, name: r.name, avatar: r.avatar },
+    likes: r.likes, likedByMe: r.liked === 1, createdAt: r.created_at,
+  };
+  if (r.kind === 'crosshair') return { ...base, art: parse(r.payload) };
+  return {
+    ...base, preset: r.preset, aspect: r.aspect, advanced: r.advanced === 1,
+    importName: r.import_name, previewUrl: previewUrl(r.preview),
+  };
+}
+
+export interface ListOpts {
+  kind: EntryKind;
+  sort: 'new' | 'top';
+  page: number;
+  author?: string | null;
+  viewer: string | null;
+}
+
+/** A page of live entries by authors who are not banned. Top is by likes,
+ *  newest first on a tie. */
+export function listEntries(db: DB, o: ListOpts): { entries: EntrySummary[]; page: number; pageSize: number; total: number } {
+  const page = Math.min(MAX_PAGE, Math.max(0, Math.floor(o.page) || 0));
+  const where = `e.kind = @kind AND e.deleted_at IS NULL AND p.status != 'banned'
+    ${o.author ? 'AND e.author_id = @author' : ''}`;
+  const params = { kind: o.kind, author: o.author ?? null, viewer: o.viewer ?? '' };
+  const order = o.sort === 'top' ? 'likes DESC, e.id DESC' : 'e.id DESC';
+  const rows = db.prepare(
+    `SELECT ${COLUMNS('crosshair-only')} FROM community_entries e JOIN players p ON p.steamid = e.author_id
+      WHERE ${where} ORDER BY ${order} LIMIT @limit OFFSET @offset`,
+  ).all({ ...params, limit: PAGE_SIZE, offset: page * PAGE_SIZE }) as Row[];
+  const { n } = db.prepare(
+    `SELECT COUNT(*) AS n FROM community_entries e JOIN players p ON p.steamid = e.author_id WHERE ${where}`,
+  ).get({ kind: params.kind, author: params.author }) as { n: number };
+  return { entries: rows.map(summary), page, pageSize: PAGE_SIZE, total: n };
+}
+
+/**
+ * One entry with its payload. A tombstone, or an entry by a banned author,
+ * comes back only when `staff` is set, and a tombstone then says who removed
+ * it and why.
+ */
+export function getEntry(db: DB, id: number, o: { viewer: string | null; staff: boolean }): EntryDetail | null {
+  const r = db.prepare(
+    `SELECT ${COLUMNS('all')}, p.status FROM community_entries e JOIN players p ON p.steamid = e.author_id WHERE e.id = @id`,
+  ).get({ id, viewer: o.viewer ?? '' }) as (Row & { status: string }) | undefined;
+  if (!r) return null;
+  if (!o.staff && (r.deleted_at !== null || r.status === 'banned')) return null;
+  const out: EntryDetail = summary(r);
+  if (r.kind === 'hud') {
+    out.design = parse(r.payload);
+    out.importId = r.import_id;
+  }
+  if (r.deleted_at !== null) out.removed = { by: r.deleted_by, reason: r.delete_reason, at: r.deleted_at };
+  return out;
+}
+
+/** The raw row, for the routes' ownership checks. */
+export function entryRow(db: DB, id: number): { id: number; kind: EntryKind; author_id: string; title: string; deleted_at: string | null } | null {
+  return (db.prepare('SELECT id, kind, author_id, title, deleted_at FROM community_entries WHERE id = ?').get(id) as
+    { id: number; kind: EntryKind; author_id: string; title: string; deleted_at: string | null } | undefined) ?? null;
+}
+
+/**
+ * A player's own entries: every live one, plus those staff removed, with the
+ * reason, so the author learns why one went. Their own deletes are left out:
+ * they know. Not filtered on ban status, so the author always sees their own.
+ */
+export function mineEntries(db: DB, steamid: string): MineEntry[] {
+  const rows = db.prepare(
+    `SELECT ${COLUMNS('crosshair-only')} FROM community_entries e JOIN players p ON p.steamid = e.author_id
+      WHERE e.author_id = @me AND (e.deleted_at IS NULL OR e.deleted_by IS NOT e.author_id)
+      ORDER BY e.id DESC`,
+  ).all({ me: steamid, viewer: steamid }) as Row[];
+  return rows.map((r) => ({ ...summary(r), removedByStaff: r.deleted_at !== null ? (r.delete_reason ?? '') : null }));
+}
+
+export function countLive(db: DB, author: string, kind: EntryKind): number {
+  return (db.prepare('SELECT COUNT(*) AS n FROM community_entries WHERE author_id = ? AND kind = ? AND deleted_at IS NULL')
+    .get(author, kind) as { n: number }).n;
+}
+
+/** Shares since `since`, deleted ones included, so delete-and-reshare still counts. */
+export function sharesSince(db: DB, author: string, since: Date): number {
+  return (db.prepare('SELECT COUNT(*) AS n FROM community_entries WHERE author_id = ? AND created_at > ?')
+    .get(author, since.toISOString()) as { n: number }).n;
+}
+
+export interface NewEntry {
+  kind: EntryKind;
+  authorId: string;
+  title: string;
+  description: string;
+  payload: string;
+  preset?: string | null;
+  aspect?: string | null;
+  advanced?: boolean;
+  importId?: string | null;
+  importName?: string | null;
+  preview?: string | null;
+  bytes: number;
+  createdAt: Date;
+}
+
+export function insertEntry(db: DB, e: NewEntry): number {
+  return Number(db.prepare(
+    `INSERT INTO community_entries
+       (kind, author_id, title, description, payload, preset, aspect, advanced, import_id, import_name, preview, bytes, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    e.kind, e.authorId, e.title, e.description, e.payload, e.preset ?? null, e.aspect ?? null,
+    e.advanced ? 1 : 0, e.importId ?? null, e.importName ?? null, e.preview ?? null, e.bytes,
+    e.createdAt.toISOString(),
+  ).lastInsertRowid);
+}
+
+/** Marks a live entry deleted. False when it was already gone. */
+export function tombstone(db: DB, id: number, o: { by: string; reason: string | null; now: Date }): boolean {
+  return db.prepare(
+    'UPDATE community_entries SET deleted_at = ?, deleted_by = ?, delete_reason = ? WHERE id = ? AND deleted_at IS NULL',
+  ).run(o.now.toISOString(), o.by, o.reason, id).changes > 0;
+}
+
+export function likeCount(db: DB, id: number): number {
+  return (db.prepare('SELECT COUNT(*) AS n FROM community_likes WHERE entry_id = ?').get(id) as { n: number }).n;
+}
+
+/** Idempotent: a second like is a no-op. */
+export function like(db: DB, id: number, player: string, now: Date): void {
+  db.prepare('INSERT OR IGNORE INTO community_likes (entry_id, player_id, created_at) VALUES (?, ?, ?)')
+    .run(id, player, now.toISOString());
+}
+
+export function unlike(db: DB, id: number, player: string): void {
+  db.prepare('DELETE FROM community_likes WHERE entry_id = ? AND player_id = ?').run(id, player);
+}
