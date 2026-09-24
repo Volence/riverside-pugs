@@ -100,6 +100,7 @@ export const PANEL_FILE: Record<string, string> = {
   infectedRow: 'resource/ui/hud/zombieteamdisplayplayer.res',
   abilityRing: 'resource/ui/hud/abilitytimerhud.res',
   progressBar: 'resource/ui/hud/progressbar.res',
+  ghostPanel: 'resource/ui/hudghostpanel.res',
 };
 
 /**

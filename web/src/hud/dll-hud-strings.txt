@@ -1,5 +1,5 @@
 # client.dll md5 9be2860914a3e33cce82b91473148459
-# strings -a -n 3 client.dll | grep -i -C 30 -E 'resource/ui/hud/|LocalPlayerPanel|TeammatePanel|HealthPanel|CircularProgressBar|CHudAbilityTimer|CHudTerrorCrosshair|ZombieTeamDisplay|FrustrationBar'
+# strings -a -n 3 client.dll | grep -i -C 30 -E 'resource/ui/hud/|LocalPlayerPanel|TeammatePanel|HealthPanel|CircularProgressBar|CHudAbilityTimer|CHudTerrorCrosshair|ZombieTeamDisplay|FrustrationBar|CHudGhostPanel|CHudZombiePanel|bgcolor_override|SpectatorInfected'
 m_fireY[0]
 m_fireX
 m_fireX[0]
@@ -528,6 +528,68 @@ resource/UI/HudAchievementFloatingNumber.res
 @G#
 PO#
 --
+pb*
+pa*
+0[*
+`j*
+ a*
+ Z*
+pZ*
+P[*
+0i*
+`^*
+Rosetta.ArmedFont
+Rosetta.DefaultFont
+Rosetta.DrawBorder
+Rosetta.DisabledFgColor
+Rosetta.DisabledBgColor
+Rosetta.ArmedBgColor
+Rosetta.DefaultFgColor
+Rosetta.DefaultBgColor
+MouseMenu.rollover
+SubmenuHotspot
+PolygonButton
+cl_fastradial
+If 1, releasing the button on a radial menu executes the highlighted button
+cl_rosetta_debug
+cl_rosetta_line_inner_radius
+cl_rosetta_line_outer_radius
+Opens a radial menu
++mouse_menu
+Opens a menu while held
+Executes the highlighted button on the radial menu (if cl_fastradial is 1)
+?CHudGhostPanel
+resource/UI/HudGhostPanel.res
+KeyChanged
+PZ.Hud.BadPlace
+#L4D_Zombie_UI_Wait_For_Stampede
+#L4D_Zombie_UI_Survivor_Escaped
+#L4D_Zombie_UI_Wait_For_Tank
+#L4D_Zombie_UI_Wait_For_Finale
+#L4D_Zombie_UI_Wait_For_Safe_Area
+#L4D_Zombie_UI_Director_TimeOut
+#L4D_Zombie_UI_Spawn_Disabled
+#L4D_spawn_select_mode_in_sight
+#L4D_Zombie_UI_BadPlace
+#L4D_spawn_select_mode_too_close
+#L4D_spawn_select_mode_inside_entity
+#L4D_spawn_select_mode_restricted_area
+PZ.Hud.Action
+ready
+#L4D_Zombie_UI_Action
+tip_smoker
+#L4D_spawn_select_mode_class_SMOKER
+tip_hunter
+#L4D_spawn_select_mode_class_HUNTER
+tip_boomer
+#L4D_spawn_select_mode_class_BOOMER
+.\Terror\HUD\SpawnLegend.cpp
+m_clrWhite
+WhiteText
+m_clrRed
+RedText
+m_iPadding
+--
 #L4D_InMemoryOf
 #L4D_Scenario_Finale_Won
 L4D360UI_Loading_As_Zoey
@@ -769,6 +831,68 @@ Pu(
 `))
 `W)
 --
+pE)
+p\)
+0Z)
+0I)
+@R)
+ O)
+pN)
+``)
+death
+DeathPanelClose
+Survivor%d
+resource/UI/TransitionStatsSurvivorPlayer.res
+#L4D_Scenario_Survivors_Dead
+#L4D_Instructor_notify_awaiting_rescue
+#L4D_Scenario_Finale_Death_Message
+rescuemsg
+#L4D_Scoreboard_Bot
+hasMolotov
+hasPipeBomb
+hasPainPills
+hasFirstAid
+isIT
+isAlive
+isIncapacitated
+isGoingToDie
+maxhealth
+healthbuffer
+RescueMessage
+SpectatorTarget
+Resource/UI/SpectatorSurvivor.res
+Resource/UI/SpectatorInfected.res
+#L4D_pz_spawn_spawning
+#L4D_pz_spawn_countdown_single
+L4D_pz_spawn_countdown
+L4D_pz_scrimmage_wait
+#L4D_pz_waiting_for_survivors
+#L4D_pz_survivors_escaped
+#L4D_pz_finale_wave
+#L4D_pz_finale_setup
+Spawning has been disabled...
+InfectedState
+#L4D_pz_tank_battle
+Countdown
+Seconds_2
+Seconds_1
+DeathMessage
+SkullIcon
+p8$
+Pu(
+05$
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+`7$
+`?$
+Pe$
+--
 Player.WeaponSelectionMoveSlot
 ?CHudZombieHealth
 `')
@@ -1007,6 +1131,261 @@ no_texture
 Pu(
 pv(
 --
+tabPosition
+visible
+pin_to_sibling_corner
+pin_corner_to_sibling
+pin_to_sibling
+tall
+wide
+f%d
+zpos
+tooltiptext
+c%d
+r%d
+ControlName
+selfDroppable
+DropContext
+m_flAlpha
+m_nPaintBackgroundType
+PaintBackgroundType
+vgui/hud/800corner1
+m_nBgTextureId1
+Texture1
+vgui/hud/800corner2
+m_nBgTextureId2
+Texture2
+vgui/hud/800corner3
+m_nBgTextureId3
+Texture3
+vgui/hud/800corner4
+m_nBgTextureId4
+Texture4
+bgcolor_override
+fgcolor_override
+screeny
+screenx
+DragDrop
+Can't add Keybindings Context for unnamed panels
+Pu(
+pv(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+DragDrop.DropFrame
+DragDrop.DragFrame
+paintborder
+paintbackground
+IgnoreScheme
+navRight
+navLeft
+navDown
+navUp
+usetitlesafe
+proportionalToParent
+CPanelMessageMapDictionary::m_PanelMessageMapPool
+CPanelKeyBindingMapDictionary::m_PanelKeyBindingMapPool
+Already have converter for type %s, ignoring...
+proportional_ypos
+--
+`h,
+`h,
+pW(
+0X(
+pm*
+ "(
+`"(
+0Y*
+PY*
+`X(
+P_(
+ p(
+@|(
+``*
+ b*
+pb*
+pa*
+0[*
+`j*
+ a*
+ Z*
+pZ*
+P[*
+`^*
+FrameSystemButton.DisabledIcon
+FrameSystemButton.Icon
+FrameSystemButton.BgColor
+FrameSystemButton.FgColor
+titlebardisabledfgcolor_override
+titlebarfgcolor_override
+titlebardisabledbgcolor_override
+titlebarbgcolor_override
+outoffocus_bgcolor_override
+infocus_bgcolor_override
+frame_menu
+frame_close
+frame_mintosystray
+frame_maximize
+frame_minimize
+frame_caption
+frame_brGrip
+frame_blGrip
+frame_trGrip
+frame_tlGrip
+frame_rightGrip
+frame_leftGrip
+frame_bottomGrip
+frame_topGrip
+#Frame_Untitled
+ComboBox
+Pu(
+`w)
+0k*
+0^*
+`h,
+`h,
+pW(
+0X(
+pm*
+@d*
+ "(
+`"(
+0Y*
+PY*
+--
+#TextEntry_ReplaceText
+TextEntry.FocusEdgeColor
+TextEntry.OutOfFocusSelectedBgColor
+TextEntry.SelectedBgColor
+TextEntry.SelectedTextColor
+TextEntry.DisabledBgColor
+TextEntry.DisabledTextColor
+TextEntry.CursorColor
+TextEntry.BgColor
+TextEntry.TextColor
+TextNewLine
+Resource\warning.wav
+P.O
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+DoSentenceModeChanged
+DoCompositionString
+DoShowIMECandidates
+DoHideIMECandidates
+DoUpdateIMECandidates
+defaultSelectionBG2Color_override
+selectionTextColor_override
+selectionColor_override
+disabledBgColor_override
+disabledFgColor_override
+ASlider
+SliderDragStart
+SliderDragEnd
+Slider.DisabledTextColor2
+Slider.DisabledTextColor1
+Slider.TrackColor
+Slider.TextColor
+Slider.NobColor
+rightText
+leftText
+thumbwidth
+%s, string leftText, string rightText
+d.O
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+ToolTipBorder
+Tooltip.TextColor
+Tooltip.BgColor
+tooltip
+PanelListPanel
+ListPanel.BgColor
+PanelListEmbedded
+--
+0[*
+`j*
+ a*
+ Z*
+pZ*
+P[*
+0i*
+`^*
+      
+://
+url 
+GetCommand
+result
+CanBeDefaultButton
+selected
+%s, string command, int default
+Button.BlinkColor
+Button.FocusBorderColor
+Button.DepressedBgColor
+Button.DepressedTextColor
+Button.ArmedBgColor
+Button.ArmedTextColor
+Button.BgColor
+Button.TextColor
+ButtonKeyFocusBorder
+PressButton
+SetAsDefaultButton
+SetAsCurrentDefaultButton
+blinkFgColor_override
+keyboardFocusColor_override
+depressedBgColor_override
+depressedFgColor_override
+armedBgColor_override
+armedFgColor_override
+defaultBgColor_override
+defaultFgColor_override
+CheckButton
+ToggleButton
+pu*
+ z*
+Pu(
+`z*
+0k*
+0^*
+`h,
+`h,
+pW(
+0X(
+pm*
+@d*
+ "(
+`"(
+0Y*
+PY*
+`X(
+P_(
+ p(
+@|(
+``*
+ b*
+pb*
+0[*
+`j*
+ a*
+ Z*
+--
 @R)
  O)
 pN)
@@ -1190,6 +1569,68 @@ PP<
 .?AVCHudIntensityGraph@@
  S<
 --
+.?AVCFloatingAchievementNumber@@
+.?AVCHudPZDamageRecordPanel@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCRadialButton@@
+.?AVCRadialMenu@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCHudGhostPanel@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCHudBlood@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+tZD
+\ZD
+HZD
+--
 xtD
 dtD
 .?AVCTeammateVoicePanel@@
@@ -1251,7 +1692,17 @@ hP<
 PP<
 4P<
 .?AVIKeyBindingListener@@
---
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
 PP<
 4P<
 .?AVCHudZombieHealth@@

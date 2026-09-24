@@ -150,8 +150,22 @@ export const ELEMENTS: HudElement[] = [
         evidence: 'client.dll CHudTerrorCrosshair run: m_abilityShouldAttack_ColorBlind|ability_attack_color_colorblind',
         note: 'The colour-blind variant of the attack colour.' },
     ] },
-  { id: 'ghostPanel', label: 'Spawn / ghost panel', side: 'infected', key: 'HudGhostPanel', move: true, resize: 'none',
-    children: [], props: ['visible'] },
+  /**
+   * The spawn (ghost) panel. A scale reaches its pieces (hudghostpanel.res,
+   * children.ts GHOST_PANEL). Its two colour keys colour every status line:
+   * probe G1 (/home/volence/l4d/hud/probe-phase2-rest/r3/shots/r3/r3-a.png,
+   * WhiteText cyan, RedText yellow), and a line's own colour is ignored (G2).
+   */
+  { id: 'ghostPanel', label: 'Spawn / ghost panel', side: 'infected', key: 'HudGhostPanel', move: true, resize: 'scale',
+    children: ['resource/ui/hudghostpanel.res'], props: ['visible'],
+    keys: [
+      { key: 'WhiteText', label: 'Text colour', type: 'colour', unsetLabel: 'File colour',
+        evidence: 'client.dll CHudGhostPanel run: m_clrWhite|WhiteText; probe G1, probe-phase2-rest/r3/shots/r3/r3-a.png (cyan lines)',
+        note: 'The class name, the title and "Ready to spawn".' },
+      { key: 'RedText', label: 'Warning colour', type: 'colour', unsetLabel: 'File colour',
+        evidence: 'client.dll CHudGhostPanel run: m_clrRed|RedText; probe G1, probe-phase2-rest/r3/shots/r3/r3-a.png (yellow warnings)',
+        note: 'Why you cannot spawn here ("Can\'t spawn here", "This is a restricted area").' },
+    ] },
   { id: 'tankPanel', label: 'Tank frustration', side: 'infected', key: 'HudFrustrationMeter', move: true, resize: 'none',
     children: [], props: ['visible'] },
 ];

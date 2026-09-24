@@ -448,6 +448,46 @@ export const PROGRESS_PANEL: PanelChildren = {
   ],
 };
 
+/**
+ * The spawn (ghost) panel's pieces (hudghostpanel.res; stock and Modern
+ * each ship one), framed by its hudlayout.res block, HudGhostPanel, which
+ * the element scales with them. Probe answers,
+ * /home/volence/l4d/hud/probe-phase2-rest/RESULTS.md:
+ * - G1: the element's WhiteText and RedText colour the status lines
+ *   (r3/shots/r3/r3-a.png: cyan class name and "Choose Spawn Location",
+ *   yellow "Can't spawn here"), so those two keys are the colour controls
+ *   (elements.ts ghostPanel).
+ * - G2: a line's own fgcolor_override is ignored (r3-a: SelectSpawn stayed
+ *   WhiteText), so no line offers a colour of its own (plan decision 7).
+ * - G3: a line moves and takes a font (r3-a: ClassName at x 150 in
+ *   DefaultLarge); G4: ClassImage moves and sizes (r3-a: 240, 20, 60 x 60).
+ * - Q21 (/home/volence/l4d/hud/probe-phase2-infected/RESULTS.md):
+ *   Background's bgcolor_override is honoured.
+ */
+const GHOST_LINE = "Coloured by the panel's Text and Warning colours (select the panel itself); a colour of its own is ignored by the game.";
+const ghostLine = (name: string, label: string, note: string): ChildDef =>
+  ({ name, label, kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: false, note: `${note} ${GHOST_LINE}` });
+export const GHOST_PANEL: PanelChildren = {
+  panelId: 'ghostPanel',
+  file: 'resource/ui/hudghostpanel.res',
+  repeat: 'single',
+  frame: 'hudlayout',
+  children: [
+    { name: 'Background', label: 'Background', kind: 'other', role: 'decor', box: 'wh', move: true, font: false, colour: false,
+      keys: [{ key: 'bgcolor_override', label: 'Background colour', type: 'colour', unsetLabel: 'File colour',
+        evidence: 'VGUI Panel key bgcolor_override (client.dll string run); probe Q21, probe-phase2-infected/RESULTS.md' }] },
+    { name: 'ClassImage', label: 'Class picture', kind: 'other', role: 'content', box: 'square', move: true, font: false, colour: false,
+      note: 'The game picks the picture by class.' },
+    ghostLine('ClassName', 'Class name', 'The game writes the class you will spawn as.'),
+    ghostLine('SelectSpawn', 'Title', 'Reads "Choose Spawn Location".'),
+    ghostLine('Ready', 'Status', 'Ready to spawn, or why you cannot spawn here (in the Warning colour).'),
+    ghostLine('Info', 'Detail', 'The reason under the status, in the Warning colour.'),
+    ghostLine('SpawnLabel', 'Press to play', 'Shown once you can spawn, beside the button to press.'),
+    { name: 'SpawnBind', label: 'Button', kind: 'other', role: 'content', box: 'none', move: true, font: false, colour: false,
+      note: 'The key or mouse button to press; the game draws it.' },
+  ],
+};
+
 /** A block's rect, as a linked rule reads it from a base file. */
 export interface LinkRect { x: number; y: number; w: number; h: number }
 export type LinkRule = 'same' | 'delta';
@@ -483,7 +523,7 @@ function mapLinked<T>(rule: LinkRule, key: string, v: T, a: LinkRect, b: LinkRec
   }
 }
 
-export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, ZCARD_PANEL, PROGRESS_PANEL];
+export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, ZCARD_PANEL, PROGRESS_PANEL, GHOST_PANEL];
 export const panelChildren = (panelId: string): PanelChildren | undefined => PANEL_CHILDREN.find((p) => p.panelId === panelId);
 export const teamChild = (name: string): ChildDef | undefined => TEAM_PANEL.children.find((c) => c.name === name);
 
