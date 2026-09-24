@@ -12,7 +12,8 @@ import type { Aspect } from './units';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { elementById } from './elements';
 import { SLOTS } from './slots';
-import { TEAM_PANEL, CONTENT_CHILDREN, type ChildDef } from './children';
+import { TEAM_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, type ChildDef, type KeyDef } from './children';
+import { probe } from './probes';
 import { MAX_IMAGE_B64, MAX_IMAGE_SIDE } from './limits';
 import { readArt, type CrosshairArt } from '../crosshair/model';
 import { SPLATTERS, splatterDef, type SplatterId, type SplatterStyle } from './splatter';
@@ -53,6 +54,8 @@ export interface ElementOverride {
    */
   color?: string; bg?: string;
   fontSize?: number;
+  /** Keys of the element's own hudlayout.res block that its registry entry declares, as the text the file takes. */
+  keys?: Record<string, string>;
 }
 /**
  * One child of a card file (v2 spec, "The data model"). Numbers are unscaled,
@@ -69,6 +72,10 @@ export interface ChildOverride {
   color?: string;
   /** Addable children: present in the file or not. Absent means as the preset's file has it. */
   on?: boolean;
+  /** Keys the child's registry entry declares (KeyDef), as the text the file takes. */
+  keys?: Record<string, string>;
+  /** The block's zpos, a whole number in -50..50. Absent means as the preset's file has it. */
+  z?: number;
 }
 export interface StyleOverride { kind: 'stock' | 'flat' | 'rounded' | 'image'; color?: string }
 
@@ -246,7 +253,7 @@ export function clampOverride(key: RangeKey, value: number): number {
   return Math.min(hi, Math.max(lo, value));
 }
 
-const CHILD_RANGES = { x: [-64, 512], y: [-64, 512], w: [1, 512], h: [1, 512], fontSize: [6, 64] } as const;
+const CHILD_RANGES = { x: [-64, 512], y: [-64, 512], w: [1, 512], h: [1, 512], fontSize: [6, 64], z: [-50, 50] } as const;
 export type ChildRangeKey = keyof typeof CHILD_RANGES;
 
 /** clampOverride's twin for a child's numbers, shared by validateDesign and the child number boxes for the same reason. */
@@ -286,9 +293,45 @@ function childOverride(def: ChildDef, raw: unknown): ChildOverride {
     if (side !== undefined) { out.w = side; out.h = side; }
   }
   if (def.font) { const f = n('fontSize'); if (f !== undefined) out.fontSize = f; }
-  if (def.colour) { const c = colour(raw.color); if (c) out.color = c; }
+  // A colour whose effect waits on a probe is dropped until the probe passes,
+  // so a flag that flips back off clears it too (plan decision 10).
+  if (def.colour && (!def.colourGate || probe(def.colourGate))) { const c = colour(raw.color); if (c) out.color = c; }
   if (def.addable && typeof raw.on === 'boolean') out.on = raw.on;
+  const z = n('z');
+  if (z !== undefined) out.z = Math.round(z);
+  const keys = validKeys(def.keys, raw.keys);
+  if (keys) out.keys = keys;
   return out;
+}
+
+/**
+ * The keys of `raw` that `defs` declares, as the text the file takes: a
+ * colour as "r g b a", a whole number clamped to its range, a bool as "1" or
+ * "0". A key whose probe has not passed is dropped like an undeclared one,
+ * because the build writes only what the registry offers today. Undefined
+ * when nothing survives, so an empty `keys` is never stored.
+ */
+export function validKeys(defs: readonly KeyDef[] | undefined, raw: unknown): Record<string, string> | undefined {
+  if (!defs || !isObj(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const def of defs) {
+    if (def.gate && !probe(def.gate)) continue;
+    const v = raw[def.key];
+    if (def.type === 'colour') {
+      const c = colour(v);
+      if (c) out[def.key] = c;
+    } else if (def.type === 'int') {
+      const num = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+      if (!Number.isFinite(num)) continue;
+      let i = Math.round(num);
+      if (def.range) i = Math.min(def.range[1], Math.max(def.range[0], i));
+      out[def.key] = String(i);
+    } else {
+      if (v === true || v === '1' || v === 1) out[def.key] = '1';
+      else if (v === false || v === '0' || v === 0) out[def.key] = '0';
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -352,8 +395,8 @@ export interface Box { x: number; y: number; w: number; h: number }
  * not in build.ts, because the spacing migration below needs the preset's
  * own fitted card too.
  */
-export function contentBox(nodes: KvNode[]): Box | null {
-  const content = new Set(CONTENT_CHILDREN.map((n) => n.toLowerCase()));
+export function contentBox(nodes: KvNode[], names: readonly string[] = CONTENT_CHILDREN): Box | null {
+  const content = new Set(names.map((n) => n.toLowerCase()));
   const num = (v: string | undefined) => { const n = parseFloat(v ?? ''); return Number.isFinite(n) ? n : 0; };
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const n of nodes) {
@@ -442,6 +485,8 @@ function element(id: string, raw: unknown, key: BaseKey): ElementOverride {
   if (team) teamFields(raw, out, key);
   const c = colour(raw.color); if (c) out.color = c;
   const b = colour(raw.bg); if (b) out.bg = b;
+  const keys = validKeys(elementById(id)?.keys, raw.keys);
+  if (keys) out.keys = keys;
   return out;
 }
 
@@ -553,16 +598,20 @@ export function validateDesign(raw: unknown): HudDesign {
   }
   const weapons = weaponsOf(raw.weapons, raw.styles, d.advanced);
   if (weapons) d.weapons = weapons;
-  const team = isObj(raw.children) ? raw.children[TEAM_PANEL.panelId] : undefined;
-  if (isObj(team)) {
+  // Every registered panel's children, by the same rules; a panel the
+  // registry does not have has nothing to apply to. Names match exactly, as
+  // the teammate card always did, so a stored name is the block's own.
+  if (isObj(raw.children)) for (const panel of PANEL_CHILDREN) {
+    const stored = raw.children[panel.panelId];
+    if (!isObj(stored)) continue;
     const kids: Record<string, ChildOverride> = {};
-    for (const [name, v] of Object.entries(team)) {
-      const def = TEAM_PANEL.children.find((c) => c.name === name);
+    for (const [name, v] of Object.entries(stored)) {
+      const def = panel.children.find((c) => c.name === name);
       if (!def) continue;
       const o = childOverride(def, v);
       if (Object.keys(o).length) kids[name] = o;
     }
-    if (Object.keys(kids).length) d.children[TEAM_PANEL.panelId] = kids;
+    if (Object.keys(kids).length) d.children[panel.panelId] = kids;
   }
   return d;
 }

@@ -1,7 +1,9 @@
 // @vitest-environment node
 // CompressionStream is a Node and browser global; happy-dom does not provide it.
-import { describe, it, expect } from 'vitest';
-import { DEFAULT_DESIGN, validateDesign, newDesign, usableCrosshair, encodeShare, decodeShare, safeName, clampOverride, clampChild, baseTeam } from './design';
+import { describe, it, expect, afterEach } from 'vitest';
+import { DEFAULT_DESIGN, validateDesign, newDesign, usableCrosshair, encodeShare, decodeShare, safeName, clampOverride, clampChild, baseTeam, validKeys } from './design';
+import type { KeyDef } from './children';
+import { _setProbe } from './probes';
 import { DEFAULT_STATE } from '../crosshair/draw';
 import { PNG_PREFIX, type CrosshairArt } from '../crosshair/model';
 
@@ -391,5 +393,42 @@ describe('splatters', () => {
     const back = (await decodeShare(await encodeShare(d)))!;
     expect(back.splatters).toEqual(d.splatters);
     expect(back.images).toEqual({});
+  });
+});
+
+describe('typed keys', () => {
+  const defs: KeyDef[] = [
+    { key: 'fill_color', label: 'Fill', type: 'colour', evidence: 't' },
+    { key: 'gap', label: 'Gap', type: 'int', range: [0, 8], evidence: 't' },
+    { key: 'east_aligned', label: 'East', type: 'bool', evidence: 't' },
+    { key: 'inset', label: 'Inset', type: 'int', range: [0, 8], evidence: 't', gate: 'Q3' },
+  ];
+  afterEach(() => { _setProbe('Q3', null); });
+
+  it('keeps each declared key as the text the file takes, clamped and rounded', () => {
+    expect(validKeys(defs, { fill_color: '1 2 3 4', gap: 9.6, east_aligned: true })).toEqual({ fill_color: '1 2 3 4', gap: '8', east_aligned: '1' });
+    expect(validKeys(defs, { gap: '3', east_aligned: '0' })).toEqual({ gap: '3', east_aligned: '0' });
+  });
+  it('drops undeclared keys, bad values, and a gated key until its probe passes', () => {
+    expect(validKeys(defs, { nope: '1', fill_color: 'red', gap: 'x', inset: 2 })).toBeUndefined();
+    _setProbe('Q3', true);
+    expect(validKeys(defs, { inset: 2 })).toEqual({ inset: '2' });
+  });
+  it('has nothing to keep without definitions', () => {
+    expect(validKeys(undefined, { gap: 1 })).toBeUndefined();
+  });
+});
+
+describe('children of every registered panel', () => {
+  it('validates the teammate card as before, and drops a panel the registry does not have', () => {
+    const d = validateDesign({ v: 1, children: { teamColumn: { Head: { x: 3 } }, nopePanel: { Head: { x: 3 } } } });
+    expect(d.children).toEqual({ teamColumn: { Head: { x: 3 } } });
+  });
+  it('keeps a zpos as a whole number in -50..50, and never keys a child does not declare', () => {
+    const d = validateDesign({ v: 1, children: { teamColumn: { Head: { z: 99.4 }, Name: { z: -3, keys: { font: 'x' } } } } });
+    expect(d.children.teamColumn).toEqual({ Head: { z: 50 }, Name: { z: -3 } });
+  });
+  it('drops element keys no element declares yet', () => {
+    expect(validateDesign({ v: 1, elements: { chat: { x: 5, keys: { foo: '1' } } } }).elements.chat).toEqual({ x: 5 });
   });
 });
