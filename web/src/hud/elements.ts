@@ -172,6 +172,16 @@ export const ELEMENTS: HudElement[] = [
         evidence: 'client.dll CHudGhostPanel run: m_clrRed|RedText; probe G1, probe-phase2-rest/r3/shots/r3/r3-a.png (yellow warnings)',
         note: 'Why you cannot spawn here ("Can\'t spawn here", "This is a restricted area").' },
     ] },
+  /**
+   * The too-far and Tank takeover panel: code shows zombiepanel.res's
+   * TooFarFromSurvivors box when a spawned infected strays far from the
+   * survivors, or its TankTakeover box when you are offered the Tank. Probe
+   * Z1 (/home/volence/l4d/hud/probe-phase2-rest/r6/shots/r6/r6-a.png) saw
+   * the too-far box move with HudZombiePanel; a ghost never showed it
+   * (r3-c, r5-a), so the preview draws it only while you are spawned.
+   */
+  { id: 'zombiePanel', label: 'Too far / Tank offer', side: 'infected', key: 'HudZombiePanel', move: true, resize: 'none',
+    children: [], props: ['visible'], shownIn: ['alive'] },
   { id: 'tankPanel', label: 'Tank frustration', side: 'infected', key: 'HudFrustrationMeter', move: true, resize: 'none',
     children: [], props: ['visible'] },
 ];

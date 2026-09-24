@@ -18,7 +18,7 @@ import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHas
 import { baseOf } from './base';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { SCREEN_H, parseSize, parsePos, screenW } from './units';
-import { PROGRESS_LABEL, paintLinearOver, drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
+import { PROGRESS_LABEL, labelTextColour, paintLinearOver, drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
 import { normaliseMaterial, HEALING_ICON, CROSSHAIR_OPEN, tipImage } from './art';
 import { barGeometry, clampBarKeys } from './progress';
 import { canvasFont, fontCell, importedFace, loadFace } from './fonts';
@@ -903,6 +903,77 @@ function paintGhostPanel(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesi
   });
 }
 
+const ZPANEL = 'resource/ui/zombiepanel.res';
+/**
+ * Where code puts the too-far line: it has no xpos in the file, and the
+ * game draws it after the key, from 116 units into the box (ink from
+ * x 884 px with the box at 622.5, r6/shots/r6/r6-a.png), 29 units past
+ * UseBind's 87.
+ */
+const TOO_FAR_TEXT_AFTER_BIND = 29;
+
+/**
+ * A key as CBindPanel draws it: a light key cap with the key's letter. The
+ * game draws the player's own binding (E by default, r6-a: the cap at
+ * x 827 to 863 px, y 230 to 265, from UseBind's 818 px); the preview
+ * draws E.
+ */
+function paintKeyCap(ctx: CanvasRenderingContext2D, x: number, y: number, k: number) {
+  const s = 16 * k, at = { x: x + 4 * k, y: y - s / 2 };
+  ctx.fillStyle = 'rgba(200,200,200,1)';
+  if (typeof ctx.roundRect === 'function') { ctx.beginPath(); ctx.roundRect(at.x, at.y, s, s, 2 * k); ctx.fill(); } else ctx.fillRect(at.x, at.y, s, s);
+  ctx.fillStyle = 'rgba(40,40,40,1)';
+  ctx.textAlign = 'center';
+  ctx.font = `${Math.round(10 * k)}px sans-serif`;
+  ctx.fillText('E', at.x + s / 2, at.y + s * 0.72);
+}
+
+/**
+ * The too-far box drawn from zombiepanel.res (through buildTrees), only
+ * while you are spawned: TooFarFromSurvivors placed inside the element and
+ * clipping its pieces, as an EditablePanel does; its Background box
+ * (paintPanelBox: navy 0 0 128 200 over black drew 0 0 115 in r6-a, the
+ * linear blend), the class picture code puts in SurvivorsImage (a Smoker's
+ * in r6-a, not the file's tip_crouch), the title and the line in their
+ * file colours and fonts (#L4D_Zombie_UI_Too_Far and _To_Be_Moved), and
+ * the key. The Tank offer box is not drawn: no probe has seen it.
+ */
+function paintZombiePanel(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view: HudView = {}) {
+  const state = previewOf(view.state);
+  const nodes = buildTrees(design)(ZPANEL);
+  const frame = kvFind(nodes, ['TooFarFromSurvivors']);
+  if (!frame) return;
+  const W = screenW(design.aspect);
+  const f = blockRect(frame, r, k, W);
+  const shown = (name: string) => { const n = kvFind(nodes, ['TooFarFromSurvivors', name]); return n && pcGet(n, 'visible') !== '0' ? n : undefined; };
+  clipToRect(ctx, r, () => clipToRect(ctx, f, () => {
+    ctx.save();
+    const bg = shown('Background');
+    if (bg) paintPanelBox(ctx, design, bg, blockRect(bg, f, k, W), k);
+    const pic = shown('SurvivorsImage');
+    const img = pic && artImage(tipImage(tipClass(state)), onAsset);
+    if (pic && img) { const b = blockRect(pic, f, k, W); ctx.drawImage(img, b.x, b.y, b.w, b.h); }
+    const title = shown('TooFarTitle');
+    if (title) paintPanelLabel(ctx, design, title, blockRect(title, f, k, W), k, 'TOO FAR FROM THE SURVIVORS', labelColour(design, title), f, onAsset);
+    const bind = shown('UseBind');
+    const line = shown('TooFarText');
+    if (line) {
+      const b = blockRect(line, f, k, W);
+      const bindX = bind ? parsePos(pcGet(bind, 'xpos') ?? '0', W) : 0;
+      const at = { ...b, x: f.x + (bindX + TOO_FAR_TEXT_AFTER_BIND) * k, w: f.w };
+      paintPanelLabel(ctx, design, line, at, k, 'Move closer to the Survivors', labelColour(design, line), f, onAsset);
+      if (bind) paintKeyCap(ctx, f.x + bindX * k, at.y + at.h / 2, k);
+    }
+    ctx.restore();
+  }));
+}
+
+/** A label's own colour, else the scheme's label colour, as a Label draws it. */
+function labelColour(design: HudDesign, n: KvNode): string {
+  const own = pcGet(n, 'fgcolor_override');
+  return own !== undefined ? colourOf(design, own) : labelTextColour(design);
+}
+
 function paintTankPanel(ctx: CanvasRenderingContext2D, r: Rect) {
   text(ctx, 'Frustration', r.x, r.y + 12, 12, '#e8e8e8');
   ctx.fillStyle = 'rgba(0,0,0,0.5)';
@@ -924,6 +995,7 @@ const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: 
   abilityRing: paintAbilityRing,
   abilityMarker: paintAbilityMarker,
   ghostPanel: paintGhostPanel,
+  zombiePanel: paintZombiePanel,
   tankPanel: paintTankPanel,
 };
 
