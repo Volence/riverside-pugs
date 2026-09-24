@@ -51,6 +51,8 @@ import { STATUS_CODES } from 'node:http';
 import { readFileSync } from 'node:fs';
 import type { Config } from './config.js';
 import type { DB } from './db.js';
+import { BalanceRolloutWriter } from './balanceWriter.js';
+import type { AddonsTransport } from './addonsTransport.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
 import { backfillPersonas } from './personaBackfill.js';
 import { handleConduct } from './conductFlags.js';
@@ -166,6 +168,9 @@ export interface ServerDeps {
    *  exercise a missing or invalid balance/knobs.json without touching the
    *  checked-in file; production reads BALANCE_KNOBS_PATH otherwise. */
   balanceKnobsPath?: string;
+  /** Transport the balance writer uses for pug_balance.cfg. Injected in tests
+   *  so a rollout never touches a real box; transportFor otherwise. */
+  balanceTransport?: (s: ServerRow, dir: string) => AddonsTransport | null;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -523,6 +528,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     },
   });
 
+  // Writes the active rollout's pug_balance.cfg to a box on release, so the
+  // new values land between matches; see src/balanceWriter.ts.
+  const balanceWriter = new BalanceRolloutWriter({ db: deps.db, transport: deps.balanceTransport });
+
   const releaser = new ServerReleaser(deps.db, deps.serverCleaner ?? (async (server, token, opts) => {
     const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
     try {
@@ -577,7 +586,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     } finally {
       rcon.close();
     }
-  }), restarter);
+  }), restarter, (server) => balanceWriter.writeForRelease(server.id));
 
   // Every enabled box mirrors the website's bans. Built here, next to the
   // releaser, because both are the backend reaching into a game server
@@ -1164,6 +1173,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     banSync.sweep().catch((err) => console.error('[serverBans] boot sweep failed:', err));
     adminSync.start();
     void adminSync.sync();
+    balanceWriter.start();
+    void balanceWriter.verifyAll();
   }
 
   const reaper = setInterval(() => {
@@ -1424,6 +1435,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     clearTimeout(pruneOnBoot);
     banSync.stop();
     adminSync.stop();
+    balanceWriter.stop();
     if (logListener) await logListener.close();
     // Where each server's replay check had got to. Best effort: the caller may
     // already have closed the database, and a few seconds of position is all
