@@ -7,7 +7,7 @@ import { Fragment } from 'preact';
 import { useState } from 'preact/hooks';
 import {
   clampOverride, clampChild, clampWeapon, WEAPON_KEYS, WEAPON_BOX_COLOUR, WEAPON_BOX_IMAGE, WEAPON_ICONS, ITEM_ICONS,
-  weaponImageKind, weaponUploadSize, VOICE_ICON_TEXELS, NOTICE_BOX_COLOUR, type NoticeBox,
+  weaponImageKind, weaponUploadSize, VOICE_ICON_TEXELS, voiceIconOpen, NOTICE_BOX_COLOUR, type NoticeBox,
   type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type ChildRangeKey,
   type WeaponNumKey, type WeaponsOverride, type WeaponBoxStyle,
 } from '../../hud/design';
@@ -705,7 +705,7 @@ function VoiceIconControls({ design, edit }: { design: HudDesign; edit: Edit }) 
       <p class="eyebrow hud__note">Pictures</p>
       <p class="muted hud__note">Your pictures keep their colours and fill the box.</p>
       {row('voiceSelf', 'Your microphone icon')}
-      {row('voicePlayer', 'Teammate talking icon', 'Shown when a teammate talks; not seen in our tests (needs a second player).')}
+      {voiceIconOpen('voicePlayer') && row('voicePlayer', 'Teammate talking icon', 'Shown when a teammate talks; not seen in our tests (needs a second player).')}
     </>
   );
 }

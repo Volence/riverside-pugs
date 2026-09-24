@@ -19,7 +19,7 @@ import { flatTexture, roundedTexture, vmtFor, parseColour } from './textures';
 import { decodeText, encodeText } from './text';
 import {
   baseTeam, contentBox, drawnBarX, isBar, NOTICE_BOX_COLOUR, WEAPON_KEYS, WEAPON_BOX_COLOUR, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir,
-  type WeaponNumKey, WEAPON_ICONS, ITEM_ICONS, WEAPON_BOX_IMAGE, weaponImageKind, VOICE_ICONS, VOICE_ICON_TEXELS,
+  type WeaponNumKey, WEAPON_ICONS, ITEM_ICONS, WEAPON_BOX_IMAGE, weaponImageKind, VOICE_ICONS, VOICE_ICON_TEXELS, voiceIconOpen,
 } from './design';
 import {
   panelChildren, panelOfFile, childDef, childPath, maxInset, linkedValue, TEAM_PANEL, OWN_PANEL, SI_PANEL, ZCARD_PANEL, type ChildDef, type PanelChildren, type LinkRect, type LinkRule,
@@ -2149,7 +2149,7 @@ const VOICE_LABELS: Record<string, string> = { voiceSelf: 'Your microphone icon'
 function voicePass(work: Work, design: HudDesign, assets: BuildAssets | null, out: VpkFile[]) {
   for (const [id, entry] of Object.entries(VOICE_ICONS)) {
     const stored = design.images[id];
-    if (!stored) continue;
+    if (!stored || !voiceIconOpen(id)) continue;
     const name = `vgui/hud/hudeditor/${entry}`;
     if (assets) {
       const px = assets.images?.[id];

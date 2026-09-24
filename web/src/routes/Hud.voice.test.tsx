@@ -16,9 +16,10 @@ vi.mock('./hud/decode', async (original) => ({
 import Hud, { assetSize } from './Hud';
 import type { HudDesign } from '../hud/design';
 import { TEAM_PANEL } from '../hud/children';
+import { _setProbe } from '../hud/probes';
 
 beforeEach(() => { localStorage.clear(); location.hash = ''; decode.calls = []; });
-afterEach(() => { cleanup(); localStorage.clear(); location.hash = ''; });
+afterEach(() => { cleanup(); localStorage.clear(); location.hash = ''; _setProbe('P2', null); });
 
 const stored = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
 const file = () => new File([new Uint8Array(8)], 'pic.png', { type: 'image/png' });
@@ -26,7 +27,16 @@ const layer = (label: string) => within(screen.getByRole('group', { name: `Layer
 
 /** The voice icon uploads on the page (plan task T2). */
 describe('the voice icon uploads', () => {
-  it('stores your microphone and the teammate talking icon at 64 x 64 from the microphone panel, then resets them', async () => {
+  it('offers only your microphone icon while gate P2 is closed: the teammate icon was never seen in game', async () => {
+    render(<Hud />);
+    fireEvent.click(layer('Your microphone').getByRole('button', { name: 'Your microphone' }));
+    expect(screen.getByLabelText('Your microphone icon picture')).toBeTruthy();
+    expect(screen.queryByLabelText('Teammate talking icon picture')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reset Teammate talking icon' })).toBeNull();
+  });
+
+  it('stores your microphone and the teammate talking icon (P2 open) at 64 x 64 from the microphone panel, then resets them', async () => {
+    _setProbe('P2', true);
     render(<Hud />);
     fireEvent.click(layer('Your microphone').getByRole('button', { name: 'Your microphone' }));
     for (const [label, id] of [['Your microphone icon', 'voiceSelf'], ['Teammate talking icon', 'voicePlayer']]) {

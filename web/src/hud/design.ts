@@ -13,7 +13,7 @@ import { kvFind, kvGet, type KvNode } from './kv';
 import { elementById } from './elements';
 import { SLOTS } from './slots';
 import { TEAM_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, panelOfFile, maxInset, childPath, type ChildDef, type KeyDef } from './children';
-import { probe } from './probes';
+import { probe, type ProbeId } from './probes';
 import { MAX_IMAGE_B64, MAX_IMAGE_SIDE } from './limits';
 import { clampBarKeys } from './progress';
 import { readArt, type CrosshairArt } from '../crosshair/model';
@@ -174,12 +174,24 @@ export function weaponImageFits(id: string, w: number, h: number): boolean | und
  * voice_self drawn from a texture cell in full colour.
  */
 export const VOICE_ICONS: Readonly<Record<string, string>> = { voiceSelf: 'voice_self', voicePlayer: 'voice_player' };
+/**
+ * The voice icon uploads waiting on a probe: voice_player (the teammate
+ * talking icon) was never drawn with one client, so it stays behind gate
+ * P2 (probes.ts). A closed gate hides the control, drops a stored picture
+ * and builds nothing for it.
+ */
+const VOICE_ICON_GATES: Readonly<Record<string, ProbeId>> = { voicePlayer: 'P2' };
+/** Whether the voice icon upload `id` is offered and built today. */
+export function voiceIconOpen(id: string): boolean {
+  const gate = VOICE_ICON_GATES[id];
+  return !gate || probe(gate);
+}
 /** A voice icon is redrawn at 64 x 64 texels before it is stored (plan decision 5). */
 export const VOICE_ICON_TEXELS = 64;
 /** Whether a stored picture under `id` is a voice icon at the size the build takes; undefined for an id that is no voice icon's. */
 export function voiceImageFits(id: string, w: number, h: number): boolean | undefined {
   if (!(id in VOICE_ICONS)) return undefined;
-  return w === VOICE_ICON_TEXELS && h === VOICE_ICON_TEXELS;
+  return voiceIconOpen(id) && w === VOICE_ICON_TEXELS && h === VOICE_ICON_TEXELS;
 }
 
 /** Box colours when a flat or rounded box carries none: the old Advanced weapon box slots' defaults. */

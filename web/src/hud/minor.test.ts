@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { PROBES, _setProbe } from './probes';
 import { elementById } from './elements';
 import { buildHud, elementRect } from './build';
 import { validateDesign, type HudDesign } from './design';
@@ -280,6 +281,7 @@ describe('the panels seen only with other players (plan task M2)', () => {
  */
 describe('the voice icon uploads (plan task T2)', () => {
   beforeEach(() => { _resetAssetCache(); });
+  afterEach(() => { _setProbe('P2', null); });
   const PNG = 'iVBORw0KGgo=';
   const withIcons = (ids: string[], size = 64) => validateDesign({ v: 1, images: Object.fromEntries(ids.map((id) => [id, { w: size, h: size, png: PNG }])) });
   const px = new Uint8ClampedArray(64 * 64 * 4).fill(200);
@@ -288,12 +290,25 @@ describe('the voice icon uploads (plan task T2)', () => {
     return f ? parseKv(new TextDecoder('latin1').decode(f.data))[0].value as KvNode[] : undefined;
   };
 
-  it('keeps a 64 x 64 upload for either icon, and drops any other size', () => {
+  it('holds the teammate talking icon behind gate P2 while closed: dropped on load, never built (only your mic was seen, V1)', () => {
+    expect(PROBES.P2.passed).toBe(false);
+    expect(Object.keys(withIcons(['voiceSelf', 'voicePlayer']).images)).toEqual(['voiceSelf']);
+    const slipped: HudDesign = { ...withIcons(['voiceSelf']), images: { voiceSelf: { w: 64, h: 64, png: PNG }, voicePlayer: { w: 64, h: 64, png: PNG } } };
+    const files = buildHud(slipped, { images: { voiceSelf: px, voicePlayer: px } });
+    const cells = kvFind(modtex(files)!, ['TextureData'])!.value as KvNode[];
+    expect(kvGet(kvFind(cells, ['voice_self'])!, 'file')).toBe('vgui/hud/hudeditor/voice_self');
+    expect(kvGet(kvFind(cells, ['voice_player'])!, 'file')).toBeUndefined();
+    expect(files.some((f) => f.path.includes('hudeditor/voice_player'))).toBe(false);
+  });
+
+  it('keeps a 64 x 64 upload for either icon with P2 open, and drops any other size', () => {
+    _setProbe('P2', true);
     expect(Object.keys(withIcons(['voiceSelf', 'voicePlayer']).images).sort()).toEqual(['voicePlayer', 'voiceSelf']);
     expect(withIcons(['voiceSelf'], 32).images).toEqual({});
   });
 
   it('points voice_self and voice_player at their uploads, a 64 x 64 cell, losing the glyph', () => {
+    _setProbe('P2', true);
     const d = withIcons(['voiceSelf', 'voicePlayer']);
     const files = buildHud(d, { images: { voiceSelf: px, voicePlayer: px } });
     const cells = kvFind(modtex(files)!, ['TextureData'])!.value as KvNode[];

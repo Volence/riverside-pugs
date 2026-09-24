@@ -19,7 +19,7 @@
  * A leaf: imports nothing.
  */
 
-export type ProbeId = 'Q1' | 'Q2' | 'Q3' | 'Q8' | 'Q24' | 'K5' | 'C2' | 'Z3' | 'T1';
+export type ProbeId = 'Q1' | 'Q2' | 'Q3' | 'Q8' | 'Q24' | 'K5' | 'C2' | 'Z3' | 'T1' | 'P2';
 
 export const PROBES: Readonly<Record<ProbeId, { passed: boolean; batch: string; question: string }>> = {
   Q1: { passed: true, batch: 'B1 (a), (c)', question: 'monochrome_color on a HealthPanel recolours the whole panel (fill, outline, number, cross, scratches) in every state' },
@@ -40,6 +40,10 @@ export const PROBES: Readonly<Record<ProbeId, { passed: boolean; batch: string; 
   // Same file, V1: a human Tank with the survivors in the rescue closets drew the meter with every key written
   // (v1/crops/v1d-frustration-a.png, v1d-frustration-d.png; east_aligned against the stock control v1f-frustration-stock-d.png).
   T1: { passed: true, batch: 'V1d (t-a, t-d), V1f (t-d)', question: 'frustrationmeter.res keys (east_aligned, label colours, fonts, moves) are honoured' },
+  // Same file, V2 and V3: with one client only your own voice is heard, and voice_loopback never puts it in the voice
+  // list or on a teammate card (r1-g), so neither the teammate talking icon nor the list's rows were ever drawn.
+  // Needs a second player talking. Holds the voice_player upload and the voice list row keys (plan decision 3).
+  P2: { passed: false, batch: 'R1 (r1-g, one client)', question: "with a second player talking, the teammate card's voice_player cell draws an uploaded picture, and HudVoiceStatus item_tall, item_wide and item_spacing size the voice list rows" },
 };
 
 /** Test overrides, read before PROBES. */
