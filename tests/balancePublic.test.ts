@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../src/db.js';
 import { listPublished, patchTimeline, publicChanges, publishPatch } from '../src/balancePublic.js';
 import { listPatches } from '../src/balancePatches.js';
+import { compareSides } from '../src/metrics/compare/compare.js';
+import { adminDefaultCompare, publicEntry } from '../src/balancePublic.js';
+import { PUBLIC_METRICS, ENGINE } from '../src/metrics/registry.js';
 
 type DBT = ReturnType<typeof openDb>;
 /** Adds `n` completed matches with two counted rounds each on `patch`, ended on `day`. */
@@ -105,5 +108,124 @@ describe('publicChanges', () => {
   it('lists a watched file that appears or disappears, and falls back to raw names without knobs', () => {
     expect(publicChanges({}, { 'f:cfg/new.cfg': '1.aaaaaaaa' }, KNOBS).files).toEqual(['cfg/new.cfg']);
     expect(publicChanges({ 'c:z_tank_health': '1' }, { 'c:z_tank_health': '2' }, null).knobs).toEqual([{ label: 'z_tank_health', from: '1', to: '2' }]);
+  });
+});
+
+/** Patch 1: 40 matches, saferoom 20%. Patch 2: 40 matches, saferoom 80%.
+ *  tank.spawns identical trend on both, an admin-only metric that must never
+ *  leak to the public entry. One map. Notes and inputs_json set so both
+ *  publishing and the change list work (see tests/metrics/compare.test.ts setup()). */
+// The compare-result cache (src/metrics/compare/cache.ts memo()) is a
+// module-level Map keyed by cache key + dataStamp, shared by every test in
+// this process. A dataStamp is just the round_metric_context row count plus
+// its MAX(computed_at), so two different :memory: dbs built by compareDb()
+// with the same shape would otherwise collide on the same cache entry across
+// tests. Tagging each build's rows with a unique computed_at (as a real
+// recompute would naturally have a unique timestamp) keeps every test's
+// adminDefaultCompare call looking at its own db.
+let compareDbSeq = 0;
+
+function compareDb(nA = 40, nB = 40) {
+  const db = openDb(':memory:');
+  const computedAt = `n${++compareDbSeq}`;
+  db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
+  db.prepare(`INSERT INTO balance_patches (id, name, notes, source, inputs_json, first_seen_at) VALUES
+    (1, 'Old', 'old notes', 'detected', '{"c:z_tank_health":"8000"}', '2026-09-01 00:00:00'),
+    (2, 'New', 'new notes', 'detected', '{"c:z_tank_health":"7500"}', '2026-09-10 00:00:00')`).run();
+  const match = db.prepare("INSERT INTO matches (id, season_id, state, campaign, origin, ended_at) VALUES (?, 1, 'completed', 'x', 'queue', ?)");
+  const ctx = db.prepare(`INSERT INTO round_metric_context (match_id, ordinal, half, map, origin, patch_id, surv_mu, inf_mu, has_replay, has_stats, engine, computed_at)
+    VALUES (?, 0, ?, 'mapA', 'queue', ?, 25, 25, 0, 0, ?, '${computedAt}')`);
+  const row = db.prepare('INSERT INTO round_metrics VALUES (?, 0, ?, ?, ?, ?, ?)');
+  let id = 1;
+  const add = (patch: number, n: number, safeEvery: number, day: number) => {
+    for (let i = 0; i < n; i++, id++) {
+      match.run(id, `2026-09-${String(day).padStart(2, '0')} 10:${String(i).padStart(2, '0')}:00`);
+      for (const half of [1, 2]) {
+        ctx.run(id, half, patch, ENGINE);
+        row.run(id, half, 'round.saferoom', 'all', (i * 2 + half) % safeEvery === 0 ? 1 : 0, 1);
+        row.run(id, half, 'tank.spawns', 'all', (i + half) % 3 === 0 || (patch === 2 && i % 7 === 0) ? 2 : 1, 1);
+        row.run(id, half, 'round.saferoom', 'tank', (i * 2 + half) % safeEvery === 0 ? 1 : 0, 1);
+        row.run(id, half, 'tank.spawns', 'tank', 1, 1);
+        row.run(id, half, 'round.saferoom', 'witch', (i + half) % 3 === 0 ? 1 : 0, 1);
+      }
+    }
+  };
+  add(1, nA, 5, 5);   // 1 in 5 rounds safe
+  add(2, nB, 1, 15);  // x % 1 === 0 always holds: every side B round is safe
+  return db;
+}
+
+describe('publicEntry', () => {
+  it('is null for unknown or unpublished ids unless previewing', () => {
+    const db = compareDb();
+    expect(publicEntry(db, 99, { knobs: null })).toBeNull();
+    expect(publicEntry(db, 2, { knobs: null })).toBeNull();
+    expect(publicEntry(db, 2, { knobs: null, preview: true })).not.toBeNull();
+  });
+
+  it('first published patch: no baseline, no comparison', () => {
+    const db = compareDb();
+    publishPatch(db, 1, true);
+    expect(publicEntry(db, 1, { knobs: null })).toMatchObject({ status: 'first', previous: null, effect: null, changes: null, changesUnavailable: 'first' });
+  });
+
+  it('parity: public rows equal the admin default rows filtered to the allowlist', () => {
+    const db = compareDb();
+    publishPatch(db, 1, true); publishPatch(db, 2, true);
+    const e = publicEntry(db, 2, { knobs: null })!;
+    expect(e.status).toBe('compared');
+    expect(e.previous).toEqual({ id: 1, name: 'Old' });
+    expect(e.changes!.knobs).toEqual([{ label: 'z_tank_health', from: '8000', to: '7500' }]);
+    const admin = compareSides(db, { patchIds: [1], origin: 'all', maps: null }, { patchIds: [2], origin: 'all', maps: null }, { phases: 'all' });
+    const pub = new Set(PUBLIC_METRICS.map((m) => m.id));
+    const adminRows = admin.rows.filter((r) => pub.has(r.metric));
+    for (const r of adminRows) {
+      const p = e.effect!.rows.find((x) => x.metric === r.metric)!;
+      expect({ v: p.verdict, a: p.a, b: p.b, lo: p.lo, hi: p.hi }).toEqual({ v: r.verdict, a: r.a, b: r.b, lo: r.lo, hi: r.hi });
+    }
+    expect(e.effect!.rows.find((x) => x.metric === 'round.saferoom')!.verdict).toBe('real');
+    // Admin-only metrics never leak.
+    expect(e.effect!.rows.some((x) => x.metric === 'tank.spawns')).toBe(false);
+    // Every allowlisted metric is listed, missing ones as no data.
+    expect(e.effect!.rows.map((x) => x.metric).sort()).toEqual([...pub].sort());
+    expect(e.effect!.rows.find((x) => x.metric === 'witch.crown_rate')).toMatchObject({ verdict: 'no_data', a: null, b: null, nA: 0, nB: 0 });
+    expect(JSON.stringify(e)).not.toMatch(/meanMu|meanGap|fingerprint|inputs_json|"p":/);
+  });
+
+  it('shares the admin cache entry', () => {
+    const db = compareDb();
+    publishPatch(db, 1, true); publishPatch(db, 2, true);
+    const first = adminDefaultCompare(db, 1, 2);
+    expect(adminDefaultCompare(db, 1, 2)).toBe(first);
+  });
+
+  it('skips a published baseline with no counted rounds, and diffs across an unpublished patch', () => {
+    const db = compareDb();
+    // Patch 3: published, no rounds, between 1 and 2 by first_seen_at.
+    db.prepare(`INSERT INTO balance_patches (id, name, notes, source, inputs_json, first_seen_at, published_at)
+      VALUES (3, 'Empty', 'n', 'detected', '{"c:z_tank_health":"7000"}', '2026-09-09 00:00:00', '2026-09-24 00:00:00')`).run();
+    publishPatch(db, 1, true); publishPatch(db, 2, true);
+    const e = publicEntry(db, 2, { knobs: null })!;
+    expect(e.previous!.id).toBe(1);
+    expect(e.changes!.knobs[0]).toMatchObject({ from: '8000', to: '7500' });
+    expect(publicEntry(db, 3, { knobs: null })).toMatchObject({ status: 'no_rounds', effect: null, matches: 0 });
+  });
+
+  it('historical patch: approximate, no change list; a baseline without inputs gives previous_unrecorded', () => {
+    const db = compareDb();
+    db.prepare("UPDATE balance_patches SET source = 'historical', inputs_json = NULL WHERE id = 1").run();
+    publishPatch(db, 1, true); publishPatch(db, 2, true);
+    expect(publicEntry(db, 1, { knobs: null })).toMatchObject({ approximate: true, changes: null, changesUnavailable: 'first' });
+    const e = publicEntry(db, 2, { knobs: null })!;
+    expect(e).toMatchObject({ changes: null, changesUnavailable: 'previous_unrecorded' });
+    expect(e.effect!.approximate).toBe(true);
+  });
+
+  it('a later historical patch shows changesUnavailable historical, not previous_unrecorded', () => {
+    const db = compareDb();
+    db.prepare("UPDATE balance_patches SET source = 'historical' WHERE id = 2").run();
+    publishPatch(db, 1, true); publishPatch(db, 2, true);
+    const e = publicEntry(db, 2, { knobs: null })!;
+    expect(e).toMatchObject({ approximate: true, changes: null, changesUnavailable: 'historical' });
   });
 });
