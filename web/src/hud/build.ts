@@ -128,9 +128,17 @@ class Work {
     for (const path of [...paths].sort()) {
       const own = layer?.get(path);
       const write = (text: string) => (own ? encodeText(text, decodeText(own).encoding) : enc(text));
-      if (this.texts.has(path) || path === ANIMS) { out.push({ path, data: write(this.text(path)) }); continue; }
+      if (this.texts.has(path) || path === ANIMS) {
+        const text = this.text(path);
+        // On Stock or Modern, a file left as the game's own is not shipped: a copy changes nothing but
+        // would still shadow another addon's (a crosshair addon's hudlayout.res, say).
+        if (!layer && text === baseFile('stock', path)) continue;
+        out.push({ path, data: write(text) });
+        continue;
+      }
       this.tree(path);
       const now = writeKv(this.trees.get(path)!);
+      if (!layer && now === writeKv(parseKv(baseFile('stock', path)))) continue;
       if (own && now === writeKv(parseKv(baseFile(this.key, path)))) { out.push({ path, data: own }); continue; }
       out.push({ path, data: write(now) });
     }
@@ -2405,13 +2413,16 @@ const README = (name: string) => `${name}: advanced install\r\n\r\n`
  * `addoninfo.txt` is harmless inside a gameinfo.txt mount and is left in.
  */
 export function packHud(design: HudDesign, assets: BuildAssets = {}, report?: BuildReport) {
-  const vpk = encodeVPK(buildHud(design, assets, report));
-  if (!design.advanced) return { filename: `${design.name}.vpk`, mime: 'application/octet-stream', bytes: vpk };
+  const built = buildHud(design, assets, report);
+  const vpk = encodeVPK(built);
+  /** The paths inside the VPK: just addoninfo.txt means the game's own HUD. */
+  const files = built.map((f) => f.path);
+  if (!design.advanced) return { filename: `${design.name}.vpk`, mime: 'application/octet-stream', bytes: vpk, files };
   const zip = encodeZip([
     { path: 'riversidehud/pak01_dir.vpk', data: vpk },
     { path: 'README.txt', data: enc(README(design.name)) },
   ]);
-  return { filename: `${design.name}.zip`, mime: 'application/zip', bytes: zip };
+  return { filename: `${design.name}.zip`, mime: 'application/zip', bytes: zip, files };
 }
 
 /**

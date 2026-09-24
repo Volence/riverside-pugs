@@ -4,6 +4,7 @@ import { elementById } from './elements';
 import { buildHud, elementRect } from './build';
 import { validateDesign, DEFAULT_DESIGN, type HudDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
+import { baseFile } from './base';
 import { drawHud, hitTest, shownInState } from './mock';
 import { placeElement } from './edit';
 import { _setImageFactory, _resetAssetCache, DEFAULT_PREVIEW, type PreviewState } from './render';
@@ -256,8 +257,9 @@ describe('the panels seen only with other players (plan task M2)', () => {
     expect(d.elements.voiceList).toEqual({ x: 10 });
     // A design that slipped one past validation still writes nothing for it.
     const slipped: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: { voiceList: { keys: { item_tall: '30' } } } };
-    const f = buildHud(slipped).find((x) => x.path === 'scripts/hudlayout.res')!;
-    const n = kvFind(parseKv(new TextDecoder('latin1').decode(f.data))[0].value as KvNode[], ['HudVoiceStatus'])!;
+    // Nothing written leaves hudlayout.res the game's own, so the build ships no copy of it.
+    expect(buildHud(slipped).find((x) => x.path === 'scripts/hudlayout.res')).toBeUndefined();
+    const n = kvFind(parseKv(baseFile('stock', 'scripts/hudlayout.res'))[0].value as KvNode[], ['HudVoiceStatus'])!;
     expect(kvGet(n, 'item_tall')).not.toBe('30');
   });
 

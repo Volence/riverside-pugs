@@ -17,8 +17,12 @@ const text = (files: { path: string; data: Uint8Array }[], path: string) => {
   const f = files.find((x) => x.path === path);
   return f ? new TextDecoder('latin1').decode(f.data) : undefined;
 };
+/**
+ * hudlayout.res as the game reads it: the build's copy, or the game's own
+ * when the build ships none (a file left exactly as stock is not shipped).
+ */
 const layoutOf = (files: { path: string; data: Uint8Array }[]) =>
-  parseKv(text(files, 'scripts/hudlayout.res')!)[0].value as KvNode[];
+  parseKv(text(files, 'scripts/hudlayout.res') ?? baseFile('stock', 'scripts/hudlayout.res'))[0].value as KvNode[];
 /** An untouched design: no element overrides, not even DEFAULT_DESIGN's fitted teammate card, which has its own tests. */
 const design = (patch: Partial<HudDesign>): HudDesign => ({ ...structuredClone(DEFAULT_DESIGN), elements: {}, ...patch });
 /** A crosshair texture's pixels, as the page hands them over: TEX x TEX RGBA. */
@@ -550,7 +554,7 @@ describe('buildHud, scale', () => {
 
 describe('buildHud, team layout', () => {
   const team = (files: { path: string; data: Uint8Array }[]) =>
-    parseKv(text(files, 'resource/ui/hud/teamdisplayhud.res')!)[0].value as KvNode[];
+    parseKv(text(files, 'resource/ui/hud/teamdisplayhud.res') ?? baseFile('stock', 'resource/ui/hud/teamdisplayhud.res'))[0].value as KvNode[];
 
   it('stacks the survivor team as a column', () => {
     const t = team(buildHud(design({ elements: { teamColumn: { dir: 'column', gap: 0 } } })));
