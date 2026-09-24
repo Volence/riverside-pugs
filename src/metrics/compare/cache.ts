@@ -10,8 +10,9 @@ const entries = new Map<string, { stamp: string; value: unknown }>();
  *  without this process's writeRoundMetrics running: a void (voided_at set),
  *  a round frozen or recomputed by another process (the backfill script),
  *  which all move the round_metric_context count or its newest computed_at,
- *  or the voided-match count, or a fold or unfold (the triage generation). Combined with the in-process generation
- *  counter, which still catches same-second rewrites. */
+ *  or the voided-match count. Combined with the in-process generation
+ *  counters: metrics, which still catches same-second rewrites, and triage,
+ *  which catches a fold or unfold moving rounds between patches. */
 export function dataStamp(db: DB): string {
   const c = db.prepare('SELECT COUNT(*) AS n, MAX(computed_at) AS t FROM round_metric_context').get() as { n: number; t: string | null };
   const v = db.prepare('SELECT COUNT(*) AS n FROM matches WHERE voided_at IS NOT NULL').get() as { n: number };
