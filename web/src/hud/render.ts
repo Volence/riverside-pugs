@@ -141,6 +141,18 @@ const DEAD_NAME_ALPHA = 0.5;
  * The factor applies only to this code-managed stock splatter. A custom
  * splatter's stand-in (HudEdSplatter, splatter.ts) is a plain ImagePanel the
  * game draws at its drawColor alone, so it draws at full strength.
+ *
+ * 0.35 is still T6's guess (probe S4 measured the weapon box, not this).
+ * Slice 2.F Task X11 tried to measure it from
+ * /home/volence/l4d/hud/probe-phase2/b13/b13-stock/survivor-full/full-1.png
+ * (the black texels at alpha 172 of healthbar_bg_N against the clear floor
+ * beside them, /home/volence/l4d/hud/probe-2f/x11_splatter.py): card by card
+ * the factor came out 0.42, 0.46 and 0.55 by nearest clear pixel and 0.63
+ * to 0.66 by row, with quartiles 0.2 to 0.8 apart, over a textured floor.
+ * Too noisy to decide, so it stays; all of it says stronger than 0.35 in
+ * gamma space (and near 1 if the game blends in linear light, as launch P
+ * found for the weapon boxes). Probe B7, the splatter over a flat backdrop,
+ * must answer it.
  */
 const SPLATTER_ALPHA = 0.35;
 
