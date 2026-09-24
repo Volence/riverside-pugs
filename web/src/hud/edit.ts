@@ -6,20 +6,25 @@
  * validator uses, so a design built here is always one the generator takes.
  *
  * Positions are read back from the generator (elementRect, teamCardRects,
- * cardChild), never worked out here, so an edit starts from exactly what the
+ * panelChild), never worked out here, so an edit starts from exactly what the
  * canvas draws.
  */
 import {
-  clampOverride, clampChild, baseTeam, DEFAULT_DESIGN, newDesign,
+  clampOverride, clampChild, DEFAULT_DESIGN, newDesign,
   type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type Box, type WeaponsOverride, type ImportedRef,
 } from './design';
-import { baseOf } from './base';
 import { screenW, SCREEN_H } from './units';
 import { elementById } from './elements';
-import { elementRect, teamLayout, teamCardRects, isFreeTeam, cardChild, type CardChild } from './build';
-import { teamChild } from './children';
+import { elementRect, teamLayout, teamCardRects, isFreeTeam, panelChild, buildTrees, type CardChild } from './build';
+import { childDef, panelChildren } from './children';
+import { kvGet } from './kv';
 import { unionBox, CORNERS, type Handle } from './guides';
-import { elementFrame, type Selection } from './selection';
+import { elementFrame, panelClamp, panelOf, type Selection } from './selection';
+
+// The clamp box lives in selection.ts (edit.ts already imports selection.ts,
+// so the reverse import would make a loop); it is offered from here too, the
+// module every child edit goes through.
+export { panelClamp };
 import type { CrosshairArt } from '../crosshair/model';
 import { splatterDef, type SplatterId, type SplatterKind, type SplatterStyle } from './splatter';
 
@@ -278,31 +283,48 @@ export function cardStarts(design: HudDesign, cards: number[]): Record<number, B
   return Object.fromEntries(cards.filter((c) => boxes[c]).map((c) => [c, boxes[c]]));
 }
 
-/** Merge into one teammate-card child's override. */
-export function patchChild(design: HudDesign, name: string, p: Partial<ChildOverride>): HudDesign {
-  const kids = design.children.teamColumn ?? {};
-  return { ...design, children: { ...design.children, teamColumn: { ...kids, [name]: { ...(kids[name] ?? {}), ...p } } } };
+/**
+ * Where a panel's piece is now, in its file's unfitted frame, as a gesture
+ * starts from it: panelChild without the typed keys and zpos, which no
+ * gesture moves.
+ */
+function childAt(design: HudDesign, panel: string, name: string): CardChild | null {
+  const c = panelChild(design, panel, name);
+  if (!c) return null;
+  const { keys: _keys, z: _z, ...plain } = c;
+  return plain;
 }
 
 /**
- * Place a teammate-card child at (x, y): unscaled units in the card file's
- * own unfitted frame, rounded, clamped inside the unfitted card (150 x 150
- * on stock). The clamp is the unfitted card, not the fitted one, or a child
- * could never move past the card it currently makes and nothing could grow.
+ * Merge into one panel child's override. Every child helper below takes the
+ * panel last, defaulting to the teammate card, so the Phase 1 calls read as
+ * they always did.
  */
-export function placeChild(design: HudDesign, name: string, x: number, y: number): HudDesign {
-  const r = cardChild(design, name);
-  if (!r || !teamChild(name)?.move) return design;
-  const p = baseTeam(baseOf(design)).card;
+export function patchChild(design: HudDesign, name: string, p: Partial<ChildOverride>, panel = 'teamColumn'): HudDesign {
+  const kids = design.children[panel] ?? {};
+  return { ...design, children: { ...design.children, [panel]: { ...kids, [name]: { ...(kids[name] ?? {}), ...p } } } };
+}
+
+/**
+ * Place a panel child at (x, y): unscaled units in the panel file's own
+ * unfitted frame, rounded, clamped inside the panel's clamp box (panelClamp:
+ * for the teammate card the unfitted card, 150 x 150 on stock). The clamp is
+ * the unfitted card, not the fitted one, or a child could never move past
+ * the card it currently makes and nothing could grow.
+ */
+export function placeChild(design: HudDesign, name: string, x: number, y: number, panel = 'teamColumn'): HudDesign {
+  const r = childAt(design, panel, name);
+  if (!r || !childDef(panel, name)?.move) return design;
+  const p = panelClamp(design, panel);
   const cx = Math.round(Math.min(Math.max(0, p.w - r.w), Math.max(0, x)));
   const cy = Math.round(Math.min(Math.max(0, p.h - r.h), Math.max(0, y)));
-  return patchChild(design, name, { x: clampChild('x', cx), y: clampChild('y', cy) });
+  return patchChild(design, name, { x: clampChild('x', cx), y: clampChild('y', cy) }, panel);
 }
 
 /** Nudge a child from where it is now, through the same clamp as a drag. */
-export function nudgeChild(design: HudDesign, name: string, dx: number, dy: number): HudDesign {
-  const r = cardChild(design, name);
-  return r ? placeChild(design, name, r.x + dx, r.y + dy) : design;
+export function nudgeChild(design: HudDesign, name: string, dx: number, dy: number, panel = 'teamColumn'): HudDesign {
+  const r = childAt(design, panel, name);
+  return r ? placeChild(design, name, r.x + dx, r.y + dy, panel) : design;
 }
 
 /**
@@ -330,22 +352,22 @@ export function resizeBox(start: Box, handle: Handle, dx: number, dy: number, ke
 }
 
 /**
- * Resize one teammate-card piece by a handle from where the gesture started
- * it, unscaled units, inside the unfitted card. Width-and-height pieces take
+ * Resize one panel piece by a handle from where the gesture started it,
+ * unscaled units, inside the panel's clamp box (the unfitted card). Width-and-height pieces take
  * any of the eight handles, and a left or top handle moves the origin so the
  * opposite edge stays put. Square art takes the corners only and grows by
  * the larger of the two deltas, keeping its ratio. The item icons have no
  * box of their own: a corner scales their icon size in proportion.
  */
 export function resizeChild(
-  design: HudDesign, name: string, start: CardChild, handle: Handle, dx: number, dy: number, keepRatio = false,
+  design: HudDesign, name: string, start: CardChild, handle: Handle, dx: number, dy: number, keepRatio = false, panel = 'teamColumn',
 ): HudDesign {
-  const def = teamChild(name);
+  const def = childDef(panel, name);
   if (!def) return design;
-  const p = baseTeam(baseOf(design)).card;
+  const p = panelClamp(design, panel);
   if (def.box === 'none') {
     if (!def.font || start.fontTall === undefined || !CORNERS.includes(handle)) return design;
-    return patchChild(design, name, { fontSize: clampChild('fontSize', Math.round(start.fontTall * cornerFactor(start, handle, dx, dy))) });
+    return patchChild(design, name, { fontSize: clampChild('fontSize', Math.round(start.fontTall * cornerFactor(start, handle, dx, dy))) }, panel);
   }
   if (def.box === 'square') {
     if (!CORNERS.includes(handle)) return design;
@@ -361,7 +383,7 @@ export function resizeChild(
     const patch: Partial<ChildOverride> = { w: side, h: side };
     if (handle.includes('w')) patch.x = clampChild('x', start.x + start.w - side);
     if (handle.includes('n')) patch.y = clampChild('y', start.y + start.h - side);
-    return patchChild(design, name, patch);
+    return patchChild(design, name, patch, panel);
   }
   const b = resizeBox(start, handle, dx, dy, keepRatio, 1);
   // Inside the unfitted card: an edge dragged past the card stops at it.
@@ -370,7 +392,7 @@ export function resizeChild(
   const patch: Partial<ChildOverride> = { w: clampChild('w', Math.max(1, right - left)), h: clampChild('h', Math.max(1, bottom - top)) };
   if (handle.includes('w')) patch.x = clampChild('x', left);
   if (handle.includes('n')) patch.y = clampChild('y', top);
-  return patchChild(design, name, patch);
+  return patchChild(design, name, patch, panel);
 }
 
 /**
@@ -379,24 +401,24 @@ export function resizeChild(
  * away. The last edit gone, the card's map goes too, so a reset design is
  * the same value as one never touched.
  */
-export function resetChild(d: HudDesign, name: string): HudDesign {
-  const def = teamChild(name);
-  const kids = { ...(d.children.teamColumn ?? {}) };
+export function resetChild(d: HudDesign, name: string, panel = 'teamColumn'): HudDesign {
+  const def = childDef(panel, name);
+  const kids = { ...(d.children[panel] ?? {}) };
   const on = kids[name]?.on;
   delete kids[name];
   if (def?.addable && on !== undefined) kids[name] = { on };
-  const children: HudDesign['children'] = { ...d.children, teamColumn: kids };
-  if (Object.keys(kids).length === 0) delete children.teamColumn;
+  const children: HudDesign['children'] = { ...d.children, [panel]: kids };
+  if (Object.keys(kids).length === 0) delete children[panel];
   return { ...d, children };
 }
 
-// --- several pieces of the teammate card at once ---
+// --- several pieces of one panel at once ---
 
 /** Where each named piece is now, in the unfitted frame: what a gesture starts from. Pieces the file lacks are left out. */
-export function startsOf(design: HudDesign, names: string[]): Record<string, CardChild> {
+export function startsOf(design: HudDesign, names: string[], panel = 'teamColumn'): Record<string, CardChild> {
   const out: Record<string, CardChild> = {};
   for (const n of names) {
-    const c = cardChild(design, n);
+    const c = childAt(design, panel, n);
     if (c) out[n] = c;
   }
   return out;
@@ -404,35 +426,35 @@ export function startsOf(design: HudDesign, names: string[]): Record<string, Car
 
 /**
  * Move pieces by (dx, dy) from where a gesture started them, unscaled units.
- * The delta is clamped once for the whole group, against the unfitted card
- * (the Phase 1 drag clamp), so the pieces keep their spacing when the group
+ * The delta is clamped once for the whole group, against the panel's clamp
+ * box (for the teammate card the unfitted card, the Phase 1 drag clamp), so the pieces keep their spacing when the group
  * meets an edge instead of piling up against it one by one. A name missing
  * from the registry, or with nothing to start from (an addable child not
  * yet in the file), is skipped. Every registered piece moves today, so
- * `teamChild(n)?.move` here currently means exactly "is `n` registered",
+ * `childDef(panel, n)?.move` here currently means exactly "is `n` registered",
  * the same live case build.ts's childPass guards against with its own "not
  * an editable child" check; `?.move` stays rather than a plain existence
  * check only so a future non-movable child would not need this filter
  * touched again.
  */
 export function moveChildren(
-  design: HudDesign, names: string[], starts: Record<string, CardChild>, dx: number, dy: number,
+  design: HudDesign, names: string[], starts: Record<string, CardChild>, dx: number, dy: number, panel = 'teamColumn',
 ): HudDesign {
-  const p = baseTeam(baseOf(design)).card;
-  const list = names.filter((n) => teamChild(n)?.move && starts[n]);
+  const p = panelClamp(design, panel);
+  const list = names.filter((n) => childDef(panel, n)?.move && starts[n]);
   if (!list.length) return design;
   const cx = Math.min(Math.min(...list.map((n) => p.w - starts[n].w - starts[n].x)), Math.max(Math.max(...list.map((n) => -starts[n].x)), dx));
   const cy = Math.min(Math.min(...list.map((n) => p.h - starts[n].h - starts[n].y)), Math.max(Math.max(...list.map((n) => -starts[n].y)), dy));
   let d = design;
-  for (const n of list) d = placeChild(d, n, starts[n].x + cx, starts[n].y + cy);
+  for (const n of list) d = placeChild(d, n, starts[n].x + cx, starts[n].y + cy, panel);
   return d;
 }
 
 /** The group X and Y boxes: put the pieces' box at (x, y), moving all of them. */
-export function placeChildren(design: HudDesign, names: string[], x: number, y: number): HudDesign {
-  const starts = startsOf(design, names);
+export function placeChildren(design: HudDesign, names: string[], x: number, y: number, panel = 'teamColumn'): HudDesign {
+  const starts = startsOf(design, names, panel);
   const box = unionBox(Object.values(starts));
-  return box ? moveChildren(design, names, starts, x - box.x, y - box.y) : design;
+  return box ? moveChildren(design, names, starts, x - box.x, y - box.y, panel) : design;
 }
 
 /**
@@ -458,16 +480,16 @@ export function anchorOf(box: Box, handle: Handle): { x: number; y: number } {
  * positions and sizes both, so the group grows or shrinks as one. Square art
  * stays square; a label scales its text size with its box, and the item
  * icons (no box of their own) scale their icon size. Each size is capped to
- * the unfitted card first and each position then clamped inside it, as
+ * the panel's clamp box first and each position then clamped inside it, as
  * placeChild does, so any factor leaves a valid design.
  */
 export function scaleChildren(
-  design: HudDesign, names: string[], starts: Record<string, CardChild>, anchor: { x: number; y: number }, f: number,
+  design: HudDesign, names: string[], starts: Record<string, CardChild>, anchor: { x: number; y: number }, f: number, panel = 'teamColumn',
 ): HudDesign {
-  const p = baseTeam(baseOf(design)).card;
+  const p = panelClamp(design, panel);
   let d = design;
   for (const n of names) {
-    const def = teamChild(n);
+    const def = childDef(panel, n);
     const s = starts[n];
     if (!def || !s) continue;
     const patch: Partial<ChildOverride> = {};
@@ -485,7 +507,7 @@ export function scaleChildren(
       patch.x = clampChild('x', Math.round(Math.min(Math.max(0, p.w - w), Math.max(0, x))));
       patch.y = clampChild('y', Math.round(Math.min(Math.max(0, p.h - h), Math.max(0, y))));
     }
-    d = patchChild(d, n, patch);
+    d = patchChild(d, n, patch, panel);
   }
   return d;
 }
@@ -505,25 +527,47 @@ export function alignedAt(r: Box, box: Box, how: Align): { x: number; y: number 
 }
 
 /** Align pieces against the box around them, through placeChild's clamp. */
-export function alignChildren(design: HudDesign, names: string[], how: Align): HudDesign {
-  const starts = startsOf(design, names);
+export function alignChildren(design: HudDesign, names: string[], how: Align, panel = 'teamColumn'): HudDesign {
+  const starts = startsOf(design, names, panel);
   const box = unionBox(Object.values(starts));
   if (!box) return design;
   let d = design;
   for (const [n, s] of Object.entries(starts)) {
-    if (!teamChild(n)?.move) continue;
+    if (!childDef(panel, n)?.move) continue;
     const at = alignedAt(s, box, how);
-    d = placeChild(d, n, at.x, at.y);
+    d = placeChild(d, n, at.x, at.y, panel);
   }
   return d;
 }
 
-export function setChildrenVisible(design: HudDesign, names: string[], visible: boolean): HudDesign {
-  return names.reduce((d, n) => patchChild(d, n, { visible }), design);
+export function setChildrenVisible(design: HudDesign, names: string[], visible: boolean, panel = 'teamColumn'): HudDesign {
+  return names.reduce((d, n) => patchChild(d, n, { visible }, panel), design);
 }
 
-export function resetChildren(design: HudDesign, names: string[]): HudDesign {
-  return names.reduce((d, n) => resetChild(d, n), design);
+export function resetChildren(design: HudDesign, names: string[], panel = 'teamColumn'): HudDesign {
+  return names.reduce((d, n) => resetChild(d, n, panel), design);
+}
+
+/**
+ * "Bring to front" and "Send to back" (plan decision 5): the pieces go one
+ * above the highest zpos in the panel's file, or one below the lowest, not
+ * one step, since several pieces often share a zpos and a single step would
+ * be ambiguous. The file is read as buildTrees has it, so a block the build
+ * injects (the card background, the splatter stand-in) counts; the pieces
+ * being moved do not, and a block with no zpos counts as 0, which is what
+ * the game gives it. Every piece gets the same zpos, through the
+ * validator's -50..50 clamp.
+ */
+export function raiseChild(design: HudDesign, names: string[], to: 'front' | 'back', panel = 'teamColumn'): HudDesign {
+  const reg = panelChildren(panel);
+  if (!reg) return design;
+  const moving = new Set(names.map((n) => n.toLowerCase()));
+  const zs = buildTrees(design)(reg.file)
+    .filter((n) => typeof n.value !== 'string' && !moving.has(n.key.toLowerCase()))
+    .map((n) => { const z = parseFloat(kvGet(n, 'zpos') ?? ''); return Number.isFinite(z) ? z : 0; });
+  if (!zs.length) return design;
+  const z = clampChild('z', to === 'front' ? Math.max(...zs) + 1 : Math.min(...zs) - 1);
+  return names.filter((n) => childDef(panel, n)).reduce((d, n) => patchChild(d, n, { z }, panel), design);
 }
 
 // --- elements, cards and whole selections ---
@@ -677,7 +721,7 @@ export function nudgeSelection(design: HudDesign, sel: Selection, dx: number, dy
   switch (sel.kind) {
     case 'elements': return sel.ids.reduce((d, id) => nudge(d, id, dx, dy), design);
     case 'cards': return nudgeCards(design, sel.cards, dx, dy);
-    case 'children': return moveChildren(design, sel.names, startsOf(design, sel.names), dx, dy);
+    case 'children': return moveChildren(design, sel.names, startsOf(design, sel.names, panelOf(sel)), dx, dy, panelOf(sel));
     default: return design;
   }
 }
@@ -688,7 +732,7 @@ export function nudgeSelection(design: HudDesign, sel: Selection, dx: number, dy
  * card selection is returned unchanged.
  */
 export function setSelectionVisible(design: HudDesign, sel: Selection, visible: boolean): HudDesign {
-  if (sel.kind === 'children') return setChildrenVisible(design, sel.names, visible);
+  if (sel.kind === 'children') return setChildrenVisible(design, sel.names, visible, panelOf(sel));
   if (sel.kind !== 'elements') return design;
   return sel.ids.reduce((d, id) => {
     if (!elementById(id)?.props.includes('visible')) return d;
@@ -703,7 +747,7 @@ export function hideSelection(design: HudDesign, sel: Selection): HudDesign {
 
 /** The menu's Reset: elements back to a fresh design's, pieces back to the file's. */
 export function resetSelection(design: HudDesign, sel: Selection): HudDesign {
-  if (sel.kind === 'children') return resetChildren(design, sel.names);
+  if (sel.kind === 'children') return resetChildren(design, sel.names, panelOf(sel));
   if (sel.kind === 'elements') return sel.ids.reduce((d, id) => resetElement(d, id), design);
   return design;
 }

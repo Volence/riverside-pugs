@@ -5,12 +5,12 @@ import {
   startsOf, moveChildren, placeChildren, scaleChildren, cornerFactor, anchorOf, alignChildren, setChildrenVisible, resetChildren,
   placeElement, moveElements, moveCards, alignElements, scaleElement, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
   ammoOnly, withImport, withPreset, hasLayoutEdits,
-  splatterKind, patchSplatter, withSplatterImage, resetSplatter,
+  splatterKind, patchSplatter, withSplatterImage, resetSplatter, panelClamp, raiseChild,
 } from './edit';
 import { buildHud, buildTrees } from './build';
 import { weaponSlots } from './weapons';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
-import { DEFAULT_DESIGN, newDesign, type HudDesign } from './design';
+import { DEFAULT_DESIGN, newDesign, baseTeam, type HudDesign } from './design';
 import { DEFAULT_STATE } from '../crosshair/draw';
 import type { CrosshairArt } from '../crosshair/model';
 import { formatPos, parsePos } from './units';
@@ -694,5 +694,26 @@ describe('splatter edits', () => {
     expect(d.splatters).toBeUndefined();
     expect(d.images.splatTeam).toBeUndefined();
     expect(d.children.teamColumn?.BackgroundImage).toEqual({ color: '255 255 255 100' });   // only the hide goes
+  });
+});
+
+describe('child edits name their panel', () => {
+  it('stores an edit under the panel it was made in', () => {
+    const d = patchChild(structuredClone(DEFAULT_DESIGN), 'Head', { x: 4 }, 'teamColumn');
+    expect(d.children.teamColumn?.Head).toEqual({ x: 4 });
+    expect(patchChild(structuredClone(DEFAULT_DESIGN), 'Head', { x: 4 })).toEqual(d);
+  });
+  it('clamps teammate pieces inside the unfitted card, as before', () => {
+    expect(panelClamp(structuredClone(DEFAULT_DESIGN), 'teamColumn')).toEqual(baseTeam('stock').card);
+  });
+  it('brings pieces to the front and sends them to the back of their file', () => {
+    // Stock teammatepanel.res: Voice, Name and Status at zpos 3 are the highest, BackgroundImage at -1 the lowest; Head has none (0).
+    const d = structuredClone(DEFAULT_DESIGN);
+    expect(raiseChild(d, ['Head'], 'front').children.teamColumn?.Head?.z).toBe(4);
+    const back = raiseChild(d, ['Head', 'Name'], 'back');
+    expect([back.children.teamColumn?.Head?.z, back.children.teamColumn?.Name?.z]).toEqual([-2, -2]);
+    // A card background the build injected counts too: it sits at -2, so Send to back goes below it.
+    const withBg = { ...d, styles: { panelBg: { kind: 'flat' as const } } };
+    expect(raiseChild(withBg, ['Head'], 'back').children.teamColumn?.Head?.z).toBe(-3);
   });
 });
