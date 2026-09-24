@@ -142,3 +142,53 @@ export function hiddenOccupancy(
   ) as Record<InfectedClass, OccResult | null>;
   return { occ: { all: occFromBlocks(all, pairs), byClass: split }, gates };
 }
+
+export interface RevealCounts { reveals: number; on: number }
+export interface RevealResult extends RevealCounts { byClass: Record<InfectedClass, RevealCounts> }
+
+/**
+ * Metric F: at each moment a spawned infected came into this survivor's view,
+ * having been hidden from the whole team the frame before, was the crosshair
+ * already on it.
+ *
+ * 10 Hz makes reaction time coarse (100 ms buckets), so the statistic is the
+ * one bucket that resolves cleanly: "already on target at the reveal frame".
+ * A wallhack user tracking through the wall is on target the instant the wall
+ * stops being in the way; an honest player has to find it first.
+ *
+ * The frame before must be hidden from the WHOLE team, not just this survivor:
+ * if a teammate could see it, a callout can put the crosshair there honestly.
+ * Within D_MIN and beyond R_MAX nothing counts, as for every other metric.
+ */
+export function revealReaction(frames: Frame[], slot: number, los: LosView): RevealResult | null {
+  if (!los.known) return null;
+  const out: RevealResult = {
+    reveals: 0, on: 0,
+    byClass: Object.fromEntries(TRACKED_CLASSES.map((c) => [c, { reveals: 0, on: 0 }])) as Record<InfectedClass, RevealCounts>,
+  };
+  for (const ts of spawnedSlotsOf(frames)) {
+    let hiddenBefore = false;
+    for (const f of frames) {
+      const s = f.players.find((p) => p.slot === slot);
+      const t = f.players.find((p) => p.slot === ts);
+      if (!s || !t || !isLiveSurvivor(s) || !isSpawnedTarget(t)) { hiddenBefore = false; continue; }
+      const own = los.sees(f, slot, ts);
+      if (own === false && los.othersSee(f, ts, slot) === false) { hiddenBefore = true; continue; }
+      if (own === true && hiddenBefore && f.tMs >= TUNING.SPAWN_GRACE_MS) {
+        const d = dist2d(s, t);
+        if (d > TUNING.D_MIN && d <= TUNING.R_MAX) {
+          const on = onTarget(s, t, TUNING.E_TRACK);
+          out.reveals++;
+          if (on) out.on++;
+          const cls = classOf(t.cls);
+          if (cls) {
+            out.byClass[cls].reveals++;
+            if (on) out.byClass[cls].on++;
+          }
+        }
+      }
+      hiddenBefore = false;
+    }
+  }
+  return out;
+}
