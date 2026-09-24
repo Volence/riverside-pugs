@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readVPK, decodeVTF } from './read';
+import { readVPK, decodeVTF, canonicalVpkProblem } from './read';
 import { encodeVPK, encodeVTF } from './index';
 import { handMade } from './fixtures';
 
@@ -99,6 +99,20 @@ describe('readVPK', () => {
     expect(new TextDecoder().decode(got.get('addoninfo.txt'))).toBe('INFO');
     expect(got.has('materials/vgui/hud/altcrosshair.vtf')).toBe(false);
     expect([...split]).toEqual(['materials/vgui/hud/altcrosshair.vtf']);
+  });
+
+  it('refuses a VPK with two entries that differ only by case', () => {
+    const out = handMade([
+      { path: 'scripts/hudlayout.res', archive: 0x7FFF, offset: 0, length: 2, preload: new Uint8Array(0), data: enc.encode('AA') },
+      { path: 'SCRIPTS/HUDLAYOUT.res', archive: 0x7FFF, offset: 2, length: 2, preload: new Uint8Array(0), data: enc.encode('BB') },
+    ]);
+    expect(() => readVPK(out)).toThrow(/differ only in case/);
+    // Also when one of the two is kept in a side archive.
+    const split = handMade([
+      { path: 'scripts/hudlayout.res', archive: 0x7FFF, offset: 0, length: 2, preload: new Uint8Array(0), data: enc.encode('AA') },
+      { path: 'Scripts/HudLayout.res', archive: 0, offset: 0, length: 2, preload: new Uint8Array(0) },
+    ]);
+    expect(() => readVPK(split, new Set())).toThrow(/differ only in case/);
   });
 
   it('refuses what is not a VPK, or is cut short', () => {
@@ -258,5 +272,42 @@ describe('decodeVTF', () => {
     expect(() => decodeVTF(vtf({ format: 0, w: 1, h: 1, mips: [new Uint8Array(4)], flags: 0x4000 }))).toThrow(/not a texture/);
     const whole = vtf({ format: 0, w: 4, h: 4, mips: [new Uint8Array(64)] });
     expect(() => decodeVTF(whole.slice(0, whole.length - 1))).toThrow(/not a texture/);
+  });
+});
+
+describe('canonicalVpkProblem', () => {
+  const files = [
+    { path: 'scripts/hudlayout.res', data: enc.encode('LAYOUT') },
+    { path: 'resource/ui/hud/p.res', data: enc.encode('PANEL') },
+  ];
+
+  it('passes what encodeVPK writes', () => {
+    const vpk = encodeVPK(files);
+    expect(canonicalVpkProblem(vpk, readVPK(vpk))).toBeNull();
+  });
+
+  it('refuses a VPK that is not byte-identical to its canonical encoding', () => {
+    const vpk = encodeVPK(files);
+    const problem = (b: Uint8Array) => canonicalVpkProblem(b, readVPK(b));
+    // Bytes after the files.
+    const padded = new Uint8Array(vpk.length + 3);
+    padded.set(vpk);
+    expect(problem(padded)).toMatch(/not laid out/);
+    // Two entries over the same bytes, with bytes after them nothing reads:
+    // the length rule 12 + tree + sum(lengths) passes this one.
+    const overlap = handMade([
+      { path: 'scripts/hudlayout.res', archive: 0x7FFF, offset: 0, length: 6, preload: new Uint8Array(0), data: enc.encode('AAAAhidden!!') },
+      { path: 'resource/ui/hud/p.res', archive: 0x7FFF, offset: 0, length: 6, preload: new Uint8Array(0) },
+    ]);
+    expect(problem(overlap)).toMatch(/not laid out/);
+    // A wrong CRC, and a name in upper case.
+    const crc = vpk.slice();
+    crc[12 + 'res\0resource/ui/hud\0p\0'.length] ^= 1;
+    expect(problem(crc)).toMatch(/not laid out/);
+    const upper = encodeVPK([{ path: 'Scripts/HudLayout.res', data: enc.encode('LAYOUT') }]);
+    expect(problem(upper)).toMatch(/not laid out/);
+    // Preload bytes, which encodeVPK never writes.
+    const preload = handMade([{ path: 'scripts/hudlayout.res', archive: 0x7FFF, offset: 0, length: 0, preload: enc.encode('LAYOUT') }]);
+    expect(problem(preload)).toMatch(/not laid out/);
   });
 });
