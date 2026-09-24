@@ -17,6 +17,11 @@ import type { ServerRow } from './serverPool.js';
 export const MANAGED_ROOTS = ['left4dead/addons', 'left4dead/cfg', 'left4dead_dlc4/missions'] as const;
 export const SIZE_CAP = 20 * 1024 * 1024;
 const SKIP_EXT = /\.(log|dem|rip|sq3|sqlite|db)$/i;
+/** Never run, or written by the server itself, so they differ by nature:
+ *  SourceMod's source tree (Chicago's NFO install has none), tickstats output,
+ *  the admin cache dump, the per-port log auth file and the ban lists. */
+const SKIP_PREFIX = ['left4dead/addons/sourcemod/scripting/', 'left4dead/addons/sourcemod/data/tickstats/'];
+const SKIP_FILE = /^(admin_cache_dump\.txt|pug_logauth_\d+\.txt|banned_user\.cfg|banned_ip\.cfg)$/;
 
 /** Under a managed root, not on the skip list, and a plain relative path. */
 export function isManaged(path: string): boolean {
@@ -25,6 +30,7 @@ export function isManaged(path: string): boolean {
   if (!MANAGED_ROOTS.some((r) => path.startsWith(`${r}/`))) return false;
   if (parts.includes('logs') || parts.includes('replays')) return false;
   if (SKIP_EXT.test(path)) return false;
+  if (SKIP_PREFIX.some((pre) => path.startsWith(pre)) || SKIP_FILE.test(parts[parts.length - 1])) return false;
   // Campaign VPKs sit directly in addons/ and are the campaign installer's.
   if (/^left4dead\/addons\/[^/]+\.vpk$/i.test(path)) return false;
   return true;
