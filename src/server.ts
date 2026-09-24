@@ -98,6 +98,7 @@ import { pruneLiveFilesSafely } from './replayPush.js';
 import { apiRoutes } from './routes/api.js';
 import { ticketRoutes } from './routes/tickets.js';
 import { statsRoutes } from './routes/stats.js';
+import { balancePublicRoutes } from './routes/balancePublic.js';
 import { replayRoutes } from './routes/replays.js';
 import { devRoutes } from './routes/dev.js';
 import { campaignRoutes } from './routes/campaigns.js';
@@ -1467,6 +1468,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   await app.register(peopleRoutes, { db: deps.db });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
+  await app.register(balancePublicRoutes, { db: deps.db, knobsPath: deps.balanceKnobsPath });
   await app.register(replayRoutes, {
     db: deps.db, replayDir: deps.config.replayDir, liveDir: deps.config.replayLiveDir, r2,
   });
