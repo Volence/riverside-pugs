@@ -309,19 +309,25 @@ web/src/hud/download.golden.test.ts   new pinned cases
 
 **Files:** create `/home/volence/l4d/hud/probe-phase2-rest/v1/` following `../build.mts` (add batches there; do not fork).
 
-- [ ] Build from this branch's editor: a design with an M16 and a pills icon upload, an image active box, weapons boxes 120 wide (W5), kill notices east in cyan with a flat box, chat text 20, teammate items yellow, use bar label magenta and icon moved, mic moved with an uploaded glyph, vote moved, pickup fly-in off; and an infected design with the ghost panel's colours and a moved `ClassName`, the zombie panel moved.
-- [ ] Run survivor steps on R1/R4's routes (one full-health Hunter for a notice; `callvote ChangeDifficulty Normal`; `give pain_pills` then a shot at 0.7 s to prove no fly-in) and infected steps on R3/R6's routes (spawned Smoker culled far away). Also try once more for the gated panels: a director Tank by lottery (`director_force_tank 1` with specials allowed, you as a ghost) for Z3 and T1, and `ent_fire trigger_finale` alternatives for the finale meter; record what shows.
-- [ ] Record in `probe-phase2-rest/RESULTS.md` (a V1 section) with preview parity crops (headless `canvas.toDataURL()` at 1920x1080). Any mismatch becomes a fix task appended here.
+- [x] Build from this branch's editor: a design with an M16 and a pills icon upload, an image active box, weapons boxes 120 wide (W5), kill notices east in cyan with a flat box, chat text 20, teammate items yellow, use bar label magenta and icon moved, mic moved with an uploaded glyph, vote moved, pickup fly-in off; and an infected design with the ghost panel's colours and a moved `ClassName`, the zombie panel moved.
+- [x] Run survivor steps on R1/R4's routes (one full-health Hunter for a notice; `callvote ChangeDifficulty Normal`; `give pain_pills` then a shot at 0.7 s to prove no fly-in) and infected steps on R3/R6's routes (spawned Smoker culled far away). Also try once more for the gated panels: a director Tank by lottery (`director_force_tank 1` with specials allowed, you as a ghost) for Z3 and T1, and `ent_fire trigger_finale` alternatives for the finale meter; record what shows.
+- [x] Record in `probe-phase2-rest/RESULTS.md` (a V1 section) with preview parity crops (headless `canvas.toDataURL()` at 1920x1080). Any mismatch becomes a fix task appended here.
+
+**Done 2026-09-24** (`probe-phase2-rest/RESULTS.md`, V1; six launches, all restores verified). Found and fixed: the frustration bar's preview look (outline and white fill, `8e5afd61`).
 
 ### Task V2: Gate flips
 
 One task per gate V1 or a later run answers (K5, C2, Z3, T1): set `passed`, update the tests that pin the control hidden, cite the shot. A NO retires the control and its gate.
 
+**Done 2026-09-24** (`6349ac10`): K5, Z3, T1 passed; C2 stays closed (no key press can reach the game from the harness).
+
 ### Task V3: Slice verification
 
-- [ ] Full suite, typecheck, build; counts against L0.
-- [ ] `sample.vpkcheck.test.ts` / `scripts/check-hud-vpk.sh` over a design touching every new field.
-- [ ] Update the spec's section 2 gap table (items 13, 16, 20 to 27, 35) to "Done" or the gate that holds them.
+- [x] Full suite, typecheck, build; counts against L0.
+- [x] `sample.vpkcheck.test.ts` / `scripts/check-hud-vpk.sh` over a design touching every new field.
+- [x] Update the spec's section 2 gap table (items 13, 16, 20 to 27, 35) to "Done" or the gate that holds them.
+
+**Done 2026-09-24**: sample r (`3d78d014`) and all samples read back; final Stock and Modern parity launches in `/home/volence/l4d/hud/probe-phase2-rest/v-verify/RESULTS.md`.
 
 ## Task list
 

@@ -301,6 +301,8 @@ string names.
 
 ## 2. The audit's gap table, re-marked
 
+Items 13, 16, 20 to 24, 26, 27 and 35 re-marked after plan task V3 (in-game evidence: /home/volence/l4d/hud/probe-phase2-rest/RESULTS.md, V1).
+
 | # | Gap | Status on 2026-09-24 |
 |---|---|---|
 | 1-4 | teammate fit, gap spacing, per-card slots, card background | **Done** (Phase 1) |
@@ -309,28 +311,28 @@ string names.
 | 10 | own-health background | **Open**, slice 2.1 (`HudEdOwnBg`, because `LocalPlayer`'s `image` is most likely unpainted, Q2) |
 | 11 | weapon selection layout | **Done**, with the narrower key set the dll proved (audit update) |
 | 12 | weapon boxes in normal mode | **Done** (`mod_textures.txt` repoint, probe B). The audit's "item 12 still open" line predates the weapons build |
-| 13 | use/revive bar style | **Open**, slice 2.6 |
+| 13 | use/revive bar style | **Done** (slice 2.6): label colour and font, icon place and size, every bar key, Subtext colour (seen in V1a while bots revived the player) |
 | 14 | target ID movable | **Impossible / removed**: the label never shows in L4D1 (in game 2026-09-23) |
 | 15 | chat via `basechat.res` | **Done** (position, size, hard hide). The `DeathPanelOpen` offset is still open, slice 2.5 |
-| 16 | chat style | **Open**, slice 2.5 |
+| 16 | chat style | **Done** for the text size (`ChatFont`, C1). The open chat's box colour stays behind gate C2: the chat opens only on a real key press, which the harness cannot send (V1a, V1e) |
 | 17 | infected card fit plus insides | **Open**, slice 2.4 |
 | 18 | SI health insides | **Open**, slice 2.2 |
 | 19 | drop `tankhealth.res`, find the Tank's file | **Done** (hunterhealth, T1) |
-| 20 | ghost panel restyle | **Open**, slice 2.7 |
-| 21 | ability ring and crosshair marker colours and sizes | **Open**, slice 2.3 |
-| 22 | tank frustration layout | **Open**, slice 2.7 |
-| 23 | dead-infected countdown | **Open**, slice 2.8 |
-| 24 | voice list, own mic | **Open**, slice 2.8 |
+| 20 | ghost panel restyle | **Done** (slice 2.7, G-verify) |
+| 21 | ability ring and crosshair marker colours and sizes | **Done** (slice 2.3) |
+| 22 | tank frustration layout | **Done**: move and hide, and every piece behind gate T1, which V1d passed (the bar's alignment against the stock control V1f) |
+| 23 | dead-infected countdown | **Done** (M4): move, colour and size, the line seen in V1c |
+| 24 | voice list, own mic | **Done** for your microphone (move, size, picture upload; M-verify). Voice lists: move and hide only, never seen (they list other players) |
 | 25 | server (SourceMod) menu | **Open**, deferred (section 6) |
-| 26 | vote panel | **Open**, slice 2.8 (move/hide) |
-| 27 | minor panels | kill notices **done** (HudPZDamageRecord); too-far/tank takeover slice 2.7; peril, leaving area, finale, captions, damage arcs, history slice 2.8 |
+| 26 | vote panel | **Done** (move, hide, background colour; M-verify) |
+| 27 | minor panels | kill notices **done** incl. text size and alignment (gate K5 passed, V1a); too-far box and Tank offer box **done** (gate Z3 passed, V1b; the preview draws the too-far box only); peril, leaving area, finale meter: move and hide only, never seen; captions, damage arcs, history: not started |
 | 28 | kill feed | **Done** (removed) |
 | 29 | image tint on image children | **Partly done** (teammate splatter opacity); slices 2.1 to 2.4 add it wherever the game honours `drawColor` |
 | 30 | decoration rectangles | **Partly done** (card background child); `HudEdOwnBg` in 2.1; a general "add a rectangle" is deferred |
 | 31 | Tab scoreboard, versus panel | **Open**, deferred (not in-play HUD) |
 | 32, 33 | global font size, scheme colour theme | **Open**, deferred (Phase 3 "themes") |
 | 34 | zpos per child | **Open**, small; slice 2.0 adds Bring forward / Send back for every registry child |
-| 35 | item pickup fly-in | **Open**, slice 2.8 (one switch in `hudanimations.txt`) |
+| 35 | item pickup fly-in | **Done** (M3, K-verify) |
 | C.7 | bar fill colour impossible | **Re-opened** by `monochrome_color` (0.1.1), pending Q1 |
 
 ## 3. Design
