@@ -42,6 +42,9 @@ const EXACT_TEXT = new Set([
   'resource/ui/scoreboardinfectedplayer.res',
   'resource/ui/versusmodescoreboard.res',
   'resource/ui/zombiepanel.res',
+  // The dead infected's spawn countdown (SpectatorGUI): labels and an image,
+  // which the editor moves and colours (build.ts countdownPass).
+  'resource/ui/spectatorinfected.res',
 ]);
 const ANIMATIONS = 'scripts/hudanimations.txt';
 const HUD_PANEL = /^resource\/ui\/hud\/([a-z0-9_]+\/)*[a-z0-9_]+\.res$/;
