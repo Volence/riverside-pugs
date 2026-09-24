@@ -365,7 +365,7 @@ describe('sharing a HUD', () => {
     expect(file.headers['content-type']).toBe('image/png');
     expect(file.headers['x-content-type-options']).toBe('nosniff');
     expect(file.headers['content-security-policy']).toBe("default-src 'none'; sandbox");
-    expect(file.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+    expect(file.headers['cache-control']).toBe('public, max-age=3600');
     expect(new Uint8Array(file.rawPayload)).toEqual(preview);
   });
 
@@ -493,6 +493,17 @@ describe('sharing a HUD', () => {
     expect(res.statusCode).toBe(507);
     expect(res.json().error).toBe('The community shelf is full right now.');
     expect(db.prepare('SELECT COUNT(*) AS n FROM community_entries').get()).toEqual({ n: 0 });
+  });
+
+  it('takes a share that adds no new bytes, even with the shelf over budget', async () => {
+    const preview = png(960, 540, 9);
+    expect((await shareHud(A, { preview })).statusCode).toBe(200);
+    setSetting(db, 'community_store_mb', '100');
+    const filler = join(dir, 'previews', 'filler.bin');
+    writeFileSync(filler, '');
+    truncateSync(filler, 100 * MB + 1024);
+    expect((await shareHud(B, { title: 'Same shot', preview })).statusCode).toBe(200);
+    expect((await shareHud(B, { title: 'New shot', preview: png(960, 540, 10) })).statusCode).toBe(507);
   });
 
   it('refuses a share that would cross the disk floor', async () => {
