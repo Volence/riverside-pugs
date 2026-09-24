@@ -47,6 +47,7 @@ export const SETUP_TABS: { key: string; label: string; path: string }[] = [
 export const BALANCE_TABS: { key: string; label: string; path: string }[] = [
   { key: 'compare', label: 'Compare', path: '/admin/balance' },
   { key: 'patches', label: 'Patches', path: '/admin/balance/patches' },
+  { key: 'knobs', label: 'Knobs', path: '/admin/balance/knobs' },
 ];
 
 /**
