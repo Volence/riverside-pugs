@@ -676,9 +676,29 @@ describe('splatter edits', () => {
     expect(splatterKind(fade, 'splatTeam')).toBe('fade');
   });
 
-  it('keeps a Fade colour when the kind changes, and stores None for a scratch', () => {
+  it("keeps a Fade colour through None, and makes a scratch's None its child's hide", () => {
     const d = patchSplatter(patchSplatter(base(), 'splatTop', { kind: 'fade', color: '1 2 3 4' }), 'splatTop', { kind: 'none' });
-    expect(d.splatters?.splatTop).toEqual({ kind: 'none', color: '1 2 3 4' });
+    expect(d.splatters?.splatTop).toEqual({ kind: 'fade', color: '1 2 3 4' });
+    expect(d.children.ownHealth?.HealthbarTextureTop).toEqual({ visible: false });
+    expect(splatterKind(d, 'splatTop')).toBe('none');
+    const back = patchSplatter(d, 'splatTop', { kind: 'fade' });
+    expect(back.children.ownHealth).toBeUndefined();   // no empty override left behind
+    expect(splatterKind(back, 'splatTop')).toBe('fade');
+  });
+
+  it('never stores None for a scratch', () => {
+    const d = patchSplatter(base(), 'splatBottom', { kind: 'none' });
+    expect(d.splatters?.splatBottom).toBeUndefined();
+    expect(splatterKind(d, 'splatBottom')).toBe('none');
+  });
+
+  it('reads a scratch hidden in Layers as None, and Reset shows it again', () => {
+    const d = setChildrenVisible(base(), ['HealthbarTextureTop'], false, 'ownHealth');
+    expect(splatterKind(d, 'splatTop')).toBe('none');
+    expect(splatterKind(d, 'splatBottom')).toBe('stock');
+    const reset = resetSplatter(d, 'splatTop');
+    expect(splatterKind(reset, 'splatTop')).toBe('stock');
+    expect(reset.children.ownHealth).toBeUndefined();
   });
 
   it('stores an upload at the texture size and switches the splatter to Image', () => {

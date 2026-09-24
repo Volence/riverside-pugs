@@ -12,7 +12,7 @@ import type { Aspect } from './units';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { elementById } from './elements';
 import { SLOTS } from './slots';
-import { TEAM_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, type ChildDef, type KeyDef } from './children';
+import { TEAM_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, panelOfFile, type ChildDef, type KeyDef } from './children';
 import { probe } from './probes';
 import { MAX_IMAGE_B64, MAX_IMAGE_SIDE } from './limits';
 import { readArt, type CrosshairArt } from '../crosshair/model';
@@ -566,15 +566,24 @@ export function validateDesign(raw: unknown): HudDesign {
     const c = colour(v.color); if (c) s.color = c;
     d.styles[id] = s;
   }
+  // Every splatter's None is its child's hide, one flag that Layers and
+  // Delete already use, so it is never stored here (plan decision 4). The
+  // teammate splatter never stored it; a scratch saved before this did, and
+  // loads as the hide below, once the stored children are read, with the
+  // kind back to stock so a Fade colour it kept waits for the next Fade.
+  // Both paths end in the same hard hide, so the download does not change.
+  const noneHides: SplatterId[] = [];
   if (isObj(raw.splatters)) {
     const out: Partial<Record<SplatterId, SplatterStyle>> = {};
     for (const def of SPLATTERS) {
       const v = raw.splatters[def.id];
       if (!isObj(v)) continue;
-      // The teammate splatter's None is the BackgroundImage child's hide, one flag
-      // that Layers and Delete already use, so it is never stored here.
-      const kind = oneOf(v.kind, ['stock', 'none', 'fade', 'image'] as const, 'stock');
-      if (kind === 'none' && def.route === 'standIn') continue;
+      let kind = oneOf(v.kind, ['stock', 'none', 'fade', 'image'] as const, 'stock');
+      if (kind === 'none') {
+        if (def.route === 'standIn') continue;
+        noneHides.push(def.id);
+        kind = 'stock';
+      }
       const s: SplatterStyle = { kind };
       const c = colour(v.color); if (c) s.color = c;
       if (def.healthTint && v.keepColours === true) s.keepColours = true;
@@ -612,6 +621,13 @@ export function validateDesign(raw: unknown): HudDesign {
       if (Object.keys(o).length) kids[name] = o;
     }
     if (Object.keys(kids).length) d.children[panel.panelId] = kids;
+  }
+  for (const id of noneHides) {
+    const def = splatterDef(id)!;
+    const panel = panelOfFile(def.file);
+    if (!panel) continue;
+    const kids = d.children[panel.panelId] ?? {};
+    d.children[panel.panelId] = { ...kids, [def.block]: { ...kids[def.block], visible: false } };
   }
   return d;
 }

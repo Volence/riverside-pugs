@@ -362,11 +362,26 @@ describe('splatters', () => {
       splatBottom: { kind: 'none' },
       nope: { kind: 'fade' },
     } });
+    // A scratch's None loads as its child's hide (plan decision 4), below.
     expect(d.splatters).toEqual({
       splatTeam: { kind: 'fade', color: '1 2 3 4' },
       splatTop: { kind: 'image', keepColours: true },
-      splatBottom: { kind: 'none' },
+      splatBottom: { kind: 'stock' },
     });
+  });
+
+  it("loads a scratch's None as the child hide Layers uses, keeping its Fade colour for later", () => {
+    const d = validateDesign({ v: 1, splatters: { splatTop: { kind: 'none', color: '1 2 3 4' } } });
+    expect(d.children.ownHealth?.HealthbarTextureTop).toEqual({ visible: false });
+    expect(d.splatters?.splatTop).toEqual({ kind: 'stock', color: '1 2 3 4' });
+  });
+
+  it('never holds None for any splatter after a load', () => {
+    const d = validateDesign({ v: 1, splatters: { splatTeam: { kind: 'none' }, splatTop: { kind: 'none' }, splatBottom: { kind: 'none' } },
+      children: { ownHealth: { HealthbarTextureBottom: { x: 3 } } } });
+    expect(Object.values(d.splatters ?? {}).some((s) => s?.kind === 'none')).toBe(false);
+    // A stored edit on the same piece is kept beside the hide.
+    expect(d.children.ownHealth).toEqual({ HealthbarTextureTop: { visible: false }, HealthbarTextureBottom: { x: 3, visible: false } });
   });
 
   it("never stores None for the teammate splatter: that is the child's hide", () => {

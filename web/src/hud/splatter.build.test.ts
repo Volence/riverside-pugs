@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { buildHud, buildTrees, splatterProblem } from './build';
-import { DEFAULT_DESIGN, type HudDesign } from './design';
+import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { decodeVTF } from '../vpk/read';
 import { fadeTexture, vmtFor } from './textures';
@@ -102,6 +102,21 @@ describe('splatterPass, the scratches', () => {
     expect(text(files, 'materials/vgui/hud/hudeditor/splatbottom.vmt')).not.toContain('$vertexcolor');
   });
 
+  it('ships no texture for a Fade scratch whose child is hidden, and keeps the block hard-hidden', () => {
+    const files = buildHud(design({ splatters: { splatTop: { kind: 'fade' } },
+      children: { ownHealth: { HealthbarTextureTop: { visible: false } } } }));
+    expect(files.some((f) => f.path.includes('hudeditor/splattop'))).toBe(false);
+    const n = kvFind(tree(files, OWN), ['HealthbarTextureTop'])!;
+    expect(['visible', 'wide', 'tall', 'drawColor'].map((k) => kvGet(n, k))).toEqual(['0', '0', '0', '255 255 255 0']);
+    expect(kvGet(n, 'image')).not.toBe('hud/hudeditor/splattop');
+  });
+
+  it('builds a loaded None the same as the None built directly', () => {
+    const loaded = validateDesign({ v: 1, splatters: { splatTop: { kind: 'none' } } });
+    const direct = design({ splatters: { splatTop: { kind: 'none' } } });
+    expect(text(buildHud({ ...loaded, elements: {} }), OWN)).toBe(text(buildHud(direct), OWN));
+  });
+
   it('hard-hides a scratch set to None', () => {
     const n = kvFind(tree(buildHud(design({ splatters: { splatTop: { kind: 'none' } } })), OWN), ['HealthbarTextureTop'])!;
     expect(['visible', 'wide', 'tall', 'drawColor'].map((k) => kvGet(n, k))).toEqual(['0', '0', '0', '255 255 255 0']);
@@ -161,6 +176,15 @@ describe('splatterProblem', () => {
       expect(files.some((f) => f.path.includes('hudeditor/splat'))).toBe(false);
       expect(text(files, OWN)).toBe(text(plain, OWN));
     }
+  });
+  it('loads a stale None on Modern as the child hide, which only hard-hides scratches Modern already hides', () => {
+    // Before the scratch None became the child hide, this entry wrote nothing
+    // on Modern. It now hard-hides the two blocks, which were visible 0 already:
+    // the bytes differ, the screen does not, and a switch back to Stock keeps the None.
+    const own = tree(buildHud(validateDesign({ v: 1, preset: 'modern', splatters: { splatTop: { kind: 'none' } } }),
+      { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } }), OWN);
+    expect(kvGet(kvFind(own, ['HealthbarTextureTop'])!, 'visible')).toBe('0');
+    expect(kvGet(kvFind(own, ['HealthbarTextureBottom'])!, 'visible')).toBe('0');
   });
   it('names the missing block on an imported HUD, and writes nothing there', () => {
     const card = new TextDecoder('latin1').decode(sampleHud().get(CARD)!);

@@ -21,7 +21,7 @@ import {
   baseTeam, contentBox, WEAPON_KEYS, WEAPON_BOX_COLOUR, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir,
   type WeaponNumKey,
 } from './design';
-import { panelChildren, childDef, TEAM_PANEL, type ChildDef } from './children';
+import { panelChildren, panelOfFile, childDef, TEAM_PANEL, type ChildDef } from './children';
 import { crosshairFiles } from '../crosshair/vpk';
 import {
   SPLATTERS, SPLAT_STAND_IN, splatterDef, splatterActive, splatterImageKey, splatterMaterial, fadePixels, type SplatterDef, type SplatterId,
@@ -631,11 +631,16 @@ function splatterPass(work: Work, design: HudDesign, assets: BuildAssets, out: V
     // touched, so an inactive entry would ship an unchanged copy of it.
     if (style.kind !== 'none') {
       if (!splatterActive(design, def.id)) continue;                // an Image with no picture stored: stock
-      if (def.route === 'standIn' && design.children.teamColumn?.[def.block]?.visible === false) continue;
+      // A splatter's None is its child's hide (plan decision 4), which
+      // hidePass has already written: no art, no texture.
+      const panel = panelOfFile(def.file);
+      if (panel && design.children[panel.panelId]?.[def.block]?.visible === false) continue;
     }
     const block = work.optional(def.file, [def.block]);
     if (!block) continue;                                           // an imported HUD without it: the row is disabled
-    if (style.kind === 'none') { hardHide(block); continue; }       // the scratches only; see validateDesign
+    // A loaded design never gets here: validateDesign turns a stored None
+    // into the child hide. A design handed straight to buildHud still can.
+    if (style.kind === 'none') { hardHide(block); continue; }
     if (def.route === 'standIn') {
       insertStandIn(work.tree(def.file), block, def);
     } else pcSet(block, 'image', splatterImageKey(def.id));
