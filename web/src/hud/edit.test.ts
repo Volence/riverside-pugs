@@ -14,7 +14,8 @@ import { DEFAULT_DESIGN, newDesign, baseTeam, type HudDesign } from './design';
 import { DEFAULT_STATE } from '../crosshair/draw';
 import type { CrosshairArt } from '../crosshair/model';
 import { formatPos, parsePos } from './units';
-import { teamCardRects, elementRect, cardChild, isFreeTeam } from './build';
+import { teamCardRects, elementRect, cardChild, isFreeTeam, panelChild } from './build';
+import { childDef } from './children';
 import { elementFrame } from './selection';
 
 /**
@@ -276,23 +277,24 @@ describe('resetChild', () => {
 
 describe('moving several pieces', () => {
   // Stock, fitted: Head (13, 38, 23 x 23), Health (37, 52, 96 x 7), in the unfitted 150 x 150 card.
+  // The item row (39) follows the bar's x: the card revive trap, below.
   const both = ['Head', 'Health'];
 
   it('moves every piece by the same amount', () => {
     const d = moveChildren(DEFAULT_DESIGN, both, startsOf(DEFAULT_DESIGN, both), 5, -2);
-    expect(d.children.teamColumn).toEqual({ Head: { x: 18, y: 36 }, Health: { x: 42, y: 50 } });
+    expect(d.children.teamColumn).toEqual({ Head: { x: 18, y: 36 }, Health: { x: 42, y: 50 }, Items: { x: 44 } });
   });
 
   it('clamps the group as one, so the pieces keep their spacing at the card edge', () => {
     const s = startsOf(DEFAULT_DESIGN, both);
-    expect(moveChildren(DEFAULT_DESIGN, both, s, -100, -100).children.teamColumn).toEqual({ Head: { x: 0, y: 0 }, Health: { x: 24, y: 14 } });
+    expect(moveChildren(DEFAULT_DESIGN, both, s, -100, -100).children.teamColumn).toEqual({ Head: { x: 0, y: 0 }, Health: { x: 24, y: 14 }, Items: { x: 26 } });
     // The health bar reaches the right edge first: 150 - 96 - 37 = 17 is all the room there is.
-    expect(moveChildren(DEFAULT_DESIGN, both, s, 100, 0).children.teamColumn).toEqual({ Head: { x: 30, y: 38 }, Health: { x: 54, y: 52 } });
+    expect(moveChildren(DEFAULT_DESIGN, both, s, 100, 0).children.teamColumn).toEqual({ Head: { x: 30, y: 38 }, Health: { x: 54, y: 52 }, Items: { x: 56 } });
   });
 
   it('places the group by its box', () => {
     const d = placeChildren(DEFAULT_DESIGN, both, 20, 40);
-    expect(d.children.teamColumn).toEqual({ Head: { x: 20, y: 40 }, Health: { x: 44, y: 54 } });
+    expect(d.children.teamColumn).toEqual({ Head: { x: 20, y: 40 }, Health: { x: 44, y: 54 }, Items: { x: 46 } });
   });
 
   it('never moves a piece with nothing to start from (an addable child not yet in the file)', () => {
@@ -310,6 +312,7 @@ describe('scaling several pieces', () => {
     expect(d.children.teamColumn).toEqual({
       Head: { w: 12, h: 12, x: 13, y: 38 },
       Health: { w: 48, h: 4, x: 25, y: 45 },
+      Items: { x: 27 },
       Name: { w: 60, h: 6, fontSize: 6, x: 13, y: 49 },
     });
   });
@@ -793,5 +796,51 @@ describe('setFit', () => {
     const d = { ...structuredClone(DEFAULT_DESIGN), elements: { ownHealth: { x: 20, y: 380 } } };
     expect(setFit(d, 'ownHealth', true).elements.ownHealth).toEqual({ x: 20, y: 380, fit: true });
     expect(setFit(setFit(d, 'ownHealth', true), 'ownHealth', false).elements).toEqual(d.elements);
+  });
+});
+
+describe('the card bar and the item row move sideways together (the card revive trap)', () => {
+  // client.dll 1023f5df..1023f6da, the player panel class shared by your own panel and the cards: after a
+  // revive the game sets a card's Health x to its Items child's x. Stock has the bar at 37 and the items at
+  // 39, so a bar or item row dragged on its own would jump after a revive; the two keep the stock offset.
+  const at = (d: HudDesign, n: string) => panelChild(d, 'teamColumn', n)!;
+  const offset = (d: HudDesign) => at(d, 'Items').x - at(d, 'Health').x;
+  for (const [label, base] of [['unfitted', { ...structuredClone(DEFAULT_DESIGN), elements: {} }], ['fitted', structuredClone(UNFIT)]] as const) {
+    it(`${label}: dragging the bar moves the item row by the same x, and not its y`, () => {
+      const d0 = base as HudDesign;
+      const was = offset(d0), itemsY = at(d0, 'Items').y;
+      const d = placeChild(d0, 'Health', at(d0, 'Health').x + 10, at(d0, 'Health').y + 5);
+      expect(at(d, 'Health').x).toBe(at(d0, 'Health').x + 10);
+      expect(offset(d)).toBe(was);
+      expect(at(d, 'Items').y).toBe(itemsY);
+    });
+    it(`${label}: dragging the item row moves the bar, and a nudge, the X box and a group move keep the offset`, () => {
+      const d0 = base as HudDesign;
+      const was = offset(d0);
+      expect(offset(placeChild(d0, 'Items', at(d0, 'Items').x - 6, at(d0, 'Items').y))).toBe(was);
+      expect(offset(nudgeChild(d0, 'Health', 3, 0))).toBe(was);
+      expect(offset(patchChild(d0, 'Items', { x: 70 }))).toBe(was);
+      const both = ['Health', 'Items'];
+      const moved = moveChildren(d0, both, startsOf(d0, both), 5, 0);
+      expect([at(moved, 'Health').x, at(moved, 'Items').x]).toEqual([at(d0, 'Health').x + 5, at(d0, 'Items').x + 5]);
+    });
+  }
+  it('stock keeps 37 and 39', () => {
+    const d = { ...structuredClone(DEFAULT_DESIGN), elements: {} };
+    expect([at(d, 'Health').x, at(d, 'Items').x]).toEqual([37, 39]);
+    expect(patchChild(d, 'Health', { x: 50 }).children.teamColumn).toEqual({ Health: { x: 50 }, Items: { x: 52 } });
+  });
+  it('resets the partner\'s x with the piece, keeping its other edits', () => {
+    const d = patchChild(patchChild({ ...structuredClone(DEFAULT_DESIGN), elements: {} }, 'Items', { fontSize: 20 }), 'Health', { x: 50 });
+    expect(d.children.teamColumn).toEqual({ Health: { x: 50 }, Items: { fontSize: 20, x: 52 } });
+    expect(resetChild(d, 'Health').children.teamColumn).toEqual({ Items: { fontSize: 20 } });
+    expect(resetChild(patchChild(d, 'Health', { y: 3 }), 'Items').children.teamColumn).toEqual({ Health: { y: 3 } });
+  });
+  it('leaves your own panel alone: its Items is the build\'s hidden anchor, placed at the bar', () => {
+    const d = patchChild(structuredClone(DEFAULT_DESIGN), 'Health', { x: 40 }, 'ownHealth');
+    expect(d.children.ownHealth).toEqual({ Health: { x: 40 } });
+  });
+  it('explains the link on both pieces', () => {
+    for (const n of ['Health', 'Items']) expect(childDef('teamColumn', n)!.note, n).toMatch(/revive/);
   });
 });

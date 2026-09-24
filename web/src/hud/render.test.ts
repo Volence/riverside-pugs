@@ -1084,6 +1084,21 @@ describe('your own health in every preview state', () => {
     expect(draws(healthy.calls, OUTLINE)).toEqual([[GREEN, r.x, r.y, r.w, r.h]]);
   });
 
+  it('draws a teammate card\'s down bar at its down picture\'s x too: one player panel class', () => {
+    // The card revive trap: the same code moves a card's Health to Incapacitated's x while down (stock 10, bar 37).
+    const { draws } = tintRig();
+    const d = design({});
+    const rects = childRects(d, 'teamColumn', O, 2);
+    const r = rects.find((c) => c.name === 'Health')!, pic = rects.find((c) => c.name === 'Incapacitated')!;
+    expect(pic.x).not.toBe(r.x);
+    const down = recCtx();
+    drawPanel(down.ctx, d, 'teamColumn', O, 2, { card: 1, state: 'down' });
+    expect(draws(down.calls, OUTLINE).map((c) => c.slice(1))).toEqual([[pic.x, r.y, r.w, r.h]]);
+    const healthy = recCtx();
+    drawPanel(healthy.ctx, d, 'teamColumn', O, 2, { card: 1 });
+    expect(draws(healthy.calls, OUTLINE).map((c) => c.slice(1))).toEqual([[r.x, r.y, r.w, r.h]]);
+  });
+
   it('insets by the file inset while gate Q3 is open, and by the stock 2 units while it is closed', () => {
     // Deliberately rewritten from plumbing Task 15's "Gated inset" test (X9): the outline is stock, drawn always.
     // /home/volence/l4d/hud/probe-phase2/b1v2 (inset 3): 6 px at 1080p.

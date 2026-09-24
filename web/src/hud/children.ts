@@ -141,6 +141,12 @@ const HEALTH_NUMBER = block('HealthNumber', [
   ['font', 'PlayerDisplayName'], ['zpos', '3'], ['fgcolor_override', '255 255 255 255'],
 ]);
 
+/**
+ * The card revive trap (edit.ts LINKED_X): after a revive the game puts a
+ * card's health bar at the item row's x, so the two move sideways together.
+ */
+const REVIVE_LINK = "The health bar and the item icons move sideways together: after a revive the game puts a teammate's bar at the item row's left edge, so moving one alone would make the bar jump. While a teammate is down the game draws the bar at the Down picture's left edge.";
+
 const STATE_NOTE = 'The game decides when this one shows. Pick Down or Dead above the canvas to see it.';
 
 /**
@@ -180,13 +186,15 @@ export const TEAM_PANEL: PanelChildren = {
       hideIn: ['down', 'dead'] },
     { name: 'Health', label: 'Health bar', kind: 'bar', role: 'content', box: 'wh', move: true, font: false, colour: false,
       hideIn: ['dead'],
+      note: REVIVE_LINK,
       keys: healthKeys('Recolours the bar and the number on every card.',
         'client.dll HealthPanel run: m_inset|inset (one HealthPanel class with the own bar, where probe Q3 proved it; B13 shows the same default inset on cards)') },
     { name: 'Name', label: 'Name', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true },
     { name: 'HealthNumber', label: 'Health number', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: false,
       addable: { template: HEALTH_NUMBER, after: 'Name' }, note: 'The game colours this by health.', hideIn: ['dead'] },
     { name: 'Items', label: 'Item icons', kind: 'label', role: 'content', box: 'none', move: true, font: true, colour: false,
-      note: "The preview draws the game's own item icons, a full loadout; in game the row shows only what that teammate carries.", hideIn: ['dead'] },
+      note: `The preview draws the game's own item icons, a full loadout; in game the row shows only what that teammate carries. ${REVIVE_LINK}`,
+      hideIn: ['dead'] },
     { name: 'Status', label: 'Status text', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true },
     { name: 'BackgroundImage', label: 'Damage splatter', kind: 'image', role: 'decor', box: 'wh', move: true, font: false, colour: true,
       opacityOnly: true, art: 'splatter',

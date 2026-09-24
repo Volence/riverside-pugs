@@ -301,9 +301,31 @@ function childAt(design: HudDesign, panel: string, name: string): CardChild | nu
  * they always did.
  */
 export function patchChild(design: HudDesign, name: string, p: Partial<ChildOverride>, panel = 'teamColumn'): HudDesign {
+  const next = mergeChild(design, name, p, panel);
+  const mate = LINKED_X[panel]?.[name.toLowerCase()];
+  if (p.x === undefined || !mate) return next;
+  const was = panelChild(design, panel, name), other = panelChild(design, panel, mate);
+  if (!was || !other || p.x === was.x) return next;
+  return mergeChild(next, mate, { x: clampChild('x', Math.round(other.x + p.x - was.x)) }, panel);
+}
+
+function mergeChild(design: HudDesign, name: string, p: Partial<ChildOverride>, panel: string): HudDesign {
   const kids = design.children[panel] ?? {};
   return { ...design, children: { ...design.children, [panel]: { ...kids, [name]: { ...(kids[name] ?? {}), ...p } } } };
 }
+
+/**
+ * Pieces whose x moves together (the card revive trap). client.dll's player
+ * panel update (1023f5df..1023f6da, the class shared by your own panel and
+ * the cards) moves Health to the down picture's x while it shows and, on the
+ * revive, to the x of the panel's Items child. On a card Items is the item
+ * row, so a bar or row dragged sideways on its own would make the bar jump
+ * after a revive. Any x edit to one moves the other by the same delta,
+ * keeping the offset the file has (stock: bar 37, items 39, the 2 units the
+ * stock card already jumps). Your own panel's Items is the hidden anchor
+ * build.ts's reviveAnchorPass places at the bar, so it needs no link.
+ */
+const LINKED_X: Record<string, Record<string, string>> = { teamColumn: { health: 'Items', items: 'Health' } };
 
 /**
  * Place a panel child at (x, y): unscaled units in the panel file's own
@@ -407,6 +429,12 @@ export function resetChild(d: HudDesign, name: string, panel = 'teamColumn'): Hu
   const on = kids[name]?.on;
   delete kids[name];
   if (def?.addable && on !== undefined) kids[name] = { on };
+  // A linked partner (LINKED_X) goes back to the file's x too, so the pair keeps the file's offset.
+  const mate = LINKED_X[panel]?.[name.toLowerCase()];
+  if (mate && kids[mate]?.x !== undefined) {
+    const { x: _x, ...rest } = kids[mate];
+    if (Object.keys(rest).length) kids[mate] = rest; else delete kids[mate];
+  }
   const children: HudDesign['children'] = { ...d.children, [panel]: kids };
   if (Object.keys(kids).length === 0) delete children[panel];
   return { ...d, children };
