@@ -54,6 +54,8 @@ import { readFileSync } from 'node:fs';
 import type { Config } from './config.js';
 import type { DB } from './db.js';
 import { BalanceRolloutWriter } from './balanceWriter.js';
+import { FleetReader } from './fleetReader.js';
+import { adminFleetRoutes } from './routes/adminFleet.js';
 import type { AddonsTransport } from './addonsTransport.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
 import { backfillPersonas } from './personaBackfill.js';
@@ -175,6 +177,8 @@ export interface ServerDeps {
   /** Transport the balance writer uses for pug_balance.cfg. Injected in tests
    *  so a rollout never touches a real box; transportFor otherwise. */
   balanceTransport?: (s: ServerRow, dir: string) => AddonsTransport | null;
+  /** Injected by tests; built from the servers table otherwise. */
+  fleetReader?: FleetReader;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -536,6 +540,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // new values land between matches; see src/balanceWriter.ts. Not wired in
   // dev mode, where a release must never write through a real transport.
   const balanceWriter = new BalanceRolloutWriter({ db: deps.db, transport: deps.balanceTransport });
+  // Fleet view: read-only readings of every box's managed files.
+  const fleetReader = deps.fleetReader ?? new FleetReader({ db: deps.db });
 
   const releaser = new ServerReleaser(deps.db, deps.serverCleaner ?? (async (server, token, opts) => {
     const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
@@ -1180,6 +1186,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     void adminSync.sync();
     balanceWriter.start();
     void balanceWriter.verifyAll();
+    fleetReader.start();
+    fleetReader.tick(); // boxes never read, or stale, get read once at boot
   }
 
   const reaper = setInterval(() => {
@@ -1441,6 +1449,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     banSync.stop();
     adminSync.stop();
     balanceWriter.stop();
+    fleetReader.stop();
     if (logListener) await logListener.close();
     // Where each server's replay check had got to. Best effort: the caller may
     // already have closed the database, and a few seconds of position is all
@@ -1500,6 +1509,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(peopleRoutes, { db: deps.db });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(balancePublicRoutes, { db: deps.db, knobsPath: deps.balanceKnobsPath });
+  await app.register(adminFleetRoutes, { db: deps.db, fleetDir: deps.config.fleetDir, reader: fleetReader });
   await app.register(replayRoutes, {
     db: deps.db, replayDir: deps.config.replayDir, liveDir: deps.config.replayLiveDir, r2,
   });
