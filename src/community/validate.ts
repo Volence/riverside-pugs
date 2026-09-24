@@ -15,8 +15,8 @@
  */
 import { findSlurs } from '../slurs.js';
 import { hasUnsafeChars, LINKISH } from '../profileFields.js';
-import { readVPK, isVpk, canonicalVpkProblem, VPK_CASE_CLASH } from '../vpkRead.js';
-import { hudSetProblem, hudId, pngSize } from '../hudFiles.js';
+import { readVPK, isVpk, canonicalVpkProblem, VPK_CASE_CLASH, VPK_NOT_CONTIGUOUS } from '../vpkRead.js';
+import { hudSetProblem, hudId, pngSize, HUD_CAPS } from '../hudFiles.js';
 
 export type Checked<T> =
   | { ok: true; value: T }
@@ -35,6 +35,8 @@ export const DESIGN_MAX_BYTES = 2 * MB;
 export const PREVIEW_MAX_BYTES = 1.5 * MB;
 /** The editor's own import cap is 50 MB; sharing has the allowlist's lower one. */
 export const IMPORT_MAX_BYTES = 20 * MB;
+/** Entries readVPK reads from an import before refusing it: the set cap and a margin, so the set cap's own sentence still shows. */
+export const IMPORT_MAX_ENTRIES = HUD_CAPS.files + 100;
 
 /** Characters as a reader counts them, so an emoji is one and not two. */
 const length = (s: string) => [...s].length;
@@ -288,9 +290,13 @@ export async function checkImport(
   const split = new Set<string>();
   let files: Map<string, Uint8Array>;
   try {
-    files = readVPK(bytes, split);
+    // Contiguous, so entries that overlap (a small upload naming the same
+    // bytes many times over) are refused before any of them is hashed or
+    // re-encoded; and capped past the set's file cap for the same reason.
+    files = readVPK(bytes, split, { contiguous: true, maxEntries: IMPORT_MAX_ENTRIES });
   } catch (e) {
     if (e instanceof Error && e.message === VPK_CASE_CLASH) return bad('The imported HUD holds two files whose names differ only in case.');
+    if (e instanceof Error && e.message === VPK_NOT_CONTIGUOUS) return bad('The imported HUD is not laid out as the editor writes it.');
     return bad('The imported HUD is not a .vpk file the site can read.');
   }
   if (split.size > 0) return bad('The imported HUD is a split archive; it must be one file.');

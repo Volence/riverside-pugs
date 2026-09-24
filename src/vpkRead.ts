@@ -15,10 +15,14 @@ import { encodeVPK } from './vpkWrite.js';
 const NOT_VPK = 'That is not a .vpk file the site can read.';
 /** readVPK's refusal of two entries whose paths differ only in case. */
 export const VPK_CASE_CLASH = 'That .vpk holds two files whose names differ only in case.';
+/** readVPK's refusal, in contiguous mode, of data not laid out as encodeVPK lays it. */
+export const VPK_NOT_CONTIGUOUS = 'That .vpk is not laid out as the editor writes it.';
 
 /** Whether the bytes start with a VPK's signature (0x55AA1234, little-endian). */
 export const isVpk = (b: Uint8Array) => b.length >= 4 && b[0] === 0x34 && b[1] === 0x12 && b[2] === 0xaa && b[3] === 0x55;
 const NOT_VTF = 'That crosshair is not a texture the site can read.';
+/** readVPK's entry cap when the caller names none: far past any HUD or crosshair addon. */
+export const DEFAULT_MAX_ENTRIES = 65536;
 
 /**
  * Every file stored inside a single-file VPK, by lower-cased path. Versions
@@ -34,8 +38,26 @@ const NOT_VTF = 'That crosshair is not a texture the site can read.';
  * The game ignores case, so two entries whose paths differ only in case
  * name one file, and which of the two it reads is not ours to guess: such
  * an archive is refused (VPK_CASE_CLASH), split entries included.
+ *
+ * The bytes can come from anyone, and many entries can name the same data,
+ * so nothing here may cost more memory than the file itself: an entry with
+ * no preload bytes is returned as a view into `bytes` (no copy), one with
+ * preload bytes is copied only after its bounds are checked, and all such
+ * copies together may not exceed the file's size. Past `maxEntries` entries
+ * (DEFAULT_MAX_ENTRIES unless given) the archive is refused.
+ *
+ * `contiguous` asks for encodeVPK's layout and nothing looser: no preload
+ * bytes, and each entry's data starting where the previous one's ended, so
+ * no two entries overlap and the data can total no more than the bytes after
+ * the tree. It is refused (VPK_NOT_CONTIGUOUS) at the first entry that
+ * breaks this, before anything else is read; an entry in a side archive is
+ * left to `split` as usual. The server's share check uses it; a player's own
+ * addon, packed by some other tool, is read without it.
  */
-export function readVPK(bytes: Uint8Array, split?: Set<string>): Map<string, Uint8Array> {
+export function readVPK(
+  bytes: Uint8Array, split?: Set<string>, opts: { maxEntries?: number; contiguous?: boolean } = {},
+): Map<string, Uint8Array> {
+  const maxEntries = opts.maxEntries ?? DEFAULT_MAX_ENTRIES;
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const need = (end: number) => { if (end > bytes.length) throw new Error(NOT_VPK); };
   need(12);
@@ -68,6 +90,9 @@ export function readVPK(bytes: Uint8Array, split?: Set<string>): Map<string, Uin
 
   const out = new Map<string, Uint8Array>();
   const seen = new Set<string>();
+  const dataBytes = bytes.length - treeEnd;
+  let copied = 0;
+  let next = 0;
   for (let ext = str(); ext !== ''; ext = str()) {
     for (let dir = str(); dir !== ''; dir = str()) {
       for (let name = str(); name !== ''; name = str()) {
@@ -80,19 +105,26 @@ export function readVPK(bytes: Uint8Array, split?: Set<string>): Map<string, Uin
         if (o + preload > treeEnd) throw new Error(NOT_VPK);
         const head = bytes.subarray(o, o + preload);
         o += preload;
+        if (seen.size >= maxEntries) throw new Error(NOT_VPK);
+        if (opts.contiguous && (archive === 0x7FFF || length === 0)) {
+          if (preload !== 0 || offset !== next || length > dataBytes - next) throw new Error(VPK_NOT_CONTIGUOUS);
+          next += length;
+        }
         // A blank directory or extension is written as a single space.
         const file = (ext === ' ' ? name : `${name}.${ext}`);
         const path = (dir === ' ' ? file : `${dir}/${file}`).toLowerCase();
         if (seen.has(path)) throw new Error(VPK_CASE_CLASH);
         seen.add(path);
         if (archive !== 0x7FFF && length > 0) { split?.add(path); continue; }
+        const start = treeEnd + offset;
+        if (length > 0) need(start + length);
+        const body = bytes.subarray(start, start + length);
+        if (preload === 0) { out.set(path, body); continue; }
+        copied += preload + length;
+        if (copied > bytes.length) throw new Error(NOT_VPK);
         const data = new Uint8Array(preload + length);
         data.set(head, 0);
-        if (length > 0) {
-          const start = treeEnd + offset;
-          need(start + length);
-          data.set(bytes.subarray(start, start + length), preload);
-        }
+        data.set(body, preload);
         out.set(path, data);
       }
     }
