@@ -106,7 +106,14 @@ export function ftpTransport(cfg: {
         // Upload under a temp name and rename, for the same reason the local
         // transport does: srcds must never mount a half-transferred VPK.
         await c.uploadFrom(localPath, `${remoteName}.part`);
-        await c.rename(`${remoteName}.part`, remoteName);
+        try {
+          await c.rename(`${remoteName}.part`, remoteName);
+        } catch {
+          // Some FTP servers refuse RNTO onto an existing file. Clear the
+          // target and try once more; a second failure is the real error.
+          await c.remove(remoteName).catch(() => {});
+          await c.rename(`${remoteName}.part`, remoteName);
+        }
       });
     },
     async size(remoteName) {
