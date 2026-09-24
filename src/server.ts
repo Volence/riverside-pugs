@@ -1542,11 +1542,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(peopleRoutes, { db: deps.db });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(balancePublicRoutes, { db: deps.db, knobsPath: deps.balanceKnobsPath });
-  await app.register(adminFleetRoutes, { db: deps.db, fleetDir: deps.config.fleetDir, reader: fleetReader });
-  await app.register(adminReleaseRoutes, {
-    db: deps.db, repo: deployRepo, service: new ReleaseService({ db: deps.db, repo: deployRepo, knobs: panelKnobs }),
-    engine: releaseEngine, devMode: deps.config.devMode,
+  const releaseService = new ReleaseService({ db: deps.db, repo: deployRepo, knobs: panelKnobs });
+  await app.register(adminFleetRoutes, {
+    db: deps.db, fleetDir: deps.config.fleetDir, reader: fleetReader,
+    // Tests that inject a fleet reader keep the repo.json reference.
+    releases: deps.fleetReader ? undefined : { repo: deployRepo, service: releaseService },
   });
+  await app.register(adminReleaseRoutes, { db: deps.db, repo: deployRepo, service: releaseService, engine: releaseEngine, devMode: deps.config.devMode });
   // Tests drive the engine's tick directly.
   app.decorate('releaseEngine', releaseEngine);
   await app.register(replayRoutes, {
