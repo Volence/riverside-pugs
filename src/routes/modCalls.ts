@@ -15,9 +15,10 @@ export interface ModCallView {
   handledBy: string | null; handledAt: string | null; folded: ModCallView[];
 }
 
-/** How many parents the All tab lists. Calls are cheap rows, but the page is
- *  a desk, not an archive. */
-const ALL_LIMIT = 200;
+/** How many parents either tab lists, newest first. Open is capped too: a
+ *  call leaves it only through the Discord button, so while Discord is not
+ *  set up it grows without end. The page is a desk, not an archive. */
+export const CALLS_LIMIT = 200;
 
 /**
  * The In-game calls desk: every stored /mod call, for mods and admins alike
@@ -60,7 +61,7 @@ export async function modCallRoutes(app: FastifyInstance, opts: { db: DB }): Pro
     const filter = (req.query as { filter?: string }).filter === 'all' ? 'all' : 'open';
     const parents = db.prepare(
       `SELECT * FROM mod_calls WHERE folded_into IS NULL ${filter === 'open' ? 'AND handled_at IS NULL' : ''}
-        ORDER BY id DESC ${filter === 'all' ? `LIMIT ${ALL_LIMIT}` : ''}`,
+        ORDER BY id DESC LIMIT ${CALLS_LIMIT}`,
     ).all() as ModCallRow[];
     const calls = parents.map((p) => view(p, foldedCalls(db, p.id).map((c) => view(c, []))));
     const discordReady = (getSetting(db, 'discord_admin_channel_id') ?? '') !== ''
