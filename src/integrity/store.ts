@@ -25,13 +25,20 @@ import type { RoundMetrics } from './round.js';
  *  scoreable and fidSum. Pools and shares of the aim prior are versioned, so
  *  this bump also rebuilds every prior as the rounds are re-measured.
  *
- *  5: line of sight (plan 2 of the spawned-infected spec). Rounds carry
- *  losKnown, fidLagSum and the hidden metrics D, E and F; hidden tracking
- *  windows become `hidden_track` clips scored by the lag search. Ghost scores
- *  are unchanged in meaning, but a version 4 board mixed with version 5 rows
- *  would show hidden columns for some players and not others for no reason a
- *  reader could see, so the whole history is re-measured. */
-export const ANALYZER_VERSION = 5;
+ *  Line of sight (plan 2 of the spawned-infected spec) added losKnown,
+ *  fidLagSum and the hidden metrics D, E and F to RoundMetrics, and hidden
+ *  tracking windows became `hidden_track` clips scored by the lag search.
+ *  This landed WITHOUT a version bump. A bump can only re-measure rounds
+ *  whose replay is still on local disk, and by the time this shipped the R2
+ *  offload had pruned 1079 of 1155 replays, so a bump would have emptied the
+ *  board and the aim priors while the ghost numbers it was trying to protect
+ *  are bit-identical between the old and new code. Instead the new fields are
+ *  additive on version 4 rows: rounds measured from now on, and any version 4
+ *  round re-measured from a replay still on local disk, carry them; older
+ *  rows simply lack them and already read as "no line of sight". Filling in
+ *  the rest of the plan-1-era history needs a backfill that pulls pruned
+ *  replays back from R2 first; that backfill is not built. */
+export const ANALYZER_VERSION = 4;
 
 export interface RoundKey { matchId: number; ordinal: number; half: number }
 export interface SaveRow { slot: number; steamid: string; metrics: RoundMetrics; clips: TrackWindow[]; hiddenClips?: TrackWindow[] }
