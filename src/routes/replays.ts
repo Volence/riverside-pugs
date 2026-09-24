@@ -500,6 +500,14 @@ export async function replayRoutes(
       })),
     ].sort((a, b) => a.seq - b.seq);
 
-    return { entries };
+    // Where t_ms 0 of this round sits in the map's SourceTV demo, for the
+    // viewer to show a demo_gototick target. Null for rounds recorded before
+    // pug-match 0.3.12, or with no match demo.
+    const sync = db.prepare(
+      'SELECT demo_tick AS tick, demo_hz AS hz FROM match_rounds WHERE match_id = ? AND ordinal = ? AND half = ?',
+    ).get(id, ord, hf) as { tick: number | null; hz: number | null } | undefined;
+    const demo = sync && sync.tick !== null && sync.hz !== null ? { tick: sync.tick, hz: sync.hz } : null;
+
+    return { entries, demo };
   });
 }

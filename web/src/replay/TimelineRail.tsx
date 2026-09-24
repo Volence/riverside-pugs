@@ -6,6 +6,7 @@ import { markerEntries } from './markers';
 import { formatTime } from './ReplayControls';
 import { enrichEvents, enrichmentText, fromTimeline, type Enrichment } from '../eventEnrich';
 import type { Toggles } from './useToggles';
+import { demoTickAt, demoTickTitle, type DemoSync } from './demoTick';
 
 export interface TimelineRailProps {
   timeline: TimelineEntry[];
@@ -16,12 +17,19 @@ export interface TimelineRailProps {
   /** SteamID64 of the followed player, or null. Selecting one turns the rail
    *  from a rolling window into that player's whole round (spec 7.2). */
   selected: string | null;
+  /** Where this round sits in the match's SourceTV demo, when known: each
+   *  entry then shows the demo tick of its moment. */
+  demo?: DemoSync | null;
 }
 
 function Entry(
-  { e, tMs, seek, nameOf, n, en }:
-  { e: TimelineEntry; tMs: number; seek: (t: number) => void; nameOf: (id: string) => string; n?: number; en?: Enrichment },
+  { e, tMs, seek, nameOf, n, en, demo }:
+  {
+    e: TimelineEntry; tMs: number; seek: (t: number) => void; nameOf: (id: string) => string;
+    n?: number; en?: Enrichment; demo: DemoSync | null;
+  },
 ) {
+  const tick = demo ? demoTickAt(demo, e.tMs) : null;
   const extra = e.kind === 'event' ? enrichmentText(e.event, en, nameOf, e.target ? nameOf(e.target) : null) : '';
   return (
     <button
@@ -30,6 +38,7 @@ function Entry(
     >
       {n !== undefined && <span class="replay__entry-n">{n}</span>}
       <span class="replay__entry-t">{formatTime(e.tMs)}</span>
+      {tick !== null && <span class="replay__entry-tick muted num" title={demoTickTitle(tick)}>{tick}</span>}
       <span class="replay__entry-who">{nameOf(e.actor)}</span>
       <span class="replay__entry-text">{entryText(e, nameOf)}{extra ? <span class="muted"> {extra}</span> : null}</span>
     </button>
@@ -46,7 +55,7 @@ function Entry(
  * side of it they were on, with entries ahead of the playhead dimmed rather
  * than hidden so the whole round is jumpable.
  */
-export function TimelineRail({ timeline, tMs, toggles, seek, names, selected }: TimelineRailProps) {
+export function TimelineRail({ timeline, tMs, toggles, seek, names, selected, demo = null }: TimelineRailProps) {
   const nameOf = (id: string) => names[id] ?? id;
   const visible = (e: TimelineEntry) => (e.kind === 'chat' ? toggles.chat : toggles.events);
   const enriched = enrichEvents(fromTimeline(timeline));
@@ -76,14 +85,14 @@ export function TimelineRail({ timeline, tMs, toggles, seek, names, selected }: 
               {g.label} <span class="num">×{g.items.length}</span>
             </div>
             {g.items.map((i) => (
-              <Entry key={i.entry.seq} e={i.entry} tMs={tMs} seek={seek} nameOf={nameOf} n={numbered.get(i.entry.seq)} en={enriched.get(i.entry.seq)} />
+              <Entry key={i.entry.seq} e={i.entry} tMs={tMs} seek={seek} nameOf={nameOf} n={numbered.get(i.entry.seq)} en={enriched.get(i.entry.seq)} demo={demo} />
             ))}
           </section>
         ))}
         {chat.length > 0 && (
           <section class="rail-group">
             <div class="rail-group__head">Chat <span class="num">×{chat.length}</span></div>
-            {chat.map((t) => <Entry key={t.entry.seq} e={t.entry} tMs={tMs} seek={seek} nameOf={nameOf} />)}
+            {chat.map((t) => <Entry key={t.entry.seq} e={t.entry} tMs={tMs} seek={seek} nameOf={nameOf} demo={demo} />)}
           </section>
         )}
       </div>
@@ -93,7 +102,7 @@ export function TimelineRail({ timeline, tMs, toggles, seek, names, selected }: 
   return (
     <div class="replay__rail">
       {activeEntries(timeline, tMs).filter(visible).map((e) => (
-        <Entry key={e.seq} e={e} tMs={tMs} seek={seek} nameOf={nameOf} en={enriched.get(e.seq)} />
+        <Entry key={e.seq} e={e} tMs={tMs} seek={seek} nameOf={nameOf} en={enriched.get(e.seq)} demo={demo} />
       ))}
     </div>
   );
