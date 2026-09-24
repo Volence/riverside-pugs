@@ -1315,7 +1315,7 @@ describe('Hud page', () => {
     expect(screen.queryByText("Edits inside a card apply to every teammate's card.")).toBeNull();
     for (const l of ['X', 'Y', 'W', 'H']) expect(screen.getByLabelText(l), l).toBeTruthy();
     expect(screen.getByText('Panel colour')).toBeTruthy();              // probe Q1 passed (slice 2.F G1)
-    expect(screen.queryByText('Inset')).toBeNull();
+    expect(screen.getByLabelText('Inset')).toBeTruthy();                // probe Q3 passed (slice 2.F G3)
     // Probe B1 Q5: the game colours the cross by health whatever the file says.
     fireEvent.click(layer('Your health').getByRole('button', { name: 'Health cross' }));
     expect(screen.getByLabelText('Text size')).toBeTruthy();
@@ -2143,7 +2143,7 @@ describe('Your own health on the page', () => {
   });
 
   it('shows the bar its box and note, and the Panel colour and Inset only once their probes pass', async () => {
-    _setProbe('Q1', false);
+    _setProbe('Q1', false); _setProbe('Q3', false);
     render(<Hud />);
     fireEvent.click(own().getByRole('button', { name: 'Health bar' }));
     for (const l of ['X', 'Y', 'W', 'H']) expect(screen.getByLabelText(l), l).toBeTruthy();
@@ -2175,6 +2175,18 @@ describe('Your own health on the page', () => {
     fireEvent.click(layer('Teammates').getByRole('button', { name: 'Health bar' }));
     expect(screen.getByLabelText('Panel colour colour')).toBeTruthy();
     expect(screen.getByText('Recolours the bar and the number on every card.')).toBeTruthy();
+  });
+
+  it('offers the Inset on your health bar and on the teammate bar, and saves it (probe Q3)', async () => {
+    // /home/volence/l4d/hud/probe-phase2/RESULTS.md Q3: inset 3 moves the fill 6 px inside the outline (b1v2 a).
+    render(<Hud />);
+    fireEvent.click(own().getByRole('button', { name: 'Health bar' }));
+    expect((screen.getByLabelText('Inset') as HTMLInputElement).max).toBe('8');
+    fireEvent.click(layer('Teammates').getByRole('button', { name: 'Health bar' }));
+    const inset = screen.getByLabelText('Inset') as HTMLInputElement;
+    fireEvent.input(inset, { target: { value: '3' } });
+    fireEvent.blur(inset);
+    await waitFor(() => expect(saved().children?.teamColumn?.Health?.keys?.inset).toBe('3'));
   });
 
   it('draws your health number in the Panel colour once it is set', async () => {

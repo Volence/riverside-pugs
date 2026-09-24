@@ -754,6 +754,12 @@ preview draws them). Also answers S4 (red box alpha against the preview) and S9 
   35 health and on the down card's number (`b1/shots/crops/card1-a.png`, `b1v3/shots/crops/cards-hurt.png`).
   The control is "Panel colour" on the own and the teammate `Health`, each with a note of what it
   recolours; no Healthy-only branch. Audit C.7 ("bar fill colour impossible") is overturned.
+- **Q3: YES, gate passed (G3).** `inset` keeps the outline at the rect and moves the fill inside it:
+  stock 4 px between frame and fill at 1080p (the default, about 2 units), `inset 3` 6 px (column
+  samples at x 1800, `b1v2` a against `b1v3` full-1). The preview draws the outline always and insets
+  by 2 units, or the file's `inset`: 4.5 px and 6.75 px at 1080p, which land on the game's 4 and 6
+  once the canvas's partial row is counted (slice 2.F X9). Offered on the own and the teammate `Health`
+  (one HealthPanel class, B13 shows the same default inset on cards).
 
 ### B2. Survivor: every element hidden with `visible 0` only (one launch)
 
