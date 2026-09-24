@@ -56,7 +56,7 @@ export function AdminPatches() {
                     <td>{label(p)}</td>
                     <td>{p.source === 'historical' ? <span class="admin-tag">approximate</span> : p.source}</td>
                     <td>{fmtTime(p.firstSeenAt)}</td>
-                    <td>{p.rounds}</td>
+                    <td>{p.source === 'announced' && p.rounds === 0 ? 'never played' : p.rounds}</td>
                     <td>{p.servers.map((s) => s.name).join(', ')}</td>
                     <td><button class="btn" type="button" disabled={busy} onClick={() => openDetail(p)}>Details</button></td>
                   </tr>

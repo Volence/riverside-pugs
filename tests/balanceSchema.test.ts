@@ -39,4 +39,12 @@ describe('balance schema', () => {
     const rows = db.prepare('SELECT id, origin FROM matches ORDER BY id').all();
     expect(rows).toEqual([{ id: 1, origin: 'queue' }, { id: 2, origin: 'in_game' }]);
   });
+
+  it('creates the rollout tables with a state check', () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO balance_patches (id, fingerprint, source, first_seen_at) VALUES (1, 'f', 'announced', '2026-09-24 00:00:00')").run();
+    db.prepare("INSERT INTO balance_rollouts (id, patch_id, values_json, content, created_by, created_at) VALUES (1, 1, '{}', 'x', 'a', 'now')").run();
+    db.prepare("INSERT INTO balance_rollout_servers (rollout_id, server_id, state) VALUES (1, 1, 'pending')").run();
+    expect(() => db.prepare("INSERT INTO balance_rollout_servers (rollout_id, server_id, state) VALUES (1, 2, 'nope')").run()).toThrow();
+  });
 });

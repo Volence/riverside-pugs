@@ -133,4 +133,31 @@ describe('balance lines end to end', () => {
       { id: 2, fingerprint: null },
     ]);
   });
+
+  it('a sighting of the rollout patch confirms the written server', async () => {
+    const port = await freeUdpPort();
+    const db = openDb(':memory:');
+    const sid = addServer(db, { name: 'dallas', host: '127.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
+    db.prepare("INSERT INTO matches (id, season_id, state, campaign, server_id, token) VALUES (1, 1, 'live', 'x', ?, ?)").run(sid, T);
+    db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (1, 'm', datetime('now'))").run();
+    const knobs = loadBalanceKnobs();
+    const inv = { 'c:z_tank_health': '7500' };
+    const fp = fingerprintOf(withoutIgnored(inv, knobs.ignored ?? []), knobs.versionless);
+    db.prepare("INSERT INTO balance_patches (id, fingerprint, source, inputs_json, first_seen_at) VALUES (5, ?, 'announced', ?, '2026-09-24 00:00:00')")
+      .run(fp, JSON.stringify(inv));
+    db.prepare("INSERT INTO balance_rollouts (id, patch_id, values_json, content, created_by, created_at) VALUES (1, 5, '{}', 'x', 'a', 'now')").run();
+    db.prepare("INSERT INTO balance_rollout_servers (rollout_id, server_id, state, written_at) VALUES (1, ?, 'written', 'now')").run(sid);
+    const app = await buildServer({ config: { ...loadConfig({}), devMode: false, logListenPort: port }, db,
+      serverCleaner: async () => {}, serverExec: async () => {} });
+    close = () => app.close();
+
+    await send(port, `PUG ${T} ROUND_START map=m half=1 surv=a`);
+    await settle();
+    await send(port, `PUG ${T} BALANCE half=1 part=0 c:z_tank_health=7500`);
+    await send(port, `PUG ${T} BALANCE_END half=1 parts=1 items=1`);
+    await settle();
+
+    expect(db.prepare('SELECT state FROM balance_rollout_servers WHERE rollout_id = 1').get()).toEqual({ state: 'confirmed' });
+  });
 });

@@ -123,6 +123,7 @@ describe('installCampaign', () => {
       },
       async size() { return 9; },
       async remove() {},
+      async readText() { return null; },
     };
     await expect(installCampaign(db, 'dbd', {
       sourcePath: src, servers: [{ id: 1, transport: t }],

@@ -37,6 +37,7 @@ describe('the panel URL parser', () => {
   it('parses the balance desk', () => {
     expect(parseAdminPath('/admin/balance', asAdmin)).toEqual({ desk: 'balance', section: 'compare', param: null });
     expect(parseAdminPath('/admin/balance/patches', asAdmin)).toEqual({ desk: 'balance', section: 'patches', param: null });
+    expect(parseAdminPath('/admin/balance/knobs', asAdmin)).toEqual({ desk: 'balance', section: 'knobs', param: null });
     expect(parseAdminPath('/admin/balance/nope', asAdmin)).toMatchObject({ desk: 'balance', section: 'unknown' });
     expect(parseAdminPath('/admin/balance', { isAdmin: false })).toMatchObject({ desk: 'people' });
   });

@@ -57,6 +57,10 @@ const serverName = (db: DB, id: number): string =>
 export function recordBalanceSighting(db: DB, s: {
   matchId: number; serverId: number | null; half: 1 | 2; inventory: Inventory; versionless: string[];
   ignored?: string[]; now?: string;
+  /** The patch a control panel rollout expects on this server: its first
+   *  sighting is the change the panel made, so it updates the state without
+   *  an alert. */
+  expectedPatchId?: number | null;
 }): { patchId: number; newPatch: boolean; serverChanged: boolean } {
   const inventory = withoutIgnored(s.inventory, s.ignored ?? []);
   // SQLite's datetime('now') format, so it sorts against match_rounds.started_at.
@@ -103,14 +107,16 @@ export function recordBalanceSighting(db: DB, s: {
                     ON CONFLICT (server_id) DO UPDATE SET patch_id = excluded.patch_id,
                       inventory_json = excluded.inventory_json, since = excluded.since`)
           .run(s.serverId, patchId, invJson, now);
-        // Same time-ordered number the admin page shows (see listPatches), not
-        // the raw row id: a historical patch inserted later would otherwise
-        // make the alert and the page disagree about which patch "#N" is.
-        const patchNumber = (db.prepare(`
-          SELECT number FROM (
-            SELECT id, ROW_NUMBER() OVER (ORDER BY first_seen_at, id) AS number FROM balance_patches
-          ) WHERE id = ?`).get(patchId) as { number: number }).number;
-        publishAdminEvent({ kind: 'problem', text: alertText(db, s.serverId, patchNumber, newPatch, prev, inventory) });
+        if (s.expectedPatchId == null || patchId !== s.expectedPatchId) {
+          // Same time-ordered number the admin page shows (see listPatches), not
+          // the raw row id: a historical patch inserted later would otherwise
+          // make the alert and the page disagree about which patch "#N" is.
+          const patchNumber = (db.prepare(`
+            SELECT number FROM (
+              SELECT id, ROW_NUMBER() OVER (ORDER BY first_seen_at, id) AS number FROM balance_patches
+            ) WHERE id = ?`).get(patchId) as { number: number }).number;
+          publishAdminEvent({ kind: 'problem', text: alertText(db, s.serverId, patchNumber, newPatch, prev, inventory) });
+        }
       }
     }
     return { patchId, newPatch, serverChanged };
