@@ -3,6 +3,7 @@ import { adminApi, type PatchDetail, type PatchSummary } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel } from '../../components/bits';
 import { AdminPatchPublic } from './AdminPatchPublic';
+import { TriageCard } from './TriageCard';
 import { fmtTime, useAction } from './useAction';
 
 const label = (p: { number: number; name: string | null }) => p.name ?? `Unnamed patch ${p.number}`;
@@ -19,8 +20,15 @@ const label = (p: { number: number; name: string | null }) => p.name ?? `Unnamed
 export function AdminPatches() {
   const patches = useFetch((s) => adminApi.balancePatches(s), []);
   const drift = useFetch((s) => adminApi.balanceDrift(s), []);
+  const ignored = useFetch((s) => adminApi.balanceIgnoredPlugins(s), []);
   const [open, setOpen] = useState<PatchDetail | null>(null);
-  const { busy, error, run } = useAction(patches.reload);
+  const { busy, error, run } = useAction(() => { patches.reload(); drift.reload(); ignored.reload(); });
+  const list = patches.data?.patches ?? [];
+  const triageOf = (p: PatchSummary) => p.triage ?? 'balance';
+  const pending = list.filter((p) => triageOf(p) === 'pending');
+  const balanceNewestFirst = [...list].reverse().filter((p) => triageOf(p) === 'balance');
+  // "plugin added: x" reads "plugin added x" inside the one-line collapse.
+  const foldedLine = (f: PatchSummary) => (f.changes ?? []).map((c) => c.replace(': ', ' ')).join(', ') || `patch ${f.number}`;
   const [name, setName] = useState('');
   const [notes, setNotes] = useState('');
 
@@ -35,6 +43,7 @@ export function AdminPatches() {
 
   return (
     <div class="stack">
+      {pending.map((p) => <TriageCard key={p.id} patch={p} targets={balanceNewestFirst} run={run} busy={busy} />)}
       <Panel>
         <h3>Server drift</h3>
         {drift.error && <Empty>Could not load server drift.</Empty>}
@@ -51,10 +60,12 @@ export function AdminPatches() {
             <table class="admin-table">
               <thead><tr><th>#</th><th>Name</th><th>Source</th><th>Since</th><th>Rounds</th><th>Servers</th><th>Public</th><th /></tr></thead>
               <tbody>
-                {(patches.data?.patches ?? []).map((p) => (
+                {list.filter((p) => triageOf(p) !== 'folded').flatMap((p) => {
+                  const folded = list.filter((f) => triageOf(f) === 'folded' && f.foldedInto === p.id);
+                  const main = (
                   <tr key={p.id} class={!p.reviewed && p.source === 'detected' ? 'admin-warn' : ''}>
                     <td>{p.number}</td>
-                    <td>{label(p)}</td>
+                    <td>{label(p)}{triageOf(p) === 'pending' && <> <span class="admin-tag">needs triage</span></>}</td>
                     <td>{p.source === 'historical' ? <span class="admin-tag">approximate</span> : p.source}</td>
                     <td>{fmtTime(p.firstSeenAt)}</td>
                     <td>{p.source === 'announced' && p.rounds === 0 ? 'never played' : p.rounds}</td>
@@ -62,10 +73,48 @@ export function AdminPatches() {
                     <td>{p.publishedAt && <span class="admin-tag">public</span>}</td>
                     <td><button class="btn" type="button" disabled={busy} onClick={() => openDetail(p)}>Details</button></td>
                   </tr>
-                ))}
+                  );
+                  if (folded.length === 0) return [main];
+                  return [main, (
+                    <tr key={`${p.id}-folded`}>
+                      <td />
+                      <td colSpan={7} class="muted">
+                        includes {folded.length} folded config{folded.length === 1 ? '' : 's'}:{' '}
+                        {folded.map((f, i) => (
+                          <span key={f.id}>
+                            {i > 0 && '; '}{foldedLine(f)}{' '}
+                            <button class="btn btn--ghost btn--sm" type="button" disabled={busy} aria-label={`Unfold patch ${f.number}`}
+                              onClick={() => void run(() => adminApi.unfoldBalancePatch(f.id))}>Unfold</button>
+                          </span>
+                        ))}
+                      </td>
+                    </tr>
+                  )];
+                })}
               </tbody>
             </table>
           </div>
+        )}
+      </Panel>
+      <Panel>
+        <h3>Ignored plugins</h3>
+        <p class="muted">Left out of the balance fingerprint: adding, removing or updating one never makes a patch.</p>
+        {ignored.error && <Empty>Could not load the ignored plugins.</Empty>}
+        {!ignored.error && (
+          <ul class="admin-list">
+            {(ignored.data?.plugins ?? []).map((p) => (
+              <li key={p.file}>
+                <code>{p.file}</code>{' '}
+                {p.source === 'knobs'
+                  ? <span class="muted">(from balance/knobs.json)</span>
+                  : <>
+                    {p.reason && <span class="muted">{p.reason} </span>}
+                    <button class="btn btn--ghost btn--sm" type="button" disabled={busy} aria-label={`Remove ${p.file}`}
+                      onClick={() => void run(() => adminApi.removeIgnoredPlugin(p.file))}>Remove</button>
+                  </>}
+              </li>
+            ))}
+          </ul>
         )}
       </Panel>
       {open && (
@@ -87,7 +136,7 @@ export function AdminPatches() {
           </form>
           <AdminPatchPublic
             key={open.id} patch={open} run={run} busy={busy}
-            listRow={patches.data?.patches.find((p) => p.id === open.id)} />
+            listRow={list.find((p) => p.id === open.id)} />
           {open.diffVsPrevious
             ? <ul class="admin-list">
               {open.diffVsPrevious.added.map((k) => <li key={`a${k}`}>added {k}</li>)}

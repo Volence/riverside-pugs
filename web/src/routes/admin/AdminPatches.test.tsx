@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import { ApiError, type DriftRow, type PatchDetail, type PatchSummary, type PublicEntry } from '../../api';
 
@@ -6,6 +6,7 @@ const { mockAdmin } = vi.hoisted(() => ({
   mockAdmin: {
     balancePatches: vi.fn(), balanceDrift: vi.fn(), balancePatch: vi.fn(), editBalancePatch: vi.fn(),
     balancePublicPreview: vi.fn(), publishBalancePatch: vi.fn(),
+    triageBalancePatch: vi.fn(), unfoldBalancePatch: vi.fn(), balanceIgnoredPlugins: vi.fn(), removeIgnoredPlugin: vi.fn(),
   },
 }));
 
@@ -16,7 +17,8 @@ vi.mock('../../api', async (importOriginal) => {
 
 const { AdminPatches } = await import('./AdminPatches');
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
+beforeEach(() => { mockAdmin.balanceIgnoredPlugins.mockResolvedValue({ plugins: [] }); });
 
 const patches: PatchSummary[] = [
   { id: 1, number: 1, name: 'Baseline', notes: '', source: 'historical', firstSeenAt: '2000-01-01 00:00:00', reviewed: true, rounds: 900, countedRounds: 850, servers: [], publishedAt: null },
@@ -163,5 +165,72 @@ describe('AdminPatches', () => {
 
     expect(await screen.findByText(/Public since/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Unpublish' })).toBeTruthy();
+  });
+});
+
+describe('AdminPatches triage', () => {
+  const pending: PatchSummary = {
+    id: 3, number: 3, name: null, notes: '', source: 'detected', firstSeenAt: '2026-09-24 03:00:00', reviewed: false,
+    rounds: 2, countedRounds: 2, servers: [{ serverId: 1, name: 'dallas', lastSeenAt: 'x' }], publishedAt: null,
+    triage: 'pending', foldedInto: null, onlyPluginsChanged: true, triageBase: { id: 1, number: 1, name: 'Baseline' },
+    changes: ['plugin added: l4d_tvwatch'], plugins: ['l4d_tvwatch.smx'],
+  };
+  const setup = (list: PatchSummary[]) => {
+    mockAdmin.balancePatches.mockResolvedValue({ patches: list });
+    mockAdmin.balanceDrift.mockResolvedValue({ servers: [] });
+    mockAdmin.balanceIgnoredPlugins.mockResolvedValue({ plugins: [] });
+    mockAdmin.triageBalancePatch.mockResolvedValue({ ok: true, target: 1 });
+  };
+
+  it('shows a triage card with the changes, the plugin hint and the servers, and folds or ignores', async () => {
+    setup([patches[0], pending]);
+    render(<AdminPatches />);
+    expect(await screen.findByText('plugin added: l4d_tvwatch')).toBeTruthy();
+    expect(screen.getByText(/Only plugins changed/)).toBeTruthy();
+    expect(screen.getByText(/running on dallas/)).toBeTruthy();
+    expect(screen.getByText('needs triage')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Not balance, fold just this once' }));
+    await waitFor(() => expect(mockAdmin.triageBalancePatch).toHaveBeenCalledWith(3, { decision: 'fold', into: 1 }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Not balance, ignore these plugins from now on' }));
+    await waitFor(() => expect(mockAdmin.triageBalancePatch).toHaveBeenCalledWith(3, { decision: 'ignore', into: 1, plugins: ['l4d_tvwatch.smx'] }));
+  });
+
+  it('balance decision needs a name', async () => {
+    setup([patches[0], pending]);
+    render(<AdminPatches />);
+    await screen.findByText('plugin added: l4d_tvwatch');
+    const submit = screen.getByRole('button', { name: 'Balance patch' }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    fireEvent.input(screen.getByLabelText('Name for patch 3'), { target: { value: 'TV watch' } });
+    fireEvent.click(submit);
+    await waitFor(() => expect(mockAdmin.triageBalancePatch).toHaveBeenCalledWith(3, { decision: 'balance', name: 'TV watch', notes: '' }));
+  });
+
+  it('offers no ignore button when more than plugins changed', async () => {
+    setup([patches[0], { ...pending, onlyPluginsChanged: false, changes: ['z_tank_health 8000 -> 7500'], plugins: [] }]);
+    render(<AdminPatches />);
+    await screen.findByText('z_tank_health 8000 -> 7500');
+    expect(screen.queryByText(/Only plugins changed/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Not balance, ignore these plugins from now on' })).toBeNull();
+  });
+
+  it('collapses a folded patch under its target with unfold, and lists ignored plugins with remove', async () => {
+    setup([patches[0], { ...pending, triage: 'folded', foldedInto: 1, merged: true }]);
+    mockAdmin.balanceIgnoredPlugins.mockResolvedValue({ plugins: [
+      { file: 'l4d_tvwatch.smx', reason: '', addedBy: null, addedAt: null, source: 'knobs' },
+      { file: 'x_noise.smx', reason: 'triage of patch #4', addedBy: '1', addedAt: '2026-09-24 00:00:00', source: 'site' },
+    ] });
+    mockAdmin.unfoldBalancePatch.mockResolvedValue({ ok: true });
+    mockAdmin.removeIgnoredPlugin.mockResolvedValue({ ok: true });
+    render(<AdminPatches />);
+    expect(await screen.findByText((_, el) => el?.tagName === 'TD' && /includes 1 folded config: plugin added l4d_tvwatch/.test(el.textContent ?? ''))).toBeTruthy();
+    expect(screen.queryByText('Unnamed patch 3')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Unfold patch 3' }));
+    await waitFor(() => expect(mockAdmin.unfoldBalancePatch).toHaveBeenCalledWith(3));
+    expect(await screen.findByText('x_noise.smx')).toBeTruthy();
+    expect(screen.getByText('(from balance/knobs.json)')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Remove l4d_tvwatch.smx' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove x_noise.smx' }));
+    await waitFor(() => expect(mockAdmin.removeIgnoredPlugin).toHaveBeenCalledWith('x_noise.smx'));
   });
 });

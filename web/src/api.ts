@@ -860,7 +860,21 @@ export interface PatchSummary {
   servers: { serverId: number; name: string; lastSeenAt: string }[];
   /** When this patch was published to the public page, null while unpublished. */
   publishedAt: string | null;
+  /** Patch triage. pending: undecided; balance: a real patch; folded: not
+   *  balance, its rounds count for `foldedInto`. The triage fields are
+   *  optional so an older server's answer still reads (as balance). */
+  triage?: 'pending' | 'balance' | 'folded';
+  foldedInto?: number | null;
+  /** Pending or folded only: what it is judged against (the default fold
+   *  target) or folded into, and the differences in plain words. */
+  triageBase?: { id: number; number: number; name: string | null } | null;
+  changes?: string[];
+  plugins?: string[];
+  onlyPluginsChanged?: boolean;
 }
+export interface IgnoredPlugin { file: string; reason: string; addedBy: string | null; addedAt: string | null; source: 'site' | 'knobs' }
+export type TriageBody = { decision: 'balance'; name: string; notes: string } | { decision: 'fold'; into: number }
+  | { decision: 'ignore'; into: number; plugins: string[] };
 export interface PatchDetail extends PatchSummary {
   inputs: Record<string, string> | null;
   diffVsPrevious: { added: string[]; removed: string[]; changed: { key: string; from: string; to: string }[] } | null;
@@ -872,7 +886,7 @@ export interface KnobView { cvar: string; label: string; group: string; type: 'i
 export interface KnobDiffRow { cvar: string; label: string; group: string; from: string; to: string }
 export interface KnobPreview { values: Record<string, string>; errors: string[]; diff: KnobDiffRow[]; groupsChanged: string[];
   base: { patchId: number; number: number } | null; missing: string[]; blocking: { serverId: number; name: string; diff: string }[];
-  fingerprint: string | null; existingPatch: { id: number; number: number; name: string | null; notes: string; source: string } | null }
+  fingerprint: string | null; existingPatch: { id: number; number: number; name: string | null; notes: string; source: string; triage?: 'pending' | 'balance' | 'folded' } | null }
 export interface RolloutServer { serverId: number; name: string; state: 'pending' | 'written' | 'confirmed' | 'failed'; lastError: string | null;
   writtenAt: string | null; confirmedAt: string | null; seen: { patchId: number; number: number; at: string } | null; mismatch: string | null }
 export interface RolloutSummary { id: number; patchId: number; patchNumber: number; patchName: string | null; values: Record<string, string>;
@@ -1496,6 +1510,10 @@ export const adminApi = {
   balanceRollouts: (signal?: AbortSignal) => get<{ rollouts: RolloutSummary[] }>('/api/admin/balance/rollouts', signal),
   balancePublicPreview: (id: number, signal?: AbortSignal) => get<PublicEntry>(`/api/admin/balance/patches/${id}/public`, signal),
   publishBalancePatch: (id: number, published: boolean) => post(`/api/admin/balance/patches/${id}/publish`, { published }),
+  triageBalancePatch: (id: number, body: TriageBody) => post<{ ok: true; target?: number }>(`/api/admin/balance/patches/${id}/triage`, body),
+  unfoldBalancePatch: (id: number) => post<{ ok: true }>(`/api/admin/balance/patches/${id}/unfold`, {}),
+  balanceIgnoredPlugins: (signal?: AbortSignal) => get<{ plugins: IgnoredPlugin[] }>('/api/admin/balance/ignored-plugins', signal),
+  removeIgnoredPlugin: (file: string) => del<{ ok: true }>(`/api/admin/balance/ignored-plugins/${encodeURIComponent(file)}`),
   balanceCompare: (q: CompareQuery, signal?: AbortSignal) => get<CompareResult>(`/api/admin/balance/compare?${compareParams(q)}`, signal),
   balanceMetric: (q: CompareQuery, metric: string, phase: string, signal?: AbortSignal) =>
     get<MetricDetail>(`/api/admin/balance/metric?${compareParams(q)}&metric=${encodeURIComponent(metric)}&phase=${encodeURIComponent(phase)}`, signal),
