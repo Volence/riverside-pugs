@@ -49,6 +49,9 @@ export interface FilingDeps {
    *  whether the report is even allowed and whether it may reach the admin
    *  feed. */
   targetDiscord?: PickedTarget;
+  /** Which surface filed this. Set only by a trusted caller, never from a
+   *  request body. Only the in-game path uses it so far. */
+  source?: 'game';
 }
 
 /** How often a Discord-only reporter may file: tighter than the per-day
@@ -266,15 +269,15 @@ export function fileReport(db: DB, reporterIn: string | DiscordReporter, body: F
     // reach the admin feed is fixed at the moment it lands, by whether its
     // ticket is restricted or its accused may be reading the feed.
     const reportId = Number(db.prepare(
-      `INSERT INTO ticket_reports (ticket_id, reporter_id, reporter_discord_id, reporter_name, category, text, match_id, map_ordinal, half, t_ms, created_at, feed_held, community_entry_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO ticket_reports (ticket_id, reporter_id, reporter_discord_id, reporter_name, category, text, match_id, map_ordinal, half, t_ms, created_at, feed_held, community_entry_id, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       ticket.id,
       reporter.kind === 'player' ? reporter.steamid : null,
       reporter.kind === 'discord' ? reporter.discordId : null,
       reporter.kind === 'discord' ? reporter.name.slice(0, 100) : '',
       category, text, matchId, moment?.ordinal ?? null, moment?.half ?? null, moment?.tMs ?? null,
-      now.toISOString(), feedHeld ? 1 : 0, entryId,
+      now.toISOString(), feedHeld ? 1 : 0, entryId, deps.source ?? null,
     ).lastInsertRowid);
     if (!ticket.created) addTicketEvent(db, ticket.id, null, 'report_attached', { reportId }, now);
     return { ok: true, reportId, ticketId: ticket.id, created: ticket.created, restricted };
