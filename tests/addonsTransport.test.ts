@@ -166,3 +166,45 @@ describe('transportFor, sftp', () => {
     } as never))).not.toBeNull();
   });
 });
+
+describe('ftpTransport put', () => {
+  /** A client whose renames fail in the order given (an Error) or succeed (null). */
+  function fakeFtp(renames: (Error | null)[]) {
+    const calls: string[] = [];
+    const client = () => ({
+      access: async () => ({}), close: () => {}, ensureDir: async () => {}, cd: async () => ({}), size: async () => 0,
+      downloadTo: async () => ({}),
+      uploadFrom: async (_l: string, name: string) => { calls.push(`upload ${name}`); return {}; },
+      remove: async (name: string) => { calls.push(`remove ${name}`); throw new Error('550 not there'); },
+      rename: async (from: string, to: string) => {
+        calls.push(`rename ${from} ${to}`);
+        const next = renames.shift();
+        if (next) throw next;
+        return {};
+      },
+    });
+    return { calls, t: ftpTransport({ host: 'h', port: 21, user: 'u', password: 'p', dir: '/cfg', client: client as never }) };
+  }
+  const refused = (msg: string) => Object.assign(new Error(msg), { code: 553 });
+
+  it('uploads to .part and renames into place', async () => {
+    const f = fakeFtp([null]);
+    await f.t.put('/tmp/x', 'pug_balance.cfg');
+    expect(f.calls).toEqual(['upload pug_balance.cfg.part', 'rename pug_balance.cfg.part pug_balance.cfg']);
+  });
+
+  it('when the rename over an existing file is refused, removes the target (ignoring errors) and renames again', async () => {
+    const f = fakeFtp([refused('553 file exists'), null]);
+    await f.t.put('/tmp/x', 'pug_balance.cfg');
+    expect(f.calls).toEqual([
+      'upload pug_balance.cfg.part', 'rename pug_balance.cfg.part pug_balance.cfg',
+      'remove pug_balance.cfg', 'rename pug_balance.cfg.part pug_balance.cfg',
+    ]);
+  });
+
+  it('rejects with the retry\'s error when the second rename fails too', async () => {
+    const f = fakeFtp([refused('553 first'), refused('553 second')]);
+    await expect(f.t.put('/tmp/x', 'pug_balance.cfg')).rejects.toThrow('553 second');
+    expect(f.calls.filter((c) => c.startsWith('rename')).length).toBe(2);
+  });
+});
