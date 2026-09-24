@@ -82,6 +82,7 @@ describe('what counts as an edit', () => {
     const moved = { ...DEFAULT_DESIGN, elements: { ...DEFAULT_DESIGN.elements, chat: { x: 5 } } };
     expect(elementsTouched(moved)).toBe(true);
     expect(hasOverrides({ ...DEFAULT_DESIGN, hideGameCrosshair: true }, null)).toBe(true);
+    expect(hasOverrides({ ...DEFAULT_DESIGN, pickupFlyIn: false }, null)).toBe(true);
   });
 
   // A design whose only change is picking a crosshair (the default is
