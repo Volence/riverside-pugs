@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
-import { copyFile, rename, stat, unlink } from 'node:fs/promises';
+import { copyFile, readFile, rename, stat, unlink } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
+import { Writable } from 'node:stream';
 import { Client as FtpClient } from 'basic-ftp';
 import type { ServerRow } from './serverPool.js';
 
@@ -23,6 +24,10 @@ export interface AddonsTransport {
   /** Bytes on the far side, or null when the file is not there. */
   size(remoteName: string): Promise<number | null>;
   remove(remoteName: string): Promise<void>;
+  /** The file as UTF-8 text, or null when it is not there. Any other failure
+   *  throws, so "could not read" is never mistaken for "absent". Used to read
+   *  back small config files after writing them. */
+  readText(remoteName: string): Promise<string | null>;
 }
 
 /** Remote names come from our own database, never from a request. Checked
@@ -62,14 +67,27 @@ export function localTransport(dir: string): AddonsTransport {
         // Already gone is the desired state.
       }
     },
+    async readText(remoteName) {
+      assertPlainName(remoteName);
+      try {
+        return await readFile(join(dir, remoteName), 'utf8');
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw err;
+      }
+    },
   };
 }
 
+/** The part of basic-ftp's Client this file uses, so tests can fake it. */
+export type FtpClientLike = Pick<FtpClient, 'access' | 'close' | 'ensureDir' | 'uploadFrom' | 'rename' | 'cd' | 'size' | 'remove' | 'downloadTo'>;
+
 export function ftpTransport(cfg: {
   host: string; port: number; user: string; password: string; dir: string;
+  client?: () => FtpClientLike;
 }): AddonsTransport {
-  const withClient = async <T>(fn: (c: FtpClient) => Promise<T>): Promise<T> => {
-    const client = new FtpClient(30_000);
+  const withClient = async <T>(fn: (c: FtpClientLike) => Promise<T>): Promise<T> => {
+    const client = cfg.client ? cfg.client() : new FtpClient(30_000);
     try {
       await client.access({
         host: cfg.host, port: cfg.port, user: cfg.user, password: cfg.password,
@@ -111,6 +129,22 @@ export function ftpTransport(cfg: {
         } catch {
           // Already gone is the desired state.
         }
+      });
+    },
+    async readText(remoteName) {
+      assertPlainName(remoteName);
+      return withClient(async (c) => {
+        await c.cd(cfg.dir);
+        const chunks: Buffer[] = [];
+        const sink = new Writable({ write(chunk, _enc, cb) { chunks.push(Buffer.from(chunk)); cb(); } });
+        try {
+          await c.downloadTo(sink, remoteName);
+        } catch (err) {
+          // 550 is FTP's "no such file"; anything else is a real failure.
+          if ((err as { code?: number }).code === 550) return null;
+          throw err;
+        }
+        return Buffer.concat(chunks).toString('utf8');
       });
     },
   };
@@ -170,6 +204,17 @@ export function sftpTransport(cfg: {
     async remove(remoteName) {
       assertPlainName(remoteName);
       await ssh(`rm -f -- ${shq(remote(remoteName))}`);
+    },
+    async readText(remoteName) {
+      assertPlainName(remoteName);
+      const p = shq(remote(remoteName));
+      try {
+        // Exit 3 is ours and means absent; ssh itself fails with 255.
+        return (await ssh(`test -e ${p} || exit 3; cat -- ${p}`)).stdout;
+      } catch (err) {
+        if ((err as { code?: number }).code === 3) return null;
+        throw err;
+      }
     },
   };
 }

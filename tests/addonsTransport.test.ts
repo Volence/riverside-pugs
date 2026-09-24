@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { localTransport, sftpTransport, transportFor } from '../src/addonsTransport.js';
+import { localTransport, sftpTransport, ftpTransport, transportFor } from '../src/addonsTransport.js';
 import type { ServerRow } from '../src/serverPool.js';
 
 let dir: string;
@@ -100,6 +100,54 @@ describe('sftpTransport', () => {
       run: async () => { throw new Error('stat: No such file or directory'); },
     });
     expect(await absent.size('dbd.vpk')).toBeNull();
+  });
+});
+
+describe('readText', () => {
+  it('local: reads a file, null when absent', async () => {
+    const t = localTransport(dir);
+    await t.put(src, 'pug_balance.cfg');
+    expect(await t.readText('pug_balance.cfg')).toBe('vpk bytes');
+    expect(await t.readText('absent.cfg')).toBeNull();
+  });
+
+  it('sftp: cats the file; exit 3 (absent) is null, anything else throws', async () => {
+    const calls: string[][] = [];
+    const t = sftpTransport({
+      host: 'h', port: 22, user: 'l4d', keyPath: '/k', dir: '/cfg',
+      run: async (cmd, args) => { calls.push([cmd, ...args]); return { stdout: 'sm_cvar a "1"\n' }; },
+    });
+    expect(await t.readText('pug_balance.cfg')).toBe('sm_cvar a "1"\n');
+    expect(calls[0].join(' ')).toContain("test -e '/cfg/pug_balance.cfg' || exit 3; cat -- '/cfg/pug_balance.cfg'");
+    const absent = sftpTransport({ host: 'h', port: 22, user: 'l4d', keyPath: '/k', dir: '/cfg',
+      run: async () => { throw Object.assign(new Error('exit 3'), { code: 3 }); } });
+    expect(await absent.readText('pug_balance.cfg')).toBeNull();
+    const down = sftpTransport({ host: 'h', port: 22, user: 'l4d', keyPath: '/k', dir: '/cfg',
+      run: async () => { throw Object.assign(new Error('ssh: connect refused'), { code: 255 }); } });
+    await expect(down.readText('pug_balance.cfg')).rejects.toThrow(/refused/);
+  });
+
+  it('ftp: downloads the file; 550 is null', async () => {
+    const files = new Map([['/cfg/pug_balance.cfg', 'sm_cvar a "1"\n']]);
+    let cwd = '/';
+    const client = () => ({
+      access: async () => ({}), close: () => {}, ensureDir: async () => {}, uploadFrom: async () => ({}),
+      rename: async () => ({}), size: async () => 0, remove: async () => ({}),
+      cd: async (d: string) => { cwd = d; return {}; },
+      downloadTo: async (sink: NodeJS.WritableStream, name: string) => {
+        const body = files.get(`${cwd}/${name}`);
+        if (body === undefined) throw Object.assign(new Error('550 No such file'), { code: 550 });
+        await new Promise<void>((r) => sink.write(Buffer.from(body), () => r()));
+        return {};
+      },
+    });
+    const t = ftpTransport({ host: 'h', port: 21, user: 'u', password: 'p', dir: '/cfg', client: client as never });
+    expect(await t.readText('pug_balance.cfg')).toBe('sm_cvar a "1"\n');
+    expect(await t.readText('absent.cfg')).toBeNull();
+  });
+
+  it('refuses an unsafe name', async () => {
+    await expect(localTransport(dir).readText('../x')).rejects.toThrow(/name/i);
   });
 });
 

@@ -11,6 +11,7 @@ import type { AddonsTransport } from '../../src/addonsTransport.js';
  *  timers. */
 export function fakeAddonsTransport(opts: { failPut?: boolean; onPut?: () => void } = {}) {
   const files = new Map<string, number>();
+  const texts = new Map<string, string>();
   const state = { failPut: opts.failPut ?? false, puts: 0 };
   const transport: AddonsTransport = {
     async put(_localPath, remoteName) {
@@ -21,6 +22,7 @@ export function fakeAddonsTransport(opts: { failPut?: boolean; onPut?: () => voi
     },
     async size(remoteName) { return files.get(remoteName) ?? null; },
     async remove(remoteName) { files.delete(remoteName); },
+    async readText(remoteName) { return texts.get(remoteName) ?? null; },
   };
-  return { transport, files, state };
+  return { transport, files, texts, state };
 }
