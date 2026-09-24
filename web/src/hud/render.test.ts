@@ -124,7 +124,7 @@ describe('childRects', () => {
     // the item icons and turns the health number on, so the card is re-fitted.
     for (const preset of ['stock', 'modern'] as const) for (const fit of [false, true]) {
       const d = design({ preset,
-        elements: { ownHealth: { scale: 1.25 }, siHealth: { scale: 0.8 }, infectedRow: { scale: 1.3 }, abilityRing: { scale: 1.2 }, teamColumn: { scale: 1.5, ...(fit ? { fit: true } : {}) } },
+        elements: { ownHealth: { scale: 1.25 }, siHealth: { scale: 0.8 }, infectedRow: { scale: 1.3 }, abilityRing: { scale: 1.2 }, progressBar: { scale: 1.4 }, teamColumn: { scale: 1.5, ...(fit ? { fit: true } : {}) } },
         children: fit ? { teamColumn: { Items: { x: 37, y: 40 }, HealthNumber: { on: true, x: 140 } } } : {} });
       const files = buildHud(d, { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } });
       for (const panelId of Object.keys(PANEL_FILE)) {

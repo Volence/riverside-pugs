@@ -31,6 +31,7 @@ import {
 import { TEX } from '../crosshair/draw';
 import { columnExtent, WEAPON_KEY_DEFAULTS } from './weaponColumn';
 import { probe } from './probes';
+import { clampBarKeys } from './progress';
 
 /**
  * Uploaded images and fonts, already decoded, keyed by slot id, and for a
@@ -569,6 +570,16 @@ function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: C
  * own inset is cut; a file's is left as the file has it.
  */
 function insetFor(def: ChildDef, block: KvNode, keys: Record<string, string>): Record<string, string> {
+  // The use bar's border and gap: probe Q22's rule (progress.ts clampBarKeys) at the tall the block has now.
+  if (def.keys?.some((k) => k.key === 'border_thickness') && (keys.gap !== undefined || keys.border_thickness !== undefined)) {
+    const tall = parseFloat(pcGet(block, 'tall') ?? '');
+    if (!Number.isFinite(tall)) return keys;
+    const n = (key: string, d: number) => { const v = parseFloat(keys[key] ?? pcGet(block, key) ?? ''); return Number.isFinite(v) ? v : d; };
+    const cut = clampBarKeys({ border: n('border_thickness', 1), gap: n('gap', 1), shadow: n('shadow_thickness', 1) }, tall);
+    return { ...keys,
+      ...(keys.border_thickness !== undefined ? { border_thickness: String(cut.border) } : {}),
+      ...(keys.gap !== undefined ? { gap: String(cut.gap) } : {}) };
+  }
   if (def.kind !== 'bar' || keys.inset === undefined) return keys;
   const tall = parseFloat(pcGet(block, 'tall') ?? '');
   if (!Number.isFinite(tall)) return keys;

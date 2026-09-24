@@ -15,6 +15,7 @@ import { SLOTS } from './slots';
 import { TEAM_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, panelOfFile, maxInset, type ChildDef, type KeyDef } from './children';
 import { probe } from './probes';
 import { MAX_IMAGE_B64, MAX_IMAGE_SIDE } from './limits';
+import { clampBarKeys } from './progress';
 import { readArt, type CrosshairArt } from '../crosshair/model';
 import { SPLATTERS, splatterDef, type SplatterId, type SplatterStyle } from './splatter';
 
@@ -842,6 +843,7 @@ export function validateDesign(raw: unknown): HudDesign {
       if (!def) continue;
       const o = childOverride(def, v);
       clampInset(d, panel.file, def, o);
+      if (panel.panelId === 'progressBar' && def.name === 'Bar') clampProgressBar(d, panel.file, def, o);
       if (Object.keys(o).length) kids[name] = o;
     }
     if (Object.keys(kids).length) d.children[panel.panelId] = kids;
@@ -873,6 +875,31 @@ function clampInset(d: HudDesign, file: string, def: ChildDef, o: ChildOverride)
     } catch { /* an imported base not registered yet */ }
   }
   if (tall !== undefined) o.keys = { ...o.keys, inset: String(Math.min(Number(raw), maxInset(tall))) };
+}
+
+/**
+ * The use bar's border and gap, cut by probe Q22's rule (progress.ts
+ * clampBarKeys) at the design's own tall, else the base file's: a stored
+ * key is cut, one the design leaves alone stays the file's. Reads the
+ * file's value for a key the design does not set, since the rule weighs
+ * all three together.
+ */
+function clampProgressBar(d: HudDesign, file: string, def: ChildDef, o: ChildOverride) {
+  const k = o.keys;
+  if (!k || (k.gap === undefined && k.border_thickness === undefined && k.shadow_thickness === undefined)) return;
+  let node: KvNode | undefined;
+  try { node = kvFind(baseTree(baseOf(d), file), [def.name]); } catch { return; }
+  const fileNum = (key: string, dflt: number) => { const v = parseFloat((node && kvGet(node, key)) ?? ''); return Number.isFinite(v) ? v : dflt; };
+  const tall = o.h ?? fileNum('tall', NaN);
+  if (!Number.isFinite(tall)) return;
+  const cut = clampBarKeys({
+    border: k.border_thickness !== undefined ? Number(k.border_thickness) : fileNum('border_thickness', 1),
+    gap: k.gap !== undefined ? Number(k.gap) : fileNum('gap', 1),
+    shadow: k.shadow_thickness !== undefined ? Number(k.shadow_thickness) : fileNum('shadow_thickness', 1),
+  }, tall);
+  o.keys = { ...k,
+    ...(k.border_thickness !== undefined ? { border_thickness: String(cut.border) } : {}),
+    ...(k.gap !== undefined ? { gap: String(cut.gap) } : {}) };
 }
 
 const KEY = 'hud';

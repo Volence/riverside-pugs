@@ -59,8 +59,14 @@ export const ELEMENTS: HudElement[] = [
   { id: 'weaponSelection', label: 'Weapons', side: 'survivor', key: 'HudWeaponSelection', move: true, resize: 'none',
     children: [], props: ['visible'] },
   { id: 'chat', label: 'Chat', side: 'both', key: 'HudChat', move: true, resize: 'free', children: [], props: ['visible'] },
-  { id: 'progressBar', label: 'Use / revive bar', side: 'both', key: 'HudProgressBar', move: true, resize: 'none',
-    children: [], mockSize: { stock: { w: 228, h: 24 }, modern: { w: 228, h: 24 } }, props: ['visible'] },
+  /**
+   * The use / revive bar. A scale reaches its pieces (progressbar.res,
+   * children.ts PROGRESS_PANEL). mockSize is the stock content's size, for
+   * picking the element; its pieces are framed and clipped by the real
+   * 300 x 45 container (mock.ts panelBoxes), as the game clips them.
+   */
+  { id: 'progressBar', label: 'Use / revive bar', side: 'both', key: 'HudProgressBar', move: true, resize: 'scale',
+    children: ['resource/ui/hud/progressbar.res'], mockSize: { stock: { w: 228, h: 24 }, modern: { w: 228, h: 24 } }, props: ['visible'] },
   /**
    * The game's real kill/incap feed: CHudPZDamageRecordPanel, whose
    * hudlayout panel is HudPZDamageRecord (stock and Modern share the same

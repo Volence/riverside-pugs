@@ -124,9 +124,22 @@ export function panelBoxes(design: HudDesign, panelId: string): Box[] {
   if (!panel || panel.repeat !== 'single' || !panel.frame) return [];
   const r = rectFor(design, panelId);
   // Framed by its own hudlayout.res block (your infected health): the element's rect is the panel, fitted or not.
-  if (panel.frame === 'hudlayout') return [{ x: r.x, y: r.y, w: r.w, h: r.h }];
+  // An element whose rect is a stand-in for picking (mockSize: the use bar) frames its pieces in the real block.
+  if (panel.frame === 'hudlayout') return [{ x: r.x, y: r.y, ...(elementById(panelId)?.mockSize ? layoutSize(design, panelId) : { w: r.w, h: r.h }) }];
   const p = parentPanel(design, panel.frame.file, panel.frame.block, 1);
   return [{ x: r.x + p.x, y: r.y + p.y, w: p.w, h: p.h }];
+}
+
+/**
+ * An element's hudlayout.res block size as the generator wrote it (scaled
+ * with the element): the rect VGUI clips its children to, which a
+ * registry mockSize, sized to the stock content for picking, is not.
+ */
+export function layoutSize(design: HudDesign, id: string): { w: number; h: number } {
+  const el = elementById(id)!;
+  const n = kvFind(buildTrees(design)('scripts/hudlayout.res'), [el.key]);
+  const W = screenW(design.aspect);
+  return { w: parseSize((n && pcGet(n, 'wide')) ?? '0', W), h: parseSize((n && pcGet(n, 'tall')) ?? '0', SCREEN_H) };
 }
 
 const ZCARD_FILE = 'resource/ui/hud/zombieteamdisplayplayer.res';
@@ -196,7 +209,8 @@ export function childAt(
   design: HudDesign, state: SurvivorState | PreviewState, ux: number, uy: number, panel = 'teamColumn',
 ): { name: string; card: number } | null {
   const container = rectFor(design, panel);
-  if (!container.visible || !inside(container, ux, uy)) return null;
+  // The pieces may reach past a stand-in rect (the use bar's mockSize) into their real frame.
+  if (!container.visible || (!inside(container, ux, uy) && !panelBoxes(design, panel).some((b) => inside(b, ux, uy)))) return null;
   let best: { name: string; card: number; area: number } | null = null;
   let decor: { name: string; card: number; area: number } | null = null;
   for (const [i, c] of panelBoxes(design, panel).entries()) {

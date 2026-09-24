@@ -1332,7 +1332,9 @@ describe('Hud page', () => {
       ['hud__layer--d1', 'Item icons'], ['hud__layer--d1', 'Status text'], ['hud__layer--d1', 'Damage splatter'],
       ['hud__layer--d1', 'Down pictureshown when down'], ['hud__layer--d1', 'Dead pictureshown when dead'],
       ['hud__layer--d1 hud__layer--hidden', 'Voice iconshown when talking'],
-      ['hud__layer--d0', 'Weapons'], ['hud__layer--d0', 'Chat'], ['hud__layer--d0', 'Use / revive bar'], ['hud__layer--d0', 'Kill / incap notices'],
+      ['hud__layer--d0', 'Weapons'], ['hud__layer--d0', 'Chat'], ['hud__layer--d0', 'Use / revive bar'],
+      ['hud__layer--d1', 'Label'], ['hud__layer--d1', 'Bar'], ['hud__layer--d1', 'Icon'], ['hud__layer--d1', 'Subtext'],
+      ['hud__layer--d0', 'Kill / incap notices'],
       ['hud__layer--d0 hud__layer--hidden', 'Custom crosshair'],
     ]);
   });
@@ -2599,5 +2601,20 @@ describe('The item pickup animation switch (plan task M3)', () => {
     await waitFor(() => expect(saved().pickupFlyIn).toBe(false));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Item pickup animation' }));
     await waitFor(() => expect(saved().pickupFlyIn).toBeUndefined());
+  });
+});
+
+describe('The use bar pieces on the page (plan task U1)', () => {
+  const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
+  it('edits the label colour, the icon size and the bar colours from Layers', async () => {
+    render(<Hud />);
+    fireEvent.click(layer('Use / revive bar').getByRole('button', { name: 'Label' }));
+    fireEvent.input(screen.getByLabelText('Label colour'), { target: { value: '#ff00ff' } });
+    await waitFor(() => expect(saved().children?.progressBar?.BarLabel?.color).toBe('255 0 255 255'));
+    fireEvent.click(layer('Use / revive bar').getByRole('button', { name: 'Icon' }));
+    expect(screen.getByText('The game picks healing or reviving.')).toBeTruthy();
+    fireEvent.click(layer('Use / revive bar').getByRole('button', { name: 'Bar' }));
+    fireEvent.input(screen.getByLabelText('Fill colour colour'), { target: { value: '#00ff00' } });
+    await waitFor(() => expect(saved().children?.progressBar?.Bar?.keys?.fill_color).toBe('0 255 0 255'));
   });
 });

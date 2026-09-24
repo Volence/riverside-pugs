@@ -99,6 +99,7 @@ export const PANEL_FILE: Record<string, string> = {
   siHealth: 'resource/ui/hud/hunterhealth.res',
   infectedRow: 'resource/ui/hud/zombieteamdisplayplayer.res',
   abilityRing: 'resource/ui/hud/abilitytimerhud.res',
+  progressBar: 'resource/ui/hud/progressbar.res',
 };
 
 /**
@@ -1018,6 +1019,9 @@ function drawSplatter(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNod
   drawTexture(ctx, n, r, k, opts, got.src, def.size.w, def.size.h, got.key, false, !(def.healthTint && style.keepColours));
 }
 
+/** The use bar label's sample: the self heal of probe B13 (probe-phase2/b13/b13-stock/heal/mid-heal.png). */
+export const PROGRESS_LABEL = 'HEALING YOURSELF';
+
 function sampleText(n: KvNode, opts: DrawOpts, panelId?: string): string {
   const t = kvGet(n, 'labelText') ?? '';
   // A dead teammate's respawn countdown, which code writes into the label: a sample 12 seconds.
@@ -1029,6 +1033,8 @@ function sampleText(n: KvNode, opts: DrawOpts, panelId?: string): string {
   }
   const lname = n.key.toLowerCase();
   if (t === '' && (lname === 'name' || lname === 'namelabel')) return opts.card === undefined ? 'Bill' : CARD_NAMES[opts.card % CARD_NAMES.length];
+  // The use bar's label, which code fills (#L4D_progress_heal): the self heal the probes shot.
+  if (t === '' && panelId === 'progressBar' && lname === 'barlabel') return PROGRESS_LABEL;
   return t;
 }
 

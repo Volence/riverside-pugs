@@ -408,6 +408,46 @@ export const ZCARD_PANEL: PanelChildren = {
   ],
 };
 
+/**
+ * The use / revive bar's pieces (progressbar.res; Modern ships none, so both
+ * presets read the stock file), framed by its hudlayout.res block,
+ * HudProgressBar, which the element scales with them. Probe answers,
+ * /home/volence/l4d/hud/probe-phase2-rest/RESULTS.md:
+ * - P1, P2: BarLabel's fgcolor_override and font are honoured
+ *   (r1/shots/crops/bar-e.png: magenta "HEALING YOURSELF" in DefaultLarge).
+ * - P3: AwardIcon moves and sizes (r1/shots/crops/bar-e-icon.png: x 232,
+ *   40 x 40); code picks its icon by action.
+ * - Q22 (/home/volence/l4d/hud/probe-phase2/RESULTS.md, b1v2): every Bar key
+ *   is honoured, and a border and gap that leave no room draw the border
+ *   alone, so the editor keeps them inside progress.ts clampBarKeys.
+ * - P4: Subtext was never seen (a self heal leaves it empty); its keys are
+ *   the plain Label keys proven on BarLabel.
+ */
+const BAR_KEY = (key: string, label: string, type: 'colour' | 'int'): KeyDef => (type === 'colour'
+  ? { key, label, type, unsetLabel: 'File colour', evidence: `client.dll progress bar run: ${key}; probe Q22 (probe-phase2/b1v2/shots/b1/b1-d.png)` }
+  : { key, label, type, range: [0, 8], evidence: `client.dll progress bar run: ${key}; probe Q22 (probe-phase2/b1v2/shots/b1/b1-d.png)` });
+export const PROGRESS_PANEL: PanelChildren = {
+  panelId: 'progressBar',
+  file: 'resource/ui/hud/progressbar.res',
+  repeat: 'single',
+  frame: 'hudlayout',
+  children: [
+    { name: 'BarLabel', label: 'Label', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true,
+      note: 'The game writes what you are doing here: healing, reviving, pouring.' },
+    { name: 'Bar', label: 'Bar', kind: 'other', role: 'content', box: 'wh', move: true, font: false, colour: false,
+      keys: [
+        BAR_KEY('fill_color', 'Fill colour', 'colour'), BAR_KEY('empty_color', 'Empty colour', 'colour'),
+        BAR_KEY('border_color', 'Border colour', 'colour'), BAR_KEY('shadow_color', 'Shadow colour', 'colour'),
+        BAR_KEY('gap', 'Gap', 'int'), BAR_KEY('border_thickness', 'Border', 'int'), BAR_KEY('shadow_thickness', 'Shadow', 'int'),
+      ],
+      note: 'The game fills the bar as the action goes. A border and gap too thick for the bar are cut so a line of fill stays.' },
+    { name: 'AwardIcon', label: 'Icon', kind: 'other', role: 'content', box: 'square', move: true, font: false, colour: false,
+      note: 'The game picks healing or reviving.' },
+    { name: 'Subtext', label: 'Subtext', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true,
+      note: 'Shows a name when someone heals or revives you; not seen in our tests.' },
+  ],
+};
+
 /** A block's rect, as a linked rule reads it from a base file. */
 export interface LinkRect { x: number; y: number; w: number; h: number }
 export type LinkRule = 'same' | 'delta';
@@ -443,7 +483,7 @@ function mapLinked<T>(rule: LinkRule, key: string, v: T, a: LinkRect, b: LinkRec
   }
 }
 
-export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, ZCARD_PANEL];
+export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, ZCARD_PANEL, PROGRESS_PANEL];
 export const panelChildren = (panelId: string): PanelChildren | undefined => PANEL_CHILDREN.find((p) => p.panelId === panelId);
 export const teamChild = (name: string): ChildDef | undefined => TEAM_PANEL.children.find((c) => c.name === name);
 
