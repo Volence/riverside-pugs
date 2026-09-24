@@ -274,17 +274,19 @@ export const ELEMENTS: HudElement[] = [
    * The voice list: HudVoiceStatus lists other players while they talk
    * (with voice_loopback your own voice never enters it, r1-g). Its row
    * keys are the ones client.dll reads beside it (m_NameFont, item_tall,
-   * item_wide, item_spacing).
+   * item_wide, item_spacing); as the list was never drawn, they wait on
+   * gate P2 (probes.ts) and the panel is move and hide only until then
+   * (plan decision 3).
    */
   { id: 'voiceList', label: 'Voice list', side: 'both', key: 'HudVoiceStatus', move: true, resize: 'none',
     children: [], props: ['visible'], occasional: true,
     note: `Lists the other players while they talk; ${UNSEEN}.`,
     keys: [
-      { key: 'item_tall', label: 'Row height', type: 'int', range: [4, 64],
+      { key: 'item_tall', label: 'Row height', type: 'int', range: [4, 64], gate: 'P2',
         evidence: 'client.dll voice status run (HudVoiceSelfStatus, text_font, item_tall, item_wide, item_spacing); stock 15' },
-      { key: 'item_wide', label: 'Row width', type: 'int', range: [20, 400],
+      { key: 'item_wide', label: 'Row width', type: 'int', range: [20, 400], gate: 'P2',
         evidence: 'client.dll voice status run (item_wide); stock 120' },
-      { key: 'item_spacing', label: 'Row gap', type: 'int', range: [0, 40],
+      { key: 'item_spacing', label: 'Row gap', type: 'int', range: [0, 40], gate: 'P2',
         evidence: 'client.dll voice status run (item_spacing); stock 2' },
     ] },
   /** The infected voice panel: HudInfectedVOIP lists your infected teammates while they talk (r3-b: your own loopback voice shows only the mic). */

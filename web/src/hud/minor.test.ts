@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PROBES, _setProbe } from './probes';
 import { elementById } from './elements';
 import { buildHud, elementRect } from './build';
-import { validateDesign, type HudDesign } from './design';
+import { validateDesign, DEFAULT_DESIGN, type HudDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { drawHud, hitTest, shownInState } from './mock';
 import { placeElement } from './edit';
@@ -213,6 +213,7 @@ describe('placing an occasional element', () => {
  */
 describe('the panels seen only with other players (plan task M2)', () => {
   beforeEach(() => { _resetAssetCache(); });
+  afterEach(() => { _setProbe('P2', null); });
   const M2: [string, string, 'survivor' | 'infected' | 'both'][] = [
     ['voiceList', 'HudVoiceStatus', 'both'], ['infectedVoice', 'HudInfectedVOIP', 'infected'], ['finaleMeter', 'HudFinaleMeter', 'survivor'],
     ['perilNotice', 'CHudTeamMateInPerilNotice', 'survivor'], ['leavingArea', 'HudLeavingAreaWarning', 'survivor'],
@@ -248,7 +249,20 @@ describe('the panels seen only with other players (plan task M2)', () => {
     expect(r.x + r.w / 2).toBeCloseTo(screenW('16:9') / 2, 0);
   });
 
-  it('takes the voice list row keys the dll reads, clamped', () => {
+  it('holds the voice list row keys behind gate P2, closed as no probe saw the list (decision 3: move and hide only)', () => {
+    expect(PROBES.P2.passed).toBe(false);
+    expect(elementById('voiceList')!.keys!.every((k) => k.gate === 'P2')).toBe(true);
+    const d = validateDesign({ v: 1, elements: { voiceList: { x: 10, keys: { item_tall: '30' } } } });
+    expect(d.elements.voiceList).toEqual({ x: 10 });
+    // A design that slipped one past validation still writes nothing for it.
+    const slipped: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: { voiceList: { keys: { item_tall: '30' } } } };
+    const f = buildHud(slipped).find((x) => x.path === 'scripts/hudlayout.res')!;
+    const n = kvFind(parseKv(new TextDecoder('latin1').decode(f.data))[0].value as KvNode[], ['HudVoiceStatus'])!;
+    expect(kvGet(n, 'item_tall')).not.toBe('30');
+  });
+
+  it('with P2 open, takes the voice list row keys the dll reads, clamped', () => {
+    _setProbe('P2', true);
     expect(elementById('voiceList')!.keys!.map((k) => k.key)).toEqual(['item_tall', 'item_wide', 'item_spacing']);
     const d = validateDesign({ v: 1, elements: { voiceList: { keys: { item_tall: '30', item_wide: '9999', item_spacing: '4' } } } });
     const n = layout(d, 'HudVoiceStatus');
@@ -258,6 +272,7 @@ describe('the panels seen only with other players (plan task M2)', () => {
   });
 
   it('draws each as a labelled frame with the toggle on, and the voice list rows at their keys', () => {
+    _setProbe('P2', true);
     const d = validateDesign({ v: 1, elements: { voiceList: { keys: { item_tall: '30', item_spacing: '10' } } } });
     const surv = calls(d, 'survivor');
     for (const s of ['A TEAMMATE IS IN TROUBLE', 'Finale', 'PLEASE WAIT FOR YOUR TEAMMATES']) expect(text(surv, s), s).toBeDefined();

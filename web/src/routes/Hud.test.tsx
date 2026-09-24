@@ -2725,10 +2725,19 @@ describe('The panels seen only with other players on the page (plan task M2)', (
     await waitFor(() => expect(saved().elements?.perilNotice).toEqual({ y: 90 }));
   });
 
-  it('edits the voice list row height', async () => {
+  afterEach(() => { _setProbe('P2', null); });
+  it('offers the voice list move and hide only while gate P2 is closed (decision 3)', () => {
     render(<Hud />);
     fireEvent.click(layer('Voice list').getByRole('button', { name: 'Voice list' }));
     expect(screen.getByText(/^Lists the other players while they talk; not seen in our tests/)).toBeTruthy();
+    expect(screen.queryByLabelText('Row height')).toBeNull();
+    expect(screen.getByLabelText('Y')).toBeTruthy();
+  });
+
+  it('edits the voice list row height with P2 open', async () => {
+    _setProbe('P2', true);
+    render(<Hud />);
+    fireEvent.click(layer('Voice list').getByRole('button', { name: 'Voice list' }));
     fireEvent.input(screen.getByLabelText('Row height'), { target: { value: '30' } });
     await waitFor(() => expect(saved().elements?.voiceList?.keys?.item_tall).toBe('30'));
   });

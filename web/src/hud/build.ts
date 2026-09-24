@@ -221,7 +221,12 @@ function layoutPass(work: Work, design: HudDesign) {
       for (const key of Object.keys(o.keys)) {
         if (!el.keys?.some((k) => k.key === key)) throw new Error(`${LAYOUT}: ${el.key} takes no key ${key}`);
       }
-      writeKeys(panel, o.keys);
+      // A key waiting on a closed probe is never written, even if one slipped past validation.
+      const open = Object.fromEntries(Object.entries(o.keys).filter(([key]) => {
+        const gate = el.keys!.find((k) => k.key === key)!.gate;
+        return !gate || probe(gate);
+      }));
+      writeKeys(panel, open);
     }
     const moved = el.move && (o.x !== undefined || o.y !== undefined);
     const sized = el.resize === 'free' && (o.w !== undefined || o.h !== undefined);
