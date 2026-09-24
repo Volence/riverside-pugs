@@ -23,7 +23,7 @@ Requires the game installed at the Steam path below. Never run this on a server.
 """
 import io, json, math, os, re, struct, sys
 import vpk
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 from srctools.vtf import VTF
 
 PAK = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/pak01_dir.vpk')
@@ -31,6 +31,7 @@ VFONT = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dea
 RESOURCE = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/resource')
 ROBOTO = os.path.join(os.path.dirname(__file__), '..', 'web', 'src', 'hud', 'base', 'fonts', 'RobotoCondensed-Regular.ttf')
 MOD_TEXTURES = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/scripts/mod_textures.txt')
+HUD_TEXTURES = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/scripts/hud_textures.txt')
 OUT = os.path.join(os.path.dirname(__file__), '..', 'web', 'src', 'hud', 'art')
 CAP = 1_000_000
 
@@ -69,7 +70,29 @@ MATERIALS = [
     # draws, probe-phase2/b13/compare/stock-infected-bottom.png); pz_charge_pounce is unused.
     'vgui/hud/pz_charge_bg', 'vgui/hud/pz_charge_meter',
     'vgui/hud/pz_charge_lunge', 'vgui/hud/pz_charge_smoker', 'vgui/hud/pz_charge_boomer', 'vgui/hud/pz_charge_tank',
+    # the ability marker around the infected crosshair: HudCrosshair's own CircularProgressBar,
+    # which code gives HUD/PZ_charge_crosshair (client.dll 0x10240e55, probe Q16a)
+    'vgui/hud/pz_charge_crosshair',
 ]
+
+# Materials drawn by a two-texture shader: the material name -> its second
+# texture, which the shader multiplies into the first. pz_charge_meter.vmt is
+# UnlitTwoTexture with $texture2 vgui/hud/PZ_charge_meter_motion, a red
+# swirl the vmt's proxies turn slowly, so the meter the game draws is red
+# with an orange glint (probe Q15, probe-phase2-infected/b10/shots/crops/
+# progress-f-zoom.png: R 176, G 3, B 1 at the lit arc), not the base
+# texture's orange (206 152 73). The PNG is the product at rest.
+TWO_TEXTURE = {
+    'vgui/hud/pz_charge_meter': 'vgui/hud/pz_charge_meter_motion',
+}
+
+# Cells of scripts/hud_textures.txt (loose in the install): index name -> entry.
+# The infected crosshair is PZ_crosshair_open, a 32 x 32 cell of
+# sprites/crosshairs that the game draws at its own pixels, 32 x 32 at 1080p
+# (probe B9 v2, b9/shots-v2/b9v2/b9v2-d.png: x 944 to 975, y 524 to 555).
+HUD_CELLS = {
+    'icon/pz_crosshair_open': 'pz_crosshair_open',
+}
 
 # The item icons: index name -> ToolBox character. The characters are the ones
 # client.dll writes into the teammate card's Items label (the function that
@@ -268,6 +291,26 @@ def texture_cells(text: str) -> dict[str, dict[str, str]]:
         cells[name.lower()] = keys; i += 1
     return cells
 
+def export_hud_cells(pak) -> dict[str, bytes]:
+    """
+    Each HUD_CELLS entry cut from its sprite sheet where hud_textures.txt says,
+    at the sheet's own pixels (the same cutter as export_equip).
+    """
+    cells = texture_cells(open(HUD_TEXTURES, encoding='latin-1').read())
+    pngs: dict[str, bytes] = {}
+    for name, entry in HUD_CELLS.items():
+        c = cells[entry]
+        sheet = c['file'].lower().replace('\\', '/')
+        img = VTF.read(io.BytesIO(pak['materials/%s.vtf' % sheet].read())).get().to_PIL().convert('RGBA')
+        x, y, w, h = (int(c[k]) for k in ('x', 'y', 'width', 'height'))
+        img = img.crop((x, y, x + w, y + h))
+        if img.getbbox() is None:
+            sys.exit('refusing: %s (%s) is empty on %s' % (entry, name, sheet))
+        buf = io.BytesIO(); img.save(buf, 'PNG', optimize=True)
+        pngs[name] = buf.getvalue()
+        print('  %-48s %4dx%-4d %6d bytes  (%s)' % (name, w, h, len(buf.getvalue()), entry))
+    return pngs
+
 def export_equip(pak) -> tuple[dict[str, bytes], dict[str, tuple[int, int]]]:
     """
     Each weapon selection icon, cut from its sheet where mod_textures.txt says,
@@ -303,6 +346,13 @@ def main() -> int:
     for name in MATERIALS:
         raw = pak['materials/%s.vtf' % name].read()
         img = VTF.read(io.BytesIO(raw)).get().to_PIL().convert('RGBA')
+        if name in TWO_TEXTURE:
+            second = VTF.read(io.BytesIO(pak['materials/%s.vtf' % TWO_TEXTURE[name]].read())).get().to_PIL().convert('RGBA')
+            if second.size != img.size:
+                second = second.resize(img.size, Image.BILINEAR)
+            r1, g1, b1, a1 = img.split()
+            r2, g2, b2, _ = second.split()
+            img = Image.merge('RGBA', (ImageChops.multiply(r1, r2), ImageChops.multiply(g1, g2), ImageChops.multiply(b1, b2), a1))
         buf = io.BytesIO(); img.save(buf, 'PNG', optimize=True)
         data = buf.getvalue()
         total += len(data)
@@ -312,7 +362,8 @@ def main() -> int:
         print('  %-48s %4dx%-4d %6d bytes' % (name, img.width, img.height, len(data)))
     glyphs, advances, space = export_glyphs()
     equip, equip_sizes = export_equip(pak)
-    for name, data in {**glyphs, **equip}.items():
+    hud_cells = export_hud_cells(pak)
+    for name, data in {**glyphs, **equip, **hud_cells}.items():
         total += len(data)
         if total > CAP:
             sys.exit('refusing: total exceeds %d bytes at %s' % (CAP, name))

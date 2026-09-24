@@ -502,11 +502,21 @@ describe('drawHud delegates panels to the renderer', () => {
       }
     });
 
-    it('draws the meter over the icon while charging, lit from 12 o\'clock counter-clockwise for 0.4 of the turn', () => {
+    it('draws no meter while not ready: a standing Hunter\'s ring has no lit arc in game', () => {
+      // /home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/ring-b.png (Hunter standing): the 30 x 30
+      // Progress draws nothing; ring-c.png (crouched, ready) has it lit all round.
+      const calls = ringCalls(DEFAULT_DESIGN, { ...DEFAULT_PREVIEW, ability: 'notReady' });
+      expect(drawsOf(calls, 'vgui/hud/pz_charge_meter')).toEqual([]);
+      expect(drawsOf(calls, 'vgui/hud/pz_charge_lunge')).toHaveLength(1);
+      const r = elementRect(DEFAULT_DESIGN, 'abilityRing', DEFAULT_DESIGN.aspect);
+      expect(calls.some((c) => c.m === 'arc' && Math.abs((c.a[0] as number) - (r.x + 40) * K) < 1e-9)).toBe(false);
+    });
+
+    it('draws the meter over the icon while recharging, lit from 12 o\'clock counter-clockwise for 0.4 of the turn', () => {
       // /home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/progress-f-zoom.png: 1.3 s into a 3 s
       // Smoker cooldown the lit arc runs from 12 o'clock down the left side.
       const r = elementRect(DEFAULT_DESIGN, 'abilityRing', DEFAULT_DESIGN.aspect);
-      const calls = ringCalls(DEFAULT_DESIGN, { ...DEFAULT_PREVIEW, ability: 'charging' });
+      const calls = ringCalls(DEFAULT_DESIGN, { ...DEFAULT_PREVIEW, ability: 'recharging' });
       const [meter] = drawsOf(calls, 'vgui/hud/pz_charge_meter');
       expect(meter.a.slice(1)).toEqual([(r.x + 10) * K, (r.y + 10) * K, 60 * K, 60 * K]);
       const arc = calls.find((c) => c.m === 'arc' && Math.abs((c.a[0] as number) - (r.x + 40) * K) < 1e-9)!;
@@ -543,7 +553,10 @@ describe('drawHud delegates panels to the renderer', () => {
       };
       const names = (fill: string) => ['pz_charge_bg', 'pz_charge_lunge', 'pz_charge_meter'].map((m) => `${artUrl(`vgui/hud/${m}`)!.split('/').pop()} ${fill}`).sort();
       expect(tints(DEFAULT_PREVIEW)).toEqual(names('rgb(255,0,255)'));
-      expect(tints({ ...DEFAULT_PREVIEW, ability: 'charging' })).toEqual(names('rgb(0,255,255)'));
+      expect(tints({ ...DEFAULT_PREVIEW, ability: 'recharging' })).toEqual(names('rgb(0,255,255)'));
+      // Not ready: the icon and the backdrop in the charging colour, and no meter at all.
+      _resetAssetCache();                                              // the tints above are cached by colour
+      expect(tints({ ...DEFAULT_PREVIEW, ability: 'notReady' })).toEqual(names('rgb(0,255,255)').filter((n) => !n.includes('meter')));
     });
 
     it('draws nothing while you are a ghost or dead: the game shows it only on a spawned infected', () => {

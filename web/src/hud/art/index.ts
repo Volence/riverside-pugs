@@ -12,6 +12,7 @@ export const ART: Record<string, string> = {
   'icon/item/molotov': 'icon-item-molotov.png',
   'icon/item/pills': 'icon-item-pills.png',
   'icon/item/pipebomb': 'icon-item-pipebomb.png',
+  'icon/pz_crosshair_open': 'icon-pz_crosshair_open.png',
   'vgui/healthbar_green': 'vgui-healthbar_green.png',
   'vgui/healthbar_grey': 'vgui-healthbar_grey.png',
   'vgui/healthbar_orange': 'vgui-healthbar_orange.png',
@@ -29,6 +30,7 @@ export const ART: Record<string, string> = {
   'vgui/hud/overlay_dead': 'vgui-hud-overlay_dead.png',
   'vgui/hud/pz_charge_bg': 'vgui-hud-pz_charge_bg.png',
   'vgui/hud/pz_charge_boomer': 'vgui-hud-pz_charge_boomer.png',
+  'vgui/hud/pz_charge_crosshair': 'vgui-hud-pz_charge_crosshair.png',
   'vgui/hud/pz_charge_lunge': 'vgui-hud-pz_charge_lunge.png',
   'vgui/hud/pz_charge_meter': 'vgui-hud-pz_charge_meter.png',
   'vgui/hud/pz_charge_smoker': 'vgui-hud-pz_charge_smoker.png',
@@ -93,4 +95,4 @@ export const FONT_METRICS: Record<string, FontMetrics> = {
   'Verdana': { unitsPerEm: 2048, winAscent: 2059, winDescent: 430 },
 };
 
-export const ART_TOTAL_BYTES = 624647;
+export const ART_TOTAL_BYTES = 629690;

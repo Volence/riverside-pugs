@@ -58,7 +58,13 @@ export interface PreviewState {
   crouched: boolean;
   infected: 'alive' | 'ghost' | 'dead';
   siClass: 'hunter' | 'smoker' | 'boomer' | 'tank';
-  ability: 'ready' | 'charging';
+  /**
+   * The ability timer as the game shows it (probe Q15): ready (ready colour,
+   * meter whole), not ready (charging colour, no meter: a standing Hunter,
+   * b10/shots/crops/ring-b.png) or recharging (charging colour, the meter
+   * refilling after an ability, progress-f-zoom.png).
+   */
+  ability: 'ready' | 'notReady' | 'recharging';
 }
 export const DEFAULT_PREVIEW: PreviewState = { survivor: 'healthy', crouched: false, infected: 'alive', siClass: 'hunter', ability: 'ready' };
 
@@ -620,6 +626,32 @@ const tints = new Lru<CanvasImageSource>(64);
 onUnregister((key) => { for (const id of [...tints.keys()]) if (id.startsWith(`${key}|`)) tints.delete(id); });
 
 /**
+ * The game's tint, texel times colour with the texel's own alpha kept, done
+ * on the pixels. The canvas's multiply blend is exact only on opaque
+ * pixels: it mixes the fill in by (1 - alpha), so a see-through edge texel
+ * comes out nearly the tint colour, and destination-in then keeps it at the
+ * edge's alpha. The black splatter art has grey edge texels (about 80 at a
+ * low alpha), so a green tint drew a green fringe the game never shows: its
+ * frame stays black (/home/volence/l4d/hud/probe-phase2-infected/b9/shots/crops/br-ghi.png,
+ * the Smoker's stock frame under drawColor 0 255 0). False where the scratch
+ * canvas cannot be read (happy-dom, a tainted canvas); the blend path is then
+ * the fallback.
+ */
+function multiplyPixels(t: CanvasRenderingContext2D, w: number, h: number, r: number, g: number, b: number): boolean {
+  if (typeof t.getImageData !== 'function' || typeof t.putImageData !== 'function') return false;
+  let px: ImageData;
+  try { px = t.getImageData(0, 0, w, h); } catch { return false; }
+  const d = px.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = Math.round(d[i] * r / 255);
+    d[i + 1] = Math.round(d[i + 1] * g / 255);
+    d[i + 2] = Math.round(d[i + 2] * b / 255);
+  }
+  t.putImageData(px, 0, 0);
+  return true;
+}
+
+/**
  * `key` names the source for the cache: a stock material, or an import's
  * base key and material (a decoded texture is a canvas, with no natural
  * size, so its size comes in as w and h).
@@ -633,6 +665,7 @@ export function tinted(img: CanvasImageSource, key: string, r: number, g: number
   const t = c?.getContext('2d');
   if (!c || !t) return img;
   t.drawImage(img, 0, 0, w, h);
+  if (multiplyPixels(t, w, h, r, g, b)) { tints.set(id, c); return c; }
   t.globalCompositeOperation = 'multiply';
   t.fillStyle = `rgb(${r},${g},${b})`;
   t.fillRect(0, 0, w, h);

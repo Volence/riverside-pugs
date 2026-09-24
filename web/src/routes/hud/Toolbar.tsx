@@ -30,9 +30,14 @@ const INFECTED_STATES: { key: PreviewState['infected']; label: string }[] = [
   { key: 'alive', label: 'Alive' }, { key: 'ghost', label: 'Ghost' }, { key: 'dead', label: 'Dead' },
 ];
 
-/** The ability timer's state: the game tints it by the matching colour, and fills the meter while charging. */
+/**
+ * The ability timer's states as the game shows them (probe Q15): Ready in the
+ * ready colour with the meter whole, Not ready in the charging colour with
+ * no meter (a standing Hunter), Recharging in the charging colour with the
+ * meter refilling after an ability.
+ */
 const ABILITY_STATES: { key: PreviewState['ability']; label: string }[] = [
-  { key: 'ready', label: 'Ready' }, { key: 'charging', label: 'Charging' },
+  { key: 'ready', label: 'Ready' }, { key: 'notReady', label: 'Not ready' }, { key: 'recharging', label: 'Recharging' },
 ];
 
 /** What the preview survivor holds: the game moves the weapon numbers when this changes. */

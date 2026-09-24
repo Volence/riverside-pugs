@@ -595,13 +595,17 @@ const ABILITY_CHARGE = 0.4;
  *   charging in b9/shots/crops/br-bcd.png), the backdrop's ring art, and the
  *   meter (b10/shots/crops/ring-all.png: R 203 ready, R 101 charging with
  *   the stock 127 grey);
- * - ready, the meter is whole; charging, it is lit from 12 o'clock
+ * - ready, the meter is whole; recharging, it is lit from 12 o'clock
  *   counter-clockwise for the charged share (progress-f-zoom.png; a
  *   clockwise drain would draw the same shape, so this is exact either way);
+ *   not ready with nothing to refill (a standing Hunter), it is not lit at
+ *   all (b10/shots/crops/ring-b.png against ring-c.png, crouched);
+ * - the meter's art is the product of its two textures, red (the export
+ *   script's TWO_TEXTURE), not the base texture's orange;
  * - the ring shows only on a spawned infected: none as a ghost (b9-a) or
  *   dead (b9-e).
- * A Hunter is charging while standing and ready while crouched; the Smoker,
- * Boomer and Tank spawn ready. Modern hides BackgroundImage (0 x 0, visible
+ * A Hunter is not ready while standing and ready while crouched; the Smoker,
+ * Boomer and Tank spawn ready, and every class recharges after its ability. Modern hides BackgroundImage (0 x 0, visible
  * 0), so its ring has no splat, as its file says. Clipped to the element,
  * as VGUI clips a panel's children: the background's bottom 10 units fall
  * outside the 70-tall element.
@@ -611,7 +615,7 @@ function paintAbilityRing(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
   if (state.infected !== 'alive') return;
   const trees = buildTrees(design);
   const layout = kvFind(trees('scripts/hudlayout.res'), ['CHudAbilityTimer']);
-  const colourKey = state.ability === 'charging' ? 'ability_charging_color' : 'ability_ready_color';
+  const colourKey = state.ability === 'ready' ? 'ability_ready_color' : 'ability_charging_color';
   const [tr, tg, tb, ta] = rgbaOf(design, (layout && pcGet(layout, colourKey)) ?? '255 255 255 255');
   const kids = trees(ABILITY).filter((n) => typeof n.value !== 'string')
     .map((n, i) => ({ n, i, z: parseFloat(pcGet(n, 'zpos') ?? '0') || 0 }))
@@ -637,6 +641,7 @@ function paintAbilityRing(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
       else if (name === 'abilityimage') paint(ABILITY_ICON[state.siClass], box);
       else if (name === 'progress') {
         const material = normaliseMaterial(pcGet(n, 'fg_image') ?? 'HUD/PZ_charge_meter');
+        if (state.ability === 'notReady') continue;
         if (state.ability === 'ready') { paint(material, box); continue; }
         const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
         ctx.save();

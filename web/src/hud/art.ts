@@ -52,6 +52,13 @@ export const EQUIP_ICONS: readonly string[] = [
 /** The use/heal bar's icon: mod_textures.txt icon_healing, cut from vgui/hud/iconsheet by the export script. */
 export const HEALING_ICON = 'icon/healing';
 
+/**
+ * The infected crosshair: hud_textures.txt's PZ_crosshair_open, a 32 x 32
+ * cell of sprites/crosshairs, cut by the export script. A cell, not a
+ * material, so it is named like the icons.
+ */
+export const CROSSHAIR_OPEN = 'icon/pz_crosshair_open';
+
 /** Every material the renderer can ask for, and the item and weapon icons. art.test.ts holds the index to this list. */
 export const NEEDED_MATERIALS: readonly string[] = [
   'vgui/s_panel_biker', 'vgui/s_panel_manager', 'vgui/s_panel_namvet', 'vgui/s_panel_teenangst',
@@ -80,6 +87,9 @@ export const NEEDED_MATERIALS: readonly string[] = [
   // Progress's fg_image. The Hunter's is pz_charge_lunge: the unused pz_charge_pounce is not it.
   'vgui/hud/pz_charge_bg', 'vgui/hud/pz_charge_meter',
   'vgui/hud/pz_charge_lunge', 'vgui/hud/pz_charge_smoker', 'vgui/hud/pz_charge_boomer', 'vgui/hud/pz_charge_tank',
+  // The ability marker round the infected crosshair: HudCrosshair's own CircularProgressBar, which
+  // code gives HUD/PZ_charge_crosshair (client.dll 0x10240e55, probe Q16a), and the crosshair itself.
+  'vgui/hud/pz_charge_crosshair', CROSSHAIR_OPEN,
   // The use/heal bar's AwardIcon (progressbar.res "icon" "icon_healing", a cell of vgui/hud/iconsheet).
   HEALING_ICON,
   ...ITEM_ICONS,

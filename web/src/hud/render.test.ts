@@ -1519,3 +1519,31 @@ describe('what a typed key control shows (review M2: the value the preview draws
     expect(shownKey(DEFAULT_DESIGN, mono, 'Orange')).toBe('255 176 0 255');
   });
 });
+
+describe('tinted: a multiply that keeps every pixel\'s own alpha', () => {
+  afterEach(() => { _setCanvasFactory(null); });
+
+  it('multiplies the colour of a see-through edge pixel instead of washing it with the tint', () => {
+    // The previous-implementer finding, fix (3): tinting the black splatter frame green left a green
+    // fringe in the preview while the game's frame stays black
+    // (/home/volence/l4d/hud/probe-phase2-infected/b9/shots/crops/br-ghi.png, the Smoker's stock frame
+    // under drawColor 0 255 0). The frame's edge texels are grey (about 80) at a low alpha; the
+    // canvas's multiply blend mixes the fill in by (1 - alpha), so a 20 percent pixel came out 80
+    // percent green. The game multiplies texel by colour: 80 grey times green is 0 80 0, still faint.
+    const src = new Uint8ClampedArray([80, 80, 80, 50, 0, 0, 0, 255, 200, 100, 50, 255]);
+    let out: Uint8ClampedArray | undefined;
+    _setCanvasFactory((w, h) => {
+      let buf = new Uint8ClampedArray(w * h * 4);
+      const t = {
+        globalCompositeOperation: 'source-over', fillStyle: '',
+        drawImage: (img: { px?: Uint8ClampedArray }) => { if (img.px) buf = new Uint8ClampedArray(img.px); },
+        fillRect: () => { throw new Error('the pixel path draws no fill'); },
+        getImageData: () => ({ data: new Uint8ClampedArray(buf), width: w, height: h }),
+        putImageData: (d: { data: Uint8ClampedArray }) => { buf = new Uint8ClampedArray(d.data); out = buf; },
+      };
+      return { width: w, height: h, getContext: () => t } as unknown as HTMLCanvasElement;
+    });
+    tinted({ px: src } as unknown as CanvasImageSource, 'edge-test', 0, 255, 0, 3, 1);
+    expect([...out!]).toEqual([0, 80, 0, 50, 0, 0, 0, 255, 0, 100, 0, 255]);
+  });
+});
