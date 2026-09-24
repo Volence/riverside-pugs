@@ -772,7 +772,10 @@ describe('custom splatter', () => {
       const { ctx, calls } = recCtx();
       drawPanel(ctx, d, 'teamColumn', TEAM, 1, { card: 0 });
       const fade = made.find((m) => m.w === 512 && m.h === 256)!;
-      expect(fade.pixels).toEqual(fadeTexture(512, 256, '200 0 0 255'));
+      // Compared byte by byte by hand: toEqual on half a million bytes takes most of a second, and timed out under the full suite.
+      const want = fadeTexture(512, 256, '200 0 0 255');
+      expect(fade.pixels!.length).toBe(want.length);
+      expect(fade.pixels!.every((v, i) => v === want[i])).toBe(true);
       const hit = draws(calls).find((c) => c.a[1] === stand.x && c.a[2] === stand.y && c.a[3] === stand.w && c.a[4] === stand.h)!;
       expect(hit.alpha).toBe(1);                                  // no SPLATTER_ALPHA: the stand-in is not code-managed
     } finally { _setCanvasFactory(null); }
