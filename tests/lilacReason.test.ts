@@ -40,8 +40,14 @@ describe('the lilac timeline summary, reason beside the flag', () => {
     const s = summary();
     expect(s).toMatch(/LilAC's reason: Autoshoot\./);
     expect(s).toMatch(
-      /Our measurement over the 1\.5 s before: biggest one-tick aim change 80\.2 degrees, total 200\.5 degrees, 10 trigger presses, 8 of them one tick long\./,
+      /Our measurement over the 1\.5 s before: biggest single-input aim change 80\.2 degrees, total 200\.5 degrees, 10 trigger presses, 8 of them held for a single input\./,
     );
+  });
+
+  it('uses the singular for exactly one trigger press', () => {
+    lilac('aimbot', 'lflags=0 ldelta=5 ltd=100 maxd=10 totd=20 taps=1 taps1=1');
+    expect(summary()).toMatch(/1 trigger press, 1 of them held for a single input\./);
+    expect(summary()).not.toMatch(/1 trigger presses/);
   });
 
   it('an lflags of -1 (unknown) omits LilAC\'s reason but keeps ours', () => {
@@ -71,13 +77,23 @@ describe('the lilac timeline summary, reason beside the flag', () => {
     expect(summary()).toMatch(/14 perfect hops in a row/);
   });
 
+  // A stock-LilAC server (no fork reason forward) reports lbhops=-1: the
+  // flag itself is still real and still stored, but there is no streak
+  // count to say anything about.
+  it('says nothing extra for a bhop flag with the -1 unknown sentinel', () => {
+    lilac('bhop', 'lbhops=-1 ljump=-1');
+    expect(summary()).toBe(
+      'Little Anti-Cheat suspected bhop. Few and rare suspicions are usually false positives; a run of them is what matters.',
+    );
+  });
+
   it('says an aimlock\'s target and hedges the through-walls caveat when lself_team is unknown', () => {
     lilac('aimlock', 'maxd=45 totd=90 taps=6 taps1=5 ltarget_team=2 ltarget_class=0 ltarget_ghost=0');
     const s = summary();
     expect(s).toMatch(/Locked onto a survivor/);
     expect(s).toMatch(/infected players see survivors through walls in L4D, so this can be legitimate if the flagged player was infected/i);
     expect(s).toMatch(
-      /Our measurement over the 1\.5 s before: biggest one-tick aim change 45 degrees, total 90 degrees, 6 trigger presses, 5 of them one tick long\./,
+      /Our measurement over the 1\.5 s before: biggest single-input aim change 45 degrees, total 90 degrees, 6 trigger presses, 5 of them held for a single input\./,
     );
     expect(s).not.toMatch(/LilAC's reason/);
   });

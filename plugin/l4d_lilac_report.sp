@@ -301,6 +301,19 @@ void ComputeAimMetrics(int client, float &maxd, float &totd, int &taps, int &tap
 			float dy = WrapDelta(a1 - prevA1);
 			float dp = a0 - prevA0;
 			float d = SquareRoot(dy * dy + dp * dp);
+			// A spin/anti-aim cheat can hand the engine a NaN or an absurdly
+			// large view angle for one usercmd, which makes d NaN or huge
+			// (SourcePawn floats are IEEE 754, so `d != d` is the standard
+			// NaN self-inequality check). Left alone, that poisons totd
+			// (NaN propagates through +=) and later fails to print cleanly
+			// into the log line, which is what actually loses the flag on
+			// exactly the player we most want on record. Treating it as the
+			// single largest change we are willing to name (360.0, a full
+			// circle) keeps the flag instead of dropping it, and every d is
+			// capped at 360.0 even when finite: no legitimate single usercmd
+			// can turn further than that.
+			if (d != d || d > 1000000.0) d = 360.0;
+			if (d > 360.0) d = 360.0;
 			totd += d;
 			if (d > maxd) maxd = d;
 
@@ -324,6 +337,32 @@ void ComputeAimMetrics(int client, float &maxd, float &totd, int &taps, int &tap
 	// out) never got to see its next usercmd, so it is deliberately NOT
 	// counted as a one-usercmd tap: taps1 only counts presses we actually
 	// watched get released.
+}
+
+/**
+ * A float about to go on the wire, clamped so the parser on the other end can
+ * never reject the whole line over it. A spin/anti-aim cheat (exactly the
+ * kind of player we most want a flag to survive for) can make LilAC's own
+ * ldelta/ltd, or our maxd/totd, come out NaN, Inf, or simply enormous: any of
+ * those either prints unparseably (SourceMod's %.1f prints "nan"/"inf",
+ * neither of which the site's number regex matches) or falls outside the
+ * site's accepted range, and losing the LINE loses the flag itself, not just
+ * the reason.
+ *
+ * -1.0 passes through unchanged: it is this plugin's own "unknown" sentinel,
+ * not a measurement, and must never be manufactured by clamping a garbage
+ * NUMBER (that would wrongly claim "we don't know" about a value we do have,
+ * just a bad one). Every other value is floored at 0.0 (these are all
+ * magnitudes; a negative one is as meaningless as a NaN) and capped at
+ * 99999.0, comfortably inside the site parser's accepted 0..100000 range for
+ * these fields.
+ */
+float ClampReasonFloat(float v)
+{
+	if (v == -1.0) return v;
+	if (v != v || v < 0.0) return 0.0; // v != v is the IEEE 754 NaN self-inequality check
+	if (v > 99999.0) return 99999.0;
+	return v;
 }
 
 /**
@@ -377,7 +416,8 @@ void Report(int client, int cheat, bool banned)
 			}
 			FormatEx(extra, sizeof(extra),
 				" lflags=%d ldelta=%.1f ltd=%.1f maxd=%.1f totd=%.1f taps=%d taps1=%d",
-				lflags, ldelta, ltd, maxd, totd, taps, taps1);
+				lflags, ClampReasonFloat(ldelta), ClampReasonFloat(ltd),
+				ClampReasonFloat(maxd), ClampReasonFloat(totd), taps, taps1);
 		} else {
 			int ttTeam = -1, ttClass = -1, ttGhost = -1;
 			if (g_fAimlockStoredAt[client] >= 0.0
@@ -397,7 +437,7 @@ void Report(int client, int cheat, bool banned)
 				? GetClientTeam(client) : -1;
 			FormatEx(extra, sizeof(extra),
 				" maxd=%.1f totd=%.1f taps=%d taps1=%d ltarget_team=%d ltarget_class=%d ltarget_ghost=%d lself_team=%d",
-				maxd, totd, taps, taps1, ttTeam, ttClass, ttGhost, selfTeam);
+				ClampReasonFloat(maxd), ClampReasonFloat(totd), taps, taps1, ttTeam, ttClass, ttGhost, selfTeam);
 		}
 	} else if (cheat == CHEAT_BHOP) {
 		int bhops = -1, jumpTicks = -1;
@@ -406,6 +446,12 @@ void Report(int client, int cheat, bool banned)
 			bhops = g_iBhopPerfect[client];
 			jumpTicks = g_iBhopJumpTicks[client];
 		}
+		// Same idea as ClampReasonFloat, for these two ints: -1 (unknown)
+		// passes through, everything else stays inside what the site parser
+		// accepts (lbhops 0..1000, ljump -1..100000), so a counter that ran
+		// long (or, in principle, went negative) cannot cost us the flag.
+		if (bhops != -1) bhops = (bhops > 1000) ? 1000 : ((bhops < 0) ? 0 : bhops);
+		if (jumpTicks != -1) jumpTicks = (jumpTicks > 100000) ? 100000 : ((jumpTicks < 0) ? 0 : jumpTicks);
 		FormatEx(extra, sizeof(extra), " lbhops=%d ljump=%d", bhops, jumpTicks);
 	}
 	// Other cheats: extra stays empty and the line is exactly as before 0.2.0.

@@ -159,10 +159,16 @@ describe('L4DL lilac flag line', () => {
       });
     });
 
-    it('accepts the -1 unknown sentinel on ljump but not lbhops', () => {
+    // The plugin sends lbhops=-1 (alongside ljump=-1) for every bhop flag on
+    // a server still on stock LilAC, without the fork's reason forward: that
+    // is the WHOLE rollout until every box carries it, so rejecting -1 here
+    // dropped the bhop flag itself, not just its reason. -1 is LilAC's
+    // "unknown" sentinel, same as every other reason field.
+    it('accepts the -1 unknown sentinel on both lbhops and ljump', () => {
       expect(parse(STAMP + BHOP_BODY.replace('ljump=22', 'ljump=-1')))
         .toMatchObject({ reason: { ljump: -1 } });
-      expect(parse(STAMP + BHOP_BODY.replace('lbhops=14', 'lbhops=-1'))).toBeNull();
+      expect(parse(STAMP + BHOP_BODY.replace('lbhops=14', 'lbhops=-1')))
+        .toMatchObject({ reason: { lbhops: -1 } });
     });
 
     for (const bad of ['lbhops=1001', 'lbhops=-2', 'ljump=100001', 'ljump=-2']) {

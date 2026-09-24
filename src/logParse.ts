@@ -438,7 +438,11 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     setMeasure('totd');
     setInt('taps', 0, 1000);
     setInt('taps1', 0, 1000);
-    setInt('lbhops', 0, 1000);
+    // -1 is LilAC's "unknown" sentinel here too: the plugin sends
+    // `lbhops=-1 ljump=-1` for every bhop flag until a server carries the
+    // fork's reason forward, so rejecting -1 dropped the bhop flag itself,
+    // not just its reason.
+    setInt('lbhops', -1, 1000);
     setInt('ljump', -1, 100000);
     setInt('ltarget_team', -1, 3);
     setInt('ltarget_class', -1, 8);
