@@ -1,4 +1,6 @@
 import type { DB } from './db.js';
+import { withoutIgnored } from './balancePatches.js';
+import type { BalanceKnobs } from './balanceKnobs.js';
 
 export interface PublicPatch {
   id: number; number: number; name: string; notes: string;
@@ -68,4 +70,46 @@ export function publishPatch(db: DB, id: number, published: boolean, now: string
   if (missing.length) return { ok: false, status: 400, error: `publishing needs ${missing.join(', ')}` };
   if (row.published_at === null) db.prepare('UPDATE balance_patches SET published_at = ? WHERE id = ?').run(now, id);
   return { ok: true };
+}
+
+export interface PublicChanges {
+  knobs: { label: string; from: string; to: string }[];
+  pluginsAdded: string[]; pluginsRemoved: string[]; pluginsUpdated: string[];
+  /** Watched config files and the per-map stripper directory that differ, by label. */
+  files: string[];
+}
+export type KnobLabels = Pick<BalanceKnobs, 'cvars' | 'files' | 'dirs' | 'versionless'> & { ignored?: string[] };
+
+/** The public-facing diff between two stored inventories: cvar changes by
+ *  label, plugins added/removed/updated by bare name, and watched files or
+ *  dirs by label. Never leaks a hash, size, raw inventory key or path outside
+ *  the knob list. */
+export function publicChanges(prevRaw: Record<string, string>, curRaw: Record<string, string>, knobs: KnobLabels | null): PublicChanges {
+  const ignored = knobs?.ignored ?? [];
+  const prev = withoutIgnored(prevRaw, ignored), cur = withoutIgnored(curRaw, ignored);
+  const versionless = new Set(knobs?.versionless ?? []);
+  const cvarLabel = new Map((knobs?.cvars ?? []).map((c) => [c.cvar, c.label]));
+  const pathLabel = new Map([...(knobs?.files ?? []), ...(knobs?.dirs ?? [])].map((f) => [f.path, f.label]));
+  const keys = [...new Set([...Object.keys(prev), ...Object.keys(cur)])].sort();
+  const out: PublicChanges = { knobs: [], pluginsAdded: [], pluginsRemoved: [], pluginsUpdated: [], files: [] };
+  const byLabel = (a: string, b: string) => a.localeCompare(b);
+  for (const k of keys) {
+    const kind = k.slice(0, 2), name = k.slice(2);
+    const a = prev[k], b = cur[k];
+    if (a === b) continue;
+    if (kind === 'c:') {
+      // Present on one side only: the watch list changed, not the game.
+      if (a !== undefined && b !== undefined) out.knobs.push({ label: cvarLabel.get(name) ?? name, from: a, to: b });
+    } else if (kind === 'p:') {
+      const plugin = name.replace(/\.smx$/, '');
+      if (a === undefined) out.pluginsAdded.push(plugin);
+      else if (b === undefined) out.pluginsRemoved.push(plugin);
+      else if (!versionless.has(name)) out.pluginsUpdated.push(plugin);
+    } else if (kind === 'f:' || kind === 'd:') {
+      out.files.push(pathLabel.get(name) ?? name);
+    }
+  }
+  out.knobs.sort((x, y) => byLabel(x.label, y.label));
+  for (const l of [out.pluginsAdded, out.pluginsRemoved, out.pluginsUpdated, out.files]) l.sort(byLabel);
+  return out;
 }
