@@ -3,6 +3,7 @@ import { percentile, aggregate, calibrate, occupancyZ, scorePlayers, type Player
 import { TUNING } from '../src/integrity/constants.js';
 import type { OccResult } from '../src/integrity/occupancy.js';
 import type { RoundMetrics } from '../src/integrity/round.js';
+import type { HiddenMetrics } from '../src/integrity/hidden.js';
 
 const m = (over: Partial<RoundMetrics> = {}): RoundMetrics => ({
   fidMax: 0.2, fidP95: 0.1, windows: 12, scoreable: 10, fidSum: 0.1, occ: null, eligiblePairs: 100,
@@ -189,7 +190,14 @@ describe('aggregate', () => {
 
 const agg = (steamid: string, over: Partial<PlayerAgg> = {}): PlayerAgg => ({
   steamid, rounds: 20, eligibleRounds: 20, fidMax: 0, fidP95: 0, scoreable: 100,
-  trackShare: 0, occZ: 0, teamGap: 0, ...over,
+  trackShare: 0, occZ: 0, teamGap: 0,
+  losRounds: 0, hiddenScoreable: 0, hiddenShare: null, hiddenOccZ: null, reveals: 0, revealShare: null,
+  byClass: {
+    hunter: { hiddenShare: null, hiddenOccZ: null, revealShare: null },
+    smoker: { hiddenShare: null, hiddenOccZ: null, revealShare: null },
+    boomer: { hiddenShare: null, hiddenOccZ: null, revealShare: null },
+  },
+  ...over,
 });
 
 describe('scorePlayers', () => {
@@ -312,5 +320,64 @@ describe('missing metrics do not inflate the composite', () => {
       agg('y', { trackShare: 0.01, occZ: 1, teamGap: 1 }),
     ]);
     expect(scored[0].steamid).toBe('x');
+  });
+});
+
+const hid = (over: Partial<HiddenMetrics> = {}): HiddenMetrics => ({
+  windows: 4, scoreable: 3, fidSum: 0.3, fidMax: 0.2, occ: null, reveals: 4, revealOn: 1,
+  byClass: {
+    hunter: { scoreable: 3, fidSum: 0.3, occ: null, reveals: 4, revealOn: 1 },
+    smoker: { scoreable: 0, fidSum: 0, occ: null, reveals: 0, revealOn: 0 },
+    boomer: { scoreable: 0, fidSum: 0, occ: null, reveals: 0, revealOn: 0 },
+  },
+  gates: { considered: 0, notLive: 0, notTarget: 0, inGrace: 0, tooClose: 0, losUnknown: 0, seen: 0, teamSees: 0, occluded: 0, passed: 0 },
+  ...over,
+});
+
+const losRows = (steamid: string, n: number, h: HiddenMetrics = hid()) =>
+  Array.from({ length: n }, (_, i) => ({ steamid, metrics: m({ losKnown: true, hidden: h }), map: 'm', round: `${steamid}/${i}` }));
+
+describe('the hidden columns', () => {
+  it('reads n/a under MIN_BOARD_ROUNDS rounds with line of sight', () => {
+    const [a] = aggregate(losRows('p', TUNING.MIN_BOARD_ROUNDS - 1));
+    expect(a.losRounds).toBe(TUNING.MIN_BOARD_ROUNDS - 1);
+    expect(a.hiddenShare).toBeNull();
+    expect(a.revealShare).toBeNull();
+    expect(a.byClass.hunter.hiddenShare).toBeNull();
+  });
+
+  it('pools D over windows and F over reveals once there is enough', () => {
+    // 8 rounds x 3 windows = 24 >= MIN_TRACK_WINDOWS; 8 x 4 reveals = 32 >= MIN_REVEALS.
+    const [a] = aggregate(losRows('p', 8));
+    expect(a.hiddenScoreable).toBe(24);
+    expect(a.hiddenShare).toBeCloseTo(0.1);
+    expect(a.reveals).toBe(32);
+    expect(a.revealShare).toBeCloseTo(0.25);
+    expect(a.byClass.hunter.hiddenShare).toBeCloseTo(0.1);
+    expect(a.byClass.hunter.revealShare).toBeCloseTo(0.25);
+    expect(a.byClass.smoker).toEqual({ hiddenShare: null, hiddenOccZ: null, revealShare: null });
+  });
+
+  it('keeps F at n/a under MIN_REVEALS even with enough rounds', () => {
+    const [a] = aggregate(losRows('p', 8, hid({ reveals: 2, revealOn: 2 })));
+    expect(a.revealShare).toBeNull();
+  });
+
+  it('treats a version 4 row as no line of sight, not as zero', () => {
+    const [a] = aggregate([{ steamid: 'old', metrics: m(), map: 'm', round: 'r' }]);
+    expect(a.losRounds).toBe(0);
+    expect(a.hiddenShare).toBeNull();
+    expect(a.hiddenOccZ).toBeNull();
+  });
+
+  it('ranks the hidden columns by percentile and leaves the composite alone', () => {
+    const low = losRows('low', 8, hid({ fidSum: 0.3 }));
+    const high = losRows('high', 8, hid({ fidSum: 2.4 }));
+    const scored = scorePlayers(aggregate([...low, ...high]));
+    const byId = new Map(scored.map((p) => [p.steamid, p]));
+    expect(byId.get('high')!.pHidden).toBe(1);
+    expect(byId.get('low')!.pHidden).toBe(0);
+    // Every other metric is identical, so the composite must be too.
+    expect(byId.get('high')!.composite).toBe(byId.get('low')!.composite);
   });
 });
