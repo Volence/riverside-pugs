@@ -68,7 +68,15 @@ export function hudPathProblem(path: string): string | null {
 const MB = 1024 * 1024;
 const capText = (n: number) => (n >= MB ? `${n / MB} MB` : `${n / 1024} KB`);
 
-type Token = { value: string; quoted: boolean };
+/** A bare word holding a byte above 0x7f, which readers may take for whitespace or not. */
+type Token = { value: string; quoted: boolean; nonAscii?: boolean };
+
+/**
+ * The game's whitespace: C isspace in the C locale, the six ASCII ones. Not
+ * JS `\s`, which also takes 0xA0 (a non-breaking space) and would read a
+ * `\xA0//` as a comment the game reads as a word followed by live keys.
+ */
+const isSpace = (c: string) => c === ' ' || c === '\t' || c === '\n' || c === '\v' || c === '\f' || c === '\r';
 
 /**
  * A line split into the tokens a KeyValues reader sees: quoted strings
@@ -88,7 +96,7 @@ function tokenize(line: string, escapes: boolean): Token[] | null {
   let i = 0;
   while (i < line.length) {
     const c = line[i]!;
-    if (/\s/.test(c)) { i++; continue; }
+    if (isSpace(c)) { i++; continue; }
     if (c === '/' && line[i + 1] === '/') break;
     if (c === '{' || c === '}') { out.push({ value: c, quoted: false }); i++; continue; }
     if (c === '"') {
@@ -105,8 +113,8 @@ function tokenize(line: string, escapes: boolean): Token[] | null {
       continue;
     }
     let v = '';
-    while (i < line.length && !/[\s"{}]/.test(line[i]!)) v += line[i++];
-    out.push({ value: v, quoted: false });
+    while (i < line.length && !isSpace(line[i]!) && line[i] !== '"' && line[i] !== '{' && line[i] !== '}') v += line[i++];
+    out.push({ value: v, quoted: false, ...(/[^\x00-\x7f]/.test(v) ? { nonAscii: true } : {}) });
   }
   return out;
 }
@@ -239,6 +247,9 @@ function textProblem(path: string, data: Uint8Array, animations: boolean): strin
   for (const reading of all) {
     for (const tokens of reading) {
       for (const t of tokens) {
+        // Whether a byte above 0x7f is whitespace depends on the reader (a
+        // signed char, a locale), so where a comment starts could too.
+        if (t.nonAscii) return `${path} has a character outside ASCII outside a comment or string`;
         if (t.quoted ? ENGINE_QUOTED.test(t.value) : t.value.toLowerCase() === 'engine') {
           return `${path} runs a console command`;
         }
