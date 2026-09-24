@@ -23,6 +23,9 @@ import {
 } from './design';
 import { panelChildren, teamChild, TEAM_PANEL, type ChildDef } from './children';
 import { crosshairFiles } from '../crosshair/vpk';
+import {
+  SPLATTERS, SPLAT_STAND_IN, splatterDef, splatterActive, splatterImageKey, splatterMaterial, fadePixels, type SplatterDef, type SplatterId,
+} from './splatter';
 import { TEX } from '../crosshair/draw';
 
 /**
@@ -529,6 +532,78 @@ function hardHide(block: KvNode) {
     const [r, g, b] = (kvGet(block, 'drawColor') ?? '255 255 255 255').split(' ');
     kvSet(block, 'drawColor', `${r} ${g} ${b} 0`);
   }
+}
+
+/**
+ * The teammate splatter's stand-in, right after BackgroundImage, at its final
+ * rect, zpos and tint; the stock one then draws at alpha 0. client.dll calls
+ * SetImage("hud/healthbar_bg_N") on every card's BackgroundImage by card
+ * slot, after the .res is applied, so its `image` key never wins, and an
+ * addon cannot replace a pak01 texture (the splatter spec, "What the game
+ * does"). So, as with the card background child HudEdCardBg, the editor adds
+ * an ImagePanel of its own that the game does not know about and so leaves
+ * alone. The stock one keeps its size and visibility, which game code
+ * manages, and only loses its alpha: the same alpha 0 that hardHide relies on.
+ */
+function insertStandIn(nodes: KvNode[], stock: KvNode, def: SplatterDef) {
+  const colour = kvGet(stock, 'drawColor') ?? '255 255 255 255';
+  const [r, g, b] = colour.split(' ');
+  const pairs: [string, string][] = [
+    ['ControlName', 'ImagePanel'], ['fieldName', SPLAT_STAND_IN],
+    ['xpos', pcGet(stock, 'xpos') ?? '0'], ['ypos', pcGet(stock, 'ypos') ?? '0'],
+    ['wide', pcGet(stock, 'wide') ?? '0'], ['tall', pcGet(stock, 'tall') ?? '0'],
+    ['zpos', pcGet(stock, 'zpos') ?? '-1'], ['visible', '1'], ['enabled', '1'], ['scaleImage', '1'],
+    ['image', splatterImageKey(def.id)], ['drawColor', colour],
+  ];
+  nodes.splice(nodes.indexOf(stock) + 1, 0, { key: SPLAT_STAND_IN, value: pairs.map(([key, value]) => ({ key, value })) });
+  kvSet(stock, 'drawColor', `${r} ${g} ${b} 0`);
+}
+
+/**
+ * The damage splatters (splatter.ts). The teammate splatter gets a stand-in
+ * (insertStandIn); the own-health scratches are repointed, since their names
+ * come only from localplayerpanel.res, and a scratch set to None gets the
+ * hard hide. An active splatter ships its texture: Fade pixels generated here,
+ * an Image from the page's decoded upload. Missing pixels fail the build, as
+ * crosshairPass does, so a download never points at a texture it lacks.
+ *
+ * `out` null: the preview's trees only, no pixels needed (buildTrees).
+ */
+function splatterPass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkFile[] | null) {
+  for (const def of SPLATTERS) {
+    const style = design.splatters?.[def.id];
+    if (!style || style.kind === 'stock') continue;
+    const block = work.optional(def.file, [def.block]);
+    if (!block) continue;                                           // an imported HUD without it: the row is disabled
+    if (style.kind === 'none') { hardHide(block); continue; }       // the scratches only; see validateDesign
+    if (!splatterActive(design, def.id)) continue;                  // an Image with no picture stored: stock
+    if (def.route === 'standIn') {
+      if (design.children.teamColumn?.[def.block]?.visible === false) continue;
+      insertStandIn(work.tree(def.file), block, def);
+    } else pcSet(block, 'image', splatterImageKey(def.id));
+    if (!out) continue;
+    const px = style.kind === 'fade' ? fadePixels(def, style) : assets.images?.[def.id];
+    if (!px || px.length !== def.size.w * def.size.h * 4) {
+      throw new Error(`${def.label}: the image could not be read. Pick it again, or choose Stock.`);
+    }
+    const name = splatterMaterial(def.id);
+    out.push({ path: `materials/${name}.vtf`, data: encodeVTF(def.size.w, def.size.h, px) },
+      { path: `materials/${name}.vmt`, data: enc(vmtFor(name, { vertexColor: !(def.healthTint && style.keepColours) })) });
+  }
+}
+
+/**
+ * Why a splatter row cannot be used on this design's base, or null: the base
+ * lacks the block (an imported HUD), or a preset hides the scratches (Modern).
+ */
+export function splatterProblem(design: HudDesign, id: SplatterId): string | null {
+  const def = splatterDef(id)!;
+  const block = kvFind(baseTree(baseOf(design), def.file), [def.block]);
+  if (!block) return `This HUD has no ${def.block} in ${def.file.split('/').pop()}, so there is nothing to restyle.`;
+  if (def.route === 'repoint' && ((pcGet(block, 'visible') ?? '1') === '0' || !(parseFloat(pcGet(block, 'wide') ?? '0') > 0))) {
+    return 'This preset hides the scratches.';
+  }
+  return null;
 }
 
 /**
@@ -1174,6 +1249,10 @@ export interface BuildReport { replaced: string[] }
  * - `hidePass` runs after `fitPass`, whose fit rule would write the state
  *   art's square back over a hidden piece's 0 size, and before `scalePass`,
  *   which leaves a 0 at 0.
+ * - `splatterPass` runs after `hidePass`, since it must see a hidden
+ *   splatter and the fitted rect, and before `teamPass` and `scalePass`: the
+ *   stand-in is a card child they place and scale like the rest. It writes
+ *   only the splatter blocks it names, the stand-in and its own textures.
  * - `fitPass` runs after `childPass` (it fits the card around what the edits
  *   left), before `teamPass` (which places and sizes the fitted card, reading
  *   the same box through cardFit) and before `scalePass` (which multiplies
@@ -1213,6 +1292,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   childPass(work, design);
   fitPass(work, design);
   hidePass(work, design);
+  splatterPass(work, design, assets, extra);
   teamPass(work, design);
   scalePass(work, design);
   fontPass(work, design, assets, extra);
@@ -1275,7 +1355,9 @@ export function packHud(design: HudDesign, assets: BuildAssets = {}, report?: Bu
  * fontPass is skipped. It only renames faces and demands the ttf bytes, and
  * the preview draws every label in Roboto Condensed regardless. So is
  * crosshairPass, which only adds texture files and demands the crosshair's
- * pixels. buildHud still runs every pass.
+ * pixels. splatterPass runs without an output list: the trees get the
+ * stand-in and the repointed scratches, and no pixels are asked for.
+ * buildHud still runs every pass.
  */
 const BUILD_TREES = new WeakMap<HudDesign, Work>();
 
@@ -1289,6 +1371,7 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
     childPass(work, design);
     fitPass(work, design);
     hidePass(work, design);
+    splatterPass(work, design, {}, null);
     teamPass(work, design);
     scalePass(work, design);
     stylePass(work, design, {}, discard);
