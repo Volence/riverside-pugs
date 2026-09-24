@@ -140,6 +140,20 @@ export function isPicked(design: HudDesign, sel: Selection, hit: Hit): boolean {
   }
 }
 
+/**
+ * Whether a press lands inside a selected element's frame. The smallest
+ * element under a point wins a hit, so a big selected element (Your health at
+ * scale 2 covers the use bar, the crosshair and more) would otherwise lose
+ * every drag that starts where a smaller element sits; a drag anywhere inside
+ * what is selected moves it, as in any editor. A plain click still picks what
+ * is under the pointer. The Free Teammates never count (their frame is the
+ * screen, and their cards move one by one).
+ */
+function insideSelected(design: HudDesign, sel: Selection, at: { x: number; y: number } | null): boolean {
+  if (!at || sel.kind !== 'elements') return false;
+  return sel.ids.some((id) => !(id === 'teamColumn' && isFreeTeam(design)) && inside(elementFrame(design, id), at.x, at.y));
+}
+
 export type Intent = { kind: 'resize'; handle: Handle } | { kind: 'box' } | { kind: 'move'; sel: Selection } | { kind: 'none' };
 
 /**
@@ -151,10 +165,12 @@ export type Intent = { kind: 'resize'; handle: Handle } | { kind: 'box' } | { ki
  * under the pointer, in any layout, or where there is no card the element,
  * and selects it, so no key is needed to move a card or a section.
  */
-export function dragIntent(design: HudDesign, sel: Selection, hit: Hit, mods: Mods, handle: Handle | null = null): Intent {
+export function dragIntent(
+  design: HudDesign, sel: Selection, hit: Hit, mods: Mods, handle: Handle | null = null, at: { x: number; y: number } | null = null,
+): Intent {
   if (handle) return { kind: 'resize', handle };
   if (mods.shift) return { kind: 'box' };
-  if (isPicked(design, sel, hit)) return { kind: 'move', sel };
+  if (isPicked(design, sel, hit) || insideSelected(design, sel, at)) return { kind: 'move', sel };
   if (!hit.element) return { kind: 'none' };
   if (hit.element === 'teamColumn' && hit.card !== null) return { kind: 'move', sel: cardsOf([hit.card]) };
   if (hit.element === 'teamColumn' && isFreeTeam(design)) return { kind: 'none' };

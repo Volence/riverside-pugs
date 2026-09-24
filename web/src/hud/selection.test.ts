@@ -110,6 +110,25 @@ describe('click', () => {
 });
 
 describe('drag', () => {
+  it('moves a selected element from anywhere inside its frame, even where a smaller element sits on top', () => {
+    // The owner's report, 2026-09-24: Your health at scale 2 covers the weapons, the kill
+    // notices and the chat, and the smallest element under a point wins the hit, so a drag
+    // inside the selected panel moved (and selected) whatever smaller thing sat there.
+    const big: HudDesign = { ...structuredClone(D), elements: { ...D.elements, ownHealth: { x: 339, y: 136, scale: 2 } } };
+    const own: Selection = { kind: 'elements', ids: ['ownHealth'] };
+    const f = elementFrame(big, 'ownHealth');
+    // The use / revive bar sits inside the scaled panel here and is the smaller of the two.
+    const b = elementFrame(big, 'progressBar');
+    const p = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+    expect(p.x > f.x && p.x < f.x + f.w && p.y > f.y && p.y < f.y + f.h).toBe(true);
+    const hit = hitAt(big, 'survivor', 'healthy', p.x, p.y);
+    expect(hit.element).toBe('progressBar');
+    expect(dragIntent(big, own, hit, plain, null, p)).toEqual({ kind: 'move', sel: own });
+    // With nothing selected, and outside the selected frame, the element under the point still wins.
+    expect(dragIntent(big, NONE, hit, plain, null, p)).toEqual({ kind: 'move', sel: { kind: 'elements', ids: ['progressBar'] } });
+    expect(dragIntent(big, own, hitAt(big, 'survivor', 'healthy', 426, 20), plain, null, { x: 426, y: 20 }).kind).not.toBe('move');
+  });
+
   it('moves only the card under the pointer when the drag starts on one not picked, in any layout', () => {
     const card2: Selection = { kind: 'cards', cards: [1] };
     const hit = hitAt(D, 'survivor', 'healthy', HEAD2.x, HEAD2.y);

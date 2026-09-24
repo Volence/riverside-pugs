@@ -678,7 +678,7 @@ export default function Hud() {
    * move are one undo step and every move after it starts from Free.
    */
   const startDrag = (p: Press): Drag | null => {
-    const intent = dragIntent(current.current, sel, p.hit, p.mods, p.handle);
+    const intent = dragIntent(current.current, sel, p.hit, p.mods, p.handle, { x: p.ux, y: p.uy });
     switch (intent.kind) {
       case 'box': return { kind: 'box' };
       case 'move':
