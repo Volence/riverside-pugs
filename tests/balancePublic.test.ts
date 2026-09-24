@@ -5,7 +5,7 @@ import { listPatches } from '../src/balancePatches.js';
 
 type DBT = ReturnType<typeof openDb>;
 /** Adds `n` completed matches with two counted rounds each on `patch`, ended on `day`. */
-export function addMatches(db: DBT, patch: number, n: number, day: string, opts: { voided?: boolean; startId?: number } = {}) {
+function addMatches(db: DBT, patch: number, n: number, day: string, opts: { voided?: boolean; startId?: number } = {}) {
   const match = db.prepare("INSERT INTO matches (id, season_id, state, campaign, origin, ended_at, voided_at) VALUES (?, 1, 'completed', 'x', 'queue', ?, ?)");
   const ctx = db.prepare(`INSERT INTO round_metric_context (match_id, ordinal, half, map, origin, patch_id, surv_mu, inf_mu, has_replay, has_stats, engine, computed_at)
     VALUES (?, 0, ?, 'mapA', 'queue', ?, 25, 25, 0, 0, 'e', 'n')`);
