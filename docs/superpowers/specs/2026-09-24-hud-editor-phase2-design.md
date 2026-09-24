@@ -743,6 +743,10 @@ preview draws them). Also answers S4 (red box alpha against the preview) and S9 
   takes the panel's health colour, or `monochrome_color` when set (`b1v2/shots/b1/b1-a.png` green,
   `b1-c.png` orange; `b1/shots/b1/b1-a.png` magenta). The cross offers no colour control; `Q5` is
   gone from `probes.ts`.
+- **Q8: YES, gate passed (G5).** The crouch icon keeps a file `drawColor` (magenta) and shows only
+  while crouched (`b1v2/shots/crops/ownbig-b.png` shown at about x 1870 to 1905, y 955 to 1000;
+  `ownbig-a.png` absent; in B1 the 100-wide panel clipped it away, `b1/shots/crops/duck-b.png`).
+  The Tint control is offered; `stateArt: 'crouched'` stands, no preview change.
 
 ### B2. Survivor: every element hidden with `visible 0` only (one launch)
 

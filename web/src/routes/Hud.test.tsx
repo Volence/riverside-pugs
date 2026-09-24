@@ -1320,9 +1320,18 @@ describe('Hud page', () => {
     fireEvent.click(layer('Your health').getByRole('button', { name: 'Health cross' }));
     expect(screen.getByLabelText('Text size')).toBeTruthy();
     expect(screen.queryByLabelText('Health cross colour')).toBeNull();
+    // Probe Q8 passed (slice 2.F G5): the crouch icon keeps a file tint, so its Tint is offered.
     fireEvent.click(layer('Your health').getByRole('button', { name: 'Crouch icon' }));
-    expect(screen.queryByLabelText('Crouch icon colour')).toBeNull();
-    expect(screen.queryByLabelText('Crouch icon tint')).toBeNull();
+    expect(screen.getByLabelText('Crouch icon tint')).toBeTruthy();
+  });
+
+  it('hides the crouch icon tint again if gate Q8 is closed', () => {
+    _setProbe('Q8', false);
+    try {
+      render(<Hud />);
+      fireEvent.click(layer('Your health').getByRole('button', { name: 'Crouch icon' }));
+      expect(screen.queryByLabelText('Crouch icon tint')).toBeNull();
+    } finally { _setProbe('Q8', null); }
   });
 
   it('keeps the teammate child controls saying the edit applies to every card, and going back to the Teammates', () => {
@@ -2154,6 +2163,14 @@ describe('Your own health on the page', () => {
     await waitFor(() => expect(saved().children?.ownHealth?.Health?.keys?.inset).toBe('3'));
     fireEvent.input(screen.getByLabelText('Panel colour colour'), { target: { value: '#ff00ff' } });
     await waitFor(() => expect(saved().children?.ownHealth?.Health?.keys?.monochrome_color).toBe('255 0 255 255'));
+  });
+
+  it('offers the crouch icon tint and saves it as the piece colour (probe Q8)', async () => {
+    // /home/volence/l4d/hud/probe-phase2/b1v2/shots/crops/ownbig-b.png: a magenta drawColor held, shown only crouched.
+    render(<Hud />);
+    fireEvent.click(own().getByRole('button', { name: 'Crouch icon' }));
+    fireEvent.input(screen.getByLabelText('Crouch icon tint'), { target: { value: '#ff00ff' } });
+    await waitFor(() => expect(saved().children?.ownHealth?.DuckingIcon?.color).toMatch(/^255 0 255 /));
   });
 
   it('never offers the health cross a colour, whatever gate is open: probe Q5 showed the game ignores it', () => {

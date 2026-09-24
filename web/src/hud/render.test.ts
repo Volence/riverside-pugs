@@ -1100,6 +1100,15 @@ describe('your own health in every preview state', () => {
     expect(draws(calls, WHITE)).toEqual([[GREEN, r.x + 2, r.y + 2, r.w - 4, r.h - 4]]);
   });
 
+  it('tints the crouch icon by its colour while crouched (probe Q8, slice 2.F G5)', () => {
+    // /home/volence/l4d/hud/probe-phase2/b1v2/shots/crops/ownbig-b.png: the file's magenta drawColor held.
+    const { draws } = tintRig();
+    const d = validateDesign({ v: 1, children: { ownHealth: { DuckingIcon: { color: '255 0 255 255' } } } });
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, d, 'ownHealth', O, 1, { state: { ...DEFAULT_PREVIEW, crouched: true } });
+    expect(draws(calls, artUrl('vgui/hud/crouch_survivor')!).map((c) => c[0])).toEqual(['rgb(255,0,255)']);
+  });
+
   describe('the panel colour (probe Q1: monochrome_color recolours the whole panel)', () => {
     // /home/volence/l4d/hud/probe-phase2/RESULTS.md Q1: monochrome_color recolours the own bar fill, its
     // outline, the HealthNumber, the HealthIcon cross and the scratches, in every health state, tinting the
