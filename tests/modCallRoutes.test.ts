@@ -4,6 +4,7 @@ import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { setSetting } from '../src/settings.js';
+import { CALLS_LIMIT } from '../src/routes/modCalls.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 
 const IDS = Array.from({ length: 5 }, (_, i) => `7656119900000000${i}`);
@@ -69,6 +70,15 @@ describe('GET /api/mod/calls', () => {
     expect(all.calls.map((c: { text: string }) => c.text)).toEqual(['done by stranger', 'done', 'open one']);
     expect(all.calls[1].handledBy).toBe('Mod Person');
     expect(all.calls[0].handledBy).toBe('999');
+  });
+
+  it('caps both tabs at the newest CALLS_LIMIT parents', async () => {
+    for (let i = 0; i < CALLS_LIMIT + 5; i++) call({ text: `c${i}` });
+    for (const filter of ['open', 'all']) {
+      const { calls } = (await get(MOD, `/api/mod/calls?filter=${filter}`)).json();
+      expect(calls).toHaveLength(CALLS_LIMIT);
+      expect(calls[0].text).toBe(`c${CALLS_LIMIT + 4}`);
+    }
   });
 
   it('discordReady needs the admin channel and calls turned on', async () => {
