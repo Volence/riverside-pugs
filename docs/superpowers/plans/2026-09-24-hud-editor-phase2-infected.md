@@ -312,6 +312,18 @@ Only if Task 14 says the fill takes the colour. Set `PROBES.Q24.passed = true`; 
 - [ ] `sample.vpkcheck.test.ts` / `scripts/check-hud-vpk.sh`: add a sample design touching all three panels and the marker, and check it with the independent VPK reader.
 - [ ] Headless preview shots (stock, 1920x1080) for Hunter ready, Hunter charging, Boomer, Tank, ghost and dead, next to `b9/shots` and `b14` game shots, in `/home/volence/l4d/hud/probe-phase2-infected/parity/`, each row "matches" or what differs with pixel positions.
 
+### Fix tasks from probe B14 (appended 2026-09-24)
+
+B14 (`/home/volence/l4d/hud/probe-phase2-infected/RESULTS.md`, section B14; side-by-side sheets in `/home/volence/l4d/hud/probe-phase2-infected/parity/b14-*.png`) found four mismatches. Two are fixed on this branch: your infected health is drawn only while spawned (the game shows none as a ghost or dead, `b14/shots/b14/b14-a.png`, `b14-g.png`), and a label with no colour of its own draws in the scheme's `Label.TextColor` (Gray 192: the SI number measured 193, `b14-c.png`). Two remain:
+
+#### Task X-B14a: the dead card's skull colour
+
+The game draws the skull at `SkullIconPlacement` flat grey, peaking at 98 98 98 (`parity/b14-dead-skull-game.png`); the preview draws `icon_skull` white (`parity/b14-dead-skull-prev.png`). Find the colour or alpha client.dll gives it (the dead branch near `0x10248606`, which sets up the skull), or, failing the dll, a second launch with the skull over a flat backdrop to tell a tint from an alpha; then draw it so, with a test citing the shot. Do not guess a factor from one shot over a textured floor.
+
+#### Task X-B14b: the infected card backdrop in linear light
+
+The stock backdrop's disc is black at alpha 224. In game it lets the floor through as 53 46 33 (`b14-g`, disc centre at 20,975), which the preview's gamma-space blend cannot give (it goes near black); the linear-light blend slice 2.F found for the weapon boxes and used for the dead survivor art (`render.ts` `paintLinearOver`, `linearOverArt`) predicts it. Draw the card backdrop through the same path, and check whether the SI frame and the ring splat need it too, against `b14-b` and `b14-c` (their black art over the Hunter's arm) before changing them.
+
 ## Task list
 
 | # | Task | Slice | Depends on |
@@ -333,5 +345,7 @@ Only if Task 14 says the fill takes the colour. Set `PROBES.Q24.passed = true`; 
 | 14 | Probe B14 (Q24 and the new writes in game) | all | 5, 9, 13 |
 | F1 | Q24 flip | 2.2, 2.4 | 14 |
 | 15 | Verification | all | 14 |
+| X-B14a | Dead card skull colour | 2.4 | 14 |
+| X-B14b | Card backdrop in linear light | 2.4 | 14 |
 
 Suggested implementer runs: (0, 1), (2), (3), (4, 5), (6, 7), (8, 9), (10), (11), (12, 13), (14, F1), (15).
