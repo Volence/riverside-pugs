@@ -754,6 +754,22 @@ describe('the lag search', () => {
     }
   });
 
+  it('never searches a lag that would reach before the start of the run', () => {
+    // A crosshair two frames late, same as the fidelity test above. The
+    // window starting at the run's very first frame cannot look back two
+    // frames (there is nothing before frame 0), so the search cannot reach
+    // the lag that actually explains it and must settle for lag 0 or 1.
+    // Later windows, with room to look back, find the true 200 ms lag.
+    const frames = wobble(40, (i, angle) => angle(i - 2));
+    const ws = trackWindows(frames, 0);
+    const first = ws.find((w) => w.startMs === frames[0].tMs);
+    expect(first).toBeDefined();
+    expect([0, 100]).toContain(first!.lagMs);
+    const later = ws.filter((w) => w.startMs >= frames[2].tMs);
+    expect(later.length).toBeGreaterThan(0);
+    for (const w of later) expect(w.lagMs).toBe(200);
+  });
+
   it('keeps lag 0 when the crosshair is on time', () => {
     const ws = trackWindows(wobble(40, (i, angle) => angle(i)), 0);
     expect(ws.length).toBeGreaterThan(0);
