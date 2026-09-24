@@ -5,7 +5,7 @@ import { registerImport, unregisterImport, isCommunityImport } from './base';
 import { SLOTS } from './slots';
 import { sampleHud, latin1 } from './importFixtures';
 import { TEX } from '../crosshair/draw';
-import { hudPathProblem, shareableHudFiles } from '../../../src/hudFiles';
+import { hudFileProblem, hudPathProblem, shareableHudFiles } from '../../../src/hudFiles';
 
 /** Each registration gets an id of its own: the base caches keep what they read for an id for ever. */
 let minted = 0;
@@ -82,6 +82,25 @@ describe('a community import at build', () => {
     const id = freshId();
     registerImport(id, withCfg(), { community: true });
     expect(() => buildHud(designOn(id))).toThrow('This community HUD would ship a file outside the HUD folders: cfg/autoexec.cfg');
+  });
+
+  it('throws rather than ship a file its own rewrite turned into a command', () => {
+    // The check and the game read `//` after `[$WIN32` as a comment; the
+    // builder's KeyValues reader takes a conditional to its `]`, and writing
+    // the file back after an edit would make the commented-out keys live.
+    const id = freshId();
+    const files = shareableHudFiles(sampleHud()).kept;
+    const layout = new TextDecoder('latin1').decode(files.get('scripts/hudlayout.res')!);
+    const at = layout.indexOf('{', layout.indexOf('HudWeaponSelection')) + 1;
+    const hidden = `${layout.slice(0, at)}\r\n\t\t"labelText" "a" [$WIN32 //] "command" "engine bind mouse1 quit"${layout.slice(at)}`;
+    files.set('scripts/hudlayout.res', latin1(hidden));
+    expect(hudFileProblem('scripts/hudlayout.res', files.get('scripts/hudlayout.res')!)).toBeNull();
+    registerImport(id, files, { community: true });
+    const moved = validateDesign({
+      v: 1, name: 'x', preset: 'imported', imported: { id, name: 'x' }, crosshair: 'none',
+      elements: { weaponSelection: { x: 400, y: 300 } },
+    });
+    expect(() => buildHud(moved)).toThrow(/This community HUD would ship a file that is not allowed: scripts\/hudlayout\.res/);
   });
 
   it("community build always writes the editor's addoninfo", () => {
