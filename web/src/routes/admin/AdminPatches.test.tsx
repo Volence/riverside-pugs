@@ -232,6 +232,12 @@ describe('AdminPatches triage', () => {
     expect(screen.queryByRole('button', { name: 'Not balance, ignore these plugins from now on' })).toBeNull();
   });
 
+  it('says which release a pending patch came from', async () => {
+    setup([patches[0], { ...pending, releaseId: 7 }]);
+    render(<AdminPatches />);
+    expect(await screen.findByText(/From release 7/)).toBeTruthy();
+  });
+
   it('offers no ignore button when more than plugins changed', async () => {
     setup([patches[0], { ...pending, onlyPluginsChanged: false, changes: ['z_tank_health 8000 -> 7500'], plugins: [] }]);
     render(<AdminPatches />);
