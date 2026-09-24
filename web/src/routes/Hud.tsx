@@ -1484,8 +1484,9 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
         {design.crosshair === 'addon' && !design.advanced && (
           <p class="muted hud__note">
             The game keeps only one layout file, and a crosshair addon ships its own, so this HUD's positions would not
-            show. Open <code>left4dead/addonlist.txt</code> and move this HUD's line above the crosshair's; the in-game
-            Add-ons menu cannot change the order. Your crosshair keeps working.
+            show. With the game closed, open <code>left4dead/addonlist.txt</code> and move this HUD's line above every
+            crosshair's; the in-game Add-ons menu cannot change the order. Your crosshair keeps working, and you can swap
+            crosshair addons as before (the game reads them when it starts).
           </p>
         )}
 

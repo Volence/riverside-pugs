@@ -339,7 +339,7 @@ describe('Hud page', () => {
       stubCanvas();
       render(<Hud />);
       expect(radio(/game default/i).checked).toBe(true);
-      expect(screen.queryByRole('radio', { name: /legacy/i })).toBeNull();
+      expect(radio(/my own crosshair addon/i).checked).toBe(false);
       const none = new TextDecoder('latin1').decode(await downloaded());
       expect(none).not.toContain('altcrosshair');
       expect(none).not.toContain('xHair');
@@ -352,11 +352,23 @@ describe('Hud page', () => {
       expect(hasTexture(await downloaded())).toBe(true);
     });
 
-    it('keeps a design saved with a separate crosshair addon, offering that choice only to it', () => {
+    it('offers My own crosshair addon to a new design: the download draws xHair and ships no texture', async () => {
+      localStorage.setItem('xhair', JSON.stringify(SAVED));
+      stubCanvas();
+      render(<Hud />);
+      fireEvent.click(radio(/my own crosshair addon/i));
+      expect(radio(/my own crosshair addon/i).checked).toBe(true);
+      expect(screen.getAllByText(/move this HUD's line above every/i).length).toBeGreaterThan(0);
+      const bytes = await downloaded();
+      expect(new TextDecoder('latin1').decode(bytes)).toContain('xHair');
+      expect(hasTexture(bytes)).toBe(false);
+    });
+
+    it('keeps a design saved with a separate crosshair addon', () => {
       localStorage.setItem('xhair', JSON.stringify(SAVED));
       localStorage.setItem('hud', JSON.stringify({ v: 1, xhair: true }));
       render(<Hud />);
-      expect(radio(/separate crosshair addon \(legacy\)/i).checked).toBe(true);
+      expect(radio(/my own crosshair addon/i).checked).toBe(true);
       expect(screen.getByText(/magenta/i)).toBeTruthy();
       expect(screen.getAllByText(/Add-ons menu cannot/i).length).toBeGreaterThan(0);
     });
