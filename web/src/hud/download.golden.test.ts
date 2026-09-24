@@ -137,3 +137,25 @@ describe('saved infected designs download the same bytes', () => {
     });
   }
 });
+
+/**
+ * Saved designs that touch the elements the rest of Phase 2 builds on
+ * (the plan 2026-09-24-hud-editor-phase2-rest.md, Task L0), pinned before
+ * slices 2.5 to 2.8 add keys to them: a design saved with none of the new
+ * fields must keep these bytes.
+ */
+describe('saved designs download the same bytes before the rest of Phase 2', () => {
+  const cases: [string, () => HudDesign, string][] = [
+    ['a flat active weapon box', () => validateDesign({ v: 1, weapons: { boxActive: { kind: 'flat', color: '0 80 160 200' } } }), 'b960a8d79edb04c71baa7c54ff4d2948379b0c2c808e595ff0efa3951ee88a2a'],
+    ['the kill notices moved', () => validateDesign({ v: 1, elements: { killNotices: { x: 200, y: 60 } } }), '95fa29054e26483c3c5907333ed0a7c16ad2295837541ad68153ad0f238b858f'],
+    ['the chat moved and resized', () => validateDesign({ v: 1, elements: { chat: { x: 40, y: 200, w: 280, h: 120 } } }), '57ee338e7dfedec79291fc7b00df254a0e033a9fab0c0a1d5cb21f6f58ca8c29'],
+    ['the use bar moved', () => validateDesign({ v: 1, elements: { progressBar: { x: 250, y: 300 } } }), '780e206a5ff64a5a34de8aacd6b8ac264d35d6496b690f3449d22a3d7af5bd1f'],
+    ['the ghost panel moved', () => validateDesign({ v: 1, elements: { ghostPanel: { x: 100, y: 320 } } }), 'dd1617d153899a670919cd75d4d2abfa3edc1ddca90da0e0ea1e0b3116b70a97'],
+    ['the Tank panel hidden', () => validateDesign({ v: 1, elements: { tankPanel: { visible: false } } }), '5503105c05369a7399429d6353d6571514cdb1a778cf1549c05e63e357802049'],
+  ];
+  for (const [name, make, hash] of cases) {
+    it(`${name} packs to the same bytes`, () => {
+      expect(download(make())).toBe(hash);
+    });
+  }
+});
