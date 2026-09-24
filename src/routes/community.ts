@@ -13,7 +13,7 @@ import {
 } from '../community/validate.js';
 import {
   countLive, ENTRY_KINDS, entryRow, fileLive, fileReferenced, getEntry, insertEntry, like, likeCount,
-  listEntries, mineEntries, sharesSince, tombstone, unlike, type EntryKind,
+  listEntries, mineEntries, sharesSince, tombstone, unlike, visibleEntryRow, type EntryKind,
 } from '../community/entries.js';
 
 /**
@@ -133,6 +133,7 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
         page: Number(req.query.page ?? 0),
         author: req.query.author || null,
         viewer: optionalViewer(req),
+        now: now(),
       });
     },
   );
@@ -151,7 +152,7 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
     const id = idOf(req.params.id);
     if (id === null) return notFound(reply);
     const viewer = optionalViewer(req);
-    const entry = getEntry(db, id, { viewer, staff: isStaff(viewer) });
+    const entry = getEntry(db, id, { viewer, staff: isStaff(viewer), now: now() });
     return entry ?? notFound(reply);
   });
 
@@ -358,7 +359,7 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
       const gone = () => reply.code(404).send({ error: 'no such file' });
       if (!match || match[2] !== ext) return gone();
       const name = match[1]!;
-      const live = fileLive(db, kind, name);
+      const live = fileLive(db, kind, name, now());
       if (!live && !isStaff(optionalViewer(req))) return gone();
       const store = opts.store();
       const bytes = kind === 'preview' ? store.readPreview(name) : store.readImport(name);
@@ -422,8 +423,9 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
     const me = requireActive(req, reply);
     if (!me) return reply;
     const id = idOf(req.params.id);
-    const row = id === null ? null : entryRow(db, id);
-    if (!row || row.deleted_at !== null) return notFound(reply);
+    // Only an entry the viewer could open: not removed, and not by a banned author.
+    const row = id === null ? null : visibleEntryRow(db, id, now());
+    if (!row) return notFound(reply);
     if (row.author_id === me) return reply.code(400).send({ error: 'You cannot like your own entry.' });
     if (on) like(db, row.id, me, now());
     else unlike(db, row.id, me);

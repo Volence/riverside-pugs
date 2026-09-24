@@ -68,6 +68,19 @@ const COLUMNS = (payload: 'crosshair-only' | 'all') => `
   (SELECT COUNT(*) FROM community_likes l WHERE l.entry_id = e.id) AS likes,
   EXISTS (SELECT 1 FROM community_likes l WHERE l.entry_id = e.id AND l.player_id = @viewer) AS liked`;
 
+/**
+ * Whether the author (players p, of entry e) is banned, as src/standing.ts
+ * answers it: status says so, or the bans table holds an active ban. The
+ * table is the authority and status only its cached consequence, kept in
+ * step by the reaper up to a minute late, so both are asked. The same WHERE
+ * as hasActiveBan (banState.ts), against @now. Merged accounts need no
+ * check: mergePlayers moves an alt's entries to the main.
+ */
+const AUTHOR_BANNED = `(p.status = 'banned' OR EXISTS (SELECT 1 FROM bans b WHERE b.player_id = e.author_id
+  AND b.lifted_at IS NULL AND (b.expires_at IS NULL OR b.expires_at > @now)))`;
+/** What anyone but staff may see: a live entry by an author who is not banned. */
+const VISIBLE = `e.deleted_at IS NULL AND NOT ${AUTHOR_BANNED}`;
+
 function parse(json: string): unknown {
   if (!json) return null;
   try { return JSON.parse(json); } catch { return null; }
@@ -96,15 +109,17 @@ export interface ListOpts {
   page: number;
   author?: string | null;
   viewer: string | null;
+  now?: Date;
 }
 
 /** A page of live entries by authors who are not banned. Top is by likes,
  *  newest first on a tie. */
 export function listEntries(db: DB, o: ListOpts): { entries: EntrySummary[]; page: number; pageSize: number; total: number } {
   const page = Math.min(MAX_PAGE, Math.max(0, Math.floor(o.page) || 0));
-  const where = `e.kind = @kind AND e.deleted_at IS NULL AND p.status != 'banned'
+  const where = `e.kind = @kind AND ${VISIBLE}
     ${o.author ? 'AND e.author_id = @author' : ''}`;
-  const params = { kind: o.kind, author: o.author ?? null, viewer: o.viewer ?? '' };
+  const now = (o.now ?? new Date()).toISOString();
+  const params = { kind: o.kind, author: o.author ?? null, viewer: o.viewer ?? '', now };
   const order = o.sort === 'top' ? 'likes DESC, e.id DESC' : 'e.id DESC';
   const rows = db.prepare(
     `SELECT ${COLUMNS('crosshair-only')} FROM community_entries e JOIN players p ON p.steamid = e.author_id
@@ -112,7 +127,7 @@ export function listEntries(db: DB, o: ListOpts): { entries: EntrySummary[]; pag
   ).all({ ...params, limit: PAGE_SIZE, offset: page * PAGE_SIZE }) as Row[];
   const { n } = db.prepare(
     `SELECT COUNT(*) AS n FROM community_entries e JOIN players p ON p.steamid = e.author_id WHERE ${where}`,
-  ).get({ kind: params.kind, author: params.author }) as { n: number };
+  ).get({ kind: params.kind, author: params.author, now }) as { n: number };
   return { entries: rows.map(summary), page, pageSize: PAGE_SIZE, total: n };
 }
 
@@ -121,12 +136,13 @@ export function listEntries(db: DB, o: ListOpts): { entries: EntrySummary[]; pag
  * comes back only when `staff` is set, and a tombstone then says who removed
  * it and why.
  */
-export function getEntry(db: DB, id: number, o: { viewer: string | null; staff: boolean }): EntryDetail | null {
+export function getEntry(db: DB, id: number, o: { viewer: string | null; staff: boolean; now?: Date }): EntryDetail | null {
   const r = db.prepare(
-    `SELECT ${COLUMNS('all')}, p.status FROM community_entries e JOIN players p ON p.steamid = e.author_id WHERE e.id = @id`,
-  ).get({ id, viewer: o.viewer ?? '' }) as (Row & { status: string }) | undefined;
+    `SELECT ${COLUMNS('all')}, ${VISIBLE} AS visible
+       FROM community_entries e JOIN players p ON p.steamid = e.author_id WHERE e.id = @id`,
+  ).get({ id, viewer: o.viewer ?? '', now: (o.now ?? new Date()).toISOString() }) as (Row & { visible: number }) | undefined;
   if (!r) return null;
-  if (!o.staff && (r.deleted_at !== null || r.status === 'banned')) return null;
+  if (!o.staff && r.visible !== 1) return null;
   const out: EntryDetail = summary(r);
   if (r.kind === 'hud') {
     out.design = parse(r.payload);
@@ -134,6 +150,15 @@ export function getEntry(db: DB, id: number, o: { viewer: string | null; staff: 
   }
   if (r.deleted_at !== null) out.removed = { by: r.deleted_by, reason: r.delete_reason, at: r.deleted_at };
   return out;
+}
+
+/** A live entry by an author who is not banned, as getEntry shows it to
+ *  anyone but staff, without the payload: for the like route. */
+export function visibleEntryRow(db: DB, id: number, now = new Date()): { id: number; author_id: string } | null {
+  return (db.prepare(
+    `SELECT e.id, e.author_id FROM community_entries e JOIN players p ON p.steamid = e.author_id
+      WHERE e.id = @id AND ${VISIBLE}`,
+  ).get({ id, now: now.toISOString() }) as { id: number; author_id: string } | undefined) ?? null;
 }
 
 /** The raw row, for the routes' ownership checks. */
@@ -222,11 +247,11 @@ const FILE_COLUMN = { preview: 'preview', import: 'import_id' } as const;
  * Whether a live entry by an author who is not banned uses this file: the
  * test for serving it to anyone. Matches what GET /api/community/:id shows.
  */
-export function fileLive(db: DB, kind: 'preview' | 'import', name: string): boolean {
+export function fileLive(db: DB, kind: 'preview' | 'import', name: string, now = new Date()): boolean {
   return !!db.prepare(
     `SELECT 1 FROM community_entries e JOIN players p ON p.steamid = e.author_id
-      WHERE e.${FILE_COLUMN[kind]} = ? AND e.deleted_at IS NULL AND p.status != 'banned' LIMIT 1`,
-  ).get(name);
+      WHERE e.${FILE_COLUMN[kind]} = @name AND ${VISIBLE} LIMIT 1`,
+  ).get({ name, now: now.toISOString() });
 }
 
 /** Whether any row that is not purged names this file, tombstones included. */
