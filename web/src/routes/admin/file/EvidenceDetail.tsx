@@ -67,9 +67,9 @@ export function EvidenceDetail(
             {' '}tracking {num3(a.hiddenShare)} ({pct(a.pHidden)})
             {' · '}pre-aim {num(a.hiddenOccZ)} ({pct(a.pHiddenOcc)})
             {' · '}on target at reveal {pct(a.revealShare)} of {a.reveals} ({pct(a.pReveal)})
-            {' · '}hunters: tracking {num3(a.byClass.hunter.hiddenShare)}, reveal {pct(a.byClass.hunter.revealShare)}
-            {' · '}smokers: tracking {num3(a.byClass.smoker.hiddenShare)}, reveal {pct(a.byClass.smoker.revealShare)}
-            {' · '}boomers: tracking {num3(a.byClass.boomer.hiddenShare)}, reveal {pct(a.byClass.boomer.revealShare)}
+            {' · '}hunters: tracking {num3(a.byClass.hunter.hiddenShare)}, pre-aim {num(a.byClass.hunter.hiddenOccZ)}, reveal {pct(a.byClass.hunter.revealShare)}
+            {' · '}smokers: tracking {num3(a.byClass.smoker.hiddenShare)}, pre-aim {num(a.byClass.smoker.hiddenOccZ)}, reveal {pct(a.byClass.smoker.revealShare)}
+            {' · '}boomers: tracking {num3(a.byClass.boomer.hiddenShare)}, pre-aim {num(a.byClass.boomer.hiddenOccZ)}, reveal {pct(a.byClass.boomer.revealShare)}
           </p>
         </>
       )}
@@ -104,7 +104,9 @@ export function EvidenceDetail(
             a callout explains a crosshair honestly. "On target at reveal" is how often the crosshair
             was already on an infected the instant it came into view. These need eight rounds with
             line of sight, and reveal needs thirty reveals, before they read anything. They are
-            shown, not ranked, until a calibration session has set what normal looks like.
+            shown, not ranked, until a calibration session has set what normal looks like. The
+            percentiles in brackets compare only against ranked players, so a player who is not
+            ranked (too few measured rounds) shows the raw numbers with no bracket beside them.
           </dd>
           <dt>Rank and n/a</dt>
           <dd>
