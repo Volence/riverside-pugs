@@ -8,7 +8,7 @@ const sig = (h: string, size = 1): FileSig => ({ size, sha256: h });
 const man = (kind: 'repo' | 'base', files: Record<string, FileSig>): Manifest => ({ kind, label: kind, at: 't', files });
 const box = (serverId: number, files: Record<string, FileSig> | null) => ({ serverId, files: files ? new Map(Object.entries(files)) : null });
 const P = 'left4dead/addons/sourcemod/plugins/pug-match.smx';
-const C = 'left4dead/cfg/server.cfg';
+const C = 'left4dead/cfg/pug_match.cfg';
 const X = 'left4dead/addons/sourcemod/plugins/extra.smx';
 
 describe('compareFleet', () => {
