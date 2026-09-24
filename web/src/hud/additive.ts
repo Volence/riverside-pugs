@@ -49,3 +49,18 @@ export function addLinear(dst: Uint8ClampedArray, src: Uint8ClampedArray): void 
     for (let c = 0; c < 3; c++) dst[i + c] = toSrgbByte(TO_LINEAR[dst[i + c]] + TO_LINEAR[src[i + c]] * a);
   }
 }
+
+/**
+ * The alpha (a byte) at which a plain gamma-space blend of a black texel
+ * darkens what is behind it as much as the game's blend of that texel at
+ * `alpha` does in linear light: there, (1 - a) scales the backdrop's linear
+ * light, which is its sRGB value times (1 - a)^(1/2.2), whatever the
+ * backdrop. Exact for black texels (to the 2.2 power the sRGB curve is close
+ * to), near for dark ones. Slice 2.F Task X13: the dead card art
+ * (s_panel_dead, black at 156) leaves a 255 stripe at 168 in game and 99 in
+ * a gamma-space canvas; through this, 166.
+ */
+export function linearOverAlpha(alpha: number): number {
+  const a = Math.min(1, Math.max(0, alpha / 255));
+  return Math.round(255 * (1 - (1 - a) ** (1 / 2.2)));
+}

@@ -36,7 +36,7 @@ import { SLOTS } from './slots';
 import { canvasFont, fontCell, importedFace, loadFace, type FontCell } from './fonts';
 import { baseOf, onUnregister } from './base';
 import { importedMaterial, _resetImportedArt } from './importArt';
-import { addLinear } from './additive';
+import { addLinear, linearOverAlpha } from './additive';
 import { panelChildren, childDef, type SurvivorState } from './children';
 import { elementById } from './elements';
 import { probe } from './probes';
@@ -554,6 +554,39 @@ export function tinted(img: CanvasImageSource, key: string, r: number, g: number
 }
 
 /**
+ * A copy of the art whose every alpha goes through linearOverAlpha, so the
+ * canvas's gamma-space blend darkens the scene as the game's linear-light
+ * blend does. Used for the dead card art (slice 2.F Task X13): over a custom
+ * splatter the dead card's cyan stripe is 0,168,168 in game
+ * (/home/volence/l4d/hud/test-splatter-2026-09-24/runs/A/survivor-hurt/hurt-settled.png
+ * at 130,1000) and was 0,99,99 in the preview (A-image-preview-dead.png),
+ * the art (black at 156, the VTF and the export agree) blended in gamma
+ * space. Not a factor fitted to the shot: the linear-light blend is the
+ * cause, the same one launch P found for the weapon boxes and additive.ts
+ * for the fonts. Only the dead art goes through it for now: which other
+ * translucent art needs it is probe B7's to measure.
+ *
+ * Needs pixels: where a scratch canvas cannot be read (happy-dom, a test
+ * stub), it draws the art itself.
+ */
+const linearArt = new Lru<CanvasImageSource>(8);
+function linearOverArt(img: HTMLImageElement, key: string): CanvasImageSource {
+  const cached = linearArt.get(key);
+  if (cached) return cached;
+  const w = img.naturalWidth, h = img.naturalHeight;
+  const c = canvasFactory(w, h);
+  const t = c?.getContext('2d') as CanvasRenderingContext2D | null | undefined;
+  if (!c || !t || typeof t.getImageData !== 'function' || typeof t.putImageData !== 'function') return img;
+  t.drawImage(img, 0, 0, w, h);
+  let px: ImageData;
+  try { px = t.getImageData(0, 0, w, h); } catch { return img; }        // a tainted canvas
+  for (let i = 3; i < px.data.length; i += 4) px.data[i] = linearOverAlpha(px.data[i]);
+  t.putImageData(px, 0, 0);
+  linearArt.set(key, c);
+  return c;
+}
+
+/**
  * The picture a custom splatter draws from: a Fade made from exactly the
  * pixels the build writes into its .vtf (fadePixels), or the stored PNG the
  * build encodes. Undefined when the splatter is not custom, its picture is
@@ -607,7 +640,7 @@ export function splatterSource(design: HudDesign, id: SplatterId, onAsset?: () =
 export function _cacheSizes(): { tints: number; fades: number } { return { tints: tints.size, fades: fades.size }; }
 
 /** Test seam: forget every loaded image, tint and warned-about material. */
-export function _resetAssetCache(): void { images.clear(); missing.clear(); tints.clear(); urls.clear(); fades.clear(); warnedNoIcons = false; _resetImportedArt(); }
+export function _resetAssetCache(): void { images.clear(); missing.clear(); tints.clear(); urls.clear(); fades.clear(); linearArt.clear(); warnedNoIcons = false; _resetImportedArt(); }
 
 export function hatch(ctx: CanvasRenderingContext2D, r: ChildRect) {
   ctx.save();
@@ -659,7 +692,7 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
     const material = lname === 'dead' ? 'vgui/s_panel_dead' : `${portraitFor(opts)}_incap`;
     const img = artImage(material, opts.onAsset);
     if (!img) { if (missing.has(material)) hatch(ctx, r); return; }
-    ctx.drawImage(img, r.x, r.y, r.w, r.h);
+    ctx.drawImage(lname === 'dead' ? linearOverArt(img, material) : img, r.x, r.y, r.w, r.h);
     return;
   }
   if (image) {

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { childRects, drawPanel, setFont, PANEL_FILE, hiddenInState, previewOf, DEFAULT_PREVIEW, ITEM_ROW, itemRowStart, paintAdditive, healthRgb, _setImageFactory, _setCanvasFactory, _resetAssetCache, _cacheSizes, splatterSource, tinted } from './render';
+import { childRects, drawPanel, setFont, PANEL_FILE, hiddenInState, previewOf, DEFAULT_PREVIEW, ITEM_ROW, itemRowStart, paintAdditive, healthRgb, _setImageFactory, _setCanvasFactory, _resetAssetCache, _cacheSizes, splatterSource, tinted, type SurvivorState } from './render';
+import { linearOverAlpha } from './additive';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { buildHud } from './build';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
@@ -1175,5 +1176,71 @@ describe('your own health in every preview state', () => {
         expect(draws(b.calls, TOP).map((c) => c[0])).toEqual([MAGENTA]);
       });
     });
+  });
+});
+
+describe('Down and Dead cards over a custom splatter (slice 2.F X13)', () => {
+  // /home/volence/l4d/hud/test-splatter-2026-09-24/runs/A/crop-dead-incap-game-vs-preview.png, pixel table
+  // from /home/volence/l4d/hud/probe-2f/x13_table.py: on the dead card the cyan stripe is 0,168,168 in game
+  // (hurt-settled.png at 130,1000; 235,1020; 130,1040) and 0,99,99 in the preview (A-image-preview-dead.png),
+  // magenta 168,0,168 against 99,0,99. s_panel_dead's dark part is black at alpha 156 (the VTF and the
+  // exported PNG agree texel for texel), which blended in gamma space gives 255 * (1 - 156/255) = 99, the
+  // preview; blended in linear light, (0.388)^(1/2.2) * 255 = 166, the game (168).
+  const png = 'iVBORw0KGgo=';
+  const d = design({ elements: { teamColumn: { fit: true } }, splatters: { splatTeam: { kind: 'image' } }, images: { splatTeam: { w: 512, h: 256, png } } });
+  const O = { x: 10, y: 20 };
+  const PIC = `data:image/png;base64,${png}`;
+
+  it('draws the splatter stand-in in Down and Dead at the same rect and alpha as Healthy, as the game does', () => {
+    const at = (state: SurvivorState) => {
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, d, 'teamColumn', O, 2, { card: 0, state });
+      return calls.filter((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === PIC).map((c) => [...c.a.slice(1), c.alpha]);
+    };
+    const healthy = at('healthy');
+    expect(healthy).toHaveLength(1);
+    expect(at('down')).toEqual(healthy);
+    expect(at('dead')).toEqual(healthy);
+  });
+
+  it('maps an alpha so that a gamma-space blend of black lands where the game\'s linear-light blend does', () => {
+    // The dead art's texel: black at 156 over the 255 stripe channel lands on 166, within 10 of the game's 168.
+    const a = linearOverAlpha(156);
+    expect(Math.round(255 * (1 - a / 255))).toBeGreaterThanOrEqual(158);
+    expect(Math.round(255 * (1 - a / 255))).toBeLessThanOrEqual(178);
+    expect(linearOverAlpha(0)).toBe(0);
+    expect(linearOverAlpha(255)).toBe(255);
+  });
+
+  it('draws the dead art through a copy whose alpha is remapped that way, where pixels can be read', () => {
+    // A scratch canvas that keeps pixels: the remap reads the art, rewrites each alpha, and draws the copy.
+    const pixels = new Uint8ClampedArray([0, 0, 0, 156, 0, 0, 0, 0, 200, 200, 200, 255, 0, 0, 0, 80]);
+    const made: { data?: Uint8ClampedArray }[] = [];
+    _setCanvasFactory((w, h) => {
+      const rec: { data?: Uint8ClampedArray } = {};
+      made.push(rec);
+      const ctx = {
+        drawImage: () => {},
+        getImageData: () => ({ data: new Uint8ClampedArray(pixels), width: w, height: h }),
+        putImageData: (img: { data: Uint8ClampedArray }) => { rec.data = img.data; },
+      };
+      return { width: w, height: h, getContext: () => ctx, rec } as unknown as HTMLCanvasElement;
+    });
+    try {
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, d, 'teamColumn', O, 2, { card: 0, state: 'dead' });
+      const dead = childRects(d, 'teamColumn', O, 2).find((r) => r.name === 'Dead')!;
+      const hit = calls.find((c) => c.m === 'drawImage' && c.a[1] === dead.x && c.a[2] === dead.y && c.a[3] === dead.w)!;
+      const copy = (hit.a[0] as { rec?: { data?: Uint8ClampedArray } }).rec?.data;
+      expect(copy).toBeDefined();
+      expect([copy![3], copy![7], copy![11], copy![15]]).toEqual([linearOverAlpha(156), 0, 255, linearOverAlpha(80)]);
+      expect([...copy!.slice(8, 11)]).toEqual([200, 200, 200]);            // colour untouched
+    } finally { _setCanvasFactory(null); }
+  });
+
+  it('falls back to the art itself where pixels cannot be read', () => {
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, d, 'teamColumn', O, 2, { card: 0, state: 'dead' });
+    expect(calls.some((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === artUrl('vgui/s_panel_dead'))).toBe(true);
   });
 });
