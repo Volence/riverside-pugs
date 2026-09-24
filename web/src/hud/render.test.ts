@@ -1384,6 +1384,24 @@ describe('your own health in every preview state', () => {
       expect(calls.filter((c) => c.m === 'fillText').map((c) => c.a[0])).toEqual(['50']);
     });
 
+    it('draws a number with no colour of its own in the scheme\'s label colour, Gray 192 on stock (probe B14)', () => {
+      // /home/volence/l4d/hud/probe-phase2-infected/b14/shots/b14/b14-c.png: the Hunter's "250" peaks at 193 193 193.
+      // A Label takes Label.TextColor, which the stock scheme sets to FgColor, which it sets to Gray, 192 192 192.
+      const styles: string[] = [];
+      const { ctx } = recCtx();
+      const fillText = ctx.fillText.bind(ctx);
+      ctx.fillText = ((...a: Parameters<typeof ctx.fillText>) => { styles.push(String(ctx.fillStyle)); fillText(...a); }) as typeof ctx.fillText;
+      drawPanel(ctx, design({}), 'siHealth', O, 1, { state: SI('hunter') });
+      expect(styles).toEqual(['rgba(192,192,192,1)']);
+      // A colour of its own still wins (probe Q13).
+      const blue: string[] = [];
+      const b = recCtx();
+      const fill2 = b.ctx.fillText.bind(b.ctx);
+      b.ctx.fillText = ((...a: Parameters<typeof ctx.fillText>) => { blue.push(String(b.ctx.fillStyle)); fill2(...a); }) as typeof ctx.fillText;
+      drawPanel(b.ctx, design({ children: { siHealth: { HealthNumber: { color: '0 0 255 255' } } } }), 'siHealth', O, 1, { state: SI('hunter') });
+      expect(blue).toEqual(['rgba(0,0,255,1)']);
+    });
+
     it('shows each class\'s own full health in the number', () => {
       for (const [siClass, n] of [['hunter', '250'], ['smoker', '250'], ['boomer', '50'], ['tank', '6000']] as const) {
         const { ctx, calls } = recCtx();

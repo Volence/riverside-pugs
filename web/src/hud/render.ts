@@ -411,6 +411,26 @@ export function colourOf(design: HudDesign, value: string | undefined): string {
   return `rgba(${r},${g},${b},${a / 255})`;
 }
 
+/**
+ * The colour a Label draws in when its block gives none: VGUI's Label takes
+ * the scheme's Label.TextColor, a name the stock scheme points at FgColor
+ * and FgColor at Gray, 192 192 192 (probe B14: the Hunter's "250", which has
+ * no fgcolor_override, peaks at 193 193 193 in
+ * /home/volence/l4d/hud/probe-phase2-infected/b14/shots/b14/b14-c.png).
+ * Names are followed through BaseSettings and Colors a few steps; anything
+ * unresolved is white, as before.
+ */
+export function labelTextColour(design: HudDesign): string {
+  const tree = buildTrees(design)(SCHEME);
+  let v = 'Label.TextColor';
+  for (let i = 0; i < 4 && !/^\d+ \d+ \d+ \d+$/.test(v); i++) {
+    const n = kvFind(tree, ['BaseSettings', v]) ?? kvFind(tree, ['Colors', v]);
+    if (!n || typeof n.value !== 'string') return 'rgba(255,255,255,1)';
+    v = n.value.trim();
+  }
+  return colourOf(design, /^\d+ \d+ \d+ \d+$/.test(v) ? v : undefined);
+}
+
 /** The same colour as numbers: a literal "r g b a", or a scheme colour name, white when there is none. */
 export function rgbaOf(design: HudDesign, value: string | undefined): [number, number, number, number] {
   if (!value) return [255, 255, 255, 255];
@@ -1090,7 +1110,8 @@ function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: st
   const cell = setFont(ctx, design, kvGet(n, 'font') ?? '', k, opts.onAsset);
   // The health number and its + are coloured by game code (healthRgb), not the file: red when down (probe T7).
   const byHealth = HEALTH_PANELS.has(panelId) && HEALTH_LABELS.has(n.key.toLowerCase());
-  ctx.fillStyle = byHealth ? `rgba(${sampleHealthRgb(opts).join(',')},1)` : colourOf(design, kvGet(n, 'fgcolor_override'));
+  const own = kvGet(n, 'fgcolor_override');
+  ctx.fillStyle = byHealth ? `rgba(${sampleHealthRgb(opts).join(',')},1)` : own !== undefined ? colourOf(design, own) : labelTextColour(design);
   const align = (kvGet(n, 'textAlignment') ?? 'west').toLowerCase();
   let x = r.x;
   if (align.includes('east')) { ctx.textAlign = 'right'; x = r.x + r.w; }
