@@ -144,6 +144,18 @@ int ModCall_TriggerEnd(const char[] text, const char[] trigger)
 	return -1;
 }
 
+/** A client's SteamID64 for a call. Steam-validated, except on a LAN server
+ *  (sv_lan 1), where Steam never validates anyone and the strict form would
+ *  refuse every call. Only the local test server runs sv_lan 1; every live
+ *  server runs 0, so there the id is always the validated one. */
+bool ModCall_AuthId(int client, char[] id, int maxlen)
+{
+	static ConVar lan = null;
+	if (lan == null) lan = FindConVar("sv_lan");
+	bool validate = lan == null || !lan.BoolValue;
+	return GetClientAuthId(client, AuthId_SteamID64, id, maxlen, validate);
+}
+
 void ModCall_Open(int client, const char[] upfront)
 {
 	float now = GetEngineTime();
@@ -151,7 +163,7 @@ void ModCall_Open(int client, const char[] upfront)
 	g_fLastOpen[client] = now;
 
 	char id[24];
-	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id)))
+	if (!ModCall_AuthId(client, id, sizeof(id)))
 	{
 		PrintToChat(client, "[PUG] Your Steam ID is not verified yet, try again in a moment.");
 		return;
@@ -241,7 +253,7 @@ public int MenuHandler_ModCallReason(Menu menu, MenuAction action, int client, i
 		if (c == client || !IsClientInGame(c) || IsFakeClient(c) || IsClientSourceTV(c)) continue;
 		// The id is taken now, so the call names the player who was in that
 		// slot when the menu was drawn even if they leave before the pick.
-		if (!GetClientAuthId(c, AuthId_SteamID64, id, sizeof(id))) continue;
+		if (!ModCall_AuthId(c, id, sizeof(id))) continue;
 		GetClientName(c, name, sizeof(name));
 		int team = GetClientTeam(c);
 		Format(label, sizeof(label), "%s %s",
@@ -298,7 +310,7 @@ void ModCall_Send(int client, const char[] rawDetails, bool notify = true)
 {
 	char caller[24];
 	if (!IsClientInGame(client) || g_sCallReason[client][0] == '\0' || g_sCallTarget[client][0] == '\0'
-		|| !GetClientAuthId(client, AuthId_SteamID64, caller, sizeof(caller)))
+		|| !ModCall_AuthId(client, caller, sizeof(caller)))
 	{
 		ModCall_Clear(client);
 		return;
