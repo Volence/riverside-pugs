@@ -2551,3 +2551,23 @@ describe('The kill notices on the page (plan tasks K1, K2)', () => {
     await waitFor(() => expect(saved().elements?.killNotices?.color).toBeUndefined());
   });
 });
+
+describe('The kill notice box on the page (plan task K2)', () => {
+  const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
+  it('switches the box between the game art, a flat colour and none', async () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Kill / incap notices' }));
+    const box = screen.getByLabelText('Notice box') as HTMLSelectElement;
+    expect(box.value).toBe('stock');
+    expect([...box.options].map((o) => o.textContent)).toEqual(['Game art', 'Flat colour', 'None']);
+    fireEvent.change(box, { target: { value: 'flat' } });
+    await waitFor(() => expect(saved().elements?.killNotices?.noticeBox).toEqual({ kind: 'flat' }));
+    fireEvent.input(screen.getByLabelText('Box colour colour'), { target: { value: '#0000ff' } });
+    await waitFor(() => expect(saved().elements?.killNotices?.noticeBox).toEqual({ kind: 'flat', color: '0 0 255 160' }));
+    fireEvent.change(screen.getByLabelText('Notice box'), { target: { value: 'none' } });
+    await waitFor(() => expect(saved().elements?.killNotices?.noticeBox).toEqual({ kind: 'none' }));
+    expect(screen.queryByLabelText('Box colour colour')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Notice box'), { target: { value: 'stock' } });
+    await waitFor(() => expect(saved().elements?.killNotices).toBeUndefined());
+  });
+});

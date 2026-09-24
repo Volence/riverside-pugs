@@ -58,7 +58,19 @@ export interface ElementOverride {
   fontSize?: number;
   /** Keys of the element's own hudlayout.res block that its registry entry declares, as the text the file takes. */
   keys?: Record<string, string>;
+  /**
+   * The kill notices' box (label4background): a flat colour, or none. Absent
+   * means the preset's own art. Kept on killNotices only.
+   */
+  noticeBox?: NoticeBox;
 }
+/**
+ * The kill notice box restyled: 'flat' a generated texture in `color`,
+ * 'none' a clear one (build.ts noticePass).
+ */
+export interface NoticeBox { kind: 'flat' | 'none'; color?: string }
+/** The flat notice box's colour when none is picked: black, about as dark as the stock box's middle. */
+export const NOTICE_BOX_COLOUR = '0 0 0 160';
 /**
  * One child of a card file (v2 spec, "The data model"). Numbers are unscaled,
  * in the card file's own unfitted frame: fitPass shifts them and the element's
@@ -653,6 +665,12 @@ function element(id: string, raw: unknown, key: BaseKey): ElementOverride {
   // The kill notices' text size waits on gate K5 (probes.ts): row 0's font
   // was never seen in game, so a stored size is dropped while it is closed.
   if (id === 'killNotices' && !probe('K5')) delete out.fontSize;
+  if (id === 'killNotices' && isObj(raw.noticeBox) && (raw.noticeBox.kind === 'flat' || raw.noticeBox.kind === 'none')) {
+    const box: NoticeBox = { kind: raw.noticeBox.kind };
+    const bc = colour(raw.noticeBox.color);
+    if (bc && box.kind === 'flat') box.color = bc;
+    out.noticeBox = box;
+  }
   const keys = validKeys(elementById(id)?.keys, raw.keys);
   if (keys) out.keys = keys;
   return out;

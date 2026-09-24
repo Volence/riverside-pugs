@@ -7,7 +7,7 @@ import { Fragment } from 'preact';
 import { useState } from 'preact/hooks';
 import {
   clampOverride, clampChild, clampWeapon, WEAPON_KEYS, WEAPON_BOX_COLOUR, WEAPON_BOX_IMAGE, WEAPON_ICONS, ITEM_ICONS,
-  weaponImageKind, weaponUploadSize,
+  weaponImageKind, weaponUploadSize, NOTICE_BOX_COLOUR, type NoticeBox,
   type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type ChildRangeKey,
   type WeaponNumKey, type WeaponsOverride, type WeaponBoxStyle,
 } from '../../hud/design';
@@ -515,13 +515,20 @@ export function ElementControls(
  * The kill notices' own look (plan tasks K1, K2): the text colour, which
  * the build writes on all five rows (only row 0 is ever used, probe K2,
  * /home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/notices-ijkl.png),
- * shown as the generated row 0 has it; and the text size, which waits on
- * gate K5.
+ * shown as the generated row 0 has it; the box behind the notice (plan
+ * task K2); and the text size, which waits on gate K5.
  */
 function NoticeControls({ design, edit, end, patch }: { design: HudDesign; edit: Edit; end: () => void; patch: Patch }) {
   const o = design.elements.killNotices ?? {};
   const row = kvFind(buildTrees(design)('resource/ui/hud/pzdamagerecordpanel.res'), ['recordlabel0']);
   const shown = o.color ?? (row && pcGet(row, 'fgcolor_override')) ?? '255 255 255 255';
+  const setBox = (box: NoticeBox | undefined) => edit((d) => {
+    const { noticeBox: _old, ...rest } = d.elements.killNotices ?? {};
+    const next = box ? { ...rest, noticeBox: box } : rest;
+    const elements = { ...d.elements };
+    if (Object.keys(next).length) elements.killNotices = next; else delete elements.killNotices;
+    return { ...d, elements };
+  }, 'step');
   const clear = (key: 'color' | 'fontSize') => edit((d) => {
     const { [key]: _gone, ...rest } = d.elements.killNotices ?? {};
     const elements = { ...d.elements };
@@ -535,6 +542,25 @@ function NoticeControls({ design, edit, end, patch }: { design: HudDesign; edit:
         <button type="button" class="btn btn--ghost btn--sm" aria-label="Text colour: use the game colour" onClick={() => clear('color')}>
           Use the game colour
         </button>
+      )}
+      {/* Probe K4 (/home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/notices-ijkl.png): the box's image is honoured. */}
+      <label class="hud__row">
+        <span>Notice box</span>
+        <select
+          aria-label="Notice box" value={o.noticeBox?.kind ?? 'stock'}
+          onChange={(e) => {
+            const v = (e.target as HTMLSelectElement).value;
+            setBox(v === 'flat' || v === 'none' ? { kind: v, ...(v === 'flat' && o.noticeBox?.color ? { color: o.noticeBox.color } : {}) } : undefined);
+          }}
+        >
+          <option value="stock">Game art</option>
+          <option value="flat">Flat colour</option>
+          <option value="none">None</option>
+        </select>
+        <span />
+      </label>
+      {o.noticeBox?.kind === 'flat' && (
+        <ColourRow label="Box colour" value={o.noticeBox.color ?? NOTICE_BOX_COLOUR} end={end} onPick={(c) => patch({ noticeBox: { kind: 'flat', color: c } }, 'gesture')} />
       )}
       {probe('K5') && (
         <Slider

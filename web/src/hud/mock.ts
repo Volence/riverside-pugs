@@ -11,10 +11,10 @@
  * keys, the way the game's own code lays it out. Every other element here is
  * still a hand-made stand-in drawn from plain shapes and text.
  */
-import type { Box, HudDesign } from './design';
+import { NOTICE_BOX_COLOUR, type Box, type HudDesign } from './design';
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import type { Guide } from './guides';
-import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHasElement, pcGet, MARKER_PX_PER_UNIT } from './build';
+import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHasElement, pcGet, MARKER_PX_PER_UNIT, NOTICE_BOX_TEXTURE } from './build';
 import { baseOf } from './base';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H, parseSize, parsePos, screenW } from './units';
@@ -530,14 +530,22 @@ function paintKillNotices(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
     else if (align.includes('center')) { ctx.textAlign = 'center'; x = r.x + (xpos + wide / 2) * k; left = x - textW / 2; }
     else ctx.textAlign = 'left';
     const bg = kvFind(nodes, ['label4background']);
-    const img = bg && artImage(normaliseMaterial(kvGet(bg, 'image') ?? ''), onAsset);
-    if (bg && img) {
+    const material = normaliseMaterial((bg && kvGet(bg, 'image')) ?? '');
+    // The editor's own box (build.ts noticePass): a flat square of one
+    // colour, or a clear one, so it nine-slices into a flat fill.
+    const own = material === NOTICE_BOX_TEXTURE ? design.elements.killNotices?.noticeBox : undefined;
+    const img = bg && !own && artImage(material, onAsset);
+    if (bg && (img || own)) {
       const pad = NOTICE_PAD * k;
       const src = parseFloat(kvGet(bg, 'src_corner_width') ?? '16');
       const corner = parseFloat(kvGet(bg, 'draw_corner_width') ?? '8') * k;
       const bgTall = parseFloat(kvGet(bg, 'tall') ?? '25') * k;
       const y = r.y + ypos * k + (tall * k - bgTall) / 2;
-      drawNineSlice(ctx, img, img.naturalWidth, img.naturalHeight, left - pad, y, textW + 2 * pad, bgTall, corner, src);
+      if (img) drawNineSlice(ctx, img, img.naturalWidth, img.naturalHeight, left - pad, y, textW + 2 * pad, bgTall, corner, src);
+      else if (own?.kind === 'flat') {
+        ctx.fillStyle = colourOf(design, own.color ?? NOTICE_BOX_COLOUR);
+        ctx.fillRect(left - pad, y, textW + 2 * pad, bgTall);
+      }
     }
     ctx.fillStyle = colourOf(design, kvGet(n, 'fgcolor_override'));
     const top = r.y + ypos * k + (tall * k - cell.cell) / 2;

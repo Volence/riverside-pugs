@@ -18,7 +18,7 @@ import { SLOTS } from './slots';
 import { flatTexture, roundedTexture, vmtFor, parseColour } from './textures';
 import { decodeText, encodeText } from './text';
 import {
-  baseTeam, contentBox, drawnBarX, isBar, WEAPON_KEYS, WEAPON_BOX_COLOUR, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir,
+  baseTeam, contentBox, drawnBarX, isBar, NOTICE_BOX_COLOUR, WEAPON_KEYS, WEAPON_BOX_COLOUR, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir,
   type WeaponNumKey, WEAPON_ICONS, ITEM_ICONS, WEAPON_BOX_IMAGE, weaponImageKind,
 } from './design';
 import {
@@ -217,6 +217,18 @@ function layoutPass(work: Work, design: HudDesign) {
 }
 
 /**
+ * The kill notice box's texture (plan task K2): label4background is a
+ * ScalableImagePanel whose `image` the game honours, though code shows it
+ * and moves it to row 0 itself (/home/volence/l4d/hud/probe-phase2-rest/RESULTS.md
+ * K4, r1/shots/crops/notices-ijkl.png). A flat box is a 32-texel square of
+ * the colour, which nine-slices into the same flat colour at any size; None
+ * is the same square fully clear, since a hard hide may not hold against
+ * code that shows and sizes the box.
+ */
+export const NOTICE_BOX_TEXTURE = 'vgui/hud/hudeditor/noticebg';
+const NOTICE_BOX_TEXELS = 32;
+
+/**
  * The kill notices' own look, in pzdamagerecordpanel.res (plan tasks K1,
  * K2). Game code fills the rows; only recordlabel0 was ever seen used, each
  * new notice replacing the last there, and its fgcolor_override is honoured
@@ -224,15 +236,27 @@ function layoutPass(work: Work, design: HudDesign) {
  * The colour goes on all five rows (plan decision 2): harmless, and right
  * if a server plugin ever fills more. The text size points every row at a
  * HudEd_ copy of its font, and waits on gate K5, since row 0's font was
- * never seen drawn. A row an imported file lacks is skipped.
+ * never seen drawn. A row an imported file lacks is skipped. The box
+ * (NOTICE_BOX_TEXTURE) ships its texture only into a download (`out`).
  */
-function noticePass(work: Work, design: HudDesign) {
+function noticePass(work: Work, design: HudDesign, out: VpkFile[] | null) {
   const o = design.elements.killNotices;
   const el = elementById('killNotices')!;
   if (!o || !baseHasElement(work.key, el)) return;
   const size = probe('K5') ? o.fontSize : undefined;
-  if (o.color === undefined && size === undefined) return;
+  if (o.color === undefined && size === undefined && !o.noticeBox) return;
   const nodes = work.tree(PZ_RECORD);
+  if (o.noticeBox) {
+    const bg = kvFind(nodes, ['label4background']);
+    if (!bg && !work.imported) throw new Error(`${PZ_RECORD}: no label4background`);
+    if (bg) {
+      // The same form as the stock path; probe K4 drew ../vgui/hud/hudeditor/probe_blue so.
+      kvSet(bg, 'image', `../${NOTICE_BOX_TEXTURE}`);
+      const colour = o.noticeBox.kind === 'none' ? '0 0 0 0' : o.noticeBox.color ?? NOTICE_BOX_COLOUR;
+      out?.push({ path: `materials/${NOTICE_BOX_TEXTURE}.vtf`, data: encodeVTF(NOTICE_BOX_TEXELS, NOTICE_BOX_TEXELS, flatTexture(NOTICE_BOX_TEXELS, NOTICE_BOX_TEXELS, colour)) },
+        { path: `materials/${NOTICE_BOX_TEXTURE}.vmt`, data: enc(vmtFor(NOTICE_BOX_TEXTURE)) });
+    }
+  }
   for (let i = 0; i < 5; i++) {
     const row = kvFind(nodes, [`recordlabel${i}`]);
     if (!row) { if (work.imported) continue; throw new Error(`${PZ_RECORD}: no recordlabel${i}`); }
@@ -2129,7 +2153,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   const extra: VpkFile[] = [];
   layoutPass(work, design);
   weaponsPass(work, design, assets, extra);
-  noticePass(work, design);
+  noticePass(work, design, extra);
   childPass(work, design);
   fitPass(work, design);
   hidePass(work, design);
@@ -2212,7 +2236,7 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
     const discard: VpkFile[] = [];
     layoutPass(work, design);
     weaponsPass(work, design, null, discard);
-    noticePass(work, design);
+    noticePass(work, design, null);
     childPass(work, design);
     fitPass(work, design);
     hidePass(work, design);
