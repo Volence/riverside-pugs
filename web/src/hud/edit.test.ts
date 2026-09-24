@@ -101,6 +101,12 @@ describe('what counts as an edit', () => {
     expect(resetElement(d, 'teamColumn').elements.teamColumn).toEqual({ fit: true });
     expect(resetElement(d, 'chat').elements.chat).toBeUndefined();
   });
+
+  it('counts a splatter as an override, and keeps splatters across a preset switch', () => {
+    const d = { ...structuredClone(DEFAULT_DESIGN), splatters: { splatTop: { kind: 'fade' as const } } };
+    expect(hasOverrides(d, null)).toBe(true);
+    expect(withPreset(d, 'modern', true).splatters).toEqual({ splatTop: { kind: 'fade' } });
+  });
 });
 
 describe('the teammate layout helpers', () => {

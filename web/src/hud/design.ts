@@ -15,6 +15,7 @@ import { SLOTS } from './slots';
 import { TEAM_PANEL, CONTENT_CHILDREN, type ChildDef } from './children';
 import { MAX_IMAGE_B64, MAX_IMAGE_SIDE } from './limits';
 import { readArt, type CrosshairArt } from '../crosshair/model';
+import { SPLATTERS, splatterDef, type SplatterId, type SplatterStyle } from './splatter';
 
 export type TeamDir = 'row' | 'column' | 'free';
 /**
@@ -176,6 +177,14 @@ export interface HudDesign {
   hideGameCrosshair?: boolean;
   /** The weapon selection's own keys, boxes and icons. Absent means the preset's. */
   weapons?: WeaponsOverride;
+  /**
+   * The damage splatters (splatter.ts): kind 'stock', 'none', 'fade' or
+   * 'image', a Fade colour, and Keep my colours (the scratches only).
+   * splatTeam never stores 'none': its None is the BackgroundImage child's
+   * hide. An Image's picture lives in `images` under the same id. Absent
+   * means every splatter is stock.
+   */
+  splatters?: Partial<Record<SplatterId, SplatterStyle>>;
 }
 
 /**
@@ -512,11 +521,32 @@ export function validateDesign(raw: unknown): HudDesign {
     const c = colour(v.color); if (c) s.color = c;
     d.styles[id] = s;
   }
+  if (isObj(raw.splatters)) {
+    const out: Partial<Record<SplatterId, SplatterStyle>> = {};
+    for (const def of SPLATTERS) {
+      const v = raw.splatters[def.id];
+      if (!isObj(v)) continue;
+      // The teammate splatter's None is the BackgroundImage child's hide, one flag
+      // that Layers and Delete already use, so it is never stored here.
+      const kind = oneOf(v.kind, ['stock', 'none', 'fade', 'image'] as const, 'stock');
+      if (kind === 'none' && def.route === 'standIn') continue;
+      const s: SplatterStyle = { kind };
+      const c = colour(v.color); if (c) s.color = c;
+      if (def.healthTint && v.keepColours === true) s.keepColours = true;
+      out[def.id] = s;
+    }
+    if (Object.keys(out).length) d.splatters = out;
+  }
   if (isObj(raw.images)) for (const [id, v] of Object.entries(raw.images)) {
-    if (!ID.test(id) || !isSlot(id) || !isObj(v)) continue;
+    if (!ID.test(id) || !(isSlot(id) || splatterDef(id)) || !isObj(v)) continue;
     const { w, h, png } = v;
     if (typeof w !== 'number' || typeof h !== 'number' || typeof png !== 'string') continue;
     if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1) continue;
+    // A splatter image must be its texture's exact size: the preview draws the
+    // stored PNG and the build encodes it at the texture size, so only that
+    // size can be both.
+    const splat = splatterDef(id);
+    if (splat && (w !== splat.size.w || h !== splat.size.h)) continue;
     if (w > MAX_IMAGE_SIDE || h > MAX_IMAGE_SIDE || png.length > MAX_IMAGE_B64) continue;
     if (!/^[A-Za-z0-9+/=]+$/.test(png)) continue;
     d.images[id] = { w, h, png };
@@ -543,8 +573,12 @@ export function loadDesign(fresh: () => HudDesign = () => structuredClone(DEFAUL
   try { const raw = localStorage.getItem(KEY); return raw ? validateDesign(JSON.parse(raw)) : fresh(); }
   catch { return fresh(); }
 }
-export function saveDesign(d: HudDesign): void {
-  try { localStorage.setItem(KEY, JSON.stringify(d)); } catch { /* a convenience, not worth surfacing */ }
+/**
+ * False when the browser refused (storage full or blocked): the page warns,
+ * since a design with its uploads can outgrow what localStorage keeps.
+ */
+export function saveDesign(d: HudDesign): boolean {
+  try { localStorage.setItem(KEY, JSON.stringify(d)); return true; } catch { return false; }
 }
 
 async function pipe(bytes: Uint8Array, stream: CompressionStream | DecompressionStream): Promise<Uint8Array> {

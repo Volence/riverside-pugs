@@ -113,6 +113,7 @@ export function hasOverrides(d: HudDesign, saved: CrosshairArt | null): boolean 
     || Object.keys(d.children).length > 0
     || Object.keys(d.styles).length > 0
     || Object.keys(d.images).length > 0
+    || Object.keys(d.splatters ?? {}).length > 0
     || d.hideGameCrosshair === true
     || d.weapons !== undefined
     || d.crosshair !== fresh.crosshair

@@ -349,3 +349,47 @@ describe('validateDesign, the weapon selection', () => {
     expect((await decodeShare(await encodeShare(d)))?.weapons).toEqual(d.weapons);
   });
 });
+
+describe('splatters', () => {
+  const PNG_OK = 'iVBORw0KGgo=';
+  it('keeps valid splatter styles and drops what does not belong', () => {
+    const d = validateDesign({ v: 1, splatters: {
+      splatTeam: { kind: 'fade', color: '1 2 3 4', keepColours: true },   // keepColours is for the scratches only
+      splatTop: { kind: 'image', keepColours: true },
+      splatBottom: { kind: 'none' },
+      nope: { kind: 'fade' },
+    } });
+    expect(d.splatters).toEqual({
+      splatTeam: { kind: 'fade', color: '1 2 3 4' },
+      splatTop: { kind: 'image', keepColours: true },
+      splatBottom: { kind: 'none' },
+    });
+  });
+
+  it("never stores None for the teammate splatter: that is the child's hide", () => {
+    expect(validateDesign({ v: 1, splatters: { splatTeam: { kind: 'none' } } }).splatters).toBeUndefined();
+  });
+
+  it('turns an unknown kind into stock and leaves no splatters key when nothing survives', () => {
+    expect(validateDesign({ v: 1, splatters: { splatTop: { kind: 'sparkles' } } }).splatters).toEqual({ splatTop: { kind: 'stock' } });
+    expect(validateDesign({ v: 1, splatters: 'x' }).splatters).toBeUndefined();
+    expect(validateDesign({ v: 1 }).splatters).toBeUndefined();
+  });
+
+  it("keeps a splatter image only at its splatter's exact texture size", () => {
+    const d = validateDesign({ v: 1, images: {
+      splatTeam: { w: 512, h: 256, png: PNG_OK },
+      splatTop: { w: 512, h: 256, png: PNG_OK },          // wrong size for a scratch
+      splatBottom: { w: 256, h: 64, png: PNG_OK },
+    } });
+    expect(Object.keys(d.images).sort()).toEqual(['splatBottom', 'splatTeam']);
+  });
+
+  it('sends splatter kinds and Fade colours in a share link, and no images', async () => {
+    const d = validateDesign({ v: 1, splatters: { splatTeam: { kind: 'image' }, splatTop: { kind: 'fade', color: '9 9 9 99' } },
+      images: { splatTeam: { w: 512, h: 256, png: PNG_OK } } });
+    const back = (await decodeShare(await encodeShare(d)))!;
+    expect(back.splatters).toEqual(d.splatters);
+    expect(back.images).toEqual({});
+  });
+});
