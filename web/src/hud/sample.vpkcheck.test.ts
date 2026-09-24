@@ -31,6 +31,13 @@
 //      hidden, the number at text size 20, the crouch icon at zpos 9 and a
 //      rounded "Your health background", so the reader also sees the own
 //      panel's file edits, HudEdOwnBg and its texture.
+//   z: the infected panels (plan 2026-09-24-hud-editor-phase2-infected.md,
+//      Task 15): your infected health fitted, scaled 1.25, its bar 20 units
+//      shorter and coloured (Q24), its number blue; the infected card fitted
+//      with gap 10, its bar coloured and its name green; the ability timer at
+//      scale 1.5 with a ready colour; the marker at ability_size 30, green,
+//      so the reader sees the three linked SI files, the card file and the
+//      HudCrosshair keys. The same edits probe B14 checked in game.
 // Unset (or any other value) keeps the original default: sample (a).
 import { it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -117,6 +124,22 @@ it('writes a sample VPK or zip for the Python/unzip readers', () => {
     const id = 'f'.repeat(64);
     registerImport(id, sampleHud());
     const d = validateDesign({ v: 1, preset: 'imported', imported: { id, name: 'edgehud' }, crosshair: 'none', elements: { ownHealth: { x: 8, y: 400 } } });
+    writeFileSync(process.env.HUD_VPK_OUT, packHud(d).bytes);
+    return;
+  }
+  if (sample === 'z') {
+    const d = validateDesign({ v: 1, preset: 'stock', crosshair: 'none',
+      elements: {
+        siHealth: { fit: true, scale: 1.25 },
+        infectedRow: { fit: true, gap: 10 },
+        abilityRing: { scale: 1.5, keys: { ability_ready_color: '255 0 255 255' } },
+        abilityMarker: { keys: { ability_size: 30, ability_ready_color: '0 255 0 255' } },
+      },
+      children: {
+        siHealth: { Health: { w: 112, keys: { monochrome_color: '255 0 255 255' } }, HealthNumber: { color: '0 0 255 255' } },
+        infectedRow: { HealthPanel: { keys: { monochrome_color: '0 255 255 255' } }, NameLabel: { color: '0 255 0 255' } },
+      } });
+    if (!d.children.siHealth?.Health?.keys?.monochrome_color) throw new Error('sample z lost the Q24 bar colour in validateDesign');
     writeFileSync(process.env.HUD_VPK_OUT, packHud(d).bytes);
     return;
   }

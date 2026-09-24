@@ -71,5 +71,45 @@ if os.environ.get('HUD_SAMPLE') == 'o':
     assert (tex.width, tex.height) == (32, 32), (tex.width, tex.height)
     assert tex.format == ImageFormats.BGRA8888, tex.format
     print('sample o: LocalPlayer', ' '.join(got), 'font', font)
+if os.environ.get('HUD_SAMPLE') == 'z':
+    # Sample z: the infected panels, read by srctools, with the expected
+    # numbers worked out here from the stock files and the plan's rules.
+    from srctools.keyvalues import Keyvalues
+    rnd = lambda v: int(v + 0.5)                # the generator's Math.round, not Python's banker's round
+    def blocks(path):
+        root = list(Keyvalues.parse(pak[path].read().decode('latin1')))[0]
+        return {b.real_name: b for b in root}
+    def stock(path):
+        root = list(Keyvalues.parse(open('web/src/hud/base/stock/' + path, encoding='latin1').read()))[0]
+        return {b.real_name: b for b in root}
+    H, S, B = ('resource/ui/hud/%s.res' % n for n in ('hunterhealth', 'smokerhealth', 'boomerhealth'))
+    for path in (H, S, B):
+        got = blocks(path)
+        assert got['Health']['monochrome_color'] == '255 0 255 255', (path, got['Health'])
+        assert got['HealthNumber']['fgcolor_override'] == '0 0 255 255', (path, got['HealthNumber'])
+    # The Hunter's bar 112 wide at 1.25; the Boomer's in proportion to its own stock bar (plan decision 3).
+    sh, sb = stock(H)['Health'], stock(B)['Health']
+    assert blocks(H)['Health']['wide'] == str(rnd(112 * 1.25)), blocks(H)['Health']['wide']
+    assert blocks(S)['Health']['wide'] == blocks(H)['Health']['wide']
+    want_b = rnd(rnd(112 * int(sb['wide']) / int(sh['wide'])) * 1.25)
+    assert blocks(B)['Health']['wide'] == str(want_b), (blocks(B)['Health']['wide'], want_b)
+    # The fit keeps the frame: (250, 0) 150 x 100 on stock, then scaled (plan decision 1).
+    layout = blocks('scripts/hudlayout.res')
+    zh = layout['HudZombieHealth']
+    assert (zh['wide'], zh['tall']) == (str(rnd(150 * 1.25)), str(rnd(100 * 1.25))), (zh['wide'], zh['tall'])
+    # The card fits to (0, 10) 133 x 64; the row steps by the card plus the gap.
+    card = blocks('resource/ui/hud/zombieteamdisplayplayer.res')
+    me = card['ZombieTeamDisplayPlayer']
+    assert (me['wide'], me['tall']) == ('133', '64'), (me['wide'], me['tall'])
+    assert card['HealthPanel']['monochrome_color'] == '0 255 255 255', card['HealthPanel']
+    assert card['NameLabel']['fgcolor_override'] == '0 255 0 255', card['NameLabel']
+    assert card['HealthPanel']['ypos'] == str(int(stock('resource/ui/hud/zombieteamdisplayplayer.res')['HealthPanel']['ypos']) - 10), card['HealthPanel']
+    assert layout['CHudZombieTeamDisplay']['HorizPanelSpacing'] == '143', layout['CHudZombieTeamDisplay']
+    ring = layout['CHudAbilityTimer']
+    assert ring['ability_ready_color'] == '255 0 255 255' and ring['wide'] == '120', ring
+    cross = layout['HudCrosshair']
+    assert cross['ability_size'] == '30' and cross['ability_ready_color'] == '0 255 0 255', cross
+    assert 'never_draw' not in {k.real_name for k in cross}, cross
+    print('sample z: SI', zh['wide'], zh['tall'], 'Boomer bar', blocks(B)['Health']['wide'], 'card', me['wide'], me['tall'])
 print(len(names), 'files ok')
 PY
