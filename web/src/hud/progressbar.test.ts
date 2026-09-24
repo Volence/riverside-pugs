@@ -6,7 +6,7 @@ import { validateDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { childAt, panelBoxes, drawHud, visibleElements, hitTest } from './mock';
-import { _setImageFactory, _resetAssetCache } from './render';
+import { _setImageFactory, _resetAssetCache, DEFAULT_PREVIEW, type PreviewState } from './render';
 import { artUrl } from './art';
 
 /**
@@ -35,6 +35,12 @@ describe('the use bar is a survivor element', () => {
     expect(visibleElements('infected', d).map((e) => e.id)).not.toContain('progressBar');
     const r = elementRect(d, 'progressBar', d.aspect);
     expect(hitTest(d, 'infected', r.x + 5, r.y + 5)).not.toBe('progressBar');
+  });
+
+  it('is an occasional panel, as the game shows it only while you heal, revive or are revived', () => {
+    expect(elementById('progressBar')!.occasional).toBe(true);
+    expect(elementById('progressBar')!.note).toMatch(/heal/i);
+    expect(elementById('progressBar')!.note).toMatch(/reviv/i);
   });
 });
 
@@ -119,7 +125,8 @@ describe('the use bar registry (plan task U1)', () => {
 
 describe('the use bar preview from its edited file (plan task U2)', () => {
   const K = 2.25;
-  function calls(design: ReturnType<typeof validateDesign>) {
+  const OCCASIONAL: PreviewState = { ...DEFAULT_PREVIEW, occasional: true };
+  function calls(design: ReturnType<typeof validateDesign>, state: PreviewState = OCCASIONAL, selected: string | null = null) {
     _setImageFactory((url) => ({ src: url, complete: true, naturalWidth: 64, naturalHeight: 64, onload: null, onerror: null }) as unknown as HTMLImageElement);
     const out: { m: string; a: unknown[]; fill: string }[] = [];
     const t: Record<string | symbol, unknown> = {
@@ -135,10 +142,11 @@ describe('the use bar preview from its edited file (plan task U2)', () => {
         : o[k]),
       set: (o, k, v) => { o[k] = v; return true; },
     }) as unknown as CanvasRenderingContext2D;
-    drawHud(ctx, 1920, 1080, design, 'survivor', null);
+    drawHud(ctx, 1920, 1080, design, 'survivor', selected, undefined, { state });
     _setImageFactory(null);
     return out;
   }
+  const label = (c: { m: string; a: unknown[] }[]) => c.some((x) => x.m === 'fillText' && x.a[0] === 'HEALING YOURSELF');
   const icon = (c: { m: string; a: unknown[] }[]) => c.find((x) => x.m === 'drawImage' && (x.a[0] as HTMLImageElement).src === artUrl('icon/healing'))!;
 
   beforeEach(() => { _resetAssetCache(); });
@@ -168,5 +176,16 @@ describe('the use bar preview from its edited file (plan task U2)', () => {
     // alone (scalePass scales places and sizes only), so the file still says 1 unit: 2 px thick, 2 px of shadow.
     const bx = Math.floor(r.x * K) + Math.floor(56 * K), by = Math.floor(r.y * K) + Math.floor(30 * K);
     expect(all.filter((c) => c.m === 'fillRect' && c.fill === 'rgba(255,255,255,1)').map((c) => c.a)).toContainEqual([bx, by, 400 * K - 2, 2]);
+  });
+
+  it('is left out of the everyday preview, and drawn with Occasional panels on or while it is selected', () => {
+    const d = validateDesign({ v: 1 });
+    expect(label(calls(d, DEFAULT_PREVIEW))).toBe(false);
+    expect(label(calls(d, OCCASIONAL))).toBe(true);
+    // Picking it (or one of its pieces, which selects its panel) in Layers shows it with the toggle off.
+    expect(label(calls(d, DEFAULT_PREVIEW, 'progressBar'))).toBe(true);
+    const r = elementRect(d, 'progressBar', d.aspect);
+    expect(hitTest(d, 'survivor', r.x + 5, r.y + 5, DEFAULT_PREVIEW)).not.toBe('progressBar');
+    expect(hitTest(d, 'survivor', r.x + 5, r.y + 5, OCCASIONAL)).toBe('progressBar');
   });
 });

@@ -397,7 +397,9 @@ describe('drawHud delegates panels to the renderer', () => {
           : t[k]),
         set: (t, k, v) => { t[k] = v; return true; },
       }) as unknown as CanvasRenderingContext2D;
-      drawHud(ctx, 1920, 1080, design, 'survivor', null);
+      // Selected, as the game shows the bar only while you heal or revive (an occasional panel),
+      // and the Occasional panels toggle would draw the others' fills too.
+      drawHud(ctx, 1920, 1080, design, 'survivor', 'progressBar');
       _setImageFactory(null);
       return calls;
     }
