@@ -64,6 +64,20 @@ forward void lilac_aimbot_detected(int client, int flags, float delta, float tot
 - [ ] **Step 5:** Build; rerun the Task 1 comparison against the installed binary: the only differences must be the new forward's public/forward entry, the version string, and the forward name string. Report them.
 - [ ] **Step 6: Commit** (deploy repo, `plugins-src/lilac` only): `"LilAC fork: lilac_aimbot_detected forward carrying the reason on every detection"`.
 
+### Task 2b (owner addition 2026-09-24): reasons for aimlock and bhop too
+
+Same pattern as Task 2, in the same fork, same `+riverside1` version.
+
+- **Bhop.** Declare in `include/lilac.inc` and create like the others:
+  `forward void lilac_bhop_detected(int client, int perfect_bhops, int jump_ticks);`
+  Fire it in `lilac_detected_bhop` immediately BEFORE `lilac_forward_client_cheat(client, CHEAT_BHOP)`, with `perfect_bhops[client]` and `jump_ticks[client]` (the values upstream only ever logs from the second detection).
+- **Aimlock.** Declare: `forward void lilac_aimlock_detected(int client, int target, int suspicions);`
+  The check (`timer_check_aimlock` / `is_aimlocking`) finds the locked-on enemy but never stores it. Add `static int aimlock_target[MAXPLAYERS + 1];`, set `aimlock_target[client] = target` where `detected_aimlock[client] = true` is set, and pass it to `lilac_detected_aimlock` (add an `int target` parameter). Fire the new forward immediately BEFORE `lilac_forward_client_cheat(client, CHEAT_AIMLOCK)` with `(client, target, playerinfo_aimlock_sus value at detection)` (capture the count before the function resets it to 0). No detection logic changes.
+- WHY aimlock matters on L4D: the check has no visibility test, and L4D shows survivors to infected through walls by design, so an infected player locking onto a glowing survivor can trip it legitimately. Recording the target's team and class is how a week of data will show whether that happens.
+- Rerun the Task 1 comparison: differences must be only the three new forwards, their name strings, and the version string.
+- Reporter (Task 3): implement both forwards like `lilac_aimbot_detected` (store with a 2.0 s freshness window). On `CHEAT_BHOP` append `lbhops=%d ljump=%d` (or `-1 -1`). On `CHEAT_AIMLOCK` append `ltarget_team=%d ltarget_class=%d ltarget_ghost=%d` (team 2 survivor or 3 infected; class `m_zombieClass` for infected else 0; ghost from `m_isGhost`; all `-1` when unknown) in addition to the aim measurement Task 3 already adds for aimlock.
+- Site (Task 4): parse the new optional integer fields (`lbhops` 0..1000, `ljump` -1..100000, `ltarget_team` -1..3, `ltarget_class` -1..8, `ltarget_ghost` -1..1) with the same reject-on-malformed rule, add them to the canonical detail string, and say them in the timeline: bhop "N perfect hops in a row"; aimlock "locked onto a survivor / an infected <class> (a ghost)" and, when the flagged player is infected and the target a survivor, add "infected see survivors through walls in L4D, so this can be legitimate".
+
 ### Task 3: `l4d_lilac_report` 0.2.0: our measurement plus LilAC's reason on the wire
 
 **Files:**
