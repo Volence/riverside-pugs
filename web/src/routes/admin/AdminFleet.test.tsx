@@ -48,6 +48,21 @@ describe('AdminFleet', () => {
     expect(screen.getAllByText(/patched on all boxes/).length).toBeGreaterThan(0);
   });
 
+  it('labels per-box files and base files removed everywhere', async () => {
+    const S = 'left4dead/cfg/secrets.cfg', R = 'left4dead/addons/sourcemod/plugins/specrates.smx';
+    mockAdmin.fleet.mockResolvedValue({ ...state, rows: [
+      { path: S, area: 'configs', repo: null, base: null, patchedEverywhere: false, perBox: true, differs: false,
+        cells: { 1: cell('neither', false, 175, 'aaaa'), 2: cell('neither', false, 92, 'bbbb') } },
+      { path: R, area: 'plugins', repo: null, base: { size: 1, sha256: 'x' }, patchedEverywhere: false, removedEverywhere: true, differs: false,
+        cells: { 1: { sig: null, label: 'missing', highlight: false, sizeOnly: false }, 2: { sig: null, label: 'missing', highlight: false, sizeOnly: false } } },
+    ] });
+    render(<AdminFleet />);
+    await screen.findByText(/No differences/);
+    fireEvent.click(screen.getByLabelText('Differences only'));
+    expect(screen.getAllByText(/per box/).length).toBe(2);
+    expect(screen.getAllByText('removed on all boxes').length).toBe(2);
+  });
+
   it('marks a highlighted cell and checks a box or all', async () => {
     render(<AdminFleet />);
     const hi = await screen.findByText(/81639 · f7ee35c3/);

@@ -30,8 +30,9 @@ export function AdminFleet() {
 
   const cellText = (r: FleetRowView, c: FleetCellView | undefined) => {
     if (!c) return '';
-    if (c.label === 'unread' || c.label === 'missing') return LABEL[c.label];
-    const tag = r.patchedEverywhere ? 'base, patched on all boxes' : LABEL[c.label];
+    if (c.label === 'unread') return LABEL.unread;
+    if (c.label === 'missing') return r.removedEverywhere ? 'removed on all boxes' : LABEL.missing;
+    const tag = r.perBox ? 'per box' : r.patchedEverywhere ? 'base, patched on all boxes' : LABEL[c.label];
     return `${short(c.sig)} (${tag}${c.sizeOnly ? ', size only' : ''})`;
   };
 

@@ -28,6 +28,18 @@ describe('compareFleet', () => {
     expect(rows[0].cells[1]).toMatchObject({ label: 'neither', highlight: false });
   });
 
+  it('a base file gone from every box reads removed; a repo file gone from every box stays highlighted', () => {
+    const rows = compareFleet(man('repo', { [C]: sig('c') }), man('base', { [X]: sig('x') }), [box(1, {}), box(2, {})]);
+    expect(rows.find((r) => r.path === X)).toMatchObject({ removedEverywhere: true, differs: false });
+    expect(rows.find((r) => r.path === C)).toMatchObject({ removedEverywhere: false, differs: true });
+  });
+
+  it('a per-box file is shown but never highlighted', () => {
+    const S = 'left4dead/cfg/secrets.cfg';
+    const rows = compareFleet(null, null, [box(1, { [S]: sig('a') }), box(2, { [S]: sig('b') }), box(3, {})]);
+    expect(rows[0]).toMatchObject({ perBox: true, differs: false });
+  });
+
   it('without a reference the minority is highlighted; a tie highlights everyone', () => {
     const rows = compareFleet(null, null, [box(1, { [X]: sig('a') }), box(2, {}), box(3, {}), box(4, {})]);
     expect(rows[0].cells[1]).toMatchObject({ label: 'neither', highlight: true });

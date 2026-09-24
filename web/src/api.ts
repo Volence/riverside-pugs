@@ -876,7 +876,8 @@ export interface FleetSig { size: number; sha256: string | null }
 export interface FleetCellView { sig: FleetSig | null; label: 'repo' | 'base' | 'neither' | 'missing' | 'unread'; highlight: boolean; sizeOnly: boolean }
 export interface FleetRowView {
   path: string; area: 'plugins' | 'configs' | 'data' | 'gamedata' | 'extensions' | 'stripper' | 'other';
-  repo: FleetSig | null; base: FleetSig | null; cells: Record<number, FleetCellView>; patchedEverywhere: boolean; differs: boolean;
+  repo: FleetSig | null; base: FleetSig | null; cells: Record<number, FleetCellView>; patchedEverywhere: boolean;
+  removedEverywhere?: boolean; perBox?: boolean; differs: boolean;
 }
 export interface FleetBox { serverId: number; name: string; enabled: boolean; readAt: string | null; attemptAt: string | null; error: string | null; pending: boolean }
 export interface FleetState { repo: { label: string; at: string } | null; base: { label: string; at: string } | null; boxes: FleetBox[]; rows: FleetRowView[] }

@@ -20,6 +20,12 @@ describe('isManaged', () => {
     expect(isManaged('left4dead/addons/sub/x.vpk')).toBe(true);
     expect(isManaged('left4dead/addons/sourcemod/data/replays/r.rip')).toBe(false);
     expect(isManaged('left4dead/cfg/../../etc/passwd')).toBe(false);
+    expect(isManaged('left4dead/addons/sourcemod/scripting/include/sourcemod.inc')).toBe(false);
+    expect(isManaged('left4dead/addons/sourcemod/data/tickstats/clients-2026-09-20.csv')).toBe(false);
+    expect(isManaged('left4dead/addons/sourcemod/data/admin_cache_dump.txt')).toBe(false);
+    expect(isManaged('left4dead/addons/sourcemod/data/pug_logauth_27015.txt')).toBe(false);
+    expect(isManaged('left4dead/cfg/banned_user.cfg')).toBe(false);
+    expect(isManaged('left4dead/cfg/banned_user.cfg.bak-20260920T224515Z')).toBe(true);
   });
 });
 

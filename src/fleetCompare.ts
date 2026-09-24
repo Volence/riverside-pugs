@@ -32,6 +32,12 @@ export function areaOf(path: string): Area {
   return 'other';
 }
 
+/** Files each box is meant to have its own copy of: shown, never highlighted. */
+export const PER_BOX = new Set([
+  'left4dead/cfg/secrets.cfg',
+  'left4dead/addons/sourcemod/configs/hostname/server_hostname.txt',
+]);
+
 export type CellLabel = 'repo' | 'base' | 'neither' | 'missing' | 'unread';
 export interface FleetCell { sig: FileSig | null; label: CellLabel; highlight: boolean; sizeOnly: boolean }
 export interface FleetRow {
@@ -40,6 +46,10 @@ export interface FleetRow {
   /** Differs from the base (no repo entry) the same way on every read box: a
    *  post-install patch such as the local.cfg hooks, not drift. */
   patchedEverywhere: boolean;
+  /** In the base only, and gone from every read box: deliberately removed. */
+  removedEverywhere: boolean;
+  /** Meant to differ per box (PER_BOX). */
+  perBox: boolean;
   differs: boolean;
 }
 
@@ -71,18 +81,22 @@ export function compareFleet(repo: Manifest | null, base: Manifest | null,
     const leaders = [...counts].filter(([, n]) => n === top).map(([k]) => k);
     const allAgree = counts.size === 1;
     const patchedEverywhere = !r && bs !== null && read.length > 0 && allAgree && sigOf(read[0]) !== null && !same(sigOf(read[0])!, bs);
+    const removedEverywhere = !r && bs !== null && read.length > 0 && read.every((b) => sigOf(b) === null);
+    const perBox = PER_BOX.has(path);
+    const quiet = patchedEverywhere || removedEverywhere || perBox;
 
     const cells: Record<number, FleetCell> = {};
     for (const b of boxes) {
       if (b.files === null) { cells[b.serverId] = { sig: null, label: 'unread', highlight: false, sizeOnly: false }; continue; }
       const s = sigOf(b);
       let highlight: boolean;
-      if (ref) highlight = patchedEverywhere ? false : s === null || !same(s, ref);
+      if (quiet) highlight = false;
+      else if (ref) highlight = s === null || !same(s, ref);
       else highlight = !allAgree && (leaders.length > 1 || key(s) !== leaders[0]);
       const sizeOnly = s !== null && (s.sha256 === null || (ref !== null && ref.sha256 === null));
       cells[b.serverId] = { sig: s, label: labelOf(s), highlight, sizeOnly };
     }
-    rows.push({ path, area: areaOf(path), repo: r, base: bs, cells, patchedEverywhere,
+    rows.push({ path, area: areaOf(path), repo: r, base: bs, cells, patchedEverywhere, removedEverywhere, perBox,
       differs: Object.values(cells).some((c) => c.highlight) });
   }
   return rows.sort((a, b) => AREA_ORDER.indexOf(a.area) - AREA_ORDER.indexOf(b.area) || a.path.localeCompare(b.path));

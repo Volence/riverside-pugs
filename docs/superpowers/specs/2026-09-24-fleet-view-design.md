@@ -231,6 +231,23 @@ the stored readings.
   boxes (read-only). Expected: Dallas's pug-match build differs; Riverside #4
   gets its first reading.
 
+## After the first real reading (2026-09-24)
+
+The first read of all four boxes flagged 226 of 1,897 rows, mostly noise. Owner
+approved four changes:
+
+- Also skipped: `addons/sourcemod/scripting/` (source, never run; Chicago's NFO
+  install has none), `addons/sourcemod/data/tickstats/`, `admin_cache_dump.txt`,
+  `pug_logauth_<port>.txt`, `banned_user.cfg`, `banned_ip.cfg` (written by the
+  server itself).
+- **Per-box files** (`cfg/secrets.cfg`, `sourcemod/configs/hostname/server_hostname.txt`)
+  are shown tagged "per box" and never highlighted.
+- A base file gone from every box reads **"removed on all boxes"** and is not
+  highlighted (as "patched on all boxes"). A repo file gone from every box stays
+  highlighted: that is an undeployed change.
+- Backup files (`*.bak-*`, `*.pre-*`) stay visible and highlighted: they are
+  hand-edit leftovers worth cleaning up.
+
 ## Out of scope (2b and later)
 
 - Staging, diffing and deploying releases; "bring this box up to the current
