@@ -274,6 +274,12 @@ export interface HudDesign {
    * means every splatter is stock.
    */
   splatters?: Partial<Record<SplatterId, SplatterStyle>>;
+  /**
+   * false switches off the item pickup fly-in (the picked-up item's icon
+   * flying to the weapon selection): build.ts pickupPass. Absent means the
+   * game's own animation; true is never stored.
+   */
+  pickupFlyIn?: false;
 }
 
 /**
@@ -758,6 +764,7 @@ export function validateDesign(raw: unknown): HudDesign {
   // it becomes 'addon'. The boolean is read here and never kept.
   d.crosshair = oneOf(raw.crosshair, ['bundle', 'addon', 'none'] as const, raw.xhair === false ? 'none' : 'addon');
   if (raw.hideGameCrosshair === true) d.hideGameCrosshair = true;
+  if (raw.pickupFlyIn === false) d.pickupFlyIn = false;
   const art = readArt(raw.xhairArt);
   if (art) d.xhairArt = art;
   if (isObj(raw.elements)) for (const [id, v] of Object.entries(raw.elements)) {

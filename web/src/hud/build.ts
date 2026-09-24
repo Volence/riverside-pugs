@@ -217,6 +217,24 @@ function layoutPass(work: Work, design: HudDesign) {
 }
 
 /**
+ * The item pickup fly-in off (plan task M3): each StartItemPickupN event in
+ * hudanimations.txt, which fades the picked-up item's icon in at the centre
+ * and flies it to the weapon selection, is cut to one line holding that
+ * image clear. Probe F1 (/home/volence/l4d/hud/probe-phase2-rest/RESULTS.md,
+ * r1-b) showed the addon's copy of the file is read and a rewritten event is
+ * what the game plays. The file's own line ending is kept; an event a HUD's
+ * file lacks is left alone.
+ */
+function pickupPass(work: Work, design: HudDesign) {
+  if (design.pickupFlyIn !== false) return;
+  const src = work.text(ANIMS);
+  const eol = src.includes('\r\n') ? '\r\n' : '\n';
+  const out = src.replace(/(event[ \t]+StartItemPickup([123])[ \t]*\r?\n?[ \t]*\{)[^}]*(\})/gi,
+    (_m, head: string, n: string, close: string) => `${head}${eol}\tAnimate image${n} Alpha 0 Linear 0.0 0.001${eol}${close}`);
+  if (out !== src) work.setText(ANIMS, out);
+}
+
+/**
  * The chat's text size and the open chat's box (plan task C1). The
  * history's own `font` key is ignored in game
  * (/home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/chat-h.png), but
@@ -2187,6 +2205,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   weaponsPass(work, design, assets, extra);
   noticePass(work, design, extra);
   chatPass(work, design);
+  pickupPass(work, design);
   childPass(work, design);
   fitPass(work, design);
   hidePass(work, design);
@@ -2271,6 +2290,7 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
     weaponsPass(work, design, null, discard);
     noticePass(work, design, null);
     chatPass(work, design);
+    pickupPass(work, design);
     childPass(work, design);
     fitPass(work, design);
     hidePass(work, design);

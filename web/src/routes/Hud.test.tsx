@@ -2587,3 +2587,17 @@ describe('The chat text size on the page (plan task C1)', () => {
     await waitFor(() => expect(saved().elements?.chat?.fontSize).toBeUndefined());
   });
 });
+
+describe('The item pickup animation switch (plan task M3)', () => {
+  const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
+  it('sits with the weapons and stores only the off state', async () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Weapons' }));
+    const box = screen.getByRole('checkbox', { name: 'Item pickup animation' }) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    fireEvent.click(box);
+    await waitFor(() => expect(saved().pickupFlyIn).toBe(false));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Item pickup animation' }));
+    await waitFor(() => expect(saved().pickupFlyIn).toBeUndefined());
+  });
+});

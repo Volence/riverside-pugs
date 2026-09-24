@@ -343,6 +343,18 @@ function WeaponControls({ design, edit, end }: { design: HudDesign; edit: Edit; 
         />
         <span>Item pictures</span>
       </label>
+      {/* Probe F1 (/home/volence/l4d/hud/probe-phase2-rest/RESULTS.md, r1-b): the addon's pickup events are what the game plays. */}
+      <label class="hud__check">
+        <input
+          type="checkbox" checked={design.pickupFlyIn !== false}
+          onChange={(e) => edit((d) => {
+            const { pickupFlyIn: _old, ...rest } = d;
+            return (e.target as HTMLInputElement).checked ? rest : { ...rest, pickupFlyIn: false };
+          }, 'step')}
+        />
+        <span>Item pickup animation</span>
+      </label>
+      <p class="muted hud__note">The icon of an item you pick up flies from the middle of the screen to its slot.</p>
       <p class="muted hud__note">
         The game fixes the rest: clip numbers are always white, the slot order and the gap between slots cannot change,
         and the pistol always sits just under the main gun. While the gun is held, the game nudges its numbers a little
