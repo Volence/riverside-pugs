@@ -5,7 +5,7 @@ describe('the probe gates', () => {
   afterEach(() => { for (const id of Object.keys(PROBES) as ProbeId[]) _setProbe(id, null); });
   it('lists every open question, each passed or open as spec section 4 records it, each naming its batch', () => {
     // Q5 failed (the game ignores the cross colour) and was retired, not kept as a closed gate (slice 2.F G4).
-    const expected: Record<string, boolean> = { Q1: true, Q2: true, Q3: true, Q8: true };
+    const expected: Record<string, boolean> = { Q1: true, Q2: true, Q3: true, Q8: true, Q24: false };
     expect(Object.keys(PROBES).sort()).toEqual(Object.keys(expected).sort());
     for (const [id, p] of Object.entries(PROBES)) {
       expect(p.passed, id).toBe(expected[id]);
@@ -22,5 +22,10 @@ describe('the probe gates', () => {
   });
   it('words Q1 as the whole-panel colour the probe proved', () => {
     expect(PROBES.Q1.question).toBe('monochrome_color on a HealthPanel recolours the whole panel (fill, outline, number, cross, scratches) in every state');
+  });
+  it('keeps Q24 (the bar colour on the infected panels) open until batch B14 runs', () => {
+    expect(PROBES.Q24.passed).toBe(false);
+    expect(PROBES.Q24.batch).toMatch(/^B14 \(/);
+    expect(PROBES.Q24.question).toMatch(/monochrome_color/);
   });
 });

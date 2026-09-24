@@ -607,7 +607,8 @@ describe('the teammate card states', () => {
     expect(hiddenInState('teamColumn', 'Head', 'down')).toBe(true);
     expect(hiddenInState('teamColumn', 'Incapacitated', 'down')).toBe(false);
     expect(hiddenInState('ownHealth', 'Incapacitated', 'down')).toBe(false);
-    expect(hiddenInState('siHealth', 'Incapacitated', 'down')).toBe(true);
+    // The infected card is not registered yet (slice 2.4): the old always-hidden list.
+    expect(hiddenInState('infectedRow', 'Incapacitated', 'down')).toBe(true);
     expect(hiddenInState('teamColumn', 'Voice', 'healthy')).toBe(true);
   });
 
@@ -1014,7 +1015,12 @@ describe('the preview state', () => {
     for (const def of TEAM_PANEL.children) expect(hiddenInState('teamColumn', def.name, 'hurt'), def.name).toBe(hiddenInState('teamColumn', def.name, 'healthy'));
   });
   it('keeps the old always-hidden list for panels the registry does not have yet', () => {
-    for (const n of ['DuckingIcon', 'Incapacitated', 'SpawnTimeLabel', 'SkullIconPlacement']) expect(hiddenInState('siHealth', n, 'healthy'), n).toBe(true);
+    for (const n of ['DuckingIcon', 'Incapacitated', 'SpawnTimeLabel', 'SkullIconPlacement']) expect(hiddenInState('infectedRow', n, 'healthy'), n).toBe(true);
+  });
+  it('shows your infected health\'s crouch icon by the registry, only when crouched', () => {
+    expect(hiddenInState('siHealth', 'DuckingIcon', 'healthy')).toBe(true);
+    expect(hiddenInState('siHealth', 'DuckingIcon', { ...DEFAULT_PREVIEW, crouched: true })).toBe(false);
+    for (const n of ['BackgroundImage', 'Health', 'HealthNumber']) expect(hiddenInState('siHealth', n, 'healthy'), n).toBe(false);
   });
   it('shows your own health pieces by the registry: crouch icon when crouched, down art when down', () => {
     expect(hiddenInState('ownHealth', 'DuckingIcon', 'healthy')).toBe(true);

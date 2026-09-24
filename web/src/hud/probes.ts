@@ -19,13 +19,15 @@
  * A leaf: imports nothing.
  */
 
-export type ProbeId = 'Q1' | 'Q2' | 'Q3' | 'Q8';
+export type ProbeId = 'Q1' | 'Q2' | 'Q3' | 'Q8' | 'Q24';
 
 export const PROBES: Readonly<Record<ProbeId, { passed: boolean; batch: string; question: string }>> = {
   Q1: { passed: true, batch: 'B1 (a), (c)', question: 'monochrome_color on a HealthPanel recolours the whole panel (fill, outline, number, cross, scratches) in every state' },
   Q2: { passed: true, batch: 'B1 (a)', question: 'LocalPlayer clips its children and does not paint its own image' },
   Q3: { passed: true, batch: 'B1 (a)', question: 'inset draws the fill inset inside an outline' },
   Q8: { passed: true, batch: 'B1 (b)', question: 'the crouch icon keeps a file drawColor and shows only while crouched' },
+  // Not run yet: the infected panels plan's Task 14 (docs/superpowers/plans/2026-09-24-hud-editor-phase2-infected.md).
+  Q24: { passed: false, batch: 'B14 (planned)', question: 'monochrome_color on the SI Health and the card HealthPanel: what else it recolours' },
 };
 
 /** Test overrides, read before PROBES. */

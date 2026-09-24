@@ -269,7 +269,50 @@ export const OWN_PANEL: PanelChildren = {
   ],
 };
 
-export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL];
+/**
+ * Your special infected health: hunterhealth.res, which the Hunter and the
+ * Tank read (probe B11, /home/volence/l4d/hud/probe-phase2-infected/b9/shots/b9/b9-l.png),
+ * with smokerhealth.res (the same geometry) and boomerhealth.res (a smaller
+ * bar) following every edit through `linked`. Framed by its hudlayout.res
+ * block, HudZombieHealth. Probe answers,
+ * /home/volence/l4d/hud/probe-phase2-infected/RESULTS.md:
+ * - Q11 the container clips its children (b10/shots/crops/br-bce.png).
+ * - Q12 the frame takes a drawColor tint and a file image
+ *   (b9/shots/crops/br-bcd.png); the stock frame art is black splatter, so a
+ *   tint shows only on light art.
+ * - Q13 the number keeps its fgcolor_override (b9-b, b9-g, b9-j, b9-l).
+ * - Q8 (probe B1 b) proved the own panel's crouch icon, the same ImagePanel
+ *   use, keeps a tint.
+ * The bar colour waits on Q24: Q1 proved monochrome_color recolours the
+ * whole own panel, and what it recolours here is unasked. The inset is the
+ * HealthPanel class's one m_inset read, which Q3 proved on that class, so it
+ * is offered ungated. ModBg (Modern's fill) stays unregistered, as on the
+ * own panel. The zombiehealthleft_* files are never child-edited.
+ */
+export const SI_PANEL: PanelChildren = {
+  panelId: 'siHealth',
+  file: 'resource/ui/hud/hunterhealth.res',
+  repeat: 'single',
+  frame: 'hudlayout',
+  linked: [{ file: 'resource/ui/hud/smokerhealth.res', rule: 'same' }, { file: 'resource/ui/hud/boomerhealth.res', rule: 'delta' }],
+  children: [
+    { name: 'BackgroundImage', label: 'Frame', kind: 'image', role: 'decor', box: 'wh', move: true, font: false, colour: true, fitPlace: 'keep',
+      note: 'A tint shows only on light art: the stock frame is black.' },
+    { name: 'Health', label: 'Health bar', kind: 'bar', role: 'content', box: 'wh', move: true, font: false, colour: false,
+      keys: [
+        { key: 'monochrome_color', label: 'Bar colour', type: 'colour', gate: 'Q24', evidence: MONO_EVIDENCE,
+          unsetLabel: 'Game colour (by health)' },
+        { key: 'inset', label: 'Inset', type: 'int', range: [0, 8], unset: String(STOCK_BAR_INSET),
+          evidence: 'client.dll HealthPanel run: m_inset|inset; probe B1 Q3 on the same class' },
+      ],
+      note: 'The game fills the bar by health.' },
+    { name: 'HealthNumber', label: 'Health number', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true },
+    { name: 'DuckingIcon', label: 'Crouch icon', kind: 'image', role: 'state', box: 'square', move: true, font: false, colour: true,
+      stateArt: 'crouched', fitPlace: 'keep', note: 'The game shows this while you crouch.' },
+  ],
+};
+
+export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL];
 export const panelChildren = (panelId: string): PanelChildren | undefined => PANEL_CHILDREN.find((p) => p.panelId === panelId);
 export const teamChild = (name: string): ChildDef | undefined => TEAM_PANEL.children.find((c) => c.name === name);
 
