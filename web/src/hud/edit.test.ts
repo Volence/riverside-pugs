@@ -17,9 +17,16 @@ import { formatPos, parsePos } from './units';
 import { teamCardRects, elementRect, cardChild, isFreeTeam } from './build';
 import { elementFrame } from './selection';
 
+/**
+ * DEFAULT_DESIGN as it was before your own health fitted by default (slice
+ * 2.F G2), the way a design saved then still loads: the tests below pin
+ * numbers of the unfitted 125 x 91 own panel.
+ */
+const UNFIT: HudDesign = { ...DEFAULT_DESIGN, elements: { teamColumn: { fit: true } } };
+
 describe('nudge', () => {
   it('starts from the base position the first time', () => {
-    const d = nudge(DEFAULT_DESIGN, 'ownHealth', -10, 0);
+    const d = nudge(UNFIT, 'ownHealth', -10, 0);
     expect(d.elements.ownHealth).toEqual({ x: 718, y: 389 });
   });
   it('does nothing to an element that cannot move', () => {
@@ -31,7 +38,7 @@ describe('nudge', () => {
   // far off screen. This pins that nudge shares the same floor, the same
   // way repeated arrow-key presses would call it.
   it('keeps at least 8 units of the element on screen, however far it is pushed, matching the drag clamp', () => {
-    let d = DEFAULT_DESIGN;
+    let d = UNFIT;
     for (let i = 0; i < 200; i++) d = nudge(d, 'ownHealth', -10, -10);
     // ownHealth is 125x91 HUD units at 16:9 (853 wide): clampSpan's 8-unit
     // floor caps x at 8 - 125 and y at 8 - 91.
@@ -39,7 +46,7 @@ describe('nudge', () => {
   });
 
   it('also clamps on the far side', () => {
-    let d = DEFAULT_DESIGN;
+    let d = UNFIT;
     for (let i = 0; i < 200; i++) d = nudge(d, 'ownHealth', 10, 10);
     expect(d.elements.ownHealth).toEqual({ x: 853 - 8, y: 480 - 8 });
   });
@@ -370,7 +377,7 @@ describe('element edits', () => {
 
   it('moves several elements by the same amount from where they started', () => {
     const starts = { chat: { x: 10, y: 275, w: 320, h: 120 }, ownHealth: { x: 728, y: 389, w: 125, h: 91 } };
-    const d = moveElements(DEFAULT_DESIGN, ['chat', 'ownHealth'], starts, -5, 10);
+    const d = moveElements(UNFIT, ['chat', 'ownHealth'], starts, -5, 10);
     expect(d.elements.chat).toEqual({ x: 5, y: 285 });
     expect(d.elements.ownHealth).toEqual({ x: 723, y: 399 });
   });
@@ -469,12 +476,12 @@ describe('element edits', () => {
   it('scales an element by a corner, proportionally, from the opposite corner, clamped 0.5 to 2', () => {
     const start = { rect: { x: 728, y: 389, w: 125, h: 91 }, scale: 1 };
     // Dragging the top-left corner out by half: the bottom-right corner stays on the screen's.
-    expect(scaleElement(DEFAULT_DESIGN, 'ownHealth', start, 'nw', -62.5, -45.5).elements.ownHealth).toEqual({ scale: 1.5, x: 666, y: 344 });
+    expect(scaleElement(UNFIT, 'ownHealth', start, 'nw', -62.5, -45.5).elements.ownHealth).toEqual({ scale: 1.5, x: 666, y: 344 });
     // The bottom-right corner: the element keeps its own position (and its file anchor).
-    expect(scaleElement(DEFAULT_DESIGN, 'ownHealth', start, 'se', 125, 0).elements.ownHealth).toEqual({ scale: 2 });
-    expect(scaleElement(DEFAULT_DESIGN, 'ownHealth', start, 'se', 1000, 0).elements.ownHealth).toEqual({ scale: 2 });
-    expect(scaleElement(DEFAULT_DESIGN, 'ownHealth', start, 'se', -1000, 0).elements.ownHealth).toEqual({ scale: 0.5 });
-    expect(scaleElement(DEFAULT_DESIGN, 'chat', start, 'se', 10, 10)).toBe(DEFAULT_DESIGN);
+    expect(scaleElement(UNFIT, 'ownHealth', start, 'se', 125, 0).elements.ownHealth).toEqual({ scale: 2 });
+    expect(scaleElement(UNFIT, 'ownHealth', start, 'se', 1000, 0).elements.ownHealth).toEqual({ scale: 2 });
+    expect(scaleElement(UNFIT, 'ownHealth', start, 'se', -1000, 0).elements.ownHealth).toEqual({ scale: 0.5 });
+    expect(scaleElement(UNFIT, 'chat', start, 'se', 10, 10)).toBe(UNFIT);
   });
 
   it('resizes a free-size element from any handle, 20 units at least', () => {
@@ -515,7 +522,7 @@ describe('edits for any selection', () => {
   });
 
   it('hides elements and pieces, never a card, and skips an element with no Visible control', () => {
-    const els = hideSelection(DEFAULT_DESIGN, { kind: 'elements', ids: ['chat', 'ownHealth', 'xhair'] });
+    const els = hideSelection(UNFIT, { kind: 'elements', ids: ['chat', 'ownHealth', 'xhair'] });
     expect(els.elements.chat).toEqual({ visible: false });
     expect(els.elements.ownHealth).toEqual({ visible: false });
     expect(els.elements.xhair).toBeUndefined();
@@ -740,7 +747,7 @@ describe('child edits name their panel', () => {
 
 describe('setFit', () => {
   it('turns fit on and off and gives back the elements exactly', () => {
-    const d = structuredClone(DEFAULT_DESIGN);
+    const d = structuredClone(UNFIT);
     const on = setFit(d, 'ownHealth', true);
     expect(on.elements.ownHealth).toEqual({ fit: true });
     expect(setFit(on, 'ownHealth', false).elements).toEqual(d.elements);

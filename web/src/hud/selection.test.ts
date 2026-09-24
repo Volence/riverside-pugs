@@ -388,7 +388,7 @@ describe('snap targets', () => {
   it('snaps a section to the screen and the other visible elements of the side', () => {
     const got = sectionTargets(D, 'survivor', { kind: 'elements', ids: ['chat'] });
     expect(got[0]).toEqual({ x: 0, y: 0, w: 853, h: 480 });
-    expect(got).toContainEqual({ x: 728, y: 389, w: 125, h: 91 });
+    expect(got).toContainEqual({ x: 728, y: 421, w: 130, h: 53 });   // your own health, fitted by default (slice 2.F G2)
     expect(got).not.toContainEqual({ x: 10, y: 275, w: 320, h: 120 });
     const cards = teamCardRects(FREE, FREE.aspect);
     const free = sectionTargets(FREE, 'survivor', { kind: 'cards', cards: [1, 2] });

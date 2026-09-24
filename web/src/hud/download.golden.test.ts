@@ -18,7 +18,10 @@ import { ammoOnly } from './edit';
  * not move with it: the preview follows the file, never the other way round.
  * These hashes are the packed downloads as they were before the preview drew
  * the game's own fonts (4886f6b). A change that means to alter the download
- * updates them on purpose, and says why in its commit.
+ * updates them on purpose, and says why in its commit. The four untouched
+ * designs moved on purpose when a new design started fitting your own
+ * health (slice 2.F X14, after the incap fix); the designs saved before that
+ * keep their old bytes (the three "saved before" cases).
  */
 const here = fileURLToPath(new URL('.', import.meta.url));
 const fonts = {
@@ -30,16 +33,17 @@ const download = (d: HudDesign) => sha(packHud(d, { fonts }).bytes);
 
 describe('the download is unchanged by the preview', () => {
   const cases: [string, HudDesign, string][] = [
-    ['an untouched design', structuredClone(DEFAULT_DESIGN), '6d8ec815dd449012fcb2fc549e4392d5d43285751cce51cd5b101ea56cab9e04'],
-    ['Ammo only', ammoOnly(structuredClone(DEFAULT_DESIGN)), 'c4376fdc9664eea94ea324011cc9c86744c221db9ecc98663ab76d4630673d18'],
+    ['an untouched design', structuredClone(DEFAULT_DESIGN), 'a5957d89eed9801d7005f4363331ea80029e56725a0e3e1a7e2d0018f5400402'],
+    ['Ammo only', ammoOnly(structuredClone(DEFAULT_DESIGN)), '9c72ccc16eedc96ab60589f9e7425d828652dfce3a43e9d2ed129bc4f4d35b20'],
     // Modern moved on purpose with the revive anchor (build.ts reviveAnchorPass): its own panel has the
     // bar at 34 and the down picture at 0, so it gains a hidden Items label at 34.
-    ['an untouched Modern design', { ...structuredClone(DEFAULT_DESIGN), preset: 'modern' }, '4c67fb0c1bba67763efe27a75b74c4c383ac02dcfbcf47e95349ff276d4d3a54'],
-    ['an untouched design in Roboto', { ...structuredClone(DEFAULT_DESIGN), font: 'roboto' }, '53437d599a759fc5b4a3c20609d28ce928332146b9598bf90e7a2095a661f180'],
-    // A design as a saved one loads, which must give the same bytes as a new one.
-    ['a saved design', validateDesign({ v: 1, crosshair: 'none', elements: { teamColumn: { fit: true } } }), '6d8ec815dd449012fcb2fc549e4392d5d43285751cce51cd5b101ea56cab9e04'],
-    ['a saved Modern design', validateDesign({ v: 1, preset: 'modern', crosshair: 'none', elements: { teamColumn: { fit: true } } }), '4c67fb0c1bba67763efe27a75b74c4c383ac02dcfbcf47e95349ff276d4d3a54'],
-    ['a saved Roboto design', validateDesign({ v: 1, font: 'roboto', crosshair: 'none', elements: { teamColumn: { fit: true } } }), '53437d599a759fc5b4a3c20609d28ce928332146b9598bf90e7a2095a661f180'],
+    ['an untouched Modern design', { ...structuredClone(DEFAULT_DESIGN), preset: 'modern' }, '1b285e76db27d4b2dfbb0e7b39c19077d1f3d6e7825a5e3f0e4210bfd25b2264'],
+    ['an untouched design in Roboto', { ...structuredClone(DEFAULT_DESIGN), font: 'roboto' }, '261f301e3d3943abd1016c3fa0a390e74aa403b927b8978274f87faa8bc912bd'],
+    // A design saved before your own health fitted by default (slice 2.F X14) keeps the bytes it had:
+    // these are the old untouched hashes, built as such a saved design loads.
+    ['a design saved before the own panel fitted by default', validateDesign({ v: 1, crosshair: 'none', elements: { teamColumn: { fit: true } } }), '6d8ec815dd449012fcb2fc549e4392d5d43285751cce51cd5b101ea56cab9e04'],
+    ['a Modern design saved before the own panel fitted by default', validateDesign({ v: 1, preset: 'modern', crosshair: 'none', elements: { teamColumn: { fit: true } } }), '4c67fb0c1bba67763efe27a75b74c4c383ac02dcfbcf47e95349ff276d4d3a54'],
+    ['a Roboto design saved before the own panel fitted by default', validateDesign({ v: 1, font: 'roboto', crosshair: 'none', elements: { teamColumn: { fit: true } } }), '53437d599a759fc5b4a3c20609d28ce928332146b9598bf90e7a2095a661f180'],
   ];
   for (const [name, d, hash] of cases) {
     it(`${name} packs to the same bytes`, () => {

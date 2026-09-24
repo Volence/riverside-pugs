@@ -760,16 +760,19 @@ preview draws them). Also answers S4 (red box alpha against the preview) and S9 
   by 2 units, or the file's `inset`: 4.5 px and 6.75 px at 1080p, which land on the game's 4 and 6
   once the canvas's partial row is counted (slice 2.F X9). Offered on the own and the teammate `Health`
   (one HealthPanel class, B13 shows the same default inset on cards).
-- **Q2: clips YES, image NO; gate passed (G2), default NOT flipped.** `LocalPlayer` clips its
-  children (with `wide 100` the bar and the top scratch stop at x 1863, `b1/shots/crops/own-a.png`;
-  with 130 the bar runs to 1912, `b1v2`) and never paints its own `image` (no teal in two launches).
-  The "image painted" branch is closed: `ownBg` (`HudEdOwnBg`) is the only own-panel background.
-  Fit is offered. It is **not** the default: launch R (2026-09-24, `probe-2f/x12/incap.steps`,
-  `probe-2f/parity/x12-incap-own.png`) showed that after the player is incapacitated, game code puts
-  the health bar at the `Incapacitated` picture's x and leaves it there after the revive. Stock has
-  both at x 26; the fit rule squares `Incapacitated` at x 0, so a fitted bar lands 26 units left,
-  over the portrait (unfitted control: no shift). Open: a fit rule that keeps `Incapacitated`'s x on
-  the bar's, then the default.
+- **Q2: clips YES, image NO; gate passed (G2).** `LocalPlayer` clips its children (with `wide 100`
+  the bar and the top scratch stop at x 1863, `b1/shots/crops/own-a.png`; with 130 the bar runs to
+  1912, `b1v2`), and never paints its own `image` (no teal in two launches). The gate is worded as
+  the clip, so it passes: a new design fits your own health by default (`DEFAULT_DESIGN`), a saved
+  one stays as saved (the golden's "saved before" cases keep the old bytes). The "image painted"
+  branch is closed for good: `ownBg` (`HudEdOwnBg`) is the only background the own panel can have.
+  History: the default was held back once (ccc87af7) because launch R (`probe-2f/x12/incap.steps`,
+  `parity/x12-incap-own.png`) showed a fitted bar 26 units left after an incap and revive. client.dll
+  (1023f5df to 1023f6da) moves `Health` to `Incapacitated`'s x while down (y kept) and, on the revive,
+  to the `Items` child's x, or nowhere when there is none. The fit rule now starts `Incapacitated` at
+  the bar's x, and every own panel whose bar and down picture differ gets a hidden `Items` anchor at
+  the bar's x (b3cb108b). Launch X14 (`probe-2f/x14`, `parity/x14-incap-own.png`): fitted stock, a
+  dragged bar and Modern all keep the bar in place through two incap and revive cycles.
 
 ### B2. Survivor: every element hidden with `visible 0` only (one launch)
 

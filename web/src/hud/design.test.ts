@@ -173,8 +173,10 @@ describe('validateDesign, the teammate layout', () => {
     expect(validateDesign({ v: 1 }).elements).toEqual({});
     expect(validateDesign({ v: 1, elements: { chat: { x: 5 } } }).elements.teamColumn).toBeUndefined();
     expect(DEFAULT_DESIGN.elements.teamColumn).toEqual({ fit: true });
-    // Not your own health, whatever Q2 says: fitting it moves the bar after an incap (launch R, slice 2.F X12).
-    expect(DEFAULT_DESIGN.elements.ownHealth).toBeUndefined();
+    // Probe Q2 passed (slice 2.F G2): a new design fits your own health too; saved designs stay as saved.
+    expect(DEFAULT_DESIGN.elements.ownHealth).toEqual({ fit: true });
+    expect(validateDesign(structuredClone(DEFAULT_DESIGN)).elements.ownHealth).toEqual({ fit: true });
+    expect(validateDesign({ v: 1, elements: { teamColumn: { fit: true } } }).elements.ownHealth).toBeUndefined();
     expect(validateDesign(null).elements.teamColumn).toEqual({ fit: true });
     expect(team('stock', { fit: false })).toEqual({ fit: false });
     expect(team('stock', { fit: 'yes' })).toBeUndefined();

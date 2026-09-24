@@ -200,18 +200,20 @@ export interface HudDesign {
  * never adds it), so only designs made from here on start with it.
  */
 /**
- * Your own health is NOT fitted in a new design, although probe Q2 passed
- * (slice 2.F G2): launch R (/home/volence/l4d/hud/probe-2f/x12/, incap.steps,
- * parity/x12-incap-own.png) showed that once the player has been
- * incapacitated, game code puts the health bar at the Incapacitated
- * picture's x, and it stays there after the revive. Stock has both at x 26;
- * the fit rule squares Incapacitated at x 0, so a fitted panel's bar ends up
- * 26 units left, over the portrait. Fit is offered; the default waits for a
- * fit rule that keeps Incapacitated's x on the bar's.
+ * A new design fits the teammate cards and your own health panel. Your own
+ * fit came with probe Q2 (slice 2.F G2, /home/volence/l4d/hud/probe-phase2/
+ * RESULTS.md: LocalPlayer clips its children and never paints its image,
+ * b1/shots/crops/own-a.png), and moves nothing on screen; a design saved
+ * without it stays as saved. It was held back once (ccc87af7): launch R
+ * showed a fitted bar moved after an incap, because game code puts the bar
+ * at the down picture's x. The fit rule now starts the down picture at the
+ * bar (build.ts downLeft), and launch X14 (/home/volence/l4d/hud/probe-2f/
+ * x14, parity/x14-incap-own.png) showed a fitted bar in place through two
+ * incap and revive cycles, so the default came back.
  */
 export const DEFAULT_DESIGN: HudDesign = {
   v: 1, name: 'my_hud', preset: 'stock', advanced: false, aspect: '16:9', font: 'preset',
-  crosshair: 'none', elements: { teamColumn: { fit: true } }, styles: {}, images: {}, children: {},
+  crosshair: 'none', elements: { teamColumn: { fit: true }, ownHealth: { fit: true } }, styles: {}, images: {}, children: {},
 };
 
 /**
