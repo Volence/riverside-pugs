@@ -54,6 +54,9 @@ import type { DB } from './db.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
 import { backfillPersonas } from './personaBackfill.js';
 import { handleConduct } from './conductFlags.js';
+import { handleModCall } from './modCalls.js';
+import { ModCallPoster } from './discord/modCallPoster.js';
+import { MOD_CALL_PREFIX } from './discord/modCallCard.js';
 import { refreshSteamSignals, startSteamSignalRefresh, type SignalDeps } from './steamSignals.js';
 import { authRoutes } from './routes/auth.js';
 import { renewSession } from './session.js';
@@ -676,6 +679,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       const liveMatchRow = (token: string) =>
         deps.db.prepare("SELECT id, server_id FROM matches WHERE token = ? AND state = 'live'")
           .get(token) as { id: number; server_id: number | null } | undefined;
+      // A call's card names the map it happened on. match_live.current_map is
+      // kept current by ROUND_START (recordRoundStart in liveView.ts) and is
+      // keyed by match id, which the call event already carries; a call with
+      // no match (a spectator, or between maps) simply gets no map.
+      const currentMapOf = (matchId: number | null): string | null => {
+        if (matchId === null) return null;
+        return (deps.db.prepare('SELECT current_map FROM match_live WHERE match_id = ?')
+          .get(matchId) as { current_map: string | null } | undefined)?.current_map ?? null;
+      };
       logListener = new LogListener((raw, source, meta) => {
         // One rewrite at the door, before anything reads a SteamID off this
         // event. A player who connects on a second account that has been
@@ -800,6 +812,17 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             handleConduct(deps.db, ev, serverOf(source, meta));
           } catch (err) {
             console.error('[conduct] failed to check a line:', err);
+          }
+          return;
+        }
+        if (ev.kind === 'call') {
+          // In-game /mod calls. Never on the critical path: a failure here
+          // must not take down the listener that also carries match_end.
+          try {
+            const sid = serverOf(source, meta);
+            handleModCall(deps.db, ev, sid, { adminSteamIds: deps.config.adminSteamIds, map: currentMapOf(ev.matchId) });
+          } catch (err) {
+            console.error('[modcall] failed to handle a call:', err);
           }
           return;
         }
@@ -1287,6 +1310,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // must never wait on, or fail because of, Discord.
   let bot: RunningBot | null = null;
   let adminFeed: AdminFeedPoster | null = null;
+  let modCalls: ModCallPoster | null = null;
   let ticketSync: TicketSync | null = null;
   let ticketMirror: TicketMirror | null = null;
   let reportButton: ReportButton | null = null;
@@ -1340,6 +1364,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       onConnected: (t) => {
         adminFeed = new AdminFeedPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
         adminFeed.start();
+        modCalls = new ModCallPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
+        modCalls.start();
         for (const text of bootProblems.splice(0)) publishAdminEvent({ kind: 'problem', text });
         // Built before the reconciler so its hook can reach it. Which of the
         // two starts first decides nothing: start() only queues a first pass
@@ -1389,6 +1415,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         'r:': (i) => adminFeed!.handleButton(i),
         't:': (i) => handleTicketButton({ db: deps.db, publicUrl: deps.config.publicUrl, chats: () => deps.reporterChats ?? reporterChats }, i),
         'rp:': (i) => handleReportButton({ db: deps.db, adminSteamIds: deps.config.adminSteamIds, chats: () => deps.reporterChats ?? reporterChats }, i),
+        [MOD_CALL_PREFIX]: (i) => modCalls!.handleButton(i),
       },
       extraModals: {
         't:': (i) => handleTicketModal({ db: deps.db, publicUrl: deps.config.publicUrl, chats: () => deps.reporterChats ?? reporterChats }, i),
@@ -1419,6 +1446,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     ticketSync?.stop();
     offTicketNudge();
     adminFeed?.stop();
+    modCalls?.stop();
     await bot?.stop();
     clearInterval(reaper);
     clearInterval(presenceSweep);
