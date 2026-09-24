@@ -2565,6 +2565,7 @@ git commit -m "admin balance: Knobs tab with preview, apply, restore and per-ser
 
    The file is watched (`cfg/rotoblin_pug_4v4_map.cfg` in knobs.json `files`), so the next match on each box raises one "new patch" alert: name that patch ("pug_balance hook"). A missing `pug_balance.cfg` only prints "couldn't exec pug_balance.cfg".
 3. Check the web app can create and rename files in each box's `left4dead/cfg`: Dallas as user `pug` (group `l4d`, dir group-writable after `deploy.sh`'s `--chmod=Dg+w`), Chicago over FTP, Riverside #3/#4 over sftp as the configured user. Never commit a `pug_balance.cfg` to the deploy repo, and do not re-upload an old `nfo/stage` tree that contains one.
-4. Merge the branch and deploy the web app (normal web deploy; no plugin change in this piece).
+   On Chicago, also confirm the FTP server accepts a rename onto an existing file (the site falls back to remove + rename, which leaves a sub-second gap where the box would run the chain's own values).
+4. Merge the branch and deploy the web app (normal web deploy; no plugin change in this piece). Do not apply anything before step 2 is live: the site cannot tell whether the hook exists, and without it the written file never runs (every server would show "expected X, saw Y" and the detected-patch alarm).
 5. After a queue match has been played on the hooked config: Knobs tab, "Reset to baseline", Preview. It must say "Matches existing patch #N" (the hook patch). Apply it (name it if unnamed). Every server should go written, then confirmed after its next match.
 6. Only then make a real change.
