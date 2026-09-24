@@ -2618,3 +2618,26 @@ describe('The use bar pieces on the page (plan task U1)', () => {
     await waitFor(() => expect(saved().children?.progressBar?.Bar?.keys?.fill_color).toBe('0 255 0 255'));
   });
 });
+
+describe('The spawn and too-far panels on the page (plan tasks G1, Z2)', () => {
+  const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
+  it('colours the spawn panel\'s text from the panel and lists its lines with no colour of their own', async () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    fireEvent.click(layer('Spawn / ghost panel').getByRole('button', { name: 'Spawn / ghost panel' }));
+    fireEvent.input(screen.getByLabelText('Text colour colour'), { target: { value: '#00ffff' } });
+    await waitFor(() => expect(saved().elements?.ghostPanel?.keys?.WhiteText).toBe('0 255 255 255'));
+    fireEvent.click(layer('Spawn / ghost panel').getByRole('button', { name: 'Title' }));
+    expect(screen.queryByLabelText('Title colour')).toBeNull();
+  });
+
+  it('edits the too-far title colour and lists no Tank offer piece while its probe is closed', async () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    const row = layer('Too far / Tank offer');
+    expect(row.queryByRole('button', { name: 'Tank offer title' })).toBeNull();
+    fireEvent.click(row.getByRole('button', { name: 'Title' }));
+    fireEvent.input(screen.getByLabelText('Title colour'), { target: { value: '#ff00ff' } });
+    await waitFor(() => expect(saved().children?.zombiePanel?.['TooFarFromSurvivors/TooFarTitle']?.color).toBe('255 0 255 255'));
+  });
+});

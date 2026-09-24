@@ -22,7 +22,7 @@ import {
   type WeaponNumKey, WEAPON_ICONS, ITEM_ICONS, WEAPON_BOX_IMAGE, weaponImageKind,
 } from './design';
 import {
-  panelChildren, panelOfFile, childDef, maxInset, linkedValue, TEAM_PANEL, OWN_PANEL, SI_PANEL, ZCARD_PANEL, type ChildDef, type PanelChildren, type LinkRect, type LinkRule,
+  panelChildren, panelOfFile, childDef, childPath, maxInset, linkedValue, TEAM_PANEL, OWN_PANEL, SI_PANEL, ZCARD_PANEL, type ChildDef, type PanelChildren, type LinkRect, type LinkRule,
 } from './children';
 import { crosshairFiles } from '../crosshair/vpk';
 import {
@@ -406,8 +406,10 @@ function childPass(work: Work, design: HudDesign) {
     for (const [name, o] of Object.entries(kids)) {
       const def = panel.children.find((c) => c.name === name);
       if (!def) throw new Error(`${panel.file}: ${name} is not an editable child`);
+      // A piece waiting on a closed probe is never written (validateDesign drops it too).
+      if (def.gate && !probe(def.gate)) continue;
       const nodes = work.tree(panel.file);
-      let block = kvFind(nodes, [name]);
+      let block = kvFind(nodes, childPath(name));
       if (def.addable) {
         if (o.on === false) { if (block) nodes.splice(nodes.indexOf(block), 1); continue; }
         if (o.on === true && !block) {
@@ -447,7 +449,7 @@ interface LinkedBlock { file: string; rule: LinkRule; block: KvNode; from: LinkR
 function linkedBlocks(work: Work, design: HudDesign, panel: PanelChildren, name: string): LinkedBlock[] {
   if (!panel.linked) return [];
   const rectOf = (file: string): LinkRect | null => {
-    const n = kvFind(baseTree(baseOf(design), file), [name]);
+    const n = kvFind(baseTree(baseOf(design), file), childPath(name));
     return n ? { x: num(pcGet(n, 'xpos')), y: num(pcGet(n, 'ypos')), w: num(pcGet(n, 'wide')), h: num(pcGet(n, 'tall')) } : null;
   };
   const from = rectOf(panel.file);
@@ -472,7 +474,7 @@ export function panelLink(design: HudDesign, panelId: string, name: string, file
   const link = panel?.linked?.find((l) => l.file === file);
   if (!panel || !link) return null;
   const rectOf = (f: string): LinkRect | null => {
-    const n = kvFind(baseTree(baseOf(design), f), [name]);
+    const n = kvFind(baseTree(baseOf(design), f), childPath(name));
     return n ? { x: num(pcGet(n, 'xpos')), y: num(pcGet(n, 'ypos')), w: num(pcGet(n, 'wide')), h: num(pcGet(n, 'tall')) } : null;
   };
   const from = rectOf(panel.file), to = rectOf(file);
@@ -1098,7 +1100,7 @@ function hidePass(work: Work, design: HudDesign) {
     const nodes = work.tree(panel.file);
     for (const [name, o] of Object.entries(kids)) {
       if (o.visible !== false) continue;
-      const block = kvFind(nodes, [name]);
+      const block = kvFind(nodes, childPath(name));
       if (!block) continue;                            // an addable child that is off is not in the file at all
       hardHide(block);
       for (const link of panel.linked ?? []) { const b = work.optional(link.file, [name]); if (b) hardHide(b); }
@@ -1407,7 +1409,7 @@ export function panelChild(design: HudDesign, panelId: string, name: string, fil
   if (!panel) return null;
   const { work, boxes } = panelWork(design);
   const src = file && panel.linked?.some((l) => l.file === file) ? file : panel.file;
-  const n = kvFind(work.tree(src), [name]);
+  const n = kvFind(work.tree(src), childPath(name));
   if (!n) return null;
   const box = boxes[panelId];
   const shift = design.elements[panelId]?.fit && box ? box : { x: 0, y: 0 };
@@ -1470,7 +1472,7 @@ export function importedHasXhair(key: BaseKey): boolean {
 /** Whether the base's own panel file has this child: an addable child it lacks shows as a checkbox. */
 export function baseHasChild(key: BaseKey, name: string, panelId = 'teamColumn'): boolean {
   const file = panelChildren(panelId)?.file;
-  return file !== undefined && kvFind(baseTree(key, file), [name]) !== undefined;
+  return file !== undefined && kvFind(baseTree(key, file), childPath(name)) !== undefined;
 }
 
 export interface TeamLayout {

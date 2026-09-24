@@ -11,7 +11,7 @@ import { cssFamily, fontCell, _resetImportFaces } from './fonts';
 import { registerImport, unregisterImport, baseFile } from './base';
 import { sampleHud, fakeCanvas, recordingCtx, hostileFont, dropBlock, type HostileFontKind } from './importFixtures';
 import { _resetImportedArt } from './importArt';
-import { TEAM_PANEL } from './children';
+import { TEAM_PANEL, panelChildren } from './children';
 import { _setProbe } from './probes';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -125,16 +125,21 @@ describe('childRects', () => {
     for (const preset of ['stock', 'modern'] as const) for (const fit of [false, true]) {
       const d = design({ preset,
         elements: { ownHealth: { scale: 1.25 }, siHealth: { scale: 0.8 }, infectedRow: { scale: 1.3 }, abilityRing: { scale: 1.2 }, progressBar: { scale: 1.4 }, ghostPanel: { scale: 1.1 }, teamColumn: { scale: 1.5, ...(fit ? { fit: true } : {}) } },
-        children: fit ? { teamColumn: { Items: { x: 37, y: 40 }, HealthNumber: { on: true, x: 140 } } } : {} });
+        children: { ...(fit ? { teamColumn: { Items: { x: 37, y: 40 }, HealthNumber: { on: true, x: 140 } } } : {}),
+          zombiePanel: { 'TooFarFromSurvivors/TooFarTitle': { x: 80 } } } });
       const files = buildHud(d, { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } });
       for (const panelId of Object.keys(PANEL_FILE)) {
-        const written = parseKv(text(files, PANEL_FILE[panelId]))[0].value as KvNode[];
+        const whole = parseKv(text(files, PANEL_FILE[panelId]))[0].value as KvNode[];
+        // A panel whose pieces sit inside its frame block (the too-far box) names them by path.
+        const reg = panelChildren(panelId);
+        const holder = reg?.inFrame && reg.frame && reg.frame !== 'hudlayout' ? kvFind(whole, [reg.frame.block]) : undefined;
+        const written = holder ? holder.value as KvNode[] : whole;
         const nodes = written.filter((n) => typeof n.value !== 'string');
         const rects = childRects(d, panelId, { x: 0, y: 0 }, 1);
         expect(rects.length, `${preset} ${fit} ${panelId}`).toBe(nodes.length);
         // rects are in draw order, not file order, so pair each file child with its rect by name.
         for (const n of nodes) {
-          const r = rects.find((c) => c.name === n.key);
+          const r = rects.find((c) => c.name === (holder ? `${holder.key}/${n.key}` : n.key));
           const at = `${preset} ${fit} ${panelId} ${n.key}`;
           expect(r, at).toBeDefined();
           expect([r!.x, r!.y, r!.w, r!.h], at).toEqual(fileRect(nodes, n, panelId));

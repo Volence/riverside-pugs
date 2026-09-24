@@ -16,6 +16,7 @@
 import type { HudDesign } from '../../hud/design';
 import { elementRect, panelChild } from '../../hud/build';
 import { panelChildren, type StateArt } from '../../hud/children';
+import { probe } from '../../hud/probes';
 import { visibleElements, type Side } from '../../hud/mock';
 import { cardsOf, pickableCards, panelOf, type Selection } from '../../hud/selection';
 
@@ -99,7 +100,7 @@ export function LayersPanel(
               const t = cardsOf([i], el.id);
               return <Row key={`card${i}`} label={`Card ${i + 1}`} depth={1} active={isIn(sel, t)} hidden={false} onPick={(shift) => onPick(t, shift)} />;
             })}
-            {reg?.children.map((def) => {
+            {reg?.children.filter((def) => !def.gate || probe(def.gate)).map((def) => {
               const info = panelChild(design, el.id, def.name);
               if (!info) {
                 return def.addable ? (

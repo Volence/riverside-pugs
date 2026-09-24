@@ -17,8 +17,8 @@ import {
 import { screenW, SCREEN_H } from './units';
 import { elementById } from './elements';
 import { elementRect, elementFitShift, drawnAt, pieceMovableIn, teamLayout, teamCardRects, isFreeTeam, panelChild, panelLink, buildTrees, panelBgZpos, type CardChild } from './build';
-import { childDef, panelChildren, panelOfFile, linkedValue, unlinkedValue } from './children';
-import { kvGet } from './kv';
+import { childDef, childPath, panelChildren, panelOfFile, linkedValue, unlinkedValue } from './children';
+import { kvFind, kvGet } from './kv';
 import { unionBox, CORNERS, type Handle } from './guides';
 import { elementFrame, panelClamp, panelOf, type Selection } from './selection';
 
@@ -797,10 +797,15 @@ export function resetChildren(design: HudDesign, names: string[], panel = 'teamC
 export function raiseChild(design: HudDesign, names: string[], to: 'front' | 'back', panel = 'teamColumn'): HudDesign {
   const reg = panelChildren(panel);
   if (!reg) return design;
+  // Nested pieces ('Block/Child', children.ts childPath) are ordered among their own block's children.
+  const parent = childPath(names[0] ?? '').slice(0, -1);
+  const prefix = parent.length ? `${parent.join('/')}/` : '';
   const moving = new Set(names.map((n) => n.toLowerCase()));
   const injected = (key: string) => key.toLowerCase().startsWith('huded') || (key.toLowerCase() === 'items' && !childDef(panel, key));
-  const zs = buildTrees(design)(reg.file)
-    .filter((n) => typeof n.value !== 'string' && !moving.has(n.key.toLowerCase()) && !injected(n.key))
+  const holder = parent.length ? kvFind(buildTrees(design)(reg.file), parent) : undefined;
+  const level = holder ? (typeof holder.value === 'string' ? [] : holder.value) : buildTrees(design)(reg.file);
+  const zs = level
+    .filter((n) => typeof n.value !== 'string' && !moving.has(`${prefix}${n.key}`.toLowerCase()) && !injected(n.key))
     .map((n) => { const z = parseFloat(kvGet(n, 'zpos') ?? ''); return Number.isFinite(z) ? z : 0; });
   if (!zs.length) return design;
   const bg = panelBgZpos(panel);

@@ -19,7 +19,7 @@
  * A leaf: imports nothing.
  */
 
-export type ProbeId = 'Q1' | 'Q2' | 'Q3' | 'Q8' | 'Q24' | 'K5' | 'C2';
+export type ProbeId = 'Q1' | 'Q2' | 'Q3' | 'Q8' | 'Q24' | 'K5' | 'C2' | 'Z3' | 'T1';
 
 export const PROBES: Readonly<Record<ProbeId, { passed: boolean; batch: string; question: string }>> = {
   Q1: { passed: true, batch: 'B1 (a), (c)', question: 'monochrome_color on a HealthPanel recolours the whole panel (fill, outline, number, cross, scratches) in every state' },
@@ -32,6 +32,10 @@ export const PROBES: Readonly<Record<ProbeId, { passed: boolean; batch: string; 
   K5: { passed: false, batch: 'R4 (g, h)', question: "recordlabel0's font sets the kill notice's text size" },
   // Same file, C2: messagemode over netcon never opened the chat input (r4-i, r1-n), and the closed chat draws no box.
   C2: { passed: false, batch: 'R4 (i), R1 (n)', question: "basechat.res HudChat bgcolor_override colours the open chat's box" },
+  // Same file, Z3: no Tank offer reached the harness player in three tries (r3-e, R5, r6-d..l).
+  Z3: { passed: false, batch: 'R3 (e), R5, R6 (d..l)', question: "zombiepanel.res TankTakeover's title, text, picture and box keys are honoured" },
+  // Same file, T1..T4: the frustration meter never drew in four Tank runs (r3-h..k, probe-2f shots-tank-control).
+  T1: { passed: false, batch: 'R3 (h..k), R6 (i..l)', question: 'frustrationmeter.res keys (east_aligned, label colours, fonts, moves) are honoured' },
 };
 
 /** Test overrides, read before PROBES. */

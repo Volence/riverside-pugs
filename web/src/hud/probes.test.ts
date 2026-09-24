@@ -5,7 +5,7 @@ describe('the probe gates', () => {
   afterEach(() => { for (const id of Object.keys(PROBES) as ProbeId[]) _setProbe(id, null); });
   it('lists every open question, each passed or open as spec section 4 records it, each naming its batch', () => {
     // Q5 failed (the game ignores the cross colour) and was retired, not kept as a closed gate (slice 2.F G4).
-    const expected: Record<string, boolean> = { Q1: true, Q2: true, Q3: true, Q8: true, Q24: true, K5: false, C2: false };
+    const expected: Record<string, boolean> = { Q1: true, Q2: true, Q3: true, Q8: true, Q24: true, K5: false, C2: false, Z3: false, T1: false };
     expect(Object.keys(PROBES).sort()).toEqual(Object.keys(expected).sort());
     for (const [id, p] of Object.entries(PROBES)) {
       expect(p.passed, id).toBe(expected[id]);

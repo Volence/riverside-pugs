@@ -116,6 +116,13 @@ export interface ChildDef {
   fitPlace?: 'rule' | 'keep';
   /** The colour control waits for this probe, because code may repaint the piece. */
   colourGate?: ProbeId;
+  /**
+   * The whole piece waits for this probe: while it is closed the page lists
+   * no such piece, a click never picks it and validateDesign drops its
+   * stored edits, so the build never writes them (the Tank offer's pieces,
+   * which no probe has seen drawn).
+   */
+  gate?: ProbeId;
 }
 
 export interface PanelChildren {
@@ -128,6 +135,13 @@ export interface PanelChildren {
    * (teamPass places each card inside CHudTeamDisplay).
    */
   frame?: { file: string; block: string } | 'hudlayout';
+  /**
+   * The pieces sit inside the frame block (a block of the panel's own file),
+   * placed relative to it and named by their path, 'Block/Child'
+   * (childPath): the too-far box. Otherwise they are the file's top-level
+   * blocks and the frame, if any, is a sibling or another file's block.
+   */
+  inFrame?: boolean;
   /**
    * Other files that must follow this one's edits: 'same' copies an edit,
    * 'delta' applies the same move. Typed here, first written in slice 2.2
@@ -488,6 +502,58 @@ export const GHOST_PANEL: PanelChildren = {
   ],
 };
 
+/**
+ * A child's path in its file. Pieces nested inside another block of the
+ * file are named by the path, 'Block/Child' (zombiepanel.res holds its
+ * too-far pieces inside TooFarFromSurvivors and the Tank offer's inside
+ * TankTakeover, each with its own Background); every other name is one
+ * top-level block.
+ */
+export const childPath = (name: string): string[] => name.split('/');
+
+/**
+ * The too-far and Tank offer panel's pieces (zombiepanel.res; stock and
+ * Modern each ship one), framed by the too-far box inside it. Probe answers,
+ * /home/volence/l4d/hud/probe-phase2-rest/RESULTS.md, R6 (a spawned Smoker
+ * culled far from the survivors, r6/shots/r6/r6-a.png):
+ * - Z2: TooFarTitle's fgcolor_override is honoured (magenta).
+ * - Z4: the too-far Background's bgcolor_override is honoured (navy).
+ * - TooFarText has no xpos or wide: code draws it after the key (r6-a), so
+ *   it offers a colour only. Its font, and the picture's place, are the
+ *   plain Label and CIconPanel keys proven on the spawn panel (G3, G4).
+ * - Z3: the Tank offer box was never seen (three tries), so its pieces wait
+ *   on gate Z3 (plan decision 10).
+ */
+const TANK_OFFER = 'Shown when you are offered the Tank; not seen in our tests.';
+export const ZPANEL_PANEL: PanelChildren = {
+  panelId: 'zombiePanel',
+  file: 'resource/ui/zombiepanel.res',
+  repeat: 'single',
+  frame: { file: 'resource/ui/zombiepanel.res', block: 'TooFarFromSurvivors' },
+  inFrame: true,
+  children: [
+    { name: 'TooFarFromSurvivors/TooFarTitle', label: 'Title', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true,
+      note: 'Reads "TOO FAR FROM THE SURVIVORS".' },
+    { name: 'TooFarFromSurvivors/TooFarText', label: 'Line', kind: 'label', role: 'content', box: 'none', move: false, font: false, colour: true,
+      note: 'The game places this line after the key to press.' },
+    { name: 'TooFarFromSurvivors/SurvivorsImage', label: 'Picture', kind: 'other', role: 'content', box: 'square', move: true, font: false, colour: false,
+      note: 'The game draws your class here.' },
+    { name: 'TooFarFromSurvivors/Background', label: 'Background', kind: 'other', role: 'decor', box: 'wh', move: true, font: false, colour: false,
+      keys: [{ key: 'bgcolor_override', label: 'Background colour', type: 'colour', unsetLabel: 'File colour',
+        evidence: 'VGUI Panel key bgcolor_override (client.dll string run); probe Z4, probe-phase2-rest/r6/shots/crops/toofar-a.png (navy)' }] },
+    { name: 'TankTakeover/Title', label: 'Tank offer title', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true,
+      gate: 'Z3', note: TANK_OFFER },
+    { name: 'TankTakeover/Text', label: 'Tank offer text', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true,
+      gate: 'Z3', note: TANK_OFFER },
+    { name: 'TankTakeover/TankImage', label: 'Tank offer picture', kind: 'other', role: 'content', box: 'square', move: true, font: false, colour: false,
+      gate: 'Z3', note: TANK_OFFER },
+    { name: 'TankTakeover/Background', label: 'Tank offer background', kind: 'other', role: 'decor', box: 'wh', move: true, font: false, colour: false,
+      gate: 'Z3', note: TANK_OFFER,
+      keys: [{ key: 'bgcolor_override', label: 'Background colour', type: 'colour', unsetLabel: 'File colour', gate: 'Z3',
+        evidence: 'VGUI Panel key bgcolor_override (client.dll string run); the too-far box honours it (Z4); the Tank offer box was never seen' }] },
+  ],
+};
+
 /** A block's rect, as a linked rule reads it from a base file. */
 export interface LinkRect { x: number; y: number; w: number; h: number }
 export type LinkRule = 'same' | 'delta';
@@ -523,7 +589,7 @@ function mapLinked<T>(rule: LinkRule, key: string, v: T, a: LinkRect, b: LinkRec
   }
 }
 
-export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, ZCARD_PANEL, PROGRESS_PANEL, GHOST_PANEL];
+export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, ZCARD_PANEL, PROGRESS_PANEL, GHOST_PANEL, ZPANEL_PANEL];
 export const panelChildren = (panelId: string): PanelChildren | undefined => PANEL_CHILDREN.find((p) => p.panelId === panelId);
 export const teamChild = (name: string): ChildDef | undefined => TEAM_PANEL.children.find((c) => c.name === name);
 

@@ -101,6 +101,7 @@ export const PANEL_FILE: Record<string, string> = {
   abilityRing: 'resource/ui/hud/abilitytimerhud.res',
   progressBar: 'resource/ui/hud/progressbar.res',
   ghostPanel: 'resource/ui/hudghostpanel.res',
+  zombiePanel: 'resource/ui/zombiepanel.res',
 };
 
 /**
@@ -267,8 +268,13 @@ export function childRects(design: HudDesign, panelId: string, origin: PanelBox,
   const tree = buildTrees(design)(file);
   const pic = state !== undefined && previewOf(state).survivor === 'down' && DOWN_MOVES_BAR.has(panelId) ? kvFind(tree, ['Incapacitated']) : undefined;
   const barX = pic ? num(kvGet(pic, 'xpos')) : drawnBarX(tree, panelChildren(panelId));
-  return orderedChildren(tree).map((n) => ({
-    name: n.key, kind: kindOf(n),
+  // A panel framed by a block of its own file (the too-far box in zombiepanel.res) has its pieces inside
+  // that block, at places relative to it, and names them by their path (children.ts childPath).
+  const reg = panelChildren(panelId);
+  const nest = reg?.inFrame && reg.frame && reg.frame !== 'hudlayout' ? kvFind(tree, [reg.frame.block]) : undefined;
+  const level = nest && typeof nest.value !== 'string' ? nest.value : tree;
+  return orderedChildren(level).map((n) => ({
+    name: nest ? `${nest.key}/${n.key}` : n.key, kind: kindOf(n),
     x: origin.x + (barX !== undefined && isBar(n.key) ? barX : num(kvGet(n, 'xpos'))) * k, y: origin.y + num(kvGet(n, 'ypos')) * k,
     w: num(kvGet(n, 'wide')) * k, h: num(kvGet(n, 'tall')) * k,
     visible: (kvGet(n, 'visible') ?? '1') !== '0',

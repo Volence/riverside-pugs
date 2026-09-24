@@ -24,6 +24,7 @@ import { barGeometry, clampBarKeys } from './progress';
 import { canvasFont, fontCell, importedFace, loadFace } from './fonts';
 import { drawArt } from '../crosshair/model';
 import { childDef, panelChildren } from './children';
+import { probe } from './probes';
 import { drawWeapons, drawNineSlice, type WeaponHeld } from './weapons';
 
 export type Side = 'survivor' | 'infected';
@@ -223,7 +224,7 @@ export function childAt(
     const card = cardOpts(panel, i, state);
     for (const r of childRects(design, panel, { x: c.x, y: c.y }, 1, state)) {
       const def = childDef(panel, r.name);
-      if (!def || !r.visible || hiddenInState(panel, r.name, state, card.cls, card.self) || !inside(r, ux, uy)) continue;
+      if (!def || (def.gate && !probe(def.gate)) || !r.visible || hiddenInState(panel, r.name, state, card.cls, card.self) || !inside(r, ux, uy)) continue;
       // The painter numbers the teammate cards; a single panel draws with no card.
       if (labelDrawsNothing(design, panel, r.name, panel === 'teamColumn' || panel === 'infectedRow' ? { state, card: i, ...card } : { state })) continue;
       const area = r.w * r.h;

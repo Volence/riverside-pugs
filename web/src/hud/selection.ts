@@ -32,7 +32,8 @@ import { elementById } from './elements';
 import { panelChild, panelFrame, elementRect, isFreeTeam, teamCardRects, type CardFrame } from './build';
 import { childRects, hiddenInState, previewOf, panelFile, DOWN_MOVES_BAR, type ChildRect, type PreviewState, type SurvivorState } from './render';
 import { childAt, elementTargets, hitTest, inside, panelBoxes, TEAM_CARDS, visibleElements, type Side } from './mock';
-import { childDef, panelChildren } from './children';
+import { childDef, childPath, panelChildren } from './children';
+import { probe } from './probes';
 import { kvFind, kvGet } from './kv';
 import { screenW, SCREEN_H } from './units';
 import { ALL_HANDLES, CORNERS, unionBox, type Guide, type Handle } from './guides';
@@ -229,6 +230,7 @@ export function dragIntent(
  */
 export function drawnPieces(design: HudDesign, state: State, panel = 'teamColumn'): string[] {
   return (panelChildren(panel)?.children ?? []).filter((def) => {
+    if (def.gate && !probe(def.gate)) return false;
     const info = panelChild(design, panel, def.name);
     return def.role !== 'decor' && !!info && info.visible && !hiddenInState(panel, def.name, state);
   }).map((def) => def.name);
@@ -527,7 +529,8 @@ export function panelClamp(design: HudDesign, panel: string): { w: number; h: nu
   }
   const tree = baseTree(key, reg.file);
   for (const def of reg.children) {
-    const n = kvFind(tree, [def.name]);
+    if (def.gate && !probe(def.gate)) continue;
+    const n = kvFind(tree, childPath(def.name));
     if (!n) continue;
     w = Math.max(w, num(n, 'xpos') + num(n, 'wide'));
     h = Math.max(h, num(n, 'ypos') + num(n, 'tall'));

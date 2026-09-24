@@ -12,7 +12,7 @@ import type { Aspect } from './units';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { elementById } from './elements';
 import { SLOTS } from './slots';
-import { TEAM_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, panelOfFile, maxInset, type ChildDef, type KeyDef } from './children';
+import { TEAM_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, panelOfFile, maxInset, childPath, type ChildDef, type KeyDef } from './children';
 import { probe } from './probes';
 import { MAX_IMAGE_B64, MAX_IMAGE_SIDE } from './limits';
 import { clampBarKeys } from './progress';
@@ -840,7 +840,8 @@ export function validateDesign(raw: unknown): HudDesign {
     const kids: Record<string, ChildOverride> = {};
     for (const [name, v] of Object.entries(stored)) {
       const def = panel.children.find((c) => c.name === name);
-      if (!def) continue;
+      // A piece waiting on a closed probe keeps nothing, so a gate that flips back off clears it.
+      if (!def || (def.gate && !probe(def.gate))) continue;
       const o = childOverride(def, v);
       clampInset(d, panel.file, def, o);
       if (panel.panelId === 'progressBar' && def.name === 'Bar') clampProgressBar(d, panel.file, def, o);
@@ -869,7 +870,7 @@ function clampInset(d: HudDesign, file: string, def: ChildDef, o: ChildOverride)
   let tall = o.h;
   if (tall === undefined) {
     try {
-      const n = kvFind(baseTree(baseOf(d), file), [def.name]);
+      const n = kvFind(baseTree(baseOf(d), file), childPath(def.name));
       const t = parseFloat((n && kvGet(n, 'tall')) ?? '');
       if (Number.isFinite(t)) tall = t;
     } catch { /* an imported base not registered yet */ }
@@ -888,7 +889,7 @@ function clampProgressBar(d: HudDesign, file: string, def: ChildDef, o: ChildOve
   const k = o.keys;
   if (!k || (k.gap === undefined && k.border_thickness === undefined && k.shadow_thickness === undefined)) return;
   let node: KvNode | undefined;
-  try { node = kvFind(baseTree(baseOf(d), file), [def.name]); } catch { return; }
+  try { node = kvFind(baseTree(baseOf(d), file), childPath(def.name)); } catch { return; }
   const fileNum = (key: string, dflt: number) => { const v = parseFloat((node && kvGet(node, key)) ?? ''); return Number.isFinite(v) ? v : dflt; };
   const tall = o.h ?? fileNum('tall', NaN);
   if (!Number.isFinite(tall)) return;
