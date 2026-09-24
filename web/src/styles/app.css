@@ -163,10 +163,14 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .xh__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); font-size: var(--fs-dense); color: var(--text-muted); }
 .xh__toolbar select { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font: inherit; font-size: var(--fs-dense); }
 .xh__note { margin-left: auto; }
+/* Actual size or whole screen: two chips, pressed one on, kept to the selects' height. */
+.xh__view { display: flex; gap: var(--sp-1); }
+.xh__view .chip { min-height: 30px; padding-inline: var(--sp-2); }
 
 .xh__preview { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-4); align-items: start; }
-/* The preview canvas sizes itself from this box and redraws at 1:1, so it
- * must not be scaled by CSS after the fact. */
+/* The preview canvas sizes its backing store from this box in display
+ * pixels (times devicePixelRatio) and redraws, so the close-up is one game
+ * pixel per display pixel; the box must not be scaled by CSS after the fact. */
 .xh__canvas { display: block; width: 100%; aspect-ratio: 16 / 9; border: 1px solid var(--border); background: #000; }
 .xh__zoomcol { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); }
 /* pixelated on both: the point of the zoom and the texture view is to show
@@ -184,6 +188,9 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
   .xh__preview { grid-template-columns: 1fr; }
   .xh__zoomcol { flex-direction: row; flex-wrap: wrap; justify-content: center; align-items: center; }
   .xh__note { margin-left: 0; }
+}
+@media (max-width: 640px) {
+  .xh__view .chip { min-height: 44px; }
 }
 
 /* ---------- HUD editor ---------- */

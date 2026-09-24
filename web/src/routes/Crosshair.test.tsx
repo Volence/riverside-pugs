@@ -202,6 +202,75 @@ describe('the Crosshair page backdrop', () => {
   });
 });
 
+describe('the Crosshair page preview size', () => {
+  const view = (name: string) => screen.getByRole('button', { name });
+  const onCanvas = (calls: ReturnType<typeof stubCanvas>, cls: string, m: string) =>
+    calls.filter((c) => c.canvas.classList.contains(cls) && c.m === m);
+  const preview = () => document.querySelector('.xh__canvas') as HTMLCanvasElement;
+
+  it('opens on the close-up, 1:1 with the screen', () => {
+    render(<Crosshair />);
+    expect(screen.getByRole('group', { name: 'Preview size' })).toBeTruthy();
+    expect(view('Close-up').getAttribute('aria-pressed')).toBe('true');
+    expect(view('Whole screen').getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByText(/Centre of a 1920 x 1080 screen, 1 game pixel = 1 pixel of your display\./)).toBeTruthy();
+  });
+
+  it('shows the whole screen scaled down, says by how much, and remembers it', () => {
+    const calls = stubCanvas();
+    render(<Crosshair />);
+    fireEvent.click(view('Whole screen'));
+    expect(view('Whole screen').getAttribute('aria-pressed')).toBe('true');
+    // happy-dom lays nothing out, so the preview is its 320 x 180 minimum: 1920 x 1080 at 1/6.
+    expect(screen.getByText(/Whole 1920 x 1080 screen, shown at 17%\./)).toBeTruthy();
+    expect(screen.queryByText(/Centre of a/)).toBeNull();
+    const scales = onCanvas(calls, 'xh__canvas', 'scale');
+    expect(scales[scales.length - 1]!.a).toEqual([1 / 6, 1 / 6]);
+    expect(JSON.parse(localStorage.getItem('xhair')!).view).toBe('whole');
+
+    fireEvent.change(screen.getByRole('combobox', { name: /resolution/i }), { target: { value: '2160' } });
+    expect(screen.getByText(/Whole 3840 x 2160 screen, shown at 8%\./)).toBeTruthy();
+
+    cleanup();
+    render(<Crosshair />);
+    expect(view('Whole screen').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('keeps the 4x zoom at true scale on the whole screen, drawn from a close-up copy of the middle', () => {
+    const calls = stubCanvas();
+    render(<Crosshair />);
+    fireEvent.click(view('Whole screen'));
+    const zooms = onCanvas(calls, 'xh__zoom', 'drawImage');
+    const last = zooms[zooms.length - 1]!.a;
+    const src = last[0] as HTMLCanvasElement;
+    expect(src).toBeInstanceOf(HTMLCanvasElement);
+    expect(src.classList.contains('xh__canvas')).toBe(false);
+    expect([src.width, src.height]).toEqual([320, 180]);
+    expect(last.slice(1)).toEqual([128, 58, 64, 64, 0, 0, 256, 256]);
+    // That copy is drawn unscaled, the crosshair at 1:1 in its middle.
+    expect(calls.some((c) => c.canvas === src && c.m === 'scale')).toBe(false);
+  });
+
+  it('sizes the canvas in display pixels, so a HiDPI screen or browser zoom still gets 1 game pixel per display pixel', () => {
+    stubCanvas();
+    vi.stubGlobal('devicePixelRatio', 2);
+    render(<Crosshair />);
+    expect([preview().width, preview().height]).toEqual([640, 360]);
+    fireEvent.click(view('Whole screen'));
+    expect(screen.getByText(/Whole 1920 x 1080 screen, shown at 33%\./)).toBeTruthy();
+  });
+
+  it('goes back to the close-up, and an older saved page opens on it', () => {
+    localStorage.setItem('xhair', JSON.stringify({ shape: 'dot' }));
+    render(<Crosshair />);
+    expect(view('Close-up').getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(view('Whole screen'));
+    fireEvent.click(view('Close-up'));
+    expect(JSON.parse(localStorage.getItem('xhair')!)).toMatchObject({ shape: 'dot', view: 'closeup' });
+    expect(screen.getByText(/Centre of a/)).toBeTruthy();
+  });
+});
+
 describe('the Crosshair page and the community page', () => {
   const entry = (art: unknown): CommunityEntryDetail => ({
     id: 7, kind: 'crosshair', title: 'Ring', description: '', createdAt: '2026-09-24T01:00:00.000Z',

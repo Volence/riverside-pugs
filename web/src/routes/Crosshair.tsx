@@ -3,13 +3,13 @@ import { Panel } from '../components/bits';
 import { HudTabs } from '../components/HudTabs';
 import {
   DEFAULT_STATE, GAME_BACKDROPS, PX_AT_1080, RES_SCALE, TEX,
-  drawBackdrop, drawCrosshair,
+  SCREEN_SIZE, drawBackdrop, drawCrosshair, wholeScreenFit,
   type Backdrop, type CrosshairState, type GameBackdrop, type Res,
 } from '../crosshair/draw';
 import { CrosshairBuilder, Field } from '../crosshair/Builder';
 import { crosshairAddonFromPixels, saveBytes } from '../crosshair/download';
 import { CROSSHAIR_KEY, crosshairPixels, savedArt, saveImage } from '../crosshair/saved';
-import { readArt, type CrosshairArt } from '../crosshair/model';
+import { readArt, readView, type CrosshairArt, type PreviewView } from '../crosshair/model';
 import { communityApi, ApiError } from '../api';
 import type { Session } from '../hooks/useLiveState';
 import { confirm } from '../components/Confirm';
@@ -19,14 +19,26 @@ const STORAGE_KEY = CROSSHAIR_KEY;
 
 /** Per-viewer convenience only, so every access is guarded: a private window
  *  or blocked site data makes these throw rather than return null. */
-function loadState(): CrosshairState {
+function loadRaw(): unknown {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? { ...DEFAULT_STATE, ...JSON.parse(raw) } : DEFAULT_STATE;
+    return raw ? JSON.parse(raw) : null;
   } catch {
-    return DEFAULT_STATE;
+    return null;
   }
 }
+
+/** The saved crosshair over the defaults, without the page's own preview size (loadView's). */
+function loadState(): CrosshairState {
+  const raw = loadRaw();
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return DEFAULT_STATE;
+  const { view: _view, ...rest } = raw as Record<string, unknown>;
+  return { ...DEFAULT_STATE, ...rest } as CrosshairState;
+}
+
+const loadView = (): PreviewView => readView(loadRaw());
+
+const VIEWS: [PreviewView, string][] = [['closeup', 'Close-up'], ['whole', 'Whole screen']];
 
 /**
  * Keep an imported image in this browser as the texture this page exports
@@ -60,6 +72,10 @@ export function Crosshair({ session = { kind: 'anonymous' } }: { session?: Sessi
   // before replacing it.
   const [hadSaved] = useState(() => savedArt() !== null);
   const [state, setState] = useState<CrosshairState>(loadState);
+  // The preview's size, a page preference kept next to the crosshair but not part of it.
+  const [view, setView] = useState<PreviewView>(loadView);
+  // On the whole screen, display pixels per game pixel, for the note.
+  const [shownAt, setShownAt] = useState(1);
   const [name, setName] = useState('my_crosshair');
   const [status, setStatus] = useState('');
   const [sharing, setSharing] = useState(false);
@@ -67,6 +83,9 @@ export function Crosshair({ session = { kind: 'anonymous' } }: { session?: Sessi
   const preview = useRef<HTMLCanvasElement>(null);
   const zoom = useRef<HTMLCanvasElement>(null);
   const tex = useRef<HTMLCanvasElement>(null);
+  // On the whole screen, the preview as the close-up would draw it, off the
+  // page: the 4x zoom is copied from it, so it stays at true scale.
+  const actualCopy = useRef<HTMLCanvasElement | null>(null);
   // Images live in refs, not state: they are large, never rendered directly,
   // and a re-render on load is triggered by the counter below instead.
   const imported = useRef<HTMLImageElement | null>(null);
@@ -76,9 +95,16 @@ export function Crosshair({ session = { kind: 'anonymous' } }: { session?: Sessi
   const set = (patch: Partial<CrosshairState>) => setState((s) => ({ ...s, ...patch }));
 
   const save = (s: CrosshairState) => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch { /* not important enough to surface */ }
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...s, view })); } catch { /* not important enough to surface */ }
   };
-  useEffect(() => save(state), [state]);
+  useEffect(() => save(state), [state, view]);
+
+  // A resize or a browser zoom (which changes devicePixelRatio) paints again at the new size.
+  useEffect(() => {
+    const again = () => setImgTick((n) => n + 1);
+    addEventListener('resize', again);
+    return () => removeEventListener('resize', again);
+  }, []);
 
   // Mount only: on the image shape, the image imported last time, saved as its texture.
   useEffect(() => {
@@ -158,23 +184,55 @@ export function Crosshair({ session = { kind: 'anonymous' } }: { session?: Sessi
     tctx.clearRect(0, 0, TEX, TEX);
     drawCrosshair(tctx, TEX / 2, TEX / 2, TEX / PX_AT_1080, state, imported.current);
 
-    // 1:1 pixels: the backing store matches the CSS size, so what you see is
-    // what the game draws at the chosen resolution.
+    // The backing store is the canvas's size in display pixels (CSS pixels
+    // times devicePixelRatio, which a HiDPI screen or a browser zoom
+    // changes), so on the close-up one game pixel at the chosen resolution
+    // is one pixel of the viewer's display.
     const rect = p.getBoundingClientRect();
-    const w = Math.max(320, Math.round(rect.width));
+    const dpr = typeof devicePixelRatio === 'number' && devicePixelRatio > 0 ? devicePixelRatio : 1;
+    // 320 only when there is no layout to measure (a hidden page, tests): a
+    // floor under a real width would scale the canvas and break the 1:1.
+    const w = Math.max(1, Math.round((rect.width > 0 ? rect.width : 320) * dpr));
     const h = Math.round(w * 9 / 16);
     if (p.width !== w || p.height !== h) { p.width = w; p.height = h; }
     const sz = shot.current ? { w: shot.current.width, h: shot.current.height } : null;
-    // The shot at its own size on the chosen screen, like the crosshair; once
-    // an in-game shot has loaded, the tick paints again.
-    drawBackdrop(pctx, w, h, state.backdrop, shot.current, sz, () => setImgTick((n) => n + 1), RES_SCALE[state.res]);
-    pctx.imageSmoothingEnabled = true;
-    drawCrosshair(pctx, w / 2, h / 2, RES_SCALE[state.res], state, imported.current);
+    const k = RES_SCALE[state.res];
+    // Once an in-game shot has loaded, the tick paints again (asked for once per paint).
+    let onLoad: (() => void) | undefined = () => setImgTick((n) => n + 1);
+    // The screen from (sw, sh) wide and high, crosshair in its middle. The
+    // shot is at its own size on the chosen screen, like the crosshair.
+    const paint = (ctx: CanvasRenderingContext2D, sw: number, sh: number) => {
+      drawBackdrop(ctx, sw, sh, state.backdrop, shot.current, sz, onLoad, k);
+      onLoad = undefined;
+      ctx.imageSmoothingEnabled = true;
+      drawCrosshair(ctx, sw / 2, sh / 2, k, state, imported.current);
+    };
+
+    let zoomFrom: HTMLCanvasElement = p;
+    if (view === 'whole') {
+      // The whole screen, crosshair included, scaled by one factor so the
+      // two keep their true proportions; bars where the shapes differ.
+      const fit = wholeScreenFit(w, h, state.res);
+      pctx.fillStyle = '#000';
+      pctx.fillRect(0, 0, w, h);
+      pctx.save();
+      pctx.translate(fit.x, fit.y);
+      pctx.scale(fit.f, fit.f);
+      paint(pctx, fit.sw, fit.sh);
+      pctx.restore();
+      setShownAt(fit.f);
+      const c = actualCopy.current ?? (actualCopy.current = document.createElement('canvas'));
+      if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+      const cctx = c.getContext('2d');
+      if (cctx) { paint(cctx, w, h); zoomFrom = c; }
+    } else {
+      paint(pctx, w, h);
+    }
 
     zctx.imageSmoothingEnabled = false;
     zctx.clearRect(0, 0, 256, 256);
-    zctx.drawImage(p, w / 2 - 32, h / 2 - 32, 64, 64, 0, 0, 256, 256);
-  }, [state, imgTick]);
+    zctx.drawImage(zoomFrom, w / 2 - 32, h / 2 - 32, 64, 64, 0, 0, 256, 256);
+  }, [state, view, imgTick]);
 
   const pickImage = (e: Event, into: typeof imported, patch: Partial<CrosshairState>) => {
     const f = (e.target as HTMLInputElement).files?.[0];
@@ -220,6 +278,8 @@ export function Crosshair({ session = { kind: 'anonymous' } }: { session?: Sessi
     saveBytes(filename, bytes);
     setStatus(`Saved ${filename} (${(bytes.length / 1024).toFixed(0)} KB). Put it in left4dead/addons/ and restart the game.`);
   };
+
+  const screenName = SCREEN_SIZE[state.res].join(' x ');
 
   return (
     <div class="page page--wide">
@@ -288,7 +348,22 @@ export function Crosshair({ session = { kind: 'anonymous' } }: { session?: Sessi
                 {RESOLUTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </label>
-            <span class="muted xh__note">Preview is 1:1 pixels. Sizes are screen pixels at 1080p.</span>
+            <div class="xh__view" role="group" aria-label="Preview size">
+              {VIEWS.map(([v, l]) => (
+                <button
+                  key={v} type="button" class={`chip${view === v ? ' is-on' : ''}`}
+                  aria-pressed={view === v} onClick={() => setView(v)}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+            <span class="muted xh__note">
+              {view === 'whole'
+                ? `Whole ${screenName} screen, shown at ${Math.round(shownAt * 100)}%.`
+                : `Centre of a ${screenName} screen, 1 game pixel = 1 pixel of your display.`}
+              {' '}Sizes are screen pixels at 1080p.
+            </span>
           </div>
 
           <div class="xh__preview">

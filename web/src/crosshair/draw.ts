@@ -47,6 +47,22 @@ export const RES_SCALE: Record<Res, number> = {
   '768': 768 / 1080, '1080': 1, '1440': 4 / 3, '2160': 2,
 };
 
+/** Each resolution's whole screen, width and height in pixels. */
+export const SCREEN_SIZE: Record<Res, readonly [number, number]> = {
+  '768': [1366, 768], '1080': [1920, 1080], '1440': [2560, 1440], '2160': [3840, 2160],
+};
+
+/**
+ * The whole screen at `res` fitted into a w x h canvas: the screen's size,
+ * the canvas pixels per screen pixel `f`, and where its top left lands, so
+ * a screen that is not the canvas's shape sits centred between bars.
+ */
+export function wholeScreenFit(w: number, h: number, res: Res): { sw: number; sh: number; f: number; x: number; y: number } {
+  const [sw, sh] = SCREEN_SIZE[res];
+  const f = Math.min(w / sw, h / sh);
+  return { sw, sh, f, x: (w - sw * f) / 2, y: (h - sh * f) / 2 };
+}
+
 export const PRESETS: Record<string, Partial<CrosshairState>> = {
   'Classic green': { shape: 'cross', len: 7, thick: 2, gap: 3, color: '#39ff5a', alpha: 100, outline: 1, oalpha: 80, round: false },
   'Small cyan': { shape: 'cross', len: 4, thick: 1.5, gap: 2, color: '#33e6ff', alpha: 100, outline: 1, oalpha: 90, round: false },

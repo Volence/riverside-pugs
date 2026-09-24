@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
   drawBackdrop, gameBackdropImage, loadGameBackdrop, resetGameBackdrops, GAME_BACKDROPS, SIDE_BACKDROP, isGameBackdrop,
-  CROSSHAIR_BACKDROP, DEFAULT_STATE,
+  CROSSHAIR_BACKDROP, DEFAULT_STATE, SCREEN_SIZE, wholeScreenFit,
 } from './draw';
 
 /** An Image that loads (or fails) only when the test says so. */
@@ -122,5 +122,23 @@ describe('the crosshair backdrop', () => {
     const r = recorder();
     drawBackdrop(r.ctx, 1000, 500, 'shot', img, { w: 2560, h: 1440 }, undefined, 4 / 3);
     expect(r.calls.find(([k]) => k === 'drawImage')?.[1]).toEqual([img, -780, -470, 2560, 1440]);
+  });
+});
+
+describe('wholeScreenFit', () => {
+  it('knows each resolution as the screen it names', () => {
+    expect(SCREEN_SIZE).toEqual({ '768': [1366, 768], '1080': [1920, 1080], '1440': [2560, 1440], '2160': [3840, 2160] });
+  });
+
+  it('fits a 16:9 screen exactly into a 16:9 canvas', () => {
+    expect(wholeScreenFit(640, 360, '1080')).toEqual({ sw: 1920, sh: 1080, f: 1 / 3, x: 0, y: 0 });
+    expect(wholeScreenFit(640, 360, '2160').f).toBe(1 / 6);
+  });
+
+  it('fits the whole of a wider screen, centred, leaving bars', () => {
+    const r = wholeScreenFit(640, 360, '768');
+    expect(r.f).toBeCloseTo(640 / 1366);
+    expect(r.x).toBe(0);
+    expect(r.y).toBeCloseTo((360 - 768 * 640 / 1366) / 2);
   });
 });
