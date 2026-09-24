@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { childRects, drawPanel, setFont, PANEL_FILE, hiddenInState, ITEM_ROW, itemRowStart, paintAdditive, healthRgb, _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
+import { childRects, drawPanel, setFont, PANEL_FILE, hiddenInState, ITEM_ROW, itemRowStart, paintAdditive, healthRgb, _setImageFactory, _setCanvasFactory, _resetAssetCache, _cacheSizes, splatterSource, tinted } from './render';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { buildHud } from './build';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
@@ -17,6 +17,44 @@ import { join } from 'node:path';
 const design = (patch: Partial<HudDesign>): HudDesign => ({ ...structuredClone(DEFAULT_DESIGN), elements: {}, ...patch });
 const text = (files: { path: string; data: Uint8Array }[], path: string) =>
   new TextDecoder('latin1').decode(files.find((f) => f.path === path)!.data);
+
+describe('the splatter caches', () => {
+  afterEach(() => { _setCanvasFactory(null); });
+
+  it('keeps a bounded number of Fade and tint canvases through a long colour drag', () => {
+    _setCanvasFactory(fakeCanvas().factory);
+    for (let i = 0; i < 300; i++) {
+      const d = design({ splatters: { splatTop: { kind: 'fade', color: `${i % 256} 0 0 ${i % 255}` } } });
+      const got = splatterSource(d, 'splatTop')!;
+      tinted(got.src, got.key, 10, 177, 50, 256, 64);
+    }
+    const { fades, tints } = _cacheSizes();
+    expect(fades).toBeLessThanOrEqual(8);
+    expect(tints).toBeLessThanOrEqual(64);
+  });
+
+  it('keeps the most recently used entry when it evicts', () => {
+    const { factory, made } = fakeCanvas();
+    _setCanvasFactory(factory);
+    const fade = (c: string) => splatterSource(design({ splatters: { splatTop: { kind: 'fade', color: c } } }), 'splatTop')!;
+    const first = fade('1 2 3 255');
+    for (let i = 0; i < 20; i++) { fade(`${i} 9 9 255`); fade('1 2 3 255'); }
+    const n = made.length;
+    expect(fade('1 2 3 255').src).toBe(first.src);
+    expect(made).toHaveLength(n);
+  });
+
+  it('keys an uploaded picture by a short hash, not its whole data URL', () => {
+    const png = 'A'.repeat(20000);
+    const d = design({ splatters: { splatTop: { kind: 'image' } }, images: { splatTop: { w: 256, h: 64, png } } });
+    const key = splatterSource(d, 'splatTop')!.key;
+    expect(key.length).toBeLessThan(64);
+    const other = design({ splatters: { splatTop: { kind: 'image' } }, images: { splatTop: { w: 256, h: 64, png: `${png}B` } } });
+    expect(splatterSource(other, 'splatTop')!.key).not.toBe(key);
+    const same = design({ splatters: { splatTop: { kind: 'image' } }, images: { splatTop: { w: 256, h: 64, png: 'A'.repeat(20000) } } });
+    expect(splatterSource(same, 'splatTop')!.key).toBe(key);
+  });
+});
 
 /** A recording 2D context: every method the renderer calls logs its name, and save/restore keep a real alpha stack. */
 function recCtx() {

@@ -415,7 +415,34 @@ function defaultCanvas(w: number, h: number): HTMLCanvasElement | null {
 export function _setCanvasFactory(f: ((w: number, h: number) => HTMLCanvasElement | null) | null): void { canvasFactory = f ?? defaultCanvas; }
 /** A scratch canvas from the same factory tests replace: importArt.ts decodes an imported texture into one. */
 export function scratchCanvas(w: number, h: number): HTMLCanvasElement | null { return canvasFactory(w, h); }
-const tints = new Map<string, CanvasImageSource>();
+/**
+ * A least-recently-used cache of scratch canvases. A colour or opacity drag
+ * makes a new Fade and a new tint on every step, and each is a full-size
+ * canvas, so an unbounded map grows by hundreds of megabytes over one drag.
+ * A hit moves the entry to the back; a miss past `cap` entries drops the front.
+ */
+class Lru<V> {
+  private map = new Map<string, V>();
+  constructor(private cap: number) {}
+  get(key: string): V | undefined {
+    const v = this.map.get(key);
+    if (v !== undefined) { this.map.delete(key); this.map.set(key, v); }
+    return v;
+  }
+  set(key: string, v: V): void {
+    this.map.delete(key);
+    while (this.map.size >= this.cap) this.map.delete(this.map.keys().next().value!);
+    this.map.set(key, v);
+  }
+  keys(): IterableIterator<string> { return this.map.keys(); }
+  delete(key: string): void { this.map.delete(key); }
+  clear(): void { this.map.clear(); }
+  get size(): number { return this.map.size; }
+}
+
+// One frame can tint a few dozen distinct textures (cards, scratches, weapon
+// icons), so the cap sits well above that, or every repaint would remake them.
+const tints = new Lru<CanvasImageSource>(64);
 // An import's tints are keyed `imported:<id>|...` (drawTexture, weapons.ts), and go with it.
 onUnregister((key) => { for (const id of [...tints.keys()]) if (id.startsWith(`${key}|`)) tints.delete(id); });
 
@@ -448,9 +475,22 @@ export function tinted(img: CanvasImageSource, key: string, r: number, g: number
  * pixels the build writes into its .vtf (fadePixels), or the stored PNG the
  * build encodes. Undefined when the splatter is not custom, its picture is
  * still loading, or there is no scratch canvas to make a Fade on (happy-dom).
- * The key is unique per picture, so tinted()'s cache never mixes two of them.
+ * The key is unique per picture, so tinted()'s cache never mixes two of them;
+ * an upload's is a hash of its PNG, so the key stays short however big it is.
  */
-const fades = new Map<string, HTMLCanvasElement>();
+const fades = new Lru<HTMLCanvasElement>(8);
+const pngHashes = new WeakMap<object, string>();
+/** FNV-1a over the base64 text plus its length, once per stored picture object. */
+function pngHash(stored: { png: string }): string {
+  let h = pngHashes.get(stored);
+  if (h === undefined) {
+    let x = 0x811c9dc5;
+    for (let i = 0; i < stored.png.length; i++) x = Math.imul(x ^ stored.png.charCodeAt(i), 0x01000193);
+    h = `${(x >>> 0).toString(36)}.${stored.png.length.toString(36)}`;
+    pngHashes.set(stored, h);
+  }
+  return h;
+}
 export function splatterSource(design: HudDesign, id: SplatterId, onAsset?: () => void): { src: CanvasImageSource; key: string } | undefined {
   const def = splatterDef(id);
   const style = design.splatters?.[id];
@@ -475,10 +515,13 @@ export function splatterSource(design: HudDesign, id: SplatterId, onAsset?: () =
   if (style.kind === 'image' && stored) {
     const url = `data:image/png;base64,${stored.png}`;
     const img = urlImage(url, onAsset);
-    return img ? { src: img, key: `splat|${id}|${url}` } : undefined;
+    return img ? { src: img, key: `splat|${id}|img|${pngHash(stored)}` } : undefined;
   }
   return undefined;
 }
+
+/** Test seam: how many tint and Fade canvases the caches hold. */
+export function _cacheSizes(): { tints: number; fades: number } { return { tints: tints.size, fades: fades.size }; }
 
 /** Test seam: forget every loaded image, tint and warned-about material. */
 export function _resetAssetCache(): void { images.clear(); missing.clear(); tints.clear(); urls.clear(); fades.clear(); warnedNoIcons = false; _resetImportedArt(); }
