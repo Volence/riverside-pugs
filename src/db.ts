@@ -1159,6 +1159,32 @@ export function openDb(path: string): DB {
       PRIMARY KEY (match_id, ordinal, half, kind, t_ms)
     );
   `);
+
+  // Balance analytics piece 4: knob rollouts written to every server.
+  // docs/superpowers/specs/2026-09-24-balance-control-panel-design.md
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS balance_rollouts (
+      id            INTEGER PRIMARY KEY,
+      patch_id      INTEGER NOT NULL REFERENCES balance_patches(id),
+      values_json   TEXT NOT NULL,
+      content       TEXT NOT NULL,
+      created_by    TEXT NOT NULL,
+      created_at    TEXT NOT NULL,
+      superseded_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS balance_rollout_servers (
+      rollout_id    INTEGER NOT NULL REFERENCES balance_rollouts(id),
+      server_id     INTEGER NOT NULL,
+      state         TEXT NOT NULL CHECK (state IN ('pending','written','confirmed','failed')),
+      last_error    TEXT,
+      written_at    TEXT,
+      confirmed_at  TEXT,
+      seen_patch_id INTEGER,
+      seen_at       TEXT,
+      PRIMARY KEY (rollout_id, server_id)
+    );
+  `);
+
   ensureColumn(db, 'match_rounds', 'patch_id', 'INTEGER REFERENCES balance_patches(id)');
   // Every admin patch query filters or counts by patch_id, so it needs an index.
   db.exec('CREATE INDEX IF NOT EXISTS match_rounds_patch ON match_rounds(patch_id)');
