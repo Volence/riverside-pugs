@@ -42,4 +42,17 @@ describe('the site route table', () => {
     open('/community/5');
     expect(await screen.findByText('This entry was removed.')).toBeTruthy();
   });
+
+  it.each([
+    ['/hud', 'HUD editor'],
+    ['/crosshair', 'Crosshair'],
+    ['/community', 'Community'],
+    ['/community/5', 'Community'],
+  ])('keeps %s working, under the HUD tab strip with %s current', async (path, tab) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
+    open(path);
+    const strip = await screen.findByRole('navigation', { name: 'HUD tools' }, { timeout: 5000 });
+    const current = [...strip.querySelectorAll('a[aria-current="page"]')].map((a) => a.textContent);
+    expect(current).toEqual([tab]);
+  }, 15000);
 });

@@ -1,7 +1,7 @@
 import { Fragment, type ComponentChildren } from 'preact';
 import { useEffect, useRef, useState, useErrorBoundary } from 'preact/hooks';
 import { Panel } from '../components/bits';
-import { PageHeader } from '../components/PageHeader';
+import { HudTabs } from '../components/HudTabs';
 import { confirm } from '../components/Confirm';
 import { drawBackdrop, SIDE_BACKDROP, type Backdrop } from '../crosshair/draw';
 import { savedArt } from '../crosshair/saved';
@@ -1234,7 +1234,9 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
 
   return (
     <div class="page page--wide">
-      <PageHeader eyebrow="Tool" title="HUD Editor" />
+      {/* The tab strip names the page, so the title is for screen readers only. */}
+      <HudTabs active="hud" />
+      <h2 class="sr-only">HUD editor</h2>
       {sharing && (
         <ShareDialog
           kind={sharing} session={session}
