@@ -530,7 +530,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
 
   // Writes the active rollout's pug_balance.cfg to a box on release, so the
-  // new values land between matches; see src/balanceWriter.ts.
+  // new values land between matches; see src/balanceWriter.ts. Not wired in
+  // dev mode, where a release must never write through a real transport.
   const balanceWriter = new BalanceRolloutWriter({ db: deps.db, transport: deps.balanceTransport });
 
   const releaser = new ServerReleaser(deps.db, deps.serverCleaner ?? (async (server, token, opts) => {
@@ -587,7 +588,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     } finally {
       rcon.close();
     }
-  }), restarter, (server) => balanceWriter.writeForRelease(server.id));
+  }), restarter, deps.config.devMode ? null : (server) => balanceWriter.writeForRelease(server.id));
 
   // Every enabled box mirrors the website's bans. Built here, next to the
   // releaser, because both are the backend reaching into a game server
