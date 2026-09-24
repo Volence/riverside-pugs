@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { TEAM_PANEL, OWN_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, FIT_SQUARED, childDef, panelOfFile, type KeyDef } from './children';
+import { TEAM_PANEL, OWN_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, FIT_SQUARED, childDef, panelOfFile, maxInset, type KeyDef } from './children';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { SPLATTERS } from './splatter';
@@ -225,6 +225,11 @@ describe('the panel colour and inset keys (probes Q1 and Q3, slice 2.F X10)', ()
   it('offers the inset on a teammate card too, one HealthPanel class with the own bar', () => {
     expect(key(team('Health').keys, 'inset')).toMatchObject({ type: 'int', range: [0, 8], gate: 'Q3' });
     expect(key(team('Health').keys, 'inset').evidence).toMatch(/HealthPanel/);
+  });
+
+  it('keeps at least one unit of fill: 2 * inset < the bar\'s tall (review L1, like probe Q22\'s rule)', () => {
+    // Stock teammate bar 7 tall, Modern own bar 6, stock own bar 10.
+    expect([7, 6, 10, 3, 2, 1, 0].map(maxInset)).toEqual([3, 2, 4, 1, 0, 0, 0]);
   });
 
   it('says the scratches take the panel colour too', () => {

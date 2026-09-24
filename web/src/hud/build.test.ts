@@ -1684,3 +1684,16 @@ describe('a hidden piece the game re-shows is moved out of its panel (probe 2F l
     expect(kvGet(kvFind(tree(buildHud(design({})), CARD), ['Name'])!, 'xpos')).toBe('13');
   });
 });
+
+describe('the inset keeps a unit of fill (review L1)', () => {
+  const CARD_FILE = 'resource/ui/hud/teammatepanel.res';
+  const bar = (o: ChildOverride) => {
+    const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), children: { teamColumn: { Health: o } } };
+    return kvFind(buildTrees(d)(CARD_FILE), ['Health'])!;
+  };
+  it('clamps a design\'s inset to the bar\'s tall in the file, however the design got it', () => {
+    expect(kvGet(bar({ keys: { inset: '8' } }), 'inset')).toBe('3');
+    expect(kvGet(bar({ h: 4, keys: { inset: '8' } }), 'inset')).toBe('1');
+    expect(kvGet(bar({ keys: { inset: '1' } }), 'inset')).toBe('1');
+  });
+});

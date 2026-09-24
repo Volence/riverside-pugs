@@ -12,7 +12,7 @@ import type { Aspect } from './units';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { elementById } from './elements';
 import { SLOTS } from './slots';
-import { TEAM_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, panelOfFile, type ChildDef, type KeyDef } from './children';
+import { TEAM_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, panelOfFile, maxInset, type ChildDef, type KeyDef } from './children';
 import { probe } from './probes';
 import { MAX_IMAGE_B64, MAX_IMAGE_SIDE } from './limits';
 import { readArt, type CrosshairArt } from '../crosshair/model';
@@ -635,6 +635,7 @@ export function validateDesign(raw: unknown): HudDesign {
       const def = panel.children.find((c) => c.name === name);
       if (!def) continue;
       const o = childOverride(def, v);
+      clampInset(d, panel.file, def, o);
       if (Object.keys(o).length) kids[name] = o;
     }
     if (Object.keys(kids).length) d.children[panel.panelId] = kids;
@@ -647,6 +648,25 @@ export function validateDesign(raw: unknown): HudDesign {
     d.children[panel.panelId] = { ...kids, [def.block]: { ...kids[def.block], visible: false } };
   }
   return d;
+}
+
+/**
+ * A bar's inset, cut so the bar keeps a unit of fill (maxInset) at the
+ * design's own tall, else the base file's. An imported base that is not
+ * registered yet cannot be read here; the build cuts it again anyway.
+ */
+function clampInset(d: HudDesign, file: string, def: ChildDef, o: ChildOverride) {
+  const raw = o.keys?.inset;
+  if (def.kind !== 'bar' || raw === undefined) return;
+  let tall = o.h;
+  if (tall === undefined) {
+    try {
+      const n = kvFind(baseTree(baseOf(d), file), [def.name]);
+      const t = parseFloat((n && kvGet(n, 'tall')) ?? '');
+      if (Number.isFinite(t)) tall = t;
+    } catch { /* an imported base not registered yet */ }
+  }
+  if (tall !== undefined) o.keys = { ...o.keys, inset: String(Math.min(Number(raw), maxInset(tall))) };
 }
 
 const KEY = 'hud';

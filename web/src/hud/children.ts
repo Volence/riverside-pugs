@@ -156,6 +156,14 @@ const STATE_NOTE = 'The game decides when this one shows. Pick Down or Dead abov
 /** HealthPanel's inset when the file gives none: 2 units, 4 px at 1080p (b13/compare/stock-own.png, b1 Q3). */
 export const STOCK_BAR_INSET = 2;
 
+/**
+ * The largest inset that leaves a unit of fill in a bar `tall` units high:
+ * 2 * inset < tall (review L1, the same kind of rule as probe Q22's for the
+ * use/heal bar). The stock card bar (7 tall) takes 3, Modern's own bar (6)
+ * 2, the stock own bar (10) 4. Units in, units out.
+ */
+export const maxInset = (tall: number): number => Math.max(0, Math.floor((tall - 1) / 2));
+
 const MONO_EVIDENCE = 'client.dll HealthPanel run: m_monochromeColor|monochrome_color';
 const healthKeys = (note: string, insetEvidence: string): KeyDef[] => [
   { key: 'monochrome_color', label: 'Panel colour', type: 'colour', gate: 'Q1', evidence: MONO_EVIDENCE, note,

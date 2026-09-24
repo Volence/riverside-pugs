@@ -471,6 +471,14 @@ describe('children of every registered panel', () => {
       for (const q of ['Q1', 'Q3', 'Q8'] as const) _setProbe(q, null);
     }
   });
+  it('clamps the inset so the bar keeps a unit of fill (review L1)', () => {
+    const team = (h: Record<string, unknown>, preset = 'stock') => validateDesign({ v: 1, preset, children: { teamColumn: { Health: h } } }).children.teamColumn?.Health;
+    expect(team({ keys: { inset: 8 } })).toEqual({ keys: { inset: '3' } });                  // stock card bar: 7 tall
+    expect(team({ h: 20, keys: { inset: 8 } })).toEqual({ h: 20, keys: { inset: '8' } });  // the design's own tall wins
+    expect(team({ h: 2, keys: { inset: 8 } })).toEqual({ h: 2, keys: { inset: '0' } });
+    const own = validateDesign({ v: 1, preset: 'modern', children: { ownHealth: { Health: { keys: { inset: 5 } } } } });
+    expect(own.children.ownHealth?.Health).toEqual({ keys: { inset: '2' } });              // Modern own bar: 6 tall
+  });
   it('keeps your own health fit only once probe Q2 passes, and never adds it', () => {
     const raw = { v: 1, elements: { ownHealth: { fit: true, x: 20 } } };
     _setProbe('Q2', false);                                        // Q2 passed in slice 2.F G2: close it to test the rule

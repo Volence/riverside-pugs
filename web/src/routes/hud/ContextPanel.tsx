@@ -14,7 +14,7 @@ import { fontFace, shownKey, healthRgb } from '../../hud/render';
 import { elementById, type HudElement } from '../../hud/elements';
 import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam } from '../../hud/build';
 import { baseOf } from '../../hud/base';
-import { childDef, panelChildren, type KeyDef } from '../../hud/children';
+import { childDef, panelChildren, maxInset, type KeyDef } from '../../hud/children';
 import { probe } from '../../hud/probes';
 import {
   cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild, resetChildKey,
@@ -480,7 +480,7 @@ export function ChildControls(
       {def.keys?.filter((k) => !k.gate || probe(k.gate)).map((k) => (
         <Fragment key={k.key}>
           <KeyControl
-            def={k} end={end}
+            def={k} end={end} max={def.kind === 'bar' && k.key === 'inset' ? maxInset(info.h) : undefined}
             value={shownKey(design, k, o.keys?.[k.key] ?? info.keys?.[k.key])}
             onValue={(v, mode) => patch({ keys: { ...o.keys, [k.key]: v } }, mode)}
           />
@@ -514,8 +514,10 @@ export function ChildControls(
  * gate has passed reach here; the value is the file's text, as the
  * generator writes it.
  */
-function KeyControl({ def, value, onValue, end }: {
+function KeyControl({ def, value, onValue, end, max }: {
   def: KeyDef; value: string | undefined; onValue: (v: string, mode?: EditMode) => void; end: () => void;
+  /** A tighter top than the range: a bar's inset stops where one unit of fill is left (maxInset). */
+  max?: number;
 }) {
   if (def.type === 'colour' && value === undefined) {
     // Unset: the game's own colour, the health colour for a Panel colour.
@@ -542,12 +544,13 @@ function KeyControl({ def, value, onValue, end }: {
       </label>
     );
   }
-  const [lo, hi] = def.range ?? [-Infinity, Infinity];
+  const [lo, top] = def.range ?? [-Infinity, Infinity];
+  const hi = max === undefined ? top : Math.min(top, max);
   return (
     <label class="hud__row">
       <span>{def.label}</span>
       <input
-        type="number" min={def.range?.[0]} max={def.range?.[1]} value={text}
+        type="number" min={def.range?.[0]} max={Number.isFinite(hi) ? hi : undefined} value={text}
         onInput={(e) => {
           const n = parseInt((e.target as HTMLInputElement).value, 10);
           if (Number.isFinite(n)) onValue(String(Math.min(hi, Math.max(lo, n))), 'gesture');

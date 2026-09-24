@@ -21,7 +21,7 @@ import {
   baseTeam, contentBox, WEAPON_KEYS, WEAPON_BOX_COLOUR, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir,
   type WeaponNumKey,
 } from './design';
-import { panelChildren, panelOfFile, childDef, TEAM_PANEL, OWN_PANEL, type ChildDef, type PanelChildren } from './children';
+import { panelChildren, panelOfFile, childDef, maxInset, TEAM_PANEL, OWN_PANEL, type ChildDef, type PanelChildren } from './children';
 import { crosshairFiles } from '../crosshair/vpk';
 import {
   SPLATTERS, SPLAT_STAND_IN, splatterDef, splatterActive, splatterImageKey, splatterMaterial, fadePixels, type SplatterDef, type SplatterId,
@@ -369,7 +369,21 @@ function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: C
     }
   }
   if (o.z !== undefined) kvSet(block, 'zpos', String(o.z));
-  if (o.keys) writeKeys(block, o.keys);
+  if (o.keys) writeKeys(block, insetFor(def, block, o.keys));
+}
+
+/**
+ * A bar's keys with the inset cut to leave a unit of fill (maxInset) at the
+ * tall the block has now, the player's size edit included; the same rule
+ * validateDesign applies, here so a live edit (a bar made shorter under an
+ * inset) never ships a bar that is all border either. Only the design's
+ * own inset is cut; a file's is left as the file has it.
+ */
+function insetFor(def: ChildDef, block: KvNode, keys: Record<string, string>): Record<string, string> {
+  if (def.kind !== 'bar' || keys.inset === undefined) return keys;
+  const tall = parseFloat(pcGet(block, 'tall') ?? '');
+  if (!Number.isFinite(tall)) return keys;
+  return { ...keys, inset: String(Math.min(Number(keys.inset), maxInset(tall))) };
 }
 
 /**
