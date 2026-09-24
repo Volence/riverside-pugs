@@ -129,6 +129,16 @@ export function sessionsForMatch(db: DB, matchId: number): SourceTvSession[] {
  * says nothing new the second time it happens on the same connection in the
  * same match. All matched players go in a single post rather than one post
  * each, since the connection is one thing sharing itself.
+ *
+ * The dedup is keyed on whether an alert was actually PUBLISHED for this
+ * match + connection (sourcetv_sessions.alerted_at), not on whether an
+ * earlier session row merely exists. player_networks gains a row on every
+ * human connect for the whole life of a match, so a spectator who joins
+ * before the matching player has connected yet gets a session with no
+ * likely rostered account and no post; if dedup keyed on row existence, that
+ * earlier no-op session would permanently suppress the real first alert on
+ * a later reconnect. Keying on alerted_at instead means only a session that
+ * actually posted can suppress a later one.
  */
 export function onSourceTv(db: DB, serverId: number, ev: SourceTvEvent): void {
   const { opened } = recordSourceTv(db, serverId, ev);
@@ -146,13 +156,13 @@ export function onSourceTv(db: DB, serverId: number, ev: SourceTvEvent): void {
     .filter((steamid) => inMatch.get(matchId, steamid));
   if (steamids.length === 0) return;
 
-  // An earlier session in this same match, on any slot, already carried this
-  // connection: the alert already went out for it (or found nobody worth
-  // reporting, which the roster will not have changed since).
-  const already = db.prepare(
-    'SELECT 1 FROM sourcetv_sessions WHERE match_id = ? AND ip_hash = ? AND id < ?',
-  ).get(matchId, row.ipHash, opened);
-  if (already) return;
+  const alreadyAlerted = db.prepare(
+    'SELECT 1 FROM sourcetv_sessions WHERE match_id = ? AND ip_hash = ? AND alerted_at IS NOT NULL',
+  ).get(matchId, row.ipHash);
+  if (alreadyAlerted) return;
+
+  db.prepare('UPDATE sourcetv_sessions SET alerted_at = ? WHERE id = ?')
+    .run(new Date().toISOString(), opened);
 
   publishAdminEvent({
     kind: 'sourcetv_watch', matchId, serverId, spectatorName: row.name, steamids,

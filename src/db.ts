@@ -1223,6 +1223,12 @@ export function openDb(path: string): DB {
     CREATE INDEX IF NOT EXISTS idx_stv_match ON sourcetv_sessions(match_id);
     CREATE INDEX IF NOT EXISTS idx_stv_open ON sourcetv_sessions(server_id, slot) WHERE left_at IS NULL;
   `);
+  // Set on the one session row that actually published the "shared
+  // connection" admin alert for its match_id + ip_hash. A session existing
+  // is not enough to dedup on: player_networks gains rows for the whole life
+  // of a match, so an earlier session on the same connection may have found
+  // nobody rostered yet and posted nothing. See src/sourcetvSessions.ts.
+  ensureColumn(db, 'sourcetv_sessions', 'alerted_at', 'TEXT');
   // start/stop of the SourceTV relay itself, so a run of dropped sessions can
   // be told apart from the relay simply not running.
   db.exec(`
