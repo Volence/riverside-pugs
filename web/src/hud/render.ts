@@ -37,7 +37,7 @@ import { canvasFont, fontCell, importedFace, loadFace, type FontCell } from './f
 import { baseOf, onUnregister } from './base';
 import { importedMaterial, _resetImportedArt } from './importArt';
 import { addLinear, overLinear, linearOverAlpha } from './additive';
-import { panelChildren, childDef, type SurvivorState } from './children';
+import { panelChildren, childDef, STOCK_BAR_INSET, type KeyDef, type SurvivorState } from './children';
 import { elementById } from './elements';
 import { probe } from './probes';
 import { splatterForMaterial, fadePixels, splatterDef, type SplatterDef, type SplatterId } from './splatter';
@@ -386,6 +386,22 @@ const HEALTH_LABELS = new Set(['healthnumber', 'healthicon']);
 
 /** The health the Hurt preview samples: 40 of 100, in the orange band. */
 const HURT_HEALTH = 40;
+
+/**
+ * What a typed key's control shows (review M2): the value the preview draws,
+ * which is the game's. `value` is the design's or the file's text, or
+ * undefined when neither sets the key. An int or bool falls back to what
+ * the game uses with no value (KeyDef.unset: the stock inset of 2), then to
+ * the bottom of its range or off. A colour resolves a scheme name the way
+ * the preview does (rgbaOf) and stays undefined when unset: the game's own
+ * colour, which for a Panel colour is the health colour.
+ */
+export function shownKey(design: HudDesign, def: KeyDef, value: string | undefined): string | undefined {
+  if (def.type === 'colour') return value === undefined ? undefined : rgbaOf(design, value).join(' ');
+  if (value !== undefined) return value;
+  if (def.unset !== undefined) return def.unset;
+  return def.type === 'int' ? String(def.range?.[0] ?? 0) : '0';
+}
 
 /**
  * The panel colour: the monochrome_color of the panel's Health block in the
@@ -996,8 +1012,6 @@ function drawBar(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: numb
   }
 }
 
-/** HealthPanel's inset when the file gives none: 2 units, 4 px at 1080p (b13/compare/stock-own.png, b1 Q3). */
-const STOCK_BAR_INSET = 2;
 
 /**
  * The player panel class (your own panel and the teammate cards) moves the

@@ -5,7 +5,7 @@ import {
   startsOf, moveChildren, placeChildren, scaleChildren, cornerFactor, anchorOf, alignChildren, setChildrenVisible, resetChildren,
   placeElement, moveElements, moveCards, alignElements, scaleElement, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
   ammoOnly, withImport, withPreset, hasLayoutEdits,
-  splatterKind, patchSplatter, withSplatterImage, resetSplatter, panelClamp, raiseChild, setFit,
+  splatterKind, patchSplatter, withSplatterImage, resetSplatter, panelClamp, raiseChild, resetChildKey, setFit,
 } from './edit';
 import { buildHud, buildTrees } from './build';
 import { weaponSlots } from './weapons';
@@ -762,6 +762,23 @@ describe('child edits name their panel', () => {
     const card = { ...structuredClone(DEFAULT_DESIGN), styles: { panelBg: { kind: 'flat' as const } } };
     const allCard = ['Head', 'Health', 'Name', 'Items', 'Status', 'BackgroundImage', 'Incapacitated', 'Dead', 'Voice'];
     expect(raiseChild(card, allCard, 'front')).toBe(card);
+  });
+});
+
+describe('resetChildKey (review M2: Use the file\'s value)', () => {
+  it('removes just that key, keeping the rest of the piece\'s edits', () => {
+    const d = patchChild(structuredClone(DEFAULT_DESIGN), 'Health', { x: 40, keys: { inset: '1', monochrome_color: '1 2 3 255' } });
+    expect(resetChildKey(d, 'Health', 'inset').children.teamColumn?.Health).toEqual({ x: 40, keys: { monochrome_color: '1 2 3 255' } });
+  });
+  it('drops an emptied keys object, then an emptied piece and panel', () => {
+    const d = patchChild(structuredClone(DEFAULT_DESIGN), 'Health', { keys: { inset: '1' } }, 'ownHealth');
+    expect(resetChildKey(d, 'Health', 'inset', 'ownHealth').children).toEqual({});
+    const e = patchChild(structuredClone(DEFAULT_DESIGN), 'Health', { x: 3, keys: { inset: '1' } });
+    expect(resetChildKey(e, 'Health', 'inset').children.teamColumn?.Health).toEqual({ x: 3 });
+  });
+  it('gives the design back unchanged when the key is not set', () => {
+    const d = structuredClone(DEFAULT_DESIGN);
+    expect(resetChildKey(d, 'Health', 'inset')).toBe(d);
   });
 });
 

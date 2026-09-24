@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { childRects, drawPanel, setFont, PANEL_FILE, hiddenInState, previewOf, DEFAULT_PREVIEW, ITEM_ROW, itemRowStart, paintAdditive, paintLinearOver, healthRgb, _setImageFactory, _setCanvasFactory, _resetAssetCache, _cacheSizes, splatterSource, tinted, type SurvivorState } from './render';
+import { childRects, drawPanel, setFont, PANEL_FILE, hiddenInState, previewOf, DEFAULT_PREVIEW, ITEM_ROW, itemRowStart, paintAdditive, paintLinearOver, healthRgb, shownKey, _setImageFactory, _setCanvasFactory, _resetAssetCache, _cacheSizes, splatterSource, tinted, type SurvivorState } from './render';
 import { linearOverAlpha } from './additive';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { buildHud } from './build';
@@ -1307,5 +1307,23 @@ describe('Down and Dead cards over a custom splatter (slice 2.F X13)', () => {
     const { ctx, calls } = recCtx();
     drawPanel(ctx, d, 'teamColumn', O, 2, { card: 0, state: 'dead' });
     expect(calls.some((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === artUrl('vgui/s_panel_dead'))).toBe(true);
+  });
+});
+
+describe('what a typed key control shows (review M2: the value the preview draws)', () => {
+  const health = TEAM_PANEL.children.find((c) => c.name === 'Health')!;
+  const inset = health.keys!.find((k) => k.key === 'inset')!;
+  const mono = health.keys!.find((k) => k.key === 'monochrome_color')!;
+  it('shows the stock inset of 2 when neither the design nor the file sets one, as drawBar draws it', () => {
+    expect(shownKey(DEFAULT_DESIGN, inset, undefined)).toBe('2');
+    expect(shownKey(DEFAULT_DESIGN, inset, '1')).toBe('1');
+  });
+  it('shows no colour for an unset Panel colour: the game colours the panel by health', () => {
+    expect(shownKey(DEFAULT_DESIGN, mono, undefined)).toBeUndefined();
+    expect(shownKey(DEFAULT_DESIGN, mono, '10 20 30 255')).toBe('10 20 30 255');
+  });
+  it('resolves a scheme colour name, as the preview does', () => {
+    // clientscheme.res: "Orange" "255 176 0 255".
+    expect(shownKey(DEFAULT_DESIGN, mono, 'Orange')).toBe('255 176 0 255');
   });
 });

@@ -10,14 +10,14 @@ import {
   type WeaponNumKey, type WeaponsOverride, type WeaponBoxStyle,
 } from '../../hud/design';
 import { weaponKey } from '../../hud/weapons';
-import { fontFace } from '../../hud/render';
+import { fontFace, shownKey, healthRgb } from '../../hud/render';
 import { elementById, type HudElement } from '../../hud/elements';
 import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam } from '../../hud/build';
 import { baseOf } from '../../hud/base';
 import { childDef, panelChildren, type KeyDef } from '../../hud/children';
 import { probe } from '../../hud/probes';
 import {
-  cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild,
+  cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild, resetChildKey,
   startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, patchWeapons, ammoOnly, setFit,
   type Align,
 } from '../../hud/edit';
@@ -481,10 +481,18 @@ export function ChildControls(
         <Fragment key={k.key}>
           <KeyControl
             def={k} end={end}
-            value={o.keys?.[k.key] ?? info.keys?.[k.key] ?? keyDefault(k)}
+            value={shownKey(design, k, o.keys?.[k.key] ?? info.keys?.[k.key])}
             onValue={(v, mode) => patch({ keys: { ...o.keys, [k.key]: v } }, mode)}
           />
           {k.note && <p class="muted hud__note">{k.note}</p>}
+          {o.keys?.[k.key] !== undefined && (
+            <button
+              type="button" class="btn btn--ghost btn--sm" aria-label={`${k.label}: use the file's value`}
+              onClick={() => edit((d) => resetChildKey(d, name, k.key, panel))}
+            >
+              Use the file's value
+            </button>
+          )}
         </Fragment>
       ))}
       {def.note && <p class="muted hud__note">{def.note}</p>}
@@ -500,13 +508,6 @@ export function ChildControls(
   );
 }
 
-/** What a typed file key shows when neither the design nor the file sets it. */
-function keyDefault(k: KeyDef): string {
-  if (k.type === 'colour') return '255 255 255 255';
-  if (k.type === 'int') return String(k.range?.[0] ?? 0);
-  return '0';
-}
-
 /**
  * One typed file key of a child (a KeyDef): a colour as a swatch and an
  * opacity, a number within its range, or a checkbox. Only keys whose probe
@@ -514,13 +515,29 @@ function keyDefault(k: KeyDef): string {
  * generator writes it.
  */
 function KeyControl({ def, value, onValue, end }: {
-  def: KeyDef; value: string; onValue: (v: string, mode?: EditMode) => void; end: () => void;
+  def: KeyDef; value: string | undefined; onValue: (v: string, mode?: EditMode) => void; end: () => void;
 }) {
-  if (def.type === 'colour') return <ColourRow label={def.label} value={value} end={end} onPick={(c) => onValue(c, 'gesture')} />;
+  if (def.type === 'colour' && value === undefined) {
+    // Unset: the game's own colour, the health colour for a Panel colour.
+    // No opacity here, so touching it cannot write white over the whole
+    // panel; the key is written only when a colour is picked.
+    const [r, g, b] = healthRgb(100, 100, false);
+    return (
+      <div class="hud__stylerow">
+        <span class="hud__stylerow-label">{`${def.label}: ${def.unsetLabel ?? 'Game colour'}`}</span>
+        <input
+          type="color" aria-label={`${def.label} colour`} value={hexOf(`${r} ${g} ${b} 255`)}
+          onInput={(e) => onValue(withHex('0 0 0 255', (e.target as HTMLInputElement).value), 'gesture')} onChange={end}
+        />
+      </div>
+    );
+  }
+  if (def.type === 'colour') return <ColourRow label={def.label} value={value!} end={end} onPick={(c) => onValue(c, 'gesture')} />;
+  const text = value ?? '0';
   if (def.type === 'bool') {
     return (
       <label class="hud__check">
-        <input type="checkbox" checked={value !== '0'} onChange={(e) => onValue((e.target as HTMLInputElement).checked ? '1' : '0')} />
+        <input type="checkbox" checked={text !== '0'} onChange={(e) => onValue((e.target as HTMLInputElement).checked ? '1' : '0')} />
         <span>{def.label}</span>
       </label>
     );
@@ -530,7 +547,7 @@ function KeyControl({ def, value, onValue, end }: {
     <label class="hud__row">
       <span>{def.label}</span>
       <input
-        type="number" min={def.range?.[0]} max={def.range?.[1]} value={value}
+        type="number" min={def.range?.[0]} max={def.range?.[1]} value={text}
         onInput={(e) => {
           const n = parseInt((e.target as HTMLInputElement).value, 10);
           if (Number.isFinite(n)) onValue(String(Math.min(hi, Math.max(lo, n))), 'gesture');

@@ -412,6 +412,26 @@ export function resetChild(d: HudDesign, name: string, panel = 'teamColumn'): Hu
   return { ...d, children };
 }
 
+/**
+ * "Use the file's value" on one typed key (review M2): the design's value
+ * for that key goes, and nothing else of the piece's edits, so the file's
+ * own value (or the game's, when the file has none) is back. An emptied
+ * keys object, piece and panel go too, as resetChild leaves them.
+ */
+export function resetChildKey(d: HudDesign, name: string, key: string, panel = 'teamColumn'): HudDesign {
+  const kids = d.children[panel] ?? {};
+  const o = kids[name];
+  if (o?.keys?.[key] === undefined) return d;
+  const { [key]: _gone, ...keys } = o.keys;
+  const { keys: _old, ...rest } = o;
+  const next: ChildOverride = Object.keys(keys).length ? { ...rest, keys } : rest;
+  const left = { ...kids };
+  if (Object.keys(next).length) left[name] = next; else delete left[name];
+  const children: HudDesign['children'] = { ...d.children, [panel]: left };
+  if (!Object.keys(left).length) delete children[panel];
+  return { ...d, children };
+}
+
 // --- several pieces of one panel at once ---
 
 /** Where each named piece is now, in the unfitted frame: what a gesture starts from. Pieces the file lacks are left out. */

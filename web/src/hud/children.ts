@@ -35,6 +35,14 @@ export interface KeyDef {
   gate?: ProbeId;
   /** Shown under the control. */
   note?: string;
+  /**
+   * What the game uses when the file has no value, as the file's text: the
+   * control shows it rather than a made-up default. A colour key has none:
+   * unset means the game's own colour.
+   */
+  unset?: string;
+  /** For a colour key: what the control says while the file leaves it unset. */
+  unsetLabel?: string;
 }
 
 export type ChildKind = 'image' | 'label' | 'bar' | 'other';
@@ -145,10 +153,14 @@ const STATE_NOTE = 'The game decides when this one shows. Pick Down or Dead abov
  * the same HealthPanel class with the one m_inset read, and B13 shows the same
  * default frame and inset on cards (plan decision 6).
  */
+/** HealthPanel's inset when the file gives none: 2 units, 4 px at 1080p (b13/compare/stock-own.png, b1 Q3). */
+export const STOCK_BAR_INSET = 2;
+
 const MONO_EVIDENCE = 'client.dll HealthPanel run: m_monochromeColor|monochrome_color';
 const healthKeys = (note: string, insetEvidence: string): KeyDef[] => [
-  { key: 'monochrome_color', label: 'Panel colour', type: 'colour', gate: 'Q1', evidence: MONO_EVIDENCE, note },
-  { key: 'inset', label: 'Inset', type: 'int', range: [0, 8], gate: 'Q3', evidence: insetEvidence },
+  { key: 'monochrome_color', label: 'Panel colour', type: 'colour', gate: 'Q1', evidence: MONO_EVIDENCE, note,
+    unsetLabel: 'Game colour (by health)' },
+  { key: 'inset', label: 'Inset', type: 'int', range: [0, 8], gate: 'Q3', evidence: insetEvidence, unset: String(STOCK_BAR_INSET) },
 ];
 
 export const TEAM_PANEL: PanelChildren = {
