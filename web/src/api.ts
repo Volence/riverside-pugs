@@ -871,6 +871,8 @@ export interface PatchSummary {
   changes?: string[];
   plugins?: string[];
   onlyPluginsChanged?: boolean;
+  /** The release that produced this config, when one did. */
+  releaseId?: number | null;
 }
 export interface FleetSig { size: number; sha256: string | null }
 export interface FleetCellView { sig: FleetSig | null; label: 'repo' | 'base' | 'neither' | 'missing' | 'unread'; highlight: boolean; sizeOnly: boolean }

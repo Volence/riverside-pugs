@@ -69,6 +69,8 @@ export function recordBalanceSighting(db: DB, s: {
   /** The patch the round counts for: patchId, or where patchId is folded into. */
   effectivePatchId: number;
   newPatch: boolean; serverChanged: boolean;
+  /** The patch this server reported before this sighting (null on its first). */
+  previousPatchId: number | null;
 } {
   const inventory = withoutIgnored(s.inventory, s.ignored ?? []);
   // SQLite's datetime('now') format, so it sorts against match_rounds.started_at.
@@ -136,7 +138,7 @@ export function recordBalanceSighting(db: DB, s: {
         }
       }
     }
-    return { patchId, effectivePatchId, newPatch, serverChanged };
+    return { patchId, effectivePatchId, newPatch, serverChanged, previousPatchId: prev?.patch_id ?? null };
   })();
 }
 
@@ -277,6 +279,8 @@ export interface PatchSummary {
   changes: string[];
   plugins: string[];
   onlyPluginsChanged: boolean;
+  /** The release that produced this config, when one did. */
+  releaseId: number | null;
   servers: { serverId: number; name: string; lastSeenAt: string }[];
   /** When the patch was put on the public page; null when it is not public. */
   publishedAt: string | null;
@@ -288,14 +292,14 @@ export interface PatchSummary {
 export function listPatches(db: DB, lists: Lists = { versionless: [], ignored: [] }): PatchSummary[] {
   const rows = db.prepare(`
     SELECT p.id, p.name, p.notes, p.source, p.first_seen_at, p.reviewed, p.published_at,
-           COALESCE(p.triage, 'balance') AS triage, p.folded_into,
+           COALESCE(p.triage, 'balance') AS triage, p.folded_into, p.release_id,
            ROW_NUMBER() OVER (ORDER BY p.first_seen_at, p.id) AS number,
            (SELECT COUNT(*) FROM match_rounds r WHERE r.patch_id = p.id) AS rounds,
            (SELECT COUNT(*) FROM round_metric_context c JOIN matches m ON m.id = c.match_id
              WHERE c.patch_id = p.id AND m.state = 'completed' AND m.voided_at IS NULL) AS counted_rounds
     FROM balance_patches p ORDER BY number`).all() as {
       id: number; name: string | null; notes: string; source: PatchSource; first_seen_at: string;
-      reviewed: number; published_at: string | null; triage: TriageState; folded_into: number | null;
+      reviewed: number; published_at: string | null; triage: TriageState; folded_into: number | null; release_id: number | null;
       number: number; rounds: number; counted_rounds: number }[];
   const servers = db.prepare(`SELECT bps.patch_id, bps.server_id, s.name, bps.last_seen_at
     FROM balance_patch_servers bps JOIN servers s ON s.id = bps.server_id`).all() as {
@@ -305,7 +309,7 @@ export function listPatches(db: DB, lists: Lists = { versionless: [], ignored: [
     return {
       id: r.id, number: r.number, name: r.name, notes: r.notes, source: r.source,
       firstSeenAt: r.first_seen_at, reviewed: r.reviewed === 1, rounds: r.rounds, countedRounds: r.counted_rounds,
-      merged: r.triage === 'folded', triage: r.triage, foldedInto: r.folded_into,
+      merged: r.triage === 'folded', triage: r.triage, foldedInto: r.folded_into, releaseId: r.release_id,
       triageBase: info?.base ?? null, changes: info?.changes ?? [], plugins: info?.plugins ?? [],
       onlyPluginsChanged: info?.onlyPluginsChanged ?? false,
       servers: servers.filter((s) => s.patch_id === r.id)

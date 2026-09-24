@@ -95,6 +95,7 @@ import { BalanceAssembler } from './balanceAssembler.js';
 import { loadBalanceKnobs, BALANCE_KNOBS_PATH, type BalanceKnobs } from './balanceKnobs.js';
 import { recordBalanceSighting, refingerprintPatches } from './balancePatches.js';
 import { effectiveIgnored } from './balanceIgnore.js';
+import { linkReleaseSighting } from './releaseBalance.js';
 import { expectedPatchFor, confirmOnSighting } from './balanceRollouts.js';
 import { recordRoundMark, recordRoundStat, recordRoundStatsEnd, resetRoundLines } from './roundStatLines.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
@@ -994,6 +995,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
               expectedPatchId: serverId !== null ? expectedPatchFor(deps.db, serverId) : null,
             });
             if (serverId !== null) confirmOnSighting(deps.db, { serverId, patchId: r.patchId });
+            if (serverId !== null) linkReleaseSighting(deps.db, { serverId, patchId: r.patchId, previousPatchId: r.previousPatchId });
             return;
           }
           else if (ev.kind === 'round_stat' || ev.kind === 'round_stats_end' || ev.kind === 'round_mark') {

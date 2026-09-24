@@ -14,7 +14,7 @@ const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const A = 'left4dead/cfg/a.cfg', B = 'left4dead/cfg/b.cfg';
 
 function box(files: Record<string, string>, fail: { on?: 'write' | 'hash'; path?: string } = {}) {
-  const fs = new Map(Object.entries(files).map(([k, v]) => [k, Buffer.from(v)]));
+  const fs = new Map<string, Buffer>(Object.entries(files).map(([k, v]) => [k, Buffer.from(v)]));
   const w: TreeWriter = {
     kind: 'local',
     read: async (p) => fs.get(p) ?? null,
@@ -114,7 +114,7 @@ describe('ReleaseEngine', () => {
     expect(relState(id)).toBe('done');
 
     boxes[s2] = box({ [A]: 'A2', [B]: 'B1' }, { on: 'write' });
-    const id2 = stage([{ ...plan[0], sha256: sha('A2'), blob: 'ba' }]);
+    const id2 = stage([plan[0]]);
     boxes[s2].fs.set(A, Buffer.from('A1'));
     e.deploy(id2, { targets: [s1, s2], canary: s2, balance: later, adminId: '1' });
     await e.tick();

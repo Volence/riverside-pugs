@@ -32,6 +32,7 @@ export function TriageCard({ patch, targets, run, busy }: {
         Compared with {base ? label(base) : 'no earlier patch'}
         {patch.servers.length > 0 && <>; running on {patch.servers.map((s) => s.name).join(', ')}</>}.
       </p>
+      {patch.releaseId != null && <p class="muted">From release {patch.releaseId}.</p>}
       {changes.length > 0
         ? <ul class="admin-list">{changes.map((c) => <li key={c}>{c}</li>)}</ul>
         : <p class="muted">No recorded differences to show.</p>}
