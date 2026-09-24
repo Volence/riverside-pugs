@@ -1129,7 +1129,7 @@ const HOLDOUT_LINES: [string, string][] = [['CurrentTimeDigits', '00:00.50'], ['
  * The survival timer drawn from hudholdouttimer.res (through buildTrees):
  * its two dark boxes (ScalablePanel_bgMidGrey_glow, nine-sliced with 16
  * texel corners drawn draw_corner_width units wide), the stopwatch as a
- * white disc, and the times and the goal in their fonts, where r2-g has
+ * white disc (its size measured in the M-verify launch), and the times and the goal in their fonts, where r2-g has
  * them. The red splash behind (HoldoutTimerBackground) is left out: the
  * preview has no art for it.
  */
@@ -1153,7 +1153,9 @@ function paintHoldoutTimer(ctx: CanvasRenderingContext2D, r: Rect, design: HudDe
       const b = blockRect(timer, r, k, W);
       ctx.fillStyle = 'rgba(255,255,255,1)';
       ctx.beginPath();
-      ctx.arc(b.x + b.w / 2, b.y + b.h / 2, Math.min(b.w, b.h) * 0.4, 0, 2 * Math.PI);
+      // The clock face fills 0.3 of the Timer's side each way: 78 px across in its 130 px at 1080p
+      // (/home/volence/l4d/hud/probe-phase2-rest/m-verify/crops/m-e-game-over-preview.png).
+      ctx.arc(b.x + b.w / 2, b.y + b.h / 2, Math.min(b.w, b.h) * 0.3, 0, 2 * Math.PI);
       ctx.fill();
     }
     for (const [name, line] of HOLDOUT_LINES) {

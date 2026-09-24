@@ -176,6 +176,13 @@ describe('the survival timer (plan task M1)', () => {
     expect(Math.abs((now.a[1] as number) - (r.x + 25) * K)).toBeLessThanOrEqual(1);
   });
 
+  it('draws the stopwatch as big as the game does (m-verify: a disc about 78 px across in the 130 px Timer)', () => {
+    const d = validateDesign({ v: 1 });
+    const r = elementRect(d, 'holdoutTimer', d.aspect);
+    const disc = calls(d, 'survivor').find((x) => x.m === 'arc' && Math.abs((x.a[0] as number) - (r.x + 172 + 29) * K) < 1)!;
+    expect(Math.abs((disc.a[2] as number) * 2 - 78)).toBeLessThanOrEqual(3);
+  });
+
   it('is not on the infected side', () => {
     const d = validateDesign({ v: 1 });
     expect(text(calls(d, 'infected'), '00:00.50')).toBeUndefined();
