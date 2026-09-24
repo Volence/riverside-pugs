@@ -102,10 +102,19 @@ describe('the frustration meter drawn from its file (plan task Z3)', () => {
     for (const s of ['ATTACK THE SURVIVORS', 'You must attack or you will', 'lose control of the Tank', 'CONTROL']) {
       expect(text(all, s)?.fill, s).toBe('rgba(255,255,255,1)');
     }
-    // FrustrationBar: 0, 53, 150 x 8, east_aligned 1: the fill is the right half.
-    const fill = all.filter((x) => x.m === 'fillRect').map((x) => x.a as number[])
-      .find((a) => Math.abs(a[0] - (r.x + 75) * K) < 0.01 && Math.abs(a[1] - (r.y + 53) * K) < 0.01);
-    expect(fill).toEqual([(r.x + 75) * K, (r.y + 53) * K, 75 * K, 8 * K]);
+    // FrustrationBar: 0, 53, 150 x 8, east_aligned 1. As the game draws it (probe V1f,
+    // /home/volence/l4d/hud/probe-phase2-rest/v1/crops/v1f-frustration-stock-d.png): a 1 px white outline on the
+    // block, no track, and a white fill 2 px inside it, here half of the inside, from the east.
+    const x = r.x * K, y = (r.y + 53) * K, w = 150 * K, h = 8 * K;
+    const rects = all.filter((c) => c.m === 'fillRect');
+    const white = rects.filter((c) => c.fill === 'rgba(255,255,255,1)').map((c) => c.a);
+    expect(white).toContainEqual([x, y, w, 1]);
+    expect(white).toContainEqual([x, y + h - 1, w, 1]);
+    expect(white).toContainEqual([x, y, 1, h]);
+    expect(white).toContainEqual([x + w - 1, y, 1, h]);
+    const inner = w - 4;
+    expect(white).toContainEqual([x + w - 2 - inner / 2, y + 2, inner / 2, h - 4]);
+    expect(rects.some((c) => c.fill.startsWith('rgba(0,0,0'))).toBe(false);
   });
 
   it('draws a west bar from the west once the file says so', () => {
@@ -113,7 +122,8 @@ describe('the frustration meter drawn from its file (plan task Z3)', () => {
     const d = validateDesign({ v: 1, children: { tankPanel: { FrustrationBar: { keys: { east_aligned: false } } } } });
     const r = elementRect(d, 'tankPanel', d.aspect);
     const all = calls(d, TANK);
-    expect(all.filter((x) => x.m === 'fillRect').map((x) => x.a)).toContainEqual([r.x * K, (r.y + 53) * K, 75 * K, 8 * K]);
+    // V1d (v1/crops/v1d-frustration-d.png): east_aligned 0 drains toward the left edge.
+    expect(all.filter((x) => x.m === 'fillRect').map((x) => x.a)).toContainEqual([r.x * K + 2, (r.y + 53) * K + 2, (150 * K - 4) / 2, 8 * K - 4]);
   });
 
   it('shows only for a spawned Tank, and is picked only then', () => {

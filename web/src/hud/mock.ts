@@ -987,11 +987,15 @@ const FRUST_SAMPLE = 0.5;
  * resource/left4dead_english.txt (#L4D_tank_attack_survivors,
  * _lose_control, _lose_control_1), the CONTROL label, all in their file
  * colours and fonts, and the bar at FRUST_SAMPLE, filled from the right
- * while east_aligned is 1 (the stock file's). The bar's own colours were
- * never seen (no probe drew the meter), so the fill keeps the old
- * stand-in's red on a dark track. Whatever gate T1 says, this reads the
- * file as it is: a closed gate only keeps edits out of it.
+ * while east_aligned is 1 (the stock file's). The bar as the game draws it
+ * (probe V1f, /home/volence/l4d/hud/probe-phase2-rest/v1/crops/v1f-frustration-stock-d.png,
+ * and V1d's east_aligned 0, v1d-frustration-d.png): a 1 px white outline on
+ * the block, no track, and a white fill FRUST_FILL_INSET px inside it.
+ * Whatever gate T1 says, this reads the file as it is: a closed gate only
+ * keeps edits out of it.
  */
+const FRUST_WHITE = 'rgba(255,255,255,1)';
+const FRUST_FILL_INSET = 2;
 const FRUST_LINES: [string, string][] = [
   ['Countdown', 'ATTACK THE SURVIVORS'], ['Warning', 'You must attack or you will'], ['Warning2', 'lose control of the Tank'], ['FrustrationLabel', 'CONTROL'],
 ];
@@ -1004,11 +1008,15 @@ function paintTankPanel(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesig
     const bar = shown('FrustrationBar');
     if (bar) {
       const b = blockRect(bar, r, k, W);
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      ctx.fillRect(b.x, b.y, b.w, b.h);
-      const w = b.w * FRUST_SAMPLE;
-      ctx.fillStyle = '#d64545';
-      ctx.fillRect(pcGet(bar, 'east_aligned') === '0' ? b.x : b.x + b.w - w, b.y, w, b.h);
+      ctx.fillStyle = FRUST_WHITE;
+      ctx.fillRect(b.x, b.y, b.w, 1);
+      ctx.fillRect(b.x, b.y + b.h - 1, b.w, 1);
+      ctx.fillRect(b.x, b.y, 1, b.h);
+      ctx.fillRect(b.x + b.w - 1, b.y, 1, b.h);
+      const inner = b.w - 2 * FRUST_FILL_INSET;
+      const w = inner * FRUST_SAMPLE;
+      const x = pcGet(bar, 'east_aligned') === '0' ? b.x + FRUST_FILL_INSET : b.x + b.w - FRUST_FILL_INSET - w;
+      ctx.fillRect(x, b.y + FRUST_FILL_INSET, w, b.h - 2 * FRUST_FILL_INSET);
     }
     for (const [name, s] of FRUST_LINES) {
       const n = shown(name);
