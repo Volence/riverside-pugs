@@ -3,6 +3,7 @@ import type { DB } from './db.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { currentOrdinal } from './liveView.js';
 import { foldInto, resolvePatch } from './balanceFold.js';
+import { triageInfo, type Lists } from './balanceTriage.js';
 
 type Inventory = Record<string, string>;
 
@@ -246,6 +247,7 @@ export function refingerprintPatches(db: DB, versionless: string[], ignored: str
 }
 
 export type PatchSource = 'announced' | 'detected' | 'historical';
+export type TriageState = 'pending' | 'balance' | 'folded';
 export interface PatchSummary {
   id: number; number: number; name: string | null; notes: string; source: PatchSource;
   firstSeenAt: string; reviewed: boolean;
@@ -254,10 +256,19 @@ export interface PatchSummary {
   /** Rounds the balance comparison actually uses: computed rounds of
    *  completed, non-voided matches (the compare filter). */
   countedRounds: number;
-  /** A detected patch the boot refingerprint merged into another (its
-   *  fingerprint was cleared): it keeps the rounds already tagged with it, but
-   *  new sightings of its config go to the patch it was merged into. */
+  /** Folded (by triage or by the refingerprint merging it): its rounds count
+   *  for `foldedInto`. Kept for older web builds; same as triage === 'folded'. */
   merged: boolean;
+  triage: TriageState;
+  foldedInto: number | null;
+  /** Pending or folded: the patch it is judged against (the default fold
+   *  target) or folded into, the differences in plain words, the plugins
+   *  among them, and whether plugins are all that differ. Empty for a
+   *  balance patch. */
+  triageBase: { id: number; number: number; name: string | null } | null;
+  changes: string[];
+  plugins: string[];
+  onlyPluginsChanged: boolean;
   servers: { serverId: number; name: string; lastSeenAt: string }[];
   /** When the patch was put on the public page; null when it is not public. */
   publishedAt: string | null;
@@ -266,36 +277,42 @@ export interface PatchSummary {
 /** Every known patch, numbered in time order (ROW_NUMBER over first_seen_at,
  *  id) so a historical patch inserted after the fact still slots into its
  *  place rather than getting the highest number. */
-export function listPatches(db: DB): PatchSummary[] {
+export function listPatches(db: DB, lists: Lists = { versionless: [], ignored: [] }): PatchSummary[] {
   const rows = db.prepare(`
     SELECT p.id, p.name, p.notes, p.source, p.first_seen_at, p.reviewed, p.published_at,
-           (p.source = 'detected' AND p.fingerprint IS NULL) AS merged,
+           COALESCE(p.triage, 'balance') AS triage, p.folded_into,
            ROW_NUMBER() OVER (ORDER BY p.first_seen_at, p.id) AS number,
            (SELECT COUNT(*) FROM match_rounds r WHERE r.patch_id = p.id) AS rounds,
            (SELECT COUNT(*) FROM round_metric_context c JOIN matches m ON m.id = c.match_id
              WHERE c.patch_id = p.id AND m.state = 'completed' AND m.voided_at IS NULL) AS counted_rounds
     FROM balance_patches p ORDER BY number`).all() as {
       id: number; name: string | null; notes: string; source: PatchSource; first_seen_at: string;
-      reviewed: number; published_at: string | null; merged: number; number: number; rounds: number; counted_rounds: number }[];
+      reviewed: number; published_at: string | null; triage: TriageState; folded_into: number | null;
+      number: number; rounds: number; counted_rounds: number }[];
   const servers = db.prepare(`SELECT bps.patch_id, bps.server_id, s.name, bps.last_seen_at
     FROM balance_patch_servers bps JOIN servers s ON s.id = bps.server_id`).all() as {
       patch_id: number; server_id: number; name: string; last_seen_at: string }[];
-  return rows.map((r) => ({
-    id: r.id, number: r.number, name: r.name, notes: r.notes, source: r.source,
-    firstSeenAt: r.first_seen_at, reviewed: r.reviewed === 1, rounds: r.rounds, countedRounds: r.counted_rounds,
-    merged: r.merged === 1,
-    servers: servers.filter((s) => s.patch_id === r.id)
-      .map((s) => ({ serverId: s.server_id, name: s.name, lastSeenAt: s.last_seen_at })),
-    publishedAt: r.published_at,
-  }));
+  return rows.map((r) => {
+    const info = r.triage === 'balance' ? null : triageInfo(db, r.id, lists);
+    return {
+      id: r.id, number: r.number, name: r.name, notes: r.notes, source: r.source,
+      firstSeenAt: r.first_seen_at, reviewed: r.reviewed === 1, rounds: r.rounds, countedRounds: r.counted_rounds,
+      merged: r.triage === 'folded', triage: r.triage, foldedInto: r.folded_into,
+      triageBase: info?.base ?? null, changes: info?.changes ?? [], plugins: info?.plugins ?? [],
+      onlyPluginsChanged: info?.onlyPluginsChanged ?? false,
+      servers: servers.filter((s) => s.patch_id === r.id)
+        .map((s) => ({ serverId: s.server_id, name: s.name, lastSeenAt: s.last_seen_at })),
+      publishedAt: r.published_at,
+    };
+  });
 }
 
 /** One patch, with its raw inputs and a diff against the previous patch that
  *  actually carried inputs (a historical patch may have none). */
-export function patchDetail(db: DB, id: number): (PatchSummary & {
+export function patchDetail(db: DB, id: number, lists?: Lists): (PatchSummary & {
   inputs: Record<string, string> | null; diffVsPrevious: ReturnType<typeof diffInventories> | null;
 }) | null {
-  const all = listPatches(db);
+  const all = listPatches(db, lists);
   const i = all.findIndex((p) => p.id === id);
   if (i < 0) return null;
   const inputsOf = (pid: number) => {
@@ -310,17 +327,19 @@ export function patchDetail(db: DB, id: number): (PatchSummary & {
 
 /** Every server's current patch and how its live inventory differs from each
  *  other server's, for spotting a box that fell behind or ahead. */
-export function serverDrift(db: DB): {
+export function serverDrift(db: DB, ignored: string[] = []): {
   serverId: number; name: string; patchId: number; since: string;
   differsFrom: { name: string; diff: string }[];
 }[] {
   const rows = db.prepare(`SELECT st.server_id, s.name, st.patch_id, st.since, st.inventory_json
     FROM balance_server_state st JOIN servers s ON s.id = st.server_id ORDER BY s.id`).all() as {
       server_id: number; name: string; patch_id: number; since: string; inventory_json: string }[];
+  // A stored inventory may predate a plugin joining the ignored list.
+  const inv = (json: string) => withoutIgnored(JSON.parse(json) as Inventory, ignored);
   return rows.map((r) => ({
     serverId: r.server_id, name: r.name, patchId: r.patch_id, since: r.since,
     differsFrom: rows.filter((o) => o.server_id !== r.server_id)
-      .map((o) => ({ name: o.name, d: diffInventories(JSON.parse(o.inventory_json) as Inventory, JSON.parse(r.inventory_json) as Inventory) }))
+      .map((o) => ({ name: o.name, d: diffInventories(inv(o.inventory_json), inv(r.inventory_json)) }))
       .filter((o) => o.d.added.length + o.d.removed.length + o.d.changed.length > 0)
       .map((o) => ({ name: o.name, diff: formatDiff(o.d) })),
   }));
