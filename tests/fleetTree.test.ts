@@ -20,6 +20,9 @@ describe('isManaged', () => {
     expect(isManaged('left4dead/addons/sub/x.vpk')).toBe(true);
     expect(isManaged('left4dead/addons/sourcemod/data/replays/r.rip')).toBe(false);
     expect(isManaged('left4dead/cfg/../../etc/passwd')).toBe(false);
+    expect(isManaged('left4dead/mymotd.txt')).toBe(true);
+    expect(isManaged('left4dead/myhost.txt')).toBe(true);
+    expect(isManaged('left4dead/motd.txt')).toBe(false);
     expect(isManaged('left4dead/addons/sourcemod/scripting/include/sourcemod.inc')).toBe(false);
     expect(isManaged('left4dead/addons/sourcemod/data/tickstats/clients-2026-09-20.csv')).toBe(false);
     expect(isManaged('left4dead/addons/sourcemod/data/admin_cache_dump.txt')).toBe(false);
@@ -49,6 +52,7 @@ describe('localTreeReader', () => {
     writeFileSync(join(dir, 'left4dead/addons/sourcemod/logs/L1.log'), 'log');
     writeFileSync(join(dir, 'left4dead/addons/big.vpk'), 'vpk');
     writeFileSync(join(dir, 'left4dead/cfg/server.cfg'), 'cfg');
+    writeFileSync(join(dir, 'left4dead/mymotd.txt'), 'motd');
     symlinkSync(join(dir, 'left4dead/cfg/server.cfg'), join(dir, 'left4dead/cfg/link.cfg'));
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
@@ -58,6 +62,7 @@ describe('localTreeReader', () => {
     expect(files.sort((a, b) => a.path.localeCompare(b.path))).toEqual([
       { path: 'left4dead/addons/sourcemod/plugins/a.smx', size: 3, sha256: sha('aaa') },
       { path: 'left4dead/cfg/server.cfg', size: 3, sha256: sha('cfg') },
+      { path: 'left4dead/mymotd.txt', size: 4, sha256: sha('motd') },
     ]);
   });
 

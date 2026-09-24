@@ -16,6 +16,8 @@ import type { ServerRow } from './serverPool.js';
 
 export const MANAGED_ROOTS = ['left4dead/addons', 'left4dead/cfg', 'left4dead_dlc4/missions'] as const;
 export const SIZE_CAP = 20 * 1024 * 1024;
+/** Single files directly in left4dead/ that the deploy repo ships. */
+export const MANAGED_FILES = ['left4dead/mymotd.txt', 'left4dead/myhost.txt'] as const;
 const SKIP_EXT = /\.(log|dem|rip|sq3|sqlite|db)$/i;
 /** Never run, or written by the server itself, so they differ by nature:
  *  SourceMod's source tree (Chicago's NFO install has none), tickstats output,
@@ -27,6 +29,7 @@ const SKIP_FILE = /^(admin_cache_dump\.txt|pug_logauth_\d+\.txt|banned_user\.cfg
 export function isManaged(path: string): boolean {
   const parts = path.split('/');
   if (parts.some((p) => p === '' || p === '.' || p === '..')) return false;
+  if ((MANAGED_FILES as readonly string[]).includes(path)) return true;
   if (!MANAGED_ROOTS.some((r) => path.startsWith(`${r}/`))) return false;
   if (parts.includes('logs') || parts.includes('replays')) return false;
   if (SKIP_EXT.test(path)) return false;
@@ -81,6 +84,11 @@ export function localTreeReader(gameDir: string, opts: { sizeCap?: number } = {}
       if (!st?.isDirectory()) throw new Error(`game dir ${gameDir} not found on this machine`);
       const out: TreeFile[] = [];
       for (const r of MANAGED_ROOTS) await walk(r, out);
+      for (const f of MANAGED_FILES) {
+        const abs = join(gameDir, f);
+        const fst = await lstat(abs).catch(() => null);
+        if (fst?.isFile()) out.push({ path: f, size: fst.size, sha256: fst.size > cap ? null : await hashFile(abs) });
+      }
       return out;
     },
   };
@@ -105,7 +113,7 @@ export function sftpTreeReader(cfg: {
       // -type f lists regular files only: find does not follow symlinks by
       // default and a symlink is not type f. A root the box lacks is skipped.
       const roots = MANAGED_ROOTS.map(shq).join(' ');
-      const listing = await ssh(`cd ${shq(cfg.gameDir)} && for r in ${roots}; do [ -d "$r" ] && find "$r" -type f -printf '%s\\t%p\\n'; done; true`);
+      const listing = await ssh(`cd ${shq(cfg.gameDir)} && for r in ${roots}; do [ -d "$r" ] && find "$r" -type f -printf '%s\\t%p\\n'; done; for f in ${MANAGED_FILES.map(shq).join(' ')}; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\\t%s\\n' "$(stat -c %s "$f")" "$f"; done; true`);
       const files: TreeFile[] = [];
       for (const line of listing.stdout.split('\n')) {
         const tab = line.indexOf('\t');
@@ -166,6 +174,22 @@ export function ftpTreeReader(cfg: {
           }
         };
         for (const r of MANAGED_ROOTS) await walk(r);
+        let top: Awaited<ReturnType<FtpTreeClient['list']>> = [];
+        try { top = await client.list(`${cfg.gameDir}/left4dead`); } catch (err) {
+          if ((err as { code?: number }).code !== 550) throw err;
+        }
+        for (const e of top) {
+          const p = `left4dead/${e.name}`;
+          if (!e.isFile || !(MANAGED_FILES as readonly string[]).includes(p)) continue;
+          let sha256: string | null = null;
+          if (e.size <= SIZE_CAP) {
+            const h = sha();
+            const sink = new Writable({ write(chunk, _enc, cb) { h.update(chunk); cb(); } });
+            await client.downloadTo(sink, `${cfg.gameDir}/${p}`);
+            sha256 = h.digest('hex');
+          }
+          out.push({ path: p, size: e.size, sha256 });
+        }
         return out;
       } finally {
         client.close();

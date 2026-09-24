@@ -67,6 +67,14 @@ export interface Config {
   replayLiveDir: string;
   /** Where scripts/push-manifest.ts drops the fleet view's repo.json and base.json. */
   fleetDir: string;
+  /** The deploy repo the site stages releases from (read-only deploy key). */
+  deployRepoUrl: string;
+  /** ssh key for the deploy repo; null uses the default ssh identity. */
+  deployRepoKey: string | null;
+  /** The site's bare clone of the deploy repo. */
+  deployRepoDir: string;
+  /** Per-release backups of every file a deploy replaced or removed. */
+  releasesDir: string;
   discord: DiscordConfig | null;
   twitch: TwitchConfig | null;
 }
@@ -115,6 +123,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     ticketAttachmentsDir: env.TICKET_ATTACHMENTS_DIR?.trim() || join(dirname(dbPath), 'ticket-attachments'),
     replayLiveDir: env.REPLAY_LIVE_DIR?.trim() || join(dirname(dbPath), 'replays-live'),
     fleetDir: env.FLEET_DIR?.trim() || join(dirname(dbPath), 'fleet'),
+    deployRepoUrl: env.DEPLOY_REPO_URL?.trim() || 'git@github.com:Volence/l4d-deploy.git',
+    deployRepoKey: env.DEPLOY_REPO_KEY?.trim() || null,
+    deployRepoDir: join(dirname(dbPath), 'deploy-repo.git'),
+    releasesDir: join(dirname(dbPath), 'releases'),
     discord: loadDiscord(env),
     twitch: loadTwitch(env),
   };
