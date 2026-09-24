@@ -65,6 +65,7 @@ export const defs: MetricDef[] = [
   { id: 'hunter.spawns', group: 'hunter', version: 1, description: 'Hunter spawns per round.',
     compute: (c) => countByPhase(c, spawnsOf(c, HUNTER)) },
   { id: 'hunter.skeet_rate', group: 'hunter', version: 2, description: 'Skeets per hunter spawn.',
+    public: { label: 'Hunters skeeted' },
     compute: (c) => (skillEvents(c)
       ? ratioByPhase(c, kind(c, 'skeet').filter((e) => e.target !== null), spawnsOf(c, HUNTER))
       : null) },
@@ -77,6 +78,7 @@ export const defs: MetricDef[] = [
   { id: 'hunter.pounce_rate', group: 'hunter', version: 1, description: 'Pounces that pinned a survivor, per hunter spawn.',
     compute: (c) => ratioByPhase(c, pinsBy(c, HUNTER), spawnsOf(c, HUNTER)) },
   { id: 'hunter.damage_per_spawn', group: 'hunter', version: 1, description: 'Damage hunters dealt to standing survivors, per hunter spawn.',
+    public: { label: 'Hunter damage per spawn' },
     compute: (c) => {
       const n = spawnsOf(c, HUNTER).length;
       return c.hasStats && n > 0 ? single(sideStat(c, 'infected', 'dmg_as_hunter'), n) : null;
@@ -87,6 +89,7 @@ export const defs: MetricDef[] = [
     compute: (c) => countByPhase(c, spawnsOf(c, SMOKER)) },
   { id: 'smoker.pull_rate', group: 'smoker', version: 2,
     description: 'Pulls that pinned a survivor, per smoker spawn (can exceed 1: smokers re-grab after a broken tongue).',
+    public: { label: 'Smoker pulls per spawn' },
     compute: (c) => ratioByPhase(c, pinsBy(c, SMOKER), spawnsOf(c, SMOKER)) },
   { id: 'smoker.clear_time_s', group: 'smoker', version: 2,
     description: 'Seconds until a pulled survivor was freed by a teammate killing the smoker.',
@@ -104,13 +107,16 @@ export const defs: MetricDef[] = [
   { id: 'boomer.spawns', group: 'boomer', version: 1, description: 'Boomer spawns per round.',
     compute: (c) => countByPhase(c, spawnsOf(c, BOOMER)) },
   { id: 'boomer.boomed_per_spawn', group: 'boomer', version: 2, description: 'Survivors covered in bile, per boomer spawn.',
+    public: { label: 'Survivors boomed per boomer' },
     compute: (c) => ratioByPhase(c, kind(c, 'boom').filter((e) => classAt(c, e.actor, e.tMs) === BOOMER), spawnsOf(c, BOOMER)) },
   { id: 'boomer.pop_rate', group: 'boomer', version: 1, description: 'Boomers popped before they could vomit, per boomer spawn.',
+    public: { label: 'Boomers popped before vomiting' },
     compute: (c) => {
       const n = spawnsOf(c, BOOMER).length;
       return c.skillDetect && n > 0 ? single(sideStat(c, 'survivor', 'boomer_pops'), n) : null;
     } },
   { id: 'si.pins_per_min', group: 'si', version: 1, description: 'Pins (pounces and pulls) per playing minute.',
+    public: { label: 'Pins per minute' },
     compute: (c) => perMinute(c, kind(c, 'pinned')) },
   { id: 'si.kills_per_min', group: 'si', version: 1, description: 'Special infected killed by survivors per playing minute.',
     compute: (c) => {

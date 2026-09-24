@@ -10,6 +10,10 @@ const LABEL: Record<(typeof GUNS)[number], string> = {
   rifle: 'the assault rifle', hunting_rifle: 'the hunting rifle',
 };
 
+const PUBLIC_HOLD: Partial<Record<(typeof GUNS)[number], string>> = {
+  pumpshotgun: 'Time holding the pump shotgun', smg: 'Time holding the Uzi',
+};
+
 function holdShare(c: RoundCtx, id: number): MetricOut | null {
   if (!c.replay || !c.timeline) return null;
   const held: Record<Phase, number> = { all: 0, tank: 0, witch: 0, event: 0, normal: 0 };
@@ -39,6 +43,7 @@ function damageShare(c: RoundCtx, gun: string, suffix: 'sidmg' | 'tankdmg'): Met
 export const defs: MetricDef[] = GUNS.flatMap((g, i) => [
   { id: `weapons.hold.${g}`, group: 'weapons' as const, version: 1,
     description: `Share of standing survivor time spent holding ${LABEL[g]}.`,
+    ...(PUBLIC_HOLD[g] ? { public: { label: PUBLIC_HOLD[g]! } } : {}),
     compute: (c: RoundCtx) => holdShare(c, i + 1) },
   { id: `weapons.si_damage.${g}`, group: 'weapons' as const, version: 1,
     description: `Share of survivor damage to special infected dealt with ${LABEL[g]}.`,

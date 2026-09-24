@@ -7,6 +7,7 @@ export const defs: MetricDef[] = [
   {
     id: 'round.saferoom', group: 'outcomes', version: 1,
     description: 'Share of rounds where at least one survivor reached the saferoom.',
+    public: { label: 'Rounds where survivors reached the saferoom' },
     compute: (c) => (finished(c) ? single(c.survivorsAlive! > 0 ? 1 : 0) : null),
   },
   {
@@ -17,6 +18,7 @@ export const defs: MetricDef[] = [
   {
     id: 'round.score', group: 'outcomes', version: 1,
     description: 'Survivor score for the round.',
+    public: { label: 'Survivor distance score' },
     compute: (c) => (c.reliable && c.ended ? single(c.score) : null),
   },
   {
@@ -27,6 +29,7 @@ export const defs: MetricDef[] = [
   {
     id: 'round.length_min', group: 'outcomes', version: 1,
     description: 'Playing minutes in the round, pauses excluded.',
+    public: { label: 'Round length (minutes)' },
     compute: (c) => (c.timeline ? single(c.timeline.minutes('all')) : null),
   },
   {
