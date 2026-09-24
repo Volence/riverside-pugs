@@ -105,7 +105,19 @@ const SAMPLE_ITEMS: { icon: string; has: boolean }[] = [
   { icon: 'icon/equip/pills', has: true },
 ];
 
-/** The box art, both slot kinds: a scalable panel drawn at this alpha (180 of 255) in white. */
+/**
+ * The box art, both slot kinds: a scalable panel drawn at this alpha (180 of
+ * 255) in white. Generated flat and rounded boxes draw at it too, active and
+ * inactive: slice 2.F launch P (/home/volence/l4d/hud/probe-2f/RESULTS.md,
+ * shots p/shots/p/p-a.png and p-g.png) drew a 255 0 0 255 active and a
+ * 0 0 255 255 inactive box as the game blending in linear light at 180/255:
+ * red 222 over a backdrop red of 83, blue 219 over a backdrop blue of 29, the
+ * zero channels about half the backdrop. Probe S4's "about 0.55, no
+ * multiplier" assumed a gamma-space blend; the same linear model fits its
+ * pixels (166 red, 36 green for a 128-alpha box). The canvas blends in gamma
+ * space, so no single alpha matches the game over every backdrop; 180/255 is
+ * the game's own number, kept.
+ */
 export const BOX_ALPHA = 180 / 255;
 /** The art's corners, in texels of its 128-texel texture, kept square when the box stretches. */
 const SRC_CORNER = 16;

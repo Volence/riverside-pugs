@@ -287,6 +287,17 @@ describe('the weapon edits in the preview', () => {
     for (const f of fills) { expect(f.fill).toBe('rgba(10,20,30,1)'); near(f.alpha, BOX_ALPHA); }
   });
 
+  it('draws a generated active box at the same 180/255 as every other box (probe 2F launch P)', () => {
+    // /home/volence/l4d/hud/probe-2f/p/shots/p/p-a.png and p-g.png (RESULTS.md, X8): a flat 255 0 0 255
+    // active box and a 0 0 255 255 inactive box both draw as the game blending in linear light at
+    // alpha 0.706 (180/255): red 222 over a backdrop red of 83, blue 219 over a backdrop blue of 29.
+    // Probe S4's "no multiplier" assumed a gamma-space blend; the same model fits its pixels too.
+    const d = design({ weapons: { boxActive: { kind: 'flat', color: '255 0 0 128' } } });
+    const fills = drawn(d).filter((c) => c.m === 'fillRect' && String(c.fill).startsWith('rgba(255,0,0,'));
+    expect(fills).toHaveLength(1);
+    near(fills[0].alpha, BOX_ALPHA);
+  });
+
   it('draws a rounded box with its corners round by one corner of the art, in the default colour when none is set', () => {
     const d = design({ weapons: { boxActive: { kind: 'rounded' } } });
     const slots = weaponSlots(d, '16:9', 100);
