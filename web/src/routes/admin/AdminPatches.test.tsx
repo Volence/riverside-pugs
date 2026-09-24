@@ -42,6 +42,15 @@ describe('AdminPatches', () => {
     expect(screen.getByText(/chicago differs from dallas/)).toBeTruthy();
   });
 
+  it('lists patches newest first', async () => {
+    mockAdmin.balancePatches.mockResolvedValue({ patches });
+    mockAdmin.balanceDrift.mockResolvedValue({ servers: [] });
+    render(<AdminPatches />);
+    await screen.findByText('Baseline');
+    const names = screen.getAllByRole('row').slice(1).map((r) => r.querySelectorAll('td')[1]?.textContent);
+    expect(names).toEqual(['Unnamed patch 2', 'Baseline']);
+  });
+
   it('shows never played for an announced patch with no rounds', async () => {
     const announced: PatchSummary[] = [
       { id: 3, number: 3, name: 'Next up', notes: '', source: 'announced', firstSeenAt: '2026-09-24 02:00:00', reviewed: false, rounds: 0, countedRounds: 0, servers: [], publishedAt: null },
@@ -78,7 +87,7 @@ describe('AdminPatches', () => {
     render(<AdminPatches />);
     await waitFor(() => expect(screen.getByText('Unnamed patch 2')).toBeTruthy());
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Details' })[1]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Details' })[0]);
     await waitFor(() => expect(mockAdmin.balancePatch).toHaveBeenCalledWith(2));
     expect(await screen.findByText('added p:l4d_itemlimiter.smx')).toBeTruthy();
     expect(screen.getByText('p:pug-match.smx: 1 to 2')).toBeTruthy();
@@ -108,7 +117,7 @@ describe('AdminPatches', () => {
     render(<AdminPatches />);
     await waitFor(() => expect(screen.getByText('Unnamed patch 2')).toBeTruthy());
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Details' })[1]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Details' })[0]);
 
     expect(await screen.findByText('no such patch')).toBeTruthy();
     expect(screen.queryByLabelText('Patch name')).toBeNull();
@@ -136,7 +145,7 @@ describe('AdminPatches', () => {
     render(<AdminPatches />);
     await waitFor(() => expect(screen.getByText('Unnamed patch 2')).toBeTruthy());
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Details' })[1]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Details' })[0]);
     await waitFor(() => expect(mockAdmin.balancePatch).toHaveBeenCalledWith(2));
     expect(screen.getByText('Not public.')).toBeTruthy();
 
