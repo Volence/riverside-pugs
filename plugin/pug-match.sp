@@ -15,7 +15,7 @@
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.3.10"
+#define PLUGIN_VERSION "0.3.11"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -155,6 +155,8 @@ char g_sRosterName[MAX_ROSTER][64];
  *  No match, self-started or not, kicks a non-rostered player; the rostered
  *  eight are placed by Timer_TeamLock and anyone else may spectate. */
 bool g_bSelfStarted;
+// l4d2_spec_stays_spec was not running when the last map ended; see OnMapStart.
+bool g_bSpecStaysWasOff;
 
 /** Monotonic per-match counter stamped on every EVENT line. UDP can deliver
  *  the same datagram twice, and an event feed that double-counts a deadly
@@ -3098,6 +3100,14 @@ public void OnMapEnd()
 	// (not its own ForceChangeLevel) is correctly abandoned here rather than
 	// left to KillTimer a freed handle on the next map's CancelTeardown().
 	CancelTeardown();
+	g_bSpecStaysWasOff = !SpecStaysLoaded();
+}
+
+/** l4d2_spec_stays_spec is loaded and running. */
+static bool SpecStaysLoaded()
+{
+	Handle pl = FindPluginByFile("l4d2_spec_stays_spec.smx");
+	return pl != null && GetPluginStatus(pl) == Plugin_Running;
 }
 
 /**
@@ -3222,6 +3232,17 @@ public void OnMapStart()
 		EndMatchNow("finale loaded");
 
 	if (g_State == MS_Pending || g_State == MS_Live) StartMatchDemo();
+
+	// pug_match.cfg unloads l4d2_spec_stays_spec because it fights the team
+	// lock, but server_custom_convars.cfg leaves plugin loading unlocked on
+	// every map, so SourceMod loads it straight back at each changelevel and
+	// the unload only ever held for map 1. Keep it off for the rest of a match
+	// that started with it off; the backend loads it back on release, so a
+	// match that ends with it loaded stays that way. ServerCommand runs next
+	// frame, long before anyone spawns; the balance scan below may still list
+	// it, which the site ignores (balance/knobs.json "ignored").
+	if ((g_State == MS_Pending || g_State == MS_Live) && g_bSpecStaysWasOff && SpecStaysLoaded())
+		ServerCommand("sm plugins unload l4d2_spec_stays_spec.smx");
 
 	BalanceScanStatic();
 }
