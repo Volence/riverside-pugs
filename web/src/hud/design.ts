@@ -861,10 +861,15 @@ export function validateDesign(raw: unknown): HudDesign {
   }
   const weapons = weaponsOf(raw.weapons, raw.styles, d.advanced, d.images);
   if (weapons) d.weapons = weapons;
-  // A weapon picture nothing names is dropped, as the old weapon box slots'
-  // were: nothing would ever ship it.
+  // An icon picture nothing names is dropped: nothing would ever ship it. A
+  // box's picture is kept through a switch to another box style, as a
+  // splatter's is through a switch of kind, so switching back brings it
+  // back; only an Image box ships it (weaponsPass).
   const named = weaponImagesInUse(d);
-  for (const id of Object.keys(d.images)) if (weaponImageFits(id, 1, 1) !== undefined && !named.has(id)) delete d.images[id];
+  const boxPictures = new Set<string>(Object.values(WEAPON_BOX_IMAGE));
+  for (const id of Object.keys(d.images)) {
+    if (weaponImageFits(id, 1, 1) !== undefined && !named.has(id) && !boxPictures.has(id)) delete d.images[id];
+  }
   // Every registered panel's children, by the same rules; a panel the
   // registry does not have has nothing to apply to. Names match exactly, as
   // the teammate card always did, so a stored name is the block's own.

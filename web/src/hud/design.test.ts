@@ -406,6 +406,14 @@ describe('validateDesign, the weapon selection', () => {
     expect(back?.images).toEqual({});
   });
 
+  it('keeps a box picture through a switch to another box style, so switching back brings it back', () => {
+    const d = validateDesign({ v: 1, images: { weaponBoxActive: img(128, 128), weaponBoxInactive: img(128, 128) },
+      weapons: { boxActive: { kind: 'flat' } } });
+    expect(Object.keys(d.images).sort()).toEqual(['weaponBoxActive', 'weaponBoxInactive']);
+    // An icon picture nothing names is still dropped.
+    expect(validateDesign({ v: 1, images: { wiconUzi: img(128, 64) } }).images).toEqual({});
+  });
+
   it('keeps the uploads while the pictures are hidden, so turning them back on brings them back', () => {
     const d = validateDesign({ v: 1, images: { wiconUzi: img(128, 64) },
       weapons: { weaponIcons: false, icons: { icon_equip_uzi: 'wiconUzi' } } });
