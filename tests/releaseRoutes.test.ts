@@ -44,6 +44,7 @@ describe('release routes', () => {
     git('add', '-A'); git('commit', '-qm', 'tank 7500');
     db = openDb(join(root, 'data', 'pug.db'));
     addServer(db, { name: 'Dallas', host: '10.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    db.prepare("UPDATE servers SET addons_transport = 'local', addons_dir = ? WHERE id = 1").run(join(root, 'game/left4dead/addons'));
     files.clear();
     files.set(CFG, Buffer.from('z_tank_health 8000\n'));
     db.prepare("INSERT INTO fleet_readings (server_id, read_at, attempt_at) VALUES (1, datetime('now'), datetime('now'))").run();
@@ -54,7 +55,7 @@ describe('release routes', () => {
   async function app() {
     const config = { ...loadConfig({ DB_PATH: join(root, 'data', 'pug.db'), DEPLOY_REPO_URL: work }), devMode: false };
     const a = await buildServer({ config, db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {},
-      releaseWriter: () => writer, serverRestarter: { restart: async () => true } });
+      releaseWriter: () => writer, releaseHumans: async () => 0, serverRestarter: { restart: async () => true } });
     const cookies = await authedCookie(a, db, ADMIN);
     db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
     return { a, cookies };

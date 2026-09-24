@@ -140,3 +140,11 @@ export async function kickThenQuit(
   }
   await rcon.exec('quit');
 }
+
+/** Humans on a box, from the engine's `status` ("players : 3 (8 max)"). 0 when
+ *  the line is missing: the caller only uses this to wait politely before a
+ *  release restarts the box. */
+export function parseHumans(status: string): number {
+  const m = /players\s*:\s*(\d+)/.exec(status);
+  return m ? Number(m[1]) : 0;
+}
