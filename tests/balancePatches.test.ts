@@ -257,12 +257,12 @@ describe('listPatches countedRounds', () => {
 });
 
 describe('listPatches merged', () => {
-  it('marks a detected patch whose fingerprint the boot refingerprint cleared as merged', () => {
+  it('marks a folded patch as merged', () => {
     const db = openDb(':memory:');
-    db.prepare(`INSERT INTO balance_patches (id, fingerprint, name, source, inputs_json, first_seen_at) VALUES
-      (1, NULL, 'Old', 'historical', NULL, '2026-09-01 00:00:00'),
-      (2, 'aaaa', NULL, 'detected', '{}', '2026-09-23 20:41:53'),
-      (3, NULL, NULL, 'detected', '{}', '2026-09-24 05:41:10')`).run();
+    db.prepare(`INSERT INTO balance_patches (id, fingerprint, name, source, inputs_json, first_seen_at, triage, folded_into) VALUES
+      (1, NULL, 'Old', 'historical', NULL, '2026-09-01 00:00:00', 'balance', NULL),
+      (2, 'aaaa', NULL, 'detected', '{}', '2026-09-23 20:41:53', 'pending', NULL),
+      (3, NULL, NULL, 'detected', '{}', '2026-09-24 05:41:10', 'folded', 2)`).run();
     expect(listPatches(db).map((p) => [p.id, p.merged])).toEqual([[1, false], [2, false], [3, true]]);
   });
 });
