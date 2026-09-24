@@ -1,5 +1,6 @@
 import type { DB } from '../../db.js';
 import { metricsGeneration } from '../store.js';
+import { triageGeneration } from '../../balanceFold.js';
 import type { Origin, SideQuery } from './types.js';
 
 const MAX_ENTRIES = 50;
@@ -9,12 +10,12 @@ const entries = new Map<string, { stamp: string; value: unknown }>();
  *  without this process's writeRoundMetrics running: a void (voided_at set),
  *  a round frozen or recomputed by another process (the backfill script),
  *  which all move the round_metric_context count or its newest computed_at,
- *  or the voided-match count. Combined with the in-process generation
+ *  or the voided-match count, or a fold or unfold (the triage generation). Combined with the in-process generation
  *  counter, which still catches same-second rewrites. */
 export function dataStamp(db: DB): string {
   const c = db.prepare('SELECT COUNT(*) AS n, MAX(computed_at) AS t FROM round_metric_context').get() as { n: number; t: string | null };
   const v = db.prepare('SELECT COUNT(*) AS n FROM matches WHERE voided_at IS NOT NULL').get() as { n: number };
-  return `${metricsGeneration()}|${c.n}|${c.t ?? ''}|${v.n}`;
+  return `${metricsGeneration()}|${triageGeneration()}|${c.n}|${c.t ?? ''}|${v.n}`;
 }
 
 /** Caches `compute()` under `key` for as long as dataStamp(db) stays the
