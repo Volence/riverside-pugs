@@ -2064,7 +2064,7 @@ describe('Splatter', () => {
 });
 
 describe('Your own health on the page', () => {
-  afterEach(() => { for (const id of ['Q1', 'Q2', 'Q3', 'Q5'] as const) _setProbe(id, null); _resetAssetCache(); });
+  afterEach(() => { for (const id of ['Q1', 'Q2', 'Q3', 'Q8'] as const) _setProbe(id, null); _resetAssetCache(); });
   const own = () => layer('Your health');
   const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
   /** A 2D context stand-in recording what the page draws: fillText strings and positions, drawImage sources. */
@@ -2156,12 +2156,14 @@ describe('Your own health on the page', () => {
     await waitFor(() => expect(saved().children?.ownHealth?.Health?.keys?.monochrome_color).toBe('255 0 255 255'));
   });
 
-  it('never offers the health cross a colour: probe Q5 showed the game ignores it', () => {
+  it('never offers the health cross a colour, whatever gate is open: probe Q5 showed the game ignores it', () => {
     // Plumbing Task 16 asked for a Colour control here once Q5 passed; Q5 failed (slice 2.F G4), so it never shows.
+    for (const id of ['Q1', 'Q2', 'Q3', 'Q8'] as const) _setProbe(id, true);
     render(<Hud />);
     fireEvent.click(own().getByRole('button', { name: 'Health cross' }));
     expect(screen.getByLabelText('Text size')).toBeTruthy();
     expect(screen.queryByLabelText('Health cross colour')).toBeNull();
+    expect(screen.getByText("The game colours this with the panel's health colour, or the Panel colour when one is set.")).toBeTruthy();
   });
 
   it('offers Fit only once probe Q2 passes, and fitting moves nothing on the canvas', async () => {

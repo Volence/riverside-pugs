@@ -187,7 +187,7 @@ describe('the own health registry', () => {
       ...(c.keys ?? []).filter((k) => k.gate).map((k) => `${c.name}.${k.key}:${k.gate}`),
       ...(c.colourGate ? [`${c.name}.colour:${c.colourGate}`] : []),
     ]);
-    expect(gated).toEqual(['Health.monochrome_color:Q1', 'Health.inset:Q3', 'HealthIcon.colour:Q5', 'DuckingIcon.colour:Q8']);
+    expect(gated).toEqual(['Health.monochrome_color:Q1', 'Health.inset:Q3', 'DuckingIcon.colour:Q8']);
     // Every other own piece offers no colour at all: code colours them by health.
     for (const def of OWN_PANEL.children) if (!def.colourGate) expect(def.colour, def.name).toBe(false);
   });
@@ -229,5 +229,15 @@ describe('the panel colour and inset keys (probes Q1 and Q3, slice 2.F X10)', ()
 
   it('says the scratches take the panel colour too', () => {
     for (const n of ['HealthbarTextureTop', 'HealthbarTextureBottom']) expect(own(n).note, n).toMatch(/or the panel colour/);
+  });
+});
+
+describe('the health cross colour (probe Q5 failed, slice 2.F G4)', () => {
+  it('offers no colour and waits on no gate: the game colours the cross itself', () => {
+    // RESULTS.md Q5: fgcolor_override blue was ignored in b1v2 a and c and in b1 a.
+    const cross = OWN_PANEL.children.find((c) => c.name === 'HealthIcon')!;
+    expect(cross.colour).toBe(false);
+    expect(cross.colourGate).toBeUndefined();
+    expect(cross.note).toBe("The game colours this with the panel's health colour, or the Panel colour when one is set.");
   });
 });

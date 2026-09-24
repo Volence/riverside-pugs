@@ -737,6 +737,13 @@ Shots: (a) full health standing, weapon slot 1 held; (b) `+duck` held 2 s; (c) s
 shot at 2 s); (e) holding pills with none of the other items (S5: missing items drawn as the
 preview draws them). Also answers S4 (red box alpha against the preview) and S9 (card background).
 
+**Answers and gates** (run 2026-09-24, `/home/volence/l4d/hud/probe-phase2/RESULTS.md`; slice 2.F G tasks):
+
+- **Q5: NO, gate retired (G4).** `fgcolor_override` on `HealthIcon` is ignored: the cross always
+  takes the panel's health colour, or `monochrome_color` when set (`b1v2/shots/b1/b1-a.png` green,
+  `b1-c.png` orange; `b1/shots/b1/b1-a.png` magenta). The cross offers no colour control; `Q5` is
+  gone from `probes.ts`.
+
 ### B2. Survivor: every element hidden with `visible 0` only (one launch)
 
 Design: stock; hand edits set `"visible" "0"` and nothing else on `CHudLocalPlayerDisplay`,

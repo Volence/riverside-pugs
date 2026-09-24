@@ -451,13 +451,14 @@ describe('children of every registered panel', () => {
     } } };
     expect(validateDesign(raw).children.ownHealth).toEqual({ Health: { x: 4 } });
     try {
-      _setProbe('Q1', true); _setProbe('Q3', true); _setProbe('Q5', true); _setProbe('Q8', true);
+      _setProbe('Q1', true); _setProbe('Q3', true); _setProbe('Q8', true);
+      // The cross colour is dropped with every gate open: probe Q5 failed and the control is gone (slice 2.F G4).
       expect(validateDesign(raw).children.ownHealth).toEqual({
-        HealthIcon: { color: '0 0 255 255' }, DuckingIcon: { color: '255 0 255 255' },
+        DuckingIcon: { color: '255 0 255 255' },
         Health: { x: 4, keys: { monochrome_color: '255 0 255 255', inset: '3' } },
       });
     } finally {
-      for (const q of ['Q1', 'Q3', 'Q5', 'Q8'] as const) _setProbe(q, null);
+      for (const q of ['Q1', 'Q3', 'Q8'] as const) _setProbe(q, null);
     }
   });
   it('keeps your own health fit only once probe Q2 passes, and never adds it', () => {

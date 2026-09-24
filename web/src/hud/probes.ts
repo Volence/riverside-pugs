@@ -11,18 +11,20 @@
  * docs/superpowers/specs/2026-09-24-hud-editor-phase2-design.md.
  *
  * Flipping a gate is a planned task of its own, never an edit hidden inside
- * another: it also updates the tests that pin the control as hidden.
+ * another: it also updates the tests that pin the control as hidden. A
+ * question the game answered NO is retired, not kept as a closed gate, so
+ * this stays a list of open or passed questions: Q5 (the health cross keeps
+ * a file colour) failed in B1 and its control is gone (slice 2.F G4).
  *
  * A leaf: imports nothing.
  */
 
-export type ProbeId = 'Q1' | 'Q2' | 'Q3' | 'Q5' | 'Q8';
+export type ProbeId = 'Q1' | 'Q2' | 'Q3' | 'Q8';
 
 export const PROBES: Readonly<Record<ProbeId, { passed: boolean; batch: string; question: string }>> = {
   Q1: { passed: false, batch: 'B1 (a), (c)', question: 'monochrome_color on a HudHealth bar draws the fill in that one colour' },
   Q2: { passed: false, batch: 'B1 (a)', question: 'LocalPlayer clips its children and does not paint its own image' },
   Q3: { passed: false, batch: 'B1 (a)', question: 'inset draws the fill inset inside an outline' },
-  Q5: { passed: false, batch: 'B1 (a)', question: 'the health cross keeps a file fgcolor_override' },
   Q8: { passed: false, batch: 'B1 (b)', question: 'the crouch icon keeps a file drawColor and shows only while crouched' },
 };
 

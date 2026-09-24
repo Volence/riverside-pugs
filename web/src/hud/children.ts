@@ -193,7 +193,7 @@ const SCRATCH_NOTE = 'The game tints these by health, or the panel colour. Chang
  *   scratches), in every health state, so the control is a panel colour.
  * - Q3 yes: inset moves the fill inside the bar outline.
  * - Q5 no: the cross takes the panel's health colour whatever the file says,
- *   so its colour gate never opens.
+ *   so it offers no colour at all (the gate is retired, slice 2.F G4).
  * - Q8 yes: the crouch icon keeps a file tint and shows only while crouched.
  * ModBg (Modern's fill) stays unregistered: the fit rule sizes it by name,
  * and ownBg is the player's background control.
@@ -211,8 +211,8 @@ export const OWN_PANEL: PanelChildren = {
       keys: healthKeys('Recolours the whole panel: bar, number, cross and scratches, in every health state.',
         'client.dll HealthPanel run: m_inset|inset'),
       note: 'The game fills the bar by health.' },
-    { name: 'HealthIcon', label: 'Health cross', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true,
-      colourGate: 'Q5', note: 'The game colours this by health.' },
+    { name: 'HealthIcon', label: 'Health cross', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: false,
+      note: "The game colours this with the panel's health colour, or the Panel colour when one is set." },
     { name: 'HealthNumber', label: 'Health number', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: false,
       note: 'The game colours this by health.' },
     { name: 'HealthbarTextureTop', label: 'Scratches, top', kind: 'image', role: 'decor', box: 'wh', move: true, font: false, colour: false,
