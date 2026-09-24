@@ -438,7 +438,8 @@ code by guesswork.
   **`checkImport(bytes, claimedId, designImportId)`:**
   - a VPK from `encodeVPK` (import it from `web/src/vpk/index.ts` in the test) of the stock files passes,
     and the result holds `id` and `files`;
-  - the same VPK with 3 extra bytes appended is refused as "has data after its files";
+  - the same VPK with 3 extra bytes appended is refused as "not laid out as the editor writes it"
+    (amended after review: see the tightness check below);
   - a VPK holding `cfg/autoexec.cfg` is refused, with the message naming it;
   - a claimed id mismatch is refused;
   - a design id mismatch is refused;
@@ -457,8 +458,10 @@ code by guesswork.
   - Crosshair `LIMITS`, `DRAWN` and the backdrop and resolution lists: copy them into a `const` here,
     with a comment naming `web/src/crosshair/model.ts`. The parity test keeps them honest.
   - `checkImport` uses `readVPK` from `../vpkRead.js`, `hudSetProblem` and `hudId` from `../hudFiles.js`.
-    The tightness check is `bytes.length === 12 + treeSize + sum(file lengths)`, with version read from
-    bytes 4..8 and `treeSize` from 8..12.
+    The tightness check is `canonicalVpkProblem(bytes, files)` from `../vpkRead.js`: the upload must be
+    byte for byte what `encodeVPK` (moved to `src/vpkWrite.ts`) writes for the files `readVPK` returned,
+    and `readVPK` refuses two paths that differ only in case. (Amended after review: the first version used
+    `bytes.length === 12 + treeSize + sum(file lengths)`, which two entries over the same bytes pass.)
 - [ ] **Step 4:** Run the file, then the full suite and typecheck.
 - [ ] **Step 5: Commit.** `git commit -m "Validate community entries on the server: text, crosshair, design, preview, import"`
 
@@ -592,6 +595,9 @@ code by guesswork.
   - **Refusals:**
     - an import holding `cfg/autoexec.cfg` gets 400 naming it;
     - trailing bytes get 400;
+    - an import that is not byte for byte `encodeVPK`'s output (two entries over the same bytes, built
+      with `handMade` from `web/src/vpk/fixtures.ts` or an equivalent in-test writer) gets 400;
+    - an import with two paths that differ only in case gets 400;
     - an id mismatch gets 400;
     - an import part on a stock design gets 400;
     - an imported design with no import part gets 400;
@@ -618,7 +624,9 @@ code by guesswork.
     1. Iterate `req.parts()`, reading each file with `toBuffer()`, and check `part.file.truncated`
        (413).
     2. Parse `meta`, then run `checkTitle`, `checkDescription`, the permission check, `checkHudDesign`,
-       `checkPreview`, and `checkImport` when present.
+       `checkPreview`, and `checkImport` when present. `checkImport` is the whole VPK check: it runs
+       `readVPK` (which refuses paths that differ only in case) and then `canonicalVpkProblem`, so the
+       route must not add a length rule of its own or accept anything `checkImport` did not return.
     3. Check the caps and `store.canTake(total)`.
     4. Run `putPreview` and `putImport`.
     5. Run `insertEntry` in a transaction that re-checks the caps.

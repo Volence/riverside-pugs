@@ -92,18 +92,45 @@ Everything else is refused. That includes:
 
 ### Text checks
 
-Every text file (`.res`, `.txt`, `.vmt`) is refused if it:
+The checks read each file the way the game does, since a check that tokenizes differently from the
+game can be walked around: whatever the check thinks is a comment or one long word, the game may read
+as a key and a value.
+
+Every KeyValues text file (`.res`, `.vmt`, and the `.txt` files other than `hudanimations.txt`) is
+refused if it:
 
 - contains a NUL byte;
+- has a quoted string that does not close on its own line. The game reads a quoted string across line
+  ends, and one that runs over would make the check and the game disagree about where comments are.
+  The check runs with and without backslash escapes, and the string must close on its line both ways;
 - has a quoted or bare value starting with `engine` followed by a space, case-insensitive. This is the
   VGUI prefix that turns a button command into a console command. The editor and the stock files never
-  write it.
+  write it. A bare word `engine` on its own is refused too.
 
-`scripts/hudanimations.txt` is also refused unless every command line starts with one of the words the
-game's animation controller uses for display: `event`, `Animate`, `RunEvent`, `RunEventChild`,
-`StopEvent`, `StopAnimation`, `StopPanelAnimations`, `SetVisible`, `SetFont`, `SetTexture` or
-`SetString`. Blank lines, braces and `//` comments are fine. Stock L4D1 uses only `event`, `Animate`,
-`StopEvent` and `StopAnimation`. The rule refuses `FireCommand`, `PlaySound` and `SetInputEnabled`.
+As in the game, `//` starts a comment only where a new token starts. Inside a bare word it is part of the
+word, so `v//x "command" "..."` is a word, then a key and a value, and the value is checked. A bare word
+ends at whitespace, a quote or a brace.
+
+`scripts/hudanimations.txt` is read by the animation controller's own tokenizer (Source's `ParseFile`),
+not the KeyValues one: a word runs through a quote or a `//`, and `{ } ( ) ' :` are tokens of their own.
+It is refused if:
+
+- `FireCommand`, `PlaySound` or `SetInputEnabled` appears anywhere, as a raw case-insensitive
+  substring, comments included. No stock file holds any of them;
+- `(`, `)`, `'` or `:` appears outside a comment, or a byte above `0x7f` outside a comment or string (the
+  game's signed `char` reads such a byte as whitespace). The stock files have none there;
+- a quoted string does not close on its line;
+- its tokens are not a run of `event <name> { <commands> }` in which every command is one of `Animate`,
+  `RunEvent`, `RunEventChild`, `StopEvent`, `StopAnimation`, `StopPanelAnimations`, `SetVisible`,
+  `SetFont`, `SetTexture` or `SetString` followed by its full count of arguments (`Animate` takes one
+  more when its interpolator is `Pulse` or `Flicker`). The check steps through the stream by those counts,
+  so a second command on a line, or a command glued onto another's arguments, is checked like the first.
+
+L4D1's controller (strings in its `client.dll`) knows only `Animate`, `RunEvent`, `StopEvent`,
+`StopAnimation`, `StopPanelAnimations`, `SetFont`, `SetTexture` and `SetString`, and it has no
+`FireCommand` at all; `RunEventChild` and `SetVisible` come from later engines, are display-only there,
+and make L4D1 stop parsing the file. Stock L4D1 uses only `event`, `Animate`, `StopEvent` and
+`StopAnimation`.
 
 ### Set caps
 
@@ -129,8 +156,11 @@ lower cap.
    - The server reads the uploaded VPK with the same reader the web uses (`readVPK` moves from
      `web/src/vpk/read.ts` to the import-free `src/vpkRead.ts`, and the web file re-exports it) and runs
      every file through `hudFileProblem`.
-   - It checks that the VPK holds no split parts and no bytes beyond the directory and file data (its
-     length must be exactly `12 + treeSize + sum of file sizes`, the layout `encodeVPK` writes).
+   - It checks that the VPK holds no split parts and no two paths that differ only in case (`readVPK`
+     refuses those), and that it is byte for byte what `encodeVPK` (now in the import-free
+     `src/vpkWrite.ts`) writes for the files it holds: `canonicalVpkProblem` in `src/vpkRead.ts`. A length
+     rule is not enough, since two entries over the same bytes leave bytes that nothing reads and still
+     add up.
    - It recomputes `hudId` and checks that it equals both the id the request claims and
      `design.imported.id`.
 3. **When fetching, in every downloader's browser.** Before a community blob is registered as an import,
