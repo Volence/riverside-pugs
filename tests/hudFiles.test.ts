@@ -115,6 +115,21 @@ describe('hudFileProblem', () => {
 
   it('runs the path rule first', () => bad('cfg/autoexec.cfg', text('bind w kill')));
 
+  // Byte for byte, not UTF-8: the game reads single bytes.
+  const latin1 = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0));
+
+  it('does not take a non-breaking space for whitespace before a comment marker', () =>
+    bad('resource/ui/scoreboard.res', latin1('"A"\n{\n  "labelText" "hi" \xa0// "command" "engine bind mouse1 quit"\n}\n')));
+
+  it('refuses a byte above 0x7f outside a quoted string or a comment', () =>
+    bad('resource/ui/hud/a.res', latin1('"A"\n{\n  "x" caf\xe9\n}\n')));
+
+  it('allows a byte above 0x7f inside a quoted string or a comment', () =>
+    ok('resource/ui/hud/a.res', latin1('"A" // caf\xe9\n{\n  "x" "caf\xe9"\n}\n')));
+
+  it('reads a form feed as whitespace before a comment marker, as the game does', () =>
+    ok('resource/ui/hud/a.res', latin1('"A"\n{\n  "labelText" \f// "command" "engine quit"\n}\n')));
+
   it('refuses a NUL byte in a text file', () => bad('resource/ui/hud/a.res', bytes(0x22, 0x61, 0x22, 0, 0x7b)));
 
   it('refuses a quoted engine command', () =>
