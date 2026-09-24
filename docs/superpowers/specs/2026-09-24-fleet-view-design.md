@@ -240,7 +240,8 @@ approved four changes:
   install has none), `addons/sourcemod/data/tickstats/`, `admin_cache_dump.txt`,
   `pug_logauth_<port>.txt`, `banned_user.cfg`, `banned_ip.cfg` (written by the
   server itself).
-- **Per-box files** (`cfg/secrets.cfg`, `sourcemod/configs/hostname/server_hostname.txt`)
+- **Per-box files** (`cfg/secrets.cfg`, `cfg/local.cfg`, `cfg/server.cfg`,
+  `sourcemod/configs/hostname/server_hostname.txt`)
   are shown tagged "per box" and never highlighted.
 - A base file gone from every box reads **"removed on all boxes"** and is not
   highlighted (as "patched on all boxes"). A repo file gone from every box stays

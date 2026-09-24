@@ -32,9 +32,14 @@ export function areaOf(path: string): Area {
   return 'other';
 }
 
-/** Files each box is meant to have its own copy of: shown, never highlighted. */
+/** Files each box is meant to have its own copy of: shown, never highlighted.
+ *  local.cfg carries each box's SourceTV title and host quirks (NFO settings on
+ *  Chicago, no autorecord on Riverside); server.cfg differs on Chicago for
+ *  NFO's required rates and download URL. The repo holds Dallas's copies. */
 export const PER_BOX = new Set([
   'left4dead/cfg/secrets.cfg',
+  'left4dead/cfg/local.cfg',
+  'left4dead/cfg/server.cfg',
   'left4dead/addons/sourcemod/configs/hostname/server_hostname.txt',
 ]);
 
