@@ -55,7 +55,9 @@ vitest 4. Server tests run in node (`tests/**`); web tests run in happy-dom (`we
 - **Before Task 0** (branch `hud-community` at 248754a, 2026-09-24): `npx vitest run` gives **259 files,
   4179 tests, all passing**, and `npm run typecheck` is clean.
 - **After Task 0** (the master merge), the controller records the new baseline here:
-  `____ files, ____ tests`.
+  **371 files, 5506 tests, all passing** (merge 79c1da8), and `npm run typecheck` is clean.
+  `tests/server.test.ts` "a malformed URL" needs a built frontend (`dist/public/index.html`); run
+  `npm run build` once in a fresh worktree or that one test fails with 400 instead of 404.
 
 Every later task must end with the full suite at or above that count and all green.
 
