@@ -1619,6 +1619,11 @@ body.is-theater { overflow: hidden; }
 .admin-status--invited, .admin-status--reserved, .admin-status--live { color: var(--rating); }
 .admin-warn { color: var(--loss); }
 
+/* Balance patches: the Public page block on the detail panel (publish state,
+ * Publish/Unpublish, and the Preview button's rendered public entry). */
+.admin-preview { border: 1px solid var(--border); padding: var(--sp-3) var(--sp-4); margin-top: var(--sp-3); }
+.admin-preview__result { margin-top: var(--sp-3); border-top: 1px solid var(--border); padding-top: var(--sp-3); }
+
 /* Balance compare: patch-group controls, banners, per-row verdict and the
  * Task 8 quick-check placeholder. */
 .verdict--real { color: var(--win); font-weight: 600; }

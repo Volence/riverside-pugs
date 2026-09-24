@@ -1,7 +1,8 @@
 import { useState } from 'preact/hooks';
-import { adminApi, type PatchDetail, type PatchSummary } from '../../api';
+import { adminApi, type PatchDetail, type PatchSummary, type PublicEntry } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel } from '../../components/bits';
+import { PatchEntryView } from '../balance/PatchEntryView';
 import { fmtTime, useAction } from './useAction';
 
 const label = (p: { number: number; name: string | null }) => p.name ?? `Unnamed patch ${p.number}`;
@@ -22,6 +23,7 @@ export function AdminPatches() {
   const { busy, error, run } = useAction(patches.reload);
   const [name, setName] = useState('');
   const [notes, setNotes] = useState('');
+  const [preview, setPreview] = useState<PublicEntry | null>(null);
 
   const differing = (drift.data?.servers ?? []).flatMap((s) =>
     s.differsFrom.map((d) => `${s.name} differs from ${d.name}: ${d.diff}`));
@@ -29,6 +31,7 @@ export function AdminPatches() {
   const openDetail = (p: PatchSummary) => {
     setName(p.name ?? '');
     setNotes(p.notes ?? '');
+    setPreview(null);
     void run(() => adminApi.balancePatch(p.id).then(setOpen));
   };
 
@@ -48,7 +51,7 @@ export function AdminPatches() {
         {!patches.error && (
           <div class="table-wrap">
             <table class="admin-table">
-              <thead><tr><th>#</th><th>Name</th><th>Source</th><th>Since</th><th>Rounds</th><th>Servers</th><th /></tr></thead>
+              <thead><tr><th>#</th><th>Name</th><th>Source</th><th>Since</th><th>Rounds</th><th>Servers</th><th>Public</th><th /></tr></thead>
               <tbody>
                 {(patches.data?.patches ?? []).map((p) => (
                   <tr key={p.id} class={!p.reviewed && p.source === 'detected' ? 'admin-warn' : ''}>
@@ -58,6 +61,7 @@ export function AdminPatches() {
                     <td>{fmtTime(p.firstSeenAt)}</td>
                     <td>{p.rounds}</td>
                     <td>{p.servers.map((s) => s.name).join(', ')}</td>
+                    <td>{p.publishedAt && <span class="admin-tag">public</span>}</td>
                     <td><button class="btn" type="button" disabled={busy} onClick={() => openDetail(p)}>Details</button></td>
                   </tr>
                 ))}
@@ -83,6 +87,45 @@ export function AdminPatches() {
             />
             <button class="btn" type="submit" disabled={busy}>Save and mark reviewed</button>
           </form>
+          {(() => {
+            // The open detail was fetched before any publish/unpublish, so its own
+            // publishedAt can be stale; the reloaded list row is the source of truth
+            // once it exists, and open.publishedAt is only a fallback until it does.
+            const row = patches.data?.patches.find((p) => p.id === open.id);
+            const publishedAt = row ? row.publishedAt : open.publishedAt;
+            const isPublic = !!publishedAt;
+            return (
+              <div class="admin-preview">
+                <h4>Public page</h4>
+                <p>{isPublic ? `Public since ${fmtTime(publishedAt)}.` : 'Not public.'}</p>
+                <div class="admin-actions">
+                  <button
+                    class="btn"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void run(() => adminApi.publishBalancePatch(open.id, !isPublic))}
+                  >
+                    {isPublic ? 'Unpublish' : 'Publish'}
+                  </button>
+                  <button
+                    class="btn"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void run(() => adminApi.balancePublicPreview(open.id).then(setPreview))}
+                  >
+                    Preview
+                  </button>
+                </div>
+                {preview && (
+                  <div class="admin-preview__result">
+                    <h4>Preview of the public entry</h4>
+                    <PatchEntryView entry={preview} />
+                  </div>
+                )}
+                <p class="muted">Publishing needs a name, notes and at least one counted round.</p>
+              </div>
+            );
+          })()}
           {open.diffVsPrevious
             ? <ul class="admin-list">
               {open.diffVsPrevious.added.map((k) => <li key={`a${k}`}>added {k}</li>)}
