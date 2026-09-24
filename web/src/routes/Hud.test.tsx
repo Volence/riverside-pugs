@@ -864,11 +864,13 @@ describe('Hud page', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
     fireEvent.click(screen.getByRole('button', { name: 'Your health' }));
-    // Your health is (728, 389) to (853, 480); its top-left corner out by half.
-    dragFrom(canvas, [728, 389], [665.5, 343.5]);
+    // Your health, fitted by default (slice 2.F G2), is framed (728, 421) to (858, 474); its top-left corner
+    // out by half, to (663, 394.5), keeps the bottom-right corner put. The element's own place is the
+    // frame less LocalPlayer's fitted offset (0, 32) at scale 1.5: (663, 346.5), kept as whole units.
+    dragFrom(canvas, [728, 421], [663, 394.5]);
     expect((screen.getByRole('slider', { name: /^Scale/ }) as HTMLInputElement).value).toBe('1.5');
-    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('666');
-    expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('344');
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('663');
+    expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('346');
   });
 
   it('resizes a piece by its side handle, and a portrait by its corner keeping it square', () => {
@@ -1151,7 +1153,8 @@ describe('Hud page', () => {
   it('picks two elements with a Shift+drag box outside the teammate card', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
-    dragFrom(canvas, [700, 300], [860, 400], { shiftKey: true });
+    // The weapons (y 165 to 325) and your health, fitted by default to y 421 to 474 (slice 2.F G2).
+    dragFrom(canvas, [700, 300], [860, 430], { shiftKey: true });
     expect(screen.getByText('2 elements', { selector: 'legend' })).toBeTruthy();
   });
 
@@ -2237,11 +2240,14 @@ describe('Your own health on the page', () => {
   });
 
   it('offers Fit only once probe Q2 passes, and fitting moves nothing on the canvas', async () => {
+    _setProbe('Q2', false);
     render(<Hud />);
     fireEvent.click(screen.getByRole('button', { name: 'Your health' }));
     expect(screen.queryByLabelText('Fit the panel to its contents')).toBeNull();
     cleanup();
-    _setProbe('Q2', true);
+    _setProbe('Q2', null);                                           // passed (slice 2.F G2)
+    // A design saved before the own panel fitted by default, so the toggle starts off.
+    localStorage.setItem('hud', JSON.stringify({ v: 1, crosshair: 'none', elements: { teamColumn: { fit: true } } }));
     const { texts } = recordDraws();
     const { container } = render(<Hud />);
     unitCanvas(container);
@@ -2256,6 +2262,12 @@ describe('Your own health on the page', () => {
     const after = number();
     expect(after.x).toBeCloseTo(before.x, 6);
     expect(after.y).toBeCloseTo(before.y, 6);
+  });
+
+  it('starts a new design with your own health fitted (probe Q2)', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Your health' }));
+    expect((screen.getByLabelText('Fit the panel to its contents') as HTMLInputElement).checked).toBe(true);
   });
 
   it('drags the Health bar on the canvas, saving its place in the file frame, and offers the piece menu for one panel', async () => {

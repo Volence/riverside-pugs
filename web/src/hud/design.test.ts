@@ -173,6 +173,10 @@ describe('validateDesign, the teammate layout', () => {
     expect(validateDesign({ v: 1 }).elements).toEqual({});
     expect(validateDesign({ v: 1, elements: { chat: { x: 5 } } }).elements.teamColumn).toBeUndefined();
     expect(DEFAULT_DESIGN.elements.teamColumn).toEqual({ fit: true });
+    // Probe Q2 passed (slice 2.F G2): a new design fits your own health too; saved designs stay as saved.
+    expect(DEFAULT_DESIGN.elements.ownHealth).toEqual({ fit: true });
+    expect(validateDesign(structuredClone(DEFAULT_DESIGN)).elements.ownHealth).toEqual({ fit: true });
+    expect(validateDesign({ v: 1, elements: { teamColumn: { fit: true } } }).elements.ownHealth).toBeUndefined();
     expect(validateDesign(null).elements.teamColumn).toEqual({ fit: true });
     expect(team('stock', { fit: false })).toEqual({ fit: false });
     expect(team('stock', { fit: 'yes' })).toBeUndefined();
@@ -469,6 +473,7 @@ describe('children of every registered panel', () => {
   });
   it('keeps your own health fit only once probe Q2 passes, and never adds it', () => {
     const raw = { v: 1, elements: { ownHealth: { fit: true, x: 20 } } };
+    _setProbe('Q2', false);                                        // Q2 passed in slice 2.F G2: close it to test the rule
     expect(validateDesign(raw).elements.ownHealth).toEqual({ x: 20 });
     expect(validateDesign({ v: 1 }).elements.ownHealth).toBeUndefined();
     try {

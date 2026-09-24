@@ -199,9 +199,16 @@ export interface HudDesign {
  * starts fitted: a saved design without `fit` stays unfitted (validateDesign
  * never adds it), so only designs made from here on start with it.
  */
+/**
+ * A new design fits the teammate cards and your own health panel. Your own
+ * fit came with probe Q2 (slice 2.F G2, /home/volence/l4d/hud/probe-phase2/
+ * RESULTS.md: LocalPlayer clips its children and never paints its image,
+ * b1/shots/crops/own-a.png), and moves nothing on screen; a design saved
+ * without it stays as saved.
+ */
 export const DEFAULT_DESIGN: HudDesign = {
   v: 1, name: 'my_hud', preset: 'stock', advanced: false, aspect: '16:9', font: 'preset',
-  crosshair: 'none', elements: { teamColumn: { fit: true } }, styles: {}, images: {}, children: {},
+  crosshair: 'none', elements: { teamColumn: { fit: true }, ownHealth: { fit: true } }, styles: {}, images: {}, children: {},
 };
 
 /**

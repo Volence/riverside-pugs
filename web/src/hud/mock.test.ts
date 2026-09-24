@@ -552,12 +552,14 @@ describe('drawHud delegates panels to the renderer', () => {
     const k = 480 / SCREEN_H;
     const size = (file: string, key: string) => {
       const n = kvFind(buildTrees(DEFAULT_DESIGN)(file), [key])!;
-      return { w: parseFloat(kvGet(n, 'wide')!), h: parseFloat(kvGet(n, 'tall')!) };
+      return { x: parseFloat(kvGet(n, 'xpos')!), y: parseFloat(kvGet(n, 'ypos')!), w: parseFloat(kvGet(n, 'wide')!), h: parseFloat(kvGet(n, 'tall')!) };
     };
     const local = size('resource/ui/hud/localplayerdisplay.res', 'LocalPlayer');
-    expect(local).toEqual({ w: 130, h: 85 });                         // stock, as shipped
+    // Fitted to its contents by default (slice 2.F G2): stock ships 0,0 130 x 85, the fit moves the
+    // frame onto what it shows and the children back by the same amount.
+    expect(local).toEqual({ x: 0, y: 32, w: 130, h: 53 });
     const own = elementRect(DEFAULT_DESIGN, 'ownHealth', DEFAULT_DESIGN.aspect);
-    expect(rects).toContainEqual([own.x * k, own.y * k, local.w * k, local.h * k]);
+    expect(rects).toContainEqual([(own.x + local.x) * k, (own.y + local.y) * k, local.w * k, local.h * k]);
     // Each teammate card is clipped where the generated file puts it, at its own size.
     const cards = teamCardRects(DEFAULT_DESIGN, DEFAULT_DESIGN.aspect).slice(0, 3);
     expect(cards[0]).toEqual({ x: 13, y: 441, w: 121, h: 36 });       // DEFAULT_DESIGN fits the stock card
