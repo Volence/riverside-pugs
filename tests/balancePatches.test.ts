@@ -215,6 +215,15 @@ describe('refingerprintPatches', () => {
       .toEqual({ triage: 'folded', folded_into: b.patchId });
   });
 
+  it('the active rollout patch and a published patch keep the fingerprint over an older balance one', () => {
+    const a = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: withSpec, versionless: [] });
+    const b = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 2, inventory: INV, versionless: [] });
+    db.prepare("UPDATE balance_patches SET triage = 'balance'").run();
+    db.prepare("UPDATE balance_patches SET published_at = '2026-09-24 00:00:00' WHERE id = ?").run(b.patchId);
+    expect(refingerprintPatches(db, [], [SPEC], () => {}).merged).toEqual([{ keep: b.patchId, into: [a.patchId] }]);
+    expect(db.prepare('SELECT published_at FROM balance_patches WHERE id = ?').get(b.patchId)).toEqual({ published_at: '2026-09-24 00:00:00' });
+  });
+
   it('resolves a merged patch left by the backfill: folded into the holder, else balance', () => {
     const a = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: [] });
     const ins = db.prepare("INSERT INTO balance_patches (fingerprint, source, inputs_json, first_seen_at, triage) VALUES (NULL, 'detected', ?, '2026-09-24 00:00:00', NULL)");

@@ -215,6 +215,23 @@ describe('AdminPatches triage', () => {
     await waitFor(() => expect(mockAdmin.triageBalancePatch).toHaveBeenCalledWith(3, { decision: 'balance', name: 'TV watch', notes: '' }));
   });
 
+  it('a patch folded into one that was folded later shows under the end of the chain', async () => {
+    const mid: PatchSummary = { ...pending, id: 4, number: 4, triage: 'folded', foldedInto: 1, changes: ['plugin added: mid'] };
+    const deep: PatchSummary = { ...pending, id: 5, number: 5, triage: 'folded', foldedInto: 4, changes: ['plugin added: deep'] };
+    setup([patches[0], mid, deep]);
+    render(<AdminPatches />);
+    expect(await screen.findByText(/Includes 2 folded configs/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Unfold patch 5' })).toBeTruthy();
+  });
+
+  it('never preselects a fold target that is not a balance patch', async () => {
+    setup([patches[0], { ...pending, triageBase: { id: 2, number: 2, name: null } }]);
+    render(<AdminPatches />);
+    await screen.findByText('plugin added: l4d_tvwatch');
+    expect((screen.getByLabelText('Fold target for patch 3') as HTMLSelectElement).value).toBe('1');
+    expect(screen.queryByRole('button', { name: 'Not balance, ignore these plugins from now on' })).toBeNull();
+  });
+
   it('offers no ignore button when more than plugins changed', async () => {
     setup([patches[0], { ...pending, onlyPluginsChanged: false, changes: ['z_tank_health 8000 -> 7500'], plugins: [] }]);
     render(<AdminPatches />);

@@ -43,8 +43,16 @@ describe('triage decisions', () => {
       base: { id: base, number: 1, name: 'Base' }, changes: ['plugin added: l4d_tvwatch'],
       plugins: ['l4d_tvwatch.smx'], onlyPluginsChanged: true,
     });
-    // No came_from: falls back to the previous non-folded patch with inputs.
-    expect(triageInfo(db, real, LISTS).base?.id).toBe(noisy);
+    // No came_from: falls back to the newest earlier balance patch with inputs.
+    expect(triageInfo(db, real, LISTS).base?.id).toBe(base);
+  });
+
+  it('the base is always a balance patch: a pending one it came from is skipped', () => {
+    // noisy (pending) came from base; a patch coming from noisy is judged against base.
+    const later = Number(db.prepare("INSERT INTO balance_patches (fingerprint, source, inputs_json, first_seen_at, triage, came_from_patch_id) VALUES ('l', 'detected', ?, '2026-09-23 00:00:00', 'pending', ?)")
+      .run(JSON.stringify({ ...BASE, 'c:z_tank_health': '7000' }), noisy).lastInsertRowid);
+    expect(triageInfo(db, later, LISTS).base?.id).toBe(base);
+    expect(triageInfo(db, real, LISTS).base?.id).toBe(base);
   });
 
   it('balance needs a name and only applies to a pending patch', () => {

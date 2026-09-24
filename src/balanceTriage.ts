@@ -60,17 +60,19 @@ const inputsOf = (db: DB, id: number, ignored: string[]): Inventory | null => {
 };
 
 /** The patch a pending patch is judged against (and folded into by default):
- *  where its first server came from, else the newest earlier non-folded patch
- *  with inputs. For a folded patch, the patch it is folded into. */
+ *  where its first server came from, when that is a balance patch, else the
+ *  newest earlier balance patch with inputs. Always a balance patch, since
+ *  only one can be folded into. For a folded patch, the patch it is folded
+ *  into. */
 function triageBaseId(db: DB, id: number): number | null {
   const r = row(db, id);
   if (!r) return null;
   if (r.triage === 'folded' && r.folded_into !== null) return resolvePatch(db, r.folded_into);
   if (r.came_from_patch_id !== null) {
     const b = resolvePatch(db, r.came_from_patch_id);
-    if (b !== id) return b;
+    if (b !== id && (row(db, b)?.triage ?? 'balance') === 'balance') return b;
   }
-  const prev = db.prepare(`SELECT id FROM balance_patches WHERE inputs_json IS NOT NULL AND COALESCE(triage, 'balance') != 'folded'
+  const prev = db.prepare(`SELECT id FROM balance_patches WHERE inputs_json IS NOT NULL AND COALESCE(triage, 'balance') = 'balance'
     AND id != ? AND (first_seen_at < ? OR (first_seen_at = ? AND id < ?)) ORDER BY first_seen_at DESC, id DESC LIMIT 1`)
     .get(id, r.first_seen_at, r.first_seen_at, id) as { id: number } | undefined;
   return prev?.id ?? null;
@@ -144,7 +146,9 @@ export function triageIgnore(db: DB, id: number, p: {
       return { ok: false, status: 400, error: `the plugins to ignore must be exactly the ones that differ: ${d.plugins.join(', ')}` };
     }
     addIgnored(db, d.plugins, { reason: `triage of patch #${patchNumber(db, id)}`, by: p.adminId, now: p.now ?? nowSql() });
-    refingerprintPatches(db, p.versionless, effectiveIgnored(db, p.knobsIgnored), (e) => console.warn(`[balance] ${e.text}`));
+    // Other patches that differ only by these plugins merge too: admins hear
+    // about it the same way as a boot merge.
+    refingerprintPatches(db, p.versionless, effectiveIgnored(db, p.knobsIgnored));
     if (resolvePatch(db, id) !== resolvePatch(db, c.into)) {
       const f = foldInto(db, id, c.into);
       if (!f.ok) return { ok: false, status: 400, error: f.error };

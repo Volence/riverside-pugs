@@ -47,7 +47,8 @@ export async function adminBalancePatchRoutes(app: FastifyInstance, opts: PatchR
   app.post('/api/admin/balance/patches/:id', async (req, reply) => {
     const adminId = requireAdmin(req, reply);
     if (!adminId) return reply;
-    const id = Number((req.params as { id: string }).id);
+    const id = idOf(req);
+    if (id === null) return reply.code(404).send({ error: 'no such patch' });
     const b = (req.body ?? {}) as { name?: unknown; notes?: unknown; reviewed?: unknown };
     const edit: { name?: string | null; notes?: string; reviewed?: boolean } = {};
     if (b.name !== undefined) {
@@ -113,13 +114,19 @@ export async function adminBalancePatchRoutes(app: FastifyInstance, opts: PatchR
     if (!knobs) return reply.code(503).send(unavailable);
     const file = (req.params as { file: string }).file;
     if (!PLUGIN_FILE_RE.test(file)) return reply.code(400).send({ error: 'not a plugin file name' });
-    if (!removeIgnored(db, file)) {
+    // One transaction: the list and the stored fingerprints change together
+    // or not at all. Past folds stay; the next sighting that includes the
+    // plugin opens a new pending patch.
+    const removed = db.transaction(() => {
+      if (!removeIgnored(db, file)) return false;
+      refingerprintPatches(db, knobs.versionless, effectiveIgnored(db, knobs.ignored));
+      return true;
+    })();
+    if (!removed) {
       return (knobs.ignored ?? []).includes(file)
         ? reply.code(409).send({ error: 'this plugin is ignored by balance/knobs.json; remove it there' })
         : reply.code(404).send({ error: 'not on the ignored list' });
     }
-    // Past folds stay; the next sighting that includes the plugin opens a new pending patch.
-    refingerprintPatches(db, knobs.versionless, effectiveIgnored(db, knobs.ignored), (e) => console.warn(`[balance] ${e.text}`));
     logAdmin(db, adminId, 'unignore_plugin', file);
     return { ok: true };
   });

@@ -176,6 +176,9 @@ export function refingerprintPatches(db: DB, versionless: string[], ignored: str
       ORDER BY first_seen_at, id`).all() as { id: number; fingerprint: string; inputs_json: string; first_seen_at: string; triage: string | null }[];
     const mine = new Set(rows.map((r) => r.id));
     const triageOf = new Map(rows.map((r) => [r.id, r.triage ?? 'balance']));
+    const rolloutPatch = (db.prepare('SELECT patch_id FROM balance_rollouts WHERE superseded_at IS NULL ORDER BY id DESC LIMIT 1')
+      .get() as { patch_id: number } | undefined)?.patch_id;
+    const published = new Set((db.prepare('SELECT id FROM balance_patches WHERE published_at IS NOT NULL').all() as { id: number }[]).map((r) => r.id));
     const groups = new Map<string, number[]>();
     for (const r of rows) {
       let fp: string;
@@ -194,11 +197,17 @@ export function refingerprintPatches(db: DB, versionless: string[], ignored: str
     const merged: { keep: number; into: number[] }[] = [];
     for (const [fp, ids] of groups) {
       const holder = holderOf.get(fp) as { id: number } | undefined;
-      // A balance patch keeps the fingerprint over an older pending or folded
-      // one, so ignoring a plugin in triage never folds the balance patch
-      // into the one being triaged.
+      // Who keeps the fingerprint, in order: a holder this step does not
+      // recompute; the knob panel's active rollout patch (its confirmation
+      // waits for that fingerprint); a published patch (folding would take it
+      // off the public page); a balance patch over an older pending or folded
+      // one, so ignoring a plugin in triage never folds the balance patch into
+      // the one being triaged; else the oldest.
       const keep = holder && !mine.has(holder.id) ? holder.id
-        : ids.find((id) => triageOf.get(id) === 'balance') ?? ids[0];
+        : ids.find((id) => id === rolloutPatch)
+          ?? ids.find((id) => published.has(id))
+          ?? ids.find((id) => triageOf.get(id) === 'balance')
+          ?? ids[0];
       for (const id of ids) want.set(id, id === keep ? fp : null);
       const others = ids.filter((id) => id !== keep);
       if (others.length > 0) merged.push({ keep, into: others });
@@ -230,7 +239,6 @@ export function refingerprintPatches(db: DB, versionless: string[], ignored: str
         holder = undefined;
       }
       if (holder && resolvePatch(db, holder.id) !== l.id) foldInto(db, l.id, holder.id);
-      else db.prepare("UPDATE balance_patches SET triage = 'balance' WHERE id = ?").run(l.id);
     }
     db.prepare("UPDATE balance_patches SET triage = 'balance' WHERE source = 'detected' AND fingerprint IS NULL AND triage IS NULL").run();
     if (merged.length > 0) {
