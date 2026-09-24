@@ -28,13 +28,13 @@ export function applyHistoricalPatches(db: DB, opts: { dryRun?: boolean } = {}):
     let tagged = 0;
     HISTORICAL_PATCHES.forEach((p, i) => {
       const id = Number(db.prepare(
-        "INSERT INTO balance_patches (fingerprint, name, notes, source, inputs_json, first_seen_at) VALUES (NULL, ?, ?, 'historical', NULL, ?)",
+        "INSERT INTO balance_patches (fingerprint, name, notes, source, inputs_json, first_seen_at, triage) VALUES (NULL, ?, ?, 'historical', NULL, ?, 'balance')",
       ).run(p.name, p.notes, p.from).lastInsertRowid);
       const to = HISTORICAL_PATCHES[i + 1]?.from ?? '9999-12-31 00:00:00';
       const end = firstDetected && firstDetected < to ? firstDetected : to;
       tagged += db.prepare(
-        'UPDATE match_rounds SET patch_id = ? WHERE patch_id IS NULL AND started_at >= ? AND started_at < ?',
-      ).run(id, p.from, end).changes;
+        'UPDATE match_rounds SET patch_id = ?, sighted_patch_id = ? WHERE patch_id IS NULL AND started_at >= ? AND started_at < ?',
+      ).run(id, id, p.from, end).changes;
     });
     return tagged;
   };
