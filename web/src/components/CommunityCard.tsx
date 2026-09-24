@@ -5,7 +5,7 @@ import type { Session } from '../hooks/useLiveState';
 import { PlayerLink } from './bits';
 import { ReportPlayer } from './ReportPlayer';
 import { confirm } from './Confirm';
-import { drawBackdrop } from '../crosshair/draw';
+import { CROSSHAIR_BACKDROP, PX_AT_1080, drawBackdrop, gameBackdropImage } from '../crosshair/draw';
 import { drawArt, readArt } from '../crosshair/model';
 import { SidePreviews } from './SidePreviews';
 
@@ -23,10 +23,12 @@ const BASE_LABEL: Record<string, string> = { stock: 'Stock', modern: 'Modern' };
 const baseBadge = (e: CommunityEntry) =>
   e.preset === 'imported' ? `Imported: ${e.importName ?? 'a HUD'}` : BASE_LABEL[e.preset ?? ''] ?? null;
 
-/** The crosshair square: 96 pixels, drawn as the maker's zoom draws it, over the saferoom backdrop. */
+/** The crosshair square: 96 pixels, drawn as the maker's zoom draws it, over the maker's default in-game shot. */
 const XHAIR_PX = 96;
 /** The square the crosshair fills, at 1.5 times its size on a 1080p screen, so a small one still reads. */
 const XHAIR_SQUARE = 88;
+/** That 1.5, as pixels per 1080p screen pixel: the shot is drawn at the same scale as the crosshair. */
+const XHAIR_K = XHAIR_SQUARE / PX_AT_1080;
 
 function CrosshairSwatch({ art: raw, title }: { art: unknown; title: string }) {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -34,16 +36,22 @@ function CrosshairSwatch({ art: raw, title }: { art: unknown; title: string }) {
     const ctx = canvas.current?.getContext('2d');
     if (!ctx) return undefined;
     const art = readArt(raw);
-    const paint = (img: CanvasImageSource | null) => {
-      drawBackdrop(ctx, XHAIR_PX, XHAIR_PX, 'scene', null, null);
+    let live = true;
+    let img: CanvasImageSource | null = null;
+    // The shot is loaded once per page, on the first card; until it is in
+    // (or if it never loads) the card draws on the drawn saferoom.
+    const paint = () => {
+      if (!live) return;
+      const shot = gameBackdropImage(CROSSHAIR_BACKDROP, paint);
+      drawBackdrop(ctx, XHAIR_PX, XHAIR_PX, shot ? CROSSHAIR_BACKDROP : 'scene', null, null, undefined, XHAIR_K);
       if (art) drawArt(ctx, XHAIR_PX / 2, XHAIR_PX / 2, XHAIR_SQUARE, art, img);
     };
-    paint(null);
-    if (art?.kind !== 'image') return undefined;
-    let live = true;
-    const img = new Image();
-    img.onload = () => { if (live) paint(img); };
-    img.src = art.png;
+    paint();
+    if (art?.kind === 'image') {
+      const pic = new Image();
+      pic.onload = () => { img = pic; paint(); };
+      pic.src = art.png;
+    }
     return () => { live = false; };
   }, [raw]);
   return <canvas ref={canvas} class="ccard__xhair" width={XHAIR_PX} height={XHAIR_PX} role="img" aria-label={`The crosshair ${title}`} />;
