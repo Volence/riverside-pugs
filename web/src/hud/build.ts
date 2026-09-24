@@ -316,8 +316,11 @@ function childPass(work: Work, design: HudDesign) {
         }
         if (!block) continue;
       }
-      if (!block) { if (work.imported) continue; throw new Error(`${panel.file}: no child ${name}`); }
-      applyChild(work, panel.file, def, block, o);
+      // An imported panel file may lack a piece its linked files have (a
+      // Hunter file with no number the Smoker's and Boomer's carry): the
+      // edit still lands in each of those, as linkedBlocks allows.
+      if (!block && !work.imported) throw new Error(`${panel.file}: no child ${name}`);
+      if (block) applyChild(work, panel.file, def, block, o);
       for (const link of linkedBlocks(work, design, panel, name)) applyChild(work, link.file, def, link.block, linkedOverride(o, link));
     }
   }
@@ -330,9 +333,11 @@ function childPass(work: Work, design: HudDesign) {
  * linked rule maps a stored number between. Bases are read from the base
  * files, never from the tree an edit already changed. A linked file an
  * imported HUD lacks the block in is skipped, as childPass skips a missing
- * block on imports.
+ * block on imports. A 'delta' file whose panel base file lacks the block
+ * (an import's Hunter file) has no rect to move from: it comes back with
+ * no rects, and linkedOverride leaves its place and size alone.
  */
-interface LinkedBlock { file: string; rule: LinkRule; block: KvNode; from: LinkRect; to: LinkRect }
+interface LinkedBlock { file: string; rule: LinkRule; block: KvNode; from: LinkRect | null; to: LinkRect | null }
 function linkedBlocks(work: Work, design: HudDesign, panel: PanelChildren, name: string): LinkedBlock[] {
   if (!panel.linked) return [];
   const rectOf = (file: string): LinkRect | null => {
@@ -344,7 +349,7 @@ function linkedBlocks(work: Work, design: HudDesign, panel: PanelChildren, name:
   for (const { file, rule } of panel.linked) {
     const block = work.optional(file, [name]);
     const to = rectOf(file);
-    if (!block || !to || !from) { if (work.imported) continue; throw new Error(`${file}: no child ${name}`); }
+    if (!block || ((!to || !from) && !work.imported)) { if (work.imported) continue; throw new Error(`${file}: no child ${name}`); }
     out.push({ file, rule, block, from, to });
   }
   return out;
@@ -368,13 +373,33 @@ export function panelLink(design: HudDesign, panelId: string, name: string, file
   return from && to ? { rule: link.rule, from, to } : null;
 }
 
-/** A child's stored edit as a linked file takes it: places and sizes through linkedValue, the rest as stored. */
+/**
+ * A child's stored edit as a linked file takes it: places and sizes through
+ * linkedValue, the rest as stored. A 'delta' file with no rects to map
+ * between (linkedBlocks) keeps its own place and size.
+ */
 function linkedOverride(o: ChildOverride, link: LinkedBlock): ChildOverride {
   const out: ChildOverride = { ...o };
   for (const k of ['x', 'y', 'w', 'h'] as const) {
-    if (o[k] !== undefined) out[k] = linkedValue(link.rule, k, o[k]!, link.from, link.to) as number;
+    if (o[k] === undefined) continue;
+    if (link.from && link.to) out[k] = linkedValue(link.rule, k, o[k]!, link.from, link.to) as number;
+    else if (link.rule === 'delta') delete out[k];
   }
   return out;
+}
+
+/**
+ * Whether a piece seen in `file` can be moved and sized there: always on
+ * the panel's own file and on a 'same' file (its frame is the stored one),
+ * and on a 'delta' file only when both base files have the piece, since
+ * the delta rule moves it from the panel file's rect. An imported Hunter
+ * file may lack a number the Boomer's has: there the Boomer view can still
+ * show, hide and colour it, but its place and size are the file's own
+ * (edit.ts patchChild drops them, the side panel says why).
+ */
+export function pieceMovableIn(design: HudDesign, panelId: string, name: string, file?: string): boolean {
+  const link = file ? panelChildren(panelId)?.linked?.find((l) => l.file === file) : undefined;
+  return !link || link.rule === 'same' || panelLink(design, panelId, name, file!) !== null;
 }
 
 /**

@@ -1,12 +1,13 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { buildHud, packHud, CLEAR_TEXTURE, type BuildReport } from './build';
+import { buildHud, packHud, CLEAR_TEXTURE, pieceMovableIn, panelChild, type BuildReport } from './build';
 import { validateDesign, type HudDesign } from './design';
 import { registerImport, unregisterImport, baseFile } from './base';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { decodeText } from './text';
 import { readVPK } from '../vpk/read';
 import { parsePos, screenW, SCREEN_H } from './units';
-import { sampleHud, latin1, MARKER_PANEL } from './importFixtures';
+import { sampleHud, latin1, MARKER_PANEL, dropBlock } from './importFixtures';
+import { patchChild } from './edit';
 import { TEX } from '../crosshair/draw';
 
 /**
@@ -151,3 +152,28 @@ describe('the revive anchor on an imported HUD', () => {
   });
 });
 
+describe('your infected health on an import whose Hunter file lacks a piece the Smoker and Boomer have', () => {
+  const HUNTER = 'resource/ui/hud/hunterhealth.res', SMOKER = 'resource/ui/hud/smokerhealth.res', BOOMER = 'resource/ui/hud/boomerhealth.res';
+  const noHunterNumber = () => sampleHud({ [HUNTER]: dropBlock(baseFile('stock', HUNTER), 'HealthNumber') });
+  it('writes the edit to every linked file that has the piece: the Smoker (same) all of it, the Boomer (delta) all but its place and size', () => {
+    const d = imported(noHunterNumber(), { children: { siHealth: { HealthNumber: { x: 300, y: 10, w: 60, color: '10 20 30 255' } } } });
+    const out = byPath(buildHud(d));
+    expect(kvFind(root(out, HUNTER), ['HealthNumber'])).toBeUndefined();
+    const smoker = kvFind(root(out, SMOKER), ['HealthNumber'])!;
+    expect([kvGet(smoker, 'xpos'), kvGet(smoker, 'ypos'), kvGet(smoker, 'wide'), kvGet(smoker, 'fgcolor_override')]).toEqual(['300', '10', '60', '10 20 30 255']);
+    // The Boomer's place moves from the Hunter's, which this HUD lacks: it keeps its own, and takes the colour.
+    const boomer = kvFind(root(out, BOOMER), ['HealthNumber'])!;
+    const stock = kvFind(parseKv(baseFile('stock', BOOMER))[0].value as KvNode[], ['HealthNumber'])!;
+    expect([kvGet(boomer, 'xpos'), kvGet(boomer, 'wide'), kvGet(boomer, 'fgcolor_override')]).toEqual([kvGet(stock, 'xpos'), kvGet(stock, 'wide'), '10 20 30 255']);
+  });
+  it('offers the place and size on the Smoker view, not on the Boomer view, and takes the rest on both', () => {
+    const d = imported(noHunterNumber());
+    expect(pieceMovableIn(d, 'siHealth', 'HealthNumber', SMOKER)).toBe(true);
+    expect(pieceMovableIn(d, 'siHealth', 'HealthNumber', BOOMER)).toBe(false);
+    expect(pieceMovableIn(d, 'siHealth', 'Health', BOOMER)).toBe(true);
+    expect(patchChild(d, 'HealthNumber', { x: 5 }, 'siHealth', BOOMER)).toBe(d);
+    expect(patchChild(d, 'HealthNumber', { x: 5, visible: false }, 'siHealth', BOOMER).children.siHealth).toEqual({ HealthNumber: { visible: false } });
+    const moved = patchChild(d, 'HealthNumber', { x: 5 }, 'siHealth', SMOKER);
+    expect(panelChild(moved, 'siHealth', 'HealthNumber', SMOKER)!.x).toBe(5);
+  });
+});

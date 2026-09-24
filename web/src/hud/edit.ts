@@ -15,7 +15,7 @@ import {
 } from './design';
 import { screenW, SCREEN_H } from './units';
 import { elementById } from './elements';
-import { elementRect, elementFitShift, drawnAt, teamLayout, teamCardRects, isFreeTeam, panelChild, panelLink, buildTrees, panelBgZpos, type CardChild } from './build';
+import { elementRect, elementFitShift, drawnAt, pieceMovableIn, teamLayout, teamCardRects, isFreeTeam, panelChild, panelLink, buildTrees, panelBgZpos, type CardChild } from './build';
 import { childDef, panelChildren, panelOfFile, linkedValue, unlinkedValue } from './children';
 import { kvGet } from './kv';
 import { unionBox, CORNERS, type Handle } from './guides';
@@ -316,7 +316,14 @@ function childAt(design: HudDesign, panel: string, name: string, file?: string):
  * panel last, defaulting to the teammate card, so the Phase 1 calls read as
  * they always did.
  */
-export function patchChild(design: HudDesign, name: string, p0: Partial<ChildOverride>, panel = 'teamColumn', file?: string): HudDesign {
+export function patchChild(design: HudDesign, name: string, p1: Partial<ChildOverride>, panel = 'teamColumn', file?: string): HudDesign {
+  // A place or size seen where it cannot be mapped back (build.ts pieceMovableIn) is dropped, and nothing else left is no edit.
+  let p0 = p1;
+  if (file && !pieceMovableIn(design, panel, name, file)) {
+    const { x: _x, y: _y, w: _w, h: _h, ...rest } = p1;
+    if (!Object.keys(rest).length) return design;
+    p0 = rest;
+  }
   const p = file ? storedFrame(design, name, p0, panel, file) : p0;
   const mate = LINKED_X[panel]?.[name.toLowerCase()];
   if (p.x === undefined || !mate) return mergeChild(design, name, p, panel);

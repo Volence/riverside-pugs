@@ -12,7 +12,7 @@ import {
 import { weaponKey } from '../../hud/weapons';
 import { fontFace, shownKey, healthRgb, panelFile, DEFAULT_PREVIEW, type PreviewState } from '../../hud/render';
 import { elementById, type HudElement } from '../../hud/elements';
-import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam, buildTrees, pcGet } from '../../hud/build';
+import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam, buildTrees, pcGet, pieceMovableIn } from '../../hud/build';
 import { kvFind } from '../../hud/kv';
 import { baseOf } from '../../hud/base';
 import { childDef, panelChildren, maxInset, type KeyDef } from '../../hud/children';
@@ -482,6 +482,9 @@ export function ChildControls(
   // entirely for just "Opacity", since there is no swatch to name.
   const colourWord = def.opacityOnly ? 'Opacity' : def.kind === 'image' ? 'Tint' : 'Colour';
   const reset = () => edit((d) => resetChild(d, name, panel));
+  // An import whose Hunter file lacks this piece: the Boomer's place moves from the Hunter's, so here it keeps its own (build.ts pieceMovableIn).
+  const movable = pieceMovableIn(design, panel, name, file);
+  const sameView = panelChildren(panel)?.linked?.find((l) => l.rule === 'same' && panelChild(design, panel, name, l.file));
 
   return (
     <Field legend={def.label}>
@@ -489,7 +492,10 @@ export function ChildControls(
         <input type="checkbox" checked={o.visible ?? info.visible} onChange={(e) => patch({ visible: (e.target as HTMLInputElement).checked })} />
         <span>Visible</span>
       </label>
-      {def.move && (
+      {!movable && (
+        <p class="muted hud__note">This HUD's Hunter file has no {def.label.toLowerCase()}, and the Boomer's place and size follow the Hunter's, so here they stay as the file has them.{sameView ? ' Move or size it on the Smoker view.' : ''}</p>
+      )}
+      {movable && def.move && (
         <div class="hud__row2">
           <label class="hud__field">
             <span>X</span>
@@ -501,7 +507,7 @@ export function ChildControls(
           </label>
         </div>
       )}
-      {def.box === 'wh' && (
+      {movable && def.box === 'wh' && (
         <div class="hud__row2">
           <label class="hud__field">
             <span>W</span>
@@ -513,7 +519,7 @@ export function ChildControls(
           </label>
         </div>
       )}
-      {def.box === 'square' && (
+      {movable && def.box === 'square' && (
         <label class="hud__row">
           <span>Size</span>
           <input type="number" value={Math.round(info.w)} onInput={(e) => num(e, 'w', (s) => ({ w: s, h: s }))} {...endsOn(end)} />
