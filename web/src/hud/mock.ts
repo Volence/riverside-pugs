@@ -18,9 +18,9 @@ import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHas
 import { baseOf } from './base';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H, parseSize } from './units';
-import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, colourOf, setFont, fillFontText, type CardState, type PreviewState, type SurvivorState } from './render';
+import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, colourOf, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
 import { drawArt } from '../crosshair/model';
-import { teamChild } from './children';
+import { childDef, panelChildren } from './children';
 import { drawWeapons, type WeaponHeld } from './weapons';
 
 export type Side = 'survivor' | 'infected';
@@ -91,8 +91,25 @@ export function hitTest(design: HudDesign, side: Side, ux: number, uy: number): 
 }
 
 /**
- * The smallest teammate-card child under the point, in whichever of the
- * three drawn cards it falls, or null. A child counts only where the card
+ * The screen boxes a panel's file is drawn in, HUD units: the three drawn
+ * teammate cards, or a single panel's frame block (its xpos, ypos, wide and
+ * tall inside the element, from the generated tree, so already scaled),
+ * which is the rect the painter clips that panel's children to. A panel the
+ * registry does not have gives none.
+ */
+export function panelBoxes(design: HudDesign, panelId: string): Box[] {
+  if (panelId === 'teamColumn') return teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).map(({ x, y, w, h }) => ({ x, y, w, h }));
+  const panel = panelChildren(panelId);
+  if (!panel || panel.repeat !== 'single' || !panel.frame || panel.frame === 'hudlayout') return [];
+  const p = parentPanel(design, panel.frame.file, panel.frame.block, 1);
+  const r = rectFor(design, panelId);
+  return [{ x: r.x + p.x, y: r.y + p.y, w: p.w, h: p.h }];
+}
+
+/**
+ * The smallest registered child of a panel under the point (the teammate
+ * card by default), in whichever of its drawn boxes (panelBoxes: the three
+ * teammate cards, or a single panel's one) it falls, or null. A child counts only where the card
  * and the container both let it show (VGUI clips to both), only when the
  * preview draws it in `state`, and only when the registry lists it. Decor
  * (the splatter, the card background) is the lowest priority: a real piece
@@ -100,7 +117,7 @@ export function hitTest(design: HudDesign, side: Side, ux: number, uy: number): 
  * piece there is picked instead of leaving the point to mean the card, so
  * the splatter is reachable by a plain click, not only from Layers. The
  * card background is never a target either way, since it carries no
- * registry entry (`teamChild` returns nothing for it). Nor is a label with
+ * registry entry (`childDef` returns nothing for it). Nor is a label with
  * nothing drawn in it (the stock and Modern Status text, blank in every
  * preview state): a click cannot land on words that are not there, so it
  * counts for neither `best` nor `decor`, and the point falls through to
@@ -115,18 +132,19 @@ export function hitTest(design: HudDesign, side: Side, ux: number, uy: number): 
  * generated tree through childRects, like everything the canvas draws.
  */
 export function childAt(
-  design: HudDesign, state: CardState, ux: number, uy: number,
+  design: HudDesign, state: SurvivorState | PreviewState, ux: number, uy: number, panel = 'teamColumn',
 ): { name: string; card: number } | null {
-  const container = rectFor(design, 'teamColumn');
+  const container = rectFor(design, panel);
   if (!container.visible || !inside(container, ux, uy)) return null;
   let best: { name: string; card: number; area: number } | null = null;
   let decor: { name: string; card: number; area: number } | null = null;
-  for (const [i, c] of teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).entries()) {
+  for (const [i, c] of panelBoxes(design, panel).entries()) {
     if (!inside(c, ux, uy)) continue;
-    for (const r of childRects(design, 'teamColumn', { x: c.x, y: c.y }, 1)) {
-      const def = teamChild(r.name);
-      if (!def || !r.visible || hiddenInState('teamColumn', r.name, state) || !inside(r, ux, uy)) continue;
-      if (labelDrawsNothing(design, 'teamColumn', r.name, { state, card: i })) continue;
+    for (const r of childRects(design, panel, { x: c.x, y: c.y }, 1)) {
+      const def = childDef(panel, r.name);
+      if (!def || !r.visible || hiddenInState(panel, r.name, state) || !inside(r, ux, uy)) continue;
+      // The painter numbers the teammate cards; a single panel draws with no card.
+      if (labelDrawsNothing(design, panel, r.name, panel === 'teamColumn' ? { state, card: i } : { state })) continue;
       const area = r.w * r.h;
       if (def.role === 'decor') { if (!decor || area < decor.area) decor = { name: r.name, card: i, area }; continue; }
       if (!best || area < best.area) best = { name: r.name, card: i, area };

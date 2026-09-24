@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { visibleElements, hitTest, drawHud, childAt } from './mock';
+import { visibleElements, hitTest, drawHud, childAt, panelBoxes, TEAM_CARDS } from './mock';
 import { selectionFrames, TEAMMATES } from './selection';
+import { withTeamDir } from './edit';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { artUrl } from './art';
 import { buildTrees, elementRect, teamCardRects } from './build';
@@ -449,5 +450,17 @@ describe('selection chrome', () => {
     const without: string[] = [];
     drawHud(fakeCtx(() => {}, undefined, without), 853, 480, hidden, 'survivor', ['ownHealth']);
     expect(without).not.toContain('Francis: got it');
+  });
+});
+
+describe('panelBoxes', () => {
+  it('gives the drawn teammate cards, as plain boxes, in Row, Column and Free', () => {
+    for (const d of [DEFAULT_DESIGN, withTeamDir(DEFAULT_DESIGN, 'column'), withTeamDir(DEFAULT_DESIGN, 'free')]) {
+      const want = teamCardRects(d, d.aspect).slice(0, TEAM_CARDS).map(({ x, y, w, h }) => ({ x, y, w, h }));
+      expect(panelBoxes(d, 'teamColumn')).toEqual(want);
+    }
+  });
+  it('gives nothing for a panel the registry does not have', () => {
+    expect(panelBoxes(DEFAULT_DESIGN, 'chat')).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@
  * What a pointer gesture on the canvas means, and what a selection covers,
  * as pure functions of the design, so the page holds no hit logic of its
  * own. Everything measured here comes from the generator's trees
- * (elementRect, teamCardRects, childRects, cardChild), as Phase 1 requires:
+ * (elementRect, teamCardRects, childRects, panelChild), as Phase 1 requires:
  * a hit, a frame, a handle or a snap target is wherever the file puts it.
  *
  * A selection is one of four levels: nothing, one or more elements of the
@@ -14,14 +14,21 @@
  * teammate card file, so picking a piece in any card picks it in all of
  * them; `card` only says which card it was picked in, for the breadcrumb
  * and the handles.
+ *
+ * The pieces level belongs to a panel: any panel the child registry has.
+ * A selection of pieces names its panel in `panel`, left out for the
+ * teammate card so every Phase 1 selection still compares equal. A single
+ * panel (one file, one box on screen) has no card level: its pieces use
+ * card 0 and climb straight to its element.
  */
 import { baseTeam, type Box, type HudDesign } from './design';
-import { baseOf } from './base';
+import { baseOf, baseTree } from './base';
 import { elementById } from './elements';
-import { cardChild, cardFrame, elementRect, isFreeTeam, teamCardRects, type CardFrame } from './build';
-import { childRects, hiddenInState, type CardState, type ChildRect } from './render';
-import { childAt, hitTest, inside, TEAM_CARDS, visibleElements, type Side } from './mock';
-import { TEAM_PANEL, teamChild } from './children';
+import { panelChild, panelFrame, elementRect, isFreeTeam, teamCardRects, type CardFrame } from './build';
+import { childRects, hiddenInState, type ChildRect, type PreviewState, type SurvivorState } from './render';
+import { childAt, hitTest, inside, panelBoxes, TEAM_CARDS, visibleElements, type Side } from './mock';
+import { childDef, panelChildren } from './children';
+import { kvFind, kvGet } from './kv';
 import { screenW, SCREEN_H } from './units';
 import { ALL_HANDLES, CORNERS, unionBox, type Guide, type Handle } from './guides';
 
@@ -29,7 +36,19 @@ export type Selection =
   | { kind: 'none' }
   | { kind: 'elements'; ids: string[] }
   | { kind: 'cards'; cards: number[] }
-  | { kind: 'children'; names: string[]; card: number };
+  | { kind: 'children'; names: string[]; card: number; panel?: string };
+
+type State = SurvivorState | PreviewState;
+
+/** The panel a pieces selection belongs to: absent means the teammate card. */
+export const panelOf = (sel: { panel?: string }): string => sel.panel ?? 'teamColumn';
+
+/** A pieces selection, naming its panel only when it is not the teammate card. */
+const piecesSel = (names: string[], card: number, panel: string): Selection =>
+  ({ kind: 'children', names, card, ...(panel === 'teamColumn' ? {} : { panel }) });
+
+/** Whether a panel repeats per teammate card, so its pieces have a card level above them. */
+const hasCards = (panel: string) => panelChildren(panel)?.repeat === 'cards';
 
 export const NONE: Selection = { kind: 'none' };
 export const TEAMMATES: Selection = { kind: 'elements', ids: ['teamColumn'] };
@@ -56,10 +75,12 @@ const touches = (a: Box, b: Box) => a.x <= b.x + b.w && a.x + a.w >= b.x && a.y 
 const plain = ({ x, y, w, h }: Box): Box => ({ x, y, w, h });
 const drawnCards = (design: HudDesign): Box[] => teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).map(plain);
 
-export function hitAt(design: HudDesign, side: Side, state: CardState, ux: number, uy: number): Hit {
+export function hitAt(design: HudDesign, side: Side, state: State, ux: number, uy: number): Hit {
   const element = hitTest(design, side, ux, uy);
-  if (element !== 'teamColumn') return { element, card: null, child: null };
-  const piece = childAt(design, state, ux, uy);
+  if (!element || !panelChildren(element)) return { element, card: null, child: null };
+  const piece = childAt(design, state, ux, uy, element);
+  // Only the teammate card has a card level; a single panel's piece is in its one box.
+  if (element !== 'teamColumn') return { element, card: piece ? piece.card : null, child: piece ? piece.name : null };
   const card = piece ? piece.card : drawnCards(design).findIndex((c) => inside(c, ux, uy));
   return { element, card: card >= 0 ? card : null, child: piece ? piece.name : null };
 }
@@ -77,7 +98,7 @@ const sameCards = (sel: Selection, card: number) => sel.kind === 'cards' && sel.
 export function targetOf(design: HudDesign, hit: Hit, ctrl = false, sel: Selection = NONE): Selection {
   if (!hit.element) return NONE;
   const levels: Selection[] = [];
-  if (hit.child) levels.push({ kind: 'children', names: [hit.child], card: hit.card ?? 0 });
+  if (hit.child) levels.push(piecesSel([hit.child], hit.card ?? 0, hit.element));
   if (hit.element === 'teamColumn' && hit.card !== null) levels.push(cardsOf([hit.card]));
   levels.push({ kind: 'elements', ids: [hit.element] });
   if (!ctrl || levels.length === 1) return levels[0];
@@ -92,8 +113,8 @@ function toggle(list: string[], item: string): string[] {
  * Combine a newly picked target with the selection, as the canvas and the
  * Layers list both do. Without Shift the target replaces it. With Shift, an
  * element toggles among elements, a card among cards and a piece among
- * pieces; at another level the target starts a new selection, and Shift on
- * nothing keeps what there is.
+ * the pieces of the same panel; at another level or in another panel the
+ * target starts a new selection, and Shift on nothing keeps what there is.
  */
 export function pick(sel: Selection, target: Selection, shift: boolean): Selection {
   if (!shift) return target;
@@ -106,9 +127,9 @@ export function pick(sel: Selection, target: Selection, shift: boolean): Selecti
     const cards = target.cards.reduce((list, c) => (list.includes(c) ? list.filter((x) => x !== c) : [...list, c]), sel.cards);
     return cards.length ? cardsOf(cards) : NONE;
   }
-  if (sel.kind === 'children' && target.kind === 'children') {
+  if (sel.kind === 'children' && target.kind === 'children' && panelOf(sel) === panelOf(target)) {
     const names = toggle(sel.names, target.names[0]);
-    return names.length ? { kind: 'children', names, card: sel.card } : NONE;
+    return names.length ? piecesSel(names, sel.card, panelOf(sel)) : NONE;
   }
   return target;
 }
@@ -135,7 +156,7 @@ export function isPicked(design: HudDesign, sel: Selection, hit: Hit): boolean {
     case 'elements':
       return hit.element !== null && sel.ids.includes(hit.element) && !(hit.element === 'teamColumn' && isFreeTeam(design));
     case 'cards': return hit.element === 'teamColumn' && hit.card !== null && sel.cards.includes(hit.card);
-    case 'children': return hit.child !== null && sel.names.includes(hit.child);
+    case 'children': return hit.child !== null && hit.element === panelOf(sel) && sel.names.includes(hit.child);
     default: return false;
   }
 }
@@ -178,23 +199,24 @@ export function dragIntent(
 }
 
 /**
- * The teammate-card pieces the preview draws in `state`, in registry order:
+ * A panel's pieces the preview draws in `state` (the teammate card's by
+ * default), in registry order:
  * the file has them, they are visible, the state shows them, and they are
  * not decoration. Used for a box-select, Ctrl+A and a moving piece's snap
  * targets, none of which the splatter joins; a plain click is different
  * (mock.ts's childAt), and does pick the splatter where no other piece is.
  */
-export function drawnPieces(design: HudDesign, state: CardState): string[] {
-  return TEAM_PANEL.children.filter((def) => {
-    const info = cardChild(design, def.name);
-    return def.role !== 'decor' && !!info && info.visible && !hiddenInState('teamColumn', def.name, state);
+export function drawnPieces(design: HudDesign, state: State, panel = 'teamColumn'): string[] {
+  return (panelChildren(panel)?.children ?? []).filter((def) => {
+    const info = panelChild(design, panel, def.name);
+    return def.role !== 'decor' && !!info && info.visible && !hiddenInState(panel, def.name, state);
   }).map((def) => def.name);
 }
 
-/** The drawn pieces of one card with their rects, in registry order. */
-function piecesIn(design: HudDesign, state: CardState, card: Box): (Box & { name: string })[] {
-  const rects = childRects(design, 'teamColumn', { x: card.x, y: card.y }, 1);
-  return drawnPieces(design, state).flatMap((name) => {
+/** The drawn pieces of one of a panel's boxes with their rects, in registry order. */
+function piecesIn(design: HudDesign, state: State, card: Box, panel: string): (Box & { name: string })[] {
+  const rects = childRects(design, panel, { x: card.x, y: card.y }, 1);
+  return drawnPieces(design, state, panel).flatMap((name) => {
     const r = rects.find((x) => x.name === name);
     return r ? [{ name, ...plain(r) }] : [];
   });
@@ -206,18 +228,20 @@ function sectionRects(design: HudDesign, id: string): Box[] {
 }
 
 /**
- * A Shift+drag box from `a` to `b`. Started inside a drawn teammate card it
- * picks every drawn piece of that card it touches; otherwise every visible
+ * A Shift+drag box from `a` to `b`. Started inside a drawn box of a
+ * registered panel of the side (a teammate card, a single panel's frame) it
+ * picks every drawn piece of that box it touches; otherwise every visible
  * element of the side it touches. It replaces the selection.
  */
-export function boxSelect(design: HudDesign, side: Side, state: CardState, a: { x: number; y: number }, b: { x: number; y: number }): Selection {
+export function boxSelect(design: HudDesign, side: Side, state: State, a: { x: number; y: number }, b: { x: number; y: number }): Selection {
   const box = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) };
-  if (side === 'survivor' && elementRect(design, 'teamColumn', design.aspect).visible) {
-    const cards = drawnCards(design);
-    const card = cards.findIndex((c) => inside(c, a.x, a.y));
+  for (const el of visibleElements(side, design)) {
+    if (!panelChildren(el.id) || !elementRect(design, el.id, design.aspect).visible) continue;
+    const boxes = panelBoxes(design, el.id);
+    const card = boxes.findIndex((c) => inside(c, a.x, a.y));
     if (card >= 0) {
-      const names = piecesIn(design, state, cards[card]).filter((r) => touches(r, box)).map((r) => r.name);
-      return names.length ? { kind: 'children', names, card } : NONE;
+      const names = piecesIn(design, state, boxes[card], el.id).filter((r) => touches(r, box)).map((r) => r.name);
+      return names.length ? piecesSel(names, card, el.id) : NONE;
     }
   }
   const ids = visibleElements(side, design)
@@ -226,19 +250,19 @@ export function boxSelect(design: HudDesign, side: Side, state: CardState, a: { 
   return ids.length ? { kind: 'elements', ids } : NONE;
 }
 
-/** Ctrl+A: with pieces picked, every drawn piece of that card; otherwise every visible element of the side. */
-export function selectAll(design: HudDesign, side: Side, state: CardState, sel: Selection): Selection {
+/** Ctrl+A: with pieces picked, every drawn piece of that panel; otherwise every visible element of the side. */
+export function selectAll(design: HudDesign, side: Side, state: State, sel: Selection): Selection {
   if (sel.kind === 'children') {
-    const names = drawnPieces(design, state);
-    return names.length ? { kind: 'children', names, card: sel.card } : sel;
+    const names = drawnPieces(design, state, panelOf(sel));
+    return names.length ? piecesSel(names, sel.card, panelOf(sel)) : sel;
   }
   const ids = visibleElements(side, design).filter((el) => elementRect(design, el.id, design.aspect).visible).map((el) => el.id);
   return ids.length ? { kind: 'elements', ids } : NONE;
 }
 
-/** Escape: pieces climb to the card they were picked in, cards to the Teammates, anything else to nothing. */
+/** Escape: pieces climb to the card they were picked in (a single panel's to its element), cards to the Teammates, anything else to nothing. */
 export function climb(sel: Selection): Selection {
-  if (sel.kind === 'children') return cardsOf([sel.card]);
+  if (sel.kind === 'children') return hasCards(panelOf(sel)) ? cardsOf([sel.card]) : { kind: 'elements', ids: [panelOf(sel)] };
   if (sel.kind === 'cards') return TEAMMATES;
   return NONE;
 }
@@ -254,7 +278,9 @@ export function breadcrumb(sel: Selection): Crumb[] {
       return [{ label: sel.ids.length === 1 ? elementById(sel.ids[0])!.label : `${sel.ids.length} elements`, sel }];
     case 'cards': return [team, { label: sel.cards.length === 1 ? `Card ${sel.cards[0] + 1}` : `${sel.cards.length} cards`, sel }];
     case 'children': {
-      const leaf: Crumb = { label: sel.names.length === 1 ? teamChild(sel.names[0])!.label : `${sel.names.length} pieces`, sel };
+      const panel = panelOf(sel);
+      const leaf: Crumb = { label: sel.names.length === 1 ? childDef(panel, sel.names[0])!.label : `${sel.names.length} pieces`, sel };
+      if (!hasCards(panel)) return [{ label: elementById(panel)!.label, sel: { kind: 'elements', ids: [panel] } }, leaf];
       return [team, { label: `Card ${sel.card + 1}`, sel: cardsOf([sel.card]) }, leaf];
     }
   }
@@ -270,7 +296,7 @@ export function selectionLabel(sel: Selection): string {
  * The selection after the design or the side changed (an undo, an import,
  * a preset, the health number removed): kept when it still names something
  * that exists, trimmed when part of it went, and when every picked piece
- * went, the Teammates, as Phase 1 stepped back to them. Returns `sel` itself
+ * went, the panel's element (the Teammates, as Phase 1 stepped back to them). Returns `sel` itself
  * when nothing changed, so the page's state update is a no-op.
  */
 export function sanitize(design: HudDesign, side: Side, sel: Selection): Selection {
@@ -288,9 +314,10 @@ export function sanitize(design: HudDesign, side: Side, sel: Selection): Selecti
       return cards.length === sel.cards.length ? sel : cards.length ? cardsOf(cards) : TEAMMATES;
     }
     case 'children': {
-      if (side !== 'survivor') return NONE;
-      const names = sel.names.filter((n) => cardChild(design, n) !== null);
-      return names.length === sel.names.length ? sel : names.length ? { ...sel, names } : TEAMMATES;
+      const panel = panelOf(sel);
+      if (side !== elementById(panel)?.side) return NONE;
+      const names = sel.names.filter((n) => panelChild(design, panel, n) !== null);
+      return names.length === sel.names.length ? sel : names.length ? { ...sel, names } : { kind: 'elements', ids: [panel] };
     }
   }
 }
@@ -300,9 +327,10 @@ export function selectionKey(sel: Selection): string {
   return JSON.stringify(sel);
 }
 
-/** The element ids a selection touches: cards or pieces belong to the Teammates. */
+/** The element ids a selection touches: cards belong to the Teammates, pieces to their panel. */
 export function selectedIds(sel: Selection): string[] {
   if (sel.kind === 'elements') return sel.ids;
+  if (sel.kind === 'children') return [panelOf(sel)];
   return sel.kind === 'none' ? [] : ['teamColumn'];
 }
 
@@ -321,19 +349,20 @@ export function elementFrame(design: HudDesign, id: string): Box {
 
 /**
  * A selected piece's frame, from a childRects entry: as drawn, or, for a
- * piece the player hid, from cardChild instead. hidePass (build.ts) zeroes a
+ * piece the player hid, from panelChild instead. hidePass (build.ts) zeroes a
  * hidden piece's wide and tall in the generated tree so the game can't force
  * it visible, but that would collapse its frame to a point at its (still
- * correct) origin. cardChild reads cardWork, which never runs hidePass, so
- * its w and h are the piece's real, undoctored size; only that size needs
- * scaling by the team's own scale, to match childRects' already-scaled
- * numbers (cardChild's frame is unscaled, the file's own stored one).
+ * correct) origin. panelChild reads panelWork, which never runs hidePass,
+ * so its w and h are the piece's real, undoctored size; only that size
+ * needs scaling by the element's own scale, to match childRects'
+ * already-scaled numbers (panelChild's frame is unscaled, the file's own
+ * stored one).
  */
-function pieceFrame(design: HudDesign, r: ChildRect): Box {
+function pieceFrame(design: HudDesign, r: ChildRect, panel: string): Box {
   if (r.visible) return plain(r);
-  const c = cardChild(design, r.name);
+  const c = panelChild(design, panel, r.name);
   if (!c) return plain(r);
-  const k = cardFrame(design).k;
+  const k = panelFrame(design, panel).k;
   // scalePass (build.ts's scaleToken) rounds every positional value it
   // writes, wide and tall included; matching that rounding here, not just
   // the factor, is what keeps a hidden piece's frame equal to the very same
@@ -341,7 +370,7 @@ function pieceFrame(design: HudDesign, r: ChildRect): Box {
   return { x: r.x, y: r.y, w: Math.round(c.w * k), h: Math.round(c.h * k) };
 }
 
-/** One outline per selected thing as drawn: an element's frame, the Free Teammates' cards, each picked card, a piece in every card. */
+/** One outline per selected thing as drawn: an element's frame, the Free Teammates' cards, each picked card, a piece in every box of its panel. */
 export function selectionFrames(design: HudDesign, sel: Selection): Box[] {
   switch (sel.kind) {
     case 'none': return [];
@@ -350,17 +379,22 @@ export function selectionFrames(design: HudDesign, sel: Selection): Box[] {
       const rects = teamCardRects(design, design.aspect);
       return sel.cards.map((c) => plain(rects[c]));
     }
-    case 'children':
-      return drawnCards(design).flatMap((c) => childRects(design, 'teamColumn', { x: c.x, y: c.y }, 1)
-        .filter((r) => sel.names.includes(r.name)).map((r) => pieceFrame(design, r)));
+    case 'children': {
+      const panel = panelOf(sel);
+      return panelBoxes(design, panel).flatMap((c) => childRects(design, panel, { x: c.x, y: c.y }, 1)
+        .filter((r) => sel.names.includes(r.name)).map((r) => pieceFrame(design, r, panel)));
+    }
   }
 }
 
-/** The box the handles sit on: for pieces, around them in the card they were picked in. */
+/** The box the handles sit on: for pieces, around them in the card (or single panel box) they were picked in. */
 export function selectionBox(design: HudDesign, sel: Selection): Box | null {
   if (sel.kind === 'children') {
-    const c = teamCardRects(design, design.aspect)[sel.card];
-    return unionBox(childRects(design, 'teamColumn', { x: c.x, y: c.y }, 1).filter((r) => sel.names.includes(r.name)).map((r) => pieceFrame(design, r)));
+    const panel = panelOf(sel);
+    // Every teammate card, the fourth included (Free lists it), not only the three drawn.
+    const c = panel === 'teamColumn' ? teamCardRects(design, design.aspect)[sel.card] : panelBoxes(design, panel)[sel.card];
+    if (!c) return null;
+    return unionBox(childRects(design, panel, { x: c.x, y: c.y }, 1).filter((r) => sel.names.includes(r.name)).map((r) => pieceFrame(design, r, panel)));
   }
   return unionBox(selectionFrames(design, sel));
 }
@@ -383,7 +417,7 @@ export function handlesFor(design: HudDesign, sel: Selection): Handle[] {
   }
   if (sel.kind === 'children') {
     if (sel.names.length > 1) return CORNERS;
-    const def = teamChild(sel.names[0]);
+    const def = childDef(panelOf(sel), sel.names[0]);
     if (!def) return [];
     if (def.box === 'wh') return ALL_HANDLES;
     return def.box === 'square' || def.font ? CORNERS : [];
@@ -409,16 +443,46 @@ export function handleAt(box: Box, handles: Handle[], ux: number, uy: number, sl
 }
 
 /**
- * What moving pieces snap to, in the card file's unfitted frame (the frame
- * a ChildOverride is stored in): the unfitted card, which is what the
- * Phase 1 drag clamps to, and the other drawn pieces.
+ * The box a panel's pieces are clamped to, in the panel file's own unfitted
+ * frame, from (0, 0). The teammate card's is the unfitted base card, as in
+ * Phase 1. A single panel's is the union of its frame block's base size and
+ * every registered child's base rect (plan decision 9), so a piece that
+ * already runs past the frame (the own panel's top scratch) is not yanked
+ * inside on its first nudge. edit.ts clamps with the same box.
  */
-export function pieceTargets(design: HudDesign, state: CardState, moving: string[]): Box[] {
-  const p = baseTeam(baseOf(design)).card;
+export function panelClamp(design: HudDesign, panel: string): { w: number; h: number } {
+  const key = baseOf(design);
+  if (panel === 'teamColumn') return baseTeam(key).card;
+  const reg = panelChildren(panel);
+  if (!reg) return { w: 0, h: 0 };
+  const num = (n: ReturnType<typeof kvFind>, k: string) => { const f = parseFloat((n && kvGet(n, k)) ?? ''); return Number.isFinite(f) ? f : 0; };
+  let w = 0, h = 0;
+  if (reg.frame && reg.frame !== 'hudlayout') {
+    const f = kvFind(baseTree(key, reg.frame.file), [reg.frame.block]);
+    w = num(f, 'wide'); h = num(f, 'tall');
+  }
+  const tree = baseTree(key, reg.file);
+  for (const def of reg.children) {
+    const n = kvFind(tree, [def.name]);
+    if (!n) continue;
+    w = Math.max(w, num(n, 'xpos') + num(n, 'wide'));
+    h = Math.max(h, num(n, 'ypos') + num(n, 'tall'));
+  }
+  return { w, h };
+}
+
+/**
+ * What moving pieces snap to, in the panel file's unfitted frame (the frame
+ * a ChildOverride is stored in): the panel's clamp box (panelClamp; for the
+ * teammate card the unfitted card, which is what the Phase 1 drag clamps
+ * to), and the other drawn pieces.
+ */
+export function pieceTargets(design: HudDesign, state: State, moving: string[], panel = 'teamColumn'): Box[] {
+  const p = panelClamp(design, panel);
   const out: Box[] = [{ x: 0, y: 0, w: p.w, h: p.h }];
-  for (const name of drawnPieces(design, state)) {
+  for (const name of drawnPieces(design, state, panel)) {
     if (moving.includes(name)) continue;
-    const c = cardChild(design, name);
+    const c = panelChild(design, panel, name);
     if (c) out.push({ x: c.x, y: c.y, w: c.w, h: c.h });
   }
   return out;

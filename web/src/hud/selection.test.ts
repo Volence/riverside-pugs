@@ -3,10 +3,11 @@ import { DEFAULT_DESIGN, type HudDesign, type Box } from './design';
 import { teamCardRects, cardFrame } from './build';
 import { childRects, type CardState } from './render';
 import { withTeamDir, patchChild } from './edit';
+import { panelBoxes } from './mock';
 import {
   NONE, TEAMMATES, hitAt, targetOf, clickSelect, dragIntent, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
   sanitize, selectedIds, selectionFrames, selectionBox, handlesFor, handlePoint, handleAt, pieceTargets, sectionTargets,
-  pieceGuideToScreen, menuActions, drawnPieces, elementFrame, isPicked, pick, cardsOf, type Selection, type Mods,
+  pieceGuideToScreen, menuActions, drawnPieces, elementFrame, isPicked, pick, cardsOf, panelOf, type Selection, type Mods,
 } from './selection';
 import { unionBox } from './guides';
 
@@ -411,5 +412,25 @@ describe('targetOf', () => {
     expect(targetOf(D, hit, true)).toEqual({ kind: 'cards', cards: [1] });
     // With that card already picked, a Ctrl+click (and so the Ctrl hover) goes to the Teammates.
     expect(targetOf(D, hit, true, { kind: 'cards', cards: [1] })).toEqual(TEAMMATES);
+  });
+});
+
+describe('the children level names its panel', () => {
+  it('leaves the panel out for the teammate card, so old selections still compare equal', () => {
+    const [c] = panelBoxes(D, 'teamColumn');
+    const hit = hitAt(D, 'survivor', 'healthy', c.x + 1, c.y + 1);
+    const t = targetOf(D, hit);
+    expect(t.kind).toBe('children');
+    if (t.kind === 'children') expect('panel' in t).toBe(false);
+    expect(panelOf({})).toBe('teamColumn');
+  });
+  it('never mixes pieces of two panels in a Shift pick', () => {
+    const a: Selection = { kind: 'children', names: ['Head'], card: 0 };
+    const b: Selection = { kind: 'children', names: ['Health'], card: 0, panel: 'ownHealth' };
+    expect(pick(a, b, true)).toEqual(b);
+  });
+  it('climbs from a single panel\'s pieces straight to its element', () => {
+    expect(climb({ kind: 'children', names: ['Health'], card: 0, panel: 'ownHealth' })).toEqual({ kind: 'elements', ids: ['ownHealth'] });
+    expect(selectedIds({ kind: 'children', names: ['Health'], card: 0, panel: 'ownHealth' })).toEqual(['ownHealth']);
   });
 });
