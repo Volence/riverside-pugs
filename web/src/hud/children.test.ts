@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, PANEL_CHILDREN, panelChildren, CONTENT_CHILDREN, FIT_SQUARED, childDef, panelOfFile, maxInset, linkedValue, unlinkedValue, type KeyDef } from './children';
+import { TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, ZCARD_PANEL, PANEL_CHILDREN, panelChildren, CONTENT_CHILDREN, FIT_SQUARED, childDef, panelOfFile, maxInset, linkedValue, unlinkedValue, type KeyDef } from './children';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { SPLATTERS } from './splatter';
@@ -14,8 +14,8 @@ const CONTROL: Record<string, string> = { image: 'imagepanel', label: 'label', b
  * the way elements.test.ts pins element keys to hudlayout.res.
  */
 describe('the teammate card registry', () => {
-  it('covers the teammate card, your own health, your infected health and the ability timer', () => {
-    expect(PANEL_CHILDREN.map((p) => p.panelId)).toEqual(['teamColumn', 'ownHealth', 'siHealth', 'abilityRing']);
+  it('covers the teammate card, your own health, your infected health, the ability timer and the infected card', () => {
+    expect(PANEL_CHILDREN.map((p) => p.panelId)).toEqual(['teamColumn', 'ownHealth', 'siHealth', 'abilityRing', 'infectedRow']);
     expect(TEAM_PANEL.file).toBe('resource/ui/hud/teammatepanel.res');
   });
 
@@ -394,5 +394,70 @@ describe('the ability timer\'s pieces (plan Task 6)', () => {
     expect(by('AbilityImage').note).toBe('The game picks the icon by class.');
     expect(by('Progress')).toMatchObject({ kind: 'other', role: 'content', box: 'square', move: true, colour: false });
     expect(by('Progress').note).toBe('The game fills this as your ability recharges.');
+  });
+});
+
+/**
+ * The infected teammate card (zombieteamdisplayplayer.res), plan Task 10.
+ * Probe answers, /home/volence/l4d/hud/probe-phase2-infected/RESULTS.md:
+ * Q17 the card's self block clips (b10/shots/crops/bl-abe.png), Q18 the
+ * backdrop takes drawColor and the name fgcolor_override
+ * (b9/shots/crops/bl-abeg.png), Q19 the dead card (Dead needs a height; the
+ * skull at SkullIconPlacement; bar and icon hidden), Q20 the ghost card, and
+ * the dll's AbilityProgress rule (0x10248700).
+ */
+describe('the infected card\'s pieces (plan Task 10)', () => {
+  const file = (preset: 'stock' | 'modern') => parseKv(baseFile(preset, ZCARD_PANEL.file))[0].value as KvNode[];
+  const by = (n: string) => ZCARD_PANEL.children.find((c) => c.name === n)!;
+  const KIND: Record<string, string> = { image: 'imagepanel', label: 'label', bar: 'healthpanel' };
+  it('is one file loaded per card, framed by its own ZombieTeamDisplayPlayer block', () => {
+    expect(panelChildren('infectedRow')).toBe(ZCARD_PANEL);
+    expect(ZCARD_PANEL.file).toBe('resource/ui/hud/zombieteamdisplayplayer.res');
+    expect(ZCARD_PANEL.repeat).toBe('cards');
+    expect(ZCARD_PANEL.frame).toEqual({ file: 'resource/ui/hud/zombieteamdisplayplayer.res', block: 'ZombieTeamDisplayPlayer' });
+    expect(ZCARD_PANEL.children.map((c) => c.name)).toEqual(['BackgroundImage', 'PlayerImage', 'HealthPanel', 'NameLabel',
+      'SpawnTimeLabel', 'AbilityProgress', 'Dead', 'SkullIconPlacement', 'Voice']);
+  });
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`names blocks the ${preset} file has, each of its kind, the frame too`, () => {
+      expect(kvFind(file(preset), ['ZombieTeamDisplayPlayer'])).toBeDefined();
+      for (const def of ZCARD_PANEL.children) {
+        const b = kvFind(file(preset), [def.name]);
+        expect(b, `${preset} ${def.name}`).toBeDefined();
+        const control = (kvGet(b!, 'ControlName') ?? '').toLowerCase();
+        expect(control, `${preset} ${def.name}`).toBe(KIND[def.kind] ?? (def.name === 'AbilityProgress' ? 'circularprogressbar' : 'panel'));
+      }
+    });
+    it(`keeps square pieces square in ${preset}, and gives each label a font its scheme defines`, () => {
+      for (const def of ZCARD_PANEL.children) {
+        const b = kvFind(file(preset), [def.name])!;
+        if (def.box === 'square') expect(kvGet(b, 'wide'), `${preset} ${def.name}`).toBe(kvGet(b, 'tall'));
+        if (def.font) expect(kvFind(scheme(preset), ['Fonts', kvGet(b, 'font')!]), `${preset} ${def.name}`).toBeDefined();
+      }
+    });
+  }
+  it('keeps the backdrop in the fit, tintable, as decoration (Q18)', () => {
+    expect(by('BackgroundImage')).toMatchObject({ kind: 'image', role: 'decor', box: 'wh', colour: true, fitPlace: 'keep' });
+  });
+  it('gives the name and the spawn time a font and a colour, ungated (Q18; decision 6)', () => {
+    expect(by('NameLabel')).toMatchObject({ kind: 'label', role: 'content', box: 'wh', font: true, colour: true });
+    expect(by('SpawnTimeLabel')).toMatchObject({ kind: 'label', role: 'state', stateArt: 'dead', font: true, colour: true });
+    expect(by('SpawnTimeLabel').note).toBe("Your teammates' respawn countdown. Your own card never shows it.");
+    expect(by('NameLabel').colourGate).toBeUndefined();
+  });
+  it('lets code pick the icon and hide it with the bar when dead, and gates the bar colour on Q24', () => {
+    expect(by('PlayerImage')).toMatchObject({ kind: 'image', role: 'content', box: 'square', colour: false, hideInInfected: ['dead'] });
+    expect(by('PlayerImage').note).toBe("The game picks the icon by class; a ghost's is faint.");
+    expect(by('HealthPanel')).toMatchObject({ kind: 'bar', role: 'content', box: 'wh', hideInInfected: ['dead'] });
+    expect(by('HealthPanel').keys!.find((k) => k.key === 'monochrome_color')).toMatchObject({ type: 'colour', gate: 'Q24' });
+    expect(by('HealthPanel').keys!.find((k) => k.key === 'inset')!.gate).toBeUndefined();
+  });
+  it('says when code shows each state piece', () => {
+    expect(by('AbilityProgress')).toMatchObject({ kind: 'other', role: 'state', stateArt: 'ability', box: 'square' });
+    expect(by('AbilityProgress').note).toBe('Shown on a spawned Smoker, Boomer or Tank; never on a Hunter or a ghost.');
+    expect(by('Dead')).toMatchObject({ kind: 'image', role: 'state', stateArt: 'dead', box: 'wh' });
+    expect(by('Dead').note).toBe('The stock file gives this no height, so the game never shows it; give it a height to see it.');
+    expect(by('SkullIconPlacement')).toMatchObject({ kind: 'other', role: 'state', stateArt: 'dead', box: 'square' });
+    expect(by('Voice')).toMatchObject({ kind: 'other', role: 'state', stateArt: 'talking', box: 'square' });
   });
 });

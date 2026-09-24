@@ -17,8 +17,12 @@ import type { ProbeId } from './probes';
 /** The survivor states the preview can show a panel in. */
 export type SurvivorState = 'healthy' | 'hurt' | 'down' | 'dead';
 
-/** When game code shows a state piece: in a survivor state, or on a condition of its own. */
-export type StateArt = 'down' | 'dead' | 'crouched' | 'talking' | 'ghost';
+/**
+ * When game code shows a state piece: in a survivor state, or on a condition
+ * of its own. 'ability' is the infected card's ability ring: code shows it on a spawned
+ * Smoker, Boomer or Tank, never a Hunter or a ghost (client.dll 0x10248700).
+ */
+export type StateArt = 'down' | 'dead' | 'crouched' | 'talking' | 'ghost' | 'ability';
 
 /**
  * A file key a control writes on a child (or on an element's own
@@ -99,6 +103,8 @@ export interface ChildDef {
   stateArt?: StateArt;
   /** Hidden in those survivor states (a down teammate's portrait gives way to the down art). */
   hideIn?: SurvivorState[];
+  /** Hidden in those infected states (a dead infected card drops its icon and bar, probe Q19). */
+  hideInInfected?: ('ghost' | 'dead')[];
   /**
    * State and decor pieces only. 'rule' (the default): the panel's fit rule
    * re-places the piece. 'keep': it keeps its place and counts toward the
@@ -341,6 +347,60 @@ export const ABILITY_PANEL: PanelChildren = {
   ],
 };
 
+/**
+ * The infected teammate card (zombieteamdisplayplayer.res): one file loaded
+ * for each of the three cards code makes, framed by the file's own
+ * ZombieTeamDisplayPlayer block, which clips the card (probe Q17,
+ * /home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/bl-abe.png).
+ * Probe answers, RESULTS.md in that folder:
+ * - Q18 the backdrop takes drawColor and the name fgcolor_override
+ *   (b9/shots/crops/bl-abeg.png: red backdrop, green name).
+ * - Q19 dead: Dead shows only when given a height (code toggles its
+ *   visibility, never its size; stock 0 tall), the skull draws at
+ *   SkullIconPlacement, PlayerImage and HealthPanel hide
+ *   (b9/shots-v2/crops/dead-card-ij.png). SpawnTimeLabel shows while a
+ *   teammate waits with a spawn time (dll 0x10248606); never on your own
+ *   card, so the harness never saw it.
+ * - Q20 ghost: the icon is the class's ghost texture tinted by code, the bar
+ *   stays, no spawn time and no ability ring (bl-abeg.png a).
+ * - the ring shows alive, not a ghost, not a Hunter (dll 0x10248700).
+ * The backdrop is not a splatter entry: the splatter work does not restyle
+ * it, so it has only its tint here. The bar colour waits on Q24, as on your
+ * infected health; the inset is the HealthPanel class's one read.
+ */
+export const ZCARD_PANEL: PanelChildren = {
+  panelId: 'infectedRow',
+  file: 'resource/ui/hud/zombieteamdisplayplayer.res',
+  repeat: 'cards',
+  frame: { file: 'resource/ui/hud/zombieteamdisplayplayer.res', block: 'ZombieTeamDisplayPlayer' },
+  children: [
+    { name: 'BackgroundImage', label: 'Backdrop', kind: 'image', role: 'decor', box: 'wh', move: true, font: false, colour: true, fitPlace: 'keep',
+      note: 'The game tints the stock backdrop art by this colour.' },
+    { name: 'PlayerImage', label: 'Class icon', kind: 'image', role: 'content', box: 'square', move: true, font: false, colour: false,
+      hideInInfected: ['dead'], note: "The game picks the icon by class; a ghost's is faint." },
+    { name: 'HealthPanel', label: 'Health bar', kind: 'bar', role: 'content', box: 'wh', move: true, font: false, colour: false,
+      hideInInfected: ['dead'],
+      keys: [
+        { key: 'monochrome_color', label: 'Bar colour', type: 'colour', gate: 'Q24', evidence: MONO_EVIDENCE,
+          unsetLabel: 'Game colour (by health)' },
+        { key: 'inset', label: 'Inset', type: 'int', range: [0, 8], unset: String(STOCK_BAR_INSET),
+          evidence: 'client.dll HealthPanel run: m_inset|inset; probe B1 Q3 on the same class' },
+      ],
+      note: 'The game fills the bar by health.' },
+    { name: 'NameLabel', label: 'Name', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true },
+    { name: 'SpawnTimeLabel', label: 'Spawn time', kind: 'label', role: 'state', box: 'wh', move: true, font: true, colour: true,
+      stateArt: 'dead', note: "Your teammates' respawn countdown. Your own card never shows it." },
+    { name: 'AbilityProgress', label: 'Ability ring', kind: 'other', role: 'state', box: 'square', move: true, font: false, colour: false,
+      stateArt: 'ability', note: 'Shown on a spawned Smoker, Boomer or Tank; never on a Hunter or a ghost.' },
+    { name: 'Dead', label: 'Dead picture', kind: 'image', role: 'state', box: 'wh', move: true, font: false, colour: false,
+      stateArt: 'dead', note: 'The stock file gives this no height, so the game never shows it; give it a height to see it.' },
+    { name: 'SkullIconPlacement', label: 'Skull', kind: 'other', role: 'state', box: 'square', move: true, font: false, colour: false,
+      stateArt: 'dead', note: 'The game draws a skull here while that player is dead.' },
+    { name: 'Voice', label: 'Voice icon', kind: 'other', role: 'state', box: 'square', move: true, font: false, colour: false,
+      stateArt: 'talking', note: 'Shown while that teammate talks.' },
+  ],
+};
+
 /** A block's rect, as a linked rule reads it from a base file. */
 export interface LinkRect { x: number; y: number; w: number; h: number }
 export type LinkRule = 'same' | 'delta';
@@ -376,7 +436,7 @@ function mapLinked<T>(rule: LinkRule, key: string, v: T, a: LinkRect, b: LinkRec
   }
 }
 
-export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL];
+export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, ZCARD_PANEL];
 export const panelChildren = (panelId: string): PanelChildren | undefined => PANEL_CHILDREN.find((p) => p.panelId === panelId);
 export const teamChild = (name: string): ChildDef | undefined => TEAM_PANEL.children.find((c) => c.name === name);
 

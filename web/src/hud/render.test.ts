@@ -607,8 +607,8 @@ describe('the teammate card states', () => {
     expect(hiddenInState('teamColumn', 'Head', 'down')).toBe(true);
     expect(hiddenInState('teamColumn', 'Incapacitated', 'down')).toBe(false);
     expect(hiddenInState('ownHealth', 'Incapacitated', 'down')).toBe(false);
-    // The infected card is not registered yet (slice 2.4): the old always-hidden list.
-    expect(hiddenInState('infectedRow', 'Incapacitated', 'down')).toBe(true);
+    // A panel the registry does not have: the old always-hidden list.
+    expect(hiddenInState('tankPanel', 'Incapacitated', 'down')).toBe(true);
     expect(hiddenInState('teamColumn', 'Voice', 'healthy')).toBe(true);
   });
 
@@ -1015,7 +1015,21 @@ describe('the preview state', () => {
     for (const def of TEAM_PANEL.children) expect(hiddenInState('teamColumn', def.name, 'hurt'), def.name).toBe(hiddenInState('teamColumn', def.name, 'healthy'));
   });
   it('keeps the old always-hidden list for panels the registry does not have yet', () => {
-    for (const n of ['DuckingIcon', 'Incapacitated', 'SpawnTimeLabel', 'SkullIconPlacement']) expect(hiddenInState('infectedRow', n, 'healthy'), n).toBe(true);
+    for (const n of ['DuckingIcon', 'Incapacitated', 'SpawnTimeLabel', 'SkullIconPlacement']) expect(hiddenInState('tankPanel', n, 'healthy'), n).toBe(true);
+  });
+  it('shows the infected card\'s pieces as the game does, alive, ghost or dead (plan Task 10)', () => {
+    // /home/volence/l4d/hud/probe-phase2-infected/b9/shots/crops/bl-abeg.png (a ghost, b Hunter, e dead, g Smoker)
+    // and the dll: AbilityProgress shows alive, not ghost, not a Hunter (0x10248700); SpawnTimeLabel only while
+    // dead with a spawn time (0x10248606); the ghost card keeps its bar (Q20).
+    const shown = (state: Partial<PreviewState>, cls?: PreviewState['siClass']) => ['BackgroundImage', 'PlayerImage', 'HealthPanel', 'NameLabel',
+      'SpawnTimeLabel', 'AbilityProgress', 'Dead', 'SkullIconPlacement', 'Voice']
+      .filter((n) => !hiddenInState('infectedRow', n, { ...DEFAULT_PREVIEW, ...state }, cls));
+    expect(shown({ siClass: 'smoker' })).toEqual(['BackgroundImage', 'PlayerImage', 'HealthPanel', 'NameLabel', 'AbilityProgress']);
+    expect(shown({ siClass: 'hunter' })).toEqual(['BackgroundImage', 'PlayerImage', 'HealthPanel', 'NameLabel']);
+    expect(shown({ siClass: 'hunter' }, 'tank')).toContain('AbilityProgress');     // a card's own class decides
+    expect(shown({ siClass: 'tank' }, 'hunter')).not.toContain('AbilityProgress');
+    expect(shown({ infected: 'ghost', siClass: 'smoker' })).toEqual(['BackgroundImage', 'PlayerImage', 'HealthPanel', 'NameLabel']);
+    expect(shown({ infected: 'dead', siClass: 'smoker' })).toEqual(['BackgroundImage', 'NameLabel', 'SpawnTimeLabel', 'Dead', 'SkullIconPlacement']);
   });
   it('shows your infected health\'s crouch icon by the registry, only when crouched', () => {
     expect(hiddenInState('siHealth', 'DuckingIcon', 'healthy')).toBe(true);

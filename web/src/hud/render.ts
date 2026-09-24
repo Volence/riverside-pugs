@@ -137,18 +137,23 @@ const STATE_CHILDREN = new Set(['incapacitated', 'dead', 'voice', 'skulliconplac
  * stand-in) is never hidden by state; an unregistered panel keeps
  * STATE_CHILDREN.
  */
-export function hiddenInState(panelId: string, name: string, state: SurvivorState | PreviewState): boolean {
+export function hiddenInState(panelId: string, name: string, state: SurvivorState | PreviewState, cls?: PreviewState['siClass']): boolean {
   const v = previewOf(state);
   if (!panelChildren(panelId)) return STATE_CHILDREN.has(name.toLowerCase());
   const def = childDef(panelId, name);
   if (!def) return false;
+  const infected = elementById(panelId)?.side === 'infected';
   switch (def.stateArt) {
     case 'down': return v.survivor !== 'down';
-    case 'dead': return elementById(panelId)?.side === 'infected' ? v.infected !== 'dead' : v.survivor !== 'dead';
+    case 'dead': return infected ? v.infected !== 'dead' : v.survivor !== 'dead';
     case 'crouched': return !v.crouched;
     case 'ghost': return v.infected !== 'ghost';
+    // An infected card's own class decides (`cls`, a sample teammate's), else the class the page shows.
+    case 'ability': return v.infected !== 'alive' || (cls ?? v.siClass) === 'hunter';
     case 'talking': return true;
-    default: return !!def.hideIn?.includes(v.survivor);
+    default:
+      if (infected) return v.infected !== 'alive' && !!def.hideInInfected?.includes(v.infected);
+      return !!def.hideIn?.includes(v.survivor);
   }
 }
 
