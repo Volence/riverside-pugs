@@ -49,6 +49,11 @@ export function watchListOnly(a: Inventory, b: Inventory, versionless: string[])
   const skip = new Set(versionless.map((f) => `p:${f}`));
   const d = diffInventories(a, b);
   const oneSided = [...d.added, ...d.removed];
+  // A cvar that vanished (c:x removed, x:x added) or appeared (the reverse) is
+  // a real change in the game, not the watch list: same name on both sides.
+  const cvarNames = (keys: string[]) => new Set(keys.filter((k) => /^[cx]:/.test(k)).map((k) => k.slice(2)));
+  const added = cvarNames(d.added), removed = cvarNames(d.removed);
+  if ([...added].some((n) => removed.has(n))) return false;
   return d.changed.every((c) => skip.has(c.key)) && oneSided.length > 0 && oneSided.every((k) => /^[cxwfd]:/.test(k));
 }
 

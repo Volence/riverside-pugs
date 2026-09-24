@@ -25,9 +25,14 @@ const DONE = new Set(['written', 'restarted', 'confirmed', 'failed', 'skipped', 
 const OK = new Set(['written', 'restarted', 'confirmed']);
 const LINK = { label: 'Deploy page', path: '/admin/setup/deploy' };
 const BACKUP_DAYS = 30;
+/** Per call on a box: a read, a write, a delete, or the verify hash. */
+const OP_LIMIT_MS: Record<TreeWriter['kind'], number> = { local: 60_000, sftp: 120_000, ftp: 300_000 };
+/** The release hook never holds the after-match restart longer than this. */
+const HOOK_CAP_MS = 3 * 60_000;
 
 export class ReleaseEngine {
   private chain: Promise<void> = Promise.resolve();
+  private restarts = new Set<Promise<void>>();
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private d: {
@@ -43,6 +48,7 @@ export class ReleaseEngine {
     emptyWaitMs?: number;
     emptyPollMs?: number;
     tickMs?: number;
+    hookCapMs?: number;
   }) {}
 
   private now() { return (this.d.now ?? sqlNow)(); }
@@ -66,6 +72,15 @@ export class ReleaseEngine {
     if (r.state !== 'staged') return { ok: false, status: 409, error: `this release is ${r.state}` };
     if (this.inFlight() !== null) return { ok: false, status: 409, error: 'another release is still deploying' };
     const rows = this.boxes(id);
+    // A plan is a diff against the box as it was at staging. Another release
+    // (or undo) reaching a target since then makes it stale: stage again.
+    const created = (this.d.db.prepare('SELECT created_at FROM releases WHERE id = ?').get(id) as { created_at: string }).created_at;
+    for (const t of p.targets) {
+      const newer = this.d.db.prepare(`SELECT r.id FROM release_boxes rb JOIN releases r ON r.id = rb.release_id
+        WHERE rb.server_id = ? AND r.id != ? AND r.deployed_at IS NOT NULL AND r.deployed_at > ?
+          AND rb.state IN ('written','restarted','confirmed','undone') LIMIT 1`).get(t, id, created) as { id: number } | undefined;
+      if (newer) return { ok: false, status: 409, error: `release ${newer.id} reached a target box after this one was staged: review this commit again` };
+    }
     const deployable = new Set(rows.filter((b) => b.plan_json !== null).map((b) => b.server_id));
     if (p.targets.length === 0 || p.targets.some((t) => !deployable.has(t))) return { ok: false, status: 400, error: 'pick at least one box that has a plan' };
     if (p.canary !== null && !p.targets.includes(p.canary)) return { ok: false, status: 400, error: 'the canary must be one of the targets' };
@@ -100,6 +115,13 @@ export class ReleaseEngine {
     if (this.inFlight() !== null) return { ok: false, status: 409, error: 'another release is still deploying' };
     const reached = this.boxes(id).filter((b) => OK.has(b.state) && (serverIds === null || serverIds.includes(b.server_id)));
     if (reached.length === 0) return { ok: false, status: 400, error: 'none of those boxes has this release on it' };
+    // Undo puts back what was there before THIS release: after a newer one
+    // reached the box, that would wipe the newer one's changes too.
+    for (const b of reached) {
+      const newer = this.d.db.prepare(`SELECT rb.release_id FROM release_boxes rb JOIN releases r ON r.id = rb.release_id
+        WHERE rb.server_id = ? AND r.kind = 'deploy' AND r.id > ? AND rb.state IN ('written','restarted','confirmed') LIMIT 1`).get(b.server_id, id) as { release_id: number } | undefined;
+      if (newer) return { ok: false, status: 409, error: `release ${newer.release_id} reached that box after this one: undo it first` };
+    }
     const uid = this.d.db.transaction(() => {
       const src = this.d.db.prepare('SELECT sources_json FROM releases WHERE id = ?').get(id) as { sources_json: string };
       const newId = Number(this.d.db.prepare(`INSERT INTO releases (kind, undo_of, sources_json, state, created_by, created_at, deployed_by, deployed_at)
@@ -128,7 +150,13 @@ export class ReleaseEngine {
    *  match; give it its turn now, before the releaser restarts it. */
   forRelease(serverId: number): Promise<void> {
     this.chain = this.chain.then(() => this.drive(serverId)).catch((err) => console.error('[releases] release hook failed:', err));
-    return this.chain;
+    // Capped: behind a slow write on another box, the releaser must still get
+    // this box back. If the cap fires first, the queued turn still runs later;
+    // by then the box is no longer offline for this release, so it waits for
+    // an idle moment like any other (runBox only writes 'offline' in the hook).
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const cap = new Promise<void>((resolve) => { t = setTimeout(resolve, this.d.hookCapMs ?? HOOK_CAP_MS); t.unref?.(); });
+    return Promise.race([this.chain, cap]).finally(() => clearTimeout(t));
   }
 
   private async drive(onlyServer: number | null): Promise<void> {
@@ -182,8 +210,12 @@ export class ReleaseEngine {
     const db = this.d.db;
     const s = getServer(db, b.server_id);
     if (!s || s.enabled !== 1) { this.setBox(r.id, b.server_id, 'failed', 'the box is disabled'); return; }
+    // 'offline' is only ours to use inside the release hook, where the
+    // releaser itself took the box offline to restart it. Anywhere else it
+    // means parked or unverified (see reconcileServers), and must never be
+    // written, restarted or turned idle from here.
     const releaserRestarting = viaRelease && s.status === 'offline';
-    if (!releaserRestarting && s.status !== 'idle' && s.status !== 'offline') { this.setBox(r.id, b.server_id, 'waiting'); return; }
+    if (!releaserRestarting && s.status !== 'idle') { this.setBox(r.id, b.server_id, 'waiting'); return; }
     const writer = (this.d.writer ?? treeWriterFor)(s);
     if (!writer) { this.setBox(r.id, b.server_id, 'failed', 'no transport configured'); return; }
     const held = s.status === 'idle';
@@ -191,25 +223,33 @@ export class ReleaseEngine {
     const unhold = () => { if (held) releaseServer(db, s.id); };
     this.setBox(r.id, b.server_id, 'writing');
 
+    // Every box call is bounded: a hung ssh or FTP call must not hold the
+    // engine (and, through the release hook, the releaser) forever.
+    const limit = OP_LIMIT_MS[writer.kind];
+    const bounded = <T>(p: Promise<T>, what: string): Promise<T> => {
+      let t: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => { t = setTimeout(() => reject(new Error(`${what} timed out after ${limit / 1000} s`)), limit); });
+      return Promise.race([p, timeout]).finally(() => clearTimeout(t));
+    };
     const ops = JSON.parse(b.plan_json!) as Op[];
     const dir = join(this.d.releasesDir, String(r.id), String(s.id));
     const backup: { path: string; existed: boolean }[] = [];
     try {
       for (const o of ops) {
-        const bytes = await writer.read(o.path);
+        const bytes = await bounded(writer.read(o.path), `reading ${o.path}`);
         if (bytes) { mkdirSync(dirname(join(dir, 'files', o.path)), { recursive: true }); writeFileSync(join(dir, 'files', o.path), bytes); }
         backup.push({ path: o.path, existed: bytes !== null });
       }
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, 'backup.json'), JSON.stringify(backup));
       for (const o of ops) {
-        if (o.op === 'remove') { await writer.remove(o.path); continue; }
+        if (o.op === 'remove') { await bounded(writer.remove(o.path), `removing ${o.path}`); continue; }
         const bytes = o.blob ? await this.d.blob(o.blob)
           : readFileSync(join(this.d.releasesDir, String(o.backupFrom!.releaseId), String(o.backupFrom!.serverId), 'files', o.path));
         if (sha256(bytes) !== o.sha256) throw new Error(`content for ${o.path} does not match its hash`);
-        await writer.write(o.path, bytes);
+        await bounded(writer.write(o.path, bytes), `writing ${o.path}`);
       }
-      const h = await writer.hash(ops.map((o) => o.path));
+      const h = await bounded(writer.hash(ops.map((o) => o.path)), 'verifying');
       for (const o of ops) {
         const got = h.get(o.path) ?? null;
         if (o.op === 'remove' ? got !== null : got !== o.sha256) throw new Error(`verify failed for ${o.path}`);
@@ -218,8 +258,8 @@ export class ReleaseEngine {
       let error = err instanceof Error ? err.message : String(err);
       try {
         for (const e of backup) {
-          if (e.existed) await writer.write(e.path, readFileSync(join(dir, 'files', e.path)));
-          else await writer.remove(e.path);
+          if (e.existed) await bounded(writer.write(e.path, readFileSync(join(dir, 'files', e.path))), `restoring ${e.path}`);
+          else await bounded(writer.remove(e.path), `restoring ${e.path}`);
         }
       } catch (e2) {
         error += `; restoring the backup also failed: ${e2 instanceof Error ? e2.message : String(e2)}`;
@@ -232,14 +272,29 @@ export class ReleaseEngine {
     this.setBox(r.id, s.id, 'written');
     if (releaserRestarting) { this.setBox(r.id, s.id, 'restarted'); return; }
     if (!this.d.restarter) { unhold(); return; }
-    await this.waitEmpty(s);
-    if (await this.d.restarter.restart(s)) {
-      releaseServer(db, s.id);
-      this.setBox(r.id, s.id, 'restarted');
-    } else {
-      // The restarter has already reported it and the box stays offline.
-      this.setBox(r.id, s.id, 'written', 'written, but the box did not come back after the restart');
-    }
+    // Waiting for the box to empty can take minutes: done off the engine's
+    // chain, so the next box and the release hook are never stuck behind it.
+    // The box stays held (reserved) until its restart.
+    const restart = (async () => {
+      await this.waitEmpty(s);
+      if (await this.d.restarter!.restart(s)) {
+        releaseServer(db, s.id);
+        this.setBox(r.id, s.id, 'restarted');
+      } else {
+        // The restarter has already reported it and the box stays offline.
+        this.setBox(r.id, s.id, 'written', 'written, but the box did not come back after the restart');
+      }
+    })().catch((err) => {
+      console.error(`[releases] restart of ${s.name} failed:`, err);
+      unhold();
+    }).finally(() => this.restarts.delete(restart));
+    this.restarts.add(restart);
+  }
+
+  /** Resolves once every restart started so far has finished (tests, shutdown). */
+  async settled(): Promise<void> {
+    await this.chain;
+    await Promise.all([...this.restarts]);
   }
 
   private async waitEmpty(s: ServerRow): Promise<void> {

@@ -1560,7 +1560,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(peopleRoutes, { db: deps.db });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(balancePublicRoutes, { db: deps.db, knobsPath: deps.balanceKnobsPath });
-  const releaseService = new ReleaseService({ db: deps.db, repo: deployRepo, knobs: panelKnobs });
+  // The balance suggestion reads the whole watch list (knobs.json plus the
+  // catalogue), so a change to a catalogue-only value is never suggested as
+  // "not balance".
+  const releaseService = new ReleaseService({ db: deps.db, repo: deployRepo, knobs: panelKnobs && watchKnobsWithCatalogue(panelKnobs, watchCatalogue) });
   await app.register(adminFleetRoutes, {
     db: deps.db, fleetDir: deps.config.fleetDir, reader: fleetReader,
     // Tests that inject a fleet reader keep the repo.json reference.
