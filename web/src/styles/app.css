@@ -1634,6 +1634,11 @@ body.is-theater { overflow: hidden; }
 .balance-side { display: flex; flex-direction: column; gap: var(--sp-1); max-height: 12rem; overflow-y: auto; }
 .balance-banner { border-left: 3px solid var(--rating); padding: var(--sp-2) var(--sp-3); background: var(--surface-2); }
 .balance-check { padding: var(--sp-3); background: var(--surface-2); }
+/* Fleet view: box chips wrap; the file column keeps long paths breakable. */
+.fleet-boxes { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); align-items: center; margin: var(--sp-2) 0; }
+.fleet-table code { overflow-wrap: anywhere; font-size: var(--fs-dense); }
+.fleet-table td { white-space: nowrap; }
+.fleet-table td:first-child { white-space: normal; min-width: 16rem; }
 /* Triage card: name, then a full-width notes box, then the button. */
 .admin-form--stack { flex-direction: column; align-items: stretch; }
 .admin-form--stack input { flex: 0 0 auto; }

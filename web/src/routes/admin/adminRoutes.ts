@@ -39,6 +39,7 @@ export const PEOPLE_TABS: { key: string; label: string; path: string }[] = [
  *  and adds Servers and Staff. */
 export const SETUP_TABS: { key: string; label: string; path: string }[] = [
   { key: 'campaigns', label: 'Campaigns', path: '/admin/setup/campaigns' },
+  { key: 'fleet', label: 'Fleet', path: '/admin/setup/fleet' },
   { key: 'seasons', label: 'Seasons', path: '/admin/setup/seasons' },
   { key: 'settings', label: 'Settings', path: '/admin/setup/settings' },
   { key: 'audit', label: 'Audit', path: '/admin/setup/audit' },

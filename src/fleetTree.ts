@@ -69,6 +69,10 @@ export function localTreeReader(gameDir: string, opts: { sizeCap?: number } = {}
   return {
     kind: 'local',
     async read() {
+      // A missing game dir is an error, not an empty box: a copy of the site
+      // running anywhere but Dallas would otherwise record every file missing.
+      const st = await lstat(gameDir).catch(() => null);
+      if (!st?.isDirectory()) throw new Error(`game dir ${gameDir} not found on this machine`);
       const out: TreeFile[] = [];
       for (const r of MANAGED_ROOTS) await walk(r, out);
       return out;

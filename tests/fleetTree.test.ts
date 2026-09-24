@@ -55,6 +55,10 @@ describe('localTreeReader', () => {
     ]);
   });
 
+  it('fails when the game dir itself is missing, rather than reading an empty box', async () => {
+    await expect(localTreeReader(join(dir, 'nope')).read()).rejects.toThrow(/not found/);
+  });
+
   it('records size only over the cap', async () => {
     const files = await localTreeReader(dir, { sizeCap: 2 }).read();
     expect(files.every((f) => f.sha256 === null)).toBe(true);
