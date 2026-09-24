@@ -449,7 +449,7 @@ describe('Hud page', () => {
       expect(s.getByRole('radio', { name: /game default/i })).toBeTruthy();
       expect(s.getByLabelText("Hide the game's crosshair")).toBeTruthy();
       expect(s.getByLabelText('Your crosshair')).toBeTruthy();
-      expect(s.getByText('Edit the crosshair below the preview.')).toBeTruthy();
+      expect(s.getByText('Edit the crosshair in the Crosshair panel under the preview.')).toBeTruthy();
       expect(s.getByText('The game always centres the crosshair.')).toBeTruthy();
       expect(s.queryByText(/The game places this one/)).toBeNull();
       // One group box, with one legend: no nested Crosshair group inside Custom crosshair.

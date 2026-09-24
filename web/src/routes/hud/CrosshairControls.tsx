@@ -145,7 +145,7 @@ export function CrosshairControls(
       <Choice design={design} edit={edit} />
       {art && <CrosshairZoom art={art} size={SMALL} label="Your crosshair" cls="hud__xhairpreview hud__xhairpreview--small" />}
       <HideGame design={design} edit={edit} />
-      <p class="muted hud__note">Edit the crosshair below the preview.</p>
+      <p class="muted hud__note">Edit the crosshair in the Crosshair panel under the preview.</p>
     </>
   );
 }
