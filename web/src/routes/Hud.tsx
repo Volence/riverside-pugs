@@ -478,6 +478,7 @@ export default function Hud() {
       try { return isFreeTeam(current.current) ? m : ''; } catch { return ''; }
     });
   }
+  const [tooBig, setTooBig] = useState(false);
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
   // A splatter's upload error is about the picture that failed; once the
   // row's entry changes (Reset, a new kind, an Undo or a successful upload)
@@ -588,12 +589,10 @@ export default function Hud() {
   // held-down arrow key, a slider) into one write once motion settles,
   // while a single change still lands within 300ms either way.
   // A refused save (over quota, most often from uploaded images) is said on
-  // the status line, and the sentence goes once a later save succeeds.
+  // a line of its own, so a download or a copied link, which set the status
+  // line, cannot hide it; it goes once a later save succeeds.
   useEffect(() => {
-    const t = setTimeout(() => {
-      const ok = saveDesign(design);
-      setStatus((m) => (ok ? (m === TOO_BIG ? '' : m) : TOO_BIG));
-    }, 300);
+    const t = setTimeout(() => { setTooBig(!saveDesign(design)); }, 300);
     return () => clearTimeout(t);
   }, [design]);
 
@@ -1365,6 +1364,7 @@ export default function Hud() {
           </label>
         </div>
 
+        {tooBig && <p class="muted hud__status">{TOO_BIG}</p>}
         {status && <p class="muted hud__status">{status}</p>}
         {!locked && fitEmpty() && (
           <p class="muted hud__status">Every part of the teammate card is hidden, so it keeps its full size instead of fitting.</p>

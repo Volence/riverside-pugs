@@ -2074,6 +2074,30 @@ describe('Splatter', () => {
     } finally { spy.mockRestore(); }
   });
 
+  it('keeps the too-big warning through a share link copy and a download, until a save succeeds', async () => {
+    const TOO_BIG = 'This design is too big for this browser to keep. Remove an uploaded image, or use Export to save it as a file.';
+    render(<Hud />);
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError'); });
+    const write = vi.fn(async () => {});
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: write } });
+    const url = vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:hud');
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    try {
+      fireEvent.change(kindOf(TOP), { target: { value: 'fade' } });
+      await waitFor(() => expect(screen.getByText(TOO_BIG)).toBeTruthy());
+      fireEvent.click(screen.getByRole('button', { name: 'Copy share link' }));
+      await waitFor(() => expect(screen.getByText('Copied.')).toBeTruthy());
+      expect(screen.getByText(TOO_BIG)).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: /download/i }));
+      await waitFor(() => expect(screen.getByText(/^Saved /)).toBeTruthy());
+      expect(screen.getByText(TOO_BIG)).toBeTruthy();
+      spy.mockRestore();
+      fireEvent.change(kindOf(TOP), { target: { value: 'stock' } });
+      await waitFor(() => expect(screen.queryByText(TOO_BIG)).toBeNull());
+      expect(screen.getByText(/^Saved /)).toBeTruthy();
+    } finally { spy.mockRestore(); url.mockRestore(); click.mockRestore(); vi.unstubAllGlobals(); }
+  });
+
   it('says an Image with no picture shows stock, with no tint strip or Colour by health', () => {
     render(<Hud />);
     fireEvent.change(kindOf(TOP), { target: { value: 'image' } });
