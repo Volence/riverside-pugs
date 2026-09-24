@@ -85,17 +85,24 @@ export function ticketDetail(db: DB, id: number, viewer: string, opts: { guildId
   const reports = (db.prepare(
     `SELECT r.id, r.reporter_id, r.reporter_discord_id, COALESCE(p.name, NULLIF(r.reporter_name, '')) AS reporter_name,
             r.category, r.text, r.match_id, m.campaign,
-            r.map_ordinal, r.half, r.t_ms, r.created_at
+            r.map_ordinal, r.half, r.t_ms, r.created_at,
+            ce.id AS entry_id, ce.kind AS entry_kind, ce.title AS entry_title, ce.deleted_at AS entry_deleted_at
      FROM ticket_reports r LEFT JOIN players p ON p.steamid = r.reporter_id LEFT JOIN matches m ON m.id = r.match_id
+       LEFT JOIN community_entries ce ON ce.id = r.community_entry_id
      WHERE r.ticket_id = ? ORDER BY r.id`,
   ).all(id) as {
     id: number; reporter_id: string | null; reporter_discord_id: string | null; reporter_name: string | null; category: string; text: string; match_id: number | null;
     campaign: string | null; map_ordinal: number | null; half: number | null; t_ms: number | null; created_at: string;
+    entry_id: number | null; entry_kind: string | null; entry_title: string | null; entry_deleted_at: string | null;
   }[]).map((r) => ({
     id: r.id, reporterId: r.reporter_id, reporterDiscordId: r.reporter_discord_id, reporterName: r.reporter_name, category: r.category, text: r.text,
     matchId: r.match_id, campaign: r.campaign,
     moment: r.map_ordinal === null || r.half === null || r.t_ms === null ? null : { ordinal: r.map_ordinal, half: r.half, tMs: r.t_ms },
     createdAt: r.created_at,
+    // The shared entry a report is about, linked to /community/<id> on the
+    // staff page. Removed covers both a staff removal and the author's delete.
+    entry: r.entry_id === null ? null
+      : { id: r.entry_id, kind: r.entry_kind, title: r.entry_title, removed: r.entry_deleted_at !== null },
   }));
   const events = (db.prepare(
     `SELECT e.id, e.actor_id, p.name AS actor_name, e.kind, e.detail, e.created_at

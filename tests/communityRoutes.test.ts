@@ -589,3 +589,42 @@ describe('the sweep at server start', () => {
     expect(existsSync(never)).toBe(false);
   });
 });
+
+// ---- Staff removal (Task 8) ---------------------------------------------------
+
+describe('staff remove', () => {
+  it('is staff only, needs a reason, logs it, and tells the author', async () => {
+    const id = await shareId(A);
+    const remove = (as: string | null, payload?: object) => inject(as, 'POST', `/api/community/${id}/remove`, payload);
+    expect((await remove(null, { reason: 'x' })).statusCode).toBe(401);
+    expect((await remove(B, { reason: 'offensive preview' })).statusCode).toBe(403);
+    expect((await remove(MOD)).statusCode).toBe(400);
+    expect((await remove(MOD, { reason: '   ' })).statusCode).toBe(400);
+    expect((await remove(MOD, { reason: 'x'.repeat(201) })).statusCode).toBe(400);
+    expect((await list(null)).json().entries).toHaveLength(1);
+
+    const res = await remove(MOD, { reason: 'offensive preview' });
+    expect(res.statusCode).toBe(200);
+    expect((await list(null)).json().entries).toHaveLength(0);
+
+    const audit = db.prepare("SELECT admin_id, target, detail FROM admin_actions WHERE action = 'community_remove'").all() as
+      { admin_id: string; target: string; detail: string }[];
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.admin_id).toBe(MOD);
+    expect(audit[0]!.target).toBe(A);
+    expect(JSON.parse(audit[0]!.detail)).toEqual({ entryId: id, kind: 'crosshair', title: 'Green cross', reason: 'offensive preview' });
+
+    const mine = (await inject(A, 'GET', '/api/community/mine')).json();
+    expect(mine.entries[0]).toMatchObject({ id, removedByStaff: 'offensive preview' });
+    expect((await inject(MOD, 'GET', `/api/community/${id}`)).json()).toMatchObject({ removed: { by: MOD, reason: 'offensive preview' } });
+
+    expect((await remove(MOD, { reason: 'again' })).statusCode).toBe(404);
+    expect((await inject(MOD, 'POST', '/api/community/9999/remove', { reason: 'x' })).statusCode).toBe(404);
+  });
+
+  it('refuses a removal of an entry the author already deleted', async () => {
+    const id = await shareId(A);
+    await inject(A, 'DELETE', `/api/community/${id}`);
+    expect((await inject(MOD, 'POST', `/api/community/${id}/remove`, { reason: 'late' })).statusCode).toBe(404);
+  });
+});

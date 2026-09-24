@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import multipart from '@fastify/multipart';
 import type { DB } from '../db.js';
-import { makeOptionalViewer, makeRequireActive } from './guards.js';
+import { makeOptionalViewer, makeRequireActive, makeRequireMod } from './guards.js';
+import { logAdmin } from '../admin/audit.js';
 import { getSetting, settingNumber } from '../settings.js';
 import { getPlayer } from '../players.js';
 import type { CommunityStore } from '../community/store.js';
@@ -34,6 +35,7 @@ export interface CommunityRouteOpts {
 const DAY_MS = 86_400_000;
 const PERMISSION_ERROR = 'Tick the box to confirm you may share this.';
 const SHELF_FULL = 'The community shelf is full right now.';
+const REMOVE_REASON_MAX = 200;
 const MB = 2 ** 20;
 /** The meta field holds the design (2 MB at most) plus the short text fields. */
 const META_MAX_BYTES = 2.5 * MB;
@@ -56,6 +58,7 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
   const now = opts.now ?? (() => new Date());
   const optionalViewer = makeOptionalViewer(db);
   const requireActive = makeRequireActive(db);
+  const requireMod = makeRequireMod(db);
 
   const isStaff = (steamid: string | null): boolean => {
     if (!steamid) return false;
@@ -334,6 +337,31 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
     // writes the audit log. This one is the author's own delete.
     if (row.author_id !== me) return reply.code(403).send({ error: 'only the author can delete this' });
     if (!tombstone(db, row.id, { by: me, reason: null, now: now() })) return notFound(reply);
+    return { ok: true };
+  });
+
+  /**
+   * Staff take an entry down, with a reason the author is shown in their own
+   * list. The tombstone and the audit row are one step, so a removal is
+   * never missing from the log.
+   */
+  app.post<{ Params: { id: string }; Body: { reason?: unknown } }>('/api/community/:id/remove', async (req, reply) => {
+    const staff = requireMod(req, reply);
+    if (!staff) return reply;
+    const id = idOf(req.params.id);
+    const row = id === null ? null : entryRow(db, id);
+    if (!row || row.deleted_at !== null) return notFound(reply);
+    const raw = (req.body as { reason?: unknown } | undefined)?.reason;
+    const reason = typeof raw === 'string' ? raw.trim() : '';
+    if (!reason || [...reason].length > REMOVE_REASON_MAX) {
+      return reply.code(400).send({ error: `Give a reason, in at most ${REMOVE_REASON_MAX} characters.` });
+    }
+    const removed = db.transaction(() => {
+      if (!tombstone(db, row.id, { by: staff, reason, now: now() })) return false;
+      logAdmin(db, staff, 'community_remove', row.author_id, { entryId: row.id, kind: row.kind, title: row.title, reason });
+      return true;
+    })();
+    if (!removed) return notFound(reply);
     return { ok: true };
   });
 
