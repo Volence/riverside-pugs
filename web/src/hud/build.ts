@@ -8,7 +8,8 @@
  * already has it and shipping it would only widen what this addon can break.
  */
 import { encodeVTF, encodeVPK, encodeZip, type VpkFile } from '../vpk';
-import { baseFile, baseOf, baseTree, importedFiles, presetOverrides, BASE_PATHS, type BaseKey } from './base';
+import { baseFile, baseOf, baseTree, importedFiles, isCommunityImport, presetOverrides, BASE_PATHS, type BaseKey } from './base';
+import { hudPathProblem } from '../../../src/hudFiles';
 
 export { baseTree };
 import { parseKv, writeKv, kvFind, kvGet, kvSet, pcApplies, type KvNode } from './kv';
@@ -1231,6 +1232,13 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   for (const f of extra) { if (layer.has(f.path)) replaced.add(f.path); out.set(f.path, f.data); }
   if (!out.has('addoninfo.txt')) out.set('addoninfo.txt', enc(addonInfo(design.name)));
   if (report) report.replaced = [...replaced].sort();
+  // A community HUD was checked against the allowlist on the way in; this is
+  // the last line, so a generated path or a stale store can never put, say,
+  // a cfg/ file into someone else's game. addoninfo.txt is the editor's own.
+  if (isCommunityImport(key)) {
+    const bad = [...out.keys()].find((p) => p !== 'addoninfo.txt' && hudPathProblem(p) !== null);
+    if (bad) throw new Error(`This community HUD would ship a file outside the HUD folders: ${bad}`);
+  }
   return [...out.keys()].sort().map((path) => ({ path, data: out.get(path)! }));
 }
 

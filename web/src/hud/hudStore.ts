@@ -16,6 +16,8 @@ export interface StoredHud {
   id: string; name: string; files: Map<string, Uint8Array>; bytes: number; added: number;
   /** What the import left out of the upload (upload.ts's `dropped`), for the download note. */
   dropped?: string[];
+  /** Set when the import came from the community page: which entry, so it registers with the community flag. */
+  community?: { entryId: number };
 }
 export type HudMeta = Omit<StoredHud, 'files'>;
 export interface HudStore {
@@ -26,7 +28,8 @@ export interface HudStore {
   delete(id: string): Promise<void>;
 }
 
-const meta = ({ id, name, bytes, added, dropped }: StoredHud): HudMeta => ({ id, name, bytes, added, ...(dropped ? { dropped } : {}) });
+const meta = ({ id, name, bytes, added, dropped, community }: StoredHud): HudMeta =>
+  ({ id, name, bytes, added, ...(dropped ? { dropped } : {}), ...(community ? { community } : {}) });
 const byAdded = (a: HudMeta, b: HudMeta) => a.added - b.added || (a.id < b.id ? -1 : 1);
 
 export function memoryStore(): HudStore {

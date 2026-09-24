@@ -50,12 +50,30 @@ export class MissingImportError extends Error {
 }
 
 const IMPORTS = new Map<string, ReadonlyMap<string, Uint8Array>>();
+/**
+ * The imports that came from the community page. buildHud refuses to emit a
+ * path outside the allowlist for these; a player's own private imports pass
+ * through byte for byte, as the import spec promised.
+ */
+const COMMUNITY = new Set<string>();
 const FORGET: ((key: BaseKey) => void)[] = [];
-/** Paths are lower case with forward slashes, as upload.ts gives them. */
-export function registerImport(id: string, files: ReadonlyMap<string, Uint8Array>): void { IMPORTS.set(id, files); }
+/**
+ * Paths are lower case with forward slashes, as upload.ts gives them. The
+ * community flag is sticky: an id is its files' hash, so a later plain
+ * register of the same id is the same files and must not lift the guard.
+ */
+export function registerImport(id: string, files: ReadonlyMap<string, Uint8Array>, opts: { community?: boolean } = {}): void {
+  IMPORTS.set(id, files);
+  if (opts.community) COMMUNITY.add(id);
+}
+/** Whether a base key is an import that came from the community page. */
+export function isCommunityImport(key: BaseKey): boolean {
+  return key.startsWith('imported:') && COMMUNITY.has(key.slice('imported:'.length));
+}
 /** Take an import out of the registry and free everything read from it. */
 export function unregisterImport(id: string): void {
   IMPORTS.delete(id);
+  COMMUNITY.delete(id);
   const key: BaseKey = `imported:${id}`;
   for (const k of [...BASE_TREES.keys()]) if (k.startsWith(`${key}|`)) BASE_TREES.delete(k);
   for (const fn of FORGET) fn(key);
