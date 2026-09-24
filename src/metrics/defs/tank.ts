@@ -128,7 +128,7 @@ export const defs: MetricDef[] = [
   {
     id: 'tank.incaps_caused', group: 'tank', version: 3,
     description: 'Survivor incaps caused by the tank player, per tank.',
-    public: { label: 'Incaps caused per tank' },
+    public: { label: 'Survivor incaps per tank' },
     compute: (c) => perTank(byTank(c, 'incap').length, c),
   },
   {
