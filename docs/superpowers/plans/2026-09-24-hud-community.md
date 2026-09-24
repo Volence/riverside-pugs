@@ -734,6 +734,11 @@ code by guesswork.
       - stored with `community: { entryId }` and `name` = the entry title through `safeName`;
       - returned as `{ id }`.
     - A blob already in the store is not fetched: assert `fetch` was not called.
+    - `openCommunityImport rechecks and flags files already in the store`: files put in the store by
+      hand (no `community` marker, and once with a `cfg/autoexec.cfg` added) go through the same
+      `hudSetProblem` and `hudId` checks as fetched ones. The clean set ends registered with
+      `isCommunityImport` true and stored with `community: { entryId }`; the bad set is refused with the
+      safety sentence and nothing is registered. (Added after review: a store hit is not a pass.)
     - A blob with `cfg/autoexec.cfg` inside is refused with `This community HUD failed its safety check`,
       and nothing is registered or stored.
     - A blob whose hash is not the entry's `import_id` is refused the same way.
@@ -760,12 +765,16 @@ code by guesswork.
 - [ ] **Step 3: Implement.**
   - **`open.ts`:**
     1. Check `hudStore().get(id)`; if it is missing, `fetch(/api/community/files/imports/<id>.vpk)`.
-    2. Run `readVPK`, reject `split`, then `hudSetProblem` and `hudId`. On any mismatch throw the safety
-       sentence.
+    2. For a fetched blob, run `readVPK` and reject `split`. Then, whether the files came from the store
+       or the network, ALWAYS run `hudSetProblem` and `hudId` on them. On any problem or mismatch throw
+       the safety sentence. A store hit is not trusted: the same id may have been imported privately,
+       with files outside the allowlist, before the viewer opened the community entry.
     3. `registerImport(id, files, { community: true })`, then `importProblem(id)`. On a problem,
-       unregister and throw `This community HUD cannot be shown: <problem>`.
-    4. `hudStore().put(...)`. A put failure is non-fatal and gets the same "kept only until this page
-       closes" note the import flow has.
+       unregister and throw `This community HUD cannot be shown: <problem>`. The flag is set on both
+       paths, store hit or fetch.
+    4. `hudStore().put(...)` with `community: { entryId }`, also on a store hit that lacked the marker. A
+       put failure is non-fatal and gets the same "kept only until this page closes" note the import flow
+       has.
   - **`publish.ts`:**
     - `renderPreview` draws with `drawBackdrop(ctx, w, h, 'scene', null, null)` and then
       `drawHud(ctx, w, h, design, 'survivor', null, onAsset, { state: 'healthy', held: 'primary' })`.
@@ -870,6 +879,13 @@ code by guesswork.
       design applies, and on its throw the status shows the sentence and the design is unchanged.
     - With `?xhair=7` (a crosshair entry): one undoable step sets `crosshair: 'bundle'` and `xhairArt` to
       the entry's art, and selects `xhair`, like `?from=crosshair`.
+    - `re-registers a stored community import with the flag after reload`: put a HUD in the store with
+      `community: { entryId: 5 }`, render the page (a fresh registry, as after a reload) on a design that
+      names it, and assert `isCommunityImport('imported:<id>')` once it loads; then do the same through
+      the Preset select's pick of that import. Both sites must pass the flag.
+    - `a private re-import keeps the stored community marker`: with that stored community HUD, import
+      the same files through the Import button; the store entry still has `community`, and
+      `isCommunityImport` stays true.
   - **`Crosshair.test.tsx`:**
     - The page has `Share to community...`.
     - With `?community=7` and a built art, it asks before replacing, then the builder shows the entry's
@@ -883,6 +899,17 @@ code by guesswork.
     and shows the preview as an `<img>` of an object URL (revoked on close).
   - In `Hud.tsx`, add the two mount effects after the existing `#d=` and `?from=crosshair` effects. Each
     strips its parameter with `history.replaceState`, as those do.
+  - (Added after review.) The registry forgets the community flag on reload, so every place `Hud.tsx`
+    registers a stored import must carry it: the design loader effect (`registerImport(id, hud.files)`
+    after `hudStore().get(id)`, around `Hud.tsx:587`) and the Preset select's import pick (around
+    `Hud.tsx:912`) both become `registerImport(id, hud.files, { community: !!hud.community })`.
+  - `importHud` (the Import button) re-puts an id that may already be stored as a community import. It
+    reads the stored entry first and keeps its `community` field in the put, and registers with
+    `{ community: !!stored?.community }`, so a private re-import of the same bytes never drops the
+    marker and with it the build-time allowlist check.
+  - Already done in `build.ts` (review item E): a build on a community import always writes the editor's
+    own `addoninfo.txt`, even when the layer holds one; test `community build always writes the editor's
+    addoninfo` in `web/src/hud/community.build.test.ts`.
 - [ ] **Step 4:** Run the files, then the full suite and typecheck.
 - [ ] **Step 5: Commit.** `git commit -m "Share HUDs and crosshairs from the editors, and open community entries in them"`
 
