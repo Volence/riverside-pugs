@@ -338,6 +338,50 @@ describe('mergePlayers', () => {
     });
   });
 
+  describe('community entries and likes', () => {
+    const entry = (author: string, title: string): number => Number(db.prepare(
+      `INSERT INTO community_entries (kind, author_id, title, payload, created_at)
+       VALUES ('crosshair', ?, ?, '{}', '2026-09-24T00:00:00.000Z')`,
+    ).run(author, title).lastInsertRowid);
+    const like = (entryId: number, player: string): void => {
+      db.prepare("INSERT INTO community_likes (entry_id, player_id, created_at) VALUES (?, ?, '2026-09-24T00:00:00.000Z')")
+        .run(entryId, player);
+    };
+    const likesOn = (entryId: number) => (db.prepare('SELECT player_id FROM community_likes WHERE entry_id = ? ORDER BY player_id')
+      .all(entryId) as { player_id: string }[]).map((r) => r.player_id);
+
+    it('moves the alt\'s entries to the main and drops likes that became self-likes', () => {
+      const altEntry = entry(ALT, 'alt hud');
+      const mainEntry = entry(MAIN, 'main hud');
+      like(mainEntry, ALT);   // the alt liked the main: a self-like once merged
+      like(altEntry, MAIN);   // the main liked the alt: a self-like once merged
+      like(altEntry, OTHER);  // somebody else's like survives
+
+      const plan = mergePlayers(db, { from: ALT, into: MAIN });
+
+      expect((db.prepare('SELECT author_id FROM community_entries WHERE id = ?').get(altEntry) as any).author_id).toBe(MAIN);
+      expect(likesOn(mainEntry)).toEqual([]);
+      expect(likesOn(altEntry)).toEqual([OTHER]);
+      expect(plan.rowsByTable.community_entries).toBe(1);
+      expect(plan.rowsByTable.community_likes).toBe(1);
+    });
+
+    it('moves who deleted an entry, for an alt that was staff', () => {
+      const e = entry(OTHER, 'removed');
+      db.prepare("UPDATE community_entries SET deleted_at = '2026-09-24T01:00:00.000Z', deleted_by = ? WHERE id = ?").run(ALT, e);
+      mergePlayers(db, { from: ALT, into: MAIN });
+      expect((db.prepare('SELECT deleted_by FROM community_entries WHERE id = ?').get(e) as any).deleted_by).toBe(MAIN);
+    });
+
+    it('keeps one like where both accounts liked the same entry', () => {
+      const e = entry(OTHER, 'liked twice');
+      like(e, ALT);
+      like(e, MAIN);
+      mergePlayers(db, { from: ALT, into: MAIN });
+      expect(likesOn(e)).toEqual([MAIN]);
+    });
+  });
+
   // Predates this branch: player_links and twitch_status were added to the
   // schema with a foreign key on players and never taught to the merge, so
   // an alt's socials and Twitch cache silently stayed behind under a steamid
