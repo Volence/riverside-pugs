@@ -1287,8 +1287,9 @@ describe('Hud page', () => {
     expect(items).toContain('Bring to front');
     expect(items).toContain('Send to back');
     fireEvent.click(screen.getByRole('menuitem', { name: 'Send to back' }));
-    // Stock teammatepanel.res: BackgroundImage at -1 is the lowest zpos in the file.
-    await waitFor(() => expect(JSON.parse(localStorage.getItem('hud') ?? '{}').children?.teamColumn?.Head?.z).toBe(-2));
+    // Stock teammatepanel.res: BackgroundImage at -1 is the lowest zpos; one below it is the card background's -2,
+    // which no piece may reach (review M1), so the piece goes to -1.
+    await waitFor(() => expect(JSON.parse(localStorage.getItem('hud') ?? '{}').children?.teamColumn?.Head?.z).toBe(-1));
   });
 
   it('lists the survivor Layers as before the pieces went per panel, with your own health pieces under it', () => {
@@ -1317,7 +1318,7 @@ describe('Hud page', () => {
     expect(screen.getByText(/^The game fills the bar by health. While you are down/)).toBeTruthy();
     expect(screen.queryByText("Edits inside a card apply to every teammate's card.")).toBeNull();
     for (const l of ['X', 'Y', 'W', 'H']) expect(screen.getByLabelText(l), l).toBeTruthy();
-    expect(screen.getByText('Panel colour')).toBeTruthy();              // probe Q1 passed (slice 2.F G1)
+    expect(screen.getByText('Panel colour: Game colour (by health)')).toBeTruthy();   // probe Q1 passed (slice 2.F G1)
     expect(screen.getByLabelText('Inset')).toBeTruthy();                // probe Q3 passed (slice 2.F G3)
     // Probe B1 Q5: the game colours the cross by health whatever the file says.
     fireEvent.click(layer('Your health').getByRole('button', { name: 'Health cross' }));
@@ -2151,17 +2152,17 @@ describe('Your own health on the page', () => {
     fireEvent.click(own().getByRole('button', { name: 'Health bar' }));
     for (const l of ['X', 'Y', 'W', 'H']) expect(screen.getByLabelText(l), l).toBeTruthy();
     expect(screen.getByText(/^The game fills the bar by health. While you are down/)).toBeTruthy();
-    expect(screen.queryByText('Panel colour')).toBeNull();
+    expect(screen.queryByText(/^Panel colour/)).toBeNull();
     expect(screen.queryByLabelText('Inset')).toBeNull();
     cleanup();
     _setProbe('Q1', true); _setProbe('Q3', true);
     render(<Hud />);
     fireEvent.click(layer('Your health').getByRole('button', { name: 'Health bar' }));
-    expect(screen.getByText('Panel colour')).toBeTruthy();
+    expect(screen.getByText('Panel colour: Game colour (by health)')).toBeTruthy();
     expect(screen.getByLabelText('Panel colour colour')).toBeTruthy();
     const inset = screen.getByLabelText('Inset') as HTMLInputElement;
     expect(inset.min).toBe('0');
-    expect(inset.max).toBe('8');
+    expect(inset.max).toBe('4');                                        // stock own bar 10 tall: 2 * 4 < 10 (review L1)
     fireEvent.input(inset, { target: { value: '3' } });
     fireEvent.blur(inset);
     await waitFor(() => expect(saved().children?.ownHealth?.Health?.keys?.inset).toBe('3'));
@@ -2184,12 +2185,36 @@ describe('Your own health on the page', () => {
     // /home/volence/l4d/hud/probe-phase2/RESULTS.md Q3: inset 3 moves the fill 6 px inside the outline (b1v2 a).
     render(<Hud />);
     fireEvent.click(own().getByRole('button', { name: 'Health bar' }));
-    expect((screen.getByLabelText('Inset') as HTMLInputElement).max).toBe('8');
+    expect((screen.getByLabelText('Inset') as HTMLInputElement).max).toBe('4');
     fireEvent.click(layer('Teammates').getByRole('button', { name: 'Health bar' }));
     const inset = screen.getByLabelText('Inset') as HTMLInputElement;
+    expect(inset.max).toBe('3');                                        // stock card bar 7 tall (review L1)
     fireEvent.input(inset, { target: { value: '3' } });
     fireEvent.blur(inset);
     await waitFor(() => expect(saved().children?.teamColumn?.Health?.keys?.inset).toBe('3'));
+  });
+
+  it('shows the inset and Panel colour the game draws, and puts one key back to the file\'s value (review M2)', async () => {
+    render(<Hud />);
+    fireEvent.click(own().getByRole('button', { name: 'Health bar' }));
+    // Neither the design nor the file sets them: the game draws inset 2 and the health colour.
+    expect((screen.getByLabelText('Inset') as HTMLInputElement).value).toBe('2');
+    expect(screen.getByText('Panel colour: Game colour (by health)')).toBeTruthy();
+    expect(screen.queryByLabelText('Panel colour opacity')).toBeNull();   // no opacity to write white with
+    expect(screen.queryByRole('button', { name: /use the file's value/ })).toBeNull();
+    fireEvent.input(screen.getByLabelText('Panel colour colour'), { target: { value: '#ff00ff' } });
+    await waitFor(() => expect(saved().children?.ownHealth?.Health?.keys?.monochrome_color).toBe('255 0 255 255'));
+    expect(screen.getByLabelText('Panel colour opacity')).toBeTruthy();
+    const inset = screen.getByLabelText('Inset') as HTMLInputElement;
+    fireEvent.input(inset, { target: { value: '3' } });
+    fireEvent.blur(inset);
+    await waitFor(() => expect(saved().children?.ownHealth?.Health?.keys?.inset).toBe('3'));
+    fireEvent.click(screen.getByRole('button', { name: "Panel colour: use the file's value" }));
+    await waitFor(() => expect(saved().children?.ownHealth?.Health?.keys).toEqual({ inset: '3' }));
+    expect(screen.getByText('Panel colour: Game colour (by health)')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: "Inset: use the file's value" }));
+    await waitFor(() => expect(saved().children?.ownHealth?.Health).toBeUndefined());
+    expect((screen.getByLabelText('Inset') as HTMLInputElement).value).toBe('2');
   });
 
   it('draws your health number in the Panel colour once it is set', async () => {
