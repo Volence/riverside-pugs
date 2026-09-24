@@ -661,6 +661,26 @@ describe('HUD share limits before the body is read', () => {
     expect((await shareHud(A, { title: 'Second A', preview: png(960, 540, 2) })).statusCode).toBe(200);
   });
 
+  it('gives up on a share that stalls, so two slow uploads cannot hold every slot', async () => {
+    await app.close();
+    app = await buildServer({
+      config: { ...loadConfig({}), communityDir: dir }, db, orchestrator: stubOrchestrator(),
+      serverCleaner: async () => {}, serverExec: async () => {}, communityFreeBytes: async () => 100 * GiB,
+      communityUploadTimeoutMs: 150,
+    });
+    for (const id of [A, B, MOD]) cookie[id] = authedCookie(app, db, id);
+    const a = await held(A, { title: 'Stalled A', preview: png(960, 540, 1) });
+    const b = await held(B, { title: 'Stalled B', preview: png(960, 540, 3) });
+    // The stalled connections are dropped: a sender that slow is not waiting for an answer.
+    await expect(a.pending).rejects.toThrow();
+    await expect(b.pending).rejects.toThrow();
+    await new Promise((r) => setTimeout(r, 20));
+    // Both slots are free again.
+    expect((await shareHud(MOD, { title: 'Mod HUD', preview: png(960, 540, 4) })).statusCode).toBe(200);
+    expect((await shareHud(A, { title: 'Fresh A', preview: png(960, 540, 2) })).statusCode).toBe(200);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM community_entries WHERE title LIKE 'Stalled%'").get()).toEqual({ n: 0 });
+  });
+
   it('refuses an oversized preview as it streams, before the details are read', async () => {
     const res = await shareHud(A, { title: 'x', preview: png(960, 540, 2 * MB) });
     expect(res.statusCode).toBe(413);

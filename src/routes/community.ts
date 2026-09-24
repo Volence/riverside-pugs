@@ -30,6 +30,8 @@ export interface CommunityRouteOpts {
   store: () => CommunityStore;
   /** Injected in tests; the wall clock otherwise. */
   now?: () => Date;
+  /** How long a HUD share may take to upload; UPLOAD_TIMEOUT_MS otherwise. */
+  uploadTimeoutMs?: number;
 }
 
 const DAY_MS = 86_400_000;
@@ -42,6 +44,14 @@ const META_MAX_BYTES = 2.5 * MB;
 
 /** HUD uploads the server takes at once, across every player. */
 const HUD_UPLOADS_AT_ONCE = 2;
+/**
+ * How long one may take. Fastify has no request timeout by default, so
+ * without this two players sending their bodies a byte at a time would hold
+ * both slots for ever. Two minutes carries the 20 MB cap at about 1.4 Mbit/s;
+ * a real HUD is a few megabytes at most.
+ */
+const UPLOAD_TIMEOUT_MS = 120_000;
+const TOO_SLOW = 'The share took too long to upload; try again.';
 const PREVIEW_TOO_BIG = 'The preview is over 1.5 MB.';
 
 /**
@@ -219,9 +229,21 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
       return reply.code(429).send({ error: 'Other HUD shares are uploading right now; try again in a moment.' });
     }
     hudUploads.add(me);
+    // A stalled body's connection is dropped, which ends the parts loop with
+    // an error and frees the slot. The 408 is for the log: nobody is left to
+    // read it.
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      req.raw.destroy();
+    }, opts.uploadTimeoutMs ?? UPLOAD_TIMEOUT_MS);
     try {
       return await shareHud(me, req, reply);
+    } catch (err) {
+      if (timedOut) return reply.code(408).send({ error: TOO_SLOW });
+      throw err;
     } finally {
+      clearTimeout(timer);
       hudUploads.delete(me);
     }
   });
