@@ -69,9 +69,20 @@ export const ELEMENTS: HudElement[] = [
    * in by game code, not by any base file, so it carries no children entry
    * here; mock.ts reads that file's own numbers straight through buildTrees
    * for the preview instead.
+   *
+   * Its alignment is the block's own label_textalign, which the game applies
+   * to every row (probe K1, /home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/notices-ijkl.png:
+   * east puts the notice at the panel's right edge). Its colour, text size
+   * and box are ElementOverride fields that build.ts noticePass writes into
+   * pzdamagerecordpanel.res.
    */
   { id: 'killNotices', label: 'Kill / incap notices', side: 'both', key: 'HudPZDamageRecord', move: true, resize: 'free',
-    children: [], props: ['visible'] },
+    children: [], props: ['visible'],
+    keys: [
+      { key: 'label_textalign', label: 'Alignment', type: 'enum',
+        options: [{ value: 'west', label: 'Left' }, { value: 'center', label: 'Centre' }, { value: 'east', label: 'Right' }],
+        evidence: 'client.dll CHudPZDamageRecordPanel run: label_textalign; probe K1 r1/shots/crops/notices-ijkl.png (east: right edge)' },
+    ] },
   { id: 'xhair', label: 'Custom crosshair', side: 'both', key: 'xHair', move: false, resize: 'none', children: [], props: [] },
   { id: 'infectedRow', label: 'Infected teammates', side: 'infected', key: 'CHudZombieTeamDisplay', move: true, resize: 'scale',
     children: ['resource/ui/hud/zombieteamdisplayplayer.res'],

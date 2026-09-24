@@ -47,11 +47,12 @@ export interface ElementOverride {
   /** Survivor team, Free: the four cards' positions. Kept when leaving Free, so coming back restores them. */
   slots?: CardSlot[];
   /**
-   * Validated and reserved, not live. The spec's own HudDesign declares these
-   * three, so they are validated and clamped here and a design that carries
-   * them survives a round trip, but no pass in build.ts reads any of them and
-   * no registry entry in elements.ts lists them as a prop, so no control
-   * writes them either.
+   * Validated and reserved, not live, except on the kill notices. The spec's
+   * own HudDesign declares these three, so they are validated and clamped
+   * here and a design that carries them survives a round trip. The kill
+   * notices' `color` (all five rows' fgcolor_override, plan decision 2) and
+   * `fontSize` (their font, gate K5) are live: build.ts noticePass writes
+   * them. No pass reads them on any other element, and `bg` nowhere.
    */
   color?: string; bg?: string;
   fontSize?: number;
@@ -418,7 +419,7 @@ function childOverride(def: ChildDef, raw: unknown): ChildOverride {
 /**
  * The keys of `raw` that `defs` declares, as the text the file takes: a
  * colour as "r g b a", a whole number clamped to its range, a bool as "1" or
- * "0". A key whose probe has not passed is dropped like an undeclared one,
+ * "0", an enum as one of its options' values. A key whose probe has not passed is dropped like an undeclared one,
  * because the build writes only what the registry offers today. Undefined
  * when nothing survives, so an empty `keys` is never stored.
  */
@@ -437,6 +438,9 @@ export function validKeys(defs: readonly KeyDef[] | undefined, raw: unknown): Re
       let i = Math.round(num);
       if (def.range) i = Math.min(def.range[1], Math.max(def.range[0], i));
       out[def.key] = String(i);
+    } else if (def.type === 'enum') {
+      const hit = typeof v === 'string' ? def.options?.find((o) => o.value === v.toLowerCase()) : undefined;
+      if (hit) out[def.key] = hit.value;
     } else {
       if (v === true || v === '1' || v === 1) out[def.key] = '1';
       else if (v === false || v === '0' || v === 0) out[def.key] = '0';
@@ -646,6 +650,9 @@ function element(id: string, raw: unknown, key: BaseKey): ElementOverride {
   if (id === 'siHealth' && typeof raw.fit === 'boolean') out.fit = raw.fit;
   const c = colour(raw.color); if (c) out.color = c;
   const b = colour(raw.bg); if (b) out.bg = b;
+  // The kill notices' text size waits on gate K5 (probes.ts): row 0's font
+  // was never seen in game, so a stored size is dropped while it is closed.
+  if (id === 'killNotices' && !probe('K5')) delete out.fontSize;
   const keys = validKeys(elementById(id)?.keys, raw.keys);
   if (keys) out.keys = keys;
   return out;

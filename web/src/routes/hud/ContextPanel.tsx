@@ -503,10 +503,46 @@ export function ElementControls(
       ))}
 
       {id === 'weaponSelection' && <WeaponControls design={design} edit={edit} end={end} />}
+      {id === 'killNotices' && <NoticeControls design={design} edit={edit} end={end} patch={patch} />}
 
       {/* The crosshair has no element settings of its own to reset: its choice and art are undone like any edit. */}
       {id !== 'xhair' && <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this element</button>}
     </Field>
+  );
+}
+
+/**
+ * The kill notices' own look (plan tasks K1, K2): the text colour, which
+ * the build writes on all five rows (only row 0 is ever used, probe K2,
+ * /home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/notices-ijkl.png),
+ * shown as the generated row 0 has it; and the text size, which waits on
+ * gate K5.
+ */
+function NoticeControls({ design, edit, end, patch }: { design: HudDesign; edit: Edit; end: () => void; patch: Patch }) {
+  const o = design.elements.killNotices ?? {};
+  const row = kvFind(buildTrees(design)('resource/ui/hud/pzdamagerecordpanel.res'), ['recordlabel0']);
+  const shown = o.color ?? (row && pcGet(row, 'fgcolor_override')) ?? '255 255 255 255';
+  const clear = (key: 'color' | 'fontSize') => edit((d) => {
+    const { [key]: _gone, ...rest } = d.elements.killNotices ?? {};
+    const elements = { ...d.elements };
+    if (Object.keys(rest).length) elements.killNotices = rest; else delete elements.killNotices;
+    return { ...d, elements };
+  });
+  return (
+    <>
+      <ColourRow label="Text colour" value={/^\d+ \d+ \d+ \d+$/.test(shown) ? shown : '255 255 255 255'} end={end} onPick={(c) => patch({ color: c }, 'gesture')} />
+      {o.color !== undefined && (
+        <button type="button" class="btn btn--ghost btn--sm" aria-label="Text colour: use the game colour" onClick={() => clear('color')}>
+          Use the game colour
+        </button>
+      )}
+      {probe('K5') && (
+        <Slider
+          label="Text size" value={o.fontSize ?? fontFace(design, (row && pcGet(row, 'font')) ?? 'Default').tall} min={6} max={64} step={1}
+          onInput={(fontSize) => patch({ fontSize }, 'gesture')} onEnd={end}
+        />
+      )}
+    </>
   );
 }
 
@@ -685,6 +721,17 @@ function KeyControl({ def, value, onValue, end, max }: {
       <label class="hud__check">
         <input type="checkbox" checked={text !== '0'} onChange={(e) => onValue((e.target as HTMLInputElement).checked ? '1' : '0')} />
         <span>{def.label}</span>
+      </label>
+    );
+  }
+  if (def.type === 'enum') {
+    return (
+      <label class="hud__row">
+        <span>{def.label}</span>
+        <select aria-label={def.label} value={text.toLowerCase()} onChange={(e) => onValue((e.target as HTMLSelectElement).value)}>
+          {def.options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <span />
       </label>
     );
   }

@@ -19,7 +19,7 @@
  * A leaf: imports nothing.
  */
 
-export type ProbeId = 'Q1' | 'Q2' | 'Q3' | 'Q8' | 'Q24';
+export type ProbeId = 'Q1' | 'Q2' | 'Q3' | 'Q8' | 'Q24' | 'K5' | 'C2';
 
 export const PROBES: Readonly<Record<ProbeId, { passed: boolean; batch: string; question: string }>> = {
   Q1: { passed: true, batch: 'B1 (a), (c)', question: 'monochrome_color on a HealthPanel recolours the whole panel (fill, outline, number, cross, scratches) in every state' },
@@ -28,6 +28,10 @@ export const PROBES: Readonly<Record<ProbeId, { passed: boolean; batch: string; 
   Q8: { passed: true, batch: 'B1 (b)', question: 'the crouch icon keeps a file drawColor and shows only while crouched' },
   // /home/volence/l4d/hud/probe-phase2-infected/RESULTS.md, B14: b14/crops/si-b-zoom.png and card-b.png (b), b14b-a (the Boomer).
   Q24: { passed: true, batch: 'B14 (b, and b14b-a)', question: 'monochrome_color on the SI Health and the card HealthPanel recolours the bar (fill and outline) only, not the number, name or icon' },
+  // /home/volence/l4d/hud/probe-phase2-rest/RESULTS.md, K2': R4's notice never fired (killing a Hunter makes none; r4-g, r4-h).
+  K5: { passed: false, batch: 'R4 (g, h)', question: "recordlabel0's font sets the kill notice's text size" },
+  // Same file, C2: messagemode over netcon never opened the chat input (r4-i, r1-n), and the closed chat draws no box.
+  C2: { passed: false, batch: 'R4 (i), R1 (n)', question: "basechat.res HudChat bgcolor_override colours the open chat's box" },
 };
 
 /** Test overrides, read before PROBES. */

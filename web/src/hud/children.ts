@@ -31,8 +31,10 @@ export type StateArt = 'down' | 'dead' | 'crouched' | 'talking' | 'ghost' | 'abi
  * the game never reads: the weapons work learned that the hard way.
  */
 export interface KeyDef {
-  key: string; label: string; type: 'colour' | 'int' | 'bool';
+  key: string; label: string; type: 'colour' | 'int' | 'bool' | 'enum';
   range?: [number, number];
+  /** For an enum key: the values the file may take, in the order the control lists them, and what each is called. */
+  options?: { value: string; label: string }[];
   /** Where the key is proven read: a dll string run or a stock file line. */
   evidence: string;
   /** The control waits for this probe to pass (probes.ts). */

@@ -2530,3 +2530,24 @@ describe('The infected bar colour once Q24 passed (plan Task F1)', () => {
     await waitFor(() => expect(saved().children?.infectedRow?.HealthPanel?.keys?.monochrome_color).toBe('0 255 255 255'));
   });
 });
+
+describe('The kill notices on the page (plan tasks K1, K2)', () => {
+  const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
+  afterEach(() => { _setProbe('K5', null); });
+  it('picks the alignment and the text colour, and keeps the text size hidden while K5 is closed', async () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Kill / incap notices' }));
+    const align = screen.getByLabelText('Alignment') as HTMLSelectElement;
+    expect(align.value).toBe('west');
+    expect([...align.options].map((o) => o.textContent)).toEqual(['Left', 'Centre', 'Right']);
+    fireEvent.change(align, { target: { value: 'east' } });
+    await waitFor(() => expect(saved().elements?.killNotices?.keys?.label_textalign).toBe('east'));
+    const colour = screen.getByLabelText('Text colour colour') as HTMLInputElement;
+    expect(colour.value).toBe('#f60505');                       // the stock row's red
+    fireEvent.input(colour, { target: { value: '#00ffff' } });
+    await waitFor(() => expect(saved().elements?.killNotices?.color).toBe('0 255 255 255'));
+    expect(screen.queryByLabelText('Text size')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Text colour: use the game colour' }));
+    await waitFor(() => expect(saved().elements?.killNotices?.color).toBeUndefined());
+  });
+});

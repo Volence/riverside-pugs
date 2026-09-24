@@ -30,6 +30,7 @@ import {
 } from './splatter';
 import { TEX } from '../crosshair/draw';
 import { columnExtent, WEAPON_KEY_DEFAULTS } from './weaponColumn';
+import { probe } from './probes';
 
 /**
  * Uploaded images and fonts, already decoded, keyed by slot id, and for a
@@ -58,6 +59,7 @@ const CHATSCHEME = 'resource/chatscheme.res';
 const BASECHAT = 'resource/ui/basechat.res';
 const CARD = TEAM_PANEL.file;
 const MODTEX = 'scripts/mod_textures.txt';
+const PZ_RECORD = 'resource/ui/hud/pzdamagerecordpanel.res';
 const POSITIONAL = ['xpos', 'ypos', 'wide', 'tall'];
 const num = (v: string | undefined) => { const n = parseFloat(v ?? ''); return Number.isFinite(n) ? n : 0; };
 
@@ -211,6 +213,34 @@ function layoutPass(work: Work, design: HudDesign) {
     }
     // Resized in place, the chat keeps hudlayout's own tokens, as elementRect does.
     if (el.id === 'chat') chatWindow(work, moved ? p : { ...p, xpos: kvGet(panel, 'xpos') ?? '0', ypos: kvGet(panel, 'ypos') ?? '0' });
+  }
+}
+
+/**
+ * The kill notices' own look, in pzdamagerecordpanel.res (plan tasks K1,
+ * K2). Game code fills the rows; only recordlabel0 was ever seen used, each
+ * new notice replacing the last there, and its fgcolor_override is honoured
+ * (/home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/notices-ijkl.png).
+ * The colour goes on all five rows (plan decision 2): harmless, and right
+ * if a server plugin ever fills more. The text size points every row at a
+ * HudEd_ copy of its font, and waits on gate K5, since row 0's font was
+ * never seen drawn. A row an imported file lacks is skipped.
+ */
+function noticePass(work: Work, design: HudDesign) {
+  const o = design.elements.killNotices;
+  const el = elementById('killNotices')!;
+  if (!o || !baseHasElement(work.key, el)) return;
+  const size = probe('K5') ? o.fontSize : undefined;
+  if (o.color === undefined && size === undefined) return;
+  const nodes = work.tree(PZ_RECORD);
+  for (let i = 0; i < 5; i++) {
+    const row = kvFind(nodes, [`recordlabel${i}`]);
+    if (!row) { if (work.imported) continue; throw new Error(`${PZ_RECORD}: no recordlabel${i}`); }
+    if (o.color !== undefined) kvSet(row, 'fgcolor_override', o.color);
+    if (size !== undefined) {
+      const leaf = (row.value as KvNode[]).find((n) => n.key.toLowerCase() === 'font' && typeof n.value === 'string');
+      if (leaf) { const tall = Math.round(size); useFontCopy(work, leaf, `t${tall}`, () => tall); }
+    }
   }
 }
 
@@ -2099,6 +2129,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   const extra: VpkFile[] = [];
   layoutPass(work, design);
   weaponsPass(work, design, assets, extra);
+  noticePass(work, design);
   childPass(work, design);
   fitPass(work, design);
   hidePass(work, design);
@@ -2181,6 +2212,7 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
     const discard: VpkFile[] = [];
     layoutPass(work, design);
     weaponsPass(work, design, null, discard);
+    noticePass(work, design);
     childPass(work, design);
     fitPass(work, design);
     hidePass(work, design);
