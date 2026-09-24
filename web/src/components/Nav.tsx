@@ -21,6 +21,7 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/streams', 'Streams'],
   ['/leaderboard', 'Leaderboard'],
   ['/matches', 'Matches'],
+  ['/balance', 'Patch notes'],
   ['/maps', 'Campaigns'],
   ['/custom-campaigns', 'Custom'],
   ['/crosshair', 'Crosshair'],

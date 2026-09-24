@@ -19,6 +19,7 @@ export function fmtValue(id: string, v: number | null): string {
   if (v === null) return 'n/a';
   if (isShareMetric(id)) return `${Math.round(v * 100)}%`;
   if (id.endsWith('_s')) return `${Math.round(v)} s`;
+  if (id.endsWith('_per_min')) return trim(v, 2);
   if (id.endsWith('_min')) return `${trim(v, 1)} min`;
   return trim(v, 2);
 }
@@ -31,6 +32,7 @@ export function fmtChange(id: string, r: { diff: number | null; rel: number | nu
   const formatUnit = (v: number): string => {
     const signed = (mag: number) => `${mag === 0 ? '' : sign(v)}${mag}`;
     if (id.endsWith('_s')) return `${signed(Math.round(Math.abs(v)))} s`;
+    if (id.endsWith('_per_min')) return signed(Number(trim(Math.abs(v), 2)));
     if (id.endsWith('_min')) return `${signed(Number(trim(Math.abs(v), 1)))} min`;
     return signed(Number(trim(Math.abs(v), 2)));
   };
