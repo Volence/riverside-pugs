@@ -153,6 +153,23 @@ describe('renderPreview on the in-game backdrops', () => {
     expect(DEFAULT_PREVIEW).toMatchObject({ infected: 'alive', siClass: 'hunter', ability: 'ready' });
   });
 
+  it('shows on the infected side exactly what a spawned Hunter always sees: no occasional panel, no other class or state', async () => {
+    FakeImage.auto = 'load';
+    const { calls } = stubCanvas();
+    const hud = vi.spyOn(mock, 'drawHud');
+    for (const preset of ['stock', 'modern'] as const) {
+      const d = validateDesign({ v: 1, name: 'x', preset, aspect: '16:9' });
+      await renderPreview(d, 'infected', { quietMs: 5, maxMs: 50 });
+      const view = hud.mock.calls.at(-1)![7]!;
+      expect(hud.mock.calls.at(-1)![5]).toBeNull();
+      const shown = mock.visibleElements('infected', d).filter((el) => mock.shownInState(el, view.state)).map((el) => el.id);
+      // The chat and the kill notices are the everyday stand-ins both sides show; the ability marker is the crosshair's centre.
+      expect(shown.sort(), preset).toEqual(['abilityMarker', 'abilityRing', 'chat', 'infectedRow', 'killNotices', 'siHealth', 'xhair']);
+    }
+    // The too-far box shows in the game only when a spawned infected strays far from the survivors.
+    expect(calls.some(([m, a]) => m === 'fillText' && a[0] === 'TOO FAR FROM THE SURVIVORS')).toBe(false);
+  });
+
   it('waits for the backdrop before it draws anything', async () => {
     FakeImage.auto = null;
     const { calls } = stubCanvas();

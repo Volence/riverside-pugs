@@ -214,10 +214,13 @@ export const ELEMENTS: HudElement[] = [
    * survivors, or its TankTakeover box when you are offered the Tank. Probe
    * Z1 (/home/volence/l4d/hud/probe-phase2-rest/r6/shots/r6/r6-a.png) saw
    * the too-far box move with HudZombiePanel; a ghost never showed it
-   * (r3-c, r5-a), so the preview draws it only while you are spawned.
+   * (r3-c, r5-a), so the preview draws it only while you are spawned, and
+   * as the game shows it only now and then, only with Occasional panels on
+   * or while it is selected.
    */
   { id: 'zombiePanel', label: 'Too far / Tank offer', side: 'infected', key: 'HudZombiePanel', move: true, resize: 'none',
-    children: [], props: ['visible'], shownIn: ['alive'] },
+    children: [], props: ['visible'], shownIn: ['alive'], occasional: true,
+    note: 'Shown when you stray too far from the survivors while spawned, or when you are offered the Tank.' },
   /**
    * The dead infected's spawn countdown: spectatorinfected.res's
    * InfectedState, where code writes "You will enter Spawn Mode in N

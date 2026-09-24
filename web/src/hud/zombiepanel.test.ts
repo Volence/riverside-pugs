@@ -25,10 +25,12 @@ const FILE = 'resource/ui/zombiepanel.res';
 const read = (d: ReturnType<typeof validateDesign>, path: string) =>
   parseKv(new TextDecoder('latin1').decode(buildHud(d).find((f) => f.path === path)!.data))[0].value as KvNode[];
 const K = 2.25;
+const OCCASIONAL: PreviewState = { ...DEFAULT_PREVIEW, occasional: true };
 
 describe('the too-far / Tank takeover element (plan task Z1)', () => {
-  it('is HudZombiePanel, on the infected side, shown while you are spawned', () => {
-    expect(elementById('zombiePanel')).toMatchObject({ key: 'HudZombiePanel', side: 'infected', move: true, shownIn: ['alive'] });
+  it('is HudZombiePanel, on the infected side, shown while you are spawned and only now and then', () => {
+    expect(elementById('zombiePanel')).toMatchObject({ key: 'HudZombiePanel', side: 'infected', move: true, shownIn: ['alive'], occasional: true });
+    expect(elementById('zombiePanel')!.note).toMatch(/far from the survivors/);
   });
 
   it('writes a move into HudZombiePanel (r6-a: ypos c-200, 40 units down)', () => {
@@ -46,7 +48,7 @@ describe('the too-far / Tank takeover element (plan task Z1)', () => {
 });
 
 describe('the too-far box drawn from zombiepanel.res (plan task Z1)', () => {
-  function calls(design: ReturnType<typeof validateDesign>, state: PreviewState = DEFAULT_PREVIEW) {
+  function calls(design: ReturnType<typeof validateDesign>, state: PreviewState = OCCASIONAL, selected: string | null = null) {
     _setImageFactory((url) => ({ src: url, complete: true, naturalWidth: 128, naturalHeight: 128, onload: null, onerror: null }) as unknown as HTMLImageElement);
     const out: { m: string; a: unknown[]; fill: string }[] = [];
     const t: Record<string | symbol, unknown> = {
@@ -62,7 +64,7 @@ describe('the too-far box drawn from zombiepanel.res (plan task Z1)', () => {
         : o[k]),
       set: (o, k, v) => { o[k] = v; return true; },
     }) as unknown as CanvasRenderingContext2D;
-    drawHud(ctx, 1920, 1080, design, 'infected', null, undefined, { state });
+    drawHud(ctx, 1920, 1080, design, 'infected', selected, undefined, { state });
     _setImageFactory(null);
     return out;
   }
@@ -72,7 +74,7 @@ describe('the too-far box drawn from zombiepanel.res (plan task Z1)', () => {
   it('draws the title, the line, the class picture and the box where r6-a has them', () => {
     const d = validateDesign({ v: 1, elements: { zombiePanel: { y: 40 } } });
     const r = elementRect(d, 'zombiePanel', d.aspect);
-    const all = calls(d, { ...DEFAULT_PREVIEW, siClass: 'smoker' });
+    const all = calls(d, { ...OCCASIONAL, siClass: 'smoker' });
     // The box: x 622 to 1296, y 101 to 313 px.
     const box = all.find((x) => x.m === 'roundRect')!.a as number[];
     for (const [got, want] of [[box[0], 622.5], [box[1], 101.25], [box[2], 675], [box[3], 213.75]]) expect(Math.abs(got - want)).toBeLessThanOrEqual(1);
@@ -88,10 +90,20 @@ describe('the too-far box drawn from zombiepanel.res (plan task Z1)', () => {
 
   it('shows only while you are spawned, and is picked only then', () => {
     const d = validateDesign({ v: 1 });
-    expect(text(calls(d, { ...DEFAULT_PREVIEW, infected: 'ghost' }), 'TOO FAR FROM THE SURVIVORS')).toBeUndefined();
+    expect(text(calls(d, { ...OCCASIONAL, infected: 'ghost' }), 'TOO FAR FROM THE SURVIVORS')).toBeUndefined();
     const r = elementRect(d, 'zombiePanel', d.aspect);
-    expect(hitTest(d, 'infected', r.x + r.w - 20, r.y + 20, DEFAULT_PREVIEW)).toBe('zombiePanel');
-    expect(hitTest(d, 'infected', r.x + r.w - 20, r.y + 20, { ...DEFAULT_PREVIEW, infected: 'ghost' })).toBe('ghostPanel');
+    expect(hitTest(d, 'infected', r.x + r.w - 20, r.y + 20, OCCASIONAL)).toBe('zombiePanel');
+    expect(hitTest(d, 'infected', r.x + r.w - 20, r.y + 20, { ...OCCASIONAL, infected: 'ghost' })).toBe('ghostPanel');
+  });
+
+  it('is an occasional panel: left out of the everyday preview, drawn with Occasional panels on or while it is selected', () => {
+    const d = validateDesign({ v: 1 });
+    expect(text(calls(d, DEFAULT_PREVIEW), 'TOO FAR FROM THE SURVIVORS')).toBeUndefined();
+    expect(text(calls(d, OCCASIONAL), 'TOO FAR FROM THE SURVIVORS')).toBeDefined();
+    // Picking it (or one of its pieces, which selects its panel) in Layers shows it with the toggle off.
+    expect(text(calls(d, DEFAULT_PREVIEW, 'zombiePanel'), 'TOO FAR FROM THE SURVIVORS')).toBeDefined();
+    const r = elementRect(d, 'zombiePanel', d.aspect);
+    expect(hitTest(d, 'infected', r.x + r.w - 20, r.y + 20, DEFAULT_PREVIEW)).not.toBe('zombiePanel');
   });
 });
 
@@ -183,7 +195,8 @@ describe('the too-far pieces, and the Tank offer pieces behind gate Z3 (plan tas
       get: (o, k) => (typeof o[k] === 'function' ? (...a: unknown[]) => { fills.push({ m: String(k), a, fill: String(o.fillStyle) }); return (o[k] as (...x: unknown[]) => unknown)(...a); } : o[k]),
       set: (o, k, v) => { o[k] = v; return true; },
     }) as unknown as CanvasRenderingContext2D;
-    drawHud(ctx, 1920, 1080, d, 'infected', null, undefined, { state: DEFAULT_PREVIEW });
+    // Selected, as picking it in Layers draws it with Occasional panels off.
+    drawHud(ctx, 1920, 1080, d, 'infected', 'zombiePanel', undefined, { state: DEFAULT_PREVIEW });
     _setImageFactory(null);
     expect(fills.find((x) => x.m === 'fillText' && x.a[0] === 'TOO FAR FROM THE SURVIVORS')!.fill).toBe('rgba(255,0,255,1)');
     expect(fills.some((x) => x.m === 'fill' && x.fill === `rgba(0,0,128,${200 / 255})`)).toBe(true);
