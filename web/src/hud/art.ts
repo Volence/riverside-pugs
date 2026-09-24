@@ -49,6 +49,9 @@ export const EQUIP_ICONS: readonly string[] = [
   'icon/equip/pumpshotgun', 'icon/equip/dualpistols', 'icon/equip/molotov', 'icon/equip/medkit', 'icon/equip/pills',
 ];
 
+/** The use/heal bar's icon: mod_textures.txt icon_healing, cut from vgui/hud/iconsheet by the export script. */
+export const HEALING_ICON = 'icon/healing';
+
 /** Every material the renderer can ask for, and the item and weapon icons. art.test.ts holds the index to this list. */
 export const NEEDED_MATERIALS: readonly string[] = [
   'vgui/s_panel_biker', 'vgui/s_panel_manager', 'vgui/s_panel_namvet', 'vgui/s_panel_teenangst',
@@ -66,6 +69,17 @@ export const NEEDED_MATERIALS: readonly string[] = [
   // The own health panel: DuckingIcon's art (named by localplayerpanel.res), and HealthPanel's
   // bar outline (named by client.dll; probe B1 Q3 showed the fill sits inset inside it).
   'vgui/hud/crouch_survivor', 'vgui/hud/s_healthbar_outline',
+  // The kill notice box: pzdamagerecordpanel.res label4background names it, and the game draws
+  // it behind a notice (probe B2, probe-phase2/b2/shots-kill/b2-killnotice/b2-f.png).
+  'vgui/hud/scalablepanel_bgblack_outlinegrey',
+  // The ability timer: code sets pz_charge_bg on AbilityTimerHud.res BackgroundImage (the black
+  // splat behind the ring, probe-phase2/b3/shots-rerun/b3-rerun/b3-b.png), each class's icon on
+  // AbilityImage (the red rings are part of those textures), and the file names the meter as
+  // Progress's fg_image. The Hunter's is pz_charge_lunge: the unused pz_charge_pounce is not it.
+  'vgui/hud/pz_charge_bg', 'vgui/hud/pz_charge_meter',
+  'vgui/hud/pz_charge_lunge', 'vgui/hud/pz_charge_smoker', 'vgui/hud/pz_charge_boomer', 'vgui/hud/pz_charge_tank',
+  // The use/heal bar's AwardIcon (progressbar.res "icon" "icon_healing", a cell of vgui/hud/iconsheet).
+  HEALING_ICON,
   ...ITEM_ICONS,
   ...EQUIP_ICONS,
 ];

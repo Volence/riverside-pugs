@@ -7,6 +7,7 @@ export const ART: Record<string, string> = {
   'icon/equip/molotov': 'icon-equip-molotov.png',
   'icon/equip/pills': 'icon-equip-pills.png',
   'icon/equip/pumpshotgun': 'icon-equip-pumpshotgun.png',
+  'icon/healing': 'icon-healing.png',
   'icon/item/medkit': 'icon-item-medkit.png',
   'icon/item/molotov': 'icon-item-molotov.png',
   'icon/item/pills': 'icon-item-pills.png',
@@ -25,10 +26,17 @@ export const ART: Record<string, string> = {
   'vgui/hud/healthbar_bg_4': 'vgui-hud-healthbar_bg_4.png',
   'vgui/hud/infected_healthbar_bg_1': 'vgui-hud-infected_healthbar_bg_1.png',
   'vgui/hud/overlay_dead': 'vgui-hud-overlay_dead.png',
+  'vgui/hud/pz_charge_bg': 'vgui-hud-pz_charge_bg.png',
+  'vgui/hud/pz_charge_boomer': 'vgui-hud-pz_charge_boomer.png',
+  'vgui/hud/pz_charge_lunge': 'vgui-hud-pz_charge_lunge.png',
+  'vgui/hud/pz_charge_meter': 'vgui-hud-pz_charge_meter.png',
+  'vgui/hud/pz_charge_smoker': 'vgui-hud-pz_charge_smoker.png',
+  'vgui/hud/pz_charge_tank': 'vgui-hud-pz_charge_tank.png',
   'vgui/hud/pz_healthbar_250': 'vgui-hud-pz_healthbar_250.png',
   'vgui/hud/pz_healthbar_3000': 'vgui-hud-pz_healthbar_3000.png',
   'vgui/hud/pz_healthbar_50': 'vgui-hud-pz_healthbar_50.png',
   'vgui/hud/s_healthbar_outline': 'vgui-hud-s_healthbar_outline.png',
+  'vgui/hud/scalablepanel_bgblack_outlinegrey': 'vgui-hud-scalablepanel_bgblack_outlinegrey.png',
   'vgui/hud/scalablepanel_bgmidgrey': 'vgui-hud-scalablepanel_bgmidgrey.png',
   'vgui/hud/scalablepanel_bgmidgrey_glow': 'vgui-hud-scalablepanel_bgmidgrey_glow.png',
   'vgui/s_panel_background': 'vgui-s_panel_background.png',
@@ -61,6 +69,7 @@ export const EQUIP_ICON_SIZE: Record<string, [number, number]> = {
   'icon/equip/molotov': [64, 64],
   'icon/equip/pills': [64, 64],
   'icon/equip/pumpshotgun': [192, 64],
+  'icon/healing': [64, 64],
 };
 
 // The stock text faces: the name clientscheme.res gives each -> its TrueType file in this folder.
@@ -83,4 +92,4 @@ export const FONT_METRICS: Record<string, FontMetrics> = {
   'Verdana': { unitsPerEm: 2048, winAscent: 2059, winDescent: 430 },
 };
 
-export const ART_TOTAL_BYTES = 411181;
+export const ART_TOTAL_BYTES = 621175;

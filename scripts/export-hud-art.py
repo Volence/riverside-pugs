@@ -58,6 +58,14 @@ MATERIALS = [
     # the outline is HealthPanel's frame, named by client.dll (probe B1 Q3 and the B13 parity
     # shots: the game draws it around the own bar with the fill inset inside it)
     'vgui/hud/crouch_survivor', 'vgui/hud/s_healthbar_outline',
+    # the kill notice box, named by pzdamagerecordpanel.res label4background (probe B2 f)
+    'vgui/hud/scalablepanel_bgblack_outlinegrey',
+    # the ability timer: pz_charge_bg is set by code on AbilityTimerHud.res BackgroundImage,
+    # the class icons on AbilityImage (their red rings are in the textures), pz_charge_meter is
+    # Progress's fg_image. The Hunter's icon is pz_charge_lunge (the leaping Hunter the game
+    # draws, probe-phase2/b13/compare/stock-infected-bottom.png); pz_charge_pounce is unused.
+    'vgui/hud/pz_charge_bg', 'vgui/hud/pz_charge_meter',
+    'vgui/hud/pz_charge_lunge', 'vgui/hud/pz_charge_smoker', 'vgui/hud/pz_charge_boomer', 'vgui/hud/pz_charge_tank',
 ]
 
 # The item icons: index name -> ToolBox character. The characters are the ones
@@ -87,6 +95,8 @@ EQUIP = {
     'icon/equip/molotov': 'icon_equip_molotov',
     'icon/equip/medkit': 'icon_equip_medkit',
     'icon/equip/pills': 'icon_equip_pills',
+    # not a weapon: the use/heal bar's AwardIcon (progressbar.res "icon" "icon_healing"), a cell of the same sheet
+    'icon/healing': 'icon_healing',
 }
 # The stock HUD's faces: the name clientscheme.res gives each -> its vfont
 # in the install and the file it is written to here. The name must be the one
