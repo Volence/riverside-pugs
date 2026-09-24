@@ -5,7 +5,7 @@ import {
   startsOf, moveChildren, placeChildren, scaleChildren, cornerFactor, anchorOf, alignChildren, setChildrenVisible, resetChildren,
   placeElement, moveElements, moveCards, alignElements, scaleElement, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
   ammoOnly, withImport, withPreset, hasLayoutEdits,
-  splatterKind, patchSplatter, withSplatterImage, resetSplatter, panelClamp, raiseChild, resetChildKey, setFit,
+  splatterKind, patchSplatter, withSplatterImage, resetSplatter, panelClamp, raiseChild, resetChildKey, setFit, rowGapSlider, setRowGap,
 } from './edit';
 import { buildHud, buildTrees } from './build';
 import { weaponSlots } from './weapons';
@@ -14,7 +14,8 @@ import { DEFAULT_DESIGN, newDesign, baseTeam, validateDesign, type HudDesign } f
 import { DEFAULT_STATE } from '../crosshair/draw';
 import type { CrosshairArt } from '../crosshair/model';
 import { formatPos, parsePos } from './units';
-import { teamCardRects, elementRect, cardChild, isFreeTeam, panelChild, elementFitShift } from './build';
+import { teamCardRects, elementRect, cardChild, isFreeTeam, panelChild, elementFitShift, teamLayout } from './build';
+import { elementById } from './elements';
 import { childDef } from './children';
 import { elementFrame } from './selection';
 
@@ -1070,6 +1071,27 @@ describe('moving your infected health\'s pieces keeps every linked class inside 
       const d = scaleChildren(plain, names, starts, { x: 0, y: 0 }, 3, 'siHealth', f);
       for (const n of names) inside(d, n);
     }
+  });
+});
+
+describe('the infected row\'s Gap slider', () => {
+  const plain: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: {} };
+  const row = elementById('infectedRow')!;
+  it('shows the stock gap, -116, inside its range, and takes it back without moving a card', () => {
+    const g = rowGapSlider(plain);
+    expect(g.value).toBe(-116);
+    expect(g.min).toBeLessThanOrEqual(-116);
+    expect(g.max).toBe(200);
+    expect(teamLayout(setRowGap(plain, g.value), row).spacing).toBe(140);
+  });
+  it('goes down to a pitch of one unit, never zero or less', () => {
+    const g = rowGapSlider(plain);
+    expect(teamLayout(setRowGap(plain, g.min), row).spacing).toBe(1);
+  });
+  it('shows a fitted card\'s gap as it is, and drops a stale spacing once set', () => {
+    const fitted: HudDesign = { ...plain, elements: { infectedRow: { fit: true, spacing: 124 } } };
+    expect(rowGapSlider(fitted).value).toBe(Math.round(teamLayout(fitted, row).gap!));
+    expect(setRowGap(fitted, 7).elements.infectedRow).toEqual({ fit: true, gap: 7 });
   });
 });
 

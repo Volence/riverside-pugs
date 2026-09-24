@@ -18,7 +18,7 @@ import { baseOf } from '../../hud/base';
 import { childDef, panelChildren, maxInset, type KeyDef } from '../../hud/children';
 import { probe } from '../../hud/probes';
 import {
-  cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild, resetChildKey,
+  cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild, resetChildKey, rowGapSlider, setRowGap,
   startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, patchWeapons, ammoOnly, setFit,
   resetElementKey,
   type Align,
@@ -50,6 +50,7 @@ export function TeamControls(
   if (!el.team) return null;
   const team = el.team;
   const t = teamLayout(design, el);
+  const rowGap = rowGapSlider(design);
   const options = team.file ? (['row', 'column', 'free'] as const) : team.dirs;
   const onLayoutChange = (e: Event) => {
     const dir = (e.target as HTMLSelectElement).value as TeamDir;
@@ -80,12 +81,10 @@ export function TeamControls(
       {/* The infected row: code places card i at i x HorizPanelSpacing, so its pitch is the card plus the gap (build.ts rowLayout). */}
       {!team.file && (
         <>
+          {/* Negative while cards overlap: the stock card is -116 (edit.ts rowGapSlider). */}
           <Slider
-            label="Gap" value={Math.max(0, Math.round(t.gap ?? 0))} min={0} max={200} step={1}
-            onInput={(gap) => edit((d) => {
-              const { spacing: _old, ...rest } = d.elements[el.id] ?? {};
-              return { ...d, elements: { ...d.elements, [el.id]: { ...rest, gap: clampOverride('gap', gap) } } };
-            }, 'gesture')}
+            label="Gap" value={rowGap.value} min={rowGap.min} max={rowGap.max} step={1}
+            onInput={(gap) => edit((d) => setRowGap(d, gap), 'gesture')}
             onEnd={end}
           />
           <label class="hud__check">

@@ -171,6 +171,14 @@ describe('validateDesign, the teammate layout', () => {
     expect(validateDesign({ v: 1, elements: { infectedRow: { spacing: 124 } } }).elements.infectedRow).toEqual({ spacing: 124 });
   });
 
+  it('keeps a negative infected row gap, down to a card overlapping all but one unit', () => {
+    // The stock card is 256 wide at a 140 pitch: its unfitted gap is -116.
+    expect(validateDesign({ v: 1, elements: { infectedRow: { gap: -116 } } }).elements.infectedRow).toEqual({ gap: -116 });
+    expect(validateDesign({ v: 1, elements: { infectedRow: { gap: -9999 } } }).elements.infectedRow).toEqual({ gap: -511 });
+    // The survivor team's gap stays 0..200.
+    expect(validateDesign({ v: 1, elements: { teamColumn: { gap: -5 } } }).elements.teamColumn!.gap).toBe(0);
+  });
+
   it('leaves fit off when a saved design has none, while a new design starts fitted', () => {
     expect(validateDesign({ v: 1 }).elements).toEqual({});
     expect(validateDesign({ v: 1, elements: { chat: { x: 5 } } }).elements.teamColumn).toBeUndefined();

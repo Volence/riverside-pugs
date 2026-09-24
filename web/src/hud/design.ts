@@ -278,6 +278,17 @@ export function clampOverride(key: RangeKey, value: number): number {
  */
 const FIT_POS_RANGES = { x: [RANGES.x[0] - 2 * 853, RANGES.x[1]], y: [RANGES.y[0] - 2 * 480, RANGES.y[1]] } as const;
 
+/**
+ * The infected row's gap, which unlike the survivor team's may be negative:
+ * code places card i at i x HorizPanelSpacing, and the stock card, 256 wide
+ * at a 140 pitch, overlaps its neighbour by 116 (gap -116). The floor is a
+ * pitch of one unit for the widest card a piece can make (512); the Gap
+ * slider stops at the viewed card's own (edit.ts rowGapSlider), and
+ * build.ts's rowLayout never writes a pitch below 1.
+ */
+const ROW_GAP = [1 - 512, RANGES.gap[1]] as const;
+export const clampRowGap = (v: number): number => Math.min(ROW_GAP[1], Math.max(ROW_GAP[0], v));
+
 /** Whether an element's fit moves its container, so its x and y take FIT_POS_RANGES. */
 export const fitMovesContainer = (id: string, fit: boolean | undefined): boolean => fit === true && (id === 'siHealth' || id === 'infectedRow');
 
@@ -540,7 +551,8 @@ function element(id: string, raw: unknown, key: BaseKey): ElementOverride {
     if ((team && k === 'spacing') || (!team && !infected && k === 'gap')) continue;
     const v = raw[k];
     if (typeof v !== 'number' || !Number.isFinite(v)) continue;
-    out[k] = k === 'x' || k === 'y' ? clampPos(k, v, fitMovesContainer(id, raw.fit === true)) : clampOverride(k, v);
+    out[k] = k === 'x' || k === 'y' ? clampPos(k, v, fitMovesContainer(id, raw.fit === true))
+      : infected && k === 'gap' ? clampRowGap(v) : clampOverride(k, v);
   }
   // The infected row is only ever a row: the game lays its cards out
   // HorizPanelSpacing apart and reads no vertical key (probe RESULTS, dll 0x10247a70).

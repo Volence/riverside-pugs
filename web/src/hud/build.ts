@@ -1558,7 +1558,8 @@ function rowLayout(design: HudDesign, el: HudElement, o: ElementOverride | undef
   const self = baseFrameRect(design, ZCARD_PANEL);
   const size = box ?? (self ? { w: self.w, h: self.h } : { w: basePitch, h: 0 });
   const gap = o?.gap ?? (o?.spacing !== undefined ? o.spacing / k : basePitch) - size.w;
-  const spacing = o?.gap !== undefined ? Math.round((size.w + o.gap) * k)
+  // A negative gap (design.ts clampRowGap) still leaves a pitch of at least one unit.
+  const spacing = o?.gap !== undefined ? Math.max(1, Math.round((size.w + o.gap) * k))
     : Math.round(o?.spacing ?? basePitch * k);
   const out: TeamLayout = { dir: 'row', spacing, gap, card: { w: size.w * k, h: size.h * k } };
   if (o?.fit && !box) out.fitEmpty = true;

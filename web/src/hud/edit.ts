@@ -10,7 +10,7 @@
  * canvas draws.
  */
 import {
-  clampOverride, clampChild, clampPos, fitMovesContainer, DEFAULT_DESIGN, newDesign,
+  clampOverride, clampChild, clampPos, clampRowGap, fitMovesContainer, DEFAULT_DESIGN, newDesign,
   type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type Box, type WeaponsOverride, type ImportedRef,
 } from './design';
 import { screenW, SCREEN_H } from './units';
@@ -1043,6 +1043,28 @@ export function resetSplatter(d: HudDesign, id: SplatterId): HudDesign {
   if (!Object.keys(splatters).length) delete next.splatters;
   const c = splatChild(id);
   return c ? showChild(next, c.name, c.panel) : next;
+}
+
+/**
+ * The infected row's Gap slider: the gap as the row is laid out (rowLayout:
+ * the stock card, 256 wide at a 140 pitch, is -116 unfitted), from a pitch
+ * of one unit for the card shown (never below the validator's floor) to
+ * 200. Shown as it is, so the first touch does not jump the spacing, and a
+ * return to the stock value gives the stock pitch back.
+ */
+export function rowGapSlider(design: HudDesign): { value: number; min: number; max: number } {
+  const el = elementById('infectedRow')!;
+  const t = teamLayout(design, el);
+  const k = el.resize === 'scale' ? design.elements[el.id]?.scale ?? 1 : 1;
+  const w = t.card ? Math.round(t.card.w / k) : 0;
+  const value = Math.round(t.gap ?? 0);
+  return { value, min: Math.min(value, clampRowGap(1 - w)), max: 200 };
+}
+
+/** Set the infected row's gap from the slider, dropping a saved spacing it replaces. */
+export function setRowGap(design: HudDesign, gap: number): HudDesign {
+  const { spacing: _old, ...rest } = design.elements.infectedRow ?? {};
+  return { ...design, elements: { ...design.elements, infectedRow: { ...rest, gap: clampRowGap(gap) } } };
 }
 
 /**
