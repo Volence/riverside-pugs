@@ -12,13 +12,17 @@ const CATEGORIES = [
 ] as const;
 
 /**
- * "Report a player". Two homes: a match page (pass matchId, pick someone from
- * that match's roster) and a profile (pass target, no match). Moderators see
+ * "Report a player". Three homes: a match page (pass matchId, pick someone from
+ * that match's roster), a profile (pass target, no match), and a community
+ * card (pass target and the entry: the report is about that shared HUD or
+ * crosshair, and joins its author's ticket like any other). Moderators see
  * reports as tickets; the reported player is never told who filed one.
  */
 export function ReportPlayer(
-  { matchId, target: fixed, moment, onClearMoment }: {
+  { matchId, target: fixed, moment, onClearMoment, entry }: {
     matchId?: number; target?: { steamid: string; name: string };
+    /** A shared community entry by `target` that the report is about. Needs `target`. */
+    entry?: { id: number; kind: 'hud' | 'crosshair'; title: string };
     /** A replay moment picked in the viewer above. Match pages only. */
     moment?: ReportMoment | null;
     onClearMoment?: () => void;
@@ -61,7 +65,8 @@ export function ReportPlayer(
     setBusy(true);
     setMsg(null);
     try {
-      if (fixed) await api.fileReport({ targetId: fixed.steamid, category, text });
+      if (fixed && entry) await api.fileReport({ targetId: fixed.steamid, category, text, entryId: entry.id });
+      else if (fixed) await api.fileReport({ targetId: fixed.steamid, category, text });
       else if (moment) await api.report(matchId!, target, category, text, moment);
       else await api.report(matchId!, target, category, text);
       setMsg({ ok: true, text: 'Thanks. The moderators will look at it.' });
@@ -78,7 +83,7 @@ export function ReportPlayer(
   };
 
   if (!open) {
-    return <button class="chip report" type="button" onClick={start}>{fixed ? `Report ${fixed.name}` : 'Report a player'}</button>;
+    return <button class="chip report" type="button" onClick={start}>{entry ? 'Report' : fixed ? `Report ${fixed.name}` : 'Report a player'}</button>;
   }
 
   const ready = fixed ? true : elig?.canReport === true;
@@ -86,6 +91,7 @@ export function ReportPlayer(
   return (
     <div class="report" ref={root}>
       <h3>{fixed ? `Report ${fixed.name}` : 'Report a player'}</h3>
+      {entry && <p class="muted">About their shared {entry.kind === 'hud' ? 'HUD' : 'crosshair'} '{entry.title}'</p>}
       {!fixed && !elig && <p class="muted">Checking...</p>}
       {!fixed && elig && !elig.canReport && <p class="muted">{capitalise(elig.reason ?? 'You cannot report on this match')}.</p>}
       {ready && (

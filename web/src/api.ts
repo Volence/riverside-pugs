@@ -1065,6 +1065,8 @@ export interface TicketSummary {
 export interface TicketReport {
   id: number; reporterId: string | null; reporterDiscordId: string | null; reporterName: string | null; category: string; text: string;
   matchId: number | null; campaign: string | null; moment: { ordinal: number; half: number; tMs: number } | null; createdAt: string;
+  /** The shared community entry the report is about. Optional only for a browser holding new JS against an older server. */
+  entry?: { id: number; kind: CommunityKind; title: string; removed: boolean } | null;
 }
 export interface TicketEvent {
   id: number; actorId: string | null; actorName: string | null; kind: string; detail: Record<string, unknown>; createdAt: string;

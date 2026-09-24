@@ -21,6 +21,12 @@ describe('NAV_LINKS', () => {
     }
   });
 
+  it('offers the community page right after the HUD editor', () => {
+    const paths = NAV_LINKS.map(([href]) => href);
+    expect(paths.indexOf('/community')).toBe(paths.indexOf('/hud') + 1);
+    expect(NAV_LINKS.find(([href]) => href === '/community')![1]).toBe('Community');
+  });
+
   it('offers Custom alongside Campaigns, at its own path', () => {
     const paths = NAV_LINKS.map(([href]) => href);
     expect(paths).toContain('/maps');
