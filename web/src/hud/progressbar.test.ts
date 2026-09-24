@@ -1,11 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { PROGRESS_PANEL, panelChildren } from './children';
 import { elementById } from './elements';
 import { buildHud, buildTrees, elementRect } from './build';
 import { validateDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
-import { childAt, panelBoxes } from './mock';
+import { childAt, panelBoxes, drawHud } from './mock';
+import { _setImageFactory, _resetAssetCache } from './render';
+import { artUrl } from './art';
 
 /**
  * The use / revive bar's pieces (plan task U1). Probe answers,
@@ -96,5 +98,59 @@ describe('the use bar registry (plan task U1)', () => {
     expect(panelBoxes(d, 'progressBar')).toEqual([{ x: r.x, y: r.y, w: 300, h: 45 }]);
     expect(childAt(d, 'healthy', r.x + 250, r.y + 20, 'progressBar')).toEqual({ name: 'AwardIcon', card: 0 });
     expect(childAt(d, 'healthy', r.x + 100, r.y + 20, 'progressBar')).toEqual({ name: 'Bar', card: 0 });
+  });
+});
+
+describe('the use bar preview from its edited file (plan task U2)', () => {
+  const K = 2.25;
+  function calls(design: ReturnType<typeof validateDesign>) {
+    _setImageFactory((url) => ({ src: url, complete: true, naturalWidth: 64, naturalHeight: 64, onload: null, onerror: null }) as unknown as HTMLImageElement);
+    const out: { m: string; a: unknown[]; fill: string }[] = [];
+    const t: Record<string | symbol, unknown> = {
+      fillStyle: '', strokeStyle: '', font: '', textAlign: 'left', textBaseline: 'alphabetic', globalAlpha: 1, lineWidth: 1,
+      canvas: { width: 1920, height: 1080, getContext: () => null },
+      measureText: (s: string) => ({ width: s.length * 10 }),
+    };
+    for (const m of ['clearRect', 'fillRect', 'strokeRect', 'fillText', 'drawImage', 'putImageData', 'beginPath', 'rect', 'clip', 'arc', 'stroke',
+      'fill', 'save', 'restore', 'setLineDash', 'moveTo', 'lineTo', 'closePath', 'roundRect']) t[m] = () => {};
+    const ctx = new Proxy(t, {
+      get: (o, k) => (typeof o[k] === 'function'
+        ? (...a: unknown[]) => { out.push({ m: String(k), a, fill: String(o.fillStyle) }); return (o[k] as (...x: unknown[]) => unknown)(...a); }
+        : o[k]),
+      set: (o, k, v) => { o[k] = v; return true; },
+    }) as unknown as CanvasRenderingContext2D;
+    drawHud(ctx, 1920, 1080, design, 'survivor', null);
+    _setImageFactory(null);
+    return out;
+  }
+  const icon = (c: { m: string; a: unknown[] }[]) => c.find((x) => x.m === 'drawImage' && (x.a[0] as HTMLImageElement).src === artUrl('icon/healing'))!;
+
+  beforeEach(() => { _resetAssetCache(); });
+
+  it('draws the label in its colour and the icon at its moved rect, clipped to the real 300 x 45 container (r1 bar-e, bar-e-icon)', () => {
+    const d = validateDesign({ v: 1, children: { progressBar: { BarLabel: { color: '255 0 255 255' }, AwardIcon: { x: 232, y: 0, w: 40, h: 40 } } } });
+    const r = elementRect(d, 'progressBar', d.aspect);
+    const all = calls(d);
+    const label = all.filter((c) => c.m === 'fillText' && c.a[0] === 'HEALING YOURSELF');
+    expect(label.at(-1)!.fill).toBe('rgba(255,0,255,1)');
+    expect(icon(all).a.slice(1)).toEqual([(r.x + 232) * K, r.y * K, 40 * K, 40 * K]);
+    expect(all.filter((c) => c.m === 'rect').map((c) => c.a)).toContainEqual([r.x * K, r.y * K, 300 * K, 45 * K]);
+  });
+
+  it('keeps drawing the bar keys, now from the edit', () => {
+    const d = validateDesign({ v: 1, children: { progressBar: { Bar: { keys: { fill_color: '0 255 0 255' } } } } });
+    expect(calls(d).some((c) => c.m === 'fillRect' && c.fill === 'rgba(0,255,0,1)')).toBe(true);
+  });
+
+  it('scales every piece with the element', () => {
+    const d = validateDesign({ v: 1, elements: { progressBar: { scale: 2 } } });
+    const r = elementRect(d, 'progressBar', d.aspect);
+    const all = calls(d);
+    expect(icon(all).a.slice(1)).toEqual([(r.x + 4) * K, r.y * K, 48 * K, 48 * K]);
+    expect(all.filter((c) => c.m === 'rect').map((c) => c.a)).toContainEqual([r.x * K, r.y * K, 600 * K, 90 * K]);
+    // The ring's top strip: the bar at 56, 30, 400 wide. Its thicknesses are file keys the scale leaves
+    // alone (scalePass scales places and sizes only), so the file still says 1 unit: 2 px thick, 2 px of shadow.
+    const bx = Math.floor(r.x * K) + Math.floor(56 * K), by = Math.floor(r.y * K) + Math.floor(30 * K);
+    expect(all.filter((c) => c.m === 'fillRect' && c.fill === 'rgba(255,255,255,1)').map((c) => c.a)).toContainEqual([bx, by, 400 * K - 2, 2]);
   });
 });

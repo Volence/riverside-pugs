@@ -18,7 +18,7 @@ import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHas
 import { baseOf } from './base';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H, parseSize, parsePos, screenW } from './units';
-import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
+import { PROGRESS_LABEL, drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
 import { normaliseMaterial, HEALING_ICON, CROSSHAIR_OPEN } from './art';
 import { barGeometry, clampBarKeys } from './progress';
 import { canvasFont, fontCell, importedFace, loadFace } from './fonts';
@@ -429,8 +429,13 @@ const PROGRESS_SAMPLE = 0.4;
  * show the border alone, as they do in game (b1/shots/crops/bar-d.png).
  * Clipped to the element, as VGUI clips the children to their panel.
  */
-function paintProgressBar(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
+function paintProgressBar(ctx: CanvasRenderingContext2D, el: Rect, design: HudDesign, k: number, onAsset?: () => void) {
   const nodes = buildTrees(design)(PROGRESS);
+  // The pieces live in the real HudProgressBar block (scaled with the
+  // element), which VGUI clips them to, not the registry's picking
+  // stand-in: a moved icon past it still draws (probe P3, r1/shots/crops/bar-e-icon.png).
+  const real = layoutSize(design, 'progressBar');
+  const r = { x: el.x, y: el.y, w: real.w * k, h: real.h * k };
   const rectOf = (name: string) => {
     const n = kvFind(nodes, [name]);
     if (!n) return null;
@@ -451,7 +456,7 @@ function paintProgressBar(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
       const cell = setFont(ctx, design, font, k, onAsset);
       ctx.textAlign = 'left';
       const top = label.px.y + (label.px.h - cell.cell) / 2;
-      const text = 'HEALING YOURSELF';
+      const text = PROGRESS_LABEL;
       if (fontFace(design, font).dropShadow) {
         ctx.fillStyle = 'rgba(0,0,0,1)';
         fillFontText(ctx, cell, text, label.px.x + 1, top + cell.ascent + 1, top + 1, r);
