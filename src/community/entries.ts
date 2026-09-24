@@ -41,7 +41,7 @@ export interface EntryDetail extends EntrySummary {
   design?: unknown;
   importId?: string | null;
   /** Staff only, on a tombstone. */
-  removed?: { by: string | null; reason: string | null; at: string };
+  removed?: { by: string | null; byName: string | null; reason: string | null; at: string };
 }
 
 export interface MineEntry extends EntrySummary {
@@ -148,7 +148,12 @@ export function getEntry(db: DB, id: number, o: { viewer: string | null; staff: 
     out.design = parse(r.payload);
     out.importId = r.import_id;
   }
-  if (r.deleted_at !== null) out.removed = { by: r.deleted_by, reason: r.delete_reason, at: r.deleted_at };
+  if (r.deleted_at !== null) {
+    const who = r.deleted_by
+      ? (db.prepare('SELECT name FROM players WHERE steamid = ?').get(r.deleted_by) as { name: string } | undefined)
+      : undefined;
+    out.removed = { by: r.deleted_by, byName: who?.name ?? null, reason: r.delete_reason, at: r.deleted_at };
+  }
   return out;
 }
 

@@ -1462,7 +1462,7 @@ export interface CommunityEntryDetail extends CommunityEntry {
   design?: unknown;
   importId?: string | null;
   /** Staff only, on a removed entry. */
-  removed?: { by: string | null; reason: string | null; at: string };
+  removed?: { by: string | null; byName?: string | null; reason: string | null; at: string };
 }
 
 export interface CommunityList { entries: CommunityEntry[]; page: number; pageSize: number; total: number }
