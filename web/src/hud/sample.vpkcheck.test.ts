@@ -38,6 +38,14 @@
 //      scale 1.5 with a ready colour; the marker at ability_size 30, green,
 //      so the reader sees the three linked SI files, the card file and the
 //      HudCrosshair keys. The same edits probe B14 checked in game.
+//   r: every field of Phase 2's last slices (plan 2026-09-24-hud-editor-phase2-rest.md,
+//      V3): kill notices cyan at size 24, centred, on a flat box; chat size
+//      20 (the open box stays behind gate C2); the use bar's label, Subtext
+//      and fill; the spawn panel's colours; the too-far and Tank offer boxes;
+//      the frustration meter; the spawn countdown; the mic moved with an
+//      upload; the vote box; the survival timer, peril, leaving-area and
+//      finale panels moved; the pickup fly-in off. The same edits probe V1
+//      checked in game.
 //   u: a stock design with weapon uploads (plan phase2-rest, task W2): the M16
 //      icon a 192x64 band (red, green, blue thirds), the pills a 64x64 of
 //      quadrants, the active box a 128x128 of yellow corners, so the reader
@@ -161,6 +169,32 @@ it('writes a sample VPK or zip for the Python/unzip readers', () => {
       } });
     if (!d.children.siHealth?.Health?.keys?.monochrome_color) throw new Error('sample z lost the Q24 bar colour in validateDesign');
     writeFileSync(process.env.HUD_VPK_OUT, packHud(d).bytes);
+    return;
+  }
+  if (sample === 'r') {
+    const mic = new Uint8ClampedArray(64 * 64 * 4).fill(255);
+    const d = validateDesign({ v: 1, preset: 'stock', crosshair: 'none', pickupFlyIn: false,
+      images: { voiceSelf: { w: 64, h: 64, png: PNG } },
+      elements: {
+        killNotices: { color: '0 255 255 255', fontSize: 24, keys: { label_textalign: 'center' }, noticeBox: { kind: 'flat', color: '0 0 255 160' } },
+        chat: { fontSize: 20 },
+        ghostPanel: { keys: { WhiteText: '0 255 255 255', RedText: '255 255 0 255' } },
+        spawnCountdown: { color: '255 0 255 255', fontSize: 20 },
+        ownMic: { x: 40, y: 40, w: 48, h: 48 },
+        vote: { y: 100, bg: '128 0 128 240' },
+        holdoutTimer: { y: 150 }, perilNotice: { y: 150 }, leavingArea: { y: 200 }, finaleMeter: { y: 250 },
+      },
+      children: {
+        progressBar: { BarLabel: { color: '255 255 0 255' }, Subtext: { color: '255 0 255 255' }, Bar: { keys: { fill_color: '0 255 0 255' } } },
+        zombiePanel: {
+          'TooFarFromSurvivors/TooFarTitle': { color: '255 255 0 255' },
+          'TankTakeover/Title': { color: '255 0 255 255' }, 'TankTakeover/Text': { color: '0 255 255 255' },
+          'TankTakeover/Background': { keys: { bgcolor_override: '0 96 0 220' } },
+        },
+        tankPanel: { Countdown: { color: '255 0 255 255', fontSize: 24 }, FrustrationLabel: { color: '0 255 255 255' }, FrustrationBar: { keys: { east_aligned: '0' } } },
+      } });
+    if (d.elements.killNotices?.fontSize !== 24 || !d.children.tankPanel || !d.children.zombiePanel?.['TankTakeover/Title']) throw new Error('sample r lost a gated field in validateDesign');
+    writeFileSync(process.env.HUD_VPK_OUT, packHud(d, { images: { voiceSelf: mic } }).bytes);
     return;
   }
   const d = validateDesign(SAMPLE_A);

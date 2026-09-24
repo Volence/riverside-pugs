@@ -134,5 +134,59 @@ if os.environ.get('HUD_SAMPLE') == 'z':
     assert cross['ability_size'] == '30' and cross['ability_ready_color'] == '0 255 0 255', cross
     assert 'never_draw' not in {k.real_name for k in cross}, cross
     print('sample z: SI', zh['wide'], zh['tall'], 'Boomer bar', blocks(B)['Health']['wide'], 'card', me['wide'], me['tall'])
+if os.environ.get('HUD_SAMPLE') == 'r':
+    # Sample r: every field Phase 2's last slices added (plan 2026-09-24-hud-editor-phase2-rest.md, V3), read by
+    # srctools: kill notices, chat size, use bar, spawn panel, too-far and Tank offer box, frustration meter,
+    # spawn countdown, mic upload, vote, survival timer, the occasional panels, the pickup fly-in off.
+    from srctools.keyvalues import Keyvalues
+    from srctools.vtf import VTF
+    def blocks(path):
+        root = list(Keyvalues.parse(pak[path].read().decode('latin1')))[0]
+        return {b.real_name: b for b in root}
+    layout = blocks('scripts/hudlayout.res')
+    scheme = pak['resource/clientscheme.res'].read().decode('latin1')
+    rec = blocks('resource/ui/hud/pzdamagerecordpanel.res')
+    for i in range(5):
+        row = rec[f'recordlabel{i}']
+        assert row['fgcolor_override'] == '0 255 255 255', row
+        assert row['font'].startswith('HudEd_') and f'"{row["font"]}"' in scheme, row['font']
+    assert rec['label4background']['image'] == '../vgui/hud/hudeditor/noticebg', rec['label4background']
+    assert layout['HudPZDamageRecord']['label_textalign'] == 'center', layout['HudPZDamageRecord']
+    assert 'materials/vgui/hud/hudeditor/noticebg.vtf' in names
+    import re
+    chat = pak['resource/chatscheme.res'].read().decode('latin1')
+    first = re.search(r'"ChatFont"\s*\{\s*"1"\s*\{(.*?)\}', chat, re.S).group(1)
+    assert re.search(r'"tall"\s+"20"\s+\[\$WIN32\]', first), first      # size 20 in the 480-line range (the PC line)
+    assert 'resource/ui/basechat.res' not in names, 'the open chat box waits on gate C2'
+    bar = blocks('resource/ui/hud/progressbar.res')
+    assert bar['Subtext']['fgcolor_override'] == '255 0 255 255', bar['Subtext']
+    assert bar['BarLabel']['fgcolor_override'] == '255 255 0 255', bar['BarLabel']
+    assert bar['Bar']['fill_color'] == '0 255 0 255', bar['Bar']
+    ghost = layout['HudGhostPanel']
+    assert (ghost['WhiteText'], ghost['RedText']) == ('0 255 255 255', '255 255 0 255'), ghost
+    zp = list(Keyvalues.parse(pak['resource/ui/zombiepanel.res'].read().decode('latin1')))[0]
+    far, tank = zp.find_key('TooFarFromSurvivors'), zp.find_key('TankTakeover')
+    assert far.find_key('TooFarTitle')['fgcolor_override'] == '255 255 0 255'
+    assert tank.find_key('Title')['fgcolor_override'] == '255 0 255 255'
+    assert tank.find_key('Text')['fgcolor_override'] == '0 255 255 255'
+    assert tank.find_key('Background')['bgcolor_override'] == '0 96 0 220'
+    fm = blocks('resource/ui/hud/frustrationmeter.res')
+    assert fm['Countdown']['fgcolor_override'] == '255 0 255 255' and fm['Countdown']['font'].startswith('HudEd_'), fm['Countdown']
+    assert fm['FrustrationLabel']['fgcolor_override'] == '0 255 255 255', fm['FrustrationLabel']
+    assert fm['FrustrationBar']['east_aligned'] == '0', fm['FrustrationBar']
+    spec = blocks('resource/ui/spectatorinfected.res')
+    assert spec['InfectedState']['fgcolor_override'] == '255 0 255 255', spec['InfectedState']
+    assert (layout['HudVoiceSelfStatus']['xpos'], layout['HudVoiceSelfStatus']['wide']) == ('40', '48'), layout['HudVoiceSelfStatus']
+    assert blocks('resource/ui/hud/votehud.res')['VoteActive']['bgcolor_override'] == '128 0 128 240'
+    kv = Keyvalues.parse(pak['scripts/mod_textures.txt'].read().decode('latin1'))
+    mic = next(iter(kv)).find_key('TextureData').find_key('voice_self')
+    assert mic['file'] == 'vgui/hud/hudeditor/voice_self' and mic['width'] == '64', mic
+    tex = VTF.read(io.BytesIO(pak['materials/vgui/hud/hudeditor/voice_self.vtf'].read()))
+    assert (tex.width, tex.height) == (64, 64)
+    for el in ('CHudTeamMateInPerilNotice', 'HudLeavingAreaWarning', 'HudFinaleMeter'):
+        assert el in layout, el
+    anims = pak['scripts/hudanimations.txt'].read().decode('latin1')
+    assert 'Animate image1 Alpha 0 Linear 0.0 0.001' in anims, 'pickup fly-in not off'
+    print('sample r: notices', rec['recordlabel0']['font'], 'countdown', spec['InfectedState']['font'], 'meter', fm['Countdown']['font'])
 print(len(names), 'files ok')
 PY
