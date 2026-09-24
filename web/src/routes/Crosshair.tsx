@@ -9,6 +9,11 @@ import {
 import { CrosshairBuilder, Field } from '../crosshair/Builder';
 import { crosshairAddonFromPixels, saveBytes } from '../crosshair/download';
 import { CROSSHAIR_KEY, crosshairPixels, savedArt, saveImage } from '../crosshair/saved';
+import { readArt, type CrosshairArt } from '../crosshair/model';
+import { communityApi, ApiError } from '../api';
+import type { Session } from '../hooks/useLiveState';
+import { confirm } from '../components/Confirm';
+import { ShareDialog } from '../components/ShareDialog';
 
 const STORAGE_KEY = CROSSHAIR_KEY;
 
@@ -46,10 +51,16 @@ const RESOLUTIONS: [Res, string][] = [
   ['2160', '3840 x 2160'], ['768', '1366 x 768'],
 ];
 
-export function Crosshair() {
+/** The session is optional so the page still renders on its own: no session reads as signed out. */
+export function Crosshair({ session = { kind: 'anonymous' } }: { session?: Session } = {}) {
+  // Whether this browser had a crosshair saved when the page opened, read
+  // before the page's own save effect writes one: a community crosshair asks
+  // before replacing it.
+  const [hadSaved] = useState(() => savedArt() !== null);
   const [state, setState] = useState<CrosshairState>(loadState);
   const [name, setName] = useState('my_crosshair');
   const [status, setStatus] = useState('');
+  const [sharing, setSharing] = useState(false);
 
   const preview = useRef<HTMLCanvasElement>(null);
   const zoom = useRef<HTMLCanvasElement>(null);
@@ -75,6 +86,59 @@ export function Crosshair() {
     img.onload = () => { imported.current = img; setImgTick((n) => n + 1); };
     img.src = art.png;
   }, []);
+
+  // Mount only: a community crosshair's Open in the crosshair maker lands
+  // here with ?community=<id>. The art is read like any stored crosshair
+  // (readArt); the parameter is used once, as the HUD editor's are.
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    const raw = q.get('community');
+    if (raw === null) return undefined;
+    q.delete('community');
+    const rest = q.toString();
+    history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash);
+    if (!/^[1-9][0-9]{0,15}$/.test(raw)) { setStatus('That community link is damaged.'); return undefined; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const entry = await communityApi.get(Number(raw));
+        if (cancelled) return;
+        const art = entry.kind === 'crosshair' ? readArt(entry.art) : null;
+        if (!art) throw new Error('This crosshair cannot be drawn.');
+        if (hadSaved && !await confirm({
+          title: 'Replace the crosshair saved on this browser with this one?',
+          confirmLabel: 'Use this one', cancelLabel: 'Keep mine',
+        })) return;
+        if (cancelled) return;
+        if (art.kind === 'built') {
+          // The viewer's own backdrop and resolution stay: they only change this page's preview.
+          setState((s) => ({ ...art.state, backdrop: s.backdrop, res: s.res }));
+        } else {
+          saveImage({ png: art.png, w: art.w, h: art.h });
+          const img = new Image();
+          img.onload = () => { if (!cancelled) { imported.current = img; setImgTick((n) => n + 1); } };
+          img.src = art.png;
+          set({ shape: 'image' });
+        }
+        setStatus(`Loaded ${entry.title} from the community page.`);
+      } catch (err) {
+        if (!cancelled) {
+          setStatus(err instanceof ApiError && err.status === 404 ? 'That community entry was removed.' : (err as Error).message);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  /** What Share to community sends: the drawn crosshair, or on the image shape the saved image. */
+  const prepareShare = async () => {
+    let art: CrosshairArt | null = { kind: 'built', state };
+    if (state.shape === 'image') {
+      art = savedArt();
+      if (art?.kind !== 'image') throw new Error('Import an image first, or pick a shape.');
+    }
+    return { kind: 'crosshair' as const, name: name === 'my_crosshair' ? '' : name, art };
+  };
 
   // One effect draws everything, so the texture and the preview can never
   // disagree about what the current settings are.
@@ -156,6 +220,9 @@ export function Crosshair() {
   return (
     <div class="page page--wide">
       <PageHeader eyebrow="Tool" title="Crosshair Maker" />
+      {sharing && (
+        <ShareDialog kind="crosshair" session={session} prepare={prepareShare} onShared={() => {}} onClose={() => setSharing(false)} />
+      )}
 
       <div class="xh">
         <Panel class="xh__controls">
@@ -184,6 +251,7 @@ export function Crosshair() {
               crosshair into the HUD editor instead: it goes into the HUD's download.
             </p>
             <a class="btn btn--ghost btn--block xh__tohud" href="/hud?from=crosshair" onClick={openInHud}>Open in the HUD editor</a>
+            <button type="button" class="btn btn--ghost btn--block xh__share" onClick={() => setSharing(true)}>Share to community...</button>
           </Field>
         </Panel>
 

@@ -158,7 +158,11 @@ export function CrosshairControls(
  * deselects the crosshair, which is what closes it.
  */
 export function CrosshairBuilderPanel(
-  { design, edit, end, onClose }: { design: HudDesign; edit: Edit; end: () => void; onClose: () => void },
+  { design, edit, end, onClose, onShare }: {
+    design: HudDesign; edit: Edit; end: () => void; onClose: () => void;
+    /** Open the Share to community dialog for this crosshair. */
+    onShare?: () => void;
+  },
 ) {
   const [error, setError] = useState('');
   const art = artOf(design);
@@ -183,7 +187,12 @@ export function CrosshairBuilderPanel(
     <section class="hud__xhairbelow" aria-labelledby="hud-xhairbelow-title">
       <div class="hud__xhairhead">
         <h3 id="hud-xhairbelow-title">Crosshair</h3>
-        <button type="button" class="btn btn--ghost btn--sm" aria-label="Close the crosshair builder" onClick={onClose}>Close</button>
+        <span class="hud__xhairacts">
+          {onShare && art && (
+            <button type="button" class="btn btn--ghost btn--sm" onClick={onShare}>Share to community...</button>
+          )}
+          <button type="button" class="btn btn--ghost btn--sm" aria-label="Close the crosshair builder" onClick={onClose}>Close</button>
+        </span>
       </div>
       <div class="hud__xhairbody">
         {art && <CrosshairZoom art={art} size={BIG} label="Your crosshair, zoomed" cls="hud__xhairpreview hud__xhairpreview--big" />}

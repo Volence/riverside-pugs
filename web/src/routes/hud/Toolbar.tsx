@@ -43,6 +43,8 @@ export interface ToolbarProps {
   locked: boolean;
   onImportFile: (f: File) => void;
   onRemoveImport: (id: string) => void;
+  /** Open the Share to community dialog. */
+  onShare: () => void;
 }
 
 export function Toolbar(p: ToolbarProps) {
@@ -154,6 +156,10 @@ export function Toolbar(p: ToolbarProps) {
       {design.preset === 'modern' && <span class="muted hud__note">Modern already uses Roboto Condensed.</span>}
       {design.preset === 'imported' && <span class="muted hud__note">An imported HUD uses its own fonts.</span>}
 
+      {/* A locked design cannot be shared: its import is missing or cannot be shown. */}
+      <button type="button" class="btn btn--ghost btn--sm hud__share" disabled={p.locked} onClick={p.onShare}>
+        Share to community...
+      </button>
       <button type="button" class="btn btn--sm hud__download" disabled={p.locked} onClick={p.onDownload}>
         {design.advanced ? 'Download .zip' : 'Download .vpk'}
       </button>
