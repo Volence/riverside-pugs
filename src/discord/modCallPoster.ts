@@ -1,3 +1,4 @@
+import { resolveAlias } from '../aliases.js';
 import type { DB } from '../db.js';
 import { getModCall, onModCall } from '../modCalls.js';
 import { playerByDiscordId } from '../players.js';
@@ -142,6 +143,10 @@ export class ModCallPoster {
     const id = Number(m[1]);
     const call = getModCall(db, id);
     if (!call) return say('No such call.');
+    // The staff member a call is about does not handle it, and gets the same
+    // answer as anyone else who may not: the card hides who called, and the
+    // reply should not say more than that.
+    if (call.target_steamid !== null && resolveAlias(db, call.target_steamid) === p.steamid) return say('Staff only.');
     // Guarded on handled_at so two mods pressing at once cannot both win.
     const won = db.prepare(
       'UPDATE mod_calls SET handled_by_discord_id = ?, handled_at = ? WHERE id = ? AND handled_at IS NULL',

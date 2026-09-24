@@ -104,4 +104,44 @@ describe('GET /api/mod/calls', () => {
     const id = (db.prepare('SELECT id FROM tickets').get() as { id: number }).id;
     expect((await get(MOD, `/api/mod/tickets/${id}`)).json().reports[0].source).toBe('game');
   });
+
+  it('never lists a call, or a folded call, about the viewer', async () => {
+    call({ target_steamid: MOD, text: 'about the mod' });
+    const parent = call({ text: 'about the accused' });
+    call({ target_steamid: MOD, text: 'folded about the mod', folded_into: parent, post_state: 'folded' });
+    call({ caller_steamid: CALLER2, text: 'folded about the accused', folded_into: parent, post_state: 'folded' });
+    for (const filter of ['open', 'all']) {
+      const { calls } = (await get(MOD, `/api/mod/calls?filter=${filter}`)).json();
+      expect(calls.map((c: { text: string }) => c.text)).toEqual(['about the accused']);
+      expect(calls[0].folded.map((c: { text: string }) => c.text)).toEqual(['folded about the accused']);
+    }
+    // Another staff member sees them all.
+    db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(PLAYER);
+    const { calls } = (await get(PLAYER, '/api/mod/calls?filter=all')).json();
+    expect(calls.map((c: { text: string }) => c.text)).toEqual(['about the accused', 'about the mod']);
+    expect(calls[0].folded).toHaveLength(2);
+  });
+
+  it('shows the ticket id only when the viewer may see that ticket', async () => {
+    const ticket = (restricted: number) => Number(db.prepare(
+      "INSERT INTO tickets (target_id, target_name, restricted, created_at) VALUES (?, 'The Accused', ?, '2026-09-24T10:00:00.000Z')",
+    ).run(ACCUSED, restricted).lastInsertRowid);
+    const open = ticket(0);
+    const locked = ticket(1);
+    call({ text: 'normal', ticket_id: open });
+    call({ text: 'restricted', ticket_id: locked });
+    const byText = async (as: string) => Object.fromEntries(
+      (await get(as, '/api/mod/calls')).json().calls.map((c: { text: string; ticketId: number | null }) => [c.text, c.ticketId]),
+    );
+    expect(await byText(MOD)).toEqual({ normal: open, restricted: null });
+    db.prepare("INSERT INTO ticket_access (ticket_id, steamid, added_by, created_at) VALUES (?, ?, 'system', 'x')").run(locked, MOD);
+    expect(await byText(MOD)).toEqual({ normal: open, restricted: locked });
+  });
+
+  it('open leaves out a call that was skipped, all keeps it', async () => {
+    call({ text: 'posted' });
+    call({ text: 'skipped', post_state: 'skipped' });
+    expect((await get(MOD, '/api/mod/calls?filter=open')).json().calls.map((c: { text: string }) => c.text)).toEqual(['posted']);
+    expect((await get(MOD, '/api/mod/calls?filter=all')).json().calls.map((c: { text: string }) => c.text)).toEqual(['skipped', 'posted']);
+  });
 });
