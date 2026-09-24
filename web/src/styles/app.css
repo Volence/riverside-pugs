@@ -2237,3 +2237,10 @@ tbody tr.is-lifted td { opacity: 0.55; }
   .chatlog__line { grid-template-columns: 3rem 1fr; }
   .chatlog__msg { grid-column: 2; }
 }
+
+/* Balance patch notes (/balance). --rating is this site's warning/accent
+ * colour: the admin balance desk already uses it for .balance-banner and
+ * .verdict--too_early, so the public banner matches it. */
+.patch-notes { white-space: pre-line; }
+.patch-banner { border-left: 3px solid var(--rating); padding-left: 0.6rem; }
+.patch-row--real td:last-child { font-weight: 600; }

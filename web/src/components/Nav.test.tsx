@@ -21,6 +21,13 @@ describe('NAV_LINKS', () => {
     }
   });
 
+  it('offers the balance patch notes page right after Matches', () => {
+    const paths = NAV_LINKS.map(([href]) => href);
+    const i = paths.indexOf('/matches');
+    expect(paths[i + 1]).toBe('/balance');
+    expect(NAV_LINKS.find(([href]) => href === '/balance')?.[1]).toBe('Patch notes');
+  });
+
   it('offers Custom alongside Campaigns, at its own path', () => {
     const paths = NAV_LINKS.map(([href]) => href);
     expect(paths).toContain('/maps');

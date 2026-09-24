@@ -1,6 +1,13 @@
 import type { PublicRow } from '../../api';
 import { fmtValue, isShareMetric } from '../admin/balance/format';
 
+/** Mirrors REAL_MIN_MATCHES in src/metrics/compare/stats.ts: the minimum
+ *  matches a side needs for a "real" change to be possible. A finished
+ *  previous patch cannot gain more matches, so a too_early row whose
+ *  previous side (nA) is already short of this reads as a flat statement
+ *  rather than a countdown that will never finish. */
+const MIN_MATCHES = 10;
+
 /** Per-spawn rates that cannot exceed one per spawn, read as shares by their public labels. */
 const PUBLIC_PERCENT = new Set(['hunter.skeet_rate', 'boomer.pop_rate']);
 const isPercent = (id: string) => isShareMetric(id) || PUBLIC_PERCENT.has(id);
@@ -26,6 +33,7 @@ export function verdictSentence(r: PublicRow): string {
     }
     case 'noise': return 'No clear change: within normal variation.';
     case 'too_early':
+      if (r.nA < MIN_MATCHES) return 'Too early to tell: the previous patch has too few matches to compare against.';
       if (r.moreMatches === null) return 'Too early to tell: more matches needed.';
       if (r.moreMatches >= 500) return 'Too early to tell: about 500+ more matches needed.';
       return `Too early to tell: about ${r.moreMatches} more match${r.moreMatches === 1 ? '' : 'es'} needed.`;
