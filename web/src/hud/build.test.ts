@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildHud, elementRect, panelWork, pcSet, HIDE_FRAMES, CODE_SHOWN, hardHide, baseHasElement, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame, panelChild, panelFrame, writeKeys, pointCell } from './build';
-import { parsePos, screenW } from './units';
+import { parsePos, parseSize, screenW, SCREEN_H } from './units';
+import { placeElement, nudge } from './edit';
 import { DEFAULT_DESIGN, validateDesign, contentBox, type HudDesign, type ElementOverride, type ChildOverride } from './design';
 import { parseKv, writeKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
 import { baseFile, registerImport, unregisterImport } from './base';
@@ -1566,6 +1567,28 @@ describe('buildHud, the weapon selection', () => {
         const d = design({ preset, weapons: { ammoX: 40 } });
         const base = kvFind(parseKv(baseFile(preset, 'scripts/hudlayout.res'))[0].value as KvNode[], ['HudWeaponSelection'])!;
         for (const k of ['xpos', 'wide', 'tall']) expect(pc(ws(d), k), `${preset} ${k}`).toEqual(pc(base, k));
+      }
+    });
+
+    it('frames and picks the grown panel, as the file has it, and a move lands where it is dropped', () => {
+      const W = screenW('16:9');
+      const rectOf = (block: KvNode) => ({
+        x: parsePos(pc(block, 'xpos')[0] as string, W), y: parsePos(pc(block, 'ypos')[0] as string, SCREEN_H),
+        w: parseSize(pc(block, 'wide')[0] as string, W), h: parseSize(pc(block, 'tall')[0] as string, SCREEN_H),
+      });
+      for (const weapons of [{ primaryBoxW: 120 }, { itemSize: 40 }]) {
+        const d = design({ weapons });
+        const r = elementRect(d, 'weaponSelection', '16:9');
+        const built = rectOf(ws(d));
+        expect({ x: r.x, y: r.y, w: r.w, h: r.h }, JSON.stringify(weapons)).toEqual(built);
+        // A press of nothing moves nothing; a drop at (300, 200) is drawn there, file and frame alike.
+        const still = elementRect(nudge(d, 'weaponSelection', 0, 0), 'weaponSelection', '16:9');
+        expect([still.x, still.y]).toEqual([r.x, r.y]);
+        const moved = placeElement(d, 'weaponSelection', 300, 200);
+        const m = elementRect(moved, 'weaponSelection', '16:9');
+        expect(Math.abs(m.x - 300), JSON.stringify(weapons)).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(m.y - 200)).toBeLessThanOrEqual(0.5);
+        expect(rectOf(ws(moved))).toEqual({ x: m.x, y: m.y, w: m.w, h: m.h });
       }
     });
 

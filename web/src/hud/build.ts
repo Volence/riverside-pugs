@@ -953,6 +953,8 @@ function fitSi(work: Work, design: HudDesign) {
  * less this.
  */
 export function elementFitShift(design: HudDesign, id: string): { x: number; y: number } {
+  // The weapons panel grows to the left by what its column needs (fitWeaponPanel).
+  if (id === 'weaponSelection') return { x: -weaponPanelGrowth(design), y: 0 };
   // The infected row's container moves by its fitted card's offset (rowLayout).
   if (id === ZCARD_PANEL.panelId) {
     const el = elementById(id)!;
@@ -2169,6 +2171,26 @@ function voicePass(work: Work, design: HudDesign, assets: BuildAssets | null, ou
 }
 
 /**
+ * HudWeaponSelection as the generated file has it once fitWeaponPanel grew
+ * it, or undefined while no weapon edit runs weaponsPass (the preset's own
+ * panel stays). buildTrees keeps a hidden element whole, so this is the
+ * panel's place and size even while it is hidden.
+ */
+function grownWeaponPanel(design: HudDesign): KvNode | undefined {
+  if (!design.weapons) return undefined;
+  return kvFind(buildTrees(design)(LAYOUT), ['HudWeaponSelection']);
+}
+
+/** How many units fitWeaponPanel grew the weapons panel to the left: 0 when it fits. */
+function weaponPanelGrowth(design: HudDesign): number {
+  const grown = grownWeaponPanel(design);
+  const base = grown && kvFind(baseTree(baseOf(design), LAYOUT), ['HudWeaponSelection']);
+  if (!grown || !base) return 0;
+  const W = screenW(design.aspect);
+  return Math.max(0, parseSize(pcGet(grown, 'wide') ?? '0', W) - Math.round(parseSize(pcGet(base, 'wide') ?? '0', W)));
+}
+
+/**
  * Grow HudWeaponSelection to the column it draws (plan decision 1, task
  * W5): the game clips numbers and icons at the panel's edges
  * (/home/volence/l4d/hud/probe-phase2-rest/r2/shots/crops/weap-ab.png), and
@@ -2441,14 +2463,18 @@ export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
   // registry's mockSize. mockSize stands in only while the file is untouched
   // and the real container is wider than anything it shows.
   const box = t?.container ?? { w: p.w * k, h: p.h * k };
-  // A container its fit rule moved and sized (your infected health) is
-  // where, and as big as, the generated file has it.
-  if (fitsContainer(design, id)) {
-    const c = kvFind(buildTrees(design)(LAYOUT), [el.key])!;
+  // A container its fit rule moved and sized (your infected health), or the
+  // weapons panel grown to its column, is where, and as big as, the
+  // generated file has it: the frame and the hit box follow the file.
+  const grown = id === 'weaponSelection' ? grownWeaponPanel(design) : undefined;
+  if (grown || fitsContainer(design, id)) {
+    const c = grown ?? kvFind(buildTrees(design)(LAYOUT), [el.key])!;
+    // fitWeaponPanel writes the PC value (pcSet), so that is the one read back.
+    const get = (k: string) => (grown ? pcGet(c, k) : kvGet(c, k)) ?? '0';
     const W = screenW(aspect);
     return {
-      x: parsePos(kvGet(c, 'xpos') ?? '0', W), y: parsePos(kvGet(c, 'ypos') ?? '0', SCREEN_H),
-      w: parseSize(kvGet(c, 'wide') ?? '0', W), h: parseSize(kvGet(c, 'tall') ?? '0', SCREEN_H), visible,
+      x: parsePos(get('xpos'), W), y: parsePos(get('ypos'), SCREEN_H),
+      w: parseSize(get('wide'), W), h: parseSize(get('tall'), SCREEN_H), visible,
     };
   }
   return { x: parsePos(xTok, screenW(aspect)), y: parsePos(yTok, SCREEN_H), w: box.w, h: box.h, visible };

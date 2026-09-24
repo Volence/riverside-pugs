@@ -224,7 +224,7 @@ describe('drawHud delegates panels to the renderer', () => {
     expect(fills).not.toContain('rgba(210,190,60,0.85)');
   });
 
-  it('clips the weapon selection to the panel the generator grew, its right edge where the element is (task W5)', () => {
+  it('clips the weapon selection to the panel the generator grew, which is the element frame (task W5)', () => {
     _setImageFactory(instant);
     const rects: number[][] = [];
     const ctx = fakeCtx(() => {});
@@ -234,8 +234,9 @@ describe('drawHud delegates panels to the renderer', () => {
     const w = elementRect(d, 'weaponSelection', d.aspect);
     const panel = kvFind(buildTrees(d)('scripts/hudlayout.res'), ['HudWeaponSelection'])!;
     const wide = parseFloat(kvGet(panel, 'wide')!), tall = parseFloat(kvGet(panel, 'tall')!);
-    expect(wide).toBeGreaterThan(w.w);
-    expect(rects).toContainEqual([w.x + w.w - wide, w.y, wide, tall]);
+    expect(wide).toBeGreaterThan(100);
+    expect([w.w, w.h]).toEqual([wide, tall]);
+    expect(rects).toContainEqual([w.x, w.y, wide, tall]);
   });
 
   describe('the kill notices', () => {
