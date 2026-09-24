@@ -156,6 +156,27 @@ describe('hudFileProblem', () => {
       '',
     ].join('\n'))));
 
+  it('refuses a comment marker inside a bare word that hides a later value', () =>
+    bad('resource/ui/hud/a.res', text('"A"\n{\n  "k" v//x "command" "engine quit"\n}\n')));
+
+  it('allows a comment marker inside a bare word when nothing after it is refused', () =>
+    ok('resource/ui/hud/a.res', text('"A"\n{\n  "image" hud//x\n}\n')));
+
+  it('refuses a quoted string that is not closed on its line', () => {
+    bad('resource/ui/hud/a.res', text('"A"\n{\n  "k" "one\n// " "command" "x"\n}\n'));
+    // Closed only when a backslash is read literally: the escaped reading runs off the line.
+    bad('resource/ui/hud/a.res', text('"A"\n{\n  "k" "C:\\"\n}\n'));
+    bad('scripts/hudanimations.txt', text('event Foo\n{\n  Animate a Alpha "255\n" Linear 0 0\n}\n'));
+  });
+
+  it('refuses a denied animation command hidden behind a mid-word comment marker', () =>
+    bad('scripts/hudanimations.txt', text('event Foo\n{\n  StopEvent X//y 0 FireCommand 0 "x"\n}\n')));
+
+  it('refuses a denied animation command inside a quoted string or a longer word', () => {
+    bad('scripts/hudanimations.txt', text('event Foo\n{\n  StopEvent "xplaysoundx" 0\n}\n'));
+    bad('scripts/hudanimations.txt', text('event Foo\n{\n  StopEvent X"a SETINPUTENABLED 0 b" 0\n}\n'));
+  });
+
   it('allows a TrueType font', () => ok('resource/a.ttf', sized(64, bytes(0, 1, 0, 0))));
   it('refuses a zip named .ttf', () => bad('resource/a.ttf', sized(64, text('PK\x03\x04'))));
   it('allows an OpenType font', () => ok('resource/a.otf', sized(64, text('OTTO'))));

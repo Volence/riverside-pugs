@@ -68,14 +68,23 @@ export function hudPathProblem(path: string): string | null {
 const MB = 1024 * 1024;
 const capText = (n: number) => (n >= MB ? `${n / MB} MB` : `${n / 1024} KB`);
 
+type Token = { value: string; quoted: boolean };
+
 /**
- * A line split into the tokens a KeyValues or animation script reader sees:
- * quoted strings (without their quotes), braces, and bare words. A `//`
- * outside quotes ends the line. With `escapes`, a backslash escapes the next
- * character inside quotes, which is how a reader that honours escapes sees it.
+ * A line split into the tokens a KeyValues reader sees: quoted strings
+ * (without their quotes), braces, and bare words. As in the game, `//` starts
+ * a comment only where a new token would start; inside a bare word it is part
+ * of the word, so `v//x "k"` is a word and then a quoted string, not a word
+ * and a comment. A bare word ends at whitespace, a quote or a brace. With
+ * `escapes`, a backslash escapes the next character inside quotes, which is
+ * how a reader that honours escapes sees it.
+ *
+ * The game reads a quoted string across line ends, and a string that runs
+ * over one would make this line-by-line reading disagree with it about what
+ * is a comment, so such a string is refused: null.
  */
-function tokenize(line: string, escapes: boolean): { value: string; quoted: boolean }[] {
-  const out: { value: string; quoted: boolean }[] = [];
+function tokenize(line: string, escapes: boolean): Token[] | null {
+  const out: Token[] = [];
   let i = 0;
   while (i < line.length) {
     const c = line[i]!;
@@ -90,21 +99,36 @@ function tokenize(line: string, escapes: boolean): { value: string; quoted: bool
         v += line[i];
         i++;
       }
+      if (i >= line.length) return null;
       i++;
       out.push({ value: v, quoted: true });
       continue;
     }
     let v = '';
-    while (i < line.length && !/[\s"{}]/.test(line[i]!) && !(line[i] === '/' && line[i + 1] === '/')) v += line[i++];
+    while (i < line.length && !/[\s"{}]/.test(line[i]!)) v += line[i++];
     out.push({ value: v, quoted: false });
   }
   return out;
 }
 
-/** Tokens per line, read both with and without escapes: a file must pass whichever way the game reads it. */
-function readings(src: string): { value: string; quoted: boolean }[][][] {
+/**
+ * Tokens per line, read both with and without escapes: a file must pass
+ * whichever way the game reads it. Null when either reading has a quoted
+ * string that does not close on its own line.
+ */
+function readings(src: string): Token[][][] | null {
   const lines = src.split(/\r\n|\r|\n/);
-  return [false, true].map((escapes) => lines.map((l) => tokenize(l, escapes)));
+  const out: Token[][][] = [];
+  for (const escapes of [false, true]) {
+    const reading: Token[][] = [];
+    for (const line of lines) {
+      const tokens = tokenize(line, escapes);
+      if (tokens === null) return null;
+      reading.push(tokens);
+    }
+    out.push(reading);
+  }
+  return out;
 }
 
 // A value starting with "engine " is the VGUI prefix that turns a button
@@ -119,21 +143,30 @@ const ANIMATION_COMMANDS = new Set([
   'setvisible', 'setfont', 'settexture', 'setstring',
 ]);
 // The controller reads a token stream, not lines, so a command can hide after
-// another on the same line. These are refused wherever they appear.
-const ANIMATION_DENIED = new Set(['firecommand', 'playsound', 'setinputenabled']);
+// another on the same line, and its tokenizer is not the KeyValues one (a
+// word runs through a quote, for one). These are refused anywhere in the
+// file, as a raw substring in any case, comments included: no stock file
+// holds any of them, so nothing real is lost.
+const ANIMATION_DENIED = ['firecommand', 'playsound', 'setinputenabled'];
 
 function textProblem(path: string, data: Uint8Array, animations: boolean): string | null {
   if (data.includes(0)) return `${path} has a NUL byte`;
   let src = '';
   for (let i = 0; i < data.length; i += 0x8000) src += String.fromCharCode(...data.subarray(i, i + 0x8000));
-  for (const reading of readings(src)) {
+  if (animations) {
+    const lower = src.toLowerCase();
+    for (const w of ANIMATION_DENIED) {
+      const at = lower.indexOf(w);
+      if (at >= 0) return `${path} uses ${src.slice(at, at + w.length)}, which a HUD may not`;
+    }
+  }
+  const all = readings(src);
+  if (all === null) return `${path} has a quoted string that does not close on its line`;
+  for (const reading of all) {
     for (const tokens of reading) {
       for (const t of tokens) {
         if (t.quoted ? ENGINE_QUOTED.test(t.value) : t.value.toLowerCase() === 'engine') {
           return `${path} runs a console command`;
-        }
-        if (animations && ANIMATION_DENIED.has(t.value.toLowerCase())) {
-          return `${path} uses ${t.value}, which a HUD may not`;
         }
       }
       if (!animations) continue;
