@@ -10,6 +10,8 @@
  * against the real base files.
  */
 
+import type { KeyDef } from './children';
+
 /**
  * Only 'visible' is live in v1. 'color', 'bg' and 'fontSize' are the reserved
  * ElementOverride fields design.ts validates: every entry below lists
@@ -34,6 +36,8 @@ export interface HudElement {
   /** Elements the game places itself (move: false): where the preview draws them, as position tokens. */
   mockPos?: { x: string; y: string };
   props: Prop[];
+  /** Keys of the element's own hudlayout.res block the game reads (slice 2.3 fills them). */
+  keys?: KeyDef[];
 }
 
 /**

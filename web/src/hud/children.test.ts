@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { TEAM_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, FIT_SQUARED } from './children';
+import { TEAM_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, FIT_SQUARED, childDef, panelOfFile } from './children';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
+import { SPLATTERS } from './splatter';
 
 const card = (preset: 'stock' | 'modern') => parseKv(baseFile(preset, TEAM_PANEL.file))[0].value as KvNode[];
 const scheme = (preset: 'stock' | 'modern') => parseKv(baseFile(preset, 'resource/clientscheme.res'))[0].value as KvNode[];
@@ -91,5 +92,39 @@ describe('the teammate card registry', () => {
     expect(splatter.note).toMatch(/under Splatter/);
     // Nothing else claims opacityOnly: it means nothing without colour, and no other art is flat.
     for (const def of TEAM_PANEL.children) if (def.name !== 'BackgroundImage') expect(def.opacityOnly, def.name).toBeFalsy();
+  });
+});
+
+describe('the per-panel registry', () => {
+  it('repeats the teammate card per teammate and gives it no frame block of its own', () => {
+    expect(TEAM_PANEL.repeat).toBe('cards');
+    expect(TEAM_PANEL.frame).toBeUndefined();
+  });
+
+  it('says in data what the preview used to hard-code for each teammate state', () => {
+    const by = (n: string) => TEAM_PANEL.children.find((c) => c.name === n)!;
+    expect([by('Incapacitated').stateArt, by('Dead').stateArt, by('Voice').stateArt]).toEqual(['down', 'dead', 'talking']);
+    expect(by('Head').hideIn).toEqual(['down', 'dead']);
+    for (const n of ['Health', 'HealthNumber', 'Items']) expect(by(n).hideIn, n).toEqual(['dead']);
+  });
+
+  it('finds a child by panel and name, whatever the case, and a panel by its file', () => {
+    expect(childDef('teamColumn', 'healthnumber')?.name).toBe('HealthNumber');
+    expect(childDef('teamColumn', 'Nope')).toBeUndefined();
+    expect(childDef('nope', 'Head')).toBeUndefined();
+    expect(panelOfFile('resource/ui/hud/teammatepanel.res')?.panelId).toBe('teamColumn');
+  });
+
+  it('marks exactly the pieces the splatter work restyles, and each is a splatter entry', () => {
+    const marked = PANEL_CHILDREN.flatMap((p) => p.children.filter((c) => c.art === 'splatter').map((c) => `${p.file}#${c.name}`));
+    for (const m of marked) expect(SPLATTERS.map((s) => `${s.file}#${s.block}`), m).toContain(m);
+  });
+
+  it('keeps stateArt and fitPlace on pieces that are not content, and gates only real controls', () => {
+    for (const p of PANEL_CHILDREN) for (const c of p.children) {
+      if (c.stateArt) expect(c.role, c.name).toBe('state');
+      if (c.fitPlace) expect(c.role, c.name).not.toBe('content');
+      if (c.colourGate) expect(c.colour, c.name).toBe(true);
+    }
   });
 });

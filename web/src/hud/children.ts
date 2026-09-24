@@ -9,9 +9,31 @@
  * typo here lands in a player's game.
  *
  * Data only: design.ts validates against it, build.ts writes with it, the
- * renderer and the page read it. It imports nothing but a type.
+ * renderer and the page read it. It imports nothing but types.
  */
 import type { KvNode } from './kv';
+import type { ProbeId } from './probes';
+
+/** The survivor states the preview can show a panel in. */
+export type SurvivorState = 'healthy' | 'hurt' | 'down' | 'dead';
+
+/** When game code shows a state piece: in a survivor state, or on a condition of its own. */
+export type StateArt = 'down' | 'dead' | 'crouched' | 'talking' | 'ghost';
+
+/**
+ * A file key a control writes on a child (or on an element's own
+ * hudlayout.res block). Every key is checked against the strings client.dll
+ * really has (dllstrings.test.ts), because a registered key can still be one
+ * the game never reads: the weapons work learned that the hard way.
+ */
+export interface KeyDef {
+  key: string; label: string; type: 'colour' | 'int' | 'bool';
+  range?: [number, number];
+  /** Where the key is proven read: a dll string run or a stock file line. */
+  evidence: string;
+  /** The control waits for this probe to pass (probes.ts). */
+  gate?: ProbeId;
+}
 
 export type ChildKind = 'image' | 'label' | 'bar' | 'other';
 
@@ -52,9 +74,49 @@ export interface ChildDef {
   addable?: { template: KvNode; after: string };
   /** Shown under the child's controls. */
   note?: string;
+  /** File keys this child's controls write, beyond the fixed ones above. */
+  keys?: KeyDef[];
+  /**
+   * The splatter work restyles this piece's art (splatter.ts owns its image
+   * and texture); everything else here only moves, sizes and hides it.
+   */
+  art?: 'splatter';
+  /**
+   * Shown only in that state. With hideIn, this replaces render.ts's
+   * TEAM_HIDDEN and STATE_CHILDREN name lists for registered panels, so what
+   * each state shows is said once, in data.
+   */
+  stateArt?: StateArt;
+  /** Hidden in those survivor states (a down teammate's portrait gives way to the down art). */
+  hideIn?: SurvivorState[];
+  /**
+   * State and decor pieces only. 'rule' (the default): the panel's fit rule
+   * re-places the piece. 'keep': it keeps its place and counts toward the
+   * fitted box, so turning fit on alone changes nothing on screen (the own
+   * panel's scratches and crouch icon; plan decision 1).
+   */
+  fitPlace?: 'rule' | 'keep';
+  /** The colour control waits for this probe, because code may repaint the piece. */
+  colourGate?: ProbeId;
 }
 
-export interface PanelChildren { panelId: string; file: string; children: ChildDef[] }
+export interface PanelChildren {
+  panelId: string; file: string; children: ChildDef[];
+  /** 'cards': one file loaded per teammate, so an edit edits every card. 'single': one panel. */
+  repeat: 'cards' | 'single';
+  /**
+   * The block that frames the children: one in the panel's own file, or the
+   * element's hudlayout.res block. The teammate card has none of its own
+   * (teamPass places each card inside CHudTeamDisplay).
+   */
+  frame?: { file: string; block: string } | 'hudlayout';
+  /**
+   * Other files that must follow this one's edits: 'same' copies an edit,
+   * 'delta' applies the same move. Typed here, first written in slice 2.2
+   * for the special infected health files.
+   */
+  linked?: { file: string; rule: 'same' | 'delta' }[];
+}
 
 const block = (key: string, pairs: [string, string][]): KvNode => ({ key, value: pairs.map(([k, v]) => ({ key: k, value: v })) });
 
@@ -74,27 +136,42 @@ const STATE_NOTE = 'The game decides when this one shows. Pick Down or Dead abov
 export const TEAM_PANEL: PanelChildren = {
   panelId: 'teamColumn',
   file: 'resource/ui/hud/teammatepanel.res',
+  repeat: 'cards',
   children: [
-    { name: 'Head', label: 'Portrait', kind: 'image', role: 'content', box: 'square', move: true, font: false, colour: false },
-    { name: 'Health', label: 'Health bar', kind: 'bar', role: 'content', box: 'wh', move: true, font: false, colour: false },
+    { name: 'Head', label: 'Portrait', kind: 'image', role: 'content', box: 'square', move: true, font: false, colour: false,
+      hideIn: ['down', 'dead'] },
+    { name: 'Health', label: 'Health bar', kind: 'bar', role: 'content', box: 'wh', move: true, font: false, colour: false,
+      hideIn: ['dead'] },
     { name: 'Name', label: 'Name', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true },
     { name: 'HealthNumber', label: 'Health number', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: false,
-      addable: { template: HEALTH_NUMBER, after: 'Name' }, note: 'The game colours this by health.' },
+      addable: { template: HEALTH_NUMBER, after: 'Name' }, note: 'The game colours this by health.', hideIn: ['dead'] },
     { name: 'Items', label: 'Item icons', kind: 'label', role: 'content', box: 'none', move: true, font: true, colour: false,
-      note: "The preview draws the game's own item icons, a full loadout; in game the row shows only what that teammate carries." },
+      note: "The preview draws the game's own item icons, a full loadout; in game the row shows only what that teammate carries.", hideIn: ['dead'] },
     { name: 'Status', label: 'Status text', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true },
     { name: 'BackgroundImage', label: 'Damage splatter', kind: 'image', role: 'decor', box: 'wh', move: true, font: false, colour: true,
-      opacityOnly: true,
+      opacityOnly: true, art: 'splatter',
       note: 'Opacity fades whatever art the splatter shows. Change the art itself under Splatter, below the canvas: stock, none, a fade or your own picture.' },
-    { name: 'Incapacitated', label: 'Down picture', kind: 'image', role: 'state', box: 'square', move: true, font: false, colour: false, note: STATE_NOTE },
-    { name: 'Dead', label: 'Dead picture', kind: 'image', role: 'state', box: 'square', move: true, font: false, colour: false, note: STATE_NOTE },
-    { name: 'Voice', label: 'Voice icon', kind: 'other', role: 'state', box: 'square', move: true, font: false, colour: false, note: STATE_NOTE },
+    { name: 'Incapacitated', label: 'Down picture', kind: 'image', role: 'state', box: 'square', move: true, font: false, colour: false, note: STATE_NOTE,
+      stateArt: 'down' },
+    { name: 'Dead', label: 'Dead picture', kind: 'image', role: 'state', box: 'square', move: true, font: false, colour: false, note: STATE_NOTE,
+      stateArt: 'dead' },
+    { name: 'Voice', label: 'Voice icon', kind: 'other', role: 'state', box: 'square', move: true, font: false, colour: false, note: STATE_NOTE,
+      stateArt: 'talking' },
   ],
 };
 
 export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL];
 export const panelChildren = (panelId: string): PanelChildren | undefined => PANEL_CHILDREN.find((p) => p.panelId === panelId);
 export const teamChild = (name: string): ChildDef | undefined => TEAM_PANEL.children.find((c) => c.name === name);
+
+/** A panel's child by block name, whatever the case (KeyValues names are case-insensitive). */
+export const childDef = (panelId: string, name: string): ChildDef | undefined => {
+  const n = name.toLowerCase();
+  return panelChildren(panelId)?.children.find((c) => c.name.toLowerCase() === n);
+};
+
+/** The registered panel whose children live in this file. */
+export const panelOfFile = (file: string): PanelChildren | undefined => PANEL_CHILDREN.find((p) => p.file === file);
 
 /** The children whose union is the fitted card. */
 export const CONTENT_CHILDREN: string[] = TEAM_PANEL.children.filter((c) => c.role === 'content').map((c) => c.name);
