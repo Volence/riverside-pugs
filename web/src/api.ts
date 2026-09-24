@@ -1067,6 +1067,8 @@ export interface TicketReport {
   matchId: number | null; campaign: string | null; moment: { ordinal: number; half: number; tMs: number } | null; createdAt: string;
   /** The shared community entry the report is about. Optional only for a browser holding new JS against an older server. */
   entry?: { id: number; kind: CommunityKind; title: string; removed: boolean } | null;
+  /** 'game' when an in-game /mod call filed it. Optional for an older server. */
+  source?: string | null;
 }
 export interface TicketEvent {
   id: number; actorId: string | null; actorName: string | null; kind: string; detail: Record<string, unknown>; createdAt: string;
@@ -1306,7 +1308,20 @@ export interface StaffChatLine {
 export const ticketAttachmentUrl = (ticketId: number, attachmentId: number): string =>
   `/api/mod/tickets/${ticketId}/attachments/${attachmentId}`;
 
+/** One in-game /mod call on the In-game calls desk. Mirrors src/routes/modCalls.ts. */
+export interface ModCallView {
+  id: number; createdAt: string; serverName: string | null; map: string | null; matchId: number | null;
+  moment: { ordinal: number; half: number; tMs: number } | null;
+  reason: string; reasonLabel: string; via: 'game' | 'tv';
+  caller: { steamid: string; name: string };
+  target: { kind: 'player' | 'team' | 'general' | 'none'; steamid: string | null; name: string | null };
+  text: string; ticketId: number | null; note: string; postState: string; pinged: boolean;
+  handledBy: string | null; handledAt: string | null; folded: ModCallView[];
+}
+
 export const modApi = {
+  calls: (filter: 'open' | 'all', signal?: AbortSignal) =>
+    get<{ calls: ModCallView[]; discordReady: boolean }>(`/api/mod/calls?filter=${filter}`, signal),
   tickets: (filter: 'open' | 'mine' | 'closed', signal?: AbortSignal) =>
     get<{ tickets: TicketSummary[]; counts: TicketCounts }>(`/api/mod/tickets?filter=${filter}`, signal),
   ticket: (id: number, signal?: AbortSignal) => get<TicketDetail>(`/api/mod/tickets/${id}`, signal),

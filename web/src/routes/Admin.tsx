@@ -6,6 +6,7 @@ import type { Session } from '../hooks/useLiveState';
 import { BALANCE_TABS, DESKS, PEOPLE_TABS, SETUP_TABS, legacyRedirect, parseAdminPath, ticketUrl } from './admin/adminRoutes';
 import { AdminLive } from './admin/AdminLive';
 import { AdminTickets } from './admin/AdminTickets';
+import { AdminCalls } from './admin/AdminCalls';
 import { AdminTicket } from './admin/AdminTicket';
 import { AdminSettings } from './admin/AdminSettings';
 import { AdminAudit } from './admin/AdminAudit';
@@ -111,6 +112,7 @@ export function Admin({ session }: { session: Session }) {
         {r.desk === 'people' && r.section === 'review' && <NeedsALook isAdmin={isAdmin} />}
         {r.desk === 'people' && r.section === 'bans' && <PeopleBans />}
         {r.desk === 'people' && r.section === 'tickets' && <AdminTickets onOpen={(id) => route(ticketUrl(id))} />}
+        {r.desk === 'people' && r.section === 'calls' && <AdminCalls />}
         {r.desk === 'people' && r.section === 'ticket' && (
           <AdminTicket
             key={r.param}

@@ -100,6 +100,7 @@ import { pruneReplays } from './replayPrune.js';
 import { pruneLiveFilesSafely } from './replayPush.js';
 import { apiRoutes } from './routes/api.js';
 import { ticketRoutes } from './routes/tickets.js';
+import { modCallRoutes } from './routes/modCalls.js';
 import { statsRoutes } from './routes/stats.js';
 import { replayRoutes } from './routes/replays.js';
 import { devRoutes } from './routes/dev.js';
@@ -1479,6 +1480,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     moderation: () => deps.discordModeration ?? bot?.transport.moderation ?? null,
     chats: () => deps.reporterChats ?? reporterChats,
   });
+  await app.register(modCallRoutes, { db: deps.db });
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,
     dlc4Probe: deps.dlc4Probe, adminSync, adminSteamIds: deps.config.adminSteamIds, logAuth,

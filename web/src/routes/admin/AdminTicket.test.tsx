@@ -263,6 +263,20 @@ describe('AdminTicket', () => {
     expect(screen.getByText(/It has no Discord thread, so keep the discussion on this page/)).toBeTruthy();
   });
 
+  it('labels a report filed by an in-game /mod call, and only that one', async () => {
+    const report = { reporterDiscordId: null, category: 'cheating', text: '', matchId: null, campaign: null, moment: null, createdAt: '2026-09-21T18:56:13.000Z' };
+    mockMod.ticket.mockResolvedValue(detail({
+      reports: [
+        { ...report, id: 9, reporterId: '76561198000000020', reporterName: 'Gamer', source: 'game' },
+        { ...report, id: 10, reporterId: '76561198000000021', reporterName: 'Webber', source: null },
+      ],
+    }));
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    await screen.findByText('Gamer');
+    expect(screen.getAllByText(/from in game/)).toHaveLength(1);
+    expect(screen.getByText('Gamer').closest('p')!.textContent).toContain('from in game');
+  });
+
   it('lists reporter chats with Join, End and Remove everything', async () => {
     mockMod.ticket.mockResolvedValue(detail({
       reports: [{ id: 9, reporterId: '76561198000000020', reporterDiscordId: null, reporterName: 'Tattler', category: 'cheating', text: '', matchId: null, campaign: null, moment: null, createdAt: '2026-09-21T18:56:13.000Z' }],
