@@ -90,10 +90,29 @@ describe('handleModCall', () => {
 
   it('folds targetless calls together but not across servers or after the window', () => {
     const first = call({ target: 'team', reason: 'toxicity' });
-    expect(call({ target: 'general', steamid: IDS[1] }, 1000).folded_into).toBe(first.id);
+    expect(call({ target: 'general', reason: 'toxicity', steamid: IDS[1] }, 1000).folded_into).toBe(first.id);
     const other = Number(db.prepare("INSERT INTO servers (name, host, port, rcon_port, rcon_password) VALUES ('Chicago', '5.6.7.8', 27015, 27015, 'x')").run().lastInsertRowid);
-    expect(call({ target: 'team', steamid: IDS[2] }, 2000, other).folded_into).toBeNull();
-    expect(call({ target: 'team', steamid: IDS[3] }, FOLD_WINDOW_MS + 5000).folded_into).toBeNull();
+    expect(call({ target: 'team', reason: 'toxicity', steamid: IDS[2] }, 2000, other).folded_into).toBeNull();
+    expect(call({ target: 'team', reason: 'toxicity', steamid: IDS[3] }, FOLD_WINDOW_MS + 5000).folded_into).toBeNull();
+  });
+
+  it('does not fold a targetless call into an earlier targetless call with a different reason', () => {
+    call({ target: 'general', reason: 'english' });
+    expect(call({ target: 'none', reason: 'broke', steamid: IDS[1] }, 1000).folded_into).toBeNull();
+  });
+
+  it('folds two targetless calls with the same reason', () => {
+    const first = call({ target: 'none', reason: 'broke' });
+    const second = call({ target: 'none', reason: 'broke', steamid: IDS[1] }, 1000);
+    expect(second.folded_into).toBe(first.id);
+    expect(second.post_state).toBe('folded');
+  });
+
+  it('folds a call about a named player into an earlier call about that player even with a different reason', () => {
+    const first = call({ reason: 'cheating' });
+    const second = call({ reason: 'griefing', steamid: IDS[1] }, 1000);
+    expect(second.folded_into).toBe(first.id);
+    expect(second.post_state).toBe('folded');
   });
 
   it('does not fold into a handled call', () => {
