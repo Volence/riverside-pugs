@@ -33,7 +33,7 @@ import {
   moveElements, moveCards, cardStarts, freeInPlace, moveChildren, startsOf, nudgeSelection,
   resizeBox, resizeElement, scaleElement, resizeChild, scaleChildren, cornerFactor, anchorOf,
   setSelectionVisible, patchChild, hideSelection, resetSelection,
-  patchSplatter, withSplatterImage, resetSplatter,
+  patchSplatter, withSplatterImage, resetSplatter, splatterKind,
 } from '../hud/edit';
 import { snapMove, snapEdges, unionBox, type Guide, type Snap, type Handle } from '../hud/guides';
 import {
@@ -452,6 +452,26 @@ export default function Hud() {
     });
   }
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
+  // A splatter's upload error is about the picture that failed; once the
+  // row's entry changes (Reset, a new kind, an Undo or a successful upload)
+  // it no longer applies, so it goes. A failed upload changes no design, so
+  // it does not clear its own error.
+  const splatSeen = useRef<Record<string, unknown[]>>({});
+  useEffect(() => {
+    const gone: string[] = [];
+    for (const def of SPLATTERS) {
+      const now = [splatterKind(design, def.id), design.splatters?.[def.id], design.images[def.id]];
+      const was = splatSeen.current[def.id];
+      if (was && now.some((v, i) => v !== was[i])) gone.push(def.id);
+      splatSeen.current[def.id] = now;
+    }
+    if (gone.length) {
+      setUploadErrors((u) => {
+        if (!gone.some((id) => id in u)) return u;
+        const n = { ...u }; for (const id of gone) delete n[id]; return n;
+      });
+    }
+  }, [design]);
   // What the pointer is over while nothing is pressed, and whether Ctrl is
   // held: the hover outline shows exactly what a click would pick.
   const [hover, setHover] = useState<{ hit: Hit; ctrl: boolean } | null>(null);

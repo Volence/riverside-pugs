@@ -1939,6 +1939,53 @@ describe('Splatter', () => {
     )).toBeTruthy());
   });
 
+  it('says an Image with no picture shows stock, with no tint strip or Colour by health', () => {
+    render(<Hud />);
+    fireEvent.change(kindOf(TOP), { target: { value: 'image' } });
+    expect(row(TOP).getByText('No picture yet (share links do not carry pictures), showing stock.')).toBeTruthy();
+    expect(row(TOP).queryByLabelText('Colour by health')).toBeNull();
+    expect(row(TOP).queryByRole('img', { name: 'Healthy' })).toBeNull();
+  });
+
+  it('tells a scratch row that light art works best, as the game multiplies it by the health colour', () => {
+    render(<Hud />);
+    fireEvent.change(kindOf(TOP), { target: { value: 'image' } });
+    expect(row(TOP).getByText(/Light or white art works best/)).toBeTruthy();
+    fireEvent.change(kindOf(TEAM), { target: { value: 'image' } });
+    expect(row(TEAM).queryByText(/Light or white art works best/)).toBeNull();
+  });
+
+  it('clears an upload error on Reset, on a change of kind and on Undo', async () => {
+    render(<Hud />);
+    const MSG = 'That image is over 4 MB.';
+    const big = () => new File([new Uint8Array(4_000_001)], 'big.png', { type: 'image/png' });
+    const fail = async () => {
+      fireEvent.change(kindOf(TOP), { target: { value: 'image' } });
+      fireEvent.change(row(TOP).getByLabelText(`${TOP} image`), { target: { files: [big()] } });
+      await waitFor(() => expect(row(TOP).getByText(MSG)).toBeTruthy());
+    };
+    await fail();
+    fireEvent.click(row(TOP).getByRole('button', { name: 'Reset to stock' }));
+    await waitFor(() => expect(row(TOP).queryByText(MSG)).toBeNull());
+    await fail();
+    fireEvent.change(kindOf(TOP), { target: { value: 'fade' } });
+    await waitFor(() => expect(row(TOP).queryByText(MSG)).toBeNull());
+    await fail();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(row(TOP).queryByText(MSG)).toBeNull());
+  });
+
+  it('keeps Reset usable on a row a preset switch disabled, so a stale entry can be cleared', async () => {
+    render(<Hud />);
+    fireEvent.change(kindOf(TOP), { target: { value: 'fade' } });
+    fireEvent.change(screen.getByRole('combobox', { name: /preset/i }), { target: { value: 'modern' } });
+    await waitFor(() => expect(kindOf(TOP).disabled).toBe(true));
+    const reset = row(TOP).getByRole('button', { name: 'Reset to stock' }) as HTMLButtonElement;
+    expect(reset.disabled).toBe(false);
+    fireEvent.click(reset);
+    await waitFor(() => expect(stored().splatters?.splatTop).toBeUndefined());
+  });
+
   it('Undo after choosing Fade brings the row back to Stock', () => {
     render(<Hud />);
     fireEvent.change(kindOf(BOTTOM), { target: { value: 'fade' } });

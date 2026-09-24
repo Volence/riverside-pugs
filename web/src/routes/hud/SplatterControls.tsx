@@ -66,10 +66,11 @@ export function TintStrip({ design, def }: { design: HudDesign; def: SplatterDef
 }
 
 /**
- * One splatter. `problem` (splatterProblem) disables every control and says
- * why: the base has no such block, or its preset hides the scratches.
- * Reset is off while there is nothing to reset: no stored style, and for the
- * teammate splatter no hide.
+ * One splatter. `problem` (splatterProblem) disables every control but Reset
+ * and says why: the base has no such block, or its preset hides the
+ * scratches. Reset stays on there, so an entry a preset switch left behind
+ * can still be cleared; it is off only while there is nothing to reset: no
+ * stored style, and for the teammate splatter no hide.
  */
 export function SplatterRow(
   { def, design, imported, problem, error, onChange, onEnd, onUpload, onReset }: {
@@ -84,7 +85,10 @@ export function SplatterRow(
   const style = design.splatters?.[def.id];
   const color = style?.color ?? def.defaultColor;
   const off = problem !== null;
-  const custom = kind === 'fade' || kind === 'image';
+  // An Image with no picture stored (a share link carries none) draws stock,
+  // so there is nothing to tint yet.
+  const noPicture = kind === 'image' && design.images[def.id] === undefined;
+  const custom = kind === 'fade' || (kind === 'image' && !noPicture);
 
   return (
     <div class="hud__stylerow" role="group" aria-label={def.label}>
@@ -128,12 +132,18 @@ export function SplatterRow(
       )}
       <button
         type="button" class="btn btn--ghost btn--sm" onClick={onReset}
-        disabled={off || (style === undefined && kind !== 'none')}
+        disabled={style === undefined && kind !== 'none'}
       >
         Reset to stock
       </button>
       {kind === 'image' && (
-        <p class="muted hud__splatfull">Stretched to {def.aspect}, {def.size.w} x {def.size.h} is ideal.</p>
+        <p class="muted hud__splatfull">
+          Stretched to {def.aspect}, {def.size.w} x {def.size.h} is ideal.
+          {def.healthTint && ' Light or white art works best: the game multiplies it by the health colour, unless you untick Colour by health.'}
+        </p>
+      )}
+      {noPicture && (
+        <p class="muted hud__splatfull">No picture yet (share links do not carry pictures), showing stock.</p>
       )}
       {def.healthTint && custom && (
         <div class="hud__splatfull">
