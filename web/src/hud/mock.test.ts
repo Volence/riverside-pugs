@@ -522,7 +522,7 @@ describe('drawHud delegates panels to the renderer', () => {
 
   it('draws siHealth and infectedRow from their generated files on the infected side', () => {
     _setImageFactory(instant);
-    const green = artUrl('vgui/healthbar_green')!;
+    const green = artUrl('vgui/healthbar_white')!;                 // every HealthPanel's fill (slice 2.F X9)
     const draw = (design: HudDesign) => {
       const texts: string[] = [];
       const srcs: string[] = [];

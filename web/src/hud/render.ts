@@ -832,50 +832,59 @@ function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: st
 }
 
 /**
- * The health bar. The fill is 1 at Healthy and Down and 0.4 at Hurt, from
- * the left, in the stock bar art: green, orange when hurt, red when down.
- * The empty part of a hurt bar is drawn too, in healthbar_grey: probe
- * S-hurt (b1v3 own-hurt) showed it a dark shaded grey, which overturns the
- * plumbing plan's decision 12 ("nothing drawn in the rest").
+ * The health bar, drawn as client.dll's HealthPanel draws it in every state
+ * (slice 2.F Task X9, decision 4). Its string run in client.dll names
+ * exactly three textures: vgui/hud/s_healthbar_outline, vgui/healthbar_grey
+ * and vgui/healthbar_white (probe-phase2 dll-hud-strings.txt, the lines
+ * after HealthPanel). So:
  *
- * Two file keys on the block change it, each only while its probe gate is
- * open (the build writes them either way when a design carries them):
- * monochrome_color (Q1, B1 shots a and c) tints the shaded healthbar_white
- * texture in that colour, as the game tints rather than paints flat; inset
- * (Q3, B1 shot a) draws s_healthbar_outline at the rect and the fill inset
- * by that many units on every side. Slice 2.F Task X9 redraws the bar
- * entirely the game's way (outline and default inset always).
+ * - the outline, s_healthbar_outline, stretched to the rect and tinted by the
+ *   health colour;
+ * - the fill, healthbar_white (255 at the top to 183 at the bottom, the
+ *   game's shading), tinted by the health colour, inset by the inset on
+ *   every side and running from the left for the health fraction (1 at
+ *   Healthy and Down, 0.4 at Hurt);
+ * - the empty rest, healthbar_grey, untinted, inset the same.
+ *
+ * Shots: /home/volence/l4d/hud/probe-phase2/b13/compare/stock-own.png and
+ * stock-card1.png (full health: the frame, the fill 4 px in at 1080p, which
+ * is the stock inset of 2 units); b1v3/shots/crops/own-hurt.png (S-hurt: an
+ * orange outline and fill, the rest a dark shaded grey, which overturns the
+ * plumbing plan's decision 12); b1v2 (inset 3: 6 px). Sampled at x 1800 in
+ * b13/b13-stock/survivor-full/full-1.png the fill runs 3,177,46 to 1,125,30,
+ * and healthbar_white times 10,177,50 gives 10,177,50 to 7,127,36; hurt,
+ * 216,146,4 to 155,102,2 against 216,146,12 to 153,104,9.
+ *
+ * The old claim that the game "never reads the healthbar_* textures (probe
+ * T8)" was about an addon overriding pak01's textures, which cannot work
+ * anyway (the splatter spec, "What the game does"), not about what code draws.
+ *
+ * Two file keys change it, each only while its probe gate is open (the build
+ * writes them either way when a design carries them): inset (Q3) sets the
+ * inset in units, and monochrome_color (Q1) tints the fill in its colour.
  */
 function drawBar(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
   const s = previewOf(opts.state).survivor;
   const frac = s === 'hurt' ? HURT_HEALTH / 100 : 1;
+  const [hr, hg, hb] = sampleHealthRgb(opts);
+  const outline = artImage('vgui/hud/s_healthbar_outline', opts.onAsset);
+  if (outline) ctx.drawImage(tinted(outline, 'vgui/hud/s_healthbar_outline', hr, hg, hb), r.x, r.y, r.w, r.h);
   const insetRaw = probe('Q3') ? kvGet(n, 'inset') : undefined;
-  let box: { x: number; y: number; w: number; h: number } = r;
-  if (insetRaw !== undefined) {
-    const outline = artImage('vgui/hud/s_healthbar_outline', opts.onAsset);
-    if (outline) ctx.drawImage(outline, r.x, r.y, r.w, r.h);
-    const m = num(insetRaw) * k;
-    box = { x: r.x + m, y: r.y + m, w: Math.max(0, r.w - 2 * m), h: Math.max(0, r.h - 2 * m) };
-  }
+  const m = (insetRaw !== undefined ? num(insetRaw, STOCK_BAR_INSET) : STOCK_BAR_INSET) * k;
+  const box = { x: r.x + m, y: r.y + m, w: Math.max(0, r.w - 2 * m), h: Math.max(0, r.h - 2 * m) };
   const fillW = box.w * frac;
   const mono = probe('Q1') ? kvGet(n, 'monochrome_color') : undefined;
-  if (mono !== undefined) {
-    const white = artImage('vgui/healthbar_white', opts.onAsset);
-    if (white) {
-      const [cr, cg, cb] = parseColour(mono);
-      ctx.drawImage(tinted(white, 'vgui/healthbar_white', cr, cg, cb), box.x, box.y, fillW, box.h);
-    }
-  } else {
-    const art = s === 'down' ? 'vgui/healthbar_red' : s === 'hurt' ? 'vgui/healthbar_orange' : 'vgui/healthbar_green';
-    const img = artImage(art, opts.onAsset);
-    if (img) ctx.drawImage(img, box.x, box.y, fillW, box.h);
-    else { ctx.fillStyle = `rgba(${sampleHealthRgb(opts).join(',')},0.9)`; ctx.fillRect(box.x, box.y, fillW, box.h); }
-  }
+  const [cr, cg, cb] = mono !== undefined ? parseColour(mono) : [hr, hg, hb];
+  const white = artImage('vgui/healthbar_white', opts.onAsset);
+  if (white && fillW > 0) ctx.drawImage(tinted(white, 'vgui/healthbar_white', cr, cg, cb), box.x, box.y, fillW, box.h);
   if (frac < 1) {
     const grey = artImage('vgui/healthbar_grey', opts.onAsset);
     if (grey) ctx.drawImage(grey, box.x + fillW, box.y, box.w - fillW, box.h);
   }
 }
+
+/** HealthPanel's inset when the file gives none: 2 units, 4 px at 1080p (b13/compare/stock-own.png, b1 Q3). */
+const STOCK_BAR_INSET = 2;
 
 export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: string, origin: PanelBox, k: number, opts: DrawOpts = {}): void {
   const view = previewOf(opts.state);

@@ -322,7 +322,8 @@ describe('drawPanel', () => {
   // The missing-art path (hatch and one warning) lives in render.missing.test.ts, which mocks ./art.
 
   it('draws the stock bar art whatever the styles say, since the game draws bar fills in code (probe T8)', () => {
-    const green = artUrl('vgui/healthbar_green')!;
+    // The fill is healthbar_white tinted by code (slice 2.F Task X9); no style can replace it.
+    const green = artUrl('vgui/healthbar_white')!;
     // barGreen is a slot the editor no longer has; a raw design that still carries it changes nothing.
     const styles = { barGreen: { kind: 'flat' as const, color: '255 0 0 255' } };
     const { ctx, calls } = recCtx();
@@ -373,7 +374,8 @@ describe('drawPanel', () => {
       const { ctx, calls } = recCtx();
       drawPanel(ctx, design({}), 'infectedRow', { x: 0, y: 0 }, 1, { card: 0 });
       const bg = childRects(design({}), 'infectedRow', { x: 0, y: 0 }, 1).find((c) => c.name === 'BackgroundImage')!;
-      expect(made).toHaveLength(1);
+      // The frame, then the card's HealthPanel outline and fill, which code tints by health (slice 2.F X9).
+      expect(made).toHaveLength(3);
       const multiply = scratch.calls.find((c) => c.m === 'fillRect' && c.op === 'multiply');
       expect(multiply?.fill).toBe('rgb(64,64,64)');
       expect(scratch.calls.some((c) => c.m === 'drawImage' && c.op === 'destination-in')).toBe(true);
@@ -382,9 +384,10 @@ describe('drawPanel', () => {
       // A child with no drawColor of its own draws its art untinted (e.g. Head, drawn via its own
       // portrait branch, never reaches this tint code at all). The own-health panel's scratch overlays
       // are the deliberate exception (see "tints the own-health scratch overlays" below): they add two
-      // more canvases here, one each for HealthbarTextureTop and HealthbarTextureBottom.
+      // more canvases here, one each for HealthbarTextureTop and HealthbarTextureBottom (the bar's green
+      // outline and fill are already in the tint cache from the infected card's bar).
       drawPanel(recCtx().ctx, design({}), 'ownHealth', { x: 0, y: 0 }, 1);
-      expect(made).toHaveLength(3);
+      expect(made).toHaveLength(5);
     } finally { _setCanvasFactory(null); }
   });
 
@@ -467,7 +470,7 @@ describe('drawPanel', () => {
     try {
       const { ctx, calls } = recCtx();
       drawPanel(ctx, design({}), 'ownHealth', { x: 0, y: 0 }, 1);
-      expect(made).toHaveLength(2);   // top and bottom scratches are different materials, each tinted once
+      expect(made).toHaveLength(4);   // top and bottom scratches, each tinted once, and the bar's outline and fill (X9)
       const multiplies = scratch.calls.filter((c) => c.m === 'fillRect' && c.op === 'multiply');
       expect(multiplies.length).toBeGreaterThanOrEqual(2);
       for (const m of multiplies) expect(m.fill).toBe('rgb(10,177,50)');
@@ -504,14 +507,14 @@ describe('the teammate card states', () => {
     expect(srcs(calls)).not.toContain(artUrl('vgui/s_panel_dead'));
   });
 
-  it("Down draws the character's incap art square at the card height, a red bar and 299 in red, and no portrait", () => {
+  it("Down draws the character's incap art square at the card height, a bar and 299 in red, and no portrait", () => {
     const { ctx, calls } = recCtx();
     drawPanel(ctx, fitted({ teamColumn: { HealthNumber: { on: true } } }), 'teamColumn', { x: 10, y: 20 }, 2, { card: 1, state: 'down' });
     // Stock fitted: a 121-unit square (the card's own width) at x 0, y -27
     // (the band centred on the card), at k = 2: 10 + 0, 20 + -27*2, 242, 242.
     expect(imageAt(calls, artUrl('vgui/s_panel_manager_incap')!)!.a.slice(1)).toEqual([10, -34, 242, 242]);
     expect(srcs(calls)).not.toContain(artUrl('vgui/s_panel_manager'));
-    expect(srcs(calls)).toContain(artUrl('vgui/healthbar_red'));
+    expect(srcs(calls)).toContain(artUrl('vgui/healthbar_white'));      // tinted the incap red (X9; happy-dom has no tint canvas)
     expect(srcs(calls)).not.toContain(artUrl('vgui/healthbar_green'));
     const number = calls.find((c) => c.m === 'fillText' && c.a[0] === '299')!;
     expect(number.fill).toBe('rgba(161,25,25,1)');                      // client.dll's incapacitated health colour
@@ -523,7 +526,7 @@ describe('the teammate card states', () => {
     const { ctx, calls } = recCtx();
     drawPanel(ctx, d, 'teamColumn', { x: 10, y: 20 }, 2, { card: 1, state: 'dead' });
     expect(imageAt(calls, artUrl('vgui/s_panel_dead')!)!.a.slice(1)).toEqual([10, -34, 242, 242]);
-    expect(srcs(calls).some((s) => /healthbar_(green|red)/.test(s))).toBe(false);
+    expect(srcs(calls).some((s) => /healthbar_(green|red|white|grey)|s_healthbar_outline/.test(s))).toBe(false);
     expect(srcs(calls)).not.toContain(artUrl('vgui/s_panel_manager'));
     expect(calls.some((c) => c.m === 'fillText' && (c.a[0] === '100' || c.a[0] === '299'))).toBe(false);
     expect(calls.find((c) => c.m === 'fillText' && c.a[0] === 'Louis')!.alpha).toBeCloseTo(0.5);
@@ -808,7 +811,8 @@ describe("an imported HUD's own textures", () => {
     const d = design({});
     const { ctx, calls } = recordingCtx();
     drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1);
-    expect(drawnFrom(calls).some((s) => s.rec)).toBe(false);
+    // A tint canvas (the bar's outline and fill, X9) is a scratch canvas too, but holds no decoded pixels.
+    expect(drawnFrom(calls).some((s) => s.rec?.pixels)).toBe(false);
   });
 });
 
@@ -866,12 +870,12 @@ describe('custom splatter', () => {
       const img = { splatTop: { w: 256, h: 64, png } };
       drawPanel(recCtx().ctx, design({ splatters: { splatTop: { kind: 'image' } }, images: img }), 'ownHealth', TEAM, 1);
       const green = scratch.calls.filter((c) => c.m === 'fillRect' && c.op === 'multiply' && c.fill === 'rgb(10,177,50)').length;
-      expect(green).toBe(2);                                      // the uploaded top and the stock bottom, both health green
+      expect(green).toBe(4);                                      // the uploaded top, the stock bottom, the bar outline and fill: all health green
       scratch.calls.length = 0;
       _resetAssetCache(); _setImageFactory(instantImage);
       drawPanel(recCtx().ctx, design({ splatters: { splatTop: { kind: 'image', keepColours: true } }, images: img }), 'ownHealth', TEAM, 1);
-      // Only HealthbarTextureBottom (stock, tinted) makes a multiply now; the kept-colour top makes none.
-      expect(scratch.calls.filter((c) => c.m === 'fillRect' && c.op === 'multiply')).toHaveLength(1);
+      // Only HealthbarTextureBottom and the bar (stock, tinted) make a multiply now; the kept-colour top makes none.
+      expect(scratch.calls.filter((c) => c.m === 'fillRect' && c.op === 'multiply')).toHaveLength(3);
     } finally { _setCanvasFactory(null); }
   });
 });
@@ -942,26 +946,116 @@ describe('your own health in every preview state', () => {
     for (const m of multiplies) expect(m.fill).toBe('rgb(216,146,12)');
   });
 
-  it('fills a hurt bar 40 percent in orange from the left, and draws the empty rest dark grey', () => {
-    // The plumbing plan's decision 12 said the rest is undrawn; probe S-hurt
-    // (b1v3 own-hurt) showed it drawn, a dark shaded grey, so the rest is healthbar_grey.
-    const d = design({});
-    const r = bar(d, 2);
-    const { ctx, calls } = recCtx();
-    drawPanel(ctx, d, 'ownHealth', O, 2, { state: hurt });
-    expect(imageAt(calls, artUrl('vgui/healthbar_orange')!).map((c) => c.a.slice(1))).toEqual([[r.x, r.y, r.w * 0.4, r.h]]);
-    expect(imageAt(calls, artUrl('vgui/healthbar_grey')!).map((c) => c.a.slice(1))).toEqual([[r.x + r.w * 0.4, r.y, r.w * 0.6, r.h]]);
-    expect(imageAt(calls, artUrl('vgui/healthbar_green')!)).toHaveLength(0);
+  /**
+   * The bar the game's way (slice 2.F Task X9). Each tinted texture is made
+   * on a scratch canvas: this records every scratch canvas, which texture it
+   * was made from and the multiply colour, so a draw of that canvas can be
+   * read back as "texture X tinted Y at rect Z".
+   */
+  function tintRig() {
+    const made = new Map<unknown, { src: string; fill: string }>();
+    _setCanvasFactory(() => {
+      const rec = recCtx();
+      const c = { width: 1, height: 1, getContext: () => rec.ctx } as unknown as HTMLCanvasElement;
+      const entry = { src: '', fill: '' };
+      made.set(c, entry);
+      const draw = rec.ctx.drawImage.bind(rec.ctx);
+      const fillRect = rec.ctx.fillRect.bind(rec.ctx);
+      (rec.ctx as unknown as { drawImage: (...a: unknown[]) => void }).drawImage = (...a: unknown[]) => {
+        if (!entry.src) entry.src = srcOf({ a });
+        (draw as (...x: unknown[]) => void)(...a);
+      };
+      (rec.ctx as unknown as { fillRect: (...a: unknown[]) => void }).fillRect = (...a: unknown[]) => {
+        if (rec.ctx.globalCompositeOperation === 'multiply') entry.fill = String(rec.ctx.fillStyle);
+        (fillRect as (...x: unknown[]) => void)(...a);
+      };
+      return c;
+    });
+    /** Every draw of `url`, tinted or not: [fill colour ('' untinted), x, y, w, h]. */
+    const draws = (calls: { m: string; a: unknown[] }[], url: string) =>
+      calls.filter((c) => c.m === 'drawImage').flatMap((c) => {
+        const t = made.get(c.a[0]);
+        if (t) return t.src === url ? [[t.fill, ...c.a.slice(1)]] : [];
+        return srcOf(c) === url ? [['', ...c.a.slice(1)]] : [];
+      });
+    return { draws };
+  }
+  const OUTLINE = artUrl('vgui/hud/s_healthbar_outline')!;
+  const WHITE = artUrl('vgui/healthbar_white')!;
+  const GREY = artUrl('vgui/healthbar_grey')!;
+  const GREEN = 'rgb(10,177,50)', ORANGE = 'rgb(216,146,12)', RED = 'rgb(161,25,25)';
+  const cardBar = (d: HudDesign, k: number) => childRects(d, 'teamColumn', O, k).find((r) => r.name === 'Health')!;
+
+  it('draws a healthy bar the game\'s way: tinted outline at the rect, tinted white fill inset 2 units, no empty part', () => {
+    // /home/volence/l4d/hud/probe-phase2/b13/compare/stock-own.png and stock-card1.png: an outline frame,
+    // the fill 4 px in at 1080p (2 units), shaded top to bottom. Sampled at x 1800 in
+    // b13/b13-stock/survivor-full/full-1.png the fill runs 3,177,46 (top) to 1,125,30 (bottom);
+    // healthbar_white (255 to 183) times healthRgb's 10,177,50 gives 10,177,50 to 7,127,36: within 7 per channel.
+    const { draws } = tintRig();
+    for (const [panel, r] of [['ownHealth', bar(design({}), 2)], ['teamColumn', cardBar(design({}), 2)]] as const) {
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, design({}), panel, O, 2, { card: panel === 'teamColumn' ? 1 : undefined });
+      expect(draws(calls, OUTLINE), panel).toEqual([[GREEN, r.x, r.y, r.w, r.h]]);
+      expect(draws(calls, WHITE), panel).toEqual([[GREEN, r.x + 4, r.y + 4, r.w - 8, r.h - 8]]);
+      expect(draws(calls, GREY), panel).toEqual([]);
+    }
   });
 
-  it('draws Healthy and Down bars as before: green full, red full', () => {
-    const d = design({});
-    const r = bar(d, 1);
-    for (const [state, art] of [['healthy', 'vgui/healthbar_green'], ['down', 'vgui/healthbar_red']] as const) {
+  it('draws a hurt bar 40 percent orange from the left and the empty rest in untinted healthbar_grey (probe S-hurt)', () => {
+    // Deliberately rewritten from plumbing Task 15's "Hurt bar" test (X9).
+    // /home/volence/l4d/hud/probe-phase2/b1v3/shots/crops/own-hurt.png: an orange outline, the orange shaded
+    // fill (game 216,146,4 top to 155,102,2 bottom; predicted 216,146,12 to 153,104,9) and the rest a dark
+    // shaded grey (44 to 38), the plain healthbar_grey (49 to 33).
+    const { draws } = tintRig();
+    for (const [panel, r] of [['ownHealth', bar(design({}), 2)], ['teamColumn', cardBar(design({}), 2)]] as const) {
       const { ctx, calls } = recCtx();
-      drawPanel(ctx, d, 'ownHealth', O, 1, { state });
-      expect(imageAt(calls, artUrl(art)!).map((c) => c.a.slice(1)), state).toEqual([[r.x, r.y, r.w, r.h]]);
-      expect(imageAt(calls, artUrl('vgui/healthbar_grey')!), state).toHaveLength(0);
+      drawPanel(ctx, design({}), panel, O, 2, { state: hurt, card: panel === 'teamColumn' ? 1 : undefined });
+      const w = r.w - 8;
+      expect(draws(calls, OUTLINE), panel).toEqual([[ORANGE, r.x, r.y, r.w, r.h]]);
+      expect(draws(calls, WHITE), panel).toEqual([[ORANGE, r.x + 4, r.y + 4, w * 0.4, r.h - 8]]);
+      expect(draws(calls, GREY), panel).toEqual([['', r.x + 4 + w * 0.4, r.y + 4, w * 0.6, r.h - 8]]);
+    }
+  });
+
+  it('draws a down bar full in the incap colour', () => {
+    const { draws } = tintRig();
+    const r = bar(design({}), 1);
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, design({}), 'ownHealth', O, 1, { state: 'down' });
+    expect(draws(calls, OUTLINE)).toEqual([[RED, r.x, r.y, r.w, r.h]]);
+    expect(draws(calls, WHITE)).toEqual([[RED, r.x + 2, r.y + 2, r.w - 4, r.h - 4]]);
+    expect(draws(calls, GREY)).toEqual([]);
+  });
+
+  it('insets by the file inset while gate Q3 is open, and by the stock 2 units while it is closed', () => {
+    // Deliberately rewritten from plumbing Task 15's "Gated inset" test (X9): the outline is stock, drawn always.
+    // /home/volence/l4d/hud/probe-phase2/b1v2 (inset 3): 6 px at 1080p.
+    const { draws } = tintRig();
+    const d = design({ children: { ownHealth: { Health: { keys: { inset: '3' } } } } });
+    const r = bar(d, 2);
+    _setProbe('Q3', true);
+    const open = recCtx();
+    drawPanel(open.ctx, d, 'ownHealth', O, 2);
+    expect(draws(open.calls, OUTLINE)).toEqual([[GREEN, r.x, r.y, r.w, r.h]]);
+    expect(draws(open.calls, WHITE)).toEqual([[GREEN, r.x + 6, r.y + 6, r.w - 12, r.h - 12]]);
+    _setProbe('Q3', false);
+    const closed = recCtx();
+    drawPanel(closed.ctx, d, 'ownHealth', O, 2);
+    expect(draws(closed.calls, OUTLINE)).toEqual([[GREEN, r.x, r.y, r.w, r.h]]);
+    expect(draws(closed.calls, WHITE)).toEqual([[GREEN, r.x + 4, r.y + 4, r.w - 8, r.h - 8]]);
+    // And a stored inset never reaches the tree while the gate is closed.
+    const loaded = validateDesign(JSON.parse(JSON.stringify(d)));
+    expect(loaded.children?.ownHealth?.Health?.keys?.inset).toBeUndefined();
+  });
+
+  it('never draws the flat healthbar_green, _orange or _red textures', () => {
+    for (const state of ['healthy', 'hurt', 'down'] as const) {
+      for (const panel of ['ownHealth', 'teamColumn'] as const) {
+        const { ctx, calls } = recCtx();
+        drawPanel(ctx, design({}), panel, O, 1, { state, card: panel === 'teamColumn' ? 1 : undefined });
+        const srcs = calls.filter((c) => c.m === 'drawImage').map(srcOf);
+        for (const art of ['vgui/healthbar_green', 'vgui/healthbar_orange', 'vgui/healthbar_red']) expect(srcs, `${state} ${panel}`).not.toContain(artUrl(art));
+      }
     }
   });
 
@@ -987,43 +1081,21 @@ describe('your own health in every preview state', () => {
     expect(icon[0].a[2]).toBe(r.y);
   });
 
-  it('tints the bar with monochrome_color while gate Q1 is open, and draws the stock bar while it is closed', () => {
-    // Probe Q1 (b1 own-a, own-c) showed the colour tints the shaded bar
-    // texture rather than painting it flat, so the preview tints healthbar_white.
+  it('tints the fill with monochrome_color while gate Q1 is open, and with the health colour while it is closed', () => {
+    // Deliberately rewritten from plumbing Task 15's "Gated bar" test (X9): the fill is healthbar_white
+    // tinted, inset 2 units, in either case. Probe Q1 (b1 own-a, own-c) showed the colour tints the shaded texture.
+    const { draws } = tintRig();
     const d = design({ children: { ownHealth: { Health: { keys: { monochrome_color: '255 0 255 255' } } } } });
     const r = bar(d, 1);
-    const scratch = recCtx();
-    const made: unknown[] = [];
-    _setCanvasFactory(() => { const c = { width: 1, height: 1, getContext: () => scratch.ctx }; made.push(c); return c as unknown as HTMLCanvasElement; });
     _setProbe('Q1', true);
-    for (const [state, w] of [[DEFAULT_PREVIEW, r.w], [hurt, r.w * 0.4]] as const) {
+    for (const [state, f] of [[DEFAULT_PREVIEW, 1], [hurt, 0.4]] as const) {
       const { ctx, calls } = recCtx();
       drawPanel(ctx, d, 'ownHealth', O, 1, { state });
-      // The tint is made once and cached, so the first draw makes it.
-      expect(scratch.calls.some((c) => c.m === 'fillRect' && c.op === 'multiply' && c.fill === 'rgb(255,0,255)')).toBe(true);
-      const fills = calls.filter((c) => c.m === 'drawImage' && made.includes(c.a[0]) && c.a[1] === r.x && c.a[2] === r.y);
-      expect(fills.map((c) => c.a.slice(1))).toEqual([[r.x, r.y, w, r.h]]);
-      expect(imageAt(calls, artUrl('vgui/healthbar_green')!)).toHaveLength(0);
-      expect(imageAt(calls, artUrl('vgui/healthbar_orange')!)).toHaveLength(0);
+      expect(draws(calls, WHITE)).toEqual([['rgb(255,0,255)', r.x + 2, r.y + 2, (r.w - 4) * f, r.h - 4]]);
     }
     _setProbe('Q1', false);
     const { ctx, calls } = recCtx();
     drawPanel(ctx, d, 'ownHealth', O, 1);
-    expect(imageAt(calls, artUrl('vgui/healthbar_green')!).map((c) => c.a.slice(1))).toEqual([[r.x, r.y, r.w, r.h]]);
-  });
-
-  it('draws the outline and insets the fill by the inset while gate Q3 is open', () => {
-    const d = design({ children: { ownHealth: { Health: { keys: { inset: '3' } } } } });
-    const r = bar(d, 2);
-    _setProbe('Q3', true);
-    const { ctx, calls } = recCtx();
-    drawPanel(ctx, d, 'ownHealth', O, 2);
-    expect(imageAt(calls, artUrl('vgui/hud/s_healthbar_outline')!).map((c) => c.a.slice(1))).toEqual([[r.x, r.y, r.w, r.h]]);
-    expect(imageAt(calls, artUrl('vgui/healthbar_green')!).map((c) => c.a.slice(1))).toEqual([[r.x + 6, r.y + 6, r.w - 12, r.h - 12]]);
-    _setProbe('Q3', false);
-    const closed = recCtx();
-    drawPanel(closed.ctx, d, 'ownHealth', O, 2);
-    expect(imageAt(closed.calls, artUrl('vgui/hud/s_healthbar_outline')!)).toHaveLength(0);
-    expect(imageAt(closed.calls, artUrl('vgui/healthbar_green')!).map((c) => c.a.slice(1))).toEqual([[r.x, r.y, r.w, r.h]]);
+    expect(draws(calls, WHITE)).toEqual([[GREEN, r.x + 2, r.y + 2, r.w - 4, r.h - 4]]);
   });
 });
