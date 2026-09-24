@@ -59,5 +59,8 @@
   "versionless": [
     "pug-match.smx", "lilac.smx", "l4d_lilac_report.smx", "l4d_inputstats.smx",
     "l4d_cvarwatch.smx", "l4d_consistency.smx", "l4d_tickstats.smx", "l4d_ping.smx"
+  ],
+  "ignored": [
+    "l4d2_spec_stays_spec.smx"
   ]
 }

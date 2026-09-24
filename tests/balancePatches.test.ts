@@ -103,4 +103,16 @@ describe('recordBalanceSighting', () => {
     expect(r).toMatchObject({ patchId: first.patchId, newPatch: false, serverChanged: true });
     expect(problems[0]).toMatch(/pug-match\.smx/);
   });
+
+  it('drops an ignored plugin: same patch, no alert, not stored', () => {
+    const ig = ['l4d2_spec_stays_spec.smx'];
+    const first = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: [], ignored: ig });
+    problems.length = 0;
+    const withSpec = { ...INV, 'p:l4d2_spec_stays_spec.smx': '8284.82ba5f50' };
+    const r = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 2, inventory: withSpec, versionless: [], ignored: ig });
+    expect(r).toMatchObject({ patchId: first.patchId, newPatch: false, serverChanged: false });
+    expect(problems).toHaveLength(0);
+    const stored = db.prepare('SELECT inventory_json FROM balance_server_state WHERE server_id = 1').get() as { inventory_json: string };
+    expect(stored.inventory_json).not.toMatch(/spec_stays/);
+  });
 });

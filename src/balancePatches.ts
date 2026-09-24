@@ -13,6 +13,13 @@ export function fingerprintOf(inv: Inventory, versionless: string[]): string {
   return createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 16);
 }
 
+/** The inventory without ignored plugins: they never reach the fingerprint,
+ *  the stored inventory or the drift alert. */
+export function withoutIgnored(inv: Inventory, ignored: string[]): Inventory {
+  const skip = new Set(ignored.map((f) => `p:${f}`));
+  return Object.fromEntries(Object.entries(inv).filter(([k]) => !skip.has(k)));
+}
+
 export function diffInventories(a: Inventory, b: Inventory) {
   const added = Object.keys(b).filter((k) => !(k in a)).sort();
   const removed = Object.keys(a).filter((k) => !(k in b)).sort();
@@ -37,12 +44,14 @@ const serverName = (db: DB, id: number): string =>
 /** One go-live's inventory arrived: find or create its patch, tag the round,
  *  and tell admins when this server's inventory changed. */
 export function recordBalanceSighting(db: DB, s: {
-  matchId: number; serverId: number | null; half: 1 | 2; inventory: Inventory; versionless: string[]; now?: string;
+  matchId: number; serverId: number | null; half: 1 | 2; inventory: Inventory; versionless: string[];
+  ignored?: string[]; now?: string;
 }): { patchId: number; newPatch: boolean; serverChanged: boolean } {
+  const inventory = withoutIgnored(s.inventory, s.ignored ?? []);
   // SQLite's datetime('now') format, so it sorts against match_rounds.started_at.
   const now = s.now ?? new Date().toISOString().replace('T', ' ').slice(0, 19);
-  const fp = fingerprintOf(s.inventory, s.versionless);
-  const invJson = JSON.stringify(Object.fromEntries(Object.entries(s.inventory).sort()));
+  const fp = fingerprintOf(inventory, s.versionless);
+  const invJson = JSON.stringify(Object.fromEntries(Object.entries(inventory).sort()));
 
   return db.transaction(() => {
     let newPatch = false;
@@ -80,7 +89,7 @@ export function recordBalanceSighting(db: DB, s: {
           SELECT number FROM (
             SELECT id, ROW_NUMBER() OVER (ORDER BY first_seen_at, id) AS number FROM balance_patches
           ) WHERE id = ?`).get(patchId) as { number: number }).number;
-        publishAdminEvent({ kind: 'problem', text: alertText(db, s.serverId, patchNumber, newPatch, prev, s.inventory) });
+        publishAdminEvent({ kind: 'problem', text: alertText(db, s.serverId, patchNumber, newPatch, prev, inventory) });
       }
     }
     return { patchId, newPatch, serverChanged };
