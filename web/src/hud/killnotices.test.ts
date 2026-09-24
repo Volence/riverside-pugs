@@ -17,7 +17,7 @@ import { decodeVTF } from '../vpk/read';
  *   panel's right edge (r1/shots/crops/notices-ijkl.png).
  * - K2: only recordlabel0 is ever used, and its fgcolor_override is
  *   honoured (same crop); the colour goes on all five rows (decision 2).
- * - K2' (gate K5): row 0's font was never seen, since R4's notice never fired.
+ * - K2' (gate K5): row 0's font never seen in R4; V1a saw it (v1/crops/v1a-k-b-notice.png), so K5 passed.
  */
 const PZ = 'resource/ui/hud/pzdamagerecordpanel.res';
 const LAYOUT = 'scripts/hudlayout.res';
@@ -68,8 +68,13 @@ describe('kill notice alignment and colour (plan task K1)', () => {
     expect(text(buildHud(plain({ elements: { killNotices: { x: 40 } } })), PZ)).toBeUndefined();
   });
 
-  it('holds the text size behind gate K5, closed: dropped on load, never written', () => {
-    expect(PROBES.K5.passed).toBe(false);
+  it('keeps the text size now that K5 passed (V1a, probe-phase2-rest/v1/crops/v1a-k-b-notice.png)', () => {
+    expect(PROBES.K5.passed).toBe(true);
+    expect(validateDesign({ v: 1, elements: { killNotices: { fontSize: 20 } } }).elements.killNotices?.fontSize).toBe(20);
+  });
+
+  it('holds the text size behind gate K5 while it is closed: dropped on load, never written', () => {
+    _setProbe('K5', false);
     const d = validateDesign({ v: 1, elements: { killNotices: { fontSize: 20 } } });
     expect(d.elements.killNotices?.fontSize).toBeUndefined();
     // A design that slipped one past validation still builds nothing for it.

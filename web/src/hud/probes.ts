@@ -28,14 +28,18 @@ export const PROBES: Readonly<Record<ProbeId, { passed: boolean; batch: string; 
   Q8: { passed: true, batch: 'B1 (b)', question: 'the crouch icon keeps a file drawColor and shows only while crouched' },
   // /home/volence/l4d/hud/probe-phase2-infected/RESULTS.md, B14: b14/crops/si-b-zoom.png and card-b.png (b), b14b-a (the Boomer).
   Q24: { passed: true, batch: 'B14 (b, and b14b-a)', question: 'monochrome_color on the SI Health and the card HealthPanel recolours the bar (fill and outline) only, not the number, name or icon' },
-  // /home/volence/l4d/hud/probe-phase2-rest/RESULTS.md, K2': R4's notice never fired (killing a Hunter makes none; r4-g, r4-h).
-  K5: { passed: false, batch: 'R4 (g, h)', question: "recordlabel0's font sets the kill notice's text size" },
-  // Same file, C2: messagemode over netcon never opened the chat input (r4-i, r1-n), and the closed chat draws no box.
-  C2: { passed: false, batch: 'R4 (i), R1 (n)', question: "basechat.res HudChat bgcolor_override colours the open chat's box" },
-  // Same file, Z3: no Tank offer reached the harness player in three tries (r3-e, R5, r6-d..l).
-  Z3: { passed: false, batch: 'R3 (e), R5, R6 (d..l)', question: "zombiepanel.res TankTakeover's title, text, picture and box keys are honoured" },
-  // Same file, T1..T4: the frustration meter never drew in four Tank runs (r3-h..k, probe-2f shots-tank-control).
-  T1: { passed: false, batch: 'R3 (h..k), R6 (i..l)', question: 'frustrationmeter.res keys (east_aligned, label colours, fonts, moves) are honoured' },
+  // /home/volence/l4d/hud/probe-phase2-rest/RESULTS.md, V1: the editor's own build with the gate forced open drew
+  // the notices at size 24 (v1/crops/v1a-k-b-notice.png, v1a-s-b-notice.png). R4's notice had never fired.
+  K5: { passed: true, batch: 'V1a (k-b, s-b)', question: "recordlabel0's font sets the kill notice's text size" },
+  // Same file, C2 and V1: the chat opens only on a key bound to messagemode (client.dll 0x100b49e0), never from
+  // the console, and synthetic X keys were ignored (v1/shots-v1a, v1/shots-v1e); the closed chat draws no box.
+  C2: { passed: false, batch: 'R4 (i), R1 (n), V1a (c2), V1e (c2)', question: "basechat.res HudChat bgcolor_override colours the open chat's box" },
+  // Same file, V1: debug_zombie_panel 1 drew the Tank offer box with the title, text and box colours written
+  // (v1/crops/v1b-tank-offer.png).
+  Z3: { passed: true, batch: 'V1b (zp-tank1)', question: "zombiepanel.res TankTakeover's title, text, picture and box keys are honoured" },
+  // Same file, V1: a human Tank with the survivors in the rescue closets drew the meter with every key written
+  // (v1/crops/v1d-frustration-a.png, v1d-frustration-d.png; east_aligned against the stock control v1f-frustration-stock-d.png).
+  T1: { passed: true, batch: 'V1d (t-a, t-d), V1f (t-d)', question: 'frustrationmeter.res keys (east_aligned, label colours, fonts, moves) are honoured' },
 };
 
 /** Test overrides, read before PROBES. */

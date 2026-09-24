@@ -64,7 +64,7 @@ describe('the use bar registry (plan task U1)', () => {
     expect(by('AwardIcon')).toMatchObject({ kind: 'other', box: 'square', move: true, font: false, colour: false });
     expect(by('AwardIcon').note).toBe('The game picks healing or reviving.');
     expect(by('Subtext')).toMatchObject({ kind: 'label', box: 'wh', move: true, font: true, colour: true });
-    expect(by('Subtext').note).toBe('Shows a name when someone heals or revives you; not seen in our tests.');
+    expect(by('Subtext').note).toBe('Shows a name when someone heals or revives you, such as "Your savior: Louis".');
     for (const c of PROGRESS_PANEL.children) expect(c.colourGate, c.name).toBeUndefined();
   });
 

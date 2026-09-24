@@ -33,7 +33,8 @@ describe('the frustration meter pieces, behind gate T1 (plan task Z3)', () => {
     for (const n of ['Countdown', 'Warning', 'Warning2', 'FrustrationLabel']) {
       expect(FRUST_PANEL.children.find((c) => c.name === n), n).toMatchObject({ kind: 'label', move: true, font: true, colour: true });
     }
-    expect(probe('T1')).toBe(false);
+    // V1d (probe-phase2-rest/v1/crops/v1d-frustration-a.png): every piece honoured, so T1 passed.
+    expect(probe('T1')).toBe(true);
   });
 
   it('names blocks the file both presets read has (Modern ships none: the stock one)', () => {
@@ -44,6 +45,7 @@ describe('the frustration meter pieces, behind gate T1 (plan task Z3)', () => {
   });
 
   it('keeps no edit while T1 is closed, and writes them once it passes', () => {
+    _setProbe('T1', false);
     const raw = { v: 1, children: { tankPanel: { Countdown: { color: '255 0 255 255' }, FrustrationBar: { keys: { east_aligned: false } } } } };
     expect(validateDesign(raw).children.tankPanel).toBeUndefined();
     _setProbe('T1', true);
@@ -55,9 +57,16 @@ describe('the frustration meter pieces, behind gate T1 (plan task Z3)', () => {
   });
 
   it('never picks a piece while T1 is closed', () => {
+    _setProbe('T1', false);
     const d = validateDesign({ v: 1 });
     const [box] = panelBoxes(d, 'tankPanel');
     expect(childAt(d, TANK, box.x + 20, box.y + 12, 'tankPanel')).toBeNull();
+  });
+
+  it('picks the title on the canvas now that T1 passed (V1d)', () => {
+    const d = validateDesign({ v: 1 });
+    const [box] = panelBoxes(d, 'tankPanel');
+    expect(childAt(d, TANK, box.x + 20, box.y + 12, 'tankPanel')).toEqual({ name: 'Countdown', card: 0 });
   });
 });
 

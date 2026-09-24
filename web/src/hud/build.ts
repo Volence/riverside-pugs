@@ -305,13 +305,13 @@ const NOTICE_BOX_TEXELS = 32;
 
 /**
  * The kill notices' own look, in pzdamagerecordpanel.res (plan tasks K1,
- * K2). Game code fills the rows; only recordlabel0 was ever seen used, each
- * new notice replacing the last there, and its fgcolor_override is honoured
- * (/home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/notices-ijkl.png).
- * The colour goes on all five rows (plan decision 2): harmless, and right
- * if a server plugin ever fills more. The text size points every row at a
- * HudEd_ copy of its font, and waits on gate K5, since row 0's font was
- * never seen drawn. A row an imported file lacks is skipped. The box
+ * K2). Game code fills the rows: a kill notice replaces the last in
+ * recordlabel0 (/home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/notices-ijkl.png),
+ * but saves stack on rows 0 and 1 at once (v1/crops/v1a-s-b-notice.png), so
+ * the colour goes on all five rows (plan decision 2). The text size points
+ * every row at a HudEd_ copy of its font, and waits on gate K5, which V1a
+ * passed (the notices drew at size 24, v1/crops/v1a-k-b-notice.png). A row
+ * an imported file lacks is skipped. The box
  * (NOTICE_BOX_TEXTURE) ships its texture only into a download (`out`).
  */
 function noticePass(work: Work, design: HudDesign, out: VpkFile[] | null) {

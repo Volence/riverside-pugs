@@ -121,10 +121,12 @@ describe('the too-far pieces, and the Tank offer pieces behind gate Z3 (plan tas
     expect(by('TooFarFromSurvivors/Background').keys!.map((k) => k.key)).toEqual(['bgcolor_override']);
     for (const n of TOO_FAR) expect(by(n).gate, n).toBeUndefined();
     for (const n of TANK) expect(by(n).gate, n).toBe('Z3');
-    expect(probe('Z3')).toBe(false);
+    // V1b (probe-phase2-rest/v1/crops/v1b-tank-offer.png, debug_zombie_panel 1): title, text and box honoured.
+    expect(probe('Z3')).toBe(true);
   });
 
   it('keeps too-far edits and drops Tank offer edits while Z3 is closed', () => {
+    _setProbe('Z3', false);
     const raw = { v: 1, children: { zombiePanel: {
       'TooFarFromSurvivors/TooFarTitle': { color: '255 0 255 255' },
       'TooFarFromSurvivors/Background': { keys: { bgcolor_override: '0 0 128 200' } },
@@ -161,7 +163,11 @@ describe('the too-far pieces, and the Tank offer pieces behind gate Z3 (plan tas
     expect(box).toEqual({ x: r.x + 10, y: r.y + 5, w: 300, h: 95 });
     expect(childAt(d, DEFAULT_PREVIEW, box.x + 150, box.y + 20, 'zombiePanel')).toEqual({ name: 'TooFarFromSurvivors/TooFarTitle', card: 0 });
     expect(childAt(d, DEFAULT_PREVIEW, box.x + 40, box.y + 40, 'zombiePanel')).toEqual({ name: 'TooFarFromSurvivors/SurvivorsImage', card: 0 });
-    expect(drawnPieces(d, DEFAULT_PREVIEW, 'zombiePanel').some((n) => n.startsWith('TankTakeover/'))).toBe(false);
+    // Z3 passed (V1b), so the Tank offer pieces are listed, but the preview draws the too-far box only: no point
+    // of the box picks one.
+    for (let x = 0; x < box.w; x += 5) for (let y = 0; y < box.h; y += 5) {
+      expect(childAt(d, DEFAULT_PREVIEW, box.x + x, box.y + y, 'zombiePanel')?.name.startsWith('TankTakeover/') ?? false).toBe(false);
+    }
   });
 
   it('draws the edited title colour and box colour in the preview (r6-a: magenta title, navy box)', () => {

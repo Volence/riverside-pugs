@@ -435,8 +435,9 @@ export const ZCARD_PANEL: PanelChildren = {
  * - Q22 (/home/volence/l4d/hud/probe-phase2/RESULTS.md, b1v2): every Bar key
  *   is honoured, and a border and gap that leave no room draw the border
  *   alone, so the editor keeps them inside progress.ts clampBarKeys.
- * - P4: Subtext was never seen (a self heal leaves it empty); its keys are
- *   the plain Label keys proven on BarLabel.
+ * - P4: a self heal leaves Subtext empty; V1a saw it while bots revived the
+ *   player, its colour honoured (magenta "Your savior: Louis",
+ *   /home/volence/l4d/hud/probe-phase2-rest/v1/crops/v1a-s-a-bar.png).
  */
 const BAR_KEY = (key: string, label: string, type: 'colour' | 'int'): KeyDef => (type === 'colour'
   ? { key, label, type, unsetLabel: 'File colour', evidence: `client.dll progress bar run: ${key}; probe Q22 (probe-phase2/b1v2/shots/b1/b1-d.png)` }
@@ -459,7 +460,7 @@ export const PROGRESS_PANEL: PanelChildren = {
     { name: 'AwardIcon', label: 'Icon', kind: 'other', role: 'content', box: 'square', move: true, font: false, colour: false,
       note: 'The game picks healing or reviving.' },
     { name: 'Subtext', label: 'Subtext', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true,
-      note: 'Shows a name when someone heals or revives you; not seen in our tests.' },
+      note: 'Shows a name when someone heals or revives you, such as "Your savior: Louis".' },
   ],
 };
 
@@ -522,10 +523,12 @@ export const childPath = (name: string): string[] => name.split('/');
  * - TooFarText has no xpos or wide: code draws it after the key (r6-a), so
  *   it offers a colour only. Its font, and the picture's place, are the
  *   plain Label and CIconPanel keys proven on the spawn panel (G3, G4).
- * - Z3: the Tank offer box was never seen (three tries), so its pieces wait
- *   on gate Z3 (plan decision 10).
+ * - Z3: the Tank offer box was not seen in R3, R5, R6; V1b drew it on demand
+ *   (debug_zombie_panel 1) with the title, text and box colours written
+ *   (/home/volence/l4d/hud/probe-phase2-rest/v1/crops/v1b-tank-offer.png),
+ *   so gate Z3 passed. The preview still draws the too-far box only.
  */
-const TANK_OFFER = 'Shown when you are offered the Tank; not seen in our tests.';
+const TANK_OFFER = 'Shown when you are offered the Tank. The preview draws the too-far box only, so this shows in the game, not on the canvas.';
 export const ZPANEL_PANEL: PanelChildren = {
   panelId: 'zombiePanel',
   file: 'resource/ui/zombiepanel.res',
@@ -558,11 +561,10 @@ export const ZPANEL_PANEL: PanelChildren = {
 /**
  * The Tank frustration meter's pieces (frustrationmeter.res; Modern ships
  * none, so both presets read the stock file), framed by its hudlayout.res
- * block, HudFrustrationMeter. No probe has seen the meter drawn
- * (/home/volence/l4d/hud/probe-phase2-rest/RESULTS.md, T1..T4: r3-h..k,
- * r6-i..l, and the stock control run ../probe-2f/i/shots-tank-control/), so
- * every piece waits on gate T1 (plan decision 10); the element's own move
- * and hide ship now.
+ * block, HudFrustrationMeter. R3, R6 and probe-2f never saw it; V1d did,
+ * with every key written honoured, east_aligned against the stock control
+ * (/home/volence/l4d/hud/probe-phase2-rest/v1/crops/v1d-frustration-a.png,
+ * v1d-frustration-d.png, v1f-frustration-stock-d.png), so gate T1 passed.
  */
 const FRUST_LINE = (name: string, label: string): ChildDef =>
   ({ name, label, kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true, gate: 'T1' });

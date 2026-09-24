@@ -2539,6 +2539,7 @@ describe('The kill notices on the page (plan tasks K1, K2)', () => {
   const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
   afterEach(() => { _setProbe('K5', null); });
   it('picks the alignment and the text colour, and keeps the text size hidden while K5 is closed', async () => {
+    _setProbe('K5', false);
     render(<Hud />);
     fireEvent.click(screen.getByRole('button', { name: 'Kill / incap notices' }));
     const align = screen.getByLabelText('Alignment') as HTMLSelectElement;
@@ -2553,6 +2554,18 @@ describe('The kill notices on the page (plan tasks K1, K2)', () => {
     expect(screen.queryByLabelText('Text size')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Text colour: use the game colour' }));
     await waitFor(() => expect(saved().elements?.killNotices?.color).toBeUndefined());
+  });
+});
+
+describe('The kill notice text size on the page (gate K5 passed, V1a)', () => {
+  const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
+  it('offers the text size and saves it', async () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Kill / incap notices' }));
+    const size = screen.getByRole('slider', { name: 'Text size' }) as HTMLInputElement;
+    expect(size.value).toBe('12');                               // recordlabel0's Default font
+    fireEvent.input(size, { target: { value: '24' } });
+    await waitFor(() => expect(saved().elements?.killNotices?.fontSize).toBe(24));
   });
 });
 
@@ -2634,6 +2647,7 @@ describe('The spawn and too-far panels on the page (plan tasks G1, Z2)', () => {
   });
 
   it('edits the too-far title colour and lists no Tank offer piece while its probe is closed', async () => {
+    _setProbe('Z3', false);
     render(<Hud />);
     fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
     const row = layer('Too far / Tank offer');
@@ -2641,6 +2655,16 @@ describe('The spawn and too-far panels on the page (plan tasks G1, Z2)', () => {
     fireEvent.click(row.getByRole('button', { name: 'Title' }));
     fireEvent.input(screen.getByLabelText('Title colour'), { target: { value: '#ff00ff' } });
     await waitFor(() => expect(saved().children?.zombiePanel?.['TooFarFromSurvivors/TooFarTitle']?.color).toBe('255 0 255 255'));
+    _setProbe('Z3', null);
+  });
+
+  it('edits the Tank offer title colour now that Z3 passed (V1b)', async () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    fireEvent.click(layer('Too far / Tank offer').getByRole('button', { name: 'Tank offer title' }));
+    expect(screen.getByText('Shown when you are offered the Tank. The preview draws the too-far box only, so this shows in the game, not on the canvas.')).toBeTruthy();
+    fireEvent.input(screen.getByLabelText('Tank offer title colour'), { target: { value: '#ff00ff' } });
+    await waitFor(() => expect(saved().children?.zombiePanel?.['TankTakeover/Title']?.color).toBe('255 0 255 255'));
   });
 });
 
