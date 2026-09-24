@@ -177,6 +177,43 @@ describe('hudFileProblem', () => {
     bad('scripts/hudanimations.txt', text('event Foo\n{\n  StopEvent X"a SETINPUTENABLED 0 b" 0\n}\n'));
   });
 
+  it('refuses a break character glued to a denied command', () => {
+    bad('scripts/hudanimations.txt', text('event Foo\n{\n  StopEvent X:FireCommand 0 "x"\n}\n'));
+    for (const c of ['(', ')', "'", ':']) {
+      bad('scripts/hudanimations.txt', text(`event Foo\n{\n  StopEvent X${c}Y 0\n}\n`));
+    }
+    // The game's signed char reads a byte above 0x7f as whitespace.
+    bad('scripts/hudanimations.txt', bytes(...text('event Foo\n{\n  StopEvent X'), 0xa0, ...text('Y 0\n}\n')));
+  });
+
+  it('allows break characters inside a comment in hudanimations.txt', () =>
+    ok('scripts/hudanimations.txt', text("// Pulse: (freq) it's\nevent Foo // a: (b)\n{\n  StopEvent X 0 // c'd\n}\n")));
+
+  it('refuses a second, unknown command on one line', () => {
+    bad('scripts/hudanimations.txt', text('event Foo\n{\n  StopEvent X 0 SomeOtherCommand 0\n}\n'));
+    bad('scripts/hudanimations.txt', text('event Foo\n{\n  Animate P Alpha "0" Pulse 3 0 1 Other 0\n}\n'));
+    bad('scripts/hudanimations.txt', text('event Foo\n{\n  Animate P Alpha "0" Linear 0 1 X\n}\n'));
+  });
+
+  it('reads commands by their argument counts across lines', () =>
+    ok('scripts/hudanimations.txt', text([
+      'event Foo { Animate P Alpha "0" Pulse 3 0 1 Animate P Alpha "9" Flicker 0.5 0 1',
+      '  StopAnimation P Alpha 0 StopPanelAnimations P 0',
+      '  RunEvent Bar 0 StopEvent Bar',
+      '  0 SetFont P font "X" 0 SetTexture P t "a/b" 0 SetString P s "hi there" 0',
+      '}',
+      'event Bar',
+      '{',
+      '}',
+      '',
+    ].join('\n'))));
+
+  it('refuses a file that is not a run of events', () => {
+    bad('scripts/hudanimations.txt', text('Foo\n{\n}\n'));
+    bad('scripts/hudanimations.txt', text('event Foo\nStopEvent X 0\n'));
+    bad('scripts/hudanimations.txt', text('event Foo\n{\n  StopEvent X\n'));
+  });
+
   it('allows a TrueType font', () => ok('resource/a.ttf', sized(64, bytes(0, 1, 0, 0))));
   it('refuses a zip named .ttf', () => bad('resource/a.ttf', sized(64, text('PK\x03\x04'))));
   it('allows an OpenType font', () => ok('resource/a.otf', sized(64, text('OTTO'))));
