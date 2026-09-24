@@ -203,8 +203,13 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 /* Wrapped controls line up under the row's own, not under its heading. */
 .hud__tbbody { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
 .hud__tbrow + .hud__tbrow { border-top: 1px solid var(--border); }
+.hud__tbtop + .hud__tbrow { padding-top: var(--sp-3); }
 .hud__tbhead { padding-top: 6px; font-family: var(--font-display, inherit); font-size: var(--fs-label); letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
-.hud__tbend { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.hud__tbtop { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--sp-2); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--border); }
+.hud__tbgroup { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+/* The Preview's lines are deliberate: what is shown, then (infected) its state, then the toggles and backdrop. */
+.hud__tbbody:has(> .hud__tbline) { flex-direction: column; align-items: stretch; }
+.hud__tbline { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
 /* In the toolbar a tab strip is a compact segmented control: joined, no strip underline. */
 .hud__toolbar .tabs { margin: 0; border: 0; gap: 0; overflow: visible; }
 .hud__toolbar .tabs__tab, .hud__toolbar .btn--ghost { min-height: 30px; padding: 2px var(--sp-3); font-size: var(--fs-label); }
