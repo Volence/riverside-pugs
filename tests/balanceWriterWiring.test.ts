@@ -7,6 +7,9 @@ import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
 import { addServer } from '../src/serverPool.js';
 import type { AddonsTransport } from '../src/addonsTransport.js';
+import { authedCookie, stubOrchestrator } from './helpers.js';
+
+const ADMIN = '76561198000000009';
 
 // Copied verbatim from tests/balanceWiring.test.ts.
 function freeUdpPort(): Promise<number> {
@@ -42,5 +45,29 @@ describe('balance writer wiring', () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(disk.get('pug_balance.cfg')).toBe('CONTENT');
     expect(db.prepare('SELECT state FROM balance_rollout_servers').get()).toEqual({ state: 'written' });
+  });
+
+  it('a dev install never writes on release', async () => {
+    const db = openDb(':memory:');
+    const sid = addServer(db, { name: 'dallas', host: '127.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    db.prepare("UPDATE servers SET status = 'live', addons_dir = '/g/left4dead/addons' WHERE id = ?").run(sid);
+    db.prepare("INSERT INTO balance_patches (id, fingerprint, source, first_seen_at) VALUES (1, 'f', 'announced', 'now')").run();
+    db.prepare("INSERT INTO balance_rollouts (id, patch_id, values_json, content, created_by, created_at) VALUES (1, 1, '{}', 'CONTENT', 'a', 'now')").run();
+    db.prepare("INSERT INTO balance_rollout_servers (rollout_id, server_id, state) VALUES (1, ?, 'pending')").run(sid);
+    const puts: string[] = [];
+    const transport = (): AddonsTransport => ({
+      put: async (_local, name) => { puts.push(name); },
+      readText: async () => null, size: async () => null, remove: async () => {},
+    });
+    const app = await buildServer({ config: { ...loadConfig({}), devMode: true }, db, orchestrator: stubOrchestrator(),
+      serverCleaner: async () => {}, serverExec: async () => {}, balanceTransport: transport });
+    close = () => app.close();
+    const cookies = await authedCookie(app, db, ADMIN);
+    db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
+    const res = await app.inject({ method: 'POST', url: `/api/admin/servers/${sid}/idle`, cookies });
+    expect(res.statusCode).toBe(200);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(puts).toEqual([]);
+    expect(db.prepare('SELECT state FROM balance_rollout_servers').get()).toEqual({ state: 'pending' });
   });
 });
