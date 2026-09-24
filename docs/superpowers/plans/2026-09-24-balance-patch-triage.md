@@ -52,7 +52,7 @@
 **Interfaces:**
 - Produces: columns `balance_patches.triage TEXT` (NULL | 'pending' | 'balance' | 'folded'), `balance_patches.folded_into INTEGER`, `balance_patches.came_from_patch_id INTEGER`, `match_rounds.sighted_patch_id INTEGER`; table `balance_ignored_plugins(file TEXT PRIMARY KEY, reason TEXT NOT NULL DEFAULT '', added_by TEXT NOT NULL, added_at TEXT NOT NULL)`; exported `TRIAGE_BACKFILL_SQL: string[]`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // tests/balanceTriageSchema.test.ts
@@ -106,11 +106,11 @@ describe('triage schema and backfill', () => {
 });
 ```
 
-- [ ] **Step 2: Run it, expect FAIL** (`TRIAGE_BACKFILL_SQL` is not exported)
+- [x] **Step 2: Run it, expect FAIL** (`TRIAGE_BACKFILL_SQL` is not exported)
 
 Run: `npx vitest run tests/balanceTriageSchema.test.ts`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `src/db.ts`, near the other exported SQL constants (e.g. beside `ORIGIN_BACKFILL_SQL`):
 
@@ -167,11 +167,11 @@ and the tagging UPDATE sets both columns:
       ).run(id, id, p.from, end).changes;
 ```
 
-- [ ] **Step 4: Run the new test and the existing balance suite, expect PASS**
+- [x] **Step 4: Run the new test and the existing balance suite, expect PASS**
 
 Run: `npx vitest run tests/balanceTriageSchema.test.ts tests/balance*.test.ts tests/historical*.test.ts`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/db.ts src/historicalPatches.ts tests/balanceTriageSchema.test.ts
@@ -197,7 +197,7 @@ git commit -m "balance triage: schema, ignored plugins table and backfill"
   - `foldInto(db, id, into): { ok: true; target: number } | { ok: false; error: string }` (stores the chain end, unpublishes, retags; no source/state validation)
   - `unfoldPatch(db, id): void` (state back to pending, retags)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // tests/balanceFold.test.ts
@@ -280,11 +280,11 @@ describe('balanceFold', () => {
 });
 ```
 
-- [ ] **Step 2: Run it, expect FAIL** (module missing)
+- [x] **Step 2: Run it, expect FAIL** (module missing)
 
 Run: `npx vitest run tests/balanceFold.test.ts`
 
-- [ ] **Step 3: Implement `src/balanceFold.ts`**
+- [x] **Step 3: Implement `src/balanceFold.ts`**
 
 ```ts
 import type { DB } from './db.js';
@@ -374,11 +374,11 @@ import { triageGeneration } from '../../balanceFold.js';
 
 Update the `dataStamp` doc comment: add "a fold or unfold (the triage generation)".
 
-- [ ] **Step 4: Run, expect PASS**
+- [x] **Step 4: Run, expect PASS**
 
 Run: `npx vitest run tests/balanceFold.test.ts tests/balanceCompare*.test.ts`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/balanceFold.ts src/metrics/compare/cache.ts tests/balanceFold.test.ts
@@ -404,7 +404,7 @@ git commit -m "balance triage: fold, unfold and chain resolution"
   - `addIgnored(db, files: string[], p: { reason: string; by: string; now: string }): string[]` (files newly added)
   - `removeIgnored(db, file): boolean`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // tests/balanceIgnore.test.ts
@@ -438,11 +438,11 @@ describe('balanceIgnore', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL**
+- [x] **Step 2: Run, expect FAIL**
 
 Run: `npx vitest run tests/balanceIgnore.test.ts`
 
-- [ ] **Step 3: Implement `src/balanceIgnore.ts`**
+- [x] **Step 3: Implement `src/balanceIgnore.ts`**
 
 ```ts
 import type { DB } from './db.js';
@@ -492,11 +492,11 @@ export function removeIgnored(db: DB, file: string): boolean {
 }
 ```
 
-- [ ] **Step 4: Run, expect PASS**
+- [x] **Step 4: Run, expect PASS**
 
 Run: `npx vitest run tests/balanceIgnore.test.ts`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/balanceIgnore.ts tests/balanceIgnore.test.ts
@@ -517,7 +517,7 @@ git commit -m "balance triage: effective ignored plugin list"
 - Consumes: `resolvePatch` (Task 2), `effectiveIgnored` (Task 3).
 - Produces: `recordBalanceSighting(...)` returns `{ patchId: number /* sighted */; effectivePatchId: number; newPatch: boolean; serverChanged: boolean }`. New detected patches are inserted `triage = 'pending'` with `came_from_patch_id` = the reporting server's previous patch, resolved. `AdminEvent` problem gains `link?: { label: string; path: string }`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to the `recordBalanceSighting` describe in `tests/balancePatches.test.ts`:
 
@@ -555,11 +555,11 @@ Add to `tests/discordAdminFeed.test.ts`, in the describe that holds "admin actio
   });
 ```
 
-- [ ] **Step 2: Run, expect FAIL**
+- [x] **Step 2: Run, expect FAIL**
 
 Run: `npx vitest run tests/balancePatches.test.ts tests/discordAdminFeed.test.ts`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/adminFeed.ts`, the problem member:
 
@@ -630,11 +630,11 @@ with `import { effectiveIgnored } from './balanceIgnore.js';`. `confirmOnSightin
 
 Fix any existing test that matched the old "unnamed; name it" wording (search: `grep -rn "name it in Admin" tests`).
 
-- [ ] **Step 4: Run, expect PASS**
+- [x] **Step 4: Run, expect PASS**
 
 Run: `npx vitest run tests/balancePatches.test.ts tests/discordAdminFeed.test.ts tests/balanceWiring.test.ts tests/balanceRollouts.test.ts`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/balancePatches.ts src/adminFeed.ts src/discord/adminFeedPoster.ts src/server.ts tests/balancePatches.test.ts tests/discordAdminFeed.test.ts
@@ -654,7 +654,7 @@ git commit -m "balance triage: sightings record pending patches and the sighted 
 - Consumes: `foldInto`, `resolvePatch`, `retagRounds` (Task 2), `effectiveIgnored` (Task 3).
 - Produces: same signature. Changes: the keeper of a group is the non-recomputed holder, else the oldest `balance` patch, else the oldest; every merged patch becomes `folded` into the keeper (so its rounds move); a detected patch with NULL fingerprint and NULL triage is folded into the holder of its recomputed fingerprint, or set `balance` when there is none.
 
-- [ ] **Step 1: Write the failing tests** (in the `refingerprintPatches` describe; its `beforeEach` has match 1 with rounds half 1 and 2, server dallas)
+- [x] **Step 1: Write the failing tests** (in the `refingerprintPatches` describe; its `beforeEach` has match 1 with rounds half 1 and 2, server dallas)
 
 ```ts
   it('folds a merged patch into the keeper and moves its rounds', () => {
@@ -690,11 +690,11 @@ git commit -m "balance triage: sightings record pending patches and the sighted 
 
 Update the existing refingerprint tests that assert a merged patch keeps its rounds: now the rounds move to the keeper (`patch_id` = keeper, `sighted_patch_id` = merged patch). Update any assertion on the message text to the new wording below.
 
-- [ ] **Step 2: Run, expect FAIL**
+- [x] **Step 2: Run, expect FAIL**
 
 Run: `npx vitest run tests/balancePatches.test.ts`
 
-- [ ] **Step 3: Implement** (in `src/balancePatches.ts`; `import { foldInto, resolvePatch, retagRounds } from './balanceFold.js';`)
+- [x] **Step 3: Implement** (in `src/balancePatches.ts`; `import { foldInto, resolvePatch, retagRounds } from './balanceFold.js';`)
 
 Select `triage` with the rows:
 
@@ -751,11 +751,11 @@ Update the function's doc comment: merges are folds; keeper preference; leftover
           refingerprintPatches(deps.db, balanceKnobs.versionless, effectiveIgnored(deps.db, balanceKnobs.ignored), (e) => bootProblems.push(e.text));
 ```
 
-- [ ] **Step 4: Run, expect PASS**
+- [x] **Step 4: Run, expect PASS**
 
 Run: `npx vitest run tests/balancePatches.test.ts tests/balanceWiring.test.ts tests/balancePublic.test.ts`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/balancePatches.ts src/server.ts tests/balancePatches.test.ts
@@ -785,7 +785,7 @@ git commit -m "balance triage: refingerprint merges become folds"
   - `PatchSummary` gains `triage: 'pending' | 'balance' | 'folded'`, `foldedInto: number | null`, `onlyPluginsChanged: boolean`, `triageBase: { id; number; name } | null`, `changes: string[]`, `plugins: string[]`; `merged` = `triage === 'folded'`.
   - `listPatches(db, lists?: Lists)`, `patchDetail(db, id, lists?: Lists)`, `serverDrift(db, ignored?: string[])`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // tests/balanceTriage.test.ts
@@ -892,11 +892,11 @@ describe('triage decisions', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL**
+- [x] **Step 2: Run, expect FAIL**
 
 Run: `npx vitest run tests/balanceTriage.test.ts`
 
-- [ ] **Step 3: Implement `src/balanceTriage.ts`**
+- [x] **Step 3: Implement `src/balanceTriage.ts`**
 
 ```ts
 import type { DB } from './db.js';
@@ -1107,11 +1107,11 @@ export interface PatchSummary {
 
 Update `tests/balanceAdmin.test.ts` / any test that builds a `PatchSummary` literal only if typecheck complains (server-side tests read JSON, so they should not).
 
-- [ ] **Step 4: Run, expect PASS**
+- [x] **Step 4: Run, expect PASS**
 
 Run: `npx vitest run tests/balanceTriage.test.ts tests/balancePatches.test.ts tests/balanceAdmin.test.ts`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/balanceTriage.ts src/balancePatches.ts tests/balanceTriage.test.ts
@@ -1141,7 +1141,7 @@ git commit -m "balance triage: decisions and the plain-words diff"
   - `DELETE /api/admin/balance/ignored-plugins/:file` → `{ ok: true }`, audited `unignore_plugin`; 409 for a knobs.json-only entry; runs the refingerprint.
   - The ignore decision and DELETE answer 503 when knobs.json failed to load (they need `versionless`).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // tests/balanceTriageRoutes.test.ts
@@ -1229,11 +1229,11 @@ describe('patch triage routes', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL** (404 on the new URLs)
+- [x] **Step 2: Run, expect FAIL** (404 on the new URLs)
 
 Run: `npx vitest run tests/balanceTriageRoutes.test.ts`
 
-- [ ] **Step 3: Implement `src/routes/adminBalancePatches.ts`**
+- [x] **Step 3: Implement `src/routes/adminBalancePatches.ts`**
 
 ```ts
 import type { FastifyInstance } from 'fastify';
@@ -1351,11 +1351,11 @@ In `src/server.ts`, next to the knob routes:
 
 with `import { adminBalancePatchRoutes } from './routes/adminBalancePatches.js';`.
 
-- [ ] **Step 4: Run, expect PASS**
+- [x] **Step 4: Run, expect PASS**
 
 Run: `npx vitest run tests/balanceTriageRoutes.test.ts tests/balanceAdmin.test.ts tests/balanceCompareRoutes.test.ts`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/routes/adminBalancePatches.ts src/routes/admin.ts src/server.ts tests/balanceTriageRoutes.test.ts
@@ -1378,7 +1378,7 @@ git commit -m "balance triage: admin routes for triage, unfold and the ignore li
 - Consumes: Tasks 2, 3.
 - Produces: `KnobPreview.existingPatch` gains `triage: 'pending' | 'balance' | 'folded'`. `publishPatch` errors: pending → `'triage it first: publish only a balance patch'`; folded → `'this patch was folded into another one; publish that patch instead'`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/balancePublic.test.ts` (inside the existing `publishPatch` describe, reusing its setup; adapt the insert helper name the file uses):
 
@@ -1435,11 +1435,11 @@ git commit -m "balance triage: admin routes for triage, unfold and the ignore li
   });
 ```
 
-- [ ] **Step 2: Run, expect FAIL**
+- [x] **Step 2: Run, expect FAIL**
 
 Run: `npx vitest run tests/balancePublic.test.ts tests/balanceControl.test.ts tests/balanceRollouts.test.ts tests/balanceKnobRoutes.test.ts`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/balancePublic.ts` `publishPatch`: select `COALESCE(triage, 'balance') AS triage` in place of the `merged` expression, and replace the merged check:
 
@@ -1494,11 +1494,11 @@ The new-patch INSERT adds `triage` = `'balance'`:
 
 `src/routes/adminBalanceKnobs.ts`: every route uses `const k = knobs && withEffectiveIgnored(db, knobs)` computed at the top of the handler in place of `knobs` (after the 503 check), and `restorable` adds `AND COALESCE(triage, 'balance') = 'balance'` to its WHERE.
 
-- [ ] **Step 4: Run, expect PASS**
+- [x] **Step 4: Run, expect PASS**
 
 Run: `npx vitest run tests/balance*.test.ts`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/balancePublic.ts src/routes/balancePublic.ts src/balanceControl.ts src/balanceRollouts.ts src/routes/adminBalanceKnobs.ts tests/
@@ -1519,7 +1519,7 @@ git commit -m "balance triage: knob panel and public page respect triage state"
 - Consumes: Task 7 routes.
 - Produces: `PatchSummary` (web) gains `triage`, `foldedInto`, `onlyPluginsChanged`, `triageBase`, `changes`, `plugins`; `IgnoredPlugin`; `adminApi.triageBalancePatch(id, body)`, `adminApi.unfoldBalancePatch(id)`, `adminApi.balanceIgnoredPlugins(signal?)`, `adminApi.removeIgnoredPlugin(file)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `AdminPatches.test.tsx`: extend `mockAdmin` with `triageBalancePatch: vi.fn(), unfoldBalancePatch: vi.fn(), balanceIgnoredPlugins: vi.fn(), removeIgnoredPlugin: vi.fn()`; give every `PatchSummary` literal the new fields (`triage: 'balance', foldedInto: null, onlyPluginsChanged: false, triageBase: null, changes: [], plugins: []`), and in `beforeEach` (add one) `mockAdmin.balanceIgnoredPlugins.mockResolvedValue({ plugins: [] })`. New tests:
 
@@ -1605,11 +1605,11 @@ In `Compare.test.tsx` (its patch fixtures gain the same new fields):
 
 (`P1`/`P2`: the file's existing `PatchSummary` fixtures; rename to match.)
 
-- [ ] **Step 2: Run, expect FAIL**
+- [x] **Step 2: Run, expect FAIL**
 
 Run: `npx vitest run web/src/routes/admin/AdminPatches.test.tsx web/src/routes/admin/balance/Compare.test.tsx`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `web/src/api.ts`:
 
@@ -1752,11 +1752,11 @@ export function TriageCard({ patch, targets, run, busy }: {
 
 `Knobs.tsx` needs no change (restorable is filtered server-side).
 
-- [ ] **Step 4: Run web tests and typecheck, expect PASS**
+- [x] **Step 4: Run web tests and typecheck, expect PASS**
 
 Run: `npx vitest run web/src/routes/admin && npm run typecheck`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/src
@@ -1774,7 +1774,7 @@ git commit -m "balance triage: triage card, folded collapse and ignored plugins 
 **Interfaces:**
 - Consumes: `openDb`, `loadBalanceKnobs`, `effectiveIgnored`, `refingerprintPatches`, `listPatches`.
 
-- [ ] **Step 1: Write the script**
+- [x] **Step 1: Write the script**
 
 ```ts
 /**
@@ -1807,7 +1807,7 @@ for (const p of listPatches(db, { versionless: knobs.versionless, ignored })) {
 }
 ```
 
-- [ ] **Step 2: Run it on a synthetic copy to prove it works**
+- [x] **Step 2: Run it on a synthetic copy to prove it works**
 
 ```bash
 npx tsx scripts/balance-triage-report.ts "$SCRATCH/triage-copy.db"
@@ -1815,12 +1815,12 @@ npx tsx scripts/balance-triage-report.ts "$SCRATCH/triage-copy.db"
 
 (`$SCRATCH` = the session scratchpad. openDb creates an empty database there, so it prints nothing and exits 0. Also run it with a path that does not contain "copy" and expect exit code 2.)
 
-- [ ] **Step 3: Full suite and typecheck**
+- [x] **Step 3: Full suite and typecheck**
 
 Run: `npx vitest run && npm run typecheck`
 Expected: all green.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/balance-triage-report.ts
