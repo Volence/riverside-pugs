@@ -25,6 +25,13 @@ vi.mock('../api', async (importOriginal) => {
 
 const { PlayerFile } = await import('./admin/file/PlayerFile');
 
+const noClass = { hiddenShare: null, hiddenOccZ: null, revealShare: null };
+const noHidden = {
+  losRounds: 0, hiddenShare: null, hiddenOccZ: null, reveals: 0, revealShare: null,
+  pHidden: null, pHiddenOcc: null, pReveal: null,
+  byClass: { hunter: noClass, smoker: noClass, boomer: noClass },
+};
+
 const P = '76561199000000001';
 // Mirrors src/admin/fileAccess.ts's ADMIN_ACTIONS: review_round and
 // steam_refresh are both admin-only gates the file's controls read directly,
@@ -360,6 +367,7 @@ describe('the evidence detail', () => {
           analyzer: {
             steamid: P, ranked: true, rank: 3, of: 40, rounds: 20, eligibleRounds: 18, clips: 1,
             trackShare: 0.21, occZ: 1.1, teamGap: 0.4, pFid: 0.9, pOcc: 0.8, pGap: 0.7, composite: 0.8,
+            ...noHidden,
           },
           rounds: [],
           clips: [{ id: 4, matchId: 7, ordinal: 2, half: 1, slot: 3, startMs: 61500, endMs: 67500, kind: 'track', score: 0.82, detail: {} }],
@@ -534,6 +542,22 @@ describe('the evidence detail', () => {
     const li = section.querySelector('ul.admin-list > li.muted') as HTMLElement | null;
     expect(li).toBeTruthy();
     expect(within(li as HTMLElement).getByText('dismissed: heard the spawn')).toBeTruthy();
+  });
+
+  it('names a hidden tracking clip as what it is', async () => {
+    mockPeople.file.mockResolvedValue(file({
+      sections: {
+        ...file().sections,
+        evidence: {
+          analyzer: null, rounds: [], flags: [], inputFlags: [], inputCaps: [],
+          signonDrops: { count: 0, lastAt: null, rows: [] },
+          clips: [{ id: 1, matchId: 42, ordinal: 2, half: 1, slot: 3, startMs: 5000, endMs: 7000, kind: 'hidden_track', score: 0.6, detail: {} }],
+        },
+      },
+    }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    await screen.findByRole('heading', { name: /griefer/ });
+    expect(await screen.findByText(/hidden infected/)).toBeTruthy();
   });
 
   it('does not bleed review state or notes between two rounds differing only in slot', async () => {

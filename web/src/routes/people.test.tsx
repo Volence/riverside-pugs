@@ -18,6 +18,13 @@ const { NeedsALook } = await import('./admin/NeedsALook');
 const { AnalysisPanel } = await import('./admin/AnalysisPanel');
 const { PeopleBans } = await import('./admin/PeopleBans');
 
+const noClass = { hiddenShare: null, hiddenOccZ: null, revealShare: null };
+const noHidden = {
+  losRounds: 0, hiddenShare: null, hiddenOccZ: null, reveals: 0, revealShare: null,
+  pHidden: null, pHiddenOcc: null, pReveal: null,
+  byClass: { hunter: noClass, smoker: noClass, boomer: noClass },
+};
+
 const row: AdminPlayerRow = {
   steamid: '76561199000000001', name: 'griefer', avatar: null, status: 'active', isAdmin: false,
   isMod: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 2,
@@ -35,13 +42,14 @@ const lookRow: NeedsALookRow = {
   analyzer: {
     steamid: '76561199000000001', ranked: true, rank: 3, of: 40, rounds: 20, eligibleRounds: 18,
     clips: 2, trackShare: 0.21, occZ: 1.1, teamGap: 0.4, pFid: 0.9, pOcc: 0.8, pGap: 0.7, composite: 0.8,
+    ...noHidden,
   },
 };
 
 const measured = (over: Partial<MeasuredRow> = {}): MeasuredRow => ({
   steamid: '76561199000000002', name: 'measured only', ranked: true, rank: 1, of: 12,
   rounds: 30, eligibleRounds: 28, clips: 0, trackShare: 0.31, occZ: 1.4, teamGap: 0.6,
-  pFid: 0.9, pOcc: 0.8, pGap: 0.7, composite: 0.8, ...over,
+  pFid: 0.9, pOcc: 0.8, pGap: 0.7, composite: 0.8, ...noHidden, ...over,
 });
 
 const ban: PeopleBan = {
@@ -177,6 +185,20 @@ describe('Needs a look', () => {
     expect(names()).toEqual(['tracker', 'measured only']);
     fireEvent.click(screen.getByRole('button', { name: 'Analyzer rank' }));
     expect(names()).toEqual(['tracker', 'measured only']);
+  });
+
+  it('shows the hidden-infected columns on the ranking tab', async () => {
+    mockPeople.review.mockResolvedValue({
+      players: [],
+      measured: [measured({ hiddenShare: 0.3, hiddenOccZ: 1.25, revealShare: 0.5, losRounds: 9, reveals: 40 })],
+      health: health(),
+    });
+    render(<NeedsALook isAdmin />);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Analyzer ranking' }));
+    expect(await screen.findByRole('columnheader', { name: 'Hidden tracking' })).toBeTruthy();
+    expect(screen.getByText('0.300')).toBeTruthy();
+    expect(screen.getByText('1.25')).toBeTruthy();
+    expect(screen.getByText('50%')).toBeTruthy();
   });
 
   it('says when nothing is waiting, and leaves pipeline health to the Servers panel', async () => {

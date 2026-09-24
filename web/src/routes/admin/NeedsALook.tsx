@@ -11,6 +11,7 @@ type SortKey = 'rank' | 'tracking';
 
 const num = (v: number | null): string => (v == null ? 'n/a' : v.toFixed(2));
 const num3 = (v: number | null): string => (v == null ? 'n/a' : v.toFixed(3));
+const pct = (v: number | null): string => (v == null ? 'n/a' : `${Math.round(v * 100)}%`);
 
 /** The rank cell, in both views.
  *
@@ -138,6 +139,9 @@ export function NeedsALook({ isAdmin }: { isAdmin: boolean }) {
                       {sortHead('tracking', 'Tracking')}
                       <th>Occupancy</th>
                       <th>Team gap</th>
+                      <th>Hidden tracking</th>
+                      <th>Hidden pre-aim</th>
+                      <th>Reveal on target</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -151,6 +155,9 @@ export function NeedsALook({ isAdmin }: { isAdmin: boolean }) {
                         <td>{num3(m.trackShare)}</td>
                         <td>{num(m.occZ)}</td>
                         <td>{num(m.teamGap)}</td>
+                        <td>{num3(m.hiddenShare)}</td>
+                        <td>{num(m.hiddenOccZ)}</td>
+                        <td>{pct(m.revealShare)}</td>
                       </tr>
                     ))}
                   </tbody>
