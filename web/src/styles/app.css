@@ -1643,6 +1643,13 @@ body.is-theater { overflow: hidden; }
 .deploy-commit { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); }
 .deploy-group h4 { margin: var(--sp-3) 0 var(--sp-1); }
 .deploy-history { border-top: 1px solid var(--border); padding-top: var(--sp-2); margin-top: var(--sp-2); }
+/* Game values page: one table per group, rows differing from vanilla marked. */
+.values-group { margin: 0 0 var(--sp-2); }
+.values-table td:first-child { min-width: 14rem; }
+.values-differs td:nth-child(2) { color: var(--rating); font-weight: 600; }
+.values-note { font-size: var(--fs-dense); }
+.values-rules { margin: var(--sp-3) 0 0; padding-left: var(--sp-4); }
+.values-rules li { margin: var(--sp-1) 0; }
 /* Triage card: name, then a full-width notes box, then the button. */
 .admin-form--stack { flex-direction: column; align-items: stretch; }
 .admin-form--stack input { flex: 0 0 auto; }

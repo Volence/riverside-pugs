@@ -903,6 +903,15 @@ export interface ReleaseOverview {
   commits: { hash: string; short: string; subject: string; author: string; at: string; releaseId: number | null }[];
   releases: ReleaseSummaryView[]; inFlight: number | null; devMode: boolean; fetchError: string | null;
 }
+export interface GameValueView {
+  id: string; label: string; unit: string | null; note: string | null; value: string | null; vanilla: string | null;
+  differsFromVanilla: boolean; status: 'reported' | 'not_reported' | 'hidden';
+  lastChange: { at: string; patch: { id: number; number: number; name: string } | null } | null;
+}
+export interface GameValues {
+  asOf: { patchId: number; number: number } | null;
+  groups: { id: string; label: string; values: GameValueView[]; rules: { id: string; text: string; active: boolean; draft: boolean }[] }[];
+}
 export interface IgnoredPlugin { file: string; reason: string; addedBy: string | null; addedAt: string | null; source: 'site' | 'knobs' }
 export type TriageBody = { decision: 'balance'; name: string; notes: string } | { decision: 'fold'; into: number }
   | { decision: 'ignore'; into: number; plugins: string[] };
@@ -1529,6 +1538,7 @@ export const adminApi = {
   deleteCampaign: (slug: string) =>
     del<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}`),
   balancePatches: (signal?: AbortSignal) => get<{ patches: PatchSummary[] }>('/api/admin/balance/patches', signal),
+  gameValues: (signal?: AbortSignal) => get<GameValues>('/api/admin/balance/values', signal),
   balancePatch: (id: number, signal?: AbortSignal) => get<PatchDetail>(`/api/admin/balance/patches/${id}`, signal),
   balanceDrift: (signal?: AbortSignal) => get<{ servers: DriftRow[] }>('/api/admin/balance/drift', signal),
   editBalancePatch: (id: number, body: { name?: string | null; notes?: string; reviewed?: boolean }) =>
@@ -1581,6 +1591,7 @@ export const api = {
   customCampaigns: (signal?: AbortSignal) =>
     get<{ campaigns: CustomCampaignRow[] }>('/api/campaigns/custom', signal),
   balancePatches: (signal?: AbortSignal) => get<{ patches: PublicPatch[] }>('/api/balance/patches', signal),
+  gameValues: (signal?: AbortSignal) => get<GameValues>('/api/balance/values', signal),
   balancePatch: (id: number, signal?: AbortSignal) => get<PublicEntry>(`/api/balance/patches/${id}`, signal),
   replayLive: (token: string, signal?: AbortSignal) =>
     get<{ filename: string; closed: boolean }>(`/api/replays/live/${encodeURIComponent(token)}`, signal),
