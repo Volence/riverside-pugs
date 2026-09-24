@@ -765,6 +765,35 @@ function fitOffset(box: Box, k: number): { x: number; y: number } {
   return { x: Math.round(box.x * k), y: Math.round(box.y * k) };
 }
 
+/**
+ * Where an element stored at (sx, sy) is drawn, by the token arithmetic the
+ * build applies, without building: layoutPass's anchor (placed, formatPos),
+ * then for a fitted container fitSi's offset and second anchor, or the
+ * infected row's fit offset. A centre token reads back at a half unit on
+ * the 853-wide screen (c-126 is 300.5), which is why a stored number is not
+ * simply its drawn place; edit.ts's placeElement inverts this, so a drawn
+ * target lands on the stored number that draws nearest it. The team
+ * layouts' on-screen clamps are not modelled: they only ever pull a team
+ * back from an edge.
+ */
+export function drawnAt(design: HudDesign, id: string, sx: number, sy: number): { x: number; y: number } {
+  const el = elementById(id);
+  const key = baseOf(design);
+  const panel = el && kvFind(baseTree(key, LAYOUT), [el.key]);
+  if (!el || !panel) return { x: sx, y: sy };
+  const W = screenW(design.aspect);
+  const p = placed({ ...design.elements[id], x: sx, y: sy }, baseRect(panel, el, key, design.aspect), el, design.aspect);
+  const x = parsePos(p.xpos, W), y = parsePos(p.ypos, SCREEN_H);
+  if (fitsContainer(design, id)) {
+    const box = panelWork(design).boxes[id]!;
+    const k = design.elements[id]?.scale ?? 1;
+    const shift = fitOffset(box, k);
+    return { x: parsePos(formatPos(x + shift.x, box.w * k, W), W), y: parsePos(formatPos(y + shift.y, box.h * k, SCREEN_H), SCREEN_H) };
+  }
+  const shift = elementFitShift(design, id);
+  return { x: x + shift.x, y: y + shift.y };
+}
+
 /** Whether a fit rule moves and sizes this element's own hudlayout.res block: fitted, framed by it, and with something to fit to. */
 function fitsContainer(design: HudDesign, id: string): boolean {
   const panel = panelChildren(id);

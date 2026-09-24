@@ -15,7 +15,7 @@ import {
 } from './design';
 import { screenW, SCREEN_H } from './units';
 import { elementById } from './elements';
-import { elementRect, elementFitShift, teamLayout, teamCardRects, isFreeTeam, panelChild, panelLink, buildTrees, panelBgZpos, type CardChild } from './build';
+import { elementRect, elementFitShift, drawnAt, teamLayout, teamCardRects, isFreeTeam, panelChild, panelLink, buildTrees, panelBgZpos, type CardChild } from './build';
 import { childDef, panelChildren, panelOfFile, unlinkedValue } from './children';
 import { kvGet } from './kv';
 import { unionBox, CORNERS, type Handle } from './guides';
@@ -29,6 +29,15 @@ import type { CrosshairArt } from '../crosshair/model';
 import { splatterDef, type SplatterId, type SplatterKind, type SplatterStyle } from './splatter';
 
 /** Keeps at least `min` units of a span on screen, whichever side it drifts to. */
+/**
+ * The stored number for a drawn target when the element is drawn `bias`
+ * away from what it stores: the target is rounded as it always was
+ * (Math.round, which is also how the X and Y boxes show a place), and the
+ * stored number is the one whose drawn place shows as that, so a place
+ * drawn at 300.5 (shown 301) stores 300 again when 301 comes back.
+ */
+const storedFor = (want: number, bias: number): number => Math.ceil(Math.round(want) - bias - 0.5) + 0;
+
 export function clampSpan(v: number, size: number, extent: number, min: number): number {
   return Math.min(extent - min, Math.max(min - size, v));
 }
@@ -681,10 +690,19 @@ export function placeElement(design: HudDesign, id: string, x: number, y: number
   if (!el || !el.move || (id === 'teamColumn' && isFreeTeam(design))) return design;
   const r = elementRect(design, id, design.aspect);
   const o = design.elements[id];
-  // A fitted container is drawn its fit offset from the stored position (build.ts elementFitShift).
+  const want = { x: clampSpan(x, r.w, screenW(design.aspect), 8), y: clampSpan(y, r.h, SCREEN_H, 8) };
+  // The stored number is not the drawn one: a fitted container is drawn its
+  // fit offset away (build.ts elementFitShift), and a centre token reads
+  // back at a half unit. So take the offset between the two at a first
+  // guess (drawnAt, the build's own arithmetic) and store through it
+  // (storedFor): a press of 1 from a place drawn at 300.5 then stores
+  // exactly 1 more, and the other axis, handed back where it is drawn,
+  // stores what it stored.
   const shift = elementFitShift(design, id);
-  const px = clampOverride('x', Math.round(clampSpan(x, r.w, screenW(design.aspect), 8)) - shift.x);
-  const py = clampOverride('y', Math.round(clampSpan(y, r.h, SCREEN_H, 8)) - shift.y);
+  const guess = { x: Math.round(want.x - shift.x), y: Math.round(want.y - shift.y) };
+  const at = drawnAt(design, id, guess.x, guess.y);
+  const px = clampOverride('x', storedFor(want.x, at.x - guess.x));
+  const py = clampOverride('y', storedFor(want.y, at.y - guess.y));
   return { ...design, elements: { ...design.elements, [id]: { ...o, x: px, y: py } } };
 }
 

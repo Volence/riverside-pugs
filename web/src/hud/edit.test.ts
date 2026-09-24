@@ -877,7 +877,8 @@ describe('placing a fitted infected health', () => {
     expect(Math.abs(r.x - 300)).toBeLessThanOrEqual(0.5);
     expect(r.y).toBe(200);
     // Stored where the unfitted container would sit: fit off and on show the same pieces in the same place.
-    expect(moved.elements.siHealth).toMatchObject({ x: 50, y: 200 });
+    // 49, not 50: 49 draws at 299.5, which the X box shows as the 300 asked for; 50 draws at 300.5, shown 301.
+    expect(moved.elements.siHealth).toMatchObject({ x: 49, y: 200 });
   });
 
   it('nudges from where it is drawn', () => {
@@ -889,6 +890,23 @@ describe('placing a fitted infected health', () => {
   });
 });
 
+describe('arrow presses at a centre-anchored place', () => {
+  // Stored 300 in 16:9 writes c-126 (300 - 426.5, the half rounded up), which reads back at 300.5.
+  for (const id of ['chat', 'siHealth', 'ownHealth', 'progressBar', 'abilityRing']) {
+    it(`moves ${id} exactly one unit on the axis pressed and never the other`, () => {
+      let d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: { [id]: { x: 300, y: 200 } } };
+      expect(elementRect(d, id, d.aspect).x % 1).toBe(0.5);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [-1, 0], [0, 1], [0, -1], [1, 0]]) {
+        const before = elementRect(d, id, d.aspect);
+        d = nudge(d, id, dx, dy);
+        const after = elementRect(d, id, d.aspect);
+        expect([after.x - before.x, after.y - before.y], `${dx},${dy}`).toEqual([dx, dy]);
+      }
+      expect(d.elements[id]).toMatchObject({ x: 300, y: 200 });
+    });
+  }
+});
+
 describe('a fitted infected health at any scale (one fit shift in build and edit)', () => {
   const SCALES = [1, 1.25, 1.33, 0.75, 1.5, 2];
   // Stored at 50, 200: on screen at every scale (stock's r387 is off the right edge at 2).
@@ -896,7 +914,7 @@ describe('a fitted infected health at any scale (one fit shift in build and edit
     { ...structuredClone(DEFAULT_DESIGN), aspect, elements: { siHealth: { fit: true, scale: k, x: 50, y: 200 } } }
   );
   const rect = (d: HudDesign) => elementRect(d, 'siHealth', d.aspect);
-  for (const aspect of ['4:3'] as const) for (const k of SCALES) {
+  for (const aspect of ['16:9', '4:3'] as const) for (const k of SCALES) {
     it(`moves exactly one unit per arrow press and never the other axis at scale ${k}, ${aspect}`, () => {
       let d = at(k, aspect);
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 0], [1, 0], [-1, 0]]) {
