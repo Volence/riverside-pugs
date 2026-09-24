@@ -317,13 +317,15 @@ function mergeChild(design: HudDesign, name: string, p: Partial<ChildOverride>, 
 /**
  * Pieces whose x moves together (the card revive trap). client.dll's player
  * panel update (1023f5df..1023f6da, the class shared by your own panel and
- * the cards) moves Health to the down picture's x while it shows and, on the
- * revive, to the x of the panel's Items child. On a card Items is the item
- * row, so a bar or row dragged sideways on its own would make the bar jump
- * after a revive. Any x edit to one moves the other by the same delta,
- * keeping the offset the file has (stock: bar 37, items 39, the 2 units the
- * stock card already jumps). Your own panel's Items is the hidden anchor
- * build.ts's reviveAnchorPass places at the bar, so it needs no link.
+ * the cards) moves Health to the down picture's x while it shows and, when
+ * it hides, to the x of the panel's Items child. On a card Items is the item
+ * row, and probe X15 (/home/volence/l4d/hud/probe-2f/x15/RESULTS.md) showed
+ * the card bar at the row's x from the first frame of the map, not only
+ * after a revive: a bar dragged alone never moved in game. Any x edit to
+ * one moves the other by the same delta, keeping the offset the file has
+ * (stock: bar 37, items 39; the game draws the stock bar at 39). Your own
+ * panel's Items is the hidden anchor build.ts's reviveAnchorPass places at
+ * the bar, so it needs no link.
  */
 const LINKED_X: Record<string, Record<string, string>> = { teamColumn: { health: 'Items', items: 'Health' } };
 

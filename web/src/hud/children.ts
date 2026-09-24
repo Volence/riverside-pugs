@@ -142,10 +142,13 @@ const HEALTH_NUMBER = block('HealthNumber', [
 ]);
 
 /**
- * The card revive trap (edit.ts LINKED_X): after a revive the game puts a
- * card's health bar at the item row's x, so the two move sideways together.
+ * The card revive trap (edit.ts LINKED_X): the game draws a card's health
+ * bar at the item row's x, not at its own. Probe X15
+ * (/home/volence/l4d/hud/probe-2f/x15/RESULTS.md): a bar dragged alone
+ * never moved in game, from the first frame of the map and after a revive;
+ * moved together with the row, it stayed put through an incap and a revive.
  */
-const REVIVE_LINK = "The health bar and the item icons move sideways together: after a revive the game puts a teammate's bar at the item row's left edge, so moving one alone would make the bar jump. While a teammate is down the game draws the bar at the Down picture's left edge.";
+const REVIVE_LINK = "The health bar and the item icons move sideways together: the game draws a teammate's bar at the item row's left edge (from the start of the map and again after every revive), so a bar moved alone would not move in game. While a teammate is down the game draws the bar at the Down picture's left edge.";
 
 const STATE_NOTE = 'The game decides when this one shows. Pick Down or Dead above the canvas to see it.';
 
