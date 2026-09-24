@@ -6,6 +6,7 @@ import {
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
+import { PassThrough } from 'node:stream';
 import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
@@ -546,6 +547,60 @@ describe('sharing a HUD', () => {
     expect((await get(MOD, `/api/community/files/previews/${'A'.repeat(64)}.png`)).statusCode).toBe(404);
     expect((await get(MOD, `/api/community/files/imports/${'a'.repeat(64)}.png`)).statusCode).toBe(404);
     expect((await get(MOD, `/api/community/files/previews/${'a'.repeat(64)}.png`)).statusCode).toBe(404);
+  });
+});
+
+describe('HUD share limits before the body is read', () => {
+  /** A share whose body stops after its first bytes until `release`, so the handler stays in flight. */
+  async function held(as: string, o: HudShare = {}) {
+    const res = new Response(hudForm(o));
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const stream = new PassThrough();
+    stream.write(bytes.subarray(0, 16));
+    const pending = app.inject({
+      method: 'POST', url: '/api/community/huds', cookies: cookie[as],
+      headers: { 'content-type': res.headers.get('content-type')! }, payload: stream,
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    return { pending, release: () => stream.end(bytes.subarray(16)) };
+  }
+
+  it('refuses a player at the HUD cap before parsing anything', async () => {
+    expect((await shareHud(A, { title: 'One HUD', preview: png(960, 540, 1) })).statusCode).toBe(200);
+    expect((await shareHud(A, { title: 'Two HUD', preview: png(960, 540, 2) })).statusCode).toBe(200);
+    const res = await app.inject({
+      method: 'POST', url: '/api/community/huds', cookies: cookie[A],
+      headers: { 'content-type': 'multipart/form-data; boundary=zz' }, payload: 'not multipart at all',
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('You are sharing 2 HUDs already. Delete one to share another.');
+  });
+
+  it('allows one HUD upload in flight per player, and two across the site', async () => {
+    const a = await held(A, { title: 'Held A', preview: png(960, 540, 1) });
+    const again = await shareHud(A, { title: 'Second A', preview: png(960, 540, 2) });
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error).toBe('Your last HUD share is still uploading; wait for it to finish.');
+
+    const b = await held(B, { title: 'Held B', preview: png(960, 540, 3) });
+    const third = await shareHud(MOD, { title: 'Mod HUD', preview: png(960, 540, 4) });
+    expect(third.statusCode).toBe(429);
+    expect(third.json().error).toBe('Other HUD shares are uploading right now; try again in a moment.');
+
+    a.release();
+    b.release();
+    expect((await a.pending).statusCode).toBe(200);
+    expect((await b.pending).statusCode).toBe(200);
+    // Both slots are free again, refusals included.
+    expect((await shareHud(MOD, { title: 'Mod HUD', preview: png(960, 540, 4) })).statusCode).toBe(200);
+    expect((await shareHud(A, { title: 'x' })).statusCode).toBe(400);
+    expect((await shareHud(A, { title: 'Second A', preview: png(960, 540, 2) })).statusCode).toBe(200);
+  });
+
+  it('refuses an oversized preview as it streams, before the details are read', async () => {
+    const res = await shareHud(A, { title: 'x', preview: png(960, 540, 2 * MB) });
+    expect(res.statusCode).toBe(413);
+    expect(res.json().error).toBe('The preview is over 1.5 MB.');
   });
 });
 
