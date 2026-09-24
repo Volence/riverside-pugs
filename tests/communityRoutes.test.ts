@@ -207,6 +207,37 @@ describe('listing', () => {
   });
 });
 
+describe('a banned author', () => {
+  /** A ban row only, as in the minute before the reaper sets status. */
+  const banRow = (id: string, expires: string | null = null) => db.prepare(
+    `INSERT INTO bans (player_id, reason, created_by, created_at, expires_at) VALUES (?, 'x', ?, ?, ?)`,
+  ).run(id, MOD, new Date().toISOString(), expires);
+
+  it('cannot have their entries liked, by status or by the bans table', async () => {
+    const id = await shareId(A);
+    db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(A);
+    expect((await inject(B, 'PUT', `/api/community/${id}/like`)).statusCode).toBe(404);
+    db.prepare("UPDATE players SET status = 'active' WHERE steamid = ?").run(A);
+    banRow(A);
+    expect((await inject(B, 'PUT', `/api/community/${id}/like`)).statusCode).toBe(404);
+    expect((await inject(B, 'DELETE', `/api/community/${id}/like`)).statusCode).toBe(404);
+  });
+
+  it('is hidden from the gallery, the entry and the files by an active ban row alone', async () => {
+    const id = await shareId(A);
+    const preview = png(960, 540, 3);
+    expect((await shareHud(A, { preview })).statusCode).toBe(200);
+    banRow(A, '2000-01-01T00:00:00.000Z');
+    expect((await list(null)).json().entries).toHaveLength(1);
+    banRow(A);
+    expect((await list(null)).json()).toMatchObject({ entries: [], total: 0 });
+    expect((await list(null, 'kind=hud')).json().entries).toHaveLength(0);
+    expect((await inject(null, 'GET', `/api/community/${id}`)).statusCode).toBe(404);
+    expect((await inject(MOD, 'GET', `/api/community/${id}`)).statusCode).toBe(200);
+    expect((await inject(null, 'GET', `/api/community/files/previews/${sha(preview)}.png`)).statusCode).toBe(404);
+  });
+});
+
 describe('delete', () => {
   it('is the author only, and staff still see the tombstone', async () => {
     const id = await shareId(A);
