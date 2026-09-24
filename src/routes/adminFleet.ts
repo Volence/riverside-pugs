@@ -29,8 +29,10 @@ export async function adminFleetRoutes(app: FastifyInstance, opts: FleetRouteOpt
     if (!rel) return null;
     try {
       await rel.repo.fetch();
-      const deployed = db.prepare(`SELECT sources_json FROM releases WHERE kind = 'deploy'
-        AND state IN ('deploying','canary_wait','done','halted') ORDER BY id DESC LIMIT 1`).get() as { sources_json: string } | undefined;
+      // The newest release that is actually on some box: a halted release that
+      // reached nothing, or one undone everywhere, is not the fleet's reference.
+      const deployed = db.prepare(`SELECT r.sources_json FROM releases r JOIN release_boxes rb ON rb.release_id = r.id
+        WHERE r.kind = 'deploy' AND rb.state IN ('written','restarted','confirmed') ORDER BY r.id DESC LIMIT 1`).get() as { sources_json: string } | undefined;
       const commit = deployed ? (JSON.parse(deployed.sources_json) as { commit: string }[])[0].commit : await rel.repo.resolve('master');
       const tree = await rel.repo.tree(commit);
       const shared: Record<string, FileSig> = {};

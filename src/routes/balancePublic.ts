@@ -37,7 +37,20 @@ export async function balancePublicRoutes(app: FastifyInstance, opts: BalancePub
     console.error('[balance] values page disabled, balance/catalogue.json failed to load:', err);
   }
   const noCatalogue = { error: 'balance/catalogue.json failed to load' };
-  app.get('/api/balance/values', async (_req, reply) => (catalogue ? gameValues(db, catalogue, { admin: false }) : reply.code(503).send(noCatalogue)));
+  // Public and unauthenticated: cached until any patch changes (name,
+  // publish, triage, a new sighting) or a minute passes.
+  let cached: { stamp: string; at: number; value: ReturnType<typeof gameValues> } | null = null;
+  const valuesStamp = () => JSON.stringify(db.prepare(`SELECT COUNT(*) AS n, MAX(id) AS m,
+    GROUP_CONCAT(COALESCE(triage,'') || COALESCE(folded_into,'') || COALESCE(published_at,'') || COALESCE(name,''), '|') AS s
+    FROM balance_patches`).get());
+  app.get('/api/balance/values', async (_req, reply) => {
+    if (!catalogue) return reply.code(503).send(noCatalogue);
+    const stamp = valuesStamp();
+    if (!cached || cached.stamp !== stamp || Date.now() - cached.at > 60_000) {
+      cached = { stamp, at: Date.now(), value: gameValues(db, catalogue, { admin: false }) };
+    }
+    return cached.value;
+  });
   app.get('/api/admin/balance/values', async (req, reply) => {
     if (!requireAdmin(req, reply)) return reply;
     return catalogue ? gameValues(db, catalogue, { admin: true }) : reply.code(503).send(noCatalogue);

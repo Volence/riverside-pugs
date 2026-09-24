@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../src/db.js';
 import { addServer } from '../src/serverPool.js';
 import { subscribeAdminEvents } from '../src/adminFeed.js';
-import { diffInventories, fingerprintOf, formatDiff, listPatches, recordBalanceSighting, refingerprintPatches, withoutIgnored } from '../src/balancePatches.js';
+import { diffInventories, fingerprintOf, formatDiff, listPatches, recordBalanceSighting, refingerprintPatches, watchListOnly, withoutIgnored } from '../src/balancePatches.js';
 
 const INV = { 'c:z_tank_health': '4000', 'p:l4d_skypounce.smx': '100.aaaa0001', 'p:pug-match.smx': '200.bbbb0001' };
 
@@ -149,6 +149,11 @@ describe('recordBalanceSighting', () => {
     const c = recordBalanceSighting(db, { matchId: 1, serverId: 2, half: 1, inventory: grown, versionless: [] });
     expect(c).toMatchObject({ patchId: b.patchId, effectivePatchId: a.patchId });
     expect(problems).toEqual([]);
+  });
+
+  it('a cvar that vanishes (c: to x:) is a real change, not a watch-list change', () => {
+    expect(watchListOnly({ 'c:z_foo': '5', 'p:a.smx': '1' }, { 'x:z_foo': 'missing', 'p:a.smx': '1' }, [])).toBe(false);
+    expect(watchListOnly({ 'c:z_foo': '5' }, { 'c:z_foo': '5', 'c:z_bar': '1' }, [])).toBe(true);
   });
 
   it('a changed value or a new plugin still asks for triage', () => {

@@ -55,14 +55,16 @@ export function gameValues(db: DB, cat: Catalogue, opts: { admin: boolean }): Ga
 
   const valueView = (v: CatalogueValue): ValueView => {
     const key = keyOf(v);
-    let lastChange: ValueView['lastChange'] = null;
+    let changed: { at: string; id: number } | null = null;
     let prev: string | undefined;
     for (const p of parsed) {
       const val = p.inv[key];
       if (val === undefined) continue;
-      if (prev !== undefined && !same(prev, val)) lastChange = { at: p.first_seen_at, patch: patchView(p.id) };
+      if (prev !== undefined && !same(prev, val)) changed = { at: p.first_seen_at, id: p.id };
       prev = val;
     }
+    // Resolved once, for the last change only.
+    const lastChange: ValueView['lastChange'] = changed ? { at: changed.at, patch: patchView(changed.id) } : null;
     let raw = inv[key];
     if (raw !== undefined && v.source === 'weapon' && raw === 'default') raw = v.vanilla ?? 'game default';
     const status: ValueView['status'] = v.hideLive ? 'hidden' : raw === undefined ? 'not_reported' : 'reported';

@@ -19,6 +19,8 @@ const FETCH_EVERY_MS = 60_000;
 export class DeployRepo {
   private fetchedAt: number | null = null;
   private trees = new Map<string, RepoFile[]>();
+  /** Blobs are content-addressed, so a blob's sha256 never changes. */
+  private blobSha = new Map<string, string>();
 
   constructor(private opts: { url: string; dir: string; keyPath?: string | null; now?: () => number }) {}
 
@@ -73,8 +75,12 @@ export class DeployRepo {
       const tab = rec.indexOf('\t');
       const [mode, type, blob, size] = rec.slice(0, tab).split(/\s+/);
       if (type !== 'blob') continue;
-      const bytes = await this.blob(blob);
-      files.push({ path: rec.slice(tab + 1), mode, blob, size: Number(size), sha256: createHash('sha256').update(bytes).digest('hex') });
+      let sha256 = this.blobSha.get(blob);
+      if (!sha256) {
+        sha256 = createHash('sha256').update(await this.blob(blob)).digest('hex');
+        this.blobSha.set(blob, sha256);
+      }
+      files.push({ path: rec.slice(tab + 1), mode, blob, size: Number(size), sha256 });
     }
     this.trees.set(hash, files);
     return files;

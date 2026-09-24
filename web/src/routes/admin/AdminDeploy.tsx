@@ -39,7 +39,7 @@ export function AdminDeploy() {
           ))}
         </ul>
       </Panel>
-      {review.data && <ReviewPanel r={review.data} busy={busy} devMode={d.devMode} inFlight={d.inFlight} run={run} />}
+      {review.data && <ReviewPanel key={review.data.id} r={review.data} busy={busy} devMode={d.devMode} inFlight={d.inFlight} run={run} />}
       <Panel>
         <h3>History</h3>
         {d.releases.length === 0 ? <p class="muted">No releases yet.</p> : d.releases.map((r) => <HistoryRow key={r.id} r={r} busy={busy} run={run} />)}

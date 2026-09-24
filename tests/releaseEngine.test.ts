@@ -35,7 +35,7 @@ describe('ReleaseEngine', () => {
     { path: B, op: 'write', kind: 'add', size: 2, sha256: sha('B1'), blob: 'bb' },
   ];
   function stage(ops: Op[] = plan) {
-    const id = Number(db.prepare("INSERT INTO releases (kind, sources_json, state, created_by, created_at) VALUES ('deploy', '[]', 'staged', '1', 'x')").run().lastInsertRowid);
+    const id = Number(db.prepare("INSERT INTO releases (kind, sources_json, state, created_by, created_at) VALUES ('deploy', '[]', 'staged', '1', datetime('now'))").run().lastInsertRowid);
     for (const s of [s1, s2]) db.prepare("INSERT INTO release_boxes (release_id, server_id, state, plan_json, shipped_json, updated_at) VALUES (?, ?, 'staged', ?, '{}', 'x')").run(id, s, JSON.stringify(ops));
     return id;
   }
@@ -65,7 +65,7 @@ describe('ReleaseEngine', () => {
     const e = engine();
     const id = stage();
     expect(e.deploy(id, { targets: [s1, s2], canary: null, balance: later, adminId: '1' })).toEqual({ ok: true });
-    await e.tick();
+    await e.tick(); await e.settled();
     expect(boxes[s1].fs.get(A)!.toString()).toBe('A2');
     expect(boxes[s2].fs.get(B)!.toString()).toBe('B1');
     expect(boxState(id, s1).state).toBe('restarted');
@@ -79,7 +79,7 @@ describe('ReleaseEngine', () => {
     const e = engine();
     const id = stage();
     e.deploy(id, { targets: [s1, s2], canary: null, balance: later, adminId: '1' });
-    await e.tick();
+    await e.tick(); await e.settled();
     expect(boxes[s1].fs.get(A)!.toString()).toBe('A1');
     expect(boxes[s1].fs.has(B)).toBe(false);
     expect(boxState(id, s1)).toEqual({ state: 'failed', error: expect.stringMatching(/disk full/) });
@@ -93,7 +93,7 @@ describe('ReleaseEngine', () => {
     const e = engine();
     const id = stage();
     e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
-    await e.tick();
+    await e.tick(); await e.settled();
     expect(boxState(id, s1).state).toBe('failed');
     expect(boxState(id, s2).state).toBe('skipped');
   });
@@ -102,14 +102,14 @@ describe('ReleaseEngine', () => {
     const e = engine();
     const id = stage();
     e.deploy(id, { targets: [s1, s2], canary: s2, balance: later, adminId: '1' });
-    await e.tick();
+    await e.tick(); await e.settled();
     expect(boxState(id, s2).state).toBe('restarted');
     expect(boxState(id, s1).state).toBe('pending');
     expect(relState(id)).toBe('canary_wait');
-    await e.tick();
+    await e.tick(); await e.settled();
     expect(boxState(id, s1).state).toBe('pending');
     expect(e.continueRelease(id, '1')).toEqual({ ok: true });
-    await e.tick();
+    await e.tick(); await e.settled();
     expect(boxState(id, s1).state).toBe('restarted');
     expect(relState(id)).toBe('done');
 
@@ -117,7 +117,7 @@ describe('ReleaseEngine', () => {
     const id2 = stage([plan[0]]);
     boxes[s2].fs.set(A, Buffer.from('A1'));
     e.deploy(id2, { targets: [s1, s2], canary: s2, balance: later, adminId: '1' });
-    await e.tick();
+    await e.tick(); await e.settled();
     expect(relState(id2)).toBe('halted');
     expect(boxState(id2, s1).state).toBe('skipped');
   });
@@ -127,7 +127,7 @@ describe('ReleaseEngine', () => {
     const e = engine();
     const id = stage();
     e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
-    await e.tick();
+    await e.tick(); await e.settled();
     expect(boxState(id, s1).state).toBe('waiting');
     db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(s1); // the releaser is restarting it
     await e.forRelease(s1);
@@ -135,12 +135,54 @@ describe('ReleaseEngine', () => {
     expect(restarts).toEqual([]); // the releaser does the restart
   });
 
+  it('never touches a parked (offline) box outside the release hook', async () => {
+    db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(s1);
+    const e = engine();
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(boxState(id, s1).state).toBe('waiting');
+    expect(boxes[s1].fs.get(A)!.toString()).toBe('A1');
+    expect(getServer(db, s1)!.status).toBe('offline');
+  });
+
+  it('refuses a stale plan and an undo under a newer release', async () => {
+    const e = engine();
+    const older = stage();
+    db.prepare("UPDATE releases SET created_at = '2000-01-01 00:00:00' WHERE id = ?").run(older);
+    const newer = stage();
+    e.deploy(newer, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(e.deploy(older, { targets: [s1], canary: null, balance: later, adminId: '1' })).toMatchObject({ ok: false, status: 409, error: expect.stringMatching(/review this commit again/) });
+    // An older deployed release on the same box cannot be undone past the newer one.
+    db.prepare("UPDATE releases SET state = 'done', deployed_at = '2000-01-01 00:00:00' WHERE id = ?").run(older);
+    db.prepare("UPDATE release_boxes SET state = 'restarted' WHERE release_id = ? AND server_id = ?").run(older, s1);
+    expect(e.undo(older, [s1], '1')).toMatchObject({ ok: false, status: 409, error: expect.stringMatching(/undo it first/) });
+  });
+
+  it('the release hook is capped behind a slow box', async () => {
+    let release!: () => void;
+    const slow = new Promise<void>((r) => { release = r; });
+    boxes[s2].w.read = async (p) => { await slow; return boxes[s2].fs.get(p) ?? null; };
+    const e = engine({ hookCapMs: 20 });
+    const id = stage();
+    e.deploy(id, { targets: [s1, s2], canary: null, balance: later, adminId: '1' });
+    db.prepare("UPDATE servers SET status = 'live' WHERE id = ?").run(s1);
+    const t = e.tick();
+    db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(s1);
+    const started = Date.now();
+    await e.forRelease(s1);
+    expect(Date.now() - started).toBeLessThan(1000);
+    release();
+    await t; await e.settled();
+  });
+
   it('waits for the box to empty, up to a limit, before restarting', async () => {
     let n = 2;
     const e = engine({ humans: async () => n--, emptyWaitMs: 10_000, emptyPollMs: 1 });
     const id = stage();
     e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
-    await e.tick();
+    await e.tick(); await e.settled();
     expect(restarts).toEqual([s1]);
     expect(n).toBe(-1);
   });
@@ -160,10 +202,10 @@ describe('ReleaseEngine', () => {
     const e = engine();
     const id = stage();
     e.deploy(id, { targets: [s1, s2], canary: null, balance: later, adminId: '1' });
-    await e.tick();
+    await e.tick(); await e.settled();
     const u = e.undo(id, [s1], '1');
     expect(u).toMatchObject({ ok: true });
-    await e.tick();
+    await e.tick(); await e.settled();
     expect(boxes[s1].fs.get(A)!.toString()).toBe('A1');
     expect(boxes[s1].fs.has(B)).toBe(false);
     expect(boxes[s2].fs.get(A)!.toString()).toBe('A2'); // not undone

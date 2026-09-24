@@ -72,7 +72,7 @@ export function sftpTreeWriter(cfg: {
   host: string; port: number; user: string; keyPath: string; gameDir: string;
   runIn?: (cmd: string, args: string[], input?: Buffer) => Promise<Buffer>;
 }): TreeWriter {
-  const common = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-i', cfg.keyPath];
+  const common = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'StrictHostKeyChecking=accept-new', '-i', cfg.keyPath];
   const run = cfg.runIn ?? defaultRunIn;
   const ssh = (script: string, input?: Buffer) => run('ssh', [...common, '-p', String(cfg.port), `${cfg.user}@${cfg.host}`, script], input);
   const abs = (p: string) => { assertWritable(p); return posix.join(cfg.gameDir, p); };

@@ -101,7 +101,7 @@ export function sftpTreeReader(cfg: {
   host: string; port: number; user: string; keyPath: string; gameDir: string;
   run?: (cmd: string, args: string[]) => Promise<{ stdout: string }>;
 }): TreeReader {
-  const common = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-i', cfg.keyPath];
+  const common = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'StrictHostKeyChecking=accept-new', '-i', cfg.keyPath];
   const run = cfg.run ?? (async (cmd: string, args: string[]) => {
     const { stdout } = await execFileAsync(cmd, args, { maxBuffer: 32 << 20 });
     return { stdout };
