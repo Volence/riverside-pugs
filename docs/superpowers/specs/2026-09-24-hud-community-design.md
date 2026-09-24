@@ -463,7 +463,7 @@ joins that player's ticket, as every other report does.
 - It must name an existing entry whose author is the report's target. Otherwise it gets a 400: "that
   entry is not theirs".
 - It is stored in `ticket_reports.community_entry_id`.
-- The duplicate rule for such a report is "one report per reporter per entry, ever". The rule "one open
+- The duplicate rule for such a report is "one report per reporter per entry, ever", counted separately for a safety report and a normal one (as every other duplicate rule is). The rule "one open
   report per player" is not applied to it, so a player can report someone's HUD without losing the
   ability to report their behaviour.
 - `ticketDetail` returns `entry: { id, kind, title, removed }` on each report. The staff ticket page links

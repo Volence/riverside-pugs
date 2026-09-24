@@ -163,6 +163,17 @@ describe('fileReport about a shared entry', () => {
     expect(fileReport(db, R1, { targetId: ACCUSED, category: 'toxicity', text: '', entryId: id }, deps)).toMatchObject({ status: 409 });
   });
 
+  it('keeps a safety report about an entry apart from a normal one about the same entry', () => {
+    const id = entry(ACCUSED);
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'toxicity', text: '', entryId: id }, deps)).toMatchObject({ ok: true });
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'unsafe', text: 'the art names my address', entryId: id }, deps))
+      .toMatchObject({ ok: true });
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'unsafe', text: 'again', entryId: id }, deps)).toMatchObject({ status: 409 });
+    const other = entry(ACCUSED);
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'unsafe', text: 'first safety', entryId: other }, deps)).toMatchObject({ ok: true });
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'toxicity', text: '', entryId: other }, deps)).toMatchObject({ ok: true });
+  });
+
   it('refuses an entry that is not the target\'s, gone, or not an id', () => {
     const theirs = entry(R3);
     expect(fileReport(db, R1, { targetId: ACCUSED, category: 'toxicity', text: '', entryId: theirs }, deps))
