@@ -747,6 +747,13 @@ preview draws them). Also answers S4 (red box alpha against the preview) and S9 
   while crouched (`b1v2/shots/crops/ownbig-b.png` shown at about x 1870 to 1905, y 955 to 1000;
   `ownbig-a.png` absent; in B1 the 100-wide panel clipped it away, `b1/shots/crops/duck-b.png`).
   The Tint control is offered; `stateArt: 'crouched'` stands, no preview change.
+- **Q1: YES, whole panel, gate passed (G1).** `monochrome_color` on a HealthPanel recolours the own
+  bar fill (tinting its shaded texture, FE00FE top to B600B6 bottom, not a flat paint), its outline,
+  the HealthNumber, the HealthIcon cross and the scratches, at 100 and at 40 health
+  (`b1/shots/crops/own-a.png`, `own-c.png`); on teammate cards the bar and the number, still cyan at
+  35 health and on the down card's number (`b1/shots/crops/card1-a.png`, `b1v3/shots/crops/cards-hurt.png`).
+  The control is "Panel colour" on the own and the teammate `Health`, each with a note of what it
+  recolours; no Healthy-only branch. Audit C.7 ("bar fill colour impossible") is overturned.
 
 ### B2. Survivor: every element hidden with `visible 0` only (one launch)
 

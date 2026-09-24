@@ -1314,7 +1314,7 @@ describe('Hud page', () => {
     expect(screen.getByText('The game fills the bar by health.')).toBeTruthy();
     expect(screen.queryByText("Edits inside a card apply to every teammate's card.")).toBeNull();
     for (const l of ['X', 'Y', 'W', 'H']) expect(screen.getByLabelText(l), l).toBeTruthy();
-    expect(screen.queryByText('Panel colour')).toBeNull();
+    expect(screen.getByText('Panel colour')).toBeTruthy();              // probe Q1 passed (slice 2.F G1)
     expect(screen.queryByText('Inset')).toBeNull();
     // Probe B1 Q5: the game colours the cross by health whatever the file says.
     fireEvent.click(layer('Your health').getByRole('button', { name: 'Health cross' }));
@@ -2143,6 +2143,7 @@ describe('Your own health on the page', () => {
   });
 
   it('shows the bar its box and note, and the Panel colour and Inset only once their probes pass', async () => {
+    _setProbe('Q1', false);
     render(<Hud />);
     fireEvent.click(own().getByRole('button', { name: 'Health bar' }));
     for (const l of ['X', 'Y', 'W', 'H']) expect(screen.getByLabelText(l), l).toBeTruthy();
@@ -2163,6 +2164,46 @@ describe('Your own health on the page', () => {
     await waitFor(() => expect(saved().children?.ownHealth?.Health?.keys?.inset).toBe('3'));
     fireEvent.input(screen.getByLabelText('Panel colour colour'), { target: { value: '#ff00ff' } });
     await waitFor(() => expect(saved().children?.ownHealth?.Health?.keys?.monochrome_color).toBe('255 0 255 255'));
+  });
+
+  it('offers the Panel colour on your health bar and on the teammate bar, each with its note (probe Q1)', () => {
+    // /home/volence/l4d/hud/probe-phase2/RESULTS.md Q1: the whole own panel; on cards the bar and the number.
+    render(<Hud />);
+    fireEvent.click(own().getByRole('button', { name: 'Health bar' }));
+    expect(screen.getByLabelText('Panel colour colour')).toBeTruthy();
+    expect(screen.getByText('Recolours the whole panel: bar, number, cross and scratches, in every health state.')).toBeTruthy();
+    fireEvent.click(layer('Teammates').getByRole('button', { name: 'Health bar' }));
+    expect(screen.getByLabelText('Panel colour colour')).toBeTruthy();
+    expect(screen.getByText('Recolours the bar and the number on every card.')).toBeTruthy();
+  });
+
+  it('draws your health number in the Panel colour once it is set', async () => {
+    _resetAssetCache();
+    _setImageFactory((url) => ({ src: url, complete: true, naturalWidth: 64, naturalHeight: 64, onload: null, onerror: null }) as unknown as HTMLImageElement);
+    const texts: { s: string; fill: string }[] = [];
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement) {
+      const canvas = this;
+      const state: Record<string | symbol, unknown> = { fillStyle: '' };
+      return new Proxy(state, {
+        get: (t, k) => {
+          if (k === 'canvas') return canvas;
+          if (k in t) return t[k];
+          return (...a: unknown[]) => {
+            if (k === 'fillText') texts.push({ s: a[0] as string, fill: String(t.fillStyle) });
+            if (k === 'getImageData') return { data: new Uint8ClampedArray(4) };
+            if (k === 'measureText') return { width: 10 };
+            if (k === 'createLinearGradient' || k === 'createRadialGradient') return { addColorStop() {} };
+            return undefined;
+          };
+        },
+        set: (t, k, v) => { t[k] = v; return true; },
+      }) as never;
+    } as never);
+    render(<Hud />);
+    expect(texts.filter((t) => t.s === '100').at(-1)!.fill).toBe('rgba(10,177,50,1)');
+    fireEvent.click(own().getByRole('button', { name: 'Health bar' }));
+    fireEvent.input(screen.getByLabelText('Panel colour colour'), { target: { value: '#ff00ff' } });
+    await waitFor(() => expect(texts.filter((t) => t.s === '100').at(-1)!.fill).toBe('rgba(255,0,255,1)'));
   });
 
   it('offers the crouch icon tint and saves it as the piece colour (probe Q8)', async () => {

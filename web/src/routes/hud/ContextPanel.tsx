@@ -3,6 +3,7 @@
  * registries (elements.ts, children.ts), with every default read back from
  * the generator, so a freshly reset thing shows real numbers.
  */
+import { Fragment } from 'preact';
 import {
   clampOverride, clampChild, clampWeapon, WEAPON_KEYS, WEAPON_BOX_COLOUR,
   type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type ChildRangeKey,
@@ -477,11 +478,14 @@ export function ChildControls(
         </div>
       )}
       {def.keys?.filter((k) => !k.gate || probe(k.gate)).map((k) => (
-        <KeyControl
-          key={k.key} def={k} end={end}
-          value={o.keys?.[k.key] ?? info.keys?.[k.key] ?? keyDefault(k)}
-          onValue={(v, mode) => patch({ keys: { ...o.keys, [k.key]: v } }, mode)}
-        />
+        <Fragment key={k.key}>
+          <KeyControl
+            def={k} end={end}
+            value={o.keys?.[k.key] ?? info.keys?.[k.key] ?? keyDefault(k)}
+            onValue={(v, mode) => patch({ keys: { ...o.keys, [k.key]: v } }, mode)}
+          />
+          {k.note && <p class="muted hud__note">{k.note}</p>}
+        </Fragment>
       ))}
       {def.note && <p class="muted hud__note">{def.note}</p>}
       {repeatsCards(panel) && <p class="muted hud__note">{EVERY_CARD}</p>}

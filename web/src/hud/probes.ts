@@ -22,7 +22,7 @@
 export type ProbeId = 'Q1' | 'Q2' | 'Q3' | 'Q8';
 
 export const PROBES: Readonly<Record<ProbeId, { passed: boolean; batch: string; question: string }>> = {
-  Q1: { passed: false, batch: 'B1 (a), (c)', question: 'monochrome_color on a HudHealth bar draws the fill in that one colour' },
+  Q1: { passed: true, batch: 'B1 (a), (c)', question: 'monochrome_color on a HealthPanel recolours the whole panel (fill, outline, number, cross, scratches) in every state' },
   Q2: { passed: false, batch: 'B1 (a)', question: 'LocalPlayer clips its children and does not paint its own image' },
   Q3: { passed: false, batch: 'B1 (a)', question: 'inset draws the fill inset inside an outline' },
   Q8: { passed: true, batch: 'B1 (b)', question: 'the crouch icon keeps a file drawColor and shows only while crouched' },

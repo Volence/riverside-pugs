@@ -449,9 +449,11 @@ describe('children of every registered panel', () => {
       HealthIcon: { color: '0 0 255 255' }, DuckingIcon: { color: '255 0 255 255' },
       Health: { x: 4, keys: { monochrome_color: '255 0 255 255', inset: 3 } },
     } } };
-    // Q8 passed (slice 2.F G5): the crouch icon's colour is kept by default; the others wait for their gates.
-    expect(validateDesign(raw).children.ownHealth).toEqual({ DuckingIcon: { color: '255 0 255 255' }, Health: { x: 4 } });
-    _setProbe('Q8', false);
+    // Q8 and Q1 passed (slice 2.F G5, G1): the crouch icon's colour and the panel colour are kept by
+    // default; the inset waits for Q3.
+    expect(validateDesign(raw).children.ownHealth).toEqual({
+      DuckingIcon: { color: '255 0 255 255' }, Health: { x: 4, keys: { monochrome_color: '255 0 255 255' } } });
+    _setProbe('Q8', false); _setProbe('Q1', false);
     expect(validateDesign(raw).children.ownHealth).toEqual({ Health: { x: 4 } });
     try {
       _setProbe('Q1', true); _setProbe('Q3', true); _setProbe('Q8', true);
