@@ -137,17 +137,90 @@ function readings(src: string): Token[][][] | null {
 // space, so it can only be the start of a command split across tokens.
 const ENGINE_QUOTED = /^\s*engine\s/i;
 
-/** The words the animation controller uses for display. Everything else, such as FireCommand, is refused. */
-const ANIMATION_COMMANDS = new Set([
-  'event', 'animate', 'runevent', 'runeventchild', 'stopevent', 'stopanimation', 'stoppanelanimations',
-  'setvisible', 'setfont', 'settexture', 'setstring',
-]);
-// The controller reads a token stream, not lines, so a command can hide after
-// another on the same line, and its tokenizer is not the KeyValues one (a
-// word runs through a quote, for one). These are refused anywhere in the
-// file, as a raw substring in any case, comments included: no stock file
-// holds any of them, so nothing real is lost.
+/**
+ * The animation commands a HUD may use, each with the number of arguments
+ * the controller reads after it. Animate reads panel, variable, value and
+ * interpolator, one more when the interpolator is Pulse or Flicker, then a
+ * start time and a duration. L4D1's controller knows Animate, RunEvent,
+ * StopEvent, StopAnimation, StopPanelAnimations, SetFont, SetTexture and
+ * SetString; RunEventChild and SetVisible come from later engines, where they
+ * are display-only too, and L4D1 fails to parse a file that uses them.
+ */
+const ANIMATION_ARGS: Record<string, number> = {
+  animate: 6, runevent: 2, runeventchild: 3, stopevent: 2, stopanimation: 3, stoppanelanimations: 2,
+  setvisible: 3, setfont: 4, settexture: 4, setstring: 4,
+};
+const INTERPOLATOR_WITH_ARG = new Set(['pulse', 'flicker']);
+// Other engines' controllers also know these, which run console commands,
+// play sounds or take the mouse. They are refused anywhere in the file, as a
+// raw substring in any case, comments included, so no reading of the file
+// can reach one: no stock file holds any of them, so nothing real is lost.
 const ANIMATION_DENIED = ['firecommand', 'playsound', 'setinputenabled'];
+
+/**
+ * hudanimations.txt as the controller's tokenizer (Source's ParseFile) reads
+ * it, which is not the KeyValues one: whitespace is any byte up to a space;
+ * `//` where a token would start runs to the end of the line; a quoted
+ * string runs to the next quote; the break characters { } ( ) ' : are tokens
+ * of their own; and a word runs to whitespace or a break character, straight
+ * through a quote or a `//`. Everything this reading could get wrong is
+ * refused instead: ( ) ' : outside comments (the stock files have none), a
+ * byte above 0x7f outside comments and strings (the game's signed char makes
+ * it whitespace), and a quoted string that does not close on its line.
+ * Then the tokens must be a run of `event <name> { <commands> }`, each
+ * command one on ANIMATION_ARGS with its full count of arguments, so every
+ * token the controller would run as a command is checked, wherever it sits
+ * on a line.
+ */
+function animationProblem(path: string, src: string): string | null {
+  const tokens: string[] = [];
+  let i = 0;
+  while (i < src.length) {
+    const code = src.charCodeAt(i);
+    if (code <= 0x20) { i++; continue; }
+    if (src[i] === '/' && src[i + 1] === '/') {
+      while (i < src.length && src[i] !== '\n') i++;
+      continue;
+    }
+    if (src[i] === '"') {
+      const end = src.indexOf('"', i + 1);
+      const line = src.slice(i + 1, end < 0 ? src.length : end);
+      if (end < 0 || /[\r\n]/.test(line)) return `${path} has a quoted string that does not close on its line`;
+      tokens.push(line);
+      i = end + 1;
+      continue;
+    }
+    if (src[i] === '{' || src[i] === '}') { tokens.push(src[i]!); i++; continue; }
+    let word = '';
+    while (i < src.length && src.charCodeAt(i) > 0x20 && src[i] !== '{' && src[i] !== '}') {
+      const c = src[i]!;
+      if (c === '(' || c === ')' || c === "'" || c === ':') return `${path} has a ${c} outside a comment, which a HUD may not`;
+      if (src.charCodeAt(i) > 0x7f) return `${path} has a character outside ASCII outside a comment or string`;
+      word += c;
+      i++;
+    }
+    tokens.push(word);
+  }
+
+  let t = 0;
+  const notEvents = `${path} is not a run of animation events`;
+  while (t < tokens.length) {
+    if (tokens[t++]!.toLowerCase() !== 'event') return notEvents;
+    if (t + 2 > tokens.length || tokens[t + 1] !== '{') return notEvents;
+    t += 2;
+    for (;;) {
+      if (t >= tokens.length) return notEvents;
+      const word = tokens[t++]!;
+      if (word === '}') break;
+      let args = ANIMATION_ARGS[word.toLowerCase()];
+      if (args === undefined) return `${path} uses ${word}, which a HUD may not`;
+      if (word.toLowerCase() === 'animate' && t + 3 < tokens.length && INTERPOLATOR_WITH_ARG.has(tokens[t + 3]!.toLowerCase())) args++;
+      if (t + args > tokens.length) return notEvents;
+      t += args;
+    }
+  }
+  return null;
+}
 
 function textProblem(path: string, data: Uint8Array, animations: boolean): string | null {
   if (data.includes(0)) return `${path} has a NUL byte`;
@@ -159,6 +232,7 @@ function textProblem(path: string, data: Uint8Array, animations: boolean): strin
       const at = lower.indexOf(w);
       if (at >= 0) return `${path} uses ${src.slice(at, at + w.length)}, which a HUD may not`;
     }
+    return animationProblem(path, src);
   }
   const all = readings(src);
   if (all === null) return `${path} has a quoted string that does not close on its line`;
@@ -168,11 +242,6 @@ function textProblem(path: string, data: Uint8Array, animations: boolean): strin
         if (t.quoted ? ENGINE_QUOTED.test(t.value) : t.value.toLowerCase() === 'engine') {
           return `${path} runs a console command`;
         }
-      }
-      if (!animations) continue;
-      const first = tokens.find((t) => t.value !== '{' && t.value !== '}');
-      if (first && !ANIMATION_COMMANDS.has(first.value.toLowerCase())) {
-        return `${path} uses ${first.value}, which a HUD may not`;
       }
     }
   }
