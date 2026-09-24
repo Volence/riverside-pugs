@@ -10,6 +10,11 @@ describe('parseKv', () => {
     ] }] }]);
   });
 
+  it('reads a form feed or vertical tab as whitespace, as the game does, so a comment after one stays a comment', () => {
+    const t = parseKv('"Root"\n{\n\t"labelText" a\f// "command" "engine quit"\n\t"x"\v1\n}\n');
+    expect(t).toEqual([{ key: 'Root', value: [{ key: 'labelText', value: 'a' }, { key: 'x', value: '1' }] }]);
+  });
+
   it('keeps conditionals on values and on blocks', () => {
     const t = parseKv('A { "6" "resource/marlett.ttf" [$OSX]\n B [$X360] { k v } }');
     const a = t[0].value as ReturnType<typeof parseKv>;
