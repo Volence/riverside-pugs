@@ -32,6 +32,12 @@ export interface Phase {
   by?: string;
 }
 
+/** Where a round sits in its map's SourceTV demo (pug-match 0.3.12 on).
+ *  `tick` is the demo tick at which the half went live, the moment every t_ms
+ *  of that round counts from, and `hz` is the server tickrate, so a moment
+ *  t_ms into the round is demo tick `tick + round(t_ms * hz / 1000)`. */
+export interface DemoSync { tick: number; hz: number }
+
 export type LogEvent =
   | { kind: 'match_start'; token: string; map: string }
   | { kind: 'map_result'; token: string; map: string; a: number; b: number }
@@ -80,7 +86,7 @@ export type LogEvent =
   // datagram with no retransmit: losing it left a fabricated side recorded as
   // reliable. An absent field is the honest signal, and the round is stored
   // unreliable until ROUND_END supplies the real one.
-  | { kind: 'round_start'; token: string; map: string; half: number; surv: 'a' | 'b' | null }
+  | { kind: 'round_start'; token: string; map: string; half: number; surv: 'a' | 'b' | null; demo?: DemoSync }
   // `map` rides along so recordRoundEnd can resolve the round to the map it
   // actually belongs to rather than to whatever had finished by arrival time.
   // `alive` is how many survivors were still standing when the round ended,
@@ -88,7 +94,7 @@ export type LogEvent =
   // absent or malformed, NOT that nobody survived: zero is a real, and the
   // most interesting, value. Optional for the same reason `map` is, an older
   // plugin does not send it.
-  | { kind: 'round_end'; token: string; map: string | null; half: number; surv: 'a' | 'b'; score: number; alive: number | null }
+  | { kind: 'round_end'; token: string; map: string | null; half: number; surv: 'a' | 'b'; score: number; alive: number | null; demo?: DemoSync }
   | { kind: 'balance_part'; token: string; half: 1 | 2; part: number; items: Record<string, string> }
   | { kind: 'balance_end'; token: string; half: 1 | 2; parts: number; items: number }
   | { kind: 'round_stat'; token: string; half: 1 | 2; steamid: string; stats: Record<string, number> }
@@ -201,6 +207,16 @@ function kv(parts: string[]): Record<string, string> {
 function intOf(s: string | undefined): number | null {
   if (s === undefined || !/^-?\d+$/.test(s)) return null;
   return Number(s);
+}
+
+/** Both keys or neither: a tick without the rate cannot be converted, and
+ *  the pair is optional on the round lines, so a bad reading drops the sync,
+ *  never the round. */
+function demoSyncOf(rest: Record<string, string>): { demo?: DemoSync } {
+  const tick = intOf(rest.demotick);
+  const hz = intOf(rest.hz);
+  if (tick === null || hz === null || tick < 0 || hz <= 0 || hz > 1000) return {};
+  return { demo: { tick, hz } };
 }
 
 function teamOf(s: string | undefined): 'a' | 'b' | null {
@@ -597,7 +613,7 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       if (rest.surv !== undefined && teamOf(rest.surv) === null) return null;
       const surv = teamOf(rest.surv);
       if (!rest.map || half === null) return null;
-      return { kind: 'round_start', token, map: rest.map, half, surv };
+      return { kind: 'round_start', token, map: rest.map, half, surv, ...demoSyncOf(rest) };
     }
     case 'ROUND_END': {
       const half = halfOf(rest.half);
@@ -618,7 +634,7 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       // averaged into a survival rate.
       const aliveRaw = intOf(rest.alive);
       const alive = aliveRaw !== null && aliveRaw >= 0 ? aliveRaw : null;
-      return { kind: 'round_end', token, map: rest.map ?? null, half, surv, score, alive };
+      return { kind: 'round_end', token, map: rest.map ?? null, half, surv, score, alive, ...demoSyncOf(rest) };
     }
     case 'EVENT': {
       const seq = intOf(rest.seq);

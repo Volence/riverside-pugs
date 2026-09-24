@@ -15,7 +15,7 @@
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.3.11"
+#define PLUGIN_VERSION "0.3.12"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -197,6 +197,8 @@ int g_iLogicalOfPugA;                    // logical team (1|2) that is pug team 
 int g_iMismatchHalves[MAXPLAYERS + 1];
 bool g_bMismatchWarned;
 bool g_bMatchDemoOpen;                   // a tv_record we started for this match is running
+int g_iDemoTickOrigin;                   // server tick that is demo tick 0 of the open match demo
+int g_iRoundDemoTick = -1;               // demo tick at which this half went live; -1 = unknown
 int g_iLastSurvLogical;                  // logical team whose score TryReadRoundScore last resolved; 0 = none
 int g_iHalf;                             // 1 or 2 within the current map, DERIVED from
                                           // m_bInSecondHalfOfRound at go-live, never counted;
@@ -673,6 +675,14 @@ void SurvSideOf(int survPug, char[] out, int maxlen)
 	else SurvPugTeam(out, maxlen);
 }
 
+/** " demotick=N hz=R" for a round line, or "" when the demo tick is unknown.
+ *  hz is the server tickrate, which converts the round's t_ms to demo ticks. */
+void DemoTickArgs(char[] out, int maxlen)
+{
+	if (g_iRoundDemoTick < 0) { out[0] = '\0'; return; }
+	Format(out, maxlen, " demotick=%d hz=%d", g_iRoundDemoTick, RoundToNearest(1.0 / GetTickInterval()));
+}
+
 /** Milliseconds since this half went live. -1 before it does, which the
  *  parser treats as "no round timing", distinct from 0. */
 int RoundMs()
@@ -783,8 +793,12 @@ void EmitRoundEnd(int half, const char[] surv, int score, int alive)
 		// flag. CountAliveSurvivors never returns a negative, so every value
 		// sent here is a real reading; the parser treats absent or
 		// non-numeric as "not measured", which is distinct from zero.
-		EmitPug("ROUND_END map=%s half=%d surv=%s score=%d alive=%d",
-			g_sCurrentMap, half, surv, score, alive);
+		// The demo tick repeats ROUND_START's, because that line is one UDP
+		// datagram and losing it would otherwise lose the round's demo sync.
+		char demo[48];
+		DemoTickArgs(demo, sizeof(demo));
+		EmitPug("ROUND_END map=%s half=%d surv=%s score=%d alive=%d%s",
+			g_sCurrentMap, half, surv, score, alive, demo);
 	}
 	// Match-critical work first, replay second. RplClose can in principle
 	// throw (see the stale-handle note on it), and an unwind here would skip
@@ -2527,6 +2541,14 @@ void StartMatchDemo()
 	ServerCommand("tv_stoprecord");
 	ServerCommand("tv_record pug_%s_%d_%s", g_sToken, g_iMapCount, g_sCurrentMap);
 	g_bMatchDemoOpen = true;
+	// A SourceTV demo counts ticks from the moment recording starts, and what
+	// it records is the SourceTV server's view, which runs tv_delay seconds
+	// behind the game. So demo tick 0 is the game tick tv_delay before now.
+	// The command itself runs on the next frame, which is at most a tick or
+	// two out: close enough for demo_gototick, where 100 ticks is a second.
+	ConVar delay = FindConVar("tv_delay");
+	int delayTicks = delay != null ? RoundToNearest(delay.FloatValue / GetTickInterval()) : 0;
+	g_iDemoTickOrigin = GetGameTickCount() - delayTicks;
 	PugDebug("demo: pug_%s_%d_%s", g_sToken, g_iMapCount, g_sCurrentMap);
 }
 
@@ -2771,6 +2793,7 @@ void ResetMatchState()
 	g_iLastSurvLogical = 0;
 	g_bMismatchWarned = false;
 	g_bMatchDemoOpen = false;
+	g_iRoundDemoTick = -1;
 	g_iHalf = 0;
 	g_fRoundLiveAt = 0.0;
 	g_bRoundEnded = false;
@@ -3389,6 +3412,12 @@ public void OnRoundIsLive()
 		// here makes the round row's half agree with it by construction.
 		g_iHalf = view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound")) ? 2 : 1;
 		g_fRoundLiveAt = GetGameTime();
+		// Where this half starts in the match demo, so the site can turn any
+		// moment of the replay (t_ms) into a demo_gototick target. Absent when
+		// this plugin did not open the demo, e.g. pug_record_demos 0.
+		g_iRoundDemoTick = g_bMatchDemoOpen ? GetGameTickCount() - g_iDemoTickOrigin : -1;
+		char demo[48];
+		DemoTickArgs(demo, sizeof(demo));
 		char surv[2];
 		SurvPugTeam(surv, sizeof(surv));
 		// An empty side means the orientation mapping has not settled. Emit
@@ -3399,8 +3428,8 @@ public void OnRoundIsLive()
 		// promotes it when ROUND_END supplies the real side. The line still
 		// goes out so the round keeps a started_at, which every event's t is
 		// measured against.
-		if (surv[0] == '\0') EmitPug("ROUND_START map=%s half=%d", g_sCurrentMap, g_iHalf);
-		else EmitPug("ROUND_START map=%s half=%d surv=%s", g_sCurrentMap, g_iHalf, surv);
+		if (surv[0] == '\0') EmitPug("ROUND_START map=%s half=%d%s", g_sCurrentMap, g_iHalf, demo);
+		else EmitPug("ROUND_START map=%s half=%d surv=%s%s", g_sCurrentMap, g_iHalf, surv, demo);
 
 		EmitBalance();
 		RoundStatsBegin();
