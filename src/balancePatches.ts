@@ -200,6 +200,8 @@ export interface PatchSummary {
    *  completed, non-voided matches (the compare filter). */
   countedRounds: number;
   servers: { serverId: number; name: string; lastSeenAt: string }[];
+  /** When the patch was put on the public page; null when it is not public. */
+  publishedAt: string | null;
 }
 
 /** Every known patch, numbered in time order (ROW_NUMBER over first_seen_at,
@@ -207,14 +209,14 @@ export interface PatchSummary {
  *  place rather than getting the highest number. */
 export function listPatches(db: DB): PatchSummary[] {
   const rows = db.prepare(`
-    SELECT p.id, p.name, p.notes, p.source, p.first_seen_at, p.reviewed,
+    SELECT p.id, p.name, p.notes, p.source, p.first_seen_at, p.reviewed, p.published_at,
            ROW_NUMBER() OVER (ORDER BY p.first_seen_at, p.id) AS number,
            (SELECT COUNT(*) FROM match_rounds r WHERE r.patch_id = p.id) AS rounds,
            (SELECT COUNT(*) FROM round_metric_context c JOIN matches m ON m.id = c.match_id
              WHERE c.patch_id = p.id AND m.state = 'completed' AND m.voided_at IS NULL) AS counted_rounds
     FROM balance_patches p ORDER BY number`).all() as {
       id: number; name: string | null; notes: string; source: PatchSource; first_seen_at: string;
-      reviewed: number; number: number; rounds: number; counted_rounds: number }[];
+      reviewed: number; published_at: string | null; number: number; rounds: number; counted_rounds: number }[];
   const servers = db.prepare(`SELECT bps.patch_id, bps.server_id, s.name, bps.last_seen_at
     FROM balance_patch_servers bps JOIN servers s ON s.id = bps.server_id`).all() as {
       patch_id: number; server_id: number; name: string; last_seen_at: string }[];
@@ -223,6 +225,7 @@ export function listPatches(db: DB): PatchSummary[] {
     firstSeenAt: r.first_seen_at, reviewed: r.reviewed === 1, rounds: r.rounds, countedRounds: r.counted_rounds,
     servers: servers.filter((s) => s.patch_id === r.id)
       .map((s) => ({ serverId: s.server_id, name: s.name, lastSeenAt: s.last_seen_at })),
+    publishedAt: r.published_at,
   }));
 }
 

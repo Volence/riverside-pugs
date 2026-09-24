@@ -1162,6 +1162,8 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'match_rounds', 'patch_id', 'INTEGER REFERENCES balance_patches(id)');
   // Every admin patch query filters or counts by patch_id, so it needs an index.
   db.exec('CREATE INDEX IF NOT EXISTS match_rounds_patch ON match_rounds(patch_id)');
+  // Balance public page (piece 5): NULL = not shown on /balance.
+  ensureColumn(db, 'balance_patches', 'published_at', 'TEXT');
   ensureColumn(db, 'match_rounds', 'variant', 'TEXT');
   ensureColumn(db, 'match_rounds', 'skill_detect', 'INTEGER');
   ensureColumn(db, 'matches', 'origin', "TEXT CHECK (origin IN ('queue','in_game'))");
