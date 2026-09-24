@@ -7,6 +7,7 @@ import { PageHeader } from './components/PageHeader';
 import { Play } from './routes/Play';
 import { Leaderboard } from './routes/Leaderboard';
 import { Matches } from './routes/Matches';
+import { BalanceNotes } from './routes/BalanceNotes';
 import { Live } from './routes/Live';
 import { Streams } from './routes/Streams';
 import { MatchDetail } from './routes/MatchDetail';
@@ -72,6 +73,7 @@ export function AppRoutes(
       <Route path="/" component={Play} session={session} state={state} refresh={refresh} />
       <Route path="/leaderboard" component={Leaderboard} me={me} />
       <Route path="/matches" component={Matches} />
+      <Route path="/balance" component={BalanceNotes} />
       <Route path="/live" component={Live} me={me} />
       <Route path="/streams" component={Streams} />
       <Route path="/match/:id" component={MatchDetail} me={me} staff={staff} />

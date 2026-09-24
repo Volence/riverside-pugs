@@ -29,6 +29,10 @@ describe('public wording', () => {
     expect(verdictSentence(row({ verdict: 'too_early', moreMatches: 1 }))).toBe('Too early to tell: about 1 more match needed.');
     expect(verdictSentence(row({ verdict: 'too_early', moreMatches: 800 }))).toBe('Too early to tell: about 500+ more matches needed.');
     expect(verdictSentence(row({ verdict: 'too_early', moreMatches: null }))).toBe('Too early to tell: more matches needed.');
+    // A finished previous patch cannot gain more matches, so this reads as a
+    // flat statement rather than a countdown, checked before moreMatches.
+    expect(verdictSentence(row({ verdict: 'too_early', moreMatches: 12, nA: 9 })))
+      .toBe('Too early to tell: the previous patch has too few matches to compare against.');
     expect(verdictSentence(row({ verdict: 'no_data', b: null, nB: 0 }))).toBe('Not measured for this patch.');
     expect(verdictSentence(row({ verdict: 'no_data', a: null, nA: 0 }))).toBe('Not measured for the previous patch.');
     expect(verdictSentence(row({ verdict: 'no_data', a: null, b: null, noSharedMaps: true }))).toBe('No maps in common with the previous patch, so no comparison.');
