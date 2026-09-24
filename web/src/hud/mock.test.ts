@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { visibleElements, hitTest, drawHud, childAt, panelBoxes, TEAM_CARDS } from './mock';
+import { visibleElements, hitTest, drawHud, childAt, panelBoxes, TEAM_CARDS, infectedCardRects, infectedCardClasses } from './mock';
 import { selectionFrames, TEAMMATES } from './selection';
 import { withTeamDir } from './edit';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
 import { baseFile, registerImport, unregisterImport } from './base';
 import { sampleHud } from './importFixtures';
-import { artUrl, CROSSHAIR_OPEN } from './art';
-import { buildTrees, elementRect, teamCardRects, markerBox, markerPx } from './build';
+import { artUrl, CROSSHAIR_OPEN, SKULL_ICON } from './art';
+import { buildTrees, elementRect, teamCardRects, teamLayout, markerBox, markerPx } from './build';
+import { elementById } from './elements';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H } from './units';
 import { DEFAULT_STATE, PX_AT_1080 } from '../crosshair/draw';
@@ -462,7 +463,9 @@ describe('drawHud delegates panels to the renderer', () => {
           : t[k]),
         set: (t, k, v) => { t[k] = v; return true; },
       }) as unknown as CanvasRenderingContext2D;
-      drawHud(ctx, 1920, 1080, design, 'infected', null, undefined, { state });
+      // The infected cards draw pz_charge_meter too (their AbilityProgress): hidden, so every ring draw is the timer's.
+      const noCards = { ...design, elements: { ...design.elements, infectedRow: { ...design.elements.infectedRow, visible: false } } };
+      drawHud(ctx, 1920, 1080, noCards, 'infected', null, undefined, { state });
       _setImageFactory(null);
       return calls;
     }
@@ -920,5 +923,164 @@ describe('drawHud passes the preview state to your own health', () => {
     };
     expect(srcs()).not.toContain(artUrl('vgui/hud/crouch_survivor'));
     expect(srcs({ ...DEFAULT_PREVIEW, crouched: true })).toContain(artUrl('vgui/hud/crouch_survivor'));
+  });
+});
+
+describe('the infected cards, as the game lays them out (plan Task 12)', () => {
+  const K = 2.25;
+  /** Only the cards: every other infected element hidden, so each art draw is a card's. */
+  const only = (extra: Record<string, unknown> = {}) => validateDesign({
+    v: 1, crosshair: 'none',
+    elements: { siHealth: { visible: false }, abilityRing: { visible: false }, abilityMarker: { visible: false }, infectedRow: extra },
+  });
+  type Call = { m: string; a: unknown[]; alpha: number };
+  function cardCalls(design: HudDesign, state: PreviewState = DEFAULT_PREVIEW) {
+    _setImageFactory((url) => ({ src: url, complete: true, naturalWidth: 64, naturalHeight: 64, onload: null, onerror: null }) as unknown as HTMLImageElement);
+    const out: Call[] = [];
+    const base = fakeCtx(() => {}) as unknown as Record<string | symbol, unknown>;
+    // The fake has no state stack; this keeps globalAlpha's, so each draw is recorded at its real alpha.
+    const alphas: number[] = [];
+    base.save = () => { alphas.push(base.globalAlpha as number); };
+    base.restore = () => { base.globalAlpha = alphas.pop() ?? 1; };
+    const ctx = new Proxy(base, {
+      get: (t, k) => (typeof t[k] === 'function'
+        ? (...a: unknown[]) => { out.push({ m: String(k), a, alpha: t.globalAlpha as number }); return (t[k] as (...x: unknown[]) => unknown)(...a); }
+        : t[k]),
+      set: (t, k, v) => { t[k] = v; return true; },
+    }) as unknown as CanvasRenderingContext2D;
+    drawHud(ctx, 1920, 1080, design, 'infected', null, undefined, { state });
+    _setImageFactory(null);
+    return out;
+  }
+  const src = (c: { a: unknown[] }) => (c.a[0] as { src?: string }).src;
+  const draws = (cs: Call[], m: string) => cs.filter((c) => c.m === 'drawImage' && src(c) === artUrl(m));
+  const icon = (cls: string) => `vgui/hud/zombieteamimage_${cls}`;
+  const at = (c: Call) => (c.a.slice(1) as number[]).map((v) => Math.round(v * 1000) / 1000);
+  const box = (x: number, y: number, w: number, h: number) => [x, y, w, h].map((v) => Math.round(v * K * 1000) / 1000);
+
+  it('draws three cards, i x HorizPanelSpacing apart from the container, y 0, never four: Smoker, Boomer, Hunter', () => {
+    // client.dll 0x10247a70: card i at (i x HorizPanelSpacing, 0); exactly three card panels (0x10247f01).
+    for (const d of [only(), only({ fit: true, gap: 10 }), only({ scale: 1.5 })]) {
+      const r = elementRect(d, 'infectedRow', d.aspect);
+      const sp = teamLayout(d, elementById('infectedRow')!).spacing;
+      const cards = infectedCardRects(d);
+      expect(cards.map((c) => [c.x, c.y])).toEqual([0, 1, 2].map((i) => [r.x + i * sp, r.y]));
+      expect(panelBoxes(d, 'infectedRow')).toEqual(cards.map(({ x, y, w, h }) => ({ x, y, w, h })));
+      const cs = cardCalls(d);
+      const img = kvFind(buildTrees(d)('resource/ui/hud/zombieteamdisplayplayer.res'), ['PlayerImage'])!;
+      const p = ['xpos', 'ypos', 'wide', 'tall'].map((key) => parseFloat(kvGet(img, key)!));
+      for (const [i, cls] of ['smoker', 'boomer', 'hunter'].entries()) {
+        expect(draws(cs, icon(cls)).map(at), cls).toEqual([box(cards[i].x + p[0], cards[i].y + p[1], p[2], p[3])]);
+      }
+      expect(draws(cs, icon('tank'))).toEqual([]);
+      // Each card is clipped to its own ZombieTeamDisplayPlayer block (probe Q17, b10/shots/crops/bl-abe.png).
+      const rects = cs.filter((c) => c.m === 'rect').map((c) => (c.a as number[]).map((v) => Math.round(v * 1000) / 1000));
+      for (const c of cards) expect(rects).toContainEqual(box(c.x, c.y, c.w, c.h));
+    }
+  });
+
+  it('sizes each card by its generated self block: 256 x 128 on stock, 133 x 64 fitted', () => {
+    expect(infectedCardRects(only()).map((c) => [c.w, c.h])).toEqual([[256, 128], [256, 128], [256, 128]]);
+    expect(infectedCardRects(only({ fit: true })).map((c) => [c.w, c.h])).toEqual([[133, 64], [133, 64], [133, 64]]);
+  });
+
+  it('draws a live card\'s icon untinted and whole, its bar green, and the ability ring on the Smoker and Boomer only', () => {
+    // b9/shots/crops/bl-abeg.png b (a white Hunter icon, a green bar) and g (the Smoker's card ring);
+    // dll 0x10248700: the ring shows alive, not a ghost, not a Hunter.
+    const d = only();
+    const cs = cardCalls(d, { ...DEFAULT_PREVIEW, survivor: 'hurt' });      // the survivor state never reaches the cards
+    for (const cls of ['smoker', 'boomer', 'hunter']) {
+      const [c] = draws(cs, icon(cls));
+      expect(c.alpha, cls).toBe(1);
+    }
+    const cards = infectedCardRects(d);
+    const ring = kvFind(buildTrees(d)('resource/ui/hud/zombieteamdisplayplayer.res'), ['AbilityProgress'])!;
+    const p = ['xpos', 'ypos', 'wide', 'tall'].map((key) => parseFloat(kvGet(ring, key)!));
+    expect(draws(cs, 'vgui/hud/pz_charge_meter').map(at)).toEqual([0, 1].map((i) => box(cards[i].x + p[0], cards[i].y + p[1], p[2], p[3])));
+    // Three bars, each filled whole (not the Hurt 40 %): healthbar_white across the inset box, never grey.
+    expect(draws(cs, 'vgui/healthbar_white')).toHaveLength(3);
+    expect(draws(cs, 'vgui/healthbar_grey')).toEqual([]);
+  });
+
+  it('draws a ghost card\'s icon faint and tinted 206 219 225, the bar kept, no ring, no spawn time (probe Q20)', () => {
+    // bl-abeg.png a; dll 0x10248575 hard-codes the ghost colour 0xCE 0xDB 0xE1; GhostTeamImage_<class>.vmt
+    // pulses its alpha between 0.02 and 0.3, drawn at the middle, 0.16.
+    const fills: string[] = [];
+    _setCanvasFactory(() => {
+      const t = { globalCompositeOperation: 'source-over', fillStyle: '', drawImage: () => {},
+        fillRect: () => { if (t.globalCompositeOperation === 'multiply') fills.push(String(t.fillStyle)); } };
+      return { width: 1, height: 1, getContext: () => t } as unknown as HTMLCanvasElement;
+    });
+    try {
+      const texts: string[] = [];
+      const cs = cardCalls(only(), { ...DEFAULT_PREVIEW, infected: 'ghost' });
+      const icons = cs.filter((c) => c.m === 'drawImage' && Math.abs(c.alpha - 0.16) < 1e-9);
+      expect(icons).toHaveLength(3);
+      expect(fills).toContain('rgb(206,219,225)');
+      expect(cs.filter((c) => c.m === 'drawImage' && src(c) === artUrl('vgui/hud/pz_charge_meter'))).toEqual([]);
+      drawHud(fakeCtx(() => {}, undefined, texts), 1920, 1080, only(), 'infected', null, undefined, { state: { ...DEFAULT_PREVIEW, infected: 'ghost' } });
+      expect(texts).not.toContain('12');
+    } finally { _setCanvasFactory(null); }
+    _resetAssetCache();                                             // the stub canvases above are cached tints
+    expect(draws(cardCalls(only(), { ...DEFAULT_PREVIEW, infected: 'ghost' }), 'vgui/healthbar_white')).toHaveLength(3);
+  });
+
+  it('draws a dead card as the skull at SkullIconPlacement and the spawn time, with no bar, no icon and no Dead art at 0 tall', () => {
+    // bl-abeg.png e, b9/shots-v2/crops/dead-card-ij.png: the skull, the bar gone; the stock Dead is 0 tall.
+    const d = only();
+    const state = { ...DEFAULT_PREVIEW, infected: 'dead' as const };
+    const cs = cardCalls(d, state);
+    const cards = infectedCardRects(d);
+    const skull = kvFind(buildTrees(d)('resource/ui/hud/zombieteamdisplayplayer.res'), ['SkullIconPlacement'])!;
+    const p = ['xpos', 'ypos', 'wide', 'tall'].map((key) => parseFloat(kvGet(skull, key)!));
+    expect(draws(cs, SKULL_ICON).map(at)).toEqual(cards.map((c) => box(c.x + p[0], c.y + p[1], p[2], p[3])));
+    for (const cls of ['smoker', 'boomer', 'hunter']) expect(draws(cs, icon(cls)), cls).toEqual([]);
+    expect(draws(cs, 'vgui/healthbar_white')).toEqual([]);
+    expect(draws(cs, 'vgui/hud/overlay_dead')).toEqual([]);
+    expect(draws(cs, 'vgui/s_panel_dead')).toEqual([]);
+    const texts: string[] = [];
+    drawHud(fakeCtx(() => {}, undefined, texts), 1920, 1080, d, 'infected', null, undefined, { state });
+    expect(texts.filter((t) => t === '12')).toHaveLength(3);
+    // Given a height, Dead draws its own file's art, hud/overlay_dead (Q19: shown only when given a height).
+    const tall = validateDesign({ ...only(), children: { infectedRow: { Dead: { h: 40 } } } });
+    expect(draws(cardCalls(tall, state), 'vgui/hud/overlay_dead')).toHaveLength(3);
+  });
+
+  it('with Show yourself on, you take the first card as the class you pick and the Hunter sample drops: still three', () => {
+    const d = only();
+    const cs = cardCalls(d, { ...DEFAULT_PREVIEW, siClass: 'tank', showSelf: true });
+    const cards = infectedCardRects(d);
+    const [tank] = draws(cs, icon('tank'));
+    expect(at(tank)[0]).toBeCloseTo((cards[0].x + 9) * K, 3);
+    expect(draws(cs, icon('smoker'))).toHaveLength(1);
+    expect(draws(cs, icon('boomer'))).toHaveLength(1);
+    expect(draws(cs, icon('hunter'))).toEqual([]);
+    expect(infectedCardClasses({ ...DEFAULT_PREVIEW, showSelf: true, siClass: 'hunter' })).toEqual(['hunter', 'smoker', 'boomer']);
+    expect(infectedCardClasses(DEFAULT_PREVIEW)).toEqual(['smoker', 'boomer', 'hunter']);
+    // Your own card never shows the spawn countdown (Q19: the dead branch shows it only for a spawn time above 0).
+    const texts: string[] = [];
+    drawHud(fakeCtx(() => {}, undefined, texts), 1920, 1080, d, 'infected', null, undefined, { state: { ...DEFAULT_PREVIEW, infected: 'dead', showSelf: true } });
+    expect(texts.filter((t) => t === '12')).toHaveLength(2);
+  });
+
+  it('tints the backdrop by its drawColor: stock 64 64 64 over infected_healthbar_bg_1', () => {
+    const fills: string[] = [];
+    _setCanvasFactory(() => {
+      const t = { globalCompositeOperation: 'source-over', fillStyle: '', drawImage: () => {},
+        fillRect: () => { if (t.globalCompositeOperation === 'multiply') fills.push(String(t.fillStyle)); } };
+      return { width: 1, height: 1, getContext: () => t } as unknown as HTMLCanvasElement;
+    });
+    try {
+      cardCalls(only());
+      expect(fills).toContain('rgb(64,64,64)');
+    } finally { _setCanvasFactory(null); }
+  });
+
+  it('finds a piece under the pointer by its own card\'s class: the ring on the Smoker card, none on the Hunter\'s', () => {
+    const d = only();
+    const cards = infectedCardRects(d);
+    // AbilityProgress (2,18 36 x 36) and PlayerImage (9,23 24 x 24) overlap; (4, 20) is on the ring only.
+    expect(childAt(d, DEFAULT_PREVIEW, cards[0].x + 4, cards[0].y + 20, 'infectedRow')).toEqual({ name: 'AbilityProgress', card: 0 });
+    expect(childAt(d, DEFAULT_PREVIEW, cards[2].x + 4, cards[2].y + 20, 'infectedRow')?.name).not.toBe('AbilityProgress');
   });
 });

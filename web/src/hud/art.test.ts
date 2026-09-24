@@ -10,7 +10,7 @@ import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
 import { ART, ART_TOTAL_BYTES, ICON_ADVANCE, ICON_SPACE, EQUIP_ICON_SIZE, FONT_FILES, FONT_METRICS } from './art/index';
-import { artUrl, normaliseMaterial, NEEDED_MATERIALS, ITEM_ICONS, EQUIP_ICONS, CROSSHAIR_OPEN } from './art';
+import { artUrl, normaliseMaterial, NEEDED_MATERIALS, ITEM_ICONS, EQUIP_ICONS, CROSSHAIR_OPEN, SKULL_ICON } from './art';
 import { buildHud } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { SLOTS } from './slots';
@@ -80,6 +80,18 @@ describe('the art index', () => {
     expect(NEEDED_MATERIALS).toContain(CROSSHAIR_OPEN);
     // hud_textures.txt PZ_crosshair_open: a 32 x 32 cell of sprites/crosshairs.
     expect(pngRgba(ART[CROSSHAIR_OPEN]).w).toBe(32);
+  });
+  it('has the infected card\'s class icons and its dead skull (client.dll strings beside ZombieTeamDisplayPlayer.res)', () => {
+    // hud/ZombieTeamImage_<class> on PlayerImage (a ghost's GhostTeamImage_<class> material draws the same
+    // texture at a pulsing alpha), and mod_textures.txt icon_skull, a 64 x 64 cell of vgui/hud/iconsheet,
+    // at SkullIconPlacement (probe Q19, /home/volence/l4d/hud/probe-phase2-infected/b9/shots/crops/bl-abeg.png e).
+    for (const c of ['hunter', 'smoker', 'boomer', 'tank']) {
+      expect(NEEDED_MATERIALS, c).toContain(`vgui/hud/zombieteamimage_${c}`);
+      expect(pngRgba(ART[`vgui/hud/zombieteamimage_${c}`]).w, c).toBe(64);
+    }
+    expect(SKULL_ICON).toBe('icon/skull');
+    expect(NEEDED_MATERIALS).toContain(SKULL_ICON);
+    expect(EQUIP_ICON_SIZE[SKULL_ICON]).toEqual([64, 64]);
   });
   it('exports the meter as the game shades it: the base times its red motion texture, not the base\'s orange', () => {
     // pz_charge_meter.vmt is UnlitTwoTexture with $texture2 PZ_charge_meter_motion. In game the lit

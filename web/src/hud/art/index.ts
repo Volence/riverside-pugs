@@ -13,6 +13,7 @@ export const ART: Record<string, string> = {
   'icon/item/pills': 'icon-item-pills.png',
   'icon/item/pipebomb': 'icon-item-pipebomb.png',
   'icon/pz_crosshair_open': 'icon-pz_crosshair_open.png',
+  'icon/skull': 'icon-skull.png',
   'vgui/healthbar_green': 'vgui-healthbar_green.png',
   'vgui/healthbar_grey': 'vgui-healthbar_grey.png',
   'vgui/healthbar_orange': 'vgui-healthbar_orange.png',
@@ -42,6 +43,10 @@ export const ART: Record<string, string> = {
   'vgui/hud/scalablepanel_bgblack_outlinegrey': 'vgui-hud-scalablepanel_bgblack_outlinegrey.png',
   'vgui/hud/scalablepanel_bgmidgrey': 'vgui-hud-scalablepanel_bgmidgrey.png',
   'vgui/hud/scalablepanel_bgmidgrey_glow': 'vgui-hud-scalablepanel_bgmidgrey_glow.png',
+  'vgui/hud/zombieteamimage_boomer': 'vgui-hud-zombieteamimage_boomer.png',
+  'vgui/hud/zombieteamimage_hunter': 'vgui-hud-zombieteamimage_hunter.png',
+  'vgui/hud/zombieteamimage_smoker': 'vgui-hud-zombieteamimage_smoker.png',
+  'vgui/hud/zombieteamimage_tank': 'vgui-hud-zombieteamimage_tank.png',
   'vgui/s_panel_background': 'vgui-s_panel_background.png',
   'vgui/s_panel_biker': 'vgui-s_panel_biker.png',
   'vgui/s_panel_biker_incap': 'vgui-s_panel_biker_incap.png',
@@ -73,6 +78,7 @@ export const EQUIP_ICON_SIZE: Record<string, [number, number]> = {
   'icon/equip/pills': [64, 64],
   'icon/equip/pumpshotgun': [192, 64],
   'icon/healing': [64, 64],
+  'icon/skull': [64, 64],
 };
 
 // The stock text faces: the name clientscheme.res gives each -> its TrueType file in this folder.
@@ -95,4 +101,4 @@ export const FONT_METRICS: Record<string, FontMetrics> = {
   'Verdana': { unitsPerEm: 2048, winAscent: 2059, winDescent: 430 },
 };
 
-export const ART_TOTAL_BYTES = 629690;
+export const ART_TOTAL_BYTES = 643242;

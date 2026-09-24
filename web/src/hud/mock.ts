@@ -119,6 +119,7 @@ export function elementTargets(design: HudDesign, id: string, r: Box = rectFor(d
  */
 export function panelBoxes(design: HudDesign, panelId: string): Box[] {
   if (panelId === 'teamColumn') return teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).map(({ x, y, w, h }) => ({ x, y, w, h }));
+  if (panelId === 'infectedRow') return infectedCardRects(design);
   const panel = panelChildren(panelId);
   if (!panel || panel.repeat !== 'single' || !panel.frame) return [];
   const r = rectFor(design, panelId);
@@ -126,6 +127,44 @@ export function panelBoxes(design: HudDesign, panelId: string): Box[] {
   if (panel.frame === 'hudlayout') return [{ x: r.x, y: r.y, w: r.w, h: r.h }];
   const p = parentPanel(design, panel.frame.file, panel.frame.block, 1);
   return [{ x: r.x + p.x, y: r.y + p.y, w: p.w, h: p.h }];
+}
+
+const ZCARD_FILE = 'resource/ui/hud/zombieteamdisplayplayer.res';
+
+/**
+ * The three infected cards, in HUD units, where the game puts them: code
+ * places card i at (i x HorizPanelSpacing, 0) inside CHudZombieTeamDisplay
+ * (client.dll 0x10247a70), with the spacing the generator writes
+ * (teamLayout), and makes exactly three card panels (0x10247f01). Each is
+ * its file's ZombieTeamDisplayPlayer block in size (256 x 128 on stock,
+ * 133 x 64 fitted), the rect it clips its children to (probe Q17,
+ * /home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/bl-abe.png);
+ * code sets its position, so the block's own xpos and ypos are not read.
+ */
+export function infectedCardRects(design: HudDesign): Box[] {
+  const r = rectFor(design, 'infectedRow');
+  const t = teamLayout(design, elementById('infectedRow')!);
+  const self = kvFind(buildTrees(design)(ZCARD_FILE), ['ZombieTeamDisplayPlayer']);
+  const num = (key: string, d: number) => { const f = parseFloat((self && kvGet(self, key)) ?? ''); return Number.isFinite(f) ? f : d; };
+  const w = num('wide', t.card?.w ?? 0), h = num('tall', t.card?.h ?? 0);
+  return Array.from({ length: TEAM_CARDS }, (_, i) => ({ x: r.x + i * t.spacing, y: r.y, w, h }));
+}
+
+/**
+ * The class of each infected card the preview draws: a sample team of a
+ * Smoker, a Boomer and a Hunter (bots never get a card, so the game can show
+ * these only for human teammates), or with Show yourself you first, as the
+ * class the page picks, and the Hunter sample dropped: still three.
+ */
+export function infectedCardClasses(state?: SurvivorState | PreviewState): PreviewState['siClass'][] {
+  const v = previewOf(state);
+  return v.showSelf ? [v.siClass, 'smoker', 'boomer'] : ['smoker', 'boomer', 'hunter'];
+}
+
+/** What the card at `i` of a panel is, for the state rules: an infected card's class and whether it is you. */
+function cardOpts(panel: string, i: number, state: SurvivorState | PreviewState): { cls?: PreviewState['siClass']; self?: boolean } {
+  if (panel !== 'infectedRow') return {};
+  return { cls: infectedCardClasses(state)[i], self: !!previewOf(state).showSelf && i === 0 };
 }
 
 /**
@@ -162,11 +201,12 @@ export function childAt(
   let decor: { name: string; card: number; area: number } | null = null;
   for (const [i, c] of panelBoxes(design, panel).entries()) {
     if (!inside(c, ux, uy)) continue;
+    const card = cardOpts(panel, i, state);
     for (const r of childRects(design, panel, { x: c.x, y: c.y }, 1, state)) {
       const def = childDef(panel, r.name);
-      if (!def || !r.visible || hiddenInState(panel, r.name, state) || !inside(r, ux, uy)) continue;
+      if (!def || !r.visible || hiddenInState(panel, r.name, state, card.cls, card.self) || !inside(r, ux, uy)) continue;
       // The painter numbers the teammate cards; a single panel draws with no card.
-      if (labelDrawsNothing(design, panel, r.name, panel === 'teamColumn' ? { state, card: i } : { state })) continue;
+      if (labelDrawsNothing(design, panel, r.name, panel === 'teamColumn' || panel === 'infectedRow' ? { state, card: i, ...card } : { state })) continue;
       const area = r.w * r.h;
       if (def.role === 'decor') { if (!decor || area < decor.area) decor = { name: r.name, card: i, area }; continue; }
       if (!best || area < best.area) best = { name: r.name, card: i, area };
@@ -203,27 +243,6 @@ function paintOwnHealth(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesig
   const [p] = panelBoxes(design, 'ownHealth');
   const local = { x: p.x * k, y: p.y * k, w: p.w * k, h: p.h * k };
   clipToRect(ctx, r, () => clipToRect(ctx, local, () => drawPanel(ctx, design, 'ownHealth', { x: local.x, y: local.y }, k, { onAsset, state: view.state })));
-}
-
-interface CardRect { x: number; y: number; w: number; h: number }
-
-/**
- * Card rects for the infected row, in canvas pixels. Now that
- * `paintTeamColumn` draws the survivor cards from `teamCardRects`, this
- * serves the infected row only: its cards have no fit offset (the game
- * places them itself), so there is no file to agree with and each card is
- * fitted to the element's own rect instead.
- */
-function teamCards(design: HudDesign, id: string, r: Rect, k: number): CardRect[] {
-  const t = teamLayout(design, elementById(id)!);
-  const spacing = t.spacing * k;
-  const w = t.card ? t.card.w * k : (t.dir === 'row' ? Math.min(spacing, r.w / TEAM_CARDS) : r.w);
-  const h = t.card ? t.card.h * k : (t.dir === 'row' ? r.h : Math.min(spacing, r.h / TEAM_CARDS));
-  return Array.from({ length: TEAM_CARDS }, (_, i) => ({
-    x: r.x + (t.dir === 'row' ? spacing * i : 0),
-    y: r.y + (t.dir === 'column' ? spacing * i : 0),
-    w, h,
-  }));
 }
 
 /** The real container clips its children, and `elementRect` reports that same
@@ -545,10 +564,20 @@ function paintXhair(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, _
   ctx.restore();
 }
 
-function paintInfectedRow(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
+/**
+ * The infected cards where the game puts them (infectedCardRects), each
+ * clipped to its own block and all to the container, as VGUI clips them;
+ * later cards draw over earlier ones where an unfitted 256-wide block
+ * overlaps the next. Each is drawn as its sample class (infectedCardClasses)
+ * in the page's Alive, Ghost or Dead state.
+ */
+function paintInfectedRow(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view: HudView = {}) {
+  const state = previewOf(view.state);
   clipToRect(ctx, r, () => {
-    for (const [i, c] of teamCards(design, 'infectedRow', r, k).entries()) {
-      drawPanel(ctx, design, 'infectedRow', { x: c.x, y: c.y }, k, { card: i, onAsset });
+    for (const [i, c] of infectedCardRects(design).entries()) {
+      const card = { x: c.x * k, y: c.y * k, w: c.w * k, h: c.h * k };
+      clipToRect(ctx, card, () => drawPanel(ctx, design, 'infectedRow', { x: card.x, y: card.y }, k,
+        { card: i, onAsset, state, ...cardOpts('infectedRow', i, state) }));
     }
   });
 }

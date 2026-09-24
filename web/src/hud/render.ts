@@ -29,7 +29,7 @@
 import { drawnBarX, isBar, type HudDesign } from './design';
 import { buildTrees } from './build';
 import { kvFind, kvGet, type KvNode } from './kv';
-import { artUrl, normaliseMaterial } from './art';
+import { artUrl, normaliseMaterial, SKULL_ICON, zombieTeamImage } from './art';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { parseColour } from './textures';
 import { SLOTS } from './slots';
@@ -65,6 +65,14 @@ export interface PreviewState {
    * refilling after an ability, progress-f-zoom.png).
    */
   ability: 'ready' | 'notReady' | 'recharging';
+  /**
+   * The infected cards with `hud_zombieteam_showself 1`, a console setting,
+   * not a file key: your own card takes the first of the three slots
+   * (client.dll 0x10247b70 fills them in player order and counts the local
+   * player only with that setting), so the last sample drops. Absent is off,
+   * the game's default.
+   */
+  showSelf?: boolean;
 }
 export const DEFAULT_PREVIEW: PreviewState = { survivor: 'healthy', crouched: false, infected: 'alive', siClass: 'hunter', ability: 'ready' };
 
@@ -76,6 +84,8 @@ export function previewOf(s?: SurvivorState | PreviewState): PreviewState {
 
 export interface DrawOpts {
   card?: number; onAsset?: () => void; state?: SurvivorState | PreviewState;
+  /** An infected card's class and whether it is your own (mock.ts infectedCardClasses): its icon, its ring, its countdown. */
+  cls?: PreviewState['siClass']; self?: boolean;
   /** Set by drawPanel from the panel's own tree (panelColour); callers leave it out. */
   panelRgb?: [number, number, number];
 }
@@ -137,8 +147,13 @@ const STATE_CHILDREN = new Set(['incapacitated', 'dead', 'voice', 'skulliconplac
  * stand-in) is never hidden by state; an unregistered panel keeps
  * STATE_CHILDREN.
  */
-export function hiddenInState(panelId: string, name: string, state: SurvivorState | PreviewState, cls?: PreviewState['siClass']): boolean {
+export function hiddenInState(panelId: string, name: string, state: SurvivorState | PreviewState, cls?: PreviewState['siClass'], self = false): boolean {
   const v = previewOf(state);
+  // Your own infected card never shows the spawn countdown: the dead branch
+  // shows it only for a spawn time above 0, which stayed 0 for the local
+  // player through a real respawn wait (probe Q19, dll 0x10248606,
+  // /home/volence/l4d/hud/probe-phase2-infected/b9/shots-v2/crops/dead-card-ij.png).
+  if (self && panelId === 'infectedRow' && name.toLowerCase() === 'spawntimelabel') return true;
   if (!panelChildren(panelId)) return STATE_CHILDREN.has(name.toLowerCase());
   const def = childDef(panelId, name);
   if (!def) return false;
@@ -482,8 +497,9 @@ export function panelColour(design: HudDesign, panelId: string): [number, number
  */
 function sampleHealthRgb(opts: DrawOpts, panelId?: string): [number, number, number] {
   if (opts.panelRgb) return opts.panelRgb;
-  // Your infected health is drawn full: green (b9/shots/b9/b9-b.png), whatever the survivor state.
-  if (panelId === 'siHealth') return healthRgb(1, 1, false);
+  // Your infected health and the infected cards are drawn full: green
+  // (b9/shots/b9/b9-b.png, b9/shots/crops/bl-abeg.png b), whatever the survivor state.
+  if (panelId === 'siHealth' || panelId === 'infectedRow') return healthRgb(1, 1, false);
   const s = previewOf(opts.state).survivor;
   return healthRgb(s === 'hurt' ? HURT_HEALTH : 100, 100, s === 'down');
 }
@@ -781,30 +797,60 @@ export function hatch(ctx: CanvasRenderingContext2D, r: ChildRect) {
 }
 
 /**
- * The infected card's head. Game code shows the class icon of whichever
- * special infected the player is, which the preview does not know, so it
- * draws a plain head-and-shoulders shape inside the file's rect instead.
+ * The ghost card's icon colour, hard-coded in client.dll (0x10248575: 0xCE
+ * 0xDB 0xE1), and the alpha its material draws at: GhostTeamImage_<class>.vmt
+ * is the live icon's texture with a Sine proxy pulsing $alpha from 0.02 to
+ * 0.3 each second, which the still preview draws at the middle (probe Q20,
+ * /home/volence/l4d/hud/probe-phase2-infected/b9/shots/crops/bl-abeg.png a).
  */
-function silhouette(ctx: CanvasRenderingContext2D, r: ChildRect) {
-  const cx = r.x + r.w / 2;
-  const unit = Math.min(r.w, r.h);
+const GHOST_RGB: [number, number, number] = [206, 219, 225];
+const GHOST_ALPHA = 0.16;
+
+/**
+ * An infected card's class icon: code sets hud/ZombieTeamImage_<class> on
+ * PlayerImage whatever the file names, white on a live player (dll: alive
+ * icons are drawn white, bl-abeg.png b), faint and tinted on a ghost. The
+ * game fits it to the block (the 64-texel texture fills the 24-unit disc in
+ * bl-abeg.png), so it is stretched to the rect.
+ */
+function drawClassIcon(ctx: CanvasRenderingContext2D, r: ChildRect, opts: DrawOpts) {
+  const material = zombieTeamImage(opts.cls ?? previewOf(opts.state).siClass);
+  const img = artImage(material, opts.onAsset);
+  if (!img) { if (missing.has(material)) hatch(ctx, r); return; }
+  if (previewOf(opts.state).infected !== 'ghost') { ctx.drawImage(img, r.x, r.y, r.w, r.h); return; }
   ctx.save();
-  ctx.fillStyle = 'rgba(150,150,150,0.55)';
-  ctx.beginPath();
-  ctx.arc(cx, r.y + r.h * 0.38, unit * 0.22, 0, Math.PI * 2);          // head
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(cx, r.y + r.h, unit * 0.4, Math.PI, 0);                      // shoulders, cut by the rect's bottom edge
-  ctx.closePath();
-  ctx.fill();
+  ctx.globalAlpha *= GHOST_ALPHA;
+  ctx.drawImage(tinted(img, material, ...GHOST_RGB), r.x, r.y, r.w, r.h);
   ctx.restore();
 }
 
-function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
+/**
+ * An infected card's two pieces game code draws with no image of the file's:
+ * the dead skull at SkullIconPlacement (mod_textures.txt icon_skull, probe
+ * Q19, bl-abeg.png e), and AbilityProgress, the CircularProgressBar whose
+ * fg_image (stock HUD/PZ_charge_meter) the preview draws whole, as a ready
+ * ring (bl-abeg.png g). The meter's UnlitTwoTexture material takes no colour
+ * (probe B15), so neither is tinted.
+ */
+function drawCardArt(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, opts: DrawOpts) {
+  const lname = n.key.toLowerCase();
+  const material = lname === 'skulliconplacement' ? SKULL_ICON
+    : lname === 'abilityprogress' ? normaliseMaterial(kvGet(n, 'fg_image') ?? 'hud/pz_charge_meter') : undefined;
+  if (!material || r.w <= 0 || r.h <= 0) return;
+  const img = artImage(material, opts.onAsset);
+  if (!img) { if (missing.has(material)) hatch(ctx, r); return; }
+  ctx.drawImage(img, r.x, r.y, r.w, r.h);
+}
+
+function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts, panelId?: string) {
   const image = kvGet(n, 'image');
   const fill = kvGet(n, 'fillcolor');
   const lname = n.key.toLowerCase();
-  if (lname === 'playerimage') { silhouette(ctx, r); return; }      // the special infected's own head: no survivor portrait
+  const infectedCard = panelId === 'infectedRow';
+  // A 0-sized panel paints nothing: VGUI clips a panel's paint to its own
+  // size (the infected card's stock Dead is 0 tall, and never shows, Q19).
+  if (r.w <= 0 || r.h <= 0) return;
+  if (lname === 'playerimage' && infectedCard) { drawClassIcon(ctx, r, opts); return; }
   if (lname === 'head') {
     // Game code picks the portrait; the preview picks a fixed one per card.
     const material = portraitFor(opts);
@@ -813,7 +859,8 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
     ctx.drawImage(img, r.x, r.y, r.w, r.h);
     return;
   }
-  if (lname === 'incapacitated' || lname === 'dead') {
+  // The infected card's Dead is its own file's art (hud/overlay_dead), not a survivor's dead panel.
+  if ((lname === 'incapacitated' || lname === 'dead') && !infectedCard) {
     // Game code picks this art too: the character's own _incap panel, or the
     // one dead panel. Drawn stretched to the rect, as scaleImage 1 has the
     // game draw it, which is why the fit rule keeps the rect square.
@@ -892,6 +939,8 @@ function drawSplatter(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNod
 
 function sampleText(n: KvNode, opts: DrawOpts, panelId?: string): string {
   const t = kvGet(n, 'labelText') ?? '';
+  // A dead teammate's respawn countdown, which code writes into the label: a sample 12 seconds.
+  if (panelId === 'infectedRow' && n.key.toLowerCase() === 'spawntimelabel') return t || '12';
   if (t === '%HealthNumber%' && panelId === 'siHealth') return String(SI_HEALTH[previewOf(opts.state).siClass]);
   if (t === '%HealthNumber%') {
     const s = previewOf(opts.state).survivor;
@@ -1076,7 +1125,7 @@ function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: st
  */
 function drawBar(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: number, opts: DrawOpts, panelId?: string) {
   const s = previewOf(opts.state).survivor;
-  const frac = s === 'hurt' && panelId !== 'siHealth' ? HURT_HEALTH / 100 : 1;
+  const frac = s === 'hurt' && HEALTH_PANELS.has(panelId ?? '') ? HURT_HEALTH / 100 : 1;
   const [hr, hg, hb] = sampleHealthRgb(opts, panelId);
   const outline = artImage('vgui/hud/s_healthbar_outline', opts.onAsset);
   if (outline) ctx.drawImage(tinted(outline, 'vgui/hud/s_healthbar_outline', hr, hg, hb), r.x, r.y, r.w, r.h);
@@ -1113,16 +1162,17 @@ export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, pane
   for (const [i, n] of nodes.entries()) {
     const r = rects[i];
     const lname = n.key.toLowerCase();
-    if (!r.visible || hiddenInState(panelId, lname, view)) continue;
+    if (!r.visible || hiddenInState(panelId, lname, view, opts.cls, opts.self)) continue;
     let alpha = 1;
     if (isTeamColumnHealthbarBg(panelId, n)) alpha = SPLATTER_ALPHA;
     if (panelId === 'teamColumn' && view.survivor === 'dead' && lname === 'name') alpha = DEAD_NAME_ALPHA;
     if (alpha !== 1) { ctx.save(); ctx.globalAlpha *= alpha; }
     switch (r.kind) {
-      case 'image': drawImageChild(ctx, design, n, r, k, opts); break;
+      case 'image': drawImageChild(ctx, design, n, r, k, opts, panelId); break;
       case 'label': drawLabel(ctx, design, panelId, n, r, k, opts); break;
       case 'bar': drawBar(ctx, n, r, k, opts, panelId); break;
-      default: break;                                                // Panel, CircularProgressBar: nothing to show
+      // A Panel or CircularProgressBar draws nothing of its own, except the two the infected card's code fills.
+      default: if (panelId === 'infectedRow') drawCardArt(ctx, n, r, opts); break;
     }
     if (alpha !== 1) ctx.restore();
   }

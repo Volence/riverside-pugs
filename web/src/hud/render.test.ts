@@ -547,15 +547,16 @@ describe('drawPanel', () => {
     } finally { _setCanvasFactory(null); }
   });
 
-  it('draws the infected card head as a silhouette, never a survivor portrait', () => {
+  it('draws the infected card head as its class icon, the one code sets, never a survivor portrait', () => {
+    // client.dll sets hud/ZombieTeamImage_<class> on PlayerImage (probe-phase2-infected/b9/shots/crops/bl-abeg.png b).
     const portraits = ['biker', 'manager', 'namvet', 'teenangst'].map((c) => artUrl(`vgui/s_panel_${c}`)!);
     for (const preset of ['stock', 'modern'] as const) {
-      for (const card of [undefined, 0, 1, 2]) {
+      for (const cls of ['hunter', 'smoker', 'boomer', 'tank'] as const) {
         const { ctx, calls } = recCtx();
-        drawPanel(ctx, design({ preset }), 'infectedRow', { x: 0, y: 0 }, 1, { card });
+        drawPanel(ctx, design({ preset }), 'infectedRow', { x: 0, y: 0 }, 1, { card: 0, cls });
         const srcs = calls.filter((c) => c.m === 'drawImage').map((c) => (c.a[0] as HTMLImageElement).src);
-        for (const p of portraits) expect(srcs, `${preset} card ${card}`).not.toContain(p);
-        expect(calls.some((c) => c.m === 'arc'), `${preset} card ${card}`).toBe(true);
+        for (const p of portraits) expect(srcs, `${preset} ${cls}`).not.toContain(p);
+        expect(srcs, `${preset} ${cls}`).toContain(artUrl(`vgui/hud/zombieteamimage_${cls}`));
       }
     }
   });

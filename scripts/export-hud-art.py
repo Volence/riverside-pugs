@@ -73,6 +73,11 @@ MATERIALS = [
     # the ability marker around the infected crosshair: HudCrosshair's own CircularProgressBar,
     # which code gives HUD/PZ_charge_crosshair (client.dll 0x10240e55, probe Q16a)
     'vgui/hud/pz_charge_crosshair',
+    # the infected teammate card's class icon: code sets hud/ZombieTeamImage_<class> on PlayerImage
+    # (client.dll strings beside ZombieTeamDisplayPlayer.res); a ghost's hud/GhostTeamImage_<class>
+    # is a material over the same texture with a pulsing alpha, so no texture of its own
+    'vgui/hud/zombieteamimage_hunter', 'vgui/hud/zombieteamimage_smoker',
+    'vgui/hud/zombieteamimage_boomer', 'vgui/hud/zombieteamimage_tank',
 ]
 
 # Materials drawn by a two-texture shader: the material name -> its second
@@ -123,6 +128,9 @@ EQUIP = {
     'icon/equip/pills': 'icon_equip_pills',
     # not a weapon: the use/heal bar's AwardIcon (progressbar.res "icon" "icon_healing"), a cell of the same sheet
     'icon/healing': 'icon_healing',
+    # not a weapon either: the infected card's dead skull, drawn by client.dll at SkullIconPlacement
+    # (the name icon_skull sits beside that block's name in its strings; probe Q19)
+    'icon/skull': 'icon_skull',
 }
 # The stock HUD's faces: the name clientscheme.res gives each -> its vfont
 # in the install and the file it is written to here. The name must be the one

@@ -59,6 +59,16 @@ export const HEALING_ICON = 'icon/healing';
  */
 export const CROSSHAIR_OPEN = 'icon/pz_crosshair_open';
 
+/**
+ * The infected card's dead skull: mod_textures.txt icon_skull, a 64 x 64 cell
+ * of vgui/hud/iconsheet, which client.dll draws at SkullIconPlacement while
+ * that player is dead (probe Q19). Cut by the export script like the icons.
+ */
+export const SKULL_ICON = 'icon/skull';
+
+/** The infected card's class icon, which code sets on PlayerImage: hud/ZombieTeamImage_<class>. */
+export const zombieTeamImage = (cls: string): string => `vgui/hud/zombieteamimage_${cls}`;
+
 /** Every material the renderer can ask for, and the item and weapon icons. art.test.ts holds the index to this list. */
 export const NEEDED_MATERIALS: readonly string[] = [
   'vgui/s_panel_biker', 'vgui/s_panel_manager', 'vgui/s_panel_namvet', 'vgui/s_panel_teenangst',
@@ -90,6 +100,9 @@ export const NEEDED_MATERIALS: readonly string[] = [
   // The ability marker round the infected crosshair: HudCrosshair's own CircularProgressBar, which
   // code gives HUD/PZ_charge_crosshair (client.dll 0x10240e55, probe Q16a), and the crosshair itself.
   'vgui/hud/pz_charge_crosshair', CROSSHAIR_OPEN,
+  // The infected teammate card: each class's icon (a ghost's is the same texture, faint) and the dead skull.
+  'vgui/hud/zombieteamimage_hunter', 'vgui/hud/zombieteamimage_smoker', 'vgui/hud/zombieteamimage_boomer', 'vgui/hud/zombieteamimage_tank',
+  SKULL_ICON,
   // The use/heal bar's AwardIcon (progressbar.res "icon" "icon_healing", a cell of vgui/hud/iconsheet).
   HEALING_ICON,
   ...ITEM_ICONS,
