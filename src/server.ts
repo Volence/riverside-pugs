@@ -91,6 +91,7 @@ import {
 import { BalanceAssembler } from './balanceAssembler.js';
 import { loadBalanceKnobs, BALANCE_KNOBS_PATH, type BalanceKnobs } from './balanceKnobs.js';
 import { recordBalanceSighting, refingerprintPatches } from './balancePatches.js';
+import { effectiveIgnored } from './balanceIgnore.js';
 import { expectedPatchFor, confirmOnSighting } from './balanceRollouts.js';
 import { recordRoundMark, recordRoundStat, recordRoundStatsEnd, resetRoundLines } from './roundStatLines.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
@@ -672,7 +673,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // not in openDb, because this is the one place the knobs are known.
       if (balanceKnobs) {
         try {
-          refingerprintPatches(deps.db, balanceKnobs.versionless, balanceKnobs.ignored ?? [], (e) => bootProblems.push(e.text));
+          refingerprintPatches(deps.db, balanceKnobs.versionless, effectiveIgnored(deps.db, balanceKnobs.ignored), (e) => bootProblems.push(e.text));
         } catch (err) {
           console.error('[balance] refingerprinting patches failed:', err);
         }
@@ -982,7 +983,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             const serverId = m.server_id ?? serverOf(source, meta);
             const r = recordBalanceSighting(deps.db, {
               matchId: m.id, serverId, half: ev.half,
-              inventory: inv, versionless: balanceKnobs.versionless, ignored: balanceKnobs.ignored,
+              inventory: inv, versionless: balanceKnobs.versionless, ignored: effectiveIgnored(deps.db, balanceKnobs.ignored),
               expectedPatchId: serverId !== null ? expectedPatchFor(deps.db, serverId) : null,
             });
             if (serverId !== null) confirmOnSighting(deps.db, { serverId, patchId: r.patchId });
