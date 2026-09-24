@@ -153,6 +153,18 @@ export const TUNING = {
    *  stretches. They are scarce: the 189 replays in hand on 2026-09-21 hold 478
    *  between 16 players, about two per three player-rounds, 0 to 124 each. */
   MIN_TRACK_WINDOWS: 20,
+  /** The tracking metrics are scored at every whole-frame lag from 0 up to
+   *  this many frames, 0 to 400 ms at 10 Hz, and the best is kept. A person
+   *  following a moving thing is always a little behind it, and 150 ms of lag
+   *  took a synthetic tracker's share of windows at or over 0.7 from 0.74 to
+   *  0.17 (see CLIP_MIN). Searching lags makes a chance match easier too, which
+   *  is why the league is scored with the identical search and why the lag 0
+   *  ghost score stays the ranked one until calibration (spec section 6). */
+  LAG_MAX_FRAMES: 4,
+  /** Metric F reads n/a under this many reveals. "Already on target when it
+   *  came into view" is a share, and under 30 events a share is one or two
+   *  lucky flicks (spec section 3). */
+  MIN_REVEALS: 30,
   /** Windows above this fidelity become reviewable clips.
    *
    *  CALIBRATED 2026-09-21, AND IT LOOKS TOO HIGH. Left at 0.7 on purpose: the
