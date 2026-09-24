@@ -203,8 +203,10 @@ export const TEAM_PANEL: PanelChildren = {
   repeat: 'cards',
   barAnchor: 'Items',
   children: [
-    { name: 'Head', label: 'Portrait', kind: 'image', role: 'content', box: 'square', move: true, font: false, colour: false,
-      hideIn: ['down', 'dead'] },
+    // Colour: drawColor tints the portrait (probe B1 S-head,
+    // /home/volence/l4d/hud/probe-phase2/b1/shots/crops/card1-a.png, pink portraits).
+    { name: 'Head', label: 'Portrait', kind: 'image', role: 'content', box: 'square', move: true, font: false, colour: true,
+      hideIn: ['down', 'dead'], note: 'The colour tints the portrait: white leaves it as the game draws it.' },
     { name: 'Health', label: 'Health bar', kind: 'bar', role: 'content', box: 'wh', move: true, font: false, colour: false,
       hideIn: ['dead'],
       note: REVIVE_LINK,
@@ -213,7 +215,8 @@ export const TEAM_PANEL: PanelChildren = {
     { name: 'Name', label: 'Name', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true },
     { name: 'HealthNumber', label: 'Health number', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: false,
       addable: { template: HEALTH_NUMBER, after: 'Name' }, note: 'The game colours this by health.', hideIn: ['dead'] },
-    { name: 'Items', label: 'Item icons', kind: 'label', role: 'content', box: 'none', move: true, font: true, colour: false,
+    // Colour: fgcolor_override colours the icons (probe B1 S-items, card1-a.png, yellow icons).
+    { name: 'Items', label: 'Item icons', kind: 'label', role: 'content', box: 'none', move: true, font: true, colour: true,
       note: `The preview draws the game's own item icons, a full loadout; in game the row shows only what that teammate carries. ${REVIVE_LINK}`,
       hideIn: ['dead'] },
     { name: 'Status', label: 'Status text', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true },

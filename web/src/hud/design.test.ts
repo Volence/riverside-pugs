@@ -240,17 +240,19 @@ describe('validateDesign, the teammate card children', () => {
     expect(got).toEqual({
       Name: { color: '10 20 30 255', fontSize: 64 },
       HealthNumber: { on: true, fontSize: 14 },
+      Head: { color: '1 2 3 4' },
       Items: { fontSize: 22, y: 20 },
       BackgroundImage: { x: 5, visible: false },
     });
   });
 
-  it('keeps a tint on the splatter, movable and free-sized like any wh piece, and drops one on the portrait', () => {
+  it('keeps a tint on the splatter, movable and free-sized like any wh piece, and on the portrait (T1), and drops one on the dead art', () => {
     const got = kids({ teamColumn: {
       BackgroundImage: { x: 5, y: 6, w: 90, h: 40, color: '10 20 30 255' },
       Head: { color: '10 20 30 255' },
+      Dead: { color: '10 20 30 255' },
     } }).teamColumn;
-    expect(got).toEqual({ BackgroundImage: { x: 5, y: 6, w: 90, h: 40, color: '10 20 30 255' } });
+    expect(got).toEqual({ BackgroundImage: { x: 5, y: 6, w: 90, h: 40, color: '10 20 30 255' }, Head: { color: '10 20 30 255' } });
   });
 
   it('stores square art with both sides equal, the smaller winning', () => {

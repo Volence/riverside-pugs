@@ -189,13 +189,13 @@ describe('buildHud, childPass', () => {
     expect(() => buildHud(design({ children: kids({ Nope: { x: 1 } }) })))
       .toThrow(/teammatepanel\.res: Nope is not an editable child/);
     // D2: a wrong-kind edit fails the same way for size and colour. The splatter now takes both, and
-    // move, so these use Items (no size box, an icon row sized by its font) and Head (an image with
-    // no tint flag) instead. There is no move guard to test any more: every registered child moves
+    // move, so these use Items (no size box, an icon row sized by its font) and Dead (an image with
+    // no tint flag; the portrait took one in task T1) instead. There is no move guard to test any more: every registered child moves
     // today, so applyChild dropped that guard rather than keep it unreachable (see its own comment).
     expect(() => buildHud(design({ children: kids({ Items: { w: 10, h: 10 } }) })))
       .toThrow(/teammatepanel\.res: Items takes no size/);
-    expect(() => buildHud(design({ children: kids({ Head: { color: '1 2 3 4' } }) })))
-      .toThrow(/teammatepanel\.res: Head takes no colour/);
+    expect(() => buildHud(design({ children: kids({ Dead: { color: '1 2 3 4' } }) })))
+      .toThrow(/teammatepanel\.res: Dead takes no colour/);
   });
 
   it('writes an image tint as drawColor and a label tint as fgcolor_override', () => {

@@ -70,12 +70,21 @@ describe('the teammate card registry', () => {
     expect(TEAM_PANEL.children.filter((c) => c.box === 'square').map((c) => c.name)).toEqual(['Head', 'Incapacitated', 'Dead', 'Voice']);
   });
 
-  it('offers colour only on labels and the splatter, and never on the health number or the other art', () => {
+  it('offers colour only on labels, the splatter and the portrait, and never on the health number or the state art', () => {
     for (const def of TEAM_PANEL.children) {
-      if (def.colour) expect(def.kind === 'label' || def.name === 'BackgroundImage', def.name).toBe(true);
+      if (def.colour) expect(def.kind === 'label' || def.name === 'BackgroundImage' || def.name === 'Head', def.name).toBe(true);
     }
     expect(TEAM_PANEL.children.find((c) => c.name === 'HealthNumber')!.colour).toBe(false);
-    expect(TEAM_PANEL.children.find((c) => c.name === 'Head')!.colour).toBe(false);
+    for (const n of ['Incapacitated', 'Dead', 'Voice']) expect(TEAM_PANEL.children.find((c) => c.name === n)!.colour, n).toBe(false);
+  });
+
+  // /home/volence/l4d/hud/probe-phase2/b1/shots/crops/card1-a.png (probe B1, S-items and S-head): the item icons
+  // took the Items label's fgcolor_override (yellow) and the portraits the Head's drawColor (pink).
+  it('colours the item icons and tints the portrait, each by the key the game was seen to honour', () => {
+    const by = (n: string) => TEAM_PANEL.children.find((c) => c.name === n)!;
+    expect([by('Items').colour, by('Items').kind]).toEqual([true, 'label']);
+    expect([by('Head').colour, by('Head').kind]).toEqual([true, 'image']);
+    expect(by('Head').note).toMatch(/tint/i);
   });
 
   it('makes the splatter a movable, free-sized, tintable piece, still decoration', () => {

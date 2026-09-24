@@ -915,7 +915,14 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
     const material = portraitFor(opts);
     const img = artImage(material, opts.onAsset);
     if (!img) { if (missing.has(material)) hatch(ctx, r); return; }
-    ctx.drawImage(img, r.x, r.y, r.w, r.h);
+    // A drawColor tints it, as an ImagePanel's does (probe B1 S-head,
+    // /home/volence/l4d/hud/probe-phase2/b1/shots/crops/card1-a.png).
+    const [tr, tg, tb, ta] = parseColour(kvGet(n, 'drawColor') ?? '255 255 255 255');
+    if (ta === 0) return;
+    ctx.save();
+    ctx.globalAlpha *= ta / 255;
+    ctx.drawImage(tr < 255 || tg < 255 || tb < 255 ? tinted(img, material, tr, tg, tb) : img, r.x, r.y, r.w, r.h);
+    ctx.restore();
     return;
   }
   // The infected card's Dead is its own file's art (hud/overlay_dead), not a survivor's dead panel.

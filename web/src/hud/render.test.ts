@@ -638,6 +638,51 @@ describe('the teammate card states', () => {
     expect(calls.some((c) => c.m === 'strokeRect' && c.a[0] === r.x)).toBe(false);
   });
 
+  describe('the teammate item colour and portrait tint (task T1)', () => {
+    // /home/volence/l4d/hud/probe-phase2/b1/shots/crops/card1-a.png: yellow item icons from the Items label's
+    // fgcolor_override, pink portraits from the Head's drawColor.
+    afterEach(() => { _setCanvasFactory(null); });
+    function tintedDraws(d: HudDesign) {
+      const scratch = recCtx();
+      const made: HTMLCanvasElement[] = [];
+      _setCanvasFactory((w, h) => {
+        const c = { width: w, height: h, getContext: () => scratch.ctx } as unknown as HTMLCanvasElement;
+        made.push(c);
+        return c;
+      });
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
+      return { calls, made, multiplies: scratch.calls.filter((c) => c.m === 'fillRect' && c.op === 'multiply').map((c) => c.fill) };
+    }
+
+    it('multiplies every item icon by the Items colour (pinned)', () => {
+      const d = design({ children: { teamColumn: { Items: { color: '255 255 0 255' } } } });
+      expect(kvGet(kvFind(parseKv(new TextDecoder('latin1').decode(buildHud(d).find((f) => f.path === TEAM_PANEL.file)!.data))[0].value as KvNode[], ['Items'])!, 'fgcolor_override')).toBe('255 255 0 255');
+      const { multiplies } = tintedDraws(d);
+      expect(multiplies.filter((f) => f === 'rgb(255,255,0)')).toHaveLength(ITEM_ROW.length);
+    });
+
+    it('tints the portrait by the Head drawColor, where it draws', () => {
+      const d = design({ children: { teamColumn: { Head: { color: '255 128 192 200' } } } });
+      expect(kvGet(kvFind(parseKv(new TextDecoder('latin1').decode(buildHud(d).find((f) => f.path === TEAM_PANEL.file)!.data))[0].value as KvNode[], ['Head'])!, 'drawColor')).toBe('255 128 192 200');
+      const head = childRects(d, 'teamColumn', { x: 0, y: 0 }, 1).find((c) => c.name === 'Head')!;
+      const { calls, made, multiplies } = tintedDraws(d);
+      expect(multiplies).toContain('rgb(255,128,192)');
+      const drawn = calls.find((c) => c.m === 'drawImage' && made.includes(c.a[0] as HTMLCanvasElement) && JSON.stringify(c.a.slice(1)) === JSON.stringify([head.x, head.y, head.w, head.h]));
+      expect(drawn).toBeDefined();
+      expect(drawn!.alpha).toBeCloseTo(200 / 255);
+    });
+
+    it('draws an untinted portrait as it is', () => {
+      const d = design({});
+      const head = childRects(d, 'teamColumn', { x: 0, y: 0 }, 1).find((c) => c.name === 'Head')!;
+      const { calls } = tintedDraws(d);
+      const drawn = calls.find((c) => c.m === 'drawImage' && JSON.stringify(c.a.slice(1)) === JSON.stringify([head.x, head.y, head.w, head.h]));
+      expect((drawn!.a[0] as HTMLImageElement).src).toBe(artUrl('vgui/s_panel_biker'));
+      expect(drawn!.alpha).toBe(1);
+    });
+  });
+
   it('scales the icons with the preview and with the icon size the player picks', () => {
     const d = design({ children: { teamColumn: { Items: { fontSize: 36 } } } });
     const r = childRects(d, 'teamColumn', { x: 10, y: 20 }, 2).find((c) => c.name === 'Items')!;
