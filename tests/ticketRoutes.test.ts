@@ -88,6 +88,20 @@ describe('filing over HTTP', () => {
 });
 
 describe('reports about a shared entry', () => {
+  it('cannot also name a match, so the per-match duplicate rule holds on either route', async () => {
+    const entryId = Number(db.prepare(
+      `INSERT INTO community_entries (kind, author_id, title, payload, created_at)
+       VALUES ('crosshair', ?, 'Loud cross', '{}', '2026-09-24T00:00:00.000Z')`,
+    ).run(ACCUSED).lastInsertRowid);
+    const body = { targetId: ACCUSED, category: 'cheating', text: '' };
+    expect((await post(R1, `/api/matches/${matchId}/reports`, body)).statusCode).toBe(200);
+    const viaMatch = await post(R1, `/api/matches/${matchId}/reports`, { ...body, entryId });
+    expect(viaMatch.statusCode).toBe(400);
+    expect(viaMatch.json().error).toBe('a report about a shared entry cannot name a match');
+    expect((await file(R1, { ...body, matchId, entryId })).statusCode).toBe(400);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM ticket_reports').get() as { n: number }).n).toBe(1);
+  });
+
   it('carry the entry in the ticket detail, and show when staff removed it', async () => {
     const entryId = Number(db.prepare(
       `INSERT INTO community_entries (kind, author_id, title, payload, created_at)

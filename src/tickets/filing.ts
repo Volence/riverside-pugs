@@ -165,6 +165,12 @@ export function fileReport(db: DB, reporterIn: string | DiscordReporter, body: F
   // member has no player account, so no entries.
   let entryId: number | null = null;
   if (body.entryId !== undefined && body.entryId !== null) {
+    // An entry report is left out of the per-match duplicate rule below, so
+    // one that also named a match would let a reporter file about the same
+    // match again and again (the match page's route fills matchId in).
+    if ((body.matchId !== undefined && body.matchId !== null) || (body.moment !== undefined && body.moment !== null)) {
+      return fail(400, 'a report about a shared entry cannot name a match');
+    }
     if (typeof body.entryId !== 'number' || !Number.isInteger(body.entryId)) return fail(400, 'that is not an entry');
     const entry = db.prepare('SELECT author_id FROM community_entries WHERE id = ? AND deleted_at IS NULL')
       .get(body.entryId) as { author_id: string } | undefined;
