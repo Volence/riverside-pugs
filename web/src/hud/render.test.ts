@@ -323,10 +323,10 @@ describe('drawPanel', () => {
   it('draws the injected card background at the card size, from the design colour', () => {
     const flat = design({ elements: { teamColumn: { fit: true } }, styles: { panelBg: { kind: 'flat', color: '255 0 0 255' } } });
     const bg = childRects(flat, 'teamColumn', { x: 5, y: 7 }, 2).find((c) => c.name === 'HudEdCardBg')!;
-    expect([bg.x, bg.y, bg.w, bg.h]).toEqual([5, 7, 242, 72]);
+    expect([bg.x, bg.y, bg.w, bg.h]).toEqual([5, 7, 244, 72]);
     const a = recCtx();
     drawPanel(a.ctx, flat, 'teamColumn', { x: 5, y: 7 }, 2, { card: 0 });
-    expect(a.calls.some((c) => c.m === 'fillRect' && c.fill === 'rgba(255,0,0,1)' && c.a.join() === [5, 7, 242, 72].join())).toBe(true);
+    expect(a.calls.some((c) => c.m === 'fillRect' && c.fill === 'rgba(255,0,0,1)' && c.a.join() === [5, 7, 244, 72].join())).toBe(true);
 
     const rounded = design({ elements: { teamColumn: { fit: true } }, styles: { panelBg: { kind: 'rounded', color: '0 255 0 255' } } });
     const b = recCtx();
@@ -579,9 +579,9 @@ describe('the teammate card states', () => {
   it("Down draws the character's incap art square at the card height, a bar and 299 in red, and no portrait", () => {
     const { ctx, calls } = recCtx();
     drawPanel(ctx, fitted({ teamColumn: { HealthNumber: { on: true } } }), 'teamColumn', { x: 10, y: 20 }, 2, { card: 1, state: 'down' });
-    // Stock fitted: a 121-unit square (the card's own width) at x 0, y -27
-    // (the band centred on the card), at k = 2: 10 + 0, 20 + -27*2, 242, 242.
-    expect(imageAt(calls, artUrl('vgui/s_panel_manager_incap')!)!.a.slice(1)).toEqual([10, -34, 242, 242]);
+    // Stock fitted: a 122-unit square (the card's own width) at x 0, y -27
+    // (the band centred on the card), at k = 2: 10 + 0, 20 + -27*2, 244, 244.
+    expect(imageAt(calls, artUrl('vgui/s_panel_manager_incap')!)!.a.slice(1)).toEqual([10, -34, 244, 244]);
     expect(srcs(calls)).not.toContain(artUrl('vgui/s_panel_manager'));
     expect(srcs(calls)).toContain(artUrl('vgui/healthbar_white'));      // tinted the incap red (X9; happy-dom has no tint canvas)
     expect(srcs(calls)).not.toContain(artUrl('vgui/healthbar_green'));
@@ -594,7 +594,7 @@ describe('the teammate card states', () => {
     const items = childRects(d, 'teamColumn', { x: 10, y: 20 }, 2).find((c) => c.name === 'Items')!;
     const { ctx, calls } = recCtx();
     drawPanel(ctx, d, 'teamColumn', { x: 10, y: 20 }, 2, { card: 1, state: 'dead' });
-    expect(imageAt(calls, artUrl('vgui/s_panel_dead')!)!.a.slice(1)).toEqual([10, -34, 242, 242]);
+    expect(imageAt(calls, artUrl('vgui/s_panel_dead')!)!.a.slice(1)).toEqual([10, -34, 244, 244]);
     expect(srcs(calls).some((s) => /healthbar_(green|red|white|grey)|s_healthbar_outline/.test(s))).toBe(false);
     expect(srcs(calls)).not.toContain(artUrl('vgui/s_panel_manager'));
     expect(calls.some((c) => c.m === 'fillText' && (c.a[0] === '100' || c.a[0] === '299'))).toBe(false);

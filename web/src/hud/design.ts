@@ -420,20 +420,25 @@ export const isBar = (name: string): boolean => name.toLowerCase() === 'health';
 /**
  * The teammate card's content: the union of the visible steady-state
  * children (Head, Health, Name, Items, and HealthNumber and Status when
- * present). State art and decoration never count. Null when every one is
- * hidden, which fitPass treats as "keep the file's card" rather than write a
- * 0 x 0 card. On stock this is x 13..134, y 36..72: 121 x 36. It lives here,
- * not in build.ts, because the spacing migration below needs the preset's
- * own fitted card too.
+ * present), each where the game draws it: the health bar at the panel's bar
+ * anchor's x (drawnBarX: a card's bar at its Items x, probe X15), so the
+ * fitted card never clips the bar. State art and decoration never count.
+ * Null when every one is hidden, which fitPass treats as "keep the file's
+ * card" rather than write a 0 x 0 card. On stock this is x 13..135 (the bar
+ * drawn 39..135), y 36..72: 122 x 36. It lives here, not in build.ts,
+ * because the spacing migration below needs the preset's own fitted card
+ * too. `panel` names the anchor: the teammate card's by default.
  */
-export function contentBox(nodes: KvNode[], names: readonly string[] = CONTENT_CHILDREN): Box | null {
+export function contentBox(nodes: KvNode[], names: readonly string[] = CONTENT_CHILDREN, panel: { barAnchor?: string } = TEAM_PANEL): Box | null {
   const content = new Set(names.map((n) => n.toLowerCase()));
   const num = (v: string | undefined) => { const n = parseFloat(v ?? ''); return Number.isFinite(n) ? n : 0; };
+  const barX = drawnBarX(nodes, panel);
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const n of nodes) {
     if (typeof n.value === 'string' || !content.has(n.key.toLowerCase())) continue;
     if ((kvGet(n, 'visible') ?? '1') === '0') continue;
-    const x = num(kvGet(n, 'xpos')), y = num(kvGet(n, 'ypos')), w = num(kvGet(n, 'wide')), h = num(kvGet(n, 'tall'));
+    const x = barX !== undefined && isBar(n.key) ? barX : num(kvGet(n, 'xpos'));
+    const y = num(kvGet(n, 'ypos')), w = num(kvGet(n, 'wide')), h = num(kvGet(n, 'tall'));
     if (w <= 0 || h <= 0) continue;
     x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h);
   }
@@ -441,7 +446,7 @@ export function contentBox(nodes: KvNode[], names: readonly string[] = CONTENT_C
 }
 
 const BASE_CONTENT = new Map<BaseKey, Box | null>();
-/** The base's own card, fitted with no inside edits: stock 121 x 36, Modern 113 x 26. */
+/** The base's own card, fitted with no inside edits: stock 122 x 36, Modern 113 x 26. */
 export function baseContent(key: BaseKey): Box | null {
   if (!BASE_CONTENT.has(key)) {
     BASE_CONTENT.set(key, contentBox(baseTree(key, TEAM_PANEL.file)));

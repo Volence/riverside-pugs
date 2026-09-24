@@ -562,7 +562,7 @@ describe('drawHud delegates panels to the renderer', () => {
     expect(rects).toContainEqual([(own.x + local.x) * k, (own.y + local.y) * k, local.w * k, local.h * k]);
     // Each teammate card is clipped where the generated file puts it, at its own size.
     const cards = teamCardRects(DEFAULT_DESIGN, DEFAULT_DESIGN.aspect).slice(0, 3);
-    expect(cards[0]).toEqual({ x: 13, y: 441, w: 121, h: 36 });       // DEFAULT_DESIGN fits the stock card
+    expect(cards[0]).toEqual({ x: 13, y: 441, w: 122, h: 36 });       // DEFAULT_DESIGN fits the stock card
     for (const c of cards) expect(rects).toContainEqual([c.x * k, c.y * k, c.w * k, c.h * k]);
   });
 });

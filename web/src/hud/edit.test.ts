@@ -246,7 +246,7 @@ describe('nudgeCards', () => {
     expect(nudgeCards(free, [0], 5, 0).elements.teamColumn!.slots![0]).toEqual({ x: 5, y: 405 });
     let d = free;
     for (let i = 0; i < 200; i++) d = nudgeCards(d, [0], -10, 0);
-    expect(teamCardRects(d, d.aspect)[0].x).toBe(8 - 121);
+    expect(teamCardRects(d, d.aspect)[0].x).toBe(8 - 122);
   });
 
   it('switches a Row team to Free first, so the nudge moves one card', () => {
@@ -393,7 +393,7 @@ describe('element edits', () => {
     const free = withTeamDir(DEFAULT_DESIGN, 'free');
     const starts = { 0: teamCardRects(free, free.aspect)[0] };
     expect(teamCardRects(moveCards(free, [0], starts, 100, -200), free.aspect)[0]).toMatchObject({ x: 113, y: 241 });
-    expect(teamCardRects(moveCards(free, [0], starts, -5000, 0), free.aspect)[0].x).toBe(8 - 121);
+    expect(teamCardRects(moveCards(free, [0], starts, -5000, 0), free.aspect)[0].x).toBe(8 - 122);
   });
 
   it('rounds a moved Free card to whole units too, since it stores through placeCard', () => {
@@ -437,7 +437,7 @@ describe('element edits', () => {
     within(a[2].x, r[2].x);
     expect(a[2].y).toBe(r[2].y);
     const edge = teamCardRects(moveCards(D, [0, 1], { 0: r[0], 1: r[1] }, -5000, 0), D.aspect);
-    expect(edge[0].x).toBe(8 - 121);
+    expect(edge[0].x).toBe(8 - 122);
     expect(edge[1].x - edge[0].x).toBe(140);
   });
 

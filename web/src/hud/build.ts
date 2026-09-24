@@ -481,11 +481,11 @@ function shiftNodes(nodes: KvNode[], by: { x: number; y: number }) {
 function fitBox(nodes: KvNode[], panel: PanelChildren, frame: Box | null): Box | null {
   const content = panel.children.filter((c) => c.role === 'content').map((c) => c.name);
   const boxes: Box[] = [];
-  const main = contentBox(nodes, content);
+  const main = contentBox(nodes, content, panel);
   if (main) boxes.push(main);
   for (const def of panel.children) {
     if (def.fitPlace !== 'keep') continue;
-    const piece = contentBox(nodes, [def.name]);
+    const piece = contentBox(nodes, [def.name], panel);
     if (!piece) continue;
     const cut = frame ? intersect(piece, frame) : piece;
     if (cut) boxes.push(cut);

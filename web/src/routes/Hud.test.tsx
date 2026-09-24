@@ -651,7 +651,8 @@ describe('Hud page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
     expect(screen.queryByLabelText('Spacing')).toBeNull();
     const gap = screen.getByRole('slider', { name: /^Gap/ }) as HTMLInputElement;
-    expect(gap.value).toBe('19');
+    // Stock's pitch 140 less the fitted card, 122 wide with the bar where the game draws it (probe X15).
+    expect(gap.value).toBe('18');
     fireEvent.input(gap, { target: { value: '30' } });
     expect((screen.getByRole('slider', { name: /^Gap/ }) as HTMLInputElement).value).toBe('30');
   });
@@ -893,11 +894,11 @@ describe('Hud page', () => {
     // Layers still works too: every teammate-card row is listed there, splatter included.
     fireEvent.click(screen.getByRole('button', { name: 'Damage splatter' }));
     expect(screen.getByText('Damage splatter', { selector: 'legend' })).toBeTruthy();
-    // Card 1's fitted splatter runs (13, 441) to (134, 502): its east handle sits at (134, 471.5).
-    dragFrom(canvas, [134, 471.5], [144, 471.5]);
-    expect((screen.getByLabelText('W') as HTMLInputElement).value).toBe('131');
+    // Card 1's fitted splatter runs (13, 441) to (135, 502): its east handle sits at (135, 471.5).
+    dragFrom(canvas, [135, 471.5], [145, 471.5]);
+    expect((screen.getByLabelText('W') as HTMLInputElement).value).toBe('132');
     undoKey();
-    expect((screen.getByLabelText('W') as HTMLInputElement).value).toBe('121');
+    expect((screen.getByLabelText('W') as HTMLInputElement).value).toBe('122');
     fireEvent.input(screen.getByLabelText('Damage splatter opacity'), { target: { value: '50' } });
     fireEvent.change(screen.getByLabelText('Damage splatter opacity'));
     expect((screen.getByLabelText('Damage splatter opacity') as HTMLInputElement).value).toBe('50');
@@ -906,7 +907,7 @@ describe('Hud page', () => {
   it('picks the splatter on the canvas where no other piece is, drags it, and undoes with Ctrl+Z', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
-    // Card 3 (Zoey) is drawn at (293, 441), 121 x 36: (323, 456) is inside it, in the splatter, but
+    // Card 3 (Zoey) is drawn at (293, 441), 122 x 36: (323, 456) is inside it, in the splatter, but
     // on none of Head, Health, Name, Status or Items, so a plain click there now picks the splatter,
     // the lowest-priority piece.
     clickAt(canvas, 323, 456);
@@ -1090,7 +1091,7 @@ describe('Hud page', () => {
     for (const v of ['20', '25', '30']) fireEvent.input(gap(), { target: { value: v } });
     fireEvent.change(gap());
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
-    expect(gap().value).toBe('19');
+    expect(gap().value).toBe('18');
   });
 
   it('makes one canvas drag one step', () => {
@@ -1385,11 +1386,12 @@ describe('Hud page', () => {
     fireEvent.blur(x());
     fireEvent.input(y(), { target: { value: '300' } });
     fireEvent.blur(y());
-    expect(x().value).toBe('299');
+    // The team is 555 wide (fitted cards 122 wide, the bar where the game draws it): 853 - 555 = 298.
+    expect(x().value).toBe('298');
     expect(y().value).toBe('300');
     // Scaled up, the wider team is drawn further left still.
     fireEvent.input(screen.getByRole('slider', { name: /^Scale/ }), { target: { value: '1.5' } });
-    expect(x().value).toBe('22');
+    expect(x().value).toBe('21');
     // A typed value inside the reach lands where it is typed.
     fireEvent.input(x(), { target: { value: '10' } });
     expect(x().value).toBe('10');

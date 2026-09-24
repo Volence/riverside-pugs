@@ -22,6 +22,15 @@ import { ammoOnly } from './edit';
  * designs moved on purpose when a new design started fitting your own
  * health (slice 2.F X14, after the incap fix); the designs saved before that
  * keep their old bytes (the three "saved before" cases).
+ *
+ * Every fitted stock card moved on purpose with the card bar fit (probe X15,
+ * /home/volence/l4d/hud/probe-2f/x15/RESULTS.md): the game draws a card's
+ * bar at its item row's x, 39, not its own 37, so the bar ends at 135 and
+ * the fitted card is 122 wide, not 121 (a 121 card clipped the bar's right
+ * outline in game, b13-stock full-1.png). The untouched stock download
+ * differs only in that: TeamPlayer1..4 and the card's squared Incapacitated
+ * and Dead 122, Voice at 106, the container 555. Modern's card has bar and
+ * row both at 32 and keeps its bytes.
  */
 const here = fileURLToPath(new URL('.', import.meta.url));
 const fonts = {
@@ -33,17 +42,17 @@ const download = (d: HudDesign) => sha(packHud(d, { fonts }).bytes);
 
 describe('the download is unchanged by the preview', () => {
   const cases: [string, HudDesign, string][] = [
-    ['an untouched design', structuredClone(DEFAULT_DESIGN), 'a5957d89eed9801d7005f4363331ea80029e56725a0e3e1a7e2d0018f5400402'],
-    ['Ammo only', ammoOnly(structuredClone(DEFAULT_DESIGN)), '9c72ccc16eedc96ab60589f9e7425d828652dfce3a43e9d2ed129bc4f4d35b20'],
+    ['an untouched design', structuredClone(DEFAULT_DESIGN), '0ff735b5c626c374c4ee64d8b35591b3efc1bb4d150468c4c7060667e8c87756'],
+    ['Ammo only', ammoOnly(structuredClone(DEFAULT_DESIGN)), '64bf9c263167e79439f125f32fe872a91f9bbddd5482cd6ec71f5b3d030e242c'],
     // Modern moved on purpose with the revive anchor (build.ts reviveAnchorPass): its own panel has the
     // bar at 34 and the down picture at 0, so it gains a hidden Items label at 34.
     ['an untouched Modern design', { ...structuredClone(DEFAULT_DESIGN), preset: 'modern' }, '1b285e76db27d4b2dfbb0e7b39c19077d1f3d6e7825a5e3f0e4210bfd25b2264'],
-    ['an untouched design in Roboto', { ...structuredClone(DEFAULT_DESIGN), font: 'roboto' }, '261f301e3d3943abd1016c3fa0a390e74aa403b927b8978274f87faa8bc912bd'],
+    ['an untouched design in Roboto', { ...structuredClone(DEFAULT_DESIGN), font: 'roboto' }, '5deb06123b98d7017cc7454d3e9d5d4c0e2e5352b3deff94e0b96181293bbb88'],
     // A design saved before your own health fitted by default (slice 2.F X14) keeps the bytes it had:
     // these are the old untouched hashes, built as such a saved design loads.
-    ['a design saved before the own panel fitted by default', validateDesign({ v: 1, crosshair: 'none', elements: { teamColumn: { fit: true } } }), '6d8ec815dd449012fcb2fc549e4392d5d43285751cce51cd5b101ea56cab9e04'],
+    ['a design saved before the own panel fitted by default', validateDesign({ v: 1, crosshair: 'none', elements: { teamColumn: { fit: true } } }), 'c400e2a6ff36772b3d3c09151b2859a99bb1c8538ca11bd01ec3826ce23da4db'],
     ['a Modern design saved before the own panel fitted by default', validateDesign({ v: 1, preset: 'modern', crosshair: 'none', elements: { teamColumn: { fit: true } } }), '4c67fb0c1bba67763efe27a75b74c4c383ac02dcfbcf47e95349ff276d4d3a54'],
-    ['a Roboto design saved before the own panel fitted by default', validateDesign({ v: 1, font: 'roboto', crosshair: 'none', elements: { teamColumn: { fit: true } } }), '53437d599a759fc5b4a3c20609d28ce928332146b9598bf90e7a2095a661f180'],
+    ['a Roboto design saved before the own panel fitted by default', validateDesign({ v: 1, font: 'roboto', crosshair: 'none', elements: { teamColumn: { fit: true } } }), '9a193ebada1b8afb78094d9a737dd1000fe7e8df2fa367636c469b9752ed5b58'],
   ];
   for (const [name, d, hash] of cases) {
     it(`${name} packs to the same bytes`, () => {
@@ -70,9 +79,9 @@ describe('saved Phase 1 designs download the same bytes', () => {
         Head: { x: 20, y: 40, w: 30, h: 30 }, HealthNumber: { on: true, fontSize: 14 }, Name: { color: '255 200 0 255' },
         BackgroundImage: { color: '255 255 255 90' }, Items: { visible: false },
       } },
-    }), 'a5c4d983db210c5efb0f9ca1943791058869b4fff65cecccebf47b7ea499686d'],
+    }), 'f86d06e0e1a42e4db014ceb92ac059e65fc47c330501c0a5c2d4ca947a4c024f'],
     ['a Free team', () => validateDesign({ v: 1, elements: { teamColumn: { fit: true, dir: 'free',
-      slots: [{ x: 10, y: 300 }, { x: 200, y: 300 }, { x: 400, y: 300 }, { x: 600, y: 300 }] } } }), 'adeb39a45a4d96e6fb735176b7ed6ae0df6b29eb9e5f491c5af0dab8d6c1b523'],
+      slots: [{ x: 10, y: 300 }, { x: 200, y: 300 }, { x: 400, y: 300 }, { x: 600, y: 300 }] } } }), '21e18600df553220d162da4e3661d6c2e2d948e80e7cf0ba3df53ccddd6ee13e'],
     ['Modern with inside edits and scaled infected panels', () => validateDesign({
       v: 1, preset: 'modern',
       elements: { teamColumn: { fit: true }, siHealth: { scale: 1.5 }, infectedRow: { scale: 2 } },

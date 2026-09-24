@@ -147,8 +147,8 @@ describe('validateDesign, the teammate layout', () => {
   it('fits an old design whose unfitted cards overlapped, and keeps its pitch with the fitted card', () => {
     // Stock column at 40: the 150-tall card overlapped, the 36-tall fitted one leaves 4.
     expect(team('stock', { dir: 'column', spacing: 40 })).toEqual({ dir: 'column', fit: true, gap: 4 });
-    // Stock's own row at 140: 150 wide overlapped, 121 fitted leaves 19.
-    expect(team('stock', { dir: 'row', spacing: 140 })).toEqual({ dir: 'row', fit: true, gap: 19 });
+    // Stock's own row at 140: 150 wide overlapped, 122 fitted (the bar where the game draws it) leaves 18.
+    expect(team('stock', { dir: 'row', spacing: 140 })).toEqual({ dir: 'row', fit: true, gap: 18 });
     // Tighter than even the fitted card: fitted, then clamped at 0.
     expect(team('stock', { dir: 'column', spacing: 20 })).toEqual({ dir: 'column', fit: true, gap: 0 });
   });

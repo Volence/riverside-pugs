@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildHud, elementRect, pcSet, HIDE_FRAMES, CODE_SHOWN, hardHide, baseHasElement, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame, panelChild, panelFrame, writeKeys } from './build';
 import { parsePos, screenW } from './units';
-import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride, type ChildOverride } from './design';
+import { DEFAULT_DESIGN, validateDesign, contentBox, type HudDesign, type ElementOverride, type ChildOverride } from './design';
 import { parseKv, writeKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { elementById, ELEMENTS } from './elements';
@@ -636,15 +636,15 @@ describe('team geometry: the canvas and the file agree for any scale, dir, gap a
   it('lays out a fitted, scaled column as the sample does', () => {
     const d = design({ elements: { teamColumn: { scale: 1.25, dir: 'column', fit: true, gap: 4 } } });
     expect(teamLayout(d, elementById('teamColumn')!)).toEqual({
-      dir: 'column', spacing: 50, gap: 4, offset: { x: 16, y: 45 }, card: { w: 151.25, h: 45 },
-      container: { w: 167.25, h: 240 },
+      dir: 'column', spacing: 50, gap: 4, offset: { x: 16, y: 45 }, card: { w: 152.5, h: 45 },
+      container: { w: 168.5, h: 240 },
       cards: [{ xpos: '16', ypos: '45' }, { xpos: '16', ypos: '95' }, { xpos: '16', ypos: '145' }, { xpos: '16', ypos: '195' }],
       // 240 tall grows up from stock's r75 until its bottom is on the screen's.
       at: { ypos: 'r240' },
     });
     const t = tree(buildHud(d), TEAM_FILE);
     expect(kvGet(kvFind(t, ['TeamPlayer1'])!, 'tall')).toBe('45');
-    expect(kvGet(kvFind(t, ['TeamPlayer1'])!, 'wide')).toBe('151');
+    expect(kvGet(kvFind(t, ['TeamPlayer1'])!, 'wide')).toBe('153');
   });
 
   it('leaves the container at its mock size while the generator writes no team geometry', () => {
@@ -713,9 +713,10 @@ describe('the whole team stays on screen', () => {
   });
 
   it('keeps a moved team switched to Column on screen', () => {
-    // 237 tall at y 300 would end at 537: it comes up to 243, the last card ending on the edge.
+    // 234 tall at y 300 would end at 534: it comes up to 246, the last card ending on the edge. (The
+    // stock row's gap, 140 - 122 = 18, steps the column: the card is 122 wide with the bar where the game draws it.)
     const d = design({ elements: { teamColumn: { fit: true, dir: 'column', x: 500, y: 300 } } });
-    expect(elementRect(d, 'teamColumn', '16:9')).toMatchObject({ x: 500, y: 243, h: 237 });
+    expect(elementRect(d, 'teamColumn', '16:9')).toMatchObject({ x: 500, y: 246, h: 234 });
     const last = teamCardRects(d, '16:9')[3];
     expect(last.y + last.h).toBe(480);
   });
@@ -761,8 +762,8 @@ describe('teamLayout, the gap', () => {
   const layout = (d: HudDesign) => teamLayout(d, elementById('teamColumn')!);
 
   it('derives the gap from the preset file when none is stored, so a new design looks like its preset', () => {
-    // Stock row pitch 140: fitted card 121 leaves 19; the unfitted 150 overlaps by 10.
-    expect(layout(design({ elements: { teamColumn: { fit: true } } }))).toMatchObject({ gap: 19, spacing: 140 });
+    // Stock row pitch 140: fitted card 122 (the bar drawn at the item row's x) leaves 18; the unfitted 150 overlaps by 10.
+    expect(layout(design({ elements: { teamColumn: { fit: true } } }))).toMatchObject({ gap: 18, spacing: 140 });
     expect(layout(design({}))).toMatchObject({ gap: -10, spacing: 140 });
     // Modern column pitch 34: fitted card 26 tall leaves 8.
     expect(layout(design({ preset: 'modern', elements: { teamColumn: { fit: true } } }))).toMatchObject({ gap: 8, spacing: 34 });
@@ -774,7 +775,7 @@ describe('teamLayout, the gap', () => {
     expect([1, 2, 3, 4].map((n) => kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'ypos'))).toEqual(['36', '76', '116', '156']);
     expect(kvGet(kvFind(team, ['TeamPlayer1'])!, 'xpos')).toBe('13');
     const c = kvFind(layoutOf(files), ['CHudTeamDisplay'])!;
-    expect([kvGet(c, 'wide'), kvGet(c, 'tall')]).toEqual(['134', '192']);
+    expect([kvGet(c, 'wide'), kvGet(c, 'tall')]).toEqual(['135', '192']);
   });
 
   it('leaves the content of an overlapping old column where it was, inside the container', () => {
@@ -814,7 +815,7 @@ describe('buildHud, Free', () => {
     // follow the card's centre, like an element's: left third plain, middle third c, right third r.
     expect([1, 2, 3, 4].map((n) => [kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'xpos'), kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'ypos')]))
       .toEqual([['21', '136'], ['21', 'c-54'], ['r140', '136'], ['c-13', 'r4']]);
-    expect(kvGet(kvFind(team, ['TeamPlayer1'])!, 'wide')).toBe('121');
+    expect(kvGet(kvFind(team, ['TeamPlayer1'])!, 'wide')).toBe('122');
   });
 
   it('reports the full screen as the container and each card the fit offset in from its slot', () => {
@@ -822,7 +823,7 @@ describe('buildHud, Free', () => {
     expect(elementRect(d, 'teamColumn', '16:9')).toMatchObject({ x: 0, y: 0, w: 853, h: 480 });
     const cards = teamCardRects(d, '16:9');
     expect(cards.slice(0, 3)).toEqual([
-      { x: 21, y: 136, w: 121, h: 36 }, { x: 21, y: 186, w: 121, h: 36 }, { x: 713, y: 136, w: 121, h: 36 },
+      { x: 21, y: 136, w: 122, h: 36 }, { x: 21, y: 186, w: 122, h: 36 }, { x: 713, y: 136, w: 122, h: 36 },
     ]);
     expect(Math.abs(cards[3].x - 413)).toBeLessThanOrEqual(0.5);          // c-13 on an odd-width screen
     // A right-anchored card stays at the right edge on another aspect.
@@ -860,8 +861,8 @@ describe('buildHud, Free', () => {
 
   it('reads the row cards from the file the same way', () => {
     expect(teamCardRects(design({ elements: { teamColumn: { fit: true } } }), '16:9')).toEqual([
-      { x: 13, y: 441, w: 121, h: 36 }, { x: 153, y: 441, w: 121, h: 36 },
-      { x: 293, y: 441, w: 121, h: 36 }, { x: 433, y: 441, w: 121, h: 36 },
+      { x: 13, y: 441, w: 122, h: 36 }, { x: 153, y: 441, w: 122, h: 36 },
+      { x: 293, y: 441, w: 122, h: 36 }, { x: 433, y: 441, w: 122, h: 36 },
     ]);
   });
 });
@@ -1008,7 +1009,7 @@ describe('buildHud, card background', () => {
     const bg = card[0];
     expect(bg.key).toBe('HudEdCardBg');
     expect(['ControlName', 'xpos', 'ypos', 'zpos', 'wide', 'tall', 'scaleImage', 'image'].map((k) => kvGet(bg, k)))
-      .toEqual(['ImagePanel', '0', '0', '-2', '121', '36', '1', 'hud/hudeditor/panelbg']);
+      .toEqual(['ImagePanel', '0', '0', '-2', '122', '36', '1', 'hud/hudeditor/panelbg']);
   });
 
   it('covers the whole file card when fit is off', () => {
@@ -1178,7 +1179,11 @@ describe('buildHud, fit', () => {
   const fitted = (preset: 'stock' | 'modern' = 'stock', children: HudDesign['children'] = {}) =>
     design({ preset, elements: { teamColumn: { fit: true } }, children });
 
-  it('fits the stock card to 121 x 36 and shifts its content by (13, 36)', () => {
+  it('fits the stock card to 122 x 36 and shifts its content by (13, 36)', () => {
+    // 122, not the 121 the blocks' own boxes give: the game draws the bar at the item row's 39, not its
+    // own 37 (probe X15), so it ends at 135; a 121-wide card clipped its right edge in game
+    // (/home/volence/l4d/hud/probe-phase2/b13/b13-stock/survivor-full/full-1.png: the outline's right
+    // column is missing at x 301, the card's edge).
     const files = buildHud(fitted());
     const card = tree(files, CARD_FILE);
     expect(cardAt(card, 'Head')).toEqual(['0', '2', '23', '23']);
@@ -1188,8 +1193,19 @@ describe('buildHud, fit', () => {
     expect(cardAt(card, 'Items')).toEqual(['26', '0', '50', '14']);
     const team = tree(files, TEAM_FILE);
     for (let n = 1; n <= 4; n++) {
-      expect([kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'wide'), kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'tall')]).toEqual(['121', '36']);
+      expect([kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'wide'), kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'tall')]).toEqual(['122', '36']);
     }
+  });
+
+  it('fits around the bar where the game draws it, wherever the item row is, and falls back to the bar\'s own x', () => {
+    // X15's unlinked VPK: the bar block alone at 67 (to 163), the row left at 26, so the bar is drawn 26..122.
+    const files = buildHud(fitted('stock', { teamColumn: { Health: { x: 67 }, Items: { x: 26 } } }));
+    const team = tree(files, TEAM_FILE);
+    // Drawn content 13..134 (Status), not 13..163.
+    expect(kvGet(kvFind(team, ['TeamPlayer1'])!, 'wide')).toBe('121');
+    const nodes = parseKv(baseFile('stock', CARD_FILE))[0].value as KvNode[];
+    expect(contentBox(nodes)).toEqual({ x: 13, y: 36, w: 122, h: 36 });
+    expect(contentBox(nodes.filter((n) => n.key !== 'Items'))).toEqual({ x: 13, y: 38, w: 121, h: 34 });
   });
 
   it('fits the Modern card to 113 x 26 from (3, 2)', () => {
@@ -1239,13 +1255,13 @@ describe('buildHud, fit', () => {
 
   it('squares the state art at the card width, its band centred on the card, and fits the splatter to the card width', () => {
     const stock = tree(buildHud(fitted()), CARD_FILE);
-    // Card 121 x 36: the square is 121 wide, and the band (texture y ~95 of
-    // 256) centres on y 18, so the square's own top lands at 18 - 95/256*121
+    // Card 122 x 36: the square is 122 wide, and the band (texture y ~95 of
+    // 256) centres on y 18, so the square's own top lands at 18 - 95/256*122
     // = -27; the card clips everything outside its own 0..36.
-    expect(cardAt(stock, 'Incapacitated')).toEqual(['0', '-27', '121', '121']);
-    expect(cardAt(stock, 'Dead')).toEqual(['0', '-27', '121', '121']);
-    expect(cardAt(stock, 'Voice')).toEqual(['105', '0', '16', '16']);
-    expect(cardAt(stock, 'BackgroundImage')).toEqual(['0', '0', '121', '61']);
+    expect(cardAt(stock, 'Incapacitated')).toEqual(['0', '-27', '122', '122']);
+    expect(cardAt(stock, 'Dead')).toEqual(['0', '-27', '122', '122']);
+    expect(cardAt(stock, 'Voice')).toEqual(['106', '0', '16', '16']);
+    expect(cardAt(stock, 'BackgroundImage')).toEqual(['0', '0', '122', '61']);
     const modern = tree(buildHud(fitted('modern'), { fonts }), CARD_FILE, 'modern');
     // Modern's own card is 113 x 26: the square is 113 wide, band centred on
     // y 13, top at 13 - 95/256*113 = -29.
@@ -1295,7 +1311,7 @@ describe('buildHud, fit', () => {
   });
 
   it('fits DEFAULT_DESIGN, which every new design starts from', () => {
-    expect(kvGet(kvFind(tree(buildHud(structuredClone(DEFAULT_DESIGN)), TEAM_FILE), ['TeamPlayer1'])!, 'wide')).toBe('121');
+    expect(kvGet(kvFind(tree(buildHud(structuredClone(DEFAULT_DESIGN)), TEAM_FILE), ['TeamPlayer1'])!, 'wide')).toBe('122');
   });
 });
 
@@ -1308,8 +1324,8 @@ describe('cardChild', () => {
   });
 
   it('reports the state art where the fit rule put it, so a drag starts where the preview draws it', () => {
-    // Fitted frame (0, -27, 121, 121) plus the content box's own (13, 36) shift.
-    expect(cardChild(fitted(), 'Incapacitated')).toMatchObject({ x: 13, y: 9, w: 121, h: 121 });
+    // Fitted frame (0, -27, 122, 122) plus the content box's own (13, 36) shift.
+    expect(cardChild(fitted(), 'Incapacitated')).toMatchObject({ x: 13, y: 9, w: 122, h: 122 });
     expect(cardChild(design({}), 'Incapacitated')).toMatchObject({ x: 10, y: 4, w: 96, h: 96 });
   });
 
