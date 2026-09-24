@@ -34,7 +34,7 @@
 **Interfaces:**
 - Produces: tables `fleet_readings(server_id INTEGER PRIMARY KEY, read_at TEXT, attempt_at TEXT NOT NULL, error TEXT)`, `fleet_files(server_id, path, size, sha256, PRIMARY KEY(server_id, path))`; `config.fleetDir: string` (env `FLEET_DIR`, default `<dirname(dbPath)>/fleet`).
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```ts
 // tests/fleetSchema.test.ts
@@ -56,9 +56,9 @@ describe('fleet schema', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL.** `npx vitest run tests/fleetSchema.test.ts`
+- [x] **Step 2: Run, expect FAIL.** `npx vitest run tests/fleetSchema.test.ts`
 
-- [ ] **Step 3: Implement.** In `src/db.ts` after the triage block:
+- [x] **Step 3: Implement.** In `src/db.ts` after the triage block:
 
 ```ts
   // Fleet view: the latest reading of each game server's managed files.
@@ -88,9 +88,9 @@ In `src/config.ts`: add `fleetDir: string;` to the config interface (beside `rep
 
 Add `'fleet_files', 'fleet_readings'` to the sorted table list in `tests/db.test.ts`.
 
-- [ ] **Step 4: Run** `npx vitest run tests/fleetSchema.test.ts tests/db.test.ts tests/config*.test.ts`, expect PASS.
+- [x] **Step 4: Run** `npx vitest run tests/fleetSchema.test.ts tests/db.test.ts tests/config*.test.ts`, expect PASS.
 
-- [ ] **Step 5: Commit** `git commit -m "fleet view: schema and data dir"`
+- [x] **Step 5: Commit** `git commit -m "fleet view: schema and data dir"`
 
 ---
 
@@ -110,7 +110,7 @@ Add `'fleet_files', 'fleet_readings'` to the sorted table list in `tests/db.test
   - `gameDirOf(server): string | null` (`addons_dir` minus `/left4dead/addons`; `''` for Chicago's FTP root)
   - `localTreeReader(gameDir)`, `sftpTreeReader(cfg)`, `ftpTreeReader(cfg)`, `treeReaderFor(server): TreeReader | null`
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```ts
 // tests/fleetTree.test.ts
@@ -236,9 +236,9 @@ describe('treeReaderFor', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL.** `npx vitest run tests/fleetTree.test.ts`
+- [x] **Step 2: Run, expect FAIL.** `npx vitest run tests/fleetTree.test.ts`
 
-- [ ] **Step 3: Implement `src/fleetTree.ts`**
+- [x] **Step 3: Implement `src/fleetTree.ts`**
 
 ```ts
 import { execFile } from 'node:child_process';
@@ -427,9 +427,9 @@ export function treeReaderFor(server: ServerRow): TreeReader | null {
 }
 ```
 
-- [ ] **Step 4: Run, expect PASS.** `npx vitest run tests/fleetTree.test.ts`
+- [x] **Step 4: Run, expect PASS.** `npx vitest run tests/fleetTree.test.ts`
 
-- [ ] **Step 5: Commit** `git commit -m "fleet view: read-only tree readers for local, sftp and FTP boxes"`
+- [x] **Step 5: Commit** `git commit -m "fleet view: read-only tree readers for local, sftp and FTP boxes"`
 
 ---
 
@@ -450,7 +450,7 @@ export function treeReaderFor(server: ServerRow): TreeReader | null {
   - `interface FleetRow { path: string; area: Area; repo: FileSig | null; base: FileSig | null; cells: Record<number, FleetCell>; patchedEverywhere: boolean; differs: boolean }`
   - `compareFleet(repo: Manifest | null, base: Manifest | null, boxes: { serverId: number; files: Map<string, FileSig> | null }[]): FleetRow[]` (sorted by area then path; only managed paths)
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```ts
 // tests/fleetCompare.test.ts
@@ -535,9 +535,9 @@ describe('loadManifest', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL.** `npx vitest run tests/fleetCompare.test.ts`
+- [x] **Step 2: Run, expect FAIL.** `npx vitest run tests/fleetCompare.test.ts`
 
-- [ ] **Step 3: Implement `src/fleetCompare.ts`**
+- [x] **Step 3: Implement `src/fleetCompare.ts`**
 
 ```ts
 import { readFileSync } from 'node:fs';
@@ -631,9 +631,9 @@ export function compareFleet(repo: Manifest | null, base: Manifest | null,
 }
 ```
 
-- [ ] **Step 4: Run, expect PASS.**
+- [x] **Step 4: Run, expect PASS.**
 
-- [ ] **Step 5: Commit** `git commit -m "fleet view: manifests and comparison rules"`
+- [x] **Step 5: Commit** `git commit -m "fleet view: manifests and comparison rules"`
 
 ---
 
@@ -650,7 +650,7 @@ export function compareFleet(repo: Manifest | null, base: Manifest | null,
   - `class FleetReader` with `constructor(deps: { db: DB; reader?: (s: ServerRow) => TreeReader | null; limits?: Partial<Record<TreeReader['kind'], number>>; now?: () => string; tickMs?: number })`, `request(serverIds: number[]): Record<number, CheckState>`, `pending(serverId): boolean`, `idle(): Promise<void>` (for tests), `tick(): number[]` (ids queued), `start()`, `stop()`
   - `readingsOf(db): Map<number, Map<string, FileSig> | null>` and `readingStates(db): { serverId: number; readAt: string | null; attemptAt: string | null; error: string | null }[]`
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```ts
 // tests/fleetReader.test.ts
@@ -740,9 +740,9 @@ describe('FleetReader', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL.**
+- [x] **Step 2: Run, expect FAIL.**
 
-- [ ] **Step 3: Implement `src/fleetReader.ts`**
+- [x] **Step 3: Implement `src/fleetReader.ts`**
 
 ```ts
 import type { DB } from './db.js';
@@ -873,9 +873,9 @@ export function readingStates(db: DB): { serverId: number; readAt: string | null
 }
 ```
 
-- [ ] **Step 4: Run, expect PASS.** `npx vitest run tests/fleetReader.test.ts`
+- [x] **Step 4: Run, expect PASS.** `npx vitest run tests/fleetReader.test.ts`
 
-- [ ] **Step 5: Commit** `git commit -m "fleet view: reader queue, busy checks, time limits and the daily tick"`
+- [x] **Step 5: Commit** `git commit -m "fleet view: reader queue, busy checks, time limits and the daily tick"`
 
 ---
 
@@ -893,7 +893,7 @@ export function readingStates(db: DB): { serverId: number; readAt: string | null
   - `POST /api/admin/fleet/check` body `{ serverId: number } | { all: true }` → `{ states: Record<number, CheckState> }`, audited `fleet_check`.
   - `BuildDeps` gains `fleetReader?: FleetReader` (tests inject a reader with a fake tree).
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```ts
 // tests/fleetRoutes.test.ts
@@ -962,9 +962,9 @@ describe('fleet routes', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL.**
+- [x] **Step 2: Run, expect FAIL.**
 
-- [ ] **Step 3: Implement `src/routes/adminFleet.ts`**
+- [x] **Step 3: Implement `src/routes/adminFleet.ts`**
 
 ```ts
 import type { FastifyInstance } from 'fastify';
@@ -1023,9 +1023,9 @@ export async function adminFleetRoutes(app: FastifyInstance, opts: FleetRouteOpt
 - Register beside the balance routes: `await app.register(adminFleetRoutes, { db: deps.db, fleetDir: deps.config.fleetDir, reader: fleetReader });`
 - Imports: `import { FleetReader } from './fleetReader.js';`, `import { adminFleetRoutes } from './routes/adminFleet.js';`
 
-- [ ] **Step 4: Run, expect PASS.** `npx vitest run tests/fleetRoutes.test.ts && npx tsc --noEmit`
+- [x] **Step 4: Run, expect PASS.** `npx vitest run tests/fleetRoutes.test.ts && npx tsc --noEmit`
 
-- [ ] **Step 5: Commit** `git commit -m "fleet view: admin routes and wiring"`
+- [x] **Step 5: Commit** `git commit -m "fleet view: admin routes and wiring"`
 
 ---
 
@@ -1042,7 +1042,7 @@ export async function adminFleetRoutes(app: FastifyInstance, opts: FleetRouteOpt
   - `BASE_LAYERS`, `BASE_DROPPED`; `baseManifest(extractedRoot: string, label: string): Promise<Manifest>` (layers in order, second wins; drops the 64-bit binary dirs)
   - CLI: `npx tsx scripts/push-manifest.ts <deployDir> [--host root@45.32.199.85] [--remote-dir /home/pug/app/data/fleet] [--out <localDir>]` (`--out` writes locally instead of over ssh)
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```ts
 // tests/fleetManifest.test.ts
@@ -1114,9 +1114,9 @@ describe('baseManifest', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL.**
+- [x] **Step 2: Run, expect FAIL.**
 
-- [ ] **Step 3: Implement `src/fleetManifest.ts`**
+- [x] **Step 3: Implement `src/fleetManifest.ts`**
 
 ```ts
 import { execFile } from 'node:child_process';
@@ -1256,11 +1256,11 @@ try {
 
 (The remote `chown` assumes the `pug` user exists; the fleet dir must be readable by the site, which runs as `pug`.)
 
-- [ ] **Step 4: Run, expect PASS.** `npx vitest run tests/fleetManifest.test.ts`
+- [x] **Step 4: Run, expect PASS.** `npx vitest run tests/fleetManifest.test.ts`
 
-- [ ] **Step 5: Run the CLI locally** against the real deploy repo into the scratchpad: `npx tsx scripts/push-manifest.ts /home/volence/l4d/deploy --out "$SCRATCH/fleet"`. Expect about 150 repo files and a base count in the hundreds, and no `secrets.cfg` key (`grep -c secrets "$SCRATCH/fleet/repo.json"` prints 0).
+- [x] **Step 5: Run the CLI locally** against the real deploy repo into the scratchpad: `npx tsx scripts/push-manifest.ts /home/volence/l4d/deploy --out "$SCRATCH/fleet"`. Expect about 150 repo files and a base count in the hundreds, and no `secrets.cfg` key (`grep -c secrets "$SCRATCH/fleet/repo.json"` prints 0).
 
-- [ ] **Step 6: Commit** `git commit -m "fleet view: push-manifest builds the repo and base references"`
+- [x] **Step 6: Commit** `git commit -m "fleet view: push-manifest builds the repo and base references"`
 
 ---
 
@@ -1275,7 +1275,7 @@ try {
 - Consumes: Task 5 routes.
 - Produces: `adminApi.fleet(signal?)`, `adminApi.fleetCheck(body)`; types `FleetState`, `FleetRowView`, `FleetCellView`, `FleetBox`.
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```tsx
 // web/src/routes/admin/AdminFleet.test.tsx
@@ -1350,9 +1350,9 @@ describe('AdminFleet', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL.**
+- [x] **Step 2: Run, expect FAIL.**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `web/src/api.ts` (types beside the balance ones, calls in `adminApi`):
 
@@ -1486,14 +1486,14 @@ export function AdminFleet() {
 .fleet-table td:first-child { white-space: normal; min-width: 16rem; }
 ```
 
-- [ ] **Step 4: Run** `npx vitest run web/src/routes/admin web/src/routes/admin.test.tsx && npm run typecheck`, expect PASS. (Add `fleet: vi.fn()` to `admin.test.tsx`'s `mockAdmin` only if a test there renders the Fleet tab.)
+- [x] **Step 4: Run** `npx vitest run web/src/routes/admin web/src/routes/admin.test.tsx && npm run typecheck`, expect PASS. (Add `fleet: vi.fn()` to `admin.test.tsx`'s `mockAdmin` only if a test there renders the Fleet tab.)
 
-- [ ] **Step 5: Commit** `git commit -m "fleet view: Admin > Setup > Fleet page"`
+- [x] **Step 5: Commit** `git commit -m "fleet view: Admin > Setup > Fleet page"`
 
 ---
 
 ### Task 8: Full suite, then a read-only look at the real boxes
 
-- [ ] **Step 1:** `npx vitest run && npm run typecheck`: all green.
-- [ ] **Step 2 (only with the owner's go-ahead: it connects to production game servers, read-only):** on a copy of the production database, run the reader against the four real boxes from this machine and print the difference summary. Dallas is reached as sftp (`root@45.32.199.85`, its game dir) for this check, since the local transport only works on the box itself. Expect: Dallas's pug-match build differs; Riverside #4 gets a reading.
-- [ ] **Step 3:** Owner runbook in the commit message or the plan footer: after deploy, run `npx tsx scripts/push-manifest.ts ~/l4d/deploy`, then Check all on the page.
+- [x] **Step 1:** `npx vitest run && npm run typecheck`: all green.
+- [x] **Step 2 (only with the owner's go-ahead: it connects to production game servers, read-only):** on a copy of the production database, run the reader against the four real boxes from this machine and print the difference summary. Dallas is reached as sftp (`root@45.32.199.85`, its game dir) for this check, since the local transport only works on the box itself. Expect: Dallas's pug-match build differs; Riverside #4 gets a reading.
+- [x] **Step 3:** Owner runbook in the commit message or the plan footer: after deploy, run `npx tsx scripts/push-manifest.ts ~/l4d/deploy`, then Check all on the page.
