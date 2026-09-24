@@ -21,7 +21,7 @@ import {
   baseTeam, contentBox, WEAPON_KEYS, WEAPON_BOX_COLOUR, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir,
   type WeaponNumKey,
 } from './design';
-import { panelChildren, teamChild, TEAM_PANEL, type ChildDef } from './children';
+import { panelChildren, childDef, TEAM_PANEL, type ChildDef } from './children';
 import { crosshairFiles } from '../crosshair/vpk';
 import {
   SPLATTERS, SPLAT_STAND_IN, splatterDef, splatterActive, splatterImageKey, splatterMaterial, fadePixels, type SplatterDef, type SplatterId,
@@ -184,6 +184,12 @@ function layoutPass(work: Work, design: HudDesign) {
     if (!o || el.id === 'xhair' || !baseHasElement(work.key, el)) continue;
     const panel = work.panel(LAYOUT, [el.key]);
     if (o.visible !== undefined) kvSet(panel, 'visible', o.visible ? '1' : '0');
+    if (o.keys) {
+      for (const key of Object.keys(o.keys)) {
+        if (!el.keys?.some((k) => k.key === key)) throw new Error(`${LAYOUT}: ${el.key} takes no key ${key}`);
+      }
+      writeKeys(panel, o.keys);
+    }
     const moved = el.move && (o.x !== undefined || o.y !== undefined);
     const sized = el.resize === 'free' && (o.w !== undefined || o.h !== undefined);
     if (!moved && !sized) continue;
@@ -233,6 +239,15 @@ export function pcSet(block: KvNode, key: string, value: string) {
   const hits = pcEntries(block, key);
   if (hits.length) for (const n of hits) n.value = value;
   else (block.value as KvNode[]).push({ key, value });
+}
+
+/**
+ * A child's or an element's typed file keys (KeyDef), each through pcSet: a
+ * block that carries a key twice, for the Mac and for the PC, gets the PC's
+ * line replaced rather than a plain third line the game would never read.
+ */
+export function writeKeys(block: KvNode, keys: Record<string, string>) {
+  for (const [key, value] of Object.entries(keys)) pcSet(block, key, value);
 }
 
 /**
@@ -341,6 +356,9 @@ function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: C
   if (o.color !== undefined && !def.colour) throw new Error(`${file}: ${def.name} takes no colour`);
   if (o.fontSize !== undefined && !def.font) throw new Error(`${file}: ${def.name} takes no text size`);
   if ((o.w !== undefined || o.h !== undefined) && def.box === 'none') throw new Error(`${file}: ${def.name} takes no size`);
+  for (const key of Object.keys(o.keys ?? {})) {
+    if (!def.keys?.some((k) => k.key === key)) throw new Error(`${file}: ${def.name} takes no key ${key}`);
+  }
   if (o.visible !== undefined) kvSet(block, 'visible', o.visible ? '1' : '0');
   const set = (key: string, v: number | undefined) => { if (v !== undefined) kvSet(block, key, String(Math.round(v))); };
   set('xpos', o.x); set('ypos', o.y); set('wide', o.w); set('tall', o.h);
@@ -363,6 +381,8 @@ function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: C
       if (baseTall > 0) kvSet(block, 'wide', String(Math.round(num(kvGet(block, 'wide')) * size / baseTall)));
     }
   }
+  if (o.z !== undefined) kvSet(block, 'zpos', String(o.z));
+  if (o.keys) writeKeys(block, o.keys);
 }
 
 /**
@@ -464,7 +484,7 @@ function cardBgBlock(bg: { fill: string } | { image: string }, size: { w: number
  * so it sits under everything, sized to the card after fit (or the file's
  * card when fit is off or finds nothing), visible in every state.
  */
-function fitPass(work: Work, design: HudDesign) {
+function fitTeam(work: Work, design: HudDesign) {
   const fit = design.elements.teamColumn?.fit === true;
   const bg = cardBackground(design);
   if (!fit && !bg) return;
@@ -486,6 +506,22 @@ function fitPass(work: Work, design: HudDesign) {
 }
 
 /**
+ * A panel's fit rule: `content` measures the box fit shrinks the panel to,
+ * on the panel file as childPass left it (panelWork keeps it for panelFrame,
+ * panelChild and teamLayout); `apply` is the rule's own fitPass step. One
+ * entry per panel that can be fitted, keyed by panel id.
+ */
+interface FitRule { content: (nodes: KvNode[]) => Box | null; apply: (work: Work, design: HudDesign) => void }
+const FIT_RULES: Record<string, FitRule> = {
+  teamColumn: { content: (nodes) => contentBox(nodes), apply: fitTeam },
+};
+
+/** Every panel's fit rule, in turn. */
+function fitPass(work: Work, design: HudDesign) {
+  for (const rule of Object.values(FIT_RULES)) rule.apply(work, design);
+}
+
+/**
  * Make a piece the player hid impossible to see, not only switched off.
  * visible 0 is not enough on its own: a probe on 2026-09-23 showed the game
  * drawing the stock damage splatter with visible 0 in the file, because game
@@ -498,7 +534,7 @@ function fitPass(work: Work, design: HudDesign) {
  * Runs after fitPass, whose fit rule would otherwise write the state art's
  * square back over the 0 size; the content box never counted a hidden piece
  * anyway, so the fitted card and its background are the same either way.
- * Not part of cardWork: the side panel keeps showing a hidden piece's real
+ * Not part of panelWork: the side panel keeps showing a hidden piece's real
  * size, which is what showing it again restores. Un-hiding writes nothing
  * here, so the file is exactly the default again.
  */
@@ -629,84 +665,114 @@ export function splatterProblem(design: HudDesign, id: SplatterId): string | nul
 }
 
 /**
- * childPass then fitPass on a scratch Work, once per design object, with the
- * content box taken between the two. teamLayout asks for the fitted size on
- * every repaint and the side panel for a child's numbers, and both must be
- * the build's own numbers.
+ * childPass then fitPass on a scratch Work, once per design object, with
+ * every fitted panel's content box taken between the two. teamLayout asks
+ * for the fitted size on every repaint and the side panel for a child's
+ * numbers, and both must be the build's own numbers.
  */
-const CARD_WORK = new WeakMap<HudDesign, { work: Work; box: Box | null }>();
-function cardWork(design: HudDesign) {
-  let w = CARD_WORK.get(design);
+const PANEL_WORK = new WeakMap<HudDesign, { work: Work; boxes: Record<string, Box | null> }>();
+function panelWork(design: HudDesign) {
+  let w = PANEL_WORK.get(design);
   if (!w) {
     const work = new Work(baseOf(design));
     childPass(work, design);
-    const box = contentBox(work.tree(CARD));
+    const boxes: Record<string, Box | null> = {};
+    for (const [id, rule] of Object.entries(FIT_RULES)) {
+      const panel = panelChildren(id);
+      boxes[id] = panel ? rule.content(work.tree(panel.file)) : null;
+    }
     fitPass(work, design);
-    w = { work, box };
-    CARD_WORK.set(design, w);
+    w = { work, boxes };
+    PANEL_WORK.set(design, w);
   }
   return w;
 }
 
 /** The teammate card's content box after the design's child edits, fit on or off. */
 function cardFit(design: HudDesign): Box | null {
-  return cardWork(design).box;
+  return panelWork(design).boxes.teamColumn ?? null;
 }
 
-/** How a teammate-card child's stored numbers land on screen. */
-export interface CardFrame { shift: { x: number; y: number }; k: number }
+/** How a panel child's stored numbers land on screen. */
+export interface PanelFrame { shift: { x: number; y: number }; k: number }
+export type CardFrame = PanelFrame;
 
 /**
- * The frame the generator draws a teammate-card child in: fitPass shifts
- * every child by the content box's top-left (when fitted), then scalePass
- * multiplies by the element's scale. A child stored at (x, y) is drawn in
- * card c at (c.x + (x - shift.x) * k, c.y + (y - shift.y) * k). The page
- * uses it to turn a pointer delta into stored units and to draw a piece's
- * snap guides where the piece is drawn, from the generator's own numbers.
+ * The frame the generator draws a panel's child in: fitPass shifts every
+ * child by the content box's top-left (when fitted), then scalePass
+ * multiplies by the element's scale. A teammate child stored at (x, y) is
+ * drawn in card c at (c.x + (x - shift.x) * k, c.y + (y - shift.y) * k). The
+ * page uses it to turn a pointer delta into stored units and to draw a
+ * piece's snap guides where the piece is drawn, from the generator's own
+ * numbers. A panel with no fit rule is never shifted.
  */
+export function panelFrame(design: HudDesign, panelId: string): PanelFrame {
+  const box = panelWork(design).boxes[panelId];
+  const shift = design.elements[panelId]?.fit && box ? { x: box.x, y: box.y } : { x: 0, y: 0 };
+  return { shift, k: design.elements[panelId]?.scale ?? 1 };
+}
+
+/** The teammate card's frame: panelFrame for 'teamColumn'. */
 export function cardFrame(design: HudDesign): CardFrame {
-  const { box } = cardWork(design);
-  const shift = design.elements.teamColumn?.fit && box ? { x: box.x, y: box.y } : { x: 0, y: 0 };
-  return { shift, k: design.elements.teamColumn?.scale ?? 1 };
+  return panelFrame(design, 'teamColumn');
 }
 
 export interface CardChild { x: number; y: number; w: number; h: number; visible: boolean; fontTall?: number; color?: string }
+/** A panel child as cardChild reports one, plus its typed file keys and its zpos as the file has them. */
+export interface PanelChild extends CardChild { keys?: Record<string, string>; z?: number }
 
 /**
- * One teammate-card child as the side panel shows it and a drag starts
- * from: after the player's edits and the fit rule, before scale, in the card
- * file's own unfitted frame, which is the frame a ChildOverride is stored
- * in. Fit shifts every top-level child of the card by the content box's
- * top-left, and this adds it back: for a child the fit rule leaves alone
- * (the content, a state picture the player placed) that is the edited
- * block, and for the state art it places, where it put it.
- * Null when the block is not in the file (an addable child that is off).
+ * One panel child as the side panel shows it and a drag starts from: after
+ * the player's edits and the fit rule, before scale, in the panel file's own
+ * unfitted frame, which is the frame a ChildOverride is stored in. Fit
+ * shifts every top-level child of the panel by the content box's top-left,
+ * and this adds it back: for a child the fit rule leaves alone (the content,
+ * a state picture the player placed) that is the edited block, and for the
+ * state art it places, where it put it. `keys` holds the value the PC reads
+ * for each key the child's registry entry declares, where the file has one;
+ * `z` the block's zpos when it is a number.
+ * Null when the panel is not registered or the block is not in the file (an
+ * addable child that is off).
  */
-export function cardChild(design: HudDesign, name: string): CardChild | null {
-  const { work, box } = cardWork(design);
-  const n = kvFind(work.tree(CARD), [name]);
+export function panelChild(design: HudDesign, panelId: string, name: string): PanelChild | null {
+  const panel = panelChildren(panelId);
+  if (!panel) return null;
+  const { work, boxes } = panelWork(design);
+  const n = kvFind(work.tree(panel.file), [name]);
   if (!n) return null;
-  const shift = design.elements.teamColumn?.fit && box ? box : { x: 0, y: 0 };
+  const box = boxes[panelId];
+  const shift = design.elements[panelId]?.fit && box ? box : { x: 0, y: 0 };
   const font = kvGet(n, 'font');
   const size = font ? kvFind(work.tree(SCHEME), ['Fonts', font, '1']) : undefined;
   const tall = size ? parseFloat(kvGet(size, 'tall') ?? '') : NaN;
-  const def = teamChild(name);
+  const def = childDef(panelId, name);
   // Reads by kind whenever the name is registered, regardless of that
   // child's own colour flag: HealthNumber has no colour control (the game
   // colours it by health) but its raw fgcolor_override is still reported
   // here, as this did before the image/label split. A name outside the
-  // registry (cardChild takes any node the file has, not only registered
-  // ones) now always reports no colour, unlike before the split, when it
-  // read raw fgcolor_override off whatever node it found; nothing in this
-  // codebase passes such a name in today, so nothing depends on that.
+  // registry (panelChild takes any node the file has, not only registered
+  // ones) always reports no colour.
   const raw = def ? kvGet(n, colourKey(def)) : undefined;
+  const keys: Record<string, string> = {};
+  for (const k of def?.keys ?? []) { const v = pcGet(n, k.key); if (v !== undefined) keys[k.key] = v; }
+  const z = parseFloat(kvGet(n, 'zpos') ?? '');
   return {
     x: num(kvGet(n, 'xpos')) + shift.x, y: num(kvGet(n, 'ypos')) + shift.y,
     w: num(kvGet(n, 'wide')), h: num(kvGet(n, 'tall')),
     visible: (kvGet(n, 'visible') ?? '1') !== '0',
     ...(Number.isFinite(tall) ? { fontTall: tall } : {}),
     ...(raw && /^\d+ \d+ \d+ \d+$/.test(raw) ? { color: raw } : {}),
+    ...(Object.keys(keys).length ? { keys } : {}),
+    ...(Number.isFinite(z) ? { z } : {}),
   };
+}
+
+/** One teammate-card child: panelChild for 'teamColumn', without the keys and zpos. */
+export function cardChild(design: HudDesign, name: string): CardChild | null {
+  const c = panelChild(design, 'teamColumn', name);
+  if (!c) return null;
+  const { keys: _keys, z: _z, ...plain } = c;
+  return plain;
 }
 
 /**
@@ -728,9 +794,10 @@ export function importedHasXhair(key: BaseKey): boolean {
   return kvFind(baseTree(key, LAYOUT), ['xHair']) !== undefined;
 }
 
-/** Whether the base's own card file has this child: an addable child it lacks shows as a checkbox. */
-export function baseHasChild(key: BaseKey, name: string): boolean {
-  return kvFind(baseTree(key, CARD), [name]) !== undefined;
+/** Whether the base's own panel file has this child: an addable child it lacks shows as a checkbox. */
+export function baseHasChild(key: BaseKey, name: string, panelId = 'teamColumn'): boolean {
+  const file = panelChildren(panelId)?.file;
+  return file !== undefined && kvFind(baseTree(key, file), [name]) !== undefined;
 }
 
 export interface TeamLayout {

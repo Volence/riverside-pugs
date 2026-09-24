@@ -24,7 +24,7 @@ import { BASE_PATHS } from './base';
 import { decodeText } from './text';
 import { safeName } from './design';
 import { ELEMENTS } from './elements';
-import { TEAM_PANEL } from './children';
+import { PANEL_CHILDREN } from './children';
 
 export const MAX_HUD_BYTES = 50 * 1024 * 1024;
 export const IMPORT_ERRORS = {
@@ -114,7 +114,12 @@ const nameOf = (fileName: string, root: string) => {
 const SHAPES: { path: string; blocks: string[]; required?: string[] }[] = [
   { path: LAYOUT, blocks: [...ELEMENTS.map((e) => e.key), 'HudCrosshair'] },
   { path: 'resource/ui/hud/teamdisplayhud.res', blocks: ['TeamPlayer1', 'TeamPlayer2', 'TeamPlayer3', 'TeamPlayer4'] },
-  { path: TEAM_PANEL.file, blocks: TEAM_PANEL.children.map((c) => c.name) },
+  // Every registered panel's children, and a panel's own frame block when it
+  // has one in a file (a 'hudlayout' frame is its element's block, above).
+  ...PANEL_CHILDREN.flatMap((p) => [
+    { path: p.file, blocks: p.children.map((c) => c.name) },
+    ...(p.frame && p.frame !== 'hudlayout' ? [{ path: p.frame.file, blocks: [p.frame.block] }] : []),
+  ]),
   { path: 'resource/ui/basechat.res', blocks: ['HudChat', 'HudChatHistory'], required: ['HudChat'] },
   { path: 'scripts/mod_textures.txt', blocks: ['TextureData'], required: ['TextureData'] },
   { path: 'resource/clientscheme.res', blocks: ['Colors', 'Fonts', 'CustomFontFiles'] },

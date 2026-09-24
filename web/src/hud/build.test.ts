@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildHud, elementRect, pcSet, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame } from './build';
+import { buildHud, elementRect, pcSet, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame, panelChild, panelFrame, writeKeys } from './build';
 import { parsePos, screenW } from './units';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride } from './design';
 import { parseKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
@@ -1394,5 +1394,38 @@ describe('buildHud, the weapon selection', () => {
   it('gives the preview the same mod_textures.txt the download carries', () => {
     const d = design({ weapons: { boxInactive: { kind: 'hidden' }, weaponIcons: false } });
     expect(buildTrees(d)(MODTEX)).toEqual(parseKv(text(buildHud(d), MODTEX)!)[0].value);
+  });
+});
+
+describe('the generator, per panel', () => {
+  it('reads a teammate child the same through the panel names as through the card names', () => {
+    const d = design({ elements: { teamColumn: { fit: true, scale: 1.5 } }, children: { teamColumn: { Head: { x: 20, y: 30 } } } });
+    for (const n of ['Head', 'Health', 'Name', 'Incapacitated', 'BackgroundImage']) {
+      const { keys: _k, z: _z, ...plain } = panelChild(d, 'teamColumn', n)!;
+      expect(plain, n).toEqual(cardChild(d, n));
+    }
+    expect(panelFrame(d, 'teamColumn')).toEqual(cardFrame(d));
+  });
+
+  it('writes a child zpos and reports it back', () => {
+    const d = design({ children: { teamColumn: { Head: { z: 7 } } } });
+    expect(kvGet(kvFind(tree(buildHud(d), CARD_FILE), ['Head'])!, 'zpos')).toBe('7');
+    expect(panelChild(d, 'teamColumn', 'Head')!.z).toBe(7);
+  });
+
+  it('refuses a key the child does not declare, naming the file and the child', () => {
+    const d = design({ children: { teamColumn: { Head: { keys: { monochrome_color: '1 2 3 4' } } } } });
+    expect(() => buildHud(d)).toThrow('resource/ui/hud/teammatepanel.res: Head takes no key monochrome_color');
+  });
+
+  it('refuses an element key the element does not declare', () => {
+    expect(() => buildHud(design({ elements: { chat: { keys: { foo: '1' } } } }))).toThrow('scripts/hudlayout.res: HudChat takes no key foo');
+  });
+
+  it("writes a key on every line the PC reads, leaving a Mac line alone and adding no third line", () => {
+    const b = parseKv('"B" { "xpos" "39" [$OSX] "xpos" "36" [$WINDOWS] }')[0];
+    writeKeys(b, { xpos: '10' });
+    const lines = (b.value as KvNode[]).filter((n) => n.key === 'xpos');
+    expect(lines.map((n) => [n.value, n.cond])).toEqual([['39', '[$OSX]'], ['10', '[$WINDOWS]']]);
   });
 });
