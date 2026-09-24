@@ -52,7 +52,9 @@ export interface ElementOverride {
    * here and a design that carries them survives a round trip. The kill
    * notices' `color` (all five rows' fgcolor_override, plan decision 2) and
    * `fontSize` (their font, gate K5) are live: build.ts noticePass writes
-   * them. No pass reads them on any other element, and `bg` nowhere.
+   * them. The chat's `fontSize` (ChatFont's size) and `bg` (the open box,
+   * gate C2) are live too: build.ts chatPass. No pass reads them on any
+   * other element.
    */
   color?: string; bg?: string;
   fontSize?: number;
@@ -665,6 +667,9 @@ function element(id: string, raw: unknown, key: BaseKey): ElementOverride {
   // The kill notices' text size waits on gate K5 (probes.ts): row 0's font
   // was never seen in game, so a stored size is dropped while it is closed.
   if (id === 'killNotices' && !probe('K5')) delete out.fontSize;
+  // The open chat's box colour waits on gate C2: the probe never got the
+  // chat open (/home/volence/l4d/hud/probe-phase2-rest/RESULTS.md, C2).
+  if (id === 'chat' && !probe('C2')) delete out.bg;
   if (id === 'killNotices' && isObj(raw.noticeBox) && (raw.noticeBox.kind === 'flat' || raw.noticeBox.kind === 'none')) {
     const box: NoticeBox = { kind: raw.noticeBox.kind };
     const bc = colour(raw.noticeBox.color);

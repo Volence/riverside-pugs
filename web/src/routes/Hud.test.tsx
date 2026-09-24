@@ -2571,3 +2571,19 @@ describe('The kill notice box on the page (plan task K2)', () => {
     await waitFor(() => expect(saved().elements?.killNotices).toBeUndefined());
   });
 });
+
+describe('The chat text size on the page (plan task C1)', () => {
+  const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
+  it('shows the ChatFont size from the file, writes a new one, and offers no box colour while C2 is closed', async () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    const size = screen.getByRole('slider', { name: 'Text size' }) as HTMLInputElement;
+    expect(size.value).toBe('12');
+    fireEvent.input(size, { target: { value: '20' } });
+    await waitFor(() => expect(saved().elements?.chat?.fontSize).toBe(20));
+    expect(screen.getByText("Sizes the chat's lines at every screen size, from this size at 480 lines.")).toBeTruthy();
+    expect(screen.queryByLabelText('Box colour colour')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Text size: use the game size' }));
+    await waitFor(() => expect(saved().elements?.chat?.fontSize).toBeUndefined());
+  });
+});

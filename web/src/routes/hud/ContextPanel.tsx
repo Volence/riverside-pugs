@@ -504,6 +504,7 @@ export function ElementControls(
 
       {id === 'weaponSelection' && <WeaponControls design={design} edit={edit} end={end} />}
       {id === 'killNotices' && <NoticeControls design={design} edit={edit} end={end} patch={patch} />}
+      {id === 'chat' && <ChatControls design={design} edit={edit} end={end} patch={patch} />}
 
       {/* The crosshair has no element settings of its own to reset: its choice and art are undone like any edit. */}
       {id !== 'xhair' && <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this element</button>}
@@ -567,6 +568,42 @@ function NoticeControls({ design, edit, end, patch }: { design: HudDesign; edit:
           label="Text size" value={o.fontSize ?? fontFace(design, (row && pcGet(row, 'font')) ?? 'Default').tall} min={6} max={64} step={1}
           onInput={(fontSize) => patch({ fontSize }, 'gesture')} onEnd={end}
         />
+      )}
+    </>
+  );
+}
+
+/**
+ * The chat's text size (plan task C1): ChatFont's size at 480 lines, which
+ * build.ts chatPass scales into every size range (probe C1,
+ * /home/volence/l4d/hud/probe-phase2-rest/r4/shots/crops/chat-d.png). The
+ * open chat's box colour waits on gate C2.
+ */
+function ChatControls({ design, edit, end, patch }: { design: HudDesign; edit: Edit; end: () => void; patch: Patch }) {
+  const o = design.elements.chat ?? {};
+  const font = kvFind(buildTrees({ ...design, elements: {} })('resource/chatscheme.res'), ['Fonts', 'ChatFont']);
+  const first = font && typeof font.value !== 'string' ? font.value.find((n) => typeof n.value !== 'string') : undefined;
+  const base = Math.round(parseFloat((first && pcGet(first, 'tall')) ?? '12')) || 12;
+  const clear = (key: 'fontSize' | 'bg') => edit((d) => {
+    const { [key]: _gone, ...rest } = d.elements.chat ?? {};
+    const elements = { ...d.elements };
+    if (Object.keys(rest).length) elements.chat = rest; else delete elements.chat;
+    return { ...d, elements };
+  });
+  return (
+    <>
+      <SliderNum
+        label="Text size" value={o.fontSize ?? base} min={6} max={64}
+        onInput={(n) => patch({ fontSize: clampOverride('fontSize', n) }, 'gesture')} onEnd={end}
+      />
+      <p class="muted hud__note">Sizes the chat's lines at every screen size, from this size at 480 lines.</p>
+      {o.fontSize !== undefined && (
+        <button type="button" class="btn btn--ghost btn--sm" aria-label="Text size: use the game size" onClick={() => clear('fontSize')}>
+          Use the game size
+        </button>
+      )}
+      {probe('C2') && (
+        <ColourRow label="Box colour" value={o.bg ?? '0 0 0 128'} end={end} onPick={(c) => patch({ bg: c }, 'gesture')} />
       )}
     </>
   );

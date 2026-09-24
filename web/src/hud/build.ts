@@ -217,6 +217,38 @@ function layoutPass(work: Work, design: HudDesign) {
 }
 
 /**
+ * The chat's text size and the open chat's box (plan task C1). The
+ * history's own `font` key is ignored in game
+ * (/home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/chat-h.png), but
+ * ChatFont in chatscheme.res sets the size (r4/shots/crops/chat-d.png), so
+ * the size goes there: every size range's PC tall, scaled from the first
+ * (480 to 599 lines) range's by size / that tall, the way a HudEd_ copy
+ * scales, the console's own lines left alone. The box colour is basechat.res
+ * HudChat's bgcolor_override, behind gate C2 (the probe never got the chat
+ * open). A size equal to the first range's own writes nothing.
+ */
+function chatPass(work: Work, design: HudDesign) {
+  const o = design.elements.chat;
+  if (!o || !baseHasElement(work.key, elementById('chat')!)) return;
+  if (o.fontSize !== undefined) {
+    const font = work.optional(CHATSCHEME, ['Fonts', 'ChatFont']);
+    const ranges = font && typeof font.value !== 'string' ? font.value.filter((n) => typeof n.value !== 'string') : [];
+    const first = ranges[0] ? num(pcGet(ranges[0], 'tall')) : 0;
+    const size = Math.round(o.fontSize);
+    if (first > 0 && size !== first) {
+      for (const r of ranges) {
+        const t = pcGet(r, 'tall');
+        if (t !== undefined) pcSet(r, 'tall', String(Math.max(1, Math.round(num(t) * size / first))));
+      }
+    }
+  }
+  if (o.bg !== undefined && probe('C2')) {
+    const chat = work.optional(BASECHAT, ['HudChat']);
+    if (chat) pcSet(chat, 'bgcolor_override', o.bg);
+  }
+}
+
+/**
  * The kill notice box's texture (plan task K2): label4background is a
  * ScalableImagePanel whose `image` the game honours, though code shows it
  * and moves it to row 0 itself (/home/volence/l4d/hud/probe-phase2-rest/RESULTS.md
@@ -2154,6 +2186,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   layoutPass(work, design);
   weaponsPass(work, design, assets, extra);
   noticePass(work, design, extra);
+  chatPass(work, design);
   childPass(work, design);
   fitPass(work, design);
   hidePass(work, design);
@@ -2237,6 +2270,7 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
     layoutPass(work, design);
     weaponsPass(work, design, null, discard);
     noticePass(work, design, null);
+    chatPass(work, design);
     childPass(work, design);
     fitPass(work, design);
     hidePass(work, design);
