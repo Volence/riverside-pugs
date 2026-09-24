@@ -305,6 +305,38 @@ describe('onSourceTv admin alert', () => {
     expect(events).toHaveLength(1);
   });
 
+  it('a spectator who joins before the matching player connects still gets exactly one post on reconnect', () => {
+    const serverId = makeServer(db);
+    const matchId = makeMatch(db, serverId);
+    upsertPlayer(db, { steamid: MAIN, name: 'Main', avatar: null }, []);
+    roster(matchId, MAIN);
+
+    // The spectator joins before the rostered player's own connection has
+    // been recorded, so likelyAccounts finds nobody yet: no post, but the
+    // session row for this match+connection now exists.
+    onSourceTv(db, serverId, {
+      kind: 'sourcetv', event: 'join', slot: 1, ip: '203.0.113.9', country: 'US', name: 'Watcher',
+    });
+    expect(events).toHaveLength(0);
+    onSourceTv(db, serverId, {
+      kind: 'sourcetv', event: 'leave', slot: 1, reason: 'Disconnect', name: 'Watcher',
+    });
+
+    // The rostered player now connects to the game server on that same
+    // connection.
+    recordPlayerNet(db, { steamid: MAIN, ip: '203.0.113.9', country: 'US' });
+
+    // The spectator reconnects, the ordinary map-change cycle. This is the
+    // first time the match+connection actually has anything to report, so
+    // it must post, not be suppressed by the earlier no-op session.
+    onSourceTv(db, serverId, {
+      kind: 'sourcetv', event: 'join', slot: 2, ip: '203.0.113.9', country: 'US', name: 'Watcher',
+    });
+
+    expect(events).toHaveLength(1);
+    expect((events[0] as Extract<AdminEvent, { kind: 'sourcetv_watch' }>).steamids).toEqual([MAIN]);
+  });
+
   it('a different connection in the same match still posts', () => {
     const serverId = makeServer(db);
     const matchId = makeMatch(db, serverId);
