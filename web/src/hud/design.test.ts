@@ -1,7 +1,7 @@
 // @vitest-environment node
 // CompressionStream is a Node and browser global; happy-dom does not provide it.
 import { describe, it, expect, afterEach } from 'vitest';
-import { DEFAULT_DESIGN, validateDesign, newDesign, usableCrosshair, encodeShare, decodeShare, safeName, clampOverride, clampChild, baseTeam, validKeys } from './design';
+import { DEFAULT_DESIGN, validateDesign, newDesign, usableCrosshair, encodeShare, decodeShare, safeName, clampOverride, clampChild, baseTeam, validKeys, weaponIconId, weaponImageKind } from './design';
 import type { KeyDef } from './children';
 import { _setProbe } from './probes';
 import { DEFAULT_STATE } from '../crosshair/draw';
@@ -359,6 +359,57 @@ describe('validateDesign, the weapon selection', () => {
       styles: { weaponBoxActive: { kind: 'flat' }, weaponBoxInactive: { kind: 'image' } },
       weapons: { boxActive: { kind: 'hidden' } } });
     expect(d.weapons).toEqual({ boxActive: { kind: 'hidden' } });
+  });
+
+  const img = (w: number, h: number) => ({ w, h, png: 'AAAA' });
+
+  it('keeps an icon upload for a gun or item entry whose picture is stored at its texel size', () => {
+    const d = validateDesign({ v: 1,
+      images: { wiconMachinegun: img(192, 64), wiconPistol: img(64, 64), wiconPills: img(64, 64) },
+      weapons: { icons: { icon_equip_machinegun: 'wiconMachinegun', icon_equip_pistol: 'wiconPistol', icon_equip_pills: 'wiconPills' } } });
+    expect(d.weapons?.icons).toEqual({ icon_equip_machinegun: 'wiconMachinegun', icon_equip_pistol: 'wiconPistol', icon_equip_pills: 'wiconPills' });
+    expect(Object.keys(d.images).sort()).toEqual(['wiconMachinegun', 'wiconPills', 'wiconPistol']);
+  });
+
+  it('drops an unknown entry, an id that is not the entry own, and an id with no stored picture', () => {
+    const d = validateDesign({ v: 1,
+      images: { wiconUzi: img(128, 64) },
+      weapons: { icons: { icon_equip_flashlight: 'wiconUzi', icon_equip_rifle: 'wiconUzi', icon_equip_uzi: 'wiconUzi', icon_equip_pills: 'wiconPills' } } });
+    expect(d.weapons).toEqual({ icons: { icon_equip_uzi: 'wiconUzi' } });
+    expect(validateDesign({ v: 1, weapons: { icons: { icon_equip_pills: 'wiconPills' } } }).weapons).toBeUndefined();
+  });
+
+  it('drops a stored icon picture that is not its texel size (plan decision 5)', () => {
+    const d = validateDesign({ v: 1,
+      images: { wiconMachinegun: img(300, 64), wiconRifle: img(64, 32), wiconPistol: img(128, 64), wiconMedkit: img(32, 32), wiconUzi: img(16, 64) },
+      weapons: { icons: { icon_equip_machinegun: 'wiconMachinegun', icon_equip_rifle: 'wiconRifle', icon_equip_pistol: 'wiconPistol',
+        icon_equip_medkit: 'wiconMedkit', icon_equip_uzi: 'wiconUzi' } } });
+    // A gun is 64 texels tall and up to four times as wide (or a quarter as wide); the pistols and items are 64 square.
+    expect(d.weapons).toEqual({ icons: { icon_equip_uzi: 'wiconUzi' } });
+    expect(Object.keys(d.images)).toEqual(['wiconUzi']);
+  });
+
+  it("keeps an Image box only with its 128-texel picture, and drops it back to stock without one", () => {
+    const d = validateDesign({ v: 1,
+      images: { weaponBoxActive: img(128, 128), weaponBoxInactive: img(64, 64) },
+      weapons: { boxActive: { kind: 'image', color: '1 2 3 4' }, boxInactive: { kind: 'image' } } });
+    expect(d.weapons).toEqual({ boxActive: { kind: 'image' } });
+    expect(Object.keys(d.images)).toEqual(['weaponBoxActive']);
+  });
+
+  it('keeps the uploads while the pictures are hidden, so turning them back on brings them back', () => {
+    const d = validateDesign({ v: 1, images: { wiconUzi: img(128, 64) },
+      weapons: { weaponIcons: false, icons: { icon_equip_uzi: 'wiconUzi' } } });
+    expect(d.weapons).toEqual({ weaponIcons: false, icons: { icon_equip_uzi: 'wiconUzi' } });
+  });
+
+  it('names each entry own picture id', () => {
+    expect(weaponIconId('icon_equip_machinegun')).toBe('wiconMachinegun');
+    expect(weaponIconId('icon_equip_dualpistols')).toBe('wiconDualpistols');
+    expect(weaponImageKind('icon_equip_autoshotgun')).toBe('gun');
+    expect(weaponImageKind('icon_equip_dualpistols')).toBe('pistol');
+    expect(weaponImageKind('icon_equip_pipebomb')).toBe('item');
+    expect(weaponImageKind('icon_equip_flashlight')).toBeUndefined();
   });
 
   it('carries the weapons through a share link', async () => {

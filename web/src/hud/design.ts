@@ -87,7 +87,56 @@ export interface StyleOverride { kind: 'stock' | 'flat' | 'rounded' | 'image'; c
  * rounded_background_noborder, which works from a normal addon (probe B,
  * 2026-09-23). No 'stock' is ever stored: absent means stock.
  */
-export interface WeaponBoxStyle { kind: 'hidden' | 'flat' | 'rounded'; color?: string }
+export interface WeaponBoxStyle { kind: 'hidden' | 'flat' | 'rounded' | 'image'; color?: string }
+
+/**
+ * The icon_equip_* entries of mod_textures.txt the weapon selection draws
+ * (weapons.ts's header): WEAPON_ICONS every gun the primary and pistol slots
+ * can hold, ITEM_ICONS the throwables, medkit and pills. build.ts re-exports
+ * both; they live here so validateDesign can check an upload against them.
+ */
+export const WEAPON_ICONS = ['icon_equip_pumpshotgun', 'icon_equip_uzi', 'icon_equip_autoshotgun', 'icon_equip_rifle',
+  'icon_equip_machinegun', 'icon_equip_dualpistols', 'icon_equip_pistol'];
+export const ITEM_ICONS = ['icon_equip_molotov', 'icon_equip_pipebomb', 'icon_equip_medkit', 'icon_equip_pills'];
+const PISTOL_ICONS = ['icon_equip_pistol', 'icon_equip_dualpistols'];
+/**
+ * How the game draws an entry's upload
+ * (/home/volence/l4d/hud/probe-phase2-rest/r4/shots/r4/r4-a..c.png): a gun
+ * PrimaryWeaponTall high at the upload's own aspect, a pistol a square as
+ * tall as its box whatever its shape, an item an IconSize square.
+ */
+export type WeaponImageKind = 'gun' | 'pistol' | 'item';
+export function weaponImageKind(entry: string): WeaponImageKind | undefined {
+  if (PISTOL_ICONS.includes(entry)) return 'pistol';
+  if (WEAPON_ICONS.includes(entry)) return 'gun';
+  return ITEM_ICONS.includes(entry) ? 'item' : undefined;
+}
+/** The `images` id an entry's upload is stored under: icon_equip_machinegun is wiconMachinegun. */
+export function weaponIconId(entry: string): string {
+  const stem = entry.replace(/^icon_equip_/, '');
+  return `wicon${stem[0].toUpperCase()}${stem.slice(1)}`;
+}
+/** The `images` ids of the two box uploads. */
+export const WEAPON_BOX_IMAGE = { boxActive: 'weaponBoxActive', boxInactive: 'weaponBoxInactive' } as const;
+/**
+ * The texel sizes a weapon upload is redrawn at in the browser before it is
+ * stored (plan decision 5): a gun 64 tall and as wide as its aspect, from a
+ * quarter to four times its height (so a sliver cannot make a screen-wide
+ * icon), a pistol or item 64 square, a box 128 square so its 16-texel
+ * corners nine-slice as the stock art's do (r1/shots/crops/weap-d.png).
+ */
+export const WEAPON_ICON_TEXELS = 64;
+export const WEAPON_GUN_MAX_W = 256;
+export const WEAPON_GUN_MIN_W = 16;
+export const WEAPON_BOX_TEXELS = 128;
+/** Whether a stored picture under `id` is a weapon upload at a size the build takes. */
+function weaponImageFits(id: string, w: number, h: number): boolean | undefined {
+  if (id === WEAPON_BOX_IMAGE.boxActive || id === WEAPON_BOX_IMAGE.boxInactive) return w === WEAPON_BOX_TEXELS && h === WEAPON_BOX_TEXELS;
+  const entry = [...WEAPON_ICONS, ...ITEM_ICONS].find((e) => weaponIconId(e) === id);
+  if (!entry) return undefined;
+  if (weaponImageKind(entry) === 'gun') return h === WEAPON_ICON_TEXELS && w >= WEAPON_GUN_MIN_W && w <= WEAPON_GUN_MAX_W;
+  return w === WEAPON_ICON_TEXELS && h === WEAPON_ICON_TEXELS;
+}
 /** Box colours when a flat or rounded box carries none: the old Advanced weapon box slots' defaults. */
 export const WEAPON_BOX_COLOUR = { boxActive: '40 40 40 215', boxInactive: '0 0 0 130' } as const;
 
@@ -140,6 +189,12 @@ export type WeaponsOverride = { [K in WeaponNumKey]?: number } & {
   weaponIcons?: boolean;
   /** false hides the throwable, medkit and pills pictures. */
   itemIcons?: boolean;
+  /**
+   * Uploaded pictures: a WEAPON_ICONS or ITEM_ICONS entry to its picture's
+   * id in `images` (always weaponIconId(entry)). weaponIcons or itemIcons
+   * false still hides them; the uploads stay, for when the pictures return.
+   */
+  icons?: Record<string, string>;
 };
 export interface UploadedImage { w: number; h: number; png: string }
 /**
@@ -585,11 +640,13 @@ function element(id: string, raw: unknown, key: BaseKey): ElementOverride {
   return out;
 }
 
-function boxStyle(v: unknown): WeaponBoxStyle | undefined {
-  if (!isObj(v) || (v.kind !== 'hidden' && v.kind !== 'flat' && v.kind !== 'rounded')) return undefined;
+function boxStyle(v: unknown, hasImage: boolean): WeaponBoxStyle | undefined {
+  if (!isObj(v) || (v.kind !== 'hidden' && v.kind !== 'flat' && v.kind !== 'rounded' && v.kind !== 'image')) return undefined;
+  // An Image box with no picture stored (a share link carries none) is stock.
+  if (v.kind === 'image' && !hasImage) return undefined;
   const out: WeaponBoxStyle = { kind: v.kind };
   const c = colour(v.color);
-  if (c && v.kind !== 'hidden') out.color = c;
+  if (c && (v.kind === 'flat' || v.kind === 'rounded')) out.color = c;
   return out;
 }
 
@@ -601,7 +658,7 @@ function boxStyle(v: unknown): WeaponBoxStyle | undefined {
  * an uploaded image, which the new setting cannot carry, is dropped. A design
  * not in advanced mode never shipped those styles, so they are dropped too.
  */
-function weaponsOf(raw: unknown, oldStyles: unknown, advanced: boolean): WeaponsOverride | undefined {
+function weaponsOf(raw: unknown, oldStyles: unknown, advanced: boolean, images: Record<string, UploadedImage>): WeaponsOverride | undefined {
   const w = isObj(raw) ? raw : {};
   const out: WeaponsOverride = {};
   for (const k of [...Object.keys(WEAPON_KEYS), 'clipFont', 'pistolFont'] as (WeaponNumKey | 'clipFont' | 'pistolFont')[]) {
@@ -612,13 +669,21 @@ function weaponsOf(raw: unknown, oldStyles: unknown, advanced: boolean): Weapons
   const ic = colour(w.inactiveColor); if (ic) out.inactiveColor = ic;
   const old = advanced && isObj(oldStyles) ? oldStyles : {};
   for (const [box, slot] of [['boxActive', 'weaponBoxActive'], ['boxInactive', 'weaponBoxInactive']] as const) {
-    const style = boxStyle(w[box]);
+    const style = boxStyle(w[box], images[WEAPON_BOX_IMAGE[box]] !== undefined);
     const was = old[slot];
     if (style) out[box] = style;
     else if (isObj(was) && (was.kind === 'flat' || was.kind === 'rounded')) out[box] = { kind: was.kind, color: colour(was.color) ?? WEAPON_BOX_COLOUR[box] };
   }
   if (typeof w.weaponIcons === 'boolean') out.weaponIcons = w.weaponIcons;
   if (typeof w.itemIcons === 'boolean') out.itemIcons = w.itemIcons;
+  if (isObj(w.icons)) {
+    const icons: Record<string, string> = {};
+    for (const [entry, id] of Object.entries(w.icons)) {
+      if (!weaponImageKind(entry) || id !== weaponIconId(entry) || !images[id]) continue;
+      icons[entry] = id;
+    }
+    if (Object.keys(icons).length) out.icons = icons;
+  }
   return Object.keys(out).length ? out : undefined;
 }
 
@@ -687,10 +752,14 @@ export function validateDesign(raw: unknown): HudDesign {
     if (Object.keys(out).length) d.splatters = out;
   }
   if (isObj(raw.images)) for (const [id, v] of Object.entries(raw.images)) {
-    if (!ID.test(id) || !(isSlot(id) || splatterDef(id)) || !isObj(v)) continue;
+    if (!ID.test(id) || !isObj(v)) continue;
     const { w, h, png } = v;
     if (typeof w !== 'number' || typeof h !== 'number' || typeof png !== 'string') continue;
     if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1) continue;
+    // A weapon upload must be the texel size it was drawn at (decision 5),
+    // which is also the size the build encodes and the cell rect it writes.
+    const weapon = weaponImageFits(id, w, h);
+    if (weapon === false || (weapon === undefined && !(isSlot(id) || splatterDef(id)))) continue;
     // A splatter image must be its texture's exact size: the preview draws the
     // stored PNG and the build encodes it at the texture size, so only that
     // size can be both.
@@ -700,8 +769,13 @@ export function validateDesign(raw: unknown): HudDesign {
     if (!/^[A-Za-z0-9+/=]+$/.test(png)) continue;
     d.images[id] = { w, h, png };
   }
-  const weapons = weaponsOf(raw.weapons, raw.styles, d.advanced);
+  const weapons = weaponsOf(raw.weapons, raw.styles, d.advanced, d.images);
   if (weapons) d.weapons = weapons;
+  // A weapon picture nothing names is dropped, as the old weapon box slots'
+  // were: nothing would ever ship it.
+  const named = new Set([...Object.values(weapons?.icons ?? {}),
+    ...(['boxActive', 'boxInactive'] as const).filter((b) => weapons?.[b]?.kind === 'image').map((b) => WEAPON_BOX_IMAGE[b])]);
+  for (const id of Object.keys(d.images)) if (weaponImageFits(id, 1, 1) !== undefined && !named.has(id)) delete d.images[id];
   // Every registered panel's children, by the same rules; a panel the
   // registry does not have has nothing to apply to. Names match exactly, as
   // the teammate card always did, so a stored name is the block's own.
