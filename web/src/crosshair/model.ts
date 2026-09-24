@@ -64,6 +64,21 @@ export function readState(raw: unknown): CrosshairState | null {
 }
 
 /**
+ * How the Crosshair page's preview shows the screen: 'closeup' is the middle
+ * of the screen, one game pixel to one display pixel; 'whole' fits the
+ * whole screen in. A preference of that page only, saved next to its
+ * crosshair in the same storage entry but never part of the crosshair:
+ * readState drops it, so a share, a design or a community entry never
+ * carries it.
+ */
+export type PreviewView = 'closeup' | 'whole';
+
+/** The saved page state's preview size; anything else, a state saved before there was one included, is the close-up. */
+export function readView(raw: unknown): PreviewView {
+  return isObj(raw) && raw.view === 'whole' ? 'whole' : 'closeup';
+}
+
+/**
  * A crosshair a design can carry, or null. An image is a PNG data URL
  * within the caps uploaded style images have, 1 to 512 pixels a side.
  */

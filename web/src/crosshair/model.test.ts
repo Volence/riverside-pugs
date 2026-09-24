@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readState, readArt, fitSquare, drawArt, LIMITS, PNG_PREFIX } from './model';
+import { readState, readArt, readView, fitSquare, drawArt, LIMITS, PNG_PREFIX } from './model';
 import { DEFAULT_STATE, PX_AT_1080 } from './draw';
 import { MAX_IMAGE_B64, MAX_IMAGE_SIDE } from '../hud/limits';
 
@@ -98,5 +98,19 @@ describe('drawArt', () => {
     const idle = rec();
     drawArt(idle.ctx, 100, 100, 40, art, null);
     expect(idle.calls.some((c) => c.m === 'drawImage')).toBe(false);
+  });
+});
+
+describe('readView', () => {
+  it('is the whole screen only when a saved page state says so, and the close-up otherwise', () => {
+    expect(readView({ view: 'whole' })).toBe('whole');
+    expect(readView({ view: 'closeup' })).toBe('closeup');
+    for (const raw of [null, undefined, 'whole', [], {}, { view: 'huge' }, { view: 1 }, { shape: 'dot' }]) {
+      expect(readView(raw), JSON.stringify(raw)).toBe('closeup');
+    }
+  });
+
+  it('is not part of the crosshair: readState drops it', () => {
+    expect(readState({ view: 'whole' })).toEqual(DEFAULT_STATE);
   });
 });
