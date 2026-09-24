@@ -217,7 +217,7 @@ export function pctDecode(s: string): string {
   return s.replace(/%20/g, ' ').replace(/%25/g, '%');
 }
 
-const BAL_ITEM_RE = /^[cxpfd]:/;
+const BAL_ITEM_RE = /^[cxpfdw]:/;
 const STAT_KEY_RE = /^[a-z0-9_]{1,40}$/;
 const ROUND_MARKS = new Set(['panic', 'finale_start', 'finale_radio']);
 

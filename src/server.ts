@@ -54,6 +54,7 @@ import { readFileSync } from 'node:fs';
 import type { Config } from './config.js';
 import type { DB } from './db.js';
 import { BalanceRolloutWriter } from './balanceWriter.js';
+import { BalanceWatchWriter, renderWatchFile } from './balanceWatch.js';
 import { FleetReader } from './fleetReader.js';
 import { adminFleetRoutes } from './routes/adminFleet.js';
 import type { AddonsTransport } from './addonsTransport.js';
@@ -550,6 +551,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // new values land between matches; see src/balanceWriter.ts. Not wired in
   // dev mode, where a release must never write through a real transport.
   const balanceWriter = new BalanceRolloutWriter({ db: deps.db, transport: deps.balanceTransport });
+  // The balance watch list as a file pug-match 0.3.12+ reads at map start
+  // (sub-project 3). Knobs loaded here for the file only; a broken knobs.json
+  // writes nothing, and every box keeps its compiled list.
+  let watchKnobs: BalanceKnobs | null = null;
+  try { watchKnobs = loadBalanceKnobs(deps.balanceKnobsPath); } catch { watchKnobs = null; }
+  const watchWriter = new BalanceWatchWriter({
+    db: deps.db, content: () => (watchKnobs ? renderWatchFile(watchKnobs) : null), transport: deps.balanceTransport,
+  });
   // Fleet view: read-only readings of every box's managed files.
   const fleetReader = deps.fleetReader ?? new FleetReader({ db: deps.db });
   // Releases (2b): the deploy repo's commits sent to the boxes from the site.
@@ -626,6 +635,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     }
   }), restarter, deps.config.devMode ? null : async (server) => {
     await balanceWriter.writeForRelease(server.id);
+    await watchWriter.writeForRelease(server.id);
     await releaseEngine.forRelease(server.id);
   });
 
@@ -1219,6 +1229,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     void balanceWriter.verifyAll();
     fleetReader.start();
     releaseEngine.start();
+    watchWriter.start();
+    void watchWriter.sync();
     fleetReader.tick(); // boxes never read, or stale, get read once at boot
   }
 
@@ -1483,6 +1495,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     balanceWriter.stop();
     fleetReader.stop();
     releaseEngine.stop();
+    watchWriter.stop();
     if (logListener) await logListener.close();
     // Where each server's replay check had got to. Best effort: the caller may
     // already have closed the database, and a few seconds of position is all

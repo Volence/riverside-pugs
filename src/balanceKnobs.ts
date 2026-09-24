@@ -27,6 +27,9 @@ export interface BalanceKnobs {
   /** Plugins that are not balance at all and get loaded and unloaded around a
    *  match, so their presence is noise. Dropped from the inventory entirely. */
   ignored?: string[];
+  /** Weapon keys from l4d_info_editor_weapons.cfg the plugin reports as
+   *  `w:<weapon>.<key>` (read from the watch file, pug-match 0.3.12+). */
+  weapons?: { weapon: string; key: string; label: string }[];
 }
 
 export const BALANCE_KNOBS_PATH = fileURLToPath(new URL('../balance/knobs.json', import.meta.url));
@@ -124,6 +127,13 @@ export function loadBalanceKnobs(path: string = BALANCE_KNOBS_PATH, raw?: unknow
   for (const d of k.dirs) {
     if (!PATH_RE.test(d.path)) throw new Error(`bad dir path: ${d.path}`);
     if (!/^\.[a-z0-9]{1,8}$/.test(d.ext)) throw new Error(`bad dir ext: ${d.ext}`);
+  }
+  if (k.weapons !== undefined) {
+    if (!Array.isArray(k.weapons)) throw new Error('balance knobs: weapons must be an array');
+    for (const w of k.weapons) {
+      if (!/^weapon_[a-z0-9_]{1,40}$/.test(w.weapon)) throw new Error(`bad weapon: ${w.weapon}`);
+      if (!/^[A-Za-z][A-Za-z0-9_]{0,40}$/.test(w.key)) throw new Error(`bad weapon key: ${w.key}`);
+    }
   }
   if (new Set(k.cvars.map((c) => c.cvar)).size !== k.cvars.length) throw new Error('duplicate cvar');
   validateAdjustable(k);
