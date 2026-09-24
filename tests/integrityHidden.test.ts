@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { STATE, type Frame } from '../src/replayFormat.js';
 import { losView } from '../src/integrity/los.js';
 import { pickClips } from '../src/integrity/ghostTrack.js';
-import { hiddenGate, hiddenTrackWindows, scanHidden } from '../src/integrity/hidden.js';
+import { hiddenGate, hiddenOccupancy, hiddenTrackWindows, scanHidden } from '../src/integrity/hidden.js';
+import { cellKey, cellOf, type PriorTable } from '../src/integrity/aimPrior.js';
 import { blank, header, scene } from './hiddenFixtures.js';
 
 const LOS = losView(header());
@@ -77,5 +78,38 @@ describe('metric D, hidden tracking', () => {
 
   it('finds nothing in a file that does not record line of sight', () => {
     expect(hiddenTrackWindows(scene(), 0, losView(header(false)))).toEqual([]);
+  });
+});
+
+/** A prior that puts probability `p` on every cell the hunter stood in. */
+function priorOver(frames: Frame[], slot: number, p: number): PriorTable {
+  const counts = new Map<string, number>();
+  for (const f of frames) {
+    const t = f.players[slot];
+    const c = cellOf(t.x, t.y);
+    counts.set(cellKey(c.cx, c.cy), p * 1000);
+  }
+  return { frames: 1000, counts };
+}
+
+describe('metric E, hidden pre-aim', () => {
+  it('counts blocks on a hidden hunter against what the map predicts, per class', () => {
+    // On time, so the aim is inside E_DWELL every frame. tMs runs 5000 to 8900:
+    // blocks 2, 3 and 4 of OCC_BLOCK_MS.
+    const frames = scene({ lagFrames: 0 });
+    const { occ, gates } = hiddenOccupancy(frames, 0, priorOver(frames, 4, 0.01), LOS);
+    expect(gates.passed).toBe(40);
+    expect(occ!.all!.blocks).toBe(3);
+    expect(occ!.all!.observed).toBeCloseTo(3);
+    expect(occ!.all!.expected).toBeCloseTo(0.03);
+    expect(occ!.byClass.hunter).toEqual(occ!.all);
+    expect(occ!.byClass.smoker).toBeNull();
+    expect(occ!.byClass.boomer).toBeNull();
+  });
+
+  it('has no score without a prior, and still reports coverage', () => {
+    const { occ, gates } = hiddenOccupancy(scene({ lagFrames: 0 }), 0, null, LOS);
+    expect(occ).toBeNull();
+    expect(gates.passed).toBe(40);
   });
 });
