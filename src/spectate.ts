@@ -1,8 +1,10 @@
 import type { DB } from './db.js';
 
 /** SourceTV's broadcast delay, in seconds. Matches tv_delay on the game
- *  servers: it is what stops a live spectator ghosting for their team. */
-export const SPECTATE_DELAY_SECONDS = 30;
+ *  servers. 0 since 2026-09-24 by the owner's call: SourceTV is live, and
+ *  instead of a delay every SourceTV spectator is recorded (src/sourcetvSessions.ts)
+ *  and one on a player's own connection is flagged to admins. */
+export const SPECTATE_DELAY_SECONDS = 0;
 
 export interface SpectateInfo {
   host: string;
@@ -16,7 +18,8 @@ export interface SpectateInfo {
  * How to watch a match on a given server, or null when that server has no
  * SourceTV switched on.
  *
- * Public on purpose (the owner's call, 2026-09-17): the 30 second delay is what
+ * Public on purpose (the owner's call, 2026-09-17, kept with no delay on
+ * 2026-09-24; see SPECTATE_DELAY_SECONDS): the delay was what
  * makes live spectating safe, not secrecy, so the connect details ride along on
  * the public live payload.
  */
