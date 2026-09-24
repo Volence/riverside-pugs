@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../src/db.js';
-import { listPublished, patchTimeline, publishPatch } from '../src/balancePublic.js';
+import { listPublished, patchTimeline, publicChanges, publishPatch } from '../src/balancePublic.js';
 import { listPatches } from '../src/balancePatches.js';
 
 type DBT = ReturnType<typeof openDb>;
@@ -63,5 +63,47 @@ describe('publishPatch', () => {
     publishPatch(db, 1, true); publishPatch(db, 2, true);
     expect(listPublished(db).map((p) => p.id)).toEqual([2, 1]);
     expect(JSON.stringify(listPublished(db))).not.toMatch(/inputs|fingerprint|hasInputs/);
+  });
+});
+
+const KNOBS = {
+  cvars: [{ cvar: 'z_tank_health', label: 'Tank base health', group: 'tank' }],
+  files: [{ path: 'cfg/pug_match.cfg', label: 'PUG match config' }],
+  dirs: [{ path: 'addons/stripper/Roto-AZMod/maps', ext: '.cfg', label: 'Stripper per-map configs' }],
+  versionless: ['pug-match.smx'],
+  ignored: ['l4d_tvwatch.smx'],
+};
+
+describe('publicChanges', () => {
+  const prev = {
+    'c:z_tank_health': '8000', 'c:tongue_hit_delay': '13', 'c:only_prev': '1',
+    'p:l4d_skypounce.smx': '100.aaaaaaaa', 'p:old_thing.smx': '5.bbbbbbbb', 'p:pug-match.smx': '9.cccccccc',
+    'f:cfg/pug_match.cfg': '10.dddddddd', 'f:cfg/other.cfg': '11.eeeeeeee',
+    'd:addons/stripper/Roto-AZMod/maps': '138.ffffffff',
+  };
+  const cur = {
+    'c:z_tank_health': '7500', 'c:tongue_hit_delay': '10', 'c:only_cur': '2',
+    'p:l4d_skypounce.smx': '101.11111111', 'p:new_thing.smx': '7.22222222', 'p:pug-match.smx': '9.33333333',
+    'p:l4d_tvwatch.smx': '1.44444444',
+    'f:cfg/pug_match.cfg': '10.55555555', 'f:cfg/other.cfg': '11.eeeeeeee',
+    'd:addons/stripper/Roto-AZMod/maps': '139.66666666',
+  };
+  it('labels knobs, names plugins without .smx and files by label, and never leaks hashes', () => {
+    const c = publicChanges(prev, cur, KNOBS);
+    expect(c).toEqual({
+      knobs: [{ label: 'Tank base health', from: '8000', to: '7500' }, { label: 'tongue_hit_delay', from: '13', to: '10' }],
+      pluginsAdded: ['new_thing'], pluginsRemoved: ['old_thing'], pluginsUpdated: ['l4d_skypounce'],
+      files: ['PUG match config', 'Stripper per-map configs'],
+    });
+    expect(JSON.stringify(c)).not.toMatch(/[0-9a-f]{8}|\.smx|cfg\/|c:|p:|f:|d:/);
+  });
+  it('ignores versionless plugin rebuilds and ignored plugins, but shows a versionless plugin appearing', () => {
+    const c = publicChanges({ 'p:pug-match.smx': '1.aaaaaaaa' }, { 'p:pug-match.smx': '2.bbbbbbbb', 'p:l4d_tvwatch.smx': '1.cccccccc' }, KNOBS);
+    expect(c.pluginsUpdated).toEqual([]); expect(c.pluginsAdded).toEqual([]);
+    expect(publicChanges({}, { 'p:pug-match.smx': '1.aaaaaaaa' }, KNOBS).pluginsAdded).toEqual(['pug-match']);
+  });
+  it('lists a watched file that appears or disappears, and falls back to raw names without knobs', () => {
+    expect(publicChanges({}, { 'f:cfg/new.cfg': '1.aaaaaaaa' }, KNOBS).files).toEqual(['cfg/new.cfg']);
+    expect(publicChanges({ 'c:z_tank_health': '1' }, { 'c:z_tank_health': '2' }, null).knobs).toEqual([{ label: 'z_tank_health', from: '1', to: '2' }]);
   });
 });
