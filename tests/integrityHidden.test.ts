@@ -5,6 +5,7 @@ import { pickClips } from '../src/integrity/ghostTrack.js';
 import { hiddenGate, hiddenOccupancy, hiddenTrackWindows, scanHidden, revealReaction } from '../src/integrity/hidden.js';
 import { analyzeRound } from '../src/integrity/round.js';
 import { cellKey, cellOf, type PriorTable } from '../src/integrity/aimPrior.js';
+import { TUNING } from '../src/integrity/constants.js';
 import { blank, header, scene } from './hiddenFixtures.js';
 
 const LOS = losView(header());
@@ -172,5 +173,18 @@ describe('analyzeRound with line of sight', () => {
     // No ghosts in this scene, so both ghost sums are zero, and present.
     expect(metrics.get(0)!.fidLagSum).toBe(0);
     expect(metrics.get(0)!.fidSum).toBe(0);
+  });
+
+  it('never clips a window the lag search rescued from under MIN_TRAVEL', () => {
+    // amp 1 / lagFrames 4 produces windows whose lag-0 travel sits just under
+    // MIN_TRAVEL (about 4 degrees) while the best lag (400 ms) scores them
+    // lagFidelity 1: real motion, just not enough of it at lag 0 to be a
+    // scoreable window. Confirmed by direct inspection of hiddenMetrics
+    // before writing this test.
+    const frames = scene({ amp: 1, lagFrames: 4 });
+    const { hiddenClips } = analyzeRound(frames, [0], null, LOS);
+    const clips = hiddenClips.get(0)!;
+    expect(clips.length).toBeGreaterThan(0);
+    for (const c of clips) expect(c.travel).toBeGreaterThanOrEqual(TUNING.MIN_TRAVEL);
   });
 });
