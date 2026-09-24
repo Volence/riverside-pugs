@@ -125,7 +125,7 @@ export interface PanelChildren {
    * 'delta' applies the same move. Typed here, first written in slice 2.2
    * for the special infected health files.
    */
-  linked?: { file: string; rule: 'same' | 'delta' }[];
+  linked?: { file: string; rule: LinkRule }[];
   /**
    * The child whose x the game draws this panel's health bar at, instead of
    * the bar's own xpos, when the file has one. client.dll's player panel
@@ -311,6 +311,41 @@ export const SI_PANEL: PanelChildren = {
       stateArt: 'crouched', fitPlace: 'keep', note: 'The game shows this while you crouch.' },
   ],
 };
+
+/** A block's rect, as a linked rule reads it from a base file. */
+export interface LinkRect { x: number; y: number; w: number; h: number }
+export type LinkRule = 'same' | 'delta';
+
+/**
+ * A stored value, kept in the panel file's frame (the Hunter's for your
+ * infected health, spec 3.2), as a linked file takes it (plan decision 3).
+ * 'same' copies it. 'delta' moves the block by the same amount from its own
+ * place (x' = x - from.x + to.x) and sizes it in proportion to its own block
+ * (w' = round(w * to.w / from.w)), the same for y and h; `from` and `to` are
+ * that block's rect in the panel's base file and in the linked base file.
+ * A size whose `from` has none to scale from (Modern's 0 x 0 frame) is
+ * kept. Anything that is not a place or a size (visible, a colour, a font
+ * size, typed keys) passes through for both rules.
+ */
+export function linkedValue<T>(rule: LinkRule, key: string, stored: T, from: LinkRect, to: LinkRect): T | number {
+  return mapLinked(rule, key, stored, from, to);
+}
+
+/** linkedValue's inverse: a value seen in the linked file, back in the panel file's frame (a drag on the Boomer preview). */
+export function unlinkedValue<T>(rule: LinkRule, key: string, seen: T, from: LinkRect, to: LinkRect): T | number {
+  return mapLinked(rule, key, seen, to, from);
+}
+
+function mapLinked<T>(rule: LinkRule, key: string, v: T, a: LinkRect, b: LinkRect): T | number {
+  if (rule === 'same' || typeof v !== 'number') return v;
+  switch (key) {
+    case 'x': return v - a.x + b.x;
+    case 'y': return v - a.y + b.y;
+    case 'w': return a.w > 0 ? Math.round(v * b.w / a.w) : v;
+    case 'h': return a.h > 0 ? Math.round(v * b.h / a.h) : v;
+    default: return v;
+  }
+}
 
 export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL];
 export const panelChildren = (panelId: string): PanelChildren | undefined => PANEL_CHILDREN.find((p) => p.panelId === panelId);

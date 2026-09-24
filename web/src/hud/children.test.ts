@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { TEAM_PANEL, OWN_PANEL, SI_PANEL, PANEL_CHILDREN, panelChildren, CONTENT_CHILDREN, FIT_SQUARED, childDef, panelOfFile, maxInset, type KeyDef } from './children';
+import { TEAM_PANEL, OWN_PANEL, SI_PANEL, PANEL_CHILDREN, panelChildren, CONTENT_CHILDREN, FIT_SQUARED, childDef, panelOfFile, maxInset, linkedValue, unlinkedValue, type KeyDef } from './children';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { SPLATTERS } from './splatter';
@@ -312,5 +312,61 @@ describe('the infected health registry', () => {
 
   it('shows the crouch icon only while crouched, keeps it in the fit and lets it take a tint', () => {
     expect(by('DuckingIcon')).toMatchObject({ kind: 'image', role: 'state', stateArt: 'crouched', fitPlace: 'keep', colour: true, box: 'square' });
+  });
+});
+
+/**
+ * One stored edit, three files (spec 3.2, plan decision 3): numbers are
+ * stored in the Hunter's frame; the Smoker's file takes them as they are,
+ * the Boomer's moves by the same amount from its own place and sizes in
+ * proportion to its own block.
+ */
+describe('linked files: the Hunter frame mapped to the Smoker and Boomer files', () => {
+  // The stock Health bar: Hunter 252,69 132x13, Boomer 322,69 64x13.
+  const hunter = { x: 252, y: 69, w: 132, h: 13 };
+  const boomer = { x: 322, y: 69, w: 64, h: 13 };
+
+  it('copies every value for the same rule', () => {
+    for (const [k, v] of [['x', 262], ['y', 60], ['w', 112], ['h', 20], ['visible', false], ['color', '0 0 255 255'], ['fontSize', 14]] as const) {
+      expect(linkedValue('same', k, v, hunter, boomer), k).toBe(v);
+    }
+  });
+
+  it('moves the Boomer by the same amount from its own place', () => {
+    expect(linkedValue('delta', 'x', 262, hunter, boomer)).toBe(332);
+    expect(linkedValue('delta', 'y', 60, hunter, boomer)).toBe(60);
+  });
+
+  it('sizes the Boomer in proportion to its own block', () => {
+    expect(linkedValue('delta', 'w', 112, hunter, boomer)).toBe(Math.round(112 * 64 / 132));
+    expect(linkedValue('delta', 'w', 112, hunter, boomer)).toBe(54);
+    expect(linkedValue('delta', 'h', 26, hunter, boomer)).toBe(26);
+  });
+
+  it('passes visibility, colours, fonts and keys through untouched', () => {
+    const keys = { inset: '3' };
+    expect(linkedValue('delta', 'visible', false, hunter, boomer)).toBe(false);
+    expect(linkedValue('delta', 'color', '0 0 255 255', hunter, boomer)).toBe('0 0 255 255');
+    expect(linkedValue('delta', 'fontSize', 14, hunter, boomer)).toBe(14);
+    expect(linkedValue('delta', 'keys', keys, hunter, boomer)).toBe(keys);
+  });
+
+  it('keeps a size as it is when the Hunter block has none to scale from (Modern\'s 0 x 0 frame)', () => {
+    const none = { x: 0, y: 0, w: 0, h: 0 };
+    expect(linkedValue('delta', 'w', 40, none, none)).toBe(40);
+    expect(unlinkedValue('delta', 'w', 40, none, none)).toBe(40);
+  });
+
+  it('round-trips through its inverse within a unit', () => {
+    for (const rule of ['same', 'delta'] as const) {
+      for (const k of ['x', 'y', 'w', 'h'] as const) {
+        for (const v of [0, 1, 54, 112, 262, 399]) {
+          const back = unlinkedValue(rule, k, linkedValue(rule, k, v, hunter, boomer) as number, hunter, boomer) as number;
+          expect(Math.abs(back - v), `${rule} ${k} ${v}`).toBeLessThanOrEqual(1);
+        }
+      }
+    }
+    expect(unlinkedValue('delta', 'x', 332, hunter, boomer)).toBe(262);
+    expect(unlinkedValue('delta', 'w', 74, hunter, boomer)).toBe(Math.round(74 * 132 / 64));
   });
 });

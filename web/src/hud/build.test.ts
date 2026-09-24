@@ -3,7 +3,8 @@ import { buildHud, elementRect, pcSet, HIDE_FRAMES, CODE_SHOWN, hardHide, baseHa
 import { parsePos, screenW } from './units';
 import { DEFAULT_DESIGN, validateDesign, contentBox, type HudDesign, type ElementOverride, type ChildOverride } from './design';
 import { parseKv, writeKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
-import { baseFile } from './base';
+import { baseFile, registerImport, unregisterImport } from './base';
+import { sampleHud, dropBlock } from './importFixtures';
 import { elementById, ELEMENTS } from './elements';
 import { PANEL_FILE, childRects } from './render';
 import { panelBoxes } from './mock';
@@ -1732,5 +1733,80 @@ describe("panelChild reports a card's health bar at the x the game draws it (pro
   it('keeps the file bytes: the written bar is still at its own xpos', () => {
     const nodes = tree(buildHud(design({})), CARD_FILE);
     expect(kvGet(kvFind(nodes, ['Health'])!, 'xpos')).toBe('37');
+  });
+});
+
+/**
+ * Your infected health is three live files (the Hunter's, which the Tank
+ * reads too, the Smoker's and the Boomer's) and one set of edits: SI_PANEL's
+ * `linked` rules (plan decision 3).
+ */
+describe('one infected health edit lands in the Hunter, Smoker and Boomer files', () => {
+  const HUNTER = 'resource/ui/hud/hunterhealth.res', SMOKER = 'resource/ui/hud/smokerhealth.res', BOOMER = 'resource/ui/hud/boomerhealth.res';
+  const si = (c: Record<string, ChildOverride>, preset: 'stock' | 'modern' = 'stock') =>
+    design({ preset, children: { siHealth: c } as HudDesign['children'] });
+  const at = (files: { path: string; data: Uint8Array }[], path: string, name: string, preset: 'stock' | 'modern' = 'stock') =>
+    kvFind(tree(files, path, preset), [name])!;
+
+  it('writes the bar\'s size and place to all three, the Boomer\'s in proportion', () => {
+    const files = buildHud(si({ Health: { w: 112, y: 60 } }));
+    for (const f of [HUNTER, SMOKER]) expect([kvGet(at(files, f, 'Health'), 'wide'), kvGet(at(files, f, 'Health'), 'ypos')], f).toEqual(['112', '60']);
+    expect([kvGet(at(files, BOOMER, 'Health'), 'wide'), kvGet(at(files, BOOMER, 'Health'), 'ypos')]).toEqual(['54', '60']);
+    // The Boomer's x was not edited, so it stays its own.
+    expect(kvGet(at(files, BOOMER, 'Health'), 'xpos')).toBe('322');
+  });
+
+  it('moves the Boomer\'s bar by the Hunter\'s move', () => {
+    const files = buildHud(si({ Health: { x: 262 } }));
+    expect(kvGet(at(files, HUNTER, 'Health'), 'xpos')).toBe('262');
+    expect(kvGet(at(files, BOOMER, 'Health'), 'xpos')).toBe('332');
+  });
+
+  it('gives the number its colour in all three (probe Q13)', () => {
+    const files = buildHud(si({ HealthNumber: { color: '0 0 255 255' } }));
+    for (const f of [HUNTER, SMOKER, BOOMER]) expect(kvGet(at(files, f, 'HealthNumber'), 'fgcolor_override'), f).toBe('0 0 255 255');
+  });
+
+  it('hard-hides a hidden frame in all three', () => {
+    const files = buildHud(si({ BackgroundImage: { visible: false } }));
+    for (const f of [HUNTER, SMOKER, BOOMER]) {
+      const n = at(files, f, 'BackgroundImage');
+      expect([kvGet(n, 'visible'), kvGet(n, 'wide'), kvGet(n, 'tall'), kvGet(n, 'drawColor')], f).toEqual(['0', '0', '0', '255 255 255 0']);
+    }
+  });
+
+  it('replaces the Hunter number\'s [$WINDOWS] tall line, never adds a second one, and leaves the Mac line', () => {
+    const files = buildHud(si({ HealthNumber: { h: 30 } }));
+    const n = at(files, HUNTER, 'HealthNumber');
+    const talls = (n.value as KvNode[]).filter((c) => c.key.toLowerCase() === 'tall');
+    expect(talls.map((c) => [c.value, c.cond])).toEqual([['30', '[$WINDOWS]'], ['25', '[$OSX]']]);
+  });
+
+  it('never touches the two zombiehealthleft files', () => {
+    const plain = buildHud(design({}));
+    const edited = buildHud(si({ Health: { w: 112, y: 60 }, HealthNumber: { color: '0 0 255 255' }, BackgroundImage: { visible: false } }));
+    for (const f of ['resource/ui/hud/zombiehealthleft_small.res', 'resource/ui/hud/zombiehealthleft_large.res']) {
+      expect(text(edited, f), f).toBe(text(plain, f));
+    }
+  });
+
+  it('on Modern, where the three files match, writes the same numbers to all three', () => {
+    // The preview's trees: a Modern download needs the Roboto files, which this test has no need of.
+    const trees = buildTrees(si({ Health: { w: 100, x: 10 } }, 'modern'));
+    for (const f of [HUNTER, SMOKER, BOOMER]) {
+      const n = kvFind(trees(f), ['Health'])!;
+      expect([kvGet(n, 'wide'), kvGet(n, 'xpos')], f).toEqual(['100', '10']);
+    }
+  });
+
+  it('skips a linked file an imported HUD lacks the block in, as it skips a missing block', () => {
+    const ID = '8'.repeat(64);
+    registerImport(ID, sampleHud({ [BOOMER]: dropBlock(baseFile('stock', BOOMER), 'Health') }));
+    try {
+      const d: HudDesign = { ...si({ Health: { w: 100 } }), preset: 'imported', imported: { id: ID, name: 'x' } };
+      const files = buildHud(d);
+      expect(kvGet(kvFind(parseKv(text(files, HUNTER)!)[0].value as KvNode[], ['Health'])!, 'wide')).toBe('100');
+      expect(kvFind(parseKv(text(files, BOOMER)!)[0].value as KvNode[], ['Health'])).toBeUndefined();
+    } finally { unregisterImport(ID); }
   });
 });

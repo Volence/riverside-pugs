@@ -21,7 +21,9 @@ import {
   baseTeam, contentBox, drawnBarX, isBar, WEAPON_KEYS, WEAPON_BOX_COLOUR, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir,
   type WeaponNumKey,
 } from './design';
-import { panelChildren, panelOfFile, childDef, maxInset, TEAM_PANEL, OWN_PANEL, type ChildDef, type PanelChildren } from './children';
+import {
+  panelChildren, panelOfFile, childDef, maxInset, linkedValue, TEAM_PANEL, OWN_PANEL, type ChildDef, type PanelChildren, type LinkRect, type LinkRule,
+} from './children';
 import { crosshairFiles } from '../crosshair/vpk';
 import {
   SPLATTERS, SPLAT_STAND_IN, splatterDef, splatterActive, splatterImageKey, splatterMaterial, fadePixels, type SplatterDef, type SplatterId,
@@ -314,8 +316,45 @@ function childPass(work: Work, design: HudDesign) {
       }
       if (!block) { if (work.imported) continue; throw new Error(`${panel.file}: no child ${name}`); }
       applyChild(work, panel.file, def, block, o);
+      for (const link of linkedBlocks(work, design, panel, name)) applyChild(work, link.file, def, link.block, linkedOverride(o, link));
     }
   }
+}
+
+/**
+ * The same block in each of a panel's linked files (your infected health:
+ * the Smoker's and the Boomer's, plan decision 3), with the block's rect in
+ * the panel's base file and in the linked base file, which is what the
+ * linked rule maps a stored number between. Bases are read from the base
+ * files, never from the tree an edit already changed. A linked file an
+ * imported HUD lacks the block in is skipped, as childPass skips a missing
+ * block on imports.
+ */
+interface LinkedBlock { file: string; rule: LinkRule; block: KvNode; from: LinkRect; to: LinkRect }
+function linkedBlocks(work: Work, design: HudDesign, panel: PanelChildren, name: string): LinkedBlock[] {
+  if (!panel.linked) return [];
+  const rectOf = (file: string): LinkRect | null => {
+    const n = kvFind(baseTree(baseOf(design), file), [name]);
+    return n ? { x: num(pcGet(n, 'xpos')), y: num(pcGet(n, 'ypos')), w: num(pcGet(n, 'wide')), h: num(pcGet(n, 'tall')) } : null;
+  };
+  const from = rectOf(panel.file);
+  const out: LinkedBlock[] = [];
+  for (const { file, rule } of panel.linked) {
+    const block = work.optional(file, [name]);
+    const to = rectOf(file);
+    if (!block || !to || !from) { if (work.imported) continue; throw new Error(`${file}: no child ${name}`); }
+    out.push({ file, rule, block, from, to });
+  }
+  return out;
+}
+
+/** A child's stored edit as a linked file takes it: places and sizes through linkedValue, the rest as stored. */
+function linkedOverride(o: ChildOverride, link: LinkedBlock): ChildOverride {
+  const out: ChildOverride = { ...o };
+  for (const k of ['x', 'y', 'w', 'h'] as const) {
+    if (o[k] !== undefined) out[k] = linkedValue(link.rule, k, o[k]!, link.from, link.to) as number;
+  }
+  return out;
 }
 
 /**
@@ -722,6 +761,7 @@ function hidePass(work: Work, design: HudDesign) {
       const block = kvFind(nodes, [name]);
       if (!block) continue;                            // an addable child that is off is not in the file at all
       hardHide(block);
+      for (const link of panel.linked ?? []) { const b = work.optional(link.file, [name]); if (b) hardHide(b); }
     }
   }
 }
