@@ -33,7 +33,7 @@ export function AdminFleet() {
     if (c.label === 'unread') return LABEL.unread;
     if (c.label === 'missing') return r.removedEverywhere ? 'removed on all boxes' : LABEL.missing;
     const tag = r.perBox ? 'per box' : r.patchedEverywhere ? 'base, patched on all boxes' : LABEL[c.label];
-    return `${short(c.sig)} (${tag}${c.sizeOnly ? ', size only' : ''})`;
+    return `${short(c.sig)} (${tag}${c.origin != null ? `, release ${c.origin}` : ''}${c.sizeOnly ? ', size only' : ''})`;
   };
 
   return (

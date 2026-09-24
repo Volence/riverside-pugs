@@ -875,7 +875,11 @@ export interface PatchSummary {
   releaseId?: number | null;
 }
 export interface FleetSig { size: number; sha256: string | null }
-export interface FleetCellView { sig: FleetSig | null; label: 'repo' | 'base' | 'neither' | 'missing' | 'unread'; highlight: boolean; sizeOnly: boolean }
+export interface FleetCellView {
+  sig: FleetSig | null; label: 'repo' | 'base' | 'neither' | 'missing' | 'unread'; highlight: boolean; sizeOnly: boolean;
+  /** The release whose copy of this file the box has. */
+  origin?: number | null;
+}
 export interface FleetRowView {
   path: string; area: 'plugins' | 'configs' | 'data' | 'gamedata' | 'extensions' | 'stripper' | 'other';
   repo: FleetSig | null; base: FleetSig | null; cells: Record<number, FleetCellView>; patchedEverywhere: boolean;

@@ -34,6 +34,17 @@ describe('compareFleet', () => {
     expect(rows.find((r) => r.path === C)).toMatchObject({ removedEverywhere: false, differs: true });
   });
 
+  it('a box layer is that box\'s reference and ends the per-box exemption; origins name the release', () => {
+    const L = 'left4dead/cfg/local.cfg';
+    const rows = compareFleet(man('repo', {}), null, [box(1, { [L]: sig('dal') }), box(2, { [L]: sig('chi-old') })], {
+      boxRefs: new Map([[1, new Map([[L, sig('dal')]])], [2, new Map([[L, sig('chi')]])]]),
+      origins: new Map([[1, new Map([[L, { releaseId: 12, sha256: 'dal' }]])]]),
+    });
+    expect(rows[0].perBox).toBe(false);
+    expect(rows[0].cells[1]).toMatchObject({ label: 'repo', highlight: false, origin: 12 });
+    expect(rows[0].cells[2]).toMatchObject({ label: 'neither', highlight: true, origin: null });
+  });
+
   it('a per-box file is shown but never highlighted', () => {
     const S = 'left4dead/cfg/secrets.cfg';
     const rows = compareFleet(null, null, [box(1, { [S]: sig('a') }), box(2, { [S]: sig('b') }), box(3, {})]);

@@ -76,6 +76,10 @@ describe('release routes', () => {
     expect(dep.json()).toEqual({ ok: true });
     await (a as unknown as { releaseEngine: { tick(): Promise<void> } }).releaseEngine.tick();
     expect(files.get(CFG)!.toString()).toBe('z_tank_health 7500\n');
+    // The fleet view names the release once the box's reading shows its copy.
+    db.prepare('UPDATE fleet_files SET size = 19, sha256 = ? WHERE server_id = 1 AND path = ?').run(sha('z_tank_health 7500\n'), CFG);
+    const fleet = (await a.inject({ method: 'GET', url: '/api/admin/fleet', cookies })).json() as { repo: { label: string }; rows: { path: string; cells: Record<string, { origin: number | null; label: string }> }[] };
+    expect(fleet.rows.find((r) => r.path === CFG)!.cells['1']).toMatchObject({ label: 'repo', origin: staged.id });
     const undo = (await a.inject({ method: 'POST', url: `/api/admin/releases/${staged.id}/undo`, cookies, payload: {} })).json() as { id: number };
     await (a as unknown as { releaseEngine: { tick(): Promise<void> } }).releaseEngine.tick();
     expect(files.get(CFG)!.toString()).toBe('z_tank_health 8000\n');

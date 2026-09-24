@@ -73,6 +73,14 @@ describe('AdminFleet', () => {
     await waitFor(() => expect(mockAdmin.fleetCheck).toHaveBeenCalledWith({ all: true }));
   });
 
+  it('names the release a box got its copy from', async () => {
+    mockAdmin.fleet.mockResolvedValue({ ...state, rows: [{ ...state.rows[0], differs: false, cells: { 1: { ...cell('repo', false), origin: 12 }, 2: cell('repo', false) } }] });
+    render(<AdminFleet />);
+    await screen.findByText(/No differences/);
+    fireEvent.click(screen.getByLabelText('Differences only'));
+    expect(screen.getByText(/release 12/)).toBeTruthy();
+  });
+
   it('filters by area', async () => {
     render(<AdminFleet />);
     await screen.findByText(P);

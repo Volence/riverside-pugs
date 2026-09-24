@@ -44,7 +44,11 @@ export const PER_BOX = new Set([
 ]);
 
 export type CellLabel = 'repo' | 'base' | 'neither' | 'missing' | 'unread';
-export interface FleetCell { sig: FileSig | null; label: CellLabel; highlight: boolean; sizeOnly: boolean }
+export interface FleetCell {
+  sig: FileSig | null; label: CellLabel; highlight: boolean; sizeOnly: boolean;
+  /** The release whose copy of this file the box has, when one does. */
+  origin?: number | null;
+}
 export interface FleetRow {
   path: string; area: Area; repo: FileSig | null; base: FileSig | null;
   cells: Record<number, FleetCell>;
@@ -62,11 +66,22 @@ export interface FleetRow {
 const same = (a: FileSig, b: FileSig) => (a.sha256 !== null && b.sha256 !== null ? a.sha256 === b.sha256 : a.size === b.size);
 const key = (s: FileSig | null) => (s === null ? 'missing' : `${s.size}:${s.sha256 ?? ''}`);
 
+export interface CompareOpts {
+  /** Per box, the files of its own layer in the deploy repo (boxes/<slug>/):
+   *  that box compares against these, and a path with any box layer is no
+   *  longer exempt as per box. */
+  boxRefs?: Map<number, Map<string, FileSig>>;
+  /** Per box, what the last release that reached it shipped. */
+  origins?: Map<number, Map<string, { releaseId: number; sha256: string }>>;
+}
+
 export function compareFleet(repo: Manifest | null, base: Manifest | null,
-  boxes: { serverId: number; files: Map<string, FileSig> | null }[]): FleetRow[] {
+  boxes: { serverId: number; files: Map<string, FileSig> | null }[], opts: CompareOpts = {}): FleetRow[] {
   const paths = new Set<string>();
   for (const m of [repo, base]) if (m) for (const p of Object.keys(m.files)) paths.add(p);
   for (const b of boxes) if (b.files) for (const p of b.files.keys()) paths.add(p);
+  for (const refs of opts.boxRefs?.values() ?? []) for (const p of refs.keys()) paths.add(p);
+  const boxRef = (id: number, path: string) => opts.boxRefs?.get(id)?.get(path) ?? null;
 
   const rows: FleetRow[] = [];
   for (const path of paths) {
@@ -87,19 +102,25 @@ export function compareFleet(repo: Manifest | null, base: Manifest | null,
     const allAgree = counts.size === 1;
     const patchedEverywhere = !r && bs !== null && read.length > 0 && allAgree && sigOf(read[0]) !== null && !same(sigOf(read[0])!, bs);
     const removedEverywhere = !r && bs !== null && read.length > 0 && read.every((b) => sigOf(b) === null);
-    const perBox = PER_BOX.has(path);
+    const anyBoxRef = boxes.some((b) => boxRef(b.serverId, path) !== null);
+    const perBox = PER_BOX.has(path) && !anyBoxRef;
     const quiet = patchedEverywhere || removedEverywhere || perBox;
 
     const cells: Record<number, FleetCell> = {};
     for (const b of boxes) {
       if (b.files === null) { cells[b.serverId] = { sig: null, label: 'unread', highlight: false, sizeOnly: false }; continue; }
       const s = sigOf(b);
+      const own = boxRef(b.serverId, path);
+      const cellRef = own ?? ref;
       let highlight: boolean;
       if (quiet) highlight = false;
-      else if (ref) highlight = s === null || !same(s, ref);
+      else if (cellRef) highlight = s === null || !same(s, cellRef);
       else highlight = !allAgree && (leaders.length > 1 || key(s) !== leaders[0]);
-      const sizeOnly = s !== null && (s.sha256 === null || (ref !== null && ref.sha256 === null));
-      cells[b.serverId] = { sig: s, label: labelOf(s), highlight, sizeOnly };
+      const sizeOnly = s !== null && (s.sha256 === null || (cellRef !== null && cellRef.sha256 === null));
+      const label: CellLabel = s !== null && own && same(s, own) ? 'repo' : labelOf(s);
+      const shipped = opts.origins?.get(b.serverId)?.get(path);
+      const origin = s !== null && shipped && s.sha256 === shipped.sha256 ? shipped.releaseId : null;
+      cells[b.serverId] = { sig: s, label, highlight, sizeOnly, origin };
     }
     rows.push({ path, area: areaOf(path), repo: r, base: bs, cells, patchedEverywhere, removedEverywhere, perBox,
       differs: Object.values(cells).some((c) => c.highlight) });
