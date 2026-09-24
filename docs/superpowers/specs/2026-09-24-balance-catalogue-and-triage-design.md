@@ -36,11 +36,49 @@ After seeing pieces 4 and 5 running locally the owner wants two things:
   `plugins/disabled/`, effective at the post-match restart.
 - Patch triage offers **"fold just this once"** and **"ignore this plugin from now
   on"** as two buttons, with no default.
-- Build order: **(1) triage, (2) plugin reads its list from a file, (3) catalogue
-  and public values page, (4) bigger knob panel.** Each gets its own plan; 2 to 4
-  get their own spec before planning.
+- **Game server changes go through the site** (release pipeline, below): a
+  release is staged from a deploy repo git commit, reviewed as a diff, marked
+  balance patch or not, then deployed from the site. Deploys can go to one canary
+  box and then to all, or to boxes picked per release. An idle box is restarted
+  right away (existing between-matches restarter); a busy box gets the release
+  after its match.
+- Build order: **(1) triage as a safety net, (2) release pipeline, (3) plugin reads
+  its list from a file, (4) catalogue and public values page, (5) bigger knob
+  panel.** Each gets its own plan; 2 to 5 get their own spec before planning.
+  Sub-projects 3 to 5 ship their server-side files as releases through 2.
 
-## The catalogue (direction for sub-projects 2 to 4)
+## Release pipeline (direction for sub-project 2)
+
+Today changes go from the owner's machine (or an agent) straight to the boxes
+(`deploy.sh`, `nfo/ftpsync.py`, the Riverside env), and the site learns about them
+only when a new fingerprint appears. Instead the site becomes the one door to the
+game servers:
+
+1. **Stage.** A `push-release` script bundles the deploy repo's `overrides/` tree at
+   a git commit and uploads it to the site. Staging touches no box. Agents stage
+   releases; they no longer deploy to live servers.
+2. **Review.** The site diffs the release against what each box has now and
+   against the previous release, in plain words (plugin added / updated / removed,
+   cvar lines changed in cfg files, data and stripper files changed), and shows
+   which boxes differ from each other.
+3. **Decide.** Balance patch (name and notes, announced before any box runs it) or
+   not balance. The next new fingerprint seen on a box after the deploy belongs to
+   that release's decision, so no whole-release fingerprint prediction is needed
+   (plugins change cvars at runtime, which the site cannot predict from files).
+4. **Deploy.** To a canary box, then the rest with one click, or to boxes picked
+   for this release. Per-box state as in the knob panel (pending, written,
+   confirmed on the first match), written only between matches, followed by a
+   restart when the box is empty.
+
+The knob panel becomes one kind of release (values only), with one history of
+everything sent to the servers and rollback to any earlier release. Risks to
+design for: the site gains write access to whole game server trees, so it needs a
+path allowlist, a backup of every replaced file, a dry-run diff and per-box
+failure isolation; Chicago is FTP-only and slow; Dallas is the site's own box.
+The web app keeps deploying with `deploy-web.sh`. Triage (sub-project 1) remains
+the safety net for changes that bypass the site.
+
+## The catalogue (direction for sub-projects 3 to 5)
 
 One hand-curated file, `balance/catalogue.json`, replaces the cvar part of
 `knobs.json` and is the single source for the plugin's watch list, the values page
@@ -70,7 +108,10 @@ and the knob panel. The survey (`value-inventory` notes, 2026-09-24) found about
 
 ### Goal
 
-When a new config version appears, an admin decides in one click whether it is a
+Once the release pipeline exists, most patches are decided at deploy time. Triage
+covers everything else: changes made outside the site (a manual edit, the NFO
+panel, a direct `deploy.sh`) and the backlog on production today. When a new
+config version appears unannounced, an admin decides in one click whether it is a
 balance patch. Non-balance changes stop cluttering Compare, the Patches tab and
 the public page, with no code change or deploy.
 
