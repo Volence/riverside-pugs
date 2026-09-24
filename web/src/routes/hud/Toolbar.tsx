@@ -100,8 +100,10 @@ export function Toolbar(p: ToolbarProps) {
           {p.imports.length > 0 && <option value="remove">Remove an imported HUD...</option>}
         </select>
       </label>
+      {/* No accept filter: a HUD kept as my_hud.vpk.orig or my_hud.zip.bak must still be pickable,
+          and anything that is not a HUD gets the import's own one-line refusal. */}
       <input
-        ref={fileRef} type="file" accept=".vpk,.zip" aria-label="Import a HUD file" style={{ display: 'none' }}
+        ref={fileRef} type="file" aria-label="Import a HUD file" style={{ display: 'none' }}
         onChange={(e) => {
           const input = e.target as HTMLInputElement;
           const f = input.files?.[0];
