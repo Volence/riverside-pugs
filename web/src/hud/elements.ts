@@ -80,8 +80,16 @@ export const ELEMENTS: HudElement[] = [
    * children.ts PROGRESS_PANEL). mockSize is the stock content's size, for
    * picking the element; its pieces are framed and clipped by the real
    * 300 x 45 container (mock.ts panelBoxes), as the game clips them.
+   *
+   * Survivor only: every label the bar carries is a heal, revive or help-up
+   * (client.dll's #L4D_progress_* strings), and server.so starts it only
+   * from CTerrorPlayer::StartHealing and StartReviving, the first aid kit,
+   * and a map's timed button (CButtonTimed::UseTimed, which checks no team;
+   * a spawned infected can use an entity only if the map flags it for them,
+   * CTerrorPlayer::IsUseableEntity, and no probe has seen one). Offered on
+   * the infected side, its sample drew over the spawn panel.
    */
-  { id: 'progressBar', label: 'Use / revive bar', side: 'both', key: 'HudProgressBar', move: true, resize: 'scale',
+  { id: 'progressBar', label: 'Use / revive bar', side: 'survivor', key: 'HudProgressBar', move: true, resize: 'scale',
     children: ['resource/ui/hud/progressbar.res'], mockSize: { stock: { w: 228, h: 24 }, modern: { w: 228, h: 24 } }, props: ['visible'] },
   /**
    * The game's real kill/incap feed: CHudPZDamageRecordPanel, whose

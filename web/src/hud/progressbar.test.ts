@@ -5,7 +5,7 @@ import { buildHud, buildTrees, elementRect } from './build';
 import { validateDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
-import { childAt, panelBoxes, drawHud } from './mock';
+import { childAt, panelBoxes, drawHud, visibleElements, hitTest } from './mock';
 import { _setImageFactory, _resetAssetCache } from './render';
 import { artUrl } from './art';
 
@@ -21,6 +21,22 @@ const FILE = 'resource/ui/hud/progressbar.res';
 const file = (preset: 'stock' | 'modern') => parseKv(baseFile(preset, FILE))[0].value as KvNode[];
 const by = (n: string) => PROGRESS_PANEL.children.find((c) => c.name === n)!;
 const rect = (n: KvNode) => ['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(n, k));
+
+describe('the use bar is a survivor element', () => {
+  // Every label the bar can carry is a heal, revive or help-up
+  // (client.dll #L4D_progress_* strings), and server.so starts the bar only
+  // from CTerrorPlayer::StartHealing / StartReviving, the first aid kit, and
+  // a map's timed button (CButtonTimed::UseTimed). Drawn on the infected
+  // side, the sample sat over the spawn panel.
+  it('is listed, drawn and picked on the survivor side only', () => {
+    const d = validateDesign({ v: 1 });
+    expect(elementById('progressBar')!.side).toBe('survivor');
+    expect(visibleElements('survivor', d).map((e) => e.id)).toContain('progressBar');
+    expect(visibleElements('infected', d).map((e) => e.id)).not.toContain('progressBar');
+    const r = elementRect(d, 'progressBar', d.aspect);
+    expect(hitTest(d, 'infected', r.x + 5, r.y + 5)).not.toBe('progressBar');
+  });
+});
 
 describe('the use bar registry (plan task U1)', () => {
   it('is the single progressbar.res, framed by its hudlayout.res block, and the element scales it', () => {
