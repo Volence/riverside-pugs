@@ -203,23 +203,6 @@ function layoutPass(work: Work, design: HudDesign) {
     // Resized in place, the chat keeps hudlayout's own tokens, as elementRect does.
     if (el.id === 'chat') chatWindow(work, moved ? p : { ...p, xpos: kvGet(panel, 'xpos') ?? '0', ypos: kvGet(panel, 'ypos') ?? '0' });
   }
-  const chat = design.elements.chat;
-  if (chat?.visible === false && baseHasElement(work.key, elementById('chat')!)) {
-    // hudlayout's own HudChat is only a background panel (chatWindow's own
-    // doc comment), but game code opens and shows the chat itself, the same
-    // trap hidePass works around for the teammate card: visible 0 alone may
-    // not be enough to keep it hidden.
-    hardHide(work.panel(LAYOUT, ['HudChat']));
-    for (const name of ['HudChat', 'HudChatHistory']) { const p = work.optional(BASECHAT, [name]); if (p) hardHide(p); }
-  }
-  const killNotices = design.elements.killNotices;
-  if (killNotices?.visible === false && baseHasElement(work.key, elementById('killNotices')!)) {
-    // CHudPZDamageRecordPanel is the game's kill/incap feed: its rows are
-    // filled in by game code, the same trap as the chat window above, so
-    // visible 0 in the file alone may not survive that. hardHide also zeros
-    // its size.
-    hardHide(work.panel(LAYOUT, ['HudPZDamageRecord']));
-  }
 }
 
 /**
@@ -669,18 +652,67 @@ function hidePass(work: Work, design: HudDesign) {
 
 /**
  * The hard hide hidePass gives a piece, for any block: visible 0, a 0 x 0
- * size, and for an ImagePanel a drawColor with alpha 0 (its RGB kept). The
- * chat window gets it too (layoutPass): game code opens and shows the chat
- * itself, so its visible key alone may not keep it hidden, the same trap as
- * the splatter. Sizes are set on every entry the PC reads, so a [$WIN32]
- * value is zeroed as well as a plain one.
+ * size, and for an ImagePanel a drawColor with alpha 0 (its RGB kept).
+ * Every hidden element gets it too (elementHidePass): probes B2 and B3
+ * showed game code re-shows every element that has only visible 0, the same
+ * trap as the splatter. Sizes are set on every entry the PC reads, so a
+ * [$WIN32] value is zeroed as well as a plain one. A block that sizes itself
+ * to its contents would grow back from 0, so an auto_wide_tocontents or
+ * auto_tall_tocontents it carries is turned off; one it lacks is not added,
+ * which is why no stock or Modern byte moves (none of their hidden blocks has
+ * one). autoResize is left alone: it is VGUI's resize-with-parent flag (it
+ * sits beside pinCorner, as in basechat.res HudChatHistory), which follows
+ * the 0 x 0 parent down, not the contents up.
  */
-function hardHide(block: KvNode) {
+export function hardHide(block: KvNode) {
   pcSet(block, 'visible', '0');
   pcSet(block, 'wide', '0');
   pcSet(block, 'tall', '0');
+  for (const key of ['auto_wide_tocontents', 'auto_tall_tocontents']) {
+    const v = pcGet(block, key);
+    if (v !== undefined && v !== '0') pcSet(block, key, '0');
+  }
   if ((kvGet(block, 'ControlName') ?? '').toLowerCase() === 'imagepanel') {
     kvSet(block, 'drawColor', clearOf(kvGet(block, 'drawColor') ?? '255 255 255 255'));
+  }
+}
+
+/**
+ * Blocks, besides the element's own hudlayout.res block, that hold its
+ * content inside another file: hidden with it. Probe Q2
+ * (/home/volence/l4d/hud/probe-phase2/b1/shots/crops/own-a.png) showed a
+ * panel clips its children, so a 0 x 0 container alone should be enough;
+ * these are the second line, for an element whose code sizes its own
+ * container. The chat's two basechat.res blocks were hard-hidden before the
+ * probes, and stay so.
+ */
+export const HIDE_FRAMES: Readonly<Record<string, readonly { file: string; blocks: readonly string[] }[]>> = {
+  ownHealth: [{ file: 'resource/ui/hud/localplayerdisplay.res', blocks: ['LocalPlayer'] }],
+  teamColumn: [{ file: 'resource/ui/hud/teamdisplayhud.res', blocks: ['TeamPlayer1', 'TeamPlayer2', 'TeamPlayer3', 'TeamPlayer4'] }],
+  chat: [{ file: BASECHAT, blocks: ['HudChat', 'HudChatHistory'] }],
+};
+
+/**
+ * Hard-hides every hidden element. Probes B2 and B3
+ * (/home/volence/l4d/hud/probe-phase2/RESULTS.md; shots b2/shots/b2/b2-a.png
+ * to e, b2/shots-kill/b2-killnotice/b2-f.png, b3/shots-rerun/b3-rerun/b3-a.png
+ * to e) showed that visible 0 in hudlayout.res hides no element at all:
+ * game code shows each one again. So a hidden element's hudlayout.res block,
+ * and each HIDE_FRAMES block of it, is written at size 0 as well.
+ *
+ * It runs after teamPass and scalePass, which write the team container and
+ * card sizes and multiply the rest: running last means neither can write a
+ * size back over the hide. It is download-only, like fontPass: buildTrees
+ * skips it, so the preview still has a hidden element whole and can paint
+ * it dimmed while it is selected (a 0 x 0 LocalPlayer would paint nothing).
+ */
+function elementHidePass(work: Work, design: HudDesign) {
+  for (const el of ELEMENTS) {
+    if (el.id === 'xhair' || design.elements[el.id]?.visible !== false || !baseHasElement(work.key, el)) continue;
+    hardHide(work.panel(LAYOUT, [el.key]));
+    for (const f of HIDE_FRAMES[el.id] ?? []) {
+      for (const name of f.blocks) { const b = work.optional(f.file, [name]); if (b) hardHide(b); }
+    }
   }
 }
 
@@ -1492,6 +1524,9 @@ export interface BuildReport { replaced: string[] }
  *   of childPass, scalePass and fontPass for the reasons given for those.
  * - `crosshairPass` only adds the texture files for the xHair element
  *   `layoutPass` wrote; it reads no tree.
+ * - `elementHidePass` runs after `teamPass` and `scalePass`, since both write
+ *   sizes it must zero, and only here: buildTrees skips it, so the preview
+ *   keeps a hidden element whole (its own doc comment).
  */
 export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: BuildReport): VpkFile[] {
   const key = baseOf(design);
@@ -1505,6 +1540,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   splatterPass(work, design, assets, extra);
   teamPass(work, design);
   scalePass(work, design);
+  elementHidePass(work, design);
   fontPass(work, design, assets, extra);
   stylePass(work, design, assets, extra);
   crosshairPass(design, assets, extra);

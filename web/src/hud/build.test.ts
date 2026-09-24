@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { buildHud, elementRect, pcSet, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame, panelChild, panelFrame, writeKeys } from './build';
+import { buildHud, elementRect, pcSet, HIDE_FRAMES, hardHide, baseHasElement, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame, panelChild, panelFrame, writeKeys } from './build';
 import { parsePos, screenW } from './units';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride, type ChildOverride } from './design';
 import { parseKv, writeKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
 import { baseFile } from './base';
-import { elementById } from './elements';
+import { elementById, ELEMENTS } from './elements';
 import { PANEL_FILE, childRects } from './render';
 import { panelBoxes } from './mock';
 import { crosshairFiles } from '../crosshair/vpk';
@@ -289,9 +289,12 @@ describe('buildHud, layout', () => {
     expect(kvGet(other, 'xpos')).toBe('r98');
   });
 
+  // Probes B2 and B3: visible 0 alone hid nothing in game, so a hidden
+  // element is also written at size 0 (the one deliberate change to this test).
   it('hides an element', () => {
     const got = layoutOf(buildHud(design({ elements: { progressBar: { visible: false } } })));
-    expect(kvGet(kvFind(got, ['HudProgressBar'])!, 'visible')).toBe('0');
+    const p = kvFind(got, ['HudProgressBar'])!;
+    expect([kvGet(p, 'visible'), kvGet(p, 'wide'), kvGet(p, 'tall')]).toEqual(['0', '0', '0']);
   });
 
   it('free-resizes chat and rewrites the three chat animations', () => {
@@ -1536,5 +1539,67 @@ describe('fitting your own health panel', () => {
   });
   it('leaves an unfitted panel exactly as the file has it', () => {
     expect(text(buildHud(own({ x: 20, y: 380 })), DISPLAY)).toBeUndefined();
+  });
+});
+
+describe('hiding an element hides it in game (probe B2 and B3: visible 0 alone hid nothing)', () => {
+  // /home/volence/l4d/hud/probe-phase2/RESULTS.md, B2 and B3: every element tested came back with visible 0 only.
+  const size = (n: KvNode) => [kvGet(n, 'visible'), kvGet(n, 'wide'), kvGet(n, 'tall')];
+  const hideable = ELEMENTS.filter((e) => e.id !== 'xhair' && e.props.includes('visible'));
+
+  for (const preset of ['stock', 'modern'] as const) {
+    for (const el of hideable) {
+      it(`${preset}: ${el.id} is visible 0 and 0 x 0 in hudlayout.res`, () => {
+        if (!baseHasElement(preset, el)) return;
+        const got = layoutOf(buildHud(design({ preset, elements: { [el.id]: { visible: false } } }), { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } }));
+        expect(size(kvFind(got, [el.key])!)).toEqual(['0', '0', '0']);
+      });
+    }
+  }
+
+  it('also zeroes the blocks that hold the content in another file', () => {
+    for (const [id, frames] of Object.entries(HIDE_FRAMES)) {
+      const files = buildHud(design({ elements: { [id]: { visible: false } } }));
+      for (const f of frames) for (const b of f.blocks) expect(size(kvFind(tree(files, f.file), [b])!), `${id} ${b}`).toEqual(['0', '0', '0']);
+    }
+  });
+
+  it('names the own panel, the four cards and the chat as frames', () => {
+    expect(HIDE_FRAMES).toEqual({
+      ownHealth: [{ file: 'resource/ui/hud/localplayerdisplay.res', blocks: ['LocalPlayer'] }],
+      teamColumn: [{ file: 'resource/ui/hud/teamdisplayhud.res', blocks: ['TeamPlayer1', 'TeamPlayer2', 'TeamPlayer3', 'TeamPlayer4'] }],
+      chat: [{ file: 'resource/ui/basechat.res', blocks: ['HudChat', 'HudChatHistory'] }],
+    });
+  });
+
+  it('keeps the hide over a fitted, scaled team and a scaled own panel', () => {
+    // teamPass writes the container and card sizes and scalePass multiplies: both run before the hide.
+    const files = buildHud(design({ elements: { teamColumn: { visible: false, fit: true, scale: 1.5 }, ownHealth: { visible: false, scale: 2 } } }));
+    expect(size(kvFind(layoutOf(files), ['CHudTeamDisplay'])!)).toEqual(['0', '0', '0']);
+    expect(size(kvFind(tree(files, 'resource/ui/hud/teamdisplayhud.res'), ['TeamPlayer1'])!)).toEqual(['0', '0', '0']);
+    expect(size(kvFind(tree(files, 'resource/ui/hud/localplayerdisplay.res'), ['LocalPlayer'])!)).toEqual(['0', '0', '0']);
+  });
+
+  it('is download-only: the preview trees keep a hidden element whole, so a selected hidden element still draws dimmed', () => {
+    const d = design({ elements: { ownHealth: { visible: false } } });
+    const local = kvFind(buildTrees(d)('resource/ui/hud/localplayerdisplay.res'), ['LocalPlayer'])!;
+    expect([kvGet(local, 'wide'), kvGet(local, 'tall')]).toEqual(['130', '85']);
+    expect(kvGet(kvFind(buildTrees(d)('scripts/hudlayout.res'), ['CHudLocalPlayerDisplay'])!, 'visible')).toBe('0');
+  });
+
+  it('writes nothing for an element that is not hidden', () => {
+    expect(buildHud(design({ elements: { ownHealth: { visible: true } } })).map((f) => f.path))
+      .toEqual(buildHud(design({})).map((f) => f.path));
+  });
+
+  it('zeroes a size-to-contents key a hand-written block carries, and adds none where there is none', () => {
+    // Decision 3: a 0 x 0 block that sizes itself to its contents would grow back.
+    // autoResize is VGUI's resize-with-parent flag (beside pinCorner in basechat.res), so it stays.
+    const block = parseKv('"B"\n{\n"ControlName" "Label"\n"wide" "40"\n"tall" "10"\n"autoResize" "1"\n"auto_wide_tocontents" "1"\n"auto_tall_tocontents" "0"\n}\n')[0];
+    hardHide(block);
+    expect(['autoResize', 'auto_wide_tocontents', 'auto_tall_tocontents', 'wide', 'tall'].map((k) => kvGet(block, k))).toEqual(['1', '0', '0', '0', '0']);
+    const plain = parseKv('"B"\n{\n"ControlName" "Label"\n"wide" "40"\n}\n')[0];
+    hardHide(plain);
+    expect(kvGet(plain, 'auto_wide_tocontents')).toBeUndefined();
   });
 });
