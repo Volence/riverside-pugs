@@ -973,9 +973,12 @@ describe('editing your infected health on the Boomer preview (plan decision 3)',
   });
   it('stores a widening of the Boomer\'s bar in proportion to the Hunter\'s', () => {
     const start = startsOf(plain, ['Health'], 'siHealth', BOOMER).Health;
-    const d = resizeChild(plain, 'Health', start, 'e', 10, 0, false, 'siHealth', BOOMER);
-    expect(d.children.siHealth?.Health?.w).toBe(132 + Math.round(10 * 132 / 64));
-    expect(panelChild(d, 'siHealth', 'Health', BOOMER)!.w).toBe(74);
+    const d = resizeChild(plain, 'Health', start, 'e', 5, 0, false, 'siHealth', BOOMER);
+    expect(d.children.siHealth?.Health?.w).toBe(132 + Math.round(5 * 132 / 64));
+    expect(panelChild(d, 'siHealth', 'Health', BOOMER)!.w).toBe(69);
+    // 10 more on the Boomer is 21 on the Hunter, whose bar would then run to 405 of the 400 container: it stops inside.
+    const far = resizeChild(plain, 'Health', start, 'e', 10, 0, false, 'siHealth', BOOMER);
+    expect(252 + far.children.siHealth!.Health!.w!).toBeLessThanOrEqual(400);
   });
   it('nudges a piece selected on the Boomer in the Boomer\'s frame, as a drag there does', () => {
     // Hunter bar at 316 puts the Boomer's at 386, its right edge on the 450 clamp box's.
@@ -993,6 +996,74 @@ describe('editing your infected health on the Boomer preview (plan decision 3)',
   it('leaves an edit on the Hunter (or with no file) as it is', () => {
     expect(patchChild(plain, 'Health', { x: 300, w: 90 }, 'siHealth', 'resource/ui/hud/hunterhealth.res').children.siHealth?.Health).toEqual({ x: 300, w: 90 });
     expect(patchChild(plain, 'Health', { x: 300, w: 90 }, 'siHealth').children.siHealth?.Health).toEqual({ x: 300, w: 90 });
+  });
+});
+
+describe('moving your infected health\'s pieces keeps every linked class inside the container', () => {
+  // HudZombieHealth, 400 x 100 on stock, clips (probe Q11). The Hunter bar is
+  // 252,69 132 wide, the Boomer's 322,69 64 wide (delta rule: +70, half the width).
+  const HUNTER = 'resource/ui/hud/hunterhealth.res', BOOMER = 'resource/ui/hud/boomerhealth.res';
+  const plain: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: {} };
+  const inside = (d: HudDesign, name: string) => {
+    for (const f of [HUNTER, 'resource/ui/hud/smokerhealth.res', BOOMER]) {
+      const c = panelChild(d, 'siHealth', name, f)!;
+      expect(c.x, f).toBeGreaterThanOrEqual(0);
+      expect(c.y, f).toBeGreaterThanOrEqual(0);
+      expect(c.x + c.w, f).toBeLessThanOrEqual(400);
+      expect(c.y + c.h, f).toBeLessThanOrEqual(100);
+    }
+  };
+  it('clamps to the container, not the frame that overhangs it', () => {
+    expect(panelClamp(plain, 'siHealth')).toEqual({ w: 400, h: 100 });
+    expect(panelClamp({ ...plain, preset: 'modern' }, 'siHealth')).toEqual({ w: 150, h: 34 });
+  });
+  it('stops a drag on the Boomer where the Hunter bar meets the left edge', () => {
+    const d = placeChild(plain, 'Health', -1000, 69, 'siHealth', BOOMER);
+    expect(d.children.siHealth?.Health?.x).toBe(0);
+    expect(panelChild(d, 'siHealth', 'Health', BOOMER)!.x).toBe(70);
+    inside(d, 'Health');
+  });
+  it('stops a drag on the Hunter where the Boomer bar meets the right edge', () => {
+    const d = placeChild(plain, 'Health', 1000, 1000, 'siHealth', HUNTER);
+    expect(d.children.siHealth?.Health).toMatchObject({ x: 400 - 64 - 70, y: 100 - 13 });
+    inside(d, 'Health');
+  });
+  it('moves a group and nudges on either view inside every class', () => {
+    for (const f of [HUNTER, BOOMER]) {
+      const names = ['Health', 'HealthNumber'];
+      const d = moveChildren(plain, names, startsOf(plain, names, 'siHealth', f), -1000, 1000, 'siHealth', f);
+      for (const n of names) inside(d, n);
+      const sel = { kind: 'children' as const, names, card: 0, panel: 'siHealth' };
+      let e = plain;
+      for (let i = 0; i < 300; i++) e = nudgeSelection(e, sel, -1, 0, f);
+      for (const n of names) inside(e, n);
+      expect(e.children.siHealth?.Health?.x).toBe(0);
+    }
+  });
+  it('lets the Hunter frame, already past the container, move back in but no further out', () => {
+    const start = startsOf(plain, ['BackgroundImage'], 'siHealth', HUNTER);
+    expect(moveChildren(plain, ['BackgroundImage'], start, -1, 0, 'siHealth', HUNTER).children.siHealth?.BackgroundImage?.x).toBe(249);
+    expect(moveChildren(plain, ['BackgroundImage'], start, 5, 0, 'siHealth', HUNTER).children.siHealth?.BackgroundImage?.x ?? 250).toBe(250);
+    expect(moveChildren(plain, ['BackgroundImage'], start, 0, -3, 'siHealth', HUNTER).children.siHealth?.BackgroundImage?.y ?? 0).toBe(0);
+  });
+  it('stops a widening where the first linked class would be cut', () => {
+    const hs = startsOf(plain, ['Health'], 'siHealth', HUNTER).Health;
+    const wide = resizeChild(plain, 'Health', hs, 'e', 1000, 0, false, 'siHealth', HUNTER);
+    inside(wide, 'Health');
+    expect(panelChild(wide, 'siHealth', 'Health', HUNTER)!.x + panelChild(wide, 'siHealth', 'Health', HUNTER)!.w).toBe(400);
+    const bs = startsOf(plain, ['Health'], 'siHealth', BOOMER).Health;
+    const left = resizeChild(plain, 'Health', bs, 'w', -1000, 0, false, 'siHealth', BOOMER);
+    inside(left, 'Health');
+    const sq = startsOf(plain, ['DuckingIcon'], 'siHealth', BOOMER).DuckingIcon;
+    inside(resizeChild(plain, 'DuckingIcon', sq, 'se', 1000, 1000, false, 'siHealth', BOOMER), 'DuckingIcon');
+  });
+  it('scales a group inside every class', () => {
+    const names = ['Health', 'HealthNumber', 'DuckingIcon'];
+    for (const f of [HUNTER, BOOMER]) {
+      const starts = startsOf(plain, names, 'siHealth', f);
+      const d = scaleChildren(plain, names, starts, { x: 0, y: 0 }, 3, 'siHealth', f);
+      for (const n of names) inside(d, n);
+    }
   });
 });
 

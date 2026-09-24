@@ -16,7 +16,7 @@ import {
 import { screenW, SCREEN_H } from './units';
 import { elementById } from './elements';
 import { elementRect, elementFitShift, drawnAt, teamLayout, teamCardRects, isFreeTeam, panelChild, panelLink, buildTrees, panelBgZpos, type CardChild } from './build';
-import { childDef, panelChildren, panelOfFile, unlinkedValue } from './children';
+import { childDef, panelChildren, panelOfFile, linkedValue, unlinkedValue } from './children';
 import { kvGet } from './kv';
 import { unionBox, CORNERS, type Handle } from './guides';
 import { elementFrame, panelClamp, panelOf, type Selection } from './selection';
@@ -363,6 +363,50 @@ function mergeChild(design: HudDesign, name: string, p: Partial<ChildOverride>, 
 const LINKED_X: Record<string, Record<string, string>> = { teamColumn: { health: 'Items', items: 'Health' } };
 
 /**
+ * For a panel whose pieces are written to linked files (your infected
+ * health: the Hunter's file, the Smoker's and the Boomer's, which the Tank
+ * reads through the Hunter's), whether a box for a piece seen in `file`
+ * keeps it inside the panel's container (panelClamp) in every one of them,
+ * or null for any other panel. The box is taken back to the stored frame as
+ * storedFrame does and out to each file as build.ts's childPass writes it,
+ * so the check is on the numbers the files will carry. A piece that starts
+ * past an edge in some file (the stock Hunter frame runs to 450 of 400) may
+ * stay as far past it, never further: a nudge does not yank it in, and
+ * nothing is pushed out of view in any class.
+ */
+function linkedHolds(design: HudDesign, panel: string, name: string, file: string | undefined, start: Box): ((b: Box) => boolean) | null {
+  const reg = panelChildren(panel);
+  if (!reg?.linked) return null;
+  const C = panelClamp(design, panel);
+  const seen = file ? panelLink(design, panel, name, file) : null;
+  const links = reg.linked.map((l) => panelLink(design, panel, name, l.file)).filter((l): l is NonNullable<typeof l> => !!l);
+  const map = (b: Box, f: (k: 'x' | 'y' | 'w' | 'h', v: number) => number): Box => ({ x: f('x', b.x), y: f('y', b.y), w: f('w', b.w), h: f('h', b.h) });
+  const everywhere = (b: Box): Box[] => {
+    const s = seen ? map(b, (k, v) => clampChild(k, Math.round(unlinkedValue(seen.rule, k, v, seen.from, seen.to) as number))) : b;
+    return [s, ...links.map((l) => map(s, (k, v) => linkedValue(l.rule, k, v, l.from, l.to) as number))];
+  };
+  const past = (b: Box) => everywhere(b).flatMap((r) => [-r.x, -r.y, r.x + r.w - C.w, r.y + r.h - C.h].map((v) => Math.max(0, v)));
+  const allowed = past(start);
+  return (b) => past(b).every((v, i) => v <= allowed[i]);
+}
+
+/** The largest t in 0..1 (to about 1/65536) at which ok holds, given that it holds at 0: how far a gesture may go before a linked check stops it. */
+function furthest(ok: (t: number) => boolean): number {
+  if (ok(1)) return 1;
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 16; i++) { const m = (lo + hi) / 2; if (ok(m)) lo = m; else hi = m; }
+  return lo;
+}
+
+/** A piece's box moved toward (x, y) as far as `holds` allows, each axis on its own, rounded: a drag along an edge still slides. */
+function slideHeld(r: Box, x: number, y: number, holds: (b: Box) => boolean): { x: number; y: number } {
+  const at = (t: number, from: number, to: number) => Math.round(from + t * (to - from));
+  const nx = at(furthest((t) => holds({ ...r, x: at(t, r.x, x) })), r.x, x);
+  const ny = at(furthest((t) => holds({ ...r, x: nx, y: at(t, r.y, y) })), r.y, y);
+  return { x: nx, y: ny };
+}
+
+/**
  * Place a panel child at (x, y): unscaled units in the panel file's own
  * unfitted frame, rounded, clamped inside the panel's clamp box (panelClamp:
  * for the teammate card the unfitted card, 150 x 150 on stock). The clamp is
@@ -372,6 +416,11 @@ const LINKED_X: Record<string, Record<string, string>> = { teamColumn: { health:
 export function placeChild(design: HudDesign, name: string, x: number, y: number, panel = 'teamColumn', file?: string): HudDesign {
   const r = childAt(design, panel, name, file);
   if (!r || !childDef(panel, name)?.move) return design;
+  const holds = linkedHolds(design, panel, name, file, r);
+  if (holds) {
+    const at = slideHeld(r, x, y, holds);
+    return patchChild(design, name, { x: clampChild('x', at.x), y: clampChild('y', at.y) }, panel, file);
+  }
   const p = panelClamp(design, panel);
   const cx = Math.round(Math.min(Math.max(0, p.w - r.w), Math.max(0, x)));
   const cy = Math.round(Math.min(Math.max(0, p.h - r.h), Math.max(0, y)));
@@ -435,11 +484,34 @@ export function resizeChild(
     const sx = handle.includes('w') ? -dx : dx;
     const sy = handle.includes('n') ? -dy : dy;
     const grow = Math.abs(sx) >= Math.abs(sy) ? sx : sy;
+    const held = linkedHolds(design, panel, name, file, start);
+    if (held) {
+      // Linked files: grown as far as it stays inside the container in every one (linkedHolds).
+      const at = (t: number): Box => {
+        const side = clampChild('w', Math.max(1, Math.round(start.w + t * grow)));
+        return { x: handle.includes('w') ? start.x + start.w - side : start.x, y: handle.includes('n') ? start.y + start.h - side : start.y, w: side, h: side };
+      };
+      const b = at(furthest((t) => held(at(t))));
+      const patch: Partial<ChildOverride> = { w: b.w, h: b.h };
+      if (handle.includes('w')) patch.x = clampChild('x', b.x);
+      if (handle.includes('n')) patch.y = clampChild('y', b.y);
+      return patchChild(design, name, patch, panel, file);
+    }
     const room = Math.min(handle.includes('w') ? start.x + start.w : p.w - start.x, handle.includes('n') ? start.y + start.h : p.h - start.y);
     const side = clampChild('w', Math.round(Math.min(Math.max(1, room), Math.max(1, start.w + grow))));
     const patch: Partial<ChildOverride> = { w: side, h: side };
     if (handle.includes('w')) patch.x = clampChild('x', start.x + start.w - side);
     if (handle.includes('n')) patch.y = clampChild('y', start.y + start.h - side);
+    return patchChild(design, name, patch, panel, file);
+  }
+  const held = linkedHolds(design, panel, name, file, start);
+  if (held) {
+    // Linked files: the drag goes as far as the piece stays inside the container in every one (linkedHolds).
+    const at = (t: number) => resizeBox(start, handle, t * dx, t * dy, keepRatio, 1);
+    const b = at(furthest((t) => held(at(t))));
+    const patch: Partial<ChildOverride> = { w: clampChild('w', b.w), h: clampChild('h', b.h) };
+    if (handle.includes('w')) patch.x = clampChild('x', b.x);
+    if (handle.includes('n')) patch.y = clampChild('y', b.y);
     return patchChild(design, name, patch, panel, file);
   }
   const b = resizeBox(start, handle, dx, dy, keepRatio, 1);
@@ -542,6 +614,18 @@ export function moveChildren(
   const p = panelClamp(design, panel);
   const list = names.filter((n) => childDef(panel, n)?.move && starts[n]);
   if (!list.length) return design;
+  const held = list.map((n) => linkedHolds(design, panel, n, file, starts[n]));
+  if (held.every((h) => h)) {
+    // Linked files: one delta for the group, as far as every piece holds in every file, each axis on its own.
+    const all = (ddx: number, ddy: number) => list.every((n, i) => held[i]!({ ...starts[n], x: starts[n].x + ddx, y: starts[n].y + ddy }));
+    const hx = Math.round(furthest((t) => all(Math.round(t * dx), 0)) * dx);
+    const hy = Math.round(furthest((t) => all(hx, Math.round(t * dy))) * dy);
+    // Patched, not placed: placeChild would hold each piece to where it is
+    // now, mid-gesture, not to where the gesture started it.
+    let d = design;
+    for (const n of list) d = patchChild(d, n, { x: clampChild('x', starts[n].x + hx), y: clampChild('y', starts[n].y + hy) }, panel, file);
+    return d;
+  }
   const cx = Math.min(Math.min(...list.map((n) => p.w - starts[n].w - starts[n].x)), Math.max(Math.max(...list.map((n) => -starts[n].x)), dx));
   const cy = Math.min(Math.min(...list.map((n) => p.h - starts[n].h - starts[n].y)), Math.max(Math.max(...list.map((n) => -starts[n].y)), dy));
   let d = design;
@@ -601,6 +685,18 @@ export function scaleChildren(
     }
     if (def.box !== 'none') { patch.w = clampChild('w', w); patch.h = clampChild('h', h); }
     if (def.font && s.fontTall !== undefined) patch.fontSize = clampChild('fontSize', Math.round(s.fontTall * f));
+    const held = def.move && def.box !== 'none' ? linkedHolds(design, panel, n, file, s) : null;
+    if (held) {
+      // Linked files: this piece scales as far toward f as it stays inside the container in every one (linkedHolds).
+      const at = (t: number): Box => {
+        const g = 1 + t * (f - 1);
+        const w1 = Math.max(1, Math.round(s.w * g)), h1 = def.box === 'square' ? w1 : Math.max(1, Math.round(s.h * g));
+        return { x: Math.round(anchor.x + (s.x - anchor.x) * g), y: Math.round(anchor.y + (s.y - anchor.y) * g), w: w1, h: h1 };
+      };
+      const b = at(furthest((t) => held(at(t))));
+      d = patchChild(d, n, { ...patch, x: clampChild('x', b.x), y: clampChild('y', b.y), w: clampChild('w', b.w), h: clampChild('h', b.h) }, panel, file);
+      continue;
+    }
     if (def.move) {
       const x = anchor.x + (s.x - anchor.x) * f, y = anchor.y + (s.y - anchor.y) * f;
       patch.x = clampChild('x', Math.round(Math.min(Math.max(0, p.w - w), Math.max(0, x))));

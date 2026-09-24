@@ -481,6 +481,13 @@ export function handleAt(box: Box, handles: Handle[], ux: number, uy: number, sl
  * every registered child's base rect (plan decision 9), so a piece that
  * already runs past the frame (the own panel's top scratch) is not yanked
  * inside on its first nudge. edit.ts clamps with the same box.
+ *
+ * A panel whose pieces are written to linked files (your infected health)
+ * takes its container instead, HudZombieHealth as the base file sizes it
+ * (stock 400 x 100, Modern 150 x 34): the container clips (probe Q11), so a
+ * piece past it is cut in game, and the stock Hunter frame that runs to 450
+ * is already cut there. edit.ts holds a piece that starts past it from
+ * going further out (linkedHolds), rather than pulling it in.
  */
 export function panelClamp(design: HudDesign, panel: string): { w: number; h: number } {
   const key = baseOf(design);
@@ -488,6 +495,10 @@ export function panelClamp(design: HudDesign, panel: string): { w: number; h: nu
   const reg = panelChildren(panel);
   if (!reg) return { w: 0, h: 0 };
   const num = (n: ReturnType<typeof kvFind>, k: string) => { const f = parseFloat((n && kvGet(n, k)) ?? ''); return Number.isFinite(f) ? f : 0; };
+  if (reg.linked && reg.frame === 'hudlayout') {
+    const c = kvFind(baseTree(key, 'scripts/hudlayout.res'), [elementById(panel)!.key]);
+    if (c) return { w: num(c, 'wide'), h: num(c, 'tall') };
+  }
   let w = 0, h = 0;
   if (reg.frame && reg.frame !== 'hudlayout') {
     const f = kvFind(baseTree(key, reg.frame.file), [reg.frame.block]);
