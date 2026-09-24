@@ -123,13 +123,22 @@ export interface TrackWindow {
 }
 
 /** Positions of everything that is not this ghost and not the survivor: what
- *  the occlusion guard checks against. */
-export function visibleOthers(f: Frame, survivorSlot: number, ghostSlot: number): Pt[] {
+ *  the occlusion guard checks against.
+ *
+ *  `keep`, when given, is an extra filter over the PLAYERS loop only (not
+ *  entities): callers that need a further reason to exclude a player, such as
+ *  the hidden gate excluding one the survivor could not see, pass it instead
+ *  of re-walking the frame themselves. Left out, every present, non-ghost
+ *  player counts, unchanged from before this parameter existed. */
+export function visibleOthers(
+  f: Frame, survivorSlot: number, ghostSlot: number, keep: (p: PlayerSample) => boolean = () => true,
+): Pt[] {
   const out: Pt[] = [];
   for (const p of f.players) {
     if (p.slot === survivorSlot || p.slot === ghostSlot) continue;
     if (isGhost(p)) continue;
     if ((p.state & STATE.PRESENT) === 0) continue;
+    if (!keep(p)) continue;
     out.push({ x: p.x, y: p.y });
   }
   for (const e of f.entities) {

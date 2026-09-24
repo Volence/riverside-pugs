@@ -1,7 +1,7 @@
-import { STATE, type Frame, type PlayerSample } from '../replayFormat.js';
+import { type Frame, type PlayerSample } from '../replayFormat.js';
 import { TUNING } from './constants.js';
-import { bearing, dist2d, isGhost, isLiveSurvivor, wrapDeg, type Pt } from './geometry.js';
-import { trackWindowsFor, type TrackWindow } from './ghostTrack.js';
+import { dist2d, isLiveSurvivor, occludedBy } from './geometry.js';
+import { trackWindowsFor, visibleOthers, type TrackWindow } from './ghostTrack.js';
 import { isSpawnedTarget, type LosView } from './los.js';
 
 /**
@@ -41,27 +41,6 @@ export const emptyTally = (): HiddenTally => ({
   considered: 0, notLive: 0, notTarget: 0, inGrace: 0, tooClose: 0, losUnknown: 0, seen: 0, teamSees: 0, occluded: 0, passed: 0,
 });
 
-/**
- * Things the survivor could plausibly have been aiming at instead. As in the
- * ghost path (see OCCLUDE_MAX_DIST), bounded and not filtered by kind, with
- * one addition line of sight makes possible: another infected this survivor
- * could NOT see explains nothing about where they aimed, so it never vetoes.
- */
-function occluders(f: Frame, survivorSlot: number, targetSlot: number, los: LosView): Pt[] {
-  const out: Pt[] = [];
-  for (const p of f.players) {
-    if (p.slot === survivorSlot || p.slot === targetSlot) continue;
-    if ((p.state & STATE.PRESENT) === 0 || isGhost(p)) continue;
-    if (los.sees(f, survivorSlot, p.slot) === false) continue;
-    out.push({ x: p.x, y: p.y });
-  }
-  for (const e of f.entities) {
-    if ((e.state & STATE.GHOST) !== 0) continue;
-    out.push({ x: e.x, y: e.y });
-  }
-  return out;
-}
-
 export function hiddenGate(f: Frame, s: PlayerSample, t: PlayerSample, los: LosView): HiddenGate {
   if (!isLiveSurvivor(s)) return 'notLive';
   if (!isSpawnedTarget(t)) return 'notTarget';
@@ -72,11 +51,13 @@ export function hiddenGate(f: Frame, s: PlayerSample, t: PlayerSample, los: LosV
   if (own === null) return 'losUnknown';
   if (own) return 'seen';
   if (los.othersSee(f, t.slot, s.slot)) return 'teamSees';
-  const toT = bearing(s, t);
-  for (const o of occluders(f, s.slot, t.slot, los)) {
-    if (dist2d(s, o) > TUNING.OCCLUDE_MAX_DIST) continue;
-    if (Math.abs(wrapDeg(bearing(s, o) - toT)) < TUNING.OCCLUDE_WINDOW) return 'occluded';
-  }
+  // Things the survivor could plausibly have been aiming at instead. As in
+  // the ghost path (see OCCLUDE_MAX_DIST), bounded and not filtered by kind,
+  // with one addition line of sight makes possible: another infected this
+  // survivor could NOT see explains nothing about where they aimed, so it
+  // never vetoes.
+  const others = visibleOthers(f, s.slot, t.slot, (p) => los.sees(f, s.slot, p.slot) !== false);
+  if (occludedBy(s, t, others)) return 'occluded';
   return 'pass';
 }
 

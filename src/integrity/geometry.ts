@@ -83,6 +83,23 @@ export interface PairArgs {
  *  thousand clean chances or never ran at all. */
 export type PairGate = 'notLive' | 'notGhost' | 'inGrace' | 'tooClose' | 'occluded' | 'pass';
 
+/** Whether something in `others` could explain aiming at `target` from `from`
+ *  instead of whatever the caller is really asking about.
+ *
+ *  Bounded by OCCLUDE_MAX_DIST, and deliberately NOT filtered by kind. See
+ *  that constant for the reasoning on both halves of this decision. Shared by
+ *  the ghost gate (`pairGate`) and the hidden-infected gate (`hiddenGate` in
+ *  hidden.ts), which ask the identical question with different candidate
+ *  lists for `others`. */
+export function occludedBy(from: Pt, target: Pt, others: Pt[]): boolean {
+  const to = bearing(from, target);
+  for (const o of others) {
+    if (dist2d(from, o) > TUNING.OCCLUDE_MAX_DIST) continue;
+    if (Math.abs(wrapDeg(bearing(from, o) - to)) < TUNING.OCCLUDE_WINDOW) return true;
+  }
+  return false;
+}
+
 /** Which gate a pair fell at, in evaluation order.
  *  Each clause is here because it generates false positives, not for tidiness. */
 export function pairGate(a: PairArgs): PairGate {
@@ -90,13 +107,7 @@ export function pairGate(a: PairArgs): PairGate {
   if (!isGhost(a.ghost)) return 'notGhost';
   if (a.tMs - a.roundStartMs < TUNING.SPAWN_GRACE_MS) return 'inGrace';
   if (dist2d(a.survivor, a.ghost) <= TUNING.D_MIN) return 'tooClose';
-  const toGhost = bearing(a.survivor, a.ghost);
-  for (const o of a.others) {
-    // Bounded by OCCLUDE_MAX_DIST, and deliberately NOT filtered by kind. See
-    // that constant for the reasoning on both halves of this decision.
-    if (dist2d(a.survivor, o) > TUNING.OCCLUDE_MAX_DIST) continue;
-    if (Math.abs(wrapDeg(bearing(a.survivor, o) - toGhost)) < TUNING.OCCLUDE_WINDOW) return 'occluded';
-  }
+  if (occludedBy(a.survivor, a.ghost, a.others)) return 'occluded';
   return 'pass';
 }
 
