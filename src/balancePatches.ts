@@ -41,6 +41,17 @@ export function diffInventories(a: Inventory, b: Inventory) {
   return { added, removed, changed };
 }
 
+/** Whether a to b only adds or removes watched keys (the watch list changed,
+ *  not the game): no key both sides have changed value, apart from a
+ *  versionless plugin's build, and every added or removed key is a cvar,
+ *  missing-cvar marker, weapon key, file or directory. */
+export function watchListOnly(a: Inventory, b: Inventory, versionless: string[]): boolean {
+  const skip = new Set(versionless.map((f) => `p:${f}`));
+  const d = diffInventories(a, b);
+  const oneSided = [...d.added, ...d.removed];
+  return d.changed.every((c) => skip.has(c.key)) && oneSided.length > 0 && oneSided.every((k) => /^[cxwfd]:/.test(k));
+}
+
 export function formatDiff(d: ReturnType<typeof diffInventories>, max = 10): string {
   const parts = [
     ...d.added.map((k) => `added ${k}`),
@@ -94,6 +105,18 @@ export function recordBalanceSighting(db: DB, s: {
       newPatch = true;
     }
     const patchId = row.id;
+    // Watching one more value (or one fewer) changes the fingerprint without
+    // anything in the game changing: never asks for triage and never alerts.
+    let watchOnly = false;
+    if (prev) {
+      let before: Inventory | null = null;
+      try { before = withoutIgnored(JSON.parse(prev.inventory_json) as Inventory, s.ignored ?? []); } catch { before = null; }
+      watchOnly = before !== null && watchListOnly(before, inventory, s.versionless);
+      if (watchOnly && newPatch) {
+        const target = resolvePatch(db, prev.patch_id);
+        if (target !== patchId) foldInto(db, patchId, target);
+      }
+    }
     // A folded patch's rounds count for the patch it was folded into.
     const effectivePatchId = resolvePatch(db, patchId);
 
@@ -122,7 +145,7 @@ export function recordBalanceSighting(db: DB, s: {
                     ON CONFLICT (server_id) DO UPDATE SET patch_id = excluded.patch_id,
                       inventory_json = excluded.inventory_json, since = excluded.since`)
           .run(s.serverId, patchId, invJson, now);
-        if (s.expectedPatchId == null || patchId !== s.expectedPatchId) {
+        if (!watchOnly && (s.expectedPatchId == null || patchId !== s.expectedPatchId)) {
           // Same time-ordered number the admin page shows (see listPatches), not
           // the raw row id: a historical patch inserted later would otherwise
           // make the alert and the page disagree about which patch "#N" is.
