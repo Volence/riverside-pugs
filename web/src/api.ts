@@ -862,6 +862,20 @@ export interface PatchDetail extends PatchSummary {
 }
 export interface DriftRow { serverId: number; name: string; patchId: number; since: string; differsFrom: { name: string; diff: string }[] }
 
+export interface KnobView { cvar: string; label: string; group: string; type: 'int' | 'float'; min: number; max: number; step: number;
+  baseline: string; unit?: string; note?: string; pairMax?: string }
+export interface KnobDiffRow { cvar: string; label: string; group: string; from: string; to: string }
+export interface KnobPreview { values: Record<string, string>; errors: string[]; diff: KnobDiffRow[]; groupsChanged: string[];
+  base: { patchId: number; number: number } | null; missing: string[]; blocking: { serverId: number; name: string; diff: string }[];
+  fingerprint: string | null; existingPatch: { id: number; number: number; name: string | null; notes: string; source: string } | null }
+export interface RolloutServer { serverId: number; name: string; state: 'pending' | 'written' | 'confirmed' | 'failed'; lastError: string | null;
+  writtenAt: string | null; confirmedAt: string | null; seen: { patchId: number; number: number; at: string } | null; mismatch: string | null }
+export interface RolloutSummary { id: number; patchId: number; patchNumber: number; patchName: string | null; values: Record<string, string>;
+  createdBy: string; createdByName: string | null; createdAt: string; supersededAt: string | null; servers: RolloutServer[] }
+export interface KnobsState { knobs: KnobView[]; current: Record<string, string>; base: { patchId: number; number: number } | null;
+  missing: string[]; blocking: { serverId: number; name: string; diff: string }[]; active: RolloutSummary | null;
+  restorable: { id: number; number: number; name: string | null; source: string }[] }
+
 export type Phase = 'all' | 'tank' | 'witch' | 'event' | 'normal';
 
 export type Verdict = 'real' | 'too_early' | 'noise' | 'no_data';
@@ -1425,6 +1439,12 @@ export const adminApi = {
   balanceDrift: (signal?: AbortSignal) => get<{ servers: DriftRow[] }>('/api/admin/balance/drift', signal),
   editBalancePatch: (id: number, body: { name?: string | null; notes?: string; reviewed?: boolean }) =>
     post(`/api/admin/balance/patches/${id}`, body),
+  balanceKnobs: (signal?: AbortSignal) => get<KnobsState>('/api/admin/balance/knobs', signal),
+  balanceKnobsPreview: (values: Record<string, string>) => post<KnobPreview>('/api/admin/balance/knobs/preview', { values }),
+  balanceKnobsApply: (body: { values: Record<string, string>; name: string; notes: string }) =>
+    post<{ ok: true; rolloutId: number; patchId: number; reused: boolean }>('/api/admin/balance/knobs/apply', body),
+  balanceKnobsRestore: (patchId: number) => get<{ values: Record<string, string>; notes: string[] }>(`/api/admin/balance/knobs/restore/${patchId}`),
+  balanceRollouts: (signal?: AbortSignal) => get<{ rollouts: RolloutSummary[] }>('/api/admin/balance/rollouts', signal),
   balanceCompare: (q: CompareQuery, signal?: AbortSignal) => get<CompareResult>(`/api/admin/balance/compare?${compareParams(q)}`, signal),
   balanceMetric: (q: CompareQuery, metric: string, phase: string, signal?: AbortSignal) =>
     get<MetricDetail>(`/api/admin/balance/metric?${compareParams(q)}&metric=${encodeURIComponent(metric)}&phase=${encodeURIComponent(phase)}`, signal),

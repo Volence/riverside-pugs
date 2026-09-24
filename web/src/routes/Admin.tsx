@@ -12,6 +12,7 @@ import { AdminAudit } from './admin/AdminAudit';
 import { AdminSeasons } from './admin/AdminSeasons';
 import { AdminPatches } from './admin/AdminPatches';
 import { Compare } from './admin/balance/Compare';
+import { Knobs } from './admin/balance/Knobs';
 import { AdminCampaigns } from './admin/AdminCampaigns';
 import { PeopleSearch } from './admin/PeopleSearch';
 import { NeedsALook } from './admin/NeedsALook';
@@ -125,6 +126,7 @@ export function Admin({ session }: { session: Session }) {
         {r.desk === 'setup' && r.section === 'audit' && <AdminAudit />}
         {r.desk === 'balance' && r.section === 'compare' && <Compare />}
         {r.desk === 'balance' && r.section === 'patches' && <AdminPatches />}
+        {r.desk === 'balance' && r.section === 'knobs' && <Knobs />}
         {/* A desk that does not exist, or a section of one that does not.
             Either way the panel says so rather than showing an empty page. */}
         {r.section === 'unknown' && <NoSuchPage />}

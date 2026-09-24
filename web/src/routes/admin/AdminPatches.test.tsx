@@ -37,6 +37,18 @@ describe('AdminPatches', () => {
     expect(screen.getByText(/chicago differs from dallas/)).toBeTruthy();
   });
 
+  it('shows never played for an announced patch with no rounds', async () => {
+    const announced: PatchSummary[] = [
+      { id: 3, number: 3, name: 'Next up', notes: '', source: 'announced', firstSeenAt: '2026-09-24 02:00:00', reviewed: false, rounds: 0, countedRounds: 0, servers: [] },
+    ];
+    mockAdmin.balancePatches.mockResolvedValue({ patches: announced });
+    mockAdmin.balanceDrift.mockResolvedValue({ servers: [] });
+
+    render(<AdminPatches />);
+
+    expect(await screen.findByText('never played')).toBeTruthy();
+  });
+
   it('shows all-clear when no server differs from another', async () => {
     mockAdmin.balancePatches.mockResolvedValue({ patches: [] });
     mockAdmin.balanceDrift.mockResolvedValue({ servers: [] });
