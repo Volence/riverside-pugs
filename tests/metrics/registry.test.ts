@@ -68,6 +68,6 @@ describe('public allowlist', () => {
   });
   it('is exactly the approved list, with the approved non-empty labels', () => {
     expect(Object.fromEntries(PUBLIC_METRICS.map((m) => [m.id, m.public!.label]))).toEqual(ALLOWLIST);
-    expect(PUBLIC_METRICS.every((m) => m.public!.label.trim().length > 0 && !m.public!.label.includes('—'))).toBe(true);
+    expect(PUBLIC_METRICS.every((m) => m.public!.label.trim().length > 0 && !m.public!.label.includes('\u2014'))).toBe(true);
   });
 });
