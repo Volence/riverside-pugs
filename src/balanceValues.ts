@@ -81,7 +81,8 @@ export function gameValues(db: DB, cat: Catalogue, opts: { admin: boolean }): Ga
   };
 
   const ruleActive = (w: Catalogue['rules'][number]['when']) => {
-    if ('plugin' in w) return inv[`p:${w.plugin}`] !== undefined;
+    // Loaded from a subfolder (plugins/optional/...) it reports as "optional/<file>".
+    if ('plugin' in w) return Object.keys(inv).some((k) => k === `p:${w.plugin}` || (k.startsWith('p:') && k.endsWith(`/${w.plugin}`)));
     const v = inv[`c:${w.cvar}`];
     if (v === undefined) return false;
     return 'equals' in w ? same(v, w.equals) : !same(v, w.notEquals);
