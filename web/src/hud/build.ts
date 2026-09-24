@@ -362,6 +362,21 @@ function countdownPass(work: Work, design: HudDesign) {
   }
 }
 
+const VOTEHUD = 'resource/ui/hud/votehud.res';
+/**
+ * The vote panel's colour (plan task M1): the element's `bg` on votehud.res
+ * VoteActive, the box shown while a vote runs. Probe VO
+ * (/home/volence/l4d/hud/probe-phase2-rest/r4/shots/r4/r4-e.png) saw it
+ * honoured (purple). The passed and failed boxes were never seen, so they
+ * keep the file's colour. An imported file lacking the block is skipped.
+ */
+function votePass(work: Work, design: HudDesign) {
+  const o = design.elements.vote;
+  if (o?.bg === undefined || !baseHasElement(work.key, elementById('vote')!)) return;
+  const box = work.optional(VOTEHUD, ['VoteActive']);
+  if (box) pcSet(box, 'bgcolor_override', o.bg);
+}
+
 /**
  * The entries of a key the PC reads: the plain one and any whose conditional
  * holds on the PC ([$WIN32], [$WINDOWS], kv.ts's pcApplies). basechat.res
@@ -2262,6 +2277,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   weaponsPass(work, design, assets, extra);
   noticePass(work, design, extra);
   countdownPass(work, design);
+  votePass(work, design);
   chatPass(work, design);
   pickupPass(work, design);
   childPass(work, design);
@@ -2348,6 +2364,7 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
     weaponsPass(work, design, null, discard);
     noticePass(work, design, null);
     countdownPass(work, design);
+    votePass(work, design);
     chatPass(work, design);
     pickupPass(work, design);
     childPass(work, design);

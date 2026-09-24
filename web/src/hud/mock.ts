@@ -73,9 +73,10 @@ function rectFor(design: HudDesign, id: string): Rect & { visible: boolean } {
 }
 
 /** Whether the preview shows an element in the page's state: an infected one the game shows only as a ghost, say (HudElement.shownIn). */
-export function shownInState(el: HudElement, state?: SurvivorState | PreviewState): boolean {
+export function shownInState(el: HudElement, state?: SurvivorState | PreviewState, picked = false): boolean {
   const v = previewOf(state);
-  return (!el.shownIn || el.shownIn.includes(v.infected)) && (!el.shownFor || el.shownFor.includes(v.siClass));
+  return (!el.shownIn || el.shownIn.includes(v.infected)) && (!el.shownFor || el.shownFor.includes(v.siClass))
+    && (!el.occasional || !!v.occasional || picked);
 }
 
 /** Card 4 shows only while spectating a full team: never drawn, never a target. */
@@ -1039,6 +1040,123 @@ function paintSpawnCountdown(ctx: CanvasRenderingContext2D, _r: Rect, design: Hu
   ctx.restore();
 }
 
+/**
+ * Your microphone as the game draws it while you talk: voice_self, a white
+ * microphone glyph (L4D_Icons_large "V") in the element's box. The preview
+ * draws a plain microphone shape as tall as the box's shorter side, at its
+ * top left.
+ */
+function paintOwnMic(ctx: CanvasRenderingContext2D, r: Rect) {
+  const s = Math.min(r.w, r.h);
+  const cx = r.x + s / 2;
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,255,255,1)';
+  ctx.strokeStyle = 'rgba(255,255,255,1)';
+  ctx.lineWidth = Math.max(1, s * 0.08);
+  const head = { w: s * 0.36, h: s * 0.56 };
+  ctx.beginPath();
+  if (typeof ctx.roundRect === 'function') ctx.roundRect(cx - head.w / 2, r.y + s * 0.05, head.w, head.h, head.w / 2);
+  else ctx.rect(cx - head.w / 2, r.y + s * 0.05, head.w, head.h);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, r.y + s * 0.4, s * 0.3, 0, Math.PI);
+  ctx.moveTo(cx, r.y + s * 0.7);
+  ctx.lineTo(cx, r.y + s * 0.9);
+  ctx.moveTo(cx - s * 0.2, r.y + s * 0.92);
+  ctx.lineTo(cx + s * 0.2, r.y + s * 0.92);
+  ctx.stroke();
+  ctx.restore();
+}
+
+const VOTEHUD = 'resource/ui/hud/votehud.res';
+/**
+ * The lines the vote box shows in r4-e
+ * (/home/volence/l4d/hud/probe-phase2-rest/r4/shots/r4/r4-e.png, after
+ * `callvote ChangeDifficulty Normal`): code fills them from
+ * resource/left4dead_english.txt. The caller's own YES is the selected row.
+ */
+const VOTE_LINES: [string, string][] = [
+  ['Header', 'VOTE:'], ['Issue', 'Change difficulty to Normal?'],
+  ['YesPCLabel', 'Press F1 to vote YES'], ['NoPCLabel', 'Press F2 to vote NO'], ['VoteCountLabel', 'Current vote count:'],
+];
+
+/**
+ * The vote box drawn from votehud.res (through buildTrees): VoteActive at
+ * the element's corner, which code shows while a vote runs (its file
+ * visible 0 is the resting state), its box in its colour (paintPanelBox,
+ * rounded: r4-e's purple box x 735 to 1185), the two dividers and the
+ * selected YES row in their fill colours, and the lines in their own file
+ * colours and fonts.
+ */
+function paintVote(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
+  const nodes = buildTrees(design)(VOTEHUD);
+  const frame = kvFind(nodes, ['VoteActive']);
+  if (!frame) return;
+  const W = screenW(design.aspect);
+  const f = blockRect(frame, r, k, W);
+  const inside = (name: string) => { const n = kvFind(nodes, ['VoteActive', name]); return n && pcGet(n, 'visible') !== '0' ? n : undefined; };
+  clipToRect(ctx, f, () => {
+    ctx.save();
+    paintPanelBox(ctx, design, frame, f, k);
+    for (const name of ['Divider', 'YesBackground_Selected', 'Divider2']) {
+      const n = inside(name);
+      const fill = n && pcGet(n, 'fillcolor');
+      if (!n || !fill) continue;
+      const b = blockRect(n, f, k, W);
+      ctx.fillStyle = colourOf(design, fill);
+      ctx.fillRect(b.x, b.y, b.w, Math.max(1, b.h));
+    }
+    for (const [name, line] of VOTE_LINES) {
+      const n = inside(name);
+      if (n) paintPanelLabel(ctx, design, n, blockRect(n, f, k, W), k, line, labelColour(design, n), f, onAsset);
+    }
+    ctx.restore();
+  });
+}
+
+const HOLDOUT = 'resource/ui/hud/hudholdouttimer.res';
+/** The two times and the goal as r2-g (/home/volence/l4d/hud/probe-phase2-rest/r2/shots/r2/r2-g.png) shows them, half a second into a round. */
+const HOLDOUT_LINES: [string, string][] = [['CurrentTimeDigits', '00:00.50'], ['TargetTimeDigits', '04:00.00'], ['NextGoalDescriptor', 'Bronze Standard']];
+
+/**
+ * The survival timer drawn from hudholdouttimer.res (through buildTrees):
+ * its two dark boxes (ScalablePanel_bgMidGrey_glow, nine-sliced with 16
+ * texel corners drawn draw_corner_width units wide), the stopwatch as a
+ * white disc, and the times and the goal in their fonts, where r2-g has
+ * them. The red splash behind (HoldoutTimerBackground) is left out: the
+ * preview has no art for it.
+ */
+function paintHoldoutTimer(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
+  const nodes = buildTrees(design)(HOLDOUT);
+  const W = screenW(design.aspect);
+  const shown = (name: string) => { const n = kvFind(nodes, [name]); return n && pcGet(n, 'visible') !== '0' ? n : undefined; };
+  clipToRect(ctx, r, () => {
+    ctx.save();
+    const glow = artImage('vgui/hud/scalablepanel_bgmidgrey_glow', onAsset);
+    for (const name of ['CurrentTimeBackground', 'HoldoutTargetTimeBackgroundImage']) {
+      const n = shown(name);
+      if (!n) continue;
+      const b = blockRect(n, r, k, W);
+      const corner = parseFloat(pcGet(n, 'draw_corner_width') ?? '8') * k;
+      if (glow) drawNineSlice(ctx, glow, glow.naturalWidth || 64, glow.naturalHeight || 64, b.x, b.y, b.w, b.h, corner);
+      else { ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(b.x, b.y, b.w, b.h); }
+    }
+    const timer = shown('Timer');
+    if (timer) {
+      const b = blockRect(timer, r, k, W);
+      ctx.fillStyle = 'rgba(255,255,255,1)';
+      ctx.beginPath();
+      ctx.arc(b.x + b.w / 2, b.y + b.h / 2, Math.min(b.w, b.h) * 0.4, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+    for (const [name, line] of HOLDOUT_LINES) {
+      const n = shown(name);
+      if (n) paintPanelLabel(ctx, design, n, blockRect(n, r, k, W), k, line, labelColour(design, n), r, onAsset);
+    }
+    ctx.restore();
+  });
+}
+
 const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view?: HudView) => void> = {
   ownHealth: paintOwnHealth,
   teamColumn: paintTeamColumn,
@@ -1055,6 +1173,9 @@ const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: 
   zombiePanel: paintZombiePanel,
   spawnCountdown: paintSpawnCountdown,
   tankPanel: paintTankPanel,
+  ownMic: paintOwnMic,
+  vote: paintVote,
+  holdoutTimer: paintHoldoutTimer,
 };
 
 const FALLBACK_ACCENT = '#de4e40';
@@ -1189,7 +1310,8 @@ export function drawHud(
 
     const r: Rect = { x: u.x * k, y: u.y * k, w: u.w * k, h: u.h * k };
     const paint = PAINTERS[el.id];
-    if (!paint || !shownInState(el, view.state)) continue;
+    // A selected occasional panel is drawn even with the toggle off, so picking it in Layers shows it.
+    if (!paint || !shownInState(el, view.state, picked.includes(el.id))) continue;
 
     if (hidden) {
       ctx.save();

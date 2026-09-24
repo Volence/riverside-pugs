@@ -1336,6 +1336,7 @@ describe('Hud page', () => {
       ['hud__layer--d1', 'Label'], ['hud__layer--d1', 'Bar'], ['hud__layer--d1', 'Icon'], ['hud__layer--d1', 'Subtext'],
       ['hud__layer--d0', 'Kill / incap notices'],
       ['hud__layer--d0 hud__layer--hidden', 'Custom crosshair'],
+      ['hud__layer--d0', 'Your microphone'], ['hud__layer--d0', 'Vote'], ['hud__layer--d0', 'Survival timer'],
     ]);
   });
 
@@ -2653,5 +2654,37 @@ describe('The spawn countdown on the page (plan task M4)', () => {
     expect(screen.getByText('"You will enter Spawn Mode in N seconds", shown while you are dead. "YOU ARE DEAD" moves and hides with it.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Countdown colour: use the file colour' }));
     await waitFor(() => expect(saved().elements?.spawnCountdown?.color).toBeUndefined());
+  });
+});
+
+describe('The occasional panels on the page (plan task M1)', () => {
+  const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
+  it('toggles the occasional panels on both sides, a preview choice that is not part of the file', () => {
+    render(<Hud />);
+    const b = screen.getByRole('button', { name: 'Occasional panels' });
+    expect(b.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(b);
+    expect(screen.getByRole('button', { name: 'Occasional panels' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    expect(screen.getByRole('button', { name: 'Occasional panels' }).getAttribute('aria-pressed')).toBe('true');
+    expect(saved().elements?.vote).toBeUndefined();
+  });
+
+  it('says when the game shows the vote, and colours its box', async () => {
+    render(<Hud />);
+    fireEvent.click(layer('Vote').getByRole('button', { name: 'Vote' }));
+    expect(screen.getByText('Shown while a vote runs (someone called one from the Esc menu or the console).')).toBeTruthy();
+    fireEvent.input(screen.getByLabelText('Box colour colour'), { target: { value: '#800080' } });
+    await waitFor(() => expect(saved().elements?.vote?.bg).toMatch(/^128 0 128 \d+$/));
+    fireEvent.click(screen.getByRole('button', { name: 'Box colour: use the file colour' }));
+    await waitFor(() => expect(saved().elements?.vote?.bg).toBeUndefined());
+  });
+
+  it('lists the survival timer on the survivor side only, with its note', () => {
+    render(<Hud />);
+    fireEvent.click(layer('Survival timer').getByRole('button', { name: 'Survival timer' }));
+    expect(screen.getByText('Survival only: the round time and the next medal. Never shown in campaign or versus.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    expect(screen.queryByRole('group', { name: 'Layers: Survival timer' })).toBeNull();
   });
 });

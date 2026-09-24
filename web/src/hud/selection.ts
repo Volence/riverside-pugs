@@ -31,7 +31,7 @@ import { baseOf, baseTree } from './base';
 import { elementById } from './elements';
 import { panelChild, panelFrame, elementRect, isFreeTeam, teamCardRects, type CardFrame } from './build';
 import { childRects, hiddenInState, previewOf, panelFile, DOWN_MOVES_BAR, type ChildRect, type PreviewState, type SurvivorState } from './render';
-import { childAt, elementTargets, hitTest, inside, panelBoxes, TEAM_CARDS, visibleElements, type Side } from './mock';
+import { childAt, elementTargets, hitTest, inside, panelBoxes, shownInState, TEAM_CARDS, visibleElements, type Side } from './mock';
 import { childDef, childPath, panelChildren } from './children';
 import { probe } from './probes';
 import { kvFind, kvGet } from './kv';
@@ -268,7 +268,7 @@ export function boxSelect(design: HudDesign, side: Side, state: State, a: { x: n
     }
   }
   const ids = visibleElements(side, design)
-    .filter((el) => elementRect(design, el.id, design.aspect).visible && sectionRects(design, el.id).some((r) => touches(r, box)))
+    .filter((el) => elementRect(design, el.id, design.aspect).visible && shownInState(el, state) && sectionRects(design, el.id).some((r) => touches(r, box)))
     .map((el) => el.id);
   return ids.length ? { kind: 'elements', ids } : NONE;
 }
@@ -279,7 +279,8 @@ export function selectAll(design: HudDesign, side: Side, state: State, sel: Sele
     const names = drawnPieces(design, state, panelOf(sel));
     return names.length ? piecesSel(names, sel.card, panelOf(sel)) : sel;
   }
-  const ids = visibleElements(side, design).filter((el) => elementRect(design, el.id, design.aspect).visible).map((el) => el.id);
+  // What the canvas draws: an element the page's state does not show (an occasional panel with the toggle off) is left out.
+  const ids = visibleElements(side, design).filter((el) => elementRect(design, el.id, design.aspect).visible && shownInState(el, state)).map((el) => el.id);
   return ids.length ? { kind: 'elements', ids } : NONE;
 }
 

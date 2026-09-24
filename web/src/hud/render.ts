@@ -73,6 +73,12 @@ export interface PreviewState {
    * the game's default.
    */
   showSelf?: boolean;
+  /**
+   * Draw the panels the game shows only now and then (HudElement.occasional:
+   * the microphone, the vote, the survival timer). Absent is off, so the
+   * everyday HUD is not covered by them.
+   */
+  occasional?: boolean;
 }
 export const DEFAULT_PREVIEW: PreviewState = { survivor: 'healthy', crouched: false, infected: 'alive', siClass: 'hunter', ability: 'ready' };
 

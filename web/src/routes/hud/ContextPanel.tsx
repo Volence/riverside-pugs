@@ -433,6 +433,8 @@ export function ElementControls(
         </label>
       )}
 
+      {el.note && <p class="muted hud__note">{el.note}</p>}
+
       {/* The crosshair is the one element the game places itself; its note is the first line of its own controls. */}
       {id === 'xhair' && <CrosshairControls design={design} edit={edit} selected />}
 
@@ -518,6 +520,7 @@ export function ElementControls(
       {id === 'killNotices' && <NoticeControls design={design} edit={edit} end={end} patch={patch} />}
       {id === 'chat' && <ChatControls design={design} edit={edit} end={end} patch={patch} />}
       {id === 'spawnCountdown' && <CountdownControls design={design} edit={edit} end={end} patch={patch} />}
+      {id === 'vote' && <VoteControls design={design} edit={edit} end={end} patch={patch} />}
 
       {/* The crosshair has no element settings of its own to reset: its choice and art are undone like any edit. */}
       {id !== 'xhair' && <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this element</button>}
@@ -654,6 +657,35 @@ function CountdownControls({ design, edit, end, patch }: { design: HudDesign; ed
       {o.fontSize !== undefined && (
         <button type="button" class="btn btn--ghost btn--sm" aria-label="Text size: use the file size" onClick={() => clear('fontSize')}>
           Use the file size
+        </button>
+      )}
+    </>
+  );
+}
+
+/**
+ * The vote box's colour (plan task M1): the element's `bg`, which build.ts
+ * votePass writes on votehud.res VoteActive, shown as the file has it.
+ * Probe VO (/home/volence/l4d/hud/probe-phase2-rest/r4/shots/r4/r4-e.png)
+ * saw it honoured.
+ */
+function VoteControls({ design, edit, end, patch }: { design: HudDesign; edit: Edit; end: () => void; patch: Patch }) {
+  const o = design.elements.vote ?? {};
+  const box = kvFind(buildTrees({ ...design, elements: {} })('resource/ui/hud/votehud.res'), ['VoteActive']);
+  const file = (box && pcGet(box, 'bgcolor_override')) ?? '0 0 0 240';
+  const shown = o.bg ?? file;
+  const clear = () => edit((d) => {
+    const { bg: _gone, ...rest } = d.elements.vote ?? {};
+    const elements = { ...d.elements };
+    if (Object.keys(rest).length) elements.vote = rest; else delete elements.vote;
+    return { ...d, elements };
+  });
+  return (
+    <>
+      <ColourRow label="Box colour" value={/^\d+ \d+ \d+ \d+$/.test(shown) ? shown : '0 0 0 240'} end={end} onPick={(c) => patch({ bg: c }, 'gesture')} />
+      {o.bg !== undefined && (
+        <button type="button" class="btn btn--ghost btn--sm" aria-label="Box colour: use the file colour" onClick={clear}>
+          Use the file colour
         </button>
       )}
     </>

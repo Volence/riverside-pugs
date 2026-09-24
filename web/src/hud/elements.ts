@@ -54,6 +54,16 @@ export interface HudElement {
   shownIn?: ('alive' | 'ghost' | 'dead')[];
   /** An infected element the game shows only for these classes (the frustration meter, only a Tank's). */
   shownFor?: ('hunter' | 'smoker' | 'boomer' | 'tank')[];
+  /**
+   * A panel the game shows only now and then (while you talk, during a
+   * vote, in survival): drawn over the rest it would hide what a player
+   * sees all the time, so the preview draws it and a click picks it only
+   * with the page's "Occasional panels" on (PreviewState.occasional), or
+   * while it is selected. Layers reaches it always.
+   */
+  occasional?: true;
+  /** Said under the element's controls: when the game shows it, what was and was not seen. */
+  note?: string;
 }
 
 /**
@@ -216,6 +226,37 @@ export const ELEMENTS: HudElement[] = [
    * (frustrationmeter.res, children.ts FRUST_PANEL) wait on gate T1, as no
    * probe has seen it drawn. The preview draws it for a spawned Tank only.
    */
+  /**
+   * Your own microphone: HudVoiceSelfStatus, which draws mod_textures.txt's
+   * voice_self while you talk. Probe V2
+   * (/home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/voice-g.png)
+   * saw it moved to c-24, 60 and sized 48 x 48; with voice_self repointed to
+   * a texture (V1) the upload fills that box.
+   */
+  { id: 'ownMic', label: 'Your microphone', side: 'both', key: 'HudVoiceSelfStatus', move: true, resize: 'free',
+    children: [], props: ['visible'], occasional: true,
+    note: 'Shown while you talk.' },
+  /**
+   * The vote panel: CHudVote, which holds votehud.res's boxes. Probe VO
+   * (/home/volence/l4d/hud/probe-phase2-rest/r4/shots/r4/r4-e.png, after
+   * `callvote ChangeDifficulty Normal`) saw it moved to c-100, 60 and the
+   * VoteActive box take its bgcolor_override (purple); the box is VoteActive's
+   * 200 x 140 at the panel's corner, so that is the element's size. Its
+   * colour is the element's `bg` (build.ts votePass).
+   */
+  { id: 'vote', label: 'Vote', side: 'both', key: 'CHudVote', move: true, resize: 'none',
+    children: [], props: ['visible'], occasional: true,
+    mockSize: { stock: { w: 200, h: 140 }, modern: { w: 200, h: 140 } },
+    note: 'Shown while a vote runs (someone called one from the Esc menu or the console).' },
+  /**
+   * The survival timer: HudHoldoutTimer. Probe H1
+   * (/home/volence/l4d/hud/probe-phase2-rest/r2/shots/r2/r2-g.png, map
+   * l4d_hospital02_subway survival) saw it drawn at the moved place, before
+   * and after the start.
+   */
+  { id: 'holdoutTimer', label: 'Survival timer', side: 'survivor', key: 'HudHoldoutTimer', move: true, resize: 'none',
+    children: [], props: ['visible'], occasional: true,
+    note: 'Survival only: the round time and the next medal. Never shown in campaign or versus.' },
   { id: 'tankPanel', label: 'Tank frustration', side: 'infected', key: 'HudFrustrationMeter', move: true, resize: 'none',
     children: [], props: ['visible'], shownIn: ['alive'], shownFor: ['tank'] },
 ];
