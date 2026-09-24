@@ -69,3 +69,15 @@ describe('Reset to game default', () => {
     expect([...vpk.keys()]).toEqual(['addoninfo.txt']);
   });
 });
+
+describe('the Riverside Modern preset', () => {
+  it('is named Riverside Modern to players, stored as modern', async () => {
+    localStorage.setItem('hud', JSON.stringify({ v: 1, name: 'mine', preset: 'modern', crosshair: 'none' }));
+    show();
+    const select = screen.getByRole('combobox', { name: /preset/i }) as HTMLSelectElement;
+    expect([...select.options].find((o) => o.value === 'modern')?.textContent).toBe('Riverside Modern');
+    expect(screen.getByText('Riverside Modern already uses Roboto Condensed.')).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 350));
+    expect(saved().preset).toBe('modern');
+  });
+});

@@ -166,7 +166,7 @@ export function Toolbar(p: ToolbarProps) {
         Preset{' '}
         <select value={value} onChange={onSelect}>
           <option value="stock">Stock</option>
-          <option value="modern">Modern</option>
+          <option value="modern">Riverside Modern</option>
           {p.imports.map((m) => <option key={m.id} value={`imported:${m.id}`}>{`Imported: ${m.name}`}</option>)}
           {unlisted && <option value={value}>{`Imported: ${design.imported!.name} (not in this browser)`}</option>}
           <option value="import">Import a HUD...</option>
@@ -229,7 +229,7 @@ export function Toolbar(p: ToolbarProps) {
           <option value="roboto">Roboto Condensed</option>
         </select>
       </label>
-      {design.preset === 'modern' && <span class="muted hud__note">Modern already uses Roboto Condensed.</span>}
+      {design.preset === 'modern' && <span class="muted hud__note">Riverside Modern already uses Roboto Condensed.</span>}
       {design.preset === 'imported' && <span class="muted hud__note">An imported HUD uses its own fonts.</span>}
 
       {/* A locked design cannot be shared: its import is missing or cannot be shown. */}
