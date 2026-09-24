@@ -1040,6 +1040,53 @@ describe('buildHud, card background', () => {
   });
 });
 
+describe('buildHud, your own health background (ownBg)', () => {
+  const OWN = 'resource/ui/hud/localplayerpanel.res';
+  const flat = { ownBg: { kind: 'flat' as const, color: '1 2 3 200' } };
+  const keys = ['ControlName', 'fieldName', 'xpos', 'ypos', 'zpos', 'wide', 'tall', 'visible', 'enabled', 'fillcolor'];
+
+  it('injects HudEdOwnBg first in the panel file at the unfitted LocalPlayer size, and ships no texture for a flat one', () => {
+    const files = buildHud(design({ styles: flat }));
+    const bg = tree(files, OWN)[0];
+    expect(bg.key).toBe('HudEdOwnBg');
+    expect(keys.map((k) => kvGet(bg, k)))
+      .toEqual(['ImagePanel', 'HudEdOwnBg', '0', '0', '-5', '130', '85', '1', '1', '1 2 3 200']);
+    expect(kvGet(bg, 'image')).toBeUndefined();
+    expect(files.some((f) => f.path.includes('ownbg'))).toBe(false);
+  });
+
+  it('sizes to the fitted panel, injected after the shift', () => {
+    const bg = tree(buildHud(design({ elements: { ownHealth: { fit: true } }, styles: flat })), OWN)[0];
+    expect(['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(bg, k))).toEqual(['0', '0', '130', '53']);
+  });
+
+  it('points a rounded one at its own texture and ships it', () => {
+    const files = buildHud(design({ styles: { ownBg: { kind: 'rounded', color: '0 40 80 180' } } }));
+    const bg = tree(files, OWN)[0];
+    expect([kvGet(bg, 'scaleImage'), kvGet(bg, 'image'), kvGet(bg, 'fillcolor')]).toEqual(['1', 'hud/hudeditor/ownbg', undefined]);
+    expect(files.some((f) => f.path === 'materials/vgui/hud/hudeditor/ownbg.vtf')).toBe(true);
+    expect(files.some((f) => f.path === 'materials/vgui/hud/hudeditor/ownbg.vmt')).toBe(true);
+  });
+
+  it('adds nothing for an Image style with no upload stored', () => {
+    const files = buildHud(design({ styles: { ownBg: { kind: 'image' } } }));
+    expect(text(files, OWN)).toBeUndefined();
+  });
+
+  it('comes before Modern ModBg, so it draws under it at the same zpos', () => {
+    const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+    const nodes = tree(buildHud(design({ preset: 'modern', styles: flat }), { fonts }), OWN, 'modern');
+    expect(nodes.map((n) => n.key).slice(0, 2)).toEqual(['HudEdOwnBg', 'ModBg']);
+  });
+
+  it('leaves the teammate card background as it was', () => {
+    const both = buildHud(design({ styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' }, ...flat } }));
+    const card = buildHud(design({ styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' } } }));
+    expect(text(both, CARD_FILE)).toBe(text(card, CARD_FILE));
+    expect(tree(both, CARD_FILE)[0].key).toBe('HudEdCardBg');
+  });
+});
+
 describe('packHud', () => {
   it('gives normal mode a VPK v1 named after the design', () => {
     const p = packHud(design({ name: 'night hud' }));

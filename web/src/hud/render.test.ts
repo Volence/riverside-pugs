@@ -264,6 +264,18 @@ describe('drawPanel', () => {
     expect(b.calls.some((c) => c.m === 'fill' && c.fill === 'rgba(0,255,0,1)')).toBe(true);
   });
 
+  it('fills your own health background first, in its colour', () => {
+    const d = design({ styles: { ownBg: { kind: 'flat', color: '1 2 3 255' } } });
+    const bg = childRects(d, 'ownHealth', { x: 5, y: 7 }, 2).find((c) => c.name === 'HudEdOwnBg')!;
+    expect([bg.x, bg.y, bg.w, bg.h]).toEqual([5, 7, 260, 170]);
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, d, 'ownHealth', { x: 5, y: 7 }, 2);
+    const draws = calls.filter((c) => ['fillRect', 'drawImage', 'fillText', 'fill'].includes(c.m));
+    expect(draws[0].m).toBe('fillRect');
+    expect(draws[0].fill).toBe('rgba(1,2,3,1)');
+    expect(draws[0].a).toEqual([5, 7, 260, 170]);
+  });
+
   it('draws a Trade Gothic label in the exported face, sized by its cell as the game sizes it', () => {
     const { ctx, calls } = recCtx();
     drawPanel(ctx, design({}), 'ownHealth', { x: 0, y: 0 }, 2);

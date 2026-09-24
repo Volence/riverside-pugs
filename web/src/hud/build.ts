@@ -528,48 +528,67 @@ function ownContent(work: Work, design: HudDesign): Box | null {
  * the element lists it. Probe Q2 (B1 a) showed LocalPlayer clips its
  * children, which is what makes the smaller panel cut what it no longer
  * covers.
+ *
+ * Then the "Your health background" child, the teammate card's pattern:
+ * injected even when fit is off, at the file's LocalPlayer size then.
  */
 function fitOwn(work: Work, design: HudDesign) {
-  if (design.elements.ownHealth?.fit !== true) return;
-  const box = ownContent(work, design);
-  const frame = OWN_PANEL.frame !== 'hudlayout' ? OWN_PANEL.frame : undefined;
-  const block = frame && work.optional(frame.file, [frame.block]);
-  if (!box || !block) return;                                      // nothing to fit to: the file's panel stays
+  const fit = design.elements.ownHealth?.fit === true;
+  const bg = panelBackground(design, OWN_BG.slot);
+  if (!fit && !bg) return;
+  const base = baseFrameRect(design, OWN_PANEL);
+  let size = base ? { w: base.w, h: base.h } : null;
   const nodes = work.tree(OWN_PANEL.file);
-  shiftNodes(nodes, box);
-  const size = { w: box.w, h: box.h };
-  squareBand(nodes, design.children.ownHealth ?? {}, 'Incapacitated', size);
-  stretchFill(nodes, size);
-  const base = baseFrameRect(design, OWN_PANEL) ?? { x: 0, y: 0, w: 0, h: 0 };
-  kvSet(block, 'xpos', String(base.x + box.x)); kvSet(block, 'ypos', String(base.y + box.y));
-  kvSet(block, 'wide', String(box.w)); kvSet(block, 'tall', String(box.h));
+  const frame = OWN_PANEL.frame !== 'hudlayout' ? OWN_PANEL.frame : undefined;
+  const box = fit ? ownContent(work, design) : null;
+  const block = box && frame ? work.optional(frame.file, [frame.block]) : undefined;
+  if (box && block) {                                              // else nothing to fit to: the file's panel stays
+    shiftNodes(nodes, box);
+    size = { w: box.w, h: box.h };
+    squareBand(nodes, design.children.ownHealth ?? {}, 'Incapacitated', size);
+    stretchFill(nodes, size);
+    const at = base ?? { x: 0, y: 0 };
+    kvSet(block, 'xpos', String(at.x + box.x)); kvSet(block, 'ypos', String(at.y + box.y));
+    kvSet(block, 'wide', String(box.w)); kvSet(block, 'tall', String(box.h));
+  }
+  // The background, as the card's: injected first, after the shift, at the panel's size.
+  if (bg && size) nodes.unshift(panelBgBlock(bg, size, OWN_BG));
 }
-
-const CARD_BG = 'HudEdCardBg';
 
 /**
- * The panelBg style as the card background child carries it. Flat is a
- * plain fillcolor (the Modern ModBg pattern), so no texture ships; Rounded
- * and Image point at the generated texture. An Image style with no stored
- * upload has nothing to show and adds nothing. Stock adds nothing: the stock
- * s_panel_background was never painted either.
+ * The background a fitted panel carries: the style slot that restyles it,
+ * the child the build injects for it, and that child's zpos (under every
+ * piece of its file). The card's sits at -2, under the splatter at -1; your
+ * own health's at -5, Modern ModBg's own zpos, under the scratches at -3,
+ * and injected first so it draws under ModBg too.
  */
-function cardBackground(design: HudDesign): { fill: string } | { image: string } | null {
-  const s = design.styles.panelBg;
+interface PanelBg { slot: string; block: string; zpos: number }
+const CARD_BG: PanelBg = { slot: 'panelBg', block: 'HudEdCardBg', zpos: -2 };
+const OWN_BG: PanelBg = { slot: 'ownBg', block: 'HudEdOwnBg', zpos: -5 };
+
+/**
+ * A background slot's style as its child carries it. Flat is a plain
+ * fillcolor (the Modern ModBg pattern), so no texture ships; Rounded and
+ * Image point at the generated texture. An Image style with no stored
+ * upload has nothing to show and adds nothing. Stock adds nothing: the
+ * stock s_panel_background was never painted either.
+ */
+function panelBackground(design: HudDesign, slotId: string): { fill: string } | { image: string } | null {
+  const s = design.styles[slotId];
   if (!s || s.kind === 'stock') return null;
-  if (s.kind === 'image' && !design.images.panelBg) return null;
-  if (s.kind === 'flat') return { fill: s.color ?? SLOTS.find((x) => x.id === 'panelBg')!.defaultColor };
-  return { image: 'hud/hudeditor/panelbg' };
+  if (s.kind === 'image' && !design.images[slotId]) return null;
+  if (s.kind === 'flat') return { fill: s.color ?? SLOTS.find((x) => x.id === slotId)!.defaultColor };
+  return { image: `hud/hudeditor/${slotId.toLowerCase()}` };
 }
 
-/** The background child, unscaled at the card's size: scalePass scales it with everything else in the card file. */
-function cardBgBlock(bg: { fill: string } | { image: string }, size: { w: number; h: number }): KvNode {
+/** The background child, unscaled at the panel's size: scalePass scales it with everything else in the panel file. */
+function panelBgBlock(bg: { fill: string } | { image: string }, size: { w: number; h: number }, def: PanelBg): KvNode {
   const pairs: [string, string][] = [
-    ['ControlName', 'ImagePanel'], ['fieldName', CARD_BG], ['xpos', '0'], ['ypos', '0'], ['zpos', '-2'],
+    ['ControlName', 'ImagePanel'], ['fieldName', def.block], ['xpos', '0'], ['ypos', '0'], ['zpos', String(def.zpos)],
     ['wide', String(size.w)], ['tall', String(size.h)], ['visible', '1'], ['enabled', '1'],
     ...('fill' in bg ? [['fillcolor', bg.fill]] as [string, string][] : [['scaleImage', '1'], ['image', bg.image]] as [string, string][]),
   ];
-  return { key: CARD_BG, value: pairs.map(([key, value]) => ({ key, value })) };
+  return { key: def.block, value: pairs.map(([key, value]) => ({ key, value })) };
 }
 
 /**
@@ -586,7 +605,7 @@ function cardBgBlock(bg: { fill: string } | { image: string }, size: { w: number
  */
 function fitTeam(work: Work, design: HudDesign) {
   const fit = design.elements.teamColumn?.fit === true;
-  const bg = cardBackground(design);
+  const bg = panelBackground(design, CARD_BG.slot);
   if (!fit && !bg) return;
   const nodes = work.tree(CARD);
   let size = baseTeam(baseOf(design)).card;
@@ -596,19 +615,20 @@ function fitTeam(work: Work, design: HudDesign) {
     size = { w: box.w, h: box.h };
     fitStateArt(nodes, design.children?.teamColumn ?? {}, size);
   }
-  if (bg) nodes.unshift(cardBgBlock(bg, size));
+  if (bg) nodes.unshift(panelBgBlock(bg, size, CARD_BG));
 }
 
 /**
  * A panel's fit rule: `content` measures the box fit shrinks the panel to,
  * with the panel file as childPass left it (panelWork keeps it for panelFrame,
- * panelChild and teamLayout); `apply` is the rule's own fitPass step. One
- * entry per panel that can be fitted, keyed by panel id.
+ * panelChild and teamLayout); `apply` is the rule's own fitPass step; `bg`
+ * the background child it injects. One entry per panel that can be fitted,
+ * keyed by panel id.
  */
-interface FitRule { content: (work: Work, design: HudDesign) => Box | null; apply: (work: Work, design: HudDesign) => void }
+interface FitRule { content: (work: Work, design: HudDesign) => Box | null; apply: (work: Work, design: HudDesign) => void; bg: PanelBg }
 const FIT_RULES: Record<string, FitRule> = {
-  teamColumn: { content: (work) => fitBox(work.tree(CARD), TEAM_PANEL, null), apply: fitTeam },
-  ownHealth: { content: ownContent, apply: fitOwn },
+  teamColumn: { content: (work) => fitBox(work.tree(CARD), TEAM_PANEL, null), apply: fitTeam, bg: CARD_BG },
+  ownHealth: { content: ownContent, apply: fitOwn, bg: OWN_BG },
 };
 
 /** Every panel's fit rule, in turn. */
@@ -1267,10 +1287,14 @@ function stylePass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkF
     const s = design.styles[slot.id];
     if (!s || s.kind === 'stock') continue;
     if (slot.advancedOnly && !design.advanced) continue;
-    // The card background is a child fitPass injects: a flat one is a plain
-    // fillcolor and needs no texture, and one fitPass did not inject (an
-    // Image style with no upload) has nothing to point at.
-    if (slot.id === 'panelBg') { const bg = cardBackground(design); if (!bg || 'fill' in bg) continue; }
+    // A panel background (the card's, your own health's) is a child fitPass
+    // injects: a flat one is a plain fillcolor and needs no texture, and one
+    // fitPass did not inject (an Image style with no upload) has nothing to
+    // point at.
+    if (Object.values(FIT_RULES).some((r) => r.bg.slot === slot.id)) {
+      const bg = panelBackground(design, slot.id);
+      if (!bg || 'fill' in bg) continue;
+    }
     const { w, h } = slot.size;
     const colour = s.color ?? slot.defaultColor;
     const rgba = s.kind === 'image' ? assets.images?.[slot.id]
