@@ -101,6 +101,9 @@ import { statsRoutes } from './routes/stats.js';
 import { replayRoutes } from './routes/replays.js';
 import { devRoutes } from './routes/dev.js';
 import { campaignRoutes } from './routes/campaigns.js';
+import { communityRoutes } from './routes/community.js';
+import { CommunityStore } from './community/store.js';
+import { settingNumber } from './settings.js';
 import type { InstallTarget } from './campaignInstall.js';
 import { notifyDiscord } from './discord.js';
 import { setMissionsDirs } from './campaignRegistry.js';
@@ -165,6 +168,9 @@ export interface ServerDeps {
    *  exercise a missing or invalid balance/knobs.json without touching the
    *  checked-in file; production reads BALANCE_KNOBS_PATH otherwise. */
   balanceKnobsPath?: string;
+  /** Free bytes on the community store's disk, for its 12 GB floor. Injected
+   *  in tests; a real statfs on config.communityDir otherwise. */
+  communityFreeBytes?: () => Promise<number>;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -1474,6 +1480,18 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     db: deps.db, addonsDir: deps.config.addonsDir, freeBytes: deps.freeBytes,
     installTargets: deps.installTargets, maxUploadBytes: deps.maxUploadBytes,
     consistencyListPath: deps.consistencyListPath,
+  });
+  // Built on first use, not here: constructing the store creates its folders,
+  // and a server that nobody shares a HUD on (every test, a dev box) should
+  // not grow a data/community it never uses.
+  let communityStore: CommunityStore | null = null;
+  await app.register(communityRoutes, {
+    db: deps.db,
+    store: () => communityStore ??= new CommunityStore({
+      dir: deps.config.communityDir,
+      freeBytes: deps.communityFreeBytes,
+      maxBytes: () => settingNumber(deps.db, 'community_store_mb', 1024, { min: 100, max: 20000, integer: true }) * 2 ** 20,
+    }),
   });
 
   // Registered whether or not dev mode is on, and deliberately NOT inside
