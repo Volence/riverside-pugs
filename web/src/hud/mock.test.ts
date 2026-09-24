@@ -449,6 +449,77 @@ describe('drawHud delegates panels to the renderer', () => {
     });
   });
 
+  describe('the ability timer', () => {
+    const K = 2.25;
+    /** drawHud on the infected side at 1920 x 1080, every call recorded with its alpha, art loaded at once. */
+    function ringCalls(design: HudDesign, state: PreviewState = DEFAULT_PREVIEW) {
+      _setImageFactory((url) => ({ src: url, complete: true, naturalWidth: 128, naturalHeight: 128, onload: null, onerror: null }) as unknown as HTMLImageElement);
+      const calls: { m: string; a: unknown[] }[] = [];
+      const base = fakeCtx(() => {}) as unknown as Record<string | symbol, unknown>;
+      const ctx = new Proxy(base, {
+        get: (t, k) => (typeof t[k] === 'function'
+          ? (...a: unknown[]) => { calls.push({ m: String(k), a }); return (t[k] as (...x: unknown[]) => unknown)(...a); }
+          : t[k]),
+        set: (t, k, v) => { t[k] = v; return true; },
+      }) as unknown as CanvasRenderingContext2D;
+      drawHud(ctx, 1920, 1080, design, 'infected', null, undefined, { state });
+      _setImageFactory(null);
+      return calls;
+    }
+    const src = (c: { a: unknown[] }) => (c.a[0] as { src?: string }).src;
+    /** The draws of one material's art, whether drawn straight or through a tinted copy (render.ts's tinted keeps no src). */
+    const drawsOf = (calls: { m: string; a: unknown[] }[], material: string) => calls.filter((c) => c.m === 'drawImage' && src(c) === artUrl(material));
+
+    it('draws AbilityTimerHud.res: the splat, the class icon, and no meter while ready (probe B3 b)', () => {
+      // /home/volence/l4d/hud/probe-phase2/b3/shots-rerun/b3-rerun/b3-b.png: the black pz_charge_bg splat behind,
+      // the Hunter's pz_charge_lunge (its red rings are in the texture) centred at (1847, 899), no orange meter.
+      const r = elementRect(DEFAULT_DESIGN, 'abilityRing', DEFAULT_DESIGN.aspect);
+      const calls = ringCalls(DEFAULT_DESIGN);
+      const [bg] = drawsOf(calls, 'vgui/hud/pz_charge_bg');
+      expect(bg.a.slice(1)).toEqual([r.x * K, r.y * K, 80 * K, 80 * K]);
+      const cx = (bg.a[1] as number) + (bg.a[3] as number) / 2, cy = (bg.a[2] as number) + (bg.a[4] as number) / 2;
+      expect(Math.abs(cx - 1847)).toBeLessThanOrEqual(1);
+      expect(Math.abs(cy - 899)).toBeLessThanOrEqual(1);
+      // The icon, 10 in, 60 square; ability_ready_color is white, so it is drawn untinted.
+      const [icon] = drawsOf(calls, 'vgui/hud/pz_charge_lunge');
+      expect(icon.a.slice(1)).toEqual([(r.x + 10) * K, (r.y + 10) * K, 60 * K, 60 * K]);
+      expect(calls.indexOf(bg)).toBeLessThan(calls.indexOf(icon));
+      expect(drawsOf(calls, 'vgui/hud/pz_charge_meter')).toEqual([]);
+      const inRing = (c: { m: string; a: unknown[] }) => c.m === 'arc' && (c.a[0] as number) > r.x * K && (c.a[0] as number) < (r.x + 80) * K
+        && (c.a[1] as number) > r.y * K && (c.a[1] as number) < (r.y + 80) * K;
+      expect(calls.some(inRing)).toBe(false);                          // the old stand-in's white arcs are gone
+      // Clipped to the 80 x 70 element, as VGUI clips its children: the splat's bottom 10 units are cut.
+      expect(calls.filter((c) => c.m === 'rect').map((c) => c.a)).toContainEqual([r.x * K, r.y * K, 80 * K, 70 * K]);
+    });
+
+    it('draws the chosen class\'s icon', () => {
+      for (const [siClass, material] of [['smoker', 'pz_charge_smoker'], ['boomer', 'pz_charge_boomer'], ['tank', 'pz_charge_tank']] as const) {
+        const calls = ringCalls(DEFAULT_DESIGN, { ...DEFAULT_PREVIEW, siClass });
+        expect(drawsOf(calls, `vgui/hud/${material}`), siClass).toHaveLength(1);
+        expect(drawsOf(calls, 'vgui/hud/pz_charge_lunge'), siClass).toEqual([]);
+      }
+    });
+
+    it('draws the meter over the icon while charging, cut to its sweep', () => {
+      const r = elementRect(DEFAULT_DESIGN, 'abilityRing', DEFAULT_DESIGN.aspect);
+      const calls = ringCalls(DEFAULT_DESIGN, { ...DEFAULT_PREVIEW, ability: 'charging' });
+      const [meter] = drawsOf(calls, 'vgui/hud/pz_charge_meter');
+      expect(meter.a.slice(1)).toEqual([(r.x + 10) * K, (r.y + 10) * K, 60 * K, 60 * K]);
+      const arc = calls.find((c) => c.m === 'arc' && Math.abs((c.a[0] as number) - (r.x + 40) * K) < 1e-9)!;
+      expect(arc.a[3]).toBeCloseTo(-Math.PI / 2, 9);
+      expect(arc.a[4]).toBeCloseTo(-Math.PI / 2 + 0.6 * 2 * Math.PI, 9);
+    });
+
+    it('draws no splat on Modern, whose file hides BackgroundImage', () => {
+      const d = { ...structuredClone(DEFAULT_DESIGN), preset: 'modern' as const };
+      const calls = ringCalls(d);
+      expect(drawsOf(calls, 'vgui/hud/pz_charge_bg')).toEqual([]);
+      const r = elementRect(d, 'abilityRing', d.aspect);
+      const [icon] = drawsOf(calls, 'vgui/hud/pz_charge_lunge');
+      expect(icon.a.slice(1)).toEqual([(r.x + 5) * K, (r.y + 5) * K, 46 * K, 46 * K]);
+    });
+  });
+
   it('draws siHealth and infectedRow from their generated files on the infected side', () => {
     _setImageFactory(instant);
     const green = artUrl('vgui/healthbar_green')!;
