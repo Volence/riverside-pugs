@@ -42,7 +42,7 @@ export interface HudElement {
   /** Size used for hit-testing and the mock when the container is bigger than what it shows. */
   mockSize?: Partial<Record<'stock' | 'modern', { w: number; h: number }>>;
   /** Elements the game places itself (move: false): where the preview draws them, as position tokens. */
-  mockPos?: { x: string; y: string };
+  mockPos?: { x?: string; y?: string };
   props: Prop[];
   /** Keys of the element's own hudlayout.res block the game reads (slice 2.3 fills them). */
   keys?: KeyDef[];
@@ -64,7 +64,15 @@ export interface HudElement {
   occasional?: true;
   /** Said under the element's controls: when the game shows it, what was and was not seen. */
   note?: string;
+  /**
+   * An element whose block has only a ypos (the peril notice): the game
+   * places it across, so only its height moves, and no xpos is ever written.
+   */
+  moveAxis?: 'y';
 }
+
+/** Said of a panel no probe has seen, which needs another player to show. */
+const UNSEEN = 'not seen in our tests (it needs a second player)';
 
 /**
  * The special infected health files the game reads. The Tank reads
@@ -257,6 +265,53 @@ export const ELEMENTS: HudElement[] = [
   { id: 'holdoutTimer', label: 'Survival timer', side: 'survivor', key: 'HudHoldoutTimer', move: true, resize: 'none',
     children: [], props: ['visible'], occasional: true,
     note: 'Survival only: the round time and the next medal. Never shown in campaign or versus.' },
+  /**
+   * The panels seen only with other players (plan task M2, decision 3):
+   * move and hide only, which every hudlayout panel tried honours
+   * (/home/volence/l4d/hud/probe-phase2-rest/RESULTS.md: V3, IV, FM1, LA1
+   * and the peril notice were never seen with one client).
+   *
+   * The voice list: HudVoiceStatus lists other players while they talk
+   * (with voice_loopback your own voice never enters it, r1-g). Its row
+   * keys are the ones client.dll reads beside it (m_NameFont, item_tall,
+   * item_wide, item_spacing).
+   */
+  { id: 'voiceList', label: 'Voice list', side: 'both', key: 'HudVoiceStatus', move: true, resize: 'none',
+    children: [], props: ['visible'], occasional: true,
+    note: `Lists the other players while they talk; ${UNSEEN}.`,
+    keys: [
+      { key: 'item_tall', label: 'Row height', type: 'int', range: [4, 64],
+        evidence: 'client.dll voice status run (HudVoiceSelfStatus, text_font, item_tall, item_wide, item_spacing); stock 15' },
+      { key: 'item_wide', label: 'Row width', type: 'int', range: [20, 400],
+        evidence: 'client.dll voice status run (item_wide); stock 120' },
+      { key: 'item_spacing', label: 'Row gap', type: 'int', range: [0, 40],
+        evidence: 'client.dll voice status run (item_spacing); stock 2' },
+    ] },
+  /** The infected voice panel: HudInfectedVOIP lists your infected teammates while they talk (r3-b: your own loopback voice shows only the mic). */
+  { id: 'infectedVoice', label: 'Infected voice', side: 'infected', key: 'HudInfectedVOIP', move: true, resize: 'none',
+    children: [], props: ['visible'], occasional: true,
+    note: `Lists your infected teammates while they talk; ${UNSEEN}.` },
+  /**
+   * The finale meter: HudFinaleMeter. FM1 (r2-i..k, r4-j..k) never got a
+   * finale started, so whether L4D1 draws it on PC at all is unknown.
+   */
+  { id: 'finaleMeter', label: 'Finale meter', side: 'survivor', key: 'HudFinaleMeter', move: true, resize: 'none',
+    children: [], props: ['visible'], occasional: true,
+    note: 'Shown during a finale; not seen in our tests (the finale never started there), and it may not show on PC at all.' },
+  /**
+   * The peril notice ("A TEAMMATE IS IN TROUBLE", #L4D_teammate_is_in_peril):
+   * client.dll shows it on player_ledge_grab. Its block has only a ypos, so
+   * the game places it across and only its height moves (moveAxis). The
+   * preview centres a 240 x 20 stand-in.
+   */
+  { id: 'perilNotice', label: 'Teammate in trouble', side: 'survivor', key: 'CHudTeamMateInPerilNotice', move: true, resize: 'none',
+    children: [], props: ['visible'], occasional: true, moveAxis: 'y',
+    mockPos: { x: 'c-120' }, mockSize: { stock: { w: 240, h: 20 }, modern: { w: 240, h: 20 } },
+    note: `Shown when a teammate hangs from a ledge; ${UNSEEN}. Only its height moves: the game places it across.` },
+  /** The leaving-area warning ("PLEASE WAIT FOR YOUR TEAMMATES", #L4D_s_team_ready_please_wait): LA1 never saw it. */
+  { id: 'leavingArea', label: 'Wait for teammates', side: 'survivor', key: 'HudLeavingAreaWarning', move: true, resize: 'none',
+    children: [], props: ['visible'], occasional: true,
+    note: `Shown when you try to leave the start area while teammates are still loading; ${UNSEEN}.` },
   { id: 'tankPanel', label: 'Tank frustration', side: 'infected', key: 'HudFrustrationMeter', move: true, resize: 'none',
     children: [], props: ['visible'], shownIn: ['alive'], shownFor: ['tank'] },
 ];

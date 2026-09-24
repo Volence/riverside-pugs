@@ -685,6 +685,8 @@ function element(id: string, raw: unknown, key: BaseKey): ElementOverride {
   }
   const keys = validKeys(elementById(id)?.keys, raw.keys);
   if (keys) out.keys = keys;
+  // The game places the peril notice across; only its height is kept.
+  if (elementById(id)?.moveAxis === 'y') delete out.x;
   return out;
 }
 

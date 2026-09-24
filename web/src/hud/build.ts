@@ -228,7 +228,8 @@ function layoutPass(work: Work, design: HudDesign) {
     if (!moved && !sized) continue;
     const base = baseRect(panel, el, work.key, design.aspect);
     const p = placed(o, base, el, design.aspect);
-    if (moved) { kvSet(panel, 'xpos', p.xpos); kvSet(panel, 'ypos', p.ypos); }
+    // A block with only a ypos (the peril notice) is placed across by the game: no xpos is added.
+    if (moved) { if (el.moveAxis !== 'y') kvSet(panel, 'xpos', p.xpos); kvSet(panel, 'ypos', p.ypos); }
     if (moved && el.moveWith) moveAlong(work, el, base, { x: parsePos(p.xpos, screenW(design.aspect)), y: parsePos(p.ypos, SCREEN_H) }, design.aspect);
     if (sized) { kvSet(panel, 'wide', String(Math.round(p.w))); kvSet(panel, 'tall', String(Math.round(p.h))); }
     if (el.id === 'chat' && moved) {

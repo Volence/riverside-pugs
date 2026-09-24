@@ -1,5 +1,81 @@
 # client.dll md5 9be2860914a3e33cce82b91473148459
-# strings -a -n 3 client.dll | grep -i -C 30 -E 'resource/ui/hud/|LocalPlayerPanel|TeammatePanel|HealthPanel|CircularProgressBar|CHudAbilityTimer|CHudTerrorCrosshair|ZombieTeamDisplay|FrustrationBar|CHudGhostPanel|CHudZombiePanel|bgcolor_override|SpectatorInfected'
+# strings -a -n 3 client.dll | grep -i -C 30 -E 'resource/ui/hud/|LocalPlayerPanel|TeammatePanel|HealthPanel|CircularProgressBar|CHudAbilityTimer|CHudTerrorCrosshair|ZombieTeamDisplay|FrustrationBar|CHudGhostPanel|CHudZombiePanel|bgcolor_override|SpectatorInfected|HudVoiceSelfStatus'
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+DebugOverlay
+m_FontSmall
+m_FontMedium
+m_FontBig
+TitleFont
+HudPredictionDump
+fov %f
+screenshot
+_fov
+Automates fov command to server.
+CHudVehicle
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+HudVehicle
+CHudVoiceSelfStatus
+voice_self
+CHudVoiceStatus
+CHudTeamDisplay
+voice_player
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+HudVoiceSelfStatus
+#Voice_UseLocation
+/Csv_alltalk
+m_NameFont
+text_font
+item_tall
+item_wide
+item_spacing
+icon_tall
+icon_wide
+m_isInverted
+inverted
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+HudVoiceStatus
+CHudWeapon
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+--
 m_fireY[0]
 m_fireX
 m_fireX[0]
@@ -1458,6 +1534,68 @@ pb*
 pZ*
 P[*
 `^*
+--
+.?AVCDefaultDataCacheClient@@
+.?AVCAsyncCaptionResourceManager@@
+.?AVCHudCloseCaption@@
+.?AVCHudCrosshair@@
+.?AVCHudFilmDemo@@
+.?AVCHudHDRDemo@@
+.?AVCHudHintDisplay@@
+.?AVCHudHintKeyDisplay@@
+.?AVIHudLCD@@
+.?AVCLCDItem@@
+.?AVCLCDItemText@@
+.?AVCLCDItemIcon@@
+.?AVCLCDItemAggregate@@
+.?AVCLCDPage@@
+.?AVCLCD@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCPDumpPanel@@
+.?AVCHudVehicle@@
+.?AVCHudVoiceSelfStatus@@
+.?AVCHudVoiceStatus@@
+.?AVCHudWeapon@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVIInput@@
+.?AVCInput@@
+.?AVConVar_m_pitch@@
+,(=
+.?AVCProxyIsNPC@@
+.?AVCLampBeamProxy@@
+.?AVCLampHaloProxy@@
+.?AVIMaterialProxyDict@@
+.?AVCMaterialProxyDict@@
+.?AVCAddProxy@@
+.?AVCSubtractProxy@@
+.?AVCMultiplyProxy@@
+.?AVCDivideProxy@@
+.?AVCClampProxy@@
+.?AVCSineProxy@@
 --
 4P<
 .?AVCProxyIT@@

@@ -448,10 +448,13 @@ export function ElementControls(
 
       {el.move && !free && (
         <div class="hud__row2">
-          <label class="hud__field">
-            <span>X</span>
-            <input type="number" value={Math.round(team ? rect.x : o.x ?? rect.x)} onInput={(e) => setPos('x', e)} {...endsOn(end)} />
-          </label>
+          {/* The game places the peril notice across: only its Y moves (HudElement.moveAxis). */}
+          {el.moveAxis !== 'y' && (
+            <label class="hud__field">
+              <span>X</span>
+              <input type="number" value={Math.round(team ? rect.x : o.x ?? rect.x)} onInput={(e) => setPos('x', e)} {...endsOn(end)} />
+            </label>
+          )}
           <label class="hud__field">
             <span>Y</span>
             <input type="number" value={Math.round(team ? rect.y : o.y ?? rect.y)} onInput={(e) => setPos('y', e)} {...endsOn(end)} />

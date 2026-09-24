@@ -15,7 +15,7 @@
 set -euo pipefail
 DLL="${1:-$HOME/.steam/steam/steamapps/common/left 4 dead/left4dead/bin/client.dll}"
 OUT="$(dirname "$0")/../web/src/hud/dll-hud-strings.txt"
-ANCHORS='resource/ui/hud/|LocalPlayerPanel|TeammatePanel|HealthPanel|CircularProgressBar|CHudAbilityTimer|CHudTerrorCrosshair|ZombieTeamDisplay|FrustrationBar|CHudGhostPanel|CHudZombiePanel|bgcolor_override|SpectatorInfected'
+ANCHORS='resource/ui/hud/|LocalPlayerPanel|TeammatePanel|HealthPanel|CircularProgressBar|CHudAbilityTimer|CHudTerrorCrosshair|ZombieTeamDisplay|FrustrationBar|CHudGhostPanel|CHudZombiePanel|bgcolor_override|SpectatorInfected|HudVoiceSelfStatus'
 {
   echo "# client.dll md5 $(md5sum "$DLL" | cut -d' ' -f1)"
   echo "# strings -a -n 3 client.dll | grep -i -C 30 -E '$ANCHORS'"

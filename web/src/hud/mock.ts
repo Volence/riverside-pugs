@@ -1157,6 +1157,53 @@ function paintHoldoutTimer(ctx: CanvasRenderingContext2D, r: Rect, design: HudDe
   });
 }
 
+/**
+ * A panel no probe has seen (plan decision 3): a dark box with the words
+ * the game puts in it, so the player can see where it lands.
+ */
+const framePainter = (words: string) => (ctx: CanvasRenderingContext2D, r: Rect, _d: HudDesign, k: number) => {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.strokeRect(r.x, r.y, r.w, r.h);
+  ctx.restore();
+  const size = Math.max(6, Math.min(r.h * 0.6, 10 * k));
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  clipToRect(ctx, r, () => text(ctx, words, r.x + r.w / 2, r.y + r.h / 2, size, 'rgba(230,230,230,1)'));
+  ctx.restore();
+};
+
+/** Sample talkers for the voice list. */
+const VOICE_NAMES = ['Zoey', 'Francis'];
+/**
+ * The voice list: its rows as HudVoiceStatus lays them out from its own
+ * keys (through buildTrees): each item_tall high, item_spacing apart from
+ * the panel's top, a speaker icon at icon_xpos and the name at text_xpos.
+ */
+function paintVoiceList(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number) {
+  const n = kvFind(buildTrees(design)('scripts/hudlayout.res'), ['HudVoiceStatus']);
+  if (!n) return;
+  const key = (name: string, d: number) => { const v = parseFloat(pcGet(n, name) ?? ''); return Number.isFinite(v) ? v : d; };
+  const tall = key('item_tall', 15), wide = key('item_wide', 120), gap = key('item_spacing', 2);
+  const icon = { x: key('icon_xpos', 0), w: key('icon_wide', 16), h: key('icon_tall', 16) }, textX = key('text_xpos', 18);
+  ctx.textAlign = 'left';
+  clipToRect(ctx, r, () => {
+    VOICE_NAMES.forEach((name, i) => {
+      const top = r.y + i * (tall + gap) * k;
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(r.x, top, wide * k, tall * k);
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.fillRect(r.x + icon.x * k + 3 * k, top + (tall - icon.h) / 2 * k + 3 * k, Math.max(1, (icon.w - 6) * k), Math.max(1, (icon.h - 6) * k));
+      ctx.restore();
+      text(ctx, name, r.x + textX * k, top + tall * k * 0.75, Math.max(6, Math.min(tall * 0.8, 12) * k), 'rgba(230,230,230,1)');
+    });
+  });
+}
+
 const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view?: HudView) => void> = {
   ownHealth: paintOwnHealth,
   teamColumn: paintTeamColumn,
@@ -1176,6 +1223,11 @@ const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: 
   ownMic: paintOwnMic,
   vote: paintVote,
   holdoutTimer: paintHoldoutTimer,
+  voiceList: paintVoiceList,
+  infectedVoice: framePainter('Infected voice'),
+  finaleMeter: framePainter('Finale'),
+  perilNotice: framePainter('A TEAMMATE IS IN TROUBLE'),
+  leavingArea: framePainter('PLEASE WAIT FOR YOUR TEAMMATES'),
 };
 
 const FALLBACK_ACCENT = '#de4e40';

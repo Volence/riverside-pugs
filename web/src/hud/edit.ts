@@ -844,6 +844,11 @@ export function placeElement(design: HudDesign, id: string, x: number, y: number
   const fitted = fitMovesContainer(id, o?.fit);
   const px = clampPos('x', storedFor(want.x, at.x - guess.x), fitted);
   const py = clampPos('y', storedFor(want.y, at.y - guess.y), fitted);
+  // Only the height moves on an element the game places across (the peril notice).
+  if (el.moveAxis === 'y') {
+    const { x: _x, ...rest } = o ?? {};
+    return { ...design, elements: { ...design.elements, [id]: { ...rest, y: py } } };
+  }
   return { ...design, elements: { ...design.elements, [id]: { ...o, x: px, y: py } } };
 }
 

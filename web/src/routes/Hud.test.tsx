@@ -1337,6 +1337,7 @@ describe('Hud page', () => {
       ['hud__layer--d0', 'Kill / incap notices'],
       ['hud__layer--d0 hud__layer--hidden', 'Custom crosshair'],
       ['hud__layer--d0', 'Your microphone'], ['hud__layer--d0', 'Vote'], ['hud__layer--d0', 'Survival timer'],
+      ['hud__layer--d0', 'Voice list'], ['hud__layer--d0', 'Finale meter'], ['hud__layer--d0', 'Teammate in trouble'], ['hud__layer--d0', 'Wait for teammates'],
     ]);
   });
 
@@ -2686,5 +2687,25 @@ describe('The occasional panels on the page (plan task M1)', () => {
     expect(screen.getByText('Survival only: the round time and the next medal. Never shown in campaign or versus.')).toBeTruthy();
     fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
     expect(screen.queryByRole('group', { name: 'Layers: Survival timer' })).toBeNull();
+  });
+});
+
+describe('The panels seen only with other players on the page (plan task M2)', () => {
+  const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
+  it('offers only Y on the peril notice, with its note', async () => {
+    render(<Hud />);
+    fireEvent.click(layer('Teammate in trouble').getByRole('button', { name: 'Teammate in trouble' }));
+    expect(screen.queryByLabelText('X')).toBeNull();
+    expect(screen.getByText(/^Shown when a teammate hangs from a ledge; not seen in our tests/)).toBeTruthy();
+    fireEvent.input(screen.getByLabelText('Y'), { target: { value: '90' } });
+    await waitFor(() => expect(saved().elements?.perilNotice).toEqual({ y: 90 }));
+  });
+
+  it('edits the voice list row height', async () => {
+    render(<Hud />);
+    fireEvent.click(layer('Voice list').getByRole('button', { name: 'Voice list' }));
+    expect(screen.getByText(/^Lists the other players while they talk; not seen in our tests/)).toBeTruthy();
+    fireEvent.input(screen.getByLabelText('Row height'), { target: { value: '30' } });
+    await waitFor(() => expect(saved().elements?.voiceList?.keys?.item_tall).toBe('30'));
   });
 });

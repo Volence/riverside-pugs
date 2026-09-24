@@ -7,11 +7,12 @@ import { baseFile, BASE_PATHS } from './base';
 const root = (preset: 'stock' | 'modern', file: string) => parseKv(baseFile(preset, file))[0].value as KvNode[];
 
 describe('ELEMENTS', () => {
-  it('has unique ids and the eighteen elements', () => {
+  it('has unique ids and the twenty-three elements', () => {
     const ids = ELEMENTS.map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids.sort()).toEqual(['abilityMarker', 'abilityRing', 'chat', 'ghostPanel', 'holdoutTimer', 'infectedRow', 'killNotices', 'ownHealth',
-      'ownMic', 'progressBar', 'siHealth', 'spawnCountdown', 'tankPanel', 'teamColumn', 'vote', 'weaponSelection', 'xhair', 'zombiePanel'].sort());
+    expect(ids.sort()).toEqual(['abilityMarker', 'abilityRing', 'chat', 'finaleMeter', 'ghostPanel', 'holdoutTimer', 'infectedRow', 'infectedVoice',
+      'killNotices', 'leavingArea', 'ownHealth', 'ownMic', 'perilNotice', 'progressBar', 'siHealth', 'spawnCountdown', 'tankPanel', 'teamColumn',
+      'voiceList', 'vote', 'weaponSelection', 'xhair', 'zombiePanel'].sort());
   });
 
   for (const preset of ['stock', 'modern'] as const) {

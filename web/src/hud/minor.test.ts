@@ -195,3 +195,72 @@ describe('placing an occasional element', () => {
     expect(d.elements.vote.y).toBe(60);
   });
 });
+
+/**
+ * The panels seen only with other players (plan task M2, decision 3): move
+ * and hide only, which every hudlayout panel tried honours, with a note
+ * saying when the game shows them. RESULTS.md: V3 (voice list), IV
+ * (infected voice), FM1 (finale meter), LA1 (leaving area) and the peril
+ * notice were never seen with one client.
+ */
+describe('the panels seen only with other players (plan task M2)', () => {
+  beforeEach(() => { _resetAssetCache(); });
+  const M2: [string, string, 'survivor' | 'infected' | 'both'][] = [
+    ['voiceList', 'HudVoiceStatus', 'both'], ['infectedVoice', 'HudInfectedVOIP', 'infected'], ['finaleMeter', 'HudFinaleMeter', 'survivor'],
+    ['perilNotice', 'CHudTeamMateInPerilNotice', 'survivor'], ['leavingArea', 'HudLeavingAreaWarning', 'survivor'],
+  ];
+
+  it('registers each on its side, occasional, moved, with a note saying when it shows and that it was not seen', () => {
+    for (const [id, key, side] of M2) {
+      const el = elementById(id)!;
+      expect(el, id).toMatchObject({ key, side, move: true, resize: 'none', occasional: true });
+      expect(el.note, id).toMatch(/not seen in our tests/);
+    }
+  });
+
+  it('writes a move into each block and hard-hides each', () => {
+    for (const [id, key] of M2) {
+      const moved = layout(validateDesign({ v: 1, elements: { [id]: { y: 100 } } }), key);
+      expect(parsePos(kvGet(moved, 'ypos')!, SCREEN_H), id).toBe(100);
+      const hidden = layout(validateDesign({ v: 1, elements: { [id]: { visible: false } } }), key);
+      expect(['visible', 'wide', 'tall'].map((k) => kvGet(hidden, k)), id).toEqual(['0', '0', '0']);
+    }
+  });
+
+  it('moves the peril notice up and down only: the block has no xpos, and none is written', () => {
+    expect(elementById('perilNotice')!.moveAxis).toBe('y');
+    const d = validateDesign({ v: 1, elements: { perilNotice: { x: 40, y: 120 } } });
+    expect(d.elements.perilNotice).toEqual({ y: 120 });
+    const n = layout(d, 'CHudTeamMateInPerilNotice');
+    expect(kvGet(n, 'xpos')).toBeUndefined();
+    expect(kvGet(n, 'ypos')).toBe('120');
+    const placed = placeElement(validateDesign({ v: 1 }), 'perilNotice', 10, 200);
+    expect(placed.elements.perilNotice).toEqual({ y: 200 });
+    const r = elementRect(placed, 'perilNotice', placed.aspect);
+    expect(r.x + r.w / 2).toBeCloseTo(screenW('16:9') / 2, 0);
+  });
+
+  it('takes the voice list row keys the dll reads, clamped', () => {
+    expect(elementById('voiceList')!.keys!.map((k) => k.key)).toEqual(['item_tall', 'item_wide', 'item_spacing']);
+    const d = validateDesign({ v: 1, elements: { voiceList: { keys: { item_tall: '30', item_wide: '9999', item_spacing: '4' } } } });
+    const n = layout(d, 'HudVoiceStatus');
+    expect(kvGet(n, 'item_tall')).toBe('30');
+    expect(kvGet(n, 'item_spacing')).toBe('4');
+    expect(Number(kvGet(n, 'item_wide'))).toBeLessThanOrEqual(400);
+  });
+
+  it('draws each as a labelled frame with the toggle on, and the voice list rows at their keys', () => {
+    const d = validateDesign({ v: 1, elements: { voiceList: { keys: { item_tall: '30', item_spacing: '10' } } } });
+    const surv = calls(d, 'survivor');
+    for (const s of ['A TEAMMATE IS IN TROUBLE', 'Finale', 'PLEASE WAIT FOR YOUR TEAMMATES']) expect(text(surv, s), s).toBeDefined();
+    expect(text(calls(d, 'infected'), 'Infected voice')).toBeDefined();
+    const r = elementRect(d, 'voiceList', d.aspect);
+    const rows = surv.filter((x) => x.m === 'fillText' && (x.a[0] === 'Zoey' || x.a[0] === 'Francis') && (x.a[1] as number) >= r.x * K);
+    expect(rows).toHaveLength(2);
+    // Rows item_tall + item_spacing apart, from the panel's top.
+    const ys = rows.map((x) => x.a[2] as number);
+    expect(Math.abs(ys[1] - ys[0] - 40 * K)).toBeLessThanOrEqual(0.5);
+    expect(ys[0]).toBeGreaterThan(r.y * K);
+    expect(calls(d, 'survivor', DEFAULT_PREVIEW).some((x) => x.m === 'fillText' && x.a[0] === 'Zoey' && (x.a[1] as number) >= r.x * K)).toBe(false);
+  });
+});
