@@ -679,14 +679,19 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       const liveMatchRow = (token: string) =>
         deps.db.prepare("SELECT id, server_id FROM matches WHERE token = ? AND state = 'live'")
           .get(token) as { id: number; server_id: number | null } | undefined;
-      // A call's card names the map it happened on. match_live.current_map is
-      // kept current by ROUND_START (recordRoundStart in liveView.ts) and is
-      // keyed by match id, which the call event already carries; a call with
-      // no match (a spectator, or between maps) simply gets no map.
-      const currentMapOf = (matchId: number | null): string | null => {
-        if (matchId === null) return null;
-        return (deps.db.prepare('SELECT current_map FROM match_live WHERE match_id = ?')
-          .get(matchId) as { current_map: string | null } | undefined)?.current_map ?? null;
+      // A call's card names the map it happened on. Keyed off the packet's own
+      // server id (serverOf's result), not the plugin-reported ev.matchId,
+      // which is the plugin's own tracked match and can be stale. Same join
+      // getLiveMatches (liveView.ts) uses to pair a server with its live
+      // match's current map, which recordRoundStart keeps current.
+      const currentMapOf = (serverId: number | null): string | null => {
+        if (serverId === null) return null;
+        return (deps.db.prepare(
+          `SELECT l.current_map AS currentMap FROM matches m
+             JOIN match_live l ON l.match_id = m.id
+            WHERE m.server_id = ? AND m.state = 'live'
+            ORDER BY m.id DESC LIMIT 1`,
+        ).get(serverId) as { currentMap: string | null } | undefined)?.currentMap ?? null;
       };
       logListener = new LogListener((raw, source, meta) => {
         // One rewrite at the door, before anything reads a SteamID off this
@@ -820,7 +825,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // must not take down the listener that also carries match_end.
           try {
             const sid = serverOf(source, meta);
-            handleModCall(deps.db, ev, sid, { adminSteamIds: deps.config.adminSteamIds, map: currentMapOf(ev.matchId) });
+            handleModCall(deps.db, ev, sid, { adminSteamIds: deps.config.adminSteamIds, map: currentMapOf(sid) });
           } catch (err) {
             console.error('[modcall] failed to handle a call:', err);
           }
