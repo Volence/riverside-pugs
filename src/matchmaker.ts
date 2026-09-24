@@ -380,7 +380,7 @@ export class Matchmaker {
       const season = currentSeasonId(this.db);
       const matchId = this.db.transaction(() => {
         const insertMatch = this.db.prepare(
-          "INSERT INTO matches (season_id, state, campaign) VALUES (?, 'configuring', ?)",
+          "INSERT INTO matches (season_id, state, campaign, origin) VALUES (?, 'configuring', ?, 'queue')",
         );
         const id = Number(insertMatch.run(season, result.campaign).lastInsertRowid);
         const insertMp = this.db.prepare(

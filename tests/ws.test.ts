@@ -32,4 +32,28 @@ describe('Hub', () => {
     expect(closed.sent).toHaveLength(0);
     expect(removed.sent).toHaveLength(0);
   });
+
+  it('sendTo reaches only signed-in sockets the caller allows, asks once per user, and tells no subscriber', () => {
+    const hub = new Hub();
+    const staff = fakeSocket();
+    const staffSecondTab = fakeSocket();
+    const player = fakeSocket();
+    const anonymous = fakeSocket();
+    hub.add(staff as any, 'S');
+    hub.add(staffSecondTab as any, 'S');
+    hub.add(player as any, 'P');
+    hub.add(anonymous as any);
+    const heard: string[] = [];
+    hub.subscribe((e) => heard.push(e));
+    const asked: string[] = [];
+    hub.sendTo('tickets', (id) => { asked.push(id); return id === 'S'; });
+    expect(staff.sent).toEqual(['{"event":"tickets"}']);
+    expect(staffSecondTab.sent).toEqual(['{"event":"tickets"}']);
+    expect(player.sent).toEqual([]);
+    expect(anonymous.sent).toEqual([]);
+    expect(asked.sort()).toEqual(['P', 'S']);
+    expect(heard).toEqual([]);
+    hub.broadcast('refresh');
+    expect(anonymous.sent).toEqual(['{"event":"refresh"}']);
+  });
 });

@@ -115,3 +115,28 @@ export function rconRestarter(deps: RconRestarterDeps): ServerRestarter {
     },
   };
 }
+
+/** Between the result kick and `quit`, so the kicks reach clients first. */
+export const ENDKICK_BEFORE_QUIT_MS = 2000;
+
+/**
+ * Kick everyone with the match result, then quit.
+ *
+ * Without the first step players saw "Server shutting down" instead of who
+ * won: the plugin's own kick waits 8 s so the score can be read in chat, and
+ * the restart lands sooner. A plugin older than 0.3.5 answers "Unknown
+ * command", which costs nothing, and any failure of the kick still quits.
+ */
+export async function kickThenQuit(
+  rcon: { exec(cmd: string): Promise<string> },
+  name: string,
+  pauseMs = ENDKICK_BEFORE_QUIT_MS,
+): Promise<void> {
+  try {
+    await rcon.exec('sm_pug_endkick_now');
+    await new Promise((r) => setTimeout(r, pauseMs));
+  } catch (err) {
+    console.log(`[serverRestart] ${name} end kick before quit failed, quitting anyway:`, err instanceof Error ? err.message : err);
+  }
+  await rcon.exec('quit');
+}

@@ -5,6 +5,7 @@ import { completeMatch } from '../src/matchResult.js';
 import { Matchmaker } from '../src/matchmaker.js';
 import { COMMAND_DEFS, handleCommand } from '../src/discord/commands.js';
 import type { Dump } from '../src/dumpParse.js';
+import type { PickedMember } from '../src/discord/transport.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const URL_ = 'https://pug.test';
@@ -36,8 +37,20 @@ beforeEach(() => {
   mm = new Matchmaker(db, { broadcast: () => {}, orchestrator: { setupMatch: async () => {}, finishMatch: async () => {} } });
 });
 
-const run = (name: string, options: Record<string, string> = {}, userId = '900') =>
-  handleCommand({ db, matchmaker: mm, publicUrl: URL_ }, { kind: 'command', name, userId, userName: 'u', options });
+const run = (
+  name: string, options: Record<string, string> = {}, userId = '900',
+  picked: Record<string, PickedMember> = {}, presserTimedOutUntil: string | null = null,
+) =>
+  handleCommand({ db, matchmaker: mm, publicUrl: URL_ }, {
+    kind: 'command', name, userId, userName: 'u', options,
+    // '/report''s `player` option is a Discord user picker: Discord itself
+    // supplies the PickedMember (name, bot, administrator) alongside the raw
+    // id in `options.player`. Every other command here ignores `picked`, so
+    // synthesizing it from `options.player` when a test does not pass one
+    // explicitly keeps every existing call site unchanged.
+    picked: options.player && !picked.player ? { ...picked, player: { id: options.player, name: 'target', bot: false, administrator: false } } : picked,
+    presserTimedOutUntil,
+  });
 const text = (r: Awaited<ReturnType<typeof run>>) => JSON.stringify(r.payload);
 
 describe('slash commands', () => {
@@ -70,6 +83,18 @@ describe('slash commands', () => {
     expect(text(r)).toContain('/link/discord?code=');
   });
 
+  // Embed titles render a subset of markdown, masked links included, and both
+  // the Steam name and the linked Discord display name are attacker text.
+  it('/profile and /matches escape a hostile steam or discord name in the title', async () => {
+    upsertPlayer(db, { steamid: IDS[6], name: '[Free Nitro](http://evil.tk)', avatar: null }, []);
+    activatePlayer(db, IDS[6]);
+    linkDiscord(db, IDS[6], '906', '[Click here](http://evil.tk)');
+    const profile = text(await run('profile', { user: '906' }));
+    expect(profile).not.toMatch(/\]\(http:\/\/evil\.tk\)/);
+    const matches = text(await run('matches', { user: '906' }));
+    expect(matches).not.toMatch(/\]\(http:\/\/evil\.tk\)/);
+  });
+
   it('/leaderboard lists ranked players only, best first', async () => {
     play('a'); play('a');
     expect(text(await run('leaderboard'))).toMatch(/nobody is ranked yet/i);
@@ -77,6 +102,32 @@ describe('slash commands', () => {
     const t = text(await run('leaderboard'));
     expect(t).toContain('player0');
     expect(t.indexOf('player0')).toBeLessThan(t.indexOf('player4'));
+    // IDS[0]'s linked discord name ("p0") differs from its steam name
+    // ("player0"), so the row says both.
+    expect(t).toContain('player0 (Discord: p0)');
+  });
+
+  it('/leaderboard escapes a hostile steam or discord name', async () => {
+    upsertPlayer(db, { steamid: IDS[6], name: '[Nitro](http://evil.tk)', avatar: null }, []);
+    activatePlayer(db, IDS[6]);
+    linkDiscord(db, IDS[6], '906', '[click](http://evil.tk)');
+    play('a'); play('a'); play('a');
+    const t = text(await run('leaderboard'));
+    expect(t).not.toMatch(/\]\(http:\/\/evil\.tk\)/);
+  });
+
+  it('stays under the 4096-char embed description limit with realistic long names for every ranked row', async () => {
+    // Every one of the 8 rostered players gets a 32-char steam name and a
+    // differing 32-char linked discord name (an 18-digit snowflake for the
+    // id), so every row shows both names at once, the worst case for length.
+    IDS.forEach((id, i) => {
+      db.prepare('UPDATE players SET name = ?, discord_id = ?, discord_name = ? WHERE steamid = ?')
+        .run('s'.repeat(30) + String(i).padStart(2, '0'), `10000000000000000${i}`, 'd'.repeat(30) + String(i).padStart(2, '0'), id);
+    });
+    play('a'); play('a'); play('a');
+    const t = text(await run('leaderboard'));
+    const description = JSON.parse(t).embeds[0].description as string;
+    expect(description.length).toBeLessThanOrEqual(4096);
   });
 
   it('/matches lists recent matches overall, or for a user', async () => {
@@ -85,12 +136,23 @@ describe('slash commands', () => {
     expect(text(await run('matches', { user: '905' }))).toContain(`${URL_}/match/${id}`);
   });
 
-  it('/queue shows the queue privately', async () => {
+  it('/queue shows the queue privately, both names when the queued player has them and they differ', async () => {
     mm.join(IDS[1]);
+    mm.join(IDS[0]);
     const r = await run('queue');
     expect(r.ephemeral).toBe(true);
-    expect(text(r)).toContain('1/8');
+    expect(text(r)).toContain('2/8');
     expect(text(r)).toContain('player1');
+    expect(text(r)).toContain('player0 (Discord: p0)');
+  });
+
+  it('/queue escapes a hostile steam or discord name', async () => {
+    upsertPlayer(db, { steamid: IDS[6], name: '[Nitro](http://evil.tk)', avatar: null }, []);
+    activatePlayer(db, IDS[6]);
+    linkDiscord(db, IDS[6], '906', '[click](http://evil.tk)');
+    mm.join(IDS[6]);
+    const t = text(await run('queue'));
+    expect(t).not.toMatch(/\]\(http:\/\/evil\.tk\)/);
   });
 
   it('/link says who you are linked to, or hands out a link', async () => {
@@ -118,13 +180,28 @@ describe('/report', () => {
     expect(rows()).toEqual([{ match_id: null, reporter_id: IDS[0], target_id: IDS[5], category: 'toxicity', text: 'in voice' }]);
   });
 
-  it('takes an explicit match, refuses a repeat, yourself, and unlinked targets', async () => {
+  it('takes an explicit match, and refuses a repeat and yourself', async () => {
     const first = play('a');
     play('b');
     expect(text(await run('report', { player: '905', reason: 'cheating', match: String(first) }))).toContain(`match #${first}`);
     expect(text(await run('report', { player: '905', reason: 'cheating', match: String(first) }))).toMatch(/already reported/);
     expect(text(await run('report', { player: '900', reason: 'afk' }))).toMatch(/yourself/);
-    expect(text(await run('report', { player: '999', reason: 'afk' }))).toMatch(/not linked/);
+  });
+
+  // A member who has not linked Steam used to be refused outright ("has not
+  // linked Discord"). Phase 3a lets the report name them instead: fileReport
+  // turns the pick into a Discord-only target, and the reply uses the name
+  // Discord supplied, not a player row.
+  it('reports a Discord-only member picked in the player option', async () => {
+    const r = await run('report', { player: '990', reason: 'toxicity' }, '900', { player: { id: '990', name: 'Lurky', bot: false, administrator: false } });
+    expect(r.payload.content).toMatch(/^Reported Lurky/);
+    expect(r.payload.content).toContain('The person you reported is never told who filed it.');
+    expect(r.payload.content).not.toContain('match #');
+  });
+
+  it('takes a report from someone who has not linked Steam', async () => {
+    const r = await run('report', { player: '999', reason: 'afk' }, 'd-new', { player: { id: '999', name: 'Ghosty', bot: false, administrator: false } });
+    expect(r.payload.content).toMatch(/^Reported Ghosty/);
   });
 
   it('offers the safety category and insists on details for it', async () => {

@@ -5,6 +5,16 @@ const TOKEN_RE = /^[0-9a-f]{32}$/;
 
 export const PHASE_STATES = ['live', 'paused', 'readyup', 'roundover', 'loading'] as const;
 export type PhaseState = typeof PHASE_STATES[number];
+/** Client settings l4d_cvarwatch reports. Anything else on an L4DV line is refused. */
+export const WATCHED_CVARS = ['cpu_level'] as const;
+export type WatchedCvar = typeof WATCHED_CVARS[number];
+/** What l4d_cvarwatch did about it. `held`: the ready gate took their ready
+ *  back. `fixed`: a held player changed the setting. `live`: seen out of
+ *  bounds with the gate not in play, which is a live round. A 0.1.0 plugin
+ *  sends no act; it only ever reported, so it reads as `live`. */
+export const CVAR_ACTS = ['held', 'fixed', 'live'] as const;
+export type CvarAct = typeof CVAR_ACTS[number];
+
 export interface Phase {
   state: PhaseState;
   /** Who is charged for a pause, or null: a disconnect pause, an admin, or
@@ -17,6 +27,9 @@ export interface Phase {
   /** Rostered players who have not readied, during a ready-up. Empty
    *  otherwise, and empty once everyone has and the countdown is running. */
   unready: string[];
+  /** Who typed !pause, when the plugin knows (pug-match 0.3.5 on). Absent,
+   *  never guessed, for older plugins, disconnect pauses and admins. */
+  by?: string;
 }
 
 export type LogEvent =
@@ -31,7 +44,11 @@ export type LogEvent =
   // result is computed, but the pause records built from it are what an admin
   // sees when a team complains about the other side's pausing.
   | { kind: 'phase'; token: string; phase: Phase }
-  | { kind: 'leave'; token: string; steamid: string; remaining: number }
+  // held, holdLeft and auto are pug-match 0.3.4 and later, sent when an admin
+  // changes a dropped player's clock (sm_pug_leave) or the hold ceiling
+  // releases it. Present only when the line carried them, so a 0.3.3 line
+  // parses to exactly the object it always did.
+  | { kind: 'leave'; token: string; steamid: string; remaining: number; held?: boolean; holdLeft?: number; auto?: boolean }
   | { kind: 'return'; token: string; steamid: string; remaining: number }
   | { kind: 'abandon'; token: string; steamid: string }
   | { kind: 'problem'; token: string; code: string }
@@ -72,6 +89,11 @@ export type LogEvent =
   // most interesting, value. Optional for the same reason `map` is, an older
   // plugin does not send it.
   | { kind: 'round_end'; token: string; map: string | null; half: number; surv: 'a' | 'b'; score: number; alive: number | null }
+  | { kind: 'balance_part'; token: string; half: 1 | 2; part: number; items: Record<string, string> }
+  | { kind: 'balance_end'; token: string; half: 1 | 2; parts: number; items: number }
+  | { kind: 'round_stat'; token: string; half: 1 | 2; steamid: string; stats: Record<string, number> }
+  | { kind: 'round_stats_end'; token: string; half: 1 | 2; players: number; skillDetect: boolean }
+  | { kind: 'round_mark'; token: string; half: 1 | 2; mark: 'panic' | 'finale_start' | 'finale_radio'; tMs: number }
   // One discrete thing that happened, for the live feed. Generic on purpose:
   // the plugin decides the `kind` and the page renders per kind, so a new
   // event type needs no backend change. `seq` is per-match monotonic and makes
@@ -110,6 +132,10 @@ export type LogEvent =
   // not read the connection time.
   | { kind: 'signon_drop'; steamid: string; secs: number; forced: number; name: string }
   | { kind: 'lilac_flag'; steamid: string; cheat: number; banned: boolean }
+  // A client setting that matters for fairness, from l4d_cvarwatch.smx: once
+  // per connection, only when the value is out of bounds. Only cpu_level so
+  // far (0 thins smoke, fire and the boomer cloud enough to see through).
+  | { kind: 'cvar_flag'; steamid: string; cvar: WatchedCvar; value: number; act: CvarAct }
   | {
       kind: 'input_burst'; steamid: string; burstKind: 'fire' | 'pounce' | 'bhop'; weapon: string;
       groundTicks: number; airPresses: number; serverTick: number; clientTick: number; intervals: number[];
@@ -131,7 +157,23 @@ export type LogEvent =
   // address is used to compute a hash and is never stored; see
   // src/playerNetworks.ts. `country` is absent when the GeoIP extension is
   // not loaded, which is normal and not an error.
-  | { kind: 'player_net'; steamid: string; ip: string; country: string | null };
+  | { kind: 'player_net'; steamid: string; ip: string; country: string | null }
+  // SourceTV spectators, from l4d_tvwatch.smx: no token and no steamid, since
+  // SourceTV clients never authenticate one. `slot` identifies which spectator
+  // a join and its later leave belong to. `name` is last on every variant that
+  // has one, the same protection MATCH_ROSTER's name= has, and on `leave`
+  // `reason` (the engine's own disconnect text) sits between `reason=` and the
+  // first ` name=` for the same reason. `start`/`stop` carry nothing
+  // player-controlled at all.
+  | { kind: 'sourcetv'; event: 'join'; slot: number; ip: string; country: string | null; name: string }
+  | { kind: 'sourcetv'; event: 'leave'; slot: number; reason: string; name: string }
+  | { kind: 'sourcetv'; event: 'start' | 'stop' }
+  // Every chat line and every name, from every human on the box, in a match
+  // or not, for the conduct alerts (src/conductFlags.ts). The rostered-only
+  // CHAT line above still feeds the match chat log; these feed nothing else.
+  // `team` is the game's team number: 1 spectator, 2 survivors, 3 infected.
+  | { kind: 'say'; steamid: string; team: number | null; message: string }
+  | { kind: 'name'; steamid: string; event: 'connect' | 'change'; name: string };
 
 /** Parse `key=val key=val` pairs from the remainder of a PUG line. */
 /** The phase fields shared by PHASE and HEARTBEAT. Plugin team numbers are
@@ -142,7 +184,9 @@ function phaseOf(state: string | undefined, rest: Record<string, string>): Phase
   const team = rest.team === '1' ? 'a' : rest.team === '2' ? 'b' : null;
   const limit = intOf(rest.limit) ?? 0;
   const unready = (rest.unready ?? '').split(',').filter((id) => /^\d{17}$/.test(id));
-  return { state: state as PhaseState, team, limit: limit < 0 ? 0 : limit, leave: rest.leave === '1', unready };
+  const phase: Phase = { state: state as PhaseState, team, limit: limit < 0 ? 0 : limit, leave: rest.leave === '1', unready };
+  if (state === 'paused' && /^\d{17}$/.test(rest.by ?? '')) phase.by = rest.by;
+  return phase;
 }
 
 function kv(parts: string[]): Record<string, string> {
@@ -167,6 +211,15 @@ function halfOf(s: string | undefined): number | null {
   const n = intOf(s);
   return n === 1 || n === 2 ? n : null;
 }
+
+/** The plugin encodes exactly '%' and ' ' in balance keys and values. */
+export function pctDecode(s: string): string {
+  return s.replace(/%20/g, ' ').replace(/%25/g, '%');
+}
+
+const BAL_ITEM_RE = /^[cxpfd]:/;
+const STAT_KEY_RE = /^[a-z0-9_]{1,40}$/;
+const ROUND_MARKS = new Set(['panic', 'finale_start', 'finale_radio']);
 
 /** The engine's `L MM/DD/YYYY - HH:MM:SS: ` stamp, which opens every log line. */
 const LOG_STAMP_RE = /L \d{2}\/\d{2}\/\d{4} - \d{2}:\d{2}:\d{2}: /;
@@ -273,6 +326,18 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     return { kind: 'lilac_flag', steamid, cheat, banned: banned === '1' };
   }
 
+  // Client settings from l4d_cvarwatch.smx. Anchored like L4DL, and the value
+  // is the client's own string, so only a plain number gets through.
+  if (body.startsWith('L4DV ')) {
+    const f = kv(body.split(/\s+/).slice(1));
+    const steamid = steamId64Of(f.id ?? '');
+    if (!steamid || !(WATCHED_CVARS as readonly string[]).includes(f.cvar ?? '')) return null;
+    if (!/^-?\d{1,6}(\.\d{1,6})?$/.test(f.value ?? '')) return null;
+    const act = f.act ?? 'live';
+    if (!(CVAR_ACTS as readonly string[]).includes(act)) return null;
+    return { kind: 'cvar_flag', steamid, cvar: f.cvar as WatchedCvar, value: Number(f.value), act: act as CvarAct };
+  }
+
   // Input bursts from l4d_inputstats.smx. Same anchoring as SIGNON_DROP and for
   // the same reason, but with nothing free-text on the line at all: the only
   // identity field is a steamid, so there is no name for a crafted one to
@@ -323,6 +388,30 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     };
   }
 
+  // Chat and names for the conduct alerts. The text is LAST and every other
+  // field is read from the slice BEFORE it, the CHAT treatment, so a message
+  // or a name with "steamid=..." typed into it cannot move the line onto
+  // another account. That is the whole reason these come from the plugin
+  // rather than from the engine's own say and "changed name" lines, whose
+  // player-controlled name comes FIRST and can be built to look like someone
+  // else's <uid><steamid><team>.
+  if (body.startsWith('PUGSAY ') || body.startsWith('PUGNAME ')) {
+    const say = body.startsWith('PUGSAY ');
+    const marker = say ? ' msg=' : ' name=';
+    const at = body.indexOf(marker);
+    if (at < 0) return null;
+    const head = kv(body.slice(0, at).split(/\s+/).slice(1));
+    const text = body.slice(at + marker.length);
+    const steamid = steamId64Of(head.steamid ?? '');
+    if (!steamid || !text.trim()) return null;
+    if (say) {
+      const team = intOf(head.team);
+      return { kind: 'say', steamid, team: team !== null && team >= 0 && team <= 3 ? team : null, message: text };
+    }
+    if (head.event !== 'connect' && head.event !== 'change') return null;
+    return { kind: 'name', steamid, event: head.event, name: text.slice(0, 128) };
+  }
+
   // Where a client connected from. Same protection as SIGNON_DROP and for the
   // same reason: no token, so the marker must be the first thing after the
   // engine's stamp, which no player-controlled text can be.
@@ -335,6 +424,42 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     if (!steamid || !/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return null;
     const cc = (rest.cc ?? '').toUpperCase();
     return { kind: 'player_net', steamid, ip, country: /^[A-Z]{2}$/.test(cc) ? cc : null };
+  }
+
+  // SourceTV spectators. Same protection as PUGNET and for the same reason:
+  // no token, so the marker must be the first thing after the engine's stamp.
+  if (body.startsWith('PUGTV ')) {
+    const rest = body.slice('PUGTV '.length);
+    const nameAt = rest.indexOf(' name=');
+    // start/stop have no name= at all: nothing player-controlled on the line.
+    if (nameAt < 0) {
+      const head = kv(rest.split(/\s+/));
+      return head.event === 'start' || head.event === 'stop' ? { kind: 'sourcetv', event: head.event } : null;
+    }
+    const head = rest.slice(0, nameAt);
+    const name = rest.slice(nameAt + ' name='.length).trim().slice(0, 128);
+    if (!name) return null;
+    const reasonAt = head.indexOf('reason=');
+    if (reasonAt >= 0) {
+      // `reason` is free text (the engine's own disconnect string), so, exactly
+      // like MATCH_ROSTER's name=, `event` and `slot` are read from the slice
+      // BEFORE reason= only: kv() is last-wins, and a reason containing a
+      // "slot=" token must not be able to overwrite the real slot.
+      const fields = kv(head.slice(0, reasonAt).split(/\s+/));
+      const slot = intOf(fields.slot);
+      if (fields.event !== 'leave' || slot === null || slot < 0 || slot > 255) return null;
+      const reason = head.slice(reasonAt + 'reason='.length).trim().slice(0, 128);
+      return { kind: 'sourcetv', event: 'leave', slot, reason, name };
+    }
+    // join: nothing before name= is free text (ip, cc and slot are the
+    // plugin's own values), so kv() over the whole head is safe here.
+    const fields = kv(head.split(/\s+/));
+    const slot = intOf(fields.slot);
+    const ip = fields.ip ?? '';
+    if (fields.event !== 'join' || slot === null || slot < 0 || slot > 255) return null;
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return null;
+    const cc = (fields.cc ?? '').toUpperCase();
+    return { kind: 'sourcetv', event: 'join', slot, ip, country: /^[A-Z]{2}$/.test(cc) ? cc : null, name };
   }
 
   const entered = ENTERED_RE.exec(body);
@@ -396,7 +521,15 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
     case 'RETURN': {
       const remaining = intOf(rest.remaining);
       if (!/^\d{17}$/.test(rest.steamid ?? '') || remaining === null) return null;
-      return { kind: verb === 'LEAVE' ? 'leave' : 'return', token, steamid: rest.steamid, remaining };
+      if (verb === 'RETURN') return { kind: 'return', token, steamid: rest.steamid, remaining };
+      const ev: Extract<LogEvent, { kind: 'leave' }> = { kind: 'leave', token, steamid: rest.steamid, remaining };
+      // A LEAVE starts the clock that ends a match, so an optional key this
+      // parser cannot read costs the key and never the line.
+      if (rest.held === '0' || rest.held === '1') ev.held = rest.held === '1';
+      const holdLeft = intOf(rest.hold_left);
+      if (holdLeft !== null && holdLeft >= 0) ev.holdLeft = holdLeft;
+      if (rest.auto === '1') ev.auto = true;
+      return ev;
     }
     case 'ABANDON':
       if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
@@ -537,6 +670,46 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       if (a === null || b === null) return null;
       if (rest.winner !== 'a' && rest.winner !== 'b' && rest.winner !== 'draw') return null;
       return { kind: 'match_end', token, a, b, winner: rest.winner };
+    }
+    case 'BALANCE': {
+      const half = halfOf(rest.half);
+      const part = intOf(rest.part);
+      if (half === null || part === null || part < 0) return null;
+      const items: Record<string, string> = {};
+      for (const [k, v] of Object.entries(rest)) {
+        if (BAL_ITEM_RE.test(k)) items[pctDecode(k)] = pctDecode(v);
+      }
+      return { kind: 'balance_part', token, half: half as 1 | 2, part, items };
+    }
+    case 'BALANCE_END': {
+      const half = halfOf(rest.half);
+      const parts = intOf(rest.parts);
+      const items = intOf(rest.items);
+      if (half === null || parts === null || items === null || parts < 0 || items < 0) return null;
+      return { kind: 'balance_end', token, half: half as 1 | 2, parts, items };
+    }
+    case 'ROUND_STAT': {
+      const half = halfOf(rest.half);
+      if (half === null || !/^\d{17}$/.test(rest.steamid ?? '')) return null;
+      const stats: Record<string, number> = {};
+      for (const [k, v] of Object.entries(rest)) {
+        if (k === 'half' || k === 'steamid' || !STAT_KEY_RE.test(k)) continue;
+        const n = intOf(v);
+        if (n !== null) stats[k] = n;
+      }
+      return { kind: 'round_stat', token, half: half as 1 | 2, steamid: rest.steamid, stats };
+    }
+    case 'ROUND_STATS_END': {
+      const half = halfOf(rest.half);
+      const players = intOf(rest.players);
+      if (half === null || players === null || (rest.sd !== '0' && rest.sd !== '1')) return null;
+      return { kind: 'round_stats_end', token, half: half as 1 | 2, players, skillDetect: rest.sd === '1' };
+    }
+    case 'ROUND_MARK': {
+      const half = halfOf(rest.half);
+      const tMs = intOf(rest.t);
+      if (half === null || tMs === null || tMs < 0 || !ROUND_MARKS.has(rest.kind ?? '')) return null;
+      return { kind: 'round_mark', token, half: half as 1 | 2, mark: rest.kind as 'panic' | 'finale_start' | 'finale_radio', tMs };
     }
     default:
       return null;

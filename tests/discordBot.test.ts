@@ -43,7 +43,7 @@ describe('startBot', () => {
     const bot = await startBot({ ...s, connect: async () => s.t });
     expect(bot).not.toBeNull();
     expect(s.t.live()).toHaveLength(1);
-    const reply = await s.t.handler!({ kind: 'button', customId: 'q:join', userId: '901', userName: 'alice' });
+    const reply = await s.t.handler!({ kind: 'button', customId: 'q:join', userId: '901', userName: 'alice', presserTimedOutUntil: null });
     expect(reply.ephemeral).toBe(true);
     expect(s.matchmaker.publicQueue().count).toBe(1);
     await bot!.stop();
@@ -59,7 +59,7 @@ describe('startBot', () => {
       },
     });
     expect(s.t.commands.map((c) => c.name)).toEqual(['queue']);
-    const r = await s.t.handler!({ kind: 'command', name: 'queue', userId: '1', userName: 'x', options: {} });
+    const r = await s.t.handler!({ kind: 'command', name: 'queue', userId: '1', userName: 'x', options: {}, picked: {}, presserTimedOutUntil: null });
     expect(r.payload.content).toBe('cmd queue');
     await bot!.stop();
   });
@@ -79,7 +79,7 @@ describe('startBot extras', () => {
     });
     expect(connected).toBe(true);
     expect(membership.isMember('2')).toBe(true);
-    const r = await s.t.handler!({ kind: 'button', customId: 'r:1:resolve', userId: '1', userName: 'x' });
+    const r = await s.t.handler!({ kind: 'button', customId: 'r:1:resolve', userId: '1', userName: 'x', presserTimedOutUntil: null });
     expect(r.payload.content).toBe('report button');
     await bot!.stop();
     expect(membership.isMember('2')).toBeNull();
@@ -102,5 +102,35 @@ describe('startBot extras', () => {
     expect(left).toEqual(['1']);
     await bot!.stop();
     expect(presence.inVoice('2')).toBeNull();
+  });
+
+  it('routes a modal submit by prefix and tells the transport which buttons open a modal', async () => {
+    const s = setup(ENV);
+    const bot = await startBot({
+      ...s, connect: async () => s.t,
+      opensModal: (customId) => customId.endsWith(':close'),
+      extraModals: { 't:': async (i) => ({ ephemeral: true, payload: { content: `closed with ${i.fields.outcome}`, embeds: [], components: [] } }) },
+    });
+    expect(s.t.opensModal?.('t:1:close')).toBe(true);
+    expect(s.t.opensModal?.('t:1:claim')).toBe(false);
+    const r = await s.t.handler!({ kind: 'modal', customId: 't:1:close', userId: '1', userName: 'x', fields: { outcome: 'warned' }, picked: {}, presserTimedOutUntil: null });
+    expect(r.payload.content).toBe('closed with warned');
+    const stray = await s.t.handler!({ kind: 'modal', customId: 'zz:1', userId: '1', userName: 'x', fields: {}, picked: {}, presserTimedOutUntil: null });
+    expect(stray.ephemeral).toBe(true);
+    await bot!.stop();
+  });
+
+  it('registers message commands beside the slash commands and routes them by name', async () => {
+    const s = setup(ENV);
+    const bot = await startBot({
+      ...s, connect: async () => s.t,
+      messageCommands: { 'Remove from ticket': async (i) => ({ ephemeral: true, payload: { content: `removed ${i.messageId} in ${i.channelId}`, embeds: [], components: [] } }) },
+    });
+    expect(s.t.messageCommands).toEqual([{ name: 'Remove from ticket' }]);
+    const r = await s.t.handler!({ kind: 'message_command', name: 'Remove from ticket', userId: '1', userName: 'x', channelId: 'th1', messageId: 'm9' });
+    expect(r.payload.content).toBe('removed m9 in th1');
+    const stray = await s.t.handler!({ kind: 'message_command', name: 'Something else', userId: '1', userName: 'x', channelId: 'th1', messageId: 'm9' });
+    expect(stray.ephemeral).toBe(true);
+    await bot!.stop();
   });
 });

@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb, type DB } from '../src/db.js';
-import { offloadMatchDemos, sweepDemos, friendlyName, type R2Ops } from '../src/demoOffload.js';
-import { r2FromEnv, encodeKey, demoKey, overviewKey, OVERVIEW_CACHE_CONTROL, signRequest, type R2Config } from '../src/r2.js';
+import { offloadMatchDemos, sweepDemos, friendlyName, DEMO_QUIET_MS, type R2Ops } from '../src/demoOffload.js';
+import { r2FromEnv, encodeKey, demoKey, overviewKey, OVERVIEW_CACHE_CONTROL, signRequest, replayKey, getRange, type R2Config } from '../src/r2.js';
 
 const CFG: R2Config = {
   endpoint: 'https://acct.r2.cloudflarestorage.com',
@@ -41,6 +41,9 @@ function fakeOps(over: Partial<R2Ops> & { storedBytes?: (key: string) => number 
   return { ops, calls, stored };
 }
 
+/** Seeded demos are finished recordings: their mtime is put 20 minutes back so
+ *  they clear the quiet period. A test about a demo still being written sets
+ *  its own mtime. */
 function seedMatch(id: number, state: string, maps: number, sizes: number[] = []) {
   db.prepare("INSERT INTO matches (id, season_id, state, campaign, token) VALUES (?, 1, ?, 'dead_air', ?)")
     .run(id, state, TOKEN);
@@ -48,6 +51,8 @@ function seedMatch(id: number, state: string, maps: number, sizes: number[] = []
     const name = `pug_${TOKEN}_${o}_l4d_vs_airport0${o + 1}_x.dem`;
     const bytes = sizes[o] ?? 100;
     writeFileSync(join(dir, name), 'x'.repeat(bytes));
+    const old = (Date.now() - 20 * 60 * 1000) / 1000;
+    utimesSync(join(dir, name), old, old);
     db.prepare('INSERT INTO match_demos (match_id, ordinal, map, filename, bytes) VALUES (?, ?, ?, ?, ?)')
       .run(id, o, `m${o}`, name, bytes);
   }
@@ -152,6 +157,35 @@ describe('offloadMatchDemos', () => {
     // The friendly name travels with the object, which is what makes the
     // redirect usable from the Source console.
     expect(calls.some((c) => c.includes('pug1-1.dem'))).toBe(true);
+  });
+
+  it('does not upload a demo that is still being written, and records nothing', async () => {
+    // Match 144 on 2026-09-23: the match was marked over while SourceTV kept
+    // recording, the demo went up at 1.2 MB and the finished file was 41 MB.
+    seedMatch(1, 'aborted', 1, [100]);
+    const name = `pug_${TOKEN}_0_l4d_vs_airport01_x.dem`;
+    const recent = (Date.now() - 2 * 60 * 1000) / 1000;
+    utimesSync(join(dir, name), recent, recent);
+    const { ops, calls } = fakeOps({ storedBytes: () => 100 });
+
+    const r = await offloadMatchDemos(db, CFG, 1, dir, { deleteLocal: true, ops });
+
+    expect(r).toMatchObject({ uploaded: 0, skipped: 1, failed: 0 });
+    expect(calls).toEqual([]);
+    expect(db.prepare('SELECT r2_key FROM match_demos').get()).toEqual({ r2_key: null });
+    expect(existsSync(join(dir, name))).toBe(true);
+  });
+
+  it('uploads it once it has been quiet for the whole period', async () => {
+    seedMatch(1, 'aborted', 1, [100]);
+    const name = `pug_${TOKEN}_0_l4d_vs_airport01_x.dem`;
+    const quiet = (Date.now() - DEMO_QUIET_MS - 1000) / 1000;
+    utimesSync(join(dir, name), quiet, quiet);
+    const { ops } = fakeOps({ storedBytes: () => 100 });
+
+    const r = await offloadMatchDemos(db, CFG, 1, dir, { deleteLocal: true, ops });
+
+    expect(r).toMatchObject({ uploaded: 1, failed: 0 });
   });
 
   it('keeps the local file and records nothing when the upload throws', async () => {
@@ -347,5 +381,93 @@ describe('overview objects', () => {
 
   it('caches hard, because a name never changes meaning', () => {
     expect(OVERVIEW_CACHE_CONTROL).toContain('immutable');
+  });
+});
+
+describe('replayKey', () => {
+  it('groups by match and names the round, never the token', () => {
+    expect(replayKey(92, 3, 2)).toBe('replays/92/3_2.rpl');
+    expect(replayKey(92, 3, 2)).not.toMatch(/[0-9a-f]{32}/);
+  });
+});
+
+describe('getRange', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => { globalThis.fetch = realFetch; });
+
+  it('asks for the bytes from `from` to the end, signed, and reports the total', async () => {
+    let seen: { url: string; headers: Record<string, string> } | null = null;
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      seen = { url, headers: init.headers as Record<string, string> };
+      return new Response(Buffer.from('world'), { status: 206, headers: { 'content-range': 'bytes 6-10/11' } });
+    }) as typeof fetch;
+    const r = await getRange(CFG, 'replays/1/0_1.rpl', 6);
+    expect(r).toEqual({ body: Buffer.from('world'), total: 11 });
+    expect(seen!.url).toBe('https://acct.r2.cloudflarestorage.com/riverside-demos/replays/1/0_1.rpl');
+    expect(seen!.headers.range).toBe('bytes=6-');
+    expect(seen!.headers.Authorization).toMatch(/SignedHeaders=[^,]*range/);
+  });
+
+  it('answers an offset at or past the end with an empty body and the total', async () => {
+    globalThis.fetch = (async () => new Response(null, { status: 416, headers: { 'content-range': 'bytes */11' } })) as typeof fetch;
+    expect(await getRange(CFG, 'k', 11)).toEqual({ body: Buffer.alloc(0), total: 11 });
+  });
+
+  it('returns null for a missing object and throws on anything else', async () => {
+    globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof fetch;
+    expect(await getRange(CFG, 'k', 0)).toBeNull();
+    globalThis.fetch = (async () => new Response(null, { status: 500 })) as typeof fetch;
+    await expect(getRange(CFG, 'k', 0)).rejects.toThrow(/R2 GET k failed: 500/);
+  });
+
+  it('reads a whole object on a 200 (from 0) and takes the total from content-length', async () => {
+    globalThis.fetch = (async () => new Response(Buffer.from('hello'), { status: 200, headers: { 'content-length': '5' } })) as typeof fetch;
+    expect(await getRange(CFG, 'k', 0)).toEqual({ body: Buffer.from('hello'), total: 5 });
+  });
+
+  // New minor 1 from the final review: on a 416 without a Content-Range
+  // header, `total` used to become 0 rather than the object's real size.
+  it('falls back to a HEAD for the total when a 416 carries no Content-Range', async () => {
+    let headCalls = 0;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      if (init.method === 'HEAD') {
+        headCalls++;
+        return new Response(null, { status: 200, headers: { 'content-length': '11' } });
+      }
+      return new Response(null, { status: 416 }); // no content-range header at all
+    }) as typeof fetch;
+    expect(await getRange(CFG, 'k', 999)).toEqual({ body: Buffer.alloc(0), total: 11 });
+    expect(headCalls).toBe(1);
+  });
+
+  it('does not fall back to HEAD when the 416 does carry Content-Range', async () => {
+    let headCalls = 0;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      if (init.method === 'HEAD') { headCalls++; return new Response(null, { status: 200 }); }
+      return new Response(null, { status: 416, headers: { 'content-range': 'bytes */11' } });
+    }) as typeof fetch;
+    expect(await getRange(CFG, 'k', 999)).toEqual({ body: Buffer.alloc(0), total: 11 });
+    expect(headCalls).toBe(0);
+  });
+
+  it('throws when the 416 fallback HEAD also fails, rather than lying about the total', async () => {
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      if (init.method === 'HEAD') return new Response(null, { status: 500 });
+      return new Response(null, { status: 416 });
+    }) as typeof fetch;
+    await expect(getRange(CFG, 'k', 999)).rejects.toThrow();
+  });
+
+  // New minor 2: a hung R2 connection must not hold a viewer request open
+  // forever. Only getRange gets this; put and head are shared with demos and
+  // out of scope for this branch.
+  it('bounds its fetch with a timeout signal', async () => {
+    let seenSignal: AbortSignal | undefined;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      seenSignal = init.signal as AbortSignal | undefined;
+      return new Response(Buffer.from('hello'), { status: 200, headers: { 'content-length': '5' } });
+    }) as typeof fetch;
+    await getRange(CFG, 'k', 0);
+    expect(seenSignal).toBeInstanceOf(AbortSignal);
   });
 });

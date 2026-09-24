@@ -85,3 +85,18 @@ describe('dlc4MissionsDir', () => {
     expect(loadConfig({}).dlc4MissionsDir).toBe('');
   });
 });
+
+describe('ticketAttachmentsDir', () => {
+  it('defaults to a directory beside the database', () => {
+    expect(loadConfig({}).ticketAttachmentsDir).toBe('data/ticket-attachments');
+    expect(loadConfig({ TICKET_ATTACHMENTS_DIR: ' /mnt/files ' }).ticketAttachmentsDir).toBe('/mnt/files');
+  });
+});
+
+describe('replayLiveDir', () => {
+  it('defaults to replays-live beside the database, and takes REPLAY_LIVE_DIR', () => {
+    expect(loadConfig({}).replayLiveDir).toBe('data/replays-live');
+    expect(loadConfig({ DB_PATH: '/srv/pug/data/pug.db' }).replayLiveDir).toBe('/srv/pug/data/replays-live');
+    expect(loadConfig({ REPLAY_LIVE_DIR: ' /mnt/live ' }).replayLiveDir).toBe('/mnt/live');
+  });
+});

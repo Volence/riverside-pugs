@@ -70,6 +70,9 @@ export function resolve(
  * custom_id scheme: q:join, q:leave, l:<lobbyId>:ready,
  * l:<lobbyId>:vote:<campaign>, m:<matchId>:connect, m:<matchId>:endorse,
  * e:<matchId>:p:<steamid>, e:<matchId>:k:<steamid>:<kind>.
+ *
+ * Ticket buttons (t:<ticketId>:...) are routed to ticketButtons.ts before
+ * they reach this function.
  */
 export async function handleButton(
   deps: ControllerDeps, i: Extract<BotInteraction, { kind: 'button' }>,
@@ -164,8 +167,9 @@ export async function handleButton(
     const tv = spectateFor(deps.db, serverOfMatch(deps.db, matchId));
     if (!tv) return say('That match has no SourceTV to watch.');
     const line = tv.password ? `password ${tv.password}; connect ${tv.host}:${tv.port}` : `connect ${tv.host}:${tv.port}`;
+    const when = tv.delay > 0 ? `${tv.delay} seconds behind live` : 'live, no delay. SourceTV spectators are recorded';
     return say(
-      `Watch in game, ${tv.delay} seconds behind live:\n\`\`\`\n${line}\n\`\`\`Spectator slots are limited, so it can be full.`,
+      `Watch in game, ${when}:\n\`\`\`\n${line}\n\`\`\`Spectator slots are limited, so it can be full.`,
     );
   }
 

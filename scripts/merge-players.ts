@@ -60,7 +60,7 @@ const backup = `${config.dbPath}.before-merge-${Date.now()}`;
 copyFileSync(config.dbPath, backup);
 console.log(`\nbackup: ${backup}`);
 
-const done = mergePlayers(db, { from, into });
+const done = mergePlayers(db, { from, into, adminSteamIds: config.adminSteamIds });
 console.log(`merged. ${done.matchesMoved} matches moved, ${done.matchesCollapsed} collapsed.`);
 
 const after = db.prepare(

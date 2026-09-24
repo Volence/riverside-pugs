@@ -36,9 +36,13 @@ export function migrateLegacyReports(db: DB): number {
     `INSERT INTO tickets (target_id, status, outcome, outcome_note, restricted, created_at, closed_at, closed_by)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
+  // announced_at is set to the report's own created_at: a migrated report is
+  // never news, and the admin feed must not announce a backlog of old cases
+  // the first time the site boots with tickets. feed_held follows the ticket's
+  // restriction, exactly as filing sets it on a live report.
   const insReport = db.prepare(
-    `INSERT INTO ticket_reports (ticket_id, reporter_id, category, text, match_id, created_at, legacy_report_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO ticket_reports (ticket_id, reporter_id, category, text, match_id, created_at, legacy_report_id, feed_held, announced_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   // An old report can point at a match that was deleted by hand, and
   // ticket_reports.match_id is a foreign key: keep the report, lose the match.
@@ -64,7 +68,7 @@ export function migrateLegacyReports(db: DB): number {
       }
       if (restricted) seedAccess(db, ticketId, r.target_id, []);
       const matchId = matchExists.get(r.match_id) ? r.match_id : null;
-      insReport.run(ticketId, r.reporter_id, r.category, r.text, matchId, r.created_at, r.id);
+      insReport.run(ticketId, r.reporter_id, r.category, r.text, matchId, r.created_at, r.id, restricted, r.created_at);
     }
   })();
   return rows.length;

@@ -1,11 +1,13 @@
-import { useState } from 'preact/hooks';
-import { api, type MatchDetail as MatchDetailData, type MatchPlayerStats, type Team } from '../api';
+import { Fragment } from 'preact';
+import { useRef, useState } from 'preact/hooks';
+import { api, type MatchDetail as MatchDetailData, type MatchOngoing, type MatchPlayerStats, type ReportMoment, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { campaignName, deriveLiveStats, fmtBytes, fmtDate, fmtLatency, mapName, orderStatKeysBySide, statGroupStarts, winnerLabel } from '../format';
 import { clearLatencyByPlayer } from '../clearLatency';
-import { Empty, Panel, PageSkeleton } from '../components/bits';
+import { Empty, Panel, PageSkeleton, PlayerLink } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { VersusHeader } from '../components/VersusHeader';
+import { StaffChatLog } from './StaffChatLog';
 import { StatTable, EventFeed, DemoPlaybackHint, type StatRow } from '../components/StatTable';
 import { ReportPlayer } from '../components/ReportPlayer';
 import { EndorsePanel } from '../components/EndorsePanel';
@@ -20,16 +22,19 @@ import { Viewer } from '../replay/Viewer';
  * called from inside a plain array-map callback.
  */
 function MapReplay(
-  { matchId, ordinal, names, initialHalf, seekMs }: {
+  { matchId, ordinal, names, initialHalf, seekMs, onMoment }: {
     matchId: number; ordinal: number; names: Record<string, string>;
     /** The round a deep link asked for, already validated by the caller
      *  against this match's own rounds. Undefined for an ordinary visit. */
     initialHalf?: number;
     /** Only meaningful for `initialHalf`'s own round: see the seek prop below. */
     seekMs?: number;
+    /** Given for a signed-in viewer: attach what is on screen to a report. */
+    onMoment?: (m: ReportMoment) => void;
   },
 ) {
   const [half, setHalf] = useState(initialHalf ?? 1);
+  const momentRef = useRef(0);
   const timeline = useFetch(
     (s) => api.replayTimeline(matchId, ordinal, half, s),
     [matchId, ordinal, half],
@@ -40,6 +45,12 @@ function MapReplay(
       <div class="replay__rounds">
         <button class={`chip ${half === 1 ? 'is-on' : ''}`} onClick={() => setHalf(1)}>Round 1</button>
         <button class={`chip ${half === 2 ? 'is-on' : ''}`} onClick={() => setHalf(2)}>Round 2</button>
+        {onMoment && (
+          <button class="chip" type="button" title="Pause on what you want the moderators to see, then press this"
+            onClick={() => onMoment({ ordinal, half, tMs: Math.round(momentRef.current) })}>
+            Report this moment
+          </button>
+        )}
       </div>
       {/* A map played before recording existed has no match_replays row.
           Viewer renders its own "couldn't load" state for that, which is the
@@ -54,6 +65,7 @@ function MapReplay(
         // possibility: Viewer never remounts across a half switch, only its
         // spec changes) never lands the wrong moment.
         seekMs={initialHalf != null && half === initialHalf ? seekMs : undefined}
+        momentRef={momentRef}
       />
     </>
   );
@@ -206,7 +218,91 @@ function ForecastPanel(
   );
 }
 
-export function MatchDetail({ id, me }: { id: string; me: string | null }) {
+/**
+ * Every SourceTV spectator on this match, admin only.
+ *
+ * "Same connection as" is evidence, not proof: it names every account whose
+ * recorded connection matches this session's, which is exactly as far as the
+ * server itself is willing to go (see sourcetvSessions.ts). This must never
+ * be worded as the spectator BEING one of those accounts.
+ */
+function SourceTvPanel({ sessions }: { sessions: NonNullable<MatchDetailData['sourcetv']> }) {
+  return (
+    <Panel>
+      <h3>SourceTV watchers <span class="muted">(admin only)</span></h3>
+      {sessions.length === 0
+        ? <Empty>Nobody watched on SourceTV.</Empty>
+        : (
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th><th>Country</th><th>Joined</th><th>Left</th>
+                  <th>Leave reason</th><th>Same connection as</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.map((s) => (
+                  <tr key={s.id}>
+                    <td>{s.name}</td>
+                    <td>{s.country ?? ''}</td>
+                    <td class="num">{fmtDate(s.joinedAt)}</td>
+                    <td class="num">{s.leftAt ? fmtDate(s.leftAt) : ''}</td>
+                    <td>{s.leaveReason ?? ''}</td>
+                    <td>
+                      same connection as{' '}
+                      {s.accounts.length === 0
+                        ? 'no known account'
+                        : s.accounts.map((a, i) => (
+                          <Fragment key={a.steamid}>
+                            {i > 0 && ', '}
+                            <PlayerLink steamid={a.steamid} name={a.name ?? a.steamid} />
+                          </Fragment>
+                        ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          )}
+    </Panel>
+  );
+}
+
+/** Mirrors the wording on the Discord card (src/discord/presenter.ts
+ *  STATE_LINE) so a player reads the same sentence on the site as in Discord. */
+const ONGOING_LINE: Record<MatchOngoing['state'], string> = {
+  waiting: 'Waiting for a server to free up.',
+  configuring: 'Setting up the server.',
+  live: 'The match is live right now.',
+};
+
+/**
+ * What /match/:id shows while the match named in the URL is still being
+ * played rather than finished.
+ *
+ * Every admin-feed post about a live match links to this same URL, and the
+ * link has to keep working once the match ends: this is the page it shows in
+ * between, not a dead end. There is no roster or score here on purpose: the
+ * server only ever sends id, campaign and state for a match still in
+ * progress, never the server address, the token or a password.
+ */
+function OngoingMatch({ data }: { data: MatchOngoing }) {
+  return (
+    <div class="page page--match">
+      <Panel>
+        <PageHeader eyebrow="In progress" title={`Match #${data.id}: ${campaignName(data.campaign)}`} />
+        <Empty>
+          Match #{data.id} is still being played. {ONGOING_LINE[data.state]}
+          {' '}Watch it on the <a href="/live">Live page</a>, or come back here once it has finished.
+        </Empty>
+      </Panel>
+    </div>
+  );
+}
+
+export function MatchDetail({ id, me, staff = false }: { id: string; me: string | null; staff?: boolean }) {
   const { data, error } = useFetch((s) => api.match(id, s), [id]);
 
   if (error) {
@@ -217,6 +313,8 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
     );
   }
   if (!data) return <PageSkeleton variant="match" panels={3} />;
+
+  if (data.ongoing) return <OngoingMatch data={data} />;
 
   const { match, maps, players } = data;
   // Roster names for the viewer's follow row and timeline rail, keyed by
@@ -298,6 +396,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   const rowFor = (p: typeof players[number]): StatRow => ({
     steamid: p.steamid,
     name: p.name,
+    discordName: p.discordName,
     title: p.title,
     captured: wasCaptured(p),
     stats: deriveLiveStats({
@@ -324,6 +423,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
     players.filter((p) => p.team === team).map((p) => ({
       steamid: p.steamid,
       name: p.name,
+      discordName: p.discordName,
       title: p.title,
       captured: mp.stats?.[p.steamid] !== undefined,
       stats: deriveLiveStats(mp.stats?.[p.steamid] ?? {}),
@@ -350,6 +450,12 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   // winner in the eyebrow.
   const voided = Boolean(match.voidedAt);
   const aborted = match.state === 'aborted' && !voided;
+  // A voided match's ratings were rebuilt without it, so whatever it once
+  // moved is no longer true; an aborted one never moved anything.
+  const showSr = match.state === 'completed' && !voided;
+  const versusName = (p: typeof players[number]) => (
+    showSr ? { name: p.name, srDelta: p.srDelta ?? null } : p.name
+  );
   const outcome = voided ? `${winnerLabel(match.winner!)} · voided`
     : aborted ? 'Aborted'
       : winnerLabel(match.winner!);
@@ -369,6 +475,8 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   const [ordinal, setOrdinal] = useState<number | null>(
     () => deepLink.ordinal ?? initialOrdinal(maps, typeof location === 'undefined' ? '' : location.hash),
   );
+  // A moment picked in the viewer, waiting in the report form below.
+  const [moment, setMoment] = useState<ReportMoment | null>(null);
   const selectMap = (o: number) => {
     setOrdinal(o);
     if (typeof history !== 'undefined') history.replaceState(null, '', `#map-${o + 1}`);
@@ -409,8 +517,8 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
       )}
 
       <VersusHeader
-        teamA={teamPlayers('a').map((p) => p.name)}
-        teamB={teamPlayers('b').map((p) => p.name)}
+        teamA={teamPlayers('a').map(versusName)}
+        teamB={teamPlayers('b').map(versusName)}
         scoreA={match.teamAScore}
         scoreB={match.teamBScore}
         eyebrowA={eyebrowA}
@@ -424,6 +532,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
 
       <div class="stack">
         {data.forecast && <ForecastPanel f={data.forecast} winner={match.winner} />}
+        {data.sourcetv && <SourceTvPanel sessions={data.sourcetv} />}
 
         <Panel>
           <h3>Match totals</h3>
@@ -497,6 +606,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
                 names={playerNames}
                 initialHalf={linkedHere ? deepLink.half ?? undefined : undefined}
                 seekMs={linkedHere ? deepLink.seekMs : undefined}
+                onMoment={me ? setMoment : undefined}
               />
               {Object.keys(mp.stats ?? {}).length > 0
                 ? (
@@ -537,9 +647,16 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
           </Panel>
         )}
 
+        {staff && (match.state === 'completed' || match.state === 'aborted') && (
+          <StaffChatLog
+            matchId={match.id}
+            highlight={typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('chat')}
+          />
+        )}
+
         {me && (
           <Panel>
-            <ReportPlayer matchId={match.id} />
+            <ReportPlayer matchId={match.id} moment={moment} onClearMoment={() => setMoment(null)} />
           </Panel>
         )}
       </div>

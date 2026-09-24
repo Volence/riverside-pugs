@@ -342,6 +342,26 @@ export interface DrawArgs {
   nowMs: number;
   /** If given, filled with what was drawn where, in draw order. */
   hits?: HitItem[];
+  /** The translate the follow camera applied to the context before this
+   *  call, if any. Everything here is drawn in pre-translate coordinates, so
+   *  this is the only way to know which of them the viewer can actually see.
+   *  Absent means no translate: the free camera moves the view instead. */
+  shift?: { x: number; y: number };
+}
+
+/**
+ * Whether any of an avatar's disc lands on the canvas.
+ *
+ * `px, py` are in drawScene's own coordinates, before the follow camera's
+ * translate, which is why the shift is needed to answer this at all.
+ */
+export function avatarOnStage(
+  px: number, py: number, r: number, width: number, height: number,
+  shift: { x: number; y: number } = { x: 0, y: 0 },
+): boolean {
+  const x = px + shift.x;
+  const y = py + shift.y;
+  return x + r > 0 && x - r < width && y + r > 0 && y - r < height;
 }
 
 /**
@@ -822,7 +842,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
         pictogram: survivor ? null : pictogramFor(pl.cls),
         badge: { text: slotNumber(pl.slot), ink: '#ffffff' },
       });
-      if (a.show.names) {
+      if (a.show.names && avatarOnStage(p.px, p.py, r, a.width, a.height, a.shift)) {
         const name = a.names[a.slots[pl.slot]] || slotLabel(pl.slot);
         labels.push({ ax: p.px + r, ay: p.py, px: p.px + r + LABEL_GAP, py: p.py, text: name, color: GHOST_COLOR });
       }
@@ -900,7 +920,14 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     // screen, so the whole set is de-conflicted in one pass after the loop.
     // Drawing them last also puts every label above every avatar, instead
     // of leaving the ones drawn early to be painted over.
-    if (a.show.names) {
+    //
+    // Only for an avatar the viewer can see. A label sits to the RIGHT of
+    // its avatar, so a player just past the left edge of a zoomed view used
+    // to leave its whole name on screen with nothing beside it, and every
+    // such player's name stacked up against that edge (owner report,
+    // 2026-09-18). It also took part in the de-confliction, pushing the
+    // labels of players who were on screen down for no visible reason.
+    if (a.show.names && avatarOnStage(p.px, p.py, r, a.width, a.height, a.shift)) {
       const name = a.names[a.slots[pl.slot]] || slotLabel(pl.slot);
       labels.push({
         ax: p.px + r, ay: p.py,

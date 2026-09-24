@@ -351,8 +351,8 @@ export class SelfStartedMatches {
         const id = Number(
           db
             .prepare(
-              `INSERT INTO matches (season_id, state, campaign, server_id, token)
-               VALUES (?, 'live', ?, ?, ?)`,
+              `INSERT INTO matches (season_id, state, campaign, server_id, token, origin)
+               VALUES (?, 'live', ?, ?, ?, 'in_game')`,
             )
             .run(currentSeasonId(db), campaign, serverId, token).lastInsertRowid,
         );

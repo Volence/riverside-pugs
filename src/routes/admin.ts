@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DB } from '../db.js';
+import { hasStaffFlag } from '../tickets/store.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { makeRequireAdmin } from './guards.js';
 import type { ServerReleaser } from '../serverRelease.js';
@@ -25,10 +26,20 @@ import { publishAdminEvent } from '../adminFeed.js';
 import { publishBanChange } from '../banEvents.js';
 import { hasActiveBan } from '../banState.js';
 import { matchInFlight, pendingRoundCount, type IntegrityJobs, type JobMode } from '../integrity/job.js';
-import { restrictOpenTicketAbout } from '../tickets/store.js';
+import { holdFeedAbout, reseedOrphanedTickets } from '../tickets/store.js';
+import { publishTicketSignal } from '../tickets/signals.js';
 import type { ServerAdminSync } from '../serverAdmins.js';
 import { LOG_AUTH_MODES, newLogSecret, setLogAuthMode, setLogSecret, type LogAuth, type LogAuthMode } from '../logAuth.js';
 import { endSessions } from '../session.js';
+import { applyLeaveState, isRostered } from '../presence.js';
+import { LEAVE_ACTIONS, LEAVE_ADD_MAX_S, leaveCommand, parseLeaveReply, type LeaveAction, type ServerQuery } from '../leaveControl.js';
+import { buildLiveBoard, type VoiceLookup } from '../admin/liveBoard.js';
+import { redactSecrets } from '../redact.js';
+import { editPatch, listPatches, patchDetail, serverDrift } from '../balancePatches.js';
+import { compareSides, metricDetail } from '../metrics/compare/compare.js';
+import { memo, parseSideParams } from '../metrics/compare/cache.js';
+import { METRICS } from '../metrics/registry.js';
+import { SUB_PHASES, type Phase } from '../metrics/types.js';
 
 export interface AdminRouteOpts {
   db: DB;
@@ -50,6 +61,13 @@ export interface AdminRouteOpts {
   /** Pushes one server its log secret over rcon; true when the box knew the
    *  cvar. Absent in tests that do not exercise it, where the route says so. */
   logSecretPusher?: (server: ServerRow, secret: string) => Promise<boolean>;
+  /** Runs one console command on one server and returns its reply. Absent in
+   *  tests that do not exercise it, where the route says so. */
+  serverQuery?: ServerQuery;
+  /** Who is in a Discord voice channel, for the live board's "not in a voice
+   *  channel" reason. Null or absent when Discord is not configured, and then
+   *  the board simply never gives that reason. */
+  voice?: VoiceLookup | null;
   /** Asks Steam about one player now and resolves with the rows written.
    *  Absent on an install with no Steam api key, where the route says so. */
   refreshSignals?: (steamid: string) => Promise<number>;
@@ -61,7 +79,7 @@ export interface AdminRouteOpts {
 /** Everything under /api/admin. Each route starts with requireAdmin and each
  *  mutation ends with logAdmin. */
 export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): Promise<void> {
-  const { db, matchmaker, releaser, broadcast, integrityJobs, adminSync, logAuth, logSecretPusher, adminSteamIds } = opts;
+  const { db, matchmaker, releaser, broadcast, integrityJobs, adminSync, logAuth, logSecretPusher, serverQuery, adminSteamIds } = opts;
   const requireAdmin = makeRequireAdmin(db);
   const dlc4Probe = opts.dlc4Probe ?? serverHasDlc4;
 
@@ -141,13 +159,19 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const was = getPlayer(db, t.steamid)?.is_admin === 1;
     db.transaction(() => {
       db.prepare('UPDATE players SET is_admin = ? WHERE steamid = ?').run(isAdmin ? 1 : 0, t.steamid);
-      if (isAdmin) restrictOpenTicketAbout(db, t.steamid, adminSteamIds);
+      if (isAdmin) {
+        holdFeedAbout(db, t.steamid);
+        // A restricted ticket nobody could be given is given to the first
+        // admin who could take it, which may be this one.
+        reseedOrphanedTickets(db, adminSteamIds);
+      }
       // A change of rights starts from a fresh sign-in: a session that was open
       // while somebody was an admin does not outlive their being one. Only on
       // a real change, so re-saving the same value signs nobody out.
       if (was !== isAdmin) endSessions(db, t.steamid);
     })();
     logAdmin(db, t.adminId, 'set_admin', t.steamid, { isAdmin });
+    publishTicketSignal({ kind: 'staff' });
     return { ok: true };
   });
 
@@ -170,13 +194,14 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const was = getPlayer(db, t.steamid)?.is_mod === 1;
     db.transaction(() => {
       db.prepare('UPDATE players SET is_mod = ? WHERE steamid = ?').run(isMod ? 1 : 0, t.steamid);
-      if (isMod) restrictOpenTicketAbout(db, t.steamid, adminSteamIds);
+      if (isMod) holdFeedAbout(db, t.steamid);
       // The same rule as the admin flag above: a demoted moderator loses the
       // tickets now, not when a 30 day session runs out, and a promoted one
       // starts from a fresh sign-in. Only on a real change.
       if (was !== isMod) endSessions(db, t.steamid);
     })();
     logAdmin(db, t.adminId, 'set_mod', t.steamid, { isMod });
+    publishTicketSignal({ kind: 'staff' });
     return { ok: true };
   });
 
@@ -207,7 +232,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     }
     try {
       const plan = mergePlayers(db, {
-        from: t.steamid, into, dryRun: dryRun === true, by: t.adminId,
+        from: t.steamid, into, dryRun: dryRun === true, by: t.adminId, adminSteamIds,
       });
       if (dryRun === true) return { plan };
       logAdmin(db, t.adminId, 'merge_player', t.steamid, { ...plan });
@@ -274,7 +299,10 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
       return reply.code(400).send({ error: 'a note needs text (up to 2000 characters)' });
     }
     addNote(db, t.steamid, t.adminId, text.trim());
-    logAdmin(db, t.adminId, 'note', t.steamid);
+    // The words go in the audit row (and so the admin feed), except for a note
+    // about staff: they may read the log and the feed, and the note is for
+    // those who can open their file.
+    logAdmin(db, t.adminId, 'note', t.steamid, hasStaffFlag(db, t.steamid) ? {} : { text: text.trim() });
     return { ok: true };
   });
 
@@ -307,6 +335,87 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     logAdmin(db, adminId, 'void_match', id, { reason: reason.trim() });
     broadcast('refresh');
     return { ok: true };
+  });
+
+  app.get('/api/admin/live', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    return buildLiveBoard(db, { voice: opts.voice ?? null });
+  });
+
+  /**
+   * Hold, release, extend or end one dropped player's reconnect allowance.
+   *
+   * The allowance lives in the plugin, so this is an rcon command and its
+   * answer. Only a PUGOK changes the board. A refusal, an old plugin, an
+   * unreachable box and an unreadable answer all leave presence exactly as it
+   * was and come back as the error the card shows. The attempt is audited
+   * either way, the same way the log secret push is.
+   */
+  app.post('/api/admin/live/:matchId/players/:steamid/leave', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const { matchId: rawId, steamid } = req.params as { matchId: string; steamid: string };
+    const matchId = Number(rawId);
+    const { action, seconds } = (req.body ?? {}) as { action?: unknown; seconds?: unknown };
+    if (typeof action !== 'string' || !(LEAVE_ACTIONS as readonly string[]).includes(action)) {
+      return reply.code(400).send({ error: 'action must be hold, release, add or end' });
+    }
+    let secs: number | undefined;
+    if (action === 'add') {
+      secs = Number(seconds);
+      if (!Number.isInteger(secs) || secs < 1 || secs > LEAVE_ADD_MAX_S) {
+        return reply.code(400).send({ error: `seconds must be a whole number between 1 and ${LEAVE_ADD_MAX_S}` });
+      }
+    }
+    const match = db.prepare('SELECT state, token, server_id FROM matches WHERE id = ?').get(matchId) as
+      | { state: string; token: string | null; server_id: number | null } | undefined;
+    if (!match) return reply.code(404).send({ error: 'no such match' });
+    if (match.state !== 'configuring' && match.state !== 'live') return reply.code(409).send({ error: `match is ${match.state}` });
+    if (!isRostered(db, matchId, steamid)) return reply.code(404).send({ error: 'not on that match\'s roster' });
+    const server = match.server_id !== null ? getServer(db, match.server_id) : undefined;
+    if (!match.token || !server) return reply.code(409).send({ error: 'that match has no server yet' });
+    if (!serverQuery) return reply.code(503).send({ error: 'clock control is not available here' });
+
+    const detail = { matchId, action, ...(secs === undefined ? {} : { seconds: secs }) };
+    // Built OUTSIDE the try. leaveCommand asserts its arguments, and a throw
+    // from it means our own tables hold something that must never become a
+    // console line; reported as a 502 "could not reach Dallas" it would read
+    // as a box being down, and someone would go and look at the box.
+    const command = leaveCommand(match.token, steamid, action as LeaveAction, secs);
+    // Anything the box says back can quote the command, and the command holds
+    // the token, which is this match's sv_password.
+    const hide = (text: string): string => redactSecrets(text, [match.token]);
+    let body: string;
+    try {
+      body = await serverQuery(server, command);
+    } catch (err) {
+      const message = hide(err instanceof Error ? err.message : String(err));
+      logAdmin(db, adminId, 'leave_clock', steamid, { ...detail, ok: false, error: message });
+      return reply.code(502).send({ error: `could not reach ${server.name}: ${message}` });
+    }
+    let answer = parseLeaveReply(body);
+    // An rcon response carries whatever else was on the console. An answer
+    // about another player is somebody else's answer, and leave_control is
+    // deliberately NOT set to 1 on it: an answer we are not reading tells us
+    // nothing about the plugin this command reached.
+    if (answer.ok && answer.steamid !== steamid) answer = { ok: false, oldPlugin: false, error: 'the answer was about another player' };
+    if (!answer.ok) {
+      if (answer.oldPlugin) {
+        db.prepare('UPDATE matches SET leave_control = 0 WHERE id = ?').run(matchId);
+        broadcast('refresh');
+      }
+      const error = hide(answer.error);
+      logAdmin(db, adminId, 'leave_clock', steamid, { ...detail, ok: false, error });
+      return reply.code(409).send({
+        error: answer.oldPlugin ? error : `${server.name} refused: ${error}`,
+        code: answer.oldPlugin ? 'old_plugin' : 'refused',
+      });
+    }
+    db.prepare('UPDATE matches SET leave_control = 1 WHERE id = ?').run(matchId);
+    applyLeaveState(db, matchId, steamid, answer.state);
+    logAdmin(db, adminId, 'leave_clock', steamid, { ...detail, ok: true, remaining: answer.state.remaining, held: answer.state.held });
+    broadcast('refresh');
+    return { ok: true, reply: answer.line, state: answer.state };
   });
 
   app.post('/api/admin/servers/:id/idle', async (req, reply) => {
@@ -387,8 +496,11 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     try {
       pushed = await logSecretPusher(server, secret);
     } catch (err) {
-      logAdmin(db, adminId, 'server_log_secret', id, { rotated: false, pushed: false, error: String(err) });
-      return reply.code(502).send({ error: `could not reach ${server.name}: ${err instanceof Error ? err.message : String(err)}` });
+      // The push is `sm_pug_log_secret "<secret>"`, and an rcon timeout names
+      // the command it gave up on, so the failure message is the secret.
+      const message = redactSecrets(err instanceof Error ? err.message : String(err), [secret]);
+      logAdmin(db, adminId, 'server_log_secret', id, { rotated: false, pushed: false, error: message });
+      return reply.code(502).send({ error: `could not reach ${server.name}: ${message}` });
     }
     const rotated = rotate && pushed;
     if (rotated) setLogSecret(db, id, secret);
@@ -645,5 +757,73 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const adminId = requireAdmin(req, reply);
     if (!adminId) return reply;
     return { actions: recentActions(db, adminId) };
+  });
+
+  // Balance patches (balance analytics piece 1).
+  app.get('/api/admin/balance/patches', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    return { patches: listPatches(db) };
+  });
+
+  app.get('/api/admin/balance/patches/:id', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    const d = patchDetail(db, Number((req.params as { id: string }).id));
+    return d ?? reply.code(404).send({ error: 'no such patch' });
+  });
+
+  app.get('/api/admin/balance/drift', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    return { servers: serverDrift(db) };
+  });
+
+  app.get('/api/admin/balance/compare', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    const q = req.query as Record<string, unknown>;
+    const sides = parseSideParams(q);
+    if (typeof sides === 'string') return reply.code(400).send({ error: sides });
+    const phases = q.phases === 'split' ? 'split' : 'all';
+    const key = `compare|${JSON.stringify(sides)}|${phases}`;
+    return memo(db, key, () => {
+      const result = compareSides(db, sides.a, sides.b, { phases });
+      if (result.ms > 2000) console.warn(`[balance] compare took ${result.ms} ms for ${key}`);
+      return result;
+    });
+  });
+
+  app.get('/api/admin/balance/metric', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    const q = req.query as Record<string, unknown>;
+    const sides = parseSideParams(q);
+    if (typeof sides === 'string') return reply.code(400).send({ error: sides });
+    const metric = typeof q.metric === 'string' ? q.metric : '';
+    if (!METRICS.some((m) => m.id === metric)) return reply.code(400).send({ error: 'unknown metric' });
+    const phase = q.phase as Phase;
+    if (!(['all', ...SUB_PHASES] as string[]).includes(String(phase))) return reply.code(400).send({ error: 'unknown phase' });
+    return memo(db, `metric|${metric}|${phase}|${JSON.stringify(sides)}`, () => metricDetail(db, metric, phase, sides.a, sides.b));
+  });
+
+  app.post('/api/admin/balance/patches/:id', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const id = Number((req.params as { id: string }).id);
+    const b = (req.body ?? {}) as { name?: unknown; notes?: unknown; reviewed?: unknown };
+    const edit: { name?: string | null; notes?: string; reviewed?: boolean } = {};
+    if (b.name !== undefined) {
+      if (b.name !== null && (typeof b.name !== 'string' || b.name.trim().length > 60)) {
+        return reply.code(400).send({ error: 'a patch name is up to 60 characters' });
+      }
+      edit.name = b.name === null || b.name.trim() === '' ? null : b.name.trim();
+    }
+    if (b.notes !== undefined) {
+      if (typeof b.notes !== 'string' || b.notes.length > 2000) return reply.code(400).send({ error: 'notes are up to 2000 characters' });
+      edit.notes = b.notes;
+    }
+    if (b.reviewed !== undefined) {
+      if (typeof b.reviewed !== 'boolean') return reply.code(400).send({ error: 'reviewed is true or false' });
+      edit.reviewed = b.reviewed;
+    }
+    if (!editPatch(db, id, edit)) return reply.code(404).send({ error: 'no such patch' });
+    logAdmin(db, adminId, 'edit_patch', id, edit);
+    return { ok: true };
   });
 }

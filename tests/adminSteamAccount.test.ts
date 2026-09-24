@@ -261,16 +261,24 @@ describe('steam account over HTTP', () => {
   it('is read only by the admin player page, the refreshers and the merge', () => {
     // The public routes, the WebSocket and the Discord cards are all built
     // from modules that never touch these tables. A new reader has to be
-    // added here on purpose, which is the moment to ask who can see it.
+    // added here on purpose, which is the moment to ask who can see it. That
+    // includes anything that imports playerFile.js or playerFileSummary.js:
+    // either one hands its caller steamFlags (among other staff-only fields)
+    // without the caller ever mentioning steamAccount.js or steamSignals.js
+    // itself, so a module reaching this data only through one of them would
+    // otherwise never trip this guard.
     const allowed = new Set([
       'src/steamSignals.ts', 'src/admin/steamAccount.ts', 'src/admin/players.ts', 'src/mergePlayers.ts',
-      'src/db.ts', 'src/server.ts',
+      'src/db.ts', 'src/server.ts', 'src/admin/timeline/steam.ts',
+      'src/admin/playerFile.ts', 'src/admin/playerFileSummary.ts', 'src/routes/people.ts',
+      'src/routes/tickets.ts',
     ]);
     const root = join(dirname(fileURLToPath(import.meta.url)), '..');
     const walk = (dir: string): string[] => readdirSync(join(root, dir), { withFileTypes: true })
       .flatMap((e) => (e.isDirectory() ? walk(`${dir}/${e.name}`) : e.name.endsWith('.ts') ? [`${dir}/${e.name}`] : []));
     const readers = walk('src').filter((f) =>
-      /player_steam_signals|steam_signal_alerts|steamSignals\.js|steamAccount\.js/.test(readFileSync(join(root, f), 'utf8')));
+      /player_steam_signals|steam_signal_alerts|steamSignals\.js|steamAccount\.js|playerFileSummary\.js|playerFile\.js/
+        .test(readFileSync(join(root, f), 'utf8')));
     expect(readers.filter((f) => !allowed.has(f))).toEqual([]);
   });
 });

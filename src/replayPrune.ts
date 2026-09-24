@@ -46,10 +46,18 @@ export interface PruneResult {
  * round, and a round is about a megabyte, so holding these against the free
  * space floor too costs nothing a disk would notice. A re-analysis that no
  * longer flags the round deletes its clips and releases it.
+ *
+ * With R2 configured (`opts.requireOffloaded`), a replay is only ever
+ * eligible once `match_replays.r2_key` is set, under either reason. On
+ * 2026-09-23 the free space floor rule deleted 559 replays that existed
+ * nowhere else, because the local file was the only copy; once R2 holds the
+ * copy, the floor is free to fall back on it, but never on a file that is
+ * still the sole copy.
  */
 export function planPrune(
   db: DB, dir: string, now: Date, retentionDays: number,
   freeBytes: number, floorBytes: number,
+  opts: { requireOffloaded?: boolean } = {},
 ): PruneCandidate[] {
   if (!dir) return [];
   // 'live' and 'configuring' stay excluded: those files are being written
@@ -62,12 +70,13 @@ export function planPrune(
        JOIN matches m ON m.id = r.match_id
       WHERE r.pruned_at IS NULL
         AND m.state IN ('completed', 'aborted')
+        AND (? = 0 OR r.r2_key IS NOT NULL)
         AND NOT EXISTS (SELECT 1 FROM integrity_clips c
                          WHERE c.match_id = r.match_id AND c.ordinal = r.ordinal AND c.half = r.half)
         AND NOT EXISTS (SELECT 1 FROM integrity_reviews v
                          WHERE v.match_id = r.match_id AND v.ordinal = r.ordinal AND v.half = r.half)
       ORDER BY ageBasis ASC, r.ordinal ASC, r.half ASC`,
-  ).all() as (PruneCandidate & { ageBasis: string })[];
+  ).all(opts.requireOffloaded ? 1 : 0) as (PruneCandidate & { ageBasis: string })[];
 
   const cutoff = new Date(now.getTime() - retentionDays * 86400_000);
   const windowSelected: PruneCandidate[] = [];
@@ -167,7 +176,7 @@ export function prunePlan(db: DB, dir: string, plan: PruneCandidate[]): PruneRes
 
 /** The daily job. Never throws: a prune failure must not take down the
  *  process that is recording ranked results. */
-export function pruneReplays(db: DB, dir: string): PruneResult {
+export function pruneReplays(db: DB, dir: string, opts: { requireOffloaded?: boolean } = {}): PruneResult {
   const empty: PruneResult = { deleted: 0, bytes: 0, missing: 0, refused: 0, failed: 0 };
   if (!dir) return empty;
   try {
@@ -175,7 +184,7 @@ export function pruneReplays(db: DB, dir: string): PruneResult {
     const floorGb = Number(getSetting(db, 'replay_free_floor_gb') ?? '10');
     const st = statfsSync(dir);
     const freeBytes = Number(st.bavail) * Number(st.bsize);
-    const plan = planPrune(db, dir, new Date(), days, freeBytes, floorGb * 1e9);
+    const plan = planPrune(db, dir, new Date(), days, freeBytes, floorGb * 1e9, opts);
     if (plan.length === 0) return empty;
     const result = prunePlan(db, dir, plan);
     const line = `[replay] pruned ${result.deleted} files, ${(result.bytes / 1e6).toFixed(1)} MB`

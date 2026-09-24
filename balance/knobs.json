@@ -1,0 +1,66 @@
+{
+  "cvars": [
+    { "cvar": "z_tank_health", "label": "Tank base health", "group": "tank" },
+    { "cvar": "versus_tank_bonus_health", "label": "Tank versus health multiplier", "group": "tank" },
+    { "cvar": "z_tank_speed_vs", "label": "Tank speed (versus)", "group": "tank" },
+    { "cvar": "z_tank_damage_slow_min_range", "label": "Tank slow min range", "group": "tank" },
+    { "cvar": "z_tank_damage_slow_max_range", "label": "Tank slow max range", "group": "tank" },
+    { "cvar": "l4d_tank_burn_cap", "label": "Tank burn damage cap", "group": "tank" },
+    { "cvar": "z_witch_health", "label": "Witch health", "group": "witch" },
+    { "cvar": "z_witch_speed", "label": "Witch speed", "group": "witch" },
+    { "cvar": "z_witch_damage_per_kill_hit", "label": "Witch damage per hit", "group": "witch" },
+    { "cvar": "z_pounce_damage", "label": "Pounce damage", "group": "hunter" },
+    { "cvar": "z_pounce_damage_interrupt", "label": "Damage to interrupt a pounce", "group": "hunter" },
+    { "cvar": "z_pounce_stumble_radius", "label": "Pounce stumble radius", "group": "hunter" },
+    { "cvar": "versus_shove_hunter_fov_pouncing", "label": "Shove FOV vs pouncing hunter", "group": "hunter" },
+    { "cvar": "l4d_skypounce_enable", "label": "Sky pounce fix enabled", "group": "hunter" },
+    { "cvar": "l4d_skypounce_mode", "label": "Sky pounce fix mode", "group": "hunter" },
+    { "cvar": "z_vomit_interval", "label": "Boomer vomit interval", "group": "boomer" },
+    { "cvar": "tongue_hit_delay", "label": "Tongue cooldown", "group": "smoker" },
+    { "cvar": "tongue_break_from_damage_amount", "label": "Damage to break a tongue", "group": "smoker" },
+    { "cvar": "tongue_choke_damage_amount", "label": "Choke damage", "group": "smoker" },
+    { "cvar": "tongue_drag_damage_amount", "label": "Drag damage", "group": "smoker" },
+    { "cvar": "z_ghost_delay_minspawn", "label": "Minimum ghost spawn delay", "group": "infected" },
+    { "cvar": "z_mob_spawn_min_size", "label": "Horde min size", "group": "horde" },
+    { "cvar": "z_mob_spawn_max_size", "label": "Horde max size", "group": "horde" },
+    { "cvar": "z_mob_spawn_min_interval_normal", "label": "Horde min interval", "group": "horde" },
+    { "cvar": "z_mob_spawn_max_interval_normal", "label": "Horde max interval", "group": "horde" },
+    { "cvar": "l4d_antibaiter_delay", "label": "Anti-bait delay", "group": "horde" },
+    { "cvar": "l4d_antibaiter_horde_timer", "label": "Anti-bait horde timer", "group": "horde" },
+    { "cvar": "survivor_max_incapacitated_count", "label": "Incaps before black and white", "group": "survivor" },
+    { "cvar": "survivor_revive_duration", "label": "Revive duration", "group": "survivor" },
+    { "cvar": "survivor_ledge_grab_health", "label": "Ledge hang health", "group": "survivor" },
+    { "cvar": "rotoblin_health_style", "label": "Rotoblin health style", "group": "items" },
+    { "cvar": "rotoblin_weapon_style", "label": "Rotoblin weapon style", "group": "items" },
+    { "cvar": "rotoblin_limit_pumpshotgun", "label": "Pump shotgun limit", "group": "items" },
+    { "cvar": "rotoblin_limit_autoshotgun", "label": "Auto shotgun limit", "group": "items" },
+    { "cvar": "rotoblin_limit_smg", "label": "Uzi limit", "group": "items" },
+    { "cvar": "rotoblin_limit_rifle", "label": "Rifle limit", "group": "items" },
+    { "cvar": "rotoblin_limit_huntingrifle", "label": "Hunting rifle limit", "group": "items" },
+    { "cvar": "director_pain_pill_density", "label": "Pill density", "group": "items" },
+    { "cvar": "versus_boss_flow_min", "label": "Boss flow min", "group": "bosses" },
+    { "cvar": "versus_boss_flow_max", "label": "Boss flow max", "group": "bosses" },
+    { "cvar": "versus_tank_chance", "label": "Tank chance", "group": "bosses" },
+    { "cvar": "versus_witch_chance", "label": "Witch chance", "group": "bosses" },
+    { "cvar": "l4d_saferoom_lock", "label": "Saferoom lock enabled", "group": "map" }
+  ],
+  "files": [
+    { "path": "addons/sourcemod/data/l4d_info_editor_weapons.cfg", "label": "Weapon stat overrides" },
+    { "path": "addons/stripper/Roto-AZMod/global_filters.cfg", "label": "Stripper global filters" },
+    { "path": "cfg/rotoblin_pug_4v4.cfg", "label": "4v4 match config" },
+    { "path": "cfg/rotoblin_pug_4v4_map.cfg", "label": "4v4 per-map config" },
+    { "path": "cfg/pug_match.cfg", "label": "PUG match config" },
+    { "path": "cfg/Reloadables/server_custom_convars.cfg", "label": "Custom convars" },
+    { "path": "cfg/server_shared_convars.cfg", "label": "Shared convars" }
+  ],
+  "dirs": [
+    { "path": "addons/stripper/Roto-AZMod/maps", "ext": ".cfg", "label": "Stripper per-map configs" }
+  ],
+  "versionless": [
+    "pug-match.smx", "lilac.smx", "l4d_lilac_report.smx", "l4d_inputstats.smx",
+    "l4d_cvarwatch.smx", "l4d_consistency.smx", "l4d_tickstats.smx", "l4d_ping.smx"
+  ],
+  "ignored": [
+    "l4d2_spec_stays_spec.smx", "l4d_tvwatch.smx"
+  ]
+}

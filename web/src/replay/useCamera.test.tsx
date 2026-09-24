@@ -62,6 +62,25 @@ describe('useCamera', () => {
     expect(h.ctl.cam.zoom).toBeCloseTo(1, 9);
   });
 
+  it('counts every wheel notch that lands before the next render', () => {
+    // A fast wheel or a trackpad delivers several events inside one frame.
+    // The handler used to multiply the zoom from the last RENDER, so the
+    // second notch recomputed the same 1.25 as the first and was lost.
+    const h = mount();
+    act(() => {
+      for (const deltaY of [-100, -100, -100]) {
+        h.stage.dispatchEvent(new WheelEvent('wheel', { deltaY, clientX: 400, clientY: 250, bubbles: true, cancelable: true }));
+      }
+    });
+    expect(h.ctl.cam.zoom).toBeCloseTo(1.25 ** 3, 9);
+    act(() => {
+      for (const deltaY of [100, 100]) {
+        h.stage.dispatchEvent(new WheelEvent('wheel', { deltaY, clientX: 400, clientY: 250, bubbles: true, cancelable: true }));
+      }
+    });
+    expect(h.ctl.cam.zoom).toBeCloseTo(1.25, 9);
+  });
+
   it('sets a chip zoom about the centre and reports the zoomed view', () => {
     const h = mount();
     act(() => h.ctl.setZoom(4));

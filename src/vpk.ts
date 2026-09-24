@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, readSync } from 'node:fs';
 import { isMapName } from './campaigns.js';
 
 /**
@@ -10,11 +10,13 @@ import { isMapName } from './campaigns.js';
  * against files that are never written back. A general VPK library would be a
  * large dependency for a header, a string tree and a struct.
  *
- * Deliberately does NOT open the numbered archive files (pak01_001.vpk and
- * friends). Mission files are a few kilobytes and live in the directory file
- * or its preload area in every campaign seen so far. A campaign that hides its
- * mission in an archive parses as "no mission", which the upload path reports
- * as a rejection rather than a crash.
+ * The mission reader deliberately does NOT open the numbered archive files
+ * (pak01_001.vpk and friends). Mission files are a few kilobytes and live in
+ * the directory file or its preload area in every campaign seen so far. A
+ * campaign that hides its mission in an archive parses as "no mission", which
+ * the upload path reports as a rejection rather than a crash. openVpk().read
+ * is the one thing here that does open them, and nothing on the upload path
+ * calls it.
  */
 
 export type KvNode = { [key: string]: string | KvNode };
@@ -22,7 +24,7 @@ export type KvNode = { [key: string]: string | KvNode };
 const VPK_MAGIC = 0x55aa1234;
 
 /** Tokenise KeyValues: quoted strings, bare tokens, braces, // comments. */
-function tokenize(text: string): string[] {
+export function tokenizeKeyValues(text: string): string[] {
   const out: string[] = [];
   let i = 0;
   while (i < text.length) {
@@ -49,7 +51,7 @@ function tokenize(text: string): string[] {
 }
 
 export function parseKeyValues(text: string): KvNode {
-  const tokens = tokenize(text);
+  const tokens = tokenizeKeyValues(text);
   let i = 0;
 
   const block = (): KvNode => {
@@ -122,18 +124,40 @@ export function parseMission(text: string): Mission | null {
   return { name, displayTitle, chapters };
 }
 
-/**
- * Every path in a VPK directory, as `dir/name.ext`, in tree order. Reads the
- * tree only and never opens a numbered archive, so it works on `pak01_dir.vpk`
- * as well as on a single-file addon. Returns [] for anything that is not a VPK.
- */
-export function listVpkPaths(vpkPath: string): string[] {
+/** One file in a VPK directory tree. */
+export interface VpkDirEntry {
+  /** `dir/name.ext`, in the archive's own spelling. */
+  path: string;
+  /** The CRC32 the directory records for the whole file, preload included. */
+  crc: number;
+  /** Preload plus archived bytes. */
+  size: number;
+  /** 0x7fff when the archived bytes follow the tree in the directory file. */
+  archiveIndex: number;
+  offset: number;
+  length: number;
+  preload: Buffer;
+}
+
+export interface VpkDir {
+  entries: VpkDirEntry[];
+  /** The whole file. Unlike the mission reader below, this DOES open the
+   *  numbered archive beside the directory file (`pak01_dir.vpk` ->
+   *  `pak01_017.vpk`): it exists for the consistency list generator, which
+   *  reads stock materials out of the game's own pak01, run by hand against a
+   *  trusted install and never against an upload. */
+  read(entry: VpkDirEntry): Buffer;
+}
+
+/** Parse a VPK directory tree, or null for anything that is not a VPK. */
+export function openVpk(vpkPath: string): VpkDir | null {
   const buf = readFileSync(vpkPath);
-  if (buf.length < 12 || buf.readUInt32LE(0) !== VPK_MAGIC) return [];
+  if (buf.length < 12 || buf.readUInt32LE(0) !== VPK_MAGIC) return null;
   const version = buf.readUInt32LE(4);
   const treeLength = buf.readUInt32LE(8);
   const treeStart = version === 2 ? 28 : 12;
-  if (treeStart + treeLength > buf.length) return [];
+  if (treeStart + treeLength > buf.length) return null;
+  const dataStart = treeStart + treeLength;
 
   let p = treeStart;
   const readCString = (): string => {
@@ -143,7 +167,7 @@ export function listVpkPaths(vpkPath: string): string[] {
     return s;
   };
 
-  const out: string[] = [];
+  const entries: VpkDirEntry[] = [];
   for (;;) {
     const ext = readCString();
     if (ext === '') break;
@@ -153,14 +177,49 @@ export function listVpkPaths(vpkPath: string): string[] {
       for (;;) {
         const name = readCString();
         if (name === '') break;
+        const crc = buf.readUInt32LE(p);
         const preloadBytes = buf.readUInt16LE(p + 4);
-        p += 18 + preloadBytes;
-        // A single space is the format's spelling of "the archive root".
-        out.push(dir === ' ' ? `${name}.${ext}` : `${dir}/${name}.${ext}`);
+        const archiveIndex = buf.readUInt16LE(p + 6);
+        const offset = buf.readUInt32LE(p + 8);
+        const length = buf.readUInt32LE(p + 12);
+        p += 18;
+        const preload = buf.subarray(p, p + preloadBytes);
+        p += preloadBytes;
+        entries.push({
+          // A single space is the format's spelling of "the archive root".
+          path: dir === ' ' ? `${name}.${ext}` : `${dir}/${name}.${ext}`,
+          crc, size: preloadBytes + length, archiveIndex, offset, length, preload,
+        });
       }
     }
   }
-  return out;
+
+  const read = (e: VpkDirEntry): Buffer => {
+    if (e.length === 0) return Buffer.from(e.preload);
+    if (e.archiveIndex === 0x7fff) {
+      return Buffer.concat([e.preload, buf.subarray(dataStart + e.offset, dataStart + e.offset + e.length)]);
+    }
+    const archive = vpkPath.replace(/_dir\.vpk$/i, `_${String(e.archiveIndex).padStart(3, '0')}.vpk`);
+    const body = Buffer.alloc(e.length);
+    const fd = openSync(archive, 'r');
+    try {
+      const got = readSync(fd, body, 0, e.length, e.offset);
+      if (got !== e.length) throw new Error(`${archive} is too short for ${e.path}`);
+    } finally {
+      closeSync(fd);
+    }
+    return Buffer.concat([e.preload, body]);
+  };
+  return { entries, read };
+}
+
+/**
+ * Every path in a VPK directory, as `dir/name.ext`, in tree order. Reads the
+ * tree only and never opens a numbered archive, so it works on `pak01_dir.vpk`
+ * as well as on a single-file addon. Returns [] for anything that is not a VPK.
+ */
+export function listVpkPaths(vpkPath: string): string[] {
+  return openVpk(vpkPath)?.entries.map((e) => e.path) ?? [];
 }
 
 /** Locate `missions/<something>.txt` in a VPK and return its text. */

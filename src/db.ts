@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { ensureTicketSchema } from './tickets/schema.js';
 import { migrateLegacyReports } from './tickets/migrate.js';
+import { widenTicketIdentity } from './tickets/identityMigration.js';
 
 export type DB = Database.Database;
 
@@ -705,7 +706,7 @@ CREATE TABLE IF NOT EXISTS steam_signal_alerts (
 );
 `;
 
-const DEFAULT_SETTINGS: Record<string, string> = {
+export const DEFAULT_SETTINGS: Record<string, string> = {
   invite_code: 'change-me',
   ready_seconds: '120',
   vote_seconds: '30',
@@ -741,6 +742,9 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   discord_admin_channel_id: '',
   // Where match results are posted. Empty keeps them in the queue channel.
   discord_results_channel_id: '',
+  discord_tickets_forum_id: '',
+  discord_tickets_channel_id: '',
+  discord_report_channel_id: '',
   // Games before a player's per-match figures are ranked for the profile
   // badges. Deliberately higher than RANKED_MIN_GAMES: three games is enough
   // for a rating to be worth showing and nowhere near enough for a per-match
@@ -750,10 +754,15 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   admin_feed_reports: '1',
   ticket_mod_ban_max_minutes: '10080',
   ticket_reports_per_day: '5',
+  ticket_store_attachments: '1',
+  ticket_attachment_max_mb: '25',
+  ticket_attachments_ticket_mb: '200',
+  ticket_attachments_total_mb: '2048',
   admin_feed_actions: '1',
   admin_feed_penalties: '1',
   admin_feed_accounts: '1',
   admin_feed_problems: '1',
+  admin_feed_conduct: '1',
   replay_retention_days: '90',
   demo_retention_days: '90',
   demo_autorecord_days: '7',
@@ -772,6 +781,10 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   // itself once everyone is back. Pushed to the plugin at match setup.
   leave_budget_seconds: '300',
   leave_auto_unpause: '1',
+  // The longest an admin may hold a clock from the live board, and how much
+  // of a dropped player's allowance is left when the admin feed says so.
+  clock_hold_max_minutes: '30',
+  abandon_low_alert_seconds: '90',
   penalties_enabled: '1',
   penalty_window_days: '7',
   penalty_minutes: JSON.stringify([5, 15, 60, 1440]),
@@ -791,6 +804,13 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   endorse_title_min_games: '10',
 };
 
+/** A match whose roster came from the site was made by the queue; anything
+ *  else was started in game. Idempotent: only fills NULLs. */
+export const ORIGIN_BACKFILL_SQL = `UPDATE matches SET origin = CASE
+    WHEN EXISTS (SELECT 1 FROM match_players mp WHERE mp.match_id = matches.id AND mp.source = 'web')
+    THEN 'queue' ELSE 'in_game' END
+  WHERE origin IS NULL`;
+
 /** Add a column if the table lacks it. No-op when already present. */
 function ensureColumn(db: DB, table: string, column: string, ddl: string): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -803,6 +823,10 @@ export function openDb(path: string): DB {
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
+  // A removal must actually erase the removed content from the file on disk,
+  // not just from the b-tree: without this SQLite is free to leave the old
+  // bytes sitting in a freed page until something else overwrites it.
+  db.pragma('secure_delete = ON');
   db.exec(SCHEMA);
   // CREATE TABLE IF NOT EXISTS never adds a column to a table that already
   // exists, so a column introduced after a database was created needs this.
@@ -810,6 +834,7 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'match_live_events', 'map_ordinal', 'INTEGER NOT NULL DEFAULT 0');
   // What the game is doing right now, as last reported by the plugin, and
   // since when. NULL until a plugin that emits PHASE has spoken.
+  ensureColumn(db, 'match_pauses', 'called_by', 'TEXT');
   ensureColumn(db, 'match_live', 'phase', 'TEXT');
   ensureColumn(db, 'match_live', 'phase_since', 'TEXT');
   ensureColumn(db, 'match_live', 'phase_team', 'TEXT');
@@ -976,6 +1001,8 @@ export function openDb(path: string): DB {
   // and the key is what says which copy the download route should serve.
   ensureColumn(db, 'match_demos', 'r2_key', 'TEXT');
   ensureColumn(db, 'match_demos', 'r2_at', 'TEXT');
+  ensureColumn(db, 'match_replays', 'r2_key', 'TEXT');
+  ensureColumn(db, 'match_replays', 'r2_at', 'TEXT');
   ensureColumn(db, 'matches', 'voided_at', 'TEXT');
   ensureColumn(db, 'matches', 'void_reason', 'TEXT');
   // How a campaign VPK reaches this box. 'local' is a filesystem copy, which
@@ -1014,8 +1041,203 @@ export function openDb(path: string): DB {
   // The ticket a ban was issued from, so the ban list and the ticket point at
   // each other. Null for every ban issued from the Players tab.
   ensureColumn(db, 'bans', 'ticket_id', 'INTEGER');
+  // "Somebody has looked at this file." What takes a player off the Needs a
+  // look list, and what puts them back when something newer arrives.
+  //
+  // No foreign key on steamid, like the evidence tables: the evidence that
+  // raises a file can sit under a merged alt's id, and a review of that file
+  // must not be blocked by whether that id still has a player row. No CHECK
+  // anywhere: this is a log, and a log has nothing to constrain.
+  db.exec(`CREATE TABLE IF NOT EXISTS player_reviews (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    steamid     TEXT NOT NULL,
+    reviewed_by TEXT NOT NULL,
+    reviewed_at TEXT NOT NULL,
+    note        TEXT NOT NULL DEFAULT ''
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS player_reviews_steamid ON player_reviews (steamid, reviewed_at)');
   ensureTicketSchema(db);
+  // When a report was said in Discord: in its ticket's thread, or as a line
+  // in the admin channel while no forum is set. NULL means "not yet", which
+  // is what lets a report filed while the bot was down be announced when it
+  // comes back. Every report older than the column is marked announced, or
+  // the first start after this deploy would replay the whole history.
+  const announcedIsNew = !(db.prepare('PRAGMA table_info(ticket_reports)').all() as { name: string }[])
+    .some((c) => c.name === 'announced_at');
+  ensureColumn(db, 'ticket_reports', 'announced_at', 'TEXT');
+  // Whether this report must never reach the admin feed. Fixed by the
+  // report's history, not by its ticket's current state: set the moment it
+  // lands on, or its ticket becomes, a restricted or about-staff case, and
+  // never cleared, so un-restricting a ticket later cannot open the gate on
+  // what happened while it was restricted. See fileReport, setRestricted and
+  // holdFeedAbout for where it is set.
+  const feedHeldIsNew = !(db.prepare('PRAGMA table_info(ticket_reports)').all() as { name: string }[])
+    .some((c) => c.name === 'feed_held');
+  ensureColumn(db, 'ticket_reports', 'feed_held', 'INTEGER NOT NULL DEFAULT 0');
+  // When this person was sent the DM saying they are on a restricted
+  // ticket's access list. Charged before the send, so a refused DM is never
+  // retried.
+  ensureColumn(db, 'ticket_access', 'notified_at', 'TEXT');
+  // After every ticket ensureColumn, so the rebuild copies announced_at and
+  // feed_held rather than dropping them. Before the legacy migration, which
+  // inserts into the rebuilt tables.
+  widenTicketIdentity(db);
   migrateLegacyReports(db);
+  // After the migration, so reports it has just created are covered too.
+  if (announcedIsNew) db.exec('UPDATE ticket_reports SET announced_at = created_at WHERE announced_at IS NULL');
+  // One-time backfill: every report already sitting on a restricted ticket
+  // was always meant to be held, whether or not it predates this column.
+  if (feedHeldIsNew) db.exec('UPDATE ticket_reports SET feed_held = 1 WHERE ticket_id IN (SELECT id FROM tickets WHERE restricted = 1)');
+  // Who is on the game server right now, one row per rostered player, written
+  // from PLAYER connect, LEAVE and RETURN and from the plugin's own answer to
+  // an admin clock action (src/presence.ts). `since` is when the current state
+  // began. `remaining_s` is the reconnect allowance as of `remaining_at`,
+  // which is a different instant after a hold, a release or an add, so the two
+  // cannot share a column. `low_alert_at` is what makes the admin feed warning
+  // once per drop, and what stops a restart from posting it again.
+  // No CHECK on state, and steamid is deliberately not a foreign key: the
+  // roster check happens at write time, against match_players.
+  db.exec(`CREATE TABLE IF NOT EXISTS match_presence (
+    match_id INTEGER NOT NULL REFERENCES matches(id),
+    steamid TEXT NOT NULL,
+    state TEXT NOT NULL,
+    since TEXT NOT NULL,
+    remaining_s INTEGER,
+    remaining_at TEXT,
+    held INTEGER NOT NULL DEFAULT 0,
+    hold_until TEXT,
+    low_alert_at TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (match_id, steamid)
+  )`);
+  // Whether this match's server understands sm_pug_leave (pug-match 0.3.4).
+  // NULL until something has asked: the setup path learns it for free from the
+  // reply to the hold ceiling cvar, and an action learns it from its own answer.
+  ensureColumn(db, 'matches', 'leave_control', 'INTEGER');
+
+  // Balance analytics, piece 1: which config each round ran on.
+  // docs/superpowers/specs/2026-09-23-balance-analytics-design.md
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS balance_patches (
+      id            INTEGER PRIMARY KEY,
+      fingerprint   TEXT UNIQUE,
+      name          TEXT,
+      notes         TEXT NOT NULL DEFAULT '',
+      source        TEXT NOT NULL CHECK (source IN ('announced','detected','historical')),
+      inputs_json   TEXT,
+      first_seen_at TEXT NOT NULL,
+      reviewed      INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS balance_patch_servers (
+      patch_id      INTEGER NOT NULL REFERENCES balance_patches(id),
+      server_id     INTEGER NOT NULL,
+      first_seen_at TEXT NOT NULL,
+      last_seen_at  TEXT NOT NULL,
+      PRIMARY KEY (patch_id, server_id)
+    );
+    CREATE TABLE IF NOT EXISTS balance_server_state (
+      server_id      INTEGER PRIMARY KEY,
+      patch_id       INTEGER NOT NULL REFERENCES balance_patches(id),
+      inventory_json TEXT NOT NULL,
+      since          TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS match_round_stats (
+      match_id  INTEGER NOT NULL REFERENCES matches(id),
+      ordinal   INTEGER NOT NULL,
+      half      INTEGER NOT NULL,
+      player_id TEXT    NOT NULL,
+      stat      TEXT    NOT NULL,
+      value     INTEGER NOT NULL,
+      PRIMARY KEY (match_id, ordinal, half, player_id, stat)
+    );
+    CREATE TABLE IF NOT EXISTS match_round_marks (
+      match_id INTEGER NOT NULL REFERENCES matches(id),
+      ordinal  INTEGER NOT NULL,
+      half     INTEGER NOT NULL,
+      kind     TEXT    NOT NULL,
+      t_ms     INTEGER NOT NULL,
+      PRIMARY KEY (match_id, ordinal, half, kind, t_ms)
+    );
+  `);
+  ensureColumn(db, 'match_rounds', 'patch_id', 'INTEGER REFERENCES balance_patches(id)');
+  // Every admin patch query filters or counts by patch_id, so it needs an index.
+  db.exec('CREATE INDEX IF NOT EXISTS match_rounds_patch ON match_rounds(patch_id)');
+  ensureColumn(db, 'match_rounds', 'variant', 'TEXT');
+  ensureColumn(db, 'match_rounds', 'skill_detect', 'INTEGER');
+  ensureColumn(db, 'matches', 'origin', "TEXT CHECK (origin IN ('queue','in_game'))");
+  db.prepare(ORIGIN_BACKFILL_SQL).run();
+
+  // Balance analytics piece 2: per-round metrics, one row per metric per phase.
+  // docs/superpowers/specs/2026-09-23-balance-analytics-design.md
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS round_metrics (
+      match_id INTEGER NOT NULL REFERENCES matches(id),
+      ordinal  INTEGER NOT NULL,
+      half     INTEGER NOT NULL,
+      metric   TEXT    NOT NULL,
+      phase    TEXT    NOT NULL CHECK (phase IN ('all','tank','witch','event','normal')),
+      num      REAL    NOT NULL,
+      den      REAL    NOT NULL,
+      PRIMARY KEY (match_id, ordinal, half, metric, phase)
+    );
+    CREATE INDEX IF NOT EXISTS round_metrics_metric ON round_metrics(metric, phase);
+    CREATE TABLE IF NOT EXISTS round_metric_context (
+      match_id    INTEGER NOT NULL REFERENCES matches(id),
+      ordinal     INTEGER NOT NULL,
+      half        INTEGER NOT NULL,
+      map         TEXT,
+      origin      TEXT,
+      server_id   INTEGER,
+      patch_id    INTEGER,
+      surv_mu     REAL,
+      inf_mu      REAL,
+      has_replay  INTEGER NOT NULL,
+      has_stats   INTEGER NOT NULL,
+      engine      TEXT    NOT NULL,
+      computed_at TEXT    NOT NULL,
+      PRIMARY KEY (match_id, ordinal, half)
+    );
+  `);
+  // A round already seen with a replay row does not need to be re-flagged as
+  // "replay arrived" every tick just because decoding it keeps failing.
+  ensureColumn(db, 'round_metric_context', 'replay_seen', 'INTEGER NOT NULL DEFAULT 0');
+
+  // Every SourceTV spectator on record, for admins. The raw address is never
+  // stored here either: ip_hash is the same salted HMAC as player_networks,
+  // so a spectator's connection can be matched against the accounts that
+  // played from it without ever holding the address itself.
+  // See src/sourcetvSessions.ts.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sourcetv_sessions (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      server_id    INTEGER NOT NULL,
+      match_id     INTEGER REFERENCES matches(id),
+      slot         INTEGER NOT NULL,
+      name         TEXT NOT NULL,
+      ip_hash      TEXT NOT NULL,
+      country      TEXT,
+      joined_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      left_at      TEXT,
+      leave_reason TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_stv_match ON sourcetv_sessions(match_id);
+    CREATE INDEX IF NOT EXISTS idx_stv_open ON sourcetv_sessions(server_id, slot) WHERE left_at IS NULL;
+  `);
+  // Set on the one session row that actually published the "shared
+  // connection" admin alert for its match_id + ip_hash. A session existing
+  // is not enough to dedup on: player_networks gains rows for the whole life
+  // of a match, so an earlier session on the same connection may have found
+  // nobody rostered yet and posted nothing. See src/sourcetvSessions.ts.
+  ensureColumn(db, 'sourcetv_sessions', 'alerted_at', 'TEXT');
+  // start/stop of the SourceTV relay itself, so a run of dropped sessions can
+  // be told apart from the relay simply not running.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sourcetv_server_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER NOT NULL,
+      event TEXT NOT NULL CHECK (event IN ('start','stop')), at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
   seed(db);
   return db;
 }

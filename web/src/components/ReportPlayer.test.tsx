@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 
 const { mockApi } = vi.hoisted(() => ({
-  mockApi: { reportEligibility: vi.fn(), report: vi.fn(), fileReport: vi.fn(), myReports: vi.fn() },
+  mockApi: { reportEligibility: vi.fn(), report: vi.fn(), fileReport: vi.fn(), myReports: vi.fn(), reportChat: vi.fn() },
 }));
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
@@ -58,6 +58,27 @@ describe('ReportPlayer on a match page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send report' }));
     await waitFor(() => expect(mockApi.report).toHaveBeenCalledWith(66, '7', 'unsafe', 'what happened'));
   });
+
+  it('opens itself when a replay moment is handed to it, says what is attached, and sends it', async () => {
+    mockApi.reportEligibility.mockResolvedValue({ canReport: true, targets: [{ steamid: '7', name: 'Walls', alreadyReported: false }] });
+    mockApi.report.mockResolvedValue({ ok: true });
+    const cleared = vi.fn();
+    render(<ReportPlayer matchId={66} moment={{ ordinal: 2, half: 1, tMs: 61500 }} onClearMoment={cleared} />);
+    await screen.findByText(/map 3, round 1, at 1:01/);
+    fireEvent.change(await screen.findByLabelText('Player'), { target: { value: '7' } });
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'cheating' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send report' }));
+    await waitFor(() => expect(mockApi.report).toHaveBeenCalledWith(66, '7', 'cheating', '', { ordinal: 2, half: 1, tMs: 61500 }));
+    await waitFor(() => expect(cleared).toHaveBeenCalled());
+  });
+
+  it('a moment can be taken off again before sending', async () => {
+    mockApi.reportEligibility.mockResolvedValue({ canReport: true, targets: [] });
+    const cleared = vi.fn();
+    render(<ReportPlayer matchId={66} moment={{ ordinal: 0, half: 2, tMs: 5000 }} onClearMoment={cleared} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Detach' }));
+    expect(cleared).toHaveBeenCalled();
+  });
 });
 
 describe('MyReports', () => {
@@ -76,5 +97,19 @@ describe('MyReports', () => {
     const { container } = render(<MyReports />);
     await waitFor(() => expect(mockApi.myReports).toHaveBeenCalled());
     expect(container.textContent).toBe('');
+  });
+
+  it('offers a chat on an open report and shows the link it gets back, or the reason it cannot', async () => {
+    mockApi.myReports.mockResolvedValue({ reports: [
+      { id: 3, targetId: '7', targetDiscordId: null, targetName: 'Walls', category: 'cheating', matchId: null, createdAt: '2026-09-21T10:00:00.000Z', status: 'open' },
+      { id: 4, targetId: '8', targetDiscordId: null, targetName: 'Gone', category: 'afk', matchId: null, createdAt: '2026-09-20T10:00:00.000Z', status: 'closed' },
+    ] });
+    mockApi.reportChat.mockResolvedValue({ ok: true, url: 'https://discord.com/channels/g1/5' });
+    render(<MyReports />);
+    const buttons = await screen.findAllByRole('button', { name: 'Chat with the moderators' });
+    expect(buttons).toHaveLength(1);
+    fireEvent.click(buttons[0]);
+    await waitFor(() => expect(mockApi.reportChat).toHaveBeenCalledWith(3));
+    expect((await screen.findByText('Open the chat in Discord')).getAttribute('href')).toBe('https://discord.com/channels/g1/5');
   });
 });

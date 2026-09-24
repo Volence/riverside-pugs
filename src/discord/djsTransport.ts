@@ -1,10 +1,14 @@
 import {
-  ApplicationCommandOptionType, ApplicationCommandType, ChannelType, Client, Events, GatewayIntentBits, MessageFlags,
-  OverwriteType, PermissionFlagsBits, type Guild, type Interaction, type TextBasedChannel,
+  ApplicationCommandOptionType, ApplicationCommandType, ChannelType, Client, ComponentType, Events, GatewayIntentBits, MessageFlags,
+  Options, OverwriteType, Partials, PermissionFlagsBits, PermissionsBitField, TextInputStyle, ThreadAutoArchiveDuration,
+  type AnyThreadChannel, type APIModalInteractionResponseCallbackData, type FetchedThreads, type ForumChannel, type Guild,
+  type Interaction, type Message, type TextBasedChannel, type User,
 } from 'discord.js';
 import type { DiscordConfig } from '../config.js';
+import { NotInGuildError } from './transport.js';
 import type {
-  BotInteraction, BotTransport, Button, InteractionReply, MessagePayload, RoleOps, SlashCommandDef, VoiceOps,
+  BotInteraction, BotTransport, Button, InboundMessage, InteractionReply, MessageCommandDef, MessageHooks, MessagePayload, ModalDef,
+  ModerationOps, ModerationResult, PickedMember, RoleOps, SlashCommandDef, ThreadOps, VoiceOps,
 } from './transport.js';
 
 /**
@@ -16,6 +20,8 @@ import type {
 const STYLE = { primary: 1, secondary: 2, success: 3, danger: 4 } as const;
 const UNKNOWN_MESSAGE = 10008;
 const UNKNOWN_CHANNEL = 10003;
+const UNKNOWN_MEMBER = 10007;
+const UNKNOWN_BAN = 10026;
 
 function toButton(b: Button) {
   return b.kind === 'link'
@@ -41,11 +47,114 @@ function toMessage(p: MessagePayload) {
   };
 }
 
-const codeOf = (err: unknown): number | undefined => (err as { code?: number }).code;
+/**
+ * A modal as raw API JSON, like toButton, but with the real component enums so
+ * the compiler checks the shape. Every field is wrapped in a Label, the only
+ * way a select can sit in a modal. A text input inside a Label must NOT carry
+ * its own `label`: discord-api-types says so at payloads/v10/message.d.ts:1463
+ * ("Cannot be used in a label component"). Verified: LabelComponentData
+ * typings/index.d.ts:401, ModalComponentData :2846,
+ * StringSelectMenuComponentData :7483, UserSelectMenuComponentData :7488,
+ * TextInputComponentData :7532.
+ */
+function toModal(m: ModalDef): APIModalInteractionResponseCallbackData {
+  return {
+    custom_id: m.customId,
+    title: m.title.slice(0, 45),
+    components: m.fields.map((f) => ({
+      type: ComponentType.Label,
+      label: f.label.slice(0, 45),
+      component: f.kind === 'select'
+        ? {
+            type: ComponentType.StringSelect, custom_id: f.id, required: true,
+            // APISelectMenuOption.default :1440 ("Whether this option should
+            // be already-selected by default"), discord-api-types
+            // payloads/v10/message.d.ts.
+            options: f.options.map((o) => ({ label: o.label, value: o.value, default: o.default })),
+          }
+        : f.kind === 'user'
+          ? {
+              type: ComponentType.UserSelect, custom_id: f.id, required: f.required ?? false,
+              min_values: f.required ? 1 : 0, max_values: 1,
+            }
+          : {
+              type: ComponentType.TextInput, custom_id: f.id,
+              style: f.style === 'paragraph' ? TextInputStyle.Paragraph : TextInputStyle.Short,
+              required: f.required ?? false, max_length: f.maxLength,
+            },
+    })),
+  };
+}
+
+/** Administrator, from either a cached GuildMember or the raw resolved member
+ *  an interaction carries (whose permissions are a bitfield string). Member
+ *  facts can be missing (null or undefined) even for a real, non-bot user,
+ *  such as when Discord resolves a picked member from a partial payload; for
+ *  anyone but a bot that is treated as administrator rather than not, fail
+ *  closed. The only cost of a false positive is a report that lands
+ *  restricted when it need not have; the cost of a false negative is a
+ *  Discord admin reading a case filed about themselves, which must never
+ *  happen. A bot has no ticket of its own to protect (reporting one is
+ *  refused before this is asked), so it is left at the ordinary default.
+ *  GuildMember.permissions :1900 (Readonly<PermissionsBitField>);
+ *  APIInteractionGuildMember.permissions / APIInteractionDataResolvedGuildMember.permissions
+ *  are `Permissions` (a string), discord-api-types payloads/v10/_interactions/base.d.ts. */
+function isAdministrator(m: unknown, bot: boolean): boolean {
+  const perms = (m as { permissions?: unknown } | null)?.permissions;
+  if (perms instanceof PermissionsBitField) return perms.has(PermissionFlagsBits.Administrator);
+  if (typeof perms === 'string') return (BigInt(perms) & PermissionFlagsBits.Administrator) !== 0n;
+  return !bot;
+}
+
+/** When a member's timeout ends, from either shape, or null.
+ *  GuildMember.communicationDisabledUntil :1890 (Date | null);
+ *  the raw member's communication_disabled_until (string | null | undefined),
+ *  discord-api-types payloads/v10/guild.d.ts APIBaseGuildMember. */
+function timedOutUntil(m: unknown): string | null {
+  const g = m as { communicationDisabledUntil?: Date | null; communication_disabled_until?: string | null } | null;
+  const v = g?.communicationDisabledUntil ?? g?.communication_disabled_until ?? null;
+  return v === null ? null : new Date(v).toISOString();
+}
+
+/** User.bot :4087, User.globalName :4096, User.username :4103;
+ *  GuildMember.displayName :1886 (getter), raw member's `nick` (APIBaseGuildMember,
+ *  discord-api-types payloads/v10/guild.d.ts). */
+function picked(user: User, member: unknown): PickedMember {
+  const nick = (member as { displayName?: string; nick?: string | null } | null);
+  return {
+    id: user.id,
+    name: nick?.displayName ?? nick?.nick ?? user.globalName ?? user.username,
+    bot: user.bot,
+    administrator: isAdministrator(member, user.bot),
+  };
+}
+
+const codeOf = (err: unknown): number | undefined => (err as { code?: unknown } | null)?.code as number | undefined;
 
 export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTransport & { destroy(): Promise<void> }> {
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates],
+    intents: [
+      GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates,
+      // Tickets mirror what staff write in ticket threads. GuildMessages is
+      // the events (discord-api-types gateway/v10.d.ts:169); MessageContent is
+      // the privileged one (:175), switched on in the developer portal, and
+      // without it every content arrives as an empty string.
+      GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent,
+    ],
+    // Without this discord.js silently drops an edit or a delete of any
+    // message it has not cached, which is every message older than this
+    // process. Partials :7735, ClientOptions.partials :6233.
+    partials: [Partials.Message],
+    // GuildMessages would otherwise have discord.js hold the last 200
+    // messages of every channel the bot can see, content included, in memory
+    // behind this seam. Nothing here reads messages.cache: both fetches pass
+    // cache: false and the listeners use the event's own payload, so the
+    // limit costs nothing and the edit of an uncached message is fetched
+    // inside the watches gate either way. Options.cacheWithLimits :1280,
+    // DefaultMakeCacheSettings :1277 (MessageManager defaults to 200),
+    // CacheWithLimitsOptions :6023, MessageManager as a cache key :5995,
+    // ClientOptions.makeCache :6231.
+    makeCache: Options.cacheWithLimits({ ...Options.DefaultMakeCacheSettings, MessageManager: 0 }),
   });
   client.on(Events.Error, (err) => console.error('[discord] client error:', err));
 
@@ -62,11 +171,111 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
   };
 
   let handler: ((i: BotInteraction) => Promise<InteractionReply>) | null = null;
+  let opensModal: ((customId: string) => boolean) | null = null;
+  let hooks: MessageHooks | null = null;
+
+  /** Message :2459. attachments :2466, author :2467, channelId :2470, content
+   *  :2473, createdTimestamp :2475, editedTimestamp :2480, member :2490,
+   *  system :2501, webhookId :2509; Attachment :2582; User.bot :4087,
+   *  globalName :4096; GuildMember.displayName :1886. */
+  // A Pick, not Message itself: it names the only parts of a message this
+  // file ever reads, so what is and is not looked at is in the type. The
+  // events hand over OmitPartialGroupDMChannel<Message> (:6085), which is an
+  // intersection with Message and satisfies this as it stands.
+  type ReadableMessage = Pick<Message,
+    'id' | 'channelId' | 'author' | 'member' | 'webhookId' | 'system' | 'content' | 'attachments' | 'createdTimestamp' | 'editedTimestamp'>;
+  const toInbound = (m: ReadableMessage): InboundMessage => ({
+    id: m.id,
+    threadId: m.channelId,
+    authorId: m.author.id,
+    authorName: m.member?.displayName ?? m.author.globalName ?? m.author.username,
+    authorIsBot: m.author.bot || m.webhookId !== null || m.system,
+    content: m.content,
+    attachments: [...m.attachments.values()].map((a) => ({ id: a.id, name: a.name, contentType: a.contentType, size: a.size, url: a.url })),
+    createdAt: new Date(m.createdTimestamp).toISOString(),
+    editedAt: m.editedTimestamp === null ? null : new Date(m.editedTimestamp).toISOString(),
+  });
+
+  /**
+   * Everything a hook is asked, `watches` included, goes through here. These
+   * listeners run inside discord.js's packet handling, where a throw becomes
+   * an unhandled rejection and ends the process, and the hooks lead to SQLite:
+   * a locked database or a constraint would otherwise take the bot down with
+   * it. The error object alone is logged, never anything the message said.
+   */
+  const contained = (what: string, run: () => void): void => {
+    try {
+      run();
+    } catch (err) {
+      console.error(`[discord] handling ${what} in a ticket thread failed:`, err);
+    }
+  };
+
+  // In all four listeners the FIRST thing read is the channel id, and the
+  // first thing done is to ask whether that thread is a ticket. Nothing else
+  // about a message is touched before the answer is yes.
+  client.on(Events.MessageCreate, (m) => {                                    // messageCreate :6145
+    contained('a new message', () => {
+      const h = hooks;
+      if (!h || !h.watches(m.channelId)) return;
+      h.create(toInbound(m));
+    });
+  });
+  client.on(Events.MessageUpdate, async (_old, m) => {                        // messageUpdate :6168
+    const h = hooks;
+    try {
+      if (!h || !h.watches(m.channelId)) return;
+      // The typings promise a whole message here (partial :2493 is `false` on
+      // Message), but discord.js builds this one out of whatever the gateway
+      // sent, so an uncached edit really can arrive with no author and no
+      // content; fetch it whole. Message.fetch :2529.
+      const full = m.partial ? await m.fetch() : m;
+      h.update(toInbound(full));
+    } catch (err) {
+      // The fetch and the hook both land here. This listener is async, so an
+      // escaping rejection would be nobody's to catch.
+      console.error('[discord] handling an edited message in a ticket thread failed:', err);
+    }
+  });
+  client.on(Events.MessageDelete, (m) => {                                    // messageDelete :6146
+    contained('a deleted message', () => {
+      // A partial still carries both ids, which is all this needs.
+      const h = hooks;
+      if (!h || !h.watches(m.channelId)) return;
+      h.remove(m.channelId, m.id);
+    });
+  });
+  client.on(Events.MessageBulkDelete, (messages, channel) => {                // messageDeleteBulk :6154
+    contained('a bulk delete', () => {
+      const h = hooks;
+      if (!h || !h.watches(channel.id)) return;
+      for (const id of messages.keys()) h.remove(channel.id, id);
+    });
+  });
 
   client.on(Events.InteractionCreate, async (i: Interaction) => {
     if (!handler) return;
     try {
       if (i.isButton()) {
+        if (opensModal?.(i.customId)) {
+          // showModal has to be the first response to the press, so this one
+          // button is not deferred (showModal: typings/index.d.ts:684). Its
+          // handler is a database read and answers well inside three seconds.
+          const reply = await handler({
+            kind: 'button', customId: i.customId, userId: i.user.id, userName: i.user.globalName ?? i.user.username,
+            presserTimedOutUntil: timedOutUntil(i.member),
+          });
+          if (reply.modal) {
+            await i.showModal(toModal(reply.modal));
+          } else {
+            const m = toMessage(reply.payload);
+            await i.reply({
+              content: m.content || undefined, embeds: m.embeds, components: m.components as never,
+              allowedMentions: m.allowedMentions, flags: MessageFlags.Ephemeral,
+            });
+          }
+          return;
+        }
         // Every button reply is private; defer first so a slow handler never
         // blows Discord's three second window.
         //
@@ -79,6 +288,7 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         else await i.deferReply({ flags: MessageFlags.Ephemeral });
         const reply = await handler({
           kind: 'button', customId: i.customId, userId: i.user.id, userName: i.user.globalName ?? i.user.username,
+          presserTimedOutUntil: timedOutUntil(i.member),
         });
         const m = toMessage(reply.payload);
         // In place, an absent content must CLEAR the old text, and undefined
@@ -86,11 +296,15 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         await i.editReply({ content: inPlace ? (m.content ?? '') : (m.content || undefined), embeds: m.embeds, components: m.components as never, allowedMentions: m.allowedMentions });
       } else if (i.isChatInputCommand()) {
         const options: Record<string, string> = {};
+        const pickedMembers: Record<string, PickedMember> = {};
         for (const o of i.options.data) {
           if (o.value !== undefined) options[o.name] = String(o.value);
+          // CommandInteractionOption.user :6291, .member :6292.
+          if (o.user) pickedMembers[o.name] = picked(o.user, o.member ?? null);
         }
         const interaction: BotInteraction = {
-          kind: 'command', name: i.commandName, userId: i.user.id, userName: i.user.globalName ?? i.user.username, options,
+          kind: 'command', name: i.commandName, userId: i.user.id, userName: i.user.globalName ?? i.user.username,
+          options, picked: pickedMembers, presserTimedOutUntil: timedOutUntil(i.member),
         };
         // Whether the reply is private is only known after the handler ran,
         // and a deferral fixes it. Commands are fast DB reads, so reply directly.
@@ -100,6 +314,42 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
           content: m.content || undefined, embeds: m.embeds, components: m.components as never,
           allowedMentions: m.allowedMentions, flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
         });
+      } else if (i.isMessageContextMenuCommand()) {
+        // isMessageContextMenuCommand :2214. Deferred and private: the handler
+        // deletes files and the answer is for the moderator alone. Only ids
+        // are passed on: targetId :1517, CommandInteraction.channelId :643.
+        // i.targetMessage, which carries the content, is never read.
+        await i.deferReply({ flags: MessageFlags.Ephemeral });
+        const reply = await handler({
+          kind: 'message_command', name: i.commandName, userId: i.user.id, userName: i.user.globalName ?? i.user.username,
+          channelId: i.channelId, messageId: i.targetId,
+        });
+        const m = toMessage(reply.payload);
+        await i.editReply({ content: m.content || undefined, embeds: m.embeds, components: m.components as never, allowedMentions: m.allowedMentions });
+      } else if (i.isModalSubmit()) {
+        // isModalSubmit: typings/index.d.ts:2215. Deferred like a button: the
+        // handler writes to the database and the reply is always private.
+        await i.deferReply({ flags: MessageFlags.Ephemeral });
+        const fields: Record<string, string> = {};
+        const pickedMembers: Record<string, PickedMember> = {};
+        // ModalSubmitFields.fields :2936, getStringSelectValues :2946,
+        // getSelectedUsers :2947, getSelectedMembers :2949.
+        for (const [id, f] of i.fields.fields) {
+          if (f.type === ComponentType.UserSelect) {
+            const user = i.fields.getSelectedUsers(id)?.first();
+            fields[id] = user?.id ?? '';
+            if (user) pickedMembers[id] = picked(user, i.fields.getSelectedMembers(id)?.get(user.id) ?? null);
+            continue;
+          }
+          fields[id] = f.type === ComponentType.TextInput ? f.value
+            : f.type === ComponentType.StringSelect ? (i.fields.getStringSelectValues(id)[0] ?? '') : '';
+        }
+        const reply = await handler({
+          kind: 'modal', customId: i.customId, userId: i.user.id, userName: i.user.globalName ?? i.user.username,
+          fields, picked: pickedMembers, presserTimedOutUntil: timedOutUntil(i.member),
+        });
+        const m = toMessage(reply.payload);
+        await i.editReply({ content: m.content || undefined, embeds: m.embeds, components: m.components as never, allowedMentions: m.allowedMentions });
       }
     } catch (err) {
       console.error('[discord] interaction failed:', err);
@@ -225,8 +475,269 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
     },
   };
 
+  /** Discord's refusals, in the words the site shows. See ModerationResult.
+   *  Error codes from DiscordAPIError.code, RESTJSONErrorCodes,
+   *  discord-api-types rest/common.d.ts: MissingPermissions 50013 :148,
+   *  MissingAccess 50001 :133, UnknownMember 10007 :12, UnknownUser 10013 :18,
+   *  UnknownBan 10026 :24. */
+  const refusal = (err: unknown): ModerationResult => {
+    const code = codeOf(err);
+    const detail = err instanceof Error ? err.message : String(err);
+    if (code === 50013 || code === 50001) return { ok: false, why: 'hierarchy', detail };
+    if (code === 10007) return { ok: false, why: 'not_member', detail };
+    if (code === 10013) return { ok: false, why: 'unknown_user', detail };
+    console.error('[discord] moderation call failed:', err);
+    return { ok: false, why: 'other', detail };
+  };
+  const moderation: ModerationOps = {
+    async timeout(userId, minutes, reason) {
+      try {
+        const member = await guild.members.fetch(userId);
+        // Ask first so an obvious hierarchy refusal (an Administrator, the
+        // owner, or a member whose top role outranks the bot's) needs no API
+        // call: without this check Discord would still refuse with 50013,
+        // which refusal() maps to the same 'hierarchy' answer. moderatable is
+        // also false when the bot itself lacks the Moderate Members
+        // permission. GuildMember.moderatable :1897 (getter).
+        if (!member.moderatable) return { ok: false, why: 'hierarchy', detail: 'not moderatable' };
+        await member.timeout(minutes * 60_000, reason);                       // GuildMember.timeout :1912
+        return { ok: true };
+      } catch (err) { return refusal(err); }
+    },
+    async removeTimeout(userId, reason) {
+      try {
+        const member = await guild.members.fetch(userId);
+        await member.timeout(null, reason);                                   // GuildMember.timeout :1912
+        return { ok: true };
+      } catch (err) { return refusal(err); }
+    },
+    async ban(userId, reason) {
+      try {
+        // GuildMemberManager.ban :5119, BanOptions.reason :5931.
+        await guild.members.ban(userId, { reason });
+        return { ok: true };
+      } catch (err) { return refusal(err); }
+    },
+    async unban(userId, reason) {
+      try {
+        await guild.members.unban(userId, reason);                            // GuildMemberManager.unban :5136
+        return { ok: true };
+      } catch (err) {
+        if (codeOf(err) === UNKNOWN_BAN) return { ok: true };
+        return refusal(err);
+      }
+    },
+  };
+
+  const threadById = async (id: string): Promise<AnyThreadChannel | null> => {
+    // guild.channels holds threads too (GuildBasedChannel :7965, fetch :5040).
+    // An archived thread is not cached, so this falls through to a fetch.
+    const ch = await channelById(id);
+    return ch && ch.isThread() ? ch : null;                                   // isThread :1108
+  };
+  const needThread = async (id: string): Promise<AnyThreadChannel> => {
+    const th = await threadById(id);
+    if (!th) throw new Error(`thread ${id} does not exist`);
+    return th;
+  };
+
+  /** Tag names to this forum's tag ids, creating what is missing. Moderated,
+   *  so only the bot (Manage Threads) can put them on a post. A post carries
+   *  at most five. availableTags :3147, setAvailableTags :3155,
+   *  GuildForumTagData :3122. */
+  const tagIds = async (forum: ForumChannel, names: string[]): Promise<string[]> => {
+    const missing = names.filter((n) => !forum.availableTags.some((t) => t.name === n));
+    const current = missing.length === 0 ? forum
+      : await forum.setAvailableTags([...forum.availableTags, ...missing.map((name) => ({ name, moderated: true }))]);
+    return names.map((n) => current.availableTags.find((t) => t.name === n)?.id).filter((id): id is string => !!id).slice(0, 5);
+  };
+
+  const threads: ThreadOps = {
+    async createForumPost(forumId, post) {
+      const forum = await channelById(forumId);
+      if (!forum || forum.type !== ChannelType.GuildForum) throw new Error(`channel ${forumId} is not a forum`);
+      const m = toMessage(post.message);
+      // GuildForumThreadManager.create :5406, GuildForumThreadCreateOptions
+      // :7987 ({ name, message, appliedTags }), StartThreadOptions :7865.
+      const thread = await forum.threads.create({
+        name: post.name.slice(0, 100),
+        autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek,
+        message: { content: m.content || undefined, embeds: m.embeds, components: m.components as never, allowedMentions: m.allowedMentions },
+        appliedTags: await tagIds(forum, post.tags),
+      });
+      // A forum post's first message has the id of the thread itself.
+      return { threadId: thread.id, messageId: thread.id };
+    },
+    async createPrivateThread(channelId, thread) {
+      const ch = await channelById(channelId);
+      if (!ch || ch.type !== ChannelType.GuildText) throw new Error(`channel ${channelId} is not a text channel`);
+      // GuildTextThreadManager.create :5400, GuildTextThreadCreateOptions
+      // :7981 ({ type, invitable }). invitable false: only the bot adds people.
+      const made = await ch.threads.create({
+        name: thread.name.slice(0, 100),
+        type: ChannelType.PrivateThread,
+        invitable: false,
+        autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek,
+      });
+      return { threadId: made.id };
+    },
+    async exists(threadId) {
+      return (await threadById(threadId)) !== null;
+    },
+    async listThreads(channelId) {
+      const forum = await channelById(channelId);
+      if (!forum || forum.type !== ChannelType.GuildForum) throw new Error(`channel ${channelId} is not a forum`);
+      const me = client.user!.id;
+      const mine = new Map<string, { threadId: string; ownerId: string | null }>();
+      // The bot's own only: the caller deletes what it is given, and nobody
+      // else's post in this forum is ever ours to delete. ownerId :3960.
+      const keepMine = (page: FetchedThreads) => {
+        for (const th of page.threads.values()) {
+          if (th.ownerId === me) mine.set(th.id, { threadId: th.id, ownerId: th.ownerId });
+        }
+      };
+      keepMine(await forum.threads.fetchActive());                            // ThreadManager.fetchActive :5397
+      // Archived too: an archived post is still a post anyone in the forum
+      // can open. A forum's threads are public, and the archived list comes
+      // newest first, so each page asks for what was archived before the
+      // oldest of the last one. FetchedThreadsMore.hasMore :6564.
+      let before: Date | undefined;
+      for (;;) {
+        const page = await forum.threads.fetchArchived({ type: 'public', limit: 100, before }); // fetchArchived :5396
+        keepMine(page);
+        const oldest = [...page.threads.values()].pop();
+        if (!page.hasMore || !oldest?.archivedAt) break;                      // ThreadChannel.archivedAt :3936
+        before = oldest.archivedAt;
+      }
+      return [...mine.values()];
+    },
+    async addMember(threadId, userId) {
+      try {
+        await (await needThread(threadId)).members.add(userId);               // ThreadMemberManager.add :5416
+      } catch (err) {
+        // 10007 here is Discord saying the user is not in the guild, the one
+        // failure a caller may need to tell apart from a transient problem.
+        if (codeOf(err) === UNKNOWN_MEMBER) throw new NotInGuildError(err instanceof Error ? err.message : 'Unknown Member');
+        throw err;
+      }
+    },
+    async removeMember(threadId, userId) {
+      try {
+        await (await needThread(threadId)).members.remove(userId);            // ThreadMemberManager.remove :5435
+      } catch (err) {
+        if (codeOf(err) !== UNKNOWN_MEMBER) throw err;
+      }
+    },
+    async memberIds(threadId) {
+      const th = await threadById(threadId);
+      if (!th) return null;
+      const members = await th.members.fetch();                               // ThreadMemberManager.fetch :5431
+      return [...members.keys()].filter((id) => id !== client.user!.id);
+    },
+    async setLocked(threadId, locked) {
+      await (await needThread(threadId)).setLocked(locked);                   // ThreadChannel.setLocked :3980
+    },
+    async isArchived(threadId) {
+      // Null is Discord saying it does not know, which is not "archived":
+      // unarchiving on a guess would unlock a thread that is meant to be shut.
+      return (await needThread(threadId)).archived === true;                  // ThreadChannel.archived :3935
+    },
+    async setArchived(threadId, archived) {
+      await (await needThread(threadId)).setArchived(archived);               // ThreadChannel.setArchived :3977
+    },
+    async setTags(threadId, tags) {
+      const th = await needThread(threadId);
+      const forum = th.parent;                                                // ThreadChannel.parent :3961
+      // Thrown, never shrugged off: the caller stores a card hash once this
+      // resolves, and a hash stored for tags nobody applied would leave the
+      // post's status tag wrong until something else changed the card.
+      if (!forum || forum.type !== ChannelType.GuildForum) throw new Error(`thread ${threadId} is not in a forum, so its tags cannot be set`);
+      await th.setAppliedTags(await tagIds(forum, tags));                     // ThreadChannel.setAppliedTags :3983
+    },
+    async deleteThread(threadId) {
+      const th = await threadById(threadId);
+      await th?.delete().catch((err: unknown) => {                            // ThreadChannel.delete :3966
+        if (codeOf(err) !== UNKNOWN_CHANNEL) throw err;
+      });
+    },
+    async fetchAfter(threadId, afterId) {
+      const th = await needThread(threadId);
+      // MessageManager.fetch(FetchMessagesOptions) :5280, options :6620.
+      // `after` returns the messages that come right after that id, up to
+      // `limit`, so taking the largest id of each page walks forward through
+      // the whole thread. cache: false, a backfill must not fill the cache.
+      const page = await th.messages.fetch({ after: afterId ?? '0', limit: 100, cache: false });
+      return [...page.values()].sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1)).map(toInbound);
+    },
+    async fetchMessage(threadId, messageId) {
+      const th = await threadById(threadId);
+      if (!th) return null;
+      try {
+        // MessageManager.fetch(id) :5279. force: the attachment links on a
+        // cached copy may have expired, and a fresh link is the whole point.
+        return toInbound(await th.messages.fetch({ message: messageId, force: true, cache: false }));
+      } catch (err) {
+        // The thread can go between the lookup and the fetch, and "gone" is
+        // one answer here: null, as the interface says.
+        const code = codeOf(err);
+        if (code === UNKNOWN_MESSAGE || code === UNKNOWN_CHANNEL) return null;
+        throw err;
+      }
+    },
+    async syncMemberAccess(channelId, userIds, opts) {
+      const ch = await channelById(channelId);
+      // A forum and nothing else, exactly as createForumPost insists: the
+      // tickets channel setting sits beside the forum one, and a mis-pasted
+      // id would otherwise delete every member overwrite on whatever channel
+      // it named and give the forum's audience the run of it.
+      if (!ch || ch.type !== ChannelType.GuildForum) throw new Error(`channel ${channelId} is not a forum`);
+      const me = client.user!.id;
+      // Member overwrites only, and never the bot's own: the owner's role
+      // overwrites (everyone denied, the bot's role allowed) are not ours.
+      const have = [...ch.permissionOverwrites.cache.values()]                // permissionOverwrites :1827
+        .filter((o) => o.type === OverwriteType.Member && o.id !== me).map((o) => o.id);
+      const want = new Set(userIds);
+      const added: string[] = [];
+      const removed: string[] = [];
+      const failed: string[] = [];
+      // Revocations first, and each one guarded: taking access away is the
+      // direction that matters, and one overwrite Discord refuses to delete
+      // must not skip every revocation after it.
+      for (const id of have) {
+        if (want.has(id)) continue;
+        try {
+          await ch.permissionOverwrites.delete(id);                           // PermissionOverwriteManager.delete :5330
+          removed.push(id);
+        } catch (err) {
+          console.error(`[discord] could not take ${id}'s access to ${channelId} away:`, err);
+          failed.push(id);
+        }
+      }
+      // Revoke-only asks for the loop above and nothing else: the caller is
+      // sure who must lose access and not yet sure who may be given it.
+      if (opts?.revokeOnly) return { added, removed, failed };
+      for (const id of want) {
+        if (have.includes(id)) continue;
+        try {
+          // An overwrite for someone who is not in the guild is rejected.
+          await guild.members.fetch(id);
+          await ch.permissionOverwrites.create(id, {                          // PermissionOverwriteManager.create :5320
+            ViewChannel: true, ReadMessageHistory: true, SendMessagesInThreads: true,
+            AttachFiles: true, EmbedLinks: true, AddReactions: true,
+          });
+          added.push(id);
+        } catch (err) {
+          console.error(`[discord] could not give ${id} access to ${channelId}:`, err);
+          failed.push(id);
+        }
+      }
+      return { added, removed, failed };
+    },
+  };
+
   return {
     roles,
+    moderation,
     async send(channelId, payload) {
       const ch = await textChannel(channelId);
       const msg = await ch.send(toMessage(payload));
@@ -263,23 +774,37 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         allowedMentions: m.allowedMentions,
       });
     },
-    onInteraction(h) {
+    onInteraction(h, opts) {
       handler = h;
+      opensModal = opts?.opensModal ?? null;
     },
-    async registerCommands(defs: SlashCommandDef[]) {
-      await guild.commands.set(defs.map((d) => ({
-        type: ApplicationCommandType.ChatInput as const,
-        name: d.name,
-        description: d.description,
-        options: (d.options ?? []).map((o) => ({
-          name: o.name,
-          description: o.description,
-          required: o.required ?? false,
-          type: o.type === 'user' ? ApplicationCommandOptionType.User
-            : o.type === 'integer' ? ApplicationCommandOptionType.Integer : ApplicationCommandOptionType.String,
-          ...(o.choices ? { choices: o.choices } : {}),
-        })) as never,
-      })));
+    watchMessages(h) {
+      hooks = h;
+    },
+    async registerCommands(defs: SlashCommandDef[], messageCommands: MessageCommandDef[] = []) {
+      await guild.commands.set([
+        ...defs.map((d) => ({
+          type: ApplicationCommandType.ChatInput as const,
+          name: d.name,
+          description: d.description,
+          options: (d.options ?? []).map((o) => ({
+            name: o.name,
+            description: o.description,
+            required: o.required ?? false,
+            type: o.type === 'user' ? ApplicationCommandOptionType.User
+              : o.type === 'integer' ? ApplicationCommandOptionType.Integer : ApplicationCommandOptionType.String,
+            ...(o.choices ? { choices: o.choices } : {}),
+          })) as never,
+        })),
+        // MessageApplicationCommandData :5613: a type and a name, no
+        // description and no options. It shows under Apps on every message in
+        // the server, for everyone; the handler is what refuses non-staff.
+        //
+        // Deliberately no defaultMemberPermissions: moderators are marked on
+        // the site, not by a Discord permission, so there is no bit that means
+        // "staff". Everyone sees the entry; only staff get anything from it.
+        ...messageCommands.map((c) => ({ type: ApplicationCommandType.Message as const, name: c.name })),
+      ]);
     },
     async watchMembers(h) {
       client.on(Events.GuildMemberAdd, (m) => { if (m.guild.id === guild.id) h.add(m.id); });
@@ -302,6 +827,7 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
       console.log(`[discord] tracking voice: ${states.length} in a channel`);
     },
     voice,
+    threads,
     async destroy() {
       await client.destroy();
     },

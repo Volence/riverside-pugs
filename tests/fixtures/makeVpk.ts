@@ -1,4 +1,5 @@
 import { writeFileSync } from 'node:fs';
+import { crc32 } from 'node:zlib';
 
 export interface VpkEntry {
   ext: string;
@@ -71,8 +72,13 @@ export function makeVpk(path: string, entry: VpkEntry): void {
  *  makeVpk above writes exactly one entry, which cannot express the case the
  *  consistency check exists for: a real campaign (it has a mission file) that
  *  ALSO ships a path the server enforces. Entries are grouped the way the
- *  format requires, by extension and then by directory, in first-seen order. */
-export function makeVpkMulti(path: string, entries: Pick<VpkEntry, 'ext' | 'dir' | 'name' | 'body'>[]): void {
+ *  format requires, by extension and then by directory, in first-seen order.
+ *
+ *  Each entry carries its real CRC32, as a shipped VPK does, and an entry given
+ *  an `archiveIndex` has its bytes written to the numbered archive beside the
+ *  directory file instead (`x_dir.vpk` -> `x_003.vpk`), which is how pak01 is
+ *  laid out and what the consistency generator has to read. */
+export function makeVpkMulti(path: string, entries: Pick<VpkEntry, 'ext' | 'dir' | 'name' | 'body' | 'archiveIndex'>[]): void {
   const cstr = (s: string) => Buffer.concat([Buffer.from(s, 'utf8'), Buffer.from([0])]);
   const end = Buffer.from([0]);
 
@@ -85,6 +91,7 @@ export function makeVpkMulti(path: string, entries: Pick<VpkEntry, 'ext' | 'dir'
 
   const tree: Buffer[] = [];
   const data: Buffer[] = [];
+  const archives = new Map<number, Buffer[]>();
   let offset = 0;
   for (const [ext, dirs] of byExt) {
     tree.push(cstr(ext));
@@ -92,16 +99,24 @@ export function makeVpkMulti(path: string, entries: Pick<VpkEntry, 'ext' | 'dir'
       tree.push(cstr(dir));
       for (const f of files) {
         const body = Buffer.from(f.body, 'utf8');
+        const archiveIndex = f.archiveIndex ?? 0x7fff;
         const meta = Buffer.alloc(18);
-        meta.writeUInt32LE(0, 0);            // CRC, unchecked by the reader
+        meta.writeUInt32LE(crc32(body), 0);
         meta.writeUInt16LE(0, 4);            // no preload
-        meta.writeUInt16LE(0x7fff, 6);       // data is in this file
-        meta.writeUInt32LE(offset, 8);       // from the end of the tree
+        meta.writeUInt16LE(archiveIndex, 6);
         meta.writeUInt32LE(body.length, 12);
         meta.writeUInt16LE(0xffff, 16);      // entry terminator
+        if (archiveIndex === 0x7fff) {
+          meta.writeUInt32LE(offset, 8);     // from the end of the tree
+          data.push(body);
+          offset += body.length;
+        } else {
+          const archive = archives.get(archiveIndex) ?? [];
+          archives.set(archiveIndex, archive);
+          meta.writeUInt32LE(archive.reduce((n, b) => n + b.length, 0), 8); // from the start of that archive
+          archive.push(body);
+        }
         tree.push(cstr(f.name), meta);
-        data.push(body);
-        offset += body.length;
       }
       tree.push(end);                        // end of this directory's files
     }
@@ -115,4 +130,7 @@ export function makeVpkMulti(path: string, entries: Pick<VpkEntry, 'ext' | 'dir'
   header.writeUInt32LE(1, 4);
   header.writeUInt32LE(treeBuf.length, 8);
   writeFileSync(path, Buffer.concat([header, treeBuf, ...data]));
+  for (const [index, bodies] of archives) {
+    writeFileSync(path.replace(/_dir\.vpk$/i, `_${String(index).padStart(3, '0')}.vpk`), Buffer.concat(bodies));
+  }
 }

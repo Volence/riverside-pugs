@@ -1,5 +1,6 @@
-import { useState } from 'preact/hooks';
-import { api, ApiError, type ReportEligibility } from '../api';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { api, ApiError, type ReportEligibility, type ReportMoment } from '../api';
+import { fmtClock } from '../format';
 
 const CATEGORIES = [
   ['griefing', 'Griefing / throwing'],
@@ -15,7 +16,14 @@ const CATEGORIES = [
  * that match's roster) and a profile (pass target, no match). Moderators see
  * reports as tickets; the reported player is never told who filed one.
  */
-export function ReportPlayer({ matchId, target: fixed }: { matchId?: number; target?: { steamid: string; name: string } }) {
+export function ReportPlayer(
+  { matchId, target: fixed, moment, onClearMoment }: {
+    matchId?: number; target?: { steamid: string; name: string };
+    /** A replay moment picked in the viewer above. Match pages only. */
+    moment?: ReportMoment | null;
+    onClearMoment?: () => void;
+  },
+) {
   const [open, setOpen] = useState(false);
   const [elig, setElig] = useState<ReportEligibility | null>(null);
   const [target, setTarget] = useState('');
@@ -23,6 +31,7 @@ export function ReportPlayer({ matchId, target: fixed }: { matchId?: number; tar
   const [text, setText] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
 
   const start = async () => {
     setOpen(true);
@@ -35,17 +44,31 @@ export function ReportPlayer({ matchId, target: fixed }: { matchId?: number; tar
     }
   };
 
+  // Picking a moment in the viewer is asking to report it: open the form...
+  useEffect(() => {
+    if (moment) void start();
+  }, [moment]);
+  // ...and bring it into view, once it exists: the form's wrapper is only
+  // rendered when `open` is true, so this waits for that render. Keyed on the
+  // moment object too, so picking a second moment scrolls back. jsdom has no
+  // scrollIntoView, hence the optional call.
+  useEffect(() => {
+    if (open && moment) root.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [open, moment]);
+
   const submit = async (e: Event) => {
     e.preventDefault();
     setBusy(true);
     setMsg(null);
     try {
       if (fixed) await api.fileReport({ targetId: fixed.steamid, category, text });
+      else if (moment) await api.report(matchId!, target, category, text, moment);
       else await api.report(matchId!, target, category, text);
       setMsg({ ok: true, text: 'Thanks. The moderators will look at it.' });
       setTarget('');
       setCategory('');
       setText('');
+      if (moment) onClearMoment?.();
       if (!fixed && matchId !== undefined) setElig(await api.reportEligibility(matchId));
     } catch (err) {
       setMsg({ ok: false, text: err instanceof ApiError ? err.message : 'Could not send the report.' });
@@ -61,7 +84,7 @@ export function ReportPlayer({ matchId, target: fixed }: { matchId?: number; tar
   const ready = fixed ? true : elig?.canReport === true;
   const needsText = category === 'unsafe';
   return (
-    <div class="report">
+    <div class="report" ref={root}>
       <h3>{fixed ? `Report ${fixed.name}` : 'Report a player'}</h3>
       {!fixed && !elig && <p class="muted">Checking...</p>}
       {!fixed && elig && !elig.canReport && <p class="muted">{capitalise(elig.reason ?? 'You cannot report on this match')}.</p>}
@@ -85,8 +108,14 @@ export function ReportPlayer({ matchId, target: fixed }: { matchId?: number; tar
             {CATEGORIES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
           </select>
           {needsText && <p class="muted">This is seen only by the people who run the community, not by the whole moderator team. Say what happened in as much detail as you are comfortable with.</p>}
+          {moment && (
+            <p class="muted">
+              Attached: map {moment.ordinal + 1}, round {moment.half}, at {fmtClock(Math.floor(moment.tMs / 1000))}.{' '}
+              <button class="chip" type="button" onClick={onClearMoment}>Detach</button>
+            </p>
+          )}
           <textarea value={text} maxLength={1000} aria-label="Details"
-            placeholder={needsText ? 'What happened (required)' : 'Details (optional): when, which map, what they did'}
+            placeholder={needsText ? 'What happened (required)' : 'Details (optional): what happened, in your own words'}
             onInput={(e) => setText((e.target as HTMLTextAreaElement).value)} />
           <div class="admin-form">
             <button class="btn" type="submit" disabled={busy || (!fixed && !target) || !category || (needsText && !text.trim())}>Send report</button>

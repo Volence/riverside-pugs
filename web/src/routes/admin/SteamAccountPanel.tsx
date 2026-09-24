@@ -15,7 +15,19 @@ const profileUrl = (steamid: string): string => `https://steamcommunity.com/prof
  * from the server; this only lays them out.
  */
 export function SteamAccountPanel(
-  { d, busy, run, onSelect }: { d: AdminPlayerDetail; busy: boolean; run: Run; onSelect: (steamid: string) => void },
+  { d, busy, run, onSelect, canRefresh = true }: {
+    // Narrower than AdminPlayerDetail on purpose: the Player File page builds
+    // this from PlayerFileData, which carries the same two fields under a
+    // different aggregate. Passing a full AdminPlayerDetail still satisfies it.
+    d: Pick<AdminPlayerDetail, 'steamid' | 'steamAccount'>;
+    busy: boolean;
+    run: Run;
+    onSelect: (steamid: string) => void;
+    /** Hide "Check now" for a viewer who may not call steam-refresh (a
+     *  moderator on the Player File page); the facts themselves are not
+     *  gated, since a moderator sees every fact an admin does. */
+    canRefresh?: boolean;
+  },
 ) {
   const a = d.steamAccount ?? null;
   return (
@@ -30,10 +42,15 @@ export function SteamAccountPanel(
       )}
       <p class="muted">
         <a href={profileUrl(d.steamid)} target="_blank" rel="noreferrer">Steam profile</a>
-        {a ? ` · checked ${fmtTime(a.checkedAt)} · ` : ' · '}
-        <button class="chip" type="button" disabled={busy} onClick={() => run(() => adminApi.steamRefresh(d.steamid))}>
-          Check now
-        </button>
+        {a ? ` · checked ${fmtTime(a.checkedAt)}` : ''}
+        {canRefresh && (
+          <>
+            {' · '}
+            <button class="chip" type="button" disabled={busy} onClick={() => run(() => adminApi.steamRefresh(d.steamid))}>
+              Check now
+            </button>
+          </>
+        )}
       </p>
     </section>
   );

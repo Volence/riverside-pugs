@@ -41,6 +41,13 @@ export function cheatName(n: number): string {
  *  match on the box, which files a spectator's flag on a game they were not
  *  playing and lets a stale live match take evidence from the real one.
  *  `steamid` is the canonical id, which is what match_players holds. */
+/** The act on a stored cvar flag's detail (`value=0 act=held`). Rows from
+ *  before l4d_cvarwatch 0.2.0 have none and only ever meant `live`. */
+export function cvarActOf(detail: string): 'held' | 'fixed' | 'live' {
+  const m = / act=(held|fixed|live)$/.exec(detail);
+  return m ? (m[1] as 'held' | 'fixed' | 'live') : 'live';
+}
+
 export function liveMatchOf(db: DB, serverId: number | null, steamid: string): number | null {
   if (serverId === null) return null;
   const row = db.prepare(
@@ -73,15 +80,16 @@ export interface IntegrityFlagRow extends IntegrityFlagInput { id: number; at: s
 /** Store one flag. Returns null when it was collapsed into a recent identical
  *  one, so the caller knows whether to announce it. */
 export function recordIntegrityFlag(
-  db: DB, f: IntegrityFlagInput, now = new Date(),
+  db: DB, f: IntegrityFlagInput, now = new Date(), opts: { dedupeOnDetail?: boolean } = {},
 ): IntegrityFlagRow | null {
   const iso = now.toISOString();
   const since = new Date(now.getTime() - DEDUPE_MS).toISOString();
   const dup = db.prepare(
     `SELECT 1 FROM integrity_flags
      WHERE steamid = ? AND source = ? AND kind = ? AND severity = ? AND at > ? AND at <= ?
+     ${opts.dedupeOnDetail ? 'AND detail = ?' : ''}
      LIMIT 1`,
-  ).get(f.steamid, f.source, f.kind, f.severity, since, iso);
+  ).get(f.steamid, f.source, f.kind, f.severity, since, iso, ...(opts.dedupeOnDetail ? [f.detail] : []));
   if (dup) return null;
 
   const info = db.prepare(
@@ -159,6 +167,8 @@ export function recentFlagFeed(db: DB, limit = 50): RecentFlag[] {
      SELECT d.id, d.signature AS kind, 'inputstats' AS source, d.severity, d.steamid,
             d.match_id AS matchId, d.at, COALESCE(p.name, d.steamid) AS name
      FROM input_detections d LEFT JOIN players p ON p.steamid = d.steamid
+     -- A scroll wheel bind is legal; its detection stays on the player's file.
+     WHERE d.note NOT LIKE 'wheel-like%'
      ORDER BY at DESC, id DESC LIMIT ?`,
   ).all(limit) as RecentFlag[];
   return rows;

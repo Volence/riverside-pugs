@@ -73,25 +73,31 @@ export function useCamera(
     if (f.kind !== 'free') setCam((c) => ({ zoom: c.zoom, panX: 0, panY: 0 }));
   }, []);
 
-  const zoomAt = useCallback((zoom: number, px: number, py: number) => {
+  /** `next` maps the zoom the camera is at to the one it should go to. It
+   *  is a function rather than a number so it runs inside the state updater
+   *  against the camera as it actually is: several wheel notches can land
+   *  before the next render, and a zoom worked out from `latest.current`
+   *  (the last RENDER) made every one of them recompute the same step, so a
+   *  fast scroll zoomed a single notch. */
+  const zoomAt = useCallback((next: (zoom: number) => number, px: number, py: number) => {
     const l = latest.current;
     setCam((c) => (
       l.follow.kind === 'free'
-        ? zoomAbout(l.fit, c, zoom, px, py, l.cssW, l.cssH)
-        : { zoom: clampZoom(zoom), panX: 0, panY: 0 }
+        ? zoomAbout(l.fit, c, next(c.zoom), px, py, l.cssW, l.cssH)
+        : { zoom: clampZoom(next(c.zoom)), panX: 0, panY: 0 }
     ));
   }, []);
 
   const setZoom = useCallback((z: number) => {
     const l = latest.current;
-    zoomAt(z, l.cssW / 2, l.cssH / 2);
+    zoomAt(() => z, l.cssW / 2, l.cssH / 2);
   }, [zoomAt]);
 
   const onWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const factor = e.deltaY < 0 ? WHEEL_STEP : 1 / WHEEL_STEP;
-    zoomAt(latest.current.cam.zoom * factor, e.clientX - rect.left, e.clientY - rect.top);
+    zoomAt((z) => z * factor, e.clientX - rect.left, e.clientY - rect.top);
   }, [zoomAt]);
 
   const onPointerDown = useCallback((e: PointerEvent) => {

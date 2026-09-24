@@ -5,9 +5,11 @@ import { campaignDisplayName } from '../campaignRegistry.js';
 import { playerByDiscordId } from '../players.js';
 import { statDef } from '../statKeys.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
-import { fileReport, REPORT_CATEGORIES, type ReportCategory } from '../tickets/filing.js';
+import { fileReport, latestSharedMatch, REPORT_CATEGORIES, type ReportCategory, type DiscordReporter } from '../tickets/filing.js';
 import { linkPrompt, resolve } from './controller.js';
 import { escapeName } from './presenter.js';
+import { chatButton } from './ticketCard.js';
+import { identityOf, plainLabelEscaped, type Identity } from '../identity.js';
 import type { BotInteraction, InteractionReply, MessagePayload, SlashCommandDef } from './transport.js';
 
 export interface CommandDeps {
@@ -20,7 +22,7 @@ export interface CommandDeps {
 }
 
 /** Labels for the report categories, in the order they should list. */
-const REPORT_LABELS: Record<ReportCategory, string> = {
+export const REPORT_LABELS: Record<ReportCategory, string> = {
   griefing: 'Griefing / throwing',
   cheating: 'Cheating',
   toxicity: 'Toxicity / harassment',
@@ -45,14 +47,14 @@ export const COMMAND_DEFS: SlashCommandDef[] = [
   { name: 'link', description: 'Link your Discord to your Steam account' },
   {
     name: 'report',
-    description: 'Privately report a player, with your latest match together attached if there is one',
+    description: 'Privately report someone, in a game or in the Discord',
     options: [
       { name: 'player', description: 'Who you are reporting', type: 'user', required: true },
       {
         name: 'reason', description: 'What happened', type: 'string', required: true,
         choices: REPORT_CATEGORIES.map((c) => ({ name: REPORT_LABELS[c], value: c })),
       },
-      { name: 'details', description: 'When, which map, what they did', type: 'string' },
+      { name: 'details', description: 'What happened, in your own words', type: 'string' },
       { name: 'match', description: 'Match number (default: your latest match together)', type: 'integer' },
     ],
   },
@@ -76,6 +78,11 @@ const standingLabel = (key: string) => FIXED_LABELS[key] ?? `${statDef(key)?.lab
 
 // Module scope, so it takes the db explicitly rather than closing over one.
 const campaign = (db: DB, slug: string) => campaignDisplayName(db, slug);
+
+/** A player row this module already has, as an Identity: avoids a second
+ *  lookup for a steamid we just fetched. */
+const idOf = (p: { steamid: string; name: string; discord_id: string | null; discord_name: string | null }): Identity =>
+  ({ steamid: p.steamid, steamName: p.name, discordId: p.discord_id, discordName: p.discord_name });
 
 type Cmd = Extract<BotInteraction, { kind: 'command' }>;
 
@@ -141,7 +148,7 @@ function profile(deps: CommandDeps, i: Cmd): InteractionReply {
   if (recentLines.length) fields.push({ name: 'Recent matches', value: recentLines.join('\n') });
 
   return pub({
-    embeds: [{ title: player.name, url, color: COLOR, description: lines.join('\n'), fields }],
+    embeds: [{ title: plainLabelEscaped(identityOf(deps.db, player.steamid)), url, color: COLOR, description: lines.join('\n'), fields }],
     components: [[{ kind: 'link', url, label: 'Full profile' }]],
   });
 }
@@ -151,7 +158,10 @@ function leaderboard(deps: CommandDeps): InteractionReply {
   const ranked = data.rows.filter((r) => r.ranked).slice(0, 10);
   const url = `${deps.publicUrl}/leaderboard`;
   const body = ranked.length
-    ? ranked.map((r, n) => `\`${String(n + 1).padStart(2, ' ')}\` **${r.sr}** ${escapeName(r.name)} · ${r.wins}W ${r.losses}L`).join('\n')
+    // Escaped plain form, not a mention: a row of up to ten of these next to
+    // each other is noisy as mentions, and this is an embed description,
+    // which still renders markdown, so the name still needs escaping.
+    ? ranked.map((r, n) => `\`${String(n + 1).padStart(2, ' ')}\` **${r.sr}** ${plainLabelEscaped(identityOf(deps.db, r.steamid))} · ${r.wins}W ${r.losses}L`).join('\n')
     : 'Nobody is ranked yet. It takes 3 matches.';
   return pub({
     embeds: [{ title: `Leaderboard · ${data.season.name}`, url, color: COLOR, description: body }],
@@ -166,7 +176,7 @@ function matches(deps: CommandDeps, i: Cmd): InteractionReply {
     const who = target(deps, i);
     if ('reply' in who) return who.reply;
     const data = profileData(deps.db, who.steamid, null)!;
-    title = `Recent matches · ${data.player.name}`;
+    title = `Recent matches · ${plainLabelEscaped(identityOf(deps.db, data.player.steamid))}`;
     rows = data.matches.slice(0, 5).map((m) => ({
       id: m.id, campaign: m.campaign, teamAScore: m.teamAScore, teamBScore: m.teamBScore,
       extra: m.result === 'win' ? ' · won' : m.result === 'loss' ? ' · lost' : ' · draw',
@@ -186,7 +196,9 @@ function matches(deps: CommandDeps, i: Cmd): InteractionReply {
 
 function queue(deps: CommandDeps): InteractionReply {
   const q = deps.matchmaker.publicQueue();
-  const names = q.players.map((p, n) => `\`${n + 1}\` ${escapeName(p.name)}`).join('\n') || '_empty_';
+  // Escaped plain form, same reasoning as /leaderboard: an embed description
+  // still renders markdown, and a queue of eight mentions is noisy.
+  const names = q.players.map((p, n) => `\`${n + 1}\` ${plainLabelEscaped(identityOf(deps.db, p.steamid))}`).join('\n') || '_empty_';
   return priv({
     embeds: [{ title: `Queue ${q.count}/${QUEUE_SIZE}`, color: COLOR, description: names }],
   });
@@ -202,37 +214,37 @@ function link(deps: CommandDeps, i: Cmd): InteractionReply {
 
 /** Always private: nobody else in the channel learns who reported whom. */
 function report(deps: CommandDeps, i: Cmd): InteractionReply {
-  // The same door the buttons use: linked, active, not banned, not merged
-  // away. The web route has always required an active player; this checked
-  // only that the Discord account was linked to somebody.
-  const who = resolve(deps, i);
-  if ('reply' in who) return who.reply;
-  const reporter = who.player;
-  const target = playerByDiscordId(deps.db, i.options.player ?? '');
-  if (!target) {
-    return priv({ content: 'That player has not linked Discord, so the bot cannot tell who they are. Use Report on their profile on the website instead.' });
+  // A linked presser goes through the same door as the buttons (standing,
+  // bans, merges). Someone only in the Discord files as themselves; fileReport
+  // holds them to the Discord-side rules.
+  const linked = playerByDiscordId(deps.db, i.userId);
+  let reporter: string | DiscordReporter;
+  if (linked) {
+    const who = resolve(deps, i);
+    if ('reply' in who) return who.reply;
+    reporter = who.player.steamid;
+  } else {
+    reporter = { kind: 'discord', discordId: i.userId, name: i.userName, timedOutUntil: i.presserTimedOutUntil };
   }
-  if (target.steamid === reporter.steamid) return priv({ content: 'You cannot report yourself.' });
+  const pick = i.picked.player;
+  if (!pick) return priv({ content: 'Pick the person you are reporting.' });
+  const targetPlayer = playerByDiscordId(deps.db, pick.id);
 
-  // A match is optional. With none given, attach the latest one you shared in
-  // the last 48 hours if there is one, because that is nearly always what the
-  // report is about; otherwise file it with no match.
-  let matchId: number | null = i.options.match ? Number(i.options.match) : null;
-  if (matchId === null) {
-    const shared = deps.db.prepare(
-      `SELECT m.id FROM matches m
-       JOIN match_players a ON a.match_id = m.id AND a.player_id = ?
-       JOIN match_players b ON b.match_id = m.id AND b.player_id = ?
-       WHERE m.state IN ('live', 'completed', 'aborted')
-         AND (m.ended_at IS NULL OR m.ended_at > datetime('now', '-48 hours'))
-       ORDER BY m.id DESC LIMIT 1`,
-    ).get(reporter.steamid, target.steamid) as { id: number } | undefined;
-    matchId = shared?.id ?? null;
-  }
-  const r = fileReport(deps.db, reporter.steamid, {
-    targetId: target.steamid, category: i.options.reason, text: i.options.details ?? '', matchId,
-  }, { adminSteamIds: deps.adminSteamIds ?? [] });
+  // A match is optional, and only exists between two players.
+  const matchId: number | null = i.options.match
+    ? Number(i.options.match)
+    : typeof reporter === 'string' && targetPlayer ? latestSharedMatch(deps.db, reporter, targetPlayer.steamid) : null;
+  const r = fileReport(deps.db, reporter, {
+    category: i.options.reason, text: i.options.details ?? '', matchId,
+  }, {
+    adminSteamIds: deps.adminSteamIds ?? [],
+    targetDiscord: { discordId: pick.id, name: pick.name, bot: pick.bot, administrator: pick.administrator },
+  });
   if (!r.ok) return priv({ content: `Could not file the report: ${r.error}.` });
   const about = matchId === null ? '' : ` for match #${matchId}`;
-  return priv({ content: `Reported ${escapeName(target.name)}${about}. Thanks, the moderators will look at it. They will not be told who reported them.` });
+  const name = targetPlayer ? plainLabelEscaped(idOf(targetPlayer)) : escapeName(pick.name);
+  return priv({
+    content: `Reported ${name}${about}. Thanks, the moderators will look at it. The person you reported is never told who filed it.`,
+    components: [[chatButton(r.reportId)]],
+  });
 }

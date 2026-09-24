@@ -10,21 +10,25 @@ describe('openDb', () => {
       .all()
       .map((r: any) => r.name);
     expect(names).toEqual([
-      'admin_actions', 'bans', 'campaign_play_rules',
+      'admin_actions',
+      'balance_patch_servers', 'balance_patches', 'balance_server_state',
+      'bans', 'campaign_play_rules',
       'custom_campaign_chapters', 'custom_campaign_installs', 'custom_campaigns',
-      'discord_link_codes', 'discord_link_history', 'discord_messages', 'discord_voice', 'discord_voice_origin',
+      'discord_link_codes', 'discord_link_history', 'discord_messages', 'discord_sanctions', 'discord_voice', 'discord_voice_origin',
       'endorsements',
       'input_bursts', 'input_caps', 'input_detections',
       'integrity_clips', 'integrity_flags', 'integrity_prior', 'integrity_prior_rounds', 'integrity_reviews', 'integrity_rounds',
       'integrity_unanalysable',
       'match_chat', 'match_demos', 'match_live', 'match_live_events', 'match_live_map_stats', 'match_live_maps',
       'match_live_players', 'match_maps',
-      'match_pauses', 'match_player_stats', 'match_players', 'match_readyup_players', 'match_readyups', 'match_replays', 'match_rounds',
+      'match_pauses', 'match_player_stats', 'match_players', 'match_presence',
+      'match_readyup_players', 'match_readyups', 'match_replays', 'match_round_marks', 'match_round_stats', 'match_rounds',
       'matches', 'matchmaker_state',
-      'penalties', 'player_aliases', 'player_links', 'player_networks', 'player_notes', 'player_ratings',
-      'player_steam_signals', 'players',
-      'rating_history', 'reports', 'seasons', 'servers', 'settings', 'signon_drops', 'steam_signal_alerts',
-      'ticket_access', 'ticket_events', 'ticket_reports', 'tickets', 'twitch_status',
+      'penalties', 'pending_reports', 'player_aliases', 'player_links', 'player_networks', 'player_notes', 'player_ratings',
+      'player_reviews', 'player_steam_signals', 'players',
+      'rating_history', 'relay_messages', 'report_message', 'reporter_chat_pings', 'reports', 'round_metric_context', 'round_metrics', 'seasons', 'servers', 'settings', 'signon_drops',
+      'sourcetv_server_events', 'sourcetv_sessions', 'steam_signal_alerts',
+      'ticket_access', 'ticket_attachments', 'ticket_events', 'ticket_messages', 'ticket_notices', 'ticket_reports', 'ticket_threads', 'tickets', 'twitch_status',
     ]);
   });
 
@@ -50,6 +54,11 @@ describe('openDb', () => {
     const db = openDb(':memory:');
     const cols = db.prepare('PRAGMA table_info(servers)').all() as { name: string }[];
     expect(cols.map((c) => c.name)).toContain('has_dlc4');
+  });
+
+  it('turns secure_delete on, so a removal actually erases the old bytes', () => {
+    const db = openDb(':memory:');
+    expect(db.pragma('secure_delete', { simple: true })).toBe(1);
   });
 });
 

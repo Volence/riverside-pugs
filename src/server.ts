@@ -1,11 +1,21 @@
 import { spawn } from 'node:child_process';
 import { pruneDemos } from './demoPrune.js';
 import { sweepDemos } from './demoOffload.js';
+import { sweepReplays } from './replayOffload.js';
 import { r2FromEnv } from './r2.js';
 import { reindexRecentMatches } from './reindex.js';
 import { IntegrityJobs, matchInFlight, pendingRoundCount } from './integrity/job.js';
+import { matchActive, runMetricsPass, REAPER_ROUNDS_PER_TICK } from './metrics/job.js';
 import { handleAbandon } from './abandon.js';
 import { AdminFeedPoster } from './discord/adminFeedPoster.js';
+import { TicketSync } from './discord/ticketSync.js';
+import { TicketMirror } from './discord/ticketMirror.js';
+import { ReporterChats } from './discord/reporterChats.js';
+import { AttachmentStore, httpFetcher } from './tickets/attachments.js';
+import { handleTicketButton, handleTicketModal, opensTicketModal } from './discord/ticketButtons.js';
+import { ReportButton, handleReportButton, handleReportModal, opensReportModal } from './discord/reportButton.js';
+import { handleRemoveCommand, REMOVE_COMMAND } from './discord/ticketRemove.js';
+import { purgeRemovedFiles } from './tickets/removal.js';
 import { playerByDiscordId } from './players.js';
 import { applyGate } from './discord/gate.js';
 import { GuildMembership } from './discord/membership.js';
@@ -14,47 +24,56 @@ import { makeQueueGate } from './queueGate.js';
 import { makeReadyGate } from './readyGate.js';
 import { canonicalise } from './aliases.js';
 import { recordPlayerNet } from './playerNetworks.js';
+import { onSourceTv } from './sourcetvSessions.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { activeTimeout } from './penalties.js';
 import { adminRoutes } from './routes/admin.js';
+import { isWheel } from './inputStats.js';
+import { peopleRoutes } from './routes/people.js';
 import { banMessage, liftExpiredBans } from './admin/players.js';
 import { botEnabled, startBot, type RunningBot } from './discord/index.js';
 import { createDjsTransport } from './discord/djsTransport.js';
 import { VoiceChannels } from './discord/voice.js';
 import { COMMAND_DEFS, handleCommand } from './discord/commands.js';
 import { fetchDiscordApi, type DiscordApi } from './discord/api.js';
+import type { ModerationOps } from './discord/transport.js';
 import { discordAuthRoutes } from './routes/discordAuth.js';
 import { twitchAuthRoutes } from './routes/twitchAuth.js';
 import { makeTwitchApi, type TwitchApi } from './twitch/api.js';
 import { startTwitchPoll } from './twitchPoll.js';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { STATUS_CODES } from 'node:http';
+import { readFileSync } from 'node:fs';
 import type { Config } from './config.js';
 import type { DB } from './db.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
 import { backfillPersonas } from './personaBackfill.js';
+import { handleConduct } from './conductFlags.js';
 import { refreshSteamSignals, startSteamSignalRefresh, type SignalDeps } from './steamSignals.js';
 import { authRoutes } from './routes/auth.js';
 import { renewSession } from './session.js';
 import { Hub } from './ws.js';
 import { wsRoutes } from './routes/ws.js';
+import { ticketNudger } from './tickets/nudge.js';
+import { subscribeTicketSignals } from './tickets/signals.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
-import { cheatName, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
+import { cheatName, cvarActOf, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
 import { inputThresholds, recordInputBurst, recordInputCap } from './inputBursts.js';
 import { resolveServerBySource, isKnownServerAddress, type ServerRow } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
+import type { ServerQuery } from './leaveControl.js';
 import { ServerBanSync, type ServerExec } from './serverBans.js';
 import { ServerAdminSync } from './serverAdmins.js';
-import { rconRestarter, type ServerRestarter } from './serverRestart.js';
+import { kickThenQuit, rconRestarter, type ServerRestarter } from './serverRestart.js';
 import { LogListener, type LogMeta } from './logListener.js';
 import { LogAuth, pushLogSecret } from './logAuth.js';
 import { SelfStartedMatches } from './selfStarted.js';
@@ -64,11 +83,18 @@ import {
   recordRoundStart, recordRoundEnd,
   reapOrphanedMatches,
   recordPhase,
+  currentOrdinal,
 } from './liveView.js';
+import { BalanceAssembler } from './balanceAssembler.js';
+import { loadBalanceKnobs, BALANCE_KNOBS_PATH, type BalanceKnobs } from './balanceKnobs.js';
+import { recordBalanceSighting, refingerprintPatches } from './balancePatches.js';
+import { recordRoundMark, recordRoundStat, recordRoundStatsEnd, resetRoundLines } from './roundStatLines.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
+import { recordPresenceLine, sweepPresence } from './presence.js';
 import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
 import { pruneReplays } from './replayPrune.js';
+import { pruneLiveFilesSafely } from './replayPush.js';
 import { apiRoutes } from './routes/api.js';
 import { ticketRoutes } from './routes/tickets.js';
 import { statsRoutes } from './routes/stats.js';
@@ -125,6 +151,20 @@ export interface ServerDeps {
   /** Pushes one server its log secret, for the admin's log-secret route.
    *  Injected in tests so it never dials a real box. */
   logSecretPusher?: (server: ServerRow, secret: string) => Promise<boolean>;
+  /** Runs one console command on one server and returns the reply, for the
+   *  live board's clock actions. Injected in tests so they never dial a box. */
+  serverQuery?: ServerQuery;
+  /** Test seam: stands in for the running bot's moderation surface, so a
+   *  ticket-discord-sanction route can be tested without a real bot. When
+   *  set, it wins over whatever the bot (if any) is actually running. */
+  discordModeration?: ModerationOps;
+  /** Test seam: stands in for the running bot's reporter chats, so the
+   *  chat routes can be tested without a real bot. Wins when set. */
+  reporterChats?: ReporterChats;
+  /** Overrides where balance knobs are read from. Injected in tests to
+   *  exercise a missing or invalid balance/knobs.json without touching the
+   *  checked-in file; production reads BALANCE_KNOBS_PATH otherwise. */
+  balanceKnobsPath?: string;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -247,8 +287,77 @@ export async function finishWithRetry(
   if (row?.server_id != null) releaser.release(row.server_id);
 }
 
+/** Vite builds web/ to dist/public (see vite.config.ts). In dev the Vite
+ *  server owns the browser and proxies here, so this path only matters in
+ *  production. */
+const STATIC_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'public');
+
+/** The app shell as bytes, or null when there is no built frontend to serve.
+ *
+ *  Only for the malformed-URL handler, which runs before @fastify/static has
+ *  decorated a reply and so has no sendFile to call: the fallback at the
+ *  bottom of buildServer still goes through the plugin. Same file, same
+ *  directory, so the two cannot serve different shells. */
+function readShell(): Buffer | null {
+  try {
+    return readFileSync(join(STATIC_ROOT, 'index.html'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether this is a browser navigating to a page, rather than something
+ * asking this server for one of the things it owns.
+ *
+ * One list, asked by both the SPA fallback and the malformed-URL handler
+ * above it: two copies of "what counts as a page" would drift, and the one
+ * that drifted would start answering a typo'd endpoint with a 200 full of
+ * HTML that fails somewhere much less obvious. Non-GET methods are never a
+ * page navigation. The list is what the fallback has always used: a mistyped
+ * `/download/...` link still lands on the site's own not-found page rather
+ * than a JSON body, which is what somebody following a link from Discord
+ * should see.
+ */
+function isPageRequest(method: string, url: string): boolean {
+  if (method !== 'GET' && method !== 'HEAD') return false;
+  return !['/api/', '/auth/', '/ws'].some((prefix) => url.startsWith(prefix));
+}
+
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false });
+  const app = Fastify({
+    logger: false,
+    // A URL fastify cannot even parse, which is almost always a percent
+    // escape truncated by a paste or a chat client, is refused here, before
+    // routing, so the SPA fallback at the bottom of this file never sees it.
+    // On a page path that handed the reader a bare 400 JSON body for what is
+    // otherwise an ordinary page URL, so the same answer the fallback gives
+    // is given here. Everything else is answered exactly as fastify would:
+    // this replaces the framework's own handler rather than wrapping it, so
+    // the default response is rebuilt rather than inherited.
+    frameworkErrors: (err, req, reply) => {
+      const e = err as Error & { code?: string; statusCode?: number };
+      // The reply handed to this hook is typed against a route that does not
+      // exist yet, so its send() accepts nothing; it is an ordinary reply.
+      const res = reply as unknown as FastifyReply;
+      if (e.code === 'FST_ERR_BAD_URL' && isPageRequest(req.method, req.raw.url ?? '')) {
+        const shell = readShell();
+        if (shell !== null) {
+          // Spelled out because this path sends bytes rather than going
+          // through @fastify/static, which appends the charset itself.
+          void res.type('text/html; charset=utf-8').send(shell);
+          return;
+        }
+      }
+      const statusCode = e.statusCode ?? 500;
+      void res.code(statusCode).send({
+        error: STATUS_CODES[statusCode] ?? 'Error',
+        code: e.code,
+        message: e.message,
+        statusCode,
+      });
+    },
+  });
 
   // Module state rather than a constructor argument: campaignRegistry(db) is
   // called from a dozen places that have no business knowing about the game
@@ -319,10 +428,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     renewSession(req, reply, deps.db, secureCookies);
   });
   await app.register(websocket);
-  // Vite builds web/ to dist/public (see vite.config.ts). In dev the Vite server
-  // owns the browser and proxies here, so this path only matters in production.
-  const staticRoot = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'public');
-  await app.register(fastifyStatic, { root: staticRoot });
+  await app.register(fastifyStatic, { root: STATIC_ROOT });
 
   const membership = new GuildMembership();
   const presence = new VoicePresence();
@@ -360,7 +466,18 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     : null;
 
   const hub = deps.hub ?? new Hub();
-  await app.register(wsRoutes, { hub });
+  await app.register(wsRoutes, { hub, db: deps.db });
+
+  // Every ticket mutation and every filing publishes a ticket signal after
+  // its commit (phase 2a). Open ticket pages of people who may see that
+  // ticket refetch on it; nobody else hears a thing.
+  const nudgeTicket = ticketNudger(deps.db, hub);
+  const offTicketNudge = subscribeTicketSignals((s) => {
+    if (s.kind === 'ticket') nudgeTicket(s.ticketId);
+  });
+  // Files of removed messages that could not be unlinked last time (a full
+  // disk, a permissions fault). Rows only: with none owed this touches nothing.
+  purgeRemovedFiles(deps.db, deps.config.ticketAttachmentsDir);
 
   // With the bot running, the bot's own cards say everything the webhook did
   // (and more), so the webhook would only duplicate them.
@@ -377,7 +494,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
       try {
         await rcon.connect();
-        await rcon.exec('quit');
+        await kickThenQuit(rcon, server.name);
       } finally {
         rcon.close();
       }
@@ -497,6 +614,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // reads its counters either way. See src/logAuth.ts.
   const logAuth = new LogAuth(deps.db, deps.config.logPublicAddress.split(':')[0]);
 
+  // Admin 'problem' events raised during boot, before anything is listening
+  // on the admin feed (the Discord poster subscribes only once the bot has
+  // connected). Posted from onConnected below, once.
+  const bootProblems: string[] = [];
+
   let orchestrator = deps.orchestrator;
   let logListener: LogListener | null = null;
   // Assigned further down, once the bot variable it reads exists: the same
@@ -515,6 +637,36 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // address (Riverside #3 and #4).
       const serverOf = (source: string, meta: LogMeta): number | null =>
         meta.serverId ?? resolveServerBySource(deps.db, source, feedHost, meta.port);
+      const balanceAssembler = new BalanceAssembler();
+      // A missing or invalid balance/knobs.json must never crash the whole
+      // site at boot: it is one small feature's config, not core to serving
+      // the app. Guarded here rather than left to throw; balance recording is
+      // simply disabled (see the balance_end handler below) until the file is
+      // fixed and the process restarted. Deliberately no empty-list fallback:
+      // that would change every fingerprint computed while it was in effect.
+      let balanceKnobs: BalanceKnobs | null;
+      try {
+        balanceKnobs = loadBalanceKnobs(deps.balanceKnobsPath);
+      } catch (err) {
+        console.error(
+          `[balance] failed to load balance knobs from ${deps.balanceKnobsPath ?? BALANCE_KNOBS_PATH}, ` +
+          'balance patch recording is disabled until this is fixed:', err,
+        );
+        balanceKnobs = null;
+      }
+      // Bring stored fingerprints in line with the versionless/ignored lists
+      // just loaded, before the first sighting can hash against them. Here,
+      // not in openDb, because this is the one place the knobs are known.
+      if (balanceKnobs) {
+        try {
+          refingerprintPatches(deps.db, balanceKnobs.versionless, balanceKnobs.ignored ?? [], (e) => bootProblems.push(e.text));
+        } catch (err) {
+          console.error('[balance] refingerprinting patches failed:', err);
+        }
+      }
+      const liveMatchRow = (token: string) =>
+        deps.db.prepare("SELECT id, server_id FROM matches WHERE token = ? AND state = 'live'")
+          .get(token) as { id: number; server_id: number | null } | undefined;
       logListener = new LogListener((raw, source, meta) => {
         // One rewrite at the door, before anything reads a SteamID off this
         // event. A player who connects on a second account that has been
@@ -552,6 +704,32 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             }
           } catch (err) {
             console.error('[lilac] failed to record a flag:', err);
+          }
+          return;
+        }
+        if (ev.kind === 'cvar_flag') {
+          // Evidence only, never on the critical path. Stored in or out of a
+          // match, like a LilAC flag; the admin channel hears about each act
+          // once per player per live match, since the plugin reports every
+          // connection and every ready-up. The act rides in detail, after the
+          // value, so rows from before it existed read as `live`.
+          try {
+            const serverId = serverOf(source, meta);
+            const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
+            const seenThisMatch = matchId !== null && (deps.db.prepare(
+              "SELECT detail FROM integrity_flags WHERE source = 'cvar' AND kind = ? AND steamid = ? AND match_id = ?",
+            ).all(ev.cvar, ev.steamid, matchId) as { detail: string }[]).some((r) => cvarActOf(r.detail) === ev.act);
+            // Deduped on detail too: a `fixed` a few seconds after a `held` is
+            // the whole story, not a repeat of it.
+            const stored = recordIntegrityFlag(deps.db, {
+              matchId, serverId, steamid: ev.steamid, source: 'cvar',
+              kind: ev.cvar, severity: 'suspected', detail: `value=${ev.value} act=${ev.act}`,
+            }, new Date(), { dedupeOnDetail: true });
+            if (stored && matchId !== null && !seenThisMatch) {
+              publishAdminEvent({ kind: 'cvar_flag', steamid: ev.steamid, matchId, cvar: ev.cvar, value: ev.value, act: ev.act });
+            }
+          } catch (err) {
+            console.error('[cvarwatch] failed to record a client setting:', err);
           }
           return;
         }
@@ -593,6 +771,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             // its repeat count, so this posts once per player, match and
             // signature however many bursts qualify afterwards.
             for (const { signature, note } of stored.created) {
+              // A scroll wheel bind is allowed; the file keeps the row, the
+              // admin channel does not need telling.
+              if (isWheel(note)) continue;
               publishAdminEvent({
                 kind: 'input_flag', steamid: ev.steamid, matchId, signature,
                 detail: `repeated across separate ${ev.burstKind} bursts this match; holds: ${note}`,
@@ -603,6 +784,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           return;
         }
+        if (ev.kind === 'say' || ev.kind === 'name') {
+          // Conduct alerts. Never on the critical path: a failure here must
+          // not take down the listener that also carries match_end.
+          try {
+            handleConduct(deps.db, ev, serverOf(source, meta));
+          } catch (err) {
+            console.error('[conduct] failed to check a line:', err);
+          }
+          return;
+        }
         if (ev.kind === 'player_net') {
           // Cosmetic-adjacent and never on the critical path: a failure here
           // must not take down the listener that also carries match_end.
@@ -610,6 +801,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             recordPlayerNet(deps.db, ev);
           } catch (err) {
             console.error('[networks] failed to record a connect address:', err);
+          }
+          return;
+        }
+        if (ev.kind === 'sourcetv') {
+          try {
+            const sid = serverOf(source, meta);
+            if (sid !== null) onSourceTv(deps.db, sid, ev);
+          } catch (err) {
+            console.error('[sourcetv] failed to record:', err);
           }
           return;
         }
@@ -636,6 +836,24 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             ev.token, ev.steamid,
           ).then((id) => { if (id !== null) hub.broadcast('refresh'); })
             .catch((err) => console.error('[abandon] failed:', err));
+          return;
+        }
+        if (ev.kind === 'leave' || ev.kind === 'return') {
+          // The live board's view of who is missing. Guarded like everything
+          // here that is not the result path: a database error must not take
+          // down the listener that also carries match_end.
+          try {
+            const change = recordPresenceLine(deps.db, ev);
+            if (change?.changed) hub.broadcast('refresh');
+            // The plugin released a hold at its ceiling. Announced only on the
+            // held to not held transition, so whichever of this line and the
+            // sweep below gets there first is the one that speaks.
+            if (change?.holdReleased && ev.kind === 'leave' && ev.auto) {
+              publishAdminEvent({ kind: 'clock', what: 'hold_expired', steamid: ev.steamid, matchId: change.matchId, remainingS: ev.remaining });
+            }
+          } catch (err) {
+            console.error('[presence] failed to record', ev.kind, err);
+          }
           return;
         }
         if (ev.kind === 'problem') {
@@ -707,6 +925,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           else if (ev.kind === 'player' && ev.event === 'connect') {
             recordPlayerConnect(deps.db, ev.token, ev.steamid);
+            // A 'refresh' on top of the 'live' every feed line ends with: the
+            // admin board listens for refresh only, because 'live' fires ten
+            // times a second. Only a real change, so the connect pulse of a map
+            // change wakes nobody.
+            if (recordPresenceLine(deps.db, ev)?.changed) hub.broadcast('refresh');
             // The plugin emits this from OnClientPostAdminCheck, which only
             // fires once the client is fully in game, so it is an entry too.
             // The engine's own "entered the game" line normally gets here
@@ -723,7 +946,40 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           else if (ev.kind === 'live_event') recordLiveEvent(deps.db, ev.token, ev);
           else if (ev.kind === 'chat') recordChat(deps.db, ev.token, ev);
           else if (ev.kind === 'phase') recordPhase(deps.db, ev.token, ev.phase);
-          else if (ev.kind === 'round_start') recordRoundStart(deps.db, ev.token, ev);
+          else if (ev.kind === 'round_start') {
+            recordRoundStart(deps.db, ev.token, ev);
+            // A replayed half re-sends ROUND_START, and its per-round stats
+            // and markers belong to the PREVIOUS attempt, so clear them now
+            // that the round row (and its ordinal) is settled.
+            const rs = liveMatchRow(ev.token);
+            if (rs) resetRoundLines(deps.db, rs.id, currentOrdinal(deps.db, rs.id), ev.half as 1 | 2);
+          }
+          else if (ev.kind === 'balance_part') {
+            balanceAssembler.part(ev.token, ev.half, ev.part, ev.items);
+            return; // nothing visible changed yet; no broadcast
+          }
+          else if (ev.kind === 'balance_end') {
+            const inv = balanceAssembler.end(ev.token, ev.half, ev.parts, ev.items);
+            const m = liveMatchRow(ev.token);
+            // balanceKnobs is null when balance/knobs.json failed to load at
+            // boot (see above); recording is disabled until that is fixed.
+            if (!inv || !m || !balanceKnobs) return;
+            // The match knows its server; the source address is the fallback
+            // (Riverside #3 and #4 share one IP, see resolveServerBySource).
+            recordBalanceSighting(deps.db, {
+              matchId: m.id, serverId: m.server_id ?? serverOf(source, meta), half: ev.half,
+              inventory: inv, versionless: balanceKnobs.versionless, ignored: balanceKnobs.ignored,
+            });
+            return;
+          }
+          else if (ev.kind === 'round_stat' || ev.kind === 'round_stats_end' || ev.kind === 'round_mark') {
+            const m = liveMatchRow(ev.token);
+            if (!m) return;
+            if (ev.kind === 'round_stat') recordRoundStat(deps.db, m.id, ev);
+            else if (ev.kind === 'round_stats_end') recordRoundStatsEnd(deps.db, m.id, ev);
+            else recordRoundMark(deps.db, m.id, ev);
+            return;
+          }
           else if (ev.kind === 'round_end') {
             recordRoundEnd(deps.db, ev.token, ev);
             // A round just closed, so the plugin has finished its replay file.
@@ -938,17 +1194,47 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     } catch (err) {
       console.error('[noShow] reaper failed:', err);
     }
+    // Balance metrics: a couple of rounds per minute, never while a match
+    // is running (decoding a replay blocks the event loop). History is
+    // filled by scripts/backfill-round-metrics.ts.
+    try {
+      if (!matchActive(deps.db)) runMetricsPass(deps.db, deps.config.replayDir, { limit: REAPER_ROUNDS_PER_TICK });
+    } catch (err) {
+      console.error('[metrics] pass failed', err);
+    }
   }, 60_000);
   reaper.unref();
+
+  // The live board's clocks. Five seconds because the warning it posts is
+  // about a countdown measured in tens of seconds; the pass is one indexed
+  // read when nobody is dropped, which is nearly always.
+  const presenceSweep = setInterval(() => {
+    try {
+      const events = sweepPresence(deps.db);
+      for (const e of events) publishAdminEvent({ kind: 'clock', ...e });
+      if (events.length > 0) hub.broadcast('refresh');
+    } catch (err) {
+      console.error('[presence] sweep failed:', err);
+    }
+  }, 5_000);
+  presenceSweep.unref();
 
   // Daily replay prune. Interval rather than cron because there is no
   // scheduler here and the exact hour does not matter: the window is 90 days.
   // unref so the timer never holds the process open in tests.
   const pruneTimer = setInterval(() => {
-    pruneReplays(deps.db, deps.config.replayDir);
+    pruneReplays(deps.db, deps.config.replayDir, { requireOffloaded: r2 !== null });
     pruneDemos(deps.db, deps.config.demoDir);
   }, 24 * 60 * 60 * 1000);
   pruneTimer.unref();
+
+  // Live replay copies. Every ten minutes, because a finished match's copy is
+  // superseded as soon as the pull job lands its final file, and the live
+  // directory should not hold a day of rounds for nothing.
+  const livePruneTimer = setInterval(() => {
+    pruneLiveFilesSafely(deps.db, deps.config.replayLiveDir, deps.config.replayDir, Date.now());
+  }, 10 * 60 * 1000);
+  livePruneTimer.unref();
 
   // Demo offload to R2, when it is configured. Hourly rather than daily and on
   // its own timer, because this one RECLAIMS space while the prunes above only
@@ -960,6 +1246,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     const offloadTimer = setInterval(() => {
       void sweepDemos(deps.db, r2, deps.config.demoDir, { deleteLocal: true })
         .catch((err) => console.error('[demoOffload] sweep failed:', err));
+      void sweepReplays(deps.db, r2, deps.config.replayDir)
+        .catch((err) => console.error('[replayOffload] sweep failed:', err));
     }, 60 * 60 * 1000);
     offloadTimer.unref();
     app.addHook('onClose', async () => { clearInterval(offloadTimer); });
@@ -973,8 +1261,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // because an escaping throw inside a timer callback would take the process
   // down rather than merely skip a prune.
   const pruneOnBoot = setTimeout(() => {
+    if (r2) {
+      void sweepReplays(deps.db, r2, deps.config.replayDir)
+        .catch((err) => console.error('[replayOffload] sweep failed:', err));
+    }
     try {
-      pruneReplays(deps.db, deps.config.replayDir);
+      pruneReplays(deps.db, deps.config.replayDir, { requireOffloaded: r2 !== null });
       pruneDemos(deps.db, deps.config.demoDir);
     } catch (err) {
       console.error('[replay] startup prune failed:', err);
@@ -986,6 +1278,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // must never wait on, or fail because of, Discord.
   let bot: RunningBot | null = null;
   let adminFeed: AdminFeedPoster | null = null;
+  let ticketSync: TicketSync | null = null;
+  let ticketMirror: TicketMirror | null = null;
+  let reportButton: ReportButton | null = null;
+  let reporterChats: ReporterChats | null = null;
   // Only where a real listener exists to feed it. `bot` is read per drop,
   // because the bot logs in some seconds after this line runs, and stays null
   // for good when Discord is not configured: drops are then stored and shown
@@ -1035,9 +1331,65 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       onConnected: (t) => {
         adminFeed = new AdminFeedPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
         adminFeed.start();
+        for (const text of bootProblems.splice(0)) publishAdminEvent({ kind: 'problem', text });
+        // Built before the reconciler so its hook can reach it. Which of the
+        // two starts first decides nothing: start() only queues a first pass
+        // on each one's own chain, and a thread the reconciler creates has
+        // no missed history; its first live message reads the thread anyway.
+        const mirror = new TicketMirror({
+          db: deps.db,
+          transport: t,
+          store: new AttachmentStore({ db: deps.db, dir: deps.config.ticketAttachmentsDir, fetcher: httpFetcher }),
+          onChange: nudgeTicket,
+          // A removal's Discord delete runs on the reconciler's chain: both
+          // unarchive a thread, act in it and archive it again, and on two
+          // chains they collide. Read per call, because the reconciler is
+          // built just below this.
+          serialise: (fn) => (ticketSync ? ticketSync.serialise(fn) : fn()),
+          // A reporter's own message is fed to the reconciler's chain (pings,
+          // relay, close notices), never handled from the mirror's own chain.
+          onReporterActivity: (th, m, fresh) => ticketSync?.reporterActivity(th, m, fresh),
+        });
+        ticketMirror = mirror;
+        // After the feed: a problem found on the first pass has somewhere to go.
+        ticketSync = new TicketSync({
+          db: deps.db,
+          transport: t,
+          publicUrl: deps.config.publicUrl,
+          // The reconciler's first pass deletes forum posts that must not
+          // exist. Whatever was written in one while the bot was down is
+          // copied onto the site first, or it goes with the post.
+          saveBeforeDelete: (threadId) => mirror.catchUp(threadId),
+          // And its timer is what retries a removal's Discord delete: a
+          // refused one would otherwise wait for the next restart.
+          sweepRemovals: () => { void mirror.sweepRemovals(); },
+        });
+        ticketSync.start();
+        mirror.start();
+        reportButton = new ReportButton({ db: deps.db, transport: t });
+        reportButton.start();
+        reporterChats = new ReporterChats({
+          db: deps.db, transport: t, publicUrl: deps.config.publicUrl, guildId: deps.config.discord!.guildId,
+          isMember: (id) => membership.isMember(id),
+          // On the reconciler's chain, like the mirror's removals: both
+          // unarchive a thread, act in it and archive it again.
+          serialise: (fn) => (ticketSync ? ticketSync.serialise(fn) : fn()),
+        });
       },
       extraButtons: {
         'r:': (i) => adminFeed!.handleButton(i),
+        't:': (i) => handleTicketButton({ db: deps.db, publicUrl: deps.config.publicUrl, chats: () => deps.reporterChats ?? reporterChats }, i),
+        'rp:': (i) => handleReportButton({ db: deps.db, adminSteamIds: deps.config.adminSteamIds, chats: () => deps.reporterChats ?? reporterChats }, i),
+      },
+      extraModals: {
+        't:': (i) => handleTicketModal({ db: deps.db, publicUrl: deps.config.publicUrl, chats: () => deps.reporterChats ?? reporterChats }, i),
+        'rp:': (i) => handleReportModal({ db: deps.db, adminSteamIds: deps.config.adminSteamIds, chats: () => deps.reporterChats ?? reporterChats }, i),
+      },
+      opensModal: (id) => opensTicketModal(id) || opensReportModal(id),
+      messageCommands: {
+        [REMOVE_COMMAND]: (i) => handleRemoveCommand({
+          db: deps.db, attachmentsDir: deps.config.ticketAttachmentsDir, mirror: () => ticketMirror,
+        }, i),
       },
       commands: {
         defs: COMMAND_DEFS,
@@ -1053,10 +1405,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }
 
   app.addHook('onClose', async () => {
+    reportButton?.stop();
+    ticketMirror?.stop();
+    ticketSync?.stop();
+    offTicketNudge();
     adminFeed?.stop();
     await bot?.stop();
     clearInterval(reaper);
+    clearInterval(presenceSweep);
     clearInterval(pruneTimer);
+    clearInterval(livePruneTimer);
     stopTwitchPoll?.();
     stopSignalRefresh?.();
     clearTimeout(pruneOnBoot);
@@ -1073,15 +1431,30 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   await app.register(ticketRoutes, {
     db: deps.db, matchmaker, broadcast: (e) => hub.broadcast(e), adminSteamIds: deps.config.adminSteamIds,
+    guildId: deps.config.discord?.guildId ?? null,
+    attachmentsDir: deps.config.ticketAttachmentsDir,
+    afterRemove: () => { void ticketMirror?.sweepRemovals(); },
+    moderation: () => deps.discordModeration ?? bot?.transport.moderation ?? null,
+    chats: () => deps.reporterChats ?? reporterChats,
   });
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,
     dlc4Probe: deps.dlc4Probe, adminSync, adminSteamIds: deps.config.adminSteamIds, logAuth,
+    voice: deps.config.discord !== null ? presence : null,
     logSecretPusher: deps.logSecretPusher ?? (async (server, secret) => {
       const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
       try {
         await rcon.connect();
         return await pushLogSecret(rcon, secret);
+      } finally {
+        rcon.close();
+      }
+    }),
+    serverQuery: deps.serverQuery ?? (async (server, command) => {
+      const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+      try {
+        await rcon.connect();
+        return await rcon.exec(command);
       } finally {
         rcon.close();
       }
@@ -1092,8 +1465,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       ? (steamid) => refreshSteamSignals(signalDeps, [steamid], { sharing: true })
       : undefined,
   });
+  await app.register(peopleRoutes, { db: deps.db });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
-  await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });
+  await app.register(replayRoutes, {
+    db: deps.db, replayDir: deps.config.replayDir, liveDir: deps.config.replayLiveDir, r2,
+  });
   await app.register(campaignRoutes, {
     db: deps.db, addonsDir: deps.config.addonsDir, freeBytes: deps.freeBytes,
     installTargets: deps.installTargets, maxUploadBytes: deps.maxUploadBytes,
@@ -1121,12 +1497,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // a 200 full of HTML and fail somewhere much less obvious. Non-GET methods
   // are likewise never a page navigation.
   app.setNotFoundHandler((req, reply) => {
-    const isPageRequest =
-      (req.method === 'GET' || req.method === 'HEAD') &&
-      !req.url.startsWith('/api/') &&
-      !req.url.startsWith('/auth/') &&
-      !req.url.startsWith('/ws');
-    if (isPageRequest) return reply.type('text/html').sendFile('index.html');
+    if (isPageRequest(req.method, req.url)) return reply.type('text/html').sendFile('index.html');
     return reply.code(404).send({ error: 'not found' });
   });
 

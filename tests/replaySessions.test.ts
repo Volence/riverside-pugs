@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, utimesSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  listSessions, currentFileFor, resolveByName, CLOSED_AFTER_IDLE_MS,
+  listSessions, currentFileFor, resolveByName, resolveFurther, CLOSED_AFTER_IDLE_MS,
 } from '../src/replaySessions.js';
 import { encodeHeader, encodeFrame, VERSION, HEADER_BYTES, PLAYER_SLOTS,
   type ReplayHeader, type Frame } from '../src/replayFormat.js';
@@ -165,5 +165,68 @@ describe('resolveByName', () => {
 
   it('returns null for a name that matches but is not on disk', () => {
     expect(resolveByName(dir, `pug_${TOKEN_B}_0_1.rpl`, NOW)).toBeNull();
+  });
+});
+
+function writeIn(target: string, name: string, h: ReplayHeader, frames: number, mtimeMs = NOW): void {
+  const path = join(target, name);
+  writeFileSync(path, Buffer.concat([
+    encodeHeader(h), ...Array.from({ length: frames }, (_, i) => encodeFrame(emptyFrame(i * 100))),
+  ]));
+  const secs = mtimeMs / 1000;
+  utimesSync(path, secs, secs);
+}
+
+describe('the live directory', () => {
+  let live: string;
+  beforeEach(() => { live = join(dir, 'live'); mkdirSync(live); });
+  const name = `pug_${TOKEN_A}_0_1.rpl`;
+
+  it('finds a round that exists only in the live directory', () => {
+    writeIn(live, name, header(), 3);
+    expect(currentFileFor(dir, TOKEN_A, NOW, undefined, 0, live)?.filename).toBe(name);
+    expect(currentFileFor(dir, TOKEN_A, NOW, undefined, 0)).toBeNull();
+  });
+
+  it('prefers the live copy while it is further along', () => {
+    writeIn(dir, name, header(), 2);
+    writeIn(live, name, header(), 5);
+    expect(currentFileFor(dir, TOKEN_A, NOW, undefined, 0, live)?.bytes).toBe(HEADER_BYTES + 5 * 168);
+  });
+
+  it('takes the replay directory copy on a tie and once it is longer', () => {
+    writeIn(dir, name, header({ frameCount: 5 }), 5);
+    writeIn(live, name, header(), 5);
+    expect(currentFileFor(dir, TOKEN_A, NOW, undefined, 0, live)?.frameCount).toBe(5);
+    writeIn(dir, name, header({ frameCount: 7 }), 7);
+    expect(currentFileFor(dir, TOKEN_A, NOW, undefined, 0, live)?.bytes).toBe(HEADER_BYTES + 7 * 168);
+  });
+
+  it('resolveFurther picks the longer copy, the replay directory on a tie, and either alone', () => {
+    expect(resolveFurther(dir, live, name, NOW)).toBeNull();
+    writeIn(live, name, header(), 3);
+    expect(resolveFurther(dir, live, name, NOW)?.path).toBe(join(live, name));
+    writeIn(dir, name, header(), 3);
+    expect(resolveFurther(dir, live, name, NOW)?.path).toBe(join(dir, name));
+    writeIn(live, name, header(), 4);
+    expect(resolveFurther(dir, live, name, NOW)?.path).toBe(join(live, name));
+    expect(resolveFurther(dir, '', name, NOW)?.path).toBe(join(dir, name));
+  });
+
+  // An aborted round and its restart reuse the same filename. A pull job can
+  // land the aborted round's (older, longer) file in the replay directory
+  // after the live copy was already truncated and restarted for the new,
+  // shorter round. Byte count alone would keep serving the stale round; the
+  // newer startedUnix must win regardless of length.
+  it('a newer round wins over an older, longer one on the other side', () => {
+    const older = header({ startedUnix: 1_785_956_000 });
+    const newer = header({ startedUnix: 1_785_957_000 });
+    writeIn(dir, name, older, 20);
+    writeIn(live, name, newer, 2);
+
+    const session = listSessions(dir, NOW, undefined, live).find((s) => s.token === TOKEN_A);
+    expect(session?.files[0].startedUnix).toBe(newer.startedUnix);
+
+    expect(resolveFurther(dir, live, name, NOW)?.info.startedUnix).toBe(newer.startedUnix);
   });
 });

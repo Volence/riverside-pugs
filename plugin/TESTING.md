@@ -656,6 +656,92 @@ Put `sm_pug_pause_seconds` back to 120 when you are done:
 
     R "sm_pug_pause_seconds 120"
 
+## Reconnect clock control (`sm_pug_leave`, 0.3.4)
+
+There is no unit harness for SourcePawn in this repo, so this is the test for
+the admin hold in `pug-leave.inc`. It needs one real client, and that client
+can be you: you are the player who drops, and the rcon shell keeps working while
+you are disconnected.
+
+`T` below is any throwaway 32 hex token and `ME` is your SteamID64:
+
+    T=$(openssl rand -hex 16); ME=76561198030413993
+
+### A. Empty server: the command exists and refuses correctly
+
+No client needed. Only with the server empty (`R status` shows 0 humans).
+
+    R "sm_pug_match 999999 $T NoMercy"
+    R "sm_pug_leave"
+    R "sm_pug_leave 00000000000000000000000000000000 $ME hold"
+    R "sm_pug_leave $T"
+    R "sm_pug_leave $T $ME hold"
+    R "sm_pug_leave_hold_max"
+    R "sm_pug_status"
+    R "sm_pug_abort $T"
+
+- [ ] `PUGOK match=999999`: ____
+- [ ] no arguments answers `PUGERR token required`: ____
+- [ ] the wrong token answers `PUGERR bad token`: ____
+- [ ] the token alone answers `PUGERR usage: sm_pug_leave ...`: ____
+- [ ] an unrostered id answers `PUGERR not rostered`: ____
+- [ ] the cvar prints `1800`: ____
+- [ ] status has `STATUS leave abandoner=none ... holdmax=1800`: ____
+- [ ] `PUGOK aborted`: ____
+
+Hold, release and end need a rostered player who has actually dropped, so they
+cannot be checked on an empty server. That is part B.
+
+### B. Real client
+
+Shorten both clocks first so the whole thing takes five minutes, not forty:
+
+    R "sm_pug_match 999 $T no_mercy"
+    R "sm_pug_roster \"$ME:a\""
+    R "sm_pug_leave_budget 180"
+    R "sm_pug_leave_hold_max 20"
+
+Join the server. `R sm_pug_status` must show your slot with `connected=1`.
+To watch the log lines, use the `nc -ul 27500` recipe from section 4.
+
+1. **Pre-grant.** While connected: `R "sm_pug_leave $T $ME add 60"`.
+   - [ ] `PUGOK leave steamid=... absent=0 remaining=240 held=0 hold_left=0`: ____
+   - [ ] a `RETURN steamid=... remaining=240` line, and a chat line about more reconnect time: ____
+2. **Hold is refused while connected.** `R "sm_pug_leave $T $ME hold"`.
+   - [ ] `PUGERR not dropped`: ____
+3. **Drop.** Disconnect from the game. Wait ten seconds.
+   - [ ] status shows `absent=1 remaining=` near 230 and falling: ____
+4. **Hold.** `R "sm_pug_leave $T $ME hold"`, then status twice, ten seconds apart.
+   - [ ] `PUGOK ... absent=1 remaining=N held=1 hold_left=20`: ____
+   - [ ] `remaining` is the SAME in both status reads: ____
+   - [ ] a `LEAVE ... held=1 hold_left=... auto=0` line: ____
+5. **The ceiling.** Wait until 25 seconds after the hold.
+   - [ ] a `LEAVE ... held=0 hold_left=0 auto=1` line: ____
+   - [ ] status shows `held=0` and `remaining` falling again: ____
+6. **Release is idempotent.** `R "sm_pug_leave $T $ME release"` twice.
+   - [ ] both answer `PUGOK ... held=0`: ____
+7. **Hold across a map change.** `R "sm_pug_leave_hold_max 600"`, hold again, note `remaining`, then
+   `R "changelevel l4d_hospital02_subway"`. After the map loads:
+   - [ ] status still shows `held=1` and the same `remaining`: ____
+   - [ ] the SourceMod error log has no `Invalid timer handle` or `Invalid Handle` from pug-match: ____
+8. **Return while held.** Still held, join the server again.
+   - [ ] chat says you are back; status shows `absent=0 held=0`: ____
+   - [ ] `remaining` is what it was at the hold, not less: ____
+9. **Match end while held.** Disconnect, hold, then `R "sm_pug_abort $T"`. Set the same match up again
+   (`sm_pug_match`, `sm_pug_roster`).
+   - [ ] status shows no `STATUS leave slot=` line at all: ____
+10. **End now.** Join, disconnect, then `R "sm_pug_leave $T $ME end"`.
+    - [ ] `PUGOK ... absent=1 remaining=0 held=0`: ____
+    - [ ] within two seconds: the "did not reconnect in time" chat line and a `PUG ... ABANDON steamid=...` line: ____
+    - [ ] status shows `STATUS leave abandoner=<your id>`: ____
+    - [ ] a further `R "sm_pug_leave $T $ME add 60"` answers `PUGERR match already abandoned`: ____
+
+Put everything back:
+
+    R "sm_pug_abort $T"
+    R "sm_pug_leave_budget 300"
+    R "sm_pug_leave_hold_max 1800"
+
 ## Teardown (`sm_pug_abort <token> teardown <map>`)
 
 Needs a REAL client connected to the local test server (`/home/volence/l4d1-ds`,
@@ -689,3 +775,210 @@ Rotoblin must be loaded. Over RCON:
    kick and no map change (the routine post-report path is unchanged).
 
 `sm_addban` cannot be tested here: on a LAN server it is a silent no-op.
+
+## Balance inventory verification
+
+Run 2026-09-23 on the isolated local instance `/home/volence/l4d1-ds-skyprobe/server`
+(port 27045, `-insecure`, `sv_lan 1`, bound to 127.0.0.1), never on a live box.
+That instance already carries the full stripper tree
+(`addons/stripper/Roto-AZMod/maps`, 139 files, 4.1 MB, 138 of them `.cfg`), which
+is larger than the 59 files in `deploy/overrides`, so the timing below is a worst
+case, not a flattering one.
+
+### Setup
+
+Modelled on `plugin/skypounce/rig/run.sh roto`. The instance is shared with other
+test workstreams, so its own plugins dir and `server.cfg` are backed up first and
+put back afterwards. Every path is absolute except where a `cd` says otherwise.
+
+    # 0. Nothing may already be on the port. If this prints anything, stop.
+    pgrep -af "srcds_linux.*-port 27045"
+
+    # 1. Build (from the plugin dir of your checkout or worktree).
+    cd /home/volence/l4d/pug/plugin && ./build.sh
+
+    # 2. Back up the instance's own plugins dir and server.cfg.
+    INST=/home/volence/l4d1-ds-skyprobe/server
+    SM=$INST/left4dead/addons/sourcemod
+    BK=$(mktemp -d)
+    cp -a $SM/plugins $BK/plugins
+    cp -a $INST/left4dead/cfg/server.cfg $BK/server.cfg
+
+    # 3. The Rotoblin set from the shared install (READ only), minus the other
+    #    sessions' test plugins, plus the fresh build.
+    rm -rf $SM/plugins && mkdir -p $SM/plugins
+    cp -a /home/volence/l4d1-ds/server/left4dead/addons/sourcemod/plugins/. $SM/plugins/
+    rm -f $SM/plugins/{l4d_probe,skyprobe,skyrig,l4d_skypounce}.smx
+    cp /home/volence/l4d/pug/plugin/pug-match.smx $SM/plugins/pug-match.smx
+
+    # 4. Start srcds with stdin on a FIFO so console commands can be fed to it.
+    mkfifo $BK/fifo
+    cd $INST && ( exec 3<>$BK/fifo; timeout 1500 ./srcds_run -console -game left4dead \
+        -ip 127.0.0.1 -port 27045 -tickrate 100 -maxplayers 8 -norestart -insecure \
+        -nomaster +sv_lan 1 +mp_gamemode versus +exec server +sv_logecho 1 \
+        +map l4d_hospital01_apartment <&3 > $BK/console.log 2>&1 ) &
+
+    # Send a command (the timeout keeps the shell from blocking forever on the
+    # FIFO if srcds has died):
+    timeout 5 sh -c "echo 'sm_pug_debug 1' > $BK/fifo"
+
+Read results from `$SM/logs/L<yyyymmdd>.log` (the SourceMod log, timestamped),
+not from `console.log`: srcds's stdout lags by one command, so the line a
+command produced often shows up there only after the NEXT command is sent.
+
+Teardown, always:
+
+    timeout 5 sh -c "echo quit > $BK/fifo"
+    pgrep -af "srcds_linux.*-port 27045"          # must print nothing
+    rm -rf $SM/plugins && cp -a $BK/plugins $SM/plugins
+    diff -r $BK/plugins $SM/plugins && diff $BK/server.cfg $INST/left4dead/cfg/server.cfg
+
+### 1. Scan cost
+
+`sm_pug_debug 1` can only be set after boot, so the boot scan itself is not
+logged. `sm plugins reload pug-match` builds a fresh plugin with an empty cache
+and rescans at once, which is the same cold scan the first map pays. Warm scans
+are map changes:
+
+    sm_pug_debug 1
+    sm plugins reload pug-match          # cold: "balance scan: N items in X ms"
+    changelevel l4d_hospital02_subway    # warm
+    changelevel l4d_hospital03_sewers    # warm
+
+Gate: cold under 250 ms, warm under 20 ms.
+
+Cold samples on the final build (commit f17b73a), one reload every 8 s,
+`/proc/loadavg` read immediately before each reload was sent (16-core host):
+
+| Sample | Cold scan | loadavg (1, 5, 15 min) |
+|---|---|---|
+| 1 | 133.6 ms | 2.62 2.92 3.04 |
+| 2 | 134.5 ms | 2.65 2.92 3.04 |
+| 3 | 134.9 ms | 2.63 2.91 3.03 |
+| 4 | 133.6 ms | 2.38 2.84 3.01 |
+| 5 | 139.1 ms | 2.27 2.81 3.00 |
+| 6 | 137.6 ms | 2.40 2.82 3.00 |
+| 7 | 139.3 ms | 2.44 2.82 3.00 |
+| 8 | 135.3 ms | 2.38 2.80 2.99 |
+| 9 | 136.0 ms | 3.00 2.92 3.03 |
+| 10 | 142.3 ms | 2.92 2.90 3.02 |
+
+All ten under 250 ms; max 142.3 ms. The same process gave 21 more cold samples
+earlier, 134.2 to 142.0 ms, at a 1-minute load of about 1.8 to 3.0.
+
+Every measurement, by build (read from the SourceMod log):
+
+| Build | Cold | Warm |
+|---|---|---|
+| Original | 134.6 ms (1 sample) | 76.3, 78.1, 78.9 ms |
+| Directory cache fix and later (runs 3 to 5) | 37 samples 133.6 to 142.3 ms, plus 2 over the gate: 256.9 and 268.8 ms (see below) | 22 samples, 1.2 to 2.4 ms |
+
+The directory cache fix: `BalScanDir` used to refold every stripper config's
+bytes at every map start. It now folds each file's cached `size.hash8` (from
+`BalFileValue`, cached by path, size and mtime), keeping the `count.hash8` output
+and sorted-name order. The directory hash VALUES changed once with that fix.
+
+The two samples over 250 ms both came from run 3, at 11:35:42 (256.9 ms) and
+11:40:31 (268.8 ms), with five normal samples (134.5 to 136.9 ms) between them.
+Load was not sampled per reload in that run; the one reading, taken about 20 s
+after the 268.8 ms sample, was `10.01 5.04 3.37` (1, 5, 15 min), so the host was
+busy with other workloads across that window. At a 1-minute load of 1.8 to 3.0
+none of 31 later samples went past 142.3 ms. A cold scan is paid once per server
+boot, during a map load; what it costs on a busy production box is not measured
+here.
+
+(Run 2 also measured one cold scan of 149.9 ms, but that build carried temporary
+debug instrumentation in the damage hooks, so it is left out of the numbers
+above.)
+
+### 2. Wire output
+
+A backend-shaped match with a fake roster, bots on the survivor side, and
+readyup's own force start:
+
+    exec pug_match
+    sv_hibernate_when_empty 0            # this instance's server.cfg sets it; keep it off
+    sm_pug_debug 1
+    sm_pug_min_orient 1
+    sm_pug_match 999 testtoken3 l4d_hospital01_apartment
+    sm_pug_roster "76561198000000001:a"   # ... through 76561198000000008, 5-8 on b
+    changelevel l4d_hospital01_apartment
+    sb_add                               # x4: with no human, no survivor bots exist, and
+                                         # sm_forcestart does nothing until they do
+    sm_forcestart                        # l4dready's admin force start, runs as root from the console
+    director_force_panic_event           # needs sv_cheats 1, which this instance's server.cfg sets
+    a4d_spawn_infected hunter            # all4dead; plain z_spawn from the console places nothing
+    sm_slay @survivors                   # ends the round
+
+In a shell, write the roster ids as `${i}:a`, not `$i:a`: zsh reads `$i:a` as a
+path modifier.
+
+Checked against the captured lines:
+
+- 20 `BALANCE` parts plus `BALANCE_END half=1 parts=20 items=289`. The items
+  across the parts count to exactly 289, with no duplicate keys.
+- Line bodies (after `PUG <token> `) are strictly under 600 bytes: 481 to 597 on
+  the final build. Before commit f17b73a a body could reach exactly 600.
+- All 43 cvars from `balance/knobs.json` appear: 41 as `c:`, and
+  `x:l4d_skypounce_enable=missing`, `x:l4d_skypounce_mode=missing` (skypounce is
+  not loaded here).
+- `p:pug-match.smx=...` once, the 7 `f:` files, and
+  `d:addons/stripper/Roto-AZMod/maps=138.<hash8>`.
+- `ROUND_MARK half=1 kind=panic t=25800` after the forced panic.
+- `ROUND_STATS_END half=1 players=8 sd=1` then `ROUND_END` after the slay.
+  No `ROUND_STAT` line: every rostered id is fake and never connects, and only
+  nonzero values go out.
+- A second go-live on half 2 sent the same inventory as half 1.
+- Weapon names, with a temporary `PugDebug` in `player_hurt`, `player_death`
+  and `infected_death` for bot survivors (reverted, never committed):
+  `player_hurt` carries `pumpshotgun` and `smg`, `player_death` carries
+  `pumpshotgun`, the held weapon for common kills is `weapon_pumpshotgun`,
+  `weapon_smg`, `weapon_pistol`. `WpnIndex` mapped every one to its own key,
+  none to `other`, so it needed no fix.
+
+A bug this found and fixed: `ReadPlugin` hands back a null handle for a plugin
+that failed to load, and plugin natives read null as the calling plugin, so each
+of the nine plugins failing on missing extensions here (GeoIP, CollisionHook,
+Actions) was listed as another `p:pug-match.smx`: 298 items before, 289 after.
+
+### 3. Backend parser round trip
+
+Captured lines, with the token swapped for 32 hex characters (the parser requires
+one), fed through `parseLogDatagram(framed(line))` in a throwaway test: BALANCE
+part 0 and part 19 gave `balance_part`, `BALANCE_END` gave `balance_end` with
+items 289, `ROUND_MARK` gave `round_mark`, `ROUND_STATS_END` gave
+`round_stats_end`. All 20 parts parsed back to 289 items in total.
+
+### Pending for the owner (needs two people in game)
+
+`ROUND_STAT` with `w_<weapon>_sidmg` keys cannot be produced alone: SI damage is
+credited only to a rostered, connected survivor and only against a
+player-controlled (not bot) SI. On the local test server, or staged per section 0:
+
+1. Both people connect. Configure a match that rosters person A on team a and
+   person B on team b, then set the test cvars:
+
+       sm_pug_match 999 <32 hex chars> no_mercy
+       sm_pug_roster "<A's steamid64>:a"
+       sm_pug_roster "<B's steamid64>:b"
+       sm_pug_min_orient 1
+       sm_pug_debug 1
+
+2. Get A on survivors and B on infected before going live. On map 1 pug team a
+   starts as survivors, and the team lock moves each rostered player to their
+   side within about 4 s on its own. If someone is on the wrong side, they type
+   `!survivors` (A) or `!infected` (B) in chat; these are l4dready's
+   `sm_survivors` / `sm_infected`, which work during ready-up. `!spectate` gets
+   out of the way. The M key (`jointeam`) is blocked by l4dready once the round
+   has left the saferoom, so use the chat commands. Check with `sm_pug_status`:
+   A `side=survivor`, B `side=infected`.
+3. Go live (`sm_forcestart` over the console or rcon, or both type `!ready`). A
+   shoots B's SI with two or more weapons (the pumpshotgun and a tier 2, a
+   molotov if you can) and kills it at least once.
+4. End the round (`sm_slay @survivors`). Expect a
+   `ROUND_STAT half=1 steamid=<A> ...` line with `w_pumpshotgun_sidmg=`,
+   `w_pumpshotgun_sikill=` and the other weapon's keys, and no damage filed under
+   `w_other_*` unless a weapon outside the list was used. The `w_*_sidmg` values
+   should sum to the line's `sidmg=`.
+5. Optional: trigger a car alarm or a crescendo button on a real map and see
+   `ROUND_MARK kind=panic` from a natural panic, not a forced one.

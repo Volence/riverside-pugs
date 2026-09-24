@@ -1,5 +1,6 @@
 import { subscribeAdminEvents } from '../src/adminFeed.js';
 import { setLogSecret } from '../src/logAuth.js';
+import { setSetting } from '../src/settings.js';
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import net from 'node:net';
 import { openDb, type DB } from '../src/db.js';
@@ -16,7 +17,10 @@ import { pugReply } from './helpers.js';
 import { deleteCampaign, insertDraft, publishCampaign, setInstall } from '../src/customCampaigns.js';
 import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistry.js';
 
-function fakeServer(dumpBody: string | ((cmd: string) => string)): Promise<{ port: number; cmds: string[]; close: () => Promise<void> }> {
+function fakeServer(
+  dumpBody: string | ((cmd: string) => string),
+  overrides: Record<string, string> = {},
+): Promise<{ port: number; cmds: string[]; close: () => Promise<void> }> {
   const cmds: string[] = [];
   return new Promise((resolve) => {
     const server = net.createServer((sock) => {
@@ -31,7 +35,10 @@ function fakeServer(dumpBody: string | ((cmd: string) => string)): Promise<{ por
             sock.write(encodePacket(p.id, SERVERDATA_AUTH_RESPONSE, ''));
           } else if (p.type === SERVERDATA_EXECCOMMAND) {
             cmds.push(p.body);
-            sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, pugReply(p.body, dumpBody)));
+            // Keyed by command name: how a test stands in for a plugin too old
+            // to know a command, which srcds answers with "Unknown command".
+            const canned = overrides[p.body.split(' ')[0]];
+            sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, canned ?? pugReply(p.body, dumpBody)));
           } else if (p.type === SERVERDATA_RESPONSE_VALUE) {
             // The client's multi-packet terminator. Source answers it with an
             // empty packet and then four junk bytes, both under the marker id.
@@ -106,6 +113,72 @@ describe('RealOrchestrator', () => {
     // The leaver rules come from the settings, after pug_match.
     expect(srv.cmds.indexOf('sm_pug_leave_budget 300')).toBeGreaterThan(srv.cmds.indexOf('exec pug_match'));
     expect(srv.cmds).toContain('sm_pug_leave_autounpause 1');
+    // The hold ceiling, from clock_hold_max_minutes (30), and what its reply
+    // says about the plugin: anything but "Unknown command" is 0.3.4 or later.
+    expect(srv.cmds).toContain('sm_pug_leave_hold_max 1800');
+    expect(m.leave_control).toBe(1);
+  });
+
+  it('notices a plugin too old for clock control, and sets the match up anyway', async () => {
+    const srv = await fakeServer('', { sm_pug_leave_hold_max: 'Unknown command "sm_pug_leave_hold_max"' });
+    cleanup.push(srv.close);
+    addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const orch = new RealOrchestrator({
+      db, listener, logPublicAddress: '127.0.0.1:27500', releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o,
+    });
+    const mid = seedMatch(db);
+    await orch.setupMatch(mid);
+
+    const m = db.prepare('SELECT state, leave_control FROM matches WHERE id = ?').get(mid) as { state: string; leave_control: number | null };
+    expect(m).toEqual({ state: 'live', leave_control: 0 });
+  });
+
+  it('pushes the DEFAULT leaver rules when their settings rows are blank, never 0', async () => {
+    // These rows are hand-edited in sqlite, and Number('') is 0, not NaN, so
+    // a blank one sails past an integer check. The same bug once aborted every
+    // live match through noshow_minutes (src/noShow.ts). Here it is quieter
+    // and worse: `sm_pug_leave_hold_max 0` is clamped by the cvar to its own
+    // lower bound of 10, so every Hold on that match releases itself after ten
+    // seconds while the board's tooltip promises thirty minutes, and
+    // `sm_pug_leave_budget 0` turns leave tracking off for the match.
+    setSetting(db, 'clock_hold_max_minutes', '');
+    setSetting(db, 'leave_budget_seconds', '   ');
+    const srv = await fakeServer('');
+    cleanup.push(srv.close);
+    addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const orch = new RealOrchestrator({
+      db, listener, logPublicAddress: '127.0.0.1:27500', releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o,
+    });
+    await orch.setupMatch(seedMatch(db));
+
+    expect(srv.cmds).toContain('sm_pug_leave_budget 300');
+    expect(srv.cmds).toContain('sm_pug_leave_hold_max 1800');
+  });
+
+  it('unrelated "Unknown command" console noise in the same reply is not read as an old plugin', async () => {
+    // A real console can answer an unrelated command with "Unknown command"
+    // in the same window an rcon reply is collected from; the probe must key
+    // on the cvar it actually asked about, not on the words anywhere in the body.
+    const srv = await fakeServer('', { sm_pug_leave_hold_max: 'Unknown command "sm_cvar"' });
+    cleanup.push(srv.close);
+    addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const orch = new RealOrchestrator({
+      db, listener, logPublicAddress: '127.0.0.1:27500', releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o,
+    });
+    const mid = seedMatch(db);
+    await orch.setupMatch(mid);
+
+    const m = db.prepare('SELECT state, leave_control FROM matches WHERE id = ?').get(mid) as { state: string; leave_control: number | null };
+    expect(m).toEqual({ state: 'live', leave_control: 1 });
   });
 
 
