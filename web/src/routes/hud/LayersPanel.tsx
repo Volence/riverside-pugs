@@ -21,6 +21,7 @@ import { cardsOf, pickableCards, panelOf, type Selection } from '../../hud/selec
 /** State pieces the game shows only sometimes, and when: read from the registry's stateArt. */
 const WHEN: Record<StateArt, string> = {
   down: 'shown when down', dead: 'shown when dead', talking: 'shown when talking', crouched: 'shown when crouched', ghost: 'shown as a ghost',
+  ability: 'shown on a spawned Smoker, Boomer or Tank',
 };
 
 /** Whether one row's target is part of the selection. */
