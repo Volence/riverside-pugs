@@ -21,6 +21,7 @@ import { teamChild } from './children';
 import { unionBox, CORNERS, type Handle } from './guides';
 import { elementFrame, type Selection } from './selection';
 import type { CrosshairArt } from '../crosshair/model';
+import { splatterDef, type SplatterId, type SplatterKind, type SplatterStyle } from './splatter';
 
 /** Keeps at least `min` units of a span on screen, whichever side it drifts to. */
 export function clampSpan(v: number, size: number, extent: number, min: number): number {
@@ -705,4 +706,66 @@ export function resetSelection(design: HudDesign, sel: Selection): HudDesign {
   if (sel.kind === 'children') return resetChildren(design, sel.names);
   if (sel.kind === 'elements') return sel.ids.reduce((d, id) => resetElement(d, id), design);
   return design;
+}
+
+// --- the damage splatters (splatter.ts) ---
+
+/**
+ * A teammate-card child shown again: its `visible` override goes, and the
+ * override itself (and teamColumn's map) when nothing else is left in it,
+ * so a design that only ever hid and showed a child is back to no edits.
+ */
+function showChild(d: HudDesign, name: string): HudDesign {
+  const kids = d.children.teamColumn;
+  const own = kids?.[name];
+  if (!kids || !own || !('visible' in own)) return d;
+  const { visible: _gone, ...rest } = own;
+  const nextKids = { ...kids };
+  if (Object.keys(rest).length) nextKids[name] = rest; else delete nextKids[name];
+  const children = { ...d.children };
+  if (Object.keys(nextKids).length) children.teamColumn = nextKids; else delete children.teamColumn;
+  return { ...d, children };
+}
+
+const TEAM_SPLAT_CHILD = 'BackgroundImage';
+
+/**
+ * What a splatter shows, as the panel offers it. The teammate splatter's
+ * None is not a stored kind but the BackgroundImage child's hide (the one
+ * flag the Layers panel and this panel share), so it reads that first.
+ */
+export function splatterKind(d: HudDesign, id: SplatterId): SplatterKind {
+  if (id === 'splatTeam' && d.children.teamColumn?.[TEAM_SPLAT_CHILD]?.visible === false) return 'none';
+  return d.splatters?.[id]?.kind ?? 'stock';
+}
+
+/**
+ * Change a splatter. Choosing None for the teammate splatter hides its
+ * child and leaves the stored style alone, so its Fade colour survives a
+ * trip through None; any other change to it shows the child again. Every
+ * other field merges into what is stored, so a Fade colour outlives a
+ * switch of kind.
+ */
+export function patchSplatter(d: HudDesign, id: SplatterId, p: Partial<SplatterStyle>): HudDesign {
+  if (id === 'splatTeam' && p.kind === 'none') return patchChild(d, TEAM_SPLAT_CHILD, { visible: false });
+  const base = id === 'splatTeam' ? showChild(d, TEAM_SPLAT_CHILD) : d;
+  const style: SplatterStyle = { ...(base.splatters?.[id] ?? { kind: 'stock' }), ...p };
+  return { ...base, splatters: { ...base.splatters, [id]: style } };
+}
+
+/** Store an upload (PNG base64, already drawn at the texture's size) and switch the splatter to it. */
+export function withSplatterImage(d: HudDesign, id: SplatterId, png: string): HudDesign {
+  const { w, h } = splatterDef(id)!.size;
+  return patchSplatter({ ...d, images: { ...d.images, [id]: { w, h, png } } }, id, { kind: 'image' });
+}
+
+/** Back to the stock art: no style, no stored picture, and the teammate splatter shown. */
+export function resetSplatter(d: HudDesign, id: SplatterId): HudDesign {
+  const splatters = { ...d.splatters };
+  delete splatters[id];
+  const images = { ...d.images };
+  delete images[id];
+  const next: HudDesign = { ...d, images, splatters };
+  if (!Object.keys(splatters).length) delete next.splatters;
+  return id === 'splatTeam' ? showChild(next, TEAM_SPLAT_CHILD) : next;
 }

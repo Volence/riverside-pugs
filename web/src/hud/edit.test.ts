@@ -5,11 +5,12 @@ import {
   startsOf, moveChildren, placeChildren, scaleChildren, cornerFactor, anchorOf, alignChildren, setChildrenVisible, resetChildren,
   placeElement, moveElements, moveCards, alignElements, scaleElement, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
   ammoOnly, withImport, withPreset, hasLayoutEdits,
+  splatterKind, patchSplatter, withSplatterImage, resetSplatter,
 } from './edit';
 import { buildHud, buildTrees } from './build';
 import { weaponSlots } from './weapons';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
-import { DEFAULT_DESIGN, newDesign } from './design';
+import { DEFAULT_DESIGN, newDesign, type HudDesign } from './design';
 import { DEFAULT_STATE } from '../crosshair/draw';
 import type { CrosshairArt } from '../crosshair/model';
 import { formatPos, parsePos } from './units';
@@ -657,5 +658,41 @@ describe('moving a design onto an imported HUD and off it', () => {
     const edited = withPreset({ ...on, elements: { chat: { x: 8 } } }, 'modern', false);
     expect(edited.elements).toEqual({ chat: { x: 8 } });
     expect(withPreset({ ...on, elements: { chat: { x: 8 } } }, 'modern', true).elements).toEqual(DEFAULT_DESIGN.elements);
+  });
+});
+
+describe('splatter edits', () => {
+  const base = () => structuredClone(DEFAULT_DESIGN);
+  const hiddenBg = (d: HudDesign) => d.children.teamColumn?.BackgroundImage?.visible === false;
+
+  it("makes the teammate splatter's None the child's hide, and any other kind shows it again", () => {
+    const none = patchSplatter(base(), 'splatTeam', { kind: 'none' });
+    expect(hiddenBg(none)).toBe(true);
+    expect(none.splatters?.splatTeam).toBeUndefined();
+    expect(splatterKind(none, 'splatTeam')).toBe('none');
+    const fade = patchSplatter(none, 'splatTeam', { kind: 'fade' });
+    expect(hiddenBg(fade)).toBe(false);
+    expect(fade.children.teamColumn?.BackgroundImage).toBeUndefined();   // no empty override left behind
+    expect(splatterKind(fade, 'splatTeam')).toBe('fade');
+  });
+
+  it('keeps a Fade colour when the kind changes, and stores None for a scratch', () => {
+    const d = patchSplatter(patchSplatter(base(), 'splatTop', { kind: 'fade', color: '1 2 3 4' }), 'splatTop', { kind: 'none' });
+    expect(d.splatters?.splatTop).toEqual({ kind: 'none', color: '1 2 3 4' });
+  });
+
+  it('stores an upload at the texture size and switches the splatter to Image', () => {
+    const d = withSplatterImage(base(), 'splatTop', 'AAAA');
+    expect(d.images.splatTop).toEqual({ w: 256, h: 64, png: 'AAAA' });
+    expect(d.splatters?.splatTop?.kind).toBe('image');
+  });
+
+  it('resets to stock: no style, no stored image, and the teammate splatter shown', () => {
+    let d = withSplatterImage(base(), 'splatTeam', 'AAAA');
+    d = patchChild(d, 'BackgroundImage', { visible: false, color: '255 255 255 100' });
+    d = resetSplatter(d, 'splatTeam');
+    expect(d.splatters).toBeUndefined();
+    expect(d.images.splatTeam).toBeUndefined();
+    expect(d.children.teamColumn?.BackgroundImage).toEqual({ color: '255 255 255 100' });   // only the hide goes
   });
 });

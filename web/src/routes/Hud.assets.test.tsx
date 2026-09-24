@@ -11,7 +11,7 @@ vi.mock('../crosshair/texture', async (original) => ({
   artPixels: async () => new Uint8ClampedArray(128 * 128 * 4),
 }));
 
-import { assetsFor } from './Hud';
+import { assetsFor, assetSize } from './Hud';
 import { validateDesign } from '../hud/design';
 import { registerImport, unregisterImport } from '../hud/base';
 import { sampleHud } from '../hud/importFixtures';
@@ -33,5 +33,14 @@ describe("assetsFor on an imported HUD's own crosshair", () => {
     const assets = await assetsFor(onImport({ ...OWN, png: 'data:image/png;base64,TkVX' }));
     expect(assets.ownCrosshair).toBeUndefined();
     expect(assets.crosshair).toHaveLength(128 * 128 * 4);
+  });
+});
+
+describe('assetSize', () => {
+  it("redraws a splatter upload at its texture's size, and a style slot at its own", () => {
+    expect(assetSize('splatTeam')).toEqual({ w: 512, h: 256 });
+    expect(assetSize('splatBottom')).toEqual({ w: 256, h: 64 });
+    expect(assetSize('panelBg')).toEqual({ w: 32, h: 32 });
+    expect(assetSize('nope')).toBeNull();
   });
 });

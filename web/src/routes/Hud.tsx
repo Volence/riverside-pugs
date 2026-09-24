@@ -21,6 +21,7 @@ import { drawHud, visibleElements, type Side } from '../hud/mock';
 import type { CardState } from '../hud/render';
 import type { WeaponHeld } from '../hud/weapons';
 import { SLOTS, type StyleSlot } from '../hud/slots';
+import { splatterDef } from '../hud/splatter';
 import { registerImport, unregisterImport, hasImport, importedFiles, baseOf } from '../hud/base';
 import { readHudUpload, hudId } from '../hud/upload';
 import { importProblem } from '../hud/importCheck';
@@ -89,17 +90,22 @@ async function fontBytes(u: string, filename: string): Promise<Uint8Array> {
   return new Uint8Array(await res.arrayBuffer());
 }
 
+/** The texture size an uploaded image is redrawn at: a style slot's, else a splatter's, else null (not an upload the build takes). */
+export function assetSize(id: string): { w: number; h: number } | null {
+  return SLOTS.find((s) => s.id === id)?.size ?? splatterDef(id)?.size ?? null;
+}
+
 /**
  * Rebuild `BuildAssets` from a design: the crosshair's texture pixels,
- * decoded pixels for every uploaded style image, plus the Roboto Condensed
+ * decoded pixels for every uploaded style or splatter image, plus the Roboto Condensed
  * files when the design needs them.
  *
  * A design's `images[id].w/h` are untrusted metadata: nothing has ever
  * cross-checked them against the PNG they came with, and a share link or an
  * imported .json file could claim anything. So every image is redrawn at its
- * SLOT's real size, never the stored one; that size is what the generator
- * actually encodes, and it is the only thing here that comes from the
- * registry rather than from the design itself.
+ * SLOT's (or splatter's) real size, never the stored one; that size is what
+ * the generator actually encodes, and it is the only thing here that comes
+ * from the registry rather than from the design itself.
  */
 export async function assetsFor(design: HudDesign): Promise<BuildAssets> {
   const assets: BuildAssets = {};
@@ -121,13 +127,14 @@ export async function assetsFor(design: HudDesign): Promise<BuildAssets> {
   if (entries.length) {
     const images: Record<string, Uint8ClampedArray> = {};
     for (const [id, stored] of entries) {
-      const slot = SLOTS.find((s) => s.id === id);
-      if (!slot) continue;
-      const { w, h } = slot.size;
+      const size = assetSize(id);
+      if (!size) continue;
+      const { w, h } = size;
+      const label = SLOTS.find((s) => s.id === id)?.label ?? splatterDef(id)?.label ?? id;
       const img = new Image();
       await new Promise<void>((resolve, reject) => {
         img.onload = () => resolve();
-        img.onerror = () => reject(new Error(`${slot.label}: the stored image will not decode`));
+        img.onerror = () => reject(new Error(`${label}: the stored image will not decode`));
         img.src = `data:image/png;base64,${stored.png}`;
       });
       const c = document.createElement('canvas');
