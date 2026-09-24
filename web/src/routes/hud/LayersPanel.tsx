@@ -13,6 +13,7 @@
  * (selection.ts's pick), and it takes the canvas's keys (arrows, Delete,
  * Escape, Ctrl+A) while a row has focus.
  */
+import { useState } from 'preact/hooks';
 import type { HudDesign } from '../../hud/design';
 import { elementRect, panelChild } from '../../hud/build';
 import { panelChildren, type StateArt } from '../../hud/children';
@@ -48,6 +49,10 @@ const GROUPS: Record<Side, { title: string; ids: string[] }[]> = {
   ],
 };
 
+/** Whether a top row starts unfolded. Tests that reach pieces directly set it (their page predates folding). */
+let foldDefaultOpen = false;
+export function _setFoldDefault(open: boolean): void { foldDefaultOpen = open; }
+
 /** Whether one row's target is part of the selection. */
 function isIn(sel: Selection, target: Selection): boolean {
   if (sel.kind === 'elements' && target.kind === 'elements') return sel.ids.includes(target.ids[0]);
@@ -72,13 +77,25 @@ function Eye({ hidden }: { hidden: boolean }) {
  * is what the row is for, so it wraps rather than being cut short.
  */
 function Row(
-  { label, depth, active, hidden, note, onPick, onEye }: {
+  { label, depth, active, hidden, note, onPick, onEye, fold }: {
     label: string; depth: 0 | 1 | 2; active: boolean; hidden: boolean; note?: string;
     onPick: (shift: boolean) => void; onEye?: (visible: boolean) => void;
+    /** A top row with pieces under it: whether they show, and the arrow that folds them. */
+    fold?: { open: boolean; onToggle: () => void };
   },
 ) {
   return (
     <div class={`hud__layer hud__layer--d${depth}${active ? ' is-active' : ''}${hidden ? ' hud__layer--hidden' : ''}`}>
+      {depth === 0 && (fold
+        ? (
+          <button
+            type="button" class={`hud__fold${fold.open ? ' is-open' : ''}`} aria-expanded={fold.open}
+            aria-label={`${fold.open ? 'Fold' : 'Unfold'} ${label}`} onClick={fold.onToggle}
+          >
+            <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5 7 5 3 8.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
+          </button>
+        )
+        : <span class="hud__fold" aria-hidden="true" />)}
       <span class="hud__layertext">
         <button type="button" class="hud__layername" onClick={(e) => onPick(e.shiftKey)}>{label}</button>
         {note && <span class="hud__layernote">{note}</span>}
@@ -116,6 +133,11 @@ export function LayersPanel(
   const cardIn = (panel: string) => (sel.kind === 'children' && panelOf(sel) === panel ? sel.card
     : sel.kind === 'cards' && panelOf(sel) === panel ? sel.cards[0] : 0);
   const cardsOfPanel = (panel: string) => Array.from({ length: pickableCards(design, panel) }, (_, i) => i);
+  // A top row's pieces are folded away until opened, so the list fits a screen; the element being
+  // edited (itself, a card or a piece of it) opens on its own. A click on the arrow overrides either way.
+  const [folds, setFolds] = useState<Record<string, boolean>>({});
+  const holdsSelection = (id: string) => (sel.kind === 'elements' ? sel.ids.includes(id) : sel.kind !== 'none' && panelOf(sel) === id);
+  const isOpen = (id: string) => folds[id] ?? (foldDefaultOpen || holdsSelection(id));
   return (
     <nav class="hud__layers" aria-label="Layers" onKeyDown={onKeyDown}>
       <p class="eyebrow">{side === 'survivor' ? 'Survivor HUD' : 'Infected HUD'}</p>
@@ -125,20 +147,23 @@ export function LayersPanel(
           {els.map((el) => {
             const target: Selection = { kind: 'elements', ids: [el.id] };
             const reg = panelChildren(el.id);
+            const foldable = !!reg && (reg.repeat === 'cards' || reg.children.length > 0);
+            const open = foldable && isOpen(el.id);
             return (
               <div key={el.id} role="group" aria-label={`Layers: ${el.label}`}>
                 <Row
                   label={el.label} depth={0} active={isIn(sel, target)} hidden={!elementRect(design, el.id, design.aspect).visible}
                   onPick={(shift) => onPick(target, shift)}
                   onEye={el.props.includes('visible') ? (v) => onVisible(target, v) : undefined}
+                  fold={foldable ? { open, onToggle: () => setFolds((f) => ({ ...f, [el.id]: !open })) } : undefined}
                 />
-                {reg?.repeat === 'cards' && cardsOfPanel(el.id).map((i) => {
+                {open && reg?.repeat === 'cards' && cardsOfPanel(el.id).map((i) => {
                   const t = cardsOf([i], el.id);
                   return <Row key={`card${i}`} label={`Card ${i + 1}`} depth={1} active={isIn(sel, t)} hidden={false} onPick={(shift) => onPick(t, shift)} />;
                 })}
                 {/* A card's pieces are one set every card shares: under their own heading, not after Card 3 as if its own. */}
-                {reg?.repeat === 'cards' && <p class="hud__layer hud__layer--d1 hud__layersub">In every card</p>}
-                {reg?.children.filter((def) => !def.gate || probe(def.gate)).map((def) => {
+                {open && reg?.repeat === 'cards' && <p class="hud__layer hud__layer--d1 hud__layersub">In every card</p>}
+                {open && reg?.children.filter((def) => !def.gate || probe(def.gate)).map((def) => {
                   const depth = reg.repeat === 'cards' ? 2 : 1;
                   const info = panelChild(design, el.id, def.name);
                   if (!info) {
