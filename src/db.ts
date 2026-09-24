@@ -806,6 +806,22 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
 
 /** A match whose roster came from the site was made by the queue; anything
  *  else was started in game. Idempotent: only fills NULLs. */
+/** Patch triage backfill (sub-project 1 of the balance catalogue roadmap).
+ *  Historical, announced and named detected patches are balance; an unnamed
+ *  detected patch that still holds a fingerprint is pending. A merged
+ *  detected patch (fingerprint NULL) is left NULL: which patch it was merged
+ *  into needs the versionless/ignored lists, so the boot refingerprint
+ *  resolves it (see refingerprintPatches). Every tagged round's sighted patch
+ *  starts as its patch. Idempotent. */
+export const TRIAGE_BACKFILL_SQL = [
+  `UPDATE balance_patches SET triage = CASE
+     WHEN source != 'detected' THEN 'balance'
+     WHEN name IS NOT NULL AND TRIM(name) != '' THEN 'balance'
+     ELSE 'pending' END
+   WHERE triage IS NULL AND NOT (source = 'detected' AND fingerprint IS NULL)`,
+  'UPDATE match_rounds SET sighted_patch_id = patch_id WHERE sighted_patch_id IS NULL AND patch_id IS NOT NULL',
+];
+
 export const ORIGIN_BACKFILL_SQL = `UPDATE matches SET origin = CASE
     WHEN EXISTS (SELECT 1 FROM match_players mp WHERE mp.match_id = matches.id AND mp.source = 'web')
     THEN 'queue' ELSE 'in_game' END
@@ -1190,6 +1206,23 @@ export function openDb(path: string): DB {
   db.exec('CREATE INDEX IF NOT EXISTS match_rounds_patch ON match_rounds(patch_id)');
   // Balance public page (piece 5): NULL = not shown on /balance.
   ensureColumn(db, 'balance_patches', 'published_at', 'TEXT');
+  // Patch triage: docs/superpowers/specs/2026-09-24-balance-catalogue-and-triage-design.md
+  ensureColumn(db, 'balance_patches', 'triage', "TEXT CHECK (triage IN ('pending','balance','folded'))");
+  ensureColumn(db, 'balance_patches', 'folded_into', 'INTEGER REFERENCES balance_patches(id)');
+  // The patch the first reporting server was on before this one: the default
+  // fold target and the base of the triage card's diff.
+  ensureColumn(db, 'balance_patches', 'came_from_patch_id', 'INTEGER REFERENCES balance_patches(id)');
+  // The patch whose fingerprint a round reported; patch_id is the effective
+  // patch after folds.
+  ensureColumn(db, 'match_rounds', 'sighted_patch_id', 'INTEGER REFERENCES balance_patches(id)');
+  db.exec('CREATE INDEX IF NOT EXISTS match_rounds_sighted_patch ON match_rounds(sighted_patch_id)');
+  db.exec(`CREATE TABLE IF NOT EXISTS balance_ignored_plugins (
+    file     TEXT PRIMARY KEY,
+    reason   TEXT NOT NULL DEFAULT '',
+    added_by TEXT NOT NULL,
+    added_at TEXT NOT NULL
+  )`);
+  for (const sql of TRIAGE_BACKFILL_SQL) db.prepare(sql).run();
   ensureColumn(db, 'match_rounds', 'variant', 'TEXT');
   ensureColumn(db, 'match_rounds', 'skill_detect', 'INTEGER');
   ensureColumn(db, 'matches', 'origin', "TEXT CHECK (origin IN ('queue','in_game'))");
