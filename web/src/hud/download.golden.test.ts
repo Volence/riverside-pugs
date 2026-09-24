@@ -107,3 +107,33 @@ describe('saved Phase 1 designs download the same bytes', () => {
     });
   }
 });
+
+/**
+ * Saved designs that touch the three infected panels, pinned before slices
+ * 2.2 to 2.4 (the infected panels plan, Task 0) change how those panels are
+ * written: a design saved with none of the new edits must keep its bytes.
+ * infectedRow still carries the pre-gap `spacing` here, as saved designs do.
+ */
+describe('saved infected designs download the same bytes', () => {
+  const infected = (preset: 'stock' | 'modern'): [string, () => HudDesign][] => [
+    [`${preset}: your infected health scaled 1.5 and moved`, () => validateDesign({ v: 1, preset, elements: { siHealth: { scale: 1.5, x: 400, y: 380 } } })],
+    [`${preset}: infected teammates scaled 2 with a stored spacing 200`, () => validateDesign({ v: 1, preset, elements: { infectedRow: { scale: 2, spacing: 200 } } })],
+    [`${preset}: the ability timer moved`, () => validateDesign({ v: 1, preset, elements: { abilityRing: { x: 300, y: 300 } } })],
+    [`${preset}: the game crosshair hidden`, () => validateDesign({ v: 1, preset, hideGameCrosshair: true })],
+  ];
+  const hashes: Record<string, string> = {
+    'stock: your infected health scaled 1.5 and moved': '840539fa287b8094c1e6535a8436299137d27c792fc35f1fa0f3c6e176ad4216',
+    'stock: infected teammates scaled 2 with a stored spacing 200': '93ed646c11be551258e91c3ede3efcc3f8833f79b765b81dcd3aa3d627918334',
+    'stock: the ability timer moved': 'e3c0ddd98ad677d3d77d0e324fe4da9c45bf86c55cf990dd9afc9a5914faf29a',
+    'stock: the game crosshair hidden': '93f6382e8f97c317c910a3f73265973e430530b954c65b23c00ce462fb9b79a5',
+    'modern: your infected health scaled 1.5 and moved': 'dfdaca22c54f5079208a647c7a88614eb292642cd004fa3f0fd9a4ca792e564c',
+    'modern: infected teammates scaled 2 with a stored spacing 200': '35fd853d2f0d9b3b12285a28c1114b013a5b9cdc55e859f3076def9a3b43fac8',
+    'modern: the ability timer moved': 'a9f4601215c651d2ef5a0a6fd0b283bb04d99775bac5ce3df33f9428acf3460a',
+    'modern: the game crosshair hidden': '0c95532a480d1c13cde0afff8e75c593f399e85b08c7fd931b5dd13c5c5cd734',
+  };
+  for (const [name, make] of [...infected('stock'), ...infected('modern')]) {
+    it(`${name} packs to the same bytes`, () => {
+      expect(download(make())).toBe(hashes[name]);
+    });
+  }
+});
