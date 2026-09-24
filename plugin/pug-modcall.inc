@@ -20,9 +20,10 @@
 // flow would open twice; the second open inside MODCALL_REOPEN_GUARD is
 // dropped.
 //
-// Nothing is sent unless the player gets all the way through: a menu cancel
-// or a disconnect mid-flow clears the pending call. The detail wait ending on
-// its own (30 s) is not a cancel; the call goes out without details.
+// Nothing is sent unless the player gets through both menus: a menu cancel
+// or a disconnect while a menu is up clears the pending call. Once the menus
+// are done the call is committed, so the detail wait ending on its own (30 s)
+// or the player leaving during it sends the call without details.
 
 #define MODCALL_COOLDOWN 180          // seconds between two sent calls from one SteamID
 #define MODCALL_DETAILS_WAIT 30.0     // seconds the next chat line is taken as details
@@ -65,19 +66,26 @@ void ModCall_Clear(int client)
 	g_bCallHasDetails[client] = false;
 }
 
+/** Called from OnClientDisconnect, where the client is still in game and its
+ *  SteamID still resolves. The menus are done during the detail wait, so the
+ *  call goes out without details (silently: the player is leaving). This also
+ *  runs on a changelevel, which sends a waiting call early; accepted. */
 void ModCall_OnDisconnect(int client)
 {
+	if (g_bAwaitDetails[client]) ModCall_Send(client, "", false);
 	ModCall_Clear(client);
 	g_fLastOpen[client] = 0.0;
 }
 
 /** Belt and braces: OnClientDisconnect already runs for every client across a
- *  changelevel, so this should find nothing to clear. */
+ *  changelevel, so this should find nothing to clear. Clears only, never
+ *  sends: nobody is in game at map start. */
 void ModCall_OnMapStart()
 {
 	for (int c = 1; c <= MaxClients; c++)
 	{
-		ModCall_OnDisconnect(c);
+		ModCall_Clear(c);
+		g_fLastOpen[c] = 0.0;
 	}
 }
 
@@ -285,10 +293,11 @@ public Action Timer_ModCallDetails(Handle timer, int userid)
 	return Plugin_Stop;
 }
 
-void ModCall_Send(int client, const char[] rawDetails)
+/** `notify` false for a player who is leaving: no chat line to them. */
+void ModCall_Send(int client, const char[] rawDetails, bool notify = true)
 {
 	char caller[24];
-	if (g_sCallReason[client][0] == '\0' || g_sCallTarget[client][0] == '\0'
+	if (!IsClientInGame(client) || g_sCallReason[client][0] == '\0' || g_sCallTarget[client][0] == '\0'
 		|| !GetClientAuthId(client, AuthId_SteamID64, caller, sizeof(caller)))
 	{
 		ModCall_Clear(client);
@@ -307,5 +316,5 @@ void ModCall_Send(int client, const char[] rawDetails)
 
 	g_smCooldown.SetValue(caller, GetTime());
 	ModCall_Clear(client);
-	PrintToChat(client, "[PUG] Mods have been called. Thanks.");
+	if (notify) PrintToChat(client, "[PUG] Mods have been called. Thanks.");
 }
