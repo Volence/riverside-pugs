@@ -463,11 +463,32 @@ export function handlePoint(box: Box, h: Handle): { x: number; y: number } {
   return { x, y };
 }
 
-/** The nearest handle within `slack` HUD units of the point, so a thin box's side handle is reachable between its corners. */
-export function handleAt(box: Box, handles: Handle[], ux: number, uy: number, slack: number): Handle | null {
-  let best: { h: Handle; d: number } | null = null;
-  for (const h of handles) {
+/**
+ * Where the canvas draws a handle square and looks for it, in HUD units:
+ * the box's point, pinned so the whole square (`half` units either side of
+ * its centre) stays inside the canvas, `w` by `h`. A frame that runs past an
+ * edge (a Free teammate card, an imported HUD's panel, which the scale
+ * clamp does not move) keeps its handles reachable, against that edge.
+ */
+export interface HandleBounds { w: number; h: number; half: number }
+const pin = (v: number, half: number, extent: number): number => Math.min(extent - half, Math.max(half, v));
+export function handlePoints(box: Box, handles: Handle[], bounds?: HandleBounds): { x: number; y: number }[] {
+  return handles.map((h) => {
     const p = handlePoint(box, h);
+    return bounds ? { x: pin(p.x, bounds.half, bounds.w), y: pin(p.y, bounds.half, bounds.h) } : p;
+  });
+}
+
+/**
+ * The nearest handle within `slack` HUD units of the point, so a thin box's
+ * side handle is reachable between its corners. With `bounds`, the handles
+ * are where handlePoints pins them, the squares the canvas draws.
+ */
+export function handleAt(box: Box, handles: Handle[], ux: number, uy: number, slack: number, bounds?: HandleBounds): Handle | null {
+  let best: { h: Handle; d: number } | null = null;
+  const pts = handlePoints(box, handles, bounds);
+  for (const [i, h] of handles.entries()) {
+    const p = pts[i];
     const d = Math.max(Math.abs(ux - p.x), Math.abs(uy - p.y));
     if (d <= slack && (!best || d < best.d)) best = { h, d };
   }

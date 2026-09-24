@@ -17,7 +17,7 @@ import {
   elementRect, teamLayout, teamCardRects, panelFrame, isFreeTeam, packHud, importedHasXhair, splatterProblem,
   type BuildAssets, type BuildReport, type CardChild,
 } from '../hud/build';
-import { drawHud, visibleElements, panelBoxes, type Side } from '../hud/mock';
+import { drawHud, visibleElements, panelBoxes, HANDLE_PX, type Side } from '../hud/mock';
 import { DEFAULT_PREVIEW, panelFile, type PreviewState } from '../hud/render';
 import type { WeaponHeld } from '../hud/weapons';
 import { SLOTS, type StyleSlot } from '../hud/slots';
@@ -39,7 +39,7 @@ import { snapMove, snapEdges, unionBox, type Guide, type Snap, type Handle } fro
 import {
   NONE, TEAMMATES, cardsOf, hitAt, targetOf, pick, clickSelect, dragIntent, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
   sanitize, selectionKey, selectedIds, selectionFrames, sectionTargets, pieceTargets, pieceGuideToScreen,
-  selectionBox, handlesFor, handlePoint, handleAt, isPicked, menuActions, elementFrame, panelOf,
+  selectionBox, handlesFor, handlePoints, handleAt, isPicked, menuActions, elementFrame, panelOf,
   type Selection, type Hit, type Mods, type Crumb, type MenuAction,
 } from '../hud/selection';
 import { ContextMenu } from './hud/ContextMenu';
@@ -276,6 +276,15 @@ const CLICK_PX = 3;
 const NO_SNAP: Snap = { dx: 0, dy: 0, guides: [] };
 /** How near a handle the pointer must be, in screen pixels, whatever the canvas scale. */
 const HANDLE_SLACK_PX = 5;
+/**
+ * The canvas in HUD units and a handle square's half size there (mock.ts
+ * HANDLE_PX, fixed in canvas pixels), so the handles are drawn and hit-tested
+ * pinned inside the canvas (selection.ts handlePoints, task L5).
+ */
+const handleBounds = (pxW: number, pxH: number) => {
+  const h = pxH || 1;
+  return { w: (pxW * SCREEN_H) / h, h: SCREEN_H, half: (HANDLE_PX / 2) * SCREEN_H / h };
+};
 const RESIZE_CURSOR: Record<Handle, string> = {
   n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
   ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize',
@@ -579,7 +588,7 @@ export default function Hud() {
         held,
         frames: selectionFrames(design, sel, preview),
         box,
-        handles: box ? handlesFor(design, sel).map((hd) => handlePoint(box, hd)) : [],
+        handles: box ? handlePoints(box, handlesFor(design, sel), handleBounds(w, h)) : [],
         hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered, preview), label: selectionLabel(hovered) },
         marquee,
         guides,
@@ -698,8 +707,10 @@ export default function Hud() {
     const box = selectionBox(d, sel, preview);
     const c = canvas.current;
     if (!box || !c) return null;
-    const slack = (HANDLE_SLACK_PX * SCREEN_H) / c.getBoundingClientRect().height;
-    return handleAt(box, handlesFor(d, sel), ux, uy, slack);
+    // The backing store is 1:1 with the CSS box (the draw effect), so the box's size is the canvas's.
+    const rect = c.getBoundingClientRect();
+    const slack = (HANDLE_SLACK_PX * SCREEN_H) / rect.height;
+    return handleAt(box, handlesFor(d, sel), ux, uy, slack, handleBounds(rect.width, rect.height));
   };
 
   /** What a handle drag resizes, from where everything is now. */

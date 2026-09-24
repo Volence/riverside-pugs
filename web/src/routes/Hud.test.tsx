@@ -1431,6 +1431,19 @@ describe('Hud page', () => {
     expect(x()).toBeLessThan(728);
   });
 
+  // Task L5: your health's stock frame runs 5 units past the right edge (728..858 on 853), so its
+  // bottom-right handle is pinned inside the canvas, and a press there scales rather than moves.
+  it('finds a handle pinned inside the canvas where the frame runs past the edge', () => {
+    const { container } = render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Your health' }));
+    const canvas = unitCanvas(container);
+    const scale = () => Number((screen.getByRole('slider', { name: /^Scale/ }) as HTMLInputElement).value);
+    const x = () => Number((screen.getByLabelText('X') as HTMLInputElement).value);
+    dragFrom(canvas, [850, 474], [790, 450]);
+    expect(scale()).toBeLessThan(1);
+    expect(x()).toBe(728);
+  });
+
   it('shows every Layers row its name, with a state note on its own line under it', () => {
     render(<Hud />);
     for (const [label, note] of [['Down picture', 'shown when down'], ['Dead picture', 'shown when dead'], ['Voice icon', 'shown when talking']]) {

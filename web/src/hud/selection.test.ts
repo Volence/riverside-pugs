@@ -6,7 +6,7 @@ import { withTeamDir, patchChild } from './edit';
 import { panelBoxes } from './mock';
 import {
   NONE, TEAMMATES, hitAt, targetOf, clickSelect, dragIntent, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
-  sanitize, selectedIds, selectionFrames, selectionBox, handlesFor, handlePoint, handleAt, pieceTargets, sectionTargets,
+  sanitize, selectedIds, selectionFrames, selectionBox, handlesFor, handlePoint, handlePoints, handleAt, pieceTargets, sectionTargets,
   pieceGuideToScreen, menuActions, drawnPieces, elementFrame, isPicked, pick, cardsOf, panelOf, type Selection, type Mods,
 } from './selection';
 import { unionBox } from './guides';
@@ -556,5 +556,33 @@ describe('the infected cards are a selection level, and moving one moves the row
     // Moving the survivor cards' snap targets leave out only the picked cards of that panel.
     expect(sectionTargets(F, 'infected', CARD2)).toContainEqual(card(0));
     expect(sectionTargets(F, 'infected', CARD2)).not.toContainEqual(card(1));
+  });
+});
+
+describe('handles never leave the canvas (task L5)', () => {
+  // A Free teammate card or an imported HUD's panel can run past the right edge (the scale clamp, L4, does not move them).
+  const bounds = { w: 853, h: 480, half: 2 };
+  const box = { x: 800, y: 440, w: 100, h: 60 };            // right edge at 900, bottom at 500
+  const corners = ['nw', 'ne', 'se', 'sw'] as const;
+
+  it('pins each handle square inside the canvas, against the edge it ran past', () => {
+    const pts = handlePoints(box, [...corners], bounds);
+    for (const p of pts) {
+      expect(p.x - bounds.half).toBeGreaterThanOrEqual(0);
+      expect(p.x + bounds.half).toBeLessThanOrEqual(bounds.w);
+      expect(p.y - bounds.half).toBeGreaterThanOrEqual(0);
+      expect(p.y + bounds.half).toBeLessThanOrEqual(bounds.h);
+    }
+    expect(pts).toEqual([{ x: 800, y: 440 }, { x: 851, y: 440 }, { x: 851, y: 478 }, { x: 800, y: 478 }]);
+  });
+
+  it('leaves a handle already inside where it is', () => {
+    expect(handlePoints({ x: 10, y: 10, w: 100, h: 50 }, ['se'], bounds)).toEqual([{ x: 110, y: 60 }]);
+    expect(handlePoints(box, ['se'])).toEqual([handlePoint(box, 'se')]);
+  });
+
+  it('hit-tests the same pinned squares', () => {
+    expect(handleAt(box, [...corners], 851, 478, 3, bounds)).toBe('se');
+    expect(handleAt(box, [...corners], 900, 500, 3, bounds)).toBeNull();
   });
 });

@@ -805,7 +805,7 @@ function drawHiddenOutline(ctx: CanvasRenderingContext2D, r: Rect) {
 }
 
 /** Handles are a fixed size on screen, whatever the canvas scale. */
-const HANDLE_PX = 7;
+export const HANDLE_PX = 7;
 const GUIDE = '#ff4fa3';
 const MARQUEE = 'rgba(153,204,255,0.9)';
 const MARQUEE_FILL = 'rgba(153,204,255,0.13)';
