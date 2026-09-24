@@ -77,7 +77,27 @@ export function TeamControls(
         </select>
         <span />
       </label>
-      {team.file ? (
+      {/* The infected row: code places card i at i x HorizPanelSpacing, so its pitch is the card plus the gap (build.ts rowLayout). */}
+      {!team.file && (
+        <>
+          <Slider
+            label="Gap" value={Math.max(0, Math.round(t.gap ?? 0))} min={0} max={200} step={1}
+            onInput={(gap) => edit((d) => {
+              const { spacing: _old, ...rest } = d.elements[el.id] ?? {};
+              return { ...d, elements: { ...d.elements, [el.id]: { ...rest, gap: clampOverride('gap', gap) } } };
+            }, 'gesture')}
+            onEnd={end}
+          />
+          <label class="hud__check">
+            <input
+              type="checkbox" checked={o.fit === true}
+              onChange={(e) => patch({ fit: (e.target as HTMLInputElement).checked })}
+            />
+            <span>Fit the card to its contents</span>
+          </label>
+        </>
+      )}
+      {team.file && (
         <>
           {t.dir !== 'free' && (
             <Slider
@@ -112,15 +132,6 @@ export function TeamControls(
             </>
           )}
         </>
-      ) : (
-        <label class="hud__row">
-          <span>Spacing</span>
-          <input
-            type="number" value={t.spacing}
-            onInput={(e) => patchNum(patch, e, 'spacing', (n) => ({ spacing: n }))} {...endsOn(end)}
-          />
-          <span />
-        </label>
       )}
     </>
   );

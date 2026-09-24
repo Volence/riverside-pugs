@@ -637,17 +637,17 @@ describe('Hud page', () => {
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('42');
   });
 
-  // design.ts's RANGES caps the infected row spacing at 400. Typing past the
-  // cap must snap the design to it immediately, not just at download time:
-  // otherwise the canvas would draw a value the packed file could never
-  // carry.
-  it('snaps an out-of-range number box to the clamp used at download time', () => {
+  // Plan Task 11: the infected row is spaced by the gap between cards, and can be fitted.
+  it('offers the infected row a Gap slider and a Fit box, and no Spacing box', async () => {
     render(<Hud />);
     fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
     fireEvent.click(screen.getByRole('button', { name: 'Infected teammates' }));
-    const spacing = screen.getByLabelText('Spacing') as HTMLInputElement;
-    fireEvent.input(spacing, { target: { value: '500' } });
-    expect(spacing.value).toBe('400');
+    expect(screen.queryByLabelText('Spacing')).toBeNull();
+    fireEvent.click(screen.getByLabelText('Fit the card to its contents'));
+    const gap = screen.getByRole('slider', { name: /^Gap/ }) as HTMLInputElement;
+    expect(gap.value).toBe('7');                       // stock's 140 pitch less the fitted 133 card
+    fireEvent.input(gap, { target: { value: '12' } });
+    await waitFor(() => expect((JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign).elements?.infectedRow).toMatchObject({ fit: true, gap: 12 }));
   });
 
   it('offers a Gap slider for the teammates, starting at the gap the fitted stock row already has', () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildHud, elementRect, pcSet, HIDE_FRAMES, CODE_SHOWN, hardHide, baseHasElement, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame, panelChild, panelFrame, writeKeys } from './build';
+import { buildHud, elementRect, panelWork, pcSet, HIDE_FRAMES, CODE_SHOWN, hardHide, baseHasElement, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame, panelChild, panelFrame, writeKeys } from './build';
 import { parsePos, screenW } from './units';
 import { DEFAULT_DESIGN, validateDesign, contentBox, type HudDesign, type ElementOverride, type ChildOverride } from './design';
 import { parseKv, writeKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
@@ -942,7 +942,7 @@ describe('teamLayout, real base-file defaults', () => {
   it('reads the modern preset real spacing when nothing is overridden', () => {
     const d = design({ preset: 'modern' });
     expect(teamLayout(d, elementById('teamColumn')!)).toMatchObject({ dir: 'column', spacing: 34, gap: 0 });
-    expect(teamLayout(d, elementById('infectedRow')!)).toEqual({ dir: 'row', spacing: 124 });
+    expect(teamLayout(d, elementById('infectedRow')!)).toMatchObject({ dir: 'row', spacing: 124 });
   });
 
   it('reads the stock preset real spacing, not a hardcoded constant', () => {
@@ -953,7 +953,7 @@ describe('teamLayout, real base-file defaults', () => {
     const zombieGap = parseFloat(kvGet(kvFind(layout, ['CHudZombieTeamDisplay'])!, 'HorizPanelSpacing')!);
     const d = design({});
     expect(teamLayout(d, elementById('teamColumn')!)).toMatchObject({ dir: 'row', spacing: rowGap, gap: rowGap - 150 });
-    expect(teamLayout(d, elementById('infectedRow')!)).toEqual({ dir: 'row', spacing: zombieGap });
+    expect(teamLayout(d, elementById('infectedRow')!)).toMatchObject({ dir: 'row', spacing: zombieGap });
   });
 });
 
@@ -1996,5 +1996,80 @@ describe('the ability marker: HudCrosshair\'s ability keys (plan Task 8)', () =>
     const base = kvFind(parseKv(baseFile('stock', LAYOUT))[0].value as KvNode[], ['HudCrosshair'])!;
     const built = kvFind(parseKv(text(validateDesign({ v: 1 })))[0].value as KvNode[], ['HudCrosshair'])!;
     expect(built).toEqual(base);
+  });
+});
+
+describe('the infected card fit and the gap between cards (plan Task 11)', () => {
+  const CARD = 'resource/ui/hud/zombieteamdisplayplayer.res';
+  const LAYOUT = 'scripts/hudlayout.res';
+  const row = (o: ElementOverride, children?: Record<string, ChildOverride>, preset: 'stock' | 'modern' = 'stock') =>
+    validateDesign({ v: 1, preset, elements: { infectedRow: o }, ...(children ? { children: { infectedRow: children } } : {}) });
+  const node = (d: HudDesign, file: string, name: string) => kvFind(buildTrees(d)(file), [name])!;
+  const rect = (n: KvNode) => ['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(n, k));
+  const FONTS = { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } };
+  const container = (d: HudDesign) => kvFind(layoutOf(buildHud(d, FONTS)), ['CHudZombieTeamDisplay'])!;
+  /** Where a card piece lands on screen, in units: the container's y plus the piece's y, as the game draws card 1. */
+  const screenY = (d: HudDesign, name: string) => {
+    const c = container(d);
+    const cardFile = parseKv(new TextDecoder('latin1').decode(buildHud(d).find((f) => f.path === CARD)?.data ?? new TextEncoder().encode(baseFile('stock', CARD))))[0].value as KvNode[];
+    return parsePos(kvGet(c, 'ypos')!, 480) + parseFloat(kvGet(kvFind(cardFile, [name])!, 'ypos')!);
+  };
+
+  it('fits stock to (0,10) 133 x 64, keeping the backdrop, and moves the container down by the offset', () => {
+    // Plan decision 1: the backdrop (0,10 128x64) is kept, NameLabel reaches x 133.
+    const d = row({ fit: true });
+    expect(panelWork(d).boxes.infectedRow).toEqual({ x: 0, y: 10, w: 133, h: 64 });
+    expect(rect(node(d, CARD, 'BackgroundImage'))).toEqual(['0', '0', '128', '64']);
+    expect(rect(node(d, CARD, 'NameLabel'))).toEqual(['13', '45', '120', '12']);
+    expect([kvGet(node(d, CARD, 'ZombieTeamDisplayPlayer'), 'wide'), kvGet(node(d, CARD, 'ZombieTeamDisplayPlayer'), 'tall')]).toEqual(['133', '64']);
+    expect(kvGet(container(d), 'ypos')).toBe('r65');
+    expect(kvGet(container(d), 'xpos')).toBe('0');
+    expect(kvGet(container(d), 'HorizPanelSpacing')).toBe('140');     // the pitch is kept
+    // Fit alone moves nothing on screen.
+    for (const n of ['BackgroundImage', 'PlayerImage', 'HealthPanel', 'NameLabel', 'SkullIconPlacement']) {
+      expect(screenY(d, n), n).toBe(screenY(row({}), n));
+    }
+  });
+
+  it('moves the container by the offset at the element\'s scale', () => {
+    const d = row({ fit: true, scale: 2 });
+    expect(kvGet(container(d), 'ypos')).toBe('r55');
+    expect(elementRect(d, 'infectedRow', d.aspect).y).toBe(425);
+  });
+
+  it('fits to the content alone with the backdrop hidden: the spec\'s (9,23) 124 x 44; state art never counts', () => {
+    const d = row({ fit: true }, { BackgroundImage: { visible: false } });
+    expect(panelWork(d).boxes.infectedRow).toEqual({ x: 9, y: 23, w: 124, h: 44 });
+  });
+
+  it('spreads Dead over the fitted card only when it has a height (probe Q19: stock 0 tall never shows)', () => {
+    expect(rect(node(row({ fit: true }), CARD, 'Dead'))).toEqual(['0', '8', '256', '0']);
+    expect(rect(node(row({ fit: true }, { Dead: { h: 40 } }), CARD, 'Dead'))).toEqual(['0', '0', '133', '40']);
+  });
+
+  it('spaces cards by the gap: HorizPanelSpacing = (card + gap) x scale', () => {
+    expect(kvGet(container(row({ fit: true, gap: 10 })), 'HorizPanelSpacing')).toBe('143');
+    expect(kvGet(container(row({ fit: true, gap: 10, scale: 2 })), 'HorizPanelSpacing')).toBe('286');
+    expect(kvGet(container(row({ gap: 10 })), 'HorizPanelSpacing')).toBe('266');           // the unfitted card is 256 wide
+    expect(teamLayout(row({ fit: true, gap: 10 }), elementById('infectedRow')!)).toMatchObject({ spacing: 143, gap: 10 });
+    // Nothing stored: the file's pitch, and the gap it implies.
+    expect(teamLayout(row({ fit: true }), elementById('infectedRow')!)).toMatchObject({ spacing: 140, gap: 7 });
+  });
+
+  it('keeps a saved design\'s stored spacing byte for byte until a gap is set', () => {
+    // download.golden.test.ts pins "infected teammates scaled 2 with a stored spacing 200".
+    expect(kvGet(container(row({ scale: 2, spacing: 200 })), 'HorizPanelSpacing')).toBe('200');
+    expect(row({ spacing: 200, gap: 5 }).elements.infectedRow).toEqual({ gap: 5 });
+  });
+
+  it('keeps the row a row: any other layout is dropped', () => {
+    expect(row({ dir: 'column' }).elements.infectedRow).toBeUndefined();
+    expect(row({ dir: 'row' }).elements.infectedRow).toEqual({ dir: 'row' });
+  });
+
+  it('fits Modern to its own backdrop, moving nothing', () => {
+    const d = row({ fit: true }, undefined, 'modern');
+    expect(panelWork(d).boxes.infectedRow).toEqual({ x: 0, y: 0, w: 120, h: 31 });
+    expect(kvGet(container(d), 'ypos')).toBe(kvGet(container(row({}, undefined, 'modern')), 'ypos'));
   });
 });

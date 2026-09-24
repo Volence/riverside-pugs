@@ -35,13 +35,14 @@ export interface ElementOverride {
   /** 'free' is the survivor team's only; validateDesign keeps it only with four `slots`. */
   dir?: TeamDir;
   /**
-   * The infected row's HorizPanelSpacing, final units. The survivor team used
-   * this too before `gap`; validateDesign migrates it and never keeps it there.
+   * The infected row's HorizPanelSpacing, final units, from before the row
+   * had `gap`: kept, byte for byte, until a gap replaces it. The survivor
+   * team used this too; validateDesign migrates it there and never keeps it.
    */
   spacing?: number;
-  /** Survivor team, Row and Column: units between two cards at scale 1. */
+  /** Survivor team (Row and Column) and the infected row: units between two cards at scale 1. */
   gap?: number;
-  /** Survivor team: shrink the card to its content. Absent means off, so a saved design renders as it was. */
+  /** Survivor team, the infected row: shrink the card to its content. Absent means off, so a saved design renders as it was. */
   fit?: boolean;
   /** Survivor team, Free: the four cards' positions. Kept when leaving Free, so coming back restores them. */
   slots?: CardSlot[];
@@ -510,15 +511,29 @@ function element(id: string, raw: unknown, key: BaseKey): ElementOverride {
   const out: ElementOverride = {};
   if (!isObj(raw)) return out;
   const team = id === 'teamColumn';
+  const infected = id === 'infectedRow';
   if (typeof raw.visible === 'boolean') out.visible = raw.visible;
   for (const k of Object.keys(RANGES) as RangeKey[]) {
-    // The survivor team's spacing is migrated to gap in teamFields; gap means nothing anywhere else.
-    if ((team && k === 'spacing') || (!team && k === 'gap')) continue;
+    // The survivor team's spacing is migrated to gap in teamFields; gap means
+    // nothing but on the two teams.
+    if ((team && k === 'spacing') || (!team && !infected && k === 'gap')) continue;
     const v = raw[k];
     if (typeof v === 'number' && Number.isFinite(v)) out[k] = clampOverride(k, v);
   }
-  if (raw.dir === 'row' || raw.dir === 'column') out.dir = raw.dir;
+  // The infected row is only ever a row: the game lays its cards out
+  // HorizPanelSpacing apart and reads no vertical key (probe RESULTS, dll 0x10247a70).
+  if (raw.dir === 'row' || (raw.dir === 'column' && !infected)) out.dir = raw.dir;
   if (team) teamFields(raw, out, key);
+  // The infected row is spaced by its gap (plan Task 11, decision 5). A
+  // saved design's `spacing` (the old HorizPanelSpacing, final units) is
+  // kept as it is while no gap replaces it, not migrated: its bytes are
+  // pinned (download.golden.test.ts), and the stock card, 256 wide at a
+  // 140 pitch, overlaps, so no gap of 0 or more could give the same pitch.
+  // The fit is opt-in, kept only as a real boolean.
+  if (infected) {
+    if (out.gap !== undefined) delete out.spacing;
+    if (typeof raw.fit === 'boolean') out.fit = raw.fit;
+  }
   // Your own health's fit rests on probe Q2 (B1 a): LocalPlayer must clip
   // its children and paint nothing of its own, or a smaller panel would
   // show or hide the wrong things. Kept only once that gate passes, and

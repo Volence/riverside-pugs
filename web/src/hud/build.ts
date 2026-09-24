@@ -22,7 +22,7 @@ import {
   type WeaponNumKey,
 } from './design';
 import {
-  panelChildren, panelOfFile, childDef, maxInset, linkedValue, TEAM_PANEL, OWN_PANEL, SI_PANEL, type ChildDef, type PanelChildren, type LinkRect, type LinkRule,
+  panelChildren, panelOfFile, childDef, maxInset, linkedValue, TEAM_PANEL, OWN_PANEL, SI_PANEL, ZCARD_PANEL, type ChildDef, type PanelChildren, type LinkRect, type LinkRule,
 } from './children';
 import { crosshairFiles } from '../crosshair/vpk';
 import {
@@ -738,12 +738,18 @@ function fitSi(work: Work, design: HudDesign) {
 /**
  * How far a fitted element's container is drawn from its stored position:
  * the fit box's offset at the element's scale, for a panel framed by its
- * own hudlayout.res block (your infected health), else 0, 0. A stored x and
+ * own hudlayout.res block (your infected health) and for the infected row
+ * (plan decision 4), else 0, 0. A stored x and
  * y mean the unfitted container's place, so fit on and off keep every piece
  * where it was; edit.ts's placeElement takes a drawn position and stores it
  * less this.
  */
 export function elementFitShift(design: HudDesign, id: string): { x: number; y: number } {
+  // The infected row's container moves by its fitted card's offset (rowLayout).
+  if (id === ZCARD_PANEL.panelId) {
+    const el = elementById(id)!;
+    return design.elements[id]?.fit === true ? teamLayout(design, el).offset ?? { x: 0, y: 0 } : { x: 0, y: 0 };
+  }
   if (!fitsContainer(design, id)) return { x: 0, y: 0 };
   const box = panelWork(design).boxes[id]!;
   const k = design.elements[id]?.scale ?? 1;
@@ -820,6 +826,47 @@ function fitTeam(work: Work, design: HudDesign) {
 }
 
 /**
+ * The infected card's fit box: its content (the class icon, the bar and the
+ * name) and its backdrop, kept (plan decision 1) and cut to the file's own
+ * ZombieTeamDisplayPlayer block first. Stock: (0,10) 133 x 64.
+ */
+function zcardContent(work: Work, design: HudDesign): Box | null {
+  const frame = baseFrameRect(design, ZCARD_PANEL);
+  return fitBox(work.tree(ZCARD_PANEL.file), ZCARD_PANEL, frame && { x: 0, y: 0, w: frame.w, h: frame.h });
+}
+
+/**
+ * Fit the infected card (plan decisions 1 and 4). Every child shifts by the
+ * box's top-left and the card's own block, ZombieTeamDisplayPlayer, which
+ * clips it (probe Q17, /home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/bl-abe.png),
+ * is sized to the box, unscaled: scalePass scales the whole file. Code
+ * places card i at (i x HorizPanelSpacing, 0) inside CHudZombieTeamDisplay
+ * (dll 0x10247a70), so the offset cannot go on the card: teamLayout moves
+ * the container by it instead, which is what keeps fitting alone from
+ * moving anything on screen. Dead, which the game shows only when it has a
+ * height (probe Q19), is spread over the fitted card when it has one, on
+ * whatever the player did not set. The other state pieces shift with the
+ * rest.
+ */
+function fitZcard(work: Work, design: HudDesign) {
+  if (design.elements.infectedRow?.fit !== true) return;
+  const box = zcardContent(work, design);
+  if (!box) return;
+  const nodes = work.tree(ZCARD_PANEL.file);
+  shiftNodes(nodes, box);
+  const self = kvFind(nodes, [(ZCARD_PANEL.frame as { block: string }).block]);
+  if (self) { kvSet(self, 'wide', String(box.w)); kvSet(self, 'tall', String(box.h)); }
+  const dead = kvFind(nodes, ['Dead']);
+  if (dead && num(kvGet(dead, 'tall')) > 0) {
+    const e = design.children.infectedRow?.Dead ?? {};
+    if (e.x === undefined) kvSet(dead, 'xpos', '0');
+    if (e.y === undefined) kvSet(dead, 'ypos', '0');
+    if (e.w === undefined) kvSet(dead, 'wide', String(box.w));
+    if (e.h === undefined) kvSet(dead, 'tall', String(box.h));
+  }
+}
+
+/**
  * A panel's fit rule: `content` measures the box fit shrinks the panel to,
  * with the panel file as childPass left it (panelWork keeps it for panelFrame,
  * panelChild and teamLayout); `apply` is the rule's own fitPass step; `bg`
@@ -832,6 +879,7 @@ const FIT_RULES: Record<string, FitRule> = {
   ownHealth: { content: ownContent, apply: fitOwn, bg: OWN_BG },
   // No background slot of its own (yet): nothing is injected.
   siHealth: { content: siContent, apply: fitSi },
+  infectedRow: { content: zcardContent, apply: fitZcard },
 };
 
 /**
@@ -1105,7 +1153,7 @@ export function splatterProblem(design: HudDesign, id: SplatterId): string | nul
  * numbers, and both must be the build's own numbers.
  */
 const PANEL_WORK = new WeakMap<HudDesign, { work: Work; boxes: Record<string, Box | null> }>();
-function panelWork(design: HudDesign) {
+export function panelWork(design: HudDesign) {
   let w = PANEL_WORK.get(design);
   if (!w) {
     const work = new Work(baseOf(design));
@@ -1355,16 +1403,7 @@ export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
   const k = el.resize === 'scale' ? o?.scale ?? 1 : 1;
   // Read on demand from the parsed base: it is needed only to size a container, and this runs on every canvas repaint.
   const layoutPanel = () => kvFind(baseTree(baseOf(design), LAYOUT), [el.key]);
-  if (!el.team?.file) {
-    const dir = el.team?.dirs[0] ?? 'row';
-    let baseSpacing: number | undefined;
-    if (el.team?.spacingKey) {
-      const panel = layoutPanel();
-      const v = panel ? kvGet(panel, el.team.spacingKey) : undefined;
-      if (v !== undefined) { const n = parseFloat(v); if (!Number.isNaN(n)) baseSpacing = n; }
-    }
-    return { dir, spacing: Math.round(o?.spacing ?? (baseSpacing ?? (dir === 'row' ? 140 : 45)) * k) };
-  }
+  if (!el.team?.file) return rowLayout(design, el, o, k, layoutPanel());
   const base = baseTeam(baseOf(design));
   // A fitted card is its content box and sits at the box's top-left, so
   // fitting alone moves nothing on screen.
@@ -1461,6 +1500,45 @@ export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
 }
 
 /**
+ * The infected row's layout (plan Task 11): code places card i at
+ * (i x HorizPanelSpacing, 0) (dll 0x10247a70), so the pitch is the card
+ * plus the gap, scaled, and a fitted card's offset moves the container
+ * (plan decision 4): `at` holds the container's position moved by it, from
+ * where layoutPass put it (the player's move or the file's own), written
+ * through formatPos with the element's own base size, as layoutPass
+ * writes a move. The card is the fitted box, or the file's own
+ * ZombieTeamDisplayPlayer (stock 256 x 128, which overlaps at the stock
+ * 140 pitch: the gap it implies is negative, as the survivor team's
+ * unfitted one is). With no gap stored, a saved `spacing` (final units) or
+ * the file's HorizPanelSpacing, scaled, stands.
+ */
+function rowLayout(design: HudDesign, el: HudElement, o: ElementOverride | undefined, k: number, panel: KvNode | undefined): TeamLayout {
+  const key = el.team?.spacingKey;
+  const v = panel && key ? parseFloat(kvGet(panel, key) ?? '') : NaN;
+  const basePitch = Number.isFinite(v) ? v : 140;
+  const box = o?.fit ? panelWork(design).boxes[el.id] ?? null : null;
+  const self = baseFrameRect(design, ZCARD_PANEL);
+  const size = box ?? (self ? { w: self.w, h: self.h } : { w: basePitch, h: 0 });
+  const gap = o?.gap ?? (o?.spacing !== undefined ? o.spacing / k : basePitch) - size.w;
+  const spacing = o?.gap !== undefined ? Math.round((size.w + o.gap) * k)
+    : Math.round(o?.spacing ?? basePitch * k);
+  const out: TeamLayout = { dir: 'row', spacing, gap, card: { w: size.w * k, h: size.h * k } };
+  if (o?.fit && !box) out.fitEmpty = true;
+  if (!box || !panel) return out;
+  const offset = { x: Math.round(box.x * k), y: Math.round(box.y * k) };
+  out.offset = offset;
+  const base = baseRect(panel, el, baseOf(design), design.aspect);
+  const W = screenW(design.aspect);
+  const at: { xpos?: string; ypos?: string } = {};
+  const start = (a: 'x' | 'y') => (el.move && o?.[a] !== undefined ? o[a]!
+    : parsePos(kvGet(panel, a === 'x' ? 'xpos' : 'ypos') ?? '0', a === 'x' ? W : SCREEN_H));
+  if (offset.x) at.xpos = formatPos(start('x') + offset.x, base.w, W);
+  if (offset.y) at.ypos = formatPos(start('y') + offset.y, base.h, SCREEN_H);
+  if (at.xpos || at.ypos) out.at = at;
+  return out;
+}
+
+/**
  * Write the team geometry `teamLayout` decided. Every number here is already
  * scaled, which is why `scalePass` skips a team element's `team.file` and its
  * container size entirely: scaling them again would double the factor.
@@ -1473,7 +1551,13 @@ function teamPass(work: Work, design: HudDesign) {
     const t = teamLayout(design, el);
     const container = work.panel(LAYOUT, [el.key]);
     if (team.spacingKey) kvSet(container, team.spacingKey, String(t.spacing));
-    if (!team.file || !t.card || !t.container || !t.cards) continue;
+    if (!team.file) {
+      // The infected row: a fitted card's offset moves the container (rowLayout).
+      if (t.at?.xpos) kvSet(container, 'xpos', t.at.xpos);
+      if (t.at?.ypos) kvSet(container, 'ypos', t.at.ypos);
+      continue;
+    }
+    if (!t.card || !t.container || !t.cards) continue;
     for (let n = 1; n <= 4; n++) {
       const p = work.panel(team.file, [`TeamPlayer${n}`]);
       kvSet(p, 'xpos', t.cards[n - 1].xpos);

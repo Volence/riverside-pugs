@@ -164,9 +164,11 @@ describe('validateDesign, the teammate layout', () => {
     expect(team('stock', { gap: -5 })).toEqual({ gap: 0 });
   });
 
-  it('keeps the infected row spacing as it is, and never gives it a gap, fit or slots', () => {
+  it('keeps the infected row\'s gap and fit, drops a stale spacing once a gap is set, and never gives it slots', () => {
+    // Plan Task 11: the row is spaced by the gap; a saved spacing stays only while no gap replaces it (its bytes are pinned).
     const d = validateDesign({ v: 1, elements: { infectedRow: { spacing: 124, gap: 5, fit: true, slots: [] } } });
-    expect(d.elements.infectedRow).toEqual({ spacing: 124 });
+    expect(d.elements.infectedRow).toEqual({ gap: 5, fit: true });
+    expect(validateDesign({ v: 1, elements: { infectedRow: { spacing: 124 } } }).elements.infectedRow).toEqual({ spacing: 124 });
   });
 
   it('leaves fit off when a saved design has none, while a new design starts fitted', () => {

@@ -908,3 +908,15 @@ describe('editing your infected health on the Boomer preview (plan decision 3)',
     expect(patchChild(plain, 'Health', { x: 300, w: 90 }, 'siHealth').children.siHealth?.Health).toEqual({ x: 300, w: 90 });
   });
 });
+
+describe('placing a fitted infected row (plan Task 11)', () => {
+  it('stores the unfitted container, so a drop where it is drawn moves nothing', () => {
+    // The fit moves CHudZombieTeamDisplay down by the card's 10-unit offset (build.ts rowLayout).
+    const d = { ...structuredClone(DEFAULT_DESIGN), elements: { infectedRow: { fit: true } } } as HudDesign;
+    const r = elementRect(d, 'infectedRow', d.aspect);
+    expect(r.y).toBe(415);
+    const moved = placeElement(d, 'infectedRow', r.x, r.y);
+    expect(elementRect(moved, 'infectedRow', moved.aspect)).toMatchObject({ x: r.x, y: r.y });
+    expect(moved.elements.infectedRow).toMatchObject({ x: 0, y: 405 });
+  });
+});
