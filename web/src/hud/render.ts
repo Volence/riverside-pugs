@@ -589,7 +589,10 @@ const urls = new Map<string, { img: HTMLImageElement; waiting: Set<() => void> }
 export function urlImage(url: string, onAsset?: () => void): HTMLImageElement | undefined {
   let hit = urls.get(url);
   if (!hit) {
-    if (urls.size >= 8) urls.delete(urls.keys().next().value!);
+    // Room for every upload one frame can draw (the crosshair, three
+    // splatters, up to five weapon icons and two boxes), or each repaint
+    // would evict one another and reload them for ever.
+    if (urls.size >= 24) urls.delete(urls.keys().next().value!);
     const entry = { img: imageFactory(url), waiting: new Set<() => void>() };
     entry.img.onload = () => {
       const fns = [...entry.waiting];
@@ -785,6 +788,15 @@ function pngHash(stored: { png: string }): string {
   }
   return h;
 }
+/**
+ * A stored upload (a weapon icon or box) decoded, with a cache key unique
+ * to its picture for tinted(); undefined while it loads.
+ */
+export function storedImage(stored: { png: string }, onAsset?: () => void): { img: HTMLImageElement; key: string } | undefined {
+  const img = urlImage(`data:image/png;base64,${stored.png}`, onAsset);
+  return img ? { img, key: `upload|${pngHash(stored)}` } : undefined;
+}
+
 export function splatterSource(design: HudDesign, id: SplatterId, onAsset?: () => void): { src: CanvasImageSource; key: string } | undefined {
   const def = splatterDef(id);
   const style = design.splatters?.[id];
