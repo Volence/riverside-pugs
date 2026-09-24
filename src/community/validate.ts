@@ -15,7 +15,7 @@
  */
 import { findSlurs } from '../slurs.js';
 import { hasUnsafeChars, LINKISH } from '../profileFields.js';
-import { readVPK, isVpk } from '../vpkRead.js';
+import { readVPK, isVpk, canonicalVpkProblem, VPK_CASE_CLASH } from '../vpkRead.js';
 import { hudSetProblem, hudId, pngSize } from '../hudFiles.js';
 
 export type Checked<T> =
@@ -266,9 +266,11 @@ export function checkPreview(bytes: Uint8Array, aspect: Aspect): Checked<{ w: nu
 // ---- Imported HUD ----------------------------------------------------------
 
 /**
- * The imported HUD's VPK, exactly as the author's browser built it:
- * version 1, one file, no split parts, no bytes beyond the directory and the
- * file data (the layout encodeVPK writes), every file on the allowlist, and
+ * The imported HUD's VPK, exactly as the author's browser built it: one
+ * file, no split parts, no two paths that differ only in case, and byte for
+ * byte what encodeVPK writes for the files it holds (so no bytes that no
+ * entry reads, no overlapping entries, no preload bytes, nothing a reader
+ * other than ours could see differently); every file on the allowlist; and
  * a hudId equal to both the id the request claims and the design's.
  *
  * Nothing is filtered: anything outside the allowlist is refused, naming the
@@ -282,18 +284,17 @@ export async function checkImport(
   if (bytes.length < 12 || !isVpk(bytes)) return bad('The imported HUD is not a .vpk file.');
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (dv.getUint32(4, true) !== 1) return bad('The imported HUD must be a version 1 .vpk, as the editor writes.');
-  const treeSize = dv.getUint32(8, true);
 
   const split = new Set<string>();
   let files: Map<string, Uint8Array>;
-  try { files = readVPK(bytes, split); } catch { return bad('The imported HUD is not a .vpk file the site can read.'); }
+  try {
+    files = readVPK(bytes, split);
+  } catch (e) {
+    if (e instanceof Error && e.message === VPK_CASE_CLASH) return bad('The imported HUD holds two files whose names differ only in case.');
+    return bad('The imported HUD is not a .vpk file the site can read.');
+  }
   if (split.size > 0) return bad('The imported HUD is a split archive; it must be one file.');
-  // Every byte accounted for. Files that share a path once lower-cased, or
-  // carry preload bytes in the tree, also land here, since each makes the
-  // sum disagree with the length; encodeVPK writes neither.
-  let data = 0;
-  for (const f of files.values()) data += f.length;
-  if (bytes.length !== 12 + treeSize + data) return bad('The imported HUD has data after its files.');
+  if (canonicalVpkProblem(bytes, files)) return bad('The imported HUD is not laid out as the editor writes it.');
 
   const problem = hudSetProblem(files);
   if (problem) return bad(problem);

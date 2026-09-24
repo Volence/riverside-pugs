@@ -10,7 +10,11 @@
  * RangeError or a texture of garbage.
  */
 
+import { encodeVPK } from './vpkWrite.js';
+
 const NOT_VPK = 'That is not a .vpk file the site can read.';
+/** readVPK's refusal of two entries whose paths differ only in case. */
+export const VPK_CASE_CLASH = 'That .vpk holds two files whose names differ only in case.';
 
 /** Whether the bytes start with a VPK's signature (0x55AA1234, little-endian). */
 export const isVpk = (b: Uint8Array) => b.length >= 4 && b[0] === 0x34 && b[1] === 0x12 && b[2] === 0xaa && b[3] === 0x55;
@@ -26,6 +30,10 @@ const NOT_VTF = 'That crosshair is not a texture the site can read.';
  * whatever archive it names, since its offset means nothing. One whose data
  * is in a side archive cannot be read from this one file: it is left out,
  * and its path goes into `split`, so the caller can say why.
+ *
+ * The game ignores case, so two entries whose paths differ only in case
+ * name one file, and which of the two it reads is not ours to guess: such
+ * an archive is refused (VPK_CASE_CLASH), split entries included.
  */
 export function readVPK(bytes: Uint8Array, split?: Set<string>): Map<string, Uint8Array> {
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -59,6 +67,7 @@ export function readVPK(bytes: Uint8Array, split?: Set<string>): Map<string, Uin
   };
 
   const out = new Map<string, Uint8Array>();
+  const seen = new Set<string>();
   for (let ext = str(); ext !== ''; ext = str()) {
     for (let dir = str(); dir !== ''; dir = str()) {
       for (let name = str(); name !== ''; name = str()) {
@@ -74,6 +83,8 @@ export function readVPK(bytes: Uint8Array, split?: Set<string>): Map<string, Uin
         // A blank directory or extension is written as a single space.
         const file = (ext === ' ' ? name : `${name}.${ext}`);
         const path = (dir === ' ' ? file : `${dir}/${file}`).toLowerCase();
+        if (seen.has(path)) throw new Error(VPK_CASE_CLASH);
+        seen.add(path);
         if (archive !== 0x7FFF && length > 0) { split?.add(path); continue; }
         const data = new Uint8Array(preload + length);
         data.set(head, 0);
@@ -87,6 +98,22 @@ export function readVPK(bytes: Uint8Array, split?: Set<string>): Map<string, Uin
     }
   }
   return out;
+}
+
+/**
+ * Why `bytes` is not exactly what encodeVPK writes for `files` (readVPK's
+ * result for those bytes), or null when it is. Byte equality rules out
+ * everything a reader could disagree about: data after the files or between
+ * them that no entry reads, two entries over the same bytes, preload bytes,
+ * wrong CRCs, names in upper case, a v2 header, or a tree in another order.
+ */
+export function canonicalVpkProblem(bytes: Uint8Array, files: ReadonlyMap<string, Uint8Array>): string | null {
+  const bad = 'That .vpk is not laid out as the editor writes it.';
+  let canonical: Uint8Array;
+  try { canonical = encodeVPK([...files].map(([path, data]) => ({ path, data }))); } catch { return bad; }
+  if (canonical.length !== bytes.length) return bad;
+  for (let i = 0; i < bytes.length; i++) if (canonical[i] !== bytes[i]) return bad;
+  return null;
 }
 
 // VTF image formats this reader decodes, by their number in the header.

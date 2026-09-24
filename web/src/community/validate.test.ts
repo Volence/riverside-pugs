@@ -12,6 +12,7 @@ import { hudId } from '../../../src/hudFiles';
 import { readArt } from '../crosshair/model';
 import { safeName } from '../hud/design';
 import { encodeVPK } from '../vpk';
+import { handMade } from '../vpk/fixtures';
 
 describe('crosshair parity with readArt', () => {
   const CASES: unknown[] = [
@@ -87,7 +88,7 @@ describe('checkImport', () => {
     padded.set(vpk);
     const r = await checkImport(padded, id, id);
     expect(r).toMatchObject({ ok: false, status: 400 });
-    expect(r.ok ? '' : r.error).toMatch(/has data after its files/);
+    expect(r.ok ? '' : r.error).toMatch(/not laid out as the editor writes/);
   });
 
   it('refuses a file outside the allowlist, naming it', async () => {
@@ -132,6 +133,32 @@ describe('checkImport', () => {
     const r = await checkImport(vpk, id, id);
     expect(r).toMatchObject({ ok: false, status: 400 });
     expect(r.ok ? '' : r.error).toMatch(/split/i);
+  });
+
+  it('refuses a VPK that is not byte-identical to its canonical encoding', async () => {
+    // Two entries over the same bytes, and bytes after them nothing reads.
+    // 12 + tree + the files' lengths is the archive's length, so the old
+    // length rule passed it.
+    const vpk = handMade([
+      { path: 'scripts/hudlayout.res', archive: 0x7FFF, offset: 0, length: 6, preload: new Uint8Array(0), data: text('"a"{}hidden!') },
+      { path: 'resource/ui/hud/p.res', archive: 0x7FFF, offset: 0, length: 6, preload: new Uint8Array(0) },
+    ]);
+    const files = new Map([['scripts/hudlayout.res', text('"a"{}h')], ['resource/ui/hud/p.res', text('"a"{}h')]]);
+    const id = await hudId(files);
+    const r = await checkImport(vpk, id, id);
+    expect(r).toMatchObject({ ok: false, status: 400 });
+    expect(r.ok ? '' : r.error).toMatch(/not laid out as the editor writes/);
+  });
+
+  it('refuses a VPK with two entries that differ only by case', async () => {
+    const vpk = handMade([
+      { path: 'scripts/hudlayout.res', archive: 0x7FFF, offset: 0, length: 6, preload: new Uint8Array(0), data: text('"a"{}\n') },
+      { path: 'SCRIPTS/HUDLAYOUT.res', archive: 0x7FFF, offset: 6, length: 6, preload: new Uint8Array(0), data: text('"b"{}\n') },
+    ]);
+    const id = await hudId(new Map([['scripts/hudlayout.res', text('"b"{}\n')]]));
+    const r = await checkImport(vpk, id, id);
+    expect(r).toMatchObject({ ok: false, status: 400 });
+    expect(r.ok ? '' : r.error).toMatch(/differ only in case/);
   });
 
   it('refuses what is not a VPK at all', async () => {
