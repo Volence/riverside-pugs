@@ -419,7 +419,8 @@ export function panelColour(design: HudDesign, panelId: string): [number, number
   const n = kvFind(buildTrees(design)(PANEL_FILE[panelId]), ['Health']);
   const v = n ? kvGet(n, 'monochrome_color') : undefined;
   if (v === undefined) return undefined;
-  const [r, g, b] = parseColour(v);
+  // A scheme colour name (an imported file's "Orange") resolves as every other colour read does.
+  const [r, g, b] = rgbaOf(design, v);
   return [r, g, b];
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { childRects, drawPanel, setFont, PANEL_FILE, hiddenInState, previewOf, DEFAULT_PREVIEW, ITEM_ROW, itemRowStart, paintAdditive, paintLinearOver, healthRgb, shownKey, _setImageFactory, _setCanvasFactory, _resetAssetCache, _cacheSizes, splatterSource, tinted, type SurvivorState } from './render';
+import { childRects, drawPanel, setFont, PANEL_FILE, hiddenInState, previewOf, DEFAULT_PREVIEW, ITEM_ROW, itemRowStart, paintAdditive, paintLinearOver, healthRgb, shownKey, panelColour, _setImageFactory, _setCanvasFactory, _resetAssetCache, _cacheSizes, splatterSource, tinted, type SurvivorState } from './render';
 import { linearOverAlpha } from './additive';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { buildHud } from './build';
@@ -1191,6 +1191,14 @@ describe('your own health in every preview state', () => {
         expect(text(calls, number)!.fill, state).toBe('rgba(255,0,255,1)');   // the colour changes, the value does not
         expect(text(calls, ',')!.fill, state).toBe('rgba(255,0,255,1)');      // the cross is "," in the ToolBox face
       }
+    });
+
+    it('resolves a scheme colour name, as every other colour read does (review L2)', () => {
+      // An imported file can say "Orange" (clientscheme.res: 255 176 0 255); parseColour alone read it as white.
+      _setProbe('Q1', true);
+      const named = design({ children: { ownHealth: { Health: { keys: { monochrome_color: 'Orange' } } } } });
+      expect(panelColour(named, 'ownHealth')).toEqual([255, 176, 0]);
+      expect(panelColour(ownMono, 'ownHealth')).toEqual([255, 0, 255]);
     });
 
     it('draws a teammate card\'s bar and number in it, the down card too, and leaves the name alone', () => {
