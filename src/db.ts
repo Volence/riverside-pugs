@@ -1223,6 +1223,24 @@ export function openDb(path: string): DB {
     added_at TEXT NOT NULL
   )`);
   for (const sql of TRIAGE_BACKFILL_SQL) db.prepare(sql).run();
+
+  // Fleet view: the latest reading of each game server's managed files.
+  // docs/superpowers/specs/2026-09-24-fleet-view-design.md
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS fleet_readings (
+      server_id  INTEGER PRIMARY KEY,
+      read_at    TEXT,
+      attempt_at TEXT NOT NULL,
+      error      TEXT
+    );
+    CREATE TABLE IF NOT EXISTS fleet_files (
+      server_id INTEGER NOT NULL,
+      path      TEXT NOT NULL,
+      size      INTEGER NOT NULL,
+      sha256    TEXT,
+      PRIMARY KEY (server_id, path)
+    );
+  `);
   ensureColumn(db, 'match_rounds', 'variant', 'TEXT');
   ensureColumn(db, 'match_rounds', 'skill_detect', 'INTEGER');
   ensureColumn(db, 'matches', 'origin', "TEXT CHECK (origin IN ('queue','in_game'))");

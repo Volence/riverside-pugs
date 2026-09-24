@@ -15,7 +15,7 @@ describe('openDb', () => {
       'bans', 'campaign_play_rules',
       'custom_campaign_chapters', 'custom_campaign_installs', 'custom_campaigns',
       'discord_link_codes', 'discord_link_history', 'discord_messages', 'discord_sanctions', 'discord_voice', 'discord_voice_origin',
-      'endorsements',
+      'endorsements', 'fleet_files', 'fleet_readings',
       'input_bursts', 'input_caps', 'input_detections',
       'integrity_clips', 'integrity_flags', 'integrity_prior', 'integrity_prior_rounds', 'integrity_reviews', 'integrity_rounds',
       'integrity_unanalysable',

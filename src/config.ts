@@ -65,6 +65,8 @@ export interface Config {
    *  Dallas the plugin writes its own file into that one, and a pushed copy
    *  beside it must never race it. Created on first push. */
   replayLiveDir: string;
+  /** Where scripts/push-manifest.ts drops the fleet view's repo.json and base.json. */
+  fleetDir: string;
   discord: DiscordConfig | null;
   twitch: TwitchConfig | null;
 }
@@ -112,6 +114,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     dlc4MissionsDir: env.DLC4_MISSIONS_DIR ?? '',
     ticketAttachmentsDir: env.TICKET_ATTACHMENTS_DIR?.trim() || join(dirname(dbPath), 'ticket-attachments'),
     replayLiveDir: env.REPLAY_LIVE_DIR?.trim() || join(dirname(dbPath), 'replays-live'),
+    fleetDir: env.FLEET_DIR?.trim() || join(dirname(dbPath), 'fleet'),
     discord: loadDiscord(env),
     twitch: loadTwitch(env),
   };
