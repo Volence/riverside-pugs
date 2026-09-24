@@ -42,6 +42,7 @@ import {
 } from '../hud/selection';
 import { ContextMenu } from './hud/ContextMenu';
 import { ContextPanel } from './hud/ContextPanel';
+import { CrosshairBuilderPanel } from './hud/CrosshairControls';
 import { LayersPanel } from './hud/LayersPanel';
 import { Toolbar, type PresetChoice } from './hud/Toolbar';
 import { endsOn, typedInto, hexOf, alphaPct, withHex, withAlphaPct, type Edit, type EditMode } from './hud/controls';
@@ -403,6 +404,8 @@ export default function Hud() {
 
   const [side, setSide] = useState<Side>('survivor');
   const [sel, setSel] = useState<Selection>(NONE);
+  /** The crosshair alone is selected: its builder is open under the canvas. */
+  const xhairSelected = sel.kind === 'elements' && sel.ids.length === 1 && sel.ids[0] === 'xhair';
   // A new design wholesale (another preset, an import, a share link) keeps
   // an element selection and climbs cards or pieces to the Teammates.
   const dropPicks = () => setSel((s) => (s.kind === 'cards' || s.kind === 'children' ? TEAMMATES : s));
@@ -1168,6 +1171,13 @@ export default function Hud() {
               />
             )}
           </div>
+
+          {/* The crosshair builder is too wide for the side panel, so while the crosshair is selected it opens here, under the canvas. */}
+          {!locked && xhairSelected && (
+            <Guard key={imp?.id ?? design.preset} onError={designFailed}>
+              <CrosshairBuilderPanel design={design} edit={edit} end={endGesture} onClose={() => setSel(NONE)} />
+            </Guard>
+          )}
         </Panel>
 
         <Panel class="hud__side">

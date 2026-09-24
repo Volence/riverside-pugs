@@ -314,11 +314,8 @@ export function ElementControls(
         </label>
       )}
 
-      {!el.move && (
-        <p class="muted hud__note">The game places this one. It can be hidden but not moved.</p>
-      )}
-
-      {id === 'xhair' && <CrosshairControls design={design} edit={edit} end={end} full />}
+      {/* The crosshair is the one element the game places itself; its note is the first line of its own controls. */}
+      {id === 'xhair' && <CrosshairControls design={design} edit={edit} selected />}
 
       {id === 'siHealth' && (
         <p class="muted hud__note">Shown as the Hunter; the Tank uses the same file.</p>
@@ -364,7 +361,8 @@ export function ElementControls(
 
       {id === 'weaponSelection' && <WeaponControls design={design} edit={edit} end={end} />}
 
-      <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this element</button>
+      {/* The crosshair has no element settings of its own to reset: its choice and art are undone like any edit. */}
+      {id !== 'xhair' && <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this element</button>}
     </Field>
   );
 }
@@ -654,7 +652,7 @@ export function ContextPanel(
       return (
         <>
           <p class="muted">Select an element on the canvas or in Layers. A click picks the piece under the pointer; a drag moves the card or element under it.</p>
-          <CrosshairControls design={design} edit={edit} end={end} />
+          <CrosshairControls design={design} edit={edit} />
         </>
       );
     case 'elements':

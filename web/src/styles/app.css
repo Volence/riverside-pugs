@@ -287,9 +287,35 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .hud__fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 /* Remove an imported HUD: a picker and two buttons beside the Preset select. */
 .hud__removerow { display: inline-flex; align-items: center; gap: var(--sp-2); }
-/* The custom crosshair: its zoomed texture above the Crosshair page's own builder controls. */
-.hud__xhair { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-3); min-width: 0; }
-.hud__xhairpreview { width: 128px; height: 128px; flex: none; border-radius: 4px; image-rendering: pixelated; }
+/* The crosshair's zoomed texture: small in the side panel, large in the builder under the canvas. */
+.hud__xhairpreview { flex: none; border-radius: 4px; image-rendering: pixelated; }
+.hud__xhairpreview--small { display: block; width: 96px; height: 96px; margin-top: var(--sp-3); }
+.hud__xhairpreview--big { width: 176px; height: 176px; max-width: 100%; }
+.hud__xhairhide { margin-top: var(--sp-3); }
+/* The crosshair builder under the canvas, while the crosshair is selected:
+ * the large preview on the left, the controls on the right. The editor's
+ * page is at most 1320px wide, so the canvas column, and this panel, is
+ * about 680px at most: sized so that two groups fit beside the preview. */
+.hud__xhairbelow { margin-top: var(--sp-4); padding-top: var(--sp-4); border-top: 1px solid var(--border); }
+.hud__xhairhead { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.hud__xhairhead h3 { margin: 0; }
+.hud__xhairbody { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+/* Presets span the top as one row of buttons; Shape, Colour and Outline sit
+ * side by side below them, as many to a row as fit, one column on a phone.
+ * The upload takes the next free cell. */
+.hud__xhairgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14.5rem, 1fr)); gap: var(--sp-3); align-items: start; min-width: 0; }
+.hud__xhairgrid > .xh__group:first-child { grid-column: 1 / -1; }
+.hud__xhairgrid > .hud__file { margin-top: 0; }
+/* Tighter than the Crosshair page's rows, so two groups fit side by side. */
+.hud__xhairgrid .xh__row { grid-template-columns: 4.5rem minmax(5rem, 1fr) 2rem; }
+.hud__xhairgrid .xh__row input[type='range'], .hud__xhairgrid .xh__row select { min-width: 5rem; }
+.hud__xhairgrid .xh__group { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
+/* Smaller preset buttons, so all six make one row. */
+.hud__xhairgrid .xh__presets { gap: var(--sp-1); }
+.hud__xhairgrid .xh__presets { flex-wrap: wrap; }
+.hud__xhairgrid .xh__presets .btn { padding-inline: 6px; letter-spacing: 0; }
+/* A native file input is as wide as its own text unless told otherwise. */
+.hud__xhairgrid input[type='file'] { max-width: 100%; }
 .hud__reset { margin-top: var(--sp-4); }
 
 /* The six align buttons of a group, in one wrapping row. */
@@ -341,6 +367,13 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 
 @media (max-width: 900px) {
   .hud { grid-template-columns: 1fr; }
+}
+
+/* On a phone the builder's preview goes above its controls, which are one column. */
+@media (max-width: 640px) {
+  .hud__xhairbody { grid-template-columns: minmax(0, 1fr); }
+  .hud__xhairpreview--big { justify-self: center; }
+  .hud__xhairgrid { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ---------- queue bar ---------- */

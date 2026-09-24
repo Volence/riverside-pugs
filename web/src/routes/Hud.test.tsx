@@ -408,6 +408,58 @@ describe('Hud page', () => {
       expect(dot().value).toBe('8');
     });
 
+    // The builder is too wide for the side panel, so it opens under the canvas instead.
+    const below = (container: Element) => container.querySelector('.hud__stage .hud__xhairbelow');
+
+    it('opens the crosshair builder below the canvas only while the crosshair is selected', () => {
+      localStorage.setItem('xhair', JSON.stringify(SAVED));
+      stubCanvas();
+      const { container } = render(<Hud />);
+      expect(below(container)).toBeNull();
+      selectCrosshair();
+      const panel = below(container)!;
+      expect(panel).toBeTruthy();
+      expect(within(panel as HTMLElement).getByRole('heading', { name: 'Crosshair' })).toBeTruthy();
+      expect(within(panel as HTMLElement).getByRole('slider', { name: 'Dot size' })).toBeTruthy();
+      expect(within(panel as HTMLElement).getByRole('combobox', { name: 'Shape' })).toBeTruthy();
+      expect(within(panel as HTMLElement).getByLabelText('Upload a crosshair')).toBeTruthy();
+      // Selecting something else closes it.
+      fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+      expect(below(container)).toBeNull();
+    });
+
+    it("closes the builder below the canvas with its close button, which deselects", () => {
+      localStorage.setItem('xhair', JSON.stringify(SAVED));
+      stubCanvas();
+      const { container } = render(<Hud />);
+      selectCrosshair();
+      fireEvent.click(screen.getByRole('button', { name: 'Close the crosshair builder' }));
+      expect(below(container)).toBeNull();
+      expect(screen.getByText(/Select an element on the canvas or in Layers/)).toBeTruthy();
+    });
+
+    it('keeps the side panel to the choice, a small preview and the hide box while the crosshair is selected', () => {
+      localStorage.setItem('xhair', JSON.stringify(SAVED));
+      stubCanvas();
+      const { container } = render(<Hud />);
+      selectCrosshair();
+      const side = container.querySelector('.hud__side') as HTMLElement;
+      const s = within(side);
+      expect(s.getByRole('radio', { name: /^custom/i })).toBeTruthy();
+      expect(s.getByRole('radio', { name: /game default/i })).toBeTruthy();
+      expect(s.getByLabelText("Hide the game's crosshair")).toBeTruthy();
+      expect(s.getByLabelText('Your crosshair')).toBeTruthy();
+      expect(s.getByText('Edit the crosshair below the preview.')).toBeTruthy();
+      expect(s.getByText('The game always centres the crosshair.')).toBeTruthy();
+      expect(s.queryByText(/The game places this one/)).toBeNull();
+      // One group box, with one legend: no nested Crosshair group inside Custom crosshair.
+      expect([...side.querySelectorAll('legend')].map((l) => l.textContent)).toEqual(['Custom crosshair']);
+      expect(s.queryByRole('slider')).toBeNull();
+      expect(s.queryByRole('combobox', { name: 'Shape' })).toBeNull();
+      expect(s.queryByLabelText('Upload a crosshair')).toBeNull();
+      expect(s.queryByRole('button', { name: /reset this element/i })).toBeNull();
+    });
+
     it('takes an uploaded crosshair .vpk as the crosshair, and the download carries it', async () => {
       stubCanvas();
       stubImages();
