@@ -10,7 +10,7 @@ import {
   type WeaponNumKey, type WeaponsOverride, type WeaponBoxStyle,
 } from '../../hud/design';
 import { weaponKey } from '../../hud/weapons';
-import { fontFace, shownKey, healthRgb } from '../../hud/render';
+import { fontFace, shownKey, healthRgb, panelFile, DEFAULT_PREVIEW, type PreviewState } from '../../hud/render';
 import { elementById, type HudElement } from '../../hud/elements';
 import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam } from '../../hud/build';
 import { baseOf } from '../../hud/base';
@@ -272,8 +272,19 @@ function WeaponControls({ design, edit, end }: { design: HudDesign; edit: Edit; 
  * design has no override yet, so a freshly reset element shows real numbers
  * rather than blanks.
  */
+/** The class names the notes use. */
+const SI_NAME: Record<PreviewState['siClass'], string> = { hunter: 'Hunter', smoker: 'Smoker', boomer: 'Boomer', tank: 'Tank' };
+
+/**
+ * Your infected health's note, for the class shown. The hide is game code:
+ * the panel is gone while you pin a survivor or throw a rock
+ * (/home/volence/l4d/hud/probe-phase2-infected/b9/shots/b9/b9-d.png, b9-h, b9-m).
+ */
+export const siHealthNote = (c: PreviewState['siClass']): string =>
+  `Shown as the ${SI_NAME[c]}. Edits apply to every special infected; the Boomer's smaller bar moves the same and sizes in proportion. The game hides this panel while you pin a survivor or throw a rock.`;
+
 export function ElementControls(
-  { design, edit, end, id }: { design: HudDesign; edit: Edit; end: () => void; id: string },
+  { design, edit, end, id, preview = DEFAULT_PREVIEW }: { design: HudDesign; edit: Edit; end: () => void; id: string; preview?: PreviewState },
 ) {
   const el = elementById(id);
   if (!el) return null;
@@ -291,8 +302,12 @@ export function ElementControls(
   // placeElement, then the clamp. The other axis keeps what it stores (read
   // from where it is drawn only when nothing is stored), so typing one box
   // never shifts the other by the half unit a right-anchored token rounds to.
-  // Anything else shows and patches what it stores.
-  const team = !!el.team;
+  // Anything else shows and patches what it stores, except a fitted panel
+  // framed by its own hudlayout.res block (your infected health): fit moves
+  // that container by the fit offset, so its boxes show where it is drawn
+  // and place through placeElement too, or ticking Fit would make the
+  // stored X jump by the offset (250 units on stock).
+  const team = !!el.team || (o.fit === true && panelChildren(id)?.frame === 'hudlayout');
   const setPos = (key: 'x' | 'y', e: Event) => {
     if (!team) { patchNum(patch, e, key, (n) => ({ [key]: n })); return; }
     const n = parseFloat((e.target as HTMLInputElement).value);
@@ -319,9 +334,7 @@ export function ElementControls(
       {/* The crosshair is the one element the game places itself; its note is the first line of its own controls. */}
       {id === 'xhair' && <CrosshairControls design={design} edit={edit} selected />}
 
-      {id === 'siHealth' && (
-        <p class="muted hud__note">Shown as the Hunter; the Tank uses the same file.</p>
-      )}
+      {id === 'siHealth' && <p class="muted hud__note">{siHealthNote(preview.siClass)}</p>}
 
       {el.move && !free && (
         <div class="hud__row2">
@@ -362,7 +375,8 @@ export function ElementControls(
       <TeamControls design={design} edit={edit} end={end} el={el} o={o} patch={patch} />
 
       {/* Fit re-places LocalPlayer to what it shows; it waits for probe Q2 (does LocalPlayer clip and paint nothing?), as validateDesign does. */}
-      {id === 'ownHealth' && probe('Q2') && (
+      {/* Your infected health's fit rests on probe Q11 (the container clips), which passed; it is opt-in (build.ts fitSi). */}
+      {((id === 'ownHealth' && probe('Q2')) || id === 'siHealth') && (
         <label class="hud__check">
           <input
             type="checkbox" checked={o.fit === true}
@@ -393,15 +407,17 @@ const repeatsCards = (panel: string): boolean => panelChildren(panel)?.repeat ==
  * size and, where the game honours it, a colour.
  */
 export function ChildControls(
-  { design, edit, end, name, onBack, panel = 'teamColumn' }: {
-    design: HudDesign; edit: Edit; end: () => void; name: string; onBack: () => void; panel?: string;
+  { design, edit, end, name, onBack, panel = 'teamColumn', preview }: {
+    design: HudDesign; edit: Edit; end: () => void; name: string; onBack: () => void; panel?: string; preview?: PreviewState;
   },
 ) {
   const def = childDef(panel, name);
-  const info = panelChild(design, panel, name);
+  // The numbers of the class shown (your infected health on the Boomer: the Boomer file's), stored back in the panel file's frame.
+  const file = panelFile(panel, preview);
+  const info = panelChild(design, panel, name, file);
   if (!def || !info) return null;
   const o = design.children[panel]?.[name] ?? {};
-  const patch = (p: Partial<ChildOverride>, mode: EditMode = 'step') => edit((d) => patchChild(d, name, p, panel), mode);
+  const patch = (p: Partial<ChildOverride>, mode: EditMode = 'step') => edit((d) => patchChild(d, name, p, panel, file), mode);
   // The same guard and clamp as patchNum, through the child table.
   const num = (e: Event, key: ChildRangeKey, to: (n: number) => Partial<ChildOverride>) => {
     const n = parseFloat((e.target as HTMLInputElement).value);
@@ -590,17 +606,20 @@ function AlignRow({ onAlign }: { onAlign: (how: Align) => void }) {
  * edit is the one card file, so every card follows.
  */
 export function PiecesControls(
-  { design, edit, end, names, panel = 'teamColumn' }: { design: HudDesign; edit: Edit; end: () => void; names: string[]; panel?: string },
+  { design, edit, end, names, panel = 'teamColumn', preview }: {
+    design: HudDesign; edit: Edit; end: () => void; names: string[]; panel?: string; preview?: PreviewState;
+  },
 ) {
-  const box = unionBox(Object.values(startsOf(design, names, panel)));
+  const file = panelFile(panel, preview);
+  const box = unionBox(Object.values(startsOf(design, names, panel, file)));
   if (!box) return null;
   const allVisible = names.every((n) => panelChild(design, panel, n)?.visible);
   const place = (key: 'x' | 'y', e: Event) => {
     const n = parseFloat((e.target as HTMLInputElement).value);
     if (!Number.isFinite(n)) return;
     edit((d) => {
-      const b = unionBox(Object.values(startsOf(d, names, panel)));
-      return b ? placeChildren(d, names, key === 'x' ? n : b.x, key === 'y' ? n : b.y, panel) : d;
+      const b = unionBox(Object.values(startsOf(d, names, panel, file)));
+      return b ? placeChildren(d, names, key === 'x' ? n : b.x, key === 'y' ? n : b.y, panel, file) : d;
     }, 'gesture');
   };
   const where = panel === 'teamColumn' ? 'the teammate card' : (elementById(panel)?.label ?? panel);
@@ -738,8 +757,10 @@ export function CardsControls(
 
 /** The right-hand panel: only what the selection can do. */
 export function ContextPanel(
-  { design, sel, edit, end, onSelect, onWentFree }: {
+  { design, sel, edit, end, onSelect, onWentFree, preview = DEFAULT_PREVIEW }: {
     design: HudDesign; sel: Selection; edit: Edit; end: () => void; onSelect: (s: Selection) => void; onWentFree: () => void;
+    /** What the canvas shows: the notes name the class, and a piece's numbers are the class file's. */
+    preview?: PreviewState;
   },
 ) {
   switch (sel.kind) {
@@ -752,7 +773,7 @@ export function ContextPanel(
       );
     case 'elements':
       return sel.ids.length === 1
-        ? <ElementControls design={design} edit={edit} end={end} id={sel.ids[0]} />
+        ? <ElementControls design={design} edit={edit} end={end} id={sel.ids[0]} preview={preview} />
         : <ElementsControls design={design} edit={edit} ids={sel.ids} />;
     case 'cards':
       return sel.cards.length === 1
@@ -762,10 +783,10 @@ export function ContextPanel(
       return sel.names.length === 1
         ? (
           <ChildControls
-            design={design} edit={edit} end={end} name={sel.names[0]} panel={panelOf(sel)}
+            design={design} edit={edit} end={end} name={sel.names[0]} panel={panelOf(sel)} preview={preview}
             onBack={() => onSelect(panelOf(sel) === 'teamColumn' ? TEAMMATES : { kind: 'elements', ids: [panelOf(sel)] })}
           />
         )
-        : <PiecesControls design={design} edit={edit} end={end} names={sel.names} panel={panelOf(sel)} />;
+        : <PiecesControls design={design} edit={edit} end={end} names={sel.names} panel={panelOf(sel)} preview={preview} />;
   }
 }

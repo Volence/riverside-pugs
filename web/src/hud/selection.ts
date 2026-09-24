@@ -25,7 +25,7 @@ import { baseTeam, isBar, type Box, type HudDesign } from './design';
 import { baseOf, baseTree } from './base';
 import { elementById } from './elements';
 import { panelChild, panelFrame, elementRect, isFreeTeam, teamCardRects, type CardFrame } from './build';
-import { childRects, hiddenInState, previewOf, DOWN_MOVES_BAR, type ChildRect, type PreviewState, type SurvivorState } from './render';
+import { childRects, hiddenInState, previewOf, panelFile, DOWN_MOVES_BAR, type ChildRect, type PreviewState, type SurvivorState } from './render';
 import { childAt, elementTargets, hitTest, inside, panelBoxes, TEAM_CARDS, visibleElements, type Side } from './mock';
 import { childDef, panelChildren } from './children';
 import { kvFind, kvGet } from './kv';
@@ -363,9 +363,9 @@ export function elementFrame(design: HudDesign, id: string): Box {
  * already-scaled numbers (panelChild's frame is unscaled, the file's own
  * stored one).
  */
-function pieceFrame(design: HudDesign, r: ChildRect, panel: string): Box {
+function pieceFrame(design: HudDesign, r: ChildRect, panel: string, state?: State): Box {
   if (r.visible) return plain(r);
-  const c = panelChild(design, panel, r.name);
+  const c = panelChild(design, panel, r.name, panelFile(panel, state));
   if (!c) return plain(r);
   const k = panelFrame(design, panel).k;
   // scalePass (build.ts's scaleToken) rounds every positional value it
@@ -392,7 +392,7 @@ export function selectionFrames(design: HudDesign, sel: Selection, state?: State
     case 'children': {
       const panel = panelOf(sel);
       return panelBoxes(design, panel).flatMap((c) => childRects(design, panel, { x: c.x, y: c.y }, 1, state)
-        .filter((r) => sel.names.includes(r.name)).map((r) => pieceFrame(design, r, panel)));
+        .filter((r) => sel.names.includes(r.name)).map((r) => pieceFrame(design, r, panel, state)));
     }
   }
 }
@@ -404,7 +404,7 @@ export function selectionBox(design: HudDesign, sel: Selection, state?: State): 
     // Every teammate card, the fourth included (Free lists it), not only the three drawn.
     const c = panel === 'teamColumn' ? teamCardRects(design, design.aspect)[sel.card] : panelBoxes(design, panel)[sel.card];
     if (!c) return null;
-    return unionBox(childRects(design, panel, { x: c.x, y: c.y }, 1, state).filter((r) => sel.names.includes(r.name)).map((r) => pieceFrame(design, r, panel)));
+    return unionBox(childRects(design, panel, { x: c.x, y: c.y }, 1, state).filter((r) => sel.names.includes(r.name)).map((r) => pieceFrame(design, r, panel, state)));
   }
   return unionBox(selectionFrames(design, sel, state));
 }
@@ -493,9 +493,10 @@ export function pieceTargets(design: HudDesign, state: State, moving: string[], 
   const p = panelClamp(design, panel);
   const out: Box[] = [{ x: 0, y: 0, w: p.w, h: p.h }];
   const pic = previewOf(state).survivor === 'down' ? panelChild(design, panel, 'Incapacitated') : null;
+  const file = panelFile(panel, state);
   for (const name of drawnPieces(design, state, panel)) {
     if (moving.includes(name)) continue;
-    const c = panelChild(design, panel, name);
+    const c = panelChild(design, panel, name, file);
     if (c) out.push({ x: pic && isBar(name) && DOWN_MOVES_BAR.has(panel) ? pic.x : c.x, y: c.y, w: c.w, h: c.h });
   }
   return out;

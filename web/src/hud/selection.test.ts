@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_DESIGN, type HudDesign, type Box } from './design';
-import { teamCardRects, cardFrame, panelChild } from './build';
-import { childRects, type CardState } from './render';
+import { teamCardRects, cardFrame, panelChild, elementRect } from './build';
+import { childRects, DEFAULT_PREVIEW, type CardState, type PreviewState } from './render';
 import { withTeamDir, patchChild } from './edit';
 import { panelBoxes } from './mock';
 import {
@@ -475,5 +475,25 @@ describe("a card's health bar is framed, hit and snapped to where the game draws
     const pic = panelChild(D, 'teamColumn', 'Incapacitated')!;
     expect(pic.x).not.toBe(39);
     expect(pieceTargets(D, 'down', ['Head'])).toContainEqual({ x: pic.x, y: 52, w: 96, h: 7 });
+  });
+});
+
+describe('the pieces of your infected health on the canvas', () => {
+  const plain: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: {} };
+  const boomer: PreviewState = { ...DEFAULT_PREVIEW, siClass: 'boomer' };
+  it('are hit where the class shown draws them', () => {
+    const r = elementRect(plain, 'siHealth', plain.aspect);
+    // The Boomer's bar is at 322..386; the Hunter's 252..384: x 385 is on the Boomer's alone.
+    const at = { x: r.x + 385, y: r.y + 75 };
+    expect(hitAt(plain, 'infected', boomer, at.x, at.y)).toMatchObject({ element: 'siHealth', child: 'Health' });
+    expect(hitAt(plain, 'infected', DEFAULT_PREVIEW, r.x + 300, at.y)).toMatchObject({ element: 'siHealth', child: 'Health' });
+    expect(hitAt(plain, 'infected', boomer, r.x + 300, at.y).child).not.toBe('Health');
+  });
+  it('frame a piece where the class shown draws it, and snap to the others there', () => {
+    const r = elementRect(plain, 'siHealth', plain.aspect);
+    const sel = { kind: 'children' as const, names: ['Health'], card: 0, panel: 'siHealth' };
+    expect(selectionFrames(plain, sel, boomer)).toEqual([{ x: r.x + 322, y: r.y + 69, w: 64, h: 13 }]);
+    const t = pieceTargets(plain, boomer, ['HealthNumber'], 'siHealth');
+    expect(t).toContainEqual({ x: 322, y: 69, w: 64, h: 13 });
   });
 });

@@ -113,15 +113,18 @@ export function elementTargets(design: HudDesign, id: string, r: Box = rectFor(d
  * The screen boxes a panel's file is drawn in, HUD units: the three drawn
  * teammate cards, or a single panel's frame block (its xpos, ypos, wide and
  * tall inside the element, from the generated tree, so already scaled),
- * which is the rect the painter clips that panel's children to. A panel the
- * registry does not have gives none.
+ * which is the rect the painter clips that panel's children to, or the
+ * element's own rect for a panel framed by its hudlayout.res block. A panel
+ * the registry does not have gives none.
  */
 export function panelBoxes(design: HudDesign, panelId: string): Box[] {
   if (panelId === 'teamColumn') return teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).map(({ x, y, w, h }) => ({ x, y, w, h }));
   const panel = panelChildren(panelId);
-  if (!panel || panel.repeat !== 'single' || !panel.frame || panel.frame === 'hudlayout') return [];
-  const p = parentPanel(design, panel.frame.file, panel.frame.block, 1);
+  if (!panel || panel.repeat !== 'single' || !panel.frame) return [];
   const r = rectFor(design, panelId);
+  // Framed by its own hudlayout.res block (your infected health): the element's rect is the panel, fitted or not.
+  if (panel.frame === 'hudlayout') return [{ x: r.x, y: r.y, w: r.w, h: r.h }];
+  const p = parentPanel(design, panel.frame.file, panel.frame.block, 1);
   return [{ x: r.x + p.x, y: r.y + p.y, w: p.w, h: p.h }];
 }
 

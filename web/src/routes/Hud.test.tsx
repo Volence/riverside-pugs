@@ -3,7 +3,7 @@ import { cleanup, render, screen, fireEvent, waitFor, within, act } from '@testi
 import { _setImageFactory, _resetAssetCache, childRects } from '../hud/render';
 import { panelBoxes } from '../hud/mock';
 import { _setProbe } from '../hud/probes';
-import { panelChild } from '../hud/build';
+import { panelChild, elementRect } from '../hud/build';
 import { toUnits } from './Hud';
 import Hud from './Hud';
 import { readFileSync } from 'node:fs';
@@ -234,11 +234,15 @@ describe('Hud page', () => {
     expect(screen.getByRole('button', { name: /download/i })).toBeTruthy();
   });
 
-  it('says the infected health card is shown as the Hunter and that the Tank uses the same file', () => {
+  it('says which class your infected health is shown as, and that edits reach every special infected', () => {
+    // The game hides the panel while you pin or throw: /home/volence/l4d/hud/probe-phase2-infected/b9/shots/b9/b9-d.png, b9-h, b9-m.
     render(<Hud />);
     fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
     fireEvent.click(screen.getByRole('button', { name: 'Your infected health' }));
-    expect(screen.getByText('Shown as the Hunter; the Tank uses the same file.')).toBeTruthy();
+    const note = (c: string) => `Shown as the ${c}. Edits apply to every special infected; the Boomer's smaller bar moves the same and sizes in proportion. The game hides this panel while you pin a survivor or throw a rock.`;
+    expect(screen.getByText(note('Hunter'))).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Boomer' }));
+    expect(screen.getByText(note('Boomer'))).toBeTruthy();
   });
 
   it('reveals the advanced-only style rows and switches the download button to a zip', () => {
@@ -2137,7 +2141,8 @@ describe('Your own health on the page', () => {
     expect(crouched().getAttribute('aria-pressed')).toBe('true');
     expect(images.some((s) => /crouch_survivor/.test(s))).toBe(true);
     fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
-    expect(screen.queryByRole('button', { name: 'Crouched' })).toBeNull();
+    // The infected side has a crouch icon of its own (your infected health's), so the toggle stays.
+    expect(crouched().getAttribute('aria-pressed')).toBe('true');
   });
 
   it('lists every piece of your own health in Layers, with the state notes', () => {
@@ -2320,5 +2325,66 @@ describe('Your own health on the page', () => {
     expect(own().getByRole('button', { name: 'Scratches, bottom' }).closest('.hud__layer')!.classList.contains('hud__layer--hidden')).toBe(true);
     fireEvent.click(own().getByRole('button', { name: 'Scratches, top' }));
     expect((screen.getByLabelText('Visible') as HTMLInputElement).checked).toBe(false);
+  });
+});
+
+describe('Your infected health on the page', () => {
+  const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
+  const si = () => layer('Your infected health');
+  const toInfected = () => fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+
+  it('offers the class, Alive / Ghost / Dead and Crouched on the infected side only', () => {
+    render(<Hud />);
+    const infectedOnly = ['Hunter', 'Smoker', 'Boomer', 'Tank', 'Alive', 'Ghost'];
+    for (const name of infectedOnly) expect(screen.queryByRole('tab', { name }), name).toBeNull();
+    toInfected();
+    for (const name of [...infectedOnly, 'Dead']) expect(screen.getByRole('tab', { name }), name).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Hunter' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: 'Alive' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Crouched' })).toBeTruthy();
+    for (const name of ['Healthy', 'Hurt']) expect(screen.queryByRole('tab', { name }), name).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'Tank' }));
+    expect(screen.getByRole('tab', { name: 'Tank' }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('lists its pieces in Layers', () => {
+    render(<Hud />);
+    toInfected();
+    for (const label of ['Frame', 'Health bar', 'Health number', 'Crouch icon']) expect(si().getByRole('button', { name: label }), label).toBeTruthy();
+    expect(si().getByText('shown when crouched')).toBeTruthy();
+  });
+
+  it('offers Fit, and a fitted panel keeps its X where it is drawn', async () => {
+    render(<Hud />);
+    toInfected();
+    fireEvent.click(screen.getByRole('button', { name: 'Your infected health' }));
+    const x = () => (screen.getByLabelText('X') as HTMLInputElement).value;
+    const fit = () => screen.getByLabelText('Fit the panel to its contents') as HTMLInputElement;
+    expect(fit().checked).toBe(false);
+    fireEvent.click(fit());
+    await waitFor(() => expect(saved().elements?.siHealth?.fit).toBe(true));
+    const d = saved();
+    const drawn = elementRect(validateDesign(d), 'siHealth', d.aspect ?? '16:9');
+    expect(Math.round(drawn.x)).toBe(Number(x()));
+    fireEvent.input(screen.getByLabelText('X'), { target: { value: String(Number(x()) - 20) } });
+    await waitFor(() => expect(Math.round(elementRect(validateDesign(saved()), 'siHealth', '16:9').x)).toBe(Math.round(drawn.x) - 20));
+  });
+
+  it('drags the Boomer\'s bar on the canvas and stores the move in the Hunter\'s frame', async () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    toInfected();
+    fireEvent.click(screen.getByRole('tab', { name: 'Boomer' }));
+    const r = elementRect(validateDesign({ v: 1 }), 'siHealth', '16:9');
+    // The Boomer's bar is 322..386 by 69..82: a quarter in, clear of the handles.
+    const at: [number, number] = [r.x + 338, r.y + 75.5];
+    clickAt(canvas, ...at);
+    expect(screen.getByText('Health bar', { selector: 'legend' })).toBeTruthy();
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('322');
+    dragFrom(canvas, at, [at[0] + 10, at[1]]);
+    await waitFor(() => expect(saved().children?.siHealth?.Health).toMatchObject({ x: 262 }));
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('332');
+    fireEvent.input(screen.getByLabelText('W'), { target: { value: '74' } });
+    await waitFor(() => expect(saved().children?.siHealth?.Health?.w).toBe(132 + Math.round(10 * 132 / 64)));
   });
 });

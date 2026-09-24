@@ -348,6 +348,24 @@ function linkedBlocks(work: Work, design: HudDesign, panel: PanelChildren, name:
   return out;
 }
 
+/**
+ * How one of a panel's linked files takes a piece: the rule and the piece's
+ * rect in the panel's base file and in the linked base file, which edit.ts
+ * maps a value seen in that file back through (unlinkedValue). Null for the
+ * panel's own file, a file it does not link, or a piece either base lacks.
+ */
+export function panelLink(design: HudDesign, panelId: string, name: string, file: string): { rule: LinkRule; from: LinkRect; to: LinkRect } | null {
+  const panel = panelChildren(panelId);
+  const link = panel?.linked?.find((l) => l.file === file);
+  if (!panel || !link) return null;
+  const rectOf = (f: string): LinkRect | null => {
+    const n = kvFind(baseTree(baseOf(design), f), [name]);
+    return n ? { x: num(pcGet(n, 'xpos')), y: num(pcGet(n, 'ypos')), w: num(pcGet(n, 'wide')), h: num(pcGet(n, 'tall')) } : null;
+  };
+  const from = rectOf(panel.file), to = rectOf(file);
+  return from && to ? { rule: link.rule, from, to } : null;
+}
+
 /** A child's stored edit as a linked file takes it: places and sizes through linkedValue, the rest as stored. */
 function linkedOverride(o: ChildOverride, link: LinkedBlock): ChildOverride {
   const out: ChildOverride = { ...o };

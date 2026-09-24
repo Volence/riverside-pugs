@@ -881,3 +881,30 @@ describe('placing a fitted infected health', () => {
     expect(after.y).toBe(before.y);
   });
 });
+
+describe('editing your infected health on the Boomer preview (plan decision 3)', () => {
+  const BOOMER = 'resource/ui/hud/boomerhealth.res';
+  const plain: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: {} };
+  it('stores a drag of the Boomer\'s bar in the Hunter\'s frame: moved the same', () => {
+    const starts = startsOf(plain, ['Health'], 'siHealth', BOOMER);
+    expect(starts.Health).toMatchObject({ x: 322, w: 64 });
+    const d = moveChildren(plain, ['Health'], starts, 10, 0, 'siHealth', BOOMER);
+    expect(d.children.siHealth?.Health).toMatchObject({ x: 262, y: 69 });
+    expect(panelChild(d, 'siHealth', 'Health', BOOMER)).toMatchObject({ x: 332, y: 69 });
+  });
+  it('stores a widening of the Boomer\'s bar in proportion to the Hunter\'s', () => {
+    const start = startsOf(plain, ['Health'], 'siHealth', BOOMER).Health;
+    const d = resizeChild(plain, 'Health', start, 'e', 10, 0, false, 'siHealth', BOOMER);
+    expect(d.children.siHealth?.Health?.w).toBe(132 + Math.round(10 * 132 / 64));
+    expect(panelChild(d, 'siHealth', 'Health', BOOMER)!.w).toBe(74);
+  });
+  it('takes an X box typed on the Boomer as the Boomer\'s own x', () => {
+    const d = patchChild(plain, 'Health', { x: 300 }, 'siHealth', BOOMER);
+    expect(d.children.siHealth?.Health?.x).toBe(230);
+    expect(panelChild(d, 'siHealth', 'Health', BOOMER)!.x).toBe(300);
+  });
+  it('leaves an edit on the Hunter (or with no file) as it is', () => {
+    expect(patchChild(plain, 'Health', { x: 300, w: 90 }, 'siHealth', 'resource/ui/hud/hunterhealth.res').children.siHealth?.Health).toEqual({ x: 300, w: 90 });
+    expect(patchChild(plain, 'Health', { x: 300, w: 90 }, 'siHealth').children.siHealth?.Health).toEqual({ x: 300, w: 90 });
+  });
+});

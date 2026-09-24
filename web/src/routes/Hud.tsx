@@ -18,7 +18,7 @@ import {
   type BuildAssets, type BuildReport, type CardChild,
 } from '../hud/build';
 import { drawHud, visibleElements, panelBoxes, type Side } from '../hud/mock';
-import { DEFAULT_PREVIEW, type PreviewState } from '../hud/render';
+import { DEFAULT_PREVIEW, panelFile, type PreviewState } from '../hud/render';
 import type { WeaponHeld } from '../hud/weapons';
 import { SLOTS, type StyleSlot } from '../hud/slots';
 import { splatterDef, SPLATTERS, type SplatterDef, type SplatterId } from '../hud/splatter';
@@ -714,7 +714,7 @@ export default function Hud() {
     }
     if (sel.kind === 'children') {
       const panel = panelOf(sel);
-      const starts = startsOf(d, sel.names, panel);
+      const starts = startsOf(d, sel.names, panel, panelFile(panel, preview));
       if (sel.names.length === 1) {
         const start = starts[sel.names[0]];
         return start ? { kind: 'resizePiece', name: sel.names[0], card: sel.card, panel, handle, start } : null;
@@ -748,7 +748,7 @@ export default function Hud() {
           return [id, { x, y, w, h }];
         })) };
       case 'cards': return { kind: 'cards', cards: s.cards, starts: cardStarts(d, s.cards) };
-      case 'children': return { kind: 'children', names: s.names, card: s.card, panel: panelOf(s), starts: startsOf(d, s.names, panelOf(s)) };
+      case 'children': return { kind: 'children', names: s.names, card: s.card, panel: panelOf(s), starts: startsOf(d, s.names, panelOf(s), panelFile(panelOf(s), preview)) };
       default: return null;
     }
   };
@@ -798,13 +798,13 @@ export default function Hud() {
       const s = snaps ? snapEdges(resizeBox(d.start, d.handle, dx, dy, false, 1), d.handle, pieceTargets(cur, preview, [d.name], d.panel)) : NO_SNAP;
       const card = pieceBox(cur, d.panel, d.card);
       setGuides(card ? s.guides.map((g) => pieceGuideToScreen(g, card, f)) : []);
-      edit((x) => resizeChild(x, d.name, d.start, d.handle, dx + s.dx, dy + s.dy, shift, d.panel), 'gesture');
+      edit((x) => resizeChild(x, d.name, d.start, d.handle, dx + s.dx, dy + s.dy, shift, d.panel, panelFile(d.panel, preview)), 'gesture');
       return;
     }
     if (d.kind === 'scalePieces') {
       const f = panelFrame(cur, d.panel);
       const k = cornerFactor(d.box, d.handle, dux / f.k, duy / f.k);
-      edit((x) => scaleChildren(x, d.names, d.starts, anchorOf(d.box, d.handle), k, d.panel), 'gesture');
+      edit((x) => scaleChildren(x, d.names, d.starts, anchorOf(d.box, d.handle), k, d.panel, panelFile(d.panel, preview)), 'gesture');
       return;
     }
     if (d.kind === 'children') {
@@ -818,7 +818,7 @@ export default function Hud() {
       const s = alt ? NO_SNAP : snapMove({ ...start, x: start.x + dx, y: start.y + dy }, pieceTargets(cur, preview, d.names, d.panel));
       const card = pieceBox(cur, d.panel, d.card);
       setGuides(card ? s.guides.map((g) => pieceGuideToScreen(g, card, f)) : []);
-      edit((x) => moveChildren(x, d.names, d.starts, dx + s.dx, dy + s.dy, d.panel), 'gesture');
+      edit((x) => moveChildren(x, d.names, d.starts, dx + s.dx, dy + s.dy, d.panel, panelFile(d.panel, preview)), 'gesture');
       return;
     }
     const moving: Selection = d.kind === 'cards' ? cardsOf(d.cards) : { kind: 'elements', ids: d.ids };
@@ -1280,7 +1280,7 @@ export default function Hud() {
         <Panel class="hud__side">
           {!locked && (
             <Guard key={imp?.id ?? design.preset} onError={designFailed}>
-              <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} onWentFree={() => setStatus(WENT_FREE)} />
+              <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} onWentFree={() => setStatus(WENT_FREE)} preview={preview} />
             </Guard>
           )}
         </Panel>

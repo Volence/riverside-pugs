@@ -20,6 +20,16 @@ const SURVIVOR_STATES: { key: SurvivorState; label: string }[] = [
   { key: 'healthy', label: 'Healthy' }, { key: 'hurt', label: 'Hurt' }, { key: 'down', label: 'Down' }, { key: 'dead', label: 'Dead' },
 ];
 
+/** The special infected the preview is: your infected health draws that class's file (the Tank reads the Hunter's). */
+const SI_CLASSES: { key: PreviewState['siClass']; label: string }[] = [
+  { key: 'hunter', label: 'Hunter' }, { key: 'smoker', label: 'Smoker' }, { key: 'boomer', label: 'Boomer' }, { key: 'tank', label: 'Tank' },
+];
+
+/** Whether the preview infected player is spawned, a ghost, or dead: game code shows different pieces in each. */
+const INFECTED_STATES: { key: PreviewState['infected']; label: string }[] = [
+  { key: 'alive', label: 'Alive' }, { key: 'ghost', label: 'Ghost' }, { key: 'dead', label: 'Dead' },
+];
+
 /** What the preview survivor holds: the game moves the weapon numbers when this changes. */
 const HELD: { key: WeaponHeld; label: string }[] = [
   { key: 'primary', label: 'Gun' }, { key: 'pistol', label: 'Pistol' }, { key: 'item', label: 'Item' },
@@ -87,15 +97,25 @@ export function Toolbar(p: ToolbarProps) {
           onSelect={(k) => p.onPreview({ ...p.preview, survivor: k as SurvivorState })}
         />
       )}
-      {/* Crouching is shown alongside any survivor state: the game draws the crouch icon whatever the health. */}
-      {p.side === 'survivor' && (
-        <button
-          type="button" class="btn btn--ghost btn--sm" aria-pressed={p.preview.crouched}
-          onClick={() => p.onPreview({ ...p.preview, crouched: !p.preview.crouched })}
-        >
-          Crouched
-        </button>
+      {p.side === 'infected' && (
+        <Tabs
+          label="Special infected" tabs={SI_CLASSES} active={p.preview.siClass}
+          onSelect={(k) => p.onPreview({ ...p.preview, siClass: k as PreviewState['siClass'] })}
+        />
       )}
+      {p.side === 'infected' && (
+        <Tabs
+          label="Infected state" tabs={INFECTED_STATES} active={p.preview.infected}
+          onSelect={(k) => p.onPreview({ ...p.preview, infected: k as PreviewState['infected'] })}
+        />
+      )}
+      {/* Crouching is shown alongside any state: the game draws the crouch icon whatever the health, on both sides. */}
+      <button
+        type="button" class="btn btn--ghost btn--sm" aria-pressed={p.preview.crouched}
+        onClick={() => p.onPreview({ ...p.preview, crouched: !p.preview.crouched })}
+      >
+        Crouched
+      </button>
       {p.side === 'survivor' && (
         <Tabs label="Holding" tabs={HELD} active={p.held} onSelect={(k) => p.onHeld(k as WeaponHeld)} />
       )}
