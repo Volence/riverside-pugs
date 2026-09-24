@@ -192,3 +192,59 @@ export function revealReaction(frames: Frame[], slot: number, los: LosView): Rev
   }
   return out;
 }
+
+export interface ClassSums { scoreable: number; fidSum: number; occ: OccResult | null; reveals: number; revealOn: number }
+
+/**
+ * One player-round of D, E and F, as SUMS, like everything else in
+ * RoundMetrics: scores are made at read time in score.ts, so a threshold can
+ * be wrong and the history re-scored. `fidSum` and `fidMax` are over
+ * `lagFidelity`; `scoreable` counts windows with MIN_TRAVEL of motion at lag 0.
+ */
+export interface HiddenMetrics {
+  windows: number;
+  scoreable: number;
+  fidSum: number;
+  fidMax: number;
+  occ: OccResult | null;
+  reveals: number;
+  revealOn: number;
+  byClass: Record<InfectedClass, ClassSums>;
+  gates: HiddenTally;
+}
+
+/** Null, never zero, for a file without line of sight: "not measured" and
+ *  "measured and clean" must never look alike on the board. */
+export function hiddenMetrics(
+  frames: Frame[], slot: number, prior: PriorTable | null, los: LosView,
+): { metrics: HiddenMetrics | null; windows: TrackWindow[] } {
+  if (!los.known) return { metrics: null, windows: [] };
+  const windows = hiddenTrackWindows(frames, slot, los);
+  const { occ, gates } = hiddenOccupancy(frames, slot, prior, los);
+  const reveal = revealReaction(frames, slot, los)!;
+  const scoreable = windows.filter((w) => w.travel >= TUNING.MIN_TRAVEL);
+  const byClass = Object.fromEntries(TRACKED_CLASSES.map((c) => [c, {
+    scoreable: 0, fidSum: 0, occ: occ?.byClass[c] ?? null, reveals: reveal.byClass[c].reveals, revealOn: reveal.byClass[c].on,
+  }])) as Record<InfectedClass, ClassSums>;
+  for (const w of scoreable) {
+    const c = classOf(w.targetCls);
+    if (!c) continue;
+    byClass[c].scoreable++;
+    byClass[c].fidSum += w.lagFidelity;
+  }
+  const fids = windows.map((w) => w.lagFidelity);
+  return {
+    metrics: {
+      windows: windows.length,
+      scoreable: scoreable.length,
+      fidSum: scoreable.reduce((a, w) => a + w.lagFidelity, 0),
+      fidMax: fids.length ? Math.max(...fids) : 0,
+      occ: occ?.all ?? null,
+      reveals: reveal.reveals,
+      revealOn: reveal.on,
+      byClass,
+      gates,
+    },
+    windows,
+  };
+}

@@ -3,6 +3,7 @@ import { STATE, type Frame } from '../src/replayFormat.js';
 import { losView } from '../src/integrity/los.js';
 import { pickClips } from '../src/integrity/ghostTrack.js';
 import { hiddenGate, hiddenOccupancy, hiddenTrackWindows, scanHidden, revealReaction } from '../src/integrity/hidden.js';
+import { analyzeRound } from '../src/integrity/round.js';
 import { cellKey, cellOf, type PriorTable } from '../src/integrity/aimPrior.js';
 import { blank, header, scene } from './hiddenFixtures.js';
 
@@ -143,5 +144,33 @@ describe('metric F, reveal reaction', () => {
 
   it('has nothing to say about a file without line of sight', () => {
     expect(revealReaction(scene({ los: reveal }), 0, losView(header(false)))).toBeNull();
+  });
+});
+
+describe('analyzeRound with line of sight', () => {
+  it('measures D, E and F for a round that records line of sight', () => {
+    const { metrics, hiddenClips } = analyzeRound(scene(), [0], null, LOS);
+    const m = metrics.get(0)!;
+    expect(m.losKnown).toBe(true);
+    expect(m.hidden!.scoreable).toBeGreaterThan(0);
+    expect(m.hidden!.fidMax).toBeGreaterThan(0.99);
+    expect(m.hidden!.byClass.hunter.scoreable).toBe(m.hidden!.scoreable);
+    expect(m.hidden!.byClass.hunter.fidSum).toBeCloseTo(m.hidden!.fidSum);
+    expect(m.hidden!.gates.passed).toBe(40);
+    expect(hiddenClips.get(0)!.length).toBeGreaterThan(0);
+  });
+
+  it('leaves the hidden metrics null, not zero, without line of sight', () => {
+    const { metrics, hiddenClips } = analyzeRound(scene(), [0], null);
+    expect(metrics.get(0)!.losKnown).toBe(false);
+    expect(metrics.get(0)!.hidden).toBeNull();
+    expect(hiddenClips.get(0)).toEqual([]);
+  });
+
+  it('stores the lag-tolerant ghost score beside the ranked one', () => {
+    const { metrics } = analyzeRound(scene(), [0], null, LOS);
+    // No ghosts in this scene, so both ghost sums are zero, and present.
+    expect(metrics.get(0)!.fidLagSum).toBe(0);
+    expect(metrics.get(0)!.fidSum).toBe(0);
   });
 });
