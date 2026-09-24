@@ -25,12 +25,18 @@
 //      the top scratches an Image (white, alpha stepping 255/160/80/0 every
 //      64 columns), the bottom scratches a magenta Fade with Keep my colours,
 //      so the reader also sees the stand-in, the repoint and the textures.
+//   o: a stock design with your own health fitted (built without
+//      validateDesign, so the fit that probe Q2 still gates is kept), scaled
+//      1.5 at (20, 380), the portrait moved and resized, the bottom scratches
+//      hidden, the number at text size 20, the crouch icon at zpos 9 and a
+//      rounded "Your health background", so the reader also sees the own
+//      panel's file edits, HudEdOwnBg and its texture.
 // Unset (or any other value) keeps the original default: sample (a).
 import { it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { packHud } from './build';
-import { validateDesign, DEFAULT_DESIGN } from './design';
+import { validateDesign, DEFAULT_DESIGN, type HudDesign } from './design';
 import { ammoOnly } from './edit';
 import type { BuildAssets } from './build';
 import { registerImport } from './base';
@@ -96,6 +102,15 @@ it('writes a sample VPK or zip for the Python/unzip readers', () => {
       images: { splatTeam: { w: 512, h: 256, png: PNG }, splatTop: { w: 256, h: 64, png: PNG } } });
     if (!d.images.splatTeam || !d.images.splatTop) throw new Error('sample s lost its stored pictures in validateDesign');
     writeFileSync(process.env.HUD_VPK_OUT, packHud(d, { images: { splatTeam: quadrants(), splatTop: stripes() } }).bytes);
+    return;
+  }
+  if (sample === 'o') {
+    const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN),
+      elements: { ...DEFAULT_DESIGN.elements, ownHealth: { fit: true, scale: 1.5, x: 20, y: 380 } },
+      children: { ownHealth: { Head: { x: 100, y: 50, w: 20, h: 20 }, HealthbarTextureBottom: { visible: false },
+        HealthNumber: { fontSize: 20 }, DuckingIcon: { z: 9 } } },
+      styles: { ownBg: { kind: 'rounded', color: '0 40 80 180' } } };
+    writeFileSync(process.env.HUD_VPK_OUT, packHud(d).bytes);
     return;
   }
   if (sample === 'i') {
