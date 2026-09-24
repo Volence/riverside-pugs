@@ -88,6 +88,18 @@ describe('release routes', () => {
     expect(actions).toEqual(['release_stage', 'release_deploy', 'release_undo']);
   });
 
+  it('warns when a per-box file would be replaced by the shared copy', async () => {
+    mkdirSync(join(work, 'overrides/left4dead/cfg'), { recursive: true });
+    writeFileSync(join(work, 'overrides/left4dead/cfg/local.cfg'), 'tv_title "Dallas"\n');
+    git('add', '-A'); git('commit', '-qm', 'shared local');
+    db.prepare('INSERT INTO fleet_files (server_id, path, size, sha256) VALUES (1, ?, 5, ?)').run('left4dead/cfg/local.cfg', sha('other'));
+    const { a, cookies } = await app();
+    await a.inject({ method: 'POST', url: '/api/admin/releases/refresh', cookies });
+    const { id } = (await a.inject({ method: 'POST', url: '/api/admin/releases/stage', cookies, payload: { commit: 'master' } })).json() as { id: number };
+    const review = (await a.inject({ method: 'GET', url: `/api/admin/releases/${id}`, cookies })).json() as { perBox: { warnings: string[] }[] };
+    expect(review.perBox[0].warnings.join(' ')).toMatch(/per-box file and would be replaced by the shared copy: add this box's own copy under boxes\/dallas\//);
+  });
+
   it('refuses a non-admin', async () => {
     const { a } = await app();
     const other = await authedCookie(a, db, '76561198000000010');

@@ -45,7 +45,9 @@ export function validateTree(files: RepoFile[]): string[] {
 }
 
 export type Op =
-  | { path: string; op: 'write'; kind: 'add' | 'update'; size: number; sha256: string; blob?: string; backupFrom?: { releaseId: number; serverId: number } }
+  | { path: string; op: 'write'; kind: 'add' | 'update'; size: number; sha256: string; blob?: string; backupFrom?: { releaseId: number; serverId: number };
+      /** Which repo layer the file comes from (absent on undo). */
+      layer?: 'shared' | 'box' }
   | { path: string; op: 'remove' };
 
 const same = (a: FileSig, sha: string, size: number) => (a.sha256 !== null ? a.sha256 === sha : a.size === size);
@@ -56,8 +58,8 @@ export function planBox(wanted: Map<string, WantedFile>, onBox: Map<string, File
   const adds: Op[] = [], updates: Op[] = [], deletes: Op[] = [];
   for (const w of [...wanted.values()].sort((a, b) => a.path.localeCompare(b.path))) {
     const have = onBox.get(w.path);
-    if (!have) adds.push({ path: w.path, op: 'write', kind: 'add', size: w.size, sha256: w.sha256, blob: w.blob });
-    else if (!same(have, w.sha256, w.size)) updates.push({ path: w.path, op: 'write', kind: 'update', size: w.size, sha256: w.sha256, blob: w.blob });
+    if (!have) adds.push({ path: w.path, op: 'write', kind: 'add', size: w.size, sha256: w.sha256, blob: w.blob, layer: w.layer });
+    else if (!same(have, w.sha256, w.size)) updates.push({ path: w.path, op: 'write', kind: 'update', size: w.size, sha256: w.sha256, blob: w.blob, layer: w.layer });
   }
   for (const p of [...shipped.keys()].sort()) if (!wanted.has(p) && onBox.has(p)) deletes.push({ path: p, op: 'remove' });
   return [...adds, ...updates, ...deletes];
