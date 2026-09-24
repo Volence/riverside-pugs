@@ -4,6 +4,7 @@ import { getSetting } from '../src/settings.js';
 import { upsertPlayer, activatePlayer } from '../src/players.js';
 import { fileReport } from '../src/tickets/filing.js';
 import { mergePlayers } from '../src/mergePlayers.js';
+import { foldTicket } from '../src/tickets/store.js';
 
 const A = '76561199000000001';
 const B = '76561199000000002';
@@ -43,5 +44,17 @@ describe('mod call storage', () => {
     const row = db.prepare('SELECT caller_steamid, target_steamid FROM mod_calls').get() as { caller_steamid: string; target_steamid: string };
     expect(row.caller_steamid).toBe(C);
     expect(row.target_steamid).toBe(B);
+  });
+
+  it('follows a folded ticket onto the kept one', () => {
+    const db = openDb(':memory:');
+    for (const id of [A, B, C]) { upsertPlayer(db, { steamid: id, name: id, avatar: null }, []); activatePlayer(db, id); }
+    const keep = fileReport(db, A, { targetId: B, category: 'cheating', text: '' }, { adminSteamIds: [] });
+    const gone = fileReport(db, A, { targetId: C, category: 'cheating', text: '' }, { adminSteamIds: [] });
+    if (!keep.ok || !gone.ok) throw new Error('filing failed');
+    db.prepare(`INSERT INTO mod_calls (created_at, caller_steamid, target_kind, target_steamid, reason, text, via, pinged, post_state, ticket_id)
+                VALUES (?, ?, 'player', ?, 'cheating', '', 'game', 1, 'posted', ?)`).run(new Date().toISOString(), A, C, gone.ticketId);
+    db.transaction(() => foldTicket(db, gone.ticketId, keep.ticketId, 'merge'))();
+    expect((db.prepare('SELECT ticket_id FROM mod_calls').get() as { ticket_id: number }).ticket_id).toBe(keep.ticketId);
   });
 });
