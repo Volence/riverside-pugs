@@ -51,15 +51,13 @@ PUGCALL steamid=<caller id64> target=<id64|team|general|none> tteam=<caller team
 | column | notes |
 |---|---|
 | id | integer primary key autoincrement |
-| created_at | unix seconds |
+| created_at | ISO text, like every other table |
 | server_id | FK servers |
 | match_id | nullable FK matches |
 | map, map_ordinal, half, t_ms | moment; nullable |
-| caller_steamid, caller_name | always set; name from `players`, else the SteamID |
-| caller_id | nullable FK players |
+| caller_steamid | always set, alias-resolved |
 | target_kind | `player`, `team`, `general`, `none` |
-| target_steamid, target_name | when target_kind = player |
-| target_id | nullable FK players |
+| target_steamid | when target_kind = player, alias-resolved |
 | caller_team | integer |
 | reason | reason key |
 | text | details, may be empty |
@@ -67,10 +65,12 @@ PUGCALL steamid=<caller id64> target=<id64|team|general|none> tteam=<caller team
 | ticket_id | nullable FK tickets |
 | folded_into | nullable FK mod_calls |
 | pinged | 0/1, whether this call's post mentioned the role |
+| post_state | `pending`, `posted`, `skipped` (banned caller or calls turned off), `folded` |
+| note | why there is no ticket or no ping, shown on the card and the site |
 | discord_message_id | nullable; null means not yet posted |
 | handled_by_discord_id, handled_at | set by the Handling it button |
 
-`caller_id` and `target_id` reference `players`, so both are added to `mergePlayers` (a missing entry makes a merge fail because `foreign_keys = ON`) and to the exhaustive table list in `tests/db.test.ts`. Names are resolved from `players` when the SteamID has an account; otherwise the name column holds the SteamID and the card links the Steam profile. The plugin sends no names, because a name is free text and only one free-text field (`text=`) can sit safely at the end of the line.
+The two SteamID columns carry no foreign key (a caller may have no account), like `integrity_flags.steamid`; both are added to `mergePlayers`' PLAIN list so they follow a merge, and the table joins the exhaustive list in `tests/db.test.ts`. Names are resolved at render time through `identityOf` (alias, then `players`); a SteamID with no account shows as itself with a Steam profile link. The plugin sends no names, because a name is free text and only one free-text field (`text=`) can sit safely at the end of the line.
 
 **Filing:** when `target_kind = player`, the caller has a `players` row and the reason is not `broke`, the web calls `fileReport(db, callerSteamId, { targetId, category, text, matchId, moment }, deps)`. Category mapping: `cheating`, `toxicity`, `griefing`, `afk` map to themselves; `english` and `other` map to `other`, with the text prefixed `Not speaking English:` for `english`. All existing rules apply: banned reporters and self-reports refused, one open case per target, new reports fold into it. On success `mod_calls.ticket_id` is set. On refusal, or when the caller has no account, the call still stores and posts; the card says "No ticket (reason)".
 
@@ -86,7 +86,7 @@ PUGCALL steamid=<caller id64> target=<id64|team|general|none> tteam=<caller team
 - Embed title: `In-game call: <reason label>`.
 - Fields: caller and target as `<@discordId>` when linked, else the escaped name with a Steam profile link; server; map; match number; details text (escaped, in a quote block); ticket number or "No ticket (reason)".
 - Links: replay at the moment (`/match/<id>?ordinal=<ord>&half=<half>&t=<ms>`), the ticket, and the SourceTV `connect` string built by `spectateFor` (the same one the match card's Spectate button uses) when the server has SourceTV enabled.
-- Allowed mentions: roles = [the mod role] only; users = []. This needs `djsTransport.ts` to accept a role allow-list, which it does not today (it only takes `mentionUserIds`). The fake transport gets the same field and records it, so tests can assert that only the role would ping.
+- Allowed mentions: `mentionRoleIds` = [the mod role] only; `mentionUserIds` = []. `MessagePayload` already has `mentionRoleIds` (the queue alert uses it), so `djsTransport.ts` needs no change.
 - **Handling it** button: records `handled_by_discord_id` and `handled_at`, edits the card to "Handled by @mod", and disables the button. Only members who are admin or mod on the site (linked Discord id) can press it; others get an ephemeral refusal.
 - The card is posted even when the admin feed toggles are off; it is not an admin feed event. It uses its own poster with a retry timer: rows with `discord_message_id IS NULL` newer than 24 h are retried every 30 s, so a Discord outage or a web restart loses nothing that reached the database.
 
