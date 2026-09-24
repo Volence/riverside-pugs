@@ -573,12 +573,16 @@ function splatterPass(work: Work, design: HudDesign, assets: BuildAssets, out: V
   for (const def of SPLATTERS) {
     const style = design.splatters?.[def.id];
     if (!style || style.kind === 'stock') continue;
+    // Every skip comes before work.optional: loading the file marks it
+    // touched, so an inactive entry would ship an unchanged copy of it.
+    if (style.kind !== 'none') {
+      if (!splatterActive(design, def.id)) continue;                // an Image with no picture stored: stock
+      if (def.route === 'standIn' && design.children.teamColumn?.[def.block]?.visible === false) continue;
+    }
     const block = work.optional(def.file, [def.block]);
     if (!block) continue;                                           // an imported HUD without it: the row is disabled
     if (style.kind === 'none') { hardHide(block); continue; }       // the scratches only; see validateDesign
-    if (!splatterActive(design, def.id)) continue;                  // an Image with no picture stored: stock
     if (def.route === 'standIn') {
-      if (design.children.teamColumn?.[def.block]?.visible === false) continue;
       insertStandIn(work.tree(def.file), block, def);
     } else pcSet(block, 'image', splatterImageKey(def.id));
     if (!out) continue;

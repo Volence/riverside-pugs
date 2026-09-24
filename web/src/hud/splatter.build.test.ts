@@ -72,6 +72,12 @@ describe('splatterPass, the teammate splatter', () => {
     expect(stock.some((f) => f.path.includes('hudeditor/splat'))).toBe(false);
   });
 
+  it('loads no file for an inactive entry, so an imageless Image downloads the same files as the plain design', () => {
+    const paths = (d: HudDesign) => buildHud(d).map((f) => f.path).sort();
+    const d = design({ splatters: { splatTeam: { kind: 'image' }, splatTop: { kind: 'image' }, splatBottom: { kind: 'image' } } });
+    expect(paths(d)).toEqual(paths(design({})));
+  });
+
   it('refuses to build an active Image whose pixels the page did not hand over', () => {
     expect(() => buildHud(design({ splatters: { splatTeam: { kind: 'image' } }, images: { splatTeam: PNG } })))
       .toThrow('Teammate card splatter: the image could not be read. Pick it again, or choose Stock.');
