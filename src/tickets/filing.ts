@@ -234,11 +234,17 @@ export function fileReport(db: DB, reporterIn: string | DiscordReporter, body: F
   const feedHeld = restricted
     || (target.kind === 'player' ? hasStaffFlag(db, target.steamid) : deps.targetDiscord!.administrator);
   const targetKey = personKey(target);
-  // A report about an entry is one per reporter per entry, ever, and it is
-  // left out of the open-report rule below, so reporting someone's HUD never
-  // uses up the one open report about their behaviour, or the other way round.
+  // A report about an entry is one per reporter per entry per flavour, ever,
+  // and it is left out of the open-report rule below, so reporting someone's
+  // HUD never uses up the one open report about their behaviour, or the other
+  // way round. Per flavour as the rules below: a safety report about an entry
+  // already reported as rude still lands, on the restricted ticket, with the
+  // entry attached as its evidence.
   if (entryId !== null) {
-    if (db.prepare(`SELECT 1 FROM ticket_reports r WHERE ${REPORTER_KEY_SQL} = ? AND r.community_entry_id = ?`).get(reporterKey, entryId)) {
+    if (db.prepare(
+      `SELECT 1 FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id
+        WHERE ${REPORTER_KEY_SQL} = ? AND r.community_entry_id = ? AND t.restricted = ?`,
+    ).get(reporterKey, entryId, restricted ? 1 : 0)) {
       return fail(409, 'you already reported this');
     }
   }
