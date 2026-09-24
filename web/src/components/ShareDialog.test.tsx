@@ -67,16 +67,39 @@ describe('the share dialog', () => {
     expect(prepare).not.toHaveBeenCalled();
   });
 
-  it('at the cap says so, links to both entries and disables Share', async () => {
-    mockCommunity.mine.mockResolvedValue(mine([entry(4, 'First one'), entry(5, 'Second one'), entry(6, 'A crosshair', 'crosshair')]));
+  it('at the cap offers only an update, of one of that kind, and sends it with replaces', async () => {
+    mockCommunity.mine.mockResolvedValue(mine([
+      { ...entry(4, 'First one'), description: 'Old words.' }, entry(5, 'Second one'), entry(6, 'A crosshair', 'crosshair'),
+    ]));
+    mockCommunity.shareHud.mockResolvedValue({ id: 5 });
     open();
-    await screen.findByText('You are sharing 2 HUDs already. Delete one to share another.');
-    expect(screen.getByRole('link', { name: 'First one' }).getAttribute('href')).toBe('/community/4');
-    expect(screen.getByRole('link', { name: 'Second one' }).getAttribute('href')).toBe('/community/5');
-    expect(screen.queryByRole('link', { name: 'A crosshair' })).toBeNull();
-    fireEvent.input(title(), { target: { value: 'Third one' } });
+    await screen.findByText('You are sharing 2 HUDs already, the most at once: update one, or delete one to share another.');
+    expect((screen.getByRole('radio', { name: 'Share as a new HUD' }) as HTMLInputElement).disabled).toBe(true);
+    const which = await screen.findByLabelText('Which HUD to update') as HTMLSelectElement;
+    expect([...which.options].map((o) => o.textContent)).toEqual(['First one', 'Second one']);
+    // The one picked gives its title and description to start from.
+    await waitFor(() => expect(title().value).toBe('First one'));
+    expect((screen.getByLabelText('Description') as HTMLTextAreaElement).value).toBe('Old words.');
+    fireEvent.change(which, { target: { value: '5' } });
+    expect(title().value).toBe('Second one');
+    await screen.findByAltText(/preview that will be shared/);
     tick();
-    expect(shareBtn().disabled).toBe(true);
+    const update = screen.getByRole('button', { name: 'Update' }) as HTMLButtonElement;
+    expect(update.disabled).toBe(false);
+    fireEvent.click(update);
+    await screen.findByText(/Updated\./);
+    expect(mockCommunity.shareHud.mock.calls[0][1]).toBe(5);
+  });
+
+  it('under the cap shares a new one by default, and can switch to an update', async () => {
+    mockCommunity.mine.mockResolvedValue(mine([entry(4, 'First one')]));
+    open();
+    const fresh = await screen.findByRole('radio', { name: 'Share as a new HUD' }) as HTMLInputElement;
+    expect(fresh.checked).toBe(true);
+    expect(screen.queryByLabelText('Which HUD to update')).toBeNull();
+    fireEvent.click(screen.getByRole('radio', { name: /Update one of yours/ }));
+    expect((screen.getByLabelText('Which HUD to update') as HTMLSelectElement).value).toBe('4');
+    expect(title().value).toBe('First one');
   });
 
   it('does not count an entry staff removed toward the cap', async () => {

@@ -1446,6 +1446,8 @@ export interface CommunityEntry {
   likes: number;
   likedByMe: boolean;
   createdAt: string;
+  /** When its author last updated it; null if never. */
+  updatedAt?: string | null;
   /** Crosshairs only: the CrosshairArt, untrusted until readArt has read it. */
   art?: unknown;
   /** HUDs only. */
@@ -1465,6 +1467,10 @@ export interface CommunityEntryDetail extends CommunityEntry {
   importId?: string | null;
   /** Staff only, on a removed entry. */
   removed?: { by: string | null; byName?: string | null; reason: string | null; at: string };
+  /** Staff only: the versions its author's updates replaced, newest first. */
+  versions?: { id: number; replacedAt: string }[];
+  /** Staff only, on a replaced version: the live entry it was a version of. */
+  versionOf?: number | null;
 }
 
 export interface CommunityList { entries: CommunityEntry[]; page: number; pageSize: number; total: number }
@@ -1472,20 +1478,24 @@ export interface CommunityMine {
   entries: (CommunityEntry & { removedByStaff: string | null })[];
   caps: { huds: number; crosshairs: number; perDay: number; sharedToday: number };
 }
-export interface CommunityListQuery { kind: CommunityKind; sort?: 'new' | 'top'; page?: number; author?: string }
+export interface CommunityListQuery { kind: CommunityKind; sort?: 'new' | 'top'; page?: number; author?: string; liked?: boolean }
 
 export const communityApi = {
   list: (q: CommunityListQuery, signal?: AbortSignal) => {
     const p = new URLSearchParams({ kind: q.kind, sort: q.sort ?? 'new', page: String(q.page ?? 0) });
     if (q.author) p.set('author', q.author);
+    if (q.liked) p.set('liked', '1');
     return get<CommunityList>(`/api/community?${p}`, signal);
   },
   get: (id: number, signal?: AbortSignal) => get<CommunityEntryDetail>(`/api/community/${id}`, signal),
   mine: (signal?: AbortSignal) => get<CommunityMine>('/api/community/mine', signal),
-  shareCrosshair: (body: { title: string; description: string; art: unknown; permission: boolean }) =>
+  /** `replaces`: update that live crosshair of yours in place instead of sharing a new one. */
+  shareCrosshair: (body: { title: string; description: string; art: unknown; permission: boolean; replaces?: number }) =>
     post<{ id: number }>('/api/community/crosshairs', body),
-  /** Multipart: meta, preview and (on an imported HUD) import; see community/publish.ts's buildHudForm. */
-  shareHud: (form: FormData) => post<{ id: number }>('/api/community/huds', form),
+  /** Multipart: meta, preview and (on an imported HUD) import; see community/publish.ts's buildHudForm.
+   *  `replaces`: update that live HUD of yours in place (in the URL, so the server knows before the body). */
+  shareHud: (form: FormData, replaces?: number) =>
+    post<{ id: number }>(replaces === undefined ? '/api/community/huds' : `/api/community/huds?replaces=${replaces}`, form),
   like: (id: number) => put<{ likes: number; likedByMe: boolean }>(`/api/community/${id}/like`, {}),
   unlike: (id: number) => del<{ likes: number; likedByMe: boolean }>(`/api/community/${id}/like`),
   /** Staff: take an entry down, with the reason its author is shown. */

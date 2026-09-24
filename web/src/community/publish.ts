@@ -152,12 +152,17 @@ export function buildHudForm(o: {
   return form;
 }
 
-/** Send a prepared HUD share. Resolves to the new entry's id; throws the server's one line. */
-export async function shareHud(o: Parameters<typeof buildHudForm>[0]): Promise<{ id: number }> {
-  return communityApi.shareHud(buildHudForm(o));
+/** Send a prepared HUD share, or with `replaces` an update of that live HUD. Resolves to the entry's id; throws the server's one line. */
+export async function shareHud(o: Parameters<typeof buildHudForm>[0] & { replaces?: number }): Promise<{ id: number }> {
+  return communityApi.shareHud(buildHudForm(o), o.replaces);
 }
 
-/** Send a crosshair share: its art as the page carries it. */
-export async function shareCrosshair(o: { title: string; description: string; permission: boolean; art: CrosshairArt }): Promise<{ id: number }> {
-  return communityApi.shareCrosshair({ title: o.title, description: o.description, art: o.art, permission: o.permission });
+/** Send a crosshair share: its art as the page carries it; `replaces` updates that live crosshair. */
+export async function shareCrosshair(
+  o: { title: string; description: string; permission: boolean; art: CrosshairArt; replaces?: number },
+): Promise<{ id: number }> {
+  return communityApi.shareCrosshair({
+    title: o.title, description: o.description, art: o.art, permission: o.permission,
+    ...(o.replaces === undefined ? {} : { replaces: o.replaces }),
+  });
 }

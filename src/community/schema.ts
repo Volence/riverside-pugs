@@ -60,4 +60,12 @@ CREATE TABLE IF NOT EXISTS community_likes (
     db.exec('ALTER TABLE community_entries ADD COLUMN preview_infected TEXT');
   }
   db.exec('CREATE INDEX IF NOT EXISTS idx_community_preview_infected ON community_entries (preview_infected)');
+  // An author's update replaces a live entry in place (its link and likes
+  // stay): updated_at is when it last did. The version it replaced is kept
+  // as a tombstone copy whose version_of names the live entry, so a report
+  // made before the update can still be judged on what was reported; the
+  // sweep purges the copy after 30 days like any other tombstone.
+  if (!cols.some((c) => c.name === 'updated_at')) db.exec('ALTER TABLE community_entries ADD COLUMN updated_at TEXT');
+  if (!cols.some((c) => c.name === 'version_of')) db.exec('ALTER TABLE community_entries ADD COLUMN version_of INTEGER');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_community_version_of ON community_entries (version_of)');
 }

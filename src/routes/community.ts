@@ -12,7 +12,7 @@ import {
   COMMUNITY_XHAIR_CAPS, IMPORT_MAX_BYTES, PREVIEW_MAX_BYTES,
 } from '../community/validate.js';
 import {
-  countLive, ENTRY_KINDS, entryRow, fileLive, fileReferenced, getEntry, insertEntry, like, likeCount,
+  countLive, ENTRY_KINDS, entryRow, fileLive, fileReferenced, getEntry, insertEntry, like, likeCount, replaceEntry,
   listEntries, mineEntries, sharesSince, tombstone, unlike, visibleEntryRow, type EntryKind,
 } from '../community/entries.js';
 
@@ -117,12 +117,18 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
    * the insert's transaction, so two shares racing each other cannot both
    * pass the count.
    */
-  const capProblem = (author: string, kind: EntryKind): { status: 403 | 409 | 429; error: string } | null => {
+  const capProblem = (author: string, kind: EntryKind, replaces?: number): { status: 403 | 404 | 409 | 429; error: string } | null => {
     const c = caps();
     const cap = kind === 'hud' ? c.huds : c.crosshairs;
     const noun = kind === 'hud' ? 'HUD' : 'crosshair';
     if (cap === 0) return { status: 403, error: `Sharing ${noun}s is switched off right now.` };
-    if (countLive(db, author, kind) >= cap) {
+    if (replaces !== undefined) {
+      // An update takes no new place, so only the day's shares limit it (replaceEntry's copy counts as one).
+      const row = entryRow(db, replaces);
+      if (!row || row.author_id !== author || row.kind !== kind || row.deleted_at !== null) {
+        return { status: 404, error: `That ${noun} is not one of your live shares.` };
+      }
+    } else if (countLive(db, author, kind) >= cap) {
       return { status: 409, error: `You are sharing ${cap} ${noun}${cap === 1 ? '' : 's'} already. Delete one to share another.` };
     }
     if (sharesSince(db, author, new Date(now().getTime() - DAY_MS)) >= c.perDay) {
@@ -135,9 +141,16 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
   const hudUploads = new Set<string>();
 
   const idOf = (raw: string): number | null => (/^[1-9][0-9]{0,15}$/.test(raw) ? Number(raw) : null);
+  /** A share's optional `replaces`: absent, or the id of the author's own live entry it updates. */
+  const replacesOf = (v: unknown): { ok: true; id?: number } | { ok: false } => {
+    if (v === undefined || v === null) return { ok: true };
+    const id = typeof v === 'number' && Number.isSafeInteger(v) ? idOf(String(v)) : null;
+    return id === null ? { ok: false } : { ok: true, id };
+  };
+  const BAD_REPLACES = 'The share names the entry it updates in a form the site does not send.';
   const notFound = (reply: FastifyReply) => reply.code(404).send({ error: 'no such entry' });
 
-  app.get<{ Querystring: { kind?: string; sort?: string; page?: string; author?: string } }>(
+  app.get<{ Querystring: { kind?: string; sort?: string; page?: string; author?: string; liked?: string } }>(
     '/api/community', async (req, reply) => {
       const kind = req.query.kind as EntryKind;
       if (!ENTRY_KINDS.includes(kind)) return reply.code(400).send({ error: 'kind must be hud or crosshair' });
@@ -146,6 +159,7 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
         sort: req.query.sort === 'top' ? 'top' : 'new',
         page: Number(req.query.page ?? 0),
         author: req.query.author || null,
+        liked: req.query.liked === '1',
         viewer: optionalViewer(req),
         now: now(),
       });
@@ -170,7 +184,7 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
     return entry ?? notFound(reply);
   });
 
-  app.post<{ Body: { title?: unknown; description?: unknown; art?: unknown; permission?: unknown } }>(
+  app.post<{ Body: { title?: unknown; description?: unknown; art?: unknown; permission?: unknown; replaces?: unknown } }>(
     '/api/community/crosshairs', { bodyLimit: 256 * 1024 }, async (req, reply) => {
       const me = requireActive(req, reply);
       if (!me) return reply;
@@ -183,19 +197,21 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
       const art = checkCrosshairArt(b.art, COMMUNITY_XHAIR_CAPS);
       if (!art.ok) return reply.code(art.status).send({ error: art.error });
       if (b.permission !== true) return reply.code(400).send({ error: PERMISSION_ERROR });
+      const replaces = replacesOf(b.replaces);
+      if (!replaces.ok) return reply.code(400).send({ error: BAD_REPLACES });
 
       // Stored re-serialized from the checked value, never the raw body, so
       // nothing the checks did not look at is kept.
       const payload = JSON.stringify(art.value);
       const result = db.transaction(() => {
-        const problem = capProblem(me, 'crosshair');
+        const problem = capProblem(me, 'crosshair', replaces.id);
         if (problem) return problem;
-        return {
-          id: insertEntry(db, {
-            kind: 'crosshair', authorId: me, title: title.value, description: description.value,
-            payload, bytes: Buffer.byteLength(payload), createdAt: now(),
-          }),
-        };
+        const fields = { title: title.value, description: description.value, payload, bytes: Buffer.byteLength(payload) };
+        if (replaces.id !== undefined) {
+          replaceEntry(db, replaces.id, fields, now());
+          return { id: replaces.id };
+        }
+        return { id: insertEntry(db, { kind: 'crosshair', authorId: me, ...fields, createdAt: now() }) };
       })();
       if ('error' in result) return reply.code(result.status).send({ error: result.error });
       return { id: result.id };
@@ -208,20 +224,25 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
    * design's JSON string, as the editor saves it), `preview` (the survivor
    * side's PNG), `previewInfected` (the infected side's PNG; optional, so a
    * page loaded before it existed can still share), and `import` (the VPK,
-   * only for a design on an imported HUD).
+   * only for a design on an imported HUD). `?replaces=id` makes it an
+   * update of the author's own live HUD (replaceEntry) rather than a new one.
    *
    * Everything is checked before the disk is touched. checkImport is the whole
    * check on the VPK (the allowlist, the canonical layout, the ids); nothing
    * here second-guesses it or keeps anything it did not return.
    */
-  app.post('/api/community/huds', async (req, reply) => {
+  app.post<{ Querystring: { replaces?: string } }>('/api/community/huds', async (req, reply) => {
     const me = requireActive(req, reply);
     if (!me) return reply;
     if (!uploadsOn()) return reply.code(403).send({ error: 'Sharing is switched off right now.' });
     // The caps before a byte of the body is read, so a player who cannot
     // share costs the server no upload; the insert checks them again inside
     // its transaction.
-    const early = capProblem(me, 'hud');
+    // An update names the entry it replaces in the URL (?replaces=id), not the
+    // meta, so this early check knows it before a byte of the body is read.
+    const replaces = replacesOf(req.query.replaces === undefined ? undefined : Number(req.query.replaces));
+    if (!replaces.ok) return reply.code(400).send({ error: BAD_REPLACES });
+    const early = capProblem(me, 'hud', replaces.id);
     if (early) return reply.code(early.status).send({ error: early.error });
     // One upload in flight per player, and a few across the site: each can
     // hold up to 27.5 MB in memory while it is checked (the 2.5 MB meta, two
@@ -242,7 +263,7 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
       req.raw.destroy();
     }, opts.uploadTimeoutMs ?? UPLOAD_TIMEOUT_MS);
     try {
-      return await shareHud(me, req, reply);
+      return await shareHud(me, req, reply, replaces.id);
     } catch (err) {
       if (timedOut) return reply.code(408).send({ error: TOO_SLOW });
       throw err;
@@ -252,7 +273,7 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
     }
   });
 
-  const shareHud = async (me: string, req: FastifyRequest, reply: FastifyReply) => {
+  const shareHud = async (me: string, req: FastifyRequest, reply: FastifyReply, replacesId?: number) => {
     // Every part is read to its end before anything is refused, so a refusal
     // never leaves a file stream half consumed under the parser.
     let meta: string | null = null;
@@ -373,17 +394,20 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
       }
       const payload = design.value.json;
       const result = db.transaction(() => {
-        const problem = capProblem(me, 'hud');
+        const problem = capProblem(me, 'hud', replacesId);
         if (problem) return problem;
-        return {
-          id: insertEntry(db, {
-            kind: 'hud', authorId: me, title: title.value, description: description.value, payload,
-            preset: design.value.preset, aspect: design.value.aspect, advanced: design.value.advanced,
-            importId: imported?.id ?? null, importName: design.value.importName, preview: p.name,
-            previewInfected: q?.name ?? null,
-            bytes: Buffer.byteLength(payload) + preview.length + (infected?.length ?? 0) + blobBytes, createdAt: now(),
-          }),
+        const fields = {
+          title: title.value, description: description.value, payload,
+          preset: design.value.preset, aspect: design.value.aspect, advanced: design.value.advanced,
+          importId: imported?.id ?? null, importName: design.value.importName, preview: p.name,
+          previewInfected: q?.name ?? null,
+          bytes: Buffer.byteLength(payload) + preview.length + (infected?.length ?? 0) + blobBytes,
         };
+        if (replacesId !== undefined) {
+          replaceEntry(db, replacesId, fields, now());
+          return { id: replacesId };
+        }
+        return { id: insertEntry(db, { kind: 'hud', authorId: me, ...fields, createdAt: now() }) };
       })();
       if ('error' in result) {
         undo();

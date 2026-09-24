@@ -7,9 +7,13 @@ import { PageHeader } from '../components/PageHeader';
 import { HudTabs } from '../components/HudTabs';
 import { CommunityCard } from '../components/CommunityCard';
 
+/** Every share, the viewer's own, or the ones they liked. */
+type Show = 'all' | 'yours' | 'liked';
+
 /**
  * /community: the HUDs and crosshairs players shared from the HUD editor and
- * the crosshair maker. Two tabs, New or Top, 24 a page.
+ * the crosshair maker. Two tabs, New or Top, 24 a page, and for a signed-in
+ * viewer All, Yours or Liked.
  *
  * The tab starts from ?kind=crosshair when a link asks for it (a profile's
  * crosshair, say); after that the page keeps its own state and leaves the
@@ -20,12 +24,23 @@ export function Community({ session }: { session: Session }) {
     new URLSearchParams(location.search).get('kind') === 'crosshair' ? 'crosshair' : 'hud');
   const [sort, setSort] = useState<'new' | 'top'>('new');
   const [page, setPage] = useState(0);
-  const { data, error } = useFetch((s) => communityApi.list({ kind, sort, page }, s), [kind, sort, page]);
+  // Yours and Liked need someone signed in; a signed-out viewer sees All alone.
+  const viewer = session.kind === 'active' || session.kind === 'pending' ? session.me.steamid : null;
+  const [show, setShow] = useState<Show>('all');
+  const scope = viewer ? show : 'all';
+  const { data, error } = useFetch(
+    (s) => communityApi.list({ kind, sort, page, ...(scope === 'yours' ? { author: viewer! } : scope === 'liked' ? { liked: true } : {}) }, s),
+    [kind, sort, page, scope],
+  );
 
   const pick = (k: CommunityKind) => { setKind(k); setPage(0); };
   const order = (o: 'new' | 'top') => { setSort(o); setPage(0); };
+  const filter = (f: Show) => { setShow(f); setPage(0); };
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
   const noun = kind === 'hud' ? 'HUDs' : 'crosshairs';
+  const none = scope === 'yours'
+    ? `You have not shared any ${noun} yet. Share one with Share to community in the ${kind === 'hud' ? 'HUD editor' : 'crosshair maker'}.`
+    : scope === 'liked' ? `You have not liked any ${noun} yet.` : `No ${noun} shared yet. Be the first.`;
 
   return (
     <div class="page page--wide community">
@@ -42,12 +57,16 @@ export function Community({ session }: { session: Session }) {
           tabs={[{ key: 'hud', label: 'HUDs' }, { key: 'crosshair', label: 'Crosshairs' }]} />
         <Tabs label="Order" active={sort} onSelect={(o) => order(o as 'new' | 'top')}
           tabs={[{ key: 'new', label: 'New' }, { key: 'top', label: 'Top' }]} />
+        {viewer && (
+          <Tabs label="Whose" active={scope} onSelect={(f) => filter(f as Show)}
+            tabs={[{ key: 'all', label: 'All' }, { key: 'yours', label: 'Yours' }, { key: 'liked', label: 'Liked' }]} />
+        )}
       </div>
 
       {error && <Panel><p class="error">Could not load the community page. Try again in a moment.</p></Panel>}
       {!error && !data && <p class="muted" role="status">Loading</p>}
       {data && data.entries.length === 0 && (
-        <Panel><Empty>{page > 0 ? `No more ${noun} here.` : `No ${noun} shared yet. Be the first.`}</Empty></Panel>
+        <Panel><Empty>{page > 0 ? `No more ${noun} here.` : none}</Empty></Panel>
       )}
       {data && data.entries.length > 0 && (
         <div class="ccards">
