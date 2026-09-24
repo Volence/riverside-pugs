@@ -3,7 +3,7 @@ import {
   nudge, nudgeCards, freeInPlace, cardBoxes, placeCards, alignCards, hasOverrides, elementsTouched, resetElement, withTeamDir, placeCard, patchChild,
   placeChild, nudgeChild, resizeChild, resetChild,
   startsOf, moveChildren, placeChildren, scaleChildren, cornerFactor, anchorOf, alignChildren, setChildrenVisible, resetChildren,
-  placeElement, moveElements, moveCards, alignElements, scaleElement, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
+  placeElement, moveElements, moveCards, alignElements, scaleElement, setScale, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
   ammoOnly, withImport, withPreset, hasLayoutEdits,
   splatterKind, patchSplatter, withSplatterImage, resetSplatter, panelClamp, raiseChild, resetChildKey, setFit, rowGapSlider, setRowGap,
 } from './edit';
@@ -13,7 +13,7 @@ import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { DEFAULT_DESIGN, newDesign, baseTeam, validateDesign, type HudDesign } from './design';
 import { DEFAULT_STATE } from '../crosshair/draw';
 import type { CrosshairArt } from '../crosshair/model';
-import { formatPos, parsePos } from './units';
+import { formatPos, parsePos, screenW } from './units';
 import { teamCardRects, elementRect, cardChild, isFreeTeam, panelChild, elementFitShift, teamLayout } from './build';
 import { elementById } from './elements';
 import { childDef } from './children';
@@ -485,9 +485,10 @@ describe('element edits', () => {
     const start = { rect: { x: 728, y: 389, w: 125, h: 91 }, scale: 1 };
     // Dragging the top-left corner out by half: the bottom-right corner stays on the screen's.
     expect(scaleElement(UNFIT, 'ownHealth', start, 'nw', -62.5, -45.5).elements.ownHealth).toEqual({ scale: 1.5, x: 666, y: 344 });
-    // The bottom-right corner: the element keeps its own position (and its file anchor).
-    expect(scaleElement(UNFIT, 'ownHealth', start, 'se', 125, 0).elements.ownHealth).toEqual({ scale: 2 });
-    expect(scaleElement(UNFIT, 'ownHealth', start, 'se', 1000, 0).elements.ownHealth).toEqual({ scale: 2 });
+    // The bottom-right corner: the element keeps its own position (and its file anchor) while it shrinks;
+    // grown past the screen's right and bottom edges it is placed back inside (plan decision 8, task L4).
+    expect(scaleElement(UNFIT, 'ownHealth', start, 'se', 125, 0).elements.ownHealth).toEqual({ scale: 2, x: 603, y: 298 });
+    expect(scaleElement(UNFIT, 'ownHealth', start, 'se', 1000, 0).elements.ownHealth).toEqual({ scale: 2, x: 603, y: 298 });
     expect(scaleElement(UNFIT, 'ownHealth', start, 'se', -1000, 0).elements.ownHealth).toEqual({ scale: 0.5 });
     expect(scaleElement(UNFIT, 'chat', start, 'se', 10, 10)).toBe(UNFIT);
   });
@@ -1104,5 +1105,48 @@ describe('placing a fitted infected row (plan Task 11)', () => {
     const moved = placeElement(d, 'infectedRow', r.x, r.y);
     expect(elementRect(moved, 'infectedRow', moved.aspect)).toMatchObject({ x: r.x, y: r.y });
     expect(moved.elements.infectedRow).toMatchObject({ x: 0, y: 405 });
+  });
+});
+
+describe('a scaled panel stays on screen (plan decision 8)', () => {
+  const W = screenW(DEFAULT_DESIGN.aspect);
+  const inside = (d: HudDesign, id: string) => {
+    const f = elementFrame(d, id);
+    expect(f.x, `${id} left`).toBeGreaterThanOrEqual(0);
+    expect(f.y, `${id} top`).toBeGreaterThanOrEqual(0);
+    expect(f.x + f.w, `${id} right`).toBeLessThanOrEqual(W);
+    expect(f.y + f.h, `${id} bottom`).toBeLessThanOrEqual(480);
+  };
+
+  it('moves your own health back inside when the Scale slider takes it to 2', () => {
+    const next = setScale(DEFAULT_DESIGN, 'ownHealth', 2);
+    expect(next.elements.ownHealth?.scale).toBe(2);
+    inside(next, 'ownHealth');
+  });
+
+  it('leaves a panel that still fits where it is, stored place and file anchor alike', () => {
+    const placed = placeElement(DEFAULT_DESIGN, 'ownHealth', 300, 200);
+    const next = setScale(placed, 'ownHealth', 1.2);
+    expect(next.elements.ownHealth).toEqual({ ...placed.elements.ownHealth, scale: 1.2 });
+    // Shrinking a panel on its file anchor never moves it (the stock frames overhang a few units already).
+    const small = setScale(DEFAULT_DESIGN, 'abilityRing', 0.8);
+    expect(small.elements.abilityRing).toEqual({ scale: 0.8 });
+    expect(setScale(DEFAULT_DESIGN, 'abilityRing', 1)).toEqual({ ...DEFAULT_DESIGN, elements: { ...DEFAULT_DESIGN.elements, abilityRing: { scale: 1 } } });
+  });
+
+  it('moves your infected health back inside after a bottom-right handle drag to 2', () => {
+    const frame = elementFrame(DEFAULT_DESIGN, 'siHealth');
+    const next = scaleElement(DEFAULT_DESIGN, 'siHealth', { rect: frame, scale: 1 }, 'se', frame.w * 2, frame.h * 2);
+    expect(next.elements.siHealth?.scale).toBe(2);
+    inside(next, 'siHealth');
+  });
+
+  it('keeps a top-left handle drag as it was: the opposite corner stays put', () => {
+    const start = { rect: { x: 728, y: 389, w: 125, h: 91 }, scale: 1 };
+    expect(scaleElement(UNFIT, 'ownHealth', start, 'nw', -62.5, -45.5).elements.ownHealth).toEqual({ scale: 1.5, x: 666, y: 344 });
+  });
+
+  it('keeps an element that cannot scale unchanged', () => {
+    expect(setScale(DEFAULT_DESIGN, 'chat', 2)).toBe(DEFAULT_DESIGN);
   });
 });

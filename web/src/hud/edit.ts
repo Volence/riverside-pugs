@@ -901,9 +901,55 @@ export function scaleElement(
   const a = anchorOf(start.rect, handle);
   const sx = a.x - (handle.includes('w') ? f.x + f.w : f.x);
   const sy = a.y - (handle.includes('n') ? f.y + f.h : f.y);
-  if (Math.abs(sx) < 0.5 && Math.abs(sy) < 0.5) return next;
+  // A right or bottom corner grows the panel toward that edge, so it is
+  // brought back inside on that axis; a left or top corner keeps its
+  // opposite corner, as it always has.
+  const axes = { x: !handle.includes('w'), y: !handle.includes('n') };
+  if (Math.abs(sx) < 0.5 && Math.abs(sy) < 0.5) return keepElementOnScreen(design, next, id, axes);
   const r = elementRect(next, id, next.aspect);
-  return placeElement(next, id, r.x + sx, r.y + sy);
+  return keepElementOnScreen(design, placeElement(next, id, r.x + sx, r.y + sy), id, axes);
+}
+
+/**
+ * The Scale slider: set an element's scale (the validator's 0.5..2), then
+ * bring it back on screen if the new size ran it further off an edge
+ * (keepElementOnScreen). An element that does not scale is returned `===`.
+ */
+export function setScale(design: HudDesign, id: string, scale: number): HudDesign {
+  const el = elementById(id);
+  if (!el || el.resize !== 'scale') return design;
+  const next: HudDesign = { ...design, elements: { ...design.elements, [id]: { ...(design.elements[id] ?? {}), scale: clampOverride('scale', scale) } } };
+  return keepElementOnScreen(design, next, id, { x: true, y: true });
+}
+
+/**
+ * Plan decision 8 (2026-09-24-hud-editor-phase2-rest.md, task L4): scaling
+ * keeps a panel on screen by moving it, not by limiting the scale. `after`
+ * is `before` with a new scale; when its frame (elementFrame, where the
+ * handles sit) runs further past an edge than it did in `before`, it is
+ * placed wholly inside through placeElement, on the axes given. A panel the
+ * new scale did not push further out does not move, so one on its file
+ * anchor keeps it: the stock right-anchored frames already overhang the
+ * right edge by a few units (your own health 5, your infected health 13),
+ * and that alone never moves them. The game draws a panel past the edge cut
+ * off, which is what the owner saw (probe-phase2-rest RESULTS.md, "scaled
+ * panel runs off screen").
+ */
+export function keepElementOnScreen(before: HudDesign, after: HudDesign, id: string, axes: { x: boolean; y: boolean }): HudDesign {
+  const W = screenW(after.aspect);
+  const fb = elementFrame(before, id), fa = elementFrame(after, id);
+  // How far to move along one axis: 0 unless the frame's overhang on a side grew.
+  const shift = (b0: number, bs: number, a0: number, as: number, extent: number): number => {
+    const grew = (Math.max(0, a0 + as - extent) > Math.max(0, b0 + bs - extent) + 0.5) || (Math.max(0, -a0) > Math.max(0, -b0) + 0.5);
+    if (!grew) return 0;
+    if (a0 < 0 || as >= extent) return Math.ceil(-a0);                 // too big for the screen: its left or top edge on the screen's
+    return a0 + as > extent ? -Math.ceil(a0 + as - extent) : 0;
+  };
+  const dx = axes.x ? shift(fb.x, fb.w, fa.x, fa.w, W) : 0;
+  const dy = axes.y ? shift(fb.y, fb.h, fa.y, fa.h, SCREEN_H) : 0;
+  if (!dx && !dy) return after;
+  const r = elementRect(after, id, after.aspect);
+  return placeElement(after, id, r.x + dx, r.y + dy);
 }
 
 /**

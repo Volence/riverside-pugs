@@ -1421,6 +1421,16 @@ describe('Hud page', () => {
     expect(x().value).toBe('10');
   });
 
+  // Plan decision 8 (task L4): the Scale slider moves a panel it grows off screen back inside.
+  it('moves your health back on screen when its Scale slider grows it past the edge', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Your health' }));
+    const x = () => Number((screen.getByLabelText('X') as HTMLInputElement).value);
+    expect(x()).toBe(728);
+    fireEvent.input(screen.getByRole('slider', { name: /^Scale/ }), { target: { value: '2' } });
+    expect(x()).toBeLessThan(728);
+  });
+
   it('shows every Layers row its name, with a state note on its own line under it', () => {
     render(<Hud />);
     for (const [label, note] of [['Down picture', 'shown when down'], ['Dead picture', 'shown when dead'], ['Voice icon', 'shown when talking']]) {

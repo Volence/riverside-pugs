@@ -20,7 +20,7 @@ import { probe } from '../../hud/probes';
 import {
   cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild, resetChildKey, rowGapSlider, setRowGap,
   startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, patchWeapons, ammoOnly, setFit,
-  resetElementKey,
+  resetElementKey, setScale,
   type Align,
 } from '../../hud/edit';
 import { unionBox } from '../../hud/guides';
@@ -395,7 +395,7 @@ export function ElementControls(
       )}
 
       {el.resize === 'scale' && (
-        <Slider label="Scale" value={o.scale ?? 1} min={0.5} max={2} step={0.05} onInput={(scale) => patch({ scale }, 'gesture')} onEnd={end} />
+        <Slider label="Scale" value={o.scale ?? 1} min={0.5} max={2} step={0.05} onInput={(scale) => edit((d) => setScale(d, id, scale), 'gesture')} onEnd={end} />
       )}
 
       <TeamControls design={design} edit={edit} end={end} el={el} o={o} patch={patch} />
