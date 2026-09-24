@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, useErrorBoundary } from 'preact/hooks';
 import { Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { confirm } from '../components/Confirm';
-import { drawBackdrop, type Backdrop } from '../crosshair/draw';
+import { drawBackdrop, SIDE_BACKDROP, type Backdrop } from '../crosshair/draw';
 import { savedArt } from '../crosshair/saved';
 import { importedCrosshair } from '../crosshair/texture';
 import { readArt, type CrosshairArt } from '../crosshair/model';
@@ -54,7 +54,7 @@ import { decodeUpload } from './hud/decode';
 import { communityApi, ApiError } from '../api';
 import type { Session } from '../hooks/useLiveState';
 import { ShareDialog, type SharePrepared } from '../components/ShareDialog';
-import { prepareHudShare, renderPreview } from '../community/publish';
+import { prepareHudShare, renderPreviews } from '../community/publish';
 import { openCommunityImport, SAFETY_FAILED, KEPT_FOR_SESSION } from '../community/open';
 
 // assetsFor and assetSize moved to hud/assets.ts so the community page can
@@ -385,7 +385,13 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
   // changes the picture, never the design or the file.
   const [preview, setPreview] = useState<PreviewState>(DEFAULT_PREVIEW);
   const [held, setHeld] = useState<WeaponHeld>('primary');
-  const [backdrop, setBackdrop] = useState<Backdrop>('scene');
+  // Null until the player picks one: each side is then previewed on its own
+  // in-game shot (the forest for survivors, a spawned Hunter for infected),
+  // the same ones the community previews are drawn on. A pick sticks across
+  // sides, since a player who chose one wants it.
+  const [picked, setBackdrop] = useState<Backdrop | null>(null);
+  const backdrop: Backdrop = picked ?? SIDE_BACKDROP[side];
+  const backdropLoaded = () => setImgTick((t) => t + 1);
   // On load only: a design's own crosshair choice is loaded and coerced
   // twice (here and in `design`, above), rather than threading the loaded
   // value through, so the two reads stay obviously in sync with each other.
@@ -486,7 +492,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
 
     const shotSize = shot.current ? { w: shot.current.naturalWidth, h: shot.current.naturalHeight } : null;
-    drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize);
+    drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize, backdropLoaded);
     if (locked) return;
     try {
       const hovered = hover && !press.current ? targetOf(design, hover.hit, hover.ctrl, sel) : NONE;
@@ -686,7 +692,8 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     const d = current.current;
     const hud = await prepareHudShare(validateDesign(d));
     if (hud.design.imported) shareKept.current = hud.design.imported.id;
-    return { kind: 'hud', name: d.name, hud, preview: await renderPreview(hud.design) };
+    const shots = await renderPreviews(hud.design);
+    return { kind: 'hud', name: d.name, hud, preview: shots.survivor, previewInfected: shots.infected };
   };
   const prepareCrosshair = async (): Promise<SharePrepared> => {
     const d = current.current;

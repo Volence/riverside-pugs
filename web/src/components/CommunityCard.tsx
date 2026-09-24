@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import type { ComponentChildren } from 'preact';
 import { communityApi, ApiError, type CommunityEntry, type CommunityEntryDetail } from '../api';
 import type { Session } from '../hooks/useLiveState';
 import { PlayerLink } from './bits';
@@ -6,6 +7,7 @@ import { ReportPlayer } from './ReportPlayer';
 import { confirm } from './Confirm';
 import { drawBackdrop } from '../crosshair/draw';
 import { drawArt, readArt } from '../crosshair/model';
+import { SidePreviews } from './SidePreviews';
 
 /**
  * One shared HUD or crosshair: the gallery's card, the entry page's larger
@@ -165,16 +167,30 @@ export function CommunityCard(
     return <article class={`ccard ccard--${size} ccard--gone`}><p class="muted">{gone}</p></article>;
   }
 
-  const shot = isHud
-    ? (entry.previewUrl
-      ? <img class={`ccard__preview ccard__preview--${(entry.aspect ?? '16:9').replace(':', 'x')}`} src={entry.previewUrl} alt={`Preview of ${entry.title}`} loading="lazy" />
-      : <div class="ccard__nopreview" />)
-    : <CrosshairSwatch art={entry.art} title={entry.title} />;
+  /** The picture box, with `over` laid on it; a HUD's has the side toggle under it. */
+  const shotBox = (over?: ComponentChildren, toggle = true) => (isHud && entry.previewUrl
+    ? (
+      <SidePreviews
+        survivor={entry.previewUrl}
+        infected={toggle ? entry.previewInfectedUrl : null}
+        alt={`Preview of ${entry.title}`} lazy shotClass="ccard__shot"
+        imgClass={`ccard__preview ccard__preview--${(entry.aspect ?? '16:9').replace(':', 'x')}`}
+      >
+        {over}
+      </SidePreviews>
+    )
+    : (
+      <div class="ccard__shot">
+        {isHud ? <div class="ccard__nopreview" /> : <CrosshairSwatch art={entry.art} title={entry.title} />}
+        {over}
+      </div>
+    ));
 
   if (size === 'compact') {
     return (
       <a class="ccard ccard--compact" href={href}>
-        <div class="ccard__shot">{shot}</div>
+        {/* A profile's compact card is a link as a whole, so no buttons inside it: the survivor side only. */}
+        {shotBox(null, false)}
         <div class="ccard__body">
           <span class="ccard__kind">{isHud ? 'HUD' : 'Crosshair'}</span>
           <span class="ccard__title">{entry.title}</span>
@@ -185,11 +201,12 @@ export function CommunityCard(
 
   return (
     <article class={`ccard ccard--${size}`}>
-      <div class="ccard__shot">
-        {shot}
-        {badge && <span class="ccard__badge">{badge}</span>}
-        {isHud && entry.advanced && <span class="ccard__badge ccard__badge--adv">Advanced install</span>}
-      </div>
+      {shotBox(
+        <>
+          {badge && <span class="ccard__badge">{badge}</span>}
+          {isHud && entry.advanced && <span class="ccard__badge ccard__badge--adv">Advanced install</span>}
+        </>,
+      )}
       <div class="ccard__body">
         {size === 'large'
           ? <h2 class="ccard__title">{entry.title}</h2>

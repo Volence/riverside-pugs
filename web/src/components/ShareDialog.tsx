@@ -3,6 +3,7 @@ import { communityApi, ApiError, type CommunityKind, type CommunityMine } from '
 import type { Session } from '../hooks/useLiveState';
 import { shareHud, shareCrosshair, type PreparedHud } from '../community/publish';
 import type { CrosshairArt } from '../crosshair/model';
+import { SidePreviews } from './SidePreviews';
 
 /**
  * Share to community: the one dialog both editors open, a HUD from the HUD
@@ -24,8 +25,10 @@ export type SharePrepared =
     /** The title to start from: the design's name. */
     name: string;
     hud: PreparedHud;
-    /** The preview PNG the share uploads, as the dialog shows it. */
+    /** The survivor side's preview PNG the share uploads, as the dialog shows it. */
     preview: Blob;
+    /** The infected side's. */
+    previewInfected?: Blob;
   }
   | { kind: 'crosshair'; name: string; art: CrosshairArt };
 
@@ -47,7 +50,7 @@ export function ShareDialog(
   const canShare = session.kind === 'active';
   const [mine, setMine] = useState<CommunityMine | null>(null);
   const [prepared, setPrepared] = useState<SharePrepared | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewUrls, setPreviewUrls] = useState<{ survivor: string; infected: string | null } | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [permission, setPermission] = useState(false);
@@ -60,15 +63,20 @@ export function ShareDialog(
   useEffect(() => {
     if (!canShare) return undefined;
     let live = true;
-    let url: string | null = null;
+    const urls: string[] = [];
     communityApi.mine().then((m) => { if (live) setMine(m); }, () => { /* the server says the cap on Share anyway */ });
     prepare().then((p) => {
       if (!live) return;
       setPrepared(p);
       setTitle((t) => t || p.name.slice(0, TITLE_MAX));
-      if (p.kind === 'hud') { url = URL.createObjectURL(p.preview); setPreviewUrl(url); }
+      if (p.kind === 'hud') {
+        const survivor = URL.createObjectURL(p.preview);
+        const infected = p.previewInfected ? URL.createObjectURL(p.previewInfected) : null;
+        urls.push(survivor, ...(infected ? [infected] : []));
+        setPreviewUrls({ survivor, infected });
+      }
     }, (e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
-    return () => { live = false; if (url) URL.revokeObjectURL(url); };
+    return () => { live = false; for (const u of urls) URL.revokeObjectURL(u); };
   }, []);
 
   useEffect(() => {
@@ -93,7 +101,7 @@ export function ShareDialog(
     try {
       const text = { title: title.trim(), description: description.trim(), permission: true };
       const { id } = prepared.kind === 'hud'
-        ? await shareHud({ ...text, prepared: prepared.hud, preview: prepared.preview })
+        ? await shareHud({ ...text, prepared: prepared.hud, preview: prepared.preview, previewInfected: prepared.previewInfected })
         : await shareCrosshair({ ...text, art: prepared.art });
       setShared(id);
       onShared(id);
@@ -139,9 +147,14 @@ export function ShareDialog(
               </div>
             )}
             {kind === 'hud' && (
-              previewUrl
-                ? <img class="share__preview" src={previewUrl} alt="The preview that will be shared" />
-                : !error && <p class="muted">Drawing the preview...</p>
+              previewUrls
+                ? (
+                  <div>
+                    <SidePreviews survivor={previewUrls.survivor} infected={previewUrls.infected}
+                      alt="The preview that will be shared" imgClass="share__preview" shotClass="share__shot" />
+                  </div>
+                )
+                : !error && <p class="muted">Drawing the previews...</p>
             )}
             {prepared?.kind === 'hud' && prepared.hud.left.length > 0 && (
               <div class="share__left">

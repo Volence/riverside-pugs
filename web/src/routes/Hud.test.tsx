@@ -1233,6 +1233,24 @@ describe('Hud page', () => {
     expect(screen.getAllByRole('button', { name: /download/i })).toHaveLength(1);
   });
 
+  it('previews each side on its own in-game shot until a backdrop is picked, then keeps the pick', () => {
+    const { container } = render(<Hud />);
+    const bar = within(container.querySelector('.hud__toolbar') as HTMLElement);
+    const pick = () => bar.getByRole('combobox', { name: /backdrop/i }) as HTMLSelectElement;
+    expect(pick().value).toBe('survivor-hilltop');
+    const values = [...pick().querySelectorAll('option')].map((o) => o.value);
+    for (const v of ['survivor-hilltop', 'survivor-subway', 'infected-hunter', 'infected-ghost', 'scene', 'dark', 'bright', 'grey', 'shot']) {
+      expect(values, v).toContain(v);
+    }
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    expect(pick().value).toBe('infected-hunter');
+    fireEvent.change(pick(), { target: { value: 'survivor-subway' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Survivor' }));
+    expect(pick().value).toBe('survivor-subway');
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    expect(pick().value).toBe('survivor-subway');
+  });
+
   it('shows a Free card its own X and Y, placing the card where it is drawn', () => {
     render(<Hud />);
     fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
