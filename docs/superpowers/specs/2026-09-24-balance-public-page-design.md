@@ -120,3 +120,65 @@ compare, comments.
 - Page render tests: first patch, historical patch, no rounds, each verdict.
 - Before ship: run against a copy of production with the historical patches
   published and read the page by eye.
+
+## Planning review (2026-09-24, checked against the code)
+
+Every allowlisted id exists in `src/metrics/defs` (checked by hand; the registry
+test pins it). Gaps found and settled:
+
+1. **Which patch is "previous".** Published patches are ordered by their first
+   counted round, falling back to `first_seen_at` for a patch with none (then id).
+   The baseline for both "What changed" and "Measured effect" is the nearest
+   earlier published patch **that has counted rounds**: a published patch whose
+   rounds were all voided cannot serve as side A (every row would be "no data").
+2. **Previous patch without inputs.** A fingerprinted patch whose baseline is a
+   historical patch (no recorded inputs) shows "the change list is not available
+   because the previous patch predates recorded settings; see the notes" instead
+   of an empty list.
+3. **Knobs and files that appear or vanish from the inventory.** A cvar present
+   on one side only means `knobs.json` started or stopped watching it, not that
+   the game changed; it is left out. A watched config file or the per-map
+   stripper directory that differs in any way (changed, added, removed) is listed
+   once by its `knobs.json` label (the path when unlabelled). Plugins are shown
+   without `.smx`. Ignored plugins are dropped and versionless plugins only
+   count when they appear or disappear, as in the fingerprint.
+4. **Same numbers as the admin page, same cache.** The public entry calls
+   `compareSides` with exactly the admin default query (side A = baseline id,
+   side B = this id, origin `all`, all maps, phases `all`) and memoizes it under
+   the admin route's own cache key. Benjamini-Hochberg already runs as two
+   families (whole-round, sub-phase), so the whole-round family is identical
+   whether or not the admin asked for phase splitting: parity holds by
+   construction. Only the compare result is cached; name, notes and the change
+   list are read fresh, so a notes edit shows at once.
+5. **Single-flight.** `compareSides` and `memo` are synchronous (better-sqlite3),
+   so Node runs one computation to completion before the next request is
+   handled; the second request finds the cache filled. No extra machinery; a
+   test pins one computation for two concurrent requests.
+6. **Allowlisted metric absent on both sides.** `compareSides` emits no row when
+   neither side has samples. The public entry still lists every allowlisted
+   metric; a missing one reads as no data.
+7. **No-data wording** distinguishes the side: "Not measured for this patch."
+   (B missing), "Not measured for the previous patch." (A missing), and "No maps
+   in common with the previous patch, so no comparison." (`noSharedMaps`).
+8. **Too early without an estimate** (`moreMatches` null): "Too early to tell:
+   more matches needed." Estimates of 500 or more read "500+".
+9. **Public skill banner** is a flag (`differs` / `unavailable`), worded for
+   players on the page; the admin text carries rating numbers and is not sent.
+10. **Real-change wording** gives the change and its range: "Measured change:
+    <label> went from X to Y (+d, likely between lo and hi)."
+11. **Per-spawn rates that cannot exceed one per spawn** (`hunter.skeet_rate`,
+    `boomer.pop_rate`) are shown as percentages on the public page to match
+    their labels ("Hunters skeeted"); every other value uses the admin
+    formatter.
+12. **A published patch whose name is later cleared** shows as "Patch N" (its
+    time-ordered number); the admin edit route is not changed (piece 4 is
+    editing the same file).
+13. **Routes live in their own module** (`src/routes/balancePublic.ts`), public
+    GETs plus the admin preview and publish routes, registered next to the stats
+    routes. Same public, unauthenticated behaviour the spec asks for; kept out of
+    `routes/stats.ts` and `routes/admin.ts` to limit merge conflicts with piece 4.
+14. **Admin API:** `GET /api/admin/balance/patches/:id/public` returns the entry
+    as if the patch were published (the preview); `POST
+    /api/admin/balance/patches/:id/publish {published: boolean}` publishes (400
+    naming what is missing: name, notes or a counted round) or unpublishes. Both
+    are admin only and the POST is audit-logged.
