@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { childRects, drawPanel, setFont, PANEL_FILE, hiddenInState, ITEM_ROW, itemRowStart, paintAdditive, healthRgb, _setImageFactory, _setCanvasFactory, _resetAssetCache, _cacheSizes, splatterSource, tinted } from './render';
+import { childRects, drawPanel, setFont, PANEL_FILE, hiddenInState, previewOf, DEFAULT_PREVIEW, ITEM_ROW, itemRowStart, paintAdditive, healthRgb, _setImageFactory, _setCanvasFactory, _resetAssetCache, _cacheSizes, splatterSource, tinted } from './render';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { buildHud } from './build';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
@@ -10,6 +10,7 @@ import { cssFamily, fontCell, _resetImportFaces } from './fonts';
 import { registerImport, unregisterImport, baseFile } from './base';
 import { sampleHud, fakeCanvas, recordingCtx, hostileFont, type HostileFontKind } from './importFixtures';
 import { _resetImportedArt } from './importArt';
+import { TEAM_PANEL } from './children';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -858,5 +859,36 @@ describe('custom splatter', () => {
       // Only HealthbarTextureBottom (stock, tinted) makes a multiply now; the kept-colour top makes none.
       expect(scratch.calls.filter((c) => c.m === 'fillRect' && c.op === 'multiply')).toHaveLength(1);
     } finally { _setCanvasFactory(null); }
+  });
+});
+
+describe('the preview state', () => {
+  // The table the registry replaced, copied here so the change is provably the same picture.
+  const OLD: Record<'healthy' | 'down' | 'dead', string[]> = {
+    healthy: ['incapacitated', 'dead', 'voice'],
+    down: ['head', 'dead', 'voice'],
+    dead: ['head', 'incapacitated', 'voice', 'health', 'healthnumber', 'items'],
+  };
+  it('hides exactly what the old teammate table hid, in every state', () => {
+    for (const state of ['healthy', 'down', 'dead'] as const) {
+      for (const def of TEAM_PANEL.children) {
+        expect(hiddenInState('teamColumn', def.name, state), `${state} ${def.name}`).toBe(OLD[state].includes(def.name.toLowerCase()));
+      }
+    }
+  });
+  it('takes a whole preview state as well as a survivor state', () => {
+    expect(hiddenInState('teamColumn', 'Head', { ...DEFAULT_PREVIEW, survivor: 'down' })).toBe(true);
+    expect(previewOf('dead')).toEqual({ ...DEFAULT_PREVIEW, survivor: 'dead' });
+    expect(previewOf()).toEqual(DEFAULT_PREVIEW);
+  });
+  it('shows Hurt as Healthy shows it, piece for piece', () => {
+    for (const def of TEAM_PANEL.children) expect(hiddenInState('teamColumn', def.name, 'hurt'), def.name).toBe(hiddenInState('teamColumn', def.name, 'healthy'));
+  });
+  it('keeps the old always-hidden list for panels the registry does not have yet', () => {
+    for (const n of ['DuckingIcon', 'Incapacitated', 'SpawnTimeLabel', 'SkullIconPlacement']) expect(hiddenInState('ownHealth', n, 'healthy'), n).toBe(true);
+    expect(hiddenInState('ownHealth', 'Head', 'down')).toBe(false);
+  });
+  it('leaves an unregistered piece of a registered panel alone (the card background, the splatter stand-in)', () => {
+    expect(hiddenInState('teamColumn', 'HudEdCardBg', 'dead')).toBe(false);
   });
 });

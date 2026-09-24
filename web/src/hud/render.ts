@@ -9,14 +9,15 @@
  * sizes, bars from the bar art. Nothing here decides a position: that is the
  * tree's job, which is the whole point.
  *
- * The preview shows the healthy, alive state, so children whose visibility
- * game code decides at runtime are not drawn: their positions are still
- * reported by childRects so a later editor can move them.
- *
- * The teammate card is the exception: the page can ask for the Down or Dead
- * state (DrawOpts.state), and each state draws what the game shows in it,
- * still from the same generated tree, so fitted, squared state art shows
- * exactly as the file will make the game draw it.
+ * The page picks a preview state (DrawOpts.state, a PreviewState or just a
+ * survivor state), and each registered panel draws what the game shows in
+ * it: the child registry says, per piece, which state it belongs to
+ * (stateArt) and which states hide it (hideIn), so what each state shows is
+ * said once, in data. It is still drawn from the same generated tree, so
+ * fitted, squared state art shows exactly as the file will make the game
+ * draw it. A panel the registry does not have yet shows the healthy, alive
+ * state: children whose visibility game code decides at runtime are not
+ * drawn, though childRects still reports their positions.
  *
  * The owner's in-game screenshot of the stock HUD at full health and the
  * probe caught two things game code decides that the .res files alone do not
@@ -36,14 +37,37 @@ import { canvasFont, fontCell, importedFace, loadFace, type FontCell } from './f
 import { baseOf, onUnregister } from './base';
 import { importedMaterial, _resetImportedArt } from './importArt';
 import { addLinear } from './additive';
+import { panelChildren, childDef, type SurvivorState } from './children';
+import { elementById } from './elements';
 import { splatterForMaterial, fadePixels, splatterDef, type SplatterDef, type SplatterId } from './splatter';
 
 export type ChildKind = 'image' | 'label' | 'bar' | 'other';
 export interface ChildRect { name: string; kind: ChildKind; x: number; y: number; w: number; h: number; visible: boolean }
 export interface PanelBox { x: number; y: number }
-/** The teammate card state the preview shows. Game code picks it at runtime; the page lets the player pick it. */
-export type CardState = 'healthy' | 'down' | 'dead';
-export interface DrawOpts { card?: number; onAsset?: () => void; state?: CardState }
+export type { SurvivorState } from './children';
+/** The survivor state the preview shows. Kept under its Phase 1 name: the page, importCheck and tests import it. */
+export type CardState = SurvivorState;
+
+/**
+ * Everything the preview can show a panel in. Game code picks each of these
+ * at runtime; the page lets the player pick them.
+ */
+export interface PreviewState {
+  survivor: SurvivorState;
+  crouched: boolean;
+  infected: 'alive' | 'ghost' | 'dead';
+  siClass: 'hunter' | 'smoker' | 'boomer' | 'tank';
+  ability: 'ready' | 'charging';
+}
+export const DEFAULT_PREVIEW: PreviewState = { survivor: 'healthy', crouched: false, infected: 'alive', siClass: 'hunter', ability: 'ready' };
+
+/** A whole preview state from either form a caller holds. */
+export function previewOf(s?: SurvivorState | PreviewState): PreviewState {
+  if (s === undefined) return { ...DEFAULT_PREVIEW };
+  return typeof s === 'string' ? { ...DEFAULT_PREVIEW, survivor: s } : s;
+}
+
+export interface DrawOpts { card?: number; onAsset?: () => void; state?: SurvivorState | PreviewState }
 
 const SCHEME = 'resource/clientscheme.res';
 
@@ -56,7 +80,8 @@ export const PANEL_FILE: Record<string, string> = {
 };
 
 /**
- * Game code decides when these show; the preview is the healthy, alive state.
+ * Game code decides when these show, on panels the child registry does not
+ * have yet; there the preview is the healthy, alive state.
  * The infected card's SpawnTimeLabel is one of them: the game shows the spawn
  * countdown only while that player is dead or a ghost, and in the stock file
  * it sits right over the live HealthPanel.
@@ -64,23 +89,29 @@ export const PANEL_FILE: Record<string, string> = {
 const STATE_CHILDREN = new Set(['incapacitated', 'dead', 'voice', 'skulliconplacement', 'duckingicon', 'spawntimelabel']);
 
 /**
- * What the teammate card shows in each preview state, beyond what visible 0
- * hides. Game code decides this at runtime; these are a best reading of the
- * probe screenshots (a down teammate's portrait gives way to the
- * incapacitated art, a dead one keeps only the dead art and a dimmed name),
- * and the owner corrects them after seeing them. Voice shows only while
- * someone talks, so it is never drawn.
+ * Whether the preview leaves a child out in this state. A registered piece
+ * says it itself: a stateArt piece shows only in its state (talking is never
+ * previewed), a hideIn piece hides in those survivor states. Those entries
+ * are a best reading of the probe screenshots (a down teammate's portrait
+ * gives way to the incapacitated art, a dead one keeps only the dead art and
+ * a dimmed name), and the owner corrects them after seeing them. A
+ * registered panel's unregistered piece (the card background, the splatter
+ * stand-in) is never hidden by state; an unregistered panel keeps
+ * STATE_CHILDREN.
  */
-const TEAM_HIDDEN: Record<CardState, ReadonlySet<string>> = {
-  healthy: new Set(['incapacitated', 'dead', 'voice']),
-  down: new Set(['head', 'dead', 'voice']),
-  dead: new Set(['head', 'incapacitated', 'voice', 'health', 'healthnumber', 'items']),
-};
-
-/** Whether the preview leaves a child out in this state. Every panel but the teammate card shows the healthy, alive state. */
-export function hiddenInState(panelId: string, name: string, state: CardState): boolean {
-  const n = name.toLowerCase();
-  return panelId === 'teamColumn' ? TEAM_HIDDEN[state].has(n) : STATE_CHILDREN.has(n);
+export function hiddenInState(panelId: string, name: string, state: SurvivorState | PreviewState): boolean {
+  const v = previewOf(state);
+  if (!panelChildren(panelId)) return STATE_CHILDREN.has(name.toLowerCase());
+  const def = childDef(panelId, name);
+  if (!def) return false;
+  switch (def.stateArt) {
+    case 'down': return v.survivor !== 'down';
+    case 'dead': return elementById(panelId)?.side === 'infected' ? v.infected !== 'dead' : v.survivor !== 'dead';
+    case 'crouched': return !v.crouched;
+    case 'ghost': return v.infected !== 'ghost';
+    case 'talking': return true;
+    default: return !!def.hideIn?.includes(v.survivor);
+  }
 }
 
 /** A dead teammate's name stays on the card, dimmed. */
@@ -301,7 +332,7 @@ const HEALTH_LABELS = new Set(['healthnumber', 'healthicon']);
 
 /** The preview's sample: full health, or down (incapacitated) on a teammate card shown down. */
 function sampleHealthRgb(opts: DrawOpts): [number, number, number] {
-  return healthRgb(100, 100, opts.state === 'down');
+  return healthRgb(100, 100, previewOf(opts.state).survivor === 'down');
 }
 
 // --- images: the exported art, or a slot texture the design generated ---
@@ -644,7 +675,7 @@ function drawSplatter(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNod
 
 function sampleText(n: KvNode, opts: DrawOpts): string {
   const t = kvGet(n, 'labelText') ?? '';
-  if (t === '%HealthNumber%') return opts.state === 'down' ? '299' : '100';   // down, the number is the incap health (probe T7)
+  if (t === '%HealthNumber%') return previewOf(opts.state).survivor === 'down' ? '299' : '100';   // down, the number is the incap health (probe T7)
   const lname = n.key.toLowerCase();
   if (t === '' && (lname === 'name' || lname === 'namelabel')) return opts.card === undefined ? 'Bill' : CARD_NAMES[opts.card % CARD_NAMES.length];
   return t;
@@ -795,23 +826,23 @@ function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: st
  * there is nothing a design can restyle here.
  */
 function drawBar(ctx: CanvasRenderingContext2D, r: ChildRect, opts: DrawOpts) {
-  const down = opts.state === 'down';
+  const down = previewOf(opts.state).survivor === 'down';
   const img = artImage(down ? 'vgui/healthbar_red' : 'vgui/healthbar_green', opts.onAsset);
   if (img) ctx.drawImage(img, r.x, r.y, r.w, r.h);
   else { ctx.fillStyle = down ? 'rgba(192,28,0,0.9)' : 'rgba(76,217,100,0.9)'; ctx.fillRect(r.x, r.y, r.w, r.h); }
 }
 
 export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: string, origin: PanelBox, k: number, opts: DrawOpts = {}): void {
-  const state = opts.state ?? 'healthy';
+  const view = previewOf(opts.state);
   const nodes = orderedChildren(buildTrees(design)(PANEL_FILE[panelId]));
   const rects = childRects(design, panelId, origin, k);
   for (const [i, n] of nodes.entries()) {
     const r = rects[i];
     const lname = n.key.toLowerCase();
-    if (!r.visible || hiddenInState(panelId, lname, state)) continue;
+    if (!r.visible || hiddenInState(panelId, lname, view)) continue;
     let alpha = 1;
     if (isTeamColumnHealthbarBg(panelId, n)) alpha = SPLATTER_ALPHA;
-    if (panelId === 'teamColumn' && state === 'dead' && lname === 'name') alpha = DEAD_NAME_ALPHA;
+    if (panelId === 'teamColumn' && view.survivor === 'dead' && lname === 'name') alpha = DEAD_NAME_ALPHA;
     if (alpha !== 1) { ctx.save(); ctx.globalAlpha *= alpha; }
     switch (r.kind) {
       case 'image': drawImageChild(ctx, design, n, r, k, opts); break;

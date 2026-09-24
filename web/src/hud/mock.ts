@@ -18,7 +18,7 @@ import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHas
 import { baseOf } from './base';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H, parseSize } from './units';
-import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, colourOf, setFont, fillFontText, type CardState } from './render';
+import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, colourOf, setFont, fillFontText, type CardState, type PreviewState, type SurvivorState } from './render';
 import { drawArt } from '../crosshair/model';
 import { teamChild } from './children';
 import { drawWeapons, type WeaponHeld } from './weapons';
@@ -50,7 +50,7 @@ interface Rect { x: number; y: number; w: number; h: number }
  * and the snap guides of a drag under way.
  */
 export interface HudView {
-  state?: CardState;
+  state?: SurvivorState | PreviewState;
   /** The weapon slot the preview survivor holds (weapons.ts's WeaponHeld); the gun when absent. */
   held?: WeaponHeld;
   frames?: Box[];
