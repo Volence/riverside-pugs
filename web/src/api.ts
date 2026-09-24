@@ -854,6 +854,9 @@ export interface PatchSummary {
   rounds: number;
   /** Rounds the comparison uses: computed rounds of completed, non-voided matches. */
   countedRounds: number;
+  /** Merged into another patch by the boot refingerprint: keeps its rounds,
+   *  gets no new ones. Optional so an older server's answer still reads. */
+  merged?: boolean;
   servers: { serverId: number; name: string; lastSeenAt: string }[];
 }
 export interface PatchDetail extends PatchSummary {

@@ -34,7 +34,9 @@ export function Compare() {
   const patches = useFetch((s) => adminApi.balancePatches(s), []);
   const list = patches.data?.patches ?? [];
   const oldestFirst = list.map((p) => p.id);
-  const q = readCompareQuery(location.search, oldestFirst, list.filter((p) => p.countedRounds > 0).map((p) => p.id));
+  // A merged patch is never a default side: its config is the one it was
+  // merged into, so "previous vs latest" would compare a config with itself.
+  const q = readCompareQuery(location.search, oldestFirst, list.filter((p) => p.countedRounds > 0 && !p.merged).map((p) => p.id));
   const set = (next: Partial<CompareQueryWithView>) => route(`/admin/balance${writeCompareQuery({ ...q, ...next })}`, true);
   const ready = list.length > 0 && q.a.length > 0 && q.b.length > 0;
   const same = ready && q.a.length === q.b.length && q.a.every((id) => q.b.includes(id));
