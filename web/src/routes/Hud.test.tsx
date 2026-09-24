@@ -958,6 +958,12 @@ describe('Hud page', () => {
     expect(box().checked).toBe(true);
   });
 
+  it('lets any file be picked for Import a HUD, so a renamed one like my_hud.vpk.orig is not hidden', () => {
+    render(<Hud />);
+    // No accept filter: a file that is not a HUD is refused by the import's own error message.
+    expect((screen.getByLabelText('Import a HUD file') as HTMLInputElement).hasAttribute('accept')).toBe(false);
+  });
+
   const undoKey = (extra: Partial<KeyboardEventInit> = {}) =>
     fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true, ...extra });
 
