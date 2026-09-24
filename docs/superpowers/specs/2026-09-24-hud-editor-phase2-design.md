@@ -322,7 +322,7 @@ Items 13, 16, 20 to 24, 26, 27 and 35 re-marked after plan task V3 (in-game evid
 | 21 | ability ring and crosshair marker colours and sizes | **Done** (slice 2.3) |
 | 22 | tank frustration layout | **Done**: move and hide, and every piece behind gate T1, which V1d passed (the bar's alignment against the stock control V1f) |
 | 23 | dead-infected countdown | **Done** (M4): move, colour and size, the line seen in V1c |
-| 24 | voice list, own mic | **Done** for your microphone (move, size, picture upload; M-verify). Voice lists: move and hide only, never seen (they list other players) |
+| 24 | voice list, own mic | **Done** for your microphone (move, size, picture upload; M-verify). Voice lists: move and hide only, never seen (they list other players); the voice list row keys and the teammate talking icon upload (`voice_player`) wait on gate P2 (a second player talking), closed |
 | 25 | server (SourceMod) menu | **Open**, deferred (section 6) |
 | 26 | vote panel | **Done** (move, hide, background colour; M-verify) |
 | 27 | minor panels | kill notices **done** incl. text size and alignment (gate K5 passed, V1a); too-far box and Tank offer box **done** (gate Z3 passed, V1b; the preview draws the too-far box only); peril, leaving area, finale meter: move and hide only, never seen; captions, damage arcs, history: not started |
