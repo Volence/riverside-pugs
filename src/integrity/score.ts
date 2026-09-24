@@ -1,4 +1,6 @@
 import { TUNING } from './constants.js';
+import type { HiddenMetrics } from './hidden.js';
+import { TRACKED_CLASSES, type InfectedClass } from './los.js';
 import type { OccResult } from './occupancy.js';
 import type { RoundMetrics } from './round.js';
 
@@ -67,12 +69,18 @@ export function occupancyZ(occ: OccResult, k: number): number | null {
  *
  * A map with under MIN_CAL_EXPECTED expected blocks on the board uses the whole
  * board's ratio, and a board with nothing measured uses 1.
+ *
+ * `pick` chooses which occupancy is being calibrated: metric B's, or metric
+ * E's, which is calibrated on its own because hidden pairs are a different
+ * population of moments.
  */
-export function calibrate(rows: ScoreRow[]): (map: string | null | undefined) => number {
+export function calibrate(
+  rows: ScoreRow[], pick: (m: RoundMetrics) => OccResult | null | undefined = (m) => m.occ,
+): (map: string | null | undefined) => number {
   const byMap = new Map<string, { observed: number; expected: number }>();
   const all = { observed: 0, expected: 0 };
   for (const r of rows) {
-    const occ = r.metrics.occ;
+    const occ = pick(r.metrics);
     if (!occ) continue;
     all.observed += occ.observed;
     all.expected += occ.expected;
@@ -88,6 +96,8 @@ export function calibrate(rows: ScoreRow[]): (map: string | null | undefined) =>
     return m && m.expected >= TUNING.MIN_CAL_EXPECTED ? m.observed / m.expected : board;
   };
 }
+
+export interface ClassScores { hiddenShare: number | null; hiddenOccZ: number | null; revealShare: number | null }
 
 export interface PlayerAgg {
   steamid: string;
@@ -106,11 +116,49 @@ export interface PlayerAgg {
   trackShare: number | null;
   occZ: number | null;
   teamGap: number | null;
+  /** Rounds whose replay recorded line of sight: what the hidden metrics'
+   *  MIN_BOARD_ROUNDS counts. Version 4 rows have none. */
+  losRounds: number;
+  hiddenScoreable: number;
+  /** Metric D: pooled lag-tolerant fidelity over scoreable hidden windows. */
+  hiddenShare: number | null;
+  /** Metric E: mean per-round z against its own per-map calibration. */
+  hiddenOccZ: number | null;
+  reveals: number;
+  /** Metric F: share of reveals already on target. Null under MIN_REVEALS. */
+  revealShare: number | null;
+  /** The same three per infected class. Hunters are quiet when crouched, so a
+   *  player far above the league on hunters is the strongest signal. */
+  byClass: Record<InfectedClass, ClassScores>;
 }
 
 function meanOrNull(xs: (number | null)[]): number | null {
   const ns = xs.filter((x): x is number => x != null);
   return ns.length ? ns.reduce((a, b) => a + b, 0) / ns.length : null;
+}
+
+/** D, E and F for one player's rounds, at the given class or overall. Every
+ *  value is null under MIN_BOARD_ROUNDS rounds with line of sight: sample
+ *  sizes here are small, and a small sample must read "not enough", not a
+ *  number (spec section 3, Minimums). */
+function hiddenScores(
+  hid: { h: HiddenMetrics; map: string | null | undefined }[],
+  k: (map: string | null | undefined) => number,
+  part: (h: HiddenMetrics) => { scoreable: number; fidSum: number; occ: OccResult | null; reveals: number; revealOn: number },
+): ClassScores & { scoreable: number; reveals: number } {
+  const enough = hid.length >= TUNING.MIN_BOARD_ROUNDS;
+  const parts = hid.map((x) => ({ p: part(x.h), map: x.map }));
+  const scoreable = parts.reduce((a, x) => a + x.p.scoreable, 0);
+  const fidSum = parts.reduce((a, x) => a + x.p.fidSum, 0);
+  const reveals = parts.reduce((a, x) => a + x.p.reveals, 0);
+  const on = parts.reduce((a, x) => a + x.p.revealOn, 0);
+  return {
+    scoreable,
+    reveals,
+    hiddenShare: enough && scoreable >= TUNING.MIN_TRACK_WINDOWS ? fidSum / scoreable : null,
+    hiddenOccZ: enough ? meanOrNull(parts.map((x) => (x.p.occ ? occupancyZ(x.p.occ, k(x.map)) : null))) : null,
+    revealShare: enough && reveals >= TUNING.MIN_REVEALS ? on / reveals : null,
+  };
 }
 
 /** Roll a player's rounds into one row.
@@ -136,6 +184,8 @@ function meanOrNull(xs: (number | null)[]): number | null {
  *  rounds, because a single high occupancy round really can be luck. */
 export function aggregate(rows: ScoreRow[]): PlayerAgg[] {
   const k = calibrate(rows);
+  const kHidden = calibrate(rows, (m) => m.hidden?.occ);
+  const kClass = new Map(TRACKED_CLASSES.map((c) => [c, calibrate(rows, (m) => m.hidden?.byClass[c].occ)]));
   const scored = rows.map((r) => ({ ...r, z: r.metrics.occ ? occupancyZ(r.metrics.occ, k(r.map)) : null }));
 
   const byRound = new Map<string, number[]>();
@@ -167,6 +217,22 @@ export function aggregate(rows: ScoreRow[]): PlayerAgg[] {
       trackShare: scoreable >= TUNING.MIN_TRACK_WINDOWS ? fidSum / scoreable : null,
       occZ: meanOrNull(list.map((r) => r.z)),
       teamGap: meanOrNull(list.map(gapOf)),
+      ...(() => {
+        const hid = list.flatMap((r) => (r.metrics.hidden ? [{ h: r.metrics.hidden, map: r.map }] : []));
+        const all = hiddenScores(hid, kHidden, (h) => h);
+        return {
+          losRounds: hid.length,
+          hiddenScoreable: all.scoreable,
+          hiddenShare: all.hiddenShare,
+          hiddenOccZ: all.hiddenOccZ,
+          reveals: all.reveals,
+          revealShare: all.revealShare,
+          byClass: Object.fromEntries(TRACKED_CLASSES.map((c) => {
+            const s = hiddenScores(hid, kClass.get(c)!, (h) => h.byClass[c]);
+            return [c, { hiddenShare: s.hiddenShare, hiddenOccZ: s.hiddenOccZ, revealShare: s.revealShare }];
+          })) as Record<InfectedClass, ClassScores>,
+        };
+      })(),
     };
   });
 }
@@ -178,6 +244,12 @@ export interface ScoredPlayer extends PlayerAgg {
   pFid: number | null;
   pOcc: number | null;
   pGap: number | null;
+  /** Percentiles of D, E and F among ranked players who have them. Shown, NOT
+   *  in the composite: their thresholds are uncalibrated (spec section 6), and
+   *  an uncalibrated number in the rank would reorder the review list on it. */
+  pHidden: number | null;
+  pHiddenOcc: number | null;
+  pReveal: number | null;
   /** Mean of the three percentiles, with a MISSING one counted as the middle of
    *  the population rather than dropped. A sort key, not a claim. Null when
    *  unranked. */
@@ -197,6 +269,9 @@ export function scorePlayers(aggs: PlayerAgg[]): ScoredPlayer[] {
   const fids = some(pool.map((a) => a.trackShare));
   const occs = some(pool.map((a) => a.occZ));
   const gaps = some(pool.map((a) => a.teamGap));
+  const hiddens = some(pool.map((a) => a.hiddenShare));
+  const hiddenOccs = some(pool.map((a) => a.hiddenOccZ));
+  const revealsP = some(pool.map((a) => a.revealShare));
 
   const ranked = pool.map((a) => {
     const pFid = a.trackShare == null ? null : percentile(fids, a.trackShare);
@@ -209,14 +284,23 @@ export function scorePlayers(aggs: PlayerAgg[]): ScoredPlayer[] {
     // high on all three to match. Seen live on 2026-09-21, where a 3-round
     // player with two n/a ranked 1 of 82 on a single number.
     const parts = [pFid, pOcc, pGap].map((x) => (x == null ? NEUTRAL_PERCENTILE : x));
-    return { ...a, ranked: true, pFid, pOcc, pGap, composite: parts.reduce((x, y) => x + y, 0) / parts.length };
+    return {
+      ...a, ranked: true, pFid, pOcc, pGap,
+      pHidden: a.hiddenShare == null ? null : percentile(hiddens, a.hiddenShare),
+      pHiddenOcc: a.hiddenOccZ == null ? null : percentile(hiddenOccs, a.hiddenOccZ),
+      pReveal: a.revealShare == null ? null : percentile(revealsP, a.revealShare),
+      composite: parts.reduce((x, y) => x + y, 0) / parts.length,
+    };
   }).sort((x, y) => y.composite - x.composite);
 
   // Listed, because an admin searching for a name should find it, and last,
   // because nothing is known about them. Most rounds first: the nearest to
   // being ranked, and the most there is to look at in the meantime.
   const unranked = aggs.filter((a) => a.eligibleRounds < TUNING.MIN_BOARD_ROUNDS)
-    .map((a) => ({ ...a, ranked: false, pFid: null, pOcc: null, pGap: null, composite: null }))
+    .map((a) => ({
+      ...a, ranked: false, pFid: null, pOcc: null, pGap: null,
+      pHidden: null, pHiddenOcc: null, pReveal: null, composite: null,
+    }))
     .sort((x, y) => y.eligibleRounds - x.eligibleRounds);
   return [...ranked, ...unranked];
 }
