@@ -93,7 +93,14 @@ export function occupancyWithGates(
 
   // Null, never zero. No prior means the map has too little history to say
   // anything, and a thin prior is worse than no score at all.
-  if (!prior || prior.frames <= 0 || blocks.size === 0) return { occ: null, gates };
+  if (!prior || prior.frames <= 0) return { occ: null, gates };
+  return { occ: occFromBlocks(blocks, pairs), gates };
+}
+
+/** Blocks to sums. Shared with metric E so the two occupancy scores are the
+ *  same arithmetic over different pairs. Null when no block formed. */
+export function occFromBlocks(blocks: Map<string, { n: number; on: number; p: number }>, pairs: number): OccResult | null {
+  if (blocks.size === 0) return null;
   let observed = 0, expected = 0, expectedSq = 0;
   for (const b of blocks.values()) {
     const p = b.p / b.n;
@@ -101,5 +108,5 @@ export function occupancyWithGates(
     expected += p;
     expectedSq += p * p;
   }
-  return { occ: { observed, expected, expectedSq, blocks: blocks.size, pairs }, gates };
+  return { observed, expected, expectedSq, blocks: blocks.size, pairs };
 }
