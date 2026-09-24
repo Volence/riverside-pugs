@@ -144,6 +144,18 @@ describe('Compare', () => {
     await waitFor(() => expect(mockAdmin.balanceCompare).toHaveBeenCalledWith(expect.objectContaining({ a: [1], b: [2] }), expect.anything()));
   });
 
+  it('does not default to a patch that was merged into another', async () => {
+    // Production 2026-09-24: patch 7 (one match) was merged into patch 6 when
+    // l4d_tvwatch joined the ignored list. It keeps its rounds, but opening
+    // the page on "6 vs 7" compares one config with itself.
+    const merged = { ...patches[1], id: 3, number: 3, name: null, source: 'detected', firstSeenAt: '2026-09-24 05:41:10', rounds: 8, countedRounds: 8, merged: true };
+    mockAdmin.balancePatches.mockResolvedValue({ patches: [...patches, merged] });
+    mockAdmin.balanceCompare.mockResolvedValue(result);
+    history.replaceState(null, '', '/admin/balance');
+    render(<LocationProvider><Compare /></LocationProvider>);
+    await waitFor(() => expect(mockAdmin.balanceCompare).toHaveBeenCalledWith(expect.objectContaining({ a: [1], b: [2] }), expect.anything()));
+  });
+
   it('explains an empty side instead of showing chips and rows', async () => {
     mockAdmin.balancePatches.mockResolvedValue({ patches });
     mockAdmin.balanceCompare.mockResolvedValue({ ...result, b: { ...side, matches: 0, rounds: 0 }, rows: [], counts: { real: 0, too_early: 0, noise: 0, no_data: 0 } });
