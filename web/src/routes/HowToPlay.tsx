@@ -69,11 +69,11 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
 const INSTALL_FAQ: { q: string; a: preact.ComponentChildren }[] = [
   {
     q: "I don't want to run the pack's left4dead.exe",
-    a: <>The pack's exe is there for one reason: it may use 4 GB of memory, and Steam's may
+    a: <><p>The pack's exe is there for one reason: it may use 4 GB of memory, and Steam's may
       only use 2 GB. The L4D2 maps need more than 2 GB, so on Steam's exe they crash with "Out
       of memory or address space". The catch is that the pack's exe is an older build, not
       Steam's with one change, so you cannot easily check what is in it. You can give your
-      own exe the same permission instead, and that is a one-byte change you can check:
+      own exe the same permission instead, and that is a one-byte change you can check:</p>
       <ol class="howto">
         <li>In step 3, drag in everything except <code>left4dead.exe</code>.</li>
         <li>
@@ -88,7 +88,7 @@ const INSTALL_FAQ: { q: string; a: preact.ComponentChildren }[] = [
   $exe = Join-Path (Get-Location) 'left4dead.exe'
   $b = [IO.File]::ReadAllBytes($exe)
   $pe = [BitConverter]::ToInt32($b, 0x3C)
-  if ($b[$pe] -ne 0x50 -or $b[$pe+1] -ne 0x45) { throw 'Not a Windows program. Are you in the Left 4 Dead folder?' }
+  if ($b[$pe] -ne 0x50 -or $b[$pe+1] -ne 0x45) { throw 'Run this in the Left 4 Dead folder.' }
   if ($b[$pe+22] -band 0x20) { 'left4dead.exe already has the flag. Nothing to do.'; return }
   Copy-Item $exe "$exe.bak" -Force
   $b[$pe+22] = $b[$pe+22] -bor 0x20
@@ -101,22 +101,22 @@ const INSTALL_FAQ: { q: string; a: preact.ComponentChildren }[] = [
           exactly one difference, <code>000000FE: 02 22</code>, and nothing else.
         </li>
       </ol>
-      Steam's <strong>Verify integrity of game files</strong> and any L4D1 update put Steam's
+      <p>Steam's <strong>Verify integrity of game files</strong> and any L4D1 update put Steam's
       exe back, so run it again after either. Verify also resets{' '}
       <code>left4dead\gameinfo.txt</code>, which turns the map pack off, so redo step 3 after
-      it too.</>,
+      it too.</p></>,
   },
   {
     q: 'I already have L4D2 maps installed',
-    a: <>Delete the old <code>left4dead_dlc4</code> folder first. If <code>thelaststand.vpk</code>{' '}
+    a: <p>Delete the old <code>left4dead_dlc4</code> folder first. If <code>thelaststand.vpk</code>{' '}
       or <code>[L4D] Campaign pack l4d2.vpk</code> are in <code>left4dead\addons</code>, delete
-      those too. Then start from step 3 above.</>,
+      those too. Then start from step 3 above.</p>,
   },
   {
     q: 'Turning the map pack back off',
-    a: <>Nothing to delete. Open <code>left4dead\gameinfo.txt</code>, put <code>//</code> in
+    a: <><p>Nothing to delete. Open <code>left4dead\gameinfo.txt</code>, put <code>//</code> in
       front of the <code>Game left4dead_dlc4</code> line, save, and restart the game. It looks
-      like this:
+      like this:</p>
       <pre class="launch-opts"><code>{`SearchPaths
 {
     Game    |gameinfo_path|.
@@ -127,12 +127,12 @@ const INSTALL_FAQ: { q: string; a: preact.ComponentChildren }[] = [
     Game    left4dead
     Game    hl2
 }`}</code></pre>
-      Remove the <code>//</code> to turn it back on.</>,
+      <p>Remove the <code>//</code> to turn it back on.</p></>,
   },
   {
     q: 'Checking which version you have',
-    a: <>Open <code>left4dead_dlc4\dlc4_version.inf</code> in a text editor. The first line
-      reads <code>DLCVersion=</code>, and ours is <code>v3.1e</code>.</>,
+    a: <p>Open <code>left4dead_dlc4\dlc4_version.inf</code> in a text editor. The first line
+      reads <code>DLCVersion=</code>, and ours is <code>v3.1e</code>.</p>,
   },
 ];
 
@@ -246,7 +246,7 @@ export function HowToPlay({ session }: { session: Session }) {
             {INSTALL_FAQ.map((f) => (
               <details key={f.q}>
                 <summary>{f.q}</summary>
-                <p>{f.a}</p>
+                <div class="faq__answer">{f.a}</div>
               </details>
             ))}
           </div>
