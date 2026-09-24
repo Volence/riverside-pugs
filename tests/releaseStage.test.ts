@@ -54,8 +54,8 @@ describe('planBox', () => {
     const shipped = new Map([['left4dead/cfg/gone.cfg', { sha256: 'g', blob: 'x' }], ['left4dead/cfg/a.cfg', { sha256: 'old', blob: 'y' }]]);
     const ops = planBox(wanted, onBox, shipped);
     expect(ops).toEqual([
-      { path: 'left4dead/cfg/b.cfg', op: 'write', kind: 'add', size: 1, sha256: 'b', blob: 'blob-b' },
-      { path: 'left4dead/cfg/a.cfg', op: 'write', kind: 'update', size: 1, sha256: 'new', blob: 'blob-new' },
+      { path: 'left4dead/cfg/b.cfg', op: 'write', kind: 'add', size: 1, sha256: 'b', blob: 'blob-b', layer: 'shared' },
+      { path: 'left4dead/cfg/a.cfg', op: 'write', kind: 'update', size: 1, sha256: 'new', blob: 'blob-new', layer: 'shared' },
       { path: 'left4dead/cfg/gone.cfg', op: 'remove' },
     ]);
     expect(planBox(wanted, new Map([['left4dead/cfg/a.cfg', { size: 1, sha256: 'new' }], ['left4dead/cfg/b.cfg', { size: 1, sha256: 'b' }]]), new Map())).toEqual([]);

@@ -4,6 +4,7 @@ import type { DeployRepo, RepoFile } from './deployRepo.js';
 import { listServers } from './serverPool.js';
 import { readingStates, readingsOf } from './fleetReader.js';
 import { treeReaderFor } from './fleetTree.js';
+import { PER_BOX } from './fleetCompare.js';
 import { cvarDiff, deploySlug, describeOps, planBox, suggestBalance, validateTree, wantedFor, type Op, type WantedFile } from './releaseStage.js';
 
 const sqlNow = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -123,6 +124,9 @@ export class ReleaseService {
         const shipped = prev?.get(o.path);
         const have = onBox?.get(o.path);
         if (shipped && have && have.sha256 !== shipped.sha256) warnings.push(`changed on the box since the last release: ${o.path.replace(/^left4dead\//, '')}`);
+        if (o.op === 'write' && o.kind === 'update' && o.layer === 'shared' && PER_BOX.has(o.path)) {
+          warnings.push(`${o.path.replace(/^left4dead\//, '')} is a per-box file and would be replaced by the shared copy: add this box's own copy under boxes/${deploySlug(s.name)}/ first`);
+        }
         if (o.op === 'write' && o.kind === 'update' && o.path.endsWith('.cfg') && o.blob) {
           const neu = (await repo.blob(o.blob)).toString('utf8');
           let old: string | null = null;
