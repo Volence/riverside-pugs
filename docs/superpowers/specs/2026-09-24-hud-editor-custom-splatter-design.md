@@ -109,7 +109,9 @@ into the card file right after `BackgroundImage`, copying its final rect and zpo
 moves, the fit rule and the hide pass) and pointing at `hud/hudeditor/splatteam`. The stock
 `BackgroundImage` keeps its rect, so the player still selects, drags and resizes the splatter on the
 canvas as today, but its drawColor alpha is written as 0, so the game draws nothing there. The
-player's own opacity for the splatter (its drawColor) moves onto the stand-in.
+player's own opacity for the splatter (its drawColor alpha) moves onto the stand-in, whose RGB is
+always 255 255 255: the custom art carries its own colours, and an imported HUD's dark tint would
+otherwise multiply it to black.
 
 This is the `HudEdCardBg` pattern the card background already uses: an injected child the game
 draws, not registered as an editable piece, so canvas clicks and Layers never see it; the registered
