@@ -149,9 +149,9 @@ describe('the art boundary', () => {
 
   it('walks every module build.ts reaches', () => {
     // The crosshair modules draw, check and pack the player's own crosshair, never Valve's art.
-    // probes.ts is the probe gates, a leaf that imports nothing.
+    // probes.ts is the probe gates, a leaf that imports nothing; weaponColumn.ts the weapon column's reach, another.
     expect(modules).toEqual(['../crosshair/draw.ts', '../crosshair/model.ts', '../crosshair/vpk.ts', '../vpk/index.ts', '../vpk/zip.ts', 'base/index.ts', 'build.ts', 'children.ts', 'design.ts', 'elements.ts',
-      'kv.ts', 'limits.ts', 'probes.ts', 'slots.ts', 'splatter.ts', 'text.ts', 'textures.ts', 'units.ts']);
+      'kv.ts', 'limits.ts', 'probes.ts', 'slots.ts', 'splatter.ts', 'text.ts', 'textures.ts', 'units.ts', 'weaponColumn.ts']);
   });
 
   // The exported fonts are Valve's too. A download carries the player's own

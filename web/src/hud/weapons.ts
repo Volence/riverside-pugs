@@ -55,6 +55,7 @@ import { artImage, colourOf, fillFontText, fontFace, hatch, isMissing, rgbaOf, s
 import { baseOf } from './base';
 import { importedMaterial } from './importArt';
 import { EQUIP_ICON_SIZE } from './art/index';
+import { WEAPON_GROW, WEAPON_KEY_DEFAULTS } from './weaponColumn';
 
 interface Rect { x: number; y: number; w: number; h: number }
 
@@ -124,7 +125,7 @@ export const BOX_ALPHA = 180 / 255;
 /** The art's corners, in texels of its 128-texel texture, kept square when the box stretches. */
 const SRC_CORNER = 16;
 /** The active slot's size, against the others. */
-const GROW = 1.2;
+const GROW = WEAPON_GROW;
 
 /**
  * The paint's other unit. Box pads, corners and the gaps between slots are
@@ -136,16 +137,11 @@ const unit640 = (aspect: Aspect) => screenW(aspect) / 640;
 
 /**
  * The defaults client.dll registers for each key, used when a file leaves
- * one out. Neither preset gives PistolAmmoFont, so the pistol's clip and
- * the primary's reserve are always in HudAmmo.
+ * one out (weaponColumn.ts, shared with the build). Neither preset gives
+ * PistolAmmoFont, so the pistol's clip and the primary's reserve are always
+ * in HudAmmo.
  */
-const DEFAULTS: Record<string, string> = {
-  PrimaryWeaponsYPos: '0', PrimaryWeaponBoxWide: '0', PrimaryWeaponBoxTall: '0', PrimaryWeaponTall: '0',
-  PrimaryWeaponAmmoX: '0', ReserveAmmoYPos: '0', PistolBoxWide: '0', PistolBoxTall: '0',
-  RightSideIndent: '10', IconSize: '32',
-  PrimaryAmmoFont: 'FrameTitle', PistolAmmoFont: 'HudAmmo',
-  ReserveAmmoColor: '128 128 128 255', InactiveItemColor: '100 100 100 255',
-};
+const DEFAULTS = WEAPON_KEY_DEFAULTS;
 
 /** A HudWeaponSelection key as the generated file has it, or the dll's default when the file leaves it out. */
 export function weaponKey(design: HudDesign, key: string): string { return keys(design)(key); }

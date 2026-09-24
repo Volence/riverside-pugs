@@ -19,7 +19,7 @@ import { flatTexture, roundedTexture, vmtFor, parseColour } from './textures';
 import { decodeText, encodeText } from './text';
 import {
   baseTeam, contentBox, drawnBarX, isBar, WEAPON_KEYS, WEAPON_BOX_COLOUR, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir,
-  type WeaponNumKey, WEAPON_ICONS, ITEM_ICONS, WEAPON_BOX_IMAGE,
+  type WeaponNumKey, WEAPON_ICONS, ITEM_ICONS, WEAPON_BOX_IMAGE, weaponImageKind,
 } from './design';
 import {
   panelChildren, panelOfFile, childDef, maxInset, linkedValue, TEAM_PANEL, OWN_PANEL, SI_PANEL, ZCARD_PANEL, type ChildDef, type PanelChildren, type LinkRect, type LinkRule,
@@ -29,6 +29,7 @@ import {
   SPLATTERS, SPLAT_STAND_IN, splatterDef, splatterActive, splatterImageKey, splatterMaterial, fadePixels, type SplatterDef, type SplatterId,
 } from './splatter';
 import { TEX } from '../crosshair/draw';
+import { columnExtent, WEAPON_KEY_DEFAULTS } from './weaponColumn';
 
 /**
  * Uploaded images and fonts, already decoded, keyed by slot id, and for a
@@ -1940,18 +1941,76 @@ function weaponsPass(work: Work, design: HudDesign, assets: BuildAssets | null, 
       if (id) uploaded(n, id, `vgui/hud/hudeditor/${n}`, uploadLabel(n));
     }
   }
-  if (!repoint.length) return;
-  const cells = work.panel(MODTEX, ['TextureData']);
-  for (const [entry, file, rect] of repoint) {
-    const e = kvFind(cells.value as KvNode[], [entry]);
-    if (!e) { if (work.imported) continue; throw new Error(`${MODTEX}: no ${entry}`); }
-    if (rect) pointCell(e, file, rect.w, rect.h);
-    else kvSet(e, 'file', file);
+  let cells: KvNode | undefined;
+  if (repoint.length) {
+    cells = work.panel(MODTEX, ['TextureData']);
+    for (const [entry, file, rect] of repoint) {
+      const e = kvFind(cells.value as KvNode[], [entry]);
+      if (!e) { if (work.imported) continue; throw new Error(`${MODTEX}: no ${entry}`); }
+      if (rect) pointCell(e, file, rect.w, rect.h);
+      else kvSet(e, 'file', file);
+    }
+    if (repoint.some(([, file]) => file === CLEAR_TEXTURE)) {
+      out.push({ path: `materials/${CLEAR_TEXTURE}.vtf`, data: encodeVTF(CLEAR_TEXELS, CLEAR_TEXELS, new Uint8ClampedArray(CLEAR_TEXELS * CLEAR_TEXELS * 4)) },
+        { path: `materials/${CLEAR_TEXTURE}.vmt`, data: enc(vmtFor(CLEAR_TEXTURE)) });
+    }
   }
-  if (repoint.some(([, file]) => file === CLEAR_TEXTURE)) {
-    out.push({ path: `materials/${CLEAR_TEXTURE}.vtf`, data: encodeVTF(CLEAR_TEXELS, CLEAR_TEXELS, new Uint8ClampedArray(CLEAR_TEXELS * CLEAR_TEXELS * 4)) },
-      { path: `materials/${CLEAR_TEXTURE}.vmt`, data: enc(vmtFor(CLEAR_TEXTURE)) });
+  fitWeaponPanel(work, design, panel, cells);
+}
+
+/**
+ * Grow HudWeaponSelection to the column it draws (plan decision 1, task
+ * W5): the game clips numbers and icons at the panel's edges
+ * (/home/volence/l4d/hud/probe-phase2-rest/r2/shots/crops/weap-ab.png), and
+ * a 4:1 gun upload was cut at the stock panel's left edge
+ * (/home/volence/l4d/hud/probe-phase2-rest/w-verify/crops/game-0de.png). The
+ * column is right-aligned, so the panel grows to the left by what the column
+ * needs past its left edge and its xpos moves left by the same, keeping the
+ * right edge (and so the column) where it was; it grows down to the lowest
+ * slot. A column that fits changes nothing, so the preset's own panel stays.
+ */
+function fitWeaponPanel(work: Work, design: HudDesign, panel: KvNode, cells: KvNode | undefined) {
+  const W = screenW(design.aspect);
+  const key = (k: string) => pcGet(panel, k) ?? WEAPON_KEY_DEFAULTS[k];
+  const n = (k: string) => { const v = parseFloat(key(k)); return Number.isFinite(v) ? v : parseFloat(WEAPON_KEY_DEFAULTS[k]); };
+  // The widest gun the column can hold: each gun entry's cell as the file
+  // the game reads has it (an upload's own rect), a cleared one drawing nothing.
+  let entries: KvNode[] | undefined = cells?.value as KvNode[] | undefined;
+  if (!entries) {
+    try {
+      const t = kvFind(baseTree(work.key, MODTEX), ['TextureData']);
+      entries = t && typeof t.value !== 'string' ? t.value : undefined;
+    } catch { /* an imported base without the file: the game's own cells */ }
   }
+  let gunAspect = entries ? 0 : 3;
+  for (const g of WEAPON_ICONS.filter((e) => weaponImageKind(e) === 'gun')) {
+    const e = entries && kvFind(entries, [g]);
+    if (!e || (kvGet(e, 'file') ?? '').toLowerCase() === CLEAR_TEXTURE) continue;
+    const cw = parseFloat(kvGet(e, 'width') ?? ''), ch = parseFloat(kvGet(e, 'height') ?? '');
+    if (cw > 0 && ch > 0) gunAspect = Math.max(gunAspect, cw / ch);
+  }
+  const tallOf = (size: number | undefined, font: string, fallback: number) => {
+    if (size !== undefined) return size;
+    try { return baseFontTall(work.key, font) ?? fallback; } catch { return fallback; }
+  };
+  const w = design.weapons ?? {};
+  const wide = parseSize(key('wide') ?? '0', W);
+  const tall = parseSize(key('tall') ?? '0', SCREEN_H);
+  const { left, bottom } = columnExtent({
+    n, panelWide: wide, u: W / 640, gunAspect,
+    clipTall: tallOf(w.clipFont, key('PrimaryAmmoFont'), 24), pistolTall: tallOf(w.pistolFont, key('PistolAmmoFont'), 18),
+  });
+  // A hair of float noise is not a unit of growth.
+  const grow = Math.ceil(-left - 1e-6);
+  if (grow > 0) {
+    pcSet(panel, 'wide', String(Math.round(wide) + grow));
+    const m = /^\s*([rRcC]?)(-?[\d.]+)\s*$/.exec(key('xpos') ?? '0');
+    if (m) {
+      const at = parseFloat(m[2]);
+      pcSet(panel, 'xpos', m[1].toLowerCase() === 'r' ? `${m[1]}${Math.round(at + grow)}` : `${m[1]}${Math.round(at - grow)}`);
+    }
+  }
+  if (bottom > tall + 1e-6) pcSet(panel, 'tall', String(Math.ceil(bottom - 1e-6)));
 }
 
 /**

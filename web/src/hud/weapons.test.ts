@@ -7,6 +7,8 @@ import { _resetImportedArt } from './importArt';
 import { sampleHud, fakeCanvas, recordingCtx } from './importFixtures';
 import { decodeText } from './text';
 import { encodeVTF } from '../vpk';
+import { buildTrees } from './build';
+import { kvFind, kvGet } from './kv';
 import { artUrl } from './art';
 import { screenW } from './units';
 import { canvasFont, fontCell } from './fonts';
@@ -418,6 +420,34 @@ describe('weapon uploads in the preview', () => {
     expect(pieces[0].a.slice(1)).toEqual([0, 0, 16, 16, fx, fy, c, c]);
     for (const p of pieces) near(p.alpha, BOX_ALPHA);
   });
+});
+
+describe('the weapons panel fits its column (task W5)', () => {
+  // Whatever the edits, every box frame and icon the preview draws, in each held state, lies inside the panel the
+  // generator wrote: the game clips at the panel (/home/volence/l4d/hud/probe-phase2-rest/r2/shots/crops/weap-ab.png).
+  const cases: Record<string, Partial<HudDesign>> = {
+    stock: {},
+    wideBox: { weapons: { primaryBoxW: 150, pistolBoxW: 90 } },
+    tallItems: { weapons: { itemSize: 60, iconTall: 40 } },
+    pistolGrown: { weapons: { pistolBoxH: 80, indent: 40 } },
+    fourByOne: { images: { wiconPumpshotgun: { w: 256, h: 64, png: 'AAAA' } }, weapons: { icons: { icon_equip_pumpshotgun: 'wiconPumpshotgun' } } },
+  };
+  for (const [name, patch] of Object.entries(cases)) {
+    it(`keeps every slot inside the built panel: ${name}`, () => {
+      const d = design(patch);
+      const panel = kvFind(buildTrees(d)('scripts/hudlayout.res'), ['HudWeaponSelection'])!;
+      const wide = parseFloat(kvGet(panel, 'wide')!);
+      const tall = parseFloat(kvGet(panel, 'tall')!);
+      for (const held of ['primary', 'pistol', 'item'] as const) {
+        for (const s of weaponSlots(d, '16:9', wide, held)) {
+          for (const r of [s.frame, s.icon]) {
+            expect(r.x, `${name} ${held} ${s.kind} x`).toBeGreaterThanOrEqual(-1e-6);
+            expect(r.y + r.h, `${name} ${held} ${s.kind} bottom`).toBeLessThanOrEqual(tall + 1e-6);
+          }
+        }
+      }
+    });
+  }
 });
 
 describe("an imported HUD's own weapon art", () => {

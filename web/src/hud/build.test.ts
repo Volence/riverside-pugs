@@ -1525,6 +1525,50 @@ describe('buildHud, the weapon selection', () => {
     expect(buildTrees(d)(MODTEX)).toEqual(parseKv(text(buildHud(d, { images: { wiconUzi: uzi.px } }), MODTEX)!)[0].value);
   });
 
+  describe('the panel sized to its column', () => {
+    // /home/volence/l4d/hud/probe-phase2-rest/r2/shots/crops/weap-ab.png: the panel clips numbers and icons at its
+    // own edges, and /home/volence/l4d/hud/probe-phase2-rest/w-verify/crops/game-0de.png: a 4:1 M16 upload was cut
+    // at the stock panel's left edge. Stock: xpos r98, wide 100, tall 160.
+    const U = screenW('16:9') / 640;
+    const ws = (d: HudDesign) => weaponsOf(buildHud(d, FONTS));
+
+    it('grows a panel too narrow for a wider held box, to the left, so its right edge stays', () => {
+      const d = design({ weapons: { primaryBoxW: 120 } });
+      const grow = Math.ceil(10 + 120 * 1.2 + 4 * U - 100);
+      expect([pc(ws(d), 'wide'), pc(ws(d), 'xpos')]).toEqual([[String(100 + grow)], [`r${98 + grow}`]]);
+      expect(pc(ws(d), 'tall')).toEqual(['160']);
+    });
+
+    it('grows it for a 4:1 gun upload, which the game would otherwise cut', () => {
+      const px = new Uint8ClampedArray(256 * 64 * 4);
+      const d = design({ images: { wiconMachinegun: { w: 256, h: 64, png: 'AAAA' } }, weapons: { icons: { icon_equip_machinegun: 'wiconMachinegun' } } });
+      const grow = Math.ceil(10 + 4 * 20 * 1.2 - 100);
+      expect(pc(weaponsOf(buildHud(d, { images: { wiconMachinegun: px } })), 'wide')).toEqual([String(100 + grow)]);
+    });
+
+    it('grows it down to cover the lowest item slot', () => {
+      const d = design({ weapons: { itemSize: 40 } });
+      // Held item: 10, the gun 24 + 2u, the pistol 24 + 2u, the first item 48 + 2u, the second 40 + 2u, the last 40 and its 2u pad.
+      const bottom = 10 + 24 + 24 + 48 + 40 + 40 + 4 * 2 * U + 2 * U;
+      expect(pc(ws(d), 'tall')).toEqual([String(Math.ceil(bottom))]);
+      expect(pc(ws(d), 'wide')).toEqual(['100']);
+    });
+
+    it('keeps the panel as the preset has it while the column fits, for both presets', () => {
+      for (const preset of ['stock', 'modern'] as const) {
+        const d = design({ preset, weapons: { ammoX: 40 } });
+        const base = kvFind(parseKv(baseFile(preset, 'scripts/hudlayout.res'))[0].value as KvNode[], ['HudWeaponSelection'])!;
+        for (const k of ['xpos', 'wide', 'tall']) expect(pc(ws(d), k), `${preset} ${k}`).toEqual(pc(base, k));
+      }
+    });
+
+    it('moves a panel the player placed by the same growth, whatever its anchor', () => {
+      const d = design({ elements: { weaponSelection: { x: 20, y: 100 } }, weapons: { primaryBoxW: 120 } });
+      const grow = Math.ceil(10 + 120 * 1.2 + 4 * U - 100);
+      expect(pc(ws(d), 'xpos')).toEqual([String(20 - grow)]);
+    });
+  });
+
   it('gives the preview the same mod_textures.txt the download carries', () => {
     const d = design({ weapons: { boxInactive: { kind: 'hidden' }, weaponIcons: false } });
     expect(buildTrees(d)(MODTEX)).toEqual(parseKv(text(buildHud(d), MODTEX)!)[0].value);

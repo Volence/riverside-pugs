@@ -17,7 +17,7 @@ import type { Guide } from './guides';
 import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHasElement, pcGet, MARKER_PX_PER_UNIT } from './build';
 import { baseOf } from './base';
 import { kvFind, kvGet } from './kv';
-import { SCREEN_H, parseSize, parsePos } from './units';
+import { SCREEN_H, parseSize, parsePos, screenW } from './units';
 import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
 import { normaliseMaterial, HEALING_ICON, CROSSHAIR_OPEN } from './art';
 import { barGeometry, clampBarKeys } from './progress';
@@ -279,8 +279,19 @@ function paintTeamColumn(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesi
  * rect: the top of the shotgun, which the game centres on its box's top edge,
  * is cut where the panel starts, as in game.
  */
+/**
+ * The game clips the slots' numbers and icons at the panel. The generator
+ * grows the panel to its column (build.ts fitWeaponPanel), to the left with
+ * its right edge kept, so the preview draws and clips in the panel as the
+ * file has it: the element's own rect (what the player moves) grown by the
+ * same amount to the left and down.
+ */
 function paintWeaponSelection(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view: HudView = {}) {
-  clipToRect(ctx, r, () => drawWeapons(ctx, design, { x: r.x, y: r.y }, k, r.w / k, onAsset, view.held));
+  const panel = kvFind(buildTrees(design)('scripts/hudlayout.res'), ['HudWeaponSelection']);
+  const wide = panel ? parseSize(pcGet(panel, 'wide') ?? '0', screenW(design.aspect)) * k : 0;
+  const tall = panel ? parseSize(pcGet(panel, 'tall') ?? '0', SCREEN_H) * k : 0;
+  const box = { x: r.x + r.w - Math.max(r.w, wide), y: r.y, w: Math.max(r.w, wide), h: Math.max(r.h, tall) };
+  clipToRect(ctx, box, () => drawWeapons(ctx, design, { x: box.x, y: box.y }, k, box.w / k, onAsset, view.held));
 }
 
 const BASECHAT = 'resource/ui/basechat.res';
