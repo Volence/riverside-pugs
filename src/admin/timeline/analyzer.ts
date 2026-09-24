@@ -8,6 +8,13 @@ interface Row {
   at: string; has_replay: number;
 }
 
+/** What each clip kind means, in the words an admin reads. An unknown kind
+ *  (an old row, a future analyzer) shows as itself rather than disappearing. */
+const CLIP_TEXT: Record<string, string> = {
+  ghost_track: 'followed a ghost',
+  hidden_track: 'followed a spawned infected nobody on the team could see',
+};
+
 /**
  * Clips the replay analyzer flagged.
  *
@@ -38,7 +45,7 @@ export const analyzerAdapter: TimelineAdapter = {
       at: toIso(r.at),
       source: 'analyzer' as const,
       kind: r.kind,
-      summary: `Analyzer clip: ${r.kind}, fidelity ${r.score.toFixed(2)} over `
+      summary: `Analyzer clip: ${CLIP_TEXT[r.kind] ?? r.kind}, fidelity ${r.score.toFixed(2)} over `
         + `${((r.end_ms - r.start_ms) / 1000).toFixed(1)} s. Watch it before deciding anything.`,
       matchId: r.match_id,
       replay: r.has_replay > 0 ? { ordinal: r.ordinal, half: r.half, tMs: r.start_ms } : null,
