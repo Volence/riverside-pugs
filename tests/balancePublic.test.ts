@@ -22,10 +22,10 @@ let db: DBT;
 beforeEach(() => {
   db = openDb(':memory:');
   db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
-  db.prepare(`INSERT INTO balance_patches (id, name, notes, source, inputs_json, first_seen_at) VALUES
-    (1, 'Old', 'old notes', 'historical', NULL, '2000-01-01 00:00:00'),
-    (2, 'Mid', 'mid notes', 'detected', '{}', '2026-09-10 00:00:00'),
-    (3, NULL, '', 'detected', '{}', '2026-09-20 00:00:00')`).run();
+  db.prepare(`INSERT INTO balance_patches (id, fingerprint, name, notes, source, inputs_json, first_seen_at) VALUES
+    (1, NULL, 'Old', 'old notes', 'historical', NULL, '2000-01-01 00:00:00'),
+    (2, 'fp2', 'Mid', 'mid notes', 'detected', '{}', '2026-09-10 00:00:00'),
+    (3, 'fp3', NULL, '', 'detected', '{}', '2026-09-20 00:00:00')`).run();
 });
 
 describe('patchTimeline', () => {
@@ -49,6 +49,16 @@ describe('publishPatch', () => {
     db.prepare("UPDATE balance_patches SET notes = 'why' WHERE id = 3").run();
     expect(publishPatch(db, 3, true)).toEqual({ ok: false, status: 400, error: expect.stringMatching(/counted round/) });
     expect(publishPatch(db, 99, true)).toEqual({ ok: false, status: 404, error: 'no such patch' });
+  });
+  it('refuses a merged patch: its config is the one it was merged into, so it would compare a config with itself', () => {
+    db.prepare("UPDATE balance_patches SET name = 'Dup', notes = 'n', fingerprint = NULL WHERE id = 3").run();
+    addMatches(db, 3, 1, '2026-09-21');
+    expect(listPatches(db).find((p) => p.id === 3)!.merged).toBe(true);
+    expect(publishPatch(db, 3, true)).toEqual({ ok: false, status: 400, error: expect.stringMatching(/merged/) });
+    expect(listPublished(db)).toEqual([]);
+    // Unpublishing one published before it was merged still works.
+    db.prepare("UPDATE balance_patches SET published_at = '2026-09-22 00:00:00' WHERE id = 3").run();
+    expect(publishPatch(db, 3, false)).toEqual({ ok: true });
   });
   it('publishes, keeps the first publish time on a repeat, and unpublishes', () => {
     addMatches(db, 2, 1, '2026-09-11');
@@ -128,9 +138,9 @@ function compareDb(nA = 40, nB = 40) {
   const db = openDb(':memory:');
   const computedAt = `n${++compareDbSeq}`;
   db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
-  db.prepare(`INSERT INTO balance_patches (id, name, notes, source, inputs_json, first_seen_at) VALUES
-    (1, 'Old', 'old notes', 'detected', '{"c:z_tank_health":"8000"}', '2026-09-01 00:00:00'),
-    (2, 'New', 'new notes', 'detected', '{"c:z_tank_health":"7500"}', '2026-09-10 00:00:00')`).run();
+  db.prepare(`INSERT INTO balance_patches (id, fingerprint, name, notes, source, inputs_json, first_seen_at) VALUES
+    (1, 'fp1', 'Old', 'old notes', 'detected', '{"c:z_tank_health":"8000"}', '2026-09-01 00:00:00'),
+    (2, 'fp2', 'New', 'new notes', 'detected', '{"c:z_tank_health":"7500"}', '2026-09-10 00:00:00')`).run();
   const match = db.prepare("INSERT INTO matches (id, season_id, state, campaign, origin, ended_at) VALUES (?, 1, 'completed', 'x', 'queue', ?)");
   const ctx = db.prepare(`INSERT INTO round_metric_context (match_id, ordinal, half, map, origin, patch_id, surv_mu, inf_mu, has_replay, has_stats, engine, computed_at)
     VALUES (?, 0, ?, 'mapA', 'queue', ?, 25, 25, 0, 0, ?, '${computedAt}')`);
@@ -211,8 +221,8 @@ describe('publicEntry', () => {
   it('skips a published baseline with no counted rounds, and diffs across an unpublished patch', () => {
     const db = compareDb();
     // Patch 3: published, no rounds, between 1 and 2 by first_seen_at.
-    db.prepare(`INSERT INTO balance_patches (id, name, notes, source, inputs_json, first_seen_at, published_at)
-      VALUES (3, 'Empty', 'n', 'detected', '{"c:z_tank_health":"7000"}', '2026-09-09 00:00:00', '2026-09-24 00:00:00')`).run();
+    db.prepare(`INSERT INTO balance_patches (id, fingerprint, name, notes, source, inputs_json, first_seen_at, published_at)
+      VALUES (3, 'fp3', 'Empty', 'n', 'detected', '{"c:z_tank_health":"7000"}', '2026-09-09 00:00:00', '2026-09-24 00:00:00')`).run();
     publishPatch(db, 1, true); publishPatch(db, 2, true);
     const e = publicEntry(db, 2, { knobs: null })!;
     expect(e.previous!.id).toBe(1);

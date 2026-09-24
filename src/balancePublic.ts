@@ -61,12 +61,19 @@ export function listPublished(db: DB): PublicPatch[] {
 export type PublishResult = { ok: true } | { ok: false; status: 400 | 404; error: string };
 
 export function publishPatch(db: DB, id: number, published: boolean, now: string = nowSql()): PublishResult {
-  const row = db.prepare('SELECT name, notes, published_at FROM balance_patches WHERE id = ?').get(id) as
-    { name: string | null; notes: string; published_at: string | null } | undefined;
+  const row = db.prepare(`SELECT name, notes, published_at, (source = 'detected' AND fingerprint IS NULL) AS merged
+    FROM balance_patches WHERE id = ?`).get(id) as
+    { name: string | null; notes: string; published_at: string | null; merged: number } | undefined;
   if (!row) return { ok: false, status: 404, error: 'no such patch' };
   if (!published) {
     db.prepare('UPDATE balance_patches SET published_at = NULL WHERE id = ?').run(id);
     return { ok: true };
+  }
+  // A merged patch (see listPatches) runs the config of the patch it was
+  // merged into: as its own public entry it would diff and compare that
+  // config against itself. Publish the patch it was merged into instead.
+  if (row.merged === 1) {
+    return { ok: false, status: 400, error: 'this patch was merged into another one; publish that patch instead' };
   }
   const p = patchTimeline(db).find((x) => x.id === id)!;
   const missing = [

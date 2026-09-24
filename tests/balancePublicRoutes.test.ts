@@ -31,9 +31,9 @@ function compareDb(nA = 40, nB = 40) {
   const db = openDb(':memory:');
   const computedAt = `route-n${++compareDbSeq}`;
   db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
-  db.prepare(`INSERT INTO balance_patches (id, name, notes, source, inputs_json, first_seen_at) VALUES
-    (1, 'Old', 'old notes', 'detected', '{"c:z_tank_health":"8000"}', '2026-09-01 00:00:00'),
-    (2, 'New', 'new notes', 'detected', '{"c:z_tank_health":"7500"}', '2026-09-10 00:00:00')`).run();
+  db.prepare(`INSERT INTO balance_patches (id, fingerprint, name, notes, source, inputs_json, first_seen_at) VALUES
+    (1, 'fp1', 'Old', 'old notes', 'detected', '{"c:z_tank_health":"8000"}', '2026-09-01 00:00:00'),
+    (2, 'fp2', 'New', 'new notes', 'detected', '{"c:z_tank_health":"7500"}', '2026-09-10 00:00:00')`).run();
   const match = db.prepare("INSERT INTO matches (id, season_id, state, campaign, origin, ended_at) VALUES (?, 1, 'completed', 'x', 'queue', ?)");
   const ctx = db.prepare(`INSERT INTO round_metric_context (match_id, ordinal, half, map, origin, patch_id, surv_mu, inf_mu, has_replay, has_stats, engine, computed_at)
     VALUES (?, 0, ?, 'mapA', 'queue', ?, 25, 25, 0, 0, 'e', '${computedAt}')`);
@@ -58,9 +58,9 @@ describe('balance public routes', () => {
   beforeEach(() => {
     db = openDb(':memory:');
     db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
-    db.prepare(`INSERT INTO balance_patches (id, name, notes, source, inputs_json, first_seen_at) VALUES
-      (1, 'Old', 'old notes', 'detected', '{}', '2026-09-01 00:00:00'),
-      (2, 'New', 'new notes', 'detected', '{}', '2026-09-10 00:00:00')`).run();
+    db.prepare(`INSERT INTO balance_patches (id, fingerprint, name, notes, source, inputs_json, first_seen_at) VALUES
+      (1, 'fp1', 'Old', 'old notes', 'detected', '{}', '2026-09-01 00:00:00'),
+      (2, 'fp2', 'New', 'new notes', 'detected', '{}', '2026-09-10 00:00:00')`).run();
   });
 
   it('GET /api/balance/patches: no cookie needed, only published, newest first', async () => {
