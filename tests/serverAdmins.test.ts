@@ -30,6 +30,7 @@ function fakeTransport(server: ServerRow, dir?: string): AddonsTransport | null 
     },
     async size() { return null; },
     async remove() {},
+    async readText() { return null; },
   };
 }
 
