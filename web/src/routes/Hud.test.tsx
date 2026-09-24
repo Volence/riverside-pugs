@@ -1367,6 +1367,13 @@ describe('Hud page', () => {
     ]);
   });
 
+  it('shows a close-up of the selection in the side panel only while something is selected', () => {
+    render(<Hud />);
+    expect(screen.queryByLabelText('Close-up of the selection')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Your microphone' }));
+    expect(screen.getByLabelText('Close-up of the selection')).toBeTruthy();
+  });
+
   it('folds each element\'s pieces away until opened, and opens the one being edited on its own', () => {
     _setFoldDefault(false);
     render(<Hud />);
