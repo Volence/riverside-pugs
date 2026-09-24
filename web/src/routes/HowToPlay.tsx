@@ -85,7 +85,9 @@ const INSTALL_FAQ: { q: string; a: preact.ComponentChildren }[] = [
           Paste this and press Enter. It keeps your original as{' '}
           <code>left4dead.exe.bak</code> and does nothing if the exe is already done.
           <pre class="launch-opts"><code>{`& {
+  $ErrorActionPreference = 'Stop'
   $exe = Join-Path (Get-Location) 'left4dead.exe'
+  if (-not (Test-Path $exe)) { throw 'No left4dead.exe here. Run this in the Left 4 Dead folder.' }
   $b = [IO.File]::ReadAllBytes($exe)
   $pe = [BitConverter]::ToInt32($b, 0x3C)
   if ($b[$pe] -ne 0x50 -or $b[$pe+1] -ne 0x45) { throw 'Run this in the Left 4 Dead folder.' }
