@@ -3,7 +3,7 @@ import { cellKey, cellOf, priorAt, type PriorTable } from './aimPrior.js';
 import { TUNING } from './constants.js';
 import { dist2d, isLiveSurvivor, occludedBy, onTarget } from './geometry.js';
 import { trackWindowsFor, visibleOthers, type TrackWindow } from './ghostTrack.js';
-import { occFromBlocks, type OccResult } from './occupancy.js';
+import { addToBlock, occFromBlocks, type Block, type OccResult } from './occupancy.js';
 import { isSpawnedTarget, TRACKED_CLASSES, classOf, type InfectedClass, type LosView } from './los.js';
 
 /**
@@ -106,8 +106,6 @@ export interface HiddenOcc {
   byClass: Record<InfectedClass, OccResult | null>;
 }
 
-type Blocks = Map<string, { n: number; on: number; p: number }>;
-
 /**
  * Metric E: metric B's occupancy, over spawned infected hidden from the whole
  * team. Same aim prior, same OCC_BLOCK_MS blocks, same R_MAX bound; only the
@@ -117,18 +115,10 @@ type Blocks = Map<string, { n: number; on: number; p: number }>;
 export function hiddenOccupancy(
   frames: Frame[], slot: number, prior: PriorTable | null, los: LosView,
 ): { occ: HiddenOcc | null; gates: HiddenTally } {
-  const all: Blocks = new Map();
-  const byClass = new Map<InfectedClass, Blocks>(TRACKED_CLASSES.map((c) => [c, new Map()]));
+  const all = new Map<string, Block>();
+  const byClass = new Map<InfectedClass, Map<string, Block>>(TRACKED_CLASSES.map((c) => [c, new Map()]));
   const pairsByClass = new Map<InfectedClass, number>(TRACKED_CLASSES.map((c) => [c, 0]));
   let pairs = 0;
-
-  const add = (blocks: Blocks, key: string, p: number, on: boolean) => {
-    const b = blocks.get(key) ?? { n: 0, on: 0, p: 0 };
-    b.n++;
-    b.p += p;
-    if (on) b.on++;
-    blocks.set(key, b);
-  };
 
   const gates = scanHidden(frames, slot, los, (s, t, f) => {
     if (!prior) return;
@@ -137,11 +127,11 @@ export function hiddenOccupancy(
     const p = priorAt(prior, cellKey(c.cx, c.cy));
     const on = onTarget(s, t, TUNING.E_DWELL);
     const key = `${t.slot}:${Math.floor(f.tMs / TUNING.OCC_BLOCK_MS)}`;
-    add(all, key, p, on);
+    addToBlock(all, key, p, on);
     pairs++;
     const cls = classOf(t.cls);
     if (cls) {
-      add(byClass.get(cls)!, key, p, on);
+      addToBlock(byClass.get(cls)!, key, p, on);
       pairsByClass.set(cls, pairsByClass.get(cls)! + 1);
     }
   });
