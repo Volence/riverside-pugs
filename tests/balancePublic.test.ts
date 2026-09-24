@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../src/db.js';
-import { listPublished, patchTimeline, publicChanges, publishPatch } from '../src/balancePublic.js';
+import { adminDefaultCompare, listPublished, patchTimeline, publicChanges, publicEntry, publishPatch } from '../src/balancePublic.js';
 import { listPatches } from '../src/balancePatches.js';
 import { compareSides } from '../src/metrics/compare/compare.js';
-import { adminDefaultCompare, publicEntry } from '../src/balancePublic.js';
 import { PUBLIC_METRICS, ENGINE } from '../src/metrics/registry.js';
 
 type DBT = ReturnType<typeof openDb>;
@@ -192,6 +191,16 @@ describe('publicEntry', () => {
     expect(JSON.stringify(e)).not.toMatch(/meanMu|meanGap|fingerprint|inputs_json|"p":/);
   });
 
+  it('parity fixture row order: the real saferoom row first, every no_data row after every other row', () => {
+    const db = compareDb();
+    publishPatch(db, 1, true); publishPatch(db, 2, true);
+    const rows = publicEntry(db, 2, { knobs: null })!.effect!.rows;
+    expect(rows[0]).toMatchObject({ metric: 'round.saferoom', verdict: 'real' });
+    const firstNoData = rows.findIndex((r) => r.verdict === 'no_data');
+    expect(firstNoData).toBeGreaterThan(0);
+    expect(rows.slice(firstNoData).every((r) => r.verdict === 'no_data')).toBe(true);
+  });
+
   it('shares the admin cache entry', () => {
     const db = compareDb();
     publishPatch(db, 1, true); publishPatch(db, 2, true);
@@ -227,5 +236,34 @@ describe('publicEntry', () => {
     publishPatch(db, 1, true); publishPatch(db, 2, true);
     const e = publicEntry(db, 2, { knobs: null })!;
     expect(e).toMatchObject({ approximate: true, changes: null, changesUnavailable: 'historical' });
+  });
+
+  it('live: the newest published patch is live, an older one is not', () => {
+    const db = compareDb();
+    publishPatch(db, 1, true); publishPatch(db, 2, true);
+    expect(publicEntry(db, 2, { knobs: null })!.live).toBe(true);
+    expect(publicEntry(db, 1, { knobs: null })!.live).toBe(false);
+  });
+
+  it('live: an older patch a server is currently on is live', () => {
+    const db = compareDb();
+    publishPatch(db, 1, true); publishPatch(db, 2, true);
+    db.prepare("INSERT INTO balance_server_state (server_id, patch_id, inventory_json, since) VALUES (7, 1, '{}', '2026-09-20 00:00:00')").run();
+    expect(publicEntry(db, 1, { knobs: null })!.live).toBe(true);
+  });
+
+  it('live: a preview counts as newest among the published patches plus itself', () => {
+    const db = compareDb();
+    publishPatch(db, 1, true);
+    expect(publicEntry(db, 2, { knobs: null, preview: true })!.live).toBe(true);
+    expect(publicEntry(db, 1, { knobs: null })!.live).toBe(true);
+  });
+
+  it('a non-historical patch without recorded inputs gives unrecorded, or first without a baseline', () => {
+    const db = compareDb();
+    db.prepare('UPDATE balance_patches SET inputs_json = NULL').run();
+    publishPatch(db, 1, true); publishPatch(db, 2, true);
+    expect(publicEntry(db, 2, { knobs: null })).toMatchObject({ changes: null, changesUnavailable: 'unrecorded' });
+    expect(publicEntry(db, 1, { knobs: null })).toMatchObject({ changes: null, changesUnavailable: 'first' });
   });
 });
