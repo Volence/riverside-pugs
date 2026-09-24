@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { STATE, type Frame } from '../src/replayFormat.js';
 import { losView } from '../src/integrity/los.js';
 import { pickClips } from '../src/integrity/ghostTrack.js';
-import { hiddenGate, hiddenOccupancy, hiddenTrackWindows, scanHidden } from '../src/integrity/hidden.js';
+import { hiddenGate, hiddenOccupancy, hiddenTrackWindows, scanHidden, revealReaction } from '../src/integrity/hidden.js';
 import { cellKey, cellOf, type PriorTable } from '../src/integrity/aimPrior.js';
 import { blank, header, scene } from './hiddenFixtures.js';
 
@@ -111,5 +111,37 @@ describe('metric E, hidden pre-aim', () => {
     const { occ, gates } = hiddenOccupancy(scene({ lagFrames: 0 }), 0, null, LOS);
     expect(occ).toBeNull();
     expect(gates.passed).toBe(40);
+  });
+});
+
+describe('metric F, reveal reaction', () => {
+  // Hidden from everyone for 20 frames, then the survivor can see it.
+  const reveal = (i: number) => (i < 20 ? 0 : 1 << 0);
+
+  it('counts a reveal the crosshair was already on', () => {
+    const r = revealReaction(scene({ lagFrames: 0, los: reveal }), 0, LOS)!;
+    expect(r.reveals).toBe(1);
+    expect(r.on).toBe(1);
+    expect(r.byClass.hunter).toEqual({ reveals: 1, on: 1 });
+    expect(r.byClass.smoker).toEqual({ reveals: 0, on: 0 });
+  });
+
+  it('counts a reveal the crosshair was nowhere near', () => {
+    const r = revealReaction(scene({ yaw: () => 90, los: reveal }), 0, LOS)!;
+    expect(r).toMatchObject({ reveals: 1, on: 0 });
+  });
+
+  it('does not count a reveal a teammate could already see', () => {
+    const r = revealReaction(scene({ lagFrames: 0, los: (i) => (i < 20 ? 1 << 4 : 1 << 0) }), 0, LOS)!;
+    expect(r.reveals).toBe(0);
+  });
+
+  it('does not count a reveal inside D_MIN', () => {
+    const close = scene({ lagFrames: 0, los: reveal, extra: (_i, p) => { p[4] = { ...p[4], x: 200, y: 0 }; } });
+    expect(revealReaction(close, 0, LOS)!.reveals).toBe(0);
+  });
+
+  it('has nothing to say about a file without line of sight', () => {
+    expect(revealReaction(scene({ los: reveal }), 0, losView(header(false)))).toBeNull();
   });
 });
