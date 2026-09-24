@@ -727,8 +727,9 @@ function fitSi(work: Work, design: HudDesign) {
     stretchFill(nodes, box);
   }
   const k = o.scale ?? 1, W = screenW(design.aspect);
-  const x = parsePos(kvGet(container, 'xpos') ?? '0', W) + box.x * k;
-  const y = parsePos(kvGet(container, 'ypos') ?? '0', SCREEN_H) + box.y * k;
+  const shift = fitOffset(box, k);
+  const x = parsePos(kvGet(container, 'xpos') ?? '0', W) + shift.x;
+  const y = parsePos(kvGet(container, 'ypos') ?? '0', SCREEN_H) + shift.y;
   kvSet(container, 'xpos', formatPos(x, box.w * k, W));
   kvSet(container, 'ypos', formatPos(y, box.h * k, SCREEN_H));
   kvSet(container, 'wide', String(box.w));
@@ -751,8 +752,16 @@ export function elementFitShift(design: HudDesign, id: string): { x: number; y: 
     return design.elements[id]?.fit === true ? teamLayout(design, el).offset ?? { x: 0, y: 0 } : { x: 0, y: 0 };
   }
   if (!fitsContainer(design, id)) return { x: 0, y: 0 };
-  const box = panelWork(design).boxes[id]!;
-  const k = design.elements[id]?.scale ?? 1;
+  return fitOffset(panelWork(design).boxes[id]!, design.elements[id]?.scale ?? 1);
+}
+
+/**
+ * The fit box's offset at scale k, whole units: the one number fitSi moves
+ * the container by and elementFitShift reports, so an edit subtracts
+ * exactly what the build added (at 1.25 an unrounded 312.5 in the build
+ * against a rounded 313 in the edit made arrow presses stall or jump 2).
+ */
+function fitOffset(box: Box, k: number): { x: number; y: number } {
   return { x: Math.round(box.x * k), y: Math.round(box.y * k) };
 }
 

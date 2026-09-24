@@ -324,14 +324,18 @@ export function ElementControls(
   // that container by the fit offset, so its boxes show where it is drawn
   // and place through placeElement too, or ticking Fit would make the
   // stored X jump by the offset (250 units on stock).
-  const team = !!el.team || (o.fit === true && panelChildren(id)?.frame === 'hudlayout');
+  // The fitted panel's other axis is passed where it is drawn: its stored
+  // number is the unfitted container's, which placeElement would take as a
+  // drawn one and move by the fit offset.
+  const fitted = o.fit === true && panelChildren(id)?.frame === 'hudlayout';
+  const team = !!el.team || fitted;
   const setPos = (key: 'x' | 'y', e: Event) => {
     if (!team) { patchNum(patch, e, key, (n) => ({ [key]: n })); return; }
     const n = parseFloat((e.target as HTMLInputElement).value);
     if (!Number.isFinite(n)) return;
     edit((d) => {
       const r = elementRect(d, id, d.aspect);
-      const s = d.elements[id] ?? {};
+      const s = fitted ? {} : d.elements[id] ?? {};
       return placeElement(d, id, key === 'x' ? n : s.x ?? r.x, key === 'y' ? n : s.y ?? r.y);
     }, 'gesture');
   };

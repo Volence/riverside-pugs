@@ -14,7 +14,7 @@ import { DEFAULT_DESIGN, newDesign, baseTeam, type HudDesign } from './design';
 import { DEFAULT_STATE } from '../crosshair/draw';
 import type { CrosshairArt } from '../crosshair/model';
 import { formatPos, parsePos } from './units';
-import { teamCardRects, elementRect, cardChild, isFreeTeam, panelChild } from './build';
+import { teamCardRects, elementRect, cardChild, isFreeTeam, panelChild, elementFitShift } from './build';
 import { childDef } from './children';
 import { elementFrame } from './selection';
 
@@ -887,6 +887,42 @@ describe('placing a fitted infected health', () => {
     expect(Math.abs(after.x - (before.x - 5))).toBeLessThanOrEqual(1);
     expect(after.y).toBe(before.y);
   });
+});
+
+describe('a fitted infected health at any scale (one fit shift in build and edit)', () => {
+  const SCALES = [1, 1.25, 1.33, 0.75, 1.5, 2];
+  // Stored at 50, 200: on screen at every scale (stock's r387 is off the right edge at 2).
+  const at = (k: number, aspect: HudDesign['aspect']): HudDesign => (
+    { ...structuredClone(DEFAULT_DESIGN), aspect, elements: { siHealth: { fit: true, scale: k, x: 50, y: 200 } } }
+  );
+  const rect = (d: HudDesign) => elementRect(d, 'siHealth', d.aspect);
+  for (const aspect of ['4:3'] as const) for (const k of SCALES) {
+    it(`moves exactly one unit per arrow press and never the other axis at scale ${k}, ${aspect}`, () => {
+      let d = at(k, aspect);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 0], [1, 0], [-1, 0]]) {
+        const before = rect(d);
+        d = nudge(d, 'siHealth', dx, dy);
+        const after = rect(d);
+        expect([after.x - before.x, after.y - before.y], `${dx},${dy}`).toEqual([dx, dy]);
+      }
+    });
+    it(`keeps its place when the X or Y box's own value is typed back at scale ${k}, ${aspect}`, () => {
+      const d = at(k, aspect);
+      const r = rect(d);
+      expect(rect(placeElement(d, 'siHealth', Math.round(r.x), r.y))).toMatchObject({ x: r.x, y: r.y });
+      expect(rect(placeElement(d, 'siHealth', r.x, Math.round(r.y)))).toMatchObject({ x: r.x, y: r.y });
+    });
+    it(`leaves the fit box's corner where it was when Fit is toggled at scale ${k}, ${aspect}`, () => {
+      const on = at(k, aspect);
+      const off = setFit(on, 'siHealth', false);
+      const shift = elementFitShift(on, 'siHealth');
+      // 853 wide, a centre token reads back at the half unit (the game's own
+      // arithmetic), and the fitted container is centred here; 640 is exact.
+      const slack = aspect === '16:9' ? 0.5 : 0;
+      expect(Math.abs(rect(on).x - (rect(off).x + shift.x))).toBeLessThanOrEqual(slack);
+      expect(rect(on).y).toBe(rect(off).y + shift.y);
+    });
+  }
 });
 
 describe('editing your infected health on the Boomer preview (plan decision 3)', () => {
