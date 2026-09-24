@@ -1,4 +1,4 @@
-import { api, ApiError, modApi } from '../api';
+import { api, ApiError, modApi, communityApi } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import type { Profile as ProfileData, Standing } from '../api';
 import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys, qualifiedMapName, survivalNote, sortMapRows, type MapSort } from '../format';
@@ -16,6 +16,7 @@ import { ChemistryPanel } from '../components/Chemistry';
 import { EndorsementCounts } from '../components/TitleTag';
 import { countryFlag, countryName } from '../countries';
 import type { Session } from '../hooks/useLiveState';
+import { CommunityCard } from '../components/CommunityCard';
 
 export function Profile(
   { steamid, session, refresh }: { steamid: string; session?: Session; refresh?: () => void },
@@ -141,6 +142,7 @@ export function Profile(
 
         <ChemistryPanel chemistry={data.chemistry} />
         <EndorsementCounts endorsements={data.endorsements} />
+        <SharedPanel steamid={steamid} session={session ?? { kind: 'anonymous' }} />
 
         <div class="profile-grid">
           <Panel>
@@ -386,3 +388,27 @@ function ProfileFigures(
 const STANDING_LABELS: Record<string, string> = {
   sidmg: 'SI damage', sikill: 'SI kills', ck: 'Commons', rev: 'Revives',
 };
+
+/**
+ * The HUDs and crosshairs this player shares on the community page, as
+ * compact cards. Decoration: it shows only with at least one entry, and a
+ * failed read hides it rather than touching the rest of the profile.
+ */
+function SharedPanel({ steamid, session }: { steamid: string; session: Session }) {
+  const { data } = useFetch(async (s) => {
+    const [huds, crosshairs] = await Promise.all([
+      communityApi.list({ kind: 'hud', author: steamid }, s),
+      communityApi.list({ kind: 'crosshair', author: steamid }, s),
+    ]);
+    return [...huds.entries, ...crosshairs.entries];
+  }, [steamid]);
+  if (!data || data.length === 0) return null;
+  return (
+    <Panel class="profile-shared">
+      <h3>Shared</h3>
+      <div class="profile-shared__cards">
+        {data.map((e) => <CommunityCard key={e.id} entry={e} session={session} size="compact" />)}
+      </div>
+    </Panel>
+  );
+}
