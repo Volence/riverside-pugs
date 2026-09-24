@@ -20,7 +20,9 @@ function lex(text: string): Tok[] {
   while (i < n) {
     const c = text[i];
     if (c === '\n') { line++; i++; continue; }
-    if (c === ' ' || c === '\t' || c === '\r') { i++; continue; }
+    // The game's whitespace (C isspace), as src/hudFiles.ts reads it: a \f or \v
+    // read as part of a word would turn `\f// "k" "v"` from a comment into keys.
+    if (c === ' ' || c === '\t' || c === '\r' || c === '\f' || c === '\v') { i++; continue; }
     if (c === '/' && text[i + 1] === '/') { while (i < n && text[i] !== '\n') i++; continue; }
     if (c === '{' || c === '}') { out.push({ t: c, v: c, line }); i++; continue; }
     if (c === '"') {
@@ -36,7 +38,7 @@ function lex(text: string): Tok[] {
       i = j + 1; continue;
     }
     let j = i;
-    while (j < n && !' \t\r\n{}"'.includes(text[j])) j++;
+    while (j < n && !' \t\r\n\f\v{}"'.includes(text[j])) j++;
     out.push({ t: 'str', v: text.slice(i, j), line });
     i = j;
   }
