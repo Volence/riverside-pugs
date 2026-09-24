@@ -1,3 +1,6 @@
+import { api } from '../api';
+import { useFetch } from '../hooks/useFetch';
+
 /** The HUD section's routes, in tab order. The nav shows the section as one
  *  item; this strip, at the top of each of the three pages, moves between
  *  them. Each tab is a real link to its route, so deep links, share links and
@@ -32,6 +35,18 @@ export function HudTabs({ active }: { active: HudTab }) {
           {label}
         </a>
       ))}
+      <FeedbackLink />
     </nav>
+  );
+}
+
+/** The HUD tools are new: a way to tell us what works, at the strip's right end. Nothing while the site has no Discord invite. */
+function FeedbackLink() {
+  const { data: site } = useFetch((sig) => api.site(sig), []);
+  if (!site?.discordInviteUrl) return null;
+  return (
+    <a class="hudtabs__feedback" href={site.discordInviteUrl} target="_blank" rel="noopener noreferrer">
+      New and in testing: send feedback on Discord
+    </a>
   );
 }

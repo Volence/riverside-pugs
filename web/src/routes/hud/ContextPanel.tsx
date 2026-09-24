@@ -382,7 +382,9 @@ export const siHealthNote = (c: PreviewState['siClass']): string =>
   `Shown as the ${SI_NAME[c]}. Edits apply to every special infected; the Boomer's smaller bar moves the same and sizes in proportion. The game hides this panel while you pin a survivor or throw a rock.`;
 
 export function ElementControls(
-  { design, edit, end, id, preview = DEFAULT_PREVIEW }: { design: HudDesign; edit: Edit; end: () => void; id: string; preview?: PreviewState },
+  { design, edit, end, id, preview = DEFAULT_PREVIEW, onPreview }: {
+    design: HudDesign; edit: Edit; end: () => void; id: string; preview?: PreviewState; onPreview?: (p: PreviewState) => void;
+  },
 ) {
   const el = elementById(id);
   if (!el) return null;
@@ -503,7 +505,7 @@ export function ElementControls(
       {el.keys?.filter((k) => !k.gate || probe(k.gate)).map((k) => (
         <Fragment key={k.key}>
           <KeyControl
-            def={k} end={end} band={previewHealthBand(preview, id)}
+            def={k} end={end} band={previewHealthBand(preview, id)} onBand={bandSetter(preview, id, onPreview)}
             value={shownKey(design, k, o.keys?.[k.key] ?? elementKey(design, el.key, k.key))}
             onValue={(v, mode) => patch({ keys: { ...o.keys, [k.key]: v } }, mode)}
           />
@@ -513,7 +515,7 @@ export function ElementControls(
               type="button" class="btn btn--ghost btn--sm" aria-label={`${k.label}: use the file's value`}
               onClick={() => edit((d) => resetElementKey(d, id, k.key))}
             >
-              Use the file's value
+              {k.byHealth && elementKey(design, el.key, k.key) === undefined ? "Use the game's health colours" : "Use the file's value"}
             </button>
           )}
         </Fragment>
@@ -758,8 +760,9 @@ const repeatsCards = (panel: string): boolean => panelChildren(panel)?.repeat ==
  * size and, where the game honours it, a colour.
  */
 export function ChildControls(
-  { design, edit, end, name, onBack, panel = 'teamColumn', preview }: {
+  { design, edit, end, name, onBack, panel = 'teamColumn', preview, onPreview }: {
     design: HudDesign; edit: Edit; end: () => void; name: string; onBack: () => void; panel?: string; preview?: PreviewState;
+    onPreview?: (p: PreviewState) => void;
   },
 ) {
   const def = childDef(panel, name);
@@ -854,7 +857,7 @@ export function ChildControls(
         <Fragment key={k.key}>
           <KeyControl
             def={k} end={end} max={def.kind === 'bar' && k.key === 'inset' ? maxInset(info.h) : undefined}
-            band={previewHealthBand(preview ?? DEFAULT_PREVIEW, panel)}
+            band={previewHealthBand(preview ?? DEFAULT_PREVIEW, panel)} onBand={bandSetter(preview ?? DEFAULT_PREVIEW, panel, onPreview)}
             value={shownKey(design, k, o.keys?.[k.key] ?? info.keys?.[k.key])}
             onValue={(v, mode) => patch({ keys: { ...o.keys, [k.key]: v } }, mode)}
           />
@@ -864,7 +867,8 @@ export function ChildControls(
               type="button" class="btn btn--ghost btn--sm" aria-label={`${k.label}: use the file's value`}
               onClick={() => edit((d) => resetChildKey(d, name, k.key, panel))}
             >
-              Use the file's value
+              {k.byHealth && panelChild(resetChildKey(design, name, k.key, panel), panel, name, file)?.keys?.[k.key] === undefined
+                ? "Use the game's health colours" : "Use the file's value"}
             </button>
           )}
         </Fragment>
@@ -880,6 +884,13 @@ export function ChildControls(
       <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={onBack}>{`Back to ${elementById(panel)?.label ?? 'Teammates'}`}</button>
     </Field>
   );
+}
+
+/** What a band pill previews: the survivor state drawn in that band. None for the infected panels, which the preview draws full. */
+const BAND_STATE: Record<HealthBand, PreviewState['survivor']> = { healthy: 'healthy', hurt: 'hurt', critical: 'down' };
+function bandSetter(preview: PreviewState, panel: string, onPreview?: (p: PreviewState) => void): ((b: HealthBand) => void) | undefined {
+  if (!onPreview || panel === 'siHealth' || panel === 'infectedRow') return undefined;
+  return (b) => onPreview({ ...preview, survivor: BAND_STATE[b] });
 }
 
 /**
@@ -905,12 +916,14 @@ export function Note({ text }: { text: string }) {
  * gate has passed reach here; the value is the file's text, as the
  * generator writes it.
  */
-function KeyControl({ def, value, onValue, end, max, band = 'healthy' }: {
+function KeyControl({ def, value, onValue, end, max, band = 'healthy', onBand }: {
   def: KeyDef; value: string | undefined; onValue: (v: string, mode?: EditMode) => void; end: () => void;
   /** A tighter top than the range: a bar's inset stops where one unit of fill is left (maxInset). */
   max?: number;
   /** The health band the preview draws in (previewHealthBand), marked among a byHealth key's three. */
   band?: HealthBand;
+  /** Preview a band: its pill becomes a button. Left out where the preview has one band only (the infected, drawn full). */
+  onBand?: (b: HealthBand) => void;
 }) {
   if (def.type === 'colour' && value === undefined) {
     // Unset: the game's own colour, the health colour for a Panel colour.
@@ -932,13 +945,28 @@ function KeyControl({ def, value, onValue, end, max, band = 'healthy' }: {
           <ul class="hud__bands" aria-label="The game's health colours">
             {HEALTH_BANDS.map((h) => (
               <li key={h.band} class={h.band === band ? 'hud__band hud__band--on' : 'hud__band'}>
-                <span class="hud__band-chip" style={{ background: `rgb(${h.rgb.join(' ')})` }} />
-                {h.label}
+                {onBand
+                  ? (
+                    <button type="button" class="hud__band-btn" aria-pressed={h.band === band} title={`Preview at ${h.label.toLowerCase()} health`} onClick={() => onBand(h.band)}>
+                      <span class="hud__band-chip" style={{ background: `rgb(${h.rgb.join(' ')})` }} />
+                      {h.label}
+                    </button>
+                  )
+                  : <><span class="hud__band-chip" style={{ background: `rgb(${h.rgb.join(' ')})` }} />{h.label}</>}
               </li>
             ))}
           </ul>
         )}
       </div>
+    );
+  }
+  if (def.type === 'colour' && def.byHealth) {
+    // Picked: the file's one colour replaces the game's three, at every health (client.dll's table cannot be changed).
+    return (
+      <>
+        <ColourRow label={def.label} value={value!} end={end} onPick={(c) => onValue(c, 'gesture')} />
+        <p class="muted hud__note">Same at every health: this replaces the game's green, orange and red.</p>
+      </>
     );
   }
   if (def.type === 'colour') return <ColourRow label={def.label} value={value!} end={end} onPick={(c) => onValue(c, 'gesture')} />;
@@ -1176,10 +1204,12 @@ function InfectedCardControls({ cards, onRow, rowLabel }: { cards: number[]; onR
 
 /** The right-hand panel: only what the selection can do. */
 export function ContextPanel(
-  { design, sel, edit, end, onSelect, onWentFree, preview = DEFAULT_PREVIEW }: {
+  { design, sel, edit, end, onSelect, onWentFree, preview = DEFAULT_PREVIEW, onPreview }: {
     design: HudDesign; sel: Selection; edit: Edit; end: () => void; onSelect: (s: Selection) => void; onWentFree: () => void;
     /** What the canvas shows: the notes name the class, and a piece's numbers are the class file's. */
     preview?: PreviewState;
+    /** Switch the preview: a health colour's band pills. */
+    onPreview?: (p: PreviewState) => void;
   },
 ) {
   switch (sel.kind) {
@@ -1192,7 +1222,7 @@ export function ContextPanel(
       );
     case 'elements':
       return sel.ids.length === 1
-        ? <ElementControls design={design} edit={edit} end={end} id={sel.ids[0]} preview={preview} />
+        ? <ElementControls design={design} edit={edit} end={end} id={sel.ids[0]} preview={preview} onPreview={onPreview} />
         : <ElementsControls design={design} edit={edit} ids={sel.ids} />;
     case 'cards':
       if (panelOf(sel) !== 'teamColumn') {
@@ -1206,7 +1236,7 @@ export function ContextPanel(
       return sel.names.length === 1
         ? (
           <ChildControls
-            design={design} edit={edit} end={end} name={sel.names[0]} panel={panelOf(sel)} preview={preview}
+            design={design} edit={edit} end={end} name={sel.names[0]} panel={panelOf(sel)} preview={preview} onPreview={onPreview}
             onBack={() => onSelect(panelOf(sel) === 'teamColumn' ? TEAMMATES : { kind: 'elements', ids: [panelOf(sel)] })}
           />
         )

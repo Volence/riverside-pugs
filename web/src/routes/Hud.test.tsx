@@ -2324,6 +2324,17 @@ describe('Your own health on the page', () => {
     expect([swatch(), lit()]).toEqual(['#d8920c', '16 to 50']);
     fireEvent.click(screen.getByRole('tab', { name: 'Down' }));
     expect([swatch(), lit()]).toEqual(['#a11919', '15 or less, or down']);
+    // A pill previews its band, as the state tab would.
+    fireEvent.click(screen.getByRole('button', { name: /^16 to 50/ }));
+    expect(screen.getByRole('tab', { name: 'Hurt' }).getAttribute('aria-selected')).toBe('true');
+    expect([swatch(), lit()]).toEqual(['#d8920c', '16 to 50']);
+    // A picked colour is one for every health, and one click puts the game's three back.
+    fireEvent.input(screen.getByLabelText('Panel colour colour'), { target: { value: '#ff00ff' } });
+    expect(screen.getByText("Same at every health: this replaces the game's green, orange and red.")).toBeTruthy();
+    expect(screen.queryByLabelText("The game's health colours")).toBeNull();
+    expect(screen.getByRole('button', { name: "Panel colour: use the file's value" }).textContent).toBe("Use the game's health colours");
+    fireEvent.click(screen.getByRole('button', { name: "Panel colour: use the file's value" }));
+    expect(screen.getByLabelText("The game's health colours")).toBeTruthy();
   });
 
   it('offers the Inset on your health bar and on the teammate bar, and saves it (probe Q3)', async () => {

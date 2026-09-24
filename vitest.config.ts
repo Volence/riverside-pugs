@@ -20,6 +20,7 @@ export default defineConfig({
           name: 'web',
           environment: 'happy-dom',
           include: ['web/**/*.test.{ts,tsx}'],
+          setupFiles: ['web/src/testSetup.ts'],
         },
       },
     ],
