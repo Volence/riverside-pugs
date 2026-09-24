@@ -172,6 +172,27 @@ function placed(o: ElementOverride, base: { x: number; y: number; w: number; h: 
   return { xpos: formatPos(x, w, screenW(designAspect)), ypos: formatPos(y, h, SCREEN_H), w, h };
 }
 
+/** The file whose block places an element: hudlayout.res, or its own (the spawn countdown's spectatorinfected.res). */
+const layoutOf = (el: HudElement): string => el.file ?? LAYOUT;
+
+/**
+ * The blocks an element's move takes along (HudElement.moveWith), each
+ * placed by the same offset from its own base place, as a token anchored
+ * the way formatPos picks for it.
+ */
+function moveAlong(work: Work, el: HudElement, from: { x: number; y: number }, to: { x: number; y: number }, aspect: Aspect) {
+  const W = screenW(aspect);
+  for (const name of el.moveWith ?? []) {
+    const b = work.optional(layoutOf(el), [name]);
+    const base = kvFind(baseTree(work.key, layoutOf(el)), [name]);
+    if (!b || !base) continue;
+    const w = parseSize(pcGet(base, 'wide') ?? '0', W), h = parseSize(pcGet(base, 'tall') ?? '0', SCREEN_H);
+    const x = parsePos(pcGet(base, 'xpos') ?? '0', W) + to.x - from.x, y = parsePos(pcGet(base, 'ypos') ?? '0', SCREEN_H) + to.y - from.y;
+    pcSet(b, 'xpos', formatPos(x, w, W));
+    pcSet(b, 'ypos', formatPos(y, h, SCREEN_H));
+  }
+}
+
 function layoutPass(work: Work, design: HudDesign) {
   const layout = work.tree(LAYOUT);
   const has = kvFind(layout, ['xHair']);
@@ -192,7 +213,7 @@ function layoutPass(work: Work, design: HudDesign) {
     // no panel for it offers no control for it, so a stored edit (from
     // before the switch) has nothing to land on.
     if (!o || el.id === 'xhair' || !baseHasElement(work.key, el)) continue;
-    const panel = work.panel(LAYOUT, [el.key]);
+    const panel = work.panel(layoutOf(el), [el.key]);
     // The marker's block is the game's crosshair: its visible stays the
     // crosshair's, and elementHidePass hides the marker by its own keys.
     if (o.visible !== undefined && el.id !== MARKER) kvSet(panel, 'visible', o.visible ? '1' : '0');
@@ -205,8 +226,10 @@ function layoutPass(work: Work, design: HudDesign) {
     const moved = el.move && (o.x !== undefined || o.y !== undefined);
     const sized = el.resize === 'free' && (o.w !== undefined || o.h !== undefined);
     if (!moved && !sized) continue;
-    const p = placed(o, baseRect(panel, el, work.key, design.aspect), el, design.aspect);
+    const base = baseRect(panel, el, work.key, design.aspect);
+    const p = placed(o, base, el, design.aspect);
     if (moved) { kvSet(panel, 'xpos', p.xpos); kvSet(panel, 'ypos', p.ypos); }
+    if (moved && el.moveWith) moveAlong(work, el, base, { x: parsePos(p.xpos, screenW(design.aspect)), y: parsePos(p.ypos, SCREEN_H) }, design.aspect);
     if (sized) { kvSet(panel, 'wide', String(Math.round(p.w))); kvSet(panel, 'tall', String(Math.round(p.h))); }
     if (el.id === 'chat' && moved) {
       // Three animation events hard-code the chat position and would snap a moved chat box back.
@@ -316,6 +339,26 @@ function noticePass(work: Work, design: HudDesign, out: VpkFile[] | null) {
       const leaf = (row.value as KvNode[]).find((n) => n.key.toLowerCase() === 'font' && typeof n.value === 'string');
       if (leaf) { const tall = Math.round(size); useFontCopy(work, leaf, `t${tall}`, () => tall); }
     }
+  }
+}
+
+/**
+ * The spawn countdown's look (plan task M4): its colour and text size on
+ * spectatorinfected.res's InfectedState, the line code writes the countdown
+ * into, not on the "YOU ARE DEAD" title above it. The addon copy of the
+ * file is read (probe Q23,
+ * /home/volence/l4d/hud/probe-phase2-infected/b9/shots/b9/b9-e.png); these
+ * are the plain Label keys. An imported file lacking the block is skipped.
+ */
+function countdownPass(work: Work, design: HudDesign) {
+  const o = design.elements.spawnCountdown;
+  const el = elementById('spawnCountdown')!;
+  if (!o || (o.color === undefined && o.fontSize === undefined) || !baseHasElement(work.key, el)) return;
+  const line = work.panel(layoutOf(el), [el.key]);
+  if (o.color !== undefined) kvSet(line, 'fgcolor_override', o.color);
+  if (o.fontSize !== undefined) {
+    const leaf = (line.value as KvNode[]).find((n) => n.key.toLowerCase() === 'font' && typeof n.value === 'string');
+    if (leaf) { const tall = Math.round(o.fontSize); useFontCopy(work, leaf, `t${tall}`, () => tall); }
   }
 }
 
@@ -922,7 +965,7 @@ function fitOffset(box: Box, k: number): { x: number; y: number } {
 export function drawnAt(design: HudDesign, id: string, sx: number, sy: number): { x: number; y: number } {
   const el = elementById(id);
   const key = baseOf(design);
-  const panel = el && kvFind(baseTree(key, LAYOUT), [el.key]);
+  const panel = el && kvFind(baseTree(key, layoutOf(el)), [el.key]);
   if (!el || !panel) return { x: sx, y: sy };
   const W = screenW(design.aspect);
   const p = placed({ ...design.elements[id], x: sx, y: sy }, baseRect(panel, el, key, design.aspect), el, design.aspect);
@@ -1201,7 +1244,8 @@ function elementHidePass(work: Work, design: HudDesign) {
   for (const el of ELEMENTS) {
     if (el.id === 'xhair' || design.elements[el.id]?.visible !== false || !baseHasElement(work.key, el)) continue;
     if (el.id === MARKER) { markerHide(work.panel(LAYOUT, [el.key]), el); continue; }
-    hardHide(work.panel(LAYOUT, [el.key]));
+    hardHide(work.panel(layoutOf(el), [el.key]));
+    for (const name of el.moveWith ?? []) { const b = work.optional(layoutOf(el), [name]); if (b) hardHide(b); }
     for (const f of HIDE_FRAMES[el.id] ?? []) {
       for (const name of f.blocks) { const b = work.optional(f.file, [name]); if (b) hardHide(b); }
     }
@@ -1458,7 +1502,7 @@ export function cardChild(design: HudDesign, name: string): CardChild | null {
  */
 export function baseHasElement(key: BaseKey, el: HudElement): boolean {
   if (el.id === 'xhair') return true;
-  if (!kvFind(baseTree(key, LAYOUT), [el.key])) return false;
+  if (!kvFind(baseTree(key, layoutOf(el)), [el.key])) return false;
   if (!el.team?.file) return true;
   const team = baseTree(key, el.team.file);
   return [1, 2, 3, 4].every((n) => kvFind(team, [`TeamPlayer${n}`]) !== undefined);
@@ -2217,6 +2261,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   layoutPass(work, design);
   weaponsPass(work, design, assets, extra);
   noticePass(work, design, extra);
+  countdownPass(work, design);
   chatPass(work, design);
   pickupPass(work, design);
   childPass(work, design);
@@ -2302,6 +2347,7 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
     layoutPass(work, design);
     weaponsPass(work, design, null, discard);
     noticePass(work, design, null);
+    countdownPass(work, design);
     chatPass(work, design);
     pickupPass(work, design);
     childPass(work, design);
@@ -2324,7 +2370,7 @@ export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
   const work = new Work(baseOf(design));
   const o = design.elements[id] ?? {};
   if (id === 'xhair') return { x: screenW(aspect) / 2 - 13, y: SCREEN_H / 2 - 13, w: 26, h: 26, visible: design.crosshair !== 'none' };
-  const panel = work.panel(LAYOUT, [el.key]);
+  const panel = work.panel(layoutOf(el), [el.key]);
   if (id === MARKER) return { ...markerBox(design, aspect), visible: o.visible ?? true };
   const base = baseRect(panel, el, baseOf(design), design.aspect);
   const p = placed(o, base, el, design.aspect);

@@ -7,19 +7,20 @@ import { baseFile, BASE_PATHS } from './base';
 const root = (preset: 'stock' | 'modern', file: string) => parseKv(baseFile(preset, file))[0].value as KvNode[];
 
 describe('ELEMENTS', () => {
-  it('has unique ids and the fourteen elements', () => {
+  it('has unique ids and the fifteen elements', () => {
     const ids = ELEMENTS.map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.sort()).toEqual(['abilityMarker', 'abilityRing', 'chat', 'ghostPanel', 'infectedRow', 'killNotices', 'ownHealth',
-      'progressBar', 'siHealth', 'tankPanel', 'teamColumn', 'weaponSelection', 'xhair', 'zombiePanel'].sort());
+      'progressBar', 'siHealth', 'spawnCountdown', 'tankPanel', 'teamColumn', 'weaponSelection', 'xhair', 'zombiePanel'].sort());
   });
 
   for (const preset of ['stock', 'modern'] as const) {
-    it(`every key exists in ${preset} hudlayout.res`, () => {
-      const layout = root(preset, 'scripts/hudlayout.res');
+    it(`every key exists in ${preset} hudlayout.res, or in the element's own file`, () => {
       for (const e of ELEMENTS) {
         if (e.id === 'xhair') continue;            // added by the generator, absent from stock
-        expect(kvFind(layout, [e.key]), e.id).toBeDefined();
+        const file = root(preset, e.file ?? 'scripts/hudlayout.res');
+        expect(kvFind(file, [e.key]), e.id).toBeDefined();
+        for (const b of e.moveWith ?? []) expect(kvFind(file, [b]), `${e.id} ${b}`).toBeDefined();
       }
     });
   }

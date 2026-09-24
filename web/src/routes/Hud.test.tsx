@@ -2641,3 +2641,17 @@ describe('The spawn and too-far panels on the page (plan tasks G1, Z2)', () => {
     await waitFor(() => expect(saved().children?.zombiePanel?.['TooFarFromSurvivors/TooFarTitle']?.color).toBe('255 0 255 255'));
   });
 });
+
+describe('The spawn countdown on the page (plan task M4)', () => {
+  const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
+  it('colours and sizes the countdown line', async () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    fireEvent.click(layer('Spawn countdown').getByRole('button', { name: 'Spawn countdown' }));
+    fireEvent.input(screen.getByLabelText('Countdown colour colour'), { target: { value: '#ff00ff' } });
+    await waitFor(() => expect(saved().elements?.spawnCountdown?.color).toBe('255 0 255 255'));
+    expect(screen.getByText('"You will enter Spawn Mode in N seconds", shown while you are dead. "YOU ARE DEAD" moves and hides with it.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Countdown colour: use the file colour' }));
+    await waitFor(() => expect(saved().elements?.spawnCountdown?.color).toBeUndefined());
+  });
+});

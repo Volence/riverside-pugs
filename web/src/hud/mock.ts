@@ -839,10 +839,11 @@ function paintPanelBox(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNo
 function paintPanelLabel(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, box: Rect, k: number, s: string, colour: string, clip: Rect, onAsset?: () => void) {
   const cell = setFont(ctx, design, pcGet(n, 'font') ?? '', k, onAsset);
   const align = (pcGet(n, 'textAlignment') ?? 'west').toLowerCase();
+  // VGUI's nine alignments: west and east name a side, and north, south and center alone centre the line.
   let x = box.x;
   if (align.includes('east')) { ctx.textAlign = 'right'; x = box.x + box.w; }
-  else if (align.includes('center')) { ctx.textAlign = 'center'; x = box.x + box.w / 2; }
-  else ctx.textAlign = 'left';
+  else if (align.includes('west')) ctx.textAlign = 'left';
+  else { ctx.textAlign = 'center'; x = box.x + box.w / 2; }
   const top = align.startsWith('north') ? box.y : align.startsWith('south') ? box.y + box.h - cell.cell : box.y + (box.h - cell.cell) / 2;
   ctx.fillStyle = colour;
   fillFontText(ctx, cell, s, x, top + cell.ascent, top, clip);
@@ -1016,6 +1017,28 @@ function paintTankPanel(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesig
   });
 }
 
+const SPECTATOR = 'resource/ui/spectatorinfected.res';
+/**
+ * The dead infected's spawn countdown drawn from spectatorinfected.res
+ * (through buildTrees), only while you are dead: SpawnModeLabel's "YOU ARE
+ * DEAD" (#L4D_pz_spectator_title) and InfectedState's countdown
+ * (#L4D_pz_spawn_countdown, a sample 12 seconds), each where the file puts
+ * it on the screen (the file's panel is the whole screen), in its font and
+ * colour; b9-e (probe-phase2-infected) shows the title so. The file's
+ * dark title band (ghost_title_bg) is left out.
+ */
+function paintSpawnCountdown(ctx: CanvasRenderingContext2D, _r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
+  const nodes = buildTrees(design)(SPECTATOR);
+  const W = screenW(design.aspect);
+  const screen = { x: 0, y: 0, w: W * k, h: SCREEN_H * k };
+  ctx.save();
+  for (const [name, s] of [['SpawnModeLabel', 'YOU ARE DEAD'], ['InfectedState', 'You will enter Spawn Mode in 12 seconds']]) {
+    const n = kvFind(nodes, [name]);
+    if (n && pcGet(n, 'visible') !== '0') paintPanelLabel(ctx, design, n, blockRect(n, screen, k, W), k, s, labelColour(design, n), screen, onAsset);
+  }
+  ctx.restore();
+}
+
 const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view?: HudView) => void> = {
   ownHealth: paintOwnHealth,
   teamColumn: paintTeamColumn,
@@ -1030,6 +1053,7 @@ const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: 
   abilityMarker: paintAbilityMarker,
   ghostPanel: paintGhostPanel,
   zombiePanel: paintZombiePanel,
+  spawnCountdown: paintSpawnCountdown,
   tankPanel: paintTankPanel,
 };
 

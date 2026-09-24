@@ -1725,10 +1725,11 @@ describe('hiding an element hides it in game (probe B2 and B3: visible 0 alone h
 
   for (const preset of ['stock', 'modern'] as const) {
     for (const el of hideable) {
-      it(`${preset}: ${el.id} is visible 0 and 0 x 0 in hudlayout.res`, () => {
+      it(`${preset}: ${el.id} is visible 0 and 0 x 0 in hudlayout.res (or its own file, with the blocks it moves with)`, () => {
         if (!baseHasElement(preset, el)) return;
-        const got = layoutOf(buildHud(design({ preset, elements: { [el.id]: { visible: false } } }), { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } }));
-        expect(size(kvFind(got, [el.key])!)).toEqual(['0', '0', '0']);
+        const files = buildHud(design({ preset, elements: { [el.id]: { visible: false } } }), { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } });
+        const got = el.file ? tree(files, el.file, preset) : layoutOf(files);
+        for (const b of [el.key, ...(el.moveWith ?? [])]) expect(size(kvFind(got, [b])!), b).toEqual(['0', '0', '0']);
       });
     }
   }

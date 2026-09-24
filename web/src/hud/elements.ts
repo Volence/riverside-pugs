@@ -23,8 +23,16 @@ export type Prop = 'visible' | 'color' | 'bg' | 'fontSize';
 export interface HudElement {
   id: string; label: string;
   side: 'survivor' | 'infected' | 'both';
-  /** The hudlayout.res panel that places it. */
+  /** The hudlayout.res panel that places it (or the block in `file` that does). */
   key: string;
+  /**
+   * The file whose `key` block places the element, when that is not
+   * hudlayout.res: the spawn countdown's labels live in
+   * spectatorinfected.res, a full-screen panel with no hudlayout block.
+   */
+  file?: string;
+  /** Blocks of `file` a move and a hide take along with `key`, keeping their offset from it. */
+  moveWith?: string[];
   move: boolean;
   resize: 'free' | 'scale' | 'none';
   /** resource/ui files whose contents scale with it. */
@@ -184,6 +192,17 @@ export const ELEMENTS: HudElement[] = [
    */
   { id: 'zombiePanel', label: 'Too far / Tank offer', side: 'infected', key: 'HudZombiePanel', move: true, resize: 'none',
     children: [], props: ['visible'], shownIn: ['alive'] },
+  /**
+   * The dead infected's spawn countdown: spectatorinfected.res's
+   * InfectedState, where code writes "You will enter Spawn Mode in N
+   * seconds", with SpawnModeLabel ("YOU ARE DEAD") moved and hidden along.
+   * The addon copy of the file is read (probe Q23,
+   * /home/volence/l4d/hud/probe-phase2-infected/b9/shots/b9/b9-e.png); the
+   * colour and text size go on InfectedState (build.ts countdownPass), the
+   * plain Label keys proven on every other panel.
+   */
+  { id: 'spawnCountdown', label: 'Spawn countdown', side: 'infected', key: 'InfectedState', file: 'resource/ui/spectatorinfected.res',
+    moveWith: ['SpawnModeLabel'], move: true, resize: 'none', children: [], props: ['visible'], shownIn: ['dead'] },
   /**
    * The Tank's frustration meter: moves and hides now; its pieces
    * (frustrationmeter.res, children.ts FRUST_PANEL) wait on gate T1, as no

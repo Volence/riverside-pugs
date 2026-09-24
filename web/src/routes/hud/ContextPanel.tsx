@@ -517,6 +517,7 @@ export function ElementControls(
       {id === 'weaponSelection' && <WeaponControls design={design} edit={edit} end={end} />}
       {id === 'killNotices' && <NoticeControls design={design} edit={edit} end={end} patch={patch} />}
       {id === 'chat' && <ChatControls design={design} edit={edit} end={end} patch={patch} />}
+      {id === 'spawnCountdown' && <CountdownControls design={design} edit={edit} end={end} patch={patch} />}
 
       {/* The crosshair has no element settings of its own to reset: its choice and art are undone like any edit. */}
       {id !== 'xhair' && <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this element</button>}
@@ -616,6 +617,44 @@ function ChatControls({ design, edit, end, patch }: { design: HudDesign; edit: E
       )}
       {probe('C2') && (
         <ColourRow label="Box colour" value={o.bg ?? '0 0 0 128'} end={end} onPick={(c) => patch({ bg: c }, 'gesture')} />
+      )}
+    </>
+  );
+}
+
+/**
+ * The spawn countdown's look (plan task M4): the colour and text size of
+ * its InfectedState line, which build.ts countdownPass writes, shown as the
+ * generated file has them. The addon copy of spectatorinfected.res is read
+ * (probe Q23, /home/volence/l4d/hud/probe-phase2-infected/b9/shots/b9/b9-e.png).
+ */
+function CountdownControls({ design, edit, end, patch }: { design: HudDesign; edit: Edit; end: () => void; patch: Patch }) {
+  const o = design.elements.spawnCountdown ?? {};
+  const line = kvFind(buildTrees({ ...design, elements: {} })('resource/ui/spectatorinfected.res'), ['InfectedState']);
+  const shown = o.color ?? (line && pcGet(line, 'fgcolor_override')) ?? '192 192 192 255';
+  const clear = (key: 'color' | 'fontSize') => edit((d) => {
+    const { [key]: _gone, ...rest } = d.elements.spawnCountdown ?? {};
+    const elements = { ...d.elements };
+    if (Object.keys(rest).length) elements.spawnCountdown = rest; else delete elements.spawnCountdown;
+    return { ...d, elements };
+  });
+  return (
+    <>
+      <p class="muted hud__note">"You will enter Spawn Mode in N seconds", shown while you are dead. "YOU ARE DEAD" moves and hides with it.</p>
+      <ColourRow label="Countdown colour" value={/^\d+ \d+ \d+ \d+$/.test(shown) ? shown : '192 192 192 255'} end={end} onPick={(c) => patch({ color: c }, 'gesture')} />
+      {o.color !== undefined && (
+        <button type="button" class="btn btn--ghost btn--sm" aria-label="Countdown colour: use the file colour" onClick={() => clear('color')}>
+          Use the file colour
+        </button>
+      )}
+      <SliderNum
+        label="Text size" value={o.fontSize ?? fontFace(design, (line && pcGet(line, 'font')) ?? 'Default').tall} min={6} max={64}
+        onInput={(n) => patch({ fontSize: clampOverride('fontSize', n) }, 'gesture')} onEnd={end}
+      />
+      {o.fontSize !== undefined && (
+        <button type="button" class="btn btn--ghost btn--sm" aria-label="Text size: use the file size" onClick={() => clear('fontSize')}>
+          Use the file size
+        </button>
       )}
     </>
   );
