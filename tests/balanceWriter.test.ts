@@ -64,15 +64,57 @@ describe('BalanceRolloutWriter', () => {
     expect(state(s2).state).toBe('written');
   });
 
-  it('defers a live box, and the release path writes it regardless of status', async () => {
+  it('defers a live box to the release path', async () => {
     const f = fakeBoxes();
     markLive(db, s2);
     const w = new BalanceRolloutWriter({ db, transport: f.transport });
     const out = await w.sync();
     expect(out.find((o) => o.serverId === s2)?.skipped).toBe('busy');
     expect(state(s2).state).toBe('pending');
-    await w.writeForRelease(s2);
+  });
+
+  it('the release path writes an offline (restarting) box', async () => {
+    const f = fakeBoxes();
+    db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(s2);
+    await new BalanceRolloutWriter({ db, transport: f.transport }).writeForRelease(s2);
     expect(state(s2).state).toBe('written');
+    expect(f.disk.get(`${s2}/pug_balance.cfg`)).toBe('CONTENT');
+  });
+
+  it('the release path writes an idle box', async () => {
+    const f = fakeBoxes();
+    await new BalanceRolloutWriter({ db, transport: f.transport }).writeForRelease(s2);
+    expect(state(s2).state).toBe('written');
+  });
+
+  it('the release path leaves a box a new match has already claimed (reserved or live) to the sweep', async () => {
+    const f = fakeBoxes();
+    db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(s1);
+    markLive(db, s2);
+    const w = new BalanceRolloutWriter({ db, transport: f.transport });
+    await w.writeForRelease(s1);
+    await w.writeForRelease(s2);
+    expect(state(s1).state).toBe('pending');
+    expect(state(s2).state).toBe('pending');
+    expect(f.disk.size).toBe(0);
+  });
+
+  it('coalesces sweeps: a sync queued behind another that has not started returns the same promise', async () => {
+    const f = fakeBoxes();
+    let puts = 0;
+    const transport = (s: ServerRow, dir: string): AddonsTransport => {
+      const t = f.transport(s, dir);
+      return { ...t, async put(local, name) { puts += 1; return t.put(local, name); } };
+    };
+    const w = new BalanceRolloutWriter({ db, transport });
+    const a = w.sync();
+    const b = w.sync();
+    expect(b).toBe(a);
+    expect(await b).toEqual(await a);
+    expect(puts).toBe(2); // one per server, not two passes
+    const c = w.sync();
+    expect(c).not.toBe(a);
+    await c;
   });
 
   it('a failed write is failed with its error, alerts once, and is retried', async () => {
@@ -211,7 +253,7 @@ describe('BalanceRolloutWriter', () => {
     db.prepare("UPDATE servers SET status = 'idle', addons_dir = '/g/left4dead/addons' WHERE id IN (?, ?)").run(s3, s4);
     db.prepare("INSERT INTO balance_rollout_servers (rollout_id, server_id, state) VALUES (1, ?, 'pending'), (1, ?, 'pending')").run(s3, s4);
 
-    const timeoutMs = 40;
+    const timeoutMs = 150;
     const w = new BalanceRolloutWriter({ db, transport, timeoutMs });
     void w.sync(); // occupies the chain for ~3 x timeoutMs (s1, s2, s4 each time out; s3 is skipped free)
 
@@ -219,12 +261,45 @@ describe('BalanceRolloutWriter', () => {
     const startedAt = Date.now();
     await w.writeForRelease(s3);
     const elapsed = Date.now() - startedAt;
-    expect(elapsed).toBeGreaterThanOrEqual(timeoutMs * 2 - 10); // resolved by the cap, not earlier
-    expect(elapsed).toBeLessThan(timeoutMs * 3 - 10); // and well before the pass it was queued behind finishes
+    // The cap fires at 2 x timeoutMs (300 ms) and the pass ahead finishes at
+    // about 3 x timeoutMs (450 ms); both bounds sit well clear of either edge.
+    expect(elapsed).toBeGreaterThanOrEqual(timeoutMs * 2 - 5); // resolved by the cap, not earlier
+    expect(elapsed).toBeLessThan(timeoutMs * 2.5); // and well before the pass it was queued behind finishes
 
     // Flush the chain (the pass, then writeForRelease's own deferred turn).
     await w.sync();
     expect(state(s3).state).not.toBe('written');
     expect(disk.has(`${s3}/pug_balance.cfg`)).toBe(false);
+  });
+
+  it('after the cap, the deferred release turn writes only an idle box, not one still offline for the restart', async () => {
+    const disk = new Map<string, string>();
+    const hanging = new Set<number>();
+    const transport = (s: ServerRow): AddonsTransport => ({
+      async put(local, name) {
+        if (hanging.has(s.id)) await new Promise<void>(() => {});
+        disk.set(`${s.id}/${name}`, readFileSync(local, 'utf8'));
+      },
+      async readText(name) { return disk.get(`${s.id}/${name}`) ?? null; },
+      async size() { return null; },
+      async remove() {},
+    });
+    // Same shape as above: s1, s2 and s4 hang and hold the chain for about
+    // 3 x timeoutMs; s3 is the box being released, offline for its restart.
+    // Its own put would succeed, so only the post-cap idle rule keeps it
+    // from being written once its turn finally comes after the cap.
+    const s3 = addServer(db, { name: 'r3', host: '10.0.0.3', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    const s4 = addServer(db, { name: 'r4', host: '10.0.0.4', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    db.prepare("UPDATE servers SET status = 'idle', addons_dir = '/g/left4dead/addons' WHERE id IN (?, ?)").run(s3, s4);
+    db.prepare("INSERT INTO balance_rollout_servers (rollout_id, server_id, state) VALUES (1, ?, 'pending'), (1, ?, 'pending')").run(s3, s4);
+    for (const id of [s1, s2, s4]) hanging.add(id);
+
+    const w = new BalanceRolloutWriter({ db, transport, timeoutMs: 60 });
+    void w.sync();
+    db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(s3);
+    await w.writeForRelease(s3); // resolved by the cap
+    await w.sync(); // flush: the pass, the deferred release turn, then this pass (which skips offline s3 as busy)
+    expect(disk.has(`${s3}/pug_balance.cfg`)).toBe(false);
+    expect(state(s3).state).toBe('pending');
   });
 });

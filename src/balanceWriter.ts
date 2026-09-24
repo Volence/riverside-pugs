@@ -58,8 +58,18 @@ export class BalanceRolloutWriter {
     return next;
   }
 
+  /** A sweep queued behind the chain that has not started yet: a second
+   *  sync() in that window joins it instead of queueing another full pass. */
+  private queuedSync: Promise<WriteOutcome[]> | null = null;
+
   sync(): Promise<WriteOutcome[]> {
-    return this.queue(() => this.pass(), []);
+    if (this.queuedSync) return this.queuedSync;
+    const p = this.queue(() => {
+      this.queuedSync = null;
+      return this.pass();
+    }, []);
+    this.queuedSync = p;
+    return p;
   }
 
   verifyAll(): Promise<WriteOutcome[]> {
@@ -70,6 +80,12 @@ export class BalanceRolloutWriter {
   }
 
   /** Never rejects: the release path must free the box whatever happens here.
+   *
+   *  Writes only a box that is enabled and still 'offline' (restarting for
+   *  this release) or 'idle'. Without a restart the releaser marks the row
+   *  idle straight away, so by the time this turn runs a new match may
+   *  already have claimed it (reserved or live); that box is left to the
+   *  minute sweep, which writes it once it is idle again.
    *
    *  Resolves after at most 2x timeoutMs even if its queued turn has not
    *  come up yet: waiting behind a chain of slow writes would stall the
@@ -94,6 +110,7 @@ export class BalanceRolloutWriter {
       if (!ro || !server || server.enabled !== 1) return;
       ensureServerRows(this.deps.db, ro.id);
       if (!this.needsWrite(ro.id, serverId)) return;
+      if (server.status !== 'offline' && server.status !== 'idle') return;
       if (capExpired && server.status !== 'idle') return;
       await this.writeOne(server, ro);
     }, undefined);
