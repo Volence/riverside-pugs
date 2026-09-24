@@ -25,7 +25,12 @@ export function publicDelta(metric: string, d: number | null): string {
   return /^0(\.0+)?( |$)/.test(s) ? s : `${sign(d)}${s}`;
 }
 
-export function verdictSentence(r: PublicRow): string {
+/** "1 match", "0 matches", "8 rounds". */
+export const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** `live`: this patch is still being played (PublicEntry.live), so a too_early
+ *  row can still gain matches. */
+export function verdictSentence(r: PublicRow, live: boolean): string {
   switch (r.verdict) {
     case 'real': {
       const range = r.lo !== null && r.hi !== null ? `, likely between ${publicDelta(r.metric, r.lo)} and ${publicDelta(r.metric, r.hi)}` : '';
@@ -33,7 +38,8 @@ export function verdictSentence(r: PublicRow): string {
     }
     case 'noise': return 'No clear change: within normal variation.';
     case 'too_early':
-      if (r.nA < MIN_MATCHES) return 'Too early to tell: the previous patch has too few matches to compare against.';
+      if (!live) return 'Too early to tell: too few matches were measured on these patches to tell.';
+      if (r.nA < MIN_MATCHES) return 'Too early to tell: the previous patch has too few measured matches to compare against.';
       if (r.moreMatches === null) return 'Too early to tell: more matches needed.';
       if (r.moreMatches >= 500) return 'Too early to tell: about 500+ more matches needed.';
       return `Too early to tell: about ${r.moreMatches} more match${r.moreMatches === 1 ? '' : 'es'} needed.`;
@@ -41,6 +47,7 @@ export function verdictSentence(r: PublicRow): string {
       if (r.noSharedMaps) return 'No maps in common with the previous patch, so no comparison.';
       if (r.nB === 0) return 'Not measured for this patch.';
       if (r.nA === 0) return 'Not measured for the previous patch.';
+      // Unreachable today (a two-sided row without values is noSharedMaps), kept as a safe default.
       return 'Not measured for this patch.';
   }
 }
@@ -53,8 +60,12 @@ export function skillBannerText(s: 'differs' | 'unavailable' | null): string | n
 
 export const APPROXIMATE_TEXT = 'Approximate: this comparison includes games from before patches were tracked automatically, so which games belong to which patch was reconstructed from dates.';
 
-export const CHANGES_UNAVAILABLE_TEXT: Record<'historical' | 'previous_unrecorded' | 'first', string> = {
+export const CHANGES_UNAVAILABLE_TEXT: Record<'historical' | 'unrecorded' | 'previous_unrecorded' | 'first', string> = {
   historical: 'This patch was reconstructed from dates, so there is no recorded list of settings. See the notes above.',
+  unrecorded: 'No list of settings was recorded for this patch. See the notes above.',
   previous_unrecorded: 'The previous patch predates recorded settings, so the list of changes is not available. See the notes above.',
   first: 'First tracked patch: nothing earlier to compare with.',
 };
+
+/** "What changed" for the first tracked patch; CHANGES_UNAVAILABLE_TEXT.first reads under "Measured effect". */
+export const FIRST_CHANGES_TEXT = 'First tracked patch, so there is no earlier patch to list changes against.';
