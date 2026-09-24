@@ -37,20 +37,26 @@ export function sweepCommunity(db: DB, store: CommunityStore | null, now: Date):
 
   if (!store) return { purged, files: 0 };
 
-  const inUse = (column: 'preview' | 'import_id'): Set<string> => new Set(
+  const inUse = (column: 'preview' | 'preview_infected' | 'import_id'): Set<string> => new Set(
     (db.prepare(`SELECT DISTINCT ${column} AS v FROM community_entries WHERE purged_at IS NULL AND ${column} IS NOT NULL`)
       .all() as { v: string }[]).map((r) => r.v),
   );
-  const refs: Record<FileKind, Set<string>> = { preview: inUse('preview'), import: inUse('import_id') };
+  // Both sides' previews share the previews folder, and one entry's survivor
+  // shot can be another's infected one, so either column keeps a file.
+  const refs: Record<FileKind, Set<string>> = {
+    preview: new Set([...inUse('preview'), ...inUse('preview_infected')]),
+    import: inUse('import_id'),
+  };
 
   // Files of a just-purged row go at once whatever their age. Everything else
   // unreferenced (a crash between write and insert, a stray temp file) waits
   // out the grace period first.
   const justPurged: Record<FileKind, Set<string>> = { preview: new Set(), import: new Set() };
   if (purged > 0) {
-    for (const r of db.prepare('SELECT preview, import_id FROM community_entries WHERE purged_at = ?')
-      .all(now.toISOString()) as { preview: string | null; import_id: string | null }[]) {
+    for (const r of db.prepare('SELECT preview, preview_infected, import_id FROM community_entries WHERE purged_at = ?')
+      .all(now.toISOString()) as { preview: string | null; preview_infected: string | null; import_id: string | null }[]) {
       if (r.preview) justPurged.preview.add(r.preview);
+      if (r.preview_infected) justPurged.preview.add(r.preview_infected);
       if (r.import_id) justPurged.import.add(r.import_id);
     }
   }

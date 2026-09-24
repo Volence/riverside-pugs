@@ -34,6 +34,8 @@ export interface EntrySummary {
   advanced?: boolean;
   importName?: string | null;
   previewUrl?: string | null;
+  /** HUDs only: the infected side's preview; null on entries shared before there was one. */
+  previewInfectedUrl?: string | null;
 }
 
 export interface EntryDetail extends EntrySummary {
@@ -52,7 +54,7 @@ export interface MineEntry extends EntrySummary {
 interface Row {
   id: number; kind: EntryKind; author_id: string; title: string; description: string; payload: string;
   preset: string | null; aspect: string | null; advanced: number; import_id: string | null;
-  import_name: string | null; preview: string | null; created_at: string; deleted_at: string | null;
+  import_name: string | null; preview: string | null; preview_infected: string | null; created_at: string; deleted_at: string | null;
   deleted_by: string | null; delete_reason: string | null;
   name: string; avatar: string | null; likes: number; liked: number;
 }
@@ -62,7 +64,7 @@ interface Row {
 const COLUMNS = (payload: 'crosshair-only' | 'all') => `
   e.id, e.kind, e.author_id, e.title, e.description,
   ${payload === 'all' ? 'e.payload' : "CASE WHEN e.kind = 'crosshair' THEN e.payload ELSE '' END AS payload"},
-  e.preset, e.aspect, e.advanced, e.import_id, e.import_name, e.preview, e.created_at,
+  e.preset, e.aspect, e.advanced, e.import_id, e.import_name, e.preview, e.preview_infected, e.created_at,
   e.deleted_at, e.deleted_by, e.delete_reason,
   p.name, p.avatar,
   (SELECT COUNT(*) FROM community_likes l WHERE l.entry_id = e.id) AS likes,
@@ -100,6 +102,7 @@ function summary(r: Row): EntrySummary {
   return {
     ...base, preset: r.preset, aspect: r.aspect, advanced: r.advanced === 1,
     importName: r.import_name, previewUrl: previewUrl(r.preview),
+    previewInfectedUrl: previewUrl(r.preview_infected),
   };
 }
 
@@ -209,6 +212,7 @@ export interface NewEntry {
   importId?: string | null;
   importName?: string | null;
   preview?: string | null;
+  previewInfected?: string | null;
   bytes: number;
   createdAt: Date;
 }
@@ -216,11 +220,12 @@ export interface NewEntry {
 export function insertEntry(db: DB, e: NewEntry): number {
   return Number(db.prepare(
     `INSERT INTO community_entries
-       (kind, author_id, title, description, payload, preset, aspect, advanced, import_id, import_name, preview, bytes, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (kind, author_id, title, description, payload, preset, aspect, advanced, import_id, import_name, preview,
+        preview_infected, bytes, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     e.kind, e.authorId, e.title, e.description, e.payload, e.preset ?? null, e.aspect ?? null,
-    e.advanced ? 1 : 0, e.importId ?? null, e.importName ?? null, e.preview ?? null, e.bytes,
+    e.advanced ? 1 : 0, e.importId ?? null, e.importName ?? null, e.preview ?? null, e.previewInfected ?? null, e.bytes,
     e.createdAt.toISOString(),
   ).lastInsertRowid);
 }
@@ -246,7 +251,11 @@ export function unlike(db: DB, id: number, player: string): void {
   db.prepare('DELETE FROM community_likes WHERE entry_id = ? AND player_id = ?').run(id, player);
 }
 
-const FILE_COLUMN = { preview: 'preview', import: 'import_id' } as const;
+/** The columns naming a file of each kind: a preview is either side's. */
+const FILE_MATCH = {
+  preview: (alias: string, param: string) => `(${alias}preview = ${param} OR ${alias}preview_infected = ${param})`,
+  import: (alias: string, param: string) => `${alias}import_id = ${param}`,
+} as const;
 
 /**
  * Whether a live entry by an author who is not banned uses this file: the
@@ -255,13 +264,13 @@ const FILE_COLUMN = { preview: 'preview', import: 'import_id' } as const;
 export function fileLive(db: DB, kind: 'preview' | 'import', name: string, now = new Date()): boolean {
   return !!db.prepare(
     `SELECT 1 FROM community_entries e JOIN players p ON p.steamid = e.author_id
-      WHERE e.${FILE_COLUMN[kind]} = @name AND ${VISIBLE} LIMIT 1`,
+      WHERE ${FILE_MATCH[kind]('e.', '@name')} AND ${VISIBLE} LIMIT 1`,
   ).get({ name, now: now.toISOString() });
 }
 
 /** Whether any row that is not purged names this file, tombstones included. */
 export function fileReferenced(db: DB, kind: 'preview' | 'import', name: string): boolean {
   return !!db.prepare(
-    `SELECT 1 FROM community_entries WHERE ${FILE_COLUMN[kind]} = ? AND purged_at IS NULL LIMIT 1`,
-  ).get(name);
+    `SELECT 1 FROM community_entries WHERE ${FILE_MATCH[kind]('', '@name')} AND purged_at IS NULL LIMIT 1`,
+  ).get({ name });
 }

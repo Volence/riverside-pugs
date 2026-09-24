@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS community_entries (
   deleted_by TEXT,                         -- author (self-delete) or staff steamid; no FK, like admin_actions.target
   delete_reason TEXT,
   purged_at TEXT
+  -- preview_infected TEXT, added by the ALTER below: sha256 hex of the infected side's preview PNG
 );
 CREATE INDEX IF NOT EXISTS idx_community_list ON community_entries (kind, deleted_at, id);
 CREATE INDEX IF NOT EXISTS idx_community_author ON community_entries (author_id, deleted_at);
@@ -50,4 +51,13 @@ CREATE TABLE IF NOT EXISTS community_likes (
   PRIMARY KEY (entry_id, player_id)
 );
 `);
+  // Added after the table first shipped, so an ALTER rather than a line in
+  // the CREATE: the column then sits last on every database, old or new.
+  // The infected side's preview; NULL on entries shared before it existed,
+  // which show their survivor preview alone.
+  const cols = db.prepare('PRAGMA table_info(community_entries)').all() as { name: string }[];
+  if (!cols.some((c) => c.name === 'preview_infected')) {
+    db.exec('ALTER TABLE community_entries ADD COLUMN preview_infected TEXT');
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_community_preview_infected ON community_entries (preview_infected)');
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  checkTitle, checkDescription, checkCrosshairArt, checkHudDesign, checkPreview,
+  checkTitle, checkDescription, checkCrosshairArt, checkHudDesign, checkPreview, PREVIEW_MAX_BYTES,
   COMMUNITY_XHAIR_CAPS, DESIGN_XHAIR_CAPS,
 } from '../src/community/validate.js';
 
@@ -177,9 +177,18 @@ describe('checkPreview', () => {
   it('refuses a size for another aspect', () => {
     expect(checkPreview(png(960, 540), '4:3').ok).toBe(false);
   });
-  it('refuses over 1.5 MB, and what is not a PNG', () => {
-    expect(checkPreview(png(960, 540, 1.5 * 1024 * 1024 - 33 + 1), '16:9')).toMatchObject({ ok: false, status: 413 });
-    expect(checkPreview(png(960, 540, 1.5 * 1024 * 1024 - 33), '16:9').ok).toBe(true);
+  it('names the side in its refusal when asked', () => {
+    expect(checkPreview(png(960, 540), '4:3', 'The infected preview')).toMatchObject({ ok: false, error: 'The infected preview must be 720 x 540 for 4:3.' });
+    expect(checkPreview(new TextEncoder().encode('<html>'), '16:9', 'The infected preview')).toMatchObject({ error: 'The infected preview is not a PNG.' });
+  });
+  it('allows any PNG a 960 x 540 canvas can encode: the cap is above its raw RGBA size', () => {
+    // 4 bytes a pixel plus one filter byte a row, before zlib: an encoder
+    // that stores it uncompressed still fits, so a real preview is never refused.
+    expect(960 * 540 * 4 + 540 + 64 * 1024).toBeLessThan(PREVIEW_MAX_BYTES);
+  });
+  it('refuses over 2.5 MB, and what is not a PNG', () => {
+    expect(checkPreview(png(960, 540, 2.5 * 1024 * 1024 - 33 + 1), '16:9')).toMatchObject({ ok: false, status: 413, error: 'The preview is over 2.5 MB.' });
+    expect(checkPreview(png(960, 540, 2.5 * 1024 * 1024 - 33), '16:9').ok).toBe(true);
     expect(checkPreview(new TextEncoder().encode('<html>'), '16:9')).toMatchObject({ ok: false, status: 400 });
   });
 });
