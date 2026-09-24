@@ -103,7 +103,7 @@ describe('Hud page', () => {
   it('steps back to the teammates when the selected piece is removed', () => {
     render(<Hud />);
     fireEvent.click(screen.getByRole('button', { name: '＋ Health number' }));
-    expect(screen.getByText('Reset this child')).toBeTruthy();
+    expect(screen.getByText('Reset health number')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Remove the health number' }));
     expect(screen.getByText('Reset this element')).toBeTruthy();
     expect(screen.getByRole('button', { name: '＋ Health number' })).toBeTruthy();
@@ -113,7 +113,7 @@ describe('Hud page', () => {
     render(<Hud />);
     fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
     fireEvent.click(team().getByRole('button', { name: 'Portrait' }));
-    expect(screen.getByText('Reset this child')).toBeTruthy();
+    expect(screen.getByText('Reset portrait')).toBeTruthy();
     fireEvent.change(screen.getByRole('combobox', { name: /preset/i }), { target: { value: 'modern' } });
     await waitFor(() => expect(screen.getByText('Reset this element')).toBeTruthy());
   });
@@ -122,7 +122,7 @@ describe('Hud page', () => {
     render(<Hud />);
     fireEvent.click(screen.getByRole('button', { name: '＋ Health number' }));
     fireEvent.input(screen.getByLabelText('X'), { target: { value: '90' } });
-    fireEvent.click(screen.getByText('Reset this child'));
+    fireEvent.click(screen.getByText('Reset health number'));
     // The move is gone and the number is still there: back at the template's x 103.
     expect(team().getByRole('button', { name: 'Health number' })).toBeTruthy();
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('103');
@@ -1337,26 +1337,30 @@ describe('Hud page', () => {
     await waitFor(() => expect(JSON.parse(localStorage.getItem('hud') ?? '{}').children?.teamColumn?.Head?.z).toBe(-1));
   });
 
-  it('lists the survivor Layers as before the pieces went per panel, with your own health pieces under it', () => {
+  it('lists the survivor Layers under their headings, the card pieces under In every card, with your own health pieces under it', () => {
     const { container } = render(<Hud />);
+    const titles = Array.from(container.querySelectorAll('.hud__layergroup-title')).map((t) => t.textContent);
+    expect(titles).toEqual(['You', 'Team', 'Messages', 'Finales and Survival']);
     const rows = Array.from(container.querySelectorAll('.hud__layer')).map((r) => [r.className.replace('hud__layer ', ''), r.textContent]);
     expect(rows).toEqual([
       ['hud__layer--d0', 'Your health'],
       ['hud__layer--d1', 'Portrait'], ['hud__layer--d1', 'Health bar'], ['hud__layer--d1', 'Health cross'], ['hud__layer--d1', 'Health number'],
       ['hud__layer--d1', 'Scratches, top'], ['hud__layer--d1', 'Scratches, bottom'],
       ['hud__layer--d1', 'Down pictureshown when down'], ['hud__layer--d1', 'Crouch iconshown when crouched'],
+      ['hud__layer--d0', 'Weapons'], ['hud__layer--d0', 'Use / revive bar'],
+      ['hud__layer--d1', 'Label'], ['hud__layer--d1', 'Bar'], ['hud__layer--d1', 'Icon'], ['hud__layer--d1', 'Subtext'],
+      ['hud__layer--d0 hud__layer--hidden', 'Custom crosshair'],
+      ['hud__layer--d0', 'Your microphone'],
       ['hud__layer--d0', 'Teammates'],
       ['hud__layer--d1', 'Card 1'], ['hud__layer--d1', 'Card 2'], ['hud__layer--d1', 'Card 3'],
-      ['hud__layer--d1', 'Portrait'], ['hud__layer--d1', 'Health bar'], ['hud__layer--d1', 'Name'], ['hud__layer--d1', '＋ Health number'],
-      ['hud__layer--d1', 'Item icons'], ['hud__layer--d1', 'Status text'], ['hud__layer--d1', 'Damage splatter'],
-      ['hud__layer--d1', 'Down pictureshown when down'], ['hud__layer--d1', 'Dead pictureshown when dead'],
-      ['hud__layer--d1 hud__layer--hidden', 'Voice iconshown when talking'],
-      ['hud__layer--d0', 'Weapons'], ['hud__layer--d0', 'Chat'], ['hud__layer--d0', 'Use / revive bar'],
-      ['hud__layer--d1', 'Label'], ['hud__layer--d1', 'Bar'], ['hud__layer--d1', 'Icon'], ['hud__layer--d1', 'Subtext'],
-      ['hud__layer--d0', 'Kill / incap notices'],
-      ['hud__layer--d0 hud__layer--hidden', 'Custom crosshair'],
-      ['hud__layer--d0', 'Your microphone'], ['hud__layer--d0', 'Vote'], ['hud__layer--d0', 'Survival timer'],
-      ['hud__layer--d0', 'Voice list'], ['hud__layer--d0', 'Finale meter'], ['hud__layer--d0', 'Teammate in trouble'], ['hud__layer--d0', 'Wait for teammates'],
+      ['hud__layer--d1 hud__layersub', 'In every card'],
+      ['hud__layer--d2', 'Portrait'], ['hud__layer--d2', 'Health bar'], ['hud__layer--d2', 'Name'], ['hud__layer--d2', '＋ Health number'],
+      ['hud__layer--d2', 'Item icons'], ['hud__layer--d2', 'Status text'], ['hud__layer--d2', 'Damage splatter'],
+      ['hud__layer--d2', 'Down pictureshown when down'], ['hud__layer--d2', 'Dead pictureshown when dead'],
+      ['hud__layer--d2 hud__layer--hidden', 'Voice iconshown when talking'],
+      ['hud__layer--d0', 'Teammate in trouble'], ['hud__layer--d0', 'Wait for teammates'],
+      ['hud__layer--d0', 'Chat'], ['hud__layer--d0', 'Kill / incap notices'], ['hud__layer--d0', 'Vote'], ['hud__layer--d0', 'Voice list'],
+      ['hud__layer--d0', 'Survival timer'], ['hud__layer--d0', 'Finale meter'],
     ]);
   });
 
@@ -1364,7 +1368,8 @@ describe('Hud page', () => {
     render(<Hud />);
     fireEvent.click(layer('Your health').getByRole('button', { name: 'Health bar' }));
     expect(screen.getByText('Health bar', { selector: 'legend' })).toBeTruthy();
-    expect(screen.getByText(/^The game fills the bar by health. While you are down/)).toBeTruthy();
+    expect(screen.getByText('The game fills the bar by health.', { exact: false })).toBeTruthy();
+    expect(screen.getByText(/^While you are down/)).toBeTruthy();   // folded behind More (Note)
     expect(screen.queryByText("Edits inside a card apply to every teammate's card.")).toBeNull();
     for (const l of ['X', 'Y', 'W', 'H']) expect(screen.getByLabelText(l), l).toBeTruthy();
     expect(screen.getByText('Panel colour: Game colour (by health)')).toBeTruthy();   // probe Q1 passed (slice 2.F G1)
@@ -2249,7 +2254,8 @@ describe('Your own health on the page', () => {
     render(<Hud />);
     fireEvent.click(own().getByRole('button', { name: 'Health bar' }));
     for (const l of ['X', 'Y', 'W', 'H']) expect(screen.getByLabelText(l), l).toBeTruthy();
-    expect(screen.getByText(/^The game fills the bar by health. While you are down/)).toBeTruthy();
+    expect(screen.getByText('The game fills the bar by health.', { exact: false })).toBeTruthy();
+    expect(screen.getByText(/^While you are down/)).toBeTruthy();   // folded behind More (Note)
     expect(screen.queryByText(/^Panel colour/)).toBeNull();
     expect(screen.queryByLabelText('Inset')).toBeNull();
     cleanup();
@@ -2718,7 +2724,8 @@ describe('The spawn and too-far panels on the page (plan tasks G1, Z2)', () => {
     render(<Hud />);
     fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
     fireEvent.click(layer('Too far / Tank offer').getByRole('button', { name: 'Tank offer title' }));
-    expect(screen.getByText('Shown when you are offered the Tank. The preview draws the too-far box only, so this shows in the game, not on the canvas.')).toBeTruthy();
+    expect(screen.getByText(/^Shown when you are offered the Tank\./)).toBeTruthy();
+    expect(screen.getByText('The preview draws the too-far box only, so this shows in the game, not on the canvas.')).toBeTruthy();
     fireEvent.input(screen.getByLabelText('Tank offer title colour'), { target: { value: '#ff00ff' } });
     await waitFor(() => expect(saved().children?.zombiePanel?.['TankTakeover/Title']?.color).toBe('255 0 255 255'));
   });
