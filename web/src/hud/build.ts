@@ -1796,13 +1796,23 @@ function stylePass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkF
  * icon_equip_* cells client.dll asks for by name (weapons.ts's header).
  * WEAPON_ICONS is every gun the primary and pistol slots can hold, so hiding
  * the pictures hides whatever the player carries, not only the preview's
- * pump shotgun; icon_equip_machinegun is the hunting rifle. The flashlight
- * cells are not the weapon selection's and are left alone.
+ * pump shotgun. icon_equip_machinegun is the M16 and icon_equip_rifle the
+ * hunting rifle: with icon_equip_rifle repointed the M16 stayed stock
+ * (/home/volence/l4d/hud/probe-phase2-rest/r1/shots/crops/weap-a.png), and
+ * with both repointed each gun drew its own upload
+ * (/home/volence/l4d/hud/probe-phase2-rest/r4/shots/crops/weap-abc.png).
+ * The flashlight cells are not the weapon selection's and are left alone.
  */
 export const WEAPON_BOX_ENTRY = { boxActive: 'rounded_background_glow', boxInactive: 'rounded_background_noborder' } as const;
 export const WEAPON_ICONS = ['icon_equip_pumpshotgun', 'icon_equip_uzi', 'icon_equip_autoshotgun', 'icon_equip_rifle',
   'icon_equip_machinegun', 'icon_equip_dualpistols', 'icon_equip_pistol'];
 export const ITEM_ICONS = ['icon_equip_molotov', 'icon_equip_pipebomb', 'icon_equip_medkit', 'icon_equip_pills'];
+/** What the editor calls each gun's icon entry (the names in WEAPON_ICONS' comment). */
+export const WEAPON_ICON_LABELS: Record<string, string> = {
+  icon_equip_pumpshotgun: 'Pump shotgun', icon_equip_uzi: 'Uzi', icon_equip_autoshotgun: 'Auto shotgun',
+  icon_equip_rifle: 'Hunting rifle', icon_equip_machinegun: 'M16 (assault rifle)',
+  icon_equip_dualpistols: 'Dual pistols', icon_equip_pistol: 'Pistol',
+};
 export const CLEAR_TEXTURE = 'vgui/hud/hudeditor/clear';
 export const weaponBoxTexture = (box: 'boxActive' | 'boxInactive') => `vgui/hud/hudeditor/weapon${box.toLowerCase()}`;
 /**

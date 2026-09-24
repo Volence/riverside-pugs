@@ -2090,3 +2090,19 @@ describe('the infected bar colour, Q24 passed in B14 (plan Task F1)', () => {
     expect(kvGet(card, 'monochrome_color')).toBe('0 255 255 255');
   });
 });
+
+describe('WEAPON_ICON_LABELS', () => {
+  it('names the M16 and the hunting rifle the way the game uses them', async () => {
+    const { WEAPON_ICON_LABELS } = await import('./build');
+    expect(WEAPON_ICON_LABELS.icon_equip_machinegun).toBe('M16 (assault rifle)');
+    expect(WEAPON_ICON_LABELS.icon_equip_rifle).toBe('Hunting rifle');
+    expect(WEAPON_ICON_LABELS).toMatchObject({
+      icon_equip_pumpshotgun: 'Pump shotgun', icon_equip_autoshotgun: 'Auto shotgun', icon_equip_uzi: 'Uzi',
+      icon_equip_pistol: 'Pistol', icon_equip_dualpistols: 'Dual pistols',
+    });
+  });
+  it('labels every weapon icon entry', async () => {
+    const { WEAPON_ICON_LABELS, WEAPON_ICONS } = await import('./build');
+    for (const name of WEAPON_ICONS) expect(WEAPON_ICON_LABELS[name], name).toBeTruthy();
+  });
+});
