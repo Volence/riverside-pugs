@@ -40,11 +40,14 @@ writes a file.
   site's file on every deploy. The runbook note also warns that re-uploading an old
   `nfo/stage` to Chicago can bring back a stale file (the detected-patch alarm
   catches it).
-- **Atomic write.** Write `pug_balance.cfg.tmp`, rename over `pug_balance.cfg`, read
-  it back. "Written" means the read-back bytes match. The rename matters because
-  `deploy.sh` runs `chown -R l4d:l4d`, which can make an in-place overwrite by the
-  `pug` user fail while a rename inside the group-writable `cfg/` still works. Add
-  `rename` and `read` to the transport interface where missing.
+- **Atomic write.** Write a temp name, rename over `pug_balance.cfg`, read it back.
+  "Written" means the read-back bytes match. The rename matters because `deploy.sh`
+  runs `chown -R l4d:l4d`, which can make an in-place overwrite by the `pug` user
+  fail while a rename inside the group-writable `cfg/` still works (`deploy.sh`
+  rsyncs with `--chmod=Dg+w` and without `--delete`, so the site's file survives a
+  deploy). All three transports' existing `put` already upload to `<name>.part` and
+  rename (local `rename`, FTP `RNFR/RNTO`, sftp `mv`), so only `read` is new on the
+  transport interface.
 
 ## Knobs: types, safe ranges, baselines
 
@@ -91,31 +94,50 @@ value with `%f`, which would break the predicted fingerprint).
    value, baseline, range, and a control snapped to `step`. A soft warning shows
    when the draft changes knobs in more than one group ("effects cannot be told
    apart").
-2. **Preconditions.** Apply is refused when enabled servers drift (`serverDrift`
-   non-empty); the admin can disable a server first. Apply is refused while another
-   rollout is still writing.
-3. **Expected fingerprint.** Base inventory = the `inputs_json` of the latest
-   sighting from a 4v4 PUG round (not `balance_server_state`, which may hold a 2v2
-   or auto-tracked casual inventory). Replace the `c:` values of the adjustable
+2. **Preconditions.** Apply is refused when an enabled server's last inventory
+   differs from the base in anything **but adjustable knob values** (compared by
+   fingerprint after dropping ignored plugins and the adjustable `c:` keys); the
+   admin can disable a server first. Not the raw `serverDrift` list: that compares
+   full inventories on purpose, so a versionless plugin build (pug-match on Dallas
+   today) would block every apply, and a box still pending an earlier rollout
+   differs only in knob values, which the new rollout fixes. A server with no
+   sighting yet does not block. Applies do not refuse each other: they are
+   serialized, and the writer always writes the latest rollout.
+3. **Expected fingerprint.** Base inventory = the `inputs_json` of the patch tagged
+   on the most recent round of a queue match (`matches.origin = 'queue'`, always
+   run on the pinned PUG config), not `balance_server_state`, which may hold a 2v2
+   or auto-tracked casual inventory. (Sightings are not stored one by one; a
+   patch's `inputs_json` is its first sighting, and every sighting of that
+   fingerprint has the same inputs apart from versionless plugin hashes, which the
+   fingerprint ignores.) Every adjustable knob must be present as `c:` in the base,
+   else preview and apply refuse ("not reported by the servers"). Replace the `c:` values of the adjustable
    knobs with the draft values (exact strings to be written), run `withoutIgnored`
    and `fingerprintOf`.
-4. **Announced patch.** Created **before** any write, name and notes required. If a
+4. **Announced patch.** Created **before** any write, name and notes required,
+   `first_seen_at` = apply time, `inputs_json` = the predicted inventory. If a
    patch with that fingerprint already exists (a rollback to a known state), reuse
-   it and keep its source and name. The confirm dialog shows the diff (knob, old ->
+   it and keep its source and name; the typed name and notes fill in only an empty
+   name or empty notes (the no-op "Reset to baseline" lands on today's unnamed
+   detected patch). The confirm dialog shows the diff (knob, old ->
    new) and the servers, and requires typing the patch name.
 5. **Rollout.** A `balance_rollouts` row (id, patch_id, values_json, created_by,
    created_at, superseded_at) and a `balance_rollout_servers` row per enabled server
    (state `pending` | `written` | `confirmed` | `failed`, last_error, written_at,
-   confirmed_at). A server is written only while `servers.status` is `idle`; a
-   `reserved` or `live` server is written by the server release path, before the
-   box goes idle and before the after-match restart. A pending write is retried on
+   confirmed_at, seen_patch_id, seen_at). The rollout row also stores the rendered
+   file text, so the read-back compare never depends on a patch name edited later.
+   A server is written only while `servers.status` is `idle`; a `reserved` or
+   `live` server is written by the server release path, after the rcon cleanup and
+   before the after-match restart (the row is `offline` while it restarts). A box
+   with `restart_after_match` off goes idle at release and is written right after
+   (all four boxes restart today). A pending write is retried on
    a timer and at site boot. A server that is offline or disabled gets the file when
    it is enabled again; at boot the site compares what each box should have with
    the read-back and rewrites on mismatch.
 6. **Confirmation.** When a BALANCE sighting from that server arrives with the
    rollout's expected fingerprint, the server row becomes `confirmed`. Until then
    the panel says "written, awaiting first match" (this can take days on a quiet
-   box). A sighting with another fingerprint after the write shows as
+   box). A sighting of the expected patch does not raise the "config changed"
+   admin alert: it is the change the panel made. A sighting with another fingerprint after the write shows as
    "expected X, saw Y" with the differing inputs (the existing detected-patch alarm
    still fires); a plugin that re-asserts a cvar after the configs run shows up
    here.
@@ -126,8 +148,8 @@ value with `%f`, which would break the predicted fingerprint).
 
 After `!load_4v4p` and before adoption, `servers.status` is still `idle`. A write
 landing in that window splits one match across two patches. Per-round fingerprints
-keep the data honest. The writer skips a box when the site knows it has players and
-retries. Carry-over of a value into a later casual session on a box that did not
+keep the data honest. (The site has no player count for an idle box, so v1 does not
+try to skip one with players.) Carry-over of a value into a later casual session on a box that did not
 restart already happens today and is unchanged.
 
 ## Restore and reset
@@ -154,6 +176,15 @@ only (`requireAdmin`), every apply audited with `logAdmin`.
   2 to 5 and returns the rollout.
 - `GET /api/admin/balance/rollouts`: history with per-server states.
 
+## Known gaps (planning)
+
+- `refingerprintPatches` recomputes detected patches only. If the versionless or
+  ignored lists in `knobs.json` change, an announced patch keeps its old
+  fingerprint and the next sighting of that config opens a detected patch (the
+  alarm fires, nothing is mislabelled). Re-apply the same values to re-announce.
+- The hook line changes `cfg/rotoblin_pug_4v4_map.cfg`, a watched file, so the
+  hook deploy itself produces one detected patch per server on the next match.
+
 ## Out of scope
 
 Plugin on/off (later), per-server values, split tests, editing watched files
@@ -176,7 +207,12 @@ Plugin on/off (later), per-server values, split tests, editing watched files
 ## Deploy notes (owner)
 
 1. Review the knob table.
-2. Deploy the hook line in the deploy repo (safe on its own).
-3. Deploy the web app.
-4. First apply: "Reset to baseline" as a no-op check. Its fingerprint must equal
-   the current patch, so it reuses it and every server confirms.
+2. Deploy the hook line in the deploy repo (safe on its own). It changes a
+   watched file, so the next match on each box raises one "new patch" alert; name
+   that patch (for example "pug_balance hook").
+3. Check the web app user can create and rename files in each box's
+   `left4dead/cfg` (Dallas locally as `pug`, the FTP and sftp users elsewhere).
+4. Deploy the web app.
+5. First apply, after a queue match has been played on the hooked config: "Reset
+   to baseline" as a no-op check. Its fingerprint must equal the current patch, so
+   it reuses it and every server confirms.

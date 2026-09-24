@@ -115,6 +115,21 @@ describe('recordBalanceSighting', () => {
     const stored = db.prepare('SELECT inventory_json FROM balance_server_state WHERE server_id = 1').get() as { inventory_json: string };
     expect(stored.inventory_json).not.toMatch(/spec_stays/);
   });
+
+  it('stays quiet for the patch a rollout expects on that server', () => {
+    // server 1 seen on inventory A, then on B which is the expected patch
+    const a = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: { 'c:a': '1' }, versionless: [] });
+    expect(a.serverChanged).toBe(true);
+    const events: string[] = [];
+    const off = subscribeAdminEvents((e) => { if (e.kind === 'problem') events.push(e.text); });
+    db.prepare("INSERT INTO balance_patches (id, fingerprint, source, inputs_json, first_seen_at) VALUES (99, ?, 'announced', '{\"c:a\":\"2\"}', '2026-09-24 00:00:00')")
+      .run(fingerprintOf({ 'c:a': '2' }, []));
+    const b = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: { 'c:a': '2' }, versionless: [], expectedPatchId: 99 });
+    off();
+    expect(b).toMatchObject({ patchId: 99, serverChanged: true, newPatch: false });
+    expect(events).toEqual([]);
+    expect(db.prepare('SELECT patch_id FROM balance_server_state WHERE server_id = 1').get()).toEqual({ patch_id: 99 });
+  });
 });
 
 describe('refingerprintPatches', () => {

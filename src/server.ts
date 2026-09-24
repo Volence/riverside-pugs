@@ -28,6 +28,7 @@ import { onSourceTv } from './sourcetvSessions.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { activeTimeout } from './penalties.js';
 import { adminRoutes } from './routes/admin.js';
+import { adminBalanceKnobRoutes } from './routes/adminBalanceKnobs.js';
 import { isWheel } from './inputStats.js';
 import { peopleRoutes } from './routes/people.js';
 import { banMessage, liftExpiredBans } from './admin/players.js';
@@ -51,6 +52,8 @@ import { STATUS_CODES } from 'node:http';
 import { readFileSync } from 'node:fs';
 import type { Config } from './config.js';
 import type { DB } from './db.js';
+import { BalanceRolloutWriter } from './balanceWriter.js';
+import type { AddonsTransport } from './addonsTransport.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
 import { backfillPersonas } from './personaBackfill.js';
 import { handleConduct } from './conductFlags.js';
@@ -88,6 +91,7 @@ import {
 import { BalanceAssembler } from './balanceAssembler.js';
 import { loadBalanceKnobs, BALANCE_KNOBS_PATH, type BalanceKnobs } from './balanceKnobs.js';
 import { recordBalanceSighting, refingerprintPatches } from './balancePatches.js';
+import { expectedPatchFor, confirmOnSighting } from './balanceRollouts.js';
 import { recordRoundMark, recordRoundStat, recordRoundStatsEnd, resetRoundLines } from './roundStatLines.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
 import { recordPresenceLine, sweepPresence } from './presence.js';
@@ -165,6 +169,9 @@ export interface ServerDeps {
    *  exercise a missing or invalid balance/knobs.json without touching the
    *  checked-in file; production reads BALANCE_KNOBS_PATH otherwise. */
   balanceKnobsPath?: string;
+  /** Transport the balance writer uses for pug_balance.cfg. Injected in tests
+   *  so a rollout never touches a real box; transportFor otherwise. */
+  balanceTransport?: (s: ServerRow, dir: string) => AddonsTransport | null;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -522,6 +529,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     },
   });
 
+  // Writes the active rollout's pug_balance.cfg to a box on release, so the
+  // new values land between matches; see src/balanceWriter.ts. Not wired in
+  // dev mode, where a release must never write through a real transport.
+  const balanceWriter = new BalanceRolloutWriter({ db: deps.db, transport: deps.balanceTransport });
+
   const releaser = new ServerReleaser(deps.db, deps.serverCleaner ?? (async (server, token, opts) => {
     const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
     try {
@@ -576,7 +588,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     } finally {
       rcon.close();
     }
-  }), restarter);
+  }), restarter, deps.config.devMode ? null : (server) => balanceWriter.writeForRelease(server.id));
 
   // Every enabled box mirrors the website's bans. Built here, next to the
   // releaser, because both are the backend reaching into a game server
@@ -966,10 +978,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             if (!inv || !m || !balanceKnobs) return;
             // The match knows its server; the source address is the fallback
             // (Riverside #3 and #4 share one IP, see resolveServerBySource).
-            recordBalanceSighting(deps.db, {
-              matchId: m.id, serverId: m.server_id ?? serverOf(source, meta), half: ev.half,
+            const serverId = m.server_id ?? serverOf(source, meta);
+            const r = recordBalanceSighting(deps.db, {
+              matchId: m.id, serverId, half: ev.half,
               inventory: inv, versionless: balanceKnobs.versionless, ignored: balanceKnobs.ignored,
+              expectedPatchId: serverId !== null ? expectedPatchFor(deps.db, serverId) : null,
             });
+            if (serverId !== null) confirmOnSighting(deps.db, { serverId, patchId: r.patchId });
             return;
           }
           else if (ev.kind === 'round_stat' || ev.kind === 'round_stats_end' || ev.kind === 'round_mark') {
@@ -1160,6 +1175,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     banSync.sweep().catch((err) => console.error('[serverBans] boot sweep failed:', err));
     adminSync.start();
     void adminSync.sync();
+    balanceWriter.start();
+    void balanceWriter.verifyAll();
   }
 
   const reaper = setInterval(() => {
@@ -1420,6 +1437,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     clearTimeout(pruneOnBoot);
     banSync.stop();
     adminSync.stop();
+    balanceWriter.stop();
     if (logListener) await logListener.close();
     // Where each server's replay check had got to. Best effort: the caller may
     // already have closed the database, and a few seconds of position is all
@@ -1465,6 +1483,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       ? (steamid) => refreshSteamSignals(signalDeps, [steamid], { sharing: true })
       : undefined,
   });
+  // Balance control panel. Loaded again here rather than reusing the log
+  // listener's copy, which exists only outside dev mode; a failure disables
+  // the panel (503) and nothing else.
+  let panelKnobs: BalanceKnobs | null = null;
+  try {
+    panelKnobs = loadBalanceKnobs(deps.balanceKnobsPath);
+  } catch (err) {
+    console.error('[balance] knob panel disabled, balance/knobs.json failed to load:', err);
+  }
+  await app.register(adminBalanceKnobRoutes, { db: deps.db, knobs: panelKnobs, writer: deps.config.devMode ? undefined : balanceWriter });
   await app.register(peopleRoutes, { db: deps.db });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(replayRoutes, {

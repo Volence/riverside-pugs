@@ -40,6 +40,7 @@ describe('serverHasDlc4', () => {
       put: async () => {},
       size: async (name: string) => { seen.push(name); return 137; },
       remove: async () => {},
+      readText: async () => null,
     }));
     expect(got).toBe(true);
     expect(seen).toEqual([DLC4_PROBE_FILE]);
@@ -49,6 +50,7 @@ describe('serverHasDlc4', () => {
     const server = { ...base, addons_transport: 'local', addons_dir: '/left4dead/addons' } as ServerRow;
     const got = await serverHasDlc4(server, () => ({
       put: async () => {}, size: async () => null, remove: async () => {},
+      readText: async () => null,
     }));
     expect(got).toBe(false);
   });
@@ -67,6 +69,7 @@ describe('serverHasDlc4', () => {
       put: async () => {},
       size: async () => { throw new Error('host unreachable'); },
       remove: async () => {},
+      readText: async () => null,
     }));
     expect(got).toBe(false);
   });
