@@ -350,6 +350,12 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 }
 .hud__stylerow:last-of-type { border-bottom: none; }
 .hud__stylerow-label { flex: 1 1 12rem; color: var(--text-muted); }
+/* A health colour key's three game bands; the one the preview draws in is lit. */
+.hud__bands { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); margin: 0; padding: 0; list-style: none; }
+.hud__band { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--text-muted); opacity: .6; }
+.hud__band--on { color: var(--text); opacity: 1; }
+.hud__band-chip { width: 1.4em; height: .7em; border-radius: 999px; outline: 1px solid var(--border); }
+.hud__band--on .hud__band-chip { outline: 2px solid var(--text); }
 .hud__stylerow select {
   background: var(--surface-2);
   color: var(--text);

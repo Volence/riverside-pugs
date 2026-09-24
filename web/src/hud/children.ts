@@ -49,6 +49,8 @@ export interface KeyDef {
   unset?: string;
   /** For a colour key: what the control says while the file leaves it unset. */
   unsetLabel?: string;
+  /** For a colour key: unset, the game colours it by health (healthRgb), so the control shows the three bands. */
+  byHealth?: true;
 }
 
 export type ChildKind = 'image' | 'label' | 'bar' | 'other';
@@ -209,7 +211,7 @@ export const maxInset = (tall: number): number => Math.max(0, Math.floor((tall -
 const MONO_EVIDENCE = 'client.dll HealthPanel run: m_monochromeColor|monochrome_color';
 const healthKeys = (note: string, insetEvidence: string): KeyDef[] => [
   { key: 'monochrome_color', label: 'Panel colour', type: 'colour', gate: 'Q1', evidence: MONO_EVIDENCE, note,
-    unsetLabel: 'Game colour (by health)' },
+    unsetLabel: 'Game colour (by health)', byHealth: true },
   { key: 'inset', label: 'Inset', type: 'int', range: [0, 8], gate: 'Q3', evidence: insetEvidence, unset: String(STOCK_BAR_INSET) },
 ];
 
@@ -328,7 +330,7 @@ export const SI_PANEL: PanelChildren = {
     { name: 'Health', label: 'Health bar', kind: 'bar', role: 'content', box: 'wh', move: true, font: false, colour: false,
       keys: [
         { key: 'monochrome_color', label: 'Bar colour', type: 'colour', gate: 'Q24', evidence: MONO_EVIDENCE,
-          unsetLabel: 'Game colour (by health)' },
+          unsetLabel: 'Game colour (by health)', byHealth: true },
         { key: 'inset', label: 'Inset', type: 'int', range: [0, 8], unset: String(STOCK_BAR_INSET),
           evidence: 'client.dll HealthPanel run: m_inset|inset; probe B1 Q3 on the same class' },
       ],
@@ -404,7 +406,7 @@ export const ZCARD_PANEL: PanelChildren = {
       hideInInfected: ['dead'],
       keys: [
         { key: 'monochrome_color', label: 'Bar colour', type: 'colour', gate: 'Q24', evidence: MONO_EVIDENCE,
-          unsetLabel: 'Game colour (by health)' },
+          unsetLabel: 'Game colour (by health)', byHealth: true },
         { key: 'inset', label: 'Inset', type: 'int', range: [0, 8], unset: String(STOCK_BAR_INSET),
           evidence: 'client.dll HealthPanel run: m_inset|inset; probe B1 Q3 on the same class' },
       ],

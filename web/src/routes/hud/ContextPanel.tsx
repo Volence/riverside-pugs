@@ -12,7 +12,7 @@ import {
   type WeaponNumKey, type WeaponsOverride, type WeaponBoxStyle,
 } from '../../hud/design';
 import { weaponKey } from '../../hud/weapons';
-import { fontFace, shownKey, healthRgb, panelFile, DEFAULT_PREVIEW, type PreviewState } from '../../hud/render';
+import { fontFace, shownKey, healthRgb, panelFile, DEFAULT_PREVIEW, HEALTH_BANDS, previewHealthBand, type HealthBand, type PreviewState } from '../../hud/render';
 import { elementById, type HudElement } from '../../hud/elements';
 import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam, buildTrees, pcGet, pieceMovableIn, WEAPON_ICON_LABELS, ITEM_ICON_LABELS } from '../../hud/build';
 import { kvFind } from '../../hud/kv';
@@ -503,7 +503,7 @@ export function ElementControls(
       {el.keys?.filter((k) => !k.gate || probe(k.gate)).map((k) => (
         <Fragment key={k.key}>
           <KeyControl
-            def={k} end={end}
+            def={k} end={end} band={previewHealthBand(preview, id)}
             value={shownKey(design, k, o.keys?.[k.key] ?? elementKey(design, el.key, k.key))}
             onValue={(v, mode) => patch({ keys: { ...o.keys, [k.key]: v } }, mode)}
           />
@@ -854,6 +854,7 @@ export function ChildControls(
         <Fragment key={k.key}>
           <KeyControl
             def={k} end={end} max={def.kind === 'bar' && k.key === 'inset' ? maxInset(info.h) : undefined}
+            band={previewHealthBand(preview ?? DEFAULT_PREVIEW, panel)}
             value={shownKey(design, k, o.keys?.[k.key] ?? info.keys?.[k.key])}
             onValue={(v, mode) => patch({ keys: { ...o.keys, [k.key]: v } }, mode)}
           />
@@ -887,16 +888,19 @@ export function ChildControls(
  * gate has passed reach here; the value is the file's text, as the
  * generator writes it.
  */
-function KeyControl({ def, value, onValue, end, max }: {
+function KeyControl({ def, value, onValue, end, max, band = 'healthy' }: {
   def: KeyDef; value: string | undefined; onValue: (v: string, mode?: EditMode) => void; end: () => void;
   /** A tighter top than the range: a bar's inset stops where one unit of fill is left (maxInset). */
   max?: number;
+  /** The health band the preview draws in (previewHealthBand), marked among a byHealth key's three. */
+  band?: HealthBand;
 }) {
   if (def.type === 'colour' && value === undefined) {
     // Unset: the game's own colour, the health colour for a Panel colour.
     // No opacity here, so touching it cannot write white over the whole
-    // panel; the key is written only when a colour is picked.
-    const [r, g, b] = healthRgb(100, 100, false);
+    // panel; the key is written only when a colour is picked. The picker
+    // opens on the colour the preview shows right now.
+    const [r, g, b] = def.byHealth ? HEALTH_BANDS.find((h) => h.band === band)!.rgb : healthRgb(100, 100, false);
     return (
       <div class="hud__stylerow">
         <span class="hud__stylerow-label">{`${def.label}: ${def.unsetLabel ?? 'Game colour'}`}</span>
@@ -904,6 +908,16 @@ function KeyControl({ def, value, onValue, end, max }: {
           type="color" aria-label={`${def.label} colour`} value={hexOf(`${r} ${g} ${b} 255`)}
           onInput={(e) => onValue(withHex('0 0 0 255', (e.target as HTMLInputElement).value), 'gesture')} onChange={end}
         />
+        {def.byHealth && (
+          <ul class="hud__bands" aria-label="The game's health colours">
+            {HEALTH_BANDS.map((h) => (
+              <li key={h.band} class={h.band === band ? 'hud__band hud__band--on' : 'hud__band'}>
+                <span class="hud__band-chip" style={{ background: `rgb(${h.rgb.join(' ')})` }} />
+                {h.label}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     );
   }

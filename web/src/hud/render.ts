@@ -479,6 +479,23 @@ export function healthRgb(health: number, maxHealth: number, incap: boolean): [n
   return [161, 25, 25];
 }
 
+/**
+ * The three colours healthRgb gives, for a control that shows the game's
+ * own colour: above half, above 15, and 15 or less (also down).
+ */
+export const HEALTH_BANDS = [
+  { band: 'healthy', label: 'Above 50', rgb: healthRgb(100, 100, false) },
+  { band: 'hurt', label: '16 to 50', rgb: healthRgb(40, 100, false) },
+  { band: 'critical', label: '15 or less, or down', rgb: healthRgb(0, 100, true) },
+] as const;
+export type HealthBand = (typeof HEALTH_BANDS)[number]['band'];
+
+/** The band a panel's pieces draw in for this preview (sampleHealthRgb's rule, before any panel colour). */
+export function previewHealthBand(preview: PreviewState, panelId?: string): HealthBand {
+  if (panelId === 'siHealth' || panelId === 'infectedRow') return 'healthy';
+  return preview.survivor === 'down' ? 'critical' : preview.survivor === 'hurt' ? 'hurt' : 'healthy';
+}
+
 /** The panels drawn by that class, and the children it colours by health. */
 const HEALTH_PANELS = new Set(['ownHealth', 'teamColumn']);
 const HEALTH_LABELS = new Set(['healthnumber', 'healthicon']);
