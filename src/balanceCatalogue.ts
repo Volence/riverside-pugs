@@ -1,0 +1,78 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import type { BalanceKnobs } from './balanceKnobs.js';
+
+/**
+ * The balance catalogue: the values and rules the public Game values page
+ * shows, and the extra values the plugin watches. See
+ * docs/superpowers/specs/2026-09-24-balance-catalogue-values-design.md.
+ */
+
+export interface CatalogueValue {
+  id: string; group: string; label: string; source: 'cvar' | 'weapon';
+  unit?: string; vanilla?: string; note?: string;
+  /** The live value misreports (a plugin applies it itself): show the note. */
+  hideLive?: boolean;
+}
+export interface CatalogueRule {
+  id: string; group: string; text: string;
+  when: { plugin: string } | { cvar: string; equals: string };
+  /** Only reviewed rules are public; drafts show on the admin preview. */
+  reviewed: boolean;
+}
+export interface Catalogue {
+  groups: { id: string; label: string }[];
+  values: CatalogueValue[];
+  rules: CatalogueRule[];
+}
+
+export const CATALOGUE_PATH = fileURLToPath(new URL('../balance/catalogue.json', import.meta.url));
+const CVAR_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+const WEAPON_RE = /^(weapon_[a-z0-9_]{1,40})\.([A-Za-z][A-Za-z0-9_]{0,40})$/;
+const PLUGIN_RE = /^[A-Za-z0-9_. -]{1,64}\.smx$/;
+
+/** Load and validate. `raw` lets tests validate an object without the disk. */
+export function loadCatalogue(path: string = CATALOGUE_PATH, raw?: unknown): Catalogue {
+  const c = (raw ?? JSON.parse(readFileSync(path, 'utf8'))) as Catalogue;
+  if (!Array.isArray(c.groups) || !Array.isArray(c.values) || !Array.isArray(c.rules)) throw new Error('catalogue: groups, values and rules must be arrays');
+  const groups = new Set(c.groups.map((g) => g.id));
+  if (groups.size !== c.groups.length) throw new Error('catalogue: duplicate group');
+  const ids = new Set<string>();
+  for (const v of c.values) {
+    if (!groups.has(v.group)) throw new Error(`catalogue: ${v.id} is in unknown group ${v.group}`);
+    if (ids.has(v.id)) throw new Error(`catalogue: duplicate value ${v.id}`);
+    ids.add(v.id);
+    if (v.source === 'cvar' && !CVAR_RE.test(v.id)) throw new Error(`catalogue: bad cvar ${v.id}`);
+    else if (v.source === 'weapon' && !WEAPON_RE.test(v.id)) throw new Error(`catalogue: bad weapon key ${v.id}`);
+    else if (v.source !== 'cvar' && v.source !== 'weapon') throw new Error(`catalogue: ${v.id} has unknown source`);
+    if (typeof v.label !== 'string' || !v.label.trim()) throw new Error(`catalogue: ${v.id} needs a label`);
+  }
+  const ruleIds = new Set<string>();
+  for (const r of c.rules) {
+    if (!groups.has(r.group)) throw new Error(`catalogue: rule ${r.id} is in unknown group ${r.group}`);
+    if (ruleIds.has(r.id)) throw new Error(`catalogue: duplicate rule ${r.id}`);
+    ruleIds.add(r.id);
+    const w = r.when as Record<string, unknown>;
+    const ok = (typeof w.plugin === 'string' && PLUGIN_RE.test(w.plugin))
+      || (typeof w.cvar === 'string' && CVAR_RE.test(w.cvar) && typeof w.equals === 'string');
+    if (!ok) throw new Error(`catalogue: rule ${r.id} needs when.plugin or when.cvar + when.equals`);
+    if (typeof r.reviewed !== 'boolean') throw new Error(`catalogue: rule ${r.id} needs reviewed true or false`);
+  }
+  return c;
+}
+
+/** The watch list the plugin reads: knobs.json's lists plus the catalogue's
+ *  cvars (deduplicated, knobs order first) and weapon keys. */
+export function watchKnobs(knobs: BalanceKnobs, cat: Catalogue | null): BalanceKnobs {
+  if (!cat) return knobs;
+  const have = new Set(knobs.cvars.map((c) => c.cvar));
+  const extra = cat.values.filter((v) => v.source === 'cvar' && !have.has(v.id)).map((v) => ({ cvar: v.id, label: v.label, group: v.group }));
+  const weapons = [...(knobs.weapons ?? [])];
+  const haveW = new Set(weapons.map((w) => `${w.weapon}.${w.key}`));
+  for (const v of cat.values) {
+    if (v.source !== 'weapon' || haveW.has(v.id)) continue;
+    const [weapon, key] = v.id.split('.');
+    weapons.push({ weapon, key, label: v.label });
+  }
+  return { ...knobs, cvars: [...knobs.cvars, ...extra], weapons };
+}

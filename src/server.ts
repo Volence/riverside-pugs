@@ -55,6 +55,7 @@ import type { Config } from './config.js';
 import type { DB } from './db.js';
 import { BalanceRolloutWriter } from './balanceWriter.js';
 import { BalanceWatchWriter, renderWatchFile } from './balanceWatch.js';
+import { loadCatalogue, watchKnobs as watchKnobsWithCatalogue, type Catalogue } from './balanceCatalogue.js';
 import { FleetReader } from './fleetReader.js';
 import { adminFleetRoutes } from './routes/adminFleet.js';
 import type { AddonsTransport } from './addonsTransport.js';
@@ -556,8 +557,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // writes nothing, and every box keeps its compiled list.
   let watchKnobs: BalanceKnobs | null = null;
   try { watchKnobs = loadBalanceKnobs(deps.balanceKnobsPath); } catch { watchKnobs = null; }
+  // The catalogue's values join the watch list; a broken catalogue only
+  // drops them (the knobs.json list still goes out).
+  let watchCatalogue: Catalogue | null = null;
+  try { watchCatalogue = loadCatalogue(); } catch { watchCatalogue = null; }
   const watchWriter = new BalanceWatchWriter({
-    db: deps.db, content: () => (watchKnobs ? renderWatchFile(watchKnobs) : null), transport: deps.balanceTransport,
+    db: deps.db, content: () => (watchKnobs ? renderWatchFile(watchKnobsWithCatalogue(watchKnobs, watchCatalogue)) : null), transport: deps.balanceTransport,
   });
   // Fleet view: read-only readings of every box's managed files.
   const fleetReader = deps.fleetReader ?? new FleetReader({ db: deps.db });

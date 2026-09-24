@@ -1,0 +1,89 @@
+import type { DB } from './db.js';
+import type { Catalogue, CatalogueValue } from './balanceCatalogue.js';
+import { baseInventory, patchNumber } from './balanceControl.js';
+import { resolvePatch } from './balanceFold.js';
+
+/**
+ * The Game values page: every catalogue value as the servers report it, its
+ * vanilla value, when it last changed, and the rules that apply now. See
+ * docs/superpowers/specs/2026-09-24-balance-catalogue-values-design.md.
+ */
+
+type Inventory = Record<string, string>;
+
+export interface ValueView {
+  id: string; label: string; unit: string | null; note: string | null;
+  /** What the servers run, or null when not reported (or hidden, see status). */
+  value: string | null;
+  vanilla: string | null;
+  differsFromVanilla: boolean;
+  status: 'reported' | 'not_reported' | 'hidden';
+  /** The most recent change; null when it has not changed since tracking began.
+   *  `patch` is null when the patch is not public (public view). */
+  lastChange: { at: string; patch: { id: number; number: number; name: string } | null } | null;
+}
+export interface RuleView { id: string; text: string; active: boolean; draft: boolean }
+export interface GroupView { id: string; label: string; values: ValueView[]; rules: RuleView[] }
+export interface GameValues { asOf: { patchId: number; number: number } | null; groups: GroupView[] }
+
+const keyOf = (v: CatalogueValue) => (v.source === 'weapon' ? `w:${v.id}` : `c:${v.id}`);
+const same = (a: string, b: string) => {
+  const x = Number(a), y = Number(b);
+  return a.trim() !== '' && b.trim() !== '' && Number.isFinite(x) && Number.isFinite(y) ? x === y : a === b;
+};
+
+interface PatchRow { id: number; first_seen_at: string; inputs_json: string; name: string | null; published_at: string | null }
+
+export function gameValues(db: DB, cat: Catalogue, opts: { admin: boolean }): GameValues {
+  const base = baseInventory(db);
+  const inv: Inventory = base?.inventory ?? {};
+  // History: balance and folded patches with inputs, in time order. A folded
+  // patch's change is credited to the patch it counts for.
+  const patches = db.prepare(`SELECT id, first_seen_at, inputs_json, name, published_at FROM balance_patches
+    WHERE inputs_json IS NOT NULL AND COALESCE(triage, 'balance') IN ('balance','folded')
+    ORDER BY first_seen_at, id`).all() as PatchRow[];
+  const parsed = patches.map((p) => { try { return { ...p, inv: JSON.parse(p.inputs_json) as Inventory }; } catch { return { ...p, inv: {} as Inventory }; } });
+  const byId = new Map(patches.map((p) => [p.id, p]));
+  const patchView = (id: number) => {
+    const target = resolvePatch(db, id);
+    const p = byId.get(target) ?? (db.prepare('SELECT id, first_seen_at, inputs_json, name, published_at FROM balance_patches WHERE id = ?').get(target) as PatchRow | undefined);
+    if (!p) return null;
+    const number = patchNumber(db, p.id);
+    if (!opts.admin && p.published_at === null) return null;
+    return { id: p.id, number, name: p.name?.trim() ? p.name : `Patch ${number}` };
+  };
+
+  const valueView = (v: CatalogueValue): ValueView => {
+    const key = keyOf(v);
+    let lastChange: ValueView['lastChange'] = null;
+    let prev: string | undefined;
+    for (const p of parsed) {
+      const val = p.inv[key];
+      if (val === undefined) continue;
+      if (prev !== undefined && !same(prev, val)) lastChange = { at: p.first_seen_at, patch: patchView(p.id) };
+      prev = val;
+    }
+    let raw = inv[key];
+    if (raw !== undefined && v.source === 'weapon' && raw === 'default') raw = v.vanilla ?? 'game default';
+    const status: ValueView['status'] = v.hideLive ? 'hidden' : raw === undefined ? 'not_reported' : 'reported';
+    const value = status === 'reported' ? raw! : null;
+    return {
+      id: v.id, label: v.label, unit: v.unit ?? null, note: v.note ?? null, value, vanilla: v.vanilla ?? null,
+      differsFromVanilla: value !== null && v.vanilla !== undefined && !same(value, v.vanilla),
+      status, lastChange,
+    };
+  };
+
+  const ruleActive = (w: Catalogue['rules'][number]['when']) =>
+    'plugin' in w ? inv[`p:${w.plugin}`] !== undefined : inv[`c:${w.cvar}`] !== undefined && same(inv[`c:${w.cvar}`], w.equals);
+
+  const groups = cat.groups.map((g): GroupView => ({
+    id: g.id, label: g.label,
+    values: cat.values.filter((v) => v.group === g.id).map(valueView),
+    rules: cat.rules.filter((r) => r.group === g.id)
+      .map((r) => ({ id: r.id, text: r.text, active: ruleActive(r.when), draft: !r.reviewed }))
+      .filter((r) => opts.admin || (r.active && !r.draft)),
+  })).filter((g) => g.values.length > 0 || g.rules.length > 0);
+
+  return { asOf: base ? { patchId: base.patchId, number: patchNumber(db, base.patchId) } : null, groups };
+}
