@@ -69,6 +69,24 @@ afterEach(() => {
 });
 
 describe('the community page', () => {
+  it('offers All, Yours and Liked to a signed-in viewer only, and asks the list for each', async () => {
+    show(ANON);
+    await screen.findByText('Clean Modern');
+    expect(screen.queryByRole('tab', { name: 'Yours' })).toBeNull();
+    cleanup();
+    mockCommunity.list.mockClear();
+    show(ACTIVE);
+    await screen.findByText('Clean Modern');
+    fireEvent.click(screen.getByRole('tab', { name: 'Yours' }));
+    await waitFor(() => expect(mockCommunity.list).toHaveBeenLastCalledWith(
+      { kind: 'hud', sort: 'new', page: 0, author: '76561190000000009' }, expect.anything()));
+    mockCommunity.list.mockResolvedValue(page([]));
+    fireEvent.click(screen.getByRole('tab', { name: 'Liked' }));
+    await waitFor(() => expect(mockCommunity.list).toHaveBeenLastCalledWith(
+      { kind: 'hud', sort: 'new', page: 0, liked: true }, expect.anything()));
+    expect(await screen.findByText('You have not liked any HUDs yet.')).toBeTruthy();
+  });
+
   it('lists HUD cards: title, author link, preview and base badge', async () => {
     const { container } = show(ANON);
     expect(await screen.findByText('Clean Modern')).toBeTruthy();

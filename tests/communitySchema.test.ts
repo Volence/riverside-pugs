@@ -15,7 +15,7 @@ describe('community schema', () => {
     expect(columns(db, 'community_entries')).toEqual([
       'id', 'kind', 'author_id', 'title', 'description', 'payload', 'preset', 'aspect', 'advanced',
       'import_id', 'import_name', 'preview', 'bytes', 'created_at', 'deleted_at', 'deleted_by',
-      'delete_reason', 'purged_at', 'preview_infected',
+      'delete_reason', 'purged_at', 'preview_infected', 'updated_at', 'version_of',
     ]);
   });
 

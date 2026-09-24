@@ -75,4 +75,19 @@ describe('the community entry page', () => {
     show(MOD);
     expect(await screen.findByText('Deleted by its author.')).toBeTruthy();
   });
+
+  it("shows staff an updated entry's earlier versions, and a kept version the live one", async () => {
+    mockCommunity.get.mockResolvedValue(entry({ versions: [{ id: 30, replacedAt: '2026-09-25T03:00:00.000Z' }] }));
+    show(MOD);
+    const link = await screen.findByRole('link', { name: '#30' });
+    expect(link.getAttribute('href')).toBe('/community/30');
+    expect(screen.getByText(/replaced 2026-09-25/)).toBeTruthy();
+    cleanup();
+    mockCommunity.get.mockResolvedValue(entry({
+      id: 30, versionOf: 11, removed: { by: '76561190000000001', reason: 'Replaced by its author with a newer version.', at: '2026-09-25T03:00:00.000Z' },
+    }));
+    show(MOD, '30');
+    expect((await screen.findByRole('link', { name: '#11' })).getAttribute('href')).toBe('/community/11');
+    expect(screen.queryByText('Deleted by its author.')).toBeNull();
+  });
 });

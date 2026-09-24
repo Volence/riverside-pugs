@@ -48,9 +48,20 @@ export function CommunityEntry({ id, session }: { id: string; session: Session }
       {header}
       {removed && (
         <p class="community__removed" role="note">
-          {removed.by === data.author.steamid
+          {data.versionOf
+            ? <>An earlier version its author replaced. The live one is <a href={`/community/${data.versionOf}`}>{`#${data.versionOf}`}</a>.</>
+            : removed.by === data.author.steamid
             ? 'Deleted by its author.'
             : <>Removed by <a href={`/player/${encodeURIComponent(removed.by ?? '')}`}>{removed.byName || removed.by || 'staff'}</a>: {removed.reason ?? 'no reason given'}</>}
+        </p>
+      )}
+      {/* Staff only: what its author's updates replaced, kept as evidence for a report made before them. */}
+      {data.versions && data.versions.length > 0 && (
+        <p class="community__removed" role="note">
+          {'Updated by its author. Earlier versions: '}
+          {data.versions.map((v, i) => (
+            <span key={v.id}>{i > 0 && ', '}<a href={`/community/${v.id}`}>{`#${v.id}`}</a>{` (replaced ${v.replacedAt.slice(0, 10)})`}</span>
+          ))}
         </p>
       )}
       {/* A removed entry is shown to staff as evidence, without the actions a

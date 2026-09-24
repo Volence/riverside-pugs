@@ -26,6 +26,8 @@ export interface EntrySummary {
   likes: number;
   likedByMe: boolean;
   createdAt: string;
+  /** When its author last replaced it with a newer version; null if never. */
+  updatedAt: string | null;
   /** Crosshairs only: the CrosshairArt, drawn live by the gallery. */
   art?: unknown;
   /** HUDs only. */
@@ -44,6 +46,10 @@ export interface EntryDetail extends EntrySummary {
   importId?: string | null;
   /** Staff only, on a tombstone. */
   removed?: { by: string | null; byName: string | null; reason: string | null; at: string };
+  /** Staff only: the versions an update replaced, newest first, each a tombstone they can open. */
+  versions?: { id: number; replacedAt: string }[];
+  /** Staff only, on a replaced version: the live entry it was a version of. */
+  versionOf?: number | null;
 }
 
 export interface MineEntry extends EntrySummary {
@@ -54,7 +60,8 @@ export interface MineEntry extends EntrySummary {
 interface Row {
   id: number; kind: EntryKind; author_id: string; title: string; description: string; payload: string;
   preset: string | null; aspect: string | null; advanced: number; import_id: string | null;
-  import_name: string | null; preview: string | null; preview_infected: string | null; created_at: string; deleted_at: string | null;
+  import_name: string | null; preview: string | null; preview_infected: string | null; created_at: string; updated_at: string | null;
+  deleted_at: string | null; version_of: number | null;
   deleted_by: string | null; delete_reason: string | null;
   name: string; avatar: string | null; likes: number; liked: number;
 }
@@ -65,7 +72,7 @@ const COLUMNS = (payload: 'crosshair-only' | 'all') => `
   e.id, e.kind, e.author_id, e.title, e.description,
   ${payload === 'all' ? 'e.payload' : "CASE WHEN e.kind = 'crosshair' THEN e.payload ELSE '' END AS payload"},
   e.preset, e.aspect, e.advanced, e.import_id, e.import_name, e.preview, e.preview_infected, e.created_at,
-  e.deleted_at, e.deleted_by, e.delete_reason,
+  e.updated_at, e.deleted_at, e.deleted_by, e.delete_reason, e.version_of,
   p.name, p.avatar,
   (SELECT COUNT(*) FROM community_likes l WHERE l.entry_id = e.id) AS likes,
   EXISTS (SELECT 1 FROM community_likes l WHERE l.entry_id = e.id AND l.player_id = @viewer) AS liked`;
@@ -96,7 +103,7 @@ function summary(r: Row): EntrySummary {
   const base: EntrySummary = {
     id: r.id, kind: r.kind, title: r.title, description: r.description,
     author: { steamid: r.author_id, name: r.name, avatar: r.avatar },
-    likes: r.likes, likedByMe: r.liked === 1, createdAt: r.created_at,
+    likes: r.likes, likedByMe: r.liked === 1, createdAt: r.created_at, updatedAt: r.updated_at,
   };
   if (r.kind === 'crosshair') return { ...base, art: parse(r.payload) };
   return {
@@ -111,6 +118,8 @@ export interface ListOpts {
   sort: 'new' | 'top';
   page: number;
   author?: string | null;
+  /** Only the entries the viewer liked (needs a viewer). */
+  liked?: boolean;
   viewer: string | null;
   now?: Date;
 }
@@ -120,7 +129,8 @@ export interface ListOpts {
 export function listEntries(db: DB, o: ListOpts): { entries: EntrySummary[]; page: number; pageSize: number; total: number } {
   const page = Math.min(MAX_PAGE, Math.max(0, Math.floor(o.page) || 0));
   const where = `e.kind = @kind AND ${VISIBLE}
-    ${o.author ? 'AND e.author_id = @author' : ''}`;
+    ${o.author ? 'AND e.author_id = @author' : ''}
+    ${o.liked ? 'AND EXISTS (SELECT 1 FROM community_likes l WHERE l.entry_id = e.id AND l.player_id = @viewer)' : ''}`;
   const now = (o.now ?? new Date()).toISOString();
   const params = { kind: o.kind, author: o.author ?? null, viewer: o.viewer ?? '', now };
   const order = o.sort === 'top' ? 'likes DESC, e.id DESC' : 'e.id DESC';
@@ -130,7 +140,7 @@ export function listEntries(db: DB, o: ListOpts): { entries: EntrySummary[]; pag
   ).all({ ...params, limit: PAGE_SIZE, offset: page * PAGE_SIZE }) as Row[];
   const { n } = db.prepare(
     `SELECT COUNT(*) AS n FROM community_entries e JOIN players p ON p.steamid = e.author_id WHERE ${where}`,
-  ).get({ kind: params.kind, author: params.author, now }) as { n: number };
+  ).get({ kind: params.kind, author: params.author, viewer: params.viewer, now }) as { n: number };
   return { entries: rows.map(summary), page, pageSize: PAGE_SIZE, total: n };
 }
 
@@ -156,6 +166,11 @@ export function getEntry(db: DB, id: number, o: { viewer: string | null; staff: 
       ? (db.prepare('SELECT name FROM players WHERE steamid = ?').get(r.deleted_by) as { name: string } | undefined)
       : undefined;
     out.removed = { by: r.deleted_by, byName: who?.name ?? null, reason: r.delete_reason, at: r.deleted_at };
+  }
+  if (o.staff) {
+    out.versions = (db.prepare('SELECT id, deleted_at AS replacedAt FROM community_entries WHERE version_of = ? ORDER BY id DESC')
+      .all(r.id) as { id: number; replacedAt: string }[]);
+    out.versionOf = r.version_of;
   }
   return out;
 }
@@ -228,6 +243,41 @@ export function insertEntry(db: DB, e: NewEntry): number {
     e.advanced ? 1 : 0, e.importId ?? null, e.importName ?? null, e.preview ?? null, e.previewInfected ?? null, e.bytes,
     e.createdAt.toISOString(),
   ).lastInsertRowid);
+}
+
+/** What an update replaces: everything a share sets but its kind, author and first date. */
+export type Replacement = Omit<NewEntry, 'kind' | 'authorId' | 'createdAt'>;
+
+export const REPLACED_REASON = 'Replaced by its author with a newer version.';
+
+/**
+ * An author's update of their live entry `id`, in place, so its link and
+ * likes stay. The version it replaces is first copied into a tombstone
+ * (deleted by the author, version_of = id, created now so it counts toward
+ * the day's shares, as a delete-and-reshare would), which keeps it, and its
+ * files, for a report made before the update. Run inside the caller's
+ * transaction. False when the entry is not live.
+ */
+export function replaceEntry(db: DB, id: number, e: Replacement, now: Date): boolean {
+  const at = now.toISOString();
+  const archived = db.prepare(
+    `INSERT INTO community_entries
+       (kind, author_id, title, description, payload, preset, aspect, advanced, import_id, import_name, preview,
+        preview_infected, bytes, created_at, deleted_at, deleted_by, delete_reason, version_of)
+     SELECT kind, author_id, title, description, payload, preset, aspect, advanced, import_id, import_name, preview,
+        preview_infected, bytes, @at, @at, author_id, @reason, id
+       FROM community_entries WHERE id = @id AND deleted_at IS NULL`,
+  ).run({ id, at, reason: REPLACED_REASON }).changes;
+  if (!archived) return false;
+  db.prepare(
+    `UPDATE community_entries SET title = ?, description = ?, payload = ?, preset = ?, aspect = ?, advanced = ?,
+       import_id = ?, import_name = ?, preview = ?, preview_infected = ?, bytes = ?, updated_at = ?
+     WHERE id = ?`,
+  ).run(
+    e.title, e.description, e.payload, e.preset ?? null, e.aspect ?? null, e.advanced ? 1 : 0, e.importId ?? null,
+    e.importName ?? null, e.preview ?? null, e.previewInfected ?? null, e.bytes, at, id,
+  );
+  return true;
 }
 
 /** Marks a live entry deleted. False when it was already gone. */

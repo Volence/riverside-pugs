@@ -834,3 +834,87 @@ describe('staff remove', () => {
     expect((await inject(MOD, 'POST', `/api/community/${id}/remove`, { reason: 'late' })).statusCode).toBe(404);
   });
 });
+
+describe('updating a share', () => {
+  it('replaces a crosshair in place, keeping its id and likes, and keeps the old version for staff', async () => {
+    const id = await shareId(A, 'First cut');
+    await inject(B, 'PUT', `/api/community/${id}/like`);
+    const res = await share(A, body('Second cut', { replaces: id, description: 'Thinner.' }));
+    expect(res.statusCode).toBe(200);
+    expect(res.json().id).toBe(id);
+
+    const entries = (await list(null)).json().entries;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ id, title: 'Second cut', description: 'Thinner.', likes: 1 });
+    expect(entries[0].updatedAt).toEqual(expect.any(String));
+    // The author sees one live share, not the kept version.
+    expect((await get(A, '/api/community/mine')).json().entries.map((e: { id: number }) => e.id)).toEqual([id]);
+
+    // Staff see the replaced version, and can open it.
+    const detail = (await get(MOD, `/api/community/${id}`)).json();
+    expect(detail.versions).toHaveLength(1);
+    const old = (await get(MOD, `/api/community/${detail.versions[0].id}`)).json();
+    expect(old).toMatchObject({ title: 'First cut', versionOf: id });
+    expect(old.removed.reason).toBe('Replaced by its author with a newer version.');
+    // Nobody else sees versions, or the old one.
+    expect((await get(B, `/api/community/${id}`)).json().versions).toBeUndefined();
+    expect((await get(B, `/api/community/${detail.versions[0].id}`)).statusCode).toBe(404);
+  });
+
+  it('lets a player at the cap update, but only their own live entry of the same kind', async () => {
+    const one = await shareId(A, 'One');
+    await shareId(A, 'Two');
+    expect((await share(A, body('Three'))).statusCode).toBe(409);
+    expect((await share(A, body('One, fixed', { replaces: one }))).statusCode).toBe(200);
+
+    const theirs = await shareId(B, 'Not yours');
+    const hud = (await shareHud(A)).json().id as number;
+    for (const target of [theirs, hud, 999999]) {
+      const res = await share(A, body('Nope', { replaces: target }));
+      expect(res.statusCode).toBe(404);
+      expect(res.json().error).toBe('That crosshair is not one of your live shares.');
+    }
+    await inject(A, 'DELETE', `/api/community/${one}`);
+    expect((await share(A, body('Gone', { replaces: one }))).statusCode).toBe(404);
+    expect((await share(A, body('Odd', { replaces: 'one' }))).statusCode).toBe(400);
+  });
+
+  it('counts an update toward the day\'s shares', async () => {
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('community_shares_per_day', '2')").run();
+    const id = await shareId(A, 'Only one');
+    expect((await share(A, body('Update one', { replaces: id }))).statusCode).toBe(200);
+    const res = await share(A, body('Update two', { replaces: id }));
+    expect(res.statusCode).toBe(429);
+  });
+
+  it('replaces a HUD from ?replaces, before the body at the cap, and keeps the old preview for the kept version', async () => {
+    const first = png(960, 540, 1);
+    const id = (await shareHud(A, { title: 'Old HUD', preview: first })).json().id as number;
+    await shareHud(A, { title: 'Other HUD', preview: png(960, 540, 2) });
+    const next = png(960, 540, 3);
+    const res = await app.inject({
+      method: 'POST', url: `/api/community/huds?replaces=${id}`, cookies: cookie[A], payload: hudForm({ title: 'New HUD', preview: next }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().id).toBe(id);
+    const entry = (await get(null, `/api/community/${id}`)).json();
+    expect(entry).toMatchObject({ title: 'New HUD', previewUrl: `/api/community/files/previews/${sha(next)}.png` });
+    // The replaced version still holds the first preview on disk.
+    expect(filesIn('previews')).toContain(`${sha(first)}.png`);
+    const bad = await app.inject({
+      method: 'POST', url: '/api/community/huds?replaces=abc', cookies: cookie[A],
+      headers: { 'content-type': 'multipart/form-data; boundary=zz' }, payload: 'not multipart at all',
+    });
+    expect(bad.statusCode).toBe(400);
+  });
+});
+
+describe('the liked list', () => {
+  it('lists only what the viewer liked, and nothing signed out', async () => {
+    const a = await shareId(A, 'Liked one');
+    await shareId(A, 'Not liked');
+    await inject(B, 'PUT', `/api/community/${a}/like`);
+    expect((await list(B, 'kind=crosshair&liked=1')).json()).toMatchObject({ total: 1, entries: [{ id: a }] });
+    expect((await list(null, 'kind=crosshair&liked=1')).json().total).toBe(0);
+  });
+});

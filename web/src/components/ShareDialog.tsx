@@ -11,10 +11,11 @@ import { SidePreviews } from './SidePreviews';
  * editor's crosshair panel.
  *
  * It asks the editor for what it would share (`prepare`) only once it knows
- * the viewer can share, and reads the viewer's live entries first, so a
- * player at the cap is told before typing anything rather than refused
- * after. The server checks every rule again; the checks here only save the
- * round trip. The modal is the site's own (Confirm.tsx's classes), with
+ * the viewer can share, and reads the viewer's live entries first: a player
+ * with shares may update one in place instead (its link and likes stay),
+ * and a player at the cap is offered only that, before typing anything.
+ * The server checks every rule again; the checks here only save the round
+ * trip. The modal is the site's own (Confirm.tsx's classes), with
  * Escape and the backdrop closing it.
  */
 
@@ -57,6 +58,9 @@ export function ShareDialog(
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [shared, setShared] = useState<number | null>(null);
+  // Which of the viewer's live entries this updates in place; null shares a new one.
+  const [target, setTarget] = useState<number | null>(null);
+  const [touched, setTouched] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
   const noun = NOUN[kind];
 
@@ -90,8 +94,20 @@ export function ShareDialog(
   const live = mine ? mine.entries.filter((e) => e.kind === kind && e.removedByStaff === null) : [];
   const cap = mine ? (kind === 'hud' ? mine.caps.huds : mine.caps.crosshairs) : Infinity;
   const atCap = mine !== null && live.length >= cap;
+  // At the cap the dialog opens on an update of the newest, the one thing it can still do.
+  useEffect(() => {
+    if (atCap && target === null && live[0]) pickTarget(live[0].id);
+  }, [atCap]);
+  /** Update that entry (its title and description to start from, unless typed over), or null for a new one. */
+  const pickTarget = (id: number | null) => {
+    setTarget(id);
+    const e = live.find((x) => x.id === id);
+    if (e && !touched) { setTitle(e.title); setDescription(e.description); }
+    if (id === null && !touched && prepared) { setTitle(prepared.name.slice(0, TITLE_MAX)); setDescription(''); }
+  };
+  const updating = target !== null && live.some((e) => e.id === target);
   const len = [...title.trim()].length;
-  const ready = prepared !== null && !atCap && permission && len >= TITLE_MIN && len <= TITLE_MAX && !busy;
+  const ready = prepared !== null && (updating || !atCap) && permission && len >= TITLE_MIN && len <= TITLE_MAX && !busy;
 
   const submit = async (e: Event) => {
     e.preventDefault();
@@ -99,7 +115,7 @@ export function ShareDialog(
     setBusy(true);
     setError(null);
     try {
-      const text = { title: title.trim(), description: description.trim(), permission: true };
+      const text = { title: title.trim(), description: description.trim(), permission: true, ...(updating ? { replaces: target! } : {}) };
       const { id } = prepared.kind === 'hud'
         ? await shareHud({ ...text, prepared: prepared.hud, preview: prepared.preview, previewInfected: prepared.previewInfected })
         : await shareCrosshair({ ...text, art: prepared.art });
@@ -133,18 +149,33 @@ export function ShareDialog(
           </>
         ) : shared !== null ? (
           <>
-            <p class="modal__body">Shared. See it on the <a href={`/community/${shared}`}>community page</a>.</p>
+            <p class="modal__body">{updating ? 'Updated.' : 'Shared.'} See it on the <a href={`/community/${shared}`}>community page</a>.</p>
             <div class="modal__actions">
               <button class="btn" type="button" onClick={onClose}>Done</button>
             </div>
           </>
         ) : (
           <form class="share__form" onSubmit={submit}>
-            {atCap && (
-              <div class="share__cap">
-                <p>{`You are sharing ${cap} ${noun}${cap === 1 ? '' : 's'} already. Delete one to share another.`}</p>
-                <ul>{live.map((e) => <li key={e.id}><a href={`/community/${e.id}`}>{e.title}</a></li>)}</ul>
-              </div>
+            {live.length > 0 && (
+              <fieldset class="share__mode">
+                <legend class="sr-only">New or update</legend>
+                <label class="share__check">
+                  <input type="radio" name="share-mode" checked={!updating} disabled={atCap} onChange={() => pickTarget(null)} />
+                  <span>{`Share as a new ${noun}`}</span>
+                </label>
+                <label class="share__check">
+                  <input type="radio" name="share-mode" checked={updating} onChange={() => pickTarget(live[0].id)} />
+                  <span>Update one of yours, keeping its link and likes:</span>
+                </label>
+                {updating && (
+                  <select aria-label={`Which ${noun} to update`} value={String(target)} onChange={(e) => pickTarget(Number((e.target as HTMLSelectElement).value))}>
+                    {live.map((e) => <option key={e.id} value={String(e.id)}>{e.title}</option>)}
+                  </select>
+                )}
+                {atCap && (
+                  <p class="muted share__cap">{`You are sharing ${cap} ${noun}${cap === 1 ? '' : 's'} already, the most at once: update one, or delete one to share another.`}</p>
+                )}
+              </fieldset>
             )}
             {kind === 'hud' && (
               previewUrls
@@ -165,12 +196,12 @@ export function ShareDialog(
             <label class="share__field">
               <span>Title</span>
               <input type="text" value={title} maxLength={TITLE_MAX}
-                onInput={(e) => setTitle((e.target as HTMLInputElement).value)} />
+                onInput={(e) => { setTouched(true); setTitle((e.target as HTMLInputElement).value); }} />
             </label>
             <label class="share__field">
               <span>Description</span>
               <textarea rows={3} value={description} maxLength={DESCRIPTION_MAX}
-                onInput={(e) => setDescription((e.target as HTMLTextAreaElement).value)} />
+                onInput={(e) => { setTouched(true); setDescription((e.target as HTMLTextAreaElement).value); }} />
             </label>
             <label class="share__check">
               <input type="checkbox" checked={permission} onChange={(e) => setPermission((e.target as HTMLInputElement).checked)} />
@@ -179,7 +210,7 @@ export function ShareDialog(
             {error && <p class="error">{error}</p>}
             <div class="modal__actions">
               <button class="btn--ghost" type="button" onClick={onClose}>Cancel</button>
-              <button class="btn" type="submit" disabled={!ready}>{busy ? 'Sharing...' : 'Share'}</button>
+              <button class="btn" type="submit" disabled={!ready}>{busy ? (updating ? 'Updating...' : 'Sharing...') : (updating ? 'Update' : 'Share')}</button>
             </div>
           </form>
         )}
