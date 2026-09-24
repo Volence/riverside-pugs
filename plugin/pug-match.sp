@@ -15,7 +15,7 @@
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.3.11"
+#define PLUGIN_VERSION "0.3.13"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -486,6 +486,7 @@ No config exec and no restart: it tracks the game already being played. Implies 
 	HookEvent("revive_success", Event_ReviveSuccess);
 	LeaveInit();
 	PauseInit();
+	ModCall_Init();
 	HookEvent("player_spawn", Event_PlayerSpawn);
 	HookEvent("player_now_it", Event_PlayerBoomed);
 
@@ -2955,6 +2956,7 @@ public void OnClientPostAdminCheck(int client)
  *  never actually left. The backend must not treat these as abandons. */
 public void OnClientDisconnect(int client)
 {
+	ModCall_OnDisconnect(client);
 	int slot = g_iClientRoster[client];
 	g_iClientRoster[client] = -1;
 	g_iLockAttempts[client] = 0;
@@ -3146,6 +3148,7 @@ public void OnConfigsExecuted()
 
 public void OnMapStart()
 {
+	ModCall_OnMapStart();
 	// Past the finale, FinalizeMap never runs (it lives behind the MS_Live
 	// guard in Event_RoundEnd), so nothing else would advance the replay map
 	// sequence and every post-finale map would reuse one ordinal and overwrite
@@ -4472,3 +4475,4 @@ public void Event_PounceStopped(Event event, const char[] name, bool dontBroadca
 #include "pug-leave.inc"
 // After pug-leave.inc: this module reads its pause state and its absence check.
 #include "pug-pause.inc"
+#include "pug-modcall.inc"
