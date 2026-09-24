@@ -2507,6 +2507,12 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .share__preview { display: block; width: 100%; height: auto; border: 1px solid var(--border); }
 .share__field { display: grid; gap: var(--sp-1); }
 .share__field input, .share__field textarea { width: 100%; box-sizing: border-box; min-width: 0; }
+.share__field textarea {
+  /* The browser's own textarea is grey and monospace; match the title input above it. */
+  padding: var(--sp-3); border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  font-family: var(--font-body); font-size: var(--fs-body); resize: vertical;
+}
+.share__field textarea:focus { border-color: var(--accent); }
 .share__check { display: flex; gap: var(--sp-2); align-items: flex-start; }
 .share__cap p, .share__left p { margin: 0; }
 .share__cap ul, .share__left ul { margin: var(--sp-1) 0 0; padding-left: var(--sp-5); overflow-wrap: anywhere; }
