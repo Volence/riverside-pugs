@@ -35,7 +35,7 @@
 **Interfaces:**
 - Produces: tables `releases`, `release_boxes` (spec "Storage", plus `release_boxes.shipped_json TEXT` and nullable `plan_json`); `balance_patches.release_id`; config `deployRepoUrl` (env `DEPLOY_REPO_URL`, default `git@github.com:Volence/l4d-deploy.git`), `deployRepoKey: string | null` (`DEPLOY_REPO_KEY`), `deployRepoDir` (`<dirname(dbPath)>/deploy-repo.git`), `releasesDir` (`<dirname(dbPath)>/releases`); `MANAGED_FILES` exported from `fleetTree.ts`.
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```ts
 // tests/releaseSchema.test.ts
@@ -65,9 +65,9 @@ describe('release schema', () => {
 
 Add to `tests/fleetTree.test.ts` `isManaged`: `expect(isManaged('left4dead/mymotd.txt')).toBe(true); expect(isManaged('left4dead/myhost.txt')).toBe(true); expect(isManaged('left4dead/motd.txt')).toBe(false);` and in the local reader `beforeEach` write `left4dead/mymotd.txt` = `'motd'`, expecting it in the sorted list (between the plugin and `server.cfg`... sorted: `left4dead/addons/...`, `left4dead/cfg/server.cfg`, `left4dead/mymotd.txt`).
 
-- [ ] **Step 2: Run, expect FAIL.**
+- [x] **Step 2: Run, expect FAIL.**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/db.ts`, after the fleet tables:
 
@@ -129,8 +129,8 @@ In `isManaged`, before the roots check: `if ((MANAGED_FILES as readonly string[]
 
 Add `'release_boxes', 'releases'` to `tests/db.test.ts`'s table list in order.
 
-- [ ] **Step 4: Run** `npx vitest run tests/releaseSchema.test.ts tests/fleetTree.test.ts tests/db.test.ts`, expect PASS.
-- [ ] **Step 5: Commit** `git commit -m "releases: schema, config, and mymotd/myhost as managed files"`
+- [x] **Step 4: Run** `npx vitest run tests/releaseSchema.test.ts tests/fleetTree.test.ts tests/db.test.ts`, expect PASS.
+- [x] **Step 5: Commit** `git commit -m "releases: schema, config, and mymotd/myhost as managed files"`
 
 ---
 
@@ -146,7 +146,7 @@ Add `'release_boxes', 'releases'` to `tests/db.test.ts`'s table list in order.
   - `interface RepoCommit { hash: string; short: string; subject: string; author: string; at: string }`
   - `class DeployRepo` with `constructor(opts: { url: string; dir: string; keyPath?: string | null; now?: () => number })`, `fetch(force?: boolean): Promise<void>` (clone if missing, else fetch; throttled to once a minute unless forced), `commits(limit = 30): Promise<RepoCommit[]>` (branch `master`), `resolve(ref): Promise<string>` (full hash; throws on unknown), `parent(hash): Promise<string | null>`, `tree(hash): Promise<RepoFile[]>` (cached per hash), `blob(id): Promise<Buffer>`, `githubCommitUrl(hash): string | null`, `lastFetchAt(): number | null`
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```ts
 // tests/deployRepo.test.ts
@@ -209,9 +209,9 @@ describe('DeployRepo', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL.**
+- [x] **Step 2: Run, expect FAIL.**
 
-- [ ] **Step 3: Implement `src/deployRepo.ts`**
+- [x] **Step 3: Implement `src/deployRepo.ts`**
 
 ```ts
 import { execFile } from 'node:child_process';
@@ -308,8 +308,8 @@ export class DeployRepo {
 }
 ```
 
-- [ ] **Step 4: Run, expect PASS.** `npx vitest run tests/deployRepo.test.ts`
-- [ ] **Step 5: Commit** `git commit -m "releases: DeployRepo, the site's read-only clone of the deploy repo"`
+- [x] **Step 4: Run, expect PASS.** `npx vitest run tests/deployRepo.test.ts`
+- [x] **Step 5: Commit** `git commit -m "releases: DeployRepo, the site's read-only clone of the deploy repo"`
 
 ---
 
@@ -332,7 +332,7 @@ export class DeployRepo {
   - `cvarDiff(oldText: string, newText: string): string[]`
   - `suggestBalance(ops: Op[][], changedCvars: string[], knobs: { cvars: { cvar: string }[]; files: { path: string }[]; dirs: { path: string }[]; versionless: string[]; ignored?: string[] } | null): 'not_balance' | 'possibly_balance'`
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```ts
 // tests/releaseStage.test.ts
@@ -432,9 +432,9 @@ describe('wording', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL.**
+- [x] **Step 2: Run, expect FAIL.**
 
-- [ ] **Step 3: Implement `src/releaseStage.ts`**
+- [x] **Step 3: Implement `src/releaseStage.ts`**
 
 ```ts
 import type { RepoFile } from './deployRepo.js';
@@ -558,8 +558,8 @@ export function suggestBalance(ops: Op[][], changedCvars: string[], knobs: {
 
 (`suggestBalance` treats any non-plugin, non-watched file as not balance-relevant; a changed `.cfg` counts through `changedCvars` or `knobs.files`.)
 
-- [ ] **Step 4: Run, expect PASS.**
-- [ ] **Step 5: Commit** `git commit -m "releases: staging, per-box plans, wording and the balance suggestion"`
+- [x] **Step 4: Run, expect PASS.**
+- [x] **Step 5: Commit** `git commit -m "releases: staging, per-box plans, wording and the balance suggestion"`
 
 ---
 
@@ -575,7 +575,7 @@ export function suggestBalance(ops: Op[][], changedCvars: string[], knobs: {
   - `assertWritable(path)` (throws unless `isManaged(path)` and basename is not `secrets.cfg`)
   - `localTreeWriter(gameDir)`, `sftpTreeWriter(cfg & { runIn?: (cmd, args, input?: Buffer) => Promise<Buffer> })`, `ftpTreeWriter(cfg & { client?: () => FtpWriteClient })`, `treeWriterFor(server): TreeWriter | null`
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```ts
 // tests/fleetWrite.test.ts
@@ -664,9 +664,9 @@ describe('ftpTreeWriter', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL.**
+- [x] **Step 2: Run, expect FAIL.**
 
-- [ ] **Step 3: Implement `src/fleetWrite.ts`**
+- [x] **Step 3: Implement `src/fleetWrite.ts`**
 
 ```ts
 import { spawn } from 'node:child_process';
@@ -846,8 +846,8 @@ export function treeWriterFor(server: ServerRow): TreeWriter | null {
 
 
 
-- [ ] **Step 4: Run, expect PASS.**
-- [ ] **Step 5: Commit** `git commit -m "releases: tree writers for local, sftp and FTP boxes"`
+- [x] **Step 4: Run, expect PASS.**
+- [x] **Step 5: Commit** `git commit -m "releases: tree writers for local, sftp and FTP boxes"`
 
 ---
 
@@ -872,7 +872,7 @@ export function treeWriterFor(server: ServerRow): TreeWriter | null {
     - `expireBackups(nowMs?: number): number`
     - `start()`, `stop()`
 
-- [ ] **Step 1: Failing test** (fake writer over an in-memory map per server; fake restarter)
+- [x] **Step 1: Failing test** (fake writer over an in-memory map per server; fake restarter)
 
 ```ts
 // tests/releaseEngine.test.ts
@@ -1062,9 +1062,9 @@ describe('ReleaseEngine', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL.**
+- [x] **Step 2: Run, expect FAIL.**
 
-- [ ] **Step 3: Implement `src/releaseEngine.ts`**
+- [x] **Step 3: Implement `src/releaseEngine.ts`**
 
 ```ts
 import { createHash } from 'node:crypto';
@@ -1359,8 +1359,8 @@ export class ReleaseEngine {
 
 (The undo test's `expireBackups` expects 2: the deploy and the undo, both deployed "now", looked at 31 days later. The undo row then refuses with `backups expired`.)
 
-- [ ] **Step 4: Run, expect PASS.** Fix only what the tests show; keep the order of operations above.
-- [ ] **Step 5: Commit** `git commit -m "releases: the deploy engine (hold, backup, write, verify, restart, canary, undo)"`
+- [x] **Step 4: Run, expect PASS.** Fix only what the tests show; keep the order of operations above.
+- [x] **Step 5: Commit** `git commit -m "releases: the deploy engine (hold, backup, write, verify, restart, canary, undo)"`
 
 ---
 
@@ -1374,7 +1374,7 @@ export class ReleaseEngine {
 **Interfaces:**
 - Produces: `linkReleaseSighting(db, s: { serverId: number; patchId: number; previousPatchId: number | null }): void`; `recordBalanceSighting` result gains `previousPatchId: number | null` (the server's `balance_server_state.patch_id` before this sighting); `PatchSummary.releaseId: number | null`.
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```ts
 // tests/releaseBalance.test.ts
@@ -1431,9 +1431,9 @@ describe('linkReleaseSighting', () => {
 
 Add to `AdminPatches.test.tsx` (triage describe): a pending patch with `releaseId: 7` shows `/from release 7/`.
 
-- [ ] **Step 2: Run, expect FAIL.**
+- [x] **Step 2: Run, expect FAIL.**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/releaseBalance.ts`:
 
@@ -1480,8 +1480,8 @@ export function linkReleaseSighting(db: DB, s: { serverId: number; patchId: numb
 
 Web: `PatchSummary.releaseId?: number | null` in `api.ts`; `TriageCard` adds after the "Compared with" paragraph: `{patch.releaseId != null && <p class="muted">From release {patch.releaseId}.</p>}`.
 
-- [ ] **Step 4: Run** `npx vitest run tests/releaseBalance.test.ts tests/balance*.test.ts web/src/routes/admin/AdminPatches.test.tsx`, expect PASS.
-- [ ] **Step 5: Commit** `git commit -m "releases: apply a release's balance decision to the first new fingerprint"`
+- [x] **Step 4: Run** `npx vitest run tests/releaseBalance.test.ts tests/balance*.test.ts web/src/routes/admin/AdminPatches.test.tsx`, expect PASS.
+- [x] **Step 5: Commit** `git commit -m "releases: apply a release's balance decision to the first new fingerprint"`
 
 ---
 
@@ -1508,7 +1508,7 @@ Web: `PatchSummary.releaseId?: number | null` in `api.ts`; `TriageCard` adds aft
     - `POST /api/admin/releases/:id/continue` (audit `release_continue`)
     - `POST /api/admin/releases/:id/undo` `{ servers?: number[] }` → `{ id }` (audit `release_undo`)
 
-- [ ] **Step 1: Failing test** (local git fixture as the "GitHub" repo; fake writers; `devMode: false` config via `loadConfig({ DEV_MODE: '0' })` or the project's equivalent, checked in `tests/helpers.ts`)
+- [x] **Step 1: Failing test** (local git fixture as the "GitHub" repo; fake writers; `devMode: false` config via `loadConfig({ DEV_MODE: '0' })` or the project's equivalent, checked in `tests/helpers.ts`)
 
 ```ts
 // tests/releaseRoutes.test.ts
@@ -1607,9 +1607,9 @@ describe('release routes', () => {
 
 (`buildServer` exposes the engine for tests with `app.decorate('releaseEngine', engine)`; the cast above reads it. If the project's `loadConfig` has no way to turn dev mode off, the test overrides `devMode` on the returned config as shown.)
 
-- [ ] **Step 2: Run, expect FAIL.**
+- [x] **Step 2: Run, expect FAIL.**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/serverRestart.ts`:
 
@@ -1884,8 +1884,8 @@ export async function adminReleaseRoutes(app: FastifyInstance, o: ReleaseRouteOp
 - `app.decorate('releaseEngine', releaseEngine)`.
 - Register `adminReleaseRoutes` with `{ db, repo: deployRepo, service: new ReleaseService({ db, repo: deployRepo, knobs: panelKnobs }), engine: releaseEngine, devMode: deps.config.devMode }` after `panelKnobs` is loaded.
 
-- [ ] **Step 4: Run** `npx vitest run tests/releaseRoutes.test.ts && npx tsc --noEmit`, then the whole server suite, expect PASS.
-- [ ] **Step 5: Commit** `git commit -m "releases: routes, service and wiring"`
+- [x] **Step 4: Run** `npx vitest run tests/releaseRoutes.test.ts && npx tsc --noEmit`, then the whole server suite, expect PASS.
+- [x] **Step 5: Commit** `git commit -m "releases: routes, service and wiring"`
 
 ---
 
@@ -1898,7 +1898,7 @@ export async function adminReleaseRoutes(app: FastifyInstance, o: ReleaseRouteOp
 **Interfaces:**
 - Produces: `compareFleet(repo, base, boxes, opts?: { boxRefs?: Map<number, Map<string, FileSig>>; origins?: Map<number, Map<string, { releaseId: number; sha256: string }>> })`; `FleetCell.origin?: number | null`. A box with a box-layer entry for a path compares against it and that row is not exempted by `PER_BOX`.
 
-- [ ] **Step 1: Failing tests** (`tests/fleetCompare.test.ts`)
+- [x] **Step 1: Failing tests** (`tests/fleetCompare.test.ts`)
 
 ```ts
   it('a box layer is that box\'s reference and ends the per-box exemption; origins name the release', () => {
@@ -1913,16 +1913,16 @@ export async function adminReleaseRoutes(app: FastifyInstance, o: ReleaseRouteOp
   });
 ```
 
-- [ ] **Step 2: Run, expect FAIL.**
+- [x] **Step 2: Run, expect FAIL.**
 
-- [ ] **Step 3: Implement.** In `compareFleet`, add the `opts` parameter. Per path: `const boxRef = (id: number) => opts?.boxRefs?.get(id)?.get(path) ?? null;` `const anyBoxRef = boxes.some((b) => boxRef(b.serverId) !== null);` `perBox = PER_BOX.has(path) && !anyBoxRef`. For each box cell: `const cellRef = boxRef(b.serverId) ?? ref;` highlight uses `cellRef`; label is `'repo'` when `s` matches `cellRef` and `cellRef` came from `boxRef` or `r`; `origin = opts?.origins?.get(b.serverId)?.get(path)?.sha256 === s?.sha256 ? releaseId : null`.
+- [x] **Step 3: Implement.** In `compareFleet`, add the `opts` parameter. Per path: `const boxRef = (id: number) => opts?.boxRefs?.get(id)?.get(path) ?? null;` `const anyBoxRef = boxes.some((b) => boxRef(b.serverId) !== null);` `perBox = PER_BOX.has(path) && !anyBoxRef`. For each box cell: `const cellRef = boxRef(b.serverId) ?? ref;` highlight uses `cellRef`; label is `'repo'` when `s` matches `cellRef` and `cellRef` came from `boxRef` or `r`; `origin = opts?.origins?.get(b.serverId)?.get(path)?.sha256 === s?.sha256 ? releaseId : null`.
 
 In `routes/adminFleet.ts`, take optional `repo?: DeployRepo` and `service?: ReleaseService` in the opts. When both are present and the clone has been fetched: the reference commit is the newest `deploy` release in state `done`/`deploying`/`canary_wait`/`halted`, else `master`; `repo` manifest = the shared `overrides/` files at that commit (label = short hash, at = commit time); `boxRefs` = per enabled box, the box-layer files of `wantedFor(tree, deploySlug(name))` with `layer === 'box'`; `origins` = per box, `service.lastShipped(id)`. Otherwise fall back to `repo.json` as today. Register with the new opts in `server.ts`.
 
 Web: `FleetCellView.origin?: number | null`; `cellText` appends `, release ${c.origin}` when set.
 
-- [ ] **Step 4: Run** the fleet tests and the web test, expect PASS.
-- [ ] **Step 5: Commit** `git commit -m "fleet view: repo reference from the site's clone, box layers and release origins"`
+- [x] **Step 4: Run** the fleet tests and the web test, expect PASS.
+- [x] **Step 5: Commit** `git commit -m "fleet view: repo reference from the site's clone, box layers and release origins"`
 
 ---
 
@@ -1936,7 +1936,7 @@ Web: `FleetCellView.origin?: number | null`; `cellText` appends `, release ${c.o
 **Interfaces:**
 - Produces: `adminApi.releases(signal?)`, `adminApi.releasesRefresh()`, `adminApi.releaseStage(commit)`, `adminApi.release(id, signal?)`, `adminApi.releaseDeploy(id, body)`, `adminApi.releaseContinue(id)`, `adminApi.releaseUndo(id, servers?)`; types `ReleaseOverview`, `ReleaseSummaryView`, `ReleaseReviewView`.
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```tsx
 // web/src/routes/admin/AdminDeploy.test.tsx
@@ -2018,9 +2018,9 @@ describe('AdminDeploy', () => {
 });
 ```
 
-- [ ] **Step 2: Run, expect FAIL.**
+- [x] **Step 2: Run, expect FAIL.**
 
-- [ ] **Step 3: Implement.** Types in `api.ts` mirroring `ReleaseSummary`/`ReleaseReview` and the overview; calls:
+- [x] **Step 3: Implement.** Types in `api.ts` mirroring `ReleaseSummary`/`ReleaseReview` and the overview; calls:
 
 ```ts
   releases: (signal?: AbortSignal) => get<ReleaseOverview>('/api/admin/releases', signal),
@@ -2179,15 +2179,17 @@ function HistoryRow({ r, busy, run }: { r: ReleaseSummaryView; busy: boolean; ru
 .deploy-history { border-top: 1px solid var(--border); padding-top: var(--sp-2); margin-top: var(--sp-2); }
 ```
 
-- [ ] **Step 4: Run** `npx vitest run web/src && npm run typecheck`, expect PASS.
-- [ ] **Step 5: Commit** `git commit -m "releases: Admin > Setup > Deploy page"`
+- [x] **Step 4: Run** `npx vitest run web/src && npm run typecheck`, expect PASS.
+- [x] **Step 5: Commit** `git commit -m "releases: Admin > Setup > Deploy page"`
 
 ---
 
 ### Task 10: Full suite, then go-live steps (owner go-ahead for each)
 
-- [ ] **Step 1:** `npx vitest run && npm run typecheck`, all green. Commit any fixes.
-- [ ] **Step 2 (local, no server touched):** point a local site at a scratch copy of the production database, `DEPLOY_REPO_URL=/home/volence/l4d/deploy`, dev mode on; stage `master` and check the review renders (deploy is refused in dev mode by design).
+- [x] **Step 1:** `npx vitest run && npm run typecheck`, all green. Commit any fixes.
+- [x] **Step 2 (local, no server touched):** point a local site at a scratch copy of the production database, `DEPLOY_REPO_URL=/home/volence/l4d/deploy`, dev mode on; stage `master` and check the review renders (deploy is refused in dev mode by design).
+
+**Local dry run (2026-09-24):** staging `96e0265` against the production snapshot and the real readings showed Chicago and both Riverside boxes would get Dallas's `local.cfg` and `server_hostname.txt` (the per-box trap; the review now says so explicitly), and `mymotd.txt` as added everywhere (readings predate it becoming managed; a fresh Check all fixes that). So the seeding commit below must land, and a fresh reading be taken, before the first deploy. The seeding is deliberately **not** done yet: moving `local.cfg` out of `overrides/` would change what today's `deploy.sh` sends to Dallas while the site cannot deploy yet.
 
 **Go-live runbook (owner, after the branch is deployed):**
 1. Deploy key: `ssh-keygen -t ed25519 -f /home/pug/.ssh/id_deploy_repo -N ''` on Dallas as `pug`; add the public key to `Volence/l4d-deploy` as a read-only deploy key; set `DEPLOY_REPO_KEY=/home/pug/.ssh/id_deploy_repo` in `/home/pug/app/.env`; restart the site.
