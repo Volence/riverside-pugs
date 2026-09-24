@@ -85,10 +85,10 @@ describe('the teammate card registry', () => {
     expect(splatter.role).toBe('decor');
   });
 
-  it('offers the splatter Opacity only, its art being flat black, and says so in a note', () => {
+  it('offers the splatter Opacity only, and its note sends the art itself to the Splatter panel', () => {
     const splatter = TEAM_PANEL.children.find((c) => c.name === 'BackgroundImage')!;
     expect(splatter.opacityOnly).toBe(true);
-    expect(splatter.note).toMatch(/black/);
+    expect(splatter.note).toMatch(/under Splatter/);
     // Nothing else claims opacityOnly: it means nothing without colour, and no other art is flat.
     for (const def of TEAM_PANEL.children) if (def.name !== 'BackgroundImage') expect(def.opacityOnly, def.name).toBeFalsy();
   });

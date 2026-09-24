@@ -14,14 +14,14 @@ import {
 import { screenW, SCREEN_H } from '../hud/units';
 import { elementById } from '../hud/elements';
 import {
-  elementRect, teamLayout, teamCardRects, cardFrame, isFreeTeam, packHud, importedHasXhair,
+  elementRect, teamLayout, teamCardRects, cardFrame, isFreeTeam, packHud, importedHasXhair, splatterProblem,
   type BuildAssets, type BuildReport, type CardChild,
 } from '../hud/build';
 import { drawHud, visibleElements, type Side } from '../hud/mock';
 import type { CardState } from '../hud/render';
 import type { WeaponHeld } from '../hud/weapons';
 import { SLOTS, type StyleSlot } from '../hud/slots';
-import { splatterDef } from '../hud/splatter';
+import { splatterDef, SPLATTERS, type SplatterDef } from '../hud/splatter';
 import { registerImport, unregisterImport, hasImport, importedFiles, baseOf } from '../hud/base';
 import { readHudUpload, hudId } from '../hud/upload';
 import { importProblem } from '../hud/importCheck';
@@ -33,6 +33,7 @@ import {
   moveElements, moveCards, cardStarts, freeInPlace, moveChildren, startsOf, nudgeSelection,
   resizeBox, resizeElement, scaleElement, resizeChild, scaleChildren, cornerFactor, anchorOf,
   setSelectionVisible, patchChild, hideSelection, resetSelection,
+  patchSplatter, withSplatterImage, resetSplatter,
 } from '../hud/edit';
 import { snapMove, snapEdges, unionBox, type Guide, type Snap, type Handle } from '../hud/guides';
 import {
@@ -45,6 +46,7 @@ import { ContextMenu } from './hud/ContextMenu';
 import { ContextPanel } from './hud/ContextPanel';
 import { CrosshairBuilderPanel } from './hud/CrosshairControls';
 import { LayersPanel } from './hud/LayersPanel';
+import { SplatterRow } from './hud/SplatterControls';
 import { Toolbar, type PresetChoice } from './hud/Toolbar';
 import { endsOn, typedInto, hexOf, alphaPct, withHex, withAlphaPct, type Edit, type EditMode } from './hud/controls';
 import regularUrl from '../hud/base/fonts/RobotoCondensed-Regular.ttf?url';
@@ -245,6 +247,8 @@ const MENU_LABELS: Record<MenuAction, string> = {
 };
 /** Said on the status line when moving a card takes a Row or Column team into Free. */
 const WENT_FREE = 'Teammates switched to Free layout';
+/** Said on the status line when localStorage refuses the design, most often over its quota with uploads in it. */
+const TOO_BIG = 'This design is too big for this browser to keep. Remove an uploaded image, or use Export to save it as a file.';
 /** Said on the status line when the Crosshair page's button brings its crosshair in. */
 const FROM_PAGE = 'Your crosshair from the Crosshair page is in this HUD now, and goes into its download.';
 /** Said on the status line when a stored 'bundle' choice loses its crosshair, below. */
@@ -536,8 +540,13 @@ export default function Hud() {
   // Resetting this timer on each change coalesces a burst (a drag, a
   // held-down arrow key, a slider) into one write once motion settles,
   // while a single change still lands within 300ms either way.
+  // A refused save (over quota, most often from uploaded images) is said on
+  // the status line, and the sentence goes once a later save succeeds.
   useEffect(() => {
-    const t = setTimeout(() => saveDesign(design), 300);
+    const t = setTimeout(() => {
+      const ok = saveDesign(design);
+      setStatus((m) => (ok ? (m === TOO_BIG ? '' : m) : TOO_BIG));
+    }, 300);
     return () => clearTimeout(t);
   }, [design]);
 
@@ -1002,6 +1011,20 @@ export default function Hud() {
     }
   };
 
+  // As onSlotUpload: drawn at the splatter's texture size, errors kept per row.
+  const onSplatterUpload = async (def: SplatterDef, file: File) => {
+    try {
+      const { png } = await decodeUpload(file, def.size.w, def.size.h);
+      setUploadErrors((u) => {
+        if (!(def.id in u)) return u;
+        const n = { ...u }; delete n[def.id]; return n;
+      });
+      edit((d) => withSplatterImage(d, def.id, png));
+    } catch (err) {
+      setUploadErrors((u) => ({ ...u, [def.id]: (err as Error).message }));
+    }
+  };
+
   const pickShot = (e: Event) => {
     const f = (e.target as HTMLInputElement).files?.[0];
     if (!f) return;
@@ -1223,6 +1246,25 @@ export default function Hud() {
             key={slot.id} slot={slot} style={design.styles[slot.id]} error={uploadErrors[slot.id]}
             onChange={(p, mode) => patchStyle(slot.id, p, mode)} onEnd={endGesture}
             onUpload={(f) => { void onSlotUpload(slot, f); }}
+          />
+        ))}
+        </fieldset>
+      </Panel>
+
+      <Panel>
+        <h3>Splatter</h3>
+        <p class="muted hud__note">
+          Splatter art is flat in the game's files: pick None, a Fade, or your own picture. Your own picture shows on
+          all four teammate cards, and also while a teammate is down or dead.
+        </p>
+        <fieldset class="hud__fieldset" disabled={locked}>
+        {SPLATTERS.map((def) => (
+          <SplatterRow
+            key={def.id} def={def} design={design} imported={design.preset === 'imported'}
+            problem={locked ? null : splatterProblem(design, def.id)} error={uploadErrors[def.id]}
+            onChange={(p, mode) => edit((d) => patchSplatter(d, def.id, p), mode)} onEnd={endGesture}
+            onUpload={(f) => { void onSplatterUpload(def, f); }}
+            onReset={() => edit((d) => resetSplatter(d, def.id))}
           />
         ))}
         </fieldset>

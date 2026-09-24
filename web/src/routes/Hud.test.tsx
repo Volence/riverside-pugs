@@ -142,15 +142,15 @@ describe('Hud page', () => {
     expect(screen.getByLabelText('Name colour')).toBeTruthy();
   });
 
-  it('offers the splatter Opacity alone, no colour swatch, with a note why, and X, Y, W and H', () => {
+  it('offers the splatter Opacity alone, no colour swatch, with a note pointing to the Splatter panel, and X, Y, W and H', () => {
     render(<Hud />);
     fireEvent.click(screen.getByRole('button', { name: 'Damage splatter' }));
     // The splatter art is pure black: an RGB tint would draw no visible difference, so there is no swatch.
     expect(screen.getByLabelText('Damage splatter opacity')).toBeTruthy();
     expect(screen.queryByLabelText('Damage splatter tint')).toBeNull();
     expect(screen.queryByLabelText('Damage splatter colour')).toBeNull();
-    expect(screen.getByText(/splatter art is black/)).toBeTruthy();
-    expect(screen.getByText(/Styles, Survivor panel background/)).toBeTruthy();
+    expect(screen.getByText(/Opacity fades whatever art the splatter shows/)).toBeTruthy();
+    expect(screen.getByText(/Change the art itself under Splatter/)).toBeTruthy();
     expect(screen.getByLabelText('X')).toBeTruthy();
     expect(screen.getByLabelText('Y')).toBeTruthy();
     expect(screen.getByLabelText('W')).toBeTruthy();
@@ -1860,5 +1860,90 @@ describe('Importing a HUD', () => {
       fireEvent.change(preset(), { target: { value: `imported:${id}` } });
       await unlocked();
     });
+  });
+});
+
+describe('Splatter', () => {
+  const stored = () => JSON.parse(localStorage.getItem('hud') ?? '{}');
+  const row = (label: string) => within(screen.getByRole('group', { name: label }));
+  const kindOf = (label: string) => screen.getByRole('combobox', { name: `${label} style` }) as HTMLSelectElement;
+  const TEAM = 'Teammate card splatter';
+  const TOP = 'Your health: top scratches';
+  const BOTTOM = 'Your health: bottom scratches';
+
+  it('shows three rows by label, each offering Stock, None, Fade and Image', () => {
+    render(<Hud />);
+    expect(screen.getByRole('heading', { name: 'Splatter' })).toBeTruthy();
+    for (const label of [TEAM, TOP, BOTTOM]) {
+      expect([...kindOf(label).options].map((o) => o.textContent), label).toEqual(['Stock', 'None', 'Fade', 'Image']);
+    }
+  });
+
+  it("saves a Fade, and saves the teammate splatter's None as the child's hide", async () => {
+    render(<Hud />);
+    fireEvent.change(kindOf(TEAM), { target: { value: 'fade' } });
+    await waitFor(() => expect(stored().splatters?.splatTeam?.kind).toBe('fade'));
+    fireEvent.change(kindOf(TEAM), { target: { value: 'none' } });
+    await waitFor(() => expect(stored().children?.teamColumn?.BackgroundImage?.visible).toBe(false));
+    expect(stored().splatters?.splatTeam?.kind).not.toBe('none');
+    expect(kindOf(TEAM).value).toBe('none');
+  });
+
+  it('Reset to stock after a Fade removes the splatters', async () => {
+    render(<Hud />);
+    const reset = () => row(TOP).getByRole('button', { name: 'Reset to stock' }) as HTMLButtonElement;
+    expect(reset().disabled).toBe(true);
+    fireEvent.change(kindOf(TOP), { target: { value: 'fade' } });
+    await waitFor(() => expect(stored().splatters?.splatTop?.kind).toBe('fade'));
+    expect(reset().disabled).toBe(false);
+    fireEvent.click(reset());
+    await waitFor(() => expect(stored().splatters).toBeUndefined());
+    expect(kindOf(TOP).value).toBe('stock');
+  });
+
+  it('disables the scratch rows on Modern and says why, and leaves the teammate row enabled', async () => {
+    render(<Hud />);
+    fireEvent.change(screen.getByRole('combobox', { name: /preset/i }), { target: { value: 'modern' } });
+    await waitFor(() => expect(kindOf(TOP).disabled).toBe(true));
+    expect(kindOf(BOTTOM).disabled).toBe(true);
+    expect(row(TOP).getByText('This preset hides the scratches.')).toBeTruthy();
+    expect(kindOf(TEAM).disabled).toBe(false);
+  });
+
+  it('offers Colour by health on a scratch Fade only, and unticking it keeps the colours', async () => {
+    render(<Hud />);
+    fireEvent.change(kindOf(TEAM), { target: { value: 'fade' } });
+    expect(row(TEAM).queryByLabelText('Colour by health')).toBeNull();
+    expect(row(TOP).queryByLabelText('Colour by health')).toBeNull();
+    fireEvent.change(kindOf(TOP), { target: { value: 'fade' } });
+    const box = row(TOP).getByLabelText('Colour by health') as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    fireEvent.click(box);
+    await waitFor(() => expect(stored().splatters?.splatTop?.keepColours).toBe(true));
+  });
+
+  it('draws the tint strip for a scratch Fade: Healthy, Hurt and Critical', () => {
+    render(<Hud />);
+    fireEvent.change(kindOf(TOP), { target: { value: 'fade' } });
+    for (const name of ['Healthy', 'Hurt', 'Critical']) {
+      expect(row(TOP).getByRole('img', { name }).tagName).toBe('CANVAS');
+    }
+  });
+
+  it('says so when the design is too big for this browser to keep', async () => {
+    render(<Hud />);
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError'); });
+    fireEvent.change(kindOf(TOP), { target: { value: 'fade' } });
+    await waitFor(() => expect(screen.getByText(
+      'This design is too big for this browser to keep. Remove an uploaded image, or use Export to save it as a file.',
+    )).toBeTruthy());
+  });
+
+  it('Undo after choosing Fade brings the row back to Stock', () => {
+    render(<Hud />);
+    fireEvent.change(kindOf(BOTTOM), { target: { value: 'fade' } });
+    expect(kindOf(BOTTOM).value).toBe('fade');
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(kindOf(BOTTOM).value).toBe('stock');
   });
 });
