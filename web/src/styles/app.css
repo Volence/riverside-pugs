@@ -236,8 +236,20 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
  * another; a hidden row is struck through, as the old pills were. */
 .hud__layers .eyebrow { margin-bottom: var(--sp-2); }
 .hud__layer { display: flex; align-items: center; gap: var(--sp-1); padding: 1px var(--sp-1); }
-.hud__layer--d1 { padding-left: var(--sp-4); }
-.hud__layer--d2 { padding-left: calc(var(--sp-4) * 2); }
+.hud__layer--d1 { padding-left: calc(var(--sp-4) + 12px); }
+.hud__layer--d2 { padding-left: calc(var(--sp-4) * 2 + 12px); }
+/* The fold arrow before a top row; a row with no pieces keeps the same space so the names line up. */
+.hud__fold {
+  flex: 0 0 12px; width: 12px; height: 12px; display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: 0; padding: 0; color: var(--text-muted); cursor: pointer;
+}
+.hud__fold svg { transition: transform .12s; }
+.hud__fold.is-open svg { transform: rotate(90deg); }
+.hud__layer.is-active .hud__fold { color: #fff; }
+/* The list keeps to the screen: it stays in view beside the canvas and scrolls on its own. */
+@media (min-width: 1201px) {
+  .hud__layerpanel { position: sticky; top: var(--sp-3); align-self: start; max-height: calc(100vh - 2 * var(--sp-3)); overflow-y: auto; }
+}
 .hud__layergroup + .hud__layergroup { margin-top: var(--sp-3); }
 .hud__layergroup-title {
   margin: 0 0 var(--sp-1); padding: 0 var(--sp-1) 2px; border-bottom: 1px solid var(--border);

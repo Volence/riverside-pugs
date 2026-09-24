@@ -6,6 +6,7 @@ import { _setProbe } from '../hud/probes';
 import { panelChild, elementRect } from '../hud/build';
 import { toUnits } from './Hud';
 import Hud from './Hud';
+import { _setFoldDefault } from './hud/LayersPanel';
 import { readFileSync } from 'node:fs';
 import { crosshairFiles } from '../crosshair/vpk';
 import { TEX, PX_AT_1080 } from '../crosshair/draw';
@@ -39,6 +40,8 @@ beforeEach(() => {
   // from one test must not change what the next one sees.
   localStorage.clear();
   location.hash = '';
+  // Most tests reach a piece in Layers directly; the folding tests turn this off.
+  _setFoldDefault(true);
 });
 afterEach(() => {
   cleanup();
@@ -1362,6 +1365,24 @@ describe('Hud page', () => {
       ['hud__layer--d0', 'Chat'], ['hud__layer--d0', 'Kill / incap notices'], ['hud__layer--d0', 'Vote'], ['hud__layer--d0', 'Voice list'],
       ['hud__layer--d0', 'Survival timer'], ['hud__layer--d0', 'Finale meter'],
     ]);
+  });
+
+  it('folds each element\'s pieces away until opened, and opens the one being edited on its own', () => {
+    _setFoldDefault(false);
+    render(<Hud />);
+    expect(layer('Teammates').queryByRole('button', { name: 'Card 1' })).toBeNull();
+    expect(layer('Your health').queryByRole('button', { name: 'Portrait' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Unfold Chat' })).toBeNull();          // no pieces, no arrow
+    fireEvent.click(screen.getByRole('button', { name: 'Unfold Teammates' }));
+    expect(layer('Teammates').getByRole('button', { name: 'Card 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Fold Teammates' }).getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Fold Teammates' }));
+    expect(layer('Teammates').queryByRole('button', { name: 'Card 1' })).toBeNull();
+    // Selecting an element opens it; its arrow still folds it.
+    fireEvent.click(layer('Your health').getByRole('button', { name: 'Your health' }));
+    expect(layer('Your health').getByRole('button', { name: 'Portrait' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Fold Your health' }));
+    expect(layer('Your health').queryByRole('button', { name: 'Portrait' })).toBeNull();
   });
 
   it('edits a piece of your own health from Layers, offering none of the controls its probes have not proven', () => {
