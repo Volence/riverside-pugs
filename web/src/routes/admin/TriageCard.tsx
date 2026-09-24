@@ -20,10 +20,11 @@ export function TriageCard({ patch, targets, run, busy }: {
   const [name, setName] = useState('');
   const [notes, setNotes] = useState('');
   const base = patch.triageBase ?? null;
-  const [into, setInto] = useState<number | null>(base?.id ?? targets[0]?.id ?? null);
+  // Only a balance patch can be folded into; the server picks the base from those.
+  const [into, setInto] = useState<number | null>(
+    base && targets.some((t) => t.id === base.id) ? base.id : targets[0]?.id ?? null);
   const changes = patch.changes ?? [];
-  // The base may be pending or historical and so not among the targets; keep it choosable.
-  const options = base && !targets.some((t) => t.id === base.id) ? [base, ...targets] : targets;
+  const options = targets;
   return (
     <Panel>
       <h3>Needs triage: {label(patch)}</h3>

@@ -804,8 +804,6 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   endorse_title_min_games: '10',
 };
 
-/** A match whose roster came from the site was made by the queue; anything
- *  else was started in game. Idempotent: only fills NULLs. */
 /** Patch triage backfill (sub-project 1 of the balance catalogue roadmap).
  *  Historical, announced and named detected patches are balance; an unnamed
  *  detected patch that still holds a fingerprint is pending. A merged
@@ -822,6 +820,8 @@ export const TRIAGE_BACKFILL_SQL = [
   'UPDATE match_rounds SET sighted_patch_id = patch_id WHERE sighted_patch_id IS NULL AND patch_id IS NOT NULL',
 ];
 
+/** A match whose roster came from the site was made by the queue; anything
+ *  else was started in game. Idempotent: only fills NULLs. */
 export const ORIGIN_BACKFILL_SQL = `UPDATE matches SET origin = CASE
     WHEN EXISTS (SELECT 1 FROM match_players mp WHERE mp.match_id = matches.id AND mp.source = 'web')
     THEN 'queue' ELSE 'in_game' END

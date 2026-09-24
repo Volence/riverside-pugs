@@ -27,6 +27,18 @@ export function AdminPatches() {
   const triageOf = (p: PatchSummary) => p.triage ?? 'balance';
   const pending = list.filter((p) => triageOf(p) === 'pending');
   const balanceNewestFirst = [...list].reverse().filter((p) => triageOf(p) === 'balance');
+  // A patch folded into one that was folded later still belongs under the
+  // end of that chain; the server stores only the first step.
+  const byId = new Map(list.map((p) => [p.id, p]));
+  const foldEnd = (p: PatchSummary): number => {
+    let cur = p;
+    for (let i = 0; i < list.length && triageOf(cur) === 'folded' && cur.foldedInto != null; i++) {
+      const next = byId.get(cur.foldedInto);
+      if (!next) break;
+      cur = next;
+    }
+    return cur.id;
+  };
   // "plugin added: x" reads "plugin added x" inside the one-line collapse.
   const foldedLine = (f: PatchSummary) => (f.changes ?? []).map((c) => c.replace(': ', ' ')).join(', ') || `patch ${f.number}`;
   const [name, setName] = useState('');
@@ -62,7 +74,7 @@ export function AdminPatches() {
               <tbody>
                 {/* Newest first: the patch that matters is the latest one. */}
                 {[...list].reverse().filter((p) => triageOf(p) !== 'folded').flatMap((p) => {
-                  const folded = list.filter((f) => triageOf(f) === 'folded' && f.foldedInto === p.id);
+                  const folded = list.filter((f) => triageOf(f) === 'folded' && foldEnd(f) === p.id);
                   const main = (
                   <tr key={p.id} class={!p.reviewed && p.source === 'detected' ? 'admin-warn' : ''}>
                     <td>{p.number}</td>
