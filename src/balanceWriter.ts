@@ -34,6 +34,12 @@ export interface WriteOutcome { serverId: number; server: string; ok: boolean; s
 export class BalanceRolloutWriter {
   private chain: Promise<unknown> = Promise.resolve();
   private timer: ReturnType<typeof setInterval> | null = null;
+  /** A transport call that outlives its timeout keeps running against the
+   *  box (an FTP rename cannot be cancelled from here); this tracks it by
+   *  server id until it actually settles, so a second write is never started
+   *  against the same box while the first might still land, and the temp
+   *  file it reads from is only removed once it is done with it. */
+  private inFlight = new Map<number, Promise<void>>();
 
   constructor(private deps: {
     db: DB;
@@ -63,15 +69,36 @@ export class BalanceRolloutWriter {
     }, []);
   }
 
-  /** Never rejects: the release path must free the box whatever happens here. */
+  /** Never rejects: the release path must free the box whatever happens here.
+   *
+   *  Resolves after at most 2x timeoutMs even if its queued turn has not
+   *  come up yet: waiting behind a chain of slow writes would stall the
+   *  after-match restart, which is what this runs in front of. If the cap
+   *  fires first, the queued work still runs later (freeing the chain for
+   *  whatever comes after), but from then on it behaves like an ordinary
+   *  sweep for this one server: it writes only if the box is still enabled
+   *  and idle, never regardless of status, because by then the release this
+   *  call was for has already moved on without it. */
   async writeForRelease(serverId: number): Promise<void> {
-    await this.queue(async () => {
+    const capMs = (this.deps.timeoutMs ?? TIMEOUT_MS) * 2;
+    let capExpired = false;
+    let capTimer!: ReturnType<typeof setTimeout>;
+    const cap = new Promise<void>((resolve) => {
+      capTimer = setTimeout(() => { capExpired = true; resolve(); }, capMs);
+      capTimer.unref();
+    });
+    const queued = this.queue(async () => {
+      if (this.inFlight.has(serverId)) return;
       const ro = activeRollout(this.deps.db);
       const server = getServer(this.deps.db, serverId);
       if (!ro || !server || server.enabled !== 1) return;
       ensureServerRows(this.deps.db, ro.id);
-      if (this.needsWrite(ro.id, serverId)) await this.writeOne(server, ro);
+      if (!this.needsWrite(ro.id, serverId)) return;
+      if (capExpired && server.status !== 'idle') return;
+      await this.writeOne(server, ro);
     }, undefined);
+    await Promise.race([queued, cap]);
+    clearTimeout(capTimer);
   }
 
   start(): void {
@@ -98,8 +125,19 @@ export class BalanceRolloutWriter {
     const out: WriteOutcome[] = [];
     for (const s of listServers(this.deps.db).filter((x) => x.enabled === 1)) {
       if (!this.needsWrite(ro.id, s.id)) continue;
-      if (s.status !== 'idle') { out.push({ serverId: s.id, server: s.name, ok: false, skipped: 'busy' }); continue; }
-      out.push(await this.writeOne(s, ro));
+      if (this.inFlight.has(s.id)) {
+        out.push({ serverId: s.id, server: s.name, ok: false, skipped: 'previous write still running' });
+        continue;
+      }
+      // Re-read right before writing, not once at the top of the loop: a
+      // pass can take up to a minute per server, and a box already in this
+      // same pass can go live in the meantime.
+      const fresh = getServer(this.deps.db, s.id);
+      if (!fresh || fresh.enabled !== 1 || fresh.status !== 'idle') {
+        out.push({ serverId: s.id, server: s.name, ok: false, skipped: 'busy' });
+        continue;
+      }
+      out.push(await this.writeOne(fresh, ro));
     }
     return out;
   }
@@ -117,27 +155,53 @@ export class BalanceRolloutWriter {
   }
 
   private async writeOne(server: ServerRow, ro: RolloutRow): Promise<WriteOutcome> {
-    const base = { serverId: server.id, server: server.name };
     const t = this.transportOf(server);
-    if (!t) return this.fail(server, ro, 'no addons transport configured');
-    const dir = await mkdtemp(join(tmpdir(), 'pug-balance-'));
+    if (!t) return this.failIfStillActive(server, ro, 'no addons transport configured');
+
+    let dir: string;
     try {
-      const local = join(dir, BALANCE_CFG);
+      dir = await mkdtemp(join(tmpdir(), 'pug-balance-'));
+    } catch (err) {
+      return this.failIfStillActive(server, ro, err instanceof Error ? err.message : String(err));
+    }
+
+    const local = join(dir, BALANCE_CFG);
+    // The real operation, tracked separately from the timeout below: bounded()
+    // only stops this call from waiting on it, it does not cancel it. Without
+    // this, a write that times out but eventually lands could rename its
+    // (now stale) bytes over a box a later, faster write had already
+    // verified, leaving a false "written".
+    const op = (async () => {
       await writeFile(local, ro.content, 'utf8');
-      const back = await this.bounded((async () => {
-        await t.put(local, BALANCE_CFG);
-        return t.readText(BALANCE_CFG);
-      })());
-      if (back !== ro.content) return this.fail(server, ro, 'read-back differs from what was written');
+      await t.put(local, BALANCE_CFG);
+      return t.readText(BALANCE_CFG);
+    })();
+    const settled = op.then(() => undefined, () => undefined).finally(() => {
+      this.inFlight.delete(server.id);
+      void rm(dir, { recursive: true, force: true }).catch(() => {});
+    });
+    this.inFlight.set(server.id, settled);
+
+    const base = { serverId: server.id, server: server.name };
+    try {
+      const back = await this.bounded(op);
+      if (back !== ro.content) return this.failIfStillActive(server, ro, 'read-back differs from what was written');
       // A newer apply may have landed while this one was in flight; its own
       // pass writes the new content, so only the still-active rollout is marked.
       if (activeRollout(this.deps.db)?.id === ro.id) markWritten(this.deps.db, ro.id, server.id);
       return { ...base, ok: true };
     } catch (err) {
-      return this.fail(server, ro, err instanceof Error ? err.message : String(err));
-    } finally {
-      await rm(dir, { recursive: true, force: true }).catch(() => {});
+      return this.failIfStillActive(server, ro, err instanceof Error ? err.message : String(err));
     }
+  }
+
+  /** A rollout superseded while a write to it was in flight is no longer
+   *  this writer's business: the new rollout's own pass writes the box, and
+   *  marking the old rollout's row failed would alert on a version nobody is
+   *  being asked for any more. */
+  private failIfStillActive(server: ServerRow, ro: RolloutRow, error: string): WriteOutcome {
+    if (activeRollout(this.deps.db)?.id !== ro.id) return { serverId: server.id, server: server.name, ok: false, error };
+    return this.fail(server, ro, error);
   }
 
   private fail(server: ServerRow, ro: RolloutRow, error: string): WriteOutcome {
