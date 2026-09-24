@@ -1,6 +1,11 @@
 import type { DB } from './db.js';
 import { withoutIgnored } from './balancePatches.js';
 import type { BalanceKnobs } from './balanceKnobs.js';
+import { compareSides } from './metrics/compare/compare.js';
+import { memo, parseSideParams } from './metrics/compare/cache.js';
+import type { CompareResult } from './metrics/compare/types.js';
+import { PUBLIC_METRICS } from './metrics/registry.js';
+import type { Verdict } from './metrics/compare/stats.js';
 
 export interface PublicPatch {
   id: number; number: number; name: string; notes: string;
@@ -112,4 +117,93 @@ export function publicChanges(prevRaw: Record<string, string>, curRaw: Record<st
   out.knobs.sort((x, y) => byLabel(x.label, y.label));
   for (const l of [out.pluginsAdded, out.pluginsRemoved, out.pluginsUpdated, out.files]) l.sort(byLabel);
   return out;
+}
+
+export interface PublicRow {
+  metric: string; group: string; label: string;
+  a: number | null; b: number | null; diff: number | null; rel: number | null; lo: number | null; hi: number | null;
+  verdict: Verdict; moreMatches: number | null; nA: number; nB: number; noSharedMaps: boolean;
+}
+
+export interface PublicEntry extends PublicPatch {
+  /** The baseline: nearest earlier published patch with counted rounds. */
+  previous: { id: number; name: string } | null;
+  status: 'compared' | 'first' | 'no_rounds';
+  changes: PublicChanges | null;
+  /** Why `changes` is null: this patch is historical, the baseline has no recorded
+   *  inputs, or there is no baseline. */
+  changesUnavailable: 'historical' | 'previous_unrecorded' | 'first' | null;
+  effect: {
+    a: { matches: number; rounds: number }; b: { matches: number; rounds: number };
+    skill: 'differs' | 'unavailable' | null; approximate: boolean; rows: PublicRow[];
+  } | null;
+}
+
+const ORDER: Verdict[] = ['real', 'too_early', 'noise', 'no_data'];
+
+/** The admin compare route's exact cache key and query for "A vs B", so the
+ *  public page and the admin default view share one computation. */
+export function adminDefaultCompare(db: DB, a: number, b: number): CompareResult {
+  const sides = parseSideParams({ a: String(a), b: String(b) });
+  if (typeof sides === 'string') throw new Error(sides);
+  // Must stay byte-identical to the key in routes/admin.ts '/api/admin/balance/compare'
+  // for phases=all, so both pages read one cached result.
+  const key = `compare|${JSON.stringify(sides)}|all`;
+  return memo(db, key, () => {
+    const result = compareSides(db, sides.a, sides.b, { phases: 'all' });
+    if (result.ms > 2000) console.warn(`[balance] compare took ${result.ms} ms for ${key}`);
+    return result;
+  });
+}
+
+/** Null for an unknown id, or an unpublished one unless `preview` (the admin
+ *  preview treats the patch as published). */
+export function publicEntry(db: DB, id: number, opts: { knobs: KnobLabels | null; preview?: boolean }): PublicEntry | null {
+  const all = patchTimeline(db);
+  const self = all.find((p) => p.id === id);
+  if (!self || (self.publishedAt === null && !opts.preview)) return null;
+  const line = all.filter((p) => p.publishedAt !== null || p.id === id);
+  const idx = line.findIndex((p) => p.id === id);
+  const base = line.slice(0, idx).reverse().find((p) => p.rounds > 0) ?? null;
+
+  const inputsOf = (pid: number) => {
+    const r = db.prepare('SELECT inputs_json FROM balance_patches WHERE id = ?').get(pid) as { inputs_json: string | null };
+    try { return r.inputs_json ? (JSON.parse(r.inputs_json) as Record<string, string>) : null; } catch { return null; }
+  };
+  let changes: PublicChanges | null = null;
+  let changesUnavailable: PublicEntry['changesUnavailable'] = null;
+  if (self.source === 'historical' || !self.hasInputs) changesUnavailable = base ? 'historical' : 'first';
+  else if (!base) changesUnavailable = 'first';
+  else {
+    const prev = inputsOf(base.id), cur = inputsOf(id);
+    if (!prev || !cur) changesUnavailable = 'previous_unrecorded';
+    else changes = publicChanges(prev, cur, opts.knobs);
+  }
+
+  let status: PublicEntry['status'] = 'compared';
+  let effect: PublicEntry['effect'] = null;
+  if (self.rounds === 0) status = 'no_rounds';
+  else if (!base) status = 'first';
+  else {
+    const r = adminDefaultCompare(db, base.id, id);
+    const byId = new Map(r.rows.filter((x) => x.phase === 'all').map((x) => [x.metric, x]));
+    const rows: PublicRow[] = PUBLIC_METRICS.map((m) => {
+      const x = byId.get(m.id);
+      return x
+        ? { metric: m.id, group: m.group, label: m.public!.label, a: x.a, b: x.b, diff: x.diff, rel: x.rel, lo: x.lo, hi: x.hi,
+            verdict: x.verdict, moreMatches: x.moreMatches, nA: x.nA, nB: x.nB, noSharedMaps: x.noSharedMaps }
+        : { metric: m.id, group: m.group, label: m.public!.label, a: null, b: null, diff: null, rel: null, lo: null, hi: null,
+            verdict: 'no_data' as const, moreMatches: null, nA: 0, nB: 0, noSharedMaps: false };
+    });
+    // Admin order within a verdict (largest change first), missing metrics last.
+    const pos = new Map(r.rows.map((x, i) => [x.metric, i]));
+    rows.sort((x, y) => ORDER.indexOf(x.verdict) - ORDER.indexOf(y.verdict) || (pos.get(x.metric) ?? 1e9) - (pos.get(y.metric) ?? 1e9));
+    const oneMissing = (r.a.meanMu === null) !== (r.b.meanMu === null);
+    effect = {
+      a: { matches: r.a.matches, rounds: r.a.rounds }, b: { matches: r.b.matches, rounds: r.b.rounds },
+      skill: r.banners.skill === null ? null : oneMissing ? 'unavailable' : 'differs',
+      approximate: r.banners.approximate, rows,
+    };
+  }
+  return { ...strip(self), previous: base ? { id: base.id, name: base.name } : null, status, changes, changesUnavailable, effect };
 }
