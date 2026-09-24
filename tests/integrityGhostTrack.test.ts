@@ -548,7 +548,7 @@ describe('scanPairs', () => {
 
 describe('pickClips', () => {
   const win = (startMs: number, endMs: number, fidelity: number): TrackWindow =>
-    ({ startMs, endMs, ghostSlot: 4, fidelity, travel: 20, meanErr: 1, meanDist: 900 });
+    ({ startMs, endMs, ghostSlot: 4, targetCls: 3, fidelity, lagFidelity: fidelity, lagMs: 0, travel: 20, meanErr: 1, meanDist: 900 });
 
   it('drops anything under CLIP_MIN', () => {
     expect(pickClips([win(0, 2000, TUNING.CLIP_MIN - 0.01)])).toEqual([]);
@@ -718,5 +718,66 @@ describe('analyzeRound', () => {
 
   it('builds a round prior from the survivors it saw, for leave-one-round-out', () => {
     expect(buildRoundPrior(round(40, (_i, b) => b), [0]).frames).toBe(40);
+  });
+});
+
+/**
+ * A ghost swinging back and forth on an arc around survivor slot 0, so its
+ * bearing changes at a CHANGING rate. A constant rate would make a late
+ * crosshair's frame-to-frame changes identical to the bearing's and hide the
+ * lag entirely. Amplitude 15 moves at most 5 degrees a frame, so a crosshair
+ * two frames late stays inside E_TRACK.
+ */
+function wobble(n: number, yawOf: (i: number, angle: (k: number) => number) => number, amp = 15): Frame[] {
+  const angle = (i: number) => amp * Math.sin(i / 3);
+  const frames: Frame[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = angle(i) * Math.PI / 180;
+    const players = Array.from({ length: PLAYER_SLOTS }, (_, s) => blank(s));
+    players[0] = { ...blank(0), state: STATE.PRESENT | STATE.ALIVE, yaw: yawOf(i, angle) };
+    players[4] = { ...blank(4), state: STATE.PRESENT | STATE.GHOST, cls: 3, x: Math.cos(a) * 1200, y: Math.sin(a) * 1200 };
+    frames.push({ tMs: TUNING.SPAWN_GRACE_MS + i * 100, offset: 0, players, entities: [] });
+  }
+  return frames;
+}
+
+describe('the lag search', () => {
+  it('scores a crosshair two frames late at full fidelity and records the lag', () => {
+    const frames = wobble(40, (i, angle) => angle(i - 2));
+    const late = trackWindows(frames, 0).filter((w) => w.startMs >= frames[2].tMs);
+    expect(late.length).toBeGreaterThan(0);
+    for (const w of late) {
+      expect(w.lagFidelity).toBeGreaterThan(0.99);
+      expect(w.lagMs).toBe(200);
+      // The lag 0 score, which is what the board still ranks, is untouched.
+      expect(w.fidelity).toBeLessThan(0.9);
+    }
+  });
+
+  it('keeps lag 0 when the crosshair is on time', () => {
+    const ws = trackWindows(wobble(40, (i, angle) => angle(i)), 0);
+    expect(ws.length).toBeGreaterThan(0);
+    for (const w of ws) {
+      expect(w.lagMs).toBe(0);
+      expect(w.lagFidelity).toBe(w.fidelity);
+    }
+  });
+
+  it('gives a held angle nothing at any lag', () => {
+    const ws = trackWindows(wobble(40, () => 0, 10), 0);
+    expect(ws.length).toBeGreaterThan(0);
+    for (const w of ws) expect(w.lagFidelity).toBe(0);
+  });
+
+  it('records the class of the infected being followed', () => {
+    for (const w of trackWindows(wobble(40, (i, angle) => angle(i)), 0)) expect(w.targetCls).toBe(3);
+  });
+
+  it('picks clips by whichever score it is handed', () => {
+    const w = (startMs: number, fidelity: number, lagFidelity: number): TrackWindow =>
+      ({ startMs, endMs: startMs + 2000, ghostSlot: 4, targetCls: 3, fidelity, lagFidelity, lagMs: 200, travel: 20, meanErr: 1, meanDist: 900 });
+    const both = [w(0, 0.1, 0.9), w(5000, 0.9, 0.1)];
+    expect(pickClips(both).map((c) => c.startMs)).toEqual([5000]);
+    expect(pickClips(both, (c) => c.lagFidelity).map((c) => c.startMs)).toEqual([0]);
   });
 });

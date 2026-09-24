@@ -12,7 +12,7 @@ const M: RoundMetrics = {
   fidMax: 0.9, fidP95: 0.5, windows: 30, scoreable: 20, fidSum: 9, occ: { observed: 4, expected: 2, expectedSq: 0.2, blocks: 40, pairs: 300 }, eligiblePairs: 300,
   gates: { considered: 900, notLive: 100, notGhost: 200, inGrace: 100, tooClose: 100, occluded: 100, passed: 300 },
 };
-const clip = { startMs: 1000, endMs: 3000, ghostSlot: 4, fidelity: 0.9, travel: 20, meanErr: 2, meanDist: 900 };
+const clip = { startMs: 1000, endMs: 3000, ghostSlot: 4, targetCls: 3, fidelity: 0.9, lagFidelity: 0.9, lagMs: 0, travel: 20, meanErr: 2, meanDist: 900 };
 
 beforeEach(() => {
   db = openDb(':memory:');
