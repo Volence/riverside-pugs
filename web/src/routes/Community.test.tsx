@@ -76,7 +76,7 @@ describe('the community page', () => {
     expect(screen.getByText('Low and tidy.')).toBeTruthy();
     expect((screen.getByRole('link', { name: 'alice' }) as HTMLAnchorElement).getAttribute('href')).toBe('/player/76561190000000001');
     expect(container.querySelector(`img[src="${PREVIEW}"]`)).toBeTruthy();
-    expect(screen.getByText('Modern')).toBeTruthy();
+    expect(screen.getByText('Riverside Modern')).toBeTruthy();
   });
 
   it('names an imported base and an Advanced install', async () => {

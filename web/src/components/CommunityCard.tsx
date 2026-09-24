@@ -19,7 +19,7 @@ import { SidePreviews } from './SidePreviews';
  * anything the author typed.
  */
 
-const BASE_LABEL: Record<string, string> = { stock: 'Stock', modern: 'Modern' };
+const BASE_LABEL: Record<string, string> = { stock: 'Stock', modern: 'Riverside Modern' };
 const baseBadge = (e: CommunityEntry) =>
   e.preset === 'imported' ? `Imported: ${e.importName ?? 'a HUD'}` : BASE_LABEL[e.preset ?? ''] ?? null;
 
