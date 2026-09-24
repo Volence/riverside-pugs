@@ -67,6 +67,17 @@ describe('special infected metrics', () => {
   it('quad caps need per-round stats', () => {
     expect(run('si.quad_caps', input())).toBeNull();
     expect(run('si.quad_caps', input({ hasStats: true, stats: stats([['i1', 'quad_caps', 1]]) }))!.all).toEqual({ num: 1, den: 1 });
+    expect(run('si.quad_caps', input({ hasStats: true, stats: stats([]) }))!.all).toEqual({ num: 0, den: 1 });
+  });
+
+  it('a quad cap counts once, though the plugin credits every infected player in it', () => {
+    // Production, match 155 map 2 half 2: one quad cap, quad_caps=1 on all
+    // four infected and times_quadded=1 on all four survivors.
+    const s = stats([
+      ['i1', 'quad_caps', 1], ['i2', 'quad_caps', 1], ['i3', 'quad_caps', 1], ['i4', 'quad_caps', 1],
+      ['s1', 'times_quadded', 1], ['s2', 'times_quadded', 1], ['s3', 'times_quadded', 1], ['s4', 'times_quadded', 1],
+    ]);
+    expect(run('si.quad_caps', input({ hasStats: true, stats: s }))!.all).toEqual({ num: 1, den: 1 });
   });
 
   it('hunter damage per spawn needs round stats', () => {
