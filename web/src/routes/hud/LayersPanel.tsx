@@ -1,7 +1,7 @@
 /**
- * The Layers list, left of the canvas: every element of the current side in
- * registry order, with an eye that shows or hides it, struck through while
- * hidden. The Teammates expand to their cards (the three drawn, and in
+ * The Layers list, left of the canvas: every element of the current side,
+ * under a few headings (GROUPS), with an eye that shows or hides it, dimmed
+ * while hidden. The Teammates expand to their cards (the three drawn, and in
  * Free the fourth, which shows only while spectating), the Infected
  * teammates to their three, and every element
  * with a child registry entry expands to its pieces (the teammate card's,
@@ -18,12 +18,34 @@ import { elementRect, panelChild } from '../../hud/build';
 import { panelChildren, type StateArt } from '../../hud/children';
 import { probe } from '../../hud/probes';
 import { visibleElements, type Side } from '../../hud/mock';
+import type { HudElement } from '../../hud/elements';
 import { cardsOf, pickableCards, panelOf, type Selection } from '../../hud/selection';
 
 /** State pieces the game shows only sometimes, and when: read from the registry's stateArt. */
 const WHEN: Record<StateArt, string> = {
   down: 'shown when down', dead: 'shown when dead', talking: 'shown when talking', crouched: 'shown when crouched', ghost: 'shown as a ghost',
   ability: 'shown on a spawned Smoker, Boomer or Tank',
+};
+
+/**
+ * The list's headings, in the order shown: what each group of elements is
+ * for, so a long list reads as a few short ones. Only the list groups
+ * this way; the registry order (elements.ts) still decides the canvas.
+ * An element no group names falls into the last group.
+ */
+const GROUPS: Record<Side, { title: string; ids: string[] }[]> = {
+  survivor: [
+    { title: 'You', ids: ['ownHealth', 'weaponSelection', 'progressBar', 'ownMic', 'xhair'] },
+    { title: 'Team', ids: ['teamColumn', 'perilNotice', 'leavingArea'] },
+    { title: 'Messages', ids: ['chat', 'killNotices', 'vote', 'voiceList'] },
+    { title: 'Finales and Survival', ids: ['finaleMeter', 'holdoutTimer'] },
+  ],
+  infected: [
+    { title: 'You', ids: ['siHealth', 'abilityRing', 'abilityMarker', 'tankPanel', 'ownMic', 'xhair'] },
+    { title: 'Spawning', ids: ['ghostPanel', 'spawnCountdown', 'zombiePanel'] },
+    { title: 'Team', ids: ['infectedRow', 'infectedVoice'] },
+    { title: 'Messages', ids: ['chat', 'killNotices', 'vote', 'voiceList'] },
+  ],
 };
 
 /** Whether one row's target is part of the selection. */
@@ -51,7 +73,7 @@ function Eye({ hidden }: { hidden: boolean }) {
  */
 function Row(
   { label, depth, active, hidden, note, onPick, onEye }: {
-    label: string; depth: 0 | 1; active: boolean; hidden: boolean; note?: string;
+    label: string; depth: 0 | 1 | 2; active: boolean; hidden: boolean; note?: string;
     onPick: (shift: boolean) => void; onEye?: (visible: boolean) => void;
   },
 ) {
@@ -70,6 +92,17 @@ function Row(
   );
 }
 
+/** The side's elements under GROUPS' headings, each group in registry order; empty groups dropped. */
+function grouped(els: HudElement[], side: Side): { title: string; els: HudElement[] }[] {
+  const groups = GROUPS[side];
+  const out = groups.map((g) => ({ title: g.title, els: [] as HudElement[] }));
+  for (const el of els) {
+    const i = groups.findIndex((g) => g.ids.includes(el.id));
+    out[i < 0 ? out.length - 1 : i].els.push(el);
+  }
+  return out.filter((g) => g.els.length > 0);
+}
+
 export function LayersPanel(
   { design, side, sel, onPick, onVisible, onAdd, onKeyDown }: {
     design: HudDesign; side: Side; sel: Selection;
@@ -86,42 +119,50 @@ export function LayersPanel(
   return (
     <nav class="hud__layers" aria-label="Layers" onKeyDown={onKeyDown}>
       <p class="eyebrow">{side === 'survivor' ? 'Survivor HUD' : 'Infected HUD'}</p>
-      {visibleElements(side, design).map((el) => {
-        const target: Selection = { kind: 'elements', ids: [el.id] };
-        const reg = panelChildren(el.id);
-        return (
-          <div key={el.id} role="group" aria-label={`Layers: ${el.label}`}>
-            <Row
-              label={el.label} depth={0} active={isIn(sel, target)} hidden={!elementRect(design, el.id, design.aspect).visible}
-              onPick={(shift) => onPick(target, shift)}
-              onEye={el.props.includes('visible') ? (v) => onVisible(target, v) : undefined}
-            />
-            {reg?.repeat === 'cards' && cardsOfPanel(el.id).map((i) => {
-              const t = cardsOf([i], el.id);
-              return <Row key={`card${i}`} label={`Card ${i + 1}`} depth={1} active={isIn(sel, t)} hidden={false} onPick={(shift) => onPick(t, shift)} />;
-            })}
-            {reg?.children.filter((def) => !def.gate || probe(def.gate)).map((def) => {
-              const info = panelChild(design, el.id, def.name);
-              if (!info) {
-                return def.addable ? (
-                  <div key={def.name} class="hud__layer hud__layer--d1">
-                    <button type="button" class="hud__layername hud__layeradd" onClick={() => onAdd(def.name, el.id)}>{`＋ ${def.label}`}</button>
-                  </div>
-                ) : null;
-              }
-              const t: Selection = el.id === 'teamColumn'
-                ? { kind: 'children', names: [def.name], card: cardIn(el.id) }
-                : { kind: 'children', names: [def.name], card: cardIn(el.id), panel: el.id };
-              return (
+      {grouped(visibleElements(side, design), side).map(({ title, els }) => (
+        <section key={title} class="hud__layergroup" aria-label={title}>
+          <h3 class="hud__layergroup-title">{title}</h3>
+          {els.map((el) => {
+            const target: Selection = { kind: 'elements', ids: [el.id] };
+            const reg = panelChildren(el.id);
+            return (
+              <div key={el.id} role="group" aria-label={`Layers: ${el.label}`}>
                 <Row
-                  key={def.name} label={def.label} depth={1} active={isIn(sel, t)} hidden={!info.visible} note={def.stateArt && WHEN[def.stateArt]}
-                  onPick={(shift) => onPick(t, shift)} onEye={(v) => onVisible(t, v)}
+                  label={el.label} depth={0} active={isIn(sel, target)} hidden={!elementRect(design, el.id, design.aspect).visible}
+                  onPick={(shift) => onPick(target, shift)}
+                  onEye={el.props.includes('visible') ? (v) => onVisible(target, v) : undefined}
                 />
-              );
-            })}
-          </div>
-        );
-      })}
+                {reg?.repeat === 'cards' && cardsOfPanel(el.id).map((i) => {
+                  const t = cardsOf([i], el.id);
+                  return <Row key={`card${i}`} label={`Card ${i + 1}`} depth={1} active={isIn(sel, t)} hidden={false} onPick={(shift) => onPick(t, shift)} />;
+                })}
+                {/* A card's pieces are one set every card shares: under their own heading, not after Card 3 as if its own. */}
+                {reg?.repeat === 'cards' && <p class="hud__layer hud__layer--d1 hud__layersub">In every card</p>}
+                {reg?.children.filter((def) => !def.gate || probe(def.gate)).map((def) => {
+                  const depth = reg.repeat === 'cards' ? 2 : 1;
+                  const info = panelChild(design, el.id, def.name);
+                  if (!info) {
+                    return def.addable ? (
+                      <div key={def.name} class={`hud__layer hud__layer--d${depth}`}>
+                        <button type="button" class="hud__layername hud__layeradd" onClick={() => onAdd(def.name, el.id)}>{`＋ ${def.label}`}</button>
+                      </div>
+                    ) : null;
+                  }
+                  const t: Selection = el.id === 'teamColumn'
+                    ? { kind: 'children', names: [def.name], card: cardIn(el.id) }
+                    : { kind: 'children', names: [def.name], card: cardIn(el.id), panel: el.id };
+                  return (
+                    <Row
+                      key={def.name} label={def.label} depth={depth} active={isIn(sel, t)} hidden={!info.visible} note={def.stateArt && WHEN[def.stateArt]}
+                      onPick={(shift) => onPick(t, shift)} onEye={(v) => onVisible(t, v)}
+                    />
+                  );
+                })}
+              </div>
+            );
+          })}
+        </section>
+      ))}
     </nav>
   );
 }

@@ -237,6 +237,14 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .hud__layers .eyebrow { margin-bottom: var(--sp-2); }
 .hud__layer { display: flex; align-items: center; gap: var(--sp-1); padding: 1px var(--sp-1); }
 .hud__layer--d1 { padding-left: var(--sp-4); }
+.hud__layer--d2 { padding-left: calc(var(--sp-4) * 2); }
+.hud__layergroup + .hud__layergroup { margin-top: var(--sp-3); }
+.hud__layergroup-title {
+  margin: 0 0 var(--sp-1); padding: 0 var(--sp-1) 2px; border-bottom: 1px solid var(--border);
+  font-size: var(--fs-label); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted);
+}
+/* "In every card": a heading inside Teammates, not a row to click. */
+.hud__layersub { margin: 0; font-size: var(--fs-label); color: var(--text-muted); font-style: italic; }
 .hud__layer.is-active { background: var(--accent); }
 /* Name above note, and the name wraps: a row never hides what it is. */
 .hud__layertext { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -246,7 +254,8 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
   overflow-wrap: anywhere;
 }
 .hud__layer.is-active .hud__layername { color: #fff; }
-.hud__layer--hidden .hud__layername { text-decoration: line-through; color: var(--text-muted); }
+/* Hidden: dimmed, and the eye is crossed out; no strikethrough, which reads as "cannot use". */
+.hud__layer--hidden .hud__layername { color: var(--text-muted); opacity: .6; }
 .hud__layernote { font-size: var(--fs-label); color: var(--text-muted); line-height: 1.2; padding-bottom: 2px; }
 .hud__layeradd { color: var(--text-muted); }
 .hud__eye { background: none; border: 0; padding: 2px; color: var(--text-muted); cursor: pointer; line-height: 0; }
@@ -288,6 +297,11 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .hud__check input { accent-color: var(--accent); }
 
 .hud__note { margin-top: var(--sp-2); }
+.hud__more summary { cursor: pointer; list-style: none; }
+.hud__more summary::-webkit-details-marker { display: none; }
+.hud__more-toggle { color: var(--accent); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: .06em; margin-left: var(--sp-1); }
+.hud__more[open] .hud__more-toggle { display: none; }
+.hud__more p { margin: var(--sp-1) 0 0; }
 /* A note the player has to act on (the addon load order, no crosshair at all). */
 .hud__warn { color: var(--text); border-left: 2px solid var(--accent); padding-left: var(--sp-2); }
 /* The Styles panel is one fieldset so a missing import can switch it all off; it draws nothing of its own. */
@@ -350,6 +364,8 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 }
 .hud__stylerow:last-of-type { border-bottom: none; }
 .hud__stylerow-label { flex: 1 1 12rem; color: var(--text-muted); }
+/* An unset colour the preview cannot know: dimmed and dashed, not a made-up colour. */
+.hud__swatch--unset { opacity: .45; outline: 1px dashed var(--text-muted); }
 /* A health colour key's three game bands; the one the preview draws in is lit. */
 .hud__bands { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); margin: 0; padding: 0; list-style: none; }
 .hud__band { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--text-muted); opacity: .6; }

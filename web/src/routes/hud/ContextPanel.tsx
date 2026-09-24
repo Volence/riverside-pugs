@@ -12,7 +12,7 @@ import {
   type WeaponNumKey, type WeaponsOverride, type WeaponBoxStyle,
 } from '../../hud/design';
 import { weaponKey } from '../../hud/weapons';
-import { fontFace, shownKey, healthRgb, panelFile, DEFAULT_PREVIEW, HEALTH_BANDS, previewHealthBand, type HealthBand, type PreviewState } from '../../hud/render';
+import { fontFace, shownKey, panelFile, DEFAULT_PREVIEW, HEALTH_BANDS, previewHealthBand, type HealthBand, type PreviewState } from '../../hud/render';
 import { elementById, type HudElement } from '../../hud/elements';
 import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam, buildTrees, pcGet, pieceMovableIn, WEAPON_ICON_LABELS, ITEM_ICON_LABELS } from '../../hud/build';
 import { kvFind } from '../../hud/kv';
@@ -433,7 +433,7 @@ export function ElementControls(
         </label>
       )}
 
-      {el.note && <p class="muted hud__note">{el.note}</p>}
+      {el.note && <Note text={el.note} />}
 
       {/* The crosshair is the one element the game places itself; its note is the first line of its own controls. */}
       {id === 'xhair' && <CrosshairControls design={design} edit={edit} selected />}
@@ -507,7 +507,7 @@ export function ElementControls(
             value={shownKey(design, k, o.keys?.[k.key] ?? elementKey(design, el.key, k.key))}
             onValue={(v, mode) => patch({ keys: { ...o.keys, [k.key]: v } }, mode)}
           />
-          {k.note && <p class="muted hud__note">{k.note}</p>}
+          {k.note && <Note text={k.note} />}
           {o.keys?.[k.key] !== undefined && (
             <button
               type="button" class="btn btn--ghost btn--sm" aria-label={`${k.label}: use the file's value`}
@@ -858,7 +858,7 @@ export function ChildControls(
             value={shownKey(design, k, o.keys?.[k.key] ?? info.keys?.[k.key])}
             onValue={(v, mode) => patch({ keys: { ...o.keys, [k.key]: v } }, mode)}
           />
-          {k.note && <p class="muted hud__note">{k.note}</p>}
+          {k.note && <Note text={k.note} />}
           {o.keys?.[k.key] !== undefined && (
             <button
               type="button" class="btn btn--ghost btn--sm" aria-label={`${k.label}: use the file's value`}
@@ -869,16 +869,33 @@ export function ChildControls(
           )}
         </Fragment>
       ))}
-      {def.note && <p class="muted hud__note">{def.note}</p>}
+      {def.note && <Note text={def.note} />}
       {repeatsCards(panel) && <p class="muted hud__note">{EVERY_CARD}</p>}
       {def.addable && !baseHasChild(baseOf(design), name, panel) && (
         <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={() => edit((d) => patchChild(d, name, { on: false }, panel))}>
           {`Remove the ${def.label.toLowerCase()}`}
         </button>
       )}
-      <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this child</button>
+      <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>{`Reset ${def.label.toLowerCase()}`}</button>
       <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={onBack}>{`Back to ${elementById(panel)?.label ?? 'Teammates'}`}</button>
     </Field>
+  );
+}
+
+/**
+ * A side-panel note. A long one shows its lead, up to the first full stop
+ * or colon, and folds the rest behind More, so the controls stay the
+ * biggest thing in the panel; a short one shows whole.
+ */
+export function Note({ text }: { text: string }) {
+  const m = text.length > 120 ? /^(.+?)[.:]\s+(.+)$/s.exec(text) : null;
+  if (!m) return <p class="muted hud__note">{text}</p>;
+  const rest = m[2].charAt(0).toUpperCase() + m[2].slice(1);
+  return (
+    <details class="muted hud__note hud__more">
+      <summary>{`${m[1]}.`} <span class="hud__more-toggle">More</span></summary>
+      <p>{rest}</p>
+    </details>
   );
 }
 
@@ -900,12 +917,15 @@ function KeyControl({ def, value, onValue, end, max, band = 'healthy' }: {
     // No opacity here, so touching it cannot write white over the whole
     // panel; the key is written only when a colour is picked. The picker
     // opens on the colour the preview shows right now.
-    const [r, g, b] = def.byHealth ? HEALTH_BANDS.find((h) => h.band === band)!.rgb : healthRgb(100, 100, false);
+    // Any other unset colour is one the preview cannot know (the game's own
+    // default): a dimmed, dashed grey swatch rather than a made-up colour.
+    const [r, g, b] = def.byHealth ? HEALTH_BANDS.find((h) => h.band === band)!.rgb : [128, 128, 128];
     return (
       <div class="hud__stylerow">
         <span class="hud__stylerow-label">{`${def.label}: ${def.unsetLabel ?? 'Game colour'}`}</span>
         <input
           type="color" aria-label={`${def.label} colour`} value={hexOf(`${r} ${g} ${b} 255`)}
+          class={def.byHealth ? undefined : 'hud__swatch--unset'}
           onInput={(e) => onValue(withHex('0 0 0 255', (e.target as HTMLInputElement).value), 'gesture')} onChange={end}
         />
         {def.byHealth && (
