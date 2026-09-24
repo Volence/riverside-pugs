@@ -185,8 +185,11 @@ describe('refingerprintPatches', () => {
     const fp = (id: number) => (db.prepare('SELECT fingerprint FROM balance_patches WHERE id = ?').get(id) as { fingerprint: string | null }).fingerprint;
     expect(fp(older.patchId)).toBe(fingerprintOf(withoutIgnored(INV, [SPEC]), []));
     expect(fp(newer.patchId)).toBeNull();
-    // Rounds already tagged with the merged patch stay tagged.
-    expect(db.prepare('SELECT patch_id FROM match_rounds WHERE half = 2').get()).toEqual({ patch_id: newer.patchId });
+    // The merged patch is folded: its rounds count for the keeper.
+    expect(db.prepare('SELECT patch_id, sighted_patch_id FROM match_rounds WHERE half = 2').get())
+      .toEqual({ patch_id: older.patchId, sighted_patch_id: newer.patchId });
+    expect(db.prepare('SELECT triage, folded_into FROM balance_patches WHERE id = ?').get(newer.patchId))
+      .toEqual({ triage: 'folded', folded_into: older.patchId });
 
     // A second run with the same lists is a no-op.
     const before = db.prepare('SELECT id, fingerprint FROM balance_patches ORDER BY id').all();
@@ -200,6 +203,26 @@ describe('refingerprintPatches', () => {
     expect(next).toMatchObject({ patchId: older.patchId, newPatch: false, serverChanged: false });
     expect(db.prepare('SELECT patch_id FROM balance_server_state WHERE server_id = 1').get()).toEqual({ patch_id: older.patchId });
     expect(problems).toHaveLength(1);
+  });
+
+  it('a balance patch keeps the fingerprint over an older pending one', () => {
+    const a = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: withSpec, versionless: [] });
+    const b = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 2, inventory: INV, versionless: [] });
+    db.prepare("UPDATE balance_patches SET triage = 'balance', name = 'Real' WHERE id = ?").run(b.patchId);
+    const r = refingerprintPatches(db, [], [SPEC], () => {});
+    expect(r.merged).toEqual([{ keep: b.patchId, into: [a.patchId] }]);
+    expect(db.prepare('SELECT triage, folded_into FROM balance_patches WHERE id = ?').get(a.patchId))
+      .toEqual({ triage: 'folded', folded_into: b.patchId });
+  });
+
+  it('resolves a merged patch left by the backfill: folded into the holder, else balance', () => {
+    const a = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: [] });
+    const ins = db.prepare("INSERT INTO balance_patches (fingerprint, source, inputs_json, first_seen_at, triage) VALUES (NULL, 'detected', ?, '2026-09-24 00:00:00', NULL)");
+    const merged = Number(ins.run(JSON.stringify(withSpec)).lastInsertRowid);
+    const orphan = Number(ins.run(JSON.stringify({ 'c:x': '1' })).lastInsertRowid);
+    refingerprintPatches(db, [], [SPEC], () => {});
+    expect(db.prepare('SELECT triage, folded_into FROM balance_patches WHERE id = ?').get(merged)).toEqual({ triage: 'folded', folded_into: a.patchId });
+    expect(db.prepare('SELECT triage, folded_into FROM balance_patches WHERE id = ?').get(orphan)).toEqual({ triage: 'balance', folded_into: null });
   });
 
   it('updates a still-unique fingerprint in place without an alert', () => {
