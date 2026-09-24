@@ -443,8 +443,10 @@ describe('drawPanel', () => {
       const { ctx, calls } = recCtx();
       drawPanel(ctx, design({}), 'infectedRow', { x: 0, y: 0 }, 1, { card: 0 });
       const bg = childRects(design({}), 'infectedRow', { x: 0, y: 0 }, 1).find((c) => c.name === 'BackgroundImage')!;
-      // The frame, then the card's HealthPanel outline and fill, which code tints by health (slice 2.F X9).
-      expect(made).toHaveLength(3);
+      // The frame, the linear-light copy the frame's fallback tries (X-B14b; this scratch has no pixels, so it
+      // draws the tinted frame itself), then the card's HealthPanel outline and fill, which code tints by
+      // health (slice 2.F X9).
+      expect(made).toHaveLength(4);
       const multiply = scratch.calls.find((c) => c.m === 'fillRect' && c.op === 'multiply');
       expect(multiply?.fill).toBe('rgb(64,64,64)');
       expect(scratch.calls.some((c) => c.m === 'drawImage' && c.op === 'destination-in')).toBe(true);
@@ -456,7 +458,7 @@ describe('drawPanel', () => {
       // more canvases here, one each for HealthbarTextureTop and HealthbarTextureBottom (the bar's green
       // outline and fill are already in the tint cache from the infected card's bar).
       drawPanel(recCtx().ctx, design({}), 'ownHealth', { x: 0, y: 0 }, 1);
-      expect(made).toHaveLength(5);
+      expect(made).toHaveLength(6);
     } finally { _setCanvasFactory(null); }
   });
 
@@ -1629,5 +1631,42 @@ describe('the dead infected card skull (X-B14a)', () => {
     expect(hit).toBeDefined();
     const drawn = (hit.a[0] as { px?: Uint8ClampedArray }).px;
     expect(drawn && [...drawn]).toEqual([98, 98, 98, 255, 98, 0, 0, 255, 98, 98, 98, 128, 0, 0, 0, 0]);
+  });
+});
+
+describe('the infected card backdrop in linear light (X-B14b)', () => {
+  afterEach(() => { _setCanvasFactory(null); });
+
+  it('lets a mid-grey scene through the black disc as the game does: about 46, not 16', () => {
+    // /home/volence/l4d/hud/probe-phase2-infected/b14/shots/b14/b14-g.png: the disc (black at 224) reads 53 46 33
+    // over the lit floor in game; the preview's gamma blend drew 6 5 5 (b14/preview/dead.png). In linear light
+    // 128 behind black at 224 is 46; a gamma blend gives 16.
+    const scene = (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4).fill(128), width: w, height: h });
+    const writes = new Map<object, Uint8ClampedArray>();
+    _setCanvasFactory((w, h) => {
+      const c = { width: w, height: h } as Record<string, unknown>;
+      const t = {
+        globalAlpha: 1, globalCompositeOperation: 'source-over', fillStyle: '',
+        translate: () => {}, drawImage: () => {}, fillRect: () => {},
+        getImageData: (_x: number, _y: number, gw: number, gh: number) => {
+          const d = new Uint8ClampedArray(gw * gh * 4);
+          for (let i = 3; i < d.length; i += 4) d[i] = 224;          // the disc alone: black at 224
+          return { data: d, width: gw, height: gh };
+        },
+        putImageData: (d: { data: Uint8ClampedArray }) => { writes.set(c, d.data); },
+      };
+      c.getContext = () => t;
+      return c as unknown as HTMLCanvasElement;
+    });
+    const d = design({});
+    const { ctx, calls } = recCtx();
+    Object.assign(ctx, { getImageData: (_x: number, _y: number, w: number, h: number) => scene(w, h), setTransform: () => {} });
+    drawPanel(ctx, d, 'infectedRow', { x: 10, y: 20 }, 2, { card: 0 });
+    const bg = childRects(d, 'infectedRow', { x: 10, y: 20 }, 2).find((r) => r.name === 'BackgroundImage')!;
+    const hit = calls.find((c) => c.m === 'drawImage' && c.a[1] === Math.floor(bg.x) && c.a[2] === Math.floor(bg.y) && writes.has(c.a[0] as object));
+    expect(hit).toBeDefined();
+    const out = writes.get(hit!.a[0] as object)!;
+    expect(out[0]).toBeGreaterThanOrEqual(44);
+    expect(out[0]).toBeLessThanOrEqual(48);
   });
 });

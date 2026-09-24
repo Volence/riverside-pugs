@@ -748,10 +748,10 @@ export function tinted(img: CanvasImageSource, key: string, r: number, g: number
  * stub), it draws the art itself.
  */
 const linearArt = new Lru<CanvasImageSource>(8);
-function linearOverArt(img: HTMLImageElement, key: string): CanvasImageSource {
+function linearOverArt(img: CanvasImageSource, key: string,
+  w = (img as HTMLImageElement).naturalWidth, h = (img as HTMLImageElement).naturalHeight): CanvasImageSource {
   const cached = linearArt.get(key);
   if (cached) return cached;
-  const w = img.naturalWidth, h = img.naturalHeight;
   const c = canvasFactory(w, h);
   const t = c?.getContext('2d') as CanvasRenderingContext2D | null | undefined;
   if (!c || !t || typeof t.getImageData !== 'function' || typeof t.putImageData !== 'function') return img;
@@ -938,11 +938,13 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
     // An imported HUD's own material first; the stock art where it has none.
     const key = baseOf(design);
     const own = design.preset === 'imported' ? importedMaterial(key, material, canvasFactory) : null;
-    if (own && 'src' in own) { drawTexture(ctx, n, r, k, opts, own.src, own.w, own.h, `${key}|${material}`, own.additive); return; }
+    // The infected card's backdrop blends in linear light (X-B14b, drawTexture's `linear`).
+    const linear = infectedCard && lname === 'backgroundimage';
+    if (own && 'src' in own) { drawTexture(ctx, n, r, k, opts, own.src, own.w, own.h, `${key}|${material}`, own.additive, true, linear); return; }
     const stock = own && 'stock' in own ? own.stock : material;
     const img = artImage(stock, opts.onAsset);
     if (!img) { if (missing.has(stock)) hatch(ctx, r); return; }   // loading: draw nothing yet; missing: say so
-    drawTexture(ctx, n, r, k, opts, img, img.naturalWidth, img.naturalHeight, stock, own !== null && own.additive);
+    drawTexture(ctx, n, r, k, opts, img, img.naturalWidth, img.naturalHeight, stock, own !== null && own.additive, true, linear);
     return;
   }
   if (fill) { ctx.fillStyle = colourOf(design, fill); ctx.fillRect(r.x, r.y, r.w, r.h); }
@@ -953,9 +955,18 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
  * health colour), stretched to the rect or unscaled, and added onto the
  * scene when its material is additive. Stock art and an imported HUD's own
  * decoded texture both come through here, so they draw alike.
+ *
+ * `linear` blends it over the scene in linear light (paintLinearOver), as
+ * the game does: the infected card's backdrop (hud/infected_healthbar_bg_1,
+ * near-black at 224 through drawColor 64) reads 53 46 33 over the lit floor
+ * in game and 6 5 5 in the gamma-blended preview
+ * (/home/volence/l4d/hud/probe-phase2-infected/b14/shots/b14/b14-g.png at
+ * 20,975, against b14/preview/dead.png). The SI panel's frame and the ability
+ * ring's splat were measured too (b14-b, b14-c over the Hunter's arm): their
+ * cores are 0 0 0 in game and preview alike, opaque, so they stay as they are.
  */
 function drawTexture(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: number, opts: DrawOpts,
-  src0: CanvasImageSource, w: number, h: number, key: string, additive: boolean, vertexColour = true) {
+  src0: CanvasImageSource, w: number, h: number, key: string, additive: boolean, vertexColour = true, linear = false) {
   let [tr, tg, tb, ta] = parseColour(kvGet(n, 'drawColor') ?? '255 255 255 255');
   if (ta === 0) return;                                                // the engine draws nothing at alpha 0 (the stock splatter under a stand-in)
   if (HEALTH_TINT_CHILDREN.has(n.key.toLowerCase())) [tr, tg, tb] = sampleHealthRgb(opts);   // game code's colour, over the file's
@@ -967,7 +978,11 @@ function drawTexture(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: 
   const paint = (c: CanvasRenderingContext2D) => c.drawImage(src, dest.x, dest.y, dest.w, dest.h);
   ctx.save();
   ctx.globalAlpha *= ta / 255;
-  if (additive) paintAdditive(ctx, dest, paint); else paint(ctx);
+  if (additive) paintAdditive(ctx, dest, paint);
+  else if (linear) {
+    const tint = src === src0 ? '' : `|${tr},${tg},${tb}`;
+    paintLinearOver(ctx, dest, paint, () => ctx.drawImage(linearOverArt(src, `${key}${tint}`, w, h), dest.x, dest.y, dest.w, dest.h));
+  } else paint(ctx);
   ctx.restore();
 }
 
