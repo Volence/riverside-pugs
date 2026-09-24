@@ -7,9 +7,8 @@ import {
   type Backdrop, type CrosshairState, type Res,
 } from '../crosshair/draw';
 import { CrosshairBuilder, Field } from '../crosshair/Builder';
-import { buildVPK } from '../crosshair/vpk';
+import { crosshairAddonFromPixels, saveBytes } from '../crosshair/download';
 import { CROSSHAIR_KEY, crosshairPixels, savedArt, saveImage } from '../crosshair/saved';
-import HUDLAYOUT from '../crosshair/hudlayout.res?raw';
 
 const STORAGE_KEY = CROSSHAIR_KEY;
 
@@ -149,17 +148,9 @@ export function Crosshair() {
     // The same pixels the HUD editor bundles from this page's saved state.
     const px = crosshairPixels(state, imported.current);
     if (!px) return;
-    const safe = (name.trim() || 'my_crosshair').replace(/[^A-Za-z0-9_-]+/g, '_');
-    const vpk = buildVPK(safe, TEX, TEX, px, HUDLAYOUT);
-    const blob = new Blob([vpk], { type: 'application/octet-stream' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${safe}.vpk`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    setStatus(`Saved ${safe}.vpk (${(vpk.length / 1024).toFixed(0)} KB). Put it in left4dead/addons/ and restart the game.`);
+    const { filename, bytes } = crosshairAddonFromPixels(name, px);
+    saveBytes(filename, bytes);
+    setStatus(`Saved ${filename} (${(bytes.length / 1024).toFixed(0)} KB). Put it in left4dead/addons/ and restart the game.`);
   };
 
   return (
