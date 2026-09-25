@@ -18,6 +18,7 @@ import { formatPos, parsePos, screenW } from './units';
 import { teamCardRects, elementRect, cardChild, isFreeTeam, panelChild, elementFitShift, teamLayout } from './build';
 import { elementById } from './elements';
 import { childDef } from './children';
+import { _setProbe } from './probes';
 import { elementFrame } from './selection';
 
 /**
@@ -1189,5 +1190,42 @@ describe('weapon uploads', () => {
     expect(weaponUploadSize('icon_equip_pistol', 300, 100)).toEqual({ w: 64, h: 64 });
     expect(weaponUploadSize('icon_equip_pills', 30, 100)).toEqual({ w: 64, h: 64 });
     expect(weaponUploadSize('boxActive', 30, 100)).toEqual({ w: 128, h: 128 });
+  });
+});
+
+/**
+ * The Tab screen's edits from the page (tab screen spec 4.3 and section 7):
+ * a hide takes every piece pinned to it along (ChildDef.hidesWith, as
+ * validateDesign stores it), showing it again takes the hides off, and the
+ * versus panel moves only inside its on-screen range and only with TS4 open.
+ */
+describe('the Tab screen edits', () => {
+  it('hides "Health Bonus:" with its number, and shows both again', () => {
+    const hid = patchChild(DEFAULT_DESIGN, 'HealthLabel', { visible: false }, 'tabVersus');
+    expect(hid.children.tabVersus).toEqual({ HealthLabel: { visible: false }, HealthAmount: { visible: false } });
+    expect(validateDesign(hid).children.tabVersus).toEqual(hid.children.tabVersus);
+    expect(patchChild(hid, 'HealthLabel', { visible: true }, 'tabVersus').children.tabVersus).toBeUndefined();
+    // The whole line down the chain from Average Distance:
+    expect(Object.keys(setChildrenVisible(DEFAULT_DESIGN, ['DistanceLabel'], false, 'tabVersus').children.tabVersus!).sort())
+      .toEqual(['DistanceAmount', 'DistanceLabel', 'HealthAmount', 'HealthLabel']);
+  });
+  it('keeps a colour when the piece is shown again', () => {
+    const d = patchChild(patchChild(DEFAULT_DESIGN, 'TeamYours', { color: '255 255 0 255' }, 'tabVersus'), 'TeamYours', { visible: false }, 'tabVersus');
+    expect(patchChild(d, 'TeamYours', { visible: true }, 'tabVersus').children.tabVersus).toEqual({ TeamYours: { color: '255 255 0 255' } });
+  });
+  it('stores no hide while its gate is closed', () => {
+    _setProbe('TS7', false);
+    try {
+      expect(patchChild(DEFAULT_DESIGN, 'HealthLabel', { visible: false }, 'tabVersus')).toBe(DEFAULT_DESIGN);
+      expect(setSelectionVisible(DEFAULT_DESIGN, { kind: 'elements', ids: ['tabVersus'] }, false)).toBe(DEFAULT_DESIGN);
+    } finally { _setProbe('TS7', null); }
+  });
+  it('moves the versus panel inside its range, and not at all while TS4 is closed', () => {
+    expect(placeElement(DEFAULT_DESIGN, 'tabVersus', 420, 20).elements.tabVersus).toEqual({ x: 420, y: 20 });
+    expect(placeElement(DEFAULT_DESIGN, 'tabVersus', 900, 470).elements.tabVersus).toEqual({ x: 853 - 354, y: 360 });
+    expect(placeElement(DEFAULT_DESIGN, 'tabVersus', -40, -9).elements.tabVersus).toEqual({ x: 0, y: 0 });
+    expect(nudge(DEFAULT_DESIGN, 'tabVersus', 1, 0).elements.tabVersus).toEqual({ x: 16, y: 25 });
+    _setProbe('TS4', false);
+    try { expect(nudge(DEFAULT_DESIGN, 'tabVersus', 1, 0)).toBe(DEFAULT_DESIGN); } finally { _setProbe('TS4', null); }
   });
 });
