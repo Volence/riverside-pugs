@@ -118,3 +118,39 @@ describe('moving the versus panel (task 7, probe TS4)', () => {
     expect((b.value as KvNode[]).find((n) => n.key === 'ypos' && n.cond === '[$X360]')!.value).toBe('c-208');
   });
 });
+
+describe('the Tab screen\'s style slots (task 8)', () => {
+  const styled = (styles: HudDesign['styles'], images: Record<string, Uint8ClampedArray> = {}) =>
+    buildHud(validateDesign({ v: 1, styles }), { ...FONTS, images });
+  const has = (files: { path: string }[], p: string) => files.some((f) => f.path === p);
+  const image = (files: { path: string; data: Uint8Array }[], path: string, block: string) => kvGet(pcFind(tree(files, path), [block])!, 'image');
+
+  it('a flat stat box ships tabstatbox.vtf and .vmt and repoints StatBreakdownHighlightImage', () => {
+    const files = styled({ tabStatBox: { kind: 'flat', color: '0 128 0 255' } });
+    expect(has(files, 'materials/vgui/hud/hudeditor/tabstatbox.vtf')).toBe(true);
+    expect(has(files, 'materials/vgui/hud/hudeditor/tabstatbox.vmt')).toBe(true);
+    // The form TAB-1 drew (../vgui/hud/hudeditor/probe_green), as the stock file writes its own.
+    expect(image(files, VERSUS, 'StatBreakdownHighlightImage')).toBe('../vgui/hud/hudeditor/tabstatbox');
+    expect(image(files, VERSUS, 'YourTeamHighlightImage')).toBe('../vgui/hud/ScalablePanel_bgBlack_outlineRed');
+  });
+
+  it('the team box slot repoints both highlight blocks', () => {
+    const files = styled({ tabTeamBox: { kind: 'rounded', color: '255 0 255 255' } });
+    expect(has(files, 'materials/vgui/hud/hudeditor/tabteambox.vtf')).toBe(true);
+    for (const b of ['YourTeamHighlightImage', 'EnemyTeamHighlightImage']) expect(image(files, VERSUS, b), b).toBe('../vgui/hud/hudeditor/tabteambox');
+    expect(image(files, VERSUS, 'StatBreakdownHighlightImage')).toBe('../vgui/hud/ScalablePanel_bgBlack_outlineRed');
+  });
+
+  it('the teammate rows slot repoints the survivor row\'s PlayerBackground, an uploaded picture too', () => {
+    const files = styled({ tabRowBg: { kind: 'image' } }, { tabRowBg: new Uint8ClampedArray(256 * 32 * 4).fill(128) });
+    expect(has(files, 'materials/vgui/hud/hudeditor/tabrowbg.vtf')).toBe(true);
+    expect(image(files, SURVIVOR_ROW, 'PlayerBackground')).toBe('../vgui/hud/hudeditor/tabrowbg');
+  });
+
+  it('no slot, no file: stock styles ship nothing and touch no Tab file', () => {
+    const files = styled({ tabStatBox: { kind: 'stock' }, tabTeamBox: { kind: 'stock' }, tabRowBg: { kind: 'stock' } });
+    expect(files.filter((f) => /tab(statbox|teambox|rowbg)|scoreboard/.test(f.path))).toEqual([]);
+    // An Image style with no upload falls back to stock, and so writes nothing.
+    expect(styled({ tabRowBg: { kind: 'image' } }).filter((f) => /tabrowbg|scoreboard/.test(f.path))).toEqual([]);
+  });
+});

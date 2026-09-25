@@ -2037,7 +2037,7 @@ function stylePass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkF
     for (const name of names) {
       out.push({ path: `materials/${name}.vtf`, data: vtf }, { path: `materials/${name}.vmt`, data: enc(vmtFor(name)) });
     }
-    for (const t of slot.targets) { const p = work.optional(t.file, t.path); if (p) kvSet(p, t.key, `hud/hudeditor/${slot.id.toLowerCase()}`); }
+    for (const t of slot.targets) { const p = work.optional(t.file, t.path); if (p) kvSet(p, t.key, `${t.prefix ?? ''}hud/hudeditor/${slot.id.toLowerCase()}`); }
   }
 }
 

@@ -1343,7 +1343,8 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     catch (e) { queueMicrotask(() => designFailed(e)); return false; }
   };
 
-  const basicSlots = SLOTS.filter((s) => !s.advancedOnly);
+  // The Tab screen's slots wait for the Tab preview (StyleSlot.tab).
+  const basicSlots = SLOTS.filter((s) => !s.advancedOnly && !s.tab);
   const advancedSlots = SLOTS.filter((s) => s.advancedOnly);
 
   return (
