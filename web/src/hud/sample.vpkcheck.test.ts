@@ -231,7 +231,7 @@ it('writes a sample VPK or zip for the Python/unzip readers', () => {
     const d = validateDesign(SAMPLE_T);
     // Every field must survive validation: a gate that closed would drop one silently.
     const kept = [d.elements.tabVersus?.x === 420, d.elements.tabVersus?.y === 20, d.children.tabBoard?.MissionTitle?.color,
-      d.children.tabVersus?.HealthAmount?.visible === false, d.children.tabSurvivors?.SurvivorStatsHealth?.keys?.monochrome_color,
+      d.children.tabVersus?.HealthLabel?.visible === false, d.children.tabSurvivors?.SurvivorStatsHealth?.keys?.monochrome_color,
       d.children.tabSurvivors?.PingImage?.visible === false, d.children.tabInfected?.Name?.color, d.styles.tabRowBg];
     if (kept.some((k) => !k)) throw new Error(`sample t lost a field in validateDesign: ${JSON.stringify(kept)}`);
     if (process.env.HUD_DESIGN_OUT) writeFileSync(process.env.HUD_DESIGN_OUT, `${JSON.stringify(d, null, 2)}\n`);
