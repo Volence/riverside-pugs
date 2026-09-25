@@ -26,6 +26,11 @@ function changeCell(v: GameValueView, admin: boolean) {
 export function GameValuesView({ data, admin }: { data: GameValues; admin: boolean }) {
   return (
     <div class="stack">
+      {data.reviewing && (
+        <p class="muted values-reviewing">
+          A newer server config is being reviewed. These are the values of the last settled one.
+        </p>
+      )}
       {data.groups.map((g) => (
         <Panel key={g.id} class="panel--table">
           <h2 class="values-group">{g.label}</h2>

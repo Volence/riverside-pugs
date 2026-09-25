@@ -910,7 +910,10 @@ export interface GameValueView {
   lastChange: { at: string; patch: { id: number; number: number; name: string } | null } | null;
 }
 export interface GameValues {
-  asOf: { patchId: number; number: number } | null;
+  /** Admin view only. */
+  asOf?: { patchId: number; number: number } | null;
+  /** The newest round ran a config still waiting for triage; the values are the last settled ones. */
+  reviewing: boolean;
   groups: { id: string; label: string; values: GameValueView[]; rules: { id: string; text: string; active: boolean; draft: boolean; missing?: string[] }[] }[];
 }
 export interface IgnoredPlugin { file: string; reason: string; addedBy: string | null; addedAt: string | null; source: 'site' | 'knobs' }
