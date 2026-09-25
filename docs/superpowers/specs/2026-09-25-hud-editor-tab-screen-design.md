@@ -764,3 +764,9 @@ Full table: `/home/volence/l4d/hud/probe-tab/RESULTS.md`. What changes in the sc
 - **Proven, left for later (owner's call):** the whole Tab screen on the right (TL1), moving the rows
   (TL2). TL4 (rounded row) was not seen. TL5: the versus panel clips its children, so a later
   resize must grow it.
+
+## 8. Owner's answers (2026-09-25 morning)
+
+- Versus-only scope, one team-box slot, and the rest of the "Decided overnight" list: **yes**.
+- The whole Tab screen on the right (TL1): wanted as a later option (confirm the exact control then).
+- `ThirdPartyServerPanel` (the server-name box): **eventually**, not now.

@@ -1572,7 +1572,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
         <p class="muted hud__note">
           {design.advanced
             ? 'Unzip it and follow README.txt. A rebuilt HUD only shows after a game restart. Custom HUDs are allowed on the Riverside servers.'
-            : <>Put the file in <code>left4dead/addons/</code> and restart the game. Keep it as this one .vpk file: unpacked into loose files, its pictures show as purple and black squares on the Riverside servers. Custom HUDs are allowed on the Riverside servers.</>}
+            : <>Put the file in <code>left4dead/addons/</code> and restart the game. Custom HUDs are allowed on the Riverside servers.</>}
         </p>
         {design.crosshair === 'bundle' && (
           <p class="muted hud__note">

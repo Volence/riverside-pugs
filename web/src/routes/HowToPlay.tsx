@@ -282,11 +282,10 @@ viewmodel_fov_override 70`}</code></pre>
           </ul>
           <p>
             <strong>Purple and black squares on your HUD?</strong> The game cannot find one of its pictures.
-            Riverside servers refuse pictures installed as loose files (for example a HUD folder in{' '}
-            <code>left4dead_custom</code>), so keep a HUD as one <code>.vpk</code> in <code>addons</code>.
-            To turn a HUD folder into one, zip the folder, import it in the <a href="/hud">HUD editor</a> and
-            download it. A HUD made from the editor's Modern preset that shows the squares on the kill
-            notices or the Tab score panel is an older download that missed some pictures: download it again.
+            A HUD made from the editor's Modern preset that shows them on the kill notices or the Tab
+            score panel is an older download that missed some pictures: download it again. For any other
+            HUD, import it in the <a href="/hud">HUD editor</a>: it lists the pictures the HUD needs but
+            does not include.
           </p>
         </Panel>
         <Panel id="playing">

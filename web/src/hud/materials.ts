@@ -6,9 +6,8 @@
  * texture, a purple and black checkerboard, in its place. The download passes
  * every imported file through, so a picture the import includes is fine, and
  * so is one the game ships (stockVgui.ts, exported from the game's files). What
- * is left is a picture the player has somewhere else, such as a loose folder the
- * HUD came from, and a server with sv_pure 2 (every Riverside server) refuses a
- * loose picture: research/2026-09-25-hud-missing-textures.md.
+ * is left is a picture the player has somewhere else (a folder the HUD came
+ * from), which the download leaves behind.
  *
  * Only pictures under vgui/ are checked, as that is what the stock list covers.
  * A bare `image` name with no folder is left alone: some panels take a texture
