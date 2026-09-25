@@ -205,6 +205,43 @@ export function HowToPlay({ session }: { session: Session }) {
             on top of yours.
           </p>
         </Panel>
+        {/* The server kicks a cl_fov outside 75 to 120 (l4d_texture_manager_block.cfg),
+            so the range below is a rule, not advice. Keep them in step. */}
+        <Panel>
+          <h3>Field of view</h3>
+          <p>
+            L4D1 will not let you change your field of view on its own. A small client plugin
+            fixes that and adds two console commands.
+          </p>
+          <ol class="howto">
+            <li>
+              Download both files:{' '}
+              <a href="/fov/viewmodeloverride.dll" download="viewmodeloverride.dll"><strong>viewmodeloverride.dll</strong></a>
+              {' '}and{' '}
+              <a href="/fov/viewmodeloverride.vdf" download="viewmodeloverride.vdf"><strong>viewmodeloverride.vdf</strong></a>.
+            </li>
+            <li>
+              Put them both in <code>steamapps/common/left 4 dead/left4dead/addons/</code>, then
+              restart L4D.
+            </li>
+            <li>
+              Set them in the console:
+              <pre class="launch-opts"><code>{`fov_override 100
+viewmodel_fov_override 70`}</code></pre>
+              <code>fov_override</code> is your field of view. <code>viewmodel_fov_override</code>{' '}
+              is how your hands and gun sit on screen. The numbers above are only a starting point.
+            </li>
+          </ol>
+          <p>
+            <strong class="howto-warn">Keep <code>fov_override</code> between 75 and 120.</strong>{' '}
+            The servers kick anyone outside that range.
+          </p>
+          <p class="muted">
+            To make them stick, add the two lines to the bottom of your{' '}
+            <code>autoexec.cfg</code>. The plugin is the community Viewmodel FOV Changer by
+            Applesauce. To remove it, delete the two files.
+          </p>
+        </Panel>
         <Panel>
           <h3>Installing the L4D2 map pack</h3>
           <p>
