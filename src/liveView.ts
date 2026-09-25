@@ -292,7 +292,13 @@ export function recordPhase(db: DB, token: string, phase: Phase): void {
       "UPDATE match_readyups SET ended_at = datetime('now') WHERE match_id = ? AND ended_at IS NULL",
     ).run(id);
   }
-  if (prev?.phase === 'paused') {
+  // Still the same team's pause, only its leave flag changed: someone on
+  // either team dropped mid-pause (or came back). That is one pause, not a
+  // new one, so the open ledger row carries on instead of being closed and
+  // reopened. Match 190 showed one pause as three rows this way.
+  const continuesPause = prev?.phase === 'paused' && phase.state === 'paused'
+    && (prev.phase_team ?? null) === phase.team;
+  if (prev?.phase === 'paused' && !continuesPause) {
     db.prepare(
       "UPDATE match_pauses SET ended_at = datetime('now') WHERE match_id = ? AND ended_at IS NULL",
     ).run(id);
@@ -314,7 +320,11 @@ export function recordPhase(db: DB, token: string, phase: Phase): void {
     const round = db
       .prepare('SELECT MAX(half) AS half FROM match_rounds WHERE match_id = ? AND ordinal = ?')
       .get(id, ordinal) as { half: number | null };
-    if (phase.state === 'paused') {
+    const continued = continuesPause && db.prepare(
+      `UPDATE match_pauses SET leave_pause = MAX(leave_pause, ?), called_by = COALESCE(called_by, ?)
+        WHERE match_id = ? AND ended_at IS NULL`,
+    ).run(phase.leave ? 1 : 0, phase.by ?? null, id).changes > 0;
+    if (phase.state === 'paused' && !continued) {
       db.prepare(
         `INSERT INTO match_pauses (match_id, map_ordinal, half, team, leave_pause, started_at, called_by)
          VALUES (?, ?, ?, ?, ?, datetime('now'), ?)`,
