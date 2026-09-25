@@ -49,6 +49,15 @@ describe('GameValues', () => {
     expect(screen.queryByText(/being reviewed/)).toBeNull();
   });
 
+  it('stacks rows on phones: every value cell carries its column label', async () => {
+    mockApi.gameValues.mockResolvedValue(data);
+    const { container } = render(<GameValues />);
+    await screen.findByText('Tank health');
+    const cells = [...container.querySelectorAll('table.values-table tbody td')];
+    expect(cells.length).toBeGreaterThan(0);
+    expect(cells.every((td) => td.getAttribute('data-label'))).toBe(true);
+  });
+
   it('the admin preview tags draft and inactive rules and shows a hidden value\'s note', async () => {
     mockAdmin.gameValues.mockResolvedValue(data);
     render(<Values />);
