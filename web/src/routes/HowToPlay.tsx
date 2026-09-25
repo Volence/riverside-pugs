@@ -280,6 +280,14 @@ viewmodel_fov_override 70`}</code></pre>
             <li><a href="/crosshair"><strong>Crosshair maker</strong></a>: draw a crosshair and download it on its own, or send it into your HUD.</li>
             <li><a href="/community"><strong>Community</strong></a>: HUDs and crosshairs other players have shared, ready to download.</li>
           </ul>
+          <p>
+            <strong>Purple and black squares on your HUD?</strong> The game cannot find one of its pictures.
+            Riverside servers refuse pictures installed as loose files (for example a HUD folder in{' '}
+            <code>left4dead_custom</code>), so keep a HUD as one <code>.vpk</code> in <code>addons</code>.
+            To turn a HUD folder into one, zip the folder, import it in the <a href="/hud">HUD editor</a> and
+            download it. A HUD made from the editor's Modern preset that shows the squares on the kill
+            notices or the Tab score panel is an older download that missed some pictures: download it again.
+          </p>
         </Panel>
         <Panel id="playing">
           <h3>Playing a match</h3>

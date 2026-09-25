@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { missingPictures, stockVgui } from './materials';
+import { missingPictures, missingPicturesNote, stockVgui } from './materials';
 
 const enc = (s: string) => new TextEncoder().encode(s);
 const hud = (files: Record<string, string>) => new Map(Object.entries(files).map(([k, v]) => [k, enc(v)]));
@@ -81,5 +81,22 @@ describe('missingPictures', () => {
       'resource/ui/b.res': '"x" { "p" { "image" "hud/custom_bg" }',
     });
     expect(missingPictures(files)).toEqual([{ material: 'vgui/hud/custom_bg', file: 'resource/ui/a.res' }]);
+  });
+});
+
+describe('missingPicturesNote', () => {
+  it('says nothing when nothing is missing', () => {
+    expect(missingPicturesNote([])).toBe('');
+  });
+  it('names one picture', () => {
+    expect(missingPicturesNote([{ material: 'vgui/hud/sigh', file: 'a.res' }])).toBe(
+      ' This HUD names a picture it does not include and the game does not have (vgui/hud/sigh). '
+      + 'The game draws it as purple and black squares. Import the whole HUD folder, with its materials folder, to include it.');
+  });
+  it('names three and counts the rest', () => {
+    const m = ['a', 'b', 'c', 'd', 'e'].map((n) => ({ material: `vgui/hud/${n}`, file: 'x.res' }));
+    expect(missingPicturesNote(m)).toContain('names 5 pictures');
+    expect(missingPicturesNote(m)).toContain('(vgui/hud/a, vgui/hud/b, vgui/hud/c and 2 more)');
+    expect(missingPicturesNote(m)).toContain('draws them');
   });
 });

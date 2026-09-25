@@ -1133,7 +1133,10 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
         dropPicks();
       }
       const lasting = kept ? '' : ' This browser could not store it, so it is kept only until this page closes.';
-      setStatus(`${again ? `Imported ${upload.name} again; this design can be edited and downloaded.` : `Imported ${upload.name}.`}${leftOut(upload.dropped, 'Left out')}${lasting}`);
+      // Loaded here, not up front: the game's file list is only needed on an import.
+      const { missingPictures, missingPicturesNote } = await import('../hud/materials');
+      const missing = missingPicturesNote(missingPictures(upload.files));
+      setStatus(`${again ? `Imported ${upload.name} again; this design can be edited and downloaded.` : `Imported ${upload.name}.`}${leftOut(upload.dropped, 'Left out')}${missing}${lasting}`);
     } catch (err) {
       setStatus((err as Error).message);
     }
@@ -1488,7 +1491,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
         <p class="muted hud__note">
           {design.advanced
             ? 'Unzip it and follow README.txt. A rebuilt HUD only shows after a game restart. Custom HUDs are allowed on the Riverside servers.'
-            : <>Put the file in <code>left4dead/addons/</code> and restart the game. Custom HUDs are allowed on the Riverside servers.</>}
+            : <>Put the file in <code>left4dead/addons/</code> and restart the game. Keep it as this one .vpk file: unpacked into loose files, its pictures show as purple and black squares on the Riverside servers. Custom HUDs are allowed on the Riverside servers.</>}
         </p>
         {design.crosshair === 'bundle' && (
           <p class="muted hud__note">
