@@ -129,6 +129,13 @@ describe('publicChanges', () => {
       { label: 'weapon_pumpshotgun.Damage', from: 'game default', to: '25' },
     ]);
   });
+  it('names a plugin from a subfolder by its bare name and matches the lists by file name', () => {
+    const k = { ...KNOBS, versionless: ['l4d_tankhud.smx'] };
+    const c = publicChanges(
+      { 'p:optional/l4d_tankhud.smx': '1.aaaaaaaa', 'p:optional/l4d_storm.smx': '1.aaaaaaaa' },
+      { 'p:optional/l4d_tankhud.smx': '2.bbbbbbbb', 'p:optional/l4d_storm.smx': '2.bbbbbbbb', 'p:optional/l4d_tvwatch.smx': '1.cccccccc', 'p:optional/new_one.smx': '1.dddddddd' }, k);
+    expect(c).toMatchObject({ pluginsAdded: ['new_one'], pluginsUpdated: ['l4d_storm'], pluginsRemoved: [] });
+  });
   it('lists a watched file that appears or disappears, and falls back to raw names without knobs', () => {
     expect(publicChanges({}, { 'f:cfg/new.cfg': '1.aaaaaaaa' }, KNOBS).files).toEqual(['cfg/new.cfg']);
     expect(publicChanges({ 'c:z_tank_health': '1' }, { 'c:z_tank_health': '2' }, null).knobs).toEqual([{ label: 'z_tank_health', from: '1', to: '2' }]);

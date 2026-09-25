@@ -1,5 +1,5 @@
 import type { DB } from './db.js';
-import { diffInventories, refingerprintPatches, withoutIgnored } from './balancePatches.js';
+import { diffInventories, onPluginList, pluginFile, refingerprintPatches, withoutIgnored } from './balancePatches.js';
 import { chainOf, foldInto, resolvePatch, unfoldPatch } from './balanceFold.js';
 import { addIgnored, effectiveIgnored, PLUGIN_FILE_RE } from './balanceIgnore.js';
 import { activeRollout } from './balanceRollouts.js';
@@ -21,7 +21,7 @@ const base = (path: string) => path.split('/').pop() ?? path;
 /** a to b in plain words, one line per difference. A versionless plugin whose
  *  build alone changed is not a difference (the fingerprint ignores it too). */
 export function describeChanges(a: Inventory, b: Inventory, versionless: string[]): { lines: string[]; plugins: string[]; onlyPlugins: boolean } {
-  const skip = new Set(versionless.map((f) => `p:${f}`));
+  const skip = onPluginList(versionless);
   const d = diffInventories(a, b);
   const lines: string[] = [];
   const plugins: string[] = [];
@@ -29,8 +29,9 @@ export function describeChanges(a: Inventory, b: Inventory, versionless: string[
   const word = (key: string, what: 'added' | 'removed' | 'changed', from?: string, to?: string) => {
     const kind = key.slice(0, 2), name = key.slice(2);
     if (kind === 'p:') {
-      plugins.push(name);
-      lines.push(`plugin ${what === 'changed' ? 'updated' : what}: ${name.replace(/\.smx$/, '')}`);
+      // The ignore list holds file names (see onPluginList).
+      if (!plugins.includes(pluginFile(key))) plugins.push(pluginFile(key));
+      lines.push(`plugin ${what === 'changed' ? 'updated' : what}: ${pluginFile(key).replace(/\.smx$/, '')}`);
       return;
     }
     other++;
@@ -41,7 +42,7 @@ export function describeChanges(a: Inventory, b: Inventory, versionless: string[
   };
   for (const k of d.added) word(k, 'added', undefined, b[k]);
   for (const k of d.removed) word(k, 'removed');
-  for (const c of d.changed) if (!skip.has(c.key)) word(c.key, 'changed', c.from, c.to);
+  for (const c of d.changed) if (!skip(c.key)) word(c.key, 'changed', c.from, c.to);
   // Plugins first, then everything else, each in key order.
   const order = (l: string) => (l.startsWith('plugin ') ? 0 : 1);
   lines.sort((x, y) => order(x) - order(y));

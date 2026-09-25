@@ -1,6 +1,6 @@
 import type { DB } from './db.js';
 import { adjustableKnobs, normalizeKnobValue, type BalanceKnobs } from './balanceKnobs.js';
-import { diffInventories, fingerprintOf, formatDiff, withoutIgnored } from './balancePatches.js';
+import { diffInventories, fingerprintOf, formatDiff, onPluginList, withoutIgnored } from './balancePatches.js';
 
 /**
  * The control panel's pure half: what the servers should run and what their
@@ -72,9 +72,9 @@ function withoutKnobs(inv: Inventory, knobs: BalanceKnobs): Inventory {
 /** formatDiff of a to b, leaving out a versionless plugin whose build alone
  *  changed (its presence still counts, as in the fingerprint). */
 export function diffIgnoringVersionless(a: Inventory, b: Inventory, versionless: string[]): string {
-  const skip = new Set(versionless.map((f) => `p:${f}`));
+  const skip = onPluginList(versionless);
   const d = diffInventories(a, b);
-  return formatDiff({ ...d, changed: d.changed.filter((c) => !skip.has(c.key)) });
+  return formatDiff({ ...d, changed: d.changed.filter((c) => !skip(c.key)) });
 }
 
 /** Enabled servers whose last inventory differs from the base in something a

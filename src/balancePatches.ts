@@ -7,19 +7,30 @@ import { triageInfo, type Lists } from './balanceTriage.js';
 
 type Inventory = Record<string, string>;
 
+/** A plugin key's file name: a plugin loaded from a subfolder
+ *  (plugins/optional/) reports as "p:optional/<file>". */
+export const pluginFile = (key: string): string => key.slice(2).split('/').pop()!;
+
+/** Whether an inventory key is a plugin on `list` (bare file names), matched
+ *  by file name so a plugin in a subfolder is on the list too. */
+export function onPluginList(list: string[]): (key: string) => boolean {
+  const names = new Set(list);
+  return (key) => key.startsWith('p:') && names.has(pluginFile(key));
+}
+
 /** Stable 16-hex fingerprint. A versionless plugin contributes its presence
  *  only, so updating pug-match does not start a new balance patch. */
 export function fingerprintOf(inv: Inventory, versionless: string[]): string {
-  const skip = new Set(versionless.map((f) => `p:${f}`));
-  const lines = Object.keys(inv).sort().map((k) => (skip.has(k) ? `${k}=present` : `${k}=${inv[k]}`));
+  const skip = onPluginList(versionless);
+  const lines = Object.keys(inv).sort().map((k) => (skip(k) ? `${k}=present` : `${k}=${inv[k]}`));
   return createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 16);
 }
 
 /** The inventory without ignored plugins: they never reach the fingerprint,
  *  the stored inventory or the drift alert. */
 export function withoutIgnored(inv: Inventory, ignored: string[]): Inventory {
-  const skip = new Set(ignored.map((f) => `p:${f}`));
-  return Object.fromEntries(Object.entries(inv).filter(([k]) => !skip.has(k)));
+  const skip = onPluginList(ignored);
+  return Object.fromEntries(Object.entries(inv).filter(([k]) => !skip(k)));
 }
 
 /** Whether a stored inventory, read as JSON, equals `invJson` once the
@@ -46,7 +57,7 @@ export function diffInventories(a: Inventory, b: Inventory) {
  *  versionless plugin's build, and every added or removed key is a cvar,
  *  missing-cvar marker, weapon key, file or directory. */
 export function watchListOnly(a: Inventory, b: Inventory, versionless: string[]): boolean {
-  const skip = new Set(versionless.map((f) => `p:${f}`));
+  const skip = onPluginList(versionless);
   const d = diffInventories(a, b);
   const oneSided = [...d.added, ...d.removed];
   // A cvar that vanished (c:x removed, x:x added) or appeared (the reverse) is
@@ -54,7 +65,7 @@ export function watchListOnly(a: Inventory, b: Inventory, versionless: string[])
   const cvarNames = (keys: string[]) => new Set(keys.filter((k) => /^[cx]:/.test(k)).map((k) => k.slice(2)));
   const added = cvarNames(d.added), removed = cvarNames(d.removed);
   if ([...added].some((n) => removed.has(n))) return false;
-  return d.changed.every((c) => skip.has(c.key)) && oneSided.length > 0 && oneSided.every((k) => /^[cxwfd]:/.test(k));
+  return d.changed.every((c) => skip(c.key)) && oneSided.length > 0 && oneSided.every((k) => /^[cxwfd]:/.test(k));
 }
 
 export function formatDiff(d: ReturnType<typeof diffInventories>, max = 10): string {
