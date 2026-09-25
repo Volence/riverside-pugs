@@ -6,11 +6,11 @@ import type { Session } from '../hooks/useLiveState';
 const FAQ: { q: string; a: preact.ComponentChildren }[] = [
   {
     q: 'Why do I need Discord?',
-    a: <>Queue pops, the ready check, the campaign vote, the connect info and your team voice channel all run through the Riverside Discord. Playing with your team in voice is a big part of what makes these games good, so being in the server is required to queue.</>,
+    a: <>Queue pops, the ready check, the campaign vote, the connect info and your team voice channel all run through the Riverside Discord. Playing with your team in voice is a big part of what makes these games good, so being in the server is required to queue, and you have to be sitting in one of its voice channels to press Ready. Leaving voice during the ready check un-readies you.</>,
   },
   {
     q: 'How do matches work?',
-    a: <>When 8 players are queued it pops: everyone has two minutes to press Ready (on the site or the bot's card in #queue-here), then there is a 30 second campaign vote. Teams are balanced by SR, a server is set up, and you get a Connect button. A match is a full campaign minus the finale, both teams playing each map as survivors and infected.</>,
+    a: <>When 8 players are queued it pops: everyone has two minutes to press Ready (on the site or the bot's card in Discord), then there is a 30 second campaign vote. Teams are split so each side has as close to an even chance as the ratings allow, a server is set up, and you get the connect line. A match is normally a full campaign minus the finale, both teams playing each map as survivors and infected, and the bot moves each team into its own voice channel.</>,
   },
   {
     q: 'Do I need to change any settings?',
@@ -22,19 +22,19 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
   },
   {
     q: 'How do I connect to the server?',
-    a: <>Press <strong>Connect</strong> on Play or on the Discord match card and paste the line into the L4D console (enable the console in Options, open it with <code>~</code>). The password goes first, then the connect: <code>password pug_xxxx; connect ip:port</code>. The other way round fails with "Bad password".</>,
+    a: <>Press <strong>Copy</strong> on Play, or <strong>Connect</strong> on the Discord match card, and paste the line into the L4D console (enable the console in Options, open it with <code>~</code>). The password goes first, then the connect: <code>password pug_xxxx; connect ip:port</code>. The other way round fails with "Bad password". Play also has a <strong>join through Steam</strong> link; it fills the password in for you, but you still have to press Enter on it.</>,
   },
   {
     q: 'How does SR work?',
-    a: <>SR comes from an OpenSkill rating, updated after every match from whether your team won. It is shown cautiously: a new player's rating is uncertain, so it starts lower and settles as you play. You are <strong>provisional</strong> for your first 3 matches and do not appear in the ranked part of the leaderboard until then. If you join a match as a sub and play under half of it, your stats count but your rating does not change.</>,
+    a: <>SR comes from an OpenSkill rating, updated after every match from whether your team won, lost or drew. It is shown cautiously: a new player's rating is uncertain, so it starts lower and settles as you play. You are <strong>provisional</strong> for your first 3 matches and are listed below the ranked part of the leaderboard until then. If you join a match as a sub and play under half of it, your stats count but your rating does not change.</>,
   },
   {
     q: 'What happens if I miss a ready check or do not show up?',
-    a: <>You get a queue timeout. Missing a ready check, or never connecting to a match that gets cancelled for no-shows, costs 5 minutes the first time, then 15 minutes, then an hour, then a day for each one after that. Offenses older than a week stop counting. If it was a genuine accident, ask an admin to clear it.</>,
+    a: <>You get a queue timeout. Missing a ready check, or never connecting to a match that gets cancelled for no-shows, costs 1 minute for each of the first three, then 5 minutes, then 15 minutes for each one after that. Offenses older than a week stop counting. If it was a genuine accident, ask an admin to clear it.</>,
   },
   {
     q: 'What happens if I disconnect during a match?',
-    a: <>The game pauses and you get 5 minutes to reconnect. That 5 minutes is for the <strong>whole match</strong>, not each disconnect, so every time you drop it keeps counting down from where it was. When everyone is back the game unpauses on its own. If you run out, the match ends as an abandon: nobody's rating changes, and you are banned from queueing for a day (3 days for a second abandon within a month, then a week). If it was a genuine crash, message an admin to appeal.</>,
+    a: <>The game pauses and you get 7 minutes to reconnect. That 7 minutes is for the <strong>whole match</strong>, not each disconnect, so every time you drop it keeps counting down from where it was. When everyone is back the game unpauses on its own after a 10 second countdown. If you run out, the match ends as an abandon: nobody's rating changes, and you are banned from the queue and the Riverside servers for a day (3 days for a second abandon within a month, then a week). If you crashed, tell an admin straight away: they can put your clock on hold or give you more time.</>,
   },
   {
     q: 'I left the queue on purpose. Is that a penalty?',
@@ -42,19 +42,23 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
   },
   {
     q: 'How do I report someone?',
-    a: <>Use <code>/report</code> in Discord, or the <strong>Report a player</strong> button at the bottom of the match page. You can report anyone from a match you played in, for 48 hours after it ends. Reports go straight to the admins, and the player is never told who reported them.</>,
+    a: <>Use <code>/report</code> in Discord, the <strong>Report a player</strong> button on a match page, or <strong>Report</strong> on their profile. The player is never told who reported them. You can file up to 5 reports a day, one per player per match. Pick <strong>Safety concern</strong> for anything that should stay private: only admins see it. Your reports and their status are under <strong>My reports</strong> on your profile, where you can also talk to the moderators about one.</>,
+  },
+  {
+    q: 'How do I get a moderator during a match?',
+    a: <>Type <code>/mod</code> (or <code>/calladmin</code>) in game chat. Nobody else sees it. Pick a reason and who it is about, add a line of detail if you want, and the moderators are pinged in Discord. You can call again after 3 minutes. For a safety concern, report it on the website instead.</>,
   },
   {
     q: 'I linked Discord but it says I am not in the server.',
-    a: <>Make sure the Discord account you linked is the one in the Riverside server (check your profile: it shows the linked name). If you linked the wrong one, Disconnect it on your profile and link again. Joining the server lets you in within a few seconds; press Check again.</>,
+    a: <>Make sure the Discord account you linked is the one in the Riverside server (check your profile: it shows the linked name). If you linked the wrong one, Disconnect it on your profile and link again; you cannot do that while you are queued, in a match or banned. Joining the server lets you in within a few seconds; press Check again.</>,
   },
   {
     q: 'What bot commands are there?',
-    a: <><code>/profile</code>, <code>/leaderboard</code>, <code>/matches</code>, <code>/queue</code>, <code>/link</code> and <code>/report</code>. The queue itself is the panel in #queue-here.</>,
+    a: <><code>/profile</code>, <code>/leaderboard</code>, <code>/matches</code>, <code>/queue</code>, <code>/link</code> and <code>/report</code>. The queue itself is the panel in Discord. When a match ends its result card has an <strong>Endorse</strong> button: you can endorse up to 2 players from it within 24 hours.</>,
   },
   {
     q: 'A match is stuck, or the server never came up.',
-    a: <>Matches where too few people connect are cancelled automatically after 10 minutes, and nobody who connected is penalised. If something else is wrong, tell an admin in Discord: they can abort a match and free the server.</>,
+    a: <>If anyone has still not connected 10 minutes after the server is ready, the match is cancelled. Only the players who never connected get a no-show; everyone else goes free. A match with no round played 30 minutes after the server is ready is cancelled with no penalties at all. If something else is wrong, tell an admin in Discord: they can abort a match and free the server.</>,
   },
   {
     q: 'I was dropped while loading with "Server is enforcing consistency for this file".',
@@ -62,7 +66,7 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
   },
   {
     q: 'My demo crashes when I play it back.',
-    a: <>Load any versus map first (<code>map l4d_vs_hospital01_apartment versus</code>), then <code>playdemo</code>. Loading a versus demo from the main menu crashes the game. The match page has the full steps next to the downloads.</>,
+    a: <>Load the demo's map in versus first (for example <code>map l4d_vs_hospital01_apartment versus</code>), then <code>playdemo</code>. Loading a versus demo from the main menu crashes the game. The match page has the full steps next to the downloads.</>,
   },
 ];
 
