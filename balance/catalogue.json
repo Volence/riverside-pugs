@@ -52,6 +52,10 @@
     {
       "id": "map",
       "label": "Maps"
+    },
+    {
+      "id": "fixes",
+      "label": "Fixes"
     }
   ],
   "values": [
@@ -124,22 +128,6 @@
       "note": "Spare Uzi bullets you can carry, on top of the magazine."
     },
     {
-      "id": "ammo_assaultrifle_max",
-      "group": "survivors",
-      "label": "Rifle reserve ammo",
-      "source": "cvar",
-      "vanilla": "360",
-      "note": "Spare rifle bullets you can carry, on top of the magazine."
-    },
-    {
-      "id": "ammo_huntingrifle_max",
-      "group": "survivors",
-      "label": "Hunting rifle reserve ammo",
-      "source": "cvar",
-      "vanilla": "150",
-      "note": "Spare hunting rifle bullets you can carry, on top of the magazine."
-    },
-    {
       "id": "l4d_smg_reload_clip_time",
       "group": "survivors",
       "label": "Uzi reload: magazine counts after",
@@ -155,6 +143,22 @@
       "unit": "s",
       "vanilla": "2.24",
       "note": "Length of the full Uzi reload. 0 means the game's own length."
+    },
+    {
+      "id": "l4d_pistol_reload_clip_time",
+      "group": "survivors",
+      "label": "Pistol reload: magazine counts after",
+      "source": "cvar",
+      "unit": "s",
+      "note": "CS:GO style reload for a single pistol, 30% longer while you are down."
+    },
+    {
+      "id": "l4d_dualpistol_reload_clip_time",
+      "group": "survivors",
+      "label": "Dual pistol reload: magazine counts after",
+      "source": "cvar",
+      "unit": "s",
+      "note": "Same for dual pistols."
     },
     {
       "id": "rotoblin_melee_penalty",
@@ -185,7 +189,7 @@
       "label": "Common infected limit",
       "source": "cvar",
       "vanilla": "30",
-      "note": "Most common infected alive at once, hordes included. Set by l4dready when the round goes live."
+      "note": "Most common infected alive at once, hordes included. A plugin removes any common beyond this + 5. Set by l4dready when the round goes live."
     },
     {
       "id": "z_mega_mob_size",
@@ -193,7 +197,15 @@
       "label": "Panic event horde size",
       "source": "cvar",
       "vanilla": "50",
-      "note": "How many commons a panic event (alarm, crescendo, finale wave) sends. Set by l4dready when the round goes live."
+      "note": "How many commons a panic event (alarm, crescendo, finale wave) sends in total. Never more than the common limit + 5 are alive at once, extras are removed as they spawn. Set by l4dready when the round goes live."
+    },
+    {
+      "id": "l4d_score_healthbounus_pill",
+      "group": "scoring",
+      "label": "Bonus per unused pills",
+      "source": "cvar",
+      "unit": "points",
+      "note": "Added to a survivor's health bonus for pills still held at the saferoom, even if they are down."
     },
     {
       "id": "director_no_mobs",
@@ -276,14 +288,14 @@
       "source": "cvar",
       "unit": "s",
       "vanilla": "75",
-      "note": "A lit tank burns to death in this time whatever its health, unless a burn cap is on."
+      "note": "A lit tank burns to death in this time whatever its health, unless a burn cap is on. Molotovs and gas cans are removed in our PUG mode, so this mostly matters in Lite."
     },
     {
       "id": "l4d_tank_burn_cap",
       "group": "tank",
       "label": "Tank burn damage cap",
       "source": "cvar",
-      "note": "Most fire damage a tank can take in one round before the fire goes out. 0 means off: fire burns the tank to death."
+      "note": "Most fire damage a tank can take in one round before the fire goes out. 0 means off: fire burns the tank to death. Molotovs and gas cans are removed in our PUG mode, so this mostly matters in Lite."
     },
     {
       "id": "z_frustration_spawn_delay",
@@ -315,28 +327,9 @@
     {
       "id": "tank_control_disable",
       "group": "tank",
-      "label": "Random tank pick",
+      "label": "Rotoblin tank rotation off",
       "source": "cvar",
-      "vanilla": "0",
-      "note": "1 means the tank goes to a random infected player instead of down a fixed order."
-    },
-    {
-      "id": "z_tank_damage_slow_min_range",
-      "group": "tank",
-      "label": "Tank slowed by damage within (min)",
-      "source": "cvar",
-      "unit": "units",
-      "vanilla": "200",
-      "note": "Gunfire from this close slows the tank the most."
-    },
-    {
-      "id": "z_tank_damage_slow_max_range",
-      "group": "tank",
-      "label": "Tank slowed by damage within (max)",
-      "source": "cvar",
-      "unit": "units",
-      "vanilla": "400",
-      "note": "Gunfire from farther than this does not slow the tank at all."
+      "note": "1 means the game's own random lottery picks the tank player, as in vanilla. 0 switches on Rotoblin's rotation, where every infected player takes a turn."
     },
     {
       "id": "z_witch_health",
@@ -475,7 +468,7 @@
       "source": "cvar",
       "unit": "deg",
       "vanilla": "45",
-      "note": "Same cone against a hunter mid-pounce. 0 means a flying hunter cannot be shoved out of the air."
+      "note": "Shove cone against a hunter mid-pounce. 0 also switches on the no-deadstop rule below."
     },
     {
       "id": "z_hunter_lunge_stagger_time",
@@ -602,7 +595,7 @@
       "label": "Smokers per team",
       "source": "cvar",
       "vanilla": "1",
-      "note": "Most smokers the infected team can have alive at once."
+      "note": "Most smokers the infected team can have alive at once. QuadCaps can lower it for one wave after a boomer dies."
     },
     {
       "id": "z_vomit_interval",
@@ -644,7 +637,7 @@
       "label": "Boomers per team",
       "source": "cvar",
       "vanilla": "1",
-      "note": "Most boomers the infected team can have alive at once."
+      "note": "Most boomers the infected team can have alive at once. QuadCaps lowers it for one wave after a boomer dies."
     },
     {
       "id": "z_max_player_zombies",
@@ -727,7 +720,7 @@
       "group": "items",
       "label": "Weapon style",
       "source": "cvar",
-      "note": "1 replaces every tier 2 weapon on the map with a tier 1 weapon."
+      "note": "1 replaces rifles with Uzis and auto shotguns with pump shotguns. Hunting rifles stay on the map, see the limit below."
     },
     {
       "id": "rotoblin_enable_throwables",
@@ -751,13 +744,6 @@
       "note": "Most pump shotguns the survivor team can hold at once. -1 means no limit."
     },
     {
-      "id": "rotoblin_limit_autoshotgun",
-      "group": "items",
-      "label": "Auto shotgun limit",
-      "source": "cvar",
-      "note": "Most auto shotguns the survivor team can hold at once. -1 means no limit."
-    },
-    {
       "id": "rotoblin_limit_smg",
       "group": "items",
       "label": "Uzi limit",
@@ -765,42 +751,11 @@
       "note": "Most Uzis the survivor team can hold at once. -1 means no limit."
     },
     {
-      "id": "rotoblin_limit_rifle",
-      "group": "items",
-      "label": "Rifle limit",
-      "source": "cvar",
-      "note": "Most rifles the survivor team can hold at once. -1 means no limit."
-    },
-    {
       "id": "rotoblin_limit_huntingrifle",
       "group": "items",
       "label": "Hunting rifle limit",
       "source": "cvar",
-      "note": "Most hunting rifles the survivor team can hold at once. -1 means no limit."
-    },
-    {
-      "id": "director_pain_pill_density",
-      "group": "items",
-      "label": "Pill density",
-      "source": "cvar",
-      "vanilla": "6.48",
-      "note": "How many pill spots the game fills across the map. Only matters when the health style keeps map pills."
-    },
-    {
-      "id": "director_convert_pills",
-      "group": "items",
-      "label": "Kits converted to pills",
-      "source": "cvar",
-      "vanilla": "1",
-      "note": "Whether the game turns some map pills into first aid kits."
-    },
-    {
-      "id": "director_vs_convert_pills",
-      "group": "items",
-      "label": "Kits converted to pills (versus)",
-      "source": "cvar",
-      "vanilla": "0.5",
-      "note": "Share of map pills turned into kits in versus."
+      "note": "Most hunting rifles the survivor team can hold at once. 0 means they sit on the map but cannot be picked up."
     },
     {
       "id": "director_pistol_density",
@@ -811,35 +766,12 @@
       "note": "How many spare pistols the game places across the map."
     },
     {
-      "id": "l4d_remove_pipebombs",
-      "group": "items",
-      "label": "Pipe bombs removed",
-      "source": "cvar",
-      "note": "1 removes pipe bombs and leaves molotovs."
-    },
-    {
-      "id": "versus_tank_chance",
-      "group": "director",
-      "label": "Tank chance",
-      "source": "cvar",
-      "vanilla": "0.75",
-      "note": "Chance a regular map has a tank. 1 means every map."
-    },
-    {
-      "id": "versus_witch_chance",
-      "group": "director",
-      "label": "Witch chance",
-      "source": "cvar",
-      "vanilla": "0.75",
-      "note": "Chance a regular map has a witch. 1 means every map."
-    },
-    {
       "id": "versus_boss_flow_min",
       "group": "director",
       "label": "Boss spawn flow (min)",
       "source": "cvar",
       "vanilla": "0.1",
-      "note": "Earliest point on the map a tank or witch can spawn, as a share of the way through."
+      "note": "Earliest point a tank or witch can spawn on a middle map, as a share of the way through. First maps and finales use their own ranges, and many maps ban some stretches. Type !boss in game for the real spot."
     },
     {
       "id": "versus_boss_flow_max",
@@ -847,23 +779,7 @@
       "label": "Boss spawn flow (max)",
       "source": "cvar",
       "vanilla": "0.9",
-      "note": "Latest point on the map a tank or witch can spawn."
-    },
-    {
-      "id": "vs_score_pp_health",
-      "group": "scoring",
-      "label": "Score per point of health",
-      "source": "cvar",
-      "vanilla": "0.5",
-      "note": "Points per point of real health a survivor has when reaching the saferoom."
-    },
-    {
-      "id": "vs_score_pp_healthbuffer",
-      "group": "scoring",
-      "label": "Score per point of temporary health",
-      "source": "cvar",
-      "vanilla": "0.25",
-      "note": "Points per point of temporary health a survivor has when reaching the saferoom."
+      "note": "Latest point a tank or witch can spawn on a middle map."
     },
     {
       "id": "l4d_saferoom_lock",
@@ -1170,7 +1086,7 @@
       "source": "cvar",
       "unit": "s",
       "vanilla": "15",
-      "note": "A lit witch burns to death in this time."
+      "note": "A lit witch burns to death in this time. Molotovs and gas cans are removed in our PUG mode, so this mostly matters in Lite."
     },
     {
       "id": "z_witch_berserk_range",
@@ -1214,33 +1130,6 @@
       "source": "cvar",
       "vanilla": "250",
       "note": "Running speed of common infected."
-    },
-    {
-      "id": "first_aid_heal_percent",
-      "group": "survivors",
-      "label": "First aid heals",
-      "source": "cvar",
-      "unit": "fraction of missing health",
-      "vanilla": "0.8",
-      "note": "Share of your missing health a first aid kit restores."
-    },
-    {
-      "id": "first_aid_kit_use_duration",
-      "group": "survivors",
-      "label": "First aid use time",
-      "source": "cvar",
-      "unit": "s",
-      "vanilla": "5",
-      "note": "How long using a first aid kit takes, on yourself or a teammate."
-    },
-    {
-      "id": "first_aid_kit_max_heal",
-      "group": "survivors",
-      "label": "First aid heals up to",
-      "source": "cvar",
-      "unit": "HP",
-      "vanilla": "100",
-      "note": "A first aid kit never heals above this."
     },
     {
       "id": "pain_pills_health_value",
@@ -1300,7 +1189,7 @@
       "label": "Fire damage factor",
       "source": "cvar",
       "vanilla": "0.2",
-      "note": "Share of fire damage survivors take. Versus runs on Normal difficulty, so this is the one that applies."
+      "note": "Share of fire damage survivors take. Versus runs on Normal difficulty, so this is the one that applies. Molotovs and gas cans are removed in our PUG mode, so this mostly matters in Lite."
     },
     {
       "id": "inferno_damage",
@@ -1309,7 +1198,7 @@
       "source": "cvar",
       "unit": "HP",
       "vanilla": "40",
-      "note": "Damage per second standing in fire, before the fire damage factor above."
+      "note": "Damage per second standing in fire, before the fire damage factor above. Molotovs and gas cans are removed in our PUG mode, so this mostly matters in Lite."
     },
     {
       "id": "inferno_flame_lifetime",
@@ -1318,7 +1207,7 @@
       "source": "cvar",
       "unit": "s",
       "vanilla": "15",
-      "note": "How long a molotov or gas can fire keeps burning."
+      "note": "How long a molotov or gas can fire keeps burning. Molotovs and gas cans are removed in our PUG mode, so this mostly matters in Lite."
     },
     {
       "id": "z_ghost_travel_distance",
@@ -1345,15 +1234,6 @@
       "source": "cvar",
       "vanilla": "450",
       "note": "How fast a ghost moves."
-    },
-    {
-      "id": "pipe_bomb_timer_duration",
-      "group": "items",
-      "label": "Pipe bomb fuse",
-      "source": "cvar",
-      "unit": "s",
-      "vanilla": "6",
-      "note": "Time from throwing a pipe bomb to the blast."
     },
     {
       "id": "gfc_hunter_duration",
@@ -1529,17 +1409,25 @@
     {
       "id": "sm_rock_hitbox",
       "group": "tank",
-      "label": "Rock hitbox follows the rock",
+      "label": "Rocks use a shootable hitbox",
       "source": "cvar",
-      "note": "1 means a rock's hit area follows the rock itself, so what you see is what hits."
+      "note": "1 means you break a rock by shooting a sphere around it, lag compensated. A rock has 100 HP and closer shots do more damage to it."
     },
     {
       "id": "sm_rock_hitbox_radius",
       "group": "tank",
-      "label": "Rock hitbox radius",
+      "label": "Shootable rock size",
       "source": "cvar",
       "unit": "units",
-      "note": "Size of that rock hit area."
+      "note": "Radius of that sphere."
+    },
+    {
+      "id": "sm_rock_godframes",
+      "group": "tank",
+      "label": "Rock cannot be shot for",
+      "source": "cvar",
+      "unit": "s",
+      "note": "A freshly thrown rock cannot be damaged for this long, and looks see-through meanwhile."
     },
     {
       "id": "sm_rock_lagcomp",
@@ -1605,7 +1493,7 @@
       "label": "Health kept by a despawned special infected",
       "source": "cvar",
       "unit": "fraction",
-      "note": "Share of its missing health a special infected gets back when it goes back to ghost."
+      "note": "Share of its missing health a special infected gets back when it goes back to ghost. At most once every 20 s."
     },
     {
       "id": "l4d_huntingrifle_fire_rate",
@@ -1614,7 +1502,11 @@
       "source": "cvar",
       "unit": "x",
       "vanilla": "1.0",
-      "note": "Hunting rifle fire rate as a share of normal. 1 is normal, lower is slower."
+      "note": "Hunting rifle fire rate as a share of normal. 1 is normal, lower is slower.",
+      "when": {
+        "cvar": "rotoblin_limit_huntingrifle",
+        "notEquals": "0"
+      }
     },
     {
       "id": "l4dbeta_huntingrifle_swtichtime",
@@ -1622,7 +1514,11 @@
       "label": "Hunting rifle switch time",
       "source": "cvar",
       "unit": "s",
-      "note": "Time after switching to the hunting rifle before it can fire."
+      "note": "Time after switching to the hunting rifle before it can fire.",
+      "when": {
+        "cvar": "rotoblin_limit_huntingrifle",
+        "notEquals": "0"
+      }
     },
     {
       "id": "l4dbeta_huntingrifle_empty_reloadtime",
@@ -1630,7 +1526,11 @@
       "label": "Hunting rifle empty reload",
       "source": "cvar",
       "unit": "s",
-      "note": "Length of a reload from an empty magazine."
+      "note": "Length of a reload from an empty magazine.",
+      "when": {
+        "cvar": "rotoblin_limit_huntingrifle",
+        "notEquals": "0"
+      }
     },
     {
       "id": "l4d_huntingrifle_tank_dmg",
@@ -1639,7 +1539,11 @@
       "source": "cvar",
       "unit": "HP",
       "vanilla": "90",
-      "note": "Damage one hunting rifle bullet does to the tank."
+      "note": "Damage one hunting rifle bullet does to the tank.",
+      "when": {
+        "cvar": "rotoblin_limit_huntingrifle",
+        "notEquals": "0"
+      }
     },
     {
       "id": "l4d_huntingrifle_hunter_chest_multi",
@@ -1648,7 +1552,11 @@
       "source": "cvar",
       "unit": "x",
       "vanilla": "1.0",
-      "note": "Damage multiplier for a hunting rifle hit on a hunter's chest."
+      "note": "Damage multiplier for a hunting rifle hit on a hunter's chest.",
+      "when": {
+        "cvar": "rotoblin_limit_huntingrifle",
+        "notEquals": "0"
+      }
     },
     {
       "id": "l4d_huntingrifle_hunter_Stomach_multi",
@@ -1657,7 +1565,11 @@
       "source": "cvar",
       "unit": "x",
       "vanilla": "1.0",
-      "note": "Damage multiplier for a hunting rifle hit on a hunter's stomach."
+      "note": "Damage multiplier for a hunting rifle hit on a hunter's stomach.",
+      "when": {
+        "cvar": "rotoblin_limit_huntingrifle",
+        "notEquals": "0"
+      }
     },
     {
       "id": "l4d_pistol_delay_single",
@@ -1792,9 +1704,10 @@
     {
       "id": "huntingrifle",
       "group": "weapons",
-      "text": "Hunting rifle (limit {rotoblin_limit_huntingrifle}; 0 means it is not available): fire rate x{l4d_huntingrifle_fire_rate}, {l4dbeta_huntingrifle_swtichtime} s switch time, {l4dbeta_huntingrifle_empty_reloadtime} s empty reload; {l4d_huntingrifle_tank_dmg} damage to the tank, x{l4d_huntingrifle_hunter_chest_multi} to a hunter's chest and x{l4d_huntingrifle_hunter_Stomach_multi} to its stomach.",
+      "text": "Hunting rifle: fire rate x{l4d_huntingrifle_fire_rate}, {l4dbeta_huntingrifle_swtichtime} s switch time, {l4dbeta_huntingrifle_empty_reloadtime} s empty reload; {l4d_huntingrifle_tank_dmg} damage to the tank, x{l4d_huntingrifle_hunter_chest_multi} to a hunter's chest and x{l4d_huntingrifle_hunter_Stomach_multi} to its stomach.",
       "when": {
-        "plugin": "l4d_versus_nerf_huntingrifle.smx"
+        "cvar": "rotoblin_limit_huntingrifle",
+        "notEquals": "0"
       },
       "reviewed": false
     },
@@ -1810,7 +1723,7 @@
     {
       "id": "antibaiter",
       "group": "common",
-      "text": "Anti-bait: if the survivors make no progress for {l4d_antibaiter_delay} s, a {l4d_antibaiter_horde_timer} s countdown appears on screen, and a horde comes when it runs out unless they move forward.",
+      "text": "Anti-bait: once every infected player has been up (spawned or ghost) for {l4d_antibaiter_delay} s and the survivors are not moving forward, a {l4d_antibaiter_horde_timer} s countdown appears, and two hordes come when it runs out unless they move on. It does not run while a tank is alive or a panic event is on, and any infected death restarts it.",
       "when": {
         "plugin": "l4d_antibaiter.smx"
       },
@@ -1828,7 +1741,7 @@
     {
       "id": "rock_lagcomp",
       "group": "tank",
-      "text": "Tank rocks can always be shot out of the air. Here the rock's hitbox (radius {sm_rock_hitbox_radius}) moves with the rock and is lag compensated, so shots that look like hits count.",
+      "text": "A tank rock can be shot out of the air once it is {sm_rock_godframes} s old. Shots count against a {sm_rock_hitbox_radius} unit sphere around the rock and are lag compensated, so shots that look like hits count.",
       "when": {
         "plugin": "l4d_rock_lagcomp.smx"
       },
@@ -1864,7 +1777,7 @@
     {
       "id": "nobhaps",
       "group": "survivors",
-      "text": "Bunny hopping is blocked.",
+      "text": "Bunny hopping is blocked for survivors, smokers, boomers and the tank. Hunters can still bunny hop.",
       "when": {
         "plugin": "l4d_nobhaps.smx"
       },
@@ -1882,7 +1795,7 @@
     {
       "id": "saferoom_lock",
       "group": "map",
-      "text": "The end saferoom door stays locked while a tank or witch is alive.",
+      "text": "The end saferoom door is held open and cannot be closed while a tank or witch is alive.",
       "when": {
         "plugin": "l4d_saferoom_lock.smx"
       },
@@ -1924,6 +1837,530 @@
       "text": "Doors do not stumble the tank. In vanilla, shutting a door on a tank stumbles it for several seconds.",
       "when": {
         "plugin": "l4d_tank_stumble_door.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "health_items",
+      "group": "items",
+      "text": "No health items on the map and no first aid kits. Every survivor is given one bottle of pills when each half goes live, and the finale has one extra bottle per survivor.",
+      "when": {
+        "cvar": "rotoblin_health_style",
+        "equals": "3"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "health_bonus",
+      "group": "scoring",
+      "text": "Health bonus: each survivor who reaches the saferoom scores half their health plus a quarter of their temporary health, plus {l4d_score_healthbounus_pill} for unused pills. A survivor who is down or hanging gets only the pills bonus. Type !bonus to check.",
+      "when": {
+        "plugin": "l4dscores.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "pill_pass",
+      "group": "items",
+      "text": "Press Reload while holding pills to pass them to a standing teammate who has none. A pass that fails comes back to you, and receiving pills does not switch your weapon.",
+      "when": {
+        "plugin": "pill_passer.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "bot_pills",
+      "group": "items",
+      "text": "Survivor bots never take pills. A player who takes over the bot gets them.",
+      "when": {
+        "plugin": "botpopstop.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "tier2",
+      "group": "weapons",
+      "text": "Rifles are replaced by Uzis and auto shotguns by pump shotguns. Hunting rifles stay on the map but cannot be picked up.",
+      "when": {
+        "cvar": "rotoblin_limit_huntingrifle",
+        "equals": "0"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "csgo_reload",
+      "group": "weapons",
+      "text": "Reloading keeps the bullets already in your magazine. The new magazine counts after {l4d_smg_reload_clip_time} s (Uzi), {l4d_pistol_reload_clip_time} s (pistol) or {l4d_dualpistol_reload_clip_time} s (dual pistols), so you can cancel the rest of the animation.",
+      "when": {
+        "plugin": "l4d_weapon_csgo_reload.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "ff_limits",
+      "group": "survivors",
+      "text": "No friendly fire from downed survivors, onto a survivor pinned by an infected, or at point-blank range. Uzi and pistol fire hurts the same teammate at most once every 0.3 s.",
+      "when": {
+        "plugin": "l4d_godframes_and_hittable_control.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "godframe_glow",
+      "group": "survivors",
+      "text": "A survivor in godframes glows red.",
+      "when": {
+        "plugin": "l4d_godframes_and_hittable_control.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "drop_pistol",
+      "group": "survivors",
+      "text": "A survivor who dies drops their pistol.",
+      "when": {
+        "plugin": "l4d_drop_secondary.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "steady_boost",
+      "group": "survivors",
+      "text": "You can stand on another player's head, teammate or enemy, without sliding off. A pouncing hunter still slides.",
+      "when": {
+        "plugin": "l4d2_steady_boost.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "no_nudge",
+      "group": "survivors",
+      "text": "Survivors do not push each other when standing close.",
+      "when": {
+        "plugin": "noteam_nudging.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "sounds",
+      "group": "survivors",
+      "text": "No heartbeat sound on black and white survivors and no downed pain sounds.",
+      "when": {
+        "plugin": "l4d2_sound_manipulation.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "hunter_callout",
+      "group": "survivors",
+      "text": "Survivors never shout \"Hunter!\" on their own.",
+      "when": {
+        "plugin": "hunter_callout_blocker.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "heard_specials",
+      "group": "survivors",
+      "text": "A few seconds after a smoker or boomer spawns, a survivor says they hear it.",
+      "when": {
+        "plugin": "l4d_heardspecialsfix.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "hittables",
+      "group": "tank",
+      "text": "Hittables do fixed damage: 100 for cars, dumpsters and logs, less for small objects, the same to a downed survivor. One object cannot hit the same survivor twice within 1.4 s, and the tank is never hurt by its own hittables.",
+      "when": {
+        "plugin": "l4d_godframes_and_hittable_control.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "ghost_warp",
+      "group": "si",
+      "text": "As a ghost, right-click jumps you to the next survivor, or type !warp with a number or name.",
+      "when": {
+        "plugin": "l4d_versus_GhostWarp.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "stagger_lock",
+      "group": "si",
+      "text": "While staggered you cannot shoot, shove, scratch or pounce. This applies to both teams, except on ladders.",
+      "when": {
+        "plugin": "staggersolver.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "quadcaps_lineup",
+      "group": "si",
+      "text": "The infected team in the second half starts with the same classes the first half started with.",
+      "when": {
+        "plugin": "l4d_QuadCaps.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "saferoom_respawns",
+      "group": "si",
+      "text": "A survivor staying in the saferoom no longer gives the infected unlimited respawns.",
+      "when": {
+        "plugin": "canbecomeghost.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "blind_infected",
+      "group": "si",
+      "text": "Infected cannot see weapons or items on the map until a survivor has had them in view.",
+      "when": {
+        "plugin": "l4d2_blind_infected.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "ladder_block",
+      "group": "si",
+      "text": "You cannot block an opponent climbing a ladder; standing on them bounces you off.",
+      "when": {
+        "plugin": "l4d_ladderblock.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "collisions",
+      "group": "si",
+      "text": "Tank rocks pass through commons and downed survivors, pulled survivors pass through commons, infected pass through the witch, and hunters pass through downed survivors.",
+      "when": {
+        "plugin": "l4d_collision_adjustments.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "scratch_move",
+      "group": "si",
+      "text": "Special infected can crouch and strafe while scratching.",
+      "when": {
+        "plugin": "l4d_no_m2_movement_block.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "no_bot_handoff",
+      "group": "si",
+      "text": "If an infected player leaves, goes spectator or becomes the tank, their special infected dies instead of becoming a bot, unless it is pinning a survivor.",
+      "when": {
+        "plugin": "l4d_nosecondchances.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "spectate_penalty",
+      "group": "si",
+      "text": "An infected player who goes spectator waits 10 s before they can rejoin the infected team.",
+      "when": {
+        "plugin": "l4dready.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "map_explosions",
+      "group": "si",
+      "text": "Explosions from the map do not hurt special infected or the tank.",
+      "when": {
+        "plugin": "l4d2_explosiondmg_prev.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "pounce_protect",
+      "group": "hunter",
+      "text": "Being shot never stops a hunter from pouncing again.",
+      "when": {
+        "plugin": "l4d_pounceprotect.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "backjump_props",
+      "group": "hunter",
+      "text": "Hunters can wall-kick off cars, dumpsters and other movable props.",
+      "when": {
+        "plugin": "l4d_backjump_fix.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "tongue_through",
+      "group": "smoker",
+      "text": "A tongue passes through other infected (not the tank), and once fired it passes through survivors other than its target.",
+      "when": {
+        "plugin": "l4d_tongue_block_fix.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "smoker_stagger",
+      "group": "smoker",
+      "text": "Shoving or staggering a smoker while its tongue is in flight cancels the shot.",
+      "when": {
+        "plugin": "l4d_fix_smoker_stagger_immune.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "boomer_shove",
+      "group": "boomer",
+      "text": "A shoved boomer cannot vomit for 1 s.",
+      "when": {
+        "plugin": "l4d2_boomer_shenanigans.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "vomit_through",
+      "group": "boomer",
+      "text": "Bile passes through other infected instead of being blocked by them.",
+      "when": {
+        "plugin": "l4d_vomit_trace_patch.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "boomer_witch",
+      "group": "witch",
+      "text": "Popping a boomer within {z_exploding_splat_radius} units of a witch that can see it startles her, and she goes for the shooter.",
+      "when": {
+        "plugin": "l4d_boomer_alarm_witch.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "panic_no_cooldown",
+      "group": "common",
+      "text": "Panic events have no cooldown: an alarm right after a crescendo still triggers.",
+      "when": {
+        "plugin": "l4d_panic_event_timer_remove.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "panic_spawns",
+      "group": "common",
+      "text": "During panic events infected can spawn anywhere, not only ahead of the survivors, and commons can spawn in cleared areas.",
+      "when": {
+        "plugin": "l4d_unrestrict_panic_battlefield.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "car_alarms",
+      "group": "common",
+      "text": "Any survivor touching an alarm car sets it off, and a car hit by a tank hittable is disarmed. Bots do not trigger alarms.",
+      "when": {
+        "plugin": "l4d_car_alarm_hittable_fix.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "stragglers",
+      "group": "common",
+      "text": "Commons left far behind the last survivor, out of sight, are removed and respawned ahead.",
+      "when": {
+        "plugin": "rotoblin-az.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "bosses_every_map",
+      "group": "director",
+      "text": "Every map has one tank and one witch, except a few maps that have none.",
+      "when": {
+        "plugin": "l4d_versus_same_UnprohibitBosses.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "same_bosses",
+      "group": "director",
+      "text": "Both teams meet the tank and the witch at the same point of the map, and they spawn in the same place.",
+      "when": {
+        "plugin": "l4d_versus_same_UnprohibitBosses.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "witch_during_tank",
+      "group": "director",
+      "text": "The witch still spawns while a tank is alive.",
+      "when": {
+        "plugin": "l4dvs_witch_spawn_fix.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "tank_props",
+      "group": "tank",
+      "text": "Cars and objects the tank hits stay put while it lives, glow red for the infected, and disappear a few seconds after it dies.",
+      "when": {
+        "plugin": "l4d_tank_props.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "hittable_rage",
+      "group": "tank",
+      "text": "A car or other big hittable that hits a survivor refills the tank's rage. Small ones only do if they incap.",
+      "when": {
+        "plugin": "l4d_tank_hittable_refill.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "tank_shove",
+      "group": "tank",
+      "text": "Shoving the tank does nothing.",
+      "when": {
+        "plugin": "l4d_tank_shove_slowdown_fix.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "tank_buttons",
+      "group": "tank",
+      "text": "Tank attacks by button: M1 right hook, M1+E left hook, M1+R uppercut; M2 one-hand throw, E underhand, R two-hand overhead.",
+      "when": {
+        "plugin": "l4d_tank_attack_control.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "tank_pass_respawn",
+      "group": "tank",
+      "text": "If your rage runs out and the tank goes to the AI, you wait the normal respawn timer.",
+      "when": {
+        "plugin": "l4d_passing_Tank_no_instant_respawn.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "rock_use_block",
+      "group": "tank",
+      "text": "After a rock hits you, you cannot revive or use anything for 1.5 s.",
+      "when": {
+        "plugin": "rotoblin-az.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "new_tank_fire",
+      "group": "tank",
+      "text": "A newly spawned tank cannot be set on fire for its first few seconds.",
+      "when": {
+        "plugin": "rotoblin-az.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "finale_rescue",
+      "group": "director",
+      "text": "When the rescue vehicle leaves, anyone down or hanging dies and does not score, and standing survivors take no more damage.",
+      "when": {
+        "plugin": "finalefix.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "witch_saferoom",
+      "group": "witch",
+      "text": "A startled witch follows you into the saferoom.",
+      "when": {
+        "plugin": "witch_allow_in_safezone.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "witch_crown",
+      "group": "witch",
+      "text": "A shotgun blast that does 799 damage or more to the witch kills her outright.",
+      "when": {
+        "plugin": "l4d2_witch_crown_fix.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "witch_model",
+      "group": "witch",
+      "text": "The witch always uses the bride model.",
+      "when": {
+        "plugin": "l4d1_random_witch_model.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "rescue_closets",
+      "group": "map",
+      "text": "Infected can spawn inside and break into the unused rescue closets.",
+      "when": {
+        "plugin": "l4d_versus_rescue_door_fix.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "fixes_survivor",
+      "group": "fixes",
+      "text": "Survivor bug fixes: no fall damage or health boost glitches, no temporary health exploits on ledges, no instant refill by picking up the same gun, a revive interrupts a reload properly, no fire damage glitch while down, shotgun pellets hit where they should, shove timing and shoves on commons fixed.",
+      "when": {
+        "plugin": "fix_engine.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "fixes_exploits",
+      "group": "fixes",
+      "text": "Exploit fixes: no ducking or ghost ducking exploits, no ammo pile refill trick, no pump shotgun fast-fire, no scratching while staggered.",
+      "when": {
+        "plugin": "rotoblin-az.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "fixes_infected",
+      "group": "fixes",
+      "text": "Infected fixes: bot hunters can be skeeted like players, boomers no longer teleport near ladders, tongues do not bend around corners or leave survivors floating, ghosts cannot spawn in the start saferoom, commons do not get stuck on melee.",
+      "when": {
+        "plugin": "l4d_ai_damagefix.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "fixes_tank",
+      "group": "fixes",
+      "text": "Tank fixes: no frozen tanks, punches do not get stuck or blocked, no falling punch glitch, rocks do not pass through black and white survivors, a tank cannot throw a rock by accident right after spawning.",
+      "when": {
+        "plugin": "frozen_tank_fix.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "fixes_witch",
+      "group": "fixes",
+      "text": "Witch fixes: she does not lose her target, is not startled by doors, and does not freeze on corners.",
+      "when": {
+        "plugin": "witch_prevent_target_loss.smx"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "fixes_map",
+      "group": "fixes",
+      "text": "Map fixes: doors behave while survivors are down, finale breakables and the escape route stay consistent between halves, and physics props push and touch correctly.",
+      "when": {
+        "plugin": "l4d_incap_door_fix.smx"
       },
       "reviewed": false
     }

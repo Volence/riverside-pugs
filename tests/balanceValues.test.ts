@@ -14,6 +14,7 @@ const CAT: Catalogue = {
     { id: 'tongue_drag_damage_amount', group: 'hunter', label: 'Drag', source: 'cvar', note: 'plugin', hideLive: true },
     { id: 'weapon_smg.Damage', group: 'weapons', label: 'Uzi damage', source: 'weapon', vanilla: '20' },
     { id: 'weapon_smg.SpreadPerShot', group: 'weapons', label: 'Uzi spread', source: 'weapon', vanilla: '0.32' },
+    { id: 'hr_dmg', group: 'weapons', label: 'Rifle damage', source: 'cvar', when: { cvar: 'hr_limit', notEquals: '0' } },
   ],
   rules: [
     { id: 'sky', group: 'hunter', text: 'Sky pounce fix.', when: { plugin: 'l4d_skypounce.smx' }, reviewed: true },
@@ -37,6 +38,7 @@ describe('loadCatalogue', () => {
     expect(bad({ values: [{ id: 'x', group: 'nope', label: 'X', source: 'cvar' }] })).toThrow(/unknown group/);
     expect(bad({ values: [{ id: 'weapon_smg', group: 'weapons', label: 'X', source: 'weapon' }] })).toThrow(/bad weapon/);
     expect(bad({ rules: [{ id: 'r', group: 'tank', text: 't', when: { cvar: 'x' } as never, reviewed: true }] })).toThrow(/when/);
+    expect(bad({ values: [{ id: 'x', group: 'tank', label: 'X', source: 'cvar', when: { cvar: 'y' } as never }] })).toThrow(/bad when/);
     expect(bad({ rules: [{ id: 'r', group: 'tank', text: 'uses {nope}', when: { plugin: 'a.smx' }, reviewed: true }] })).toThrow(/not a catalogue value/);
   });
 });
@@ -132,6 +134,15 @@ describe('gameValues', () => {
   it('never reports the admin-only patch pointer publicly', () => {
     expect(gameValues(db, CAT, { admin: false })).not.toHaveProperty('asOf');
     expect(gameValues(db, CAT, { admin: true }).asOf).toMatchObject({ number: 2 });
+  });
+
+  it('a conditional value shows publicly only while its condition holds; admins see it tagged', () => {
+    const ids = (admin: boolean) => gameValues(db, CAT, { admin }).groups.find((x) => x.id === 'weapons')!.values;
+    expect(ids(false).map((v) => v.id)).not.toContain('hr_dmg'); // hr_limit not reported: condition off
+    expect(ids(true).find((v) => v.id === 'hr_dmg')).toMatchObject({ conditionOff: true });
+    sight(db, 3, s1, INV('8000', { 'c:hr_limit': '1', 'c:hr_dmg': '120' }), 'queue', '2026-09-23 00:00:00');
+    expect(ids(false).find((v) => v.id === 'hr_dmg')).toMatchObject({ value: '120' });
+    expect(ids(true).find((v) => v.id === 'hr_dmg')!.conditionOff).toBeUndefined();
   });
 
   it('shows reviewed active rules publicly; every rule, tagged, for admins', () => {
