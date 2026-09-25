@@ -14,11 +14,11 @@
 import { NOTICE_BOX_COLOUR, type Box, type HudDesign } from './design';
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import type { Guide } from './guides';
-import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHasElement, pcGet, MARKER_PX_PER_UNIT, NOTICE_BOX_TEXTURE, MODERN_ART } from './build';
+import { buildTrees, elementRect, yourItemsBlocked, teamLayout, teamCardRects, isFreeTeam, baseHasElement, pcGet, MARKER_PX_PER_UNIT, NOTICE_BOX_TEXTURE, MODERN_ART } from './build';
 import { baseOf } from './base';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { SCREEN_H, parseSize, parsePos, screenW } from './units';
-import { PROGRESS_LABEL, labelTextColour, labelColour, paintPanelBox, paintPanelLabel, paintLinearOver, drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, storedImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
+import { PROGRESS_LABEL, labelTextColour, labelColour, paintPanelBox, paintPanelLabel, paintLinearOver, drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, storedImage, artImage, colourOf, rgbaOf, tinted, previewOf, drawItems, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
 import { normaliseMaterial, HEALING_ICON, CROSSHAIR_OPEN, tipImage } from './art';
 import { barGeometry, clampBarKeys } from './progress';
 import { canvasFont, fontCell, importedFace, loadFace, setLetterSpacing, synthBoldSpacing } from './fonts';
@@ -27,6 +27,7 @@ import { childDef, panelChildren } from './children';
 import { probe } from './probes';
 import { drawWeapons, drawNineSlice, type WeaponHeld } from './weapons';
 import { drawTabScreen, tabPicked, tabBoxes, tabSideOf } from './tabscreen';
+import { YOUR_ITEMS, DEFAULT_ITEM_FONT, type LimitLine } from './youritems';
 
 export type Side = 'survivor' | 'infected';
 
@@ -68,6 +69,12 @@ export interface HudView {
   hover?: { rects: Box[]; label: string } | null;
   marquee?: Box | null;
   guides?: Guide[];
+  /**
+   * Your items' limits while it is selected (build.ts yourItemsLimits): the
+   * page passes them, nothing else does, so a share, a publish or a close-up
+   * image never carries them (spec section 4).
+   */
+  limits?: LimitLine[];
   /**
    * Device pixels per CSS pixel of the canvas (window.devicePixelRatio, capped
    * by the page). The HUD itself is drawn at whatever size the canvas is; only
@@ -335,6 +342,30 @@ function paintOwnHealth(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesig
   const [p] = panelBoxes(design, 'ownHealth');
   const local = { x: p.x * k, y: p.y * k, w: p.w * k, h: p.h * k };
   clipToRect(ctx, r, () => clipToRect(ctx, local, () => drawPanel(ctx, design, 'ownHealth', { x: local.x, y: local.y }, k, { onAsset, state: view.state })));
+}
+
+/**
+ * Your items: the game's item glyphs for a full loadout (medkit, pills, pipe
+ * bomb) in the row's box, by the teammate cards' own painter (render.ts
+ * drawItems: additive ToolBox glyphs, tinted by the colour), so the two rows
+ * look alike. The box is exactly a full row, so the glyphs fill it whatever
+ * the alignment. Down and Dead draw it empty, as the game empties the Label
+ * while you are incapacitated or dead (/home/volence/l4d/hud/probe-own-items/RESULTS.md,
+ * "Incapacitated: the Label goes EMPTY"); crouching changes nothing. A base
+ * that blocks Your items (build.ts yourItemsBlocked: an import that already
+ * places its own Items, or one the editor cannot read) never draws the row,
+ * not even dimmed while it is picked, since the download never writes it.
+ */
+export function paintYourItems(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view: HudView = {}) {
+  const s = previewOf(view.state).survivor;
+  if (s === 'down' || s === 'dead') return;
+  if (yourItemsBlocked(design) !== null) return;
+  const o = design.elements[YOUR_ITEMS] ?? {};
+  const n: KvNode = { key: 'Items', value: [
+    { key: 'font', value: o.itemFont ?? DEFAULT_ITEM_FONT }, { key: 'textAlignment', value: 'east' },
+    ...(o.color ? [{ key: 'fgcolor_override', value: o.color }] : []),
+  ] };
+  drawItems(ctx, design, n, { name: 'Items', kind: 'label', x: r.x, y: r.y, w: r.w, h: r.h, visible: true }, k, { onAsset });
 }
 
 /** The real container clips its children, and `elementRect` reports that same
@@ -1249,6 +1280,7 @@ function paintVoiceList(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesig
 
 const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view?: HudView) => void> = {
   ownHealth: paintOwnHealth,
+  [YOUR_ITEMS]: paintYourItems,
   teamColumn: paintTeamColumn,
   weaponSelection: paintWeaponSelection,
   chat: paintChat,
@@ -1296,6 +1328,42 @@ function drawHiddenOutline(ctx: CanvasRenderingContext2D, r: Rect, d = 1) {
 /** Handles are a fixed size on screen, whatever the canvas scale. */
 export const HANDLE_PX = 7;
 const GUIDE = '#ff4fa3';
+/** Your items' limit: amber, so it never reads as one of the pink snap guides. */
+export const LIMIT_COLOUR = '#ffb000';
+const LIMIT_SHADE = 'rgba(0,0,0,0.45)';
+
+/**
+ * Your items' limits (spec section 2): everything the row cannot reach
+ * dimmed, the full screen height, and a solid line at each limit with its
+ * label beside it, on the side the row can reach. Editor chrome, drawn from
+ * HudView only.
+ */
+function drawLimits(ctx: CanvasRenderingContext2D, lines: LimitLine[], k: number, pxW: number, pxH: number, d = 1) {
+  ctx.save();
+  ctx.setLineDash([]);
+  for (const l of lines) {
+    const x = l.x * k;
+    ctx.fillStyle = LIMIT_SHADE;
+    if (l.side === 'left') ctx.fillRect(0, 0, x, pxH); else ctx.fillRect(x, 0, pxW - x, pxH);
+  }
+  ctx.strokeStyle = LIMIT_COLOUR;
+  ctx.lineWidth = 2 * d;
+  ctx.font = `${11 * d}px sans-serif`;
+  setLetterSpacing(ctx, 0);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  for (const l of lines) {
+    const x = l.x * k;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, pxH); ctx.stroke();
+    const w = ctx.measureText(l.label).width + 8 * d;
+    const bx = l.side === 'left' ? x + 4 * d : x - 4 * d - w;
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(bx, 8 * d, w, 14 * d);
+    ctx.fillStyle = LIMIT_COLOUR;
+    ctx.fillText(l.label, bx + 4 * d, 19 * d);
+  }
+  ctx.restore();
+}
 const MARQUEE = 'rgba(153,204,255,0.9)';
 const MARQUEE_FILL = 'rgba(153,204,255,0.13)';
 
@@ -1435,6 +1503,8 @@ export function drawHud(
     if (!versus.visible && picked.includes('tabVersus')) drawHiddenOutline(ctx, { x: versus.x * k, y: versus.y * k, w: versus.w * k, h: versus.h * k }, d);
   }
 
+  // Under the selection chrome, over the HUD: the frame and handles stay readable on the shade.
+  if (view.limits?.length) drawLimits(ctx, view.limits, k, pxW, pxH, d);
   if (view.frames?.length) drawFrames(ctx, view.frames, k, accent, d);
   if (view.box || view.handles?.length) drawHandles(ctx, view.box ?? null, view.handles ?? [], k, accent, d);
   if (view.hover) drawHover(ctx, view.hover, k, d);
