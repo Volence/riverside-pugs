@@ -7,6 +7,7 @@ import {
   placeElement, moveElements, moveCards, alignElements, scaleElement, setScale, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
   ammoOnly, withImport, withPreset, hasLayoutEdits,
   splatterKind, patchSplatter, withSplatterImage, resetSplatter, panelClamp, raiseChild, resetChildKey, setFit, rowGapSlider, setRowGap,
+  hiddenWith,
 } from './edit';
 import { buildHud, buildTrees } from './build';
 import { weaponSlots } from './weapons';
@@ -1216,6 +1217,17 @@ describe('the Tab screen edits', () => {
     const own = patchChild(DEFAULT_DESIGN, 'HealthAmount', { visible: false }, 'tabVersus');
     const round = patchChild(patchChild(own, 'DistanceLabel', { visible: false }, 'tabVersus'), 'DistanceLabel', { visible: true }, 'tabVersus');
     expect(round.children.tabVersus).toEqual({ HealthAmount: { visible: false } });
+  });
+  it('names the nearest hidden piece up the pin chain that hides a piece (hiddenWith)', () => {
+    const d = setChildrenVisible(DEFAULT_DESIGN, ['DistanceLabel'], false, 'tabVersus');
+    expect(hiddenWith(d, 'tabVersus', 'HealthAmount')?.name).toBe('DistanceLabel');
+    expect(hiddenWith(d, 'tabVersus', 'DistanceAmount')?.name).toBe('DistanceLabel');
+    expect(hiddenWith(d, 'tabVersus', 'DistanceLabel')).toBeUndefined();
+    expect(hiddenWith(d, 'tabVersus', 'SurvivalMultAmount')).toBeUndefined();
+    // The nearest one: Health Bonus hidden too names Health Bonus for its number.
+    expect(hiddenWith(setChildrenVisible(d, ['HealthLabel'], false, 'tabVersus'), 'tabVersus', 'HealthAmount')?.name).toBe('HealthLabel');
+    expect(hiddenWith(DEFAULT_DESIGN, 'tabVersus', 'HealthAmount')).toBeUndefined();
+    expect(hiddenWith(DEFAULT_DESIGN, 'teamColumn', 'Health')).toBeUndefined();
   });
   it('keeps a colour when the piece is shown again', () => {
     const d = patchChild(patchChild(DEFAULT_DESIGN, 'TeamYours', { color: '255 255 0 255' }, 'tabVersus'), 'TeamYours', { visible: false }, 'tabVersus');

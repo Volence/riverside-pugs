@@ -17,7 +17,7 @@ import {
 import { screenW, SCREEN_H } from './units';
 import { elementById } from './elements';
 import { elementRect, elementFitShift, drawnAt, pieceMovableIn, teamLayout, teamCardRects, isFreeTeam, panelChild, panelLink, buildTrees, panelBgZpos, type CardChild } from './build';
-import { childDef, childPath, panelChildren, panelOfFile, linkedValue, unlinkedValue } from './children';
+import { childDef, childPath, panelChildren, panelOfFile, linkedValue, unlinkedValue, type ChildDef } from './children';
 import { kvFind, kvGet } from './kv';
 import { probe } from './probes';
 import { baseOf } from './base';
@@ -432,6 +432,22 @@ function tabVisible(design: HudDesign, name: string, p: Partial<ChildOverride>, 
   const def = childDef(panel, name);
   if (!def || (def.hideGate && !probe(def.hideGate))) return d;
   return visible ? showChild(d, def.name, panel) : mergeChild(d, def.name, { visible: false }, panel);
+}
+
+/**
+ * The hidden piece a piece is hidden with: the nearest one up its pin chain
+ * (the piece whose ChildDef.hidesWith lists it, and so on up) that the design
+ * hides. The game and the preview hide the piece with it (TS7), so the page
+ * offers no Visible control of its own and names this one instead.
+ */
+export function hiddenWith(design: HudDesign, panel: string, name: string): ChildDef | undefined {
+  const kids = panelChildren(panel)?.children ?? [];
+  const seen = new Set<string>([name]);
+  for (let up = kids.find((c) => c.hidesWith?.includes(name)); up && !seen.has(up.name); up = kids.find((c) => c.hidesWith?.includes(up!.name))) {
+    seen.add(up.name);
+    if (design.children[panel]?.[up.name]?.visible === false && (!up.hideGate || probe(up.hideGate))) return up;
+  }
+  return undefined;
 }
 
 function mergeChild(design: HudDesign, name: string, p: Partial<ChildOverride>, panel: string): HudDesign {
