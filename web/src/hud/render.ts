@@ -26,8 +26,8 @@
  * own-health panel's scratch overlays are tinted with the health colour, not
  * drawn raw (the drawColor branch in drawImageChild, below).
  */
-import { drawnBarX, isBar, type HudDesign } from './design';
-import { buildTrees, MODERN_ART } from './build';
+import { drawnBarX, isBar, type Box, type HudDesign } from './design';
+import { buildTrees, pcGet, MODERN_ART } from './build';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { artUrl, normaliseMaterial, SKULL_ICON, zombieTeamImage } from './art';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
@@ -115,6 +115,7 @@ export const PANEL_FILE: Record<string, string> = {
   ghostPanel: 'resource/ui/hudghostpanel.res',
   zombiePanel: 'resource/ui/zombiepanel.res',
   tankPanel: 'resource/ui/hud/frustrationmeter.res',
+  tabSurvivors: 'resource/ui/scoreboardsurvivor.res',
 };
 
 /**
@@ -409,6 +410,66 @@ export function paintLinearOver(ctx: CanvasRenderingContext2D, box: { x: number;
 }
 
 /**
+ * PaintBackgroundType 2's corner, in HUD units: the stock box's corner
+ * curves over about 7 px at 1080p
+ * (/home/volence/l4d/hud/probe-phase2/b13/b13-stock/infected/ghost.png,
+ * x 589 to 596 along its top rows).
+ */
+const ROUNDED_CORNER = 7 / 2.25;
+
+/**
+ * A panel's box as VGUI paints it: bgcolor_override over the scene in
+ * linear light (the stock ghost box, 0 0 0 at 245 over 183 217 233, reads
+ * 35 45 50 in b13 ghost.png, which only a linear blend gives), with rounded
+ * corners for PaintBackgroundType 2.
+ */
+export function paintPanelBox(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, box: Box, k: number) {
+  const colour = pcGet(n, 'bgcolor_override');
+  if (colour === undefined) return;
+  const rounded = pcGet(n, 'PaintBackgroundType') === '2';
+  const fill = (c: CanvasRenderingContext2D) => {
+    c.fillStyle = colourOf(design, colour);
+    if (rounded && typeof c.roundRect === 'function') { c.beginPath(); c.roundRect(box.x, box.y, box.w, box.h, ROUNDED_CORNER * k); c.fill(); }
+    else c.fillRect(box.x, box.y, box.w, box.h);
+  };
+  paintLinearOver(ctx, box, fill, () => fill(ctx));
+}
+
+/**
+ * One of a status panel's labels: in its file font, at its place, its cell
+ * at the top for a north alignment and centred otherwise, as drawLabel
+ * (render.ts) places a Label, in the colour game code gives it. `extra.font`
+ * is the font a block with none takes (a Tab screen Label's is the scheme's
+ * Default), and `extra.shadow` lays a dropshadow font's glyphs over a black
+ * copy one pixel right and down (the versus scores' dark edge, InstructorTitle).
+ */
+export function paintPanelLabel(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, box: Box, k: number, s: string, colour: string, clip: Box, onAsset?: () => void,
+  extra: { font?: string; shadow?: boolean } = {}) {
+  const font = pcGet(n, 'font') ?? extra.font ?? '';
+  const cell = setFont(ctx, design, font, k, onAsset);
+  const align = (pcGet(n, 'textAlignment') ?? 'west').toLowerCase();
+  // VGUI's nine alignments: west and east name a side, and north, south and center alone centre the line.
+  let x = box.x;
+  if (align.includes('east')) { ctx.textAlign = 'right'; x = box.x + box.w; }
+  else if (align.includes('west')) ctx.textAlign = 'left';
+  else { ctx.textAlign = 'center'; x = box.x + box.w / 2; }
+  const top = align.startsWith('north') ? box.y : align.startsWith('south') ? box.y + box.h - cell.cell : box.y + (box.h - cell.cell) / 2;
+  // A dropshadow font's glyphs over a black copy one pixel right and down, as the use bar's label draws them.
+  if (extra.shadow && fontFace(design, font).dropShadow) {
+    ctx.fillStyle = 'rgba(0,0,0,1)';
+    fillFontText(ctx, cell, s, x + 1, top + cell.ascent + 1, top + 1, clip);
+  }
+  ctx.fillStyle = colour;
+  fillFontText(ctx, cell, s, x, top + cell.ascent, top, clip);
+}
+
+/** A label's own colour, else the scheme's label colour, as a Label draws it. */
+export function labelColour(design: HudDesign, n: KvNode): string {
+  const own = pcGet(n, 'fgcolor_override');
+  return own !== undefined ? colourOf(design, own) : labelTextColour(design);
+}
+
+/**
  * Draws one line of text at (x, y) (the baseline, with ctx's alignment
  * already set): through paintAdditive when its font is additive, over the
  * box the text covers (measured, one cell tall from cellTop, with a cell's
@@ -533,9 +594,13 @@ export function shownKey(design: HudDesign, def: KeyDef, value: string | undefin
  * never coloured by health, so the number, the name and the icon keep their
  * own colours without a rule of their own.
  */
-const BAR_COLOUR: Record<string, { block: string; gate: 'Q1' | 'Q24' }> = {
+const BAR_COLOUR: Record<string, { block: string; gate: 'Q1' | 'Q24' | 'TS3' }> = {
   ownHealth: { block: 'Health', gate: 'Q1' }, teamColumn: { block: 'Health', gate: 'Q1' },
   siHealth: { block: 'Health', gate: 'Q24' }, infectedRow: { block: 'HealthPanel', gate: 'Q24' },
+  // The Tab screen's survivor rows (tabscreen.ts): the same HealthPanel class, one colour for every
+  // row bar at every health (probe TS3, /home/volence/l4d/hud/probe-tab/RESULTS.md, TAB-1 tab-a:
+  // every bar red), so the file's Gray draws; without the key the bars colour by health (TL3).
+  tabSurvivors: { block: 'SurvivorStatsHealth', gate: 'TS3' },
 };
 
 /**
@@ -948,7 +1013,7 @@ function drawCardArt(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, opt
   ctx.drawImage(skull ? tinted(img, material, ...SKULL_TINT) : img, r.x, r.y, r.w, r.h);
 }
 
-function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts, panelId?: string) {
+export function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts, panelId?: string) {
   const image = kvGet(n, 'image');
   const fill = kvGet(n, 'fillcolor');
   const lname = n.key.toLowerCase();
@@ -1157,7 +1222,7 @@ let warnedNoIcons = false;
  * is not in the art index or fails to load, the row falls back to
  * drawItemStandIns, so the preview never loses the row.
  */
-function drawItems(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
+export function drawItems(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
   const s = fontFace(design, kvGet(n, 'font') ?? '').tall * k;
   const y = r.y + (r.h - s) / 2;
   if (ITEM_ROW.some((name) => !artUrl(name))) {
@@ -1269,7 +1334,7 @@ function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: st
  * sampleHealthRgb hands the outline and the fill (and every other health
  * piece of the panel) in place of the health colour.
  */
-function drawBar(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: number, opts: DrawOpts, panelId?: string) {
+export function drawBar(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: number, opts: DrawOpts, panelId?: string) {
   const s = previewOf(opts.state).survivor;
   const frac = s === 'hurt' && HEALTH_PANELS.has(panelId ?? '') ? HURT_HEALTH / 100 : 1;
   const [hr, hg, hb] = sampleHealthRgb(opts, panelId);

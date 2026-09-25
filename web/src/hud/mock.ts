@@ -18,7 +18,7 @@ import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHas
 import { baseOf } from './base';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { SCREEN_H, parseSize, parsePos, screenW } from './units';
-import { PROGRESS_LABEL, labelTextColour, paintLinearOver, drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, storedImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
+import { PROGRESS_LABEL, labelTextColour, labelColour, paintPanelBox, paintPanelLabel, paintLinearOver, drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, storedImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
 import { normaliseMaterial, HEALING_ICON, CROSSHAIR_OPEN, tipImage } from './art';
 import { barGeometry, clampBarKeys } from './progress';
 import { canvasFont, fontCell, importedFace, loadFace } from './fonts';
@@ -26,6 +26,7 @@ import { drawArt } from '../crosshair/model';
 import { childDef, panelChildren } from './children';
 import { probe } from './probes';
 import { drawWeapons, drawNineSlice, type WeaponHeld } from './weapons';
+import { drawTabScreen, tabPicked } from './tabscreen';
 
 export type Side = 'survivor' | 'infected';
 
@@ -35,10 +36,10 @@ export type Side = 'survivor' | 'infected';
  * hit test reaches a panel the file does not have. Stock and Modern offer
  * every one.
  *
- * The Tab screen elements (HudElement.tab) are left out until the preview
- * can draw the Tab screen and the page lists them (tab screen spec tasks 13
- * to 16): until then Layers, the snap targets and the canvas would reach
- * elements nothing draws.
+ * The Tab screen elements (HudElement.tab) are left out: drawHud draws the
+ * Tab screen itself (tabscreen.ts), and they join Layers, the snap targets
+ * and the hit test once the page lists them (tab screen spec tasks 15 and
+ * 16).
  */
 export function visibleElements(side: Side, design: HudDesign): HudElement[] {
   const key = baseOf(design);
@@ -826,50 +827,6 @@ function paintGameCrosshair(ctx: CanvasRenderingContext2D, pxW: number, pxH: num
 }
 
 const GHOST = 'resource/ui/hudghostpanel.res';
-/**
- * PaintBackgroundType 2's corner, in HUD units: the stock box's corner
- * curves over about 7 px at 1080p
- * (/home/volence/l4d/hud/probe-phase2/b13/b13-stock/infected/ghost.png,
- * x 589 to 596 along its top rows).
- */
-const ROUNDED_CORNER = 7 / 2.25;
-
-/**
- * A panel's box as VGUI paints it: bgcolor_override over the scene in
- * linear light (the stock ghost box, 0 0 0 at 245 over 183 217 233, reads
- * 35 45 50 in b13 ghost.png, which only a linear blend gives), with rounded
- * corners for PaintBackgroundType 2.
- */
-function paintPanelBox(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, box: Rect, k: number) {
-  const colour = pcGet(n, 'bgcolor_override');
-  if (colour === undefined) return;
-  const rounded = pcGet(n, 'PaintBackgroundType') === '2';
-  const fill = (c: CanvasRenderingContext2D) => {
-    c.fillStyle = colourOf(design, colour);
-    if (rounded && typeof c.roundRect === 'function') { c.beginPath(); c.roundRect(box.x, box.y, box.w, box.h, ROUNDED_CORNER * k); c.fill(); }
-    else c.fillRect(box.x, box.y, box.w, box.h);
-  };
-  paintLinearOver(ctx, box, fill, () => fill(ctx));
-}
-
-/**
- * One of a status panel's labels: in its file font, at its place, its cell
- * at the top for a north alignment and centred otherwise, as drawLabel
- * (render.ts) places a Label, in the colour game code gives it.
- */
-function paintPanelLabel(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, box: Rect, k: number, s: string, colour: string, clip: Rect, onAsset?: () => void) {
-  const cell = setFont(ctx, design, pcGet(n, 'font') ?? '', k, onAsset);
-  const align = (pcGet(n, 'textAlignment') ?? 'west').toLowerCase();
-  // VGUI's nine alignments: west and east name a side, and north, south and center alone centre the line.
-  let x = box.x;
-  if (align.includes('east')) { ctx.textAlign = 'right'; x = box.x + box.w; }
-  else if (align.includes('west')) ctx.textAlign = 'left';
-  else { ctx.textAlign = 'center'; x = box.x + box.w / 2; }
-  const top = align.startsWith('north') ? box.y : align.startsWith('south') ? box.y + box.h - cell.cell : box.y + (box.h - cell.cell) / 2;
-  ctx.fillStyle = colour;
-  fillFontText(ctx, cell, s, x, top + cell.ascent, top, clip);
-}
-
 /** A block of a status panel file, in canvas pixels inside `r`, from the generated tree (so already scaled). */
 function blockRect(n: KvNode, r: Rect, k: number, W: number): Rect {
   return {
@@ -992,11 +949,6 @@ function paintZombiePanel(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
   }));
 }
 
-/** A label's own colour, else the scheme's label colour, as a Label draws it. */
-function labelColour(design: HudDesign, n: KvNode): string {
-  const own = pcGet(n, 'fgcolor_override');
-  return own !== undefined ? colourOf(design, own) : labelTextColour(design);
-}
 
 const FRUST = 'resource/ui/hud/frustrationmeter.res';
 /** The sample frustration: half, as the old stand-in showed. */
@@ -1394,8 +1346,12 @@ export function drawHud(
   // player can see what they are editing; every outline comes from `view`.
   const picked: readonly string[] = selected === null ? [] : typeof selected === 'string' ? [selected] : selected;
   if (side === 'infected') paintGameCrosshair(ctx, pxW, pxH, design, onAsset, view);
+  // Tab held: the game takes some HUD elements off (the survivor teammate
+  // cards, HudElement.underTab) and draws the Tab screen over the rest.
+  const tabHeld = !!previewOf(view.state).tab;
 
   for (const el of visibleElements(side, design)) {
+    if (tabHeld && el.underTab === 'hidden') continue;
     const u = rectFor(design, el.id);
     const hidden = !u.visible;
     if (hidden && !picked.includes(el.id)) continue;
@@ -1414,6 +1370,14 @@ export function drawHud(
     } else {
       paint(ctx, r, design, k, onAsset, view);
     }
+  }
+
+  // The Tab screen (tabscreen.ts), with Tab held or while one of its elements
+  // or pieces is picked, as a picked occasional panel is drawn (spec 3.1).
+  if (tabHeld || tabPicked(picked)) {
+    drawTabScreen(ctx, design, side, k, { onAsset, state: view.state, picked });
+    const versus = rectFor(design, 'tabVersus');
+    if (!versus.visible && picked.includes('tabVersus')) drawHiddenOutline(ctx, { x: versus.x * k, y: versus.y * k, w: versus.w * k, h: versus.h * k }, d);
   }
 
   if (view.frames?.length) drawFrames(ctx, view.frames, k, accent, d);
