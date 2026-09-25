@@ -3102,6 +3102,23 @@ describe('The Tab screen on the page', () => {
     expect(undo().disabled).toBe(true);
   });
 
+  it('drops the Teammates from the selection when Tab held turns on, and skips them in the Tab-key cycle', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.click(team().getByRole('button', { name: 'Teammates' }));
+    expect(legend('Teammates')).toBeTruthy();
+    fireEvent.click(tabHeld());
+    expect(legend('Teammates')).toBeNull();
+    expect(container.querySelector('.hud__crumbs')?.textContent ?? '').not.toMatch(/Teammates/);
+    const seenIds: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      fireEvent.keyDown(canvas, { key: 'Tab' });
+      seenIds.push(container.querySelector('.hud__crumbs')?.textContent ?? '');
+    }
+    expect(seenIds.some((t) => /Versus score/.test(t))).toBe(true);
+    expect(seenIds.some((t) => /Teammates/.test(t))).toBe(false);
+  });
+
   it('never picks the teammate cards under the Tab screen', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
