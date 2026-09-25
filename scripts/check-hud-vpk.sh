@@ -2,7 +2,7 @@
 # Build a sample HUD VPK with the real generator and read it back with the Python vpk reader.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-OUT="$(mktemp -d)/sample.vpk"
+OUT="${HUD_VPK_OUT:-$(mktemp -d)/sample.vpk}"
 HUD_VPK_OUT="$OUT" npx vitest run --project web --dir web/src/hud sample.vpkcheck.test.ts >/dev/null
 /home/volence/l4d/hud/.venv/bin/python - "$OUT" <<'PY'
 import io, os, sys, vpk
@@ -188,5 +188,50 @@ if os.environ.get('HUD_SAMPLE') == 'r':
     anims = pak['scripts/hudanimations.txt'].read().decode('latin1')
     assert 'Animate image1 Alpha 0 Linear 0.0 0.001' in anims, 'pickup fly-in not off'
     print('sample r: notices', rec['recordlabel0']['font'], 'countdown', spec['InfectedState']['font'], 'meter', fm['Countdown']['font'])
+if os.environ.get('HUD_SAMPLE') == 't':
+    # Sample t: the Tab screen at TAB-1's values (TAB-4), read by srctools with the PC's
+    # conditionals, so each check sees the block the game reads, never an [$X360] one.
+    from srctools.keyvalues import Keyvalues
+    from srctools.vtf import VTF
+    # srctools looks a flag up by its token casefolded, the $ kept ("$win32"); any other flag is false.
+    PC = {'$win32': True, '$windows': True, '$english': True}
+    def blocks(path):
+        root = list(Keyvalues.parse(pak[path].read().decode('latin1'), flags=PC))[0]
+        return {b.real_name: b for b in root}
+    raw = lambda path: pak[path].read().decode('latin1')
+    sb = blocks('resource/ui/scoreboard.res')
+    assert sb['BackgroundImage']['wide'] == '340' and sb['BackgroundImage']['bgcolor_override'] == '0 0 96 200', sb['BackgroundImage']
+    assert raw('resource/ui/scoreboard.res').count('"0 0 0 230"') == 1, 'the [$X360] backdrop must keep its stock colour'
+    assert sb['MissionTitle']['fgcolor_override'] == '255 0 0 255', sb['MissionTitle']
+    vs_panel = sb['CVersusModeScoreboard']
+    print('sample t: versus panel at', vs_panel['xpos'], vs_panel['ypos'])
+    import re
+    assert re.search(r'"ypos"\s+"c-208"\s+\[\$X360\]', raw('resource/ui/scoreboard.res')), 'the [$X360] ypos must stay'
+    assert vs_panel['ypos'] == '20', vs_panel
+    vs = blocks('resource/ui/versusmodescoreboard.res')
+    assert vs['StatBreakdownHighlightImage']['image'] == '../vgui/hud/hudeditor/tabstatbox'
+    for b in ('YourTeamHighlightImage', 'EnemyTeamHighlightImage'):
+        assert vs[b]['image'] == '../vgui/hud/hudeditor/tabteambox', vs[b]
+    assert vs['TeamYours']['fgcolor_override'] == '255 255 0 255' and vs['DistanceAmount']['fgcolor_override'] == '255 0 255 255'
+    for b in ('TeamEnemy', 'HealthLabel', 'HealthAmount'):
+        assert (vs[b]['visible'], vs[b]['wide'], vs[b]['tall']) == ('0', '0', '0'), vs[b]
+    assert vs['HealthLabel']['auto_wide_tocontents'] == '0', vs['HealthLabel']
+    sv = blocks('resource/ui/scoreboardsurvivor.res')
+    assert sv['PlayerBackground_Selected']['bgcolor_override'] == '0 128 0 255'
+    assert sv['PlayerBackground']['image'] == '../vgui/hud/hudeditor/tabrowbg'
+    assert sv['SurvivorStatsHealth']['monochrome_color'] == '255 0 0 255'
+    assert (sv['PingImage']['visible'], sv['PingImage']['wide'], sv['PingImage']['tall']) == ('0', '0', '0')
+    inf = blocks('resource/ui/scoreboardinfectedplayer.res')
+    assert inf['PlayerBackground_Selected']['bgcolor_override'] == '255 255 0 255'
+    assert inf['Name']['fgcolor_override'] == '0 255 255 255' and inf['NoAvatarName']['fgcolor_override'] == '0 255 255 255'
+    assert inf['PlayerBackground']['bgcolor_override'] == '40 40 40 255', 'TS5b is closed: the other infected rows stay stock'
+    for n, size, want in (('tabstatbox', (64, 64), (0, 255, 0, 255)), ('tabteambox', (64, 64), (255, 0, 255, 255)), ('tabrowbg', (256, 32), (128, 0, 255, 255))):
+        tex = VTF.read(io.BytesIO(pak[f'materials/vgui/hud/hudeditor/{n}.vtf'].read()))
+        assert (tex.width, tex.height) == size, (n, tex.width, tex.height)
+        tex.load()
+        px = tex.get()[size[0] // 2, size[1] // 2]
+        assert (px.r, px.g, px.b, px.a) == want, (n, px)
+        assert f'materials/vgui/hud/hudeditor/{n}.vmt' in names
+    print('sample t: Tab files and textures ok')
 print(len(names), 'files ok')
 PY

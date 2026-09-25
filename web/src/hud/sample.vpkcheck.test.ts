@@ -50,6 +50,14 @@
 //      icon a 192x64 band (red, green, blue thirds), the pills a 64x64 of
 //      quadrants, the active box a 128x128 of yellow corners, so the reader
 //      sees the repointed cells with the uploads' own rects and the VTFs.
+//   t: the Tab screen (tab screen spec, TAB-4): a stock design with every
+//      open Tab control at TAB-1's probe value (/home/volence/l4d/hud/probe-tab/build.mts):
+//      a navy backdrop, a red title, the versus panel at 420, 20, a flat
+//      green stat box, a flat magenta team box, a yellow "Your Team", a
+//      magenta distance, "Enemy Team" and "Health Bonus:" hidden (its number
+//      with it), your row green, flat purple teammate rows, red row bars, the
+//      ping glyph hidden, your infected row yellow, the infected names cyan.
+//      HUD_DESIGN_OUT, when set, also gets the design as JSON.
 // Unset (or any other value) keeps the original default: sample (a).
 import { it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -85,6 +93,28 @@ function stripes(): Uint8ClampedArray {
   for (let y = 0; y < 64; y++) for (let x = 0; x < 256; x++) px.set([255, 255, 255, [255, 160, 80, 0][x >> 6]], (y * 256 + x) * 4);
   return px;
 }
+
+/** Sample t: TAB-1's values through the editor's own controls (see the header). */
+export const SAMPLE_T = { v: 1, preset: 'stock', name: 'tab4',
+  elements: { tabVersus: { x: 420, y: 20 } },
+  styles: {
+    tabStatBox: { kind: 'flat', color: '0 255 0 255' },
+    tabTeamBox: { kind: 'flat', color: '255 0 255 255' },
+    tabRowBg: { kind: 'flat', color: '128 0 255 255' },
+  },
+  children: {
+    tabBoard: { BackgroundImage: { keys: { bgcolor_override: '0 0 96 200' } }, MissionTitle: { color: '255 0 0 255' } },
+    tabVersus: { TeamYours: { color: '255 255 0 255' }, DistanceAmount: { color: '255 0 255 255' }, TeamEnemy: { visible: false }, HealthLabel: { visible: false } },
+    tabSurvivors: {
+      PlayerBackground_Selected: { keys: { bgcolor_override: '0 128 0 255' } },
+      SurvivorStatsHealth: { keys: { monochrome_color: '255 0 0 255' } },
+      PingImage: { visible: false },
+    },
+    tabInfected: {
+      PlayerBackground_Selected: { keys: { bgcolor_override: '255 255 0 255' } },
+      Name: { color: '0 255 255 255' }, NoAvatarName: { color: '0 255 255 255' },
+    },
+  } };
 
 const SAMPLE_A = { v: 1, preset: 'stock', elements: {
   ownHealth: { x: 8, y: 400 },
@@ -195,6 +225,17 @@ it('writes a sample VPK or zip for the Python/unzip readers', () => {
       } });
     if (d.elements.killNotices?.fontSize !== 24 || !d.children.tankPanel || !d.children.zombiePanel?.['TankTakeover/Title']) throw new Error('sample r lost a gated field in validateDesign');
     writeFileSync(process.env.HUD_VPK_OUT, packHud(d, { images: { voiceSelf: mic } }).bytes);
+    return;
+  }
+  if (sample === 't') {
+    const d = validateDesign(SAMPLE_T);
+    // Every field must survive validation: a gate that closed would drop one silently.
+    const kept = [d.elements.tabVersus?.x === 420, d.elements.tabVersus?.y === 20, d.children.tabBoard?.MissionTitle?.color,
+      d.children.tabVersus?.HealthAmount?.visible === false, d.children.tabSurvivors?.SurvivorStatsHealth?.keys?.monochrome_color,
+      d.children.tabSurvivors?.PingImage?.visible === false, d.children.tabInfected?.Name?.color, d.styles.tabRowBg];
+    if (kept.some((k) => !k)) throw new Error(`sample t lost a field in validateDesign: ${JSON.stringify(kept)}`);
+    if (process.env.HUD_DESIGN_OUT) writeFileSync(process.env.HUD_DESIGN_OUT, `${JSON.stringify(d, null, 2)}\n`);
+    writeFileSync(process.env.HUD_VPK_OUT, packHud(d).bytes);
     return;
   }
   const d = validateDesign(SAMPLE_A);
