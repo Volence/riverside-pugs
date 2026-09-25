@@ -101,6 +101,8 @@ export class BalanceRolloutWriter {
    *  write has settled. */
   private async writeHeld(server: ServerRow, ro: RolloutRow): Promise<WriteOutcome> {
     const base = { serverId: server.id, server: server.name };
+    // Nothing to hold or count for a box this cannot write at all.
+    if (!this.transportOf(server)) return this.failIfStillActive(server, ro, NO_TRANSPORT);
     if (!this.hold(server.id)) return { ...base, ok: false, skipped: 'busy' };
     const why = await this.emptyOrWhy(server);
     if (why) {

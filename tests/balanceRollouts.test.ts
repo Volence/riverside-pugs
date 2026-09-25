@@ -6,6 +6,8 @@ import {
   activeRollout, applyKnobs, confirmOnSighting, ensureServerRows, expectedPatchFor, listRollouts, markFailed, markWritten,
 } from '../src/balanceRollouts.js';
 import { previewKnobs } from '../src/balanceControl.js';
+import { recordBalanceSighting } from '../src/balancePatches.js';
+import { subscribeAdminEvents } from '../src/adminFeed.js';
 
 type DB = ReturnType<typeof openDb>;
 let db: DB;
@@ -103,15 +105,15 @@ describe('rollout state', () => {
     const r = apply({ z_tank_health: 7500 });
     if (!r.ok) throw new Error(r.error);
     expect(expectedPatchFor(db, s1)).toBe(r.patchId);
-    confirmOnSighting(db, { serverId: s1, patchId: r.patchId, now: '2026-09-24 10:01:00' });
+    confirmOnSighting(db, { serverId: s1, matchId: 1, patchId: r.patchId, now: '2026-09-24 10:01:00' });
     expect(db.prepare('SELECT state FROM balance_rollout_servers WHERE server_id = ?').get(s1)).toEqual({ state: 'pending' });
     markWritten(db, r.rolloutId, s1, '2026-09-24 10:02:00');
     const other = sight(db, 3, s1, { ...LIVE, 'c:z_tank_health': '7000' }, 'queue', '2026-09-24 10:03:00');
-    confirmOnSighting(db, { serverId: s1, patchId: other.patchId, now: '2026-09-24 10:03:00' });
+    confirmOnSighting(db, { serverId: s1, matchId: 3, patchId: other.patchId, now: '2026-09-24 10:03:00' });
     let row = listRollouts(db, KNOBS)[0].servers.find((s) => s.serverId === s1)!;
     expect(row.state).toBe('written');
     expect(row.mismatch).toBe('c:z_tank_health 7500 -> 7000');
-    confirmOnSighting(db, { serverId: s1, patchId: r.patchId, now: '2026-09-24 10:04:00' });
+    confirmOnSighting(db, { serverId: s1, matchId: 3, patchId: r.patchId, now: '2026-09-24 10:04:00' });
     row = listRollouts(db, KNOBS)[0].servers.find((s) => s.serverId === s1)!;
     expect(row).toMatchObject({ state: 'confirmed', confirmedAt: '2026-09-24 10:04:00', mismatch: null });
   });
@@ -126,5 +128,69 @@ describe('rollout state', () => {
 
   it('no rollout means no expectation', () => {
     expect(expectedPatchFor(db, s1)).toBeNull();
+  });
+});
+
+/** A queue (or other) match on `serverId` whose round saw `inv`, recorded the
+ *  way server.ts does it: with the rollout's expectation, then the confirm. */
+function sightLive(matchId: number, serverId: number, inv: Record<string, string>, origin = 'queue', at = '2026-09-24 11:00:00') {
+  db.prepare("INSERT INTO matches (id, season_id, state, campaign, server_id, token, origin) VALUES (?, 1, 'live', 'x', ?, ?, ?)")
+    .run(matchId, serverId, String(matchId).padStart(32, '0'), origin);
+  db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, started_at) VALUES (?, 0, 1, 'a', ?)").run(matchId, at);
+  const r = recordBalanceSighting(db, { matchId, serverId, half: 1, inventory: inv, versionless: KNOBS.versionless, ignored: KNOBS.ignored, now: at,
+    expectedPatchId: expectedPatchFor(db, serverId) });
+  confirmOnSighting(db, { serverId, matchId, patchId: r.patchId, now: at });
+  return r;
+}
+const rowOf = (sid: number) => listRollouts(db, KNOBS)[0].servers.find((s) => s.serverId === sid)!;
+
+describe('confirming a rollout when something else changed in the same gap', () => {
+  it('a watch list that grew: confirmed, no alert, and the new config is folded into the rollout patch', () => {
+    const r = apply({ z_tank_health: 7500 });
+    if (!r.ok) throw new Error(r.error);
+    markWritten(db, r.rolloutId, s1);
+    const alerts: string[] = [];
+    const off = subscribeAdminEvents((e) => { if (e.kind === 'problem') alerts.push(e.text); });
+    const seen = sightLive(10, s1, { ...LIVE, 'c:z_tank_health': '7500', 'c:z_new_watch': '5' });
+    off();
+    expect(alerts).toEqual([]);
+    expect(seen.patchId).not.toBe(r.patchId);
+    expect(seen.effectivePatchId).toBe(r.patchId);
+    expect(rowOf(s1)).toMatchObject({ state: 'confirmed', mismatch: null });
+  });
+
+  it('a release that changed a plugin in the same gap: the rollout is still confirmed by its knob values', () => {
+    const r = apply({ z_tank_health: 7500 });
+    if (!r.ok) throw new Error(r.error);
+    markWritten(db, r.rolloutId, s1);
+    sightLive(10, s1, { ...LIVE, 'c:z_tank_health': '7500', 'p:l4d_skypounce.smx': '3.cccc' });
+    expect(rowOf(s1)).toMatchObject({ state: 'confirmed', mismatch: null });
+  });
+
+  it('a knob value that is not the rollout\'s is still a mismatch, and does not confirm', () => {
+    const r = apply({ z_tank_health: 7500 });
+    if (!r.ok) throw new Error(r.error);
+    markWritten(db, r.rolloutId, s1);
+    sightLive(10, s1, { ...LIVE, 'c:z_tank_health': '7000', 'c:z_new_watch': '5' });
+    expect(rowOf(s1).state).toBe('written');
+    expect(rowOf(s1).mismatch).toMatch(/z_tank_health 7500 -> 7000/);
+  });
+
+  it('only a queue match confirms or records a sighting: a casual or 2v2 config never flips a confirmed box', () => {
+    const r = apply({ z_tank_health: 7500 });
+    if (!r.ok) throw new Error(r.error);
+    markWritten(db, r.rolloutId, s1);
+    sightLive(10, s1, { ...LIVE, 'c:z_tank_health': '7500' }, 'in_game');
+    expect(rowOf(s1)).toMatchObject({ state: 'written', seen: null });
+    sightLive(11, s1, { ...LIVE, 'c:z_tank_health': '7500' });
+    expect(rowOf(s1)).toMatchObject({ state: 'confirmed', mismatch: null });
+    sightLive(12, s1, { ...LIVE, 'c:z_tank_health': '4000' }, 'in_game', '2026-09-24 12:00:00');
+    expect(rowOf(s1)).toMatchObject({ state: 'confirmed', mismatch: null, seen: { at: '2026-09-24 11:00:00' } });
+  });
+
+  it('the preview warns while a release is still rolling out', () => {
+    expect(previewKnobs(db, KNOBS, {}).warnings).toEqual([]);
+    db.prepare(`INSERT INTO releases (id, kind, sources_json, state, created_by, created_at) VALUES (4, 'deploy', '[]', 'deploying', 'a', 'now')`).run();
+    expect(previewKnobs(db, KNOBS, {}).warnings.join(' ')).toMatch(/release 4/i);
   });
 });

@@ -147,6 +147,17 @@ export interface KnobPreview {
   blocking: { serverId: number; name: string; diff: string }[];
   fingerprint: string | null;
   existingPatch: { id: number; number: number; name: string | null; notes: string; source: string; triage: 'pending' | 'balance' | 'folded' } | null;
+  /** Things that do not block an apply but make its first sightings harder
+   *  to read. */
+  warnings: string[];
+}
+
+/** A release still on its way to the boxes changes their inventory in the
+ *  same between-match gap as this apply. The rollout still confirms (by its
+ *  knob values), but the first sightings carry both changes. */
+export function applyWarnings(db: DB): string[] {
+  const rows = db.prepare("SELECT id FROM releases WHERE state IN ('deploying', 'canary_wait') ORDER BY id").all() as { id: number }[];
+  return rows.map((r) => `Release ${r.id} is still rolling out: the first matches after this apply will show both changes at once, so the patch they report may differ from the one predicted here.`);
 }
 
 export function previewKnobs(db: DB, knobs: BalanceKnobs, raw: unknown): KnobPreview {
@@ -167,7 +178,7 @@ export function previewKnobs(db: DB, knobs: BalanceKnobs, raw: unknown): KnobPre
     if (p) existingPatch = { ...p, number: patchNumber(db, p.id) };
   }
   return {
-    values, errors, diff, groupsChanged, missing, blocking, fingerprint, existingPatch,
+    values, errors, diff, groupsChanged, missing, blocking, fingerprint, existingPatch, warnings: applyWarnings(db),
     base: base ? { patchId: base.patchId, number: patchNumber(db, base.patchId) } : null,
   };
 }
