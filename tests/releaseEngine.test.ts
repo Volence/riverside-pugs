@@ -131,8 +131,25 @@ describe('ReleaseEngine', () => {
     expect(boxState(id, s1).state).toBe('waiting');
     db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(s1); // the releaser is restarting it
     await e.forRelease(s1);
-    expect(boxState(id, s1).state).toBe('restarted');
+    // Not 'restarted' yet: the releaser has not sent quit.
+    expect(boxState(id, s1)).toEqual({ state: 'written', error: null });
+    expect(relState(id)).toBe('deploying');
     expect(restarts).toEqual([]); // the releaser does the restart
+    expect(e.ownsRestart(s1)).toBe(true);
+    expect(e.afterReleaserRestart(s1, { back: true, quitSent: true })).toBe(false);
+    expect(boxState(id, s1).state).toBe('restarted');
+    expect(relState(id)).toBe('done');
+    expect(e.ownsRestart(s1)).toBe(false);
+  });
+
+  it('through the release hook, a quit that was never sent parks the box', async () => {
+    db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(s1);
+    const e = engine();
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.forRelease(s1);
+    expect(e.afterReleaserRestart(s1, { back: true, quitSent: false })).toBe(true); // keep it offline
+    expect(boxState(id, s1)).toEqual({ state: 'written', error: expect.stringMatching(/restart pending/) });
   });
 
   it('never touches a parked (offline) box outside the release hook', async () => {
@@ -173,8 +190,28 @@ describe('ReleaseEngine', () => {
     const started = Date.now();
     await e.forRelease(s1);
     expect(Date.now() - started).toBeLessThan(1000);
+    // The capped hook's turn is spent: the box is still offline (booting),
+    // with no hold of ours, so the queued turn must not write it.
     release();
     await t; await e.settled();
+    expect(boxes[s1].fs.get(A)!.toString()).toBe('A1');
+    expect(boxState(id, s1).state).toBe('waiting');
+    expect(e.ownsRestart(s1)).toBe(false);
+  });
+
+  it('a hook write the releaser restarted under (after the cap) is parked', async () => {
+    let release!: () => void;
+    const slow = new Promise<void>((r) => { release = r; });
+    boxes[s1].w.write = async (p, b) => { await slow; boxes[s1].fs.set(p, b); };
+    db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(s1);
+    const e = engine({ hookCapMs: 20 });
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.forRelease(s1);
+    expect(e.afterReleaserRestart(s1, { back: true, quitSent: true })).toBe(true);
+    release();
+    await e.settled();
+    expect(boxState(id, s1)).toEqual({ state: 'written', error: expect.stringMatching(/restart pending/) });
   });
 
   it('waits for the box to empty, up to a limit, before restarting', async () => {

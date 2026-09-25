@@ -203,6 +203,34 @@ describe('ServerReleaser with a restart', () => {
     expect(restart).not.toHaveBeenCalled();
   });
 
+  it('lets a release that wrote the box judge its restart, and keeps it offline when told to', async () => {
+    setRestartAfterMatch(db, serverId, true);
+    const restart = vi.fn(async () => true);
+    const restartForRelease = vi.fn(async () => ({ back: true, quitSent: false }));
+    const seen: unknown[] = [];
+    const releaser = new ServerReleaser(db, async () => {}, { restart, restartForRelease }, null, {
+      owns: () => true,
+      after: (_s, res) => { seen.push(res); return true; },
+    });
+    releaser.release(serverId, { restart: true });
+    await releaser.settled();
+    expect(restart).not.toHaveBeenCalled();
+    expect(seen).toEqual([{ back: true, quitSent: false }]);
+    expect(statusOf()).toBe('offline');
+  });
+
+  it('restarts as before when no release owns the box', async () => {
+    setRestartAfterMatch(db, serverId, true);
+    const restart = vi.fn(async () => true);
+    const restartForRelease = vi.fn(async () => ({ back: true, quitSent: true }));
+    const releaser = new ServerReleaser(db, async () => {}, { restart, restartForRelease }, null, { owns: () => false, after: () => true });
+    releaser.release(serverId, { restart: true });
+    await releaser.settled();
+    expect(restart).toHaveBeenCalledOnce();
+    expect(restartForRelease).not.toHaveBeenCalled();
+    expect(statusOf()).toBe('idle');
+  });
+
   it('restarts after the cleanup, never before it', async () => {
     setRestartAfterMatch(db, serverId, true);
     const order: string[] = [];
