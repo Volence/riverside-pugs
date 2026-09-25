@@ -84,7 +84,9 @@ const CLOSEUP_RENDER_W = 2600;
  * together edit `design.styles[slot.id]`, and for the Image kind a file
  * input that runs the upload through `decodeUpload`. `slot.defaultColor` is
  * only ever shown, never written back, until the reader actually touches
- * something.
+ * something. Touching the colour or opacity of a Stock row makes it Flat, as
+ * Stock draws the game's own art and has no colour to change; an Image row
+ * has none either, so it shows no colour controls.
  */
 function StyleRow(
   { slot, style, error, onChange, onEnd, onUpload }: {
@@ -96,6 +98,7 @@ function StyleRow(
 ) {
   const kind = style?.kind ?? 'stock';
   const color = style?.color ?? slot.defaultColor;
+  const flatFromStock: Partial<StyleOverride> = kind === 'stock' ? { kind: 'flat' } : {};
 
   return (
     <div class="hud__stylerow">
@@ -109,16 +112,18 @@ function StyleRow(
         <option value="rounded">Rounded</option>
         <option value="image">Image</option>
       </select>
-      <input
-        type="color" aria-label={`${slot.label} colour`} value={hexOf(color)}
-        onInput={(e) => onChange({ color: withHex(color, (e.target as HTMLInputElement).value) }, 'gesture')}
-        onChange={onEnd}
-      />
-      <input
-        type="range" min={0} max={100} step={1} aria-label={`${slot.label} opacity`} value={alphaPct(color)}
-        onInput={(e) => onChange({ color: withAlphaPct(color, parseFloat((e.target as HTMLInputElement).value)) }, 'gesture')}
-        onChange={onEnd}
-      />
+      {kind !== 'image' && <>
+        <input
+          type="color" aria-label={`${slot.label} colour`} value={hexOf(color)}
+          onInput={(e) => onChange({ ...flatFromStock, color: withHex(color, (e.target as HTMLInputElement).value) }, 'gesture')}
+          onChange={onEnd}
+        />
+        <input
+          type="range" min={0} max={100} step={1} aria-label={`${slot.label} opacity`} value={alphaPct(color)}
+          onInput={(e) => onChange({ ...flatFromStock, color: withAlphaPct(color, parseFloat((e.target as HTMLInputElement).value)) }, 'gesture')}
+          onChange={onEnd}
+        />
+      </>}
       {kind === 'image' && (
         <label class="hud__file hud__file--inline">
           <span class="btn btn--ghost btn--sm">Choose image</span>

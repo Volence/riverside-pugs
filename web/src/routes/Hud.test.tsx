@@ -720,6 +720,25 @@ describe('Hud page', () => {
     expect(screen.getByText(/keeps its full size/)).toBeTruthy();
   });
 
+  it('makes a Stock style row Flat when its colour or opacity is touched', () => {
+    render(<Hud />);
+    const kind = () => screen.getByRole('combobox', { name: 'Survivor panel background style' }) as HTMLSelectElement;
+    expect(kind().value).toBe('stock');
+    fireEvent.input(screen.getByLabelText('Survivor panel background colour'), { target: { value: '#ff0000' } });
+    expect(kind().value).toBe('flat');
+    const own = () => screen.getByRole('combobox', { name: 'Your health background style' }) as HTMLSelectElement;
+    fireEvent.input(screen.getByLabelText('Your health background opacity'), { target: { value: '30' } });
+    expect(own().value).toBe('flat');
+  });
+
+  it('shows no colour controls on an Image style row', () => {
+    render(<Hud />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Survivor panel background style' }), { target: { value: 'image' } });
+    expect(screen.queryByLabelText('Survivor panel background colour')).toBeNull();
+    expect(screen.queryByLabelText('Survivor panel background opacity')).toBeNull();
+    expect(screen.getByLabelText('Survivor panel background image')).toBeTruthy();
+  });
+
   it('shows a damaged-link message for a hash that will not decode', async () => {
     location.hash = '#d=garbage';
     render(<Hud />);
