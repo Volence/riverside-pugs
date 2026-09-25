@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assertWritable, ftpTreeWriter, localTreeWriter, sftpTreeWriter } from '../src/fleetWrite.js';
+import { assertWritable, defaultRunIn, ftpTreeWriter, localTreeWriter, sftpTreeWriter } from '../src/fleetWrite.js';
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const P = 'left4dead/cfg/new/a.cfg';
@@ -79,5 +79,45 @@ describe('ftpTreeWriter', () => {
     await w.remove(P);
     await w.remove(P);
     expect(files.size).toBe(0);
+  });
+});
+
+describe('cancelling a box call', () => {
+  it('kills the ssh child when the signal aborts', async () => {
+    const ac = new AbortController();
+    const started = Date.now();
+    const p = defaultRunIn('sleep', ['5'], undefined, ac.signal);
+    setTimeout(() => ac.abort(), 20);
+    await expect(p).rejects.toThrow();
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it('hands the signal to every ssh call', async () => {
+    const seen: (AbortSignal | undefined)[] = [];
+    const runIn = async (_c: string, args: string[], _i?: Buffer, signal?: AbortSignal) => {
+      seen.push(signal);
+      return args[args.length - 1].includes('sha256sum') ? Buffer.alloc(0) : Buffer.from('x');
+    };
+    const w = sftpTreeWriter({ host: 'h', port: 22, user: 'u', keyPath: '/k', gameDir: '/g', runIn });
+    const { signal } = new AbortController();
+    await w.read(P, signal); await w.write(P, Buffer.from('a'), signal); await w.remove(P, signal); await w.hash([P], signal);
+    expect(seen).toEqual([signal, signal, signal, signal]);
+  });
+
+  it('closes the FTP client when the signal aborts', async () => {
+    let closed = false;
+    let hang!: (e: Error) => void;
+    const client = {
+      access: async () => ({}), close: () => { closed = true; hang(new Error('closed')); },
+      ensureDir: async () => {}, uploadFrom: async () => ({}), rename: async () => ({}), remove: async () => ({}),
+      downloadTo: () => new Promise((_r, rej) => { hang = rej; }),
+    };
+    const w = ftpTreeWriter({ host: 'h', port: 21, user: 'u', password: 'p', gameDir: '', client: () => client as never });
+    const ac = new AbortController();
+    const p = w.read(P, ac.signal);
+    await new Promise((r) => setTimeout(r, 5));
+    ac.abort();
+    await expect(p).rejects.toThrow();
+    expect(closed).toBe(true);
   });
 });

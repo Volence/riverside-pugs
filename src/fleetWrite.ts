@@ -10,15 +10,17 @@ import type { ServerRow } from './serverPool.js';
 /**
  * Writing a release onto a box. Every call checks the path first: managed
  * files only, never secrets.cfg. Writes go to `<path>.part` and are renamed
- * into place, so srcds never loads half a file.
+ * into place, so srcds never loads half a file. The signal cancels a call
+ * for real (kills the ssh child, closes the FTP client), so a call the engine
+ * gave up on cannot land after it has put the backup back.
  */
 
 export interface TreeWriter {
   kind: 'local' | 'sftp' | 'ftp';
-  read(path: string): Promise<Buffer | null>;
-  write(path: string, bytes: Buffer): Promise<void>;
-  remove(path: string): Promise<void>;
-  hash(paths: string[]): Promise<Map<string, string | null>>;
+  read(path: string, signal?: AbortSignal): Promise<Buffer | null>;
+  write(path: string, bytes: Buffer, signal?: AbortSignal): Promise<void>;
+  remove(path: string, signal?: AbortSignal): Promise<void>;
+  hash(paths: string[], signal?: AbortSignal): Promise<Map<string, string | null>>;
 }
 
 export function assertWritable(path: string): void {
@@ -29,8 +31,8 @@ const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 
 export function localTreeWriter(gameDir: string): TreeWriter {
   const abs = (p: string) => { assertWritable(p); return join(gameDir, p); };
-  const read = async (p: string) => {
-    try { return await readFile(abs(p)); } catch (err) {
+  const read = async (p: string, signal?: AbortSignal) => {
+    try { return await readFile(abs(p), { signal }); } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
       throw err;
     }
@@ -38,16 +40,17 @@ export function localTreeWriter(gameDir: string): TreeWriter {
   return {
     kind: 'local',
     read,
-    async write(p, bytes) {
+    async write(p, bytes, signal) {
       const a = abs(p);
       await mkdir(dirname(a), { recursive: true });
-      await writeFile(`${a}.part`, bytes);
+      await writeFile(`${a}.part`, bytes, { signal });
+      signal?.throwIfAborted();
       await rename(`${a}.part`, a);
     },
-    async remove(p) { await rm(abs(p), { force: true }); },
-    async hash(paths) {
+    async remove(p, signal) { signal?.throwIfAborted(); await rm(abs(p), { force: true }); },
+    async hash(paths, signal) {
       const out = new Map<string, string | null>();
-      for (const p of paths) { const b = await read(p); out.set(p, b ? sha256(b) : null); }
+      for (const p of paths) { const b = await read(p, signal); out.set(p, b ? sha256(b) : null); }
       return out;
     },
   };
@@ -55,9 +58,11 @@ export function localTreeWriter(gameDir: string): TreeWriter {
 
 const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
-function defaultRunIn(cmd: string, args: string[], input?: Buffer): Promise<Buffer> {
+export function defaultRunIn(cmd: string, args: string[], input?: Buffer, signal?: AbortSignal): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    // An aborted signal kills the child (and rejects through 'error').
+    const child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'], signal, killSignal: 'SIGKILL' });
+    child.stdin.on('error', () => {});
     const out: Buffer[] = [], err: Buffer[] = [];
     child.stdout.on('data', (c) => out.push(c));
     child.stderr.on('data', (c) => err.push(c));
@@ -70,31 +75,31 @@ function defaultRunIn(cmd: string, args: string[], input?: Buffer): Promise<Buff
 
 export function sftpTreeWriter(cfg: {
   host: string; port: number; user: string; keyPath: string; gameDir: string;
-  runIn?: (cmd: string, args: string[], input?: Buffer) => Promise<Buffer>;
+  runIn?: (cmd: string, args: string[], input?: Buffer, signal?: AbortSignal) => Promise<Buffer>;
 }): TreeWriter {
   const common = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'StrictHostKeyChecking=accept-new', '-i', cfg.keyPath];
   const run = cfg.runIn ?? defaultRunIn;
-  const ssh = (script: string, input?: Buffer) => run('ssh', [...common, '-p', String(cfg.port), `${cfg.user}@${cfg.host}`, script], input);
+  const ssh = (script: string, input?: Buffer, signal?: AbortSignal) => run('ssh', [...common, '-p', String(cfg.port), `${cfg.user}@${cfg.host}`, script], input, signal);
   const abs = (p: string) => { assertWritable(p); return posix.join(cfg.gameDir, p); };
   return {
     kind: 'sftp',
-    async read(p) {
+    async read(p, signal) {
       const a = shq(abs(p));
-      try { return await ssh(`test -e ${a} || exit 3; cat -- ${a}`); } catch (err) {
+      try { return await ssh(`test -e ${a} || exit 3; cat -- ${a}`, undefined, signal); } catch (err) {
         if ((err as { code?: number }).code === 3) return null;
         throw err;
       }
     },
-    async write(p, bytes) {
+    async write(p, bytes, signal) {
       const a = abs(p);
-      await ssh(`mkdir -p ${shq(posix.dirname(a))} && cat > ${shq(`${a}.part`)} && mv -f ${shq(`${a}.part`)} ${shq(a)}`, bytes);
+      await ssh(`mkdir -p ${shq(posix.dirname(a))} && cat > ${shq(`${a}.part`)} && mv -f ${shq(`${a}.part`)} ${shq(a)}`, bytes, signal);
     },
-    async remove(p) { await ssh(`rm -f -- ${shq(abs(p))}`); },
-    async hash(paths) {
+    async remove(p, signal) { await ssh(`rm -f -- ${shq(abs(p))}`, undefined, signal); },
+    async hash(paths, signal) {
       const out = new Map<string, string | null>(paths.map((p) => [p, null]));
       if (paths.length === 0) return out;
       paths.forEach(assertWritable);
-      const text = (await ssh(`cd ${shq(cfg.gameDir)} && sha256sum -- ${paths.map(shq).join(' ')} 2>/dev/null; true`)).toString();
+      const text = (await ssh(`cd ${shq(cfg.gameDir)} && sha256sum -- ${paths.map(shq).join(' ')} 2>/dev/null; true`, undefined, signal)).toString();
       for (const line of text.split('\n')) {
         const m = /^([0-9a-f]{64}) {2}(.+)$/.exec(line);
         if (m && out.has(m[2])) out.set(m[2], m[1]);
@@ -111,12 +116,18 @@ export function ftpTreeWriter(cfg: {
   client?: () => FtpWriteClient;
 }): TreeWriter {
   const abs = (p: string) => { assertWritable(p); return `${cfg.gameDir}/${p}`; };
-  const withClient = async <T>(fn: (c: FtpWriteClient) => Promise<T>): Promise<T> => {
+  const withClient = async <T>(fn: (c: FtpWriteClient) => Promise<T>, signal?: AbortSignal): Promise<T> => {
+    signal?.throwIfAborted();
     const c = cfg.client ? cfg.client() : new FtpClient(60_000);
+    // Closing the client fails whatever transfer is in flight.
+    const cancel = () => c.close();
+    signal?.addEventListener('abort', cancel, { once: true });
     try {
       await c.access({ host: cfg.host, port: cfg.port, user: cfg.user, password: cfg.password });
-      return await fn(c);
-    } finally { c.close(); }
+      const out = await fn(c);
+      signal?.throwIfAborted();
+      return out;
+    } finally { signal?.removeEventListener('abort', cancel); c.close(); }
   };
   const download = async (c: FtpWriteClient, a: string): Promise<Buffer | null> => {
     const chunks: Buffer[] = [];
@@ -129,8 +140,8 @@ export function ftpTreeWriter(cfg: {
   };
   return {
     kind: 'ftp',
-    read: (p) => withClient((c) => download(c, abs(p))),
-    async write(p, bytes) {
+    read: (p, signal) => withClient((c) => download(c, abs(p)), signal),
+    async write(p, bytes, signal) {
       const a = abs(p);
       await withClient(async (c) => {
         await c.ensureDir(posix.dirname(a));
@@ -140,16 +151,16 @@ export function ftpTreeWriter(cfg: {
           await c.remove(a).catch(() => {});
           await c.rename(`${a}.part`, a);
         }
-      });
+      }, signal);
     },
-    async remove(p) {
-      await withClient(async (c) => { try { await c.remove(abs(p)); } catch { /* absent is fine */ } });
+    async remove(p, signal) {
+      await withClient(async (c) => { try { await c.remove(abs(p)); } catch { /* absent is fine */ } }, signal);
     },
-    hash: (paths) => withClient(async (c) => {
+    hash: (paths, signal) => withClient(async (c) => {
       const out = new Map<string, string | null>();
       for (const p of paths) { const b = await download(c, abs(p)); out.set(p, b ? sha256(b) : null); }
       return out;
-    }),
+    }, signal),
   };
 }
 
