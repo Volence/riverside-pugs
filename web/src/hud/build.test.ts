@@ -1755,7 +1755,8 @@ describe('hiding an element hides it in game (probe B2 and B3: visible 0 alone h
   // /home/volence/l4d/hud/probe-phase2/RESULTS.md, B2 and B3: every element tested came back with visible 0 only.
   const size = (n: KvNode) => [kvGet(n, 'visible'), kvGet(n, 'wide'), kvGet(n, 'tall')];
   // The marker shares the game's crosshair block, so it is hidden by its own keys instead (plan Task 8, below).
-  const hideable = ELEMENTS.filter((e) => e.id !== 'xhair' && e.id !== 'abilityMarker' && e.props.includes('visible'));
+  // Your items has no block of its own until it is on: off, it writes nothing (build.youritems.test.ts).
+  const hideable = ELEMENTS.filter((e) => e.id !== 'xhair' && e.id !== 'abilityMarker' && e.id !== 'yourItems' && e.props.includes('visible'));
 
   for (const preset of ['stock', 'modern'] as const) {
     for (const el of hideable) {

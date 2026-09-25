@@ -43,7 +43,7 @@ const WHEN: Record<StateArt, string> = {
 const TAB_IDS = ['tabBoard', 'tabVersus', 'tabSurvivors', 'tabInfected'];
 const GROUPS: Record<Side, { title: string; ids: string[] }[]> = {
   survivor: [
-    { title: 'You', ids: ['ownHealth', 'weaponSelection', 'progressBar', 'ownMic', 'xhair'] },
+    { title: 'You', ids: ['ownHealth', 'yourItems', 'weaponSelection', 'progressBar', 'ownMic', 'xhair'] },
     { title: 'Team', ids: ['teamColumn', 'perilNotice', 'leavingArea'] },
     { title: 'Messages', ids: ['chat', 'killNotices', 'vote', 'voiceList'] },
     { title: 'Finales and Survival', ids: ['finaleMeter', 'holdoutTimer'] },

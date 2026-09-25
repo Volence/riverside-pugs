@@ -83,3 +83,20 @@ export function columnExtent(c: ColumnInput): { left: number; bottom: number } {
   }
   return { left, bottom };
 }
+
+/**
+ * The column's right edge (the boxes', RightSideIndent in from the panel's)
+ * and the bottom of the pistol slot's box art, in panel units, with the gun
+ * held, the preview's default (weapons.ts weaponSlots lays the same slots
+ * out): the gun box grown WEAPON_GROW, two 640-units down to the pistol row,
+ * and the pistol box's art padded two 640-units past its box. Your items
+ * starts there (build.ts yourItemsHome), about where the stock item slots
+ * were. It restates weaponSlots' pistol row, as columnExtent restates the
+ * column, because build.ts may not import weapons.ts: that module reaches
+ * the exported art (art.test.ts, "the art boundary").
+ * build.youritems.test.ts holds the two to the same numbers.
+ */
+export function weaponRowsEdge(c: { n: (key: string) => number; panelWide: number; u: number }): { right: number; bottom: number } {
+  const pistolTop = c.n('PrimaryWeaponsYPos') + c.n('PrimaryWeaponBoxTall') * WEAPON_GROW + 2 * c.u;
+  return { right: c.panelWide - c.n('RightSideIndent'), bottom: pistolTop + c.n('PistolBoxTall') + 2 * c.u };
+}

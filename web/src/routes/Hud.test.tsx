@@ -1407,6 +1407,7 @@ describe('Hud page', () => {
       ['hud__layer--d1', 'Portrait'], ['hud__layer--d1', 'Health bar'], ['hud__layer--d1', 'Health cross'], ['hud__layer--d1', 'Health number'],
       ['hud__layer--d1', 'Scratches, top'], ['hud__layer--d1', 'Scratches, bottom'],
       ['hud__layer--d1', 'Down pictureshown when down'], ['hud__layer--d1', 'Crouch iconshown when crouched'],
+      ['hud__layer--d0 hud__layer--hidden', 'Your items'],
       ['hud__layer--d0', 'Weapons'], ['hud__layer--d0', 'Use / revive bar'],
       ['hud__layer--d1', 'Label'], ['hud__layer--d1', 'Bar'], ['hud__layer--d1', 'Icon'], ['hud__layer--d1', 'Subtext'],
       ['hud__layer--d0 hud__layer--hidden', 'Custom crosshair'],

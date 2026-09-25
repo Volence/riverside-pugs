@@ -183,7 +183,8 @@ describe('renderPreview on the in-game backdrops', () => {
       // Your health, the teammates, the weapons and the crosshair are always up; the chat and the
       // kill notices are the everyday stand-ins both sides show. The mic, vote, voice list, survival
       // timer, finale meter, peril notice and wait-for-teammates warning come and go.
-      expect(shown.sort(), preset).toEqual(['chat', 'killNotices', 'ownHealth', 'teamColumn', 'weaponSelection', 'xhair']);
+      // Your items is listed too; a new design has it off, and drawHud skips a hidden element.
+      expect(shown.sort(), preset).toEqual(['chat', 'killNotices', 'ownHealth', 'teamColumn', 'weaponSelection', 'xhair', 'yourItems']);
     }
     // The use bar shows in the game only while you heal, revive or are revived.
     expect(calls.some(([m, a]) => m === 'fillText' && a[0] === 'HEALING YOURSELF')).toBe(false);
