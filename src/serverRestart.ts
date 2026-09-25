@@ -201,10 +201,11 @@ export async function kickThenQuit(
   await rcon.exec('quit');
 }
 
-/** Humans on a box, from the engine's `status` ("players : 3 (8 max)"). 0 when
- *  the line is missing: the caller only uses this to wait politely before a
- *  release restarts the box. */
+/** Humans on a box, from the engine's `status` ("players : 3 (8 max)").
+ *  Throws when the line is missing: a release restarts a box only on a count
+ *  of exactly 0, and a reply it cannot read is not one. */
 export function parseHumans(status: string): number {
   const m = /players\s*:\s*(\d+)/.exec(status);
-  return m ? Number(m[1]) : 0;
+  if (!m) throw new Error('no player count in the status reply');
+  return Number(m[1]);
 }

@@ -187,6 +187,89 @@ describe('ReleaseEngine', () => {
     expect(n).toBe(-1);
   });
 
+  it('never restarts a box that did not empty in time: written, restart pending, parked offline', async () => {
+    const e = engine({ humans: async () => 1, emptyWaitMs: 5, emptyPollMs: 1 });
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(restarts).toEqual([]);
+    expect(boxState(id, s1)).toEqual({ state: 'written', error: expect.stringMatching(/restart pending/) });
+    expect(getServer(db, s1)!.status).toBe('offline');
+  });
+
+  it('never restarts when the player count cannot be read', async () => {
+    const e = engine({ humans: async () => { throw new Error('rcon connect timeout'); } });
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(restarts).toEqual([]);
+    expect(boxState(id, s1)).toEqual({ state: 'written', error: expect.stringMatching(/restart pending.*rcon connect timeout/) });
+    expect(getServer(db, s1)!.status).toBe('offline');
+  });
+
+  it('never restarts or frees a box a match took while it waited to empty', async () => {
+    let n = 1;
+    const e = engine({
+      humans: async () => {
+        // An in-game PUG is adopted on the box (selfStarted marks it live).
+        db.prepare("UPDATE servers SET status = 'live' WHERE id = ?").run(s1);
+        return n--;
+      },
+      emptyPollMs: 1,
+    });
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(restarts).toEqual([]);
+    expect(boxState(id, s1)).toEqual({ state: 'written', error: expect.stringMatching(/restart pending/) });
+    expect(getServer(db, s1)!.status).toBe('live');
+  });
+
+  it('does not call a box restarted when quit was never sent', async () => {
+    const e = engine({ restarter: { restart: async () => true, restartForRelease: async () => ({ back: false, quitSent: false }) } });
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(boxState(id, s1)).toEqual({ state: 'written', error: expect.stringMatching(/restart pending.*quit/) });
+    expect(getServer(db, s1)!.status).toBe('offline');
+  });
+
+  it('a box that does not come back from its restart stays offline', async () => {
+    const e = engine({ restarter: { restart: async () => false } });
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(boxState(id, s1)).toEqual({ state: 'written', error: expect.stringMatching(/did not come back/) });
+    expect(getServer(db, s1)!.status).toBe('offline');
+  });
+
+  it('the canary is checked only once it has restarted, and a canary left unrestarted halts', async () => {
+    let open!: () => void;
+    const gate = new Promise<void>((r) => { open = r; });
+    const e = engine({ humans: async () => { await gate; return 0; } });
+    const id = stage();
+    e.deploy(id, { targets: [s1, s2], canary: s2, balance: later, adminId: '1' });
+    await e.tick();
+    expect(boxState(id, s2).state).toBe('written');
+    expect(relState(id)).toBe('deploying');
+    await e.tick();
+    expect(boxState(id, s1).state).toBe('pending');
+    open();
+    await e.settled();
+    expect(boxState(id, s2).state).toBe('restarted');
+    expect(relState(id)).toBe('canary_wait');
+
+    const e2 = engine({ humans: async () => 1, emptyWaitMs: 2, emptyPollMs: 1 });
+    db.prepare("UPDATE releases SET state = 'done' WHERE id = ?").run(id);
+    db.prepare("UPDATE servers SET status = 'idle'").run();
+    const id2 = stage([plan[0]]);
+    boxes[s2].fs.set(A, Buffer.from('A1'));
+    e2.deploy(id2, { targets: [s1, s2], canary: s2, balance: later, adminId: '1' });
+    await e2.tick(); await e2.settled();
+    expect(relState(id2)).toBe('halted');
+    expect(boxState(id2, s1).state).toBe('skipped');
+  });
+
   it('refuses in dev mode, a second in-flight release, bad targets and a nameless balance patch', () => {
     const id = stage();
     expect(engine({ devMode: true }).deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' })).toMatchObject({ ok: false, status: 409 });
