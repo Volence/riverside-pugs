@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { loadBalanceKnobs, renderBalanceListInc, BALANCE_KNOBS_PATH } from '../src/balanceKnobs.js';
+import { loadCatalogue, watchKnobs } from '../src/balanceCatalogue.js';
+import { renderWatchFile } from '../src/balanceWatch.js';
 import { adjustableKnobs, formatKnobValue, normalizeKnobValue, stepDecimals, type AdjustableKnob } from '../src/balanceKnobs.js';
 
 describe('balance knobs', () => {
@@ -19,6 +21,21 @@ describe('balance knobs', () => {
   it('rejects a knobs file missing the versionless array', () => {
     const bad = { cvars: [], files: [], dirs: [] };
     expect(() => loadBalanceKnobs(undefined, bad)).toThrow(/versionless/);
+  });
+
+  it('rejects a duplicate file, dir or weapon key: the plugin would send the key twice and the round would lose its tag', () => {
+    const f = { path: 'cfg/a.cfg', label: 'x' }, d = { path: 'cfg/d', ext: '.cfg', label: 'y' };
+    const w = { weapon: 'weapon_smg', key: 'Damage', label: 'z' };
+    expect(() => loadBalanceKnobs(undefined, { cvars: [], files: [f, f], dirs: [], versionless: [] })).toThrow(/duplicate file/);
+    expect(() => loadBalanceKnobs(undefined, { cvars: [], files: [], dirs: [d, d], versionless: [] })).toThrow(/duplicate dir/);
+    expect(() => loadBalanceKnobs(undefined, { cvars: [], files: [], dirs: [], versionless: [], weapons: [w, w] })).toThrow(/duplicate weapon/);
+  });
+
+  it('the real knobs.json and catalogue.json make a watch list with no entry twice (cvars ignoring case)', () => {
+    const text = renderWatchFile(watchKnobs(loadBalanceKnobs(BALANCE_KNOBS_PATH), loadCatalogue()));
+    const body = text.split('\n').filter((l) => l && !l.startsWith('//')).map((l) => (l.startsWith('cvar ') ? l.toLowerCase() : l));
+    expect(body.length).toBeGreaterThan(100);
+    expect(new Set(body).size).toBe(body.length);
   });
 
   it('the checked-in plugin include matches knobs.json', () => {

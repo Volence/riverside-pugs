@@ -121,7 +121,9 @@ export type LogEvent =
   // most interesting, value. Optional for the same reason `map` is, an older
   // plugin does not send it.
   | { kind: 'round_end'; token: string; map: string | null; half: number; surv: 'a' | 'b'; score: number; alive: number | null; demo?: DemoSync }
-  | { kind: 'balance_part'; token: string; half: 1 | 2; part: number; items: Record<string, string> }
+  /** `sent`: items on the line, a key sent twice counted twice (items keeps
+   *  one), so a duplicate watch entry does not look like a lost item. */
+  | { kind: 'balance_part'; token: string; half: 1 | 2; part: number; items: Record<string, string>; sent: number }
   | { kind: 'balance_end'; token: string; half: 1 | 2; parts: number; items: number }
   | { kind: 'round_stat'; token: string; half: 1 | 2; steamid: string; stats: Record<string, number> }
   | { kind: 'round_stats_end'; token: string; half: 1 | 2; players: number; skillDetect: boolean }
@@ -859,7 +861,8 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       for (const [k, v] of Object.entries(rest)) {
         if (BAL_ITEM_RE.test(k)) items[pctDecode(k)] = pctDecode(v);
       }
-      return { kind: 'balance_part', token, half: half as 1 | 2, part, items };
+      const sent = parts.slice(3).filter((p) => p.indexOf('=') > 0 && BAL_ITEM_RE.test(p)).length;
+      return { kind: 'balance_part', token, half: half as 1 | 2, part, items, sent };
     }
     case 'BALANCE_END': {
       const half = halfOf(rest.half);

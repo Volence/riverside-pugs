@@ -531,12 +531,17 @@ describe('balance and per-round lines', () => {
       `PUG ${TOKEN} BALANCE half=1 part=0 c:z_tank_health=4000 c:sv_tags=a%20b%25 p:l4d_skypounce.smx=1234.0a0b0c0d x:l4d_nope=missing junk=1`,
     ));
     expect(ev).toEqual({
-      kind: 'balance_part', token: TOKEN, half: 1, part: 0,
+      kind: 'balance_part', token: TOKEN, half: 1, part: 0, sent: 4,
       items: {
         'c:z_tank_health': '4000', 'c:sv_tags': 'a b%',
         'p:l4d_skypounce.smx': '1234.0a0b0c0d', 'x:l4d_nope': 'missing',
       },
     });
+  });
+
+  it('counts a BALANCE item sent twice on one line', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} BALANCE half=1 part=0 f:a.cfg=1.a c:x=1 f:a.cfg=1.a`));
+    expect(ev).toMatchObject({ kind: 'balance_part', sent: 3, items: { 'f:a.cfg': '1.a', 'c:x': '1' } });
   });
 
   it('parses BALANCE_END', () => {
