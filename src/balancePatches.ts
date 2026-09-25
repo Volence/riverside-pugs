@@ -8,8 +8,9 @@ import { triageInfo, type Lists } from './balanceTriage.js';
 type Inventory = Record<string, string>;
 
 /** A plugin key's file name: a plugin loaded from a subfolder
- *  (plugins/optional/) reports as "p:optional/<file>". */
-export const pluginFile = (key: string): string => key.slice(2).split('/').pop()!;
+ *  (plugins/optional/) reports as "p:optional/<file>", or with a backslash
+ *  from SourceMod on Windows. */
+export const pluginFile = (key: string): string => key.slice(2).split(/[\\/]/).pop()!;
 
 /** Whether an inventory key is a plugin on `list` (bare file names), matched
  *  by file name so a plugin in a subfolder is on the list too. */
