@@ -19,15 +19,29 @@ import type { ServerRow } from './serverPool.js';
  * transfer is the failure this actually guards against.
  */
 
+/** `signal` cancels the call for real: the FTP connection is closed and an
+ *  scp/ssh child is killed, so a caller that gives up on a call (a timeout)
+ *  is not left with it still landing on the box later. A local file copy is
+ *  over in milliseconds and only checks the signal before it starts. */
+export interface TransportOpts { signal?: AbortSignal }
+
 export interface AddonsTransport {
-  put(localPath: string, remoteName: string): Promise<void>;
+  put(localPath: string, remoteName: string, opts?: TransportOpts): Promise<void>;
   /** Bytes on the far side, or null when the file is not there. */
-  size(remoteName: string): Promise<number | null>;
-  remove(remoteName: string): Promise<void>;
+  size(remoteName: string, opts?: TransportOpts): Promise<number | null>;
+  remove(remoteName: string, opts?: TransportOpts): Promise<void>;
   /** The file as UTF-8 text, or null when it is not there. Any other failure
    *  throws, so "could not read" is never mistaken for "absent". Used to read
    *  back small config files after writing them. */
-  readText(remoteName: string): Promise<string | null>;
+  readText(remoteName: string, opts?: TransportOpts): Promise<string | null>;
+}
+
+function abortError(): Error {
+  return Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
+}
+
+function throwIfAborted(opts?: TransportOpts): void {
+  if (opts?.signal?.aborted) throw abortError();
 }
 
 /** Remote names come from our own database, never from a request. Checked
@@ -41,8 +55,9 @@ function assertPlainName(name: string): void {
 
 export function localTransport(dir: string): AddonsTransport {
   return {
-    async put(localPath, remoteName) {
+    async put(localPath, remoteName, opts) {
       assertPlainName(remoteName);
+      throwIfAborted(opts);
       // Copy beside the target and rename, so srcds (which mounts whatever is
       // in addons/ at map load) never sees a partial file under the real name.
       // Same filesystem, so the rename is atomic.
@@ -67,8 +82,9 @@ export function localTransport(dir: string): AddonsTransport {
         // Already gone is the desired state.
       }
     },
-    async readText(remoteName) {
+    async readText(remoteName, opts) {
       assertPlainName(remoteName);
+      throwIfAborted(opts);
       try {
         return await readFile(join(dir, remoteName), 'utf8');
       } catch (err) {
@@ -98,20 +114,33 @@ export function ftpTransport(cfg: {
   host: string; port: number; user: string; password: string; dir: string;
   client?: () => FtpClientLike;
 }): AddonsTransport {
-  const withClient = async <T>(fn: (c: FtpClientLike) => Promise<T>): Promise<T> => {
+  // basic-ftp's own timeout (30 s) bounds a silent socket; the signal is
+  // for the caller's overall deadline. Closing the client rejects whatever
+  // task is pending on it, so an aborted put stops before its rename.
+  const withClient = async <T>(fn: (c: FtpClientLike) => Promise<T>, opts?: TransportOpts): Promise<T> => {
+    throwIfAborted(opts);
     const client = cfg.client ? cfg.client() : new FtpClient(30_000);
+    let aborted = false;
+    const onAbort = () => { aborted = true; client.close(); };
+    opts?.signal?.addEventListener('abort', onAbort, { once: true });
     try {
       await client.access({
         host: cfg.host, port: cfg.port, user: cfg.user, password: cfg.password,
       });
-      return await fn(client);
+      if (aborted) throw abortError();
+      const out = await fn(client);
+      if (aborted) throw abortError();
+      return out;
+    } catch (err) {
+      throw aborted ? abortError() : err;
     } finally {
+      opts?.signal?.removeEventListener('abort', onAbort);
       client.close();
     }
   };
 
   return {
-    async put(localPath, remoteName) {
+    async put(localPath, remoteName, opts) {
       assertPlainName(remoteName);
       await withClient(async (c) => {
         await c.ensureDir(cfg.dir);
@@ -136,9 +165,9 @@ export function ftpTransport(cfg: {
             throw new Error(`${why}; ${remoteName} was removed and the new copy is only at ${remoteName}.part on the box: put it in place by hand`);
           }
         }
-      });
+      }, opts);
     },
-    async size(remoteName) {
+    async size(remoteName, opts) {
       assertPlainName(remoteName);
       return withClient(async (c) => {
         await c.cd(cfg.dir);
@@ -147,9 +176,9 @@ export function ftpTransport(cfg: {
         } catch {
           return null;
         }
-      });
+      }, opts);
     },
-    async remove(remoteName) {
+    async remove(remoteName, opts) {
       assertPlainName(remoteName);
       await withClient(async (c) => {
         await c.cd(cfg.dir);
@@ -158,9 +187,9 @@ export function ftpTransport(cfg: {
         } catch {
           // Already gone is the desired state.
         }
-      });
+      }, opts);
     },
-    async readText(remoteName) {
+    async readText(remoteName, opts) {
       assertPlainName(remoteName);
       return withClient(async (c) => {
         await c.cd(cfg.dir);
@@ -174,7 +203,7 @@ export function ftpTransport(cfg: {
           throw err;
         }
         return Buffer.concat(chunks).toString('utf8');
-      });
+      }, opts);
     },
   };
 }
@@ -195,34 +224,44 @@ const execFileAsync = promisify(execFile);
 
 export function sftpTransport(cfg: {
   host: string; port: number; user: string; keyPath: string; dir: string;
-  run?: (cmd: string, args: string[]) => Promise<{ stdout: string }>;
+  run?: (cmd: string, args: string[], opts?: TransportOpts) => Promise<{ stdout: string }>;
 }): AddonsTransport {
   // BatchMode so a missing key fails fast instead of hanging on a prompt, and
   // accept-new so first contact works without a manual known_hosts step while
-  // still pinning the key after that.
-  const common = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-i', cfg.keyPath];
-  const run = cfg.run ?? (async (cmd: string, args: string[]) => {
-    const { stdout } = await execFileAsync(cmd, args, { maxBuffer: 1 << 20 });
+  // still pinning the key after that. ConnectTimeout bounds an unreachable
+  // box and the keepalives drop a connection that went silent, so a child
+  // never hangs for ever on its own; the signal kills it sooner.
+  const common = [
+    '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new',
+    '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=2',
+    '-i', cfg.keyPath,
+  ];
+  const run = cfg.run ?? (async (cmd: string, args: string[], opts?: TransportOpts) => {
+    const { stdout } = await execFileAsync(cmd, args, { maxBuffer: 1 << 20, signal: opts?.signal });
     return { stdout };
   });
   const remote = (name: string) => `${cfg.dir}/${name}`;
   // scp spells the port -P, ssh spells it -p. Getting this backwards silently
   // talks to the wrong port, so keep the two arg builders separate.
-  const ssh = (script: string) => run('ssh', [...common, '-p', String(cfg.port), `${cfg.user}@${cfg.host}`, script]);
+  const ssh = (script: string, opts?: TransportOpts) => {
+    throwIfAborted(opts);
+    return run('ssh', [...common, '-p', String(cfg.port), `${cfg.user}@${cfg.host}`, script], opts);
+  };
   return {
-    async put(localPath, remoteName) {
+    async put(localPath, remoteName, opts) {
       assertPlainName(remoteName);
+      throwIfAborted(opts);
       // Same reason as localTransport: srcds mounts whatever is in addons/ at
       // map load, so it must never see a partial file under the real name.
       const final = remote(remoteName);
       const tmp = `${final}.part`;
-      await run('scp', [...common, '-P', String(cfg.port), localPath, `${cfg.user}@${cfg.host}:${tmp}`]);
-      await ssh(`mv -- ${shq(tmp)} ${shq(final)}`);
+      await run('scp', [...common, '-P', String(cfg.port), localPath, `${cfg.user}@${cfg.host}:${tmp}`], opts);
+      await ssh(`mv -- ${shq(tmp)} ${shq(final)}`, opts);
     },
-    async size(remoteName) {
+    async size(remoteName, opts) {
       assertPlainName(remoteName);
       try {
-        const { stdout } = await ssh(`stat -c %s -- ${shq(remote(remoteName))}`);
+        const { stdout } = await ssh(`stat -c %s -- ${shq(remote(remoteName))}`, opts);
         const n = Number.parseInt(stdout.trim(), 10);
         return Number.isFinite(n) ? n : null;
       } catch {
@@ -230,16 +269,16 @@ export function sftpTransport(cfg: {
         return null;
       }
     },
-    async remove(remoteName) {
+    async remove(remoteName, opts) {
       assertPlainName(remoteName);
-      await ssh(`rm -f -- ${shq(remote(remoteName))}`);
+      await ssh(`rm -f -- ${shq(remote(remoteName))}`, opts);
     },
-    async readText(remoteName) {
+    async readText(remoteName, opts) {
       assertPlainName(remoteName);
       const p = shq(remote(remoteName));
       try {
         // Exit 3 is ours and means absent; ssh itself fails with 255.
-        return (await ssh(`test -e ${p} || exit 3; cat -- ${p}`)).stdout;
+        return (await ssh(`test -e ${p} || exit 3; cat -- ${p}`, opts)).stdout;
       } catch (err) {
         if ((err as { code?: number }).code === 3) return null;
         throw err;
