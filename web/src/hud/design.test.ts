@@ -622,6 +622,18 @@ describe('validateDesign on the Tab screen', () => {
     expect(withKids({ tabVersus: { HealthLabel: { visible: false } } }).children).toEqual({});
   });
 
+  it('hides everything pinned down the line: Average Distance takes the rest of the line with it', () => {
+    const hidden = { visible: false };
+    expect(withKids({ tabVersus: { DistanceLabel: hidden } }).children.tabVersus)
+      .toEqual({ DistanceLabel: hidden, DistanceAmount: hidden, HealthLabel: hidden, HealthAmount: hidden });
+    expect(withKids({ tabVersus: { DistanceAmount: hidden } }).children.tabVersus)
+      .toEqual({ DistanceAmount: hidden, HealthLabel: hidden, HealthAmount: hidden });
+    expect(withKids({ tabVersus: { SurvivalMultLabel: hidden } }).children.tabVersus)
+      .toEqual({ SurvivalMultLabel: hidden, SurvivalMultAmount: hidden });
+    // A piece shown again is only that piece's choice: a hide upstream still wins.
+    expect(withKids({ tabVersus: { DistanceLabel: hidden, HealthLabel: { visible: true } } }).children.tabVersus!.HealthLabel).toEqual(hidden);
+  });
+
   it('drops a gated colour while its gate is closed: the title (TS1), the infected names (TS6)', () => {
     _setProbe('TS1', false); _setProbe('TS6', false);
     expect(withKids({ tabBoard: { MissionTitle: { color: '255 0 0 255' } }, tabInfected: { Name: { color: '0 255 255 255' } } }).children).toEqual({});

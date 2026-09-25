@@ -142,11 +142,11 @@ export interface ChildDef {
   hideGate?: ProbeId;
   /**
    * Pieces the game takes away with this one when it is hidden, because
-   * they are pinned to it: a stored hide of this piece is a hide of them too
-   * (validateDesign writes it), so the page hides them together and the
-   * preview draws none. The versus panel's Health Bonus number, pinned to its
-   * label (TS7, /home/volence/l4d/hud/probe-tab/RESULTS.md, TAB-1
-   * tab1/runs/tab-survivor/tab-a.png: the label hidden, the number gone too).
+   * they are pinned to it (their pin_to_sibling names it): a stored hide of
+   * this piece is a hide of them too, and of whatever is pinned to them in
+   * turn (validateDesign follows the chain), so the page hides them together
+   * and the preview draws none. Only the direct pins are listed; the test
+   * checks the list against both presets' pin_to_sibling keys.
    */
   hidesWith?: string[];
 }
@@ -678,14 +678,23 @@ export const TAB_VERSUS: PanelChildren = {
     { name: 'TeamYourScoreSurvivors', label: 'Your score', kind: 'label', role: 'content', colour: false, ...TAB_HIDE, note: SCORE_NOTE },
     { name: 'TeamEnemyScoreSurvivors', label: 'Enemy score', kind: 'label', role: 'content', colour: false, ...TAB_HIDE,
       note: `${SCORE_NOTE} "N/A" is a half not played yet.` },
-    { name: 'DistanceLabel', label: '"Average Distance:"', kind: 'label', role: 'content', colour: true, ...TAB_HIDE,
-      note: 'The rest of the line follows this label: the game places each piece after the one before it.' },
-    { name: 'DistanceAmount', label: 'Distance', kind: 'label', role: 'content', colour: true, ...TAB_HIDE },
+    // The stat line is a pin chain (versusmodescoreboard.res pin_to_sibling,
+    // stock and Modern alike): DistanceAmount is pinned to DistanceLabel,
+    // HealthLabel to DistanceAmount, HealthAmount to HealthLabel, and
+    // SurvivalMultAmount to SurvivalMultLabel. Hiding a piece hides every
+    // piece pinned to it, directly or down the chain (hidesWith). Only the
+    // HealthLabel link was seen in game (TS7, /home/volence/l4d/hud/probe-tab/RESULTS.md,
+    // TAB-1 tab1/runs/tab-survivor/tab-a.png: the label hidden, HealthAmount
+    // gone too); the other links follow from the same pin behaviour.
+    { name: 'DistanceLabel', label: '"Average Distance:"', kind: 'label', role: 'content', colour: true, ...TAB_HIDE, hidesWith: ['DistanceAmount'],
+      note: 'The rest of the line follows this label: the game places each piece after the one before it, so hiding it hides the whole line.' },
+    { name: 'DistanceAmount', label: 'Distance', kind: 'label', role: 'content', colour: true, ...TAB_HIDE, hidesWith: ['HealthLabel'],
+      note: 'Hiding it hides Health Bonus and its number too: the game places them after it.' },
     { name: 'HealthLabel', label: '"Health Bonus:"', kind: 'label', role: 'content', colour: true, ...TAB_HIDE, hidesWith: ['HealthAmount'],
       note: 'Hiding it hides its number too: the game places the number after it.' },
     { name: 'HealthAmount', label: 'Health bonus', kind: 'label', role: 'content', colour: true, ...TAB_HIDE },
-    { name: 'SurvivalMultLabel', label: '"Survival Multiplier:"', kind: 'label', role: 'content', colour: true, ...TAB_HIDE,
-      note: 'The game shows this line only later in a round.' },
+    { name: 'SurvivalMultLabel', label: '"Survival Multiplier:"', kind: 'label', role: 'content', colour: true, ...TAB_HIDE, hidesWith: ['SurvivalMultAmount'],
+      note: 'The game shows this line only later in a round. Hiding it hides its number too.' },
     { name: 'SurvivalMultAmount', label: 'Survival multiplier', kind: 'label', role: 'content', colour: true, ...TAB_HIDE,
       note: 'The game shows this line only later in a round.' },
   ],

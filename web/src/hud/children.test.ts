@@ -576,10 +576,28 @@ describe('the Tab screen registry', () => {
     expect(by(TAB_SURVIVOR_ROW, 'PlayerBackground')).toMatchObject({ kind: 'image', role: 'decor', colour: false });
   });
 
-  it('hides Health Bonus\'s number with its label, as the game did (TS7: HealthAmount is pinned to HealthLabel)', () => {
+  it('hides a piece with every piece pinned to it, as the file\'s pin_to_sibling chain says, in both presets (TS7)', () => {
     const withs = PANEL_CHILDREN.flatMap((p) => p.children.filter((c) => c.hidesWith).map((c) => [p.panelId, c.name, c.hidesWith]));
-    expect(withs).toEqual([['tabVersus', 'HealthLabel', ['HealthAmount']]]);
+    expect(withs).toEqual([
+      ['tabVersus', 'DistanceLabel', ['DistanceAmount']],
+      ['tabVersus', 'DistanceAmount', ['HealthLabel']],
+      ['tabVersus', 'HealthLabel', ['HealthAmount']],
+      ['tabVersus', 'SurvivalMultLabel', ['SurvivalMultAmount']],
+    ]);
     for (const [panelId, , names] of withs) for (const n of names as string[]) expect(childDef(panelId as string, n), n).toBeDefined();
+    // The list is the file's own pins, turned round: each piece lists the
+    // pieces whose pin_to_sibling names it. Every Tab file, both presets.
+    for (const panel of [TAB_BOARD, TAB_VERSUS, TAB_SURVIVOR_ROW, TAB_INFECTED_ROW]) {
+      for (const preset of ['stock', 'modern'] as const) {
+        const pinned: Record<string, string[]> = {};
+        for (const n of file(preset, panel.file)) {
+          const to = typeof n.value === 'string' ? undefined : kvGet(n, 'pin_to_sibling');
+          if (to) (pinned[to] ??= []).push(n.key);
+        }
+        const listed = Object.fromEntries(panel.children.filter((c) => c.hidesWith).map((c) => [c.name, c.hidesWith]));
+        expect(listed, `${preset} ${panel.file}`).toEqual(pinned);
+      }
+    }
   });
 
   it('offers the row bars grey as the file has them, by health, or one colour (TS3, and TL3 for by health)', () => {
