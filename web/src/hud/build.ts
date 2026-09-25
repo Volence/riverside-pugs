@@ -2340,7 +2340,9 @@ export interface BuildReport { replaced: string[] }
  * panel, the weapon background entries), and the game has none of them.
  * Without them every panel naming one draws the purple and black missing
  * texture. They were shipped only in the owner's gameinfo.txt folder, so the
- * owner's own game (and every probe run on it) never showed the gap.
+ * owner's own game never showed the gap (the in-game harness takes that folder
+ * out for each run, but no probe shot the kill notice or the Tab screen on an
+ * untouched Modern design).
  */
 export const MODERN_ART: ReadonlyArray<{ name: string; w: number; h: number; colour: string }> = [
   { name: 'vgui/hud/mod_panel_flat', w: 32, h: 32, colour: '0 0 0 140' },
