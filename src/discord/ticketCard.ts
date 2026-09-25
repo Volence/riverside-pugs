@@ -59,7 +59,9 @@ function reportBlock(db: DB, r: ReportBit, publicUrl: string): string {
   const who = escapeName(reporterLabel(db, r.ticket_id, { reporterId: r.reporter_id, reporterDiscordId: r.reporter_discord_id }));
   const where = r.match_id === null ? '' : ` · ${matchLinks(r, publicUrl)}`;
   const text = r.text.trim();
-  const clipped = text.length > TEXT_MAX ? `${text.slice(0, TEXT_MAX)}...` : text;
+  // By code point, so a clip never splits an emoji into a lone surrogate.
+  const chars = Array.from(text);
+  const clipped = chars.length > TEXT_MAX ? `${chars.slice(0, TEXT_MAX).join('')}...` : text;
   const quote = clipped === '' ? [] : clipped.split('\n').map((l) => `> ${escapeName(l)}`);
   return [`**${who}** · ${escapeName(r.category)}${where}`, ...quote].join('\n');
 }
@@ -81,8 +83,10 @@ function reportsText(blocks: string[], tail: string): string {
  * The case card: the first message of a ticket's staff thread.
  *
  * It names the accused and every reporter with what they wrote. The accused
- * never reads it: forumAudience keeps a ticket's subject out of its post, and
- * a restricted ticket has no Discord thread at all.
+ * never reads it: forumAudience keeps a ticket's subject out of its post. A
+ * restricted ticket keeps its reporters to the site: new ones get no thread,
+ * but a private thread made before that rule is still kept up, and Discord
+ * Administrators can read it, so its card names nobody who reported.
  */
 export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketCard | null {
   const t = getTicketRow(db, ticketId);
@@ -146,7 +150,9 @@ export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketC
       url,
       description: reports.length === 0
         ? 'Bans are issued on the ticket page.'
-        : reportsText(reports.map((r) => reportBlock(db, r, publicUrl)), 'Bans are issued on the ticket page.'),
+        : t.restricted === 1
+          ? 'Who reported and what they wrote is on the ticket page. Bans are issued there too.'
+          : reportsText(reports.map((r) => reportBlock(db, r, publicUrl)), 'Bans are issued on the ticket page.'),
       color: COLOR[status],
       fields,
       footer: t.restricted === 1
@@ -169,11 +175,17 @@ export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketC
 }
 
 /** The line a further report posts into the thread: who filed it, the
- *  category, where, and what they wrote. */
+ *  category, where, and what they wrote. On a restricted ticket, only the
+ *  category and where. */
 export function reportLine(db: DB, reportId: number, publicUrl: string): MessagePayload {
   const r = db.prepare(`SELECT ${REPORT_COLS} FROM ticket_reports WHERE id = ?`).get(reportId) as ReportBit;
+  const restricted = (db.prepare('SELECT restricted FROM tickets WHERE id = ?').get(r.ticket_id) as { restricted: number } | undefined)?.restricted === 1;
+  // A restricted ticket's thread names nobody who reported (see ticketCard).
+  const description = restricted
+    ? `**${escapeName(r.category)}**${r.match_id === null ? '' : ` · ${matchLinks(r, publicUrl)}`}`
+    : reportBlock(db, r, publicUrl);
   return {
-    embeds: [{ title: 'Another report', description: reportBlock(db, r, publicUrl), color: COLOR.open }],
+    embeds: [{ title: 'Another report', description, color: COLOR.open }],
     components: [],
     mentionUserIds: [],
   };

@@ -302,7 +302,7 @@ export class TicketSync {
    *
    * Never for a restricted ticket, and never about somebody with a staff flag
    * (held above): every admin reads the feed, and one of them may be who the
-   * ticket is about. The event carries no reporter.
+   * ticket is about. The event names the reporter of the report it says.
    *
    * Marked before it is published: publishing cannot fail, and a report must
    * never be said twice.

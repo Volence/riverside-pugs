@@ -69,4 +69,25 @@ describe('ticket card names the reporters', () => {
     expect(line.description).toContain('**other** · griefing');
     expect(line.description).toContain('> threw the tank');
   });
+
+  it('a restricted ticket names nobody who reported, on the card or a further line', () => {
+    const { ticketId } = file(GAIGE, 'toxicity', 'private words');
+    const second = file(OTHER, 'griefing', 'more private words');
+    db.prepare('UPDATE tickets SET restricted = 1 WHERE id = ?').run(ticketId);
+    const card = JSON.stringify(ticketCard(db, ticketId, URL)!.payload);
+    expect(card).not.toContain('gaige');
+    expect(card).not.toContain('private words');
+    expect(card).toContain('Who reported and what they wrote is on the ticket page.');
+    const line = JSON.stringify(reportLine(db, second.reportId, URL));
+    expect(line).not.toContain('other**');
+    expect(line).not.toContain('private words');
+    expect(line).toContain('griefing');
+  });
+
+  it('clips a long report by code point, never splitting an emoji', () => {
+    const { ticketId } = file(GAIGE, 'toxicity', 'a'.repeat(399) + '😀😀');
+    const desc = ticketCard(db, ticketId, URL)!.payload.embeds[0].description ?? '';
+    expect(desc).toContain('😀...');
+    expect(desc).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  });
 });
