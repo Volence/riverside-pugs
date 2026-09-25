@@ -1,6 +1,7 @@
 import type { DB } from '../db.js';
 import { discordLabel, escapeName, identityOf } from '../identity.js';
 import { foldedCalls, REASON_LABELS, type ModCallRow } from '../modCalls.js';
+import { serverPasswordFor } from '../matchToken.js';
 import { getSetting } from '../settings.js';
 import { hasStaffFlag } from '../tickets/store.js';
 import { spectateFor } from '../spectate.js';
@@ -41,6 +42,32 @@ function personLine(db: DB, steamid: string): string {
   const id = identityOf(db, steamid);
   if (id.discordId) return discordLabel(id);
   return `**${escapeName(id.steamName)}** ([Steam](https://steamcommunity.com/profiles/${id.steamid}))`;
+}
+
+/**
+ * How to join the call's own game server, for staff who want to look in
+ * person rather than through SourceTV. Null when the call has no server.
+ *
+ * A queue match sets sv_password from its token once it goes live
+ * (src/orchestrator.ts ~183), so joining it needs that derived password
+ * first, the same as the admin view's connect line (src/admin/matches.ts
+ * ~30-36); the token itself never goes out. A self-started ('in_game' origin)
+ * match never touches sv_password, so it gets the plain connect line, and so
+ * does a server with no live queue match at all. The server's own standing
+ * password, set outside of a match, is not stored by the site and so cannot
+ * be included.
+ */
+function joinLineFor(db: DB, serverId: number | null): string | null {
+  if (serverId === null) return null;
+  const server = db.prepare('SELECT host, port FROM servers WHERE id = ?')
+    .get(serverId) as { host: string; port: number } | undefined;
+  if (!server) return null;
+  const live = db.prepare(
+    `SELECT token FROM matches WHERE server_id = ? AND state = 'live' AND origin = 'queue' AND token IS NOT NULL
+     ORDER BY id DESC LIMIT 1`,
+  ).get(serverId) as { token: string } | undefined;
+  const connect = `connect ${server.host}:${server.port}`;
+  return live ? `password ${serverPasswordFor(live.token)}; ${connect}` : connect;
 }
 
 /**
@@ -97,10 +124,13 @@ export function renderModCallCard(db: DB, call: ModCallRow, publicUrl: string): 
     return `+ ${who(c.caller_steamid)}: ${REASON_LABELS[c.reason]}${said}`;
   });
 
-  // Watching is the fastest way to judge a cheating call, so the connect line
-  // rides on the card rather than behind a button.
+  // Joining the game server or watching it are both faster than digging for
+  // connect details elsewhere, so both connect lines ride on the card rather
+  // than behind a button.
+  const join = joinLineFor(db, call.server_id);
   const tv = spectateFor(db, call.server_id);
   const tail: string[] = [];
+  if (join) tail.push(`Join: \`${join}\``);
   if (tv) tail.push(`Watch: \`${spectateConnectLine(tv)}\``);
   if (handled && call.handled_by_discord_id) tail.push(`Handled by <@${call.handled_by_discord_id}>`);
 

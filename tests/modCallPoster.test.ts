@@ -108,7 +108,9 @@ describe('ModCallPoster', () => {
     call({ tMs: null }); await poster.idle();
     const p = inAdmin()[0].payload;
     expect(p.components[0].map((b) => b.label)).not.toContain('Replay moment');
-    expect(JSON.stringify(p)).not.toContain('connect ');
+    expect(JSON.stringify(p)).not.toContain('Watch:');
+    // The Join line still shows: it points at the game server, not SourceTV.
+    expect(JSON.stringify(p)).toContain('Join: `connect 1.2.3.4:27015`');
   });
 
   it('keeps a call pending when the send fails and posts it on the next pass', async () => {
@@ -171,6 +173,38 @@ describe('ModCallPoster', () => {
     const press = (userId: string) => poster.handleButton({ kind: 'button', customId: `mc:${row.id}:handle`, userId, userName: 'x', presserTimedOutUntil: null });
     expect((await press('907')).payload.content).toBe('Staff only.');
     expect((await press('906')).payload.content).toBe('Marked as yours.');
+  });
+
+  it('shows a Join line for the game server, above Watch, using the derived password when a queue match is live there', async () => {
+    const token = 'abcdef0123456789abcdef0123456789';
+    db.prepare("UPDATE matches SET server_id = ?, origin = 'queue', token = ? WHERE id = ?").run(serverId, token, matchId);
+    call(); await poster.idle();
+    const desc = inAdmin()[0].payload.embeds[0].description ?? '';
+    expect(desc).toContain('Join: `password pug_abcdef01; connect 1.2.3.4:27015`');
+    expect(desc.indexOf('Join:')).toBeLessThan(desc.indexOf('Watch:'));
+  });
+
+  it('shows a plain Join line when the server has no live queue match', async () => {
+    call(); await poster.idle();
+    const desc = inAdmin()[0].payload.embeds[0].description ?? '';
+    expect(desc).toContain('Join: `connect 1.2.3.4:27015`');
+  });
+
+  it('shows a plain Join line for a live in_game match (no sv_password from a token)', async () => {
+    const token = 'abcdef0123456789abcdef0123456789';
+    db.prepare("UPDATE matches SET server_id = ?, origin = 'in_game', token = ? WHERE id = ?").run(serverId, token, matchId);
+    call(); await poster.idle();
+    const desc = inAdmin()[0].payload.embeds[0].description ?? '';
+    expect(desc).toContain('Join: `connect 1.2.3.4:27015`');
+    expect(desc).not.toContain('password pug_');
+  });
+
+  it('leaves out the Join line when the call has no server', async () => {
+    handleModCall(db, ev(), null, { adminSteamIds: [], map: 'l4d_hospital01_apartment' });
+    await poster.idle();
+    expect(inAdmin()).toHaveLength(1);
+    const desc = inAdmin()[0].payload.embeds[0].description ?? '';
+    expect(desc).not.toContain('Join:');
   });
 
   it('links the Steam profile of a caller or target with no Discord linked', async () => {
