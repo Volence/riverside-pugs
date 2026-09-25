@@ -38,6 +38,18 @@ describe('GameValues', () => {
     expect(screen.getByText('Fire damage to the tank is capped.')).toBeTruthy();
   });
 
+  it('a value equal to vanilla shows its number once, in the Vanilla column with the unit', async () => {
+    const same = { id: 'survivor_revive_duration', label: 'Revive time', unit: 's', note: null, value: '5.0', vanilla: '5',
+      differsFromVanilla: false, status: 'reported' as const, lastChange: null };
+    mockApi.gameValues.mockResolvedValue({ ...data, groups: [{ id: 'survivors', label: 'Survivors', values: [same], rules: [] }] });
+    const { container } = render(<GameValues />);
+    await screen.findByText('Revive time');
+    const row = container.querySelector('table.values-table tbody tr')!;
+    expect(row.querySelector('[data-label="Ours"]')!.textContent).toBe('vanilla');
+    expect(row.querySelector('[data-label="Vanilla"]')!.textContent).toBe('5 s');
+    expect(row.className).not.toContain('values-differs');
+  });
+
   it('says when a newer config is being reviewed, and not otherwise', async () => {
     mockApi.gameValues.mockResolvedValue({ ...data, reviewing: true });
     render(<GameValues />);

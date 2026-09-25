@@ -11,8 +11,13 @@ function valueCell(v: GameValueView) {
   // Not reported by the servers yet (the plugin that reports it is not live
   // everywhere): a plain dash, so the row does not read as differing from vanilla.
   if (v.status === 'not_reported') return <span class="muted" title="Not reported by the servers yet">-</span>;
-  return <>{v.value}{v.unit && <span class="muted"> {v.unit}</span>}</>;
+  // Same as vanilla: the number shows once, in the Vanilla column.
+  if (isVanilla(v)) return <span class="muted">vanilla</span>;
+  return withUnit(v.value!, v.unit);
 }
+
+const withUnit = (value: string, unit: string | null) => <>{value}{unit && <span class="muted"> {unit}</span>}</>;
+const isVanilla = (v: GameValueView) => v.status === 'reported' && v.vanilla !== null && !v.differsFromVanilla;
 
 function changeCell(v: GameValueView, admin: boolean) {
   if (!v.lastChange) return <span class="muted">unchanged since tracking began</span>;
@@ -47,7 +52,7 @@ export function GameValuesView({ data, admin }: { data: GameValues; admin: boole
                     <tr key={v.id} class={v.differsFromVanilla ? 'values-differs' : ''}>
                       <td class="values-table__setting" data-label="Setting">{v.label}{v.note && v.status !== 'hidden' && <div class="muted values-note">{v.note}</div>}</td>
                       <td data-label="Ours">{valueCell(v)}</td>
-                      <td data-label="Vanilla">{v.vanilla ?? <span class="muted">-</span>}</td>
+                      <td data-label="Vanilla">{v.vanilla !== null ? withUnit(v.vanilla, v.unit) : <span class="muted">-</span>}</td>
                       <td data-label="Last changed">{changeCell(v, admin)}</td>
                     </tr>
                   ))}
