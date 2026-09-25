@@ -12,11 +12,11 @@ function valueCell(v: GameValueView) {
   // everywhere): a plain dash, so the row does not read as differing from vanilla.
   if (v.status === 'not_reported') return <span class="muted" title="Not reported by the servers yet">-</span>;
   // Same as vanilla: the number shows once, in the Vanilla column.
-  if (isVanilla(v)) return <span class="muted">vanilla</span>;
+  if (isVanilla(v)) return <span class="muted values-num">vanilla</span>;
   return withUnit(v.value!, v.unit);
 }
 
-const withUnit = (value: string, unit: string | null) => <>{value}{unit && <span class="muted"> {unit}</span>}</>;
+const withUnit = (value: string, unit: string | null) => <span class="values-num">{value}{unit && <span class="muted"> {unit}</span>}</span>;
 const isVanilla = (v: GameValueView) => v.status === 'reported' && v.vanilla !== null && !v.differsFromVanilla;
 
 function changeCell(v: GameValueView, admin: boolean) {
