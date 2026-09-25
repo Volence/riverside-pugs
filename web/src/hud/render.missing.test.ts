@@ -5,6 +5,7 @@
  * renderer has to hatch that child's rect and warn about it once.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { ICON_CELL_EM, ICON_ASCENT_EM } from './iconMetrics';
 
 const GONE = 'vgui/hud/detail_scratches_top_1';
 // An item icon too, as if the font glyph could not be exported: the Items row falls back to its stand-ins.
@@ -55,8 +56,10 @@ describe('a material the index lacks', () => {
     for (let i = 0; i < 2; i++) {
       const { ctx, calls } = recCtx();
       expect(() => drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 })).not.toThrow();
-      // Stock's L4D_Icons_medium is 18 tall, centred on the 14-tall label.
-      expect(calls.filter((c) => c.m === 'strokeRect').map((c) => c.a)).toContainEqual([r.x, r.y + (r.h - 18) / 2, 18, 18]);
+      // Stock's L4D_Icons_medium is 18 tall: ToolBox's VDMX makes that 15 ppem, a cell 18 high centred
+      // on the 14-tall label, the baseline 15 down, and a stand-in the glyph PNG's 15 x 64 / 68 px.
+      const s = 15 * ICON_CELL_EM, y = r.y + (r.h - 18) / 2 + 15 - 15 * ICON_ASCENT_EM;
+      expect(calls.filter((c) => c.m === 'strokeRect').map((c) => c.a)).toContainEqual([r.x, y, s, s]);
       expect(calls.some((c) => c.m === 'drawImage' && /icon-item-/.test((c.a[0] as HTMLImageElement).src))).toBe(false);
     }
     expect(warn).toHaveBeenCalledTimes(1);

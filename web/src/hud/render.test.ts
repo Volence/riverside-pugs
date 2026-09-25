@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { childRects, drawPanel, setFont, PANEL_FILE, panelFile, type PreviewState, hiddenInState, previewOf, DEFAULT_PREVIEW, ITEM_ROW, itemRowStart, paintAdditive, paintLinearOver, healthRgb, shownKey, panelColour, _setImageFactory, _setCanvasFactory, _resetAssetCache, _cacheSizes, splatterSource, tinted, type SurvivorState } from './render';
 import { linearOverAlpha } from './additive';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
+import { ICON_CELL_EM, ICON_ASCENT_EM } from './iconMetrics';
 import { buildHud } from './build';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
@@ -624,14 +625,29 @@ describe('the teammate card states', () => {
 
   const icon = <C extends { m: string; a: unknown[] }>(calls: C[], name: string) =>
     calls.find((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === artUrl(name));
+  /**
+   * Where drawItems puts a glyph PNG for a tall of `tallPx` canvas pixels in a
+   * label box: sized by the em the ToolBox VDMX picks (the game's), not the
+   * tall, its cell centred as text is and its baseline on the text's
+   * (iconMetrics.ts, probe p4).
+   */
+  const glyphAt = (tallPx: number, box: { y: number; h: number }) => {
+    const c = fontCell('ToolBox', tallPx);
+    return { s: c.em * ICON_CELL_EM, y: box.y + (box.h - c.cell) / 2 + c.ascent - c.em * ICON_ASCENT_EM };
+  };
 
   it('draws the real item icons, a full loadout in the game\'s order, one font size tall where the Items label sits', () => {
     const d = design({});
     const r = childRects(d, 'teamColumn', { x: 0, y: 0 }, 1).find((c) => c.name === 'Items')!;
     const { ctx, calls } = recCtx();
     drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
-    // L4D_Icons_medium is 18 tall in the stock scheme; the label box is 14, so the icons centre on it.
-    const s = 18, y = r.y + (r.h - s) / 2;
+    // L4D_Icons_medium is 18 tall in the stock scheme: ToolBox's VDMX makes that 15 ppem, a cell 18
+    // high with the baseline 15 down, so the PNG is 15 x 64 / 68 = 14.12 px, not 18. The label box
+    // is 14, so the cell centres on it.
+    const { s, y } = glyphAt(18, r);
+    expect(fontCell('ToolBox', 18)).toEqual({ em: 15, ascent: 15, cell: 18 });
+    expect(s).toBeCloseTo(14.1176, 4);
+    expect(y).toBeCloseTo(r.y + (r.h - 18) / 2 + 15 - 15 * 49 / 68, 9);
     const medkit = icon(calls, 'icon/item/medkit')!, pills = icon(calls, 'icon/item/pills')!, pipe = icon(calls, 'icon/item/pipebomb')!;
     // The test images are 64 x 64, so each draws s wide; the row advances by each glyph's own advance plus a space.
     expect(medkit.a.slice(1)).toEqual([r.x, y, s, s]);
@@ -695,7 +711,10 @@ describe('the teammate card states', () => {
     const r = childRects(d, 'teamColumn', { x: 10, y: 20 }, 2).find((c) => c.name === 'Items')!;
     const { ctx, calls } = recCtx();
     drawPanel(ctx, d, 'teamColumn', { x: 10, y: 20 }, 2, { card: 0 });
-    expect(icon(calls, 'icon/item/medkit')!.a.slice(1)).toEqual([r.x, r.y + (r.h - 72) / 2, 72, 72]);
+    // 36 units at k 2 is a 72 px tall: VDMX 62 ppem, so the PNG is 62 x 64 / 68 = 58.35 px, not 72.
+    const { s, y } = glyphAt(72, r);
+    expect(fontCell('ToolBox', 72).em).toBe(62);
+    expect(icon(calls, 'icon/item/medkit')!.a.slice(1)).toEqual([r.x, y, s, s]);
   });
 
   it('lays the icon row out by the label\'s textAlignment', () => {
@@ -712,7 +731,8 @@ describe('the teammate card states', () => {
   });
 
   it('keeps a full stock loadout inside the stock Items label', () => {
-    // The game's own row, medkit, space, pills, space, throwable, fits the 50-wide label at 18 tall.
+    // The game's own row, medkit, space, pills, space, throwable, fits the 50-wide label at 18 tall
+    // (VDMX 15 ppem, a 14.12 px PNG); it would fit even at a PNG cell the full 18.
     const s = 18;
     const row = ITEM_ROW.reduce((w, n, i) => w + ICON_ADVANCE[n] * s + (i ? ICON_SPACE * s : 0), 0);
     expect(row).toBeLessThanOrEqual(50);
@@ -741,12 +761,11 @@ describe('the teammate card states', () => {
       if (preset === 'stock') {
         // The whole row, the throwable last, fits inside the widened label.
         const pipe = icon(calls, 'icon/item/pipebomb')!;
-        expect((pipe.a[1] as number) + ICON_ADVANCE['icon/item/pipebomb'] * 36).toBeLessThanOrEqual(r.x + r.w);
+        expect((pipe.a[1] as number) + ICON_ADVANCE['icon/item/pipebomb'] * (pipe.a[4] as number)).toBeLessThanOrEqual(r.x + r.w);
       } else {
-        // Unclipped, the icon row would start above the label, over the Name text.
-        const name = rects.find((c) => c.name === 'Name')!;
-        expect(calls[first].a[2] as number).toBeLessThan(r.y);
-        expect(r.y).toBeGreaterThan(name.y + name.h / 2);
+        // Unclipped, the 16-tall icon cell would spill out of the 13-tall label.
+        const [, , y, , h] = calls[first].a as number[];
+        expect(y < r.y || y + h > r.y + r.h).toBe(true);
       }
     });
   }
@@ -768,7 +787,8 @@ describe('the teammate card states', () => {
       failing[0].onerror!();
       const { ctx, calls } = recCtx();
       drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
-      expect(calls.filter((c) => c.m === 'strokeRect').map((c) => c.a)).toContainEqual([r.x, r.y + (r.h - 18) / 2, 18, 18]);
+      const { s, y } = glyphAt(18, r);
+      expect(calls.filter((c) => c.m === 'strokeRect').map((c) => c.a)).toContainEqual([r.x, y, s, s]);
       expect(icon(calls, 'icon/item/medkit')).toBeUndefined();
       expect(warn).toHaveBeenCalledTimes(1);
     } finally { warn.mockRestore(); }

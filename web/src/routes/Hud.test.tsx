@@ -3357,7 +3357,7 @@ describe('Your items on the page', () => {
     expect((screen.getByRole('combobox', { name: 'Icon size' }) as HTMLSelectElement).value).toBe('L4D_Icons_medium');
     expect((screen.getByRole('combobox', { name: 'Alignment' }) as HTMLSelectElement).value).toBe('right');
     const x = screen.getByLabelText('X') as HTMLInputElement;
-    expect(x.value).toBe('797');
+    expect(x.value).toBe('805');
     fireEvent.input(x, { target: { value: '600' } });
     fireEvent.blur(x);
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('754');
@@ -3386,7 +3386,7 @@ describe('Your items on the page', () => {
     await waitFor(() => expect(saved().elements?.yourItems).toMatchObject({ x: 754, y: 241 }));
   });
 
-  // Snapping on (no Alt). The row starts drawn at x 797.43, 47.57 wide, 18 tall.
+  // Snapping on (no Alt). The row starts drawn at x 805.35, 39.65 wide, 18 tall.
   describe('snap guides while it is dragged', () => {
     /** The row's drawn lines along an axis, from the design as saved. */
     const drawnLines = (axis: 'x' | 'y') => {
@@ -3405,7 +3405,8 @@ describe('Your items on the page', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Show Your items' }));
       const canvas = unitCanvas(container);
       await waitFor(() => expect(rec.texts.length).toBeGreaterThan(0));
-      // Asked 69 left, the row's centre (752.21) snaps to the pistol icon's right edge at 752: past the bar's edge, so held at 754.
+      // Asked 69 left, the row (its left edge at 736.35) is past the bar's edge, so it is held at 754: no x guide may
+      // show where it was asked, such as the pistol icon's right edge at 752.
       fireEvent.pointerDown(canvas, { clientX: 821, clientY: 242, pointerId: 1 });
       rec.guides.length = 0;
       fireEvent.pointerMove(canvas, { clientX: 752, clientY: 242, pointerId: 1 });
@@ -3422,17 +3423,17 @@ describe('Your items on the page', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Show Your items' }));
       const canvas = unitCanvas(container);
       await waitFor(() => expect(rec.texts.length).toBeGreaterThan(0));
-      // Asked 4 left, the row's left edge (793.43) snaps to 793, a centre line; the row is drawn at 793.43.
+      // Asked 10 left, the row's left edge (795.35) snaps to 793, a centre line; the row is drawn at 793.35.
       // Its bottom (251) snaps to 250, which the drawn row does reach: that guide stays.
       fireEvent.pointerDown(canvas, { clientX: 821, clientY: 242, pointerId: 1 });
       rec.guides.length = 0;
-      fireEvent.pointerMove(canvas, { clientX: 817, clientY: 242, pointerId: 1 });
+      fireEvent.pointerMove(canvas, { clientX: 811, clientY: 242, pointerId: 1 });
       await waitFor(() => expect(saved().elements?.yourItems).toMatchObject({ x: 793, y: 232 }));
       const k = canvas.height / 480;
       expect(rec.guides.some((g) => g.axis === 'y' && Math.abs(g.at / k - 250) < 0.01)).toBe(true);
       expect(rec.guides.filter((g) => g.axis === 'x' && Math.abs(g.at / k - 793) < 0.01)).toEqual([]);
       expectOnRow(rec.guides, k);
-      fireEvent.pointerUp(canvas, { clientX: 817, clientY: 242, pointerId: 1 });
+      fireEvent.pointerUp(canvas, { clientX: 811, clientY: 242, pointerId: 1 });
     });
   });
 

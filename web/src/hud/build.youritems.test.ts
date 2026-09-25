@@ -58,7 +58,7 @@ describe('yourItemsHome: where the row first shows', () => {
       expect(home.y, d.aspect).toBeCloseTo(r.y + pistol.frame.y + pistol.frame.h, 6);
     }
     const h = yourItemsHome(base('stock', '16:9'));
-    expect(h.x).toBeCloseTo(797.4332, 3);
+    expect(h.x).toBeCloseTo(805.3465, 3);
     expect(h.y).toBeCloseTo(233.13, 2);
   });
 });
@@ -68,7 +68,7 @@ describe('the element on the canvas', () => {
     const d = base('stock', '16:9');
     const r = elementRect(d, YOUR_ITEMS, d.aspect);
     expect(r.visible).toBe(false);
-    expect(r.x).toBeCloseTo(797.4332, 3);
+    expect(r.x).toBeCloseTo(805.3465, 3);
     expect(r.w).toBeCloseTo(itemRowWidth(yourItemsInput(d).tall), 9);
     expect(r.h).toBe(18);
     expect(yourItemsOn(d)).toBe(false);
@@ -147,7 +147,7 @@ const treeOf = (files: VpkFile[], d: HudDesign, path: string) => parseKv(text(fi
 /** Your items on (or stored and off) with the item slots off, as setYourItems leaves a design. */
 const withItems = (d: HudDesign, on: boolean, o: ElementOverride = {}): HudDesign => ({
   ...d, weapons: { ...d.weapons, itemSize: 0, itemIcons: false },
-  elements: { ...d.elements, [YOUR_ITEMS]: { x: 797, y: 233, ...o, visible: on } },
+  elements: { ...d.elements, [YOUR_ITEMS]: { x: 805, y: 233, ...o, visible: on } },
 });
 type Rect = { x: number; y: number; w: number; h: number };
 /**
@@ -258,7 +258,7 @@ describe('the download with Your items on (spec section 3)', () => {
   });
 
   it('draws a row stored left of a moved health bar at the new limit, without rewriting it', () => {
-    const d0 = withItems(base('stock', '16:9'), true);
+    const d0 = withItems(base('stock', '16:9'), true, { x: 797 });
     const d: HudDesign = { ...d0, elements: { ...d0.elements, ownHealth: { ...d0.elements.ownHealth, x: 778, y: 389 } } };
     expect(ownBarX(d)).toBe(804);
     const own = treeOf(buildHud(d, { fonts }), d, OWN);

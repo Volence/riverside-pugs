@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   ITEM_ROW, itemRowWidth, rowLayout, rowXRange, placeRow, rowLimitLines, EDGE_MARGIN, LABEL_PAD, BAR_EDGE_LABEL, CENTRE_EDGE_LABEL,
-  ITEM_FONTS, ITEM_FONT_TALL, DEFAULT_ITEM_FONT, type RowInput,
+  ITEM_FONTS, ITEM_FONT_TALL, DEFAULT_ITEM_FONT, glyphRowWidth, itemGlyphCell, type RowInput,
 } from './youritems';
 import { ITEM_ROW as RENDER_ITEM_ROW } from './render';
 import { ICON_ADVANCE, ICON_SPACE } from './iconMetrics';
@@ -16,11 +16,21 @@ describe('the item row', () => {
     expect(ITEM_ROW).toEqual(['icon/item/medkit', 'icon/item/pills', 'icon/item/pipebomb']);
     expect(RENDER_ITEM_ROW).toBe(ITEM_ROW);
   });
-  it('is each glyph\'s advance and a space between two, at the font\'s tall', () => {
+  it('is each glyph\'s advance and a space between two, at the glyph PNG\'s height', () => {
     const s = 18;
     const want = ITEM_ROW.reduce((w, n, i) => w + ICON_ADVANCE[n] * s + (i ? ICON_SPACE * s : 0), 0);
-    expect(itemRowWidth(s)).toBeCloseTo(want, 9);
-    expect(itemRowWidth(18)).toBeCloseTo(47.5668, 3);
+    expect(glyphRowWidth(s)).toBeCloseTo(want, 9);
+  });
+  it('sizes the glyphs by the face\'s em, not by the tall (probe p4: the game\'s row is 83 px at 1080p, not 106)', () => {
+    // The unhinted em for an 18 tall is 18 x 1000 / 1129 = 15.94 units, the
+    // PNG cell 64 / 68 of it; the row is hmtx's 760 + 278 + 437 + 278 + 734
+    // = 2487 thousandths of the em.
+    expect(itemGlyphCell(18)).toBeCloseTo(18 * 1000 / 1129 * 64 / 68, 9);
+    expect(itemRowWidth(18)).toBeCloseTo(glyphRowWidth(itemGlyphCell(18)), 9);
+    expect(itemRowWidth(18)).toBeCloseTo(2.487 * 18 * 1000 / 1129, 2);
+    expect(itemRowWidth(18)).toBeCloseTo(39.6535, 3);
+    // Never narrower than the game draws it at 1080p (VDMX 34 ppem): 83 px of ink, 84 of advances.
+    expect(itemRowWidth(18) * 2.25).toBeGreaterThanOrEqual(84);
   });
   it('offers the game\'s three item icon fonts, medium by default', () => {
     expect(ITEM_FONTS).toEqual(['L4D_Icons', 'L4D_Icons_medium', 'L4D_Icons_large']);
@@ -31,11 +41,11 @@ describe('the item row', () => {
 
 describe('rowLayout, Right', () => {
   it('starts the Label at the bar and ends it where the row ends', () => {
-    const { row, label } = rowLayout(STOCK, { x: 797, y: 233 });
+    const { row, label } = rowLayout(STOCK, { x: 805, y: 233 });
     expect(label).toEqual({ x: 754, y: 233 - LABEL_PAD, w: 91, h: 18 + 2 * LABEL_PAD });
     expect(row.x + row.w).toBeCloseTo(label.x + label.w, 9);
     expect(row).toMatchObject({ y: 233, h: 18 });
-    expect(row.x).toBeCloseTo(797.4332, 3);
+    expect(row.x).toBeCloseTo(805.3465, 3);
   });
   it('holds the row at the bar\'s edge', () => {
     const { row, label } = rowLayout(STOCK, { x: 600, y: 233 });
@@ -62,7 +72,7 @@ describe('rowLayout, Right', () => {
 
 describe('rowLayout, Centre', () => {
   it('spans the Label from the bar to 2 x centre - bar, an even width', () => {
-    const { row, label } = rowLayout(MODERN, { x: 420, y: 250 });
+    const { row, label } = rowLayout(MODERN, { x: 424, y: 250 });
     expect(label.x).toBe(42);
     expect(label.w % 2).toBe(0);
     expect(label.w).toBe(804);
