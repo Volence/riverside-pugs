@@ -5,7 +5,13 @@ import { computeRound, ENGINE } from './registry.js';
 import { writeRoundMetrics } from './store.js';
 import type { RoundKey, RoundReplay } from './types.js';
 
-export const REAPER_ROUNDS_PER_TICK = 2;
+/** Rounds the reaper computes per minute with no match live or configuring. */
+export const REAPER_ROUNDS_PER_TICK = 4;
+/** Rounds per minute while any match runs. Decoding blocks the event loop,
+ *  but only for 8 to 20 ms on a real replay (the largest, 8.5 MB, measured
+ *  2026-09-25), and skipping every live minute left 78 rounds uncomputed
+ *  after one busy evening, since the fleet is rarely idle all at once. */
+export const REAPER_ROUNDS_PER_TICK_LIVE = 1;
 export const REPLAY_WAIT_MIN = 30;
 
 const sqliteNow = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -162,4 +168,9 @@ export function drainPending(db: DB, replayDir: string, opts: {
 /** True while a match could be using the event loop for live ingestion. */
 export function matchActive(db: DB): boolean {
   return (db.prepare("SELECT COUNT(*) AS n FROM matches WHERE state IN ('live', 'configuring')").get() as { n: number }).n > 0;
+}
+
+/** How many rounds the reaper computes this minute. */
+export function reaperRoundLimit(db: DB): number {
+  return matchActive(db) ? REAPER_ROUNDS_PER_TICK_LIVE : REAPER_ROUNDS_PER_TICK;
 }
