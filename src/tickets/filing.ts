@@ -49,6 +49,9 @@ export interface FilingDeps {
    *  whether the report is even allowed and whether it may reach the admin
    *  feed. */
   targetDiscord?: PickedTarget;
+  /** Which surface filed this. Set only by a trusted caller, never from a
+   *  request body. Only the in-game path uses it so far. */
+  source?: 'game';
 }
 
 /** How often a Discord-only reporter may file: tighter than the per-day
@@ -58,7 +61,11 @@ export const DISCORD_REPORT_GAP_MS = 10 * 60_000;
 export interface DiscordReporter { kind: 'discord'; discordId: string; name: string; timedOutUntil: string | null }
 /** A member picked in Discord, with the facts Discord supplied about them. */
 export interface PickedTarget { discordId: string; name: string; bot: boolean; administrator: boolean }
-export interface FileBody { targetId?: unknown; category?: unknown; text?: unknown; matchId?: unknown; moment?: unknown }
+export interface FileBody {
+  targetId?: unknown; category?: unknown; text?: unknown; matchId?: unknown; moment?: unknown;
+  /** A community entry the report is about. It must be the target's own. */
+  entryId?: unknown;
+}
 type Fail = { ok: false; status: number; error: string };
 export type FileResult = { ok: true; reportId: number; ticketId: number; created: boolean; restricted: boolean } | Fail;
 
@@ -156,6 +163,25 @@ export function fileReport(db: DB, reporterIn: string | DiscordReporter, body: F
     && getPlayer(db, reporter.steamid)?.discord_id === target.discordId;
   if (reporterKey === personKey(target) || selfByDiscord) return fail(400, 'you cannot report yourself');
 
+  // A shared HUD or crosshair is its author's, so a report about one is a
+  // report about them: the entry must be live and theirs. A Discord-only
+  // member has no player account, so no entries.
+  let entryId: number | null = null;
+  if (body.entryId !== undefined && body.entryId !== null) {
+    // An entry report is left out of the per-match duplicate rule below, so
+    // one that also named a match would let a reporter file about the same
+    // match again and again (the match page's route fills matchId in).
+    if ((body.matchId !== undefined && body.matchId !== null) || (body.moment !== undefined && body.moment !== null)) {
+      return fail(400, 'a report about a shared entry cannot name a match');
+    }
+    if (typeof body.entryId !== 'number' || !Number.isInteger(body.entryId)) return fail(400, 'that is not an entry');
+    const entry = db.prepare('SELECT author_id FROM community_entries WHERE id = ? AND deleted_at IS NULL')
+      .get(body.entryId) as { author_id: string } | undefined;
+    if (!entry) return fail(404, 'no such entry');
+    if (target.kind !== 'player' || entry.author_id !== target.steamid) return fail(400, 'that entry is not theirs');
+    entryId = body.entryId;
+  }
+
   if (typeof body.category !== 'string' || !(REPORT_CATEGORIES as readonly string[]).includes(body.category)) {
     return fail(400, 'pick a category');
   }
@@ -211,14 +237,29 @@ export function fileReport(db: DB, reporterIn: string | DiscordReporter, body: F
   const feedHeld = restricted
     || (target.kind === 'player' ? hasStaffFlag(db, target.steamid) : deps.targetDiscord!.administrator);
   const targetKey = personKey(target);
-  const dupe = matchId !== null
+  // A report about an entry is one per reporter per entry per flavour, ever,
+  // and it is left out of the open-report rule below, so reporting someone's
+  // HUD never uses up the one open report about their behaviour, or the other
+  // way round. Per flavour as the rules below: a safety report about an entry
+  // already reported as rude still lands, on the restricted ticket, with the
+  // entry attached as its evidence.
+  if (entryId !== null) {
+    if (db.prepare(
+      `SELECT 1 FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id
+        WHERE ${REPORTER_KEY_SQL} = ? AND r.community_entry_id = ? AND t.restricted = ?`,
+    ).get(reporterKey, entryId, restricted ? 1 : 0)) {
+      return fail(409, 'you already reported this');
+    }
+  }
+  const dupe = entryId !== null ? null : matchId !== null
     ? db.prepare(
       `SELECT 1 FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id
        WHERE ${REPORTER_KEY_SQL} = ? AND ${TARGET_KEY_SQL} = ? AND r.match_id = ? AND t.restricted = ?`)
       .get(reporterKey, targetKey, matchId, restricted ? 1 : 0)
     : db.prepare(
       `SELECT 1 FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id
-       WHERE ${REPORTER_KEY_SQL} = ? AND ${TARGET_KEY_SQL} = ? AND r.match_id IS NULL AND t.status = 'open' AND t.restricted = ?`)
+       WHERE ${REPORTER_KEY_SQL} = ? AND ${TARGET_KEY_SQL} = ? AND r.match_id IS NULL AND r.community_entry_id IS NULL
+         AND t.status = 'open' AND t.restricted = ?`)
       .get(reporterKey, targetKey, restricted ? 1 : 0);
   if (dupe) return fail(409, matchId !== null ? 'you already reported this player for this match' : 'you already have an open report about this player');
 
@@ -228,15 +269,15 @@ export function fileReport(db: DB, reporterIn: string | DiscordReporter, body: F
     // reach the admin feed is fixed at the moment it lands, by whether its
     // ticket is restricted or its accused may be reading the feed.
     const reportId = Number(db.prepare(
-      `INSERT INTO ticket_reports (ticket_id, reporter_id, reporter_discord_id, reporter_name, category, text, match_id, map_ordinal, half, t_ms, created_at, feed_held)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO ticket_reports (ticket_id, reporter_id, reporter_discord_id, reporter_name, category, text, match_id, map_ordinal, half, t_ms, created_at, feed_held, community_entry_id, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       ticket.id,
       reporter.kind === 'player' ? reporter.steamid : null,
       reporter.kind === 'discord' ? reporter.discordId : null,
       reporter.kind === 'discord' ? reporter.name.slice(0, 100) : '',
       category, text, matchId, moment?.ordinal ?? null, moment?.half ?? null, moment?.tMs ?? null,
-      now.toISOString(), feedHeld ? 1 : 0,
+      now.toISOString(), feedHeld ? 1 : 0, entryId, deps.source ?? null,
     ).lastInsertRowid);
     if (!ticket.created) addTicketEvent(db, ticket.id, null, 'report_attached', { reportId }, now);
     return { ok: true, reportId, ticketId: ticket.id, created: ticket.created, restricted };

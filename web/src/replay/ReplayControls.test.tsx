@@ -31,6 +31,22 @@ function mount(over: Partial<Parameters<typeof ReplayControls>[0]> = {}) {
   );
 }
 
+describe('ReplayControls demo tick', () => {
+  it('shows the demo tick at the playhead and in a tick tooltip when the round has a demo sync', () => {
+    const { container } = mount({ demo: { tick: 700, hz: 100 } });
+    expect(container.querySelector('.replay__demotick')?.textContent).toBe('tick 700');
+    fireEvent.pointerEnter(container.querySelectorAll('.scrub__tick')[0]);
+    expect(container.querySelector('.scrub__tip')?.textContent).toMatch(/^0:25 \(tick 3200\)/);
+  });
+
+  it('shows nothing about demos without one', () => {
+    const { container } = mount();
+    expect(container.querySelector('.replay__demotick')).toBeNull();
+    fireEvent.pointerEnter(container.querySelectorAll('.scrub__tick')[0]);
+    expect(container.querySelector('.scrub__tip')?.textContent).not.toMatch(/tick/);
+  });
+});
+
 describe('ReplayControls ticks', () => {
   it('places one tick per timeline entry at its fraction of the round', () => {
     const { container } = mount();

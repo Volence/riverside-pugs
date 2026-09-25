@@ -33,6 +33,7 @@ export const PEOPLE_TABS: { key: string; label: string; path: string }[] = [
   { key: 'review', label: 'Needs a look', path: '/admin/people/review' },
   { key: 'bans', label: 'Bans', path: '/admin/people/bans' },
   { key: 'tickets', label: 'Tickets', path: '/admin/people/tickets' },
+  { key: 'calls', label: 'In-game calls', path: '/admin/people/calls' },
 ];
 
 /** Setup holds what the old flat tabs held, until the Setup plan regroups it
@@ -92,6 +93,7 @@ export function parseAdminPath(path: string, opts: { isAdmin: boolean }): AdminR
     if (a === '') return { desk: 'people', section: 'search', param: null };
     if (a === 'review') return { desk: 'people', section: 'review', param: null };
     if (a === 'bans') return { desk: 'people', section: 'bans', param: null };
+    if (a === 'calls' && b === '') return { desk: 'people', section: 'calls', param: null };
     if (a === 'tickets') {
       if (b === '') return { desk: 'people', section: 'tickets', param: null };
       // The ticket page fetches by id, so a param that is not one is a bad

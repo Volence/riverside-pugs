@@ -4,6 +4,7 @@ import { SPEEDS, type usePlayback } from './playback';
 import { tickEntries } from './bookmarks';
 import { bookmarkSeekMs, entryText, type TimelineEntry } from './timeline';
 import { eventSentence } from './eventText';
+import { demoTickAt, demoTickTitle, type DemoSync } from './demoTick';
 import {
   FREE, TEAM, ZOOM_LEVELS, followSlotOf, type Follow,
 } from './camera';
@@ -21,9 +22,12 @@ export function formatTime(ms: number): string {
 /** What a scrub tick says when hovered: the moment, then the same sentence
  *  the map tag tooltip uses for an event, or speaker and message for chat.
  *  The aria-label carries the phrase form; this is the readable one. */
-export function tickText(e: TimelineEntry, nameOf: (id: string) => string): string {
+export function tickText(
+  e: TimelineEntry, nameOf: (id: string) => string, demo: DemoSync | null = null,
+): string {
   const what = e.kind === 'chat' ? `${nameOf(e.actor)}: ${e.text}` : eventSentence(e, nameOf);
-  return `${formatTime(e.tMs)} · ${what}`;
+  const at = demo ? `${formatTime(e.tMs)} (tick ${demoTickAt(demo, e.tMs)})` : formatTime(e.tMs);
+  return `${at} · ${what}`;
 }
 
 /** Which way the tick tip grows so it stays inside the bar: centred on the
@@ -45,6 +49,8 @@ export interface ReplayControlsProps {
   slots: string[];
   names: Record<string, string>;
   timeline?: TimelineEntry[];
+  /** Where this round sits in the match's SourceTV demo, when known. */
+  demo?: DemoSync | null;
 }
 
 /** The toolbar, scrub bar, speed and follow rows. Purely presentational:
@@ -52,7 +58,7 @@ export interface ReplayControlsProps {
  *  one of the callback props. */
 export function ReplayControls(
   {
-    playback, endMs, live, follow, setFollow, zoom, setZoom, slots, names, timeline,
+    playback, endMs, live, follow, setFollow, zoom, setZoom, slots, names, timeline, demo = null,
   }: ReplayControlsProps,
 ) {
   const nameOf = (id: string) => names[id] ?? id;
@@ -112,10 +118,15 @@ export function ReplayControls(
               class={`replay__tip scrub__tip scrub__tip--${tipAnchor(tipEntry.tMs / endMs)}`}
               role="tooltip"
               style={{ left: pct(tipEntry.tMs) }}
-            >{tickText(tipEntry, nameOf)}</div>
+            >{tickText(tipEntry, nameOf, demo)}</div>
           )}
         </div>
         <span class="replay__time">{formatTime(playback.tMs)} / {formatTime(endMs)}</span>
+        {demo && (
+          <span class="replay__time replay__demotick muted" title={demoTickTitle(demoTickAt(demo, playback.tMs))}>
+            tick {demoTickAt(demo, playback.tMs)}
+          </span>
+        )}
         {SPEEDS.map((s) => (
           <button
             key={s}

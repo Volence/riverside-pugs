@@ -23,11 +23,25 @@ import type { RoundMetrics } from './round.js';
  *  R_MAX, and scored at read time against a per-map calibration, with the team
  *  gap; RoundMetrics lost occZ, teamRank and teamGap and gained occ, windows,
  *  scoreable and fidSum. Pools and shares of the aim prior are versioned, so
- *  this bump also rebuilds every prior as the rounds are re-measured. */
+ *  this bump also rebuilds every prior as the rounds are re-measured.
+ *
+ *  Line of sight (plan 2 of the spawned-infected spec) added losKnown,
+ *  fidLagSum and the hidden metrics D, E and F to RoundMetrics, and hidden
+ *  tracking windows became `hidden_track` clips scored by the lag search.
+ *  This landed WITHOUT a version bump. A bump can only re-measure rounds
+ *  whose replay is still on local disk, and by the time this shipped the R2
+ *  offload had pruned 1079 of 1155 replays, so a bump would have emptied the
+ *  board and the aim priors while the ghost numbers it was trying to protect
+ *  are bit-identical between the old and new code. Instead the new fields are
+ *  additive on version 4 rows: rounds measured from now on, and any version 4
+ *  round re-measured from a replay still on local disk, carry them; older
+ *  rows simply lack them and already read as "no line of sight". Filling in
+ *  the rest of the plan-1-era history needs a backfill that pulls pruned
+ *  replays back from R2 first; that backfill is not built. */
 export const ANALYZER_VERSION = 4;
 
 export interface RoundKey { matchId: number; ordinal: number; half: number }
-export interface SaveRow { slot: number; steamid: string; metrics: RoundMetrics; clips: TrackWindow[] }
+export interface SaveRow { slot: number; steamid: string; metrics: RoundMetrics; clips: TrackWindow[]; hiddenClips?: TrackWindow[] }
 
 const countsToJson = (m: Map<string, number>): string => JSON.stringify([...m]);
 const countsFromJson = (s: string): Map<string, number> => new Map(JSON.parse(s) as [string, number][]);
@@ -59,7 +73,18 @@ export function saveRound(db: DB, key: RoundKey, rows: SaveRow[]): void {
       for (const c of r.clips) {
         insClip.run(
           key.matchId, key.ordinal, key.half, r.slot, r.steamid, c.startMs, c.endMs,
-          'ghost_track', c.fidelity, JSON.stringify({ ghostSlot: c.ghostSlot, meanErr: c.meanErr, meanDist: c.meanDist, travel: c.travel }),
+          'ghost_track', c.fidelity,
+          JSON.stringify({ ghostSlot: c.ghostSlot, meanErr: c.meanErr, meanDist: c.meanDist, travel: c.travel, lagFidelity: c.lagFidelity, lagMs: c.lagMs }),
+          ANALYZER_VERSION,
+        );
+      }
+      // Scored by the lag search, which is metric D's own score. `fidelityLag0`
+      // rides along so a reviewer can see how much of the score the lag made.
+      for (const c of r.hiddenClips ?? []) {
+        insClip.run(
+          key.matchId, key.ordinal, key.half, r.slot, r.steamid, c.startMs, c.endMs,
+          'hidden_track', c.lagFidelity,
+          JSON.stringify({ infectedSlot: c.ghostSlot, cls: c.targetCls, lagMs: c.lagMs, fidelityLag0: c.fidelity, meanErr: c.meanErr, meanDist: c.meanDist, travel: c.travel }),
           ANALYZER_VERSION,
         );
       }

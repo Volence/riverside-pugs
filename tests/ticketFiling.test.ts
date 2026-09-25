@@ -141,6 +141,62 @@ describe('fileReport', () => {
   });
 });
 
+describe('fileReport about a shared entry', () => {
+  const entry = (author: string, deleted = false) => Number(db.prepare(
+    `INSERT INTO community_entries (kind, author_id, title, payload, created_at, deleted_at, deleted_by)
+     VALUES ('hud', ?, 'Loud HUD', '{}', '2026-09-24T00:00:00.000Z', ?, ?)`,
+  ).run(author, deleted ? '2026-09-24T01:00:00.000Z' : null, deleted ? author : null).lastInsertRowid);
+
+  it('stores the entry, allows one report per entry, and leaves a plain report possible', () => {
+    const id = entry(ACCUSED);
+    const r = fileReport(db, R1, { targetId: ACCUSED, category: 'toxicity', text: '', entryId: id }, deps);
+    expect(r).toMatchObject({ ok: true });
+    expect(db.prepare('SELECT community_entry_id FROM ticket_reports').get()).toEqual({ community_entry_id: id });
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'toxicity', text: '', entryId: id }, deps))
+      .toEqual({ ok: false, status: 409, error: 'you already reported this' });
+    // The entry report does not count as the reporter's open report about them.
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'griefing', text: '' }, deps)).toMatchObject({ ok: true });
+    // Nor does a plain report block reporting a second entry.
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'other', text: '', entryId: entry(ACCUSED) }, deps)).toMatchObject({ ok: true });
+    // Once a ticket closes, the same entry still cannot be reported again: one per entry, ever.
+    db.prepare("UPDATE tickets SET status = 'closed'").run();
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'toxicity', text: '', entryId: id }, deps)).toMatchObject({ status: 409 });
+  });
+
+  it('keeps a safety report about an entry apart from a normal one about the same entry', () => {
+    const id = entry(ACCUSED);
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'toxicity', text: '', entryId: id }, deps)).toMatchObject({ ok: true });
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'unsafe', text: 'the art names my address', entryId: id }, deps))
+      .toMatchObject({ ok: true });
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'unsafe', text: 'again', entryId: id }, deps)).toMatchObject({ status: 409 });
+    const other = entry(ACCUSED);
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'unsafe', text: 'first safety', entryId: other }, deps)).toMatchObject({ ok: true });
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'toxicity', text: '', entryId: other }, deps)).toMatchObject({ ok: true });
+  });
+
+  it('refuses an entry that is not the target\'s, gone, or not an id', () => {
+    const theirs = entry(R3);
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'toxicity', text: '', entryId: theirs }, deps))
+      .toEqual({ ok: false, status: 400, error: 'that entry is not theirs' });
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'toxicity', text: '', entryId: 9999 }, deps))
+      .toEqual({ ok: false, status: 404, error: 'no such entry' });
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'toxicity', text: '', entryId: entry(ACCUSED, true) }, deps))
+      .toEqual({ ok: false, status: 404, error: 'no such entry' });
+    for (const bad of ['1', 1.5, true, {}]) {
+      expect(fileReport(db, R1, { targetId: ACCUSED, category: 'toxicity', text: '', entryId: bad }, deps)).toMatchObject({ ok: false, status: 400 });
+    }
+    expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_reports').get()).toEqual({ n: 0 });
+  });
+
+  it('refuses an entry on a report about a Discord-only member', () => {
+    const id = entry(ACCUSED);
+    const r = fileReport(db, R1, { category: 'toxicity', text: '', entryId: id }, {
+      ...deps, targetDiscord: { discordId: '555', name: 'someone', bot: false, administrator: false },
+    });
+    expect(r).toEqual({ ok: false, status: 400, error: 'that entry is not theirs' });
+  });
+});
+
 describe('openStaffTicket', () => {
   it('opens a ticket with no report, and reuses the open one', () => {
     const a = openStaffTicket(db, MOD, { targetId: ACCUSED, note: 'seen in discord' }, deps);

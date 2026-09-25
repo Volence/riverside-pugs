@@ -17,11 +17,11 @@ beforeEach(() => {
   db.prepare("INSERT INTO matches (id, season_id, state, campaign, ended_at) VALUES (7, 1, 'completed', 'dead_air', '2026-09-20 18:00:00')").run();
 });
 
-const clip = (version: number, startMs = 61500) =>
+const clip = (version: number, startMs = 61500, kind = 'track', detail = '{}') =>
   db.prepare(
     `INSERT INTO integrity_clips (match_id, ordinal, half, slot, steamid, start_ms, end_ms, kind, score, detail, analyzer_version)
-     VALUES (7, 2, 1, 3, ?, ?, ?, 'track', 0.82, '{}', ?)`,
-  ).run(P, startMs, startMs + 6000, version);
+     VALUES (7, 2, 1, 3, ?, ?, ?, ?, 0.82, ?, ?)`,
+  ).run(P, startMs, startMs + 6000, kind, detail, version);
 
 const replayRow = (pruned: string | null) =>
   db.prepare(
@@ -57,6 +57,40 @@ describe('the analyzer source', () => {
     expect(analyzerAdapter.items({ db, steamid: P, ids: [P], viewer: STAFF })[0].replay).toBeNull();
     replayRow('2026-09-21 00:00:00');
     expect(analyzerAdapter.items({ db, steamid: P, ids: [P], viewer: STAFF })[0].replay).toBeNull();
+  });
+
+  it('says in words which kind of moment a clip is', () => {
+    clip(ANALYZER_VERSION, 1000, 'hidden_track');
+    clip(ANALYZER_VERSION, 9000, 'ghost_track');
+    const text = analyzerAdapter.items({ db, steamid: P, ids: [P], viewer: STAFF }).map((i) => i.summary);
+    expect(text.some((t) => /followed a spawned infected nobody on the team could see/.test(t))).toBe(true);
+    expect(text.some((t) => /followed a ghost/.test(t))).toBe(true);
+  });
+
+  it('calls a hidden_track clip\'s score lag-tolerant, and names the lag that won', () => {
+    clip(ANALYZER_VERSION, 1000, 'hidden_track', JSON.stringify({ lagMs: 200 }));
+    const text = analyzerAdapter.items({ db, steamid: P, ids: [P], viewer: STAFF })[0].summary;
+    expect(text).toMatch(/lag-tolerant fidelity 0\.82 at 200 ms lag/);
+  });
+
+  it('leaves a ghost_track clip worded exactly as before', () => {
+    clip(ANALYZER_VERSION, 9000, 'ghost_track');
+    const text = analyzerAdapter.items({ db, steamid: P, ids: [P], viewer: STAFF })[0].summary;
+    expect(text).toMatch(/fidelity 0\.82 over/);
+    expect(text).not.toMatch(/lag-tolerant/);
+  });
+
+  it('lists a hidden_track clip on the player file but excludes it from evidence, unlike a ghost_track clip', () => {
+    clip(ANALYZER_VERSION, 1000, 'hidden_track');
+    clip(ANALYZER_VERSION, 9000, 'ghost_track');
+    const items = analyzerAdapter.items({ db, steamid: P, ids: [P], viewer: STAFF });
+    expect(items).toHaveLength(2);
+    expect(analyzerAdapter.evidence!(db)).toEqual([{ steamid: P, at: '2026-09-20T18:00:00.000Z' }]);
+  });
+
+  it('reports no evidence at all when only a hidden_track clip exists', () => {
+    clip(ANALYZER_VERSION, 1000, 'hidden_track');
+    expect(analyzerAdapter.evidence!(db)).toEqual([]);
   });
 });
 

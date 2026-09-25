@@ -89,7 +89,7 @@ export function linkUrl(platform: string, handle: string): string | null {
  * and a corrupted one still compiles and still matches something, just not
  * what it says. The ranges are legible here and a test pins them.
  */
-function hasUnsafeChars(s: string, allowNewlines = false): boolean {
+export function hasUnsafeChars(s: string, allowNewlines = false): boolean {
   for (const ch of s) {
     const c = ch.codePointAt(0)!;
     // The bio is a paragraph field, so a plain newline is content there. Every
@@ -110,7 +110,7 @@ function hasUnsafeChars(s: string, allowNewlines = false): boolean {
 /** Anything link-shaped. Deliberately broad, because the bio is prose and a
  *  false positive costs somebody one rephrase, while a false negative puts a
  *  clickable-looking domain on a public page. */
-const LINKISH = /(?:[a-z][a-z0-9+.-]*:)|(?:\bwww\.)|(?:[a-z0-9-]+\.(?:com|net|org|gg|io|tv|co|me|xyz|link|ru|cn|info|biz|top|site|live|app|dev|gl|ly))\b/i;
+export const LINKISH = /(?:[a-z][a-z0-9+.-]*:)|(?:\bwww\.)|(?:[a-z0-9-]+\.(?:com|net|org|gg|io|tv|co|me|xyz|link|ru|cn|info|biz|top|site|live|app|dev|gl|ly))\b/i;
 
 function asString(raw: unknown): string | null {
   if (raw === null || raw === undefined) return null;

@@ -112,6 +112,21 @@ describe('the Tickets section', () => {
     await waitFor(() => expect(mockMod.claim).toHaveBeenCalledWith(12, true));
   });
 
+  it('links a report about a shared entry to it, and says when it was removed', async () => {
+    const base = detail().reports[0];
+    mockMod.ticket.mockResolvedValue(detail({ reports: [
+      { ...base, id: 1, matchId: null, campaign: null, moment: null, entry: { id: 31, kind: 'hud', title: 'Loud HUD', removed: false } },
+      { ...base, id: 2, matchId: null, campaign: null, moment: null, text: 'second', entry: { id: 32, kind: 'crosshair', title: 'Rude cross', removed: true } },
+    ] }));
+    renderAdmin('/admin/people/tickets/12', mod);
+    const live = await screen.findByRole('link', { name: /Loud HUD/ }) as HTMLAnchorElement;
+    expect(live.getAttribute('href')).toBe('/community/31');
+    expect(live.closest('p')!.textContent).not.toContain('(removed)');
+    const gone = screen.getByRole('link', { name: /Rude cross/ }) as HTMLAnchorElement;
+    expect(gone.getAttribute('href')).toBe('/community/32');
+    expect(gone.closest('p')!.textContent).toContain('(removed)');
+  });
+
   it('opens straight to a ticket from an old feed link', async () => {
     renderAdmin('/admin?ticket=12', mod);
     await screen.findByText('saw me through a wall');

@@ -3,6 +3,7 @@
  *  it changes here. 4a introduces no new endpoints and alters no existing one. */
 
 import type { TimelineEntry } from './replay/timeline';
+import type { DemoSync } from './replay/demoTick';
 
 export type Team = 'a' | 'b';
 export type Winner = Team | 'draw';
@@ -1182,6 +1183,10 @@ export interface TicketSummary {
 export interface TicketReport {
   id: number; reporterId: string | null; reporterDiscordId: string | null; reporterName: string | null; category: string; text: string;
   matchId: number | null; campaign: string | null; moment: { ordinal: number; half: number; tMs: number } | null; createdAt: string;
+  /** The shared community entry the report is about. Optional only for a browser holding new JS against an older server. */
+  entry?: { id: number; kind: CommunityKind; title: string; removed: boolean } | null;
+  /** 'game' when an in-game /mod call filed it. Optional for an older server. */
+  source?: string | null;
 }
 export interface TicketEvent {
   id: number; actorId: string | null; actorName: string | null; kind: string; detail: Record<string, unknown>; createdAt: string;
@@ -1277,12 +1282,21 @@ export type FileAction =
   | 'note' | 'looked_at' | 'open_ticket'
   | 'ban' | 'timeout' | 'merge' | 'sign_out' | 'waive' | 'staff_flags' | 'review_round' | 'steam_refresh';
 
-/** The analyzer board's columns for one player. A sort key, never a claim. */
+export type InfectedClass = 'smoker' | 'boomer' | 'hunter';
+export interface ClassScores { hiddenShare: number | null; hiddenOccZ: number | null; revealShare: number | null }
+
+/** The analyzer board's columns for one player. A sort key, never a claim.
+ *  Mirrors src/admin/analyzerRanks.ts. The hidden columns (D, E, F) are shown
+ *  beside the rank and are not part of it. */
 export interface AnalyzerRank {
   steamid: string; ranked: boolean; rank: number | null; of: number;
   rounds: number; eligibleRounds: number; clips: number;
   trackShare: number | null; occZ: number | null; teamGap: number | null;
   pFid: number | null; pOcc: number | null; pGap: number | null; composite: number | null;
+  losRounds: number; hiddenShare: number | null; hiddenOccZ: number | null;
+  reveals: number; revealShare: number | null;
+  pHidden: number | null; pHiddenOcc: number | null; pReveal: number | null;
+  byClass: Record<InfectedClass, ClassScores>;
 }
 
 export interface FileReview {
@@ -1412,7 +1426,22 @@ export interface StaffChatLine {
 export const ticketAttachmentUrl = (ticketId: number, attachmentId: number): string =>
   `/api/mod/tickets/${ticketId}/attachments/${attachmentId}`;
 
+/** One in-game /mod call on the In-game calls desk. Mirrors src/routes/modCalls.ts. */
+export interface ModCallView {
+  id: number; createdAt: string; serverName: string | null; map: string | null; matchId: number | null;
+  moment: { ordinal: number; half: number; tMs: number } | null;
+  reason: string; reasonLabel: string; via: 'game' | 'tv';
+  caller: { steamid: string; name: string };
+  target: { kind: 'player' | 'team' | 'general' | 'none'; steamid: string | null; name: string | null };
+  text: string; ticketId: number | null; note: string; postState: string; pinged: boolean;
+  handledBy: string | null; handledAt: string | null; folded: ModCallView[];
+}
+
 export const modApi = {
+  calls: (filter: 'open' | 'all', signal?: AbortSignal) =>
+    get<{ calls: ModCallView[]; discordReady: boolean }>(`/api/mod/calls?filter=${filter}`, signal),
+  /** Mark an in-game call handled, as the Discord card's button does. */
+  handleCall: (id: number) => post<{ ok: true }>(`/api/mod/calls/${id}/handle`),
   tickets: (filter: 'open' | 'mine' | 'closed', signal?: AbortSignal) =>
     get<{ tickets: TicketSummary[]; counts: TicketCounts }>(`/api/mod/tickets?filter=${filter}`, signal),
   ticket: (id: number, signal?: AbortSignal) => get<TicketDetail>(`/api/mod/tickets/${id}`, signal),
@@ -1570,6 +1599,78 @@ export const adminApi = {
     get<MetricDetail>(`/api/admin/balance/metric?${compareParams(q)}&metric=${encodeURIComponent(metric)}&phase=${encodeURIComponent(phase)}`, signal),
 };
 
+// ---------- community ----------
+
+export type CommunityKind = 'hud' | 'crosshair';
+
+/** One shared HUD or crosshair, as the gallery lists it (src/community/entries.ts). */
+export interface CommunityEntry {
+  id: number;
+  kind: CommunityKind;
+  title: string;
+  description: string;
+  author: { steamid: string; name: string; avatar: string | null };
+  likes: number;
+  likedByMe: boolean;
+  createdAt: string;
+  /** When its author last updated it; null if never. */
+  updatedAt?: string | null;
+  /** Crosshairs only: the CrosshairArt, untrusted until readArt has read it. */
+  art?: unknown;
+  /** HUDs only. */
+  preset?: string | null;
+  aspect?: string | null;
+  advanced?: boolean;
+  importName?: string | null;
+  previewUrl?: string | null;
+  /** HUDs only: the infected side's preview; null on entries shared before there was one. */
+  previewInfectedUrl?: string | null;
+}
+
+/** One entry with its payload, from GET /api/community/:id. */
+export interface CommunityEntryDetail extends CommunityEntry {
+  /** HUDs only: the design, untrusted until validateDesign has read it. */
+  design?: unknown;
+  importId?: string | null;
+  /** Staff only, on a removed entry. */
+  removed?: { by: string | null; byName?: string | null; reason: string | null; at: string };
+  /** Staff only: the versions its author's updates replaced, newest first. */
+  versions?: { id: number; replacedAt: string }[];
+  /** Staff only, on a replaced version: the live entry it was a version of. */
+  versionOf?: number | null;
+}
+
+export interface CommunityList { entries: CommunityEntry[]; page: number; pageSize: number; total: number }
+export interface CommunityMine {
+  entries: (CommunityEntry & { removedByStaff: string | null })[];
+  caps: { huds: number; crosshairs: number; perDay: number; sharedToday: number };
+}
+export interface CommunityListQuery { kind: CommunityKind; sort?: 'new' | 'top'; page?: number; author?: string; liked?: boolean }
+
+export const communityApi = {
+  list: (q: CommunityListQuery, signal?: AbortSignal) => {
+    const p = new URLSearchParams({ kind: q.kind, sort: q.sort ?? 'new', page: String(q.page ?? 0) });
+    if (q.author) p.set('author', q.author);
+    if (q.liked) p.set('liked', '1');
+    return get<CommunityList>(`/api/community?${p}`, signal);
+  },
+  get: (id: number, signal?: AbortSignal) => get<CommunityEntryDetail>(`/api/community/${id}`, signal),
+  mine: (signal?: AbortSignal) => get<CommunityMine>('/api/community/mine', signal),
+  /** `replaces`: update that live crosshair of yours in place instead of sharing a new one. */
+  shareCrosshair: (body: { title: string; description: string; art: unknown; permission: boolean; replaces?: number }) =>
+    post<{ id: number }>('/api/community/crosshairs', body),
+  /** Multipart: meta, preview and (on an imported HUD) import; see community/publish.ts's buildHudForm.
+   *  `replaces`: update that live HUD of yours in place (in the URL, so the server knows before the body). */
+  shareHud: (form: FormData, replaces?: number) =>
+    post<{ id: number }>(replaces === undefined ? '/api/community/huds' : `/api/community/huds?replaces=${replaces}`, form),
+  like: (id: number) => put<{ likes: number; likedByMe: boolean }>(`/api/community/${id}/like`, {}),
+  unlike: (id: number) => del<{ likes: number; likedByMe: boolean }>(`/api/community/${id}/like`),
+  /** Staff: take an entry down, with the reason its author is shown. */
+  remove: (id: number, reason: string) => post<{ ok: true }>(`/api/community/${id}/remove`, { reason }),
+  /** The author's own delete. */
+  delete: (id: number) => del<{ ok: true }>(`/api/community/${id}`),
+};
+
 /** A second of a round: which map of the match, which half, how far in. */
 export interface ReportMoment { ordinal: number; half: number; tMs: number }
 
@@ -1596,7 +1697,7 @@ export const api = {
   replayLive: (token: string, signal?: AbortSignal) =>
     get<{ filename: string; closed: boolean }>(`/api/replays/live/${encodeURIComponent(token)}`, signal),
   replayTimeline: (matchId: number, ordinal: number, half: number, signal?: AbortSignal) =>
-    get<{ entries: TimelineEntry[] }>(`/api/replays/timeline/${matchId}/${ordinal}/${half}`, signal),
+    get<{ entries: TimelineEntry[]; demo?: DemoSync | null }>(`/api/replays/timeline/${matchId}/${ordinal}/${half}`, signal),
   map: (map: string, signal?: AbortSignal) =>
     get<MapDetail>(`/api/maps/${encodeURIComponent(map)}`, signal),
   match: (id: string, signal?: AbortSignal) =>
@@ -1625,7 +1726,7 @@ export const api = {
     get<ReportEligibility>(`/api/matches/${matchId}/report-eligibility`, signal),
   report: (matchId: number, targetId: string, category: string, text: string, moment?: ReportMoment) =>
     post(`/api/matches/${matchId}/reports`, moment ? { targetId, category, text, moment } : { targetId, category, text }),
-  fileReport: (body: { targetId: string; category: string; text: string; matchId?: number; moment?: ReportMoment }) =>
+  fileReport: (body: { targetId: string; category: string; text: string; matchId?: number; moment?: ReportMoment; entryId?: number }) =>
     post('/api/reports', body),
   myReports: (signal?: AbortSignal) => get<{ reports: MyReport[] }>('/api/reports/mine', signal),
   reportChat: (reportId: number) => post<{ ok: true; url: string }>(`/api/reports/${reportId}/chat`),

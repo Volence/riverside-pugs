@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { ensureTicketSchema } from './tickets/schema.js';
+import { ensureCommunitySchema } from './community/schema.js';
 import { migrateLegacyReports } from './tickets/migrate.js';
 import { widenTicketIdentity } from './tickets/identityMigration.js';
 
@@ -704,6 +705,40 @@ CREATE TABLE IF NOT EXISTS steam_signal_alerts (
   at TEXT NOT NULL,
   PRIMARY KEY (player_id, kind, marker)
 );
+
+-- In-game /mod calls (src/modCalls.ts). One row per call, whether or not it
+-- became a ticket or reached Discord. No foreign key on either SteamID: a
+-- caller or a target may have no account. Both follow a merge through
+-- mergePlayers' PLAIN list.
+CREATE TABLE IF NOT EXISTS mod_calls (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at            TEXT    NOT NULL,
+  server_id             INTEGER,
+  match_id              INTEGER,
+  map                   TEXT,
+  map_ordinal           INTEGER,
+  half                  INTEGER,
+  t_ms                  INTEGER,
+  caller_steamid        TEXT    NOT NULL,
+  caller_team           INTEGER,
+  target_kind           TEXT    NOT NULL CHECK (target_kind IN ('player', 'team', 'general', 'none')),
+  target_steamid        TEXT,
+  reason                TEXT    NOT NULL,
+  text                  TEXT    NOT NULL DEFAULT '',
+  via                   TEXT    NOT NULL DEFAULT 'game',
+  ticket_id             INTEGER,
+  folded_into           INTEGER REFERENCES mod_calls(id),
+  pinged                INTEGER NOT NULL DEFAULT 0,
+  post_state            TEXT    NOT NULL DEFAULT 'pending' CHECK (post_state IN ('pending', 'posted', 'skipped', 'folded')),
+  note                  TEXT    NOT NULL DEFAULT '',
+  discord_message_id    TEXT,
+  handled_by_discord_id TEXT,
+  handled_at            TEXT,
+  handled_by_steamid    TEXT
+);
+CREATE INDEX IF NOT EXISTS mod_calls_created ON mod_calls (created_at);
+CREATE INDEX IF NOT EXISTS mod_calls_caller ON mod_calls (caller_steamid, created_at);
+CREATE INDEX IF NOT EXISTS mod_calls_pending ON mod_calls (post_state) WHERE post_state = 'pending';
 `;
 
 export const DEFAULT_SETTINGS: Record<string, string> = {
@@ -714,6 +749,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   discord_webhook_url: '',
   discord_queue_thresholds: JSON.stringify([4, 6]),
   discord_pug_role_id: '',
+  mod_call_role_id: '',
+  mod_calls_enabled: '1',
   // Empty: guild membership alone activates a linked player. A role id: the
   // member must also hold that role.
   discord_required_role_id: '',
@@ -802,6 +839,14 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // and that many matches played at all.
   endorse_title_min: '5',
   endorse_title_min_games: '10',
+  // The community page (HUDs and crosshairs players share). Off refuses new
+  // shares only; browsing, downloads and likes keep working.
+  community_uploads: '1',
+  community_huds_per_player: '2',
+  community_crosshairs_per_player: '2',
+  // Deletes count too, so delete-and-reshare cannot churn the disk.
+  community_shares_per_day: '6',
+  community_store_mb: '1024',
 };
 
 /** Patch triage backfill (sub-project 1 of the balance catalogue roadmap).
@@ -1072,6 +1117,8 @@ export function openDb(path: string): DB {
     note        TEXT NOT NULL DEFAULT ''
   )`);
   db.exec('CREATE INDEX IF NOT EXISTS player_reviews_steamid ON player_reviews (steamid, reviewed_at)');
+  // Before tickets: ticket_reports.community_entry_id, added below, points at it.
+  ensureCommunitySchema(db);
   ensureTicketSchema(db);
   // When a report was said in Discord: in its ticket's thread, or as a line
   // in the admin channel while no forum is set. NULL means "not yet", which
@@ -1104,6 +1151,16 @@ export function openDb(path: string): DB {
   // One-time backfill: every report already sitting on a restricted ticket
   // was always meant to be held, whether or not it predates this column.
   if (feedHeldIsNew) db.exec('UPDATE ticket_reports SET feed_held = 1 WHERE ticket_id IN (SELECT id FROM tickets WHERE restricted = 1)');
+  // The shared HUD or crosshair a report is about, when it is about one.
+  // After widenTicketIdentity and migrateLegacyReports on purpose: that
+  // rebuild copies a fixed column list (identityMigration.ts REPORTS_OLD) and
+  // refuses a column it does not know, so adding this before it would make
+  // the first open of an old database throw. No foreign key: ALTER TABLE
+  // cannot add one, and a purged entry keeps its row anyway.
+  ensureColumn(db, 'ticket_reports', 'community_entry_id', 'INTEGER');
+  // Where a report came from. Only the in-game /mod path sets it (src/modCalls.ts);
+  // null means one of the older surfaces, which never recorded it.
+  ensureColumn(db, 'ticket_reports', 'source', 'TEXT');
   // Who is on the game server right now, one row per rostered player, written
   // from PLAYER connect, LEAVE and RETURN and from the plugin's own answer to
   // an admin clock action (src/presence.ts). `since` is when the current state
@@ -1276,6 +1333,10 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'balance_patches', 'release_id', 'INTEGER REFERENCES releases(id)');
   ensureColumn(db, 'match_rounds', 'variant', 'TEXT');
   ensureColumn(db, 'match_rounds', 'skill_detect', 'INTEGER');
+  // Where the half went live in its map's SourceTV demo, and the tickrate
+  // that converts the round's t_ms to demo ticks (see DemoSync in logParse).
+  ensureColumn(db, 'match_rounds', 'demo_tick', 'INTEGER');
+  ensureColumn(db, 'match_rounds', 'demo_hz', 'INTEGER');
   ensureColumn(db, 'matches', 'origin', "TEXT CHECK (origin IN ('queue','in_game'))");
   db.prepare(ORIGIN_BACKFILL_SQL).run();
 
@@ -1341,6 +1402,11 @@ export function openDb(path: string): DB {
   // of a match, so an earlier session on the same connection may have found
   // nobody rostered yet and posted nothing. See src/sourcetvSessions.ts.
   ensureColumn(db, 'sourcetv_sessions', 'alerted_at', 'TEXT');
+  // Who marked an in-game call handled, as a player: the site's Mark handled
+  // has a player and maybe no Discord, and the Discord button's presser is a
+  // linked player. Rows handled before this column existed keep only
+  // handled_by_discord_id, which the card and the site still fall back to.
+  ensureColumn(db, 'mod_calls', 'handled_by_steamid', 'TEXT');
   // start/stop of the SourceTV relay itself, so a run of dropped sessions can
   // be told apart from the relay simply not running.
   db.exec(`

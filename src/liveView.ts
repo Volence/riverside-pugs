@@ -580,12 +580,18 @@ export function recordRoundStart(
   const id = liveMatchIdOf(db, token);
   if (id === null) return;
   db.prepare(
-    `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, reliable, started_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'))
-     ON CONFLICT (match_id, ordinal, half) DO NOTHING`,
-    // DO NOTHING, not an update: a duplicated ROUND_START must not reset the
-    // started_at that t_ms values are already measured against.
-  ).run(id, currentOrdinal(db, id), ev.half, ev.surv ?? PLACEHOLDER_SIDE, ev.surv === null ? 0 : 1);
+    `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, reliable, started_at, demo_tick, demo_hz)
+     VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?)
+     ON CONFLICT (match_id, ordinal, half) DO UPDATE SET
+       demo_tick = COALESCE(excluded.demo_tick, match_rounds.demo_tick),
+       demo_hz = COALESCE(excluded.demo_hz, match_rounds.demo_hz)`,
+    // Nothing else is updated: a duplicated ROUND_START must not reset the
+    // started_at that t_ms values are already measured against. The demo
+    // tick is the exception because a half that goes live again (an admin
+    // restart) restarts t_ms and the replay with it, so the newest go-live
+    // is the one the replay's clock counts from.
+  ).run(id, currentOrdinal(db, id), ev.half, ev.surv ?? PLACEHOLDER_SIDE, ev.surv === null ? 0 : 1,
+    ev.demo?.tick ?? null, ev.demo?.hz ?? null);
   // ev.map, not a bare touch: ROUND_START names the map and arrives at the top
   // of every round, which makes it the wire's own answer to "what is being
   // played right now".
@@ -653,8 +659,8 @@ export function recordRoundEnd(
   // 2026-09-13 showed 0 to 0 for a map that was played).
   const known = ev.score >= 0;
   db.prepare(
-    `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, ended_at, survivors_alive)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)
+    `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, ended_at, survivors_alive, demo_tick, demo_hz)
+     VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
      ON CONFLICT (match_id, ordinal, half) DO UPDATE SET
        surv_team = excluded.surv_team,
        score = excluded.score,
@@ -669,8 +675,13 @@ export function recordRoundEnd(
        -- here is authoritative on every line, but this one is the single
        -- field an older plugin can omit, so absence has to lose to presence
        -- rather than win by arriving second.
-       survivors_alive = COALESCE(excluded.survivors_alive, match_rounds.survivors_alive)`,
-  ).run(id, ordinal, ev.half, ev.surv, known ? ev.score : 0, known ? 1 : 0, ev.alive);
+       survivors_alive = COALESCE(excluded.survivors_alive, match_rounds.survivors_alive),
+       -- Repeated from ROUND_START so a lost start datagram does not lose the
+       -- round's demo sync. Same COALESCE rule: an older plugin omits it.
+       demo_tick = COALESCE(excluded.demo_tick, match_rounds.demo_tick),
+       demo_hz = COALESCE(excluded.demo_hz, match_rounds.demo_hz)`,
+  ).run(id, ordinal, ev.half, ev.surv, known ? ev.score : 0, known ? 1 : 0, ev.alive,
+    ev.demo?.tick ?? null, ev.demo?.hz ?? null);
   touch(db, id);
 }
 

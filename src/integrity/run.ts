@@ -5,6 +5,7 @@ import { parseReplay, slotInfected, type Frame, type ReplayHeader } from '../rep
 import { subtractRound, type PriorTable } from './aimPrior.js';
 import { TUNING } from './constants.js';
 import { analyzeRound, buildRoundPrior, unpausedFrames } from './round.js';
+import { losView } from './los.js';
 import {
   loadPrior, loadRoundPrior, markUnanalysable, pendingRounds, pooledRounds, poolRounds, saveRound,
   type PoolEntry, type RoundKey,
@@ -68,12 +69,13 @@ export function analyzeOneRound(db: DB, key: RoundKey, buf: Uint8Array): boolean
     prior = own ? subtractRound(pooled.table, own) : pooled.table;
   }
 
-  const { metrics, clips } = analyzeRound(replay.frames, slots, prior);
+  const { metrics, clips, hiddenClips } = analyzeRound(replay.frames, slots, prior, losView(replay.header));
   saveRound(db, key, slots.map((slot) => ({
     slot,
     steamid: replay.header.slots[slot],
     metrics: metrics.get(slot)!,
     clips: clips.get(slot) ?? [],
+    hiddenClips: hiddenClips.get(slot) ?? [],
   })));
   return true;
 }

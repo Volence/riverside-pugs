@@ -22,6 +22,10 @@ const num = (v: number | null): string => (v == null ? 'n/a' : v.toFixed(2));
 const num3 = (v: number | null): string => (v == null ? 'n/a' : v.toFixed(3));
 const pct = (v: number | null): string => (v == null ? 'n/a' : `${Math.round(v * 100)}%`);
 
+/** A clip's kind in words. Unknown kinds show as themselves. */
+const CLIP_KIND: Record<string, string> = { ghost_track: 'ghost', hidden_track: 'hidden infected' };
+const clipKind = (k: string): string => CLIP_KIND[k] ?? k;
+
 /**
  * The numbers under the timeline rows, for the reader who wants them.
  *
@@ -50,13 +54,24 @@ export function EvidenceDetail(
 
       <h4>Replay analyzer</h4>
       {a === null ? <p class="muted">No analysed rounds for this player.</p> : (
-        <p class="muted">
-          {a.ranked ? `Rank ${a.rank} of ${a.of} ranked players` : 'Too few measured rounds to rank'}
-          {' · '}{a.rounds} rounds, {a.eligibleRounds} with something to measure, {a.clips} clip{a.clips === 1 ? '' : 's'}
-          {' · '}tracking {num3(a.trackShare)} ({pct(a.pFid)})
-          {' · '}occupancy {num(a.occZ)} ({pct(a.pOcc)})
-          {' · '}team gap {num(a.teamGap)} ({pct(a.pGap)})
-        </p>
+        <>
+          <p class="muted">
+            {a.ranked ? `Rank ${a.rank} of ${a.of} ranked players` : 'Too few measured rounds to rank'}
+            {' · '}{a.rounds} rounds, {a.eligibleRounds} with something to measure, {a.clips} clip{a.clips === 1 ? '' : 's'}
+            {' · '}tracking {num3(a.trackShare)} ({pct(a.pFid)})
+            {' · '}occupancy {num(a.occZ)} ({pct(a.pOcc)})
+            {' · '}team gap {num(a.teamGap)} ({pct(a.pGap)})
+          </p>
+          <p class="muted">
+            Hidden infected ({a.losRounds} rounds with line of sight, not in the rank):
+            {' '}tracking {num3(a.hiddenShare)} ({pct(a.pHidden)})
+            {' · '}pre-aim {num(a.hiddenOccZ)} ({pct(a.pHiddenOcc)})
+            {' · '}on target at reveal {pct(a.revealShare)} of {a.reveals} ({pct(a.pReveal)})
+            {' · '}hunters: tracking {num3(a.byClass.hunter.hiddenShare)}, pre-aim {num(a.byClass.hunter.hiddenOccZ)}, reveal {pct(a.byClass.hunter.revealShare)}
+            {' · '}smokers: tracking {num3(a.byClass.smoker.hiddenShare)}, pre-aim {num(a.byClass.smoker.hiddenOccZ)}, reveal {pct(a.byClass.smoker.revealShare)}
+            {' · '}boomers: tracking {num3(a.byClass.boomer.hiddenShare)}, pre-aim {num(a.byClass.boomer.hiddenOccZ)}, reveal {pct(a.byClass.boomer.revealShare)}
+          </p>
+        </>
       )}
       <details class="colkey">
         <summary>What these columns mean</summary>
@@ -80,6 +95,18 @@ export function EvidenceDetail(
           <dd>
             Their occupancy minus their own teammates' average in the same rounds, which cancels out
             a round where everyone was staring at the same doorway.
+          </dd>
+          <dt>Hidden tracking, pre-aim and reveal</dt>
+          <dd>
+            The same questions as tracking and occupancy, asked about spawned infected at the
+            moments nobody on the survivor team could see them, from the line of sight the server
+            records ten times a second. If a teammate could see it, the moment does not count, because
+            a callout explains a crosshair honestly. "On target at reveal" is how often the crosshair
+            was already on an infected the instant it came into view. These need eight rounds with
+            line of sight, and reveal needs thirty reveals, before they read anything. They are
+            shown, not ranked, until a calibration session has set what normal looks like. The
+            percentiles in brackets compare only against ranked players, so a player who is not
+            ranked (too few measured rounds) shows the raw numbers with no bracket beside them.
           </dd>
           <dt>Rank and n/a</dt>
           <dd>
@@ -107,7 +134,7 @@ export function EvidenceDetail(
                     <a href={`/match/${c.matchId}?ordinal=${c.ordinal}&half=${c.half}&t=${c.startMs}`}>
                       Match #{c.matchId}
                     </a>
-                    <span class="muted"> · fidelity {c.score.toFixed(2)} · {((c.endMs - c.startMs) / 1000).toFixed(1)}s</span>
+                    <span class="muted"> · {clipKind(c.kind)} · fidelity {c.score.toFixed(2)} · {((c.endMs - c.startMs) / 1000).toFixed(1)}s</span>
                   </li>
                 ))}
               </ul>

@@ -28,7 +28,7 @@ export interface BalanceKnobs {
    *  match, so their presence is noise. Dropped from the inventory entirely. */
   ignored?: string[];
   /** Weapon keys from l4d_info_editor_weapons.cfg the plugin reports as
-   *  `w:<weapon>.<key>` (read from the watch file, pug-match 0.3.12+). */
+   *  `w:<weapon>.<key>` (read from the watch file, pug-match 0.3.14+). */
   weapons?: { weapon: string; key: string; label: string }[];
 }
 

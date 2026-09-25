@@ -105,6 +105,16 @@ describe('escapeName', () => {
     expect(escapeName('b*o_b')).toBe('b\\*o\\_b');
   });
 
+  it('drops bidi controls so a name cannot flip the rest of its line', () => {
+    const hostile = 'a‮b‭c‪d⁦e⁩f‎g‏h؜i';
+    expect(escapeName(hostile)).toBe('abcdefghi');
+  });
+
+  it('keeps the zero width joiner that emoji sequences need', () => {
+    const family = '\u{1F468}‍\u{1F469}‍\u{1F467}';
+    expect(escapeName(family)).toBe(family);
+  });
+
   // A Steam name is attacker-controlled text with no length or character
   // limit worth trusting. `\@` and `\<` both render literally in Discord, so
   // escaping them is free; today's only backstop is the transport sending

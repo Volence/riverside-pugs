@@ -102,6 +102,10 @@ export function foldTicket(db: DB, gone: number, keep: number, access: 'merge' |
   // Close DMs owed to reporters reference the ticket too: a notice queued on
   // the emptied ticket still goes out, from the survivor.
   db.prepare('UPDATE ticket_notices SET ticket_id = ? WHERE ticket_id = ?').run(keep, gone);
+  // An in-game call links the ticket it filed onto. No foreign key holds this
+  // one, so without the move the card and the calls page would link a ticket
+  // that no longer exists.
+  db.prepare('UPDATE mod_calls SET ticket_id = ? WHERE ticket_id = ?').run(keep, gone);
   if (access === 'merge') db.prepare('UPDATE OR IGNORE ticket_access SET ticket_id = ? WHERE ticket_id = ?').run(keep, gone);
   db.prepare('DELETE FROM ticket_access WHERE ticket_id = ?').run(gone);
   db.prepare("UPDATE admin_actions SET target = ? WHERE target = ? AND action LIKE 'ticket\\_%' ESCAPE '\\'")

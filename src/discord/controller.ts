@@ -3,7 +3,7 @@ import type { Matchmaker } from '../matchmaker.js';
 import { QUEUE_SIZE } from '../queue.js';
 import { campaignDisplayName } from '../campaignRegistry.js';
 import { createLinkCode, playerByDiscordId, type PlayerRow } from '../players.js';
-import { spectateFor } from '../spectate.js';
+import { spectateFor, type SpectateInfo } from '../spectate.js';
 import type { BotInteraction, InteractionReply, MessagePayload, RoleOps } from './transport.js';
 import { getSetting } from '../settings.js';
 import { ENDORSE_ERROR_TEXT, ENDORSE_LABEL, endorseState, giveEndorsement } from '../endorsements.js';
@@ -166,7 +166,7 @@ export async function handleButton(
     // roster check. Still ephemeral, to keep the channel tidy.
     const tv = spectateFor(deps.db, serverOfMatch(deps.db, matchId));
     if (!tv) return say('That match has no SourceTV to watch.');
-    const line = tv.password ? `password ${tv.password}; connect ${tv.host}:${tv.port}` : `connect ${tv.host}:${tv.port}`;
+    const line = spectateConnectLine(tv);
     const when = tv.delay > 0 ? `${tv.delay} seconds behind live` : 'live, no delay. SourceTV spectators are recorded';
     return say(
       `Watch in game, ${when}:\n\`\`\`\n${line}\n\`\`\`Spectator slots are limited, so it can be full.`,
@@ -182,6 +182,12 @@ export async function handleButton(
     `Paste this into the L4D console (password first, or it fails):\n\`\`\`\npassword ${c.password}; connect ${c.host}:${c.port}\n\`\`\`Keep the password to yourself.`,
     { components: [[{ kind: 'link', url: `${deps.publicUrl}/`, label: 'Open on the website' }]] },
   );
+}
+
+/** The console line that joins a server's SourceTV, password first when it
+ *  has one. Shared with the mod call card so both say exactly the same thing. */
+export function spectateConnectLine(tv: SpectateInfo): string {
+  return tv.password ? `password ${tv.password}; connect ${tv.host}:${tv.port}` : `connect ${tv.host}:${tv.port}`;
 }
 
 /** The server a match is on, for the public spectate button. */

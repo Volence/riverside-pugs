@@ -114,17 +114,23 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .xh { display: grid; grid-template-columns: 340px 1fr; gap: var(--sp-4); align-items: start; }
 .xh__controls { display: flex; flex-direction: column; gap: var(--sp-4); }
 
-.xh__group { border: 1px solid var(--border); padding: var(--sp-3) var(--sp-4) var(--sp-4); margin: 0; }
+/* min-inline-size: a fieldset otherwise sizes to its content's min-content and overflows its column. */
+.xh__group { border: 1px solid var(--border); padding: var(--sp-3) var(--sp-4) var(--sp-4); margin: 0; min-inline-size: 0; }
 .xh__group legend { padding: 0 var(--sp-2); }
 
 /* Label, control, readout. The readout column is fixed so the sliders all
  * start and end at the same x, which is what makes the stack scannable. */
-.xh__row { display: grid; grid-template-columns: 5.5rem 1fr 2.5rem; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); }
+.xh__row { display: grid; grid-template-columns: 5.5rem minmax(6rem, 1fr) 2.5rem; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); }
 .xh__row > span:first-child { font-size: var(--fs-dense); color: var(--text-muted); }
 .xh__row output { text-align: right; font-size: var(--fs-dense); }
-.xh__row input[type='range'] { width: 100%; accent-color: var(--accent); }
+/* The control column never goes below 6rem, and nor do the controls in it:
+ * squeezed into a narrow box the sliders shrank to nubs and the Shape select
+ * too narrow to show its value. A group too narrow for that is laid out
+ * wider (or in one column) by whatever holds it, never squeezed. */
+.xh__row input[type='range'] { width: 100%; min-width: 6rem; accent-color: var(--accent); }
 .xh__row select, .xh__row input[type='text'] {
   width: 100%;
+  min-width: 6rem;
   background: var(--surface-2);
   color: var(--text);
   border: 1px solid var(--border);
@@ -148,7 +154,7 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 /* The native file input is unstylable across browsers, so it is hidden and
  * the label around it does the work. */
 .xh__file { display: block; margin-top: var(--sp-2); font-size: var(--fs-dense); color: var(--text-muted); cursor: pointer; }
-.xh__file input[type='file'] { display: block; margin-top: var(--sp-2); font-size: var(--fs-label); color: var(--text-muted); }
+.xh__file input[type='file'] { display: block; max-width: 100%; margin-top: var(--sp-2); font-size: var(--fs-label); color: var(--text-muted); }
 .xh__file--inline { margin: 0; }
 .xh__file--inline input[type='file'] { display: none; }
 
@@ -157,10 +163,14 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .xh__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); font-size: var(--fs-dense); color: var(--text-muted); }
 .xh__toolbar select { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font: inherit; font-size: var(--fs-dense); }
 .xh__note { margin-left: auto; }
+/* Actual size or whole screen: two chips, pressed one on, kept to the selects' height. */
+.xh__view { display: flex; gap: var(--sp-1); }
+.xh__view .chip { min-height: 30px; padding-inline: var(--sp-2); }
 
 .xh__preview { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-4); align-items: start; }
-/* The preview canvas sizes itself from this box and redraws at 1:1, so it
- * must not be scaled by CSS after the fact. */
+/* The preview canvas sizes its backing store from this box in display
+ * pixels (times devicePixelRatio) and redraws, so the close-up is one game
+ * pixel per display pixel; the box must not be scaled by CSS after the fact. */
 .xh__canvas { display: block; width: 100%; aspect-ratio: 16 / 9; border: 1px solid var(--border); background: #000; }
 .xh__zoomcol { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); }
 /* pixelated on both: the point of the zoom and the texture view is to show
@@ -178,6 +188,262 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
   .xh__preview { grid-template-columns: 1fr; }
   .xh__zoomcol { flex-direction: row; flex-wrap: wrap; justify-content: center; align-items: center; }
   .xh__note { margin-left: 0; }
+}
+@media (max-width: 640px) {
+  .xh__view .chip { min-height: 44px; }
+}
+
+/* ---------- HUD editor ---------- */
+
+.hud { display: grid; grid-template-columns: 190px minmax(0, 1fr) 320px; gap: var(--sp-4); align-items: start; }
+
+/* Two rows: the HUD (goes into the download), then the Preview (never does). */
+.hud__toolbar { display: flex; flex-direction: column; margin-bottom: var(--sp-4); font-size: var(--fs-dense); color: var(--text-muted); }
+.hud__tbrow { display: grid; grid-template-columns: 4.5rem 1fr; align-items: start; padding: var(--sp-2) 0; }
+/* Wrapped controls line up under the row's own, not under its heading. */
+.hud__tbbody { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.hud__tbrow + .hud__tbrow { border-top: 1px solid var(--border); }
+.hud__tbtop + .hud__tbrow { padding-top: var(--sp-3); }
+.hud__tbhead { padding-top: 6px; font-family: var(--font-display, inherit); font-size: var(--fs-label); letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+.hud__tbtop { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--sp-2); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--border); }
+.hud__tbgroup { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+/* The Preview's lines are deliberate: what is shown, then (infected) its state, then the toggles and backdrop. */
+.hud__tbbody:has(> .hud__tbline) { flex-direction: column; align-items: stretch; }
+.hud__tbline { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+/* In the toolbar a tab strip is a compact segmented control: joined, no strip underline. */
+.hud__toolbar .tabs { margin: 0; border: 0; gap: 0; overflow: visible; }
+.hud__toolbar .tabs__tab, .hud__toolbar .btn--ghost { min-height: 30px; padding: 2px var(--sp-3); font-size: var(--fs-label); }
+.hud__toolbar .tabs__tab + .tabs__tab { margin-left: -1px; }
+.hud__toolbar .tabs__tab.is-active { background: var(--surface-2); color: var(--text-bright, var(--text)); border-color: var(--border); box-shadow: inset 0 -2px 0 var(--accent); }
+/* A toggle (Crouched, Occasional panels, Show yourself) says on or off with a dot. */
+.hud__toolbar .btn--ghost[aria-pressed]::before { content: ''; width: 7px; height: 7px; border-radius: 50%; border: 1px solid currentColor; }
+.hud__toolbar .btn--ghost[aria-pressed='true'] { color: var(--text); border-color: var(--accent); }
+.hud__toolbar .btn--ghost[aria-pressed='true']::before { background: var(--accent); border-color: var(--accent); }
+.hud__toolbar select { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font: inherit; font-size: var(--fs-dense); }
+.hud__tbsep { width: 1px; align-self: stretch; background: var(--border); }
+
+/* The backing store is sized to this box every draw, 1:1, so it must never be
+ * scaled by CSS after the fact. touch-action: none is what lets a drag win
+ * over the browser's own scroll/zoom gestures on a touch screen. aspect-ratio
+ * itself comes from an inline style: it tracks the design's own aspect, not a
+ * fixed one. */
+.hud__canvas { display: block; width: 100%; touch-action: none; border: 1px solid var(--border); background: #000; }
+/* The canvas and what floats over it: the breadcrumb at its corner and,
+ * later, the right-click menu. */
+.hud__canvaswrap { position: relative; }
+.hud__crumbs {
+  position: absolute; left: var(--sp-2); top: var(--sp-2);
+  display: flex; align-items: center; gap: var(--sp-1);
+  padding: 2px var(--sp-2); background: rgba(0, 0, 0, 0.65);
+  font-size: var(--fs-dense); color: var(--text-bright);
+}
+.hud__crumbs button { background: none; border: 0; padding: 0; color: var(--text-muted); font: inherit; cursor: pointer; }
+.hud__crumbs button:hover { color: var(--text-bright); text-decoration: underline; }
+
+.hud__menu {
+  position: absolute; z-index: 5; list-style: none; margin: 0; padding: var(--sp-1) 0; min-width: 11rem;
+  background: var(--surface-2); border: 1px solid var(--border-strong); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.hud__menu button {
+  display: block; width: 100%; text-align: left; background: none; border: 0;
+  padding: var(--sp-1) var(--sp-3); color: var(--text); font: inherit; font-size: var(--fs-dense); cursor: pointer;
+}
+.hud__menu button:hover, .hud__menu button:focus-visible { background: var(--surface); color: var(--text-bright); }
+
+/* The Layers list: one row per element, pieces indented under the
+ * Teammates. The name is a button (click selects, Shift+click adds), the eye
+ * another; a hidden row is struck through, as the old pills were. */
+.hud__layers .eyebrow { margin-bottom: var(--sp-2); }
+.hud__layer { display: flex; align-items: center; gap: var(--sp-1); padding: 1px var(--sp-1); }
+.hud__layer--d1 { padding-left: calc(var(--sp-4) + 12px); }
+.hud__layer--d2 { padding-left: calc(var(--sp-4) * 2 + 12px); }
+/* The fold arrow before a top row; a row with no pieces keeps the same space so the names line up. */
+.hud__fold {
+  flex: 0 0 12px; width: 12px; height: 12px; display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: 0; padding: 0; color: var(--text-muted); cursor: pointer;
+}
+.hud__fold svg { transition: transform .12s; }
+.hud__fold.is-open svg { transform: rotate(90deg); }
+.hud__layer.is-active .hud__fold { color: #fff; }
+/* The list keeps to the screen: it stays in view beside the canvas and scrolls on its own. */
+@media (min-width: 1201px) {
+  .hud__layerpanel { position: sticky; top: var(--sp-3); align-self: start; max-height: calc(100vh - 2 * var(--sp-3)); overflow-y: auto; }
+}
+.hud__layergroup + .hud__layergroup { margin-top: var(--sp-3); }
+.hud__layergroup-title {
+  margin: 0 0 var(--sp-1); padding: 0 var(--sp-1) 2px; border-bottom: 1px solid var(--border);
+  font-size: var(--fs-label); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted);
+}
+/* "In every card": a heading inside Teammates, not a row to click. */
+.hud__layersub { margin: 0; font-size: var(--fs-label); color: var(--text-muted); font-style: italic; }
+.hud__layer.is-active { background: var(--accent); }
+/* Name above note, and the name wraps: a row never hides what it is. */
+.hud__layertext { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.hud__layername {
+  text-align: left; background: none; border: 0; padding: 2px 0;
+  color: var(--text); font: inherit; font-size: var(--fs-dense); cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.hud__layer.is-active .hud__layername { color: #fff; }
+/* Hidden: dimmed, and the eye is crossed out; no strikethrough, which reads as "cannot use". */
+.hud__layer--hidden .hud__layername { color: var(--text-muted); opacity: .6; }
+.hud__layernote { font-size: var(--fs-label); color: var(--text-muted); line-height: 1.2; padding-bottom: 2px; }
+.hud__layeradd { color: var(--text-muted); }
+.hud__eye { background: none; border: 0; padding: 2px; color: var(--text-muted); cursor: pointer; line-height: 0; }
+.hud__eye:hover { color: var(--text-bright); }
+
+.hud__group { border: 1px solid var(--border); padding: var(--sp-3) var(--sp-4) var(--sp-4); margin: 0; min-inline-size: 0; max-width: 100%; }
+.hud__group legend { padding: 0 var(--sp-2); }
+
+.hud__row { display: grid; grid-template-columns: 5.5rem 1fr 2.5rem; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); }
+.hud__row > span:first-child { font-size: var(--fs-dense); color: var(--text-muted); }
+.hud__row output { text-align: right; font-size: var(--fs-dense); }
+.hud__row input[type='range'] { width: 100%; accent-color: var(--accent); }
+.hud__row select, .hud__row input[type='number'] {
+  width: 100%;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: var(--sp-2);
+  font: inherit;
+  font-size: var(--fs-dense);
+}
+
+/* A slider with its number box: a wider last column, room for "-200". */
+.hud__row--num { grid-template-columns: 5.5rem 1fr 3.75rem; }
+
+.hud__row2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); margin-top: var(--sp-3); }
+.hud__field { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); color: var(--text-muted); min-width: 0; }
+.hud__field input {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: var(--sp-2);
+  font: inherit;
+  font-size: var(--fs-dense);
+  min-width: 0;
+}
+
+.hud__check { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-dense); color: var(--text-muted); }
+.hud__check input { accent-color: var(--accent); }
+
+.hud__note { margin-top: var(--sp-2); }
+.hud__more summary { cursor: pointer; list-style: none; }
+.hud__more summary::-webkit-details-marker { display: none; }
+.hud__more-toggle { color: var(--accent); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: .06em; margin-left: var(--sp-1); }
+.hud__more[open] .hud__more-toggle { display: none; }
+.hud__more p { margin: var(--sp-1) 0 0; }
+/* A note the player has to act on (the addon load order, no crosshair at all). */
+.hud__warn { color: var(--text); border-left: 2px solid var(--accent); padding-left: var(--sp-2); }
+/* The Styles panel is one fieldset so a missing import can switch it all off; it draws nothing of its own. */
+.hud__fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+/* Remove an imported HUD: a picker and two buttons beside the Preset select. */
+.hud__removerow { display: inline-flex; align-items: center; gap: var(--sp-2); }
+/* The crosshair's zoomed texture: small in the side panel, large in the builder under the canvas. */
+.hud__xhairpreview { flex: none; border-radius: 4px; image-rendering: pixelated; }
+.hud__xhairpreview--small { display: block; width: 96px; height: 96px; margin-top: var(--sp-3); }
+.hud__xhairpreview--big { width: 176px; height: 176px; max-width: 100%; }
+.hud__xhairhide { margin-top: var(--sp-3); }
+/* The crosshair builder under the canvas, while the crosshair is selected:
+ * the large preview on the left, the controls on the right. The editor's
+ * page is at most 1320px wide, so the canvas column, and this panel, is
+ * about 680px at most: sized so that two groups fit beside the preview. */
+.hud__xhairbelow { margin-top: var(--sp-4); padding-top: var(--sp-4); border-top: 1px solid var(--border); }
+.hud__xhairhead { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.hud__xhairhead h3 { margin: 0; }
+.hud__xhairacts { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.hud__xhairbody { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+/* Presets span the top as one row of buttons; Shape, Colour and Outline sit
+ * side by side below them, as many to a row as fit, one column on a phone.
+ * The upload takes the next free cell. */
+.hud__xhairgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14.5rem, 1fr)); gap: var(--sp-3); align-items: start; min-width: 0; }
+.hud__xhairgrid > .xh__group:first-child { grid-column: 1 / -1; }
+.hud__xhairgrid > .hud__file { margin-top: 0; }
+/* Tighter than the Crosshair page's rows, so two groups fit side by side. */
+.hud__xhairgrid .xh__row { grid-template-columns: 4.5rem minmax(5rem, 1fr) 2rem; }
+.hud__xhairgrid .xh__row input[type='range'], .hud__xhairgrid .xh__row select { min-width: 5rem; }
+.hud__xhairgrid .xh__group { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
+/* Smaller preset buttons, so all six make one row. */
+.hud__xhairgrid .xh__presets { gap: var(--sp-1); }
+.hud__xhairgrid .xh__presets { flex-wrap: wrap; }
+.hud__xhairgrid .xh__presets .btn { padding-inline: 6px; letter-spacing: 0; }
+/* A native file input is as wide as its own text unless told otherwise. */
+.hud__xhairgrid input[type='file'] { max-width: 100%; }
+.hud__reset { margin-top: var(--sp-4); }
+
+/* The six align buttons of a group, in one wrapping row. */
+.hud__align { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-3); }
+
+/* The native file input is unstylable across browsers, so it is hidden and
+ * the label around it does the work, same as the crosshair page's xh__file. */
+.hud__file { display: block; margin-top: var(--sp-2); font-size: var(--fs-dense); color: var(--text-muted); cursor: pointer; }
+.hud__file input[type='file'] { display: block; margin-top: var(--sp-2); font-size: var(--fs-label); color: var(--text-muted); }
+.hud__file--inline { margin: 0; }
+.hud__file--inline input[type='file'] { display: none; }
+
+/* One row per style slot: a label, then whichever controls apply, wrapping
+ * on narrow screens rather than forcing a rigid grid that would clip a long
+ * slot label like "Health bar: healthy". */
+.hud__stylerow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-dense);
+}
+.hud__stylerow:last-of-type { border-bottom: none; }
+.hud__stylerow-label { flex: 1 1 12rem; color: var(--text-muted); }
+/* An unset colour the preview cannot know: dimmed and dashed, not a made-up colour. */
+.hud__swatch--unset { opacity: .45; outline: 1px dashed var(--text-muted); }
+/* A health colour key's three game bands; the one the preview draws in is lit. */
+.hud__bands { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); margin: 0; padding: 0; list-style: none; }
+.hud__band { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--text-muted); opacity: .6; }
+.hud__band--on { color: var(--text); opacity: 1; }
+.hud__band-chip { width: 1.4em; height: .7em; border-radius: 999px; outline: 1px solid var(--border); }
+.hud__band-btn { display: inline-flex; align-items: center; gap: var(--sp-1); background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+.hud__band-btn:hover { color: var(--text); }
+.hud__band--on .hud__band-chip { outline: 2px solid var(--text); }
+.hud__stylerow select {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: var(--sp-1) var(--sp-2);
+  font: inherit;
+  font-size: var(--fs-dense);
+}
+.hud__stylerow input[type='color'] { width: 40px; height: 28px; padding: 2px; background: var(--surface-2); border: 1px solid var(--border); }
+.hud__stylerow input[type='range'] { width: 100px; accent-color: var(--accent); }
+.hud__stylerow .hud__file { margin: 0; }
+/* A Splatter row's hint, health options and messages sit on their own line under its controls. */
+.hud__splatfull { flex: 1 1 100%; margin: 0; }
+/* A scratch at the three health colours: small canvases with a label under each, wrapping on a phone. */
+.hud__tintstrip { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin-top: var(--sp-2); }
+.hud__tintstrip figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); }
+.hud__tintstrip canvas { width: 64px; height: 16px; background: var(--surface-2); border: 1px solid var(--border); }
+.hud__tintstrip figcaption { font-size: var(--fs-dense); color: var(--text-muted); }
+
+.hud__advtoggle { margin-top: var(--sp-3); }
+
+.hud__sharebar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-top: var(--sp-3); }
+
+.hud__status { margin-top: var(--sp-3); font-size: var(--fs-dense); }
+
+@media (max-width: 1200px) {
+  .hud { grid-template-columns: minmax(0, 1fr) 320px; }
+  .hud__layerpanel { grid-column: 1 / -1; }
+}
+
+@media (max-width: 900px) {
+  .hud { grid-template-columns: 1fr; }
+}
+
+/* On a phone the builder's preview goes above its controls, which are one column. */
+@media (max-width: 640px) {
+  .hud__xhairbody { grid-template-columns: minmax(0, 1fr); }
+  .hud__xhairpreview--big { justify-self: center; }
+  .hud__xhairgrid { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ---------- queue bar ---------- */
@@ -1193,6 +1459,11 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 }
 .tabs__tab:hover { color: var(--text); }
 .tabs__tab.is-active { color: var(--text); border-color: var(--border); border-bottom-color: var(--accent); }
+/* The HUD section's strip (HUD editor, Crosshair, Community) heads its three
+ * pages. A poster title under it needs air, or the strip reads as part of it. */
+.hudtabs__feedback { margin-left: auto; align-self: center; padding: 0 var(--sp-2); font-size: var(--fs-label); color: var(--text-muted); white-space: nowrap; }
+.hudtabs__feedback:hover { color: var(--text); }
+.hudtabs + .page-head, .hudtabs + .sr-only + .page-head { margin-top: var(--sp-5); }
 .tabs__count {
   margin-left: 0.4em;
   padding: 0 0.4em;
@@ -1345,6 +1616,7 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .replay__entry:hover { background: var(--surface-2); }
 .replay__entry--chat .replay__entry-text { opacity: 0.85; font-style: italic; }
 .replay__entry-t { font-variant-numeric: tabular-nums; opacity: 0.55; }
+.replay__entry-tick { font-variant-numeric: tabular-nums; opacity: 0.45; font-size: 0.7rem; align-self: center; }
 .replay__entry-n { display: inline-block; min-width: 1.2em; margin-right: 4px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .replay__entry-who { font-weight: 600; }
 .replay__entry--ahead { opacity: 0.45; }
@@ -1826,16 +2098,32 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .queue-block { margin-top: var(--sp-3); }
 
 .howto { margin: 0; padding-left: 1.25rem; display: grid; gap: var(--sp-2); }
+/* A grid item will not shrink below its content by default, so a long code
+   block in a step would stretch the step past the panel instead of scrolling. */
+.howto > li { min-width: 0; }
 /* Shader Detail crash warning in the map pack install steps. Borrows
    .error's color since it is the same "this will hurt you" red, but not its
    font-size: this is a preventive warning read before anything has gone
    wrong, not a shrunken status line for a failure that already happened. */
 .howto-warn { color: var(--loss); }
+.howto-index ul { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
+.howto-index a { font-family: var(--font-label); letter-spacing: 0.04em; }
+.howto-cmds { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-2) var(--sp-4); }
+.howto-cmds dd { margin: 0; }
+@media (max-width: 640px) {
+  .howto-cmds { grid-template-columns: 1fr; gap: 0; }
+  .howto-cmds dd { margin-bottom: var(--sp-3); }
+}
+.page--profile .stack > .panel[id] { scroll-margin-top: var(--sp-6); }
 .steps { margin: var(--sp-3) 0; padding-left: 1.25rem; display: grid; gap: var(--sp-2); }
 .steps code { word-break: break-all; }
 .faq details { border-bottom: 1px solid var(--border); padding: var(--sp-3) 0; }
 .faq summary { cursor: pointer; color: var(--text-bright); font-family: var(--font-label); letter-spacing: 0.04em; }
 .faq details p { margin: var(--sp-2) 0 0; color: var(--text); }
+/* An answer long enough to need a list or a code block cannot live inside a
+   <p>, so it gets a div and brings its own paragraphs. */
+.faq__answer { color: var(--text); }
+.faq__answer > .howto { margin-top: var(--sp-2); }
 
 .season-picker { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.12em; }
 
@@ -2232,6 +2520,15 @@ tbody tr.is-lifted td { opacity: 0.55; }
 }
 .ticket-row:hover, .ticket-row:focus-visible { background: rgba(255, 255, 255, 0.04); }
 .ticket-row__id { font-variant-numeric: tabular-nums; opacity: 0.7; }
+
+/* In-game calls. A folded call sits one step in under the call it joined,
+ * as it does on the Discord card. */
+.admin-warning { color: var(--loss); border-left: 3px solid var(--loss); padding-left: 0.75rem; margin: 0.75rem 0; }
+.calls { list-style: none; margin: 0; padding: 0; }
+.calls--folded { margin-left: var(--sp-4); border-left: 2px solid var(--rule); padding-left: var(--sp-3); }
+.call-row { padding: 0.6rem 0.25rem; border-bottom: 1px solid var(--border); }
+.call-row p { margin: 0 0 var(--sp-1); overflow-wrap: anywhere; }
+.call-row blockquote { margin: 0 0 var(--sp-1); padding-left: var(--sp-3); border-left: 2px solid var(--rule); overflow-wrap: anywhere; white-space: pre-wrap; }
 .ticket-restricted { border-left: 3px solid #de4e40; padding-left: 0.75rem; margin: 0.75rem 0; }
 .ticket-timeline { list-style: none; margin: 0; padding: 0; }
 .ticket-event { padding: var(--sp-2) 0; }
@@ -2291,3 +2588,112 @@ tbody tr.is-lifted td { opacity: 0.55; }
   .patch-table td.patch-table__change:not(:empty) { margin-left: 0.5rem; }
   .patch-table td.patch-table__sentence { display: block; margin-top: 0.25rem; }
 }
+
+/* ---- Community: shared HUDs and crosshairs ----
+ * Cards in the streams tiles' clothes: flat surface, square corners, a
+ * label-font badge over the picture, Anton titles. Everything wraps at phone
+ * width; nothing an author typed may push the page sideways. */
+.community__lede { max-width: 60rem; margin: 0 0 var(--sp-4); }
+.community__bar { display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-5); align-items: center; margin-bottom: var(--sp-4); }
+.community__pager { display: flex; gap: var(--sp-3); align-items: center; justify-content: center; margin-top: var(--sp-5); }
+.community__removed {
+  margin: 0 0 var(--sp-4); padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--loss); background: var(--surface-2); overflow-wrap: anywhere;
+}
+
+.ccards { display: grid; gap: var(--sp-4); grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.ccard {
+  display: flex; flex-direction: column; min-width: 0;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text);
+}
+.ccard:hover { border-color: var(--border-strong); }
+.ccard--large { max-width: 60rem; }
+.ccard--gone { padding: var(--sp-4); }
+.ccard__shot {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  aspect-ratio: 16 / 9; background: var(--bg); overflow: hidden;
+}
+.ccard__preview { width: 100%; height: 100%; object-fit: contain; display: block; }
+.ccard__nopreview { width: 100%; height: 100%; }
+/* A shared HUD's Survivor / Infected toggle (SidePreviews): a strip of two
+   tabs right under the preview, never over it, so no corner of the HUD is
+   hidden. The side on show is underlined in the accent, as the site's tabs. */
+.sidepv { display: flex; background: var(--bg); border-bottom: 1px solid var(--border); }
+.sidepv__btn {
+  flex: 1 1 0; min-height: 32px; padding: 2px 8px; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+  background: transparent; cursor: pointer;
+  font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.sidepv__btn:hover { color: var(--text-bright); }
+.sidepv__btn.is-on { border-bottom-color: var(--accent); color: var(--text-bright); }
+.sidepv__btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* 96 backing pixels shown at twice their size, crisp, as the maker's zoom shows them. */
+.ccard__xhair { width: 192px; height: 192px; max-height: 100%; aspect-ratio: 1; image-rendering: pixelated; }
+.ccard__badge {
+  position: absolute; top: var(--sp-2); left: var(--sp-2); max-width: calc(100% - 2 * var(--sp-2));
+  padding: 2px 6px; border-radius: 2px;
+  background: rgba(5, 4, 3, 0.78); color: var(--text-bright);
+  font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.1em; text-transform: uppercase;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ccard__badge--adv { top: auto; bottom: var(--sp-2); background: var(--rating); color: var(--accent-ink); }
+.ccard__body { padding: var(--sp-3); display: grid; gap: var(--sp-2); min-width: 0; }
+.ccard__title {
+  margin: 0; font-family: var(--font-display); font-size: var(--fs-h3); font-weight: 400; line-height: 1.1;
+  color: var(--text-bright); overflow-wrap: anywhere;
+}
+.ccard--large .ccard__title { font-size: var(--fs-h2); }
+.ccard__title a { color: inherit; text-decoration: none; }
+.ccard__title a:hover { color: var(--accent); }
+.ccard__desc { margin: 0; font-size: var(--fs-dense); color: var(--text-muted); white-space: pre-line; overflow-wrap: anywhere; }
+.ccard__who { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; font-size: var(--fs-dense); min-width: 0; }
+.ccard__who a { overflow-wrap: anywhere; }
+.ccard__avatar { width: 24px; height: 24px; object-fit: cover; flex: none; }
+.ccard__avatar--blank { display: inline-block; background: var(--surface-2); }
+.ccard__likes { margin-left: auto; }
+.ccard__like.is-on { border-color: var(--accent); color: var(--text-bright); }
+.ccard__actions, .ccard__mod { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.ccard__mod .report { margin-top: 0; flex-basis: 100%; }
+.ccard__status { margin: 0; font-size: var(--fs-dense); overflow-wrap: anywhere; }
+.ccard__remove { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; flex-basis: 100%; }
+.ccard__remove input { flex: 1 1 12rem; min-width: 0; }
+.ccard__remove .error { flex-basis: 100%; margin: 0; }
+.ccard--compact { text-decoration: none; }
+.ccard--compact .ccard__xhair { width: 96px; height: 96px; }
+.ccard__kind {
+  font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+/* A profile's Shared panel: compact cards, as many to a row as fit. */
+.profile-shared__cards { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); }
+/* The Share to community dialog: the confirm modal's panel, a little wider for the preview. */
+.share { width: min(40rem, 100%); }
+.share__form { display: grid; gap: var(--sp-3); margin-top: var(--sp-3); }
+.share__preview { display: block; width: 100%; height: auto; border: 1px solid var(--border); }
+.share__field { display: grid; gap: var(--sp-1); }
+.share__field input, .share__field textarea { width: 100%; box-sizing: border-box; min-width: 0; }
+.share__field textarea {
+  /* The browser's own textarea is grey and monospace; match the title input above it. */
+  padding: var(--sp-3); border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  font-family: var(--font-body); font-size: var(--fs-body); resize: vertical;
+}
+.share__field textarea:focus { border-color: var(--accent); }
+.share__check { display: flex; gap: var(--sp-2); align-items: flex-start; }
+.share__mode { border: 1px solid var(--border); padding: var(--sp-2) var(--sp-3); margin: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.share__mode select { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font: inherit; margin-left: var(--sp-5); }
+.share__mode .share__cap { margin: 0; }
+.share__cap p, .share__left p { margin: 0; }
+.share__cap ul, .share__left ul { margin: var(--sp-1) 0 0; padding-left: var(--sp-5); overflow-wrap: anywhere; }
+.share__left { color: var(--text-muted); }
+.share .modal__actions { margin-top: var(--sp-2); }
+@media (max-width: 640px) {
+  .ccards { grid-template-columns: minmax(0, 1fr); }
+  .community__bar { gap: var(--sp-2); }
+}
+
+/* The close-up of the selection, top of the side panel: the canvas's view of it, enlarged. */
+.hud__closeup { margin: 0 0 var(--sp-3); }
+.hud__closeup canvas { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; border: 1px solid var(--border); }
+.hud__closeup figcaption { margin-top: var(--sp-1); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: .06em; }

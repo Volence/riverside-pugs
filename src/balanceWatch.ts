@@ -9,7 +9,7 @@ import { getServer, listServers, type ServerRow } from './serverPool.js';
 import { publishAdminEvent } from './adminFeed.js';
 
 /**
- * The balance watch list as a file on every box, which pug-match 0.3.12+
+ * The balance watch list as a file on every box, which pug-match 0.3.14+
  * reads at map start instead of its compiled list, so watching one more value
  * is a site-only change. See
  * docs/superpowers/specs/2026-09-24-balance-watch-file-design.md.

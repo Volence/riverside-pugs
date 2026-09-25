@@ -673,6 +673,30 @@ describe('round persistence', () => {
     expect(second.started_at).toBe(first.started_at);
   });
 
+  it('stores the demo sync from round start, and round end fills or refreshes it', () => {
+    const db = liveMatchForRounds();
+    const demoOf = (half: number) => db.prepare(
+      'SELECT demo_tick AS tick, demo_hz AS hz FROM match_rounds WHERE half = ?',
+    ).get(half) as { tick: number | null; hz: number | null };
+    recordRoundStart(db, ROUND_TOKEN, {
+      kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', demo: { tick: 900, hz: 100 },
+    });
+    expect(demoOf(1)).toEqual({ tick: 900, hz: 100 });
+    // An older plugin's round end has no sync and must not erase it.
+    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', score: 1, alive: null });
+    expect(demoOf(1)).toEqual({ tick: 900, hz: 100 });
+    // A half that went live again restarts its clock: the newest start wins.
+    recordRoundStart(db, ROUND_TOKEN, {
+      kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', demo: { tick: 5000, hz: 100 },
+    });
+    expect(demoOf(1)).toEqual({ tick: 5000, hz: 100 });
+    // A lost ROUND_START: the end line alone supplies it.
+    recordRoundEnd(db, ROUND_TOKEN, {
+      kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 2, surv: 'b', score: 1, alive: null, demo: { tick: 31000, hz: 100 },
+    });
+    expect(demoOf(2)).toEqual({ tick: 31000, hz: 100 });
+  });
+
   it('trusts the round-end side when start and end disagree', () => {
     const db = liveMatchForRounds();
     recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' });

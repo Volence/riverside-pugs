@@ -50,7 +50,7 @@ import websocket from '@fastify/websocket';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { STATUS_CODES } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import type { Config } from './config.js';
 import type { DB } from './db.js';
 import { BalanceRolloutWriter } from './balanceWriter.js';
@@ -62,6 +62,9 @@ import type { AddonsTransport } from './addonsTransport.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
 import { backfillPersonas } from './personaBackfill.js';
 import { handleConduct } from './conductFlags.js';
+import { handleModCall } from './modCalls.js';
+import { ModCallPoster } from './discord/modCallPoster.js';
+import { MOD_CALL_PREFIX } from './discord/modCallCard.js';
 import { refreshSteamSignals, startSteamSignalRefresh, type SignalDeps } from './steamSignals.js';
 import { authRoutes } from './routes/auth.js';
 import { renewSession } from './session.js';
@@ -73,6 +76,7 @@ import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
 import { cheatName, cvarActOf, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
+import { lilacReasonDetail } from './logParse.js';
 import { inputThresholds, recordInputBurst, recordInputCap } from './inputBursts.js';
 import { resolveServerBySource, isKnownServerAddress, type ServerRow } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
@@ -81,7 +85,7 @@ import { RconClient as RealRcon } from './rcon.js';
 import type { ServerQuery } from './leaveControl.js';
 import { ServerBanSync, type ServerExec } from './serverBans.js';
 import { ServerAdminSync } from './serverAdmins.js';
-import { kickThenQuit, parseHumans, rconRestarter, type ServerRestarter } from './serverRestart.js';
+import { kickThenQuit, parseHumans, QuitNotSentError, rconRestarter, type ServerRestarter } from './serverRestart.js';
 import { DeployRepo } from './deployRepo.js';
 import { ReleaseEngine } from './releaseEngine.js';
 import { ReleaseService } from './releaseService.js';
@@ -113,11 +117,16 @@ import { pruneReplays } from './replayPrune.js';
 import { pruneLiveFilesSafely } from './replayPush.js';
 import { apiRoutes } from './routes/api.js';
 import { ticketRoutes } from './routes/tickets.js';
+import { modCallRoutes } from './routes/modCalls.js';
 import { statsRoutes } from './routes/stats.js';
 import { balancePublicRoutes } from './routes/balancePublic.js';
 import { replayRoutes } from './routes/replays.js';
 import { devRoutes } from './routes/dev.js';
 import { campaignRoutes } from './routes/campaigns.js';
+import { communityRoutes } from './routes/community.js';
+import { CommunityStore } from './community/store.js';
+import { sweepCommunity } from './community/sweep.js';
+import { settingNumber } from './settings.js';
 import type { InstallTarget } from './campaignInstall.js';
 import { notifyDiscord } from './discord.js';
 import { setMissionsDirs } from './campaignRegistry.js';
@@ -191,6 +200,11 @@ export interface ServerDeps {
   balanceTransport?: (s: ServerRow, dir: string) => AddonsTransport | null;
   /** Injected by tests; built from the servers table otherwise. */
   fleetReader?: FleetReader;
+  /** Free bytes on the community store's disk, for its 12 GB floor. Injected
+   *  in tests; a real statfs on config.communityDir otherwise. */
+  communityFreeBytes?: () => Promise<number>;
+  /** How long a HUD share may take to upload. Injected in tests; two minutes otherwise. */
+  communityUploadTimeoutMs?: number;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -519,7 +533,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     quit: async (server) => {
       const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
       try {
-        await rcon.connect();
+        // A failed connect means quit never went out: typed, so the restarter
+        // retries it rather than read it as the box dying mid-quit.
+        try {
+          await rcon.connect();
+        } catch (err) {
+          throw new QuitNotSentError(err);
+        }
         await kickThenQuit(rcon, server.name);
       } finally {
         rcon.close();
@@ -552,7 +572,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // new values land between matches; see src/balanceWriter.ts. Not wired in
   // dev mode, where a release must never write through a real transport.
   const balanceWriter = new BalanceRolloutWriter({ db: deps.db, transport: deps.balanceTransport });
-  // The balance watch list as a file pug-match 0.3.12+ reads at map start
+  // The balance watch list as a file pug-match 0.3.14+ reads at map start
   // (sub-project 3). Knobs loaded here for the file only; a broken knobs.json
   // writes nothing, and every box keeps its compiled list.
   let watchKnobs: BalanceKnobs | null = null;
@@ -733,6 +753,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       const liveMatchRow = (token: string) =>
         deps.db.prepare("SELECT id, server_id FROM matches WHERE token = ? AND state = 'live'")
           .get(token) as { id: number; server_id: number | null } | undefined;
+      // A call's card names the map it happened on. Keyed off the packet's own
+      // server id (serverOf's result), not the plugin-reported ev.matchId,
+      // which is the plugin's own tracked match and can be stale. Same join
+      // getLiveMatches (liveView.ts) uses to pair a server with its live
+      // match's current map, which recordRoundStart keeps current. Only the
+      // fallback: the plugin names its own map on the line, which also covers
+      // a call outside a match; this fills in for an older plugin.
+      const currentMapOf = (serverId: number | null): string | null => {
+        if (serverId === null) return null;
+        return (deps.db.prepare(
+          `SELECT l.current_map AS currentMap FROM matches m
+             JOIN match_live l ON l.match_id = m.id
+            WHERE m.server_id = ? AND m.state = 'live'
+            ORDER BY m.id DESC LIMIT 1`,
+        ).get(serverId) as { currentMap: string | null } | undefined)?.currentMap ?? null;
+      };
       logListener = new LogListener((raw, source, meta) => {
         // One rewrite at the door, before anything reads a SteamID off this
         // event. A player who connects on a second account that has been
@@ -760,7 +796,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             // spectator, and there is one row per event rather than thousands.
             const stored = recordIntegrityFlag(deps.db, {
               matchId, serverId, steamid: ev.steamid, source: 'lilac',
-              kind, severity: ev.banned ? 'banned' : 'suspected', detail: '',
+              kind, severity: ev.banned ? 'banned' : 'suspected',
+              detail: ev.reason ? lilacReasonDetail(ev.reason) : '',
             });
             if (stored) {
               publishAdminEvent({
@@ -857,6 +894,17 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             handleConduct(deps.db, ev, serverOf(source, meta));
           } catch (err) {
             console.error('[conduct] failed to check a line:', err);
+          }
+          return;
+        }
+        if (ev.kind === 'call') {
+          // In-game /mod calls. Never on the critical path: a failure here
+          // must not take down the listener that also carries match_end.
+          try {
+            const sid = serverOf(source, meta);
+            handleModCall(deps.db, ev, sid, { adminSteamIds: deps.config.adminSteamIds, map: ev.map ?? currentMapOf(sid) });
+          } catch (err) {
+            console.error('[modcall] failed to handle a call:', err);
           }
           return;
         }
@@ -1355,6 +1403,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // must never wait on, or fail because of, Discord.
   let bot: RunningBot | null = null;
   let adminFeed: AdminFeedPoster | null = null;
+  let modCalls: ModCallPoster | null = null;
   let ticketSync: TicketSync | null = null;
   let ticketMirror: TicketMirror | null = null;
   let reportButton: ReportButton | null = null;
@@ -1408,6 +1457,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       onConnected: (t) => {
         adminFeed = new AdminFeedPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
         adminFeed.start();
+        modCalls = new ModCallPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
+        modCalls.start();
         for (const text of bootProblems.splice(0)) publishAdminEvent({ kind: 'problem', text });
         // Built before the reconciler so its hook can reach it. Which of the
         // two starts first decides nothing: start() only queues a first pass
@@ -1457,6 +1508,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         'r:': (i) => adminFeed!.handleButton(i),
         't:': (i) => handleTicketButton({ db: deps.db, publicUrl: deps.config.publicUrl, chats: () => deps.reporterChats ?? reporterChats }, i),
         'rp:': (i) => handleReportButton({ db: deps.db, adminSteamIds: deps.config.adminSteamIds, chats: () => deps.reporterChats ?? reporterChats }, i),
+        [MOD_CALL_PREFIX]: (i) => modCalls!.handleButton(i),
       },
       extraModals: {
         't:': (i) => handleTicketModal({ db: deps.db, publicUrl: deps.config.publicUrl, chats: () => deps.reporterChats ?? reporterChats }, i),
@@ -1487,6 +1539,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     ticketSync?.stop();
     offTicketNudge();
     adminFeed?.stop();
+    modCalls?.stop();
     await bot?.stop();
     clearInterval(reaper);
     clearInterval(presenceSweep);
@@ -1518,6 +1571,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     moderation: () => deps.discordModeration ?? bot?.transport.moderation ?? null,
     chats: () => deps.reporterChats ?? reporterChats,
   });
+  await app.register(modCallRoutes, { db: deps.db });
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,
     dlc4Probe: deps.dlc4Probe, adminSync, adminSteamIds: deps.config.adminSteamIds, logAuth,
@@ -1580,6 +1634,35 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     installTargets: deps.installTargets, maxUploadBytes: deps.maxUploadBytes,
     consistencyListPath: deps.consistencyListPath,
   });
+  // Built on first use, not here: constructing the store creates its folders,
+  // and a server that nobody shares a HUD on (every test, a dev box) should
+  // not grow a data/community it never uses.
+  let communityStore: CommunityStore | null = null;
+  const getCommunityStore = () => communityStore ??= new CommunityStore({
+    dir: deps.config.communityDir,
+    freeBytes: deps.communityFreeBytes,
+    maxBytes: () => settingNumber(deps.db, 'community_store_mb', 1024, { min: 100, max: 20000, integer: true }) * 2 ** 20,
+  });
+  await app.register(communityRoutes, { db: deps.db, store: getCommunityStore, uploadTimeoutMs: deps.communityUploadTimeoutMs });
+
+  // Purge community tombstones past their 30 days, once at start and then
+  // daily. With no community folder yet nothing was ever written, so only
+  // the rows are swept (a crosshair tombstone has no files) and the folder is
+  // not created for it. Errors are logged and never stop the server, as with
+  // purgeRemovedFiles above.
+  const sweepCommunityNow = () => {
+    try {
+      const store = communityStore ?? (existsSync(deps.config.communityDir) ? getCommunityStore() : null);
+      const r = sweepCommunity(deps.db, store, new Date());
+      if (r.purged > 0 || r.files > 0) console.log(`[community] swept ${r.purged} entr(ies), ${r.files} file(s)`);
+    } catch (err) {
+      console.error('[community] the sweep failed:', err instanceof Error ? err.message : err);
+    }
+  };
+  sweepCommunityNow();
+  const communitySweepTimer = setInterval(sweepCommunityNow, 24 * 60 * 60 * 1000);
+  communitySweepTimer.unref();
+  app.addHook('onClose', async () => { clearInterval(communitySweepTimer); });
 
   // Registered whether or not dev mode is on, and deliberately NOT inside
   // devRoutes. The dev panel probes this on every page load to decide whether

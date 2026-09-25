@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { addServer, getServer, markLive, setRestartAfterMatch, type ServerRow } from '../src/serverPool.js';
 import { ServerReleaser } from '../src/serverRelease.js';
-import { kickThenQuit, rconRestarter, restartsAfterMatch, type ServerRestarter } from '../src/serverRestart.js';
+import {
+  kickThenQuit, QUIT_ATTEMPTS, QuitNotSentError, rconRestarter, restartsAfterMatch, type ServerRestarter,
+} from '../src/serverRestart.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 
 let db: DB;
@@ -45,6 +47,41 @@ describe('rconRestarter', () => {
   it('treats a dropped quit connection as normal, not a failure', async () => {
     const r = build(async () => true, async () => { throw new Error('connection reset'); });
     await expect(r.restart(getServer(db, serverId)!)).resolves.toBe(true);
+  });
+
+  it('retries a quit that never connected instead of calling it a restart', async () => {
+    // Dallas 2026-09-25 04:17: "rcon connect timeout", no quit ever reached
+    // srcds, and the box that never went down answered the first probe.
+    let attempts = 0;
+    const quit = vi.fn(async () => {
+      if (++attempts < 3) throw new QuitNotSentError(new Error('rcon connect timeout'));
+    });
+    const r = build(async () => true, quit);
+    await expect(r.restart(getServer(db, serverId)!)).resolves.toBe(true);
+    expect(quit).toHaveBeenCalledTimes(3);
+  });
+
+  it('says so when the quit could never be sent, and keeps the box in service', async () => {
+    const seen: AdminEvent[] = [];
+    const off = subscribeAdminEvents((e) => seen.push(e));
+    try {
+      const quit = vi.fn(async () => { throw new QuitNotSentError(new Error('rcon connect timeout')); });
+      const r = build(async () => true, quit);
+      // It never went down, so it still answers and goes back to the pool.
+      await expect(r.restart(getServer(db, serverId)!)).resolves.toBe(true);
+      expect(quit).toHaveBeenCalledTimes(QUIT_ATTEMPTS);
+      const problem = seen.find((e) => e.kind === 'problem');
+      expect((problem as { text: string }).text).toMatch(/Dallas .*was not restarted/);
+    } finally {
+      off();
+    }
+  });
+
+  it('does not retry a quit whose connection dropped after it was sent', async () => {
+    const quit = vi.fn(async () => { throw new Error('rcon exec timeout: quit'); });
+    const r = build(async () => true, quit);
+    await expect(r.restart(getServer(db, serverId)!)).resolves.toBe(true);
+    expect(quit).toHaveBeenCalledOnce();
   });
 
   it('keeps waiting through a probe that throws', async () => {

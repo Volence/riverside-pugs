@@ -63,6 +63,17 @@ const PLAIN: [table: string, column: string][] = [
   // pointing at the losing account would tell the survivor the pick is not
   // theirs to make.
   ['pending_reports', 'reporter_id'],
+  // In-game /mod calls, both sides and whoever handled one. No foreign key,
+  // so nothing fails if they are left behind; they move so the call history
+  // reads on the survivor.
+  ['mod_calls', 'caller_steamid'],
+  ['mod_calls', 'target_steamid'],
+  ['mod_calls', 'handled_by_steamid'],
+  // Shared HUDs and crosshairs follow their author. The per-player cap is
+  // checked only when sharing, so a merged account may end up over it; that
+  // is allowed. deleted_by moves too, for a merged member of staff.
+  ['community_entries', 'author_id'],
+  ['community_entries', 'deleted_by'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`
@@ -84,6 +95,10 @@ const KEYED: [table: string, column: string][] = [
   ['player_links', 'player_id'],
   // Summed first, below, where both accounts were seen on one address.
   ['player_networks', 'player_id'],
+  // A like per player per entry. Where both accounts liked one entry, one
+  // like is kept. A like that lands on the survivor's own entry is dropped
+  // after the KEYED pass.
+  ['community_likes', 'player_id'],
 ];
 
 /** A merge that cannot be done because of what was asked for, as opposed to
@@ -305,6 +320,12 @@ export function mergePlayers(
       db.prepare(`UPDATE OR IGNORE ${table} SET ${column} = ? WHERE ${column} = ?`).run(into, from);
       db.prepare(`DELETE FROM ${table} WHERE ${column} = ?`).run(from);
     }
+    // Entries and likes have both moved by now, so a like either account gave
+    // the other's entry is a like on the survivor's own entry, which the
+    // like route never allows.
+    db.prepare(
+      'DELETE FROM community_likes WHERE player_id = ? AND entry_id IN (SELECT id FROM community_entries WHERE author_id = ?)',
+    ).run(into, into);
 
     // 3. Ratings are not moved, they are discarded. Both accounts' numbers
     //    were computed against rosters that no longer exist, so carrying
