@@ -894,12 +894,15 @@ export function raiseChild(design: HudDesign, names: string[], to: 'front' | 'ba
  * Put an element's top-left at (x, y), rounded, keeping 8 units of it on
  * screen as a drag always has (clampSpan) and inside the validator's range.
  * An element the game places, or the Free Teammates (each card places
- * itself), is returned unchanged, `===`.
+ * itself), is returned unchanged, `===`, as is Your items on a base that
+ * places its own items or cannot be read (build.ts yourItemsBlocked): the
+ * side panel offers it no X and Y there, and an arrow or a drag after
+ * picking it in Layers must not store a place either.
  */
 export function placeElement(design: HudDesign, id: string, x: number, y: number): HudDesign {
   const el = elementById(id);
   if (!el || !el.move || (el.moveGate && !probe(el.moveGate)) || (id === 'teamColumn' && isFreeTeam(design))) return design;
-  if (id === YOUR_ITEMS) return placeYourItems(design, x, y);
+  if (id === YOUR_ITEMS) return yourItemsBlocked(design) ? design : placeYourItems(design, x, y);
   // The versus panel is kept whole on screen (validateDesign's clamp, tabVersusRange), in whole units.
   if (id === 'tabVersus') {
     const r = tabVersusRange(design.aspect, baseOf(design));

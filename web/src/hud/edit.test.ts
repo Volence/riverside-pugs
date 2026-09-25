@@ -1305,6 +1305,8 @@ describe('Your items', () => {
       registerImport(ID, sampleHud({ 'resource/ui/hud/localplayerpanel.res': own }));
       const d = validateDesign({ v: 1, preset: 'imported', imported: { id: ID, name: 'x' } });
       expect(setYourItems(d, true)).toBe(d);
+      expect(placeElement(d, YOUR_ITEMS, 800, 240)).toBe(d);
+      expect(nudge(d, YOUR_ITEMS, 1, 0)).toBe(d);
     });
   });
 

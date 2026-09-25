@@ -14,7 +14,7 @@ import {
 import { weaponKey } from '../../hud/weapons';
 import { fontFace, shownKey, panelFile, DEFAULT_PREVIEW, HEALTH_BANDS, previewHealthBand, type HealthBand, type PreviewState } from '../../hud/render';
 import { elementById, type HudElement } from '../../hud/elements';
-import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam, buildTrees, pcGet, pieceMovableIn, WEAPON_ICON_LABELS, ITEM_ICON_LABELS } from '../../hud/build';
+import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam, buildTrees, pcGet, pieceMovableIn, WEAPON_ICON_LABELS, ITEM_ICON_LABELS, yourItemsBlocked } from '../../hud/build';
 import { kvFind } from '../../hud/kv';
 import { baseOf } from '../../hud/base';
 import { childDef, panelChildren, maxInset, type KeyDef } from '../../hud/children';
@@ -22,9 +22,10 @@ import { probe } from '../../hud/probes';
 import {
   cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild, resetChildKey, rowGapSlider, setRowGap,
   startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, patchWeapons, ammoOnly, setFit, hiddenWith,
-  resetElementKey, setScale, withWeaponUpload, resetWeaponUpload, withVoiceUpload, resetVoiceUpload,
+  resetElementKey, setScale, withWeaponUpload, resetWeaponUpload, withVoiceUpload, resetVoiceUpload, setYourItems, setItemsLook,
   type Align,
 } from '../../hud/edit';
+import { YOUR_ITEMS, ITEM_FONTS, ITEM_FONT_LABELS, DEFAULT_ITEM_FONT, type ItemFont, type ItemAlign } from '../../hud/youritems';
 import { unionBox } from '../../hud/guides';
 import { CrosshairControls } from './CrosshairControls';
 import { decodeUpload } from './decode';
@@ -396,6 +397,8 @@ export function ElementControls(
     { ...d, elements: { ...d.elements, [id]: { ...(d.elements[id] ?? {}), ...p } } }
   ), mode);
   const reset = () => edit((d) => resetElement(d, id));
+  // Your items on a base that blocks it: only the reason is shown (build.ts yourItemsBlocked).
+  const itemsBlocked = id === YOUR_ITEMS ? yourItemsBlocked(design) : null;
   // A team's on-screen clamp can draw it away from its stored X and Y (a
   // team moved past the right edge, or scaled up there), so its boxes show
   // where it is drawn, and a typed value is placed as a drag would place it:
@@ -411,11 +414,12 @@ export function ElementControls(
   // number is the unfitted container's, which placeElement would take as a
   // drawn one and move by the fit offset.
   const fitted = o.fit === true && panelChildren(id)?.frame === 'hudlayout';
-  // The versus panel goes through placeElement too, which keeps it whole on screen.
-  const team = !!el.team || fitted || id === 'tabVersus';
-  // A move or a hide waiting on a probe (the Tab screen's versus panel: TS4, TS7) is not offered.
-  const moves = el.move && (!el.moveGate || probe(el.moveGate));
-  const hides = el.props.includes('visible') && (!el.hideGate || probe(el.hideGate));
+  // The versus panel goes through placeElement too, which keeps it whole on screen; so does Your items,
+  // held at your health bar's edge (edit.ts placeElement), so its boxes show where the row is drawn.
+  const team = !!el.team || fitted || id === 'tabVersus' || id === YOUR_ITEMS;
+  // A move or a hide waiting on a probe (the Tab screen's versus panel: TS4, TS7) is not offered, nor either on a blocked Your items.
+  const moves = el.move && (!el.moveGate || probe(el.moveGate)) && !itemsBlocked;
+  const hides = el.props.includes('visible') && (!el.hideGate || probe(el.hideGate)) && !itemsBlocked;
   const setPos = (key: 'x' | 'y', e: Event) => {
     if (!team) { patchNum(patch, e, key, (n) => ({ [key]: n })); return; }
     const n = parseFloat((e.target as HTMLInputElement).value);
@@ -433,13 +437,18 @@ export function ElementControls(
         <label class="hud__check">
           <input
             type="checkbox" checked={o.visible ?? rect.visible}
-            onChange={(e) => patch({ visible: (e.target as HTMLInputElement).checked })}
+            onChange={(e) => {
+              const v = (e.target as HTMLInputElement).checked;
+              // Your items turns the item slots off with it, in the same edit (edit.ts setYourItems).
+              if (id === YOUR_ITEMS) edit((d) => setYourItems(d, v)); else patch({ visible: v });
+            }}
           />
           <span>Visible</span>
         </label>
       )}
 
-      {el.note && <Note text={el.note} />}
+      {el.note && !itemsBlocked && <Note text={el.note} />}
+      {itemsBlocked && <Note text={itemsBlocked} />}
       {el.tab && <p class="muted hud__note">{TAB_NOTE}</p>}
 
       {/* The crosshair is the one element the game places itself; its note is the first line of its own controls. */}
@@ -532,6 +541,7 @@ export function ElementControls(
       {id === 'spawnCountdown' && <CountdownControls design={design} edit={edit} end={end} patch={patch} />}
       {id === 'vote' && <VoteControls design={design} edit={edit} end={end} patch={patch} />}
       {id === 'ownMic' && <VoiceIconControls design={design} edit={edit} />}
+      {id === YOUR_ITEMS && !itemsBlocked && <YourItemsControls design={design} edit={edit} end={end} patch={patch} />}
 
       {/* The crosshair has no element settings of its own to reset: its choice and art are undone like any edit. */}
       {id !== 'xhair' && <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this element</button>}
@@ -740,6 +750,52 @@ function VoteControls({ design, edit, end, patch }: { design: HudDesign; edit: E
       {o.bg !== undefined && (
         <button type="button" class="btn btn--ghost btn--sm" aria-label="Box colour: use the file colour" onClick={clear}>
           Use the file colour
+        </button>
+      )}
+    </>
+  );
+}
+
+/**
+ * Your items' look (spec section 1): the game's three item icon fonts, which
+ * end stays put as items come and go, and the colour (fgcolor_override;
+ * unset is the game's white). A font or alignment change keeps that end
+ * where it is drawn (edit.ts setItemsLook).
+ */
+function YourItemsControls({ design, edit, end, patch }: { design: HudDesign; edit: Edit; end: () => void; patch: Patch }) {
+  const o = design.elements[YOUR_ITEMS] ?? {};
+  const clearColour = () => edit((d) => {
+    const { color: _gone, ...rest } = d.elements[YOUR_ITEMS] ?? {};
+    return { ...d, elements: { ...d.elements, [YOUR_ITEMS]: rest } };
+  });
+  return (
+    <>
+      <label class="hud__row">
+        <span>Icon size</span>
+        <select
+          aria-label="Icon size" value={o.itemFont ?? DEFAULT_ITEM_FONT}
+          onChange={(e) => edit((d) => setItemsLook(d, { itemFont: (e.target as HTMLSelectElement).value as ItemFont }))}
+        >
+          {ITEM_FONTS.map((f) => <option key={f} value={f}>{ITEM_FONT_LABELS[f]}</option>)}
+        </select>
+        <span />
+      </label>
+      <label class="hud__row">
+        <span>Alignment</span>
+        <select
+          aria-label="Alignment" value={o.itemAlign ?? 'right'}
+          onChange={(e) => edit((d) => setItemsLook(d, { itemAlign: (e.target as HTMLSelectElement).value as ItemAlign }))}
+        >
+          <option value="right">Right</option>
+          <option value="center">Centre</option>
+        </select>
+        <span />
+      </label>
+      <p class="muted hud__note">The end that stays put as items come and go.</p>
+      <ColourRow label="Icons" value={o.color ?? '255 255 255 255'} end={end} onPick={(c) => patch({ color: c }, 'gesture')} />
+      {o.color !== undefined && (
+        <button type="button" class="btn btn--ghost btn--sm" aria-label="Icons colour: use the game colour" onClick={clearColour}>
+          Use the game colour
         </button>
       )}
     </>
