@@ -68,6 +68,27 @@ describe('balanceFold', () => {
     expect(db.prepare('SELECT published_at FROM balance_patches WHERE id = 3').get()).toEqual({ published_at: null });
   });
 
+  it('unfolding a published patch restores its publication and its balance state', () => {
+    foldInto(db, 3, 1);
+    unfoldPatch(db, 3);
+    expect(db.prepare('SELECT triage, folded_into, published_at FROM balance_patches WHERE id = 3').get())
+      .toEqual({ triage: 'balance', folded_into: null, published_at: '2026-09-22 00:00:00' });
+    // An unpublished patch goes back to pending as before.
+    foldInto(db, 2, 1);
+    unfoldPatch(db, 2);
+    expect(db.prepare('SELECT triage, published_at FROM balance_patches WHERE id = 2').get()).toEqual({ triage: 'pending', published_at: null });
+  });
+
+  it('a mid-chain unfold leaves the patches folded into it pointed at the chain end', () => {
+    foldInto(db, 2, 3);
+    foldInto(db, 3, 1);
+    unfoldPatch(db, 3);
+    expect(db.prepare('SELECT folded_into FROM balance_patches WHERE id = 2').get()).toEqual({ folded_into: 1 });
+    expect(resolvePatch(db, 2)).toBe(1);
+    expect(roundPatch(2)).toEqual({ patch_id: 1, sighted_patch_id: 2 });
+    expect(roundPatch(1, 1)).toEqual({ patch_id: 3, sighted_patch_id: 3 });
+  });
+
   it('retagging bumps the generation and the compare data stamp', () => {
     const g = triageGeneration(), s = dataStamp(db);
     retagRounds(db);

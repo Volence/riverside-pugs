@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { DB } from './db.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { currentOrdinal } from './liveView.js';
-import { foldInto, resolvePatch } from './balanceFold.js';
+import { chainOf, foldInto, resolvePatch } from './balanceFold.js';
 import { triageInfo, type Lists } from './balanceTriage.js';
 
 type Inventory = Record<string, string>;
@@ -52,6 +52,19 @@ export function diffInventories(a: Inventory, b: Inventory) {
   return { added, removed, changed };
 }
 
+/** The keys of a to b that are present on one side only and are watched
+ *  values (cvar, missing-cvar marker, weapon key, file or directory): the
+ *  watch list changed, not the game. A cvar that vanished (c:x on one side,
+ *  x:x on the other) or appeared is left out: same name on both sides, so a
+ *  real change in the game. */
+export function watchedOneSided(a: Inventory, b: Inventory): Set<string> {
+  const d = diffInventories(a, b);
+  const oneSided = [...d.added, ...d.removed].filter((k) => /^[cxwfd]:/.test(k));
+  const cvarNames = (keys: string[]) => new Set(keys.filter((k) => /^[cx]:/.test(k)).map((k) => k.slice(2)));
+  const added = cvarNames(d.added), removed = cvarNames(d.removed);
+  return new Set(oneSided.filter((k) => !/^[cx]:/.test(k) || !(added.has(k.slice(2)) && removed.has(k.slice(2)))));
+}
+
 /** Whether a to b only adds or removes watched keys (the watch list changed,
  *  not the game): no key both sides have changed value, apart from a
  *  versionless plugin's build, and every added or removed key is a cvar,
@@ -86,6 +99,9 @@ const serverName = (db: DB, id: number): string =>
 export function recordBalanceSighting(db: DB, s: {
   matchId: number; serverId: number | null; half: 1 | 2; inventory: Inventory; versionless: string[];
   ignored?: string[]; now?: string;
+  /** Which watch list the plugin read (BALANCE_END watch=), kept on the
+   *  server's state row; null from a plugin before 0.3.14. */
+  watch?: 'file' | 'builtin' | null;
   /** The patch a control panel rollout expects on this server: its first
    *  sighting is the change the panel made, so it updates the state without
    *  an alert. */
@@ -141,6 +157,10 @@ export function recordBalanceSighting(db: DB, s: {
 
     let serverChanged = false;
     if (s.serverId !== null) {
+      // After the state upserts below, so a first sighting's row exists.
+      const keepWatch = () => {
+        if (s.watch !== undefined) db.prepare('UPDATE balance_server_state SET watch = ? WHERE server_id = ?').run(s.watch, s.serverId);
+      };
       db.prepare(`INSERT INTO balance_patch_servers (patch_id, server_id, first_seen_at, last_seen_at)
                   VALUES (?, ?, ?, ?)
                   ON CONFLICT (patch_id, server_id) DO UPDATE SET last_seen_at = excluded.last_seen_at`)
@@ -176,6 +196,7 @@ export function recordBalanceSighting(db: DB, s: {
           });
         }
       }
+      keepWatch();
     }
     return { patchId, effectivePatchId, newPatch, serverChanged, previousPatchId: prev?.patch_id ?? null };
   })();
@@ -249,8 +270,24 @@ export function refingerprintPatches(db: DB, versionless: string[], ignored: str
           ?? ids.find((id) => published.has(id))
           ?? ids.find((id) => triageOf.get(id) === 'balance')
           ?? ids[0];
-      for (const id of ids) want.set(id, id === keep ? fp : null);
-      const others = ids.filter((id) => id !== keep);
+      // A fold that would loop (the keeper is folded through this patch on
+      // its way to another) is not made: that patch keeps its fingerprint
+      // rather than being left NULL and unfolded. Logged, since the patches
+      // then still differ by fingerprint only.
+      const keepChain = chainOf(db, keep);
+      const blocked = ids.filter((id) => id !== keep && keepChain.includes(id) && keepChain[keepChain.length - 1] !== id);
+      for (const id of blocked) {
+        console.warn(`[balance] refingerprint: patch ${id} hashes like patch ${keep}, but ${keep} is folded through it; left as it is`);
+      }
+      // A blocked patch holding this very fingerprint keeps it, so the keeper
+      // cannot take it and stays as it was too.
+      const keeperTakes = !blocked.some((id) => current.get(id) === fp);
+      for (const id of ids) {
+        if (blocked.includes(id)) want.set(id, current.get(id)!);
+        else if (id === keep) want.set(id, keeperTakes ? fp : current.get(id)!);
+        else want.set(id, null);
+      }
+      const others = ids.filter((id) => id !== keep && !blocked.includes(id));
       if (others.length > 0) merged.push({ keep, into: others });
     }
     const changed = [...want].filter(([id, fp]) => current.get(id) !== fp);
@@ -263,14 +300,18 @@ export function refingerprintPatches(db: DB, versionless: string[], ignored: str
     for (const m of merged) {
       for (const id of m.into) {
         if (resolvePatch(db, m.keep) === id) continue; // the keeper is already folded into it: one patch already
-        foldInto(db, id, m.keep);
+        const f = foldInto(db, id, m.keep);
+        if (!f.ok) console.warn(`[balance] refingerprint: could not fold patch ${id} into ${m.keep}: ${f.error}`);
       }
     }
     // Merged patches from before triage existed (the openDb backfill leaves
     // them NULL): fold each into whoever holds its fingerprint now, else call
-    // it balance, as it was treated before.
+    // it balance, as it was treated before. A merged patch an older backfill
+    // made pending is folded the same way (it can never be sighted again);
+    // left pending when no patch holds its fingerprint.
     const leftovers = db.prepare(`SELECT id, inputs_json FROM balance_patches
-      WHERE source = 'detected' AND fingerprint IS NULL AND triage IS NULL AND inputs_json IS NOT NULL`)
+      WHERE source = 'detected' AND fingerprint IS NULL AND inputs_json IS NOT NULL
+        AND (triage IS NULL OR (triage = 'pending' AND folded_into IS NULL))`)
       .all() as { id: number; inputs_json: string }[];
     for (const l of leftovers) {
       let holder: { id: number } | undefined;
@@ -376,21 +417,40 @@ export function patchDetail(db: DB, id: number, lists?: Lists): (PatchSummary & 
   return { ...all[i], inputs, diffVsPrevious: inputs && prevInputs ? diffInventories(prevInputs, inputs) : null };
 }
 
+/** How box `b` differs from box `a`, leaving out watched values only one of
+ *  them reports (watchedOneSided). Always, not only when the two boxes'
+ *  watch lists differ: a watched value present on one box only can only mean
+ *  the two read different lists (compiled versus the site's file, or a file
+ *  not yet written everywhere), never a difference in the game, because the
+ *  plugin reports every watched entry whatever the box has (x:...=missing
+ *  for an absent cvar, f:...=missing for an absent file, w:...=default for an
+ *  unset weapon key). What the game does differently still shows: a changed
+ *  value on a key both report, a plugin on one box only, a cvar that exists
+ *  on one box and not the other. The stored watch column says which list
+ *  each box read, for the admin reading the drift. */
+export function driftBetween(a: Inventory, b: Inventory): ReturnType<typeof diffInventories> {
+  const skip = watchedOneSided(a, b);
+  const d = diffInventories(a, b);
+  return { added: d.added.filter((k) => !skip.has(k)), removed: d.removed.filter((k) => !skip.has(k)), changed: d.changed };
+}
+
 /** Every server's current patch and how its live inventory differs from each
  *  other server's, for spotting a box that fell behind or ahead. */
 export function serverDrift(db: DB, ignored: string[] = []): {
   serverId: number; name: string; patchId: number; since: string;
+  /** Which watch list the box read at its last sighting; null before pug-match 0.3.14. */
+  watch: string | null;
   differsFrom: { name: string; diff: string }[];
 }[] {
-  const rows = db.prepare(`SELECT st.server_id, s.name, st.patch_id, st.since, st.inventory_json
+  const rows = db.prepare(`SELECT st.server_id, s.name, st.patch_id, st.since, st.inventory_json, st.watch
     FROM balance_server_state st JOIN servers s ON s.id = st.server_id ORDER BY s.id`).all() as {
-      server_id: number; name: string; patch_id: number; since: string; inventory_json: string }[];
+      server_id: number; name: string; patch_id: number; since: string; inventory_json: string; watch: string | null }[];
   // A stored inventory may predate a plugin joining the ignored list.
   const inv = (json: string) => withoutIgnored(JSON.parse(json) as Inventory, ignored);
   return rows.map((r) => ({
-    serverId: r.server_id, name: r.name, patchId: r.patch_id, since: r.since,
+    serverId: r.server_id, name: r.name, patchId: r.patch_id, since: r.since, watch: r.watch,
     differsFrom: rows.filter((o) => o.server_id !== r.server_id)
-      .map((o) => ({ name: o.name, d: diffInventories(inv(o.inventory_json), inv(r.inventory_json)) }))
+      .map((o) => ({ name: o.name, d: driftBetween(inv(o.inventory_json), inv(r.inventory_json)) }))
       .filter((o) => o.d.added.length + o.d.removed.length + o.d.changed.length > 0)
       .map((o) => ({ name: o.name, diff: formatDiff(o.d) })),
   }));
@@ -423,7 +483,7 @@ function alertText(db: DB, serverId: number, patchNumber: number, newPatch: bool
     FROM balance_server_state st WHERE st.server_id != ?`)
     .all(serverId) as { server_id: number; inventory_json: string; last_seen: string | null }[];
   const drift = others
-    .map((o) => ({ who: serverName(db, o.server_id), seen: o.last_seen, d: diffInventories(JSON.parse(o.inventory_json) as Inventory, inv) }))
+    .map((o) => ({ who: serverName(db, o.server_id), seen: o.last_seen, d: driftBetween(JSON.parse(o.inventory_json) as Inventory, inv) }))
     .filter((o) => o.d.added.length + o.d.removed.length + o.d.changed.length > 0)
     .map((o) => ` Now differs from ${o.who}${o.seen ? ` (last seen ${o.seen.slice(0, 16)} UTC)` : ''}: ${formatDiff(o.d, 5)}.`);
   return head + vsOwn + drift.join('');

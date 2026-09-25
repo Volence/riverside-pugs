@@ -1,5 +1,5 @@
 import type { DB } from './db.js';
-import { diffInventories, onPluginList, pluginFile, refingerprintPatches, withoutIgnored } from './balancePatches.js';
+import { diffInventories, onPluginList, pluginFile, refingerprintPatches, watchedOneSided, withoutIgnored } from './balancePatches.js';
 import { chainOf, foldInto, resolvePatch, unfoldPatch } from './balanceFold.js';
 import { addIgnored, effectiveIgnored, PLUGIN_FILE_RE } from './balanceIgnore.js';
 import { activeRollout } from './balanceRollouts.js';
@@ -12,17 +12,26 @@ import { patchNumber } from './balanceControl.js';
  */
 
 type Inventory = Record<string, string>;
-export type Lists = { versionless: string[]; ignored: string[] };
+export type Lists = {
+  versionless: string[]; ignored: string[];
+  /** Words for weapon keys, `w:<weapon>.<key>` -> label (see weaponLabels). */
+  labels?: Record<string, string>;
+};
 export type TriageResult = { ok: true; target?: number } | { ok: false; status: 400 | 404 | 409; error: string };
 
 const nowSql = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 const base = (path: string) => path.split('/').pop() ?? path;
 
 /** a to b in plain words, one line per difference. A versionless plugin whose
- *  build alone changed is not a difference (the fingerprint ignores it too). */
-export function describeChanges(a: Inventory, b: Inventory, versionless: string[]): { lines: string[]; plugins: string[]; onlyPlugins: boolean } {
+ *  build alone changed is not a difference (the fingerprint ignores it too).
+ *  Neither is a watched value present on one side only: the watch list grew
+ *  or shrank, not the game (the rule watchListOnly uses), so those are one
+ *  summary line each way and never stop a plugin-only change from reading as
+ *  one. `labels` words weapon keys (`w:...`) by their catalogue label. */
+export function describeChanges(a: Inventory, b: Inventory, versionless: string[], labels: Record<string, string> = {}): { lines: string[]; plugins: string[]; onlyPlugins: boolean } {
   const skip = onPluginList(versionless);
   const d = diffInventories(a, b);
+  const watched = watchedOneSided(a, b);
   const lines: string[] = [];
   const plugins: string[] = [];
   let other = 0;
@@ -35,14 +44,26 @@ export function describeChanges(a: Inventory, b: Inventory, versionless: string[
       return;
     }
     other++;
-    if (kind === 'c:') lines.push(what === 'changed' ? `${name} ${from} -> ${to}` : `${name} ${what === 'added' ? `now reported (${to})` : 'no longer reported'}`);
+    if (kind === 'c:') {
+      // A vanished or appeared cvar is worded once, on its c: key; the x: key
+      // on the other side is skipped below.
+      const gone = what === 'removed' && `x:${name}` in b, came = what === 'added' && `x:${name}` in a;
+      if (gone) lines.push(`${name} no longer exists (was ${a[key]})`);
+      else if (came) lines.push(`${name} now exists (${to})`);
+      else lines.push(what === 'changed' ? `${name} ${from} -> ${to}` : `${name} ${what === 'added' ? `now reported (${to})` : 'no longer reported'}`);
+    } else if (kind === 'x:' && what !== 'changed' && (`c:${name}` in a || `c:${name}` in b)) other--;
+    else if (kind === 'w:') lines.push(what === 'changed' ? `${labels[key] ?? name} ${from} -> ${to}` : `${labels[key] ?? name} ${what}`);
     else if (kind === 'f:') lines.push(`file ${what}: ${base(name)}`);
     else if (kind === 'd:') lines.push(`files changed in: ${base(name)}`);
     else lines.push(what === 'changed' ? `${key}: ${from} -> ${to}` : `${key} ${what}`);
   };
-  for (const k of d.added) word(k, 'added', undefined, b[k]);
-  for (const k of d.removed) word(k, 'removed');
+  for (const k of d.added) if (!watched.has(k)) word(k, 'added', undefined, b[k]);
+  for (const k of d.removed) if (!watched.has(k)) word(k, 'removed');
   for (const c of d.changed) if (!skip(c.key)) word(c.key, 'changed', c.from, c.to);
+  const values = (n: number) => `${n} value${n === 1 ? '' : 's'}`;
+  const grew = d.added.filter((k) => watched.has(k)).length, shrank = d.removed.filter((k) => watched.has(k)).length;
+  if (grew > 0) lines.push(`${values(grew)} newly watched`);
+  if (shrank > 0) lines.push(`${values(shrank)} no longer watched`);
   // Plugins first, then everything else, each in key order.
   const order = (l: string) => (l.startsWith('plugin ') ? 0 : 1);
   lines.sort((x, y) => order(x) - order(y));
@@ -84,7 +105,7 @@ export function triageInfo(db: DB, id: number, lists: Lists) {
   const b = baseId === null ? undefined : row(db, baseId);
   const mine = inputsOf(db, id, lists.ignored);
   const theirs = baseId === null ? null : inputsOf(db, baseId, lists.ignored);
-  const d = mine && theirs ? describeChanges(theirs, mine, lists.versionless) : { lines: [], plugins: [], onlyPlugins: false };
+  const d = mine && theirs ? describeChanges(theirs, mine, lists.versionless, lists.labels) : { lines: [], plugins: [], onlyPlugins: false };
   return {
     base: b ? { id: b.id, number: patchNumber(db, b.id), name: b.name } : null,
     changes: d.lines, plugins: d.plugins, onlyPluginsChanged: d.onlyPlugins,
@@ -150,8 +171,15 @@ export function triageIgnore(db: DB, id: number, p: {
     // Other patches that differ only by these plugins merge too: admins hear
     // about it the same way as a boot merge.
     refingerprintPatches(db, p.versionless, effectiveIgnored(db, p.knobsIgnored));
-    if (resolvePatch(db, id) !== resolvePatch(db, c.into)) {
-      const f = foldInto(db, id, c.into);
+    // The refingerprint may have merged this patch into another one that now
+    // holds the shared fingerprint (or that one into this). New sightings land
+    // on that holder, so it is the chain end that joins the target: folding
+    // this patch alone would leave the holder pending and every later
+    // sighting counting for it. A holder that is a balance patch already
+    // counts as balance and is left alone.
+    const end = resolvePatch(db, id);
+    if (end !== resolvePatch(db, c.into) && (row(db, end)?.triage ?? 'balance') === 'pending') {
+      const f = foldInto(db, end, c.into);
       if (!f.ok) return { ok: false, status: 400, error: f.error };
     }
     return { ok: true, target: resolvePatch(db, id) };
@@ -162,6 +190,15 @@ export function triageUnfold(db: DB, id: number): TriageResult {
   const r = row(db, id);
   if (!r) return { ok: false, status: 404, error: 'no such patch' };
   if (r.triage !== 'folded') return { ok: false, status: 409, error: 'this patch is not folded' };
+  // Merged by the refingerprint (or an ignore): it hashes the same as the
+  // patch it is folded into, and no sighting can reach it again, so unfolded
+  // it would be a pending patch nothing could ever resolve.
+  const fp = db.prepare('SELECT fingerprint FROM balance_patches WHERE id = ?').get(id) as { fingerprint: string | null };
+  if (r.source === 'detected' && fp.fingerprint === null) {
+    return { ok: false, status: 409, error: 'this patch was merged: it has the same config as the patch it is folded into once ignored and versionless plugins are left out, so it cannot be unfolded' };
+  }
+  const ro = activeRollout(db);
+  if (ro && ro.patch_id === id) return { ok: false, status: 409, error: 'this patch is the knob panel\'s active rollout; it cannot be unfolded' };
   unfoldPatch(db, id);
   return { ok: true };
 }

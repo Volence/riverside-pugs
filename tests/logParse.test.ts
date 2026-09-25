@@ -531,7 +531,7 @@ describe('balance and per-round lines', () => {
       `PUG ${TOKEN} BALANCE half=1 part=0 c:z_tank_health=4000 c:sv_tags=a%20b%25 p:l4d_skypounce.smx=1234.0a0b0c0d x:l4d_nope=missing junk=1`,
     ));
     expect(ev).toEqual({
-      kind: 'balance_part', token: TOKEN, half: 1, part: 0,
+      kind: 'balance_part', token: TOKEN, half: 1, part: 0, sent: 4,
       items: {
         'c:z_tank_health': '4000', 'c:sv_tags': 'a b%',
         'p:l4d_skypounce.smx': '1234.0a0b0c0d', 'x:l4d_nope': 'missing',
@@ -539,10 +539,29 @@ describe('balance and per-round lines', () => {
     });
   });
 
+  it('counts a BALANCE item sent twice on one line', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} BALANCE half=1 part=0 f:a.cfg=1.a c:x=1 f:a.cfg=1.a`));
+    expect(ev).toMatchObject({ kind: 'balance_part', sent: 3, items: { 'f:a.cfg': '1.a', 'c:x': '1' } });
+  });
+
   it('parses BALANCE_END', () => {
     expect(parseLogDatagram(framed(`PUG ${TOKEN} BALANCE_END half=2 parts=3 items=71`))).toEqual({
       kind: 'balance_end', token: TOKEN, half: 2, parts: 3, items: 71,
     });
+  });
+
+  it('parses BALANCE_END watch=, and leaves it out when absent or unknown', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} BALANCE_END half=1 parts=1 items=3 watch=file`))).toEqual({
+      kind: 'balance_end', token: TOKEN, half: 1, parts: 1, items: 3, watch: 'file',
+    });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} BALANCE_END half=1 parts=1 items=3 watch=builtin`))).toMatchObject({ watch: 'builtin' });
+    const odd = parseLogDatagram(framed(`PUG ${TOKEN} BALANCE_END half=1 parts=1 items=3 watch=bogus`));
+    expect(odd).toMatchObject({ kind: 'balance_end', items: 3 });
+    expect(odd && 'watch' in odd ? odd.watch : undefined).toBeUndefined();
+  });
+
+  it('a BALANCE_END not opening the line (after the engine stamp) is refused', () => {
+    expect(parseLogDatagram(framed(`"x<1><STEAM_1:0:1><>" say "PUG ${TOKEN} BALANCE_END half=1 parts=1 items=3 watch=file"`))).toBeNull();
   });
 
   it('rejects BALANCE with a bad half', () => {

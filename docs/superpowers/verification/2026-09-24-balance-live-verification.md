@@ -242,7 +242,10 @@ patch can still be picked by hand.
 
 ## For the owner (nothing run on production)
 
-1. **Data repair, patch 7 into 6.** Run
+1. **Data repair, patch 7 into 6.** OBSOLETE, do not run (2026-09-25): the
+   SQL's DELETE now fails on the sighted_patch_id foreign key, and the boot
+   refingerprint folds 7 into 6 by itself. The script now folds instead of
+   deleting. Original note: Run
    `docs/superpowers/verification/2026-09-24-fold-patch-7-into-6.sql` while no
    match is live, after a backup:
    `sqlite3 /home/pug/app/data/pug.db ".read 2026-09-24-fold-patch-7-into-6.sql"`.
