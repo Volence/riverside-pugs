@@ -202,9 +202,101 @@ describe('ftpTransport put', () => {
     ]);
   });
 
-  it('rejects with the retry\'s error when the second rename fails too', async () => {
+  it('when the second rename fails too, says loudly that the target is gone and the new copy is still .part', async () => {
     const f = fakeFtp([refused('553 first'), refused('553 second')]);
-    await expect(f.t.put('/tmp/x', 'pug_balance.cfg')).rejects.toThrow('553 second');
+    await expect(f.t.put('/tmp/x', 'pug_balance.cfg')).rejects.toThrow(/553 second.*pug_balance\.cfg was removed.*pug_balance\.cfg\.part/);
     expect(f.calls.filter((c) => c.startsWith('rename')).length).toBe(2);
+  });
+
+  it('a 550 refusal also takes the remove-and-retry path', async () => {
+    const f = fakeFtp([Object.assign(new Error('550 exists'), { code: 550 }), null]);
+    await f.t.put('/tmp/x', 'pug_balance_watch.txt');
+    expect(f.calls).toContain('remove pug_balance_watch.txt');
+  });
+
+  it('any other rename error is thrown as is and never removes the target', async () => {
+    const f = fakeFtp([Object.assign(new Error('421 timeout'), { code: 421 })]);
+    await expect(f.t.put('/tmp/x', 'pug_balance.cfg')).rejects.toThrow('421 timeout');
+    expect(f.calls.some((c) => c.startsWith('remove'))).toBe(false);
+    const g = fakeFtp([new Error('socket closed')]);
+    await expect(g.t.put('/tmp/x', 'pug_balance.cfg')).rejects.toThrow('socket closed');
+    expect(g.calls.some((c) => c.startsWith('remove'))).toBe(false);
+  });
+
+  it('never removes a campaign VPK to make room for a rename', async () => {
+    const f = fakeFtp([refused('553 file exists')]);
+    await expect(f.t.put('/tmp/x', 'dbd.vpk')).rejects.toThrow('553 file exists');
+    expect(f.calls.some((c) => c.startsWith('remove'))).toBe(false);
+  });
+});
+
+describe('aborting a transport call', () => {
+  /** An FTP client whose upload hangs until close() is called, as basic-ftp
+   *  rejects a pending task when its socket is closed. */
+  function hangingFtp() {
+    const calls: string[] = [];
+    let fail: ((e: Error) => void) | null = null;
+    const client = () => ({
+      access: async () => { calls.push('access'); return {}; },
+      close: () => { calls.push('close'); fail?.(new Error('User closed client')); },
+      ensureDir: async () => {}, cd: async () => ({}), size: async () => 0, remove: async () => {},
+      rename: async () => { calls.push('rename'); return {}; },
+      downloadTo: () => new Promise((_r, rej) => { fail = rej; }),
+      uploadFrom: () => new Promise((_r, rej) => { fail = rej; }),
+    });
+    return { calls, t: ftpTransport({ host: 'h', port: 21, user: 'u', password: 'p', dir: '/cfg', client: client as never }) };
+  }
+
+  it('ftp: an abort closes the client, so the upload stops and never renames', async () => {
+    const f = hangingFtp();
+    const ac = new AbortController();
+    const p = f.t.put('/tmp/x', 'pug_balance.cfg', { signal: ac.signal });
+    await new Promise((r) => setTimeout(r, 5));
+    ac.abort();
+    await expect(p).rejects.toThrow();
+    expect(f.calls).toContain('close');
+    expect(f.calls).not.toContain('rename');
+  });
+
+  it('ftp: an abort also stops a read', async () => {
+    const f = hangingFtp();
+    const ac = new AbortController();
+    const p = f.t.readText('pug_balance.cfg', { signal: ac.signal });
+    await new Promise((r) => setTimeout(r, 5));
+    ac.abort();
+    await expect(p).rejects.toThrow();
+  });
+
+  it('ftp: an already aborted call never connects', async () => {
+    const f = hangingFtp();
+    const ac = new AbortController();
+    ac.abort();
+    await expect(f.t.put('/tmp/x', 'pug_balance.cfg', { signal: ac.signal })).rejects.toThrow(/abort/i);
+    expect(f.calls).not.toContain('access');
+  });
+
+  it('sftp: hands the signal to every child process, and bounds the connection itself', async () => {
+    const seen: { cmd: string; args: string[]; signal?: AbortSignal }[] = [];
+    const t = sftpTransport({
+      host: 'h', port: 22, user: 'l4d', keyPath: '/k', dir: '/cfg',
+      run: async (cmd, args, opts) => { seen.push({ cmd, args, signal: opts?.signal }); return { stdout: '' }; },
+    });
+    const ac = new AbortController();
+    await t.put(src, 'pug_balance.cfg', { signal: ac.signal });
+    await t.readText('pug_balance.cfg', { signal: ac.signal });
+    expect(seen.map((c) => c.cmd)).toEqual(['scp', 'ssh', 'ssh']);
+    for (const c of seen) {
+      expect(c.signal).toBe(ac.signal);
+      expect(c.args.join(' ')).toMatch(/ConnectTimeout=\d+/);
+      expect(c.args.join(' ')).toMatch(/ServerAliveInterval=\d+/);
+    }
+  });
+
+  it('sftp: the default runner kills the child on abort', async () => {
+    const t = sftpTransport({ host: '203.0.113.1', port: 22, user: 'l4d', keyPath: '/nonexistent', dir: '/cfg' });
+    const ac = new AbortController();
+    const p = t.readText('pug_balance.cfg', { signal: ac.signal });
+    ac.abort();
+    await expect(p).rejects.toThrow(/abort/i);
   });
 });

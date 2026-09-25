@@ -139,7 +139,8 @@ describe('balance lines end to end', () => {
     const db = openDb(':memory:');
     const sid = addServer(db, { name: 'dallas', host: '127.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
     db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
-    db.prepare("INSERT INTO matches (id, season_id, state, campaign, server_id, token) VALUES (1, 1, 'live', 'x', ?, ?)").run(sid, T);
+    // A queue match: only those confirm a rollout (see confirmOnSighting).
+    db.prepare("INSERT INTO matches (id, season_id, state, campaign, server_id, token, origin) VALUES (1, 1, 'live', 'x', ?, ?, 'queue')").run(sid, T);
     db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (1, 'm', datetime('now'))").run();
     const knobs = loadBalanceKnobs();
     const inv = { 'c:z_tank_health': '7500' };

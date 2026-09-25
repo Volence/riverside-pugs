@@ -20,14 +20,15 @@ const state: KnobsState = {
   current: { z_tank_health: '7500', versus_boss_flow_min: '0.10' },
   base: { patchId: 6, number: 6 }, missing: [], blocking: [],
   active: { id: 1, patchId: 8, patchNumber: 8, patchName: 'Tank 7500', values: {}, createdBy: 'a', createdByName: 'Admin', createdAt: '2026-09-24 10:00:00', supersededAt: null,
-    servers: [{ serverId: 1, name: 'dallas', state: 'written', lastError: null, writtenAt: 'x', confirmedAt: null, seen: null, mismatch: null }] },
+    servers: [{ serverId: 1, name: 'dallas', state: 'written', lastError: null, writtenAt: 'x', confirmedAt: null, seen: null, mismatch: null, noTransport: false }] },
   restorable: [{ id: 6, number: 6, name: null, source: 'detected' }],
 };
 const preview = (over: Partial<KnobPreview> = {}): KnobPreview => ({
   values: { z_tank_health: '8000', versus_boss_flow_min: '0.15' }, errors: [], groupsChanged: ['tank', 'bosses'],
   diff: [{ cvar: 'z_tank_health', label: 'Tank base health', group: 'tank', from: '7500', to: '8000' },
     { cvar: 'versus_boss_flow_min', label: 'Boss flow min', group: 'bosses', from: '0.10', to: '0.15' }],
-  base: { patchId: 6, number: 6 }, missing: [], blocking: [], fingerprint: 'abcdef0123456789', existingPatch: null, ...over,
+  base: { patchId: 6, number: 6 }, missing: [], blocking: [], fingerprint: 'abcdef0123456789', existingPatch: null,
+  warnings: [], rolloutId: 1, ...over,
 });
 
 describe('Knobs', () => {
@@ -68,7 +69,7 @@ describe('Knobs', () => {
     expect(apply.disabled).toBe(false);
     fireEvent.click(apply);
     await waitFor(() => expect(mockAdmin.balanceKnobsApply).toHaveBeenCalledWith({
-      values: { z_tank_health: '8000', versus_boss_flow_min: '0.15' }, name: 'Back to 8000', notes: 'revert' }));
+      values: { z_tank_health: '8000', versus_boss_flow_min: '0.15' }, name: 'Back to 8000', notes: 'revert', baseRolloutId: 1 }));
   });
 
   it('shows both name and notes inputs for a reused patch with neither set, and applies with them', async () => {
@@ -88,7 +89,16 @@ describe('Knobs', () => {
     fireEvent.input(screen.getByLabelText('Type the patch name to confirm'), { target: { value: 'Reused patch' } });
     fireEvent.click(screen.getByText('Apply to all servers'));
     await waitFor(() => expect(mockAdmin.balanceKnobsApply).toHaveBeenCalledWith({
-      values: { z_tank_health: '8000', versus_boss_flow_min: '0.15' }, name: 'Reused patch', notes: 'why this' }));
+      values: { z_tank_health: '8000', versus_boss_flow_min: '0.15' }, name: 'Reused patch', notes: 'why this', baseRolloutId: 1 }));
+  });
+
+  it('shows the preview warnings', async () => {
+    mockAdmin.balanceKnobs.mockResolvedValue(state);
+    mockAdmin.balanceKnobsPreview.mockResolvedValue(preview({ warnings: ['Release 4 is still rolling out.'] }));
+    render(<Knobs />);
+    await screen.findByText('Tank base health');
+    fireEvent.click(screen.getByText('Preview'));
+    expect(await screen.findByText('Release 4 is still rolling out.')).toBeTruthy();
   });
 
   it('blocking servers disable apply and are listed', async () => {

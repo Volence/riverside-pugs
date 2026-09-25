@@ -16,7 +16,7 @@ describe('knob values', () => {
 });
 
 describe('serverStateText', () => {
-  const s = { serverId: 1, name: 'dallas', lastError: null, writtenAt: null, confirmedAt: null, seen: null, mismatch: null };
+  const s = { serverId: 1, name: 'dallas', lastError: null, writtenAt: null, confirmedAt: null, seen: null, mismatch: null, noTransport: false };
   it('says what each state means', () => {
     expect(serverStateText({ ...s, state: 'pending' }, 7)).toBe('waiting for the server to be free');
     expect(serverStateText({ ...s, state: 'failed', lastError: 'refused' }, 7)).toBe('write failed: refused, retrying');
@@ -24,5 +24,7 @@ describe('serverStateText', () => {
     expect(serverStateText({ ...s, state: 'written', seen: { patchId: 3, number: 3, at: 'x' }, mismatch: 'c:a 1 -> 2' }, 7))
       .toBe('expected #7, saw #3: c:a 1 -> 2');
     expect(serverStateText({ ...s, state: 'confirmed', confirmedAt: '2026-09-24 10:00:00' }, 7)).toMatch(/^confirmed/);
+    expect(serverStateText({ ...s, state: 'failed', lastError: 'no addons transport configured', noTransport: true }, 7))
+      .toBe('no transport: the site cannot reach this box\'s cfg directory, so it never gets the file; set its addons dir and transport');
   });
 });
