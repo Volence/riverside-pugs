@@ -79,6 +79,12 @@ export interface PreviewState {
    * everyday HUD is not covered by them.
    */
   occasional?: boolean;
+  /**
+   * Draw the Tab screen as the game shows it while you hold Tab in versus
+   * (HudElement.tab; tab screen spec 3.1). Preview only, never part of the
+   * design. Absent is off.
+   */
+  tab?: boolean;
 }
 export const DEFAULT_PREVIEW: PreviewState = { survivor: 'healthy', crouched: false, infected: 'alive', siClass: 'hunter', ability: 'ready' };
 
