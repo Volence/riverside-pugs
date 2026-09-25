@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildHud } from './build';
-import { DEFAULT_DESIGN, type HudDesign } from './design';
+import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
 import { parseKv, writeKv, kvGet, pcFind, type KvNode } from './kv';
 import { baseFile } from './base';
 
@@ -80,5 +80,27 @@ describe('the versus panel\'s if_embedded blocks (spec 4.4, task 6)', () => {
   it('turns DistanceLabel\'s auto_wide_tocontents off on a hide, so it cannot grow back to its text', () => {
     const b = pcFind(versus({ DistanceLabel: { visible: false } }), ['DistanceLabel'])!;
     expect([kvGet(b, 'visible'), kvGet(b, 'wide'), kvGet(b, 'tall'), kvGet(b, 'auto_wide_tocontents')]).toEqual(['0', '0', '0', '0']);
+  });
+});
+
+describe('the row bars by health: a cleared key is taken out of the file (KeyDef.clear, probe TL3)', () => {
+  const bar = (keys: Record<string, string>) => {
+    const d = validateDesign({ v: 1, children: { tabSurvivors: { SurvivorStatsHealth: { keys } } } });
+    const files = build(d);
+    return { files, block: pcFind(tree(files, SURVIVOR_ROW), ['SurvivorStatsHealth'])! };
+  };
+
+  it('removes monochrome_color from SurvivorStatsHealth, writing no empty value', () => {
+    const { files, block } = bar({ monochrome_color: '' });
+    expect(kvGet(block, 'monochrome_color')).toBeUndefined();
+    expect(text(files, SURVIVOR_ROW)).not.toMatch(/monochrome_color/i);
+    // Only that line goes: the rest of the block is the file's.
+    const stock = structuredClone(pcFind(stockTree(SURVIVOR_ROW), ['SurvivorStatsHealth'])!);
+    stock.value = (stock.value as KvNode[]).filter((n) => n.key.toLowerCase() !== 'monochrome_color');
+    expect(block).toEqual(stock);
+  });
+
+  it('writes one colour as the value (TS3)', () => {
+    expect(kvGet(bar({ monochrome_color: '255 0 0 255' }).block, 'monochrome_color')).toBe('255 0 0 255');
   });
 });

@@ -646,7 +646,17 @@ function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: C
   }
   if (o.z !== undefined) put('zpos', String(o.z));
   if (o.keys) {
-    const keys = insetFor(def, block, o.keys);
+    // '' on a key the registry lets be cleared (KeyDef.clear) takes the key
+    // out of the file, for what the game does without it: the Tab rows' bars
+    // colour by health with no monochrome_color (probe TL3). Every line the
+    // PC reads goes; a console-only one stays.
+    const cleared = Object.keys(o.keys).filter((k) => o.keys![k] === '' && def.keys?.find((d) => d.key === k)?.clear);
+    for (const key of cleared) {
+      for (const b of [block, ...(embedded ? [embeddedOf(block)] : [])]) {
+        if (b && typeof b.value !== 'string') b.value = b.value.filter((n) => !(n.key.toLowerCase() === key.toLowerCase() && typeof n.value === 'string' && pcApplies(n.cond)));
+      }
+    }
+    const keys = insetFor(def, block, Object.fromEntries(Object.entries(o.keys).filter(([k]) => !cleared.includes(k))));
     if (embedded) for (const [key, value] of Object.entries(keys)) embeddedSet(block, key, value, true);
     else writeKeys(block, keys);
   }
