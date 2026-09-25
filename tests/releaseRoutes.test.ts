@@ -20,7 +20,8 @@ describe('parseHumans', () => {
   it('reads the player count from status', () => {
     expect(parseHumans('hostname: x\nplayers : 3 (8 max)\n')).toBe(3);
     expect(parseHumans('players : 0 humans, 4 bots (8 max)')).toBe(0);
-    expect(parseHumans('nothing')).toBe(0);
+    // A release restarts only on a count of exactly 0, so no count is no 0.
+    expect(() => parseHumans('nothing')).toThrow();
   });
 });
 
