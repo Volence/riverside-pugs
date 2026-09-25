@@ -9,7 +9,7 @@
 #   ./stage.sh <target> --status   print plugin + cvar state, change nothing
 #   ./stage.sh <target> --remove   unload it and delete the file (rollback)
 #
-# <target>: dallas | riverside-a | riverside-b | chicago   (default: dallas)
+# <target>: dallas | riverside-a | riverside-b | riverside-5 | riverside-6 | chicago   (default: dallas)
 #
 # Dallas and Riverside are reached over ssh, with rcon through deploy/rcon.py's
 # ssh tunnel. Chicago is an NFO box with no ssh: FTP upload and direct rcon.
@@ -21,7 +21,7 @@ NAME="L4D1 sky pounce block"
 SMX="$HERE/../l4d_skypounce.smx"
 
 TARGET=dallas
-case "${1:-}" in dallas|riverside-a|riverside-b|chicago) TARGET=$1; shift ;; esac
+case "${1:-}" in dallas|riverside-a|riverside-b|riverside-5|riverside-6|chicago) TARGET=$1; shift ;; esac
 ACTION=${1:-}
 
 pw_from() { sed -n 's/^[[:space:]]*rcon_password[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -1; }
@@ -37,6 +37,11 @@ case "$TARGET" in
     if [ "$TARGET" = riverside-a ]; then PORT=27015; INST=l4d1-a; else PORT=27016; INST=l4d1-b; fi
     REMOTE=/home/l4d/$INST/left4dead/addons/sourcemod/plugins
     PW=$(pw_from "$DEPLOY/riverside1/secrets.cfg") ;;
+  riverside-5|riverside-6)
+    HOST=$(envval "$DEPLOY/riverside2/riverside2.env" L4D_HOST)
+    if [ "$TARGET" = riverside-5 ]; then PORT=27015; INST=l4d1-a; else PORT=27016; INST=l4d1-b; fi
+    REMOTE=/home/l4d/$INST/left4dead/addons/sourcemod/plugins
+    PW=$(pw_from "$DEPLOY/riverside2/secrets.cfg") ;;
   chicago)
     REMOTE=/left4dead/addons/sourcemod/plugins ;;
 esac
