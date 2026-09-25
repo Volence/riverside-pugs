@@ -5,7 +5,7 @@ import { listServers } from './serverPool.js';
 import { readingStates, readingsOf } from './fleetReader.js';
 import { SITE_OWNED, treeReaderFor } from './fleetTree.js';
 import { PER_BOX } from './fleetCompare.js';
-import { cvarDiff, describeOps, planBox, suggestBalance, validateTree, wantedFor, type Op, type WantedFile } from './releaseStage.js';
+import { cvarDiff, describeOps, isShippedCfg, passwordsSet, planBox, suggestBalance, validateTree, wantedFor, type Op, type WantedFile } from './releaseStage.js';
 
 const sqlNow = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 const DAY_MS = 86_400_000;
@@ -41,7 +41,9 @@ export class ReleaseService {
     let hash: string;
     try { hash = await repo.resolve(commit); } catch { return { ok: false, status: 404, error: 'no such commit' }; }
     const files = await repo.tree(hash);
-    const invalid = validateTree(files);
+    const texts = new Map<string, string>();
+    for (const f of files) if (isShippedCfg(f.path) && f.mode !== '120000') texts.set(f.path, (await repo.blob(f.blob)).toString('utf8'));
+    const invalid = validateTree(files, texts);
     const parent = await repo.parent(hash);
     const parentFiles: RepoFile[] = parent ? await repo.tree(parent) : [];
     const readings = readingsOf(db);
@@ -140,6 +142,9 @@ export class ReleaseService {
         if (shipped && have && have.sha256 !== shipped.sha256) warnings.push(`changed on the box since the last release: ${o.path.replace(/^left4dead\//, '')}`);
         if (o.op === 'write' && o.kind === 'update' && o.layer === 'shared' && PER_BOX.has(o.path)) {
           warnings.push(`${o.path.replace(/^left4dead\//, '')} is a per-box file and would be replaced by the shared copy: add this box's own copy under boxes/${s.deploy_slug}/ first`);
+        }
+        if (o.op === 'write' && o.path.endsWith('.cfg') && o.blob && passwordsSet((await repo.blob(o.blob)).toString('utf8')).includes('tv_password')) {
+          warnings.push(`tv_password is set in ${o.path.replace(/^left4dead\//, '')}: it belongs in secrets.cfg`);
         }
         if (o.op === 'write' && o.kind === 'update' && o.path.endsWith('.cfg') && o.blob) {
           const neu = (await repo.blob(o.blob)).toString('utf8');

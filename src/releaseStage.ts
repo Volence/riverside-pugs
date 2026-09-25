@@ -30,11 +30,39 @@ export function wantedFor(files: RepoFile[], slug: string): Map<string, WantedFi
   return out;
 }
 
-export function validateTree(files: RepoFile[]): string[] {
+const PASSWORD_LINE = /^\s*(rcon_password|sv_password|tv_password)\s+(?:"([^"]*)"|([^\s"]+))/;
+
+/** The password cvars a cfg sets to something non-empty, in order. At line
+ *  start only; commented lines and `""` do not count. */
+export function passwordsSet(text: string): string[] {
+  const out: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const m = PASSWORD_LINE.exec(raw.replace(/\/\/.*$/, ''));
+    if (m && (m[2] ?? m[3] ?? '') !== '' && !out.includes(m[1])) out.push(m[1]);
+  }
+  return out;
+}
+
+/** Whether a repo path is a cfg the release would ship (its text is checked). */
+export function isShippedCfg(repoPath: string): boolean {
+  const m = mapPath(repoPath);
+  return m !== null && m.path.endsWith('.cfg') && isManaged(m.path);
+}
+
+/** `texts` holds the content of the cfgs (by repo path, see isShippedCfg): an
+ *  rcon_password or sv_password in one would be committed to git and shipped
+ *  to every box that gets it. tv_password is only warned about (review). */
+export function validateTree(files: RepoFile[], texts: Map<string, string> = new Map()): string[] {
   const reasons: string[] = [];
   for (const f of files) {
     const m = mapPath(f.path);
     if (!m) continue;
+    const text = texts.get(f.path);
+    if (text !== undefined && m.path.split('/').pop() !== 'secrets.cfg') {
+      for (const cvar of passwordsSet(text)) {
+        if (cvar !== 'tv_password') reasons.push(`${cvar} is set in ${m.path} (${f.path}): move it into that box's secrets.cfg, which is never deployed`);
+      }
+    }
     const base = m.path.split('/').pop();
     if (base === 'secrets.cfg') reasons.push(`secrets.cfg is never deployed: ${m.path}`);
     else if (f.mode === '120000') reasons.push(`symlink: ${f.path}`);
