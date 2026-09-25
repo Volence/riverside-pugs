@@ -60,7 +60,8 @@ export function GameValuesView({ data, admin }: { data: GameValues; admin: boole
               </table>
             </div>
           )}
-          {g.rules.length > 0 && (
+          {g.rules.length > 0 && (<>
+            <h3 class="values-rules-head">How it plays</h3>
             <ul class="values-rules">
               {g.rules.map((r) => (
                 <li key={r.id} class={r.active ? '' : 'muted'}>
@@ -71,6 +72,7 @@ export function GameValuesView({ data, admin }: { data: GameValues; admin: boole
                 </li>
               ))}
             </ul>
+          </>
           )}
         </Panel>
       ))}

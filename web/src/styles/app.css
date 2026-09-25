@@ -1927,8 +1927,16 @@ body.is-theater { overflow: hidden; }
 .values-note { font-size: var(--fs-dense); }
 /* A number with its unit, or "vanilla", never splits across lines. */
 .values-num { white-space: nowrap; overflow-wrap: normal; }
-.values-rules { margin: var(--sp-3) 0 0; padding-left: var(--sp-4); }
-.values-rules li { margin: var(--sp-1) 0; }
+/* The rules under a group's table read as more rows of it: a header in the
+ * table's th style, then dense text with the cells' padding and dividers. */
+h3.values-rules-head {
+  margin: var(--sp-4) 0 0; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border);
+  font-family: var(--font-label); font-size: var(--fs-label); font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.18em; color: var(--text-muted);
+}
+.values-rules { margin: 0; padding: 0; list-style: none; font-size: var(--fs-dense); }
+.values-rules li { padding: var(--sp-3); border-bottom: 1px solid var(--border); }
+.values-rules li:last-child { border-bottom: 0; }
 /* Phones: one block per row, the setting in bold, then each value under its
  * column name, with no horizontal scroll. */
 @media (max-width: 640px) {
