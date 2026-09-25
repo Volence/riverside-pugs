@@ -8,8 +8,8 @@
  * becomes the defaults.
  */
 import { baseOf, baseTree, onUnregister, type Preset, type BaseKey } from './base';
-import type { Aspect } from './units';
-import { kvFind, kvGet, type KvNode } from './kv';
+import { screenW, SCREEN_H, type Aspect } from './units';
+import { kvFind, kvGet, pcFind, type KvNode } from './kv';
 import { elementById } from './elements';
 import { SLOTS } from './slots';
 import { TEAM_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, panelOfFile, maxInset, childPath, type ChildDef, type KeyDef } from './children';
@@ -89,7 +89,10 @@ export interface ChildOverride {
   color?: string;
   /** Addable children: present in the file or not. Absent means as the preset's file has it. */
   on?: boolean;
-  /** Keys the child's registry entry declares (KeyDef), as the text the file takes. */
+  /**
+   * Keys the child's registry entry declares (KeyDef), as the text the file
+   * takes; '' for a key whose KeyDef has `clear`: take the line out of the file.
+   */
   keys?: Record<string, string>;
   /** The block's zpos, a whole number in -50..50. Absent means as the preset's file has it. */
   z?: number;
@@ -439,7 +442,8 @@ function childOverride(def: ChildDef, raw: unknown): ChildOverride {
     const v = raw[k];
     return typeof v === 'number' && Number.isFinite(v) ? clampChild(k, v) : undefined;
   };
-  if (typeof raw.visible === 'boolean') out.visible = raw.visible;
+  // A hide whose effect waits on a probe is dropped until it passes (the Tab screen's pieces, TS7).
+  if (typeof raw.visible === 'boolean' && (!def.hideGate || probe(def.hideGate))) out.visible = raw.visible;
   if (def.move) {
     const x = n('x'), y = n('y');
     if (x !== undefined) out.x = x;
@@ -481,8 +485,9 @@ export function validKeys(defs: readonly KeyDef[] | undefined, raw: unknown): Re
     if (def.gate && !probe(def.gate)) continue;
     const v = raw[def.key];
     if (def.type === 'colour') {
-      const c = colour(v);
-      if (c) out[def.key] = c;
+      // '' takes the key out of the file, only where the registry allows it (KeyDef.clear).
+      const c = def.clear && v === '' ? '' : colour(v);
+      if (c !== undefined) out[def.key] = c;
     } else if (def.type === 'int') {
       const num = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
       if (!Number.isFinite(num)) continue;
@@ -660,7 +665,29 @@ function teamFields(raw: Record<string, unknown>, out: ElementOverride, key: Bas
   }
 }
 
-function element(id: string, raw: unknown, key: BaseKey): ElementOverride {
+/** The versus score panel's block in scoreboard.res, and its size when the base cannot be read (stock and Modern: 354 x 120). */
+const TAB_VERSUS_FILE = 'resource/ui/scoreboard.res';
+const TAB_VERSUS_SIZE = { w: 354, h: 120 };
+
+/**
+ * Where the Tab screen's versus panel may be put, in screen units from the
+ * top-left corner (every top-level block of scoreboard.res is placed from
+ * there, tab screen spec 1.1): so that the whole panel stays on screen at
+ * the design's aspect, x 0 to the width less the panel's, y 0 to 480 less
+ * its height (stock: 0..499 at 16:9, 0..360). The size is the base file's,
+ * or stock's while an imported base is not loaded.
+ */
+export function tabVersusRange(aspect: Aspect, key: BaseKey): { x: [number, number]; y: [number, number] } {
+  let { w, h } = TAB_VERSUS_SIZE;
+  try {
+    const n = pcFind(baseTree(key, TAB_VERSUS_FILE), [elementById('tabVersus')!.key]);
+    const num = (k: string, d: number) => { const v = parseFloat((n && kvGet(n, k)) ?? ''); return Number.isFinite(v) && v >= 0 ? v : d; };
+    w = num('wide', w); h = num('tall', h);
+  } catch { /* an imported base not registered yet */ }
+  return { x: [0, Math.max(0, screenW(aspect) - w)], y: [0, Math.max(0, SCREEN_H - h)] };
+}
+
+function element(id: string, raw: unknown, key: BaseKey, aspect: Aspect): ElementOverride {
   const out: ElementOverride = {};
   if (!isObj(raw)) return out;
   const team = id === 'teamColumn';
@@ -717,6 +744,22 @@ function element(id: string, raw: unknown, key: BaseKey): ElementOverride {
   if (keys) out.keys = keys;
   // The game places the peril notice across; only its height is kept.
   if (elementById(id)?.moveAxis === 'y') delete out.x;
+  // A move or a hide waiting on a probe is dropped until it passes (the Tab
+  // screen's versus panel: TS4, TS7), so a gate that flips back off clears it.
+  const el = elementById(id);
+  if (el?.moveGate && !probe(el.moveGate)) { delete out.x; delete out.y; }
+  if (el?.hideGate && !probe(el.hideGate)) delete out.visible;
+  // A Tab screen element keeps only what it offers: a place if it moves, a
+  // hide if it lists one (the dialog and the rows take neither in v1).
+  if (el?.tab) {
+    if (!el.move) { delete out.x; delete out.y; }
+    if (!el.props.includes('visible')) delete out.visible;
+  }
+  if (id === 'tabVersus' && (out.x !== undefined || out.y !== undefined)) {
+    const r = tabVersusRange(aspect, key);
+    if (out.x !== undefined) out.x = Math.min(r.x[1], Math.max(r.x[0], out.x));
+    if (out.y !== undefined) out.y = Math.min(r.y[1], Math.max(r.y[0], out.y));
+  }
   return out;
 }
 
@@ -804,7 +847,7 @@ export function validateDesign(raw: unknown): HudDesign {
   if (isObj(raw.elements)) for (const [id, v] of Object.entries(raw.elements)) {
     // An element the registry no longer has (the kill feed, say) has nothing to apply to.
     if (!ID.test(id) || !elementById(id)) continue;
-    const e = element(id, v, baseOf(d));
+    const e = element(id, v, baseOf(d), d.aspect);
     if (Object.keys(e).length) d.elements[id] = e;
   }
   // A slot the editor no longer has (the removed health bar slots) has nothing to restyle.
@@ -885,6 +928,16 @@ export function validateDesign(raw: unknown): HudDesign {
       clampInset(d, panel.file, def, o);
       if (panel.panelId === 'progressBar' && def.name === 'Bar') clampProgressBar(d, panel.file, def, o);
       if (Object.keys(o).length) kids[name] = o;
+    }
+    // A piece the game hides along with another (pinned to it) is stored
+    // hidden with it, so the page, the preview and the build agree.
+    for (const [name, o] of Object.entries(kids)) {
+      if (o.visible !== false) continue;
+      for (const n of panel.children.find((c) => c.name === name)?.hidesWith ?? []) {
+        const follower = panel.children.find((c) => c.name === n);
+        if (!follower || (follower.gate && !probe(follower.gate)) || (follower.hideGate && !probe(follower.hideGate))) continue;
+        kids[n] = { ...kids[n], visible: false };
+      }
     }
     if (Object.keys(kids).length) d.children[panel.panelId] = kids;
   }
