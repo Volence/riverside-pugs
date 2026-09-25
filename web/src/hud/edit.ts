@@ -1312,6 +1312,10 @@ export function setYourItems(d: HudDesign, on: boolean): HudDesign {
   const o = d.elements[YOUR_ITEMS] ?? {};
   if (!on) return { ...d, elements: { ...d.elements, [YOUR_ITEMS]: { ...o, visible: false } } };
   if (yourItemsBlocked(d)) return d;
+  // Already on: nothing to do. Re-applying would undo item slots the player
+  // brought back in the Weapons panel on purpose (the multi-select Visible
+  // box turns on every picked element, shown ones included).
+  if (o.visible === true) return d;
   const at = o.x !== undefined && o.y !== undefined ? { x: o.x, y: o.y } : placeRow(yourItemsInput(d), yourItemsHome(d));
   return patchWeapons({ ...d, elements: { ...d.elements, [YOUR_ITEMS]: { ...o, visible: true, x: at.x, y: at.y } } }, { itemSize: 0, itemIcons: false });
 }

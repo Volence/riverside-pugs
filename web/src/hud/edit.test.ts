@@ -1296,6 +1296,16 @@ describe('Your items', () => {
     expect(both.weapons).toEqual({ itemSize: 0, itemIcons: false });
   });
 
+  it('keeps item slots brought back in the Weapons panel when it is turned on again while shown', () => {
+    // The multi-select Visible box turns on every picked element, a shown Your items included.
+    const restored: HudDesign = { ...on(), weapons: { itemSize: 24, itemIcons: true }, elements: { ...on().elements, chat: { visible: false } } };
+    expect(setYourItems(restored, true)).toBe(restored);
+    const both = setSelectionVisible(restored, { kind: 'elements', ids: ['chat', YOUR_ITEMS] }, true);
+    expect(both.elements.chat).toEqual({ visible: true });
+    expect(both.elements.yourItems).toEqual(restored.elements.yourItems);
+    expect(both.weapons).toEqual({ itemSize: 24, itemIcons: true });
+  });
+
   describe('on an import that places its own items', () => {
     const ID = 'd'.repeat(64);
     afterEach(() => { unregisterImport(ID); });
