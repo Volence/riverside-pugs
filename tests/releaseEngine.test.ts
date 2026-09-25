@@ -330,6 +330,11 @@ describe('ReleaseEngine', () => {
     await e.settled();
     expect(boxState(id, s2).state).toBe('restarted');
     expect(relState(id)).toBe('canary_wait');
+    // After Continue, another box's restart finishing must not re-arm the wait.
+    e.continueRelease(id, '1');
+    await e.tick(); await e.settled();
+    expect(boxState(id, s1).state).toBe('restarted');
+    expect(relState(id)).toBe('done');
 
     const e2 = engine({ humans: async () => 1, emptyWaitMs: 2, emptyPollMs: 1 });
     db.prepare("UPDATE releases SET state = 'done' WHERE id = ?").run(id);

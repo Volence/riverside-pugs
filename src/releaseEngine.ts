@@ -195,7 +195,7 @@ export class ReleaseEngine {
     } else {
       this.park(h.releaseId, serverId, res.quitSent ? 'the box did not come back after the restart' : 'quit could not be sent over rcon, so the box is still running the old files');
     }
-    if (!this.canaryOutcome(h.releaseId)) this.settle(h.releaseId);
+    this.afterBox(h.releaseId, serverId);
     return !(res.back && res.quitSent);
   }
 
@@ -218,6 +218,12 @@ export class ReleaseEngine {
       if (b.server_id === canary && this.canaryOutcome(id)) return;
     }
     this.settle(id);
+  }
+
+  /** A box's restart settled off the chain: the canary's decides the rest. */
+  private afterBox(releaseId: number, serverId: number): void {
+    if (this.rel(releaseId)?.canary_server_id === serverId && this.canaryOutcome(releaseId)) return;
+    this.settle(releaseId);
   }
 
   /** After the canary's state changed: halt on a failed or parked canary, wait
@@ -344,7 +350,7 @@ export class ReleaseEngine {
       else hooked.stage = 'written';
       return;
     }
-    if (!this.d.restarter) { unhold(); return; }
+    if (!this.d.restarter) { this.park(r.id, s.id, 'this site has no way to restart it'); return; }
     this.queueRestart(r.id, s.id);
   }
 
@@ -377,7 +383,7 @@ export class ReleaseEngine {
       this.park(releaseId, serverId, err instanceof Error ? err.message : String(err));
     }).finally(() => {
       this.restarts.delete(restart);
-      if (!this.canaryOutcome(releaseId)) this.settle(releaseId);
+      this.afterBox(releaseId, serverId);
     });
     this.restarts.add(restart);
   }
