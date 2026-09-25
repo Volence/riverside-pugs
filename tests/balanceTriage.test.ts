@@ -109,6 +109,16 @@ describe('triage decisions', () => {
     expect(triageUnfold(db, noisy)).toMatchObject({ ok: false, status: 409 });
   });
 
+  it('unfold refuses a merged patch (no fingerprint of its own) and the active rollout', () => {
+    triageFold(db, noisy, base);
+    db.prepare('UPDATE balance_patches SET fingerprint = NULL WHERE id = ?').run(noisy);
+    expect(triageUnfold(db, noisy)).toMatchObject({ ok: false, status: 409, error: expect.stringMatching(/merged/) });
+    db.prepare("UPDATE balance_patches SET fingerprint = 'n' WHERE id = ?").run(noisy);
+    db.prepare("INSERT INTO balance_rollouts (patch_id, values_json, content, created_by, created_at) VALUES (?, '{}', '', '1', 'x')").run(noisy);
+    expect(triageUnfold(db, noisy)).toMatchObject({ ok: false, status: 409, error: expect.stringMatching(/rollout/) });
+    expect(db.prepare('SELECT triage FROM balance_patches WHERE id = ?').get(noisy)).toEqual({ triage: 'folded' });
+  });
+
   it('ignore: plugin-only diffs only, adds the plugins, refingerprints and folds', () => {
     expect(triageIgnore(db, real, { into: base, plugins: [], versionless: LISTS.versionless, knobsIgnored: [], adminId: '1' }))
       .toMatchObject({ ok: false, status: 400 });

@@ -189,6 +189,15 @@ export function triageUnfold(db: DB, id: number): TriageResult {
   const r = row(db, id);
   if (!r) return { ok: false, status: 404, error: 'no such patch' };
   if (r.triage !== 'folded') return { ok: false, status: 409, error: 'this patch is not folded' };
+  // Merged by the refingerprint (or an ignore): it hashes the same as the
+  // patch it is folded into, and no sighting can reach it again, so unfolded
+  // it would be a pending patch nothing could ever resolve.
+  const fp = db.prepare('SELECT fingerprint FROM balance_patches WHERE id = ?').get(id) as { fingerprint: string | null };
+  if (r.source === 'detected' && fp.fingerprint === null) {
+    return { ok: false, status: 409, error: 'this patch was merged: it has the same config as the patch it is folded into once ignored and versionless plugins are left out, so it cannot be unfolded' };
+  }
+  const ro = activeRollout(db);
+  if (ro && ro.patch_id === id) return { ok: false, status: 409, error: 'this patch is the knob panel\'s active rollout; it cannot be unfolded' };
   unfoldPatch(db, id);
   return { ok: true };
 }
