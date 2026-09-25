@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assertWritable, ftpTreeWriter, localTreeWriter, sftpTreeWriter } from '../src/fleetWrite.js';
+import { assertWritable, defaultRunIn, ftpTreeWriter, localTreeWriter, sftpTreeWriter } from '../src/fleetWrite.js';
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const P = 'left4dead/cfg/new/a.cfg';
@@ -15,6 +15,10 @@ describe('assertWritable', () => {
     expect(() => assertWritable('left4dead/cfg/secrets.cfg')).toThrow();
     expect(() => assertWritable('left4dead/maps/x.bsp')).toThrow();
     expect(() => assertWritable('left4dead/cfg/../../etc/passwd')).toThrow();
+    // The site's balance writers own these; a release never touches them.
+    expect(() => assertWritable('left4dead/cfg/pug_balance.cfg')).toThrow(/site/);
+    expect(() => assertWritable('left4dead/addons/sourcemod/data/pug_balance_watch.txt')).toThrow(/site/);
+    expect(() => assertWritable('left4dead/addons/sourcemod/data/l4d_info_editor_weapons.cfg')).not.toThrow();
   });
 });
 
@@ -69,6 +73,7 @@ describe('ftpTreeWriter', () => {
       rename: async (a: string, b: string) => { files.set(b, files.get(a)!); files.delete(a); },
       remove: async (p: string) => { if (!files.delete(p)) throw Object.assign(new Error('550'), { code: 550 }); },
       downloadTo: async (sink: NodeJS.WritableStream, p: string) => { const b = files.get(p); if (!b) throw Object.assign(new Error('550'), { code: 550 }); sink.write(b); },
+      list: async (d: string) => [...files.keys()].filter((k) => k.startsWith(`${d}/`)).map((k) => ({ name: k.slice(d.length + 1).split('/')[0] })),
     };
     const w = ftpTreeWriter({ host: 'h', port: 21, user: 'u', password: 'p', gameDir: '', client: () => client as never });
     await w.write(P, Buffer.from('abc'));
@@ -79,5 +84,71 @@ describe('ftpTreeWriter', () => {
     await w.remove(P);
     await w.remove(P);
     expect(files.size).toBe(0);
+  });
+});
+
+describe('ftpTreeWriter and a 550', () => {
+  const client = (listing: Record<string, string[] | 'denied'>) => ({
+    access: async () => ({}), close: () => {}, ensureDir: async () => {}, uploadFrom: async () => ({}), rename: async () => ({}), remove: async () => ({}),
+    downloadTo: async () => { throw Object.assign(new Error('550 Permission denied'), { code: 550 }); },
+    list: async (d: string) => {
+      const l = listing[d];
+      if (!l || l === 'denied') throw Object.assign(new Error('550'), { code: 550 });
+      return l.map((name) => ({ name }));
+    },
+  });
+  it('is absent only when the listing says so', async () => {
+    const w = ftpTreeWriter({ host: 'h', port: 21, user: 'u', password: 'p', gameDir: '/g', client: () => client({ '/g/left4dead/cfg/new': ['b.cfg'] }) as never });
+    expect(await w.read(P)).toBeNull();
+  });
+  it('is absent when a parent folder is absent', async () => {
+    const w = ftpTreeWriter({ host: 'h', port: 21, user: 'u', password: 'p', gameDir: '/g', client: () => client({ '/g/left4dead/cfg': ['x.cfg'] }) as never });
+    expect(await w.read(P)).toBeNull();
+  });
+  it('is an error when the file is there but cannot be read', async () => {
+    const w = ftpTreeWriter({ host: 'h', port: 21, user: 'u', password: 'p', gameDir: '/g', client: () => client({ '/g/left4dead/cfg/new': ['a.cfg'] }) as never });
+    await expect(w.read(P)).rejects.toThrow(/Permission denied/);
+    const w2 = ftpTreeWriter({ host: 'h', port: 21, user: 'u', password: 'p', gameDir: '/g', client: () => client({ '/g/left4dead/cfg/new': 'denied', '/g/left4dead/cfg': ['new'] }) as never });
+    await expect(w2.read(P)).rejects.toThrow(/Permission denied/);
+  });
+});
+
+describe('cancelling a box call', () => {
+  it('kills the ssh child when the signal aborts', async () => {
+    const ac = new AbortController();
+    const started = Date.now();
+    const p = defaultRunIn('sleep', ['5'], undefined, ac.signal);
+    setTimeout(() => ac.abort(), 20);
+    await expect(p).rejects.toThrow();
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it('hands the signal to every ssh call', async () => {
+    const seen: (AbortSignal | undefined)[] = [];
+    const runIn = async (_c: string, args: string[], _i?: Buffer, signal?: AbortSignal) => {
+      seen.push(signal);
+      return args[args.length - 1].includes('sha256sum') ? Buffer.alloc(0) : Buffer.from('x');
+    };
+    const w = sftpTreeWriter({ host: 'h', port: 22, user: 'u', keyPath: '/k', gameDir: '/g', runIn });
+    const { signal } = new AbortController();
+    await w.read(P, signal); await w.write(P, Buffer.from('a'), signal); await w.remove(P, signal); await w.hash([P], signal);
+    expect(seen).toEqual([signal, signal, signal, signal]);
+  });
+
+  it('closes the FTP client when the signal aborts', async () => {
+    let closed = false;
+    let hang!: (e: Error) => void;
+    const client = {
+      access: async () => ({}), close: () => { closed = true; hang(new Error('closed')); },
+      ensureDir: async () => {}, uploadFrom: async () => ({}), rename: async () => ({}), remove: async () => ({}),
+      downloadTo: () => new Promise((_r, rej) => { hang = rej; }),
+    };
+    const w = ftpTreeWriter({ host: 'h', port: 21, user: 'u', password: 'p', gameDir: '', client: () => client as never });
+    const ac = new AbortController();
+    const p = w.read(P, ac.signal);
+    await new Promise((r) => setTimeout(r, 5));
+    ac.abort();
+    await expect(p).rejects.toThrow();
+    expect(closed).toBe(true);
   });
 });

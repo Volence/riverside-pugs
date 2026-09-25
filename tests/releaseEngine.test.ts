@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb } from '../src/db.js';
@@ -88,6 +88,41 @@ describe('ReleaseEngine', () => {
     expect(getServer(db, s1)!.status).toBe('idle');
   });
 
+  it('a failed restore still tries every file, and parks the box offline instead of idle', async () => {
+    boxes[s1] = box({ [A]: 'A1' }, { on: 'hash' });
+    let writesOfA = 0;
+    const write = boxes[s1].w.write;
+    boxes[s1].w.write = async (p, b) => { if (p === A && ++writesOfA > 1) throw new Error('permission denied'); await write(p, b); };
+    const e = engine();
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(boxes[s1].fs.has(B)).toBe(false); // restored even though A's restore failed first
+    expect(boxState(id, s1)).toEqual({ state: 'failed', error: expect.stringMatching(/restoring .*a\.cfg.*permission denied/) });
+    expect(getServer(db, s1)!.status).toBe('offline');
+    expect(restarts).toEqual([]);
+  });
+
+  it('a box call that times out is cancelled before the backup goes back', async () => {
+    const events: string[] = [];
+    const write = boxes[s1].w.write;
+    boxes[s1].w.write = (p, b, signal) => {
+      if (p === B) {
+        return new Promise<void>((_r, reject) => signal?.addEventListener('abort', () => { events.push('aborted'); reject(new Error('killed')); }));
+      }
+      events.push(`write ${p}`);
+      return write(p, b);
+    };
+    boxes[s1].w.remove = async (p) => { events.push(`remove ${p}`); boxes[s1].fs.delete(p); };
+    const e = engine({ opLimitMs: 10 });
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(events).toEqual([`write ${A}`, 'aborted', `write ${A}`, `remove ${B}`]);
+    expect(boxState(id, s1)).toEqual({ state: 'failed', error: expect.stringMatching(/timed out/) });
+    expect(getServer(db, s1)!.status).toBe('idle');
+  });
+
   it('a verify mismatch is a failure', async () => {
     boxes[s1] = box({ [A]: 'A1' }, { on: 'hash' });
     const e = engine();
@@ -131,8 +166,25 @@ describe('ReleaseEngine', () => {
     expect(boxState(id, s1).state).toBe('waiting');
     db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(s1); // the releaser is restarting it
     await e.forRelease(s1);
-    expect(boxState(id, s1).state).toBe('restarted');
+    // Not 'restarted' yet: the releaser has not sent quit.
+    expect(boxState(id, s1)).toEqual({ state: 'written', error: null });
+    expect(relState(id)).toBe('deploying');
     expect(restarts).toEqual([]); // the releaser does the restart
+    expect(e.ownsRestart(s1)).toBe(true);
+    expect(e.afterReleaserRestart(s1, { back: true, quitSent: true })).toBe(false);
+    expect(boxState(id, s1).state).toBe('restarted');
+    expect(relState(id)).toBe('done');
+    expect(e.ownsRestart(s1)).toBe(false);
+  });
+
+  it('through the release hook, a quit that was never sent parks the box', async () => {
+    db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(s1);
+    const e = engine();
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.forRelease(s1);
+    expect(e.afterReleaserRestart(s1, { back: true, quitSent: false })).toBe(true); // keep it offline
+    expect(boxState(id, s1)).toEqual({ state: 'written', error: expect.stringMatching(/restart pending/) });
   });
 
   it('never touches a parked (offline) box outside the release hook', async () => {
@@ -173,8 +225,28 @@ describe('ReleaseEngine', () => {
     const started = Date.now();
     await e.forRelease(s1);
     expect(Date.now() - started).toBeLessThan(1000);
+    // The capped hook's turn is spent: the box is still offline (booting),
+    // with no hold of ours, so the queued turn must not write it.
     release();
     await t; await e.settled();
+    expect(boxes[s1].fs.get(A)!.toString()).toBe('A1');
+    expect(boxState(id, s1).state).toBe('waiting');
+    expect(e.ownsRestart(s1)).toBe(false);
+  });
+
+  it('a hook write the releaser restarted under (after the cap) is parked', async () => {
+    let release!: () => void;
+    const slow = new Promise<void>((r) => { release = r; });
+    boxes[s1].w.write = async (p, b) => { await slow; boxes[s1].fs.set(p, b); };
+    db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(s1);
+    const e = engine({ hookCapMs: 20 });
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.forRelease(s1);
+    expect(e.afterReleaserRestart(s1, { back: true, quitSent: true })).toBe(true);
+    release();
+    await e.settled();
+    expect(boxState(id, s1)).toEqual({ state: 'written', error: expect.stringMatching(/restart pending/) });
   });
 
   it('waits for the box to empty, up to a limit, before restarting', async () => {
@@ -185,6 +257,94 @@ describe('ReleaseEngine', () => {
     await e.tick(); await e.settled();
     expect(restarts).toEqual([s1]);
     expect(n).toBe(-1);
+  });
+
+  it('never restarts a box that did not empty in time: written, restart pending, parked offline', async () => {
+    const e = engine({ humans: async () => 1, emptyWaitMs: 5, emptyPollMs: 1 });
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(restarts).toEqual([]);
+    expect(boxState(id, s1)).toEqual({ state: 'written', error: expect.stringMatching(/restart pending/) });
+    expect(getServer(db, s1)!.status).toBe('offline');
+  });
+
+  it('never restarts when the player count cannot be read', async () => {
+    const e = engine({ humans: async () => { throw new Error('rcon connect timeout'); } });
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(restarts).toEqual([]);
+    expect(boxState(id, s1)).toEqual({ state: 'written', error: expect.stringMatching(/restart pending.*rcon connect timeout/) });
+    expect(getServer(db, s1)!.status).toBe('offline');
+  });
+
+  it('never restarts or frees a box a match took while it waited to empty', async () => {
+    let n = 1;
+    const e = engine({
+      humans: async () => {
+        // An in-game PUG is adopted on the box (selfStarted marks it live).
+        db.prepare("UPDATE servers SET status = 'live' WHERE id = ?").run(s1);
+        return n--;
+      },
+      emptyPollMs: 1,
+    });
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(restarts).toEqual([]);
+    expect(boxState(id, s1)).toEqual({ state: 'written', error: expect.stringMatching(/restart pending/) });
+    expect(getServer(db, s1)!.status).toBe('live');
+  });
+
+  it('does not call a box restarted when quit was never sent', async () => {
+    const e = engine({ restarter: { restart: async () => true, restartForRelease: async () => ({ back: false, quitSent: false }) } });
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(boxState(id, s1)).toEqual({ state: 'written', error: expect.stringMatching(/restart pending.*quit/) });
+    expect(getServer(db, s1)!.status).toBe('offline');
+  });
+
+  it('a box that does not come back from its restart stays offline', async () => {
+    const e = engine({ restarter: { restart: async () => false } });
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(boxState(id, s1)).toEqual({ state: 'written', error: expect.stringMatching(/did not come back/) });
+    expect(getServer(db, s1)!.status).toBe('offline');
+  });
+
+  it('the canary is checked only once it has restarted, and a canary left unrestarted halts', async () => {
+    let open!: () => void;
+    const gate = new Promise<void>((r) => { open = r; });
+    const e = engine({ humans: async () => { await gate; return 0; } });
+    const id = stage();
+    e.deploy(id, { targets: [s1, s2], canary: s2, balance: later, adminId: '1' });
+    await e.tick();
+    expect(boxState(id, s2).state).toBe('written');
+    expect(relState(id)).toBe('deploying');
+    await e.tick();
+    expect(boxState(id, s1).state).toBe('pending');
+    open();
+    await e.settled();
+    expect(boxState(id, s2).state).toBe('restarted');
+    expect(relState(id)).toBe('canary_wait');
+    // After Continue, another box's restart finishing must not re-arm the wait.
+    e.continueRelease(id, '1');
+    await e.tick(); await e.settled();
+    expect(boxState(id, s1).state).toBe('restarted');
+    expect(relState(id)).toBe('done');
+
+    const e2 = engine({ humans: async () => 1, emptyWaitMs: 2, emptyPollMs: 1 });
+    db.prepare("UPDATE releases SET state = 'done' WHERE id = ?").run(id);
+    db.prepare("UPDATE servers SET status = 'idle'").run();
+    const id2 = stage([plan[0]]);
+    boxes[s2].fs.set(A, Buffer.from('A1'));
+    e2.deploy(id2, { targets: [s1, s2], canary: s2, balance: later, adminId: '1' });
+    await e2.tick(); await e2.settled();
+    expect(relState(id2)).toBe('halted');
+    expect(boxState(id2, s1).state).toBe('skipped');
   });
 
   it('refuses in dev mode, a second in-flight release, bad targets and a nameless balance patch', () => {
@@ -214,13 +374,70 @@ describe('ReleaseEngine', () => {
     expect(e.undo(id, [s2], '1')).toMatchObject({ ok: false, status: 409 });
   });
 
-  it('recover marks an interrupted box failed and lifts its hold', () => {
+  it('recover marks a box interrupted before any write failed and lifts its hold', async () => {
     const id = stage();
     db.prepare("UPDATE releases SET state = 'deploying' WHERE id = ?").run(id);
     db.prepare("UPDATE release_boxes SET state = 'writing' WHERE release_id = ? AND server_id = ?").run(id, s1);
     db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(s1);
-    engine().recover();
+    const e = engine();
+    e.recover();
+    await e.settled();
     expect(boxState(id, s1)).toEqual({ state: 'failed', error: expect.stringMatching(/interrupted/) });
     expect(getServer(db, s1)!.status).toBe('idle');
+  });
+
+  /** A box a site restart caught mid-write: A updated, B added, backup on disk. */
+  function interrupted() {
+    const id = stage();
+    db.prepare("UPDATE releases SET state = 'deploying' WHERE id = ?").run(id);
+    db.prepare("UPDATE release_boxes SET state = 'writing' WHERE release_id = ? AND server_id = ?").run(id, s1);
+    db.prepare("UPDATE release_boxes SET state = 'skipped' WHERE release_id = ? AND server_id = ?").run(id, s2);
+    db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(s1);
+    const d = join(dir, String(id), String(s1));
+    mkdirSync(join(d, 'files', 'left4dead', 'cfg'), { recursive: true });
+    writeFileSync(join(d, 'files', A), 'A1');
+    writeFileSync(join(d, 'backup.json'), JSON.stringify([{ path: A, existed: true }, { path: B, existed: false }]));
+    boxes[s1].fs.set(A, Buffer.from('A2'));
+    boxes[s1].fs.set(B, Buffer.from('B1'));
+    return id;
+  }
+
+  it('recover puts an interrupted box back from its backup on disk, parked until then', async () => {
+    const id = interrupted();
+    const e = engine();
+    e.recover();
+    // Parked at once, before the boot reconcile could hand it out as idle.
+    expect(getServer(db, s1)!.status).toBe('offline');
+    await e.settled();
+    expect(boxes[s1].fs.get(A)!.toString()).toBe('A1');
+    expect(boxes[s1].fs.has(B)).toBe(false);
+    expect(boxState(id, s1)).toEqual({ state: 'failed', error: expect.stringMatching(/interrupted.*put back/) });
+    expect(getServer(db, s1)!.status).toBe('idle');
+    expect(relState(id)).toBe('done');
+  });
+
+  it('recover leaves a box it could not restore offline', async () => {
+    const id = interrupted();
+    boxes[s1].w.remove = async () => { throw new Error('permission denied'); };
+    const e = engine();
+    e.recover();
+    await e.settled();
+    expect(boxState(id, s1)).toEqual({ state: 'failed', error: expect.stringMatching(/permission denied/) });
+    expect(getServer(db, s1)!.status).toBe('offline');
+  });
+
+  it('recover re-queues a restart a site restart lost', async () => {
+    const id = stage();
+    db.prepare("UPDATE releases SET state = 'deploying' WHERE id = ?").run(id);
+    db.prepare("UPDATE release_boxes SET state = 'written' WHERE release_id = ? AND server_id = ?").run(id, s1);
+    db.prepare("UPDATE release_boxes SET state = 'skipped' WHERE release_id = ? AND server_id = ?").run(id, s2);
+    db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(s1);
+    const e = engine();
+    e.recover();
+    await e.settled();
+    expect(restarts).toEqual([s1]);
+    expect(boxState(id, s1).state).toBe('restarted');
+    expect(getServer(db, s1)!.status).toBe('idle');
+    expect(relState(id)).toBe('done');
   });
 });
