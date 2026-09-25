@@ -219,12 +219,27 @@ static void BalanceLoadWatch()
 	}
 }
 
+/** Whether s is a plain decimal number: an optional '-', digits, and at
+ *  most one '.' with at least one digit somewhere. */
+static bool BalIsDecimal(const char[] s)
+{
+	int i = (s[0] == '-') ? 1 : 0, digits = 0, dots = 0;
+	for (; s[i] != '\0'; i++)
+	{
+		if (s[i] >= '0' && s[i] <= '9') digits++;
+		else if (s[i] == '.' && dots == 0) dots++;
+		else return false;
+	}
+	return digits > 0;
+}
+
 /** KeyValues stores "0.22" as a float and GetString gives back "0.220000":
  *  drop the trailing zeros (and a bare trailing dot) so the site sees the
- *  number as written, "0.22" (and "2.0" becomes "2"). */
+ *  number as written, "0.22" (and "2.0" becomes "2"). Only a whole value
+ *  that is a number: a string such as "v1.10" is left exactly as it is. */
 static void BalTrimFloat(char[] s)
 {
-	if (StrContains(s, ".") == -1) return;
+	if (StrContains(s, ".") == -1 || !BalIsDecimal(s)) return;
 	int n = strlen(s);
 	while (n > 0 && s[n - 1] == '0') s[--n] = '\0';
 	if (n > 0 && s[n - 1] == '.') s[--n] = '\0';
