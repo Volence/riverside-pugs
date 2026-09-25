@@ -84,21 +84,24 @@ export function diffIgnoringVersionless(a: Inventory, b: Inventory, versionless:
  *  same reason as baseInventory: balance_server_state follows whatever the
  *  box last ran, and a 2v2 or casual config there is not a difference in the
  *  PUG config a rollout writes to. */
-export function blockingServers(db: DB, base: Inventory, knobs: BalanceKnobs): { serverId: number; name: string; diff: string }[] {
+export function blockingServers(db: DB, base: Inventory, knobs: BalanceKnobs): { serverId: number; name: string; diff: string; lastMatchAt: string | null }[] {
   const want = withoutKnobs(base, knobs);
   const wantFp = fingerprintOf(want, knobs.versionless);
-  const rows = db.prepare(`SELECT s.id AS server_id, s.name, p.inputs_json AS inventory_json FROM servers s
+  const rows = db.prepare(`SELECT s.id AS server_id, s.name, p.inputs_json AS inventory_json,
+      (SELECT MAX(r.started_at) FROM match_rounds r JOIN matches m ON m.id = r.match_id
+        WHERE m.server_id = s.id AND m.origin = 'queue') AS last_at
+    FROM servers s
     JOIN balance_patches p ON p.id = (
       SELECT COALESCE(r.sighted_patch_id, r.patch_id) FROM match_rounds r JOIN matches m ON m.id = r.match_id
       WHERE m.server_id = s.id AND m.origin = 'queue' AND COALESCE(r.sighted_patch_id, r.patch_id) IS NOT NULL
       ORDER BY r.started_at DESC, r.match_id DESC, r.ordinal DESC, r.half DESC LIMIT 1)
     WHERE s.enabled = 1 AND p.inputs_json IS NOT NULL ORDER BY s.id`).all() as
-    { server_id: number; name: string; inventory_json: string }[];
-  const out: { serverId: number; name: string; diff: string }[] = [];
+    { server_id: number; name: string; inventory_json: string; last_at: string | null }[];
+  const out: { serverId: number; name: string; diff: string; lastMatchAt: string | null }[] = [];
   for (const r of rows) {
     const have = withoutKnobs(JSON.parse(r.inventory_json) as Inventory, knobs);
     if (fingerprintOf(have, knobs.versionless) === wantFp) continue;
-    out.push({ serverId: r.server_id, name: r.name, diff: diffIgnoringVersionless(want, have, knobs.versionless) });
+    out.push({ serverId: r.server_id, name: r.name, diff: diffIgnoringVersionless(want, have, knobs.versionless), lastMatchAt: r.last_at });
   }
   return out;
 }

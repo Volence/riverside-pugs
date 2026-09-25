@@ -65,7 +65,11 @@ export function Knobs() {
           : <p class="error">No queue match has a fingerprint yet: nothing to predict from.</p>}
         {data.missing.length > 0 && <p class="error">Not reported by the servers: {data.missing.join(', ')}.</p>}
         {data.blocking.map((b) => (
-          <p class="error" key={b.serverId}>{b.name} differs in more than knob values: {b.diff}. Disable it or fix it before applying.</p>
+          <p class="error" key={b.serverId}>
+            {b.name} differs in more than knob values: {b.diff}.
+            {b.lastMatchAt && <> Its last queue match started {b.lastMatchAt} UTC; if the box was updated since, it clears after its next match.</>}
+            {' '}Disable it or fix it before applying.
+          </p>
         ))}
         {data.active && (
           <div>
