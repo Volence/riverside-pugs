@@ -86,3 +86,12 @@ export function watchKnobs(knobs: BalanceKnobs, cat: Catalogue | null): BalanceK
   }
   return { ...knobs, cvars: [...knobs.cvars, ...extra], weapons };
 }
+
+/** `w:<weapon>.<key>` -> label, from knobs.json's weapons and the catalogue's
+ *  weapon values (knobs first), for wording triage changes. */
+export function weaponLabels(knobs: BalanceKnobs | null, cat: Catalogue | null): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const v of cat?.values ?? []) if (v.source === 'weapon') out[`w:${v.id}`] = v.label;
+  for (const w of knobs?.weapons ?? []) out[`w:${w.weapon}.${w.key}`] = w.label;
+  return out;
+}
