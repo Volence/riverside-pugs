@@ -88,6 +88,16 @@ describe('triage decisions', () => {
     expect(triageInfo(db, real, LISTS).base?.id).toBe(base);
   });
 
+  it('with no balance patch to judge against, the card compares with the newest earlier untriaged one and says so', () => {
+    // Production on 2026-09-25: only historical patches (no inputs) are balance,
+    // and the first two fingerprinted configs are both pending.
+    db.prepare("UPDATE balance_patches SET triage = 'pending', name = NULL WHERE id = ?").run(base);
+    const info = triageInfo(db, noisy, LISTS);
+    expect(info.base).toEqual({ id: base, number: 1, name: null, needsTriage: true });
+    expect(info.changes).toEqual(['plugin added: l4d_tvwatch']);
+    expect(triageInfo(db, base, LISTS).base).toBeNull();
+  });
+
   it('balance needs a name and only applies to a pending patch', () => {
     expect(triageBalance(db, noisy, { name: ' ', notes: '' })).toMatchObject({ ok: false, status: 400 });
     expect(triageBalance(db, noisy, { name: 'Tv', notes: 'n' })).toEqual({ ok: true });

@@ -369,7 +369,7 @@ export interface PatchSummary {
    *  target) or folded into, the differences in plain words, the plugins
    *  among them, and whether plugins are all that differ. Empty for a
    *  balance patch. */
-  triageBase: { id: number; number: number; name: string | null } | null;
+  triageBase: { id: number; number: number; name: string | null; needsTriage?: boolean } | null;
   changes: string[];
   plugins: string[];
   onlyPluginsChanged: boolean;

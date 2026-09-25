@@ -30,6 +30,7 @@ export function TriageCard({ patch, targets, run, busy }: {
       <h3>Needs triage: {label(patch)}</h3>
       <p class="muted">
         Compared with {base ? label(base) : 'no earlier patch'}
+        {base?.needsTriage && ' (not triaged yet, so nothing can be folded into it: triage that one first)'}
         {patch.servers.length > 0 && <>; running on {patch.servers.map((s) => s.name).join(', ')}</>}.
       </p>
       {patch.releaseId != null && <p class="muted">From release {patch.releaseId}.</p>}

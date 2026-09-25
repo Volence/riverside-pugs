@@ -868,7 +868,7 @@ export interface PatchSummary {
   foldedInto?: number | null;
   /** Pending or folded only: what it is judged against (the default fold
    *  target) or folded into, and the differences in plain words. */
-  triageBase?: { id: number; number: number; name: string | null } | null;
+  triageBase?: { id: number; number: number; name: string | null; needsTriage?: boolean } | null;
   changes?: string[];
   plugins?: string[];
   onlyPluginsChanged?: boolean;
