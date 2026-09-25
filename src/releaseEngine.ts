@@ -3,7 +3,8 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { DB } from './db.js';
 import { publishAdminEvent } from './adminFeed.js';
-import { getServer, markOffline, release as releaseServer, type ServerRow } from './serverPool.js';
+import { getServer, markOffline, type ServerRow } from './serverPool.js';
+import { ServerHolds } from './serverHolds.js';
 import { restartOutcome, type RestartOutcome, type ServerRestarter } from './serverRestart.js';
 import { treeWriterFor, type TreeWriter } from './fleetWrite.js';
 import type { Op } from './releaseStage.js';
@@ -47,6 +48,9 @@ export class ReleaseEngine {
   private hooked = new Map<number, { releaseId: number; stage: 'writing' | 'written' | 'park' | 'restarted' }>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private recovered = false;
+  /** Which reserved boxes are this engine's holds, shared with the balance
+   *  writer so neither side takes the other's hold for its own. */
+  private holds: ServerHolds;
 
   constructor(private d: {
     db: DB;
@@ -63,7 +67,15 @@ export class ReleaseEngine {
     tickMs?: number;
     hookCapMs?: number;
     opLimitMs?: number;
-  }) {}
+    /** Shared with the balance writer (see serverHolds.ts); one of its own
+     *  when absent. */
+    holds?: ServerHolds;
+    /** Called when the engine gives a box back to the pool, so a match
+     *  waiting for a server can claim it (the pending list's drain). */
+    onFreed?: () => void;
+  }) {
+    this.holds = d.holds ?? new ServerHolds();
+  }
 
   private now() { return (this.d.now ?? sqlNow)(); }
   private rel(id: number) { return this.d.db.prepare('SELECT * FROM releases WHERE id = ?').get(id) as Row | undefined; }
@@ -276,8 +288,11 @@ export class ReleaseEngine {
     const writer = (this.d.writer ?? treeWriterFor)(s);
     if (!writer) { this.setBox(r.id, b.server_id, 'failed', 'no transport configured'); return; }
     const held = s.status === 'idle';
-    if (held) db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(s.id);
-    const unhold = () => { if (held) releaseServer(db, s.id); };
+    if (held) {
+      db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(s.id);
+      this.holds.take(s.id, 'release');
+    }
+    const unhold = () => { if (held) this.unhold(s.id); };
     const hooked = { releaseId: r.id, stage: 'writing' as 'writing' | 'written' | 'park' | 'restarted' };
     if (releaserRestarting) this.hooked.set(s.id, hooked);
     this.setBox(r.id, b.server_id, 'writing');
@@ -332,6 +347,7 @@ export class ReleaseEngine {
         if (releaserRestarting && hooked.stage === 'writing') hooked.stage = 'park';
         else if (releaserRestarting) this.hooked.delete(s.id);
         markOffline(db, s.id);
+        this.holds.drop(s.id, 'release');
         publishAdminEvent({ kind: 'problem', text: `Release ${r.id} failed on ${s.name} and its files could not all be put back: ${error}. It is offline; fix it by hand, then Set idle.`, link: LINK });
         return;
       }
@@ -382,6 +398,7 @@ export class ReleaseEngine {
       console.error(`[releases] restart of server ${serverId} failed:`, err);
       this.park(releaseId, serverId, err instanceof Error ? err.message : String(err));
     }).finally(() => {
+      this.holds.drop(serverId, 'release');
       this.restarts.delete(restart);
       this.afterBox(releaseId, serverId);
     });
@@ -389,11 +406,14 @@ export class ReleaseEngine {
   }
 
   /** Written but not restarted: never back to idle, since srcds has not loaded
-   *  what is on its disk. Offline while we still hold it; a box a match took
-   *  meanwhile is left to that match. An admin restarts it and sets it idle. */
-  private park(releaseId: number, serverId: number, why: string): void {
+   *  what is on its disk. Offline while we still hold it; a box a match or the
+   *  balance writer took meanwhile is left to it. An admin restarts it and
+   *  sets it idle. `ours` overrides the hold record for recover(), which runs
+   *  before any hold has been recorded. */
+  private park(releaseId: number, serverId: number, why: string, ours = this.holds.owns(serverId, 'release')): void {
     const db = this.d.db;
-    db.prepare("UPDATE servers SET status = 'offline' WHERE id = ? AND status = 'reserved'").run(serverId);
+    if (ours) db.prepare("UPDATE servers SET status = 'offline' WHERE id = ? AND status = 'reserved'").run(serverId);
+    this.holds.drop(serverId, 'release');
     this.setBox(releaseId, serverId, 'written', `written, restart pending: ${why}`);
     const name = getServer(db, serverId)?.name ?? `server ${serverId}`;
     publishAdminEvent({ kind: 'problem', text: `Release ${releaseId} is written to ${name} but it was not restarted: ${why}. Restart it when empty, then Set idle.`, link: LINK });
@@ -401,13 +421,31 @@ export class ReleaseEngine {
 
   /** Idle again after its restart, unless something else has the box now. */
   private freeIfOurs(serverId: number): void {
-    this.d.db.prepare(`UPDATE servers SET status = 'idle' WHERE id = ? AND status = 'offline'
+    const r = this.d.db.prepare(`UPDATE servers SET status = 'idle' WHERE id = ? AND status = 'offline'
       AND NOT EXISTS (SELECT 1 FROM matches WHERE server_id = ? AND state IN ('configuring','live'))`).run(serverId, serverId);
+    if (r.changes === 1) this.freed();
   }
 
-  /** Our hold on the box: still reserved and no match on it. */
+  /** Lets go of our hold, back to idle, unless a match took the box over
+   *  meanwhile (an in-game match adopted on it goes live whatever the row
+   *  said) or the hold is no longer ours. The balance writer's unhold, same
+   *  guard. */
+  private unhold(serverId: number): void {
+    if (!this.holds.owns(serverId, 'release')) return;
+    this.holds.drop(serverId, 'release');
+    const r = this.d.db.prepare(`UPDATE servers SET status = 'idle' WHERE id = ? AND status = 'reserved'
+      AND NOT EXISTS (SELECT 1 FROM matches WHERE server_id = ? AND state IN ('configuring','live'))`).run(serverId, serverId);
+    if (r.changes === 1) this.freed();
+  }
+
+  private freed(): void {
+    try { this.d.onFreed?.(); } catch (err) { console.error('[releases] onFreed threw:', err); }
+  }
+
+  /** Our hold on the box: recorded as ours, still reserved, no match on it. */
   private stillOurs(serverId: number): boolean {
-    return getServer(this.d.db, serverId)?.status === 'reserved'
+    return this.holds.owns(serverId, 'release')
+      && getServer(this.d.db, serverId)?.status === 'reserved'
       && !this.d.db.prepare("SELECT 1 FROM matches WHERE server_id = ? AND state IN ('configuring','live')").get(serverId);
   }
 
@@ -440,12 +478,12 @@ export class ReleaseEngine {
     const sleep = this.d.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     const limit = this.d.emptyWaitMs ?? 10 * 60_000, poll = this.d.emptyPollMs ?? 60_000;
     for (let waited = 0; waited < limit; waited += poll) {
-      if (!this.stillOurs(serverId)) return 'a match took the box while it waited to empty';
+      if (!this.stillOurs(serverId)) return 'something else took the box while it waited to empty';
       let n: number;
       try { n = await this.d.humans(getServer(this.d.db, serverId)!); } catch (err) {
         return `could not count the players on it (${err instanceof Error ? err.message : String(err)})`;
       }
-      if (!this.stillOurs(serverId)) return 'a match took the box while it waited to empty';
+      if (!this.stillOurs(serverId)) return 'something else took the box while it waited to empty';
       if (n === 0) return null;
       await sleep(poll);
     }
@@ -459,11 +497,14 @@ export class ReleaseEngine {
    * was lost is held again. Then, off the chain, the first is put back from
    * its backup on disk (idle again only if it was ours from idle, never if the
    * releaser had it) and the second gets its restart through the normal
-   * empty-box path. Runs once.
+   * empty-box path. Returns the ids of the boxes held again, which the boot
+   * reconcile must leave alone (to it they are 'reserved' with no match).
+   * Runs once; a second call returns nothing.
    */
-  recover(): void {
-    if (this.recovered) return;
+  recover(): number[] {
+    if (this.recovered) return [];
     this.recovered = true;
+    const held: number[] = [];
     const db = this.d.db;
     const matchOn = (sid: number) => !!db.prepare("SELECT 1 FROM matches WHERE server_id = ? AND state IN ('configuring','live')").get(sid);
     const stuck = db.prepare("SELECT release_id, server_id FROM release_boxes WHERE state = 'writing'").all() as { release_id: number; server_id: number }[];
@@ -481,12 +522,15 @@ export class ReleaseEngine {
     for (const b of lost) {
       const st = getServer(db, b.server_id)?.status;
       if (!this.d.restarter || matchOn(b.server_id) || (st !== 'reserved' && st !== 'offline')) {
-        this.park(b.release_id, b.server_id, 'its restart was lost to a site restart');
+        this.park(b.release_id, b.server_id, 'its restart was lost to a site restart', st === 'reserved' && !matchOn(b.server_id));
         continue;
       }
       db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(b.server_id);
+      this.holds.take(b.server_id, 'release');
+      held.push(b.server_id);
       this.queueRestart(b.release_id, b.server_id);
     }
+    return held;
   }
 
   private async restoreInterrupted(releaseId: number, serverId: number, freeAfter: boolean): Promise<void> {

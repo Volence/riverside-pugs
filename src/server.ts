@@ -88,6 +88,7 @@ import { ServerAdminSync } from './serverAdmins.js';
 import { kickThenQuit, parseHumans, QuitNotSentError, rconRestarter, type ServerRestarter } from './serverRestart.js';
 import { DeployRepo } from './deployRepo.js';
 import { ReleaseEngine } from './releaseEngine.js';
+import { ServerHolds } from './serverHolds.js';
 import { ReleaseService } from './releaseService.js';
 import { adminReleaseRoutes } from './routes/adminReleases.js';
 import type { TreeWriter } from './fleetWrite.js';
@@ -576,10 +577,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // It holds an idle box out of the pool while it writes and counts its
   // players first (humansOn is defined below, called only later). When a
   // hold ends the pending list drains, as it does when a match frees a box.
-  let balanceHoldFreed: () => void = () => {};
+  // The release engine below holds boxes the same way; the two share one
+  // record of whose hold a reserved box is (src/serverHolds.ts).
+  let holdFreed: () => void = () => {};
+  const serverHolds = new ServerHolds();
   const balanceWriter = new BalanceRolloutWriter({
-    db: deps.db, transport: deps.balanceTransport,
-    humans: (s) => (deps.balanceHumans ?? humansOn)(s), onFreed: () => balanceHoldFreed(),
+    db: deps.db, transport: deps.balanceTransport, holds: serverHolds,
+    humans: (s) => (deps.balanceHumans ?? humansOn)(s), onFreed: () => holdFreed(),
   });
   // The balance watch list as a file pug-match 0.3.14+ reads at map start
   // (sub-project 3). Knobs loaded here for the file only; a broken knobs.json
@@ -611,6 +615,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const releaseEngine = new ReleaseEngine({
     db: deps.db, blob: (id) => deployRepo.blob(id), writer: deps.releaseWriter, restarter, humans: deps.releaseHumans ?? humansOn,
     releasesDir: deps.config.releasesDir, devMode: deps.config.devMode,
+    holds: serverHolds, onFreed: () => holdFreed(),
   });
 
   const releaser = new ServerReleaser(deps.db, deps.serverCleaner ?? (async (server, token, opts) => {
@@ -1187,8 +1192,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // matches at all.
       // Before the reconcile: a box a release held mid-write or mid-restart
       // is 'reserved' with no match, which the reconcile would make idle.
-      if (!deps.config.devMode) releaseEngine.recover();
-      const stranded = reconcileServers(deps.db, releaser);
+      // The boxes recover holds again for their lost restart are kept out of
+      // it by id.
+      const releaseHeld = deps.config.devMode ? [] : releaseEngine.recover();
+      const stranded = reconcileServers(deps.db, releaser, releaseHeld);
       if (stranded.length > 0) {
         console.log(`[server] reconciled ${stranded.length} stranded server(s) at boot`);
       }
@@ -1201,7 +1208,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       pending = new PendingMatches(deps.db, (id) => (orchestrator as RealOrchestrator).setupMatch(id));
       pending.rebuildFromDb();
       releaser.onFreed(() => pending.drain());
-      balanceHoldFreed = () => pending?.drain();
+      holdFreed = () => pending?.drain();
       // Drain once at boot, because the pending list is otherwise driven
       // entirely by servers being freed and an already-idle box frees nothing:
       // a match that was waiting when the process died and an idle server

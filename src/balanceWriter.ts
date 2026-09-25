@@ -5,6 +5,7 @@ import type { DB } from './db.js';
 import { transportFor, type AddonsTransport } from './addonsTransport.js';
 import { getServer, listServers, type ServerRow } from './serverPool.js';
 import { publishAdminEvent } from './adminFeed.js';
+import { ServerHolds } from './serverHolds.js';
 import { activeRollout, ensureServerRows, markFailed, markPending, markWritten, NO_TRANSPORT, type RolloutRow } from './balanceRollouts.js';
 
 /**
@@ -52,6 +53,9 @@ export class BalanceRolloutWriter {
    *  against the same box while the first might still land, and the temp
    *  file it reads from is only removed once it is done with it. */
   private inFlight = new Map<number, Promise<void>>();
+  /** Which reserved boxes are this writer's holds, shared with the release
+   *  engine so neither side takes the other's hold for its own. */
+  private holds: ServerHolds;
 
   constructor(private deps: {
     db: DB;
@@ -65,18 +69,29 @@ export class BalanceRolloutWriter {
     /** Called when a hold ends and the box is back in the pool, so a match
      *  waiting for a server can claim it (the pending list's drain). */
     onFreed?: () => void;
-  }) {}
+    /** Shared with the release engine (see serverHolds.ts); one of its own
+     *  when absent. */
+    holds?: ServerHolds;
+  }) {
+    this.holds = deps.holds ?? new ServerHolds();
+  }
 
   /** idle -> reserved in one statement, so nothing can claim the box
    *  between the check and the write. False when it was not idle. */
   private hold(serverId: number): boolean {
-    return this.deps.db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ? AND status = 'idle' AND enabled = 1")
+    const took = this.deps.db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ? AND status = 'idle' AND enabled = 1")
       .run(serverId).changes === 1;
+    if (took) this.holds.take(serverId, 'balance');
+    return took;
   }
 
   /** Back to idle, unless a match took the box over meanwhile (an in-game
-   *  match adopted on it goes live whatever the row said). */
+   *  match adopted on it goes live whatever the row said), or the hold is
+   *  not ours any more (an admin set the box idle and the release engine
+   *  holds it now). */
   private unhold(serverId: number): void {
+    if (!this.holds.owns(serverId, 'balance')) return;
+    this.holds.drop(serverId, 'balance');
     const r = this.deps.db.prepare(`UPDATE servers SET status = 'idle' WHERE id = ? AND status = 'reserved'
       AND NOT EXISTS (SELECT 1 FROM matches WHERE server_id = ? AND state IN ('configuring', 'live'))`).run(serverId, serverId);
     if (r.changes === 1) {
