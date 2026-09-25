@@ -11,4 +11,20 @@ describe('demoTickAt', () => {
   it('never lands before the go-live tick', () => {
     expect(demoTickAt({ tick: 4000, hz: 100 }, -50)).toBe(4000);
   });
+
+  // The replay clock is game time, which stands still through a pause, while
+  // the demo keeps recording ticks. Each shift is a pause: at round time tMs
+  // the demo went on for `ticks` more than the round clock did.
+  it('adds the demo ticks of every pause the moment is past', () => {
+    const sync = { tick: 4000, hz: 100, shifts: [{ tMs: 10_000, ticks: 6600 }, { tMs: 30_000, ticks: 250 }] };
+    expect(demoTickAt(sync, 5_000)).toBe(4500);
+    // The frozen moment itself is the last tick before the pause.
+    expect(demoTickAt(sync, 10_000)).toBe(5000);
+    expect(demoTickAt(sync, 10_010)).toBe(5001 + 6600);
+    expect(demoTickAt(sync, 40_000)).toBe(8000 + 6600 + 250);
+  });
+
+  it('reads an empty shift list like none', () => {
+    expect(demoTickAt({ tick: 4000, hz: 100, shifts: [] }, 1000)).toBe(4100);
+  });
 });

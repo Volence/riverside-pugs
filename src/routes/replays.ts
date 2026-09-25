@@ -11,6 +11,7 @@ import {
 import { applyPush, errCode, parsePush, PUSH_BODY_LIMIT } from '../replayPush.js';
 import { infectedMaskForHeader, rewriteHead } from '../replaySides.js';
 import { getRange, type R2Config } from '../r2.js';
+import { storedDemoShifts, type DemoSync } from '../logParse.js';
 
 /** How long a computed cutoff is reused.
  *
@@ -503,10 +504,17 @@ export async function replayRoutes(
     // Where t_ms 0 of this round sits in the map's SourceTV demo, for the
     // viewer to show a demo_gototick target. Null for rounds recorded before
     // pug-match 0.3.12, or with no match demo.
+    // `shifts` are the round's pauses (pug-match 0.3.15 on): t_ms stands
+    // still through one while the demo keeps recording.
     const sync = db.prepare(
-      'SELECT demo_tick AS tick, demo_hz AS hz FROM match_rounds WHERE match_id = ? AND ordinal = ? AND half = ?',
-    ).get(id, ord, hf) as { tick: number | null; hz: number | null } | undefined;
-    const demo = sync && sync.tick !== null && sync.hz !== null ? { tick: sync.tick, hz: sync.hz } : null;
+      'SELECT demo_tick AS tick, demo_hz AS hz, demo_shifts AS shifts FROM match_rounds WHERE match_id = ? AND ordinal = ? AND half = ?',
+    ).get(id, ord, hf) as { tick: number | null; hz: number | null; shifts: string | null } | undefined;
+    let demo: DemoSync | null = null;
+    if (sync && sync.tick !== null && sync.hz !== null) {
+      demo = { tick: sync.tick, hz: sync.hz };
+      const shifts = storedDemoShifts(sync.shifts);
+      if (shifts.length > 0) demo.shifts = shifts;
+    }
 
     return { entries, demo };
   });

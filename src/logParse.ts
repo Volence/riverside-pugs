@@ -40,7 +40,17 @@ export interface Phase {
  *  `tick` is the demo tick at which the half went live, the moment every t_ms
  *  of that round counts from, and `hz` is the server tickrate, so a moment
  *  t_ms into the round is demo tick `tick + round(t_ms * hz / 1000)`. */
-export interface DemoSync { tick: number; hz: number }
+export interface DemoSync { tick: number; hz: number; shifts?: DemoShift[] }
+
+/** A pause inside a round (pug-match 0.3.15 on, `demoshift=t:ticks,...` on
+ *  ROUND_END). t_ms is game time, which stands still while the server is
+ *  paused, but the SourceTV demo keeps recording, so from round time `tMs`
+ *  (the frozen moment the pause began) the demo is `ticks` further along
+ *  than `tick + round(t_ms * hz / 1000)` says. */
+export interface DemoShift { tMs: number; ticks: number }
+
+/** More than any real round: 3 pauses a team per campaign plus disconnects. */
+const MAX_DEMO_SHIFTS = 32;
 
 /** The reason fields l4d_lilac_report 0.2.0+ adds onto an L4DL line for
  *  aimbot, aimlock and bhop, straight off Little Anti-Cheat's own forwards.
@@ -258,7 +268,45 @@ function demoSyncOf(rest: Record<string, string>): { demo?: DemoSync } {
   const tick = intOf(rest.demotick);
   const hz = intOf(rest.hz);
   if (tick === null || hz === null || tick < 0 || hz <= 0 || hz > 1000) return {};
-  return { demo: { tick, hz } };
+  const shifts = demoShiftsOf(rest.demoshift);
+  return { demo: shifts ? { tick, hz, shifts } : { tick, hz } };
+}
+
+/** match_rounds.demo_shifts back into shifts: [] for NULL or anything that
+ *  is not the stored shape, so a damaged column loses the pauses and never
+ *  the sync. */
+export function storedDemoShifts(json: string | null): DemoShift[] {
+  if (json === null) return [];
+  let v: unknown;
+  try { v = JSON.parse(json); } catch { return []; }
+  if (!Array.isArray(v) || v.length > MAX_DEMO_SHIFTS) return [];
+  const out: DemoShift[] = [];
+  for (const e of v) {
+    const tMs = (e as { tMs?: unknown })?.tMs;
+    const ticks = (e as { ticks?: unknown })?.ticks;
+    if (!Number.isInteger(tMs) || !Number.isInteger(ticks) || (tMs as number) < 0 || (ticks as number) <= 0) return [];
+    out.push({ tMs: tMs as number, ticks: ticks as number });
+  }
+  return out;
+}
+
+/** `t:ticks,t:ticks` in round order, or null for absent or anything
+ *  malformed: a bad list loses the pauses, never the sync itself. */
+function demoShiftsOf(s: string | undefined): DemoShift[] | null {
+  if (s === undefined) return null;
+  const parts = s.split(',');
+  if (parts.length > MAX_DEMO_SHIFTS) return null;
+  const out: DemoShift[] = [];
+  for (const part of parts) {
+    const m = /^(\d+):(\d+)$/.exec(part);
+    if (!m) return null;
+    const tMs = Number(m[1]);
+    const ticks = Number(m[2]);
+    if (ticks <= 0 || ticks > 10_000_000 || tMs > 100_000_000) return null;
+    if (out.length > 0 && tMs < out[out.length - 1].tMs) return null;
+    out.push({ tMs, ticks });
+  }
+  return out;
 }
 
 function intRange(s: string | undefined, min: number, max: number): number | null {

@@ -57,4 +57,22 @@ describe('ROUND_END parity between plugin and parser', () => {
       demo: { tick: 4100, hz: 100 },
     });
   });
+
+  it('parses the pause list DemoTickArgs appends', () => {
+    // The key and both separators, read out of the plugin's own Format so a
+    // rename there fails here rather than silently dropping every pause.
+    const m = pluginSrc.match(/Format\(out, maxlen, "%s%s%d(.)%d", out, i == 0 \? " (\w+)=" : "(.)"/);
+    expect(m).not.toBeNull();
+    const [, pair, key, sep] = m!;
+    const args = ` demotick=4100 hz=100 ${key}=10000${pair}6600${sep}30000${pair}250`;
+    const values = ['m', '1', 'a', '10', '4', args];
+    let i = 0;
+    const body = fmt.replace(/%[sd]/g, () => values[i++]);
+    const ev = parseLogDatagram(Buffer.from(
+      `\xff\xff\xff\xffRL 08/29/2026 - 15:29:00: PUG ${'a'.repeat(32)} ${body}\n\x00`, 'binary'));
+    expect(ev).toMatchObject({
+      kind: 'round_end',
+      demo: { tick: 4100, hz: 100, shifts: [{ tMs: 10000, ticks: 6600 }, { tMs: 30000, ticks: 250 }] },
+    });
+  });
 });

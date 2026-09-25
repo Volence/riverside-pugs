@@ -180,6 +180,9 @@ public Action Listener_PugPause(int client, const char[] command, int argc)
 public Action Timer_PauseClock(Handle timer)
 {
 	PauseClockTick();
+	// Rides the same clock: finds pauses by game time standing still, so it
+	// covers every kind of pause, not only the ones this file charges.
+	DemoShiftTick();
 	// After the bookkeeping on purpose: the tick that first sees the game
 	// paused is the one that decides who owns the pause, and the PHASE line
 	// that announces it has to carry that owner.
