@@ -17,7 +17,29 @@ One frame was on Chicago. Portraits, bars and text draw fine.
 The checkerboard is Source's "material not found" texture. So the game looked for a
 material and got nothing back.
 
-## Bottom line
+## Update, same night: a stronger cause, found and fixed in the HUD editor
+
+**The HUD editor's Modern preset drew exactly these checkerboards for every player but the owner.**
+Its files name four flat textures the game does not have (`vgui/hud/mod_panel_flat` behind the kill
+notices and the versus score panel, `mod_panel_flat_red` behind the team score box, and
+`mod_equip_active`/`_inactive`), and the download did not include them. They lived only in the
+owner's own `modernhud` folder, which the owner's `gameinfo.txt` mounts first, so the owner's game
+and every in-game probe drew them fine.
+
+Proven in game (`/home/volence/l4d/hud/probe-modern-art/RESULTS.md`): with the `modernhud` line
+commented out for the run, the untouched Modern download from master draws the purple and black
+texture on the versus score boxes, the "Average Distance / Health Bonus" panel and the kill notice
+box, which matches Kong's frames. The build from branch `hud-overnight` (commit 07c83684) ships the four
+textures and draws flat panels. This happens on every server and offline too; sv_pure plays no part.
+
+So the most likely story: Kong downloaded a Modern-based HUD from the editor (or from the community
+page). After the fix is deployed he downloads it again. Any other player with a Modern-based HUD needs
+to do the same. The sv_pure analysis below still holds for HUDs installed as loose files.
+
+A new test (`web/src/hud/pictures.build.test.ts`) checks every preset's download against the game's
+own vgui files (`scripts/export-stock-vgui.py`), so a missing picture fails the build.
+
+## Bottom line (before the update)
 
 1. **Most likely: `sv_pure 2` on all four servers, together with a HUD installed as loose
    files.** Under `sv_pure 2` the client refuses any `materials/`, `models/` or `sound/` file
