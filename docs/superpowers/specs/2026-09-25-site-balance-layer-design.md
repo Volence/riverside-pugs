@@ -187,7 +187,7 @@ the plugin list.
 
 1. Approve this shape (git-first, `site/` layer, apply opens a release that still
    needs a Deploy click).
-2. Write credential: second deploy key (recommended) or bot account.
+2. ~~Write credential~~ **Decided 2026-09-25: a second deploy key** with write access on `Volence/l4d-deploy`.
 3. Which plugins are toggleable.
 4. Ranges for weapon knobs, and which other values get ranges first.
 5. Whether the direct writer is removed right after step 3, or kept a while as a
