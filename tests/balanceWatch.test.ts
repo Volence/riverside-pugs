@@ -7,6 +7,7 @@ import { parseLogDatagram } from '../src/logParse.js';
 import { BalanceWatchWriter, dataDirOf, renderWatchFile, WATCH_FILE } from '../src/balanceWatch.js';
 import type { AddonsTransport } from '../src/addonsTransport.js';
 import { KNOBS } from './balanceFixtures.js';
+import { loadCatalogue, watchKnobs } from '../src/balanceCatalogue.js';
 
 describe('renderWatchFile', () => {
   it('lists cvars, files, dirs and weapon keys in knobs order', () => {
@@ -18,6 +19,25 @@ describe('renderWatchFile', () => {
       'file cfg/pug_match.cfg', 'dir addons/stripper/maps .cfg', 'weapon weapon_smg SpreadPerShot',
     ]);
     expect(text.endsWith('\n')).toBe(true);
+  });
+  it('lists each entry once, cvars compared ignoring case (FindConVar does)', () => {
+    const f = { path: 'cfg/a.cfg', label: 'x' }, d = { path: 'cfg/d', ext: '.cfg', label: 'y' };
+    const w = { weapon: 'weapon_smg', key: 'Damage', label: 'z' };
+    const text = renderWatchFile({ ...KNOBS, cvars: [{ cvar: 'gfc_ff_zc_flags', label: 'a', group: 'g' }, { cvar: 'gfc_FF_zc_flags', label: 'b', group: 'g' }],
+      files: [f, f], dirs: [d, d], weapons: [w, w] });
+    expect(text.split('\n').filter((l) => l && !l.startsWith('//'))).toEqual([
+      'cvar gfc_ff_zc_flags', 'file cfg/a.cfg', 'dir cfg/d .cfg', 'weapon weapon_smg Damage',
+    ]);
+  });
+  it('a catalogue cvar spelled with other case joins neither the list nor the file twice, and the catalogue refuses two spellings', () => {
+    const cat = { groups: [{ id: 'g', label: 'G' }], rules: [], values: [
+      { id: 'Z_Tank_Health', group: 'g', label: 'T', source: 'cvar' as const },
+      { id: 'weapon_smg.Damage', group: 'g', label: 'U', source: 'weapon' as const },
+    ] };
+    const k = watchKnobs({ ...KNOBS, weapons: [{ weapon: 'weapon_smg', key: 'Damage', label: 'U' }] }, cat);
+    expect(k.cvars.map((c) => c.cvar.toLowerCase()).filter((c) => c === 'z_tank_health')).toHaveLength(1);
+    expect(k.weapons).toHaveLength(1);
+    expect(() => loadCatalogue('', { ...cat, values: [...cat.values, { id: 'z_tank_health', group: 'g', label: 'T', source: 'cvar' }] })).toThrow(/duplicate/);
   });
   it('finds the data dir from the addons dir', () => {
     expect(dataDirOf({ addons_dir: '/g/left4dead/addons' } as never)).toBe('/g/left4dead/addons/sourcemod/data');

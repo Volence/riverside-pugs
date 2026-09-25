@@ -135,7 +135,17 @@ export function loadBalanceKnobs(path: string = BALANCE_KNOBS_PATH, raw?: unknow
       if (!/^[A-Za-z][A-Za-z0-9_]{0,40}$/.test(w.key)) throw new Error(`bad weapon key: ${w.key}`);
     }
   }
-  if (new Set(k.cvars.map((c) => c.cvar)).size !== k.cvars.length) throw new Error('duplicate cvar');
+  // The plugin sends one item per watched entry, so an entry listed twice
+  // sends its key twice and the round's inventory is dropped as incomplete.
+  // Cvars compare ignoring case: FindConVar does.
+  const dup = (keys: string[]) => keys.find((x, i) => keys.indexOf(x) !== i);
+  const twice = [
+    ['cvar', dup(k.cvars.map((c) => c.cvar.toLowerCase()))],
+    ['file', dup(k.files.map((f) => f.path))],
+    ['dir', dup(k.dirs.map((d) => d.path))],
+    ['weapon key', dup((k.weapons ?? []).map((w) => `${w.weapon}.${w.key}`))],
+  ].find(([, x]) => x !== undefined);
+  if (twice) throw new Error(`balance knobs: duplicate ${twice[0]} ${twice[1]}`);
   validateAdjustable(k);
   return k;
 }

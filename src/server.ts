@@ -1069,7 +1069,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             if (rs) resetRoundLines(deps.db, rs.id, currentOrdinal(deps.db, rs.id), ev.half as 1 | 2);
           }
           else if (ev.kind === 'balance_part') {
-            balanceAssembler.part(ev.token, ev.half, ev.part, ev.items);
+            balanceAssembler.part(ev.token, ev.half, ev.part, ev.items, Date.now(), ev.sent);
             return; // nothing visible changed yet; no broadcast
           }
           else if (ev.kind === 'balance_end') {
