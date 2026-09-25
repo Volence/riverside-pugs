@@ -79,6 +79,18 @@ export function localTransport(dir: string): AddonsTransport {
   };
 }
 
+/** 550 and 553 are how FTP servers that refuse RNTO onto an existing file
+ *  say so (basic-ftp puts the reply code on the error). */
+function renameRefusedAsExisting(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  return code === 550 || code === 553;
+}
+
+/** The files this is allowed to remove-then-rename: small text configs. */
+function isSmallConfigName(name: string): boolean {
+  return /\.(cfg|txt)$/i.test(name);
+}
+
 /** The part of basic-ftp's Client this file uses, so tests can fake it. */
 export type FtpClientLike = Pick<FtpClient, 'access' | 'close' | 'ensureDir' | 'uploadFrom' | 'rename' | 'cd' | 'size' | 'remove' | 'downloadTo'>;
 
@@ -108,11 +120,21 @@ export function ftpTransport(cfg: {
         await c.uploadFrom(localPath, `${remoteName}.part`);
         try {
           await c.rename(`${remoteName}.part`, remoteName);
-        } catch {
-          // Some FTP servers refuse RNTO onto an existing file. Clear the
-          // target and try once more; a second failure is the real error.
+        } catch (err) {
+          // Some FTP servers refuse RNTO onto an existing file (550 or 553).
+          // Only then, and only for a small config file, is the target cleared
+          // for a second try: between the remove and the rename the box has
+          // no copy at all, which a campaign VPK (put by this same function)
+          // must never risk, and any other error (a dropped connection, say)
+          // says nothing about the target being in the way.
+          if (!renameRefusedAsExisting(err) || !isSmallConfigName(remoteName)) throw err;
           await c.remove(remoteName).catch(() => {});
-          await c.rename(`${remoteName}.part`, remoteName);
+          try {
+            await c.rename(`${remoteName}.part`, remoteName);
+          } catch (err2) {
+            const why = err2 instanceof Error ? err2.message : String(err2);
+            throw new Error(`${why}; ${remoteName} was removed and the new copy is only at ${remoteName}.part on the box: put it in place by hand`);
+          }
         }
       });
     },
