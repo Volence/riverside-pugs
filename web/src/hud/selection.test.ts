@@ -604,3 +604,73 @@ describe('handles never leave the canvas (task L5)', () => {
     expect(handleAt(box, [...corners], 900, 500, 3, bounds)).toBeNull();
   });
 });
+
+/**
+ * Picking on the Tab screen (tab screen spec 3.1, task 15): while Tab is
+ * held its pieces are hit first; a row piece is one piece in every row (the
+ * one row file), with no card level: it climbs straight to its element.
+ * v1 moves only the versus panel, so a Tab piece has no handles.
+ */
+describe('the Tab screen', () => {
+  const HELD: PreviewState = { ...DEFAULT_PREVIEW, tab: true };
+  const HEALTH_ROW2 = { x: 55, y: 218 };
+  const bar: Selection = { kind: 'children', names: ['SurvivorStatsHealth'], card: 1, panel: 'tabSurvivors' };
+
+  it('picks a row piece in the row clicked, and nothing Tab with Tab off', () => {
+    const hit = hitAt(D, 'survivor', HELD, HEALTH_ROW2.x, HEALTH_ROW2.y);
+    expect(hit).toEqual({ element: 'tabSurvivors', card: 1, child: 'SurvivorStatsHealth' });
+    expect(clickSelect(D, NONE, hit, plain)).toEqual(bar);
+    expect(targetOf(D, hit, true)).toEqual({ kind: 'elements', ids: ['tabSurvivors'] });
+    expect(hitAt(D, 'survivor', DEFAULT_PREVIEW, HEALTH_ROW2.x, HEALTH_ROW2.y).element).not.toBe('tabSurvivors');
+  });
+
+  it('outlines a row piece in every row, puts no handles on it, and climbs to its element', () => {
+    const frames = selectionFrames(D, bar, HELD);
+    expect(frames).toEqual([0, 1, 2, 3].map((i) => ({ x: 50, y: 185 + 30 * i, w: 96, h: 7 })));
+    expect(selectionBox(D, bar, HELD)).toEqual(frames[1]);
+    expect(handlesFor(D, bar)).toEqual([]);
+    expect(climb(bar)).toEqual({ kind: 'elements', ids: ['tabSurvivors'] });
+    expect(breadcrumb(bar).map((c) => c.label)).toEqual(['Survivor rows', 'Health bar']);
+    expect(menuActions(bar)).toEqual(['hide', 'reset', 'selectTeam']);
+  });
+
+  it('frames the rows by their four boxes, the versus panel by its rect, the board by its backdrop and title', () => {
+    expect(elementFrame(D, 'tabSurvivors')).toEqual({ x: 20, y: 167, w: 300, h: 118 });
+    expect(elementFrame(D, 'tabVersus')).toEqual({ x: 15, y: 25, w: 354, h: 120 });
+    // MissionTitle's block (20, 13, 330 wide) runs 10 units past the 340-wide backdrop.
+    expect(elementFrame(D, 'tabBoard')).toEqual({ x: 0, y: 0, w: 350, h: 480 });
+    expect(handlesFor(D, { kind: 'elements', ids: ['tabVersus'] })).toEqual([]);
+  });
+
+  it('frames a hidden versus piece where it would be, and the piece hidden with it', () => {
+    const d = patchChild(D, 'HealthLabel', { visible: false }, 'tabVersus');
+    for (const name of ['HealthLabel', 'HealthAmount']) {
+      const [f] = selectionFrames(d, { kind: 'children', names: [name], card: 0, panel: 'tabVersus' }, HELD);
+      expect(f.w, name).toBeGreaterThan(0);
+      expect(f, name).toEqual(selectionFrames(D, { kind: 'children', names: [name], card: 0, panel: 'tabVersus' }, HELD)[0]);
+    }
+  });
+
+  it('keeps a Tab selection on both sides, the infected rows on the infected side only', () => {
+    expect(sanitize(D, 'survivor', bar)).toBe(bar);
+    expect(sanitize(D, 'infected', bar)).toBe(bar);
+    const own: Selection = { kind: 'children', names: ['Name'], card: 0, panel: 'tabInfected' };
+    expect(sanitize(D, 'infected', own)).toBe(own);
+    expect(sanitize(D, 'survivor', own)).toEqual(NONE);
+  });
+
+  it('box-selects and selects all nothing of the Tab screen while Tab is off', () => {
+    const sel = boxSelect(D, 'survivor', DEFAULT_PREVIEW, { x: 25, y: 170 }, { x: 300, y: 280 });
+    expect(selectedIds(sel).some((id) => id.startsWith('tab'))).toBe(false);
+    expect(selectedIds(selectAll(D, 'survivor', DEFAULT_PREVIEW, NONE)).some((id) => id.startsWith('tab'))).toBe(false);
+    expect(boxSelect(D, 'survivor', HELD, { x: 25, y: 170 }, { x: 300, y: 196 })).toMatchObject({ kind: 'children', panel: 'tabSurvivors', card: 0 });
+  });
+
+  it('snaps a HUD move to no Tab element, and the versus panel to the Tab screen only', () => {
+    const hud = sectionTargets(D, 'survivor', { kind: 'elements', ids: ['chat'] });
+    expect(hud).not.toContainEqual(elementFrame(D, 'tabVersus'));
+    const versus = sectionTargets(D, 'survivor', { kind: 'elements', ids: ['tabVersus'] });
+    expect(versus).toContainEqual({ x: 0, y: 0, w: 340, h: 480 });
+    expect(versus).not.toContainEqual(elementFrame(D, 'chat'));
+  });
+});

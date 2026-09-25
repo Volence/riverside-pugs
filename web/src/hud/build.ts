@@ -1569,7 +1569,8 @@ export function panelChild(design: HudDesign, panelId: string, name: string, fil
   return {
     x: drawn !== undefined ? drawn + shift.x : own, y: num(kvGet(n, 'ypos')) + shift.y,
     w: num(kvGet(n, 'wide')), h: num(kvGet(n, 'tall')),
-    visible: (kvGet(n, 'visible') ?? '1') !== '0',
+    // A piece code shows itself (ChildDef.codeShown) is visible unless the player hid it.
+    visible: def?.codeShown ? design.children[panelId]?.[def.name]?.visible !== false : (kvGet(n, 'visible') ?? '1') !== '0',
     ...(Number.isFinite(tall) ? { fontTall: tall } : {}),
     ...(raw && /^\d+ \d+ \d+ \d+$/.test(raw) ? { color: raw } : {}),
     ...(Object.keys(keys).length ? { keys } : {}),
@@ -2567,7 +2568,9 @@ export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
   const base = baseRect(panel, el, baseOf(design), design.aspect);
   const p = placed(o, base, el, design.aspect);
   const k = el.resize === 'scale' ? o.scale ?? 1 : 1;
-  const visible = o.visible ?? (kvGet(panel, 'visible') ?? '1') !== '0';
+  // The Tab screen's dialog (scores) is visible 0 in the file until code shows it on Tab: a Tab
+  // element with no hide of its own is always shown with the Tab screen.
+  const visible = o.visible ?? ((el.tab && !el.props.includes('visible')) || (kvGet(panel, 'visible') ?? '1') !== '0');
   // In Free the container covers the screen and each card places itself.
   if (el.team?.file && teamLayout(design, el).dir === 'free') return { x: 0, y: 0, w: screenW(aspect), h: SCREEN_H, visible };
   const moved = el.move && (o.x !== undefined || o.y !== undefined);
