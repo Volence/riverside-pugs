@@ -44,3 +44,41 @@ describe('Tab files are read and written as the PC game reads them (pcFind)', ()
     expect(writeKv([blockOf(got, 'BackgroundImage', '[$X360]')])).toBe(writeKv([blockOf(stockTree(SCOREBOARD), 'BackgroundImage', '[$X360]')]));
   });
 });
+
+describe('the versus panel\'s if_embedded blocks (spec 4.4, task 6)', () => {
+  const versus = (c: Record<string, unknown>) => tree(build(kids({ tabVersus: c } as HudDesign['children'])), VERSUS);
+  const emb = (n: KvNode) => pcFind(n.value as KvNode[], ['if_embedded'])!;
+
+  it('puts a colour on TeamYours\' plain block: its if_embedded holds only xpos', () => {
+    const got = versus({ TeamYours: { color: '255 255 0 255' } });
+    const b = pcFind(got, ['TeamYours'])!;
+    expect(kvGet(b, 'fgcolor_override')).toBe('255 255 0 255');
+    expect(writeKv([emb(b)])).toBe(writeKv([emb(pcFind(stockTree(VERSUS), ['TeamYours'])!)]));
+  });
+
+  it('writes a key into if_embedded when that block has it, and into the plain block otherwise', () => {
+    // No v1 piece moves (validateDesign drops a stored move), so the rule is
+    // pinned on the build with a move handed to it directly.
+    const b = pcFind(versus({ TeamYours: { x: 40, y: 50 } }), ['TeamYours'])!;
+    expect(kvGet(emb(b), 'xpos')).toBe('40');
+    expect(kvGet(b, 'xpos')).toBe('25');                         // the standalone panel's place is kept
+    expect(kvGet(b, 'ypos')).toBe('50');
+    expect(kvGet(emb(b), 'ypos')).toBeUndefined();
+  });
+
+  it('zeroes StatBreakdownHighlightImage\'s if_embedded wide on a hide, so the embedded view cannot undo it', () => {
+    const b = pcFind(versus({ StatBreakdownHighlightImage: { visible: false } }), ['StatBreakdownHighlightImage'])!;
+    expect([kvGet(b, 'visible'), kvGet(b, 'wide'), kvGet(b, 'tall')]).toEqual(['0', '0', '0']);
+    expect(kvGet(emb(b), 'wide')).toBe('0');
+    // The console and other-language lines stay as they were.
+    expect((emb(b).value as KvNode[]).map((n) => [n.key, n.value, n.cond])).toEqual([['wide', '0', '[$ENGLISH]'], ['wide', '345', '[$!ENGLISH]']]);
+    // Nothing is added to an if_embedded that lacks the key.
+    const team = pcFind(versus({ TeamYours: { visible: false } }), ['TeamYours'])!;
+    expect((emb(team).value as KvNode[]).map((n) => n.key)).toEqual(['xpos']);
+  });
+
+  it('turns DistanceLabel\'s auto_wide_tocontents off on a hide, so it cannot grow back to its text', () => {
+    const b = pcFind(versus({ DistanceLabel: { visible: false } }), ['DistanceLabel'])!;
+    expect([kvGet(b, 'visible'), kvGet(b, 'wide'), kvGet(b, 'tall'), kvGet(b, 'auto_wide_tocontents')]).toEqual(['0', '0', '0', '0']);
+  });
+});

@@ -511,7 +511,7 @@ function childPass(work: Work, design: HudDesign) {
       // Hunter file with no number the Smoker's and Boomer's carry): the
       // edit still lands in each of those, as linkedBlocks allows.
       if (!block && !work.imported) throw new Error(`${panel.file}: no child ${name}`);
-      if (block) applyChild(work, panel.file, def, block, o);
+      if (block) applyChild(work, panel.file, def, block, o, panel.embedded);
       for (const link of linkedBlocks(work, design, panel, name)) applyChild(work, link.file, def, link.block, linkedOverride(o, link));
     }
   }
@@ -614,17 +614,18 @@ function colourKey(def: ChildDef): 'drawColor' | 'fgcolor_override' {
  * future child ever ships with `move: false`, this guard comes back with
  * it, alongside a real registry entry to test it against.
  */
-function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: ChildOverride) {
+function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: ChildOverride, embedded = false) {
   if (o.color !== undefined && !def.colour) throw new Error(`${file}: ${def.name} takes no colour`);
   if (o.fontSize !== undefined && !def.font) throw new Error(`${file}: ${def.name} takes no text size`);
   if ((o.w !== undefined || o.h !== undefined) && def.box === 'none') throw new Error(`${file}: ${def.name} takes no size`);
   for (const key of Object.keys(o.keys ?? {})) {
     if (!def.keys?.some((k) => k.key === key)) throw new Error(`${file}: ${def.name} takes no key ${key}`);
   }
-  if (o.visible !== undefined) kvSet(block, 'visible', o.visible ? '1' : '0');
-  const set = (key: string, v: number | undefined) => { if (v !== undefined) kvSet(block, key, String(Math.round(v))); };
+  const put = embedded ? (key: string, value: string) => embeddedSet(block, key, value) : (key: string, value: string) => kvSet(block, key, value);
+  if (o.visible !== undefined) put('visible', o.visible ? '1' : '0');
+  const set = (key: string, v: number | undefined) => { if (v !== undefined) put(key, String(Math.round(v))); };
   set('xpos', o.x); set('ypos', o.y); set('wide', o.w); set('tall', o.h);
-  if (o.color !== undefined) kvSet(block, colourKey(def), o.color);
+  if (o.color !== undefined) put(colourKey(def), o.color);
   if (o.fontSize !== undefined) {
     const leaf = typeof block.value === 'string' ? undefined
       : block.value.find((n) => n.key.toLowerCase() === 'font' && typeof n.value === 'string');
@@ -639,13 +640,37 @@ function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: C
     // an 18-tall font is 100 at 36), so the icons are not cut off on either
     // side and the fitted card grows with them.
     if (def.box === 'none') {
-      kvSet(block, 'tall', String(size));
-      if (baseTall > 0) kvSet(block, 'wide', String(Math.round(num(kvGet(block, 'wide')) * size / baseTall)));
+      put('tall', String(size));
+      if (baseTall > 0) put('wide', String(Math.round(num(kvGet(block, 'wide')) * size / baseTall)));
     }
   }
-  if (o.z !== undefined) kvSet(block, 'zpos', String(o.z));
-  if (o.keys) writeKeys(block, insetFor(def, block, o.keys));
+  if (o.z !== undefined) put('zpos', String(o.z));
+  if (o.keys) {
+    const keys = insetFor(def, block, o.keys);
+    if (embedded) for (const [key, value] of Object.entries(keys)) embeddedSet(block, key, value, true);
+    else writeKeys(block, keys);
+  }
 }
+
+/**
+ * One key of a child of an embedded panel (PanelChildren.embedded, the
+ * versus score panel): into the block's if_embedded when that block already
+ * has the key, since the game reads it over the plain one there, else into
+ * the plain block (tab screen spec 4.4). So a colour lands on the plain key
+ * and shows in the standalone panel too, which is the same panel, and a
+ * TeamYours x lands on if_embedded's xpos. `pc` writes every PC entry of the
+ * key (pcSet, a typed KeyDef key), else the first (kvSet, as applyChild does
+ * for a plain panel).
+ */
+function embeddedSet(block: KvNode, key: string, value: string, pc = false) {
+  const emb = embeddedOf(block);
+  const target = emb && pcGet(emb, key) !== undefined ? emb : block;
+  if (pc || target === emb) pcSet(target, key, value); else kvSet(target, key, value);
+}
+
+/** A block's if_embedded sub-block, as the PC reads it. */
+const embeddedOf = (block: KvNode): KvNode | undefined =>
+  typeof block.value === 'string' ? undefined : pcFind(block.value, ['if_embedded']);
 
 /**
  * A bar's keys with the inset cut to leave a unit of fill (maxInset) at the
@@ -1187,7 +1212,7 @@ function hidePass(work: Work, design: HudDesign) {
       if (o.visible !== false) continue;
       const block = blockIn(panel.file, nodes, childPath(name));
       if (!block) continue;                            // an addable child that is off is not in the file at all
-      hardHide(block);
+      hardHide(block, panel.embedded);
       for (const link of panel.linked ?? []) { const b = work.optional(link.file, [name]); if (b) hardHide(b); }
     }
   }
@@ -1207,13 +1232,23 @@ function hidePass(work: Work, design: HudDesign) {
  * sits beside pinCorner, as in basechat.res HudChatHistory), which follows
  * the 0 x 0 parent down, not the contents up.
  */
-export function hardHide(block: KvNode) {
+export function hardHide(block: KvNode, embedded = false) {
   pcSet(block, 'visible', '0');
   pcSet(block, 'wide', '0');
   pcSet(block, 'tall', '0');
   for (const key of ['auto_wide_tocontents', 'auto_tall_tocontents']) {
     const v = pcGet(block, key);
     if (v !== undefined && v !== '0') pcSet(block, key, '0');
+  }
+  // A child of an embedded panel: its if_embedded keys win over the plain
+  // ones there, so each of these it carries is zeroed too, or
+  // StatBreakdownHighlightImage's if_embedded wide 320 would undo the hide
+  // (TAB-2: with it zeroed too, no box drew). Keys it lacks are not added.
+  const emb = embedded ? embeddedOf(block) : undefined;
+  if (emb) {
+    for (const key of ['visible', 'wide', 'tall', 'auto_wide_tocontents', 'auto_tall_tocontents']) {
+      if (pcGet(emb, key) !== undefined) pcSet(emb, key, '0');
+    }
   }
   if ((kvGet(block, 'ControlName') ?? '').toLowerCase() === 'imagepanel') {
     kvSet(block, 'drawColor', clearOf(kvGet(block, 'drawColor') ?? '255 255 255 255'));
