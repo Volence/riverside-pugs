@@ -60,7 +60,7 @@ describe('the CSS face for a scheme face', () => {
 
   it('widens a face the game emboldens itself by a pixel a glyph at 1080p: a bold weight on a face with no bold file', () => {
     // The stock Tab title, FrameTitle (Trade Gothic Bold, weight 700), is 333 px of ink in game and
-    // was 308 in the preview without it (/home/volence/l4d/hud/probe-tab/p0/REPORT.md).
+    // was 308 in the preview without it (/home/volence/l4d/hud/probe-tab/p0/measure.txt, "title").
     expect(synthBoldSpacing('Trade Gothic Bold', 700)).toBe(1);
     expect(synthBoldSpacing('Trade Gothic', 600)).toBe(1);
     expect(synthBoldSpacing('Trade Gothic Bold', 400)).toBe(0);
