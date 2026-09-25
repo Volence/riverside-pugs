@@ -2334,6 +2334,29 @@ export interface BuildReport { replaced: string[] }
  * - `codeShownPass` runs after `scalePass` and only here, for the same
  *   reasons: it moves a hidden piece the game re-shows out of its panel.
  */
+/**
+ * The Modern preset's own flat panels, as /home/volence/l4d/hud/tools/gen_textures.py
+ * makes them: its files name these (the kill notice box, the versus score
+ * panel, the weapon background entries), and the game has none of them.
+ * Without them every panel naming one draws the purple and black missing
+ * texture. They were shipped only in the owner's gameinfo.txt folder, so the
+ * owner's own game (and every probe run on it) never showed the gap.
+ */
+export const MODERN_ART: ReadonlyArray<{ name: string; w: number; h: number; colour: string }> = [
+  { name: 'vgui/hud/mod_panel_flat', w: 32, h: 32, colour: '0 0 0 140' },
+  { name: 'vgui/hud/mod_panel_flat_red', w: 32, h: 32, colour: '95 22 22 205' },
+  { name: 'vgui/hud/mod_equip_active', w: 128, h: 64, colour: '40 40 40 215' },
+  { name: 'vgui/hud/mod_equip_inactive', w: 128, h: 32, colour: '0 0 0 130' },
+];
+
+function modernArtPass(key: BaseKey, out: VpkFile[]) {
+  if (key !== 'modern') return;
+  for (const t of MODERN_ART) {
+    out.push({ path: `materials/${t.name}.vtf`, data: encodeVTF(t.w, t.h, flatTexture(t.w, t.h, t.colour)) },
+      { path: `materials/${t.name}.vmt`, data: enc(vmtFor(t.name)) });
+  }
+}
+
 export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: BuildReport): VpkFile[] {
   const key = baseOf(design);
   const work = new Work(key);
@@ -2358,6 +2381,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   fontPass(work, design, assets, extra);
   stylePass(work, design, assets, extra);
   crosshairPass(design, assets, extra);
+  modernArtPass(key, extra);
   const edited = work.files();
   const layer = importedFiles(key);
   if (!layer) return [...edited, ...extra, { path: 'addoninfo.txt', data: enc(addonInfo(design.name)) }];
