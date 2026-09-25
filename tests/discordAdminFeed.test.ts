@@ -60,7 +60,7 @@ describe('admin feed', () => {
     expect(staff).not.toContain('secret about a mod');
   });
 
-  it('with no forum set, posts one plain line for a new ticket and another for a further report, never naming the reporter', async () => {
+  it('with no forum set, posts one plain line for a new ticket and another for a further report, each saying who reported whom', async () => {
     const a = fileReport(db, IDS[0], { targetId: IDS[5], category: 'griefing', text: 'kept killing us', matchId }, { adminSteamIds: [] }) as { ticketId: number };
     fileReport(db, IDS[1], { targetId: IDS[5], category: 'cheating', text: '' }, { adminSteamIds: [] });
     await settled();
@@ -70,8 +70,8 @@ describe('admin feed', () => {
     expect(text(0)).toContain('griefing');
     expect(text(0)).toMatch(/new ticket/i);
     expect(text(1)).toMatch(/another report/i);
-    expect(text(0) + text(1)).not.toContain('player0');
-    expect(text(0) + text(1)).not.toContain('player1');
+    expect(text(0)).toMatch(/\*\*player0\*\*.* reported \*\*player5\*\*/);
+    expect(text(1)).toMatch(/\*\*player1\*\*.* reported \*\*player5\*\*/);
     expect(text(0)).not.toContain('kept killing us');
     expect(t.live()[0].payload.components).toEqual([]);
     // Said once: a later pass finds nothing left to say.

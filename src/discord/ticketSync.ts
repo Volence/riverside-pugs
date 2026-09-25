@@ -15,6 +15,7 @@ import {
 } from '../tickets/threads.js';
 import { accessDm, closeDm, reportLine, reporterWroteDm, ticketCard } from './ticketCard.js';
 import { CHAT_ENDED_ON_CLOSE, endReporterThread } from './reporterChats.js';
+import { reporterLabel } from '../tickets/reporterChat.js';
 import { syncRelay } from './reporterRelay.js';
 import type { BotTransport } from './transport.js';
 
@@ -315,8 +316,8 @@ export class TicketSync {
     // runs outside any request.
     if (hasStaffFlag(db, t.target_id)) holdFeedAbout(db, t.target_id!);
     const rows = db.prepare(
-      'SELECT id, category, feed_held FROM ticket_reports WHERE ticket_id = ? AND announced_at IS NULL ORDER BY id',
-    ).all(t.id) as { id: number; category: string; feed_held: number }[];
+      'SELECT id, reporter_id, reporter_discord_id, category, feed_held FROM ticket_reports WHERE ticket_id = ? AND announced_at IS NULL ORDER BY id',
+    ).all(t.id) as { id: number; reporter_id: string | null; reporter_discord_id: string | null; category: string; feed_held: number }[];
     for (const r of rows) {
       // Marked whether or not it is said: announced_at means "never
       // reconsidered", and a held report must never be reconsidered either.
@@ -329,7 +330,12 @@ export class TicketSync {
       // new ticket rather than hinting at a case the feed never heard of.
       const first = t.opened_by === null
         && !db.prepare('SELECT 1 FROM ticket_reports WHERE ticket_id = ? AND id < ? AND feed_held = 0').get(t.id, r.id);
-      publishAdminEvent({ kind: 'report', ticketId: t.id, targetId: t.target_id, targetName: targetLabel(db, t), category: r.category, created: first });
+      publishAdminEvent({
+        kind: 'report', ticketId: t.id, targetId: t.target_id, targetName: targetLabel(db, t),
+        reporterId: r.reporter_id,
+        reporterName: reporterLabel(db, t.id, { reporterId: r.reporter_id, reporterDiscordId: r.reporter_discord_id }),
+        category: r.category, created: first,
+      });
     }
   }
 

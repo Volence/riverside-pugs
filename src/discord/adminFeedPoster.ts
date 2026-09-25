@@ -85,10 +85,11 @@ export class AdminFeedPoster {
       case 'report': {
         const link = `[#${e.ticketId}](${this.ticket(e.ticketId)})`;
         const who = e.targetId !== null ? this.name(e.targetId) : escapeName(e.targetName);
+        const from = e.reporterId !== null ? this.name(e.reporterId) : escapeName(e.reporterName);
         return {
           text: e.created
-            ? `🎫 New ticket ${link} about ${who} (${e.category}).`
-            : `🎫 Another report on ticket ${link} about ${who} (${e.category}).`,
+            ? `🎫 New ticket ${link}: ${from} reported ${who} (${e.category}).`
+            : `🎫 Another report on ticket ${link}: ${from} reported ${who} (${e.category}).`,
           color: COLOR.report,
         };
       }
