@@ -236,6 +236,17 @@ describe('drawHud delegates panels to the renderer', () => {
     expect(fills.some((f) => /^rgba\(0, ?0, ?0, ?0\.549\d*\) 25$/.test(f))).toBe(true);
   });
 
+  it('draws an uploaded panel background behind each teammate card', () => {
+    // QA 2026-09-25: an Image style changed nothing in the preview.
+    _setImageFactory(instant);
+    const design = { ...DEFAULT_DESIGN, styles: { panelBg: { kind: 'image' as const } }, images: { panelBg: { w: 32, h: 32, png: 'AAAA' } } };
+    const srcs: string[] = [];
+    const ctx = fakeCtx(() => {});
+    ctx.drawImage = ((img: HTMLImageElement) => { srcs.push(img.src); }) as unknown as typeof ctx.drawImage;
+    drawHud(ctx, 853, 480, design, 'survivor', null);
+    expect(srcs.filter((u) => u === 'data:image/png;base64,AAAA').length).toBe(3);   // one per teammate card
+  });
+
   it('draws the weapon selection from the game art, clipped to its element, with no stand-in boxes', () => {
     // The game paints the slots inside the HudWeaponSelection panel and VGUI
     // clips that paint to the panel, so the preview clips to elementRect.
