@@ -3102,3 +3102,14 @@ describe('The Tab screen on the page', () => {
     await waitFor(() => expect(saved().elements?.tabVersus?.x).toBe(853 - 354));
   });
 });
+
+describe('the selection path over the Tab screen', () => {
+  afterEach(cleanup);
+  it('moves to the top right while the Tab screen is drawn, off its title', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    expect(screen.getByRole('navigation', { name: 'Selection path' }).className).toBe('hud__crumbs');
+    fireEvent.click(screen.getByRole('button', { name: /tab held/i }));
+    expect(screen.getByRole('navigation', { name: 'Selection path' }).className).toContain('hud__crumbs--right');
+  });
+});

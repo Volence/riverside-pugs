@@ -237,6 +237,7 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
   padding: 2px var(--sp-2); background: rgba(0, 0, 0, 0.65);
   font-size: var(--fs-dense); color: var(--text-bright);
 }
+.hud__crumbs--right { left: auto; right: var(--sp-2); }
 .hud__crumbs button { background: none; border: 0; padding: 0; color: var(--text-muted); font: inherit; cursor: pointer; }
 .hud__crumbs button:hover { color: var(--text-bright); text-decoration: underline; }
 

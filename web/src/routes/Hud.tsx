@@ -215,11 +215,15 @@ const RESET_DONE = "This design is the game's own HUD now, with nothing changed.
 const GAME_OWN = "This is the game's own HUD; you don't need to install anything. The file holds only its name, so it just replaces an older HUD file of the same name.";
 const BUNDLE_LOST = "This design's crosshair is no longer saved on this browser, so it now uses the game default. Choose Custom to make one.";
 
-/** The selection's path at the canvas corner. Each ancestor is a button that selects its level; the last is where you are. */
-function Crumbs({ crumbs, onSelect }: { crumbs: Crumb[]; onSelect: (s: Selection) => void }) {
+/**
+ * The selection's path at the canvas corner. Each ancestor is a button that
+ * selects its level; the last is where you are. Top left, except while the Tab
+ * screen is drawn, whose title sits there: then top right.
+ */
+function Crumbs({ crumbs, onSelect, right = false }: { crumbs: Crumb[]; onSelect: (s: Selection) => void; right?: boolean }) {
   if (!crumbs.length) return null;
   return (
-    <nav class="hud__crumbs" aria-label="Selection path">
+    <nav class={right ? 'hud__crumbs hud__crumbs--right' : 'hud__crumbs'} aria-label="Selection path">
       {crumbs.map((c, i) => (
         <Fragment key={i}>
           {i > 0 && <span aria-hidden="true">›</span>}
@@ -1422,7 +1426,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
               onKeyDown={safely(onKeyDown)}
               onContextMenu={safely(onContextMenu)}
             />
-            <Crumbs crumbs={breadcrumb(sel)} onSelect={setSel} />
+            <Crumbs crumbs={breadcrumb(sel)} onSelect={setSel} right={tabShown} />
             {menu && (
               <ContextMenu
                 x={menu.x} y={menu.y} onClose={(refocus) => { setMenu(null); if (refocus) canvas.current?.focus(); }}
