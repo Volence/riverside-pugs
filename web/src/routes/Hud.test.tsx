@@ -739,6 +739,17 @@ describe('Hud page', () => {
     expect(screen.getByLabelText('Survivor panel background image')).toBeTruthy();
   });
 
+  it('keeps the name the page shows the same as the one a reload loads', () => {
+    // QA 2026-09-25: "qa test hud!" came back as "qa test hud" after a reload.
+    render(<Hud />);
+    const name = screen.getByRole('textbox', { name: 'Name' }) as HTMLInputElement;
+    fireEvent.input(name, { target: { value: '  qa  test hud!' } });
+    expect(name.value).toBe('  qa  test hud');
+    fireEvent.blur(name);
+    expect(name.value).toBe('qa test hud');
+    expect(name.maxLength).toBe(40);
+  });
+
   it('shows a damaged-link message for a hash that will not decode', async () => {
     location.hash = '#d=garbage';
     render(<Hud />);
