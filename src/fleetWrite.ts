@@ -110,7 +110,7 @@ export function sftpTreeWriter(cfg: {
   };
 }
 
-export type FtpWriteClient = Pick<FtpClient, 'access' | 'close' | 'ensureDir' | 'uploadFrom' | 'rename' | 'remove' | 'downloadTo'>;
+export type FtpWriteClient = Pick<FtpClient, 'access' | 'close' | 'ensureDir' | 'uploadFrom' | 'rename' | 'remove' | 'downloadTo' | 'list'>;
 
 export function ftpTreeWriter(cfg: {
   host: string; port: number; user: string; password: string; gameDir: string;
@@ -134,10 +134,23 @@ export function ftpTreeWriter(cfg: {
     const chunks: Buffer[] = [];
     const sink = new Writable({ write(chunk, _e, cb) { chunks.push(Buffer.from(chunk)); cb(); } });
     try { await c.downloadTo(sink, a); } catch (err) {
-      if ((err as { code?: number }).code === 550) return null;
+      // 550 is also "permission denied": absent only when a listing says so.
+      if ((err as { code?: number }).code === 550 && await absent(c, a)) return null;
       throw err;
     }
     return Buffer.concat(chunks);
+  };
+  /** True when the listing of the parent (or, if that folder will not list,
+   *  of its parent) confirms the path is not there. Never guesses past the
+   *  game dir. */
+  const absent = async (c: FtpWriteClient, a: string): Promise<boolean> => {
+    const dir = posix.dirname(a);
+    let names: string[];
+    try { names = (await c.list(dir)).map((e) => e.name); } catch (err) {
+      if ((err as { code?: number }).code !== 550 || dir === cfg.gameDir || dir === posix.dirname(dir)) throw err;
+      return absent(c, dir);
+    }
+    return !names.includes(posix.basename(a));
   };
   return {
     kind: 'ftp',
