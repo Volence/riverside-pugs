@@ -19,7 +19,7 @@
  * /home/volence/l4d/hud/probe-your-items/RESULTS.md).
  */
 import type { Box } from './design';
-import { ICON_ADVANCE, ICON_SPACE } from './art/index';
+import { ICON_ADVANCE, ICON_SPACE } from './iconMetrics';
 import { SCREEN_H } from './units';
 
 export const YOUR_ITEMS = 'yourItems';
