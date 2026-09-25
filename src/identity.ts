@@ -28,7 +28,27 @@ const MARKDOWN = /([\\*_~`|>[\]()@<])/g;
  *  touch the transport (embed titles, button labels), so this escapes it at
  *  the source instead of relying on that alone. */
 export function escapeName(name: string): string {
-  return name.replace(MARKDOWN, '\\$1');
+  return stripBidi(name).replace(MARKDOWN, '\\$1');
+}
+
+/** A name with its bidi controls removed. A Steam name holding U+202E (right
+ *  to left override) flips the rest of the line it lands in: in the queue
+ *  card the row's number jumped to the right and the SR to the left. Nothing
+ *  a caller appends can close the override, so the control goes at the
+ *  source. Written as a code point scan for the reason given on
+ *  hasUnsafeChars in profileFields.ts. Zero width joiner (U+200D) stays,
+ *  because emoji sequences are built from it. */
+export function stripBidi(name: string): string {
+  let out = '';
+  for (const ch of name) {
+    const c = ch.codePointAt(0)!;
+    if (c === 0x061c) continue;                   // Arabic letter mark
+    if (c === 0x200e || c === 0x200f) continue;   // LTR/RTL marks
+    if (c >= 0x202a && c <= 0x202e) continue;     // bidi embedding and overrides
+    if (c >= 0x2066 && c <= 0x2069) continue;     // bidi isolates
+    out += ch;
+  }
+  return out;
 }
 
 /** The account this steamid really is, resolved through the alias table, with
@@ -78,8 +98,8 @@ export function discordLabel(id: Identity): string {
  * together. Not escaped: callers escape for their own medium.
  */
 export function plainLabel(id: Identity): string {
-  if (hasDistinctDiscordName(id)) return `${id.steamName} (Discord: ${id.discordName})`;
-  return id.steamName;
+  if (hasDistinctDiscordName(id)) return `${stripBidi(id.steamName)} (Discord: ${stripBidi(id.discordName!)})`;
+  return stripBidi(id.steamName);
 }
 
 /** plainLabel, markdown-escaped for a Discord surface that does not render
