@@ -34,6 +34,8 @@ const BACKUP_DAYS = 30;
 const OP_LIMIT_MS: Record<TreeWriter['kind'], number> = { local: 60_000, sftp: 120_000, ftp: 300_000 };
 /** The release hook never holds the after-match restart longer than this. */
 const HOOK_CAP_MS = 3 * 60_000;
+/** How long a cancelled box call gets to die before the engine moves on. */
+const ABORT_GRACE_MS = 10_000;
 
 export class ReleaseEngine {
   private chain: Promise<void> = Promise.resolve();
@@ -59,6 +61,7 @@ export class ReleaseEngine {
     emptyPollMs?: number;
     tickMs?: number;
     hookCapMs?: number;
+    opLimitMs?: number;
   }) {}
 
   private now() { return (this.d.now ?? sqlNow)(); }
@@ -273,32 +276,44 @@ export class ReleaseEngine {
     this.setBox(r.id, b.server_id, 'writing');
 
     // Every box call is bounded: a hung ssh or FTP call must not hold the
-    // engine (and, through the release hook, the releaser) forever.
-    const limit = OP_LIMIT_MS[writer.kind];
-    const bounded = <T>(p: Promise<T>, what: string): Promise<T> => {
+    // engine (and, through the release hook, the releaser) forever. A call
+    // that runs out of time is cancelled (the ssh child killed, the FTP client
+    // closed) and given a moment to die before anything else touches the box,
+    // so it cannot finish after the backup has gone back.
+    const limit = this.d.opLimitMs ?? OP_LIMIT_MS[writer.kind];
+    const bounded = async <T>(call: (signal: AbortSignal) => Promise<T>, what: string): Promise<T> => {
+      const ac = new AbortController();
+      const p = call(ac.signal);
       let t: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<never>((_, reject) => { t = setTimeout(() => reject(new Error(`${what} timed out after ${limit / 1000} s`)), limit); });
-      return Promise.race([p, timeout]).finally(() => clearTimeout(t));
+      const timeout = new Promise<'timeout'>((resolve) => { t = setTimeout(() => resolve('timeout'), limit); });
+      try {
+        const won = await Promise.race([p.then((v) => ({ v })), timeout]);
+        if (won !== 'timeout') return won.v;
+      } finally { clearTimeout(t); }
+      ac.abort();
+      let g: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([p.catch(() => {}), new Promise<void>((resolve) => { g = setTimeout(resolve, ABORT_GRACE_MS); })]).finally(() => clearTimeout(g));
+      throw new Error(`${what} timed out after ${limit / 1000} s`);
     };
     const ops = JSON.parse(b.plan_json!) as Op[];
     const dir = join(this.d.releasesDir, String(r.id), String(s.id));
     const backup: { path: string; existed: boolean }[] = [];
     try {
       for (const o of ops) {
-        const bytes = await bounded(writer.read(o.path), `reading ${o.path}`);
+        const bytes = await bounded((sig) => writer.read(o.path, sig), `reading ${o.path}`);
         if (bytes) { mkdirSync(dirname(join(dir, 'files', o.path)), { recursive: true }); writeFileSync(join(dir, 'files', o.path), bytes); }
         backup.push({ path: o.path, existed: bytes !== null });
       }
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, 'backup.json'), JSON.stringify(backup));
       for (const o of ops) {
-        if (o.op === 'remove') { await bounded(writer.remove(o.path), `removing ${o.path}`); continue; }
+        if (o.op === 'remove') { await bounded((sig) => writer.remove(o.path, sig), `removing ${o.path}`); continue; }
         const bytes = o.blob ? await this.d.blob(o.blob)
           : readFileSync(join(this.d.releasesDir, String(o.backupFrom!.releaseId), String(o.backupFrom!.serverId), 'files', o.path));
         if (sha256(bytes) !== o.sha256) throw new Error(`content for ${o.path} does not match its hash`);
-        await bounded(writer.write(o.path, bytes), `writing ${o.path}`);
+        await bounded((sig) => writer.write(o.path, bytes, sig), `writing ${o.path}`);
       }
-      const h = await bounded(writer.hash(ops.map((o) => o.path)), 'verifying');
+      const h = await bounded((sig) => writer.hash(ops.map((o) => o.path), sig), 'verifying');
       for (const o of ops) {
         const got = h.get(o.path) ?? null;
         if (o.op === 'remove' ? got !== null : got !== o.sha256) throw new Error(`verify failed for ${o.path}`);
@@ -310,8 +325,8 @@ export class ReleaseEngine {
       const unrestored: string[] = [];
       for (const e of backup) {
         try {
-          if (e.existed) await bounded(writer.write(e.path, readFileSync(join(dir, 'files', e.path))), 'the restore');
-          else await bounded(writer.remove(e.path), 'the restore');
+          if (e.existed) await bounded((sig) => writer.write(e.path, readFileSync(join(dir, 'files', e.path)), sig), 'the restore');
+          else await bounded((sig) => writer.remove(e.path, sig), 'the restore');
         } catch (e2) {
           unrestored.push(`restoring ${e.path}: ${e2 instanceof Error ? e2.message : String(e2)}`);
         }

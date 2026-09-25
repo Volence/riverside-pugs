@@ -103,6 +103,26 @@ describe('ReleaseEngine', () => {
     expect(restarts).toEqual([]);
   });
 
+  it('a box call that times out is cancelled before the backup goes back', async () => {
+    const events: string[] = [];
+    const write = boxes[s1].w.write;
+    boxes[s1].w.write = (p, b, signal) => {
+      if (p === B) {
+        return new Promise<void>((_r, reject) => signal?.addEventListener('abort', () => { events.push('aborted'); reject(new Error('killed')); }));
+      }
+      events.push(`write ${p}`);
+      return write(p, b);
+    };
+    boxes[s1].w.remove = async (p) => { events.push(`remove ${p}`); boxes[s1].fs.delete(p); };
+    const e = engine({ opLimitMs: 10 });
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(events).toEqual([`write ${A}`, 'aborted', `write ${A}`, `remove ${B}`]);
+    expect(boxState(id, s1)).toEqual({ state: 'failed', error: expect.stringMatching(/timed out/) });
+    expect(getServer(db, s1)!.status).toBe('idle');
+  });
+
   it('a verify mismatch is a failure', async () => {
     boxes[s1] = box({ [A]: 'A1' }, { on: 'hash' });
     const e = engine();
