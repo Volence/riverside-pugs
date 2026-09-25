@@ -1176,6 +1176,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // stranded non-idle forever with nothing left pointing at it. Boot is
       // the one moment that can self-heal that, since it is not scoped to
       // matches at all.
+      // Before the reconcile: a box a release held mid-write or mid-restart
+      // is 'reserved' with no match, which the reconcile would make idle.
+      if (!deps.config.devMode) releaseEngine.recover();
       const stranded = reconcileServers(deps.db, releaser);
       if (stranded.length > 0) {
         console.log(`[server] reconciled ${stranded.length} stranded server(s) at boot`);

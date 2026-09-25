@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb } from '../src/db.js';
@@ -369,13 +369,70 @@ describe('ReleaseEngine', () => {
     expect(e.undo(id, [s2], '1')).toMatchObject({ ok: false, status: 409 });
   });
 
-  it('recover marks an interrupted box failed and lifts its hold', () => {
+  it('recover marks a box interrupted before any write failed and lifts its hold', async () => {
     const id = stage();
     db.prepare("UPDATE releases SET state = 'deploying' WHERE id = ?").run(id);
     db.prepare("UPDATE release_boxes SET state = 'writing' WHERE release_id = ? AND server_id = ?").run(id, s1);
     db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(s1);
-    engine().recover();
+    const e = engine();
+    e.recover();
+    await e.settled();
     expect(boxState(id, s1)).toEqual({ state: 'failed', error: expect.stringMatching(/interrupted/) });
     expect(getServer(db, s1)!.status).toBe('idle');
+  });
+
+  /** A box a site restart caught mid-write: A updated, B added, backup on disk. */
+  function interrupted() {
+    const id = stage();
+    db.prepare("UPDATE releases SET state = 'deploying' WHERE id = ?").run(id);
+    db.prepare("UPDATE release_boxes SET state = 'writing' WHERE release_id = ? AND server_id = ?").run(id, s1);
+    db.prepare("UPDATE release_boxes SET state = 'skipped' WHERE release_id = ? AND server_id = ?").run(id, s2);
+    db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(s1);
+    const d = join(dir, String(id), String(s1));
+    mkdirSync(join(d, 'files', 'left4dead', 'cfg'), { recursive: true });
+    writeFileSync(join(d, 'files', A), 'A1');
+    writeFileSync(join(d, 'backup.json'), JSON.stringify([{ path: A, existed: true }, { path: B, existed: false }]));
+    boxes[s1].fs.set(A, Buffer.from('A2'));
+    boxes[s1].fs.set(B, Buffer.from('B1'));
+    return id;
+  }
+
+  it('recover puts an interrupted box back from its backup on disk, parked until then', async () => {
+    const id = interrupted();
+    const e = engine();
+    e.recover();
+    // Parked at once, before the boot reconcile could hand it out as idle.
+    expect(getServer(db, s1)!.status).toBe('offline');
+    await e.settled();
+    expect(boxes[s1].fs.get(A)!.toString()).toBe('A1');
+    expect(boxes[s1].fs.has(B)).toBe(false);
+    expect(boxState(id, s1)).toEqual({ state: 'failed', error: expect.stringMatching(/interrupted.*put back/) });
+    expect(getServer(db, s1)!.status).toBe('idle');
+    expect(relState(id)).toBe('done');
+  });
+
+  it('recover leaves a box it could not restore offline', async () => {
+    const id = interrupted();
+    boxes[s1].w.remove = async () => { throw new Error('permission denied'); };
+    const e = engine();
+    e.recover();
+    await e.settled();
+    expect(boxState(id, s1)).toEqual({ state: 'failed', error: expect.stringMatching(/permission denied/) });
+    expect(getServer(db, s1)!.status).toBe('offline');
+  });
+
+  it('recover re-queues a restart a site restart lost', async () => {
+    const id = stage();
+    db.prepare("UPDATE releases SET state = 'deploying' WHERE id = ?").run(id);
+    db.prepare("UPDATE release_boxes SET state = 'written' WHERE release_id = ? AND server_id = ?").run(id, s1);
+    db.prepare("UPDATE release_boxes SET state = 'skipped' WHERE release_id = ? AND server_id = ?").run(id, s2);
+    db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(s1);
+    const e = engine();
+    e.recover();
+    await e.settled();
+    expect(restarts).toEqual([s1]);
+    expect(boxState(id, s1).state).toBe('restarted');
+    expect(getServer(db, s1)!.status).toBe('idle');
+    expect(relState(id)).toBe('done');
   });
 });
