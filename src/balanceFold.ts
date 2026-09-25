@@ -61,15 +61,27 @@ export function foldInto(db: DB, id: number, into: number): { ok: true; target: 
   if (chain.includes(id)) return { ok: false, error: 'that fold would make a loop: the target is already folded into this patch' };
   const target = chain[chain.length - 1];
   db.transaction(() => {
-    db.prepare("UPDATE balance_patches SET triage = 'folded', folded_into = ?, published_at = NULL WHERE id = ?").run(target, id);
+    db.prepare(`UPDATE balance_patches SET triage = 'folded', folded_into = ?,
+      published_before_fold = COALESCE(published_at, published_before_fold), published_at = NULL WHERE id = ?`).run(target, id);
     retagRounds(db);
   })();
   return { ok: true, target };
 }
 
+/** Undo a fold: the patch's own rounds count for it again. Back to pending,
+ *  or to balance and the public page when it was published before the fold
+ *  (only a balance patch can be published, and it was one). Patches folded
+ *  into this one keep counting for the chain end they counted for, not for
+ *  this patch. No checks: triageUnfold makes them. */
 export function unfoldPatch(db: DB, id: number): void {
   db.transaction(() => {
-    db.prepare("UPDATE balance_patches SET triage = 'pending', folded_into = NULL WHERE id = ?").run(id);
+    const end = resolvePatch(db, id);
+    if (end !== id) {
+      db.prepare("UPDATE balance_patches SET folded_into = ? WHERE folded_into = ? AND triage = 'folded'").run(end, id);
+    }
+    db.prepare(`UPDATE balance_patches SET folded_into = NULL,
+      triage = CASE WHEN published_before_fold IS NULL THEN 'pending' ELSE 'balance' END,
+      published_at = published_before_fold, published_before_fold = NULL WHERE id = ?`).run(id);
     retagRounds(db);
   })();
 }
