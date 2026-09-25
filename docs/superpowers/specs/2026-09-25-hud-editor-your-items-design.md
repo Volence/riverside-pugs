@@ -51,6 +51,14 @@ the right of it. The editor enforces it:
 - Moving or scaling Your health later moves the limit. A stored row left of the new limit is drawn and
   written at the limit, not rewritten in the design (the same "drawn where the clamp holds it" rule as the
   team column at the screen edge).
+- **Shown while you place it** (owner, 2026-09-25): whenever the row is selected or being dragged, the
+  preview shades the area it cannot reach (everything left of the bar's x, full screen height, a dim
+  wash) and draws a solid limit line at the bar's x, in a colour distinct from the pink snap guides, with
+  a small label "Your health bar's edge". For Center, the right-hand limit (the widest centre that still
+  fits on screen) is drawn the same way when it is closer than the screen edge. The drag itself is held
+  at the line live: the row stops against it on screen while the pointer keeps going, so the preview
+  never shows a spot the download would not produce. Arrows and typed X values stop at the same line.
+  With nothing selected the shading and line are gone.
 - The element's note says it in one line: "The game puts your health bar at this row's left edge, so the
   icons can only sit level with or right of your health bar."
 
@@ -92,6 +100,8 @@ writing a guess.
 - Preview states Down and Dead draw the row empty (the game empties it); Crouched changes nothing.
 - The own health card draws exactly where it does today (the preview never needs the full-screen frame).
 - Hit tests and Layers pick the row like any element.
+- The limit shading and line (section 2) are drawn in the page's overlay layer with the snap guides,
+  never into the preview image a share or screenshot captures.
 
 ## 5. Proof
 
@@ -101,6 +111,8 @@ Unit tests:
   its box with the element off (the build's own tree readers, as the fit tests do).
 - The written Items x equals the bar's written x; `wide` and alignment per section 2; the screen-width and
   bar-x clamps; moving Your health after placing the row.
+- The limit geometry: its x equals the drawn bar x for Stock, Modern, a moved and a scaled Your health;
+  a drag past it leaves the row at the line; the Center right-hand limit.
 - Turning on sets `itemSize 0` and `itemIcons false` in the same edit; Undo restores both; turning off
   leaves them.
 - Import with its own Items: element disabled, file untouched.
