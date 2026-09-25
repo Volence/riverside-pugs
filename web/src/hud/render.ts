@@ -30,7 +30,7 @@ import { drawnBarX, isBar, type Box, type HudDesign } from './design';
 import { buildTrees, pcGet, MODERN_ART } from './build';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { artUrl, normaliseMaterial, SKULL_ICON, zombieTeamImage } from './art';
-import { ICON_ADVANCE, ICON_SPACE } from './art/index';
+import { ICON_ADVANCE, ICON_SPACE } from './iconMetrics';
 import { ITEM_ROW, itemRowWidth } from './youritems';
 import { parseColour } from './textures';
 import { SLOTS } from './slots';

@@ -412,11 +412,9 @@ def main() -> int:
              'export const ART: Record<string, string> = {']
     for k in sorted(index): lines.append("  '%s': '%s'," % (k, index[k]))
     lines += ['};', '',
-              '// Item icon glyphs: how far each one advances the row, and the space the game puts',
-              '// between two, as a fraction of the font cell height the PNGs are drawn at.',
-              'export const ICON_ADVANCE: Record<string, number> = {']
-    for k in sorted(advances): lines.append("  '%s': %s," % (k, advances[k]))
-    lines += ['};', '', 'export const ICON_SPACE = %s;' % space, '',
+              '// ICON_ADVANCE and ICON_SPACE live in ../iconMetrics.ts (plain numbers, no',
+              '// art folder import), re-exported here so existing importers keep working.',
+              "export { ICON_ADVANCE, ICON_SPACE } from '../iconMetrics';", '',
               '// Weapon selection icons: each cell\'s width and height on its icon sheet, in texels.',
               'export const EQUIP_ICON_SIZE: Record<string, [number, number]> = {']
     for k in sorted(equip_sizes): lines.append("  '%s': [%d, %d]," % (k, *equip_sizes[k]))

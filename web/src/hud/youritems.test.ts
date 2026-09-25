@@ -4,7 +4,7 @@ import {
   ITEM_FONTS, ITEM_FONT_TALL, DEFAULT_ITEM_FONT, type RowInput,
 } from './youritems';
 import { ITEM_ROW as RENDER_ITEM_ROW } from './render';
-import { ICON_ADVANCE, ICON_SPACE } from './art/index';
+import { ICON_ADVANCE, ICON_SPACE } from './iconMetrics';
 
 /** Stock at 16:9, fitted as a new design ships: the bar is drawn at 728 + 0 + 26. */
 const STOCK: RowInput = { barX: 754, screenW: 853, tall: 18, align: 'right' };
