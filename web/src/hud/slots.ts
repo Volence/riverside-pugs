@@ -26,9 +26,9 @@ export interface StyleSlot {
   stockNames: string[];
   defaultColor: string;
   /**
-   * A Tab screen slot (tab screen spec 4.1): kept out of the page's Styles
-   * until the preview draws the Tab screen and the page groups these (spec
-   * tasks 13 to 16), as the Tab elements are kept out of Layers.
+   * A Tab screen slot (tab screen spec 4.1): the page lists these under a
+   * Tab screen heading of their own in Styles, as Layers groups the Tab
+   * elements.
    */
   tab?: true;
 }
