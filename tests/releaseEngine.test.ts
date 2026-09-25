@@ -88,6 +88,21 @@ describe('ReleaseEngine', () => {
     expect(getServer(db, s1)!.status).toBe('idle');
   });
 
+  it('a failed restore still tries every file, and parks the box offline instead of idle', async () => {
+    boxes[s1] = box({ [A]: 'A1' }, { on: 'hash' });
+    let writesOfA = 0;
+    const write = boxes[s1].w.write;
+    boxes[s1].w.write = async (p, b) => { if (p === A && ++writesOfA > 1) throw new Error('permission denied'); await write(p, b); };
+    const e = engine();
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(boxes[s1].fs.has(B)).toBe(false); // restored even though A's restore failed first
+    expect(boxState(id, s1)).toEqual({ state: 'failed', error: expect.stringMatching(/restoring .*a\.cfg.*permission denied/) });
+    expect(getServer(db, s1)!.status).toBe('offline');
+    expect(restarts).toEqual([]);
+  });
+
   it('a verify mismatch is a failure', async () => {
     boxes[s1] = box({ [A]: 'A1' }, { on: 'hash' });
     const e = engine();

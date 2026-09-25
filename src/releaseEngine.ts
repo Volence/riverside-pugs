@@ -305,15 +305,28 @@ export class ReleaseEngine {
       }
     } catch (err) {
       let error = err instanceof Error ? err.message : String(err);
-      try {
-        for (const e of backup) {
-          if (e.existed) await bounded(writer.write(e.path, readFileSync(join(dir, 'files', e.path))), `restoring ${e.path}`);
-          else await bounded(writer.remove(e.path), `restoring ${e.path}`);
+      // Every file is tried: one that will not go back must not leave the
+      // others as the release wrote them.
+      const unrestored: string[] = [];
+      for (const e of backup) {
+        try {
+          if (e.existed) await bounded(writer.write(e.path, readFileSync(join(dir, 'files', e.path))), 'the restore');
+          else await bounded(writer.remove(e.path), 'the restore');
+        } catch (e2) {
+          unrestored.push(`restoring ${e.path}: ${e2 instanceof Error ? e2.message : String(e2)}`);
         }
-      } catch (e2) {
-        error += `; restoring the backup also failed: ${e2 instanceof Error ? e2.message : String(e2)}`;
       }
+      if (unrestored.length) error += `; restoring the backup also failed: ${unrestored.join('; ')}`;
       this.setBox(r.id, s.id, 'failed', error);
+      if (unrestored.length) {
+        // Half the release and half the backup: never back in the pool. Inside
+        // the hook the releaser's restart must leave it offline too.
+        if (releaserRestarting && hooked.stage === 'writing') hooked.stage = 'park';
+        else if (releaserRestarting) this.hooked.delete(s.id);
+        markOffline(db, s.id);
+        publishAdminEvent({ kind: 'problem', text: `Release ${r.id} failed on ${s.name} and its files could not all be put back: ${error}. It is offline; fix it by hand, then Set idle.`, link: LINK });
+        return;
+      }
       // Files back as they were: the releaser's restart and idle are fine. A
       // box it already restarted under the write stays offline where it is.
       if (releaserRestarting) this.hooked.delete(s.id);
