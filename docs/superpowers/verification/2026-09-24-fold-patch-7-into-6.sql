@@ -1,3 +1,14 @@
+-- OBSOLETE. DO NOT RUN.
+--
+-- Written before folding existed. Since then match_rounds.sighted_patch_id
+-- references balance_patches, so the final DELETE fails with a foreign key
+-- error, and the boot refingerprint now folds a merged patch like 7 into its
+-- keeper by itself (its rounds count for 6 without any repair). If a manual
+-- merge is ever needed, use `scripts/merge-balance-patches.ts <db> 6 7`
+-- (dry run) and then with --apply: it folds and never deletes.
+--
+-- The original text follows, kept for the record.
+--
 -- One-off repair, NOT RUN. Needs the owner's go-ahead.
 --
 -- Folds balance patch 7 into patch 6. Patch 7 was detected on Dallas at
