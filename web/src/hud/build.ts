@@ -30,7 +30,11 @@ import {
   SPLATTERS, SPLAT_STAND_IN, splatterDef, splatterActive, splatterImageKey, splatterMaterial, fadePixels, type SplatterDef, type SplatterId,
 } from './splatter';
 import { TEX } from '../crosshair/draw';
-import { columnExtent, WEAPON_KEY_DEFAULTS } from './weaponColumn';
+import { columnExtent, weaponRowsEdge, WEAPON_KEY_DEFAULTS } from './weaponColumn';
+import {
+  YOUR_ITEMS, DEFAULT_ITEM_FONT, ITEM_FONT_TALL, itemRowWidth, rowLayout as itemRowLayout, rowLimitLines,
+  type RowInput, type RowLayout, type LimitLine,
+} from './youritems';
 import { probe } from './probes';
 import { clampBarKeys } from './progress';
 
@@ -231,7 +235,8 @@ function layoutPass(work: Work, design: HudDesign) {
     // An element the base lacks is skipped whole: an imported HUD that has
     // no panel for it offers no control for it, so a stored edit (from
     // before the switch) has nothing to land on.
-    if (!o || el.id === 'xhair' || !baseHasElement(work.key, el)) continue;
+    // Your items has no block until yourItemsPass writes one (its place is the row's, youritems.ts).
+    if (!o || el.id === 'xhair' || el.id === YOUR_ITEMS || !baseHasElement(work.key, el)) continue;
     const panel = work.panel(layoutOf(el), [el.key]);
     // The marker's block is the game's crosshair: its visible stays the
     // crosshair's, and elementHidePass hides the marker by its own keys.
@@ -931,6 +936,126 @@ function reviveAnchorPass(work: Work) {
   ].map(([key, value]) => ({ key, value })) });
 }
 
+/** Your own panel's frame file and its container's hudlayout.res block. */
+const OWN_BOX = 'resource/ui/hud/localplayerdisplay.res';
+const OWN_KEY = 'CHudLocalPlayerDisplay';
+
+/** A position token split: its anchor ('' from the left or top, 'r' the right or bottom, 'c' the centre) and its number. */
+interface Anchored { anchor: '' | 'r' | 'c'; n: number }
+const ANCHORED = /^([rRcC]?)(-?\d+(?:\.\d+)?)$/;
+const PLAIN = /^-?\d+(?:\.\d+)?$/;
+function anchored(tok: string | undefined): Anchored | null {
+  const m = ANCHORED.exec((tok ?? '0').trim());
+  return m ? { anchor: m[1].toLowerCase() as Anchored['anchor'], n: parseFloat(m[2]) } : null;
+}
+
+/**
+ * Your own panel as the files in `tree` place it: CHudLocalPlayerDisplay's
+ * position tokens, LocalPlayer's offset inside it, and the health bar's
+ * drawn x on screen (the container, plus LocalPlayer, plus Health's own
+ * xpos: the own panel has no bar anchor, children.ts OWN_PANEL). Null when
+ * any of it is not the plain numbers yourItemsPass can re-express on the
+ * screen: LocalPlayer's offset and every piece's xpos and ypos (each line
+ * the PC reads) must be plain numbers, as stock's and Modern's are. An
+ * import that places them some other way is left alone (spec section 3).
+ */
+interface OwnFrame { x: Anchored; y: Anchored; lp: { x: number; y: number }; barX: number }
+function ownFrame(tree: (path: string) => KvNode[], aspect: Aspect): OwnFrame | null {
+  const container = kvFind(tree(LAYOUT), [OWN_KEY]);
+  const lp = kvFind(tree(OWN_BOX), ['LocalPlayer']);
+  if (!container || !lp) return null;
+  const x = anchored(kvGet(container, 'xpos')), y = anchored(kvGet(container, 'ypos'));
+  const lx = (kvGet(lp, 'xpos') ?? '0').trim(), ly = (kvGet(lp, 'ypos') ?? '0').trim();
+  if (!x || !y || !PLAIN.test(lx) || !PLAIN.test(ly)) return null;
+  const nodes = tree(OWN_PANEL.file);
+  for (const n of nodes) {
+    if (typeof n.value === 'string') continue;
+    for (const key of ['xpos', 'ypos']) {
+      if (pcEntries(n, key).some((e) => !PLAIN.test((e.value as string).trim()))) return null;
+    }
+  }
+  const bar = kvFind(nodes, ['Health']);
+  const bx = bar ? pcGet(bar, 'xpos') : undefined;
+  if (bx === undefined || !PLAIN.test(bx.trim())) return null;
+  const barX = parsePos(kvGet(container, 'xpos') ?? '0', screenW(aspect)) + parseFloat(lx) + parseFloat(bx);
+  return { x, y, lp: { x: parseFloat(lx), y: parseFloat(ly) }, barX };
+}
+
+/**
+ * Your health bar's drawn x on screen, units, after every move, scale and
+ * fit (the preview's own trees), or undefined when the panel cannot be read
+ * (ownFrame). Your items' Label starts here.
+ */
+export function ownBarX(design: HudDesign): number | undefined {
+  return ownFrame(buildTrees(design), design.aspect)?.barX;
+}
+
+export const ITEMS_OWN_NOTE = 'This HUD already places your items itself.';
+export const ITEMS_UNREAD_NOTE = 'The editor cannot read where this HUD puts your health panel, so it cannot place your items here.';
+
+/**
+ * Why Your items is not offered on this design's base, or null when it is:
+ * an import whose own panel already has an Items child keeps its author's
+ * Label (spec section 3), and one the editor cannot read is left alone
+ * rather than written with a guess.
+ */
+export function yourItemsBlocked(design: HudDesign): string | null {
+  if (kvFind(baseTree(baseOf(design), OWN_PANEL.file), ['Items'])) return ITEMS_OWN_NOTE;
+  return ownFrame(buildTrees(design), design.aspect) ? null : ITEMS_UNREAD_NOTE;
+}
+
+/** Whether the design shows Your items: turned on, and not blocked. */
+export function yourItemsOn(design: HudDesign): boolean {
+  return design.elements[YOUR_ITEMS]?.visible === true && yourItemsBlocked(design) === null;
+}
+
+/**
+ * The four numbers youritems.ts works from, off the design: the bar's x
+ * (0 when unreadable, where the element is blocked anyway), the screen
+ * width, the chosen font's tall in the base's scheme (the stock tall when
+ * the scheme lacks it) and the alignment.
+ */
+export function yourItemsInput(design: HudDesign): RowInput {
+  const o = design.elements[YOUR_ITEMS] ?? {};
+  const font = o.itemFont ?? DEFAULT_ITEM_FONT;
+  let tall: number | undefined;
+  try { tall = baseFontTall(baseOf(design), font); } catch { /* an imported base not registered yet */ }
+  return { barX: ownBarX(design) ?? 0, screenW: screenW(design.aspect), tall: tall && tall > 0 ? tall : ITEM_FONT_TALL[font], align: o.itemAlign ?? 'right' };
+}
+
+/**
+ * Where the row first shows (spec section 1): its right end at the weapon
+ * boxes' right edge, its top just under the pistol row's box art, from the
+ * weapon selection as the design has it (weaponColumn.ts weaponRowsEdge,
+ * the layout weapons.ts weaponSlots draws). Unclamped: rowLayout and placeRow
+ * hold it at the bar's edge. A base without the weapon panel starts it at
+ * the bar, mid-height.
+ */
+export function yourItemsHome(design: HudDesign): { x: number; y: number } {
+  const inp = yourItemsInput(design);
+  if (!baseHasElement(baseOf(design), elementById('weaponSelection')!)) return { x: inp.barX, y: SCREEN_H / 2 };
+  const r = elementRect(design, 'weaponSelection', design.aspect);
+  const panel = kvFind(buildTrees(design)(LAYOUT), ['HudWeaponSelection']);
+  const n = (k: string) => {
+    const v = parseFloat((panel && pcGet(panel, k)) ?? WEAPON_KEY_DEFAULTS[k]);
+    return Number.isFinite(v) ? v : parseFloat(WEAPON_KEY_DEFAULTS[k]);
+  };
+  const edge = weaponRowsEdge({ n, panelWide: r.w, u: screenW(design.aspect) / 640 });
+  return { x: r.x + edge.right - itemRowWidth(inp.tall), y: r.y + edge.bottom };
+}
+
+/** Your items as drawn and built: the stored place (or the home spot), through the bar limit and the screen edge. */
+export function yourItemsLayout(design: HudDesign): RowLayout {
+  const o = design.elements[YOUR_ITEMS] ?? {};
+  const home = o.x === undefined || o.y === undefined ? yourItemsHome(design) : undefined;
+  return itemRowLayout(yourItemsInput(design), { x: o.x ?? home!.x, y: o.y ?? home!.y });
+}
+
+/** The limits the editor draws while Your items is selected (spec section 2); none where it is blocked. */
+export function yourItemsLimits(design: HudDesign): LimitLine[] {
+  return yourItemsBlocked(design) ? [] : rowLimitLines(yourItemsInput(design));
+}
+
 /** Your infected health's three live files: the Hunter's (the Tank reads it too), then its linked Smoker and Boomer files. */
 const SI_FILES = [SI_PANEL.file, ...(SI_PANEL.linked ?? []).map((l) => l.file)];
 
@@ -1334,7 +1459,7 @@ function codeShownPass(work: Work, design: HudDesign) {
  */
 function elementHidePass(work: Work, design: HudDesign) {
   for (const el of ELEMENTS) {
-    if (el.id === 'xhair' || design.elements[el.id]?.visible !== false || !baseHasElement(work.key, el)) continue;
+    if (el.id === 'xhair' || el.id === YOUR_ITEMS || design.elements[el.id]?.visible !== false || !baseHasElement(work.key, el)) continue;
     if (el.id === MARKER) { markerHide(work.panel(LAYOUT, [el.key]), el); continue; }
     hardHide(work.panel(layoutOf(el), [el.key]));
     for (const name of el.moveWith ?? []) { const b = work.optional(layoutOf(el), [name]); if (b) hardHide(b); }
@@ -1595,6 +1720,8 @@ export function cardChild(design: HudDesign, name: string): CardChild | null {
  */
 export function baseHasElement(key: BaseKey, el: HudElement): boolean {
   if (el.id === 'xhair') return true;
+  // Your items is a Label the build adds to Your health's own panel: offered wherever that panel is.
+  if (el.id === YOUR_ITEMS) return baseHasElement(key, elementById('ownHealth')!);
   if (!blockIn(layoutOf(el), baseTree(key, layoutOf(el)), [el.key])) return false;
   if (!el.team?.file) return true;
   const team = baseTree(key, el.team.file);
@@ -2560,6 +2687,8 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
 export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
   const el = elementById(id);
   if (!el) throw new Error(`No HUD element ${id}`);
+  // Your items is drawn where its row is (youritems.ts rowLayout), shown only once on and not blocked.
+  if (id === YOUR_ITEMS) return { ...yourItemsLayout(design).row, visible: yourItemsOn(design) };
   const work = new Work(baseOf(design));
   const o = design.elements[id] ?? {};
   if (id === 'xhair') return { x: screenW(aspect) / 2 - 13, y: SCREEN_H / 2 - 13, w: 26, h: 26, visible: design.crosshair !== 'none' };
