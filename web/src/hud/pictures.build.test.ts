@@ -20,6 +20,18 @@ describe('a download ships every picture it names', () => {
     }
   }
 
+  // The Tab screen's three slots (tab screen spec task 8): each names its
+  // generated texture in a Tab file, so each must ship it.
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`${preset}, with the Tab screen's slots styled`, () => {
+      const styles = { tabStatBox: { kind: 'flat' as const, color: '0 128 0 255' }, tabTeamBox: { kind: 'rounded' as const, color: '255 0 255 255' },
+        tabRowBg: { kind: 'flat' as const, color: '128 0 128 255' } };
+      const out = files({ ...newDesign(null), preset, styles });
+      expect(missingPictures(out)).toEqual([]);
+      for (const id of ['tabstatbox', 'tabteambox', 'tabrowbg']) expect(out.has(`materials/vgui/hud/hudeditor/${id}.vtf`), id).toBe(true);
+    });
+  }
+
   it('Modern ships its flat panels at the colours the Modern HUD uses', () => {
     const out = files({ ...newDesign(null), preset: 'modern' });
     for (const name of ['mod_panel_flat', 'mod_panel_flat_red', 'mod_equip_active', 'mod_equip_inactive']) {
