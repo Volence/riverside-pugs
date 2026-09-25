@@ -31,8 +31,9 @@
  * What game code decides, not the file, is the CODE table below and the
  * row rules, each with its evidence.
  */
-import type { HudDesign } from './design';
+import type { Box, HudDesign } from './design';
 import { elementById } from './elements';
+import { panelChildren } from './children';
 import { buildTrees, elementRect } from './build';
 import { kvGet, type KvNode } from './kv';
 import { layoutBlocks, type LaidBlock } from './tablayout';
@@ -41,7 +42,7 @@ import { normaliseMaterial } from './art';
 import { MODERN_ART } from './build';
 import { baseOf } from './base';
 import {
-  artImage, drawBar, drawImageChild, drawItems, labelColour, paintLinearOver, paintPanelBox, paintPanelLabel,
+  artImage, drawBar, drawImageChild, drawItems, fontFace, labelColour, paintLinearOver, paintPanelBox, paintPanelLabel,
   panelColour, previewOf, setFont, DEFAULT_PREVIEW, type ChildRect, type PreviewState, type SurvivorState,
 } from './render';
 import { drawNineSlice } from './weapons';
@@ -376,3 +377,120 @@ function scalable(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r
 /** The Tab elements, for drawHud: whether any is in the selection. */
 export const tabPicked = (picked: readonly string[]): boolean => picked.some((id) => !!elementById(id)?.tab);
 
+
+/**
+ * A registered Tab piece where the painter puts it, in HUD units on the
+ * screen: `visible` as the laid-out file has it (a piece pinned to a hidden
+ * one is hidden too), `drawn` whether the painter draws it at all (code's
+ * rules for the row and the side, a label with no text, a piece of no size).
+ */
+export interface TabPiece extends Box { name: string; visible: boolean; drawn: boolean }
+/** One box a Tab panel draws its pieces in: the board's screen, the versus panel, or one row (its PlayerBackground, as the rows overlap). */
+export interface TabBox { box: Box; pieces: TabPiece[] }
+
+/**
+ * Where each registered piece of a Tab panel is, box by box, as
+ * drawTabScreen lays it out: the board's pieces on the screen, the versus
+ * panel's at its element's place through if_embedded and the pin chain, a
+ * row panel's in each row the side sees (tabRows). For hit tests, outlines
+ * and snaps, which have no canvas: a label as wide as its text is measured
+ * on a canvas of the page's own when there is one, else estimated from its
+ * font size. `side` says which team's box and rows are drawn.
+ */
+export function tabBoxes(design: HudDesign, side: Side, panel: string): TabBox[] {
+  const reg = panelChildren(panel);
+  if (!reg || !elementById(panel)?.tab) return [];
+  const byName = new Map(reg.children.map((c) => [c.name.toLowerCase(), c.name]));
+  const measure = unitMeasurer(design);
+  const trees = buildTrees(design);
+  const W = screenW(design.aspect);
+  // Each piece is cut to its panel, as VGUI clips a panel's children (the row's 300 x 80, the versus panel's 354 x 120).
+  const pieces = (laid: LaidBlock[], at: Box, shown: (b: LaidBlock) => boolean, text: (n: KvNode) => string,
+    visible: (b: LaidBlock) => boolean = (b) => b.visible): TabPiece[] =>
+    laid.flatMap((b) => {
+      const name = byName.get(b.name.toLowerCase());
+      if (!name) return [];
+      const label = (kvGet(b.node, 'ControlName') ?? '').toLowerCase() === 'label' && b.name.toLowerCase() !== 'pingimage';
+      const x = Math.max(at.x, at.x + b.x), y = Math.max(at.y, at.y + b.y);
+      const w = Math.min(at.x + at.w, at.x + b.x + b.w) - x, h = Math.min(at.y + at.h, at.y + b.y + b.h) - y;
+      const drawn = shown(b) && w > 0 && h > 0 && (!label || text(b.node) !== '');
+      return [{ name, x, y, w: Math.max(0, w), h: Math.max(0, h), visible: visible(b), drawn }];
+    });
+  const board = layoutBlocks(trees(BOARD), { w: W, h: SCREEN_H, textOf: boardText, measure });
+  if (panel === 'tabBoard') {
+    const shown = (b: LaidBlock) => b.visible && !BOARD_HIDDEN.has(b.name.toLowerCase());
+    return [{ box: { x: 0, y: 0, w: W, h: SCREEN_H }, pieces: pieces(board, { x: 0, y: 0, w: W, h: SCREEN_H }, shown, boardText) }];
+  }
+  if (panel === 'tabVersus') {
+    const el = elementRect(design, 'tabVersus', design.aspect);
+    const text = (n: KvNode) => versusText(n, side);
+    const laid = layoutBlocks(trees(VERSUS), { w: el.w, h: el.h, embedded: true, textOf: text, measure });
+    const shown = (b: LaidBlock) => el.visible && b.visible && !VERSUS_HIDDEN.has(b.name.toLowerCase()) && b.name.toLowerCase() !== OTHER_TEAM_BOX[side];
+    return [{ box: { x: el.x, y: el.y, w: el.w, h: el.h }, pieces: pieces(laid, el, shown, text) }];
+  }
+  const survivor = panel === 'tabSurvivors';
+  const rows = survivor ? tabRows(side).survivors : tabRows(side).infected;
+  const file = survivor ? SURVIVOR_ROW : INFECTED_ROW;
+  return rows.flatMap((row, i) => {
+    const at = board.find((b) => b.name.toLowerCase() === `${survivor ? 'survivor' : 'infected'}${i + 1}`);
+    if (!at || !at.visible) return [];
+    const text = (n: KvNode) => rowText(n, row, ROW_STATE);
+    const laid = layoutBlocks(trees(file), { w: at.w, h: at.h, textOf: text, measure });
+    const rule = survivor ? survivorPiece : infectedPiece;
+    const shown = (b: LaidBlock) => { const s = rule(b.name.toLowerCase(), row); return s === 'force' || (s && b.visible); };
+    const bg = laid.find((b) => b.name.toLowerCase() === 'playerbackground');
+    const box = bg ? { x: at.x + bg.x, y: at.y + bg.y, w: bg.w, h: bg.h } : { x: at.x, y: at.y, w: at.w, h: at.h };
+    // Code shows your row's own background whatever its visible says (survivorPiece's 'force').
+    return [{ box, pieces: pieces(laid, at, shown, text, (b) => rule(b.name.toLowerCase(), row) === 'force' || b.visible) }];
+  });
+}
+
+/** The side a Tab panel's boxes are measured for when no side is given: the infected rows' own, else the survivors'. */
+export const tabSideOf = (panel: string): Side => (elementById(panel)?.side === 'infected' ? 'infected' : 'survivor');
+
+let measureCtx: CanvasRenderingContext2D | null | undefined;
+/** A label's width in HUD units without the page's canvas: measured at 4 px a unit on a canvas of its own, or estimated where there is none. */
+function unitMeasurer(design: HudDesign) {
+  if (measureCtx === undefined) {
+    try { measureCtx = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d'); } catch { measureCtx = null; }
+  }
+  const ctx = measureCtx;
+  if (ctx) return measurer(ctx, design, 4);
+  return (n: KvNode, text: string): number => text.length * fontFace(design, kvGet(n, 'font') ?? 'Default').tall * 0.5;
+}
+
+/** The design with the player's hides on one Tab panel taken off, kept per design so its trees are built once. */
+const UNHIDDEN = new WeakMap<HudDesign, Map<string, HudDesign>>();
+function unhidden(design: HudDesign, panel: string): HudDesign {
+  const kids = design.children[panel];
+  const hides = kids && Object.values(kids).some((o) => o.visible !== undefined);
+  if (!hides && design.elements[panel]?.visible === undefined) return design;
+  let per = UNHIDDEN.get(design);
+  if (!per) UNHIDDEN.set(design, per = new Map());
+  let d = per.get(panel);
+  if (!d) {
+    const children = { ...design.children };
+    if (kids) children[panel] = Object.fromEntries(Object.entries(kids).map(([n, o]) => { const { visible: _v, ...rest } = o; return [n, rest]; }));
+    const elements = { ...design.elements };
+    if (elements[panel]) { const { visible: _v, ...rest } = elements[panel]; elements[panel] = rest; }
+    d = { ...design, children, elements };
+    per.set(panel, d);
+  }
+  return d;
+}
+
+/**
+ * Where the selection outlines Tab pieces: in each box where the painter
+ * would draw the piece were the player's own hides taken off (so a hidden
+ * piece, and one hidden with it, keeps its outline at its place), or, for a
+ * piece code never draws on this side (the enemy box to the survivors, the
+ * other infected rows), in every box.
+ */
+export function tabFrames(design: HudDesign, side: Side, panel: string, names: readonly string[]): { card: number; box: Box }[] {
+  const boxes = tabBoxes(unhidden(design, panel), side, panel);
+  return names.flatMap((name) => {
+    const at = boxes.map((b, card) => ({ card, p: b.pieces.find((p) => p.name === name) })).filter((x) => x.p);
+    const drawn = at.filter((x) => x.p!.drawn);
+    return (drawn.length ? drawn : at).map(({ card, p }) => ({ card, box: { x: p!.x, y: p!.y, w: p!.w, h: p!.h } }));
+  });
+}

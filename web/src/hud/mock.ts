@@ -26,7 +26,7 @@ import { drawArt } from '../crosshair/model';
 import { childDef, panelChildren } from './children';
 import { probe } from './probes';
 import { drawWeapons, drawNineSlice, type WeaponHeld } from './weapons';
-import { drawTabScreen, tabPicked } from './tabscreen';
+import { drawTabScreen, tabPicked, tabBoxes, tabSideOf } from './tabscreen';
 
 export type Side = 'survivor' | 'infected';
 
@@ -36,14 +36,13 @@ export type Side = 'survivor' | 'infected';
  * hit test reaches a panel the file does not have. Stock and Modern offer
  * every one.
  *
- * The Tab screen elements (HudElement.tab) are left out: drawHud draws the
- * Tab screen itself (tabscreen.ts), and they join Layers, the snap targets
- * and the hit test once the page lists them (tab screen spec tasks 15 and
- * 16).
+ * The Tab screen elements (HudElement.tab) are among them: drawHud draws the
+ * Tab screen itself (tabscreen.ts), and shownInState keeps them off the
+ * canvas and out of every click until Tab is held or one is picked.
  */
 export function visibleElements(side: Side, design: HudDesign): HudElement[] {
   const key = baseOf(design);
-  return ELEMENTS.filter((e) => !e.tab && (e.side === side || e.side === 'both') && baseHasElement(key, e));
+  return ELEMENTS.filter((e) => (e.side === side || e.side === 'both') && baseHasElement(key, e));
 }
 
 /** What a painter is handed: a box in canvas pixels. Whether the element is
@@ -103,20 +102,42 @@ export const TEAM_CARDS = 3;
 /** Smallest-area element under the point wins, so a small element sitting
  *  inside a larger container (the crosshair inside the whole screen, say)
  *  stays selectable. In Free the teammates' container covers the screen, so
- *  there the three drawn cards are the targets instead of the container. */
+ *  there the three drawn cards are the targets instead of the container.
+ *
+ *  While Tab is held the Tab screen is on top: its pieces are hit first
+ *  (tabTargets), the HUD only where none is, and never an element the game
+ *  takes off under Tab (the teammate cards, HudElement.underTab). */
 export function hitTest(design: HudDesign, side: Side, ux: number, uy: number, state?: SurvivorState | PreviewState): string | null {
-  let best: { id: string; area: number } | null = null;
-  for (const el of visibleElements(side, design)) {
-    const r = rectFor(design, el.id);
-    if (!r.visible || !shownInState(el, state)) continue;
-    const targets = elementTargets(design, el.id, r);
-    for (const t of targets) {
-      if (!inside(t, ux, uy)) continue;
-      const area = t.w * t.h;
-      if (!best || area < best.area) best = { id: el.id, area };
+  const tab = !!previewOf(state).tab;
+  const smallest = (els: HudElement[], targets: (el: HudElement, r: Rect) => Box[]): string | null => {
+    let best: { id: string; area: number } | null = null;
+    for (const el of els) {
+      const r = rectFor(design, el.id);
+      if (!r.visible || !shownInState(el, state)) continue;
+      for (const t of targets(el, r)) {
+        if (!inside(t, ux, uy)) continue;
+        const area = t.w * t.h;
+        if (!best || area < best.area) best = { id: el.id, area };
+      }
     }
+    return best ? best.id : null;
+  };
+  const els = visibleElements(side, design);
+  if (tab) {
+    const hit = smallest(els.filter((e) => e.tab), (el) => tabTargets(design, side, el.id));
+    if (hit) return hit;
   }
-  return best ? best.id : null;
+  return smallest(els.filter((e) => !e.tab && !(tab && e.underTab === 'hidden')), (el, r) => elementTargets(design, el.id, r));
+}
+
+/**
+ * Where a Tab element takes a click: the versus panel on its whole rect
+ * (it moves, and a drag anywhere on it should move it), the board and the
+ * rows on the pieces the painter draws, a row on its box too.
+ */
+export function tabTargets(design: HudDesign, side: Side, id: string): Box[] {
+  if (id === 'tabVersus') return tabBoxes(design, side, id).map((b) => b.box);
+  return tabBoxes(design, side, id).flatMap((b) => [...(id === 'tabBoard' ? [] : [b.box]), ...b.pieces.filter((p) => p.drawn)]);
 }
 
 /**
@@ -127,6 +148,7 @@ export function hitTest(design: HudDesign, side: Side, ux: number, uy: number, s
  * cut-away part of the container draws nothing), else the element's rect.
  */
 export function elementTargets(design: HudDesign, id: string, r: Box = rectFor(design, id)): Box[] {
+  if (elementById(id)?.tab) return tabTargets(design, tabSideOf(id), id).map(({ x, y, w, h }) => ({ x, y, w, h }));
   if (id === 'teamColumn') return isFreeTeam(design) ? teamCardRects(design, design.aspect).slice(0, TEAM_CARDS) : [r];
   if (design.elements[id]?.fit) {
     const boxes = panelBoxes(design, id);
@@ -146,6 +168,8 @@ export function elementTargets(design: HudDesign, id: string, r: Box = rectFor(d
 export function panelBoxes(design: HudDesign, panelId: string): Box[] {
   if (panelId === 'teamColumn') return teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).map(({ x, y, w, h }) => ({ x, y, w, h }));
   if (panelId === 'infectedRow') return infectedCardRects(design);
+  // A Tab panel: the board's screen, the versus panel's rect, each row's PlayerBackground (the row blocks overlap).
+  if (elementById(panelId)?.tab) return tabBoxes(design, tabSideOf(panelId), panelId).map((b) => b.box);
   const panel = panelChildren(panelId);
   if (!panel || panel.repeat !== 'single' || !panel.frame) return [];
   const r = rectFor(design, panelId);
@@ -232,8 +256,9 @@ function cardOpts(panel: string, i: number, state: SurvivorState | PreviewState)
  * generated tree through childRects, like everything the canvas draws.
  */
 export function childAt(
-  design: HudDesign, state: SurvivorState | PreviewState, ux: number, uy: number, panel = 'teamColumn',
+  design: HudDesign, state: SurvivorState | PreviewState, ux: number, uy: number, panel = 'teamColumn', side: Side = tabSideOf(panel),
 ): { name: string; card: number } | null {
+  if (elementById(panel)?.tab) return tabChildAt(design, side, ux, uy, panel);
   const container = rectFor(design, panel);
   // The pieces may reach past a stand-in rect (the use bar's mockSize) into their real frame.
   if (!container.visible || (!inside(container, ux, uy) && !panelBoxes(design, panel).some((b) => inside(b, ux, uy)))) return null;
@@ -250,6 +275,32 @@ export function childAt(
       const area = r.w * r.h;
       if (def.role === 'decor') { if (!decor || area < decor.area) decor = { name: r.name, card: i, area }; continue; }
       if (!best || area < best.area) best = { name: r.name, card: i, area };
+    }
+  }
+  const hit = best ?? decor;
+  return hit && { name: hit.name, card: hit.card };
+}
+
+/**
+ * childAt on the Tab screen: the smallest piece the painter draws under the
+ * point, decor (the backdrop, the boxes, the row backgrounds) only where no
+ * other piece is, as on the cards. Every registered piece is open to a
+ * click: none waits on a whole-piece gate. A hidden versus panel takes none.
+ */
+function tabChildAt(design: HudDesign, side: Side, ux: number, uy: number, panel: string): { name: string; card: number } | null {
+  if (!rectFor(design, panel).visible && elementById(panel)?.props.includes('visible')) return null;
+  let best: { name: string; card: number; area: number } | null = null;
+  let decor: { name: string; card: number; area: number } | null = null;
+  for (const [card, b] of tabBoxes(design, side, panel).entries()) {
+    for (const p of b.pieces) {
+      if (!p.drawn || !inside(p, ux, uy)) continue;
+      // The versus panel clips its pieces to its rect (TL5).
+      if (panel === 'tabVersus' && !inside(b.box, ux, uy)) continue;
+      const def = childDef(panel, p.name);
+      if (!def || (def.gate && !probe(def.gate))) continue;
+      const area = p.w * p.h;
+      if (def.role === 'decor') { if (!decor || area < decor.area) decor = { name: p.name, card, area }; continue; }
+      if (!best || area < best.area) best = { name: p.name, card, area };
     }
   }
   const hit = best ?? decor;
