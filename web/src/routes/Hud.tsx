@@ -1488,10 +1488,21 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
         <h3>Save your HUD</h3>
         <label class="hud__row">
           <span>Name</span>
+          {/* Only what safeName keeps, as it is typed, and the rest of safeName
+            * (spaces trimmed and joined) when the field is left: the name a
+            * reload, an export or a share link carries is the one shown here. */}
           <input
-            type="text" value={design.name}
-            onInput={(e) => edit((d) => ({ ...d, name: (e.target as HTMLInputElement).value }), 'gesture')}
-            {...endsOn(endGesture)}
+            type="text" value={design.name} maxLength={40}
+            onInput={(e) => {
+              const input = e.target as HTMLInputElement;
+              const typed = input.value.replace(/[^A-Za-z0-9_ -]/g, '');
+              if (typed !== input.value) input.value = typed;
+              edit((d) => ({ ...d, name: typed }), 'gesture');
+            }}
+            {...endsOn(() => {
+              if (current.current.name !== safeName(current.current.name)) edit((d) => ({ ...d, name: safeName(d.name) }), 'gesture');
+              endGesture();
+            })}
           />
           <span />
         </label>
