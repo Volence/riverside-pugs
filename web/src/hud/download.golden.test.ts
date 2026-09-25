@@ -6,7 +6,11 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { packHud } from './build';
+import { packHud, buildTrees } from './build';
+import { DEFAULT_PREVIEW, type PreviewState } from './render';
+import { shownInState } from './mock';
+import { ELEMENTS } from './elements';
+import { panelChildren } from './children';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
 import { registerImport, unregisterImport } from './base';
 import { sampleHud } from './importFixtures';
@@ -62,6 +66,26 @@ describe('the download is unchanged by the preview', () => {
   ];
   for (const [name, d, hash] of cases) {
     it(`${name} packs to the same bytes`, () => {
+      expect(download(d)).toBe(hash);
+    });
+  }
+
+  // Tab held is preview only (PreviewState.tab, tab screen spec 4.5): with
+  // it on, the page reads every Tab file through buildTrees and shows the Tab
+  // elements, and the download is still the untouched one, byte for byte.
+  for (const [name, preset, hash] of [
+    ['an untouched design', 'stock', cases[0][2]],
+    ['an untouched Modern design', 'modern', cases[2][2]],
+  ] as const) {
+    it(`${name} with the Tab screen previewed packs to the same bytes`, () => {
+      const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), preset };
+      const preview: PreviewState = { ...DEFAULT_PREVIEW, tab: true };
+      const trees = buildTrees(d);
+      for (const el of ELEMENTS.filter((e) => e.tab)) {
+        expect(shownInState(el, preview), el.id).toBe(true);
+        trees(el.file!);
+      }
+      for (const id of ['tabBoard', 'tabVersus', 'tabSurvivors', 'tabInfected']) trees(panelChildren(id)!.file);
       expect(download(d)).toBe(hash);
     });
   }
