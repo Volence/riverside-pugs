@@ -34,10 +34,15 @@ export type Side = 'survivor' | 'infected';
  * or renamed an element's panel does not offer it, so no control, outline or
  * hit test reaches a panel the file does not have. Stock and Modern offer
  * every one.
+ *
+ * The Tab screen elements (HudElement.tab) are left out until the preview
+ * can draw the Tab screen and the page lists them (tab screen spec tasks 13
+ * to 16): until then Layers, the snap targets and the canvas would reach
+ * elements nothing draws.
  */
 export function visibleElements(side: Side, design: HudDesign): HudElement[] {
   const key = baseOf(design);
-  return ELEMENTS.filter((e) => (e.side === side || e.side === 'both') && baseHasElement(key, e));
+  return ELEMENTS.filter((e) => !e.tab && (e.side === side || e.side === 'both') && baseHasElement(key, e));
 }
 
 /** What a painter is handed: a box in canvas pixels. Whether the element is
@@ -79,11 +84,16 @@ function rectFor(design: HudDesign, id: string): Rect & { visible: boolean } {
   return elementRect(design, id, design.aspect);
 }
 
-/** Whether the preview shows an element in the page's state: an infected one the game shows only as a ghost, say (HudElement.shownIn). */
+/**
+ * Whether the preview shows an element in the page's state: an infected one
+ * the game shows only as a ghost, say (HudElement.shownIn). A Tab screen
+ * element shows only while the preview holds Tab (PreviewState.tab), or
+ * while it is selected, as an occasional panel does (tab screen spec 3.1).
+ */
 export function shownInState(el: HudElement, state?: SurvivorState | PreviewState, picked = false): boolean {
   const v = previewOf(state);
   return (!el.shownIn || el.shownIn.includes(v.infected)) && (!el.shownFor || el.shownFor.includes(v.siClass))
-    && (!el.occasional || !!v.occasional || picked);
+    && (!el.occasional || !!v.occasional || picked) && (!el.tab || !!v.tab || picked);
 }
 
 /** Card 4 shows only while spectating a full team: never drawn, never a target. */

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { visibleElements, hitTest, drawHud, HANDLE_PX, childAt, panelBoxes, TEAM_CARDS, infectedCardRects, infectedCardClasses } from './mock';
+import { visibleElements, shownInState, hitTest, drawHud, HANDLE_PX, childAt, panelBoxes, TEAM_CARDS, infectedCardRects, infectedCardClasses } from './mock';
 import { selectionFrames, TEAMMATES } from './selection';
 import { withTeamDir } from './edit';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
@@ -1195,5 +1195,26 @@ describe('the infected cards, as the game lays them out (plan Task 12)', () => {
     // AbilityProgress (2,18 36 x 36) and PlayerImage (9,23 24 x 24) overlap; (4, 20) is on the ring only.
     expect(childAt(d, DEFAULT_PREVIEW, cards[0].x + 4, cards[0].y + 20, 'infectedRow')).toEqual({ name: 'AbilityProgress', card: 0 });
     expect(childAt(d, DEFAULT_PREVIEW, cards[2].x + 4, cards[2].y + 20, 'infectedRow')?.name).not.toBe('AbilityProgress');
+  });
+});
+
+/**
+ * The Tab screen elements are in the registry before the preview can draw
+ * them (tab screen spec tasks 4 and 13 to 16): until then no list, click or
+ * snap reaches them, and once drawn they show only with Tab held or while
+ * selected, as an occasional panel does (spec 3.1).
+ */
+describe('the Tab screen elements, before the Tab painter', () => {
+  it('are in no side\'s list of elements yet', () => {
+    for (const side of ['survivor', 'infected'] as const) {
+      expect(visibleElements(side, DEFAULT_DESIGN).filter((e) => e.tab), side).toEqual([]);
+    }
+  });
+  it('show only while the preview holds Tab, or while picked', () => {
+    const el = elementById('tabVersus')!;
+    expect(shownInState(el, DEFAULT_PREVIEW)).toBe(false);
+    expect(shownInState(el, { ...DEFAULT_PREVIEW, tab: true })).toBe(true);
+    expect(shownInState(el, DEFAULT_PREVIEW, true)).toBe(true);
+    expect(shownInState(elementById('teamColumn')!, DEFAULT_PREVIEW)).toBe(true);
   });
 });
