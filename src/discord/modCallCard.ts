@@ -3,7 +3,6 @@ import { discordLabel, escapeName, identityOf } from '../identity.js';
 import { foldedCalls, REASON_LABELS, type ModCallRow } from '../modCalls.js';
 import { serverPasswordFor } from '../matchToken.js';
 import { getSetting } from '../settings.js';
-import { hasStaffFlag } from '../tickets/store.js';
 import { spectateFor } from '../spectate.js';
 import { spectateConnectLine } from './controller.js';
 import type { ActionRow, MessagePayload } from './transport.js';
@@ -101,24 +100,17 @@ export function renderModCallCard(db: DB, call: ModCallRow, publicUrl: string): 
   const children = foldedCalls(db, call.id);
   const handled = call.handled_at !== null;
   const who = (steamid: string) => personLine(db, steamid);
-  // A call about a staff member is read in the admin channel by that staff
-  // member too. The ticket system keeps the accused out of every surface, so
-  // the card says only what happened and where: no caller, no details and no
-  // ticket link. The site's calls page, which hides the call from its subject,
-  // has the rest.
-  const aboutStaff = call.target_kind === 'player' && call.target_steamid !== null
-    && hasStaffFlag(db, identityOf(db, call.target_steamid).steamid);
-  const ticketUrl = call.ticket_id !== null && !aboutStaff ? `${publicUrl}/admin/people/tickets/${call.ticket_id}` : null;
+  // Names show even when the call is about a staff member, who may read this
+  // channel too: the owner's call (2026-09-25), since a card that hid them
+  // left mods unable to tell who called on whom. The site still hides the
+  // call and its ticket from their subject.
+  const ticketUrl = call.ticket_id !== null ? `${publicUrl}/admin/people/tickets/${call.ticket_id}` : null;
 
   const lines: string[] = [];
-  if (aboutStaff) {
-    lines.push('About a staff member: details are on the site.', `[In-game calls](${publicUrl}/admin/people/calls)`);
-  } else {
-    lines.push(`Caller: ${who(call.caller_steamid)}${call.via === 'tv' ? ' on SourceTV' : ''}`);
-    if (call.target_kind === 'player' && call.target_steamid) lines.push(`About: ${who(call.target_steamid)}`);
-    else if (call.target_kind === 'team') lines.push('About: their own team');
-    else if (call.target_kind === 'general') lines.push('About: the whole server');
-  }
+  lines.push(`Caller: ${who(call.caller_steamid)}${call.via === 'tv' ? ' on SourceTV' : ''}`);
+  if (call.target_kind === 'player' && call.target_steamid) lines.push(`About: ${who(call.target_steamid)}`);
+  else if (call.target_kind === 'team') lines.push('About: their own team');
+  else if (call.target_kind === 'general') lines.push('About: the whole server');
 
   const server = call.server_id !== null
     ? (db.prepare('SELECT name FROM servers WHERE id = ?').get(call.server_id) as { name: string } | undefined)
@@ -128,14 +120,13 @@ export function renderModCallCard(db: DB, call: ModCallRow, publicUrl: string): 
   if (call.match_id !== null) where += ` · match [#${call.match_id}](${publicUrl}/match/${call.match_id})`;
   lines.push(where);
 
-  if (!aboutStaff && call.text.trim() !== '') lines.push(call.text.split('\n').map((l) => `> ${escapeName(l)}`).join('\n'));
+  if (call.text.trim() !== '') lines.push(call.text.split('\n').map((l) => `> ${escapeName(l)}`).join('\n'));
   if (ticketUrl) lines.push(`Ticket [#${call.ticket_id}](${ticketUrl})`);
   // The note says why there is no ticket, or that the rate cap held back the
   // ping; it can sit beside a ticket, so it is not an either/or.
   if (call.note) lines.push(escapeName(call.note));
 
   const childLines = children.map((c) => {
-    if (aboutStaff) return `+ ${REASON_LABELS[c.reason]}`;
     const said = c.text.trim() !== '' ? ` "${escapeName(c.text)}"` : '';
     return `+ ${who(c.caller_steamid)}: ${REASON_LABELS[c.reason]}${said}`;
   });
