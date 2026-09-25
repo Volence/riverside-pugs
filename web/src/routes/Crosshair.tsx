@@ -235,7 +235,10 @@ export function Crosshair({ session = { kind: 'anonymous' } }: { session?: Sessi
   }, [state, view, imgTick]);
 
   const pickImage = (e: Event, into: typeof imported, patch: Partial<CrosshairState>) => {
-    const f = (e.target as HTMLInputElement).files?.[0];
+    const input = e.target as HTMLInputElement;
+    const f = input.files?.[0];
+    // Cleared, so picking the same file again (after fixing it) fires again.
+    input.value = '';
     if (!f) return;
     const img = new Image();
     const url = URL.createObjectURL(f);
@@ -245,6 +248,11 @@ export function Crosshair({ session = { kind: 'anonymous' } }: { session?: Sessi
       set(patch);
       setImgTick((n) => n + 1);
       URL.revokeObjectURL(url);
+    };
+    // Without this a file that is not an image fails silently and leaks its URL.
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      setStatus(`${f.name} is not an image the browser can read.`);
     };
     img.src = url;
   };

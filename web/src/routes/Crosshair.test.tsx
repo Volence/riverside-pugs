@@ -318,3 +318,20 @@ describe('the Crosshair page and the community page', () => {
     await waitFor(() => expect(loaded).toContain(PNG));
   });
 });
+
+describe('the Crosshair page file pickers', () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); cleanup(); });
+
+  it('says so when a picked file is not an image, and frees its URL', async () => {
+    // QA 2026-09-25: a non-image file changed nothing and said nothing.
+    class Broken { onload: (() => void) | null = null; onerror: (() => void) | null = null; set src(_v: string) { queueMicrotask(() => this.onerror?.()); } }
+    vi.stubGlobal('Image', Broken);
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:x');
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    render(<Crosshair />);
+    const input = screen.getByLabelText('Use your own image') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['not an image'], 'notes.txt', { type: 'text/plain' })] } });
+    expect(await screen.findByText('notes.txt is not an image the browser can read.')).toBeTruthy();
+    expect(revoke).toHaveBeenCalledWith('blob:x');
+  });
+});
