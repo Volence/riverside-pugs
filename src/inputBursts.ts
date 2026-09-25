@@ -2,8 +2,8 @@ import type { DB } from './db.js';
 import { getSetting } from './settings.js';
 import {
   DEFAULT_THRESHOLDS, MAX_HOLDS, MAX_RATE_CEILING, MIN_RATE_FLOOR, SIGNATURES, burstStats, decodeIntervals,
-  encodeIntervals, holdAnnotation, holdStats, isWheel, matchDetections, mostlySteady, STEADY_TAPS,
-  type HoldAnnotation, type HoldStats, type Thresholds,
+  burstLabel, detectionLabel, encodeIntervals, holdStats, isWheel, matchDetections,
+  type BurstLabel, type HoldStats, type Thresholds,
 } from './inputStats.js';
 
 /**
@@ -106,19 +106,21 @@ interface GroupRow {
 }
 
 /**
- * What the holds across a detection's evidence look like, plus a warning when
- * any of it came from plugin 0.1.0: those bursts have no holds, were timed by
- * server tick, and were captured before ghosts were excluded, so a pounce
- * burst among them may be spawn mashing.
+ * What a detection's evidence looks like, plus a warning when any of it came
+ * from plugin 0.1.0: those bursts have no holds, were timed by server tick, and
+ * were captured before ghosts were excluded, so a pounce burst among them may
+ * be spawn mashing.
+ *
+ * Each burst is labelled on its own holds and its own gaps (`burstLabel`) and
+ * the detection takes the most common label (`detectionLabel`). Holds are NOT
+ * pooled across the evidence: pooled, one burst's merged notches outvoted
+ * another's one-tick ones, and a fast wheel read as variable-hold.
  */
 function evidenceNote(
   evidence: readonly { wire: number; holds: string | null; intervals: readonly number[] }[],
 ): string {
-  const all: number[] = [];
-  for (const e of evidence) all.push(...(e.holds ? decodeIntervals(e.holds, MAX_HOLDS) ?? [] : []));
-  let note: string = holdAnnotation(all);
-  // Wheel binds are legal, a fixed-rate tapper is not: see STEADY_TAPS.
-  if (note === 'wheel-like' && mostlySteady(evidence.map((e) => e.intervals))) note = STEADY_TAPS;
+  const labels = evidence.map((e) => burstLabel(e.intervals, e.holds ? decodeIntervals(e.holds, MAX_HOLDS) : null));
+  const note: string = detectionLabel(labels);
   return evidence.some((e) => e.wire === 1) ? `${note}, plugin 0.1.0 capture` : note;
 }
 
@@ -180,7 +182,8 @@ export interface EvidenceBurst {
   /** Server ticks the burst spanned, to set against presses and rate. */
   serverSpan: number | null;
   hold: HoldStats | null;
-  annotation: HoldAnnotation;
+  /** This burst's own label, from its holds and its gaps. */
+  annotation: BurstLabel;
 }
 
 export interface DetectionRow {
@@ -216,12 +219,13 @@ function evidenceBursts(db: DB, ids: readonly number[]): EvidenceBurst[] {
      FROM input_bursts WHERE id IN (${ids.map(() => '?').join(',')}) ORDER BY id`,
   ).all(...ids) as { id: number; at: string; weapon: string; intervals: string; wire: number; serverSpan: number | null; holds: string | null }[];
   return rows.map((r) => {
-    const stats = burstStats(decodeIntervals(String(r.intervals)) ?? []);
+    const intervals = decodeIntervals(String(r.intervals)) ?? [];
+    const stats = burstStats(intervals);
     const holds = r.holds ? decodeIntervals(r.holds, MAX_HOLDS) : null;
     return {
       id: r.id, at: r.at, weapon: r.weapon, presses: stats.n + 1,
       ratePerSec: stats.ratePerSec, meanTicks: stats.meanTicks,
-      wire: r.wire, serverSpan: r.serverSpan, hold: holdStats(holds), annotation: holdAnnotation(holds),
+      wire: r.wire, serverSpan: r.serverSpan, hold: holdStats(holds), annotation: burstLabel(intervals, holds),
     };
   });
 }
