@@ -15,6 +15,10 @@ describe('assertWritable', () => {
     expect(() => assertWritable('left4dead/cfg/secrets.cfg')).toThrow();
     expect(() => assertWritable('left4dead/maps/x.bsp')).toThrow();
     expect(() => assertWritable('left4dead/cfg/../../etc/passwd')).toThrow();
+    // The site's balance writers own these; a release never touches them.
+    expect(() => assertWritable('left4dead/cfg/pug_balance.cfg')).toThrow(/site/);
+    expect(() => assertWritable('left4dead/addons/sourcemod/data/pug_balance_watch.txt')).toThrow(/site/);
+    expect(() => assertWritable('left4dead/addons/sourcemod/data/l4d_info_editor_weapons.cfg')).not.toThrow();
   });
 });
 

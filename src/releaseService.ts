@@ -3,7 +3,7 @@ import type { BalanceKnobs } from './balanceKnobs.js';
 import type { DeployRepo, RepoFile } from './deployRepo.js';
 import { listServers } from './serverPool.js';
 import { readingStates, readingsOf } from './fleetReader.js';
-import { treeReaderFor } from './fleetTree.js';
+import { SITE_OWNED, treeReaderFor } from './fleetTree.js';
 import { PER_BOX } from './fleetCompare.js';
 import { cvarDiff, describeOps, planBox, suggestBalance, validateTree, wantedFor, type Op, type WantedFile } from './releaseStage.js';
 
@@ -72,10 +72,12 @@ export class ReleaseService {
           if (gone) refused = `would remove the per-box file ${gone.path.replace(/^left4dead\//, '')}`;
         }
         if (refused) ops = null;
+        for (const o of ops ?? []) if (SITE_OWNED.has(o.path)) invalid.push(`would ${o.op === 'remove' ? 'remove' : 'overwrite'} ${o.path} ${o.op === 'remove' ? 'from' : 'on'} ${s.name}, which the site writes`);
         const shippedJson = Object.fromEntries([...wanted.values()].map((w: WantedFile) => [w.path, { sha256: w.sha256, blob: w.blob }]));
         db.prepare("INSERT INTO release_boxes (release_id, server_id, state, error, plan_json, shipped_json, updated_at) VALUES (?, ?, 'staged', ?, ?, ?, ?)")
           .run(id, s.id, refused, ops ? JSON.stringify(ops) : null, JSON.stringify(shippedJson), this.now());
       }
+      if (invalid.length) db.prepare("UPDATE releases SET state = 'invalid', invalid_json = ? WHERE id = ?").run(JSON.stringify(invalid), id);
       return { ok: true as const, id };
     })();
   }

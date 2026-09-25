@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { Client as FtpClient } from 'basic-ftp';
-import { gameDirOf, isManaged } from './fleetTree.js';
+import { gameDirOf, isManaged, SITE_OWNED } from './fleetTree.js';
 import type { ServerRow } from './serverPool.js';
 
 /**
@@ -25,6 +25,7 @@ export interface TreeWriter {
 
 export function assertWritable(path: string): void {
   if (!isManaged(path) || path.split('/').pop() === 'secrets.cfg') throw new Error(`refusing to touch ${path}`);
+  if (SITE_OWNED.has(path)) throw new Error(`refusing to touch ${path}: the site writes it`);
 }
 
 const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex');

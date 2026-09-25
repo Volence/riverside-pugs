@@ -33,11 +33,15 @@ describe('wantedFor and validateTree', () => {
       f('boxes/dallas/left4dead/cfg/link.cfg', 'h', '120000'),
       f('overrides/left4dead/maps/x.bsp'),
       f('overrides/left4dead/addons/sourcemod/plugins/big.smx', 'h', '100644', 30 * 1024 * 1024),
+      f('overrides/left4dead/cfg/pug_balance.cfg'),
+      f('boxes/dallas/left4dead/addons/sourcemod/data/pug_balance_watch.txt'),
     ])).toEqual([
       'secrets.cfg is never deployed: left4dead/cfg/secrets.cfg',
       'symlink: boxes/dallas/left4dead/cfg/link.cfg',
       'outside the managed folders: left4dead/maps/x.bsp',
       'over 20 MB: left4dead/addons/sourcemod/plugins/big.smx',
+      'written by the site, never by a release: left4dead/cfg/pug_balance.cfg',
+      'written by the site, never by a release: left4dead/addons/sourcemod/data/pug_balance_watch.txt',
     ]);
   });
 });
