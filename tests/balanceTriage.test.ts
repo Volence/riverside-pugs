@@ -135,6 +135,25 @@ describe('triage decisions', () => {
     expect(db.prepare('SELECT triage, folded_into FROM balance_patches WHERE id = ?').get(g)).toEqual({ triage: 'folded', folded_into: base });
   });
 
+  it('ignore: when another patch holds the shared fingerprint, that holder is folded, so new sightings count for the target', () => {
+    // Two pending patches, same config but for the ignored plugin's build and
+    // one newly watched cvar the base lacks: after the ignore they hash the
+    // same as each other, not as the base.
+    const extra = { 'c:z_new': '1' };
+    addServer(db, { name: 'chicago', host: '10.0.0.2', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    const older = recordBalanceSighting(db, { matchId: 1, serverId: 2, half: 2, inventory: { ...BASE, ...extra, 'p:l4d_tvwatch.smx': '3.c' },
+      versionless: LISTS.versionless, now: '2026-09-22 01:00:00' }).patchId;
+    const newer = recordBalanceSighting(db, { matchId: 1, serverId: 2, half: 2, inventory: { ...BASE, ...extra, 'p:l4d_tvwatch.smx': '4.d' },
+      versionless: LISTS.versionless, now: '2026-09-22 02:00:00' }).patchId;
+    expect(triageIgnore(db, newer, { into: base, plugins: ['l4d_tvwatch.smx'], versionless: LISTS.versionless, knobsIgnored: [], adminId: '1' }))
+      .toEqual({ ok: true, target: base });
+    const again = recordBalanceSighting(db, { matchId: 1, serverId: 2, half: 2, inventory: { ...BASE, ...extra, 'p:l4d_tvwatch.smx': '5.e' },
+      versionless: LISTS.versionless, ignored: ['l4d_tvwatch.smx'] });
+    expect(again.patchId).toBe(older);
+    expect(again.effectivePatchId).toBe(base);
+    expect(db.prepare('SELECT folded_into FROM balance_patches WHERE id = ?').get(newer)).toEqual({ folded_into: older });
+  });
+
   it('drift uses the ignored list it is given', () => {
     addServer(db, { name: 'chicago', host: '10.0.0.2', port: 27015, rconPort: 27015, rconPassword: 'x' });
     recordBalanceSighting(db, { matchId: 1, serverId: 2, half: 1, inventory: BASE, versionless: LISTS.versionless });

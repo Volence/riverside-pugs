@@ -170,8 +170,15 @@ export function triageIgnore(db: DB, id: number, p: {
     // Other patches that differ only by these plugins merge too: admins hear
     // about it the same way as a boot merge.
     refingerprintPatches(db, p.versionless, effectiveIgnored(db, p.knobsIgnored));
-    if (resolvePatch(db, id) !== resolvePatch(db, c.into)) {
-      const f = foldInto(db, id, c.into);
+    // The refingerprint may have merged this patch into another one that now
+    // holds the shared fingerprint (or that one into this). New sightings land
+    // on that holder, so it is the chain end that joins the target: folding
+    // this patch alone would leave the holder pending and every later
+    // sighting counting for it. A holder that is a balance patch already
+    // counts as balance and is left alone.
+    const end = resolvePatch(db, id);
+    if (end !== resolvePatch(db, c.into) && (row(db, end)?.triage ?? 'balance') === 'pending') {
+      const f = foldInto(db, end, c.into);
       if (!f.ok) return { ok: false, status: 400, error: f.error };
     }
     return { ok: true, target: resolvePatch(db, id) };
