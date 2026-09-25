@@ -149,6 +149,12 @@ export interface ChildDef {
    * checks the list against both presets' pin_to_sibling keys.
    */
   hidesWith?: string[];
+  /**
+   * Code shows the piece whatever the file's visible says (your own Tab row's
+   * background, visible 0 in both presets): the page shows it visible unless
+   * the player hid it, and only a hide is written.
+   */
+  codeShown?: true;
 }
 
 export interface PanelChildren {
@@ -708,7 +714,7 @@ export const TAB_SURVIVOR_ROW: PanelChildren = {
   children: [
     { name: 'PlayerBackground', label: 'Teammate row', kind: 'image', role: 'decor', colour: false, ...TAB_HIDE,
       note: "Your teammates' rows. Its look is its style: the stock fade, a flat colour or a picture." },
-    { name: 'PlayerBackground_Selected', label: 'Your row', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE,
+    { name: 'PlayerBackground_Selected', label: 'Your row', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE, codeShown: true,
       keys: [{ key: 'bgcolor_override', label: 'Your row colour', type: 'colour', unsetLabel: 'File colour',
         evidence: `${PANEL_BG}; stock's 140 0 0 255 reads 141 0 0 on your row (tab screen spec 1.5); TAB-1 green (probe-tab tab1/runs/tab-survivor/tab-a.png)` }],
       note: 'The game shows this on your own row only.' },
@@ -737,7 +743,7 @@ export const TAB_INFECTED_ROW: PanelChildren = {
     { name: 'PlayerBackground', label: 'Other rows', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE,
       keys: [{ key: 'bgcolor_override', label: "Other rows' colour", type: 'colour', unsetLabel: 'File colour', gate: 'TS5b',
         evidence: `${PANEL_BG}; the other infected rows were never on screen (probe TS5b needs a second infected player)` }] },
-    { name: 'PlayerBackground_Selected', label: 'Your row', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE,
+    { name: 'PlayerBackground_Selected', label: 'Your row', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE, codeShown: true,
       keys: [{ key: 'bgcolor_override', label: 'Your row colour', type: 'colour', unsetLabel: 'File colour', gate: 'TS5',
         evidence: `${PANEL_BG}; probe TS5, probe-tab tab1/runs/tab-infected/tab-c.png (your row yellow)` }],
       note: 'The game shows this on your own row only.' },
