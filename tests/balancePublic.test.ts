@@ -119,6 +119,16 @@ describe('publicChanges', () => {
     expect(c.pluginsUpdated).toEqual([]); expect(c.pluginsAdded).toEqual([]);
     expect(publicChanges({}, { 'p:pug-match.smx': '1.aaaaaaaa' }, KNOBS).pluginsAdded).toEqual(['pug-match']);
   });
+  it('lists weapon stat changes by label, like cvars, and skips a key on one side only', () => {
+    const k = { ...KNOBS, weapons: [{ weapon: 'weapon_smg', key: 'Damage', label: 'Uzi damage' }] };
+    const c = publicChanges(
+      { 'w:weapon_smg.Damage': '24', 'w:weapon_pumpshotgun.Damage': 'default', 'w:weapon_only.Prev': '1' },
+      { 'w:weapon_smg.Damage': 'default', 'w:weapon_pumpshotgun.Damage': '25', 'w:weapon_only.Cur': '1' }, k);
+    expect(c.knobs).toEqual([
+      { label: 'Uzi damage', from: '24', to: 'game default' },
+      { label: 'weapon_pumpshotgun.Damage', from: 'game default', to: '25' },
+    ]);
+  });
   it('lists a watched file that appears or disappears, and falls back to raw names without knobs', () => {
     expect(publicChanges({}, { 'f:cfg/new.cfg': '1.aaaaaaaa' }, KNOBS).files).toEqual(['cfg/new.cfg']);
     expect(publicChanges({ 'c:z_tank_health': '1' }, { 'c:z_tank_health': '2' }, null).knobs).toEqual([{ label: 'z_tank_health', from: '1', to: '2' }]);
