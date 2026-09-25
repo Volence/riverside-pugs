@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { visibleElements, hitTest, drawHud, childAt, panelBoxes, TEAM_CARDS, infectedCardRects, infectedCardClasses } from './mock';
+import { visibleElements, shownInState, hitTest, drawHud, HANDLE_PX, childAt, panelBoxes, TEAM_CARDS, infectedCardRects, infectedCardClasses } from './mock';
 import { selectionFrames, TEAMMATES } from './selection';
 import { withTeamDir } from './edit';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
@@ -202,6 +202,62 @@ describe('drawHud delegates panels to the renderer', () => {
     drawHud(ctx, 853, 480, design, 'survivor', null);
     const redFills = fills.filter((f) => f.fill === 'rgba(255,0,0,1)');
     expect(redFills.length).toBe(3);   // one per teammate card
+  });
+
+  it('draws a restyled incapacitated or dead panel in advanced mode only, as the download ships it', () => {
+    // QA 2026-09-25: the advanced state panels were written by the build but never drawn.
+    _setImageFactory(instant);
+    const fillsOf = (design: typeof DEFAULT_DESIGN, state: 'down' | 'dead') => {
+      const fills: string[] = [];
+      const ctx = { ...fakeCtx(() => {}) } as unknown as CanvasRenderingContext2D;
+      const real = ctx.fillRect.bind(ctx);
+      ctx.fillRect = ((...a: [number, number, number, number]) => { fills.push(ctx.fillStyle as string); return real(...a); }) as typeof ctx.fillRect;
+      drawHud(ctx, 853, 480, design, 'survivor', null, undefined, { state });
+      return fills;
+    };
+    const styles = { incapPanel: { kind: 'flat' as const, color: '0 255 0 255' }, deadPanel: { kind: 'flat' as const, color: '0 0 255 255' } };
+    const adv = { ...DEFAULT_DESIGN, advanced: true, styles };
+    expect(fillsOf(adv, 'down')).toContain('rgba(0,255,0,1)');
+    expect(fillsOf(adv, 'dead')).toContain('rgba(0,0,255,1)');
+    const normal = { ...DEFAULT_DESIGN, styles };
+    expect(fillsOf(normal, 'down')).not.toContain('rgba(0,255,0,1)');
+    expect(fillsOf(normal, 'dead')).not.toContain('rgba(0,0,255,1)');
+  });
+
+  it('draws the Modern kill notice box in the flat colour the download ships', () => {
+    // QA 2026-09-25: the preview had no art for vgui/hud/mod_panel_flat and drew no box.
+    _setImageFactory(instant);
+    const fills: string[] = [];
+    const ctx = { ...fakeCtx(() => {}) } as unknown as CanvasRenderingContext2D;
+    const real = ctx.fillRect.bind(ctx);
+    // The box is label4background's 25 tall (Modern's pzdamagerecordpanel.res), at 1:1 on a 480 tall canvas.
+    ctx.fillRect = ((...a: [number, number, number, number]) => { fills.push(`${ctx.fillStyle} ${Math.round(a[3])}`); return real(...a); }) as typeof ctx.fillRect;
+    drawHud(ctx, 853, 480, { ...DEFAULT_DESIGN, preset: 'modern' }, 'survivor', null);
+    expect(fills.some((f) => /^rgba\(0, ?0, ?0, ?0\.549\d*\) 25$/.test(f))).toBe(true);
+  });
+
+  it('draws an uploaded panel background behind each teammate card', () => {
+    // QA 2026-09-25: an Image style changed nothing in the preview.
+    _setImageFactory(instant);
+    const design = { ...DEFAULT_DESIGN, styles: { panelBg: { kind: 'image' as const } }, images: { panelBg: { w: 32, h: 32, png: 'AAAA' } } };
+    const srcs: string[] = [];
+    const ctx = fakeCtx(() => {});
+    ctx.drawImage = ((img: HTMLImageElement) => { srcs.push(img.src); }) as unknown as typeof ctx.drawImage;
+    drawHud(ctx, 853, 480, design, 'survivor', null);
+    expect(srcs.filter((u) => u === 'data:image/png;base64,AAAA').length).toBe(3);   // one per teammate card
+  });
+
+  it('draws the selection handles at a fixed size on screen, in device pixels', () => {
+    const sizes = (dpr?: number) => {
+      const out: number[] = [];
+      const ctx = fakeCtx(() => {});
+      const real = ctx.fillRect.bind(ctx);
+      ctx.fillRect = ((...a: [number, number, number, number]) => { if (ctx.fillStyle === '#ffffff') out.push(a[2]); return real(...a); }) as typeof ctx.fillRect;
+      drawHud(ctx, 853, 480, DEFAULT_DESIGN, 'survivor', null, undefined, { handles: [{ x: 10, y: 10 }], ...(dpr ? { dpr } : {}) });
+      return out;
+    };
+    expect(sizes()).toEqual([HANDLE_PX]);
+    expect(sizes(2)).toEqual([HANDLE_PX * 2]);
   });
 
   it('draws the weapon selection from the game art, clipped to its element, with no stand-in boxes', () => {
@@ -1139,5 +1195,83 @@ describe('the infected cards, as the game lays them out (plan Task 12)', () => {
     // AbilityProgress (2,18 36 x 36) and PlayerImage (9,23 24 x 24) overlap; (4, 20) is on the ring only.
     expect(childAt(d, DEFAULT_PREVIEW, cards[0].x + 4, cards[0].y + 20, 'infectedRow')).toEqual({ name: 'AbilityProgress', card: 0 });
     expect(childAt(d, DEFAULT_PREVIEW, cards[2].x + 4, cards[2].y + 20, 'infectedRow')?.name).not.toBe('AbilityProgress');
+  });
+});
+
+/**
+ * The Tab screen elements on the canvas (tab screen spec 3.1 and task 15):
+ * drawn by drawHud's own Tab painter (tabscreen.ts, tabscreen.test.ts), not
+ * by the element loop. They are listed on both sides (the infected rows on
+ * the infected side), show and take clicks only with Tab held or while
+ * picked, and while they show their pieces are hit first, the teammate
+ * cards under them never.
+ */
+describe('the Tab screen elements on the canvas', () => {
+  const HELD: PreviewState = { ...DEFAULT_PREVIEW, tab: true };
+  const D = DEFAULT_DESIGN;
+  it('are listed on both sides, the infected rows on the infected side only', () => {
+    expect(visibleElements('survivor', D).filter((e) => e.tab).map((e) => e.id)).toEqual(['tabBoard', 'tabVersus', 'tabSurvivors']);
+    expect(visibleElements('infected', D).filter((e) => e.tab).map((e) => e.id)).toEqual(['tabBoard', 'tabVersus', 'tabSurvivors', 'tabInfected']);
+  });
+  it('show only while the preview holds Tab, or while picked', () => {
+    const el = elementById('tabVersus')!;
+    expect(shownInState(el, DEFAULT_PREVIEW)).toBe(false);
+    expect(shownInState(el, HELD)).toBe(true);
+    expect(shownInState(el, DEFAULT_PREVIEW, true)).toBe(true);
+    expect(shownInState(elementById('teamColumn')!, DEFAULT_PREVIEW)).toBe(true);
+  });
+  it('give each row its PlayerBackground as its box: four survivor rows 30 apart, one infected row (yours)', () => {
+    // Survivor1 at 20, c-95 (145); PlayerBackground at 0, 22, 300 x 28 in the row file.
+    expect(panelBoxes(D, 'tabSurvivors')).toEqual([0, 1, 2, 3].map((i) => ({ x: 20, y: 167 + 30 * i, w: 300, h: 28 })));
+    // Infected1 at 20, c33 (273); PlayerBackground at 0, 15, 300 x 19.
+    expect(panelBoxes(D, 'tabInfected')).toEqual([{ x: 20, y: 288, w: 300, h: 19 }]);
+    expect(panelBoxes(D, 'tabVersus')).toEqual([{ x: 15, y: 25, w: 354, h: 120 }]);
+  });
+  it('hit a Tab piece before the HUD while Tab is held', () => {
+    // Row 2's health bar: SurvivorStatsHealth at 30, 40 in Survivor2 (20, 175).
+    expect(hitTest(D, 'survivor', 55, 218, HELD)).toBe('tabSurvivors');
+    expect(childAt(D, HELD, 55, 218, 'tabSurvivors', 'survivor')).toEqual({ name: 'SurvivorStatsHealth', card: 1 });
+    // "Your Team": TeamYours at its embedded 20, 30 in the versus panel (15, 25).
+    expect(hitTest(D, 'survivor', 60, 60, HELD)).toBe('tabVersus');
+    expect(childAt(D, HELD, 60, 60, 'tabVersus', 'survivor')).toEqual({ name: 'TeamYours', card: 0 });
+    // The backdrop where no other piece is.
+    expect(hitTest(D, 'survivor', 10, 400, HELD)).toBe('tabBoard');
+    expect(childAt(D, HELD, 10, 400, 'tabBoard', 'survivor')).toEqual({ name: 'BackgroundImage', card: 0 });
+  });
+  it('never hit the teammate cards under the Tab screen', () => {
+    const [c] = teamCardRects(D, D.aspect);
+    const at = { x: c.x + c.w / 2, y: c.y + c.h / 2 };
+    expect(hitTest(D, 'survivor', at.x, at.y)).toBe('teamColumn');
+    expect(hitTest(D, 'survivor', at.x, at.y, HELD)).toBe('tabBoard');
+    // With the backdrop hidden nothing of the Tab screen is there, and still the card is no target: the game takes it off.
+    const bare = validateDesign({ v: 1, children: { tabBoard: { BackgroundImage: { visible: false } } } });
+    expect(hitTest(bare, 'survivor', at.x, at.y, HELD)).not.toBe('teamColumn');
+    expect(hitTest(bare, 'survivor', at.x, at.y)).toBe('teamColumn');
+  });
+  it('leave the HUD clickable where no Tab piece is', () => {
+    const centre = (id: string) => { const r = elementRect(D, id, D.aspect); return [r.x + r.w / 2, r.y + r.h / 2]; };
+    for (const [x, y] of [[426, 240], centre('weaponSelection')]) {
+      const hud = hitTest(D, 'survivor', x, y);
+      expect(hud, `${x},${y}`).not.toBeNull();
+      expect(hitTest(D, 'survivor', x, y, HELD), `${x},${y}`).toBe(hud);
+    }
+  });
+  it('the enemy box is no target on the survivor side: the painter does not draw it there', () => {
+    // The enemy team's box shows to the infected side only (TAB-1 tab-c): EnemyTeamHighlightImage at
+    // 160, 43, 125 x 32, over the stat box (0, 70). Below the enemy score, the survivors hit the stat box.
+    expect(childAt(D, HELD, 15 + 200, 25 + 72, 'tabVersus', 'survivor')).toEqual({ name: 'StatBreakdownHighlightImage', card: 0 });
+    expect(childAt(D, HELD, 15 + 200, 25 + 72, 'tabVersus', 'infected')).toEqual({ name: 'EnemyTeamHighlightImage', card: 0 });
+  });
+  it('take no click, and draw nothing, while Tab is off and nothing Tab is picked', () => {
+    for (const [x, y] of [[55, 218], [60, 60], [10, 400], [200, 10]]) {
+      const hit = hitTest(D, 'survivor', x, y);
+      expect(hit === null || !elementById(hit)!.tab, `${x},${y}`).toBe(true);
+    }
+    const texts: string[] = [];
+    drawHud(fakeCtx(() => {}, undefined, texts), 853, 480, D, 'survivor', null);
+    expect(texts).not.toContain('No Mercy, Versus Mode');
+    const held: string[] = [];
+    drawHud(fakeCtx(() => {}, undefined, held), 853, 480, D, 'survivor', null, undefined, { state: HELD });
+    expect(held).toContain('No Mercy, Versus Mode');
   });
 });

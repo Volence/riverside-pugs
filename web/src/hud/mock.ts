@@ -14,18 +14,19 @@
 import { NOTICE_BOX_COLOUR, type Box, type HudDesign } from './design';
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import type { Guide } from './guides';
-import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHasElement, pcGet, MARKER_PX_PER_UNIT, NOTICE_BOX_TEXTURE } from './build';
+import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHasElement, pcGet, MARKER_PX_PER_UNIT, NOTICE_BOX_TEXTURE, MODERN_ART } from './build';
 import { baseOf } from './base';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { SCREEN_H, parseSize, parsePos, screenW } from './units';
-import { PROGRESS_LABEL, labelTextColour, paintLinearOver, drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, storedImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
+import { PROGRESS_LABEL, labelTextColour, labelColour, paintPanelBox, paintPanelLabel, paintLinearOver, drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, storedImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
 import { normaliseMaterial, HEALING_ICON, CROSSHAIR_OPEN, tipImage } from './art';
 import { barGeometry, clampBarKeys } from './progress';
-import { canvasFont, fontCell, importedFace, loadFace } from './fonts';
+import { canvasFont, fontCell, importedFace, loadFace, setLetterSpacing, synthBoldSpacing } from './fonts';
 import { drawArt } from '../crosshair/model';
 import { childDef, panelChildren } from './children';
 import { probe } from './probes';
 import { drawWeapons, drawNineSlice, type WeaponHeld } from './weapons';
+import { drawTabScreen, tabPicked, tabBoxes, tabSideOf } from './tabscreen';
 
 export type Side = 'survivor' | 'infected';
 
@@ -34,6 +35,10 @@ export type Side = 'survivor' | 'infected';
  * or renamed an element's panel does not offer it, so no control, outline or
  * hit test reaches a panel the file does not have. Stock and Modern offer
  * every one.
+ *
+ * The Tab screen elements (HudElement.tab) are among them: drawHud draws the
+ * Tab screen itself (tabscreen.ts), and shownInState keeps them off the
+ * canvas and out of every click until Tab is held or one is picked.
  */
 export function visibleElements(side: Side, design: HudDesign): HudElement[] {
   const key = baseOf(design);
@@ -63,6 +68,13 @@ export interface HudView {
   hover?: { rects: Box[]; label: string } | null;
   marquee?: Box | null;
   guides?: Guide[];
+  /**
+   * Device pixels per CSS pixel of the canvas (window.devicePixelRatio, capped
+   * by the page). The HUD itself is drawn at whatever size the canvas is; only
+   * the editor's own chrome (outlines, handles, the hover label, guides) is a
+   * fixed size on screen, so it is scaled by this. 1 when absent.
+   */
+  dpr?: number;
 }
 
 /** Whether a point is on a box, edges included. */
@@ -72,11 +84,16 @@ function rectFor(design: HudDesign, id: string): Rect & { visible: boolean } {
   return elementRect(design, id, design.aspect);
 }
 
-/** Whether the preview shows an element in the page's state: an infected one the game shows only as a ghost, say (HudElement.shownIn). */
+/**
+ * Whether the preview shows an element in the page's state: an infected one
+ * the game shows only as a ghost, say (HudElement.shownIn). A Tab screen
+ * element shows only while the preview holds Tab (PreviewState.tab), or
+ * while it is selected, as an occasional panel does (tab screen spec 3.1).
+ */
 export function shownInState(el: HudElement, state?: SurvivorState | PreviewState, picked = false): boolean {
   const v = previewOf(state);
   return (!el.shownIn || el.shownIn.includes(v.infected)) && (!el.shownFor || el.shownFor.includes(v.siClass))
-    && (!el.occasional || !!v.occasional || picked);
+    && (!el.occasional || !!v.occasional || picked) && (!el.tab || !!v.tab || picked);
 }
 
 /** Card 4 shows only while spectating a full team: never drawn, never a target. */
@@ -85,20 +102,42 @@ export const TEAM_CARDS = 3;
 /** Smallest-area element under the point wins, so a small element sitting
  *  inside a larger container (the crosshair inside the whole screen, say)
  *  stays selectable. In Free the teammates' container covers the screen, so
- *  there the three drawn cards are the targets instead of the container. */
+ *  there the three drawn cards are the targets instead of the container.
+ *
+ *  While Tab is held the Tab screen is on top: its pieces are hit first
+ *  (tabTargets), the HUD only where none is, and never an element the game
+ *  takes off under Tab (the teammate cards, HudElement.underTab). */
 export function hitTest(design: HudDesign, side: Side, ux: number, uy: number, state?: SurvivorState | PreviewState): string | null {
-  let best: { id: string; area: number } | null = null;
-  for (const el of visibleElements(side, design)) {
-    const r = rectFor(design, el.id);
-    if (!r.visible || !shownInState(el, state)) continue;
-    const targets = elementTargets(design, el.id, r);
-    for (const t of targets) {
-      if (!inside(t, ux, uy)) continue;
-      const area = t.w * t.h;
-      if (!best || area < best.area) best = { id: el.id, area };
+  const tab = !!previewOf(state).tab;
+  const smallest = (els: HudElement[], targets: (el: HudElement, r: Rect) => Box[]): string | null => {
+    let best: { id: string; area: number } | null = null;
+    for (const el of els) {
+      const r = rectFor(design, el.id);
+      if (!r.visible || !shownInState(el, state)) continue;
+      for (const t of targets(el, r)) {
+        if (!inside(t, ux, uy)) continue;
+        const area = t.w * t.h;
+        if (!best || area < best.area) best = { id: el.id, area };
+      }
     }
+    return best ? best.id : null;
+  };
+  const els = visibleElements(side, design);
+  if (tab) {
+    const hit = smallest(els.filter((e) => e.tab), (el) => tabTargets(design, side, el.id));
+    if (hit) return hit;
   }
-  return best ? best.id : null;
+  return smallest(els.filter((e) => !e.tab && !(tab && e.underTab === 'hidden')), (el, r) => elementTargets(design, el.id, r));
+}
+
+/**
+ * Where a Tab element takes a click: the versus panel on its whole rect
+ * (it moves, and a drag anywhere on it should move it), the board and the
+ * rows on the pieces the painter draws, a row on its box too.
+ */
+export function tabTargets(design: HudDesign, side: Side, id: string): Box[] {
+  if (id === 'tabVersus') return tabBoxes(design, side, id).map((b) => b.box);
+  return tabBoxes(design, side, id).flatMap((b) => [...(id === 'tabBoard' ? [] : [b.box]), ...b.pieces.filter((p) => p.drawn)]);
 }
 
 /**
@@ -109,6 +148,7 @@ export function hitTest(design: HudDesign, side: Side, ux: number, uy: number, s
  * cut-away part of the container draws nothing), else the element's rect.
  */
 export function elementTargets(design: HudDesign, id: string, r: Box = rectFor(design, id)): Box[] {
+  if (elementById(id)?.tab) return tabTargets(design, tabSideOf(id), id).map(({ x, y, w, h }) => ({ x, y, w, h }));
   if (id === 'teamColumn') return isFreeTeam(design) ? teamCardRects(design, design.aspect).slice(0, TEAM_CARDS) : [r];
   if (design.elements[id]?.fit) {
     const boxes = panelBoxes(design, id);
@@ -128,6 +168,8 @@ export function elementTargets(design: HudDesign, id: string, r: Box = rectFor(d
 export function panelBoxes(design: HudDesign, panelId: string): Box[] {
   if (panelId === 'teamColumn') return teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).map(({ x, y, w, h }) => ({ x, y, w, h }));
   if (panelId === 'infectedRow') return infectedCardRects(design);
+  // A Tab panel: the board's screen, the versus panel's rect, each row's PlayerBackground (the row blocks overlap).
+  if (elementById(panelId)?.tab) return tabBoxes(design, tabSideOf(panelId), panelId).map((b) => b.box);
   const panel = panelChildren(panelId);
   if (!panel || panel.repeat !== 'single' || !panel.frame) return [];
   const r = rectFor(design, panelId);
@@ -214,8 +256,9 @@ function cardOpts(panel: string, i: number, state: SurvivorState | PreviewState)
  * generated tree through childRects, like everything the canvas draws.
  */
 export function childAt(
-  design: HudDesign, state: SurvivorState | PreviewState, ux: number, uy: number, panel = 'teamColumn',
+  design: HudDesign, state: SurvivorState | PreviewState, ux: number, uy: number, panel = 'teamColumn', side: Side = tabSideOf(panel),
 ): { name: string; card: number } | null {
+  if (elementById(panel)?.tab) return tabChildAt(design, side, ux, uy, panel);
   const container = rectFor(design, panel);
   // The pieces may reach past a stand-in rect (the use bar's mockSize) into their real frame.
   if (!container.visible || (!inside(container, ux, uy) && !panelBoxes(design, panel).some((b) => inside(b, ux, uy)))) return null;
@@ -238,9 +281,36 @@ export function childAt(
   return hit && { name: hit.name, card: hit.card };
 }
 
+/**
+ * childAt on the Tab screen: the smallest piece the painter draws under the
+ * point, decor (the backdrop, the boxes, the row backgrounds) only where no
+ * other piece is, as on the cards. Every registered piece is open to a
+ * click: none waits on a whole-piece gate. A hidden versus panel takes none.
+ */
+function tabChildAt(design: HudDesign, side: Side, ux: number, uy: number, panel: string): { name: string; card: number } | null {
+  if (!rectFor(design, panel).visible && elementById(panel)?.props.includes('visible')) return null;
+  let best: { name: string; card: number; area: number } | null = null;
+  let decor: { name: string; card: number; area: number } | null = null;
+  for (const [card, b] of tabBoxes(design, side, panel).entries()) {
+    for (const p of b.pieces) {
+      if (!p.drawn || !inside(p, ux, uy)) continue;
+      // The versus panel clips its pieces to its rect (TL5).
+      if (panel === 'tabVersus' && !inside(b.box, ux, uy)) continue;
+      const def = childDef(panel, p.name);
+      if (!def || (def.gate && !probe(def.gate))) continue;
+      const area = p.w * p.h;
+      if (def.role === 'decor') { if (!decor || area < decor.area) decor = { name: p.name, card, area }; continue; }
+      if (!best || area < best.area) best = { name: p.name, card, area };
+    }
+  }
+  const hit = best ?? decor;
+  return hit && { name: hit.name, card: hit.card };
+}
+
 function text(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, size: number, colour: string, weight = ''): void {
   ctx.fillStyle = colour;
   ctx.font = `${weight} ${size}px sans-serif`.trim();
+  setLetterSpacing(ctx, 0);
   ctx.fillText(s, x, y);
 }
 
@@ -391,6 +461,7 @@ function paintChat(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k:
   clipToRect(ctx, r, () => clipToRect(ctx, box, () => {
     ctx.save();
     ctx.font = canvasFont(face, f.weight, f.tallUnits * k);
+    setLetterSpacing(ctx, synthBoldSpacing(face, f.weight) * k / (1080 / 480));
     ctx.textBaseline = 'alphabetic';
     ctx.textAlign = 'left';
     CHAT_LINES.forEach(([who, said], i) => {
@@ -564,7 +635,10 @@ function paintKillNotices(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
     const material = normaliseMaterial((bg && kvGet(bg, 'image')) ?? '');
     // The editor's own box (build.ts noticePass): a flat square of one
     // colour, or a clear one, so it nine-slices into a flat fill.
-    const own = material === NOTICE_BOX_TEXTURE ? design.elements.killNotices?.noticeBox : undefined;
+    // The Modern preset's box is one of its generated flat panels (MODERN_ART), drawn the same way.
+    const modern = baseOf(design) === 'modern' ? MODERN_ART.find((t) => t.name === material) : undefined;
+    const own = material === NOTICE_BOX_TEXTURE ? design.elements.killNotices?.noticeBox
+      : modern ? { kind: 'flat' as const, color: modern.colour } : undefined;
     const img = bg && !own && artImage(material, onAsset);
     if (bg && (img || own)) {
       const pad = NOTICE_PAD * k;
@@ -806,50 +880,6 @@ function paintGameCrosshair(ctx: CanvasRenderingContext2D, pxW: number, pxH: num
 }
 
 const GHOST = 'resource/ui/hudghostpanel.res';
-/**
- * PaintBackgroundType 2's corner, in HUD units: the stock box's corner
- * curves over about 7 px at 1080p
- * (/home/volence/l4d/hud/probe-phase2/b13/b13-stock/infected/ghost.png,
- * x 589 to 596 along its top rows).
- */
-const ROUNDED_CORNER = 7 / 2.25;
-
-/**
- * A panel's box as VGUI paints it: bgcolor_override over the scene in
- * linear light (the stock ghost box, 0 0 0 at 245 over 183 217 233, reads
- * 35 45 50 in b13 ghost.png, which only a linear blend gives), with rounded
- * corners for PaintBackgroundType 2.
- */
-function paintPanelBox(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, box: Rect, k: number) {
-  const colour = pcGet(n, 'bgcolor_override');
-  if (colour === undefined) return;
-  const rounded = pcGet(n, 'PaintBackgroundType') === '2';
-  const fill = (c: CanvasRenderingContext2D) => {
-    c.fillStyle = colourOf(design, colour);
-    if (rounded && typeof c.roundRect === 'function') { c.beginPath(); c.roundRect(box.x, box.y, box.w, box.h, ROUNDED_CORNER * k); c.fill(); }
-    else c.fillRect(box.x, box.y, box.w, box.h);
-  };
-  paintLinearOver(ctx, box, fill, () => fill(ctx));
-}
-
-/**
- * One of a status panel's labels: in its file font, at its place, its cell
- * at the top for a north alignment and centred otherwise, as drawLabel
- * (render.ts) places a Label, in the colour game code gives it.
- */
-function paintPanelLabel(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, box: Rect, k: number, s: string, colour: string, clip: Rect, onAsset?: () => void) {
-  const cell = setFont(ctx, design, pcGet(n, 'font') ?? '', k, onAsset);
-  const align = (pcGet(n, 'textAlignment') ?? 'west').toLowerCase();
-  // VGUI's nine alignments: west and east name a side, and north, south and center alone centre the line.
-  let x = box.x;
-  if (align.includes('east')) { ctx.textAlign = 'right'; x = box.x + box.w; }
-  else if (align.includes('west')) ctx.textAlign = 'left';
-  else { ctx.textAlign = 'center'; x = box.x + box.w / 2; }
-  const top = align.startsWith('north') ? box.y : align.startsWith('south') ? box.y + box.h - cell.cell : box.y + (box.h - cell.cell) / 2;
-  ctx.fillStyle = colour;
-  fillFontText(ctx, cell, s, x, top + cell.ascent, top, clip);
-}
-
 /** A block of a status panel file, in canvas pixels inside `r`, from the generated tree (so already scaled). */
 function blockRect(n: KvNode, r: Rect, k: number, W: number): Rect {
   return {
@@ -929,6 +959,7 @@ function paintKeyCap(ctx: CanvasRenderingContext2D, x: number, y: number, k: num
   ctx.fillStyle = 'rgba(40,40,40,1)';
   ctx.textAlign = 'center';
   ctx.font = `${Math.round(10 * k)}px sans-serif`;
+  setLetterSpacing(ctx, 0);
   ctx.fillText('E', at.x + s / 2, at.y + s * 0.72);
 }
 
@@ -972,11 +1003,6 @@ function paintZombiePanel(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
   }));
 }
 
-/** A label's own colour, else the scheme's label colour, as a Label draws it. */
-function labelColour(design: HudDesign, n: KvNode): string {
-  const own = pcGet(n, 'fgcolor_override');
-  return own !== undefined ? colourOf(design, own) : labelTextColour(design);
-}
 
 const FRUST = 'resource/ui/hud/frustrationmeter.res';
 /** The sample frustration: half, as the old stand-in showed. */
@@ -1258,10 +1284,11 @@ function accentColour(ctx: CanvasRenderingContext2D): string {
   }
 }
 
-function drawHiddenOutline(ctx: CanvasRenderingContext2D, r: Rect) {
+function drawHiddenOutline(ctx: CanvasRenderingContext2D, r: Rect, d = 1) {
   ctx.save();
   ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-  ctx.setLineDash([4, 4]);
+  ctx.lineWidth = d;
+  ctx.setLineDash([4 * d, 4 * d]);
   ctx.strokeRect(r.x, r.y, r.w, r.h);
   ctx.restore();
 }
@@ -1272,69 +1299,71 @@ const GUIDE = '#ff4fa3';
 const MARQUEE = 'rgba(153,204,255,0.9)';
 const MARQUEE_FILL = 'rgba(153,204,255,0.13)';
 
-function drawFrames(ctx: CanvasRenderingContext2D, frames: Box[], k: number, accent: string) {
+function drawFrames(ctx: CanvasRenderingContext2D, frames: Box[], k: number, accent: string, d = 1) {
   ctx.save();
   ctx.strokeStyle = accent;
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1.5 * d;
   ctx.setLineDash([]);
   for (const f of frames) ctx.strokeRect(f.x * k, f.y * k, f.w * k, f.h * k);
   ctx.restore();
 }
 
 /** The selection's box, thin, and a white square with an accent edge on each handle point. */
-function drawHandles(ctx: CanvasRenderingContext2D, box: Box | null, points: { x: number; y: number }[], k: number, accent: string) {
+function drawHandles(ctx: CanvasRenderingContext2D, box: Box | null, points: { x: number; y: number }[], k: number, accent: string, d = 1) {
   ctx.save();
   ctx.setLineDash([]);
-  ctx.lineWidth = 1;
+  ctx.lineWidth = d;
   ctx.strokeStyle = accent;
   if (box) ctx.strokeRect(box.x * k, box.y * k, box.w * k, box.h * k);
+  const size = HANDLE_PX * d;
   for (const p of points) {
-    const x = p.x * k - HANDLE_PX / 2, y = p.y * k - HANDLE_PX / 2;
+    const x = p.x * k - size / 2, y = p.y * k - size / 2;
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(x, y, HANDLE_PX, HANDLE_PX);
-    ctx.strokeRect(x, y, HANDLE_PX, HANDLE_PX);
+    ctx.fillRect(x, y, size, size);
+    ctx.strokeRect(x, y, size, size);
   }
   ctx.restore();
 }
 
 /** What a click would pick: a dashed white outline and its name in a small label above the first rect. */
-function drawHover(ctx: CanvasRenderingContext2D, hover: { rects: Box[]; label: string }, k: number) {
+function drawHover(ctx: CanvasRenderingContext2D, hover: { rects: Box[]; label: string }, k: number, d = 1) {
   ctx.save();
   ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([3, 3]);
+  ctx.lineWidth = d;
+  ctx.setLineDash([3 * d, 3 * d]);
   for (const r of hover.rects) ctx.strokeRect(r.x * k, r.y * k, r.w * k, r.h * k);
   ctx.setLineDash([]);
   const first = hover.rects[0];
   if (first && hover.label) {
-    ctx.font = '11px sans-serif';
+    ctx.font = `${11 * d}px sans-serif`;
+    setLetterSpacing(ctx, 0);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    const w = ctx.measureText(hover.label).width + 8;
-    const x = first.x * k, y = Math.max(0, first.y * k - 16);
+    const w = ctx.measureText(hover.label).width + 8 * d;
+    const x = first.x * k, y = Math.max(0, first.y * k - 16 * d);
     ctx.fillStyle = 'rgba(0,0,0,0.8)';
-    ctx.fillRect(x, y, w, 14);
+    ctx.fillRect(x, y, w, 14 * d);
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(hover.label, x + 4, y + 11);
+    ctx.fillText(hover.label, x + 4 * d, y + 11 * d);
   }
   ctx.restore();
 }
 
-function drawMarquee(ctx: CanvasRenderingContext2D, m: Box, k: number) {
+function drawMarquee(ctx: CanvasRenderingContext2D, m: Box, k: number, d = 1) {
   ctx.save();
   ctx.fillStyle = MARQUEE_FILL;
   ctx.fillRect(m.x * k, m.y * k, m.w * k, m.h * k);
   ctx.strokeStyle = MARQUEE;
-  ctx.lineWidth = 1;
-  ctx.setLineDash([4, 3]);
+  ctx.lineWidth = d;
+  ctx.setLineDash([4 * d, 3 * d]);
   ctx.strokeRect(m.x * k, m.y * k, m.w * k, m.h * k);
   ctx.restore();
 }
 
-function drawGuides(ctx: CanvasRenderingContext2D, guides: Guide[], k: number) {
+function drawGuides(ctx: CanvasRenderingContext2D, guides: Guide[], k: number, d = 1) {
   ctx.save();
   ctx.strokeStyle = GUIDE;
-  ctx.lineWidth = 1;
+  ctx.lineWidth = d;
   ctx.setLineDash([]);
   for (const g of guides) {
     ctx.beginPath();
@@ -1366,13 +1395,18 @@ export function drawHud(
   selected: string | readonly string[] | null, onAsset?: () => void, view: HudView = {},
 ): void {
   const k = pxH / SCREEN_H;
+  const d = view.dpr ?? 1;
   const accent = accentColour(ctx);
   // A hidden element is still drawn, dimmed, while it is selected, so the
   // player can see what they are editing; every outline comes from `view`.
   const picked: readonly string[] = selected === null ? [] : typeof selected === 'string' ? [selected] : selected;
   if (side === 'infected') paintGameCrosshair(ctx, pxW, pxH, design, onAsset, view);
+  // Tab held: the game takes some HUD elements off (the survivor teammate
+  // cards, HudElement.underTab) and draws the Tab screen over the rest.
+  const tabHeld = !!previewOf(view.state).tab;
 
   for (const el of visibleElements(side, design)) {
+    if (tabHeld && el.underTab === 'hidden') continue;
     const u = rectFor(design, el.id);
     const hidden = !u.visible;
     if (hidden && !picked.includes(el.id)) continue;
@@ -1387,15 +1421,23 @@ export function drawHud(
       ctx.globalAlpha = 0.25;
       paint(ctx, r, design, k, onAsset, view);
       ctx.restore();
-      drawHiddenOutline(ctx, r);
+      drawHiddenOutline(ctx, r, d);
     } else {
       paint(ctx, r, design, k, onAsset, view);
     }
   }
 
-  if (view.frames?.length) drawFrames(ctx, view.frames, k, accent);
-  if (view.box || view.handles?.length) drawHandles(ctx, view.box ?? null, view.handles ?? [], k, accent);
-  if (view.hover) drawHover(ctx, view.hover, k);
-  if (view.marquee) drawMarquee(ctx, view.marquee, k);
-  if (view.guides?.length) drawGuides(ctx, view.guides, k);
+  // The Tab screen (tabscreen.ts), with Tab held or while one of its elements
+  // or pieces is picked, as a picked occasional panel is drawn (spec 3.1).
+  if (tabHeld || tabPicked(picked)) {
+    drawTabScreen(ctx, design, side, k, { onAsset, state: view.state, picked });
+    const versus = rectFor(design, 'tabVersus');
+    if (!versus.visible && picked.includes('tabVersus')) drawHiddenOutline(ctx, { x: versus.x * k, y: versus.y * k, w: versus.w * k, h: versus.h * k }, d);
+  }
+
+  if (view.frames?.length) drawFrames(ctx, view.frames, k, accent, d);
+  if (view.box || view.handles?.length) drawHandles(ctx, view.box ?? null, view.handles ?? [], k, accent, d);
+  if (view.hover) drawHover(ctx, view.hover, k, d);
+  if (view.marquee) drawMarquee(ctx, view.marquee, k, d);
+  if (view.guides?.length) drawGuides(ctx, view.guides, k, d);
 }

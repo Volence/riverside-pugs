@@ -32,6 +32,9 @@ rsync -az --delete --info=stats1 \
   --exclude '*.db' \
   --exclude '*.db-*' \
   --exclude '.superpowers/' \
+  `# Local Claude Code state: its worktrees are whole checkouts of other,
+   # possibly unpushed branches (240 MB went up on 2026-09-25 before this).` \
+  --exclude '.claude/' \
   `# The 4x overview layers: 182 files, 989 MB, served from R2 and not committed.
    # Gitignoring them keeps them out of git, not out of rsync, and this box moved
    # its demos off for disk in the first place. Excluding leaves the old 1x webp

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, ZCARD_PANEL, PANEL_CHILDREN, panelChildren, CONTENT_CHILDREN, FIT_SQUARED, childDef, panelOfFile, maxInset, linkedValue, unlinkedValue, type KeyDef } from './children';
-import { parseKv, kvFind, kvGet, type KvNode } from './kv';
+import { TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, ZCARD_PANEL, PANEL_CHILDREN, panelChildren, CONTENT_CHILDREN, FIT_SQUARED, childDef, panelOfFile, maxInset, linkedValue, unlinkedValue,
+  TAB_BOARD, TAB_VERSUS, TAB_SURVIVOR_ROW, TAB_INFECTED_ROW, type KeyDef } from './children';
+import { parseKv, kvFind, kvGet, pcFind, type KvNode } from './kv';
+import { elementById } from './elements';
 import { baseFile } from './base';
 import { SPLATTERS } from './splatter';
 
@@ -15,7 +17,8 @@ const CONTROL: Record<string, string> = { image: 'imagepanel', label: 'label', b
  */
 describe('the teammate card registry', () => {
   it('covers the teammate card, your own health, your infected health, the ability timer, the infected card, the use bar, the spawn, too-far and frustration panels', () => {
-    expect(PANEL_CHILDREN.map((p) => p.panelId)).toEqual(['teamColumn', 'ownHealth', 'siHealth', 'abilityRing', 'infectedRow', 'progressBar', 'ghostPanel', 'zombiePanel', 'tankPanel']);
+    expect(PANEL_CHILDREN.map((p) => p.panelId)).toEqual(['teamColumn', 'ownHealth', 'siHealth', 'abilityRing', 'infectedRow', 'progressBar', 'ghostPanel', 'zombiePanel', 'tankPanel',
+      'tabBoard', 'tabVersus', 'tabSurvivors', 'tabInfected']);
     expect(TEAM_PANEL.file).toBe('resource/ui/hud/teammatepanel.res');
   });
 
@@ -468,5 +471,155 @@ describe('the infected card\'s pieces (plan Task 10)', () => {
     expect(by('Dead').note).toBe('The stock file gives this no height, so the game never shows it; give it a height to see it.');
     expect(by('SkullIconPlacement')).toMatchObject({ kind: 'other', role: 'state', stateArt: 'dead', box: 'square' });
     expect(by('Voice')).toMatchObject({ kind: 'other', role: 'state', stateArt: 'talking', box: 'square' });
+  });
+});
+
+/**
+ * The Tab screen's pieces (docs/superpowers/specs/2026-09-25-hud-editor-tab-screen-design.md
+ * 4.1, with the probe answers of section 7, /home/volence/l4d/hud/probe-tab/RESULTS.md),
+ * pinned to both presets' files as the HUD panels are. The files carry
+ * console blocks beside the PC ones (scoreboard.res's BackgroundImage
+ * [$X360] first), so every name is found the way the PC game reads it.
+ */
+describe('the Tab screen registry', () => {
+  const TAB = [TAB_BOARD, TAB_VERSUS, TAB_SURVIVOR_ROW, TAB_INFECTED_ROW];
+  const file = (preset: 'stock' | 'modern', f: string) => parseKv(baseFile(preset, f))[0].value as KvNode[];
+  const by = (p: typeof TAB_BOARD, n: string) => p.children.find((c) => c.name === n)!;
+  const KIND: Record<string, string> = { image: 'imagepanel', label: 'label', bar: 'healthpanel' };
+
+  it('is one panel per Tab element, each in its own file', () => {
+    expect(TAB.map((p) => [p.panelId, p.file, p.repeat])).toEqual([
+      ['tabBoard', 'resource/ui/scoreboard.res', 'single'],
+      ['tabVersus', 'resource/ui/versusmodescoreboard.res', 'single'],
+      ['tabSurvivors', 'resource/ui/scoreboardsurvivor.res', 'cards'],
+      ['tabInfected', 'resource/ui/scoreboardinfectedplayer.res', 'cards'],
+    ]);
+    for (const p of TAB) { expect(elementById(p.panelId)?.tab, p.panelId).toBe(true); expect(panelChildren(p.panelId)).toBe(p); }
+    expect(TAB_BOARD.frame).toBe('hudlayout');
+    expect(TAB_VERSUS.frame).toBe('hudlayout');
+  });
+
+  it('reads and writes the versus panel through its if_embedded blocks, and no other panel', () => {
+    expect(PANEL_CHILDREN.filter((p) => p.embedded).map((p) => p.panelId)).toEqual(['tabVersus']);
+    const team = kvFind(file('stock', TAB_VERSUS.file), ['TeamYours'])!;
+    expect(kvGet(kvFind(team.value as KvNode[], ['if_embedded'])!, 'xpos')).toBe('20');
+  });
+
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`finds every piece in the ${preset} files as the PC reads them, each of its kind`, () => {
+      for (const p of TAB) for (const def of p.children) {
+        const b = pcFind(file(preset, p.file), [def.name]);
+        expect(b, `${preset} ${p.panelId} ${def.name}`).toBeDefined();
+        const control = (kvGet(b!, 'ControlName') ?? '').toLowerCase();
+        if (def.kind === 'other') expect(Object.values(KIND), `${preset} ${def.name}`).not.toContain(control);
+        else expect(control, `${preset} ${p.panelId} ${def.name}`).toBe(KIND[def.kind]);
+      }
+    });
+  }
+
+  it('lists the v1 pieces, with the versus labels and boxes of spec 2.1', () => {
+    expect(TAB_BOARD.children.map((c) => c.name)).toEqual(['BackgroundImage', 'MissionTitle']);
+    expect(TAB_VERSUS.children.map((c) => c.name)).toEqual(['YourTeamHighlightImage', 'EnemyTeamHighlightImage', 'StatBreakdownHighlightImage',
+      'TeamYours', 'TeamEnemy', 'TeamYourScoreSurvivors', 'TeamEnemyScoreSurvivors', 'DistanceLabel', 'DistanceAmount', 'HealthLabel', 'HealthAmount',
+      'SurvivalMultLabel', 'SurvivalMultAmount']);
+    expect(TAB_SURVIVOR_ROW.children.map((c) => c.name)).toEqual(['PlayerBackground', 'PlayerBackground_Selected', 'SurvivorStatsHealth',
+      'SurvivorStatsName', 'SurvivorStatsNoAvatarName', 'PingImage', 'PingLabel']);
+    expect(TAB_INFECTED_ROW.children.map((c) => c.name)).toEqual(['PlayerBackground', 'PlayerBackground_Selected', 'Name', 'NoAvatarName']);
+  });
+
+  it('never moves, sizes or resizes the text of a Tab piece in v1, and hides each behind TS7', () => {
+    for (const p of TAB) for (const c of p.children) {
+      expect([c.move, c.box, c.font, c.hideGate], `${p.panelId} ${c.name}`).toEqual([false, 'none', false, 'TS7']);
+    }
+    for (const p of PANEL_CHILDREN.filter((x) => !TAB.includes(x))) for (const c of p.children) expect(c.hideGate, `${p.panelId} ${c.name}`).toBeUndefined();
+  });
+
+  it('gates exactly the colours section 7 left gated or passed', () => {
+    const gated = TAB.flatMap((p) => p.children.flatMap((c) => [
+      ...(c.keys ?? []).filter((k) => k.gate).map((k) => `${p.panelId}.${c.name}.${k.key}:${k.gate}`),
+      ...(c.colourGate ? [`${p.panelId}.${c.name}.colour:${c.colourGate}`] : []),
+    ]));
+    expect(gated).toEqual([
+      'tabBoard.MissionTitle.colour:TS1',
+      'tabSurvivors.SurvivorStatsHealth.monochrome_color:TS3',
+      'tabInfected.PlayerBackground.bgcolor_override:TS5b',
+      'tabInfected.PlayerBackground_Selected.bgcolor_override:TS5',
+      'tabInfected.Name.colour:TS6',
+      'tabInfected.NoAvatarName.colour:TS6',
+    ]);
+  });
+
+  it('offers the backdrop, your row and the eight versus labels their colours ungated (tonight\'s shots proved them)', () => {
+    expect(by(TAB_BOARD, 'BackgroundImage').keys).toEqual([expect.objectContaining({ key: 'bgcolor_override', type: 'colour', label: 'Backdrop colour' })]);
+    expect(by(TAB_SURVIVOR_ROW, 'PlayerBackground_Selected').keys).toEqual([expect.objectContaining({ key: 'bgcolor_override', type: 'colour', label: 'Your row colour' })]);
+    const open = TAB_VERSUS.children.filter((c) => c.colour).map((c) => c.name);
+    expect(open).toEqual(['TeamYours', 'TeamEnemy', 'DistanceLabel', 'DistanceAmount', 'HealthLabel', 'HealthAmount', 'SurvivalMultLabel', 'SurvivalMultAmount']);
+    for (const n of open) { expect(by(TAB_VERSUS, n).kind, n).toBe('label'); expect(by(TAB_VERSUS, n).colourGate, n).toBeUndefined(); }
+  });
+
+  it('offers no colour where code colours: the versus scores (TS2 failed) and the survivor names (TS6 split)', () => {
+    for (const n of ['TeamYourScoreSurvivors', 'TeamEnemyScoreSurvivors']) {
+      expect([by(TAB_VERSUS, n).colour, by(TAB_VERSUS, n).colourGate], n).toEqual([false, undefined]);
+      expect(by(TAB_VERSUS, n).note, n).toMatch(/colours it itself/);
+    }
+    for (const n of ['SurvivorStatsName', 'SurvivorStatsNoAvatarName']) {
+      expect([by(TAB_SURVIVOR_ROW, n).colour, by(TAB_SURVIVOR_ROW, n).colourGate], n).toEqual([false, undefined]);
+      expect(by(TAB_SURVIVOR_ROW, n).note, n).toMatch(/white/);
+    }
+  });
+
+  it('gives the three versus boxes and the teammate row art no tint: their look is their picture (a style slot)', () => {
+    for (const n of ['YourTeamHighlightImage', 'EnemyTeamHighlightImage', 'StatBreakdownHighlightImage']) {
+      expect(by(TAB_VERSUS, n), n).toMatchObject({ kind: 'other', role: 'decor', colour: false });
+      expect(by(TAB_VERSUS, n).keys, n).toBeUndefined();
+    }
+    expect(by(TAB_SURVIVOR_ROW, 'PlayerBackground')).toMatchObject({ kind: 'image', role: 'decor', colour: false });
+  });
+
+  it('hides a piece with every piece pinned to it, as the file\'s pin_to_sibling chain says, in both presets (TS7)', () => {
+    const withs = PANEL_CHILDREN.flatMap((p) => p.children.filter((c) => c.hidesWith).map((c) => [p.panelId, c.name, c.hidesWith]));
+    expect(withs).toEqual([
+      ['tabVersus', 'DistanceLabel', ['DistanceAmount']],
+      ['tabVersus', 'DistanceAmount', ['HealthLabel']],
+      ['tabVersus', 'HealthLabel', ['HealthAmount']],
+      ['tabVersus', 'SurvivalMultLabel', ['SurvivalMultAmount']],
+    ]);
+    for (const [panelId, , names] of withs) for (const n of names as string[]) expect(childDef(panelId as string, n), n).toBeDefined();
+    // The list is the file's own pins, turned round: each piece lists the
+    // pieces whose pin_to_sibling names it. Every Tab file, both presets.
+    for (const panel of [TAB_BOARD, TAB_VERSUS, TAB_SURVIVOR_ROW, TAB_INFECTED_ROW]) {
+      for (const preset of ['stock', 'modern'] as const) {
+        const pinned: Record<string, string[]> = {};
+        for (const n of file(preset, panel.file)) {
+          const to = typeof n.value === 'string' ? undefined : kvGet(n, 'pin_to_sibling');
+          if (to) (pinned[to] ??= []).push(n.key);
+        }
+        const listed = Object.fromEntries(panel.children.filter((c) => c.hidesWith).map((c) => [c.name, c.hidesWith]));
+        expect(listed, `${preset} ${panel.file}`).toEqual(pinned);
+      }
+    }
+  });
+
+  it('offers the row bars grey as the file has them, by health, or one colour (TS3, and TL3 for by health)', () => {
+    const bar = by(TAB_SURVIVOR_ROW, 'SurvivorStatsHealth');
+    expect(bar).toMatchObject({ kind: 'bar', role: 'content' });
+    expect(bar.keys).toHaveLength(1);
+    const k = bar.keys![0];
+    expect(k).toMatchObject({ key: 'monochrome_color', type: 'colour', gate: 'TS3', byHealth: true });
+    expect(k.clear?.label).toBe('By health');
+    expect(k.clear?.evidence).toMatch(/TL3/);
+    // Both presets write Gray: absent from the design, the bars stay the file's grey.
+    for (const preset of ['stock', 'modern'] as const) {
+      expect(kvGet(pcFind(file(preset, TAB_SURVIVOR_ROW.file), ['SurvivorStatsHealth'])!, 'monochrome_color'), preset).toBe('Gray');
+    }
+    // Only this key may be taken out of the file.
+    const clears = PANEL_CHILDREN.flatMap((p) => p.children.flatMap((c) => (c.keys ?? []).filter((x) => x.clear).map((x) => `${p.panelId}.${c.name}.${x.key}`)));
+    expect(clears).toEqual(['tabSurvivors.SurvivorStatsHealth.monochrome_color']);
+  });
+
+  it('colours the infected rows behind their own gates: your row TS5, the others TS5b, the names TS6', () => {
+    expect(by(TAB_INFECTED_ROW, 'PlayerBackground').keys).toEqual([expect.objectContaining({ key: 'bgcolor_override', gate: 'TS5b' })]);
+    expect(by(TAB_INFECTED_ROW, 'PlayerBackground_Selected').keys).toEqual([expect.objectContaining({ key: 'bgcolor_override', gate: 'TS5' })]);
+    for (const n of ['Name', 'NoAvatarName']) expect(by(TAB_INFECTED_ROW, n), n).toMatchObject({ kind: 'label', colour: true, colourGate: 'TS6' });
   });
 });

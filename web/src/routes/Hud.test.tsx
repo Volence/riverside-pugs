@@ -3,8 +3,8 @@ import { cleanup, render, screen, fireEvent, waitFor, within, act } from '@testi
 import { _setImageFactory, _resetAssetCache, childRects } from '../hud/render';
 import { panelBoxes } from '../hud/mock';
 import { _setProbe } from '../hud/probes';
-import { panelChild, elementRect } from '../hud/build';
-import { toUnits } from './Hud';
+import { panelChild, elementRect, teamCardRects } from '../hud/build';
+import { toUnits, canvasDpr, watchDpr } from './Hud';
 import Hud from './Hud';
 import { _setFoldDefault } from './hud/LayersPanel';
 import { readFileSync } from 'node:fs';
@@ -17,7 +17,7 @@ import { memoryStore, _setHudStore, type HudStore } from '../hud/hudStore';
 import { unregisterImport, baseFile } from '../hud/base';
 import { hudId } from '../hud/upload';
 import { sampleHud, asList, dropBlock } from '../hud/importFixtures';
-import { encodeShare, validateDesign, type HudDesign } from '../hud/design';
+import { encodeShare, validateDesign, DEFAULT_DESIGN, type HudDesign } from '../hud/design';
 
 // A switch for the tests of the page's own safety net: with it on, the
 // import checks find nothing wrong, so a broken import gets as far as the
@@ -720,9 +720,54 @@ describe('Hud page', () => {
     expect(screen.getByText(/keeps its full size/)).toBeTruthy();
   });
 
+  it('makes a Stock style row Flat when its colour or opacity is touched', () => {
+    render(<Hud />);
+    const kind = () => screen.getByRole('combobox', { name: 'Survivor panel background style' }) as HTMLSelectElement;
+    expect(kind().value).toBe('stock');
+    fireEvent.input(screen.getByLabelText('Survivor panel background colour'), { target: { value: '#ff0000' } });
+    expect(kind().value).toBe('flat');
+    const own = () => screen.getByRole('combobox', { name: 'Your health background style' }) as HTMLSelectElement;
+    fireEvent.input(screen.getByLabelText('Your health background opacity'), { target: { value: '30' } });
+    expect(own().value).toBe('flat');
+  });
+
+  it('shows no colour controls on an Image style row', () => {
+    render(<Hud />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Survivor panel background style' }), { target: { value: 'image' } });
+    expect(screen.queryByLabelText('Survivor panel background colour')).toBeNull();
+    expect(screen.queryByLabelText('Survivor panel background opacity')).toBeNull();
+    expect(screen.getByLabelText('Survivor panel background image')).toBeTruthy();
+  });
+
+  it('keeps the name the page shows the same as the one a reload loads', () => {
+    // QA 2026-09-25: "qa test hud!" came back as "qa test hud" after a reload.
+    render(<Hud />);
+    const name = screen.getByRole('textbox', { name: 'Name' }) as HTMLInputElement;
+    fireEvent.input(name, { target: { value: '  qa  test hud!' } });
+    expect(name.value).toBe('  qa  test hud');
+    fireEvent.blur(name);
+    expect(name.value).toBe('qa test hud');
+    expect(name.maxLength).toBe(40);
+  });
+
   it('shows a damaged-link message for a hash that will not decode', async () => {
     location.hash = '#d=garbage';
     render(<Hud />);
+    expect(await screen.findByText('That link is damaged.')).toBeTruthy();
+  });
+
+  it('loads a share link opened in a tab already on the editor', async () => {
+    render(<Hud />);
+    location.hash = `#d=${await encodeShare({ ...validateDesign({ v: 1 }), preset: 'modern' } as HudDesign)}`;
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    await waitFor(() => expect((screen.getByRole('combobox', { name: /preset/i }) as HTMLSelectElement).value).toBe('modern'));
+    expect(location.hash).toBe('');
+  });
+
+  it('says a link opened in a tab already on the editor is damaged', async () => {
+    render(<Hud />);
+    location.hash = '#d=garbage';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
     expect(await screen.findByText('That link is damaged.')).toBeTruthy();
   });
 
@@ -1352,10 +1397,10 @@ describe('Hud page', () => {
     await waitFor(() => expect(JSON.parse(localStorage.getItem('hud') ?? '{}').children?.teamColumn?.Head?.z).toBe(-1));
   });
 
-  it('lists the survivor Layers under their headings, the card pieces under In every card, with your own health pieces under it', () => {
+  it('lists the survivor Layers under their headings, the card pieces under In every card, with your own health pieces under it, and the Tab screen last', () => {
     const { container } = render(<Hud />);
     const titles = Array.from(container.querySelectorAll('.hud__layergroup-title')).map((t) => t.textContent);
-    expect(titles).toEqual(['You', 'Team', 'Messages', 'Finales and Survival']);
+    expect(titles).toEqual(['You', 'Team', 'Messages', 'Finales and Survival', 'Tab screen']);
     const rows = Array.from(container.querySelectorAll('.hud__layer')).map((r) => [r.className.replace('hud__layer ', ''), r.textContent]);
     expect(rows).toEqual([
       ['hud__layer--d0', 'Your health'],
@@ -1376,6 +1421,15 @@ describe('Hud page', () => {
       ['hud__layer--d0', 'Teammate in trouble'], ['hud__layer--d0', 'Wait for teammates'],
       ['hud__layer--d0', 'Chat'], ['hud__layer--d0', 'Kill / incap notices'], ['hud__layer--d0', 'Vote'], ['hud__layer--d0', 'Voice list'],
       ['hud__layer--d0', 'Survival timer'], ['hud__layer--d0', 'Finale meter'],
+      ['hud__layer--d0', 'Tab screen'], ['hud__layer--d1', 'Backdrop'], ['hud__layer--d1', 'Title'],
+      ['hud__layer--d0', 'Versus score'],
+      ['hud__layer--d1', 'Team score box'], ['hud__layer--d1', 'Enemy team box'], ['hud__layer--d1', 'Versus score box'],
+      ['hud__layer--d1', '"Your Team"'], ['hud__layer--d1', '"Enemy Team"'], ['hud__layer--d1', 'Your score'], ['hud__layer--d1', 'Enemy score'],
+      ['hud__layer--d1', '"Average Distance:"'], ['hud__layer--d1', 'Distance'], ['hud__layer--d1', '"Health Bonus:"'], ['hud__layer--d1', 'Health bonus'],
+      ['hud__layer--d1', '"Survival Multiplier:"'], ['hud__layer--d1', 'Survival multiplier'],
+      ['hud__layer--d0', 'Survivor rows'], ['hud__layer--d1 hud__layersub', 'In every row'],
+      ['hud__layer--d2', 'Teammate row'], ['hud__layer--d2', 'Your row'], ['hud__layer--d2', 'Health bar'], ['hud__layer--d2', 'Your name'],
+      ['hud__layer--d2', 'Bot name'], ['hud__layer--d2', 'Ping bars'], ['hud__layer--d2', 'Ping'],
     ]);
   });
 
@@ -1789,6 +1843,22 @@ describe('Importing a HUD', () => {
     await waitFor(() => expect(blobs).toHaveLength(1));
     return new Uint8Array(await blobs[0].arrayBuffer());
   };
+
+  it('says which pictures an import names but neither ships nor the game has', async () => {
+    const bare = sampleHud({ 'materials/vgui/hud/myart.vmt': null, 'materials/vgui/hud/myart.vtf': null });
+    const bareId = await hudId(bare);
+    try {
+      render(<Hud />);
+      importFile(new File([encodeVPK(asList(bare))], 'edgehud.vpk'));
+      await screen.findByText(/^Imported edgehud\. This HUD names a picture it does not include and the game does not have \(vgui\/hud\/myart\)\./);
+    } finally { unregisterImport(bareId); }
+  });
+
+  it('says nothing about pictures when the import ships its own', async () => {
+    render(<Hud />);
+    importFile(vpkFile());
+    await screen.findByText('Imported edgehud.');
+  });
 
   it('imports a .vpk from the Preset select and switches the design to it', async () => {
     render(<Hud />);
@@ -2854,5 +2924,327 @@ describe('The panels seen only with other players on the page (plan task M2)', (
     fireEvent.click(layer('Voice list').getByRole('button', { name: 'Voice list' }));
     fireEvent.input(screen.getByLabelText('Row height'), { target: { value: '30' } });
     await waitFor(() => expect(saved().elements?.voiceList?.keys?.item_tall).toBe('30'));
+  });
+});
+
+describe('canvasDpr', () => {
+  it('draws at the display\'s own pixel density', () => {
+    expect(canvasDpr(1200, 1.5)).toBe(1.5);
+    expect(canvasDpr(1200, 1)).toBe(1);
+  });
+  it('stops a wide canvas at 3200 device pixels, and never goes under 1', () => {
+    expect(canvasDpr(2000, 2)).toBe(1.6);
+    expect(canvasDpr(4000, 2)).toBe(1);
+    expect(canvasDpr(800, 0.9)).toBe(1);
+  });
+});
+
+describe('watchDpr', () => {
+  /** A window whose matchMedia hands back queries the test can fire, as a monitor change does. */
+  const fakeWindow = (ratio: number) => {
+    const queries: { media: string; listeners: Set<() => void> }[] = [];
+    const win = {
+      devicePixelRatio: ratio,
+      matchMedia: (media: string) => {
+        const q = { media, listeners: new Set<() => void>() };
+        queries.push(q);
+        return {
+          media,
+          addEventListener: (_: string, f: () => void) => q.listeners.add(f),
+          removeEventListener: (_: string, f: () => void) => q.listeners.delete(f),
+        };
+      },
+    };
+    return { win, queries };
+  };
+
+  it('redraws when the pixel density changes, and listens again at the new one', () => {
+    const { win, queries } = fakeWindow(1);
+    let draws = 0;
+    const stop = watchDpr(win as unknown as Window, () => { draws += 1; });
+    expect(queries.map((q) => q.media)).toEqual(['(resolution: 1dppx)']);
+    win.devicePixelRatio = 1.5;
+    for (const f of [...queries[0].listeners]) f();
+    expect(draws).toBe(1);
+    expect(queries[0].listeners.size).toBe(0);
+    expect(queries.map((q) => q.media)).toEqual(['(resolution: 1dppx)', '(resolution: 1.5dppx)']);
+    stop();
+    expect(queries[1].listeners.size).toBe(0);
+  });
+
+  it('does nothing where there is no matchMedia (a test page)', () => {
+    let draws = 0;
+    const stop = watchDpr({ devicePixelRatio: 2 } as unknown as Window, () => { draws += 1; });
+    stop();
+    expect(draws).toBe(0);
+  });
+});
+
+/**
+ * The Tab screen on the page (tab screen spec 3.1 and task 16; probe
+ * answers in section 7, /home/volence/l4d/hud/probe-tab/RESULTS.md): the
+ * Tab held preview, the Tab screen group in Layers and in Styles, the side
+ * panel's controls from the registry, and picking on the canvas while the
+ * Tab screen shows. Points are HUD units (unitCanvas): row 2's health bar at
+ * (55, 218), "Your Team" at (60, 60) on the stock file.
+ */
+describe('The Tab screen on the page', () => {
+  const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
+  const legend = (text: string) => screen.queryByText(text, { selector: 'legend' });
+  const tabHeld = () => screen.getByRole('button', { name: 'Tab held' });
+
+  it('toggles Tab held on both sides, a preview choice that is never saved in the design', async () => {
+    render(<Hud />);
+    expect(tabHeld().getAttribute('aria-pressed')).toBe('false');
+    expect(tabHeld().getAttribute('title')).toBe(
+      'Preview only: draw the Tab screen (scoreboard and versus score) as the game shows it while you hold Tab in versus.');
+    fireEvent.click(tabHeld());
+    expect(tabHeld().getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    expect(tabHeld().getAttribute('aria-pressed')).toBe('true');
+    // A real edit so the design is saved, then nothing of the toggle in it.
+    fireEvent.change(screen.getByRole('combobox', { name: 'Versus score box style' }), { target: { value: 'flat' } });
+    await waitFor(() => expect(saved().styles?.tabStatBox?.kind).toBe('flat'));
+    expect(JSON.stringify(saved())).not.toMatch(/"tab":/);
+  });
+
+  it('lists the Tab screen group in Layers: the four elements on the infected side, the rows\' pieces under In every row', () => {
+    render(<Hud />);
+    const group = () => within(screen.getByRole('region', { name: 'Tab screen' }));
+    expect(screen.getAllByText('Tab screen', { selector: '.hud__layergroup-title' })).toHaveLength(1);
+    expect(group().getByRole('button', { name: 'Versus score' })).toBeTruthy();
+    expect(group().getByRole('button', { name: 'Survivor rows' })).toBeTruthy();
+    expect(group().queryByRole('button', { name: 'Infected rows' })).toBeNull();
+    expect(layer('Versus score').getByRole('button', { name: '"Your Team"' })).toBeTruthy();
+    expect(layer('Survivor rows').getByText('In every row')).toBeTruthy();
+    expect(layer('Survivor rows').queryByRole('button', { name: 'Card 1' })).toBeNull();
+    // Your row is code's to show: listed shown, not dimmed as its file's visible 0 would say.
+    expect(layer('Survivor rows').getByRole('button', { name: 'Hide Your row' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    expect(group().getByRole('button', { name: 'Infected rows' })).toBeTruthy();
+    expect(layer('Infected rows').getByRole('button', { name: 'Player name' })).toBeTruthy();
+  });
+
+  it('shows the three Tab slots under Styles and edits them', async () => {
+    render(<Hud />);
+    expect(screen.getByText('Tab screen', { selector: '.eyebrow' })).toBeTruthy();
+    for (const label of ['Versus score box', 'Team score box', 'Teammate rows']) {
+      expect(screen.getByRole('combobox', { name: `${label} style` }), label).toBeTruthy();
+    }
+    fireEvent.input(screen.getByLabelText('Team score box colour'), { target: { value: '#ff00ff' } });
+    await waitFor(() => expect(saved().styles?.tabTeamBox).toMatchObject({ kind: 'flat', color: expect.stringMatching(/^255 0 255 \d+$/) }));
+  });
+
+  it('colours "Your Team" from its piece, and selecting it draws the Tab screen', async () => {
+    const { container } = render(<Hud />);
+    fireEvent.click(layer('Versus score').getByRole('button', { name: '"Your Team"' }));
+    expect(legend('"Your Team"')).toBeTruthy();
+    expect(container.querySelector('.hud__crumbs')!.textContent).toBe('Versus score›"Your Team"');
+    fireEvent.input(screen.getByLabelText('"Your Team" colour'), { target: { value: '#ffff00' } });
+    await waitFor(() => expect(saved().children?.tabVersus?.TeamYours?.color).toMatch(/^255 255 0 \d+$/));
+    // Picked, the Tab screen is on the canvas though Tab held is off: a click there picks from it.
+    expect(tabHeld().getAttribute('aria-pressed')).toBe('false');
+    clickAt(unitCanvas(container), 55, 218);
+    expect(legend('Health bar')).toBeTruthy();
+  });
+
+  it('says which pieces the game colours itself, offering no colour there', () => {
+    render(<Hud />);
+    fireEvent.click(layer('Versus score').getByRole('button', { name: 'Your score' }));
+    expect(screen.getByText(/The game writes the score here and colours it itself/)).toBeTruthy();
+    expect(screen.queryByLabelText('Your score colour')).toBeNull();
+    fireEvent.click(layer('Survivor rows').getByRole('button', { name: 'Bot name' }));
+    expect(screen.getByText(/The game draws the names white whatever the file says/)).toBeTruthy();
+    expect(screen.queryByLabelText('Bot name colour')).toBeNull();
+    expect(screen.getByText('Edits apply to every row.')).toBeTruthy();
+  });
+
+  it('hides "Health Bonus:" with its number, and says so', async () => {
+    render(<Hud />);
+    fireEvent.click(layer('Versus score').getByRole('button', { name: '"Health Bonus:"' }));
+    expect(screen.getByText(/Hiding it hides its number too/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Visible' }));
+    // Only the label's hide is stored: the game and the preview take its number along.
+    await waitFor(() => expect(saved().children?.tabVersus).toEqual({ HealthLabel: { visible: false } }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Visible' }));
+    await waitFor(() => expect(saved().children?.tabVersus).toBeUndefined());
+  });
+
+  it('lists a piece pinned to a hidden one as hidden with it, with no Visible control, until the head is shown', async () => {
+    render(<Hud />);
+    fireEvent.click(layer('Versus score').getByRole('button', { name: '"Average Distance:"' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Visible' }));
+    await waitFor(() => expect(saved().children?.tabVersus).toEqual({ DistanceLabel: { visible: false } }));
+    // Layers: dimmed, no eye, and the note naming what hides it.
+    expect(layer('Versus score').queryByRole('button', { name: /^(Show|Hide) Health bonus$/ })).toBeNull();
+    expect(layer('Versus score').getAllByText('Hidden with "Average Distance:"')).toHaveLength(3);
+    fireEvent.click(layer('Versus score').getByRole('button', { name: 'Health bonus' }));
+    expect(screen.queryByRole('checkbox', { name: 'Visible' })).toBeNull();
+    expect(screen.getByText(/Hidden with "Average Distance:"\. Show it to bring this back\./)).toBeTruthy();
+    // Showing the head from Layers brings the line back.
+    fireEvent.click(layer('Versus score').getByRole('button', { name: 'Show "Average Distance:"' }));
+    await waitFor(() => expect(saved().children?.tabVersus).toBeUndefined());
+    expect(screen.getByRole('checkbox', { name: 'Visible' })).toBeTruthy();
+    expect(layer('Versus score').getByRole('button', { name: 'Hide Health bonus' })).toBeTruthy();
+  });
+
+  it('offers the row bars grey as the file has it, by health, or one colour', async () => {
+    render(<Hud />);
+    fireEvent.click(layer('Survivor rows').getByRole('button', { name: 'Health bar' }));
+    const choice = () => screen.getByRole('combobox', { name: 'Row bars' }) as HTMLSelectElement;
+    expect(Array.from(choice().options).map((o) => o.textContent)).toEqual(['As the file has it', 'By health', 'One colour']);
+    expect(choice().value).toBe('file');
+    expect(screen.queryByLabelText('Row bars colour')).toBeNull();
+    fireEvent.change(choice(), { target: { value: 'clear' } });
+    await waitFor(() => expect(saved().children?.tabSurvivors?.SurvivorStatsHealth?.keys).toEqual({ monochrome_color: '' }));
+    fireEvent.change(choice(), { target: { value: 'one' } });
+    await waitFor(() => expect(saved().children?.tabSurvivors?.SurvivorStatsHealth?.keys?.monochrome_color).toMatch(/^\d+ \d+ \d+ \d+$/));
+    fireEvent.input(screen.getByLabelText('Row bars colour'), { target: { value: '#ff0000' } });
+    await waitFor(() => expect(saved().children?.tabSurvivors?.SurvivorStatsHealth?.keys?.monochrome_color).toMatch(/^255 0 0 \d+$/));
+    fireEvent.change(choice(), { target: { value: 'file' } });
+    await waitFor(() => expect(saved().children?.tabSurvivors).toBeUndefined());
+  });
+
+  it('picks a Tab piece on the canvas while Tab is held, with its outline and no handles', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.click(tabHeld());
+    clickAt(canvas, 55, 218);
+    expect(legend('Health bar')).toBeTruthy();
+    expect(container.querySelector('.hud__crumbs')!.textContent).toBe('Survivor rows›Health bar');
+    clickAt(canvas, 60, 60);
+    expect(legend('"Your Team"')).toBeTruthy();
+    // Ctrl+click climbs to the versus panel.
+    clickAt(canvas, 60, 60, { ctrlKey: true });
+    expect(legend('Versus score')).toBeTruthy();
+  });
+
+  it('moves the versus panel from a drag in a picked Tab piece, and records nothing for a drag on the board', async () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    const undo = () => screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement;
+    fireEvent.click(tabHeld());
+    clickAt(canvas, 60, 60);
+    expect(legend('"Your Team"')).toBeTruthy();
+    dragFrom(canvas, [60, 60], [80, 70]);
+    await waitFor(() => expect(saved().elements?.tabVersus).toEqual({ x: 35, y: 35 }));
+    expect(legend('Versus score')).toBeTruthy();
+    fireEvent.click(undo());
+    expect(undo().disabled).toBe(true);
+    // The backdrop, then the board: neither moves, and nothing up from them does.
+    clickAt(canvas, 100, 400);
+    expect(legend('Backdrop')).toBeTruthy();
+    dragFrom(canvas, [100, 400], [150, 420]);
+    expect(undo().disabled).toBe(true);
+    expect(legend('Backdrop')).toBeTruthy();
+    clickAt(canvas, 100, 400, { ctrlKey: true });
+    expect(legend('Tab screen')).toBeTruthy();
+    dragFrom(canvas, [100, 400], [150, 420]);
+    expect(undo().disabled).toBe(true);
+  });
+
+  it('drops the Teammates from the selection when Tab held turns on, and skips them in the Tab-key cycle', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.click(team().getByRole('button', { name: 'Teammates' }));
+    expect(legend('Teammates')).toBeTruthy();
+    fireEvent.click(tabHeld());
+    expect(legend('Teammates')).toBeNull();
+    expect(container.querySelector('.hud__crumbs')?.textContent ?? '').not.toMatch(/Teammates/);
+    const seenIds: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      fireEvent.keyDown(canvas, { key: 'Tab' });
+      seenIds.push(container.querySelector('.hud__crumbs')?.textContent ?? '');
+    }
+    expect(seenIds.some((t) => /Versus score/.test(t))).toBe(true);
+    expect(seenIds.some((t) => /Teammates/.test(t))).toBe(false);
+  });
+
+  it('holds the versus panel on screen when the aspect narrows, as the download does', async () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.click(tabHeld());
+    clickAt(canvas, 60, 60, { ctrlKey: true });
+    expect(legend('Versus score')).toBeTruthy();
+    dragFrom(canvas, [60, 60], [60 + 484, 60]);
+    await waitFor(() => expect(saved().elements?.tabVersus?.x).toBe(499));
+    fireEvent.change(screen.getByRole('combobox', { name: /aspect/i }), { target: { value: '4:3' } });
+    await waitFor(() => expect(saved().elements?.tabVersus?.x).toBe(640 - 354));
+  });
+
+  it('offers no X, Y or Align on several Tab pieces, none of which moves, and keeps Visible and Reset all', () => {
+    render(<Hud />);
+    fireEvent.click(layer('Versus score').getByRole('button', { name: '"Your Team"' }));
+    fireEvent.click(layer('Versus score').getByRole('button', { name: '"Enemy Team"' }), { shiftKey: true });
+    expect(screen.getByText('2 pieces in Versus score', { selector: 'legend' })).toBeTruthy();
+    expect(screen.queryByLabelText('X')).toBeNull();
+    expect(screen.queryByLabelText('Y')).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Align' })).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Visible' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Reset all' })).toBeTruthy();
+  });
+
+  it('offers no Visible on several elements while the only one that hides has its hide gated (TS7)', () => {
+    _setProbe('TS7', false);
+    try {
+      render(<Hud />);
+      fireEvent.click(layer('Versus score').getByRole('button', { name: 'Versus score' }));
+      fireEvent.click(layer('Tab screen').getByRole('button', { name: 'Tab screen' }), { shiftKey: true });
+      expect(screen.getByText('2 elements', { selector: 'legend' })).toBeTruthy();
+      expect(screen.queryByRole('checkbox', { name: 'Visible' })).toBeNull();
+    } finally { _setProbe('TS7', null); }
+  });
+
+  it('never picks the teammate cards under the Tab screen', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    const [c] = teamCardRects(DEFAULT_DESIGN, DEFAULT_DESIGN.aspect);
+    clickAt(canvas, c.x + c.w / 2, c.y + c.h / 2, { ctrlKey: true });
+    expect(container.querySelector('.hud__crumbs')!.textContent).toMatch(/^Teammates/);
+    fireEvent.keyDown(canvas, { key: 'Escape' });
+    fireEvent.keyDown(canvas, { key: 'Escape' });
+    fireEvent.click(tabHeld());
+    clickAt(canvas, c.x + c.w / 2, c.y + c.h / 2, { ctrlKey: true });
+    expect(container.querySelector('.hud__crumbs')!.textContent).not.toMatch(/Teammates/);
+    expect(legend('Tab screen')).toBeTruthy();
+  });
+
+  it('picks nothing of the Tab screen while Tab held is off and nothing Tab is picked', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    for (const [x, y] of [[55, 218], [60, 60], [10, 300]]) {
+      clickAt(canvas, x, y);
+      const crumbs = container.querySelector('.hud__crumbs')?.textContent ?? '';
+      expect(crumbs, `${x},${y}`).not.toMatch(/Tab screen|Versus score|Survivor rows/);
+      fireEvent.keyDown(canvas, { key: 'Escape' });
+      fireEvent.keyDown(canvas, { key: 'Escape' });
+    }
+  });
+
+  it('moves the versus panel by its number boxes, the arrow keys and a drag, inside the screen', async () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.click(layer('Versus score').getByRole('button', { name: 'Versus score' }));
+    expect(screen.getByRole('checkbox', { name: 'Visible' })).toBeTruthy();
+    fireEvent.input(screen.getByLabelText('X'), { target: { value: '100' } });
+    await waitFor(() => expect(saved().elements?.tabVersus).toEqual({ x: 100, y: 25 }));
+    fireEvent.keyDown(canvas, { key: 'ArrowRight' });
+    await waitFor(() => expect(saved().elements?.tabVersus).toEqual({ x: 101, y: 25 }));
+    // Drawn while picked: a drag on it moves it (from 101, 25 by 50, 10).
+    dragFrom(canvas, [150, 60], [200, 70]);
+    await waitFor(() => expect(saved().elements?.tabVersus).toEqual({ x: 151, y: 35 }));
+    fireEvent.input(screen.getByLabelText('X'), { target: { value: '900' } });
+    await waitFor(() => expect(saved().elements?.tabVersus?.x).toBe(853 - 354));
+  });
+});
+
+describe('the selection path over the Tab screen', () => {
+  afterEach(cleanup);
+  it('moves to the top right while the Tab screen is drawn, off its title', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    expect(screen.getByRole('navigation', { name: 'Selection path' }).className).toBe('hud__crumbs');
+    fireEvent.click(screen.getByRole('button', { name: /tab held/i }));
+    expect(screen.getByRole('navigation', { name: 'Selection path' }).className).toContain('hud__crumbs--right');
   });
 });

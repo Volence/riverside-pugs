@@ -1,5 +1,5 @@
 import { Fragment, type ComponentChildren } from 'preact';
-import { useEffect, useRef, useState, useErrorBoundary } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState, useErrorBoundary } from 'preact/hooks';
 import { Panel } from '../components/bits';
 import { HudTabs } from '../components/HudTabs';
 import { confirm } from '../components/Confirm';
@@ -18,6 +18,7 @@ import {
   type BuildReport, type CardChild,
 } from '../hud/build';
 import { drawHud, visibleElements, panelBoxes, HANDLE_PX, type Side } from '../hud/mock';
+import { tabPicked } from '../hud/tabscreen';
 import { DEFAULT_PREVIEW, panelFile, type PreviewState } from '../hud/render';
 import type { WeaponHeld } from '../hud/weapons';
 import { closeUpRegion } from '../hud/closeup';
@@ -35,10 +36,11 @@ import {
   resizeBox, resizeElement, scaleElement, resizeChild, scaleChildren, cornerFactor, anchorOf,
   setSelectionVisible, patchChild, hideSelection, resetSelection, raiseChild,
   patchSplatter, withSplatterImage, resetSplatter, splatterKind, gameDefault, isGameDefault,
+  setAspect,
 } from '../hud/edit';
 import { snapMove, snapEdges, unionBox, type Guide, type Snap, type Handle } from '../hud/guides';
 import {
-  NONE, TEAMMATES, cardsOf, hitAt, targetOf, pick, clickSelect, dragIntent, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
+  NONE, TEAMMATES, cardsOf, hitAt, targetOf, pick, clickSelect, dragIntent, withoutUnderTab, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
   sanitize, selectionKey, selectedIds, selectionFrames, sectionTargets, pieceTargets, pieceGuideToScreen,
   selectionBox, handlesFor, handlePoints, handleAt, isPicked, menuActions, elementFrame, panelOf,
   type Selection, type Hit, type Mods, type Crumb, type MenuAction,
@@ -76,6 +78,33 @@ export function toUnits(e: { clientX: number; clientY: number }, rect: DOMRect):
   return { ux: (e.clientX - rect.left) * k, uy: (e.clientY - rect.top) * k };
 }
 
+/** The widest backing store the preview canvas gets, in device pixels. */
+const MAX_CANVAS_PX = 3200;
+/** Device pixels per CSS pixel for a canvas `cssW` wide: the display's, at most what keeps it under MAX_CANVAS_PX. */
+export function canvasDpr(cssW: number, ratio = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1): number {
+  return Math.max(1, Math.min(ratio, MAX_CANVAS_PX / cssW));
+}
+
+/**
+ * Call `onChange` whenever the display's pixel density changes (the window
+ * dragged to another monitor, the browser zoomed), so the canvas redraws at
+ * the new density. A `(resolution: Xdppx)` query matches only the density it
+ * was made at, so each change re-arms one at the new density. Where there is
+ * no matchMedia (a test page) it does nothing. Returns the stop function.
+ */
+export function watchDpr(win: Window, onChange: () => void): () => void {
+  if (typeof win.matchMedia !== 'function') return () => {};
+  let mq: MediaQueryList | null = null;
+  const fire = () => { disarm(); onChange(); arm(); };
+  const arm = () => {
+    mq = win.matchMedia(`(resolution: ${win.devicePixelRatio || 1}dppx)`);
+    mq?.addEventListener?.('change', fire);
+  };
+  const disarm = () => { mq?.removeEventListener?.('change', fire); mq = null; };
+  arm();
+  return disarm;
+}
+
 /** How wide the close-up's sharp render may get, in pixels: past this a redraw costs more than it shows. */
 const CLOSEUP_RENDER_W = 2600;
 
@@ -84,7 +113,9 @@ const CLOSEUP_RENDER_W = 2600;
  * together edit `design.styles[slot.id]`, and for the Image kind a file
  * input that runs the upload through `decodeUpload`. `slot.defaultColor` is
  * only ever shown, never written back, until the reader actually touches
- * something.
+ * something. Touching the colour or opacity of a Stock row makes it Flat, as
+ * Stock draws the game's own art and has no colour to change; an Image row
+ * has none either, so it shows no colour controls.
  */
 function StyleRow(
   { slot, style, error, onChange, onEnd, onUpload }: {
@@ -96,6 +127,7 @@ function StyleRow(
 ) {
   const kind = style?.kind ?? 'stock';
   const color = style?.color ?? slot.defaultColor;
+  const flatFromStock: Partial<StyleOverride> = kind === 'stock' ? { kind: 'flat' } : {};
 
   return (
     <div class="hud__stylerow">
@@ -109,16 +141,18 @@ function StyleRow(
         <option value="rounded">Rounded</option>
         <option value="image">Image</option>
       </select>
-      <input
-        type="color" aria-label={`${slot.label} colour`} value={hexOf(color)}
-        onInput={(e) => onChange({ color: withHex(color, (e.target as HTMLInputElement).value) }, 'gesture')}
-        onChange={onEnd}
-      />
-      <input
-        type="range" min={0} max={100} step={1} aria-label={`${slot.label} opacity`} value={alphaPct(color)}
-        onInput={(e) => onChange({ color: withAlphaPct(color, parseFloat((e.target as HTMLInputElement).value)) }, 'gesture')}
-        onChange={onEnd}
-      />
+      {kind !== 'image' && <>
+        <input
+          type="color" aria-label={`${slot.label} colour`} value={hexOf(color)}
+          onInput={(e) => onChange({ ...flatFromStock, color: withHex(color, (e.target as HTMLInputElement).value) }, 'gesture')}
+          onChange={onEnd}
+        />
+        <input
+          type="range" min={0} max={100} step={1} aria-label={`${slot.label} opacity`} value={alphaPct(color)}
+          onInput={(e) => onChange({ ...flatFromStock, color: withAlphaPct(color, parseFloat((e.target as HTMLInputElement).value)) }, 'gesture')}
+          onChange={onEnd}
+        />
+      </>}
       {kind === 'image' && (
         <label class="hud__file hud__file--inline">
           <span class="btn btn--ghost btn--sm">Choose image</span>
@@ -202,11 +236,15 @@ const RESET_DONE = "This design is the game's own HUD now, with nothing changed.
 const GAME_OWN = "This is the game's own HUD; you don't need to install anything. The file holds only its name, so it just replaces an older HUD file of the same name.";
 const BUNDLE_LOST = "This design's crosshair is no longer saved on this browser, so it now uses the game default. Choose Custom to make one.";
 
-/** The selection's path at the canvas corner. Each ancestor is a button that selects its level; the last is where you are. */
-function Crumbs({ crumbs, onSelect }: { crumbs: Crumb[]; onSelect: (s: Selection) => void }) {
+/**
+ * The selection's path at the canvas corner. Each ancestor is a button that
+ * selects its level; the last is where you are. Top left, except while the Tab
+ * screen is drawn, whose title sits there: then top right.
+ */
+function Crumbs({ crumbs, onSelect, right = false }: { crumbs: Crumb[]; onSelect: (s: Selection) => void; right?: boolean }) {
   if (!crumbs.length) return null;
   return (
-    <nav class="hud__crumbs" aria-label="Selection path">
+    <nav class={right ? 'hud__crumbs hud__crumbs--right' : 'hud__crumbs'} aria-label="Selection path">
       {crumbs.map((c, i) => (
         <Fragment key={i}>
           {i > 0 && <span aria-hidden="true">›</span>}
@@ -392,6 +430,14 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
   // the infected side's states). Game code picks it in game; this only
   // changes the picture, never the design or the file.
   const [preview, setPreview] = useState<PreviewState>(DEFAULT_PREVIEW);
+  // What the canvas shows and takes clicks on: the preview, with the Tab
+  // screen also while a Tab element or piece is picked (tab screen spec 3.1),
+  // as a picked occasional panel is drawn. The toggle itself stays as set.
+  const tabShown = !!preview.tab || tabPicked(selectedIds(sel));
+  const seen = useMemo<PreviewState>(() => (tabShown && !preview.tab ? { ...preview, tab: true } : preview), [preview, tabShown]);
+  // Tab held on: the canvas no longer draws the teammate cards, so a
+  // selection of them is dropped rather than left framed and draggable there.
+  useEffect(() => { if (preview.tab) setSel(withoutUnderTab); }, [preview.tab]);
   const [held, setHeld] = useState<WeaponHeld>('primary');
   // Null until the player picks one: each side is then previewed on its own
   // in-game shot (the forest for survivors, a spawned Hunter for infected),
@@ -467,6 +513,24 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
   const shot = useRef<HTMLImageElement | null>(null);
   const [imgTick, setImgTick] = useState(0);
 
+  // The backing store is sized only when the canvas draws, so a canvas whose
+  // box changes (window resized, the side panel wrapping) redraws at once
+  // rather than showing a stretched old frame until the next edit.
+  useEffect(() => {
+    const c = canvas.current;
+    if (!c || typeof ResizeObserver === 'undefined') return;
+    let last = '';
+    const ro = new ResizeObserver(([e]) => {
+      const size = `${Math.round(e.contentRect.width)}x${Math.round(e.contentRect.height)}`;
+      if (size !== last) { last = size; setImgTick((t) => t + 1); }
+    });
+    ro.observe(c);
+    return () => ro.disconnect();
+  }, []);
+  // A new pixel density (another monitor, a zoom) keeps the box's size, so the
+  // ResizeObserver misses it: redraw then too, so the canvas is sharp there.
+  useEffect(() => (typeof window === 'undefined' ? undefined : watchDpr(window, () => setImgTick((t) => t + 1))), []);
+
   // The press and the drag under way, if any. Refs rather than state: they
   // change on every pointermove and must never themselves trigger a render.
   const press = useRef<Press | null>(null);
@@ -495,11 +559,15 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     const ctx = c.getContext('2d');
     if (!ctx) return;
 
-    // 1:1 pixels: the backing store matches the CSS box, which is itself
-    // locked to the design's aspect ratio by the inline aspect-ratio style.
+    // The backing store is the CSS box (itself locked to the design's aspect
+    // by the inline aspect-ratio style) in device pixels, so a display scaled
+    // to 125 or 150% gets a sharp preview, not a stretched one. Capped, as a
+    // very wide canvas at 2x would make every redraw slow.
     const rect = c.getBoundingClientRect();
-    const w = Math.max(320, Math.round(rect.width));
-    const h = Math.max(1, Math.round(rect.height));
+    const cssW = Math.max(320, Math.round(rect.width));
+    const cssH = Math.max(1, Math.round(rect.height));
+    const dpr = canvasDpr(cssW);
+    const w = Math.round(cssW * dpr), h = Math.round(cssH * dpr);
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
 
     const shotSize = shot.current ? { w: shot.current.naturalWidth, h: shot.current.naturalHeight } : null;
@@ -507,23 +575,24 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     if (locked) return;
     try {
       const hovered = hover && !press.current ? targetOf(design, hover.hit, hover.ctrl, sel) : NONE;
-      const box = selectionBox(design, sel, preview);
+      const box = selectionBox(design, sel, seen);
       drawHud(ctx, w, h, design, side, selectedIds(sel), () => setImgTick((t) => t + 1), {
-        state: preview,
+        state: seen,
         held,
-        frames: selectionFrames(design, sel, preview),
+        frames: selectionFrames(design, sel, seen),
         box,
-        handles: box ? handlePoints(box, handlesFor(design, sel), handleBounds(w, h)) : [],
-        hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered, preview), label: selectionLabel(hovered) },
+        handles: box ? handlePoints(box, handlesFor(design, sel), handleBounds(cssW, cssH)) : [],
+        hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered, seen), label: selectionLabel(hovered) },
         marquee,
         guides,
+        dpr,
       });
     } catch (e) {
       // A half-drawn HUD is wiped back to the backdrop before the banner says why.
       drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize);
       designFailed(e);
     }
-  }, [design, side, sel, backdrop, imgTick, preview, held, hover, guides, marquee, locked]);
+  }, [design, side, sel, backdrop, imgTick, seen, held, hover, guides, marquee, locked]);
 
   // The close-up: the HUD drawn again, sharp, at up to CLOSEUP_RENDER_W wide (the
   // additive text painter works only untransformed, so no zoomed transform),
@@ -536,7 +605,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       const z = zoom.current, c = canvas.current;
       const zctx = z?.getContext('2d');
       if (!z || !c || !zctx) return;
-      const box = selectionBox(design, sel, preview);
+      const box = selectionBox(design, sel, seen);
       if (!box) return;
       const zr = z.getBoundingClientRect();
       const vw = Math.max(1, Math.round(zr.width)), vh = Math.max(1, Math.round(zr.height));
@@ -552,7 +621,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       try {
         const shotSize = shot.current ? { w: shot.current.naturalWidth, h: shot.current.naturalHeight } : null;
         drawBackdrop(bctx, bw, bh, backdrop, shot.current, shotSize);
-        drawHud(bctx, bw, bh, design, side, selectedIds(sel), undefined, { state: preview, held, frames: selectionFrames(design, sel, preview) });
+        drawHud(bctx, bw, bh, design, side, selectedIds(sel), undefined, { state: seen, held, frames: selectionFrames(design, sel, seen) });
       } catch { return; }                                              // the main canvas reports it
       zctx.fillStyle = '#000';
       zctx.fillRect(0, 0, vw, vh);
@@ -560,7 +629,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       zctx.drawImage(buf, r.x * scale, r.y * scale, r.w * scale, r.h * scale, 0, 0, vw, vh);
     }, 60);
     return () => clearTimeout(t);
-  }, [hasCloseUp, design, side, sel, backdrop, imgTick, preview, held]);
+  }, [hasCloseUp, design, side, sel, backdrop, imgTick, seen, held]);
 
   // A selection the design or the side no longer has is trimmed or dropped:
   // after an undo, an import, a removed health number, a layout change.
@@ -584,21 +653,23 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     return () => clearTimeout(t);
   }, [design]);
 
-  // Mount only: a share link is meant to be consumed once. Re-running this
-  // whenever `design` changes would try to re-import the same link every
-  // time the reader so much as drags an element.
+  // A share link is consumed once: at mount, and again whenever a new one is
+  // opened in this tab (pasted into the address bar, or a link clicked on the
+  // page), which changes only the hash and would otherwise be ignored until a
+  // reload. The design is read from `current`, not a closure, so a link opened
+  // after edits asks about the edited design.
   useEffect(() => {
-    if (!location.hash.startsWith('#d=')) return;
-    const raw = location.hash.slice(3);
     let cancelled = false;
-    (async () => {
+    const consume = async () => {
+      if (!location.hash.startsWith('#d=')) return;
+      const raw = location.hash.slice(3);
       const decoded = await decodeShare(raw);
       if (cancelled) return;
       if (!decoded) {
         setStatus('That link is damaged.');
       } else {
         let apply = true;
-        if (hasOverrides(design, saved)) {
+        if (hasOverrides(current.current, saved)) {
           apply = await confirm({
             title: 'Load the HUD design from this link? It will replace the one saved on this browser.',
             confirmLabel: 'Load link', cancelLabel: 'Keep mine',
@@ -607,10 +678,11 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
         if (!cancelled && apply) { edit(() => usableCrosshair(decoded, saved)); dropPicks(); }
       }
       if (!cancelled) history.replaceState(null, '', location.pathname + location.search);
-    })();
-    return () => { cancelled = true; };
-    // `design` is deliberately read only from the closure captured at mount:
-    // this effect must run exactly once, not on every subsequent edit.
+    };
+    void consume();
+    const onHash = () => { void consume(); };
+    window.addEventListener('hashchange', onHash);
+    return () => { cancelled = true; window.removeEventListener('hashchange', onHash); };
   }, []);
 
   // Mount only: list this browser's imports for the Preset select. A browser
@@ -765,7 +837,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
 
   /** The selection's handle under the point, if any: the nearest within HANDLE_SLACK_PX screen pixels. */
   const handleUnder = (d: HudDesign, ux: number, uy: number): Handle | null => {
-    const box = selectionBox(d, sel, preview);
+    const box = selectionBox(d, sel, seen);
     const c = canvas.current;
     if (!box || !c) return null;
     // The backing store is 1:1 with the CSS box (the draw effect), so the box's size is the canvas's.
@@ -806,7 +878,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     endGesture();
     const { ux, uy } = pointerUnits(e);
     const d = current.current;
-    press.current = { cx: e.clientX, cy: e.clientY, ux, uy, mods: modsOf(e), hit: hitAt(d, side, preview, ux, uy), handle: handleUnder(d, ux, uy), moved: false };
+    press.current = { cx: e.clientX, cy: e.clientY, ux, uy, mods: modsOf(e), hit: hitAt(d, side, seen, ux, uy), handle: handleUnder(d, ux, uy), moved: false };
     drag.current = null;
     setHover(null);
   };
@@ -832,7 +904,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
    * move are one undo step and every move after it starts from Free.
    */
   const startDrag = (p: Press): Drag | null => {
-    const intent = dragIntent(current.current, sel, p.hit, p.mods, p.handle, { x: p.ux, y: p.uy });
+    const intent = dragIntent(current.current, sel, p.hit, p.mods, p.handle, { x: p.ux, y: p.uy }, seen);
     switch (intent.kind) {
       case 'box': return { kind: 'box' };
       case 'move':
@@ -911,7 +983,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       const d = current.current;
       // The previous object back when nothing it names changed, so a pointer
       // wandering over one piece does not redraw the canvas on every move.
-      const hit = hitAt(d, side, preview, ux, uy), ctrl = e.ctrlKey || e.metaKey;
+      const hit = hitAt(d, side, seen, ux, uy), ctrl = e.ctrlKey || e.metaKey;
       setHover((h) => (h && h.ctrl === ctrl && h.hit.element === hit.element && h.hit.card === hit.card && h.hit.child === hit.child
         ? h : { hit, ctrl }));
       const over = handleUnder(d, ux, uy);
@@ -940,7 +1012,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     if (!p.moved) { setSel((s) => clickSelect(current.current, s, p.hit, p.mods)); return; }
     if (d?.kind === 'box') {
       const { ux, uy } = pointerUnits(e);
-      setSel(boxSelect(current.current, side, preview, { x: p.ux, y: p.uy }, { x: ux, y: uy }));
+      setSel(boxSelect(current.current, side, seen, { x: p.ux, y: p.uy }, { x: ux, y: uy }));
       return;
     }
     endGesture();
@@ -973,7 +1045,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     if (press.current) return;
     const d = current.current;
     const { ux, uy } = pointerUnits(e);
-    const hit = hitAt(d, side, preview, ux, uy);
+    const hit = hitAt(d, side, seen, ux, uy);
     const target = targetOf(d, hit);
     if (target.kind === 'none') { setMenu(null); return; }
     const acting = isPicked(d, sel, hit) ? sel : target;
@@ -1010,7 +1082,8 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
 
     if (e.key === 'Tab' && e.target === canvas.current) {
       e.preventDefault();
-      const list = visibleElements(side, design).map((el) => el.id);
+      // The Tab screen's elements join the cycle only while it shows, and what it takes off (the teammate cards) leaves it then.
+      const list = visibleElements(side, design).filter((el) => (seen.tab ? el.underTab !== 'hidden' : !el.tab)).map((el) => el.id);
       if (list.length === 0) return;
       const forward = !e.shiftKey;
       const at = sel.kind === 'elements' && sel.ids.length === 1 ? list.indexOf(sel.ids[0]) : -1;
@@ -1021,7 +1094,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
 
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
       e.preventDefault();
-      setSel((s) => selectAll(current.current, side, preview, s));
+      setSel((s) => selectAll(current.current, side, seen, s));
       return;
     }
 
@@ -1118,7 +1191,10 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
         dropPicks();
       }
       const lasting = kept ? '' : ' This browser could not store it, so it is kept only until this page closes.';
-      setStatus(`${again ? `Imported ${upload.name} again; this design can be edited and downloaded.` : `Imported ${upload.name}.`}${leftOut(upload.dropped, 'Left out')}${lasting}`);
+      // Loaded here, not up front: the game's file list is only needed on an import.
+      const { missingPictures, missingPicturesNote } = await import('../hud/materials');
+      const missing = missingPicturesNote(missingPictures(upload.files));
+      setStatus(`${again ? `Imported ${upload.name} again; this design can be edited and downloaded.` : `Imported ${upload.name}.`}${leftOut(upload.dropped, 'Left out')}${missing}${lasting}`);
     } catch (err) {
       setStatus((err as Error).message);
     }
@@ -1305,11 +1381,13 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     catch (e) { queueMicrotask(() => designFailed(e)); return false; }
   };
 
-  const basicSlots = SLOTS.filter((s) => !s.advancedOnly);
+  // The Tab screen's slots under a heading of their own (StyleSlot.tab).
+  const basicSlots = SLOTS.filter((s) => !s.advancedOnly && !s.tab);
+  const tabSlots = SLOTS.filter((s) => s.tab);
   const advancedSlots = SLOTS.filter((s) => s.advancedOnly);
 
   return (
-    <div class="page page--wide">
+    <div class="page page--wide page--editor">
       {/* The tab strip names the page, so the title is for screen readers only. */}
       <HudTabs active="hud" />
       <h2 class="sr-only">HUD editor</h2>
@@ -1341,7 +1419,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
             onPreview={setPreview}
             onHeld={setHeld}
             onPreset={(p) => { void changePreset(p); }}
-            onAspect={(a) => edit((d) => ({ ...d, aspect: a }))}
+            onAspect={(a) => edit((d) => setAspect(d, a))}
             onBackdrop={setBackdrop}
             onShot={pickShot}
             onFont={(f) => edit((d) => ({ ...d, font: f }))}
@@ -1375,7 +1453,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
               onKeyDown={safely(onKeyDown)}
               onContextMenu={safely(onContextMenu)}
             />
-            <Crumbs crumbs={breadcrumb(sel)} onSelect={setSel} />
+            <Crumbs crumbs={breadcrumb(sel)} onSelect={setSel} right={tabShown} />
             {menu && (
               <ContextMenu
                 x={menu.x} y={menu.y} onClose={(refocus) => { setMenu(null); if (refocus) canvas.current?.focus(); }}
@@ -1411,6 +1489,16 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
         <h3>Styles</h3>
         <fieldset class="hud__fieldset" disabled={locked}>
         {basicSlots.map((slot) => (
+          <StyleRow
+            key={slot.id} slot={slot} style={design.styles[slot.id]} error={uploadErrors[slot.id]}
+            onChange={(p, mode) => patchStyle(slot.id, p, mode)} onEnd={endGesture}
+            onUpload={(f) => { void onSlotUpload(slot, f); }}
+          />
+        ))}
+
+        <p class="eyebrow hud__note">Tab screen</p>
+        <p class="muted hud__note">The scoreboard the game shows while you hold Tab. Turn on Tab held above the canvas to see it.</p>
+        {tabSlots.map((slot) => (
           <StyleRow
             key={slot.id} slot={slot} style={design.styles[slot.id]} error={uploadErrors[slot.id]}
             onChange={(p, mode) => patchStyle(slot.id, p, mode)} onEnd={endGesture}
@@ -1462,10 +1550,21 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
         <h3>Save your HUD</h3>
         <label class="hud__row">
           <span>Name</span>
+          {/* Only what safeName keeps, as it is typed, and the rest of safeName
+            * (spaces trimmed and joined) when the field is left: the name a
+            * reload, an export or a share link carries is the one shown here. */}
           <input
-            type="text" value={design.name}
-            onInput={(e) => edit((d) => ({ ...d, name: (e.target as HTMLInputElement).value }), 'gesture')}
-            {...endsOn(endGesture)}
+            type="text" value={design.name} maxLength={40}
+            onInput={(e) => {
+              const input = e.target as HTMLInputElement;
+              const typed = input.value.replace(/[^A-Za-z0-9_ -]/g, '');
+              if (typed !== input.value) input.value = typed;
+              edit((d) => ({ ...d, name: typed }), 'gesture');
+            }}
+            {...endsOn(() => {
+              if (current.current.name !== safeName(current.current.name)) edit((d) => ({ ...d, name: safeName(d.name) }), 'gesture');
+              endGesture();
+            })}
           />
           <span />
         </label>

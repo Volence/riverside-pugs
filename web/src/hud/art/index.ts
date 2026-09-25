@@ -17,6 +17,7 @@ export const ART: Record<string, string> = {
   'icon/tip_boomer': 'icon-tip_boomer.png',
   'icon/tip_hunter': 'icon-tip_hunter.png',
   'icon/tip_smoker': 'icon-tip_smoker.png',
+  'vgui/background_survivor': 'vgui-background_survivor.png',
   'vgui/healthbar_green': 'vgui-healthbar_green.png',
   'vgui/healthbar_grey': 'vgui-healthbar_grey.png',
   'vgui/healthbar_orange': 'vgui-healthbar_orange.png',
@@ -44,6 +45,7 @@ export const ART: Record<string, string> = {
   'vgui/hud/pz_healthbar_50': 'vgui-hud-pz_healthbar_50.png',
   'vgui/hud/s_healthbar_outline': 'vgui-hud-s_healthbar_outline.png',
   'vgui/hud/scalablepanel_bgblack_outlinegrey': 'vgui-hud-scalablepanel_bgblack_outlinegrey.png',
+  'vgui/hud/scalablepanel_bgblack_outlinered': 'vgui-hud-scalablepanel_bgblack_outlinered.png',
   'vgui/hud/scalablepanel_bgmidgrey': 'vgui-hud-scalablepanel_bgmidgrey.png',
   'vgui/hud/scalablepanel_bgmidgrey_glow': 'vgui-hud-scalablepanel_bgmidgrey_glow.png',
   'vgui/hud/zombieteamimage_boomer': 'vgui-hud-zombieteamimage_boomer.png',
@@ -107,4 +109,4 @@ export const FONT_METRICS: Record<string, FontMetrics> = {
   'Verdana': { unitsPerEm: 2048, winAscent: 2059, winDescent: 430 },
 };
 
-export const ART_TOTAL_BYTES = 683059;
+export const ART_TOTAL_BYTES = 689426;

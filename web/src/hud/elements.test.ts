@@ -3,16 +3,18 @@ import { ELEMENTS, elementById } from './elements';
 import { SLOTS } from './slots';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile, BASE_PATHS } from './base';
+import { elementRect } from './build';
+import { DEFAULT_DESIGN } from './design';
 
 const root = (preset: 'stock' | 'modern', file: string) => parseKv(baseFile(preset, file))[0].value as KvNode[];
 
 describe('ELEMENTS', () => {
-  it('has unique ids and the twenty-three elements', () => {
+  it('has unique ids and the twenty-seven elements', () => {
     const ids = ELEMENTS.map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.sort()).toEqual(['abilityMarker', 'abilityRing', 'chat', 'finaleMeter', 'ghostPanel', 'holdoutTimer', 'infectedRow', 'infectedVoice',
       'killNotices', 'leavingArea', 'ownHealth', 'ownMic', 'perilNotice', 'progressBar', 'siHealth', 'spawnCountdown', 'tankPanel', 'teamColumn',
-      'voiceList', 'vote', 'weaponSelection', 'xhair', 'zombiePanel'].sort());
+      'voiceList', 'vote', 'weaponSelection', 'xhair', 'zombiePanel', 'tabBoard', 'tabVersus', 'tabSurvivors', 'tabInfected'].sort());
   });
 
   for (const preset of ['stock', 'modern'] as const) {
@@ -128,5 +130,51 @@ describe('the ability marker element (plan Task 8)', () => {
     expect(size).toMatchObject({ type: 'int', range: [4, 64], label: 'Size (pixels)' });
     for (const k of el.keys!.slice(1)) expect(k.type, k.key).toBe('colour');
     for (const k of el.keys!) expect(k.gate, k.key).toBeUndefined();
+  });
+});
+
+/**
+ * The Tab screen (tab screen spec 4.1): four elements placed by blocks of
+ * scoreboard.res, not hudlayout.res. The dialog itself is placed by code at
+ * the top-left corner whatever its ypos says (spec 1.1: the versus box's top
+ * edge is at 214 px, not 308), so the preview puts it at 0,0 by mockPos.
+ */
+describe('the Tab screen elements', () => {
+  const tab = ELEMENTS.filter((e) => e.tab);
+  it('are the four Tab elements, each placed by a block of scoreboard.res', () => {
+    expect(tab.map((e) => e.id)).toEqual(['tabBoard', 'tabVersus', 'tabSurvivors', 'tabInfected']);
+    for (const e of tab) expect(e.file, e.id).toBe('resource/ui/scoreboard.res');
+    expect(tab.map((e) => e.key)).toEqual(['scores', 'CVersusModeScoreboard', 'Survivor1', 'Infected1']);
+  });
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`find their blocks, the rows each moves along too, in ${preset} scoreboard.res`, () => {
+      const board = root(preset, 'resource/ui/scoreboard.res');
+      for (const e of tab) {
+        expect(kvFind(board, [e.key]), e.id).toBeDefined();
+        for (const b of e.moveWith ?? []) expect(kvFind(board, [b]), `${e.id} ${b}`).toBeDefined();
+      }
+    });
+  }
+  it('take the rows along with the first', () => {
+    expect(elementById('tabSurvivors')!.moveWith).toEqual(['Survivor2', 'Survivor3', 'Survivor4']);
+    expect(elementById('tabInfected')!.moveWith).toEqual(['Infected2', 'Infected3', 'Infected4', 'Infected5']);
+  });
+  it('move only the versus panel, behind TS4, and hide only it, behind TS7; none scales', () => {
+    expect(tab.filter((e) => e.move).map((e) => e.id)).toEqual(['tabVersus']);
+    expect(elementById('tabVersus')).toMatchObject({ moveGate: 'TS4', hideGate: 'TS7', props: ['visible'] });
+    for (const e of tab) expect(e.resize, e.id).toBe('none');
+    for (const e of tab.filter((x) => x.id !== 'tabVersus')) expect(e.props, e.id).toEqual([]);
+    for (const e of ELEMENTS.filter((x) => !x.tab)) { expect(e.moveGate, e.id).toBeUndefined(); expect(e.hideGate, e.id).toBeUndefined(); }
+  });
+  it('show the infected rows on the infected side only; the rest on both', () => {
+    expect(Object.fromEntries(tab.map((e) => [e.id, e.side]))).toEqual({ tabBoard: 'both', tabVersus: 'both', tabSurvivors: 'both', tabInfected: 'infected' });
+  });
+  it('put the dialog at the top-left corner by mockPos, not at the file\'s ypos 42', () => {
+    expect(elementById('tabBoard')!.mockPos).toEqual({ x: '0', y: '0' });
+    const r = elementRect(DEFAULT_DESIGN, 'tabBoard', '16:9');
+    expect([r.x, r.y]).toEqual([0, 0]);
+  });
+  it('hide the survivor teammate cards under Tab, and nothing else yet (TAB-1 hud-a against tab-a)', () => {
+    expect(ELEMENTS.filter((e) => e.underTab).map((e) => [e.id, e.underTab])).toEqual([['teamColumn', 'hidden']]);
   });
 });

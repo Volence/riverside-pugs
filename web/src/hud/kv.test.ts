@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseKv, writeKv, kvFind, kvGet, kvSet, pcApplies } from './kv';
+import { parseKv, writeKv, kvFind, kvGet, kvSet, pcApplies, pcFind, pcBlocks, type KvNode } from './kv';
 import { BASE_PATHS, baseFile } from './base';
 
 describe('parseKv', () => {
@@ -84,5 +84,39 @@ describe('platform conditionals, as the Windows English client reads them', () =
     kvSet(root, 'xpos', '50');
     kvSet(root, 'tall', '12');
     expect(writeKv([root]).replace(/\s+/g, ' ')).toContain('"xpos" "39" [$OSX] "xpos" "50" [$WINDOWS] "tall" "9" [$X360] "tall" "12"');
+  });
+});
+
+/**
+ * The Tab screen's scoreboard.res holds a console block before the PC one
+ * under the same name (BackgroundImage [$X360], 400 wide, then [$WIN32], 340
+ * wide) and console-only labels (MoveSelectionButton and the rest). kvFind
+ * returns the first name match, so the Tab code reads through these instead
+ * (tab screen spec 1.1, task 2).
+ */
+describe('the PC-aware block lookup', () => {
+  const board = (preset: 'stock' | 'modern') => parseKv(baseFile(preset, 'resource/ui/scoreboard.res'))[0].value as KvNode[];
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`finds the [$WIN32] backdrop in ${preset} scoreboard.res, not the console one kvFind finds`, () => {
+      expect(kvGet(kvFind(board(preset), ['BackgroundImage'])!, 'wide')).toBe('400');
+      const pc = pcFind(board(preset), ['BackgroundImage'])!;
+      expect(pc.cond).toBe('[$WIN32]');
+      expect(kvGet(pc, 'wide')).toBe('340');
+    });
+    it(`lists the blocks the PC game keeps in ${preset} scoreboard.res`, () => {
+      const names = pcBlocks(board(preset)).map((n) => n.key);
+      for (const n of ['MoveSelectionButton', 'MoveSelectionLabel', 'VoteKickButton', 'VoteKickLabel', 'GamerCardButton', 'GamerCardLabel']) {
+        expect(names, n).not.toContain(n);
+      }
+      expect(names.filter((n) => n === 'BackgroundImage')).toHaveLength(1);
+      for (const n of ['scores', 'MissionTitle', 'Survivor1', 'Infected5', 'CVersusModeScoreboard']) expect(names, n).toContain(n);
+    });
+  }
+  it('walks a path through PC blocks only, case-insensitively, and lists blocks, not value lines', () => {
+    const t = parseKv('A { B [$X360] { C { k 1 } } B [$WIN32] { c { k 2 } } v 3 D [!$WIN32] { } }')[0].value as KvNode[];
+    expect(kvGet(pcFind(t, ['b', 'C'])!, 'k')).toBe('2');
+    expect(pcFind(t, ['D'])).toBeUndefined();
+    expect(pcFind(t, ['B', 'nope'])).toBeUndefined();
+    expect(pcBlocks(t).map((n) => `${n.key}${n.cond ?? ''}`)).toEqual(['B[$WIN32]']);
   });
 });

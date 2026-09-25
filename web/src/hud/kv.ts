@@ -127,6 +127,30 @@ export function pcApplies(cond: string | undefined): boolean {
   }));
 }
 
+/**
+ * kvFind as the PC game sees the file: at every level, a node whose
+ * conditional fails on PC is skipped. scoreboard.res has BackgroundImage
+ * [$X360] (400 wide) before BackgroundImage [$WIN32] (340 wide); kvFind
+ * returns the console block, this the one the game draws. kvFind itself is
+ * left as it is: switching every caller is its own change, which the golden
+ * downloads would have to prove harmless (tab screen spec 4.4).
+ */
+export function pcFind(nodes: KvNode[], path: string[]): KvNode | undefined {
+  let level = nodes;
+  let hit: KvNode | undefined;
+  for (const part of path) {
+    hit = level.find((n) => same(n.key, part) && pcApplies(n.cond));
+    if (!hit) return undefined;
+    level = typeof hit.value === 'string' ? [] : hit.value;
+  }
+  return hit;
+}
+
+/** The blocks at this level the PC game keeps, in file order: no console-only block, no value line. */
+export function pcBlocks(nodes: KvNode[]): KvNode[] {
+  return nodes.filter((n) => typeof n.value !== 'string' && pcApplies(n.cond));
+}
+
 /** A value line the PC game reads: a string, under a conditional that holds there. */
 const pcLine = (c: KvNode, key: string) => same(c.key, key) && typeof c.value === 'string' && pcApplies(c.cond);
 

@@ -391,6 +391,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           void res.type('text/html; charset=utf-8').send(shell);
           return;
         }
+        // No built shell (a checkout that never ran the build, as in the
+        // tests): answer as the not-found handler then answers any other page
+        // path, which is @fastify/static's own 404 for a missing index.html.
+        // (callNotFound would reach fastify's default handler from this hook,
+        // not ours.) tests/server.test.ts pins that the two stay the same.
+        void res.code(404).type('text/html').send('404 Not Found');
+        return;
       }
       const statusCode = e.statusCode ?? 500;
       void res.code(statusCode).send({

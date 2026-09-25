@@ -163,6 +163,33 @@ export function cssWeight(weight: number): number {
   return Math.min(900, Math.max(100, Math.round(weight / 100) * 100));
 }
 
+/**
+ * The extra advance, in pixels at 1080p, the game gives each glyph of a face
+ * it has to embolden itself: a weight of 600 or more on a face whose only
+ * file is regular weight (both Trade Gothics and ToolBox; "Trade Gothic
+ * Bold" is a bold design at regular weight). The font engine's simulated
+ * bold widens every glyph by a pixel. Measured on the stock Tab title,
+ * FrameTitle (Trade Gothic Bold at 700): 333 px of ink in game
+ * (/home/volence/l4d/hud/probe-modern-art/runs/stock/tab/tab-a.png, x 47 to
+ * 380), 308 in the preview without it, 21 glyphs. A face with a bold file
+ * (Roboto Condensed) or one the preview has no file for is left alone.
+ */
+export function synthBoldSpacing(face: string, weight: number): number {
+  if (!(weight >= 600)) return 0;
+  const name = known(face);
+  const files = name ? FILES[name] : undefined;
+  return files && files.every((f) => parseInt(f.weight, 10) < 600) ? 1 : 0;
+}
+
+/**
+ * Sets the canvas letter spacing, where the browser has it. Every place that
+ * sets a font sets this too, since it is canvas state: a label drawn after a
+ * simulated-bold one would otherwise inherit its spacing.
+ */
+export function setLetterSpacing(ctx: CanvasRenderingContext2D, px: number): void {
+  if ('letterSpacing' in ctx) ctx.letterSpacing = `${px}px`;
+}
+
 /** The canvas font for a scheme face at a weight and a tall in pixels. */
 export function canvasFont(face: string, weight: number, tallPx: number): string {
   return `${cssWeight(weight)} ${fontCell(face, tallPx).em}px ${cssFamily(face)}`;

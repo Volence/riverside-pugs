@@ -11,6 +11,7 @@
  */
 
 import type { KeyDef } from './children';
+import type { ProbeId } from './probes';
 
 /**
  * Only 'visible' is live in v1. 'color', 'bg' and 'fontSize' are the reserved
@@ -69,6 +70,18 @@ export interface HudElement {
    * places it across, so only its height moves, and no xpos is ever written.
    */
   moveAxis?: 'y';
+  /**
+   * A Tab screen element (tab screen spec 4.1): placed by a block of
+   * scoreboard.res, and drawn only while the preview holds Tab or while it
+   * or a piece of it is selected.
+   */
+  tab?: true;
+  /** A HUD element the game takes off the screen while Tab is held (the survivor teammate cards, TAB-1 hud-a against tab-a). */
+  underTab?: 'hidden';
+  /** The element's x and y wait on this probe: validateDesign drops a stored move while it is closed. */
+  moveGate?: ProbeId;
+  /** The element's hide waits on this probe: validateDesign drops a stored visible: false while it is closed. */
+  hideGate?: ProbeId;
 }
 
 /** Said of a panel no probe has seen, which needs another player to show. */
@@ -86,7 +99,9 @@ export const ELEMENTS: HudElement[] = [
   { id: 'ownHealth', label: 'Your health', side: 'survivor', key: 'CHudLocalPlayerDisplay', move: true, resize: 'scale',
     children: ['resource/ui/hud/localplayerdisplay.res', 'resource/ui/hud/localplayerpanel.res'],
     mockSize: { stock: { w: 125, h: 91 } }, props: ['visible'] },
-  { id: 'teamColumn', label: 'Teammates', side: 'survivor', key: 'CHudTeamDisplay', move: true, resize: 'scale',
+  // underTab: the game hides the teammate cards while Tab is held, as the scoreboard lists the team
+  // (/home/volence/l4d/hud/probe-tab/RESULTS.md, TAB-1 tab1/runs/tab-survivor/hud-a.png against tab-a.png).
+  { id: 'teamColumn', label: 'Teammates', side: 'survivor', key: 'CHudTeamDisplay', move: true, resize: 'scale', underTab: 'hidden',
     children: ['resource/ui/hud/teammatepanel.res'],
     team: { file: 'resource/ui/hud/teamdisplayhud.res', dirs: ['row', 'column'] },
     mockSize: { stock: { w: 430, h: 75 }, modern: { w: 120, h: 100 } }, props: ['visible'] },
@@ -323,5 +338,37 @@ export const ELEMENTS: HudElement[] = [
     note: `Shown when you try to leave the start area while teammates are still loading; ${UNSEEN}.` },
   { id: 'tankPanel', label: 'Tank frustration', side: 'infected', key: 'HudFrustrationMeter', move: true, resize: 'none',
     children: [], props: ['visible'], shownIn: ['alive'], shownFor: ['tank'] },
+  /**
+   * The Tab screen: the scoreboard dialog and the versus score panel, drawn
+   * while Tab is held (docs/superpowers/specs/2026-09-25-hud-editor-tab-screen-design.md,
+   * sections 1 and 4.1; probe answers in section 7 and
+   * /home/volence/l4d/hud/probe-tab/RESULTS.md). Every one is a block of
+   * scoreboard.res. None scales in v1, and only the versus panel moves.
+   *
+   * The dialog: code puts it at the top-left corner, the full screen wide
+   * (scoreboard_position north-west), whatever its xpos and ypos say: the
+   * versus box's top edge is at 214 px, which is ypos 0, not 42 (spec 1.1).
+   * So it is drawn at 0,0 by mockPos, and neither moves nor hides.
+   */
+  { id: 'tabBoard', label: 'Tab screen', side: 'both', key: 'scores', file: 'resource/ui/scoreboard.res', tab: true,
+    move: false, resize: 'none', children: [], props: [], mockPos: { x: '0', y: '0' } },
+  /**
+   * The versus score panel, in screen units from the top-left corner like
+   * every top-level block of scoreboard.res. TS4: moved to 420, 20 its stat
+   * box drew at 945, 202 px (tab1/runs/tab-survivor/tab-a.png); TS7: hidden
+   * whole it drew nothing (tab3/runs/tab-survivor/tab-a.png).
+   */
+  { id: 'tabVersus', label: 'Versus score', side: 'both', key: 'CVersusModeScoreboard', file: 'resource/ui/scoreboard.res', tab: true,
+    move: true, moveGate: 'TS4', resize: 'none', children: [], props: ['visible'], hideGate: 'TS7' },
+  /**
+   * The survivor rows: code makes one row panel per survivor at each block's
+   * place (the blocks are DontAutoCreate). Both teams see them (tab1/runs/tab-infected/tab-c.png).
+   * Moving the list (TL2) was proven but is left for later.
+   */
+  { id: 'tabSurvivors', label: 'Survivor rows', side: 'both', key: 'Survivor1', file: 'resource/ui/scoreboard.res', tab: true,
+    moveWith: ['Survivor2', 'Survivor3', 'Survivor4'], move: false, resize: 'none', children: [], props: [] },
+  /** The infected rows: seen only on the infected side (tab-c, tab-d), and there only your own row. */
+  { id: 'tabInfected', label: 'Infected rows', side: 'infected', key: 'Infected1', file: 'resource/ui/scoreboard.res', tab: true,
+    moveWith: ['Infected2', 'Infected3', 'Infected4', 'Infected5'], move: false, resize: 'none', children: [], props: [] },
 ];
 export const elementById = (id: string) => ELEMENTS.find((e) => e.id === id);
