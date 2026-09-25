@@ -444,6 +444,8 @@ function childOverride(def: ChildDef, raw: unknown): ChildOverride {
   };
   // A hide whose effect waits on a probe is dropped until it passes (the Tab screen's pieces, TS7).
   if (typeof raw.visible === 'boolean' && (!def.hideGate || probe(def.hideGate))) out.visible = raw.visible;
+  // A piece code shows (your own Tab row, visible 0 in its file) keeps only a hide: a stored show would write visible 1 into the one file every row loads.
+  if (def.codeShown && out.visible === true) delete out.visible;
   if (def.move) {
     const x = n('x'), y = n('y');
     if (x !== undefined) out.x = x;
