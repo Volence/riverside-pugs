@@ -92,10 +92,10 @@ export interface PublicChanges {
   /** Watched config files and the per-map stripper directory that differ, by label. */
   files: string[];
 }
-export type KnobLabels = Pick<BalanceKnobs, 'cvars' | 'files' | 'dirs' | 'versionless'> & { ignored?: string[] };
+export type KnobLabels = Pick<BalanceKnobs, 'cvars' | 'files' | 'dirs' | 'versionless' | 'weapons'> & { ignored?: string[] };
 
-/** The public-facing diff between two stored inventories: cvar changes by
- *  label, plugins added/removed/updated by bare name, and watched files or
+/** The public-facing diff between two stored inventories: cvar and weapon
+ *  stat changes by label, plugins added/removed/updated by bare name, and watched files or
  *  dirs by label. Never leaks a hash, size, raw inventory key or path outside
  *  the knob list. */
 export function publicChanges(prevRaw: Record<string, string>, curRaw: Record<string, string>, knobs: KnobLabels | null): PublicChanges {
@@ -103,6 +103,9 @@ export function publicChanges(prevRaw: Record<string, string>, curRaw: Record<st
   const prev = withoutIgnored(prevRaw, ignored), cur = withoutIgnored(curRaw, ignored);
   const versionless = new Set(knobs?.versionless ?? []);
   const cvarLabel = new Map((knobs?.cvars ?? []).map((c) => [c.cvar, c.label]));
+  const weaponLabel = new Map((knobs?.weapons ?? []).map((w) => [`${w.weapon}.${w.key}`, w.label]));
+  // The plugin reports a weapon key the weapons file does not set as "default".
+  const weaponValue = (v: string) => (v === 'default' ? 'game default' : v);
   const pathLabel = new Map([...(knobs?.files ?? []), ...(knobs?.dirs ?? [])].map((f) => [f.path, f.label]));
   const keys = [...new Set([...Object.keys(prev), ...Object.keys(cur)])].sort();
   const out: PublicChanges = { knobs: [], pluginsAdded: [], pluginsRemoved: [], pluginsUpdated: [], files: [] };
@@ -114,6 +117,8 @@ export function publicChanges(prevRaw: Record<string, string>, curRaw: Record<st
     if (kind === 'c:') {
       // Present on one side only: the watch list changed, not the game.
       if (a !== undefined && b !== undefined) out.knobs.push({ label: cvarLabel.get(name) ?? name, from: a, to: b });
+    } else if (kind === 'w:') {
+      if (a !== undefined && b !== undefined) out.knobs.push({ label: weaponLabel.get(name) ?? name, from: weaponValue(a), to: weaponValue(b) });
     } else if (kind === 'p:') {
       const plugin = name.replace(/\.smx$/, '');
       if (a === undefined) out.pluginsAdded.push(plugin);
