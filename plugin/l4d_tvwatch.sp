@@ -59,7 +59,7 @@
 #define REQUIRE_EXTENSIONS
 #include "pug-logauth.inc"
 
-#define PLUGIN_VERSION "0.1.0"
+#define PLUGIN_VERSION "0.2.0"
 
 /** Bound on the SourceTV spectator slot index we will cache or emit. Matches
  *  the site parser's own slot bound (src/logParse.ts, 0-255) rather than any
@@ -85,6 +85,39 @@ public void OnPluginStart()
 	CreateConVar("l4d_tvwatch_version", PLUGIN_VERSION, "L4D1 SourceTV Watch version",
 		FCVAR_NOTIFY | FCVAR_DONTRECORD);
 	PugLogAuth_Init();
+	CreateTimer(1.0, Timer_PollLeaves, _, TIMER_REPEAT);
+}
+
+/**
+ * Leaves are found by polling, not by SourceTV_OnSpectatorDisconnected.
+ *
+ * Our SourceTV Manager build (1.2-riverside1) installs no per-spectator
+ * hooks: on L4D1 a spectator whose Disconnect hook was carried through a
+ * changelevel segfaulted srcds when it later timed out (bisected 2026-09-25
+ * on Riverside #3). So the disconnect forward never fires; once a second each
+ * cached slot is asked whether it is still connected, and a slot that is not
+ * is reported with reason=left. The engine's own reason (timed out,
+ * disconnect by user) is no longer available.
+ *
+ * The disconnect forward is still implemented below, so an unpatched
+ * extension keeps working; whichever path sees the leave first clears the
+ * cache, and the other then finds nothing to report.
+ */
+public Action Timer_PollLeaves(Handle timer)
+{
+	if (GetFeatureStatus(FeatureType_Native, "SourceTV_IsClientConnected") != FeatureStatus_Available)
+		return Plugin_Continue;
+
+	int count = SourceTV_GetClientCount();
+	for (int slot = 1; slot < TVWATCH_MAX_SLOT; slot++)
+	{
+		if (!g_bSlotCached[slot]) continue;
+		// A slot above the current count cannot hold a live client, and the
+		// native would throw on it.
+		if (slot <= count && SourceTV_IsClientConnected(slot)) continue;
+		EmitLeave(slot, "left");
+	}
+	return Plugin_Continue;
 }
 
 public void SourceTV_OnServerStart(int instance)
@@ -94,12 +127,18 @@ public void SourceTV_OnServerStart(int instance)
 
 public void SourceTV_OnServerShutdown(int instance)
 {
+	// The site already closes every open row on stop ('SourceTV restarted'),
+	// so the cache is just dropped, not reported.
+	for (int slot = 0; slot < TVWATCH_MAX_SLOT; slot++) g_bSlotCached[slot] = false;
 	PugLog("PUGTV event=stop");
 }
 
 public void SourceTV_OnSpectatorConnected(int client)
 {
 	if (client <= 0 || client >= TVWATCH_MAX_SLOT) return;
+	// The slot's previous occupant left inside the last poll interval and the
+	// slot was handed straight to someone new: report that leave first.
+	if (g_bSlotCached[client]) EmitLeave(client, "left");
 	// Proxies are relays feeding other SourceTV instances, not people
 	// watching; nothing here is interesting to an admin. Cleared, not left
 	// as-is, so a missed leave for a real spectator that used to hold this
@@ -138,16 +177,20 @@ public void SourceTV_OnSpectatorDisconnected(int client, const char reason[255])
 	// slot this plugin never saw connect (e.g. loaded mid-session). Either
 	// way there is nothing trustworthy to attribute the line to.
 	if (!g_bSlotCached[client]) return;
-	g_bSlotCached[client] = false;
+	EmitLeave(client, reason);
+}
 
-	// Free text from the engine, and on some builds player-reachable (the
-	// disconnect console command takes a message). Sanitised the same way as
-	// the name: control bytes stripped, '=' and '"' turned into '_', so it
-	// cannot forge a fake "name=" boundary or any other field on the line.
+/** Reports a cached slot's leave once and clears the cache. The reason is
+ *  free text from the engine, and on some builds player-reachable (the
+ *  disconnect console command takes a message). Sanitised the same way as
+ *  the name: control bytes stripped, '=' and '"' turned into '_', so it
+ *  cannot forge a fake "name=" boundary or any other field on the line. */
+void EmitLeave(int slot, const char[] reason)
+{
+	g_bSlotCached[slot] = false;
 	char cleanReason[128];
 	SanitizeText(reason, cleanReason, sizeof(cleanReason));
-
-	PugLog("PUGTV event=leave slot=%d reason=%s name=%s", client, cleanReason, g_sSlotName[client]);
+	PugLog("PUGTV event=leave slot=%d reason=%s name=%s", slot, cleanReason, g_sSlotName[slot]);
 }
 
 /** Strips a trailing ":port" from a SourceTV_GetClientIP result in place.
