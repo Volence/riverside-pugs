@@ -175,26 +175,23 @@ describe('ModCallPoster', () => {
     expect(after.note).toMatch(/Calls are turned off$/);
   });
 
-  it('keeps the caller, details and ticket off the card when the call is about staff', async () => {
+  it('names the caller, the staff member and the details when the call is about staff', async () => {
     const first = call({ target: IDS[7], text: 'secret details' }); await poster.idle();
-    // A ticket was filed, so leaving its link off the card is the rule at work.
     expect(first.ticket_id).not.toBeNull();
     call({ steamid: IDS[1], target: IDS[7], text: 'second secret' }); await poster.idle();
     expect(inAdmin()).toHaveLength(1);
     const p = inAdmin()[0].payload;
     const body = JSON.stringify(p);
-    expect(body).toContain('About a staff member: details are on the site.');
-    expect(body).toContain('https://pug.test/admin/people/calls');
-    expect(body).not.toContain('<@900>');
-    expect(body).not.toContain('<@901>');
-    expect(body).not.toContain('secret');
-    expect(body).not.toContain('/admin/people/tickets/');
-    expect(p.components[0].map((b) => b.label)).not.toContain('Ticket');
-    // What happened and where still show, and the role is still pinged.
-    expect(body).toContain('In-game call: Cheating (2 calls)');
-    expect(body).toContain('Dallas');
-    expect(body).toContain('Replay moment');
-    expect(body).toContain('connect 1.2.3.4:27020');
+    expect(body).not.toContain('About a staff member');
+    expect(body).toContain('Caller: **player0** (<@900>)');
+    expect(body).toContain('About: **player7** (<@907>)');
+    expect(body).toContain('<@901>');
+    expect(body).toContain('secret details');
+    expect(body).toContain('second secret');
+    expect(body).toContain(`/admin/people/tickets/${first.ticket_id}`);
+    expect(p.components[0].map((b) => b.label)).toContain('Ticket');
+    // Named, never pinged: only the role is.
+    expect(p.mentionUserIds).toEqual([]);
     expect(p.content).toBe(`<@&${ROLE}>`);
   });
 
