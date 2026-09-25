@@ -33,7 +33,7 @@ import { artUrl, normaliseMaterial, SKULL_ICON, zombieTeamImage } from './art';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { parseColour } from './textures';
 import { SLOTS } from './slots';
-import { canvasFont, fontCell, importedFace, loadFace, synthBoldSpacing, type FontCell } from './fonts';
+import { canvasFont, fontCell, importedFace, loadFace, synthBoldSpacing, setLetterSpacing, type FontCell } from './fonts';
 import { baseOf, onUnregister } from './base';
 import { importedMaterial, _resetImportedArt } from './importArt';
 import { addLinear, overLinear, linearOverAlpha } from './additive';
@@ -335,7 +335,7 @@ export function setFont(ctx: CanvasRenderingContext2D, design: HudDesign, name: 
   ctx.font = canvasFont(face, f.weight, f.tall * k);
   ctx.textBaseline = 'alphabetic';
   // The game's simulated bold, a pixel a glyph at 1080p (fonts.ts synthBoldSpacing), scaled to the canvas.
-  if ('letterSpacing' in ctx) ctx.letterSpacing = `${synthBoldSpacing(face, f.weight) * k / (1080 / 480)}px`;
+  setLetterSpacing(ctx, synthBoldSpacing(face, f.weight) * k / (1080 / 480));
   return { ...fontCell(face, f.tall * k), additive: f.additive };
 }
 
