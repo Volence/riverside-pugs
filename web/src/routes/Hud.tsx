@@ -36,6 +36,7 @@ import {
   resizeBox, resizeElement, scaleElement, resizeChild, scaleChildren, cornerFactor, anchorOf,
   setSelectionVisible, patchChild, hideSelection, resetSelection, raiseChild,
   patchSplatter, withSplatterImage, resetSplatter, splatterKind, gameDefault, isGameDefault,
+  setAspect,
 } from '../hud/edit';
 import { snapMove, snapEdges, unionBox, type Guide, type Snap, type Handle } from '../hud/guides';
 import {
@@ -1395,7 +1396,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
             onPreview={setPreview}
             onHeld={setHeld}
             onPreset={(p) => { void changePreset(p); }}
-            onAspect={(a) => edit((d) => ({ ...d, aspect: a }))}
+            onAspect={(a) => edit((d) => setAspect(d, a))}
             onBackdrop={setBackdrop}
             onShot={pickShot}
             onFont={(f) => edit((d) => ({ ...d, font: f }))}

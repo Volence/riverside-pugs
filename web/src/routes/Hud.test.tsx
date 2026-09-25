@@ -3119,6 +3119,18 @@ describe('The Tab screen on the page', () => {
     expect(seenIds.some((t) => /Teammates/.test(t))).toBe(false);
   });
 
+  it('holds the versus panel on screen when the aspect narrows, as the download does', async () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.click(tabHeld());
+    clickAt(canvas, 60, 60, { ctrlKey: true });
+    expect(legend('Versus score')).toBeTruthy();
+    dragFrom(canvas, [60, 60], [60 + 484, 60]);
+    await waitFor(() => expect(saved().elements?.tabVersus?.x).toBe(499));
+    fireEvent.change(screen.getByRole('combobox', { name: /aspect/i }), { target: { value: '4:3' } });
+    await waitFor(() => expect(saved().elements?.tabVersus?.x).toBe(640 - 354));
+  });
+
   it('never picks the teammate cards under the Tab screen', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
