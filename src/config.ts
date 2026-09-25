@@ -75,6 +75,10 @@ export interface Config {
   deployRepoDir: string;
   /** Per-release backups of every file a deploy replaced or removed. */
   releasesDir: string;
+  /** Where the community page keeps shared files: imports/<hudId>.vpk and
+   *  previews/<sha256>.png. Beside the database like ticket attachments, and
+   *  so under data/, which deploy-web.sh already excludes. */
+  communityDir: string;
   discord: DiscordConfig | null;
   twitch: TwitchConfig | null;
 }
@@ -127,6 +131,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     deployRepoKey: env.DEPLOY_REPO_KEY?.trim() || null,
     deployRepoDir: join(dirname(dbPath), 'deploy-repo.git'),
     releasesDir: join(dirname(dbPath), 'releases'),
+    communityDir: env.COMMUNITY_DIR?.trim() || join(dirname(dbPath), 'community'),
     discord: loadDiscord(env),
     twitch: loadTwitch(env),
   };

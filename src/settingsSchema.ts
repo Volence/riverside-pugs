@@ -19,7 +19,7 @@ export interface SettingDef {
   key: string;
   label: string;
   help: string;
-  group: 'Queue' | 'Match' | 'Stats' | 'Discord' | 'Admin feed' | 'Penalties' | 'Replays';
+  group: 'Queue' | 'Match' | 'Stats' | 'Discord' | 'Admin feed' | 'Penalties' | 'Replays' | 'Community';
   type: SettingType;
   /** Masked in the panel until revealed, and never written to the audit log. */
   secret?: boolean;
@@ -74,6 +74,8 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'admin_feed_problems', group: 'Admin feed', label: 'Problems', help: 'Matches aborted by the reapers, lost results, voice channel failures, and a player dropped twice while connecting (likely a modified game file).', type: { kind: 'bool' } },
   { key: 'admin_feed_conduct', group: 'Admin feed', label: 'Slurs in chat and names', help: 'A slur typed in chat or used in a name on any game server, by anyone, in a match or not. Slurs only: swearing and insults do not post. Chat posts at most once a minute per player, a name once per player per name, and every line is kept on the player file either way.', type: { kind: 'bool' } },
   { key: 'discord_pug_role_id', group: 'Discord', label: 'Queue alert role id', help: 'Role pinged when the queue fills past a threshold. Members opt in with the Notify me button on the panel. Empty turns the alert off.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
+  { key: 'mod_call_role_id', group: 'Discord', label: 'Mod call role', help: 'Role mentioned on every in-game /mod call in the admin channel. Empty posts calls without a ping.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
+  { key: 'mod_calls_enabled', group: 'Discord', label: 'In-game mod calls', help: 'Post /mod calls from the game servers to the admin channel. Off still stores every call and lists it on the In-game calls page.', type: { kind: 'bool' } },
   { key: 'discord_required_role_id', group: 'Discord', label: 'Required role id', help: 'Empty: any member of the Discord server is let in on linking. A role id: they must also have that role.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
   { key: 'discord_webhook_url', group: 'Discord', label: 'Webhook URL', help: 'Legacy announcements. Unused while the bot is running.', type: { kind: 'string', maxLength: 300, allowEmpty: true }, secret: true },
   { key: 'discord_queue_thresholds', group: 'Discord', label: 'Webhook queue thresholds', help: 'Queue sizes the legacy webhook announces.', type: { kind: 'intList', min: 1, max: 8, maxItems: 8 } },
@@ -81,6 +83,11 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'demo_retention_days', group: 'Replays', label: 'Match demo retention (days)', help: 'Match demos are deleted after this, and the download disappears from the match page.', type: { kind: 'int', min: 7, max: 3650 } },
   { key: 'demo_autorecord_days', group: 'Replays', label: 'Casual demo retention (days)', help: "SourceTV's own recordings of ordinary play, which nothing links to.", type: { kind: 'int', min: 1, max: 365 } },
   { key: 'replay_free_floor_gb', group: 'Replays', label: 'Free disk floor (GB)', help: 'Prune the oldest replays early when free space drops below this.', type: { kind: 'int', min: 1, max: 500 } },
+  { key: 'community_uploads', group: 'Community', label: 'Community sharing', help: 'Players can share HUDs and crosshairs to the community page. Off refuses new shares; browsing, downloads and likes keep working.', type: { kind: 'bool' } },
+  { key: 'community_huds_per_player', group: 'Community', label: 'Shared HUDs per player', help: 'Live HUD entries one player may have on the community page at a time.', type: { kind: 'int', min: 0, max: 5 } },
+  { key: 'community_crosshairs_per_player', group: 'Community', label: 'Shared crosshairs per player', help: 'Live crosshair entries one player may have on the community page at a time.', type: { kind: 'int', min: 0, max: 5 } },
+  { key: 'community_shares_per_day', group: 'Community', label: 'Shares per player per day', help: 'Shares one player may make in 24 hours, deletes included, so delete-and-reshare cannot churn the disk.', type: { kind: 'int', min: 1, max: 50 } },
+  { key: 'community_store_mb', group: 'Community', label: 'Community store cap (MB)', help: 'Total disk the community page may use for previews and imported HUDs. A share that would pass it is refused with "The community shelf is full right now."', type: { kind: 'int', min: 100, max: 20000 } },
 ];
 
 const BY_KEY = new Map(SETTINGS_SCHEMA.map((d) => [d.key, d]));
@@ -119,6 +126,11 @@ export function validateSetting(
       const v = raw.trim();
       if (!v && !t.allowEmpty) return { ok: false, error: 'cannot be empty' };
       if (v.length > t.maxLength) return { ok: false, error: `at most ${t.maxLength} characters` };
+      // The mod call card pings <@&value>. A pasted mention or a role name
+      // would post a broken ping on every call, so only a Discord id passes.
+      if (key === 'mod_call_role_id' && v !== '' && !/^\d{17,20}$/.test(v)) {
+        return { ok: false, error: 'must be a Discord role id (17 to 20 digits), or empty' };
+      }
       return { ok: true, value: v };
     }
     case 'bool':

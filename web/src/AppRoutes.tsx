@@ -1,4 +1,4 @@
-import { Route, Router } from 'preact-iso';
+import { Route, Router, lazy } from 'preact-iso';
 import type { StateSnapshot } from './api';
 import type { Session } from './hooks/useLiveState';
 import { Redirect } from './components/Redirect';
@@ -23,6 +23,13 @@ import { Admin } from './routes/Admin';
 import { ADMIN_ROUTE_PATHS } from './routes/admin/adminRoutes';
 import { HowToPlay } from './routes/HowToPlay';
 import { HelpConsistency } from './routes/HelpConsistency';
+
+// The HUD editor carries ~170 KB of base HUD files, so it stays out of the main bundle.
+const Hud = lazy(() => import('./routes/Hud'));
+// The community pages draw crosshairs and fetch on mount; lazy like the editor so
+// neither weighs on the first load of the pages people land on most.
+const Community = lazy(() => import('./routes/Community'));
+const CommunityEntry = lazy(() => import('./routes/CommunityEntry'));
 
 /** The 404.
  *
@@ -81,7 +88,10 @@ export function AppRoutes(
       <Route path="/match/:id" component={MatchDetail} me={me} staff={staff} />
       <Route path="/maps" component={Maps} />
       <Route path="/custom-campaigns" component={CustomCampaigns} />
-      <Route path="/crosshair" component={Crosshair} />
+      <Route path="/crosshair" component={Crosshair} session={session} />
+      <Route path="/hud" component={Hud} session={session} />
+      <Route path="/community" component={Community} session={session} />
+      <Route path="/community/:id" component={CommunityEntry} session={session} />
       <Route path="/replay/file/:name" component={ReplayPage} />
       <Route path="/map/:map" component={MapDetail} />
       <Route path="/player/:steamid" component={Profile} session={session} refresh={refresh} />

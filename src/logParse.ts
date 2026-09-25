@@ -14,6 +14,10 @@ export type WatchedCvar = typeof WATCHED_CVARS[number];
  *  sends no act; it only ever reported, so it reads as `live`. */
 export const CVAR_ACTS = ['held', 'fixed', 'live'] as const;
 export type CvarAct = typeof CVAR_ACTS[number];
+/** Reasons an in-game /mod call (src/modCalls.ts) can give. Anything else on
+ *  a PUGCALL line is refused. */
+export const MOD_CALL_REASONS = ['cheating', 'toxicity', 'griefing', 'afk', 'english', 'broke', 'other'] as const;
+export type ModCallReason = (typeof MOD_CALL_REASONS)[number];
 
 export interface Phase {
   state: PhaseState;
@@ -30,6 +34,34 @@ export interface Phase {
   /** Who typed !pause, when the plugin knows (pug-match 0.3.5 on). Absent,
    *  never guessed, for older plugins, disconnect pauses and admins. */
   by?: string;
+}
+
+/** Where a round sits in its map's SourceTV demo (pug-match 0.3.12 on).
+ *  `tick` is the demo tick at which the half went live, the moment every t_ms
+ *  of that round counts from, and `hz` is the server tickrate, so a moment
+ *  t_ms into the round is demo tick `tick + round(t_ms * hz / 1000)`. */
+export interface DemoSync { tick: number; hz: number }
+
+/** The reason fields l4d_lilac_report 0.2.0+ adds onto an L4DL line for
+ *  aimbot, aimlock and bhop, straight off Little Anti-Cheat's own forwards.
+ *  Every field is individually optional because the three cheats each fill a
+ *  different subset: aimbot has lflags/ldelta/ltd, aimlock has the
+ *  ltarget_* trio plus lself_team, bhop has lbhops/ljump, and
+ *  maxd/totd/taps/taps1 are shared by aimbot and aimlock. -1 is LilAC's own
+ *  "unknown/stale" value, a valid parsed value on every field that carries
+ *  it, never a guess.
+ *
+ *  lself_team is the flagged CLIENT's own team (round 1 fix, 2026-09-24):
+ *  ltarget_team alone can only ever hedge the L4D through-walls caveat ("the
+ *  target is a survivor, so this COULD be legitimate IF the flagged player
+ *  was infected"), because it says nothing about the flagged player's own
+ *  side. With lself_team the site can tell a real infected-sees-through-walls
+ *  lock (lself_team 3, target a survivor) apart from a survivor locking onto
+ *  another survivor (lself_team 2, no caveat makes sense at all). */
+export interface LilacReason {
+  lflags?: number; ldelta?: number; ltd?: number; maxd?: number; totd?: number;
+  taps?: number; taps1?: number; lbhops?: number; ljump?: number;
+  ltarget_team?: number; ltarget_class?: number; ltarget_ghost?: number; lself_team?: number;
 }
 
 export type LogEvent =
@@ -80,7 +112,7 @@ export type LogEvent =
   // datagram with no retransmit: losing it left a fabricated side recorded as
   // reliable. An absent field is the honest signal, and the round is stored
   // unreliable until ROUND_END supplies the real one.
-  | { kind: 'round_start'; token: string; map: string; half: number; surv: 'a' | 'b' | null }
+  | { kind: 'round_start'; token: string; map: string; half: number; surv: 'a' | 'b' | null; demo?: DemoSync }
   // `map` rides along so recordRoundEnd can resolve the round to the map it
   // actually belongs to rather than to whatever had finished by arrival time.
   // `alive` is how many survivors were still standing when the round ended,
@@ -88,7 +120,7 @@ export type LogEvent =
   // absent or malformed, NOT that nobody survived: zero is a real, and the
   // most interesting, value. Optional for the same reason `map` is, an older
   // plugin does not send it.
-  | { kind: 'round_end'; token: string; map: string | null; half: number; surv: 'a' | 'b'; score: number; alive: number | null }
+  | { kind: 'round_end'; token: string; map: string | null; half: number; surv: 'a' | 'b'; score: number; alive: number | null; demo?: DemoSync }
   | { kind: 'balance_part'; token: string; half: 1 | 2; part: number; items: Record<string, string> }
   | { kind: 'balance_end'; token: string; half: 1 | 2; parts: number; items: number }
   | { kind: 'round_stat'; token: string; half: 1 | 2; steamid: string; stats: Record<string, number> }
@@ -131,7 +163,10 @@ export type LogEvent =
   // cancelled loading screen looks like. `secs` is -1 when the plugin could
   // not read the connection time.
   | { kind: 'signon_drop'; steamid: string; secs: number; forced: number; name: string }
-  | { kind: 'lilac_flag'; steamid: string; cheat: number; banned: boolean }
+  // `reason` is the extra fields l4d_lilac_report 0.2.0+ adds for aimbot,
+  // aimlock and bhop, straight off Little Anti-Cheat's own forwards. Absent
+  // for every other cheat and for an older plugin, which sends none of them.
+  | { kind: 'lilac_flag'; steamid: string; cheat: number; banned: boolean; reason?: LilacReason }
   // A client setting that matters for fairness, from l4d_cvarwatch.smx: once
   // per connection, only when the value is out of bounds. Only cpu_level so
   // far (0 thins smoke, fire and the boomer cloud enough to see through).
@@ -173,7 +208,16 @@ export type LogEvent =
   // CHAT line above still feeds the match chat log; these feed nothing else.
   // `team` is the game's team number: 1 spectator, 2 survivors, 3 infected.
   | { kind: 'say'; steamid: string; team: number | null; message: string }
-  | { kind: 'name'; steamid: string; event: 'connect' | 'change'; name: string };
+  | { kind: 'name'; steamid: string; event: 'connect' | 'change'; name: string }
+  // An in-game /mod call (src/modCalls.ts). `target` is a SteamID64 or one of
+  // the targetless words the plugin sends when the caller did not aim at a
+  // player. `matchId`/`ordinal`/`half`/`tMs` are the round moment, present
+  // only inside a match or a round the way PHASE fields are. `map` is the
+  // server's current map as the plugin saw it, so a call outside a match
+  // still says where it came from; null from an older plugin.
+  | { kind: 'call'; steamid: string; target: string; callerTeam: number | null; reason: ModCallReason;
+      matchId: number | null; ordinal: number | null; half: number | null; tMs: number | null;
+      via: 'game' | 'tv'; map: string | null; text: string };
 
 /** Parse `key=val key=val` pairs from the remainder of a PUG line. */
 /** The phase fields shared by PHASE and HEARTBEAT. Plugin team numbers are
@@ -201,6 +245,58 @@ function kv(parts: string[]): Record<string, string> {
 function intOf(s: string | undefined): number | null {
   if (s === undefined || !/^-?\d+$/.test(s)) return null;
   return Number(s);
+}
+
+/** Both keys or neither: a tick without the rate cannot be converted, and
+ *  the pair is optional on the round lines, so a bad reading drops the sync,
+ *  never the round. */
+function demoSyncOf(rest: Record<string, string>): { demo?: DemoSync } {
+  const tick = intOf(rest.demotick);
+  const hz = intOf(rest.hz);
+  if (tick === null || hz === null || tick < 0 || hz <= 0 || hz > 1000) return {};
+  return { demo: { tick, hz } };
+}
+
+function intRange(s: string | undefined, min: number, max: number): number | null {
+  const v = intOf(s);
+  return v === null || v < min || v > max ? null : v;
+}
+
+function floatOf(s: string | undefined): number | null {
+  if (s === undefined || !/^-?\d+(\.\d+)?$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** LilAC's degree measurements (ldelta/ltd/maxd/totd): -1 for "unknown/stale",
+ *  else a plausible reading. Anything else is refused rather than guessed at. */
+function measureOf(s: string | undefined): number | null {
+  const v = floatOf(s);
+  if (v === null) return null;
+  return v === -1 || (v >= 0 && v <= 100000) ? v : null;
+}
+
+/** Field order the plugin itself formats them in: aimbot's, then aimlock's
+ *  (maxd/totd/taps/taps1 are the two shared ones), then bhop's, then
+ *  aimlock's target trio. A reason only ever has one cheat's subset, so this
+ *  single fixed order reproduces any of the three shapes unchanged.
+ *  `lself_team` is appended LAST (round 1 fix, 2026-09-24) rather than beside
+ *  the target trio it logically belongs with, so a detail string stored by
+ *  the previous plugin version (with no lself_team) stays byte-identical to
+ *  what this order would have produced for it, and the reverse-parser in
+ *  admin/timeline/lilac.ts (which reads key=value pairs, not positions)
+ *  needs no change either way. */
+const REASON_FIELD_ORDER: (keyof LilacReason)[] = [
+  'lflags', 'ldelta', 'ltd', 'maxd', 'totd', 'taps', 'taps1',
+  'lbhops', 'ljump', 'ltarget_team', 'ltarget_class', 'ltarget_ghost', 'lself_team',
+];
+
+/** The canonical string integrity_flags.detail stores for a lilac_flag with a
+ *  reason: every field that was on the line, `key=value`, space separated, in
+ *  the order above. Built from the parsed numbers, not the original text, so
+ *  `12.30` and `12.3` store identically. */
+export function lilacReasonDetail(r: LilacReason): string {
+  return REASON_FIELD_ORDER.filter((k) => r[k] !== undefined).map((k) => `${k}=${r[k]}`).join(' ');
 }
 
 function teamOf(s: string | undefined): 'a' | 'b' | null {
@@ -323,7 +419,54 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     if (!steamid) return null;
     if (cheat === null || cheat < 0 || cheat >= LILAC_CHEAT_MAX) return null;
     if (banned !== '0' && banned !== '1') return null;
-    return { kind: 'lilac_flag', steamid, cheat, banned: banned === '1' };
+
+    // Every extra field is optional: 0.2.0+ sends a subset depending on
+    // `cheat` (aimbot/aimlock/bhop), an older plugin sends none at all, and a
+    // field that IS present but out of range rejects the whole line, same as
+    // every other rule here. Ranges are LilAC/l4d_lilac_report's own: -1 is
+    // its "unknown/stale" sentinel, never a guess.
+    const reason: LilacReason = {};
+    let hasReason = false;
+    let bad = false;
+    const setInt = (key: keyof LilacReason, min: number, max: number): void => {
+      const raw = f[key];
+      if (raw === undefined) return;
+      const v = intRange(raw, min, max);
+      if (v === null) { bad = true; return; }
+      reason[key] = v;
+      hasReason = true;
+    };
+    const setMeasure = (key: 'ldelta' | 'ltd' | 'maxd' | 'totd'): void => {
+      const raw = f[key];
+      if (raw === undefined) return;
+      const v = measureOf(raw);
+      if (v === null) { bad = true; return; }
+      reason[key] = v;
+      hasReason = true;
+    };
+    setInt('lflags', -1, 15);
+    setMeasure('ldelta');
+    setMeasure('ltd');
+    setMeasure('maxd');
+    setMeasure('totd');
+    setInt('taps', 0, 1000);
+    setInt('taps1', 0, 1000);
+    // -1 is LilAC's "unknown" sentinel here too: the plugin sends
+    // `lbhops=-1 ljump=-1` for every bhop flag until a server carries the
+    // fork's reason forward, so rejecting -1 dropped the bhop flag itself,
+    // not just its reason.
+    setInt('lbhops', -1, 1000);
+    setInt('ljump', -1, 100000);
+    setInt('ltarget_team', -1, 3);
+    setInt('ltarget_class', -1, 8);
+    setInt('ltarget_ghost', -1, 1);
+    setInt('lself_team', -1, 3);
+    if (bad) return null;
+
+    return {
+      kind: 'lilac_flag', steamid, cheat, banned: banned === '1',
+      ...(hasReason ? { reason } : {}),
+    };
   }
 
   // Client settings from l4d_cvarwatch.smx. Anchored like L4DL, and the value
@@ -410,6 +553,43 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     }
     if (head.event !== 'connect' && head.event !== 'change') return null;
     return { kind: 'name', steamid, event: head.event, name: text.slice(0, 128) };
+  }
+
+  // An in-game /mod call (src/modCalls.ts). Same treatment as PUGSAY: the
+  // details text is LAST and every other field is read from the slice before
+  // the first " text=", so nothing a player types can move the call onto
+  // another account, another target or another match. Empty text is allowed:
+  // most calls are just a reason and a name.
+  if (body.startsWith('PUGCALL ')) {
+    const at = body.indexOf(' text=');
+    if (at < 0) return null;
+    const head = kv(body.slice(0, at).split(/\s+/).slice(1));
+    const text = body.slice(at + ' text='.length);
+    const steamid = steamId64Of(head.steamid ?? '');
+    if (!steamid) return null;
+    const rawTarget = head.target ?? '';
+    const target = rawTarget === 'team' || rawTarget === 'general' || rawTarget === 'none' ? rawTarget : steamId64Of(rawTarget);
+    if (!target) return null;
+    const reason = head.reason ?? '';
+    if (!(MOD_CALL_REASONS as readonly string[]).includes(reason)) return null;
+    const via = head.via;
+    if (via !== 'game' && via !== 'tv') return null;
+    const team = intOf(head.tteam);
+    const match = intOf(head.match);
+    const ord = intOf(head.ord);
+    const half = intOf(head.half);
+    const tms = intOf(head.tms);
+    // Optional: a plugin older than the field sends none. A value that is not
+    // a plain map name is dropped rather than refusing the whole call.
+    const map = head.map !== undefined && /^[A-Za-z0-9_.-]{1,64}$/.test(head.map) ? head.map : null;
+    return {
+      kind: 'call', steamid, target, reason: reason as ModCallReason, via, map, text,
+      callerTeam: team !== null && team >= 0 && team <= 3 ? team : null,
+      matchId: match !== null && match > 0 ? match : null,
+      ordinal: ord !== null && ord >= 0 ? ord : null,
+      half: half === 1 || half === 2 ? half : null,
+      tMs: tms !== null && tms >= 0 ? tms : null,
+    };
   }
 
   // Where a client connected from. Same protection as SIGNON_DROP and for the
@@ -597,7 +777,7 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       if (rest.surv !== undefined && teamOf(rest.surv) === null) return null;
       const surv = teamOf(rest.surv);
       if (!rest.map || half === null) return null;
-      return { kind: 'round_start', token, map: rest.map, half, surv };
+      return { kind: 'round_start', token, map: rest.map, half, surv, ...demoSyncOf(rest) };
     }
     case 'ROUND_END': {
       const half = halfOf(rest.half);
@@ -618,7 +798,7 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       // averaged into a survival rate.
       const aliveRaw = intOf(rest.alive);
       const alive = aliveRaw !== null && aliveRaw >= 0 ? aliveRaw : null;
-      return { kind: 'round_end', token, map: rest.map ?? null, half, surv, score, alive };
+      return { kind: 'round_end', token, map: rest.map ?? null, half, surv, score, alive, ...demoSyncOf(rest) };
     }
     case 'EVENT': {
       const seq = intOf(rest.seq);

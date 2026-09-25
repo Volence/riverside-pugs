@@ -4,6 +4,8 @@ import { isLiveSurvivor } from './geometry.js';
 import { pickClips, trackWindows, type GateTally, type TrackWindow } from './ghostTrack.js';
 import { occupancyWithGates, type OccResult } from './occupancy.js';
 import { PriorBuilder, type PriorTable } from './aimPrior.js';
+import { hiddenMetrics, type HiddenMetrics } from './hidden.js';
+import { NO_LOS, type LosView } from './los.js';
 
 /**
  * The round-level pass: every survivor, every metric, one round.
@@ -36,6 +38,16 @@ export interface RoundMetrics {
   eligiblePairs: number;
   /** Where the frames went. The diagnosable half of "no clips". */
   gates: GateTally;
+  /** Whether this round's replay records line of sight. Optional, like every
+   *  field below: rows written by version 4 have none of them and must still
+   *  read. */
+  losKnown?: boolean;
+  /** Metric A at the best of the lag search, summed over the same scoreable
+   *  windows as `fidSum`. Stored, not ranked: it replaces the lag 0 score only
+   *  after calibration (spec section 6). */
+  fidLagSum?: number;
+  /** Metrics D, E and F. Null when the replay records no line of sight. */
+  hidden?: HiddenMetrics | null;
 }
 
 /**
@@ -99,10 +111,11 @@ function p95(xs: number[]): number {
  * contained this round.
  */
 export function analyzeRound(
-  frames: Frame[], survivorSlots: number[], prior: PriorTable | null,
-): { metrics: Map<number, RoundMetrics>; clips: Map<number, TrackWindow[]> } {
+  frames: Frame[], survivorSlots: number[], prior: PriorTable | null, los: LosView = NO_LOS,
+): { metrics: Map<number, RoundMetrics>; clips: Map<number, TrackWindow[]>; hiddenClips: Map<number, TrackWindow[]> } {
   const metrics = new Map<number, RoundMetrics>();
   const clips = new Map<number, TrackWindow[]>();
+  const hiddenClips = new Map<number, TrackWindow[]>();
 
   for (const slot of survivorSlots) {
     const windows = trackWindows(frames, slot);
@@ -110,6 +123,13 @@ export function analyzeRound(
     const { occ, gates } = occupancyWithGates(frames, slot, prior);
     const fids = windows.map((w) => w.fidelity);
     const scoreable = windows.filter((w) => w.travel >= TUNING.MIN_TRAVEL);
+    const hidden = hiddenMetrics(frames, slot, prior, los);
+    // Clips come from the same scoreable windows as fidSum/scoreable above,
+    // not every hidden window: a window under MIN_TRAVEL never contributed to
+    // the score, so it should never become a clip either, however high its
+    // lagFidelity.
+    const hiddenScoreable = hidden.windows.filter((w) => w.travel >= TUNING.MIN_TRAVEL);
+    hiddenClips.set(slot, pickClips(hiddenScoreable, (w) => w.lagFidelity));
     metrics.set(slot, {
       fidMax: fids.length ? Math.max(...fids) : 0,
       fidP95: p95(fids),
@@ -119,7 +139,10 @@ export function analyzeRound(
       occ,
       eligiblePairs: gates.passed,
       gates,
+      losKnown: los.known,
+      fidLagSum: scoreable.reduce((a, w) => a + w.lagFidelity, 0),
+      hidden: hidden.metrics,
     });
   }
-  return { metrics, clips };
+  return { metrics, clips, hiddenClips };
 }

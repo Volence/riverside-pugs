@@ -3,6 +3,7 @@ import { useLocation } from 'preact-iso';
 import { api, type StateSnapshot } from '../api';
 import { campaignName } from '../format';
 import type { Session } from '../hooks/useLiveState';
+import { hudTabFor } from './HudTabs';
 
 /** [href, label, target?].
  *
@@ -14,7 +15,10 @@ import type { Session } from '../hooks/useLiveState';
  *  otherwise land on the SPA's not-found.
  *
  *  The maps route is labelled Campaigns: that is how players refer to what it
- *  lists. The path stays /maps so nothing bookmarked breaks. */
+ *  lists. The path stays /maps so nothing bookmarked breaks.
+ *
+ *  HUD is a section: the HUD editor, the crosshair maker and the community
+ *  page share one item, and a tab strip on each page moves between them. */
 export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/', 'Play'],
   ['/live', 'Live'],
@@ -24,9 +28,16 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/balance', 'Patch notes'],
   ['/maps', 'Campaigns'],
   ['/custom-campaigns', 'Custom'],
-  ['/crosshair', 'Crosshair'],
+  ['/hud', 'HUD'],
   ['/how-to-play', 'How to play'],
 ];
+
+/** Whether a nav item is the page being shown. The HUD item stands for its
+ *  whole section, so it is current on the crosshair and community pages too. */
+function isCurrent(href: string, path: string): boolean {
+  if (href === '/hud') return hudTabFor(path) !== null;
+  return path === href;
+}
 
 export function Nav(
   { session, state, onSignedOut }: {
@@ -60,7 +71,7 @@ export function Nav(
         {NAV_LINKS.map(([href, label, target]) => (
           <a key={href} href={href} target={target}
              rel={target ? 'noopener' : undefined}
-             aria-current={path === href ? 'page' : undefined}>{label}</a>
+             aria-current={isCurrent(href, path) ? 'page' : undefined}>{label}</a>
         ))}
         {/* The ban list is a People screen inside the panel, reached through the
             link below. It had a nav entry of its own for a while, which only

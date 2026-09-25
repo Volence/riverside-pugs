@@ -11,5 +11,5 @@
     "jsxImportSource": "preact",
     "types": ["vite/client", "node"]
   },
-  "include": ["src", "../src/replayFormat.ts", "../src/mapTransform.ts", "../src/replaySessionTypes.ts"]
+  "include": ["src", "../src/replayFormat.ts", "../src/mapTransform.ts", "../src/replaySessionTypes.ts", "../src/vpkRead.ts", "../src/vpkWrite.ts", "../src/hudFiles.ts"]
 }

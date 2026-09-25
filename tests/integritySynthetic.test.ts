@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { PLAYER_SLOTS, STATE, type Frame, type PlayerSample } from '../src/replayFormat.js';
 import { TUNING } from '../src/integrity/constants.js';
 import { aimError, pitchError } from '../src/integrity/geometry.js';
-import { trackWindows } from '../src/integrity/ghostTrack.js';
+import { trackWindows, pickClips } from '../src/integrity/ghostTrack.js';
 import { busiestPair, injectTracker } from '../src/integrity/synthetic.js';
+import { losView, isSpawnedTarget } from '../src/integrity/los.js';
+import { hiddenTrackWindows } from '../src/integrity/hidden.js';
+import { header, scene as hiddenScene } from './hiddenFixtures.js';
 
 function blank(slot: number): PlayerSample {
   return { slot, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, state: 0, health: 0, temp: 0, cls: 0, weapon: 0, clip: 0, reserve: 0 };
@@ -87,5 +90,24 @@ describe('busiestPair', () => {
   it('is null when no pair was ever eligible', () => {
     const frames = scene().map((f) => ({ ...f, tMs: f.tMs - TUNING.SPAWN_GRACE_MS }));
     expect(busiestPair(frames.slice(0, 40), [0])).toBeNull();
+  });
+});
+
+describe('a synthetic wallhacker on a hidden infected', () => {
+  const LOS = losView(header());
+
+  it('is flagged when it follows the hidden hunter 150 ms late', () => {
+    // The scene's own survivor looks the other way: an honest player.
+    const honest = hiddenScene({ yaw: () => 90 });
+    expect(hiddenTrackWindows(honest, 0, LOS)).toEqual([]);
+    const cheat = injectTracker(honest, 0, 4, { lagMs: 150, noiseDeg: 0.5, noiseTauMs: 300, seed: 1 }, isSpawnedTarget);
+    const clips = pickClips(hiddenTrackWindows(cheat, 0, LOS), (w) => w.lagFidelity);
+    expect(clips.length).toBeGreaterThan(0);
+  });
+
+  it('still follows ghosts by default', () => {
+    const frames = hiddenScene({ yaw: () => 90 });
+    // No ghosts in this scene: the default leaves every frame untouched.
+    expect(injectTracker(frames, 0, 4, { lagMs: 0, noiseDeg: 0, noiseTauMs: 0, seed: 1 })).toEqual(frames);
   });
 });

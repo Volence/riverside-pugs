@@ -11,6 +11,8 @@ describe('the panel URL parser', () => {
     expect(parseAdminPath('/admin/people/review', asAdmin)).toEqual({ desk: 'people', section: 'review', param: null });
     expect(parseAdminPath('/admin/people/bans', asAdmin)).toEqual({ desk: 'people', section: 'bans', param: null });
     expect(parseAdminPath('/admin/people/tickets', asAdmin)).toEqual({ desk: 'people', section: 'tickets', param: null });
+    expect(parseAdminPath('/admin/people/calls', asMod)).toEqual({ desk: 'people', section: 'calls', param: null });
+    expect(parseAdminPath('/admin/people/calls/3', asAdmin)).toEqual({ desk: 'people', section: 'unknown', param: null });
     expect(parseAdminPath('/admin/people/tickets/12', asAdmin)).toEqual({ desk: 'people', section: 'ticket', param: '12' });
     expect(parseAdminPath('/admin/people/76561199000000001', asAdmin))
       .toEqual({ desk: 'people', section: 'file', param: '76561199000000001' });
@@ -80,7 +82,7 @@ describe('the panel URL parser', () => {
     );
     for (const url of [
       '/admin', '/admin/live', '/admin/people', '/admin/people/review', '/admin/people/bans',
-      '/admin/people/tickets', '/admin/people/tickets/12', '/admin/people/76561199000000001',
+      '/admin/people/tickets', '/admin/people/tickets/12', '/admin/people/calls', '/admin/people/76561199000000001',
       '/admin/setup', '/admin/setup/settings', '/admin/setup/audit',
       '/admin/balance', '/admin/balance/patches',
     ]) expect(matched(url), url).toBe(true);

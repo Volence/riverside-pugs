@@ -44,7 +44,8 @@ describe('ROUND_END parity between plugin and parser', () => {
   it('parses a line built from the plugin format with real values', () => {
     // Substitutes the printf placeholders in order, so this exercises the
     // actual emitted shape rather than a hand-copied imitation of it.
-    const values = ['l4d_vs_hospital01_apartment', '2', 'b', '412', '3'];
+    // The trailing %s is DemoTickArgs, the optional demo sync.
+    const values = ['l4d_vs_hospital01_apartment', '2', 'b', '412', '3', ' demotick=4100 hz=100'];
     let i = 0;
     const body = fmt.replace(/%[sd]/g, () => values[i++]);
     const token = 'a'.repeat(32);
@@ -53,6 +54,7 @@ describe('ROUND_END parity between plugin and parser', () => {
       `\xff\xff\xff\xffRL 08/29/2026 - 15:29:00: PUG ${token} ${body}\n\x00`, 'binary'));
     expect(ev).toMatchObject({
       kind: 'round_end', map: 'l4d_vs_hospital01_apartment', half: 2, surv: 'b', score: 412, alive: 3,
+      demo: { tick: 4100, hz: 100 },
     });
   });
 });

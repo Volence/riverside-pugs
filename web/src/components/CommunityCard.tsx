@@ -1,0 +1,260 @@
+import { useEffect, useRef, useState } from 'preact/hooks';
+import type { ComponentChildren } from 'preact';
+import { communityApi, ApiError, type CommunityEntry, type CommunityEntryDetail } from '../api';
+import type { Session } from '../hooks/useLiveState';
+import { PlayerLink } from './bits';
+import { ReportPlayer } from './ReportPlayer';
+import { confirm } from './Confirm';
+import { CROSSHAIR_BACKDROP, PX_AT_1080, drawBackdrop, gameBackdropImage } from '../crosshair/draw';
+import { drawArt, readArt } from '../crosshair/model';
+import { SidePreviews } from './SidePreviews';
+
+/**
+ * One shared HUD or crosshair: the gallery's card, the entry page's larger
+ * one, and (compact) the profile's.
+ *
+ * Everything the author typed (title, description, their name) renders as
+ * Preact text, never HTML. Image and file URLs come from the server, built
+ * from ids and hex hashes it validated; the page never builds one out of
+ * anything the author typed.
+ */
+
+const BASE_LABEL: Record<string, string> = { stock: 'Stock', modern: 'Riverside Modern' };
+const baseBadge = (e: CommunityEntry) =>
+  e.preset === 'imported' ? `Imported: ${e.importName ?? 'a HUD'}` : BASE_LABEL[e.preset ?? ''] ?? null;
+
+/** The crosshair square: 96 pixels, drawn as the maker's zoom draws it, over the maker's default in-game shot. */
+const XHAIR_PX = 96;
+/** The square the crosshair fills, at 1.5 times its size on a 1080p screen, so a small one still reads. */
+const XHAIR_SQUARE = 88;
+/** That 1.5, as pixels per 1080p screen pixel: the shot is drawn at the same scale as the crosshair. */
+const XHAIR_K = XHAIR_SQUARE / PX_AT_1080;
+
+function CrosshairSwatch({ art: raw, title }: { art: unknown; title: string }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const ctx = canvas.current?.getContext('2d');
+    if (!ctx) return undefined;
+    const art = readArt(raw);
+    let live = true;
+    let img: CanvasImageSource | null = null;
+    // The shot is loaded once per page, on the first card; until it is in
+    // (or if it never loads) the card draws on the drawn saferoom.
+    const paint = () => {
+      if (!live) return;
+      const shot = gameBackdropImage(CROSSHAIR_BACKDROP, paint);
+      drawBackdrop(ctx, XHAIR_PX, XHAIR_PX, shot ? CROSSHAIR_BACKDROP : 'scene', null, null, undefined, XHAIR_K);
+      if (art) drawArt(ctx, XHAIR_PX / 2, XHAIR_PX / 2, XHAIR_SQUARE, art, img);
+    };
+    paint();
+    if (art?.kind === 'image') {
+      const pic = new Image();
+      pic.onload = () => { img = pic; paint(); };
+      pic.src = art.png;
+    }
+    return () => { live = false; };
+  }, [raw]);
+  return <canvas ref={canvas} class="ccard__xhair" width={XHAIR_PX} height={XHAIR_PX} role="img" aria-label={`The crosshair ${title}`} />;
+}
+
+function Likes({ entry, session }: { entry: CommunityEntry; session: Session }) {
+  const [likes, setLikes] = useState({ n: entry.likes, mine: entry.likedByMe });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { setLikes({ n: entry.likes, mine: entry.likedByMe }); }, [entry.id, entry.likes, entry.likedByMe]);
+  const count = `${likes.n} ${likes.n === 1 ? 'like' : 'likes'}`;
+  const own = session.kind !== 'loading' && session.kind !== 'anonymous' && session.me.steamid === entry.author.steamid;
+  if (own) return <span class="ccard__likes muted">{count}</span>;
+  const active = session.kind === 'active';
+  const title = active ? undefined : session.kind === 'pending' ? 'Your account is not active yet' : 'Sign in to like';
+  const toggle = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = likes.mine ? await communityApi.unlike(entry.id) : await communityApi.like(entry.id);
+      setLikes({ n: r.likes, mine: r.likedByMe });
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Could not save that like.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span class="ccard__likes">
+      <button type="button" class={`chip ccard__like${likes.mine ? ' is-on' : ''}`} disabled={!active || busy} title={title}
+        aria-pressed={likes.mine} onClick={toggle}>
+        {likes.mine ? `Liked, ${likes.n}` : `Like, ${likes.n}`}
+      </button>
+      {err && <span class="error"> {err}</span>}
+    </span>
+  );
+}
+
+/** Staff take-down: a reason, then the tombstone. The reason is what the author sees. */
+function RemoveEntry({ entry, onGone }: { entry: CommunityEntry; onGone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  if (!open) return <button class="chip" type="button" onClick={() => setOpen(true)}>Remove</button>;
+  const submit = async (e: Event) => {
+    e.preventDefault();
+    setBusy(true);
+    setErr(null);
+    try {
+      await communityApi.remove(entry.id, reason.trim());
+      onGone();
+    } catch (x) {
+      setErr(x instanceof ApiError ? x.message : 'Could not remove it.');
+      setBusy(false);
+    }
+  };
+  return (
+    <form class="ccard__remove" onSubmit={submit}>
+      <input type="text" maxLength={200} value={reason} aria-label="Reason for removal"
+        placeholder="Why (the author is shown this)" onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
+      <button class="btn btn--danger" type="submit" disabled={busy || !reason.trim()}>Remove entry</button>
+      <button class="chip" type="button" onClick={() => setOpen(false)}>Cancel</button>
+      {err && <p class="error">{err}</p>}
+    </form>
+  );
+}
+
+export function CommunityCard(
+  { entry, session, size = 'card' }: {
+    entry: CommunityEntry | CommunityEntryDetail;
+    session: Session;
+    /** card: the gallery. large: the entry page. compact: the profile's panel, a link and little else. */
+    size?: 'card' | 'large' | 'compact';
+  },
+) {
+  const [gone, setGone] = useState<string | null>(null);
+  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const isHud = entry.kind === 'hud';
+  const noun = isHud ? 'HUD' : 'crosshair';
+  const viewer = session.kind === 'active' || session.kind === 'pending' ? session.me : null;
+  const own = viewer?.steamid === entry.author.steamid;
+  const staff = session.kind === 'active' && (session.me.isAdmin || session.me.isMod === true);
+  const href = `/community/${entry.id}`;
+  const badge = isHud ? baseBadge(entry) : null;
+  // A removed entry reaches the page only for staff, as evidence: shown, never
+  // opened, downloaded or liked, so a take-down never lands in a browser.
+  const removed = 'removed' in entry && !!entry.removed;
+
+  // The build code is most of the HUD editor, so it loads on the first
+  // Download, never with the gallery. A HUD needs its design, which the
+  // list leaves out.
+  const download = async () => {
+    setBusy(true);
+    setStatus(null);
+    try {
+      const m = await import('../community/download');
+      const out = isHud
+        ? await m.downloadCommunityHud('design' in entry && entry.design !== undefined ? entry : await communityApi.get(entry.id))
+        : await m.downloadCommunityCrosshair(entry);
+      setStatus({ ok: true, text: `Saved ${out.filename}. Put it in left4dead/addons/ and restart the game.` });
+    } catch (e) {
+      setStatus({ ok: false, text: e instanceof ApiError && e.status === 404 ? 'This entry was removed.' : (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const del = async () => {
+    if (!await confirm({ title: `Delete your shared ${noun}?`, body: 'It leaves the community page at once. Likes on it are lost.', confirmLabel: 'Delete', danger: true })) return;
+    try {
+      await communityApi.delete(entry.id);
+      setGone('Deleted.');
+    } catch (e) {
+      setStatus({ ok: false, text: e instanceof ApiError ? e.message : 'Could not delete it.' });
+    }
+  };
+
+  if (gone) {
+    return <article class={`ccard ccard--${size} ccard--gone`}><p class="muted">{gone}</p></article>;
+  }
+
+  /** The picture box, with `over` laid on it; a HUD's has the side toggle under it. */
+  const shotBox = (over?: ComponentChildren, toggle = true) => (isHud && entry.previewUrl
+    ? (
+      <SidePreviews
+        survivor={entry.previewUrl}
+        infected={toggle ? entry.previewInfectedUrl : null}
+        alt={`Preview of ${entry.title}`} lazy shotClass="ccard__shot"
+        imgClass={`ccard__preview ccard__preview--${(entry.aspect ?? '16:9').replace(':', 'x')}`}
+      >
+        {over}
+      </SidePreviews>
+    )
+    : (
+      <div class="ccard__shot">
+        {isHud ? <div class="ccard__nopreview" /> : <CrosshairSwatch art={entry.art} title={entry.title} />}
+        {over}
+      </div>
+    ));
+
+  if (size === 'compact') {
+    return (
+      <a class="ccard ccard--compact" href={href}>
+        {/* A profile's compact card is a link as a whole, so no buttons inside it: the survivor side only. */}
+        {shotBox(null, false)}
+        <div class="ccard__body">
+          <span class="ccard__kind">{isHud ? 'HUD' : 'Crosshair'}</span>
+          <span class="ccard__title">{entry.title}</span>
+        </div>
+      </a>
+    );
+  }
+
+  return (
+    <article class={`ccard ccard--${size}`}>
+      {shotBox(
+        <>
+          {badge && <span class="ccard__badge">{badge}</span>}
+          {isHud && entry.advanced && <span class="ccard__badge ccard__badge--adv">Advanced install</span>}
+        </>,
+      )}
+      <div class="ccard__body">
+        {size === 'large'
+          ? <h2 class="ccard__title">{entry.title}</h2>
+          : <h3 class="ccard__title"><a href={href}>{entry.title}</a></h3>}
+        {entry.description && <p class="ccard__desc">{entry.description}</p>}
+        <div class="ccard__who">
+          {entry.author.avatar
+            ? <img class="ccard__avatar" src={entry.author.avatar} alt="" loading="lazy" />
+            : <span class="ccard__avatar ccard__avatar--blank" />}
+          <PlayerLink steamid={entry.author.steamid} name={entry.author.name} />
+          {removed
+            ? <span class="ccard__likes muted">{`${entry.likes} ${entry.likes === 1 ? 'like' : 'likes'}`}</span>
+            : <Likes entry={entry} session={session} />}
+        </div>
+        {!removed && <div class="ccard__actions">
+          {isHud ? (
+            <>
+              <a class="btn btn--sm" href={`/hud?community=${entry.id}`}>Open in the HUD editor</a>
+              <button class="btn btn--ghost btn--sm" type="button" disabled={busy} onClick={download}>Download</button>
+            </>
+          ) : (
+            <>
+              <button class="btn btn--sm" type="button" disabled={busy} onClick={download}>Download .vpk</button>
+              <a class="btn btn--ghost btn--sm" href={`/crosshair?community=${entry.id}`}>Open in the crosshair maker</a>
+              <a class="btn btn--ghost btn--sm" href={`/hud?xhair=${entry.id}`}>Use in my HUD</a>
+            </>
+          )}
+        </div>}
+        {status && <p class={status.ok ? 'muted ccard__status' : 'error ccard__status'}>{status.text}</p>}
+        {(session.kind === 'active' && !own) || staff || own ? (
+          <div class="ccard__mod">
+            {session.kind === 'active' && !own && (
+              <ReportPlayer target={{ steamid: entry.author.steamid, name: entry.author.name }}
+                entry={{ id: entry.id, kind: entry.kind, title: entry.title }} />
+            )}
+            {own && <button class="chip" type="button" onClick={del}>Delete</button>}
+            {staff && !own && <RemoveEntry entry={entry} onGone={() => setGone('Removed.')} />}
+          </div>
+        ) : null}
+      </div>
+    </article>
+  );
+}

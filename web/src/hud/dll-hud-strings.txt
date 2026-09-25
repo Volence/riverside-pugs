@@ -1,0 +1,1918 @@
+# client.dll md5 9be2860914a3e33cce82b91473148459
+# strings -a -n 3 client.dll | grep -i -C 30 -E 'resource/ui/hud/|LocalPlayerPanel|TeammatePanel|HealthPanel|CircularProgressBar|CHudAbilityTimer|CHudTerrorCrosshair|ZombieTeamDisplay|FrustrationBar|CHudGhostPanel|CHudZombiePanel|bgcolor_override|SpectatorInfected|HudVoiceSelfStatus'
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+DebugOverlay
+m_FontSmall
+m_FontMedium
+m_FontBig
+TitleFont
+HudPredictionDump
+fov %f
+screenshot
+_fov
+Automates fov command to server.
+CHudVehicle
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+HudVehicle
+CHudVoiceSelfStatus
+voice_self
+CHudVoiceStatus
+CHudTeamDisplay
+voice_player
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+HudVoiceSelfStatus
+#Voice_UseLocation
+/Csv_alltalk
+m_NameFont
+text_font
+item_tall
+item_wide
+item_spacing
+icon_tall
+icon_wide
+m_isInverted
+inverted
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+HudVoiceStatus
+CHudWeapon
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+--
+m_fireY[0]
+m_fireX
+m_fireX[0]
+C_Inferno::SynchronizeDrawables
+Magic
+Csprites/fire1.vmt
+C_Inferno::DrawModel
+DeadRun
+Pw"
+Pf"
+0s"
+Ps"
+pt"
+C_Inferno::ClientThink
+inferno_dlight_spacing
+Inferno dlights are at least this far apart
+inferno_dlights
+Min FPS at which molotov dlights will be created
+inferno_particles
+inferno_fire
+CInferno
+BloodyHands
+ z"
+BurnLevel
+ScreenSpaceBurnLevel
+BBQLevel
+0}"
+p}"
+PlayerTeam
+ZombiePlayerClass
+?CHudAbilityTimer
+Resource/UI/HUD/AbilityTimerHud.res
+127 127 127 255
+m_abilitySurpressed
+ability_surpressed_color
+m_abilityCharging
+ability_charging_color
+m_abilityReady
+ability_ready_color
+Progress
+AbilityImage
+BackgroundImage
+`')
+Pu(
+`))
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+CHudFinaleMeter
+finale_rush
+rushes
+Pu(
+pv(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+Resource/UI/HUD/FinaleMeter.res
+RescueBar
+`')
+Pu(
+`))
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+HudFinaleMeter
+BrightGray
+TransparentLightBlack
+?CFrustrationMeterBarPanel
+CHudFrustrationMeter
+Resource/UI/HUD/FrustrationMeter.res
+m_bEastAligned
+east_aligned
+Pu(
+pv(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+FrustrationBar
+`')
+Pu(
+`))
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+HudFrustrationMeter
+z_frustration_blink_percent
+z_frustration_blink_rate
+?ProgressBarPanel
+CHudProgressBar
+.\Terror\HUD\HealingProgressBar.cpp
+AwardIcon
+Resource/UI/HUD/ProgressBar.res
+icon_healing
+#L4D_progress_heal
+#L4D_progress_heal_friend
+#L4D_progress_healing_target
+#L4D_progress_being_healed
+#L4D_progress_reviving_player
+#L4D_progress_being_revived
+#L4D_progress_being_helped_up
+icon_reviving
+Subtext
+BarLabel
+#L4D_progress_reviving_friend
+#L4D_progress_helping_friend_up
+m_borderColor
+border_color
+m_fillColor
+fill_color
+ProgressBar.BgColor
+m_emptyColor
+empty_color
+shadow_color
+m_gap
+gap
+m_borderThickness
+border_thickness
+m_shadowThickness
+shadow_thickness
+Pu(
+pv(
+pW(
+--
+P_(
+ p(
+@|(
+Bar
+`')
+Pu(
+`))
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+HudProgressBar
+cl_drawprogressbar
+Draw progress bar when healing
+HealthPanel
+>m_monochromeColor
+monochrome_color
+m_inset
+inset
+vgui/hud/s_healthbar_outline
+vgui/healthbar_grey
+vgui/healthbar_white
+`')
+Pu(
+`))
+pv(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+cl_temp_health_pulse_rate
+2.5
+temp health pulses this many times per second
+cl_temp_health_pulse_incap
+incap health pulses in the same fashion as temp health
+cl_temp_health_fade
+temp health fades top to bottom
+?CHudHoldoutTimer
+PrecacheHoldoutSounds
+Holdout.team_record
+Holdout.player_record
+Holdout.medal
+Holdout.countdown
+GoalImage
+Timer
+TargetTransition
+TargetTimeDigits
+CurrentTimeDigits
+Resource/UI/HUD/HudHoldoutTimer.res
+player_connect_full
+FlashCurrentTime
+TargetTimeTransition
+icon_team_record_small
+Holdout.%s
+Missing holdout target timer element
+NextGoalDescriptor
+#L4D_HoldoutTimer_DescriptionFmt
+#L4D_HoldoutTimer_Description_TeamRecord
+#L4D_HoldoutTimer_Description_Bronze
+#L4D_HoldoutTimer_Description_Silver
+#L4D_HoldoutTimer_Description_Gold
+RecordTimeTransition
+player_record
+team_record
+#L4D_HoldoutTimer_YourBest
+#L4D_HoldoutTimer_TeamBest
+m_nTimerYPosAlive
+TimerYPosAlive
+m_nTimerYPosDead
+TimerYPosDead
+m_nTargetTransitionXOffset
+TargetTransitionXOffset
+m_nTargetTransitionYOffset
+TargetTransitionYOffset
+`')
+Pu(
+`))
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+HudHoldoutTimer
+hud_holdout_target_time_range
+?CHudInfectedVOIP
+voice_teammate
+Resource/UI/HUD/InfectedVOIP.res
+../vgui/s_panel_dead
+../vgui/pz_panel_smoker
+../vgui/pz_panel_boomer
+../vgui/pz_panel_hunter
+../vgui/pz_panel_hulk
+MenuSubTitle
+m_hPlayerNameFontSmall
+player_name_font_small
+Avatar
+`')
+Pu(
+`))
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+HudInfectedVOIP
+?CHudIntensityGraph
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+HudIntensityGraph
+s_panel_teenangst
+s_panel_manager
+s_panel_biker
+s_panel_namvet
+director_show_intensity
+director_intensity_threshold
+?CItemPickupPanel
+ammo_pickup
+weapon_pickup
+CleanupItemPickup
+Resource/UI/HUD/ItemPickup.res
+icon_pistol
+icon_molotov
+icon_pipebomb
+icon_painpills
+StartItemPickup%d
+pickup
+icon_ammo
+.\Terror\HUD\ItemPickup.cpp
+weaponslot
+weaponid
+context
+image%d
+`')
+Pu(
+`))
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+--
+@/)
+P')
+P#)
+ $)
+HudLeavingAreaWarning
+Warning
+?CHudLocalPlayerDisplay
+`')
+Pu(
+`))
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+Resource/UI/HUD/LocalPlayerDisplay.res
+subjectentid
+PlayerPanelDeleted
+pDeletedPanel
+LocalPlayer
+PrecacheLocatorTarget
+vgui/hud/icon_arrow_plain
+vgui/hud/icon_arrow_down
+vgui/hud/icon_arrow_up
+vgui/hud/icon_arrow_right
+vgui/hud/icon_arrow_left
+CLocatorPanel
+resource/UI/Locator.res
+LocatorBG
+#GameUI_Icons_%s
+SEMICOLON
+Locator Panel has no free targets!
+caption_color format incorrect. RRR,GGG,BBB expected.
+icon_key_generic
+F12
+F11
+F10
+PAUSE
+PGDN
+PGUP
+END
+HOME
+DEL
+INS
+icon_key_right
+RIGHTARROW
+--
+ a*
+ Z*
+pZ*
+P[*
+0i*
+`^*
+VisibleHotspot
+Hotspot
+#L4D_GoldMedalEarned
+#L4D_SilverMedalEarned
+#L4D_BronzeMedalEarned
+#L4D_OnAwardMedic
+#L4D_OnAwardRescuer
+#L4D_OnAwardProtector
+#L4D_OnAwardSharing
+#L4D_OnAwardSaved
+#L4D_INCAPACITATE_ASSIST
+#L4D_HIT_POUNCE_ATTACK
+#L4D_HIT_PUSH_ATTACK
+#L4D_HIT_PUSH_ASSIST_ATTACK
+#L4D_HIT_ATTACK
+#L4D_HIT_ASSIST_ATTACK
+#L4D_HIT_ASSIST
+#L4D_INCAPACITATE
+#L4D_KILLED
+?CFloatingAchievementNumber
+CHudPZDamageRecordPanel
+label_textalign
+label4background
+recordlabel%d
+Resource/UI/HUD/PZDamageRecordPanel.res
+CHudVote
+`')
+ 7#
+P7#
+Pu(
+`))
+P4#
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+resource/UI/HudAchievementFloatingNumber.res
+@G#
+PO#
+--
+pb*
+pa*
+0[*
+`j*
+ a*
+ Z*
+pZ*
+P[*
+0i*
+`^*
+Rosetta.ArmedFont
+Rosetta.DefaultFont
+Rosetta.DrawBorder
+Rosetta.DisabledFgColor
+Rosetta.DisabledBgColor
+Rosetta.ArmedBgColor
+Rosetta.DefaultFgColor
+Rosetta.DefaultBgColor
+MouseMenu.rollover
+SubmenuHotspot
+PolygonButton
+cl_fastradial
+If 1, releasing the button on a radial menu executes the highlighted button
+cl_rosetta_debug
+cl_rosetta_line_inner_radius
+cl_rosetta_line_outer_radius
+Opens a radial menu
++mouse_menu
+Opens a menu while held
+Executes the highlighted button on the radial menu (if cl_fastradial is 1)
+?CHudGhostPanel
+resource/UI/HudGhostPanel.res
+KeyChanged
+PZ.Hud.BadPlace
+#L4D_Zombie_UI_Wait_For_Stampede
+#L4D_Zombie_UI_Survivor_Escaped
+#L4D_Zombie_UI_Wait_For_Tank
+#L4D_Zombie_UI_Wait_For_Finale
+#L4D_Zombie_UI_Wait_For_Safe_Area
+#L4D_Zombie_UI_Director_TimeOut
+#L4D_Zombie_UI_Spawn_Disabled
+#L4D_spawn_select_mode_in_sight
+#L4D_Zombie_UI_BadPlace
+#L4D_spawn_select_mode_too_close
+#L4D_spawn_select_mode_inside_entity
+#L4D_spawn_select_mode_restricted_area
+PZ.Hud.Action
+ready
+#L4D_Zombie_UI_Action
+tip_smoker
+#L4D_spawn_select_mode_class_SMOKER
+tip_hunter
+#L4D_spawn_select_mode_class_HUNTER
+tip_boomer
+#L4D_spawn_select_mode_class_BOOMER
+.\Terror\HUD\SpawnLegend.cpp
+m_clrWhite
+WhiteText
+m_clrRed
+RedText
+m_iPadding
+--
+#L4D_InMemoryOf
+#L4D_Scenario_Finale_Won
+L4D360UI_Loading_As_Zoey
+L4D360UI_Loading_As_Louis
+L4D360UI_Loading_As_Francis
+L4D360UI_Loading_As_Bill
+#L4D360UI_Loading_As_Himself
+#L4D360UI_Loading_As_Herself
+#L4D360UI_Survivors
+statblock
+#L4D_Stat_Tagline
+statline
+OuttroTemplate
+Params
+StatsCrawlScript
+credits.txt
+scripts/stats_crawl.txt
+votes
+StatsCrawl
+cl_showing_stats_crawl
+?CTargetID
+TargetIDNormal
+CPlayerLabel
+TargetIDLabel
+TargetID
+UseDowngrade
+UseUpgrade
+Hostage_yellow
+CT_Blue
+T_Red
+Resource/UI/HUD/TargetID.res
+L4D_Scoreboard_Idle
+TargetIDReviveProgress
+ %0.0f 
+OPAQUE
+MASK_NPCSOLID
+TONGUE_TRAVELING_MASK
+TONGUE_MAINTAINING_MASK
+TONGUE_TARGETING_MASK
+MASK_SURVIVORSOLID
+@p@Gray
+m_normalFgColor
+normal_fgcolor
+m_normalBgColor
+normal_bgcolor
+m_downgradeFgColor
+downgrade_fgcolor
+m_downgradeBgColor
+downgrade_bgcolor
+`')
+Pu(
+`))
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+--
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+PlayerLabel
+hud_showtargetid
+hud_targetid_rangefinder
+shows range for different masks
+hud_targetid_player_view_cone
+0.92
+View cone for survivors seeing names of other survivors
+hud_targetid_pz_ss_view_cone
+View cone for seeing player names as a PZ in splitscreen
+hud_targetid_health
+hud_targetid_skill
+hud_targetid_upgrades
+hud_targetid_name_height
+Player names are this many inches over player eye positions
+hud_targetid_name_height_boomer
+hud_targetid_name_height_tank
+hud_targetid_name_height_smoker
+hud_targetid_name_height_hunter
+?Resource/UI/HUD/TeamDisplayHud.res
+Resource/UI/HUD/TeamDisplayHud_Vertical.res
+left_survivor_only
+TeamPlayer%d
+`')
+Pu(
+`))
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+terror_reload_team_display
+Reload team display
+terror_test_hud_glow
+Tests hud glow
+hud/healthbar_bg_4
+hud/healthbar_bg_3
+hud/healthbar_bg_2
+hud/healthbar_bg_1
+?TeamDisplayPlayer
+CTeammateVoicePanel
+resource/UI/HUD/TeammatePanel.res
+resource/UI/HUD/LocalPlayerPanel.res
+../vgui/s_panel_teenangst
+../vgui/s_panel_manager
+../vgui/s_panel_biker
+../vgui/s_panel_namvet
+../vgui/s_panel_teenangst_incap
+../vgui/s_panel_manager_incap
+../vgui/s_panel_biker_incap
+../vgui/s_panel_namvet_incap
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+Voice
+Items
+HealthNumber
+HealthIcon
+HealthbarTextureBottom
+HealthbarTextureTop
+MediumGray
+Incapacitated
+DuckingIcon
+Status
+#L4D_Scoreboard_Idle
+Hint.BigReward
+#L4D_Scoreboard_s_Loading
+`')
+Pu(
+`))
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+spec_portraits
+teamwork_event_fade_in_time
+teamwork_event_fade_out_time
+teamwork_event_display_time
+8.0
+teamwork_event_min_interval
+TeammatePanel
+LocalPlayerPanel
+?CHudTeamMateInPerilNotice
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+player_ledge_grab
+#L4D_teammate_is_in_peril_use_word
+#L4D_teammate_is_in_peril_use
+lblPerilButton
+lblPerilMessage
+#L4D_teammate_is_in_peril
+peril_notice_timer
+?CHudTerrorCrosshair
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+PZ_crosshair_open
+HUD/PZ_charge_crosshair
+m_abilitySize
+ability_size
+255 0 0 255
+m_abilityShouldAttack
+ability_attack_color
+12 206 206 255
+m_abilityShouldAttack_ColorBlind
+ability_attack_color_colorblind
+AbilityProgress
+z_gun_swing_crosshair_mode
+?CTerrorSpectatorGUI
+CTerrorViewportPanel
+ '$
+ I%
+`\)
+`')
+Pu(
+`))
+`W)
+--
+pE)
+p\)
+0Z)
+0I)
+@R)
+ O)
+pN)
+``)
+death
+DeathPanelClose
+Survivor%d
+resource/UI/TransitionStatsSurvivorPlayer.res
+#L4D_Scenario_Survivors_Dead
+#L4D_Instructor_notify_awaiting_rescue
+#L4D_Scenario_Finale_Death_Message
+rescuemsg
+#L4D_Scoreboard_Bot
+hasMolotov
+hasPipeBomb
+hasPainPills
+hasFirstAid
+isIT
+isAlive
+isIncapacitated
+isGoingToDie
+maxhealth
+healthbuffer
+RescueMessage
+SpectatorTarget
+Resource/UI/SpectatorSurvivor.res
+Resource/UI/SpectatorInfected.res
+#L4D_pz_spawn_spawning
+#L4D_pz_spawn_countdown_single
+L4D_pz_spawn_countdown
+L4D_pz_scrimmage_wait
+#L4D_pz_waiting_for_survivors
+#L4D_pz_survivors_escaped
+#L4D_pz_finale_wave
+#L4D_pz_finale_setup
+Spawning has been disabled...
+InfectedState
+#L4D_pz_tank_battle
+Countdown
+Seconds_2
+Seconds_1
+DeathMessage
+SkullIcon
+p8$
+Pu(
+05$
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+`7$
+`?$
+Pe$
+--
+Player.WeaponSelectionMoveSlot
+?CHudZombieHealth
+`')
+0j$
+`j$
+pj$
+Pu(
+`))
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+HudZombieHealth
+.\Terror\HUD\ZombieHealth.cpp
+Resource/UI/HUD/HunterHealth.res
+Resource/UI/HUD/BoomerHealth.res
+Resource/UI/HUD/SmokerHealth.res
+Resource/UI/HUD/ZombieHealthLeft_Small.res
+Resource/UI/HUD/ZombieHealthLeft_Large.res
+?CHudZombiePanel
+TooFarText
+tip_crouch
+SurvivorsImage
+tip_tank_incap
+TankImage
+resource/UI/ZombiePanel.res
+#L4D_tank_take_control_tip
+#L4D_tank_take_control
+tanktext
+#L4D_tank_is_becoming
+tanktitle
+#L4D_tank_awoken
+.\Terror\HUD\ZombiePanel.cpp
+UseBind
+TooFarFromSurvivors
+TankTakeover
+`')
+Pu(
+`))
+Pn$
+pW(
+0X(
+@o$
+ "(
+`"(
+`X(
+P_(
+0p$
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+debug_zombie_panel
+-1 = Too Far 1 = Tank 2 = Someone else tank
+?CHudZombieTeamDisplay
+`')
+p{$
+0{$
+Pu(
+`))
+pv(
+pW(
+0X(
+pz$
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+.\Terror\HUD\ZombieTeamDisplay.cpp
+m_iHorizPanelSpacing
+HorizPanelSpacing
+ZombieTeamDisplayPlayer
+hud_zombieteam_showself
+Show your own status in the zombie team display
+?CHudZombieTeamDisplayPlayer
+`')
+Pu(
+`))
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+PlayerImage
+SkullIconPlacement
+SpawnTimeLabel
+NameLabel
+hud/ZombieTeamImage_Hunter
+icon_skull
+resource/UI/HUD/ZombieTeamDisplayPlayer.res
+hud/ZombieTeamImage_Tank
+hud/ZombieTeamImage_Smoker
+hud/ZombieTeamImage_Boomer
+hud/GhostTeamImage_Tank
+hud/GhostTeamImage_Hunter
+hud/GhostTeamImage_Smoker
+hud/GhostTeamImage_Boomer
+hud_zombieteam
+Show infected team status on the HUD
+?CPersonalStatsSummaryPanel
+`')
+Pu(
+`))
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+--
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+0%)
+p%)
+0@+
+`*)
+`+)
+`,)
+0,)
+0*)
+@/)
+P')
+P#)
+ $)
+Survivor%dEntry
+holdout_shutting_down
+Resource/UI/HoldoutModeShutdown.res
+TankKillsDigits
+BoomerKillsDigits
+SmokerKillsDigits
+HunterKillsDigits
+CommonKillsDigits
+FinalTimeDigits
+%02d:%02d.%02d
+Resource/UI/HoldoutModeScoreboard.res
+VoteBarPanel
+Resource/UI/HUD/VoteHud.res
+Vote No
+Vote Yes
+.\hud_vote.cpp
+HideVoteBackgrounds
+PulseNoVote
+PulseYesVote
+#L4d_vote_no_transition_vote
+FailedReason
+#L4d_vote_no_vote_spam
+vote_ended
+passedresult
+NoPCLabel
+#L4D_vote_no_pc_instruction
+YesPCLabel
+#L4D_vote_yes_pc_instruction
+voteissue
+m_iBoxSize
+box_size
+m_iSpacer
+spacer
+m_iBoxInset
+box_inset
+vgui/hud/vote_yes
+m_nYesTextureId
+yes_texture
+vgui/hud/vote_no
+m_nNoTextureId
+no_texture
+Pu(
+pv(
+--
+tabPosition
+visible
+pin_to_sibling_corner
+pin_corner_to_sibling
+pin_to_sibling
+tall
+wide
+f%d
+zpos
+tooltiptext
+c%d
+r%d
+ControlName
+selfDroppable
+DropContext
+m_flAlpha
+m_nPaintBackgroundType
+PaintBackgroundType
+vgui/hud/800corner1
+m_nBgTextureId1
+Texture1
+vgui/hud/800corner2
+m_nBgTextureId2
+Texture2
+vgui/hud/800corner3
+m_nBgTextureId3
+Texture3
+vgui/hud/800corner4
+m_nBgTextureId4
+Texture4
+bgcolor_override
+fgcolor_override
+screeny
+screenx
+DragDrop
+Can't add Keybindings Context for unnamed panels
+Pu(
+pv(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+DragDrop.DropFrame
+DragDrop.DragFrame
+paintborder
+paintbackground
+IgnoreScheme
+navRight
+navLeft
+navDown
+navUp
+usetitlesafe
+proportionalToParent
+CPanelMessageMapDictionary::m_PanelMessageMapPool
+CPanelKeyBindingMapDictionary::m_PanelKeyBindingMapPool
+Already have converter for type %s, ignoring...
+proportional_ypos
+--
+`h,
+`h,
+pW(
+0X(
+pm*
+ "(
+`"(
+0Y*
+PY*
+`X(
+P_(
+ p(
+@|(
+``*
+ b*
+pb*
+pa*
+0[*
+`j*
+ a*
+ Z*
+pZ*
+P[*
+`^*
+FrameSystemButton.DisabledIcon
+FrameSystemButton.Icon
+FrameSystemButton.BgColor
+FrameSystemButton.FgColor
+titlebardisabledfgcolor_override
+titlebarfgcolor_override
+titlebardisabledbgcolor_override
+titlebarbgcolor_override
+outoffocus_bgcolor_override
+infocus_bgcolor_override
+frame_menu
+frame_close
+frame_mintosystray
+frame_maximize
+frame_minimize
+frame_caption
+frame_brGrip
+frame_blGrip
+frame_trGrip
+frame_tlGrip
+frame_rightGrip
+frame_leftGrip
+frame_bottomGrip
+frame_topGrip
+#Frame_Untitled
+ComboBox
+Pu(
+`w)
+0k*
+0^*
+`h,
+`h,
+pW(
+0X(
+pm*
+@d*
+ "(
+`"(
+0Y*
+PY*
+--
+#TextEntry_ReplaceText
+TextEntry.FocusEdgeColor
+TextEntry.OutOfFocusSelectedBgColor
+TextEntry.SelectedBgColor
+TextEntry.SelectedTextColor
+TextEntry.DisabledBgColor
+TextEntry.DisabledTextColor
+TextEntry.CursorColor
+TextEntry.BgColor
+TextEntry.TextColor
+TextNewLine
+Resource\warning.wav
+P.O
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+DoSentenceModeChanged
+DoCompositionString
+DoShowIMECandidates
+DoHideIMECandidates
+DoUpdateIMECandidates
+defaultSelectionBG2Color_override
+selectionTextColor_override
+selectionColor_override
+disabledBgColor_override
+disabledFgColor_override
+ASlider
+SliderDragStart
+SliderDragEnd
+Slider.DisabledTextColor2
+Slider.DisabledTextColor1
+Slider.TrackColor
+Slider.TextColor
+Slider.NobColor
+rightText
+leftText
+thumbwidth
+%s, string leftText, string rightText
+d.O
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+ToolTipBorder
+Tooltip.TextColor
+Tooltip.BgColor
+tooltip
+PanelListPanel
+ListPanel.BgColor
+PanelListEmbedded
+--
+0[*
+`j*
+ a*
+ Z*
+pZ*
+P[*
+0i*
+`^*
+      
+://
+url 
+GetCommand
+result
+CanBeDefaultButton
+selected
+%s, string command, int default
+Button.BlinkColor
+Button.FocusBorderColor
+Button.DepressedBgColor
+Button.DepressedTextColor
+Button.ArmedBgColor
+Button.ArmedTextColor
+Button.BgColor
+Button.TextColor
+ButtonKeyFocusBorder
+PressButton
+SetAsDefaultButton
+SetAsCurrentDefaultButton
+blinkFgColor_override
+keyboardFocusColor_override
+depressedBgColor_override
+depressedFgColor_override
+armedBgColor_override
+armedFgColor_override
+defaultBgColor_override
+defaultFgColor_override
+CheckButton
+ToggleButton
+pu*
+ z*
+Pu(
+`z*
+0k*
+0^*
+`h,
+`h,
+pW(
+0X(
+pm*
+@d*
+ "(
+`"(
+0Y*
+PY*
+`X(
+P_(
+ p(
+@|(
+``*
+ b*
+pb*
+0[*
+`j*
+ a*
+ Z*
+--
+@R)
+ O)
+pN)
+``)
+ShutdownRequest
+MessageBoxText
+ContinuousProgressBar
+D6O
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+variable
+progress
+%s, string progress, string variable
+SetProgress
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+CircularProgressBar
+Pu(
+pW(
+0X(
+ "(
+`"(
+`X(
+P_(
+ p(
+@|(
+CircularProgressBar.BgColor
+CircularProgressBar.FgColor
+vgui/
+-DT
+?bg_image
+fg_image
+RadioButton
+<7O
+Pu(
+`h,
+`h,
+pW(
+0X(
+pm*
+ "(
+`"(
+0Y*
+PY*
+`X(
+P_(
+ p(
+@|(
+``*
+ b*
+pb*
+0[*
+`j*
+ a*
+ Z*
+pZ*
+P[*
+`^*
+--
+.?AVCDefaultDataCacheClient@@
+.?AVCAsyncCaptionResourceManager@@
+.?AVCHudCloseCaption@@
+.?AVCHudCrosshair@@
+.?AVCHudFilmDemo@@
+.?AVCHudHDRDemo@@
+.?AVCHudHintDisplay@@
+.?AVCHudHintKeyDisplay@@
+.?AVIHudLCD@@
+.?AVCLCDItem@@
+.?AVCLCDItemText@@
+.?AVCLCDItemIcon@@
+.?AVCLCDItemAggregate@@
+.?AVCLCDPage@@
+.?AVCLCD@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCPDumpPanel@@
+.?AVCHudVehicle@@
+.?AVCHudVoiceSelfStatus@@
+.?AVCHudVoiceStatus@@
+.?AVCHudWeapon@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVIInput@@
+.?AVCInput@@
+.?AVConVar_m_pitch@@
+,(=
+.?AVCProxyIsNPC@@
+.?AVCLampBeamProxy@@
+.?AVCLampHaloProxy@@
+.?AVIMaterialProxyDict@@
+.?AVCMaterialProxyDict@@
+.?AVCAddProxy@@
+.?AVCSubtractProxy@@
+.?AVCMultiplyProxy@@
+.?AVCDivideProxy@@
+.?AVCClampProxy@@
+.?AVCSineProxy@@
+--
+4P<
+.?AVCProxyIT@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCPlayerTeamProxy@@
+.?AVCPlayerZombieClassProxy@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCHudAbilityTimer@@
+.?AVFinaleMeterBarPanel@@
+.?AVCHudFinaleMeter@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCFrustrationMeterBarPanel@@
+.?AVCHudFrustrationMeter@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVProgressBarPanel@@
+.?AVCHudProgressBar@@
+.?AVHealthPanel@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCResourcePrecacher@PrecacheHoldoutSoundsPrecache@@
+.?AVCircularProgressBar@vgui@@
+.?AVCHudHoldoutTimer@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCHudInfectedVOIP@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCHudIntensityGraph@@
+ S<
+--
+.?AVCFloatingAchievementNumber@@
+.?AVCHudPZDamageRecordPanel@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCRadialButton@@
+.?AVCRadialMenu@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCHudGhostPanel@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCHudBlood@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+tZD
+\ZD
+HZD
+--
+xtD
+dtD
+.?AVCTeammateVoicePanel@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCHudTeamMateInPerilNotice@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCHudTerrorCrosshair@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCTerrorSpectatorGUI@@
+.?AVCTerrorViewportPanel@@
+.?AVDeathPanel@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVIKeyBindingListener@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCHudZombieHealth@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCHudZombiePanel@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCHudZombieTeamDisplay@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCHudZombieTeamDisplayPlayer@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCPersonalStatsSummaryPanel@@
+.?AVC_NextBotCombatCharacter@@
+.?AVCBindPanel@@
+ S<
+hR<
+LR<
+4R<
+ R<
+|Q<
+hQ<
+TQ<
+<Q<
+(Q<
+hP<
+PP<
+4P<
+.?AVCVersusModeScoreboard@@

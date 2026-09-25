@@ -12,7 +12,7 @@ const M: RoundMetrics = {
   fidMax: 0.9, fidP95: 0.5, windows: 30, scoreable: 20, fidSum: 9, occ: { observed: 4, expected: 2, expectedSq: 0.2, blocks: 40, pairs: 300 }, eligiblePairs: 300,
   gates: { considered: 900, notLive: 100, notGhost: 200, inGrace: 100, tooClose: 100, occluded: 100, passed: 300 },
 };
-const clip = { startMs: 1000, endMs: 3000, ghostSlot: 4, fidelity: 0.9, travel: 20, meanErr: 2, meanDist: 900 };
+const clip = { startMs: 1000, endMs: 3000, ghostSlot: 4, targetCls: 3, fidelity: 0.9, lagFidelity: 0.9, lagMs: 0, travel: 20, meanErr: 2, meanDist: 900 };
 
 beforeEach(() => {
   db = openDb(':memory:');
@@ -45,6 +45,14 @@ describe('saveRound', () => {
     saveRound(db, KEY, [{ slot: 0, steamid: '765', metrics: M, clips: [] }]);
     const rev = db.prepare('SELECT state, note FROM integrity_reviews').get();
     expect(rev).toEqual({ state: 'dismissed', note: 'watched it, he heard the spawn' });
+  });
+
+  it('stores hidden tracking clips as their own kind, scored by the lag search', () => {
+    saveRound(db, KEY, [{ slot: 0, steamid: '765', metrics: M, clips: [clip], hiddenClips: [{ ...clip, startMs: 9000, endMs: 11000, lagFidelity: 0.8, lagMs: 200 }] }]);
+    const rows = db.prepare('SELECT kind, score, detail FROM integrity_clips ORDER BY start_ms').all() as { kind: string; score: number; detail: string }[];
+    expect(rows.map((r) => r.kind)).toEqual(['ghost_track', 'hidden_track']);
+    expect(rows[1].score).toBe(0.8);
+    expect(JSON.parse(rows[1].detail)).toMatchObject({ infectedSlot: 4, cls: 3, lagMs: 200 });
   });
 });
 

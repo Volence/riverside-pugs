@@ -2,14 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { NAV_LINKS } from './Nav';
 
 describe('NAV_LINKS', () => {
-  it('offers the crosshair maker as an in-site route', () => {
-    // It was /crosshair.html with target=_blank, a standalone document with
-    // its own palette and no way back. Now a route, so it keeps the header.
-    const link = NAV_LINKS.find(([href]) => href === '/crosshair');
-    expect(link).toBeTruthy();
-    expect(link![2]).toBeUndefined();
-  });
-
   it('gives every static page a target so the SPA router does not swallow it', () => {
     // preact-iso intercepts same-origin clicks unless target is absent or
     // _self (router.js:45). A static .html page is not a route, so being
@@ -26,6 +18,18 @@ describe('NAV_LINKS', () => {
     const i = paths.indexOf('/matches');
     expect(paths[i + 1]).toBe('/balance');
     expect(NAV_LINKS.find(([href]) => href === '/balance')?.[1]).toBe('Patch notes');
+  });
+
+  it('folds the crosshair maker, HUD editor and community into one HUD item', () => {
+    // They were three top-level items; the HUD page's own tab strip now
+    // reaches all three, so the nav carries only the section.
+    const paths = NAV_LINKS.map(([href]) => href);
+    expect(paths).toContain('/hud');
+    expect(paths).not.toContain('/crosshair');
+    expect(paths).not.toContain('/community');
+    expect(NAV_LINKS.find(([href]) => href === '/hud')![1]).toBe('HUD');
+    expect(NAV_LINKS.map(([, label]) => label)).not.toContain('Crosshair');
+    expect(NAV_LINKS.map(([, label]) => label)).not.toContain('Community');
   });
 
   it('offers Custom alongside Campaigns, at its own path', () => {
@@ -115,5 +119,26 @@ describe('Nav', () => {
     unmount();
     render(<LocationProvider><Nav session={{ kind: 'anonymous' }} state={null} /></LocationProvider>);
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+  });
+});
+
+describe('Nav current page', () => {
+  const at = (path: string) => {
+    history.replaceState(null, '', path);
+    render(<LocationProvider><Nav session={{ kind: 'anonymous' }} state={null} /></LocationProvider>);
+    return screen.getAllByRole('link')
+      .filter((a) => a.getAttribute('aria-current') === 'page')
+      .map((a) => a.textContent);
+  };
+  afterEach(() => history.replaceState(null, '', '/'));
+
+  it.each(['/hud', '/crosshair', '/community', '/community/7'])('marks HUD current on %s', (path) => {
+    expect(at(path)).toEqual(['HUD']);
+  });
+
+  it('marks only the matching item elsewhere', () => {
+    expect(at('/maps')).toEqual(['Campaigns']);
+    cleanup();
+    expect(at('/')).toEqual(['Play']);
   });
 });

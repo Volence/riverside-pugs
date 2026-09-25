@@ -1,0 +1,132 @@
+import { describe, it, expect } from 'vitest';
+import { ELEMENTS, elementById } from './elements';
+import { SLOTS } from './slots';
+import { parseKv, kvFind, kvGet, type KvNode } from './kv';
+import { baseFile, BASE_PATHS } from './base';
+
+const root = (preset: 'stock' | 'modern', file: string) => parseKv(baseFile(preset, file))[0].value as KvNode[];
+
+describe('ELEMENTS', () => {
+  it('has unique ids and the twenty-three elements', () => {
+    const ids = ELEMENTS.map((e) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.sort()).toEqual(['abilityMarker', 'abilityRing', 'chat', 'finaleMeter', 'ghostPanel', 'holdoutTimer', 'infectedRow', 'infectedVoice',
+      'killNotices', 'leavingArea', 'ownHealth', 'ownMic', 'perilNotice', 'progressBar', 'siHealth', 'spawnCountdown', 'tankPanel', 'teamColumn',
+      'voiceList', 'vote', 'weaponSelection', 'xhair', 'zombiePanel'].sort());
+  });
+
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`every key exists in ${preset} hudlayout.res, or in the element's own file`, () => {
+      for (const e of ELEMENTS) {
+        if (e.id === 'xhair') continue;            // added by the generator, absent from stock
+        const file = root(preset, e.file ?? 'scripts/hudlayout.res');
+        expect(kvFind(file, [e.key]), e.id).toBeDefined();
+        for (const b of e.moveWith ?? []) expect(kvFind(file, [b]), `${e.id} ${b}`).toBeDefined();
+      }
+    });
+  }
+
+  it('names only child files that exist', () => {
+    for (const e of ELEMENTS) for (const f of [...e.children, ...(e.team?.file ? [e.team.file] : [])]) {
+      expect(BASE_PATHS, `${e.id}: ${f}`).toContain(f);
+    }
+  });
+
+  // A path that merely exists is not a pin: a typo could swap in a different
+  // real base file and the existence check above would still pass. These
+  // check the actual shape the generator (task 8) reads out of each file.
+  it('team files have four sized teammate panels', () => {
+    for (const e of ELEMENTS) {
+      if (!e.team?.file) continue;
+      const teamRoot = root('stock', e.team.file);
+      for (let n = 1; n <= 4; n++) {
+        const panel = kvFind(teamRoot, [`TeamPlayer${n}`]);
+        expect(panel, `${e.id}: ${e.team.file} TeamPlayer${n}`).toBeDefined();
+        expect(kvGet(panel!, 'wide'), `${e.id}: TeamPlayer${n} wide`).toBeDefined();
+        expect(kvGet(panel!, 'tall'), `${e.id}: TeamPlayer${n} tall`).toBeDefined();
+      }
+    }
+  });
+
+  it('children files parse to one root block with children', () => {
+    for (const e of ELEMENTS) for (const f of e.children) {
+      const nodes = parseKv(baseFile('stock', f));
+      expect(nodes.length, `${e.id}: ${f}`).toBe(1);
+      const kids = nodes[0].value;
+      expect(Array.isArray(kids), `${e.id}: ${f}`).toBe(true);
+      expect((kids as KvNode[]).length, `${e.id}: ${f}`).toBeGreaterThan(0);
+    }
+  });
+
+  // Probe T1: the Tank reads hunterhealth.res, and tankhealth.res is never
+  // loaded. Writing it shipped a file the game ignores.
+  it('lists the five infected health files the game reads, and never tankhealth.res', () => {
+    const files = elementById('siHealth')!.children;
+    expect(files).toHaveLength(5);
+    expect(files).not.toContain('resource/ui/hud/tankhealth.res');
+  });
+
+  // scalePass multiplies a file in place and Work memoises parsed trees, so
+  // scaling the same file for two elements would square the factor. Nothing
+  // in the code stops that; this does.
+  it('never gives the same child file to two scaled elements', () => {
+    const children = ELEMENTS.filter((e) => e.resize === 'scale').flatMap((e) => e.children);
+    expect(new Set(children).size, children.join(' ')).toBe(children.length);
+  });
+
+  // Only 'visible' is wired up in v1: 'color', 'bg' and 'fontSize' stay in
+  // the type because the spec declares them, but nothing reads or writes
+  // them, and the side panel would render a control it cannot honour.
+  it('lists no prop beyond visible', () => {
+    expect(ELEMENTS.flatMap((e) => e.props).filter((p) => p !== 'visible')).toEqual([]);
+  });
+});
+
+describe('SLOTS', () => {
+  it('points every target at a real image key in the stock file', () => {
+    for (const s of SLOTS) for (const t of s.targets) {
+      // The card and own health backgrounds are children fitPass injects into
+      // their panel files, so they are in no base file; build.test.ts pins
+      // that they are written.
+      if (t.path[0] === 'HudEdCardBg' || t.path[0] === 'HudEdOwnBg') continue;
+      const panel = kvFind(root('stock', t.file), t.path);
+      expect(panel, `${s.id}: ${t.file} ${t.path.join('/')}`).toBeDefined();
+      // Finding the panel is not enough: the key itself must name a real
+      // field on it, or a typo like "imag" for "image" passes silently.
+      expect(kvGet(panel!, t.key), `${s.id}: ${t.file} ${t.path.join('/')} ${t.key}`).toBeDefined();
+    }
+  });
+  // No targets means no normal-mode route: nothing points a .res image key at
+  // the new texture, so the slot can only work from a VPK mounted ahead of
+  // pak01. The old guard also required stockNames, which let a slot with
+  // neither skip the check entirely.
+  it('marks every slot with no normal-mode route advanced only', () => {
+    for (const s of SLOTS) if (s.targets.length === 0) expect(s.advancedOnly, s.id).toBe(true);
+  });
+});
+
+describe('the ability timer element (plan Task 6)', () => {
+  it('scales with its pieces and carries the three state colours, ungated', () => {
+    const el = elementById('abilityRing')!;
+    expect(el.resize).toBe('scale');
+    expect(el.children).toEqual(['resource/ui/hud/abilitytimerhud.res']);
+    // The game's own spelling, "surpressed". Probe Q15 (/home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/ring-all.png).
+    expect(el.keys?.map((k) => k.key)).toEqual(['ability_ready_color', 'ability_charging_color', 'ability_surpressed_color']);
+    for (const k of el.keys!) { expect(k.type, k.key).toBe('colour'); expect(k.gate, k.key).toBeUndefined(); }
+  });
+});
+
+describe('the ability marker element (plan Task 8)', () => {
+  it('is HudCrosshair\'s ability keys, placed by the game at the screen centre, ungated', () => {
+    // Probe Q16a (/home/volence/l4d/hud/probe-phase2-infected/b9/shots-v2/crops/centre-af.png): the
+    // marker is HudCrosshair's own child, a box of 32 + 2 x ability_size screen pixels (probe B15), coloured by its keys.
+    const el = elementById('abilityMarker')!;
+    expect(el).toMatchObject({ side: 'infected', key: 'HudCrosshair', move: false, resize: 'none', mockPos: { x: 'c', y: 'c' } });
+    expect(el.keys?.map((k) => k.key)).toEqual(['ability_size', 'ability_ready_color', 'ability_charging_color',
+      'ability_surpressed_color', 'ability_attack_color', 'ability_attack_color_colorblind']);
+    const size = el.keys![0];
+    expect(size).toMatchObject({ type: 'int', range: [4, 64], label: 'Size (pixels)' });
+    for (const k of el.keys!.slice(1)) expect(k.type, k.key).toBe('colour');
+    for (const k of el.keys!) expect(k.gate, k.key).toBeUndefined();
+  });
+});

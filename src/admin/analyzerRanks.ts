@@ -1,5 +1,7 @@
 import type { DB } from '../db.js';
 import { integrityBoard } from './integrity.js';
+import type { ClassScores } from '../integrity/score.js';
+import type { InfectedClass } from '../integrity/los.js';
 
 /**
  * The integrity board as a per-player lookup.
@@ -29,6 +31,16 @@ export interface AnalyzerRank {
   pOcc: number | null;
   pGap: number | null;
   composite: number | null;
+  /** Metrics D, E and F. Shown beside the rank, not part of it. */
+  losRounds: number;
+  hiddenShare: number | null;
+  hiddenOccZ: number | null;
+  reveals: number;
+  revealShare: number | null;
+  pHidden: number | null;
+  pHiddenOcc: number | null;
+  pReveal: number | null;
+  byClass: Record<InfectedClass, ClassScores>;
 }
 
 export function analyzerRanks(db: DB, seasonId: number | null = null): Map<string, AnalyzerRank> {
@@ -51,6 +63,15 @@ export function analyzerRanks(db: DB, seasonId: number | null = null): Map<strin
     pOcc: p.pOcc,
     pGap: p.pGap,
     composite: p.composite,
+    losRounds: p.losRounds,
+    hiddenShare: p.hiddenShare,
+    hiddenOccZ: p.hiddenOccZ,
+    reveals: p.reveals,
+    revealShare: p.revealShare,
+    pHidden: p.pHidden,
+    pHiddenOcc: p.pHiddenOcc,
+    pReveal: p.pReveal,
+    byClass: p.byClass,
   }]));
 }
 

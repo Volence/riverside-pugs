@@ -93,6 +93,14 @@ describe('ticketAttachmentsDir', () => {
   });
 });
 
+describe('communityDir', () => {
+  it('defaults to community beside the database, and takes COMMUNITY_DIR', () => {
+    expect(loadConfig({}).communityDir).toBe('data/community');
+    expect(loadConfig({ DB_PATH: '/x/y/pug.db' }).communityDir).toBe('/x/y/community');
+    expect(loadConfig({ DB_PATH: '/x/y/pug.db', COMMUNITY_DIR: ' /mnt/community ' }).communityDir).toBe('/mnt/community');
+  });
+});
+
 describe('replayLiveDir', () => {
   it('defaults to replays-live beside the database, and takes REPLAY_LIVE_DIR', () => {
     expect(loadConfig({}).replayLiveDir).toBe('data/replays-live');

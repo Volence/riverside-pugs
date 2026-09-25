@@ -67,7 +67,7 @@ export function occupancy(frames: Frame[], slot: number, prior: PriorTable | nul
 export function occupancyWithGates(
   frames: Frame[], slot: number, prior: PriorTable | null,
 ): { occ: OccResult | null; gates: GateTally } {
-  const blocks = new Map<string, { n: number; on: number; p: number }>();
+  const blocks = new Map<string, Block>();
   let pairs = 0;
 
   const gates = scanPairs(frames, slot, (s, g, f) => {
@@ -80,20 +80,43 @@ export function occupancyWithGates(
     if (dist2d(s, g) > TUNING.R_MAX) return;
     const c = cellOf(g.x, g.y);
     const key = `${g.slot}:${Math.floor(f.tMs / TUNING.OCC_BLOCK_MS)}`;
-    const b = blocks.get(key) ?? { n: 0, on: 0, p: 0 };
-    b.n++;
-    b.p += priorAt(prior, cellKey(c.cx, c.cy));
+    const p = priorAt(prior, cellKey(c.cx, c.cy));
     // Pitch counts here and not in the prior, which has no target to take an
     // elevation to. That can only lower `observed` against `expected`, so the
     // asymmetry costs sensitivity and cannot flag anyone.
-    if (onTarget(s, g, TUNING.E_DWELL)) b.on++;
-    blocks.set(key, b);
+    const on = onTarget(s, g, TUNING.E_DWELL);
+    addToBlock(blocks, key, p, on);
     pairs++;
   });
 
   // Null, never zero. No prior means the map has too little history to say
   // anything, and a thin prior is worse than no score at all.
-  if (!prior || prior.frames <= 0 || blocks.size === 0) return { occ: null, gates };
+  if (!prior || prior.frames <= 0) return { occ: null, gates };
+  return { occ: occFromBlocks(blocks, pairs), gates };
+}
+
+/** One block's running sums: frames seen, frames on target, and prior summed
+ *  over them. */
+export interface Block {
+  n: number;
+  on: number;
+  p: number;
+}
+
+/** One producer of a block, shared by metrics B and E so the two occupancy
+ *  scores accumulate identically over their different pairs. */
+export function addToBlock(blocks: Map<string, Block>, key: string, p: number, on: boolean): void {
+  const b = blocks.get(key) ?? { n: 0, on: 0, p: 0 };
+  b.n++;
+  b.p += p;
+  if (on) b.on++;
+  blocks.set(key, b);
+}
+
+/** Blocks to sums. Shared with metric E so the two occupancy scores are the
+ *  same arithmetic over different pairs. Null when no block formed. */
+export function occFromBlocks(blocks: Map<string, Block>, pairs: number): OccResult | null {
+  if (blocks.size === 0) return null;
   let observed = 0, expected = 0, expectedSq = 0;
   for (const b of blocks.values()) {
     const p = b.p / b.n;
@@ -101,5 +124,5 @@ export function occupancyWithGates(
     expected += p;
     expectedSq += p * p;
   }
-  return { occ: { observed, expected, expectedSq, blocks: blocks.size, pairs }, gates };
+  return { observed, expected, expectedSq, blocks: blocks.size, pairs };
 }

@@ -100,25 +100,45 @@ export function requiredMotion(dBearing: number[], dGhost: number[]): number[] {
 export interface TrackWindow {
   startMs: number;
   endMs: number;
+  /** The infected being followed: a ghost for metric A, a spawned infected
+   *  for metric D. Named for its first use; the slot is the same kind of
+   *  number either way. */
   ghostSlot: number;
-  /** Zero when `travel` is under MIN_TRAVEL: the window formed, and is counted
-   *  as having formed, but held nothing to follow. */
+  /** Its `m_zombieClass` at the window's first frame, for the per-class split.
+   *  Taken per window because a slot can die and come back as another class
+   *  in the same round. */
+  targetCls: number;
+  /** At lag 0. Zero when `travel` is under MIN_TRAVEL: the window formed, and
+   *  is counted as having formed, but held nothing to follow. */
   fidelity: number;
-  /** Degrees of required motion in the window, summed frame to frame. See
-   *  MIN_TRAVEL. */
+  /** The best fidelity over lags 0 to LAG_MAX_FRAMES, and the lag it came at,
+   *  in milliseconds. Equal to `fidelity` and 0 when lag 0 is best. */
+  lagFidelity: number;
+  lagMs: number;
+  /** Degrees of required motion in the window at lag 0, summed frame to
+   *  frame. See MIN_TRAVEL. */
   travel: number;
   meanErr: number;
   meanDist: number;
 }
 
 /** Positions of everything that is not this ghost and not the survivor: what
- *  the occlusion guard checks against. */
-export function visibleOthers(f: Frame, survivorSlot: number, ghostSlot: number): Pt[] {
+ *  the occlusion guard checks against.
+ *
+ *  `keep`, when given, is an extra filter over the PLAYERS loop only (not
+ *  entities): callers that need a further reason to exclude a player, such as
+ *  the hidden gate excluding one the survivor could not see, pass it instead
+ *  of re-walking the frame themselves. Left out, every present, non-ghost
+ *  player counts, unchanged from before this parameter existed. */
+export function visibleOthers(
+  f: Frame, survivorSlot: number, ghostSlot: number, keep: (p: PlayerSample) => boolean = () => true,
+): Pt[] {
   const out: Pt[] = [];
   for (const p of f.players) {
     if (p.slot === survivorSlot || p.slot === ghostSlot) continue;
     if (isGhost(p)) continue;
     if ((p.state & STATE.PRESENT) === 0) continue;
+    if (!keep(p)) continue;
     out.push({ x: p.x, y: p.y });
   }
   for (const e of f.entities) {
@@ -136,62 +156,105 @@ export function visibleOthers(f: Frame, survivorSlot: number, ghostSlot: number)
   return out;
 }
 
-/** Every window in which this survivor held aim on one ghost for W frames,
- *  with how much of the motion needed to follow it they actually produced. */
-export function trackWindows(frames: Frame[], slot: number): TrackWindow[] {
-  if (frames.length === 0) return [];
-  const roundStartMs = 0;
+/** One frame of a run: the pair eligible and the aim on target. */
+interface RunFrame { tMs: number; yaw: number; bear: number; err: number; dist: number; cls: number; s: Pt; g: Pt }
+
+/**
+ * The three series for the window of YAW frames i .. i+W-1, against where the
+ * target was `lag` frames earlier, each seen from where the survivor stands in
+ * the yaw frame.
+ *
+ * The yaw window is the same at every lag and only the target moves back, so
+ * every lag scores the same crosshair motion and the number of windows does
+ * not depend on the search. At lag 0 this is exactly version 4's window: the
+ * bearing change, and the target's own share of it (where it is now against
+ * where it was, from where the survivor now stands).
+ */
+function seriesAtLag(run: RunFrame[], i: number, lag: number): { dy: number[]; db: number[]; dg: number[] } {
+  const bearAt = (j: number): number => (lag === 0 ? run[j].bear : bearing(run[j].s, run[j - lag].g));
+  const dy: number[] = [], db: number[] = [], dg: number[] = [];
+  for (let k = 1; k < TUNING.W; k++) {
+    const j = i + k;
+    dy.push(wrapDeg(run[j].yaw - run[j - 1].yaw));
+    db.push(wrapDeg(bearAt(j) - bearAt(j - 1)));
+    dg.push(wrapDeg(bearAt(j) - bearing(run[j].s, run[j - 1 - lag].g)));
+  }
+  return { dy, db, dg };
+}
+
+function scoreAt(run: RunFrame[], i: number, lag: number): { fidelity: number; travel: number } {
+  const { dy, db, dg } = seriesAtLag(run, i, lag);
+  const travel = requiredMotion(db, dg).reduce((a, x) => a + Math.abs(x), 0);
+  return { fidelity: travel >= TUNING.MIN_TRAVEL ? trackFidelity(dy, db, dg) : 0, travel };
+}
+
+function windowAt(run: RunFrame[], i: number, targetSlot: number): TrackWindow {
+  const w = run.slice(i, i + TUNING.W);
+  const at0 = scoreAt(run, i, 0);
+  // A lag needs the target's position that many frames before the window,
+  // which must itself be in the run: a break means the pair stopped being
+  // comparable, and reaching across one would compare incomparable frames.
+  let best = { fidelity: at0.fidelity, lag: 0 };
+  for (let lag = 1; lag <= TUNING.LAG_MAX_FRAMES && i - lag >= 0; lag++) {
+    const s = scoreAt(run, i, lag);
+    if (s.fidelity > best.fidelity) best = { fidelity: s.fidelity, lag };
+  }
+  return {
+    startMs: w[0].tMs,
+    endMs: w[w.length - 1].tMs,
+    ghostSlot: targetSlot,
+    targetCls: w[0].cls,
+    fidelity: at0.fidelity,
+    lagFidelity: best.fidelity,
+    lagMs: run[i].tMs - run[i - best.lag].tMs,
+    travel: at0.travel,
+    meanErr: w.reduce((s, x) => s + Math.abs(x.err), 0) / w.length,
+    meanDist: w.reduce((s, x) => s + x.dist, 0) / w.length,
+  };
+}
+
+/**
+ * Every window in which this survivor held aim on one target for W frames,
+ * with how much of the motion needed to follow it they actually produced.
+ *
+ * Generic over what counts as a target and when a pair counts, so metric A
+ * (ghosts) and metric D (spawned infected hidden from the team) are the same
+ * arithmetic with different gates. A run is consecutive frames where the pair
+ * is eligible AND on target; windows never straddle a break, because a break
+ * means the pair stopped being comparable, not that nothing happened.
+ */
+export function trackWindowsFor(
+  frames: Frame[], slot: number, targets: Iterable<number>,
+  eligible: (f: Frame, s: PlayerSample, g: PlayerSample) => boolean,
+): TrackWindow[] {
   const out: TrackWindow[] = [];
-
-  for (const gs of ghostSlotsOf(frames)) {
-    // A run is consecutive frames where this pair is eligible AND on target.
-    // Windows never straddle a break, because a break means the pair stopped
-    // being comparable, not that nothing happened.
-    let run: { tMs: number; yaw: number; bear: number; err: number; dist: number; s: Pt; g: Pt }[] = [];
-
+  for (const ts of targets) {
+    let run: RunFrame[] = [];
     const flush = () => {
-      for (let i = 0; i + TUNING.W <= run.length; i++) {
-        const w = run.slice(i, i + TUNING.W);
-        const dy: number[] = [], db: number[] = [], dg: number[] = [];
-        for (let k = 1; k < w.length; k++) {
-          dy.push(wrapDeg(w[k].yaw - w[k - 1].yaw));
-          db.push(wrapDeg(w[k].bear - w[k - 1].bear));
-          // The ghost's own share of that bearing change: where it is now
-          // against where it was, both seen from where the survivor now
-          // stands. Exactly zero for a ghost that did not move, however far
-          // the survivor did, because the positions are integers.
-          dg.push(wrapDeg(w[k].bear - bearing(w[k].s, w[k - 1].g)));
-        }
-        const travel = requiredMotion(db, dg).reduce((a, x) => a + Math.abs(x), 0);
-        out.push({
-          startMs: w[0].tMs,
-          endMs: w[w.length - 1].tMs,
-          ghostSlot: gs,
-          fidelity: travel >= TUNING.MIN_TRAVEL ? trackFidelity(dy, db, dg) : 0,
-          travel,
-          meanErr: w.reduce((s, x) => s + Math.abs(x.err), 0) / w.length,
-          meanDist: w.reduce((s, x) => s + x.dist, 0) / w.length,
-        });
-      }
+      for (let i = 0; i + TUNING.W <= run.length; i++) out.push(windowAt(run, i, ts));
       run = [];
     };
-
     for (const f of frames) {
       const s = f.players.find((p) => p.slot === slot);
-      const g = f.players.find((p) => p.slot === gs);
-      if (!s || !g || !isLiveSurvivor(s) || !isGhost(g)) { flush(); continue; }
-      if (!pairEligible({ survivor: s, ghost: g, others: visibleOthers(f, slot, gs), tMs: f.tMs, roundStartMs })) {
-        flush(); continue;
-      }
-      // Yaw and pitch both. A ghost two floors up shares a bearing with the
-      // doorway under it, and following that doorway is not following the ghost.
+      const g = f.players.find((p) => p.slot === ts);
+      if (!s || !g || !eligible(f, s, g)) { flush(); continue; }
+      // Yaw and pitch both. A target two floors up shares a bearing with the
+      // doorway under it, and following that doorway is not following it.
       if (!onTarget(s, g, TUNING.E_TRACK)) { flush(); continue; }
-      const err = aimError(s.yaw, s, g);
-      run.push({ tMs: f.tMs, yaw: s.yaw, bear: bearing(s, g), err, dist: dist2d(s, g), s: { x: s.x, y: s.y }, g: { x: g.x, y: g.y } });
+      run.push({
+        tMs: f.tMs, yaw: s.yaw, bear: bearing(s, g), err: aimError(s.yaw, s, g), dist: dist2d(s, g), cls: g.cls,
+        s: { x: s.x, y: s.y }, g: { x: g.x, y: g.y },
+      });
     }
     flush();
   }
   return out;
+}
+
+/** Metric A: windows against ghosts, under the ghost gates. */
+export function trackWindows(frames: Frame[], slot: number): TrackWindow[] {
+  return trackWindowsFor(frames, slot, ghostSlotsOf(frames), (f, s, g) =>
+    pairEligible({ survivor: s, ghost: g, others: visibleOthers(f, slot, g.slot), tMs: f.tMs, roundStartMs: 0 }));
 }
 
 /** Slots that were a ghost at any point this round: the infected roster as the
@@ -266,10 +329,11 @@ export function scanPairs(
 
 /** The reviewable moments: strongest first, never overlapping, capped. A
  *  reviewer's time is the scarce resource, so five separate moments beat fifty
- *  slices of the same one. */
-export function pickClips(windows: TrackWindow[]): TrackWindow[] {
+ *  slices of the same one. `score` is which fidelity decides: lag 0 for ghost
+ *  clips, the lag search for hidden ones. */
+export function pickClips(windows: TrackWindow[], score: (w: TrackWindow) => number = (w) => w.fidelity): TrackWindow[] {
   const kept: TrackWindow[] = [];
-  for (const w of [...windows].filter((x) => x.fidelity >= TUNING.CLIP_MIN).sort((a, b) => b.fidelity - a.fidelity)) {
+  for (const w of [...windows].filter((x) => score(x) >= TUNING.CLIP_MIN).sort((a, b) => score(b) - score(a))) {
     if (kept.length >= TUNING.CLIPS_PER_ROUND) break;
     if (kept.some((k) => w.startMs <= k.endMs && k.startMs <= w.endMs)) continue;
     kept.push(w);

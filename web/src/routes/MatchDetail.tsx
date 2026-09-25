@@ -59,6 +59,7 @@ function MapReplay(
         spec={{ kind: 'match', matchId, ordinal, half }}
         names={names}
         timeline={timeline.data?.entries}
+        demo={timeline.data?.demo ?? null}
         // The clip's timestamp belongs to initialHalf's round alone. Once the
         // round switch moves away from it this becomes undefined, so a stray
         // seek effect firing on the OTHER round's own first frames (a real

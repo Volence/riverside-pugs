@@ -1,0 +1,2253 @@
+import { describe, it, expect } from 'vitest';
+import { buildHud, elementRect, panelWork, pcSet, HIDE_FRAMES, CODE_SHOWN, hardHide, baseHasElement, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame, panelChild, panelFrame, writeKeys, pointCell } from './build';
+import { parsePos, parseSize, screenW, SCREEN_H } from './units';
+import { placeElement, nudge } from './edit';
+import { DEFAULT_DESIGN, validateDesign, contentBox, type HudDesign, type ElementOverride, type ChildOverride } from './design';
+import { parseKv, writeKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
+import { baseFile, registerImport, unregisterImport } from './base';
+import { sampleHud, dropBlock } from './importFixtures';
+import { elementById, ELEMENTS } from './elements';
+import { PANEL_FILE, childRects } from './render';
+import { panelBoxes } from './mock';
+import { crosshairFiles } from '../crosshair/vpk';
+import { decodeVTF } from '../vpk/read';
+import { TEX } from '../crosshair/draw';
+
+const text = (files: { path: string; data: Uint8Array }[], path: string) => {
+  const f = files.find((x) => x.path === path);
+  return f ? new TextDecoder('latin1').decode(f.data) : undefined;
+};
+/**
+ * hudlayout.res as the game reads it: the build's copy, or the game's own
+ * when the build ships none (a file left exactly as stock is not shipped).
+ */
+const layoutOf = (files: { path: string; data: Uint8Array }[]) =>
+  parseKv(text(files, 'scripts/hudlayout.res') ?? baseFile('stock', 'scripts/hudlayout.res'))[0].value as KvNode[];
+/** An untouched design: no element overrides, not even DEFAULT_DESIGN's fitted teammate card, which has its own tests. */
+const design = (patch: Partial<HudDesign>): HudDesign => ({ ...structuredClone(DEFAULT_DESIGN), elements: {}, ...patch });
+/** A crosshair texture's pixels, as the page hands them over: TEX x TEX RGBA. */
+const PIXELS = new Uint8ClampedArray(TEX * TEX * 4).map((_, i) => (i * 31) & 0xff);
+const CARD_FILE = 'resource/ui/hud/teammatepanel.res';
+const TEAM_FILE = 'resource/ui/hud/teamdisplayhud.res';
+const SCHEME_FILE = 'resource/clientscheme.res';
+/** A file's root children as the build wrote it, or the base file when the build left it alone (as the game would read it). */
+const tree = (files: { path: string; data: Uint8Array }[], path: string, preset: 'stock' | 'modern' = 'stock') =>
+  parseKv(text(files, path) ?? baseFile(preset, path))[0].value as KvNode[];
+const cardAt = (nodes: KvNode[], name: string) => ['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(kvFind(nodes, [name])!, k));
+
+describe('buildHud, childPass', () => {
+  const kids = (c: Record<string, unknown>) => ({ teamColumn: c }) as HudDesign['children'];
+
+  it('writes only the overridden keys', () => {
+    const got = tree(buildHud(design({ children: kids({ Name: { x: 20 } }) })), CARD_FILE);
+    const expected = parseKv(baseFile('stock', CARD_FILE))[0].value as KvNode[];
+    kvSet(kvFind(expected, ['Name'])!, 'xpos', '20');
+    expect(got).toEqual(expected);
+  });
+
+  it('hides a child', () => {
+    const got = tree(buildHud(design({ children: kids({ Head: { visible: false } }) })), CARD_FILE);
+    expect(kvGet(kvFind(got, ['Head'])!, 'visible')).toBe('0');
+  });
+
+  // Probe 2026-09-23: game code turned the stock splatter on with visible 0
+  // in the file, so a hidden piece is also written at size 0 and, for an
+  // ImagePanel, at alpha 0, which SetVisible(true) cannot undo.
+  for (const fit of [false, true]) {
+    it(`writes a hidden splatter at size 0 and alpha 0, keeping its tint's RGB${fit ? ', fitted' : ''}`, () => {
+      const elements: Record<string, ElementOverride> = fit ? { teamColumn: { fit: true } } : {};
+      const plain = tree(buildHud(design({ elements, children: kids({ BackgroundImage: { visible: false } }) })), CARD_FILE);
+      const n = kvFind(plain, ['BackgroundImage'])!;
+      expect([kvGet(n, 'visible'), kvGet(n, 'wide'), kvGet(n, 'tall'), kvGet(n, 'drawColor')]).toEqual(['0', '0', '0', '255 255 255 0']);
+      const tinted = tree(buildHud(design({ elements, children: kids({ BackgroundImage: { visible: false, color: '255 255 255 120' } }) })), CARD_FILE);
+      expect(kvGet(kvFind(tinted, ['BackgroundImage'])!, 'drawColor')).toBe('255 255 255 0');
+    });
+
+    it(`writes hidden state art at size 0 even where the fit rule squares it${fit ? ', fitted' : ''}`, () => {
+      const elements: Record<string, ElementOverride> = fit ? { teamColumn: { fit: true } } : {};
+      const got = tree(buildHud(design({ elements, children: kids({ Incapacitated: { visible: false }, Dead: { visible: false }, Voice: { visible: false } }) })), CARD_FILE);
+      for (const name of ['Incapacitated', 'Dead', 'Voice']) {
+        const n = kvFind(got, [name])!;
+        expect([kvGet(n, 'visible'), kvGet(n, 'wide'), kvGet(n, 'tall')], name).toEqual(['0', '0', '0']);
+      }
+      expect(kvGet(kvFind(got, ['Dead'])!, 'drawColor')).toBe('255 255 255 0');
+      expect(kvGet(kvFind(got, ['Voice'])!, 'drawColor')).toBeUndefined();    // a Panel, not an ImagePanel
+    });
+  }
+
+  it('writes a hidden label at size 0 with no drawColor', () => {
+    const got = tree(buildHud(design({ children: kids({ Name: { visible: false } }) })), CARD_FILE);
+    const n = kvFind(got, ['Name'])!;
+    expect([kvGet(n, 'visible'), kvGet(n, 'wide'), kvGet(n, 'tall')]).toEqual(['0', '0', '0']);
+    expect(kvGet(n, 'drawColor')).toBeUndefined();
+  });
+
+  it('writes a hidden piece at size 0 after scaling too', () => {
+    const got = tree(buildHud(design({ elements: { teamColumn: { scale: 1.5 } }, children: kids({ BackgroundImage: { visible: false } }) })), CARD_FILE);
+    const n = kvFind(got, ['BackgroundImage'])!;
+    expect([kvGet(n, 'wide'), kvGet(n, 'tall')]).toEqual(['0', '0']);
+  });
+
+  it('writes an un-hidden piece exactly as the default', () => {
+    for (const fit of [false, true]) {
+      const elements: Record<string, ElementOverride> = fit ? { teamColumn: { fit: true } } : {};
+      const base = buildHud(design({ elements }));
+      for (const name of ['BackgroundImage', 'Name', 'Dead', 'Voice']) {
+        const shown = buildHud(design({ elements, children: kids({ [name]: { visible: true } }) }));
+        const want = tree(base, CARD_FILE);
+        // Stock ships Voice visible 0; showing it writes visible 1 and nothing else.
+        if (name === 'Voice') kvSet(kvFind(want, ['Voice'])!, 'visible', '1');
+        expect(tree(shown, CARD_FILE), `${name} ${fit}`).toEqual(want);
+      }
+    }
+  });
+
+  it('keeps the hidden piece out of the fitted card and the card background', () => {
+    const bg = { panelBg: { kind: 'flat' as const, color: '0 0 0 150' } };
+    const shown = tree(buildHud(design({ elements: { teamColumn: { fit: true } }, styles: bg })), CARD_FILE);
+    const hidden = tree(buildHud(design({ elements: { teamColumn: { fit: true } }, styles: bg, children: kids({ BackgroundImage: { visible: false } }) })), CARD_FILE);
+    expect(cardAt(hidden, 'HudEdCardBg')).toEqual(cardAt(shown, 'HudEdCardBg'));
+    expect(cardAt(hidden, 'Head')).toEqual(cardAt(shown, 'Head'));
+  });
+
+  it('adds the health number after Name on stock, and removes it on Modern', () => {
+    const stock = tree(buildHud(design({ children: kids({ HealthNumber: { on: true } }) })), CARD_FILE);
+    const at = stock.findIndex((n) => n.key === 'HealthNumber');
+    expect(stock[at - 1].key).toBe('Name');
+    expect(cardAt(stock, 'HealthNumber')).toEqual(['103', '60', '30', '12']);
+    expect(kvGet(stock[at], 'labelText')).toBe('%HealthNumber%');
+
+    const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+    const modern = tree(buildHud(design({ preset: 'modern', children: kids({ HealthNumber: { on: false } }) }), { fonts }), CARD_FILE, 'modern');
+    expect(kvFind(modern, ['HealthNumber'])).toBeUndefined();
+  });
+
+  it('ignores edits to an addable child that is off in this preset', () => {
+    const files = buildHud(design({ children: kids({ HealthNumber: { x: 5 } }) }));
+    expect(kvFind(tree(files, CARD_FILE), ['HealthNumber'])).toBeUndefined();
+  });
+
+  it('writes a label colour raw', () => {
+    const got = tree(buildHud(design({ children: kids({ Name: { color: '10 20 30 255' } }) })), CARD_FILE);
+    expect(kvGet(kvFind(got, ['Name'])!, 'fgcolor_override')).toBe('10 20 30 255');
+  });
+
+  it('points a sized label at a HudEd_<font>_t<size> copy of its font', () => {
+    const files = buildHud(design({ children: kids({ Name: { fontSize: 14 } }) }));
+    expect(kvGet(kvFind(tree(files, CARD_FILE), ['Name'])!, 'font')).toBe('HudEd_PlayerDisplayName_t14');
+    const copy = kvFind(tree(files, SCHEME_FILE), ['Fonts', 'HudEd_PlayerDisplayName_t14', '1'])!;
+    expect(kvGet(copy, 'tall')).toBe('14');
+    // Other labels on the same font keep the original.
+    expect(kvGet(kvFind(tree(files, CARD_FILE), ['Status'])!, 'font')).toBe('PlayerDisplayName');
+  });
+
+  it('sizes the item icons by their font and grows the label with them', () => {
+    const files = buildHud(design({ children: kids({ Items: { fontSize: 22 } }) }));
+    const items = kvFind(tree(files, CARD_FILE), ['Items'])!;
+    expect(kvGet(items, 'font')).toBe('HudEd_L4D_Icons_medium_t22');
+    expect(kvGet(items, 'tall')).toBe('22');
+  });
+
+  it('widens the item icon row with the icon size, so the icons are not cut off on the right', () => {
+    // Stock Items is 50 wide at an 18-tall font: at 36 it is 50 * 36 / 18 = 100 wide.
+    const items = kvFind(tree(buildHud(design({ children: kids({ Items: { fontSize: 36 } }) })), CARD_FILE), ['Items'])!;
+    expect([kvGet(items, 'wide'), kvGet(items, 'tall')]).toEqual(['100', '36']);
+    // Modern: 50 wide at a 16-tall font, 20 gives 63 (62.5 rounded).
+    const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+    const modern = kvFind(tree(buildHud(design({ preset: 'modern', children: kids({ Items: { fontSize: 20 } }) }), { fonts }), CARD_FILE, 'modern'), ['Items'])!;
+    expect([kvGet(modern, 'wide'), kvGet(modern, 'tall')]).toEqual(['63', '20']);
+  });
+
+  // childPass writes unscaled numbers before scalePass, which multiplies them with the rest of the file.
+  it('lets the element scale multiply the edited values', () => {
+    const files = buildHud(design({ elements: { teamColumn: { scale: 1.5 } }, children: kids({ Name: { x: 20, fontSize: 14 } }) }));
+    const name = kvFind(tree(files, CARD_FILE), ['Name'])!;
+    expect(kvGet(name, 'xpos')).toBe('30');
+    // scalePass collects the t14 leaf like any other font and clones it again.
+    expect(kvGet(name, 'font')).toBe('HudEd_HudEd_PlayerDisplayName_t14_150');
+    const copy = kvFind(tree(files, SCHEME_FILE), ['Fonts', 'HudEd_HudEd_PlayerDisplayName_t14_150', '1'])!;
+    expect(kvGet(copy, 'tall')).toBe(String(Math.round(14 * 1.5)));
+  });
+
+  // The `t` in the tag: without it a size-60 label and a 0.60 scale on the same font would share one key.
+  it('keeps a size-60 label and a 0.60 scale on the same font apart', () => {
+    const files = buildHud(design({ elements: { teamColumn: { scale: 0.6 } }, children: kids({ Name: { fontSize: 60 } }) }));
+    const fonts = kvFind(tree(files, SCHEME_FILE), ['Fonts'])!.value as KvNode[];
+    expect(kvGet(kvFind(fonts, ['HudEd_PlayerDisplayName_60', '1'])!, 'tall')).toBe(String(Math.round(12 * 0.6)));
+    expect(kvGet(kvFind(fonts, ['HudEd_HudEd_PlayerDisplayName_t60_60', '1'])!, 'tall')).toBe('36');
+  });
+
+  // childPass and fontPass are order independent: fontPass renames every face in the scheme, copies included.
+  it('gives a sized label the chosen font', () => {
+    const files = buildHud(design({ font: 'roboto', children: kids({ Name: { fontSize: 14 } }) }),
+      { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } });
+    const copy = kvFind(tree(files, SCHEME_FILE), ['Fonts', 'HudEd_PlayerDisplayName_t14', '1'])!;
+    expect(kvGet(copy, 'name')).toBe('Roboto Condensed');
+  });
+
+  it('fails naming the file and child for an edit the child cannot take', () => {
+    // validateDesign strips these; this is the guard for a design that skipped it.
+    expect(() => buildHud(design({ children: kids({ HealthNumber: { on: true, color: '1 2 3 255' } }) })))
+      .toThrow(/teammatepanel\.res: HealthNumber takes no colour/);
+    expect(() => buildHud(design({ children: kids({ Head: { fontSize: 20 } }) })))
+      .toThrow(/teammatepanel\.res: Head takes no text size/);
+    expect(() => buildHud(design({ children: kids({ Nope: { x: 1 } }) })))
+      .toThrow(/teammatepanel\.res: Nope is not an editable child/);
+    // D2: a wrong-kind edit fails the same way for size and colour. The splatter now takes both, and
+    // move, so these use Items (no size box, an icon row sized by its font) and Dead (an image with
+    // no tint flag; the portrait took one in task T1) instead. There is no move guard to test any more: every registered child moves
+    // today, so applyChild dropped that guard rather than keep it unreachable (see its own comment).
+    expect(() => buildHud(design({ children: kids({ Items: { w: 10, h: 10 } }) })))
+      .toThrow(/teammatepanel\.res: Items takes no size/);
+    expect(() => buildHud(design({ children: kids({ Dead: { color: '1 2 3 4' } }) })))
+      .toThrow(/teammatepanel\.res: Dead takes no colour/);
+  });
+
+  it('writes an image tint as drawColor and a label tint as fgcolor_override', () => {
+    const card = tree(buildHud(design({ children: kids({
+      BackgroundImage: { color: '64 64 64 200' }, Name: { color: '10 20 30 255' },
+    }) })), CARD_FILE);
+    expect(kvGet(kvFind(card, ['BackgroundImage'])!, 'drawColor')).toBe('64 64 64 200');
+    expect(kvGet(kvFind(card, ['BackgroundImage'])!, 'fgcolor_override')).toBeUndefined();
+    expect(kvGet(kvFind(card, ['Name'])!, 'fgcolor_override')).toBe('10 20 30 255');
+    expect(kvGet(kvFind(card, ['Name'])!, 'drawColor')).toBeUndefined();
+  });
+
+  it('moves and resizes the splatter like any wh piece', () => {
+    const files = buildHud(design({ children: kids({ BackgroundImage: { x: 5, y: 6, w: 80, h: 40 } }) }));
+    expect(cardAt(tree(files, CARD_FILE), 'BackgroundImage')).toEqual(['5', '6', '80', '40']);
+  });
+});
+
+describe('buildHud, layout', () => {
+  it('ships stock hudlayout plus the xHair element for a design that wants one', () => {
+    const files = buildHud(design({ crosshair: 'addon' }));
+    const got = layoutOf(files);
+    const stock = parseKv(baseFile('stock', 'scripts/hudlayout.res'))[0].value as KvNode[];
+    expect(got.filter((n) => n.key !== 'xHair')).toEqual(stock);
+    const x = kvFind(got, ['xHair'])!;
+    expect(kvGet(x, 'image')).toBe('hud/altcrosshair');
+    expect(kvGet(x, 'xpos')).toBe('c-13');
+    expect(files.map((f) => f.path)).toContain('addoninfo.txt');
+  });
+
+  it('leaves xHair out when the crosshair choice is none, on either preset', () => {
+    expect(kvFind(layoutOf(buildHud(design({ crosshair: 'none' }))), ['xHair'])).toBeUndefined();
+    const modern = layoutOf(buildHud(design({ preset: 'modern', crosshair: 'none' }), { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } }));
+    expect(modern.filter((n) => n.key.toLowerCase() === 'xhair')).toEqual([]);
+  });
+
+  it('does not duplicate xHair on the modern preset, which already has it', () => {
+    for (const crosshair of ['addon', 'bundle'] as const) {
+      const got = layoutOf(buildHud(design({ preset: 'modern', crosshair }), { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) }, crosshair: PIXELS }));
+      expect(got.filter((n) => n.key.toLowerCase() === 'xhair').length).toBe(1);
+    }
+  });
+
+  it('ships the crosshair texture only when bundling, the Crosshair page\'s own bytes', () => {
+    const paths = (files: { path: string }[]) => files.map((f) => f.path).filter((p) => p.includes('altcrosshair'));
+    expect(paths(buildHud(design({ crosshair: 'addon' }), { crosshair: PIXELS }))).toEqual([]);
+    expect(paths(buildHud(design({ crosshair: 'none' }), { crosshair: PIXELS }))).toEqual([]);
+    const files = buildHud(design({ crosshair: 'bundle' }), { crosshair: PIXELS });
+    expect(kvGet(kvFind(layoutOf(files), ['xHair'])!, 'image')).toBe('hud/altcrosshair');
+    const want = crosshairFiles(TEX, TEX, PIXELS);
+    expect(files.filter((f) => f.path.includes('altcrosshair'))).toEqual(want);
+  });
+
+  it('fails a bundled crosshair with no pixels rather than ship the missing-texture checker', () => {
+    expect(() => buildHud(design({ crosshair: 'bundle' }))).toThrow(/Custom crosshair/);
+  });
+
+  it("packs the crosshair as a TEX x TEX texture holding exactly the pixels it was handed", () => {
+    // artPixels draws an image crosshair, fitted and centred, into these
+    // pixels (crosshair/texture.test.ts); here they must come back out of
+    // the shipped texture unchanged, whatever the art was.
+    const files = buildHud(design({ crosshair: 'bundle' }), { crosshair: PIXELS });
+    const got = decodeVTF(files.find((f) => f.path === 'materials/vgui/hud/altcrosshair.vtf')!.data);
+    expect([got.w, got.h]).toEqual([TEX, TEX]);
+    expect(got.rgba).toEqual(PIXELS);
+  });
+
+  it('reports the crosshair element visible unless the choice is none', () => {
+    expect(elementRect(design({ crosshair: 'bundle' }), 'xhair', '16:9').visible).toBe(true);
+    expect(elementRect(design({ crosshair: 'addon' }), 'xhair', '16:9').visible).toBe(true);
+    expect(elementRect(design({ crosshair: 'none' }), 'xhair', '16:9').visible).toBe(false);
+  });
+
+  // Probe T2: never_draw on HudCrosshair hides the engine crosshair for both teams.
+  it('writes never_draw on HudCrosshair only when the player hides the game crosshair', () => {
+    const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+    for (const preset of ['stock', 'modern'] as const) {
+      const on = kvFind(layoutOf(buildHud(design({ preset, hideGameCrosshair: true }), { fonts })), ['HudCrosshair'])!;
+      expect(kvGet(on, 'never_draw'), preset).toBe('1');
+      const off = kvFind(layoutOf(buildHud(design({ preset }), { fonts })), ['HudCrosshair'])!;
+      expect(kvGet(off, 'never_draw'), preset).toBeUndefined();
+    }
+  });
+
+  it('moves one element and nothing else', () => {
+    const got = layoutOf(buildHud(design({ elements: { ownHealth: { x: 8, y: 400 } } })));
+    const p = kvFind(got, ['CHudLocalPlayerDisplay'])!;
+    expect(kvGet(p, 'xpos')).toBe('8');
+    expect(kvGet(p, 'ypos')).toBe('r80');
+    expect(kvGet(p, 'wide')).toBe('150');
+    const other = kvFind(got, ['HudWeaponSelection'])!;
+    expect(kvGet(other, 'xpos')).toBe('r98');
+  });
+
+  // Probes B2 and B3: visible 0 alone hid nothing in game, so a hidden
+  // element is also written at size 0 (the one deliberate change to this test).
+  it('hides an element', () => {
+    const got = layoutOf(buildHud(design({ elements: { progressBar: { visible: false } } })));
+    const p = kvFind(got, ['HudProgressBar'])!;
+    expect([kvGet(p, 'visible'), kvGet(p, 'wide'), kvGet(p, 'tall')]).toEqual(['0', '0', '0']);
+  });
+
+  it('free-resizes chat and rewrites the three chat animations', () => {
+    const files = buildHud(design({ elements: { chat: { x: 134, y: 320, w: 280, h: 100 } } }));
+    const c = kvFind(layoutOf(files), ['HudChat'])!;
+    expect(kvGet(c, 'xpos')).toBe('134');
+    expect(kvGet(c, 'ypos')).toBe('r160');
+    expect(kvGet(c, 'wide')).toBe('280');
+    const anim = text(files, 'scripts/hudanimations.txt')!;
+    const hits = anim.match(/Animate\s+HudChat\s+Position\s+"134 r160"/g) ?? [];
+    expect(hits.length).toBe(3);
+  });
+
+  it('does not ship hudanimations when chat has not moved', () => {
+    expect(text(buildHud(design({})), 'scripts/hudanimations.txt')).toBeUndefined();
+  });
+
+  it('free-resizes and moves HudPZDamageRecord, the kill/incap feed', () => {
+    const got = layoutOf(buildHud(design({ elements: { killNotices: { x: 40, y: 40, w: 300, h: 90 } } })));
+    const p = kvFind(got, ['HudPZDamageRecord'])!;
+    expect(kvGet(p, 'xpos')).toBe('40');
+    expect(kvGet(p, 'ypos')).toBe('40');
+    expect(kvGet(p, 'wide')).toBe('300');
+    expect(kvGet(p, 'tall')).toBe('90');
+  });
+
+  // CHudPZDamageRecordPanel is the same trap as the chat window (hardHide's
+  // own doc comment): game code may force it visible again, so hiding it
+  // writes size 0 as well as visible 0.
+  it('hard-hides HudPZDamageRecord: visible 0 and size 0', () => {
+    const got = layoutOf(buildHud(design({ elements: { killNotices: { visible: false } } })));
+    const p = kvFind(got, ['HudPZDamageRecord'])!;
+    expect([kvGet(p, 'visible'), kvGet(p, 'wide'), kvGet(p, 'tall')]).toEqual(['0', '0', '0']);
+  });
+
+  it('leaves HudPZDamageRecord exactly as the base file while killNotices is untouched', () => {
+    const got = kvFind(layoutOf(buildHud(design({}))), ['HudPZDamageRecord'])!;
+    const base = kvFind(parseKv(baseFile('stock', 'scripts/hudlayout.res'))[0].value as KvNode[], ['HudPZDamageRecord'])!;
+    expect(got).toEqual(base);
+  });
+
+  it('ships every file the modern preset overrides even when nothing is edited', () => {
+    const paths = buildHud(design({ preset: 'modern' }), { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } }).map((f) => f.path);
+    expect(paths).toContain('resource/ui/hud/teammatepanel.res');
+    expect(paths).toContain('scripts/hudanimations.txt');
+  });
+
+  it('never ships a crosshair image', () => {
+    for (const preset of ['stock', 'modern'] as const) {
+      expect(buildHud(design({ preset }), { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } }).some((f) => f.path.includes('altcrosshair'))).toBe(false);
+    }
+  });
+
+  it('anchors a team display by what it shows, not by its full-width container', () => {
+    const got = layoutOf(buildHud(design({ elements: { teamColumn: { x: 8, y: 332 } } })));
+    expect(kvGet(kvFind(got, ['CHudTeamDisplay'])!, 'xpos')).toBe('8');
+  });
+});
+
+describe('buildHud, the chat window (basechat.res)', () => {
+  // Probe T4: the chat window you type into and its history are placed and
+  // sized by basechat.res's HudChat; hudlayout's HudChat is only a background
+  // panel. So a moved chat has to be written to both.
+  const CHAT = 'resource/ui/basechat.res';
+  const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+  const build = (d: HudDesign) => buildHud(d, { fonts });
+  /** The value the PC reads: the entry with no platform conditional, or the [$WIN32] one. */
+  const pc = (block: KvNode, key: string) => (block.value as KvNode[])
+    .find((n) => n.key.toLowerCase() === key.toLowerCase() && typeof n.value === 'string' && (!n.cond || n.cond === '[$WIN32]'))?.value as string | undefined;
+  const console360 = (block: KvNode) => (block.value as KvNode[]).filter((n) => n.cond === '[$X360]');
+  const chatOf = (files: { path: string; data: Uint8Array }[], preset: 'stock' | 'modern') => tree(files, CHAT, preset);
+
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`writes a moved chat's position and size into basechat.res too: ${preset}`, () => {
+      // Top right, as the owner placed it: hudlayout's HudChat went to r320 0 and the chat window stayed put.
+      const d = design({ preset, elements: { chat: { x: 853 - 320, y: 0 } } });
+      const files = build(d);
+      expect(text(files, CHAT), preset).toBeDefined();
+      const layoutChat = kvFind(layoutOf(files), ['HudChat'])!;
+      const base = kvFind(parseKv(baseFile(preset, CHAT))[0].value as KvNode[], ['HudChat'])!;
+      const chat = kvFind(chatOf(files, preset), ['HudChat'])!;
+      expect(pc(chat, 'xpos')).toBe(kvGet(layoutChat, 'xpos'));
+      expect(pc(chat, 'ypos')).toBe(kvGet(layoutChat, 'ypos'));
+      expect(pc(chat, 'xpos')).toBe('r320');
+      expect(pc(chat, 'ypos')).toBe('0');
+      const r = elementRect(d, 'chat', d.aspect);
+      expect(pc(chat, 'wide')).toBe(String(Math.round(r.w)));
+      expect(pc(chat, 'tall')).toBe(String(Math.round(r.h)));
+      // The console lines ride along untouched.
+      expect(console360(chat)).toEqual(console360(base));
+    });
+
+    it(`scales HudChatHistory with a resized chat, keeping its share of the box: ${preset}`, () => {
+      const files = build(design({ preset, elements: { chat: { x: 10, y: 200, w: 560, h: 240 } } }));
+      const nodes = chatOf(files, preset);
+      const chat = kvFind(nodes, ['HudChat'])!;
+      expect([pc(chat, 'wide'), pc(chat, 'tall')]).toEqual(['560', '240']);
+      // The base box is 280 x 120 with the history at 10, 17, 260 x 75: twice the size is twice each number.
+      const history = kvFind(nodes, ['HudChatHistory'])!;
+      expect(['xpos', 'ypos', 'wide', 'tall'].map((k) => pc(history, k))).toEqual(['20', '34', '520', '150']);
+      const base = kvFind(parseKv(baseFile(preset, CHAT))[0].value as KvNode[], ['HudChatHistory'])!;
+      expect(console360(history)).toEqual(console360(base));
+    });
+
+    // Every other basechat child scales the same way HudChatHistory does,
+    // not only the history: the box you type into (ChatInputLine) and the
+    // label above it (KeyStateLabel), left at the base file's size before.
+    it(`scales the other basechat children too, not only HudChatHistory: ${preset}`, () => {
+      const files = build(design({ preset, elements: { chat: { x: 10, y: 200, w: 560, h: 240 } } }));
+      const nodes = chatOf(files, preset);
+      const input = kvFind(nodes, ['ChatInputLine'])!;
+      // Base: xpos 10, ypos 395, wide 260, tall 2; the box doubled, so does every number.
+      expect(['xpos', 'ypos', 'wide', 'tall'].map((k) => pc(input, k))).toEqual(['20', '790', '520', '4']);
+      const inputBase = kvFind(parseKv(baseFile(preset, CHAT))[0].value as KvNode[], ['ChatInputLine'])!;
+      expect(console360(input)).toEqual(console360(inputBase));
+
+      const keyState = kvFind(nodes, ['KeyStateLabel'])!;
+      // Base: xpos 10, ypos 2, wide 300, tall 12.
+      expect(['xpos', 'ypos', 'wide', 'tall'].map((k) => pc(keyState, k))).toEqual(['20', '4', '600', '24']);
+    });
+
+    // ChatInputLine's base tall is 2: shrinking the box to a fifth or less
+    // rounds that to 0, which is the game's own "hidden" size (hidePass,
+    // hardHide). A shrink never asked to hide it, so wide and tall are
+    // clamped to at least 1; xpos and ypos are free to land on 0.
+    it(`never rounds a scaled child's wide or tall down to 0: ${preset}`, () => {
+      const nodes = chatOf(build(design({ preset, elements: { chat: { w: 280, h: 20 } } })), preset);
+      const input = kvFind(nodes, ['ChatInputLine'])!;
+      expect(pc(input, 'tall')).toBe('1');
+      expect(Number(pc(input, 'wide'))).toBeGreaterThan(0);
+    });
+
+    it(`hides the chat window by size as well as visible 0: ${preset}`, () => {
+      const nodes = chatOf(build(design({ preset, elements: { chat: { visible: false } } })), preset);
+      for (const name of ['HudChat', 'HudChatHistory']) {
+        const b = kvFind(nodes, [name])!;
+        expect(['visible', 'wide', 'tall'].map((k) => pc(b, k)), name).toEqual(['0', '0', '0']);
+      }
+    });
+
+    // hudlayout's own HudChat is only a background panel (Probe T4), but game
+    // code opens and shows the chat itself, the same trap hidePass works
+    // around for the teammate card: visible 0 alone may not stay hidden.
+    it(`hard-hides hudlayout's own HudChat panel too, since the game may force it on: ${preset}`, () => {
+      const layoutChat = kvFind(layoutOf(build(design({ preset, elements: { chat: { visible: false } } }))), ['HudChat'])!;
+      expect(['visible', 'wide', 'tall'].map((k) => kvGet(layoutChat, k))).toEqual(['0', '0', '0']);
+    });
+
+    // The chat window's size is basechat.res's own (280 x 120 on both
+    // presets), not hudlayout's background panel (320 wide on stock), so
+    // moving the chat must not resize it or touch its children.
+    it(`keeps basechat's own size and children when the chat only moves: ${preset}`, () => {
+      const d = design({ preset, elements: { chat: { x: 853 - 280, y: 0 } } });
+      const nodes = chatOf(build(d), preset);
+      const base = parseKv(baseFile(preset, CHAT))[0].value as KvNode[];
+      const chat = kvFind(nodes, ['HudChat'])!;
+      expect([pc(chat, 'wide'), pc(chat, 'tall')]).toEqual(['280', '120']);
+      for (const name of ['HudChatHistory', 'ChatInputLine', 'KeyStateLabel', 'ChatFiltersButton']) {
+        expect(kvFind(nodes, [name]), name).toEqual(kvFind(base, [name]));
+      }
+      const r = elementRect(d, 'chat', d.aspect);
+      expect([r.w, r.h]).toEqual([280, 120]);
+    });
+
+    it(`reports an untouched chat at basechat's size: ${preset}`, () => {
+      const r = elementRect(design({ preset }), 'chat', '16:9');
+      expect([r.w, r.h]).toEqual([280, 120]);
+    });
+
+    it(`agrees with elementRect wherever the chat goes: ${preset}`, () => {
+      for (const aspect of ['4:3', '16:9', '16:10'] as const) {
+        for (const chat of [{ x: 853 - 320, y: 0 }, { x: 20, y: 300, w: 200, h: 90 }, { w: 400, h: 150 }, { x: 400 }] as ElementOverride[]) {
+          const d = design({ preset, aspect, elements: { chat } });
+          const c = kvFind(chatOf(build(d), preset), ['HudChat'])!;
+          const r = elementRect(d, 'chat', aspect);
+          const got = { x: parsePos(pc(c, 'xpos')!, screenW(aspect)), y: parsePos(pc(c, 'ypos')!, 480), w: Number(pc(c, 'wide')), h: Number(pc(c, 'tall')) };
+          expect(got, `${aspect} ${JSON.stringify(chat)}`).toEqual({ x: r.x, y: r.y, w: Math.round(r.w), h: Math.round(r.h) });
+        }
+      }
+    });
+  }
+
+  it('ships no basechat.res on stock while the chat is untouched', () => {
+    expect(text(build(design({})), CHAT)).toBeUndefined();
+    expect(text(build(design({ elements: { ownHealth: { visible: false }, chat: { visible: true } } })), CHAT)).toBeUndefined();
+  });
+
+  it("ships Modern's own basechat.res unchanged while the chat is untouched", () => {
+    const got = text(build(design({ preset: 'modern' })), CHAT)!;
+    expect(parseKv(got)).toEqual(parseKv(baseFile('modern', CHAT)));
+  });
+});
+
+describe('pcSet', () => {
+  it('adds a plain entry rather than overwrite a console-only one', () => {
+    const block: KvNode = { key: 'HudChat', value: [{ key: 'wide', value: '350', cond: '[$X360]' }] };
+    pcSet(block, 'wide', '400');
+    expect(block.value).toEqual([{ key: 'wide', value: '350', cond: '[$X360]' }, { key: 'wide', value: '400' }]);
+  });
+  it('sets both a plain and a [$WIN32] entry and leaves the console one', () => {
+    const block: KvNode = { key: 'b', value: [{ key: 'xpos', value: '1', cond: '[$WIN32]' }, { key: 'xpos', value: '2', cond: '[$X360]' }, { key: 'tall', value: '3' }] };
+    pcSet(block, 'xpos', '9'); pcSet(block, 'tall', '8');
+    expect(block.value).toEqual([{ key: 'xpos', value: '9', cond: '[$WIN32]' }, { key: 'xpos', value: '2', cond: '[$X360]' }, { key: 'tall', value: '8' }]);
+  });
+});
+
+describe('elementRect', () => {
+  it('reads the base position at the asked aspect', () => {
+    expect(elementRect(design({}), 'ownHealth', '16:9')).toMatchObject({ x: 728, y: 389, visible: true });
+    expect(elementRect(design({}), 'ownHealth', '4:3')).toMatchObject({ x: 515, y: 389 });
+  });
+  it('re-projects a moved element through its anchor', () => {
+    const d = design({ aspect: '16:9', elements: { ownHealth: { x: 728, y: 389 } } });
+    expect(elementRect(d, 'ownHealth', '4:3').x).toBe(515);
+  });
+});
+
+describe('buildHud, scale', () => {
+  const scheme = (files: { path: string; data: Uint8Array }[]) =>
+    parseKv(text(files, 'resource/clientscheme.res')!)[0].value as KvNode[];
+
+  it('multiplies the container and every child, and points children at scaled fonts', () => {
+    const files = buildHud(design({ elements: { teamColumn: { scale: 1.5 } } }));
+    const stockPanel = parseKv(baseFile('stock', 'resource/ui/hud/teammatepanel.res'))[0].value as KvNode[];
+    const gotPanel = parseKv(text(files, 'resource/ui/hud/teammatepanel.res')!)[0].value as KvNode[];
+    const named = stockPanel.find((n) => typeof n.value !== 'string' && kvGet(n, 'font') === 'PlayerDisplayName')!;
+    const after = kvFind(gotPanel, [named.key])!;
+    expect(kvGet(after, 'wide')).toBe(String(Math.round(parseFloat(kvGet(named, 'wide')!) * 1.5)));
+    expect(kvGet(after, 'font')).toBe('HudEd_PlayerDisplayName_150');
+
+    const fonts = kvFind(scheme(files), ['Fonts'])!;
+    const stockFont = kvFind(parseKv(baseFile('stock', 'resource/clientscheme.res'))[0].value as KvNode[], ['Fonts', 'PlayerDisplayName', '1'])!;
+    const scaled = kvFind(fonts.value as KvNode[], ['HudEd_PlayerDisplayName_150', '1'])!;
+    expect(kvGet(scaled, 'tall')).toBe(String(Math.round(parseFloat(kvGet(stockFont, 'tall')!) * 1.5)));
+    expect(kvGet(scaled, 'name')).toBe(kvGet(stockFont, 'name'));
+  });
+
+  it('writes nothing extra at scale 1', () => {
+    const paths = buildHud(design({ elements: { teamColumn: { scale: 1 } } })).map((f) => f.path);
+    expect(paths).not.toContain('resource/clientscheme.res');
+  });
+
+  it('scales the five infected health files the game reads, and never writes tankhealth.res', () => {
+    const paths = buildHud(design({ elements: { siHealth: { scale: 1.2 } } })).map((f) => f.path);
+    for (const n of ['boomerhealth', 'hunterhealth', 'smokerhealth', 'zombiehealthleft_large', 'zombiehealthleft_small']) {
+      expect(paths).toContain(`resource/ui/hud/${n}.res`);
+    }
+    expect(paths).not.toContain('resource/ui/hud/tankhealth.res');
+  });
+});
+
+describe('buildHud, team layout', () => {
+  const team = (files: { path: string; data: Uint8Array }[]) =>
+    parseKv(text(files, 'resource/ui/hud/teamdisplayhud.res') ?? baseFile('stock', 'resource/ui/hud/teamdisplayhud.res'))[0].value as KvNode[];
+
+  it('stacks the survivor team as a column', () => {
+    const t = team(buildHud(design({ elements: { teamColumn: { dir: 'column', gap: 0 } } })));
+    expect([1, 2, 3, 4].map((n) => [kvGet(kvFind(t, [`TeamPlayer${n}`])!, 'xpos'), kvGet(kvFind(t, [`TeamPlayer${n}`])!, 'ypos')]))
+      .toEqual([['0', '0'], ['0', '150'], ['0', '300'], ['0', '450']]);
+  });
+
+  it('lays it out as a row', () => {
+    const t = team(buildHud(design({ elements: { teamColumn: { dir: 'row' } } })));
+    expect(kvGet(kvFind(t, ['TeamPlayer3'])!, 'xpos')).toBe('280');
+    expect(kvGet(kvFind(t, ['TeamPlayer3'])!, 'ypos')).toBe('0');
+  });
+
+  it('grows the container so a column is not clipped', () => {
+    const got = layoutOf(buildHud(design({ elements: { teamColumn: { dir: 'column', gap: 10 } } })));
+    expect(parseFloat(kvGet(kvFind(got, ['CHudTeamDisplay'])!, 'tall')!)).toBeGreaterThanOrEqual(3 * 160 + 150);
+  });
+
+  it('sets infected spacing in hudlayout', () => {
+    const got = layoutOf(buildHud(design({ elements: { infectedRow: { spacing: 124 } } })));
+    expect(kvGet(kvFind(got, ['CHudZombieTeamDisplay'])!, 'HorizPanelSpacing')).toBe('124');
+  });
+
+  it('scales the infected row spacing the preview shows, and only once', () => {
+    const d = design({ elements: { infectedRow: { scale: 1.5 } } });
+    const got = layoutOf(buildHud(d));
+    // Stock HorizPanelSpacing is 140; teamLayout is the only thing that
+    // applies the scale, so the file gets 210 and not 315.
+    expect(teamLayout(d, elementById('infectedRow')!).spacing).toBe(210);
+    expect(kvGet(kvFind(got, ['CHudZombieTeamDisplay'])!, 'HorizPanelSpacing')).toBe('210');
+  });
+});
+
+/**
+ * The whole point of teamLayout: one function decides a team element's
+ * direction, pitch, card, offset and container, the generator writes exactly
+ * those numbers and elementRect reports exactly that container, so the
+ * canvas cannot show a layout the downloaded file contradicts.
+ */
+describe('team geometry: the canvas and the file agree for any scale, dir, gap and fit', () => {
+  const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+  for (const preset of ['stock', 'modern'] as const) {
+    for (const dir of ['row', 'column'] as const) {
+      for (const gap of [undefined, 0, 20]) {
+        for (const scale of [undefined, 0.75, 1.25]) {
+          for (const fit of [false, true]) {
+            const label = `${preset} ${dir} gap=${gap} scale=${scale} fit=${fit}`;
+            it(label, () => {
+              const o: ElementOverride = { dir };
+              if (gap !== undefined) o.gap = gap;
+              if (scale !== undefined) o.scale = scale;
+              if (fit) o.fit = true;
+              const d = design({ preset, elements: { teamColumn: o } });
+              const files = buildHud(d, { fonts });
+              const t = teamLayout(d, elementById('teamColumn')!);
+              const rect = elementRect(d, 'teamColumn', d.aspect);
+              // The pitch is one card plus the gap, both scaled.
+              expect(t.spacing, label).toBe(Math.round((t.dir === 'row' ? t.card!.w : t.card!.h) + t.gap! * (scale ?? 1)));
+              const team = tree(files, TEAM_FILE, preset);
+              for (let n = 1; n <= 4; n++) {
+                const p = kvFind(team, [`TeamPlayer${n}`])!;
+                const along = t.spacing * (n - 1);
+                expect(kvGet(p, 'xpos'), `${label} TeamPlayer${n} xpos`).toBe(String(t.offset!.x + (t.dir === 'row' ? along : 0)));
+                expect(kvGet(p, 'ypos'), `${label} TeamPlayer${n} ypos`).toBe(String(t.offset!.y + (t.dir === 'row' ? 0 : along)));
+                expect(t.cards![n - 1], `${label} TeamPlayer${n} tokens`).toEqual({ xpos: kvGet(p, 'xpos'), ypos: kvGet(p, 'ypos') });
+                expect(kvGet(p, 'wide'), `${label} TeamPlayer${n} wide`).toBe(String(Math.round(t.card!.w)));
+                expect(kvGet(p, 'tall'), `${label} TeamPlayer${n} tall`).toBe(String(Math.round(t.card!.h)));
+              }
+              // The container the preview draws is the container the file has, where the file puts it.
+              const c = kvFind(layoutOf(files), ['CHudTeamDisplay'])!;
+              expect(kvGet(c, 'wide'), `${label} container wide`).toBe(String(Math.round(rect.w)));
+              expect(kvGet(c, 'tall'), `${label} container tall`).toBe(String(Math.round(rect.h)));
+              expect(parsePos(kvGet(c, 'xpos')!, screenW(d.aspect)), `${label} container xpos`).toBe(rect.x);
+              expect(parsePos(kvGet(c, 'ypos')!, 480), `${label} container ypos`).toBe(rect.y);
+              // And it covers all four cards, so nothing is clipped away that the canvas drew.
+              if (t.dir === 'row') expect(rect.w, label).toBeGreaterThanOrEqual(t.offset!.x + t.spacing * 3 + t.card!.w);
+              else expect(rect.h, label).toBeGreaterThanOrEqual(t.offset!.y + t.spacing * 3 + t.card!.h);
+            });
+          }
+        }
+      }
+    }
+  }
+
+  it('lays out a fitted, scaled column as the sample does', () => {
+    const d = design({ elements: { teamColumn: { scale: 1.25, dir: 'column', fit: true, gap: 4 } } });
+    expect(teamLayout(d, elementById('teamColumn')!)).toEqual({
+      dir: 'column', spacing: 50, gap: 4, offset: { x: 16, y: 45 }, card: { w: 152.5, h: 45 },
+      container: { w: 168.5, h: 240 },
+      cards: [{ xpos: '16', ypos: '45' }, { xpos: '16', ypos: '95' }, { xpos: '16', ypos: '145' }, { xpos: '16', ypos: '195' }],
+      // 240 tall grows up from stock's r75 until its bottom is on the screen's.
+      at: { ypos: 'r240' },
+    });
+    const t = tree(buildHud(d), TEAM_FILE);
+    expect(kvGet(kvFind(t, ['TeamPlayer1'])!, 'tall')).toBe('45');
+    expect(kvGet(kvFind(t, ['TeamPlayer1'])!, 'wide')).toBe('153');
+  });
+
+  it('leaves the container at its mock size while the generator writes no team geometry', () => {
+    expect(elementRect(design({}), 'teamColumn', '16:9')).toMatchObject({ w: 430, h: 75 });
+    expect(teamLayout(design({}), elementById('teamColumn')!).container).toBeUndefined();
+  });
+});
+
+describe('a team container anchored to the far edge grows back toward it', () => {
+  it('keeps a stock fitted column on screen by growing it up from the bottom', () => {
+    // Stock's container sits at r75 and would grow down from y 405, putting the cards at 441, 481, 521.
+    const d = design({ elements: { teamColumn: { fit: true, dir: 'column', gap: 4 } } });
+    const cards = teamCardRects(d, '16:9');
+    for (const c of cards) {
+      expect(c.y).toBeGreaterThanOrEqual(0);
+      expect(c.y + c.h).toBeLessThanOrEqual(480);
+    }
+    // 192 tall, bottom on the screen's bottom edge.
+    const c = kvFind(layoutOf(buildHud(d)), ['CHudTeamDisplay'])!;
+    expect([kvGet(c, 'ypos'), kvGet(c, 'tall')]).toEqual(['r192', '192']);
+    expect(elementRect(d, 'teamColumn', '16:9')).toMatchObject({ y: 288, h: 192 });
+    expect(cards.map((r) => r.y)).toEqual([324, 364, 404, 444]);
+  });
+
+  it('keeps the owner sample column on screen at scale 1.25', () => {
+    const d = design({ elements: { teamColumn: { scale: 1.25, dir: 'column', fit: true, gap: 4 } } });
+    for (const c of teamCardRects(d, '16:9')) expect(c.y + c.h).toBeLessThanOrEqual(480);
+  });
+
+  it('leaves a Row where it was along the screen, lifts it just enough to end on it, and leaves a moved team where the player put it', () => {
+    // Fitted, gap 30, scale 1.5: the cards reach 108 into a container at r75,
+    // so the container lifts to r108 and the cards end on the bottom edge.
+    const row = kvFind(layoutOf(buildHud(design({ elements: { teamColumn: { fit: true, gap: 30, scale: 1.5 } } }))), ['CHudTeamDisplay'])!;
+    expect([kvGet(row, 'xpos'), kvGet(row, 'ypos')]).toEqual(['0', 'r108']);
+    const moved = design({ elements: { teamColumn: { fit: true, dir: 'column', gap: 4, x: 8, y: 100 } } });
+    expect(elementRect(moved, 'teamColumn', '16:9')).toMatchObject({ x: 8, y: 100 });
+    // Moving it across only (the X box alone) leaves the column growing up from the bottom.
+    const across = design({ elements: { teamColumn: { fit: true, dir: 'column', gap: 4, x: 8 } } });
+    expect(elementRect(across, 'teamColumn', '16:9')).toMatchObject({ x: 8, y: 288 });
+    expect(kvGet(kvFind(layoutOf(buildHud(across)), ['CHudTeamDisplay'])!, 'ypos')).toBe('r192');
+  });
+
+  it('never moves a container that did not grow past its file size, so fitting alone still moves nothing', () => {
+    // Modern's column: 136 tall in the file, 130 fitted, so it stays at r148.
+    const d = design({ preset: 'modern', elements: { teamColumn: { fit: true } } });
+    const c = kvFind(layoutOf(buildHud(d, { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } })), ['CHudTeamDisplay'])!;
+    expect(kvGet(c, 'ypos')).toBe('r148');
+  });
+
+  it('grows back only toward a far edge, by what it grew, and stays on screen', () => {
+    expect(growBack(405, 192, 100, 480, true)).toBe(288);          // grew 92 past a bottom already off screen: clamped to the edge
+    expect(growBack(300, 150, 100, 480, true)).toBe(250);          // grew 50: the bottom stays at 400
+    expect(growBack(300, 80, 100, 480, true)).toBe(300);           // shrank: never moves down
+    expect(growBack(405, 192, 100, 480, false)).toBe(405);         // anchored to the near edge: grows away from it
+    expect(growBack(700, 900, 100, 853, true)).toBe(0);            // taller than the screen: its start stays on it
+    expect(growBack(600, 400, 200, 853, true)).toBe(400);          // a right-anchored row grows left the same way
+  });
+});
+
+describe('the whole team stays on screen', () => {
+  it('lifts a scaled Row off the bottom edge so its cards end on the screen', () => {
+    const d = design({ elements: { teamColumn: { fit: true, scale: 1.25 } } });
+    expect(elementRect(d, 'teamColumn', '16:9')).toMatchObject({ x: 0, y: 390 });
+    expect(teamCardRects(d, '16:9')[0]).toMatchObject({ y: 435, h: 45 });
+    expect(kvGet(kvFind(layoutOf(buildHud(d)), ['CHudTeamDisplay'])!, 'ypos')).toBe('r90');
+  });
+
+  it('keeps a moved team switched to Column on screen', () => {
+    // 234 tall at y 300 would end at 534: it comes up to 246, the last card ending on the edge. (The
+    // stock row's gap, 140 - 122 = 18, steps the column: the card is 122 wide with the bar where the game draws it.)
+    const d = design({ elements: { teamColumn: { fit: true, dir: 'column', x: 500, y: 300 } } });
+    expect(elementRect(d, 'teamColumn', '16:9')).toMatchObject({ x: 500, y: 246, h: 234 });
+    const last = teamCardRects(d, '16:9')[3];
+    expect(last.y + last.h).toBe(480);
+  });
+
+  it('brings a team moved past the top and left edges back to 0', () => {
+    const d = design({ elements: { teamColumn: { fit: true, x: -50, y: -20 } } });
+    expect(elementRect(d, 'teamColumn', '16:9')).toMatchObject({ x: 0, y: 0 });
+    const c = kvFind(layoutOf(buildHud(d)), ['CHudTeamDisplay'])!;
+    expect([kvGet(c, 'xpos'), kvGet(c, 'ypos')]).toEqual(['0', '0']);
+  });
+
+  it('leaves an unscaled team exactly where the preset puts it, fitted or not', () => {
+    // Stock's own container hangs 25 off the bottom, but its cards do not: nothing moves.
+    expect(elementRect(DEFAULT_DESIGN, 'teamColumn', '16:9')).toMatchObject({ y: 405 });
+    expect(teamCardRects(DEFAULT_DESIGN, '16:9')[0]).toMatchObject({ x: 13, y: 441 });
+    expect(elementRect(design({ elements: { teamColumn: { gap: 30 } } }), 'teamColumn', '16:9')).toMatchObject({ y: 405 });
+    const modern = design({ preset: 'modern', elements: { teamColumn: { fit: true } } });
+    expect(elementRect(modern, 'teamColumn', '16:9')).toMatchObject({ x: 8, y: 332 });
+  });
+
+  it('clamps a start so the reach ends on the screen, never before 0', () => {
+    expect(keepOnScreen(405, 90, 480)).toBe(390);
+    expect(keepOnScreen(405, 72, 480)).toBe(405);
+    expect(keepOnScreen(-20, 72, 480)).toBe(0);
+    expect(keepOnScreen(300, 900, 853)).toBe(0);
+  });
+});
+
+describe('cardFrame', () => {
+  it("reports the frame a child's stored numbers are drawn in, the one the generator used", () => {
+    expect(cardFrame(DEFAULT_DESIGN)).toEqual({ shift: { x: 13, y: 36 }, k: 1 });
+    expect(cardFrame(design({ elements: { teamColumn: { scale: 1.5 } } }))).toEqual({ shift: { x: 0, y: 0 }, k: 1.5 });
+    const c = teamCardRects(DEFAULT_DESIGN, '16:9')[1];
+    const f = cardFrame(DEFAULT_DESIGN);
+    const info = cardChild(DEFAULT_DESIGN, 'Head')!;
+    const head = childRects(DEFAULT_DESIGN, 'teamColumn', { x: c.x, y: c.y }, 1).find((r) => r.name === 'Head')!;
+    expect(head.x).toBe(c.x + (info.x - f.shift.x) * f.k);
+    expect(head.y).toBe(c.y + (info.y - f.shift.y) * f.k);
+  });
+});
+
+describe('teamLayout, the gap', () => {
+  const layout = (d: HudDesign) => teamLayout(d, elementById('teamColumn')!);
+
+  it('derives the gap from the preset file when none is stored, so a new design looks like its preset', () => {
+    // Stock row pitch 140: fitted card 122 (the bar drawn at the item row's x) leaves 18; the unfitted 150 overlaps by 10.
+    expect(layout(design({ elements: { teamColumn: { fit: true } } }))).toMatchObject({ gap: 18, spacing: 140 });
+    expect(layout(design({}))).toMatchObject({ gap: -10, spacing: 140 });
+    // Modern column pitch 34: fitted card 26 tall leaves 8.
+    expect(layout(design({ preset: 'modern', elements: { teamColumn: { fit: true } } }))).toMatchObject({ gap: 8, spacing: 34 });
+  });
+
+  it('steps a fitted stock column by the card plus the gap', () => {
+    const files = buildHud(design({ elements: { teamColumn: { fit: true, dir: 'column', gap: 4 } } }));
+    const team = tree(files, TEAM_FILE);
+    expect([1, 2, 3, 4].map((n) => kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'ypos'))).toEqual(['36', '76', '116', '156']);
+    expect(kvGet(kvFind(team, ['TeamPlayer1'])!, 'xpos')).toBe('13');
+    const c = kvFind(layoutOf(files), ['CHudTeamDisplay'])!;
+    expect([kvGet(c, 'wide'), kvGet(c, 'tall')]).toEqual(['135', '192']);
+  });
+
+  it('leaves the content of an overlapping old column where it was, inside the container', () => {
+    // Before the migration: the unfitted 150-tall card stepped 40 (a gap of -110).
+    const before = design({ elements: { teamColumn: { dir: 'column', gap: -110 } } });
+    const after = validateDesign({ v: 1, elements: { teamColumn: { dir: 'column', spacing: 40 } } });
+    expect(after.elements.teamColumn).toMatchObject({ fit: true, gap: 4 });
+    const content = (d: HudDesign) => {
+      const files = buildHud(d);
+      const team = tree(files, TEAM_FILE), card = tree(files, CARD_FILE);
+      return [1, 2, 3, 4].flatMap((n) => ['Head', 'Health', 'Name', 'Items', 'Status'].map((name) => {
+        const p = kvFind(team, [`TeamPlayer${n}`])!, c = kvFind(card, [name])!;
+        return [parseFloat(kvGet(p, 'xpos')!) + parseFloat(kvGet(c, 'xpos')!), parseFloat(kvGet(p, 'ypos')!) + parseFloat(kvGet(c, 'ypos')!)];
+      }));
+    };
+    expect(content(after)).toEqual(content(before));
+  });
+
+  it('gives a migrated design the pitch it had', () => {
+    expect(layout(validateDesign({ v: 1, elements: { teamColumn: { dir: 'column', spacing: 180 } } })).spacing).toBe(180);
+    expect(layout(validateDesign({ v: 1, preset: 'modern', elements: { teamColumn: { spacing: 45, scale: 1.25 } } })).spacing).toBe(45);
+  });
+});
+
+const FOUR = [{ x: 8, y: 100 }, { x: 8, y: 150 }, { x: 700, y: 100 }, { x: 400, y: 440 }];
+
+describe('buildHud, Free', () => {
+  const free = (patch: Partial<ElementOverride> = {}) =>
+    design({ elements: { teamColumn: { fit: true, dir: 'free', slots: FOUR, ...patch } } });
+
+  it('writes the full-screen container and four anchored card positions', () => {
+    const files = buildHud(free());
+    const c = kvFind(layoutOf(files), ['CHudTeamDisplay'])!;
+    expect(['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(c, k))).toEqual(['0', '0', 'f0', 'f0']);
+    const team = tree(files, TEAM_FILE);
+    // Each fitted card is drawn the fit offset (13, 36) in from its slot. Anchors
+    // follow the card's centre, like an element's: left third plain, middle third c, right third r.
+    expect([1, 2, 3, 4].map((n) => [kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'xpos'), kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'ypos')]))
+      .toEqual([['21', '136'], ['21', 'c-54'], ['r140', '136'], ['c-13', 'r4']]);
+    expect(kvGet(kvFind(team, ['TeamPlayer1'])!, 'wide')).toBe('122');
+  });
+
+  it('reports the full screen as the container and each card the fit offset in from its slot', () => {
+    const d = free();
+    expect(elementRect(d, 'teamColumn', '16:9')).toMatchObject({ x: 0, y: 0, w: 853, h: 480 });
+    const cards = teamCardRects(d, '16:9');
+    expect(cards.slice(0, 3)).toEqual([
+      { x: 21, y: 136, w: 122, h: 36 }, { x: 21, y: 186, w: 122, h: 36 }, { x: 713, y: 136, w: 122, h: 36 },
+    ]);
+    expect(Math.abs(cards[3].x - 413)).toBeLessThanOrEqual(0.5);          // c-13 on an odd-width screen
+    // A right-anchored card stays at the right edge on another aspect.
+    expect(teamCardRects(d, '4:3')[2].x).toBe(640 - 140);
+  });
+
+  it('keeps the slots while in Row, so switching back to Free restores the cards', () => {
+    const row = design({ elements: { teamColumn: { fit: true, dir: 'row', slots: FOUR } } });
+    expect(kvGet(kvFind(tree(buildHud(row), TEAM_FILE), ['TeamPlayer1'])!, 'xpos')).toBe('13');
+    expect(isFreeTeam(row)).toBe(false);
+    const back = validateDesign({ v: 1, elements: { teamColumn: { ...row.elements.teamColumn, dir: 'free' } } });
+    expect(isFreeTeam(back)).toBe(true);
+    expect(kvGet(kvFind(tree(buildHud(back), TEAM_FILE), ['TeamPlayer1'])!, 'xpos')).toBe('21');
+  });
+
+  // Spec rule 4: a slot is the card's unfitted origin, so fitting alone moves
+  // nothing in Free either; the drawn card moves by the fit offset instead.
+  for (const scale of [undefined, 1.25]) {
+    it(`leaves the portrait where it was when fit is toggled in Free${scale ? ` at scale ${scale}` : ''}`, () => {
+      const head = (fit: boolean) => {
+        const d = design({ elements: { teamColumn: { dir: 'free', slots: FOUR, ...(scale ? { scale } : {}), ...(fit ? { fit: true } : {}) } } });
+        return teamCardRects(d, '16:9').slice(0, 3).map((c) => {
+          const r = childRects(d, 'teamColumn', { x: c.x, y: c.y }, 1).find((x) => x.name === 'Head')!;
+          return [r.x, r.y, r.w, r.h];
+        });
+      };
+      expect(head(true)).toEqual(head(false));
+    });
+  }
+
+  it('reads a Free without four slots as the preset direction', () => {
+    const d = design({ elements: { teamColumn: { dir: 'free' } } });
+    expect(teamLayout(d, elementById('teamColumn')!).dir).toBe('row');
+  });
+
+  it('reads the row cards from the file the same way', () => {
+    expect(teamCardRects(design({ elements: { teamColumn: { fit: true } } }), '16:9')).toEqual([
+      { x: 13, y: 441, w: 122, h: 36 }, { x: 153, y: 441, w: 122, h: 36 },
+      { x: 293, y: 441, w: 122, h: 36 }, { x: 433, y: 441, w: 122, h: 36 },
+    ]);
+  });
+});
+
+describe('buildHud, fonts', () => {
+  const ttf = { regular: new Uint8Array([1, 2, 3]), bold: new Uint8Array([4, 5, 6]) };
+
+  it('switches every Trade Gothic face to Roboto and ships both files', () => {
+    const files = buildHud(design({ font: 'roboto' }), { fonts: ttf });
+    const s = text(files, 'resource/clientscheme.res')!;
+    expect(s).not.toMatch(/Trade Gothic/);
+    expect(s).toMatch(/Roboto Condensed/);
+    expect(s).toMatch(/resource\/robotocondensed-regular\.ttf/i);
+    expect(files.map((f) => f.path)).toEqual(expect.arrayContaining(
+      ['resource/robotocondensed-regular.ttf', 'resource/robotocondensed-bold.ttf']));
+  });
+
+  it('ships the fonts for the modern preset, whose scheme already names them', () => {
+    const paths = buildHud(design({ preset: 'modern' }), { fonts: ttf }).map((f) => f.path);
+    expect(paths).toContain('resource/robotocondensed-bold.ttf');
+  });
+
+  it('fails clearly when Roboto is needed and was not loaded', () => {
+    expect(() => buildHud(design({ font: 'roboto' }))).toThrow(/font/i);
+  });
+
+  // scalePass clones existing scheme entries into HudEd_<font>_<tag> font
+  // entries for a scaled panel. Those clones must end up on the chosen font
+  // too, not left behind on the base face, regardless of whether scalePass
+  // or fontPass runs first (see the note above buildHud).
+  it('gives a scaled panel the chosen font', () => {
+    const files = buildHud(design({ font: 'roboto', elements: { teamColumn: { scale: 1.5 } } }), { fonts: ttf });
+    const s = text(files, 'resource/clientscheme.res')!;
+    const fonts = kvFind(parseKv(s)[0].value as KvNode[], ['Fonts'])!;
+    const scaled = kvFind(fonts.value as KvNode[], ['HudEd_PlayerDisplayName_150', '1'])!;
+    expect(kvGet(scaled, 'name')).toBe('Roboto Condensed');
+    expect(s).not.toMatch(/Trade Gothic/);
+  });
+
+  // The chat box draws from its own scheme, which carries its own six Trade
+  // Gothic faces; the spec lists chatscheme.res as an output whenever the
+  // font changes for exactly this reason.
+  it('moves the chat scheme to Roboto as well, and registers the font files there', () => {
+    const chat = text(buildHud(design({ font: 'roboto' }), { fonts: ttf }), 'resource/chatscheme.res');
+    expect(chat).toBeDefined();
+    expect(chat).not.toMatch(/Trade Gothic/);
+    expect(chat).toMatch(/Roboto Condensed/);
+    expect(chat).toMatch(/resource\/robotocondensed-regular\.ttf/);
+    expect(chat).toMatch(/resource\/robotocondensed-bold\.ttf/);
+  });
+
+  it('leaves the chat scheme out entirely when the font did not change', () => {
+    expect(text(buildHud(design({})), 'resource/chatscheme.res')).toBeUndefined();
+  });
+});
+
+describe('buildHud, bad numbers', () => {
+  // parseFloat('') is NaN, and a NaN position comes out of formatPos as the
+  // token "rNaN": a file the game cannot read, and one the canvas reads back
+  // as 0, so the preview and the file disagree as well. Every control drops a
+  // non-finite entry, and download() runs the design through validateDesign
+  // before packing, which is the guard this pins.
+  it('cannot write a literal NaN into a shipped file, whatever the design carries', () => {
+    const bad = { ...design({}), elements: { chat: { x: NaN, y: 10, w: NaN, h: 60 },
+      teamColumn: { scale: NaN, gap: NaN, dir: 'column' }, infectedRow: { spacing: NaN } } };
+    const files = buildHud(validateDesign(bad));
+    for (const f of files) {
+      expect(new TextDecoder('latin1').decode(f.data), f.path).not.toMatch(/NaN/i);
+    }
+    // The good values in the same override survive.
+    expect(kvGet(kvFind(layoutOf(files), ['HudChat'])!, 'tall')).toBe('60');
+  });
+});
+
+describe('teamLayout, real base-file defaults', () => {
+  it('reads the modern preset real spacing when nothing is overridden', () => {
+    const d = design({ preset: 'modern' });
+    expect(teamLayout(d, elementById('teamColumn')!)).toMatchObject({ dir: 'column', spacing: 34, gap: 0 });
+    expect(teamLayout(d, elementById('infectedRow')!)).toMatchObject({ dir: 'row', spacing: 124 });
+  });
+
+  it('reads the stock preset real spacing, not a hardcoded constant', () => {
+    const teamFile = parseKv(baseFile('stock', 'resource/ui/hud/teamdisplayhud.res'))[0].value as KvNode[];
+    const p1 = kvFind(teamFile, ['TeamPlayer1'])!, p2 = kvFind(teamFile, ['TeamPlayer2'])!;
+    const rowGap = Math.abs(parseFloat(kvGet(p2, 'xpos')!) - parseFloat(kvGet(p1, 'xpos')!));
+    const layout = parseKv(baseFile('stock', 'scripts/hudlayout.res'))[0].value as KvNode[];
+    const zombieGap = parseFloat(kvGet(kvFind(layout, ['CHudZombieTeamDisplay'])!, 'HorizPanelSpacing')!);
+    const d = design({});
+    expect(teamLayout(d, elementById('teamColumn')!)).toMatchObject({ dir: 'row', spacing: rowGap, gap: rowGap - 150 });
+    expect(teamLayout(d, elementById('infectedRow')!)).toMatchObject({ dir: 'row', spacing: zombieGap });
+  });
+});
+
+describe('buildHud, styles', () => {
+  const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+
+  it('writes a new texture and points the card background at it', () => {
+    const files = buildHud(design({ styles: { panelBg: { kind: 'rounded', color: '0 0 0 140' } } }));
+    const paths = files.map((f) => f.path);
+    expect(paths).toContain('materials/vgui/hud/hudeditor/panelbg.vtf');
+    expect(paths).toContain('materials/vgui/hud/hudeditor/panelbg.vmt');
+    expect(kvGet(tree(files, CARD_FILE)[0], 'image')).toBe('hud/hudeditor/panelbg');
+  });
+
+  it('uses an uploaded image when the slot asks for one', () => {
+    const rgba = new Uint8ClampedArray(32 * 32 * 4).fill(7);
+    const files = buildHud(design({ styles: { panelBg: { kind: 'image' } }, images: { panelBg: { w: 32, h: 32, png: 'AAAA' } } }),
+      { images: { panelBg: rgba } });
+    const vtf = files.find((f) => f.path.endsWith('panelbg.vtf'))!;
+    expect(vtf.data.length).toBe(80 + 32 * 32 * 4);
+    expect(vtf.data[80]).toBe(7);
+  });
+
+  it('never writes a stock texture name in normal mode', () => {
+    const files = buildHud(design({ styles: { panelBg: { kind: 'rounded', color: '0 0 0 140' } } }));
+    const materials = files.filter((f) => f.path.startsWith('materials/'));
+    expect(materials.length).toBeGreaterThan(0);
+    for (const f of materials) expect(f.path, f.path).toMatch(/^materials\/vgui\/hud\/hudeditor\//);
+  });
+
+  it('writes stock names in advanced mode', () => {
+    const files = buildHud(design({ advanced: true, styles: { incapPanel: { kind: 'flat', color: '95 22 22 205' } } }));
+    expect(files.map((f) => f.path)).toEqual(expect.arrayContaining(
+      ['materials/vgui/s_panel_biker_incap.vtf', 'materials/vgui/s_panel_biker_incap.vmt']));
+  });
+
+  it('never writes a health bar texture, since the game draws bar fills in code (probe T8)', () => {
+    const files = buildHud(design({ advanced: true, styles: { barGreen: { kind: 'flat', color: '0 255 0 255' } } }));
+    expect(files.some((f) => f.path.includes('healthbar_'))).toBe(false);
+  });
+
+  it('keeps every path lower case', () => {
+    const files = buildHud(design({ preset: 'modern', advanced: true,
+      styles: { incapPanel: { kind: 'flat' }, panelBg: { kind: 'rounded' } } }), { fonts });
+    for (const f of files) expect(f.path).toBe(f.path.toLowerCase());
+  });
+});
+
+describe('buildHud, card background', () => {
+  const rounded = { panelBg: { kind: 'rounded' as const, color: '0 0 0 150' } };
+
+  it('injects HudEdCardBg first in the card file, at the fitted card size', () => {
+    const card = tree(buildHud(design({ elements: { teamColumn: { fit: true } }, styles: rounded })), CARD_FILE);
+    const bg = card[0];
+    expect(bg.key).toBe('HudEdCardBg');
+    expect(['ControlName', 'xpos', 'ypos', 'zpos', 'wide', 'tall', 'scaleImage', 'image'].map((k) => kvGet(bg, k)))
+      .toEqual(['ImagePanel', '0', '0', '-2', '122', '36', '1', 'hud/hudeditor/panelbg']);
+  });
+
+  it('covers the whole file card when fit is off', () => {
+    const bg = tree(buildHud(design({ styles: rounded })), CARD_FILE)[0];
+    expect([kvGet(bg, 'wide'), kvGet(bg, 'tall')]).toEqual(['150', '150']);
+  });
+
+  it('draws a flat background with fillcolor and ships no texture for it', () => {
+    const files = buildHud(design({ elements: { teamColumn: { fit: true } }, styles: { panelBg: { kind: 'flat' } } }));
+    const bg = tree(files, CARD_FILE)[0];
+    expect(kvGet(bg, 'fillcolor')).toBe('0 0 0 140');                   // the slot's default colour
+    expect(kvGet(bg, 'image')).toBeUndefined();
+    expect(files.some((f) => f.path.includes('panelbg'))).toBe(false);
+  });
+
+  it('scales with the card', () => {
+    const files = buildHud(design({ elements: { teamColumn: { fit: true, scale: 1.5 } }, styles: rounded }));
+    const bg = tree(files, CARD_FILE)[0];
+    const card = kvFind(tree(files, TEAM_FILE), ['TeamPlayer1'])!;
+    expect([kvGet(bg, 'wide'), kvGet(bg, 'tall')]).toEqual([kvGet(card, 'wide'), kvGet(card, 'tall')]);
+  });
+
+  // Probe T6: the card block's own image is never painted, which is why the old target did nothing.
+  it('never writes the card block image', () => {
+    const team = tree(buildHud(design({ elements: { teamColumn: { fit: true } }, styles: rounded })), TEAM_FILE);
+    for (let n = 1; n <= 4; n++) expect(kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'image')).toBe('../vgui/s_panel_background');
+  });
+
+  it('adds nothing for an Image style with no upload stored', () => {
+    const files = buildHud(design({ styles: { panelBg: { kind: 'image' } } }));
+    expect(text(files, CARD_FILE)).toBeUndefined();
+  });
+});
+
+describe('buildHud, your own health background (ownBg)', () => {
+  const OWN = 'resource/ui/hud/localplayerpanel.res';
+  const flat = { ownBg: { kind: 'flat' as const, color: '1 2 3 200' } };
+  const keys = ['ControlName', 'fieldName', 'xpos', 'ypos', 'zpos', 'wide', 'tall', 'visible', 'enabled', 'fillcolor'];
+
+  it('injects HudEdOwnBg first in the panel file at the unfitted LocalPlayer size, and ships no texture for a flat one', () => {
+    const files = buildHud(design({ styles: flat }));
+    const bg = tree(files, OWN)[0];
+    expect(bg.key).toBe('HudEdOwnBg');
+    expect(keys.map((k) => kvGet(bg, k)))
+      .toEqual(['ImagePanel', 'HudEdOwnBg', '0', '0', '-5', '130', '85', '1', '1', '1 2 3 200']);
+    expect(kvGet(bg, 'image')).toBeUndefined();
+    expect(files.some((f) => f.path.includes('ownbg'))).toBe(false);
+  });
+
+  it('sizes to the fitted panel, injected after the shift', () => {
+    const bg = tree(buildHud(design({ elements: { ownHealth: { fit: true } }, styles: flat })), OWN)[0];
+    expect(['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(bg, k))).toEqual(['0', '0', '130', '53']);
+  });
+
+  it('points a rounded one at its own texture and ships it', () => {
+    const files = buildHud(design({ styles: { ownBg: { kind: 'rounded', color: '0 40 80 180' } } }));
+    const bg = tree(files, OWN)[0];
+    expect([kvGet(bg, 'scaleImage'), kvGet(bg, 'image'), kvGet(bg, 'fillcolor')]).toEqual(['1', 'hud/hudeditor/ownbg', undefined]);
+    expect(files.some((f) => f.path === 'materials/vgui/hud/hudeditor/ownbg.vtf')).toBe(true);
+    expect(files.some((f) => f.path === 'materials/vgui/hud/hudeditor/ownbg.vmt')).toBe(true);
+  });
+
+  it('adds nothing for an Image style with no upload stored', () => {
+    const files = buildHud(design({ styles: { ownBg: { kind: 'image' } } }));
+    expect(text(files, OWN)).toBeUndefined();
+  });
+
+  it('comes before Modern ModBg, so it draws under it at the same zpos', () => {
+    const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+    const nodes = tree(buildHud(design({ preset: 'modern', styles: flat }), { fonts }), OWN, 'modern');
+    expect(nodes.map((n) => n.key).slice(0, 2)).toEqual(['HudEdOwnBg', 'ModBg']);
+  });
+
+  it('leaves the teammate card background as it was', () => {
+    const both = buildHud(design({ styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' }, ...flat } }));
+    const card = buildHud(design({ styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' } } }));
+    expect(text(both, CARD_FILE)).toBe(text(card, CARD_FILE));
+    expect(tree(both, CARD_FILE)[0].key).toBe('HudEdCardBg');
+  });
+});
+
+describe('packHud', () => {
+  it('gives normal mode a VPK v1 named after the design', () => {
+    const p = packHud(design({ name: 'night hud' }));
+    expect(p.filename).toBe('night hud.vpk');
+    const dv = new DataView(p.bytes.buffer);
+    expect(dv.getUint32(0, true)).toBe(0x55AA1234);
+    expect(dv.getUint32(4, true)).toBe(1);
+  });
+
+  it('gives advanced mode a zip holding the mount folder and a README', () => {
+    const p = packHud(design({ name: 'night hud', advanced: true }));
+    expect(p.filename).toBe('night hud.zip');
+    const s = new TextDecoder('latin1').decode(p.bytes);
+    expect(s).toContain('riversidehud/pak01_dir.vpk');
+    expect(s).toContain('README.txt');
+    expect(s).toContain('Game\triversidehud');
+  });
+});
+
+describe('buildTrees', () => {
+  // The preview draws from buildTrees, the download is buildHud: this is what
+  // makes the picture the file. Every file the preview reads (each panel's
+  // file, the team and layout files that place them, and the scheme its
+  // labels read fonts and colours from) is compared in both presets, advanced
+  // on and off, with the panels scaled and two slots restyled so every pass
+  // has something to write. A file the build does not emit must still be the
+  // base file, since that is what the game will read. The fitted variant also
+  // moves the item icons and turns the health number on, so fitPass shifts,
+  // re-fits and squares the card in both trees.
+  for (const preset of ['stock', 'modern'] as const) {
+    for (const advanced of [false, true]) {
+      for (const fit of [false, true]) {
+        for (const dir of ['row', 'column', 'free'] as const) {
+        it(`returns every file the preview reads exactly as buildHud writes it: ${preset} ${dir}${advanced ? ', advanced' : ''}${fit ? ', fitted' : ''}`, () => {
+          const d = design({ preset, advanced,
+            elements: { ownHealth: { scale: 1.25 }, siHealth: { scale: 0.8 }, infectedRow: { scale: 1.3 },
+              teamColumn: { scale: 1.5, dir, gap: 6, slots: FOUR, ...(fit ? { fit: true } : {}) } },
+            styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' }, incapPanel: { kind: 'flat', color: '255 0 0 255' } },
+            children: { teamColumn: { Name: { x: 20, fontSize: 14 }, Head: { visible: false },
+              ...(fit ? { Items: { x: 37, y: 40 }, HealthNumber: { on: true, x: 140 } } : {}) } } });
+          const files = buildHud(d, { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } });
+          const paths = [...Object.values(PANEL_FILE), 'resource/ui/hud/teamdisplayhud.res', 'scripts/hudlayout.res', 'resource/clientscheme.res'];
+          for (const path of paths) {
+            const t = text(files, path);
+            const expected = parseKv(t ?? baseFile(preset, path))[0].value as KvNode[];
+            const got = buildTrees(d)(path);
+            if (path === 'resource/clientscheme.res' && preset === 'modern') {
+              // fontPass, which buildTrees skips, registers the ttf files in
+              // CustomFontFiles on the modern preset. Nothing in the preview
+              // reads that block, so it is the one part left out.
+              const drop = (nodes: KvNode[]) => nodes.filter((n) => n.key.toLowerCase() !== 'customfontfiles');
+              expect(drop(got), `${preset} ${path}`).toEqual(drop(expected));
+            } else {
+              expect(got, `${preset} ${path}`).toEqual(expected);
+            }
+          }
+        });
+        }
+      }
+    }
+  }
+
+  it('does not need the font files even when the design wants Roboto', () => {
+    const d = design({ font: 'roboto' });
+    expect(() => buildTrees(d)('resource/ui/hud/localplayerpanel.res')).not.toThrow();
+    expect(() => buildHud(d)).toThrow(/font/i);        // buildHud is unchanged
+  });
+
+  it('is memoised per design object and rebuilt for a new one', () => {
+    const d = design({});
+    const a = buildTrees(d)('scripts/hudlayout.res');
+    expect(buildTrees(d)('scripts/hudlayout.res')).toBe(a);
+    const d2 = { ...d, elements: { chat: { x: 5, y: 5 } } };
+    expect(buildTrees(d2)('scripts/hudlayout.res')).not.toBe(a);
+  });
+
+  it('parses a file it has not been asked for before from the same design', () => {
+    const d = design({});
+    const t = buildTrees(d)('resource/ui/hud/hunterhealth.res');
+    expect(kvFind(t, ['HealthNumber'])).toBeDefined();
+  });
+});
+
+describe('buildHud, fit', () => {
+  const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+  const fitted = (preset: 'stock' | 'modern' = 'stock', children: HudDesign['children'] = {}) =>
+    design({ preset, elements: { teamColumn: { fit: true } }, children });
+
+  it('fits the stock card to 122 x 36 and shifts its content by (13, 36)', () => {
+    // 122, not the 121 the blocks' own boxes give: the game draws the bar at the item row's 39, not its
+    // own 37 (probe X15), so it ends at 135; a 121-wide card clipped its right edge in game
+    // (/home/volence/l4d/hud/probe-phase2/b13/b13-stock/survivor-full/full-1.png: the outline's right
+    // column is missing at x 301, the card's edge).
+    const files = buildHud(fitted());
+    const card = tree(files, CARD_FILE);
+    expect(cardAt(card, 'Head')).toEqual(['0', '2', '23', '23']);
+    expect(cardAt(card, 'Health')).toEqual(['24', '16', '96', '7']);
+    expect(cardAt(card, 'Name')).toEqual(['0', '24', '120', '12']);
+    expect(cardAt(card, 'Status')).toEqual(['51', '2', '70', '12']);
+    expect(cardAt(card, 'Items')).toEqual(['26', '0', '50', '14']);
+    const team = tree(files, TEAM_FILE);
+    for (let n = 1; n <= 4; n++) {
+      expect([kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'wide'), kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'tall')]).toEqual(['122', '36']);
+    }
+  });
+
+  it('fits around the bar where the game draws it, wherever the item row is, and falls back to the bar\'s own x', () => {
+    // X15's unlinked VPK: the bar block alone at 67 (to 163), the row left at 26, so the bar is drawn 26..122.
+    const files = buildHud(fitted('stock', { teamColumn: { Health: { x: 67 }, Items: { x: 26 } } }));
+    const team = tree(files, TEAM_FILE);
+    // Drawn content 13..134 (Status), not 13..163.
+    expect(kvGet(kvFind(team, ['TeamPlayer1'])!, 'wide')).toBe('121');
+    const nodes = parseKv(baseFile('stock', CARD_FILE))[0].value as KvNode[];
+    expect(contentBox(nodes)).toEqual({ x: 13, y: 36, w: 122, h: 36 });
+    expect(contentBox(nodes.filter((n) => n.key !== 'Items'))).toEqual({ x: 13, y: 38, w: 121, h: 34 });
+  });
+
+  it('fits the Modern card to 113 x 26 from (3, 2)', () => {
+    const files = buildHud(fitted('modern'), { fonts });
+    expect(cardAt(tree(files, CARD_FILE, 'modern'), 'Head')).toEqual(['0', '1', '25', '25']);
+    expect(kvGet(kvFind(tree(files, TEAM_FILE, 'modern'), ['TeamPlayer1'])!, 'wide')).toBe('113');
+    expect(kvGet(kvFind(tree(files, TEAM_FILE, 'modern'), ['TeamPlayer1'])!, 'tall')).toBe('26');
+  });
+
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`fitting alone moves nothing on screen: ${preset}`, () => {
+      const dir = preset === 'stock' ? 'row' as const : 'column' as const;
+      const onScreen = (d: HudDesign) => {
+        const files = buildHud(d, { fonts });
+        const team = tree(files, TEAM_FILE, preset);
+        const card = tree(files, CARD_FILE, preset);
+        const container = kvFind(layoutOf(files), ['CHudTeamDisplay'])!;
+        const out: Record<string, number[]> = { container: [kvGet(container, 'xpos'), kvGet(container, 'ypos')].map((v) => parseFloat(v!.replace(/^r/, '-'))) };
+        for (let n = 1; n <= 4; n++) {
+          const p = kvFind(team, [`TeamPlayer${n}`])!;
+          for (const name of ['Head', 'Health', 'Name', 'Items', 'Status', 'HealthNumber']) {
+            const c = kvFind(card, [name]);
+            if (!c) continue;
+            out[`${n} ${name}`] = [parseFloat(kvGet(p, 'xpos')!) + parseFloat(kvGet(c, 'xpos')!),
+              parseFloat(kvGet(p, 'ypos')!) + parseFloat(kvGet(c, 'ypos')!)];
+          }
+        }
+        return out;
+      };
+      expect(onScreen(design({ preset, elements: { teamColumn: { dir, fit: true } } })))
+        .toEqual(onScreen(design({ preset, elements: { teamColumn: { dir } } })));
+    });
+  }
+
+  it('re-fits when the icons move above a shorter bar', () => {
+    // Head 13..36, Health now 37..85, Name 13..133 at y 60..72, Status 64..134, Items 37..87 at y 40..54: box y 38..72.
+    const files = buildHud(fitted('stock', { teamColumn: { Items: { x: 37, y: 40 }, Health: { w: 48 } } }));
+    expect(kvGet(kvFind(tree(files, TEAM_FILE), ['TeamPlayer1'])!, 'tall')).toBe('34');
+    expect(cardAt(tree(files, CARD_FILE), 'Items').slice(0, 2)).toEqual(['24', '2']);
+  });
+
+  it('re-fits when the health number is turned on and moved past the card', () => {
+    const files = buildHud(fitted('stock', { teamColumn: { HealthNumber: { on: true, x: 140 } } }));
+    expect(kvGet(kvFind(tree(files, TEAM_FILE), ['TeamPlayer1'])!, 'wide')).toBe('157');
+    expect(cardAt(tree(files, CARD_FILE), 'HealthNumber').slice(0, 2)).toEqual(['127', '24']);
+  });
+
+  it('squares the state art at the card width, its band centred on the card, and fits the splatter to the card width', () => {
+    const stock = tree(buildHud(fitted()), CARD_FILE);
+    // Card 122 x 36: the square is 122 wide, and the band (texture y ~95 of
+    // 256) centres on y 18, so the square's own top lands at 18 - 95/256*122
+    // = -27; the card clips everything outside its own 0..36.
+    expect(cardAt(stock, 'Incapacitated')).toEqual(['0', '-27', '122', '122']);
+    expect(cardAt(stock, 'Dead')).toEqual(['0', '-27', '122', '122']);
+    expect(cardAt(stock, 'Voice')).toEqual(['106', '0', '16', '16']);
+    expect(cardAt(stock, 'BackgroundImage')).toEqual(['0', '0', '122', '61']);
+    const modern = tree(buildHud(fitted('modern'), { fonts }), CARD_FILE, 'modern');
+    // Modern's own card is 113 x 26: the square is 113 wide, band centred on
+    // y 13, top at 13 - 95/256*113 = -29.
+    expect(cardAt(modern, 'Incapacitated')).toEqual(['0', '-29', '113', '113']);
+    expect(cardAt(modern, 'Dead')).toEqual(['0', '-29', '113', '113']);
+    expect(cardAt(modern, 'Voice')).toEqual(['97', '0', '16', '16']);
+    expect(cardAt(modern, 'BackgroundImage')).toEqual(['0', '0', '113', '57']);
+    // Modern's own fill background covers the fitted card, like the splatter, so a grown card stays covered.
+    expect(cardAt(modern, 'ModBg')).toEqual(['0', '0', '113', '26']);
+  });
+
+  it("grows Modern's fill background with a card that grew past the file card", () => {
+    // The health number moved right, to 140..170, and the name down to y 40: the card grows to 167 x 49.
+    const files = buildHud(fitted('modern', { teamColumn: { HealthNumber: { x: 140 }, Name: { y: 40 } } }), { fonts });
+    const team = kvFind(tree(files, TEAM_FILE, 'modern'), ['TeamPlayer1'])!;
+    expect(cardAt(tree(files, CARD_FILE, 'modern'), 'ModBg')).toEqual(['0', '0', kvGet(team, 'wide'), kvGet(team, 'tall')]);
+    expect([kvGet(team, 'wide'), kvGet(team, 'tall')]).toEqual(['167', '49']);
+  });
+
+  it('keeps a moved or sized state picture where the player put it, still square', () => {
+    const files = buildHud(fitted('stock', { teamColumn: { Incapacitated: { x: 50, y: 40, w: 30, h: 30 } } }));
+    expect(cardAt(tree(files, CARD_FILE), 'Incapacitated')).toEqual(['37', '4', '30', '30']);
+  });
+
+  it('keeps a moved and sized splatter where the player put it, the shift already moving it into the fitted frame', () => {
+    const files = buildHud(fitted('stock', { teamColumn: { BackgroundImage: { x: 50, y: 10, w: 80, h: 40 } } }));
+    expect(cardAt(tree(files, CARD_FILE), 'BackgroundImage')).toEqual(['37', '-26', '80', '40']);
+  });
+
+  it('lets the fit rule fill in only the fields the player left alone on the splatter', () => {
+    // Only w is the player's; x, y and h still follow the fit rule (the card's top-left, width / 2).
+    const files = buildHud(fitted('stock', { teamColumn: { BackgroundImage: { w: 80 } } }));
+    expect(cardAt(tree(files, CARD_FILE), 'BackgroundImage')).toEqual(['0', '0', '80', '61']);
+  });
+
+  it('keeps the full card and says so when every content child is hidden', () => {
+    const hidden = Object.fromEntries(['Head', 'Health', 'Name', 'Items', 'Status'].map((n) => [n, { visible: false }]));
+    const d = fitted('stock', { teamColumn: hidden });
+    const files = buildHud(d);
+    expect(kvGet(kvFind(tree(files, TEAM_FILE), ['TeamPlayer1'])!, 'wide')).toBe('150');
+    expect(cardAt(tree(files, CARD_FILE), 'Head').slice(0, 2)).toEqual(['13', '38']);
+    expect(teamLayout(d, elementById('teamColumn')!).fitEmpty).toBe(true);
+  });
+
+  it('leaves the card file alone when fit is off', () => {
+    expect(text(buildHud(design({ elements: { teamColumn: { dir: 'row' } } })), CARD_FILE)).toBeUndefined();
+  });
+
+  it('fits DEFAULT_DESIGN, which every new design starts from', () => {
+    expect(kvGet(kvFind(tree(buildHud(structuredClone(DEFAULT_DESIGN)), TEAM_FILE), ['TeamPlayer1'])!, 'wide')).toBe('122');
+  });
+});
+
+describe('cardChild', () => {
+  const fitted = (children: HudDesign['children'] = {}) => design({ elements: { teamColumn: { fit: true } }, children });
+
+  it('reports a child in the unfitted frame its override is stored in', () => {
+    expect(cardChild(fitted(), 'Head')).toMatchObject({ x: 13, y: 38, w: 23, h: 23, visible: true });
+    expect(cardChild(design({}), 'Head')).toMatchObject({ x: 13, y: 38, w: 23, h: 23 });
+  });
+
+  it('reports the state art where the fit rule put it, so a drag starts where the preview draws it', () => {
+    // Fitted frame (0, -27, 122, 122) plus the content box's own (13, 36) shift.
+    expect(cardChild(fitted(), 'Incapacitated')).toMatchObject({ x: 13, y: 9, w: 122, h: 122 });
+    expect(cardChild(design({}), 'Incapacitated')).toMatchObject({ x: 10, y: 4, w: 96, h: 96 });
+  });
+
+  it('reports the font size, a raw colour, and nothing for an addable child that is off', () => {
+    expect(cardChild(fitted(), 'HealthNumber')).toBeNull();
+    expect(cardChild(fitted({ teamColumn: { HealthNumber: { on: true } } }), 'HealthNumber'))
+      .toMatchObject({ x: 103, y: 60, w: 30, h: 12, fontTall: 12, color: '255 255 255 255' });
+    expect(cardChild(fitted({ teamColumn: { Name: { fontSize: 14 } } }), 'Name')!.fontTall).toBe(14);
+    expect(cardChild(fitted(), 'Name')!.color).toBeUndefined();                  // "White" is a scheme name, not raw
+  });
+
+  it("reports the splatter's tint from drawColor, not fgcolor_override", () => {
+    expect(cardChild(fitted(), 'BackgroundImage')!.color).toBeUndefined();       // stock ships no drawColor
+    expect(cardChild(fitted({ teamColumn: { BackgroundImage: { color: '64 64 64 200' } } }), 'BackgroundImage'))
+      .toMatchObject({ color: '64 64 64 200' });
+  });
+
+  it('knows which children a preset file has', () => {
+    expect(baseHasChild('stock', 'HealthNumber')).toBe(false);
+    expect(baseHasChild('modern', 'HealthNumber')).toBe(true);
+  });
+});
+
+describe('buildHud, the weapon selection', () => {
+  const FONTS = { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } };
+  const MODTEX = 'scripts/mod_textures.txt';
+  const weaponsOf = (files: { path: string; data: Uint8Array }[]) => kvFind(layoutOf(files), ['HudWeaponSelection'])!;
+  const pc = (block: KvNode, key: string) => (block.value as KvNode[])
+    .filter((n) => n.key.toLowerCase() === key.toLowerCase() && (!n.cond || n.cond.toUpperCase() === '[$WIN32]'))
+    .map((n) => n.value);
+  const entries = (files: { path: string; data: Uint8Array }[]) =>
+    kvFind(parseKv(text(files, MODTEX)!)[0].value as KvNode[], ['TextureData'])!.value as KvNode[];
+  const fileOf = (nodes: KvNode[], name: string) => kvGet(kvFind(nodes, [name])!, 'file');
+  const BASE_ENTRIES = kvFind(parseKv(baseFile('stock', MODTEX))[0].value as KvNode[], ['TextureData'])!.value as KvNode[];
+  const WEAPON_ICONS = ['icon_equip_pumpshotgun', 'icon_equip_uzi', 'icon_equip_autoshotgun', 'icon_equip_rifle',
+    'icon_equip_machinegun', 'icon_equip_dualpistols', 'icon_equip_pistol'];
+  const ITEM_ICONS = ['icon_equip_molotov', 'icon_equip_pipebomb', 'icon_equip_medkit', 'icon_equip_pills'];
+
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`writes each key the game reads into HudWeaponSelection, rounded, once per PC entry (${preset})`, () => {
+      const weapons = { primaryY: 12, indent: 0, primaryBoxW: 0, primaryBoxH: 0.4, pistolBoxW: 40, pistolBoxH: 30,
+        iconTall: 22, itemSize: 0, ammoX: 48, reserveY: -2, reserveColor: '255 0 255 255', inactiveColor: '0 255 0 255' };
+      const ws = weaponsOf(buildHud(design({ preset, weapons }), FONTS));
+      expect([
+        'PrimaryWeaponsYPos', 'RightSideIndent', 'PrimaryWeaponBoxWide', 'PrimaryWeaponBoxTall', 'PistolBoxWide', 'PistolBoxTall',
+        'PrimaryWeaponTall', 'IconSize', 'PrimaryWeaponAmmoX', 'ReserveAmmoYPos', 'ReserveAmmoColor', 'InactiveItemColor',
+      ].map((k) => pc(ws, k))).toEqual([['12'], ['0'], ['0'], ['0'], ['40'], ['30'], ['22'], ['0'], ['48'], ['-2'], ['255 0 255 255'], ['0 255 0 255']]);
+      // The console's own InactiveItemColor is left as it was.
+      expect((ws.value as KvNode[]).find((n) => n.cond === '[$X360]' && n.key === 'InactiveItemColor')?.value).toBe('55 55 55 255');
+    });
+  }
+
+  it('changes nothing for a design that never touched the weapons', () => {
+    for (const preset of ['stock', 'modern'] as const) {
+      const files = buildHud(design({ preset }), FONTS);
+      expect(files.map((f) => f.path).filter((p) => p === MODTEX || p.includes('hudeditor'))).toEqual([]);
+      const base = kvFind(parseKv(baseFile(preset, 'scripts/hudlayout.res'))[0].value as KvNode[], ['HudWeaponSelection']);
+      if (text(files, 'scripts/hudlayout.res')) expect(weaponsOf(files)).toEqual(base);
+    }
+  });
+
+  it('sizes the clip through a HudEd_ copy of its font, and the reserve through one of HudAmmo', () => {
+    const files = buildHud(design({ weapons: { clipFont: 18, pistolFont: 30 } }));
+    const ws = weaponsOf(files);
+    expect(pc(ws, 'PrimaryAmmoFont')).toEqual(['HudEd_HudAmmoLarge_t18']);
+    expect(pc(ws, 'PistolAmmoFont')).toEqual(['HudEd_HudAmmo_t30']);
+    const fonts = kvFind(tree(files, SCHEME_FILE), ['Fonts'])!;
+    expect(kvGet(kvFind(fonts.value as KvNode[], ['HudEd_HudAmmoLarge_t18', '1'])!, 'tall')).toBe('18');
+    expect(kvGet(kvFind(fonts.value as KvNode[], ['HudEd_HudAmmo_t30', '1'])!, 'tall')).toBe('30');
+  });
+
+  it("writes the base font itself for a size that is that font's own, with no copy", () => {
+    const files = buildHud(design({ weapons: { clipFont: 24, pistolFont: 18 } }));
+    expect(pc(weaponsOf(files), 'PrimaryAmmoFont')).toEqual(['HudAmmoLarge']);
+    expect(pc(weaponsOf(files), 'PistolAmmoFont')).toEqual(['HudAmmo']);
+    expect(text(files, SCHEME_FILE)).toBeUndefined();
+  });
+
+  it('ships no mod_textures.txt for number edits alone, nor for stock boxes with icons on', () => {
+    const files = buildHud(design({ weapons: { ammoX: 40, weaponIcons: true, itemIcons: true } }));
+    expect(text(files, MODTEX)).toBeUndefined();
+  });
+
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`hides a box by repointing its mod_textures.txt entry to a clear texture, the rest as the game has it (${preset})`, () => {
+      const files = buildHud(design({ preset, weapons: { boxActive: { kind: 'hidden' } } }), FONTS);
+      const got = entries(files);
+      expect(fileOf(got, 'rounded_background_glow')).toBe('vgui/hud/hudeditor/clear');
+      // Everything else, the rect of the repointed entry included, is the game's own file.
+      const want = structuredClone(BASE_ENTRIES);
+      kvSet(kvFind(want, ['rounded_background_glow'])!, 'file', 'vgui/hud/hudeditor/clear');
+      expect(got).toEqual(want);
+      const clear = files.find((f) => f.path === 'materials/vgui/hud/hudeditor/clear.vtf')!;
+      expect(decodeVTF(clear.data).rgba.every((v) => v === 0)).toBe(true);
+      expect(text(files, 'materials/vgui/hud/hudeditor/clear.vmt')).toContain('vgui/hud/hudeditor/clear');
+    });
+  }
+
+  it('draws a flat or rounded box from a generated 128-texel texture, the size of the art it replaces', () => {
+    const files = buildHud(design({ weapons: {
+      boxActive: { kind: 'flat', color: '10 20 30 200' }, boxInactive: { kind: 'rounded' },
+    } }));
+    const got = entries(files);
+    expect(fileOf(got, 'rounded_background_glow')).toBe('vgui/hud/hudeditor/weaponboxactive');
+    expect(fileOf(got, 'rounded_background_noborder')).toBe('vgui/hud/hudeditor/weaponboxinactive');
+    const active = decodeVTF(files.find((f) => f.path === 'materials/vgui/hud/hudeditor/weaponboxactive.vtf')!.data);
+    expect([active.w, active.h, ...active.rgba.slice(0, 4)]).toEqual([128, 128, 10, 20, 30, 200]);
+    const inactive = decodeVTF(files.find((f) => f.path === 'materials/vgui/hud/hudeditor/weaponboxinactive.vtf')!.data);
+    // The default inactive colour, its corner cut round and its middle solid.
+    expect([inactive.w, ...inactive.rgba.slice(0, 4)]).toEqual([128, 0, 0, 0, 0]);
+    const mid = (64 * 128 + 64) * 4;
+    expect([...inactive.rgba.slice(mid, mid + 4)]).toEqual([0, 0, 0, 130]);
+    expect(files.some((f) => f.path.endsWith('/clear.vtf'))).toBe(false);
+  });
+
+  it('hides every gun picture the paint can draw, and every item picture, each on its own switch', () => {
+    const guns = entries(buildHud(design({ weapons: { weaponIcons: false } })));
+    for (const n of WEAPON_ICONS) expect(fileOf(guns, n), n).toBe('vgui/hud/hudeditor/clear');
+    for (const n of ITEM_ICONS) expect(fileOf(guns, n), n).toBe('vgui/hud/iconsheet');
+    const items = entries(buildHud(design({ weapons: { itemIcons: false } })));
+    for (const n of ITEM_ICONS) expect(fileOf(items, n), n).toBe('vgui/hud/hudeditor/clear');
+    for (const n of WEAPON_ICONS) expect(fileOf(items, n), n).toBe('vgui/hud/iconsheet');
+    // The flashlight icons are not the weapon selection's.
+    expect(fileOf(items, 'icon_equip_flashlight')).toBe('vgui/hud/iconsheet');
+  });
+
+  it('ships the clear texture once however many entries use it', () => {
+    const files = buildHud(design({ weapons: { weaponIcons: false, itemIcons: false, boxActive: { kind: 'hidden' }, boxInactive: { kind: 'hidden' } } }));
+    expect(files.filter((f) => f.path === 'materials/vgui/hud/hudeditor/clear.vtf')).toHaveLength(1);
+    expect(new Set(files.map((f) => f.path)).size).toBe(files.length);
+  });
+
+  /** A stored upload's record and its decoded pixels, a colour per texel column so a stretch or crop would show. */
+  const upload = (w: number, h: number) => ({
+    stored: { w, h, png: 'AAAA' },
+    px: new Uint8ClampedArray(w * h * 4).map((_, i) => (i % 4 === 3 ? 255 : ((i >> 2) % w) & 0xff)),
+  });
+  const cellOf = (nodes: KvNode[], name: string) => {
+    const e = kvFind(nodes, [name])!;
+    return Object.fromEntries((e.value as KvNode[]).map((n) => [n.key.toLowerCase(), n.value]));
+  };
+
+  it("ships an uploaded gun icon as its own texture, its cell the upload's own rect", () => {
+    const m16 = upload(192, 64);
+    const d = design({ images: { wiconMachinegun: m16.stored }, weapons: { icons: { icon_equip_machinegun: 'wiconMachinegun' } } });
+    const files = buildHud(d, { images: { wiconMachinegun: m16.px } });
+    expect(cellOf(entries(files), 'icon_equip_machinegun')).toEqual({
+      file: 'vgui/hud/hudeditor/icon_equip_machinegun', x: '0', y: '0', width: '192', height: '64',
+    });
+    const vtf = decodeVTF(files.find((f) => f.path === 'materials/vgui/hud/hudeditor/icon_equip_machinegun.vtf')!.data);
+    expect([vtf.w, vtf.h]).toEqual([192, 64]);
+    expect([...vtf.rgba]).toEqual([...m16.px]);
+    expect(text(files, 'materials/vgui/hud/hudeditor/icon_equip_machinegun.vmt')).toContain('vgui/hud/hudeditor/icon_equip_machinegun');
+    // Every other entry is the game's own.
+    expect(cellOf(entries(files), 'icon_equip_rifle').file).toBe('vgui/hud/iconsheet');
+  });
+
+  it('ships an Image box as a 128-texel texture and keeps the 0 0 128 128 rect', () => {
+    const box = upload(128, 128);
+    const d = design({ images: { weaponBoxActive: box.stored }, weapons: { boxActive: { kind: 'image' } } });
+    const files = buildHud(d, { images: { weaponBoxActive: box.px } });
+    expect(cellOf(entries(files), 'rounded_background_glow')).toEqual({
+      file: 'vgui/hud/hudeditor/weaponboxactive', x: '0', y: '0', width: '128', height: '128',
+    });
+    const vtf = decodeVTF(files.find((f) => f.path === 'materials/vgui/hud/hudeditor/weaponboxactive.vtf')!.data);
+    expect([vtf.w, vtf.h, ...vtf.rgba.slice(0, 8)]).toEqual([128, 128, ...box.px.slice(0, 8)]);
+  });
+
+  it("builds an Image box with no picture (a share link's) as the game's box", () => {
+    const d = design({ weapons: { boxActive: { kind: 'image' } } });
+    const files = buildHud(d, { images: {} });
+    expect(files.some((f) => f.path.includes('hudeditor/weaponboxactive'))).toBe(false);
+    expect(files.some((f) => f.path === 'scripts/mod_textures.txt')).toBe(false);
+  });
+
+  it('turns a font glyph entry into a texture cell: file and rect in, font and character out', () => {
+    const e = parseKv('"voice_self" { "font" "L4D_Icons_large" "character" "V" }')[0];
+    pointCell(e, 'vgui/hud/hudeditor/voice_self', 64, 64);
+    expect((e.value as KvNode[]).map((n) => [n.key, n.value])).toEqual([
+      ['file', 'vgui/hud/hudeditor/voice_self'], ['x', '0'], ['y', '0'], ['width', '64'], ['height', '64'],
+    ]);
+  });
+
+  it('lets the hide switches win over an upload', () => {
+    const uzi = upload(128, 64);
+    const pills = upload(64, 64);
+    const d = design({ images: { wiconUzi: uzi.stored, wiconPills: pills.stored },
+      weapons: { weaponIcons: false, itemIcons: false, icons: { icon_equip_uzi: 'wiconUzi', icon_equip_pills: 'wiconPills' } } });
+    const files = buildHud(d, { images: { wiconUzi: uzi.px, wiconPills: pills.px } });
+    expect(fileOf(entries(files), 'icon_equip_uzi')).toBe('vgui/hud/hudeditor/clear');
+    expect(fileOf(entries(files), 'icon_equip_pills')).toBe('vgui/hud/hudeditor/clear');
+    expect(files.some((f) => f.path.includes('icon_equip_'))).toBe(false);
+  });
+
+  it('refuses to build an upload whose pixels it was not given, naming the picture', () => {
+    const d = design({ images: { wiconUzi: upload(128, 64).stored }, weapons: { icons: { icon_equip_uzi: 'wiconUzi' } } });
+    expect(() => buildHud(d)).toThrow('Uzi');
+  });
+
+  it('gives the preview the upload cells the download carries', () => {
+    const uzi = upload(128, 64);
+    const d = design({ images: { wiconUzi: uzi.stored }, weapons: { icons: { icon_equip_uzi: 'wiconUzi' } } });
+    expect(buildTrees(d)(MODTEX)).toEqual(parseKv(text(buildHud(d, { images: { wiconUzi: uzi.px } }), MODTEX)!)[0].value);
+  });
+
+  describe('the panel sized to its column', () => {
+    // /home/volence/l4d/hud/probe-phase2-rest/r2/shots/crops/weap-ab.png: the panel clips numbers and icons at its
+    // own edges, and /home/volence/l4d/hud/probe-phase2-rest/w-verify/crops/game-0de.png: a 4:1 M16 upload was cut
+    // at the stock panel's left edge. Stock: xpos r98, wide 100, tall 160.
+    const U = screenW('16:9') / 640;
+    const ws = (d: HudDesign) => weaponsOf(buildHud(d, FONTS));
+
+    it('grows a panel too narrow for a wider held box, to the left, so its right edge stays', () => {
+      const d = design({ weapons: { primaryBoxW: 120 } });
+      const grow = Math.ceil(10 + 120 * 1.2 + 4 * U - 100);
+      expect([pc(ws(d), 'wide'), pc(ws(d), 'xpos')]).toEqual([[String(100 + grow)], [`r${98 + grow}`]]);
+      expect(pc(ws(d), 'tall')).toEqual(['160']);
+    });
+
+    it('grows it for a 4:1 gun upload, which the game would otherwise cut', () => {
+      const px = new Uint8ClampedArray(256 * 64 * 4);
+      const d = design({ images: { wiconMachinegun: { w: 256, h: 64, png: 'AAAA' } }, weapons: { icons: { icon_equip_machinegun: 'wiconMachinegun' } } });
+      const grow = Math.ceil(10 + 4 * 20 * 1.2 - 100);
+      expect(pc(weaponsOf(buildHud(d, { images: { wiconMachinegun: px } })), 'wide')).toEqual([String(100 + grow)]);
+    });
+
+    it('grows it down to cover the lowest item slot', () => {
+      const d = design({ weapons: { itemSize: 40 } });
+      // Held item: 10, the gun 24 + 2u, the pistol 24 + 2u, the first item 48 + 2u, the second 40 + 2u, the last 40 and its 2u pad.
+      const bottom = 10 + 24 + 24 + 48 + 40 + 40 + 4 * 2 * U + 2 * U;
+      expect(pc(ws(d), 'tall')).toEqual([String(Math.ceil(bottom))]);
+      expect(pc(ws(d), 'wide')).toEqual(['100']);
+    });
+
+    it('keeps the panel as the preset has it while the column fits, for both presets', () => {
+      for (const preset of ['stock', 'modern'] as const) {
+        const d = design({ preset, weapons: { ammoX: 40 } });
+        const base = kvFind(parseKv(baseFile(preset, 'scripts/hudlayout.res'))[0].value as KvNode[], ['HudWeaponSelection'])!;
+        for (const k of ['xpos', 'wide', 'tall']) expect(pc(ws(d), k), `${preset} ${k}`).toEqual(pc(base, k));
+      }
+    });
+
+    it('frames and picks the grown panel, as the file has it, and a move lands where it is dropped', () => {
+      const W = screenW('16:9');
+      const rectOf = (block: KvNode) => ({
+        x: parsePos(pc(block, 'xpos')[0] as string, W), y: parsePos(pc(block, 'ypos')[0] as string, SCREEN_H),
+        w: parseSize(pc(block, 'wide')[0] as string, W), h: parseSize(pc(block, 'tall')[0] as string, SCREEN_H),
+      });
+      for (const weapons of [{ primaryBoxW: 120 }, { itemSize: 40 }]) {
+        const d = design({ weapons });
+        const r = elementRect(d, 'weaponSelection', '16:9');
+        const built = rectOf(ws(d));
+        expect({ x: r.x, y: r.y, w: r.w, h: r.h }, JSON.stringify(weapons)).toEqual(built);
+        // A press of nothing moves nothing; a drop at (300, 200) is drawn there, file and frame alike.
+        const still = elementRect(nudge(d, 'weaponSelection', 0, 0), 'weaponSelection', '16:9');
+        expect([still.x, still.y]).toEqual([r.x, r.y]);
+        const moved = placeElement(d, 'weaponSelection', 300, 200);
+        const m = elementRect(moved, 'weaponSelection', '16:9');
+        expect(Math.abs(m.x - 300), JSON.stringify(weapons)).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(m.y - 200)).toBeLessThanOrEqual(0.5);
+        expect(rectOf(ws(moved))).toEqual({ x: m.x, y: m.y, w: m.w, h: m.h });
+      }
+    });
+
+    it('moves a panel the player placed by the same growth, whatever its anchor', () => {
+      const d = design({ elements: { weaponSelection: { x: 20, y: 100 } }, weapons: { primaryBoxW: 120 } });
+      const grow = Math.ceil(10 + 120 * 1.2 + 4 * U - 100);
+      expect(pc(ws(d), 'xpos')).toEqual([String(20 - grow)]);
+    });
+  });
+
+  it('gives the preview the same mod_textures.txt the download carries', () => {
+    const d = design({ weapons: { boxInactive: { kind: 'hidden' }, weaponIcons: false } });
+    expect(buildTrees(d)(MODTEX)).toEqual(parseKv(text(buildHud(d), MODTEX)!)[0].value);
+  });
+});
+
+describe('the generator, per panel', () => {
+  it('reads a teammate child the same through the panel names as through the card names', () => {
+    const d = design({ elements: { teamColumn: { fit: true, scale: 1.5 } }, children: { teamColumn: { Head: { x: 20, y: 30 } } } });
+    for (const n of ['Head', 'Health', 'Name', 'Incapacitated', 'BackgroundImage']) {
+      const { keys: _k, z: _z, ...plain } = panelChild(d, 'teamColumn', n)!;
+      expect(plain, n).toEqual(cardChild(d, n));
+    }
+    expect(panelFrame(d, 'teamColumn')).toEqual(cardFrame(d));
+  });
+
+  it('writes a child zpos and reports it back', () => {
+    const d = design({ children: { teamColumn: { Head: { z: 7 } } } });
+    expect(kvGet(kvFind(tree(buildHud(d), CARD_FILE), ['Head'])!, 'zpos')).toBe('7');
+    expect(panelChild(d, 'teamColumn', 'Head')!.z).toBe(7);
+  });
+
+  it('refuses a key the child does not declare, naming the file and the child', () => {
+    const d = design({ children: { teamColumn: { Head: { keys: { monochrome_color: '1 2 3 4' } } } } });
+    expect(() => buildHud(d)).toThrow('resource/ui/hud/teammatepanel.res: Head takes no key monochrome_color');
+  });
+
+  it('refuses an element key the element does not declare', () => {
+    expect(() => buildHud(design({ elements: { chat: { keys: { foo: '1' } } } }))).toThrow('scripts/hudlayout.res: HudChat takes no key foo');
+  });
+
+  it("writes a key on every line the PC reads, leaving a Mac line alone and adding no third line", () => {
+    const b = parseKv('"B" { "xpos" "39" [$OSX] "xpos" "36" [$WINDOWS] }')[0];
+    writeKeys(b, { xpos: '10' });
+    const lines = (b.value as KvNode[]).filter((n) => n.key === 'xpos');
+    expect(lines.map((n) => [n.value, n.cond])).toEqual([['39', '[$OSX]'], ['10', '[$WINDOWS]']]);
+  });
+});
+
+describe('fitting your own health panel', () => {
+  const OWN = 'resource/ui/hud/localplayerpanel.res';
+  const DISPLAY = 'resource/ui/hud/localplayerdisplay.res';
+  const rectOf = (n: KvNode) => ['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(n, k));
+  const own = (o: ElementOverride, kids: Record<string, ChildOverride> = {}, preset: 'stock' | 'modern' = 'stock') =>
+    design({ preset, elements: { ownHealth: o }, children: Object.keys(kids).length ? { ownHealth: kids } : {} });
+
+  it('keeps what the stock panel shows: content, the scratches and the crouch icon, cut to LocalPlayer', () => {
+    const t = buildTrees(own({ fit: true }));
+    expect(rectOf(kvFind(t(DISPLAY), ['LocalPlayer'])!)).toEqual(['0', '32', '130', '53']);
+  });
+  it('shrinks to the spec box once the decoration and the crouch icon are hidden', () => {
+    const hidden = { HealthbarTextureTop: { visible: false }, HealthbarTextureBottom: { visible: false } };
+    expect(rectOf(kvFind(buildTrees(own({ fit: true }, hidden))(DISPLAY), ['LocalPlayer'])!)).toEqual(['0', '32', '122', '47']);
+    expect(rectOf(kvFind(buildTrees(own({ fit: true }, { ...hidden, DuckingIcon: { visible: false } }))(DISPLAY), ['LocalPlayer'])!))
+      .toEqual(['0', '48', '122', '31']);
+  });
+  it('fits Modern to its content and stretches its fill to match', () => {
+    const t = buildTrees(own({ fit: true }, {}, 'modern'));
+    expect(rectOf(kvFind(t(DISPLAY), ['LocalPlayer'])!)).toEqual(['3', '3', '114', '28']);
+    expect(rectOf(kvFind(t(OWN), ['ModBg'])!)).toEqual(['0', '0', '114', '28']);
+  });
+  it('keeps the file panel when nothing is left to fit to', () => {
+    const all = Object.fromEntries(['Head', 'Health', 'HealthIcon', 'HealthNumber', 'HealthbarTextureTop', 'HealthbarTextureBottom', 'DuckingIcon']
+      .map((n) => [n, { visible: false }]));
+    expect(rectOf(kvFind(buildTrees(own({ fit: true }, all))(DISPLAY), ['LocalPlayer'])!)).toEqual(['0', '0', '130', '85']);
+  });
+  for (const scale of [1, 2]) {
+    it(`moves nothing on screen by fitting alone, at scale ${scale}`, () => {
+      const at = (d: HudDesign) => {
+        const [box] = panelBoxes(d, 'ownHealth');
+        return Object.fromEntries(childRects(d, 'ownHealth', box, 1)
+          .filter((r) => r.name !== 'Incapacitated').map((r) => [r.name, [r.x, r.y, r.w, r.h]]));
+      };
+      expect(at(own({ fit: true, scale }))).toEqual(at(own({ scale })));
+    });
+  }
+  it('starts the down picture at the bar, squared to the panel\'s right edge with its band centred', () => {
+    // client.dll 1023f5df..1023f6da: on the incap the game moves Health to Incapacitated's x (y kept).
+    // Stock has both at 26; a down picture at the bar's x keeps the bar where it was while down.
+    const n = kvFind(buildTrees(own({ fit: true }))(OWN), ['Incapacitated'])!;
+    expect(rectOf(n)).toEqual(['26', '-12', '104', '104']);
+  });
+  it('keeps the down picture on a dragged bar, and leaves a down picture the player placed alone', () => {
+    const moved = kvFind(buildTrees(own({ fit: true }, { Health: { x: 30 } }))(OWN), ['Incapacitated'])!;
+    expect(kvGet(moved, 'xpos')).toBe(kvGet(kvFind(buildTrees(own({ fit: true }, { Health: { x: 30 } }))(OWN), ['Health'])!, 'xpos'));
+    const placed = kvFind(buildTrees(own({ fit: true }, { Incapacitated: { x: 5 } }))(OWN), ['Incapacitated'])!;
+    expect(kvGet(placed, 'xpos')).toBe('5');
+  });
+  it('shifts the PC line of a conditional key and leaves the Mac one', () => {
+    const block = kvFind(buildTrees(own({ fit: true }))(OWN), ['HealthNumber'])!;
+    expect(kvGet(block, 'xpos')).toBe('36');
+    expect(kvGet(block, 'ypos')).toBe('16');
+    const mac = (block.value as KvNode[]).find((n) => n.key === 'xpos' && n.cond === '[$OSX]');
+    expect(mac?.value).toBe('39');
+  });
+  it('leaves the container block alone', () => {
+    // layoutPass always parses hudlayout.res, so the file ships either way; the block must not differ.
+    const block = (d: HudDesign) => writeKv([kvFind(tree(buildHud(d), 'scripts/hudlayout.res'), ['CHudLocalPlayerDisplay'])!]);
+    expect(block(own({ fit: true, x: 20, y: 380 }))).toBe(block(own({ x: 20, y: 380 })));
+  });
+  it('reads a piece back in the unfitted frame, as the side panel shows it', () => {
+    expect(panelChild(own({ fit: true }), 'ownHealth', 'Head')).toMatchObject({ x: 0, y: 54, w: 25, h: 25 });
+  });
+  it('leaves an unfitted panel exactly as the file has it', () => {
+    expect(text(buildHud(own({ x: 20, y: 380 })), DISPLAY)).toBeUndefined();
+  });
+});
+
+describe('the revive anchor on your own panel (client.dll: the bar goes back to Items\' x)', () => {
+  // client.dll 1023f64e..1023f6da, the player panel class shared by your own panel and the cards:
+  // when the Incapacitated picture turns visible the game sets Health's x to Incapacitated's x; when it
+  // turns hidden again (the revive) it sets Health's x to the "Items" child's x, and keeps it where it
+  // is when there is no Items child, which localplayerpanel.res never has. y is never touched.
+  const OWN = 'resource/ui/hud/localplayerpanel.res';
+  const own = (o: ElementOverride, kids: Record<string, ChildOverride> = {}, preset: 'stock' | 'modern' = 'stock') =>
+    design({ preset, elements: Object.keys(o).length ? { ownHealth: o } : {}, children: Object.keys(kids).length ? { ownHealth: kids } : {} });
+  const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+  const items = (d: HudDesign) => { const f = text(buildHud(d, { fonts }), OWN); return f === undefined ? undefined : kvFind(parseKv(f)[0].value as KvNode[], ['Items']); };
+  const barX = (d: HudDesign) => kvGet(kvFind(parseKv(text(buildHud(d, { fonts }), OWN)!)[0].value as KvNode[], ['Health'])!, 'xpos');
+
+  it('adds a hidden Items label at a dragged bar\'s x, so a revive puts the bar back', () => {
+    const d = own({}, { Health: { x: 40 } });
+    const a = items(d)!;
+    expect(kvGet(a, 'ControlName')).toBe('Label');
+    expect(kvGet(a, 'visible')).toBe('0');
+    expect(kvGet(a, 'xpos')).toBe('40');
+    expect(barX(d)).toBe('40');
+  });
+  it('follows the bar through fit and scale', () => {
+    for (const d of [own({ fit: true, scale: 2 }, { Incapacitated: { x: 3 } }), own({ scale: 1.5 }, { Incapacitated: { x: 3 } }), own({ scale: 2 }, { Health: { x: 40 } }), own({}, {}, 'modern')]) {
+      expect(kvGet(items(d)!, 'xpos')).toBe(barX(d));
+    }
+  });
+  it('fixes Modern as it ships: its bar at 34 and its down picture at 0', () => {
+    expect(kvGet(items(own({}, {}, 'modern'))!, 'xpos')).toBe('34');
+  });
+  it('adds nothing where the bar and the down picture already share an x', () => {
+    expect(text(buildHud(own({})), OWN)).toBeUndefined();
+    expect(items(own({ fit: true }))).toBeUndefined();
+    expect(items(own({ fit: true, scale: 2 }, { Health: { x: 40 } }))).toBeUndefined();     // the fitted down picture follows the bar
+    expect(items(own({}, { Health: { y: 60 } }))).toBeUndefined();
+  });
+  it('is in the preview trees too, hidden, so the preview reads the file the game gets', () => {
+    const a = kvFind(buildTrees(own({}, { Health: { x: 40 } }))(OWN), ['Items'])!;
+    expect([kvGet(a, 'xpos'), kvGet(a, 'visible')]).toEqual(['40', '0']);
+  });
+});
+
+describe('hiding an element hides it in game (probe B2 and B3: visible 0 alone hid nothing)', () => {
+  // /home/volence/l4d/hud/probe-phase2/RESULTS.md, B2 and B3: every element tested came back with visible 0 only.
+  const size = (n: KvNode) => [kvGet(n, 'visible'), kvGet(n, 'wide'), kvGet(n, 'tall')];
+  // The marker shares the game's crosshair block, so it is hidden by its own keys instead (plan Task 8, below).
+  const hideable = ELEMENTS.filter((e) => e.id !== 'xhair' && e.id !== 'abilityMarker' && e.props.includes('visible'));
+
+  for (const preset of ['stock', 'modern'] as const) {
+    for (const el of hideable) {
+      it(`${preset}: ${el.id} is visible 0 and 0 x 0 in hudlayout.res (or its own file, with the blocks it moves with)`, () => {
+        if (!baseHasElement(preset, el)) return;
+        const files = buildHud(design({ preset, elements: { [el.id]: { visible: false } } }), { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } });
+        const got = el.file ? tree(files, el.file, preset) : layoutOf(files);
+        for (const b of [el.key, ...(el.moveWith ?? [])]) expect(size(kvFind(got, [b])!), b).toEqual(['0', '0', '0']);
+      });
+    }
+  }
+
+  it('also zeroes the blocks that hold the content in another file', () => {
+    for (const [id, frames] of Object.entries(HIDE_FRAMES)) {
+      const files = buildHud(design({ elements: { [id]: { visible: false } } }));
+      for (const f of frames) for (const b of f.blocks) expect(size(kvFind(tree(files, f.file), [b])!), `${id} ${b}`).toEqual(['0', '0', '0']);
+    }
+  });
+
+  it('names the own panel, the four cards and the chat as frames', () => {
+    expect(HIDE_FRAMES).toEqual({
+      ownHealth: [{ file: 'resource/ui/hud/localplayerdisplay.res', blocks: ['LocalPlayer'] }],
+      teamColumn: [{ file: 'resource/ui/hud/teamdisplayhud.res', blocks: ['TeamPlayer1', 'TeamPlayer2', 'TeamPlayer3', 'TeamPlayer4'] }],
+      chat: [{ file: 'resource/ui/basechat.res', blocks: ['HudChat', 'HudChatHistory'] }],
+    });
+  });
+
+  it('keeps the hide over a fitted, scaled team and a scaled own panel', () => {
+    // teamPass writes the container and card sizes and scalePass multiplies: both run before the hide.
+    const files = buildHud(design({ elements: { teamColumn: { visible: false, fit: true, scale: 1.5 }, ownHealth: { visible: false, scale: 2 } } }));
+    expect(size(kvFind(layoutOf(files), ['CHudTeamDisplay'])!)).toEqual(['0', '0', '0']);
+    expect(size(kvFind(tree(files, 'resource/ui/hud/teamdisplayhud.res'), ['TeamPlayer1'])!)).toEqual(['0', '0', '0']);
+    expect(size(kvFind(tree(files, 'resource/ui/hud/localplayerdisplay.res'), ['LocalPlayer'])!)).toEqual(['0', '0', '0']);
+  });
+
+  it('is download-only: the preview trees keep a hidden element whole, so a selected hidden element still draws dimmed', () => {
+    const d = design({ elements: { ownHealth: { visible: false } } });
+    const local = kvFind(buildTrees(d)('resource/ui/hud/localplayerdisplay.res'), ['LocalPlayer'])!;
+    expect([kvGet(local, 'wide'), kvGet(local, 'tall')]).toEqual(['130', '85']);
+    expect(kvGet(kvFind(buildTrees(d)('scripts/hudlayout.res'), ['CHudLocalPlayerDisplay'])!, 'visible')).toBe('0');
+  });
+
+  it('writes nothing for an element that is not hidden', () => {
+    expect(buildHud(design({ elements: { ownHealth: { visible: true } } })).map((f) => f.path))
+      .toEqual(buildHud(design({})).map((f) => f.path));
+  });
+
+  it('zeroes a size-to-contents key a hand-written block carries, and adds none where there is none', () => {
+    // Decision 3: a 0 x 0 block that sizes itself to its contents would grow back.
+    // autoResize is VGUI's resize-with-parent flag (beside pinCorner in basechat.res), so it stays.
+    const block = parseKv('"B"\n{\n"ControlName" "Label"\n"wide" "40"\n"tall" "10"\n"autoResize" "1"\n"auto_wide_tocontents" "1"\n"auto_tall_tocontents" "0"\n}\n')[0];
+    hardHide(block);
+    expect(['autoResize', 'auto_wide_tocontents', 'auto_tall_tocontents', 'wide', 'tall'].map((k) => kvGet(block, k))).toEqual(['1', '0', '0', '0', '0']);
+    const plain = parseKv('"B"\n{\n"ControlName" "Label"\n"wide" "40"\n}\n')[0];
+    hardHide(plain);
+    expect(kvGet(plain, 'auto_wide_tocontents')).toBeUndefined();
+  });
+});
+
+describe('a hidden piece the game re-shows is moved out of its panel (probe 2F launch P)', () => {
+  // /home/volence/l4d/hud/probe-2f/p/shots/cards.png (from p-a.png and p-f.png): the teammate Name
+  // written visible 0 and 0 x 0 still drew its text at the card's bottom left, so game code shows it
+  // and sizes it to the name. Every other hidden piece stayed gone. A panel clips its children
+  // (probe Q2, /home/volence/l4d/hud/probe-phase2/b1/shots/crops/own-a.png), so the name goes far left of the card.
+  const CARD = 'resource/ui/hud/teammatepanel.res';
+  const hideName = (extra: Partial<HudDesign> = {}) => design({ children: { teamColumn: { Name: { visible: false } } } as HudDesign['children'], ...extra });
+
+  it('lists the teammate Name only', () => {
+    expect(CODE_SHOWN).toEqual({ teamColumn: ['Name'] });
+  });
+
+  it('writes a hidden Name at xpos -2000, still 0 x 0 and visible 0', () => {
+    const n = kvFind(tree(buildHud(hideName()), CARD), ['Name'])!;
+    expect(['xpos', 'visible', 'wide', 'tall'].map((k) => kvGet(n, k))).toEqual(['-2000', '0', '0', '0']);
+  });
+
+  it('keeps it out of the card when the card is fitted and scaled', () => {
+    const n = kvFind(tree(buildHud(hideName({ elements: { teamColumn: { fit: true, scale: 1.5 } } })), CARD), ['Name'])!;
+    expect(kvGet(n, 'xpos')).toBe('-2000');
+  });
+
+  it('is download-only: the preview and the side panel keep the file place', () => {
+    const d = hideName();
+    expect(kvGet(kvFind(buildTrees(d)(CARD), ['Name'])!, 'xpos')).toBe('13');
+    expect(panelChild(d, 'teamColumn', 'Name')).toMatchObject({ x: 13 });
+  });
+
+  it('leaves a shown Name where the file has it', () => {
+    expect(kvGet(kvFind(tree(buildHud(design({})), CARD), ['Name'])!, 'xpos')).toBe('13');
+  });
+});
+
+describe('the inset keeps a unit of fill (review L1)', () => {
+  const CARD_FILE = 'resource/ui/hud/teammatepanel.res';
+  const bar = (o: ChildOverride) => {
+    const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), children: { teamColumn: { Health: o } } };
+    return kvFind(buildTrees(d)(CARD_FILE), ['Health'])!;
+  };
+  it('clamps a design\'s inset to the bar\'s tall in the file, however the design got it', () => {
+    expect(kvGet(bar({ keys: { inset: '8' } }), 'inset')).toBe('3');
+    expect(kvGet(bar({ h: 4, keys: { inset: '8' } }), 'inset')).toBe('1');
+    expect(kvGet(bar({ keys: { inset: '1' } }), 'inset')).toBe('1');
+  });
+});
+
+describe("panelChild reports a card's health bar at the x the game draws it (probe X15)", () => {
+  // /home/volence/l4d/hud/probe-2f/x15/RESULTS.md: the game draws a card's Health at its Items child's x.
+  it('gives the item row\'s x as the bar\'s x, and the block\'s own x as ownX, unfitted and fitted', () => {
+    for (const d of [design({}), structuredClone(DEFAULT_DESIGN)]) {
+      const bar = panelChild(d, 'teamColumn', 'Health')!, items = panelChild(d, 'teamColumn', 'Items')!;
+      expect(bar.x).toBe(items.x);
+      expect([bar.x, bar.ownX, bar.y, bar.w, bar.h]).toEqual([39, 37, 52, 96, 7]);
+    }
+  });
+  it('has no ownX where the game draws the block at its own x: your own panel, any other piece', () => {
+    // Modern's card has the bar and the row both at 32: anchored all the same.
+    expect(panelChild(design({ preset: 'modern' }), 'teamColumn', 'Health')).toMatchObject({ x: 32, ownX: 32 });
+    expect(panelChild(design({}), 'ownHealth', 'Health')!.ownX).toBeUndefined();
+    expect(panelChild(design({}), 'teamColumn', 'Items')!.ownX).toBeUndefined();
+  });
+  it('keeps the file bytes: the written bar is still at its own xpos', () => {
+    const nodes = tree(buildHud(design({})), CARD_FILE);
+    expect(kvGet(kvFind(nodes, ['Health'])!, 'xpos')).toBe('37');
+  });
+});
+
+/**
+ * Your infected health is three live files (the Hunter's, which the Tank
+ * reads too, the Smoker's and the Boomer's) and one set of edits: SI_PANEL's
+ * `linked` rules (plan decision 3).
+ */
+describe('one infected health edit lands in the Hunter, Smoker and Boomer files', () => {
+  const HUNTER = 'resource/ui/hud/hunterhealth.res', SMOKER = 'resource/ui/hud/smokerhealth.res', BOOMER = 'resource/ui/hud/boomerhealth.res';
+  const si = (c: Record<string, ChildOverride>, preset: 'stock' | 'modern' = 'stock') =>
+    design({ preset, children: { siHealth: c } as HudDesign['children'] });
+  const at = (files: { path: string; data: Uint8Array }[], path: string, name: string, preset: 'stock' | 'modern' = 'stock') =>
+    kvFind(tree(files, path, preset), [name])!;
+
+  it('writes the bar\'s size and place to all three, the Boomer\'s in proportion', () => {
+    const files = buildHud(si({ Health: { w: 112, y: 60 } }));
+    for (const f of [HUNTER, SMOKER]) expect([kvGet(at(files, f, 'Health'), 'wide'), kvGet(at(files, f, 'Health'), 'ypos')], f).toEqual(['112', '60']);
+    expect([kvGet(at(files, BOOMER, 'Health'), 'wide'), kvGet(at(files, BOOMER, 'Health'), 'ypos')]).toEqual(['54', '60']);
+    // The Boomer's x was not edited, so it stays its own.
+    expect(kvGet(at(files, BOOMER, 'Health'), 'xpos')).toBe('322');
+  });
+
+  it('moves the Boomer\'s bar by the Hunter\'s move', () => {
+    const files = buildHud(si({ Health: { x: 262 } }));
+    expect(kvGet(at(files, HUNTER, 'Health'), 'xpos')).toBe('262');
+    expect(kvGet(at(files, BOOMER, 'Health'), 'xpos')).toBe('332');
+  });
+
+  it('gives the number its colour in all three (probe Q13)', () => {
+    const files = buildHud(si({ HealthNumber: { color: '0 0 255 255' } }));
+    for (const f of [HUNTER, SMOKER, BOOMER]) expect(kvGet(at(files, f, 'HealthNumber'), 'fgcolor_override'), f).toBe('0 0 255 255');
+  });
+
+  it('hard-hides a hidden frame in all three', () => {
+    const files = buildHud(si({ BackgroundImage: { visible: false } }));
+    for (const f of [HUNTER, SMOKER, BOOMER]) {
+      const n = at(files, f, 'BackgroundImage');
+      expect([kvGet(n, 'visible'), kvGet(n, 'wide'), kvGet(n, 'tall'), kvGet(n, 'drawColor')], f).toEqual(['0', '0', '0', '255 255 255 0']);
+    }
+  });
+
+  it('replaces the Hunter number\'s [$WINDOWS] tall line, never adds a second one, and leaves the Mac line', () => {
+    const files = buildHud(si({ HealthNumber: { h: 30 } }));
+    const n = at(files, HUNTER, 'HealthNumber');
+    const talls = (n.value as KvNode[]).filter((c) => c.key.toLowerCase() === 'tall');
+    expect(talls.map((c) => [c.value, c.cond])).toEqual([['30', '[$WINDOWS]'], ['25', '[$OSX]']]);
+  });
+
+  it('never touches the two zombiehealthleft files', () => {
+    const plain = buildHud(design({}));
+    const edited = buildHud(si({ Health: { w: 112, y: 60 }, HealthNumber: { color: '0 0 255 255' }, BackgroundImage: { visible: false } }));
+    for (const f of ['resource/ui/hud/zombiehealthleft_small.res', 'resource/ui/hud/zombiehealthleft_large.res']) {
+      expect(text(edited, f), f).toBe(text(plain, f));
+    }
+  });
+
+  it('on Modern, where the three files match, writes the same numbers to all three', () => {
+    // The preview's trees: a Modern download needs the Roboto files, which this test has no need of.
+    const trees = buildTrees(si({ Health: { w: 100, x: 10 } }, 'modern'));
+    for (const f of [HUNTER, SMOKER, BOOMER]) {
+      const n = kvFind(trees(f), ['Health'])!;
+      expect([kvGet(n, 'wide'), kvGet(n, 'xpos')], f).toEqual(['100', '10']);
+    }
+  });
+
+  it('skips a linked file an imported HUD lacks the block in, as it skips a missing block', () => {
+    const ID = '8'.repeat(64);
+    registerImport(ID, sampleHud({ [BOOMER]: dropBlock(baseFile('stock', BOOMER), 'Health') }));
+    try {
+      const d: HudDesign = { ...si({ Health: { w: 100 } }), preset: 'imported', imported: { id: ID, name: 'x' } };
+      const files = buildHud(d);
+      expect(kvGet(kvFind(parseKv(text(files, HUNTER)!)[0].value as KvNode[], ['Health'])!, 'wide')).toBe('100');
+      expect(kvFind(parseKv(text(files, BOOMER)!)[0].value as KvNode[], ['Health'])).toBeUndefined();
+    } finally { unregisterImport(ID); }
+  });
+});
+
+/**
+ * Fitting your infected health (plan decisions 1 and 2): the container,
+ * HudZombieHealth, shrinks to what the three live files show and moves by the
+ * same amount, and every piece in those files shifts back, so fitting alone
+ * moves nothing on screen. Probe Q11 (b10/shots/crops/br-bce.png): the
+ * container clips its children, so a smaller container cuts what it no
+ * longer covers.
+ */
+describe('fitting your infected health', () => {
+  const HUNTER = 'resource/ui/hud/hunterhealth.res', SMOKER = 'resource/ui/hud/smokerhealth.res', BOOMER = 'resource/ui/hud/boomerhealth.res';
+  const LAYOUT_FILE = 'scripts/hudlayout.res';
+  const W = screenW('16:9');
+  const si = (o: ElementOverride, kids: Record<string, ChildOverride> = {}, preset: 'stock' | 'modern' = 'stock') =>
+    design({ preset, elements: { siHealth: o }, children: Object.keys(kids).length ? { siHealth: kids } : {} });
+  const container = (d: HudDesign) => kvFind(buildTrees(d)(LAYOUT_FILE), ['HudZombieHealth'])!;
+  const rectOf = (n: KvNode) => ['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(n, k));
+
+  it('fits stock to the Hunter and Boomer frames: (250,0) 150 x 100, and the container moves the same 250 right', () => {
+    const d = si({ fit: true });
+    expect(rectOf(container(d))).toEqual(['r137', 'r100', '150', '100']);
+    expect(panelFrame(d, 'siHealth').shift).toEqual({ x: 250, y: 0 });
+  });
+
+  it('shifts every piece in the three live files by the box\'s top-left', () => {
+    const t = buildTrees(si({ fit: true }));
+    const x = (f: string, n: string) => kvGet(kvFind(t(f), [n])!, 'xpos');
+    expect([x(HUNTER, 'Health'), x(HUNTER, 'BackgroundImage'), x(HUNTER, 'HealthNumber'), x(HUNTER, 'DuckingIcon')]).toEqual(['2', '0', '85', '70']);
+    expect([x(SMOKER, 'Health'), x(SMOKER, 'BackgroundImage')]).toEqual(['2', '0']);
+    expect([x(BOOMER, 'Health'), x(BOOMER, 'BackgroundImage')]).toEqual(['72', '70']);
+  });
+
+  it('scales the fitted container and its offset with the element', () => {
+    const d = si({ fit: true, scale: 1.5 });
+    const c = container(d);
+    expect([kvGet(c, 'wide'), kvGet(c, 'tall')]).toEqual(['225', '150']);
+    expect(parsePos(kvGet(c, 'xpos')!, W)).toBe(parsePos('r387', W) + 250 * 1.5);
+  });
+
+  it('moves the fitted container from where the player put the element', () => {
+    const d = si({ fit: true, x: 100, y: 300 });
+    const c = container(d);
+    // A centre token on the 853.33-wide screen reads back to the half unit.
+    expect(Math.abs(parsePos(kvGet(c, 'xpos')!, W) - 350)).toBeLessThanOrEqual(0.5);
+    expect(parsePos(kvGet(c, 'ypos')!, 480)).toBe(300);
+  });
+
+  for (const scale of [1, 1.5]) {
+    it(`moves nothing on screen by fitting alone, at scale ${scale}`, () => {
+      const at = (d: HudDesign) => {
+        const r = elementRect(d, 'siHealth', d.aspect);
+        const t = buildTrees(d);
+        return Object.fromEntries([HUNTER, SMOKER, BOOMER].flatMap((f) => ['BackgroundImage', 'Health', 'HealthNumber', 'DuckingIcon'].map((n) => {
+          const b = kvFind(t(f), [n])!;
+          return [`${f} ${n}`, [r.x + parseFloat(kvGet(b, 'xpos')!), r.y + parseFloat(kvGet(b, 'ypos')!), kvGet(b, 'wide'), kvGet(b, 'tall')]];
+        })));
+      };
+      const fitted = at(si({ fit: true, scale })), plain = at(si({ scale }));
+      for (const [k, v] of Object.entries(plain)) {
+        const f = fitted[k];
+        expect(Math.abs((f[0] as number) - (v[0] as number)), k).toBeLessThanOrEqual(1);
+        expect(Math.abs((f[1] as number) - (v[1] as number)), k).toBeLessThanOrEqual(1);
+        expect([f[2], f[3]], k).toEqual([v[2], v[3]]);
+      }
+    });
+  }
+
+  it('reports the fitted container as the element\'s rect, where the preview clips it', () => {
+    const r = elementRect(si({ fit: true }), 'siHealth', '16:9');
+    expect([r.x, r.y, r.w, r.h]).toEqual([W - 137, 380, 150, 100]);
+  });
+
+  it('shrinks to the bars, numbers and crouch icon once the frame is hidden, and to the spec box without the icon', () => {
+    const noFrame = si({ fit: true }, { BackgroundImage: { visible: false } });
+    expect(panelFrame(noFrame, 'siHealth').shift).toEqual({ x: 252, y: 42 });
+    expect([kvGet(container(noFrame), 'wide'), kvGet(container(noFrame), 'tall')]).toEqual(['134', '40']);
+    const bare = si({ fit: true }, { BackgroundImage: { visible: false }, DuckingIcon: { visible: false } });
+    expect(panelFrame(bare, 'siHealth').shift).toEqual({ x: 252, y: 49 });
+    expect([kvGet(container(bare), 'wide'), kvGet(container(bare), 'tall')]).toEqual(['134', '33']);
+  });
+
+  it('fits Modern to its content and stretches its fill in all three files', () => {
+    const d = si({ fit: true }, {}, 'modern');
+    // Health 8,25 134x5; number 8,3 100x20; crouch icon 134,4 12x12; the frame is 0 x 0.
+    expect(panelFrame(d, 'siHealth').shift).toEqual({ x: 8, y: 3 });
+    expect([kvGet(container(d), 'wide'), kvGet(container(d), 'tall')]).toEqual(['138', '27']);
+    for (const f of [HUNTER, SMOKER, BOOMER]) expect(rectOf(kvFind(buildTrees(d)(f), ['ModBg'])!), f).toEqual(['0', '0', '138', '27']);
+  });
+
+  it('reads a piece back in the unfitted Hunter frame, as the side panel shows it', () => {
+    expect(panelChild(si({ fit: true }), 'siHealth', 'Health')).toMatchObject({ x: 252, y: 69, w: 132, h: 13 });
+  });
+
+  it('keeps the file\'s container when nothing is left to fit to', () => {
+    const all = Object.fromEntries(['BackgroundImage', 'Health', 'HealthNumber', 'DuckingIcon'].map((n) => [n, { visible: false }]));
+    expect(rectOf(container(si({ fit: true }, all)))).toEqual(['r387', 'r100', '400', '100']);
+  });
+
+  it('leaves the container and the files alone with fit off', () => {
+    const files = buildHud(si({ scale: 1 }));
+    for (const f of [HUNTER, SMOKER, BOOMER]) expect(text(files, f), f).toBeUndefined();
+    expect(rectOf(kvFind(layoutOf(files), ['HudZombieHealth'])!)).toEqual(['r387', 'r100', '400', '100']);
+  });
+});
+
+describe('a piece of your infected health, read in the class file the preview shows', () => {
+  const BOOMER = 'resource/ui/hud/boomerhealth.res';
+  it('reads the Boomer file\'s own numbers, fitted or not', () => {
+    const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), elements: {}, children: { siHealth: { Health: { w: 112 } } } };
+    expect(panelChild(d, 'siHealth', 'Health', BOOMER)).toMatchObject({ x: 322, y: 69, w: 54, h: 13 });
+    expect(panelChild(d, 'siHealth', 'Health')).toMatchObject({ x: 252, y: 69, w: 112, h: 13 });
+    const fitted: HudDesign = { ...d, elements: { siHealth: { fit: true } } };
+    expect(panelChild(fitted, 'siHealth', 'Health', BOOMER)).toMatchObject({ x: 322, y: 69, w: 54, h: 13 });
+  });
+});
+
+describe('the ability timer: scale, pieces and state colours (plan Task 6)', () => {
+  const ABILITY = 'resource/ui/hud/abilitytimerhud.res';
+  const block = (d: HudDesign, file: string, name: string) => kvFind(buildTrees(d)(file), [name])!;
+  const rect = (n: KvNode) => ['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(n, k));
+  const plain = (p: Partial<HudDesign> = {}): HudDesign => ({ ...structuredClone(DEFAULT_DESIGN), elements: {}, ...p });
+  it('scales every piece and the element block by its scale', () => {
+    const d = plain({ elements: { abilityRing: { scale: 1.5 } } });
+    expect(rect(block(d, ABILITY, 'BackgroundImage'))).toEqual(['0', '0', '120', '120']);
+    expect(rect(block(d, ABILITY, 'AbilityImage'))).toEqual(['15', '15', '90', '90']);
+    expect(rect(block(d, ABILITY, 'Progress'))).toEqual(['15', '15', '90', '90']);
+    const el = block(d, 'scripts/hudlayout.res', 'CHudAbilityTimer');
+    expect([kvGet(el, 'wide'), kvGet(el, 'tall')]).toEqual(['120', '105']);
+  });
+  it('writes a state colour over the stock line, never a second one', () => {
+    const d = validateDesign({ v: 1, elements: { abilityRing: { keys: { ability_ready_color: '255 0 255 255' } } } });
+    const text = new TextDecoder('latin1').decode(buildHud(d).find((f) => f.path === 'scripts/hudlayout.res')!.data);
+    const at = text.indexOf('"CHudAbilityTimer"');
+    const blockText = text.slice(at, text.indexOf('if_split_screen_left', at));
+    expect(blockText.match(/ability_ready_color/g)).toHaveLength(1);
+    expect(blockText).toMatch(/"ability_ready_color"\s+"255 0 255 255"/);
+  });
+  it('hard-hides a hidden backdrop, and leaves Modern\'s own hidden one alone when untouched', () => {
+    const d = validateDesign({ v: 1, children: { abilityRing: { BackgroundImage: { visible: false } } } });
+    const bg = block(d, ABILITY, 'BackgroundImage');
+    expect([kvGet(bg, 'visible'), kvGet(bg, 'wide'), kvGet(bg, 'tall')]).toEqual(['0', '0', '0']);
+    const modern = validateDesign({ v: 1, preset: 'modern' });
+    expect(rect(block(modern, ABILITY, 'BackgroundImage'))).toEqual(['0', '0', '0', '0']);
+  });
+});
+
+describe('the ability marker: HudCrosshair\'s ability keys (plan Task 8)', () => {
+  const LAYOUT = 'scripts/hudlayout.res';
+  const text = (d: HudDesign) => new TextDecoder('latin1').decode(buildHud(d).find((f) => f.path === LAYOUT)!.data);
+  /** The HudCrosshair block's text in the download: the block runs to the next top-level block. */
+  const crosshairBlocks = (d: HudDesign) => [...text(d).matchAll(/\n\t"?HudCrosshair"?\s*\r?\n\t\{([\s\S]*?)\r?\n\t\}/g)].map((m) => m[1]);
+  it('writes the marker keys and never_draw into one HudCrosshair block', () => {
+    const d = validateDesign({ v: 1, hideGameCrosshair: true,
+      elements: { abilityMarker: { keys: { ability_size: 30, ability_ready_color: '0 255 0 255' } } } });
+    const blocks = crosshairBlocks(d);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatch(/"?never_draw"?\s+"1"/);
+    expect(blocks[0]).toMatch(/"ability_size"\s+"30"/);
+    expect(blocks[0].match(/ability_ready_color/g)).toHaveLength(1);
+    expect(blocks[0]).toMatch(/"ability_ready_color"\s+"0 255 0 255"/);
+  });
+  it('hides the marker by its size and colours, never by a hard hide that would take the crosshair too', () => {
+    // Probe Q16b (/home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/centre-bcef.png): never_draw on
+    // HudCrosshair removes the crosshair and the marker together, and a 0 x 0 HudCrosshair would too.
+    const d = validateDesign({ v: 1, elements: { abilityMarker: { visible: false, keys: { ability_ready_color: '0 255 0 255' } } } });
+    const c = kvFind(buildTrees(d)(LAYOUT), ['HudCrosshair'])!;
+    const hidden = kvFind(parseKv(text(d))[0].value as KvNode[], ['HudCrosshair'])!;
+    for (const n of [hidden]) {
+      expect(kvGet(n, 'visible')).toBe('1');
+      expect(kvGet(n, 'wide')).toBe('640');
+      expect(kvGet(n, 'tall')).toBe('480');
+      expect(kvGet(n, 'never_draw')).toBeUndefined();
+      expect(kvGet(n, 'ability_size')).toBe('0');
+      for (const k of ['ability_ready_color', 'ability_charging_color', 'ability_surpressed_color', 'ability_attack_color', 'ability_attack_color_colorblind']) {
+        expect(kvGet(n, k)?.split(' ')[3], k).toBe('0');
+      }
+      expect(kvGet(n, 'ability_ready_color')).toBe('0 255 0 0');           // its RGB kept
+    }
+    // The preview's tree keeps the marker whole, as every hidden element's (elementHidePass is download-only).
+    expect(kvGet(c, 'ability_size')).toBe('17');
+  });
+  it('leaves an untouched design\'s HudCrosshair exactly as the preset has it', () => {
+    const base = kvFind(parseKv(baseFile('stock', LAYOUT))[0].value as KvNode[], ['HudCrosshair'])!;
+    const built = kvFind(parseKv(text(validateDesign({ v: 1 })))[0].value as KvNode[], ['HudCrosshair'])!;
+    expect(built).toEqual(base);
+  });
+});
+
+describe('the infected card fit and the gap between cards (plan Task 11)', () => {
+  const CARD = 'resource/ui/hud/zombieteamdisplayplayer.res';
+  const LAYOUT = 'scripts/hudlayout.res';
+  const row = (o: ElementOverride, children?: Record<string, ChildOverride>, preset: 'stock' | 'modern' = 'stock') =>
+    validateDesign({ v: 1, preset, elements: { infectedRow: o }, ...(children ? { children: { infectedRow: children } } : {}) });
+  const node = (d: HudDesign, file: string, name: string) => kvFind(buildTrees(d)(file), [name])!;
+  const rect = (n: KvNode) => ['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(n, k));
+  const FONTS = { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } };
+  const container = (d: HudDesign) => kvFind(layoutOf(buildHud(d, FONTS)), ['CHudZombieTeamDisplay'])!;
+  /** Where a card piece lands on screen, in units: the container's y plus the piece's y, as the game draws card 1. */
+  const screenY = (d: HudDesign, name: string) => {
+    const c = container(d);
+    const cardFile = parseKv(new TextDecoder('latin1').decode(buildHud(d).find((f) => f.path === CARD)?.data ?? new TextEncoder().encode(baseFile('stock', CARD))))[0].value as KvNode[];
+    return parsePos(kvGet(c, 'ypos')!, 480) + parseFloat(kvGet(kvFind(cardFile, [name])!, 'ypos')!);
+  };
+
+  it('fits stock to (0,10) 133 x 64, keeping the backdrop, and moves the container down by the offset', () => {
+    // Plan decision 1: the backdrop (0,10 128x64) is kept, NameLabel reaches x 133.
+    const d = row({ fit: true });
+    expect(panelWork(d).boxes.infectedRow).toEqual({ x: 0, y: 10, w: 133, h: 64 });
+    expect(rect(node(d, CARD, 'BackgroundImage'))).toEqual(['0', '0', '128', '64']);
+    expect(rect(node(d, CARD, 'NameLabel'))).toEqual(['13', '45', '120', '12']);
+    expect([kvGet(node(d, CARD, 'ZombieTeamDisplayPlayer'), 'wide'), kvGet(node(d, CARD, 'ZombieTeamDisplayPlayer'), 'tall')]).toEqual(['133', '64']);
+    expect(kvGet(container(d), 'ypos')).toBe('r65');
+    expect(kvGet(container(d), 'xpos')).toBe('0');
+    expect(kvGet(container(d), 'HorizPanelSpacing')).toBe('140');     // the pitch is kept
+    // Fit alone moves nothing on screen.
+    for (const n of ['BackgroundImage', 'PlayerImage', 'HealthPanel', 'NameLabel', 'SkullIconPlacement']) {
+      expect(screenY(d, n), n).toBe(screenY(row({}), n));
+    }
+  });
+
+  it('moves the container by the offset at the element\'s scale', () => {
+    const d = row({ fit: true, scale: 2 });
+    expect(kvGet(container(d), 'ypos')).toBe('r55');
+    expect(elementRect(d, 'infectedRow', d.aspect).y).toBe(425);
+  });
+
+  it('fits to the content alone with the backdrop hidden: the spec\'s (9,23) 124 x 44; state art never counts', () => {
+    const d = row({ fit: true }, { BackgroundImage: { visible: false } });
+    expect(panelWork(d).boxes.infectedRow).toEqual({ x: 9, y: 23, w: 124, h: 44 });
+  });
+
+  it('spreads Dead over the fitted card only when it has a height (probe Q19: stock 0 tall never shows)', () => {
+    expect(rect(node(row({ fit: true }), CARD, 'Dead'))).toEqual(['0', '8', '256', '0']);
+    expect(rect(node(row({ fit: true }, { Dead: { h: 40 } }), CARD, 'Dead'))).toEqual(['0', '0', '133', '40']);
+  });
+
+  it('spaces cards by the gap: HorizPanelSpacing = (card + gap) x scale', () => {
+    expect(kvGet(container(row({ fit: true, gap: 10 })), 'HorizPanelSpacing')).toBe('143');
+    expect(kvGet(container(row({ fit: true, gap: 10, scale: 2 })), 'HorizPanelSpacing')).toBe('286');
+    expect(kvGet(container(row({ gap: 10 })), 'HorizPanelSpacing')).toBe('266');           // the unfitted card is 256 wide
+    expect(teamLayout(row({ fit: true, gap: 10 }), elementById('infectedRow')!)).toMatchObject({ spacing: 143, gap: 10 });
+    // Nothing stored: the file's pitch, and the gap it implies.
+    expect(teamLayout(row({ fit: true }), elementById('infectedRow')!)).toMatchObject({ spacing: 140, gap: 7 });
+  });
+
+  it('keeps a saved design\'s stored spacing byte for byte until a gap is set', () => {
+    // download.golden.test.ts pins "infected teammates scaled 2 with a stored spacing 200".
+    expect(kvGet(container(row({ scale: 2, spacing: 200 })), 'HorizPanelSpacing')).toBe('200');
+    expect(row({ spacing: 200, gap: 5 }).elements.infectedRow).toEqual({ gap: 5 });
+  });
+
+  it('keeps the row a row: any other layout is dropped', () => {
+    expect(row({ dir: 'column' }).elements.infectedRow).toBeUndefined();
+    expect(row({ dir: 'row' }).elements.infectedRow).toEqual({ dir: 'row' });
+  });
+
+  it('fits Modern to its own backdrop, moving nothing', () => {
+    const d = row({ fit: true }, undefined, 'modern');
+    expect(panelWork(d).boxes.infectedRow).toEqual({ x: 0, y: 0, w: 120, h: 31 });
+    expect(kvGet(container(d), 'ypos')).toBe(kvGet(container(row({}, undefined, 'modern')), 'ypos'));
+  });
+});
+
+describe('the infected bar colour, Q24 passed in B14 (plan Task F1)', () => {
+  it('writes monochrome_color on the Hunter, Smoker and Boomer Health and the card HealthPanel, as B14 set them by hand', () => {
+    // /home/volence/l4d/hud/probe-phase2-infected/b14/build.mts HAND_EDITS: the same key and block in each file.
+    const d = validateDesign({ v: 1, children: {
+      siHealth: { Health: { keys: { monochrome_color: '255 0 255 255' } } },
+      infectedRow: { HealthPanel: { keys: { monochrome_color: '0 255 255 255' } } },
+    } });
+    const files = buildHud(d);
+    for (const f of ['hunterhealth', 'smokerhealth', 'boomerhealth']) {
+      const n = kvFind(parseKv(text(files, `resource/ui/hud/${f}.res`)!)[0].value as KvNode[], ['Health'])!;
+      expect(kvGet(n, 'monochrome_color'), f).toBe('255 0 255 255');
+    }
+    const card = kvFind(parseKv(text(files, 'resource/ui/hud/zombieteamdisplayplayer.res')!)[0].value as KvNode[], ['HealthPanel'])!;
+    expect(kvGet(card, 'monochrome_color')).toBe('0 255 255 255');
+  });
+});
+
+describe('WEAPON_ICON_LABELS', () => {
+  it('names the M16 and the hunting rifle the way the game uses them', async () => {
+    const { WEAPON_ICON_LABELS } = await import('./build');
+    expect(WEAPON_ICON_LABELS.icon_equip_machinegun).toBe('M16 (assault rifle)');
+    expect(WEAPON_ICON_LABELS.icon_equip_rifle).toBe('Hunting rifle');
+    expect(WEAPON_ICON_LABELS).toMatchObject({
+      icon_equip_pumpshotgun: 'Pump shotgun', icon_equip_autoshotgun: 'Auto shotgun', icon_equip_uzi: 'Uzi',
+      icon_equip_pistol: 'Pistol', icon_equip_dualpistols: 'Dual pistols',
+    });
+  });
+  it('labels every weapon icon entry', async () => {
+    const { WEAPON_ICON_LABELS, WEAPON_ICONS } = await import('./build');
+    for (const name of WEAPON_ICONS) expect(WEAPON_ICON_LABELS[name], name).toBeTruthy();
+  });
+});
