@@ -1331,6 +1331,9 @@ const GUIDE = '#ff4fa3';
 /** Your items' limit: amber, so it never reads as one of the pink snap guides. */
 export const LIMIT_COLOUR = '#ffb000';
 const LIMIT_SHADE = 'rgba(0,0,0,0.45)';
+/** A limit label's plate height, and the step from one plate down to the next (the plate plus a 2 px gap). */
+const LIMIT_PLATE_H = 14;
+const LIMIT_PLATE_STEP = LIMIT_PLATE_H + 2;
 
 /**
  * Your items' limits (spec section 2): everything the row cannot reach
@@ -1352,15 +1355,19 @@ function drawLimits(ctx: CanvasRenderingContext2D, lines: LimitLine[], k: number
   setLetterSpacing(ctx, 0);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  for (const l of lines) {
+  // Each plate a row lower than the one before, so Centre's two labels never
+  // cover each other however close its limits sit, and each kept on the
+  // canvas (a narrow one would cut the bar's label off); the line stays put.
+  for (const [i, l] of lines.entries()) {
     const x = l.x * k;
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, pxH); ctx.stroke();
     const w = ctx.measureText(l.label).width + 8 * d;
-    const bx = l.side === 'left' ? x + 4 * d : x - 4 * d - w;
+    const bx = Math.max(0, Math.min(l.side === 'left' ? x + 4 * d : x - 4 * d - w, pxW - w));
+    const by = (8 + i * LIMIT_PLATE_STEP) * d;
     ctx.fillStyle = 'rgba(0,0,0,0.8)';
-    ctx.fillRect(bx, 8 * d, w, 14 * d);
+    ctx.fillRect(bx, by, w, LIMIT_PLATE_H * d);
     ctx.fillStyle = LIMIT_COLOUR;
-    ctx.fillText(l.label, bx + 4 * d, 19 * d);
+    ctx.fillText(l.label, bx + 4 * d, by + 11 * d);
   }
   ctx.restore();
 }
