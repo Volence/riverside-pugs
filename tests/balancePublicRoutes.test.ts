@@ -134,6 +134,22 @@ describe('balance public routes', () => {
     expect(forbidden.statusCode).toBe(403);
   });
 
+  it('change list labels catalogue-only cvars and weapon stats, and still drops ignored plugins', async () => {
+    const cdb = compareDb();
+    const inv = (revive: string, uzi: string, tv: string) => JSON.stringify({
+      'c:survivor_revive_health': revive, 'w:weapon_smg.Damage': uzi, 'p:l4d_tvwatch.smx': tv });
+    cdb.prepare('UPDATE balance_patches SET inputs_json = ? WHERE id = 1').run(inv('30', '24', '1.aaaaaaaa'));
+    cdb.prepare('UPDATE balance_patches SET inputs_json = ? WHERE id = 2').run(inv('40', 'default', '2.bbbbbbbb'));
+    cdb.prepare("UPDATE balance_patches SET published_at = '2026-09-20 00:00:00'").run();
+    const { a } = await app(cdb);
+    const c = (await a.inject({ method: 'GET', url: '/api/balance/patches/2' })).json().changes;
+    expect(c.knobs).toEqual([
+      { label: 'Health after a revive', from: '30', to: '40' },
+      { label: 'Uzi damage', from: '24', to: 'game default' },
+    ]);
+    expect(c.pluginsUpdated).toEqual([]);
+  });
+
   it('single flight: concurrent public GETs for the same patch share one comparison', async () => {
     const cdb = compareDb();
     cdb.prepare("UPDATE balance_patches SET published_at = '2026-09-20 00:00:00' WHERE id = 1").run();

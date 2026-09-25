@@ -5,7 +5,7 @@ import { logAdmin } from '../admin/audit.js';
 import { loadBalanceKnobs, type BalanceKnobs } from '../balanceKnobs.js';
 import { listPublished, publicEntry, publishPatch, type KnobLabels } from '../balancePublic.js';
 import { withEffectiveIgnored } from '../balanceIgnore.js';
-import { loadCatalogue, type Catalogue } from '../balanceCatalogue.js';
+import { loadCatalogue, watchKnobs, type Catalogue } from '../balanceCatalogue.js';
 import { gameValues } from '../balanceValues.js';
 
 export interface BalancePublicRouteOpts { db: DB; knobsPath?: string; cataloguePath?: string }
@@ -28,15 +28,18 @@ export async function balancePublicRoutes(app: FastifyInstance, opts: BalancePub
     console.error('[balance] public page: knobs.json failed to load, showing raw names:', err);
   }
 
-  // Per request: the site ignore list can change while the process runs.
-  const labels = (): KnobLabels => withEffectiveIgnored(db, knobs ?? { cvars: [], files: [], dirs: [], versionless: [] });
-
   // The Game values page (sub-project 4). A broken catalogue disables it (503).
   let catalogue: Catalogue | null = null;
   try { catalogue = loadCatalogue(opts.cataloguePath); } catch (err) {
     console.error('[balance] values page disabled, balance/catalogue.json failed to load:', err);
   }
   const noCatalogue = { error: 'balance/catalogue.json failed to load' };
+
+  // Labels for the change list: knobs.json plus the catalogue's cvars and
+  // weapon stats, the same watch list the servers report. Per request: the
+  // site ignore list can change while the process runs.
+  const watched = watchKnobs(knobs ?? { cvars: [], files: [], dirs: [], versionless: [] }, catalogue);
+  const labels = (): KnobLabels => withEffectiveIgnored(db, watched);
   // Public and unauthenticated: cached until any patch changes (name,
   // publish, triage, a new sighting) or a minute passes.
   let cached: { stamp: string; at: number; value: ReturnType<typeof gameValues> } | null = null;
