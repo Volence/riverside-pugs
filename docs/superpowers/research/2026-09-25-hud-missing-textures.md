@@ -23,8 +23,9 @@ material and got nothing back.
 Its files name four flat textures the game does not have (`vgui/hud/mod_panel_flat` behind the kill
 notices and the versus score panel, `mod_panel_flat_red` behind the team score box, and
 `mod_equip_active`/`_inactive`), and the download did not include them. They lived only in the
-owner's own `modernhud` folder, which the owner's `gameinfo.txt` mounts first, so the owner's game
-and every in-game probe drew them fine.
+owner's own `modernhud` folder, which the owner's `gameinfo.txt` mounts first, so the owner's own
+game drew them fine. (The in-game harness already takes that folder out for each run, in `addons.py`,
+but no earlier probe shot the kill notice or the Tab screen on an untouched Modern design.)
 
 Proven in game (`/home/volence/l4d/hud/probe-modern-art/RESULTS.md`): with the `modernhud` line
 commented out for the run, the untouched Modern download from master draws the purple and black
