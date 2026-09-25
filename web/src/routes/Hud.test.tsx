@@ -3078,6 +3078,30 @@ describe('The Tab screen on the page', () => {
     expect(legend('Versus score')).toBeTruthy();
   });
 
+  it('moves the versus panel from a drag in a picked Tab piece, and records nothing for a drag on the board', async () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    const undo = () => screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement;
+    fireEvent.click(tabHeld());
+    clickAt(canvas, 60, 60);
+    expect(legend('"Your Team"')).toBeTruthy();
+    dragFrom(canvas, [60, 60], [80, 70]);
+    await waitFor(() => expect(saved().elements?.tabVersus).toEqual({ x: 35, y: 35 }));
+    expect(legend('Versus score')).toBeTruthy();
+    fireEvent.click(undo());
+    expect(undo().disabled).toBe(true);
+    // The backdrop, then the board: neither moves, and nothing up from them does.
+    clickAt(canvas, 100, 400);
+    expect(legend('Backdrop')).toBeTruthy();
+    dragFrom(canvas, [100, 400], [150, 420]);
+    expect(undo().disabled).toBe(true);
+    expect(legend('Backdrop')).toBeTruthy();
+    clickAt(canvas, 100, 400, { ctrlKey: true });
+    expect(legend('Tab screen')).toBeTruthy();
+    dragFrom(canvas, [100, 400], [150, 420]);
+    expect(undo().disabled).toBe(true);
+  });
+
   it('never picks the teammate cards under the Tab screen', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);

@@ -10,6 +10,7 @@ import {
   pieceGuideToScreen, menuActions, drawnPieces, elementFrame, isPicked, pick, cardsOf, panelOf, type Selection, type Mods,
 } from './selection';
 import { unionBox } from './guides';
+import { _setProbe } from './probes';
 
 const D = DEFAULT_DESIGN;
 const FREE = withTeamDir(DEFAULT_DESIGN, 'free');
@@ -664,6 +665,29 @@ describe('the Tab screen', () => {
     expect(selectedIds(sel).some((id) => id.startsWith('tab'))).toBe(false);
     expect(selectedIds(selectAll(D, 'survivor', DEFAULT_PREVIEW, NONE)).some((id) => id.startsWith('tab'))).toBe(false);
     expect(boxSelect(D, 'survivor', HELD, { x: 25, y: 170 }, { x: 300, y: 196 })).toMatchObject({ kind: 'children', panel: 'tabSurvivors', card: 0 });
+  });
+
+  it('moves the versus panel from a drag in a Tab piece or the board, which cannot move themselves, and starts no move of nothing', () => {
+    const versus: Selection = { kind: 'elements', ids: ['tabVersus'] };
+    const team: Selection = { kind: 'children', names: ['TeamYours'], card: 0, panel: 'tabVersus' };
+    const [f] = selectionFrames(D, team, HELD);
+    const mid = { x: f.x + f.w / 2, y: f.y + f.h / 2 };
+    const hit = hitAt(D, 'survivor', HELD, mid.x, mid.y);
+    expect(dragIntent(D, team, hit, plain, null, mid, HELD)).toEqual({ kind: 'move', sel: versus });
+    const board: Selection = { kind: 'elements', ids: ['tabBoard'] };
+    expect(dragIntent(D, board, hit, plain, null, mid, HELD)).toEqual({ kind: 'move', sel: versus });
+    // On the board away from the versus panel: nothing there can move.
+    const low = { x: 100, y: 400 };
+    const onBoard = hitAt(D, 'survivor', HELD, low.x, low.y);
+    expect(onBoard.element).toBe('tabBoard');
+    expect(dragIntent(D, board, onBoard, plain, null, low, HELD)).toEqual({ kind: 'none' });
+    expect(dragIntent(D, NONE, onBoard, plain, null, low, HELD)).toEqual({ kind: 'none' });
+    // With the versus panel's move gated, a drag in it moves nothing either.
+    _setProbe('TS4', false);
+    try {
+      expect(dragIntent(D, team, hit, plain, null, mid, HELD)).toEqual({ kind: 'none' });
+      expect(dragIntent(D, versus, hit, plain, null, mid, HELD)).toEqual({ kind: 'none' });
+    } finally { _setProbe('TS4', null); }
   });
 
   it('snaps a HUD move to no Tab element, and the versus panel to the Tab screen only', () => {

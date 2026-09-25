@@ -87,6 +87,30 @@ function movable(sel: Selection): Selection {
 }
 
 /**
+ * Whether a move of this selection can move anything: an element that moves
+ * (HudElement.move, its moveGate open, not the Free Teammates, whose frame
+ * is the screen), a card, or a piece that moves (ChildDef.move). The Tab
+ * pieces and the Tab board cannot, so a drag must not start a move of them.
+ */
+function canMove(design: HudDesign, sel: Selection): boolean {
+  switch (sel.kind) {
+    case 'elements': return sel.ids.some((id) => {
+      const el = elementById(id);
+      return !!el?.move && (!el.moveGate || probe(el.moveGate)) && !(id === 'teamColumn' && isFreeTeam(design));
+    });
+    case 'cards': return true;
+    case 'children': return sel.names.some((n) => { const def = childDef(panelOf(sel), n); return !!def?.move && (!def.gate || probe(def.gate)); });
+    default: return false;
+  }
+}
+
+/** What a drag in this selection moves: the selection, else the nearest level up that can move (a Tab piece's versus panel), else nothing. */
+function movableUp(design: HudDesign, sel: Selection): Selection | null {
+  for (let s = movable(sel); s.kind !== 'none'; s = movable(climb(s))) if (canMove(design, s)) return s;
+  return null;
+}
+
+/**
  * How many cards can be picked: the three the preview draws, and in Free
  * the fourth as well, which shows only while spectating a full team and is
  * reachable only from Layers, where Free lists it.
@@ -220,9 +244,12 @@ export type Intent = { kind: 'resize'; handle: Handle } | { kind: 'box' } | { ki
  * of the selection's handles (`handle`, found by handleAt) resizes, with or
  * without Shift, since Shift there keeps the ratio. Otherwise Shift draws a
  * box. A drag on part of the selection moves the selection (the Row or
- * Column Teammates picked move as one). Anywhere else it moves the card
- * under the pointer, in any layout, or where there is no card the element,
- * and selects it, so no key is needed to move a card or a section.
+ * Column Teammates picked move as one), or when the selection cannot move
+ * (a Tab piece, the Tab board) the nearest level up that can (the versus
+ * panel). Anywhere else it moves the card under the pointer, in any layout,
+ * or where there is no card the element, and selects it, so no key is
+ * needed to move a card or a section. Nothing that cannot move starts a
+ * move, so a drag never opens a gesture that changes nothing.
  */
 export function dragIntent(
   design: HudDesign, sel: Selection, hit: Hit, mods: Mods, handle: Handle | null = null, at: { x: number; y: number } | null = null,
@@ -230,11 +257,15 @@ export function dragIntent(
 ): Intent {
   if (handle) return { kind: 'resize', handle };
   if (mods.shift) return { kind: 'box' };
-  if (isPicked(design, sel, hit) || insideSelected(design, sel, at, state)) return { kind: 'move', sel: movable(sel) };
+  if (isPicked(design, sel, hit) || insideSelected(design, sel, at, state)) {
+    const up = movableUp(design, sel);
+    if (up) return { kind: 'move', sel: up };
+  }
   if (!hit.element) return { kind: 'none' };
   if (hit.element === 'teamColumn' && hit.card !== null) return { kind: 'move', sel: cardsOf([hit.card]) };
-  if (hit.element === 'teamColumn' && isFreeTeam(design)) return { kind: 'none' };
-  return { kind: 'move', sel: { kind: 'elements', ids: [hit.element] } };
+  // What is under the pointer, when it can move: never a move that moves nothing (the Tab board, the crosshair).
+  const under: Selection = { kind: 'elements', ids: [hit.element] };
+  return canMove(design, under) ? { kind: 'move', sel: under } : { kind: 'none' };
 }
 
 /**
