@@ -196,38 +196,12 @@
       "note": "How many commons a panic event (alarm, crescendo, finale wave) sends. Set by l4dready when the round goes live."
     },
     {
-      "id": "z_mob_spawn_min_size",
+      "id": "director_no_mobs",
       "group": "common",
-      "label": "Horde size (min)",
+      "label": "Natural hordes off",
       "source": "cvar",
-      "vanilla": "10",
-      "note": "Smallest natural horde."
-    },
-    {
-      "id": "z_mob_spawn_max_size",
-      "group": "common",
-      "label": "Horde size (max)",
-      "source": "cvar",
-      "vanilla": "30",
-      "note": "Largest natural horde."
-    },
-    {
-      "id": "z_mob_spawn_min_interval_normal",
-      "group": "common",
-      "label": "Time between hordes (min)",
-      "source": "cvar",
-      "unit": "s",
-      "vanilla": "90",
-      "note": "Shortest gap between natural hordes."
-    },
-    {
-      "id": "z_mob_spawn_max_interval_normal",
-      "group": "common",
-      "label": "Time between hordes (max)",
-      "source": "cvar",
-      "unit": "s",
-      "vanilla": "180",
-      "note": "Longest gap between natural hordes."
+      "vanilla": "0",
+      "note": "1 means the game never sends hordes on a timer. Hordes then come only from panic events (alarms, crescendos, finales), boomer bile and the anti-bait countdown. Rotoblin keeps this at 1."
     },
     {
       "id": "l4d_antibaiter_delay",
@@ -243,7 +217,7 @@
       "label": "Anti-bait horde timer",
       "source": "cvar",
       "unit": "s",
-      "note": "Countdown, once started, before a panic horde is sent at survivors who are still not moving."
+      "note": "Countdown, once started, before two hordes are sent at survivors who are still not moving."
     },
     {
       "id": "l4d_antibaiter_progress",
