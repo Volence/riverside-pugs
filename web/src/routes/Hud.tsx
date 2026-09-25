@@ -467,6 +467,21 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
   const shot = useRef<HTMLImageElement | null>(null);
   const [imgTick, setImgTick] = useState(0);
 
+  // The backing store is sized only when the canvas draws, so a canvas whose
+  // box changes (window resized, the side panel wrapping) redraws at once
+  // rather than showing a stretched old frame until the next edit.
+  useEffect(() => {
+    const c = canvas.current;
+    if (!c || typeof ResizeObserver === 'undefined') return;
+    let last = '';
+    const ro = new ResizeObserver(([e]) => {
+      const size = `${Math.round(e.contentRect.width)}x${Math.round(e.contentRect.height)}`;
+      if (size !== last) { last = size; setImgTick((t) => t + 1); }
+    });
+    ro.observe(c);
+    return () => ro.disconnect();
+  }, []);
+
   // The press and the drag under way, if any. Refs rather than state: they
   // change on every pointermove and must never themselves trigger a render.
   const press = useRef<Press | null>(null);
@@ -1309,7 +1324,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
   const advancedSlots = SLOTS.filter((s) => s.advancedOnly);
 
   return (
-    <div class="page page--wide">
+    <div class="page page--wide page--editor">
       {/* The tab strip names the page, so the title is for screen readers only. */}
       <HudTabs active="hud" />
       <h2 class="sr-only">HUD editor</h2>
