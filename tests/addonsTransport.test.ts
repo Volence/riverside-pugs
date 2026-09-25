@@ -202,9 +202,30 @@ describe('ftpTransport put', () => {
     ]);
   });
 
-  it('rejects with the retry\'s error when the second rename fails too', async () => {
+  it('when the second rename fails too, says loudly that the target is gone and the new copy is still .part', async () => {
     const f = fakeFtp([refused('553 first'), refused('553 second')]);
-    await expect(f.t.put('/tmp/x', 'pug_balance.cfg')).rejects.toThrow('553 second');
+    await expect(f.t.put('/tmp/x', 'pug_balance.cfg')).rejects.toThrow(/553 second.*pug_balance\.cfg was removed.*pug_balance\.cfg\.part/);
     expect(f.calls.filter((c) => c.startsWith('rename')).length).toBe(2);
+  });
+
+  it('a 550 refusal also takes the remove-and-retry path', async () => {
+    const f = fakeFtp([Object.assign(new Error('550 exists'), { code: 550 }), null]);
+    await f.t.put('/tmp/x', 'pug_balance_watch.txt');
+    expect(f.calls).toContain('remove pug_balance_watch.txt');
+  });
+
+  it('any other rename error is thrown as is and never removes the target', async () => {
+    const f = fakeFtp([Object.assign(new Error('421 timeout'), { code: 421 })]);
+    await expect(f.t.put('/tmp/x', 'pug_balance.cfg')).rejects.toThrow('421 timeout');
+    expect(f.calls.some((c) => c.startsWith('remove'))).toBe(false);
+    const g = fakeFtp([new Error('socket closed')]);
+    await expect(g.t.put('/tmp/x', 'pug_balance.cfg')).rejects.toThrow('socket closed');
+    expect(g.calls.some((c) => c.startsWith('remove'))).toBe(false);
+  });
+
+  it('never removes a campaign VPK to make room for a rename', async () => {
+    const f = fakeFtp([refused('553 file exists')]);
+    await expect(f.t.put('/tmp/x', 'dbd.vpk')).rejects.toThrow('553 file exists');
+    expect(f.calls.some((c) => c.startsWith('remove'))).toBe(false);
   });
 });
