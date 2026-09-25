@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { buildHud } from './build';
+import { describe, it, expect, afterAll } from 'vitest';
+import { buildHud, buildTrees } from './build';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
 import { parseKv, writeKv, kvGet, pcFind, type KvNode } from './kv';
-import { baseFile } from './base';
+import { baseFile, baseOf, presetOverrides, registerImport, unregisterImport } from './base';
+import { sampleHud } from './importFixtures';
 import { parsePos, screenW, SCREEN_H } from './units';
 
 /**
@@ -153,4 +154,34 @@ describe('the Tab screen\'s style slots (task 8)', () => {
     // An Image style with no upload falls back to stock, and so writes nothing.
     expect(styled({ tabRowBg: { kind: 'image' } }).filter((f) => /tabrowbg|scoreboard/.test(f.path))).toEqual([]);
   });
+});
+
+describe('no Tab edit, no Tab file (spec 4.4)', () => {
+  const ID = '7'.repeat(64);
+  afterAll(() => { unregisterImport(ID); });
+  const TAB = [SCOREBOARD, VERSUS, SURVIVOR_ROW, 'resource/ui/scoreboardinfectedplayer.res'];
+  const cases: [string, () => HudDesign][] = [
+    ['stock', () => validateDesign({ v: 1 })],
+    ['Modern', () => validateDesign({ v: 1, preset: 'modern' })],
+    ['an imported HUD', () => { registerImport(ID, sampleHud()); return validateDesign({ v: 1, preset: 'imported', imported: { id: ID, name: 'x' } }); }],
+    ['an imported HUD with other edits', () => {
+      registerImport(ID, sampleHud());
+      return validateDesign({ v: 1, preset: 'imported', imported: { id: ID, name: 'x' }, elements: { ownHealth: { x: 30, y: 400 } }, children: { teamColumn: { Head: { x: 30 } } } });
+    }],
+  ];
+  for (const [name, make] of cases) {
+    it(`${name} ships none of the Tab files, even after the preview has read them`, () => {
+      const d = make();
+      const before = build(d).map((f) => f.path);
+      // The Tab preview reads every Tab file through buildTrees; the download must not follow it.
+      const trees = buildTrees(d);
+      for (const f of TAB) trees(f);
+      const after = build(d);
+      expect(after.map((f) => f.path)).toEqual(before);
+      // Modern ships its own Tab files as it always has, unedited (they are the preset); stock and imports none.
+      const own = TAB.filter((f) => presetOverrides(baseOf(d), f)).sort();
+      expect(after.filter((f) => TAB.includes(f.path) || /hudeditor\/tab/.test(f.path)).map((f) => f.path)).toEqual(own);
+      for (const f of own) expect(text(after, f), f).toBe(writeKv(parseKv(baseFile(baseOf(d), f))));
+    });
+  }
 });
