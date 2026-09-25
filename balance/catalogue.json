@@ -1,5 +1,5 @@
 {
-  "_comment": "Balance catalogue: the values and rules the public Game values page shows, and the extra values the plugin watches. Drafted 2026-09-24 while the owner was away: labels, rule wording and vanilla values need the owner's review. Vanilla values for game cvars are the engine defaults read from a local L4D1 dedicated server; plugin cvars have none.",
+  "_comment": "Balance catalogue: the values and rules the public Game values page shows, and the extra values the plugin watches. Notes and rules were drafted from cvar help text, plugin sources and server.so, and published by the owner on 2026-09-25. Vanilla values for game cvars are the engine defaults read from a local L4D1 dedicated server; plugin cvars have none.",
   "groups": [
     {
       "id": "survivors",
@@ -1634,7 +1634,7 @@
       "when": {
         "plugin": "l4d_QuadCaps.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "dp",
@@ -1643,7 +1643,7 @@
       "when": {
         "plugin": "pounce_maxdamage.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "no_deadstops",
@@ -1652,7 +1652,7 @@
       "when": {
         "plugin": "l4d_no_hunter_deadstops.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "skypounce_1",
@@ -1662,7 +1662,7 @@
         "cvar": "l4d_skypounce_mode",
         "equals": "1"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "skypounce_2",
@@ -1672,7 +1672,7 @@
         "cvar": "l4d_skypounce_mode",
         "equals": "2"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "godframes",
@@ -1681,7 +1681,7 @@
       "when": {
         "plugin": "l4d_godframes_and_hittable_control.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "tongue_timer",
@@ -1690,7 +1690,7 @@
       "when": {
         "plugin": "l4d_tongue_timer.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "drag",
@@ -1699,7 +1699,7 @@
       "when": {
         "plugin": "l4d_smoker_drag_damage_interval.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "huntingrifle",
@@ -1709,7 +1709,7 @@
         "cvar": "rotoblin_limit_huntingrifle",
         "notEquals": "0"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "slowdown",
@@ -1718,7 +1718,7 @@
       "when": {
         "plugin": "l4d_slowdown_control.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "antibaiter",
@@ -1727,7 +1727,7 @@
       "when": {
         "plugin": "l4d_antibaiter.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "tankrage",
@@ -1736,7 +1736,7 @@
       "when": {
         "plugin": "l4d2_tankrage.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "rock_lagcomp",
@@ -1745,7 +1745,7 @@
       "when": {
         "plugin": "l4d_rock_lagcomp.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "finale_tanks",
@@ -1754,7 +1754,7 @@
       "when": {
         "plugin": "l4d_NoRescueFirstTank.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "bash_kills",
@@ -1763,7 +1763,7 @@
       "when": {
         "plugin": "l4d_bash_kills.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "si_ff",
@@ -1772,7 +1772,7 @@
       "when": {
         "plugin": "l4d2_si_ffblock.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "nobhaps",
@@ -1781,7 +1781,7 @@
       "when": {
         "plugin": "l4d_nobhaps.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "pistol_delay",
@@ -1790,7 +1790,7 @@
       "when": {
         "plugin": "l4d2_pistol_delay.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "saferoom_lock",
@@ -1799,7 +1799,7 @@
       "when": {
         "plugin": "l4d_saferoom_lock.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "tank_burn_cap",
@@ -1809,7 +1809,7 @@
         "cvar": "l4d_tank_burn_cap",
         "notEquals": "0"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "throwables",
@@ -1819,7 +1819,7 @@
         "cvar": "rotoblin_enable_throwables",
         "equals": "0"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "witch_unstuck",
@@ -1829,7 +1829,7 @@
         "cvar": "l4d_witch_unstuck_mode",
         "equals": "2"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "tank_stumble_door",
@@ -1838,7 +1838,7 @@
       "when": {
         "plugin": "l4d_tank_stumble_door.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "health_items",
@@ -1848,7 +1848,7 @@
         "cvar": "rotoblin_health_style",
         "equals": "3"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "health_bonus",
@@ -1857,7 +1857,7 @@
       "when": {
         "plugin": "l4dscores.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "pill_pass",
@@ -1866,7 +1866,7 @@
       "when": {
         "plugin": "pill_passer.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "bot_pills",
@@ -1875,7 +1875,7 @@
       "when": {
         "plugin": "botpopstop.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "tier2",
@@ -1885,7 +1885,7 @@
         "cvar": "rotoblin_limit_huntingrifle",
         "equals": "0"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "csgo_reload",
@@ -1894,7 +1894,7 @@
       "when": {
         "plugin": "l4d_weapon_csgo_reload.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "ff_limits",
@@ -1903,7 +1903,7 @@
       "when": {
         "plugin": "l4d_godframes_and_hittable_control.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "godframe_glow",
@@ -1912,7 +1912,7 @@
       "when": {
         "plugin": "l4d_godframes_and_hittable_control.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "drop_pistol",
@@ -1921,7 +1921,7 @@
       "when": {
         "plugin": "l4d_drop_secondary.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "steady_boost",
@@ -1930,7 +1930,7 @@
       "when": {
         "plugin": "l4d2_steady_boost.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "no_nudge",
@@ -1939,7 +1939,7 @@
       "when": {
         "plugin": "noteam_nudging.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "sounds",
@@ -1948,7 +1948,7 @@
       "when": {
         "plugin": "l4d2_sound_manipulation.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "hunter_callout",
@@ -1957,7 +1957,7 @@
       "when": {
         "plugin": "hunter_callout_blocker.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "heard_specials",
@@ -1966,7 +1966,7 @@
       "when": {
         "plugin": "l4d_heardspecialsfix.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "hittables",
@@ -1975,7 +1975,7 @@
       "when": {
         "plugin": "l4d_godframes_and_hittable_control.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "ghost_warp",
@@ -1984,7 +1984,7 @@
       "when": {
         "plugin": "l4d_versus_GhostWarp.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "stagger_lock",
@@ -1993,7 +1993,7 @@
       "when": {
         "plugin": "staggersolver.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "quadcaps_lineup",
@@ -2002,7 +2002,7 @@
       "when": {
         "plugin": "l4d_QuadCaps.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "saferoom_respawns",
@@ -2011,7 +2011,7 @@
       "when": {
         "plugin": "canbecomeghost.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "blind_infected",
@@ -2020,7 +2020,7 @@
       "when": {
         "plugin": "l4d2_blind_infected.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "ladder_block",
@@ -2029,7 +2029,7 @@
       "when": {
         "plugin": "l4d_ladderblock.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "collisions",
@@ -2038,7 +2038,7 @@
       "when": {
         "plugin": "l4d_collision_adjustments.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "scratch_move",
@@ -2047,7 +2047,7 @@
       "when": {
         "plugin": "l4d_no_m2_movement_block.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "no_bot_handoff",
@@ -2056,7 +2056,7 @@
       "when": {
         "plugin": "l4d_nosecondchances.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "spectate_penalty",
@@ -2065,7 +2065,7 @@
       "when": {
         "plugin": "l4dready.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "map_explosions",
@@ -2074,7 +2074,7 @@
       "when": {
         "plugin": "l4d2_explosiondmg_prev.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "pounce_protect",
@@ -2083,7 +2083,7 @@
       "when": {
         "plugin": "l4d_pounceprotect.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "backjump_props",
@@ -2092,7 +2092,7 @@
       "when": {
         "plugin": "l4d_backjump_fix.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "tongue_through",
@@ -2101,7 +2101,7 @@
       "when": {
         "plugin": "l4d_tongue_block_fix.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "smoker_stagger",
@@ -2110,7 +2110,7 @@
       "when": {
         "plugin": "l4d_fix_smoker_stagger_immune.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "boomer_shove",
@@ -2119,7 +2119,7 @@
       "when": {
         "plugin": "l4d2_boomer_shenanigans.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "vomit_through",
@@ -2128,7 +2128,7 @@
       "when": {
         "plugin": "l4d_vomit_trace_patch.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "boomer_witch",
@@ -2137,7 +2137,7 @@
       "when": {
         "plugin": "l4d_boomer_alarm_witch.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "panic_no_cooldown",
@@ -2146,7 +2146,7 @@
       "when": {
         "plugin": "l4d_panic_event_timer_remove.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "panic_spawns",
@@ -2155,7 +2155,7 @@
       "when": {
         "plugin": "l4d_unrestrict_panic_battlefield.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "car_alarms",
@@ -2164,7 +2164,7 @@
       "when": {
         "plugin": "l4d_car_alarm_hittable_fix.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "stragglers",
@@ -2173,7 +2173,7 @@
       "when": {
         "plugin": "rotoblin-az.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "bosses_every_map",
@@ -2182,7 +2182,7 @@
       "when": {
         "plugin": "l4d_versus_same_UnprohibitBosses.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "same_bosses",
@@ -2191,7 +2191,7 @@
       "when": {
         "plugin": "l4d_versus_same_UnprohibitBosses.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "witch_during_tank",
@@ -2200,7 +2200,7 @@
       "when": {
         "plugin": "l4dvs_witch_spawn_fix.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "tank_props",
@@ -2209,7 +2209,7 @@
       "when": {
         "plugin": "l4d_tank_props.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "hittable_rage",
@@ -2218,7 +2218,7 @@
       "when": {
         "plugin": "l4d_tank_hittable_refill.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "tank_shove",
@@ -2227,7 +2227,7 @@
       "when": {
         "plugin": "l4d_tank_shove_slowdown_fix.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "tank_buttons",
@@ -2236,7 +2236,7 @@
       "when": {
         "plugin": "l4d_tank_attack_control.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "tank_pass_respawn",
@@ -2245,7 +2245,7 @@
       "when": {
         "plugin": "l4d_passing_Tank_no_instant_respawn.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "rock_use_block",
@@ -2254,7 +2254,7 @@
       "when": {
         "plugin": "rotoblin-az.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "new_tank_fire",
@@ -2263,7 +2263,7 @@
       "when": {
         "plugin": "rotoblin-az.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "finale_rescue",
@@ -2272,7 +2272,7 @@
       "when": {
         "plugin": "finalefix.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "witch_saferoom",
@@ -2281,7 +2281,7 @@
       "when": {
         "plugin": "witch_allow_in_safezone.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "witch_crown",
@@ -2290,7 +2290,7 @@
       "when": {
         "plugin": "l4d2_witch_crown_fix.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "witch_model",
@@ -2299,7 +2299,7 @@
       "when": {
         "plugin": "l4d1_random_witch_model.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "rescue_closets",
@@ -2308,7 +2308,7 @@
       "when": {
         "plugin": "l4d_versus_rescue_door_fix.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "fixes_survivor",
@@ -2317,7 +2317,7 @@
       "when": {
         "plugin": "fix_engine.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "fixes_exploits",
@@ -2326,7 +2326,7 @@
       "when": {
         "plugin": "rotoblin-az.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "fixes_infected",
@@ -2335,7 +2335,7 @@
       "when": {
         "plugin": "l4d_ai_damagefix.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "fixes_tank",
@@ -2344,7 +2344,7 @@
       "when": {
         "plugin": "frozen_tank_fix.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "fixes_witch",
@@ -2353,7 +2353,7 @@
       "when": {
         "plugin": "witch_prevent_target_loss.smx"
       },
-      "reviewed": false
+      "reviewed": true
     },
     {
       "id": "fixes_map",
@@ -2362,7 +2362,7 @@
       "when": {
         "plugin": "l4d_incap_door_fix.smx"
       },
-      "reviewed": false
+      "reviewed": true
     }
   ]
 }
