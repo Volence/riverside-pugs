@@ -7,7 +7,9 @@ import { artUrl } from './art';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
 import { baseFile, registerImport, unregisterImport } from './base';
 import { sampleHud } from './importFixtures';
-import { YOUR_ITEMS, BAR_EDGE_LABEL, CENTRE_EDGE_LABEL } from './youritems';
+import { YOUR_ITEMS, BAR_EDGE_LABEL, CENTRE_EDGE_LABEL, glyphRowWidth } from './youritems';
+import { fontCell } from './fonts';
+import { ICON_CELL_EM, ICON_ASCENT_EM } from './iconMetrics';
 
 /** An image that is "loaded" the moment it is created, so drawImage fires synchronously. */
 const instantImage = (url: string) => ({ src: url, complete: true, naturalWidth: 64, naturalHeight: 64, onload: null, onerror: null }) as unknown as HTMLImageElement;
@@ -44,23 +46,55 @@ function proxyCtx(textW?: (s: string) => number) {
 }
 const ICONS = ['icon/item/medkit', 'icon/item/pills', 'icon/item/pipebomb'].map((n) => artUrl(n));
 const D: HudDesign = structuredClone(DEFAULT_DESIGN);
+/**
+ * The glyph PNG's height and its top below the row box's, for the medium
+ * font (18 units) at canvas scale k: sized by the em ToolBox's VDMX gives,
+ * as the game's font is (iconMetrics.ts, probe p4). At k 1 that is 15 ppem,
+ * a 14.12 px PNG 4.19 px down.
+ */
+const glyph = (k: number) => {
+  const c = fontCell('ToolBox', 18 * k);
+  return { s: c.em * ICON_CELL_EM, dy: (18 * k - c.cell) / 2 + c.ascent - c.em * ICON_ASCENT_EM };
+};
 
 describe('the Your items row in the preview', () => {
-  it('draws the full loadout in the row\'s box, one font tall, right-aligned in it', () => {
+  it('draws the full loadout in the row\'s box at the game\'s glyph size, right-aligned in it', () => {
     const d = setYourItems(D, true);
     const r = elementRect(d, YOUR_ITEMS, d.aspect);
+    const { s, dy } = glyph(1);
+    expect(s).toBeCloseTo(14.1176, 4);
+    expect(dy).toBeCloseTo(4.1912, 4);
     const { ctx, draws } = proxyCtx();
     paintYourItems(ctx, r, d, 1);
     expect(draws.map((c) => c.src)).toEqual(ICONS);
-    expect(draws[0].a[0]).toBeCloseTo(r.x, 9);
-    expect(draws[0].a.slice(1)).toEqual([r.y, 18, 18]);
+    // The row's right end is the box's (the Label's east end); the box is the
+    // unhinted width, so the hinted glyphs start a little right of its left.
+    expect(draws[0].a[0]).toBeCloseTo(r.x + r.w - glyphRowWidth(s), 9);
+    expect(draws[0].a[0]).toBeGreaterThanOrEqual(r.x);
+    expect(draws[0].a[1]).toBeCloseTo(r.y + dy, 9);
+    expect(draws[0].a.slice(2)).toEqual([s, s]);
+  });
+  it('is the size the game draws at 1080p (probe p4: 83 px of ink across, where 1.28x that was drawn before)', () => {
+    const d = setYourItems(D, true);
+    const k = 1080 / 480;
+    const r = elementRect(d, YOUR_ITEMS, d.aspect);
+    const box = { x: r.x * k, y: r.y * k, w: r.w * k, h: r.h * k };
+    const { ctx, draws } = proxyCtx();
+    (ctx as unknown as { canvas: unknown }).canvas = { width: 1920, height: 1080 };
+    paintYourItems(ctx, box, d, k);
+    // L4D_Icons_medium at 1080p: a 40 px tall, VDMX 34 ppem, a 32 px PNG.
+    expect(draws[0].a[3]).toBeCloseTo(32, 9);
+    const last = draws[2];
+    const advances = last.a[0] + 0.7798 * last.a[3] - draws[0].a[0];
+    expect(advances).toBeGreaterThan(83);
+    expect(advances).toBeLessThan(86);
   });
   it('lays the row against the right of a box wider than one row, as the Label\'s east alignment does', () => {
     const d = setYourItems(D, true);
     const r = elementRect(d, YOUR_ITEMS, d.aspect);
     const { ctx, draws } = proxyCtx();
     paintYourItems(ctx, { ...r, w: r.w + 40 }, d, 1);
-    expect(draws[0].a[0]).toBeCloseTo(r.x + 40, 9);
+    expect(draws[0].a[0]).toBeCloseTo(r.x + r.w + 40 - glyphRowWidth(glyph(1).s), 9);
   });
   it('draws it empty while you are down or dead, and the same while crouched', () => {
     const d = setYourItems(D, true);
@@ -85,7 +119,7 @@ describe('the Your items row in the preview', () => {
     const d = setYourItems(D, true);
     const r = elementRect(d, YOUR_ITEMS, d.aspect);
     // The item icons only: the weapon panel's grenade slot starts on the same line as the row's home spot.
-    const inRow = (c: { src: string; a: number[] }) => ICONS.includes(c.src) && c.a[0] >= r.x - 0.5 && c.a[0] <= r.x + r.w && Math.abs(c.a[1] - r.y) < 0.5;
+    const inRow = (c: { src: string; a: number[] }) => ICONS.includes(c.src) && c.a[0] >= r.x - 0.5 && c.a[0] <= r.x + r.w && Math.abs(c.a[1] - r.y - glyph(1).dy) < 0.5;
     const off = proxyCtx();
     drawHud(off.ctx, 853, 480, D, 'survivor', null);
     expect(off.draws.filter(inRow)).toEqual([]);

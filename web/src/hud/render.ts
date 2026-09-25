@@ -30,8 +30,8 @@ import { drawnBarX, isBar, type Box, type HudDesign } from './design';
 import { buildTrees, pcGet, MODERN_ART } from './build';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { artUrl, normaliseMaterial, SKULL_ICON, zombieTeamImage } from './art';
-import { ICON_ADVANCE, ICON_SPACE } from './iconMetrics';
-import { ITEM_ROW, itemRowWidth } from './youritems';
+import { ICON_ADVANCE, ICON_SPACE, ICON_CELL_EM, ICON_ASCENT_EM } from './iconMetrics';
+import { ITEM_ROW, glyphRowWidth } from './youritems';
 import { parseColour } from './textures';
 import { SLOTS } from './slots';
 import { canvasFont, fontCell, importedFace, loadFace, synthBoldSpacing, setLetterSpacing, type FontCell } from './fonts';
@@ -1191,13 +1191,13 @@ export function labelDrawsNothing(design: HudDesign, panelId: string, name: stri
  */
 export { ITEM_ROW } from './youritems';
 
-/** Where the row starts in a label at x, w wide: the label's textAlignment places the whole row, as it would the text. */
+/** Where the row starts in a label at x, w wide, glyph PNGs s tall: the label's textAlignment places the whole row, as it would the text. */
 export function itemRowStart(x: number, w: number, s: number, align: string): number {
   const a = align.toLowerCase();
-  if (a.includes('east')) return x + w - itemRowWidth(s);
+  if (a.includes('east')) return x + w - glyphRowWidth(s);
   if (a.includes('west')) return x;
   // center, and a bare north or south: VGUI centres those across the label.
-  if (a === 'center' || a === 'north' || a === 'south') return x + (w - itemRowWidth(s)) / 2;
+  if (a === 'center' || a === 'north' || a === 'south') return x + (w - glyphRowWidth(s)) / 2;
   return x;
 }
 
@@ -1205,10 +1205,13 @@ let warnedNoIcons = false;
 
 /**
  * The teammate's item icons, drawn from the ToolBox glyphs the export script
- * made into PNGs (preview only, like the rest of the art). Each is scaled so
- * the font's cell is the label's font tall in canvas pixels, which puts the
- * glyph where the font puts it, and the row is laid glyph, space, glyph, as
- * the game writes it. They are white: the font is additive, so on the HUD
+ * made into PNGs (preview only, like the rest of the art). Each is sized
+ * the way setFont sizes text: the tall through fontCell (the VDMX ppem the
+ * game's GDI-style font picks), the PNG's cell that em's ICON_CELL_EM, and
+ * its baseline on the cell's, the cell centred in the label as text is.
+ * Fitting the PNG cell to the tall instead drew the glyphs 1.28x the game's
+ * and 7 px high at 1080p (probe p4, iconMetrics.ts). The row is laid glyph,
+ * space, glyph, as the game writes it. They are white: the font is additive, so on the HUD
  * they show as white, dimmed only by the label's own colour when the file
  * gives it one. The game draws the glyphs inside the label and nowhere else,
  * so they are clipped to the label's rect: an icon taller than its label
@@ -1220,8 +1223,10 @@ let warnedNoIcons = false;
  * drawItemStandIns, so the preview never loses the row.
  */
 export function drawItems(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
-  const s = fontFace(design, kvGet(n, 'font') ?? '').tall * k;
-  const y = r.y + (r.h - s) / 2;
+  const f = fontFace(design, kvGet(n, 'font') ?? '');
+  const c = fontCell(f.face, f.tall * k);
+  const s = c.em * ICON_CELL_EM;
+  const y = r.y + (r.h - c.cell) / 2 + c.ascent - c.em * ICON_ASCENT_EM;
   if (ITEM_ROW.some((name) => !artUrl(name))) {
     if (!warnedNoIcons) { warnedNoIcons = true; console.warn('HUD preview: no item icon art, drawing stand-ins'); }
     drawItemStandIns(ctx, r, s, y);
@@ -1248,7 +1253,7 @@ export function drawItems(ctx: CanvasRenderingContext2D, design: HudDesign, n: K
   // The icons are glyphs of the label's font, so they are laid on the scene
   // the way that font is: added, for the stock ToolBox icon fonts. The box
   // is the label's rect, which also clips them there.
-  if (fontFace(design, kvGet(n, 'font') ?? '').additive) paintAdditive(ctx, r, row);
+  if (f.additive) paintAdditive(ctx, r, row);
   else row(ctx);
   ctx.restore();
 }

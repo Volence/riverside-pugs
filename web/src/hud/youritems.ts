@@ -19,7 +19,7 @@
  * /home/volence/l4d/hud/probe-your-items/RESULTS.md).
  */
 import type { Box } from './design';
-import { ICON_ADVANCE, ICON_SPACE } from './iconMetrics';
+import { ICON_ADVANCE, ICON_SPACE, ICON_CELL_EM, ICON_EM_PER_TALL } from './iconMetrics';
 import { SCREEN_H } from './units';
 
 export const YOUR_ITEMS = 'yourItems';
@@ -47,9 +47,26 @@ export type ItemAlign = 'right' | 'center';
  */
 export const ITEM_ROW: readonly string[] = ['icon/item/medkit', 'icon/item/pills', 'icon/item/pipebomb'];
 
-/** How wide the row is at s units (or canvas pixels) tall: each glyph's advance, and a space between two. */
-export function itemRowWidth(s: number): number {
+/** How wide the row is with the glyph PNGs s units (or canvas pixels) tall: each glyph's advance, and a space between two. */
+export function glyphRowWidth(s: number): number {
   return ITEM_ROW.reduce((w, name, i) => w + (ICON_ADVANCE[name] ?? 1) * s + (i ? ICON_SPACE * s : 0), 0);
+}
+
+/**
+ * The glyph PNG's height, units, for an item font `tall` units tall: the
+ * face's unhinted em for that tall (ICON_EM_PER_TALL, never smaller than
+ * the em the game picks from VDMX at any common resolution) times the PNG
+ * cell's share of the em (ICON_CELL_EM). About 0.834 of the tall: the game
+ * does not fit the glyph cell to the tall, iconMetrics.ts has the probe p4
+ * measurements.
+ */
+export function itemGlyphCell(tall: number): number {
+  return tall * ICON_EM_PER_TALL * ICON_CELL_EM;
+}
+
+/** How wide the row is, units, in an item font `tall` units tall (glyphRowWidth at itemGlyphCell). */
+export function itemRowWidth(tall: number): number {
+  return glyphRowWidth(itemGlyphCell(tall));
 }
 
 /**

@@ -1261,7 +1261,7 @@ describe('Your items', () => {
 
   it('turns on in one design: shown at its home, the item slots off', () => {
     const d = on();
-    expect(d.elements.yourItems).toEqual({ visible: true, x: 797, y: 233 });
+    expect(d.elements.yourItems).toEqual({ visible: true, x: 805, y: 233 });
     expect(d.weapons).toEqual({ itemSize: 0, itemIcons: false });
   });
   it('keeps the other weapon edits when it turns on', () => {
@@ -1274,7 +1274,7 @@ describe('Your items', () => {
   });
   it('turns off leaving the item slot settings as they are', () => {
     const d = setYourItems(on(), false);
-    expect(d.elements.yourItems).toEqual({ visible: false, x: 797, y: 233 });
+    expect(d.elements.yourItems).toEqual({ visible: false, x: 805, y: 233 });
     expect(d.weapons).toEqual({ itemSize: 0, itemIcons: false });
   });
   it('is what the Layers eye, Delete and the menu\'s Hide do', () => {
@@ -1285,10 +1285,10 @@ describe('Your items', () => {
     // The eye is setSelectionVisible on the one element: on is the whole
     // turn-on edit (one design, so one Undo), off only hides.
     const shown = setSelectionVisible(D, sel, true);
-    expect(shown.elements.yourItems).toEqual({ visible: true, x: 797, y: 233 });
+    expect(shown.elements.yourItems).toEqual({ visible: true, x: 805, y: 233 });
     expect(shown.weapons).toEqual({ itemSize: 0, itemIcons: false });
     const hidden = setSelectionVisible(shown, sel, false);
-    expect(hidden.elements.yourItems).toEqual({ visible: false, x: 797, y: 233 });
+    expect(hidden.elements.yourItems).toEqual({ visible: false, x: 805, y: 233 });
     expect(hidden.weapons).toEqual({ itemSize: 0, itemIcons: false });
     // Shown with another element, the others still just show.
     const both = setSelectionVisible({ ...D, elements: { ...D.elements, chat: { visible: false } } }, { kind: 'elements', ids: ['chat', YOUR_ITEMS] }, true);
@@ -1345,7 +1345,7 @@ describe('Your items', () => {
     expect(yourItemsHeld(d, 900)).toBe(true);
   });
   it('keeps the right end when the font changes, and the centre for Centre', () => {
-    // 770: far enough from Centre's widest centre (778 at medium on stock) that neither end is clamped.
+    // 770: far enough from Centre's widest centre (782 at medium on stock) that neither end is clamped.
     const d = placeElement(on(), YOUR_ITEMS, 770, 233);
     const r0 = elementRect(d, YOUR_ITEMS, d.aspect);
     const big = setItemsLook(d, { itemFont: 'L4D_Icons_large' });

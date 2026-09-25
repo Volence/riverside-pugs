@@ -208,7 +208,7 @@ const NO_SNAP: Snap = { dx: 0, dy: 0, guides: [] };
  * centre line of the selection as it is drawn once moved (`moved`). The row
  * is not always where the snap put it: the clamp holds it at your health
  * bar's edge while the pointer keeps going (edit.ts yourItemsHeld), and a
- * row a full loadout wide (47.57 units at medium) is stored in whole units
+ * row a full loadout wide (39.65 units at medium) is stored in whole units
  * and drawn from a whole-unit Label (youritems.ts placeRow, rowLayout), so a
  * snapped left edge lands up to half a unit off its target. A guide there
  * would promise an alignment the preview and the download do not have.
