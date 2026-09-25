@@ -10,15 +10,17 @@
  * canvas draws.
  */
 import {
-  clampOverride, clampChild, clampPos, clampRowGap, fitMovesContainer, DEFAULT_DESIGN, newDesign,
+  clampOverride, clampChild, clampPos, clampRowGap, fitMovesContainer, tabVersusRange, DEFAULT_DESIGN, newDesign,
   type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type Box, type WeaponsOverride, type ImportedRef,
   type UploadedImage, WEAPON_BOX_IMAGE, weaponIconId,
 } from './design';
-import { screenW, SCREEN_H } from './units';
+import { screenW, SCREEN_H, type Aspect } from './units';
 import { elementById } from './elements';
 import { elementRect, elementFitShift, drawnAt, pieceMovableIn, teamLayout, teamCardRects, isFreeTeam, panelChild, panelLink, buildTrees, panelBgZpos, type CardChild } from './build';
-import { childDef, childPath, panelChildren, panelOfFile, linkedValue, unlinkedValue } from './children';
+import { childDef, childPath, panelChildren, panelOfFile, linkedValue, unlinkedValue, type ChildDef } from './children';
 import { kvFind, kvGet } from './kv';
+import { probe } from './probes';
+import { baseOf } from './base';
 import { unionBox, CORNERS, type Handle } from './guides';
 import { elementFrame, panelClamp, panelOf, type Selection } from './selection';
 
@@ -59,7 +61,7 @@ export function clampSpan(v: number, size: number, extent: number, min: number):
 export function nudge(design: HudDesign, id: string, dx: number, dy: number): HudDesign {
   const el = elementById(id);
   // In Free each card places itself: the element's own position would move nothing.
-  if (!el || !el.move || (id === 'teamColumn' && isFreeTeam(design))) return design;
+  if (!el || !el.move || (el.moveGate && !probe(el.moveGate)) || (id === 'teamColumn' && isFreeTeam(design))) return design;
   // From where the element is drawn, not the stored x and y: a team the
   // on-screen clamp holds at the edge is drawn there whatever it stores, and
   // a press back from the edge must move it at once.
@@ -382,6 +384,7 @@ function childAt(design: HudDesign, panel: string, name: string, file?: string):
  * they always did.
  */
 export function patchChild(design: HudDesign, name: string, p1: Partial<ChildOverride>, panel = 'teamColumn', file?: string): HudDesign {
+  if (p1.visible !== undefined && elementById(panel)?.tab) return tabVisible(design, name, p1, panel, file);
   // A place or size seen where it cannot be mapped back (build.ts pieceMovableIn) is dropped, and nothing else left is no edit.
   let p0 = p1;
   if (file && !pieceMovableIn(design, panel, name, file)) {
@@ -412,6 +415,39 @@ function storedFrame(design: HudDesign, name: string, p: Partial<ChildOverride>,
     if (p[k] !== undefined) out[k] = clampChild(k, Math.round(unlinkedValue(link.rule, k, p[k]!, link.from, link.to) as number));
   }
   return out;
+}
+
+/**
+ * A Tab piece's Visible: none while its hide waits on a probe (ChildDef.hideGate).
+ * The hide is stored on that piece only. The game hides every piece pinned
+ * to it, down the chain (ChildDef.hidesWith, TS7), and the preview's layout
+ * (tablayout.ts) does the same, so storing those follower hides as well
+ * would only let a reset or a show leave them behind. Showing it takes its
+ * own hide off, so a piece only ever hidden and shown is back to no edit
+ * (every Tab piece is shown by its file or by code).
+ */
+function tabVisible(design: HudDesign, name: string, p: Partial<ChildOverride>, panel: string, file?: string): HudDesign {
+  const { visible, ...rest } = p;
+  const d = Object.keys(rest).length ? patchChild(design, name, rest, panel, file) : design;
+  const def = childDef(panel, name);
+  if (!def || (def.hideGate && !probe(def.hideGate))) return d;
+  return visible ? showChild(d, def.name, panel) : mergeChild(d, def.name, { visible: false }, panel);
+}
+
+/**
+ * The hidden piece a piece is hidden with: the nearest one up its pin chain
+ * (the piece whose ChildDef.hidesWith lists it, and so on up) that the design
+ * hides. The game and the preview hide the piece with it (TS7), so the page
+ * offers no Visible control of its own and names this one instead.
+ */
+export function hiddenWith(design: HudDesign, panel: string, name: string): ChildDef | undefined {
+  const kids = panelChildren(panel)?.children ?? [];
+  const seen = new Set<string>([name]);
+  for (let up = kids.find((c) => c.hidesWith?.includes(name)); up && !seen.has(up.name); up = kids.find((c) => c.hidesWith?.includes(up!.name))) {
+    seen.add(up.name);
+    if (design.children[panel]?.[up.name]?.visible === false && (!up.hideGate || probe(up.hideGate))) return up;
+  }
+  return undefined;
 }
 
 function mergeChild(design: HudDesign, name: string, p: Partial<ChildOverride>, panel: string): HudDesign {
@@ -860,7 +896,13 @@ export function raiseChild(design: HudDesign, names: string[], to: 'front' | 'ba
  */
 export function placeElement(design: HudDesign, id: string, x: number, y: number): HudDesign {
   const el = elementById(id);
-  if (!el || !el.move || (id === 'teamColumn' && isFreeTeam(design))) return design;
+  if (!el || !el.move || (el.moveGate && !probe(el.moveGate)) || (id === 'teamColumn' && isFreeTeam(design))) return design;
+  // The versus panel is kept whole on screen (validateDesign's clamp, tabVersusRange), in whole units.
+  if (id === 'tabVersus') {
+    const r = tabVersusRange(design.aspect, baseOf(design));
+    const at = (v: number, [lo, hi]: [number, number]) => Math.round(Math.min(hi, Math.max(lo, v)));
+    return { ...design, elements: { ...design.elements, [id]: { ...design.elements[id], x: at(x, r.x), y: at(y, r.y) } } };
+  }
   const r = elementRect(design, id, design.aspect);
   const o = design.elements[id];
   const want = { x: clampSpan(x, r.w, screenW(design.aspect), 8), y: clampSpan(y, r.h, SCREEN_H, 8) };
@@ -889,6 +931,25 @@ export function placeElement(design: HudDesign, id: string, x: number, y: number
 }
 
 /** Move elements by (dx, dy) from where a gesture started them. */
+/**
+ * The aspect picker. The versus panel's place is held whole on the new
+ * screen (tabVersusRange, as validateDesign holds it for the download), so a
+ * panel moved to the right of a 16:9 screen is drawn where a 4:3 download
+ * puts it, not off the narrower screen.
+ */
+export function setAspect(design: HudDesign, aspect: Aspect): HudDesign {
+  if (design.aspect === aspect) return design;
+  const next = { ...design, aspect };
+  const o = design.elements.tabVersus;
+  if (!o || (o.x === undefined && o.y === undefined)) return next;
+  const r = tabVersusRange(aspect, baseOf(design));
+  const at = (v: number | undefined, [lo, hi]: [number, number]) => (v === undefined ? undefined : Math.min(hi, Math.max(lo, v)));
+  const held = { ...o, x: at(o.x, r.x), y: at(o.y, r.y) };
+  if (held.x === undefined) delete held.x;
+  if (held.y === undefined) delete held.y;
+  return { ...next, elements: { ...design.elements, tabVersus: held } };
+}
+
 export function moveElements(design: HudDesign, ids: string[], starts: Record<string, Box>, dx: number, dy: number): HudDesign {
   return ids.reduce((d, id) => (starts[id] ? placeElement(d, id, starts[id].x + dx, starts[id].y + dy) : d), design);
 }
@@ -1087,7 +1148,8 @@ export function setSelectionVisible(design: HudDesign, sel: Selection, visible: 
   if (sel.kind === 'children') return setChildrenVisible(design, sel.names, visible, panelOf(sel));
   if (sel.kind !== 'elements') return design;
   return sel.ids.reduce((d, id) => {
-    if (!elementById(id)?.props.includes('visible')) return d;
+    const el = elementById(id);
+    if (!el?.props.includes('visible') || (el.hideGate && !probe(el.hideGate))) return d;
     return { ...d, elements: { ...d.elements, [id]: { ...(d.elements[id] ?? {}), visible } } };
   }, design);
 }

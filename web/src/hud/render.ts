@@ -26,14 +26,14 @@
  * own-health panel's scratch overlays are tinted with the health colour, not
  * drawn raw (the drawColor branch in drawImageChild, below).
  */
-import { drawnBarX, isBar, type HudDesign } from './design';
-import { buildTrees } from './build';
+import { drawnBarX, isBar, type Box, type HudDesign } from './design';
+import { buildTrees, pcGet, MODERN_ART } from './build';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { artUrl, normaliseMaterial, SKULL_ICON, zombieTeamImage } from './art';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { parseColour } from './textures';
 import { SLOTS } from './slots';
-import { canvasFont, fontCell, importedFace, loadFace, type FontCell } from './fonts';
+import { canvasFont, fontCell, importedFace, loadFace, synthBoldSpacing, setLetterSpacing, type FontCell } from './fonts';
 import { baseOf, onUnregister } from './base';
 import { importedMaterial, _resetImportedArt } from './importArt';
 import { addLinear, overLinear, linearOverAlpha } from './additive';
@@ -79,6 +79,12 @@ export interface PreviewState {
    * everyday HUD is not covered by them.
    */
   occasional?: boolean;
+  /**
+   * Draw the Tab screen as the game shows it while you hold Tab in versus
+   * (HudElement.tab; tab screen spec 3.1). Preview only, never part of the
+   * design. Absent is off.
+   */
+  tab?: boolean;
 }
 export const DEFAULT_PREVIEW: PreviewState = { survivor: 'healthy', crouched: false, infected: 'alive', siClass: 'hunter', ability: 'ready' };
 
@@ -109,6 +115,7 @@ export const PANEL_FILE: Record<string, string> = {
   ghostPanel: 'resource/ui/hudghostpanel.res',
   zombiePanel: 'resource/ui/zombiepanel.res',
   tankPanel: 'resource/ui/hud/frustrationmeter.res',
+  tabSurvivors: 'resource/ui/scoreboardsurvivor.res',
 };
 
 /**
@@ -327,6 +334,8 @@ export function setFont(ctx: CanvasRenderingContext2D, design: HudDesign, name: 
   loadFace(face, onAsset);
   ctx.font = canvasFont(face, f.weight, f.tall * k);
   ctx.textBaseline = 'alphabetic';
+  // The game's simulated bold, a pixel a glyph at 1080p (fonts.ts synthBoldSpacing), scaled to the canvas.
+  setLetterSpacing(ctx, synthBoldSpacing(face, f.weight) * k / (1080 / 480));
   return { ...fontCell(face, f.tall * k), additive: f.additive };
 }
 
@@ -361,6 +370,7 @@ export function paintAdditive(ctx: CanvasRenderingContext2D, box: { x: number; y
   }
   octx.font = ctx.font; octx.fillStyle = ctx.fillStyle; octx.textAlign = ctx.textAlign;
   octx.textBaseline = ctx.textBaseline; octx.globalAlpha = ctx.globalAlpha;
+  if ('letterSpacing' in ctx) octx.letterSpacing = ctx.letterSpacing;
   octx.translate(-x0, -y0);
   paint(octx);
   const glyphs = octx.getImageData(0, 0, x1 - x0, y1 - y0);
@@ -400,6 +410,66 @@ export function paintLinearOver(ctx: CanvasRenderingContext2D, box: { x: number;
   ctx.globalAlpha = 1;
   ctx.drawImage(off, x0, y0);
   ctx.restore();
+}
+
+/**
+ * PaintBackgroundType 2's corner, in HUD units: the stock box's corner
+ * curves over about 7 px at 1080p
+ * (/home/volence/l4d/hud/probe-phase2/b13/b13-stock/infected/ghost.png,
+ * x 589 to 596 along its top rows).
+ */
+const ROUNDED_CORNER = 7 / 2.25;
+
+/**
+ * A panel's box as VGUI paints it: bgcolor_override over the scene in
+ * linear light (the stock ghost box, 0 0 0 at 245 over 183 217 233, reads
+ * 35 45 50 in b13 ghost.png, which only a linear blend gives), with rounded
+ * corners for PaintBackgroundType 2.
+ */
+export function paintPanelBox(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, box: Box, k: number) {
+  const colour = pcGet(n, 'bgcolor_override');
+  if (colour === undefined) return;
+  const rounded = pcGet(n, 'PaintBackgroundType') === '2';
+  const fill = (c: CanvasRenderingContext2D) => {
+    c.fillStyle = colourOf(design, colour);
+    if (rounded && typeof c.roundRect === 'function') { c.beginPath(); c.roundRect(box.x, box.y, box.w, box.h, ROUNDED_CORNER * k); c.fill(); }
+    else c.fillRect(box.x, box.y, box.w, box.h);
+  };
+  paintLinearOver(ctx, box, fill, () => fill(ctx));
+}
+
+/**
+ * One of a status panel's labels: in its file font, at its place, its cell
+ * at the top for a north alignment and centred otherwise, as drawLabel
+ * (render.ts) places a Label, in the colour game code gives it. `extra.font`
+ * is the font a block with none takes (a Tab screen Label's is the scheme's
+ * Default), and `extra.shadow` lays a dropshadow font's glyphs over a black
+ * copy one pixel right and down (the versus scores' dark edge, InstructorTitle).
+ */
+export function paintPanelLabel(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, box: Box, k: number, s: string, colour: string, clip: Box, onAsset?: () => void,
+  extra: { font?: string; shadow?: boolean } = {}) {
+  const font = pcGet(n, 'font') ?? extra.font ?? '';
+  const cell = setFont(ctx, design, font, k, onAsset);
+  const align = (pcGet(n, 'textAlignment') ?? 'west').toLowerCase();
+  // VGUI's nine alignments: west and east name a side, and north, south and center alone centre the line.
+  let x = box.x;
+  if (align.includes('east')) { ctx.textAlign = 'right'; x = box.x + box.w; }
+  else if (align.includes('west')) ctx.textAlign = 'left';
+  else { ctx.textAlign = 'center'; x = box.x + box.w / 2; }
+  const top = align.startsWith('north') ? box.y : align.startsWith('south') ? box.y + box.h - cell.cell : box.y + (box.h - cell.cell) / 2;
+  // A dropshadow font's glyphs over a black copy one pixel right and down, as the use bar's label draws them.
+  if (extra.shadow && fontFace(design, font).dropShadow) {
+    ctx.fillStyle = 'rgba(0,0,0,1)';
+    fillFontText(ctx, cell, s, x + 1, top + cell.ascent + 1, top + 1, clip);
+  }
+  ctx.fillStyle = colour;
+  fillFontText(ctx, cell, s, x, top + cell.ascent, top, clip);
+}
+
+/** A label's own colour, else the scheme's label colour, as a Label draws it. */
+export function labelColour(design: HudDesign, n: KvNode): string {
+  const own = pcGet(n, 'fgcolor_override');
+  return own !== undefined ? colourOf(design, own) : labelTextColour(design);
 }
 
 /**
@@ -527,9 +597,13 @@ export function shownKey(design: HudDesign, def: KeyDef, value: string | undefin
  * never coloured by health, so the number, the name and the icon keep their
  * own colours without a rule of their own.
  */
-const BAR_COLOUR: Record<string, { block: string; gate: 'Q1' | 'Q24' }> = {
+const BAR_COLOUR: Record<string, { block: string; gate: 'Q1' | 'Q24' | 'TS3' }> = {
   ownHealth: { block: 'Health', gate: 'Q1' }, teamColumn: { block: 'Health', gate: 'Q1' },
   siHealth: { block: 'Health', gate: 'Q24' }, infectedRow: { block: 'HealthPanel', gate: 'Q24' },
+  // The Tab screen's survivor rows (tabscreen.ts): the same HealthPanel class, one colour for every
+  // row bar at every health (probe TS3, /home/volence/l4d/hud/probe-tab/RESULTS.md, TAB-1 tab-a:
+  // every bar red), so the file's Gray draws; without the key the bars colour by health (TL3).
+  tabSurvivors: { block: 'SurvivorStatsHealth', gate: 'TS3' },
 };
 
 /**
@@ -644,14 +718,23 @@ export function urlImage(url: string, onAsset?: () => void): HTMLImageElement | 
  * generated texture. stylePass makes a flat or rounded texture in that colour
  * and the game stretches it over the panel, so a filled (or rounded) rect in
  * the same colour is the same picture, and it needs no offscreen canvas,
- * which happy-dom does not have. Uploads (kind image) are not drawn yet: this
- * returns false for them, as it does for a slot that is not restyled, and the
+ * which happy-dom does not have. An upload (kind image) is drawn stretched
+ * over the rect, as the game stretches the texture made from it; while it
+ * decodes nothing shows and `onAsset` asks for the redraw. It returns false
+ * for a slot that is not restyled or an image slot with no upload, and the
  * caller decides what shows instead.
  */
-function drawSlotStyle(ctx: CanvasRenderingContext2D, design: HudDesign, slotId: string, r: ChildRect): boolean {
+function drawSlotStyle(ctx: CanvasRenderingContext2D, design: HudDesign, slotId: string, r: ChildRect, onAsset?: () => void): boolean {
   const slot = SLOTS.find((s) => s.id.toLowerCase() === slotId);
   const style = slot && design.styles[slot.id];
-  if (!slot || !style || style.kind === 'stock' || style.kind === 'image') return false;
+  if (!slot || !style || style.kind === 'stock') return false;
+  if (style.kind === 'image') {
+    const stored = design.images[slot.id];
+    if (!stored) return false;
+    const img = urlImage(`data:image/png;base64,${stored.png}`, onAsset);
+    if (img) ctx.drawImage(img, r.x, r.y, r.w, r.h);
+    return true;
+  }
   const [cr, cg, cb, ca] = parseColour(style.color ?? slot.defaultColor);
   ctx.fillStyle = `rgba(${cr},${cg},${cb},${ca / 255})`;
   if (style.kind === 'rounded') {
@@ -933,7 +1016,7 @@ function drawCardArt(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, opt
   ctx.drawImage(skull ? tinted(img, material, ...SKULL_TINT) : img, r.x, r.y, r.w, r.h);
 }
 
-function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts, panelId?: string) {
+export function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts, panelId?: string) {
   const image = kvGet(n, 'image');
   const fill = kvGet(n, 'fillcolor');
   const lname = n.key.toLowerCase();
@@ -962,6 +1045,9 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
     // Game code picks this art too: the character's own _incap panel, or the
     // one dead panel. Drawn stretched to the rect, as scaleImage 1 has the
     // game draw it, which is why the fit rule keeps the rect square.
+    // Advanced mode overwrites that art with the player's style (stylePass
+    // writes the slot's texture under the stock names), so draw the style.
+    if (design.advanced && drawSlotStyle(ctx, design, lname === 'dead' ? 'deadpanel' : 'incappanel', r, opts.onAsset)) return;
     const material = lname === 'dead' ? 'vgui/s_panel_dead' : `${portraitFor(opts)}_incap`;
     const img = artImage(material, opts.onAsset);
     if (!img) { if (missing.has(material)) hatch(ctx, r); return; }
@@ -977,7 +1063,7 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
     if (material.startsWith('vgui/hud/hudeditor/')) {
       const splat = splatterForMaterial(material);
       if (splat) { drawSplatter(ctx, design, n, r, k, opts, splat); return; }
-      drawSlotStyle(ctx, design, material.slice('vgui/hud/hudeditor/'.length), r);   // false: an upload; the game shows it, we cannot yet
+      drawSlotStyle(ctx, design, material.slice('vgui/hud/hudeditor/'.length), r, opts.onAsset);
       return;
     }
     // client.dll sets card N's splatter to hud/healthbar_bg_N whatever the
@@ -985,6 +1071,15 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
     // the game does"), so each card draws its own slot's texture.
     if (n.key === 'BackgroundImage' && opts.card !== undefined && /^vgui\/hud\/healthbar_bg_\d+$/.test(material)) {
       material = `vgui/hud/healthbar_bg_${(opts.card % 4) + 1}`;
+    }
+    // The Modern preset's flat panels are generated by the build (MODERN_ART),
+    // one colour each, and the game stretches or nine-slices them: a fill.
+    const flat = baseOf(design) === 'modern' ? MODERN_ART.find((t) => t.name === material) : undefined;
+    if (flat) {
+      const [fr, fg, fb, fa] = parseColour(flat.colour);
+      ctx.fillStyle = `rgba(${fr},${fg},${fb},${fa / 255})`;
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      return;
     }
     // An imported HUD's own material first; the stock art where it has none.
     const key = baseOf(design);
@@ -1130,7 +1225,7 @@ let warnedNoIcons = false;
  * is not in the art index or fails to load, the row falls back to
  * drawItemStandIns, so the preview never loses the row.
  */
-function drawItems(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
+export function drawItems(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
   const s = fontFace(design, kvGet(n, 'font') ?? '').tall * k;
   const y = r.y + (r.h - s) / 2;
   if (ITEM_ROW.some((name) => !artUrl(name))) {
@@ -1242,7 +1337,7 @@ function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: st
  * sampleHealthRgb hands the outline and the fill (and every other health
  * piece of the panel) in place of the health colour.
  */
-function drawBar(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: number, opts: DrawOpts, panelId?: string) {
+export function drawBar(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: number, opts: DrawOpts, panelId?: string) {
   const s = previewOf(opts.state).survivor;
   const frac = s === 'hurt' && HEALTH_PANELS.has(panelId ?? '') ? HURT_HEALTH / 100 : 1;
   const [hr, hg, hb] = sampleHealthRgb(opts, panelId);

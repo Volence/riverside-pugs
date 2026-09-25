@@ -78,6 +78,10 @@ MATERIALS = [
     # is a material over the same texture with a pulsing alpha, so no texture of its own
     'vgui/hud/zombieteamimage_hunter', 'vgui/hud/zombieteamimage_smoker',
     'vgui/hud/zombieteamimage_boomer', 'vgui/hud/zombieteamimage_tank',
+    # the Tab screen: the versus panel's team and stat boxes, named by versusmodescoreboard.res's
+    # highlight images (nine-sliced with 16-texel corners), and the teammate rows' blue-grey fade,
+    # named by scoreboardsurvivor.res PlayerBackground (tab screen spec 1.5, 1.6)
+    'vgui/hud/scalablepanel_bgblack_outlinered', 'vgui/background_survivor',
 ]
 
 # Materials drawn by a two-texture shader: the material name -> its second

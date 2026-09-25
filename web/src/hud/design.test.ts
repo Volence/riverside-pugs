@@ -590,3 +590,103 @@ describe('fit on your infected health', () => {
     }
   });
 });
+
+/**
+ * The Tab screen's stored edits (tab screen spec 4.2, 4.3 and task 9, with
+ * the probe answers of section 7): a hide, a move and a colour are each
+ * dropped while their gate is closed, so a gate that flips back off clears
+ * them, and kept once it is open.
+ */
+describe('validateDesign on the Tab screen', () => {
+  const GATES = ['TS1', 'TS3', 'TS4', 'TS5', 'TS5b', 'TS6', 'TS7'] as const;
+  afterEach(() => { for (const g of GATES) _setProbe(g, null); });
+  const withKids = (children: Record<string, Record<string, unknown>>) => validateDesign({ v: 1, children });
+  const withEls = (elements: Record<string, unknown>, aspect = '16:9') => validateDesign({ v: 1, aspect, elements });
+
+  it('drops a Tab piece\'s stored hide while TS7 is closed, and keeps it once open', () => {
+    _setProbe('TS7', false);
+    expect(withKids({ tabBoard: { MissionTitle: { visible: false } } }).children).toEqual({});
+    _setProbe('TS7', true);
+    expect(withKids({ tabBoard: { MissionTitle: { visible: false } } }).children).toEqual({ tabBoard: { MissionTitle: { visible: false } } });
+  });
+
+  it('keeps a hide on the piece hidden only, and none while the hide is gated', () => {
+    // The game hides what is pinned to a hidden piece (TS7): the design stores no follower hide.
+    expect(withKids({ tabVersus: { HealthLabel: { visible: false } } }).children.tabVersus).toEqual({ HealthLabel: { visible: false } });
+    expect(withKids({ tabVersus: { DistanceLabel: { visible: false } } }).children.tabVersus).toEqual({ DistanceLabel: { visible: false } });
+    // The number keeps its own edits and adds no hide.
+    expect(withKids({ tabVersus: { HealthLabel: { visible: false }, HealthAmount: { color: '1 2 3 255' } } }).children.tabVersus!.HealthAmount)
+      .toEqual({ color: '1 2 3 255' });
+    // Hidden on its own, the number leaves the label alone.
+    expect(withKids({ tabVersus: { HealthAmount: { visible: false } } }).children.tabVersus).toEqual({ HealthAmount: { visible: false } });
+    // Every choice stored down the line is kept as chosen: nothing refused, nothing added.
+    const line = { DistanceLabel: { visible: false }, HealthLabel: { visible: true }, HealthAmount: { visible: false } };
+    expect(withKids({ tabVersus: line }).children.tabVersus).toEqual(line);
+    _setProbe('TS7', false);
+    expect(withKids({ tabVersus: { HealthLabel: { visible: false } } }).children).toEqual({});
+  });
+
+  it('drops a gated colour while its gate is closed: the title (TS1), the infected names (TS6)', () => {
+    _setProbe('TS1', false); _setProbe('TS6', false);
+    expect(withKids({ tabBoard: { MissionTitle: { color: '255 0 0 255' } }, tabInfected: { Name: { color: '0 255 255 255' } } }).children).toEqual({});
+    _setProbe('TS1', true); _setProbe('TS6', true);
+    expect(withKids({ tabBoard: { MissionTitle: { color: '255 0 0 255' } }, tabInfected: { Name: { color: '0 255 255 255' } } }).children)
+      .toEqual({ tabBoard: { MissionTitle: { color: '255 0 0 255' } }, tabInfected: { Name: { color: '0 255 255 255' } } });
+  });
+
+  it('drops the other infected rows\' colour while TS5b is closed, as it ships, and keeps your row\'s (TS5)', () => {
+    const d = withKids({ tabInfected: {
+      PlayerBackground: { keys: { bgcolor_override: '0 0 255 255' } },
+      PlayerBackground_Selected: { keys: { bgcolor_override: '255 255 0 255' } },
+    } });
+    expect(d.children.tabInfected).toEqual({ PlayerBackground_Selected: { keys: { bgcolor_override: '255 255 0 255' } } });
+    _setProbe('TS5b', true);
+    expect(withKids({ tabInfected: { PlayerBackground: { keys: { bgcolor_override: '0 0 255 255' } } } }).children.tabInfected)
+      .toEqual({ PlayerBackground: { keys: { bgcolor_override: '0 0 255 255' } } });
+  });
+
+  it('never keeps a colour code decides: the versus scores (TS2 failed) and the survivor names', () => {
+    expect(withKids({
+      tabVersus: { TeamYourScoreSurvivors: { color: '255 128 0 255' }, TeamEnemyScoreSurvivors: { color: '255 128 0 255' } },
+      tabSurvivors: { SurvivorStatsName: { color: '0 255 255 255' }, SurvivorStatsNoAvatarName: { color: '0 255 255 255' } },
+    }).children).toEqual({});
+  });
+
+  it('never keeps a move, a size or a text size on a Tab piece in v1', () => {
+    expect(withKids({ tabVersus: { TeamYours: { x: 30, y: 60, w: 50, h: 20, fontSize: 20 } } }).children).toEqual({});
+  });
+
+  it('keeps the row bars as one colour, or by health (the key taken out), behind TS3', () => {
+    expect(withKids({ tabSurvivors: { SurvivorStatsHealth: { keys: { monochrome_color: '255 0 0 255' } } } }).children.tabSurvivors)
+      .toEqual({ SurvivorStatsHealth: { keys: { monochrome_color: '255 0 0 255' } } });
+    expect(withKids({ tabSurvivors: { SurvivorStatsHealth: { keys: { monochrome_color: '' } } } }).children.tabSurvivors)
+      .toEqual({ SurvivorStatsHealth: { keys: { monochrome_color: '' } } });
+    _setProbe('TS3', false);
+    expect(withKids({ tabSurvivors: { SurvivorStatsHealth: { keys: { monochrome_color: '' } } } }).children).toEqual({});
+  });
+
+  it('takes a key out of the file only where the registry says it may', () => {
+    expect(withKids({ tabBoard: { BackgroundImage: { keys: { bgcolor_override: '' } } } }).children).toEqual({});
+    expect(withKids({ teamColumn: { Health: { keys: { monochrome_color: '' } } } }).children).toEqual({});
+    expect(withKids({ tabBoard: { BackgroundImage: { keys: { bgcolor_override: '0 0 96 200' } } } }).children)
+      .toEqual({ tabBoard: { BackgroundImage: { keys: { bgcolor_override: '0 0 96 200' } } } });
+  });
+
+  it('drops the versus panel\'s move while TS4 is closed and its hide while TS7 is, and keeps them once open', () => {
+    _setProbe('TS4', false); _setProbe('TS7', false);
+    expect(withEls({ tabVersus: { x: 100, y: 20, visible: false } }).elements).toEqual({});
+    _setProbe('TS4', true); _setProbe('TS7', true);
+    expect(withEls({ tabVersus: { x: 100, y: 20, visible: false } }).elements).toEqual({ tabVersus: { x: 100, y: 20, visible: false } });
+  });
+
+  it('keeps the versus panel on screen at the design\'s aspect: x 0 to the width less its 354, y 0 to 360', () => {
+    expect(withEls({ tabVersus: { x: 900, y: 400 } }).elements.tabVersus).toEqual({ x: 853 - 354, y: 360 });
+    expect(withEls({ tabVersus: { x: -50, y: -10 } }).elements.tabVersus).toEqual({ x: 0, y: 0 });
+    expect(withEls({ tabVersus: { x: 900 } }, '4:3').elements.tabVersus).toEqual({ x: 640 - 354 });
+    expect(withEls({ tabVersus: { x: 420, y: 20 } }).elements.tabVersus).toEqual({ x: 420, y: 20 });
+  });
+
+  it('never keeps a move or a hide on the Tab elements that take neither', () => {
+    expect(withEls({ tabBoard: { x: 10, y: 10, visible: false }, tabSurvivors: { x: 60 }, tabInfected: { y: 5 } }).elements).toEqual({});
+  });
+});

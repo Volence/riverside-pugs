@@ -12,7 +12,7 @@ import { baseFile, baseOf, baseTree, importedFiles, isCommunityImport, presetOve
 import { hudFileProblem, hudPathProblem } from '../../../src/hudFiles';
 
 export { baseTree };
-import { parseKv, writeKv, kvFind, kvGet, kvSet, pcApplies, type KvNode } from './kv';
+import { parseKv, writeKv, kvFind, kvGet, kvSet, pcApplies, pcFind, type KvNode } from './kv';
 import { parsePos, parseSize, formatPos, scaleToken, screenW, SCREEN_H, type Aspect } from './units';
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import { SLOTS } from './slots';
@@ -23,7 +23,7 @@ import {
   type WeaponNumKey, WEAPON_ICONS, ITEM_ICONS, WEAPON_BOX_IMAGE, weaponImageKind, VOICE_ICONS, VOICE_ICON_TEXELS, voiceIconOpen,
 } from './design';
 import {
-  panelChildren, panelOfFile, childDef, childPath, maxInset, linkedValue, TEAM_PANEL, OWN_PANEL, SI_PANEL, ZCARD_PANEL, type ChildDef, type PanelChildren, type LinkRect, type LinkRule,
+  panelChildren, panelOfFile, childDef, childPath, maxInset, linkedValue, TAB_FILES, TEAM_PANEL, OWN_PANEL, SI_PANEL, ZCARD_PANEL, type ChildDef, type PanelChildren, type LinkRect, type LinkRule,
 } from './children';
 import { crosshairFiles } from '../crosshair/vpk';
 import {
@@ -65,6 +65,16 @@ const PZ_RECORD = 'resource/ui/hud/pzdamagerecordpanel.res';
 const POSITIONAL = ['xpos', 'ypos', 'wide', 'tall'];
 const num = (v: string | undefined) => { const n = parseFloat(v ?? ''); return Number.isFinite(n) ? n : 0; };
 
+/**
+ * A block of `file` at `path`: in a Tab screen file (children.ts TAB_FILES)
+ * as the PC game finds it, skipping console-only blocks (pcFind), so an edit
+ * to scoreboard.res's BackgroundImage lands on the [$WIN32] block the game
+ * draws, not the [$X360] one before it; elsewhere kvFind, as before.
+ */
+export function blockIn(file: string, nodes: KvNode[], path: string[]): KvNode | undefined {
+  return TAB_FILES.has(file.toLowerCase()) ? pcFind(nodes, path) : kvFind(nodes, path);
+}
+
 class Work {
   private trees = new Map<string, KvNode[]>();
   private texts = new Map<string, string>();
@@ -89,7 +99,7 @@ class Work {
     return root.value;
   }
   panel(path: string, keys: string[]): KvNode {
-    const p = kvFind(this.tree(path), keys);
+    const p = blockIn(path, this.tree(path), keys);
     if (!p) throw new Error(`${path}: no panel ${keys.join('/')}`);
     return p;
   }
@@ -103,7 +113,7 @@ class Work {
    * so there a missing one is still a bug and fails loudly, as panel() does.
    */
   optional(path: string, keys: string[]): KvNode | undefined {
-    const p = kvFind(this.tree(path), keys);
+    const p = blockIn(path, this.tree(path), keys);
     if (!p && !this.imported) throw new Error(`${path}: no panel ${keys.join('/')}`);
     return p;
   }
@@ -193,7 +203,7 @@ function moveAlong(work: Work, el: HudElement, from: { x: number; y: number }, t
   const W = screenW(aspect);
   for (const name of el.moveWith ?? []) {
     const b = work.optional(layoutOf(el), [name]);
-    const base = kvFind(baseTree(work.key, layoutOf(el)), [name]);
+    const base = blockIn(layoutOf(el), baseTree(work.key, layoutOf(el)), [name]);
     if (!b || !base) continue;
     const w = parseSize(pcGet(base, 'wide') ?? '0', W), h = parseSize(pcGet(base, 'tall') ?? '0', SCREEN_H);
     const x = parsePos(pcGet(base, 'xpos') ?? '0', W) + to.x - from.x, y = parsePos(pcGet(base, 'ypos') ?? '0', SCREEN_H) + to.y - from.y;
@@ -243,7 +253,12 @@ function layoutPass(work: Work, design: HudDesign) {
     const base = baseRect(panel, el, work.key, design.aspect);
     const p = placed(o, base, el, design.aspect);
     // A block with only a ypos (the peril notice) is placed across by the game: no xpos is added.
-    if (moved) { if (el.moveAxis !== 'y') kvSet(panel, 'xpos', p.xpos); kvSet(panel, 'ypos', p.ypos); }
+    // A block in its own file is written on every line the PC reads, never a
+    // console one: scoreboard.res's CVersusModeScoreboard has ypos [$WIN32]
+    // and [$X360] (tab screen spec 4.4). hudlayout.res keeps kvSet, the
+    // first PC line, as its downloads were pinned with.
+    const setPos = el.file ? pcSet : kvSet;
+    if (moved) { if (el.moveAxis !== 'y') setPos(panel, 'xpos', p.xpos); setPos(panel, 'ypos', p.ypos); }
     if (moved && el.moveWith) moveAlong(work, el, base, { x: parsePos(p.xpos, screenW(design.aspect)), y: parsePos(p.ypos, SCREEN_H) }, design.aspect);
     if (sized) { kvSet(panel, 'wide', String(Math.round(p.w))); kvSet(panel, 'tall', String(Math.round(p.h))); }
     if (el.id === 'chat' && moved) {
@@ -482,7 +497,7 @@ function childPass(work: Work, design: HudDesign) {
       // A piece waiting on a closed probe is never written (validateDesign drops it too).
       if (def.gate && !probe(def.gate)) continue;
       const nodes = work.tree(panel.file);
-      let block = kvFind(nodes, childPath(name));
+      let block = blockIn(panel.file, nodes, childPath(name));
       if (def.addable) {
         if (o.on === false) { if (block) nodes.splice(nodes.indexOf(block), 1); continue; }
         if (o.on === true && !block) {
@@ -501,7 +516,7 @@ function childPass(work: Work, design: HudDesign) {
       // Hunter file with no number the Smoker's and Boomer's carry): the
       // edit still lands in each of those, as linkedBlocks allows.
       if (!block && !work.imported) throw new Error(`${panel.file}: no child ${name}`);
-      if (block) applyChild(work, panel.file, def, block, o);
+      if (block) applyChild(work, panel.file, def, block, o, panel.embedded);
       for (const link of linkedBlocks(work, design, panel, name)) applyChild(work, link.file, def, link.block, linkedOverride(o, link));
     }
   }
@@ -604,17 +619,18 @@ function colourKey(def: ChildDef): 'drawColor' | 'fgcolor_override' {
  * future child ever ships with `move: false`, this guard comes back with
  * it, alongside a real registry entry to test it against.
  */
-function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: ChildOverride) {
+function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: ChildOverride, embedded = false) {
   if (o.color !== undefined && !def.colour) throw new Error(`${file}: ${def.name} takes no colour`);
   if (o.fontSize !== undefined && !def.font) throw new Error(`${file}: ${def.name} takes no text size`);
   if ((o.w !== undefined || o.h !== undefined) && def.box === 'none') throw new Error(`${file}: ${def.name} takes no size`);
   for (const key of Object.keys(o.keys ?? {})) {
     if (!def.keys?.some((k) => k.key === key)) throw new Error(`${file}: ${def.name} takes no key ${key}`);
   }
-  if (o.visible !== undefined) kvSet(block, 'visible', o.visible ? '1' : '0');
-  const set = (key: string, v: number | undefined) => { if (v !== undefined) kvSet(block, key, String(Math.round(v))); };
+  const put = embedded ? (key: string, value: string) => embeddedSet(block, key, value) : (key: string, value: string) => kvSet(block, key, value);
+  if (o.visible !== undefined) put('visible', o.visible ? '1' : '0');
+  const set = (key: string, v: number | undefined) => { if (v !== undefined) put(key, String(Math.round(v))); };
   set('xpos', o.x); set('ypos', o.y); set('wide', o.w); set('tall', o.h);
-  if (o.color !== undefined) kvSet(block, colourKey(def), o.color);
+  if (o.color !== undefined) put(colourKey(def), o.color);
   if (o.fontSize !== undefined) {
     const leaf = typeof block.value === 'string' ? undefined
       : block.value.find((n) => n.key.toLowerCase() === 'font' && typeof n.value === 'string');
@@ -629,13 +645,47 @@ function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: C
     // an 18-tall font is 100 at 36), so the icons are not cut off on either
     // side and the fitted card grows with them.
     if (def.box === 'none') {
-      kvSet(block, 'tall', String(size));
-      if (baseTall > 0) kvSet(block, 'wide', String(Math.round(num(kvGet(block, 'wide')) * size / baseTall)));
+      put('tall', String(size));
+      if (baseTall > 0) put('wide', String(Math.round(num(kvGet(block, 'wide')) * size / baseTall)));
     }
   }
-  if (o.z !== undefined) kvSet(block, 'zpos', String(o.z));
-  if (o.keys) writeKeys(block, insetFor(def, block, o.keys));
+  if (o.z !== undefined) put('zpos', String(o.z));
+  if (o.keys) {
+    // '' on a key the registry lets be cleared (KeyDef.clear) takes the key
+    // out of the file, for what the game does without it: the Tab rows' bars
+    // colour by health with no monochrome_color (probe TL3). Every line the
+    // PC reads goes; a console-only one stays.
+    const cleared = Object.keys(o.keys).filter((k) => o.keys![k] === '' && def.keys?.find((d) => d.key === k)?.clear);
+    for (const key of cleared) {
+      for (const b of [block, ...(embedded ? [embeddedOf(block)] : [])]) {
+        if (b && typeof b.value !== 'string') b.value = b.value.filter((n) => !(n.key.toLowerCase() === key.toLowerCase() && typeof n.value === 'string' && pcApplies(n.cond)));
+      }
+    }
+    const keys = insetFor(def, block, Object.fromEntries(Object.entries(o.keys).filter(([k]) => !cleared.includes(k))));
+    if (embedded) for (const [key, value] of Object.entries(keys)) embeddedSet(block, key, value, true);
+    else writeKeys(block, keys);
+  }
 }
+
+/**
+ * One key of a child of an embedded panel (PanelChildren.embedded, the
+ * versus score panel): into the block's if_embedded when that block already
+ * has the key, since the game reads it over the plain one there, else into
+ * the plain block (tab screen spec 4.4). So a colour lands on the plain key
+ * and shows in the standalone panel too, which is the same panel, and a
+ * TeamYours x lands on if_embedded's xpos. `pc` writes every PC entry of the
+ * key (pcSet, a typed KeyDef key), else the first (kvSet, as applyChild does
+ * for a plain panel).
+ */
+function embeddedSet(block: KvNode, key: string, value: string, pc = false) {
+  const emb = embeddedOf(block);
+  const target = emb && pcGet(emb, key) !== undefined ? emb : block;
+  if (pc || target === emb) pcSet(target, key, value); else kvSet(target, key, value);
+}
+
+/** A block's if_embedded sub-block, as the PC reads it. */
+const embeddedOf = (block: KvNode): KvNode | undefined =>
+  typeof block.value === 'string' ? undefined : pcFind(block.value, ['if_embedded']);
 
 /**
  * A bar's keys with the inset cut to leave a unit of fill (maxInset) at the
@@ -997,7 +1047,7 @@ function fitOffset(box: Box, k: number): { x: number; y: number } {
 export function drawnAt(design: HudDesign, id: string, sx: number, sy: number): { x: number; y: number } {
   const el = elementById(id);
   const key = baseOf(design);
-  const panel = el && kvFind(baseTree(key, layoutOf(el)), [el.key]);
+  const panel = el && blockIn(layoutOf(el), baseTree(key, layoutOf(el)), [el.key]);
   if (!el || !panel) return { x: sx, y: sy };
   const W = screenW(design.aspect);
   const p = placed({ ...design.elements[id], x: sx, y: sy }, baseRect(panel, el, key, design.aspect), el, design.aspect);
@@ -1175,9 +1225,9 @@ function hidePass(work: Work, design: HudDesign) {
     const nodes = work.tree(panel.file);
     for (const [name, o] of Object.entries(kids)) {
       if (o.visible !== false) continue;
-      const block = kvFind(nodes, childPath(name));
+      const block = blockIn(panel.file, nodes, childPath(name));
       if (!block) continue;                            // an addable child that is off is not in the file at all
-      hardHide(block);
+      hardHide(block, panel.embedded);
       for (const link of panel.linked ?? []) { const b = work.optional(link.file, [name]); if (b) hardHide(b); }
     }
   }
@@ -1197,13 +1247,23 @@ function hidePass(work: Work, design: HudDesign) {
  * sits beside pinCorner, as in basechat.res HudChatHistory), which follows
  * the 0 x 0 parent down, not the contents up.
  */
-export function hardHide(block: KvNode) {
+export function hardHide(block: KvNode, embedded = false) {
   pcSet(block, 'visible', '0');
   pcSet(block, 'wide', '0');
   pcSet(block, 'tall', '0');
   for (const key of ['auto_wide_tocontents', 'auto_tall_tocontents']) {
     const v = pcGet(block, key);
     if (v !== undefined && v !== '0') pcSet(block, key, '0');
+  }
+  // A child of an embedded panel: its if_embedded keys win over the plain
+  // ones there, so each of these it carries is zeroed too, or
+  // StatBreakdownHighlightImage's if_embedded wide 320 would undo the hide
+  // (TAB-2: with it zeroed too, no box drew). Keys it lacks are not added.
+  const emb = embedded ? embeddedOf(block) : undefined;
+  if (emb) {
+    for (const key of ['visible', 'wide', 'tall', 'auto_wide_tocontents', 'auto_tall_tocontents']) {
+      if (pcGet(emb, key) !== undefined) pcSet(emb, key, '0');
+    }
   }
   if ((kvGet(block, 'ControlName') ?? '').toLowerCase() === 'imagepanel') {
     kvSet(block, 'drawColor', clearOf(kvGet(block, 'drawColor') ?? '255 255 255 255'));
@@ -1485,7 +1545,7 @@ export function panelChild(design: HudDesign, panelId: string, name: string, fil
   if (!panel) return null;
   const { work, boxes } = panelWork(design);
   const src = file && panel.linked?.some((l) => l.file === file) ? file : panel.file;
-  const n = kvFind(work.tree(src), childPath(name));
+  const n = blockIn(src, work.tree(src), childPath(name));
   if (!n) return null;
   const box = boxes[panelId];
   const shift = design.elements[panelId]?.fit && box ? box : { x: 0, y: 0 };
@@ -1509,7 +1569,8 @@ export function panelChild(design: HudDesign, panelId: string, name: string, fil
   return {
     x: drawn !== undefined ? drawn + shift.x : own, y: num(kvGet(n, 'ypos')) + shift.y,
     w: num(kvGet(n, 'wide')), h: num(kvGet(n, 'tall')),
-    visible: (kvGet(n, 'visible') ?? '1') !== '0',
+    // A piece code shows itself (ChildDef.codeShown) is visible unless the player hid it.
+    visible: def?.codeShown ? design.children[panelId]?.[def.name]?.visible !== false : (kvGet(n, 'visible') ?? '1') !== '0',
     ...(Number.isFinite(tall) ? { fontTall: tall } : {}),
     ...(raw && /^\d+ \d+ \d+ \d+$/.test(raw) ? { color: raw } : {}),
     ...(Object.keys(keys).length ? { keys } : {}),
@@ -1534,7 +1595,7 @@ export function cardChild(design: HudDesign, name: string): CardChild | null {
  */
 export function baseHasElement(key: BaseKey, el: HudElement): boolean {
   if (el.id === 'xhair') return true;
-  if (!kvFind(baseTree(key, layoutOf(el)), [el.key])) return false;
+  if (!blockIn(layoutOf(el), baseTree(key, layoutOf(el)), [el.key])) return false;
   if (!el.team?.file) return true;
   const team = baseTree(key, el.team.file);
   return [1, 2, 3, 4].every((n) => kvFind(team, [`TeamPlayer${n}`]) !== undefined);
@@ -1548,7 +1609,7 @@ export function importedHasXhair(key: BaseKey): boolean {
 /** Whether the base's own panel file has this child: an addable child it lacks shows as a checkbox. */
 export function baseHasChild(key: BaseKey, name: string, panelId = 'teamColumn'): boolean {
   const file = panelChildren(panelId)?.file;
-  return file !== undefined && kvFind(baseTree(key, file), childPath(name)) !== undefined;
+  return file !== undefined && blockIn(file, baseTree(key, file), childPath(name)) !== undefined;
 }
 
 export interface TeamLayout {
@@ -1977,7 +2038,7 @@ function stylePass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkF
     for (const name of names) {
       out.push({ path: `materials/${name}.vtf`, data: vtf }, { path: `materials/${name}.vmt`, data: enc(vmtFor(name)) });
     }
-    for (const t of slot.targets) { const p = work.optional(t.file, t.path); if (p) kvSet(p, t.key, `hud/hudeditor/${slot.id.toLowerCase()}`); }
+    for (const t of slot.targets) { const p = work.optional(t.file, t.path); if (p) kvSet(p, t.key, `${t.prefix ?? ''}hud/hudeditor/${slot.id.toLowerCase()}`); }
   }
 }
 
@@ -2334,6 +2395,31 @@ export interface BuildReport { replaced: string[] }
  * - `codeShownPass` runs after `scalePass` and only here, for the same
  *   reasons: it moves a hidden piece the game re-shows out of its panel.
  */
+/**
+ * The Modern preset's own flat panels, as /home/volence/l4d/hud/tools/gen_textures.py
+ * makes them: its files name these (the kill notice box, the versus score
+ * panel, the weapon background entries), and the game has none of them.
+ * Without them every panel naming one draws the purple and black missing
+ * texture. They were shipped only in the owner's gameinfo.txt folder, so the
+ * owner's own game never showed the gap (the in-game harness takes that folder
+ * out for each run, but no probe shot the kill notice or the Tab screen on an
+ * untouched Modern design).
+ */
+export const MODERN_ART: ReadonlyArray<{ name: string; w: number; h: number; colour: string }> = [
+  { name: 'vgui/hud/mod_panel_flat', w: 32, h: 32, colour: '0 0 0 140' },
+  { name: 'vgui/hud/mod_panel_flat_red', w: 32, h: 32, colour: '95 22 22 205' },
+  { name: 'vgui/hud/mod_equip_active', w: 128, h: 64, colour: '40 40 40 215' },
+  { name: 'vgui/hud/mod_equip_inactive', w: 128, h: 32, colour: '0 0 0 130' },
+];
+
+function modernArtPass(key: BaseKey, out: VpkFile[]) {
+  if (key !== 'modern') return;
+  for (const t of MODERN_ART) {
+    out.push({ path: `materials/${t.name}.vtf`, data: encodeVTF(t.w, t.h, flatTexture(t.w, t.h, t.colour)) },
+      { path: `materials/${t.name}.vmt`, data: enc(vmtFor(t.name)) });
+  }
+}
+
 export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: BuildReport): VpkFile[] {
   const key = baseOf(design);
   const work = new Work(key);
@@ -2358,6 +2444,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   fontPass(work, design, assets, extra);
   stylePass(work, design, assets, extra);
   crosshairPass(design, assets, extra);
+  modernArtPass(key, extra);
   const edited = work.files();
   const layer = importedFiles(key);
   if (!layer) return [...edited, ...extra, { path: 'addoninfo.txt', data: enc(addonInfo(design.name)) }];
@@ -2481,7 +2568,9 @@ export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
   const base = baseRect(panel, el, baseOf(design), design.aspect);
   const p = placed(o, base, el, design.aspect);
   const k = el.resize === 'scale' ? o.scale ?? 1 : 1;
-  const visible = o.visible ?? (kvGet(panel, 'visible') ?? '1') !== '0';
+  // The Tab screen's dialog (scores) is visible 0 in the file until code shows it on Tab: a Tab
+  // element with no hide of its own is always shown with the Tab screen.
+  const visible = o.visible ?? ((el.tab && !el.props.includes('visible')) || (kvGet(panel, 'visible') ?? '1') !== '0');
   // In Free the container covers the screen and each card places itself.
   if (el.team?.file && teamLayout(design, el).dir === 'free') return { x: 0, y: 0, w: screenW(aspect), h: SCREEN_H, visible };
   const moved = el.move && (o.x !== undefined || o.y !== undefined);

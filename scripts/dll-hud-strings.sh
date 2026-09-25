@@ -10,12 +10,17 @@
 # the string runs this script saves. The first line records the dll's md5,
 # so a game update that moves the strings shows as a failing test.
 #
+# The Tab screen anchors (scoreboard dialog to MissionTitle) reach the runs
+# the Tab screen spec cites: the dialog's own names sit more than 30 lines
+# from its class name, the versus panel's highlight names beside its .res
+# path, the survivor row's children beside SurvivorStats*.
+#
 # Usage: bash scripts/dll-hud-strings.sh [path/to/client.dll]
 # The dll is only read, never written.
 set -euo pipefail
 DLL="${1:-$HOME/.steam/steam/steamapps/common/left 4 dead/left4dead/bin/client.dll}"
 OUT="$(dirname "$0")/../web/src/hud/dll-hud-strings.txt"
-ANCHORS='resource/ui/hud/|LocalPlayerPanel|TeammatePanel|HealthPanel|CircularProgressBar|CHudAbilityTimer|CHudTerrorCrosshair|ZombieTeamDisplay|FrustrationBar|CHudGhostPanel|CHudZombiePanel|bgcolor_override|SpectatorInfected|HudVoiceSelfStatus'
+ANCHORS='resource/ui/hud/|LocalPlayerPanel|TeammatePanel|HealthPanel|CircularProgressBar|CHudAbilityTimer|CHudTerrorCrosshair|ZombieTeamDisplay|FrustrationBar|CHudGhostPanel|CHudZombiePanel|bgcolor_override|SpectatorInfected|HudVoiceSelfStatus|CClientScoreBoardDialog|CTerrorClientScoreBoardDialog|BasePlayerStatsPanel|SurvivorStats|CVersusModeScoreboard|if_embedded|Resource/UI/VersusModeScoreboard.res|Resource/UI/ScoreBoard|MissionTitle'
 {
   echo "# client.dll md5 $(md5sum "$DLL" | cut -d' ' -f1)"
   echo "# strings -a -n 3 client.dll | grep -i -C 30 -E '$ANCHORS'"

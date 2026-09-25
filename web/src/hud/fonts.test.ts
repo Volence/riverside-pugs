@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { fontCell, cssFamily, cssWeight, canvasFont, loadFace, _resetFaces, importedFace, _resetImportFaces } from './fonts';
+import { fontCell, cssFamily, cssWeight, canvasFont, synthBoldSpacing, loadFace, _resetFaces, importedFace, _resetImportFaces } from './fonts';
 import { registerImport, unregisterImport, baseFile } from './base';
 import { sampleHud } from './importFixtures';
 import { readFileSync } from 'node:fs';
@@ -56,6 +56,18 @@ describe('the CSS face for a scheme face', () => {
     expect(cssWeight(700)).toBe(700);
     expect(cssWeight(1000)).toBe(900);
     expect(cssWeight(550)).toBe(600);
+  });
+
+  it('widens a face the game emboldens itself by a pixel a glyph at 1080p: a bold weight on a face with no bold file', () => {
+    // The stock Tab title, FrameTitle (Trade Gothic Bold, weight 700), is 333 px of ink in game and
+    // was 308 in the preview without it (/home/volence/l4d/hud/probe-tab/p0/measure.txt, "title").
+    expect(synthBoldSpacing('Trade Gothic Bold', 700)).toBe(1);
+    expect(synthBoldSpacing('Trade Gothic', 600)).toBe(1);
+    expect(synthBoldSpacing('Trade Gothic Bold', 400)).toBe(0);
+    expect(synthBoldSpacing('Trade Gothic Bold', 0)).toBe(0);
+    // Roboto Condensed has a bold file of its own, and a face the preview has no file for is left alone.
+    expect(synthBoldSpacing('Roboto Condensed', 700)).toBe(0);
+    expect(synthBoldSpacing('Verdana', 700)).toBe(0);
   });
 
   it('writes the canvas font from the face, the weight and the cell', () => {

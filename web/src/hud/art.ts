@@ -112,6 +112,10 @@ export const NEEDED_MATERIALS: readonly string[] = [
   // The infected teammate card: each class's icon (a ghost's is the same texture, faint) and the dead skull.
   'vgui/hud/zombieteamimage_hunter', 'vgui/hud/zombieteamimage_smoker', 'vgui/hud/zombieteamimage_boomer', 'vgui/hud/zombieteamimage_tank',
   SKULL_ICON,
+  // The Tab screen (tab screen spec 3.2, task 11): the versus panel's team and stat boxes
+  // (versusmodescoreboard.res's highlight images, a ScalableImagePanel nine-slice), and the
+  // teammate rows' blue-grey fade (scoreboardsurvivor.res PlayerBackground).
+  'vgui/hud/scalablepanel_bgblack_outlinered', 'vgui/background_survivor',
   // The use/heal bar's AwardIcon (progressbar.res "icon" "icon_healing", a cell of vgui/hud/iconsheet).
   HEALING_ICON,
   // The spawn and too-far panels' class picture (tip_<class>, cells of vgui/tipgraphic).

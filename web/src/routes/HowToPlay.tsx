@@ -280,6 +280,13 @@ viewmodel_fov_override 70`}</code></pre>
             <li><a href="/crosshair"><strong>Crosshair maker</strong></a>: draw a crosshair and download it on its own, or send it into your HUD.</li>
             <li><a href="/community"><strong>Community</strong></a>: HUDs and crosshairs other players have shared, ready to download.</li>
           </ul>
+          <p>
+            <strong>Purple and black squares on your HUD?</strong> The game cannot find one of its pictures.
+            A HUD made from the editor's Modern preset that shows them on the kill notices or the Tab
+            score panel is an older download that missed some pictures: download it again. For any other
+            HUD, import it in the <a href="/hud">HUD editor</a>: it lists the pictures the HUD needs but
+            does not include.
+          </p>
         </Panel>
         <Panel id="playing">
           <h3>Playing a match</h3>

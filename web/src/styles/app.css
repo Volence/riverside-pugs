@@ -195,7 +195,7 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 
 /* ---------- HUD editor ---------- */
 
-.hud { display: grid; grid-template-columns: 190px minmax(0, 1fr) 320px; gap: var(--sp-4); align-items: start; }
+.hud { display: grid; grid-template-columns: 210px minmax(0, 1fr) 340px; gap: var(--sp-4); align-items: start; }
 
 /* Two rows: the HUD (goes into the download), then the Preview (never does). */
 .hud__toolbar { display: flex; flex-direction: column; margin-bottom: var(--sp-4); font-size: var(--fs-dense); color: var(--text-muted); }
@@ -237,6 +237,7 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
   padding: 2px var(--sp-2); background: rgba(0, 0, 0, 0.65);
   font-size: var(--fs-dense); color: var(--text-bright);
 }
+.hud__crumbs--right { left: auto; right: var(--sp-2); }
 .hud__crumbs button { background: none; border: 0; padding: 0; color: var(--text-muted); font: inherit; cursor: pointer; }
 .hud__crumbs button:hover { color: var(--text-bright); text-decoration: underline; }
 
@@ -529,6 +530,8 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 /* The crosshair maker: a control column beside a 16:9 preview needs more
  * room than any of the stats pages. */
 .page--wide { max-width: 1320px; }
+/* The HUD editor's preview is the tool: on a big screen it takes the room. */
+.page--editor { max-width: 1880px; }
 .lb-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--sp-5); align-items: start; }
 @media (max-width: 960px) { .lb-layout { grid-template-columns: minmax(0, 1fr); } }
 /* Same reason: panels hold wide scrolling tables. */

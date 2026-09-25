@@ -51,6 +51,15 @@ export interface KeyDef {
   unsetLabel?: string;
   /** For a colour key: unset, the game colours it by health (healthRgb), so the control shows the three bands. */
   byHealth?: true;
+  /**
+   * The key can also be taken out of the file, for what the game does
+   * without it: stored as '' (never a value the key takes), which the build
+   * turns into removing the line. `label` names that choice beside "as the
+   * file has it" (nothing stored) and a value. Only for a key the base file
+   * sets whose absence the game reads differently: the Tab rows' bar, Gray in
+   * both presets, which colours by health without it (probe TL3).
+   */
+  clear?: { label: string; evidence: string };
 }
 
 export type ChildKind = 'image' | 'label' | 'bar' | 'other';
@@ -125,6 +134,27 @@ export interface ChildDef {
    * which no probe has seen drawn).
    */
   gate?: ProbeId;
+  /**
+   * The hide waits on this probe: while it is closed the page offers no
+   * Visible control for the piece and validateDesign drops a stored
+   * `visible`, so the build never writes it (the Tab screen's pieces, TS7).
+   */
+  hideGate?: ProbeId;
+  /**
+   * Pieces the game takes away with this one when it is hidden, because
+   * they are pinned to it (their pin_to_sibling names it), and whatever is
+   * pinned to them in turn. The design stores no hide for them: the game
+   * and the preview's layout take them away with this piece, and the page
+   * reads this list to say so. Only the direct pins are listed; the test
+   * checks the list against both presets' pin_to_sibling keys.
+   */
+  hidesWith?: string[];
+  /**
+   * Code shows the piece whatever the file's visible says (your own Tab row's
+   * background, visible 0 in both presets): the page shows it visible unless
+   * the player hid it, and only a hide is written.
+   */
+  codeShown?: true;
 }
 
 export interface PanelChildren {
@@ -161,6 +191,15 @@ export interface PanelChildren {
    * none: its Items is the build's hidden anchor at the bar's own x.
    */
   barAnchor?: string;
+  /**
+   * The children each carry an if_embedded block whose keys the game reads
+   * over their plain keys when the panel is embedded in another (the versus
+   * score panel inside the Tab screen, tab screen spec 1.6). The build writes
+   * a key into if_embedded when that block already has it, and into the
+   * plain block otherwise (spec 4.4); the preview reads the plain keys with
+   * the if_embedded ones over them.
+   */
+  embedded?: true;
 }
 
 const block = (key: string, pairs: [string, string][]): KvNode => ({ key, value: pairs.map(([k, v]) => ({ key: k, value: v })) });
@@ -586,6 +625,135 @@ export const FRUST_PANEL: PanelChildren = {
   ],
 };
 
+/**
+ * The Tab screen's pieces: the scoreboard dialog, the versus score panel and
+ * the two kinds of row, one panel each, the panelId being the element's
+ * (elements.ts). The evidence is the tab screen spec
+ * (docs/superpowers/specs/2026-09-25-hud-editor-tab-screen-design.md,
+ * section 1), and the probe answers its section 7 and
+ * /home/volence/l4d/hud/probe-tab/RESULTS.md (shots under tabN/runs/ there):
+ * - Open on tonight's shots: the backdrop colour (Modern's 0 0 0 200 drew
+ *   lighter; TAB-1 navy), your survivor row colour (stock's 140 0 0 read
+ *   141 0 0; TAB-1 green), the versus label colours (Modern's ModText amounts
+ *   read 236; TAB-1 yellow "Your Team", magenta "1%").
+ * - TS1 the title colour, TS3 the row bars, TS5 your infected row, TS6 the
+ *   infected names, TS7 the hides: passed. TS5b (the other infected rows)
+ *   was never on screen and stays closed.
+ * - Code colours the versus scores (TS2 failed: grey whatever the file says)
+ *   and the survivor names (white whatever the file says), so neither
+ *   offers a colour.
+ * In v1 no piece moves, sizes or changes its text size (spec 2.1): every one
+ * is move false, box none, font false, its hide behind TS7. The build must
+ * find each block as the PC game does (kv.ts pcFind): scoreboard.res's
+ * BackgroundImage [$X360] comes before the PC one.
+ */
+const TAB_HIDE = { move: false, box: 'none', font: false, hideGate: 'TS7' } as const;
+const PANEL_BG = 'VGUI Panel key bgcolor_override (client.dll string run)';
+
+export const TAB_BOARD: PanelChildren = {
+  panelId: 'tabBoard',
+  file: 'resource/ui/scoreboard.res',
+  repeat: 'single',
+  frame: 'hudlayout',
+  children: [
+    { name: 'BackgroundImage', label: 'Backdrop', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE,
+      keys: [{ key: 'bgcolor_override', label: 'Backdrop colour', type: 'colour', unsetLabel: 'File colour',
+        evidence: `${PANEL_BG}; Modern's 0 0 0 200 draws lighter than stock's 0 0 0 230 (tab screen spec 1.2); TAB-1 navy (probe-tab tab1/runs/tab-survivor/tab-a.png)` }],
+      note: 'The dark panel behind the list. Opacity 0 leaves no backdrop; the game still draws the rows.' },
+    { name: 'MissionTitle', label: 'Title', kind: 'label', role: 'content', colour: true, colourGate: 'TS1', ...TAB_HIDE,
+      note: 'The game writes the campaign and the mode here, such as "No Mercy, Versus Mode".' },
+  ],
+};
+
+const BOX_NOTE = 'The game draws this box from its picture and takes no tint, so its look is its style.';
+const SCORE_NOTE = 'The game writes the score here and colours it itself: a file colour is ignored (probe TS2).';
+export const TAB_VERSUS: PanelChildren = {
+  panelId: 'tabVersus',
+  file: 'resource/ui/versusmodescoreboard.res',
+  repeat: 'single',
+  frame: 'hudlayout',
+  embedded: true,
+  children: [
+    { name: 'YourTeamHighlightImage', label: 'Team score box', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE,
+      note: `${BOX_NOTE} The game shows one team's box at a time.` },
+    { name: 'EnemyTeamHighlightImage', label: 'Enemy team box', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE,
+      note: `${BOX_NOTE} It shares the team score box's style; the game shows it in place of yours.` },
+    { name: 'StatBreakdownHighlightImage', label: 'Versus score box', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE, note: BOX_NOTE },
+    { name: 'TeamYours', label: '"Your Team"', kind: 'label', role: 'content', colour: true, ...TAB_HIDE },
+    { name: 'TeamEnemy', label: '"Enemy Team"', kind: 'label', role: 'content', colour: true, ...TAB_HIDE },
+    { name: 'TeamYourScoreSurvivors', label: 'Your score', kind: 'label', role: 'content', colour: false, ...TAB_HIDE, note: SCORE_NOTE },
+    { name: 'TeamEnemyScoreSurvivors', label: 'Enemy score', kind: 'label', role: 'content', colour: false, ...TAB_HIDE,
+      note: `${SCORE_NOTE} "N/A" is a half not played yet.` },
+    // The stat line is a pin chain (versusmodescoreboard.res pin_to_sibling,
+    // stock and Modern alike): DistanceAmount is pinned to DistanceLabel,
+    // HealthLabel to DistanceAmount, HealthAmount to HealthLabel, and
+    // SurvivalMultAmount to SurvivalMultLabel. Hiding a piece hides every
+    // piece pinned to it, directly or down the chain (hidesWith). Only the
+    // HealthLabel link was seen in game (TS7, /home/volence/l4d/hud/probe-tab/RESULTS.md,
+    // TAB-1 tab1/runs/tab-survivor/tab-a.png: the label hidden, HealthAmount
+    // gone too); the other links follow from the same pin behaviour.
+    { name: 'DistanceLabel', label: '"Average Distance:"', kind: 'label', role: 'content', colour: true, ...TAB_HIDE, hidesWith: ['DistanceAmount'],
+      note: 'The rest of the line follows this label: the game places each piece after the one before it, so hiding it hides the whole line.' },
+    { name: 'DistanceAmount', label: 'Distance', kind: 'label', role: 'content', colour: true, ...TAB_HIDE, hidesWith: ['HealthLabel'],
+      note: 'Hiding it hides Health Bonus and its number too: the game places them after it.' },
+    { name: 'HealthLabel', label: '"Health Bonus:"', kind: 'label', role: 'content', colour: true, ...TAB_HIDE, hidesWith: ['HealthAmount'],
+      note: 'Hiding it hides its number too: the game places the number after it.' },
+    { name: 'HealthAmount', label: 'Health bonus', kind: 'label', role: 'content', colour: true, ...TAB_HIDE },
+    { name: 'SurvivalMultLabel', label: '"Survival Multiplier:"', kind: 'label', role: 'content', colour: true, ...TAB_HIDE, hidesWith: ['SurvivalMultAmount'],
+      note: 'The game shows this line only later in a round. Hiding it hides its number too.' },
+    { name: 'SurvivalMultAmount', label: 'Survival multiplier', kind: 'label', role: 'content', colour: true, ...TAB_HIDE,
+      note: 'The game shows this line only later in a round.' },
+  ],
+};
+
+const NAME_WHITE = 'The game draws the names white whatever the file says (probe TS6).';
+export const TAB_SURVIVOR_ROW: PanelChildren = {
+  panelId: 'tabSurvivors',
+  file: 'resource/ui/scoreboardsurvivor.res',
+  repeat: 'cards',
+  children: [
+    { name: 'PlayerBackground', label: 'Teammate row', kind: 'image', role: 'decor', colour: false, ...TAB_HIDE,
+      note: "Your teammates' rows. Its look is its style: the stock fade, a flat colour or a picture." },
+    { name: 'PlayerBackground_Selected', label: 'Your row', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE, codeShown: true,
+      keys: [{ key: 'bgcolor_override', label: 'Your row colour', type: 'colour', unsetLabel: 'File colour',
+        evidence: `${PANEL_BG}; stock's 140 0 0 255 reads 141 0 0 on your row (tab screen spec 1.5); TAB-1 green (probe-tab tab1/runs/tab-survivor/tab-a.png)` }],
+      note: 'The game shows this on your own row only.' },
+    { name: 'SurvivorStatsHealth', label: 'Health bar', kind: 'bar', role: 'content', colour: false, ...TAB_HIDE,
+      keys: [{ key: 'monochrome_color', label: 'Row bars', type: 'colour', gate: 'TS3', byHealth: true,
+        evidence: `${MONO_EVIDENCE}; probe TS3, probe-tab tab1/runs/tab-survivor/tab-a.png (every bar red, at full, at 40 and down)`,
+        clear: { label: 'By health', evidence: 'probe TL3, probe-tab tab2/runs/tab-survivor/tab-a.png: without monochrome_color the bars are green at full, orange hurt, red down' },
+        note: 'Grey as the file has it, the game\'s health colours, or one colour at every health.' }],
+      note: 'The game fills the bar by health.' },
+    { name: 'SurvivorStatsName', label: 'Your name', kind: 'label', role: 'content', colour: false, ...TAB_HIDE,
+      note: `Shown on a player's row, beside the Steam picture. ${NAME_WHITE}` },
+    { name: 'SurvivorStatsNoAvatarName', label: 'Bot name', kind: 'label', role: 'content', colour: false, ...TAB_HIDE,
+      note: `Shown on a bot's row, which has no Steam picture. ${NAME_WHITE}` },
+    { name: 'PingImage', label: 'Ping bars', kind: 'label', role: 'content', colour: false, ...TAB_HIDE,
+      note: 'Shown for players only; the game draws the bars.' },
+    { name: 'PingLabel', label: 'Ping', kind: 'label', role: 'content', colour: false, ...TAB_HIDE,
+      note: 'Shown for players only; the game writes the number.' },
+  ],
+};
+
+export const TAB_INFECTED_ROW: PanelChildren = {
+  panelId: 'tabInfected',
+  file: 'resource/ui/scoreboardinfectedplayer.res',
+  repeat: 'cards',
+  children: [
+    { name: 'PlayerBackground', label: 'Other rows', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE,
+      keys: [{ key: 'bgcolor_override', label: "Other rows' colour", type: 'colour', unsetLabel: 'File colour', gate: 'TS5b',
+        evidence: `${PANEL_BG}; the other infected rows were never on screen (probe TS5b needs a second infected player)` }] },
+    { name: 'PlayerBackground_Selected', label: 'Your row', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE, codeShown: true,
+      keys: [{ key: 'bgcolor_override', label: 'Your row colour', type: 'colour', unsetLabel: 'File colour', gate: 'TS5',
+        evidence: `${PANEL_BG}; probe TS5, probe-tab tab1/runs/tab-infected/tab-c.png (your row yellow)` }],
+      note: 'The game shows this on your own row only.' },
+    { name: 'Name', label: 'Player name', kind: 'label', role: 'content', colour: true, colourGate: 'TS6', ...TAB_HIDE,
+      note: "Shown on a player's row, beside the Steam picture." },
+    { name: 'NoAvatarName', label: 'Bot name', kind: 'label', role: 'content', colour: true, colourGate: 'TS6', ...TAB_HIDE,
+      note: "Shown on a bot's row, which has no Steam picture." },
+  ],
+};
+
 /** A block's rect, as a linked rule reads it from a base file. */
 export interface LinkRect { x: number; y: number; w: number; h: number }
 export type LinkRule = 'same' | 'delta';
@@ -621,7 +789,18 @@ function mapLinked<T>(rule: LinkRule, key: string, v: T, a: LinkRect, b: LinkRec
   }
 }
 
-export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, ZCARD_PANEL, PROGRESS_PANEL, GHOST_PANEL, ZPANEL_PANEL, FRUST_PANEL];
+/**
+ * The Tab screen's files: the four panels' and scoreboard.res, which places
+ * them. Every read and write of one finds its blocks as the PC game does
+ * (kv.ts pcFind), since scoreboard.res puts console-only blocks first
+ * (BackgroundImage [$X360] before the PC's [$WIN32]). Other files keep
+ * kvFind (tab screen spec 4.4: switching every caller is its own change).
+ */
+export const TAB_FILES: ReadonlySet<string> = new Set(['resource/ui/scoreboard.res',
+  ...[TAB_BOARD, TAB_VERSUS, TAB_SURVIVOR_ROW, TAB_INFECTED_ROW].map((p) => p.file)]);
+
+export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, ZCARD_PANEL, PROGRESS_PANEL, GHOST_PANEL, ZPANEL_PANEL, FRUST_PANEL,
+  TAB_BOARD, TAB_VERSUS, TAB_SURVIVOR_ROW, TAB_INFECTED_ROW];
 export const panelChildren = (panelId: string): PanelChildren | undefined => PANEL_CHILDREN.find((p) => p.panelId === panelId);
 export const teamChild = (name: string): ChildDef | undefined => TEAM_PANEL.children.find((c) => c.name === name);
 
