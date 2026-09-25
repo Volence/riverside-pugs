@@ -930,7 +930,7 @@ export interface KnobView { cvar: string; label: string; group: string; type: 'i
   baseline: string; unit?: string; note?: string; pairMax?: string }
 export interface KnobDiffRow { cvar: string; label: string; group: string; from: string; to: string }
 export interface KnobPreview { values: Record<string, string>; errors: string[]; diff: KnobDiffRow[]; groupsChanged: string[];
-  base: { patchId: number; number: number } | null; missing: string[]; blocking: { serverId: number; name: string; diff: string }[];
+  base: { patchId: number; number: number } | null; missing: string[]; blocking: { serverId: number; name: string; diff: string; lastMatchAt?: string | null }[];
   fingerprint: string | null; existingPatch: { id: number; number: number; name: string | null; notes: string; source: string; triage?: 'pending' | 'balance' | 'folded' } | null;
   warnings: string[]; rolloutId: number | null }
 export interface RolloutServer { serverId: number; name: string; state: 'pending' | 'written' | 'confirmed' | 'failed'; lastError: string | null;
@@ -939,7 +939,7 @@ export interface RolloutServer { serverId: number; name: string; state: 'pending
 export interface RolloutSummary { id: number; patchId: number; patchNumber: number; patchName: string | null; values: Record<string, string>;
   createdBy: string; createdByName: string | null; createdAt: string; supersededAt: string | null; servers: RolloutServer[] }
 export interface KnobsState { knobs: KnobView[]; current: Record<string, string>; base: { patchId: number; number: number } | null;
-  missing: string[]; blocking: { serverId: number; name: string; diff: string }[]; active: RolloutSummary | null;
+  missing: string[]; blocking: { serverId: number; name: string; diff: string; lastMatchAt?: string | null }[]; active: RolloutSummary | null;
   restorable: { id: number; number: number; name: string | null; source: string }[] }
 
 export type Phase = 'all' | 'tank' | 'witch' | 'event' | 'normal';
