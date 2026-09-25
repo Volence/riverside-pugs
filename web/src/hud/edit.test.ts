@@ -1195,19 +1195,27 @@ describe('weapon uploads', () => {
 
 /**
  * The Tab screen's edits from the page (tab screen spec 4.3 and section 7):
- * a hide takes every piece pinned to it along (ChildDef.hidesWith, as
- * validateDesign stores it), showing it again takes the hides off, and the
+ * a hide is stored on the piece hidden only (the preview and the game take
+ * what is pinned to it along), showing it again takes that hide off, and the
  * versus panel moves only inside its on-screen range and only with TS4 open.
  */
 describe('the Tab screen edits', () => {
-  it('hides "Health Bonus:" with its number, and shows both again', () => {
+  it('stores only the piece hidden: the pieces pinned to it follow in the preview and in game, not in the design', () => {
     const hid = patchChild(DEFAULT_DESIGN, 'HealthLabel', { visible: false }, 'tabVersus');
-    expect(hid.children.tabVersus).toEqual({ HealthLabel: { visible: false }, HealthAmount: { visible: false } });
+    expect(hid.children.tabVersus).toEqual({ HealthLabel: { visible: false } });
     expect(validateDesign(hid).children.tabVersus).toEqual(hid.children.tabVersus);
     expect(patchChild(hid, 'HealthLabel', { visible: true }, 'tabVersus').children.tabVersus).toBeUndefined();
-    // The whole line down the chain from Average Distance:
-    expect(Object.keys(setChildrenVisible(DEFAULT_DESIGN, ['DistanceLabel'], false, 'tabVersus').children.tabVersus!).sort())
-      .toEqual(['DistanceAmount', 'DistanceLabel', 'HealthAmount', 'HealthLabel']);
+    expect(setChildrenVisible(DEFAULT_DESIGN, ['DistanceLabel'], false, 'tabVersus').children.tabVersus).toEqual({ DistanceLabel: { visible: false } });
+  });
+  it('resets "Average Distance:" to no edit, leaving no piece of its line hidden', () => {
+    const hid = setChildrenVisible(DEFAULT_DESIGN, ['DistanceLabel'], false, 'tabVersus');
+    expect(resetChild(hid, 'DistanceLabel', 'tabVersus').children.tabVersus).toBeUndefined();
+    expect(resetChildren(hid, ['DistanceLabel'], 'tabVersus').children.tabVersus).toBeUndefined();
+  });
+  it('keeps a separate hide of the Health Bonus number through a hide and show of "Average Distance:"', () => {
+    const own = patchChild(DEFAULT_DESIGN, 'HealthAmount', { visible: false }, 'tabVersus');
+    const round = patchChild(patchChild(own, 'DistanceLabel', { visible: false }, 'tabVersus'), 'DistanceLabel', { visible: true }, 'tabVersus');
+    expect(round.children.tabVersus).toEqual({ HealthAmount: { visible: false } });
   });
   it('keeps a colour when the piece is shown again', () => {
     const d = patchChild(patchChild(DEFAULT_DESIGN, 'TeamYours', { color: '255 255 0 255' }, 'tabVersus'), 'TeamYours', { visible: false }, 'tabVersus');

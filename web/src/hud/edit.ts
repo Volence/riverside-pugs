@@ -419,23 +419,19 @@ function storedFrame(design: HudDesign, name: string, p: Partial<ChildOverride>,
 
 /**
  * A Tab piece's Visible: none while its hide waits on a probe (ChildDef.hideGate).
- * A hide is stored on the piece and on every piece pinned to it, down the
- * chain (ChildDef.hidesWith), as validateDesign stores it and as the game
- * takes them away; showing it takes those hides off again, so a piece
- * only ever hidden and shown is back to no edit (every Tab piece is shown
- * by its file or by code).
+ * The hide is stored on that piece only. The game hides every piece pinned
+ * to it, down the chain (ChildDef.hidesWith, TS7), and the preview's layout
+ * (tablayout.ts) does the same, so storing those follower hides as well
+ * would only let a reset or a show leave them behind. Showing it takes its
+ * own hide off, so a piece only ever hidden and shown is back to no edit
+ * (every Tab piece is shown by its file or by code).
  */
 function tabVisible(design: HudDesign, name: string, p: Partial<ChildOverride>, panel: string, file?: string): HudDesign {
   const { visible, ...rest } = p;
-  let d = Object.keys(rest).length ? patchChild(design, name, rest, panel, file) : design;
+  const d = Object.keys(rest).length ? patchChild(design, name, rest, panel, file) : design;
   const def = childDef(panel, name);
   if (!def || (def.hideGate && !probe(def.hideGate))) return d;
-  const chain = [def.name];
-  for (let i = 0; i < chain.length; i++) {
-    for (const n of childDef(panel, chain[i])?.hidesWith ?? []) if (!chain.includes(n)) chain.push(n);
-  }
-  for (const n of chain) d = visible ? showChild(d, n, panel) : mergeChild(d, n, { visible: false }, panel);
-  return d;
+  return visible ? showChild(d, def.name, panel) : mergeChild(d, def.name, { visible: false }, panel);
 }
 
 function mergeChild(design: HudDesign, name: string, p: Partial<ChildOverride>, panel: string): HudDesign {

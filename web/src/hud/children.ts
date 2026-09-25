@@ -142,10 +142,10 @@ export interface ChildDef {
   hideGate?: ProbeId;
   /**
    * Pieces the game takes away with this one when it is hidden, because
-   * they are pinned to it (their pin_to_sibling names it): a stored hide of
-   * this piece is a hide of them too, and of whatever is pinned to them in
-   * turn (validateDesign follows the chain), so the page hides them together
-   * and the preview draws none. Only the direct pins are listed; the test
+   * they are pinned to it (their pin_to_sibling names it), and whatever is
+   * pinned to them in turn. The design stores no hide for them: the game
+   * and the preview's layout take them away with this piece, and the page
+   * reads this list to say so. Only the direct pins are listed; the test
    * checks the list against both presets' pin_to_sibling keys.
    */
   hidesWith?: string[];

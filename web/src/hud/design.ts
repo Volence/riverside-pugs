@@ -929,19 +929,10 @@ export function validateDesign(raw: unknown): HudDesign {
       if (panel.panelId === 'progressBar' && def.name === 'Bar') clampProgressBar(d, panel.file, def, o);
       if (Object.keys(o).length) kids[name] = o;
     }
-    // A piece the game hides along with another (pinned to it, or pinned to
-    // a piece pinned to it: ChildDef.hidesWith, followed down the chain) is
-    // stored hidden with it, so the page, the preview and the build agree.
-    const queue = Object.keys(kids).filter((name) => kids[name].visible === false);
-    for (let name = queue.shift(); name !== undefined; name = queue.shift()) {
-      for (const n of panel.children.find((c) => c.name === name)?.hidesWith ?? []) {
-        const follower = panel.children.find((c) => c.name === n);
-        if (!follower || (follower.gate && !probe(follower.gate)) || (follower.hideGate && !probe(follower.hideGate))) continue;
-        if (kids[n]?.visible === false) continue;
-        kids[n] = { ...kids[n], visible: false };
-        queue.push(n);
-      }
-    }
+    // A piece pinned to a hidden one (ChildDef.hidesWith) stores no hide of
+    // its own: the game takes it away with the piece it is pinned to (TS7)
+    // and the preview's layout does the same, so a stored hide is only ever
+    // the player's own choice.
     if (Object.keys(kids).length) d.children[panel.panelId] = kids;
   }
   for (const id of noneHides) {

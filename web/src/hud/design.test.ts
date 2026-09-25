@@ -610,28 +610,20 @@ describe('validateDesign on the Tab screen', () => {
     expect(withKids({ tabBoard: { MissionTitle: { visible: false } } }).children).toEqual({ tabBoard: { MissionTitle: { visible: false } } });
   });
 
-  it('hides the Health Bonus number with its label, and neither while the hide is gated', () => {
-    expect(withKids({ tabVersus: { HealthLabel: { visible: false } } }).children.tabVersus)
-      .toEqual({ HealthLabel: { visible: false }, HealthAmount: { visible: false } });
-    // The number keeps its own edits beside the hide it takes.
+  it('keeps a hide on the piece hidden only, and none while the hide is gated', () => {
+    // The game hides what is pinned to a hidden piece (TS7): the design stores no follower hide.
+    expect(withKids({ tabVersus: { HealthLabel: { visible: false } } }).children.tabVersus).toEqual({ HealthLabel: { visible: false } });
+    expect(withKids({ tabVersus: { DistanceLabel: { visible: false } } }).children.tabVersus).toEqual({ DistanceLabel: { visible: false } });
+    // The number keeps its own edits and adds no hide.
     expect(withKids({ tabVersus: { HealthLabel: { visible: false }, HealthAmount: { color: '1 2 3 255' } } }).children.tabVersus!.HealthAmount)
-      .toEqual({ color: '1 2 3 255', visible: false });
+      .toEqual({ color: '1 2 3 255' });
     // Hidden on its own, the number leaves the label alone.
     expect(withKids({ tabVersus: { HealthAmount: { visible: false } } }).children.tabVersus).toEqual({ HealthAmount: { visible: false } });
+    // Every choice stored down the line is kept as chosen: nothing refused, nothing added.
+    const line = { DistanceLabel: { visible: false }, HealthLabel: { visible: true }, HealthAmount: { visible: false } };
+    expect(withKids({ tabVersus: line }).children.tabVersus).toEqual(line);
     _setProbe('TS7', false);
     expect(withKids({ tabVersus: { HealthLabel: { visible: false } } }).children).toEqual({});
-  });
-
-  it('hides everything pinned down the line: Average Distance takes the rest of the line with it', () => {
-    const hidden = { visible: false };
-    expect(withKids({ tabVersus: { DistanceLabel: hidden } }).children.tabVersus)
-      .toEqual({ DistanceLabel: hidden, DistanceAmount: hidden, HealthLabel: hidden, HealthAmount: hidden });
-    expect(withKids({ tabVersus: { DistanceAmount: hidden } }).children.tabVersus)
-      .toEqual({ DistanceAmount: hidden, HealthLabel: hidden, HealthAmount: hidden });
-    expect(withKids({ tabVersus: { SurvivalMultLabel: hidden } }).children.tabVersus)
-      .toEqual({ SurvivalMultLabel: hidden, SurvivalMultAmount: hidden });
-    // A piece shown again is only that piece's choice: a hide upstream still wins.
-    expect(withKids({ tabVersus: { DistanceLabel: hidden, HealthLabel: { visible: true } } }).children.tabVersus!.HealthLabel).toEqual(hidden);
   });
 
   it('drops a gated colour while its gate is closed: the title (TS1), the infected names (TS6)', () => {
