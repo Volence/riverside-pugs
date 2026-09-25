@@ -644,14 +644,23 @@ export function urlImage(url: string, onAsset?: () => void): HTMLImageElement | 
  * generated texture. stylePass makes a flat or rounded texture in that colour
  * and the game stretches it over the panel, so a filled (or rounded) rect in
  * the same colour is the same picture, and it needs no offscreen canvas,
- * which happy-dom does not have. Uploads (kind image) are not drawn yet: this
- * returns false for them, as it does for a slot that is not restyled, and the
+ * which happy-dom does not have. An upload (kind image) is drawn stretched
+ * over the rect, as the game stretches the texture made from it; while it
+ * decodes nothing shows and `onAsset` asks for the redraw. It returns false
+ * for a slot that is not restyled or an image slot with no upload, and the
  * caller decides what shows instead.
  */
-function drawSlotStyle(ctx: CanvasRenderingContext2D, design: HudDesign, slotId: string, r: ChildRect): boolean {
+function drawSlotStyle(ctx: CanvasRenderingContext2D, design: HudDesign, slotId: string, r: ChildRect, onAsset?: () => void): boolean {
   const slot = SLOTS.find((s) => s.id.toLowerCase() === slotId);
   const style = slot && design.styles[slot.id];
-  if (!slot || !style || style.kind === 'stock' || style.kind === 'image') return false;
+  if (!slot || !style || style.kind === 'stock') return false;
+  if (style.kind === 'image') {
+    const stored = design.images[slot.id];
+    if (!stored) return false;
+    const img = urlImage(`data:image/png;base64,${stored.png}`, onAsset);
+    if (img) ctx.drawImage(img, r.x, r.y, r.w, r.h);
+    return true;
+  }
   const [cr, cg, cb, ca] = parseColour(style.color ?? slot.defaultColor);
   ctx.fillStyle = `rgba(${cr},${cg},${cb},${ca / 255})`;
   if (style.kind === 'rounded') {
@@ -964,7 +973,7 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
     // game draw it, which is why the fit rule keeps the rect square.
     // Advanced mode overwrites that art with the player's style (stylePass
     // writes the slot's texture under the stock names), so draw the style.
-    if (design.advanced && drawSlotStyle(ctx, design, lname === 'dead' ? 'deadpanel' : 'incappanel', r)) return;
+    if (design.advanced && drawSlotStyle(ctx, design, lname === 'dead' ? 'deadpanel' : 'incappanel', r, opts.onAsset)) return;
     const material = lname === 'dead' ? 'vgui/s_panel_dead' : `${portraitFor(opts)}_incap`;
     const img = artImage(material, opts.onAsset);
     if (!img) { if (missing.has(material)) hatch(ctx, r); return; }
@@ -980,7 +989,7 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
     if (material.startsWith('vgui/hud/hudeditor/')) {
       const splat = splatterForMaterial(material);
       if (splat) { drawSplatter(ctx, design, n, r, k, opts, splat); return; }
-      drawSlotStyle(ctx, design, material.slice('vgui/hud/hudeditor/'.length), r);   // false: an upload; the game shows it, we cannot yet
+      drawSlotStyle(ctx, design, material.slice('vgui/hud/hudeditor/'.length), r, opts.onAsset);
       return;
     }
     // client.dll sets card N's splatter to hud/healthbar_bg_N whatever the
