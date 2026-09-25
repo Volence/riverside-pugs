@@ -690,7 +690,7 @@
       "source": "cvar",
       "unit": "s",
       "vanilla": "6",
-      "note": "Longest a shoved special infected staggers."
+      "note": "Longest a shoved special infected staggers. Boomers are the exception: they stagger for about 3 s, because the plugin that caps them is switched off together with gravity stagger."
     },
     {
       "id": "z_door_pound_damage",
