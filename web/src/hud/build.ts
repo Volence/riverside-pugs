@@ -253,7 +253,12 @@ function layoutPass(work: Work, design: HudDesign) {
     const base = baseRect(panel, el, work.key, design.aspect);
     const p = placed(o, base, el, design.aspect);
     // A block with only a ypos (the peril notice) is placed across by the game: no xpos is added.
-    if (moved) { if (el.moveAxis !== 'y') kvSet(panel, 'xpos', p.xpos); kvSet(panel, 'ypos', p.ypos); }
+    // A block in its own file is written on every line the PC reads, never a
+    // console one: scoreboard.res's CVersusModeScoreboard has ypos [$WIN32]
+    // and [$X360] (tab screen spec 4.4). hudlayout.res keeps kvSet, the
+    // first PC line, as its downloads were pinned with.
+    const setPos = el.file ? pcSet : kvSet;
+    if (moved) { if (el.moveAxis !== 'y') setPos(panel, 'xpos', p.xpos); setPos(panel, 'ypos', p.ypos); }
     if (moved && el.moveWith) moveAlong(work, el, base, { x: parsePos(p.xpos, screenW(design.aspect)), y: parsePos(p.ypos, SCREEN_H) }, design.aspect);
     if (sized) { kvSet(panel, 'wide', String(Math.round(p.w))); kvSet(panel, 'tall', String(Math.round(p.h))); }
     if (el.id === 'chat' && moved) {
