@@ -981,6 +981,9 @@ function ownFrame(tree: (path: string) => KvNode[], aspect: Aspect): OwnFrame | 
   return { x, y, lp: { x: parseFloat(lx), y: parseFloat(ly) }, barX };
 }
 
+/** A file reader: buildTrees' for the preview, or a Work's own trees inside buildHud (itemsTrees). */
+type Trees = (path: string) => KvNode[];
+
 /**
  * Your health bar's drawn x on screen, units, after every move, scale and
  * fit (the preview's own trees), or undefined when the panel cannot be read
@@ -1000,8 +1003,12 @@ export const ITEMS_UNREAD_NOTE = 'The editor cannot read where this HUD puts you
  * rather than written with a guess.
  */
 export function yourItemsBlocked(design: HudDesign): string | null {
+  return itemsBlockedIn(design, buildTrees(design));
+}
+/** yourItemsBlocked on the given trees. */
+function itemsBlockedIn(design: HudDesign, tree: Trees): string | null {
   if (kvFind(baseTree(baseOf(design), OWN_PANEL.file), ['Items'])) return ITEMS_OWN_NOTE;
-  return ownFrame(buildTrees(design), design.aspect) ? null : ITEMS_UNREAD_NOTE;
+  return ownFrame(tree, design.aspect) ? null : ITEMS_UNREAD_NOTE;
 }
 
 /** Whether the design shows Your items: turned on, and not blocked. */
@@ -1016,13 +1023,17 @@ export function yourItemsOn(design: HudDesign): boolean {
  * the scheme lacks it) and the alignment.
  */
 export function yourItemsInput(design: HudDesign): RowInput {
+  return itemsInputAt(design, ownBarX(design) ?? 0);
+}
+/** yourItemsInput with the bar's x already read. */
+function itemsInputAt(design: HudDesign, barX: number): RowInput {
   const o = design.elements[YOUR_ITEMS] ?? {};
   const font = o.itemFont ?? DEFAULT_ITEM_FONT;
   let tall: number | undefined;
   try { tall = baseFontTall(baseOf(design), font); } catch (e) {
     if (!(e instanceof MissingImportError)) throw e;   // an imported base not registered yet
   }
-  return { barX: ownBarX(design) ?? 0, screenW: screenW(design.aspect), tall: tall && tall > 0 ? tall : ITEM_FONT_TALL[font], align: o.itemAlign ?? 'right' };
+  return { barX, screenW: screenW(design.aspect), tall: tall && tall > 0 ? tall : ITEM_FONT_TALL[font], align: o.itemAlign ?? 'right' };
 }
 
 /**
@@ -1035,28 +1046,136 @@ export function yourItemsInput(design: HudDesign): RowInput {
  * that already has it.
  */
 export function yourItemsHome(design: HudDesign, inp: RowInput = yourItemsInput(design)): { x: number; y: number } {
-  if (!baseHasElement(baseOf(design), elementById('weaponSelection')!)) return { x: inp.barX, y: SCREEN_H / 2 };
-  const r = elementRect(design, 'weaponSelection', design.aspect);
-  const panel = kvFind(buildTrees(design)(LAYOUT), ['HudWeaponSelection']);
+  return itemsHomeIn(design, inp, buildTrees(design));
+}
+/**
+ * yourItemsHome on the given trees. The weapons panel is read from their
+ * hudlayout.res block, the PC's values (fitWeaponPanel writes those), as
+ * elementRect reads a grown or fitted panel, so the preview and the
+ * download start the row from the same box.
+ */
+function itemsHomeIn(design: HudDesign, inp: RowInput, tree: Trees): { x: number; y: number } {
+  const panel = baseHasElement(baseOf(design), elementById('weaponSelection')!) ? kvFind(tree(LAYOUT), ['HudWeaponSelection']) : undefined;
+  if (!panel) return { x: inp.barX, y: SCREEN_H / 2 };
+  const W = screenW(design.aspect);
   const n = (k: string) => {
-    const v = parseFloat((panel && pcGet(panel, k)) ?? WEAPON_KEY_DEFAULTS[k]);
+    const v = parseFloat(pcGet(panel, k) ?? WEAPON_KEY_DEFAULTS[k]);
     return Number.isFinite(v) ? v : parseFloat(WEAPON_KEY_DEFAULTS[k]);
   };
-  const edge = weaponRowsEdge({ n, panelWide: r.w, u: screenW(design.aspect) / 640 });
-  return { x: r.x + edge.right - itemRowWidth(inp.tall), y: r.y + edge.bottom };
+  const at = (k: string) => pcGet(panel, k) ?? '0';
+  const x = parsePos(at('xpos'), W), y = parsePos(at('ypos'), SCREEN_H);
+  const edge = weaponRowsEdge({ n, panelWide: parseSize(at('wide'), W), u: W / 640 });
+  return { x: x + edge.right - itemRowWidth(inp.tall), y: y + edge.bottom };
 }
 
 /** Your items as drawn and built: the stored place (or the home spot), through the bar limit and the screen edge. */
 export function yourItemsLayout(design: HudDesign): RowLayout {
+  return itemsLayoutIn(design, buildTrees(design));
+}
+/** yourItemsLayout on the given trees. */
+function itemsLayoutIn(design: HudDesign, tree: Trees): RowLayout {
   const o = design.elements[YOUR_ITEMS] ?? {};
-  const inp = yourItemsInput(design);
-  const home = o.x === undefined || o.y === undefined ? yourItemsHome(design, inp) : undefined;
+  const inp = itemsInputAt(design, ownFrame(tree, design.aspect)?.barX ?? 0);
+  const home = o.x === undefined || o.y === undefined ? itemsHomeIn(design, inp, tree) : undefined;
   return itemRowLayout(inp, { x: o.x ?? home!.x, y: o.y ?? home!.y });
 }
 
 /** The limits the editor draws while Your items is selected (spec section 2); none where it is blocked. */
 export function yourItemsLimits(design: HudDesign): LimitLine[] {
   return yourItemsBlocked(design) ? [] : rowLimitLines(yourItemsInput(design));
+}
+
+/**
+ * A Work's trees for reading only: a file a pass has parsed as the Work has
+ * it, any other as the base has it. Reading through work.tree would parse
+ * the file into the Work and so ship it, and a design the pass then leaves
+ * alone must build as it did.
+ */
+const itemsTrees = (work: Work): Trees => (path) => (work.parsed(path) ? work.tree(path) : baseTree(work.key, path));
+
+/** A unit count as a token's number: whole numbers stay whole, anything else keeps three decimals. */
+const unitsText = (v: number): string => String(Math.round(v * 1000) / 1000);
+
+/**
+ * Your items (spec section 3; /home/volence/l4d/hud/probe-your-items/RESULTS.md
+ * p1 to p3, /home/volence/l4d/hud/probe-own-items/RESULTS.md v1 to v3).
+ * client.dll fills the own panel's Items Label with your item glyphs, but
+ * only as a direct child of that panel, and the panel clips its children
+ * (probe Q2). So to put the row anywhere, CHudLocalPlayerDisplay and
+ * LocalPlayer become the whole screen (LocalPlayer with the clear texture as
+ * its image, so its own art can never stretch over the screen), and every
+ * piece of localplayerpanel.res is written at the same screen place it had,
+ * with the anchor its container had: a right-anchored container's pieces as
+ * r positions (stock r125 / r91, Health 26, 36 in a LocalPlayer at 0, 32:
+ * r99, r23), a left-anchored one's as plain numbers (Modern 8: Health 31 in
+ * a LocalPlayer at 3 becomes 42), a centred one's as c positions, so another
+ * resolution of the same aspect lines up as the design did. Sizes are never
+ * touched. p1 and p2 saw the card stay put through healthy, temp health,
+ * crouch, incap and revive.
+ *
+ * The Items Label then starts at the bar's written x: the game draws the bar
+ * at Items' x (the revive snap, which also runs at spawn; probe-own-items v2
+ * saw the bar jump to an Items at x 20), so the Label's x is the bar's, and
+ * its wide and textAlignment put the glyphs where the preview draws the row
+ * (youritems.ts rowLayout; p3: east keeps the right end). Its tall is the
+ * font's plus LABEL_PAD above and below, written LABEL_PAD higher, so the
+ * glyphs land at the row's y (p3's Label). It runs after scalePass, so every
+ * number is final, and before reviveAnchorPass, which then finds an Items
+ * child and adds nothing.
+ *
+ * Your health hidden: every other piece is hard-hidden here, and the
+ * container (CHudLocalPlayerDisplay and LocalPlayer) is written visible 1
+ * and left whole (buildHud hands elementHidePass `ownHealth` to keep), so
+ * the items show without the card.
+ *
+ * Everything it reads comes from this Work's own trees (itemsTrees), never
+ * buildTrees: they are the same passes up to here, so the Label is the one
+ * yourItemsLayout gives the preview.
+ *
+ * Download only, like elementHidePass: the preview draws the own card inside
+ * the element (mock.ts paintOwnHealth, panelBoxes), and the row from
+ * rowLayout, so buildTrees keeps the panel as it was.
+ * build.youritems.test.ts holds every piece's screen box equal with the
+ * element on and off, on both presets and every aspect. Returns whether it
+ * wrote the element.
+ */
+function yourItemsPass(work: Work, design: HudDesign, out: VpkFile[]): boolean {
+  if (design.elements[YOUR_ITEMS]?.visible !== true) return false;
+  const read = itemsTrees(work);
+  if (itemsBlockedIn(design, read)) return false;
+  const frame = ownFrame(read, design.aspect)!;
+  const { label } = itemsLayoutIn(design, read);
+  const tok = (a: Anchored, add: number) => (a.anchor === 'r' ? `r${unitsText(a.n - add)}` : `${a.anchor}${unitsText(a.n + add)}`);
+  const nodes = work.tree(OWN_PANEL.file);
+  const hideRest = design.elements.ownHealth?.visible === false;
+  let top = 0;
+  for (const n of nodes) {
+    if (typeof n.value === 'string') continue;
+    for (const [key, a, off] of [['xpos', frame.x, frame.lp.x], ['ypos', frame.y, frame.lp.y]] as const) {
+      const hits = pcEntries(n, key);
+      if (!hits.length) n.value.push({ key, value: tok(a, off) });
+      for (const e of hits) e.value = tok(a, off + parseFloat(e.value as string));
+    }
+    const z = parseFloat(kvGet(n, 'zpos') ?? '');
+    if (Number.isFinite(z)) top = Math.max(top, Math.round(z));
+    if (hideRest) hardHide(n);
+  }
+  const o = design.elements[YOUR_ITEMS] ?? {};
+  const bar = kvFind(nodes, ['Health'])!;
+  const pairs: [string, string][] = [
+    ['ControlName', 'Label'], ['fieldName', 'Items'], ['xpos', pcGet(bar, 'xpos')!], ['ypos', formatPos(label.y, label.h, SCREEN_H)],
+    ['wide', String(label.w)], ['tall', String(label.h)], ['visible', '1'], ['enabled', '1'], ['labelText', ''],
+    ['textAlignment', o.itemAlign === 'center' ? 'center' : 'east'], ['font', o.itemFont ?? DEFAULT_ITEM_FONT], ['zpos', String(top + 1)],
+  ];
+  if (o.color) pairs.push(['fgcolor_override', o.color]);
+  nodes.push({ key: 'Items', value: pairs.map(([key, value]) => ({ key, value })) });
+  const full: [string, string][] = [['xpos', '0'], ['ypos', '0'], ['wide', 'f0'], ['tall', 'f0'], ...(hideRest ? [['visible', '1'] as [string, string]] : [])];
+  const container = work.panel(LAYOUT, [OWN_KEY]);
+  for (const [k, v] of full) kvSet(container, k, v);
+  const lp = work.panel(OWN_BOX, ['LocalPlayer']);
+  for (const [k, v] of [...full, ['image', `../${CLEAR_TEXTURE}`]]) kvSet(lp, k, v);
+  for (const f of clearTextureFiles()) if (!out.some((g) => g.path === f.path)) out.push(f);
+  return true;
 }
 
 /** Your infected health's three live files: the Hunter's (the Tank reads it too), then its linked Smoker and Boomer files. */
@@ -1459,10 +1578,12 @@ function codeShownPass(work: Work, design: HudDesign) {
  * size back over the hide. It is download-only, like fontPass: buildTrees
  * skips it, so the preview still has a hidden element whole and can paint
  * it dimmed while it is selected (a 0 x 0 LocalPlayer would paint nothing).
+ * Your health is left whole when Your items is on (yourItemsPass hides its
+ * pieces instead, so the items still show).
  */
-function elementHidePass(work: Work, design: HudDesign) {
+function elementHidePass(work: Work, design: HudDesign, keep: ReadonlySet<string> = new Set()) {
   for (const el of ELEMENTS) {
-    if (el.id === 'xhair' || el.id === YOUR_ITEMS || design.elements[el.id]?.visible !== false || !baseHasElement(work.key, el)) continue;
+    if (el.id === 'xhair' || el.id === YOUR_ITEMS || keep.has(el.id) || design.elements[el.id]?.visible !== false || !baseHasElement(work.key, el)) continue;
     if (el.id === MARKER) { markerHide(work.panel(LAYOUT, [el.key]), el); continue; }
     hardHide(work.panel(layoutOf(el), [el.key]));
     for (const name of el.moveWith ?? []) { const b = work.optional(layoutOf(el), [name]); if (b) hardHide(b); }
@@ -2217,6 +2338,14 @@ const BOX_CORNER = 16;
  */
 const CLEAR_TEXELS = 16;
 
+/** The clear texture's two files, every texel transparent: shipped once however many passes point at it. */
+function clearTextureFiles(): VpkFile[] {
+  return [
+    { path: `materials/${CLEAR_TEXTURE}.vtf`, data: encodeVTF(CLEAR_TEXELS, CLEAR_TEXELS, new Uint8ClampedArray(CLEAR_TEXELS * CLEAR_TEXELS * 4)) },
+    { path: `materials/${CLEAR_TEXTURE}.vmt`, data: enc(vmtFor(CLEAR_TEXTURE)) },
+  ];
+}
+
 /**
  * A scheme font's tall in the preset's own file, read without pulling the
  * scheme into the build: asking the Work for it would ship an untouched
@@ -2334,10 +2463,7 @@ function weaponsPass(work: Work, design: HudDesign, assets: BuildAssets | null, 
       if (rect) pointCell(e, file, rect.w, rect.h);
       else kvSet(e, 'file', file);
     }
-    if (repoint.some(([, file]) => file === CLEAR_TEXTURE)) {
-      out.push({ path: `materials/${CLEAR_TEXTURE}.vtf`, data: encodeVTF(CLEAR_TEXELS, CLEAR_TEXELS, new Uint8ClampedArray(CLEAR_TEXELS * CLEAR_TEXELS * 4)) },
-        { path: `materials/${CLEAR_TEXTURE}.vmt`, data: enc(vmtFor(CLEAR_TEXTURE)) });
-    }
+    if (repoint.some(([, file]) => file === CLEAR_TEXTURE)) out.push(...clearTextureFiles());
   }
   fitWeaponPanel(work, design, panel, cells);
 }
@@ -2568,8 +2694,9 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   splatterPass(work, design, assets, extra);
   teamPass(work, design);
   scalePass(work, design);
+  const itemsOn = yourItemsPass(work, design, extra);
   reviveAnchorPass(work);
-  elementHidePass(work, design);
+  elementHidePass(work, design, itemsOn ? new Set(['ownHealth']) : undefined);
   codeShownPass(work, design);
   fontPass(work, design, assets, extra);
   stylePass(work, design, assets, extra);
@@ -2656,7 +2783,8 @@ export function packHud(design: HudDesign, assets: BuildAssets = {}, report?: Bu
  * crosshairPass, which only adds texture files and demands the crosshair's
  * pixels. splatterPass runs without an output list: the trees get the
  * stand-in and the repointed scratches, and no pixels are asked for.
- * buildHud still runs every pass.
+ * buildHud still runs every pass. yourItemsPass is download only, like
+ * elementHidePass: see its comment.
  */
 const BUILD_TREES = new WeakMap<HudDesign, Work>();
 
