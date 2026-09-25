@@ -63,6 +63,13 @@ describe('AdminFleet', () => {
     expect(screen.getAllByText('removed on all boxes').length).toBe(2);
   });
 
+  it('does not claim "no differences" before any box has been read', async () => {
+    mockAdmin.fleet.mockResolvedValue({ ...state, boxes: state.boxes.map((b) => ({ ...b, readAt: null })), rows: [] });
+    render(<AdminFleet />);
+    await screen.findByText(/No box has been read yet/);
+    expect(screen.queryByText(/^No differences\./)).toBeNull();
+  });
+
   it('marks a highlighted cell and checks a box or all', async () => {
     render(<AdminFleet />);
     const hi = await screen.findByText(/81639 · f7ee35c3/);
