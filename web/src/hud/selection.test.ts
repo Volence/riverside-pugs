@@ -717,6 +717,17 @@ describe('the Tab screen', () => {
     expect(withoutUnderTab(bar)).toBe(bar);
   });
 
+  it('offers no Hide in the menu for an element whose hide gate is closed (TS7)', () => {
+    const versus: Selection = { kind: 'elements', ids: ['tabVersus'] };
+    expect(menuActions(versus)).toEqual(['hide', 'reset']);
+    _setProbe('TS7', false);
+    try {
+      expect(menuActions(versus)).toEqual(['reset']);
+      // With another element that hides, the menu keeps Hide for that one.
+      expect(menuActions({ kind: 'elements', ids: ['tabVersus', 'chat'] })).toEqual(['hide', 'reset']);
+    } finally { _setProbe('TS7', null); }
+  });
+
   it('snaps a HUD move to no Tab element, and the versus panel to the Tab screen only', () => {
     const hud = sectionTargets(D, 'survivor', { kind: 'elements', ids: ['chat'] });
     expect(hud).not.toContainEqual(elementFrame(D, 'tabVersus'));

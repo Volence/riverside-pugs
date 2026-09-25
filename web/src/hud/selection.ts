@@ -684,7 +684,8 @@ export type MenuAction = 'hide' | 'reset' | 'front' | 'back' | 'selectCard' | 's
  */
 export function menuActions(sel: Selection): MenuAction[] {
   switch (sel.kind) {
-    case 'elements': return ['hide', 'reset'];
+    // An element whose hide waits on a probe (HudElement.hideGate, the versus panel's TS7) offers no Hide while it is closed.
+    case 'elements': return sel.ids.some((id) => { const g = elementById(id)?.hideGate; return !g || probe(g); }) ? ['hide', 'reset'] : ['reset'];
     case 'cards': return ['selectTeam'];
     // A Tab piece takes no zpos in v1 (only colours, the boxes and hides), and its hide may wait on a probe.
     case 'children': return isTab(panelOf(sel))
