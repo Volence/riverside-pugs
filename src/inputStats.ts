@@ -139,21 +139,27 @@ export function holdStats(holds: readonly number[] | null | undefined): HoldStat
  * never an input to one: it changes neither whether a signature fires nor its
  * severity.
  *
- *   wheel-like     nearly every press down for ONE usercmd. That is what a
- *                  mouse wheel bound to +attack or +jump produces, because a
- *                  wheel notch has no "held" state. A script that taps with no
- *                  hold time looks the same, so this says "not a finger on a
- *                  button", not "innocent": a free-spinning wheel decays and
- *                  wobbles in RATE where a script is flat, and that is for the
- *                  admin to read off the intervals. Whether a wheel bind is
- *                  legal at all is a league ruling (see the spec).
- *   fixed-hold     holds all within a tick of each other: an AutoHotkey-style
- *                  macro with a set hold time. One tick of slack is the same
- *                  aliasing that makes a flat 77 ms interval read 7,8,7,8.
+ *   wheel-like     a mouse wheel bound to +attack or +jump. A slow wheel sends
+ *                  nearly every press down for ONE usercmd, because a notch
+ *                  has no "held" state. A fast one (Icy Inferno going quickly
+ *                  up and down, owner's ground truth 2026-09-24) merges notches
+ *                  into 2 to 5 tick holds, so it is known by its gaps instead:
+ *                  runs of 2 and 3 ticks no finger reaches. See `burstLabel`.
+ *                  Wheel binds are legal (owner's ruling, 2026-09-22).
+ *   steady-taps    wheel-shaped, but at a flat rate no hand-spun wheel holds: a
+ *                  rapid-fire bind or mouse auto-fire. See STEADY_TAPS. It
+ *                  needs the intervals, so only `burstLabel` gives it.
+ *   fixed-hold     holds all within a tick of a median of 2 or more: an
+ *                  AutoHotkey-style macro with a set hold time. One tick of
+ *                  slack is the same aliasing that makes a flat 77 ms interval
+ *                  read 7,8,7,8. A median of 1 is left out because every 1 and
+ *                  2 is within a tick of it: that is a wheel whose notches
+ *                  sometimes merge, not a set hold.
  *   variable-hold  what a hand does: measured 5 to 12 ticks, never the same.
  *   no-hold-data   plugin 0.1.0 did not send holds, or there are too few.
  */
 export type HoldAnnotation = 'wheel-like' | 'fixed-hold' | 'variable-hold' | 'no-hold-data';
+export type BurstLabel = HoldAnnotation | 'steady-taps';
 
 export const MIN_HOLDS_TO_ANNOTATE = 4;
 
@@ -164,7 +170,7 @@ export const MIN_HOLDS_TO_ANNOTATE = 4;
 export const isWheel = (note: string): boolean => note.startsWith('wheel-like');
 
 /**
- * The note a wheel-like detection gets instead when its rate is too steady for
+ * The label a wheel-shaped burst gets instead when its rate is too steady for
  * a hand-spun wheel. NOT a wheel for isWheel, so it stays evidence.
  *
  * Measured on prod 2026-09-22. Icy Inferno, a known wheel player: gaps of 1 to
@@ -176,37 +182,121 @@ export const isWheel = (note: string): boolean => note.startsWith('wheel-like');
  */
 export const STEADY_TAPS = 'steady-taps';
 
-/** Share of a burst's gaps within one tick of its median for it to count as
- *  steady. One tick either way is the aliasing any flat rate shows. */
+/** Share of a burst's gaps on the beat for it to count as steady. */
 export const STEADY_SHARE = 0.85;
 export const STEADY_MIN_INTERVALS = 6;
+/** A gap on the beat is within this of the median: the aliasing any flat rate
+ *  shows. */
+export const BEAT_SLACK = 1;
+/** A skipped beat is within this of twice the median. Measured 2026-09-24 on
+ *  caramellow's pounce bursts: a flat 6 with skips reading 10 to 14. */
+export const SKIP_SLACK = 2;
 
-export function isSteadyBurst(intervals: readonly number[]): boolean {
-  if (intervals.length < STEADY_MIN_INTERVALS) return false;
-  const sorted = [...intervals].sort((a, b) => a - b);
+function median(xs: readonly number[]): number {
+  const sorted = [...xs].sort((a, b) => a - b);
   const n = sorted.length;
-  const median = n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
-  let near = 0;
-  for (const t of intervals) if (Math.abs(t - median) <= 1) near++;
-  return near / n >= STEADY_SHARE;
+  return n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
 }
 
-/** More than half of a detection's bursts steady. Strictly more: with two
- *  bursts a wheel player at 6% per burst would otherwise be caught one time in
- *  nine; needing both makes it about one in three hundred. */
-export function mostlySteady(bursts: readonly (readonly number[])[]): boolean {
-  if (bursts.length === 0) return false;
-  let steady = 0;
-  for (const b of bursts) if (isSteadyBurst(b)) steady++;
-  return steady * 2 > bursts.length;
+/**
+ * Whether a burst keeps one clock. A gap is on the beat when it is within
+ * BEAT_SLACK of the median, or within SKIP_SLACK of twice the median: a device
+ * that misses a beat (the audit of 2026-09-24 found 11 to 13 tick gaps in flat
+ * 6 tick bursts) is still on its clock.
+ *
+ * The skipped-beat window counts only when it is clear of the single one, with
+ * at least one tick between them that is neither. That holds from a median of
+ * 5 up (4 to 6, then 8 to 12, with 7 between). At 4 the windows would be 3 to
+ * 5 and 6 to 10, whose union is a spun wheel's whole range: on prod data,
+ * allowing the skip window at every median turned 68 of Icy Inferno's 229 fast
+ * bursts steady, against 13 with it held to this rule.
+ */
+export function isSteadyBurst(intervals: readonly number[]): boolean {
+  const n = intervals.length;
+  if (n < STEADY_MIN_INTERVALS) return false;
+  const m = median(intervals);
+  const skips = (2 * m - SKIP_SLACK) - (m + BEAT_SLACK) > 1;
+  let on = 0;
+  for (const t of intervals) {
+    if (Math.abs(t - m) <= BEAT_SLACK || (skips && Math.abs(t - 2 * m) <= SKIP_SLACK)) on++;
+  }
+  return on / n >= STEADY_SHARE;
 }
 
+/** A slow wheel: at least this share of presses down for one usercmd. */
+export const WHEEL_ONE_TICK_SHARE = 0.8;
+/** A fast wheel: at least this share of gaps at or under FAST_GAP_TICKS.
+ *  Three ticks is 33 presses/s, three times the measured human finger peak of
+ *  10.9/s (77 players over 3 s, 2026-09-24). */
+export const WHEEL_FAST_GAP_SHARE = 0.25;
+export const FAST_GAP_TICKS = 3;
+
+function isFixedHold(h: HoldStats): boolean {
+  return h.medianTicks >= 2 && h.nearMedianFrac >= 0.9;
+}
+
+/** What the holds alone say, with no intervals to read the rhythm from.
+ *  `burstLabel` is the full answer and is what detections use. */
 export function holdAnnotation(holds: readonly number[] | null | undefined): HoldAnnotation {
   const h = holdStats(holds);
   if (!h || h.n < MIN_HOLDS_TO_ANNOTATE) return 'no-hold-data';
-  if (h.oneTickFrac >= 0.8) return 'wheel-like';
-  if (h.nearMedianFrac >= 0.9) return 'fixed-hold';
+  if (h.oneTickFrac >= WHEEL_ONE_TICK_SHARE) return 'wheel-like';
+  if (isFixedHold(h)) return 'fixed-hold';
   return 'variable-hold';
+}
+
+/**
+ * One burst, labelled from its own holds AND its own gaps. Per burst, because
+ * pooling holds across a detection's evidence let one burst's merged notches
+ * outvote another's one-tick ones, and the steady check reads one burst's
+ * rhythm anyway.
+ *
+ * Wheel-shaped means one-tick holds (a slow wheel) OR fast gaps (a fast one).
+ * Of those, a steady burst is a device and is checked FIRST: a script that
+ * taps without holding looks exactly like a wheel by its holds, and a 33/s
+ * device clears the fast-gap rule by itself, so only the flat rate tells it
+ * apart (owner's ruling). Measured 2026-09-24: devices at a flat 16 to 32/s,
+ * 97 to 100% one-tick holds, cv 0.06 to 0.08; Icy's fast wheel at cv about 0.6
+ * with half its holds merged.
+ */
+export function burstLabel(
+  intervals: readonly number[], holds: readonly number[] | null | undefined,
+): BurstLabel {
+  const h = holdStats(holds);
+  if (!h || h.n < MIN_HOLDS_TO_ANNOTATE) return 'no-hold-data';
+  let fast = 0;
+  for (const t of intervals) if (t <= FAST_GAP_TICKS) fast++;
+  const wheelShaped = h.oneTickFrac >= WHEEL_ONE_TICK_SHARE
+    || (intervals.length > 0 && fast / intervals.length >= WHEEL_FAST_GAP_SHARE);
+  if (wheelShaped) return isSteadyBurst(intervals) ? STEADY_TAPS : 'wheel-like';
+  if (isFixedHold(h)) return 'fixed-hold';
+  return 'variable-hold';
+}
+
+/** Tie order for detectionLabel. */
+const TIE_ORDER: readonly BurstLabel[] = ['wheel-like', STEADY_TAPS, 'fixed-hold', 'variable-hold'];
+
+/**
+ * A detection's label, from its bursts' own labels: the most common one.
+ * Bursts without holds say nothing and are skipped, unless nothing else is
+ * there.
+ *
+ * Ties go to wheel-like first. A spun wheel's short run of notches can be
+ * steady by chance (about 6% of Icy Inferno's short bursts), so steady-taps
+ * must outnumber the wheel bursts, not match them: with two bursts, "one of
+ * two steady" would catch a wheel player one match in nine, where "both"
+ * makes it about one in three hundred. Devices are nowhere near a tie (97 to
+ * 100% of their fast bursts are steady), so this costs nothing against them.
+ */
+export function detectionLabel(labels: readonly BurstLabel[]): BurstLabel {
+  const counts = new Map<BurstLabel, number>();
+  for (const l of labels) if (l !== 'no-hold-data') counts.set(l, (counts.get(l) ?? 0) + 1);
+  let best: BurstLabel = 'no-hold-data', bestN = 0;
+  for (const l of TIE_ORDER) {
+    const c = counts.get(l) ?? 0;
+    if (c > bestN) { best = l; bestN = c; }
+  }
+  return best;
 }
 
 /** What a signature reads. Storage and the wire both carry more. */

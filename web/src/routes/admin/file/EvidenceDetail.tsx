@@ -225,9 +225,11 @@ export function EvidenceDetail(
                     ))}
                   </ul>
                   <p class="muted">
-                    wheel-like: nearly every press down for a single tick, which is a mouse wheel bind or a
-                    script that taps with no hold. fixed-hold: a constant hold time, as a scripted macro has.
-                    variable-hold: what a hand does. This describes the evidence; it does not change the flag.
+                    wheel-like: a mouse wheel bind, from one-tick presses or runs of 2 and 3 tick gaps no
+                    finger reaches. steady-taps: the same shape at a flat rate no spun wheel holds, a
+                    rapid-fire bind or auto-fire. fixed-hold: a constant hold time, as a scripted macro has.
+                    variable-hold: what a hand does. Each burst is labelled on its own; the flag takes the
+                    most common label. This describes the evidence; it does not change the flag.
                   </p>
                 </details>
               )}

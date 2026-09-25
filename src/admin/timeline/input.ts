@@ -25,7 +25,7 @@ export const inputAdapter: TimelineAdapter = {
       source: 'input' as const,
       kind: r.signature,
       summary: isWheel(r.note)
-        ? `Input check ${r.signature} on ${r.hits} ${r.kind} burst${r.hits === 1 ? '' : 's'}, one-tick presses of a `
+        ? `Input check ${r.signature} on ${r.hits} ${r.kind} burst${r.hits === 1 ? '' : 's'}, the presses of a `
           + 'scroll wheel bind, which is allowed. Kept for the record, not a flag.'
         : `Input check ${r.signature} on ${r.hits} ${r.kind} burst${r.hits === 1 ? '' : 's'}`
           + `${r.note.startsWith(STEADY_TAPS)

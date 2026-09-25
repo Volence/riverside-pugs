@@ -672,7 +672,7 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
   inputCaps: { matchId: number | null; kind: string; serverTick: number; at: string }[];
   inputFlags: {
     id: number; burstId: number; matchId: number | null; steamid: string; kind: string; signature: string; severity: string; at: string; hits: number;
-    /** What the holds across the evidence look like: wheel-like, fixed-hold, variable-hold, no-hold-data. */
+    /** The most common of the bursts' own labels: wheel-like, steady-taps, fixed-hold, variable-hold, no-hold-data. */
     note: string;
     bursts: {
       id: number; at: string; weapon: string; presses: number; ratePerSec: number; meanTicks: number;

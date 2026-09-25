@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { ICY_WHEEL, BELLINGHAM_TAPS } from './fixtures/wheelSamples.js';
-import { isSteadyBurst, mostlySteady } from '../src/inputStats.js';
+import { ICY_WHEEL, BELLINGHAM_TAPS, ICY_FAST_PISTOL, ICY_FAST_POUNCES, CARAMELLOW_SKIPS, MIRA_180 } from './fixtures/wheelSamples.js';
+import { burstLabel, detectionLabel, isSteadyBurst } from '../src/inputStats.js';
 import {
   BURST_MAX_TICKS, DEFAULT_THRESHOLDS, MAX_INTERVALS, PISTOL_REPEATS, POUNCE_REPEATS, burstStats, decodeIntervals,
   encodeIntervals, holdAnnotation, holdStats, matchDetections, pistolRate, pounceSpam,
@@ -240,6 +240,12 @@ describe('holdStats', () => {
     expect(holdAnnotation(HAND)).toBe('variable-hold');
   });
 
+  // A median of 1 puts every 1 and 2 within a tick of it, so a wheel whose
+  // notches sometimes merge would read as a constant scripted hold.
+  it('never calls a one-tick median fixed-hold', () => {
+    expect(holdAnnotation([1, 2, 1, 1, 2, 1, 2, 1, 1, 2])).toBe('variable-hold');
+  });
+
   it('says so when there is too little to judge, or nothing at all', () => {
     expect(holdAnnotation([1, 1, 1])).toBe('no-hold-data');
     expect(holdAnnotation(null)).toBe('no-hold-data');
@@ -260,10 +266,88 @@ describe('steady taps', () => {
     expect(isSteadyBurst([6, 6, 6, 6, 6])).toBe(false); // too short to say
   });
 
-  it('needs strictly more than half of a detection\'s bursts steady', () => {
-    expect(mostlySteady([BELLINGHAM_TAPS, BELLINGHAM_TAPS])).toBe(true);
-    expect(mostlySteady([BELLINGHAM_TAPS, ICY_WHEEL])).toBe(false);
-    expect(mostlySteady([BELLINGHAM_TAPS, BELLINGHAM_TAPS, ICY_WHEEL])).toBe(true);
-    expect(mostlySteady([])).toBe(false);
+  it('needs a detection\'s steady bursts to outnumber its wheel bursts', () => {
+    const one = (iv: number[]) => burstLabel(iv, iv.map(() => 1).concat(1));
+    expect(detectionLabel([one(BELLINGHAM_TAPS), one(BELLINGHAM_TAPS)])).toBe('steady-taps');
+    expect(detectionLabel([one(BELLINGHAM_TAPS), one(ICY_WHEEL)])).toBe('wheel-like');
+    expect(detectionLabel([one(BELLINGHAM_TAPS), one(BELLINGHAM_TAPS), one(ICY_WHEEL)])).toBe('steady-taps');
+  });
+});
+
+describe('steady taps with skipped beats', () => {
+  // A device that misses a beat leaves one gap of twice its period. That is
+  // still the same clock.
+  it('counts a gap of twice the median as on the beat', () => {
+    expect(isSteadyBurst([6, 6, 6, 12, 6, 6, 6, 6, 13, 6])).toBe(true);
+    expect(isSteadyBurst([6, 6, 6, 11, 6, 5, 6, 6, 14, 6])).toBe(true);
+    expect(isSteadyBurst([6, 6, 6, 9, 6, 6, 6, 6, 9, 6])).toBe(false); // 9 is neither
+  });
+
+  // Below a median of 5 the two windows touch (4: 3 to 5 and 6 to 10), and
+  // their union is a spun wheel's whole range.
+  it('only when the doubled window is clear of the single one', () => {
+    expect(isSteadyBurst([3, 3, 6, 3, 7, 3, 8, 3, 6, 3])).toBe(false);
+    expect(isSteadyBurst([4, 4, 8, 4, 9, 4, 10, 4, 7, 4])).toBe(false);
+  });
+
+  it('finds real device bursts with skips steady, and a fast wheel not', () => {
+    for (const b of CARAMELLOW_SKIPS) expect(isSteadyBurst(b.intervals)).toBe(true);
+    for (const b of [...ICY_FAST_PISTOL, ...ICY_FAST_POUNCES]) expect(isSteadyBurst(b.intervals)).toBe(false);
+  });
+});
+
+describe('burstLabel', () => {
+  // Owner's ground truth: Icy Inferno spins a wheel quickly up and down.
+  it('calls a fast wheel wheel-like even when its notches merge into longer holds', () => {
+    for (const b of [...ICY_FAST_PISTOL, ...ICY_FAST_POUNCES]) {
+      expect(holdStats(b.holds)!.oneTickFrac).toBeLessThan(0.8); // the old rule missed every one
+      expect(burstLabel(b.intervals, b.holds)).toBe('wheel-like');
+    }
+  });
+
+  // The ruling: a wheel-like burst whose rate is flat is a device, because a
+  // script that taps without holding looks exactly like a wheel.
+  it('checks for a steady device first', () => {
+    for (const b of CARAMELLOW_SKIPS) expect(burstLabel(b.intervals, b.holds)).toBe('steady-taps');
+    expect(burstLabel(MIRA_180.intervals, MIRA_180.holds)).toBe('steady-taps');
+    // 33/s, gaps of 3: fast enough for the wheel rule, flat enough to be a device.
+    const flat3 = [3, 3, 3, 3, 4, 3, 3, 2, 3, 3, 3, 3];
+    expect(burstLabel(flat3, flat3.map(() => 1).concat(1))).toBe('steady-taps');
+  });
+
+  it('calls one-tick holds on an irregular rhythm wheel-like', () => {
+    const holds = Array.from({ length: ICY_WHEEL.length + 1 }, () => 1);
+    expect(burstLabel(ICY_WHEEL, holds)).toBe('wheel-like');
+  });
+
+  it('keeps fixed-hold and variable-hold for everything a wheel is not', () => {
+    const slow = [12, 9, 14, 11, 10, 13, 12, 9, 11, 12, 10];
+    expect(burstLabel(slow, [3, 4, 3, 3, 4, 3, 4, 3, 3, 4, 3, 30])).toBe('fixed-hold');
+    expect(burstLabel(slow, [6, 9, 5, 11, 7, 8, 12, 6, 10, 7, 5, 9])).toBe('variable-hold');
+    expect(burstLabel(slow, null)).toBe('no-hold-data');
+    expect(burstLabel(slow, [1, 1, 1])).toBe('no-hold-data');
+  });
+});
+
+describe('detectionLabel', () => {
+  it('is what most of the bursts are, never pooled holds', () => {
+    expect(detectionLabel(['wheel-like', 'wheel-like', 'variable-hold'])).toBe('wheel-like');
+    expect(detectionLabel(['steady-taps', 'steady-taps', 'wheel-like'])).toBe('steady-taps');
+    expect(detectionLabel(['fixed-hold', 'fixed-hold', 'variable-hold'])).toBe('fixed-hold');
+  });
+
+  // A wheel's short run of notches is sometimes steady by chance, so one
+  // steady burst beside one wheel burst must not make the detection a device.
+  it('breaks a tie toward wheel-like, and steady-taps must outnumber it', () => {
+    expect(detectionLabel(['wheel-like', 'steady-taps'])).toBe('wheel-like');
+    expect(detectionLabel(['wheel-like', 'wheel-like', 'steady-taps', 'variable-hold'])).toBe('wheel-like');
+    expect(detectionLabel(['wheel-like', 'steady-taps', 'steady-taps'])).toBe('steady-taps');
+    expect(detectionLabel(['steady-taps', 'fixed-hold'])).toBe('steady-taps');
+  });
+
+  it('ignores bursts with no holds unless there is nothing else', () => {
+    expect(detectionLabel(['no-hold-data', 'wheel-like', 'wheel-like'])).toBe('wheel-like');
+    expect(detectionLabel(['no-hold-data', 'no-hold-data'])).toBe('no-hold-data');
+    expect(detectionLabel([])).toBe('no-hold-data');
   });
 });
