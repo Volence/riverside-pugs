@@ -1917,11 +1917,25 @@ body.is-theater { overflow: hidden; }
 .deploy-history { border-top: 1px solid var(--border); padding-top: var(--sp-2); margin-top: var(--sp-2); }
 /* Game values page: one table per group, rows differing from vanilla marked. */
 .values-group { margin: 0 0 var(--sp-2); }
+/* The admin table's nowrap would push a long note or setting name past 1000px. */
+.values-table td { white-space: normal; overflow-wrap: anywhere; }
 .values-table td:first-child { min-width: 14rem; }
 .values-differs td:nth-child(2) { color: var(--rating); font-weight: 600; }
 .values-note { font-size: var(--fs-dense); }
 .values-rules { margin: var(--sp-3) 0 0; padding-left: var(--sp-4); }
 .values-rules li { margin: var(--sp-1) 0; }
+/* Phones: one block per row, the setting in bold, then each value under its
+ * column name, with no horizontal scroll. */
+@media (max-width: 640px) {
+  .values-table, .values-table tbody, .values-table tr { display: block; width: 100%; }
+  .values-table thead { display: none; }
+  .values-table tr { padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+  .values-table td { display: block; padding: 0; border: 0; }
+  .values-table td:first-child { min-width: 0; }
+  .values-table td.values-table__setting { font-weight: 600; }
+  .values-table td:not(.values-table__setting)::before { content: attr(data-label) ": "; color: var(--text-muted); }
+  .values-table .values-note { font-weight: normal; }
+}
 /* Triage card: name, then a full-width notes box, then the button. */
 .admin-form--stack { flex-direction: column; align-items: stretch; }
 .admin-form--stack input { flex: 0 0 auto; }
@@ -2576,6 +2590,7 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .patch-table th:nth-child(2), .patch-table th:nth-child(3) { width: 10%; }
 .patch-table th:nth-child(4) { width: 12%; }
 .patch-table td { overflow-wrap: anywhere; }
+.patch-changes li { overflow-wrap: anywhere; }
 /* Phones: one block per row. The metric in bold, then "before -> after" and
  * the change on one line, then the sentence, with no horizontal scroll. */
 @media (max-width: 640px) {
