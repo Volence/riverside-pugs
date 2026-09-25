@@ -3131,6 +3131,18 @@ describe('The Tab screen on the page', () => {
     await waitFor(() => expect(saved().elements?.tabVersus?.x).toBe(640 - 354));
   });
 
+  it('offers no X, Y or Align on several Tab pieces, none of which moves, and keeps Visible and Reset all', () => {
+    render(<Hud />);
+    fireEvent.click(layer('Versus score').getByRole('button', { name: '"Your Team"' }));
+    fireEvent.click(layer('Versus score').getByRole('button', { name: '"Enemy Team"' }), { shiftKey: true });
+    expect(screen.getByText('2 pieces in Versus score', { selector: 'legend' })).toBeTruthy();
+    expect(screen.queryByLabelText('X')).toBeNull();
+    expect(screen.queryByLabelText('Y')).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Align' })).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Visible' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Reset all' })).toBeTruthy();
+  });
+
   it('never picks the teammate cards under the Tab screen', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
