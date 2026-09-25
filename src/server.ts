@@ -159,6 +159,8 @@ export interface ServerDeps {
   releaseWriter?: (s: ServerRow) => TreeWriter | null;
   /** Tests inject the player count a release waits on before restarting. */
   releaseHumans?: (s: ServerRow) => Promise<number>;
+  /** Tests inject the player count the balance writer checks before a write. */
+  balanceHumans?: (s: ServerRow) => Promise<number>;
   /** Free bytes on the addons filesystem, for the campaign upload disk-floor
    *  check. Injected in tests; built from a real statfs on config.addonsDir
    *  otherwise, same as orchestrator and serverCleaner. */
@@ -571,7 +573,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // Writes the active rollout's pug_balance.cfg to a box on release, so the
   // new values land between matches; see src/balanceWriter.ts. Not wired in
   // dev mode, where a release must never write through a real transport.
-  const balanceWriter = new BalanceRolloutWriter({ db: deps.db, transport: deps.balanceTransport });
+  // It holds an idle box out of the pool while it writes and counts its
+  // players first (humansOn is defined below, called only later). When a
+  // hold ends the pending list drains, as it does when a match frees a box.
+  let balanceHoldFreed: () => void = () => {};
+  const balanceWriter = new BalanceRolloutWriter({
+    db: deps.db, transport: deps.balanceTransport,
+    humans: (s) => (deps.balanceHumans ?? humansOn)(s), onFreed: () => balanceHoldFreed(),
+  });
   // The balance watch list as a file pug-match 0.3.14+ reads at map start
   // (sub-project 3). Knobs loaded here for the file only; a broken knobs.json
   // writes nothing, and every box keeps its compiled list.
@@ -1189,6 +1198,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       pending = new PendingMatches(deps.db, (id) => (orchestrator as RealOrchestrator).setupMatch(id));
       pending.rebuildFromDb();
       releaser.onFreed(() => pending.drain());
+      balanceHoldFreed = () => pending?.drain();
       // Drain once at boot, because the pending list is otherwise driven
       // entirely by servers being freed and an already-idle box frees nothing:
       // a match that was waiting when the process died and an idle server
