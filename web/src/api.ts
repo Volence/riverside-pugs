@@ -908,6 +908,8 @@ export interface GameValueView {
   id: string; label: string; unit: string | null; note: string | null; value: string | null; vanilla: string | null;
   differsFromVanilla: boolean; status: 'reported' | 'not_reported' | 'hidden';
   lastChange: { at: string; patch: { id: number; number: number; name: string } | null } | null;
+  /** Admin view only: the value's condition does not hold, so the public page leaves it out. */
+  conditionOff?: true;
 }
 export interface GameValues {
   /** Admin view only. */

@@ -13,6 +13,9 @@ export interface CatalogueValue {
   unit?: string; vanilla?: string; note?: string;
   /** The live value misreports (a plugin applies it itself): show the note. */
   hideLive?: boolean;
+  /** Shown publicly only while this holds (e.g. hunting rifle stats only while
+   *  the rifle can be picked up). Same shape as a rule's `when`. */
+  when?: CatalogueRule['when'];
 }
 export interface CatalogueRule {
   id: string; group: string; text: string;
@@ -38,6 +41,12 @@ const CVAR_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 const WEAPON_RE = /^(weapon_[a-z0-9_]{1,40})\.([A-Za-z][A-Za-z0-9_]{0,40})$/;
 const PLUGIN_RE = /^[A-Za-z0-9_. -]{1,64}\.smx$/;
 
+function validWhen(when: unknown): boolean {
+  const w = (when ?? {}) as Record<string, unknown>;
+  return (typeof w.plugin === 'string' && PLUGIN_RE.test(w.plugin))
+    || (typeof w.cvar === 'string' && CVAR_RE.test(w.cvar) && (typeof w.equals === 'string' || typeof w.notEquals === 'string'));
+}
+
 /** Load and validate. `raw` lets tests validate an object without the disk. */
 export function loadCatalogue(path: string = CATALOGUE_PATH, raw?: unknown): Catalogue {
   const c = (raw ?? JSON.parse(readFileSync(path, 'utf8'))) as Catalogue;
@@ -59,16 +68,14 @@ export function loadCatalogue(path: string = CATALOGUE_PATH, raw?: unknown): Cat
     else if (v.source === 'weapon' && !WEAPON_RE.test(v.id)) throw new Error(`catalogue: bad weapon key ${v.id}`);
     else if (v.source !== 'cvar' && v.source !== 'weapon') throw new Error(`catalogue: ${v.id} has unknown source`);
     if (typeof v.label !== 'string' || !v.label.trim()) throw new Error(`catalogue: ${v.id} needs a label`);
+    if (v.when !== undefined && !validWhen(v.when)) throw new Error(`catalogue: ${v.id} has a bad when: needs plugin, or cvar with equals or notEquals`);
   }
   const ruleIds = new Set<string>();
   for (const r of c.rules) {
     if (!groups.has(r.group)) throw new Error(`catalogue: rule ${r.id} is in unknown group ${r.group}`);
     if (ruleIds.has(r.id)) throw new Error(`catalogue: duplicate rule ${r.id}`);
     ruleIds.add(r.id);
-    const w = r.when as Record<string, unknown>;
-    const ok = (typeof w.plugin === 'string' && PLUGIN_RE.test(w.plugin))
-      || (typeof w.cvar === 'string' && CVAR_RE.test(w.cvar) && (typeof w.equals === 'string' || typeof w.notEquals === 'string'));
-    if (!ok) throw new Error(`catalogue: rule ${r.id} needs when.plugin, or when.cvar with equals or notEquals`);
+    if (!validWhen(r.when)) throw new Error(`catalogue: rule ${r.id} needs when.plugin, or when.cvar with equals or notEquals`);
     for (const t of placeholders(r.text)) {
       if (!ids.has(t)) throw new Error(`catalogue: rule ${r.id} uses {${t}}, which is not a catalogue value`);
     }

@@ -22,6 +22,8 @@ export interface ValueView {
   /** The most recent change; null when it has not changed since tracking began.
    *  `patch` is null when the patch is not public (public view). */
   lastChange: { at: string; patch: { id: number; number: number; name: string } | null } | null;
+  /** Admin view only: its `when` does not hold, so the public page leaves it out. */
+  conditionOff?: true;
 }
 export interface RuleView {
   id: string; text: string; active: boolean; draft: boolean;
@@ -155,7 +157,9 @@ export function gameValues(db: DB, cat: Catalogue, opts: { admin: boolean }): Ga
 
   const groups = cat.groups.map((g): GroupView => ({
     id: g.id, label: g.label,
-    values: cat.values.filter((v) => v.group === g.id).map(valueView),
+    // A conditional value shows publicly only while its condition holds.
+    values: cat.values.filter((v) => v.group === g.id && (opts.admin || !v.when || ruleActive(v.when)))
+      .map((v) => (opts.admin && v.when && !ruleActive(v.when) ? { ...valueView(v), conditionOff: true as const } : valueView(v))),
     rules: cat.rules.filter((r) => r.group === g.id)
       .map((r) => { const t = render(r.text); return { id: r.id, text: t.text, active: ruleActive(r.when), draft: !r.reviewed, missing: t.missing }; })
       // Publicly, a rule shows only once every number in it is reported.

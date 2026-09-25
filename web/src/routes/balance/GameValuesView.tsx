@@ -50,7 +50,7 @@ export function GameValuesView({ data, admin }: { data: GameValues; admin: boole
                 <tbody>
                   {g.values.map((v) => (
                     <tr key={v.id} class={v.differsFromVanilla ? 'values-differs' : ''}>
-                      <td class="values-table__setting" data-label="Setting">{v.label}{v.note && v.status !== 'hidden' && <div class="muted values-note">{v.note}</div>}</td>
+                      <td class="values-table__setting" data-label="Setting">{v.label}{admin && v.conditionOff && <> <span class="admin-tag">hidden publicly: condition off</span></>}{v.note && v.status !== 'hidden' && <div class="muted values-note">{v.note}</div>}</td>
                       <td data-label="Ours">{valueCell(v)}</td>
                       <td data-label="Vanilla">{v.vanilla !== null ? withUnit(v.vanilla, v.unit) : <span class="muted">-</span>}</td>
                       <td data-label="Last changed">{changeCell(v, admin)}</td>
