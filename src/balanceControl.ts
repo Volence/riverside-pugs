@@ -77,15 +77,22 @@ export function diffIgnoringVersionless(a: Inventory, b: Inventory, versionless:
   return formatDiff({ ...d, changed: d.changed.filter((c) => !skip.has(c.key)) });
 }
 
-/** Enabled servers whose last inventory differs from the base in something a
- *  rollout does not set. Compared by fingerprint, so a versionless plugin
- *  build or a pending knob value never blocks. A server never sighted does
- *  not block. */
+/** Enabled servers whose latest queue match's inventory differs from the
+ *  base in something a rollout does not set. Compared by fingerprint, so a
+ *  versionless plugin build or a pending knob value never blocks. A server
+ *  with no queue match sighted does not block. Queue matches only, for the
+ *  same reason as baseInventory: balance_server_state follows whatever the
+ *  box last ran, and a 2v2 or casual config there is not a difference in the
+ *  PUG config a rollout writes to. */
 export function blockingServers(db: DB, base: Inventory, knobs: BalanceKnobs): { serverId: number; name: string; diff: string }[] {
   const want = withoutKnobs(base, knobs);
   const wantFp = fingerprintOf(want, knobs.versionless);
-  const rows = db.prepare(`SELECT st.server_id, s.name, st.inventory_json FROM balance_server_state st
-    JOIN servers s ON s.id = st.server_id WHERE s.enabled = 1 ORDER BY s.id`).all() as
+  const rows = db.prepare(`SELECT s.id AS server_id, s.name, p.inputs_json AS inventory_json FROM servers s
+    JOIN balance_patches p ON p.id = (
+      SELECT COALESCE(r.sighted_patch_id, r.patch_id) FROM match_rounds r JOIN matches m ON m.id = r.match_id
+      WHERE m.server_id = s.id AND m.origin = 'queue' AND COALESCE(r.sighted_patch_id, r.patch_id) IS NOT NULL
+      ORDER BY r.started_at DESC, r.match_id DESC, r.ordinal DESC, r.half DESC LIMIT 1)
+    WHERE s.enabled = 1 AND p.inputs_json IS NOT NULL ORDER BY s.id`).all() as
     { server_id: number; name: string; inventory_json: string }[];
   const out: { serverId: number; name: string; diff: string }[] = [];
   for (const r of rows) {

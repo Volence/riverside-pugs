@@ -95,7 +95,7 @@ describe('balance knob API', () => {
 
   it('a plugin on the site ignore list never blocks an apply', async () => {
     const s2 = addServer(db, { name: 'chicago', host: '10.0.0.2', port: 27015, rconPort: 27015, rconPassword: 'x' });
-    sight(db, 2, s2, { ...LIVE, 'p:x_noise.smx': '1.a' }, 'in_game');
+    sight(db, 2, s2, { ...LIVE, 'p:x_noise.smx': '1.a' }, 'queue', '2026-09-24 00:30:00');
     const { a, cookies } = await app();
     const before = (await a.inject({ method: 'GET', url: '/api/admin/balance/knobs', cookies })).json() as { blocking: unknown[] };
     expect(before.blocking).toHaveLength(1);

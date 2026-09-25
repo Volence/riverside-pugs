@@ -68,6 +68,15 @@ describe('blockingServers', () => {
     expect(blockingServers(db, LIVE, KNOBS)).toEqual([{ serverId: s2, name: 'chicago', diff: 'added p:l4d_itemlimiter.smx' }]);
   });
 
+  it('compares each server\'s latest queue match, never a casual or 2v2 config it ran since', () => {
+    sight(db, 1, s1, LIVE);
+    sight(db, 2, s2, LIVE);
+    sight(db, 3, s2, { ...LIVE, 'p:l4d_2v2.smx': '1.a' }, 'in_game', '2026-09-24 03:00:00');
+    expect(blockingServers(db, LIVE, KNOBS)).toEqual([]);
+    sight(db, 4, s2, { ...LIVE, 'p:l4d_itemlimiter.smx': '3.cccc' }, 'queue', '2026-09-24 04:00:00');
+    expect(blockingServers(db, LIVE, KNOBS)).toEqual([{ serverId: s2, name: 'chicago', diff: 'added p:l4d_itemlimiter.smx' }]);
+  });
+
   it('skips a disabled server', () => {
     sight(db, 1, s2, { ...LIVE, 'p:l4d_itemlimiter.smx': '3.cccc' });
     db.prepare('UPDATE servers SET enabled = 0 WHERE id = ?').run(s2);

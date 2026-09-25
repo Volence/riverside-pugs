@@ -59,7 +59,7 @@ describe('applyKnobs', () => {
     expect(apply({ z_tank_health: 1 })).toMatchObject({ ok: false, status: 400 });
     const empty = openDb(':memory:');
     expect(applyKnobs(empty, KNOBS, { values: {}, name: 'n', notes: 'n', adminId: ADMIN })).toMatchObject({ ok: false, status: 409 });
-    sight(db, 2, s2, { ...LIVE, 'p:l4d_itemlimiter.smx': '1.1' }, 'in_game');
+    sight(db, 2, s2, { ...LIVE, 'p:l4d_itemlimiter.smx': '1.1' }, 'queue', '2026-09-24 00:30:00');
     expect(apply({ z_tank_health: 7500 })).toMatchObject({ ok: false, status: 409, error: expect.stringMatching(/chicago/) });
   });
 
