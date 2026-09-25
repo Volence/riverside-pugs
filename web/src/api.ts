@@ -1323,6 +1323,8 @@ export interface ModCallView {
 export const modApi = {
   calls: (filter: 'open' | 'all', signal?: AbortSignal) =>
     get<{ calls: ModCallView[]; discordReady: boolean }>(`/api/mod/calls?filter=${filter}`, signal),
+  /** Mark an in-game call handled, as the Discord card's button does. */
+  handleCall: (id: number) => post<{ ok: true }>(`/api/mod/calls/${id}/handle`),
   tickets: (filter: 'open' | 'mine' | 'closed', signal?: AbortSignal) =>
     get<{ tickets: TicketSummary[]; counts: TicketCounts }>(`/api/mod/tickets?filter=${filter}`, signal),
   ticket: (id: number, signal?: AbortSignal) => get<TicketDetail>(`/api/mod/tickets/${id}`, signal),

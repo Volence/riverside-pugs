@@ -1,9 +1,10 @@
+import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
 import { modApi, type ModCallView } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel, Tabs } from '../../components/bits';
 import { ticketUrl } from './adminRoutes';
-import { fmtTime } from './useAction';
+import { fmtTime, useAction } from './useAction';
 
 const FILTERS: { key: 'open' | 'all'; label: string }[] = [
   { key: 'open', label: 'Open' }, { key: 'all', label: 'All' },
@@ -21,8 +22,8 @@ function About({ c }: { c: ModCallView }) {
 }
 
 /** One call. Folded calls are the same row one level in, and carry no
- *  folded calls of their own. */
-function CallRow({ c }: { c: ModCallView }) {
+ *  folded calls of their own. `action` rides at the end of the first line. */
+function CallRow({ c, action }: { c: ModCallView; action?: ComponentChildren }) {
   const where = [c.serverName ?? 'unknown server', c.map].filter(Boolean).join(' · ');
   return (
     <div class="call-row">
@@ -38,6 +39,7 @@ function CallRow({ c }: { c: ModCallView }) {
           <> · <a href={`/match/${c.matchId}?ordinal=${c.moment.ordinal}&half=${c.moment.half}&t=${c.moment.tMs}`}>replay moment</a></>
         )}
         {c.ticketId !== null && <> · <a href={ticketUrl(c.ticketId)}>ticket #{c.ticketId}</a></>}
+        {action && <> {action}</>}
       </p>
       {c.text && <blockquote>{c.text}</blockquote>}
       {(c.note || c.handledAt) && (
@@ -56,14 +58,20 @@ function CallRow({ c }: { c: ModCallView }) {
  * pinged; this is the record, including calls that never reached Discord
  * (a banned caller, calls turned off, or no admin channel set), which is why
  * the page says so plainly when nothing is posting.
+ *
+ * Mark handled is the card's Handling it button from here, under the same
+ * rules, and the card follows. Only an unhandled parent offers it: a folded
+ * call is handled with the card it sits on.
  */
 export function AdminCalls() {
   const [filter, setFilter] = useState<'open' | 'all'>('open');
-  const { data } = useFetch((s) => modApi.calls(filter, s), [filter]);
+  const { data, reload } = useFetch((s) => modApi.calls(filter, s), [filter]);
+  const { busy, error, run } = useAction(reload);
 
   return (
     <Panel>
       <Tabs active={filter} onSelect={(k) => setFilter(k as typeof filter)} tabs={FILTERS} />
+      {error && <p class="error">{error}</p>}
       {data && !data.discordReady && (
         <p class="admin-warning">Calls are not reaching Discord: set the Admin channel id and turn on In-game mod calls in Settings.</p>
       )}
@@ -71,7 +79,9 @@ export function AdminCalls() {
       <ul class="calls">
         {data?.calls.map((c) => (
           <li key={c.id}>
-            <CallRow c={c} />
+            <CallRow c={c} action={c.handledAt === null && (
+              <button class="chip" type="button" disabled={busy} onClick={() => run(() => modApi.handleCall(c.id))}>Mark handled</button>
+            )} />
             {c.folded.length > 0 && (
               <ul class="calls calls--folded" aria-label={`Folded into call ${c.id}`}>
                 {c.folded.map((f) => <li key={f.id}><CallRow c={f} /></li>)}
