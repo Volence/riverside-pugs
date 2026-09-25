@@ -31,6 +31,7 @@ import { buildTrees, pcGet, MODERN_ART } from './build';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { artUrl, normaliseMaterial, SKULL_ICON, zombieTeamImage } from './art';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
+import { ITEM_ROW, itemRowWidth } from './youritems';
 import { parseColour } from './textures';
 import { SLOTS } from './slots';
 import { canvasFont, fontCell, importedFace, loadFace, synthBoldSpacing, setLetterSpacing, type FontCell } from './fonts';
@@ -1184,18 +1185,11 @@ export function labelDrawsNothing(design: HudDesign, panelId: string, name: stri
 }
 
 /**
- * The row the preview shows: a full loadout, in the order the game writes it.
- * client.dll builds the Items label's text as the medkit ('!'), the pills
- * ('"'), then one throwable (the pipe bomb '$', or the molotov '#' when that
- * is what is carried), with a space between each; a teammate carries one
- * throwable, so the row shows the pipe bomb.
+ * The row the preview shows and its width live in youritems.ts, which the
+ * Your items element shares: one row, drawn the same way on the cards and on
+ * your own row.
  */
-export const ITEM_ROW: readonly string[] = ['icon/item/medkit', 'icon/item/pills', 'icon/item/pipebomb'];
-
-/** How wide the row is at s canvas pixels tall: each glyph's advance, and a space between two. */
-function itemRowWidth(s: number): number {
-  return ITEM_ROW.reduce((w, name, i) => w + (ICON_ADVANCE[name] ?? 1) * s + (i ? ICON_SPACE * s : 0), 0);
-}
+export { ITEM_ROW } from './youritems';
 
 /** Where the row starts in a label at x, w wide: the label's textAlignment places the whole row, as it would the text. */
 export function itemRowStart(x: number, w: number, s: number, align: string): number {
