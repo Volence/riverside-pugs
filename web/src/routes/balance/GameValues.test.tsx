@@ -33,7 +33,7 @@ describe('GameValues', () => {
     expect(await screen.findByText('Tank health')).toBeTruthy();
     expect(screen.getByText('8000').closest('tr')!.className).toContain('values-differs');
     expect((screen.getByText('Tank 8000') as HTMLAnchorElement).getAttribute('href')).toBe('/balance#patch-7');
-    expect(screen.getByText('not reported yet')).toBeTruthy();
+    expect(screen.getByTitle('Not reported by the servers yet').textContent).toBe('-');
     expect(screen.getByText('unchanged since tracking began')).toBeTruthy();
     expect(screen.getByText('Fire damage to the tank is capped.')).toBeTruthy();
   });

@@ -8,7 +8,9 @@ const fmtDate = (at: string) => {
 
 function valueCell(v: GameValueView) {
   if (v.status === 'hidden') return <span class="muted">{v.note ?? 'set by a plugin'}</span>;
-  if (v.status === 'not_reported') return <span class="muted">not reported yet</span>;
+  // Not reported by the servers yet (the plugin that reports it is not live
+  // everywhere): a plain dash, so the row does not read as differing from vanilla.
+  if (v.status === 'not_reported') return <span class="muted" title="Not reported by the servers yet">-</span>;
   return <>{v.value}{v.unit && <span class="muted"> {v.unit}</span>}</>;
 }
 
@@ -39,7 +41,7 @@ export function GameValuesView({ data, admin }: { data: GameValues; admin: boole
           {g.values.length > 0 && (
             <div class="table-wrap">
               <table class="admin-table values-table">
-                <thead><tr><th>Setting</th><th>Ours</th><th>Vanilla</th><th>Last changed</th></tr></thead>
+                <thead><tr><th>Setting</th><th>Ours</th><th>Vanilla versus</th><th>Last changed</th></tr></thead>
                 <tbody>
                   {g.values.map((v) => (
                     <tr key={v.id} class={v.differsFromVanilla ? 'values-differs' : ''}>
