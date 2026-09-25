@@ -40,7 +40,7 @@ describe('balance writer wiring', () => {
       readText: async (name) => disk.get(name) ?? null, size: async () => null, remove: async () => {},
     });
     const app = await buildServer({ config: { ...loadConfig({}), devMode: false, logListenPort: await freeUdpPort() }, db,
-      serverCleaner: async () => {}, serverExec: async () => {}, balanceTransport: transport });
+      serverCleaner: async () => {}, serverExec: async () => {}, balanceTransport: transport, balanceHumans: async () => 0 });
     close = () => app.close();
     await new Promise((r) => setTimeout(r, 100));
     expect(disk.get('pug_balance.cfg')).toBe('CONTENT');

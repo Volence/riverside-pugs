@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../src/db.js';
-import { addServer, markLive, type ServerRow } from '../src/serverPool.js';
+import { addServer, claimIdle, markLive, type ServerRow } from '../src/serverPool.js';
 import type { AddonsTransport } from '../src/addonsTransport.js';
 import { subscribeAdminEvents } from '../src/adminFeed.js';
 import { BalanceRolloutWriter, cfgDirOf } from '../src/balanceWriter.js';
+import { listRollouts } from '../src/balanceRollouts.js';
 import { readFileSync } from 'node:fs';
 
 type DB = ReturnType<typeof openDb>;
@@ -157,6 +158,22 @@ describe('BalanceRolloutWriter', () => {
     expect(state(s1)).toEqual({ state: 'failed', last_error: 'no addons transport configured' });
   });
 
+  it('a server with no transport alerts once for the rollout, not on every sweep, and is listed as such', async () => {
+    db.prepare('UPDATE servers SET addons_dir = NULL WHERE id = ?').run(s1);
+    const alerts: string[] = [];
+    const off = subscribeAdminEvents((e) => { if (e.kind === 'problem') alerts.push(e.text); });
+    const w = new BalanceRolloutWriter({ db, transport: fakeBoxes().transport });
+    await w.sync();
+    await w.sync();
+    await w.sync();
+    off();
+    expect(alerts.length).toBe(1);
+    expect(listRollouts(db, { cvars: [], files: [], dirs: [], versionless: [] })[0].servers.find((x) => x.serverId === s1))
+      .toMatchObject({ state: 'failed', noTransport: true });
+    expect(listRollouts(db, { cvars: [], files: [], dirs: [], versionless: [] })[0].servers.find((x) => x.serverId === s2))
+      .toMatchObject({ noTransport: false });
+  });
+
   it('adds rows for servers enabled after the apply and skips disabled ones', async () => {
     const s3 = addServer(db, { name: 'r3', host: '10.0.0.3', port: 27015, rconPort: 27015, rconPassword: 'x' });
     db.prepare("UPDATE servers SET status = 'idle', addons_dir = '/g/left4dead/addons' WHERE id = ?").run(s3);
@@ -301,5 +318,126 @@ describe('BalanceRolloutWriter', () => {
     await w.sync(); // flush: the pass, the deferred release turn, then this pass (which skips offline s3 as busy)
     expect(disk.has(`${s3}/pug_balance.cfg`)).toBe(false);
     expect(state(s3).state).toBe('pending');
+  });
+});
+
+describe('BalanceRolloutWriter holds a box out of the pool while it writes', () => {
+  const statusOf = (sid: number) => (db.prepare('SELECT status FROM servers WHERE id = ?').get(sid) as { status: string }).status;
+
+  it('the sweep takes the box out of the pool for the write, so claimIdle cannot hand it to a match mid-write', async () => {
+    const f = fakeBoxes();
+    const during: { status: string; claimed: number | null }[] = [];
+    const transport = (s: ServerRow, dir: string): AddonsTransport => {
+      const t = f.transport(s, dir);
+      return { ...t, async put(local, name) {
+        during.push({ status: statusOf(s.id), claimed: claimIdle(db)?.id ?? null });
+        return t.put(local, name);
+      } };
+    };
+    db.prepare('UPDATE servers SET enabled = 0 WHERE id = ?').run(s2);
+    const freed: number[] = [];
+    await new BalanceRolloutWriter({ db, transport, onFreed: () => freed.push(1) }).sync();
+    expect(during).toEqual([{ status: 'reserved', claimed: null }]);
+    expect(statusOf(s1)).toBe('idle');
+    expect(state(s1).state).toBe('written');
+    expect(freed.length).toBe(1);
+  });
+
+  it('the release path holds an idle box the same way', async () => {
+    const f = fakeBoxes();
+    const during: string[] = [];
+    const transport = (s: ServerRow, dir: string): AddonsTransport => {
+      const t = f.transport(s, dir);
+      return { ...t, async put(local, name) { during.push(statusOf(s.id)); return t.put(local, name); } };
+    };
+    await new BalanceRolloutWriter({ db, transport }).writeForRelease(s1);
+    expect(during).toEqual(['reserved']);
+    expect(statusOf(s1)).toBe('idle');
+  });
+
+  it('never frees a box a match took over during the write', async () => {
+    const f = fakeBoxes();
+    const transport = (s: ServerRow, dir: string): AddonsTransport => {
+      const t = f.transport(s, dir);
+      return { ...t, async put(local, name) {
+        // An in-game !load_4v4p adopted on this box while the file went out.
+        db.prepare("INSERT INTO matches (season_id, state, campaign, server_id, origin) VALUES (1, 'live', 'dead_air', ?, 'in_game')").run(s.id);
+        markLive(db, s.id);
+        return t.put(local, name);
+      } };
+    };
+    db.prepare('UPDATE servers SET enabled = 0 WHERE id = ?').run(s2);
+    await new BalanceRolloutWriter({ db, transport }).sync();
+    expect(statusOf(s1)).toBe('live');
+  });
+
+  it('never frees a box a queue match is configuring on, even if it reads reserved', async () => {
+    const f = fakeBoxes();
+    const transport = (s: ServerRow, dir: string): AddonsTransport => {
+      const t = f.transport(s, dir);
+      return { ...t, async put(local, name) {
+        // Adopted, finished and claimed again by the queue, all mid-write.
+        db.prepare("INSERT INTO matches (season_id, state, campaign, server_id, origin) VALUES (1, 'configuring', 'dead_air', ?, 'queue')").run(s.id);
+        return t.put(local, name);
+      } };
+    };
+    db.prepare('UPDATE servers SET enabled = 0 WHERE id = ?').run(s2);
+    await new BalanceRolloutWriter({ db, transport }).sync();
+    expect(statusOf(s1)).toBe('reserved');
+  });
+
+  it('skips a box with players on it, and one whose player count cannot be read, and puts it back in the pool', async () => {
+    const f = fakeBoxes();
+    const humans = async (s: ServerRow) => {
+      expect(statusOf(s.id)).toBe('reserved'); // counted under the hold, not before it
+      if (s.id === s1) return 2;
+      throw new Error('rcon connect timeout');
+    };
+    const out = await new BalanceRolloutWriter({ db, transport: f.transport, humans }).sync();
+    expect(out.find((o) => o.serverId === s1)?.skipped).toBe('players on the server');
+    expect(out.find((o) => o.serverId === s2)?.skipped).toMatch(/could not count players/);
+    expect(f.disk.size).toBe(0);
+    expect(state(s1).state).toBe('pending');
+    expect(statusOf(s1)).toBe('idle');
+    expect(statusOf(s2)).toBe('idle');
+  });
+
+  it('writes a box whose player count is zero', async () => {
+    const f = fakeBoxes();
+    await new BalanceRolloutWriter({ db, transport: f.transport, humans: async () => 0 }).sync();
+    expect(state(s1).state).toBe('written');
+  });
+
+  it('the release path counts players on an idle box too, but not on one offline for its restart', async () => {
+    const f = fakeBoxes();
+    db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(s2);
+    const asked: number[] = [];
+    const w = new BalanceRolloutWriter({ db, transport: f.transport, humans: async (s) => { asked.push(s.id); return 3; } });
+    await w.writeForRelease(s1);
+    await w.writeForRelease(s2);
+    expect(asked).toEqual([s1]);
+    expect(state(s1).state).toBe('pending');
+    expect(state(s2).state).toBe('written');
+  });
+
+  it('a timeout aborts the transport call, and the box stays held until that call has settled', async () => {
+    let signal: AbortSignal | undefined;
+    let finish!: () => void;
+    const transport = (): AddonsTransport => ({
+      // Ignores the abort, standing in for a rename already on the wire.
+      put: (_l, _n, opts) => { signal = opts?.signal; return new Promise<void>((r) => { finish = r; }); },
+      readText: async () => null, size: async () => null, remove: async () => {},
+    });
+    db.prepare('UPDATE servers SET enabled = 0 WHERE id = ?').run(s2);
+    const w = new BalanceRolloutWriter({ db, transport, timeoutMs: 20 });
+    await w.sync();
+    expect(state(s1)).toEqual({ state: 'failed', last_error: 'timed out after 20 ms' });
+    expect(signal?.aborted).toBe(true);
+    expect(statusOf(s1)).toBe('reserved');
+    expect(claimIdle(db)).toBeNull();
+    finish();
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(statusOf(s1)).toBe('idle');
   });
 });

@@ -56,7 +56,7 @@ describe('balance knob API', () => {
   it('applies, audits, and lists the rollout', async () => {
     const { a, cookies } = await app();
     const res = await a.inject({ method: 'POST', url: '/api/admin/balance/knobs/apply', cookies,
-      payload: { values: { z_tank_health: 7500 }, name: 'Tank 7500', notes: 'lower tank HP' } });
+      payload: { values: { z_tank_health: 7500 }, name: 'Tank 7500', notes: 'lower tank HP', baseRolloutId: null } });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ ok: true, reused: false });
     const audit = db.prepare("SELECT detail FROM admin_actions WHERE action = 'balance_apply'").all() as { detail: string }[];
@@ -75,9 +75,29 @@ describe('balance knob API', () => {
   it('answers 400 with the errors for an invalid draft', async () => {
     const { a, cookies } = await app();
     const res = await a.inject({ method: 'POST', url: '/api/admin/balance/knobs/apply', cookies,
-      payload: { values: { z_tank_health: 1 }, name: 'x', notes: 'y' } });
+      payload: { values: { z_tank_health: 1 }, name: 'x', notes: 'y', baseRolloutId: null } });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toMatch(/outside/);
+  });
+
+  it('refuses an apply made from a preview older than the latest rollout (409), and one with no preview base (400)', async () => {
+    const { a, cookies } = await app();
+    const pre = await a.inject({ method: 'POST', url: '/api/admin/balance/knobs/preview', cookies, payload: { values: { z_tank_health: 7500 } } });
+    expect(pre.json().rolloutId).toBeNull();
+    const first = await a.inject({ method: 'POST', url: '/api/admin/balance/knobs/apply', cookies,
+      payload: { values: { z_tank_health: 7500 }, name: 'Tank 7500', notes: 'n', baseRolloutId: null } });
+    expect(first.statusCode).toBe(200);
+    // A second admin who previewed before that apply.
+    const stale = await a.inject({ method: 'POST', url: '/api/admin/balance/knobs/apply', cookies,
+      payload: { values: { z_tank_health: 7000 }, name: 'Tank 7000', notes: 'n', baseRolloutId: null } });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json().error).toMatch(/preview again/i);
+    const missing = await a.inject({ method: 'POST', url: '/api/admin/balance/knobs/apply', cookies,
+      payload: { values: { z_tank_health: 7000 }, name: 'Tank 7000', notes: 'n' } });
+    expect(missing.statusCode).toBe(400);
+    const fresh = await a.inject({ method: 'POST', url: '/api/admin/balance/knobs/apply', cookies,
+      payload: { values: { z_tank_health: 7000 }, name: 'Tank 7000', notes: 'n', baseRolloutId: first.json().rolloutId } });
+    expect(fresh.statusCode).toBe(200);
   });
 
   it('restores values from a patch', async () => {
@@ -95,7 +115,7 @@ describe('balance knob API', () => {
 
   it('a plugin on the site ignore list never blocks an apply', async () => {
     const s2 = addServer(db, { name: 'chicago', host: '10.0.0.2', port: 27015, rconPort: 27015, rconPassword: 'x' });
-    sight(db, 2, s2, { ...LIVE, 'p:x_noise.smx': '1.a' }, 'in_game');
+    sight(db, 2, s2, { ...LIVE, 'p:x_noise.smx': '1.a' }, 'queue', '2026-09-24 00:30:00');
     const { a, cookies } = await app();
     const before = (await a.inject({ method: 'GET', url: '/api/admin/balance/knobs', cookies })).json() as { blocking: unknown[] };
     expect(before.blocking).toHaveLength(1);

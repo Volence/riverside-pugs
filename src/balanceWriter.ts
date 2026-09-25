@@ -5,7 +5,7 @@ import type { DB } from './db.js';
 import { transportFor, type AddonsTransport } from './addonsTransport.js';
 import { getServer, listServers, type ServerRow } from './serverPool.js';
 import { publishAdminEvent } from './adminFeed.js';
-import { activeRollout, ensureServerRows, markFailed, markPending, markWritten, type RolloutRow } from './balanceRollouts.js';
+import { activeRollout, ensureServerRows, markFailed, markPending, markWritten, NO_TRANSPORT, type RolloutRow } from './balanceRollouts.js';
 
 /**
  * Puts the active rollout's cfg/pug_balance.cfg on every enabled server.
@@ -14,11 +14,23 @@ import { activeRollout, ensureServerRows, markFailed, markPending, markWritten, 
  * release path (writeForRelease), which runs after the rcon cleanup and
  * before the after-match restart, so a match never changes config halfway.
  * "Written" means the bytes read back equal what was sent.
+ *
+ * pug_balance.cfg runs on every map, so a match that started while the file
+ * was going out would play map 1 on the old values and the rest on the new.
+ * An idle box is therefore held out of the pool for the whole write, the way
+ * the release engine holds one: idle -> reserved in a single guarded UPDATE,
+ * which claimIdle can never see, and back to idle only once the transport
+ * call has actually settled (a call that outlived its timeout included). An
+ * idle row is not an empty server either (an in-game !load_4v4p only shows
+ * up once adopted), so under the hold the box's players are counted over
+ * rcon and a box with anyone on it, or whose count cannot be read, is left
+ * for a later pass.
  */
 
 export const BALANCE_CFG = 'pug_balance.cfg';
 const SWEEP_MS = 60_000;
 const TIMEOUT_MS = 60_000;
+export { NO_TRANSPORT };
 
 /** `<game>/left4dead/addons` -> `<game>/left4dead/cfg`; null for a layout we
  *  cannot reason about, which then reads as "no transport". */
@@ -47,7 +59,56 @@ export class BalanceRolloutWriter {
     transport?: (s: ServerRow, dir: string) => AddonsTransport | null;
     intervalMs?: number;
     timeoutMs?: number;
+    /** Humans on the box, over rcon (parseHumans of `status`). Absent in
+     *  tests that do not care, where every box counts as empty. */
+    humans?: (s: ServerRow) => Promise<number>;
+    /** Called when a hold ends and the box is back in the pool, so a match
+     *  waiting for a server can claim it (the pending list's drain). */
+    onFreed?: () => void;
   }) {}
+
+  /** idle -> reserved in one statement, so nothing can claim the box
+   *  between the check and the write. False when it was not idle. */
+  private hold(serverId: number): boolean {
+    return this.deps.db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ? AND status = 'idle' AND enabled = 1")
+      .run(serverId).changes === 1;
+  }
+
+  /** Back to idle, unless a match took the box over meanwhile (an in-game
+   *  match adopted on it goes live whatever the row said). */
+  private unhold(serverId: number): void {
+    const r = this.deps.db.prepare(`UPDATE servers SET status = 'idle' WHERE id = ? AND status = 'reserved'
+      AND NOT EXISTS (SELECT 1 FROM matches WHERE server_id = ? AND state IN ('configuring', 'live'))`).run(serverId, serverId);
+    if (r.changes === 1) {
+      try { this.deps.onFreed?.(); } catch (err) { console.error('[balanceWriter] onFreed threw:', err); }
+    }
+  }
+
+  /** Under a hold: null when the box may be written, else why not. */
+  private async emptyOrWhy(server: ServerRow): Promise<string | null> {
+    if (!this.deps.humans) return null;
+    try {
+      const n = await this.bounded(this.deps.humans(server));
+      return n > 0 ? 'players on the server' : null;
+    } catch (err) {
+      return `could not count players: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  /** Hold an idle box, check it is empty, write it, and let it go once the
+   *  write has settled. */
+  private async writeHeld(server: ServerRow, ro: RolloutRow): Promise<WriteOutcome> {
+    const base = { serverId: server.id, server: server.name };
+    // Nothing to hold or count for a box this cannot write at all.
+    if (!this.transportOf(server)) return this.failIfStillActive(server, ro, NO_TRANSPORT);
+    if (!this.hold(server.id)) return { ...base, ok: false, skipped: 'busy' };
+    const why = await this.emptyOrWhy(server);
+    if (why) {
+      this.unhold(server.id);
+      return { ...base, ok: false, skipped: why };
+    }
+    return this.writeOne(server, ro, () => this.unhold(server.id));
+  }
 
   private queue<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
     const next = this.chain.then(fn).catch((err) => {
@@ -112,7 +173,14 @@ export class BalanceRolloutWriter {
       if (!this.needsWrite(ro.id, serverId)) return;
       if (server.status !== 'offline' && server.status !== 'idle') return;
       if (capExpired && server.status !== 'idle') return;
+      if (server.status === 'idle') { await this.writeHeld(server, ro); return; }
+      // Offline: the releaser took the box out of the pool for its restart
+      // and puts it back afterwards, so the hold is already there. Wait for a
+      // write that timed out to settle (it was aborted, so this is short)
+      // before letting the restart and the release go ahead.
       await this.writeOne(server, ro);
+      const late = this.inFlight.get(serverId);
+      if (late) await Promise.race([late, new Promise<void>((r) => { setTimeout(r, this.deps.timeoutMs ?? TIMEOUT_MS).unref(); })]);
     }, undefined);
     await Promise.race([queued, cap]);
     clearTimeout(capTimer);
@@ -148,13 +216,14 @@ export class BalanceRolloutWriter {
       }
       // Re-read right before writing, not once at the top of the loop: a
       // pass can take up to a minute per server, and a box already in this
-      // same pass can go live in the meantime.
+      // same pass can go live in the meantime. The hold in writeHeld is what
+      // makes that check and the write one step.
       const fresh = getServer(this.deps.db, s.id);
       if (!fresh || fresh.enabled !== 1 || fresh.status !== 'idle') {
         out.push({ serverId: s.id, server: s.name, ok: false, skipped: 'busy' });
         continue;
       }
-      out.push(await this.writeOne(fresh, ro));
+      out.push(await this.writeHeld(fresh, ro));
     }
     return out;
   }
@@ -164,44 +233,54 @@ export class BalanceRolloutWriter {
     return dir ? (this.deps.transport ?? transportFor)(server, dir) : null;
   }
 
-  private bounded<T>(p: Promise<T>): Promise<T> {
+  /** Rejects after timeoutMs, and then aborts `ac` so the transport call
+   *  itself is cancelled (FTP client closed, scp/ssh child killed) rather
+   *  than left to land on the box later. */
+  private bounded<T>(p: Promise<T>, ac?: AbortController): Promise<T> {
     const ms = this.deps.timeoutMs ?? TIMEOUT_MS;
     let t: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => { t = setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms); });
+    const timeout = new Promise<never>((_, reject) => {
+      t = setTimeout(() => { ac?.abort(); reject(new Error(`timed out after ${ms} ms`)); }, ms);
+    });
     return Promise.race([p, timeout]).finally(() => clearTimeout(t));
   }
 
-  private async writeOne(server: ServerRow, ro: RolloutRow): Promise<WriteOutcome> {
+  /** `release` ends the caller's hold on the box; it runs once the write has
+   *  settled, which for a timed-out write is after this returns. */
+  private async writeOne(server: ServerRow, ro: RolloutRow, release: () => void = () => {}): Promise<WriteOutcome> {
     const t = this.transportOf(server);
-    if (!t) return this.failIfStillActive(server, ro, 'no addons transport configured');
+    if (!t) { release(); return this.failIfStillActive(server, ro, NO_TRANSPORT); }
 
     let dir: string;
     try {
       dir = await mkdtemp(join(tmpdir(), 'pug-balance-'));
     } catch (err) {
+      release();
       return this.failIfStillActive(server, ro, err instanceof Error ? err.message : String(err));
     }
 
     const local = join(dir, BALANCE_CFG);
-    // The real operation, tracked separately from the timeout below: bounded()
-    // only stops this call from waiting on it, it does not cancel it. Without
-    // this, a write that times out but eventually lands could rename its
-    // (now stale) bytes over a box a later, faster write had already
-    // verified, leaving a false "written".
+    // The real operation, tracked separately from the timeout below. On a
+    // timeout bounded() aborts it, but a rename already on the wire can still
+    // land, so it is tracked until it settles: no second write starts against
+    // the box and the hold is not let go before then, and a late landing can
+    // never pass for a later write's verified bytes.
+    const ac = new AbortController();
     const op = (async () => {
       await writeFile(local, ro.content, 'utf8');
-      await t.put(local, BALANCE_CFG);
-      return t.readText(BALANCE_CFG);
+      await t.put(local, BALANCE_CFG, { signal: ac.signal });
+      return t.readText(BALANCE_CFG, { signal: ac.signal });
     })();
     const settled = op.then(() => undefined, () => undefined).finally(() => {
       this.inFlight.delete(server.id);
+      release();
       void rm(dir, { recursive: true, force: true }).catch(() => {});
     });
     this.inFlight.set(server.id, settled);
 
     const base = { serverId: server.id, server: server.name };
     try {
-      const back = await this.bounded(op);
+      const back = await this.bounded(op, ac);
       if (back !== ro.content) return this.failIfStillActive(server, ro, 'read-back differs from what was written');
       // A newer apply may have landed while this one was in flight; its own
       // pass writes the new content, so only the still-active rollout is marked.
@@ -221,10 +300,14 @@ export class BalanceRolloutWriter {
     return this.fail(server, ro, error);
   }
 
+  /** Alerts and logs once per box per rollout (markFailed says when it is
+   *  the first failure); later retries fail quietly until one succeeds. */
   private fail(server: ServerRow, ro: RolloutRow, error: string): WriteOutcome {
-    console.error(`[balanceWriter] ${server.name}: ${error}`);
     if (markFailed(this.deps.db, ro.id, server.id, error)) {
-      publishAdminEvent({ kind: 'problem', text: `Could not write the balance config to ${server.name}: ${error}. It is retried every minute; see Admin > Balance > Knobs.` });
+      console.error(`[balanceWriter] ${server.name}: ${error}`);
+      publishAdminEvent({ kind: 'problem', text: error === NO_TRANSPORT
+        ? `${server.name} has no addons transport configured, so the site cannot give it the balance config. Set its addons dir and transport; see Admin > Balance > Knobs.`
+        : `Could not write the balance config to ${server.name}: ${error}. It is retried every minute; see Admin > Balance > Knobs.` });
     }
     return { serverId: server.id, server: server.name, ok: false, error };
   }

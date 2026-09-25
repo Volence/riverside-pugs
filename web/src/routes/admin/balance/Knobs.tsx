@@ -115,6 +115,7 @@ export function Knobs() {
               <tbody>{preview.diff.map((d) => <tr key={d.cvar}><td>{d.label}</td><td>{d.from}</td><td>{d.to}</td></tr>)}</tbody>
             </table>
           )}
+          {preview.warnings.map((w) => <p class="admin-warn" key={w}>{w}</p>)}
           {preview.groupsChanged.length > 1 && (
             <p class="admin-warn">This changes knobs in more than one group ({preview.groupsChanged.join(', ')}): their effects cannot be told apart.</p>
           )}
@@ -125,7 +126,9 @@ export function Knobs() {
             e.preventDefault();
             if (!canApply) return;
             void applyAction.run(async () => {
-              await adminApi.balanceKnobsApply({ values: preview.values, name: name.trim(), notes: patchNotes });
+              // The rollout this preview was made against: the server refuses
+              // the apply if another admin's landed since.
+              await adminApi.balanceKnobsApply({ values: preview.values, name: name.trim(), notes: patchNotes, baseRolloutId: preview.rolloutId });
               setPreview(null);
               setConfirm('');
               setSeeded(false);

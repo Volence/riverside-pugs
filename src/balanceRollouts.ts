@@ -1,8 +1,13 @@
 import type { DB } from './db.js';
 import type { BalanceKnobs } from './balanceKnobs.js';
 import {
-  diffIgnoringVersionless, patchNumber, predictInventory, previewKnobs, renderBalanceCfg, type Inventory, type KnobPreview,
+  diffIgnoringVersionless, latestRolloutId, patchNumber, predictInventory, previewKnobs, renderBalanceCfg, type Inventory, type KnobPreview,
 } from './balanceControl.js';
+
+/** The error a box with no reachable cfg directory is failed with. It is a
+ *  standing configuration gap rather than a write that may succeed on the
+ *  next try, so the Knobs tab shows it as its own state. */
+export const NO_TRANSPORT = 'no addons transport configured';
 
 /** SQLite's datetime('now') format, so it sorts against the other balance times. */
 const sqlNow = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -24,9 +29,16 @@ const text = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
  *  cannot interleave. Writing to the boxes is the writer's job. */
 export function applyKnobs(db: DB, knobs: BalanceKnobs, req: {
   values: unknown; name: unknown; notes: unknown; adminId: string; now?: string;
+  /** The rollout the admin's preview was made against (KnobPreview.rolloutId).
+   *  When given, an apply is refused if another has landed since. */
+  baseRolloutId?: number | null;
 }): ApplyResult {
   const now = req.now ?? sqlNow();
   return db.transaction((): ApplyResult => {
+    const latest = latestRolloutId(db);
+    if (req.baseRolloutId !== undefined && req.baseRolloutId !== latest) {
+      return { ok: false, status: 409, error: `Another apply (rollout ${latest ?? 'none'}) landed after your preview: preview again before applying, so it is not undone by accident.` };
+    }
     const preview = previewKnobs(db, knobs, req.values);
     if (preview.errors.length) return { ok: false, status: 400, error: preview.errors.join('; '), preview };
     if (!preview.base) return { ok: false, status: 409, error: 'No queue match has been seen with a balance fingerprint yet, so there is nothing to predict from.', preview };
@@ -122,11 +134,33 @@ export function expectedPatchFor(db: DB, serverId: number): number | null {
   return r?.patch_id ?? null;
 }
 
+/** Whether a patch's recorded inventory carries every value this rollout
+ *  wrote. The knob keys are the only ones the rollout sets: a watch list that
+ *  grew, or a release that changed a plugin in the same between-match gap,
+ *  gives the sighting a fingerprint the prediction never had, and neither
+ *  says anything about whether pug_balance.cfg landed. */
+export function knobValuesMatch(db: DB, ro: Pick<RolloutRow, 'patch_id' | 'values_json'>, patchId: number): boolean {
+  if (patchId === ro.patch_id) return true;
+  const values = JSON.parse(ro.values_json) as Record<string, string>;
+  const keys = Object.keys(values);
+  if (keys.length === 0) return false;
+  const r = db.prepare('SELECT inputs_json FROM balance_patches WHERE id = ?').get(patchId) as { inputs_json: string | null } | undefined;
+  if (!r?.inputs_json) return false;
+  const inv = JSON.parse(r.inputs_json) as Inventory;
+  return keys.every((k) => inv[`c:${k}`] === values[k]);
+}
+
 /** A BALANCE sighting from this server: confirm the active rollout's row when
- *  the file is written and the patch is the expected one; always remember
- *  what was seen after the write, for "expected X, saw Y". */
-export function confirmOnSighting(db: DB, s: { serverId: number; patchId: number; now?: string }): void {
+ *  the file is written and the sighting carries the rollout's knob values;
+ *  always remember what was seen after the write, for "expected X, saw Y".
+ *
+ *  Only a queue match counts. Those always run the pinned PUG config the
+ *  rollout predicted from (see baseInventory); an in-game match may be a 2v2
+ *  or a casual config, which would read as a box that lost its values. */
+export function confirmOnSighting(db: DB, s: { serverId: number; matchId: number; patchId: number; now?: string }): void {
   const now = s.now ?? sqlNow();
+  const m = db.prepare('SELECT origin FROM matches WHERE id = ?').get(s.matchId) as { origin: string | null } | undefined;
+  if (m?.origin !== 'queue') return;
   const ro = activeRollout(db);
   if (!ro) return;
   const row = db.prepare('SELECT state FROM balance_rollout_servers WHERE rollout_id = ? AND server_id = ?')
@@ -134,7 +168,7 @@ export function confirmOnSighting(db: DB, s: { serverId: number; patchId: number
   if (!row || (row.state !== 'written' && row.state !== 'confirmed')) return;
   db.prepare('UPDATE balance_rollout_servers SET seen_patch_id = ?, seen_at = ? WHERE rollout_id = ? AND server_id = ?')
     .run(s.patchId, now, ro.id, s.serverId);
-  if (row.state === 'written' && s.patchId === ro.patch_id) {
+  if (row.state === 'written' && knobValuesMatch(db, ro, s.patchId)) {
     db.prepare("UPDATE balance_rollout_servers SET state = 'confirmed', confirmed_at = ? WHERE rollout_id = ? AND server_id = ?")
       .run(now, ro.id, s.serverId);
   }
@@ -146,6 +180,8 @@ export interface RolloutServer {
   seen: { patchId: number; number: number; at: string } | null;
   /** What the last sighting differed in, when it was not the expected patch. */
   mismatch: string | null;
+  /** The site has no way to write this box (no addons dir or transport). */
+  noTransport: boolean;
 }
 export interface RolloutSummary {
   id: number; patchId: number; patchNumber: number; patchName: string | null; values: Record<string, string>;
@@ -176,8 +212,10 @@ export function listRollouts(db: DB, knobs: BalanceKnobs, limit = 20): RolloutSu
         const seenInv = seen && seen.patchId !== ro.patch_id ? inputsOf(seen.patchId) : null;
         return {
           serverId: s.server_id, name: s.name, state: s.state, lastError: s.last_error, writtenAt: s.written_at,
-          confirmedAt: s.confirmed_at, seen,
-          mismatch: seen && seen.patchId !== ro.patch_id
+          confirmedAt: s.confirmed_at, seen, noTransport: s.state === 'failed' && s.last_error === NO_TRANSPORT,
+          // A sighting that carries the rollout's values is not a mismatch,
+          // whatever else (a longer watch list, a release) changed with it.
+          mismatch: seen && !knobValuesMatch(db, ro, seen.patchId)
             ? (expected && seenInv ? diffIgnoringVersionless(expected, seenInv, knobs.versionless) : 'a different patch')
             : null,
         };
