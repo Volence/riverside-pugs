@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer, activatePlayer } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
-import { handleModCall, onModCall, FOLD_WINDOW_MS, type ModCallEvent } from '../src/modCalls.js';
+import { handleModCall, onModCall, onModCallHandled, markModCallHandled, getModCall, FOLD_WINDOW_MS, type ModCallEvent } from '../src/modCalls.js';
+import { addAlias } from '../src/aliases.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const STRANGER = '76561199999999999';
@@ -139,5 +140,90 @@ describe('handleModCall', () => {
     const row = call();
     off();
     expect(seen).toEqual([row.id]);
+  });
+});
+
+describe('markModCallHandled', () => {
+  const MOD = IDS[7];
+  const by = { steamid: MOD, discordId: '907' };
+
+  it('marks an open parent handled by the given player and Discord id, and signals it', () => {
+    const row = call();
+    const seen: number[] = [];
+    const off = onModCallHandled((id) => { seen.push(id); });
+    expect(markModCallHandled(db, row.id, by, at(1000))).toEqual({ ok: true });
+    off();
+    expect(seen).toEqual([row.id]);
+    const after = getModCall(db, row.id)!;
+    expect(after.handled_by_steamid).toBe(MOD);
+    expect(after.handled_by_discord_id).toBe('907');
+    expect(after.handled_at).toBe(at(1000).toISOString());
+  });
+
+  it('stores a null Discord id for a handler with none linked', () => {
+    const row = call();
+    expect(markModCallHandled(db, row.id, { steamid: MOD, discordId: null })).toEqual({ ok: true });
+    expect(getModCall(db, row.id)!.handled_by_discord_id).toBeNull();
+  });
+
+  it('refuses a call that does not exist', () => {
+    expect(markModCallHandled(db, 9999, by)).toEqual({ ok: false, why: 'no_call' });
+  });
+
+  it('refuses a call already handled, and keeps the first handler', () => {
+    const row = call();
+    expect(markModCallHandled(db, row.id, by).ok).toBe(true);
+    const seen: number[] = [];
+    const off = onModCallHandled((id) => { seen.push(id); });
+    expect(markModCallHandled(db, row.id, { steamid: IDS[6], discordId: '906' })).toEqual({ ok: false, why: 'already' });
+    off();
+    expect(seen).toEqual([]);
+    expect(getModCall(db, row.id)!.handled_by_steamid).toBe(MOD);
+  });
+
+  it('refuses a folded call: the parent is the one to handle', () => {
+    const first = call();
+    const child = call({ steamid: IDS[1] }, 1000);
+    expect(child.folded_into).toBe(first.id);
+    expect(markModCallHandled(db, child.id, by)).toEqual({ ok: false, why: 'folded' });
+    expect(getModCall(db, child.id)!.handled_at).toBeNull();
+  });
+
+  it('refuses the player the call is about, through an alias on either side', () => {
+    const ALT = '76561199888888888';
+    const row = call({ target: MOD });
+    expect(markModCallHandled(db, row.id, by)).toEqual({ ok: false, why: 'about_you' });
+    // The handler signs in on an alt folded into the target's account.
+    addAlias(db, { steamid: ALT, canonical: MOD, by: 'test' });
+    expect(markModCallHandled(db, row.id, { steamid: ALT, discordId: null })).toEqual({ ok: false, why: 'about_you' });
+    // The call names the alt; the handler is the canonical account.
+    db.prepare('UPDATE mod_calls SET target_steamid = ? WHERE id = ?').run(ALT, row.id);
+    expect(markModCallHandled(db, row.id, by)).toEqual({ ok: false, why: 'about_you' });
+    expect(getModCall(db, row.id)!.handled_at).toBeNull();
+  });
+
+  it('answers about_you before already, so the subject learns nothing about its state', () => {
+    const row = call({ target: MOD });
+    expect(markModCallHandled(db, row.id, { steamid: IDS[6], discordId: null }).ok).toBe(true);
+    expect(markModCallHandled(db, row.id, by)).toEqual({ ok: false, why: 'about_you' });
+  });
+
+  it('the update itself is guarded, so a handle that lands between the read and the write loses', () => {
+    const row = call();
+    // Another handler wins after this one's checks have read the row: the
+    // competing write runs just before this call's own UPDATE is prepared.
+    const racing = new Proxy(db, {
+      get(target, prop, recv) {
+        if (prop !== 'prepare') return Reflect.get(target, prop, recv);
+        return (sql: string) => {
+          if (/^\s*UPDATE mod_calls SET handled/.test(sql)) {
+            target.prepare('UPDATE mod_calls SET handled_at = ?, handled_by_steamid = ? WHERE id = ?').run('x', IDS[6], row.id);
+          }
+          return target.prepare(sql);
+        };
+      },
+    });
+    expect(markModCallHandled(racing, row.id, by)).toEqual({ ok: false, why: 'already' });
+    expect(getModCall(db, row.id)!.handled_by_steamid).toBe(IDS[6]);
   });
 });

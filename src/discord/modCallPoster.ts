@@ -1,10 +1,9 @@
-import { resolveAlias } from '../aliases.js';
 import type { DB } from '../db.js';
-import { getModCall, onModCall } from '../modCalls.js';
+import { getModCall, markModCallHandled, onModCall, onModCallHandled } from '../modCalls.js';
 import { playerByDiscordId } from '../players.js';
 import { getSetting } from '../settings.js';
 import { inGoodStanding } from '../standing.js';
-import { renderModCallCard } from './modCallCard.js';
+import { handlerLabel, renderModCallCard } from './modCallCard.js';
 import type { BotInteraction, BotTransport, InteractionReply } from './transport.js';
 
 const RETRY_MS = 30_000;
@@ -33,13 +32,17 @@ const say = (content: string): InteractionReply => ({
  */
 export class ModCallPoster {
   private chain: Promise<void> = Promise.resolve();
-  private off: (() => void) | null = null;
+  private offs: (() => void)[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private deps: { db: DB; transport: BotTransport; publicUrl: string; retryMs?: number }) {}
 
   start(): void {
-    this.off = onModCall((id) => { void this.enqueue(() => this.deliver(id)); });
+    this.offs = [
+      onModCall((id) => { void this.enqueue(() => this.deliver(id)); }),
+      // Handled from the button or the site alike: the card follows the row.
+      onModCallHandled((id) => { void this.enqueue(() => this.refresh(id)); }),
+    ];
     void this.retryNow();
     const every = this.deps.retryMs ?? RETRY_MS;
     if (every > 0) {
@@ -49,8 +52,8 @@ export class ModCallPoster {
   }
 
   stop(): void {
-    this.off?.();
-    this.off = null;
+    for (const off of this.offs) off();
+    this.offs = [];
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
   }
@@ -141,18 +144,17 @@ export class ModCallPoster {
     const p = playerByDiscordId(db, i.userId);
     if (!p || (p.is_admin !== 1 && p.is_mod !== 1) || !inGoodStanding(db, p.steamid)) return say('Staff only.');
     const id = Number(m[1]);
-    const call = getModCall(db, id);
-    if (!call) return say('No such call.');
-    // The staff member a call is about does not handle it, and gets the same
-    // answer as anyone else who may not: the card hides who called, and the
-    // reply should not say more than that.
-    if (call.target_steamid !== null && resolveAlias(db, call.target_steamid) === p.steamid) return say('Staff only.');
-    // Guarded on handled_at so two mods pressing at once cannot both win.
-    const won = db.prepare(
-      'UPDATE mod_calls SET handled_by_discord_id = ?, handled_at = ? WHERE id = ? AND handled_at IS NULL',
-    ).run(i.userId, new Date().toISOString(), id).changes === 1;
-    if (!won) return say(`Already handled by <@${getModCall(db, id)?.handled_by_discord_id}>.`);
-    void this.enqueue(() => this.refresh(id));
+    // The rules are markModCallHandled's, shared with the site. The staff
+    // member a call is about gets the same answer as anyone else who may not
+    // handle it: the card hides who called, and the reply should not say more
+    // than that. The refresh comes from its handled signal.
+    const r = markModCallHandled(db, id, { steamid: p.steamid, discordId: i.userId });
+    if (!r.ok) {
+      if (r.why === 'no_call') return say('No such call.');
+      if (r.why === 'about_you') return say('Staff only.');
+      if (r.why === 'folded') return say('That call is folded into another card: handle that one.');
+      return say(`Already handled by ${handlerLabel(db, getModCall(db, id)!) ?? 'someone'}.`);
+    }
     return say('Marked as yours.');
   }
 }

@@ -45,6 +45,22 @@ function personLine(db: DB, steamid: string): string {
 }
 
 /**
+ * Who handled a call, for the card and the button's "Already handled" reply.
+ * A handler with a linked Discord shows as a mention (looked up through the
+ * player, so a relink since is followed), falling back to the id the button
+ * stored, which is all a row handled before handled_by_steamid has. Someone
+ * with no Discord handled it from the site, so the card says that by name.
+ * Null for a call nobody has handled.
+ */
+export function handlerLabel(db: DB, call: ModCallRow): string | null {
+  if (call.handled_at === null) return null;
+  const id = call.handled_by_steamid !== null ? identityOf(db, call.handled_by_steamid) : null;
+  const discordId = id?.discordId ?? call.handled_by_discord_id;
+  if (discordId) return `<@${discordId}>`;
+  return id ? `**${escapeName(id.steamName)}** (on the site)` : null;
+}
+
+/**
  * How to join the call's own game server, for staff who want to look in
  * person rather than through SourceTV. Null when the call has no server.
  *
@@ -132,7 +148,8 @@ export function renderModCallCard(db: DB, call: ModCallRow, publicUrl: string): 
   const tail: string[] = [];
   if (join) tail.push(`Join: \`${join}\``);
   if (tv) tail.push(`Watch: \`${spectateConnectLine(tv)}\``);
-  if (handled && call.handled_by_discord_id) tail.push(`Handled by <@${call.handled_by_discord_id}>`);
+  const handler = handlerLabel(db, call);
+  if (handler) tail.push(`Handled by ${handler}`);
 
   const row: ActionRow = [{
     kind: 'button', customId: `${MOD_CALL_PREFIX}${call.id}:handle`,

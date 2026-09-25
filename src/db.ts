@@ -733,7 +733,8 @@ CREATE TABLE IF NOT EXISTS mod_calls (
   note                  TEXT    NOT NULL DEFAULT '',
   discord_message_id    TEXT,
   handled_by_discord_id TEXT,
-  handled_at            TEXT
+  handled_at            TEXT,
+  handled_by_steamid    TEXT
 );
 CREATE INDEX IF NOT EXISTS mod_calls_created ON mod_calls (created_at);
 CREATE INDEX IF NOT EXISTS mod_calls_caller ON mod_calls (caller_steamid, created_at);
@@ -1289,6 +1290,11 @@ export function openDb(path: string): DB {
   // of a match, so an earlier session on the same connection may have found
   // nobody rostered yet and posted nothing. See src/sourcetvSessions.ts.
   ensureColumn(db, 'sourcetv_sessions', 'alerted_at', 'TEXT');
+  // Who marked an in-game call handled, as a player: the site's Mark handled
+  // has a player and maybe no Discord, and the Discord button's presser is a
+  // linked player. Rows handled before this column existed keep only
+  // handled_by_discord_id, which the card and the site still fall back to.
+  ensureColumn(db, 'mod_calls', 'handled_by_steamid', 'TEXT');
   // start/stop of the SourceTV relay itself, so a run of dropped sessions can
   // be told apart from the relay simply not running.
   db.exec(`

@@ -38,7 +38,7 @@ export interface ModCallRow {
   target_kind: 'player' | 'team' | 'general' | 'none'; target_steamid: string | null; reason: ModCallReason; text: string;
   via: 'game' | 'tv'; ticket_id: number | null; folded_into: number | null; pinged: number;
   post_state: 'pending' | 'posted' | 'skipped' | 'folded'; note: string; discord_message_id: string | null;
-  handled_by_discord_id: string | null; handled_at: string | null;
+  handled_by_discord_id: string | null; handled_by_steamid: string | null; handled_at: string | null;
 }
 
 const listeners = new Set<(id: number) => void>();
@@ -48,6 +48,16 @@ const listeners = new Set<(id: number) => void>();
 export function onModCall(fn: (id: number) => void): () => void {
   listeners.add(fn);
   return () => { listeners.delete(fn); };
+}
+
+const handledListeners = new Set<(id: number) => void>();
+
+/** Hear about every call marked handled, from Discord or the site, by id,
+ *  once the row says so. The poster re-renders the card on it. Returns the
+ *  unsubscribe. */
+export function onModCallHandled(fn: (id: number) => void): () => void {
+  handledListeners.add(fn);
+  return () => { handledListeners.delete(fn); };
 }
 
 export function getModCall(db: DB, id: number): ModCallRow | undefined {
@@ -166,4 +176,37 @@ export function handleModCall(
     try { fn(id); } catch (err) { console.error('[modcall] listener failed:', err); }
   }
   return getModCall(db, id)!;
+}
+
+export type MarkHandledResult = { ok: true } | { ok: false; why: 'no_call' | 'already' | 'about_you' | 'folded' };
+
+/**
+ * Mark a call handled. The one rule set for the Discord button and the site's
+ * Mark handled, so neither can let through what the other refuses. Whoever is
+ * asking is assumed to be staff: each surface checks that its own way first.
+ *
+ * The player a call is about never handles it, alias or not, and is told so
+ * before anything else about the call, so the answer says nothing about its
+ * state. A folded call has no card of its own: its parent is the one to
+ * handle. The UPDATE is guarded on handled_at, so two handlers at once cannot
+ * both win, and a loser sees `already`.
+ */
+export function markModCallHandled(
+  db: DB, callId: number, by: { steamid: string; discordId: string | null }, now: Date = new Date(),
+): MarkHandledResult {
+  const call = getModCall(db, callId);
+  if (!call) return { ok: false, why: 'no_call' };
+  const me = resolveAlias(db, by.steamid);
+  if (call.target_steamid !== null && resolveAlias(db, call.target_steamid) === me) return { ok: false, why: 'about_you' };
+  if (call.folded_into !== null) return { ok: false, why: 'folded' };
+  if (call.handled_at !== null) return { ok: false, why: 'already' };
+  const won = db.prepare(
+    `UPDATE mod_calls SET handled_by_steamid = ?, handled_by_discord_id = ?, handled_at = ?
+      WHERE id = ? AND handled_at IS NULL`,
+  ).run(me, by.discordId, now.toISOString(), callId).changes === 1;
+  if (!won) return { ok: false, why: 'already' };
+  for (const fn of handledListeners) {
+    try { fn(callId); } catch (err) { console.error('[modcall] handled listener failed:', err); }
+  }
+  return { ok: true };
 }
