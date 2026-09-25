@@ -550,6 +550,20 @@ describe('balance and per-round lines', () => {
     });
   });
 
+  it('parses BALANCE_END watch=, and leaves it out when absent or unknown', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} BALANCE_END half=1 parts=1 items=3 watch=file`))).toEqual({
+      kind: 'balance_end', token: TOKEN, half: 1, parts: 1, items: 3, watch: 'file',
+    });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} BALANCE_END half=1 parts=1 items=3 watch=builtin`))).toMatchObject({ watch: 'builtin' });
+    const odd = parseLogDatagram(framed(`PUG ${TOKEN} BALANCE_END half=1 parts=1 items=3 watch=bogus`));
+    expect(odd).toMatchObject({ kind: 'balance_end', items: 3 });
+    expect(odd && 'watch' in odd ? odd.watch : undefined).toBeUndefined();
+  });
+
+  it('a BALANCE_END not opening the line (after the engine stamp) is refused', () => {
+    expect(parseLogDatagram(framed(`"x<1><STEAM_1:0:1><>" say "PUG ${TOKEN} BALANCE_END half=1 parts=1 items=3 watch=file"`))).toBeNull();
+  });
+
   it('rejects BALANCE with a bad half', () => {
     expect(parseLogDatagram(framed(`PUG ${TOKEN} BALANCE half=3 part=0 c:a=1`))).toBeNull();
   });

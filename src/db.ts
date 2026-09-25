@@ -1269,6 +1269,9 @@ export function openDb(path: string): DB {
   // A folded patch's published_at from before the fold (a fold unpublishes),
   // so an unfold can put it back on the public page. See balanceFold.ts.
   ensureColumn(db, 'balance_patches', 'published_before_fold', 'TEXT');
+  // Which watch list the box's plugin read at its last sighting: 'file' (the
+  // site's pug_balance_watch.txt) or 'builtin'; NULL before pug-match 0.3.14.
+  ensureColumn(db, 'balance_server_state', 'watch', 'TEXT');
   // The patch the first reporting server was on before this one: the default
   // fold target and the base of the triage card's diff.
   ensureColumn(db, 'balance_patches', 'came_from_patch_id', 'INTEGER REFERENCES balance_patches(id)');

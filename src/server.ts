@@ -1083,7 +1083,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             const serverId = m.server_id ?? serverOf(source, meta);
             const r = recordBalanceSighting(deps.db, {
               matchId: m.id, serverId, half: ev.half,
-              inventory: inv, versionless: balanceKnobs.versionless, ignored: effectiveIgnored(deps.db, balanceKnobs.ignored),
+              inventory: inv, versionless: balanceKnobs.versionless, ignored: effectiveIgnored(deps.db, balanceKnobs.ignored), watch: ev.watch ?? null,
               expectedPatchId: serverId !== null ? expectedPatchFor(deps.db, serverId) : null,
             });
             if (serverId !== null) confirmOnSighting(deps.db, { serverId, patchId: r.patchId });

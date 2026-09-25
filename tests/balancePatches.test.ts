@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../src/db.js';
 import { addServer } from '../src/serverPool.js';
 import { subscribeAdminEvents } from '../src/adminFeed.js';
-import { diffInventories, fingerprintOf, formatDiff, listPatches, recordBalanceSighting, refingerprintPatches, watchListOnly, withoutIgnored } from '../src/balancePatches.js';
+import { diffInventories, fingerprintOf, formatDiff, listPatches, recordBalanceSighting, refingerprintPatches, serverDrift, watchListOnly, withoutIgnored } from '../src/balancePatches.js';
 
 const INV = { 'c:z_tank_health': '4000', 'p:l4d_skypounce.smx': '100.aaaa0001', 'p:pug-match.smx': '200.bbbb0001' };
 
@@ -82,6 +82,30 @@ describe('recordBalanceSighting', () => {
     expect(problems[0]).toMatch(/chicago seen for the first time \(patch #1/);
     expect(problems[0]).not.toMatch(/changed \(still patch/);
     expect(problems[0]).toMatch(/differs from dallas \(last seen 2026-09-24 04:20 UTC\)/);
+  });
+
+  it('stores which watch list a box used, and drift ignores values only one box watches', () => {
+    // Dallas on the site's file (more cvars, a weapon key), Chicago on the
+    // compiled list: the extra keys are not drift. A vanished cvar (c: on one
+    // side, x: on the other) and a changed shared value still are.
+    const grown = { ...INV, 'c:z_new': '1', 'w:weapon_smg.Damage': 'default' };
+    recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: grown, versionless: [], watch: 'file' });
+    recordBalanceSighting(db, { matchId: 1, serverId: 2, half: 1, inventory: INV, versionless: [], watch: 'builtin' });
+    expect(db.prepare('SELECT server_id, watch FROM balance_server_state ORDER BY server_id').all())
+      .toEqual([{ server_id: 1, watch: 'file' }, { server_id: 2, watch: 'builtin' }]);
+    expect(problems[1]).not.toMatch(/differs from/);
+    const drift = serverDrift(db);
+    expect(drift.map((d) => [d.name, d.watch, d.differsFrom])).toEqual([['dallas', 'file', []], ['chicago', 'builtin', []]]);
+
+    problems.length = 0;
+    recordBalanceSighting(db, { matchId: 1, serverId: 2, half: 1, inventory: { ...INV, 'c:z_tank_health': '8000', 'x:z_new': 'missing' }, versionless: [], watch: 'file' });
+    expect(problems[0]).toMatch(/differs from dallas.*c:z_tank_health 4000 -> 8000/);
+    expect(problems[0]).toMatch(/x:z_new/);
+    expect(problems[0]).not.toMatch(/weapon_smg/);
+    const chicago = serverDrift(db).find((d) => d.name === 'chicago')!;
+    expect(chicago.watch).toBe('file');
+    expect(chicago.differsFrom[0].diff).toMatch(/c:z_tank_health 4000 -> 8000/);
+    expect(chicago.differsFrom[0].diff).not.toMatch(/weapon_smg/);
   });
 
   it('alerts with the time-ordered patch number, not the row id', () => {
