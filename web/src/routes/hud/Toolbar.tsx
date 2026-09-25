@@ -46,6 +46,8 @@ const ABILITY_STATES: { key: PreviewState['ability']; label: string }[] = [
 /** What Show yourself is: a picture of a console setting, never written into the download. */
 /** What the Occasional panels toggle shows. */
 const OCCASIONAL_NOTE = 'Preview only: also draw the panels the game shows now and then, such as your microphone, a vote or the survival timer.';
+/** What the Tab held toggle shows (tab screen spec 3.1). */
+const TAB_NOTE = 'Preview only: draw the Tab screen (scoreboard and versus score) as the game shows it while you hold Tab in versus.';
 const SHOW_SELF_NOTE = 'Preview only: the game shows your own card with the console setting hud_zombieteam_showself 1, which is not part of the HUD file.';
 
 /** What the preview survivor holds: the game moves the weapon numbers when this changes. */
@@ -241,6 +243,13 @@ export function Toolbar(p: ToolbarProps) {
               onClick={() => p.onPreview({ ...p.preview, occasional: !p.preview.occasional })}
             >
               Occasional panels
+            </button>
+            {/* The scoreboard and versus score the game draws while Tab is held (PreviewState.tab): a preview, never part of the design. */}
+            <button
+              type="button" class="btn btn--ghost btn--sm" aria-pressed={!!p.preview.tab} title={TAB_NOTE}
+              onClick={() => p.onPreview({ ...p.preview, tab: !p.preview.tab })}
+            >
+              Tab held
             </button>
             <label>
               Backdrop{' '}

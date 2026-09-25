@@ -411,7 +411,11 @@ export function ElementControls(
   // number is the unfitted container's, which placeElement would take as a
   // drawn one and move by the fit offset.
   const fitted = o.fit === true && panelChildren(id)?.frame === 'hudlayout';
-  const team = !!el.team || fitted;
+  // The versus panel goes through placeElement too, which keeps it whole on screen.
+  const team = !!el.team || fitted || id === 'tabVersus';
+  // A move or a hide waiting on a probe (the Tab screen's versus panel: TS4, TS7) is not offered.
+  const moves = el.move && (!el.moveGate || probe(el.moveGate));
+  const hides = el.props.includes('visible') && (!el.hideGate || probe(el.hideGate));
   const setPos = (key: 'x' | 'y', e: Event) => {
     if (!team) { patchNum(patch, e, key, (n) => ({ [key]: n })); return; }
     const n = parseFloat((e.target as HTMLInputElement).value);
@@ -425,7 +429,7 @@ export function ElementControls(
 
   return (
     <Field legend={el.label}>
-      {el.props.includes('visible') && (
+      {hides && (
         <label class="hud__check">
           <input
             type="checkbox" checked={o.visible ?? rect.visible}
@@ -436,6 +440,7 @@ export function ElementControls(
       )}
 
       {el.note && <Note text={el.note} />}
+      {el.tab && <p class="muted hud__note">{TAB_NOTE}</p>}
 
       {/* The crosshair is the one element the game places itself; its note is the first line of its own controls. */}
       {id === 'xhair' && <CrosshairControls design={design} edit={edit} selected />}
@@ -448,7 +453,7 @@ export function ElementControls(
       )}
       {id === 'abilityRing' && <p class="muted hud__note">Hunter: not ready while standing (no meter), ready while crouched. After any ability the icon takes the charging colour while the meter refills.</p>}
 
-      {el.move && !free && (
+      {moves && !free && (
         <div class="hud__row2">
           {/* The game places the peril notice across: only its Y moves (HudElement.moveAxis). */}
           {el.moveAxis !== 'y' && (
@@ -749,6 +754,10 @@ function elementKey(design: HudDesign, block: string, key: string): string | und
 
 /** Said under a teammate piece's controls: one file is loaded for every card. */
 const EVERY_CARD = "Edits inside a card apply to every teammate's card.";
+/** The Tab screen's rows: one file for every row, as for the cards. */
+const EVERY_ROW = 'Edits apply to every row.';
+/** Said on a Tab screen element. */
+const TAB_NOTE = 'Shown while you hold Tab in versus. Pick a piece to edit it.';
 /** Whether a panel's file is loaded once per teammate card. */
 const repeatsCards = (panel: string): boolean => panelChildren(panel)?.repeat === 'cards';
 
@@ -788,12 +797,17 @@ export function ChildControls(
   const movable = pieceMovableIn(design, panel, name, file);
   const sameView = panelChildren(panel)?.linked?.find((l) => l.rule === 'same' && panelChild(design, panel, name, l.file));
 
+  // A hide waiting on a probe (the Tab screen's pieces, TS7) is not offered.
+  const hides = !def.hideGate || probe(def.hideGate);
+
   return (
     <Field legend={def.label}>
-      <label class="hud__check">
-        <input type="checkbox" checked={o.visible ?? info.visible} onChange={(e) => patch({ visible: (e.target as HTMLInputElement).checked })} />
-        <span>Visible</span>
-      </label>
+      {hides && (
+        <label class="hud__check">
+          <input type="checkbox" checked={o.visible ?? info.visible} onChange={(e) => patch({ visible: (e.target as HTMLInputElement).checked })} />
+          <span>Visible</span>
+        </label>
+      )}
       {!movable && (
         <p class="muted hud__note">This HUD's Hunter file has no {def.label.toLowerCase()}, and the Boomer's place and size follow the Hunter's, so here they stay as the file has them.{sameView ? ' Move or size it on the Smoker view.' : ''}</p>
       )}
@@ -853,7 +867,18 @@ export function ChildControls(
           />
         </div>
       )}
-      {def.keys?.filter((k) => !k.gate || probe(k.gate)).map((k) => (
+      {def.keys?.filter((k) => !k.gate || probe(k.gate)).map((k) => (k.clear
+        ? (
+          <Fragment key={k.key}>
+            <ClearableKey
+              def={k} end={end} stored={o.keys?.[k.key]} file={info.keys?.[k.key]} design={design}
+              onValue={(v, mode) => patch({ keys: { ...o.keys, [k.key]: v } }, mode)}
+              onFile={() => edit((d) => resetChildKey(d, name, k.key, panel))}
+            />
+            {k.note && <Note text={k.note} />}
+          </Fragment>
+        )
+        : (
         <Fragment key={k.key}>
           <KeyControl
             def={k} end={end} max={def.kind === 'bar' && k.key === 'inset' ? maxInset(info.h) : undefined}
@@ -872,9 +897,9 @@ export function ChildControls(
             </button>
           )}
         </Fragment>
-      ))}
+        )))}
       {def.note && <Note text={def.note} />}
-      {repeatsCards(panel) && <p class="muted hud__note">{EVERY_CARD}</p>}
+      {repeatsCards(panel) && <p class="muted hud__note">{elementById(panel)?.tab ? EVERY_ROW : EVERY_CARD}</p>}
       {def.addable && !baseHasChild(baseOf(design), name, panel) && (
         <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={() => edit((d) => patchChild(d, name, { on: false }, panel))}>
           {`Remove the ${def.label.toLowerCase()}`}
@@ -1008,6 +1033,40 @@ function KeyControl({ def, value, onValue, end, max, band = 'healthy', onBand }:
   );
 }
 
+/**
+ * A key the file sets whose absence the game reads differently (KeyDef.clear:
+ * the Tab rows' bar, Gray in both presets, which colours by health without
+ * it, probe TL3): three choices, as the file has it (nothing stored), the
+ * key taken out ('' stored), or one colour of the player's.
+ */
+function ClearableKey({ def, stored, file, design, onValue, onFile, end }: {
+  def: KeyDef; stored: string | undefined; file: string | undefined; design: HudDesign;
+  onValue: (v: string, mode?: EditMode) => void; onFile: () => void; end: () => void;
+}) {
+  const mode = stored === '' ? 'clear' : stored !== undefined ? 'one' : 'file';
+  // One colour starts from the colour the file draws, so picking it changes nothing on screen yet.
+  const start = shownKey(design, def, file) ?? '255 255 255 255';
+  const onMode = (m: string) => {
+    if (m === 'file') onFile();
+    else if (m === 'clear') onValue('');
+    else onValue(stored && stored !== '' ? stored : start);
+  };
+  return (
+    <>
+      <label class="hud__row">
+        <span>{def.label}</span>
+        <select aria-label={def.label} value={mode} onChange={(e) => onMode((e.target as HTMLSelectElement).value)}>
+          <option value="file">As the file has it</option>
+          <option value="clear">{def.clear!.label}</option>
+          <option value="one">One colour</option>
+        </select>
+        <span />
+      </label>
+      {mode === 'one' && <ColourRow label={def.label} value={shownKey(design, def, stored) ?? start} end={end} onPick={(c) => onValue(c, 'gesture')} />}
+    </>
+  );
+}
+
 const ALIGNS: { how: Align; label: string }[] = [
   { how: 'left', label: 'Left' }, { how: 'centre', label: 'Centre' }, { how: 'right', label: 'Right' },
   { how: 'top', label: 'Top' }, { how: 'middle', label: 'Middle' }, { how: 'bottom', label: 'Bottom' },
@@ -1055,7 +1114,7 @@ export function PiecesControls(
   const where = panel === 'teamColumn' ? 'the teammate card' : (elementById(panel)?.label ?? panel);
   return (
     <Field legend={`${names.length} pieces in ${where}`}>
-      {repeatsCards(panel) && <p class="muted hud__note">{EVERY_CARD}</p>}
+      {repeatsCards(panel) && <p class="muted hud__note">{elementById(panel)?.tab ? EVERY_ROW : EVERY_CARD}</p>}
       <div class="hud__row2">
         <label class="hud__field">
           <span>X</span>
