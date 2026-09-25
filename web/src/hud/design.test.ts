@@ -690,3 +690,24 @@ describe('validateDesign on the Tab screen', () => {
     expect(withEls({ tabBoard: { x: 10, y: 10, visible: false }, tabSurvivors: { x: 60 }, tabInfected: { y: 5 } }).elements).toEqual({});
   });
 });
+
+describe('validateDesign: Your items', () => {
+  it('keeps what it offers: shown, a place, a colour, a font and an alignment', () => {
+    const d = validateDesign({ v: 1, elements: { yourItems: {
+      visible: true, x: 790, y: 230, color: '255 0 255 255', itemFont: 'L4D_Icons_large', itemAlign: 'center',
+      scale: 2, w: 90, h: 40, fit: true, keys: { font: 'x' }, dir: 'row',
+    } } });
+    expect(d.elements.yourItems).toEqual({ visible: true, x: 790, y: 230, color: '255 0 255 255', itemFont: 'L4D_Icons_large', itemAlign: 'center' });
+  });
+  it('drops a font or an alignment the game does not have', () => {
+    const d = validateDesign({ v: 1, elements: { yourItems: { visible: true, itemFont: 'Default', itemAlign: 'left' } } });
+    expect(d.elements.yourItems).toEqual({ visible: true });
+  });
+  it('keeps the font and alignment fields on no other element', () => {
+    const d = validateDesign({ v: 1, elements: { chat: { x: 10, itemFont: 'L4D_Icons_large', itemAlign: 'center' } } });
+    expect(d.elements.chat).toEqual({ x: 10 });
+  });
+  it('is not in a new design', () => {
+    expect(DEFAULT_DESIGN.elements.yourItems).toBeUndefined();
+  });
+});

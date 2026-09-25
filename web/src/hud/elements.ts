@@ -12,6 +12,7 @@
 
 import type { KeyDef } from './children';
 import type { ProbeId } from './probes';
+import { YOUR_ITEMS } from './youritems';
 
 /**
  * Only 'visible' is live in v1. 'color', 'bg' and 'fontSize' are the reserved
@@ -99,6 +100,21 @@ export const ELEMENTS: HudElement[] = [
   { id: 'ownHealth', label: 'Your health', side: 'survivor', key: 'CHudLocalPlayerDisplay', move: true, resize: 'scale',
     children: ['resource/ui/hud/localplayerdisplay.res', 'resource/ui/hud/localplayerpanel.res'],
     mockSize: { stock: { w: 125, h: 91 } }, props: ['visible'] },
+  /**
+   * Your items: your own medkit, pills and throwable, anywhere at or right
+   * of your health bar (docs/superpowers/specs/2026-09-25-hud-editor-your-items-design.md).
+   * It is the own panel's Items Label, which client.dll fills with ToolBox
+   * glyphs but only as a direct child of that panel
+   * (/home/volence/l4d/hud/probe-own-items/RESULTS.md, v1), and which
+   * build.ts yourItemsPass adds with the panel made full screen
+   * (/home/volence/l4d/hud/probe-your-items/RESULTS.md, p1 to p3). No base
+   * file has the block, so `key` names the one the build writes, and
+   * baseHasElement answers for it from Your health's own panel. Off until
+   * the player turns it on: an absent `visible` is off, never the file's.
+   */
+  { id: YOUR_ITEMS, label: 'Your items', side: 'survivor', key: 'Items', file: 'resource/ui/hud/localplayerpanel.res',
+    move: true, resize: 'none', children: [], props: ['visible'],
+    note: "The game puts your health bar at this row's left edge, so the icons can only sit level with or right of your health bar." },
   // underTab: the game hides the teammate cards while Tab is held, as the scoreboard lists the team
   // (/home/volence/l4d/hud/probe-tab/RESULTS.md, TAB-1 tab1/runs/tab-survivor/hud-a.png against tab-a.png).
   { id: 'teamColumn', label: 'Teammates', side: 'survivor', key: 'CHudTeamDisplay', move: true, resize: 'scale', underTab: 'hidden',
