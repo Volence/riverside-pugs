@@ -25,6 +25,9 @@ beforeEach(async () => {
 afterEach(async () => { await app.close(); });
 
 const get = (as: string, url: string) => app.inject({ method: 'GET', url, cookies: cookie[as] });
+const handle = (as: string, id: number) => app.inject({ method: 'POST', url: `/api/mod/calls/${id}/handle`, cookies: cookie[as] });
+const row = (id: number) => db.prepare('SELECT handled_by_steamid, handled_by_discord_id, handled_at FROM mod_calls WHERE id = ?').get(id) as
+  { handled_by_steamid: string | null; handled_by_discord_id: string | null; handled_at: string | null };
 
 function call(fields: Record<string, unknown>): number {
   const row = {
@@ -143,5 +146,66 @@ describe('GET /api/mod/calls', () => {
     call({ text: 'skipped', post_state: 'skipped' });
     expect((await get(MOD, '/api/mod/calls?filter=open')).json().calls.map((c: { text: string }) => c.text)).toEqual(['posted']);
     expect((await get(MOD, '/api/mod/calls?filter=all')).json().calls.map((c: { text: string }) => c.text)).toEqual(['skipped', 'posted']);
+  });
+});
+
+describe('POST /api/mod/calls/:id/handle', () => {
+  it('is staff only', async () => {
+    const id = call({});
+    expect((await app.inject({ method: 'POST', url: `/api/mod/calls/${id}/handle` })).statusCode).toBe(401);
+    expect((await handle(PLAYER, id)).statusCode).toBe(403);
+    expect(row(id).handled_at).toBeNull();
+  });
+
+  it('marks an open parent handled by the viewer, with their linked Discord', async () => {
+    const id = call({});
+    const r = await handle(MOD, id);
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ ok: true });
+    expect(row(id)).toMatchObject({ handled_by_steamid: MOD, handled_by_discord_id: '4242' });
+    expect(row(id).handled_at).not.toBeNull();
+    const [c] = (await get(MOD, '/api/mod/calls?filter=all')).json().calls;
+    expect(c.handledBy).toBe('Mod Person');
+  });
+
+  it('stores no Discord id for a viewer with none linked, and still names them', async () => {
+    db.prepare("UPDATE players SET is_mod = 1, name = 'Plain Mod' WHERE steamid = ?").run(PLAYER);
+    const id = call({});
+    expect((await handle(PLAYER, id)).statusCode).toBe(200);
+    expect(row(id)).toMatchObject({ handled_by_steamid: PLAYER, handled_by_discord_id: null });
+    expect((await get(MOD, '/api/mod/calls?filter=all')).json().calls[0].handledBy).toBe('Plain Mod');
+  });
+
+  it('answers 409 for a call already handled', async () => {
+    const id = call({ handled_at: '2026-09-24T10:05:00.000Z', handled_by_discord_id: '999' });
+    const r = await handle(MOD, id);
+    expect(r.statusCode).toBe(409);
+    expect(r.json().error).toBe('already handled');
+    expect(row(id).handled_by_discord_id).toBe('999');
+  });
+
+  it('answers 400 for a folded call', async () => {
+    const parent = call({});
+    const child = call({ caller_steamid: CALLER2, folded_into: parent, post_state: 'folded' });
+    expect((await handle(MOD, child)).statusCode).toBe(400);
+    expect(row(child).handled_at).toBeNull();
+  });
+
+  it('answers 404 alike for no such call and a call about the viewer', async () => {
+    const about = call({ target_steamid: MOD });
+    const missing = await handle(MOD, 9999);
+    const aboutMe = await handle(MOD, about);
+    expect(missing.statusCode).toBe(404);
+    expect(aboutMe.statusCode).toBe(404);
+    expect(aboutMe.json()).toEqual(missing.json());
+    expect(row(about).handled_at).toBeNull();
+    // Already handled by someone else: still 404 for its subject, not 409.
+    db.prepare("UPDATE mod_calls SET handled_at = 'x' WHERE id = ?").run(about);
+    expect((await handle(MOD, about)).statusCode).toBe(404);
+  });
+
+  it('answers 404 for an id that is not a number', async () => {
+    const r = await app.inject({ method: 'POST', url: '/api/mod/calls/abc/handle', cookies: cookie[MOD] });
+    expect(r.statusCode).toBe(404);
   });
 });
