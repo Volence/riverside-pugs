@@ -774,6 +774,16 @@ function mapLinked<T>(rule: LinkRule, key: string, v: T, a: LinkRect, b: LinkRec
   }
 }
 
+/**
+ * The Tab screen's files: the four panels' and scoreboard.res, which places
+ * them. Every read and write of one finds its blocks as the PC game does
+ * (kv.ts pcFind), since scoreboard.res puts console-only blocks first
+ * (BackgroundImage [$X360] before the PC's [$WIN32]). Other files keep
+ * kvFind (tab screen spec 4.4: switching every caller is its own change).
+ */
+export const TAB_FILES: ReadonlySet<string> = new Set(['resource/ui/scoreboard.res',
+  ...[TAB_BOARD, TAB_VERSUS, TAB_SURVIVOR_ROW, TAB_INFECTED_ROW].map((p) => p.file)]);
+
 export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, ZCARD_PANEL, PROGRESS_PANEL, GHOST_PANEL, ZPANEL_PANEL, FRUST_PANEL,
   TAB_BOARD, TAB_VERSUS, TAB_SURVIVOR_ROW, TAB_INFECTED_ROW];
 export const panelChildren = (panelId: string): PanelChildren | undefined => PANEL_CHILDREN.find((p) => p.panelId === panelId);

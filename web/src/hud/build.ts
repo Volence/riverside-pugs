@@ -12,7 +12,7 @@ import { baseFile, baseOf, baseTree, importedFiles, isCommunityImport, presetOve
 import { hudFileProblem, hudPathProblem } from '../../../src/hudFiles';
 
 export { baseTree };
-import { parseKv, writeKv, kvFind, kvGet, kvSet, pcApplies, type KvNode } from './kv';
+import { parseKv, writeKv, kvFind, kvGet, kvSet, pcApplies, pcFind, type KvNode } from './kv';
 import { parsePos, parseSize, formatPos, scaleToken, screenW, SCREEN_H, type Aspect } from './units';
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import { SLOTS } from './slots';
@@ -23,7 +23,7 @@ import {
   type WeaponNumKey, WEAPON_ICONS, ITEM_ICONS, WEAPON_BOX_IMAGE, weaponImageKind, VOICE_ICONS, VOICE_ICON_TEXELS, voiceIconOpen,
 } from './design';
 import {
-  panelChildren, panelOfFile, childDef, childPath, maxInset, linkedValue, TEAM_PANEL, OWN_PANEL, SI_PANEL, ZCARD_PANEL, type ChildDef, type PanelChildren, type LinkRect, type LinkRule,
+  panelChildren, panelOfFile, childDef, childPath, maxInset, linkedValue, TAB_FILES, TEAM_PANEL, OWN_PANEL, SI_PANEL, ZCARD_PANEL, type ChildDef, type PanelChildren, type LinkRect, type LinkRule,
 } from './children';
 import { crosshairFiles } from '../crosshair/vpk';
 import {
@@ -65,6 +65,16 @@ const PZ_RECORD = 'resource/ui/hud/pzdamagerecordpanel.res';
 const POSITIONAL = ['xpos', 'ypos', 'wide', 'tall'];
 const num = (v: string | undefined) => { const n = parseFloat(v ?? ''); return Number.isFinite(n) ? n : 0; };
 
+/**
+ * A block of `file` at `path`: in a Tab screen file (children.ts TAB_FILES)
+ * as the PC game finds it, skipping console-only blocks (pcFind), so an edit
+ * to scoreboard.res's BackgroundImage lands on the [$WIN32] block the game
+ * draws, not the [$X360] one before it; elsewhere kvFind, as before.
+ */
+export function blockIn(file: string, nodes: KvNode[], path: string[]): KvNode | undefined {
+  return TAB_FILES.has(file.toLowerCase()) ? pcFind(nodes, path) : kvFind(nodes, path);
+}
+
 class Work {
   private trees = new Map<string, KvNode[]>();
   private texts = new Map<string, string>();
@@ -89,7 +99,7 @@ class Work {
     return root.value;
   }
   panel(path: string, keys: string[]): KvNode {
-    const p = kvFind(this.tree(path), keys);
+    const p = blockIn(path, this.tree(path), keys);
     if (!p) throw new Error(`${path}: no panel ${keys.join('/')}`);
     return p;
   }
@@ -103,7 +113,7 @@ class Work {
    * so there a missing one is still a bug and fails loudly, as panel() does.
    */
   optional(path: string, keys: string[]): KvNode | undefined {
-    const p = kvFind(this.tree(path), keys);
+    const p = blockIn(path, this.tree(path), keys);
     if (!p && !this.imported) throw new Error(`${path}: no panel ${keys.join('/')}`);
     return p;
   }
@@ -193,7 +203,7 @@ function moveAlong(work: Work, el: HudElement, from: { x: number; y: number }, t
   const W = screenW(aspect);
   for (const name of el.moveWith ?? []) {
     const b = work.optional(layoutOf(el), [name]);
-    const base = kvFind(baseTree(work.key, layoutOf(el)), [name]);
+    const base = blockIn(layoutOf(el), baseTree(work.key, layoutOf(el)), [name]);
     if (!b || !base) continue;
     const w = parseSize(pcGet(base, 'wide') ?? '0', W), h = parseSize(pcGet(base, 'tall') ?? '0', SCREEN_H);
     const x = parsePos(pcGet(base, 'xpos') ?? '0', W) + to.x - from.x, y = parsePos(pcGet(base, 'ypos') ?? '0', SCREEN_H) + to.y - from.y;
@@ -482,7 +492,7 @@ function childPass(work: Work, design: HudDesign) {
       // A piece waiting on a closed probe is never written (validateDesign drops it too).
       if (def.gate && !probe(def.gate)) continue;
       const nodes = work.tree(panel.file);
-      let block = kvFind(nodes, childPath(name));
+      let block = blockIn(panel.file, nodes, childPath(name));
       if (def.addable) {
         if (o.on === false) { if (block) nodes.splice(nodes.indexOf(block), 1); continue; }
         if (o.on === true && !block) {
@@ -997,7 +1007,7 @@ function fitOffset(box: Box, k: number): { x: number; y: number } {
 export function drawnAt(design: HudDesign, id: string, sx: number, sy: number): { x: number; y: number } {
   const el = elementById(id);
   const key = baseOf(design);
-  const panel = el && kvFind(baseTree(key, layoutOf(el)), [el.key]);
+  const panel = el && blockIn(layoutOf(el), baseTree(key, layoutOf(el)), [el.key]);
   if (!el || !panel) return { x: sx, y: sy };
   const W = screenW(design.aspect);
   const p = placed({ ...design.elements[id], x: sx, y: sy }, baseRect(panel, el, key, design.aspect), el, design.aspect);
@@ -1175,7 +1185,7 @@ function hidePass(work: Work, design: HudDesign) {
     const nodes = work.tree(panel.file);
     for (const [name, o] of Object.entries(kids)) {
       if (o.visible !== false) continue;
-      const block = kvFind(nodes, childPath(name));
+      const block = blockIn(panel.file, nodes, childPath(name));
       if (!block) continue;                            // an addable child that is off is not in the file at all
       hardHide(block);
       for (const link of panel.linked ?? []) { const b = work.optional(link.file, [name]); if (b) hardHide(b); }
@@ -1485,7 +1495,7 @@ export function panelChild(design: HudDesign, panelId: string, name: string, fil
   if (!panel) return null;
   const { work, boxes } = panelWork(design);
   const src = file && panel.linked?.some((l) => l.file === file) ? file : panel.file;
-  const n = kvFind(work.tree(src), childPath(name));
+  const n = blockIn(src, work.tree(src), childPath(name));
   if (!n) return null;
   const box = boxes[panelId];
   const shift = design.elements[panelId]?.fit && box ? box : { x: 0, y: 0 };
@@ -1534,7 +1544,7 @@ export function cardChild(design: HudDesign, name: string): CardChild | null {
  */
 export function baseHasElement(key: BaseKey, el: HudElement): boolean {
   if (el.id === 'xhair') return true;
-  if (!kvFind(baseTree(key, layoutOf(el)), [el.key])) return false;
+  if (!blockIn(layoutOf(el), baseTree(key, layoutOf(el)), [el.key])) return false;
   if (!el.team?.file) return true;
   const team = baseTree(key, el.team.file);
   return [1, 2, 3, 4].every((n) => kvFind(team, [`TeamPlayer${n}`]) !== undefined);
@@ -1548,7 +1558,7 @@ export function importedHasXhair(key: BaseKey): boolean {
 /** Whether the base's own panel file has this child: an addable child it lacks shows as a checkbox. */
 export function baseHasChild(key: BaseKey, name: string, panelId = 'teamColumn'): boolean {
   const file = panelChildren(panelId)?.file;
-  return file !== undefined && kvFind(baseTree(key, file), childPath(name)) !== undefined;
+  return file !== undefined && blockIn(file, baseTree(key, file), childPath(name)) !== undefined;
 }
 
 export interface TeamLayout {

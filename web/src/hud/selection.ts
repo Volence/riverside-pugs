@@ -29,7 +29,7 @@
 import { baseTeam, isBar, type Box, type HudDesign } from './design';
 import { baseOf, baseTree } from './base';
 import { elementById } from './elements';
-import { panelChild, panelFrame, elementRect, isFreeTeam, teamCardRects, type CardFrame } from './build';
+import { blockIn, panelChild, panelFrame, elementRect, isFreeTeam, teamCardRects, type CardFrame } from './build';
 import { childRects, hiddenInState, previewOf, panelFile, DOWN_MOVES_BAR, type ChildRect, type PreviewState, type SurvivorState } from './render';
 import { childAt, elementTargets, hitTest, inside, panelBoxes, shownInState, TEAM_CARDS, visibleElements, type Side } from './mock';
 import { childDef, childPath, panelChildren } from './children';
@@ -537,7 +537,7 @@ export function panelClamp(design: HudDesign, panel: string): { w: number; h: nu
   const tree = baseTree(key, reg.file);
   for (const def of reg.children) {
     if (def.gate && !probe(def.gate)) continue;
-    const n = kvFind(tree, childPath(def.name));
+    const n = blockIn(reg.file, tree, childPath(def.name));
     if (!n) continue;
     w = Math.max(w, num(n, 'xpos') + num(n, 'wide'));
     h = Math.max(h, num(n, 'ypos') + num(n, 'tall'));
