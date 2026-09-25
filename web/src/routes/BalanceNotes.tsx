@@ -1,3 +1,4 @@
+import { useEffect } from 'preact/hooks';
 import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { Empty, Panel } from '../components/bits';
@@ -8,6 +9,11 @@ import { PatchEntryView } from './balance/PatchEntryView';
  *  siblings, so a slow or failing patch never blocks the rest of the list. */
 function PatchPanel({ id }: { id: number }) {
   const { data, error } = useFetch((s) => api.balancePatch(id, s), [id]);
+  // A link to #patch-N arrives before this panel exists, so the browser's own
+  // jump lands at the top: jump once the entry is on the page.
+  useEffect(() => {
+    if (data && window.location.hash === `#patch-${id}`) document.getElementById(`patch-${id}`)?.scrollIntoView();
+  }, [data, id]);
   return (
     // Anchored so the Game values page can link a change to its patch.
     <Panel id={`patch-${id}`}>

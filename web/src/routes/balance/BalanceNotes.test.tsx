@@ -129,6 +129,22 @@ describe('BalanceNotes', () => {
     expect(container.textContent).not.toMatch(/caus/i);
   });
 
+  it('scrolls to a linked patch once its entry has loaded', async () => {
+    mockApi.balancePatches.mockResolvedValue({ patches: [summaryOf(comparedEntry), summaryOf(historicalEntry)] });
+    mockApi.balancePatch.mockImplementation((id: number) => Promise.resolve([comparedEntry, historicalEntry].find((e) => e.id === id)));
+    const scrolled: string[] = [];
+    const spy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element) { scrolled.push(this.id); });
+    window.location.hash = '#patch-2';
+    try {
+      render(<BalanceNotes />);
+      await waitFor(() => expect(screen.getByText('Original release.')).toBeTruthy());
+      await waitFor(() => expect(scrolled).toEqual(['patch-2']));
+    } finally {
+      spy.mockRestore();
+      window.location.hash = '';
+    }
+  });
+
   it('says so when there are no patches', async () => {
     mockApi.balancePatches.mockResolvedValue({ patches: [] });
     render(<BalanceNotes />);
