@@ -1,5 +1,5 @@
 import { Fragment, type ComponentChildren } from 'preact';
-import { useEffect, useRef, useState, useErrorBoundary } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState, useErrorBoundary } from 'preact/hooks';
 import { Panel } from '../components/bits';
 import { HudTabs } from '../components/HudTabs';
 import { confirm } from '../components/Confirm';
@@ -18,6 +18,7 @@ import {
   type BuildReport, type CardChild,
 } from '../hud/build';
 import { drawHud, visibleElements, panelBoxes, HANDLE_PX, type Side } from '../hud/mock';
+import { tabPicked } from '../hud/tabscreen';
 import { DEFAULT_PREVIEW, panelFile, type PreviewState } from '../hud/render';
 import type { WeaponHeld } from '../hud/weapons';
 import { closeUpRegion } from '../hud/closeup';
@@ -404,6 +405,11 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
   // the infected side's states). Game code picks it in game; this only
   // changes the picture, never the design or the file.
   const [preview, setPreview] = useState<PreviewState>(DEFAULT_PREVIEW);
+  // What the canvas shows and takes clicks on: the preview, with the Tab
+  // screen also while a Tab element or piece is picked (tab screen spec 3.1),
+  // as a picked occasional panel is drawn. The toggle itself stays as set.
+  const tabShown = !!preview.tab || tabPicked(selectedIds(sel));
+  const seen = useMemo<PreviewState>(() => (tabShown && !preview.tab ? { ...preview, tab: true } : preview), [preview, tabShown]);
   const [held, setHeld] = useState<WeaponHeld>('primary');
   // Null until the player picks one: each side is then previewed on its own
   // in-game shot (the forest for survivors, a spawned Hunter for infected),
@@ -538,14 +544,14 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     if (locked) return;
     try {
       const hovered = hover && !press.current ? targetOf(design, hover.hit, hover.ctrl, sel) : NONE;
-      const box = selectionBox(design, sel, preview);
+      const box = selectionBox(design, sel, seen);
       drawHud(ctx, w, h, design, side, selectedIds(sel), () => setImgTick((t) => t + 1), {
-        state: preview,
+        state: seen,
         held,
-        frames: selectionFrames(design, sel, preview),
+        frames: selectionFrames(design, sel, seen),
         box,
         handles: box ? handlePoints(box, handlesFor(design, sel), handleBounds(cssW, cssH)) : [],
-        hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered, preview), label: selectionLabel(hovered) },
+        hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered, seen), label: selectionLabel(hovered) },
         marquee,
         guides,
         dpr,
@@ -555,7 +561,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize);
       designFailed(e);
     }
-  }, [design, side, sel, backdrop, imgTick, preview, held, hover, guides, marquee, locked]);
+  }, [design, side, sel, backdrop, imgTick, seen, held, hover, guides, marquee, locked]);
 
   // The close-up: the HUD drawn again, sharp, at up to CLOSEUP_RENDER_W wide (the
   // additive text painter works only untransformed, so no zoomed transform),
@@ -568,7 +574,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       const z = zoom.current, c = canvas.current;
       const zctx = z?.getContext('2d');
       if (!z || !c || !zctx) return;
-      const box = selectionBox(design, sel, preview);
+      const box = selectionBox(design, sel, seen);
       if (!box) return;
       const zr = z.getBoundingClientRect();
       const vw = Math.max(1, Math.round(zr.width)), vh = Math.max(1, Math.round(zr.height));
@@ -584,7 +590,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       try {
         const shotSize = shot.current ? { w: shot.current.naturalWidth, h: shot.current.naturalHeight } : null;
         drawBackdrop(bctx, bw, bh, backdrop, shot.current, shotSize);
-        drawHud(bctx, bw, bh, design, side, selectedIds(sel), undefined, { state: preview, held, frames: selectionFrames(design, sel, preview) });
+        drawHud(bctx, bw, bh, design, side, selectedIds(sel), undefined, { state: seen, held, frames: selectionFrames(design, sel, seen) });
       } catch { return; }                                              // the main canvas reports it
       zctx.fillStyle = '#000';
       zctx.fillRect(0, 0, vw, vh);
@@ -592,7 +598,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       zctx.drawImage(buf, r.x * scale, r.y * scale, r.w * scale, r.h * scale, 0, 0, vw, vh);
     }, 60);
     return () => clearTimeout(t);
-  }, [hasCloseUp, design, side, sel, backdrop, imgTick, preview, held]);
+  }, [hasCloseUp, design, side, sel, backdrop, imgTick, seen, held]);
 
   // A selection the design or the side no longer has is trimmed or dropped:
   // after an undo, an import, a removed health number, a layout change.
@@ -800,7 +806,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
 
   /** The selection's handle under the point, if any: the nearest within HANDLE_SLACK_PX screen pixels. */
   const handleUnder = (d: HudDesign, ux: number, uy: number): Handle | null => {
-    const box = selectionBox(d, sel, preview);
+    const box = selectionBox(d, sel, seen);
     const c = canvas.current;
     if (!box || !c) return null;
     // The backing store is 1:1 with the CSS box (the draw effect), so the box's size is the canvas's.
@@ -841,7 +847,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     endGesture();
     const { ux, uy } = pointerUnits(e);
     const d = current.current;
-    press.current = { cx: e.clientX, cy: e.clientY, ux, uy, mods: modsOf(e), hit: hitAt(d, side, preview, ux, uy), handle: handleUnder(d, ux, uy), moved: false };
+    press.current = { cx: e.clientX, cy: e.clientY, ux, uy, mods: modsOf(e), hit: hitAt(d, side, seen, ux, uy), handle: handleUnder(d, ux, uy), moved: false };
     drag.current = null;
     setHover(null);
   };
@@ -867,7 +873,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
    * move are one undo step and every move after it starts from Free.
    */
   const startDrag = (p: Press): Drag | null => {
-    const intent = dragIntent(current.current, sel, p.hit, p.mods, p.handle, { x: p.ux, y: p.uy }, preview);
+    const intent = dragIntent(current.current, sel, p.hit, p.mods, p.handle, { x: p.ux, y: p.uy }, seen);
     switch (intent.kind) {
       case 'box': return { kind: 'box' };
       case 'move':
@@ -946,7 +952,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       const d = current.current;
       // The previous object back when nothing it names changed, so a pointer
       // wandering over one piece does not redraw the canvas on every move.
-      const hit = hitAt(d, side, preview, ux, uy), ctrl = e.ctrlKey || e.metaKey;
+      const hit = hitAt(d, side, seen, ux, uy), ctrl = e.ctrlKey || e.metaKey;
       setHover((h) => (h && h.ctrl === ctrl && h.hit.element === hit.element && h.hit.card === hit.card && h.hit.child === hit.child
         ? h : { hit, ctrl }));
       const over = handleUnder(d, ux, uy);
@@ -975,7 +981,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     if (!p.moved) { setSel((s) => clickSelect(current.current, s, p.hit, p.mods)); return; }
     if (d?.kind === 'box') {
       const { ux, uy } = pointerUnits(e);
-      setSel(boxSelect(current.current, side, preview, { x: p.ux, y: p.uy }, { x: ux, y: uy }));
+      setSel(boxSelect(current.current, side, seen, { x: p.ux, y: p.uy }, { x: ux, y: uy }));
       return;
     }
     endGesture();
@@ -1008,7 +1014,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     if (press.current) return;
     const d = current.current;
     const { ux, uy } = pointerUnits(e);
-    const hit = hitAt(d, side, preview, ux, uy);
+    const hit = hitAt(d, side, seen, ux, uy);
     const target = targetOf(d, hit);
     if (target.kind === 'none') { setMenu(null); return; }
     const acting = isPicked(d, sel, hit) ? sel : target;
@@ -1045,7 +1051,8 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
 
     if (e.key === 'Tab' && e.target === canvas.current) {
       e.preventDefault();
-      const list = visibleElements(side, design).map((el) => el.id);
+      // The Tab screen's elements join the cycle only while it shows.
+      const list = visibleElements(side, design).filter((el) => !el.tab || seen.tab).map((el) => el.id);
       if (list.length === 0) return;
       const forward = !e.shiftKey;
       const at = sel.kind === 'elements' && sel.ids.length === 1 ? list.indexOf(sel.ids[0]) : -1;
@@ -1056,7 +1063,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
 
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
       e.preventDefault();
-      setSel((s) => selectAll(current.current, side, preview, s));
+      setSel((s) => selectAll(current.current, side, seen, s));
       return;
     }
 
@@ -1343,8 +1350,9 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     catch (e) { queueMicrotask(() => designFailed(e)); return false; }
   };
 
-  // The Tab screen's slots wait for the Tab preview (StyleSlot.tab).
+  // The Tab screen's slots under a heading of their own (StyleSlot.tab).
   const basicSlots = SLOTS.filter((s) => !s.advancedOnly && !s.tab);
+  const tabSlots = SLOTS.filter((s) => s.tab);
   const advancedSlots = SLOTS.filter((s) => s.advancedOnly);
 
   return (
@@ -1450,6 +1458,16 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
         <h3>Styles</h3>
         <fieldset class="hud__fieldset" disabled={locked}>
         {basicSlots.map((slot) => (
+          <StyleRow
+            key={slot.id} slot={slot} style={design.styles[slot.id]} error={uploadErrors[slot.id]}
+            onChange={(p, mode) => patchStyle(slot.id, p, mode)} onEnd={endGesture}
+            onUpload={(f) => { void onSlotUpload(slot, f); }}
+          />
+        ))}
+
+        <p class="eyebrow hud__note">Tab screen</p>
+        <p class="muted hud__note">The scoreboard the game shows while you hold Tab. Turn on Tab held above the canvas to see it.</p>
+        {tabSlots.map((slot) => (
           <StyleRow
             key={slot.id} slot={slot} style={design.styles[slot.id]} error={uploadErrors[slot.id]}
             onChange={(p, mode) => patchStyle(slot.id, p, mode)} onEnd={endGesture}
