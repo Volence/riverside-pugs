@@ -49,6 +49,13 @@ describe('GameValues', () => {
     expect(screen.queryByText(/being reviewed/)).toBeNull();
   });
 
+  it('with nothing settled yet, says the values come from a config still being reviewed', async () => {
+    mockApi.gameValues.mockResolvedValue({ ...data, reviewing: true, unsettled: true });
+    render(<GameValues />);
+    expect(await screen.findByText(/come from a server config that is still being reviewed/)).toBeTruthy();
+    expect(screen.queryByText(/last settled one/)).toBeNull();
+  });
+
   it('stacks rows on phones: every value cell carries its column label', async () => {
     mockApi.gameValues.mockResolvedValue(data);
     const { container } = render(<GameValues />);

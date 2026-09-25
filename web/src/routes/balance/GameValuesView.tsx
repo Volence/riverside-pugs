@@ -28,7 +28,9 @@ export function GameValuesView({ data, admin }: { data: GameValues; admin: boole
     <div class="stack">
       {data.reviewing && (
         <p class="muted values-reviewing">
-          A newer server config is being reviewed. These are the values of the last settled one.
+          {data.unsettled
+            ? 'These values come from a server config that is still being reviewed.'
+            : 'A newer server config is being reviewed. These are the values of the last settled one.'}
         </p>
       )}
       {data.groups.map((g) => (

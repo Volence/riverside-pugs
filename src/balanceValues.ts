@@ -35,6 +35,9 @@ export interface GameValues {
   /** The newest queue round ran a config still waiting for triage: the values
    *  shown are the last settled ones. */
   reviewing: boolean;
+  /** No config has been settled yet, so the values are the newest reported
+   *  one's, still waiting for triage. Only set when true. */
+  unsettled?: true;
   groups: GroupView[];
 }
 
@@ -54,13 +57,13 @@ interface Run { at: string; patchId: number; inv: Inventory }
  *  started watching shows) counted for the balance patch it resolves to.
  *  Rounds on a pending patch are left out. Walking rounds rather than patches
  *  dates a return to an earlier config (A, B, A reuses A's row) at the return. */
-function settledRuns(db: DB): { runs: Run[]; reviewing: boolean } {
+function settledRuns(db: DB): { runs: Run[]; reviewing: boolean; unsettled: Inventory | null } {
   const rounds = db.prepare(`SELECT r.started_at AS at, COALESCE(r.sighted_patch_id, r.patch_id) AS sighted
     FROM match_rounds r JOIN matches m ON m.id = r.match_id
     WHERE m.origin = 'queue' AND r.started_at IS NOT NULL AND COALESCE(r.sighted_patch_id, r.patch_id) IS NOT NULL
     ORDER BY r.started_at, r.match_id, r.ordinal, r.half`).all() as { at: string; sighted: number }[];
   const getPatch = db.prepare("SELECT id, inputs_json, name, published_at, COALESCE(triage, 'balance') AS triage FROM balance_patches WHERE id = ?");
-  const info = new Map<number, { settled: false; pending: boolean } | { settled: true; patchId: number; inv: Inventory }>();
+  const info = new Map<number, { settled: false; pending: boolean; inv: Inventory | null } | { settled: true; patchId: number; inv: Inventory }>();
   const infoOf = (sighted: number) => {
     let i = info.get(sighted);
     if (i) return i;
@@ -69,27 +72,31 @@ function settledRuns(db: DB): { runs: Run[]; reviewing: boolean } {
     const eff = target === sighted ? own : (getPatch.get(target) as PatchRow | undefined);
     let inv: Inventory | null = null;
     try { inv = own?.inputs_json ? (JSON.parse(own.inputs_json) as Inventory) : null; } catch { inv = null; }
-    i = eff?.triage === 'balance' && inv ? { settled: true, patchId: target, inv } : { settled: false, pending: eff?.triage === 'pending' };
+    i = eff?.triage === 'balance' && inv ? { settled: true, patchId: target, inv } : { settled: false, pending: eff?.triage === 'pending', inv };
     info.set(sighted, i);
     return i;
   };
   const runs: Run[] = [];
   let lastSighted: number | null = null;
   let reviewing = false;
+  let unsettled: Inventory | null = null;
   for (const r of rounds) {
     const i = infoOf(r.sighted);
-    if (!i.settled) { reviewing = i.pending; continue; }
+    if (!i.settled) { reviewing = i.pending; if (i.inv) unsettled = i.inv; continue; }
     reviewing = false;
     if (r.sighted !== lastSighted) runs.push({ at: r.at, patchId: i.patchId, inv: i.inv });
     lastSighted = r.sighted;
   }
-  return { runs, reviewing };
+  return { runs, reviewing, unsettled };
 }
 
 export function gameValues(db: DB, cat: Catalogue, opts: { admin: boolean }): GameValues {
-  const { runs, reviewing } = settledRuns(db);
+  const { runs, reviewing, unsettled } = settledRuns(db);
   const current = runs.length ? runs[runs.length - 1] : null;
-  const inv: Inventory = current?.inv ?? {};
+  // Nothing settled yet (a site whose only balance patches are historical,
+  // with no reported values): show the newest reported config rather than a
+  // page of blanks. `reviewing` stays set, so the page says it is not settled.
+  const inv: Inventory = current?.inv ?? unsettled ?? {};
   const patchView = (id: number) => {
     const p = db.prepare('SELECT id, name, published_at FROM balance_patches WHERE id = ?').get(id) as
       { id: number; name: string | null; published_at: string | null } | undefined;
@@ -156,5 +163,6 @@ export function gameValues(db: DB, cat: Catalogue, opts: { admin: boolean }): Ga
   })).filter((g) => g.values.length > 0 || g.rules.length > 0);
 
   const asOf = current ? { patchId: current.patchId, number: patchNumber(db, current.patchId) } : null;
-  return opts.admin ? { asOf, reviewing, groups } : { reviewing, groups };
+  const extra = !current && unsettled ? { unsettled: true as const } : {};
+  return opts.admin ? { asOf, reviewing, ...extra, groups } : { reviewing, ...extra, groups };
 }
