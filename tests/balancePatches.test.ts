@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../src/db.js';
 import { addServer } from '../src/serverPool.js';
 import { subscribeAdminEvents } from '../src/adminFeed.js';
-import { diffInventories, fingerprintOf, formatDiff, listPatches, recordBalanceSighting, refingerprintPatches, serverDrift, watchListOnly, withoutIgnored } from '../src/balancePatches.js';
+import { diffInventories, fingerprintOf, formatDiff, listPatches, pluginFile, recordBalanceSighting, refingerprintPatches, serverDrift, watchListOnly, withoutIgnored } from '../src/balancePatches.js';
 
 const INV = { 'c:z_tank_health': '4000', 'p:l4d_skypounce.smx': '100.aaaa0001', 'p:pug-match.smx': '200.bbbb0001' };
 
@@ -31,6 +31,12 @@ describe('plugins loaded from a subfolder', () => {
     expect(watchListOnly(inv, { ...inv, 'p:optional/l4d_tankhud.smx': '2.bbbb', 'c:z_new': '1' }, ['l4d_tankhud.smx'])).toBe(true);
     // A plugin whose file name is not on a list still counts in full.
     expect(fingerprintOf({ ...inv, 'p:optional/l4d_tankhud.smx': '2.bbbb' }, ['pug-match.smx'])).not.toBe(fingerprintOf(inv, ['pug-match.smx']));
+  });
+
+  it('split on a backslash too, the way SourceMod on Windows reports the path', () => {
+    expect(pluginFile('p:optional\\l4d_tankhud.smx')).toBe('l4d_tankhud.smx');
+    expect(pluginFile('p:optional/l4d_tankhud.smx')).toBe('l4d_tankhud.smx');
+    expect(withoutIgnored({ 'c:z_tank_health': '8000', 'p:optional\\l4d_tankhud.smx': '1.aaaa' }, ['l4d_tankhud.smx'])).toEqual({ 'c:z_tank_health': '8000' });
   });
 });
 
