@@ -4,8 +4,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb } from '../src/db.js';
-import { addServer, getServer } from '../src/serverPool.js';
+import { addServer, getServer, type ServerRow } from '../src/serverPool.js';
 import { ReleaseEngine } from '../src/releaseEngine.js';
+import { ServerReleaser, reconcileServers } from '../src/serverRelease.js';
+import { ServerHolds } from '../src/serverHolds.js';
+import { BalanceRolloutWriter } from '../src/balanceWriter.js';
+import type { AddonsTransport } from '../src/addonsTransport.js';
 import type { TreeWriter } from '../src/fleetWrite.js';
 import type { Op } from '../src/releaseStage.js';
 
@@ -439,5 +443,154 @@ describe('ReleaseEngine', () => {
     expect(boxState(id, s1).state).toBe('restarted');
     expect(getServer(db, s1)!.status).toBe('idle');
     expect(relState(id)).toBe('done');
+  });
+
+  /** A box whose restart a site restart lost: written, waiting on its restart. */
+  function lostRestart() {
+    const id = stage();
+    db.prepare("UPDATE releases SET state = 'deploying' WHERE id = ?").run(id);
+    db.prepare("UPDATE release_boxes SET state = 'written' WHERE release_id = ? AND server_id = ?").run(id, s1);
+    db.prepare("UPDATE release_boxes SET state = 'skipped' WHERE release_id = ? AND server_id = ?").run(id, s2);
+    db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(s1);
+    return id;
+  }
+
+  it('a box recover holds for its lost restart stays held through the boot reconcile, and is restarted', async () => {
+    const id = lostRestart();
+    const e = engine();
+    // server.ts at boot: recover, then the reconcile, both synchronous.
+    const held = e.recover();
+    expect(held).toEqual([s1]);
+    expect(reconcileServers(db, new ServerReleaser(db, async () => {}), held)).toEqual([]);
+    expect(getServer(db, s1)!.status).toBe('reserved');
+    await e.settled();
+    expect(restarts).toEqual([s1]);
+    expect(boxState(id, s1).state).toBe('restarted');
+    expect(getServer(db, s1)!.status).toBe('idle');
+  });
+
+  it('a failed write never frees a box a match adopted meanwhile', async () => {
+    boxes[s1] = box({ [A]: 'A1' }, { on: 'write', path: B });
+    const write = boxes[s1].w.write;
+    boxes[s1].w.write = async (p, b) => {
+      if (p === B) {
+        // An in-game PUG is adopted on the box (selfStarted marks it live).
+        db.prepare("INSERT INTO matches (season_id, state, campaign, server_id, token) VALUES (1, 'live', 'no_mercy', ?, 't')").run(s1);
+        db.prepare("UPDATE servers SET status = 'live' WHERE id = ?").run(s1);
+      }
+      await write(p, b);
+    };
+    const freed: number[] = [];
+    const e = engine({ onFreed: () => freed.push(1) });
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(boxState(id, s1)).toEqual({ state: 'failed', error: expect.stringMatching(/disk full/) });
+    expect(getServer(db, s1)!.status).toBe('live');
+    expect(freed).toEqual([]);
+  });
+
+  it('tells onFreed each time it gives a box back to the pool', async () => {
+    boxes[s1] = box({ [A]: 'A1' }, { on: 'write', path: B });
+    const freed: number[] = [];
+    const e = engine({ onFreed: () => freed.push(freed.length) });
+    const id = stage();
+    e.deploy(id, { targets: [s1, s2], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    // s1 failed and was let go; s2 was restarted and set idle.
+    expect(getServer(db, s1)!.status).toBe('idle');
+    expect(getServer(db, s2)!.status).toBe('idle');
+    expect(freed.length).toBe(2);
+  });
+
+  it('tells onFreed when recover puts an interrupted box back in the pool', async () => {
+    interrupted();
+    const freed: number[] = [];
+    const e = engine({ onFreed: () => freed.push(1) });
+    e.recover();
+    await e.settled();
+    expect(getServer(db, s1)!.status).toBe('idle');
+    expect(freed.length).toBe(1);
+  });
+
+  describe('beside the balance writer', () => {
+    /** A balance rollout pending on s1 only, and a transport whose put waits
+     *  on `gate` once `started` has fired. */
+    function balance() {
+      db.prepare("UPDATE servers SET addons_dir = '/g/left4dead/addons' WHERE id = ?").run(s1);
+      db.prepare('UPDATE servers SET enabled = 0 WHERE id = ?').run(s2);
+      db.prepare("INSERT INTO balance_patches (id, fingerprint, source, first_seen_at) VALUES (1, 'f', 'announced', 'now')").run();
+      db.prepare("INSERT INTO balance_rollouts (id, patch_id, values_json, content, created_by, created_at) VALUES (1, 1, '{}', 'CONTENT', 'a', 'now')").run();
+      db.prepare("INSERT INTO balance_rollout_servers (rollout_id, server_id, state) VALUES (1, ?, 'pending')").run(s1);
+      let open!: () => void, started!: () => void;
+      const gate = new Promise<void>((r) => { open = r; });
+      const putStarted = new Promise<void>((r) => { started = r; });
+      let text: string | null = null;
+      const transport = (_s: ServerRow): AddonsTransport => ({
+        async put() { started(); await gate; text = 'CONTENT'; },
+        async readText() { return text; },
+        async size() { return null; },
+        async remove() {},
+      });
+      return { transport, open, putStarted };
+    }
+
+    it('never restarts under the writer\'s hold after an admin set the box idle', async () => {
+      const holds = new ServerHolds();
+      const bw = balance();
+      const writer = new BalanceRolloutWriter({ db, transport: bw.transport, holds });
+      let writing: Promise<unknown> | null = null;
+      let n = 1;
+      const e = engine({
+        holds, emptyPollMs: 1,
+        humans: async () => n--,
+        // While the engine waits for the box to empty, an admin sets it idle
+        // and the balance writer holds it for its own write.
+        sleep: async () => {
+          db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(s1);
+          writing = writer.sync();
+          await bw.putStarted;
+        },
+      });
+      const id = stage();
+      e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+      await e.tick(); await e.settled();
+      expect(restarts).toEqual([]);
+      expect(boxState(id, s1)).toEqual({ state: 'written', error: expect.stringMatching(/restart pending/) });
+      // Still the writer's: not parked offline under its write.
+      expect(getServer(db, s1)!.status).toBe('reserved');
+      bw.open();
+      await writing;
+      expect(getServer(db, s1)!.status).toBe('idle');
+    });
+
+    it('the writer never frees a box the engine held after an admin set it idle', async () => {
+      const holds = new ServerHolds();
+      const bw = balance();
+      const writer = new BalanceRolloutWriter({ db, transport: bw.transport, holds });
+      const writing = writer.sync();
+      await bw.putStarted;
+      expect(getServer(db, s1)!.status).toBe('reserved');
+      db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(s1);
+      let resume!: () => void, reading!: () => void;
+      const readGate = new Promise<void>((r) => { resume = r; });
+      const engineReading = new Promise<void>((r) => { reading = r; });
+      const read = boxes[s1].w.read;
+      boxes[s1].w.read = async (p, sig) => { reading(); await readGate; return read(p, sig); };
+      const e = engine({ holds });
+      const id = stage();
+      e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+      const ticking = e.tick();
+      await engineReading;
+      bw.open();
+      await writing;
+      // The writer's write settled, but the hold on the box is the engine's now.
+      expect(getServer(db, s1)!.status).toBe('reserved');
+      resume();
+      await ticking; await e.settled();
+      expect(restarts).toEqual([s1]);
+      expect(boxState(id, s1).state).toBe('restarted');
+      expect(getServer(db, s1)!.status).toBe('idle');
+    });
   });
 });

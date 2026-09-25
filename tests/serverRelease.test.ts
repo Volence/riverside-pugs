@@ -209,6 +209,16 @@ describe('reconcileServers', () => {
     expect(getServer(db, id)!.status).toBe('idle');
   });
 
+  it('leaves alone a server it is told to keep', () => {
+    const db = openDb(':memory:');
+    const id = seedServer(db);
+    db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(id);
+    const releaser = new ServerReleaser(db, async () => {});
+
+    expect(reconcileServers(db, releaser, [id])).toEqual([]);
+    expect(getServer(db, id)!.status).toBe('reserved');
+  });
+
   it('leaves a server alone when a live match owns it', () => {
     const db = openDb(':memory:');
     const id = seedServer(db);

@@ -204,8 +204,13 @@ function lastTokenOn(db: DB, serverId: number): string | null {
  * the match was immortal in a state hasOpenMatch counts, locking all eight
  * players out of the queue for good. A match that is merely WAITING for a box
  * has server_id IS NULL, so it can never be reconciled by accident.
+ *
+ * `keep` is boxes held on purpose with no match: the ones the release engine's
+ * recover() has just held again for a restart a site restart lost. Freeing
+ * one would put it back in the pool without that restart, running the old
+ * binaries over the new files.
  */
-export function reconcileServers(db: DB, releaser: ServerReleaser): number[] {
+export function reconcileServers(db: DB, releaser: ServerReleaser, keep: readonly number[] = []): number[] {
   const rows = db
     .prepare(
       `SELECT id FROM servers
@@ -216,10 +221,11 @@ export function reconcileServers(db: DB, releaser: ServerReleaser): number[] {
        )`,
     )
     .all() as { id: number }[];
+  const stranded = rows.filter((r) => !keep.includes(r.id));
 
-  for (const r of rows) {
+  for (const r of stranded) {
     console.warn(`[serverRelease] reconciling stranded server ${r.id}: no live match owns it`);
     releaser.release(r.id);
   }
-  return rows.map((r) => r.id);
+  return stranded.map((r) => r.id);
 }
