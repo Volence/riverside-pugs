@@ -3143,6 +3143,17 @@ describe('The Tab screen on the page', () => {
     expect(screen.getByRole('button', { name: 'Reset all' })).toBeTruthy();
   });
 
+  it('offers no Visible on several elements while the only one that hides has its hide gated (TS7)', () => {
+    _setProbe('TS7', false);
+    try {
+      render(<Hud />);
+      fireEvent.click(layer('Versus score').getByRole('button', { name: 'Versus score' }));
+      fireEvent.click(layer('Tab screen').getByRole('button', { name: 'Tab screen' }), { shiftKey: true });
+      expect(screen.getByText('2 elements', { selector: 'legend' })).toBeTruthy();
+      expect(screen.queryByRole('checkbox', { name: 'Visible' })).toBeNull();
+    } finally { _setProbe('TS7', null); }
+  });
+
   it('never picks the teammate cards under the Tab screen', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);

@@ -1145,7 +1145,8 @@ export function PiecesControls(
 
 /** Several elements of the side: Align against their box, and Visible for all of those that can hide. */
 export function ElementsControls({ design, edit, ids }: { design: HudDesign; edit: Edit; ids: string[] }) {
-  const hideable = ids.filter((id) => elementById(id)?.props.includes('visible'));
+  // A hide waiting on a probe (HudElement.hideGate) is not offered, as for one element.
+  const hideable = ids.filter((id) => { const el = elementById(id); return el?.props.includes('visible') && (!el.hideGate || probe(el.hideGate)); });
   const allVisible = hideable.every((id) => elementRect(design, id, design.aspect).visible);
   return (
     <Field legend={`${ids.length} elements`}>
