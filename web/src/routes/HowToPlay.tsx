@@ -41,14 +41,6 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
     a: <>No. Leaving the queue before it pops is always fine. Only an ignored ready check or a no-show counts.</>,
   },
   {
-    q: 'How do I report someone?',
-    a: <>Use <code>/report</code> in Discord, the <strong>Report a player</strong> button on a match page, or <strong>Report</strong> on their profile. The player is never told who reported them. You can file up to 5 reports a day, one per player per match. Pick <strong>Safety concern</strong> for anything that should stay private: only admins see it. Your reports and their status are under <strong>My reports</strong> on your profile, where you can also talk to the moderators about one.</>,
-  },
-  {
-    q: 'How do I get a moderator during a match?',
-    a: <>Type <code>/mod</code> (or <code>/calladmin</code>) in game chat. Nobody else sees it. Pick a reason and who it is about, add a line of detail if you want, and the moderators are pinged in Discord. You can call again after 3 minutes. For a safety concern, report it on the website instead.</>,
-  },
-  {
     q: 'I linked Discord but it says I am not in the server.',
     a: <>Make sure the Discord account you linked is the one in the Riverside server (check your profile: it shows the linked name). If you linked the wrong one, Disconnect it on your profile and link again; you cannot do that while you are queued, in a match or banned. Joining the server lets you in within a few seconds; press Check again.</>,
   },
@@ -151,11 +143,12 @@ const SECTIONS: { id: string; label: string }[] = [
   { id: 'config', label: 'Your config' },
   { id: 'fov', label: 'Field of view' },
   { id: 'hud', label: 'HUD and crosshair' },
-  { id: 'map-pack', label: 'L4D2 map pack' },
   { id: 'playing', label: 'Playing a match' },
   { id: 'commands', label: 'In-game commands' },
   { id: 'allowed', label: "What's allowed" },
+  { id: 'reporting', label: 'Reporting' },
   { id: 'watching', label: 'Watching and replays' },
+  { id: 'map-pack', label: 'L4D2 map pack' },
   { id: 'faq', label: 'FAQ' },
 ];
 
@@ -288,6 +281,147 @@ viewmodel_fov_override 70`}</code></pre>
             <li><a href="/community"><strong>Community</strong></a>: HUDs and crosshairs other players have shared, ready to download.</li>
           </ul>
         </Panel>
+        <Panel id="playing">
+          <h3>Playing a match</h3>
+          <ol class="howto">
+            <li><strong>Queue</strong> on the Play page or with Join Queue on the Discord queue panel. Both are the same queue.</li>
+            <li><strong>Ready up</strong> when it pops. You have two minutes, the bot pings you, and you need to be in a Discord voice channel to press Ready.</li>
+            <li><strong>Vote a campaign.</strong> Teams are balanced by rating once the vote closes.</li>
+            <li><strong>Connect</strong> with the button, and paste the line into your L4D console.</li>
+            <li><strong>Hop in your team voice channel.</strong> The bot makes one per team and moves you in if you are already in voice.</li>
+            <li><strong>Play it out.</strong> The result, SR changes and stats are posted when the match ends.</li>
+          </ol>
+        </Panel>
+        {/* Player commands only. The config, map and score votes (!load, !match,
+            !changemap, !setscores, !voteboss, !mix, !slots) are left out on purpose:
+            none of them belongs in a ranked match. */}
+        <Panel id="commands">
+          <h3>In-game commands</h3>
+          <p>Type these in game chat.</p>
+          <dl class="howto-cmds">
+            <dt><code>!ready</code> / <code>!unready</code></dt>
+            <dd>Ready up, or take it back, before a round starts. F1 and F2 work too.</dd>
+            <dt><code>!pause</code> / <code>!unpause</code></dt>
+            <dd>Pause the game. Both teams type <code>!unpause</code> (or <code>!ready</code>) to resume after a countdown.</dd>
+            <dt><code>!boss</code></dt>
+            <dd>Where the tank and witch spawn this map, as a percentage of the way through, and who gets the tank.</dd>
+            <dt><code>!scores</code> / <code>!bonus</code></dt>
+            <dd>The scores so far, and this round's health bonus.</dd>
+            <dt><code>!tankhud</code> / <code>!spechud</code></dt>
+            <dd>Turn the tank or spectator HUD on or off.</dd>
+            <dt><code>!rates</code> / <code>!lerps</code></dt>
+            <dd>Everyone's network rates and interp, if a hit looked wrong.</dd>
+            <dt><code>/mod</code></dt>
+            <dd>Call a moderator. Only the moderators see it. See <a href="#reporting">Reporting</a>.</dd>
+            <dt><code>!stuckwitch</code></dt>
+            <dd>A witch is stuck in a wall or not moving. It records where she is so we can fix it.</dd>
+          </dl>
+        </Panel>
+        {/* Only what the servers or the site actually enforce or review. Keep each
+            line true to a check that exists: consistency, the fov and cpu_level
+            checks, LilAC and the input-timing flags. */}
+        <Panel id="allowed">
+          <h3>What's allowed</h3>
+          <h4>Fine</h4>
+          <ul class="howto">
+            <li>The <a href="/autoexec.cfg" download="autoexec.cfg">autoexec.cfg</a> rates and any settings of your own.</li>
+            <li>The <a href="#fov">FOV plugin</a>, with <code>fov_override</code> between 75 and 120.</li>
+            <li>HUDs and crosshairs, including everything from the <a href="#hud">HUD editor and Community</a>.</li>
+            <li>The <a href="#map-pack">L4D2 map pack</a>.</li>
+          </ul>
+          <h4>Not fine</h4>
+          <ul class="howto">
+            <li>
+              Addons that change game files the servers check, like skins, no-trees packs and
+              silenced-weapon packs. You are dropped while loading;{' '}
+              <a href="/help/consistency">here is how to fix it</a>.
+            </li>
+            <li>Effect Detail on Low. The servers will not let you stay ready on it.</li>
+            <li>
+              Cheats, and macros or scripts that press buttons for you. The servers run
+              anticheat, and match data is reviewed for input no hand can make.
+            </li>
+          </ul>
+        </Panel>
+        <Panel id="reporting">
+          <h3>Reporting</h3>
+          <p>
+            The player is never told who reported them. For anything that should stay
+            private, pick <strong>Safety concern</strong> on the website: only admins see it.
+          </p>
+          <h4>During a match</h4>
+          <p>
+            Type <code>/mod</code> (or <code>/calladmin</code>) in game chat. Nobody else sees it.
+          </p>
+          <ol class="howto">
+            <li>Pick a reason: cheating, toxic, griefing, AFK, not speaking English, something broke, or other.</li>
+            <li>Pick who it is about: a player, your team, or the whole server.</li>
+            <li>Type a line of detail within 30 seconds, or <code>/skip</code>.</li>
+          </ol>
+          <p>
+            The moderators are pinged in Discord straight away, and a call about a player is
+            filed as a report too. You can call again after 3 minutes.
+          </p>
+          <h4>After a match, or any time</h4>
+          <ul class="howto">
+            <li><code>/report</code> in Discord.</li>
+            <li><strong>Report a player</strong> at the bottom of the match page.</li>
+            <li><strong>Report this moment</strong> in the replay viewer, which pins the report to that point in the round so the moderators see exactly what you saw.</li>
+            <li><strong>Report</strong> on the player's profile.</li>
+          </ul>
+          <p>
+            You can file up to 5 reports a day, one per player per match. Follow yours
+            under <strong>My reports</strong> on your profile, where you can also talk to the
+            moderators about one.
+          </p>
+        </Panel>
+        <Panel id="watching">
+          <h3>Watching and replays</h3>
+          <p>
+            Every match is recorded, and there are a few ways to watch one back or while it
+            happens. The quickest way to get better is to watch yourself.
+          </p>
+          <h4>Live</h4>
+          <ul class="howto">
+            <li>
+              <a href="/live"><strong>Live</strong></a> shows every match being played right now:
+              a map of where everyone is, the score, the stats and an event feed.
+            </li>
+            <li>
+              <strong>Watch on SourceTV</strong> (on Live, or the <strong>Watch</strong> button
+              on the Discord match card) puts you in the game as a spectator with no delay.
+              You can free-roam or ride along in anyone's first person. Slots are limited, and
+              everyone who watches is recorded.
+            </li>
+            <li>
+              <a href="/streams"><strong>Streams</strong></a> lists Riverside players streaming
+              on Twitch, with the ones in a PUG right now at the top.
+            </li>
+          </ul>
+          <h4>After the match</h4>
+          <ul class="howto">
+            <li>
+              <strong>The replay viewer</strong> is on every match page. It redraws each round
+              on an overhead map: every player, common and witch, with markers on the timeline
+              for pounces, skeets, clears, incaps, deaths and more. Pick yourself in the follow
+              row and the timeline only shows your events, so you can jump straight to each of
+              your deaths or pins and see where everyone was just before it. <strong>Stats</strong>{' '}
+              shows the box score at that moment, and <strong>Key</strong> explains the symbols.
+            </li>
+            <li>
+              <strong>Demos</strong>: each map has a download on the match page. A demo lets you
+              watch the round in the real game from any player's eyes. When the viewer shows a{' '}
+              <strong>tick</strong> next to the clock, type <code>demo_gototick</code> and that
+              number in the demo to jump to the same moment. See the FAQ below if a demo crashes.
+            </li>
+            <li>
+              <strong>Stats</strong>: the match page breaks every player down, from skeets,
+              clears and how fast pinned teammates were freed to damage as each infected.
+              Compare yours with the lobby, then find the moments behind the numbers in the
+              viewer.
+            </li>
+          </ul>
+        </Panel>
         <Panel id="map-pack">
           <h3>Installing the L4D2 map pack</h3>
           <p>
@@ -341,121 +475,6 @@ viewmodel_fov_override 70`}</code></pre>
               </details>
             ))}
           </div>
-        </Panel>
-        <Panel id="playing">
-          <h3>Playing a match</h3>
-          <ol class="howto">
-            <li><strong>Queue</strong> on the Play page or with Join Queue on the Discord queue panel. Both are the same queue.</li>
-            <li><strong>Ready up</strong> when it pops. You have two minutes, the bot pings you, and you need to be in a Discord voice channel to press Ready.</li>
-            <li><strong>Vote a campaign.</strong> Teams are balanced by rating once the vote closes.</li>
-            <li><strong>Connect</strong> with the button, and paste the line into your L4D console.</li>
-            <li><strong>Hop in your team voice channel.</strong> The bot makes one per team and moves you in if you are already in voice.</li>
-            <li><strong>Play it out.</strong> The result, SR changes and stats are posted when the match ends.</li>
-          </ol>
-        </Panel>
-        {/* Player commands only. The config, map and score votes (!load, !match,
-            !changemap, !setscores, !voteboss, !mix, !slots) are left out on purpose:
-            none of them belongs in a ranked match. */}
-        <Panel id="commands">
-          <h3>In-game commands</h3>
-          <p>Type these in game chat.</p>
-          <dl class="howto-cmds">
-            <dt><code>!ready</code> / <code>!unready</code></dt>
-            <dd>Ready up, or take it back, before a round starts. F1 and F2 work too.</dd>
-            <dt><code>!pause</code> / <code>!unpause</code></dt>
-            <dd>Pause the game. Both teams type <code>!unpause</code> (or <code>!ready</code>) to resume after a countdown.</dd>
-            <dt><code>!boss</code></dt>
-            <dd>Where the tank and witch spawn this map, as a percentage of the way through, and who gets the tank.</dd>
-            <dt><code>!cur</code></dt>
-            <dd>How far the survivors are right now, on the same scale.</dd>
-            <dt><code>!scores</code> / <code>!bonus</code></dt>
-            <dd>The scores so far, and this round's health bonus.</dd>
-            <dt><code>!warp</code></dt>
-            <dd>As a ghost, jump to a survivor.</dd>
-            <dt><code>!underhand</code> / <code>!overhand</code> / <code>!overonehand</code></dt>
-            <dd>As tank, pick your rock throw.</dd>
-            <dt><code>!tankhud</code> / <code>!spechud</code></dt>
-            <dd>Turn the tank or spectator HUD on or off.</dd>
-            <dt><code>!rates</code> / <code>!lerps</code></dt>
-            <dd>Everyone's network rates and interp, if a hit looked wrong.</dd>
-            <dt><code>/mod</code></dt>
-            <dd>Call a moderator. Only the moderators see it. See the FAQ.</dd>
-            <dt><code>!stuckwitch</code></dt>
-            <dd>A witch is stuck in a wall or not moving. It records where she is so we can fix it.</dd>
-          </dl>
-        </Panel>
-        {/* Only what the servers or the site actually enforce or review. Keep each
-            line true to a check that exists: consistency, the fov and cpu_level
-            checks, LilAC and the input-timing flags. */}
-        <Panel id="allowed">
-          <h3>What's allowed</h3>
-          <h4>Fine</h4>
-          <ul class="howto">
-            <li>The <a href="/autoexec.cfg" download="autoexec.cfg">autoexec.cfg</a> rates and any settings of your own.</li>
-            <li>The <a href="#fov">FOV plugin</a>, with <code>fov_override</code> between 75 and 120.</li>
-            <li>HUDs and crosshairs, including everything from the <a href="#hud">HUD editor and Community</a>.</li>
-            <li>The <a href="#map-pack">L4D2 map pack</a>.</li>
-          </ul>
-          <h4>Not fine</h4>
-          <ul class="howto">
-            <li>
-              Addons that change game files the servers check, like skins, no-trees packs and
-              silenced-weapon packs. You are dropped while loading;{' '}
-              <a href="/help/consistency">here is how to fix it</a>.
-            </li>
-            <li>Effect Detail on Low. The servers will not let you stay ready on it.</li>
-            <li>
-              Cheats, and macros or scripts that press buttons for you. The servers run
-              anticheat, and match data is reviewed for input no hand can make.
-            </li>
-          </ul>
-        </Panel>
-        <Panel id="watching">
-          <h3>Watching and replays</h3>
-          <p>
-            Every match is recorded, and there are a few ways to watch one back or while it
-            happens. The quickest way to get better is to watch yourself.
-          </p>
-          <h4>Live</h4>
-          <ul class="howto">
-            <li>
-              <a href="/live"><strong>Live</strong></a> shows every match being played right now:
-              a map of where everyone is, the score, the stats and an event feed.
-            </li>
-            <li>
-              <strong>Watch on SourceTV</strong> (on Live, or the <strong>Watch</strong> button
-              on the Discord match card) puts you in the game as a spectator with no delay.
-              You can free-roam or ride along in anyone's first person. Slots are limited, and
-              everyone who watches is recorded.
-            </li>
-            <li>
-              <a href="/streams"><strong>Streams</strong></a> lists Riverside players streaming
-              on Twitch, with the ones in a PUG right now at the top.
-            </li>
-          </ul>
-          <h4>After the match</h4>
-          <ul class="howto">
-            <li>
-              <strong>The replay viewer</strong> is on every match page. It redraws each round
-              on an overhead map: every player, common and witch, with markers on the timeline
-              for pounces, skeets, clears, incaps, deaths and more. Pick yourself in the follow
-              row and the timeline only shows your events, so you can jump straight to each of
-              your deaths or pins and see where everyone was just before it. <strong>Stats</strong>{' '}
-              shows the box score at that moment, and <strong>Key</strong> explains the symbols.
-            </li>
-            <li>
-              <strong>Demos</strong>: each map has a download on the match page. A demo lets you
-              watch the round in the real game from any player's eyes. When the viewer shows a{' '}
-              <strong>tick</strong> next to the clock, type <code>demo_gototick</code> and that
-              number in the demo to jump to the same moment. See the FAQ below if a demo crashes.
-            </li>
-            <li>
-              <strong>Stats</strong>: the match page breaks every player down, from skeets,
-              clears and how fast pinned teammates were freed to damage as each infected.
-              Compare yours with the lobby, then find the moments behind the numbers in the
-              viewer.
-            </li>
-          </ul>
         </Panel>
         <Panel id="faq">
           <h3>FAQ</h3>
