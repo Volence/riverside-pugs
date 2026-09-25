@@ -1199,12 +1199,13 @@ describe('the infected cards, as the game lays them out (plan Task 12)', () => {
 });
 
 /**
- * The Tab screen elements are in the registry before the preview can draw
- * them (tab screen spec tasks 4 and 13 to 16): until then no list, click or
- * snap reaches them, and once drawn they show only with Tab held or while
- * selected, as an occasional panel does (spec 3.1).
+ * The Tab screen elements: drawn by drawHud's own Tab painter (tabscreen.ts,
+ * tabscreen.test.ts), not by the element loop, so until the page lists them
+ * (tab screen spec tasks 15 and 16) no list, click or snap reaches them;
+ * they show only with Tab held or while selected, as an occasional panel
+ * does (spec 3.1).
  */
-describe('the Tab screen elements, before the Tab painter', () => {
+describe('the Tab screen elements, before the page lists them', () => {
   it('are in no side\'s list of elements yet', () => {
     for (const side of ['survivor', 'infected'] as const) {
       expect(visibleElements(side, DEFAULT_DESIGN).filter((e) => e.tab), side).toEqual([]);
