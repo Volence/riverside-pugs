@@ -8,7 +8,7 @@
  * already has it and shipping it would only widen what this addon can break.
  */
 import { encodeVTF, encodeVPK, encodeZip, type VpkFile } from '../vpk';
-import { baseFile, baseOf, baseTree, importedFiles, isCommunityImport, presetOverrides, BASE_PATHS, type BaseKey } from './base';
+import { baseFile, baseOf, baseTree, importedFiles, isCommunityImport, presetOverrides, BASE_PATHS, MissingImportError, type BaseKey } from './base';
 import { hudFileProblem, hudPathProblem } from '../../../src/hudFiles';
 
 export { baseTree };
@@ -1019,7 +1019,9 @@ export function yourItemsInput(design: HudDesign): RowInput {
   const o = design.elements[YOUR_ITEMS] ?? {};
   const font = o.itemFont ?? DEFAULT_ITEM_FONT;
   let tall: number | undefined;
-  try { tall = baseFontTall(baseOf(design), font); } catch { /* an imported base not registered yet */ }
+  try { tall = baseFontTall(baseOf(design), font); } catch (e) {
+    if (!(e instanceof MissingImportError)) throw e;   // an imported base not registered yet
+  }
   return { barX: ownBarX(design) ?? 0, screenW: screenW(design.aspect), tall: tall && tall > 0 ? tall : ITEM_FONT_TALL[font], align: o.itemAlign ?? 'right' };
 }
 
@@ -1029,10 +1031,10 @@ export function yourItemsInput(design: HudDesign): RowInput {
  * weapon selection as the design has it (weaponColumn.ts weaponRowsEdge,
  * the layout weapons.ts weaponSlots draws). Unclamped: rowLayout and placeRow
  * hold it at the bar's edge. A base without the weapon panel starts it at
- * the bar, mid-height.
+ * the bar, mid-height. `inp` is yourItemsInput's, passed in by a caller
+ * that already has it.
  */
-export function yourItemsHome(design: HudDesign): { x: number; y: number } {
-  const inp = yourItemsInput(design);
+export function yourItemsHome(design: HudDesign, inp: RowInput = yourItemsInput(design)): { x: number; y: number } {
   if (!baseHasElement(baseOf(design), elementById('weaponSelection')!)) return { x: inp.barX, y: SCREEN_H / 2 };
   const r = elementRect(design, 'weaponSelection', design.aspect);
   const panel = kvFind(buildTrees(design)(LAYOUT), ['HudWeaponSelection']);
@@ -1047,8 +1049,9 @@ export function yourItemsHome(design: HudDesign): { x: number; y: number } {
 /** Your items as drawn and built: the stored place (or the home spot), through the bar limit and the screen edge. */
 export function yourItemsLayout(design: HudDesign): RowLayout {
   const o = design.elements[YOUR_ITEMS] ?? {};
-  const home = o.x === undefined || o.y === undefined ? yourItemsHome(design) : undefined;
-  return itemRowLayout(yourItemsInput(design), { x: o.x ?? home!.x, y: o.y ?? home!.y });
+  const inp = yourItemsInput(design);
+  const home = o.x === undefined || o.y === undefined ? yourItemsHome(design, inp) : undefined;
+  return itemRowLayout(inp, { x: o.x ?? home!.x, y: o.y ?? home!.y });
 }
 
 /** The limits the editor draws while Your items is selected (spec section 2); none where it is blocked. */

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
-  buildHud, elementRect, ownBarX, yourItemsBlocked, yourItemsOn, yourItemsHome, yourItemsLayout, yourItemsLimits,
+  buildHud, elementRect, ownBarX, yourItemsBlocked, yourItemsOn, yourItemsHome, yourItemsInput, yourItemsLayout, yourItemsLimits,
   ITEMS_OWN_NOTE, ITEMS_UNREAD_NOTE,
 } from './build';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride } from './design';
@@ -52,7 +52,7 @@ describe('yourItemsHome: where the row first shows', () => {
       const r = elementRect(d, 'weaponSelection', d.aspect);
       const [, pistol] = weaponSlots(d, d.aspect, r.w);
       const home = yourItemsHome(d);
-      expect(home.x + itemRowWidth(18), d.aspect).toBeCloseTo(r.x + pistol.box.x + pistol.box.w, 6);
+      expect(home.x + itemRowWidth(yourItemsInput(d).tall), d.aspect).toBeCloseTo(r.x + pistol.box.x + pistol.box.w, 6);
       expect(home.y, d.aspect).toBeCloseTo(r.y + pistol.frame.y + pistol.frame.h, 6);
     }
     const h = yourItemsHome(base('stock', '16:9'));
@@ -67,7 +67,7 @@ describe('the element on the canvas', () => {
     const r = elementRect(d, YOUR_ITEMS, d.aspect);
     expect(r.visible).toBe(false);
     expect(r.x).toBeCloseTo(797.4332, 3);
-    expect(r.w).toBeCloseTo(itemRowWidth(18), 9);
+    expect(r.w).toBeCloseTo(itemRowWidth(yourItemsInput(d).tall), 9);
     expect(r.h).toBe(18);
     expect(yourItemsOn(d)).toBe(false);
   });
@@ -99,6 +99,8 @@ describe('an imported HUD', () => {
   const ID = 'b'.repeat(64);
   afterEach(() => { unregisterImport(ID); });
   const imported = (over: Record<string, string>, yourItems: Record<string, unknown> = { visible: true, x: 780, y: 200 }): HudDesign => {
+    // A fresh registration: the parsed-tree caches keep an id's files until it is unregistered.
+    unregisterImport(ID);
     registerImport(ID, sampleHud(over));
     return validateDesign({ v: 1, preset: 'imported', imported: { id: ID, name: 'x' }, elements: { yourItems } });
   };
@@ -123,8 +125,11 @@ describe('an imported HUD', () => {
   // Spec section 5: off, the download is unchanged for an import as for Stock and Modern.
   it('builds exactly the files it built before while it is off, whatever it stores', () => {
     const stored = { visible: false, x: 700, y: 100, itemFont: 'L4D_Icons_large', itemAlign: 'center', color: '1 2 3 4' };
-    for (const over of [{}, { [OWN]: withOwnItems }] as Record<string, string>[]) {
-      const off = buildHud(imported(over, stored), { fonts });
+    for (const [over, blocked] of [[{}, null], [{ [OWN]: withOwnItems }, ITEMS_OWN_NOTE]] as [Record<string, string>, string | null][]) {
+      const d = imported(over, stored);
+      // Each case really builds its own import: only the one with an Items child is blocked.
+      expect(yourItemsBlocked(d)).toBe(blocked);
+      const off = buildHud(d, { fonts });
       const plain = buildHud(validateDesign({ v: 1, preset: 'imported', imported: { id: ID, name: 'x' } }), { fonts });
       expect(off).toEqual(plain);
     }
