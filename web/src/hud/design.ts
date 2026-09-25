@@ -11,6 +11,7 @@ import { baseOf, baseTree, onUnregister, type Preset, type BaseKey } from './bas
 import { screenW, SCREEN_H, type Aspect } from './units';
 import { kvFind, kvGet, pcFind, type KvNode } from './kv';
 import { elementById } from './elements';
+import { YOUR_ITEMS, ITEM_FONTS, type ItemFont, type ItemAlign } from './youritems';
 import { SLOTS } from './slots';
 import { TEAM_PANEL, PANEL_CHILDREN, CONTENT_CHILDREN, panelOfFile, maxInset, childPath, type ChildDef, type KeyDef } from './children';
 import { probe, type ProbeId } from './probes';
@@ -66,6 +67,10 @@ export interface ElementOverride {
    * means the preset's own art. Kept on killNotices only.
    */
   noticeBox?: NoticeBox;
+  /** Your items only: the item icon font (youritems.ts ITEM_FONTS). Absent means L4D_Icons_medium, the teammate cards' font. */
+  itemFont?: ItemFont;
+  /** Your items only: which end of the row stays put as items come and go. Absent means 'right'. */
+  itemAlign?: ItemAlign;
 }
 /**
  * The kill notice box restyled: 'flat' a generated texture in `color`,
@@ -761,6 +766,20 @@ function element(id: string, raw: unknown, key: BaseKey, aspect: Aspect): Elemen
     const r = tabVersusRange(aspect, key);
     if (out.x !== undefined) out.x = Math.min(r.x[1], Math.max(r.x[0], out.x));
     if (out.y !== undefined) out.y = Math.min(r.y[1], Math.max(r.y[0], out.y));
+  }
+  // Your items keeps only what it offers (youritems.ts): shown or not, a
+  // place, a colour, a font and an alignment. Its place is the row's
+  // top-left in whole units; the bar limit is applied where it is drawn and
+  // built (build.ts yourItemsLayout), not here, since it moves with Your health.
+  if (id === YOUR_ITEMS) {
+    const keep: ElementOverride = {};
+    if (out.visible !== undefined) keep.visible = out.visible;
+    if (out.x !== undefined) keep.x = out.x;
+    if (out.y !== undefined) keep.y = out.y;
+    if (out.color) keep.color = out.color;
+    if (ITEM_FONTS.includes(raw.itemFont as ItemFont)) keep.itemFont = raw.itemFont as ItemFont;
+    if (raw.itemAlign === 'right' || raw.itemAlign === 'center') keep.itemAlign = raw.itemAlign;
+    return keep;
   }
   return out;
 }

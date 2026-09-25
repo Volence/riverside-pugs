@@ -9,18 +9,19 @@ import { DEFAULT_DESIGN } from './design';
 const root = (preset: 'stock' | 'modern', file: string) => parseKv(baseFile(preset, file))[0].value as KvNode[];
 
 describe('ELEMENTS', () => {
-  it('has unique ids and the twenty-seven elements', () => {
+  it('has unique ids and the twenty-eight elements', () => {
     const ids = ELEMENTS.map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.sort()).toEqual(['abilityMarker', 'abilityRing', 'chat', 'finaleMeter', 'ghostPanel', 'holdoutTimer', 'infectedRow', 'infectedVoice',
       'killNotices', 'leavingArea', 'ownHealth', 'ownMic', 'perilNotice', 'progressBar', 'siHealth', 'spawnCountdown', 'tankPanel', 'teamColumn',
-      'voiceList', 'vote', 'weaponSelection', 'xhair', 'zombiePanel', 'tabBoard', 'tabVersus', 'tabSurvivors', 'tabInfected'].sort());
+      'voiceList', 'vote', 'weaponSelection', 'xhair', 'yourItems', 'zombiePanel', 'tabBoard', 'tabVersus', 'tabSurvivors', 'tabInfected'].sort());
   });
 
   for (const preset of ['stock', 'modern'] as const) {
     it(`every key exists in ${preset} hudlayout.res, or in the element's own file`, () => {
       for (const e of ELEMENTS) {
         if (e.id === 'xhair') continue;            // added by the generator, absent from stock
+        if (e.id === 'yourItems') continue;        // the Items Label build.ts yourItemsPass adds; no base file has it
         const file = root(preset, e.file ?? 'scripts/hudlayout.res');
         expect(kvFind(file, [e.key]), e.id).toBeDefined();
         for (const b of e.moveWith ?? []) expect(kvFind(file, [b]), `${e.id} ${b}`).toBeDefined();
@@ -176,5 +177,16 @@ describe('the Tab screen elements', () => {
   });
   it('hide the survivor teammate cards under Tab, and nothing else yet (TAB-1 hud-a against tab-a)', () => {
     expect(ELEMENTS.filter((e) => e.underTab).map((e) => [e.id, e.underTab])).toEqual([['teamColumn', 'hidden']]);
+  });
+});
+
+describe('Your items (spec 2026-09-25-hud-editor-your-items-design.md)', () => {
+  it('is the own panel\'s Items Label, survivor only, moved but never sized, right after Your health', () => {
+    const el = elementById('yourItems')!;
+    expect(el).toMatchObject({ label: 'Your items', side: 'survivor', key: 'Items', file: 'resource/ui/hud/localplayerpanel.res',
+      move: true, resize: 'none', children: [], props: ['visible'] });
+    expect(el.note).toBe("The game puts your health bar at this row's left edge, so the icons can only sit level with or right of your health bar.");
+    const ids = ELEMENTS.map((e) => e.id);
+    expect(ids.indexOf('yourItems')).toBe(ids.indexOf('ownHealth') + 1);
   });
 });
