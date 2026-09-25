@@ -21,7 +21,7 @@ import { childDef, panelChildren, maxInset, type KeyDef } from '../../hud/childr
 import { probe } from '../../hud/probes';
 import {
   cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild, resetChildKey, rowGapSlider, setRowGap,
-  startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, patchWeapons, ammoOnly, setFit,
+  startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, patchWeapons, ammoOnly, setFit, hiddenWith,
   resetElementKey, setScale, withWeaponUpload, resetWeaponUpload, withVoiceUpload, resetVoiceUpload,
   type Align,
 } from '../../hud/edit';
@@ -797,11 +797,14 @@ export function ChildControls(
   const movable = pieceMovableIn(design, panel, name, file);
   const sameView = panelChildren(panel)?.linked?.find((l) => l.rule === 'same' && panelChild(design, panel, name, l.file));
 
-  // A hide waiting on a probe (the Tab screen's pieces, TS7) is not offered.
-  const hides = !def.hideGate || probe(def.hideGate);
+  // A hide waiting on a probe (the Tab screen's pieces, TS7) is not offered;
+  // nor is one for a piece pinned to a hidden piece, which the game hides with it.
+  const head = hiddenWith(design, panel, name);
+  const hides = (!def.hideGate || probe(def.hideGate)) && !head;
 
   return (
     <Field legend={def.label}>
+      {head && <p class="muted hud__note">Hidden with {head.label}. Show it to bring this back.</p>}
       {hides && (
         <label class="hud__check">
           <input type="checkbox" checked={o.visible ?? info.visible} onChange={(e) => patch({ visible: (e.target as HTMLInputElement).checked })} />

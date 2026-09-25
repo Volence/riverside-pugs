@@ -3029,6 +3029,24 @@ describe('The Tab screen on the page', () => {
     await waitFor(() => expect(saved().children?.tabVersus).toBeUndefined());
   });
 
+  it('lists a piece pinned to a hidden one as hidden with it, with no Visible control, until the head is shown', async () => {
+    render(<Hud />);
+    fireEvent.click(layer('Versus score').getByRole('button', { name: '"Average Distance:"' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Visible' }));
+    await waitFor(() => expect(saved().children?.tabVersus).toEqual({ DistanceLabel: { visible: false } }));
+    // Layers: dimmed, no eye, and the note naming what hides it.
+    expect(layer('Versus score').queryByRole('button', { name: /^(Show|Hide) Health bonus$/ })).toBeNull();
+    expect(layer('Versus score').getAllByText('Hidden with "Average Distance:"')).toHaveLength(3);
+    fireEvent.click(layer('Versus score').getByRole('button', { name: 'Health bonus' }));
+    expect(screen.queryByRole('checkbox', { name: 'Visible' })).toBeNull();
+    expect(screen.getByText(/Hidden with "Average Distance:"\. Show it to bring this back\./)).toBeTruthy();
+    // Showing the head from Layers brings the line back.
+    fireEvent.click(layer('Versus score').getByRole('button', { name: 'Show "Average Distance:"' }));
+    await waitFor(() => expect(saved().children?.tabVersus).toBeUndefined());
+    expect(screen.getByRole('checkbox', { name: 'Visible' })).toBeTruthy();
+    expect(layer('Versus score').getByRole('button', { name: 'Hide Health bonus' })).toBeTruthy();
+  });
+
   it('offers the row bars grey as the file has it, by health, or one colour', async () => {
     render(<Hud />);
     fireEvent.click(layer('Survivor rows').getByRole('button', { name: 'Health bar' }));

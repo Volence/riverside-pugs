@@ -26,6 +26,7 @@ import { probe } from '../../hud/probes';
 import { visibleElements, type Side } from '../../hud/mock';
 import type { HudElement } from '../../hud/elements';
 import { cardsOf, pickableCards, panelOf, type Selection } from '../../hud/selection';
+import { hiddenWith } from '../../hud/edit';
 
 /** State pieces the game shows only sometimes, and when: read from the registry's stateArt. */
 const WHEN: Record<StateArt, string> = {
@@ -175,8 +176,10 @@ export function LayersPanel(
                 {open && reg?.repeat === 'cards' && <p class="hud__layer hud__layer--d1 hud__layersub">{cards ? 'In every card' : 'In every row'}</p>}
                 {open && reg?.children.filter((def) => !def.gate || probe(def.gate)).map((def) => {
                   const depth = reg.repeat === 'cards' ? 2 : 1;
-                  // A hide waiting on a probe (ChildDef.hideGate) offers no eye.
-                  const hides = !def.hideGate || probe(def.hideGate);
+                  // A hide waiting on a probe (ChildDef.hideGate) offers no eye; nor does a piece
+                  // pinned to a hidden one, which the game hides with it (shown by showing that one).
+                  const head = hiddenWith(design, el.id, def.name);
+                  const hides = (!def.hideGate || probe(def.hideGate)) && !head;
                   const info = panelChild(design, el.id, def.name);
                   if (!info) {
                     return def.addable ? (
@@ -190,7 +193,8 @@ export function LayersPanel(
                     : { kind: 'children', names: [def.name], card: cardIn(el.id), panel: el.id };
                   return (
                     <Row
-                      key={def.name} label={def.label} depth={depth} active={isIn(sel, t)} hidden={!info.visible} note={def.stateArt && WHEN[def.stateArt]}
+                      key={def.name} label={def.label} depth={depth} active={isIn(sel, t)} hidden={!info.visible || !!head}
+                      note={head ? `Hidden with ${head.label}` : def.stateArt && WHEN[def.stateArt]}
                       onPick={(shift) => onPick(t, shift)} onEye={hides ? (v) => onVisible(t, v) : undefined}
                     />
                   );
