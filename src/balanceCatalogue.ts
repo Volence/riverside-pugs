@@ -45,10 +45,16 @@ export function loadCatalogue(path: string = CATALOGUE_PATH, raw?: unknown): Cat
   const groups = new Set(c.groups.map((g) => g.id));
   if (groups.size !== c.groups.length) throw new Error('catalogue: duplicate group');
   const ids = new Set<string>();
+  const cvarsLower = new Set<string>();
   for (const v of c.values) {
     if (!groups.has(v.group)) throw new Error(`catalogue: ${v.id} is in unknown group ${v.group}`);
     if (ids.has(v.id)) throw new Error(`catalogue: duplicate value ${v.id}`);
     ids.add(v.id);
+    // FindConVar ignores case, so two spellings would watch one cvar twice.
+    if (v.source === 'cvar') {
+      if (cvarsLower.has(v.id.toLowerCase())) throw new Error(`catalogue: duplicate value ${v.id} (cvars ignore case)`);
+      cvarsLower.add(v.id.toLowerCase());
+    }
     if (v.source === 'cvar' && !CVAR_RE.test(v.id)) throw new Error(`catalogue: bad cvar ${v.id}`);
     else if (v.source === 'weapon' && !WEAPON_RE.test(v.id)) throw new Error(`catalogue: bad weapon key ${v.id}`);
     else if (v.source !== 'cvar' && v.source !== 'weapon') throw new Error(`catalogue: ${v.id} has unknown source`);
@@ -75,14 +81,25 @@ export function loadCatalogue(path: string = CATALOGUE_PATH, raw?: unknown): Cat
  *  cvars (deduplicated, knobs order first) and weapon keys. */
 export function watchKnobs(knobs: BalanceKnobs, cat: Catalogue | null): BalanceKnobs {
   if (!cat) return knobs;
-  const have = new Set(knobs.cvars.map((c) => c.cvar));
-  const extra = cat.values.filter((v) => v.source === 'cvar' && !have.has(v.id)).map((v) => ({ cvar: v.id, label: v.label, group: v.group }));
+  // Cvars compare ignoring case, as FindConVar does.
+  const have = new Set(knobs.cvars.map((c) => c.cvar.toLowerCase()));
+  const extra = cat.values.filter((v) => v.source === 'cvar' && !have.has(v.id.toLowerCase())).map((v) => ({ cvar: v.id, label: v.label, group: v.group }));
   const weapons = [...(knobs.weapons ?? [])];
   const haveW = new Set(weapons.map((w) => `${w.weapon}.${w.key}`));
   for (const v of cat.values) {
     if (v.source !== 'weapon' || haveW.has(v.id)) continue;
+    haveW.add(v.id);
     const [weapon, key] = v.id.split('.');
     weapons.push({ weapon, key, label: v.label });
   }
   return { ...knobs, cvars: [...knobs.cvars, ...extra], weapons };
+}
+
+/** `w:<weapon>.<key>` -> label, from knobs.json's weapons and the catalogue's
+ *  weapon values (knobs first), for wording triage changes. */
+export function weaponLabels(knobs: BalanceKnobs | null, cat: Catalogue | null): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const v of cat?.values ?? []) if (v.source === 'weapon') out[`w:${v.id}`] = v.label;
+  for (const w of knobs?.weapons ?? []) out[`w:${w.weapon}.${w.key}`] = w.label;
+  return out;
 }

@@ -18,6 +18,31 @@ describe('describeChanges', () => {
     expect(mixed.onlyPlugins).toBe(false);
     expect(describeChanges(BASE, BASE, []).onlyPlugins).toBe(false);
   });
+
+  it('keys present on one side only are the watch list growing, not a difference', () => {
+    // After pug-match 0.3.14 the watch list grows from 43 cvars to ~205 plus
+    // weapon keys: a plugin-only update must still read as plugin-only.
+    const grown = { ...BASE, 'p:l4d_tvwatch.smx': '3.c', 'c:z_new_a': '1', 'c:z_new_b': '2', 'x:z_gone': 'missing',
+      'w:weapon_rifle.Damage': '33', 'f:cfg/extra.cfg': '1.a', 'd:cfg/stripper': '3.b' };
+    expect(describeChanges(BASE, grown, LISTS.versionless)).toEqual({
+      lines: ['plugin added: l4d_tvwatch', '6 values newly watched'], plugins: ['l4d_tvwatch.smx'], onlyPlugins: true,
+    });
+    const shrunk = describeChanges({ ...BASE, 'c:z_new_a': '1' }, BASE, LISTS.versionless);
+    expect(shrunk).toEqual({ lines: ['1 value no longer watched'], plugins: [], onlyPlugins: false });
+  });
+
+  it('a cvar that vanished (c: on one side, x: on the other) is still a real difference', () => {
+    const d = describeChanges({ ...BASE, 'c:l4d_foo': '1', 'p:l4d_foo.smx': '1.a' }, { ...BASE, 'x:l4d_foo': 'missing' }, []);
+    expect(d.onlyPlugins).toBe(false);
+    expect(d.lines).toEqual(['plugin removed: l4d_foo', 'l4d_foo no longer exists (was 1)']);
+  });
+
+  it('weapon keys are worded with their catalogue label when one is known', () => {
+    const a = { ...BASE, 'w:weapon_rifle.Damage': '33', 'w:weapon_smg.Damage': '20' };
+    const b = { ...BASE, 'w:weapon_rifle.Damage': '40', 'w:weapon_smg.Damage': '22' };
+    expect(describeChanges(a, b, [], { 'w:weapon_rifle.Damage': 'Rifle damage' }).lines)
+      .toEqual(['Rifle damage 33 -> 40', 'weapon_smg.Damage 20 -> 22']);
+  });
 });
 
 describe('describeChanges, plugins in a subfolder', () => {
@@ -92,6 +117,16 @@ describe('triage decisions', () => {
     expect(triageUnfold(db, noisy)).toMatchObject({ ok: false, status: 409 });
   });
 
+  it('unfold refuses a merged patch (no fingerprint of its own) and the active rollout', () => {
+    triageFold(db, noisy, base);
+    db.prepare('UPDATE balance_patches SET fingerprint = NULL WHERE id = ?').run(noisy);
+    expect(triageUnfold(db, noisy)).toMatchObject({ ok: false, status: 409, error: expect.stringMatching(/merged/) });
+    db.prepare("UPDATE balance_patches SET fingerprint = 'n' WHERE id = ?").run(noisy);
+    db.prepare("INSERT INTO balance_rollouts (patch_id, values_json, content, created_by, created_at) VALUES (?, '{}', '', '1', 'x')").run(noisy);
+    expect(triageUnfold(db, noisy)).toMatchObject({ ok: false, status: 409, error: expect.stringMatching(/rollout/) });
+    expect(db.prepare('SELECT triage FROM balance_patches WHERE id = ?').get(noisy)).toEqual({ triage: 'folded' });
+  });
+
   it('ignore: plugin-only diffs only, adds the plugins, refingerprints and folds', () => {
     expect(triageIgnore(db, real, { into: base, plugins: [], versionless: LISTS.versionless, knobsIgnored: [], adminId: '1' }))
       .toMatchObject({ ok: false, status: 400 });
@@ -106,6 +141,35 @@ describe('triage decisions', () => {
     const again = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 2, inventory: { ...BASE, 'p:l4d_tvwatch.smx': '3.c' },
       versionless: LISTS.versionless, ignored: ['l4d_tvwatch.smx'] });
     expect(again.patchId).toBe(base);
+  });
+
+  it('ignore still works for a plugin update that arrives with a grown watch list', () => {
+    const grown = { ...BASE, 'p:l4d_tvwatch.smx': '3.c', 'c:z_new_a': '1', 'w:weapon_rifle.Damage': '33' };
+    const g = Number(db.prepare("INSERT INTO balance_patches (fingerprint, source, inputs_json, first_seen_at, triage, came_from_patch_id) VALUES ('g', 'detected', ?, '2026-09-23 00:00:00', 'pending', ?)")
+      .run(JSON.stringify(grown), base).lastInsertRowid);
+    expect(triageInfo(db, g, LISTS)).toMatchObject({ onlyPluginsChanged: true, plugins: ['l4d_tvwatch.smx'] });
+    expect(triageIgnore(db, g, { into: base, plugins: ['l4d_tvwatch.smx'], versionless: LISTS.versionless, knobsIgnored: [], adminId: '1' }))
+      .toEqual({ ok: true, target: base });
+    expect(db.prepare('SELECT triage, folded_into FROM balance_patches WHERE id = ?').get(g)).toEqual({ triage: 'folded', folded_into: base });
+  });
+
+  it('ignore: when another patch holds the shared fingerprint, that holder is folded, so new sightings count for the target', () => {
+    // Two pending patches, same config but for the ignored plugin's build and
+    // one newly watched cvar the base lacks: after the ignore they hash the
+    // same as each other, not as the base.
+    const extra = { 'c:z_new': '1' };
+    addServer(db, { name: 'chicago', host: '10.0.0.2', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    const older = recordBalanceSighting(db, { matchId: 1, serverId: 2, half: 2, inventory: { ...BASE, ...extra, 'p:l4d_tvwatch.smx': '3.c' },
+      versionless: LISTS.versionless, now: '2026-09-22 01:00:00' }).patchId;
+    const newer = recordBalanceSighting(db, { matchId: 1, serverId: 2, half: 2, inventory: { ...BASE, ...extra, 'p:l4d_tvwatch.smx': '4.d' },
+      versionless: LISTS.versionless, now: '2026-09-22 02:00:00' }).patchId;
+    expect(triageIgnore(db, newer, { into: base, plugins: ['l4d_tvwatch.smx'], versionless: LISTS.versionless, knobsIgnored: [], adminId: '1' }))
+      .toEqual({ ok: true, target: base });
+    const again = recordBalanceSighting(db, { matchId: 1, serverId: 2, half: 2, inventory: { ...BASE, ...extra, 'p:l4d_tvwatch.smx': '5.e' },
+      versionless: LISTS.versionless, ignored: ['l4d_tvwatch.smx'] });
+    expect(again.patchId).toBe(older);
+    expect(again.effectivePatchId).toBe(base);
+    expect(db.prepare('SELECT folded_into FROM balance_patches WHERE id = ?').get(newer)).toEqual({ folded_into: older });
   });
 
   it('drift uses the ignored list it is given', () => {
