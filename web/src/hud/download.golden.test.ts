@@ -31,6 +31,12 @@ import { ammoOnly } from './edit';
  * differs only in that: TeamPlayer1..4 and the card's squared Incapacitated
  * and Dead 122, Voice at 106, the container 555. Modern's card has bar and
  * row both at 32 and keeps its bytes.
+ *
+ * Every Modern download moved on purpose on 2026-09-25: it now ships the
+ * Modern HUD's four flat panel textures (build.ts MODERN_ART), which its files
+ * name and which were missing, so the kill notices and the versus score panel
+ * drew the purple and black missing texture for every player but the owner.
+ * The other files are byte for byte as before.
  */
 const here = fileURLToPath(new URL('.', import.meta.url));
 const fonts = {
@@ -46,12 +52,12 @@ describe('the download is unchanged by the preview', () => {
     ['Ammo only', ammoOnly(structuredClone(DEFAULT_DESIGN)), '64bf9c263167e79439f125f32fe872a91f9bbddd5482cd6ec71f5b3d030e242c'],
     // Modern moved on purpose with the revive anchor (build.ts reviveAnchorPass): its own panel has the
     // bar at 34 and the down picture at 0, so it gains a hidden Items label at 34.
-    ['an untouched Modern design', { ...structuredClone(DEFAULT_DESIGN), preset: 'modern' }, '1b285e76db27d4b2dfbb0e7b39c19077d1f3d6e7825a5e3f0e4210bfd25b2264'],
+    ['an untouched Modern design', { ...structuredClone(DEFAULT_DESIGN), preset: 'modern' }, 'ceb1b8c500a40ea2c8afc4c02256385de128be8ae0773ea5b46740b35acd0e4b'],
     ['an untouched design in Roboto', { ...structuredClone(DEFAULT_DESIGN), font: 'roboto' }, '5deb06123b98d7017cc7454d3e9d5d4c0e2e5352b3deff94e0b96181293bbb88'],
     // A design saved before your own health fitted by default (slice 2.F X14) keeps the bytes it had:
     // these are the old untouched hashes, built as such a saved design loads.
     ['a design saved before the own panel fitted by default', validateDesign({ v: 1, crosshair: 'none', elements: { teamColumn: { fit: true } } }), 'c400e2a6ff36772b3d3c09151b2859a99bb1c8538ca11bd01ec3826ce23da4db'],
-    ['a Modern design saved before the own panel fitted by default', validateDesign({ v: 1, preset: 'modern', crosshair: 'none', elements: { teamColumn: { fit: true } } }), '4c67fb0c1bba67763efe27a75b74c4c383ac02dcfbcf47e95349ff276d4d3a54'],
+    ['a Modern design saved before the own panel fitted by default', validateDesign({ v: 1, preset: 'modern', crosshair: 'none', elements: { teamColumn: { fit: true } } }), '2cc59f59353a95cc5fa3d5d755d8282cff9a975e2f463b319830769672bf2f9d'],
     ['a Roboto design saved before the own panel fitted by default', validateDesign({ v: 1, font: 'roboto', crosshair: 'none', elements: { teamColumn: { fit: true } } }), '9a193ebada1b8afb78094d9a737dd1000fe7e8df2fa367636c469b9752ed5b58'],
   ];
   for (const [name, d, hash] of cases) {
@@ -86,7 +92,7 @@ describe('saved Phase 1 designs download the same bytes', () => {
       v: 1, preset: 'modern',
       elements: { teamColumn: { fit: true }, siHealth: { scale: 1.5 }, infectedRow: { scale: 2 } },
       children: { teamColumn: { Status: { visible: false }, Head: { w: 20, h: 20 } } },
-    }), '9c61b7503e2c1aa2076e17a71d5620c1c0eacafde4d43a3b6940c35e52a51843'],
+    }), '9cd4aae14a90ddd0f644b4518bc4ed6876cdf67cf7eb9d86bf35b59d99053807'],
     ['hidden chat and notices, the game crosshair hidden, weapons edited', () => validateDesign({
       v: 1, crosshair: 'none', hideGameCrosshair: true,
       elements: { chat: { visible: false }, killNotices: { visible: false } },
@@ -126,10 +132,10 @@ describe('saved infected designs download the same bytes', () => {
     'stock: infected teammates scaled 2 with a stored spacing 200': '93ed646c11be551258e91c3ede3efcc3f8833f79b765b81dcd3aa3d627918334',
     'stock: the ability timer moved': 'e3c0ddd98ad677d3d77d0e324fe4da9c45bf86c55cf990dd9afc9a5914faf29a',
     'stock: the game crosshair hidden': '93f6382e8f97c317c910a3f73265973e430530b954c65b23c00ce462fb9b79a5',
-    'modern: your infected health scaled 1.5 and moved': 'dfdaca22c54f5079208a647c7a88614eb292642cd004fa3f0fd9a4ca792e564c',
-    'modern: infected teammates scaled 2 with a stored spacing 200': '35fd853d2f0d9b3b12285a28c1114b013a5b9cdc55e859f3076def9a3b43fac8',
-    'modern: the ability timer moved': 'a9f4601215c651d2ef5a0a6fd0b283bb04d99775bac5ce3df33f9428acf3460a',
-    'modern: the game crosshair hidden': '0c95532a480d1c13cde0afff8e75c593f399e85b08c7fd931b5dd13c5c5cd734',
+    'modern: your infected health scaled 1.5 and moved': 'c15d38246b4b15a78480fb09749214c754c370f5c854b20848bcd99d8bf20f48',
+    'modern: infected teammates scaled 2 with a stored spacing 200': '224ce222028da1fa065e94f36686d950b07bbc36d7d012e14bf5819e1ab02e12',
+    'modern: the ability timer moved': '2cceb68b08bfa67ab5dc8688cbc351d4cde143604b54a3a4cbe1c0abd9deef23',
+    'modern: the game crosshair hidden': '7afca08f606cd33611b27fc79b3ee0d586722788a27d8e3b99d8ceccb6f0995f',
   };
   for (const [name, make] of [...infected('stock'), ...infected('modern')]) {
     it(`${name} packs to the same bytes`, () => {
