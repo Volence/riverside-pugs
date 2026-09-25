@@ -66,4 +66,14 @@ describe('classOf and isSpawnedTarget', () => {
     expect(isSpawnedTarget(sample({ state: live, cls: 5 }))).toBe(false);
     expect(isSpawnedTarget(sample({ state: 0, cls: 3 }))).toBe(false);
   });
+
+  it('never takes a survivor for an infected, whatever character number cls holds', () => {
+    // A survivor's cls is its character (0 Bill, 1 Zoey, 2 Louis, 3 Francis),
+    // so 1 to 3 collide with smoker, boomer and hunter.
+    const live = STATE.PRESENT | STATE.ALIVE;
+    for (const cls of [1, 2, 3]) {
+      expect(isSpawnedTarget(sample({ state: live, cls, infected: false }))).toBe(false);
+      expect(isSpawnedTarget(sample({ state: live, cls, infected: true }))).toBe(true);
+    }
+  });
 });
