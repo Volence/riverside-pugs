@@ -3,7 +3,7 @@ import type { DB } from '../db.js';
 import { getPlayer } from '../players.js';
 import { targetLabel } from '../tickets/person.js';
 import { getTicketRow } from '../tickets/store.js';
-import { reporterThreadsOf } from '../tickets/reporterChat.js';
+import { reporterLabel, reporterThreadsOf } from '../tickets/reporterChat.js';
 import { TICKET_OUTCOMES } from '../tickets/actions.js';
 import { escapeName } from './presenter.js';
 import type { ActionRow, Button, EmbedField, MessagePayload, ModalDef } from './transport.js';
@@ -30,7 +30,16 @@ export interface TicketCard {
   hash: string;
 }
 
-interface ReportBit { id: number; category: string; match_id: number | null; map_ordinal: number | null; half: number | null; t_ms: number | null }
+interface ReportBit {
+  id: number; ticket_id: number; reporter_id: string | null; reporter_discord_id: string | null;
+  category: string; text: string; match_id: number | null; map_ordinal: number | null; half: number | null; t_ms: number | null;
+}
+
+const REPORT_COLS = 'id, ticket_id, reporter_id, reporter_discord_id, category, text, match_id, map_ordinal, half, t_ms';
+/** Discord refuses an embed description longer than this. */
+const DESCRIPTION_MAX = 4096;
+/** One report's words on a card. The whole text is on the ticket page. */
+const TEXT_MAX = 400;
 
 const people = (n: number) => `${n} ${n === 1 ? 'person' : 'people'}`;
 
@@ -41,16 +50,45 @@ function matchLinks(r: ReportBit, publicUrl: string): string {
 }
 
 /**
+ * One report as staff read it: who filed it, the category, where, and what
+ * they wrote. The name and the words are escaped and the name is plain text,
+ * never anchor text (see the Accused field). The text is quoted line by line
+ * and clipped; the ticket page has all of it.
+ */
+function reportBlock(db: DB, r: ReportBit, publicUrl: string): string {
+  const who = escapeName(reporterLabel(db, r.ticket_id, { reporterId: r.reporter_id, reporterDiscordId: r.reporter_discord_id }));
+  const where = r.match_id === null ? '' : ` · ${matchLinks(r, publicUrl)}`;
+  const text = r.text.trim();
+  const clipped = text.length > TEXT_MAX ? `${text.slice(0, TEXT_MAX)}...` : text;
+  const quote = clipped === '' ? [] : clipped.split('\n').map((l) => `> ${escapeName(l)}`);
+  return [`**${who}** · ${escapeName(r.category)}${where}`, ...quote].join('\n');
+}
+
+/** The reports, newest last, with as many of the newest as fit under
+ *  Discord's limit and the rest counted, since the ticket page lists them all. */
+function reportsText(blocks: string[], tail: string): string {
+  let shown = blocks.length;
+  const join = () => {
+    const hidden = blocks.length - shown;
+    return [...(hidden > 0 ? [`${hidden} earlier ${hidden === 1 ? 'report' : 'reports'} on the ticket page`] : []), ...blocks.slice(blocks.length - shown), tail].join('\n\n');
+  };
+  let text = join();
+  while (text.length > DESCRIPTION_MAX && shown > 0) { shown--; text = join(); }
+  return text.slice(0, DESCRIPTION_MAX);
+}
+
+/**
  * The case card: the first message of a ticket's staff thread.
  *
- * It names the accused and nobody else. Who reported, and what they wrote,
- * stay on the ticket page behind canSeeTicket; the card links there.
+ * It names the accused and every reporter with what they wrote. The accused
+ * never reads it: forumAudience keeps a ticket's subject out of its post, and
+ * a restricted ticket has no Discord thread at all.
  */
 export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketCard | null {
   const t = getTicketRow(db, ticketId);
   if (!t) return null;
   const reports = db.prepare(
-    'SELECT id, category, match_id, map_ordinal, half, t_ms FROM ticket_reports WHERE ticket_id = ? ORDER BY id',
+    `SELECT ${REPORT_COLS} FROM ticket_reports WHERE ticket_id = ? ORDER BY id`,
   ).all(ticketId) as ReportBit[];
   const reporters = (db.prepare(
     "SELECT COUNT(DISTINCT COALESCE(reporter_id, 'd:' || reporter_discord_id)) AS n FROM ticket_reports WHERE ticket_id = ?",
@@ -59,7 +97,9 @@ export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketC
   const accused = targetLabel(db, t);
   const url = `${publicUrl}/admin/people/tickets/${t.id}`;
   const status = t.status === 'closed' ? 'closed' : t.claimed_by ? 'claimed' : 'open';
-  const claimedBy = t.claimed_by ? escapeName(getPlayer(db, t.claimed_by)?.name ?? t.claimed_by) : '';
+  const nameOf = (steamid: string) => escapeName(getPlayer(db, steamid)?.name ?? steamid);
+  const claimedBy = t.claimed_by ? nameOf(t.claimed_by) : '';
+  const closedBy = t.closed_by ? ` by ${nameOf(t.closed_by)}` : '';
   // A Discord-only person has no profile page. The id is shown as code so a
   // moderator can find them in Discord's member list; never as a mention,
   // which would ping them from a staff post.
@@ -76,7 +116,7 @@ export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketC
     { name: 'Accused', value: accusedValue, inline: true },
     {
       name: 'Status', inline: true,
-      value: status === 'closed' ? `closed: ${(t.outcome ?? '').replace(/_/g, ' ')}` : status === 'claimed' ? `claimed by ${claimedBy}` : 'open, unclaimed',
+      value: status === 'closed' ? `closed${closedBy}: ${(t.outcome ?? '').replace(/_/g, ' ')}` : status === 'claimed' ? `claimed by ${claimedBy}` : 'open, unclaimed',
     },
     { name: 'Reports', value: reports.length === 0 ? 'None. Opened by staff.' : `${reports.length} from ${people(reporters)}: ${categories.join(', ')}` },
   ];
@@ -104,7 +144,9 @@ export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketC
     embeds: [{
       title: `Ticket #${t.id}`,
       url,
-      description: 'Who reported and what they wrote is on the ticket page. Bans are issued there too.',
+      description: reports.length === 0
+        ? 'Bans are issued on the ticket page.'
+        : reportsText(reports.map((r) => reportBlock(db, r, publicUrl)), 'Bans are issued on the ticket page.'),
       color: COLOR[status],
       fields,
       footer: t.restricted === 1
@@ -126,15 +168,12 @@ export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketC
   };
 }
 
-/** The line a further report posts into the thread. The category and where to
- *  look, never who filed it or what they wrote. */
+/** The line a further report posts into the thread: who filed it, the
+ *  category, where, and what they wrote. */
 export function reportLine(db: DB, reportId: number, publicUrl: string): MessagePayload {
-  const r = db.prepare(
-    'SELECT id, category, match_id, map_ordinal, half, t_ms FROM ticket_reports WHERE id = ?',
-  ).get(reportId) as ReportBit;
-  const where = r.match_id === null ? '' : ` · ${matchLinks(r, publicUrl)}`;
+  const r = db.prepare(`SELECT ${REPORT_COLS} FROM ticket_reports WHERE id = ?`).get(reportId) as ReportBit;
   return {
-    embeds: [{ description: `Another report: **${r.category}**${where}`, color: COLOR.open }],
+    embeds: [{ title: 'Another report', description: reportBlock(db, r, publicUrl), color: COLOR.open }],
     components: [],
     mentionUserIds: [],
   };

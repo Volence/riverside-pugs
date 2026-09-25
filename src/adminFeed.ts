@@ -14,7 +14,7 @@ export type AdminEvent =
   // for a restricted ticket or a ticket about staff. It carries no reporter:
   // the feed channel is wider than the ticket. `created` is whether the
   // report opened the ticket or joined one.
-  | { kind: 'report'; ticketId: number; targetId: string | null; targetName: string; category: string; created: boolean }
+  | { kind: 'report'; ticketId: number; targetId: string | null; targetName: string; reporterId: string | null; reporterName: string; category: string; created: boolean }
   | { kind: 'admin_action'; adminId: string; action: string; target: string; detail: Record<string, unknown> }
   | { kind: 'penalty'; steamid: string; penalty: 'ready_fail' | 'no_show'; matchId: number | null }
   | { kind: 'account'; steamid: string; what: 'linked' | 'activated'; discordName?: string }

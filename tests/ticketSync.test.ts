@@ -47,7 +47,7 @@ const cardOf = (threadId: string) => t.byId(threadId)!.payload;
 const buttons = (threadId: string) => cardOf(threadId).components.flat().map((b) => (b.kind === 'button' ? `${b.customId}=${b.label}` : `link=${b.url}`));
 
 describe('the staff forum post', () => {
-  it('makes one post for a new ticket: titled, tagged, a case card, and nobody who reported it', async () => {
+  it('makes one post for a new ticket: titled, tagged, a case card naming who reported it and what they wrote', async () => {
     sync.start();
     const id = file(IDS[0], { targetId: IDS[5], category: 'griefing', text: 'kept killing us', matchId, moment: { ordinal: 2, half: 1, tMs: 61500 } });
     await sync.idle();
@@ -61,8 +61,8 @@ describe('the staff forum post', () => {
     expect(text).toContain(`https://pug.test/admin/people/tickets/${id}`);
     expect(text).toContain('player5');
     expect(text).toContain(`https://pug.test/match/${matchId}?ordinal=2&half=1&t=61500`);
-    expect(text).not.toContain('player0');
-    expect(text).not.toContain('kept killing us');
+    expect(text).toContain('**player0** · griefing');
+    expect(text).toContain('> kept killing us');
     expect(buttons(row.thread_id)).toEqual([
       `t:${id}:claim=Claim`, `t:${id}:close=Close`, `link=https://pug.test/admin/people/tickets/${id}`, `t:${id}:contact=Contact reporter`,
     ]);
@@ -81,8 +81,8 @@ describe('the staff forum post', () => {
     expect(inThread).toHaveLength(2);
     expect(JSON.stringify(inThread[1].payload)).toMatch(/another report/i);
     expect(JSON.stringify(inThread[1].payload)).toContain('cheating');
-    expect(JSON.stringify(inThread[1].payload)).not.toContain('player1');
-    expect(JSON.stringify(inThread[1].payload)).not.toContain('walls');
+    expect(JSON.stringify(inThread[1].payload)).toContain('**player1** · cheating');
+    expect(JSON.stringify(inThread[1].payload)).toContain('> walls');
     expect(JSON.stringify(cardOf(threadId))).toContain('2 from 2 people');
     expect(t.threadsById.get(threadId)!.tags).toEqual(['open', 'griefing', 'cheating']);
   });
@@ -155,7 +155,7 @@ describe('the staff forum post', () => {
     closeTicket(db, id, MOD, 'warned', 'first time');
     await sync.idle();
     expect(t.threadsById.get(threadId)).toMatchObject({ locked: true, archived: true, tags: ['closed', 'afk'] });
-    expect(JSON.stringify(cardOf(threadId))).toContain('closed: warned');
+    expect(JSON.stringify(cardOf(threadId))).toContain('closed by player6: warned');
     expect(JSON.stringify(cardOf(threadId))).not.toContain('first time');
     expect(buttons(threadId)).toEqual([`link=https://pug.test/admin/people/tickets/${id}`]);
     expect(staffThread(db, id)!.locked).toBe(1);
@@ -188,7 +188,7 @@ describe('the staff forum post', () => {
     closeTicket(db, id, MOD, 'warned', '');
     await sync.idle();
     expect(t.threadsById.get(threadId)).toMatchObject({ locked: true, archived: true, tags: ['closed', 'afk'] });
-    expect(JSON.stringify(cardOf(threadId))).toContain('closed: warned');
+    expect(JSON.stringify(cardOf(threadId))).toContain('closed by player6: warned');
     expect(staffThread(db, id)!.locked).toBe(1);
     expect(events.filter((e) => e.kind === 'problem')).toEqual([]);
   });

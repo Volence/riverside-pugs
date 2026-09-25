@@ -105,8 +105,9 @@ describe('a report held from the feed by its history', () => {
     expect(inFeed()).toHaveLength(1);
     expect(text(0)).toMatch(/new ticket/i);
     expect(text(0)).toContain('player5');
+    // The held report's reporter and words stay out; the said one names its own.
     expect(text(0)).not.toContain('player0');
-    expect(text(0)).not.toContain('player1');
+    expect(text(0)).toContain('player1');
     expect(text(0)).not.toContain('threat');
   });
 
