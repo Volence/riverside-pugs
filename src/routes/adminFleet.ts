@@ -6,7 +6,7 @@ import { listServers } from '../serverPool.js';
 import { compareFleet, loadManifest, type CompareOpts, type FileSig, type Manifest } from '../fleetCompare.js';
 import type { DeployRepo } from '../deployRepo.js';
 import type { ReleaseService } from '../releaseService.js';
-import { deploySlug, wantedFor } from '../releaseStage.js';
+import { wantedFor } from '../releaseStage.js';
 import { readingStates, readingsOf, type FleetReader } from '../fleetReader.js';
 
 export interface FleetRouteOpts {
@@ -42,7 +42,7 @@ export async function adminFleetRoutes(app: FastifyInstance, opts: FleetRouteOpt
       const origins = new Map<number, Map<string, { releaseId: number; sha256: string }>>();
       for (const s of servers) {
         const own = new Map<string, FileSig>();
-        for (const w of wantedFor(tree, deploySlug(s.name)).values()) if (w.layer === 'box') own.set(w.path, { size: w.size, sha256: w.sha256 });
+        for (const w of wantedFor(tree, s.deploy_slug ?? '').values()) if (w.layer === 'box') own.set(w.path, { size: w.size, sha256: w.sha256 });
         boxRefs.set(s.id, own);
         const last = rel.service.lastShipped(s.id);
         if (last) origins.set(s.id, new Map([...last.files].map(([p, f]) => [p, { releaseId: last.releaseId, sha256: f.sha256 }])));

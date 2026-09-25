@@ -101,6 +101,54 @@ describe('release routes', () => {
     expect(review.perBox[0].warnings.join(' ')).toMatch(/per-box file and would be replaced by the shared copy: add this box's own copy under boxes\/dallas\//);
   });
 
+  /** Stages master and returns Dallas's review row. */
+  async function stageAndReview() {
+    const { a, cookies } = await app();
+    await a.inject({ method: 'POST', url: '/api/admin/releases/refresh', cookies });
+    const { id } = (await a.inject({ method: 'POST', url: '/api/admin/releases/stage', cookies, payload: { commit: 'master' } })).json() as { id: number };
+    const review = (await a.inject({ method: 'GET', url: `/api/admin/releases/${id}`, cookies })).json() as { perBox: { deployable: boolean; warnings: string[]; lines: string[] }[] };
+    return review.perBox[0];
+  }
+  const LOCAL = 'left4dead/cfg/local.cfg';
+
+  it('keeps a box on its own layer after a rename', async () => {
+    mkdirSync(join(work, 'boxes/dallas/left4dead/cfg'), { recursive: true });
+    writeFileSync(join(work, 'boxes/dallas/left4dead/cfg/local.cfg'), 'exec secrets.cfg\n');
+    git('add', '-A'); git('commit', '-qm', 'dallas local');
+    writeFileSync(join(work, 'overrides/left4dead/cfg/pug_match.cfg'), 'z_tank_health 7000\n');
+    git('add', '-A'); git('commit', '-qm', 'tank 7000');
+    db.prepare('INSERT INTO fleet_files (server_id, path, size, sha256) VALUES (1, ?, 17, ?)').run(LOCAL, sha('exec secrets.cfg\n'));
+    // An earlier release shipped Dallas its own local.cfg.
+    const prev = Number(db.prepare("INSERT INTO releases (kind, sources_json, state, created_by, created_at, deployed_at) VALUES ('deploy', '[]', 'done', '1', 'x', 'x')").run().lastInsertRowid);
+    db.prepare("INSERT INTO release_boxes (release_id, server_id, state, plan_json, shipped_json, updated_at) VALUES (?, 1, 'restarted', '[]', ?, 'x')")
+      .run(prev, JSON.stringify({ [LOCAL]: { sha256: sha('exec secrets.cfg\n'), blob: 'b' } }));
+    db.prepare("UPDATE servers SET name = 'Dallas TX' WHERE id = 1").run();
+    const box = await stageAndReview();
+    expect(box.deployable).toBe(true);
+    expect(box.lines.join(' ')).not.toMatch(/local\.cfg/);
+  });
+
+  it('refuses to plan a box whose slug has no folder under boxes/', async () => {
+    mkdirSync(join(work, 'boxes/chicago/left4dead/cfg'), { recursive: true });
+    writeFileSync(join(work, 'boxes/chicago/left4dead/cfg/local.cfg'), 'x\n');
+    git('add', '-A'); git('commit', '-qm', 'chicago only');
+    const box = await stageAndReview();
+    expect(box.deployable).toBe(false);
+    expect(box.warnings.join(' ')).toMatch(/no boxes\/dallas\/ folder/);
+  });
+
+  it('blocks a release that would remove a per-box file', async () => {
+    mkdirSync(join(work, 'boxes/dallas/left4dead/cfg'), { recursive: true });
+    writeFileSync(join(work, 'boxes/dallas/left4dead/cfg/local.cfg'), 'exec secrets.cfg\n');
+    writeFileSync(join(work, 'boxes/dallas/left4dead/cfg/other.cfg'), 'x\n');
+    git('add', '-A'); git('commit', '-qm', 'dallas local');
+    git('rm', '-q', 'boxes/dallas/left4dead/cfg/local.cfg'); git('commit', '-qm', 'oops');
+    db.prepare('INSERT INTO fleet_files (server_id, path, size, sha256) VALUES (1, ?, 17, ?)').run(LOCAL, sha('exec secrets.cfg\n'));
+    const box = await stageAndReview();
+    expect(box.deployable).toBe(false);
+    expect(box.warnings.join(' ')).toMatch(/would remove the per-box file cfg\/local\.cfg/);
+  });
+
   it('refuses a non-admin', async () => {
     const { a } = await app();
     const other = await authedCookie(a, db, '76561198000000010');
