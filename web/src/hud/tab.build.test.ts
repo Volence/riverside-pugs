@@ -3,6 +3,7 @@ import { buildHud } from './build';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
 import { parseKv, writeKv, kvGet, pcFind, type KvNode } from './kv';
 import { baseFile } from './base';
+import { parsePos, screenW, SCREEN_H } from './units';
 
 /**
  * The Tab screen in the download (tab screen spec
@@ -102,5 +103,18 @@ describe('the row bars by health: a cleared key is taken out of the file (KeyDef
 
   it('writes one colour as the value (TS3)', () => {
     expect(kvGet(bar({ monochrome_color: '255 0 0 255' }).block, 'monochrome_color')).toBe('255 0 0 255');
+  });
+});
+
+describe('moving the versus panel (task 7, probe TS4)', () => {
+  it('writes the [$WIN32] ypos and the xpos, and leaves the [$X360] ypos line', () => {
+    const files = build(validateDesign({ v: 1, elements: { tabVersus: { x: 420, y: 20 } } }));
+    const b = pcFind(tree(files, SCOREBOARD), ['CVersusModeScoreboard'])!;
+    const lines = (b.value as KvNode[]).filter((n) => ['xpos', 'ypos'].includes(n.key)).map((n) => [n.key, n.cond]);
+    expect(lines).toEqual([['xpos', undefined], ['ypos', '[$WIN32]'], ['ypos', '[$X360]']]);
+    const W = screenW('16:9');
+    expect(parsePos(kvGet(b, 'xpos')!, W)).toBeCloseTo(420, 0);
+    expect(parsePos(kvGet(b, 'ypos')!, SCREEN_H)).toBeCloseTo(20, 0);
+    expect((b.value as KvNode[]).find((n) => n.key === 'ypos' && n.cond === '[$X360]')!.value).toBe('c-208');
   });
 });
