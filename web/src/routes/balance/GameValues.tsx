@@ -13,7 +13,7 @@ export function GameValues() {
       <PageHeader eyebrow="Balance" title="Game values">
         <p>
           Every balance setting as our servers run it, next to the vanilla Left 4 Dead value. Rows that
-          differ from vanilla are highlighted. <a href="/balance">Patch notes</a> say why each change was made.
+          differ from vanilla are highlighted, and a dash means ours is the same as vanilla. <a href="/balance">Patch notes</a> say why each change was made.
         </p>
       </PageHeader>
       {error ? <Empty>Could not load the game values.</Empty>

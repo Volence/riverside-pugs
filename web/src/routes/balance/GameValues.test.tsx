@@ -33,7 +33,7 @@ describe('GameValues', () => {
     expect(await screen.findByText('Tank health')).toBeTruthy();
     expect(screen.getByText('8000').closest('tr')!.className).toContain('values-differs');
     expect((screen.getByText('Tank 8000') as HTMLAnchorElement).getAttribute('href')).toBe('/balance#patch-7');
-    expect(screen.getByTitle('Not reported by the servers yet').textContent).toBe('-');
+    expect(screen.getByTitle('Not reported by the servers yet').textContent).toBe('?');
     expect(screen.getByText('unchanged since tracking began')).toBeTruthy();
     expect(screen.getByText('Fire damage to the tank is capped.')).toBeTruthy();
   });
@@ -45,7 +45,8 @@ describe('GameValues', () => {
     const { container } = render(<GameValues />);
     await screen.findByText('Revive time');
     const row = container.querySelector('table.values-table tbody tr')!;
-    expect(row.querySelector('[data-label="Ours"]')!.textContent).toBe('vanilla');
+    expect(row.querySelector('[data-label="Ours"]')!.textContent).toBe('-');
+    expect(row.querySelector('[title="Same as vanilla"]')).toBeTruthy();
     expect(row.querySelector('[data-label="Vanilla"]')!.textContent).toBe('5 s');
     expect(row.className).not.toContain('values-differs');
   });
