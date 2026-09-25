@@ -73,6 +73,7 @@ describe('ftpTreeWriter', () => {
       rename: async (a: string, b: string) => { files.set(b, files.get(a)!); files.delete(a); },
       remove: async (p: string) => { if (!files.delete(p)) throw Object.assign(new Error('550'), { code: 550 }); },
       downloadTo: async (sink: NodeJS.WritableStream, p: string) => { const b = files.get(p); if (!b) throw Object.assign(new Error('550'), { code: 550 }); sink.write(b); },
+      list: async (d: string) => [...files.keys()].filter((k) => k.startsWith(`${d}/`)).map((k) => ({ name: k.slice(d.length + 1).split('/')[0] })),
     };
     const w = ftpTreeWriter({ host: 'h', port: 21, user: 'u', password: 'p', gameDir: '', client: () => client as never });
     await w.write(P, Buffer.from('abc'));
@@ -83,6 +84,32 @@ describe('ftpTreeWriter', () => {
     await w.remove(P);
     await w.remove(P);
     expect(files.size).toBe(0);
+  });
+});
+
+describe('ftpTreeWriter and a 550', () => {
+  const client = (listing: Record<string, string[] | 'denied'>) => ({
+    access: async () => ({}), close: () => {}, ensureDir: async () => {}, uploadFrom: async () => ({}), rename: async () => ({}), remove: async () => ({}),
+    downloadTo: async () => { throw Object.assign(new Error('550 Permission denied'), { code: 550 }); },
+    list: async (d: string) => {
+      const l = listing[d];
+      if (!l || l === 'denied') throw Object.assign(new Error('550'), { code: 550 });
+      return l.map((name) => ({ name }));
+    },
+  });
+  it('is absent only when the listing says so', async () => {
+    const w = ftpTreeWriter({ host: 'h', port: 21, user: 'u', password: 'p', gameDir: '/g', client: () => client({ '/g/left4dead/cfg/new': ['b.cfg'] }) as never });
+    expect(await w.read(P)).toBeNull();
+  });
+  it('is absent when a parent folder is absent', async () => {
+    const w = ftpTreeWriter({ host: 'h', port: 21, user: 'u', password: 'p', gameDir: '/g', client: () => client({ '/g/left4dead/cfg': ['x.cfg'] }) as never });
+    expect(await w.read(P)).toBeNull();
+  });
+  it('is an error when the file is there but cannot be read', async () => {
+    const w = ftpTreeWriter({ host: 'h', port: 21, user: 'u', password: 'p', gameDir: '/g', client: () => client({ '/g/left4dead/cfg/new': ['a.cfg'] }) as never });
+    await expect(w.read(P)).rejects.toThrow(/Permission denied/);
+    const w2 = ftpTreeWriter({ host: 'h', port: 21, user: 'u', password: 'p', gameDir: '/g', client: () => client({ '/g/left4dead/cfg/new': 'denied', '/g/left4dead/cfg': ['new'] }) as never });
+    await expect(w2.read(P)).rejects.toThrow(/Permission denied/);
   });
 });
 
