@@ -100,14 +100,28 @@ function triageBaseId(db: DB, id: number): number | null {
   return prev?.id ?? null;
 }
 
+/** With no balance patch to judge against (the first fingerprinted configs
+ *  on a site that only had historical patches), the newest earlier patch that
+ *  has inputs, whatever its triage, so the card still shows what changed. It
+ *  is shown as needing triage and is never a fold target. */
+function comparisonOnlyId(db: DB, id: number): number | null {
+  const r = row(db, id);
+  if (!r) return null;
+  const prev = db.prepare(`SELECT id FROM balance_patches WHERE inputs_json IS NOT NULL AND COALESCE(triage, 'balance') != 'folded'
+    AND id != ? AND (first_seen_at < ? OR (first_seen_at = ? AND id < ?)) ORDER BY first_seen_at DESC, id DESC LIMIT 1`)
+    .get(id, r.first_seen_at, r.first_seen_at, id) as { id: number } | undefined;
+  return prev?.id ?? null;
+}
+
 export function triageInfo(db: DB, id: number, lists: Lists) {
-  const baseId = triageBaseId(db, id);
+  const foldBase = triageBaseId(db, id);
+  const baseId = foldBase ?? comparisonOnlyId(db, id);
   const b = baseId === null ? undefined : row(db, baseId);
   const mine = inputsOf(db, id, lists.ignored);
   const theirs = baseId === null ? null : inputsOf(db, baseId, lists.ignored);
   const d = mine && theirs ? describeChanges(theirs, mine, lists.versionless, lists.labels) : { lines: [], plugins: [], onlyPlugins: false };
   return {
-    base: b ? { id: b.id, number: patchNumber(db, b.id), name: b.name } : null,
+    base: b ? { id: b.id, number: patchNumber(db, b.id), name: b.name, ...(foldBase === null ? { needsTriage: true } : {}) } : null,
     changes: d.lines, plugins: d.plugins, onlyPluginsChanged: d.onlyPlugins,
   };
 }
