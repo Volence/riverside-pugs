@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { drawHud, hitTest, paintYourItems, panelBoxes, LIMIT_COLOUR } from './mock';
+import { drawHud, hitTest, paintYourItems, panelBoxes, LIMIT_COLOUR, LIMIT_PLATE_TOP } from './mock';
 import { elementRect, yourItemsLimits } from './build';
 import { setYourItems, setItemsLook } from './edit';
 import { childRects, _setImageFactory, _resetAssetCache, DEFAULT_PREVIEW } from './render';
@@ -169,6 +169,20 @@ describe('the limit while Your items is placed (spec section 2)', () => {
     // The two plates would overlap side by side (the limits are close), so they must not share any height.
     expect(a[0] < b[0] + b[2] && b[0] < a[0] + a[2]).toBe(true);
     expect(a[1] + a[3] <= b[1] || b[1] + b[3] <= a[1]).toBe(true);
+    expect(Math.min(a[1], b[1])).toBe(LIMIT_PLATE_TOP);
+  });
+  it('starts the plates below the selection\'s name chip, which sits in the canvas\'s top left (Modern\'s bar is at 42)', () => {
+    // .hud__crumbs: 8 px in from the corner (--sp-2), about 20 px tall.
+    expect(LIMIT_PLATE_TOP).toBeGreaterThanOrEqual(8 + 20 + 4);
+    const m = setYourItems(validateDesign({ v: 1, preset: 'modern' }), true);
+    const lines = yourItemsLimits(m);
+    expect(lines[0].x).toBe(42);
+    for (const d of [1, 2]) {
+      const { ctx, fills } = proxyCtx(realW);
+      drawHud(ctx, 853 * d, 480 * d, m, 'survivor', [YOUR_ITEMS], undefined, { limits: lines, dpr: d });
+      const [p] = fills.filter((f) => f[3] === 14 * d);
+      expect(p[1], `dpr ${d}`).toBe(LIMIT_PLATE_TOP * d);
+    }
   });
   it('keeps the bar\'s label plate on a narrow canvas, the line still at the bar', () => {
     const d = setYourItems(D, true);
