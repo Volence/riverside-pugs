@@ -20,6 +20,7 @@ export function snapKnob(k: KnobView, raw: string): string {
 }
 
 export function serverStateText(s: RolloutServer, expectedNumber: number): string {
+  if (s.noTransport) return 'no transport: the site cannot reach this box\'s cfg directory, so it never gets the file; set its addons dir and transport';
   if (s.mismatch && s.seen) return `expected #${expectedNumber}, saw #${s.seen.number}: ${s.mismatch}`;
   if (s.state === 'pending') return 'waiting for the server to be free';
   if (s.state === 'failed') return `write failed: ${s.lastError ?? 'unknown error'}, retrying`;

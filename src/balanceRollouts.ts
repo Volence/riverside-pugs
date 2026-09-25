@@ -1,8 +1,13 @@
 import type { DB } from './db.js';
 import type { BalanceKnobs } from './balanceKnobs.js';
 import {
-  diffIgnoringVersionless, patchNumber, predictInventory, previewKnobs, renderBalanceCfg, type Inventory, type KnobPreview,
+  diffIgnoringVersionless, latestRolloutId, patchNumber, predictInventory, previewKnobs, renderBalanceCfg, type Inventory, type KnobPreview,
 } from './balanceControl.js';
+
+/** The error a box with no reachable cfg directory is failed with. It is a
+ *  standing configuration gap rather than a write that may succeed on the
+ *  next try, so the Knobs tab shows it as its own state. */
+export const NO_TRANSPORT = 'no addons transport configured';
 
 /** SQLite's datetime('now') format, so it sorts against the other balance times. */
 const sqlNow = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -24,9 +29,16 @@ const text = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
  *  cannot interleave. Writing to the boxes is the writer's job. */
 export function applyKnobs(db: DB, knobs: BalanceKnobs, req: {
   values: unknown; name: unknown; notes: unknown; adminId: string; now?: string;
+  /** The rollout the admin's preview was made against (KnobPreview.rolloutId).
+   *  When given, an apply is refused if another has landed since. */
+  baseRolloutId?: number | null;
 }): ApplyResult {
   const now = req.now ?? sqlNow();
   return db.transaction((): ApplyResult => {
+    const latest = latestRolloutId(db);
+    if (req.baseRolloutId !== undefined && req.baseRolloutId !== latest) {
+      return { ok: false, status: 409, error: `Another apply (rollout ${latest ?? 'none'}) landed after your preview: preview again before applying, so it is not undone by accident.` };
+    }
     const preview = previewKnobs(db, knobs, req.values);
     if (preview.errors.length) return { ok: false, status: 400, error: preview.errors.join('; '), preview };
     if (!preview.base) return { ok: false, status: 409, error: 'No queue match has been seen with a balance fingerprint yet, so there is nothing to predict from.', preview };
@@ -168,6 +180,8 @@ export interface RolloutServer {
   seen: { patchId: number; number: number; at: string } | null;
   /** What the last sighting differed in, when it was not the expected patch. */
   mismatch: string | null;
+  /** The site has no way to write this box (no addons dir or transport). */
+  noTransport: boolean;
 }
 export interface RolloutSummary {
   id: number; patchId: number; patchNumber: number; patchName: string | null; values: Record<string, string>;
@@ -198,7 +212,7 @@ export function listRollouts(db: DB, knobs: BalanceKnobs, limit = 20): RolloutSu
         const seenInv = seen && seen.patchId !== ro.patch_id ? inputsOf(seen.patchId) : null;
         return {
           serverId: s.server_id, name: s.name, state: s.state, lastError: s.last_error, writtenAt: s.written_at,
-          confirmedAt: s.confirmed_at, seen,
+          confirmedAt: s.confirmed_at, seen, noTransport: s.state === 'failed' && s.last_error === NO_TRANSPORT,
           // A sighting that carries the rollout's values is not a mismatch,
           // whatever else (a longer watch list, a release) changed with it.
           mismatch: seen && !knobValuesMatch(db, ro, seen.patchId)

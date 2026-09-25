@@ -157,6 +157,14 @@ export interface KnobPreview {
   /** Things that do not block an apply but make its first sightings harder
    *  to read. */
   warnings: string[];
+  /** The latest rollout this preview's "now" values came from, or null.
+   *  The apply sends it back, so a second admin's apply in between is
+   *  refused instead of silently undone. */
+  rolloutId: number | null;
+}
+
+export function latestRolloutId(db: DB): number | null {
+  return (db.prepare('SELECT id FROM balance_rollouts ORDER BY id DESC LIMIT 1').get() as { id: number } | undefined)?.id ?? null;
 }
 
 /** A release still on its way to the boxes changes their inventory in the
@@ -186,6 +194,7 @@ export function previewKnobs(db: DB, knobs: BalanceKnobs, raw: unknown): KnobPre
   }
   return {
     values, errors, diff, groupsChanged, missing, blocking, fingerprint, existingPatch, warnings: applyWarnings(db),
+    rolloutId: latestRolloutId(db),
     base: base ? { patchId: base.patchId, number: patchNumber(db, base.patchId) } : null,
   };
 }
