@@ -90,6 +90,41 @@ describe('gameValues', () => {
     expect(gameValues(db, CAT, { admin: false }).groups[2].values[1].lastChange).toBeNull();
   });
 
+  it('dates a revert at the return: A, B, then A again reports the change back to A', () => {
+    sight(db, 3, s1, INV('7000'), 'queue', '2026-09-23 00:00:00');
+    const v = gameValues(db, CAT, { admin: true }).groups[0].values[0];
+    expect(v.value).toBe('7000');
+    expect(v.lastChange).toMatchObject({ at: '2026-09-23 00:00:00', patch: { name: 'Base' } });
+  });
+
+  it('keeps the settled balance value while a newer config waits for triage', () => {
+    sight(db, 3, s1, INV('9000'), 'queue', '2026-09-23 00:00:00'); // a new patch, pending
+    const g = gameValues(db, CAT, { admin: false });
+    expect(g.groups[0].values[0]).toMatchObject({ value: '8000', lastChange: { at: '2026-09-22 00:00:00' } });
+    expect(g.reviewing).toBe(true);
+    expect(gameValues(db, CAT, { admin: false }).groups[0].rules.map((r) => r.text)).toContain('Tank has 8000 HP.');
+    // Triaged as balance, it becomes the value.
+    db.prepare("UPDATE balance_patches SET triage = 'balance' WHERE triage = 'pending'").run();
+    const after = gameValues(db, CAT, { admin: false });
+    expect(after.groups[0].values[0].value).toBe('9000');
+    expect(after.reviewing).toBe(false);
+  });
+
+  it('reads a folded patch: its own reported values, credited to the patch it counts for', () => {
+    // Watching one more value folds the new patch into Tank 8000 on sight.
+    const r = sight(db, 3, s1, INV('8000', { 'c:z_new_thing': '5' }), 'queue', '2026-09-23 00:00:00');
+    expect(r.patchId).not.toBe(r.effectivePatchId);
+    const g = gameValues(db, CAT, { admin: true });
+    expect(g.groups[0].values[1]).toMatchObject({ id: 'z_new_thing', value: '5', status: 'reported', lastChange: null });
+    expect(g.groups[0].values[0].lastChange).toMatchObject({ at: '2026-09-22 00:00:00', patch: { name: 'Tank 8000' } });
+    expect(g.reviewing).toBe(false);
+  });
+
+  it('never reports the admin-only patch pointer publicly', () => {
+    expect(gameValues(db, CAT, { admin: false })).not.toHaveProperty('asOf');
+    expect(gameValues(db, CAT, { admin: true }).asOf).toMatchObject({ number: 2 });
+  });
+
   it('shows reviewed active rules publicly; every rule, tagged, for admins', () => {
     const pub = gameValues(db, CAT, { admin: false });
     expect(pub.groups.find((x) => x.id === 'hunter')!.rules.map((r) => r.id)).toEqual(['sky']);
@@ -115,8 +150,8 @@ describe('values routes', () => {
     const a = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {} });
     const pub = await a.inject({ method: 'GET', url: '/api/balance/values' });
     expect(pub.statusCode).toBe(200);
-    const body = pub.json() as { asOf: null; groups: { id: string; rules: unknown[] }[] };
-    expect(body.asOf).toBeNull();
+    const body = pub.json() as { groups: { id: string; rules: unknown[] }[] };
+    expect(body).not.toHaveProperty('asOf');
     expect(body.groups.find((g) => g.id === 'tank')).toBeTruthy();
     expect(body.groups.every((g) => g.rules.length === 0)).toBe(true); // every rule is a draft
     expect((await a.inject({ method: 'GET', url: '/api/admin/balance/values' })).statusCode).toBe(401);

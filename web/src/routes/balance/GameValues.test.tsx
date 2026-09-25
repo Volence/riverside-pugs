@@ -13,6 +13,7 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 const data: GV = {
   asOf: { patchId: 6, number: 6 },
+  reviewing: false,
   groups: [
     { id: 'tank', label: 'Tank', values: [
       { id: 'z_tank_health', label: 'Tank health', unit: 'HP', note: null, value: '8000', vanilla: '4000', differsFromVanilla: true, status: 'reported',
@@ -35,6 +36,17 @@ describe('GameValues', () => {
     expect(screen.getByText('not reported yet')).toBeTruthy();
     expect(screen.getByText('unchanged since tracking began')).toBeTruthy();
     expect(screen.getByText('Fire damage to the tank is capped.')).toBeTruthy();
+  });
+
+  it('says when a newer config is being reviewed, and not otherwise', async () => {
+    mockApi.gameValues.mockResolvedValue({ ...data, reviewing: true });
+    render(<GameValues />);
+    expect(await screen.findByText(/A newer server config is being reviewed/)).toBeTruthy();
+    cleanup();
+    mockApi.gameValues.mockResolvedValue(data);
+    render(<GameValues />);
+    await screen.findByText('Tank health');
+    expect(screen.queryByText(/being reviewed/)).toBeNull();
   });
 
   it('the admin preview tags draft and inactive rules and shows a hidden value\'s note', async () => {
