@@ -31,7 +31,7 @@ import { hudStore, type HudMeta } from '../hud/hudStore';
 import * as undoStack from '../hud/history';
 import { childDef } from '../hud/children';
 import {
-  hasOverrides, withImport, withPreset, hasLayoutEdits,
+  hasOverrides, withImport, withPreset,
   moveElements, moveCards, cardStarts, freeInPlace, moveChildren, startsOf, nudgeSelection,
   resizeBox, resizeElement, scaleElement, resizeChild, scaleChildren, cornerFactor, anchorOf,
   setSelectionVisible, patchChild, hideSelection, resetSelection, raiseChild,
@@ -1112,24 +1112,15 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
   };
 
   /**
-   * Switching base keeps whatever moves the reader made, but they were placed
-   * for the other layout's own panel sizes, so a design with any layout edits
-   * asks first whether to drop them. Either answer switches; only whether the
-   * edits survive it differs.
+   * Picking a base in the Preset select (or importing a HUD) starts a clean
+   * design on it: every HUD edit goes (edit.ts freshOn), so what shows is
+   * that base as it ships. One edit, so Undo brings the old design back.
    */
-  const askReset = (d: HudDesign) => (hasLayoutEdits(d)
-    ? confirm({
-      title: 'Switching preset keeps your moves and inside edits, but they were placed for the other layout. Reset them as well?',
-      confirmLabel: 'Reset', cancelLabel: 'Keep',
-    })
-    : Promise.resolve(false));
-
   const changePreset = async (choice: PresetChoice) => {
     const cur = current.current;
     if (typeof choice === 'string') {
       if (choice === cur.preset) return;
-      const reset = await askReset(cur);
-      edit((d) => withPreset(d, choice, reset));
+      edit((d) => withPreset(d, choice));
     } else {
       const meta = imports.find((m) => m.id === choice.id);
       if (!meta) return;
@@ -1145,10 +1136,9 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       // One stored before the import checks, that the editor cannot show, is not switched onto.
       const problem = importProblem(choice.id);
       if (problem) { setStatus(`${meta.name} cannot be shown: ${problem}. Remove it from the Preset select.`); return; }
-      const reset = await askReset(cur);
       // Switching back onto an import keeps the design's crosshair: the
       // upload's own texture was offered once, when it was imported.
-      edit((d) => withImport(d, { id: choice.id, name: meta.name }, { art: null, hasXhair: importedHasXhair(`imported:${choice.id}`), reset }));
+      edit((d) => withImport(d, { id: choice.id, name: meta.name }, { art: null, hasXhair: importedHasXhair(`imported:${choice.id}`) }));
     }
     dropPicks();
   };
@@ -1185,9 +1175,8 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       const cur = current.current;
       const again = cur.preset === 'imported' && cur.imported?.id === id;
       if (!again) {
-        const reset = await askReset(cur);
         const art = importedCrosshair(upload.files);
-        edit((d) => withImport(d, { id, name: upload.name }, { art, hasXhair: importedHasXhair(`imported:${id}`), reset }));
+        edit((d) => withImport(d, { id, name: upload.name }, { art, hasXhair: importedHasXhair(`imported:${id}`) }));
         dropPicks();
       }
       const lasting = kept ? '' : ' This browser could not store it, so it is kept only until this page closes.';

@@ -2268,10 +2268,19 @@ describe('Splatter', () => {
     await waitFor(() => expect(row(TOP).queryByText(MSG)).toBeNull());
   });
 
-  it('keeps Reset usable on a row a preset switch disabled, so a stale entry can be cleared', async () => {
+  it('drops a splatter edit on a preset switch, and Undo brings it back', async () => {
     render(<Hud />);
     fireEvent.change(kindOf(TOP), { target: { value: 'fade' } });
     fireEvent.change(screen.getByRole('combobox', { name: /preset/i }), { target: { value: 'modern' } });
+    await waitFor(() => expect(stored().preset).toBe('modern'));
+    expect(stored().splatters?.splatTop).toBeUndefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(stored().splatters?.splatTop).toEqual({ kind: 'fade' }));
+  });
+
+  it('keeps Reset usable on a row the preset disables, so a stale entry can be cleared', async () => {
+    localStorage.setItem('hud', JSON.stringify({ v: 1, preset: 'modern', splatters: { splatTop: { kind: 'fade' } } }));
+    render(<Hud />);
     await waitFor(() => expect(kindOf(TOP).disabled).toBe(true));
     const reset = row(TOP).getByRole('button', { name: 'Reset to stock' }) as HTMLButtonElement;
     expect(reset.disabled).toBe(false);
