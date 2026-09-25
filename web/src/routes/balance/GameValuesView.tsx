@@ -8,11 +8,11 @@ const fmtDate = (at: string) => {
 
 function valueCell(v: GameValueView) {
   if (v.status === 'hidden') return <span class="muted">{v.note ?? 'set by a plugin'}</span>;
-  // Not reported by the servers yet (the plugin that reports it is not live
-  // everywhere): a plain dash, so the row does not read as differing from vanilla.
-  if (v.status === 'not_reported') return <span class="muted" title="Not reported by the servers yet">-</span>;
-  // Same as vanilla: the number shows once, in the Vanilla column.
-  if (isVanilla(v)) return <span class="muted values-num">vanilla</span>;
+  // Not reported by the servers yet: a question mark, so it never reads as
+  // "same as vanilla" (the dash) or as differing from vanilla.
+  if (v.status === 'not_reported') return <span class="muted" title="Not reported by the servers yet">?</span>;
+  // Same as vanilla: a dash, and the number shows once, in the Vanilla column.
+  if (isVanilla(v)) return <span class="muted" title="Same as vanilla">-</span>;
   return withUnit(v.value!, v.unit);
 }
 
