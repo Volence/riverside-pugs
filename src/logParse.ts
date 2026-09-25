@@ -124,7 +124,9 @@ export type LogEvent =
   /** `sent`: items on the line, a key sent twice counted twice (items keeps
    *  one), so a duplicate watch entry does not look like a lost item. */
   | { kind: 'balance_part'; token: string; half: 1 | 2; part: number; items: Record<string, string>; sent: number }
-  | { kind: 'balance_end'; token: string; half: 1 | 2; parts: number; items: number }
+  /** `watch`: which list the plugin read (pug-match 0.3.14+), the site's
+   *  file or its compiled fallback; absent from older plugins. */
+  | { kind: 'balance_end'; token: string; half: 1 | 2; parts: number; items: number; watch?: 'file' | 'builtin' }
   | { kind: 'round_stat'; token: string; half: 1 | 2; steamid: string; stats: Record<string, number> }
   | { kind: 'round_stats_end'; token: string; half: 1 | 2; players: number; skillDetect: boolean }
   | { kind: 'round_mark'; token: string; half: 1 | 2; mark: 'panic' | 'finale_start' | 'finale_radio'; tMs: number }
@@ -869,7 +871,10 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       const parts = intOf(rest.parts);
       const items = intOf(rest.items);
       if (half === null || parts === null || items === null || parts < 0 || items < 0) return null;
-      return { kind: 'balance_end', token, half: half as 1 | 2, parts, items };
+      // An unknown watch= word costs the field, never the line: the
+      // inventory is still good.
+      const watch = rest.watch === 'file' || rest.watch === 'builtin' ? rest.watch : undefined;
+      return { kind: 'balance_end', token, half: half as 1 | 2, parts, items, ...(watch ? { watch } : {}) };
     }
     case 'ROUND_STAT': {
       const half = halfOf(rest.half);

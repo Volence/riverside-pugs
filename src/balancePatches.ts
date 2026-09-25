@@ -88,6 +88,9 @@ const serverName = (db: DB, id: number): string =>
 export function recordBalanceSighting(db: DB, s: {
   matchId: number; serverId: number | null; half: 1 | 2; inventory: Inventory; versionless: string[];
   ignored?: string[]; now?: string;
+  /** Which watch list the plugin read (BALANCE_END watch=), kept on the
+   *  server's state row; null from a plugin before 0.3.14. */
+  watch?: 'file' | 'builtin' | null;
   /** The patch a control panel rollout expects on this server: its first
    *  sighting is the change the panel made, so it updates the state without
    *  an alert. */
@@ -143,6 +146,10 @@ export function recordBalanceSighting(db: DB, s: {
 
     let serverChanged = false;
     if (s.serverId !== null) {
+      // After the state upserts below, so a first sighting's row exists.
+      const keepWatch = () => {
+        if (s.watch !== undefined) db.prepare('UPDATE balance_server_state SET watch = ? WHERE server_id = ?').run(s.watch, s.serverId);
+      };
       db.prepare(`INSERT INTO balance_patch_servers (patch_id, server_id, first_seen_at, last_seen_at)
                   VALUES (?, ?, ?, ?)
                   ON CONFLICT (patch_id, server_id) DO UPDATE SET last_seen_at = excluded.last_seen_at`)
@@ -178,6 +185,7 @@ export function recordBalanceSighting(db: DB, s: {
           });
         }
       }
+      keepWatch();
     }
     return { patchId, effectivePatchId, newPatch, serverChanged, previousPatchId: prev?.patch_id ?? null };
   })();
@@ -398,21 +406,40 @@ export function patchDetail(db: DB, id: number, lists?: Lists): (PatchSummary & 
   return { ...all[i], inputs, diffVsPrevious: inputs && prevInputs ? diffInventories(prevInputs, inputs) : null };
 }
 
+/** How box `b` differs from box `a`, leaving out watched values only one of
+ *  them reports (watchedOneSided). Always, not only when the two boxes'
+ *  watch lists differ: a watched value present on one box only can only mean
+ *  the two read different lists (compiled versus the site's file, or a file
+ *  not yet written everywhere), never a difference in the game, because the
+ *  plugin reports every watched entry whatever the box has (x:...=missing
+ *  for an absent cvar, f:...=missing for an absent file, w:...=default for an
+ *  unset weapon key). What the game does differently still shows: a changed
+ *  value on a key both report, a plugin on one box only, a cvar that exists
+ *  on one box and not the other. The stored watch column says which list
+ *  each box read, for the admin reading the drift. */
+export function driftBetween(a: Inventory, b: Inventory): ReturnType<typeof diffInventories> {
+  const skip = watchedOneSided(a, b);
+  const d = diffInventories(a, b);
+  return { added: d.added.filter((k) => !skip.has(k)), removed: d.removed.filter((k) => !skip.has(k)), changed: d.changed };
+}
+
 /** Every server's current patch and how its live inventory differs from each
  *  other server's, for spotting a box that fell behind or ahead. */
 export function serverDrift(db: DB, ignored: string[] = []): {
   serverId: number; name: string; patchId: number; since: string;
+  /** Which watch list the box read at its last sighting; null before pug-match 0.3.14. */
+  watch: string | null;
   differsFrom: { name: string; diff: string }[];
 }[] {
-  const rows = db.prepare(`SELECT st.server_id, s.name, st.patch_id, st.since, st.inventory_json
+  const rows = db.prepare(`SELECT st.server_id, s.name, st.patch_id, st.since, st.inventory_json, st.watch
     FROM balance_server_state st JOIN servers s ON s.id = st.server_id ORDER BY s.id`).all() as {
-      server_id: number; name: string; patch_id: number; since: string; inventory_json: string }[];
+      server_id: number; name: string; patch_id: number; since: string; inventory_json: string; watch: string | null }[];
   // A stored inventory may predate a plugin joining the ignored list.
   const inv = (json: string) => withoutIgnored(JSON.parse(json) as Inventory, ignored);
   return rows.map((r) => ({
-    serverId: r.server_id, name: r.name, patchId: r.patch_id, since: r.since,
+    serverId: r.server_id, name: r.name, patchId: r.patch_id, since: r.since, watch: r.watch,
     differsFrom: rows.filter((o) => o.server_id !== r.server_id)
-      .map((o) => ({ name: o.name, d: diffInventories(inv(o.inventory_json), inv(r.inventory_json)) }))
+      .map((o) => ({ name: o.name, d: driftBetween(inv(o.inventory_json), inv(r.inventory_json)) }))
       .filter((o) => o.d.added.length + o.d.removed.length + o.d.changed.length > 0)
       .map((o) => ({ name: o.name, diff: formatDiff(o.d) })),
   }));
@@ -445,7 +472,7 @@ function alertText(db: DB, serverId: number, patchNumber: number, newPatch: bool
     FROM balance_server_state st WHERE st.server_id != ?`)
     .all(serverId) as { server_id: number; inventory_json: string; last_seen: string | null }[];
   const drift = others
-    .map((o) => ({ who: serverName(db, o.server_id), seen: o.last_seen, d: diffInventories(JSON.parse(o.inventory_json) as Inventory, inv) }))
+    .map((o) => ({ who: serverName(db, o.server_id), seen: o.last_seen, d: driftBetween(JSON.parse(o.inventory_json) as Inventory, inv) }))
     .filter((o) => o.d.added.length + o.d.removed.length + o.d.changed.length > 0)
     .map((o) => ` Now differs from ${o.who}${o.seen ? ` (last seen ${o.seen.slice(0, 16)} UTC)` : ''}: ${formatDiff(o.d, 5)}.`);
   return head + vsOwn + drift.join('');
