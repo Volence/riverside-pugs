@@ -202,3 +202,19 @@ describe('the versus panel through an aspect change (review 5)', () => {
     expect(setAspect(DEFAULT_DESIGN, '4:3')).toEqual({ ...DEFAULT_DESIGN, aspect: '4:3' });
   });
 });
+
+describe('your own Tab row, which code shows (ChildDef.codeShown, review 6)', () => {
+  it('keeps no stored visible true, so a shared file cannot write "visible" "1" on it', () => {
+    for (const panel of ['tabSurvivors', 'tabInfected'] as const) {
+      const raw = { v: 1, children: { [panel]: { PlayerBackground_Selected: { visible: true } } } };
+      const d = validateDesign(raw);
+      expect(d.children[panel], panel).toBeUndefined();
+      const path = panel === 'tabSurvivors' ? SURVIVOR_ROW : 'resource/ui/scoreboardinfectedplayer.res';
+      const b = pcFind(tree(build(d), path), ['PlayerBackground_Selected'])!;
+      expect(kvGet(b, 'visible'), panel).toBe('0');
+      // A hide is the one visible it keeps.
+      expect(validateDesign({ v: 1, children: { [panel]: { PlayerBackground_Selected: { visible: false } } } }).children[panel], panel)
+        .toEqual({ PlayerBackground_Selected: { visible: false } });
+    }
+  });
+});
