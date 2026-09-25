@@ -14,7 +14,7 @@
 import { NOTICE_BOX_COLOUR, type Box, type HudDesign } from './design';
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import type { Guide } from './guides';
-import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHasElement, pcGet, MARKER_PX_PER_UNIT, NOTICE_BOX_TEXTURE } from './build';
+import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHasElement, pcGet, MARKER_PX_PER_UNIT, NOTICE_BOX_TEXTURE, MODERN_ART } from './build';
 import { baseOf } from './base';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { SCREEN_H, parseSize, parsePos, screenW } from './units';
@@ -564,7 +564,10 @@ function paintKillNotices(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
     const material = normaliseMaterial((bg && kvGet(bg, 'image')) ?? '');
     // The editor's own box (build.ts noticePass): a flat square of one
     // colour, or a clear one, so it nine-slices into a flat fill.
-    const own = material === NOTICE_BOX_TEXTURE ? design.elements.killNotices?.noticeBox : undefined;
+    // The Modern preset's box is one of its generated flat panels (MODERN_ART), drawn the same way.
+    const modern = baseOf(design) === 'modern' ? MODERN_ART.find((t) => t.name === material) : undefined;
+    const own = material === NOTICE_BOX_TEXTURE ? design.elements.killNotices?.noticeBox
+      : modern ? { kind: 'flat' as const, color: modern.colour } : undefined;
     const img = bg && !own && artImage(material, onAsset);
     if (bg && (img || own)) {
       const pad = NOTICE_PAD * k;

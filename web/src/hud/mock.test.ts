@@ -224,6 +224,18 @@ describe('drawHud delegates panels to the renderer', () => {
     expect(fillsOf(normal, 'dead')).not.toContain('rgba(0,0,255,1)');
   });
 
+  it('draws the Modern kill notice box in the flat colour the download ships', () => {
+    // QA 2026-09-25: the preview had no art for vgui/hud/mod_panel_flat and drew no box.
+    _setImageFactory(instant);
+    const fills: string[] = [];
+    const ctx = { ...fakeCtx(() => {}) } as unknown as CanvasRenderingContext2D;
+    const real = ctx.fillRect.bind(ctx);
+    // The box is label4background's 25 tall (Modern's pzdamagerecordpanel.res), at 1:1 on a 480 tall canvas.
+    ctx.fillRect = ((...a: [number, number, number, number]) => { fills.push(`${ctx.fillStyle} ${Math.round(a[3])}`); return real(...a); }) as typeof ctx.fillRect;
+    drawHud(ctx, 853, 480, { ...DEFAULT_DESIGN, preset: 'modern' }, 'survivor', null);
+    expect(fills.some((f) => /^rgba\(0, ?0, ?0, ?0\.549\d*\) 25$/.test(f))).toBe(true);
+  });
+
   it('draws the weapon selection from the game art, clipped to its element, with no stand-in boxes', () => {
     // The game paints the slots inside the HudWeaponSelection panel and VGUI
     // clips that paint to the panel, so the preview clips to elementRect.
