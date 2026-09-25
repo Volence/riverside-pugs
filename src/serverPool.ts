@@ -1,5 +1,6 @@
 import type { DB } from './db.js';
 import { publishAdminEvent } from './adminFeed.js';
+import { deploySlug } from './releaseStage.js';
 
 export interface ServerRow {
   id: number;
@@ -29,6 +30,8 @@ export interface ServerRow {
   log_secret: string | null;
   /** off | log | enforce: what happens to a line that fails that check. */
   log_auth: 'off' | 'log' | 'enforce';
+  /** The box's boxes/<slug>/ layer in the deploy repo; see src/db.ts. */
+  deploy_slug: string | null;
 }
 
 export function addServer(
@@ -40,10 +43,10 @@ export function addServer(
 ): number {
   const info = db
     .prepare(
-      `INSERT INTO servers (name, host, port, rcon_port, rcon_password, status)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO servers (name, host, port, rcon_port, rcon_password, status, deploy_slug)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(s.name, s.host, s.port, s.rconPort, s.rconPassword, s.status ?? 'idle');
+    .run(s.name, s.host, s.port, s.rconPort, s.rconPassword, s.status ?? 'idle', deploySlug(s.name));
   return Number(info.lastInsertRowid);
 }
 

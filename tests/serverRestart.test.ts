@@ -77,6 +77,30 @@ describe('rconRestarter', () => {
     }
   });
 
+  it('tells a release caller when quit was never sent, without waiting on the probe', async () => {
+    const seen: AdminEvent[] = [];
+    const off = subscribeAdminEvents((e) => seen.push(e));
+    try {
+      const quit = vi.fn(async () => { throw new QuitNotSentError(new Error('rcon connect timeout')); });
+      const ready = vi.fn(async () => true);
+      const r = build(ready, quit);
+      await expect(r.restartForRelease!(getServer(db, serverId)!)).resolves.toEqual({ back: false, quitSent: false });
+      expect(quit).toHaveBeenCalledTimes(QUIT_ATTEMPTS);
+      expect(ready).not.toHaveBeenCalled();
+      // The release reports it in its own words; "stays in the pool" is not true there.
+      expect(seen.some((e) => /stays in the pool/.test((e as { text?: string }).text ?? ''))).toBe(false);
+    } finally {
+      off();
+    }
+  });
+
+  it('tells a release caller the box went down and came back', async () => {
+    const r = build(async () => true, async () => { throw new Error('connection reset'); });
+    await expect(r.restartForRelease!(getServer(db, serverId)!)).resolves.toEqual({ back: true, quitSent: true });
+    const r2 = build(async () => false);
+    await expect(r2.restartForRelease!(getServer(db, serverId)!)).resolves.toEqual({ back: false, quitSent: true });
+  });
+
   it('does not retry a quit whose connection dropped after it was sent', async () => {
     const quit = vi.fn(async () => { throw new Error('rcon exec timeout: quit'); });
     const r = build(async () => true, quit);
@@ -177,6 +201,34 @@ describe('ServerReleaser with a restart', () => {
     expect(statusOf()).toBe('idle');
     await releaser.settled();
     expect(restart).not.toHaveBeenCalled();
+  });
+
+  it('lets a release that wrote the box judge its restart, and keeps it offline when told to', async () => {
+    setRestartAfterMatch(db, serverId, true);
+    const restart = vi.fn(async () => true);
+    const restartForRelease = vi.fn(async () => ({ back: true, quitSent: false }));
+    const seen: unknown[] = [];
+    const releaser = new ServerReleaser(db, async () => {}, { restart, restartForRelease }, null, {
+      owns: () => true,
+      after: (_s, res) => { seen.push(res); return true; },
+    });
+    releaser.release(serverId, { restart: true });
+    await releaser.settled();
+    expect(restart).not.toHaveBeenCalled();
+    expect(seen).toEqual([{ back: true, quitSent: false }]);
+    expect(statusOf()).toBe('offline');
+  });
+
+  it('restarts as before when no release owns the box', async () => {
+    setRestartAfterMatch(db, serverId, true);
+    const restart = vi.fn(async () => true);
+    const restartForRelease = vi.fn(async () => ({ back: true, quitSent: true }));
+    const releaser = new ServerReleaser(db, async () => {}, { restart, restartForRelease }, null, { owns: () => false, after: () => true });
+    releaser.release(serverId, { restart: true });
+    await releaser.settled();
+    expect(restart).toHaveBeenCalledOnce();
+    expect(restartForRelease).not.toHaveBeenCalled();
+    expect(statusOf()).toBe('idle');
   });
 
   it('restarts after the cleanup, never before it', async () => {

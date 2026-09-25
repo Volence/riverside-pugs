@@ -3,9 +3,9 @@ import type { BalanceKnobs } from './balanceKnobs.js';
 import type { DeployRepo, RepoFile } from './deployRepo.js';
 import { listServers } from './serverPool.js';
 import { readingStates, readingsOf } from './fleetReader.js';
-import { treeReaderFor } from './fleetTree.js';
+import { SITE_OWNED, treeReaderFor } from './fleetTree.js';
 import { PER_BOX } from './fleetCompare.js';
-import { cvarDiff, deploySlug, describeOps, planBox, suggestBalance, validateTree, wantedFor, type Op, type WantedFile } from './releaseStage.js';
+import { cvarDiff, describeOps, isShippedCfg, passwordsSet, planBox, suggestBalance, validateTree, wantedFor, type Op, type WantedFile } from './releaseStage.js';
 
 const sqlNow = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 const DAY_MS = 86_400_000;
@@ -41,7 +41,9 @@ export class ReleaseService {
     let hash: string;
     try { hash = await repo.resolve(commit); } catch { return { ok: false, status: 404, error: 'no such commit' }; }
     const files = await repo.tree(hash);
-    const invalid = validateTree(files);
+    const texts = new Map<string, string>();
+    for (const f of files) if (isShippedCfg(f.path) && f.mode !== '120000') texts.set(f.path, (await repo.blob(f.blob)).toString('utf8'));
+    const invalid = validateTree(files, texts);
     const parent = await repo.parent(hash);
     const parentFiles: RepoFile[] = parent ? await repo.tree(parent) : [];
     const readings = readingsOf(db);
@@ -54,17 +56,30 @@ export class ReleaseService {
       }
       const id = Number(db.prepare(`INSERT INTO releases (kind, sources_json, state, invalid_json, created_by, created_at)
         VALUES ('deploy', ?, ?, ?, ?, ?)`).run(JSON.stringify(sources), invalid.length ? 'invalid' : 'staged', invalid.length ? JSON.stringify(invalid) : null, adminId, this.now()).lastInsertRowid);
+      const slugs = new Set(files.map((f) => /^boxes\/([^/]+)\//.exec(f.path)?.[1]).filter((x): x is string => !!x));
       for (const s of listServers(db).filter((x) => x.enabled === 1)) {
-        const slug = deploySlug(s.name);
+        const slug = s.deploy_slug ?? '';
         const wanted = wantedFor(files, slug);
         const shipped = this.lastShipped(s.id)?.files
           ?? new Map([...wantedFor(parentFiles, slug).values()].map((w) => [w.path, { sha256: w.sha256, blob: w.blob }]));
         const onBox = readings.get(s.id) ?? null;
-        const ops = onBox && treeReaderFor(s) ? planBox(wanted, onBox, shipped) : null;
+        let ops = onBox && treeReaderFor(s) ? planBox(wanted, onBox, shipped) : null;
+        // Refused rather than warned: a box planned without its own layer
+        // would lose local.cfg (and with it the exec of secrets.cfg).
+        let refused: string | null = null;
+        if (!slug) refused = 'this box has no deploy slug';
+        else if (slugs.size > 0 && !slugs.has(slug)) refused = `this commit has no boxes/${slug}/ folder for this box`;
+        else {
+          const gone = ops?.find((o) => o.op === 'remove' && PER_BOX.has(o.path));
+          if (gone) refused = `would remove the per-box file ${gone.path.replace(/^left4dead\//, '')}`;
+        }
+        if (refused) ops = null;
+        for (const o of ops ?? []) if (SITE_OWNED.has(o.path)) invalid.push(`would ${o.op === 'remove' ? 'remove' : 'overwrite'} ${o.path} ${o.op === 'remove' ? 'from' : 'on'} ${s.name}, which the site writes`);
         const shippedJson = Object.fromEntries([...wanted.values()].map((w: WantedFile) => [w.path, { sha256: w.sha256, blob: w.blob }]));
-        db.prepare("INSERT INTO release_boxes (release_id, server_id, state, plan_json, shipped_json, updated_at) VALUES (?, ?, 'staged', ?, ?, ?)")
-          .run(id, s.id, ops ? JSON.stringify(ops) : null, JSON.stringify(shippedJson), this.now());
+        db.prepare("INSERT INTO release_boxes (release_id, server_id, state, error, plan_json, shipped_json, updated_at) VALUES (?, ?, 'staged', ?, ?, ?, ?)")
+          .run(id, s.id, refused, ops ? JSON.stringify(ops) : null, JSON.stringify(shippedJson), this.now());
       }
+      if (invalid.length) db.prepare("UPDATE releases SET state = 'invalid', invalid_json = ? WHERE id = ?").run(JSON.stringify(invalid), id);
       return { ok: true as const, id };
     })();
   }
@@ -93,7 +108,7 @@ export class ReleaseService {
     const sum = this.summary(id);
     if (!sum) return null;
     const { db, repo } = this.d;
-    const rows = db.prepare(`SELECT rb.server_id, rb.plan_json FROM release_boxes rb WHERE rb.release_id = ? ORDER BY rb.server_id`).all(id) as { server_id: number; plan_json: string | null }[];
+    const rows = db.prepare(`SELECT rb.server_id, rb.plan_json, rb.error FROM release_boxes rb WHERE rb.release_id = ? ORDER BY rb.server_id`).all(id) as { server_id: number; plan_json: string | null; error: string | null }[];
     const readings = readingsOf(db);
     const states = new Map(readingStates(db).map((s) => [s.serverId, s]));
     const servers = new Map(listServers(db).map((s) => [s.id, s]));
@@ -112,9 +127,10 @@ export class ReleaseService {
       if (!st?.readAt) warnings.push('never read: check it on the Fleet page first');
       else if (Date.now() - Date.parse(`${st.readAt.replace(' ', 'T')}Z`) > DAY_MS) warnings.push('reading is over 24 hours old: check it now first');
       if (!treeReaderFor(s)) warnings.push('no transport configured');
+      if (row.plan_json === null && row.error && sum.state === 'staged') warnings.push(`not deployable: ${row.error}`);
       if (row.plan_json === null) { perBox.push({ serverId: s.id, name: s.name, lines: [], warnings, deployable: false }); continue; }
       const ops = JSON.parse(row.plan_json) as Op[];
-      const prev = shippedBefore(s.id, deploySlug(s.name));
+      const prev = shippedBefore(s.id, s.deploy_slug ?? '');
       const onBox = readings.get(s.id);
       const lines: string[] = [];
       const words = describeOps(ops);
@@ -125,7 +141,10 @@ export class ReleaseService {
         const have = onBox?.get(o.path);
         if (shipped && have && have.sha256 !== shipped.sha256) warnings.push(`changed on the box since the last release: ${o.path.replace(/^left4dead\//, '')}`);
         if (o.op === 'write' && o.kind === 'update' && o.layer === 'shared' && PER_BOX.has(o.path)) {
-          warnings.push(`${o.path.replace(/^left4dead\//, '')} is a per-box file and would be replaced by the shared copy: add this box's own copy under boxes/${deploySlug(s.name)}/ first`);
+          warnings.push(`${o.path.replace(/^left4dead\//, '')} is a per-box file and would be replaced by the shared copy: add this box's own copy under boxes/${s.deploy_slug}/ first`);
+        }
+        if (o.op === 'write' && o.path.endsWith('.cfg') && o.blob && passwordsSet((await repo.blob(o.blob)).toString('utf8')).includes('tv_password')) {
+          warnings.push(`tv_password is set in ${o.path.replace(/^left4dead\//, '')}: it belongs in secrets.cfg`);
         }
         if (o.op === 'write' && o.kind === 'update' && o.path.endsWith('.cfg') && o.blob) {
           const neu = (await repo.blob(o.blob)).toString('utf8');

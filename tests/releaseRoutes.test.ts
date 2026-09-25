@@ -20,7 +20,8 @@ describe('parseHumans', () => {
   it('reads the player count from status', () => {
     expect(parseHumans('hostname: x\nplayers : 3 (8 max)\n')).toBe(3);
     expect(parseHumans('players : 0 humans, 4 bots (8 max)')).toBe(0);
-    expect(parseHumans('nothing')).toBe(0);
+    // A release restarts only on a count of exactly 0, so no count is no 0.
+    expect(() => parseHumans('nothing')).toThrow();
   });
 });
 
@@ -98,6 +99,85 @@ describe('release routes', () => {
     const { id } = (await a.inject({ method: 'POST', url: '/api/admin/releases/stage', cookies, payload: { commit: 'master' } })).json() as { id: number };
     const review = (await a.inject({ method: 'GET', url: `/api/admin/releases/${id}`, cookies })).json() as { perBox: { warnings: string[] }[] };
     expect(review.perBox[0].warnings.join(' ')).toMatch(/per-box file and would be replaced by the shared copy: add this box's own copy under boxes\/dallas\//);
+  });
+
+  /** Stages master and returns Dallas's review row. */
+  async function stageAndReview() {
+    const { a, cookies } = await app();
+    await a.inject({ method: 'POST', url: '/api/admin/releases/refresh', cookies });
+    const { id } = (await a.inject({ method: 'POST', url: '/api/admin/releases/stage', cookies, payload: { commit: 'master' } })).json() as { id: number };
+    const review = (await a.inject({ method: 'GET', url: `/api/admin/releases/${id}`, cookies })).json() as { perBox: { deployable: boolean; warnings: string[]; lines: string[] }[] };
+    return review.perBox[0];
+  }
+  const LOCAL = 'left4dead/cfg/local.cfg';
+
+  it('keeps a box on its own layer after a rename', async () => {
+    mkdirSync(join(work, 'boxes/dallas/left4dead/cfg'), { recursive: true });
+    writeFileSync(join(work, 'boxes/dallas/left4dead/cfg/local.cfg'), 'exec secrets.cfg\n');
+    git('add', '-A'); git('commit', '-qm', 'dallas local');
+    writeFileSync(join(work, 'overrides/left4dead/cfg/pug_match.cfg'), 'z_tank_health 7000\n');
+    git('add', '-A'); git('commit', '-qm', 'tank 7000');
+    db.prepare('INSERT INTO fleet_files (server_id, path, size, sha256) VALUES (1, ?, 17, ?)').run(LOCAL, sha('exec secrets.cfg\n'));
+    // An earlier release shipped Dallas its own local.cfg.
+    const prev = Number(db.prepare("INSERT INTO releases (kind, sources_json, state, created_by, created_at, deployed_at) VALUES ('deploy', '[]', 'done', '1', 'x', 'x')").run().lastInsertRowid);
+    db.prepare("INSERT INTO release_boxes (release_id, server_id, state, plan_json, shipped_json, updated_at) VALUES (?, 1, 'restarted', '[]', ?, 'x')")
+      .run(prev, JSON.stringify({ [LOCAL]: { sha256: sha('exec secrets.cfg\n'), blob: 'b' } }));
+    db.prepare("UPDATE servers SET name = 'Dallas TX' WHERE id = 1").run();
+    const box = await stageAndReview();
+    expect(box.deployable).toBe(true);
+    expect(box.lines.join(' ')).not.toMatch(/local\.cfg/);
+  });
+
+  it('refuses to plan a box whose slug has no folder under boxes/', async () => {
+    mkdirSync(join(work, 'boxes/chicago/left4dead/cfg'), { recursive: true });
+    writeFileSync(join(work, 'boxes/chicago/left4dead/cfg/local.cfg'), 'x\n');
+    git('add', '-A'); git('commit', '-qm', 'chicago only');
+    const box = await stageAndReview();
+    expect(box.deployable).toBe(false);
+    expect(box.warnings.join(' ')).toMatch(/no boxes\/dallas\/ folder/);
+  });
+
+  it('blocks a release that would remove a per-box file', async () => {
+    mkdirSync(join(work, 'boxes/dallas/left4dead/cfg'), { recursive: true });
+    writeFileSync(join(work, 'boxes/dallas/left4dead/cfg/local.cfg'), 'exec secrets.cfg\n');
+    writeFileSync(join(work, 'boxes/dallas/left4dead/cfg/other.cfg'), 'x\n');
+    git('add', '-A'); git('commit', '-qm', 'dallas local');
+    git('rm', '-q', 'boxes/dallas/left4dead/cfg/local.cfg'); git('commit', '-qm', 'oops');
+    db.prepare('INSERT INTO fleet_files (server_id, path, size, sha256) VALUES (1, ?, 17, ?)').run(LOCAL, sha('exec secrets.cfg\n'));
+    const box = await stageAndReview();
+    expect(box.deployable).toBe(false);
+    expect(box.warnings.join(' ')).toMatch(/would remove the per-box file cfg\/local\.cfg/);
+  });
+
+  it('refuses a release that would remove a file the site writes', async () => {
+    const BAL = 'left4dead/cfg/pug_balance.cfg';
+    db.prepare('INSERT INTO fleet_files (server_id, path, size, sha256) VALUES (1, ?, 5, ?)').run(BAL, sha('x'));
+    // Shipped by a release from before the rule.
+    const prev = Number(db.prepare("INSERT INTO releases (kind, sources_json, state, created_by, created_at, deployed_at) VALUES ('deploy', '[]', 'done', '1', 'x', 'x')").run().lastInsertRowid);
+    db.prepare("INSERT INTO release_boxes (release_id, server_id, state, plan_json, shipped_json, updated_at) VALUES (?, 1, 'restarted', '[]', ?, 'x')")
+      .run(prev, JSON.stringify({ [BAL]: { sha256: sha('x'), blob: 'b' } }));
+    const { a, cookies } = await app();
+    await a.inject({ method: 'POST', url: '/api/admin/releases/refresh', cookies });
+    const { id } = (await a.inject({ method: 'POST', url: '/api/admin/releases/stage', cookies, payload: { commit: 'master' } })).json() as { id: number };
+    const review = (await a.inject({ method: 'GET', url: `/api/admin/releases/${id}`, cookies })).json() as { state: string; invalid: string[] };
+    expect(review.state).toBe('invalid');
+    expect(review.invalid.join(' ')).toMatch(/would remove left4dead\/cfg\/pug_balance\.cfg from Dallas, which the site writes/);
+  });
+
+  it('refuses a committed rcon_password, and only warns on a tv_password', async () => {
+    writeFileSync(join(work, 'overrides/left4dead/cfg/pug_match.cfg'), 'z_tank_health 7000\ntv_password "watch"\n');
+    git('add', '-A'); git('commit', '-qm', 'tv password');
+    const box = await stageAndReview();
+    expect(box.deployable).toBe(true);
+    expect(box.warnings.join(' ')).toMatch(/tv_password is set in cfg\/pug_match\.cfg/);
+    writeFileSync(join(work, 'overrides/left4dead/cfg/pug_match.cfg'), 'z_tank_health 7000\nrcon_password "hunter2"\n');
+    git('add', '-A'); git('commit', '-qm', 'rcon password');
+    const { a, cookies } = await app();
+    await a.inject({ method: 'POST', url: '/api/admin/releases/refresh', cookies });
+    const { id } = (await a.inject({ method: 'POST', url: '/api/admin/releases/stage', cookies, payload: { commit: 'master' } })).json() as { id: number };
+    const review = (await a.inject({ method: 'GET', url: `/api/admin/releases/${id}`, cookies })).json() as { state: string; invalid: string[] };
+    expect(review.state).toBe('invalid');
+    expect(review.invalid.join(' ')).toMatch(/rcon_password is set in left4dead\/cfg\/pug_match\.cfg.*secrets\.cfg/);
   });
 
   it('refuses a non-admin', async () => {

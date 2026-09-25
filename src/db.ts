@@ -5,6 +5,7 @@ import { ensureTicketSchema } from './tickets/schema.js';
 import { ensureCommunitySchema } from './community/schema.js';
 import { migrateLegacyReports } from './tickets/migrate.js';
 import { widenTicketIdentity } from './tickets/identityMigration.js';
+import { deploySlug } from './releaseStage.js';
 
 export type DB = Database.Database;
 
@@ -1056,6 +1057,14 @@ export function openDb(path: string): DB {
   // gone until someone opens its host's control panel, so this is not a
   // switch to flip for four servers at once. See src/serverRestart.ts.
   ensureColumn(db, 'servers', 'restart_after_match', 'INTEGER NOT NULL DEFAULT 0');
+  // Which boxes/<slug>/ folder of the deploy repo is this box's own layer.
+  // Its own column, not derived from the name on every staging: a rename
+  // would otherwise drop the box's local.cfg and server.cfg from what it
+  // should have, and the release would delete them. Set once from the name.
+  ensureColumn(db, 'servers', 'deploy_slug', 'TEXT');
+  for (const r of db.prepare('SELECT id, name FROM servers WHERE deploy_slug IS NULL').all() as { id: number; name: string }[]) {
+    db.prepare('UPDATE servers SET deploy_slug = ? WHERE id = ?').run(deploySlug(r.name), r.id);
+  }
   // Object key once a demo has been copied to R2, NULL while it is still only
   // on disk. The row carries both states on purpose: the local file is deleted
   // only after the upload is verified, so for a moment a demo is in both places

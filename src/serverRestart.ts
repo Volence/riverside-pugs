@@ -77,6 +77,20 @@ export interface ServerRestarter {
   /** True once the box is answering again; false if it never came back, in
    *  which case it has already been reported and must stay out of the pool. */
   restart(server: ServerRow): Promise<boolean>;
+  /** The same restart for a release, which must know whether quit really went
+   *  out: a box that never went down has new files on disk that srcds has not
+   *  loaded. When quit was never sent it answers at once, without probing and
+   *  without the between-match report (the release reports it itself). */
+  restartForRelease?(server: ServerRow): Promise<RestartOutcome>;
+}
+
+export interface RestartOutcome { back: boolean; quitSent: boolean }
+
+/** A release's view of a restart. A restarter that cannot say whether quit
+ *  was sent (test fakes) is taken at its word. */
+export async function restartOutcome(r: ServerRestarter, server: ServerRow): Promise<RestartOutcome> {
+  if (r.restartForRelease) return r.restartForRelease(server);
+  return { back: await r.restart(server), quitSent: true };
 }
 
 export interface RconRestarterDeps {
@@ -99,63 +113,66 @@ export function rconRestarter(deps: RconRestarterDeps): ServerRestarter {
   const timeoutMs = deps.timeoutMs ?? TIMEOUT_MS;
   const pollMs = deps.pollMs ?? POLL_MS;
 
-  return {
-    async restart(server) {
-      let sent = false;
-      for (let attempt = 1; attempt <= QUIT_ATTEMPTS && !sent; attempt++) {
-        try {
-          await deps.quit(server);
-          sent = true;
-        } catch (err) {
-          if (err instanceof QuitNotSentError) {
-            console.warn(`[serverRestart] ${server.name} quit not sent (attempt ${attempt}/${QUIT_ATTEMPTS}):`, err.message);
-            if (attempt < QUIT_ATTEMPTS) await sleep(QUIT_RETRY_MS);
-            continue;
-          }
-          // Expected as often as not: the connection dies with the process we
-          // just asked to exit, and that is a successful quit, not a failure.
-          // Whether it worked is decided by the probe below, never by this.
-          console.log(`[serverRestart] ${server.name} dropped the quit connection (normal):`, err instanceof Error ? err.message : err);
-          sent = true;
+  const run = async (server: ServerRow, forRelease: boolean): Promise<RestartOutcome> => {
+    let sent = false;
+    for (let attempt = 1; attempt <= QUIT_ATTEMPTS && !sent; attempt++) {
+      try {
+        await deps.quit(server);
+        sent = true;
+      } catch (err) {
+        if (err instanceof QuitNotSentError) {
+          console.warn(`[serverRestart] ${server.name} quit not sent (attempt ${attempt}/${QUIT_ATTEMPTS}):`, err.message);
+          if (attempt < QUIT_ATTEMPTS) await sleep(QUIT_RETRY_MS);
+          continue;
         }
+        // Expected as often as not: the connection dies with the process we
+        // just asked to exit, and that is a successful quit, not a failure.
+        // Whether it worked is decided by the probe below, never by this.
+        console.log(`[serverRestart] ${server.name} dropped the quit connection (normal):`, err instanceof Error ? err.message : err);
+        sent = true;
       }
-      if (!sent) {
-        // Never went down, so the probe below finds it answering and it goes
-        // back to the pool unrestarted. That is the right outcome for the next
-        // match; it is reported so a box that keeps skipping gets looked at.
-        console.error(`[serverRestart] ${server.name} was not restarted: quit could not be sent in ${QUIT_ATTEMPTS} tries`);
-        publishAdminEvent({
-          kind: 'problem',
-          text: `${server.name} was due a restart after its match but did not answer rcon in `
-            + `${QUIT_ATTEMPTS} tries, so it was not restarted. It stays in the pool.`,
-        });
-      }
-      const deadline = now() + timeoutMs;
-      // Slept BEFORE the first probe on purpose. The old process is still
-      // listening for the moment it takes to exit, so probing immediately can
-      // answer "ready" from the server we are trying to replace.
-      while (now() < deadline) {
-        await sleep(pollMs);
-        let ok = false;
-        try {
-          ok = await deps.ready(server);
-        } catch {
-          ok = false;
-        }
-        if (ok) {
-          console.log(`[serverRestart] ${server.name} is back`);
-          return true;
-        }
-      }
-      console.error(`[serverRestart] ${server.name} did not come back within ${timeoutMs / 1000}s`);
+    }
+    if (!sent && forRelease) return { back: false, quitSent: false };
+    if (!sent) {
+      // Never went down, so the probe below finds it answering and it goes
+      // back to the pool unrestarted. That is the right outcome for the next
+      // match; it is reported so a box that keeps skipping gets looked at.
+      console.error(`[serverRestart] ${server.name} was not restarted: quit could not be sent in ${QUIT_ATTEMPTS} tries`);
       publishAdminEvent({
         kind: 'problem',
-        text: `${server.name} was asked to restart after a match and has not come back after `
-          + `${timeoutMs / 1000} seconds. It is out of the pool so no match can land on it. `
-          + 'Check the box, then put it back with Set idle in the admin panel.',
+        text: `${server.name} was due a restart after its match but did not answer rcon in `
+          + `${QUIT_ATTEMPTS} tries, so it was not restarted. It stays in the pool.`,
       });
-      return false;
-    },
+    }
+    const deadline = now() + timeoutMs;
+    // Slept BEFORE the first probe on purpose. The old process is still
+    // listening for the moment it takes to exit, so probing immediately can
+    // answer "ready" from the server we are trying to replace.
+    while (now() < deadline) {
+      await sleep(pollMs);
+      let ok = false;
+      try {
+        ok = await deps.ready(server);
+      } catch {
+        ok = false;
+      }
+      if (ok) {
+        console.log(`[serverRestart] ${server.name} is back`);
+        return { back: true, quitSent: sent };
+      }
+    }
+    console.error(`[serverRestart] ${server.name} did not come back within ${timeoutMs / 1000}s`);
+    publishAdminEvent({
+      kind: 'problem',
+      text: `${server.name} was asked to restart after a match and has not come back after `
+        + `${timeoutMs / 1000} seconds. It is out of the pool so no match can land on it. `
+        + 'Check the box, then put it back with Set idle in the admin panel.',
+    });
+    return { back: false, quitSent: sent };
+  };
+  return {
+    restart: async (server) => (await run(server, false)).back,
+    restartForRelease: (server) => run(server, true),
   };
 }
 
@@ -184,10 +201,11 @@ export async function kickThenQuit(
   await rcon.exec('quit');
 }
 
-/** Humans on a box, from the engine's `status` ("players : 3 (8 max)"). 0 when
- *  the line is missing: the caller only uses this to wait politely before a
- *  release restarts the box. */
+/** Humans on a box, from the engine's `status` ("players : 3 (8 max)").
+ *  Throws when the line is missing: a release restarts a box only on a count
+ *  of exactly 0, and a reply it cannot read is not one. */
 export function parseHumans(status: string): number {
   const m = /players\s*:\s*(\d+)/.exec(status);
-  return m ? Number(m[1]) : 0;
+  if (!m) throw new Error('no player count in the status reply');
+  return Number(m[1]);
 }

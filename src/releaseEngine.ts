@@ -3,15 +3,17 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { DB } from './db.js';
 import { publishAdminEvent } from './adminFeed.js';
-import { getServer, release as releaseServer, type ServerRow } from './serverPool.js';
-import type { ServerRestarter } from './serverRestart.js';
+import { getServer, markOffline, release as releaseServer, type ServerRow } from './serverPool.js';
+import { restartOutcome, type RestartOutcome, type ServerRestarter } from './serverRestart.js';
 import { treeWriterFor, type TreeWriter } from './fleetWrite.js';
 import type { Op } from './releaseStage.js';
 
 /**
  * Sends a staged release to the boxes, one box at a time: wait until idle,
  * hold, back up, write, verify, restart when empty. Any failure before the
- * restart puts the backups back and marks the box failed. See
+ * restart puts the backups back and marks the box failed. A box whose restart
+ * cannot be done safely (players on it, a match took it, quit never sent) is
+ * left 'written' with the reason as its error and parked offline. See
  * docs/superpowers/specs/2026-09-24-release-deploy-design.md.
  */
 
@@ -23,17 +25,28 @@ const sqlNow = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 const DONE = new Set(['written', 'restarted', 'confirmed', 'failed', 'skipped', 'undone']);
 const OK = new Set(['written', 'restarted', 'confirmed']);
+/** 'written' with no error is a restart still to come; with one, it is parked. */
+const boxDone = (b: { state: string; error: string | null }) => DONE.has(b.state) && !(b.state === 'written' && b.error === null);
+const CANARY_OK = new Set(['restarted', 'confirmed']);
 const LINK = { label: 'Deploy page', path: '/admin/setup/deploy' };
 const BACKUP_DAYS = 30;
 /** Per call on a box: a read, a write, a delete, or the verify hash. */
 const OP_LIMIT_MS: Record<TreeWriter['kind'], number> = { local: 60_000, sftp: 120_000, ftp: 300_000 };
 /** The release hook never holds the after-match restart longer than this. */
 const HOOK_CAP_MS = 3 * 60_000;
+/** How long a cancelled box call gets to die before the engine moves on. */
+const ABORT_GRACE_MS = 10_000;
 
 export class ReleaseEngine {
   private chain: Promise<void> = Promise.resolve();
   private restarts = new Set<Promise<void>>();
+  /** Boxes this engine wrote inside the release hook, whose restart is the
+   *  releaser's: 'writing' until the write settles, 'written' when the new
+   *  files wait on that restart, 'park' when the box must stay offline after
+   *  it, 'restarted' when the releaser restarted it before the write was done. */
+  private hooked = new Map<number, { releaseId: number; stage: 'writing' | 'written' | 'park' | 'restarted' }>();
   private timer: ReturnType<typeof setInterval> | null = null;
+  private recovered = false;
 
   constructor(private d: {
     db: DB;
@@ -49,6 +62,7 @@ export class ReleaseEngine {
     emptyPollMs?: number;
     tickMs?: number;
     hookCapMs?: number;
+    opLimitMs?: number;
   }) {}
 
   private now() { return (this.d.now ?? sqlNow)(); }
@@ -149,17 +163,43 @@ export class ReleaseEngine {
   /** The ServerReleaser's before-restart hook: this box has just finished a
    *  match; give it its turn now, before the releaser restarts it. */
   forRelease(serverId: number): Promise<void> {
-    this.chain = this.chain.then(() => this.drive(serverId)).catch((err) => console.error('[releases] release hook failed:', err));
+    const hook = { live: true };
+    this.chain = this.chain.then(() => this.drive(serverId, hook)).catch((err) => console.error('[releases] release hook failed:', err));
     // Capped: behind a slow write on another box, the releaser must still get
-    // this box back. If the cap fires first, the queued turn still runs later;
-    // by then the box is no longer offline for this release, so it waits for
-    // an idle moment like any other (runBox only writes 'offline' in the hook).
+    // this box back. When the cap fires the hook's turn is spent: the queued
+    // turn still runs later, but may no longer treat the box's 'offline' as
+    // the releaser's (it may be booting, or parked), so it waits for an idle
+    // moment like any other. A write already under way when the cap fires is
+    // judged by afterReleaserRestart.
     let t: ReturnType<typeof setTimeout> | undefined;
     const cap = new Promise<void>((resolve) => { t = setTimeout(resolve, this.d.hookCapMs ?? HOOK_CAP_MS); t.unref?.(); });
-    return Promise.race([this.chain, cap]).finally(() => clearTimeout(t));
+    return Promise.race([this.chain, cap]).finally(() => { clearTimeout(t); hook.live = false; });
   }
 
-  private async drive(onlyServer: number | null): Promise<void> {
+  /** Whether the releaser's coming restart of this box is one a release
+   *  wrote for (so it must say how the restart went). */
+  ownsRestart(serverId: number): boolean {
+    return this.hooked.has(serverId);
+  }
+
+  /** The releaser restarted a box this engine wrote inside the hook. True
+   *  means keep it offline: the new files are not loaded, or not all there. */
+  afterReleaserRestart(serverId: number, res: RestartOutcome): boolean {
+    const h = this.hooked.get(serverId);
+    if (!h) return false;
+    if (h.stage === 'writing') { h.stage = 'restarted'; return true; }
+    this.hooked.delete(serverId);
+    if (h.stage === 'park') return true;
+    if (res.back && res.quitSent) {
+      this.setBox(h.releaseId, serverId, 'restarted');
+    } else {
+      this.park(h.releaseId, serverId, res.quitSent ? 'the box did not come back after the restart' : 'quit could not be sent over rcon, so the box is still running the old files');
+    }
+    this.afterBox(h.releaseId, serverId);
+    return !(res.back && res.quitSent);
+  }
+
+  private async drive(onlyServer: number | null, hook: { live: boolean } | null = null): Promise<void> {
     const id = this.inFlight();
     if (id === null) return;
     const r = this.rel(id)!;
@@ -169,27 +209,43 @@ export class ReleaseEngine {
     const order = [...rows].sort((a, b) => Number(b.server_id === canary) - Number(a.server_id === canary) || a.server_id - b.server_id);
     const canaryRow = canary === null ? null : rows.find((b) => b.server_id === canary)!;
     for (const b of order) {
-      if (canaryRow && b.server_id !== canary && !DONE.has(this.boxState(id, canary!))) break;
+      // The rest wait until the canary has restarted, not merely been written.
+      if (canaryRow && b.server_id !== canary && !CANARY_OK.has(this.boxState(id, canary!))) break;
       if (onlyServer !== null && b.server_id !== onlyServer) continue;
       const st = this.boxState(id, b.server_id);
       if (st !== 'pending' && st !== 'waiting') continue;
-      await this.runBox(r, b, onlyServer !== null);
-      if (b.server_id === canary) {
-        const cs = this.boxState(id, canary);
-        if (cs === 'failed') {
-          for (const o of rows) if (o.server_id !== canary && ['pending', 'waiting'].includes(this.boxState(id, o.server_id))) this.setBox(id, o.server_id, 'skipped');
-          this.setRel(id, 'halted');
-          publishAdminEvent({ kind: 'problem', text: `Release ${id}: the canary failed, so no other box got it.`, link: LINK });
-          return;
-        }
-        if (OK.has(cs) && rows.some((o) => ['pending', 'waiting'].includes(this.boxState(id, o.server_id)))) {
-          this.setRel(id, 'canary_wait');
-          publishAdminEvent({ kind: 'problem', text: `Release ${id}: the canary box has it. Check it, then press Continue for the rest.`, link: LINK });
-          return;
-        }
-      }
+      await this.runBox(r, b, hook);
+      if (b.server_id === canary && this.canaryOutcome(id)) return;
     }
     this.settle(id);
+  }
+
+  /** A box's restart settled off the chain: the canary's decides the rest. */
+  private afterBox(releaseId: number, serverId: number): void {
+    if (this.rel(releaseId)?.canary_server_id === serverId && this.canaryOutcome(releaseId)) return;
+    this.settle(releaseId);
+  }
+
+  /** After the canary's state changed: halt on a failed or parked canary, wait
+   *  for Continue once it has restarted. True when the release stopped here. */
+  private canaryOutcome(id: number): boolean {
+    const r = this.rel(id)!;
+    const canary = r.canary_server_id;
+    if (canary === null || r.state !== 'deploying') return false;
+    const c = this.d.db.prepare('SELECT state, error FROM release_boxes WHERE release_id = ? AND server_id = ?').get(id, canary) as { state: string; error: string | null };
+    const rest = this.boxes(id).filter((o) => o.server_id !== canary && ['pending', 'waiting'].includes(o.state));
+    if (c.state === 'failed' || (c.state === 'written' && c.error !== null)) {
+      for (const o of rest) this.setBox(id, o.server_id, 'skipped');
+      this.setRel(id, 'halted');
+      publishAdminEvent({ kind: 'problem', text: `Release ${id}: the canary ${c.state === 'failed' ? 'failed' : 'was not restarted'}, so no other box got it.`, link: LINK });
+      return true;
+    }
+    if (CANARY_OK.has(c.state) && rest.length > 0) {
+      this.setRel(id, 'canary_wait');
+      publishAdminEvent({ kind: 'problem', text: `Release ${id}: the canary box has it. Check it, then press Continue for the rest.`, link: LINK });
+      return true;
+    }
+    return false;
   }
 
   private boxState(id: number, sid: number): string {
@@ -197,8 +253,9 @@ export class ReleaseEngine {
   }
 
   private settle(id: number): void {
-    const states = this.boxes(id).map((b) => b.state);
-    if (!states.every((s) => DONE.has(s))) return;
+    if (this.rel(id)?.state !== 'deploying') return;
+    const rows = this.d.db.prepare('SELECT state, error FROM release_boxes WHERE release_id = ?').all(id) as { state: string; error: string | null }[];
+    if (!rows.every(boxDone)) return;
     this.setRel(id, 'done');
     const r = this.rel(id)!;
     if (r.kind === 'undo' && r.undo_of !== null) {
@@ -206,7 +263,7 @@ export class ReleaseEngine {
     }
   }
 
-  private async runBox(r: Row, b: BoxRow, viaRelease: boolean): Promise<void> {
+  private async runBox(r: Row, b: BoxRow, hook: { live: boolean } | null): Promise<void> {
     const db = this.d.db;
     const s = getServer(db, b.server_id);
     if (!s || s.enabled !== 1) { this.setBox(r.id, b.server_id, 'failed', 'the box is disabled'); return; }
@@ -214,81 +271,160 @@ export class ReleaseEngine {
     // releaser itself took the box offline to restart it. Anywhere else it
     // means parked or unverified (see reconcileServers), and must never be
     // written, restarted or turned idle from here.
-    const releaserRestarting = viaRelease && s.status === 'offline';
+    const releaserRestarting = hook?.live === true && s.status === 'offline';
     if (!releaserRestarting && s.status !== 'idle') { this.setBox(r.id, b.server_id, 'waiting'); return; }
     const writer = (this.d.writer ?? treeWriterFor)(s);
     if (!writer) { this.setBox(r.id, b.server_id, 'failed', 'no transport configured'); return; }
     const held = s.status === 'idle';
     if (held) db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(s.id);
     const unhold = () => { if (held) releaseServer(db, s.id); };
+    const hooked = { releaseId: r.id, stage: 'writing' as 'writing' | 'written' | 'park' | 'restarted' };
+    if (releaserRestarting) this.hooked.set(s.id, hooked);
     this.setBox(r.id, b.server_id, 'writing');
 
     // Every box call is bounded: a hung ssh or FTP call must not hold the
-    // engine (and, through the release hook, the releaser) forever.
-    const limit = OP_LIMIT_MS[writer.kind];
-    const bounded = <T>(p: Promise<T>, what: string): Promise<T> => {
-      let t: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<never>((_, reject) => { t = setTimeout(() => reject(new Error(`${what} timed out after ${limit / 1000} s`)), limit); });
-      return Promise.race([p, timeout]).finally(() => clearTimeout(t));
-    };
+    // engine (and, through the release hook, the releaser) forever. A call
+    // that runs out of time is cancelled (the ssh child killed, the FTP client
+    // closed) and given a moment to die before anything else touches the box,
+    // so it cannot finish after the backup has gone back.
+    const bounded = <T>(call: (signal: AbortSignal) => Promise<T>, what: string) => this.bounded(writer, call, what);
     const ops = JSON.parse(b.plan_json!) as Op[];
     const dir = join(this.d.releasesDir, String(r.id), String(s.id));
     const backup: { path: string; existed: boolean }[] = [];
     try {
       for (const o of ops) {
-        const bytes = await bounded(writer.read(o.path), `reading ${o.path}`);
+        const bytes = await bounded((sig) => writer.read(o.path, sig), `reading ${o.path}`);
         if (bytes) { mkdirSync(dirname(join(dir, 'files', o.path)), { recursive: true }); writeFileSync(join(dir, 'files', o.path), bytes); }
         backup.push({ path: o.path, existed: bytes !== null });
       }
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, 'backup.json'), JSON.stringify(backup));
       for (const o of ops) {
-        if (o.op === 'remove') { await bounded(writer.remove(o.path), `removing ${o.path}`); continue; }
+        if (o.op === 'remove') { await bounded((sig) => writer.remove(o.path, sig), `removing ${o.path}`); continue; }
         const bytes = o.blob ? await this.d.blob(o.blob)
           : readFileSync(join(this.d.releasesDir, String(o.backupFrom!.releaseId), String(o.backupFrom!.serverId), 'files', o.path));
         if (sha256(bytes) !== o.sha256) throw new Error(`content for ${o.path} does not match its hash`);
-        await bounded(writer.write(o.path, bytes), `writing ${o.path}`);
+        await bounded((sig) => writer.write(o.path, bytes, sig), `writing ${o.path}`);
       }
-      const h = await bounded(writer.hash(ops.map((o) => o.path)), 'verifying');
+      const h = await bounded((sig) => writer.hash(ops.map((o) => o.path), sig), 'verifying');
       for (const o of ops) {
         const got = h.get(o.path) ?? null;
         if (o.op === 'remove' ? got !== null : got !== o.sha256) throw new Error(`verify failed for ${o.path}`);
       }
     } catch (err) {
       let error = err instanceof Error ? err.message : String(err);
-      try {
-        for (const e of backup) {
-          if (e.existed) await bounded(writer.write(e.path, readFileSync(join(dir, 'files', e.path))), `restoring ${e.path}`);
-          else await bounded(writer.remove(e.path), `restoring ${e.path}`);
+      // Every file is tried: one that will not go back must not leave the
+      // others as the release wrote them.
+      const unrestored: string[] = [];
+      for (const e of backup) {
+        try {
+          if (e.existed) await bounded((sig) => writer.write(e.path, readFileSync(join(dir, 'files', e.path)), sig), 'the restore');
+          else await bounded((sig) => writer.remove(e.path, sig), 'the restore');
+        } catch (e2) {
+          unrestored.push(`restoring ${e.path}: ${e2 instanceof Error ? e2.message : String(e2)}`);
         }
-      } catch (e2) {
-        error += `; restoring the backup also failed: ${e2 instanceof Error ? e2.message : String(e2)}`;
       }
+      if (unrestored.length) error += `; restoring the backup also failed: ${unrestored.join('; ')}`;
       this.setBox(r.id, s.id, 'failed', error);
+      if (unrestored.length) {
+        // Half the release and half the backup: never back in the pool. Inside
+        // the hook the releaser's restart must leave it offline too.
+        if (releaserRestarting && hooked.stage === 'writing') hooked.stage = 'park';
+        else if (releaserRestarting) this.hooked.delete(s.id);
+        markOffline(db, s.id);
+        publishAdminEvent({ kind: 'problem', text: `Release ${r.id} failed on ${s.name} and its files could not all be put back: ${error}. It is offline; fix it by hand, then Set idle.`, link: LINK });
+        return;
+      }
+      // Files back as they were: the releaser's restart and idle are fine. A
+      // box it already restarted under the write stays offline where it is.
+      if (releaserRestarting) this.hooked.delete(s.id);
       unhold();
       publishAdminEvent({ kind: 'problem', text: `Release ${r.id} failed on ${s.name}: ${error}. Its files were put back; it was not restarted.`, link: LINK });
       return;
     }
     this.setBox(r.id, s.id, 'written');
-    if (releaserRestarting) { this.setBox(r.id, s.id, 'restarted'); return; }
-    if (!this.d.restarter) { unhold(); return; }
-    // Waiting for the box to empty can take minutes: done off the engine's
-    // chain, so the next box and the release hook are never stuck behind it.
-    // The box stays held (reserved) until its restart.
+    if (releaserRestarting) {
+      // The releaser restarts it once the hook returns; afterReleaserRestart
+      // records how that went. Restarted under the write: parked.
+      if (hooked.stage === 'restarted') { this.hooked.delete(s.id); this.park(r.id, s.id, 'the releaser restarted it before the write finished'); }
+      else hooked.stage = 'written';
+      return;
+    }
+    if (!this.d.restarter) { this.park(r.id, s.id, 'this site has no way to restart it'); return; }
+    this.queueRestart(r.id, s.id);
+  }
+
+  /**
+   * Waiting for the box to empty can take minutes: done off the engine's
+   * chain, so the next box and the release hook are never stuck behind it.
+   * The box stays held (reserved) until its restart, goes offline for it, and
+   * is idle again only once it is back. Restarts only when the box has exactly
+   * no players, is still held by us, and no match is on it; anything else
+   * parks it (see park).
+   */
+  private queueRestart(releaseId: number, serverId: number): void {
+    const db = this.d.db;
     const restart = (async () => {
-      await this.waitEmpty(s);
-      if (await this.d.restarter!.restart(s)) {
-        releaseServer(db, s.id);
-        this.setBox(r.id, s.id, 'restarted');
-      } else {
+      const why = await this.waitEmpty(serverId);
+      if (why !== null) { this.park(releaseId, serverId, why); return; }
+      const s = getServer(db, serverId)!;
+      markOffline(db, serverId);
+      const res = await restartOutcome(this.d.restarter!, s);
+      if (!res.quitSent) { this.park(releaseId, serverId, 'quit could not be sent over rcon, so the box is still running the old files'); return; }
+      if (!res.back) {
         // The restarter has already reported it and the box stays offline.
-        this.setBox(r.id, s.id, 'written', 'written, but the box did not come back after the restart');
+        this.setBox(releaseId, serverId, 'written', 'written, but the box did not come back after the restart');
+        return;
       }
+      this.freeIfOurs(serverId);
+      this.setBox(releaseId, serverId, 'restarted');
     })().catch((err) => {
-      console.error(`[releases] restart of ${s.name} failed:`, err);
-      unhold();
-    }).finally(() => this.restarts.delete(restart));
+      console.error(`[releases] restart of server ${serverId} failed:`, err);
+      this.park(releaseId, serverId, err instanceof Error ? err.message : String(err));
+    }).finally(() => {
+      this.restarts.delete(restart);
+      this.afterBox(releaseId, serverId);
+    });
     this.restarts.add(restart);
+  }
+
+  /** Written but not restarted: never back to idle, since srcds has not loaded
+   *  what is on its disk. Offline while we still hold it; a box a match took
+   *  meanwhile is left to that match. An admin restarts it and sets it idle. */
+  private park(releaseId: number, serverId: number, why: string): void {
+    const db = this.d.db;
+    db.prepare("UPDATE servers SET status = 'offline' WHERE id = ? AND status = 'reserved'").run(serverId);
+    this.setBox(releaseId, serverId, 'written', `written, restart pending: ${why}`);
+    const name = getServer(db, serverId)?.name ?? `server ${serverId}`;
+    publishAdminEvent({ kind: 'problem', text: `Release ${releaseId} is written to ${name} but it was not restarted: ${why}. Restart it when empty, then Set idle.`, link: LINK });
+  }
+
+  /** Idle again after its restart, unless something else has the box now. */
+  private freeIfOurs(serverId: number): void {
+    this.d.db.prepare(`UPDATE servers SET status = 'idle' WHERE id = ? AND status = 'offline'
+      AND NOT EXISTS (SELECT 1 FROM matches WHERE server_id = ? AND state IN ('configuring','live'))`).run(serverId, serverId);
+  }
+
+  /** Our hold on the box: still reserved and no match on it. */
+  private stillOurs(serverId: number): boolean {
+    return getServer(this.d.db, serverId)?.status === 'reserved'
+      && !this.d.db.prepare("SELECT 1 FROM matches WHERE server_id = ? AND state IN ('configuring','live')").get(serverId);
+  }
+
+  private async bounded<T>(writer: TreeWriter, call: (signal: AbortSignal) => Promise<T>, what: string): Promise<T> {
+    const limit = this.d.opLimitMs ?? OP_LIMIT_MS[writer.kind];
+    const ac = new AbortController();
+    const p = call(ac.signal);
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<'timeout'>((resolve) => { t = setTimeout(() => resolve('timeout'), limit); });
+    try {
+      const won = await Promise.race([p.then((v) => ({ v })), timeout]);
+      if (won !== 'timeout') return won.v;
+    } finally { clearTimeout(t); }
+    ac.abort();
+    let g: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([p.catch(() => {}), new Promise<void>((resolve) => { g = setTimeout(resolve, ABORT_GRACE_MS); })]).finally(() => clearTimeout(g));
+    throw new Error(`${what} timed out after ${limit / 1000} s`);
   }
 
   /** Resolves once every restart started so far has finished (tests, shutdown). */
@@ -297,26 +433,92 @@ export class ReleaseEngine {
     await Promise.all([...this.restarts]);
   }
 
-  private async waitEmpty(s: ServerRow): Promise<void> {
-    if (!this.d.humans) return;
+  /** Null once the box is safe to restart, or why it is not. Never guesses:
+   *  a count that cannot be read, or a box a match took, is a no. */
+  private async waitEmpty(serverId: number): Promise<string | null> {
+    if (!this.d.humans) return 'no way to count the players on it';
     const sleep = this.d.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     const limit = this.d.emptyWaitMs ?? 10 * 60_000, poll = this.d.emptyPollMs ?? 60_000;
     for (let waited = 0; waited < limit; waited += poll) {
-      let n = 0;
-      try { n = await this.d.humans(s); } catch { return; }
-      if (n <= 0) return;
+      if (!this.stillOurs(serverId)) return 'a match took the box while it waited to empty';
+      let n: number;
+      try { n = await this.d.humans(getServer(this.d.db, serverId)!); } catch (err) {
+        return `could not count the players on it (${err instanceof Error ? err.message : String(err)})`;
+      }
+      if (!this.stillOurs(serverId)) return 'a match took the box while it waited to empty';
+      if (n === 0) return null;
       await sleep(poll);
+    }
+    return `players were still on it after ${Math.round(limit / 60_000)} minutes`;
+  }
+
+  /**
+   * After a site restart. Synchronous first, so that server.ts can run it
+   * before the boot reconcile, which would otherwise hand a held box out as
+   * idle: a box caught mid-write is parked offline, and a box whose restart
+   * was lost is held again. Then, off the chain, the first is put back from
+   * its backup on disk (idle again only if it was ours from idle, never if the
+   * releaser had it) and the second gets its restart through the normal
+   * empty-box path. Runs once.
+   */
+  recover(): void {
+    if (this.recovered) return;
+    this.recovered = true;
+    const db = this.d.db;
+    const matchOn = (sid: number) => !!db.prepare("SELECT 1 FROM matches WHERE server_id = ? AND state IN ('configuring','live')").get(sid);
+    const stuck = db.prepare("SELECT release_id, server_id FROM release_boxes WHERE state = 'writing'").all() as { release_id: number; server_id: number }[];
+    for (const b of stuck) {
+      const was = getServer(db, b.server_id)?.status;
+      markOffline(db, b.server_id);
+      const restore = this.restoreInterrupted(b.release_id, b.server_id, was === 'reserved')
+        .catch((err) => {
+          this.setBox(b.release_id, b.server_id, 'failed', `interrupted by a site restart; putting the backup back failed: ${err instanceof Error ? err.message : String(err)}`);
+        })
+        .finally(() => { this.restarts.delete(restore); this.settle(b.release_id); });
+      this.restarts.add(restore);
+    }
+    const lost = db.prepare("SELECT release_id, server_id FROM release_boxes WHERE state = 'written' AND error IS NULL").all() as { release_id: number; server_id: number }[];
+    for (const b of lost) {
+      const st = getServer(db, b.server_id)?.status;
+      if (!this.d.restarter || matchOn(b.server_id) || (st !== 'reserved' && st !== 'offline')) {
+        this.park(b.release_id, b.server_id, 'its restart was lost to a site restart');
+        continue;
+      }
+      db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(b.server_id);
+      this.queueRestart(b.release_id, b.server_id);
     }
   }
 
-  recover(): void {
-    const db = this.d.db;
-    const stuck = db.prepare("SELECT release_id, server_id FROM release_boxes WHERE state = 'writing'").all() as { release_id: number; server_id: number }[];
-    for (const b of stuck) {
-      this.setBox(b.release_id, b.server_id, 'failed', 'interrupted by a site restart; check the box (its backup is on disk)');
-      db.prepare(`UPDATE servers SET status = 'idle' WHERE id = ? AND status = 'reserved'
-        AND NOT EXISTS (SELECT 1 FROM matches WHERE server_id = ? AND state IN ('configuring','live'))`).run(b.server_id, b.server_id);
+  private async restoreInterrupted(releaseId: number, serverId: number, freeAfter: boolean): Promise<void> {
+    const dir = join(this.d.releasesDir, String(releaseId), String(serverId));
+    let backup: { path: string; existed: boolean }[];
+    try { backup = JSON.parse(readFileSync(join(dir, 'backup.json'), 'utf8')) as typeof backup; } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      // backup.json is written before the first write: nothing on the box changed.
+      this.setBox(releaseId, serverId, 'failed', 'interrupted by a site restart before any file was written');
+      if (freeAfter) this.freeIfOurs(serverId);
+      return;
     }
+    const s = getServer(this.d.db, serverId);
+    const writer = s ? (this.d.writer ?? treeWriterFor)(s) : null;
+    if (!writer) throw new Error('no transport configured');
+    const failed: string[] = [];
+    for (const e of backup) {
+      try {
+        if (e.existed) await this.bounded(writer, (sig) => writer.write(e.path, readFileSync(join(dir, 'files', e.path)), sig), 'the restore');
+        else await this.bounded(writer, (sig) => writer.remove(e.path, sig), 'the restore');
+      } catch (err) {
+        failed.push(`restoring ${e.path}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (failed.length) {
+      this.setBox(releaseId, serverId, 'failed', `interrupted by a site restart; putting the backup back failed: ${failed.join('; ')}`);
+      publishAdminEvent({ kind: 'problem', text: `Release ${releaseId} was interrupted on ${s!.name} and its files could not all be put back. It is offline; fix it by hand, then Set idle.`, link: LINK });
+      return;
+    }
+    this.setBox(releaseId, serverId, 'failed', 'interrupted by a site restart; its files were put back');
+    if (freeAfter) this.freeIfOurs(serverId);
+    else publishAdminEvent({ kind: 'problem', text: `Release ${releaseId} was interrupted on ${s!.name}; its files were put back. It is offline; check it, then Set idle.`, link: LINK });
   }
 
   expireBackups(nowMs: number = Date.now()): number {
