@@ -22,8 +22,13 @@ export function AdminFleet() {
   if (!d) return <p class="muted">Loading...</p>;
 
   const differing = d.rows.filter((r) => r.differs);
+  const unreadBoxes = d.boxes.filter((b) => b.enabled && b.readAt === null);
   const summary = differing.length === 0
-    ? 'No differences.'
+    ? unreadBoxes.length === d.boxes.filter((b) => b.enabled).length
+      ? 'No box has been read yet: Check all to compare them.'
+      : unreadBoxes.length > 0
+        ? `No differences among the boxes read so far (not read yet: ${unreadBoxes.map((b) => b.name).join(', ')}).`
+        : 'No differences.'
     : `${differing.length} difference${differing.length === 1 ? '' : 's'}: ${differing.slice(0, 5).map((r) =>
       `${fileName(r.path)} (${d.boxes.filter((b) => r.cells[b.serverId]?.highlight).map((b) => b.name).join(', ')})`).join('; ')}${differing.length > 5 ? '; ...' : ''}`;
   const rows = d.rows.filter((r) => (!diffOnly || r.differs) && (area === 'all' || r.area === area));

@@ -35,9 +35,13 @@ after any push to Dallas, never blank `sv_password`.
    (plugin lists now match by file name). No box is written: the watch-file writer
    does write `data/pug_balance_watch.txt` to idle boxes, which only the 0.3.14
    plugin reads, so it is inert until stage 3.
-4. Recompute the 26 rounds whose replays were pruned before their metrics ran
-   (matches 156, 158, 159, 160): `npx tsx scripts/recompute-metrics-from-r2.ts
-   /home/pug/app/data/pug.db` (dry run), then `--apply`, while no match is live.
+4. Recompute from R2 every round whose local replay was pruned: the 26 rounds of
+   matches 156, 158, 159 and 160 that were computed with no replay, and every
+   older round still on an earlier metric definition (Compare says "N rounds use
+   an older metric definition" for nearly all of them on 2026-09-25):
+   `npx tsx scripts/recompute-metrics-from-r2.ts /home/pug/app/data/pug.db`
+   (dry run), then `--apply`, while no match is live. The branch's own commit
+   measured 682 rounds in 4 s on a prod copy.
 5. Verify per `pug-deploy-verification`: tree hash, bundle strings
    ("Patch notes", "Game values"), DB columns, `/balance` and `/balance/values`
    load logged out, Admin > Balance > Patches shows the two pending cards.
