@@ -1,6 +1,6 @@
 import type { DB } from './db.js';
 import { getServer, markOffline, release, type ServerRow } from './serverPool.js';
-import { restartsAfterMatch, type ServerRestarter } from './serverRestart.js';
+import { restartOutcome, restartsAfterMatch, type RestartOutcome, type ServerRestarter } from './serverRestart.js';
 
 /** How a server is being freed. `teardown` is the ending that went wrong:
  *  abandon, no-show, admin abort. The roster is still on the box, possibly
@@ -52,6 +52,10 @@ export class ServerReleaser {
      *  values land between matches and the restart loads them. Failures are
      *  logged and never stop the release. */
     private beforeRestart: ((server: ServerRow) => Promise<void>) | null = null,
+    /** A release that wrote this box in beforeRestart judges the restart:
+     *  it must know quit really went out, and `after` answering true keeps
+     *  the box offline. Every other restart is exactly as before. */
+    private releaseRestart: { owns(serverId: number): boolean; after(serverId: number, res: RestartOutcome): boolean } | null = null,
   ) {}
 
   /** Called when a box frees, so a match waiting for one can claim it. */
@@ -130,6 +134,12 @@ export class ServerReleaser {
         // A box that never came back stays offline on purpose: the matchmaker
         // simply uses another, and the restarter has already said so in the
         // admin feed. An admin puts it back with Set idle.
+        if (this.releaseRestart?.owns(serverId)) {
+          const res = await restartOutcome(this.restarter!, server);
+          const park = this.releaseRestart.after(serverId, res);
+          if (res.back && !park) release(this.db, serverId);
+          return;
+        }
         if (await this.restarter!.restart(server)) release(this.db, serverId);
       })
       .then(() => {

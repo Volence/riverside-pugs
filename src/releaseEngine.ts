@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import type { DB } from './db.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { getServer, markOffline, release as releaseServer, type ServerRow } from './serverPool.js';
-import { restartOutcome, type ServerRestarter } from './serverRestart.js';
+import { restartOutcome, type RestartOutcome, type ServerRestarter } from './serverRestart.js';
 import { treeWriterFor, type TreeWriter } from './fleetWrite.js';
 import type { Op } from './releaseStage.js';
 
@@ -38,6 +38,11 @@ const HOOK_CAP_MS = 3 * 60_000;
 export class ReleaseEngine {
   private chain: Promise<void> = Promise.resolve();
   private restarts = new Set<Promise<void>>();
+  /** Boxes this engine wrote inside the release hook, whose restart is the
+   *  releaser's: 'writing' until the write settles, 'written' when the new
+   *  files wait on that restart, 'park' when the box must stay offline after
+   *  it, 'restarted' when the releaser restarted it before the write was done. */
+  private hooked = new Map<number, { releaseId: number; stage: 'writing' | 'written' | 'park' | 'restarted' }>();
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private d: {
@@ -154,17 +159,43 @@ export class ReleaseEngine {
   /** The ServerReleaser's before-restart hook: this box has just finished a
    *  match; give it its turn now, before the releaser restarts it. */
   forRelease(serverId: number): Promise<void> {
-    this.chain = this.chain.then(() => this.drive(serverId)).catch((err) => console.error('[releases] release hook failed:', err));
+    const hook = { live: true };
+    this.chain = this.chain.then(() => this.drive(serverId, hook)).catch((err) => console.error('[releases] release hook failed:', err));
     // Capped: behind a slow write on another box, the releaser must still get
-    // this box back. If the cap fires first, the queued turn still runs later;
-    // by then the box is no longer offline for this release, so it waits for
-    // an idle moment like any other (runBox only writes 'offline' in the hook).
+    // this box back. When the cap fires the hook's turn is spent: the queued
+    // turn still runs later, but may no longer treat the box's 'offline' as
+    // the releaser's (it may be booting, or parked), so it waits for an idle
+    // moment like any other. A write already under way when the cap fires is
+    // judged by afterReleaserRestart.
     let t: ReturnType<typeof setTimeout> | undefined;
     const cap = new Promise<void>((resolve) => { t = setTimeout(resolve, this.d.hookCapMs ?? HOOK_CAP_MS); t.unref?.(); });
-    return Promise.race([this.chain, cap]).finally(() => clearTimeout(t));
+    return Promise.race([this.chain, cap]).finally(() => { clearTimeout(t); hook.live = false; });
   }
 
-  private async drive(onlyServer: number | null): Promise<void> {
+  /** Whether the releaser's coming restart of this box is one a release
+   *  wrote for (so it must say how the restart went). */
+  ownsRestart(serverId: number): boolean {
+    return this.hooked.has(serverId);
+  }
+
+  /** The releaser restarted a box this engine wrote inside the hook. True
+   *  means keep it offline: the new files are not loaded, or not all there. */
+  afterReleaserRestart(serverId: number, res: RestartOutcome): boolean {
+    const h = this.hooked.get(serverId);
+    if (!h) return false;
+    if (h.stage === 'writing') { h.stage = 'restarted'; return true; }
+    this.hooked.delete(serverId);
+    if (h.stage === 'park') return true;
+    if (res.back && res.quitSent) {
+      this.setBox(h.releaseId, serverId, 'restarted');
+    } else {
+      this.park(h.releaseId, serverId, res.quitSent ? 'the box did not come back after the restart' : 'quit could not be sent over rcon, so the box is still running the old files');
+    }
+    if (!this.canaryOutcome(h.releaseId)) this.settle(h.releaseId);
+    return !(res.back && res.quitSent);
+  }
+
+  private async drive(onlyServer: number | null, hook: { live: boolean } | null = null): Promise<void> {
     const id = this.inFlight();
     if (id === null) return;
     const r = this.rel(id)!;
@@ -179,7 +210,7 @@ export class ReleaseEngine {
       if (onlyServer !== null && b.server_id !== onlyServer) continue;
       const st = this.boxState(id, b.server_id);
       if (st !== 'pending' && st !== 'waiting') continue;
-      await this.runBox(r, b, onlyServer !== null);
+      await this.runBox(r, b, hook);
       if (b.server_id === canary && this.canaryOutcome(id)) return;
     }
     this.settle(id);
@@ -222,7 +253,7 @@ export class ReleaseEngine {
     }
   }
 
-  private async runBox(r: Row, b: BoxRow, viaRelease: boolean): Promise<void> {
+  private async runBox(r: Row, b: BoxRow, hook: { live: boolean } | null): Promise<void> {
     const db = this.d.db;
     const s = getServer(db, b.server_id);
     if (!s || s.enabled !== 1) { this.setBox(r.id, b.server_id, 'failed', 'the box is disabled'); return; }
@@ -230,13 +261,15 @@ export class ReleaseEngine {
     // releaser itself took the box offline to restart it. Anywhere else it
     // means parked or unverified (see reconcileServers), and must never be
     // written, restarted or turned idle from here.
-    const releaserRestarting = viaRelease && s.status === 'offline';
+    const releaserRestarting = hook?.live === true && s.status === 'offline';
     if (!releaserRestarting && s.status !== 'idle') { this.setBox(r.id, b.server_id, 'waiting'); return; }
     const writer = (this.d.writer ?? treeWriterFor)(s);
     if (!writer) { this.setBox(r.id, b.server_id, 'failed', 'no transport configured'); return; }
     const held = s.status === 'idle';
     if (held) db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(s.id);
     const unhold = () => { if (held) releaseServer(db, s.id); };
+    const hooked = { releaseId: r.id, stage: 'writing' as 'writing' | 'written' | 'park' | 'restarted' };
+    if (releaserRestarting) this.hooked.set(s.id, hooked);
     this.setBox(r.id, b.server_id, 'writing');
 
     // Every box call is bounded: a hung ssh or FTP call must not hold the
@@ -281,12 +314,21 @@ export class ReleaseEngine {
         error += `; restoring the backup also failed: ${e2 instanceof Error ? e2.message : String(e2)}`;
       }
       this.setBox(r.id, s.id, 'failed', error);
+      // Files back as they were: the releaser's restart and idle are fine. A
+      // box it already restarted under the write stays offline where it is.
+      if (releaserRestarting) this.hooked.delete(s.id);
       unhold();
       publishAdminEvent({ kind: 'problem', text: `Release ${r.id} failed on ${s.name}: ${error}. Its files were put back; it was not restarted.`, link: LINK });
       return;
     }
     this.setBox(r.id, s.id, 'written');
-    if (releaserRestarting) { this.setBox(r.id, s.id, 'restarted'); return; }
+    if (releaserRestarting) {
+      // The releaser restarts it once the hook returns; afterReleaserRestart
+      // records how that went. Restarted under the write: parked.
+      if (hooked.stage === 'restarted') { this.hooked.delete(s.id); this.park(r.id, s.id, 'the releaser restarted it before the write finished'); }
+      else hooked.stage = 'written';
+      return;
+    }
     if (!this.d.restarter) { unhold(); return; }
     this.queueRestart(r.id, s.id);
   }

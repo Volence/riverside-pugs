@@ -662,7 +662,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     await balanceWriter.writeForRelease(server.id);
     await watchWriter.writeForRelease(server.id);
     await releaseEngine.forRelease(server.id);
-  });
+  }, { owns: (id) => releaseEngine.ownsRestart(id), after: (id, res) => releaseEngine.afterReleaserRestart(id, res) });
 
   // Every enabled box mirrors the website's bans. Built here, next to the
   // releaser, because both are the backend reaching into a game server
