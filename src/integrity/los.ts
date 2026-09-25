@@ -27,9 +27,18 @@ export function classOf(cls: number): InfectedClass | null {
   return null;
 }
 
-/** An infected the hidden metrics can be about: present, alive, spawned, and
- *  of a scored class. A ghost is metric A's business, not these. */
+/** An infected the hidden metrics can be about: on the infected side,
+ *  present, alive, spawned, and of a scored class. A ghost is metric A's
+ *  business, not these.
+ *
+ *  The side check comes first because `cls` means something else on the
+ *  survivor side: it holds the survivor's character number, and characters 1
+ *  to 3 are the same numbers as smoker, boomer and hunter. Without it every
+ *  survivor teammate was paired as a target and fell into `losUnknown` (the
+ *  scores never saw them, but the gate tallies did). `infected` is always set
+ *  by `decodeFrames`; a hand-built sample without it is taken at its class. */
 export function isSpawnedTarget(p: PlayerSample): boolean {
+  if (p.infected === false) return false;
   if ((p.state & STATE.PRESENT) === 0) return false;
   if ((p.state & STATE.ALIVE) === 0) return false;
   if ((p.state & STATE.GHOST) !== 0) return false;

@@ -59,6 +59,21 @@ describe('scanHidden', () => {
     expect(t.passed).toBe(30);
     expect(passed).toBe(30);
   });
+
+  it('never pairs a survivor with a teammate whose character number looks like a class', () => {
+    // Slot 1 is Louis (character 2, the boomer's class id) on the survivor side.
+    const frames = scene({
+      extra: (_i, players) => {
+        players[0] = { ...players[0], infected: false };
+        players[1] = { ...players[1], cls: 2, infected: false };
+        players[4] = { ...players[4], infected: true };
+      },
+    });
+    const t = scanHidden(frames, 0, LOS);
+    expect(t.considered).toBe(40);
+    expect(t.losUnknown).toBe(0);
+    expect(t.passed).toBe(40);
+  });
 });
 
 describe('metric D, hidden tracking', () => {
