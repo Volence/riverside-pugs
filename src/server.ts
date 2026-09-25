@@ -1095,7 +1095,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
               inventory: inv, versionless: balanceKnobs.versionless, ignored: effectiveIgnored(deps.db, balanceKnobs.ignored),
               expectedPatchId: serverId !== null ? expectedPatchFor(deps.db, serverId) : null,
             });
-            if (serverId !== null) confirmOnSighting(deps.db, { serverId, patchId: r.patchId });
+            if (serverId !== null) confirmOnSighting(deps.db, { serverId, matchId: m.id, patchId: r.patchId });
             if (serverId !== null) linkReleaseSighting(deps.db, { serverId, patchId: r.patchId, previousPatchId: r.previousPatchId });
             return;
           }

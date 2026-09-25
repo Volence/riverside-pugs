@@ -110,6 +110,20 @@ export function recordBalanceSighting(db: DB, s: {
       newPatch = true;
     }
     const patchId = row.id;
+    // The patch a rollout expects here, seen with only the watch list
+    // changed (knobs.json grew while the new values went out): that is the
+    // rollout landing, so it joins the rollout's patch without an alert.
+    let expectedPlusWatch = false;
+    if (s.expectedPatchId != null && patchId !== s.expectedPatchId) {
+      const e = db.prepare('SELECT inputs_json FROM balance_patches WHERE id = ?').get(s.expectedPatchId) as { inputs_json: string | null } | undefined;
+      let expected: Inventory | null = null;
+      try { expected = e?.inputs_json ? withoutIgnored(JSON.parse(e.inputs_json) as Inventory, s.ignored ?? []) : null; } catch { expected = null; }
+      expectedPlusWatch = expected !== null && watchListOnly(expected, inventory, s.versionless);
+      if (expectedPlusWatch && newPatch) {
+        const target = resolvePatch(db, s.expectedPatchId);
+        if (target !== patchId) foldInto(db, patchId, target);
+      }
+    }
     // Watching one more value (or one fewer) changes the fingerprint without
     // anything in the game changing: never asks for triage and never alerts.
     let watchOnly = false;
@@ -117,7 +131,7 @@ export function recordBalanceSighting(db: DB, s: {
       let before: Inventory | null = null;
       try { before = withoutIgnored(JSON.parse(prev.inventory_json) as Inventory, s.ignored ?? []); } catch { before = null; }
       watchOnly = before !== null && watchListOnly(before, inventory, s.versionless);
-      if (watchOnly && newPatch) {
+      if (watchOnly && newPatch && !expectedPlusWatch) {
         const target = resolvePatch(db, prev.patch_id);
         if (target !== patchId) foldInto(db, patchId, target);
       }
@@ -150,7 +164,7 @@ export function recordBalanceSighting(db: DB, s: {
                     ON CONFLICT (server_id) DO UPDATE SET patch_id = excluded.patch_id,
                       inventory_json = excluded.inventory_json, since = excluded.since`)
           .run(s.serverId, patchId, invJson, now);
-        if (!watchOnly && (s.expectedPatchId == null || patchId !== s.expectedPatchId)) {
+        if (!watchOnly && !expectedPlusWatch && (s.expectedPatchId == null || patchId !== s.expectedPatchId)) {
           // Same time-ordered number the admin page shows (see listPatches), not
           // the raw row id: a historical patch inserted later would otherwise
           // make the alert and the page disagree about which patch "#N" is.
