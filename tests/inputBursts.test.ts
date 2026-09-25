@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ICY_WHEEL, BELLINGHAM_TAPS } from './fixtures/wheelSamples.js';
+import { ICY_WHEEL, BELLINGHAM_TAPS, ICY_FAST_PISTOL, ICY_FAST_POUNCES, CARAMELLOW_SKIPS, MIRA_180, type StoredSample } from './fixtures/wheelSamples.js';
 import { openDb, type DB } from '../src/db.js';
 import {
   detectionsForPlayer, inputThresholds, recordInputBurst, rerunSignatures,
@@ -134,7 +134,8 @@ describe('hold annotation', () => {
     const d = detectionsForPlayer(db, A)[0];
     expect(d.bursts).toHaveLength(2);
     expect(d.bursts[0].hold).toMatchObject({ n: 51, medianTicks: 1, oneTickFrac: 1 });
-    expect(d.bursts[0].annotation).toBe('wheel-like');
+    // One-tick holds at a flat 7 or 8 ticks: the rate says device, not wheel.
+    expect(d.bursts[0].annotation).toBe('steady-taps');
     expect(d.bursts[0].ratePerSec).toBeGreaterThan(12);
   });
 
@@ -181,6 +182,34 @@ describe('hold annotation', () => {
     recordInputBurst(db, hand);
     recordInputBurst(db, hand);
     expect(detectionsForPlayer(db, B)[0].note).toBe('variable-hold');
+  });
+
+  describe('on real bursts', () => {
+    const real = (b: StoredSample, kind: 'fire' | 'pounce') => burst(kind === 'fire'
+      ? { kind, weapon: 'weapon_pistol', airPresses: 0, groundTicks: 0, intervals: b.intervals, holds: b.holds, wire: 2 }
+      : { kind, intervals: b.intervals, holds: b.holds, wire: 2 });
+
+    // Match 190: pistol_rate and pounce_spam both reached Needs a look as
+    // variable-hold for a player the owner confirmed spins a wheel.
+    it('keeps a fast scroll wheel off Needs a look', () => {
+      const created = [
+        ...ICY_FAST_PISTOL.map((b) => recordInputBurst(db, real(b, 'fire'))),
+        ...ICY_FAST_POUNCES.map((b) => recordInputBurst(db, real(b, 'pounce'))),
+      ].flatMap((r) => r.created);
+      expect(created.map((c) => c.signature).sort()).toEqual(['pistol_rate', 'pounce_spam']);
+      for (const c of created) expect(c.note).toBe('wheel-like');
+      for (const d of detectionsForPlayer(db, A)) expect(isWheel(d.note)).toBe(true);
+    });
+
+    it('calls a device that skips beats steady-taps, not a wheel', () => {
+      for (const b of CARAMELLOW_SKIPS) recordInputBurst(db, real(b, 'pounce'));
+      expect(detectionsForPlayer(db, A)[0]).toMatchObject({ signature: 'pounce_spam', note: 'steady-taps' });
+    });
+
+    it('keeps mira\'s match 180 pounces steady-taps', () => {
+      for (let i = 0; i < POUNCE_REPEATS; i++) recordInputBurst(db, real(MIRA_180, 'pounce'));
+      expect(detectionsForPlayer(db, A)[0]).toMatchObject({ signature: 'pounce_spam', note: 'steady-taps' });
+    });
   });
 
   // Plugin 0.1.0 sent no holds, timed by server tick, and captured ghosts.

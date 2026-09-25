@@ -454,7 +454,8 @@ describe('the evidence detail', () => {
     expect(text).toContain('96% one-tick');
     // wire 1 means the plugin version that did not exclude ghosts yet.
     expect(text).toContain('plugin 0.1.0: server tick timing, ghosts not excluded');
-    expect(text).toContain('wheel-like: nearly every press down for a single tick');
+    expect(text).toContain('wheel-like: a mouse wheel bind, from one-tick presses or runs of 2 and 3 tick gaps');
+    expect(text).toContain('steady-taps: the same shape at a flat rate no spun wheel holds');
     expect(text).toContain('This describes the evidence; it does not change the flag.');
     const capText = screen.getByText(/Capture was cut short/).textContent!;
     expect(capText).toContain('Capture was cut short by the game server\'s per-round budget 1 time');
