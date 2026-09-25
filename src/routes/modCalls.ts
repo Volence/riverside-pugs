@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { resolveAlias } from '../aliases.js';
 import type { DB } from '../db.js';
 import { identityOf, plainLabel } from '../identity.js';
-import { foldedCalls, REASON_LABELS, type ModCallRow } from '../modCalls.js';
+import { foldedCalls, markModCallHandled, REASON_LABELS, type ModCallRow } from '../modCalls.js';
+import { getPlayer } from '../players.js';
 import { getSetting } from '../settings.js';
 import { canSeeTicket, getTicketRow } from '../tickets/store.js';
 import { makeRequireMod } from './guards.js';
@@ -18,16 +19,17 @@ export interface ModCallView {
 }
 
 /** How many parents either tab lists, newest first. Open is capped too: a
- *  call leaves it only through the Discord button, so while Discord is not
- *  set up it grows without end. The page is a desk, not an archive. */
+ *  call leaves it only when someone marks it handled, so while nobody does
+ *  it grows without end. The page is a desk, not an archive. */
 export const CALLS_LIMIT = 200;
 
 /**
  * The In-game calls desk: every stored /mod call, for mods and admins alike
  * (the same guard as tickets). A call folded into another's card is listed
  * under that parent and never on its own, as on the Discord card. Open means
- * nobody has pressed Handling it yet, and leaves out a call that was skipped
- * because calls were off: nobody is going to press anything for it.
+ * nobody has marked it handled yet (the Discord button or Mark handled here),
+ * and leaves out a call that was skipped because calls were off: nobody is
+ * going to press anything for it.
  *
  * The ticket system's rule holds here too: the accused never sees a case
  * about themselves. A call about the viewer is left out, parent or folded,
@@ -51,8 +53,12 @@ export async function modCallRoutes(app: FastifyInstance, opts: { db: DB }): Pro
   };
 
   const view = (me: string, c: ModCallRow, folded: ModCallView[]): ModCallView => {
+    // The handler as a player when the row says who (the site, or the button
+    // since handled_by_steamid); an older row has only the Discord id.
     let handledBy: string | null = null;
-    if (c.handled_by_discord_id !== null) {
+    if (c.handled_by_steamid !== null) {
+      handledBy = plainLabel(identityOf(db, c.handled_by_steamid));
+    } else if (c.handled_by_discord_id !== null) {
       const p = byDiscord.get(c.handled_by_discord_id) as { steamid: string } | undefined;
       handledBy = p ? plainLabel(identityOf(db, p.steamid)) : c.handled_by_discord_id;
     }
@@ -88,5 +94,25 @@ export async function modCallRoutes(app: FastifyInstance, opts: { db: DB }): Pro
     const discordReady = (getSetting(db, 'discord_admin_channel_id') ?? '') !== ''
       && getSetting(db, 'mod_calls_enabled') === '1';
     return { calls, discordReady };
+  });
+
+  /**
+   * Mark handled, the site's side of the card's Handling it button, under the
+   * same rules (markModCallHandled). The viewer's linked Discord id is stored
+   * too, so the card mentions them as it would after a press. A call about
+   * the viewer answers exactly as a call that does not exist, as the ticket
+   * routes do, so the endpoint cannot be used to learn that one exists.
+   */
+  app.post('/api/mod/calls/:id/handle', async (req, reply) => {
+    const viewer = requireMod(req, reply);
+    if (!viewer) return reply;
+    const me = resolveAlias(db, viewer);
+    const id = Number((req.params as { id: string }).id);
+    if (!Number.isSafeInteger(id)) return reply.code(404).send({ error: 'no such call' });
+    const r = markModCallHandled(db, id, { steamid: me, discordId: getPlayer(db, me)?.discord_id ?? null });
+    if (r.ok) return { ok: true };
+    if (r.why === 'already') return reply.code(409).send({ error: 'already handled' });
+    if (r.why === 'folded') return reply.code(400).send({ error: 'this call is folded into another: handle that one' });
+    return reply.code(404).send({ error: 'no such call' });
   });
 }
