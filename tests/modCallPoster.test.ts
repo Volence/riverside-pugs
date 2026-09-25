@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer, activatePlayer, linkDiscord } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
-import { handleModCall, type ModCallEvent } from '../src/modCalls.js';
+import { getModCall, handleModCall, markModCallHandled, type ModCallEvent } from '../src/modCalls.js';
 import { ModCallPoster } from '../src/discord/modCallPoster.js';
+import { renderModCallCard } from '../src/discord/modCallCard.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
@@ -81,7 +82,37 @@ describe('ModCallPoster', () => {
     await poster.idle();
     const body = JSON.stringify(inAdmin()[0].payload);
     expect(body).toContain('Handled by <@907>');
-    expect((await press('907')).payload.content).toContain('Already handled');
+    expect((await press('907')).payload.content).toBe('Already handled by <@907>.');
+    expect(getModCall(db, row.id)).toMatchObject({ handled_by_steamid: IDS[7], handled_by_discord_id: '907' });
+  });
+
+  it('edits the card when a call is marked handled from the site', async () => {
+    const row = call(); await poster.idle();
+    const edits = t.edits;
+    expect(markModCallHandled(db, row.id, { steamid: IDS[7], discordId: '907' })).toEqual({ ok: true });
+    await poster.idle();
+    expect(t.edits).toBe(edits + 1);
+    const p = inAdmin()[0].payload;
+    expect(p.embeds[0].description).toContain('Handled by <@907>');
+    expect(p.components[0][0]).toMatchObject({ kind: 'button', label: 'Handled', disabled: true });
+  });
+
+  it('names a site handler with no Discord linked, and the button says so too', async () => {
+    db.prepare("UPDATE players SET discord_id = NULL, name = 'Mod *Star*' WHERE steamid = ?").run(IDS[7]);
+    db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(IDS[6]);
+    const row = call(); await poster.idle();
+    expect(markModCallHandled(db, row.id, { steamid: IDS[7], discordId: null }).ok).toBe(true);
+    await poster.idle();
+    expect(inAdmin()[0].payload.embeds[0].description).toContain('Handled by **Mod \\*Star\\*** (on the site)');
+    const reply = await poster.handleButton({ kind: 'button', customId: `mc:${row.id}:handle`, userId: '906', userName: 'x', presserTimedOutUntil: null });
+    expect(reply.payload.content).toBe('Already handled by **Mod \\*Star\\*** (on the site).');
+    expect(reply.payload.mentionUserIds).toEqual([]);
+  });
+
+  it('still shows the Discord id of a call handled before handled_by_steamid existed', async () => {
+    const row = call(); await poster.idle();
+    db.prepare("UPDATE mod_calls SET handled_by_discord_id = '12345', handled_at = ? WHERE id = ?").run(new Date().toISOString(), row.id);
+    expect(renderModCallCard(db, getModCall(db, row.id)!, 'https://pug.test').embeds[0].description).toContain('Handled by <@12345>');
   });
 
   it('retries a call that could not be sent', async () => {

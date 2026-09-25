@@ -63,10 +63,12 @@ const PLAIN: [table: string, column: string][] = [
   // pointing at the losing account would tell the survivor the pick is not
   // theirs to make.
   ['pending_reports', 'reporter_id'],
-  // In-game /mod calls, both sides. No foreign key, so nothing fails if they
-  // are left behind; they move so the call history reads on the survivor.
+  // In-game /mod calls, both sides and whoever handled one. No foreign key,
+  // so nothing fails if they are left behind; they move so the call history
+  // reads on the survivor.
   ['mod_calls', 'caller_steamid'],
   ['mod_calls', 'target_steamid'],
+  ['mod_calls', 'handled_by_steamid'],
   // Shared HUDs and crosshairs follow their author. The per-player cap is
   // checked only when sharing, so a merged account may end up over it; that
   // is allowed. deleted_by moves too, for a merged member of staff.
