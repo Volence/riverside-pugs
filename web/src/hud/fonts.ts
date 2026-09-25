@@ -181,6 +181,15 @@ export function synthBoldSpacing(face: string, weight: number): number {
   return files && files.every((f) => parseInt(f.weight, 10) < 600) ? 1 : 0;
 }
 
+/**
+ * Sets the canvas letter spacing, where the browser has it. Every place that
+ * sets a font sets this too, since it is canvas state: a label drawn after a
+ * simulated-bold one would otherwise inherit its spacing.
+ */
+export function setLetterSpacing(ctx: CanvasRenderingContext2D, px: number): void {
+  if ('letterSpacing' in ctx) ctx.letterSpacing = `${px}px`;
+}
+
 /** The canvas font for a scheme face at a weight and a tall in pixels. */
 export function canvasFont(face: string, weight: number, tallPx: number): string {
   return `${cssWeight(weight)} ${fontCell(face, tallPx).em}px ${cssFamily(face)}`;

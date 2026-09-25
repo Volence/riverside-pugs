@@ -21,7 +21,7 @@ import { SCREEN_H, parseSize, parsePos, screenW } from './units';
 import { PROGRESS_LABEL, labelTextColour, labelColour, paintPanelBox, paintPanelLabel, paintLinearOver, drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, storedImage, artImage, colourOf, rgbaOf, tinted, previewOf, fontFace, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
 import { normaliseMaterial, HEALING_ICON, CROSSHAIR_OPEN, tipImage } from './art';
 import { barGeometry, clampBarKeys } from './progress';
-import { canvasFont, fontCell, importedFace, loadFace } from './fonts';
+import { canvasFont, fontCell, importedFace, loadFace, setLetterSpacing, synthBoldSpacing } from './fonts';
 import { drawArt } from '../crosshair/model';
 import { childDef, panelChildren } from './children';
 import { probe } from './probes';
@@ -259,6 +259,7 @@ export function childAt(
 function text(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, size: number, colour: string, weight = ''): void {
   ctx.fillStyle = colour;
   ctx.font = `${weight} ${size}px sans-serif`.trim();
+  setLetterSpacing(ctx, 0);
   ctx.fillText(s, x, y);
 }
 
@@ -409,6 +410,7 @@ function paintChat(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k:
   clipToRect(ctx, r, () => clipToRect(ctx, box, () => {
     ctx.save();
     ctx.font = canvasFont(face, f.weight, f.tallUnits * k);
+    setLetterSpacing(ctx, synthBoldSpacing(face, f.weight) * k / (1080 / 480));
     ctx.textBaseline = 'alphabetic';
     ctx.textAlign = 'left';
     CHAT_LINES.forEach(([who, said], i) => {
@@ -906,6 +908,7 @@ function paintKeyCap(ctx: CanvasRenderingContext2D, x: number, y: number, k: num
   ctx.fillStyle = 'rgba(40,40,40,1)';
   ctx.textAlign = 'center';
   ctx.font = `${Math.round(10 * k)}px sans-serif`;
+  setLetterSpacing(ctx, 0);
   ctx.fillText('E', at.x + s / 2, at.y + s * 0.72);
 }
 
@@ -1282,6 +1285,7 @@ function drawHover(ctx: CanvasRenderingContext2D, hover: { rects: Box[]; label: 
   const first = hover.rects[0];
   if (first && hover.label) {
     ctx.font = `${11 * d}px sans-serif`;
+    setLetterSpacing(ctx, 0);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     const w = ctx.measureText(hover.label).width + 8 * d;
