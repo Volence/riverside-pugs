@@ -179,7 +179,7 @@ describe('PatchEntryView', () => {
 
   it('a compared entry no longer live says too few matches were measured, not a countdown', () => {
     render(<PatchEntryView entry={{ ...comparedEntry, live: false }} />);
-    expect(screen.getByText('Too early to tell: too few matches were measured on these patches to tell.')).toBeTruthy();
+    expect(screen.getByText('Too early to tell: too few matches were measured on these patches.')).toBeTruthy();
     expect(screen.queryByText(/more matches needed/)).toBeNull();
   });
 

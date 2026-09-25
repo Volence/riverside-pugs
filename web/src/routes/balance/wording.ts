@@ -38,7 +38,7 @@ export function verdictSentence(r: PublicRow, live: boolean): string {
     }
     case 'noise': return 'No clear change: within normal variation.';
     case 'too_early':
-      if (!live) return 'Too early to tell: too few matches were measured on these patches to tell.';
+      if (!live) return 'Too early to tell: too few matches were measured on these patches.';
       if (r.nA < MIN_MATCHES) return 'Too early to tell: the previous patch has too few measured matches to compare against.';
       if (r.moreMatches === null) return 'Too early to tell: more matches needed.';
       if (r.moreMatches >= 500) return 'Too early to tell: about 500+ more matches needed.';

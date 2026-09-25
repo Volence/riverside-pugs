@@ -96,7 +96,7 @@ export const defs: MetricDef[] = [
   {
     id: 'tank.lifetime_killed_s', group: 'tank', version: 1,
     description: 'Seconds a tank lived, counting only tanks the survivors killed (not cut short by the round ending).',
-    public: { label: 'How long a killed tank lasted (s)' },
+    public: { label: 'How long a killed tank lasted' },
     compute: (c) => {
       const iv = c.timeline?.tank ?? [];
       const kills = survivorKills(c).filter((e) => e.tMs >= 0);
