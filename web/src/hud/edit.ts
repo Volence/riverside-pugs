@@ -16,7 +16,8 @@ import {
 } from './design';
 import { screenW, SCREEN_H, type Aspect } from './units';
 import { elementById } from './elements';
-import { elementRect, elementFitShift, drawnAt, pieceMovableIn, teamLayout, teamCardRects, isFreeTeam, panelChild, panelLink, buildTrees, panelBgZpos, type CardChild } from './build';
+import { elementRect, elementFitShift, drawnAt, pieceMovableIn, teamLayout, teamCardRects, isFreeTeam, panelChild, panelLink, buildTrees, panelBgZpos, yourItemsBlocked, yourItemsInput, yourItemsHome, yourItemsLayout, type CardChild } from './build';
+import { YOUR_ITEMS, placeRow, itemRowWidth, type ItemFont, type ItemAlign } from './youritems';
 import { childDef, childPath, panelChildren, panelOfFile, linkedValue, unlinkedValue, type ChildDef } from './children';
 import { kvFind, kvGet } from './kv';
 import { probe } from './probes';
@@ -898,6 +899,7 @@ export function raiseChild(design: HudDesign, names: string[], to: 'front' | 'ba
 export function placeElement(design: HudDesign, id: string, x: number, y: number): HudDesign {
   const el = elementById(id);
   if (!el || !el.move || (el.moveGate && !probe(el.moveGate)) || (id === 'teamColumn' && isFreeTeam(design))) return design;
+  if (id === YOUR_ITEMS) return placeYourItems(design, x, y);
   // The versus panel is kept whole on screen (validateDesign's clamp, tabVersusRange), in whole units.
   if (id === 'tabVersus') {
     const r = tabVersusRange(design.aspect, baseOf(design));
@@ -1149,6 +1151,7 @@ export function setSelectionVisible(design: HudDesign, sel: Selection, visible: 
   if (sel.kind === 'children') return setChildrenVisible(design, sel.names, visible, panelOf(sel));
   if (sel.kind !== 'elements') return design;
   return sel.ids.reduce((d, id) => {
+    if (id === YOUR_ITEMS) return setYourItems(d, visible);
     const el = elementById(id);
     if (!el?.props.includes('visible') || (el.hideGate && !probe(el.hideGate))) return d;
     return { ...d, elements: { ...d.elements, [id]: { ...(d.elements[id] ?? {}), visible } } };
@@ -1272,4 +1275,64 @@ export function setFit(design: HudDesign, id: string, on: boolean): HudDesign {
   else if (Object.keys(rest).length) elements[id] = rest;
   else delete elements[id];
   return { ...design, elements };
+}
+
+// --- Your items (youritems.ts) ---
+
+/**
+ * Your items at a drawn (x, y), held at your health bar's edge and the
+ * screen's (youritems.ts placeRow), so a drag past the bar stops at it live,
+ * as the arrows and a typed X do (spec section 2). The stored numbers are the
+ * row's top-left in whole units.
+ */
+function placeYourItems(design: HudDesign, x: number, y: number): HudDesign {
+  const at = placeRow(yourItemsInput(design), { x, y });
+  return { ...design, elements: { ...design.elements, [YOUR_ITEMS]: { ...design.elements[YOUR_ITEMS], x: at.x, y: at.y } } };
+}
+
+/**
+ * Your items on or off (spec section 1), one design in and one out, so a
+ * single Undo restores everything it changed. On shows the row where it was
+ * placed, or first at its home (build.ts yourItemsHome, held at the bar's
+ * edge), and switches the stock item slots off: IconSize 0 and the item
+ * pictures cleared. Probe p3 (/home/volence/l4d/hud/probe-your-items/RESULTS.md)
+ * showed both are needed: IconSize 0 alone still drew the pickup fly-in's
+ * pile of slot art near the weapons for about a second after a pickup. Off
+ * only hides the row; the item slot settings stay as they are, since the
+ * player may want them, and the Weapons panel brings them back. On a base
+ * that blocks the element (an import that places its own items, or one the
+ * editor cannot read) turning on returns the design unchanged, ===. The
+ * Layers eye, Delete and the menu's Hide come here (setSelectionVisible), so
+ * showing the row from Layers is this same one-step edit.
+ */
+export function setYourItems(d: HudDesign, on: boolean): HudDesign {
+  const o = d.elements[YOUR_ITEMS] ?? {};
+  if (!on) return { ...d, elements: { ...d.elements, [YOUR_ITEMS]: { ...o, visible: false } } };
+  if (yourItemsBlocked(d)) return d;
+  const at = o.x !== undefined && o.y !== undefined ? { x: o.x, y: o.y } : placeRow(yourItemsInput(d), yourItemsHome(d));
+  return patchWeapons({ ...d, elements: { ...d.elements, [YOUR_ITEMS]: { ...o, visible: true, x: at.x, y: at.y } } }, { itemSize: 0, itemIcons: false });
+}
+
+/**
+ * Your items' font or alignment, keeping the row's steady end where it is
+ * drawn: Right its right end, Centre its centre, so a bigger font grows the
+ * row away from that end, the way the game grows it as items come and go.
+ * Switching the alignment keeps the row where it is.
+ */
+export function setItemsLook(d: HudDesign, p: { itemFont?: ItemFont; itemAlign?: ItemAlign }): HudDesign {
+  const before = yourItemsLayout(d).row;
+  const o = { ...d.elements[YOUR_ITEMS], ...p };
+  const next: HudDesign = { ...d, elements: { ...d.elements, [YOUR_ITEMS]: o } };
+  const w = itemRowWidth(yourItemsInput(next).tall);
+  const x = (o.itemAlign ?? 'right') === 'center' ? before.x + before.w / 2 - w / 2 : before.x + before.w - w;
+  return placeYourItems(next, x, before.y);
+}
+
+/**
+ * Whether a drag's asked-for x for Your items is not where it lands: the
+ * clamp held it at a limit. The page then draws no snap guide on that x,
+ * which would stand where the row is not.
+ */
+export function yourItemsHeld(design: HudDesign, askedX: number): boolean {
+  return placeRow(yourItemsInput(design), { x: askedX, y: 0 }).x !== Math.round(askedX);
 }

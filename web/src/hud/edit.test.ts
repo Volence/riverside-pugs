@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   withWeaponUpload, resetWeaponUpload, patchWeapons,
   nudge, nudgeCards, freeInPlace, cardBoxes, placeCards, alignCards, hasOverrides, elementsTouched, resetElement, withTeamDir, placeCard, patchChild,
@@ -7,7 +7,7 @@ import {
   placeElement, moveElements, moveCards, alignElements, scaleElement, setScale, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
   ammoOnly, withImport, withPreset,
   splatterKind, patchSplatter, withSplatterImage, resetSplatter, panelClamp, raiseChild, resetChildKey, setFit, rowGapSlider, setRowGap,
-  hiddenWith,
+  hiddenWith, setYourItems, setItemsLook, yourItemsHeld,
 } from './edit';
 import { buildHud, buildTrees } from './build';
 import { weaponSlots } from './weapons';
@@ -20,7 +20,11 @@ import { teamCardRects, elementRect, cardChild, isFreeTeam, panelChild, elementF
 import { elementById } from './elements';
 import { childDef } from './children';
 import { _setProbe } from './probes';
-import { elementFrame } from './selection';
+import { elementFrame, type Selection } from './selection';
+import { yourItemsLimits } from './build';
+import { YOUR_ITEMS, EDGE_MARGIN, itemRowWidth } from './youritems';
+import { baseFile, registerImport, unregisterImport } from './base';
+import { sampleHud } from './importFixtures';
 
 /**
  * DEFAULT_DESIGN as it was before your own health fitted by default (slice
@@ -1247,5 +1251,122 @@ describe('the Tab screen edits', () => {
     expect(nudge(DEFAULT_DESIGN, 'tabVersus', 1, 0).elements.tabVersus).toEqual({ x: 16, y: 25 });
     _setProbe('TS4', false);
     try { expect(nudge(DEFAULT_DESIGN, 'tabVersus', 1, 0)).toBe(DEFAULT_DESIGN); } finally { _setProbe('TS4', null); }
+  });
+});
+
+describe('Your items', () => {
+  const D: HudDesign = structuredClone(DEFAULT_DESIGN);
+  const on = () => setYourItems(D, true);
+  const sel: Selection = { kind: 'elements', ids: [YOUR_ITEMS] };
+
+  it('turns on in one design: shown at its home, the item slots off', () => {
+    const d = on();
+    expect(d.elements.yourItems).toEqual({ visible: true, x: 797, y: 233 });
+    expect(d.weapons).toEqual({ itemSize: 0, itemIcons: false });
+  });
+  it('keeps the other weapon edits when it turns on', () => {
+    const d = setYourItems({ ...D, weapons: { indent: 12, reserveColor: '1 2 3 255' } }, true);
+    expect(d.weapons).toEqual({ indent: 12, reserveColor: '1 2 3 255', itemSize: 0, itemIcons: false });
+  });
+  it('turns on where it was placed before', () => {
+    const d = setYourItems({ ...D, elements: { ...D.elements, yourItems: { visible: false, x: 780, y: 100 } } }, true);
+    expect(d.elements.yourItems).toEqual({ visible: true, x: 780, y: 100 });
+  });
+  it('turns off leaving the item slot settings as they are', () => {
+    const d = setYourItems(on(), false);
+    expect(d.elements.yourItems).toEqual({ visible: false, x: 797, y: 233 });
+    expect(d.weapons).toEqual({ itemSize: 0, itemIcons: false });
+  });
+  it('is what the Layers eye, Delete and the menu\'s Hide do', () => {
+    expect(setSelectionVisible(D, sel, true)).toEqual(on());
+    expect(hideSelection(on(), sel).elements.yourItems?.visible).toBe(false);
+  });
+  it('shows with the Layers eye in one edit, and hides with it leaving the item slots', () => {
+    // The eye is setSelectionVisible on the one element: on is the whole
+    // turn-on edit (one design, so one Undo), off only hides.
+    const shown = setSelectionVisible(D, sel, true);
+    expect(shown.elements.yourItems).toEqual({ visible: true, x: 797, y: 233 });
+    expect(shown.weapons).toEqual({ itemSize: 0, itemIcons: false });
+    const hidden = setSelectionVisible(shown, sel, false);
+    expect(hidden.elements.yourItems).toEqual({ visible: false, x: 797, y: 233 });
+    expect(hidden.weapons).toEqual({ itemSize: 0, itemIcons: false });
+    // Shown with another element, the others still just show.
+    const both = setSelectionVisible({ ...D, elements: { ...D.elements, chat: { visible: false } } }, { kind: 'elements', ids: ['chat', YOUR_ITEMS] }, true);
+    expect(both.elements.chat).toEqual({ visible: true });
+    expect(both.weapons).toEqual({ itemSize: 0, itemIcons: false });
+  });
+
+  describe('on an import that places its own items', () => {
+    const ID = 'd'.repeat(64);
+    afterEach(() => { unregisterImport(ID); });
+    it('does nothing', () => {
+      const own = baseFile('stock', 'resource/ui/hud/localplayerpanel.res')
+        .replace(/\}\s*$/, '\t"Items"\r\n\t{\r\n\t\t"ControlName"\t"Label"\r\n\t\t"fieldName"\t"Items"\r\n\t\t"xpos"\t"26"\r\n\t}\r\n}\r\n');
+      registerImport(ID, sampleHud({ 'resource/ui/hud/localplayerpanel.res': own }));
+      const d = validateDesign({ v: 1, preset: 'imported', imported: { id: ID, name: 'x' } });
+      expect(setYourItems(d, true)).toBe(d);
+    });
+  });
+
+  it('stops at your health bar\'s edge: a drag, an arrow and a typed X', () => {
+    const d = on();
+    const start = elementRect(d, YOUR_ITEMS, d.aspect);
+    const dragged = moveElements(d, [YOUR_ITEMS], { [YOUR_ITEMS]: start }, -300, 10);
+    expect(dragged.elements.yourItems).toMatchObject({ x: 754, y: 243 });
+    expect(elementRect(dragged, YOUR_ITEMS, d.aspect).x).toBeGreaterThanOrEqual(754);
+    let n = placeElement(d, YOUR_ITEMS, 754, 233);
+    for (let i = 0; i < 5; i++) n = nudge(n, YOUR_ITEMS, -1, 0);
+    expect(n.elements.yourItems!.x).toBe(754);
+    expect(placeElement(d, YOUR_ITEMS, 100, 233).elements.yourItems!.x).toBe(754);
+  });
+  it('moves one unit per arrow press away from the limit', () => {
+    let n = placeElement(on(), YOUR_ITEMS, 770, 233);
+    n = nudge(n, YOUR_ITEMS, 1, 0);
+    expect(n.elements.yourItems!.x).toBe(771);
+    n = nudge(n, YOUR_ITEMS, 0, -1);
+    expect(n.elements.yourItems!.y).toBe(232);
+  });
+  it('stops at the screen edge, and Centre at its right limit', () => {
+    const far = placeElement(on(), YOUR_ITEMS, 900, 233);
+    const r = elementRect(far, YOUR_ITEMS, far.aspect);
+    expect(r.x + r.w).toBeLessThanOrEqual(853 - EDGE_MARGIN + 1e-9);
+    const centred = placeElement(setItemsLook(on(), { itemAlign: 'center' }), YOUR_ITEMS, 900, 233);
+    const c = elementRect(centred, YOUR_ITEMS, centred.aspect);
+    const lines = yourItemsLimits(centred);
+    expect(lines).toHaveLength(2);
+    expect(c.x + c.w).toBeCloseTo(lines[1].x, 9);
+  });
+  it('says when the clamp held the row away from where a drag asked for it', () => {
+    const d = on();
+    expect(yourItemsHeld(d, 700)).toBe(true);
+    expect(yourItemsHeld(d, 780)).toBe(false);
+    expect(yourItemsHeld(d, 900)).toBe(true);
+  });
+  it('keeps the right end when the font changes, and the centre for Centre', () => {
+    // 770: far enough from Centre's widest centre (778 at medium on stock) that neither end is clamped.
+    const d = placeElement(on(), YOUR_ITEMS, 770, 233);
+    const r0 = elementRect(d, YOUR_ITEMS, d.aspect);
+    const big = setItemsLook(d, { itemFont: 'L4D_Icons_large' });
+    const r1 = elementRect(big, YOUR_ITEMS, big.aspect);
+    expect(big.elements.yourItems!.itemFont).toBe('L4D_Icons_large');
+    expect(r1.w).toBeCloseTo(itemRowWidth(24), 9);
+    expect(Math.abs(r1.x + r1.w - (r0.x + r0.w))).toBeLessThanOrEqual(1);
+    const c = setItemsLook(d, { itemAlign: 'center' });
+    const rc = elementRect(c, YOUR_ITEMS, c.aspect);
+    expect(Math.abs(rc.x - r0.x)).toBeLessThanOrEqual(1);
+    const cBig = setItemsLook(c, { itemFont: 'L4D_Icons_large' });
+    const rcb = elementRect(cBig, YOUR_ITEMS, cBig.aspect);
+    expect(Math.abs(rcb.x + rcb.w / 2 - (rc.x + rc.w / 2))).toBeLessThanOrEqual(1);
+  });
+  it('holds a large row at the screen edge on screen', () => {
+    const d = setItemsLook(placeElement(on(), YOUR_ITEMS, 900, 233), { itemFont: 'L4D_Icons_large' });
+    const r = elementRect(d, YOUR_ITEMS, d.aspect);
+    expect(r.x + r.w).toBeLessThanOrEqual(853 - EDGE_MARGIN + 1e-9);
+    expect(r.x).toBeGreaterThanOrEqual(754);
+  });
+  it('goes off with Reset, leaving the item slot settings', () => {
+    const d = resetElement(on(), YOUR_ITEMS);
+    expect(d.elements.yourItems).toBeUndefined();
+    expect(d.weapons).toEqual({ itemSize: 0, itemIcons: false });
   });
 });
