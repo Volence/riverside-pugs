@@ -218,10 +218,10 @@
     {
       "id": "l4d_antibaiter_delay",
       "group": "common",
-      "label": "Anti-bait: stall time before a horde",
+      "label": "Anti-bait: infected up for",
       "source": "cvar",
       "unit": "s",
-      "note": "How long survivors can stop moving forward before the anti-bait countdown starts."
+      "note": "The anti-bait countdown can only start once every infected player has been up (spawned or ghost) this long."
     },
     {
       "id": "l4d_antibaiter_horde_timer",
