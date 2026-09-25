@@ -35,9 +35,9 @@ describe('public wording', () => {
       .toBe('Too early to tell: the previous patch has too few measured matches to compare against.');
     // A patch no longer being played cannot gain matches either, checked first of all.
     expect(verdictSentence(row({ verdict: 'too_early', moreMatches: 12, nA: 9 }), false))
-      .toBe('Too early to tell: too few matches were measured on these patches to tell.');
+      .toBe('Too early to tell: too few matches were measured on these patches.');
     expect(verdictSentence(row({ verdict: 'too_early', moreMatches: 12 }), false))
-      .toBe('Too early to tell: too few matches were measured on these patches to tell.');
+      .toBe('Too early to tell: too few matches were measured on these patches.');
     expect(verdictSentence(row({ verdict: 'no_data', b: null, nB: 0 }), true)).toBe('Not measured for this patch.');
     expect(verdictSentence(row({ verdict: 'no_data', a: null, nA: 0 }), true)).toBe('Not measured for the previous patch.');
     expect(verdictSentence(row({ verdict: 'no_data', a: null, b: null, noSharedMaps: true }), true)).toBe('No maps in common with the previous patch, so no comparison.');

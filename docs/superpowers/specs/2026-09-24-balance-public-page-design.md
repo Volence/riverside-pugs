@@ -60,9 +60,9 @@ in the wording. No "noise" presented as a result.
 |---|---|
 | round.saferoom | Rounds where survivors reached the saferoom |
 | round.score | Survivor distance score |
-| round.length_min | Round length (minutes) |
+| round.length_min | Round length |
 | tank.killed_rate | Tanks killed by survivors |
-| tank.lifetime_killed_s | How long a killed tank lasted (s) |
+| tank.lifetime_killed_s | How long a killed tank lasted |
 | tank.damage_per_tank | Damage dealt per tank |
 | tank.incaps_caused | Survivor incaps per tank |
 | witch.crown_rate | Witches crowned |

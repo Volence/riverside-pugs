@@ -29,7 +29,7 @@ export const defs: MetricDef[] = [
   {
     id: 'round.length_min', group: 'outcomes', version: 1,
     description: 'Playing minutes in the round, pauses excluded.',
-    public: { label: 'Round length (minutes)' },
+    public: { label: 'Round length' },
     compute: (c) => (c.timeline ? single(c.timeline.minutes('all')) : null),
   },
   {
