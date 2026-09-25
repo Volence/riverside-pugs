@@ -1,5 +1,5 @@
 import type { DB } from './db.js';
-import { diffInventories, refingerprintPatches, withoutIgnored } from './balancePatches.js';
+import { diffInventories, refingerprintPatches, watchedOneSided, withoutIgnored } from './balancePatches.js';
 import { chainOf, foldInto, resolvePatch, unfoldPatch } from './balanceFold.js';
 import { addIgnored, effectiveIgnored, PLUGIN_FILE_RE } from './balanceIgnore.js';
 import { activeRollout } from './balanceRollouts.js';
@@ -12,17 +12,26 @@ import { patchNumber } from './balanceControl.js';
  */
 
 type Inventory = Record<string, string>;
-export type Lists = { versionless: string[]; ignored: string[] };
+export type Lists = {
+  versionless: string[]; ignored: string[];
+  /** Words for weapon keys, `w:<weapon>.<key>` -> label (see weaponLabels). */
+  labels?: Record<string, string>;
+};
 export type TriageResult = { ok: true; target?: number } | { ok: false; status: 400 | 404 | 409; error: string };
 
 const nowSql = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 const base = (path: string) => path.split('/').pop() ?? path;
 
 /** a to b in plain words, one line per difference. A versionless plugin whose
- *  build alone changed is not a difference (the fingerprint ignores it too). */
-export function describeChanges(a: Inventory, b: Inventory, versionless: string[]): { lines: string[]; plugins: string[]; onlyPlugins: boolean } {
+ *  build alone changed is not a difference (the fingerprint ignores it too).
+ *  Neither is a watched value present on one side only: the watch list grew
+ *  or shrank, not the game (the rule watchListOnly uses), so those are one
+ *  summary line each way and never stop a plugin-only change from reading as
+ *  one. `labels` words weapon keys (`w:...`) by their catalogue label. */
+export function describeChanges(a: Inventory, b: Inventory, versionless: string[], labels: Record<string, string> = {}): { lines: string[]; plugins: string[]; onlyPlugins: boolean } {
   const skip = new Set(versionless.map((f) => `p:${f}`));
   const d = diffInventories(a, b);
+  const watched = watchedOneSided(a, b);
   const lines: string[] = [];
   const plugins: string[] = [];
   let other = 0;
@@ -34,14 +43,26 @@ export function describeChanges(a: Inventory, b: Inventory, versionless: string[
       return;
     }
     other++;
-    if (kind === 'c:') lines.push(what === 'changed' ? `${name} ${from} -> ${to}` : `${name} ${what === 'added' ? `now reported (${to})` : 'no longer reported'}`);
+    if (kind === 'c:') {
+      // A vanished or appeared cvar is worded once, on its c: key; the x: key
+      // on the other side is skipped below.
+      const gone = what === 'removed' && `x:${name}` in b, came = what === 'added' && `x:${name}` in a;
+      if (gone) lines.push(`${name} no longer exists (was ${a[key]})`);
+      else if (came) lines.push(`${name} now exists (${to})`);
+      else lines.push(what === 'changed' ? `${name} ${from} -> ${to}` : `${name} ${what === 'added' ? `now reported (${to})` : 'no longer reported'}`);
+    } else if (kind === 'x:' && what !== 'changed' && (`c:${name}` in a || `c:${name}` in b)) other--;
+    else if (kind === 'w:') lines.push(what === 'changed' ? `${labels[key] ?? name} ${from} -> ${to}` : `${labels[key] ?? name} ${what}`);
     else if (kind === 'f:') lines.push(`file ${what}: ${base(name)}`);
     else if (kind === 'd:') lines.push(`files changed in: ${base(name)}`);
     else lines.push(what === 'changed' ? `${key}: ${from} -> ${to}` : `${key} ${what}`);
   };
-  for (const k of d.added) word(k, 'added', undefined, b[k]);
-  for (const k of d.removed) word(k, 'removed');
+  for (const k of d.added) if (!watched.has(k)) word(k, 'added', undefined, b[k]);
+  for (const k of d.removed) if (!watched.has(k)) word(k, 'removed');
   for (const c of d.changed) if (!skip.has(c.key)) word(c.key, 'changed', c.from, c.to);
+  const values = (n: number) => `${n} value${n === 1 ? '' : 's'}`;
+  const grew = d.added.filter((k) => watched.has(k)).length, shrank = d.removed.filter((k) => watched.has(k)).length;
+  if (grew > 0) lines.push(`${values(grew)} newly watched`);
+  if (shrank > 0) lines.push(`${values(shrank)} no longer watched`);
   // Plugins first, then everything else, each in key order.
   const order = (l: string) => (l.startsWith('plugin ') ? 0 : 1);
   lines.sort((x, y) => order(x) - order(y));
@@ -83,7 +104,7 @@ export function triageInfo(db: DB, id: number, lists: Lists) {
   const b = baseId === null ? undefined : row(db, baseId);
   const mine = inputsOf(db, id, lists.ignored);
   const theirs = baseId === null ? null : inputsOf(db, baseId, lists.ignored);
-  const d = mine && theirs ? describeChanges(theirs, mine, lists.versionless) : { lines: [], plugins: [], onlyPlugins: false };
+  const d = mine && theirs ? describeChanges(theirs, mine, lists.versionless, lists.labels) : { lines: [], plugins: [], onlyPlugins: false };
   return {
     base: b ? { id: b.id, number: patchNumber(db, b.id), name: b.name } : null,
     changes: d.lines, plugins: d.plugins, onlyPluginsChanged: d.onlyPlugins,

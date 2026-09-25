@@ -44,6 +44,15 @@ describe('patch triage routes', () => {
     expect(body.patches[1]).toMatchObject({ id: 2, triage: 'pending', changes: ['plugin added: x_noise'], onlyPluginsChanged: true, triageBase: { id: 1 } });
   });
 
+  it('words a weapon key by its catalogue label', async () => {
+    recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: { ...BASE, 'w:weapon_smg.Damage': '20' }, versionless: KNOBS.versionless, now: '2026-09-22 00:00:00' });
+    db.prepare("UPDATE balance_patches SET triage = 'balance', name = 'W' WHERE id = 3").run();
+    recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 2, inventory: { ...BASE, 'w:weapon_smg.Damage': '24' }, versionless: KNOBS.versionless, now: '2026-09-23 00:00:00' });
+    const { a, cookies } = await app();
+    const body = (await a.inject({ method: 'GET', url: '/api/admin/balance/patches', cookies })).json() as { patches: { id: number; changes: string[] }[] };
+    expect(body.patches.find((p) => p.id === 4)!.changes).toEqual(['Uzi damage 20 -> 24']);
+  });
+
   it('refuses a non-admin', async () => {
     const { a, cookies } = await app(false);
     const res = await a.inject({ method: 'POST', url: '/api/admin/balance/patches/2/triage', cookies, payload: { decision: 'fold', into: 1 } });

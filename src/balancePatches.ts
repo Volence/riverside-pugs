@@ -41,6 +41,19 @@ export function diffInventories(a: Inventory, b: Inventory) {
   return { added, removed, changed };
 }
 
+/** The keys of a to b that are present on one side only and are watched
+ *  values (cvar, missing-cvar marker, weapon key, file or directory): the
+ *  watch list changed, not the game. A cvar that vanished (c:x on one side,
+ *  x:x on the other) or appeared is left out: same name on both sides, so a
+ *  real change in the game. */
+export function watchedOneSided(a: Inventory, b: Inventory): Set<string> {
+  const d = diffInventories(a, b);
+  const oneSided = [...d.added, ...d.removed].filter((k) => /^[cxwfd]:/.test(k));
+  const cvarNames = (keys: string[]) => new Set(keys.filter((k) => /^[cx]:/.test(k)).map((k) => k.slice(2)));
+  const added = cvarNames(d.added), removed = cvarNames(d.removed);
+  return new Set(oneSided.filter((k) => !/^[cx]:/.test(k) || !(added.has(k.slice(2)) && removed.has(k.slice(2)))));
+}
+
 /** Whether a to b only adds or removes watched keys (the watch list changed,
  *  not the game): no key both sides have changed value, apart from a
  *  versionless plugin's build, and every added or removed key is a cvar,

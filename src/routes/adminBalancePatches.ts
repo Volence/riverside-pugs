@@ -3,6 +3,7 @@ import type { DB } from '../db.js';
 import { makeRequireAdmin } from './guards.js';
 import { logAdmin } from '../admin/audit.js';
 import type { BalanceKnobs } from '../balanceKnobs.js';
+import { loadCatalogue, weaponLabels } from '../balanceCatalogue.js';
 import { editPatch, listPatches, patchDetail, refingerprintPatches, serverDrift } from '../balancePatches.js';
 import { effectiveIgnored, listIgnored, PLUGIN_FILE_RE, removeIgnored } from '../balanceIgnore.js';
 import { triageBalance, triageFold, triageIgnore, triageUnfold, type Lists } from '../balanceTriage.js';
@@ -24,7 +25,11 @@ const idOf = (req: { params: unknown }): number | null => {
 export async function adminBalancePatchRoutes(app: FastifyInstance, opts: PatchRouteOpts): Promise<void> {
   const { db, knobs } = opts;
   const requireAdmin = makeRequireAdmin(db);
-  const lists = (): Lists => ({ versionless: knobs?.versionless ?? [], ignored: effectiveIgnored(db, knobs?.ignored) });
+  // Weapon keys worded by their catalogue label; a broken catalogue only
+  // leaves them raw.
+  let labels: Record<string, string>;
+  try { labels = weaponLabels(knobs, loadCatalogue()); } catch { labels = weaponLabels(knobs, null); }
+  const lists = (): Lists => ({ versionless: knobs?.versionless ?? [], ignored: effectiveIgnored(db, knobs?.ignored), labels });
   const unavailable = { error: 'balance/knobs.json failed to load; ignoring plugins is unavailable until it is fixed' };
 
   app.get('/api/admin/balance/patches', async (req, reply) => {
