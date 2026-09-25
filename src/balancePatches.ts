@@ -401,13 +401,19 @@ function alertText(db: DB, serverId: number, patchNumber: number, newPatch: bool
   const name = serverName(db, serverId);
   const head = newPatch
     ? `Balance config on ${name} is a new patch (#${patchNumber}, needs triage).`
-    : `Balance config on ${name} changed (still patch #${patchNumber}${pending ? ', needs triage' : ''}).`;
-  const vsOwn = prev ? ` Changed: ${formatDiff(diffInventories(JSON.parse(prev.inventory_json) as Inventory, inv))}.` : ' First sighting.';
-  const others = db.prepare('SELECT server_id, inventory_json FROM balance_server_state WHERE server_id != ?')
-    .all(serverId) as { server_id: number; inventory_json: string }[];
+    : prev
+      ? `Balance config on ${name} changed (still patch #${patchNumber}${pending ? ', needs triage' : ''}).`
+      : `Balance config on ${name} seen for the first time (patch #${patchNumber}${pending ? ', needs triage' : ''}).`;
+  const vsOwn = prev ? ` Changed: ${formatDiff(diffInventories(JSON.parse(prev.inventory_json) as Inventory, inv))}.` : '';
+  // A box that has not played since may simply not have had the change yet,
+  // so each drift clause says when that box was last seen.
+  const others = db.prepare(`SELECT st.server_id, st.inventory_json,
+      (SELECT MAX(ps.last_seen_at) FROM balance_patch_servers ps WHERE ps.server_id = st.server_id) AS last_seen
+    FROM balance_server_state st WHERE st.server_id != ?`)
+    .all(serverId) as { server_id: number; inventory_json: string; last_seen: string | null }[];
   const drift = others
-    .map((o) => ({ who: serverName(db, o.server_id), d: diffInventories(JSON.parse(o.inventory_json) as Inventory, inv) }))
+    .map((o) => ({ who: serverName(db, o.server_id), seen: o.last_seen, d: diffInventories(JSON.parse(o.inventory_json) as Inventory, inv) }))
     .filter((o) => o.d.added.length + o.d.removed.length + o.d.changed.length > 0)
-    .map((o) => ` Now differs from ${o.who}: ${formatDiff(o.d, 5)}.`);
+    .map((o) => ` Now differs from ${o.who}${o.seen ? ` (last seen ${o.seen.slice(0, 16)} UTC)` : ''}: ${formatDiff(o.d, 5)}.`);
   return head + vsOwn + drift.join('');
 }

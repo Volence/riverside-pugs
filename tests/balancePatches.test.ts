@@ -73,6 +73,17 @@ describe('recordBalanceSighting', () => {
     expect(problems[0]).toMatch(/differs from dallas/);
   });
 
+  it('words a server\'s first sighting of a known patch as such, and dates each drift clause', () => {
+    const v = ['pug-match.smx'];
+    recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: v, now: '2026-09-24 04:20:00' });
+    problems.length = 0;
+    recordBalanceSighting(db, { matchId: 1, serverId: 2, half: 1, inventory: { ...INV, 'p:pug-match.smx': '9.bbbb' }, versionless: v, now: '2026-09-25 01:00:00' });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/chicago seen for the first time \(patch #1/);
+    expect(problems[0]).not.toMatch(/changed \(still patch/);
+    expect(problems[0]).toMatch(/differs from dallas \(last seen 2026-09-24 04:20 UTC\)/);
+  });
+
   it('alerts with the time-ordered patch number, not the row id', () => {
     // First sighting gets row id 1 but a LATER first_seen_at than the one below.
     recordBalanceSighting(db, {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../../src/db.js';
-import { drainPending, pendingRounds, runMetricsPass } from '../../src/metrics/job.js';
+import { drainPending, pendingRounds, reaperRoundLimit, REAPER_ROUNDS_PER_TICK, REAPER_ROUNDS_PER_TICK_LIVE, runMetricsPass } from '../../src/metrics/job.js';
 import { ENGINE } from '../../src/metrics/registry.js';
 import type { RoundKey } from '../../src/metrics/types.js';
 import { frames, replayOf, standing4 } from './fixtures.js';
@@ -46,6 +46,14 @@ describe('metrics job', () => {
     runMetricsPass(db, '', { limit: 10, now: NOW, load: () => null });
     db.prepare("INSERT INTO match_replays (match_id, ordinal, half, filename, bytes, frames, sample_hz) VALUES (1, 0, 2, 'f', 1, 1, 10)").run();
     expect(pendingRounds(db, { engine: ENGINE, replayWaitMin: 30, limit: 10, now: NOW }).map((k) => k.half)).toEqual([2]);
+  });
+
+  it('keeps computing while a match is live, one round a minute', () => {
+    const db = setup();
+    expect(reaperRoundLimit(db)).toBe(REAPER_ROUNDS_PER_TICK_LIVE);
+    expect(REAPER_ROUNDS_PER_TICK_LIVE).toBeGreaterThan(0);
+    db.prepare("UPDATE matches SET state = 'completed' WHERE id = 3").run();
+    expect(reaperRoundLimit(db)).toBe(REAPER_ROUNDS_PER_TICK);
   });
 
   it('respects the limit', () => {
