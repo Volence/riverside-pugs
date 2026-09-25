@@ -65,6 +65,11 @@ describe('publishPatch', () => {
     db.prepare("UPDATE balance_patches SET published_at = '2026-09-22 00:00:00' WHERE id = 3").run();
     expect(publishPatch(db, 3, false)).toEqual({ ok: true });
   });
+  it('unpublishing a folded patch also drops the publish time kept for an unfold', () => {
+    db.prepare("UPDATE balance_patches SET published_before_fold = '2026-09-22 00:00:00' WHERE id = 1").run();
+    expect(publishPatch(db, 1, false)).toEqual({ ok: true });
+    expect(db.prepare('SELECT published_before_fold AS p FROM balance_patches WHERE id = 1').get()).toEqual({ p: null });
+  });
   it('publishes, keeps the first publish time on a repeat, and unpublishes', () => {
     addMatches(db, 2, 1, '2026-09-11');
     expect(publishPatch(db, 2, true, '2026-09-24 01:00:00')).toEqual({ ok: true });

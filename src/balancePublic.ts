@@ -67,7 +67,9 @@ export function publishPatch(db: DB, id: number, published: boolean, now: string
     { name: string | null; notes: string; published_at: string | null; triage: string } | undefined;
   if (!row) return { ok: false, status: 404, error: 'no such patch' };
   if (!published) {
-    db.prepare('UPDATE balance_patches SET published_at = NULL WHERE id = ?').run(id);
+    // A folded patch keeps its publish time aside for an unfold; unpublishing
+    // it now means an unfold must not publish it again.
+    db.prepare('UPDATE balance_patches SET published_at = NULL, published_before_fold = NULL WHERE id = ?').run(id);
     return { ok: true };
   }
   // Only a balance patch is public. A folded patch's rounds count for the
