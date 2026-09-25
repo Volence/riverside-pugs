@@ -113,7 +113,8 @@ export function suggestBalance(ops: Op[][], changedCvars: string[], knobs: {
   for (const o of ops.flat()) {
     const rel = o.path.replace(/^left4dead\//, '');
     if (knobs.files.some((f) => f.path === rel) || knobs.dirs.some((d) => rel.startsWith(`${d.path}/`))) return 'possibly_balance';
-    if (o.path.startsWith(PLUGIN_DIR) && o.path.endsWith('.smx') && !quiet.has(o.path.slice(PLUGIN_DIR.length))) return 'possibly_balance';
+    // By file name, as the lists match a plugin in plugins/optional/ too.
+    if (o.path.startsWith(PLUGIN_DIR) && o.path.endsWith('.smx') && !quiet.has(o.path.split('/').pop()!)) return 'possibly_balance';
   }
   return 'not_balance';
 }

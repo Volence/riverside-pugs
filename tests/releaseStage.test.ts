@@ -88,6 +88,8 @@ describe('wording', () => {
     const cfg: Op = { ...tv, path: 'left4dead/cfg/pug_match.cfg' };
     expect(suggestBalance([[tv, pm]], [], k)).toBe('not_balance');
     expect(suggestBalance([[sky]], [], k)).toBe('possibly_balance');
+    const opt: Op = { ...tv, path: 'left4dead/addons/sourcemod/plugins/optional/l4d_tvwatch.smx' };
+    expect(suggestBalance([[opt]], [], k)).toBe('not_balance');
     expect(suggestBalance([[cfg]], [], k)).toBe('possibly_balance');
     expect(suggestBalance([[tv]], ['z_tank_health'], k)).toBe('possibly_balance');
   });

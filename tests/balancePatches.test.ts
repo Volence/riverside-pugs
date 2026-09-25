@@ -23,6 +23,17 @@ describe('fingerprintOf', () => {
   });
 });
 
+describe('plugins loaded from a subfolder', () => {
+  it('match the versionless and ignored lists by file name', () => {
+    const inv = { 'c:z_tank_health': '8000', 'p:optional/l4d_tankhud.smx': '1.aaaa' };
+    expect(fingerprintOf({ ...inv, 'p:optional/l4d_tankhud.smx': '2.bbbb' }, ['l4d_tankhud.smx'])).toBe(fingerprintOf(inv, ['l4d_tankhud.smx']));
+    expect(withoutIgnored(inv, ['l4d_tankhud.smx'])).toEqual({ 'c:z_tank_health': '8000' });
+    expect(watchListOnly(inv, { ...inv, 'p:optional/l4d_tankhud.smx': '2.bbbb', 'c:z_new': '1' }, ['l4d_tankhud.smx'])).toBe(true);
+    // A plugin whose file name is not on a list still counts in full.
+    expect(fingerprintOf({ ...inv, 'p:optional/l4d_tankhud.smx': '2.bbbb' }, ['pug-match.smx'])).not.toBe(fingerprintOf(inv, ['pug-match.smx']));
+  });
+});
+
 describe('diffInventories', () => {
   it('reports added, removed and changed keys', () => {
     const d = diffInventories({ a: '1', b: '2' }, { b: '3', c: '4' });

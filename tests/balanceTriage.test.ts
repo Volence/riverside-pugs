@@ -20,6 +20,14 @@ describe('describeChanges', () => {
   });
 });
 
+describe('describeChanges, plugins in a subfolder', () => {
+  it('skips a versionless one by file name and offers its file name for the ignore list', () => {
+    const a = { ...BASE, 'p:optional/l4d_tankhud.smx': '1.a', 'p:optional/l4d_storm.smx': '1.a' };
+    const d = describeChanges(a, { ...a, 'p:optional/l4d_tankhud.smx': '2.b', 'p:optional/l4d_storm.smx': '2.b' }, ['l4d_tankhud.smx']);
+    expect(d).toEqual({ lines: ['plugin updated: l4d_storm'], plugins: ['l4d_storm.smx'], onlyPlugins: true });
+  });
+});
+
 describe('triage decisions', () => {
   let db: DB;
   let base: number, noisy: number, real: number;

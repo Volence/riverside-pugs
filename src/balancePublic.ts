@@ -1,5 +1,5 @@
 import type { DB } from './db.js';
-import { withoutIgnored } from './balancePatches.js';
+import { onPluginList, pluginFile, withoutIgnored } from './balancePatches.js';
 import { resolvePatch } from './balanceFold.js';
 import type { BalanceKnobs } from './balanceKnobs.js';
 import { compareSides } from './metrics/compare/compare.js';
@@ -101,7 +101,7 @@ export type KnobLabels = Pick<BalanceKnobs, 'cvars' | 'files' | 'dirs' | 'versio
 export function publicChanges(prevRaw: Record<string, string>, curRaw: Record<string, string>, knobs: KnobLabels | null): PublicChanges {
   const ignored = knobs?.ignored ?? [];
   const prev = withoutIgnored(prevRaw, ignored), cur = withoutIgnored(curRaw, ignored);
-  const versionless = new Set(knobs?.versionless ?? []);
+  const versionless = onPluginList(knobs?.versionless ?? []);
   const cvarLabel = new Map((knobs?.cvars ?? []).map((c) => [c.cvar, c.label]));
   const weaponLabel = new Map((knobs?.weapons ?? []).map((w) => [`${w.weapon}.${w.key}`, w.label]));
   // The plugin reports a weapon key the weapons file does not set as "default".
@@ -120,10 +120,11 @@ export function publicChanges(prevRaw: Record<string, string>, curRaw: Record<st
     } else if (kind === 'w:') {
       if (a !== undefined && b !== undefined) out.knobs.push({ label: weaponLabel.get(name) ?? name, from: weaponValue(a), to: weaponValue(b) });
     } else if (kind === 'p:') {
-      const plugin = name.replace(/\.smx$/, '');
+      // Bare name: a plugin in a subfolder shows without its "optional/".
+      const plugin = pluginFile(k).replace(/\.smx$/, '');
       if (a === undefined) out.pluginsAdded.push(plugin);
       else if (b === undefined) out.pluginsRemoved.push(plugin);
-      else if (!versionless.has(name)) out.pluginsUpdated.push(plugin);
+      else if (!versionless(k)) out.pluginsUpdated.push(plugin);
     } else if (kind === 'f:' || kind === 'd:') {
       out.files.push(pathLabel.get(name) ?? name);
     }
