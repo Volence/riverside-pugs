@@ -658,6 +658,18 @@ describe('GET /api/replays/timeline/:matchId/:ordinal/:half', () => {
     ).run();
     const again = await app2.inject({ url: '/api/replays/timeline/1/0/1' });
     expect((again.json() as { demo: unknown }).demo).toEqual({ tick: 1234, hz: 100 });
+
+    // A round with pauses serves them for the viewer's mapping.
+    db.prepare(
+      `UPDATE match_rounds SET demo_shifts = '[{"tMs":10000,"ticks":6600}]' WHERE match_id = 1 AND ordinal = 0 AND half = 1`,
+    ).run();
+    const paused = await app2.inject({ url: '/api/replays/timeline/1/0/1' });
+    expect((paused.json() as { demo: unknown }).demo).toEqual({ tick: 1234, hz: 100, shifts: [{ tMs: 10000, ticks: 6600 }] });
+
+    // A damaged column loses the shifts, never the sync.
+    db.prepare(`UPDATE match_rounds SET demo_shifts = 'nope' WHERE match_id = 1`).run();
+    const damaged = await app2.inject({ url: '/api/replays/timeline/1/0/1' });
+    expect((damaged.json() as { demo: unknown }).demo).toEqual({ tick: 1234, hz: 100 });
     await app2.close();
   });
 

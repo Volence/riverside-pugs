@@ -697,6 +697,41 @@ describe('round persistence', () => {
     expect(demoOf(2)).toEqual({ tick: 31000, hz: 100 });
   });
 
+  it('stores the pauses from round end, and a new go-live clears them', () => {
+    const db = liveMatchForRounds();
+    const shiftsOf = (half: number) => (db.prepare(
+      'SELECT demo_shifts AS s FROM match_rounds WHERE half = ?',
+    ).get(half) as { s: string | null }).s;
+    const shifts = [{ tMs: 10000, ticks: 6600 }];
+    recordRoundStart(db, ROUND_TOKEN, {
+      kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', demo: { tick: 900, hz: 100 },
+    });
+    expect(shiftsOf(1)).toBeNull();
+    recordRoundEnd(db, ROUND_TOKEN, {
+      kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', score: 1, alive: null,
+      demo: { tick: 900, hz: 100, shifts },
+    });
+    expect(JSON.parse(shiftsOf(1)!)).toEqual(shifts);
+    // An older plugin's round end has no sync and must not erase them.
+    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', score: 1, alive: null });
+    expect(JSON.parse(shiftsOf(1)!)).toEqual(shifts);
+    // A round end with a sync and no shifts says there were none.
+    recordRoundEnd(db, ROUND_TOKEN, {
+      kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', score: 1, alive: null, demo: { tick: 900, hz: 100 },
+    });
+    expect(shiftsOf(1)).toBeNull();
+    recordRoundEnd(db, ROUND_TOKEN, {
+      kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', score: 1, alive: null,
+      demo: { tick: 900, hz: 100, shifts },
+    });
+    // The half went live again: its clock restarted, so the old pauses no
+    // longer sit where they did.
+    recordRoundStart(db, ROUND_TOKEN, {
+      kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', demo: { tick: 5000, hz: 100 },
+    });
+    expect(shiftsOf(1)).toBeNull();
+  });
+
   it('trusts the round-end side when start and end disagree', () => {
     const db = liveMatchForRounds();
     recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' });

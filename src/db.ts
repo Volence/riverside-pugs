@@ -1352,6 +1352,9 @@ export function openDb(path: string): DB {
   // that converts the round's t_ms to demo ticks (see DemoSync in logParse).
   ensureColumn(db, 'match_rounds', 'demo_tick', 'INTEGER');
   ensureColumn(db, 'match_rounds', 'demo_hz', 'INTEGER');
+  // The half's pauses as JSON [{tMs, ticks}] (DemoShift in logParse), NULL
+  // for none: the demo keeps recording through a pause that t_ms does not see.
+  ensureColumn(db, 'match_rounds', 'demo_shifts', 'TEXT');
   ensureColumn(db, 'matches', 'origin', "TEXT CHECK (origin IN ('queue','in_game'))");
   db.prepare(ORIGIN_BACKFILL_SQL).run();
 

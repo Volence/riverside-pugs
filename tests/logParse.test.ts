@@ -361,6 +361,22 @@ describe('round lines', () => {
       .toMatchObject({ kind: 'round_end', score: 412, demo: { tick: 41870, hz: 100 } });
   });
 
+  it('carries the pauses of a round as demo shifts (0.3.15)', () => {
+    expect(parseLogDatagram(framed(
+      `PUG ${TOKEN} ROUND_END map=m half=1 surv=b score=412 alive=3 demotick=900 hz=100 demoshift=10000:6600,30000:250`,
+    ))).toMatchObject({
+      kind: 'round_end',
+      demo: { tick: 900, hz: 100, shifts: [{ tMs: 10000, ticks: 6600 }, { tMs: 30000, ticks: 250 }] },
+    });
+  });
+
+  it('drops malformed demo shifts but keeps the demo sync', () => {
+    for (const bad of ['demoshift=', 'demoshift=10:x', 'demoshift=-1:50', 'demoshift=10:0', 'demoshift=10', 'demoshift=20:5,10:5']) {
+      const ev = parseLogDatagram(framed(`PUG ${TOKEN} ROUND_START map=m half=1 surv=a demotick=12 hz=100 ${bad}`));
+      expect(ev).toEqual({ kind: 'round_start', token: TOKEN, map: 'm', half: 1, surv: 'a', demo: { tick: 12, hz: 100 } });
+    }
+  });
+
   it('drops a malformed demo sync but keeps the round', () => {
     for (const bad of ['demotick=12', 'hz=100', 'demotick=-5 hz=100', 'demotick=12 hz=0', 'demotick=x hz=100']) {
       const ev = parseLogDatagram(framed(`PUG ${TOKEN} ROUND_START map=m half=1 surv=a ${bad}`));

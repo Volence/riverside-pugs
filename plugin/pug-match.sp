@@ -10,12 +10,17 @@
 // loads there; without this it would refuse to start at all.
 #undef REQUIRE_EXTENSIONS
 #include <geoip>
+// Optional too, for SourceTV_GetRecordingTick: the demo's own tick counter,
+// which keeps counting through a pause when GetGameTickCount does not. Every
+// server loads it for l4d_tvwatch, but a box without it still loads this
+// plugin and falls back to engine time (DemoTickNow).
+#include <sourcetvmanager>
 #define REQUIRE_EXTENSIONS
 #undef REQUIRE_PLUGIN
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.3.14"
+#define PLUGIN_VERSION "0.3.15"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -197,8 +202,19 @@ int g_iLogicalOfPugA;                    // logical team (1|2) that is pug team 
 int g_iMismatchHalves[MAXPLAYERS + 1];
 bool g_bMismatchWarned;
 bool g_bMatchDemoOpen;                   // a tv_record we started for this match is running
-int g_iDemoTickOrigin;                   // server tick that is demo tick 0 of the open match demo
+float g_fDemoEngineAt;                   // engine time the open match demo's tv_record was issued
+int g_iDemoDelayTicks;                   // tv_delay in ticks when it was, see StartMatchDemo
 int g_iRoundDemoTick = -1;               // demo tick at which this half went live; -1 = unknown
+// This half's pauses as seen by the demo (see DemoShiftTick): at round time
+// g_iDemoShiftT[i] ms the demo went on g_iDemoShiftTicks[i] ticks further
+// than the round clock did. Cleared at every go-live.
+#define MAX_DEMO_SHIFTS 16
+int g_iDemoShiftT[MAX_DEMO_SHIFTS];
+int g_iDemoShiftTicks[MAX_DEMO_SHIFTS];
+int g_iDemoShiftCount;
+int g_iDemoShiftSum;                     // sum of g_iDemoShiftTicks, plus any shift past the array
+int g_iDemoShiftPauseT = -1;             // round ms frozen at the pause in progress; -1 = none seen
+float g_fDemoShiftLastGame;              // GetGameTime at the previous DemoShiftTick
 int g_iLastSurvLogical;                  // logical team whose score TryReadRoundScore last resolved; 0 = none
 int g_iHalf;                             // 1 or 2 within the current map, DERIVED from
                                           // m_bInSecondHalfOfRound at go-live, never counted;
@@ -677,11 +693,112 @@ void SurvSideOf(int survPug, char[] out, int maxlen)
 }
 
 /** " demotick=N hz=R" for a round line, or "" when the demo tick is unknown.
- *  hz is the server tickrate, which converts the round's t_ms to demo ticks. */
+ *  hz is the server tickrate, which converts the round's t_ms to demo ticks.
+ *  " demoshift=T:N,T:N" follows when this half has been paused: the site adds
+ *  N ticks to every moment after round time T ms (web/src/replay/demoTick.ts). */
 void DemoTickArgs(char[] out, int maxlen)
 {
 	if (g_iRoundDemoTick < 0) { out[0] = '\0'; return; }
 	Format(out, maxlen, " demotick=%d hz=%d", g_iRoundDemoTick, RoundToNearest(1.0 / GetTickInterval()));
+	for (int i = 0; i < g_iDemoShiftCount; i++)
+		Format(out, maxlen, "%s%s%d:%d", out, i == 0 ? " demoshift=" : ",", g_iDemoShiftT[i], g_iDemoShiftTicks[i]);
+}
+
+/** The match demo's tick right now: the tick a demo_gototick needs to land on
+ *  what the game is doing at this moment, or -1 when no match demo is open.
+ *
+ *  NOT GetGameTickCount, which is what 0.3.12 to 0.3.14 used and what put
+ *  match 186 map 2's half 2 67 s early: the game's tick count stands still
+ *  while the server is paused, and the demo does not. In engine.so,
+ *  CHLTVDemoRecorder::GetRecordingTick is host_tickcount minus its value at
+ *  StartRecording, host_tickcount advances every host tick paused or not, and
+ *  the same function stamps every packet written to the file. So the
+ *  extension's native IS the file's tick. Without the extension, or before
+ *  the tv_record has run, engine time since the tv_record gives the same
+ *  count to within a tick or two, because host ticks are paced by real time.
+ *
+ *  tv_delay is added to both: what the demo records is the SourceTV server's
+ *  view, tv_delay seconds behind the game, so the game's "now" is written
+ *  that many ticks later. */
+int DemoTickNow()
+{
+	if (!g_bMatchDemoOpen) return -1;
+	if (GetFeatureStatus(FeatureType_Native, "SourceTV_GetRecordingTick") == FeatureStatus_Available)
+	{
+		int tick = SourceTV_GetRecordingTick();
+		if (tick >= 0) return tick + g_iDemoDelayTicks;
+	}
+	return RoundToNearest((GetEngineTime() - g_fDemoEngineAt) / GetTickInterval()) + g_iDemoDelayTicks;
+}
+
+/** Below this, a difference between the demo and the round clock is sampling
+ *  noise (the engine time fallback wobbles by a tick or two), not a pause. */
+#define DEMO_SHIFT_MIN_TICKS 20
+
+/** New go-live: the round clock restarts, and so does its pause list. */
+void DemoShiftReset()
+{
+	g_iDemoShiftCount = 0;
+	g_iDemoShiftSum = 0;
+	g_iDemoShiftPauseT = -1;
+	g_fDemoShiftLastGame = GetGameTime();
+}
+
+/** Record whatever the demo has run ahead of the round clock since the last
+ *  shift. t is the frozen round time of the pause when one was seen, else now
+ *  (a pause too short for the 1 s clock to catch, which is at most a second
+ *  out). Past MAX_DEMO_SHIFTS the ticks fold into the last entry, so every
+ *  later moment is still right. */
+static void DemoShiftRecord()
+{
+	int now = DemoTickNow();
+	int ms = RoundMs();
+	if (now < 0 || ms < 0 || g_iRoundDemoTick < 0) return;
+	int hz = RoundToNearest(1.0 / GetTickInterval());
+	int ahead = now - (g_iRoundDemoTick + RoundToNearest(float(ms) * float(hz) / 1000.0)) - g_iDemoShiftSum;
+	if (ahead < DEMO_SHIFT_MIN_TICKS) return;
+	int t = g_iDemoShiftPauseT >= 0 ? g_iDemoShiftPauseT : ms;
+	g_iDemoShiftPauseT = -1;
+	g_iDemoShiftSum += ahead;
+	if (g_iDemoShiftCount < MAX_DEMO_SHIFTS)
+	{
+		g_iDemoShiftT[g_iDemoShiftCount] = t;
+		g_iDemoShiftTicks[g_iDemoShiftCount] = ahead;
+		g_iDemoShiftCount++;
+	}
+	else
+	{
+		g_iDemoShiftTicks[MAX_DEMO_SHIFTS - 1] += ahead;
+	}
+	PugDebug("demo: shift t=%d ticks=%d", t, ahead);
+}
+
+/** Once a second from Timer_PauseClock, whatever paused the game: Rotoblin's
+ *  !pause, the leave module's, or an admin's `pause`. A pause is read off the
+ *  clock itself rather than any plugin's state: game time that has not moved
+ *  since the last second is a paused server, and the round time it froze at
+ *  is where the pause sits on the replay's clock. Nothing is recorded while
+ *  paused, only once the game runs again, when the whole pause is known. */
+void DemoShiftTick()
+{
+	if (g_iRoundDemoTick < 0 || g_fRoundLiveAt <= 0.0 || g_bRoundEnded) return;
+	float game = GetGameTime();
+	bool frozen = game == g_fDemoShiftLastGame;
+	g_fDemoShiftLastGame = game;
+	if (frozen)
+	{
+		if (g_iDemoShiftPauseT < 0) g_iDemoShiftPauseT = RoundMs();
+		return;
+	}
+	DemoShiftRecord();
+}
+
+/** From EmitRoundEnd, so an unpause in the last second of a half is not lost
+ *  between clock ticks. */
+void DemoShiftCatchUp()
+{
+	if (g_iRoundDemoTick < 0 || g_fRoundLiveAt <= 0.0) return;
+	DemoShiftRecord();
 }
 
 /** Milliseconds since this half went live. -1 before it does, which the
@@ -796,7 +913,10 @@ void EmitRoundEnd(int half, const char[] surv, int score, int alive)
 		// non-numeric as "not measured", which is distinct from zero.
 		// The demo tick repeats ROUND_START's, because that line is one UDP
 		// datagram and losing it would otherwise lose the round's demo sync.
-		char demo[48];
+		// This line alone carries the half's pauses, which are only all known
+		// now. 16 shifts of at most "9999999:9999999," fit in the 320.
+		DemoShiftCatchUp();
+		char demo[320];
 		DemoTickArgs(demo, sizeof(demo));
 		EmitPug("ROUND_END map=%s half=%d surv=%s score=%d alive=%d%s",
 			g_sCurrentMap, half, surv, score, alive, demo);
@@ -2542,14 +2662,13 @@ void StartMatchDemo()
 	ServerCommand("tv_stoprecord");
 	ServerCommand("tv_record pug_%s_%d_%s", g_sToken, g_iMapCount, g_sCurrentMap);
 	g_bMatchDemoOpen = true;
-	// A SourceTV demo counts ticks from the moment recording starts, and what
-	// it records is the SourceTV server's view, which runs tv_delay seconds
-	// behind the game. So demo tick 0 is the game tick tv_delay before now.
-	// The command itself runs on the next frame, which is at most a tick or
-	// two out: close enough for demo_gototick, where 100 ticks is a second.
+	// For DemoTickNow's fallback: a SourceTV demo counts ticks from the moment
+	// recording starts. The command itself runs on the next frame, which is at
+	// most a tick or two out: close enough for demo_gototick, where 100 ticks
+	// is a second. The extension's own count, when there, has no such error.
 	ConVar delay = FindConVar("tv_delay");
-	int delayTicks = delay != null ? RoundToNearest(delay.FloatValue / GetTickInterval()) : 0;
-	g_iDemoTickOrigin = GetGameTickCount() - delayTicks;
+	g_iDemoDelayTicks = delay != null ? RoundToNearest(delay.FloatValue / GetTickInterval()) : 0;
+	g_fDemoEngineAt = GetEngineTime();
 	PugDebug("demo: pug_%s_%d_%s", g_sToken, g_iMapCount, g_sCurrentMap);
 }
 
@@ -2795,6 +2914,9 @@ void ResetMatchState()
 	g_bMismatchWarned = false;
 	g_bMatchDemoOpen = false;
 	g_iRoundDemoTick = -1;
+	g_iDemoShiftCount = 0;
+	g_iDemoShiftSum = 0;
+	g_iDemoShiftPauseT = -1;
 	g_iHalf = 0;
 	g_fRoundLiveAt = 0.0;
 	g_bRoundEnded = false;
@@ -3418,8 +3540,9 @@ public void OnRoundIsLive()
 		// Where this half starts in the match demo, so the site can turn any
 		// moment of the replay (t_ms) into a demo_gototick target. Absent when
 		// this plugin did not open the demo, e.g. pug_record_demos 0.
-		g_iRoundDemoTick = g_bMatchDemoOpen ? GetGameTickCount() - g_iDemoTickOrigin : -1;
-		char demo[48];
+		g_iRoundDemoTick = DemoTickNow();
+		DemoShiftReset();
+		char demo[320];
 		DemoTickArgs(demo, sizeof(demo));
 		char surv[2];
 		SurvPugTeam(surv, sizeof(surv));

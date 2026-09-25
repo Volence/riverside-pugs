@@ -584,7 +584,10 @@ export function recordRoundStart(
      VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?)
      ON CONFLICT (match_id, ordinal, half) DO UPDATE SET
        demo_tick = COALESCE(excluded.demo_tick, match_rounds.demo_tick),
-       demo_hz = COALESCE(excluded.demo_hz, match_rounds.demo_hz)`,
+       demo_hz = COALESCE(excluded.demo_hz, match_rounds.demo_hz),
+       -- A new go-live restarts t_ms, so pauses measured on the old clock
+       -- no longer sit where they did. ROUND_END brings this half's own.
+       demo_shifts = CASE WHEN excluded.demo_tick IS NULL THEN match_rounds.demo_shifts ELSE NULL END`,
     // Nothing else is updated: a duplicated ROUND_START must not reset the
     // started_at that t_ms values are already measured against. The demo
     // tick is the exception because a half that goes live again (an admin
@@ -659,8 +662,8 @@ export function recordRoundEnd(
   // 2026-09-13 showed 0 to 0 for a map that was played).
   const known = ev.score >= 0;
   db.prepare(
-    `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, ended_at, survivors_alive, demo_tick, demo_hz)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
+    `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, ended_at, survivors_alive, demo_tick, demo_hz, demo_shifts)
+     VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?)
      ON CONFLICT (match_id, ordinal, half) DO UPDATE SET
        surv_team = excluded.surv_team,
        score = excluded.score,
@@ -679,9 +682,14 @@ export function recordRoundEnd(
        -- Repeated from ROUND_START so a lost start datagram does not lose the
        -- round's demo sync. Same COALESCE rule: an older plugin omits it.
        demo_tick = COALESCE(excluded.demo_tick, match_rounds.demo_tick),
-       demo_hz = COALESCE(excluded.demo_hz, match_rounds.demo_hz)`,
+       demo_hz = COALESCE(excluded.demo_hz, match_rounds.demo_hz),
+       -- The plugin lists the half's pauses on the same line as the sync, so
+       -- a line WITH a sync is authoritative about them (none is NULL), and
+       -- a line without one (an older plugin) leaves them alone.
+       demo_shifts = CASE WHEN excluded.demo_tick IS NULL THEN match_rounds.demo_shifts ELSE excluded.demo_shifts END`,
   ).run(id, ordinal, ev.half, ev.surv, known ? ev.score : 0, known ? 1 : 0, ev.alive,
-    ev.demo?.tick ?? null, ev.demo?.hz ?? null);
+    ev.demo?.tick ?? null, ev.demo?.hz ?? null,
+    ev.demo?.shifts && ev.demo.shifts.length > 0 ? JSON.stringify(ev.demo.shifts) : null);
   touch(db, id);
 }
 
