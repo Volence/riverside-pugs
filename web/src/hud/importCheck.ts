@@ -46,7 +46,7 @@ function nullCtx(): CanvasRenderingContext2D {
 /** Throws whatever the page would throw showing this import on a fresh design. */
 function dryRun(id: string): void {
   const key: BaseKey = `imported:${id}`;
-  const d = withImport(newDesign(null), { id, name: 'check' }, { art: null, hasXhair: importedHasXhair(key), reset: true });
+  const d = withImport(newDesign(null), { id, name: 'check' }, { art: null, hasXhair: importedHasXhair(key) });
   buildHud(d);
   buildHud({ ...d, advanced: true });
   teamLayout(d, elementById('teamColumn')!);

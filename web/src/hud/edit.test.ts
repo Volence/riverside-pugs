@@ -5,7 +5,7 @@ import {
   placeChild, nudgeChild, resizeChild, resetChild,
   startsOf, moveChildren, placeChildren, scaleChildren, cornerFactor, anchorOf, alignChildren, setChildrenVisible, resetChildren,
   placeElement, moveElements, moveCards, alignElements, scaleElement, setScale, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
-  ammoOnly, withImport, withPreset, hasLayoutEdits,
+  ammoOnly, withImport, withPreset,
   splatterKind, patchSplatter, withSplatterImage, resetSplatter, panelClamp, raiseChild, resetChildKey, setFit, rowGapSlider, setRowGap,
   hiddenWith,
 } from './edit';
@@ -116,10 +116,9 @@ describe('what counts as an edit', () => {
     expect(resetElement(d, 'chat').elements.chat).toBeUndefined();
   });
 
-  it('counts a splatter as an override, and keeps splatters across a preset switch', () => {
+  it('counts a splatter as an override', () => {
     const d = { ...structuredClone(DEFAULT_DESIGN), splatters: { splatTop: { kind: 'fade' as const } } };
     expect(hasOverrides(d, null)).toBe(true);
-    expect(withPreset(d, 'modern', true).splatters).toEqual({ splatTop: { kind: 'fade' } });
   });
 });
 
@@ -649,19 +648,22 @@ describe('the weapon selection', () => {
 describe('moving a design onto an imported HUD and off it', () => {
   const ref = { id: 'e'.repeat(64), name: 'edgehud' };
   const art: CrosshairArt = { kind: 'image', png: 'data:image/png;base64,UE5H', w: 128, h: 128 };
-  const none = { art: null, hasXhair: false, reset: false };
-
-  it('starts a design with no layout edits with none, so the HUD shows as its author made it', () => {
-    const d = withImport(structuredClone(DEFAULT_DESIGN), ref, none);
-    expect(d).toMatchObject({ preset: 'imported', imported: ref, font: 'preset', elements: {}, children: {} });
-    expect(hasLayoutEdits(d)).toBe(false);
+  const none = { art: null, hasXhair: false };
+  // Every HUD edit there is, on top of a bundled crosshair the switch must keep.
+  const edited = (): HudDesign => ({
+    ...ammoOnly(structuredClone(DEFAULT_DESIGN)), name: 'mine', aspect: '4:3', advanced: true, font: 'roboto',
+    crosshair: 'bundle', xhairArt: art, hideGameCrosshair: true, pickupFlyIn: false,
+    styles: { panelBg: { kind: 'flat' } }, splatters: { splatTop: { kind: 'fade' } },
+    children: { teamColumn: { Name: { x: 4 } } },
+    elements: { ...ammoOnly(structuredClone(DEFAULT_DESIGN)).elements, chat: { x: 8, y: 8 } },
   });
+  const kept = { name: 'mine', aspect: '4:3', advanced: true, crosshair: 'bundle', xhairArt: art, hideGameCrosshair: true };
 
-  it('keeps the edits a player keeps, and drops them on reset', () => {
-    const edited = { ...structuredClone(DEFAULT_DESIGN), elements: { chat: { x: 8, y: 8 } } };
-    expect(hasLayoutEdits(edited)).toBe(true);
-    expect(withImport(edited, ref, none).elements).toEqual({ chat: { x: 8, y: 8 } });
-    expect(withImport(edited, ref, { ...none, reset: true }).elements).toEqual({});
+  it('starts the import with no edits at all, so the HUD shows as its author made it', () => {
+    expect(withImport(structuredClone(DEFAULT_DESIGN), ref, none))
+      .toMatchObject({ preset: 'imported', imported: ref, font: 'preset', elements: {}, children: {} });
+    const d = withImport(edited(), ref, none);
+    expect(d).toEqual({ ...structuredClone(DEFAULT_DESIGN), ...kept, preset: 'imported', imported: ref, elements: {}, children: {} });
   });
 
   it("takes the upload's crosshair texture as a bundled image crosshair", () => {
@@ -676,15 +678,13 @@ describe('moving a design onto an imported HUD and off it', () => {
     expect(withImport(bundled, ref, { ...none, hasXhair: true }).crosshair).toBe('bundle');
   });
 
-  it('moves back to Stock without the import, with the default teammates when it had no edits', () => {
-    const on = withImport(structuredClone(DEFAULT_DESIGN), ref, none);
-    const back = withPreset(on, 'stock', false);
-    expect(back.preset).toBe('stock');
+  it('picks Stock or Modern as the preset ships: every HUD edit goes, the crosshair and file settings stay', () => {
+    for (const preset of ['stock', 'modern'] as const) {
+      expect(withPreset(edited(), preset)).toEqual({ ...structuredClone(DEFAULT_DESIGN), ...kept, preset });
+    }
+    const back = withPreset(withImport(structuredClone(DEFAULT_DESIGN), ref, none), 'stock');
     expect('imported' in back).toBe(false);
-    expect(back.elements).toEqual(DEFAULT_DESIGN.elements);
-    const edited = withPreset({ ...on, elements: { chat: { x: 8 } } }, 'modern', false);
-    expect(edited.elements).toEqual({ chat: { x: 8 } });
-    expect(withPreset({ ...on, elements: { chat: { x: 8 } } }, 'modern', true).elements).toEqual(DEFAULT_DESIGN.elements);
+    expect(back).toEqual(structuredClone(DEFAULT_DESIGN));
   });
 });
 
@@ -766,13 +766,13 @@ describe('child edits name their panel', () => {
     const d = { ...structuredClone(DEFAULT_DESIGN), styles: { panelBg: { kind: 'flat' as const } } };
     expect(raiseChild(d, ['Head'], 'back').children.teamColumn?.Head?.z).toBe(-1);
     // Modern's own panel: ModBg at -5 is the lowest, HudEdOwnBg injects at -5 too; the floor is -4.
-    const own = { ...withPreset(structuredClone(DEFAULT_DESIGN), 'modern', true), styles: { ownBg: { kind: 'flat' as const } } };
+    const own = { ...withPreset(structuredClone(DEFAULT_DESIGN), 'modern'), styles: { ownBg: { kind: 'flat' as const } } };
     expect(buildTrees(own)('resource/ui/hud/localplayerpanel.res').some((n) => n.key === 'HudEdOwnBg')).toBe(true);
     expect(raiseChild(own, ['Head'], 'back', 'ownHealth').children.ownHealth?.Head?.z).toBe(-4);
   });
   it('leaves the injected blocks and the hidden revive anchor out of the zpos list', () => {
     // Modern ships bar 34 and down picture 0, so unfitted the build adds the hidden Items anchor (no zpos, so 0).
-    const own = { ...withPreset(structuredClone(DEFAULT_DESIGN), 'modern', true), elements: {} };
+    const own = { ...withPreset(structuredClone(DEFAULT_DESIGN), 'modern'), elements: {} };
     expect(buildTrees(own)('resource/ui/hud/localplayerpanel.res').some((n) => n.key === 'Items')).toBe(true);
     // With every registered piece moving, only ModBg (-5) is left: front is -4, not 1 from the anchor.
     const all = ['Head', 'Health', 'HealthIcon', 'HealthNumber', 'HealthbarTextureTop', 'HealthbarTextureBottom', 'Incapacitated', 'DuckingIcon'];
