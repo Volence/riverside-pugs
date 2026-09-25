@@ -726,6 +726,21 @@ describe('Hud page', () => {
     expect(await screen.findByText('That link is damaged.')).toBeTruthy();
   });
 
+  it('loads a share link opened in a tab already on the editor', async () => {
+    render(<Hud />);
+    location.hash = `#d=${await encodeShare({ ...validateDesign({ v: 1 }), preset: 'modern' } as HudDesign)}`;
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    await waitFor(() => expect((screen.getByRole('combobox', { name: /preset/i }) as HTMLSelectElement).value).toBe('modern'));
+    expect(location.hash).toBe('');
+  });
+
+  it('says a link opened in a tab already on the editor is damaged', async () => {
+    render(<Hud />);
+    location.hash = '#d=garbage';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    expect(await screen.findByText('That link is damaged.')).toBeTruthy();
+  });
+
   it('imports a design and selects its preset', async () => {
     render(<Hud />);
     const file = new File(['{"v":1,"preset":"modern"}'], 'my.hud.json', { type: 'application/json' });

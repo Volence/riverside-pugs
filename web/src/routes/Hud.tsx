@@ -599,21 +599,23 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     return () => clearTimeout(t);
   }, [design]);
 
-  // Mount only: a share link is meant to be consumed once. Re-running this
-  // whenever `design` changes would try to re-import the same link every
-  // time the reader so much as drags an element.
+  // A share link is consumed once: at mount, and again whenever a new one is
+  // opened in this tab (pasted into the address bar, or a link clicked on the
+  // page), which changes only the hash and would otherwise be ignored until a
+  // reload. The design is read from `current`, not a closure, so a link opened
+  // after edits asks about the edited design.
   useEffect(() => {
-    if (!location.hash.startsWith('#d=')) return;
-    const raw = location.hash.slice(3);
     let cancelled = false;
-    (async () => {
+    const consume = async () => {
+      if (!location.hash.startsWith('#d=')) return;
+      const raw = location.hash.slice(3);
       const decoded = await decodeShare(raw);
       if (cancelled) return;
       if (!decoded) {
         setStatus('That link is damaged.');
       } else {
         let apply = true;
-        if (hasOverrides(design, saved)) {
+        if (hasOverrides(current.current, saved)) {
           apply = await confirm({
             title: 'Load the HUD design from this link? It will replace the one saved on this browser.',
             confirmLabel: 'Load link', cancelLabel: 'Keep mine',
@@ -622,10 +624,11 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
         if (!cancelled && apply) { edit(() => usableCrosshair(decoded, saved)); dropPicks(); }
       }
       if (!cancelled) history.replaceState(null, '', location.pathname + location.search);
-    })();
-    return () => { cancelled = true; };
-    // `design` is deliberately read only from the closure captured at mount:
-    // this effect must run exactly once, not on every subsequent edit.
+    };
+    void consume();
+    const onHash = () => { void consume(); };
+    window.addEventListener('hashchange', onHash);
+    return () => { cancelled = true; window.removeEventListener('hashchange', onHash); };
   }, []);
 
   // Mount only: list this browser's imports for the Preset select. A browser
