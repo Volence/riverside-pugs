@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer, activatePlayer, linkDiscord } from '../src/players.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
-import { SignonDropNotifier, CONSISTENCY_HELP_PATH } from '../src/signonDropNotify.js';
+import { SignonDropNotifier, CONSISTENCY_HELP_PATH, CUSTOM_CAMPAIGNS_PATH, customCampaignOnServer } from '../src/signonDropNotify.js';
+import { addServer } from '../src/serverPool.js';
+import { insertDraft, publishCampaign } from '../src/customCampaigns.js';
+import { invalidateCampaignCache } from '../src/campaignRegistry.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
 const LINKED = '76561198030413993';
@@ -125,5 +128,67 @@ describe('SignonDropNotifier: the player DM', () => {
     up = true;
     await n.onDrop(drop(LINKED), at(5));
     expect(t.dms).toHaveLength(1);
+  });
+});
+
+describe('SignonDropNotifier: a drop during a custom campaign match', () => {
+  let serverId: number;
+  const liveMatch = (campaign: string, sid = serverId) => db.prepare(
+    `INSERT INTO matches (season_id, state, campaign, server_id, token, created_at, went_live_at)
+     VALUES (1, 'live', ?, ?, 'tok', '2026-09-19 19:58:00', '2026-09-19 19:59:00')`,
+  ).run(campaign, sid);
+
+  beforeEach(() => {
+    invalidateCampaignCache();
+    serverId = addServer(db, { name: 'Dallas', host: '1.2.3.4', port: 27015, rconPort: 27015, rconPassword: 'x', status: 'live' });
+    insertDraft(db, {
+      slug: 'suicideblitz', name: 'Suicide Blitz', vpkFilename: 'suicideblitz.vpk',
+      sizeBytes: 1, sha256: 'x', uploadedBy: null,
+    }, [{ map: 'l4d_vs_stadium1_apartment', display: null, isFinale: false }]);
+    publishCampaign(db, 'suicideblitz', 'Suicide Blitz');
+  });
+  afterEach(() => invalidateCampaignCache());
+
+  it('names the campaign on the admin line when the server is live on a custom one', async () => {
+    liveMatch('suicideblitz');
+    await notifier.onDrop(drop(STRANGER, 'mayhem'), at(0), serverId);
+    await notifier.onDrop(drop(STRANGER, 'mayhem'), at(1), serverId);
+    expect(events).toEqual([{
+      kind: 'signon_drop', steamid: STRANGER, name: 'mayhem', count: 2, total: 2,
+      campaign: { slug: 'suicideblitz', name: 'Suicide Blitz' },
+    }]);
+  });
+
+  it('sends the campaign DM, with the download page, instead of the consistency one', async () => {
+    liveMatch('suicideblitz');
+    await notifier.onDrop(drop(LINKED), at(0), serverId);
+    const content = t.dms[0].payload.content;
+    expect(content).toContain('Suicide Blitz');
+    expect(content).toContain("Your string table differs from the server's.");
+    expect(content).toContain(`https://pug.test${CUSTOM_CAMPAIGNS_PATH}`);
+    expect(content).not.toMatch(/modified game file/);
+    expect(t.dms[0].payload.components.flat()).toEqual([
+      { kind: 'link', url: `https://pug.test${CUSTOM_CAMPAIGNS_PATH}`, label: 'Custom campaigns' },
+    ]);
+  });
+
+  it('keeps the consistency wording on a stock campaign, with no server, or on another server', async () => {
+    liveMatch('dead_air');
+    const other = addServer(db, { name: 'Chicago', host: '5.6.7.8', port: 27015, rconPort: 27015, rconPassword: 'x', status: 'live' });
+    liveMatch('suicideblitz', other);
+    await notifier.onDrop(drop(STRANGER), at(0), serverId);
+    await notifier.onDrop(drop(STRANGER), at(1), null);
+    expect(events).toHaveLength(1);
+    expect(events[0]).not.toHaveProperty('campaign');
+    await notifier.onDrop(drop(LINKED), at(0), serverId);
+    expect(t.dms[0].payload.content).toMatch(/modified game file/);
+  });
+
+  it('ignores a match that is no longer live', async () => {
+    db.prepare(
+      `INSERT INTO matches (season_id, state, campaign, server_id, token, created_at)
+       VALUES (1, 'completed', 'suicideblitz', ?, 'old', '2026-09-19 18:00:00')`,
+    ).run(serverId);
+    expect(customCampaignOnServer(db, serverId)).toBeNull();
   });
 });

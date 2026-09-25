@@ -237,6 +237,20 @@ describe('admin feed', () => {
     expect(t.live()[0].payload.embeds[0].description).toContain(`[${IDS[4]}](https://pug.test/admin/people/${IDS[4]})`);
   });
 
+  it('a connect drop during a custom campaign match blames the campaign, not a modified file', async () => {
+    publishAdminEvent({
+      kind: 'signon_drop', steamid: IDS[4], name: 'x', count: 2, total: 2,
+      campaign: { slug: 'suicideblitz', name: 'Suicide *Blitz' },
+    });
+    await feed.idle();
+    const line = t.live()[0].payload.embeds[0].description ?? '';
+    expect(line).toContain('**Suicide \\*Blitz**, a custom campaign');
+    expect(line).toContain("Your string table differs from the server's");
+    expect(line).toContain('(https://pug.test/custom-campaigns)');
+    expect(line).not.toContain('modified game file');
+    expect(line).toContain('hint, not proof');
+  });
+
   it('connect drops ride the problems toggle', async () => {
     setSetting(db, 'admin_feed_problems', '0');
     publishAdminEvent({ kind: 'signon_drop', steamid: IDS[4], name: 'x', count: 2, total: 2 });
