@@ -740,3 +740,27 @@ Open questions for the owner:
 - Where does the Tab screen rank against the phase 2 work still open?
 - Should Riverside's own `ThirdPartyServerPanel` (the server name box players see on our
   servers) be styled? It needs the allowlist in `src/hudFiles.ts` to grow.
+
+## 7. Probe results (TAB-1 to TAB-3, run 2026-09-25 03:52 to 03:56)
+
+Full table: `/home/volence/l4d/hud/probe-tab/RESULTS.md`. What changes in the scope above:
+
+- **Open at ship, confirmed:** items 1 to 6 of 2.1. The enemy team's box does show (to the
+  infected side), so the one `tabTeamBox` slot for both boxes is right.
+- **Gates passed** (set `passed: true`, cite the RESULTS file): **TS1** title colour, **TS3** row bar
+  colour, **TS4** move the versus panel, **TS7** hides, **TS8** (`if_embedded` takes new keys, so a
+  later position edit may write there).
+- **TS5 split:** your infected row colour (`PlayerBackground_Selected`) **passed**; the other
+  infected rows (`PlayerBackground`) were never on screen (they need a second infected player):
+  a new gate **TS5b**, closed.
+- **TS6 split:** infected names (`Name`, `NoAvatarName` in the infected file) **passed**; survivor
+  names stay white whatever the file says: **no control** for them (code), and the preview draws
+  them white.
+- **TS2 failed:** 262 and N/A stay grey (code). No control; the preview keeps 145 145 145.
+- **Hiding `HealthLabel` also hides `HealthAmount`** (pinned to it). The page hides the pair
+  together, and the preview draws neither.
+- **New, cheap and proven, added to v1:** "Row bars: grey (stock) / by health / one colour". By
+  health removes `monochrome_color` (TL3 showed green, orange, red); one colour writes it (TS3).
+- **Proven, left for later (owner's call):** the whole Tab screen on the right (TL1), moving the rows
+  (TL2). TL4 (rounded row) was not seen. TL5: the versus panel clips its children, so a later
+  resize must grow it.
