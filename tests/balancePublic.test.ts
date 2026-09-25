@@ -277,6 +277,24 @@ describe('publicEntry', () => {
     expect(publicEntry(db, 1, { knobs: null })!.live).toBe(true);
   });
 
+  it('live: after a revert to an older patch the servers run, the newer one is no longer live', () => {
+    const db = compareDb();
+    publishPatch(db, 1, true); publishPatch(db, 2, true);
+    // Patch 1's fingerprint came back: its row is reused, so it stays older in the timeline.
+    db.prepare("INSERT INTO balance_server_state (server_id, patch_id, inventory_json, since) VALUES (7, 1, '{}', '2026-09-20 00:00:00')").run();
+    expect(publicEntry(db, 1, { knobs: null })!.live).toBe(true);
+    expect(publicEntry(db, 2, { knobs: null })!.live).toBe(false);
+  });
+
+  it('live: a server on a config no public patch covers leaves the newest patch live', () => {
+    const db = compareDb();
+    publishPatch(db, 1, true); publishPatch(db, 2, true);
+    db.prepare("INSERT INTO balance_patches (id, fingerprint, source, inputs_json, first_seen_at, triage) VALUES (9, 'fp9', 'detected', '{}', '2026-09-21 00:00:00', 'pending')").run();
+    db.prepare("INSERT INTO balance_server_state (server_id, patch_id, inventory_json, since) VALUES (7, 9, '{}', '2026-09-21 00:00:00')").run();
+    expect(publicEntry(db, 2, { knobs: null })!.live).toBe(true);
+    expect(publicEntry(db, 1, { knobs: null })!.live).toBe(false);
+  });
+
   it('live: a preview counts as newest among the published patches plus itself', () => {
     const db = compareDb();
     publishPatch(db, 1, true);

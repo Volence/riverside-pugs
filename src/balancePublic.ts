@@ -148,8 +148,9 @@ export interface PublicEntry extends PublicPatch {
   /** Why `changes` is null: this patch is historical, this patch or the baseline
    *  has no recorded inputs, or there is no baseline. */
   changesUnavailable: 'historical' | 'unrecorded' | 'previous_unrecorded' | 'first' | null;
-  /** The newest patch in the public timeline (a preview counts itself as
-   *  published), or a patch some server is running right now. */
+  /** A patch some server is running right now, or, when no server runs any
+   *  patch in the public timeline, the newest one (a preview counts itself
+   *  as published). */
   live: boolean;
   effect: {
     a: { matches: number; rounds: number }; b: { matches: number; rounds: number };
@@ -224,9 +225,14 @@ export function publicEntry(db: DB, id: number, opts: { knobs: KnobLabels | null
       approximate: r.banners.approximate, rows,
     };
   }
-  // A server's state holds the patch it reported; one folded into this patch counts.
-  const onServers = (db.prepare('SELECT patch_id FROM balance_server_state').all() as { patch_id: number }[])
-    .some((st) => resolvePatch(db, st.patch_id) === id);
-  const live = line[line.length - 1].id === id || onServers;
+  // A server's state holds the patch it reported; one folded into this patch
+  // counts. The servers decide when any of them runs a patch in this line: a
+  // return to an older config reuses that patch's row, which stays older in
+  // the timeline, so "newest" alone would keep the reverted patch live and
+  // its countdown running. Otherwise (no state yet, or every server on a
+  // config still in triage) the newest patch is the live one.
+  const running = new Set((db.prepare('SELECT patch_id FROM balance_server_state').all() as { patch_id: number }[])
+    .map((st) => resolvePatch(db, st.patch_id)));
+  const live = line.some((p) => running.has(p.id)) ? running.has(id) : line[line.length - 1].id === id;
   return { ...strip(self), live, previous: base ? { id: base.id, name: base.name } : null, status, changes, changesUnavailable, effect };
 }
