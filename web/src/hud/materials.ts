@@ -100,3 +100,16 @@ export function missingPictures(files: ReadonlyMap<string, Uint8Array>): Missing
   }
   return out;
 }
+
+/**
+ * One status sentence for an import naming pictures nobody provides, or ''.
+ * Names up to three, so the line stays readable, and says what to do.
+ */
+export function missingPicturesNote(missing: readonly MissingPicture[]): string {
+  if (missing.length === 0) return '';
+  const shown = missing.slice(0, 3).map((m) => m.material).join(', ');
+  const more = missing.length > 3 ? ` and ${missing.length - 3} more` : '';
+  const one = missing.length === 1;
+  return ` This HUD names ${one ? 'a picture' : `${missing.length} pictures`} it does not include and the game does not have (${shown}${more}). `
+    + `The game draws ${one ? 'it' : 'them'} as purple and black squares. Import the whole HUD folder, with its materials folder, to include ${one ? 'it' : 'them'}.`;
+}

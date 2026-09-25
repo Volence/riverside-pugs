@@ -1790,6 +1790,22 @@ describe('Importing a HUD', () => {
     return new Uint8Array(await blobs[0].arrayBuffer());
   };
 
+  it('says which pictures an import names but neither ships nor the game has', async () => {
+    const bare = sampleHud({ 'materials/vgui/hud/myart.vmt': null, 'materials/vgui/hud/myart.vtf': null });
+    const bareId = await hudId(bare);
+    try {
+      render(<Hud />);
+      importFile(new File([encodeVPK(asList(bare))], 'edgehud.vpk'));
+      await screen.findByText(/^Imported edgehud\. This HUD names a picture it does not include and the game does not have \(vgui\/hud\/myart\)\./);
+    } finally { unregisterImport(bareId); }
+  });
+
+  it('says nothing about pictures when the import ships its own', async () => {
+    render(<Hud />);
+    importFile(vpkFile());
+    await screen.findByText('Imported edgehud.');
+  });
+
   it('imports a .vpk from the Preset select and switches the design to it', async () => {
     render(<Hud />);
     expect(screen.getByRole('option', { name: 'Import a HUD...' })).toBeTruthy();
