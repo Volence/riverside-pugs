@@ -14,7 +14,7 @@ import {
 import { screenW, SCREEN_H } from '../hud/units';
 import { elementById } from '../hud/elements';
 import {
-  elementRect, teamLayout, teamCardRects, panelFrame, isFreeTeam, packHud, importedHasXhair, splatterProblem,
+  elementRect, teamLayout, teamCardRects, panelFrame, isFreeTeam, packHud, importedHasXhair, splatterProblem, yourItemsLimits,
   type BuildReport, type CardChild,
 } from '../hud/build';
 import { drawHud, visibleElements, panelBoxes, HANDLE_PX, type Side } from '../hud/mock';
@@ -30,6 +30,7 @@ import { importProblem } from '../hud/importCheck';
 import { hudStore, type HudMeta } from '../hud/hudStore';
 import * as undoStack from '../hud/history';
 import { childDef } from '../hud/children';
+import { YOUR_ITEMS } from '../hud/youritems';
 import {
   hasOverrides, withImport, withPreset,
   moveElements, moveCards, cardStarts, freeInPlace, moveChildren, startsOf, nudgeSelection,
@@ -201,6 +202,23 @@ const pieceBox = (d: HudDesign, panel: string, card: number): Box | undefined =>
 /** A press and release within this many screen pixels is a click; anything further is a drag. */
 const CLICK_PX = 3;
 const NO_SNAP: Snap = { dx: 0, dy: 0, guides: [] };
+
+/**
+ * The snap guides a move of Your items may draw: only those on an edge or
+ * centre line of the selection as it is drawn once moved (`moved`). The row
+ * is not always where the snap put it: the clamp holds it at your health
+ * bar's edge while the pointer keeps going (edit.ts yourItemsHeld), and a
+ * row a full loadout wide (47.57 units at medium) is stored in whole units
+ * and drawn from a whole-unit Label (youritems.ts placeRow, rowLayout), so a
+ * snapped left edge lands up to half a unit off its target. A guide there
+ * would promise an alignment the preview and the download do not have.
+ */
+function guidesOnDrawn(guides: Guide[], moved: HudDesign, ids: string[]): Guide[] {
+  const box = unionBox(ids.map((id) => elementRect(moved, id, moved.aspect)));
+  if (!box) return [];
+  const on = (at: number, lo: number, size: number) => [lo, lo + size / 2, lo + size].some((l) => Math.abs(l - at) < 0.01);
+  return guides.filter((g) => (g.axis === 'x' ? on(g.at, box.x, box.w) : on(g.at, box.y, box.h)));
+}
 /** How near a handle the pointer must be, in screen pixels, whatever the canvas scale. */
 const HANDLE_SLACK_PX = 5;
 /**
@@ -585,6 +603,8 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
         hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered, seen), label: selectionLabel(hovered) },
         marquee,
         guides,
+        // Your items' limit, only while it is selected, which a drag of it is too (spec section 2); never in a share or the close-up.
+        limits: sel.kind === 'elements' && sel.ids.includes(YOUR_ITEMS) ? yourItemsLimits(design) : undefined,
         dpr,
       });
     } catch (e) {
@@ -969,7 +989,9 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     const start = unionBox(Object.values(d.starts));
     if (!start) return;
     const s = alt ? NO_SNAP : snapMove({ ...start, x: start.x + dux, y: start.y + duy }, sectionTargets(cur, side, moving));
-    setGuides(s.guides);
+    // Your items may not land where the snap put it (held at the bar's edge, or whole-unit rounding): guides only where it is drawn.
+    const items = d.kind === 'elements' && !!d.starts[YOUR_ITEMS];
+    setGuides(items ? guidesOnDrawn(s.guides, moveElements(cur, d.ids, d.starts, dux + s.dx, duy + s.dy), d.ids) : s.guides);
     edit((x) => (d.kind === 'cards'
       ? moveCards(x, d.cards, d.starts, dux + s.dx, duy + s.dy)
       : moveElements(x, d.ids, d.starts, dux + s.dx, duy + s.dy)), 'gesture');

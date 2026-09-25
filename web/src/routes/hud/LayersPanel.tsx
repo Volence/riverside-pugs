@@ -20,7 +20,8 @@
  */
 import { useState } from 'preact/hooks';
 import type { HudDesign } from '../../hud/design';
-import { elementRect, panelChild } from '../../hud/build';
+import { elementRect, panelChild, yourItemsBlocked } from '../../hud/build';
+import { YOUR_ITEMS } from '../../hud/youritems';
 import { panelChildren, type StateArt } from '../../hud/children';
 import { probe } from '../../hud/probes';
 import { visibleElements, type Side } from '../../hud/mock';
@@ -160,12 +161,15 @@ export function LayersPanel(
             // A card level: the teammate and infected cards. The Tab rows repeat per player but code places each one.
             const cards = reg?.repeat === 'cards' && !el.tab;
             const open = foldable && isOpen(el.id);
+            // Your items on an import that places its own items (or cannot be read): listed with why, no eye.
+            const blocked = el.id === YOUR_ITEMS ? yourItemsBlocked(design) : null;
             return (
               <div key={el.id} role="group" aria-label={`Layers: ${el.label}`}>
                 <Row
                   label={el.label} depth={0} active={isIn(sel, target)} hidden={!elementRect(design, el.id, design.aspect).visible}
+                  note={blocked ?? undefined}
                   onPick={(shift) => onPick(target, shift)}
-                  onEye={el.props.includes('visible') && (!el.hideGate || probe(el.hideGate)) ? (v) => onVisible(target, v) : undefined}
+                  onEye={!blocked && el.props.includes('visible') && (!el.hideGate || probe(el.hideGate)) ? (v) => onVisible(target, v) : undefined}
                   fold={foldable ? { open, onToggle: () => setFolds((f) => ({ ...f, [el.id]: !open })) } : undefined}
                 />
                 {open && cards && cardsOfPanel(el.id).map((i) => {
