@@ -204,6 +204,26 @@ describe('drawHud delegates panels to the renderer', () => {
     expect(redFills.length).toBe(3);   // one per teammate card
   });
 
+  it('draws a restyled incapacitated or dead panel in advanced mode only, as the download ships it', () => {
+    // QA 2026-09-25: the advanced state panels were written by the build but never drawn.
+    _setImageFactory(instant);
+    const fillsOf = (design: typeof DEFAULT_DESIGN, state: 'down' | 'dead') => {
+      const fills: string[] = [];
+      const ctx = { ...fakeCtx(() => {}) } as unknown as CanvasRenderingContext2D;
+      const real = ctx.fillRect.bind(ctx);
+      ctx.fillRect = ((...a: [number, number, number, number]) => { fills.push(ctx.fillStyle as string); return real(...a); }) as typeof ctx.fillRect;
+      drawHud(ctx, 853, 480, design, 'survivor', null, undefined, { state });
+      return fills;
+    };
+    const styles = { incapPanel: { kind: 'flat' as const, color: '0 255 0 255' }, deadPanel: { kind: 'flat' as const, color: '0 0 255 255' } };
+    const adv = { ...DEFAULT_DESIGN, advanced: true, styles };
+    expect(fillsOf(adv, 'down')).toContain('rgba(0,255,0,1)');
+    expect(fillsOf(adv, 'dead')).toContain('rgba(0,0,255,1)');
+    const normal = { ...DEFAULT_DESIGN, styles };
+    expect(fillsOf(normal, 'down')).not.toContain('rgba(0,255,0,1)');
+    expect(fillsOf(normal, 'dead')).not.toContain('rgba(0,0,255,1)');
+  });
+
   it('draws the weapon selection from the game art, clipped to its element, with no stand-in boxes', () => {
     // The game paints the slots inside the HudWeaponSelection panel and VGUI
     // clips that paint to the panel, so the preview clips to elementRect.

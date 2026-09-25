@@ -962,6 +962,9 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
     // Game code picks this art too: the character's own _incap panel, or the
     // one dead panel. Drawn stretched to the rect, as scaleImage 1 has the
     // game draw it, which is why the fit rule keeps the rect square.
+    // Advanced mode overwrites that art with the player's style (stylePass
+    // writes the slot's texture under the stock names), so draw the style.
+    if (design.advanced && drawSlotStyle(ctx, design, lname === 'dead' ? 'deadpanel' : 'incappanel', r)) return;
     const material = lname === 'dead' ? 'vgui/s_panel_dead' : `${portraitFor(opts)}_incap`;
     const img = artImage(material, opts.onAsset);
     if (!img) { if (missing.has(material)) hatch(ctx, r); return; }
