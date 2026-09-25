@@ -110,6 +110,15 @@ describe('gameValues', () => {
     expect(after.reviewing).toBe(false);
   });
 
+  it('with nothing settled yet, shows the newest reported config and says it is under review', () => {
+    // Production before the first triage: every patch with reported values is pending.
+    db.prepare("UPDATE balance_patches SET triage = 'pending'").run();
+    const g = gameValues(db, CAT, { admin: false });
+    expect(g.reviewing).toBe(true);
+    expect(g.unsettled).toBe(true);
+    expect(g.groups[0].values[0]).toMatchObject({ value: '8000', status: 'reported', lastChange: null });
+  });
+
   it('reads a folded patch: its own reported values, credited to the patch it counts for', () => {
     // Watching one more value folds the new patch into Tank 8000 on sight.
     const r = sight(db, 3, s1, INV('8000', { 'c:z_new_thing': '5' }), 'queue', '2026-09-23 00:00:00');
