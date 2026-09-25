@@ -184,17 +184,22 @@ export function isPicked(design: HudDesign, sel: Selection, hit: Hit): boolean {
 }
 
 /**
- * Whether a press lands inside a selected element's frame. The smallest
- * element under a point wins a hit, so a big selected element (Your health at
- * scale 2 covers the use bar, the crosshair and more) would otherwise lose
- * every drag that starts where a smaller element sits; a drag anywhere inside
- * what is selected moves it, as in any editor. A plain click still picks what
- * is under the pointer. The Free Teammates never count (their frame is the
- * screen, and their cards move one by one).
+ * Whether a press lands inside what is selected. The smallest element under a
+ * point wins a hit, so a big selected element (Your health at scale 2 covers
+ * the use bar, the crosshair and more) would otherwise lose every drag that
+ * starts where a smaller element sits; the same goes for a selected piece
+ * under another piece (Your health's number lies under its cross). A drag
+ * anywhere inside what is selected moves it, as in any editor. A plain click
+ * still picks what is under the pointer. The Free Teammates never count
+ * (their frame is the screen, and their cards move one by one).
  */
-function insideSelected(design: HudDesign, sel: Selection, at: { x: number; y: number } | null): boolean {
-  if (!at || sel.kind !== 'elements') return false;
-  return sel.ids.some((id) => !(id === 'teamColumn' && isFreeTeam(design)) && inside(elementFrame(design, id), at.x, at.y));
+function insideSelected(design: HudDesign, sel: Selection, at: { x: number; y: number } | null, state?: State): boolean {
+  if (!at) return false;
+  if (sel.kind === 'elements') {
+    return sel.ids.some((id) => !(id === 'teamColumn' && isFreeTeam(design)) && inside(elementFrame(design, id), at.x, at.y));
+  }
+  if (sel.kind === 'children' || sel.kind === 'cards') return selectionFrames(design, sel, state).some((f) => inside(f, at.x, at.y));
+  return false;
 }
 
 export type Intent = { kind: 'resize'; handle: Handle } | { kind: 'box' } | { kind: 'move'; sel: Selection } | { kind: 'none' };
@@ -210,10 +215,11 @@ export type Intent = { kind: 'resize'; handle: Handle } | { kind: 'box' } | { ki
  */
 export function dragIntent(
   design: HudDesign, sel: Selection, hit: Hit, mods: Mods, handle: Handle | null = null, at: { x: number; y: number } | null = null,
+  state?: State,
 ): Intent {
   if (handle) return { kind: 'resize', handle };
   if (mods.shift) return { kind: 'box' };
-  if (isPicked(design, sel, hit) || insideSelected(design, sel, at)) return { kind: 'move', sel: movable(sel) };
+  if (isPicked(design, sel, hit) || insideSelected(design, sel, at, state)) return { kind: 'move', sel: movable(sel) };
   if (!hit.element) return { kind: 'none' };
   if (hit.element === 'teamColumn' && hit.card !== null) return { kind: 'move', sel: cardsOf([hit.card]) };
   if (hit.element === 'teamColumn' && isFreeTeam(design)) return { kind: 'none' };

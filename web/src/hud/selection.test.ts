@@ -132,6 +132,20 @@ describe('drag', () => {
     expect(dragIntent(big, own, hitAt(big, 'survivor', 'healthy', 426, 20), plain, null, { x: 426, y: 20 }).kind).not.toBe('move');
   });
 
+  it('moves a selected piece from anywhere inside it, even where another piece sits on top', () => {
+    // QA 2026-09-25: Your health's Health number lies under the Health cross, so a drag on
+    // the selected number hit the cross and moved (and selected) the whole panel.
+    const num: Selection = { kind: 'children', names: ['HealthNumber'], card: 0, panel: 'ownHealth' };
+    const [f] = selectionFrames(D, num, DEFAULT_PREVIEW);
+    const p = { x: f.x + f.w / 2, y: f.y + f.h / 2 };
+    const hit = hitAt(D, 'survivor', DEFAULT_PREVIEW, p.x, p.y);
+    expect(hit.child).not.toBe('HealthNumber');
+    expect(dragIntent(D, num, hit, plain, null, p, DEFAULT_PREVIEW)).toEqual({ kind: 'move', sel: num });
+    // Outside the piece, what is under the pointer still wins.
+    const out = hitAt(D, 'survivor', DEFAULT_PREVIEW, 426, 20);
+    expect(dragIntent(D, num, out, plain, null, { x: 426, y: 20 }, DEFAULT_PREVIEW)).not.toEqual({ kind: 'move', sel: num });
+  });
+
   it('moves only the card under the pointer when the drag starts on one not picked, in any layout', () => {
     const card2: Selection = { kind: 'cards', cards: [1] };
     const hit = hitAt(D, 'survivor', 'healthy', HEAD2.x, HEAD2.y);

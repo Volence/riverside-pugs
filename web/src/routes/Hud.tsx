@@ -850,7 +850,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
    * move are one undo step and every move after it starts from Free.
    */
   const startDrag = (p: Press): Drag | null => {
-    const intent = dragIntent(current.current, sel, p.hit, p.mods, p.handle, { x: p.ux, y: p.uy });
+    const intent = dragIntent(current.current, sel, p.hit, p.mods, p.handle, { x: p.ux, y: p.uy }, preview);
     switch (intent.kind) {
       case 'box': return { kind: 'box' };
       case 'move':
