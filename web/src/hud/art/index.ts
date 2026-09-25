@@ -64,16 +64,9 @@ export const ART: Record<string, string> = {
   'vgui/s_panel_teenangst_incap': 'vgui-s_panel_teenangst_incap.png',
 };
 
-// Item icon glyphs: how far each one advances the row, and the space the game puts
-// between two, as a fraction of the font cell height the PNGs are drawn at.
-export const ICON_ADVANCE: Record<string, number> = {
-  'icon/item/medkit': 0.8076,
-  'icon/item/molotov': 0.7544,
-  'icon/item/pills': 0.4644,
-  'icon/item/pipebomb': 0.7798,
-};
-
-export const ICON_SPACE = 0.2954;
+// ICON_ADVANCE and ICON_SPACE live in ../iconMetrics.ts (plain numbers, no
+// art folder import), re-exported here so existing importers keep working.
+export { ICON_ADVANCE, ICON_SPACE } from '../iconMetrics';
 
 // Weapon selection icons: each cell's width and height on its icon sheet, in texels.
 export const EQUIP_ICON_SIZE: Record<string, [number, number]> = {
