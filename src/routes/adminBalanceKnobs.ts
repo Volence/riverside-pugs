@@ -54,8 +54,14 @@ export async function adminBalanceKnobRoutes(app: FastifyInstance, opts: KnobRou
     if (!adminId) return reply;
     const knobs = current();
     if (!knobs) return reply.code(503).send(unavailable);
-    const b = (req.body ?? {}) as { values?: unknown; name?: unknown; notes?: unknown };
-    const r = applyKnobs(db, knobs, { values: b.values ?? {}, name: b.name, notes: b.notes, adminId });
+    const b = (req.body ?? {}) as { values?: unknown; name?: unknown; notes?: unknown; baseRolloutId?: unknown };
+    // The rollout the admin previewed against; required, so a page from
+    // before this check (or a hand-made request) cannot skip it.
+    const base = b.baseRolloutId;
+    if (base !== null && !(typeof base === 'number' && Number.isInteger(base))) {
+      return reply.code(400).send({ error: 'This page is out of date: preview again before applying.' });
+    }
+    const r = applyKnobs(db, knobs, { values: b.values ?? {}, name: b.name, notes: b.notes, adminId, baseRolloutId: base });
     if (!r.ok) return reply.code(r.status).send({ error: r.error, preview: r.preview });
     logAdmin(db, adminId, 'balance_apply', r.rolloutId, {
       patchId: r.patchId, reused: r.reused, name: r.name, notesSet: r.notesSet, changes: r.preview.diff.map((d) => `${d.cvar} ${d.from} -> ${d.to}`),

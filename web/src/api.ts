@@ -927,9 +927,11 @@ export interface KnobView { cvar: string; label: string; group: string; type: 'i
 export interface KnobDiffRow { cvar: string; label: string; group: string; from: string; to: string }
 export interface KnobPreview { values: Record<string, string>; errors: string[]; diff: KnobDiffRow[]; groupsChanged: string[];
   base: { patchId: number; number: number } | null; missing: string[]; blocking: { serverId: number; name: string; diff: string }[];
-  fingerprint: string | null; existingPatch: { id: number; number: number; name: string | null; notes: string; source: string; triage?: 'pending' | 'balance' | 'folded' } | null }
+  fingerprint: string | null; existingPatch: { id: number; number: number; name: string | null; notes: string; source: string; triage?: 'pending' | 'balance' | 'folded' } | null;
+  warnings: string[]; rolloutId: number | null }
 export interface RolloutServer { serverId: number; name: string; state: 'pending' | 'written' | 'confirmed' | 'failed'; lastError: string | null;
-  writtenAt: string | null; confirmedAt: string | null; seen: { patchId: number; number: number; at: string } | null; mismatch: string | null }
+  writtenAt: string | null; confirmedAt: string | null; seen: { patchId: number; number: number; at: string } | null; mismatch: string | null;
+  noTransport: boolean }
 export interface RolloutSummary { id: number; patchId: number; patchNumber: number; patchName: string | null; values: Record<string, string>;
   createdBy: string; createdByName: string | null; createdAt: string; supersededAt: string | null; servers: RolloutServer[] }
 export interface KnobsState { knobs: KnobView[]; current: Record<string, string>; base: { patchId: number; number: number } | null;
@@ -1574,7 +1576,7 @@ export const adminApi = {
     post(`/api/admin/balance/patches/${id}`, body),
   balanceKnobs: (signal?: AbortSignal) => get<KnobsState>('/api/admin/balance/knobs', signal),
   balanceKnobsPreview: (values: Record<string, string>) => post<KnobPreview>('/api/admin/balance/knobs/preview', { values }),
-  balanceKnobsApply: (body: { values: Record<string, string>; name: string; notes: string }) =>
+  balanceKnobsApply: (body: { values: Record<string, string>; name: string; notes: string; baseRolloutId: number | null }) =>
     post<{ ok: true; rolloutId: number; patchId: number; reused: boolean }>('/api/admin/balance/knobs/apply', body),
   balanceKnobsRestore: (patchId: number) => get<{ values: Record<string, string>; notes: string[] }>(`/api/admin/balance/knobs/restore/${patchId}`),
   balanceRollouts: (signal?: AbortSignal) => get<{ rollouts: RolloutSummary[] }>('/api/admin/balance/rollouts', signal),

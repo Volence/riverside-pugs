@@ -4,6 +4,7 @@ import { addServer, claimIdle, markLive, type ServerRow } from '../src/serverPoo
 import type { AddonsTransport } from '../src/addonsTransport.js';
 import { subscribeAdminEvents } from '../src/adminFeed.js';
 import { BalanceRolloutWriter, cfgDirOf } from '../src/balanceWriter.js';
+import { listRollouts } from '../src/balanceRollouts.js';
 import { readFileSync } from 'node:fs';
 
 type DB = ReturnType<typeof openDb>;
@@ -155,6 +156,22 @@ describe('BalanceRolloutWriter', () => {
     db.prepare('UPDATE servers SET addons_dir = NULL WHERE id = ?').run(s1);
     await new BalanceRolloutWriter({ db, transport: fakeBoxes().transport }).sync();
     expect(state(s1)).toEqual({ state: 'failed', last_error: 'no addons transport configured' });
+  });
+
+  it('a server with no transport alerts once for the rollout, not on every sweep, and is listed as such', async () => {
+    db.prepare('UPDATE servers SET addons_dir = NULL WHERE id = ?').run(s1);
+    const alerts: string[] = [];
+    const off = subscribeAdminEvents((e) => { if (e.kind === 'problem') alerts.push(e.text); });
+    const w = new BalanceRolloutWriter({ db, transport: fakeBoxes().transport });
+    await w.sync();
+    await w.sync();
+    await w.sync();
+    off();
+    expect(alerts.length).toBe(1);
+    expect(listRollouts(db, { cvars: [], files: [], dirs: [], versionless: [] })[0].servers.find((x) => x.serverId === s1))
+      .toMatchObject({ state: 'failed', noTransport: true });
+    expect(listRollouts(db, { cvars: [], files: [], dirs: [], versionless: [] })[0].servers.find((x) => x.serverId === s2))
+      .toMatchObject({ noTransport: false });
   });
 
   it('adds rows for servers enabled after the apply and skips disabled ones', async () => {

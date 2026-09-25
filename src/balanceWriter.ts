@@ -5,7 +5,7 @@ import type { DB } from './db.js';
 import { transportFor, type AddonsTransport } from './addonsTransport.js';
 import { getServer, listServers, type ServerRow } from './serverPool.js';
 import { publishAdminEvent } from './adminFeed.js';
-import { activeRollout, ensureServerRows, markFailed, markPending, markWritten, type RolloutRow } from './balanceRollouts.js';
+import { activeRollout, ensureServerRows, markFailed, markPending, markWritten, NO_TRANSPORT, type RolloutRow } from './balanceRollouts.js';
 
 /**
  * Puts the active rollout's cfg/pug_balance.cfg on every enabled server.
@@ -30,9 +30,7 @@ import { activeRollout, ensureServerRows, markFailed, markPending, markWritten, 
 export const BALANCE_CFG = 'pug_balance.cfg';
 const SWEEP_MS = 60_000;
 const TIMEOUT_MS = 60_000;
-/** The error a box with no reachable cfg directory is failed with; the
- *  Knobs tab shows it as its own state rather than as a retrying write. */
-export const NO_TRANSPORT = 'no addons transport configured';
+export { NO_TRANSPORT };
 
 /** `<game>/left4dead/addons` -> `<game>/left4dead/cfg`; null for a layout we
  *  cannot reason about, which then reads as "no transport". */
@@ -302,10 +300,14 @@ export class BalanceRolloutWriter {
     return this.fail(server, ro, error);
   }
 
+  /** Alerts and logs once per box per rollout (markFailed says when it is
+   *  the first failure); later retries fail quietly until one succeeds. */
   private fail(server: ServerRow, ro: RolloutRow, error: string): WriteOutcome {
-    console.error(`[balanceWriter] ${server.name}: ${error}`);
     if (markFailed(this.deps.db, ro.id, server.id, error)) {
-      publishAdminEvent({ kind: 'problem', text: `Could not write the balance config to ${server.name}: ${error}. It is retried every minute; see Admin > Balance > Knobs.` });
+      console.error(`[balanceWriter] ${server.name}: ${error}`);
+      publishAdminEvent({ kind: 'problem', text: error === NO_TRANSPORT
+        ? `${server.name} has no addons transport configured, so the site cannot give it the balance config. Set its addons dir and transport; see Admin > Balance > Knobs.`
+        : `Could not write the balance config to ${server.name}: ${error}. It is retried every minute; see Admin > Balance > Knobs.` });
     }
     return { serverId: server.id, server: server.name, ok: false, error };
   }
