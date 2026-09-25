@@ -1115,10 +1115,12 @@ export function PiecesControls(
     }, 'gesture');
   };
   const where = panel === 'teamColumn' ? 'the teammate card' : (elementById(panel)?.label ?? panel);
+  // X, Y and Align move pieces: offered only when one of these can move (no Tab piece does in v1).
+  const moves = names.some((n) => childDef(panel, n)?.move);
   return (
     <Field legend={`${names.length} pieces in ${where}`}>
       {repeatsCards(panel) && <p class="muted hud__note">{elementById(panel)?.tab ? EVERY_ROW : EVERY_CARD}</p>}
-      <div class="hud__row2">
+      {moves && <div class="hud__row2">
         <label class="hud__field">
           <span>X</span>
           <input type="number" value={Math.round(box.x)} onInput={(e) => place('x', e)} {...endsOn(end)} />
@@ -1127,8 +1129,8 @@ export function PiecesControls(
           <span>Y</span>
           <input type="number" value={Math.round(box.y)} onInput={(e) => place('y', e)} {...endsOn(end)} />
         </label>
-      </div>
-      <AlignRow onAlign={(how) => edit((d) => alignChildren(d, names, how, panel, file))} />
+      </div>}
+      {moves && <AlignRow onAlign={(how) => edit((d) => alignChildren(d, names, how, panel, file))} />}
       <label class="hud__check">
         <input
           type="checkbox" checked={allVisible}
