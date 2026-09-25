@@ -36,4 +36,11 @@ describe('the registry offers only what client.dll can read', () => {
     expect(has.has('monochrome_color')).toBe(true);
     expect(has.has('HudEdNotAKey')).toBe(false);
   });
+  // The Tab screen's runs (tab screen spec 1.1, 1.5, 1.6): the scoreboard dialog, the row panels and the versus panel.
+  it('holds the scoreboard runs the Tab screen registry reads', () => {
+    for (const s of ['PlayerBackground_Selected', 'YourTeamHighlightImage', 'EnemyTeamHighlightImage', 'scoreboard_position', 'if_embedded',
+      'MissionTitle', 'SurvivorStatsHealth', 'SurvivorStatsName', 'Resource/UI/ScoreBoardSurvivor.res', 'Resource/UI/ScoreBoardInfectedPlayer.res']) {
+      expect(has.has(s), s).toBe(true);
+    }
+  });
 });
