@@ -77,7 +77,7 @@ import { RconClient as RealRcon } from './rcon.js';
 import type { ServerQuery } from './leaveControl.js';
 import { ServerBanSync, type ServerExec } from './serverBans.js';
 import { ServerAdminSync } from './serverAdmins.js';
-import { kickThenQuit, rconRestarter, type ServerRestarter } from './serverRestart.js';
+import { kickThenQuit, QuitNotSentError, rconRestarter, type ServerRestarter } from './serverRestart.js';
 import { LogListener, type LogMeta } from './logListener.js';
 import { LogAuth, pushLogSecret } from './logAuth.js';
 import { SelfStartedMatches } from './selfStarted.js';
@@ -507,7 +507,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     quit: async (server) => {
       const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
       try {
-        await rcon.connect();
+        // A failed connect means quit never went out: typed, so the restarter
+        // retries it rather than read it as the box dying mid-quit.
+        try {
+          await rcon.connect();
+        } catch (err) {
+          throw new QuitNotSentError(err);
+        }
         await kickThenQuit(rcon, server.name);
       } finally {
         rcon.close();

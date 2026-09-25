@@ -53,6 +53,26 @@ export function restartsAfterMatch(db: DB, serverId: number): boolean {
   return row?.restart_after_match === 1;
 }
 
+/** Tries at sending `quit` before giving up on this restart. */
+export const QUIT_ATTEMPTS = 4;
+/** Gap between those tries. */
+export const QUIT_RETRY_MS = 5_000;
+
+/**
+ * Thrown by a `quit` dependency when it never got as far as sending quit
+ * (connect or auth failed), as opposed to the connection dying after quit went
+ * out, which is the normal result. The difference matters: from 2026-09-21 to
+ * 09-25 Dallas skipped 7 of 37 between-match restarts this way ("rcon connect
+ * timeout"), each logged as a successful quit, and the box that never went down
+ * answered the first probe as "back".
+ */
+export class QuitNotSentError extends Error {
+  constructor(readonly cause: unknown) {
+    super(`quit not sent: ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = 'QuitNotSentError';
+  }
+}
+
 export interface ServerRestarter {
   /** True once the box is answering again; false if it never came back, in
    *  which case it has already been reported and must stay out of the pool. */
@@ -60,7 +80,9 @@ export interface ServerRestarter {
 }
 
 export interface RconRestarterDeps {
-  /** Ask the box to quit. Its supervisor starts it again. */
+  /** Ask the box to quit. Its supervisor starts it again. Throws
+   *  QuitNotSentError when quit never reached the box; any other error means
+   *  the connection died after quit went out. */
   quit(server: ServerRow): Promise<void>;
   /** One readiness probe. Resolves true when the box answers as a working pug
    *  server, false when it does not (refused, timed out, still loading). */
@@ -79,13 +101,34 @@ export function rconRestarter(deps: RconRestarterDeps): ServerRestarter {
 
   return {
     async restart(server) {
-      try {
-        await deps.quit(server);
-      } catch (err) {
-        // Expected as often as not: the connection dies with the process we
-        // just asked to exit, and that is a successful quit, not a failure.
-        // Whether it worked is decided by the probe below, never by this.
-        console.log(`[serverRestart] ${server.name} dropped the quit connection (normal):`, err instanceof Error ? err.message : err);
+      let sent = false;
+      for (let attempt = 1; attempt <= QUIT_ATTEMPTS && !sent; attempt++) {
+        try {
+          await deps.quit(server);
+          sent = true;
+        } catch (err) {
+          if (err instanceof QuitNotSentError) {
+            console.warn(`[serverRestart] ${server.name} quit not sent (attempt ${attempt}/${QUIT_ATTEMPTS}):`, err.message);
+            if (attempt < QUIT_ATTEMPTS) await sleep(QUIT_RETRY_MS);
+            continue;
+          }
+          // Expected as often as not: the connection dies with the process we
+          // just asked to exit, and that is a successful quit, not a failure.
+          // Whether it worked is decided by the probe below, never by this.
+          console.log(`[serverRestart] ${server.name} dropped the quit connection (normal):`, err instanceof Error ? err.message : err);
+          sent = true;
+        }
+      }
+      if (!sent) {
+        // Never went down, so the probe below finds it answering and it goes
+        // back to the pool unrestarted. That is the right outcome for the next
+        // match; it is reported so a box that keeps skipping gets looked at.
+        console.error(`[serverRestart] ${server.name} was not restarted: quit could not be sent in ${QUIT_ATTEMPTS} tries`);
+        publishAdminEvent({
+          kind: 'problem',
+          text: `${server.name} was due a restart after its match but did not answer rcon in `
+            + `${QUIT_ATTEMPTS} tries, so it was not restarted. It stays in the pool.`,
+        });
       }
       const deadline = now() + timeoutMs;
       // Slept BEFORE the first probe on purpose. The old process is still
