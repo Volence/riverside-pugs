@@ -4,7 +4,7 @@ import { _setImageFactory, _resetAssetCache, childRects } from '../hud/render';
 import { panelBoxes } from '../hud/mock';
 import { _setProbe } from '../hud/probes';
 import { panelChild, elementRect, teamCardRects } from '../hud/build';
-import { toUnits, canvasDpr } from './Hud';
+import { toUnits, canvasDpr, watchDpr } from './Hud';
 import Hud from './Hud';
 import { _setFoldDefault } from './hud/LayersPanel';
 import { readFileSync } from 'node:fs';
@@ -2936,6 +2936,47 @@ describe('canvasDpr', () => {
     expect(canvasDpr(2000, 2)).toBe(1.6);
     expect(canvasDpr(4000, 2)).toBe(1);
     expect(canvasDpr(800, 0.9)).toBe(1);
+  });
+});
+
+describe('watchDpr', () => {
+  /** A window whose matchMedia hands back queries the test can fire, as a monitor change does. */
+  const fakeWindow = (ratio: number) => {
+    const queries: { media: string; listeners: Set<() => void> }[] = [];
+    const win = {
+      devicePixelRatio: ratio,
+      matchMedia: (media: string) => {
+        const q = { media, listeners: new Set<() => void>() };
+        queries.push(q);
+        return {
+          media,
+          addEventListener: (_: string, f: () => void) => q.listeners.add(f),
+          removeEventListener: (_: string, f: () => void) => q.listeners.delete(f),
+        };
+      },
+    };
+    return { win, queries };
+  };
+
+  it('redraws when the pixel density changes, and listens again at the new one', () => {
+    const { win, queries } = fakeWindow(1);
+    let draws = 0;
+    const stop = watchDpr(win as unknown as Window, () => { draws += 1; });
+    expect(queries.map((q) => q.media)).toEqual(['(resolution: 1dppx)']);
+    win.devicePixelRatio = 1.5;
+    for (const f of [...queries[0].listeners]) f();
+    expect(draws).toBe(1);
+    expect(queries[0].listeners.size).toBe(0);
+    expect(queries.map((q) => q.media)).toEqual(['(resolution: 1dppx)', '(resolution: 1.5dppx)']);
+    stop();
+    expect(queries[1].listeners.size).toBe(0);
+  });
+
+  it('does nothing where there is no matchMedia (a test page)', () => {
+    let draws = 0;
+    const stop = watchDpr({ devicePixelRatio: 2 } as unknown as Window, () => { draws += 1; });
+    stop();
+    expect(draws).toBe(0);
   });
 });
 

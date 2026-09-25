@@ -85,6 +85,26 @@ export function canvasDpr(cssW: number, ratio = typeof window === 'undefined' ? 
   return Math.max(1, Math.min(ratio, MAX_CANVAS_PX / cssW));
 }
 
+/**
+ * Call `onChange` whenever the display's pixel density changes (the window
+ * dragged to another monitor, the browser zoomed), so the canvas redraws at
+ * the new density. A `(resolution: Xdppx)` query matches only the density it
+ * was made at, so each change re-arms one at the new density. Where there is
+ * no matchMedia (a test page) it does nothing. Returns the stop function.
+ */
+export function watchDpr(win: Window, onChange: () => void): () => void {
+  if (typeof win.matchMedia !== 'function') return () => {};
+  let mq: MediaQueryList | null = null;
+  const fire = () => { disarm(); onChange(); arm(); };
+  const arm = () => {
+    mq = win.matchMedia(`(resolution: ${win.devicePixelRatio || 1}dppx)`);
+    mq?.addEventListener?.('change', fire);
+  };
+  const disarm = () => { mq?.removeEventListener?.('change', fire); mq = null; };
+  arm();
+  return disarm;
+}
+
 /** How wide the close-up's sharp render may get, in pixels: past this a redraw costs more than it shows. */
 const CLOSEUP_RENDER_W = 2600;
 
@@ -507,6 +527,9 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     ro.observe(c);
     return () => ro.disconnect();
   }, []);
+  // A new pixel density (another monitor, a zoom) keeps the box's size, so the
+  // ResizeObserver misses it: redraw then too, so the canvas is sharp there.
+  useEffect(() => (typeof window === 'undefined' ? undefined : watchDpr(window, () => setImgTick((t) => t + 1))), []);
 
   // The press and the drag under way, if any. Refs rather than state: they
   // change on every pointermove and must never themselves trigger a render.
