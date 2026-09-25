@@ -1334,6 +1334,13 @@ const LIMIT_SHADE = 'rgba(0,0,0,0.45)';
 /** A limit label's plate height, and the step from one plate down to the next (the plate plus a 2 px gap). */
 const LIMIT_PLATE_H = 14;
 const LIMIT_PLATE_STEP = LIMIT_PLATE_H + 2;
+/**
+ * The first plate's top, CSS px: below the selection's name chip
+ * (.hud__crumbs, 8 px in from the canvas corner and about 20 px tall, always
+ * shown while something is picked), which otherwise covered "Your health
+ * bar's edge" on Modern, whose bar sits at 42 units, near the left edge.
+ */
+export const LIMIT_PLATE_TOP = 34;
 
 /**
  * Your items' limits (spec section 2): everything the row cannot reach
@@ -1363,7 +1370,7 @@ function drawLimits(ctx: CanvasRenderingContext2D, lines: LimitLine[], k: number
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, pxH); ctx.stroke();
     const w = ctx.measureText(l.label).width + 8 * d;
     const bx = Math.max(0, Math.min(l.side === 'left' ? x + 4 * d : x - 4 * d - w, pxW - w));
-    const by = (8 + i * LIMIT_PLATE_STEP) * d;
+    const by = (LIMIT_PLATE_TOP + i * LIMIT_PLATE_STEP) * d;
     ctx.fillStyle = 'rgba(0,0,0,0.8)';
     ctx.fillRect(bx, by, w, LIMIT_PLATE_H * d);
     ctx.fillStyle = LIMIT_COLOUR;
