@@ -257,8 +257,8 @@
       "label": "Tank health",
       "source": "cvar",
       "unit": "HP",
-      "vanilla": "4000",
-      "note": "Versus multiplies this by the tank health multiplier below."
+      "vanilla": "6000",
+      "note": "Versus multiplies this by the tank health multiplier below. Vanilla versus is 4000 x 1.5 = 6000."
     },
     {
       "id": "versus_tank_bonus_health",
