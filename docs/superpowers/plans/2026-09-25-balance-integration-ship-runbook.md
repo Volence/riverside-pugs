@@ -91,6 +91,7 @@ after any push to Dallas, never blank `sv_password`.
 - Web: redeploy master. Master's code ignores the new tables and columns, so the
   DB stays as it is; restore the stage-1 backup only if a migration itself went
   wrong (that loses everything recorded since).
-- Plugin: the `.pre-0.3.14` copy on each box.
+- Plugin: keep a `pug-match.smx.pre-0.3.14` copy on each box when staging, and
+  put it back the same way.
 - Knob hook: delete the exec line (a missing `pug_balance.cfg` only prints
   "couldn't exec").
