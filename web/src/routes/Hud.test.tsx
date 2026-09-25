@@ -3023,8 +3023,8 @@ describe('The Tab screen on the page', () => {
     fireEvent.click(layer('Versus score').getByRole('button', { name: '"Health Bonus:"' }));
     expect(screen.getByText(/Hiding it hides its number too/)).toBeTruthy();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Visible' }));
-    await waitFor(() => expect(saved().children?.tabVersus).toEqual({ HealthLabel: { visible: false }, HealthAmount: { visible: false } }));
-    expect(layer('Versus score').getByRole('button', { name: 'Show Health bonus' })).toBeTruthy();
+    // Only the label's hide is stored: the game and the preview take its number along.
+    await waitFor(() => expect(saved().children?.tabVersus).toEqual({ HealthLabel: { visible: false } }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Visible' }));
     await waitFor(() => expect(saved().children?.tabVersus).toBeUndefined());
   });
