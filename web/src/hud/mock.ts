@@ -63,6 +63,13 @@ export interface HudView {
   hover?: { rects: Box[]; label: string } | null;
   marquee?: Box | null;
   guides?: Guide[];
+  /**
+   * Device pixels per CSS pixel of the canvas (window.devicePixelRatio, capped
+   * by the page). The HUD itself is drawn at whatever size the canvas is; only
+   * the editor's own chrome (outlines, handles, the hover label, guides) is a
+   * fixed size on screen, so it is scaled by this. 1 when absent.
+   */
+  dpr?: number;
 }
 
 /** Whether a point is on a box, edges included. */
@@ -1261,10 +1268,11 @@ function accentColour(ctx: CanvasRenderingContext2D): string {
   }
 }
 
-function drawHiddenOutline(ctx: CanvasRenderingContext2D, r: Rect) {
+function drawHiddenOutline(ctx: CanvasRenderingContext2D, r: Rect, d = 1) {
   ctx.save();
   ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-  ctx.setLineDash([4, 4]);
+  ctx.lineWidth = d;
+  ctx.setLineDash([4 * d, 4 * d]);
   ctx.strokeRect(r.x, r.y, r.w, r.h);
   ctx.restore();
 }
@@ -1275,69 +1283,70 @@ const GUIDE = '#ff4fa3';
 const MARQUEE = 'rgba(153,204,255,0.9)';
 const MARQUEE_FILL = 'rgba(153,204,255,0.13)';
 
-function drawFrames(ctx: CanvasRenderingContext2D, frames: Box[], k: number, accent: string) {
+function drawFrames(ctx: CanvasRenderingContext2D, frames: Box[], k: number, accent: string, d = 1) {
   ctx.save();
   ctx.strokeStyle = accent;
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1.5 * d;
   ctx.setLineDash([]);
   for (const f of frames) ctx.strokeRect(f.x * k, f.y * k, f.w * k, f.h * k);
   ctx.restore();
 }
 
 /** The selection's box, thin, and a white square with an accent edge on each handle point. */
-function drawHandles(ctx: CanvasRenderingContext2D, box: Box | null, points: { x: number; y: number }[], k: number, accent: string) {
+function drawHandles(ctx: CanvasRenderingContext2D, box: Box | null, points: { x: number; y: number }[], k: number, accent: string, d = 1) {
   ctx.save();
   ctx.setLineDash([]);
-  ctx.lineWidth = 1;
+  ctx.lineWidth = d;
   ctx.strokeStyle = accent;
   if (box) ctx.strokeRect(box.x * k, box.y * k, box.w * k, box.h * k);
+  const size = HANDLE_PX * d;
   for (const p of points) {
-    const x = p.x * k - HANDLE_PX / 2, y = p.y * k - HANDLE_PX / 2;
+    const x = p.x * k - size / 2, y = p.y * k - size / 2;
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(x, y, HANDLE_PX, HANDLE_PX);
-    ctx.strokeRect(x, y, HANDLE_PX, HANDLE_PX);
+    ctx.fillRect(x, y, size, size);
+    ctx.strokeRect(x, y, size, size);
   }
   ctx.restore();
 }
 
 /** What a click would pick: a dashed white outline and its name in a small label above the first rect. */
-function drawHover(ctx: CanvasRenderingContext2D, hover: { rects: Box[]; label: string }, k: number) {
+function drawHover(ctx: CanvasRenderingContext2D, hover: { rects: Box[]; label: string }, k: number, d = 1) {
   ctx.save();
   ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([3, 3]);
+  ctx.lineWidth = d;
+  ctx.setLineDash([3 * d, 3 * d]);
   for (const r of hover.rects) ctx.strokeRect(r.x * k, r.y * k, r.w * k, r.h * k);
   ctx.setLineDash([]);
   const first = hover.rects[0];
   if (first && hover.label) {
-    ctx.font = '11px sans-serif';
+    ctx.font = `${11 * d}px sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    const w = ctx.measureText(hover.label).width + 8;
-    const x = first.x * k, y = Math.max(0, first.y * k - 16);
+    const w = ctx.measureText(hover.label).width + 8 * d;
+    const x = first.x * k, y = Math.max(0, first.y * k - 16 * d);
     ctx.fillStyle = 'rgba(0,0,0,0.8)';
-    ctx.fillRect(x, y, w, 14);
+    ctx.fillRect(x, y, w, 14 * d);
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(hover.label, x + 4, y + 11);
+    ctx.fillText(hover.label, x + 4 * d, y + 11 * d);
   }
   ctx.restore();
 }
 
-function drawMarquee(ctx: CanvasRenderingContext2D, m: Box, k: number) {
+function drawMarquee(ctx: CanvasRenderingContext2D, m: Box, k: number, d = 1) {
   ctx.save();
   ctx.fillStyle = MARQUEE_FILL;
   ctx.fillRect(m.x * k, m.y * k, m.w * k, m.h * k);
   ctx.strokeStyle = MARQUEE;
-  ctx.lineWidth = 1;
-  ctx.setLineDash([4, 3]);
+  ctx.lineWidth = d;
+  ctx.setLineDash([4 * d, 3 * d]);
   ctx.strokeRect(m.x * k, m.y * k, m.w * k, m.h * k);
   ctx.restore();
 }
 
-function drawGuides(ctx: CanvasRenderingContext2D, guides: Guide[], k: number) {
+function drawGuides(ctx: CanvasRenderingContext2D, guides: Guide[], k: number, d = 1) {
   ctx.save();
   ctx.strokeStyle = GUIDE;
-  ctx.lineWidth = 1;
+  ctx.lineWidth = d;
   ctx.setLineDash([]);
   for (const g of guides) {
     ctx.beginPath();
@@ -1369,6 +1378,7 @@ export function drawHud(
   selected: string | readonly string[] | null, onAsset?: () => void, view: HudView = {},
 ): void {
   const k = pxH / SCREEN_H;
+  const d = view.dpr ?? 1;
   const accent = accentColour(ctx);
   // A hidden element is still drawn, dimmed, while it is selected, so the
   // player can see what they are editing; every outline comes from `view`.
@@ -1390,15 +1400,15 @@ export function drawHud(
       ctx.globalAlpha = 0.25;
       paint(ctx, r, design, k, onAsset, view);
       ctx.restore();
-      drawHiddenOutline(ctx, r);
+      drawHiddenOutline(ctx, r, d);
     } else {
       paint(ctx, r, design, k, onAsset, view);
     }
   }
 
-  if (view.frames?.length) drawFrames(ctx, view.frames, k, accent);
-  if (view.box || view.handles?.length) drawHandles(ctx, view.box ?? null, view.handles ?? [], k, accent);
-  if (view.hover) drawHover(ctx, view.hover, k);
-  if (view.marquee) drawMarquee(ctx, view.marquee, k);
-  if (view.guides?.length) drawGuides(ctx, view.guides, k);
+  if (view.frames?.length) drawFrames(ctx, view.frames, k, accent, d);
+  if (view.box || view.handles?.length) drawHandles(ctx, view.box ?? null, view.handles ?? [], k, accent, d);
+  if (view.hover) drawHover(ctx, view.hover, k, d);
+  if (view.marquee) drawMarquee(ctx, view.marquee, k, d);
+  if (view.guides?.length) drawGuides(ctx, view.guides, k, d);
 }

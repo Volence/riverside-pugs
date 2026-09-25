@@ -4,7 +4,7 @@ import { _setImageFactory, _resetAssetCache, childRects } from '../hud/render';
 import { panelBoxes } from '../hud/mock';
 import { _setProbe } from '../hud/probes';
 import { panelChild, elementRect } from '../hud/build';
-import { toUnits } from './Hud';
+import { toUnits, canvasDpr } from './Hud';
 import Hud from './Hud';
 import { _setFoldDefault } from './hud/LayersPanel';
 import { readFileSync } from 'node:fs';
@@ -2915,5 +2915,17 @@ describe('The panels seen only with other players on the page (plan task M2)', (
     fireEvent.click(layer('Voice list').getByRole('button', { name: 'Voice list' }));
     fireEvent.input(screen.getByLabelText('Row height'), { target: { value: '30' } });
     await waitFor(() => expect(saved().elements?.voiceList?.keys?.item_tall).toBe('30'));
+  });
+});
+
+describe('canvasDpr', () => {
+  it('draws at the display\'s own pixel density', () => {
+    expect(canvasDpr(1200, 1.5)).toBe(1.5);
+    expect(canvasDpr(1200, 1)).toBe(1);
+  });
+  it('stops a wide canvas at 3200 device pixels, and never goes under 1', () => {
+    expect(canvasDpr(2000, 2)).toBe(1.6);
+    expect(canvasDpr(4000, 2)).toBe(1);
+    expect(canvasDpr(800, 0.9)).toBe(1);
   });
 });

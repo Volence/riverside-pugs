@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { visibleElements, hitTest, drawHud, childAt, panelBoxes, TEAM_CARDS, infectedCardRects, infectedCardClasses } from './mock';
+import { visibleElements, hitTest, drawHud, HANDLE_PX, childAt, panelBoxes, TEAM_CARDS, infectedCardRects, infectedCardClasses } from './mock';
 import { selectionFrames, TEAMMATES } from './selection';
 import { withTeamDir } from './edit';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
@@ -245,6 +245,19 @@ describe('drawHud delegates panels to the renderer', () => {
     ctx.drawImage = ((img: HTMLImageElement) => { srcs.push(img.src); }) as unknown as typeof ctx.drawImage;
     drawHud(ctx, 853, 480, design, 'survivor', null);
     expect(srcs.filter((u) => u === 'data:image/png;base64,AAAA').length).toBe(3);   // one per teammate card
+  });
+
+  it('draws the selection handles at a fixed size on screen, in device pixels', () => {
+    const sizes = (dpr?: number) => {
+      const out: number[] = [];
+      const ctx = fakeCtx(() => {});
+      const real = ctx.fillRect.bind(ctx);
+      ctx.fillRect = ((...a: [number, number, number, number]) => { if (ctx.fillStyle === '#ffffff') out.push(a[2]); return real(...a); }) as typeof ctx.fillRect;
+      drawHud(ctx, 853, 480, DEFAULT_DESIGN, 'survivor', null, undefined, { handles: [{ x: 10, y: 10 }], ...(dpr ? { dpr } : {}) });
+      return out;
+    };
+    expect(sizes()).toEqual([HANDLE_PX]);
+    expect(sizes(2)).toEqual([HANDLE_PX * 2]);
   });
 
   it('draws the weapon selection from the game art, clipped to its element, with no stand-in boxes', () => {

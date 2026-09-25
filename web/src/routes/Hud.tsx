@@ -76,6 +76,13 @@ export function toUnits(e: { clientX: number; clientY: number }, rect: DOMRect):
   return { ux: (e.clientX - rect.left) * k, uy: (e.clientY - rect.top) * k };
 }
 
+/** The widest backing store the preview canvas gets, in device pixels. */
+const MAX_CANVAS_PX = 3200;
+/** Device pixels per CSS pixel for a canvas `cssW` wide: the display's, at most what keeps it under MAX_CANVAS_PX. */
+export function canvasDpr(cssW: number, ratio = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1): number {
+  return Math.max(1, Math.min(ratio, MAX_CANVAS_PX / cssW));
+}
+
 /** How wide the close-up's sharp render may get, in pixels: past this a redraw costs more than it shows. */
 const CLOSEUP_RENDER_W = 2600;
 
@@ -515,11 +522,15 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     const ctx = c.getContext('2d');
     if (!ctx) return;
 
-    // 1:1 pixels: the backing store matches the CSS box, which is itself
-    // locked to the design's aspect ratio by the inline aspect-ratio style.
+    // The backing store is the CSS box (itself locked to the design's aspect
+    // by the inline aspect-ratio style) in device pixels, so a display scaled
+    // to 125 or 150% gets a sharp preview, not a stretched one. Capped, as a
+    // very wide canvas at 2x would make every redraw slow.
     const rect = c.getBoundingClientRect();
-    const w = Math.max(320, Math.round(rect.width));
-    const h = Math.max(1, Math.round(rect.height));
+    const cssW = Math.max(320, Math.round(rect.width));
+    const cssH = Math.max(1, Math.round(rect.height));
+    const dpr = canvasDpr(cssW);
+    const w = Math.round(cssW * dpr), h = Math.round(cssH * dpr);
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
 
     const shotSize = shot.current ? { w: shot.current.naturalWidth, h: shot.current.naturalHeight } : null;
@@ -533,10 +544,11 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
         held,
         frames: selectionFrames(design, sel, preview),
         box,
-        handles: box ? handlePoints(box, handlesFor(design, sel), handleBounds(w, h)) : [],
+        handles: box ? handlePoints(box, handlesFor(design, sel), handleBounds(cssW, cssH)) : [],
         hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered, preview), label: selectionLabel(hovered) },
         marquee,
         guides,
+        dpr,
       });
     } catch (e) {
       // A half-drawn HUD is wiped back to the backdrop before the banner says why.
