@@ -149,6 +149,21 @@ describe('release routes', () => {
     expect(box.warnings.join(' ')).toMatch(/would remove the per-box file cfg\/local\.cfg/);
   });
 
+  it('refuses a release that would remove a file the site writes', async () => {
+    const BAL = 'left4dead/cfg/pug_balance.cfg';
+    db.prepare('INSERT INTO fleet_files (server_id, path, size, sha256) VALUES (1, ?, 5, ?)').run(BAL, sha('x'));
+    // Shipped by a release from before the rule.
+    const prev = Number(db.prepare("INSERT INTO releases (kind, sources_json, state, created_by, created_at, deployed_at) VALUES ('deploy', '[]', 'done', '1', 'x', 'x')").run().lastInsertRowid);
+    db.prepare("INSERT INTO release_boxes (release_id, server_id, state, plan_json, shipped_json, updated_at) VALUES (?, 1, 'restarted', '[]', ?, 'x')")
+      .run(prev, JSON.stringify({ [BAL]: { sha256: sha('x'), blob: 'b' } }));
+    const { a, cookies } = await app();
+    await a.inject({ method: 'POST', url: '/api/admin/releases/refresh', cookies });
+    const { id } = (await a.inject({ method: 'POST', url: '/api/admin/releases/stage', cookies, payload: { commit: 'master' } })).json() as { id: number };
+    const review = (await a.inject({ method: 'GET', url: `/api/admin/releases/${id}`, cookies })).json() as { state: string; invalid: string[] };
+    expect(review.state).toBe('invalid');
+    expect(review.invalid.join(' ')).toMatch(/would remove left4dead\/cfg\/pug_balance\.cfg from Dallas, which the site writes/);
+  });
+
   it('refuses a non-admin', async () => {
     const { a } = await app();
     const other = await authedCookie(a, db, '76561198000000010');

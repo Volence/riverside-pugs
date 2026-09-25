@@ -16,6 +16,9 @@ import type { ServerRow } from './serverPool.js';
 
 export const MANAGED_ROOTS = ['left4dead/addons', 'left4dead/cfg', 'left4dead_dlc4/missions'] as const;
 export const SIZE_CAP = 20 * 1024 * 1024;
+/** Managed files the site itself writes (the balance writers), which a
+ *  release must never ship, overwrite or remove. */
+export const SITE_OWNED = new Set(['left4dead/cfg/pug_balance.cfg', 'left4dead/addons/sourcemod/data/pug_balance_watch.txt']);
 /** Single files directly in left4dead/ that the deploy repo ships. */
 export const MANAGED_FILES = ['left4dead/mymotd.txt', 'left4dead/myhost.txt'] as const;
 const SKIP_EXT = /\.(log|dem|rip|sq3|sqlite|db)$/i;

@@ -1,6 +1,6 @@
 import type { RepoFile } from './deployRepo.js';
 import type { FileSig } from './fleetCompare.js';
-import { isManaged, SIZE_CAP } from './fleetTree.js';
+import { isManaged, SITE_OWNED, SIZE_CAP } from './fleetTree.js';
 
 /** Staging a release: pure functions from a repo tree and the fleet readings.
  *  docs/superpowers/specs/2026-09-24-release-deploy-design.md */
@@ -40,6 +40,7 @@ export function validateTree(files: RepoFile[]): string[] {
     else if (f.mode === '120000') reasons.push(`symlink: ${f.path}`);
     else if (!isManaged(m.path)) reasons.push(`outside the managed folders: ${m.path}`);
     else if (f.size > SIZE_CAP) reasons.push(`over 20 MB: ${m.path}`);
+    else if (SITE_OWNED.has(m.path)) reasons.push(`written by the site, never by a release: ${m.path}`);
   }
   return reasons;
 }
