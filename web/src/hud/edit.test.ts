@@ -7,7 +7,7 @@ import {
   placeElement, moveElements, moveCards, alignElements, scaleElement, setScale, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
   ammoOnly, withImport, withPreset,
   splatterKind, patchSplatter, withSplatterImage, resetSplatter, panelClamp, raiseChild, resetChildKey, setFit, rowGapSlider, setRowGap,
-  hiddenWith, setYourItems, setItemsLook, yourItemsHeld,
+  hiddenWith, setYourItems, setItemsLook,
 } from './edit';
 import { buildHud, buildTrees } from './build';
 import { weaponSlots } from './weapons';
@@ -1347,12 +1347,6 @@ describe('Your items', () => {
     const lines = yourItemsLimits(centred);
     expect(lines).toHaveLength(2);
     expect(c.x + c.w).toBeCloseTo(lines[1].x, 9);
-  });
-  it('says when the clamp held the row away from where a drag asked for it', () => {
-    const d = on();
-    expect(yourItemsHeld(d, 700)).toBe(true);
-    expect(yourItemsHeld(d, 780)).toBe(false);
-    expect(yourItemsHeld(d, 900)).toBe(true);
   });
   it('keeps the right end when the font changes, and the centre for Centre', () => {
     // 770: far enough from Centre's widest centre (782 at medium on stock) that neither end is clamped.

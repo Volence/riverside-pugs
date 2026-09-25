@@ -1334,12 +1334,3 @@ export function setItemsLook(d: HudDesign, p: { itemFont?: ItemFont; itemAlign?:
   const x = (o.itemAlign ?? 'right') === 'center' ? before.x + before.w / 2 - w / 2 : before.x + before.w - w;
   return placeYourItems(next, x, before.y);
 }
-
-/**
- * Whether a drag's asked-for x for Your items is not where it lands: the
- * clamp held it at a limit. The page then draws no snap guide on that x,
- * which would stand where the row is not.
- */
-export function yourItemsHeld(design: HudDesign, askedX: number): boolean {
-  return placeRow(yourItemsInput(design), { x: askedX, y: 0 }).x !== Math.round(askedX);
-}
