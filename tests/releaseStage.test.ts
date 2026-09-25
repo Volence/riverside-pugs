@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RepoFile } from '../src/deployRepo.js';
-import { cvarDiff, deploySlug, describeOps, planBox, suggestBalance, validateTree, wantedFor, type Op } from '../src/releaseStage.js';
+import { cvarDiff, deploySlug, describeOps, passwordsSet, planBox, suggestBalance, validateTree, wantedFor, type Op } from '../src/releaseStage.js';
 
 const f = (path: string, sha = 'h', mode = '100644', size = 1): RepoFile => ({ path, mode, blob: `b-${sha}`.padEnd(40, '0'), size, sha256: sha });
 
@@ -42,6 +42,25 @@ describe('wantedFor and validateTree', () => {
       'over 20 MB: left4dead/addons/sourcemod/plugins/big.smx',
       'written by the site, never by a release: left4dead/cfg/pug_balance.cfg',
       'written by the site, never by a release: left4dead/addons/sourcemod/data/pug_balance_watch.txt',
+    ]);
+  });
+});
+
+describe('passwords in a cfg', () => {
+  it('finds a non-empty rcon_password, sv_password or tv_password at line start, ignoring comments and empty values', () => {
+    expect(passwordsSet('hostname "x"\nrcon_password "hunter2"\n  sv_password pug // x\ntv_password ""\n// rcon_password "old"\necho rcon_password nope\n'))
+      .toEqual(['rcon_password', 'sv_password']);
+    expect(passwordsSet('tv_password "watch"\r\nsv_password ""\n')).toEqual(['tv_password']);
+  });
+  it('refuses a release whose cfg sets rcon_password or sv_password, anywhere but secrets.cfg', () => {
+    const tree = [f('boxes/dallas/left4dead/cfg/server.cfg', 'srv'), f('overrides/left4dead/cfg/local.cfg', 'loc'), f('overrides/left4dead/cfg/pug_match.cfg', 'pm')];
+    const texts = new Map([
+      ['boxes/dallas/left4dead/cfg/server.cfg', 'hostname x\nrcon_password "hunter2"\nsv_password ""\n'],
+      ['overrides/left4dead/cfg/local.cfg', 'tv_password "watch"\n'],
+      ['overrides/left4dead/cfg/pug_match.cfg', '// sv_password "x"\n'],
+    ]);
+    expect(validateTree(tree, texts)).toEqual([
+      'rcon_password is set in left4dead/cfg/server.cfg (boxes/dallas/left4dead/cfg/server.cfg): move it into that box\'s secrets.cfg, which is never deployed',
     ]);
   });
 });
