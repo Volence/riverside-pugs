@@ -17,6 +17,12 @@ One frame was on Chicago. Portraits, bars and text draw fine.
 The checkerboard is Source's "material not found" texture. So the game looked for a
 material and got nothing back.
 
+## Owner's answer (2026-09-25 morning)
+
+The owner says `sv_pure` does not work in L4D1, so the loose-file analysis below does not apply:
+the servers do not refuse loose HUD pictures. The Modern preset cause (next section) stands. The
+How to play and download texts no longer mention loose files.
+
 ## Update, same night: a stronger cause, found and fixed in the HUD editor
 
 **The HUD editor's Modern preset drew exactly these checkerboards for every player but the owner.**
