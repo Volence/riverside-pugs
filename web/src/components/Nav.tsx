@@ -33,9 +33,11 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
 ];
 
 /** Whether a nav item is the page being shown. The HUD item stands for its
- *  whole section, so it is current on the crosshair and community pages too. */
+ *  whole section, so it is current on the crosshair and community pages too,
+ *  and Patch notes for the balance pages under it (Game values). */
 function isCurrent(href: string, path: string): boolean {
   if (href === '/hud') return hudTabFor(path) !== null;
+  if (href === '/balance') return path === href || path.startsWith('/balance/');
   return path === href;
 }
 

@@ -136,6 +136,10 @@ describe('Nav current page', () => {
     expect(at(path)).toEqual(['HUD']);
   });
 
+  it.each(['/balance', '/balance/values'])('marks Patch notes current on %s', (path) => {
+    expect(at(path)).toEqual(['Patch notes']);
+  });
+
   it('marks only the matching item elsewhere', () => {
     expect(at('/maps')).toEqual(['Campaigns']);
     cleanup();
