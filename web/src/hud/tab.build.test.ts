@@ -1,5 +1,6 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { buildHud, buildTrees } from './build';
+import { buildHud, buildTrees, elementRect } from './build';
+import { placeElement, setAspect } from './edit';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
 import { parseKv, writeKv, kvGet, pcFind, type KvNode } from './kv';
 import { baseFile, baseOf, presetOverrides, registerImport, unregisterImport } from './base';
@@ -184,4 +185,20 @@ describe('no Tab edit, no Tab file (spec 4.4)', () => {
       for (const f of own) expect(text(after, f), f).toBe(writeKv(parseKv(baseFile(baseOf(d), f))));
     });
   }
+});
+
+describe('the versus panel through an aspect change (review 5)', () => {
+  it('shows and downloads the same x after 16:9 to 4:3: the move is held on the narrower screen', () => {
+    const wide = placeElement({ ...structuredClone(DEFAULT_DESIGN), aspect: '16:9' }, 'tabVersus', 499, 20);
+    expect(wide.elements.tabVersus).toEqual({ x: 499, y: 20 });
+    const narrow = setAspect(wide, '4:3');
+    expect(narrow.aspect).toBe('4:3');
+    const shown = elementRect(narrow, 'tabVersus', narrow.aspect).x;
+    const b = pcFind(tree(build(validateDesign(narrow)), SCOREBOARD), ['CVersusModeScoreboard'])!;
+    expect(parsePos(kvGet(b, 'xpos')!, screenW('4:3'))).toBeCloseTo(shown, 0);
+    expect(shown).toBe(640 - 354);
+    // Nothing else of the design changes, and an aspect already set is no edit.
+    expect(setAspect(narrow, '4:3')).toBe(narrow);
+    expect(setAspect(DEFAULT_DESIGN, '4:3')).toEqual({ ...DEFAULT_DESIGN, aspect: '4:3' });
+  });
 });

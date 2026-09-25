@@ -14,7 +14,7 @@ import {
   type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type Box, type WeaponsOverride, type ImportedRef,
   type UploadedImage, WEAPON_BOX_IMAGE, weaponIconId,
 } from './design';
-import { screenW, SCREEN_H } from './units';
+import { screenW, SCREEN_H, type Aspect } from './units';
 import { elementById } from './elements';
 import { elementRect, elementFitShift, drawnAt, pieceMovableIn, teamLayout, teamCardRects, isFreeTeam, panelChild, panelLink, buildTrees, panelBgZpos, type CardChild } from './build';
 import { childDef, childPath, panelChildren, panelOfFile, linkedValue, unlinkedValue, type ChildDef } from './children';
@@ -931,6 +931,25 @@ export function placeElement(design: HudDesign, id: string, x: number, y: number
 }
 
 /** Move elements by (dx, dy) from where a gesture started them. */
+/**
+ * The aspect picker. The versus panel's place is held whole on the new
+ * screen (tabVersusRange, as validateDesign holds it for the download), so a
+ * panel moved to the right of a 16:9 screen is drawn where a 4:3 download
+ * puts it, not off the narrower screen.
+ */
+export function setAspect(design: HudDesign, aspect: Aspect): HudDesign {
+  if (design.aspect === aspect) return design;
+  const next = { ...design, aspect };
+  const o = design.elements.tabVersus;
+  if (!o || (o.x === undefined && o.y === undefined)) return next;
+  const r = tabVersusRange(aspect, baseOf(design));
+  const at = (v: number | undefined, [lo, hi]: [number, number]) => (v === undefined ? undefined : Math.min(hi, Math.max(lo, v)));
+  const held = { ...o, x: at(o.x, r.x), y: at(o.y, r.y) };
+  if (held.x === undefined) delete held.x;
+  if (held.y === undefined) delete held.y;
+  return { ...next, elements: { ...design.elements, tabVersus: held } };
+}
+
 export function moveElements(design: HudDesign, ids: string[], starts: Record<string, Box>, dx: number, dy: number): HudDesign {
   return ids.reduce((d, id) => (starts[id] ? placeElement(d, id, starts[id].x + dx, starts[id].y + dy) : d), design);
 }
