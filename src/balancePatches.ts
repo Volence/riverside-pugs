@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { DB } from './db.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { currentOrdinal } from './liveView.js';
-import { foldInto, resolvePatch } from './balanceFold.js';
+import { chainOf, foldInto, resolvePatch } from './balanceFold.js';
 import { triageInfo, type Lists } from './balanceTriage.js';
 
 type Inventory = Record<string, string>;
@@ -251,8 +251,24 @@ export function refingerprintPatches(db: DB, versionless: string[], ignored: str
           ?? ids.find((id) => published.has(id))
           ?? ids.find((id) => triageOf.get(id) === 'balance')
           ?? ids[0];
-      for (const id of ids) want.set(id, id === keep ? fp : null);
-      const others = ids.filter((id) => id !== keep);
+      // A fold that would loop (the keeper is folded through this patch on
+      // its way to another) is not made: that patch keeps its fingerprint
+      // rather than being left NULL and unfolded. Logged, since the patches
+      // then still differ by fingerprint only.
+      const keepChain = chainOf(db, keep);
+      const blocked = ids.filter((id) => id !== keep && keepChain.includes(id) && keepChain[keepChain.length - 1] !== id);
+      for (const id of blocked) {
+        console.warn(`[balance] refingerprint: patch ${id} hashes like patch ${keep}, but ${keep} is folded through it; left as it is`);
+      }
+      // A blocked patch holding this very fingerprint keeps it, so the keeper
+      // cannot take it and stays as it was too.
+      const keeperTakes = !blocked.some((id) => current.get(id) === fp);
+      for (const id of ids) {
+        if (blocked.includes(id)) want.set(id, current.get(id)!);
+        else if (id === keep) want.set(id, keeperTakes ? fp : current.get(id)!);
+        else want.set(id, null);
+      }
+      const others = ids.filter((id) => id !== keep && !blocked.includes(id));
       if (others.length > 0) merged.push({ keep, into: others });
     }
     const changed = [...want].filter(([id, fp]) => current.get(id) !== fp);
@@ -265,14 +281,18 @@ export function refingerprintPatches(db: DB, versionless: string[], ignored: str
     for (const m of merged) {
       for (const id of m.into) {
         if (resolvePatch(db, m.keep) === id) continue; // the keeper is already folded into it: one patch already
-        foldInto(db, id, m.keep);
+        const f = foldInto(db, id, m.keep);
+        if (!f.ok) console.warn(`[balance] refingerprint: could not fold patch ${id} into ${m.keep}: ${f.error}`);
       }
     }
     // Merged patches from before triage existed (the openDb backfill leaves
     // them NULL): fold each into whoever holds its fingerprint now, else call
-    // it balance, as it was treated before.
+    // it balance, as it was treated before. A merged patch an older backfill
+    // made pending is folded the same way (it can never be sighted again);
+    // left pending when no patch holds its fingerprint.
     const leftovers = db.prepare(`SELECT id, inputs_json FROM balance_patches
-      WHERE source = 'detected' AND fingerprint IS NULL AND triage IS NULL AND inputs_json IS NOT NULL`)
+      WHERE source = 'detected' AND fingerprint IS NULL AND inputs_json IS NOT NULL
+        AND (triage IS NULL OR (triage = 'pending' AND folded_into IS NULL))`)
       .all() as { id: number; inputs_json: string }[];
     for (const l of leftovers) {
       let holder: { id: number } | undefined;

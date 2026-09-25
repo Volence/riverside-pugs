@@ -244,6 +244,20 @@ describe('refingerprintPatches', () => {
     expect(problems).toHaveLength(1);
   });
 
+  it('a merge whose fold would loop is skipped and logged: the patch keeps its fingerprint', () => {
+    // A is folded into B, B into C; A and B now hash the same, and A (the
+    // oldest) would keep: folding B into A loops (A's chain runs through B).
+    const ins = db.prepare("INSERT INTO balance_patches (id, fingerprint, source, inputs_json, first_seen_at, triage, folded_into) VALUES (?, ?, 'detected', ?, ?, ?, ?)");
+    ins.run(3, 'fc', JSON.stringify({ 'c:z': '9' }), '2026-09-03 00:00:00', 'balance', null);
+    ins.run(2, 'fb', JSON.stringify(withSpec), '2026-09-02 00:00:00', 'folded', 3);
+    ins.run(1, 'fa', JSON.stringify(INV), '2026-09-01 00:00:00', 'folded', 2);
+    const r = refingerprintPatches(db, [], [SPEC], () => {});
+    expect(r.merged).toEqual([]);
+    const row = (id: number) => db.prepare('SELECT fingerprint, triage, folded_into FROM balance_patches WHERE id = ?').get(id);
+    expect(row(2)).toEqual({ fingerprint: 'fb', triage: 'folded', folded_into: 3 });
+    expect(row(1)).toEqual({ fingerprint: fingerprintOf(withoutIgnored(INV, [SPEC]), []), triage: 'folded', folded_into: 2 });
+  });
+
   it('a balance patch keeps the fingerprint over an older pending one', () => {
     const a = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: withSpec, versionless: [] });
     const b = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 2, inventory: INV, versionless: [] });
