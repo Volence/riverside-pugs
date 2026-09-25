@@ -39,7 +39,7 @@ import {
 } from '../hud/edit';
 import { snapMove, snapEdges, unionBox, type Guide, type Snap, type Handle } from '../hud/guides';
 import {
-  NONE, TEAMMATES, cardsOf, hitAt, targetOf, pick, clickSelect, dragIntent, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
+  NONE, TEAMMATES, cardsOf, hitAt, targetOf, pick, clickSelect, dragIntent, withoutUnderTab, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
   sanitize, selectionKey, selectedIds, selectionFrames, sectionTargets, pieceTargets, pieceGuideToScreen,
   selectionBox, handlesFor, handlePoints, handleAt, isPicked, menuActions, elementFrame, panelOf,
   type Selection, type Hit, type Mods, type Crumb, type MenuAction,
@@ -414,6 +414,9 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
   // as a picked occasional panel is drawn. The toggle itself stays as set.
   const tabShown = !!preview.tab || tabPicked(selectedIds(sel));
   const seen = useMemo<PreviewState>(() => (tabShown && !preview.tab ? { ...preview, tab: true } : preview), [preview, tabShown]);
+  // Tab held on: the canvas no longer draws the teammate cards, so a
+  // selection of them is dropped rather than left framed and draggable there.
+  useEffect(() => { if (preview.tab) setSel(withoutUnderTab); }, [preview.tab]);
   const [held, setHeld] = useState<WeaponHeld>('primary');
   // Null until the player picks one: each side is then previewed on its own
   // in-game shot (the forest for survivors, a spawned Hunter for infected),
@@ -1055,8 +1058,8 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
 
     if (e.key === 'Tab' && e.target === canvas.current) {
       e.preventDefault();
-      // The Tab screen's elements join the cycle only while it shows.
-      const list = visibleElements(side, design).filter((el) => !el.tab || seen.tab).map((el) => el.id);
+      // The Tab screen's elements join the cycle only while it shows, and what it takes off (the teammate cards) leaves it then.
+      const list = visibleElements(side, design).filter((el) => (seen.tab ? el.underTab !== 'hidden' : !el.tab)).map((el) => el.id);
       if (list.length === 0) return;
       const forward = !e.shiftKey;
       const at = sel.kind === 'elements' && sel.ids.length === 1 ? list.indexOf(sel.ids[0]) : -1;

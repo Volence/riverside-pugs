@@ -64,6 +64,8 @@ const hasCards = (panel: string) => panelChildren(panel)?.repeat === 'cards' && 
 const isTab = (id: string) => !!elementById(id)?.tab;
 /** The order a box select tries the elements in: the Tab panels, the Tab board, the HUD. */
 const rank = (el: { id: string; tab?: true }) => (el.tab ? (el.id === 'tabBoard' ? 1 : 0) : 2);
+/** An element the game takes off while the Tab screen shows (the teammate cards, HudElement.underTab), in a state that draws it. */
+const offUnderTab = (id: string, state?: State) => !!state && !!previewOf(state).tab && elementById(id)?.underTab === 'hidden';
 /** Whether an element belongs to the side: its own, or both. */
 const onSideOf = (id: string, side: Side) => { const s = elementById(id)?.side; return s === side || s === 'both'; };
 
@@ -231,10 +233,24 @@ export function isPicked(design: HudDesign, sel: Selection, hit: Hit): boolean {
 function insideSelected(design: HudDesign, sel: Selection, at: { x: number; y: number } | null, state?: State): boolean {
   if (!at) return false;
   if (sel.kind === 'elements') {
-    return sel.ids.some((id) => !(id === 'teamColumn' && isFreeTeam(design)) && inside(elementFrame(design, id), at.x, at.y));
+    return sel.ids.some((id) => !(id === 'teamColumn' && isFreeTeam(design)) && !offUnderTab(id, state) && inside(elementFrame(design, id), at.x, at.y));
   }
   if (sel.kind === 'children' || sel.kind === 'cards') return selectionFrames(design, sel, state).some((f) => inside(f, at.x, at.y));
   return false;
+}
+
+/**
+ * The selection without what the Tab screen takes off (the teammate cards,
+ * HudElement.underTab): the page drops those when Tab held turns on, as the
+ * canvas no longer draws them. Anything else comes back as it was.
+ */
+export function withoutUnderTab(sel: Selection): Selection {
+  const off = (id: string) => elementById(id)?.underTab === 'hidden';
+  if (sel.kind === 'elements') {
+    const ids = sel.ids.filter((id) => !off(id));
+    return ids.length === sel.ids.length ? sel : ids.length ? { kind: 'elements', ids } : NONE;
+  }
+  return sel.kind !== 'none' && off(panelOf(sel)) ? NONE : sel;
 }
 
 export type Intent = { kind: 'resize'; handle: Handle } | { kind: 'box' } | { kind: 'move'; sel: Selection } | { kind: 'none' };
@@ -471,9 +487,12 @@ function pieceFrame(design: HudDesign, r: ChildRect, panel: string, state?: Stat
  * health bar sits at the down picture's x while down).
  */
 export function selectionFrames(design: HudDesign, sel: Selection, state?: State): Box[] {
+  // What the Tab screen takes off (the teammate cards) has no frame while it shows.
+  if (sel.kind !== 'none' && sel.kind !== 'elements' && offUnderTab(panelOf(sel), state)) return [];
   switch (sel.kind) {
     case 'none': return [];
-    case 'elements': return sel.ids.flatMap((id) => (id === 'teamColumn' && isFreeTeam(design) ? drawnCards(design) : [elementFrame(design, id)]));
+    case 'elements': return sel.ids.filter((id) => !offUnderTab(id, state))
+      .flatMap((id) => (id === 'teamColumn' && isFreeTeam(design) ? drawnCards(design) : [elementFrame(design, id)]));
     case 'cards': {
       const rects = panelOf(sel) === 'teamColumn' ? teamCardRects(design, design.aspect) : panelBoxes(design, panelOf(sel));
       return sel.cards.filter((c) => rects[c]).map((c) => plain(rects[c]));
@@ -491,6 +510,7 @@ export function selectionFrames(design: HudDesign, sel: Selection, state?: State
 export function selectionBox(design: HudDesign, sel: Selection, state?: State): Box | null {
   if (sel.kind === 'children') {
     const panel = panelOf(sel);
+    if (offUnderTab(panel, state)) return null;
     if (isTab(panel)) {
       // The row it was picked in, or where it is drawn when that row does not draw it (Your row, from Layers, is row 1).
       const all = tabFrames(design, tabSideOf(panel), panel, sel.names);

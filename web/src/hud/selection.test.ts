@@ -7,7 +7,7 @@ import { panelBoxes } from './mock';
 import {
   NONE, TEAMMATES, hitAt, targetOf, clickSelect, dragIntent, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
   sanitize, selectedIds, selectionFrames, selectionBox, handlesFor, handlePoint, handlePoints, handleAt, pieceTargets, sectionTargets,
-  pieceGuideToScreen, menuActions, drawnPieces, elementFrame, isPicked, pick, cardsOf, panelOf, type Selection, type Mods,
+  pieceGuideToScreen, menuActions, drawnPieces, elementFrame, isPicked, pick, cardsOf, panelOf, withoutUnderTab, type Selection, type Mods,
 } from './selection';
 import { unionBox } from './guides';
 import { _setProbe } from './probes';
@@ -688,6 +688,33 @@ describe('the Tab screen', () => {
       expect(dragIntent(D, team, hit, plain, null, mid, HELD)).toEqual({ kind: 'none' });
       expect(dragIntent(D, versus, hit, plain, null, mid, HELD)).toEqual({ kind: 'none' });
     } finally { _setProbe('TS4', null); }
+  });
+
+  it('frames, boxes and drags nothing of the teammate cards while the Tab screen takes them off', () => {
+    const [c] = teamCardRects(D, D.aspect);
+    const at = { x: c.x + c.w / 2, y: c.y + c.h / 2 };
+    const hit = hitAt(D, 'survivor', HELD, at.x, at.y);
+    const card: Selection = { kind: 'cards', cards: [0] };
+    const head: Selection = { kind: 'children', names: ['Head'], card: 0 };
+    for (const sel of [TEAMMATES, card, head]) {
+      expect(selectionFrames(D, sel, HELD), selectionLabel(sel)).toEqual([]);
+      expect(selectionBox(D, sel, HELD), selectionLabel(sel)).toBeNull();
+      expect(dragIntent(D, sel, hit, plain, null, at, HELD), selectionLabel(sel)).toEqual({ kind: 'none' });
+      // Tab off, they are the page's as always.
+      expect(selectionFrames(D, sel, DEFAULT_PREVIEW).length, selectionLabel(sel)).toBeGreaterThan(0);
+    }
+    // Another element picked with them keeps its own frame.
+    expect(selectionFrames(D, { kind: 'elements', ids: ['teamColumn', 'chat'] }, HELD)).toEqual([elementFrame(D, 'chat')]);
+  });
+
+  it('takes what the Tab screen takes off out of a selection (withoutUnderTab)', () => {
+    expect(withoutUnderTab(TEAMMATES)).toEqual(NONE);
+    expect(withoutUnderTab({ kind: 'cards', cards: [1] })).toEqual(NONE);
+    expect(withoutUnderTab({ kind: 'children', names: ['Head'], card: 0 })).toEqual(NONE);
+    expect(withoutUnderTab({ kind: 'elements', ids: ['teamColumn', 'chat'] })).toEqual({ kind: 'elements', ids: ['chat'] });
+    const chat: Selection = { kind: 'elements', ids: ['chat'] };
+    expect(withoutUnderTab(chat)).toBe(chat);
+    expect(withoutUnderTab(bar)).toBe(bar);
   });
 
   it('snaps a HUD move to no Tab element, and the versus panel to the Tab screen only', () => {
