@@ -3130,16 +3130,25 @@ describe('The Tab screen on the page', () => {
     expect(legend('Versus score')).toBeTruthy();
   });
 
-  it('moves the versus panel from a drag in a picked Tab piece, and records nothing for a drag on the board', async () => {
+  it('moves a picked versus piece from a drag (PIECES-1), the versus panel once climbed to, and records nothing for a drag on the board', async () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
     const undo = () => screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement;
     fireEvent.click(tabHeld());
     clickAt(canvas, 60, 60);
     expect(legend('"Your Team"')).toBeTruthy();
+    // "Your Team" is drawn at its if_embedded x 20 in the panel at 15, 25: the drag moves it 20 across, 10 down.
+    dragFrom(canvas, [60, 60], [80, 70]);
+    await waitFor(() => expect(saved().children?.tabVersus?.TeamYours).toEqual({ x: 40, y: 40 }));
+    expect(legend('"Your Team"')).toBeTruthy();
+    expect(saved().elements?.tabVersus).toBeUndefined();
+    fireEvent.click(undo());
+    expect(undo().disabled).toBe(true);
+    // Ctrl+click climbs to the panel, which a drag then moves.
+    clickAt(canvas, 60, 60, { ctrlKey: true });
+    expect(legend('Versus score')).toBeTruthy();
     dragFrom(canvas, [60, 60], [80, 70]);
     await waitFor(() => expect(saved().elements?.tabVersus).toEqual({ x: 35, y: 35 }));
-    expect(legend('Versus score')).toBeTruthy();
     fireEvent.click(undo());
     expect(undo().disabled).toBe(true);
     // The backdrop, then the board: neither moves, and nothing up from them does.
@@ -3152,6 +3161,41 @@ describe('The Tab screen on the page', () => {
     expect(legend('Tab screen')).toBeTruthy();
     dragFrom(canvas, [100, 400], [150, 420]);
     expect(undo().disabled).toBe(true);
+  });
+
+  it('nudges a picked versus piece with the arrows and shows its drawn place in X and Y', async () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.click(tabHeld());
+    clickAt(canvas, 60, 60);
+    expect(legend('"Your Team"')).toBeTruthy();
+    // The embedded place the game reads (if_embedded xpos 20), not the standalone panel's 25.
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('20');
+    expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('30');
+    fireEvent.keyDown(canvas, { key: 'ArrowRight' });
+    fireEvent.keyDown(canvas, { key: 'ArrowDown' });
+    await waitFor(() => expect(saved().children?.tabVersus?.TeamYours).toEqual({ x: 21, y: 31 }));
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('21');
+    fireEvent.input(screen.getByLabelText('X'), { target: { value: '360' } });
+    await waitFor(() => expect(saved().children?.tabVersus?.TeamYours).toEqual({ x: 360, y: 31 }));
+  });
+
+  it('moves "Health Bonus:" on its own from its X box, keeping its drawn Y, and says it leaves the line', async () => {
+    render(<Hud />);
+    fireEvent.click(tabHeld());
+    fireEvent.click(layer('Versus score').getByRole('button', { name: '"Health Bonus:"' }));
+    expect(screen.getByText(/Moved on its own, it stops following the distance/)).toBeTruthy();
+    const y = (screen.getByLabelText('Y') as HTMLInputElement).value;
+    expect(y).toBe('80');
+    fireEvent.input(screen.getByLabelText('X'), { target: { value: '200' } });
+    await waitFor(() => expect(saved().children?.tabVersus?.HealthLabel).toEqual({ x: 200, y: 80 }));
+  });
+
+  it('offers no X or Y on the Survival Multiplier line, which the probe never saw, and says why', () => {
+    render(<Hud />);
+    fireEvent.click(layer('Versus score').getByRole('button', { name: '"Survival Multiplier:"' }));
+    expect(screen.getByText(/never seen in game when the Tab pieces were tested/)).toBeTruthy();
+    expect(screen.queryByLabelText('X')).toBeNull();
   });
 
   it('drops the Teammates from the selection when Tab held turns on, and skips them in the Tab-key cycle', () => {
@@ -3183,11 +3227,16 @@ describe('The Tab screen on the page', () => {
     await waitFor(() => expect(saved().elements?.tabVersus?.x).toBe(640 - 354));
   });
 
-  it('offers no X, Y or Align on several Tab pieces, none of which moves, and keeps Visible and Reset all', () => {
+  it('offers X, Y and Align on several versus pieces, and none on several row pieces, which do not move; Visible and Reset all on both', () => {
     render(<Hud />);
     fireEvent.click(layer('Versus score').getByRole('button', { name: '"Your Team"' }));
     fireEvent.click(layer('Versus score').getByRole('button', { name: '"Enemy Team"' }), { shiftKey: true });
     expect(screen.getByText('2 pieces in Versus score', { selector: 'legend' })).toBeTruthy();
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('20');
+    expect(screen.getByRole('group', { name: 'Align' })).toBeTruthy();
+    fireEvent.click(layer('Survivor rows').getByRole('button', { name: 'Bot name' }));
+    fireEvent.click(layer('Survivor rows').getByRole('button', { name: 'Ping' }), { shiftKey: true });
+    expect(screen.getByText('2 pieces in Survivor rows', { selector: 'legend' })).toBeTruthy();
     expect(screen.queryByLabelText('X')).toBeNull();
     expect(screen.queryByLabelText('Y')).toBeNull();
     expect(screen.queryByRole('group', { name: 'Align' })).toBeNull();

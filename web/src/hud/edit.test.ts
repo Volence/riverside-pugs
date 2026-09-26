@@ -25,6 +25,7 @@ import { yourItemsLimits } from './build';
 import { YOUR_ITEMS, EDGE_MARGIN, itemRowWidth } from './youritems';
 import { baseFile, registerImport, unregisterImport } from './base';
 import { sampleHud } from './importFixtures';
+import { tabBoxes, versusPiece } from './tabscreen';
 
 /**
  * DEFAULT_DESIGN as it was before your own health fitted by default (slice
@@ -1251,6 +1252,89 @@ describe('the Tab screen edits', () => {
     expect(nudge(DEFAULT_DESIGN, 'tabVersus', 1, 0).elements.tabVersus).toEqual({ x: 16, y: 25 });
     _setProbe('TS4', false);
     try { expect(nudge(DEFAULT_DESIGN, 'tabVersus', 1, 0)).toBe(DEFAULT_DESIGN); } finally { _setProbe('TS4', null); }
+  });
+});
+
+/**
+ * Moving the versus panel's pieces (probes PIECES-1 and PIECES-2,
+ * /home/volence/l4d/hud/probe-tab-pieces/RESULTS.md): a stored place is
+ * where the piece is drawn in the panel, the Distance / Health line moves
+ * as a chain, and a piece of it moved on its own leaves the chain.
+ */
+describe('moving the versus pieces', () => {
+  const V = 'tabVersus';
+  /** Where the preview draws a piece, in the panel's own frame. */
+  const drawn = (d: HudDesign, name: string) => {
+    const b = tabBoxes(d, 'survivor', V)[0];
+    const p = b.pieces.find((x) => x.name === name)!;
+    return { x: p.x - b.box.x, y: p.y - b.box.y };
+  };
+  const stored = (d: HudDesign, name: string) => d.children[V]?.[name];
+
+  it('starts a move from where the piece is drawn: TeamYours at its if_embedded x 20, not its plain 25', () => {
+    expect(versusPiece(DEFAULT_DESIGN, 'TeamYours')).toMatchObject({ x: 20, y: 30, w: 125, h: 20 });
+    expect(startsOf(DEFAULT_DESIGN, ['TeamYours'], V).TeamYours).toMatchObject({ x: 20, y: 30 });
+    const d = nudgeChild(DEFAULT_DESIGN, 'TeamYours', 1, 0, V);
+    expect(stored(d, 'TeamYours')).toEqual({ x: 21, y: 30 });
+    expect(drawn(d, 'TeamYours')).toEqual({ x: 21, y: 30 });
+  });
+
+  it('moves a box, a score and the stat box to exactly where they are placed', () => {
+    let d = placeChild(DEFAULT_DESIGN, 'EnemyTeamHighlightImage', 360, 40, V);
+    d = placeChild(d, 'TeamEnemyScoreSurvivors', 140, 75, V);
+    d = placeChild(d, 'StatBreakdownHighlightImage', 10, 205, V);
+    expect(d.children[V]).toEqual({ EnemyTeamHighlightImage: { x: 360, y: 40 }, TeamEnemyScoreSurvivors: { x: 140, y: 75 }, StatBreakdownHighlightImage: { x: 10, y: 205 } });
+    expect(drawn(d, 'StatBreakdownHighlightImage')).toEqual({ x: 10, y: 205 });
+    expect(drawn(d, 'TeamEnemyScoreSurvivors')).toEqual({ x: 140, y: 75 });
+  });
+
+  it('carries the line after "Average Distance:" when it moves, storing nothing on the pieces carried', () => {
+    const before = ['DistanceAmount', 'HealthLabel', 'HealthAmount'].map((n) => drawn(DEFAULT_DESIGN, n));
+    const d = nudgeChild(DEFAULT_DESIGN, 'DistanceLabel', 5, 40, V);
+    expect(d.children[V]).toEqual({ DistanceLabel: { x: 18, y: 120 } });
+    expect(['DistanceAmount', 'HealthLabel', 'HealthAmount'].map((n) => drawn(d, n))).toEqual(before.map((p) => ({ x: p.x + 5, y: p.y + 40 })));
+  });
+
+  it('stores both axes when a line piece moves on its own, so it is unpinned exactly there; what follows it goes along', () => {
+    const was = drawn(DEFAULT_DESIGN, 'HealthLabel');
+    const amount = drawn(DEFAULT_DESIGN, 'HealthAmount');
+    const d = nudgeChild(DEFAULT_DESIGN, 'HealthLabel', 0, 30, V);
+    expect(stored(d, 'HealthLabel')).toEqual({ x: was.x, y: was.y + 30 });
+    expect(drawn(d, 'HealthLabel')).toEqual({ x: was.x, y: was.y + 30 });
+    expect(drawn(d, 'HealthAmount')).toEqual({ x: amount.x, y: amount.y + 30 });
+    // The X box alone still stores the pair.
+    const x = patchChild(DEFAULT_DESIGN, 'HealthAmount', { x: 300 }, V);
+    expect(stored(x, 'HealthAmount')).toEqual({ x: 300, y: amount.y });
+    expect(drawn(x, 'HealthAmount')).toEqual({ x: 300, y: amount.y });
+    // Moved on its own, it no longer follows "Average Distance:".
+    const after = nudgeChild(d, 'DistanceLabel', 0, -20, V);
+    expect(drawn(after, 'HealthLabel')).toEqual({ x: was.x, y: was.y + 30 });
+    expect(drawn(after, 'DistanceAmount').y).toBe(drawn(DEFAULT_DESIGN, 'DistanceAmount').y - 20);
+  });
+
+  it('moves a line piece picked with the piece it follows by the piece it follows alone', () => {
+    const names = ['DistanceLabel', 'DistanceAmount', 'HealthAmount'];
+    const d = moveChildren(DEFAULT_DESIGN, names, startsOf(DEFAULT_DESIGN, names, V), 10, 10, V);
+    expect(d.children[V]).toEqual({ DistanceLabel: { x: 23, y: 90 } });
+  });
+
+  it('holds a moved piece on the screen, whatever the panel\'s own size', () => {
+    const d = placeChild(DEFAULT_DESIGN, 'TeamYours', 2000, 1000, V);
+    // The panel is at 15, 25; the label 125 x 20; a stored x stops at 512.
+    expect(stored(d, 'TeamYours')).toEqual({ x: 512, y: 480 - 25 - 20 });
+    expect(placeChild(DEFAULT_DESIGN, 'TeamYours', -30, -30, V).children[V]).toEqual({ TeamYours: { x: 0, y: 0 } });
+  });
+
+  it('stops naming a hidden piece up the chain once a piece moved on its own has left it', () => {
+    const hid = setChildrenVisible(DEFAULT_DESIGN, ['DistanceLabel'], false, V);
+    const d = nudgeChild(hid, 'HealthLabel', 0, 30, V);
+    expect(hiddenWith(d, V, 'DistanceAmount')?.name).toBe('DistanceLabel');
+    expect(hiddenWith(d, V, 'HealthLabel')).toBeUndefined();
+    expect(hiddenWith(d, V, 'HealthAmount')).toBeUndefined();
+  });
+
+  it('never moves the Survival Multiplier line', () => {
+    expect(nudgeChild(DEFAULT_DESIGN, 'SurvivalMultLabel', 1, 1, V)).toBe(DEFAULT_DESIGN);
   });
 });
 
