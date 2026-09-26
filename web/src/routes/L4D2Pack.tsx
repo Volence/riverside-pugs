@@ -38,21 +38,6 @@ const PACK_FAQ: { q: string; a: preact.ComponentChildren }[] = [
       step again.</p></>,
   },
   {
-    q: "Use Left 4 Dead 2's exe instead",
-    a: <><p>If you own Left 4 Dead 2, its exe already has the 4 GB permission and runs L4D1
-      fine: it is only a small launcher that starts whichever game's files sit next to it, so
-      you do not have to trust a download from anyone.</p>
-      <ol class="howto">
-        <li>In Steam, right-click <strong>Left 4 Dead 2</strong>, then <strong>Manage</strong>,
-          then <strong>Browse local files</strong>, and copy <code>left4dead2.exe</code>.</li>
-        <li>In your Left 4 Dead (1) folder, rename Steam's <code>left4dead.exe</code> to{' '}
-          <code>left4dead.exe.bak</code>, paste the copy, and rename it to{' '}
-          <code>left4dead.exe</code>. The name matters: the game finds its own folder from
-          the exe's name, and Steam starts <code>left4dead.exe</code>.</li>
-      </ol>
-      <p>Verify integrity and L4D1 updates put Steam's exe back here too.</p></>,
-  },
-  {
     q: 'Why delete addonlist.txt?',
     a: <p>Some custom campaigns carry their own copies of L4D2 models, and when two add-ons
       have the same file, the one listed first in <code>addonlist.txt</code> wins. New add-ons
@@ -108,8 +93,7 @@ export function L4D2Pack() {
               on and nothing else changed. In the Left 4 Dead folder, rename Steam's to{' '}
               <code>left4dead.exe.bak</code> and put this one in its place. You can check it:{' '}
               <code>fc.exe /b left4dead.exe.bak left4dead.exe</code> lists exactly one
-              difference, <code>000000FE: 02 22</code>. Rather use Left 4 Dead 2's exe? See
-              below.
+              difference, <code>000000FE: 02 22</code>.
             </li>
             <li>
               Or make that same one-byte change to your own exe yourself. In the
@@ -120,6 +104,16 @@ export function L4D2Pack() {
               It keeps your original as <code>left4dead.exe.bak</code>. Check it with{' '}
               <code>fc.exe /b left4dead.exe.bak left4dead.exe</code>: exactly one difference,{' '}
               <code>000000FE: 02 22</code>.
+            </li>
+            <li>
+              Or, if you own Left 4 Dead 2, use its exe: it already has the 4 GB permission and
+              runs L4D1 fine, since it only starts whichever game's files sit next to it. In
+              Steam, right-click <strong>Left 4 Dead 2</strong>, then <strong>Manage</strong>,
+              then <strong>Browse local files</strong>, and copy <code>left4dead2.exe</code>.
+              In your Left 4 Dead folder, rename Steam's <code>left4dead.exe</code> to{' '}
+              <code>left4dead.exe.bak</code>, paste the copy, and rename it to{' '}
+              <code>left4dead.exe</code>. The name matters: the game finds its own folder from
+              the exe's name, and Steam starts <code>left4dead.exe</code>.
             </li>
           </ul>
           <p>Steam's <strong>Verify integrity of game files</strong> and any L4D1 update put
