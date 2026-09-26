@@ -201,6 +201,20 @@ describe('the Player File', () => {
     await waitFor(() => expect(mockAdmin.ban).toHaveBeenCalledWith(P, 'throwing', 1440));
   });
 
+  // The header chip only jumps to Standing; for a banned player the thing
+  // there is Unban, so it must not say "Ban" (2026-09-26, owner looked for Unban).
+  it('labels the header chip Unban for a banned player, Ban otherwise', async () => {
+    const base = file();
+    mockPeople.file.mockResolvedValue(file({ sections: { ...base.sections, standing: { ...base.sections.standing,
+      activeBan: { id: 2, reason: 'Abandoned match #223', createdBy: 'system', createdByName: null, createdAt: '2026-09-26T07:02:33.000Z', expiresAt: '2026-09-27T07:02:33.000Z', liftedBy: null, liftedByName: null, liftedAt: null } } } }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    await screen.findByRole('heading', { name: /griefer/ });
+    const chip = screen.getByRole('link', { name: 'Unban' });
+    expect(chip.getAttribute('href')).toBe('#standing');
+    expect(screen.queryByRole('link', { name: 'Ban' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Unban' })).toBeTruthy();
+  });
+
   it('writes a note and marks the file looked at', async () => {
     render(<PlayerFile steamid={P} me="76561199000000009" />);
     await screen.findByRole('heading', { name: /griefer/ });

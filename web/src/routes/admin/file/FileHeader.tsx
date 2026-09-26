@@ -47,7 +47,9 @@ export function FileHeader(
             Open a ticket
           </button>
         )}
-        {can('ban') && <a class="chip" href="#standing">Ban</a>}
+        {/* Jumps to Standing, which holds both the ban form and, for a banned
+            player, the Unban button; the label says which one is there. */}
+        {can('ban') && <a class="chip" href="#standing">{d.sections.standing.activeBan ? 'Unban' : 'Ban'}</a>}
         {can('merge') && <a class="chip" href="#identity">Merge</a>}
         {can('staff_flags') && h.status === 'invited' && (
           <button class="chip" type="button" disabled={busy}
