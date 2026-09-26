@@ -1658,13 +1658,12 @@ describe('CustomCampaigns', () => {
     expect(container.querySelector('#l4d2-pack')).toBeTruthy();
     const pack = screen.getByRole('link', { name: /download the l4d2 campaigns/i });
     expect(pack.getAttribute('href')).toBe('https://assets.riversidepug.com/mappack/Riverside-L4D2-Maps-VPK-v3.1e.zip');
-    // Our exe is Steam's with one byte changed, checkable with fc; the map
-    // pack's older exe stays available as the alternative.
+    // Our exe is Steam's with one byte changed, checkable with fc. The map
+    // pack's older exe is no longer offered (same job, older build).
     const exe = screen.getByRole('link', { name: /download the 4 gb left4dead\.exe/i });
     expect(exe.getAttribute('href')).toBe('https://assets.riversidepug.com/mappack/left4dead-4gb-steam-20241019.exe');
     expect(exe.getAttribute('download')).toBe('left4dead.exe');
-    const packExe = screen.getByRole('link', { name: /map pack's left4dead\.exe/i });
-    expect(packExe.getAttribute('href')).toBe('https://assets.riversidepug.com/mappack/left4dead-4gb.exe');
+    expect(screen.queryByRole('link', { name: /map pack's left4dead\.exe/i })).toBeNull();
     // L4D2's own exe is copy-your-own (proven 2026-09-26: renamed to left4dead.exe it
     // starts L4D1 and loads c2m1), so there is no download link for it.
     const section = container.querySelector('#l4d2-pack')!;
