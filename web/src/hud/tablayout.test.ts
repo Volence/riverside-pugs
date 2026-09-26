@@ -78,6 +78,18 @@ describe('layoutBlocks', () => {
     expect(by(laid, 'DistanceAmount').x).toBe(193);
     expect(by(laid, 'YourTeamHighlightImage')).toMatchObject({ x: 20, y: 46, h: 28 });
   });
+  it('moves a pinned block UP by a positive ypos and right by a positive xpos (probe PIECES-1)', () => {
+    // /home/volence/l4d/hud/probe-tab-pieces/RESULTS.md, PIECES-1: DistanceAmount written at pin
+    // offset 30,10 drew 22 px (10 units) ABOVE its label, HealthLabel at 50,25 56 px above, HealthAmount
+    // at 15,40 90 px above; the x offsets went right, magnitudes exact on all three.
+    const [root] = parseKv(`"x" {
+      "S" { "xpos" "10" "ypos" "50" "wide" "20" "tall" "10" }
+      "P" { "xpos" "30" "ypos" "10" "wide" "5" "tall" "5" "pin_to_sibling" "S" "pin_corner_to_sibling" "0" "pin_to_sibling_corner" "1" }
+      "Q" { "xpos" "5" "ypos" "-4" "wide" "5" "tall" "5" "pin_to_sibling" "P" "pin_corner_to_sibling" "0" "pin_to_sibling_corner" "1" } }`);
+    const laid = layoutBlocks(root.value as KvNode[], { w: 100, h: 100, textOf: () => '', measure });
+    expect(by(laid, 'P')).toMatchObject({ x: 10 + 20 + 30, y: 50 - 10 });
+    expect(by(laid, 'Q')).toMatchObject({ x: 60 + 5 + 5, y: 40 + 4 });
+  });
   it('drops the blocks the PC does not have, and lays them in file order', () => {
     const [root] = parseKv('"x" { "A" [$X360] { "xpos" "1" } "A" [$WIN32] { "xpos" "2" } "B" { "xpos" "c-10" "wide" "f20" } }');
     const laid = layoutBlocks(root.value as KvNode[], { w: 100, h: 50, textOf: () => '', measure });
