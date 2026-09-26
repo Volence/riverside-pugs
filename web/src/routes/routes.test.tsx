@@ -1658,9 +1658,13 @@ describe('CustomCampaigns', () => {
     expect(container.querySelector('#l4d2-pack')).toBeTruthy();
     const pack = screen.getByRole('link', { name: /download the l4d2 campaigns/i });
     expect(pack.getAttribute('href')).toBe('https://assets.riversidepug.com/mappack/Riverside-L4D2-Maps-VPK-v3.1e.zip');
-    const exe = screen.getByRole('link', { name: /4 gb left4dead\.exe/i });
-    expect(exe.getAttribute('href')).toBe('https://assets.riversidepug.com/mappack/left4dead-4gb.exe');
+    // Our exe is Steam's with one byte changed, checkable with fc; the map
+    // pack's older exe stays available as the alternative.
+    const exe = screen.getByRole('link', { name: /download the 4 gb left4dead\.exe/i });
+    expect(exe.getAttribute('href')).toBe('https://assets.riversidepug.com/mappack/left4dead-4gb-steam-20241019.exe');
     expect(exe.getAttribute('download')).toBe('left4dead.exe');
+    const packExe = screen.getByRole('link', { name: /map pack's left4dead\.exe/i });
+    expect(packExe.getAttribute('href')).toBe('https://assets.riversidepug.com/mappack/left4dead-4gb.exe');
   });
 
   // Without this step another campaign's copy of an L4D2 model can load on

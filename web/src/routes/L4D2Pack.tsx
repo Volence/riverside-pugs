@@ -5,8 +5,12 @@ import { Panel } from '../components/bits';
  *  folder install, so players on either one can share a server. */
 export const L4D2_PACK_URL = 'https://assets.riversidepug.com/mappack/Riverside-L4D2-Maps-VPK-v3.1e.zip';
 export const L4D2_PACK_SIZE = '3.4 GB';
-/** The pack's own left4dead.exe: a Valve build with the 4 GB (large address aware) flag set. */
-export const L4D2_EXE_URL = 'https://assets.riversidepug.com/mappack/left4dead-4gb.exe';
+/** Steam's current left4dead.exe (2024-10-19 build, identical to the SteamCMD copy) with only
+ *  the 4 GB (large address aware) flag set: one byte, 000000FE 02 -> 22. Rebuild and re-upload
+ *  under a new dated key if Steam ever ships a new exe. */
+export const L4D2_EXE_URL = 'https://assets.riversidepug.com/mappack/left4dead-4gb-steam-20241019.exe';
+/** The exe the original L4D2 map pack shipped: an older Valve build (2022) with the same flag. */
+export const PACK_EXE_URL = 'https://assets.riversidepug.com/mappack/left4dead-4gb.exe';
 
 /** One-byte LAA patch for the player's own exe. Offset 0xFE, 02 to 22 on the current Steam
  *  build; the script finds the PE header rather than trusting the offset. */
@@ -31,8 +35,18 @@ const PACK_FAQ: { q: string; a: preact.ComponentChildren }[] = [
       <code>left4dead\gameinfo.txt</code>, delete the line <code>Game left4dead_dlc4</code>,
       save, then delete the <code>left4dead_dlc4</code> folder and do the steps above. You get
       about 6 GB back.</p>
-      <p>You already have the 4 GB exe from the old pack, so skip the 4 GB step unless Steam
-      has verified or updated the game since.</p></>,
+      <p>You already have the map pack's 4 GB exe, so skip the 4 GB step unless Steam has
+      verified or updated the game since.</p></>,
+  },
+  {
+    q: "I'd rather use the L4D2 map pack's exe",
+    a: <><p>The original L4D2 map pack shipped its own <code>left4dead.exe</code> with the same
+      4 GB permission. It is an older Valve build (2022) rather than Steam's current one with a
+      single byte changed, so you cannot compare it against your own copy the way you can ours,
+      but it is the one most people ran with the old pack, and if you installed that pack you
+      already have it.{' '}
+      <a href={PACK_EXE_URL} download="left4dead.exe"><strong>Download the map pack's left4dead.exe</strong></a>{' '}
+      and put it in the Left 4 Dead folder in place of Steam's.</p></>,
   },
   {
     q: 'Why delete addonlist.txt?',
@@ -85,13 +99,16 @@ export function L4D2Pack() {
           4 GB. On Windows, pick one:
           <ul>
             <li>
-              <a href={L4D2_EXE_URL} download="left4dead.exe"><strong>Download the 4 GB left4dead.exe</strong></a>{' '}
-              and put it in the Left 4 Dead folder, replacing Steam's (keep a copy of Steam's
-              if you like). It is the exe from the original L4D2 map pack, a Valve build with
-              that one permission set. If you installed that pack before, you already have it.
+              <a href={L4D2_EXE_URL} download="left4dead.exe"><strong>Download the 4 GB left4dead.exe</strong></a>.
+              It is Steam's current <code>left4dead.exe</code> with that one permission switched
+              on and nothing else changed. In the Left 4 Dead folder, rename Steam's to{' '}
+              <code>left4dead.exe.bak</code> and put this one in its place. You can check it:{' '}
+              <code>fc.exe /b left4dead.exe.bak left4dead.exe</code> lists exactly one
+              difference, <code>000000FE: 02 22</code>. Rather use the exe from the original
+              L4D2 map pack? See below.
             </li>
             <li>
-              Or give your own exe the permission, a one-byte change you can check. In the
+              Or make that same one-byte change to your own exe yourself. In the
               Left 4 Dead folder, right-click an empty spot and pick{' '}
               <strong>Open in Terminal</strong> (Windows 10: <strong>File</strong>, then{' '}
               <strong>Open Windows PowerShell</strong>), paste this and press Enter:
