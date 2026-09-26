@@ -3,12 +3,29 @@ import type { DB } from '../db.js';
 import { logAdmin } from '../admin/audit.js';
 import { serverPasswordFor } from '../matchToken.js';
 import { spectateFor, type SpectateInfo } from '../spectate.js';
+import { campaignDisplayName, campaignRegistry } from '../campaignRegistry.js';
+import { phaseFor, roundInProgress } from '../liveView.js';
 import { makeRequireCaster } from './guards.js';
 
 export interface CastMatch {
   id: number;
   campaign: string;
+  /** Display name, custom campaigns included. */
+  campaignName: string;
   currentMap: string | null;
+  /** Which chapter is being played, 1-based: the map's place in the campaign
+   *  when the registry knows it, else maps finished + 1. */
+  mapNumber: number;
+  /** Chapters in the campaign, or null when the registry does not know. */
+  mapCount: number | null;
+  /** Running totals over finished maps, as the Live page shows them. */
+  teamAScore: number;
+  teamBScore: number;
+  /** What the game is doing (live, paused, readyup, roundover, loading), null
+   *  before the first heartbeat. */
+  phase: string | null;
+  /** 1 or 2 while a round is being played, else null. */
+  half: number | null;
   serverName: string | null;
   teamA: string[];
   teamB: string[];
@@ -57,6 +74,11 @@ export async function castRoutes(app: FastifyInstance, opts: { db: DB }): Promis
       `SELECT p.name FROM match_players mp JOIN players p ON p.steamid = mp.player_id
        WHERE mp.match_id = ? AND mp.team = ? ORDER BY p.name COLLATE NOCASE`,
     );
+    const scoresOf = db.prepare(
+      `SELECT COUNT(*) AS done, COALESCE(SUM(team_a_score), 0) AS a, COALESCE(SUM(team_b_score), 0) AS b
+       FROM match_live_maps WHERE match_id = ?`,
+    );
+    const registry = campaignRegistry(db);
     const seen = db.prepare(
       "SELECT 1 FROM admin_actions WHERE action = 'cast_connect' AND admin_id = ? AND target = ? LIMIT 1",
     );
@@ -68,10 +90,20 @@ export async function castRoutes(app: FastifyInstance, opts: { db: DB }): Promis
       if (connect && !seen.get(viewer, String(r.id))) {
         logAdmin(db, viewer, 'cast_connect', r.id, { server: r.serverName }, { quiet: true });
       }
+      const score = scoresOf.get(r.id) as { done: number; a: number; b: number };
+      const chapters = registry.get(r.campaign)?.maps ?? [];
+      const at = r.currentMap ? chapters.findIndex((m) => m.toLowerCase() === r.currentMap!.toLowerCase()) : -1;
       return {
         id: r.id,
         campaign: r.campaign,
+        campaignName: campaignDisplayName(db, r.campaign),
         currentMap: r.currentMap,
+        mapNumber: at >= 0 ? at + 1 : score.done + 1,
+        mapCount: chapters.length > 0 ? chapters.length : null,
+        teamAScore: score.a,
+        teamBScore: score.b,
+        phase: phaseFor(db, r.id)?.state ?? null,
+        half: roundInProgress(db, r.id)?.half ?? null,
         serverName: r.serverName,
         teamA: (teamOf.all(r.id, 'a') as { name: string }[]).map((p) => p.name),
         teamB: (teamOf.all(r.id, 'b') as { name: string }[]).map((p) => p.name),

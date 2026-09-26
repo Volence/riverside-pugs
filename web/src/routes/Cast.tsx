@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { ApiError, castApi, type CastMatch } from '../api';
-import { campaignName, mapName } from '../format';
-import { Empty, Panel } from '../components/bits';
-import { ConnectPanel } from '../components/ConnectPanel';
-import { SpectatePanel } from '../components/SpectatePanel';
+import { campaignTint, mapName } from '../format';
+import { Empty } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 
 /** A new match appears here once it goes live, so poll rather than make a
- *  caster reload. Slow on purpose: nothing on the card changes mid-match. */
+ *  caster reload. The score only moves at a map's end, so no need to rush. */
 const POLL_MS = 15000;
+
+const PHASE_LABEL: Record<NonNullable<CastMatch['phase']>, string> = {
+  live: 'Live', paused: 'Paused', readyup: 'Ready-up', roundover: 'Between rounds', loading: 'Loading',
+};
 
 /**
  * Casters (and admins): the game server connect line for every live match, so
@@ -50,10 +52,10 @@ export function Cast() {
   return (
     <div class="page page--list">
       <PageHeader eyebrow="Casting" title="Cast a match">
-        <p class="muted">
-          Join the game server and stay on Spectators. Do not pick a team: anyone on a
-          side when the match goes live is put on the roster and scored as a player.
-          Each match has its own password, and the site records who looked at it.
+        <p class="muted cast__rules">
+          Join and stay on Spectators. Do not pick a team: anyone on a side when the match goes
+          live is rostered and scored. Each match has its own password, and the site records who
+          looked at it.
         </p>
       </PageHeader>
       {matches.length === 0 ? (
@@ -68,18 +70,80 @@ export function Cast() {
 }
 
 function CastCard({ m }: { m: CastMatch }) {
+  const phase = m.phase ? PHASE_LABEL[m.phase] : null;
+  const status = phase && m.half && (m.phase === 'live' || m.phase === 'paused')
+    ? `${phase} · Round ${m.half}` : phase;
+  const lead = (mine: number, theirs: number) => (mine > theirs ? ' cast__score--lead' : '');
   return (
-    <Panel class="cast">
-      <h3>
-        <a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)}
-        {m.currentMap && <span class="muted"> · {mapName(m.currentMap)}</span>}
-        {m.serverName && <span class="muted"> · {m.serverName}</span>}
+    <section class="panel cast" style={{ '--cast-tint': campaignTint(m.campaign) }}>
+      <div class="cast__top">
+        <p class="eyebrow">
+          <a href={`/match/${m.id}`}>#{m.id}</a>
+          {m.serverName && <> · {m.serverName}</>}
+        </p>
+        {status && <span class={`cast__status cast__status--${m.phase}`}>{status}</span>}
+      </div>
+      <h3 class="cast__title">
+        {m.campaignName}
+        <span class="cast__map">
+          Map {m.mapNumber}{m.mapCount !== null && <> of {m.mapCount}</>}
+          {m.currentMap && <> · {mapName(m.currentMap)}</>}
+        </span>
       </h3>
-      <p class="muted">{m.teamA.join(', ')} <strong>vs</strong> {m.teamB.join(', ')}</p>
-      {m.connect
-        ? <ConnectPanel connect={m.connect} />
-        : <p class="muted">Started in game, so the site does not know this server's password. Ask an admin for it.</p>}
-      {m.spectate && <SpectatePanel spectate={m.spectate} />}
-    </Panel>
+      <div class="cast__teams">
+        <div class="cast__side">
+          <p class="eyebrow versus__eyebrow--a">Team A</p>
+          <p>{m.teamA.join(', ')}</p>
+        </div>
+        <p class="cast__scores num" aria-label={`Score ${m.teamAScore} to ${m.teamBScore}`}>
+          <span class={`cast__score${lead(m.teamAScore, m.teamBScore)}`}>{m.teamAScore}</span>
+          <span class="cast__slash">/</span>
+          <span class={`cast__score${lead(m.teamBScore, m.teamAScore)}`}>{m.teamBScore}</span>
+        </p>
+        <div class="cast__side cast__side--b">
+          <p class="eyebrow versus__eyebrow--b">Team B</p>
+          <p>{m.teamB.join(', ')}</p>
+        </div>
+      </div>
+      {m.connect ? (
+        <>
+          <div class="cast__connect">
+            {/* Password FIRST: see ConnectPanel for why the order matters. */}
+            <code>password {m.connect.password}; connect {m.connect.host}:{m.connect.port}</code>
+            <CopyChip label="Copy" text={`password ${m.connect.password}; connect ${m.connect.host}:${m.connect.port}`} />
+            <a class="chip" href={`steam://connect/${m.connect.host}:${m.connect.port}/${m.connect.password}`}>Steam</a>
+            {m.spectate && (
+              <CopyChip label="SourceTV" title="Copy the SourceTV connect line"
+                text={m.spectate.password
+                  ? `password ${m.spectate.password}; connect ${m.spectate.host}:${m.spectate.port}`
+                  : `connect ${m.spectate.host}:${m.spectate.port}`} />
+            )}
+          </div>
+          <p class="muted cast__hint">Paste it into the console. Through Steam, press Enter on the password prompt.</p>
+        </>
+      ) : (
+        <p class="muted cast__hint">Started in game, so the site does not know this server's password. Ask an admin for it.</p>
+      )}
+    </section>
+  );
+}
+
+function CopyChip({ label, text, title }: { label: string; text: string; title?: string }) {
+  const [copied, setCopied] = useState(false);
+  const reset = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (reset.current !== null) clearTimeout(reset.current); }, []);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      reset.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard denied. The line is on screen to select by hand.
+    }
+  };
+  return (
+    <button class={`chip${copied ? ' is-on' : ''}`} type="button" title={title} onClick={copy}>
+      {copied ? 'Copied' : label}
+    </button>
   );
 }
