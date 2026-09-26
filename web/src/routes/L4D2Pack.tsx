@@ -39,6 +39,21 @@ const PACK_FAQ: { q: string; a: preact.ComponentChildren }[] = [
       verified or updated the game since.</p></>,
   },
   {
+    q: "Use Left 4 Dead 2's exe instead",
+    a: <><p>If you own Left 4 Dead 2, its exe already has the 4 GB permission and runs L4D1
+      fine: it is only a small launcher that starts whichever game's files sit next to it, so
+      you do not have to trust a download from anyone.</p>
+      <ol class="howto">
+        <li>In Steam, right-click <strong>Left 4 Dead 2</strong>, then <strong>Manage</strong>,
+          then <strong>Browse local files</strong>, and copy <code>left4dead2.exe</code>.</li>
+        <li>In your Left 4 Dead (1) folder, rename Steam's <code>left4dead.exe</code> to{' '}
+          <code>left4dead.exe.bak</code>, paste the copy, and rename it to{' '}
+          <code>left4dead.exe</code>. The name matters: the game finds its own folder from
+          the exe's name, and Steam starts <code>left4dead.exe</code>.</li>
+      </ol>
+      <p>Verify integrity and L4D1 updates put Steam's exe back here too.</p></>,
+  },
+  {
     q: "I'd rather use the L4D2 map pack's exe",
     a: <><p>The original L4D2 map pack shipped its own <code>left4dead.exe</code> with the same
       4 GB permission. It is an older Valve build (2022) rather than Steam's current one with a
@@ -104,8 +119,8 @@ export function L4D2Pack() {
               on and nothing else changed. In the Left 4 Dead folder, rename Steam's to{' '}
               <code>left4dead.exe.bak</code> and put this one in its place. You can check it:{' '}
               <code>fc.exe /b left4dead.exe.bak left4dead.exe</code> lists exactly one
-              difference, <code>000000FE: 02 22</code>. Rather use the exe from the original
-              L4D2 map pack? See below.
+              difference, <code>000000FE: 02 22</code>. Rather use Left 4 Dead 2's exe, or the
+              one from the original L4D2 map pack? Both are below.
             </li>
             <li>
               Or make that same one-byte change to your own exe yourself. In the
