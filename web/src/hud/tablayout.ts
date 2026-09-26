@@ -14,7 +14,8 @@
  *   ends where its glyphs do, and the amount pinned to it starts 10 units on.
  * - **pin_to_sibling.** A pinned block's corner (pin_corner_to_sibling) is
  *   put on its sibling's corner (pin_to_sibling_corner), offset by its own
- *   xpos and ypos. Corners are VGUI's: 0 top-left, 1 top-right, 2
+ *   xpos and ypos, the ypos inverted (a positive ypos moves it up: probe
+ *   PIECES-1, /home/volence/l4d/hud/probe-tab-pieces/RESULTS.md). Corners are VGUI's: 0 top-left, 1 top-right, 2
  *   bottom-left, 3 bottom-right. A block pinned to a hidden one is hidden:
  *   TAB-1 hid HealthLabel alone and HealthAmount went with it (TS7).
  *
@@ -101,8 +102,13 @@ export function layoutBlocks(nodes: KvNode[], opts: LayoutOpts): LaidBlock[] {
     busy.delete(b);
     const at = cornerOf(s, num(kvGet(b.node, 'pin_to_sibling_corner')));
     const self = cornerOf({ x: 0, y: 0, w: b.w, h: b.h }, num(kvGet(b.node, 'pin_corner_to_sibling')));
-    // The block's own xpos and ypos are the offset from the sibling's corner.
-    const out = { ...b, x: at.x - self.x + num(kvGet(b.node, 'xpos')), y: at.y - self.y + num(kvGet(b.node, 'ypos')), visible: b.visible && s.visible };
+    // The block's own xpos and ypos are the offset from the sibling's corner,
+    // the ypos turned round: a positive ypos moves a pinned block UP. Probe
+    // PIECES-1 (/home/volence/l4d/hud/probe-tab-pieces/RESULTS.md, measure.txt):
+    // DistanceAmount at pin offset 30,10 drew 22 px (10 units) above its label,
+    // HealthLabel at 50,25 56 px above, HealthAmount at 15,40 90 px above,
+    // while every x offset went right by its own amount.
+    const out = { ...b, x: at.x - self.x + num(kvGet(b.node, 'xpos')), y: at.y - self.y - num(kvGet(b.node, 'ypos')), visible: b.visible && s.visible };
     done.set(b, out);
     return out;
   };
