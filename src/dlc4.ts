@@ -16,6 +16,11 @@ import { transportFor, type AddonsTransport } from './addonsTransport.js';
  *  is not a state any of our install paths can leave behind. */
 export const DLC4_PROBE_FILE = 'c1m1_hotel.bsp';
 
+/** The same proof for the pack as addon VPKs (l4d/l4d2vpk): the campaign VPK
+ *  that carries c1m1_hotel. Named zz_ so a rebuilt addonlist.txt lists the pack
+ *  first, which it must be to win over other campaigns' copies of L4D2 models. */
+export const DLC4_PROBE_VPK = 'zz_l4d2maps_c01_deadcenter.vpk';
+
 /**
  * Where a server keeps its dlc4 maps, derived from where it keeps its addons.
  *
@@ -38,15 +43,24 @@ export async function serverHasDlc4(
   // real transportFor.
   makeTransport: (s: ServerRow, dir: string) => AddonsTransport | null = transportFor,
 ): Promise<boolean> {
-  const dir = dlc4MapsDir((server as ServerRow & { addons_dir?: string | null }).addons_dir);
-  if (!dir) return false;
-  const t = makeTransport(server, dir);
-  if (!t) return false;
-  try {
-    return (await t.size(DLC4_PROBE_FILE)) !== null;
-  } catch {
-    // An unreachable box is not a box we may assume is fine, and an exception
-    // here must not take down whatever is iterating servers.
-    return false;
+  const addonsDir = (server as ServerRow & { addons_dir?: string | null }).addons_dir;
+  // The pack as addon VPKs first (every box since 2026-09-26), then the old
+  // left4dead_dlc4 folder, so a box part way through the switch still proves.
+  const probes: [string | null, string][] = [
+    [addonsDir ? addonsDir.replace(/\/$/, '') : null, DLC4_PROBE_VPK],
+    [dlc4MapsDir(addonsDir), DLC4_PROBE_FILE],
+  ];
+  for (const [dir, file] of probes) {
+    if (!dir) continue;
+    const t = makeTransport(server, dir);
+    if (!t) continue;
+    try {
+      if ((await t.size(file)) !== null) return true;
+    } catch {
+      // An unreachable box is not a box we may assume is fine, and an exception
+      // here must not take down whatever is iterating servers.
+      return false;
+    }
   }
+  return false;
 }
