@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dlc4MapsDir, serverHasDlc4, DLC4_PROBE_FILE } from '../src/dlc4.js';
+import { dlc4MapsDir, serverHasDlc4, DLC4_PROBE_FILE, DLC4_PROBE_VPK } from '../src/dlc4.js';
 import type { ServerRow } from '../src/serverPool.js';
 
 const base = {
@@ -33,20 +33,35 @@ describe('dlc4MapsDir', () => {
 });
 
 describe('serverHasDlc4', () => {
-  it('is true when the probe file has a size', async () => {
+  it('is true when the pack VPK is in the addons folder', async () => {
     const server = { ...base, addons_transport: 'local', addons_dir: '/left4dead/addons' } as ServerRow;
     const seen: string[] = [];
-    const got = await serverHasDlc4(server, () => ({
+    const got = await serverHasDlc4(server, (_s, dir) => ({
       put: async () => {},
-      size: async (name: string) => { seen.push(name); return 137; },
+      size: async (name: string) => { seen.push(`${dir}/${name}`); return 137; },
       remove: async () => {},
       readText: async () => null,
     }));
     expect(got).toBe(true);
-    expect(seen).toEqual([DLC4_PROBE_FILE]);
+    expect(seen).toEqual([`/left4dead/addons/${DLC4_PROBE_VPK}`]);
   });
 
-  it('is false when the probe file is absent', async () => {
+  // A box still on the old left4dead_dlc4 folder install proves too, so the
+  // switch to VPKs can go one server at a time.
+  it('falls back to the left4dead_dlc4 folder when the VPK is absent', async () => {
+    const server = { ...base, addons_transport: 'local', addons_dir: '/left4dead/addons/' } as ServerRow;
+    const seen: string[] = [];
+    const got = await serverHasDlc4(server, (_s, dir) => ({
+      put: async () => {},
+      size: async (name: string) => { seen.push(`${dir}/${name}`); return name === DLC4_PROBE_FILE ? 137 : null; },
+      remove: async () => {},
+      readText: async () => null,
+    }));
+    expect(got).toBe(true);
+    expect(seen).toEqual([`/left4dead/addons/${DLC4_PROBE_VPK}`, `/left4dead_dlc4/maps/${DLC4_PROBE_FILE}`]);
+  });
+
+  it('is false when neither the VPK nor the folder is there', async () => {
     const server = { ...base, addons_transport: 'local', addons_dir: '/left4dead/addons' } as ServerRow;
     const got = await serverHasDlc4(server, () => ({
       put: async () => {}, size: async () => null, remove: async () => {},

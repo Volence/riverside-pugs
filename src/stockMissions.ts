@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseMission } from './vpk.js';
+import { missionFromLargeVpk, parseMission } from './vpk.js';
 import { campaignForMap } from './campaigns.js';
 
 /**
@@ -22,7 +22,15 @@ import { campaignForMap } from './campaigns.js';
  * The `dirs` parameter is a list of directories walked in order. Slugs cannot
  * collide across them, so the reader folds them rather than making the caller
  * merge two maps and decide precedence.
+ *
+ * A directory can also be an addons folder holding the L4D2 pack as addon VPKs
+ * (`zz_l4d2maps_c01_deadcenter.vpk` and so on, since 2026-09-26): each campaign
+ * VPK carries its mission file, read without loading the whole VPK. Only those
+ * names are opened, so custom campaigns in the same folder are left to their own
+ * registry.
  */
+
+const PACK_VPK = /^zz_l4d2maps_c\d+_[a-z0-9]+\.vpk$/i;
 
 export interface StockChapter { map: string; display: string | null }
 
@@ -32,7 +40,7 @@ export function readStockMissions(dirs: string[]): Map<string, StockChapter[]> {
     if (!dir) continue;
     let names: string[];
     try {
-      names = readdirSync(dir).filter((n) => n.toLowerCase().endsWith('.txt'));
+      names = readdirSync(dir).filter((n) => n.toLowerCase().endsWith('.txt') || PACK_VPK.test(n));
     } catch {
       // A directory that is not there is how a feature is turned off, not an
       // error, and one bad path must not cost us the campaigns in the others.
@@ -41,7 +49,9 @@ export function readStockMissions(dirs: string[]): Map<string, StockChapter[]> {
     for (const name of names) {
       let mission;
       try {
-        mission = parseMission(readFileSync(join(dir, name), 'utf8'));
+        mission = PACK_VPK.test(name)
+          ? missionFromLargeVpk(join(dir, name))
+          : parseMission(readFileSync(join(dir, name), 'utf8'));
       } catch {
         continue;
       }
