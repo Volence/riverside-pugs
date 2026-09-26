@@ -29,8 +29,11 @@ export type AdminEvent =
   // A steamid dropped while connecting for the second time in ten minutes
   // without getting in between. `name` is the in-game name off the drop line,
   // because the steamid is often nobody the site knows. `count` is the drops in
-  // that window, `total` every drop on record.
-  | { kind: 'signon_drop'; steamid: string; name: string; count: number; total: number }
+  // that window, `total` every drop on record. `campaign` is set only when the
+  // drop's server was running a live match on a custom campaign: there the
+  // likely cause is the campaign's own VPK (missing, stale, or installed
+  // without restarting the game), not the file consistency list.
+  | { kind: 'signon_drop'; steamid: string; name: string; count: number; total: number; campaign?: { slug: string; name: string } }
   // An input signature fired on a player for the first time in a match. Fires
   // once per player per match, never per burst: a macro trips on every pounce
   // and per-burst posting would bury the feed under one player's round. This is

@@ -239,8 +239,16 @@ export class AdminFeedPoster {
         const known = getPlayer(this.deps.db, e.steamid);
         const id = known ? `[${e.steamid}](${this.file(e.steamid)})` : `\`${e.steamid}\``;
         const who = known ? this.name(e.steamid) : `**${escapeName(e.name)}**`;
+        const dropped = `${who} (${id}) dropped while connecting ${e.count} times in ten minutes without getting in (${e.total} on record)`;
+        // On a custom campaign the consistency list is the unlikely cause: the
+        // client drops itself on the server's first message, before that
+        // check runs, when its copy of the campaign is missing, stale, or was
+        // added without restarting the game ("Your string table differs").
+        const why = e.campaign
+          ? ` during a match on **${escapeName(e.campaign.name)}**, a custom campaign: likely a missing or out of date copy of it, or a game not restarted after installing it (their screen usually says "Your string table differs from the server's"). The download is on [Custom campaigns](${this.deps.publicUrl}/custom-campaigns).`
+          : ': likely rejected for a modified game file; the file name was shown on their screen.';
         return {
-          text: `${who} (${id}) dropped while connecting ${e.count} times in ten minutes without getting in (${e.total} on record): likely rejected for a modified game file; the file name was shown on their screen. A cancelled loading screen looks the same, so this is a hint, not proof.`,
+          text: `${dropped}${why} A cancelled loading screen looks the same, so this is a hint, not proof.`,
           color: COLOR.problem,
         };
       }

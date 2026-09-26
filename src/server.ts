@@ -802,7 +802,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         // asked for a token they do not have, and guarded so a database error
         // cannot take down the listener that also carries match_end.
         if (ev.kind === 'signon_drop') {
-          signonDrops?.onDrop(ev).catch((err) => console.error('[consistency] failed to record a connect drop:', err));
+          // The server only picks the wording (custom campaign or modified
+          // file); a lookup failure must not lose the drop itself.
+          let dropServer: number | null = null;
+          try { dropServer = serverOf(source, meta); } catch { /* unknown server */ }
+          signonDrops?.onDrop(ev, new Date(), dropServer).catch((err) => console.error('[consistency] failed to record a connect drop:', err));
           return;
         }
         if (ev.kind === 'lilac_flag') {

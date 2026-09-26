@@ -297,3 +297,69 @@ export function missionFromVpk(vpkPath: string): Mission | null {
   }
   return found ? parseMission(found.text) : null;
 }
+
+/**
+ * The mission in a large single-file VPK, reading only its directory and the
+ * mission's own bytes. missionFromVpk reads the whole file, which is fine for
+ * an upload but not for the L4D2 pack's campaign VPKs (up to 330 MB each) at
+ * every boot. Null for anything that is not a VPK or holds no inline mission.
+ */
+export function missionFromLargeVpk(vpkPath: string): Mission | null {
+  let fd: number;
+  try { fd = openSync(vpkPath, 'r'); } catch { return null; }
+  try {
+    const read = (pos: number, len: number): Buffer => {
+      const b = Buffer.alloc(len);
+      const got = readSync(fd, b, 0, len, pos);
+      if (got !== len) throw new Error('short read');
+      return b;
+    };
+    const head = read(0, 12);
+    if (head.readUInt32LE(0) !== VPK_MAGIC) return null;
+    const version = head.readUInt32LE(4);
+    const treeLength = head.readUInt32LE(8);
+    const treeStart = version === 2 ? 28 : 12;
+    // A directory tree this size is not something our packs produce; refuse
+    // rather than allocate whatever a corrupt header claims.
+    if (treeLength > 64 * 1024 * 1024) return null;
+    const tree = read(treeStart, treeLength);
+    const dataStart = treeStart + treeLength;
+    let p = 0;
+    const cstr = (): string => {
+      const end = tree.indexOf(0, p);
+      if (end < 0) throw new Error('bad tree');
+      const s = tree.toString('latin1', p, end);
+      p = end + 1;
+      return s;
+    };
+    for (;;) {
+      const ext = cstr();
+      if (ext === '') break;
+      for (;;) {
+        const dir = cstr();
+        if (dir === '') break;
+        for (;;) {
+          const name = cstr();
+          if (name === '') break;
+          const preloadBytes = tree.readUInt16LE(p + 4);
+          const archiveIndex = tree.readUInt16LE(p + 6);
+          const offset = tree.readUInt32LE(p + 8);
+          const length = tree.readUInt32LE(p + 12);
+          p += 18;
+          const preload = tree.subarray(p, p + preloadBytes);
+          p += preloadBytes;
+          if (ext === 'txt' && dir.toLowerCase() === 'missions') {
+            if (archiveIndex !== 0x7fff && length > 0) return null;
+            const body = length > 0 ? read(dataStart + offset, length) : Buffer.alloc(0);
+            return parseMission(Buffer.concat([preload, body]).toString('utf8'));
+          }
+        }
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
+}

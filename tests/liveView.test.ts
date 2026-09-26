@@ -941,6 +941,31 @@ describe('liveView: match phase', () => {
     expect(pausesFor(db, id).map((p) => p.calledBy)).toEqual(['76561198000000042']);
   });
 
+  // Match 190: team A paused, a player dropped and came back inside it, then
+  // team A paused again. The plugin counted two pauses; the site must too.
+  it('keeps one pause row when a player leaves and returns inside a team pause', () => {
+    const id = seedLive();
+    const CALLER = '76561197972484944';
+    recordPhase(db, TOKEN, { ...paused, by: CALLER });
+    recordPhase(db, TOKEN, { ...paused, leave: true, by: CALLER });
+    recordPhase(db, TOKEN, { ...paused, by: CALLER });
+    recordPhase(db, TOKEN, live);
+    recordPhase(db, TOKEN, { ...paused, by: CALLER });
+    recordPhase(db, TOKEN, live);
+    expect(pausesFor(db, id)).toMatchObject([
+      { team: 'a', leave: true, calledBy: CALLER },
+      { team: 'a', leave: false, calledBy: CALLER },
+    ]);
+    expect(pausesFor(db, id).every((p) => p.endedAt !== null)).toBe(true);
+  });
+
+  it('still opens a new row when the pause changes hands', () => {
+    const id = seedLive();
+    recordPhase(db, TOKEN, paused);
+    recordPhase(db, TOKEN, { ...paused, team: 'b' });
+    expect(pausesFor(db, id).map((p) => p.team)).toEqual(['a', 'b']);
+  });
+
   it('records a disconnect pause as nobody\'s', () => {
     const id = seedLive();
     recordPhase(db, TOKEN, { state: 'paused', team: null, limit: 0, leave: true, unready: [] });
