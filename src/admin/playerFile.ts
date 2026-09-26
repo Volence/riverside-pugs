@@ -31,6 +31,7 @@ export interface PlayerFile {
     status: string;
     isAdmin: boolean;
     isMod: boolean;
+    isCaster: boolean;
     discordName: string | null;
     sr: number | null;
     games: number;
@@ -131,6 +132,7 @@ export function playerFile(
       status: player.status,
       isAdmin: player.is_admin === 1,
       isMod: player.is_mod === 1,
+      isCaster: player.is_caster === 1,
       discordName: player.discord_name,
       sr: row?.sr ?? null,
       games: row?.games ?? 0,

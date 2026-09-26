@@ -18,6 +18,8 @@ export interface PlayerRow {
   is_admin: number;
   /** May work tickets. Nothing else: no settings, no game server rights. */
   is_mod: number;
+  /** May read live match connect lines on /cast. Not staff. */
+  is_caster: number;
   created_at: string;
   discord_id: string | null;
   discord_name: string | null;

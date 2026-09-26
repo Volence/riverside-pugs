@@ -17,6 +17,8 @@ export interface Me {
   isAdmin: boolean;
   /** May open the Tickets tab. */
   isMod?: boolean;
+  /** May open the Cast page (live match connect lines). */
+  isCaster?: boolean;
   /** False when the server has no Discord app configured: hide every Discord control. */
   discordEnabled?: boolean;
   discord?: { id: string; name: string } | null;
@@ -1333,7 +1335,7 @@ export interface PlayerFileData {
   steamid: string;
   header: {
     steamid: string; name: string; avatar: string | null; status: string;
-    isAdmin: boolean; isMod: boolean; discordName: string | null;
+    isAdmin: boolean; isMod: boolean; isCaster: boolean; discordName: string | null;
     sr: number | null; games: number; createdAt: string;
   };
   glance: FileSummaryData;
@@ -1475,6 +1477,23 @@ export const modApi = {
     post<{ ok: true; removed: number; ended: boolean }>(`/api/mod/tickets/${id}/chats/${chatId}/remove-all`),
 };
 
+/** One live match on the Cast page. Mirrors src/routes/cast.ts. */
+export interface CastMatch {
+  id: number;
+  campaign: string;
+  currentMap: string | null;
+  serverName: string | null;
+  teamA: string[];
+  teamB: string[];
+  /** Null for a match started in game: its password is the box's own. */
+  connect: { host: string; port: number; password: string } | null;
+  spectate: SpectateInfo | null;
+}
+
+export const castApi = {
+  list: (signal?: AbortSignal) => get<{ matches: CastMatch[] }>('/api/cast', signal),
+};
+
 export const adminApi = {
   ban: (steamid: string, reason: string, minutes: number | null) =>
     post(`/api/admin/players/${steamid}/ban`, { reason, minutes }),
@@ -1482,6 +1501,7 @@ export const adminApi = {
   activate: (steamid: string) => post(`/api/admin/players/${steamid}/activate`),
   setAdmin: (steamid: string, isAdmin: boolean) => post(`/api/admin/players/${steamid}/admin`, { isAdmin }),
   setMod: (steamid: string, isMod: boolean) => post(`/api/admin/players/${steamid}/mod`, { isMod }),
+  setCaster: (steamid: string, isCaster: boolean) => post(`/api/admin/players/${steamid}/caster`, { isCaster }),
   unlinkDiscord: (steamid: string) => post(`/api/admin/players/${steamid}/unlink-discord`),
   /** Ends every session the player holds, on every device. */
   signOutPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/sign-out`),

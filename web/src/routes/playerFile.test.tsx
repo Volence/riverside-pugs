@@ -44,7 +44,7 @@ const ADMIN_ACTIONS = [
 const file = (over: Partial<PlayerFileData> = {}): PlayerFileData => ({
   steamid: P,
   header: {
-    steamid: P, name: 'griefer', avatar: null, status: 'active', isAdmin: false, isMod: false,
+    steamid: P, name: 'griefer', avatar: null, status: 'active', isAdmin: false, isMod: false, isCaster: false,
     discordName: 'grief#1', sr: 900, games: 12, createdAt: '2026-08-01T00:00:00.000Z',
   },
   glance: {

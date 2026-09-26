@@ -81,3 +81,22 @@ export function makeRequireMod(db: DB) {
     return steamid;
   };
 }
+
+/** Per-route guard for the caster page: an active caster or admin's steamid,
+ *  or the 401/403 reply sent and null. Moderators are not let in by their
+ *  flag: working tickets is no reason to hold a live match password. */
+export function makeRequireCaster(db: DB) {
+  return function requireCaster(req: FastifyRequest, reply: FastifyReply): string | null {
+    const steamid = getSession(req, db);
+    if (!steamid) {
+      reply.code(401).send({ error: 'not logged in' });
+      return null;
+    }
+    const player = getPlayer(db, steamid);
+    if (!player || (player.is_admin !== 1 && player.is_caster !== 1) || !inGoodStanding(db, steamid)) {
+      reply.code(403).send({ error: 'casters only' });
+      return null;
+    }
+    return steamid;
+  };
+}

@@ -79,6 +79,11 @@ export function Nav(
             link below. It had a nav entry of its own for a while, which only
             duplicated a screen the panel already owns, so the panel link is
             current for the whole panel including that screen. */}
+        {/* Casters get their page; admins reach it by URL rather than
+            carrying one more nav entry. */}
+        {me?.isCaster && !me.isAdmin && (
+          <a href="/cast" aria-current={path === '/cast' ? 'page' : undefined}>Cast</a>
+        )}
         {(me?.isAdmin || me?.isMod) && (
           <a href="/admin" aria-current={path.startsWith('/admin') ? 'page' : undefined}>
             {me?.isAdmin ? 'Admin' : 'Moderation'}

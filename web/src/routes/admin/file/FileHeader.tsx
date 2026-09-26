@@ -28,6 +28,7 @@ export function FileHeader(
           {h.name}
           {h.isAdmin && <span class="admin-tag">admin</span>}
           {h.isMod && <span class="admin-tag">mod</span>}
+          {h.isCaster && <span class="admin-tag">caster</span>}
           <span class={`admin-status admin-status--${h.status}`}>{h.status}</span>
         </h2>
         <p class="muted mono">{h.steamid}</p>
@@ -78,6 +79,16 @@ export function FileHeader(
               confirmLabel: 'Make moderator',
             })}>
             {h.isMod ? 'Remove moderator' : 'Make moderator'}
+          </button>
+        )}
+        {can('staff_flags') && (
+          <button class="chip" type="button" disabled={busy}
+            onClick={() => run(() => adminApi.setCaster(h.steamid, !h.isCaster), h.isCaster ? undefined : {
+              title: `Make ${h.name} a caster?`,
+              body: 'They can open the Cast page, which shows the game server and password of every live match so they can join as a spectator. They see both teams in first person. Nothing else: no tickets, no files, no admin on the game servers.',
+              confirmLabel: 'Make caster',
+            })}>
+            {h.isCaster ? 'Remove caster' : 'Make caster'}
           </button>
         )}
         {can('staff_flags') && h.discordName && (
