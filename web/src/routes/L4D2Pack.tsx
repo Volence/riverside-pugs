@@ -9,8 +9,6 @@ export const L4D2_PACK_SIZE = '3.4 GB';
  *  the 4 GB (large address aware) flag set: one byte, 000000FE 02 -> 22. Rebuild and re-upload
  *  under a new dated key if Steam ever ships a new exe. */
 export const L4D2_EXE_URL = 'https://assets.riversidepug.com/mappack/left4dead-4gb-steam-20241019.exe';
-/** The exe the original L4D2 map pack shipped: an older Valve build (2022) with the same flag. */
-export const PACK_EXE_URL = 'https://assets.riversidepug.com/mappack/left4dead-4gb.exe';
 
 /** One-byte LAA patch for the player's own exe. Offset 0xFE, 02 to 22 on the current Steam
  *  build; the script finds the PE header rather than trusting the offset. */
@@ -35,8 +33,9 @@ const PACK_FAQ: { q: string; a: preact.ComponentChildren }[] = [
       <code>left4dead\gameinfo.txt</code>, delete the line <code>Game left4dead_dlc4</code>,
       save, then delete the <code>left4dead_dlc4</code> folder and do the steps above. You get
       about 6 GB back.</p>
-      <p>You already have the map pack's 4 GB exe, so skip the 4 GB step unless Steam has
-      verified or updated the game since.</p></>,
+      <p>The old pack's exe also has the 4 GB permission, so you can keep it; ours is the same
+      thing on Steam's newer build. If Steam has verified or updated the game since, do the 4 GB
+      step again.</p></>,
   },
   {
     q: "Use Left 4 Dead 2's exe instead",
@@ -52,16 +51,6 @@ const PACK_FAQ: { q: string; a: preact.ComponentChildren }[] = [
           the exe's name, and Steam starts <code>left4dead.exe</code>.</li>
       </ol>
       <p>Verify integrity and L4D1 updates put Steam's exe back here too.</p></>,
-  },
-  {
-    q: "I'd rather use the L4D2 map pack's exe",
-    a: <><p>The original L4D2 map pack shipped its own <code>left4dead.exe</code> with the same
-      4 GB permission. It is an older Valve build (2022) rather than Steam's current one with a
-      single byte changed, so you cannot compare it against your own copy the way you can ours,
-      but it is the one most people ran with the old pack, and if you installed that pack you
-      already have it.{' '}
-      <a href={PACK_EXE_URL} download="left4dead.exe"><strong>Download the map pack's left4dead.exe</strong></a>{' '}
-      and put it in the Left 4 Dead folder in place of Steam's.</p></>,
   },
   {
     q: 'Why delete addonlist.txt?',
@@ -119,8 +108,8 @@ export function L4D2Pack() {
               on and nothing else changed. In the Left 4 Dead folder, rename Steam's to{' '}
               <code>left4dead.exe.bak</code> and put this one in its place. You can check it:{' '}
               <code>fc.exe /b left4dead.exe.bak left4dead.exe</code> lists exactly one
-              difference, <code>000000FE: 02 22</code>. Rather use Left 4 Dead 2's exe, or the
-              one from the original L4D2 map pack? Both are below.
+              difference, <code>000000FE: 02 22</code>. Rather use Left 4 Dead 2's exe? See
+              below.
             </li>
             <li>
               Or make that same one-byte change to your own exe yourself. In the
