@@ -15,6 +15,7 @@ import { weaponKey } from '../../hud/weapons';
 import { fontFace, shownKey, panelFile, DEFAULT_PREVIEW, HEALTH_BANDS, previewHealthBand, type HealthBand, type PreviewState } from '../../hud/render';
 import { elementById, type HudElement } from '../../hud/elements';
 import { elementRect, teamLayout, panelChild, baseHasChild, isFreeTeam, buildTrees, pcGet, pieceMovableIn, WEAPON_ICON_LABELS, ITEM_ICON_LABELS, yourItemsBlocked } from '../../hud/build';
+import { panelPiece } from '../../hud/tabscreen';
 import { kvFind } from '../../hud/kv';
 import { baseOf } from '../../hud/base';
 import { childDef, panelChildren, maxInset, type KeyDef } from '../../hud/children';
@@ -833,7 +834,8 @@ export function ChildControls(
   const def = childDef(panel, name);
   // The numbers of the class shown (your infected health on the Boomer: the Boomer file's), stored back in the panel file's frame.
   const file = panelFile(panel, preview);
-  const info = panelChild(design, panel, name, file);
+  // A versus piece's numbers are where the Tab screen draws it (panelPiece), the frame its move is stored in.
+  const info = panelPiece(design, panel, name, file);
   if (!def || !info) return null;
   const o = design.children[panel]?.[name] ?? {};
   const patch = (p: Partial<ChildOverride>, mode: EditMode = 'step') => edit((d) => patchChild(d, name, p, panel, file), mode);
@@ -1171,7 +1173,7 @@ export function PiecesControls(
     }, 'gesture');
   };
   const where = panel === 'teamColumn' ? 'the teammate card' : (elementById(panel)?.label ?? panel);
-  // X, Y and Align move pieces: offered only when one of these can move (no Tab piece does in v1).
+  // X, Y and Align move pieces: offered only when one of these can move (of the Tab screen, only the versus pieces do).
   const moves = names.some((n) => childDef(panel, n)?.move);
   return (
     <Field legend={`${names.length} pieces in ${where}`}>

@@ -32,7 +32,7 @@ import { elementById } from './elements';
 import { blockIn, panelChild, panelFrame, elementRect, isFreeTeam, teamCardRects, type CardFrame } from './build';
 import { childRects, hiddenInState, previewOf, panelFile, DOWN_MOVES_BAR, type ChildRect, type PreviewState, type SurvivorState } from './render';
 import { childAt, elementTargets, hitTest, inside, panelBoxes, shownInState, TEAM_CARDS, visibleElements, type Side } from './mock';
-import { tabFrames, tabSideOf } from './tabscreen';
+import { panelPiece, tabFrames, tabSideOf, versusLeader } from './tabscreen';
 import { childDef, childPath, panelChildren } from './children';
 import { probe } from './probes';
 import { kvFind, kvGet } from './kv';
@@ -603,10 +603,20 @@ export function handleAt(box: Box, handles: Handle[], ux: number, uy: number, sl
  * piece past it is cut in game, and the stock Hunter frame that runs to 450
  * is already cut there. edit.ts holds a piece that starts past it from
  * going further out (linkedHolds), rather than pulling it in.
+ *
+ * The Tab screen's versus panel takes the screen from its own place: the
+ * build grows the panel over whatever moves (PIECES-1 ran at 500 x 260
+ * with nothing clipped), so only the screen's edge bounds a piece.
  */
 export function panelClamp(design: HudDesign, panel: string): { w: number; h: number } {
   const key = baseOf(design);
   if (panel === 'teamColumn') return baseTeam(key).card;
+  // The versus panel grows to hold its moved pieces (build.ts tabVersusGrowPass), so its own
+  // size is no bound: a piece stays on the Tab screen, from the panel's place to the screen's edge.
+  if (panel === 'tabVersus') {
+    const el = elementRect(design, panel, design.aspect);
+    return { w: Math.max(0, screenW(design.aspect) - el.x), h: Math.max(0, SCREEN_H - el.y) };
+  }
   const reg = panelChildren(panel);
   if (!reg) return { w: 0, h: 0 };
   const num = (n: ReturnType<typeof kvFind>, k: string) => { const f = parseFloat((n && kvGet(n, k)) ?? ''); return Number.isFinite(f) ? f : 0; };
@@ -632,7 +642,9 @@ export function panelClamp(design: HudDesign, panel: string): { w: number; h: nu
 
 /**
  * What moving pieces snap to, in the panel file's unfitted frame (the frame
- * a ChildOverride is stored in): the panel's clamp box (panelClamp; for the
+ * a ChildOverride is stored in; a versus piece's is where it is drawn in the
+ * panel, tabscreen.ts panelPiece, and a piece carried along by a moving one
+ * is no target): the panel's clamp box (panelClamp; for the
  * teammate card the unfitted card, which is what the Phase 1 drag clamps
  * to), and the other drawn pieces, each where it is drawn in `state`
  * (panelChild's x, which for a card's bar is its item row's; in the Down
@@ -643,9 +655,19 @@ export function pieceTargets(design: HudDesign, state: State, moving: string[], 
   const out: Box[] = [{ x: 0, y: 0, w: p.w, h: p.h }];
   const pic = previewOf(state).survivor === 'down' ? panelChild(design, panel, 'Incapacitated') : null;
   const file = panelFile(panel, state);
+  // A versus piece pinned after a moving one moves with it (PIECES-1): no target to snap to.
+  const carried = (name: string) => {
+    if (panel !== 'tabVersus') return false;
+    const seen = new Set<string>();
+    for (let up = versusLeader(design, name); up && !seen.has(up.toLowerCase()); up = versusLeader(design, up)) {
+      if (moving.some((m) => m.toLowerCase() === up!.toLowerCase())) return true;
+      seen.add(up.toLowerCase());
+    }
+    return false;
+  };
   for (const name of drawnPieces(design, state, panel)) {
-    if (moving.includes(name)) continue;
-    const c = panelChild(design, panel, name, file);
+    if (moving.includes(name) || carried(name)) continue;
+    const c = panelPiece(design, panel, name, file);
     if (c) out.push({ x: pic && isBar(name) && DOWN_MOVES_BAR.has(panel) ? pic.x : c.x, y: c.y, w: c.w, h: c.h });
   }
   return out;

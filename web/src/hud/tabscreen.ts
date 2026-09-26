@@ -34,8 +34,8 @@
 import type { Box, HudDesign } from './design';
 import { elementById } from './elements';
 import { panelChildren } from './children';
-import { buildTrees, elementRect } from './build';
-import { kvGet, type KvNode } from './kv';
+import { buildTrees, elementRect, panelChild, type PanelChild } from './build';
+import { kvGet, pcFind, type KvNode } from './kv';
 import { layoutBlocks, TAB_STRINGS, type LaidBlock } from './tablayout';
 import { screenW, SCREEN_H } from './units';
 import { normaliseMaterial } from './art';
@@ -434,6 +434,49 @@ export function tabBoxes(design: HudDesign, side: Side, panel: string): TabBox[]
     // Code shows your row's own background whatever its visible says (survivorPiece's 'force').
     return [{ box, pieces: pieces(laid, at, shown, text, (b) => rule(b.name.toLowerCase(), row) === 'force' || b.visible) }];
   });
+}
+
+/**
+ * Where a versus piece is, in the panel's own frame (HUD units from the
+ * panel's top-left), laid out as the painter lays it (tabBoxes) but not cut
+ * to the panel: its if_embedded place, or down its pin chain after the
+ * piece it follows, a label as wide as its text. This is the frame a moved
+ * piece's place is stored in (edit.ts: a drag starts here, the X and Y
+ * boxes show it), and the frame the build writes a moved piece in: xpos and
+ * ypos exact, unpinned if it was pinned (build.ts unpin, probe PIECES-2), so
+ * the preview draws it where it was put. Null for a piece the file lacks.
+ */
+export function versusPiece(design: HudDesign, name: string): Box | null {
+  const el = elementRect(design, 'tabVersus', design.aspect);
+  const laid = layoutBlocks(buildTrees(design)(VERSUS), { w: el.w, h: el.h, embedded: true, textOf: (n) => versusText(n, 'survivor'), measure: unitMeasurer(design) });
+  const b = laid.find((l) => l.name.toLowerCase() === name.toLowerCase());
+  return b ? { x: b.x, y: b.y, w: b.w, h: b.h } : null;
+}
+
+/**
+ * panelChild with a versus piece where it is drawn (versusPiece) instead of
+ * its plain xpos and ypos, which for TeamYours is the standalone panel's 25,
+ * not the embedded 20 the game reads, and for a pinned piece an offset. The
+ * reader for anything that shows or starts from a piece's place: the X and
+ * Y boxes, a drag, a nudge and the snap targets. Any other panel's piece is
+ * panelChild's.
+ */
+export function panelPiece(design: HudDesign, panel: string, name: string, file?: string): PanelChild | null {
+  const c = panelChild(design, panel, name, file);
+  if (!c || panel !== 'tabVersus') return c;
+  const at = versusPiece(design, name);
+  return at ? { ...c, ...at } : c;
+}
+
+/**
+ * The versus piece a piece is pinned to in the design's files (its
+ * pin_to_sibling), or undefined: the game places it after that one and
+ * carries it along (PIECES-1). A line piece moved on its own has lost its
+ * pins (build.ts unpin), so it follows nothing.
+ */
+export function versusLeader(design: HudDesign, name: string): string | undefined {
+  const b = pcFind(buildTrees(design)(VERSUS), [name]);
+  return b ? kvGet(b, 'pin_to_sibling') : undefined;
 }
 
 /** The side a Tab panel's boxes are measured for when no side is given: the infected rows' own, else the survivors'. */

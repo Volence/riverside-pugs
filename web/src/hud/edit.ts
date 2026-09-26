@@ -24,6 +24,7 @@ import { probe } from './probes';
 import { baseOf } from './base';
 import { unionBox, CORNERS, type Handle } from './guides';
 import { elementFrame, panelClamp, panelOf, type Selection } from './selection';
+import { panelPiece, versusPiece, versusLeader } from './tabscreen';
 
 // The clamp box lives in selection.ts (edit.ts already imports selection.ts,
 // so the reverse import would make a loop); it is offered from here too, the
@@ -374,10 +375,50 @@ export function cardStarts(design: HudDesign, cards: number[]): Record<number, B
  * Boomer file gets. The panel's own file, or none, changes nothing.
  */
 function childAt(design: HudDesign, panel: string, name: string, file?: string): CardChild | null {
-  const c = panelChild(design, panel, name, file);
+  const c = panelPiece(design, panel, name, file);
   if (!c) return null;
   const { keys: _keys, z: _z, ...plain } = c;
   return plain;
+}
+
+/**
+ * The Tab screen's versus panel. Its pieces are stored where the preview
+ * lays them out in the panel (tabscreen.ts versusPiece): the if_embedded
+ * place, or, down the Distance / Health line, after the piece each is
+ * pinned to (probe PIECES-1, /home/volence/l4d/hud/probe-tab-pieces/RESULTS.md).
+ */
+const VERSUS = 'tabVersus';
+
+/**
+ * A move of a versus piece the game places after another (pin_to_sibling):
+ * the build unpins it and writes the stored place exactly (build.ts unpin,
+ * probe PIECES-2), which needs both axes, so an X or a Y box alone stores
+ * the other axis too, where the piece is drawn now.
+ */
+function pairedMove(design: HudDesign, name: string, p: Partial<ChildOverride>): Partial<ChildOverride> {
+  if ((p.x === undefined) === (p.y === undefined) || !versusLeader(design, name)) return p;
+  const at = versusPiece(design, name);
+  if (!at) return p;
+  return { ...p, x: p.x ?? clampChild('x', Math.round(at.x)), y: p.y ?? clampChild('y', Math.round(at.y)) };
+}
+
+/**
+ * The versus pieces of `names` that a moving piece of `names` carries: a
+ * piece pinned, directly or down the line, to another in the list moves with
+ * it in game and in the preview, so a group move stores nothing on it and it
+ * stays pinned (PIECES-1: moving a leader carries every piece pinned after it).
+ */
+function carriedIn(design: HudDesign, names: string[]): Set<string> {
+  const lower = new Set(names.map((n) => n.toLowerCase()));
+  const out = new Set<string>();
+  for (const n of names) {
+    const seen = new Set<string>([n.toLowerCase()]);
+    for (let up = versusLeader(design, n); up && !seen.has(up.toLowerCase()); up = versusLeader(design, up)) {
+      if (lower.has(up.toLowerCase())) { out.add(n); break; }
+      seen.add(up.toLowerCase());
+    }
+  }
+  return out;
 }
 
 /**
@@ -394,7 +435,7 @@ export function patchChild(design: HudDesign, name: string, p1: Partial<ChildOve
     if (!Object.keys(rest).length) return design;
     p0 = rest;
   }
-  const p = file ? storedFrame(design, name, p0, panel, file) : p0;
+  const p = file ? storedFrame(design, name, p0, panel, file) : panel === VERSUS ? pairedMove(design, name, p0) : p0;
   const mate = LINKED_X[panel]?.[name.toLowerCase()];
   if (p.x === undefined || !mate) return mergeChild(design, name, p, panel);
   const was = panelChild(design, panel, name), other = panelChild(design, panel, mate);
@@ -445,7 +486,10 @@ function tabVisible(design: HudDesign, name: string, p: Partial<ChildOverride>, 
 export function hiddenWith(design: HudDesign, panel: string, name: string): ChildDef | undefined {
   const kids = panelChildren(panel)?.children ?? [];
   const seen = new Set<string>([name]);
-  for (let up = kids.find((c) => c.hidesWith?.includes(name)); up && !seen.has(up.name); up = kids.find((c) => c.hidesWith?.includes(up!.name))) {
+  // A line piece moved on its own is unpinned (build.ts unpin) and follows nothing: the walk stops there.
+  const follows = (n: string) => panel !== VERSUS || versusLeader(design, n) !== undefined;
+  for (let up = follows(name) ? kids.find((c) => c.hidesWith?.includes(name)) : undefined; up && !seen.has(up.name);
+    up = follows(up.name) ? kids.find((c) => c.hidesWith?.includes(up!.name)) : undefined) {
     seen.add(up.name);
     if (design.children[panel]?.[up.name]?.visible === false && (!up.hideGate || probe(up.hideGate))) return up;
   }
@@ -722,7 +766,8 @@ export function moveChildren(
   design: HudDesign, names: string[], starts: Record<string, CardChild>, dx: number, dy: number, panel = 'teamColumn', file?: string,
 ): HudDesign {
   const p = panelClamp(design, panel);
-  const list = names.filter((n) => childDef(panel, n)?.move && starts[n]);
+  const carried = panel === VERSUS ? carriedIn(design, names) : new Set<string>();
+  const list = names.filter((n) => childDef(panel, n)?.move && starts[n] && !carried.has(n));
   if (!list.length) return design;
   const held = list.map((n) => linkedHolds(design, panel, n, file, starts[n]));
   if (held.every((h) => h)) {
