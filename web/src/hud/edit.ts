@@ -885,6 +885,9 @@ export function alignChildren(design: HudDesign, names: string[], how: Align, pa
   for (const [n, s] of Object.entries(starts)) {
     if (!childDef(panel, n)?.move) continue;
     const at = alignedAt(s, box, how);
+    // A versus piece already in place is left alone: placing a line piece, even where it is, unpins it
+    // (build.ts unpin), so it would stop sliding with the number in front of it (review M3).
+    if (panel === VERSUS && at.x === s.x && at.y === s.y) continue;
     d = placeChild(d, n, at.x, at.y, panel, file);
   }
   return d;
@@ -944,13 +947,26 @@ export function raiseChild(design: HudDesign, names: string[], to: 'front' | 'ba
  * side panel offers it no X and Y there, and an arrow or a drag after
  * picking it in Layers must not store a place either.
  */
+/**
+ * Where the versus panel may be put: tabVersusRange, narrowed by the size the
+ * panel has grown to over its moved pieces (build.ts tabVersusGrowPass, which
+ * elementRect reports), so moving the panel, or a narrower aspect, never
+ * pushes a moved piece off the screen (review M1). validateDesign keeps the
+ * base range, which is the wider one.
+ */
+function versusRange(design: HudDesign, aspect: Aspect): { x: [number, number]; y: [number, number] } {
+  const r = tabVersusRange(aspect, baseOf(design));
+  const el = elementRect(design, 'tabVersus', aspect);
+  return { x: [r.x[0], Math.min(r.x[1], Math.max(0, screenW(aspect) - el.w))], y: [r.y[0], Math.min(r.y[1], Math.max(0, SCREEN_H - el.h))] };
+}
+
 export function placeElement(design: HudDesign, id: string, x: number, y: number): HudDesign {
   const el = elementById(id);
   if (!el || !el.move || (el.moveGate && !probe(el.moveGate)) || (id === 'teamColumn' && isFreeTeam(design))) return design;
   if (id === YOUR_ITEMS) return yourItemsBlocked(design) ? design : placeYourItems(design, x, y);
   // The versus panel is kept whole on screen (validateDesign's clamp, tabVersusRange), in whole units.
   if (id === 'tabVersus') {
-    const r = tabVersusRange(design.aspect, baseOf(design));
+    const r = versusRange(design, design.aspect);
     const at = (v: number, [lo, hi]: [number, number]) => Math.round(Math.min(hi, Math.max(lo, v)));
     return { ...design, elements: { ...design.elements, [id]: { ...design.elements[id], x: at(x, r.x), y: at(y, r.y) } } };
   }
@@ -993,7 +1009,7 @@ export function setAspect(design: HudDesign, aspect: Aspect): HudDesign {
   const next = { ...design, aspect };
   const o = design.elements.tabVersus;
   if (!o || (o.x === undefined && o.y === undefined)) return next;
-  const r = tabVersusRange(aspect, baseOf(design));
+  const r = versusRange(next, aspect);
   const at = (v: number | undefined, [lo, hi]: [number, number]) => (v === undefined ? undefined : Math.min(hi, Math.max(lo, v)));
   const held = { ...o, x: at(o.x, r.x), y: at(o.y, r.y) };
   if (held.x === undefined) delete held.x;

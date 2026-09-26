@@ -279,6 +279,16 @@ describe('moving the versus pieces (probe PIECES-1 and PIECES-2)', () => {
     expect(pins(piece(last, 'HealthLabel'))).toEqual(['DistanceAmount', '0', '1']);
   });
 
+  it('writes an unpinned piece one plain xpos and ypos, dropping the other languages\' lines, so every client draws it there (review I1)', () => {
+    // Stock DistanceAmount, HealthLabel and HealthAmount carry "xpos" [$ENGLISH] and "xpos" [$!ENGLISH]; a
+    // non-English client left with its own 5 or 10 would draw the unpinned piece near the panel's left edge.
+    for (const name of ['DistanceAmount', 'HealthLabel', 'HealthAmount']) {
+      const b = piece(moved({ [name]: { x: 250, y: 60 } }), name);
+      const lines = (b.value as KvNode[]).filter((n) => ['xpos', 'ypos'].includes(n.key.toLowerCase())).map((n) => [n.key, n.value, n.cond]);
+      expect(lines, name).toEqual([['xpos', '250', undefined], ['ypos', '60', undefined]]);
+    }
+  });
+
   it('fills the other axis of a lone move from where the piece is laid out, so an unpinned piece never loses its place', () => {
     const files = moved({ HealthAmount: { y: 30 } });
     const b = piece(files, 'HealthAmount');
