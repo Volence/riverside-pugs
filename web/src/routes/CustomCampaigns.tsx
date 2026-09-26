@@ -3,6 +3,7 @@ import { useFetch } from '../hooks/useFetch';
 import { campaignTint, chapterName } from '../format';
 import { Empty, Panel, PageSkeleton } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { L4D2Pack } from './L4D2Pack';
 
 /** 300 MB, not 314572800. Nobody installing a campaign cares about bytes. */
 function fileSize(bytes: number): string {
@@ -20,21 +21,27 @@ function fileSize(bytes: number): string {
 export function CustomCampaigns() {
   const { data, error } = useFetch((s) => api.customCampaigns(s), []);
 
-  if (error) {
-    return (
-      <div class="page page--list">
-        <Panel><Empty>Couldn't load custom campaigns.</Empty></Panel>
+  // The L4D2 pack section needs no data, so it renders at once and a
+  // /custom-campaigns#l4d2-pack link lands on it before the list has loaded.
+  return (
+    <div class="page page--list">
+      <PageHeader title="Custom campaigns" />
+      <div class="stack">
+        <L4D2Pack />
+        <CampaignList data={data} error={error} />
       </div>
-    );
-  }
+    </div>
+  );
+}
+
+function CampaignList({ data, error }: { data: { campaigns: CustomCampaignRow[] } | null | undefined; error: unknown }) {
+  if (error) return <Panel><Empty>Couldn't load custom campaigns.</Empty></Panel>;
   if (!data) return <PageSkeleton variant="list" panels={2} />;
 
   const campaigns = data.campaigns;
 
   return (
-    <div class="page page--list">
-      <PageHeader title="Custom campaigns" />
-
+    <>
       <Panel>
         <h3>Installing one</h3>
         <ol class="steps">
@@ -92,6 +99,6 @@ export function CustomCampaigns() {
           ))}
         </div>
       )}
-    </div>
+    </>
   );
 }

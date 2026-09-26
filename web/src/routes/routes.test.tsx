@@ -1636,7 +1636,7 @@ describe('CustomCampaigns', () => {
     mockApi.customCampaigns.mockResolvedValue({ campaigns: [campaign] });
     render(<CustomCampaigns />);
     expect(await waitFor(() => screen.getByText('Dead Before Dawn'))).toBeTruthy();
-    const link = screen.getByRole('link', { name: /download/i }) as HTMLAnchorElement;
+    const link = screen.getByRole('link', { name: /download 300 mb/i }) as HTMLAnchorElement;
     expect(link.getAttribute('href')).toBe('/download/campaign/dbd');
   });
 
@@ -1646,8 +1646,29 @@ describe('CustomCampaigns', () => {
   it('opts the download link out of the SPA router', async () => {
     mockApi.customCampaigns.mockResolvedValue({ campaigns: [campaign] });
     render(<CustomCampaigns />);
-    const link = await waitFor(() => screen.getByRole('link', { name: /download/i }));
+    const link = await waitFor(() => screen.getByRole('link', { name: /download 300 mb/i }));
     expect(link.getAttribute('target')).toBe('_blank');
+  });
+
+  // The L4D2 pack needs no data, so it must be on the page before the list
+  // loads: /custom-campaigns#l4d2-pack links from How to play land on it.
+  it('shows the L4D2 pack before the campaign list has loaded', () => {
+    mockApi.customCampaigns.mockReturnValue(new Promise(() => {}));
+    const { container } = render(<CustomCampaigns />);
+    expect(container.querySelector('#l4d2-pack')).toBeTruthy();
+    const pack = screen.getByRole('link', { name: /download the l4d2 campaigns/i });
+    expect(pack.getAttribute('href')).toBe('https://assets.riversidepug.com/mappack/Riverside-L4D2-Maps-VPK-v3.1e.zip');
+    const exe = screen.getByRole('link', { name: /4 gb left4dead\.exe/i });
+    expect(exe.getAttribute('href')).toBe('https://assets.riversidepug.com/mappack/left4dead-4gb.exe');
+    expect(exe.getAttribute('download')).toBe('left4dead.exe');
+  });
+
+  // Without this step another campaign's copy of an L4D2 model can load on
+  // these maps and crash the client (seen 2026-09-26 on Dark Carnival).
+  it('tells players to delete addonlist.txt', () => {
+    mockApi.customCampaigns.mockReturnValue(new Promise(() => {}));
+    const { container } = render(<CustomCampaigns />);
+    expect(container.querySelector('#l4d2-pack')!.textContent).toMatch(/Delete left4dead\\addonlist\.txt/);
   });
 
   it('shows the file size in a human unit', async () => {
