@@ -1665,6 +1665,11 @@ describe('CustomCampaigns', () => {
     expect(exe.getAttribute('download')).toBe('left4dead.exe');
     const packExe = screen.getByRole('link', { name: /map pack's left4dead\.exe/i });
     expect(packExe.getAttribute('href')).toBe('https://assets.riversidepug.com/mappack/left4dead-4gb.exe');
+    // L4D2's own exe is copy-your-own (proven 2026-09-26: renamed to left4dead.exe it
+    // starts L4D1 and loads c2m1), so there is no download link for it.
+    const section = container.querySelector('#l4d2-pack')!;
+    expect(section.textContent).toMatch(/copy left4dead2\.exe/);
+    expect(section.textContent).toMatch(/rename it to left4dead\.exe/);
   });
 
   // Without this step another campaign's copy of an L4D2 model can load on
