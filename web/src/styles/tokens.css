@@ -41,9 +41,9 @@
 
   /* Campaign tints for the four L4D1 campaigns. Every other campaign gets a
    * tint from campaignTint() in web/src/format.ts, at the same weight. */
-  --c-no-mercy: #6f8a7a;
-  --c-death-toll: #5a6f8c;
-  --c-dead-air: #b8842f;
+  --c-no-mercy: #5a6f8c;
+  --c-death-toll: #6f8a7a;
+  --c-dead-air: #c46a2c;
   --c-blood-harvest: #8a3f32;
 
   --font-display: "Anton", Impact, "Arial Narrow", sans-serif;
