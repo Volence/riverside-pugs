@@ -3,9 +3,13 @@ import { publishAdminEvent } from './adminFeed.js';
 import { getPlayer } from './players.js';
 import { markEntered, recordSignonDrop, STREAK_WINDOW_MS, type SignonDropInput } from './signonDrops.js';
 import type { MessagePayload } from './discord/transport.js';
+import { campaignRegistry } from './campaignRegistry.js';
 
 /** Where the DM and the help link point. A page on the Preact site. */
 export const CONSISTENCY_HELP_PATH = '/help/consistency';
+
+/** Where a custom campaign's download lives. */
+export const CUSTOM_CAMPAIGNS_PATH = '/custom-campaigns';
 
 /** At most one DM per steamid in this long. */
 const DM_EVERY_MS = 60 * 60_000;
@@ -25,6 +29,48 @@ export function signonDropDm(helpUrl: string): MessagePayload {
     components: [[{ kind: 'link', url: helpUrl, label: 'How to fix it' }]],
     mentionUserIds: [],
   };
+}
+
+/**
+ * The DM for a drop during a match on a custom campaign. There the client
+ * drops itself on the server's very first message, before the consistency
+ * check can run, when its copy of the campaign does not match: missing, an
+ * older version, or dropped into addons while the game was running (a VPK
+ * mounts only at game start). Root-caused on Suicide Blitz in match 108.
+ */
+export function customCampaignDropDm(campaignName: string, downloadUrl: string): MessagePayload {
+  return {
+    content: [
+      `The Riverside L4D server dropped your connection while you were loading into a match on ${campaignName}, a custom campaign.`,
+      'That usually means your copy of the campaign does not match the server\'s, and your game showed:',
+      '> Your string table differs from the server\'s.',
+      `1. Download ${campaignName} from ${downloadUrl} and put the .vpk in left4dead/addons, replacing any older copy.`,
+      '2. Fully quit and restart Left 4 Dead. A campaign added while the game is running is not loaded.',
+      '3. Still dropped? Verify your game files in Steam, and delete left4dead/stringtable_dictionary_fallback.dct (the game makes a fresh one), then restart again.',
+      'If you only cancelled the loading screen, ignore this message.',
+    ].join('\n'),
+    embeds: [],
+    components: [[{ kind: 'link', url: downloadUrl, label: 'Custom campaigns' }]],
+    mentionUserIds: [],
+  };
+}
+
+/**
+ * The custom campaign a server's live match is on, or null for a stock one,
+ * no live match, or an unknown server. Keyed on the match's campaign rather
+ * than match_live.current_map, because the drops that matter happen while the
+ * match's players first connect, before any round has started to set the map.
+ * A match is flipped live right after its changelevel, so by the time anyone
+ * connects the server is already on that campaign.
+ */
+export function customCampaignOnServer(db: DB, serverId: number | null): { slug: string; name: string } | null {
+  if (serverId === null) return null;
+  const row = db.prepare(
+    "SELECT campaign FROM matches WHERE server_id = ? AND state = 'live' ORDER BY id DESC LIMIT 1",
+  ).get(serverId) as { campaign: string } | undefined;
+  if (!row) return null;
+  const entry = campaignRegistry(db).get(row.campaign);
+  return entry?.custom ? { slug: entry.slug, name: entry.name } : null;
 }
 
 /**
@@ -54,15 +100,26 @@ export class SignonDropNotifier {
     dm: () => DmFn | null;
   }) {}
 
-  /** Resolves once the DM, if any, has been sent or has failed. Never rejects. */
-  async onDrop(d: SignonDropInput, now = new Date()): Promise<void> {
+  /** Resolves once the DM, if any, has been sent or has failed. Never rejects.
+   *  `serverId` is the game server the line came from, when known; it only
+   *  picks the wording (custom campaign or modified file). */
+  async onDrop(d: SignonDropInput, now = new Date(), serverId: number | null = null): Promise<void> {
     const rec = recordSignonDrop(this.deps.db, d, now);
     if (!rec) return;
+    let campaign: { slug: string; name: string } | null = null;
+    try {
+      campaign = customCampaignOnServer(this.deps.db, serverId);
+    } catch (err) {
+      console.warn('[consistency] could not look up the campaign for a connect drop:', err);
+    }
 
     const posted = this.lastPost.get(d.steamid);
     if (rec.streak >= 2 && (posted === undefined || now.getTime() - posted >= STREAK_WINDOW_MS)) {
       this.lastPost.set(d.steamid, now.getTime());
-      publishAdminEvent({ kind: 'signon_drop', steamid: d.steamid, name: d.name, count: rec.streak, total: rec.total });
+      publishAdminEvent({
+        kind: 'signon_drop', steamid: d.steamid, name: d.name, count: rec.streak, total: rec.total,
+        ...(campaign ? { campaign } : {}),
+      });
     }
 
     const discordId = getPlayer(this.deps.db, d.steamid)?.discord_id;
@@ -72,7 +129,9 @@ export class SignonDropNotifier {
     if (sent !== undefined && now.getTime() - sent < DM_EVERY_MS) return;
     this.lastDm.set(d.steamid, now.getTime());
     try {
-      await dm(discordId, signonDropDm(`${this.deps.publicUrl}${CONSISTENCY_HELP_PATH}`));
+      await dm(discordId, campaign
+        ? customCampaignDropDm(campaign.name, `${this.deps.publicUrl}${CUSTOM_CAMPAIGNS_PATH}`)
+        : signonDropDm(`${this.deps.publicUrl}${CONSISTENCY_HELP_PATH}`));
     } catch (err) {
       console.warn(`[consistency] could not DM ${d.steamid} about a connect drop, not retrying:`, err);
     }
