@@ -642,12 +642,25 @@ export const FRUST_PANEL: PanelChildren = {
  * - Code colours the versus scores (TS2 failed: grey whatever the file says)
  *   and the survivor names (white whatever the file says), so neither
  *   offers a colour.
- * In v1 no piece moves, sizes or changes its text size (spec 2.1): every one
- * is move false, box none, font false, its hide behind TS7. The build must
+ * No piece sizes or changes its text size (spec 2.1): every one is box
+ * none, font false, its hide behind TS7. Only the versus panel's pieces
+ * move (TAB_MOVE), from probe PIECES-1 and PIECES-2
+ * (/home/volence/l4d/hud/probe-tab-pieces/RESULTS.md). The build must
  * find each block as the PC game does (kv.ts pcFind): scoreboard.res's
  * BackgroundImage [$X360] comes before the PC one.
  */
 const TAB_HIDE = { move: false, box: 'none', font: false, hideGate: 'TS7' } as const;
+/**
+ * A versus piece that moves: probe PIECES-1 moved every one by its own
+ * offset and each drew exactly there, on both sides, as a ghost and
+ * spawned (/home/volence/l4d/hud/probe-tab-pieces/RESULTS.md, measure.txt).
+ * The build writes xpos into if_embedded where stock has it there (the
+ * team labels, the scores and the team boxes: PIECES-2 saw a plain xpos
+ * under an if_embedded one ignored) and ypos into the plain block, grows
+ * the panel to hold what moved (TL5: it clips its children), and unpins a
+ * piece of the stat line moved on its own (build.ts childPass).
+ */
+const TAB_MOVE = { ...TAB_HIDE, move: true } as const;
 const PANEL_BG = 'VGUI Panel key bgcolor_override (client.dll string run)';
 
 export const TAB_BOARD: PanelChildren = {
@@ -666,6 +679,12 @@ export const TAB_BOARD: PanelChildren = {
 };
 
 const BOX_NOTE = 'The game draws this box from its picture and takes no tint, so its look is its style.';
+/**
+ * The Survival Multiplier line never drew in probe PIECES-1's scenarios
+ * (/home/volence/l4d/hud/probe-tab-pieces/RESULTS.md, rule 7), so its moves
+ * are untested in game and the two pieces stay hide and colour only.
+ */
+const SURVIVAL_UNSEEN = 'It was never seen in game when the Tab pieces were tested, so moving it waits on a probe.';
 const SCORE_NOTE = 'The game writes the score here and colours it itself: a file colour is ignored (probe TS2).';
 export const TAB_VERSUS: PanelChildren = {
   panelId: 'tabVersus',
@@ -674,15 +693,15 @@ export const TAB_VERSUS: PanelChildren = {
   frame: 'hudlayout',
   embedded: true,
   children: [
-    { name: 'YourTeamHighlightImage', label: 'Team score box', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE,
+    { name: 'YourTeamHighlightImage', label: 'Team score box', kind: 'other', role: 'decor', colour: false, ...TAB_MOVE,
       note: `${BOX_NOTE} The game shows one team's box at a time.` },
-    { name: 'EnemyTeamHighlightImage', label: 'Enemy team box', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE,
+    { name: 'EnemyTeamHighlightImage', label: 'Enemy team box', kind: 'other', role: 'decor', colour: false, ...TAB_MOVE,
       note: `${BOX_NOTE} It shares the team score box's style; the game shows it in place of yours.` },
-    { name: 'StatBreakdownHighlightImage', label: 'Versus score box', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE, note: BOX_NOTE },
-    { name: 'TeamYours', label: '"Your Team"', kind: 'label', role: 'content', colour: true, ...TAB_HIDE },
-    { name: 'TeamEnemy', label: '"Enemy Team"', kind: 'label', role: 'content', colour: true, ...TAB_HIDE },
-    { name: 'TeamYourScoreSurvivors', label: 'Your score', kind: 'label', role: 'content', colour: false, ...TAB_HIDE, note: SCORE_NOTE },
-    { name: 'TeamEnemyScoreSurvivors', label: 'Enemy score', kind: 'label', role: 'content', colour: false, ...TAB_HIDE,
+    { name: 'StatBreakdownHighlightImage', label: 'Versus score box', kind: 'other', role: 'decor', colour: false, ...TAB_MOVE, note: BOX_NOTE },
+    { name: 'TeamYours', label: '"Your Team"', kind: 'label', role: 'content', colour: true, ...TAB_MOVE },
+    { name: 'TeamEnemy', label: '"Enemy Team"', kind: 'label', role: 'content', colour: true, ...TAB_MOVE },
+    { name: 'TeamYourScoreSurvivors', label: 'Your score', kind: 'label', role: 'content', colour: false, ...TAB_MOVE, note: SCORE_NOTE },
+    { name: 'TeamEnemyScoreSurvivors', label: 'Enemy score', kind: 'label', role: 'content', colour: false, ...TAB_MOVE,
       note: `${SCORE_NOTE} "N/A" is a half not played yet.` },
     // The stat line is a pin chain (versusmodescoreboard.res pin_to_sibling,
     // stock and Modern alike): DistanceAmount is pinned to DistanceLabel,
@@ -692,17 +711,25 @@ export const TAB_VERSUS: PanelChildren = {
     // HealthLabel link was seen in game (TS7, /home/volence/l4d/hud/probe-tab/RESULTS.md,
     // TAB-1 tab1/runs/tab-survivor/tab-a.png: the label hidden, HealthAmount
     // gone too); the other links follow from the same pin behaviour.
-    { name: 'DistanceLabel', label: '"Average Distance:"', kind: 'label', role: 'content', colour: true, ...TAB_HIDE, hidesWith: ['DistanceAmount'],
-      note: 'The rest of the line follows this label: the game places each piece after the one before it, so hiding it hides the whole line.' },
-    { name: 'DistanceAmount', label: 'Distance', kind: 'label', role: 'content', colour: true, ...TAB_HIDE, hidesWith: ['HealthLabel'],
-      note: 'Hiding it hides Health Bonus and its number too: the game places them after it.' },
-    { name: 'HealthLabel', label: '"Health Bonus:"', kind: 'label', role: 'content', colour: true, ...TAB_HIDE, hidesWith: ['HealthAmount'],
-      note: 'Hiding it hides its number too: the game places the number after it.' },
-    { name: 'HealthAmount', label: 'Health bonus', kind: 'label', role: 'content', colour: true, ...TAB_HIDE },
+    // PIECES-1 and PIECES-2 (/home/volence/l4d/hud/probe-tab-pieces/RESULTS.md)
+    // saw the chain in motion: moving a piece carries every piece pinned
+    // after it, a pinned piece's offset runs from the top-right of the one
+    // before it with its ypos turned round, and a piece whose three pin keys
+    // are removed is placed exactly where its own xpos and ypos say, taking
+    // its followers with it. So the first move of a pinned piece on its own
+    // unpins it (build.ts childPass) and it stops following.
+    { name: 'DistanceLabel', label: '"Average Distance:"', kind: 'label', role: 'content', colour: true, ...TAB_MOVE, hidesWith: ['DistanceAmount'],
+      note: 'The rest of the line follows this label: the game places each piece after the one before it, so moving or hiding it takes the whole line along. A piece of the line moved on its own stops following.' },
+    { name: 'DistanceAmount', label: 'Distance', kind: 'label', role: 'content', colour: true, ...TAB_MOVE, hidesWith: ['HealthLabel'],
+      note: 'Moving or hiding it takes Health Bonus and its number along while they follow it: the game places them after it. Moved on its own, it stops following "Average Distance:".' },
+    { name: 'HealthLabel', label: '"Health Bonus:"', kind: 'label', role: 'content', colour: true, ...TAB_MOVE, hidesWith: ['HealthAmount'],
+      note: 'Hiding it hides its number too: the game places the number after it, and moving it takes the number along. Moved on its own, it stops following the distance.' },
+    { name: 'HealthAmount', label: 'Health bonus', kind: 'label', role: 'content', colour: true, ...TAB_MOVE,
+      note: 'Moved on its own, it stops following "Health Bonus:" and stays where you put it.' },
     { name: 'SurvivalMultLabel', label: '"Survival Multiplier:"', kind: 'label', role: 'content', colour: true, ...TAB_HIDE, hidesWith: ['SurvivalMultAmount'],
-      note: 'The game shows this line only later in a round. Hiding it hides its number too.' },
+      note: `The game shows this line only later in a round. Hiding it hides its number too. ${SURVIVAL_UNSEEN}` },
     { name: 'SurvivalMultAmount', label: 'Survival multiplier', kind: 'label', role: 'content', colour: true, ...TAB_HIDE,
-      note: 'The game shows this line only later in a round.' },
+      note: `The game shows this line only later in a round. ${SURVIVAL_UNSEEN}` },
   ],
 };
 

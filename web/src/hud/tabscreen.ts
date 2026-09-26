@@ -36,7 +36,7 @@ import { elementById } from './elements';
 import { panelChildren } from './children';
 import { buildTrees, elementRect } from './build';
 import { kvGet, type KvNode } from './kv';
-import { layoutBlocks, type LaidBlock } from './tablayout';
+import { layoutBlocks, TAB_STRINGS, type LaidBlock } from './tablayout';
 import { screenW, SCREEN_H } from './units';
 import { normaliseMaterial } from './art';
 import { MODERN_ART } from './build';
@@ -75,15 +75,6 @@ export const TAB_SAMPLES = {
   pingBox: 'rgba(38,36,35,1)',
   pingBar: 'rgba(67,121,52,1)',
 } as const;
-
-/** The #L4D_VSScoreboard_* tokens in English (resource/left4dead_english.txt). */
-const STRINGS: Record<string, string> = {
-  '#l4d_vsscoreboard_yourteam': 'Your Team',
-  '#l4d_vsscoreboard_enemyteam': 'Enemy Team',
-  '#l4d_vsscoreboard_distanceshort': 'Average Distance:',
-  '#l4d_vsscoreboard_health': 'Health Bonus:',
-  '#l4d_vsscoreboard_survivalmult': 'Survival Multiplier:',
-};
 
 /**
  * What code hides in versus, whatever the file says (spec 1.3, 1.4, 1.7 and
@@ -212,7 +203,7 @@ function ordered(laid: LaidBlock[]): LaidBlock[] {
 }
 
 const boardText = (n: KvNode): string => (n.key.toLowerCase() === 'missiontitle' ? TAB_SAMPLES.title : token(kvGet(n, 'labelText') ?? ''));
-const token = (t: string): string => STRINGS[t.toLowerCase()] ?? (t.startsWith('#') ? '' : t);
+const token = (t: string): string => TAB_STRINGS[t.toLowerCase()] ?? (t.startsWith('#') ? '' : t);
 
 /**
  * The versus panel: at its element's place (it moves, TS4), clipped to its

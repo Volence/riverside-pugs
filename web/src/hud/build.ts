@@ -36,6 +36,7 @@ import {
   type RowInput, type RowLayout, type LimitLine,
 } from './youritems';
 import { probe } from './probes';
+import { layoutBlocks, versusEstimate } from './tablayout';
 import { clampBarKeys } from './progress';
 
 /**
@@ -521,11 +522,115 @@ function childPass(work: Work, design: HudDesign) {
       // Hunter file with no number the Smoker's and Boomer's carry): the
       // edit still lands in each of those, as linkedBlocks allows.
       if (!block && !work.imported) throw new Error(`${panel.file}: no child ${name}`);
-      if (block) applyChild(work, panel.file, def, block, o, panel.embedded);
+      if (block && panel.embedded && (o.x !== undefined || o.y !== undefined) && pcGet(block, 'pin_to_sibling') !== undefined) {
+        applyChild(work, panel.file, def, block, unpin(work, panel.file, block, o), true);
+      } else if (block) applyChild(work, panel.file, def, block, o, panel.embedded);
       for (const link of linkedBlocks(work, design, panel, name)) applyChild(work, link.file, def, link.block, linkedOverride(o, link));
     }
   }
 }
+
+/** The three keys that pin a block to a sibling. */
+const PIN_KEYS = ['pin_to_sibling', 'pin_corner_to_sibling', 'pin_to_sibling_corner'];
+
+/**
+ * A versus piece of the stat line moved on its own: its three pin keys come
+ * out and it takes the exact place stored, in the panel's own frame. Probe
+ * PIECES-2 (/home/volence/l4d/hud/probe-tab-pieces/RESULTS.md, pieces2/build-log.txt):
+ * HealthLabel with its pins removed and xpos 200, ypos 30 drew at 1194, 118 px
+ * against 1192.2, 118.5 expected, where still pinned it would have drawn near
+ * 1445; and HealthAmount, still pinned to it, went along. So a stored place is
+ * always absolute (what the X and Y boxes show), the pinned offset with its
+ * turned-round ypos (PIECES-1) is never written, and the pieces pinned to
+ * this one keep their pins and follow it.
+ *
+ * A stored move on one axis alone (a hand-edited design; edit.ts stores both)
+ * takes the other from where the piece is laid out now, through the build's
+ * text estimate (tablayout.ts versusEstimate), so an unpinned piece never
+ * falls back to 0 on the axis it did not move.
+ */
+function unpin(work: Work, file: string, block: KvNode, o: ChildOverride): ChildOverride {
+  let { x, y } = o;
+  if (x === undefined || y === undefined) {
+    const at = versusLaid(work, work.tree(file)).find((b) => b.name.toLowerCase() === block.key.toLowerCase());
+    x ??= Math.round(at?.x ?? 0);
+    y ??= Math.round(at?.y ?? 0);
+  }
+  block.value = (block.value as KvNode[]).filter((n) => !(typeof n.value === 'string' && pcApplies(n.cond) && PIN_KEYS.includes(n.key.toLowerCase())));
+  return { ...o, x, y };
+}
+
+/** The versus panel's block in scoreboard.res, which places and sizes (and clips, TL5) every piece of versusmodescoreboard.res. */
+const SCOREBOARD = 'resource/ui/scoreboard.res';
+const VERSUS_PANEL = 'CVersusModeScoreboard';
+
+/** The versus panel's size in the base file: stock and Modern 354 x 120. */
+function versusBase(work: Work): { w: number; h: number } {
+  const n = blockIn(SCOREBOARD, baseTree(work.key, SCOREBOARD), [VERSUS_PANEL]);
+  return { w: num(n && pcGet(n, 'wide')), h: num(n && pcGet(n, 'tall')) };
+}
+
+/**
+ * The versus panel's blocks laid out as the embedded panel lays them
+ * (tablayout.ts: if_embedded over the plain keys, the pin chain with its
+ * turned-round ypos), with the build's text estimate for the labels as
+ * wide as their text. The scheme is read without parsing it into the
+ * download when no pass has.
+ */
+function versusLaid(work: Work, nodes: KvNode[]) {
+  const scheme = work.parsed(SCHEME) ? work.tree(SCHEME) : baseTree(work.key, SCHEME);
+  const tallOf = (font: string) => {
+    const f = kvFind(scheme, ['Fonts', font, '1']) ?? kvFind(scheme, ['Fonts', 'Default', '1']);
+    const t = num(f && pcGet(f, 'tall'));
+    return t > 0 ? t : 12;
+  };
+  return layoutBlocks(nodes, { ...versusBase(work), embedded: true, ...versusEstimate(tallOf) });
+}
+
+/**
+ * The versus panel grown to hold the pieces the player moved. It clips its
+ * children (TL5, /home/volence/l4d/hud/probe-tab/RESULTS.md: wide 200 cut
+ * "Health Bonus" off), so every moved piece, and every piece pinned after
+ * one (which the game carries along), must fall inside it: its wide and
+ * tall grow to the far edge of the furthest, never shrink, and its place
+ * does not change. PIECES-1 and PIECES-2 ran at 500 x 260 with nothing
+ * clipped (/home/volence/l4d/hud/probe-tab-pieces/RESULTS.md, rule 5).
+ * The labels as wide as their text are sized by the build's estimate,
+ * wider than the game draws them, and the preview clips at the size
+ * written here (elementRect reads it back), so the two agree. A design
+ * with no piece moved, or none past the panel's own size, leaves
+ * scoreboard.res alone, byte for byte.
+ */
+function tabVersusGrowPass(work: Work, design: HudDesign) {
+  const moved = versusMoved(design);
+  if (!moved.length || !work.parsed(TAB_VERSUS_FILE)) return;
+  const laid = versusLaid(work, work.tree(TAB_VERSUS_FILE));
+  // The moved pieces and, down the pin chain, every piece pinned after one.
+  const carried = new Set(moved);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const b of laid) {
+      const to = kvGet(b.node, 'pin_to_sibling')?.toLowerCase();
+      if (to && carried.has(to) && !carried.has(b.name.toLowerCase())) { carried.add(b.name.toLowerCase()); grew = true; }
+    }
+  }
+  const base = versusBase(work);
+  let w = base.w, h = base.h;
+  for (const b of laid) {
+    if (!carried.has(b.name.toLowerCase()) || !b.visible || b.w <= 0 || b.h <= 0) continue;
+    w = Math.max(w, Math.ceil(b.x + b.w));
+    h = Math.max(h, Math.ceil(b.y + b.h));
+  }
+  if (w === base.w && h === base.h) return;
+  const panel = work.panel(SCOREBOARD, [VERSUS_PANEL]);
+  if (w !== base.w) pcSet(panel, 'wide', String(w));
+  if (h !== base.h) pcSet(panel, 'tall', String(h));
+}
+const TAB_VERSUS_FILE = 'resource/ui/versusmodescoreboard.res';
+
+/** The versus pieces the design moves, lower-cased. */
+const versusMoved = (design: HudDesign): string[] =>
+  Object.entries(design.children.tabVersus ?? {}).filter(([, o]) => o.x !== undefined || o.y !== undefined).map(([n]) => n.toLowerCase());
 
 /**
  * The same block in each of a panel's linked files (your infected health:
@@ -2691,6 +2796,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   childPass(work, design);
   fitPass(work, design);
   hidePass(work, design);
+  tabVersusGrowPass(work, design);
   splatterPass(work, design, assets, extra);
   teamPass(work, design);
   scalePass(work, design);
@@ -2804,6 +2910,7 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
     childPass(work, design);
     fitPass(work, design);
     hidePass(work, design);
+    tabVersusGrowPass(work, design);
     splatterPass(work, design, {}, null);
     teamPass(work, design);
     scalePass(work, design);
@@ -2857,6 +2964,9 @@ export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
       w: parseSize(get('wide'), W), h: parseSize(get('tall'), SCREEN_H), visible,
     };
   }
+  // The versus panel grown to hold its moved pieces (tabVersusGrowPass) clips them at that size in game, so the preview does too.
+  const grownTab = id === 'tabVersus' && versusMoved(design) ? pcFind(buildTrees(design)(SCOREBOARD), [VERSUS_PANEL]) : undefined;
+  if (grownTab) return { x: parsePos(xTok, screenW(aspect)), y: parsePos(yTok, SCREEN_H), w: num(pcGet(grownTab, 'wide')), h: num(pcGet(grownTab, 'tall')), visible };
   return { x: parsePos(xTok, screenW(aspect)), y: parsePos(yTok, SCREEN_H), w: box.w, h: box.h, visible };
 }
 

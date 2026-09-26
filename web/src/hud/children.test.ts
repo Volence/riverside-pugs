@@ -527,10 +527,15 @@ describe('the Tab screen registry', () => {
     expect(TAB_INFECTED_ROW.children.map((c) => c.name)).toEqual(['PlayerBackground', 'PlayerBackground_Selected', 'Name', 'NoAvatarName']);
   });
 
-  it('never moves, sizes or resizes the text of a Tab piece in v1, and hides each behind TS7', () => {
+  it('moves the versus pieces probe PIECES-1 saw move and nothing else of the Tab screen; sizes none; hides each behind TS7', () => {
+    const MOVES = ['YourTeamHighlightImage', 'EnemyTeamHighlightImage', 'StatBreakdownHighlightImage', 'TeamYours', 'TeamEnemy',
+      'TeamYourScoreSurvivors', 'TeamEnemyScoreSurvivors', 'DistanceLabel', 'DistanceAmount', 'HealthLabel', 'HealthAmount'];
     for (const p of TAB) for (const c of p.children) {
-      expect([c.move, c.box, c.font, c.hideGate], `${p.panelId} ${c.name}`).toEqual([false, 'none', false, 'TS7']);
+      const moves = p === TAB_VERSUS && MOVES.includes(c.name);
+      expect([c.move, c.box, c.font, c.hideGate], `${p.panelId} ${c.name}`).toEqual([moves, 'none', false, 'TS7']);
     }
+    // The Survival Multiplier line never showed in the probe's scenarios: its move waits on a probe of its own.
+    for (const n of ['SurvivalMultLabel', 'SurvivalMultAmount']) expect(by(TAB_VERSUS, n).note, n).toMatch(/never seen in game/);
     for (const p of PANEL_CHILDREN.filter((x) => !TAB.includes(x))) for (const c of p.children) expect(c.hideGate, `${p.panelId} ${c.name}`).toBeUndefined();
   });
 

@@ -667,13 +667,13 @@ describe('the Tab screen', () => {
     expect(boxSelect(D, 'survivor', HELD, { x: 25, y: 170 }, { x: 300, y: 196 })).toMatchObject({ kind: 'children', panel: 'tabSurvivors', card: 0 });
   });
 
-  it('moves the versus panel from a drag in a Tab piece or the board, which cannot move themselves, and starts no move of nothing', () => {
+  it('moves a picked versus piece itself (PIECES-1), the versus panel from a drag on the board, and starts no move of nothing', () => {
     const versus: Selection = { kind: 'elements', ids: ['tabVersus'] };
     const team: Selection = { kind: 'children', names: ['TeamYours'], card: 0, panel: 'tabVersus' };
     const [f] = selectionFrames(D, team, HELD);
     const mid = { x: f.x + f.w / 2, y: f.y + f.h / 2 };
     const hit = hitAt(D, 'survivor', HELD, mid.x, mid.y);
-    expect(dragIntent(D, team, hit, plain, null, mid, HELD)).toEqual({ kind: 'move', sel: versus });
+    expect(dragIntent(D, team, hit, plain, null, mid, HELD)).toEqual({ kind: 'move', sel: team });
     const board: Selection = { kind: 'elements', ids: ['tabBoard'] };
     expect(dragIntent(D, board, hit, plain, null, mid, HELD)).toEqual({ kind: 'move', sel: versus });
     // On the board away from the versus panel: nothing there can move.
@@ -682,10 +682,10 @@ describe('the Tab screen', () => {
     expect(onBoard.element).toBe('tabBoard');
     expect(dragIntent(D, board, onBoard, plain, null, low, HELD)).toEqual({ kind: 'none' });
     expect(dragIntent(D, NONE, onBoard, plain, null, low, HELD)).toEqual({ kind: 'none' });
-    // With the versus panel's move gated, a drag in it moves nothing either.
+    // With the versus panel's move gated, a drag in it moves no panel; its pieces' moves are PIECES-1's, not TS4's.
     _setProbe('TS4', false);
     try {
-      expect(dragIntent(D, team, hit, plain, null, mid, HELD)).toEqual({ kind: 'none' });
+      expect(dragIntent(D, team, hit, plain, null, mid, HELD)).toEqual({ kind: 'move', sel: team });
       expect(dragIntent(D, versus, hit, plain, null, mid, HELD)).toEqual({ kind: 'none' });
     } finally { _setProbe('TS4', null); }
   });
