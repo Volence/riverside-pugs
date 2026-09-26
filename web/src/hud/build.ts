@@ -557,6 +557,14 @@ function unpin(work: Work, file: string, block: KvNode, o: ChildOverride): Child
     y ??= Math.round(at?.y ?? 0);
   }
   block.value = (block.value as KvNode[]).filter((n) => !(typeof n.value === 'string' && pcApplies(n.cond) && PIN_KEYS.includes(n.key.toLowerCase())));
+  // One plain xpos and one plain ypos, where the first line of each was: the stock line pieces carry
+  // "xpos" [$ENGLISH] beside "xpos" [$!ENGLISH] (5 or 10), and a client in another language would keep
+  // its own small offset, now panel-absolute, and draw the piece near the panel's left edge.
+  for (const key of ['xpos', 'ypos']) {
+    const lines = (block.value as KvNode[]).filter((n) => typeof n.value === 'string' && n.key.toLowerCase() === key);
+    lines.slice(1).forEach((n) => (block.value as KvNode[]).splice((block.value as KvNode[]).indexOf(n), 1));
+    if (lines[0]) delete lines[0].cond;
+  }
   return { ...o, x, y };
 }
 
@@ -2965,7 +2973,7 @@ export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
     };
   }
   // The versus panel grown to hold its moved pieces (tabVersusGrowPass) clips them at that size in game, so the preview does too.
-  const grownTab = id === 'tabVersus' && versusMoved(design) ? pcFind(buildTrees(design)(SCOREBOARD), [VERSUS_PANEL]) : undefined;
+  const grownTab = id === 'tabVersus' && versusMoved(design).length ? pcFind(buildTrees(design)(SCOREBOARD), [VERSUS_PANEL]) : undefined;
   if (grownTab) return { x: parsePos(xTok, screenW(aspect)), y: parsePos(yTok, SCREEN_H), w: num(pcGet(grownTab, 'wide')), h: num(pcGet(grownTab, 'tall')), visible };
   return { x: parsePos(xTok, screenW(aspect)), y: parsePos(yTok, SCREEN_H), w: box.w, h: box.h, visible };
 }

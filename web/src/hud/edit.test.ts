@@ -7,7 +7,7 @@ import {
   placeElement, moveElements, moveCards, alignElements, scaleElement, setScale, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
   ammoOnly, withImport, withPreset,
   splatterKind, patchSplatter, withSplatterImage, resetSplatter, panelClamp, raiseChild, resetChildKey, setFit, rowGapSlider, setRowGap,
-  hiddenWith, setYourItems, setItemsLook,
+  hiddenWith, setYourItems, setItemsLook, setAspect,
 } from './edit';
 import { buildHud, buildTrees } from './build';
 import { weaponSlots } from './weapons';
@@ -1331,6 +1331,23 @@ describe('moving the versus pieces', () => {
     expect(hiddenWith(d, V, 'DistanceAmount')?.name).toBe('DistanceLabel');
     expect(hiddenWith(d, V, 'HealthLabel')).toBeUndefined();
     expect(hiddenWith(d, V, 'HealthAmount')).toBeUndefined();
+  });
+
+  it('keeps the grown panel whole on screen when the panel itself moves, or the aspect narrows (review M1)', () => {
+    // HealthAmount, 220 wide, at 300,150 grows the panel to 520 x 170.
+    const d = patchChild(DEFAULT_DESIGN, 'HealthAmount', { x: 300, y: 150 }, V);
+    expect(placeElement(d, V, 900, 470).elements[V]).toEqual({ x: 853 - 520, y: 480 - 170 });
+    const narrow = setAspect(placeElement(d, V, 300, 20), '4:3');
+    expect(narrow.elements[V]).toEqual({ x: 640 - 520, y: 20 });
+    // Nothing moved inside it: the stock 354 x 120, as before.
+    expect(placeElement(DEFAULT_DESIGN, V, 900, 470).elements[V]).toEqual({ x: 853 - 354, y: 360 });
+  });
+
+  it('aligns without unpinning a line piece whose place does not change (review M3)', () => {
+    // "Average Distance:" and "Health Bonus:" share a row: aligning their tops moves neither.
+    expect(alignChildren(DEFAULT_DESIGN, ['DistanceLabel', 'HealthLabel'], 'top', V)).toBe(DEFAULT_DESIGN);
+    const d = alignChildren(DEFAULT_DESIGN, ['TeamYours', 'HealthLabel'], 'top', V);
+    expect(d.children[V]).toEqual({ HealthLabel: { x: drawn(DEFAULT_DESIGN, 'HealthLabel').x, y: 30 } });
   });
 
   it('never moves the Survival Multiplier line', () => {
