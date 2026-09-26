@@ -15,7 +15,8 @@ const { Cast } = await import('./Cast');
 afterEach(() => { cleanup(); mockCast.list.mockReset(); });
 
 const match = (over: Partial<CastMatch> = {}): CastMatch => ({
-  id: 240, campaign: 'dead_air', currentMap: 'l4d_airport02_offices', serverName: 'Dallas',
+  id: 240, campaign: 'dead_air', campaignName: 'Dead Air', currentMap: 'l4d_vs_airport02_offices',
+  mapNumber: 2, mapCount: 5, teamAScore: 612, teamBScore: 480, phase: 'live', half: 2, serverName: 'Dallas',
   teamA: ['alice', 'bob'], teamB: ['carol', 'dave'],
   connect: { host: '1.2.3.4', port: 27015, password: 'pug_abc' },
   spectate: null,
@@ -30,6 +31,14 @@ describe('Cast', () => {
     expect(screen.getByText(/Dallas/)).toBeTruthy();
     expect(screen.getByText(/alice, bob/)).toBeTruthy();
     expect(screen.getByText(/Do not pick a team/)).toBeTruthy();
+  });
+
+  it('shows the map number, the running score and what the game is doing', async () => {
+    mockCast.list.mockResolvedValue({ matches: [match()] });
+    render(<Cast />);
+    expect(await screen.findByText(/Map 2 of 5 · The Crane/)).toBeTruthy();
+    expect(screen.getByLabelText('Score 612 to 480')).toBeTruthy();
+    expect(screen.getByText('Live · Round 2')).toBeTruthy();
   });
 
   it('says why there is no password for a match started in game', async () => {

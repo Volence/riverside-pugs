@@ -1481,7 +1481,18 @@ export const modApi = {
 export interface CastMatch {
   id: number;
   campaign: string;
+  campaignName: string;
   currentMap: string | null;
+  /** 1-based chapter being played. */
+  mapNumber: number;
+  /** Chapters in the campaign, null when unknown. */
+  mapCount: number | null;
+  /** Running totals over finished maps. */
+  teamAScore: number;
+  teamBScore: number;
+  phase: LivePhase['state'] | null;
+  /** 1 or 2 while a round is being played. */
+  half: number | null;
   serverName: string | null;
   teamA: string[];
   teamB: string[];

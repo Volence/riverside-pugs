@@ -71,6 +71,17 @@ describe('GET /api/cast', () => {
     expect(m.teamB).toHaveLength(4);
   });
 
+  it('carries the map number and running score over finished maps', async () => {
+    const map = db.prepare('INSERT INTO match_live_maps (match_id, ordinal, map, team_a_score, team_b_score) VALUES (?, ?, ?, ?, ?)');
+    map.run(matchId, 1, 'l4d_vs_airport01_greenhouse', 400, 350);
+    map.run(matchId, 2, 'l4d_vs_airport02_offices', 300, 500);
+    db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (?, 'l4d_vs_airport03_garage', datetime('now'))").run(matchId);
+    const [m] = (await list(CASTER)).json().matches;
+    expect(m).toMatchObject({
+      currentMap: 'l4d_vs_airport03_garage', mapNumber: 3, teamAScore: 700, teamBScore: 850, half: null,
+    });
+  });
+
   it('admins see it too', async () => {
     expect((await list(ADMIN)).json().matches).toHaveLength(1);
   });
