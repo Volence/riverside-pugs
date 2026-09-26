@@ -204,6 +204,23 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     return { ok: true };
   });
 
+  /** Casters may read live match connect lines on /cast. Not staff: no
+   *  tickets, no files, nothing on the game servers. Signed out on a change,
+   *  like the two staff flags, so a removal takes the page away now. */
+  app.post('/api/admin/players/:steamid/caster', async (req, reply) => {
+    const t = target(req, reply);
+    if (!t) return reply;
+    const { isCaster } = (req.body ?? {}) as { isCaster?: unknown };
+    if (typeof isCaster !== 'boolean') return reply.code(400).send({ error: 'isCaster must be true or false' });
+    const was = getPlayer(db, t.steamid)?.is_caster === 1;
+    db.transaction(() => {
+      db.prepare('UPDATE players SET is_caster = ? WHERE steamid = ?').run(isCaster ? 1 : 0, t.steamid);
+      if (was !== isCaster) endSessions(db, t.steamid);
+    })();
+    logAdmin(db, t.adminId, 'set_caster', t.steamid, { isCaster });
+    return { ok: true };
+  });
+
   app.post('/api/admin/players/:steamid/unlink-discord', async (req, reply) => {
     const t = target(req, reply);
     if (!t) return reply;

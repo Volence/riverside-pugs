@@ -266,6 +266,7 @@ export class AdminFeedPoster {
       case 'activate': return `${who} activated ${target}`;
       case 'set_admin': return `${who} ${d.isAdmin ? 'made' : 'removed'} ${target} ${d.isAdmin ? 'an admin' : 'as admin'}`;
       case 'set_mod': return `${who} ${d.isMod ? 'made' : 'removed'} ${target} ${d.isMod ? 'a moderator' : 'as moderator'}`;
+      case 'set_caster': return `${who} ${d.isCaster ? 'made' : 'removed'} ${target} ${d.isCaster ? 'a caster' : 'as caster'}`;
       case 'unlink_discord': return `${who} unlinked ${target}'s Discord`;
       case 'note': {
         // The note's own words, quoted, so the channel shows what was written

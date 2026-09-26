@@ -110,6 +110,22 @@ describe('Nav', () => {
     expect(screen.queryByRole('link', { name: 'Moderation' })).toBeNull();
   });
 
+  it('offers Cast to a caster, and not to a player or an admin', () => {
+    const caster = { steamid: '1', name: 'cas', avatar: null, status: 'active', isAdmin: false, isCaster: true };
+    const { unmount } = render(
+      <LocationProvider><Nav session={{ kind: 'active', me: caster }} state={null} /></LocationProvider>,
+    );
+    expect((screen.getByRole('link', { name: 'Cast' }) as HTMLAnchorElement).getAttribute('href')).toBe('/cast');
+    unmount();
+    const admin = { steamid: '2', name: 'boss', avatar: null, status: 'active', isAdmin: true, isCaster: true };
+    const second = render(<LocationProvider><Nav session={{ kind: 'active', me: admin }} state={null} /></LocationProvider>);
+    expect(screen.queryByRole('link', { name: 'Cast' })).toBeNull();
+    second.unmount();
+    const player = { steamid: '3', name: 'alice', avatar: null, status: 'active', isAdmin: false };
+    render(<LocationProvider><Nav session={{ kind: 'active', me: player }} state={null} /></LocationProvider>);
+    expect(screen.queryByRole('link', { name: 'Cast' })).toBeNull();
+  });
+
   it('offers it to a pending or banned account too, and to nobody signed out', () => {
     const me = { steamid: '1', name: 'alice', avatar: null, status: 'banned', isAdmin: false };
     const { unmount } = render(

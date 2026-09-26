@@ -10,6 +10,7 @@ import { Matches } from './routes/Matches';
 import { BalanceNotes } from './routes/BalanceNotes';
 import { GameValues } from './routes/balance/GameValues';
 import { Live } from './routes/Live';
+import { Cast } from './routes/Cast';
 import { Streams } from './routes/Streams';
 import { MatchDetail } from './routes/MatchDetail';
 import { MapDetail } from './routes/MapDetail';
@@ -84,6 +85,7 @@ export function AppRoutes(
       <Route path="/balance" component={BalanceNotes} />
       <Route path="/balance/values" component={GameValues} />
       <Route path="/live" component={Live} me={me} />
+      <Route path="/cast" component={Cast} />
       <Route path="/streams" component={Streams} />
       <Route path="/match/:id" component={MatchDetail} me={me} staff={staff} />
       <Route path="/maps" component={Maps} />
