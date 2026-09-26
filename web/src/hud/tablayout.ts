@@ -121,3 +121,39 @@ function embeddedPlain(block: KvNode): KvNode {
   const kept = block.value.filter((c) => !same(c.key, 'if_embedded'));
   return embeddedView({ key: block.key, value: kept });
 }
+
+/** The #L4D_VSScoreboard_* tokens in English (resource/left4dead_english.txt), for the painter and the build's estimate. */
+export const TAB_STRINGS: Record<string, string> = {
+  '#l4d_vsscoreboard_yourteam': 'Your Team',
+  '#l4d_vsscoreboard_enemyteam': 'Enemy Team',
+  '#l4d_vsscoreboard_distanceshort': 'Average Distance:',
+  '#l4d_vsscoreboard_health': 'Health Bonus:',
+  '#l4d_vsscoreboard_survivalmult': 'Survival Multiplier:',
+};
+
+/** The widest value code writes into each of the versus panel's %variable% labels, for the estimate. */
+const WIDEST: Record<string, string> = {
+  '%yoursurvivor%': '9999', '%enemysurvivor%': '9999', '%distance%': '100%', '%healthbonus%': '9999', '%survivalmult%': 'x9.99',
+};
+
+/** How wide the estimate takes a character, in font talls: past any face the scheme names, so a panel grown by it clips nothing. */
+export const ESTIMATE_EM = 0.7;
+
+/**
+ * Text widths for the download, which has no canvas: every label at its
+ * widest (its English text, or the widest value code writes into it), each
+ * character ESTIMATE_EM of its font's tall (tallOf: the scheme's tall for
+ * that font name, the scheme's Default when the label names none). Wider
+ * than the game draws, on purpose: the build sizes the versus panel with it
+ * (build.ts tabVersusGrowPass), and a panel too big clips nothing, while
+ * one too small cuts a piece off (TL5).
+ */
+export function versusEstimate(tallOf: (font: string) => number): Pick<LayoutOpts, 'textOf' | 'measure'> {
+  return {
+    textOf: (n) => {
+      const t = (kvGet(n, 'labelText') ?? '').toLowerCase();
+      return WIDEST[t] ?? TAB_STRINGS[t] ?? (t.startsWith('#') || t.startsWith('%') ? '' : kvGet(n, 'labelText') ?? '');
+    },
+    measure: (n, text) => text.length * tallOf(kvGet(n, 'font') ?? 'Default') * ESTIMATE_EM,
+  };
+}

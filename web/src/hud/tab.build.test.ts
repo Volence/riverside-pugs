@@ -6,6 +6,7 @@ import { parseKv, writeKv, kvGet, pcFind, type KvNode } from './kv';
 import { baseFile, baseOf, presetOverrides, registerImport, unregisterImport } from './base';
 import { sampleHud } from './importFixtures';
 import { parsePos, screenW, SCREEN_H } from './units';
+import { layoutBlocks, versusEstimate } from './tablayout';
 
 /**
  * The Tab screen in the download (tab screen spec
@@ -60,8 +61,6 @@ describe('the versus panel\'s if_embedded blocks (spec 4.4, task 6)', () => {
   });
 
   it('writes a key into if_embedded when that block has it, and into the plain block otherwise', () => {
-    // No v1 piece moves (validateDesign drops a stored move), so the rule is
-    // pinned on the build with a move handed to it directly.
     const b = pcFind(versus({ TeamYours: { x: 40, y: 50 } }), ['TeamYours'])!;
     expect(kvGet(emb(b), 'xpos')).toBe('40');
     expect(kvGet(b, 'xpos')).toBe('25');                         // the standalone panel's place is kept
@@ -216,5 +215,99 @@ describe('your own Tab row, which code shows (ChildDef.codeShown, review 6)', ()
       expect(validateDesign({ v: 1, children: { [panel]: { PlayerBackground_Selected: { visible: false } } } }).children[panel], panel)
         .toEqual({ PlayerBackground_Selected: { visible: false } });
     }
+  });
+});
+
+/**
+ * Moving the versus panel's pieces one by one: probes PIECES-1 and PIECES-2
+ * (/home/volence/l4d/hud/probe-tab-pieces/RESULTS.md, with the keys each
+ * wrote in build.mts and their edit logs piecesN/build-log.txt).
+ */
+describe('moving the versus pieces (probe PIECES-1 and PIECES-2)', () => {
+  const moved = (c: Record<string, unknown>) => build(validateDesign({ v: 1, children: { tabVersus: c } }));
+  const piece = (files: { path: string; data: Uint8Array }[], name: string) => pcFind(tree(files, VERSUS), [name])!;
+  const stockPiece = (name: string) => pcFind(stockTree(VERSUS), [name])!;
+  const emb = (n: KvNode) => pcFind(n.value as KvNode[], ['if_embedded']);
+  const panel = (files: { path: string; data: Uint8Array }[]) => pcFind(tree(files, SCOREBOARD), ['CVersusModeScoreboard'])!;
+  const PINS = ['pin_to_sibling', 'pin_corner_to_sibling', 'pin_to_sibling_corner'];
+  const pins = (n: KvNode) => PINS.map((k) => kvGet(n, k));
+
+  it('keeps a stored move on the eleven pieces that move and drops one on the Survival Multiplier line', () => {
+    const d = validateDesign({ v: 1, children: { tabVersus: { TeamYours: { x: 10, y: 5 }, HealthAmount: { x: 300, y: 40 }, SurvivalMultLabel: { x: 300, y: 150 },
+      SurvivalMultAmount: { x: 20, y: 15, color: '255 0 0 255' } } } });
+    expect(d.children.tabVersus).toEqual({ TeamYours: { x: 10, y: 5 }, HealthAmount: { x: 300, y: 40 }, SurvivalMultAmount: { color: '255 0 0 255' } });
+  });
+
+  for (const [name, x, y] of [['TeamYours', 10, 5], ['TeamEnemy', 360, 5], ['TeamYourScoreSurvivors', 140, 45], ['TeamEnemyScoreSurvivors', 140, 75],
+    ['YourTeamHighlightImage', 10, 40], ['EnemyTeamHighlightImage', 360, 40]] as const) {
+    it(`writes ${name}'s x into its if_embedded xpos, the one the game reads, and its y into the plain block`, () => {
+      const b = piece(moved({ [name]: { x, y } }), name);
+      expect(kvGet(emb(b)!, 'xpos')).toBe(String(x));
+      expect(kvGet(b, 'ypos')).toBe(String(y));
+      expect(kvGet(emb(b)!, 'ypos')).toBeUndefined();
+      // The standalone panel's plain xpos is left, dead under the if_embedded one (PIECES-2, TeamEnemy).
+      expect(kvGet(b, 'xpos')).toBe(kvGet(stockPiece(name), 'xpos'));
+    });
+  }
+
+  it('writes the stat box and "Average Distance:" on their plain blocks, which carry no if_embedded xpos', () => {
+    const files = moved({ StatBreakdownHighlightImage: { x: 10, y: 205 }, DistanceLabel: { x: 30, y: 110 } });
+    const box = piece(files, 'StatBreakdownHighlightImage');
+    expect([kvGet(box, 'xpos'), kvGet(box, 'ypos')]).toEqual(['10', '205']);
+    expect(writeKv([emb(box)!])).toBe(writeKv([emb(stockPiece('StatBreakdownHighlightImage'))!]));
+    const label = piece(files, 'DistanceLabel');
+    expect([kvGet(label, 'xpos'), kvGet(label, 'ypos')]).toEqual(['30', '110']);
+  });
+
+  it('leaves the rest of the line pinned to "Average Distance:" when it moves, so the game carries it along', () => {
+    const files = moved({ DistanceLabel: { x: 13, y: 150 } });
+    for (const n of ['DistanceAmount', 'HealthLabel', 'HealthAmount']) expect(writeKv([piece(files, n)]), n).toBe(writeKv([stockPiece(n)]));
+  });
+
+  it('unpins a line piece moved on its own and writes its exact place; the piece pinned to it keeps following it', () => {
+    const files = moved({ HealthLabel: { x: 200, y: 30 } });
+    const b = piece(files, 'HealthLabel');
+    expect(pins(b)).toEqual([undefined, undefined, undefined]);
+    expect([kvGet(b, 'xpos'), kvGet(b, 'ypos')]).toEqual(['200', '30']);
+    expect(pins(piece(files, 'HealthAmount'))).toEqual(['HealthLabel', '0', '1']);
+    expect(writeKv([piece(files, 'HealthAmount')])).toBe(writeKv([stockPiece('HealthAmount')]));
+    expect(writeKv([piece(files, 'DistanceAmount')])).toBe(writeKv([stockPiece('DistanceAmount')]));
+    // The last piece of the line, alone: only its own pins go.
+    const last = moved({ HealthAmount: { x: 300, y: 40 } });
+    expect(pins(piece(last, 'HealthAmount'))).toEqual([undefined, undefined, undefined]);
+    expect([kvGet(piece(last, 'HealthAmount'), 'xpos'), kvGet(piece(last, 'HealthAmount'), 'ypos')]).toEqual(['300', '40']);
+    expect(pins(piece(last, 'HealthLabel'))).toEqual(['DistanceAmount', '0', '1']);
+  });
+
+  it('fills the other axis of a lone move from where the piece is laid out, so an unpinned piece never loses its place', () => {
+    const files = moved({ HealthAmount: { y: 30 } });
+    const b = piece(files, 'HealthAmount');
+    expect(pins(b)).toEqual([undefined, undefined, undefined]);
+    const laid = layoutBlocks(stockTree(VERSUS), { w: 354, h: 120, embedded: true, ...versusEstimate(() => 12) });
+    expect(kvGet(b, 'xpos')).toBe(String(Math.round(laid.find((l) => l.name === 'HealthAmount')!.x)));
+    expect(kvGet(b, 'ypos')).toBe('30');
+  });
+
+  it('grows the panel to cover a moved piece, from where it is, and not otherwise', () => {
+    const across = panel(moved({ TeamEnemy: { x: 400, y: 30 } }));
+    expect(kvGet(across, 'wide')).toBe(String(400 + 125));
+    expect(kvGet(across, 'tall')).toBe('120');
+    expect(kvGet(across, 'xpos')).toBe('15');
+    expect(kvGet(across, 'ypos')).toBe('c-215');
+    const down = panel(moved({ StatBreakdownHighlightImage: { x: 0, y: 300 } }));
+    expect([kvGet(down, 'wide'), kvGet(down, 'tall')]).toEqual(['354', String(300 + 45)]);
+    // A move inside the stock panel grows nothing, and ships no scoreboard.res.
+    expect(text(moved({ TeamYours: { x: 30, y: 30 } }), SCOREBOARD)).toBeUndefined();
+    expect(text(moved({ TeamYours: { color: '255 0 0 255' } }), SCOREBOARD)).toBeUndefined();
+  });
+
+  it('grows the panel over the pieces a moved piece carries (the line after "Average Distance:")', () => {
+    const files = moved({ DistanceLabel: { x: 13, y: 300 } });
+    const p = panel(files);
+    const laid = layoutBlocks(tree(files, VERSUS), { w: 354, h: 120, embedded: true, ...versusEstimate(() => 12) });
+    const amount = laid.find((l) => l.name === 'HealthAmount')!;
+    expect(amount.y).toBe(300);
+    expect(Number(kvGet(p, 'tall'))).toBe(320);
+    expect(Number(kvGet(p, 'wide'))).toBe(Math.ceil(amount.x + amount.w));
   });
 });

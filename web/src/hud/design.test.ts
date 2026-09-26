@@ -652,8 +652,10 @@ describe('validateDesign on the Tab screen', () => {
     }).children).toEqual({});
   });
 
-  it('never keeps a move, a size or a text size on a Tab piece in v1', () => {
-    expect(withKids({ tabVersus: { TeamYours: { x: 30, y: 60, w: 50, h: 20, fontSize: 20 } } }).children).toEqual({});
+  it('keeps a move on a versus piece (PIECES-1), never one on a row piece or the Survival Multiplier line, and never a size or a text size', () => {
+    expect(withKids({ tabVersus: { TeamYours: { x: 30, y: 60, w: 50, h: 20, fontSize: 20 } } }).children).toEqual({ tabVersus: { TeamYours: { x: 30, y: 60 } } });
+    expect(withKids({ tabVersus: { SurvivalMultLabel: { x: 30, y: 60 } }, tabSurvivors: { PingLabel: { x: 3, y: 4 } }, tabBoard: { MissionTitle: { x: 1, y: 2 } } }).children)
+      .toEqual({});
   });
 
   it('keeps the row bars as one colour, or by health (the key taken out), behind TS3', () => {

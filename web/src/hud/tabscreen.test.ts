@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { drawTabScreen, TAB_SAMPLES, tabRows } from './tabscreen';
+import { drawTabScreen, TAB_SAMPLES, tabRows, tabBoxes } from './tabscreen';
+import { buildHud, elementRect } from './build';
+import { parseKv, kvGet, pcFind, type KvNode } from './kv';
 import { drawHud } from './mock';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
 import { _setImageFactory, _resetAssetCache, panelColour, DEFAULT_PREVIEW, type PreviewState } from './render';
@@ -140,6 +142,64 @@ describe('the Tab screen: the versus panel (task 13)', () => {
     const m = tab(validateDesign({ v: 1, preset: 'modern' }));
     expect(rectAt(m, 35, 25 + 46, 125, 28)?.fill).toBe(`rgba(95,22,22,${205 / 255})`);
     expect(rectAt(m, 15, 95, 320, 45)?.fill).toBe(`rgba(0,0,0,${140 / 255})`);
+  });
+});
+
+/**
+ * Pieces moved one by one (probes PIECES-1 and PIECES-2,
+ * /home/volence/l4d/hud/probe-tab-pieces/RESULTS.md): the preview draws each
+ * where the download writes it and clips to the panel the download grows.
+ */
+describe('the Tab screen: moved versus pieces (PIECES-1, PIECES-2)', () => {
+  const MOVES = {
+    TeamYours: { x: 10, y: 5 }, EnemyTeamHighlightImage: { x: 360, y: 40 }, StatBreakdownHighlightImage: { x: 10, y: 205 },
+    DistanceLabel: { x: 30, y: 110 }, HealthAmount: { x: 300, y: 40 },
+  };
+  const d = validateDesign({ v: 1, children: { tabVersus: MOVES } });
+  const download = (path: string) => {
+    const f = buildHud(d, { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } }).find((x) => x.path === path)!;
+    return parseKv(new TextDecoder('latin1').decode(f.data))[0].value as KvNode[];
+  };
+  const panel = () => pcFind(download('resource/ui/scoreboard.res'), ['CVersusModeScoreboard'])!;
+
+  it('clips to the panel as the download grows it (the far edge of the furthest moved piece), and hit-tests in it', () => {
+    // HealthAmount is 220 wide at 300; the stat box 45 tall at 205.
+    expect([kvGet(panel(), 'wide'), kvGet(panel(), 'tall')]).toEqual(['520', '250']);
+    const el = elementRect(d, 'tabVersus', d.aspect);
+    expect([el.x, el.y, el.w, el.h]).toEqual([15, 25, 520, 250]);
+    expect(tabBoxes(d, 'survivor', 'tabVersus')[0].box).toEqual({ x: 15, y: 25, w: 520, h: 250 });
+    const out = tab(d);
+    expect(out.some((c) => c.m === 'rect' && near(c.a[0] as number, 15 * K) && near(c.a[2] as number, 520 * K) && near(c.a[3] as number, 250 * K))).toBe(true);
+    // Nothing moved, nothing grows: the stock 354 x 120.
+    const s = elementRect(DEFAULT_DESIGN, 'tabVersus', DEFAULT_DESIGN.aspect);
+    expect([s.w, s.h]).toEqual([354, 120]);
+  });
+
+  it('draws each moved piece at its stored place in the panel, which is what the download writes', () => {
+    const out = tab(d);
+    const inf = tab(d, 'infected');
+    const v = download('resource/ui/versusmodescoreboard.res');
+    const emb = (n: string) => pcFind(pcFind(v, [n])!.value as KvNode[], ['if_embedded'])!;
+    expect([kvGet(emb('EnemyTeamHighlightImage'), 'xpos'), kvGet(pcFind(v, ['EnemyTeamHighlightImage'])!, 'ypos')]).toEqual(['360', '40']);
+    expect(sliceAt(inf, 15 + 360, 25 + 40)).toBeDefined();
+    expect(sliceAt(out, 15 + 10, 25 + 205)).toBeDefined();
+    const x = (s: string) => out.find((c) => c.m === 'fillText' && c.a[0] === s)!.a[1] as number;
+    const y = (s: string) => out.find((c) => c.m === 'fillText' && c.a[0] === s)!.a[2] as number;
+    expect(x('Average Distance:')).toBeCloseTo((15 + 30) * K);
+    // "1%" still follows its label, 10 units after its text ends (the stub: 10 px a character), on its row.
+    expect(x('1%')).toBeCloseTo((15 + 30) * K + 170 + 10 * K);
+    expect(y('1%')).toBeCloseTo(y('Average Distance:'));
+    // HealthAmount, moved on its own, is unpinned and drawn at exactly its place.
+    expect(pcFind(v, ['HealthAmount']) && kvGet(pcFind(v, ['HealthAmount'])!, 'pin_to_sibling')).toBeUndefined();
+    expect(x('200')).toBeCloseTo((15 + 300) * K);
+  });
+
+  it('frames a moved piece where it is drawn, for the outline and the hit test', () => {
+    const b = tabBoxes(d, 'survivor', 'tabVersus')[0];
+    const at = (n: string) => b.pieces.find((p) => p.name === n)!;
+    expect([at('StatBreakdownHighlightImage').x, at('StatBreakdownHighlightImage').y]).toEqual([15 + 10, 25 + 205]);
+    expect([at('HealthAmount').x, at('HealthAmount').y, at('HealthAmount').w]).toEqual([15 + 300, 25 + 40, 220]);
+    expect([at('TeamYours').x, at('TeamYours').y]).toEqual([15 + 10, 25 + 5]);
   });
 });
 

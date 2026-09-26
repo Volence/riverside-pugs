@@ -151,9 +151,9 @@ describe('the art boundary', () => {
     // The crosshair modules draw, check and pack the player's own crosshair, never Valve's art.
     // src/hudFiles.ts is the community allowlist and src/vpkWrite.ts the VPK writer; neither has any imports.
     // probes.ts is the probe gates, a leaf that imports nothing; weaponColumn.ts the weapon column's reach, another;
-    // progress.ts the use bar's border and gap rule, a third.
+    // progress.ts the use bar's border and gap rule, a third; tablayout.ts the Tab screen's layout step (kv and units only).
     expect(modules).toEqual(['../../../src/hudFiles.ts', '../../../src/vpkWrite.ts', '../crosshair/draw.ts', '../crosshair/model.ts', '../crosshair/vpk.ts', '../vpk/index.ts', '../vpk/zip.ts', 'base/index.ts', 'build.ts', 'children.ts', 'design.ts', 'elements.ts',
-      'iconMetrics.ts', 'kv.ts', 'limits.ts', 'probes.ts', 'progress.ts', 'slots.ts', 'splatter.ts', 'text.ts', 'textures.ts', 'units.ts', 'weaponColumn.ts', 'youritems.ts']);
+      'iconMetrics.ts', 'kv.ts', 'limits.ts', 'probes.ts', 'progress.ts', 'slots.ts', 'splatter.ts', 'tablayout.ts', 'text.ts', 'textures.ts', 'units.ts', 'weaponColumn.ts', 'youritems.ts']);
   });
 
   // The exported fonts are Valve's too. A download carries the player's own
