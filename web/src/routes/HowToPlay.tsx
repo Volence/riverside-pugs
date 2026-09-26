@@ -62,80 +62,6 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
   },
 ];
 
-const INSTALL_FAQ: { q: string; a: preact.ComponentChildren }[] = [
-  {
-    q: "I don't want to run the pack's left4dead.exe",
-    a: <><p>On Linux or Steam Deck, leave it out and you are done. Proton already lets every
-      game use 4 GB, so there is nothing to patch.</p>
-      <p>The pack's exe is there for one reason: it may use 4 GB of memory, and Steam's may
-      only use 2 GB. The L4D2 maps need more than 2 GB, so on Steam's exe they crash with "Out
-      of memory or address space". The catch is that the pack's exe is an older build, not
-      Steam's with one change, so you cannot easily check what is in it. You can give your
-      own exe the same permission instead, and that is a one-byte change you can check:</p>
-      <ol class="howto">
-        <li>In step 3, drag in everything except <code>left4dead.exe</code>.</li>
-        <li>
-          In the Left 4 Dead folder from step 2, right-click an empty spot and pick{' '}
-          <strong>Open in Terminal</strong>. On Windows 10 it is <strong>File</strong>, then{' '}
-          <strong>Open Windows PowerShell</strong>.
-        </li>
-        <li>
-          Paste this and press Enter. It keeps your original as{' '}
-          <code>left4dead.exe.bak</code> and does nothing if the exe is already done.
-          <pre class="launch-opts"><code>{`& {
-  $ErrorActionPreference = 'Stop'
-  $exe = Join-Path (Get-Location) 'left4dead.exe'
-  if (-not (Test-Path $exe)) { throw 'No left4dead.exe here. Run this in the Left 4 Dead folder.' }
-  $b = [IO.File]::ReadAllBytes($exe)
-  $pe = [BitConverter]::ToInt32($b, 0x3C)
-  if ($b[$pe] -ne 0x50 -or $b[$pe+1] -ne 0x45) { throw 'Run this in the Left 4 Dead folder.' }
-  if ($b[$pe+22] -band 0x20) { 'left4dead.exe already has the flag. Nothing to do.'; return }
-  Copy-Item $exe "$exe.bak" -Force
-  $b[$pe+22] = $b[$pe+22] -bor 0x20
-  [IO.File]::WriteAllBytes($exe, $b)
-  'Done. left4dead.exe can now use 4 GB. The original is left4dead.exe.bak.'
-}`}</code></pre>
-        </li>
-        <li>
-          Check it: <code>fc.exe /b left4dead.exe.bak left4dead.exe</code>. It should list
-          exactly one difference, <code>000000FE: 02 22</code>, and nothing else.
-        </li>
-      </ol>
-      <p>Steam's <strong>Verify integrity of game files</strong> and any L4D1 update put Steam's
-      exe back, so run it again after either. Verify also resets{' '}
-      <code>left4dead\gameinfo.txt</code>, which turns the map pack off, so redo step 3 after
-      it too.</p></>,
-  },
-  {
-    q: 'I already have L4D2 maps installed',
-    a: <p>Delete the old <code>left4dead_dlc4</code> folder first. If <code>thelaststand.vpk</code>{' '}
-      or <code>[L4D] Campaign pack l4d2.vpk</code> are in <code>left4dead\addons</code>, delete
-      those too. Then start from step 3 above.</p>,
-  },
-  {
-    q: 'Turning the map pack back off',
-    a: <><p>Nothing to delete. Open <code>left4dead\gameinfo.txt</code>, put <code>//</code> in
-      front of the <code>Game left4dead_dlc4</code> line, save, and restart the game. It looks
-      like this:</p>
-      <pre class="launch-opts"><code>{`SearchPaths
-{
-    Game    |gameinfo_path|.
-    //Game  left4dead_dlc4
-    Game    left4dead_dlc3
-    Game    left4dead_dlc2
-    Game    left4dead_dlc1
-    Game    left4dead
-    Game    hl2
-}`}</code></pre>
-      <p>Remove the <code>//</code> to turn it back on.</p></>,
-  },
-  {
-    q: 'Checking which version you have',
-    a: <p>Open <code>left4dead_dlc4\dlc4_version.inf</code> in a text editor. The first line
-      reads <code>DLCVersion=</code>, and ours is <code>v3.1e</code>.</p>,
-  },
-];
-
 /** The page's sections in order, for the index at the top. Each id is the
  *  id on that section's Panel below. */
 const SECTIONS: { id: string; label: string }[] = [
@@ -148,7 +74,7 @@ const SECTIONS: { id: string; label: string }[] = [
   { id: 'allowed', label: "What's allowed" },
   { id: 'reporting', label: 'Reporting' },
   { id: 'watching', label: 'Watching and replays' },
-  { id: 'map-pack', label: 'L4D2 map pack' },
+  { id: 'map-pack', label: 'L4D2 campaigns' },
   { id: 'faq', label: 'FAQ' },
 ];
 
@@ -334,7 +260,7 @@ viewmodel_fov_override 70`}</code></pre>
             <li>The <a href="/autoexec.cfg" download="autoexec.cfg">autoexec.cfg</a> rates and any settings of your own.</li>
             <li>The <a href="#fov">FOV plugin</a>, with <code>fov_override</code> between 75 and 120.</li>
             <li>HUDs and crosshairs, including everything from the <a href="#hud">HUD editor and Community</a>.</li>
-            <li>The <a href="#map-pack">L4D2 map pack</a>.</li>
+            <li>The <a href="/custom-campaigns#l4d2-pack">L4D2 campaigns</a>.</li>
           </ul>
           <h4>Not fine</h4>
           <ul class="howto">
@@ -430,58 +356,14 @@ viewmodel_fov_override 70`}</code></pre>
           </ul>
         </Panel>
         <Panel id="map-pack">
-          <h3>Installing the L4D2 map pack</h3>
+          <h3>L4D2 campaigns</h3>
           <p>
-            This pack is only for the L4D2 campaigns ported to L4D1: Dead Center, Dark
-            Carnival, Swamp Fever, Hard Rain, The Parish, Passifice, Cold Stream and The Last
-            Stand. They are not part of a normal install, so before you can join a match on
-            one, install the pack once. It stays installed after that.
+            Dead Center, Dark Carnival, Swamp Fever, Hard Rain, The Parish, Passifice, Cold
+            Stream and The Sacrifice can come up in a match, and they are not part of a normal
+            install. Install them once from the{' '}
+            <a href="/custom-campaigns#l4d2-pack">Custom campaigns</a> page: twelve add-on files
+            that go in your <code>addons</code> folder.
           </p>
-          <p class="muted">
-            Custom campaigns are not in it. Each of those is its own download on the{' '}
-            <a href="/custom-campaigns">Custom campaigns</a> page.
-          </p>
-          <ol class="howto">
-            <li>
-              <a href="https://assets.riversidepug.com/mappack/L4D2-Maps-for-L4D1-v3.1e.zip">
-                <strong>Download the map pack</strong>
-              </a>. It is 3.4 GB, so do not start it on a phone tether.
-            </li>
-            <li>
-              Open your Left 4 Dead folder. In Steam, right-click <strong>Left 4 Dead</strong>,
-              then <strong>Manage</strong>, then <strong>Browse local files</strong>. You should
-              see a <code>left4dead</code> folder and an <code>hl2</code> folder there. If you
-              do not, you are in the wrong place.
-            </li>
-            <li>
-              Open the zip you downloaded, then drag everything inside it into that folder, and
-              click <strong>Yes</strong> when it asks about replacing files. When it is done you
-              will have a new <code>left4dead_dlc4</code> folder sitting next to <code>left4dead</code>.
-              This includes a <code>left4dead.exe</code> that lets the game use more memory; if
-              you would rather not run someone else's exe, see below.
-            </li>
-            <li>
-              <strong class="howto-warn">Turn your Shader Detail down, or these maps will crash your game.</strong>{' '}
-              In-game: <strong>Options</strong>, then <strong>Video</strong>, then{' '}
-              <strong>Advanced</strong>, then <strong>Shader Detail</strong>, set to Medium or
-              lower. This is the single most common reason someone drops mid match after
-              installing the pack. The pack's own ReadMe buries it at step 4 of 5. We are not
-              burying it here.
-            </li>
-            <li>
-              Check it worked. Open the console and type <code>map c1m1_hotel</code>. If a hotel
-              level loads, you are done. If you get "map not found", the files went into the
-              wrong folder: redo step 2.
-            </li>
-          </ol>
-          <div class="faq">
-            {INSTALL_FAQ.map((f) => (
-              <details key={f.q}>
-                <summary>{f.q}</summary>
-                <div class="faq__answer">{f.a}</div>
-              </details>
-            ))}
-          </div>
         </Panel>
         <Panel id="faq">
           <h3>FAQ</h3>
