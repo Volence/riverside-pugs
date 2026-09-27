@@ -41,6 +41,9 @@ const EXACT_TEXT = new Set([
   'resource/ui/scoreboardsurvivor.res',
   'resource/ui/scoreboardinfectedplayer.res',
   'resource/ui/versusmodescoreboard.res',
+  // The chapter screen between maps (labels, images and score rows, no
+  // buttons): its versus panel grows with the Tab one (build.ts tabVersusGrowPass).
+  'resource/ui/multimapversusmodescoreboard.res',
   'resource/ui/zombiepanel.res',
   // The dead infected's spawn countdown (SpectatorGUI): labels and an image,
   // which the editor moves and colours (build.ts countdownPass).

@@ -624,7 +624,33 @@ function tabVersusGrowPass(work: Work, design: HudDesign) {
   const panel = work.panel(SCOREBOARD, [VERSUS_PANEL]);
   if (w !== base.w) pcSet(panel, 'wide', String(w));
   if (h !== base.h) pcSet(panel, 'tall', String(h));
+  // The chapter screen between maps embeds the same panel (client.dll
+  // 0x1025c900: CMultiMapVersusModeScoreboard), so it reads the same moves
+  // and clips them at its own stock 354 x 120 (probe TAB-EMB,
+  // /home/volence/l4d/hud/probe-tab-embedded/runs/roundend/end1-42.png). It
+  // grows to the Tab size, owner's pick 2026-09-26 over hiding it (the panel
+  // carries the half's score tally the rows do not); pieces moved low can
+  // cover the top rows. Kept inside the 600-wide screen by moving left.
+  const chapter = work.panel(CHAPTER, [VERSUS_PANEL]);
+  const x = num(pcGet(chapter, 'xpos'));
+  // One plain line each: the file carries [$ENGLISH] and [$!ENGLISH] ones,
+  // and a client in another language would keep the stock size.
+  everyLanguage(chapter, 'wide', String(w));
+  everyLanguage(chapter, 'tall', String(h));
+  everyLanguage(chapter, 'xpos', String(x + w > CHAPTER_WIDE ? Math.max(0, CHAPTER_WIDE - w) : x));
 }
+/** A key set to one plain line, in place of its language lines ([$ENGLISH], [$!ENGLISH]). */
+function everyLanguage(block: KvNode, key: string, value: string) {
+  const kids = block.value as KvNode[];
+  const lines = kids.filter((n) => typeof n.value === 'string' && n.key.toLowerCase() === key && (!n.cond || /ENGLISH/i.test(n.cond)));
+  if (!lines.length) { kids.push({ key, value }); return; }
+  lines.slice(1).forEach((n) => kids.splice(kids.indexOf(n), 1));
+  lines[0].value = value;
+  delete lines[0].cond;
+}
+/** The chapter screen (from left4dead_dlc3), whose versus panel follows the Tab one's size, and its width. */
+const CHAPTER = 'resource/ui/multimapversusmodescoreboard.res';
+const CHAPTER_WIDE = 600;
 const TAB_VERSUS_FILE = 'resource/ui/versusmodescoreboard.res';
 
 /** The versus pieces the design moves, lower-cased. */
