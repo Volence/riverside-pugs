@@ -64,6 +64,7 @@ import { backfillPersonas } from './personaBackfill.js';
 import { handleConduct } from './conductFlags.js';
 import { handleModCall } from './modCalls.js';
 import { ModCallPoster } from './discord/modCallPoster.js';
+import { WeeklyPoster } from './discord/weeklyPoster.js';
 import { MOD_CALL_PREFIX } from './discord/modCallCard.js';
 import { refreshSteamSignals, startSteamSignalRefresh, type SignalDeps } from './steamSignals.js';
 import { authRoutes } from './routes/auth.js';
@@ -1454,6 +1455,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   let bot: RunningBot | null = null;
   let adminFeed: AdminFeedPoster | null = null;
   let modCalls: ModCallPoster | null = null;
+  let weekly: WeeklyPoster | null = null;
   let ticketSync: TicketSync | null = null;
   let ticketMirror: TicketMirror | null = null;
   let reportButton: ReportButton | null = null;
@@ -1509,6 +1511,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         adminFeed.start();
         modCalls = new ModCallPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
         modCalls.start();
+        weekly = new WeeklyPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
+        weekly.start();
         for (const text of bootProblems.splice(0)) publishAdminEvent({ kind: 'problem', text });
         // Built before the reconciler so its hook can reach it. Which of the
         // two starts first decides nothing: start() only queues a first pass
@@ -1590,6 +1594,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     offTicketNudge();
     adminFeed?.stop();
     modCalls?.stop();
+    weekly?.stop();
     await bot?.stop();
     clearInterval(reaper);
     clearInterval(presenceSweep);
