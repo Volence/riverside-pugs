@@ -47,6 +47,17 @@ describe('stat awards', () => {
     expect(find(computeWeek(db, W), 'skeets', 'avg')!.winners[0].steamid).toBe(P[0]);
   });
 
+  it('an out-of-range or blank minimum falls back to the default of 5', () => {
+    play(P[0], 4, { skeets: 5 });
+    play(P[1], 5, { skeets: 3 });
+    setSetting(db, 'weekly_min_games', '0');
+    expect(find(computeWeek(db, W), 'skeets', 'avg')!.winners[0].steamid).toBe(P[1]);
+    setSetting(db, 'weekly_min_games', '');
+    expect(find(computeWeek(db, W), 'skeets', 'avg')!.winners[0].steamid).toBe(P[1]);
+    setSetting(db, 'weekly_min_games', '3.5');
+    expect(find(computeWeek(db, W), 'skeets', 'avg')!.winners[0].steamid).toBe(P[1]);
+  });
+
   it('ties share, zeros never win, voided and aborted matches do not count', () => {
     play(P[0], 5, { boomer_pops: 2 });
     play(P[1], 5, { boomer_pops: 2 });
