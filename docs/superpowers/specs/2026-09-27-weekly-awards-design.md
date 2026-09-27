@@ -46,7 +46,7 @@ Survivor:
 | skeets | Skeets | skeets |
 | skeet_assists | Skeet assists | skeet_assists |
 | boomer_pops | Boomer pops | boomer_pops |
-| crowns | Witch crowns | crowns |
+| crowns | Witch crowns | crowns + draw_crowns |
 | rock_skeets | Rock skeets | rock_skeets |
 | tongue_clears | Tongue clears | tongue_clears |
 | insta_clears | Insta clears | insta_clears |
@@ -74,6 +74,7 @@ Overall (single winner each, no average/total split):
 | wins | Most wins | count of won matches |
 | win_streak | Longest win streak | longest run of consecutive wins, matches ordered by `ended_at`; a draw or loss breaks it |
 | matches | Iron man | most matches played |
+| win_rate | Best win rate | wins / (wins + losses), min `weekly_min_games` decided matches; shown as a W-L record ("15-4") |
 
 Shame (single winner each, min `weekly_min_games` matches):
 
@@ -83,8 +84,8 @@ Shame (single winner each, min `weekly_min_games` matches):
 | incap_damage | Kicking them while they're down | highest per-match average `dmg_to_incapped` |
 | group_hug | Group hug | highest per-match average `times_quadded` |
 
-Left out on purpose: self clears (owner), draw crowns (suspected recording
-bug, see Out of scope), stats that are always zero on L4D1 (deadstops, tongue
+Left out on purpose: self clears (owner), highest SR (owner agreed to skip: it
+is the season leaderboard's #1 every week), stats that are always zero on L4D1 (deadstops, tongue
 cuts, sniper and melee skeets, survivors biled), and every `self`-visibility
 stat such as times skeeted.
 
@@ -121,8 +122,10 @@ CREATE TABLE IF NOT EXISTS weekly_awards (
 CREATE TABLE IF NOT EXISTS weekly_award_weeks (
   week_start TEXT PRIMARY KEY,
   frozen_at  TEXT NOT NULL,
-  posted_at  TEXT,                   -- null until Discord accepted the card
-  message_id TEXT
+  posted_at  TEXT,                   -- null until Discord accepted both messages
+  recap_message_id  TEXT,
+  awards_message_id TEXT,
+  weekly_recap TEXT                  -- JSON, frozen with the awards
 );
 ```
 
@@ -149,6 +152,36 @@ CREATE TABLE IF NOT EXISTS weekly_award_weeks (
   `Skeets: VII 4.6/g, VII 187 total`, collapsing to
   `Skeets: VII (4.6/g, 187 total)` when one player holds both. Names link to
   profiles. No emojis. Links to the weekly tab at the bottom.
+
+### Weekly recap (the first message)
+
+Modelled on the owner's hand-written "Friday recap" that players liked: plain
+Discord markdown, bold numbers, match numbers named. Built from the frozen
+week, so it lives in the same freeze (a `weekly_recap` JSON column on
+`weekly_award_weeks`, written once with the awards).
+
+- Headline: matches played, distinct players, peak games running at once
+  (max overlap of `went_live_at`..`ended_at`), busiest day.
+- Highlights, best single game of the week, each naming the match:
+  skeets, tank damage, common kills, boomer pops, rock skeets, damage
+  pounces. Plus the match with the most quad caps, and week totals for witch
+  crowns, skeets and common infected, naming who led each.
+- Hot streaks: up to 4 best W-L records at 5+ decided matches ("mado went
+  15-4").
+- Iron players: the top player(s) by matches plus the runner-up.
+- Closest game: smallest score margin, with campaign and score.
+
+`quad_caps` credits a quad to every infected player in it (a quad needs all
+four), so summing it over a match counts each quad four times: match 218 sums
+to 12 for 3 quads. The recap counts a match's quads as the highest
+`quad_caps` on team a plus the highest on team b, since each team plays
+infected in its own halves. The per-player Quad caps award is unaffected.
+
+Discord caps a plain message at 2,000 characters, and the recap plus ~27
+award lines exceeds that. So the post is two messages sent back to back: the
+recap, then the awards. `weekly_award_weeks` keeps both message ids and
+`posted_at` is set only after both are accepted; a retry resends only the one
+that is missing.
 
 ### API
 
@@ -189,7 +222,4 @@ CREATE TABLE IF NOT EXISTS weekly_award_weeks (
 
 ## Out of scope
 
-- Draw crowns: Bone Breaker shows exactly 1.0 per match over 38 matches,
-  which looks like a recording bug. Investigate separately; it may also
-  affect season stats.
 - Top 3 per award, weekly role filters, notifications to winners.
