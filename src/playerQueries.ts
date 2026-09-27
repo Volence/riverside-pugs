@@ -7,6 +7,7 @@ import { playerStandings, RANKED_MIN_GAMES } from './standings.js';
 import { resolveCampaignForMap, campaignDisplayName } from './campaignRegistry.js';
 import { chemistryFor } from './chemistry.js';
 import { allTitles, endorsementSummary } from './endorsements.js';
+import { playerWeeklyAwards } from './weeklyStore.js';
 
 /** Read models shared by the HTTP routes and the Discord slash commands, so a
  *  number on the site and the same number in Discord come from one query. */
@@ -162,6 +163,9 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
     // Top-5 places this season, per match, among ranked players. Keyed like
     // the stat bag plus `winrate` and `boomer_rate`.
     standings: playerStandings(db, seasonId, steamid),
+    // Weekly award wins, grouped by award with the weeks. Shame awards are
+    // left out: they are for the Discord post, not a player's page.
+    weeklyAwards: playerWeeklyAwards(db, steamid),
     // Who they win with and lose to. Three lines, computed per request: it is
     // one grouped query over an indexed primary key.
     chemistry: chemistryFor(db, steamid),

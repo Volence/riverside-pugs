@@ -122,6 +122,7 @@ import { ticketRoutes } from './routes/tickets.js';
 import { modCallRoutes } from './routes/modCalls.js';
 import { castRoutes } from './routes/cast.js';
 import { statsRoutes } from './routes/stats.js';
+import { weeklyRoutes } from './routes/weekly.js';
 import { balancePublicRoutes } from './routes/balancePublic.js';
 import { replayRoutes } from './routes/replays.js';
 import { devRoutes } from './routes/dev.js';
@@ -1669,6 +1670,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(adminBalanceKnobRoutes, { db: deps.db, knobs: panelKnobs, writer: deps.config.devMode ? undefined : balanceWriter });
   await app.register(peopleRoutes, { db: deps.db });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
+  await app.register(weeklyRoutes, { db: deps.db });
   await app.register(balancePublicRoutes, { db: deps.db, knobsPath: deps.balanceKnobsPath });
   // The balance suggestion reads the whole watch list (knobs.json plus the
   // catalogue), so a change to a catalogue-only value is never suggested as
