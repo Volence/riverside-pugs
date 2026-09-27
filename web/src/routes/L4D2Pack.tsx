@@ -58,7 +58,12 @@ const PACK_FAQ: { q: string; a: preact.ComponentChildren }[] = [
 export function L4D2Pack() {
   return (
     <Panel id="l4d2-pack">
-      <h3>The L4D2 campaigns</h3>
+      {/* The same header button as each campaign card below; the step 1 link alone was
+          easy to miss inside the prose. */}
+      <div class="ccamp__head l4d2pack__head">
+        <h3>The L4D2 campaigns</h3>
+        <a class="btn" href={L4D2_PACK_URL}>Download {L4D2_PACK_SIZE}</a>
+      </div>
       <p>
         Dead Center, Dark Carnival, Swamp Fever, Hard Rain, The Parish, Passifice, Cold Stream
         and The Sacrifice, ported to L4D1. They are not part of a normal install, so install

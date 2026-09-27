@@ -1658,6 +1658,10 @@ describe('CustomCampaigns', () => {
     expect(container.querySelector('#l4d2-pack')).toBeTruthy();
     const pack = screen.getByRole('link', { name: /download the l4d2 campaigns/i });
     expect(pack.getAttribute('href')).toBe('https://assets.riversidepug.com/mappack/Riverside-L4D2-Maps-VPK-v3.1e.zip');
+    // A header button like every campaign card's, since the inline link was easy to miss.
+    const button = screen.getByRole('link', { name: 'Download 3.4 GB' });
+    expect(button.getAttribute('href')).toBe(pack.getAttribute('href'));
+    expect(button.classList.contains('btn')).toBe(true);
     // Our exe is Steam's with one byte changed, checkable with fc. The map
     // pack's older exe is no longer offered (same job, older build).
     const exe = screen.getByRole('link', { name: /download the 4 gb left4dead\.exe/i });
