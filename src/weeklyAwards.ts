@@ -1,5 +1,5 @@
 import type { DB } from './db.js';
-import { getSetting } from './settings.js';
+import { settingNumber } from './settings.js';
 
 /**
  * Weekly awards, computed from the live tables for any week.
@@ -78,8 +78,9 @@ export function weekBounds(week: string): { from: string; to: string } {
 }
 
 export function weeklyMinGames(db: DB): number {
-  const n = Number(getSetting(db, 'weekly_min_games'));
-  return Number.isInteger(n) && n > 0 ? n : 5;
+  // settingNumber, not Number(): the documented reader for numeric settings,
+  // so a blank or out-of-range row falls back rather than reading as 0.
+  return settingNumber(db, 'weekly_min_games', 5, { min: 1, max: 50, integer: true });
 }
 
 /** The matches that count for a week, as a reusable SQL fragment. */
