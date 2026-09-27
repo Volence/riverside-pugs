@@ -40,6 +40,10 @@ describe('findSlurs', () => {
     ['beaner', 'ethnic slur'],
     ['tranny', 'slur'],
     ['maricon', 'Spanish slur'],
+    ['LeChink James', 'prefix glued on (a real name, 2026-09-26)'],
+    ['xXkikeXx', 'wrapped in decoration'],
+    ['bignigga', 'prefix glued on'],
+    ['ImAFaggot', 'prefix glued on'],
   ])('flags %j (%s)', (line) => {
     expect(findSlurs(line)).not.toEqual([]);
   });
@@ -58,6 +62,8 @@ describe('findSlurs', () => {
     'reggae',
     'I can get u early',
     'spice',
+    'spicy',
+    'conspicuous',
     'gg niger delta',
     'fuck you',
     'stfu',
