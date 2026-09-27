@@ -2206,6 +2206,60 @@ tbody tr.is-lifted td { opacity: 0.55; }
 
 .season-picker { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.12em; }
 
+/* ---------- leaderboard: Season / This week toggle ---------- */
+
+.lb-aside { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+
+/* A two-segment pill beside the season picker. Only one segment is ever "on",
+   so it reads as a single control rather than two independent buttons. */
+.lb-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+}
+.lb-toggle button {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border: 0;
+  padding: var(--sp-1) var(--sp-3);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+}
+.lb-toggle button + button { border-left: 1px solid var(--border); }
+.lb-toggle button:hover { color: var(--text); }
+.lb-toggle button.is-on { background: var(--accent); color: var(--accent-ink); }
+
+/* ---------- weekly board ---------- */
+
+.weekly__bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.weekly__note { color: var(--text-muted); font-size: var(--fs-dense); }
+.weekly__group { margin: 0 0 var(--sp-3); }
+
+.weekly__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--sp-3);
+}
+.weekly__card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  padding: var(--sp-3);
+  display: grid;
+  gap: var(--sp-2);
+}
+.weekly__label { font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); font-size: var(--fs-label); }
+.weekly__winner { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); }
+.weekly__kind { color: var(--text-muted); font-size: var(--fs-dense); }
+.weekly__value { margin-left: auto; color: var(--text-bright, var(--text)); font-variant-numeric: tabular-nums; }
+
+.weekly .panel + .panel { margin-top: var(--sp-4); }
+
+@media (max-width: 480px) {
+  .weekly__grid { grid-template-columns: 1fr; }
+}
+
 .spectate__open { margin-bottom: var(--sp-3); }
 .spectate { margin-bottom: var(--sp-4); }
 

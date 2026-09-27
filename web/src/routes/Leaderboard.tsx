@@ -7,6 +7,7 @@ import { Empty, Panel, PlayerLink } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { Headliner } from '../components/Headliner';
 import { TitleTag } from '../components/TitleTag';
+import { WeeklyBoard } from './WeeklyBoard';
 
 /** Columns that are not stats and so are not part of the stat bag.
  *
@@ -43,6 +44,12 @@ function valueOf(r: Row, key: string): number | null {
 }
 
 export function Leaderboard({ me }: { me: string | null }) {
+  // The Discord post links `/leaderboard?week=YYYY-MM-DD`: that query alone
+  // must open the weekly view, so it is read once on mount rather than
+  // through the router (this route has no other query params to lose).
+  const params = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
+  const [weekly, setWeekly] = useState(params.has('week'));
+  const [week, setWeek] = useState<string | undefined>(params.get('week') ?? undefined);
   const [season, setSeason] = useState<number | undefined>(undefined);
   const { data, error } = useFetch((s) => api.leaderboard(s, season), [season]);
   const { data: seasonList } = useFetch((s) => api.seasons(s).catch(() => ({ seasons: [] })), []);
@@ -101,18 +108,26 @@ export function Leaderboard({ me }: { me: string | null }) {
     <div class="page page--list">
       <PageHeader
         title="Leaderboard"
-        aside={seasons.length > 1 ? (
-          <select
-            class="season-picker" aria-label="Season"
-            value={String(season ?? seasons.find((s) => s.current)?.id ?? '')}
-            onChange={(e) => {
-              const id = Number((e.target as HTMLSelectElement).value);
-              setSeason(seasons.find((s) => s.id === id)?.current ? undefined : id);
-            }}
-          >
-            {seasons.map((s) => <option key={s.id} value={s.id}>{s.name}{s.current ? '' : ' (ended)'}</option>)}
-          </select>
-        ) : data ? data.season.name : undefined}
+        aside={(
+          <div class="lb-aside">
+            <div class="lb-toggle" role="group" aria-label="Board">
+              <button type="button" class={weekly ? '' : 'is-on'} aria-pressed={!weekly} onClick={() => setWeekly(false)}>Season</button>
+              <button type="button" class={weekly ? 'is-on' : ''} aria-pressed={weekly} onClick={() => setWeekly(true)}>This week</button>
+            </div>
+            {!weekly && (seasons.length > 1 ? (
+              <select
+                class="season-picker" aria-label="Season"
+                value={String(season ?? seasons.find((s) => s.current)?.id ?? '')}
+                onChange={(e) => {
+                  const id = Number((e.target as HTMLSelectElement).value);
+                  setSeason(seasons.find((s) => s.id === id)?.current ? undefined : id);
+                }}
+              >
+                {seasons.map((s) => <option key={s.id} value={s.id}>{s.name}{s.current ? '' : ' (ended)'}</option>)}
+              </select>
+            ) : data ? data.season.name : undefined)}
+          </div>
+        )}
       >
         {rows.length > 0 && (
           <Figures>
@@ -132,6 +147,9 @@ export function Leaderboard({ me }: { me: string | null }) {
 
       <StatLeaders rows={rows} sortKey={sort.key} onPick={(k) => setSort({ key: k, desc: true })} />
 
+      {weekly ? (
+        <WeeklyBoard week={week} onWeek={setWeek} />
+      ) : (
       <div class="lb-layout">
         <Panel class="panel--table">
           {error ? (
@@ -222,6 +240,7 @@ export function Leaderboard({ me }: { me: string | null }) {
           );
         })()}
       </div>
+      )}
     </div>
   );
 }

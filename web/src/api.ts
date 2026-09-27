@@ -152,6 +152,33 @@ export interface Leaderboard {
   rows: LeaderboardRow[];
 }
 
+/** Which panel of the weekly board an award sits in. */
+export type AwardGroup = 'survivor' | 'infected' | 'overall' | 'shame';
+
+export interface WeeklyWinner { steamid: string; name: string; value: number; games: number; detail: string | null }
+
+/** One line of an award: `avg` and `total` can both exist for the same
+ *  `key` (two rows in the same card), `single` never shares its key. */
+export interface WeeklyAward { key: string; label: string; group: AwardGroup; kind: 'avg' | 'total' | 'single'; winners: WeeklyWinner[] }
+
+export interface WeeklyRecap {
+  matches: number;
+  players: number;
+  peakConcurrent: number;
+  busiestDay: { date: string; matches: number } | null;
+  highlights: { key: string; verb: string; label: string; player: { steamid: string; name: string }; value: number; matchId: number }[];
+  mostQuads: { matchId: number; quads: number } | null;
+  totals: { key: string; label: string; value: number; leader: { steamid: string; name: string; value: number } | null }[];
+  streaks: { steamid: string; name: string; w: number; l: number }[];
+  iron: { steamid: string; name: string; games: number }[];
+  closest: { matchId: number; campaign: string; a: number; b: number } | null;
+}
+
+export interface WeeklyData { week: string; live: boolean; minGames: number; awards: WeeklyAward[]; recap: WeeklyRecap }
+
+/** A player's history of weekly awards, shown on their profile. */
+export interface PlayerAward { award: string; label: string; count: number; weeks: string[] }
+
 export interface MatchSummary {
   id: number;
   campaign: string;
@@ -566,6 +593,8 @@ export interface Profile {
   chemistry?: Chemistry;
   /** Optional only for a server older than the feature. */
   endorsements?: EndorsementSummary;
+  /** Optional only for a server older than the feature. */
+  weeklyAwards?: PlayerAward[];
 }
 
 /** A place on this season's board: `rank` of `of` ranked players. Ties share. */
@@ -1724,6 +1753,8 @@ export const api = {
   leaderboard: (signal?: AbortSignal, season?: number) =>
     get<Leaderboard>(season === undefined ? '/api/leaderboard' : `/api/leaderboard?season=${season}`, signal),
   seasons: (signal?: AbortSignal) => get<{ seasons: Season[] }>('/api/seasons', signal),
+  weekly: (signal?: AbortSignal, week?: string) => get<WeeklyData>(week ? `/api/weekly?week=${week}` : '/api/weekly', signal),
+  weeklyWeeks: (signal?: AbortSignal) => get<{ current: string; weeks: string[] }>('/api/weekly/weeks', signal),
   matches: (signal?: AbortSignal) => get<{ matches: MatchSummary[] }>('/api/matches', signal),
   live: (signal?: AbortSignal) => get<{ matches: LiveMatch[] }>('/api/live', signal),
   streams: (all = false, signal?: AbortSignal) =>
