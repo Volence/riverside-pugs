@@ -740,6 +740,28 @@ CREATE TABLE IF NOT EXISTS mod_calls (
 CREATE INDEX IF NOT EXISTS mod_calls_created ON mod_calls (created_at);
 CREATE INDEX IF NOT EXISTS mod_calls_caller ON mod_calls (caller_steamid, created_at);
 CREATE INDEX IF NOT EXISTS mod_calls_pending ON mod_calls (post_state) WHERE post_state = 'pending';
+-- Weekly awards (src/weeklyStore.ts). A closed week is frozen once: the
+-- winners and the recap are written here and never recomputed, so a void or
+-- a rating recompute later cannot quietly change who won a past week.
+CREATE TABLE IF NOT EXISTS weekly_awards (
+  week_start TEXT NOT NULL,
+  award      TEXT NOT NULL,
+  kind       TEXT NOT NULL CHECK (kind IN ('avg','total','single')),
+  player_id  TEXT NOT NULL REFERENCES players(steamid),
+  value      REAL NOT NULL,
+  games      INTEGER NOT NULL,
+  detail     TEXT,
+  PRIMARY KEY (week_start, award, kind, player_id)
+);
+CREATE INDEX IF NOT EXISTS weekly_awards_player ON weekly_awards (player_id);
+CREATE TABLE IF NOT EXISTS weekly_award_weeks (
+  week_start        TEXT PRIMARY KEY,
+  frozen_at         TEXT NOT NULL,
+  weekly_recap      TEXT NOT NULL DEFAULT '{}',
+  recap_message_id  TEXT,
+  awards_message_id TEXT,
+  posted_at         TEXT
+);
 `;
 
 export const DEFAULT_SETTINGS: Record<string, string> = {
@@ -789,6 +811,13 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // average to mean anything, so the badges used to land on whoever had
   // played least.
   standing_min_games: '10',
+  // Matches in a week before a player's averages, win rate, SR climb or a
+  // shame award count for the weekly awards. Five, not three: at three the
+  // week of 2026-09-21 gave an average to a four-game player.
+  weekly_min_games: '5',
+  // Where the weekly recap and awards are posted. Empty posts nothing; the
+  // week is still frozen for the site.
+  discord_weekly_channel_id: '',
   admin_feed_reports: '1',
   ticket_mod_ban_max_minutes: '10080',
   ticket_reports_per_day: '5',
