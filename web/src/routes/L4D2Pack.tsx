@@ -22,6 +22,8 @@ export interface L4D2Piece {
   /** Whether the all-in-one zip holds this exact version. Set it false when a
    *  piece is updated without rebuilding the full zip. */
   inAll: boolean;
+  /** A short line under the name, for a piece whose name alone misleads. */
+  note?: string;
 }
 
 const PIECE_BASE = 'https://assets.riversidepug.com/mappack/l4d2-v3.1e';
@@ -34,9 +36,13 @@ export const L4D2_CAMPAIGNS: L4D2Piece[] = [
   { id: 'c3', name: 'Swamp Fever', url: `${PIECE_BASE}/Riverside-L4D2-Swamp-Fever.zip`, bytes: 79844207, inAll: true },
   { id: 'c4', name: 'Hard Rain', url: `${PIECE_BASE}/Riverside-L4D2-Hard-Rain.zip`, bytes: 105729055, inAll: true },
   { id: 'c5', name: 'The Parish', url: `${PIECE_BASE}/Riverside-L4D2-The-Parish.zip`, bytes: 79281877, inAll: true },
-  { id: 'c6', name: 'Passifice', url: `${PIECE_BASE}/Riverside-L4D2-Passifice.zip`, bytes: 31937607, inAll: true },
+  { id: 'c6', name: 'Passifice', url: `${PIECE_BASE}/Riverside-L4D2-Passifice.zip`, bytes: 31937607, inAll: true,
+    note: 'The Passing + The Sacrifice' },
   { id: 'c13', name: 'Cold Stream', url: `${PIECE_BASE}/Riverside-L4D2-Cold-Stream.zip`, bytes: 113772918, inAll: true },
-  { id: 'c14', name: 'The Sacrifice', url: `${PIECE_BASE}/Riverside-L4D2-The-Sacrifice.zip`, bytes: 32037246, inAll: true },
+  // c14 is L4D2's The Last Stand (c14m1_junkyard, c14m2_lighthouse). The VPK is still named
+  // zz_l4d2maps_c14_thesacrifice after a build.py mislabel; renaming it would touch every
+  // player and server install for no gain. The Sacrifice's maps are inside Passifice.
+  { id: 'c14', name: 'The Last Stand', url: `${PIECE_BASE}/Riverside-L4D2-The-Last-Stand.zip`, bytes: 32037246, inAll: true },
 ];
 
 /** What this browser has downloaded, as piece id (or 'all') to the URL it got.
@@ -143,8 +149,8 @@ export function L4D2Pack() {
         </a>
       </div>
       <p>
-        Dead Center, Dark Carnival, Swamp Fever, Hard Rain, The Parish, Passifice, Cold Stream
-        and The Sacrifice, ported to L4D1. They are not part of a normal install, so install
+        Dead Center, Dark Carnival, Swamp Fever, Hard Rain, The Parish, Passifice (The Passing
+        and The Sacrifice as one campaign), Cold Stream and The Last Stand, ported to L4D1. They are not part of a normal install, so install
         these once before you can join a match on one.
       </p>
       <div class="l4d2pick">
@@ -156,7 +162,7 @@ export function L4D2Pack() {
           onGet={() => mark(L4D2_SHARED.id, L4D2_SHARED.url)} />
         <div class="l4d2pick__grid">
           {L4D2_CAMPAIGNS.map((p) => (
-            <PieceRow key={p.id} piece={p} status={pieceStatus(p, got)} onGet={() => mark(p.id, p.url)} />
+            <PieceRow key={p.id} piece={p} status={pieceStatus(p, got)} note={p.note} onGet={() => mark(p.id, p.url)} />
           ))}
         </div>
       </div>
