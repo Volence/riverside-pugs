@@ -9,7 +9,18 @@ export interface DemoFile {
   map: string;
   filename: string;
   bytes: number;
+  /** Last write, for telling a finished file from one srcds is still writing. */
+  mtimeMs: number;
 }
+
+/**
+ * How recently the newest demo must have been written to count as still
+ * recording. A demo srcds is recording on this box is written every few
+ * seconds. One pulled from another box (Riverside, Chicago) only arrives after
+ * its pull script has seen it untouched for 3 minutes, and keeps that mtime,
+ * so it is always older than this and counts as finished.
+ */
+export const IN_PROGRESS_MS = 150_000;
 
 /**
  * Find the demos belonging to one match.
@@ -39,10 +50,12 @@ export function discoverMatchDemos(dir: string, token: string): DemoFile[] {
     const m = re.exec(name);
     if (!m) continue;
     let bytes: number;
+    let mtimeMs: number;
     try {
       const st = statSync(join(dir, name));
       if (!st.isFile()) continue;
       bytes = st.size;
+      mtimeMs = st.mtimeMs;
     } catch {
       continue;
     }
@@ -50,7 +63,7 @@ export function discoverMatchDemos(dir: string, token: string): DemoFile[] {
     // e.g. the match was aborted immediately. Offering it as a download would
     // just waste someone's time.
     if (bytes === 0) continue;
-    out.push({ ordinal: Number(m[1]), map: m[2], filename: name, bytes });
+    out.push({ ordinal: Number(m[1]), map: m[2], filename: name, bytes, mtimeMs });
   }
   return out.sort((a, b) => a.ordinal - b.ordinal);
 }
@@ -59,20 +72,24 @@ export function discoverMatchDemos(dir: string, token: string): DemoFile[] {
  * Record a match's demos. Upserts, so re-running after a demo finishes
  * flushing updates the size rather than failing. Returns the row count.
  *
- * `excludeInProgress` drops the highest-ordinal demo, which during a live
- * match is always the one srcds is still writing: `tv_record` for map N+1 is
- * what closes map N's file. Offering that one as a download hands the user a
- * truncated, unplayable demo. At match completion the flag is off, because by
- * then the final demo has been closed by `tv_stoprecord`.
+ * `excludeInProgress` drops the highest-ordinal demo while it is still being
+ * written (see IN_PROGRESS_MS): on this box that is the map being played, since
+ * `tv_record` for map N+1 is what closes map N's file, and offering it hands
+ * the user a truncated, unplayable demo. Dropping the newest unconditionally
+ * was wrong for pulled files: for a Riverside or Chicago match the one still
+ * recording is on that box, the newest file here is already finished, and each
+ * map's demo showed up a map late (match 245, 2026-09-27). At match completion
+ * the flag is off, because by then `tv_stoprecord` has closed the final demo.
  */
 export function recordMatchDemos(
   db: DB, matchId: number, token: string, dir: string,
-  opts: { excludeInProgress?: boolean } = {},
+  opts: { excludeInProgress?: boolean; nowMs?: number } = {},
 ): number {
   let found = discoverMatchDemos(dir, token);
   if (opts.excludeInProgress && found.length > 0) {
     const newest = Math.max(...found.map((d) => d.ordinal));
-    found = found.filter((d) => d.ordinal !== newest);
+    const now = opts.nowMs ?? Date.now();
+    found = found.filter((d) => d.ordinal !== newest || now - d.mtimeMs >= IN_PROGRESS_MS);
   }
   if (found.length === 0) return 0;
   // Two files can share an ordinal: warm-up before a campaign change, the tail
