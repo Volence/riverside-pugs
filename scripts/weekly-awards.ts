@@ -19,7 +19,9 @@ const db = openDb(path);
 let f: FrozenWeek;
 if (flag === '--freeze') {
   console.log(freezeWeek(db, week) ? 'frozen' : 'already frozen');
-  f = frozenWeek(db, week)!;
+  const frozen = frozenWeek(db, week);
+  if (!frozen) throw new Error(`could not read frozen week ${week}`);
+  f = frozen;
 } else {
   f = { week, frozenAt: '', postedAt: null, awards: computeWeek(db, week), recap: computeRecap(db, week) };
 }
