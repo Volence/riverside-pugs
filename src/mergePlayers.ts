@@ -99,6 +99,9 @@ const KEYED: [table: string, column: string][] = [
   // like is kept. A like that lands on the survivor's own entry is dropped
   // after the KEYED pass.
   ['community_likes', 'player_id'],
+  // Primary key (week_start, award, kind, player_id): a tie between the two
+  // accounts on the same award collapses into one row.
+  ['weekly_awards', 'player_id'],
 ];
 
 /** A merge that cannot be done because of what was asked for, as opposed to

@@ -31,6 +31,7 @@ describe('openDb', () => {
       'rating_history', 'relay_messages', 'release_boxes', 'releases', 'report_message', 'reporter_chat_pings', 'reports', 'round_metric_context', 'round_metrics', 'seasons', 'servers', 'settings', 'signon_drops',
       'sourcetv_server_events', 'sourcetv_sessions', 'steam_signal_alerts',
       'ticket_access', 'ticket_attachments', 'ticket_events', 'ticket_messages', 'ticket_notices', 'ticket_reports', 'ticket_threads', 'tickets', 'twitch_status',
+      'weekly_award_weeks', 'weekly_awards',
     ]);
   });
 
