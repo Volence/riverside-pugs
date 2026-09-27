@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { setSetting } from '../src/settings.js';
 import { addWeeks, computeWeek, weekBounds, weekStartOf } from '../src/weeklyAwards.js';
-import { seedMatch, seedPlayers } from './weeklyFixtures.js';
+import { seedMatch, seedPlayers, seedRating, seedReadyup } from './weeklyFixtures.js';
 
 let db: DB; let P: string[];
 beforeEach(() => { db = openDb(':memory:'); P = seedPlayers(db, 8); });
@@ -81,5 +81,67 @@ describe('stat awards', () => {
     play(P[0], 4, { skeets: 5 });
     seedMatch(db, { endedAt: at(3), lines: [{ id: P[0], team: 'a' }] });   // fifth match, no stats
     expect(find(computeWeek(db, W), 'skeets', 'avg')!.winners[0]).toMatchObject({ value: 4, games: 5 });
+  });
+});
+
+describe('overall awards', () => {
+  /** p on team a in each match; results as a string like 'WWLW' (D = draw). */
+  function results(p: string, s: string) {
+    [...s].forEach((c, i) => seedMatch(db, {
+      endedAt: at(0, `${String(10 + i).padStart(2, '0')}:00:00`),
+      winner: c === 'W' ? 'a' : c === 'L' ? 'b' : 'draw',
+      lines: [{ id: p, team: 'a' }],
+    }));
+  }
+  const single = (key: string) => find(computeWeek(db, W), key, 'single');
+
+  it('most wins, iron man, best win rate with its W-L record', () => {
+    results(P[0], 'WWWWL');       // 4-1, 5 games
+    results(P[1], 'WWWWWWLLLL');  // 6-4, 10 games
+    results(P[2], 'WWWW');        // 4-0 but only 4 games
+    expect(single('wins')!.winners.map((w) => w.steamid)).toEqual([P[1]]);
+    expect(single('matches')!.winners.map((w) => [w.steamid, w.value])).toEqual([[P[1], 10]]);
+    expect(single('win_rate')!.winners.map((w) => [w.steamid, w.value, w.detail])).toEqual([[P[0], 0.8, '4-1']]);
+  });
+
+  it('a draw breaks a win streak and does not count as decided', () => {
+    results(P[0], 'WWDWWWL');
+    results(P[1], 'WWLWW');   // same 4-1 record as P0's decided games, but no run of 3+
+    expect(single('win_streak')!.winners.map((w) => [w.steamid, w.value])).toEqual([[P[0], 3]]);
+    expect(single('win_rate')!.winners[0]).toMatchObject({ steamid: P[1], detail: '4-1' });
+  });
+
+  it('SR climb is displayed SR after the last match minus before the first', () => {
+    const ids: number[] = [];
+    for (let i = 0; i < 5; i++) ids.push(seedMatch(db, { endedAt: at(i), lines: [{ id: P[0], team: 'a' }, { id: P[1], team: 'b' }] }));
+    // P0: 25/8.333 (833) up to 30/7 (1600): +767. P1 falls: never a winner.
+    ids.forEach((m, i) => {
+      seedRating(db, m, P[0], i === 0 ? [25, 8.333] : [26, 8], i === 4 ? [30, 7] : [26, 8]);
+      seedRating(db, m, P[1], [25, 8.333], [20, 8]);
+    });
+    expect(single('sr_climb')!.winners.map((w) => [w.steamid, w.value])).toEqual([[P[0], 767]]);
+  });
+});
+
+describe('shame awards', () => {
+  it('slowest ready-up is the average per ready-up, gated on matches', () => {
+    for (let i = 0; i < 5; i++) {
+      const m = seedMatch(db, { endedAt: at(i), lines: [{ id: P[0], team: 'a' }, { id: P[1], team: 'b' }] });
+      seedReadyup(db, m, { [P[0]]: 40, [P[1]]: 10 });
+      seedReadyup(db, m, { [P[0]]: 20, [P[1]]: 10 });
+    }
+    const m = seedMatch(db, { endedAt: at(5), lines: [{ id: P[2], team: 'a' }] });
+    seedReadyup(db, m, { [P[2]]: 500 });   // one match: below the gate
+    const s = find(computeWeek(db, W), 'slow_ready', 'single')!;
+    expect(s.group).toBe('shame');
+    expect(s.winners.map((w) => [w.steamid, w.value])).toEqual([[P[0], 30]]);
+  });
+
+  it('incap damage and group hug are per-match averages', () => {
+    play(P[0], 5, { dmg_to_incapped: 300, times_quadded: 1 });
+    play(P[1], 5, { dmg_to_incapped: 100, times_quadded: 2 });
+    const r = computeWeek(db, W);
+    expect(find(r, 'incap_damage', 'single')!.winners[0].steamid).toBe(P[0]);
+    expect(find(r, 'group_hug', 'single')!.winners[0]).toMatchObject({ steamid: P[1], value: 2 });
   });
 });

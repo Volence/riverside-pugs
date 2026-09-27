@@ -1,4 +1,5 @@
 import type { DB } from './db.js';
+import { displaySr } from './rating.js';
 import { settingNumber } from './settings.js';
 
 /**
@@ -47,8 +48,17 @@ const STAT_AWARDS: StatAward[] = [
   { key: 'smoker_damage', label: 'Smoker damage', group: 'infected', stats: ['dmg_as_smoker'] },
 ];
 
-/** Single-winner awards, filled in by computeSingles (Task 3). */
-const SINGLE_AWARDS: AwardDef[] = [];
+/** Single-winner awards. Order is display order. */
+const SINGLE_AWARDS: AwardDef[] = [
+  { key: 'sr_climb', label: 'Biggest SR climb', group: 'overall' },
+  { key: 'wins', label: 'Most wins', group: 'overall' },
+  { key: 'win_streak', label: 'Longest win streak', group: 'overall' },
+  { key: 'matches', label: 'Iron man', group: 'overall' },
+  { key: 'win_rate', label: 'Best win rate', group: 'overall' },
+  { key: 'slow_ready', label: 'Slowest ready-up', group: 'shame' },
+  { key: 'incap_damage', label: "Kicking them while they're down", group: 'shame' },
+  { key: 'group_hug', label: 'Group hug', group: 'shame' },
+];
 
 export const AWARDS: AwardDef[] = [
   ...STAT_AWARDS.map(({ key, label, group }) => ({ key, label, group })),
@@ -125,6 +135,88 @@ function statTotals(db: DB, week: string, a: StatAward): Map<string, number> {
 const winner = (g: PlayerGames, value: number, detail: string | null = null): Winner =>
   ({ steamid: g.steamid, name: g.name, value, games: g.games, detail });
 
+interface Result { steamid: string; winner: 'a' | 'b' | 'draw' | null; team: 'a' | 'b' }
+
+/** Each player's matches this week in order, as W, L or D. */
+function resultsByPlayer(db: DB, week: string): Map<string, ('W' | 'L' | 'D')[]> {
+  const { from, to } = weekBounds(week);
+  const rows = db.prepare(
+    `SELECT mp.player_id AS steamid, m.winner, mp.team
+     FROM match_players mp JOIN matches m ON m.id = mp.match_id
+     WHERE m.id IN (${WEEK_MATCHES})
+     ORDER BY m.ended_at, m.id`,
+  ).all(from, to) as Result[];
+  const out = new Map<string, ('W' | 'L' | 'D')[]>();
+  for (const r of rows) {
+    const c = r.winner === r.team ? 'W' : r.winner === 'a' || r.winner === 'b' ? 'L' : 'D';
+    out.set(r.steamid, [...(out.get(r.steamid) ?? []), c]);
+  }
+  return out;
+}
+
+function longestRun(seq: string[]): number {
+  let best = 0; let run = 0;
+  for (const c of seq) { run = c === 'W' ? run + 1 : 0; best = Math.max(best, run); }
+  return best;
+}
+
+/** Displayed SR after the last rated match of the week minus before the first. */
+function srClimbs(db: DB, week: string): Map<string, number> {
+  const { from, to } = weekBounds(week);
+  const rows = db.prepare(
+    `SELECT rh.player_id AS steamid, rh.mu_before, rh.sigma_before, rh.mu_after, rh.sigma_after
+     FROM rating_history rh JOIN matches m ON m.id = rh.match_id
+     WHERE m.id IN (${WEEK_MATCHES})
+     ORDER BY m.ended_at, m.id`,
+  ).all(from, to) as { steamid: string; mu_before: number; sigma_before: number; mu_after: number; sigma_after: number }[];
+  const first = new Map<string, number>(); const last = new Map<string, number>();
+  for (const r of rows) {
+    if (!first.has(r.steamid)) first.set(r.steamid, displaySr(r.mu_before, r.sigma_before));
+    last.set(r.steamid, displaySr(r.mu_after, r.sigma_after));
+  }
+  return new Map([...first].map(([id, sr]) => [id, last.get(id)! - sr]));
+}
+
+function slowReadyAverages(db: DB, week: string): Map<string, number> {
+  const { from, to } = weekBounds(week);
+  const rows = db.prepare(
+    `SELECT player_id AS steamid, AVG(seconds) AS v FROM match_readyup_players
+     WHERE match_id IN (${WEEK_MATCHES}) GROUP BY player_id`,
+  ).all(from, to) as { steamid: string; v: number }[];
+  return new Map(rows.map((r) => [r.steamid, r.v]));
+}
+
+function computeSingles(db: DB, week: string, games: Map<string, PlayerGames>, min: number): AwardResult[] {
+  const results = resultsByPlayer(db, week);
+  const climbs = srClimbs(db, week);
+  const ready = slowReadyAverages(db, week);
+  const incap = statTotals(db, week, { key: '', label: '', group: 'shame', stats: ['dmg_to_incapped'] });
+  const hugs = statTotals(db, week, { key: '', label: '', group: 'shame', stats: ['times_quadded'] });
+  const all = [...games.values()];
+  const gated = all.filter((g) => g.games >= min);
+  const record = (id: string) => {
+    const seq = results.get(id) ?? [];
+    return { w: seq.filter((c) => c === 'W').length, l: seq.filter((c) => c === 'L').length, seq };
+  };
+  const pick: Record<string, Winner[]> = {
+    sr_climb: topOf(gated.map((g) => ({ g, value: climbs.get(g.steamid) ?? 0 }))).map((r) => winner(r.g, r.value)),
+    wins: topOf(all.map((g) => ({ g, value: record(g.steamid).w }))).map((r) => winner(r.g, r.value)),
+    win_streak: topOf(all.map((g) => ({ g, value: longestRun(record(g.steamid).seq) }))).map((r) => winner(r.g, r.value)),
+    matches: topOf(all.map((g) => ({ g, value: g.games }))).map((r) => winner(r.g, r.value)),
+    // Win rate is wins over games played, so a draw dilutes it like a loss
+    // would; the record in `detail` still lists only the decided games.
+    win_rate: topOf(gated
+      .map((g) => { const r = record(g.steamid); return { g, w: r.w, l: r.l, value: r.w / g.games }; }))
+      .map((r) => winner(r.g, r.value, `${r.w}-${r.l}`)),
+    slow_ready: topOf(gated.map((g) => ({ g, value: ready.get(g.steamid) ?? 0 }))).map((r) => winner(r.g, r.value)),
+    incap_damage: topOf(gated.map((g) => ({ g, value: (incap.get(g.steamid) ?? 0) / g.games }))).map((r) => winner(r.g, r.value)),
+    group_hug: topOf(gated.map((g) => ({ g, value: (hugs.get(g.steamid) ?? 0) / g.games }))).map((r) => winner(r.g, r.value)),
+  };
+  return SINGLE_AWARDS
+    .filter((a) => pick[a.key].length > 0)
+    .map((a) => ({ key: a.key, label: a.label, group: a.group, kind: 'single' as const, winners: pick[a.key] }));
+}
+
 export function computeWeek(db: DB, week: string): AwardResult[] {
   const games = playerGames(db, week);
   const min = weeklyMinGames(db);
@@ -138,5 +230,6 @@ export function computeWeek(db: DB, week: string): AwardResult[] {
     if (avg.length) out.push({ ...base, kind: 'avg', winners: avg.map((r) => winner(r.g, r.value)) });
     if (tot.length) out.push({ ...base, kind: 'total', winners: tot.map((r) => winner(r.g, r.value)) });
   }
+  out.push(...computeSingles(db, week, games, min));
   return out;
 }
