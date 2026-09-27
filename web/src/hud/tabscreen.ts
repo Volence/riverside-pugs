@@ -36,7 +36,7 @@ import { elementById } from './elements';
 import { panelChildren } from './children';
 import { buildTrees, elementRect, panelChild, type PanelChild } from './build';
 import { kvGet, pcFind, type KvNode } from './kv';
-import { layoutBlocks, TAB_STRINGS, type LaidBlock } from './tablayout';
+import { embeddedView, layoutBlocks, TAB_STRINGS, type LaidBlock } from './tablayout';
 import { screenW, SCREEN_H } from './units';
 import { normaliseMaterial } from './art';
 import { MODERN_ART } from './build';
@@ -476,7 +476,8 @@ export function panelPiece(design: HudDesign, panel: string, name: string, file?
  */
 export function versusLeader(design: HudDesign, name: string): string | undefined {
   const b = pcFind(buildTrees(design)(VERSUS), [name]);
-  return b ? kvGet(b, 'pin_to_sibling') : undefined;
+  // Read as the Tab screen reads it: a piece moved on its own is unpinned in its if_embedded block (build.ts unpin).
+  return (b && kvGet(embeddedView(b), 'pin_to_sibling')) || undefined;
 }
 
 /** The side a Tab panel's boxes are measured for when no side is given: the infected rows' own, else the survivors'. */

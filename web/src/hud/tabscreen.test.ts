@@ -180,7 +180,7 @@ describe('the Tab screen: moved versus pieces (PIECES-1, PIECES-2)', () => {
     const inf = tab(d, 'infected');
     const v = download('resource/ui/versusmodescoreboard.res');
     const emb = (n: string) => pcFind(pcFind(v, [n])!.value as KvNode[], ['if_embedded'])!;
-    expect([kvGet(emb('EnemyTeamHighlightImage'), 'xpos'), kvGet(pcFind(v, ['EnemyTeamHighlightImage'])!, 'ypos')]).toEqual(['360', '40']);
+    expect([kvGet(emb('EnemyTeamHighlightImage'), 'xpos'), kvGet(emb('EnemyTeamHighlightImage'), 'ypos')]).toEqual(['360', '40']);
     expect(sliceAt(inf, 15 + 360, 25 + 40)).toBeDefined();
     expect(sliceAt(out, 15 + 10, 25 + 205)).toBeDefined();
     const x = (s: string) => out.find((c) => c.m === 'fillText' && c.a[0] === s)!.a[1] as number;
@@ -190,7 +190,7 @@ describe('the Tab screen: moved versus pieces (PIECES-1, PIECES-2)', () => {
     expect(x('1%')).toBeCloseTo((15 + 30) * K + 170 + 10 * K);
     expect(y('1%')).toBeCloseTo(y('Average Distance:'));
     // HealthAmount, moved on its own, is unpinned and drawn at exactly its place.
-    expect(pcFind(v, ['HealthAmount']) && kvGet(pcFind(v, ['HealthAmount'])!, 'pin_to_sibling')).toBeUndefined();
+    expect(kvGet(emb('HealthAmount'), 'pin_to_sibling')).toBe('');
     expect(x('200')).toBeCloseTo((15 + 300) * K);
   });
 

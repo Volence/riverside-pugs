@@ -654,11 +654,11 @@ const TAB_HIDE = { move: false, box: 'none', font: false, hideGate: 'TS7' } as c
  * A versus piece that moves: probe PIECES-1 moved every one by its own
  * offset and each drew exactly there, on both sides, as a ghost and
  * spawned (/home/volence/l4d/hud/probe-tab-pieces/RESULTS.md, measure.txt).
- * The build writes xpos into if_embedded where stock has it there (the
- * team labels, the scores and the team boxes: PIECES-2 saw a plain xpos
- * under an if_embedded one ignored) and ypos into the plain block, grows
- * the panel to hold what moved (TL5: it clips its children), and unpins a
- * piece of the stat line moved on its own (build.ts childPass).
+ * The build writes every move into the piece's if_embedded block alone
+ * (build.ts embeddedLayout: the round-end screen reads the plain keys and
+ * keeps the stock layout), grows the panel to hold what moved (TL5: it
+ * clips its children), and unpins a piece of the stat line moved on its
+ * own there too (build.ts unpin).
  */
 const TAB_MOVE = { ...TAB_HIDE, move: true } as const;
 const PANEL_BG = 'VGUI Panel key bgcolor_override (client.dll string run)';

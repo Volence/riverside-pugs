@@ -530,17 +530,16 @@ function childPass(work: Work, design: HudDesign) {
   }
 }
 
-/** The three keys that pin a block to a sibling. */
-const PIN_KEYS = ['pin_to_sibling', 'pin_corner_to_sibling', 'pin_to_sibling_corner'];
 
 /**
- * A versus piece of the stat line moved on its own: its three pin keys come
- * out and it takes the exact place stored, in the panel's own frame. Probe
- * PIECES-2 (/home/volence/l4d/hud/probe-tab-pieces/RESULTS.md, pieces2/build-log.txt):
- * HealthLabel with its pins removed and xpos 200, ypos 30 drew at 1194, 118 px
- * against 1192.2, 118.5 expected, where still pinned it would have drawn near
- * 1445; and HealthAmount, still pinned to it, went along. So a stored place is
- * always absolute (what the X and Y boxes show), the pinned offset with its
+ * A versus piece of the stat line moved on its own: unpinned on the Tab
+ * screen alone, by an if_embedded "pin_to_sibling" "" (probe TAB-EMB,
+ * /home/volence/l4d/hud/probe-tab-embedded: HealthAmount so written with
+ * xpos 300, ypos 150 drew at 300,150), so the standalone panels keep the
+ * stock line. Probe PIECES-2 (/home/volence/l4d/hud/probe-tab-pieces/RESULTS.md)
+ * showed an unpinned piece is placed exactly where its own xpos and ypos say
+ * and takes the pieces pinned to it along. So a stored place is always
+ * absolute (what the X and Y boxes show), the pinned offset with its
  * turned-round ypos (PIECES-1) is never written, and the pieces pinned to
  * this one keep their pins and follow it.
  *
@@ -556,15 +555,7 @@ function unpin(work: Work, file: string, block: KvNode, o: ChildOverride): Child
     x ??= Math.round(at?.x ?? 0);
     y ??= Math.round(at?.y ?? 0);
   }
-  block.value = (block.value as KvNode[]).filter((n) => !(typeof n.value === 'string' && pcApplies(n.cond) && PIN_KEYS.includes(n.key.toLowerCase())));
-  // One plain xpos and one plain ypos, where the first line of each was: the stock line pieces carry
-  // "xpos" [$ENGLISH] beside "xpos" [$!ENGLISH] (5 or 10), and a client in another language would keep
-  // its own small offset, now panel-absolute, and draw the piece near the panel's left edge.
-  for (const key of ['xpos', 'ypos']) {
-    const lines = (block.value as KvNode[]).filter((n) => typeof n.value === 'string' && n.key.toLowerCase() === key);
-    lines.slice(1).forEach((n) => (block.value as KvNode[]).splice((block.value as KvNode[]).indexOf(n), 1));
-    if (lines[0]) delete lines[0].cond;
-  }
+  embeddedLayout(block, 'pin_to_sibling', '');
   return { ...o, x, y };
 }
 
@@ -746,7 +737,11 @@ function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: C
   }
   const put = embedded ? (key: string, value: string) => embeddedSet(block, key, value) : (key: string, value: string) => kvSet(block, key, value);
   if (o.visible !== undefined) put('visible', o.visible ? '1' : '0');
-  const set = (key: string, v: number | undefined) => { if (v !== undefined) put(key, String(Math.round(v))); };
+  // A place or size of an embedded panel's child goes into if_embedded alone:
+  // the round-end, transition and shutdown panels read the plain keys
+  // (embeddedLayout), and must keep the stock layout.
+  const layout = embedded ? (key: string, value: string) => embeddedLayout(block, key, value) : put;
+  const set = (key: string, v: number | undefined) => { if (v !== undefined) layout(key, String(Math.round(v))); };
   set('xpos', o.x); set('ypos', o.y); set('wide', o.w); set('tall', o.h);
   if (o.color !== undefined) put(colourKey(def), o.color);
   if (o.fontSize !== undefined) {
@@ -799,6 +794,27 @@ function embeddedSet(block: KvNode, key: string, value: string, pc = false) {
   const emb = embeddedOf(block);
   const target = emb && pcGet(emb, key) !== undefined ? emb : block;
   if (pc || target === emb) pcSet(target, key, value); else kvSet(target, key, value);
+}
+
+/**
+ * A layout key of a child of the embedded versus panel, written into its
+ * if_embedded block (made when stock has none) and never the plain one.
+ * client.dll 0x1025c900 (CVersusModeScoreboard::ApplySchemeSettings) sets
+ * the if_embedded condition only when the panel's parent is the Tab
+ * scoreboard (CTerrorClientScoreBoardDialog) or the chapter screen
+ * (CMultiMapVersusModeScoreboard); the round-end screen
+ * (FullscreenVersusModeScoreboard.res), the transition stats and the
+ * shutdown screen read the plain keys, and a move written there drew the
+ * round-end panel broken (a player's clip, 2026-09-26). Probe TAB-EMB
+ * (/home/volence/l4d/hud/probe-tab-embedded) drew every move so written on
+ * the Tab screen where the plain one had drawn, a new if_embedded block
+ * (DistanceLabel's) included.
+ */
+function embeddedLayout(block: KvNode, key: string, value: string) {
+  if (typeof block.value === 'string') return;
+  let emb = embeddedOf(block);
+  if (!emb) { emb = { key: 'if_embedded', value: [] }; block.value.push(emb); }
+  pcSet(emb, key, value);
 }
 
 /** A block's if_embedded sub-block, as the PC reads it. */
