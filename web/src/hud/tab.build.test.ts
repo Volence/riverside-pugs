@@ -302,6 +302,25 @@ describe('moving the versus pieces (probe PIECES-1 and PIECES-2)', () => {
     expect(text(moved({ TeamYours: { color: '255 0 0 255' } }), SCOREBOARD)).toBeUndefined();
   });
 
+  it('grows the chapter screen\'s panel to the Tab one, since it reads the same if_embedded moves', () => {
+    // client.dll 0x1025c900: CMultiMapVersusModeScoreboard embeds the versus panel too; probe TAB-EMB
+    // (/home/volence/l4d/hud/probe-tab-embedded/runs/roundend/end1-42.png) drew the moved layout there cut off at 354 x 120.
+    const CHAPTER = 'resource/ui/multimapversusmodescoreboard.res';
+    const chapter = (files: { path: string; data: Uint8Array }[]) => pcFind(tree(files, CHAPTER), ['CVersusModeScoreboard'])!;
+    const down = moved({ StatBreakdownHighlightImage: { x: 0, y: 300 } });
+    expect([kvGet(chapter(down), 'wide'), kvGet(chapter(down), 'tall')]).toEqual([kvGet(panel(down), 'wide'), kvGet(panel(down), 'tall')]);
+    expect(kvGet(chapter(down), 'xpos')).toBe('135');
+    // Wider than the room right of its place in the 600-wide screen: it moves left so it is not cut off.
+    const across = moved({ TeamEnemy: { x: 400, y: 30 } });
+    expect(kvGet(chapter(across), 'wide')).toBe('525');
+    expect(kvGet(chapter(across), 'xpos')).toBe('75');
+    // One line per key, so a client in another language gets it too.
+    const lines = (chapter(across).value as KvNode[]).filter((n) => ['xpos', 'wide', 'tall'].includes(n.key)).map((n) => [n.key, n.value, n.cond]);
+    expect(lines).toEqual([['xpos', '75', undefined], ['wide', '525', undefined], ['tall', '120', undefined]]);
+    // Nothing grown, nothing shipped.
+    expect(text(moved({ TeamYours: { x: 30, y: 30 } }), CHAPTER)).toBeUndefined();
+  });
+
   it('grows the panel over the pieces a moved piece carries (the line after "Average Distance:")', () => {
     const files = moved({ DistanceLabel: { x: 13, y: 300 } });
     const p = panel(files);
