@@ -14,6 +14,9 @@ export interface CustomCampaignRow {
   uploaded_by: string | null;
   uploaded_at: number;
   notes: string | null;
+  /** R2 key of the zipped VPK, or null before campaignZip.ts has made one. */
+  zip_key: string | null;
+  zip_bytes: number | null;
 }
 
 export interface ChapterRow {

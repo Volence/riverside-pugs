@@ -22,6 +22,8 @@ import { listVpkPaths, missionFromVpk, MissionError } from '../vpk.js';
 import { collisionMessage, consistencyCollisions, loadConsistencyList } from '../consistencyList.js';
 import type { ServerRow } from '../serverPool.js';
 import { getCampaignPool, setSetting } from '../settings.js';
+import { currentZip, sweepCampaignZips, type CampaignZipDeps } from '../campaignZip.js';
+import { publicUrlFor } from '../r2.js';
 
 /** Headroom the box must keep after an upload lands. A game server that fills
  *  its partition stops serving; a refused upload is a message, a full disk is
@@ -50,12 +52,17 @@ export interface CampaignRouteOpts {
    *  and gets the committed consistency/configs/l4d_consistency.cfg; tests
    *  point it at a missing file to exercise the refuse-everything path. */
   consistencyListPath?: string;
+  /** Zipped downloads in R2 (campaignZip.ts), or null/absent when R2 is not
+   *  configured, in which case every campaign is served as its raw VPK. */
+  zips?: CampaignZipDeps | null;
 }
 
 export async function campaignRoutes(
   app: FastifyInstance, opts: CampaignRouteOpts,
 ): Promise<void> {
   const { db, addonsDir } = opts;
+  const zips = opts.zips ?? null;
+  const zipOf = (c: Parameters<typeof currentZip>[0]) => (zips ? currentZip(c) : null);
   const requireAdmin = makeRequireAdmin(db);
   const freeBytes = opts.freeBytes
     ?? (async () => { const s = await statfs(addonsDir); return s.bsize * s.bavail; });
@@ -90,6 +97,9 @@ export async function campaignRoutes(
     return {
       campaigns: listCampaigns(db, { state: 'published' }).map((c) => ({
         slug: c.slug, name: c.name, sizeBytes: c.size_bytes, sha256: c.sha256,
+        // What the Download button actually hands over: the zip when there
+        // is one, else null and the raw VPK at sizeBytes.
+        zipBytes: zipOf(c)?.bytes ?? null,
         filename: c.vpk_filename, notes: c.notes, inPool: pool.has(c.slug),
         chapters: chaptersOf(db, c.slug).map((ch) => ({
           map: ch.map, display: ch.display, included: ch.included === 1,
@@ -111,6 +121,8 @@ export async function campaignRoutes(
     const { slug } = req.params as { slug: string };
     const c = getCampaign(db, slug);
     if (!c || c.state !== 'published') return reply.code(404).send({ error: 'no such campaign' });
+    const zip = zipOf(c);
+    if (zip && zips) return reply.redirect(publicUrlFor(zips.r2, zip.key), 302);
     // The path comes from the row, never from the URL. The slug only indexes
     // into the database; it never gets joined to addonsDir directly.
     const path = join(addonsDir, c.vpk_filename);
@@ -304,6 +316,8 @@ export async function campaignRoutes(
     void installCampaign(db, slug, {
       sourcePath: join(addonsDir, c.vpk_filename), servers: targets(),
     }).catch((err) => req.log.error({ err, slug }, 'installCampaign rejected unexpectedly'));
+    // Its zipped download, in the background; served raw until that lands.
+    if (zips) void sweepCampaignZips(db, zips);
     return { ok: true };
   });
 

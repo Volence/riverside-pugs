@@ -897,6 +897,11 @@ export function openDb(path: string): DB {
   // What the game is doing right now, as last reported by the plugin, and
   // since when. NULL until a plugin that emits PHASE has spoken.
   ensureColumn(db, 'match_pauses', 'called_by', 'TEXT');
+  // The zipped copy of a custom campaign in R2 (campaignZip.ts). The key
+  // carries the VPK's hash, so a row whose key is not the one its hash implies
+  // has no current zip and is served raw until the next sweep makes one.
+  ensureColumn(db, 'custom_campaigns', 'zip_key', 'TEXT');
+  ensureColumn(db, 'custom_campaigns', 'zip_bytes', 'INTEGER');
   ensureColumn(db, 'match_live', 'phase', 'TEXT');
   ensureColumn(db, 'match_live', 'phase_since', 'TEXT');
   ensureColumn(db, 'match_live', 'phase_team', 'TEXT');

@@ -125,6 +125,7 @@ import { balancePublicRoutes } from './routes/balancePublic.js';
 import { replayRoutes } from './routes/replays.js';
 import { devRoutes } from './routes/dev.js';
 import { campaignRoutes } from './routes/campaigns.js';
+import { sweepCampaignZips, type CampaignZipDeps } from './campaignZip.js';
 import { communityRoutes } from './routes/community.js';
 import { CommunityStore } from './community/store.js';
 import { sweepCommunity } from './community/sweep.js';
@@ -178,6 +179,9 @@ export interface ServerDeps {
   /** Overrides where the campaign uploader reads the enforced file list from.
    *  Injected in tests only; production reads the committed cfg. */
   consistencyListPath?: string;
+  /** Zipped campaign downloads. Injected in tests (null turns them off);
+   *  production builds them from R2 and config.campaignZipDir, and sweeps. */
+  campaignZips?: CampaignZipDeps | null;
   /** Probes one server for the dlc4 mappack, for the admin's dlc4-check
    *  route. Injected in tests so the check never dials a real box; defaults
    *  to the real serverHasDlc4 otherwise. */
@@ -421,6 +425,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // behaviour mid-process.
   const r2 = r2FromEnv();
   if (r2) console.log(`[demoOffload] R2 configured: bucket ${r2.bucket}`);
+  const campaignZips: CampaignZipDeps | null = deps.campaignZips !== undefined
+    ? deps.campaignZips
+    : r2 && deps.config.addonsDir
+      ? { r2, addonsDir: deps.config.addonsDir, workDir: deps.config.campaignZipDir }
+      : null;
 
   // logger: false above means Fastify's own default error handler is the only
   // thing that would otherwise put err.message on the wire in a 500 body. For
@@ -1399,6 +1408,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // beside it: a demo already in R2 is one the prune can delete locally without
   // destroying the recording. Bounded per sweep so a backlog does not hold the
   // process; whatever is left is picked up an hour later.
+  // Zipped campaign downloads: catch up at startup, then hourly, which retries
+  // any zip that failed. Each pass skips campaigns whose zip is current, so a
+  // quiet hour costs one small query. Only for the real deps: a test that
+  // injects its own drives sweepCampaignZips itself.
+  if (campaignZips && deps.campaignZips === undefined) {
+    void sweepCampaignZips(deps.db, campaignZips);
+    setInterval(() => { void sweepCampaignZips(deps.db, campaignZips); }, 60 * 60 * 1000).unref();
+  }
+
   if (r2) {
     const offloadTimer = setInterval(() => {
       void sweepDemos(deps.db, r2, deps.config.demoDir, { deleteLocal: true })
@@ -1665,7 +1683,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(campaignRoutes, {
     db: deps.db, addonsDir: deps.config.addonsDir, freeBytes: deps.freeBytes,
     installTargets: deps.installTargets, maxUploadBytes: deps.maxUploadBytes,
-    consistencyListPath: deps.consistencyListPath,
+    consistencyListPath: deps.consistencyListPath, zips: campaignZips,
   });
   // Built on first use, not here: constructing the store creates its folders,
   // and a server that nobody shares a HUD on (every test, a dev box) should

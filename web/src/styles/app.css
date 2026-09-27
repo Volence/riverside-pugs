@@ -818,6 +818,37 @@ a.ctile { text-decoration: none; }
 .ccamp__head h3 { margin: 0; }
 /* The L4D2 pack panel has no campaign tint, so it keeps a panel heading's red rule. */
 .l4d2pack__head { border-bottom: 2px solid var(--rule); }
+/* The pieces of the L4D2 pack: one full-width row for the shared files, then
+   the campaigns two to a line. Each row is one link, so the whole row is the
+   target; a tick marks what this browser already downloaded. */
+.l4d2pick { margin: var(--sp-3) 0 var(--sp-4); display: grid; gap: var(--sp-2); }
+.l4d2pick__lede { margin: 0; color: var(--text-muted); }
+.l4d2pick__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); }
+.l4d2pick__row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto 5.5rem; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); background: var(--bg);
+  color: var(--text-bright); text-decoration: none; transition: border-color 120ms linear;
+}
+.l4d2pick__row:hover { border-color: var(--accent); text-decoration: none; }
+.l4d2pick__name { font-family: var(--font-label); letter-spacing: 0.04em; min-width: 0; }
+.l4d2pick__note { color: var(--text-muted); font-family: var(--font-body); letter-spacing: 0; font-size: 0.875em; }
+.l4d2pick__size { color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 0.875rem; }
+.l4d2pick__status { justify-self: end; font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+.l4d2pick__row.is-have { border-color: color-mix(in srgb, var(--win) 45%, var(--border)); }
+.l4d2pick__row.is-have .l4d2pick__status { color: var(--win); font-size: 1rem; }
+/* Phones: still two to a line, the size under the name, and the whole row is
+   the link, so the Download word goes and only a tick or Updated remains. */
+@media (max-width: 640px) {
+  .l4d2pick__row { grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--sp-2); row-gap: 0; padding: var(--sp-2); }
+  .l4d2pick__name { grid-column: 1; }
+  .l4d2pick__size { grid-column: 1; grid-row: 2; font-size: 0.8125rem; }
+  .l4d2pick__status { grid-column: 2; grid-row: 1 / 3; }
+  .l4d2pick__status--get { display: none; }
+  .l4d2pick__note { display: block; }
+}
+.howto-more { margin-top: var(--sp-2); }
+.howto-more > summary { cursor: pointer; color: var(--text-bright); font-family: var(--font-label); letter-spacing: 0.04em; }
+.howto-more[open] > summary { margin-bottom: var(--sp-2); }
 .ccamp__chapters { margin: 0; padding-left: 1.25rem; display: grid; gap: var(--sp-1); color: var(--text); }
 .ccamp__hash { margin-top: var(--sp-3); word-break: break-all; }
 

@@ -79,6 +79,10 @@ export interface Config {
    *  previews/<sha256>.png. Beside the database like ticket attachments, and
    *  so under data/, which deploy-web.sh already excludes. */
   communityDir: string;
+  /** Scratch space for zipping a custom campaign before it goes to R2. Beside
+   *  the database, never the addons directory: on Dallas that is the live game
+   *  server's own addons folder. Each zip is deleted once uploaded. */
+  campaignZipDir: string;
   discord: DiscordConfig | null;
   twitch: TwitchConfig | null;
 }
@@ -132,6 +136,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     deployRepoDir: join(dirname(dbPath), 'deploy-repo.git'),
     releasesDir: join(dirname(dbPath), 'releases'),
     communityDir: env.COMMUNITY_DIR?.trim() || join(dirname(dbPath), 'community'),
+    campaignZipDir: join(dirname(dbPath), 'campaign-zips'),
     discord: loadDiscord(env),
     twitch: loadTwitch(env),
   };

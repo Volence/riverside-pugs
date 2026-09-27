@@ -17,6 +17,7 @@ import { authedCookie, stubOrchestrator } from './helpers.js';
 import { makeVpk, makeVpkMulti } from './fixtures/makeVpk.js';
 import { fakeAddonsTransport } from './fakes/fakeAddonsTransport.js';
 import { getJsonSetting, setSetting } from '../src/settings.js';
+import { campaignZipKey, type CampaignZipDeps } from '../src/campaignZip.js';
 
 const MISSION = `
 "mission"
@@ -56,7 +57,7 @@ let addons: string;
 const buildTestApp = (o: {
   db: DB; addonsDir: string; freeBytes?: number;
   installTargets?: () => InstallTarget[]; maxUploadBytes?: number;
-  consistencyListPath?: string;
+  consistencyListPath?: string; campaignZips?: CampaignZipDeps | null;
 }): Promise<FastifyInstance> =>
   buildServer({
     config: loadConfig({ ADDONS_DIR: o.addonsDir }),
@@ -71,6 +72,8 @@ const buildTestApp = (o: {
     installTargets: o.installTargets,
     maxUploadBytes: o.maxUploadBytes,
     consistencyListPath: o.consistencyListPath,
+    // Off unless a test asks: the zips have their own tests below.
+    campaignZips: o.campaignZips ?? null,
   });
 
 beforeEach(() => {
@@ -228,6 +231,49 @@ describe('GET /download/campaign/:slug', () => {
     }, [{ map: 'wip1', display: null, isFinale: true }]);
     const app = await buildTestApp({ db, addonsDir: addons });
     expect((await app.inject({ method: 'GET', url: '/download/campaign/wip' })).statusCode).toBe(404);
+  });
+
+  const zipDeps = (): CampaignZipDeps => ({
+    r2: { endpoint: 'https://r2.test', bucket: 'b', accessKeyId: 'k', secretAccessKey: 's', publicUrl: 'https://assets.test' },
+    addonsDir: addons, workDir: join(addons, 'zips'),
+  });
+  const sha = () => createHash('sha256').update('vpk bytes').digest('hex');
+
+  // The zip is the same file at about a third of the size, and R2 takes the
+  // download off the game server's box.
+  it('redirects to the zip in R2 when the campaign has a current one', async () => {
+    publishOne();
+    db.prepare('UPDATE custom_campaigns SET zip_key = ?, zip_bytes = 3 WHERE slug = ?')
+      .run(campaignZipKey('dbd', sha()), 'dbd');
+    const app = await buildTestApp({ db, addonsDir: addons, campaignZips: zipDeps() });
+    const res = await app.inject({ method: 'GET', url: '/download/campaign/dbd' });
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe(`https://assets.test/${campaignZipKey('dbd', sha())}`);
+    const list = (await app.inject({ method: 'GET', url: '/api/campaigns/custom' })).json();
+    expect(list.campaigns[0].zipBytes).toBe(3);
+  });
+
+  // A zip made from an earlier VPK must never stand in for the current one.
+  it('serves the raw VPK when the recorded zip is for a different hash', async () => {
+    publishOne();
+    db.prepare('UPDATE custom_campaigns SET zip_key = ?, zip_bytes = 3 WHERE slug = ?')
+      .run(campaignZipKey('dbd', 'f'.repeat(64)), 'dbd');
+    const app = await buildTestApp({ db, addonsDir: addons, campaignZips: zipDeps() });
+    const res = await app.inject({ method: 'GET', url: '/download/campaign/dbd' });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('vpk bytes');
+    const list = (await app.inject({ method: 'GET', url: '/api/campaigns/custom' })).json();
+    expect(list.campaigns[0].zipBytes).toBeNull();
+  });
+
+  it('serves the raw VPK when R2 is not configured, even with a zip recorded', async () => {
+    publishOne();
+    db.prepare('UPDATE custom_campaigns SET zip_key = ?, zip_bytes = 3 WHERE slug = ?')
+      .run(campaignZipKey('dbd', sha()), 'dbd');
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const res = await app.inject({ method: 'GET', url: '/download/campaign/dbd' });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('vpk bytes');
   });
 
   // The slug indexes the database; it never becomes part of a path.
