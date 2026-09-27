@@ -361,6 +361,9 @@ export interface RoundAggregate {
 export interface CustomCampaignChapter { map: string; display: string | null; included: boolean }
 export interface CustomCampaignRow {
   slug: string; name: string; sizeBytes: number; sha256: string;
+  /** Size of the zipped download, or null when the button hands over the raw
+   *  VPK (a campaign whose zip has not been made yet). */
+  zipBytes: number | null;
   filename: string; notes: string | null; inPool: boolean;
   chapters: CustomCampaignChapter[];
 }

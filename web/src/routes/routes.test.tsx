@@ -1624,7 +1624,7 @@ describe('Maps', () => {
 
 describe('CustomCampaigns', () => {
   const campaign = {
-    slug: 'dbd', name: 'Dead Before Dawn', sizeBytes: 314572800,
+    slug: 'dbd', name: 'Dead Before Dawn', sizeBytes: 314572800, zipBytes: null as number | null,
     sha256: 'a'.repeat(64), filename: 'dbd.vpk', notes: null, inPool: true,
     chapters: [
       { map: 'dbd1_alley', display: 'Alley', included: true },
@@ -1659,7 +1659,7 @@ describe('CustomCampaigns', () => {
     const pack = screen.getByRole('link', { name: /download the l4d2 campaigns/i });
     expect(pack.getAttribute('href')).toBe('https://assets.riversidepug.com/mappack/Riverside-L4D2-Maps-VPK-v3.1e.zip');
     // A header button like every campaign card's, since the inline link was easy to miss.
-    const button = screen.getByRole('link', { name: 'Download 3.4 GB' });
+    const button = screen.getByRole('link', { name: 'Download all 3.4 GB' });
     expect(button.getAttribute('href')).toBe(pack.getAttribute('href'));
     expect(button.classList.contains('btn')).toBe(true);
     // Our exe is Steam's with one byte changed, checkable with fc. The map
@@ -1675,12 +1675,50 @@ describe('CustomCampaigns', () => {
     expect(section.textContent).toMatch(/rename it to left4dead\.exe/);
   });
 
+  // The pieces: the shared files plus one zip per campaign, each a versioned
+  // R2 object, so a player can take one campaign now and the rest later.
+  it('lists the shared files and every campaign as separate downloads', () => {
+    mockApi.customCampaigns.mockReturnValue(new Promise(() => {}));
+    const { container } = render(<CustomCampaigns />);
+    const rows = [...container.querySelectorAll('#l4d2-pack .l4d2pick__row')] as HTMLAnchorElement[];
+    expect(rows).toHaveLength(9);
+    expect(rows[0].textContent).toMatch(/Shared files/);
+    expect(rows.map((r) => r.getAttribute('href'))).toContain(
+      'https://assets.riversidepug.com/mappack/l4d2-v3.1e/Riverside-L4D2-Dark-Carnival.zip');
+    expect(container.querySelector('#l4d2-pack')!.textContent).toMatch(/Do this again every time you add one/);
+  });
+
+  // Download all holds every piece, so after it nothing asks to be fetched again.
+  it('ticks every piece after Download all, and a single piece after its own link', () => {
+    localStorage.removeItem('l4d2-downloads');
+    mockApi.customCampaigns.mockReturnValue(new Promise(() => {}));
+    const { container } = render(<CustomCampaigns />);
+    const rows = () => [...container.querySelectorAll('#l4d2-pack .l4d2pick__row')];
+    const dc = rows().find((r) => /Dark Carnival/.test(r.textContent!))!;
+    dc.addEventListener('click', (e) => e.preventDefault());
+    fireEvent.click(dc);
+    expect(rows().filter((r) => r.classList.contains('is-have'))).toHaveLength(1);
+    const all = screen.getByRole('link', { name: 'Download all 3.4 GB' });
+    all.addEventListener('click', (e) => e.preventDefault());
+    fireEvent.click(all);
+    expect(rows().filter((r) => r.classList.contains('is-have'))).toHaveLength(9);
+    localStorage.removeItem('l4d2-downloads');
+  });
+
   // Without this step another campaign's copy of an L4D2 model can load on
   // these maps and crash the client (seen 2026-09-26 on Dark Carnival).
   it('tells players to delete addonlist.txt', () => {
     mockApi.customCampaigns.mockReturnValue(new Promise(() => {}));
     const { container } = render(<CustomCampaigns />);
     expect(container.querySelector('#l4d2-pack')!.textContent).toMatch(/Delete left4dead\\addonlist\.txt/);
+  });
+
+  // The button hands over the zip when there is one, so it states the zip's size.
+  it('shows the zipped size when the campaign has a zip', async () => {
+    mockApi.customCampaigns.mockResolvedValue({ campaigns: [{ ...campaign, zipBytes: 104857600 }] });
+    render(<CustomCampaigns />);
+    expect(await waitFor(() => screen.getByText(/Download 100 MB/i))).toBeTruthy();
+    expect(screen.getByText(/dbd\.vpk \(zipped\)/)).toBeTruthy();
   });
 
   it('shows the file size in a human unit', async () => {

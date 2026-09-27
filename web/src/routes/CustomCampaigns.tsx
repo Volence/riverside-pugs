@@ -45,7 +45,10 @@ function CampaignList({ data, error }: { data: { campaigns: CustomCampaignRow[] 
       <Panel>
         <h3>Installing one</h3>
         <ol class="steps">
-          <li>Download the <code>.vpk</code> below.</li>
+          <li>
+            Download it below and unzip it. Inside is one <code>.vpk</code> file, the campaign
+            itself.
+          </li>
           <li>
             Find your game folder: right click <strong>Left 4 Dead</strong> in your Steam library,
             then <strong>Manage</strong>, then <strong>Browse local files</strong>. That opens the
@@ -84,7 +87,7 @@ function CampaignList({ data, error }: { data: { campaigns: CustomCampaignRow[] 
                   </h3>
                   <a class="btn" href={`/download/campaign/${encodeURIComponent(c.slug)}`}
                      target="_blank" rel="noopener">
-                    Download {fileSize(c.sizeBytes)}
+                    Download {fileSize(c.zipBytes ?? c.sizeBytes)}
                   </a>
                 </div>
                 <ol class="ccamp__chapters">
@@ -93,7 +96,7 @@ function CampaignList({ data, error }: { data: { campaigns: CustomCampaignRow[] 
                   ))}
                 </ol>
                 {c.notes && <p>{c.notes}</p>}
-                <p class="muted mono ccamp__hash">{c.filename} · sha256 {c.sha256.slice(0, 16)}...</p>
+                <p class="muted mono ccamp__hash">{c.filename}{c.zipBytes != null && ' (zipped)'} · sha256 {c.sha256.slice(0, 16)}...</p>
               </Panel>
             </div>
           ))}
