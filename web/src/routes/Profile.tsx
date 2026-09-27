@@ -17,6 +17,7 @@ import { EndorsementCounts } from '../components/TitleTag';
 import { countryFlag, countryName } from '../countries';
 import type { Session } from '../hooks/useLiveState';
 import { CommunityCard } from '../components/CommunityCard';
+import { WeeklyAwardChips } from '../components/WeeklyAwardChips';
 
 export function Profile(
   { steamid, session, refresh }: { steamid: string; session?: Session; refresh?: () => void },
@@ -139,6 +140,8 @@ export function Profile(
           totals={totals} statTotals={statTotals} rating={rating}
           standings={data.standings ?? {}} statDefs={data.statDefs}
         />
+
+        <WeeklyAwardChips awards={data.weeklyAwards ?? []} />
 
         <ChemistryPanel chemistry={data.chemistry} />
         <EndorsementCounts endorsements={data.endorsements} />
