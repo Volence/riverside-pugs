@@ -34,6 +34,17 @@ const PATTERNS: [SlurKind, RegExp][] = [
   ['kys', /^kys$/],
 ];
 
+// Slurs that no ordinary word contains, so they count anywhere inside a word:
+// a prefix or suffix glued on ("LeChink James", 2026-09-26) must not hide one.
+// Only spellings checked against the full chat and name history belong here;
+// "nigger" stays out ("snigger"), as do "spic" ("spicy") and "retard"
+// ("retardant").
+const INSIDE: [SlurKind, RegExp][] = [
+  ['n-word', /nigga/],
+  ['f-slur', /fagg?ot/],
+  ['ethnic slur', /chink|kike|wetback|beaner/],
+];
+
 const LEET: Record<string, string> = {
   '1': 'i', '!': 'i', '|': 'i', '3': 'e', '0': 'o', '4': 'a', '@': 'a',
   '$': 's', '5': 's', '7': 't', '6': 'g', '9': 'g', q: 'g',
@@ -80,6 +91,7 @@ export function findSlurs(text: string): SlurKind[] {
   const add = (k: SlurKind) => { if (!found.includes(k)) found.push(k); };
   for (const w of words(text)) {
     for (const [kind, re] of PATTERNS) if (re.test(w)) add(kind);
+    for (const [kind, re] of INSIDE) if (re.test(w)) add(kind);
   }
   if (KILL_YOURSELF.test(letters(text).replace(/\s+/g, ' '))) add('kys');
   return found;
