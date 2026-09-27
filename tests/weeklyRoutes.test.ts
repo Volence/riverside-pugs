@@ -35,6 +35,11 @@ describe('weekly routes', () => {
     const r = await app.inject({ url: '/api/weekly?week=2026-09-21' });
     expect(r.json()).toMatchObject({ week: '2026-09-21', live: false, recap: { matches: 5 } });
     expect((await app.inject({ url: '/api/weekly?week=nope' })).statusCode).toBe(400);
+    // Calendar-invalid but shape-matching dates must 400, not 500.
+    expect((await app.inject({ url: '/api/weekly?week=2026-13-01' })).statusCode).toBe(400);
+    expect((await app.inject({ url: '/api/weekly?week=2026-01-32' })).statusCode).toBe(400);
+    // A valid calendar date that isn't a Monday is not a canonical week id.
+    expect((await app.inject({ url: '/api/weekly?week=2026-09-22' })).statusCode).toBe(400);
     expect((await app.inject({ url: '/api/weekly/weeks' })).json()).toEqual({ current: '2026-09-28', weeks: ['2026-09-21'] });
   });
 
