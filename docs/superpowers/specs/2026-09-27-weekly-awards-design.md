@@ -100,7 +100,10 @@ dropping one is a one-line change plus its label.
 
 ### `src/weeklyAwards.ts` (pure computation)
 
-- `weekBounds(date)` returns `{ start, end }` as UTC ISO strings.
+- `weekStartOf(date)` returns the Monday as `YYYY-MM-DD`; `weekBounds(week)`
+  returns `{ from, to }` in the `YYYY-MM-DD HH:MM:SS` UTC form SQLite's
+  `datetime('now')` writes to `matches.ended_at`, so plain string comparison
+  is correct.
 - `computeWeek(db, start)` returns every award's winners for that week from
   live tables: `{ key, kind: 'avg' | 'total' | 'single', winners: [{ steamid,
   name, value, games }] }`.
@@ -111,12 +114,13 @@ dropping one is a one-line change plus its label.
 
 ```sql
 CREATE TABLE IF NOT EXISTS weekly_awards (
-  week_start TEXT NOT NULL,          -- Monday 00:00 UTC, ISO
+  week_start TEXT NOT NULL,          -- Monday as 'YYYY-MM-DD' (UTC)
   award      TEXT NOT NULL,          -- key from the award list
   kind       TEXT NOT NULL CHECK (kind IN ('avg','total','single')),
   player_id  TEXT NOT NULL REFERENCES players(steamid),
   value      REAL NOT NULL,
   games      INTEGER NOT NULL,
+  detail     TEXT,                   -- display extra, e.g. '15-4' for win rate
   PRIMARY KEY (week_start, award, kind, player_id)
 );
 CREATE TABLE IF NOT EXISTS weekly_award_weeks (
@@ -133,8 +137,10 @@ CREATE TABLE IF NOT EXISTS weekly_award_weeks (
   that the site, badges and post read only the frozen rows, so a later void
   does not silently rewrite who won. An admin void of a match inside a frozen
   week does not refreeze; that is accepted.
-- Only weeks that end after the feature ships are frozen automatically.
-  Earlier weeks can be frozen once with a script, if the owner wants history.
+- The poster freezes only the week that just closed (the one before the
+  current week), so weeks before the feature shipped are never frozen
+  automatically. `scripts/weekly-awards.ts --freeze <week>` freezes one by
+  hand, and without `--freeze` prints a week's post for a dry run.
 - `weekly_awards` references players, so `mergePlayers` moves its rows to the
   kept account (collapsing duplicates on the primary key), per the standing
   rule for new tables.
@@ -150,8 +156,10 @@ CREATE TABLE IF NOT EXISTS weekly_award_weeks (
 - The card: title "Weekly awards, week of Sep 21", sections Survivor,
   Infected, Overall, Shame. One line per award:
   `Skeets: VII 4.6/g, VII 187 total`, collapsing to
-  `Skeets: VII (4.6/g, 187 total)` when one player holds both. Names link to
-  profiles. No emojis. Links to the weekly tab at the bottom.
+  `Skeets: VII (4.6/g, 187 total)` when one player holds both. Sent as one
+  embed (description limit 4,096). Names are plain escaped text, not profile
+  links: 27 lines of two links each would not fit. No emojis. One link to
+  the weekly tab at the bottom.
 
 ### Weekly recap (the first message)
 
