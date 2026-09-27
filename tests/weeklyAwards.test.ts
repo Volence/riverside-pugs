@@ -106,9 +106,10 @@ describe('overall awards', () => {
 
   it('a draw breaks a win streak and does not count as decided', () => {
     results(P[0], 'WWDWWWL');
-    results(P[1], 'WWLWW');   // same 4-1 record as P0's decided games, but no run of 3+
+    results(P[1], 'WWLWW');
+    // If a draw counted as decided, P0 would be 5/7 and lose to P1's 4/5.
     expect(single('win_streak')!.winners.map((w) => [w.steamid, w.value])).toEqual([[P[0], 3]]);
-    expect(single('win_rate')!.winners[0]).toMatchObject({ steamid: P[1], detail: '4-1' });
+    expect(single('win_rate')!.winners[0]).toMatchObject({ steamid: P[0], detail: '5-1' });
   });
 
   it('SR climb is displayed SR after the last match minus before the first', () => {

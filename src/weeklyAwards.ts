@@ -203,10 +203,10 @@ function computeSingles(db: DB, week: string, games: Map<string, PlayerGames>, m
     wins: topOf(all.map((g) => ({ g, value: record(g.steamid).w }))).map((r) => winner(r.g, r.value)),
     win_streak: topOf(all.map((g) => ({ g, value: longestRun(record(g.steamid).seq) }))).map((r) => winner(r.g, r.value)),
     matches: topOf(all.map((g) => ({ g, value: g.games }))).map((r) => winner(r.g, r.value)),
-    // Win rate is wins over games played, so a draw dilutes it like a loss
-    // would; the record in `detail` still lists only the decided games.
-    win_rate: topOf(gated
-      .map((g) => { const r = record(g.steamid); return { g, w: r.w, l: r.l, value: r.w / g.games }; }))
+    win_rate: topOf(all
+      .map((g) => ({ g, ...record(g.steamid) }))
+      .filter((r) => r.w + r.l >= min)
+      .map((r) => ({ ...r, value: r.w / (r.w + r.l) })))
       .map((r) => winner(r.g, r.value, `${r.w}-${r.l}`)),
     slow_ready: topOf(gated.map((g) => ({ g, value: ready.get(g.steamid) ?? 0 }))).map((r) => winner(r.g, r.value)),
     incap_damage: topOf(gated.map((g) => ({ g, value: (incap.get(g.steamid) ?? 0) / g.games }))).map((r) => winner(r.g, r.value)),
