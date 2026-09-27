@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb, type DB } from '../src/db.js';
@@ -268,6 +268,18 @@ describe('recordMatchDemos: in-progress exclusion', () => {
     touch(`pug_${TOKEN}_0_l4d_vs_hospital01_apartment.dem`, 100);
     touch(`pug_${TOKEN}_1_l4d_vs_hospital02_subway.dem`, 50);
     expect(recordMatchDemos(db, 1, TOKEN, dir)).toBe(2);
+  });
+
+  // Match 245 (2026-09-27, Riverside): a demo pulled from another box arrives
+  // finished, 3+ minutes after its last write, while the one still recording
+  // stays on that box. Dropping the newest file here held every map's demo
+  // back a whole map.
+  it('keeps the newest demo when it was last written long ago (pulled from another box)', () => {
+    touch(`pug_${TOKEN}_0_l4d_vs_hospital01_apartment.dem`, 100);
+    touch(`pug_${TOKEN}_1_l4d_vs_hospital02_subway.dem`, 50);
+    const old = new Date(Date.now() - 4 * 60_000);
+    utimesSync(join(dir, `pug_${TOKEN}_1_l4d_vs_hospital02_subway.dem`), old, old);
+    expect(recordMatchDemos(db, 1, TOKEN, dir, { excludeInProgress: true })).toBe(2);
   });
 
   it('records nothing when the only demo is the one in progress', () => {
