@@ -1686,6 +1686,12 @@ describe('CustomCampaigns', () => {
     expect(rows.map((r) => r.getAttribute('href'))).toContain(
       'https://assets.riversidepug.com/mappack/l4d2-v3.1e/Riverside-L4D2-Dark-Carnival.zip');
     expect(container.querySelector('#l4d2-pack')!.textContent).toMatch(/Do this again every time you add one/);
+    // c14 is The Last Stand (junkyard, lighthouse); it was listed as The Sacrifice,
+    // whose maps are the second half of Passifice.
+    expect(rows.find((r) => /The Last Stand/.test(r.textContent!))!.getAttribute('href')).toBe(
+      'https://assets.riversidepug.com/mappack/l4d2-v3.1e/Riverside-L4D2-The-Last-Stand.zip');
+    expect(rows.find((r) => /Passifice/.test(r.textContent!))!.textContent).toMatch(/The Passing \+ The Sacrifice/);
+    expect(container.querySelector('#l4d2-pack')!.textContent).not.toMatch(/Cold Stream and The Sacrifice/);
   });
 
   // Download all holds every piece, so after it nothing asks to be fetched again.

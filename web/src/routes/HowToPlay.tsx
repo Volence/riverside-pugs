@@ -358,8 +358,8 @@ viewmodel_fov_override 70`}</code></pre>
         <Panel id="map-pack">
           <h3>L4D2 campaigns</h3>
           <p>
-            Dead Center, Dark Carnival, Swamp Fever, Hard Rain, The Parish, Passifice, Cold
-            Stream and The Sacrifice can come up in a match, and they are not part of a normal
+            Dead Center, Dark Carnival, Swamp Fever, Hard Rain, The Parish, Passifice (The Passing
+            and The Sacrifice), Cold Stream and The Last Stand can come up in a match, and they are not part of a normal
             install. Install them once from the{' '}
             <a href="/custom-campaigns#l4d2-pack">Custom campaigns</a> page: twelve add-on files
             that go in your <code>addons</code> folder.
