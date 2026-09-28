@@ -47,9 +47,10 @@ const STAGE_MAX_VH = 78;
  * times its aspect, so a portrait map on a 1080p screen (about 955px of
  * viewport) came out a narrow column with the page's sides empty: caves 440px
  * wide in a 1018px frame, airport03 and farm04 about 553. Beside the column
- * the stage is capped by nearly the whole viewport height instead, and the
- * layout widens past the page into the side margins to fit it (see
- * `.replay__main` in app.css), so a portrait map always gets bigger.
+ * the stage is capped by nearly the whole viewport height instead, and by
+ * the width the card has left beside the column (see `.replay__main` in
+ * app.css). The layout never leaves the card: it once widened into the page
+ * margins, and on a wide window floated outside the card on both sides.
  *
  * Why 1.0: this is the owner's call for portrait maps, and 1.0 is where the
  * shipped maps split with room to spare. The 22 overviews have nothing

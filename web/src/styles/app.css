@@ -1569,18 +1569,16 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
     justify-content: center;
     align-items: start;
     gap: var(--sp-4);
-    /* Wider than the page when the viewport has the room, centred on it by
-       the negative margin. Kept inside the page, the column's 336px came out
-       of a stage the 1120px page already capped, and on a tall screen the
-       map ended up SMALLER than stacked (airport03 at 1920x1300: 684px wide
-       against 754). The margins beside the page are exactly the empty space
-       the layout exists to use. 64px under 100vw keeps a gutter either side
-       and room for a scrollbar, so the page never scrolls sideways. Not a
-       transform: that would make this the containing block for anything
-       position: fixed inside it. */
-    --main-w: min(calc(100vw - 64px), calc(var(--side-frame-w) + var(--side-col-w) + var(--sp-4)));
-    width: var(--main-w);
-    margin-left: calc((100% - var(--main-w)) / 2);
+    /* Inside the card, always (owner, 2026-09-28). This used to widen past
+       the page into the side margins, centred by a negative margin, so a
+       tall map could use the empty space beside a 1120px page. On a wide
+       window that put the map's left edge outside the card and the controls
+       column outside its right edge, and the viewer floated wider than
+       everything else on the page. Now the column keeps its width and the
+       frame's track (minmax(0, ...) above) takes what is left of the card,
+       never more than the viewport height allows; the stage follows the
+       frame's width at the map's aspect. */
+    width: 100%;
   }
   .replay__side { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
   .replay--portrait .replay__stage { max-width: var(--side-max-w); }
