@@ -1,5 +1,5 @@
 {
-  "_comment": "Balance catalogue: the values and rules the public Game values page shows, and the extra values the plugin watches. Notes and rules were drafted from cvar help text, plugin sources and server.so, and published by the owner on 2026-09-25. Vanilla values for game cvars are the engine defaults read from a local L4D1 dedicated server; plugin cvars have none.",
+  "_comment": "Balance catalogue: the values and rules the public Game values page shows, and the extra values the plugin watches. Notes and rules were drafted from cvar help text, plugin sources and server.so, and published by the owner on 2026-09-25. Vanilla values for game cvars are the engine defaults read from a local L4D1 dedicated server, except the 10 that stock versus overrides through server.so's built-in table (pVersusConvars, applied while fix_versus_convars is 1, its default), which show the versus value; plugin cvars have none.",
   "groups": [
     {
       "id": "survivors",
@@ -414,7 +414,7 @@
       "label": "Damage to interrupt a pounce (skeet)",
       "source": "cvar",
       "unit": "HP",
-      "vanilla": "50",
+      "vanilla": "150",
       "note": "Damage a hunter must take in the air to be knocked out of a pounce, the skeet."
     },
     {
@@ -440,7 +440,7 @@
       "label": "Pounce stumble radius",
       "source": "cvar",
       "unit": "units",
-      "vanilla": "0",
+      "vanilla": "160",
       "note": "Survivors this close to a pounce landing stumble. 0 means only the victim is hit."
     },
     {
@@ -514,7 +514,7 @@
       "label": "Tongue cooldown",
       "source": "cvar",
       "unit": "s",
-      "vanilla": "20",
+      "vanilla": "15",
       "note": "Cooldown after a pull, counted from the moment the smoker lets go."
     },
     {
@@ -523,7 +523,7 @@
       "label": "Damage to break a tongue",
       "source": "cvar",
       "unit": "HP",
-      "vanilla": "50",
+      "vanilla": "300",
       "note": "Damage the smoker must take during a pull to let go. A high value means you have to kill him."
     },
     {
@@ -532,7 +532,7 @@
       "label": "Choke damage",
       "source": "cvar",
       "unit": "HP",
-      "vanilla": "10",
+      "vanilla": "5",
       "note": "Damage each choke tick does while the smoker holds a survivor in place."
     },
     {
@@ -613,7 +613,7 @@
       "source": "cvar",
       "unit": "units",
       "vanilla": "300",
-      "note": "How far the vomit reaches."
+      "note": "Does nothing in L4D1: the only game code that reads it is never called. How far vomit flies comes from its speed and lifetime, not this value."
     },
     {
       "id": "z_exploding_shove_min",
@@ -689,7 +689,7 @@
       "label": "Maximum stagger time",
       "source": "cvar",
       "unit": "s",
-      "vanilla": "6",
+      "vanilla": "0.9",
       "note": "Longest a shoved special infected staggers. Boomers are the exception: they stagger for about 3 s, because the plugin that caps them is switched off together with gravity stagger."
     },
     {
@@ -945,7 +945,7 @@
       "label": "DP: distance where extra damage starts",
       "source": "cvar",
       "unit": "units",
-      "vanilla": "500",
+      "vanilla": "300",
       "note": "A pounce from farther than this starts doing extra damage on landing."
     },
     {
@@ -989,7 +989,7 @@
       "label": "Cooldown after a missed tongue",
       "source": "cvar",
       "unit": "s",
-      "vanilla": "15",
+      "vanilla": "3",
       "note": "Cooldown after a tongue that misses."
     },
     {
@@ -1023,7 +1023,7 @@
       "label": "Drop time after a tongue breaks",
       "source": "cvar",
       "unit": "s",
-      "vanilla": "2",
+      "vanilla": "0.5",
       "note": "How long a tongue that missed or hit a wall waits before pulling back."
     },
     {
@@ -1224,7 +1224,7 @@
       "label": "Minimum spawn distance from survivors",
       "source": "cvar",
       "unit": "units",
-      "vanilla": "550",
+      "vanilla": "200",
       "note": "A ghost cannot spawn closer than this to any survivor."
     },
     {
