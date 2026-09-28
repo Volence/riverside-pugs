@@ -81,8 +81,13 @@ New `servers.status` value: `sidegame`.
   `sidegame` server. The side game ends, and its players stay in the queue.
   Only the pop of the side game's own queue normally ends it, because every
   side-game player is in that queue.
-- **Pop to match:** `setupMatch` prefers the `sidegame` server when one
-  exists. It sends `sm_side_stop`, then runs the normal sequence (`exec
+- **Pop to match:** the side game claimed its box with the same `claimIdle`
+  a match uses, so it holds the server the match would have taken anyway.
+  `setupMatch` takes the `sidegame` server instead of claiming a fresh one.
+  The one exception: if the voted campaign cannot run there (custom campaign
+  not installed, or dlc4 missing), which the pool rules normally prevent,
+  `setupMatch` closes the side game and falls back to `claimIdle` as today;
+  players then reconnect to the new box with the link the site already shows. It sends `sm_side_stop`, then runs the normal sequence (`exec
   pug_match`, new `sv_password`, `sm_pug_match`, roster, changelevel).
   Connected clients survive the password change and the changelevel.
   Anyone connected who is not in the roster is kicked with "Queue match
