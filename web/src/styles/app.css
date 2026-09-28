@@ -2261,8 +2261,18 @@ tbody tr.is-lifted td { opacity: 0.55; }
 
 .weekly .panel + .panel { margin-top: var(--sp-4); }
 
+.weekly__glossary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3) var(--sp-4);
+  margin: 0;
+}
+.weekly__glossary-entry dt { font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.08em; font-size: var(--fs-label); }
+.weekly__glossary-entry dd { margin: var(--sp-1) 0 0; color: var(--text-muted); font-size: var(--fs-dense); }
+
 @media (max-width: 480px) {
   .weekly__grid { grid-template-columns: 1fr; }
+  .weekly__glossary { grid-template-columns: 1fr; }
 }
 
 .spectate__open { margin-bottom: var(--sp-3); }
