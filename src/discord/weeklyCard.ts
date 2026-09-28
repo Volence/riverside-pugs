@@ -105,16 +105,23 @@ export function renderRecap(f: FrozenWeek, _publicUrl: string): MessagePayload {
     rest.push(`${b('Hot streaks')}\n${r.streaks.map((s) => `${b(name(s.name))} went ${b(`${s.w}-${s.l}`)}`).join(', ')}`);
   }
   if (r.iron.length) {
+    const IRON_SHOWN = 4;
     const top = r.iron.filter((x) => x.games === r.iron[0].games);
     const next = r.iron.filter((x) => x.games !== r.iron[0].games);
-    const who = top.map((x) => b(name(x.name))).join(' and ');
-    const line = `${who} ${top.length > 1 ? 'each ' : ''}played ${b(`${r.iron[0].games} games`)}`
-      + (next.length ? `, with ${next.map((x) => b(name(x.name))).join(' and ')} close behind at ${next[0].games}` : '');
+    // At most four names total across both groups; a big tie (a whole team
+    // stack, say) would otherwise blow the line past readability.
+    const shownTop = top.slice(0, IRON_SHOWN);
+    const shownNext = next.slice(0, Math.max(0, IRON_SHOWN - shownTop.length));
+    const cut = (top.length - shownTop.length) + (next.length - shownNext.length);
+    const who = shownTop.map((x) => b(name(x.name))).join(' and ');
+    let line = `${who} ${shownTop.length > 1 ? 'each ' : ''}played ${b(`${r.iron[0].games} games`)}`
+      + (shownNext.length ? `, with ${shownNext.map((x) => b(name(x.name))).join(' and ')} close behind at ${next[0].games}` : '');
+    if (cut > 0) line += `, and ${cut} more`;
     rest.push(`${b('Iron players')}\n${line}`);
   }
   if (r.closest) {
     const hi = Math.max(r.closest.a, r.closest.b); const lo = Math.min(r.closest.a, r.closest.b);
-    rest.push(`${b('Closest game:')} match ${r.closest.matchId} on ${r.closest.campaign}, ${b(`${hi} to ${lo}`)}`);
+    rest.push(`${b('Closest game:')} match ${r.closest.matchId} on ${name(r.closest.campaign)}, ${b(`${hi} to ${lo}`)}`);
   }
 
   const build = (hl: string[]) => [

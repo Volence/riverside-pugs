@@ -83,4 +83,33 @@ describe('renderRecap', () => {
     const c = renderRecap(week({ recap: { ...emptyRecap, matches: 1, players: 1, highlights } }), 'https://pug.test').content!;
     expect(c.length).toBeLessThanOrEqual(2000);
   });
+
+  it('escapes the closest game campaign name', () => {
+    const recap: Recap = { ...emptyRecap, matches: 1, players: 1, closest: { matchId: 1, campaign: 'Zombie_Night *Redux*', a: 2, b: 1 } };
+    const c = renderRecap(week({ recap }), 'https://pug.test').content!;
+    expect(c).toContain('Zombie\\_Night \\*Redux\\*');
+  });
+
+  it('caps iron players at 4 names total and notes how many more tied', () => {
+    const iron = Array.from({ length: 7 }, (_, i) => ({ steamid: String(i), name: `p${i}`, games: 40 }));
+    const recap: Recap = { ...emptyRecap, matches: 1, players: 7, iron };
+    const c = renderRecap(week({ recap }), 'https://pug.test').content!;
+    const line = c.split('\n').find((l) => l.includes('played'))!;
+    expect(line).toContain('p0');
+    expect(line).toContain('p3');
+    expect(line).not.toContain('p4');
+    expect(line).not.toContain('p6');
+    expect(line).toContain('and 3 more');
+  });
+
+  it('keeps today\'s wording when the iron players are not cut', () => {
+    const iron = [
+      { steamid: '1', name: 'a', games: 40 }, { steamid: '2', name: 'b', games: 40 },
+      { steamid: '3', name: 'c', games: 38 },
+    ];
+    const recap: Recap = { ...emptyRecap, matches: 1, players: 3, iron };
+    const c = renderRecap(week({ recap }), 'https://pug.test').content!;
+    expect(c).toContain('**a** and **b** each played **40 games**, with **c** close behind at 38');
+    expect(c).not.toContain('more');
+  });
 });
