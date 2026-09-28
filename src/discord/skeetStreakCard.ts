@@ -41,7 +41,7 @@ export function renderSkeetStreak(db: DB, row: SkeetStreakRow, publicUrl: string
   const player = getPlayer(db, row.player_id);
   const name = escapeName(player?.name ?? row.player_id);
   const match = db.prepare('SELECT campaign FROM matches WHERE id = ?').get(row.match_id) as { campaign: string } | undefined;
-  const campaign = campaignDisplayName(db, match?.campaign ?? '');
+  const campaign = escapeName(campaignDisplayName(db, match?.campaign ?? ''));
   const { streak, skeets } = names(row.count);
   const seconds = (row.span_ms / 1000).toFixed(1);
   const link = `${publicUrl}/match/${row.match_id}?ordinal=${row.map_ordinal}&half=${row.half}&t=${row.t_ms}`;

@@ -62,6 +62,16 @@ describe('renderSkeetStreak', () => {
     expect(EMOJI.test(p.content ?? '')).toBe(false);
   });
 
+  it('escapes a campaign display name with markdown', () => {
+    setup('VII');
+    // Not a registered slug, so campaignDisplayName falls back to the slug
+    // itself: a cheap way to get a "display name" with markdown in it
+    // without standing up a whole custom campaign.
+    db.prepare('UPDATE matches SET campaign = ? WHERE id = ?').run('**evil**_camp', matchId);
+    const p = renderSkeetStreak(db, row(), 'https://pug.test');
+    expect(p.content).toContain('on \\*\\*evil\\*\\*\\_camp,');
+  });
+
   it('links the exact replay moment, wrapped to suppress the embed preview', () => {
     setup('VII');
     const p = renderSkeetStreak(db, row({ map_ordinal: 2, half: 2, t_ms: 99999 }), 'https://pug.test');
