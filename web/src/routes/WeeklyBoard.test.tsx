@@ -44,4 +44,20 @@ describe('WeeklyBoard', () => {
     await waitFor(() => screen.getByRole('combobox', { name: 'Week' }));
     expect(screen.getByRole('option', { name: 'Week of Sep 21' })).toBeTruthy();
   });
+
+  it('still shows the week picker when the week fails to load', async () => {
+    mockApi.weekly.mockRejectedValue(new Error('boom'));
+    render(<WeeklyBoard onWeek={() => {}} />);
+    await waitFor(() => screen.getByText('Could not load this week.'));
+    expect(screen.getByRole('combobox', { name: 'Week' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Week of Sep 21' })).toBeTruthy();
+  });
+
+  it('treats the linked week as live once it is the current week again', async () => {
+    // A stale Discord link or profile chip points at ?week=<its Monday>. Once
+    // that week becomes the current one, it must read as "This week" (live),
+    // not as a request for a week id that means nothing special any more.
+    render(<WeeklyBoard week="2026-09-28" onWeek={() => {}} />);
+    await waitFor(() => expect(mockApi.weekly).toHaveBeenCalledWith(expect.anything(), undefined));
+  });
 });

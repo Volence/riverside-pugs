@@ -129,7 +129,7 @@ export function Leaderboard({ me }: { me: string | null }) {
           </div>
         )}
       >
-        {rows.length > 0 && (
+        {!weekly && rows.length > 0 && (
           <Figures>
             <Figure label="Players" value={rows.length} />
             {/* The API's distinct-match count. This was the top player's
@@ -145,101 +145,101 @@ export function Leaderboard({ me }: { me: string | null }) {
         )}
       </PageHeader>
 
-      <StatLeaders rows={rows} sortKey={sort.key} onPick={(k) => setSort({ key: k, desc: true })} />
+      {!weekly && <StatLeaders rows={rows} sortKey={sort.key} onPick={(k) => setSort({ key: k, desc: true })} />}
 
       {weekly ? (
         <WeeklyBoard week={week} onWeek={setWeek} />
       ) : (
-      <div class="lb-layout">
-        <Panel class="panel--table">
-          {error ? (
-            <Empty>Couldn't load the leaderboard.</Empty>
-          ) : !data ? (
-            <Empty>Loading…</Empty>
-          ) : rows.length === 0 ? (
-            <Empty>No rated players yet.</Empty>
-          ) : (
-            <div class={`table-wrap lb${sort.key === 'sr' && sort.desc && ranked.length > 0 ? ' lb--ranked' : ''}`}>
-              <table>
-                <thead>
-                  <tr>
-                    <th class="rank lb__rank">#</th>
-                    <th class="lb__pcol">Player</th>
-                    {BASE_COLS.map((c) => th(c.key, c.label, c.cls))}
-                    {statCols.map((k) => th(k, labelFor(k)))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...ranked, ...provisional].map((r, i) => {
-                    const decided = r.wins + r.losses;
-                    // Rank follows the CURRENT sort, so it stays meaningful
-                    // when the table is ordered by something other than SR.
-                    // A provisional row has no rank at all, not a low one.
-                    const rank = r.ranked ? String(i + 1).padStart(2, '0') : '–';
-                    const rowClass = [
-                      r.steamid === me ? 'is-me' : '',
-                      r.ranked ? '' : 'is-provisional',
-                    ].filter(Boolean).join(' ');
-                    return (
-                      <Fragment key={r.steamid}>
-                        {i === ranked.length && (
-                          <tr class="lb__group">
-                            <td colSpan={2 + BASE_COLS.length + statCols.length}>
-                              <span class="eyebrow">Provisional, under 3 games</span>
-                            </td>
-                          </tr>
-                        )}
-                        <tr class={rowClass}>
-                          <td class={`rank lb__rank${r.ranked && i < 3 ? ' rank--top' : ''}`}>{rank}</td>
-                          {/* The cell is a fixed width so SR can pin beside it on a
-                              phone; a long name is clipped, and the title carries
-                              the rest. */}
-                          <td class="lb__pcol pname" title={r.name}><PlayerLink steamid={r.steamid} name={r.name} /><TitleTag kind={r.title} /></td>
-                          <td class="num sr lb__sr">{r.sr}</td>
-                          <td class="num lb__wl">{r.wins}</td>
-                          <td class="num lb__wl">{r.losses}</td>
-                          <td class="num muted">{r.games}</td>
-                          <td class="num lb__wl">
-                            {decided > 0
-                              ? `${Math.round((r.wins / decided) * 100)}%`
-                              : <span class="muted">n/a</span>}
-                          </td>
-                          {statCols.map((k) => {
-                            const v = r.stats?.[k];
-                            return (
-                              <td class={`num${v ? '' : ' is-dim'}`} key={k}>
-                                {v === undefined ? <span class="muted">n/a</span> : v}
+        <div class="lb-layout">
+          <Panel class="panel--table">
+            {error ? (
+              <Empty>Couldn't load the leaderboard.</Empty>
+            ) : !data ? (
+              <Empty>Loading…</Empty>
+            ) : rows.length === 0 ? (
+              <Empty>No rated players yet.</Empty>
+            ) : (
+              <div class={`table-wrap lb${sort.key === 'sr' && sort.desc && ranked.length > 0 ? ' lb--ranked' : ''}`}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th class="rank lb__rank">#</th>
+                      <th class="lb__pcol">Player</th>
+                      {BASE_COLS.map((c) => th(c.key, c.label, c.cls))}
+                      {statCols.map((k) => th(k, labelFor(k)))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...ranked, ...provisional].map((r, i) => {
+                      const decided = r.wins + r.losses;
+                      // Rank follows the CURRENT sort, so it stays meaningful
+                      // when the table is ordered by something other than SR.
+                      // A provisional row has no rank at all, not a low one.
+                      const rank = r.ranked ? String(i + 1).padStart(2, '0') : '–';
+                      const rowClass = [
+                        r.steamid === me ? 'is-me' : '',
+                        r.ranked ? '' : 'is-provisional',
+                      ].filter(Boolean).join(' ');
+                      return (
+                        <Fragment key={r.steamid}>
+                          {i === ranked.length && (
+                            <tr class="lb__group">
+                              <td colSpan={2 + BASE_COLS.length + statCols.length}>
+                                <span class="eyebrow">Provisional, under 3 games</span>
                               </td>
-                            );
-                          })}
-                        </tr>
-                      </Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Panel>
-        {/* Top rated is chosen among RANKED players only: a provisional SR
-            after one game is not a claim on the card. */}
-        {ranked.length > 0 && (() => {
-          const top = [...ranked].sort((a, b) => b.sr - a.sr)[0];
-          const decided = top.wins + top.losses;
-          return (
-            <Headliner
-              eyebrow="Top rated"
-              name={top.name}
-              rating={top.sr}
-              stats={[
-                { label: 'Record', value: `${top.wins}W ${top.losses}L` },
-                { label: 'Win %', value: decided > 0 ? `${Math.round((top.wins / decided) * 100)}%` : 'n/a' },
-                { label: 'Games', value: top.games },
-              ]}
-            />
-          );
-        })()}
-      </div>
+                            </tr>
+                          )}
+                          <tr class={rowClass}>
+                            <td class={`rank lb__rank${r.ranked && i < 3 ? ' rank--top' : ''}`}>{rank}</td>
+                            {/* The cell is a fixed width so SR can pin beside it on a
+                                phone; a long name is clipped, and the title carries
+                                the rest. */}
+                            <td class="lb__pcol pname" title={r.name}><PlayerLink steamid={r.steamid} name={r.name} /><TitleTag kind={r.title} /></td>
+                            <td class="num sr lb__sr">{r.sr}</td>
+                            <td class="num lb__wl">{r.wins}</td>
+                            <td class="num lb__wl">{r.losses}</td>
+                            <td class="num muted">{r.games}</td>
+                            <td class="num lb__wl">
+                              {decided > 0
+                                ? `${Math.round((r.wins / decided) * 100)}%`
+                                : <span class="muted">n/a</span>}
+                            </td>
+                            {statCols.map((k) => {
+                              const v = r.stats?.[k];
+                              return (
+                                <td class={`num${v ? '' : ' is-dim'}`} key={k}>
+                                  {v === undefined ? <span class="muted">n/a</span> : v}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Panel>
+          {/* Top rated is chosen among RANKED players only: a provisional SR
+              after one game is not a claim on the card. */}
+          {ranked.length > 0 && (() => {
+            const top = [...ranked].sort((a, b) => b.sr - a.sr)[0];
+            const decided = top.wins + top.losses;
+            return (
+              <Headliner
+                eyebrow="Top rated"
+                name={top.name}
+                rating={top.sr}
+                stats={[
+                  { label: 'Record', value: `${top.wins}W ${top.losses}L` },
+                  { label: 'Win %', value: decided > 0 ? `${Math.round((top.wins / decided) * 100)}%` : 'n/a' },
+                  { label: 'Games', value: top.games },
+                ]}
+              />
+            );
+          })()}
+        </div>
       )}
     </div>
   );
