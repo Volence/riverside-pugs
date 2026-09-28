@@ -69,6 +69,11 @@ export async function practiceRoutes(
 ): Promise<void> {
   const { db } = opts;
   const requireActive = makeRequireActive(db);
+  // Players with a drill being built right now. The hourly count below is
+  // read before an await (the replay read), so without this a script firing
+  // requests in parallel would pass the count on every one of them, and each
+  // would pull a whole round (up to 15 MB) into memory at once.
+  const building = new Set<string>();
 
   /**
    * Make a drill from one moment of a finished match.
@@ -110,23 +115,31 @@ export async function practiceRoutes(
       return reply.code(429).send({ error: `You can make ${DRILLS_PER_HOUR} drills an hour; try again later.` });
     }
 
-    const bytes = await finishedReplayBytes(db, opts, matchId, ordinal, half);
-    const replay = bytes ? parseReplay(bytes) : null;
-    if (!replay || replay.frames.length === 0) {
-      return reply.code(404).send({ error: 'There is no replay of that round to make a drill from.' });
+    if (building.has(steamid)) {
+      return reply.code(429).send({ error: 'Your last drill is still being made; try again in a moment.' });
     }
+    building.add(steamid);
+    try {
+      const bytes = await finishedReplayBytes(db, opts, matchId, ordinal, half);
+      const replay = bytes ? parseReplay(bytes) : null;
+      if (!replay || replay.frames.length === 0) {
+        return reply.code(404).send({ error: 'There is no replay of that round to make a drill from.' });
+      }
 
-    const built = buildDrill(replay, tMs, {
-      names: rosterNames(db, replay.header.slots),
-      matchId,
-      mapLabel: drillMapLabel(db, replay.header.map),
-      ordinal,
-      half,
-    });
-    if (!built) return reply.code(404).send({ error: 'There is no replay of that round to make a drill from.' });
+      const built = buildDrill(replay, tMs, {
+        names: rosterNames(db, replay.header.slots),
+        matchId,
+        mapLabel: drillMapLabel(db, replay.header.map),
+        ordinal,
+        half,
+      });
+      if (!built) return reply.code(404).send({ error: 'There is no replay of that round to make a drill from.' });
 
-    const { spec } = createDrill(db, built, moment, steamid);
-    return { code: spec.code, spec };
+      const { spec } = createDrill(db, built, moment, steamid);
+      return { code: spec.code, spec };
+    } finally {
+      building.delete(steamid);
+    }
   });
 
   /**
