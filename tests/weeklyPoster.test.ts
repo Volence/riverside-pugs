@@ -14,7 +14,7 @@ beforeEach(() => {
   for (let i = 0; i < 5; i++) seedMatch(db, { endedAt: `2026-09-22 1${i}:00:00`, lines: [{ id: p, team: 'a', stats: { skeets: 3 } }] });
   setSetting(db, 'discord_weekly_channel_id', 'weekly');
   t = new FakeTransport();
-  now = new Date('2026-09-28T00:10:00Z');   // Monday just after the week of Sep 21 closed
+  now = new Date('2026-09-28T12:10:00Z');   // Monday just after the noon UTC close of the week of Sep 21
   poster = new WeeklyPoster({ db, transport: t, publicUrl: 'https://pug.test', tickMs: 0, now: () => now });
 });
 afterEach(() => poster.stop());

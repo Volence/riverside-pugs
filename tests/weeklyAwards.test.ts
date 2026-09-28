@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { setSetting } from '../src/settings.js';
-import { addWeeks, computeWeek, weekBounds, weekStartOf } from '../src/weeklyAwards.js';
+import { addWeeks, computeWeek, isWeekStart, playerGames, weekBounds, weekStartOf } from '../src/weeklyAwards.js';
 import { seedMatch, seedPlayers, seedRating, seedReadyup } from './weeklyFixtures.js';
 
 let db: DB; let P: string[];
@@ -9,25 +9,39 @@ beforeEach(() => { db = openDb(':memory:'); P = seedPlayers(db, 8); });
 
 const W = '2026-09-21';
 const at = (day: number, hms = '20:00:00') => `2026-09-${String(21 + day).padStart(2, '0')} ${hms}`;
-/** n matches for player p with the given stats each, teammates filler. */
+/** n matches for player p with the given stats each, teammates filler. Hours
+ *  start at 12 so every one lands after the Monday noon UTC week start. */
 function play(p: string, n: number, stats: Record<string, number>, day = 0) {
-  for (let i = 0; i < n; i++) seedMatch(db, { endedAt: at(day, `1${i}:00:00`), lines: [{ id: p, team: 'a', stats }] });
+  for (let i = 0; i < n; i++) seedMatch(db, { endedAt: at(day, `${12 + i}:00:00`), lines: [{ id: p, team: 'a', stats }] });
 }
 const find = (r: ReturnType<typeof computeWeek>, key: string, kind: string) => r.find((x) => x.key === key && x.kind === kind);
 
 describe('week math', () => {
-  it('Monday is the start, whatever day is given', () => {
-    expect(weekStartOf(new Date('2026-09-21T00:00:00Z'))).toBe(W);
-    expect(weekStartOf(new Date('2026-09-27T23:59:59Z'))).toBe(W);
-    expect(weekStartOf(new Date('2026-09-28T00:00:00Z'))).toBe('2026-09-28');
+  it('weekStartOf turns over at Monday noon UTC, not midnight', () => {
+    expect(weekStartOf(new Date('2026-09-21T11:59:59Z'))).toBe('2026-09-14');
+    expect(weekStartOf(new Date('2026-09-21T12:00:00Z'))).toBe(W);
+    expect(weekStartOf(new Date('2026-09-28T11:59:59Z'))).toBe(W);
+    expect(weekStartOf(new Date('2026-09-28T12:00:00Z'))).toBe('2026-09-28');
     expect(addWeeks(W, -1)).toBe('2026-09-14');
-    expect(weekBounds(W)).toEqual({ from: '2026-09-21 00:00:00', to: '2026-09-28 00:00:00' });
+    expect(weekBounds(W)).toEqual({ from: '2026-09-21 12:00:00', to: '2026-09-28 12:00:00' });
   });
 
-  it('a match ending exactly at Monday 00:00:00 belongs to the new week', () => {
-    seedMatch(db, { endedAt: '2026-09-28 00:00:00', lines: [{ id: P[0], team: 'a', stats: { skeets: 9 } }] });
-    expect(find(computeWeek(db, W), 'skeets', 'total')).toBeUndefined();
-    expect(find(computeWeek(db, '2026-09-28'), 'skeets', 'total')?.winners[0].steamid).toBe(P[0]);
+  it('a match ending exactly at Monday noon belongs to the new week, one second earlier to the old', () => {
+    seedMatch(db, { endedAt: '2026-09-28 12:00:00', lines: [{ id: P[0], team: 'a' }] });
+    seedMatch(db, { endedAt: '2026-09-28 11:59:59', lines: [{ id: P[1], team: 'a' }] });
+    // Real match 282: ended well before the new noon boundary, so the old week still gets it.
+    seedMatch(db, { endedAt: '2026-09-28 00:07:44', lines: [{ id: P[2], team: 'a' }] });
+    const oldWeek = playerGames(db, W);
+    const newWeek = playerGames(db, '2026-09-28');
+    expect([oldWeek.has(P[0]), oldWeek.has(P[1]), oldWeek.has(P[2])]).toEqual([false, true, true]);
+    expect([newWeek.has(P[0]), newWeek.has(P[1]), newWeek.has(P[2])]).toEqual([true, false, false]);
+  });
+
+  it('isWeekStart accepts only a canonical Monday id', () => {
+    expect(isWeekStart('2026-09-21')).toBe(true);
+    expect(isWeekStart('2026-09-22')).toBe(false);
+    expect(isWeekStart('2026-13-01')).toBe(false);
+    expect(isWeekStart('nope')).toBe(false);
   });
 });
 
@@ -85,10 +99,11 @@ describe('stat awards', () => {
 });
 
 describe('overall awards', () => {
-  /** p on team a in each match; results as a string like 'WWLW' (D = draw). */
+  /** p on team a in each match; results as a string like 'WWLW' (D = draw).
+   *  Hours start at 12 so every match lands after the Monday noon week start. */
   function results(p: string, s: string) {
     [...s].forEach((c, i) => seedMatch(db, {
-      endedAt: at(0, `${String(10 + i).padStart(2, '0')}:00:00`),
+      endedAt: at(0, `${String(12 + i).padStart(2, '0')}:00:00`),
       winner: c === 'W' ? 'a' : c === 'L' ? 'b' : 'draw',
       lines: [{ id: p, team: 'a' }],
     }));
@@ -150,7 +165,7 @@ describe('shame awards', () => {
     }
     // Four matches only: below the min-games gate, so a huge ff_dealt does not win.
     for (let i = 0; i < 4; i++) {
-      seedMatch(db, { endedAt: at(i, '09:00:00'), lines: [{ id: P[2], team: 'a', fixed: { ff_dealt: 500 } }] });
+      seedMatch(db, { endedAt: at(i, '13:00:00'), lines: [{ id: P[2], team: 'a', fixed: { ff_dealt: 500 } }] });
     }
     const r = computeWeek(db, W);
     expect(find(r, 'friendly_fire', 'single')!.winners.map((w) => [w.steamid, w.value])).toEqual([[P[0], 30]]);

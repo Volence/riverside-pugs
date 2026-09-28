@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { DB } from '../db.js';
-import { computeWeek, weekStartOf, weeklyMinGames } from '../weeklyAwards.js';
+import { computeWeek, isWeekStart, weekStartOf, weeklyMinGames } from '../weeklyAwards.js';
 import { computeRecap } from '../weeklyRecap.js';
 import { frozenWeek, frozenWeeks } from '../weeklyStore.js';
 
@@ -13,15 +13,8 @@ export async function weeklyRoutes(app: FastifyInstance, opts: { db: DB }): Prom
   app.get('/api/weekly', async (req, reply) => {
     const current = weekStartOf(new Date());
     const q = (req.query as { week?: string }).week;
-    if (q !== undefined) {
-      const parsed = Date.parse(`${q}T00:00:00Z`);
-      // A calendar-invalid date (2026-13-01, 2026-01-32, ...) still matches
-      // the \d{4}-\d{2}-\d{2} shape but Date.parse rejects it as NaN; without
-      // this check weekStartOf's toISOString() would throw on it instead of
-      // failing cleanly as a bad request.
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(q) || Number.isNaN(parsed) || weekStartOf(new Date(parsed)) !== q) {
-        return reply.code(400).send({ error: 'bad week' });
-      }
+    if (q !== undefined && !isWeekStart(q)) {
+      return reply.code(400).send({ error: 'bad week' });
     }
     const week = q ?? current;
     const minGames = weeklyMinGames(db);

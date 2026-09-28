@@ -1,5 +1,5 @@
 import { openDb } from '../src/db.js';
-import { computeWeek } from '../src/weeklyAwards.js';
+import { computeWeek, isWeekStart } from '../src/weeklyAwards.js';
 import { computeRecap } from '../src/weeklyRecap.js';
 import { freezeWeek, frozenWeek, type FrozenWeek } from '../src/weeklyStore.js';
 import { renderAwards, renderRecap } from '../src/discord/weeklyCard.js';
@@ -11,8 +11,8 @@ import { renderAwards, renderRecap } from '../src/discord/weeklyCard.js';
  * openDb creates missing tables, which is a write.
  */
 const [path, week, flag] = process.argv.slice(2);
-if (!path || !/^\d{4}-\d{2}-\d{2}$/.test(week ?? '')) {
-  console.error('usage: tsx scripts/weekly-awards.ts <db-path> <YYYY-MM-DD> [--freeze]');
+if (!path || !isWeekStart(week ?? '')) {
+  console.error('usage: tsx scripts/weekly-awards.ts <db-path> <YYYY-MM-DD (a Monday)> [--freeze]');
   process.exit(2);
 }
 const db = openDb(path);

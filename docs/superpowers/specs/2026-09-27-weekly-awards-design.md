@@ -11,9 +11,10 @@ people show up, and are announced in Discord.
 
 ## Rules (owner decisions)
 
-- A week is Monday 00:00 UTC up to the next Monday 00:00 UTC. A match belongs
-  to the week its `ended_at` falls in. Only `state = 'completed'` and
-  `voided_at IS NULL` matches count.
+- A week is Monday 12:00 UTC up to the next Monday 12:00 UTC (US play peaks
+  right after Monday 00:00 UTC, so a midnight cut split that session; noon is
+  the quietest hour). A match belongs to the week its `ended_at` falls in.
+  Only `state = 'completed'` and `voided_at IS NULL` matches count.
 - Each stat award has two winners: **best average** (per match, among players
   with at least `WEEKLY_MIN_GAMES` = 5 matches that week) and **most total**
   (no gate). Five, not three: a replay of the week of 2026-09-21 gave the
@@ -204,7 +205,7 @@ that is missing.
 
 - Leaderboard page gets a Season / This week toggle. The weekly view shows the
   four sections as a grid of award cards (label, average winner, total
-  winner), a week picker, and a "live, final Monday 00:00 UTC" note on the
+  winner), a week picker, and a "live, final Monday 12:00 UTC" note on the
   current week.
 - Profile gets a "Weekly awards" row: one chip per award with a count
   ("Top Skeeter x3"), average and total wins counting as the same award, at
@@ -213,7 +214,7 @@ that is missing.
 
 ## Testing
 
-- Week bounds, including a match ending exactly at Monday 00:00 UTC.
+- Week bounds, including a match ending exactly at Monday 12:00 UTC.
 - The 5-game gate on averages and its absence on totals.
 - Ties share; zeros never win.
 - Win streak across a loss and a draw; SR climb for a player whose first

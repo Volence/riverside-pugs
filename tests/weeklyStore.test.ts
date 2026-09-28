@@ -10,9 +10,10 @@ const W2 = '2026-09-28';
 // The real clock in CI is 2026-09-27, so both weeks above are still open on
 // it. Freeze against a fixed later date instead of relying on the real clock.
 const NOW = new Date('2026-10-12T00:00:00Z');
+// Hours start at 12 so every match lands after the Monday noon UTC week start.
 function skeetWeek(week: string, p: string, n = 5) {
   const ids: number[] = [];
-  for (let i = 0; i < n; i++) ids.push(seedMatch(db, { endedAt: `${week} 1${i}:00:00`, lines: [{ id: p, team: 'a', stats: { skeets: 3 } }] }));
+  for (let i = 0; i < n; i++) ids.push(seedMatch(db, { endedAt: `${week} ${12 + i}:00:00`, lines: [{ id: p, team: 'a', stats: { skeets: 3 } }] }));
   return ids;
 }
 
@@ -40,7 +41,7 @@ describe('weeklyStore', () => {
   });
 
   it('keeps the win rate detail', () => {
-    for (let i = 0; i < 5; i++) seedMatch(db, { endedAt: `${W} 1${i}:00:00`, winner: i < 4 ? 'a' : 'b', lines: [{ id: P[0], team: 'a' }] });
+    for (let i = 0; i < 5; i++) seedMatch(db, { endedAt: `${W} ${12 + i}:00:00`, winner: i < 4 ? 'a' : 'b', lines: [{ id: P[0], team: 'a' }] });
     freezeWeek(db, W, NOW);
     expect(frozenWeek(db, W)!.awards.find((a) => a.key === 'win_rate')!.winners[0].detail).toBe('4-1');
   });

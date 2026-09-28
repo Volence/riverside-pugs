@@ -1,6 +1,6 @@
 import type { DB } from './db.js';
 import { campaignDisplayName } from './campaignRegistry.js';
-import { WEEK_MATCHES, weekBounds, weeklyMinGames } from './weeklyAwards.js';
+import { WEEK_MATCHES, WEEK_START_HOUR, weekBounds, weeklyMinGames } from './weeklyAwards.js';
 
 /**
  * The numbers behind the weekly recap message, modelled on the owner's hand
@@ -52,9 +52,12 @@ export function computeRecap(db: DB, week: string): Recap {
   );
   const peakConcurrent = spans.reduce((best, x) => Math.max(best, spans.filter((y) => y.s <= x.s && y.e > x.s).length), 0);
 
+  // Bucketed by the session, not the UTC calendar day: shifting back by the
+  // same WEEK_START_HOUR that turns weeks over means a Friday-night US
+  // session that ends after midnight UTC still counts as Friday.
   const busy = one<{ date: string; matches: number }>(
-    `SELECT substr(ended_at, 1, 10) AS date, COUNT(*) AS matches FROM matches WHERE id IN ${inWeek}
-     GROUP BY date ORDER BY matches DESC, date LIMIT 1`,
+    `SELECT substr(datetime(ended_at, '-${WEEK_START_HOUR} hours'), 1, 10) AS date, COUNT(*) AS matches
+     FROM matches WHERE id IN ${inWeek} GROUP BY date ORDER BY matches DESC, date LIMIT 1`,
   );
 
   const highlights: Highlight[] = [];
