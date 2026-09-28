@@ -726,6 +726,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     release: (serverId) => new Promise<boolean>((resolve) => {
       releaser.release(serverId, { restart: true, forceRestart: true }, resolve);
     }),
+    // The clean slate before a lease's setup: the same quit-and-wait a
+    // release uses, without the release (the lease still holds the box).
+    restart: (server) => restarter.restart(server),
   });
   // A lease that was winding down when this process stopped has its box
   // offline mid-restart; nothing else would ever bring that box back.

@@ -22,7 +22,7 @@ function lease(over: Partial<PracticeLease> = {}): PracticeLease {
     id: 4, kind: 'drill', server: 'Riverside #4',
     owner: { steamid: '76561199000000001', name: 'mayhem' },
     isOwner: true, canEnd: true, drillCode: 'K7QX',
-    createdAt: new Date().toISOString(), readyAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(), readyAt: new Date().toISOString(), setupPhase: null,
     endsAt: new Date(Date.now() + 75 * 60_000).toISOString(),
     humans: 2, capacity: null, map: 'l4d_vs_hospital03_sewers', warnedAt: null,
     state: 'ready', endReason: null, endedAt: null,
@@ -77,6 +77,18 @@ describe('Practice (invite page)', () => {
     expect(screen.getByText('Started by')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Close this server' })).toBeNull();
     expect(screen.queryByText(`${location.origin}/practice/4`)).toBeNull();
+  });
+
+  it('says the server is resetting, then loading, while it sets up', async () => {
+    mockApi.practiceLease.mockResolvedValue(lease({ state: 'setting_up', setupPhase: 'resetting', readyAt: null }));
+    render(<Practice id="4" session={ACTIVE} />);
+    expect((await screen.findByRole('status')).textContent)
+      .toBe('Resetting Riverside #4 for a clean start, which takes up to a minute. Connect once it is loading.');
+    cleanup();
+    mockApi.practiceLease.mockResolvedValue(lease({ kind: 'park', state: 'setting_up', setupPhase: 'loading', readyAt: null }));
+    render(<Practice id="4" session={ACTIVE} />);
+    expect((await screen.findByRole('status')).textContent)
+      .toBe('Loading the Practice Park on Riverside #4. You can connect now; it finishes around you.');
   });
 
   it('says when a PUG is taking the server back', async () => {

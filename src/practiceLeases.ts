@@ -50,7 +50,7 @@
 import { randomInt } from 'node:crypto';
 import type { DB } from './db.js';
 import { getServer, NOT_LEASED_SQL, type ServerRow } from './serverPool.js';
-import { settingNumber } from './settings.js';
+import { getSetting, settingNumber } from './settings.js';
 import { parseHumans } from './serverRestart.js';
 import { getPlayer } from './players.js';
 import { publishAdminEvent } from './adminFeed.js';
@@ -71,6 +71,7 @@ export interface LeaseRow {
   drill_code: string | null;
   created_at: string;
   ready_at: string | null;
+  setup_phase: 'resetting' | 'loading' | null;
   last_human_at: string;
   ends_at: string;
   humans: number;
@@ -129,6 +130,27 @@ export function getLease(db: DB, id: number): LeaseRow | undefined {
 /** Every lease still holding its box, winding down included, oldest first. */
 export function openLeases(db: DB): LeaseRow[] {
   return db.prepare('SELECT * FROM practice_leases WHERE ended_at IS NULL ORDER BY id').all() as LeaseRow[];
+}
+
+/**
+ * Whether this viewer may start and join practice servers, by the staged
+ * rollout switch `practice_leasing` (off | admins | everyone, default
+ * admins). `viewer` is an active player's SteamID or null. Anything the
+ * switch does not recognise reads as admins, the cautious middle.
+ */
+export function practiceAccess(db: DB, viewer: string | null): boolean {
+  if (!viewer) return false;
+  const mode = getSetting(db, 'practice_leasing') ?? 'admins';
+  if (mode === 'off') return false;
+  if (mode === 'everyone') return true;
+  return getPlayer(db, viewer)?.is_admin === 1;
+}
+
+/** What someone the switch keeps out is told. */
+export function practiceClosedMessage(db: DB): string {
+  return getSetting(db, 'practice_leasing') === 'off'
+    ? 'Practice servers are turned off right now.'
+    : 'Practice servers are being tried out by admins first. They open to everyone soon.';
 }
 
 /** Open and not winding down: a lease people can still join. */
@@ -283,6 +305,14 @@ export interface PracticeLeaseDeps {
    * afterwards, so a PUG that preempted this lease gets the box at once.
    */
   release: (serverId: number) => Promise<boolean>;
+  /**
+   * Restart srcds for a clean slate before a lease's setup, and resolve once
+   * it answers again (true) or never did (false). Production wires this to
+   * the same rconRestarter a release uses (quit, then wait for sm_pug_status),
+   * without the release around it: the box stays held by the lease, so it
+   * must not be marked idle or handed to a waiting match.
+   */
+  restart: (server: ServerRow) => Promise<boolean>;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }
@@ -403,7 +433,17 @@ export class PracticeLeases {
     if (!first) return;
     const server = getServer(this.db, first.server_id);
     if (!server) { this.close(id, 'setup_failed'); return; }
+    const phase = (p: 'resetting' | 'loading' | null) =>
+      this.db.prepare('UPDATE practice_leases SET setup_phase = ? WHERE id = ?').run(p, id);
     try {
+      // A clean slate first (owner, 2026-09-28): whatever the box was doing,
+      // a casual config, a stale plugin state, the last PUG's leftovers, is
+      // gone before the practice cfg goes on. Costs 30 to 60 seconds, which
+      // the page says as "Resetting the server".
+      phase('resetting');
+      if (!(await this.deps.restart(server))) throw new Error('the server did not come back from its restart');
+      if (!this.stillActive(id)) return;
+      phase('loading');
       await this.deps.rcon(server, [`exec practice_${first.kind}.cfg`]);
       await this.sleep(SETUP_SETTLE_MS);
       let lease = this.stillActive(id);
@@ -420,7 +460,7 @@ export class PracticeLeases {
         again.push(`sm_drill_load ${lease.drill_code}`);
       }
       await this.deps.rcon(server, again);
-      this.db.prepare('UPDATE practice_leases SET ready_at = ? WHERE id = ? AND ended_at IS NULL')
+      this.db.prepare('UPDATE practice_leases SET ready_at = ?, setup_phase = NULL WHERE id = ? AND ended_at IS NULL')
         .run(iso(this.now()), id);
       console.log(`[practice] lease ${id} (${lease.kind}) is ready on ${server.name}`);
     } catch (err) {
@@ -634,6 +674,9 @@ export interface LeaseView {
   drillCode: string | null;
   createdAt: string;
   readyAt: string | null;
+  /** While setting up: 'resetting' (srcds restarting) or 'loading' (the
+   *  practice cfg going on). Null otherwise. */
+  setupPhase: 'resetting' | 'loading' | null;
   endsAt: string;
   humans: number;
   capacity: number | null;
@@ -668,6 +711,7 @@ export function leaseView(db: DB, l: LeaseRow, viewer: string, viewerIsAdmin: bo
     drillCode: l.drill_code,
     createdAt: l.created_at,
     readyAt: l.ready_at,
+    setupPhase: state === 'setting_up' ? (l.setup_phase ?? 'resetting') : null,
     endsAt: l.ends_at,
     humans: l.humans,
     capacity: l.kind === 'park' ? PARK_CAPACITY : null,

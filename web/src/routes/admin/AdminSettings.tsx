@@ -125,6 +125,13 @@ function SettingRow({ setting: s, campaigns, serversMissingDlc4, onSaved }: {
         </>
       );
       break;
+    case 'choice':
+      input = (
+        <select value={s.value} aria-label={s.label} onChange={(e) => void save((e.target as HTMLSelectElement).value)}>
+          {s.type.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      );
+      break;
     default:
       input = revealed ? (
         <input value={value} aria-label={s.label} inputMode={s.type.kind === 'int' ? 'numeric' : undefined}
@@ -142,7 +149,7 @@ function SettingRow({ setting: s, campaigns, serversMissingDlc4, onSaved }: {
       </div>
       <div class="admin-setting__control">
         {input}
-        {s.type.kind !== 'bool' && revealed && <button class="btn" type="submit">Save</button>}
+        {s.type.kind !== 'bool' && s.type.kind !== 'choice' && revealed && <button class="btn" type="submit">Save</button>}
         {msg && <span class={msg.ok ? 'muted' : 'error'}>{msg.text}</span>}
       </div>
     </form>
