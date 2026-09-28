@@ -151,3 +151,55 @@ describe('GET /api/admin/practice/leases', () => {
     expect(r.json().leases).toMatchObject([{ id: 1, kind: 'park', owner: { steamid: OWNER } }]);
   });
 });
+
+describe('POST /api/practice/leases/:id/drill', () => {
+  const load = (id: number, code: string, c: Record<string, string>) =>
+    app.inject({ method: 'POST', url: `/api/practice/leases/${id}/drill`, payload: { code }, cookies: c });
+
+  it('sends sm_drill_load to the owner\'s ready drill server and records the drill', async () => {
+    seedServers(2);
+    db.prepare("INSERT INTO practice_drills (code, spec_json, ordinal, half, t_ms) VALUES ('K7QX', '{}', 0, 1, 0), ('M2PB', '{}', 0, 1, 100)").run();
+    await start({ kind: 'drill', drillCode: 'K7QX' });
+    await flush();
+    sent = [];
+    const r = await load(1, 'm2pb', owner);
+    expect(r.statusCode).toBe(200);
+    expect(r.json().drillCode).toBe('M2PB');
+    expect(sent).toEqual([['sm_drill_load M2PB']]);
+  });
+
+  it('refuses anyone but the owner, unknown codes, the park, and a server still setting up', async () => {
+    seedServers(3);
+    db.prepare("INSERT INTO practice_drills (code, spec_json, ordinal, half, t_ms) VALUES ('K7QX', '{}', 0, 1, 0)").run();
+    await start({ kind: 'drill' });
+    await flush();
+    expect((await load(1, 'K7QX', friend)).statusCode).toBe(403);
+    expect((await load(1, 'ZZZZ', owner)).statusCode).toBe(404);
+    db.prepare('UPDATE practice_leases SET ready_at = NULL WHERE id = 1').run();
+    expect((await load(1, 'K7QX', owner)).json().error).toMatch(/still setting up/);
+    await start({ kind: 'park' }, friend);
+    await flush();
+    expect((await load(2, 'K7QX', friend)).json().error).toMatch(/not the Practice Park/);
+  });
+
+  it('is rate limited per owner', async () => {
+    seedServers(2);
+    db.prepare("INSERT INTO practice_drills (code, spec_json, ordinal, half, t_ms) VALUES ('K7QX', '{}', 0, 1, 0)").run();
+    await start({ kind: 'drill' });
+    await flush();
+    for (let i = 0; i < 6; i++) expect((await load(1, 'K7QX', owner)).statusCode).toBe(200);
+    expect((await load(1, 'K7QX', owner)).statusCode).toBe(429);
+  });
+
+  it('passes on the plugin\'s refusal', async () => {
+    seedServers(2);
+    db.prepare("INSERT INTO practice_drills (code, spec_json, ordinal, half, t_ms) VALUES ('K7QX', '{}', 0, 1, 0)").run();
+    await start({ kind: 'drill' });
+    await flush();
+    const real = leases;
+    (real as unknown as { deps: { rcon: unknown } }).deps.rcon = async () => ['PRACTICEERR practice not enabled'];
+    const r = await load(1, 'K7QX', owner);
+    expect(r.statusCode).toBe(502);
+    expect(r.json().error).toBe('Your server refused it: practice not enabled.');
+  });
+});

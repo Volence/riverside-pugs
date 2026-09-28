@@ -1840,6 +1840,8 @@ export const api = {
     post<{ joined: boolean; lease: PracticeLease }>('/api/practice/leases', body),
   practiceLease: (id: number, signal?: AbortSignal) => get<PracticeLease>(`/api/practice/leases/${id}`, signal),
   endPractice: (id: number) => post<PracticeLease>(`/api/practice/leases/${id}/end`),
+  /** Load a drill on your own drill server (owner only). */
+  loadDrillOnLease: (id: number, code: string) => post<PracticeLease>(`/api/practice/leases/${id}/drill`, { code }),
   /** Turn a moment of a finished match into a drill code (POST /api/practice/drills). */
   createDrill: (m: DrillMoment) => post<{ code: string; spec: DrillSpec }>('/api/practice/drills', m),
   replayTimeline: (matchId: number, ordinal: number, half: number, signal?: AbortSignal) =>

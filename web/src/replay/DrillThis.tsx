@@ -2,6 +2,34 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { api, ApiError, type DrillActor, type DrillSpec, type PracticeLease } from '../api';
 import { formatTime } from './ReplayControls';
 import { leasePath } from '../practice';
+import { ConnectPanel } from '../components/ConnectPanel';
+import { CopyRow } from '../components/CopyRow';
+
+/** How often the panel re-reads a server that is still setting up. */
+const SERVER_POLL_MS = 4_000;
+
+type ServerState =
+  | { kind: 'checking' }
+  | { kind: 'none' }
+  | { kind: 'own'; lease: PracticeLease; loaded: boolean }
+  | { kind: 'started'; lease: PracticeLease };
+
+/** A drill server's way in: the connect line (password first), the password
+ *  and the invite link on their own with Copy, and its page. */
+function LeaseConnect({ lease }: { lease: PracticeLease }) {
+  if (!lease.connect) return null;
+  return (
+    <div class="drill__lease">
+      <ConnectPanel connect={lease.connect} />
+      <CopyRow label="Password" value={lease.connect.password} />
+      {lease.isOwner && (
+        <CopyRow label="Invite link" value={`${location.origin}${leasePath(lease.id)}`}
+          hint="Anyone logged in who opens it gets the connect line. Only you run the drill." />
+      )}
+      <p class="drill__page"><a href={leasePath(lease.id)}>Server page</a> (time left, close it)</p>
+    </div>
+  );
+}
 
 /** What the panel says for each survivor character and infected class. */
 const CLASS_LABEL: Record<string, string> = {
@@ -31,9 +59,14 @@ type State =
  * The site stores the moment as a drill spec and answers with a short code;
  * a player types `!drill <code>` in any server running practice mode and the
  * practice plugin rebuilds the situation from it (l4d/practice/DESIGN.md).
- * The result is the code, a line to copy, and who will be where, plus a
- * button that leases a private drill server with the code preloaded
- * (src/practiceLeases.ts) for anyone without a practice server to type it in.
+ * What the result leads with depends on the viewer (owner, 2026-09-28).
+ * Without a drill server of their own, the primary button starts one with
+ * the drill preloaded (src/practiceLeases.ts) and the panel turns into its
+ * connect line, password and invite link while it sets up. With one, the
+ * primary button loads this drill on it (sm_drill_load over rcon) and shows
+ * its connect line. Either way the code and its `!drill` line follow as the
+ * secondary way in, for any other practice server, and the actors close it.
+ * A signed-out viewer cannot make a drill at all and is asked to log in.
  *
  * Only offered on a finished match, and the server refuses anything else
  * regardless: a frame carries ghost positions. The moment comes from the
@@ -63,10 +96,14 @@ export function DrillThis(
 ) {
   const [state, setState] = useState<State>({ kind: 'idle' });
   const [copied, setCopied] = useState(false);
-  // The drill server started from this panel, or why it could not be.
-  const [server, setServer] = useState<
-    { kind: 'none' } | { kind: 'busy' } | { kind: 'started'; lease: PracticeLease } | { kind: 'error'; message: string }
-  >({ kind: 'none' });
+  // Where this drill can be played, once there is one. `checking` while the
+  // panel asks whether the viewer already has a drill server of their own;
+  // `none` when they do not (the primary action starts one); `own` when they
+  // do (the primary action loads this drill on it); `started` for the server
+  // this panel just leased. `loaded` says the drill was sent to `own`.
+  const [server, setServer] = useState<ServerState>({ kind: 'checking' });
+  const [serverBusy, setServerBusy] = useState(false);
+  const [serverError, setServerError] = useState('');
 
   // A round switch keeps this component mounted, and a code for the other
   // round must not stay on screen as if it were this one's. Compared against
@@ -79,7 +116,8 @@ export function DrillThis(
     if (shownFor.current === round) return;
     shownFor.current = round;
     setState({ kind: 'idle' });
-    setServer({ kind: 'none' });
+    setServer({ kind: 'checking' });
+    setServerError('');
   }, [round]);
 
   // Tracked so a navigation within the 2 s "Copied" window cannot set state
@@ -115,16 +153,72 @@ export function DrillThis(
     }
   };
 
+  // Once a drill exists: does the viewer already have a drill server? The
+  // park list carries the viewer's own open lease; only a drill server takes
+  // a drill from here (the park is shared, and a drill there would pull
+  // everyone into it).
+  const done = state.kind === 'done';
+  useEffect(() => {
+    if (!done) return;
+    let alive = true;
+    setServer({ kind: 'checking' });
+    (async () => {
+      try {
+        const { mine } = await api.practiceParks();
+        if (!mine || mine.kind !== 'drill') { if (alive) setServer({ kind: 'none' }); return; }
+        const lease = await api.practiceLease(mine.id);
+        if (alive) setServer(lease.state === 'ready' || lease.state === 'setting_up' ? { kind: 'own', lease, loaded: false } : { kind: 'none' });
+      } catch {
+        if (alive) setServer({ kind: 'none' });
+      }
+    })();
+    return () => { alive = false; };
+  }, [done]);
+
+  // While a server this panel shows is setting up, follow it until it is
+  // ready (or gone), so the status line tells the truth.
+  const watched = server.kind === 'own' || server.kind === 'started' ? server.lease : null;
+  useEffect(() => {
+    if (!watched || watched.state !== 'setting_up') return;
+    const t = setTimeout(async () => {
+      try {
+        const fresh = await api.practiceLease(watched.id);
+        setServer((cur) => (cur.kind === 'own' || cur.kind === 'started') && cur.lease.id === fresh.id
+          ? { ...cur, lease: fresh } : cur);
+      } catch {
+        // The next render keeps the last reading; nothing to recover.
+      }
+    }, SERVER_POLL_MS);
+    return () => clearTimeout(t);
+  }, [watched]);
+
   /** Lease a private drill server with this code preloaded
    *  (src/practiceLeases.ts). Answers once the box is reserved and checked
-   *  empty; its invite page follows the rest of the setup. */
+   *  empty; the setup carries on and the status follows it. */
   const startServer = async (code: string) => {
-    setServer({ kind: 'busy' });
+    setServerBusy(true);
+    setServerError('');
     try {
       const { lease } = await api.startPractice({ kind: 'drill', drillCode: code });
       setServer({ kind: 'started', lease });
     } catch (err) {
-      setServer({ kind: 'error', message: err instanceof ApiError ? err.message : 'Could not start a drill server.' });
+      setServerError(err instanceof ApiError ? err.message : 'Could not start a drill server.');
+    } finally {
+      setServerBusy(false);
+    }
+  };
+
+  /** Send this drill to the viewer's own drill server (sm_drill_load). */
+  const loadOnOwn = async (lease: PracticeLease, code: string) => {
+    setServerBusy(true);
+    setServerError('');
+    try {
+      const fresh = await api.loadDrillOnLease(lease.id, code);
+      setServer({ kind: 'own', lease: fresh, loaded: true });
+    } catch (err) {
+      setServerError(err instanceof ApiError ? err.message : 'Could not load the drill on your server.');
+    } finally {
+      setServerBusy(false);
     }
   };
 
@@ -151,7 +245,7 @@ export function DrillThis(
       <span class="drill__note">
         {button}{' '}
         {/* target _top: /auth/steam is a backend route, see Play.tsx. */}
-        <a href={`/auth/steam?next=${encodeURIComponent(next)}`} target="_top" rel="noopener">Log in to create drills</a>
+        <a href={`/auth/steam?next=${encodeURIComponent(next)}`} target="_top" rel="noopener">Log in to start a drill server</a>
         {onHide && <button class="chip" type="button" onClick={onHide}>Close</button>}
       </span>
     );
@@ -168,30 +262,50 @@ export function DrillThis(
 
   const { code, spec } = state;
   const line = `!drill ${code}`;
+  const leased = server.kind === 'own' || server.kind === 'started';
   return (
     <div class="drill" role="region" aria-label="Replay drill">
       <div class="drill__head">
         <p class="eyebrow">Replay drill · {formatTime(spec.source.tMs)}</p>
         <button class="chip" type="button" onClick={() => { setState({ kind: 'idle' }); onHide?.(); }}>{onHide ? 'Close' : 'Hide'}</button>
       </div>
-      <p class="drill__code" aria-label={`Drill code ${code}`}>{code}</p>
-      <p class="drill__how">Type <code>{line}</code> in a practice server</p>
-      <div class="connect__line drill__line">
-        <code>{line}</code>
-        <button class="btn btn--block" type="button" onClick={() => copy(line)}>{copied ? 'Copied' : 'Copy'}</button>
-      </div>
-      <div class="drill__server">
-        {server.kind === 'started' ? (
-          <p>
-            Your drill server is starting with this drill.{' '}
-            <a href={leasePath(server.lease.id)}>Open it for the connect line and invite link</a>
-          </p>
-        ) : (
-          <button class="chip" type="button" disabled={server.kind === 'busy'} onClick={() => startServer(code)}>
-            {server.kind === 'busy' ? 'Starting a drill server...' : 'Start a drill server with this drill'}
+
+      <div class="drill__primary">
+        {server.kind === 'checking' && <p class="muted">Checking for a practice server of yours...</p>}
+        {server.kind === 'none' && (
+          <>
+            <button class="btn btn--block" type="button" disabled={serverBusy} onClick={() => startServer(code)}>
+              {serverBusy ? 'Starting a drill server...' : 'Start a drill server'}
+            </button>
+            <p class="muted drill__hint">A private server with this drill loaded. Share its invite link to bring friends; only you run the drill.</p>
+          </>
+        )}
+        {server.kind === 'own' && !server.loaded && (
+          <button class="btn btn--block" type="button" disabled={serverBusy || server.lease.state !== 'ready'}
+            onClick={() => loadOnOwn(server.lease, code)}>
+            {serverBusy ? 'Loading...' : server.lease.state === 'ready' ? 'Load this drill on your server' : 'Your server is still setting up...'}
           </button>
         )}
-        {server.kind === 'error' && <span class="drill__error" role="alert">{server.message}</span>}
+        {server.kind === 'own' && server.loaded && (
+          <p class="drill__status" role="status">Sent to {server.lease.server}. The drill loads in a few seconds.</p>
+        )}
+        {server.kind === 'started' && server.lease.state === 'setting_up' && (
+          <p class="drill__status" role="status">Setting up {server.lease.server} with this drill, about half a minute. You can connect now.</p>
+        )}
+        {server.kind === 'started' && server.lease.state === 'ready' && (
+          <p class="drill__status" role="status">{server.lease.server} is ready with this drill loaded.</p>
+        )}
+        {serverError && <p class="drill__error" role="alert">{serverError}</p>}
+        {leased && <LeaseConnect lease={server.lease} />}
+      </div>
+
+      <div class={`drill__secondary${leased ? ' drill__secondary--quiet' : ''}`}>
+        <p class={`drill__code${leased ? ' drill__code--small' : ''}`} aria-label={`Drill code ${code}`}>{code}</p>
+        <p class="drill__how">Or type <code>{line}</code> in any practice server</p>
+        <div class="connect__line drill__line">
+          <code>{line}</code>
+          <button class="btn btn--block btn--ghost" type="button" onClick={() => copy(line)}>{copied ? 'Copied' : 'Copy'}</button>
+        </div>
       </div>
       <p class="muted drill__title">{spec.title}</p>
       {spec.actors.length === 0

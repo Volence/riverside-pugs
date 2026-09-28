@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { api, ApiError, type PracticeLease } from '../api';
 import type { Session } from '../hooks/useLiveState';
 import { mapName } from '../format';
 import { Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { ConnectPanel } from '../components/ConnectPanel';
+import { CopyRow } from '../components/CopyRow';
 import { useSecondsLeft } from '../components/Countdown';
 import { confirm } from '../components/Confirm';
 import { IDLE_MINUTES, KIND_LABEL, endReasonText, leaseClock, leasePath } from '../practice';
@@ -177,35 +178,5 @@ export function LeasePanel({ lease, onChanged }: { lease: PracticeLease; onChang
       )}
       {error && <p class="error" role="alert">{error}</p>}
     </Panel>
-  );
-}
-
-/** A value with its own Copy button: the password on its own (the connect
- *  line above already carries it, but people paste it into the prompt L4D1
- *  shows on a steam:// join) and the invite link. */
-function CopyRow({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  const [copied, setCopied] = useState(false);
-  const reset = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (reset.current !== null) clearTimeout(reset.current); }, []);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      reset.current = setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard denied. The value is on screen to select by hand.
-    }
-  };
-  return (
-    <div class="practice__copy">
-      <p class="eyebrow">{label}</p>
-      <div class="connect__line">
-        <code>{value}</code>
-        <button class="btn btn--block" type="button" onClick={copy} aria-label={`Copy ${label.toLowerCase()}`}>
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-      </div>
-      {hint && <p class="muted practice__hint">{hint}</p>}
-    </div>
   );
 }
