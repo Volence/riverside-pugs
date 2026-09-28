@@ -13,7 +13,9 @@ export type SettingType =
   | { kind: 'string'; maxLength: number; allowEmpty: boolean }
   | { kind: 'campaigns' }
   | { kind: 'bool' }
-  | { kind: 'intList'; min: number; max: number; maxItems: number };
+  | { kind: 'intList'; min: number; max: number; maxItems: number }
+  /** One of a fixed list, shown as a select. */
+  | { kind: 'choice'; options: { value: string; label: string }[] };
 
 export interface SettingDef {
   key: string;
@@ -90,6 +92,7 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'community_crosshairs_per_player', group: 'Community', label: 'Shared crosshairs per player', help: 'Live crosshair entries one player may have on the community page at a time.', type: { kind: 'int', min: 0, max: 5 } },
   { key: 'community_shares_per_day', group: 'Community', label: 'Shares per player per day', help: 'Shares one player may make in 24 hours, deletes included, so delete-and-reshare cannot churn the disk.', type: { kind: 'int', min: 1, max: 50 } },
   { key: 'community_store_mb', group: 'Community', label: 'Community store cap (MB)', help: 'Total disk the community page may use for previews and imported HUDs. A share that would pass it is refused with "The community shelf is full right now."', type: { kind: 'int', min: 100, max: 20000 } },
+  { key: 'practice_leasing', group: 'Practice', label: 'Practice servers for', help: 'Who can start and join practice servers (the Practice Park and drill servers) and sees the Practice card on the Play page. Admins only is for trying it out; nobody else sees any of it. Off stops new ones; servers already running carry on until they close.', type: { kind: 'choice', options: [{ value: 'off', label: 'Nobody (off)' }, { value: 'admins', label: 'Admins only' }, { value: 'everyone', label: 'Every player' }] } },
   { key: 'practice_max_leases', group: 'Practice', label: 'Practice servers at once', help: 'How many pool servers may be lent out as a Practice Park or a drill server at the same time. 0 turns practice servers off. A PUG that needs a server always takes one back, newest lease first, after a 60 second warning in game.', type: { kind: 'int', min: 0, max: 6 } },
   { key: 'practice_reserve_idle', group: 'Practice', label: 'Servers kept free for the queue', help: 'A practice server is only started while at least this many OTHER enabled servers stay idle for PUGs.', type: { kind: 'int', min: 0, max: 6 } },
 ];
@@ -148,6 +151,11 @@ export function validateSetting(
       const unknown = raw.filter((c) => typeof c !== 'string' || !known.has(c));
       if (unknown.length) return { ok: false, error: `unknown campaign: ${unknown.join(', ')}` };
       return { ok: true, value: JSON.stringify([...new Set(raw as string[])]) };
+    }
+    case 'choice': {
+      const hit = t.options.find((o) => o.value === raw);
+      if (!hit) return { ok: false, error: `must be one of: ${t.options.map((o) => o.label).join(', ')}` };
+      return { ok: true, value: hit.value };
     }
     case 'intList': {
       if (!Array.isArray(raw) || raw.length > t.maxItems) return { ok: false, error: `a list of up to ${t.maxItems} numbers` };

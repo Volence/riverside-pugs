@@ -22,6 +22,7 @@ let humansOn: Record<string, number>;
 let rconDown: Set<string>;
 let released: number[];
 let releaseBack: boolean;
+let restartBack: boolean;
 
 function seedServer(name: string, over: { restart?: number; enabled?: number; status?: ServerRow['status'] } = {}): number {
   const id = addServer(db, { name, host: `10.0.0.${name.length}`, port: 27015, rconPort: 27015, rconPassword: 'x' });
@@ -43,6 +44,8 @@ function manager(over: Partial<ConstructorParameters<typeof PracticeLeases>[0]> 
       return cmds.map((c) => (c === 'status' ? status(humansOn[server.name] ?? 0) : ''));
     },
     release: async (id) => { released.push(id); if (releaseBack) db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id); return releaseBack; },
+    // Recorded in `sent` so the order against the rcon lines is visible.
+    restart: async (server) => { sent.push({ server: server.name, cmds: ['(restart)'] }); return restartBack; },
     sleep: async () => {},
     now: () => now,
     ...over,
@@ -60,6 +63,7 @@ beforeEach(() => {
   rconDown = new Set();
   released = [];
   releaseBack = true;
+  restartBack = true;
   upsertPlayer(db, { steamid: ME, name: 'me', avatar: null }, []);
   upsertPlayer(db, { steamid: YOU, name: 'you', avatar: null }, []);
 });
@@ -206,7 +210,9 @@ describe('PracticeLeases.create', () => {
     await flush();
     const pw = getLease(db, r.lease.id)!.password;
     const id = [`sm_cvar sv_password "${pw}"`, 'l4d_practice_owner ""', `l4d_practice_site "${URL}"`];
-    expect(sent.map((s) => s.cmds)).toEqual([['status'], ['exec practice_park.cfg'], id, id]);
+    // Status first (nobody on it), then a restart for a clean slate, then the cfg.
+    expect(sent.map((s) => s.cmds)).toEqual([['status'], ['(restart)'], ['exec practice_park.cfg'], id, id]);
+    expect(getLease(db, r.lease.id)!.setup_phase).toBeNull();
     expect(sent.every((s) => s.server === 'bb')).toBe(true);
     expect(getLease(db, r.lease.id)!.ready_at).toBe(new Date(T0).toISOString());
   });
@@ -217,9 +223,10 @@ describe('PracticeLeases.create', () => {
     const r = await mgr.create(ME, 'drill', 'K7QX');
     await flush();
     expect(r.ok).toBe(true);
-    expect(sent[1].cmds).toEqual(['exec practice_drill.cfg']);
-    expect(sent[3].cmds.at(-1)).toBe('sm_drill_load K7QX');
-    expect(sent[2].cmds).not.toContain('sm_drill_load K7QX');
+    expect(sent[1].cmds).toEqual(['(restart)']);
+    expect(sent[2].cmds).toEqual(['exec practice_drill.cfg']);
+    expect(sent[4].cmds.at(-1)).toBe('sm_drill_load K7QX');
+    expect(sent[3].cmds).not.toContain('sm_drill_load K7QX');
   });
 
   it('hands back the park that has room instead of leasing another box', async () => {
@@ -271,6 +278,36 @@ describe('PracticeLeases.create', () => {
     seedServer('a');
     mgr = manager();
     expect(await mgr.create(ME, 'park')).toEqual({ ok: false, status: 503, error: PICK_ERRORS.no_server });
+  });
+
+  it('a server that does not come back from its reset ends the lease through the release', async () => {
+    seedServer('a'); const b = seedServer('bb');
+    restartBack = false;
+    mgr = manager();
+    expect((await mgr.create(ME, 'park')).ok).toBe(true);
+    await flush();
+    expect(sent.map((s) => s.cmds[0])).not.toContain('exec practice_park.cfg');
+    expect(getLease(db, 1)!.end_reason).toBe('setup_failed');
+    expect(released).toEqual([b]);
+  });
+
+  it('says which setup step it is on: resetting, then loading', async () => {
+    seedServer('a'); seedServer('bb');
+    let letBack!: (v: boolean) => void;
+    mgr = manager({ restart: () => new Promise((r) => { letBack = r; }) });
+    await mgr.create(ME, 'drill');
+    await flush();
+    expect(leaseView(db, getLease(db, 1)!, ME, false)).toMatchObject({ state: 'setting_up', setupPhase: 'resetting' });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    // Hold the setup at its settle wait to read the loading phase.
+    (mgr as unknown as { sleep: (ms: number) => Promise<void> }).sleep = () => gate;
+    letBack(true);
+    await flush();
+    expect(leaseView(db, getLease(db, 1)!, ME, false).setupPhase).toBe('loading');
+    release();
+    await flush();
+    expect(leaseView(db, getLease(db, 1)!, ME, false)).toMatchObject({ state: 'ready', setupPhase: null });
   });
 
   it('a setup that fails is wound down through the release', async () => {

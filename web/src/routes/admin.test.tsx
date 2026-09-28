@@ -118,6 +118,21 @@ describe('Admin page', () => {
     expect((screen.getByLabelText('Ready check seconds') as HTMLInputElement).value).toBe('120');
   });
 
+  it('a choice setting is a select that saves on change', async () => {
+    mockAdmin.settings.mockResolvedValue({
+      settings: [{ key: 'practice_leasing', label: 'Practice servers for', help: 'h', group: 'Practice', value: 'admins', type: { kind: 'choice', options: [
+        { value: 'off', label: 'Nobody (off)' }, { value: 'admins', label: 'Admins only' }, { value: 'everyone', label: 'Every player' },
+      ] } }],
+      campaigns: [],
+    });
+    mockAdmin.saveSetting.mockResolvedValue({ ok: true });
+    renderAdmin('/admin/setup/settings');
+    const select = await screen.findByLabelText('Practice servers for') as HTMLSelectElement;
+    expect(select.value).toBe('admins');
+    fireEvent.change(select, { target: { value: 'everyone' } });
+    await waitFor(() => expect(mockAdmin.saveSetting).toHaveBeenCalledWith('practice_leasing', 'everyone'));
+  });
+
   it('says which servers are missing the mappack next to the campaign pool', async () => {
     mockAdmin.settings.mockResolvedValue({
       settings: [{ key: 'map_pool', label: 'Campaign pool', help: 'h', group: 'Queue', value: '["no_mercy"]', type: { kind: 'campaigns' } }],

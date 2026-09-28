@@ -6,6 +6,7 @@ import { practiceRoutes } from '../src/routes/practice.js';
 import { addServer } from '../src/serverPool.js';
 import { PracticeLeases, getLease } from '../src/practiceLeases.js';
 import { authedCookie } from './helpers.js';
+import { setSetting } from '../src/settings.js';
 
 const OWNER = '76561199000000061';
 const FRIEND = '76561199000000062';
@@ -35,6 +36,7 @@ beforeEach(async () => {
     db, publicUrl: 'https://riversidepug.com',
     rcon: async (_s, cmds) => { sent.push(cmds); return cmds.map((c) => (c === 'status' ? 'players : 0 humans, 0 bots (31 max)' : '')); },
     release: async () => true,
+    restart: async () => true,
     sleep: async () => {},
   });
   app = Fastify();
@@ -45,6 +47,8 @@ beforeEach(async () => {
   friend = authedCookie(app, db, FRIEND);
   admin = authedCookie(app, db, ADMIN);
   db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
+  // Most tests are about leases, not the rollout switch: open to everyone.
+  setSetting(db, 'practice_leasing', 'everyone');
 });
 afterEach(async () => { leases.stop(); await app.close(); });
 
@@ -230,5 +234,43 @@ describe('POST /api/practice/leases/:id/drill', () => {
     const r = await load(1, 'K7QX', owner);
     expect(r.statusCode).toBe(502);
     expect(r.json().error).toBe('Your server refused it: practice not enabled.');
+  });
+});
+
+describe('the practice_leasing rollout switch', () => {
+  it('defaults to admins: only admins can start or join, and nobody else is shown the park', async () => {
+    const fresh = openDb(':memory:');
+    expect(fresh.prepare("SELECT value FROM settings WHERE key = 'practice_leasing'").get()).toEqual({ value: 'admins' });
+    seedServers(3);
+    setSetting(db, 'practice_leasing', 'admins');
+    const r = await start({ kind: 'park' });
+    expect(r.statusCode).toBe(403);
+    expect(r.json().error).toBe('Practice servers are being tried out by admins first. They open to everyone soon.');
+    expect((await start({ kind: 'park' }, admin)).statusCode).toBe(200);
+    // A player (or a visitor) is shown nothing; an admin sees the park.
+    expect((await app.inject({ method: 'GET', url: '/api/practice/park', cookies: owner })).json())
+      .toEqual({ available: false, parks: [], mine: null });
+    expect((await app.inject({ method: 'GET', url: '/api/practice/park' })).json().available).toBe(false);
+    expect((await app.inject({ method: 'GET', url: '/api/practice/park', cookies: admin })).json().parks).toHaveLength(1);
+    // Joining follows the switch too.
+    expect((await app.inject({ method: 'GET', url: '/api/practice/leases/1', cookies: owner })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'GET', url: '/api/practice/leases/1', cookies: admin })).statusCode).toBe(200);
+  });
+
+  it('off keeps everyone out, admins included', async () => {
+    seedServers(3);
+    setSetting(db, 'practice_leasing', 'off');
+    const r = await start({ kind: 'park' }, admin);
+    expect(r.statusCode).toBe(403);
+    expect(r.json().error).toBe('Practice servers are turned off right now.');
+    expect((await app.inject({ method: 'GET', url: '/api/practice/park', cookies: admin })).json().available).toBe(false);
+  });
+
+  it('everyone shows the park list to signed-out visitors too', async () => {
+    seedServers(3);
+    await start({ kind: 'park' });
+    const anon = (await app.inject({ method: 'GET', url: '/api/practice/park' })).json();
+    expect(anon.available).toBe(true);
+    expect(anon.parks).toHaveLength(1);
   });
 });

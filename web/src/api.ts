@@ -879,7 +879,8 @@ export interface AdminSetting {
     | { kind: 'string'; maxLength: number; allowEmpty: boolean }
     | { kind: 'campaigns' }
     | { kind: 'bool' }
-    | { kind: 'intList'; min: number; max: number; maxItems: number };
+    | { kind: 'intList'; min: number; max: number; maxItems: number }
+    | { kind: 'choice'; options: { value: string; label: string }[] };
 }
 
 export interface AuditEntry {
@@ -1775,6 +1776,8 @@ export interface PracticeLease {
   drillCode: string | null;
   createdAt: string;
   readyAt: string | null;
+  /** While setting up: 'resetting' (srcds restarting) or 'loading'. */
+  setupPhase: 'resetting' | 'loading' | null;
   endsAt: string;
   humans: number;
   capacity: number | null;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { api, ApiError, type DrillActor, type DrillSpec, type PracticeLease } from '../api';
 import { formatTime } from './ReplayControls';
-import { leasePath } from '../practice';
+import { leasePath, setupText } from '../practice';
 import { ConnectPanel } from '../components/ConnectPanel';
 import { CopyRow } from '../components/CopyRow';
 
@@ -10,6 +10,7 @@ const SERVER_POLL_MS = 4_000;
 
 type ServerState =
   | { kind: 'checking' }
+  | { kind: 'unavailable' }
   | { kind: 'none' }
   | { kind: 'own'; lease: PracticeLease; loaded: boolean }
   | { kind: 'started'; lease: PracticeLease };
@@ -164,12 +165,15 @@ export function DrillThis(
     setServer({ kind: 'checking' });
     (async () => {
       try {
-        const { mine } = await api.practiceParks();
+        const { available, mine } = await api.practiceParks();
+        // Practice servers are not open to this viewer (the rollout switch):
+        // the panel is the code alone, as it was before servers existed.
+        if (!available) { if (alive) setServer({ kind: 'unavailable' }); return; }
         if (!mine || mine.kind !== 'drill') { if (alive) setServer({ kind: 'none' }); return; }
         const lease = await api.practiceLease(mine.id);
         if (alive) setServer(lease.state === 'ready' || lease.state === 'setting_up' ? { kind: 'own', lease, loaded: false } : { kind: 'none' });
       } catch {
-        if (alive) setServer({ kind: 'none' });
+        if (alive) setServer({ kind: 'unavailable' });
       }
     })();
     return () => { alive = false; };
@@ -263,6 +267,7 @@ export function DrillThis(
   const { code, spec } = state;
   const line = `!drill ${code}`;
   const leased = server.kind === 'own' || server.kind === 'started';
+  const serverless = server.kind === 'unavailable';
   return (
     <div class="drill" role="region" aria-label="Replay drill">
       <div class="drill__head">
@@ -270,7 +275,7 @@ export function DrillThis(
         <button class="chip" type="button" onClick={() => { setState({ kind: 'idle' }); onHide?.(); }}>{onHide ? 'Close' : 'Hide'}</button>
       </div>
 
-      <div class="drill__primary">
+      {!serverless && <div class="drill__primary">
         {server.kind === 'checking' && <p class="muted">Checking for a practice server of yours...</p>}
         {server.kind === 'none' && (
           <>
@@ -290,18 +295,18 @@ export function DrillThis(
           <p class="drill__status" role="status">Sent to {server.lease.server}. The drill loads in a few seconds.</p>
         )}
         {server.kind === 'started' && server.lease.state === 'setting_up' && (
-          <p class="drill__status" role="status">Setting up {server.lease.server} with this drill, about half a minute. You can connect now.</p>
+          <p class="drill__status" role="status">{setupText(server.lease)}</p>
         )}
         {server.kind === 'started' && server.lease.state === 'ready' && (
           <p class="drill__status" role="status">{server.lease.server} is ready with this drill loaded.</p>
         )}
         {serverError && <p class="drill__error" role="alert">{serverError}</p>}
         {leased && <LeaseConnect lease={server.lease} />}
-      </div>
+      </div>}
 
-      <div class={`drill__secondary${leased ? ' drill__secondary--quiet' : ''}`}>
+      <div class={serverless ? 'drill__only' : `drill__secondary${leased ? ' drill__secondary--quiet' : ''}`}>
         <p class={`drill__code${leased ? ' drill__code--small' : ''}`} aria-label={`Drill code ${code}`}>{code}</p>
-        <p class="drill__how">Or type <code>{line}</code> in any practice server</p>
+        <p class="drill__how">{serverless ? 'Type' : 'Or type'} <code>{line}</code> in {serverless ? 'a' : 'any'} practice server</p>
         <div class="connect__line drill__line">
           <code>{line}</code>
           <button class="btn btn--block btn--ghost" type="button" onClick={() => copy(line)}>{copied ? 'Copied' : 'Copy'}</button>

@@ -4,10 +4,11 @@ import { parseReplay } from '../replayFormat.js';
 import { buildDrill } from '../drillSpec.js';
 import { createDrill, drillForMoment, drillsCreatedSince, fetchDrill, normalizeCode, DRILLS_PER_HOUR } from '../practiceDrills.js';
 import {
-  adminLeaseRows, getLease, leaseView, openDrillLeaseOf, parkListings, type LeaseKind, type PracticeLeases,
+  adminLeaseRows, getLease, leaseView, openDrillLeaseOf, parkListings, practiceAccess, practiceClosedMessage, type LeaseKind, type PracticeLeases,
 } from '../practiceLeases.js';
 import { getPlayer } from '../players.js';
 import { logAdmin } from '../admin/audit.js';
+import { getSetting } from '../settings.js';
 import { campaignRegistry, resolveCampaignForMap } from '../campaignRegistry.js';
 import { finishedReplayBytes, type ReplaySources } from './replays.js';
 import { makeOptionalViewer, makeRequireActive, makeRequireAdmin } from './guards.js';
@@ -186,6 +187,7 @@ export async function practiceRoutes(
   app.post('/api/practice/leases', async (req, reply) => {
     const steamid = requireActive(req, reply);
     if (!steamid) return reply;
+    if (!practiceAccess(db, steamid)) return reply.code(403).send({ error: practiceClosedMessage(db) });
     if (!leases) return reply.code(503).send({ error: 'Practice servers are not available on this site.' });
     const body = (req.body ?? {}) as { kind?: unknown; drillCode?: unknown };
     const kind = body.kind;
@@ -215,8 +217,14 @@ export async function practiceRoutes(
   app.get('/api/practice/park', async (req) => {
     const viewer = optionalViewer(req);
     const mine = viewer ? openDrillLeaseOf(db, viewer) : undefined;
+    // The staged rollout switch hides all of it, list included, from anyone
+    // it keeps out: a park they cannot join is not worth advertising.
+    // Open to everyone, a signed-out visitor sees the list too (and is asked
+    // to sign in to join), as the Play page's landing block intends.
+    const visible = getSetting(db, 'practice_leasing') === 'everyone' || practiceAccess(db, viewer);
+    if (leases === null || !visible) return { available: false, parks: [], mine: null };
     return {
-      available: leases !== null,
+      available: true,
       parks: parkListings(db),
       mine: mine ? { id: mine.id, kind: mine.kind } : null,
     };
@@ -227,6 +235,7 @@ export async function practiceRoutes(
   app.get('/api/practice/leases/:id', async (req, reply) => {
     const steamid = requireActive(req, reply);
     if (!steamid) return reply;
+    if (!practiceAccess(db, steamid)) return reply.code(403).send({ error: practiceClosedMessage(db) });
     const id = Number((req.params as { id: string }).id);
     const lease = Number.isInteger(id) ? getLease(db, id) : undefined;
     if (!lease) return reply.code(404).send({ error: 'No such practice server.' });
@@ -248,6 +257,7 @@ export async function practiceRoutes(
   app.post('/api/practice/leases/:id/drill', async (req, reply) => {
     const steamid = requireActive(req, reply);
     if (!steamid) return reply;
+    if (!practiceAccess(db, steamid)) return reply.code(403).send({ error: practiceClosedMessage(db) });
     if (!leases) return reply.code(503).send({ error: 'Practice servers are not available on this site.' });
     const id = Number((req.params as { id: string }).id);
     const lease = Number.isInteger(id) ? getLease(db, id) : undefined;

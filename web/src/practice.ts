@@ -1,4 +1,4 @@
-import type { PracticeEndReason, PracticeKind } from './api';
+import type { PracticeEndReason, PracticeKind, PracticeLease } from './api';
 
 /** Minutes with nobody on before a lease closes itself. Mirrors IDLE_END_MS
  *  in src/practiceLeases.ts (the park is shared and gives its box back
@@ -46,4 +46,15 @@ export const leasePath = (id: number) => `/practice/${id}`;
 export function endReasonText(reason: PracticeEndReason | null, kind: PracticeKind): string {
   if (reason === 'idle') return `nobody was on it for ${IDLE_MINUTES[kind]} minutes`;
   return END_REASON[reason ?? 'owner'];
+}
+
+/** What a lease that is still setting up is doing, as one sentence. The
+ *  reset is a real srcds restart (30 to 60 seconds), and connecting during
+ *  it just gets you dropped, so the line says to wait until it is loading. */
+export function setupText(lease: Pick<PracticeLease, 'kind' | 'server' | 'setupPhase'>): string {
+  const what = lease.kind === 'park' ? 'the Practice Park' : 'your drill server';
+  if (lease.setupPhase === 'loading') {
+    return `Loading ${what} on ${lease.server}. You can connect now; it finishes around you.`;
+  }
+  return `Resetting ${lease.server} for a clean start, which takes up to a minute. Connect once it is loading.`;
 }

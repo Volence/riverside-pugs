@@ -899,6 +899,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // least this many OTHER enabled servers stay idle for the queue, and never
   // more than practice_max_leases at once (0 turns leasing off).
   practice_reserve_idle: '1',
+  // Who may start and join practice servers: off | admins | everyone. Admins
+  // first, for the staged rollout (owner, 2026-09-28).
+  practice_leasing: 'admins',
   practice_max_leases: '2',
 };
 
@@ -1546,6 +1549,7 @@ export function openDb(path: string): DB {
       drill_code      TEXT,
       created_at      TEXT NOT NULL DEFAULT (datetime('now')),
       ready_at        TEXT,
+      setup_phase     TEXT,
       last_human_at   TEXT NOT NULL DEFAULT (datetime('now')),
       ends_at         TEXT NOT NULL,
       humans          INTEGER NOT NULL DEFAULT 0,
@@ -1558,6 +1562,10 @@ export function openDb(path: string): DB {
     CREATE INDEX IF NOT EXISTS practice_leases_open ON practice_leases (server_id) WHERE ended_at IS NULL;
     CREATE INDEX IF NOT EXISTS practice_leases_owner ON practice_leases (owner_player_id, created_at);
   `);
+  // Which step of its setup a lease is on, for the page's status line:
+  // 'resetting' (srcds restarting for a clean slate), 'loading' (the
+  // practice cfg and the password lines), NULL once ready or before setup.
+  ensureColumn(db, 'practice_leases', 'setup_phase', 'TEXT');
 
   seed(db);
   return db;

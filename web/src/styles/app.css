@@ -1738,6 +1738,8 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .drill__secondary { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--border); }
 .drill__secondary .drill__code { margin-top: 0; }
 .drill__code--small { font-size: var(--fs-h2); letter-spacing: 0.08em; }
+/* Practice servers not open to this viewer: the code is the whole result. */
+.drill__only { margin-top: var(--sp-2); }
 
 /* ---------- practice servers (src/practiceLeases.ts) ---------- */
 

@@ -8,7 +8,7 @@ import { ConnectPanel } from '../components/ConnectPanel';
 import { CopyRow } from '../components/CopyRow';
 import { useSecondsLeft } from '../components/Countdown';
 import { confirm } from '../components/Confirm';
-import { IDLE_MINUTES, KIND_LABEL, endReasonText, leaseClock, leasePath } from '../practice';
+import { IDLE_MINUTES, KIND_LABEL, endReasonText, leaseClock, leasePath, setupText } from '../practice';
 
 /** Fast while something is about to change (setup, wind-down), slow once
  *  the server is just running. */
@@ -122,7 +122,7 @@ export function LeasePanel({ lease, onChanged }: { lease: PracticeLease; onChang
   return (
     <Panel class="practice">
       <p class="eyebrow">
-        {lease.state === 'setting_up' ? 'Setting up'
+        {lease.state === 'setting_up' ? (lease.setupPhase === 'loading' ? 'Loading' : 'Resetting')
           : lease.state === 'ready' ? 'Ready'
           : lease.state === 'ending' ? 'Closing'
           : 'Closed'}
@@ -133,7 +133,7 @@ export function LeasePanel({ lease, onChanged }: { lease: PracticeLease; onChang
         <p class="practice__note">Practice Park, closes 5 minutes after everyone leaves.</p>
       )}
       {lease.state === 'setting_up' && (
-        <p class="practice__note">The server is loading the practice config. That takes about half a minute; you can connect now and it finishes around you.</p>
+        <p class="practice__note" role="status">{setupText(lease)}</p>
       )}
       {open && lease.warnedAt && (
         <p class="practice__warn" role="alert">A PUG needs this server. It closes within a minute: ranked matches always come first.</p>

@@ -23,7 +23,7 @@ function actor(over: Partial<DrillActor> = {}): DrillActor {
 
 const LEASE = (over: Partial<PracticeLease> = {}): PracticeLease => ({
   id: 7, kind: 'drill', server: 'Riverside #4', owner: { steamid: '1', name: 'me' }, isOwner: true, canEnd: true,
-  drillCode: 'K7QX', createdAt: '', readyAt: '', endsAt: new Date(Date.now() + 3_600_000).toISOString(), humans: 0,
+  drillCode: 'K7QX', createdAt: '', readyAt: '', setupPhase: null, endsAt: new Date(Date.now() + 3_600_000).toISOString(), humans: 0,
   capacity: null, map: null, warnedAt: null, state: 'ready', endReason: null, endedAt: null,
   connect: { host: '66.59.208.5', port: 27016, password: 'abcd2345' }, ...over,
 });
@@ -132,7 +132,7 @@ describe('DrillThis', () => {
 
   it('without a drill server of your own: leads with Start a drill server, then shows its way in', async () => {
     mockApi.createDrill.mockResolvedValue({ code: 'K7QX', spec: SPEC });
-    mockApi.startPractice.mockResolvedValue({ joined: false, lease: LEASE({ state: 'setting_up' }) });
+    mockApi.startPractice.mockResolvedValue({ joined: false, lease: LEASE({ state: 'setting_up', setupPhase: 'resetting' }) });
     render(<DrillThis {...props()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Drill this' }));
     const start = await screen.findByRole('button', { name: 'Start a drill server' });
@@ -140,12 +140,24 @@ describe('DrillThis', () => {
     expect(screen.getByLabelText('Drill code K7QX').classList.contains('drill__code--small')).toBe(false);
     fireEvent.click(start);
     expect(mockApi.startPractice).toHaveBeenCalledWith({ kind: 'drill', drillCode: 'K7QX' });
-    expect((await screen.findByRole('status')).textContent).toMatch(/^Setting up Riverside #4 with this drill/);
+    // The server restarts first, and says so: connecting during that drops you.
+    expect((await screen.findByRole('status')).textContent)
+      .toBe('Resetting Riverside #4 for a clean start, which takes up to a minute. Connect once it is loading.');
     expect(screen.getByText('password abcd2345; connect 66.59.208.5:27016')).toBeTruthy();
     expect(screen.getByText('abcd2345')).toBeTruthy();
     expect(screen.getByText(`${location.origin}/practice/7`)).toBeTruthy();
     expect(screen.getByLabelText('Drill code K7QX').classList.contains('drill__code--small')).toBe(true);
     expect(screen.queryByRole('button', { name: 'Start a drill server' })).toBeNull();
+  });
+
+  it('where practice servers are not open to the viewer: the code alone, no server button', async () => {
+    mockApi.createDrill.mockResolvedValue({ code: 'K7QX', spec: SPEC });
+    mockApi.practiceParks.mockResolvedValue({ available: false, parks: [], mine: null });
+    render(<DrillThis {...props()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Drill this' }));
+    await waitFor(() => expect(screen.getByText(/in a practice server/).textContent).toBe('Type !drill K7QX in a practice server'));
+    expect(screen.queryByRole('button', { name: 'Start a drill server' })).toBeNull();
+    expect(screen.queryByText(/Checking for a practice server/)).toBeNull();
   });
 
   it('says why no drill server could be started, and lets you try again', async () => {

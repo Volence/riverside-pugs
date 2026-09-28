@@ -43,6 +43,8 @@ describe('settings schema', () => {
     expect(validateSetting('map_pool', ['dead_air', 'no_mercy'])).toEqual({ ok: true, value: '["dead_air","no_mercy"]' });
     expect(validateSetting('map_pool', ['dead_air', 'nope']).ok).toBe(false);
     expect(validateSetting('map_pool', []).ok).toBe(false);
+    expect(validateSetting('practice_leasing', 'everyone')).toEqual({ ok: true, value: 'everyone' });
+    expect(validateSetting('practice_leasing', 'some').ok).toBe(false);
     expect(validateSetting('discord_voice_enabled', true)).toEqual({ ok: true, value: '1' });
     expect(validateSetting('discord_queue_thresholds', [4, 6])).toEqual({ ok: true, value: '[4,6]' });
     expect(validateSetting('discord_queue_thresholds', [0]).ok).toBe(false);
