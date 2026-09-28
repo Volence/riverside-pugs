@@ -1,5 +1,5 @@
 import { Fragment } from 'preact';
-import { useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { api, type MatchDetail as MatchDetailData, type MatchOngoing, type MatchPlayerStats, type ReportMoment, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { campaignName, deriveLiveStats, fmtBytes, fmtDate, fmtLatency, mapName, orderStatKeysBySide, statGroupStarts, winnerLabel } from '../format';
@@ -39,6 +39,50 @@ function MapReplay(
 ) {
   const [half, setHalf] = useState(initialHalf ?? 1);
   const momentRef = useRef(0);
+  // What theater's own Report this moment / Drill this chips have open.
+  // The page's buttons above are out of reach in theater (it covers the
+  // page, fullscreen when the browser allows), so theater carries its own
+  // pair and shows their result in a panel over the map rather than leave
+  // fullscreen. `n` remounts the drill panel on each press, so every press
+  // drills the moment on screen at that press.
+  const [tool, setTool] = useState<
+    null | { kind: 'report'; moment: ReportMoment | null } | { kind: 'drill'; n: number }
+  >(null);
+  // A round switch leaves the old round's moment behind.
+  useEffect(() => { setTool(null); }, [half]);
+  const theaterTools = onMoment || drill ? {
+    chips: (
+      <>
+        {onMoment && (
+          <button class={`chip${tool?.kind === 'report' ? ' is-on' : ''}`} type="button"
+            title="Pause on what you want the moderators to see, then press this"
+            onClick={() => setTool(tool?.kind === 'report' ? null
+              : { kind: 'report', moment: { ordinal, half, tMs: Math.round(momentRef.current) } })}>
+            Report this moment
+          </button>
+        )}
+        {drill && (
+          <button class={`chip${tool?.kind === 'drill' ? ' is-on' : ''}`} type="button"
+            title="Pause on the setup you want to practise, then press this"
+            onClick={() => setTool(tool?.kind === 'drill' ? null : { kind: 'drill', n: Date.now() })}>
+            Drill this
+          </button>
+        )}
+      </>
+    ),
+    panel: tool === null ? null : (
+      <div class="theater-tool" role="dialog" aria-label={tool.kind === 'report' ? 'Report this moment' : 'Replay drill'}>
+        {tool.kind === 'report' ? (
+          <ReportPlayer matchId={matchId} moment={tool.moment}
+            onClearMoment={() => setTool({ kind: 'report', moment: null })} onClose={() => setTool(null)} />
+        ) : drill ? (
+          <DrillThis key={tool.n} matchId={matchId} ordinal={ordinal} half={half} momentRef={momentRef}
+            signedIn={drill.signedIn} autoStart onHide={() => setTool(null)} />
+        ) : null}
+      </div>
+    ),
+    onClose: () => setTool(null),
+  } : undefined;
   const timeline = useFetch(
     (s) => api.replayTimeline(matchId, ordinal, half, s),
     [matchId, ordinal, half],
@@ -74,6 +118,7 @@ function MapReplay(
         // spec changes) never lands the wrong moment.
         seekMs={initialHalf != null && half === initialHalf ? seekMs : undefined}
         momentRef={momentRef}
+        theaterTools={theaterTools}
       />
     </>
   );

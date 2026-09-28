@@ -139,6 +139,26 @@ describe('DrillThis', () => {
     expect(screen.getByRole('button', { name: 'Start a drill server with this drill' })).toBeTruthy();
   });
 
+  it('in theater\'s panel: drills at once, and its Close empties and closes the panel', async () => {
+    mockApi.createDrill.mockResolvedValue({ code: 'K7QX', spec: SPEC });
+    const onHide = vi.fn();
+    render(<DrillThis {...props()} autoStart onHide={onHide} />);
+    expect(mockApi.createDrill).toHaveBeenCalledTimes(1);
+    await screen.findByLabelText('Drill code K7QX');
+    expect(screen.queryByRole('button', { name: 'Hide' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onHide).toHaveBeenCalled();
+  });
+
+  it('in theater\'s panel: an error still has a way out', async () => {
+    mockApi.createDrill.mockRejectedValue(new ApiError(429, 'slow down'));
+    const onHide = vi.fn();
+    render(<DrillThis {...props()} autoStart onHide={onHide} />);
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onHide).toHaveBeenCalled();
+  });
+
   it('says when nobody was alive', async () => {
     mockApi.createDrill.mockResolvedValue({ code: 'K7QX', spec: { ...SPEC, actors: [], entities: [] } });
     render(<DrillThis {...props()} />);

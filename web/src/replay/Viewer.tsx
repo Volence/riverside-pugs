@@ -1,3 +1,4 @@
+import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { canvasForAspect } from '../../../src/mapTransform';
 import { STATE } from '../../../src/replayFormat';
@@ -141,7 +142,7 @@ export function edgeTop(chromeHeight: number): number {
 }
 
 export function Viewer(
-  { spec, live = false, names = NO_NAMES, timeline, demo = null, seekMs, momentRef }:
+  { spec, live = false, names = NO_NAMES, timeline, demo = null, seekMs, momentRef, theaterTools }:
   {
     spec: ReplaySpec; live?: boolean; names?: Record<string, string>; timeline?: TimelineEntry[];
     /** Where this round sits in the match's SourceTV demo, when known. */
@@ -152,6 +153,15 @@ export function Viewer(
      *  match page's "Report this moment") can ask without the viewer knowing
      *  what it is for. A ref, not a callback: it must never cause a render. */
     momentRef?: { current: number };
+    /** Extra chips for theater's toolbar, and the panel they open, from the
+     *  page around the viewer (the match page's Report this moment and Drill
+     *  this). Theater covers the page, fullscreen even, so a control that
+     *  lives on the page is out of reach there; these render inside the
+     *  viewer's root instead. The panel is drawn over the map, outside the
+     *  toolbar, so it does not fade with it when the pointer rests.
+     *  `onClose` runs when theater closes, so a panel does not come back
+     *  stale the next time it opens. */
+    theaterTools?: { chips: ComponentChildren; panel: ComponentChildren | null; onClose?: () => void };
   },
 ) {
   const { header, frames, closed, phase, behindSinceMs = null, tooNew, error } = useReplaySource(spec);
@@ -197,6 +207,10 @@ export function Viewer(
     return () => ro.disconnect();
   }, [theater]);
   const { idle, wake } = useIdle(theater);
+  // Leaving theater closes whatever its toolbar opened (see theaterTools).
+  const closeTools = useRef(theaterTools?.onClose);
+  closeTools.current = theaterTools?.onClose;
+  useEffect(() => { if (!theater) closeTools.current?.(); }, [theater]);
 
   /**
    * One interpolated frame per DOM tick, shared by everything made of DOM.
@@ -513,8 +527,10 @@ export function Viewer(
           {filters}
           <div class="theater__toggles">
             <ToggleChips toggles={toggles} toggle={toggle} theater={theaterChip} />
+            {theaterTools?.chips}
           </div>
         </div>
+        {theaterTools?.panel && <div class="theater__panel">{theaterTools.panel}</div>}
         <HudStrip
           players={livePlayers}
           header={header}
