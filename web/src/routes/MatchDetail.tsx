@@ -13,6 +13,7 @@ import { ReportPlayer } from '../components/ReportPlayer';
 import { EndorsePanel } from '../components/EndorsePanel';
 import { sideTotals } from '../matchTotals';
 import { Viewer } from '../replay/Viewer';
+import { DrillThis } from '../replay/DrillThis';
 
 /**
  * One map's round switch and replay viewer.
@@ -22,7 +23,7 @@ import { Viewer } from '../replay/Viewer';
  * called from inside a plain array-map callback.
  */
 function MapReplay(
-  { matchId, ordinal, names, initialHalf, seekMs, onMoment }: {
+  { matchId, ordinal, names, initialHalf, seekMs, onMoment, drill }: {
     matchId: number; ordinal: number; names: Record<string, string>;
     /** The round a deep link asked for, already validated by the caller
      *  against this match's own rounds. Undefined for an ordinary visit. */
@@ -31,6 +32,9 @@ function MapReplay(
     seekMs?: number;
     /** Given for a signed-in viewer: attach what is on screen to a report. */
     onMoment?: (m: ReportMoment) => void;
+    /** Given for a finished match: offer "Drill this" (replay drills). The
+     *  button shows signed out too, and says to sign in when pressed. */
+    drill?: { signedIn: boolean };
   },
 ) {
   const [half, setHalf] = useState(initialHalf ?? 1);
@@ -50,6 +54,9 @@ function MapReplay(
             onClick={() => onMoment({ ordinal, half, tMs: Math.round(momentRef.current) })}>
             Report this moment
           </button>
+        )}
+        {drill && (
+          <DrillThis matchId={matchId} ordinal={ordinal} half={half} momentRef={momentRef} signedIn={drill.signedIn} />
         )}
       </div>
       {/* A map played before recording existed has no match_replays row.
@@ -608,6 +615,9 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
                 initialHalf={linkedHere ? deepLink.half ?? undefined : undefined}
                 seekMs={linkedHere ? deepLink.seekMs : undefined}
                 onMoment={me ? setMoment : undefined}
+                // The server refuses drills of anything unfinished too: a
+                // frame carries ghost positions.
+                drill={match.state === 'completed' || match.state === 'aborted' ? { signedIn: Boolean(me) } : undefined}
               />
               {Object.keys(mp.stats ?? {}).length > 0
                 ? (

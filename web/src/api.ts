@@ -4,6 +4,7 @@
 
 import type { TimelineEntry } from './replay/timeline';
 import type { DemoSync } from './replay/demoTick';
+import type { DrillSpec } from '../../src/drillSpec';
 
 export type Team = 'a' | 'b';
 export type Winner = Team | 'draw';
@@ -1745,6 +1746,12 @@ export const communityApi = {
 /** A second of a round: which map of the match, which half, how far in. */
 export interface ReportMoment { ordinal: number; half: number; tMs: number }
 
+/** A replay drill as the practice plugin receives it. The shape is defined
+ *  once, server-side, in src/drillSpec.ts (the contract with the plugin), and
+ *  only imported here so the panel can never drift from it. */
+export type { DrillSpec, DrillActor } from '../../src/drillSpec';
+export interface DrillMoment { matchId: number; ordinal: number; half: number; tMs: number }
+
 export const api = {
   me: (signal?: AbortSignal) => get<Me>('/api/me', signal),
   site: (signal?: AbortSignal) => get<SiteInfo>('/api/site', signal),
@@ -1769,6 +1776,8 @@ export const api = {
   balancePatch: (id: number, signal?: AbortSignal) => get<PublicEntry>(`/api/balance/patches/${id}`, signal),
   replayLive: (token: string, signal?: AbortSignal) =>
     get<{ filename: string; closed: boolean }>(`/api/replays/live/${encodeURIComponent(token)}`, signal),
+  /** Turn a moment of a finished match into a drill code (POST /api/practice/drills). */
+  createDrill: (m: DrillMoment) => post<{ code: string; spec: DrillSpec }>('/api/practice/drills', m),
   replayTimeline: (matchId: number, ordinal: number, half: number, signal?: AbortSignal) =>
     get<{ entries: TimelineEntry[]; demo?: DemoSync | null }>(`/api/replays/timeline/${matchId}/${ordinal}/${half}`, signal),
   map: (map: string, signal?: AbortSignal) =>

@@ -255,6 +255,17 @@ describe('MatchDetail', () => {
     expect(screen.queryByText('Chat log')).toBeNull();
   });
 
+  it('offers Drill this on a finished match beside the replay, signed in or not', async () => {
+    mockApi.match.mockResolvedValue(matchWith({}));
+    const { unmount } = render(<MatchDetail id="7" me="1" />);
+    expect(await screen.findByRole('button', { name: 'Drill this' })).toBeTruthy();
+    unmount();
+    mockApi.match.mockResolvedValue(matchWith({}));
+    render(<MatchDetail id="7" me={null} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Drill this' }));
+    expect(screen.getByRole('link', { name: 'Log in to create drills' })).toBeTruthy();
+  });
+
   it('shows no SR changes on a voided match, whose ratings were rebuilt without it', async () => {
     mockApi.match.mockResolvedValue(matchWith({
       match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a', voidedAt: '2026-09-07T00:00:00' },
