@@ -17,18 +17,30 @@
 // Thresholds are the owner's (2026-09-27): what riversidepug.com's autoexec.cfg
 // sets. Every one is a cvar and can be turned off on its own, and
 // sm_pug_rates_enforce 0 turns the whole gate off.
+//
+// Effect Detail (cpu_level) is held the same way, at the owner's ask ("they
+// should at least behave similarly"). Low thins smoke and the boomer cloud
+// enough to see through. l4d_cvarwatch's ready gate did this by taking back
+// the player's ready, which only worked because nothing could move them;
+// with the lock waiting here, one rule and one message cover both. The value
+// is not userinfo, so it is asked of the client (QueryClientConVar) on each
+// lock tick and cached. Like cvarwatch, only a known Low counts: an
+// unanswered query never holds anyone.
 
 ConVar g_cvRatesEnforce;
 ConVar g_cvRatesMaxLerp;
 ConVar g_cvRatesMinCmd;
 ConVar g_cvRatesMinUpd;
 ConVar g_cvRatesMinRate;
+ConVar g_cvRatesMinCpu;
 ConVar g_cvRatesSvMinUpd;
 ConVar g_cvRatesSvMinRatio;
 ConVar g_cvRatesSvMaxRatio;
 
 float g_fRatesWarnedAt[MAXPLAYERS + 1];
 bool g_bRatesHeld[MAXPLAYERS + 1];   // last lock tick found this client failing
+float g_fRatesCpu[MAXPLAYERS + 1] = {-1.0, ...};   // last cpu_level answer, -1 unknown
+int g_iRatesCpuUid[MAXPLAYERS + 1];  // userid that answer belongs to
 
 void RatesInit()
 {
@@ -44,6 +56,9 @@ void RatesInit()
 		"Lowest cl_updaterate allowed on a team. 0 = no check.", FCVAR_NOTIFY, true, 0.0, true, 1000.0);
 	g_cvRatesMinRate = CreateConVar("sm_pug_rates_min_rate", "100000",
 		"Lowest rate allowed on a team. 0 = no check.", FCVAR_NOTIFY, true, 0.0, true, 10000000.0);
+	g_cvRatesMinCpu = CreateConVar("sm_pug_rates_min_cpu_level", "1",
+		"Lowest cpu_level (Effect Detail: 0 Low, 1 Medium, 2 High) allowed on a team. 0 = no check.",
+		FCVAR_NOTIFY, true, 0.0, true, 2.0);
 	// For the lerp the engine will actually use, the same way lerptracker
 	// works it out. L4D1 has no sv_maxupdaterate, so that one is not read.
 	g_cvRatesSvMinUpd = FindConVar("sv_minupdaterate");
@@ -92,12 +107,39 @@ float RatesLerp(int client)
 	return interp > byRatio ? interp : byRatio;
 }
 
+/** Ask the client for cpu_level; the answer lands in the cache a moment later. */
+void RatesQueryCpu(int client)
+{
+	if (g_cvRatesMinCpu.IntValue <= 0 || IsFakeClient(client)) return;
+	QueryClientConVar(client, "cpu_level", OnRatesCpu, GetClientUserId(client));
+}
+
+public void OnRatesCpu(QueryCookie cookie, int client, ConVarQueryResult result,
+	const char[] name, const char[] value, any uid)
+{
+	if (result != ConVarQuery_Okay) return;
+	if (!IsClientInGame(client) || GetClientUserId(client) != uid) return;
+	g_fRatesCpu[client] = StringToFloat(value);
+	g_iRatesCpuUid[client] = uid;
+}
+
+/** Known Low (below the minimum). Unknown never counts. */
+bool RatesCpuLow(int client)
+{
+	int minCpu = g_cvRatesMinCpu.IntValue;
+	if (minCpu <= 0 || g_iRatesCpuUid[client] != GetClientUserId(client)) return false;
+	return g_fRatesCpu[client] >= 0.0 && g_fRatesCpu[client] < float(minCpu);
+}
+
 /** Whether a client's settings pass. On failure `why` holds what to type, one
- *  console command per problem, ready to paste. */
-bool RatesOk(int client, char[] why, int maxlen)
+ *  console command per problem, ready to paste, and `cpuLow` says Effect
+ *  Detail is too low (a menu setting, so it gets its own line). */
+bool RatesOk(int client, char[] why, int maxlen, bool &cpuLow)
 {
 	why[0] = '\0';
+	cpuLow = false;
 	if (!RatesEnforced() || IsFakeClient(client)) return true;
+	cpuLow = RatesCpuLow(client);
 
 	float maxLerp = g_cvRatesMaxLerp.FloatValue;
 	// A thousandth of a millisecond of slack: the client stores cl_interp as a
@@ -121,43 +163,54 @@ bool RatesOk(int client, char[] why, int maxlen)
 	{
 		Format(why, maxlen, "%s rate %d;", why, minRate);
 	}
-	return why[0] == '\0';
+	return why[0] == '\0' && !cpuLow;
 }
 
 /** Tell a failing player what is wrong and how to fix it, at most every 15 s.
  *  `playing` is a player still on a team mid-round, who is not held yet. */
-void RatesWarn(int client, const char[] why, bool now_, bool playing)
+void RatesWarn(int client, const char[] why, bool cpuLow, bool now_, bool playing)
 {
 	float now = GetEngineTime();
 	if (!now_ && now - g_fRatesWarnedAt[client] < 15.0) return;
 	g_fRatesWarnedAt[client] = now;
 	if (playing)
 	{
-		PrintToChat(client, "\x04[PUG]\x01 Your net settings are off. Fix them now or you will be held in spectator at the next ready-up. Open the console and paste:");
+		PrintToChat(client, "\x04[PUG]\x01 Your game settings are off. Fix them now or you will be held in spectator at the next ready-up.");
 	}
 	else
 	{
-		PrintToChat(client, "\x04[PUG]\x01 Your net settings are off, so you are held in spectator. Open the console and paste:");
+		PrintToChat(client, "\x04[PUG]\x01 Your game settings are off, so you are held in spectator until they are fixed.");
 	}
-	PrintToChat(client, "\x05%s", why);
-	PrintToChat(client, "\x01Or get the autoexec from \x05riversidepug.com/how-to-play\x01 so it is set every time. You go back on your team as soon as it is fixed.");
-	if (!playing) PrintHintText(client, "Net settings off: you are held in spectator.\nSee chat for what to type.");
+	if (why[0] != '\0')
+	{
+		PrintToChat(client, "\x01Open the console and paste:\x05%s", why);
+		PrintToChat(client, "\x01Or get the autoexec from \x05riversidepug.com/how-to-play\x01 so your rates are set every time.");
+	}
+	if (cpuLow)
+	{
+		PrintToChat(client, "\x01Effect Detail is on \x04Low\x01, which lets you see through smoke. Options > Video > Advanced > Effect Detail: \x05Medium or High\x01.");
+	}
+	PrintToChat(client, "\x01You go back on your team as soon as it is fixed. Type \x05!myrates\x01 to check.");
+	if (!playing) PrintHintText(client, "Held in spectator: game settings off.\nSee chat for what to change.");
 }
 
 /** Called by Timer_TeamLock for each rostered client, before it places them.
  *  True means leave this client alone this tick. */
 bool RatesHold(int client, int have)
 {
+	// Refresh Effect Detail for the next tick; this one uses the cached answer.
+	RatesQueryCpu(client);
 	char why[160];
-	if (RatesOk(client, why, sizeof(why)))
+	bool cpuLow;
+	if (RatesOk(client, why, sizeof(why), cpuLow))
 	{
 		if (g_bRatesHeld[client])
 		{
 			g_bRatesHeld[client] = false;
-			PrintToChat(client, "\x04[PUG]\x01 Net settings fixed, thanks.");
+			PrintToChat(client, "\x04[PUG]\x01 Settings fixed, thanks.");
 			char name[MAX_NAME_LENGTH];
 			GetClientName(client, name, sizeof(name));
-			PrintToChatAll("\x04[PUG]\x01 %s fixed their net settings.", name);
+			PrintToChatAll("\x04[PUG]\x01 %s fixed their game settings.", name);
 		}
 		return false;
 	}
@@ -178,10 +231,11 @@ bool RatesHold(int client, int have)
 	{
 		char name[MAX_NAME_LENGTH];
 		GetClientName(client, name, sizeof(name));
-		PrintToChatAll("\x04[PUG]\x01 %s is held in spectator until their net settings are fixed (%s).", name, why);
+		PrintToChatAll("\x04[PUG]\x01 %s is held in spectator until their game settings are fixed (%s%s).",
+			name, cpuLow ? " Effect Detail Low;" : "", why);
 	}
-	if (first || moved) PugDebug("rates hold %N (team %d, moved %d):%s", client, have, moved, why);
-	RatesWarn(client, why, first || moved, playing);
+	if (first || moved) PugDebug("rates hold %N (team %d, moved %d, cpuLow %d):%s", client, have, moved, cpuLow, why);
+	RatesWarn(client, why, cpuLow, first || moved, playing);
 	// Mid-round on a team: nothing moves, but the lock must not treat them as
 	// placed either way, so the answer is the same.
 	return true;
@@ -191,19 +245,26 @@ void RatesClientReset(int client)
 {
 	g_fRatesWarnedAt[client] = 0.0;
 	g_bRatesHeld[client] = false;
+	g_fRatesCpu[client] = -1.0;
+	g_iRatesCpuUid[client] = 0;
 }
 
 public Action Cmd_MyRates(int client, int args)
 {
 	if (client <= 0 || !IsClientInGame(client)) return Plugin_Handled;
 	char why[160];
-	bool ok = RatesOk(client, why, sizeof(why));
-	ReplyToCommand(client, "[PUG] lerp %.1f ms (max %.1f), cl_cmdrate %d (min %d), cl_updaterate %d (min %d), rate %d (min %d)%s",
+	bool cpuLow;
+	bool ok = RatesOk(client, why, sizeof(why), cpuLow);
+	RatesQueryCpu(client);
+	ReplyToCommand(client, "[PUG] lerp %.1f ms (max %.1f), cl_cmdrate %d (min %d), cl_updaterate %d (min %d), rate %d (min %d), cpu_level %s (min %d)%s",
 		RatesLerp(client) * 1000.0, g_cvRatesMaxLerp.FloatValue * 1000.0,
 		RatesInfoInt(client, "cl_cmdrate"), g_cvRatesMinCmd.IntValue,
 		RatesInfoInt(client, "cl_updaterate"), g_cvRatesMinUpd.IntValue,
 		RatesInfoInt(client, "rate"), g_cvRatesMinRate.IntValue,
-		!RatesEnforced() ? ": not enforced" : ok ? ": all good" : ": fix with");
-	if (!ok) ReplyToCommand(client, "%s", why);
+		g_iRatesCpuUid[client] != GetClientUserId(client) ? "unknown" : g_fRatesCpu[client] >= 2.0 ? "High" : g_fRatesCpu[client] >= 1.0 ? "Medium" : "Low",
+		g_cvRatesMinCpu.IntValue,
+		!RatesEnforced() ? ": not enforced" : ok ? ": all good" : ": needs fixing");
+	if (!ok && why[0] != '\0') ReplyToCommand(client, "Paste in console:%s", why);
+	if (!ok && cpuLow) ReplyToCommand(client, "Options > Video > Advanced > Effect Detail: Medium or High");
 	return Plugin_Handled;
 }
