@@ -16,6 +16,11 @@ export interface ReleaseOpts {
    *  reconcile, which may be looking at a box with people on it. Only acts
    *  when that box also has restart_after_match set. */
   restart: boolean;
+  /** Restart even when the box does not have restart_after_match set.
+   *  Only the end of a practice lease passes it: that box has run a practice
+   *  config, and the restart is what guarantees none of it reaches the next
+   *  PUG (src/practiceLeases.ts). Ignored without a restarter. */
+  forceRestart?: boolean;
 }
 
 /** Hands a server back: restore sv_password, and tell the plugin the match whose
@@ -99,15 +104,28 @@ export class ServerReleaser {
    * would mean keeping the row unclaimable until the rcon settles, which is a
    * larger change than this class.
    */
-  release(serverId: number, opts: Partial<ReleaseOpts> = {}): void {
+  release(
+    serverId: number,
+    opts: Partial<ReleaseOpts> = {},
+    /** Called once everything below has settled, with whether the box went
+     *  back in the pool (false: its restart never came back and it stays
+     *  offline, reported already). The practice lease manager closes its
+     *  lease here rather than when this returns, so a lease keeps holding
+     *  its box for the whole restart. */
+    onSettled?: (backInPool: boolean) => void,
+  ): void {
     const server = getServer(this.db, serverId);
-    if (!server) return;
-    const full: ReleaseOpts = { teardown: opts.teardown ?? false, restart: opts.restart ?? false };
+    if (!server) { onSettled?.(false); return; }
+    const full: ReleaseOpts = {
+      teardown: opts.teardown ?? false, restart: opts.restart ?? false, forceRestart: opts.forceRestart ?? false,
+    };
     // A restarting box must not be claimable, and the window is now ten to
     // twenty seconds rather than one rcon round trip, so it goes OFFLINE here
     // and only becomes idle once it answers again. Without a restart the row
     // still goes straight to idle, synchronously, exactly as before.
-    const restarting = full.restart && this.restarter !== null && restartsAfterMatch(this.db, serverId);
+    const restarting = this.restarter !== null
+      && (full.forceRestart || (full.restart && restartsAfterMatch(this.db, serverId)));
+    let backInPool = !restarting;
     // Read before the row is freed, though nothing here depends on the order:
     // release() writes only the servers table. The newest match on the box is
     // the one whose match the plugin may still be holding. A stale or already
@@ -137,12 +155,23 @@ export class ServerReleaser {
         if (this.releaseRestart?.owns(serverId)) {
           const res = await restartOutcome(this.restarter!, server);
           const park = this.releaseRestart.after(serverId, res);
-          if (res.back && !park) release(this.db, serverId);
+          if (res.back && !park) { release(this.db, serverId); backInPool = true; }
           return;
         }
-        if (await this.restarter!.restart(server)) release(this.db, serverId);
+        if (await this.restarter!.restart(server)) { release(this.db, serverId); backInPool = true; }
+      })
+      .catch((err) => {
+        // Only reachable through a restarter that throws, which the real one
+        // never does; the box is then left offline, as for one that never
+        // came back.
+        console.error(`[serverRelease] restart of ${server.name} failed:`, err);
       })
       .then(() => {
+        try {
+          onSettled?.(backInPool);
+        } catch (err) {
+          console.error('[serverRelease] onSettled threw:', err);
+        }
         for (const fn of this.waiters) {
           try {
             fn();

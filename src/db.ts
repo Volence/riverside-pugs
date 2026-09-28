@@ -895,6 +895,11 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // Deletes count too, so delete-and-reshare cannot churn the disk.
   community_shares_per_day: '6',
   community_store_mb: '1024',
+  // Practice leases (src/practiceLeases.ts). A server is only leased while at
+  // least this many OTHER enabled servers stay idle for the queue, and never
+  // more than practice_max_leases at once (0 turns leasing off).
+  practice_reserve_idle: '1',
+  practice_max_leases: '2',
 };
 
 /** Patch triage backfill (sub-project 1 of the balance catalogue roadmap).
@@ -1513,6 +1518,45 @@ export function openDb(path: string): DB {
     CREATE UNIQUE INDEX IF NOT EXISTS practice_drills_moment
       ON practice_drills (match_id, ordinal, half, t_ms) WHERE match_id IS NOT NULL;
     CREATE INDEX IF NOT EXISTS practice_drills_creator ON practice_drills (created_by, created_at);
+  `);
+  // Practice server leases (src/practiceLeases.ts). A lease holds one pool
+  // server for practice: a public Practice Park or a private drill server.
+  // Deliberately a table of its own and NOT a servers.status value: status
+  // has a CHECK constraint SQLite can only change by rebuilding the table,
+  // and reconcileServers frees every reserved/live row with no live match at
+  // boot, which would run sm_pug_abort and exec secrets.cfg into the middle
+  // of a practice session. A leased box stays 'idle' in servers and is kept
+  // from the matchmaker by claimIdle reading this table instead.
+  //
+  // Open means ended_at IS NULL. A lease that is being wound down has
+  // end_reason set and ended_at still NULL: it keeps holding its box until
+  // the restart that clears the practice config has finished, so a web
+  // restart in that window resumes the wind-down rather than stranding the
+  // box offline (see pug-offline-strand-on-web-restart). ready_at is when
+  // setup finished; humans and map are the last `status` reading, for the
+  // public park list; warned_at is when a PUG asked for the box back.
+  // password is per lease, random, and never derived from anything public.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS practice_leases (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      server_id       INTEGER NOT NULL REFERENCES servers(id),
+      kind            TEXT NOT NULL CHECK (kind IN ('park','drill')),
+      owner_player_id TEXT NOT NULL REFERENCES players(steamid),
+      password        TEXT NOT NULL,
+      drill_code      TEXT,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      ready_at        TEXT,
+      last_human_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      ends_at         TEXT NOT NULL,
+      humans          INTEGER NOT NULL DEFAULT 0,
+      map             TEXT,
+      warned_at       TEXT,
+      ending_at       TEXT,
+      ended_at        TEXT,
+      end_reason      TEXT
+    );
+    CREATE INDEX IF NOT EXISTS practice_leases_open ON practice_leases (server_id) WHERE ended_at IS NULL;
+    CREATE INDEX IF NOT EXISTS practice_leases_owner ON practice_leases (owner_player_id, created_at);
   `);
 
   seed(db);

@@ -54,14 +54,36 @@ export function getServer(db: DB, id: number): ServerRow | undefined {
   return db.prepare('SELECT * FROM servers WHERE id = ?').get(id) as ServerRow | undefined;
 }
 
+/**
+ * SQL for "no open practice lease holds this server", to AND into a WHERE on
+ * the servers table.
+ *
+ * A leased box stays 'idle' in servers.status (a lease is a row of
+ * practice_leases, not a status; see src/db.ts for why), so everything that
+ * takes an idle box for itself must also ask this. Today that is claimIdle
+ * and the two between-matches writers that hold an idle box (the balance
+ * writer and the release engine). A lease being wound down still counts as
+ * open: it holds its box until the restart that clears the practice config
+ * has finished.
+ */
+export const NOT_LEASED_SQL = 'id NOT IN (SELECT server_id FROM practice_leases WHERE ended_at IS NULL)';
+
+/** Whether an open practice lease holds this server. */
+export function isLeased(db: DB, serverId: number): boolean {
+  return db.prepare('SELECT 1 FROM practice_leases WHERE server_id = ? AND ended_at IS NULL').get(serverId) !== undefined;
+}
+
 /** Atomically reserve one idle, enabled server; returns it, or null if none is
  *  available. A disabled box is invisible here however idle it looks, which is
  *  the whole point: an admin can pull a misbehaving server out of rotation
- *  mid-evening without stopping it, kicking anyone, or editing the database. */
+ *  mid-evening without stopping it, kicking anyone, or editing the database.
+ *  A box lent out as a practice server is invisible the same way; a PUG that
+ *  finds nothing else takes one back through the practice lease manager's
+ *  preemption (src/practiceLeases.ts), never by claiming it here. */
 export function claimIdle(db: DB): ServerRow | null {
   return db.transaction(() => {
     const row = db
-      .prepare("SELECT * FROM servers WHERE status = 'idle' AND enabled = 1 ORDER BY id LIMIT 1")
+      .prepare(`SELECT * FROM servers WHERE status = 'idle' AND enabled = 1 AND ${NOT_LEASED_SQL} ORDER BY id LIMIT 1`)
       .get() as ServerRow | undefined;
     if (!row) return null;
     db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(row.id);

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DB } from './db.js';
 import { transportFor, type AddonsTransport } from './addonsTransport.js';
-import { getServer, listServers, type ServerRow } from './serverPool.js';
+import { getServer, listServers, NOT_LEASED_SQL, type ServerRow } from './serverPool.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { ServerHolds } from './serverHolds.js';
 import { activeRollout, ensureServerRows, markFailed, markPending, markWritten, NO_TRANSPORT, type RolloutRow } from './balanceRollouts.js';
@@ -77,9 +77,11 @@ export class BalanceRolloutWriter {
   }
 
   /** idle -> reserved in one statement, so nothing can claim the box
-   *  between the check and the write. False when it was not idle. */
+   *  between the check and the write. False when it was not idle, or when
+   *  it is lent out as a practice server (idle in status, busy in fact); a
+   *  lease ends through the releaser, whose hook gives this its turn. */
   private hold(serverId: number): boolean {
-    const took = this.deps.db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ? AND status = 'idle' AND enabled = 1")
+    const took = this.deps.db.prepare(`UPDATE servers SET status = 'reserved' WHERE id = ? AND status = 'idle' AND enabled = 1 AND ${NOT_LEASED_SQL}`)
       .run(serverId).changes === 1;
     if (took) this.holds.take(serverId, 'balance');
     return took;
