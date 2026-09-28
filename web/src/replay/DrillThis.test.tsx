@@ -174,7 +174,7 @@ describe('DrillThis', () => {
     expect(screen.getByLabelText('Drill code K7QX').classList.contains('drill__code--small')).toBe(true);
   });
 
-  it('a Practice Park of your own is not where a drill goes: it offers a drill server', async () => {
+  it('a Practice Park never counts as your server: the panel offers a drill server', async () => {
     mockApi.createDrill.mockResolvedValue({ code: 'K7QX', spec: SPEC });
     mockApi.practiceParks.mockResolvedValue({ available: true, parks: [], mine: { id: 3, kind: 'park' } });
     render(<DrillThis {...props()} />);

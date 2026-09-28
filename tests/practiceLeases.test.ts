@@ -180,18 +180,22 @@ describe('small parts', () => {
   });
 
   it('quotes the site URL, since // starts a console comment', () => {
-    expect(identityLines({ password: 'abcd2345', owner_player_id: ME }, URL)).toEqual([
+    expect(identityLines({ kind: 'drill', password: 'abcd2345', owner_player_id: ME }, URL)).toEqual([
       'sm_cvar sv_password "abcd2345"',
       `l4d_practice_owner ${ME}`,
       'l4d_practice_site "https://riversidepug.com"',
     ]);
-    expect(() => identityLines({ password: 'a"b', owner_player_id: ME }, URL)).toThrow();
-    expect(() => identityLines({ password: 'abcd2345', owner_player_id: ME }, 'http://x/"; quit')).toThrow();
+    expect(() => identityLines({ kind: 'drill', password: 'a"b', owner_player_id: ME }, URL)).toThrow();
+    expect(() => identityLines({ kind: 'drill', password: 'abcd2345', owner_player_id: ME }, 'http://x/"; quit')).toThrow();
+  });
+
+  it('a park is ownerless in game: its owner cvar is set empty', () => {
+    expect(identityLines({ kind: 'park', password: 'abcd2345', owner_player_id: ME }, URL)[1]).toBe('l4d_practice_owner ""');
   });
 });
 
 describe('PracticeLeases.create', () => {
-  it('leases a park: checks for people, execs the cfg, then sends password, owner and site twice', async () => {
+  it('leases a park: checks for people, execs the cfg, then sends password, an empty owner and site twice', async () => {
     seedServer('a'); const b = seedServer('bb');
     mgr = manager();
     const r = await mgr.create(ME, 'park');
@@ -201,7 +205,7 @@ describe('PracticeLeases.create', () => {
     expect(r.lease.ends_at).toBe(new Date(T0 + LEASE_MS).toISOString());
     await flush();
     const pw = getLease(db, r.lease.id)!.password;
-    const id = [`sm_cvar sv_password "${pw}"`, `l4d_practice_owner ${ME}`, `l4d_practice_site "${URL}"`];
+    const id = [`sm_cvar sv_password "${pw}"`, 'l4d_practice_owner ""', `l4d_practice_site "${URL}"`];
     expect(sent.map((s) => s.cmds)).toEqual([['status'], ['exec practice_park.cfg'], id, id]);
     expect(sent.every((s) => s.server === 'bb')).toBe(true);
     expect(getLease(db, r.lease.id)!.ready_at).toBe(new Date(T0).toISOString());
@@ -231,7 +235,7 @@ describe('PracticeLeases.create', () => {
     expect(third.ok && !third.joined).toBe(true);
   });
 
-  it('one open lease per player, joining a park aside', async () => {
+  it('one open drill server per player', async () => {
     seedServer('a'); seedServer('bb'); seedServer('ccc');
     mgr = manager();
     const d = await mgr.create(ME, 'drill');

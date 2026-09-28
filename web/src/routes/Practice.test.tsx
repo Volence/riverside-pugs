@@ -69,6 +69,16 @@ describe('Practice (invite page)', () => {
     expect(screen.queryByText('abcd2345')).toBeNull();
   });
 
+  it('a park says it closes when everyone leaves, has no time limit, and no Close for a player', async () => {
+    mockApi.practiceLease.mockResolvedValue(lease({ kind: 'park', isOwner: false, canEnd: false, capacity: 8, drillCode: null }));
+    render(<Practice id="4" session={ACTIVE} />);
+    expect(await screen.findByText('Practice Park, closes 5 minutes after everyone leaves.')).toBeTruthy();
+    expect(screen.queryByText('Time left')).toBeNull();
+    expect(screen.getByText('Started by')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Close this server' })).toBeNull();
+    expect(screen.queryByText(`${location.origin}/practice/4`)).toBeNull();
+  });
+
   it('says when a PUG is taking the server back', async () => {
     mockApi.practiceLease.mockResolvedValue(lease({ warnedAt: new Date().toISOString() }));
     render(<Practice id="4" session={ACTIVE} />);
