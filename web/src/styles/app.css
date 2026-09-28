@@ -907,6 +907,9 @@ a.ctile { text-decoration: none; }
 .headliner { position: relative; background: color-mix(in srgb, var(--bg) 35%, var(--surface)); }
 .headliner__avatar { position: absolute; top: var(--sp-5); right: var(--sp-5); width: 56px; height: 56px; object-fit: cover; }
 .headliner--avatar { padding-right: calc(56px + 2 * var(--sp-5)); }
+.headliner__avatar--link { display: block; }
+.headliner__avatar--link img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.headliner__avatar--link:hover img, .headliner__avatar--link:focus-visible img { outline: 2px solid var(--accent); outline-offset: 2px; }
 .headliner__eyebrow { margin: 0; }
 .headliner__name { font-size: var(--fs-h1); margin-top: var(--sp-1); }
 .headliner__row { display: flex; align-items: baseline; gap: var(--sp-3); margin-top: var(--sp-2); }

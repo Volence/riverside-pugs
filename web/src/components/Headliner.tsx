@@ -13,7 +13,7 @@ import { TitleTag } from './TitleTag';
  */
 export function Headliner(
   {
-    eyebrow, name, rating, delta, stats, avatar,
+    eyebrow, name, rating, delta, stats, avatar, avatarHref,
     pronouns, countryCode, countryLabel, countryFlag, bio, title,
   }: {
     eyebrow: string;
@@ -22,6 +22,10 @@ export function Headliner(
     delta?: number | null;
     stats: { label: string; value: string | number; tone?: 'win' | 'loss' }[];
     avatar?: string | null;
+    /** Where clicking the avatar goes (the profile passes the player's Steam
+     *  profile). Opens in a new tab. Without it the avatar is a plain image,
+     *  as on the leaderboard's side card. */
+    avatarHref?: string | null;
     pronouns?: string | null;
     countryCode?: string | null;
     countryLabel?: string | null;
@@ -34,7 +38,14 @@ export function Headliner(
   const hasIdentity = Boolean(countryFlag || pronouns);
   return (
     <section class={`panel headliner${avatar ? ' headliner--avatar' : ''}`}>
-      {avatar && <img class="headliner__avatar" src={avatar} alt="" />}
+      {avatar && (avatarHref
+        ? (
+          <a class="headliner__avatar headliner__avatar--link" href={avatarHref}
+            target="_blank" rel="noopener noreferrer" title="Steam profile">
+            <img src={avatar} alt={`${name} on Steam`} />
+          </a>
+        )
+        : <img class="headliner__avatar" src={avatar} alt="" />)}
       <p class="eyebrow headliner__eyebrow">{eyebrow}</p>
       <h2 class="headliner__name">{name}<TitleTag kind={title} /></h2>
       {hasIdentity && (

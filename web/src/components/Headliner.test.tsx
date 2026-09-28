@@ -23,6 +23,21 @@ describe('Headliner', () => {
     expect(screen.getByText(/unrated/i)).toBeTruthy();
   });
 
+  it('links the avatar to a new tab when given a link, and leaves it a plain image otherwise', () => {
+    const { container, rerender } = render(
+      <Headliner eyebrow="Rating" name="bob" rating={1000} stats={[]} avatar="/a.png"
+        avatarHref="https://steamcommunity.com/profiles/76561198000000001" />,
+    );
+    const link = container.querySelector('a.headliner__avatar') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('https://steamcommunity.com/profiles/76561198000000001');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
+    expect(link.querySelector('img')?.getAttribute('src')).toBe('/a.png');
+    rerender(<Headliner eyebrow="Rating" name="bob" rating={1000} stats={[]} avatar="/a.png" />);
+    expect(container.querySelector('a.headliner__avatar')).toBeNull();
+    expect(container.querySelector('img.headliner__avatar')).toBeTruthy();
+  });
+
   it('reserves a gutter for the avatar only when one is given', () => {
     const { container, rerender } = render(<Headliner eyebrow="Rating" name="bob" rating={1000} stats={[]} avatar="/a.png" />);
     expect(container.querySelector('.headliner')?.classList.contains('headliner--avatar')).toBe(true);
