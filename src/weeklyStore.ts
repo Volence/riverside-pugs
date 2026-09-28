@@ -1,5 +1,5 @@
 import type { DB } from './db.js';
-import { AWARDS, awardDef, computeWeek, type AwardKind, type AwardResult, type Winner } from './weeklyAwards.js';
+import { AWARDS, awardDef, computeWeek, weekStartOf, type AwardKind, type AwardResult, type Winner } from './weeklyAwards.js';
 import { computeRecap, type Recap } from './weeklyRecap.js';
 
 /**
@@ -11,7 +11,16 @@ import { computeRecap, type Recap } from './weeklyRecap.js';
 export interface FrozenWeek { week: string; frozenAt: string; postedAt: string | null; awards: AwardResult[]; recap: Recap }
 export interface PlayerAward { award: string; label: string; count: number; weeks: string[] }
 
-export function freezeWeek(db: DB, week: string): boolean {
+export function freezeWeek(db: DB, week: string, now: Date = new Date()): boolean {
+  // Calendar-invalid input (2026-13-01, 2026-01-32) must not reach
+  // weekStartOf, which would silently read it through Date's own
+  // rollover; catch it here so both bad shapes report the same error.
+  if (Number.isNaN(Date.parse(`${week}T00:00:00Z`)) || weekStartOf(new Date(`${week}T00:00:00Z`)) !== week) {
+    throw new Error(`not a week start: ${week}`);
+  }
+  if (!(week < weekStartOf(now))) {
+    throw new Error(`week not closed yet: ${week}`);
+  }
   return db.transaction(() => {
     const exists = db.prepare('SELECT 1 FROM weekly_award_weeks WHERE week_start = ?').get(week);
     if (exists) return false;

@@ -18,7 +18,12 @@ if (!path || !/^\d{4}-\d{2}-\d{2}$/.test(week ?? '')) {
 const db = openDb(path);
 let f: FrozenWeek;
 if (flag === '--freeze') {
-  console.log(freezeWeek(db, week) ? 'frozen' : 'already frozen');
+  try {
+    console.log(freezeWeek(db, week) ? 'frozen' : 'already frozen');
+  } catch (err) {
+    console.error(`error: ${(err as Error).message}`);
+    process.exit(1);
+  }
   const frozen = frozenWeek(db, week);
   if (!frozen) throw new Error(`could not read frozen week ${week}`);
   f = frozen;
