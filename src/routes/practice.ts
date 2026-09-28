@@ -8,6 +8,7 @@ import {
 } from '../practiceLeases.js';
 import { getPlayer } from '../players.js';
 import { logAdmin } from '../admin/audit.js';
+import { kickReason, knownOnSite } from '../practicePlayers.js';
 import { getSetting } from '../settings.js';
 import { campaignRegistry, resolveCampaignForMap } from '../campaignRegistry.js';
 import { finishedReplayBytes, type ReplaySources } from './replays.js';
@@ -306,6 +307,52 @@ export async function practiceRoutes(
     }
     if (!byOwner) logAdmin(db, steamid, 'practice_end', lease.id, { owner: lease.owner_player_id, kind: lease.kind });
     return leaseView(db, getLease(db, lease.id)!, steamid, isAdmin);
+  });
+
+  /**
+   * Who is on a practice server, for the admin live board: the humans from
+   * the box's `status` (no bots, no SourceTV) with team and trainer from the
+   * practice plugin when it says, and whether each is known to the site.
+   */
+  app.get('/api/admin/practice/:leaseId/players', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    if (!leases) return reply.code(503).send({ error: 'Practice servers are not available on this site.' });
+    const id = Number((req.params as { leaseId: string }).leaseId);
+    if (!Number.isInteger(id) || !getLease(db, id)) return reply.code(404).send({ error: 'No such practice server.' });
+    const r = await leases.players(id);
+    if (!r.ok) return reply.code(r.status).send({ error: r.error });
+    const known = knownOnSite(db, r.players.map((p) => p.steamid64).filter((x): x is string => x !== null));
+    reply.header('Cache-Control', 'no-store');
+    return {
+      players: r.players.map((p) => ({
+        userid: p.userid, name: p.name, steamid64: p.steamid64, connectedFor: p.connectedFor, ping: p.ping,
+        team: p.team, trainer: p.trainer, onSite: p.steamid64 !== null && known.has(p.steamid64),
+      })),
+    };
+  });
+
+  /**
+   * Kick someone off a practice server. The reason is cleaned for the
+   * console (kickReason) and defaults to "Removed by an admin"; the kick is
+   * refused when the lease is not open or that userid is not on the box,
+   * and logged to the admin feed like any other admin action.
+   */
+  app.post('/api/admin/practice/:leaseId/kick', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    if (!leases) return reply.code(503).send({ error: 'Practice servers are not available on this site.' });
+    const id = Number((req.params as { leaseId: string }).leaseId);
+    if (!Number.isInteger(id) || !getLease(db, id)) return reply.code(404).send({ error: 'No such practice server.' });
+    const body = (req.body ?? {}) as { userid?: unknown; reason?: unknown };
+    const userid = typeof body.userid === 'number' && Number.isInteger(body.userid) && body.userid > 0 ? body.userid : null;
+    if (userid === null) return reply.code(400).send({ error: 'userid must be a positive whole number' });
+    const reason = kickReason(body.reason);
+    const r = await leases.kick(id, userid, reason);
+    if (!r.ok) return reply.code(r.status).send({ error: r.error });
+    logAdmin(db, adminId, 'practice_kick', r.player.steamid64 ?? `lease ${id}`, {
+      name: r.player.name, server: r.server, kind: r.kind, reason, leaseId: id,
+    });
+    return { ok: true };
   });
 
   /** Every open lease, for the admin live board. */

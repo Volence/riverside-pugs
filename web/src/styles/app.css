@@ -1774,6 +1774,14 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .practice__drill { margin: var(--sp-4) 0 0; }
 .practice__drill code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-bright); }
 .practice__end { margin-top: var(--sp-4); }
+/* The admin board's Practice servers rows open into who is on the server. */
+.practice-row { cursor: pointer; }
+.practice-row.is-open > td { border-bottom-color: transparent; }
+.practice-row__players { max-width: 22rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.practice-row__detail > td { padding: 0 var(--sp-3) var(--sp-3); background: var(--surface-2); }
+.practice-players { margin-top: var(--sp-2); }
+.practice-kick { display: inline-flex; gap: var(--sp-2); align-items: center; }
+.practice-kick input { min-width: 12rem; background: var(--surface); color: var(--text); border: 1px solid var(--border); padding: 2px 6px; font: inherit; min-height: 32px; }
 @media (max-width: 480px) {
   .practice-card__park { grid-template-columns: minmax(0, 1fr) auto auto; }
   .practice-card__map { display: none; }

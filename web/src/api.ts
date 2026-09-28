@@ -1564,6 +1564,10 @@ export const adminApi = {
   overview: (signal?: AbortSignal) => get<AdminOverview>('/api/admin/overview', signal),
   live: (signal?: AbortSignal) => get<LiveBoard>('/api/admin/live', signal),
   practiceLeases: (signal?: AbortSignal) => get<{ leases: AdminPracticeLease[] }>('/api/admin/practice/leases', signal),
+  practicePlayers: (leaseId: number, signal?: AbortSignal) =>
+    get<{ players: AdminPracticePlayer[] }>(`/api/admin/practice/${leaseId}/players`, signal),
+  practiceKick: (leaseId: number, userid: number, reason: string) =>
+    post<{ ok: true }>(`/api/admin/practice/${leaseId}/kick`, { userid, reason }),
   leaveClock: (matchId: number, steamid: string, action: LeaveClockAction, seconds?: number) =>
     post<{ ok: true; reply: string }>(`/api/admin/live/${matchId}/players/${steamid}/leave`, { action, seconds }),
   abortMatch: (id: number) => post(`/api/admin/matches/${id}/abort`),
@@ -1797,6 +1801,20 @@ export interface PracticeParks {
   parks: PracticeParkListing[];
   /** The viewer's own open lease, when logged in and they have one. */
   mine: { id: number; kind: PracticeKind } | null;
+}
+/** One human on a practice server, from its rcon `status` (see
+ *  src/practicePlayers.ts). team: 1 spectator, 2 survivor, 3 infected;
+ *  trainer: 1 skeet, 2 crown, 3 rocks; both null when unknown. */
+export interface AdminPracticePlayer {
+  userid: number;
+  name: string;
+  steamid64: string | null;
+  connectedFor: string;
+  ping: number;
+  team: number | null;
+  trainer: number | null;
+  /** The site knows this SteamID: the name links to the profile and the file. */
+  onSite: boolean;
 }
 export interface AdminPracticeLease {
   id: number;

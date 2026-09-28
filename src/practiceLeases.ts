@@ -54,6 +54,7 @@ import { getSetting, settingNumber } from './settings.js';
 import { parseHumans } from './serverRestart.js';
 import { getPlayer } from './players.js';
 import { publishAdminEvent } from './adminFeed.js';
+import { practicePlayers, type PracticePlayer } from './practicePlayers.js';
 
 export type LeaseKind = 'park' | 'drill';
 
@@ -579,6 +580,53 @@ export class PracticeLeases {
    * plugin answers PRACTICEOK (fetching) or PRACTICEERR with a reason,
    * which is passed on as it is.
    */
+  /**
+   * The humans on an open lease's box (src/practicePlayers.ts), for the
+   * admin panel. `status` and `sm_practice_who` on one connection; a plugin
+   * without the second command leaves the teams unknown, never the list.
+   */
+  async players(id: number): Promise<{ ok: true; players: PracticePlayer[] } | { ok: false; status: number; error: string }> {
+    const lease = getLease(this.db, id);
+    if (!lease || lease.ended_at !== null) return { ok: false, status: 409, error: 'That practice server has closed.' };
+    const server = getServer(this.db, lease.server_id);
+    if (!server) return { ok: false, status: 409, error: 'That practice server has closed.' };
+    try {
+      const [status, who] = await this.deps.rcon(server, ['status', 'sm_practice_who']);
+      return { ok: true, players: practicePlayers(status ?? '', who ?? '') };
+    } catch (err) {
+      console.warn(`[practice] lease ${id}: reading players on ${server.name} failed:`, err instanceof Error ? err.message : err);
+      return { ok: false, status: 502, error: `${server.name} did not answer. Try again in a moment.` };
+    }
+  }
+
+  /**
+   * Kick one human off an open lease's box by userid. Re-reads `status` on
+   * the same connection first and refuses a userid that is not on the box,
+   * so a stale panel cannot kick whoever inherited the number. Answers with
+   * who was kicked, for the audit line.
+   */
+  async kick(id: number, userid: number, reason: string):
+    Promise<{ ok: true; player: PracticePlayer; server: string; kind: LeaseKind } | { ok: false; status: number; error: string }> {
+    const lease = this.stillActive(id);
+    if (!lease) return { ok: false, status: 409, error: 'That practice server has closed.' };
+    const server = getServer(this.db, lease.server_id);
+    if (!server) return { ok: false, status: 409, error: 'That practice server has closed.' };
+    let player: PracticePlayer | undefined;
+    try {
+      // The check, then the kick only once it has passed. Two short
+      // connections one after the other, which is safe: src/rcon.ts gives
+      // each its own turn on the box, so neither closes under the other.
+      const [status] = await this.deps.rcon(server, ['status']);
+      player = practicePlayers(status ?? '', '').find((p) => p.userid === userid);
+      if (!player) return { ok: false, status: 404, error: 'That player is not on this server any more.' };
+      await this.deps.rcon(server, [`sm_kick #${userid} "${reason}"`]);
+    } catch (err) {
+      console.warn(`[practice] lease ${id}: kick on ${server.name} failed:`, err instanceof Error ? err.message : err);
+      return { ok: false, status: 502, error: `${server.name} did not answer. Try again in a moment.` };
+    }
+    return { ok: true, player, server: server.name, kind: lease.kind };
+  }
+
   async loadDrill(id: number, code: string): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
     if (!/^[A-Z0-9]{4,5}$/.test(code)) return { ok: false, status: 400, error: 'That is not a drill code.' };
     const lease = this.stillActive(id);
