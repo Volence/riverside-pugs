@@ -22,7 +22,7 @@ const GLOSSARY: { label: string; text: string }[] = [
   { label: 'Tongue clears', text: 'Freeing a teammate from a smoker before they get dragged in.' },
   { label: 'Insta clears', text: 'Freeing a pinned teammate within 0.75 seconds.' },
   { label: 'Damage pounces', text: 'Pounces from high enough up to count as a damage pounce.' },
-  { label: 'Pounce damage', text: 'The damage pounces deal on impact, which grows with how far the hunter flew. Scratching after landing counts toward Hunter damage.' },
+  { label: 'Damage from pounces', text: 'The damage pounces deal on impact, which grows with how far the hunter flew. Scratching after landing counts toward Hunter damage.' },
   { label: 'Quad caps', text: 'All four survivors pinned at the same time.' },
   { label: 'Booms landed', text: 'Boomer lives that got vomit on at least one survivor, by a direct hit or the explosion.' },
   { label: 'Biggest SR climb', text: 'The most SR gained from the start of the week to the end.' },

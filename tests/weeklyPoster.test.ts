@@ -56,6 +56,20 @@ describe('WeeklyPoster', () => {
     expect(inWeekly()).toHaveLength(0);
   });
 
+  it('a tick just before the boundary does nothing; just after, it closes and posts the week', async () => {
+    now = new Date('2026-09-28T11:00:00Z');   // still inside the week of 2026-09-21 (boundary is noon UTC)
+    await poster.tickNow();
+    expect(db.prepare('SELECT week_start FROM weekly_award_weeks').all()).toEqual([]);
+    expect(inWeekly()).toHaveLength(0);
+
+    now = new Date('2026-09-28T12:30:00Z');   // just past the noon UTC boundary
+    await poster.tickNow();
+    expect(db.prepare('SELECT week_start FROM weekly_award_weeks').all()).toEqual([{ week_start: '2026-09-21' }]);
+    expect(inWeekly()).toHaveLength(2);
+    expect(inWeekly()[0].payload.content).toContain('Weekly recap, week of Sep 21');
+    expect(inWeekly()[1].payload.embeds[0].title).toBe('Weekly awards, week of Sep 21');
+  });
+
   it('catches up one week on the next tick after an outage', async () => {
     poster.start(); await poster.idle();   // freezes and posts 2026-09-21
     expect(inWeekly()).toHaveLength(2);
