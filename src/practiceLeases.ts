@@ -386,7 +386,10 @@ export class PracticeLeases {
         error: 'You already have a drill server open. Close it before starting another.',
       };
     }
-    if (leasesStartedSince(this.db, owner, iso(this.now() - 3_600_000)) >= LEASES_PER_HOUR) {
+    // Admins are exempt: the limit is anti-spam, and it locked the owner out
+    // while testing and recording (2026-09-28).
+    const admin = getPlayer(this.db, owner)?.is_admin === 1;
+    if (!admin && leasesStartedSince(this.db, owner, iso(this.now() - 3_600_000)) >= LEASES_PER_HOUR) {
       return { ok: false, status: 429, error: `You can start ${LEASES_PER_HOUR} practice servers an hour. Try again later.` };
     }
     if (this.creating.has(owner)) {
