@@ -29,6 +29,12 @@ describe('computeRecap', () => {
     expect(r.busiestDay).toEqual({ date: '2026-09-22', matches: 2 });
   });
 
+  it('busiest day follows the session, not the UTC calendar: a Friday night that ends past midnight still counts as Friday', () => {
+    seedMatch(db, { endedAt: '2026-09-26 03:00:00', lines: [{ id: P[0], team: 'a' }] });
+    seedMatch(db, { endedAt: '2026-09-26 04:00:00', lines: [{ id: P[1], team: 'a' }] });
+    expect(computeRecap(db, W).busiestDay).toEqual({ date: '2026-09-25', matches: 2 });
+  });
+
   it('best single game names the match; quads count once per team, not per player', () => {
     const m1 = seedMatch(db, { endedAt: '2026-09-22 21:00:00', lines: [
       { id: P[0], team: 'a', stats: { skeets: 12, quad_caps: 2 } },

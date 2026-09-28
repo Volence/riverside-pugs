@@ -70,12 +70,22 @@ export function awardDef(key: string): AwardDef | undefined {
 }
 
 const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
 const ymd = (d: Date): string => d.toISOString().slice(0, 10);
 
-/** The Monday (UTC) of the week `d` falls in, as 'YYYY-MM-DD'. */
+// US play peaks 00:00-07:00 UTC (Sunday evening into early Monday US time), so
+// a Monday 00:00 UTC cut split that session across two weeks; noon UTC is the
+// quietest hour, so the week (and the Discord post) turns over there instead.
+export const WEEK_START_HOUR = 12;
+const START_HHMMSS = `${String(WEEK_START_HOUR).padStart(2, '0')}:00:00`;
+
+/** The Monday (UTC) of the week containing instant `d`, under the
+ *  WEEK_START_HOUR rule: shift back by that many hours, then take the
+ *  Monday of the calendar week the shifted instant falls on. */
 export function weekStartOf(d: Date): string {
-  const day = (d.getUTCDay() + 6) % 7;   // Monday 0 .. Sunday 6
-  return ymd(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - day * DAY_MS));
+  const shifted = new Date(d.getTime() - WEEK_START_HOUR * HOUR_MS);
+  const day = (shifted.getUTCDay() + 6) % 7;   // Monday 0 .. Sunday 6
+  return ymd(new Date(Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()) - day * DAY_MS));
 }
 
 export function addWeeks(week: string, n: number): string {
@@ -84,7 +94,18 @@ export function addWeeks(week: string, n: number): string {
 
 /** In the form datetime('now') writes, so string comparison is correct. */
 export function weekBounds(week: string): { from: string; to: string } {
-  return { from: `${week} 00:00:00`, to: `${addWeeks(week, 1)} 00:00:00` };
+  return { from: `${week} ${START_HHMMSS}`, to: `${addWeeks(week, 1)} ${START_HHMMSS}` };
+}
+
+/** True for a canonical week id: 'YYYY-MM-DD' shape, a real calendar date,
+ *  and that date is a Monday (UTC). Use this wherever a week id from the
+ *  outside world (a query param, a stored row, a CLI arg) needs checking;
+ *  it never calls weekStartOf, so a calendar-invalid id such as
+ *  '2026-13-01' or '2026-01-32' cannot reach its toISOString() and throw. */
+export function isWeekStart(week: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(week)) return false;
+  const parsed = Date.parse(`${week}T00:00:00Z`);
+  return !Number.isNaN(parsed) && new Date(parsed).getUTCDay() === 1;
 }
 
 export function weeklyMinGames(db: DB): number {
