@@ -74,6 +74,9 @@ const PLAIN: [table: string, column: string][] = [
   // is allowed. deleted_by moves too, for a merged member of staff.
   ['community_entries', 'author_id'],
   ['community_entries', 'deleted_by'],
+  // Replay drills follow whoever made them, so the hourly limit counts the
+  // merged account's drills against the survivor.
+  ['practice_drills', 'created_by'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`

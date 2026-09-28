@@ -1489,6 +1489,31 @@ export function openDb(path: string): DB {
       event TEXT NOT NULL CHECK (event IN ('start','stop')), at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+  // Replay drills: one moment of a finished match, frozen as the JSON spec a
+  // practice server fetches by `code` (l4d/practice/DESIGN.md). The spec is
+  // stored whole rather than rebuilt per fetch, so a drill a player shared
+  // keeps meaning the same thing even if the builder later changes, and the
+  // fetch route never has to touch a replay file. match_id and created_by are
+  // NULL only for drills made by hand with scripts/make-drill.ts. t_ms is the
+  // moment asked for, rounded to 100 ms, which is what makes the same moment
+  // asked twice come back as the same code. See src/practiceDrills.ts.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS practice_drills (
+      code            TEXT PRIMARY KEY,
+      spec_json       TEXT NOT NULL,
+      created_by      TEXT REFERENCES players(steamid),
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      match_id        INTEGER REFERENCES matches(id),
+      ordinal         INTEGER NOT NULL,
+      half            INTEGER NOT NULL,
+      t_ms            INTEGER NOT NULL,
+      fetch_count     INTEGER NOT NULL DEFAULT 0,
+      last_fetched_at TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS practice_drills_moment
+      ON practice_drills (match_id, ordinal, half, t_ms) WHERE match_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS practice_drills_creator ON practice_drills (created_by, created_at);
+  `);
 
   seed(db);
   return db;

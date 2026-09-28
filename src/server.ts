@@ -126,6 +126,7 @@ import { statsRoutes } from './routes/stats.js';
 import { weeklyRoutes } from './routes/weekly.js';
 import { balancePublicRoutes } from './routes/balancePublic.js';
 import { replayRoutes } from './routes/replays.js';
+import { practiceRoutes } from './routes/practice.js';
 import { devRoutes } from './routes/dev.js';
 import { campaignRoutes } from './routes/campaigns.js';
 import { sweepCampaignZips, type CampaignZipDeps } from './campaignZip.js';
@@ -1690,6 +1691,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // Tests drive the engine's tick directly.
   app.decorate('releaseEngine', releaseEngine);
   await app.register(replayRoutes, {
+    db: deps.db, replayDir: deps.config.replayDir, liveDir: deps.config.replayLiveDir, r2,
+  });
+  // Replay drills read rounds through the same local-then-R2 path as the
+  // replay route above (finishedReplayBytes), so they take the same sources.
+  await app.register(practiceRoutes, {
     db: deps.db, replayDir: deps.config.replayDir, liveDir: deps.config.replayLiveDir, r2,
   });
   await app.register(campaignRoutes, {

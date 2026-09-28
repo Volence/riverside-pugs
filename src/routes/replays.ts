@@ -229,6 +229,70 @@ export function infectedMaskFor(
   return infectedMaskForHeader(db, head, matchId, ordinal, half);
 }
 
+/** The R2 key of one round of a FINISHED match, or null. The state check is
+ *  what keeps a live round from ever being served out of R2 (it has no key
+ *  yet anyway, but the rule should not rest on that). */
+function finishedR2Key(db: DB, matchId: number, ordinal: number, half: number): string | null {
+  const row = db.prepare(
+    `SELECT r.r2_key AS key FROM match_replays r JOIN matches m ON m.id = r.match_id
+      WHERE r.match_id = ? AND r.ordinal = ? AND r.half = ?
+        AND r.r2_key IS NOT NULL AND m.state IN ('completed', 'aborted')`,
+  ).get(matchId, ordinal, half) as { key: string } | undefined;
+  return row?.key ?? null;
+}
+
+export interface ReplaySources {
+  replayDir: string;
+  liveDir?: string;
+  r2?: R2Config | null;
+  r2Get?: typeof getRange;
+}
+
+/**
+ * The whole file of one round of a finished match, in memory, exactly as
+ * GET /api/replays/match/:id/:ordinal/:half would serve it: a local copy
+ * first (the replay directory or the live directory, whichever is further),
+ * then R2, with the token blanked and the side mask stamped from the
+ * database when the file has none. Null when neither holds the round, or R2
+ * fails.
+ *
+ * For server-side readers that need to parse a round (replay drills), not
+ * for serving: the route streams, and a finished round runs to 15 MB. The
+ * caller is responsible for having checked the match is finished; this
+ * never reads a live round on purpose, but a local copy of one would
+ * otherwise be returned like any other.
+ */
+export async function finishedReplayBytes(
+  db: DB, src: ReplaySources, matchId: number, ordinal: number, half: number,
+): Promise<Buffer | null> {
+  const { replayDir, liveDir = '', r2 = null, r2Get = getRange } = src;
+  let buf: Buffer | null = null;
+  const row = resolveReplayPath(db, matchId, ordinal, half, replayDir);
+  const found = row ? resolveFurther(replayDir, liveDir, row.filename, Date.now()) : null;
+  if (found) {
+    try {
+      buf = readFileSync(found.path);
+    } catch {
+      buf = null;
+    }
+  }
+  if (!buf && r2) {
+    const key = finishedR2Key(db, matchId, ordinal, half);
+    if (key) {
+      try {
+        const got = await r2Get(r2, key, 0);
+        buf = got ? Buffer.from(got.body) : null;
+      } catch (err) {
+        console.error('[replays] R2 read failed:', (err as Error).message);
+        buf = null;
+      }
+    }
+  }
+  if (!buf || buf.length < HEADER_BYTES) return null;
+  rewriteHead(buf, 0, infectedMaskForHeader(db, buf.subarray(0, HEADER_BYTES), matchId, ordinal, half));
+  return buf;
+}
+
 /** How much earlier than the round row's `started_at` a file's own header
  *  may say it began and still count as that round. The two clocks are the
  *  game server's and the site's, and the round row is stamped when the
@@ -393,14 +457,10 @@ export async function replayRoutes(
     // replay directory nor the live directory holds the round, and the query
     // below requires a finished match, so a live round can never reach here.
     if (!found && r2) {
-      const keyRow = db.prepare(
-        `SELECT r.r2_key AS key FROM match_replays r JOIN matches m ON m.id = r.match_id
-          WHERE r.match_id = ? AND r.ordinal = ? AND r.half = ?
-            AND r.r2_key IS NOT NULL AND m.state IN ('completed', 'aborted')`,
-      ).get(Number(id), Number(ordinal), Number(half)) as { key: string } | undefined;
-      if (keyRow) {
+      const key = finishedR2Key(db, Number(id), Number(ordinal), Number(half));
+      if (key) {
         try {
-          return await sendR2Slice(reply, r2, r2Get, keyRow.key, Number(since ?? 0),
+          return await sendR2Slice(reply, r2, r2Get, key, Number(since ?? 0),
             (head) => infectedMaskForHeader(db, head, Number(id), Number(ordinal), Number(half)));
         } catch (err) {
           console.error('[replays] R2 read failed:', (err as Error).message);
