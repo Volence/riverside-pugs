@@ -127,6 +127,7 @@ import { weeklyRoutes } from './routes/weekly.js';
 import { balancePublicRoutes } from './routes/balancePublic.js';
 import { replayRoutes } from './routes/replays.js';
 import { practiceRoutes } from './routes/practice.js';
+import { PracticeLeases, TICK_MS as PRACTICE_TICK_MS, type LeaseRcon } from './practiceLeases.js';
 import { devRoutes } from './routes/dev.js';
 import { campaignRoutes } from './routes/campaigns.js';
 import { sweepCampaignZips, type CampaignZipDeps } from './campaignZip.js';
@@ -162,6 +163,8 @@ export interface ServerDeps {
   serverExec?: ServerExec;
   /** Injected in tests so nothing ever asks a real box to quit. */
   serverRestarter?: ServerRestarter;
+  /** Tests stand in for the game servers a practice lease talks to. */
+  practiceRcon?: LeaseRcon;
   /** Tests inject a fake box writer for releases. */
   releaseWriter?: (s: ServerRow) => TreeWriter | null;
   /** Tests inject the player count a release waits on before restarting. */
@@ -699,6 +702,37 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     await releaseEngine.forRelease(server.id);
   }, { owns: (id) => releaseEngine.ownsRestart(id), after: (id, res) => releaseEngine.afterReleaserRestart(id, res) });
 
+  // Practice server leases (src/practiceLeases.ts). Built next to the
+  // releaser because ending a lease IS a release, with a forced restart so no
+  // practice cvar reaches the next PUG, and the lease holds its box until
+  // that restart settles. Unlike the syncs below it runs in dev mode too: it
+  // only ever touches a box somebody leased, and a dev database's servers are
+  // disabled or local. One short rcon connection per burst, never one held
+  // across the setup's twenty second wait (see src/rcon.ts on turns).
+  const practiceLeases = new PracticeLeases({
+    db: deps.db,
+    publicUrl: deps.config.publicUrl,
+    rcon: deps.practiceRcon ?? (async (server, commands) => {
+      const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+      try {
+        await rcon.connect();
+        const out: string[] = [];
+        for (const c of commands) out.push(await rcon.exec(c));
+        return out;
+      } finally {
+        rcon.close();
+      }
+    }),
+    release: (serverId) => new Promise<boolean>((resolve) => {
+      releaser.release(serverId, { restart: true, forceRestart: true }, resolve);
+    }),
+  });
+  // A lease that was winding down when this process stopped has its box
+  // offline mid-restart; nothing else would ever bring that box back.
+  practiceLeases.resume();
+  const practiceTick = setInterval(() => { void practiceLeases.tick(); }, PRACTICE_TICK_MS);
+  practiceTick.unref();
+
   // Every enabled box mirrors the website's bans. Built here, next to the
   // releaser, because both are the backend reaching into a game server
   // outside a match; started below once the server list has been reconciled.
@@ -1191,7 +1225,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         notify,
         demoDir: deps.config.demoDir,
         replayDir: deps.config.replayDir,
-        onNoServer: (id) => pending?.add(id),
+        // Ranked always wins: a PUG with no box takes one back from practice
+        // (the newest lease, after a 60 second warning in game). The pending
+        // list then gets it when the lease's release frees the box.
+        onNoServer: (id) => { pending?.add(id); practiceLeases.needServer(); },
         beforeLive: (rcon) => banSync.pushAll((c) => rcon.exec(c)),
       });
 
@@ -1604,6 +1641,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     skeetStreaks?.stop();
     await bot?.stop();
     clearInterval(reaper);
+    clearInterval(practiceTick);
+    practiceLeases.stop();
     clearInterval(presenceSweep);
     clearInterval(pruneTimer);
     clearInterval(livePruneTimer);
@@ -1696,7 +1735,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // Replay drills read rounds through the same local-then-R2 path as the
   // replay route above (finishedReplayBytes), so they take the same sources.
   await app.register(practiceRoutes, {
-    db: deps.db, replayDir: deps.config.replayDir, liveDir: deps.config.replayLiveDir, r2,
+    db: deps.db, replayDir: deps.config.replayDir, liveDir: deps.config.replayLiveDir, r2, leases: practiceLeases,
   });
   await app.register(campaignRoutes, {
     db: deps.db, addonsDir: deps.config.addonsDir, freeBytes: deps.freeBytes,

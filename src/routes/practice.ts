@@ -2,10 +2,15 @@ import type { FastifyInstance } from 'fastify';
 import type { DB } from '../db.js';
 import { parseReplay } from '../replayFormat.js';
 import { buildDrill } from '../drillSpec.js';
-import { createDrill, drillForMoment, drillsCreatedSince, fetchDrill, DRILLS_PER_HOUR } from '../practiceDrills.js';
+import { createDrill, drillForMoment, drillsCreatedSince, fetchDrill, normalizeCode, DRILLS_PER_HOUR } from '../practiceDrills.js';
+import {
+  adminLeaseRows, getLease, leaseView, openLeaseOf, parkListings, type LeaseKind, type PracticeLeases,
+} from '../practiceLeases.js';
+import { getPlayer } from '../players.js';
+import { logAdmin } from '../admin/audit.js';
 import { campaignRegistry, resolveCampaignForMap } from '../campaignRegistry.js';
 import { finishedReplayBytes, type ReplaySources } from './replays.js';
-import { makeRequireActive } from './guards.js';
+import { makeOptionalViewer, makeRequireActive, makeRequireAdmin } from './guards.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -65,10 +70,13 @@ const isCount = (v: unknown): v is number => typeof v === 'number' && Number.isI
  */
 export async function practiceRoutes(
   app: FastifyInstance,
-  opts: { db: DB } & ReplaySources,
+  opts: { db: DB; leases?: PracticeLeases | null } & ReplaySources,
 ): Promise<void> {
   const { db } = opts;
   const requireActive = makeRequireActive(db);
+  const requireAdmin = makeRequireAdmin(db);
+  const optionalViewer = makeOptionalViewer(db);
+  const leases = opts.leases ?? null;
   // Players with a drill being built right now. The hourly count below is
   // read before an await (the replay read), so without this a script firing
   // requests in parallel would pass the count on every one of them, and each
@@ -159,5 +167,95 @@ export async function practiceRoutes(
     if (json === null) return reply.code(404).send({ error: 'no such drill' });
     reply.header('Cache-Control', 'no-store');
     return reply.type('application/json').send(json);
+  });
+
+  // ---- Practice server leases (src/practiceLeases.ts) ----
+
+  /**
+   * Start a practice server, or join the Practice Park.
+   *
+   * `{ kind: 'park' }` answers with the park that has room when there is
+   * one (`joined: true`) and only leases a box when there is not.
+   * `{ kind: 'drill', drillCode? }` always leases a private box; the code, if
+   * given, must be a stored drill, and the server loads it once set up.
+   *
+   * Every refusal carries a sentence a player can act on: the manager's
+   * PICK_ERRORS for "no server can be spared", a 409 naming the lease they
+   * already have, a 429 for the hourly limit.
+   */
+  app.post('/api/practice/leases', async (req, reply) => {
+    const steamid = requireActive(req, reply);
+    if (!steamid) return reply;
+    if (!leases) return reply.code(503).send({ error: 'Practice servers are not available on this site.' });
+    const body = (req.body ?? {}) as { kind?: unknown; drillCode?: unknown };
+    const kind = body.kind;
+    if (kind !== 'park' && kind !== 'drill') return reply.code(400).send({ error: 'kind must be park or drill' });
+    let code: string | null = null;
+    if (body.drillCode !== undefined && body.drillCode !== null && body.drillCode !== '') {
+      if (kind !== 'drill') return reply.code(400).send({ error: 'only a drill server takes a drill code' });
+      code = typeof body.drillCode === 'string' ? normalizeCode(body.drillCode) : null;
+      const known = code !== null
+        && db.prepare('SELECT 1 FROM practice_drills WHERE code = ?').get(code) !== undefined;
+      if (!known) return reply.code(404).send({ error: 'No drill has that code.' });
+    }
+    const r = await leases.create(steamid, kind as LeaseKind, code);
+    if (!r.ok) {
+      return reply.code(r.status).send({ error: r.error, ...(r.leaseId !== undefined ? { leaseId: r.leaseId } : {}) });
+    }
+    return { joined: r.joined, lease: leaseView(db, r.lease, steamid, getPlayer(db, steamid)?.is_admin === 1) };
+  });
+
+  /**
+   * The Practice Park, publicly: which parks are open, how full, on what
+   * map. No host and no password; those are behind a login on the lease page.
+   * A logged-in viewer also learns the id of their own open lease, so the
+   * Play page can link back to it.
+   */
+  app.get('/api/practice/park', async (req) => {
+    const viewer = optionalViewer(req);
+    const mine = viewer ? openLeaseOf(db, viewer) : undefined;
+    return {
+      available: leases !== null,
+      parks: parkListings(db),
+      mine: mine ? { id: mine.id, kind: mine.kind } : null,
+    };
+  });
+
+  /** One lease, for its invite page. Any active player may see the connect
+   *  line and password: sharing the link is how a drill owner invites. */
+  app.get('/api/practice/leases/:id', async (req, reply) => {
+    const steamid = requireActive(req, reply);
+    if (!steamid) return reply;
+    const id = Number((req.params as { id: string }).id);
+    const lease = Number.isInteger(id) ? getLease(db, id) : undefined;
+    if (!lease) return reply.code(404).send({ error: 'No such practice server.' });
+    reply.header('Cache-Control', 'no-store');
+    return leaseView(db, lease, steamid, getPlayer(db, steamid)?.is_admin === 1);
+  });
+
+  /** End a lease: its owner, or any admin. */
+  app.post('/api/practice/leases/:id/end', async (req, reply) => {
+    const steamid = requireActive(req, reply);
+    if (!steamid) return reply;
+    if (!leases) return reply.code(503).send({ error: 'Practice servers are not available on this site.' });
+    const id = Number((req.params as { id: string }).id);
+    const lease = Number.isInteger(id) ? getLease(db, id) : undefined;
+    if (!lease) return reply.code(404).send({ error: 'No such practice server.' });
+    const isAdmin = getPlayer(db, steamid)?.is_admin === 1;
+    if (lease.owner_player_id !== steamid && !isAdmin) {
+      return reply.code(403).send({ error: 'Only whoever started this practice server, or an admin, can close it.' });
+    }
+    const byOwner = lease.owner_player_id === steamid;
+    if (!leases.end(lease.id, byOwner ? 'owner' : 'admin')) {
+      return reply.code(409).send({ error: 'That practice server is already closing.' });
+    }
+    if (!byOwner) logAdmin(db, steamid, 'practice_end', lease.id, { owner: lease.owner_player_id, kind: lease.kind });
+    return leaseView(db, getLease(db, lease.id)!, steamid, isAdmin);
+  });
+
+  /** Every open lease, for the admin live board. */
+  app.get('/api/admin/practice/leases', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    return { leases: adminLeaseRows(db) };
   });
 }
