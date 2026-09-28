@@ -19,7 +19,7 @@ export interface SettingDef {
   key: string;
   label: string;
   help: string;
-  group: 'Queue' | 'Match' | 'Stats' | 'Discord' | 'Admin feed' | 'Penalties' | 'Replays' | 'Community';
+  group: 'Queue' | 'Match' | 'Stats' | 'Discord' | 'Admin feed' | 'Penalties' | 'Replays' | 'Community' | 'Practice';
   type: SettingType;
   /** Masked in the panel until revealed, and never written to the audit log. */
   secret?: boolean;
@@ -90,6 +90,8 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'community_crosshairs_per_player', group: 'Community', label: 'Shared crosshairs per player', help: 'Live crosshair entries one player may have on the community page at a time.', type: { kind: 'int', min: 0, max: 5 } },
   { key: 'community_shares_per_day', group: 'Community', label: 'Shares per player per day', help: 'Shares one player may make in 24 hours, deletes included, so delete-and-reshare cannot churn the disk.', type: { kind: 'int', min: 1, max: 50 } },
   { key: 'community_store_mb', group: 'Community', label: 'Community store cap (MB)', help: 'Total disk the community page may use for previews and imported HUDs. A share that would pass it is refused with "The community shelf is full right now."', type: { kind: 'int', min: 100, max: 20000 } },
+  { key: 'practice_max_leases', group: 'Practice', label: 'Practice servers at once', help: 'How many pool servers may be lent out as a Practice Park or a drill server at the same time. 0 turns practice servers off. A PUG that needs a server always takes one back, newest lease first, after a 60 second warning in game.', type: { kind: 'int', min: 0, max: 6 } },
+  { key: 'practice_reserve_idle', group: 'Practice', label: 'Servers kept free for the queue', help: 'A practice server is only started while at least this many OTHER enabled servers stay idle for PUGs.', type: { kind: 'int', min: 0, max: 6 } },
 ];
 
 const BY_KEY = new Map(SETTINGS_SCHEMA.map((d) => [d.key, d]));

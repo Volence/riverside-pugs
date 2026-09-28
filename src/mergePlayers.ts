@@ -77,6 +77,10 @@ const PLAIN: [table: string, column: string][] = [
   // Replay drills follow whoever made them, so the hourly limit counts the
   // merged account's drills against the survivor.
   ['practice_drills', 'created_by'],
+  // Practice leases follow their owner, so the one-open-lease rule and the
+  // hourly limit see the merged account's leases on the survivor, and the
+  // survivor can still end a lease the other account opened.
+  ['practice_leases', 'owner_player_id'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`
