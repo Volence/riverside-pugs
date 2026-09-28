@@ -1664,6 +1664,58 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 
 .replay--empty { padding: 2rem; text-align: center; color: var(--text-muted); }
 .replay__controls, .replay__toolbar, .replay__rounds { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+
+/* ---------- replay drills ("Drill this", src/drillSpec.ts) ---------- */
+
+/* Sits in the round switch row, so it takes a whole row of its own there
+ * once it opens. The code is the one thing on it a player must read off the
+ * screen and type in game chat, so it gets the display face at poster size. */
+.drill {
+  flex: 1 1 100%;
+  margin-top: var(--sp-2);
+  padding: var(--sp-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--rule);
+}
+.drill__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.drill__head .eyebrow { margin: 0; }
+.drill__code {
+  margin: var(--sp-2) 0 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-hero);
+  line-height: 1;
+  letter-spacing: 0.12em;
+  color: var(--text-bright);
+  user-select: all;
+}
+.drill__how { margin: var(--sp-2) 0 0; }
+.drill__how code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-bright); }
+.drill__line { max-width: 24rem; }
+.drill__title { margin: var(--sp-3) 0 var(--sp-2); font-size: var(--fs-dense); }
+.drill__actors { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; background: var(--border); border: 1px solid var(--border); }
+.drill__actor {
+  display: grid;
+  grid-template-columns: 5.5rem 5rem minmax(0, 1fr) auto;
+  gap: var(--sp-2);
+  align-items: baseline;
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--surface);
+  font-size: var(--fs-dense);
+}
+.drill__side { font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.drill__actor--infected .drill__side { color: var(--accent); }
+.drill__cls { color: var(--text-bright); }
+.drill__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drill__hp { color: var(--text-muted); }
+.drill__entities { margin: var(--sp-2) 0 0; font-size: var(--fs-dense); }
+.drill__note { display: inline-flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.drill__error { color: var(--accent); font-size: var(--fs-dense); }
+@media (max-width: 480px) {
+  .drill__code { font-size: var(--fs-h1); }
+  .drill__actor { grid-template-columns: 4.5rem 4.5rem minmax(0, 1fr); }
+  .drill__hp { grid-column: 2 / -1; }
+}
 .replay__time { font-family: var(--font-label); font-variant-numeric: tabular-nums; font-size: var(--fs-dense); color: var(--text-muted); letter-spacing: 0.08em; }
 .chip--slot { gap: 0.35rem; }
 /* Inherits the chip's inline slot colour. A 0.6rem dot is a graphical
