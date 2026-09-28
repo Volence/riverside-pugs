@@ -10,6 +10,29 @@ const GROUPS = [
 ] as const;
 const DAMAGE = new Set(['si_damage', 'tank_damage', 'damage_as_si', 'pounce_damage', 'hunter_damage', 'smoker_damage', 'friendly_fire']);
 
+/** Only the awards whose name does not already say what they are. One array
+ *  so a new or renamed award's meaning is easy to add or edit in one place.
+ *  "{minGames}" in the text is filled in with the live weekly minimum. */
+const GLOSSARY: { label: string; text: string }[] = [
+  { label: 'Best average / Most total', text: 'Best average is the most per game, among players with at least {minGames}+ games that week. Most total is the biggest sum for the week, with no minimum.' },
+  { label: 'Skeets', text: 'Killing a hunter in mid-air while it pounces.' },
+  { label: 'Skeet assists', text: 'Helping teammates kill a pouncing hunter in mid-air.' },
+  { label: 'Rock skeets', text: "Shooting a tank's rock out of the air." },
+  { label: 'Witch crowns', text: 'Killing the witch before she hurts anyone, including draw crowns (startling her first).' },
+  { label: 'Tongue clears', text: 'Freeing a teammate from a smoker before they get dragged in.' },
+  { label: 'Insta clears', text: 'Freeing a pinned teammate within 0.75 seconds.' },
+  { label: 'Damage pounces', text: 'Pounces from high enough up to count as a damage pounce.' },
+  { label: 'Pounce damage', text: 'The damage pounces deal on impact, which grows with how far the hunter flew. Scratching after landing counts toward Hunter damage.' },
+  { label: 'Quad caps', text: 'All four survivors pinned at the same time.' },
+  { label: 'Booms landed', text: 'Boomer lives that got vomit on at least one survivor, by a direct hit or the explosion.' },
+  { label: 'Biggest SR climb', text: 'The most SR gained from the start of the week to the end.' },
+  { label: 'Best win rate', text: 'Wins and losses from games with a winner; draws do not count.' },
+  { label: 'Iron man', text: 'The most games played this week.' },
+  { label: 'Slowest ready-up', text: 'The longest average time spent not ready before a round.' },
+  { label: 'Friendly fire', text: 'The most damage done to teammates, per game.' },
+  { label: 'Group hug', text: 'Caught in the most quad caps, per game.' },
+];
+
 const n0 = (v: number) => Math.round(v).toLocaleString('en-US');
 const weekName = (w: string) =>
   `Week of ${new Date(`${w}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}`;
@@ -100,6 +123,17 @@ export function WeeklyBoard({ week, onWeek }: { week?: string; onWeek: (w: strin
           </Panel>
         );
       })}
+      <Panel>
+        <h3 class="weekly__group">What these mean</h3>
+        <dl class="weekly__glossary">
+          {GLOSSARY.map((g) => (
+            <div class="weekly__glossary-entry" key={g.label}>
+              <dt>{g.label}</dt>
+              <dd>{g.text.replace('{minGames}', String(data.minGames))}</dd>
+            </div>
+          ))}
+        </dl>
+      </Panel>
     </div>
   );
 }

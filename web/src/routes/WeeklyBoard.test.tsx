@@ -30,7 +30,8 @@ afterEach(cleanup);
 describe('WeeklyBoard', () => {
   it('shows each section, both winners of a stat award, and the live note', async () => {
     render(<WeeklyBoard onWeek={() => {}} />);
-    await waitFor(() => screen.getByText('Skeets'));
+    // "Skeets" also names a glossary entry now, so wait for at least one hit.
+    await waitFor(() => screen.getAllByText('Skeets'));
     expect(screen.getByText('Survivor')).toBeTruthy();
     expect(screen.getByText('Shame')).toBeTruthy();
     expect(screen.getByText('VII')).toBeTruthy();
@@ -59,5 +60,20 @@ describe('WeeklyBoard', () => {
     // not as a request for a week id that means nothing special any more.
     render(<WeeklyBoard week="2026-09-28" onWeek={() => {}} />);
     await waitFor(() => expect(mockApi.weekly).toHaveBeenCalledWith(expect.anything(), undefined));
+  });
+
+  it('shows the glossary, with the live minimum filled in', async () => {
+    render(<WeeklyBoard onWeek={() => {}} />);
+    await waitFor(() => screen.getByText('What these mean'));
+    expect(screen.getByText('Iron man')).toBeTruthy();
+    expect(screen.getByText(/among players with at least 5\+ games that week/)).toBeTruthy();
+  });
+
+  it('still shows the glossary when the week has no awards yet', async () => {
+    mockApi.weekly.mockResolvedValue({ ...data, awards: [] });
+    render(<WeeklyBoard onWeek={() => {}} />);
+    await waitFor(() => screen.getByText('No awards yet this week.'));
+    expect(screen.getByText('What these mean')).toBeTruthy();
+    expect(screen.getByText('Iron man')).toBeTruthy();
   });
 });
