@@ -29,6 +29,11 @@ describe('the site route table', () => {
     expect(await screen.findByText('Staff only.')).toBeTruthy();
   });
 
+  it('mounts a practice server invite page, not the 404', async () => {
+    open('/practice/3');
+    expect(await screen.findByText('Sign in to get the connect line and password for this practice server.')).toBeTruthy();
+  });
+
   it('still has a 404 for a path that is not a route', async () => {
     open('/not-a-page');
     expect(await screen.findByText('Page not found')).toBeTruthy();

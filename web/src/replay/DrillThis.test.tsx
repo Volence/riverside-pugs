@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import type { DrillActor, DrillSpec } from '../api';
 
-const { mockApi } = vi.hoisted(() => ({ mockApi: { createDrill: vi.fn() } }));
+const { mockApi } = vi.hoisted(() => ({ mockApi: { createDrill: vi.fn(), startPractice: vi.fn() } }));
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
   return { ...actual, api: { ...actual.api, ...mockApi } };
@@ -32,7 +32,7 @@ const SPEC: DrillSpec = {
 };
 
 afterEach(cleanup);
-beforeEach(() => { mockApi.createDrill.mockReset(); });
+beforeEach(() => { mockApi.createDrill.mockReset(); mockApi.startPractice.mockReset(); });
 
 const props = (over: Partial<Parameters<typeof DrillThis>[0]> = {}) => ({
   matchId: 212, ordinal: 2, half: 2, momentRef: { current: 758040.6 }, signedIn: true, ...over,
@@ -116,6 +116,27 @@ describe('DrillThis', () => {
     await screen.findByLabelText('Drill code K7QX');
     fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
     expect(screen.queryByLabelText('Drill code K7QX')).toBeNull();
+  });
+
+  it('starts a drill server with the code preloaded and links to its page', async () => {
+    mockApi.createDrill.mockResolvedValue({ code: 'K7QX', spec: SPEC });
+    mockApi.startPractice.mockResolvedValue({ joined: false, lease: { id: 7 } });
+    render(<DrillThis {...props()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Drill this' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start a drill server with this drill' }));
+    expect(mockApi.startPractice).toHaveBeenCalledWith({ kind: 'drill', drillCode: 'K7QX' });
+    const link = await screen.findByRole('link', { name: 'Open it for the connect line and invite link' });
+    expect(link.getAttribute('href')).toBe('/practice/7');
+  });
+
+  it('says why no drill server could be started, and lets you try again', async () => {
+    mockApi.createDrill.mockResolvedValue({ code: 'K7QX', spec: SPEC });
+    mockApi.startPractice.mockRejectedValue(new ApiError(503, 'All servers are busy with PUGs right now. Try again in a few minutes.'));
+    render(<DrillThis {...props()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Drill this' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start a drill server with this drill' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('All servers are busy with PUGs right now. Try again in a few minutes.');
+    expect(screen.getByRole('button', { name: 'Start a drill server with this drill' })).toBeTruthy();
   });
 
   it('says when nobody was alive', async () => {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { api, ApiError, type DrillActor, type DrillSpec } from '../api';
+import { api, ApiError, type DrillActor, type DrillSpec, type PracticeLease } from '../api';
 import { formatTime } from './ReplayControls';
+import { leasePath } from '../practice';
 
 /** What the panel says for each survivor character and infected class. */
 const CLASS_LABEL: Record<string, string> = {
@@ -30,8 +31,9 @@ type State =
  * The site stores the moment as a drill spec and answers with a short code;
  * a player types `!drill <code>` in any server running practice mode and the
  * practice plugin rebuilds the situation from it (l4d/practice/DESIGN.md).
- * There is no server to reserve and nothing to join from here, so the whole
- * result is the code, a line to copy, and who will be where.
+ * The result is the code, a line to copy, and who will be where, plus a
+ * button that leases a private drill server with the code preloaded
+ * (src/practiceLeases.ts) for anyone without a practice server to type it in.
  *
  * Only offered on a finished match, and the server refuses anything else
  * regardless: a frame carries ghost positions. The moment comes from the
@@ -53,6 +55,10 @@ export function DrillThis(
 ) {
   const [state, setState] = useState<State>({ kind: 'idle' });
   const [copied, setCopied] = useState(false);
+  // The drill server started from this panel, or why it could not be.
+  const [server, setServer] = useState<
+    { kind: 'none' } | { kind: 'busy' } | { kind: 'started'; lease: PracticeLease } | { kind: 'error'; message: string }
+  >({ kind: 'none' });
 
   // A round switch keeps this component mounted, and a code for the other
   // round must not stay on screen as if it were this one's. Compared against
@@ -65,6 +71,7 @@ export function DrillThis(
     if (shownFor.current === round) return;
     shownFor.current = round;
     setState({ kind: 'idle' });
+    setServer({ kind: 'none' });
   }, [round]);
 
   // Tracked so a navigation within the 2 s "Copied" window cannot set state
@@ -97,6 +104,19 @@ export function DrillThis(
       resetTimeout.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       // Clipboard denied. The line is on screen to type by hand.
+    }
+  };
+
+  /** Lease a private drill server with this code preloaded
+   *  (src/practiceLeases.ts). Answers once the box is reserved and checked
+   *  empty; its invite page follows the rest of the setup. */
+  const startServer = async (code: string) => {
+    setServer({ kind: 'busy' });
+    try {
+      const { lease } = await api.startPractice({ kind: 'drill', drillCode: code });
+      setServer({ kind: 'started', lease });
+    } catch (err) {
+      setServer({ kind: 'error', message: err instanceof ApiError ? err.message : 'Could not start a drill server.' });
     }
   };
 
@@ -137,6 +157,19 @@ export function DrillThis(
       <div class="connect__line drill__line">
         <code>{line}</code>
         <button class="btn btn--block" type="button" onClick={() => copy(line)}>{copied ? 'Copied' : 'Copy'}</button>
+      </div>
+      <div class="drill__server">
+        {server.kind === 'started' ? (
+          <p>
+            Your drill server is starting with this drill.{' '}
+            <a href={leasePath(server.lease.id)}>Open it for the connect line and invite link</a>
+          </p>
+        ) : (
+          <button class="chip" type="button" disabled={server.kind === 'busy'} onClick={() => startServer(code)}>
+            {server.kind === 'busy' ? 'Starting a drill server...' : 'Start a drill server with this drill'}
+          </button>
+        )}
+        {server.kind === 'error' && <span class="drill__error" role="alert">{server.message}</span>}
       </div>
       <p class="muted drill__title">{spec.title}</p>
       {spec.actors.length === 0

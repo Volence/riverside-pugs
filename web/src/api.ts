@@ -1558,6 +1558,7 @@ export const adminApi = {
   note: (steamid: string, text: string) => post(`/api/admin/players/${steamid}/notes`, { text }),
   overview: (signal?: AbortSignal) => get<AdminOverview>('/api/admin/overview', signal),
   live: (signal?: AbortSignal) => get<LiveBoard>('/api/admin/live', signal),
+  practiceLeases: (signal?: AbortSignal) => get<{ leases: AdminPracticeLease[] }>('/api/admin/practice/leases', signal),
   leaveClock: (matchId: number, steamid: string, action: LeaveClockAction, seconds?: number) =>
     post<{ ok: true; reply: string }>(`/api/admin/live/${matchId}/players/${steamid}/leave`, { action, seconds }),
   abortMatch: (id: number) => post(`/api/admin/matches/${id}/abort`),
@@ -1752,6 +1753,58 @@ export interface ReportMoment { ordinal: number; half: number; tMs: number }
 export type { DrillSpec, DrillActor } from '../../src/drillSpec';
 export interface DrillMoment { matchId: number; ordinal: number; half: number; tMs: number }
 
+/** Practice server leases (src/practiceLeases.ts). Declared here rather than
+ *  imported, because that module pulls in node:crypto, which the web build
+ *  cannot resolve even for a type. Kept field for field with LeaseView,
+ *  ParkListing and AdminLeaseRow there. */
+export type PracticeKind = 'park' | 'drill';
+export type PracticeState = 'setting_up' | 'ready' | 'ending' | 'ended';
+export type PracticeEndReason =
+  | 'owner' | 'admin' | 'idle' | 'expired' | 'preempted' | 'setup_failed' | 'players_on_server' | 'interrupted';
+export interface PracticeLease {
+  id: number;
+  kind: PracticeKind;
+  server: string;
+  owner: { steamid: string; name: string };
+  isOwner: boolean;
+  canEnd: boolean;
+  drillCode: string | null;
+  createdAt: string;
+  readyAt: string | null;
+  endsAt: string;
+  humans: number;
+  capacity: number | null;
+  map: string | null;
+  warnedAt: string | null;
+  state: PracticeState;
+  endReason: PracticeEndReason | null;
+  endedAt: string | null;
+  connect: { host: string; port: number; password: string } | null;
+}
+export interface PracticeParkListing {
+  id: number; server: string; humans: number; capacity: number; map: string | null; ready: boolean; endsAt: string;
+}
+export interface PracticeParks {
+  /** False on an install with no lease manager: the card hides itself. */
+  available: boolean;
+  parks: PracticeParkListing[];
+  /** The viewer's own open lease, when logged in and they have one. */
+  mine: { id: number; kind: PracticeKind } | null;
+}
+export interface AdminPracticeLease {
+  id: number;
+  kind: PracticeKind;
+  server: string;
+  owner: { steamid: string; name: string };
+  state: PracticeState;
+  humans: number;
+  map: string | null;
+  createdAt: string;
+  endsAt: string;
+  warnedAt: string | null;
+  endReason: PracticeEndReason | null;
+}
+
 export const api = {
   me: (signal?: AbortSignal) => get<Me>('/api/me', signal),
   site: (signal?: AbortSignal) => get<SiteInfo>('/api/site', signal),
@@ -1776,6 +1829,13 @@ export const api = {
   balancePatch: (id: number, signal?: AbortSignal) => get<PublicEntry>(`/api/balance/patches/${id}`, signal),
   replayLive: (token: string, signal?: AbortSignal) =>
     get<{ filename: string; closed: boolean }>(`/api/replays/live/${encodeURIComponent(token)}`, signal),
+  /** The Practice Park list, public (GET /api/practice/park). */
+  practiceParks: (signal?: AbortSignal) => get<PracticeParks>('/api/practice/park', signal),
+  /** Start a practice server, or join the park that has room. */
+  startPractice: (body: { kind: PracticeKind; drillCode?: string }) =>
+    post<{ joined: boolean; lease: PracticeLease }>('/api/practice/leases', body),
+  practiceLease: (id: number, signal?: AbortSignal) => get<PracticeLease>(`/api/practice/leases/${id}`, signal),
+  endPractice: (id: number) => post<PracticeLease>(`/api/practice/leases/${id}/end`),
   /** Turn a moment of a finished match into a drill code (POST /api/practice/drills). */
   createDrill: (m: DrillMoment) => post<{ code: string; spec: DrillSpec }>('/api/practice/drills', m),
   replayTimeline: (matchId: number, ordinal: number, half: number, signal?: AbortSignal) =>
