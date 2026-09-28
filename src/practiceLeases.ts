@@ -427,6 +427,37 @@ export class PracticeLeases {
   }
 
   /**
+   * Load another drill on an open drill server: `sm_drill_load <code>` over
+   * rcon, and the code recorded as the lease's drill. The caller has
+   * checked the viewer owns the lease and that the code is a stored drill.
+   *
+   * Only once the lease is set up: before that its own setup is still
+   * sending lines, and a load now would race the cfg's map change. The
+   * plugin answers PRACTICEOK (fetching) or PRACTICEERR with a reason,
+   * which is passed on as it is.
+   */
+  async loadDrill(id: number, code: string): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+    if (!/^[A-Z0-9]{4,5}$/.test(code)) return { ok: false, status: 400, error: 'That is not a drill code.' };
+    const lease = this.stillActive(id);
+    if (!lease) return { ok: false, status: 409, error: 'That practice server has closed.' };
+    if (lease.kind !== 'drill') return { ok: false, status: 409, error: 'Drills load on a drill server, not the Practice Park.' };
+    if (lease.ready_at === null) return { ok: false, status: 409, error: 'Your server is still setting up. Try again in a few seconds.' };
+    const server = getServer(this.db, lease.server_id);
+    if (!server) return { ok: false, status: 409, error: 'That practice server has closed.' };
+    let reply: string;
+    try {
+      [reply] = await this.deps.rcon(server, [`sm_drill_load ${code}`]);
+    } catch (err) {
+      console.warn(`[practice] lease ${id}: sm_drill_load on ${server.name} failed:`, err instanceof Error ? err.message : err);
+      return { ok: false, status: 502, error: 'Your server did not answer. Try again in a moment.' };
+    }
+    const bad = /PRACTICEERR\s*(.*)/.exec(reply ?? '');
+    if (bad) return { ok: false, status: 502, error: `Your server refused it: ${bad[1].trim() || 'no reason given'}.` };
+    this.db.prepare('UPDATE practice_leases SET drill_code = ? WHERE id = ?').run(code, id);
+    return { ok: true };
+  }
+
+  /**
    * Start winding a lease down. False when it is already ended or ending.
    *
    * Synchronous up to the guarded write that claims the wind-down, so two

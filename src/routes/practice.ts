@@ -233,6 +233,44 @@ export async function practiceRoutes(
     return leaseView(db, lease, steamid, getPlayer(db, steamid)?.is_admin === 1);
   });
 
+  // Drill loads per owner in the last minute, for the rate limit below.
+  const loads = new Map<string, number[]>();
+  const LOADS_PER_MINUTE = 6;
+
+  /**
+   * Load a drill on the viewer's own drill server (the replay panel's
+   * "Load this drill on your server"). Owner only: the lease's password is
+   * shared with everyone the owner invited, but only the owner drives the
+   * drills, in game and from here. Rate limited per owner, because each
+   * call is an rcon round trip to a pool server and a map change there.
+   */
+  app.post('/api/practice/leases/:id/drill', async (req, reply) => {
+    const steamid = requireActive(req, reply);
+    if (!steamid) return reply;
+    if (!leases) return reply.code(503).send({ error: 'Practice servers are not available on this site.' });
+    const id = Number((req.params as { id: string }).id);
+    const lease = Number.isInteger(id) ? getLease(db, id) : undefined;
+    if (!lease) return reply.code(404).send({ error: 'No such practice server.' });
+    if (lease.owner_player_id !== steamid) {
+      return reply.code(403).send({ error: 'Only whoever started this server can load drills on it.' });
+    }
+    const body = (req.body ?? {}) as { code?: unknown };
+    const code = typeof body.code === 'string' ? normalizeCode(body.code) : null;
+    if (!code || db.prepare('SELECT 1 FROM practice_drills WHERE code = ?').get(code) === undefined) {
+      return reply.code(404).send({ error: 'No drill has that code.' });
+    }
+    const now = Date.now();
+    const recent = (loads.get(steamid) ?? []).filter((t) => now - t < 60_000);
+    if (recent.length >= LOADS_PER_MINUTE) {
+      return reply.code(429).send({ error: 'That is a lot of drills in a minute. Give the last one a moment.' });
+    }
+    recent.push(now);
+    loads.set(steamid, recent);
+    const r = await leases.loadDrill(lease.id, code);
+    if (!r.ok) return reply.code(r.status).send({ error: r.error });
+    return leaseView(db, getLease(db, lease.id)!, steamid, getPlayer(db, steamid)?.is_admin === 1);
+  });
+
   /** End a lease: its owner, or any admin. */
   app.post('/api/practice/leases/:id/end', async (req, reply) => {
     const steamid = requireActive(req, reply);

@@ -263,7 +263,7 @@ describe('MatchDetail', () => {
     mockApi.match.mockResolvedValue(matchWith({}));
     render(<MatchDetail id="7" me={null} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Drill this' }));
-    expect(screen.getByRole('link', { name: 'Log in to create drills' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Log in to start a drill server' })).toBeTruthy();
   });
 
   it('shows no SR changes on a voided match, whose ratings were rebuilt without it', async () => {
