@@ -56,10 +56,13 @@ let db: DB;
 let app: FastifyInstance;
 let me: Record<string, string>;
 
-async function makeApp(r2?: { store: Map<string, Buffer>; fail?: boolean }): Promise<FastifyInstance> {
+async function makeApp(
+  r2?: { store: Map<string, Buffer>; fail?: boolean; gate?: Promise<void> },
+): Promise<FastifyInstance> {
   const a = Fastify();
   await a.register(cookie, { secret: 'x'.repeat(32) });
   const r2Get = async (_cfg: unknown, key: string, from: number) => {
+    if (r2?.gate) await r2.gate;
     if (r2?.fail) throw new Error('R2 down');
     const b = r2?.store.get(key);
     return b ? { body: b.subarray(from), total: b.length } : null;
@@ -211,6 +214,28 @@ describe('POST /api/practice/drills', () => {
     const res = await create({ matchId: id, ordinal: 0, half: 1, tMs: 500 }, authedCookie(a, db, ME), a);
     expect(res.statusCode).toBe(200);
     expect(res.json().spec.actors).toHaveLength(2);
+    await a.close();
+  });
+
+  it('builds one drill per player at a time, so parallel requests cannot outrun the hourly limit', async () => {
+    let open!: () => void;
+    const gate = new Promise<void>((r) => { open = r; });
+    const store = new Map([[`replays/1/0_1.rpl`, roundBytes()]]);
+    const a = await makeApp({ store, gate });
+    const id = seedMatch('completed', null);
+    db.prepare(
+      "INSERT INTO match_replays (match_id, ordinal, half, filename, bytes, frames, sample_hz, r2_key) VALUES (?, 0, 1, ?, 1, 31, 10, 'replays/1/0_1.rpl')",
+    ).run(id, `pug_${TOKEN}_0_1.rpl`);
+    const cookies = authedCookie(a, db, ME);
+    const first = create({ matchId: id, ordinal: 0, half: 1, tMs: 500 }, cookies, a);
+    // Let the first request reach the (held) R2 read before the second arrives.
+    await new Promise((r) => setTimeout(r, 20));
+    const second = await create({ matchId: id, ordinal: 0, half: 1, tMs: 1500 }, cookies, a);
+    expect(second.statusCode).toBe(429);
+    open();
+    expect((await first).statusCode).toBe(200);
+    // Once it is done the next one goes through.
+    expect((await create({ matchId: id, ordinal: 0, half: 1, tMs: 1500 }, cookies, a)).statusCode).toBe(200);
     await a.close();
   });
 
