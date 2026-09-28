@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { setSetting } from '../src/settings.js';
 import { WeeklyPoster } from '../src/discord/weeklyPoster.js';
+import { freezeWeek } from '../src/weeklyStore.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 import { seedMatch, seedPlayers } from './weeklyFixtures.js';
 
@@ -82,5 +83,45 @@ describe('WeeklyPoster', () => {
     expect(inWeekly()).toHaveLength(1);
     expect(inWeekly()[0].payload.content).toContain('Weekly recap, week of Oct 5');
     expect(inWeekly()[0].payload.content).toContain('No matches were played');
+  });
+});
+
+// The hourly tick is only the retry net for a Discord outage; the boundary
+// timer is what makes the post land at the same moment the site's "This
+// week" flips, rather than up to an hour late.
+describe('WeeklyPoster: posts right at the week boundary', () => {
+  let boundaryDb: DB; let boundaryT: FakeTransport; let boundaryPoster: WeeklyPoster;
+  const inBoundaryWeekly = () => boundaryT.live().filter((m) => m.channelId === 'weekly');
+
+  beforeEach(() => {
+    boundaryDb = openDb(':memory:');
+    seedPlayers(boundaryDb, 1);
+    setSetting(boundaryDb, 'discord_weekly_channel_id', 'weekly');
+    boundaryT = new FakeTransport();
+    // 2026-09-21 already closed, frozen and posted, same as a real fixture
+    // that has been live a while: only the still-open 2026-09-28 is at stake.
+    freezeWeek(boundaryDb, '2026-09-21', new Date('2026-09-29T00:00:00Z'));
+    boundaryDb.prepare(
+      "UPDATE weekly_award_weeks SET posted_at = datetime('now'), recap_message_id = 'm1', awards_message_id = 'm2' WHERE week_start = '2026-09-21'",
+    ).run();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-05T11:59:00Z'));   // one minute before the 2026-10-05 noon UTC boundary
+    boundaryPoster = new WeeklyPoster({ db: boundaryDb, transport: boundaryT, publicUrl: 'https://pug.test' });
+  });
+  afterEach(() => { boundaryPoster.stop(); vi.useRealTimers(); });
+
+  it('waits for the boundary, then posts the week that just closed exactly once', async () => {
+    boundaryPoster.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(inBoundaryWeekly()).toHaveLength(0);   // 2026-09-28 has not closed yet
+
+    await vi.advanceTimersByTimeAsync(65_000);   // past 2026-10-05T12:00:05Z
+    // 2026-09-28 had no matches: only a "no matches" recap gets posted for it.
+    expect(inBoundaryWeekly()).toHaveLength(1);
+    expect(inBoundaryWeekly()[0].payload.content).toContain('Weekly recap, week of Sep 28');
+    expect(inBoundaryWeekly()[0].payload.content).toContain('No matches were played');
+
+    await vi.advanceTimersByTimeAsync(60 * 60_000);   // the next hourly retry tick
+    expect(inBoundaryWeekly()).toHaveLength(1);
   });
 });

@@ -1,11 +1,15 @@
 import type { DB } from '../db.js';
 import { getSetting } from '../settings.js';
-import { addWeeks, weekStartOf } from '../weeklyAwards.js';
+import { addWeeks, weekStartOf, WEEK_START_HOUR } from '../weeklyAwards.js';
 import { freezeWeek, frozenWeek } from '../weeklyStore.js';
 import type { BotTransport } from './transport.js';
 import { renderAwards, renderRecap } from './weeklyCard.js';
 
 const TICK_MS = 60 * 60_000;
+// setTimeout only holds a signed 32-bit ms count; past that it fires
+// immediately instead of overflowing. A week-out boundary is nowhere near
+// it, but armBoundary re-arms rather than ever hand setTimeout more than this.
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 // The first week that closes after the weekly awards feature shipped. Weeks
 // before it are never frozen automatically: nobody was tracking them, so a
@@ -30,6 +34,7 @@ export const WEEKLY_FIRST_WEEK = '2026-09-21';
 export class WeeklyPoster {
   private chain: Promise<void> = Promise.resolve();
   private timer: ReturnType<typeof setInterval> | null = null;
+  private boundaryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private deps: { db: DB; transport: BotTransport; publicUrl: string; tickMs?: number; now?: () => Date }) {}
 
@@ -40,11 +45,38 @@ export class WeeklyPoster {
       this.timer = setInterval(() => { void this.tickNow(); }, every);
       this.timer.unref();
     }
+    // The hourly tick above is only the retry net for a Discord outage; the
+    // site and the post are meant to turn over together, so this timer fires
+    // right at the week boundary instead of waiting for the next hourly tick.
+    this.armBoundary();
   }
 
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    if (this.boundaryTimer) clearTimeout(this.boundaryTimer);
+    this.boundaryTimer = null;
+  }
+
+  /** Schedules tickNow() for 5 seconds after the next week boundary (past the
+   *  instant weekStartOf/weekBounds treat as the new week, never before it),
+   *  then re-arms for the boundary after that. */
+  private armBoundary(): void {
+    const now = (this.deps.now ?? (() => new Date()))();
+    const nextWeek = addWeeks(weekStartOf(now), 1);
+    const boundary = Date.parse(`${nextWeek}T00:00:00Z`) + WEEK_START_HOUR * 3_600_000;
+    const delay = boundary + 5_000 - now.getTime();
+    if (delay > MAX_TIMEOUT_MS) {
+      // A week-out boundary is nowhere near this ceiling, but guard anyway:
+      // wait as long as is safe, then recompute rather than let it overflow.
+      this.boundaryTimer = setTimeout(() => this.armBoundary(), MAX_TIMEOUT_MS);
+    } else {
+      this.boundaryTimer = setTimeout(() => {
+        void this.tickNow();
+        this.armBoundary();
+      }, Math.max(delay, 0));
+    }
+    this.boundaryTimer.unref();
   }
 
   idle(): Promise<void> {
