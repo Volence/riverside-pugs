@@ -297,6 +297,10 @@ export function identityLines(lease: Pick<LeaseRow, 'kind' | 'password' | 'owner
   if (lease.kind === 'drill' && !/^\d{17}$/.test(lease.owner_player_id)) throw new Error('lease owner is not a SteamID64');
   return [
     `sm_cvar sv_password ${quoted(lease.password)}`,
+    // The plugin re-applies this after every map load: server.cfg's
+    // secrets.cfg restores the standing password on each change of map, and
+    // players got "bad password" until the next resend (2026-09-28).
+    `l4d_practice_password ${quoted(lease.password)}`,
     lease.kind === 'drill' ? `l4d_practice_owner ${lease.owner_player_id}` : 'l4d_practice_owner ""',
     `l4d_practice_site ${quoted(publicUrl)}`,
   ];

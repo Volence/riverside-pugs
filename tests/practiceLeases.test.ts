@@ -215,6 +215,7 @@ describe('small parts', () => {
   it('quotes the site URL, since // starts a console comment', () => {
     expect(identityLines({ kind: 'drill', password: 'abcd2345', owner_player_id: ME }, URL)).toEqual([
       'sm_cvar sv_password "abcd2345"',
+      'l4d_practice_password "abcd2345"',
       `l4d_practice_owner ${ME}`,
       'l4d_practice_site "https://riversidepug.com"',
     ]);
@@ -223,7 +224,7 @@ describe('small parts', () => {
   });
 
   it('a park is ownerless in game: its owner cvar is set empty', () => {
-    expect(identityLines({ kind: 'park', password: 'abcd2345', owner_player_id: ME }, URL)[1]).toBe('l4d_practice_owner ""');
+    expect(identityLines({ kind: 'park', password: 'abcd2345', owner_player_id: ME }, URL)[2]).toBe('l4d_practice_owner ""');
   });
 });
 
@@ -238,7 +239,7 @@ describe('PracticeLeases.create', () => {
     expect(r.lease.ends_at).toBe(new Date(T0 + LEASE_MS).toISOString());
     await flush();
     const pw = getLease(db, r.lease.id)!.password;
-    const id = [`sm_cvar sv_password "${pw}"`, 'l4d_practice_owner ""', `l4d_practice_site "${URL}"`];
+    const id = [`sm_cvar sv_password "${pw}"`, `l4d_practice_password "${pw}"`, 'l4d_practice_owner ""', `l4d_practice_site "${URL}"`];
     // Status first (nobody on it), then a restart for a clean slate, then the cfg.
     expect(sent.map((s) => s.cmds)).toEqual([['status'], ['(restart)'], ['exec practice_park.cfg'], id, id]);
     expect(getLease(db, r.lease.id)!.setup_phase).toBeNull();
