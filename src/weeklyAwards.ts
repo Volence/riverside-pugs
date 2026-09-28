@@ -39,7 +39,7 @@ const STAT_AWARDS: StatAward[] = [
   { key: 'tank_damage', label: 'Tank damage', group: 'survivor', stats: ['tank_damage'] },
   { key: 'damage_as_si', label: 'Damage as SI', group: 'infected', stats: ['damage_as_si'] },
   { key: 'dps_landed', label: 'Damage pounces', group: 'infected', stats: ['dps_landed'] },
-  { key: 'pounce_damage', label: 'Pounce damage', group: 'infected', stats: ['pounce_damage_high'] },
+  { key: 'pounce_damage', label: 'Damage from pounces', group: 'infected', stats: ['pounce_damage_high'] },
   { key: 'quad_caps', label: 'Quad caps', group: 'infected', stats: ['quad_caps'] },
   { key: 'booms', label: 'Booms landed', group: 'infected', stats: ['boom_successes'] },
   { key: 'rocks', label: 'Tank rocks landed', group: 'infected', stats: ['tank_rocks_landed'] },
