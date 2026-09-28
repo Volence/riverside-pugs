@@ -75,10 +75,14 @@ describe('Practice (invite page)', () => {
     expect((await screen.findByRole('alert')).textContent).toMatch(/A PUG needs this server/);
   });
 
-  it('a closed server says why and shows no connect line', async () => {
+  it('a closed server says why, with the idle time of its kind, and shows no connect line', async () => {
     mockApi.practiceLease.mockResolvedValue(lease({ state: 'ended', endReason: 'idle', connect: null, canEnd: false }));
     render(<Practice id="4" session={ACTIVE} />);
     expect(await screen.findByText('This practice server closed because nobody was on it for 10 minutes.')).toBeTruthy();
+    cleanup();
+    mockApi.practiceLease.mockResolvedValue(lease({ kind: 'park', state: 'ended', endReason: 'idle', connect: null, canEnd: false }));
+    render(<Practice id="4" session={ACTIVE} />);
+    expect(await screen.findByText('This practice server closed because nobody was on it for 5 minutes.')).toBeTruthy();
     expect(screen.queryByText(/connect 66/)).toBeNull();
   });
 

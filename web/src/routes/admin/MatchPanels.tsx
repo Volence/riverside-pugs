@@ -75,7 +75,18 @@ export function AdminServersPanel({ servers, busy, run, health }: {
             {servers.map((s) => (
               <tr key={s.id} class={s.enabled === 1 ? undefined : 'is-dim'}>
                 <td>{s.name} <span class="muted mono">{s.host}:{s.port}</span></td>
-                <td><span class={`admin-status admin-status--${s.status}`}>{s.status}</span></td>
+                <td>
+                  {/* A leased box is 'idle' in status only (a lease is a
+                      row, not a status), so the lease speaks for it here. */}
+                  {s.practice ? (
+                    <>
+                      <span class="admin-status admin-status--reserved">
+                        {s.practice.ending ? 'practice, closing' : `practice (${s.practice.kind})`}
+                      </span>{' '}
+                      <a class="muted" href={`/practice/${s.practice.leaseId}`}>{s.practice.ownerName}</a>
+                    </>
+                  ) : <span class={`admin-status admin-status--${s.status}`}>{s.status}</span>}
+                </td>
                 {/* Eligibility, not lifecycle. A disabled box keeps whatever
                     status it has and simply stops being claimed, so a match
                     already on it plays out untouched. */}
@@ -101,7 +112,7 @@ export function AdminServersPanel({ servers, busy, run, health }: {
                 <td><RestartCell server={s} busy={busy} run={run} /></td>
                 <td><SourceTvCell server={s} busy={busy} run={run} /></td>
                 <td><LogAuthCell server={s} busy={busy} run={run} /></td>
-                <td>{s.status !== 'idle' && (
+                <td>{s.status !== 'idle' && !s.practice && (
                   <button class="chip" disabled={busy}
                     onClick={() => run(() => adminApi.serverIdle(s.id), {
                       title: `Set ${s.name} idle?`,

@@ -7,7 +7,7 @@ import { PageHeader } from '../components/PageHeader';
 import { ConnectPanel } from '../components/ConnectPanel';
 import { useSecondsLeft } from '../components/Countdown';
 import { confirm } from '../components/Confirm';
-import { END_REASON, KIND_LABEL, leaseClock, leasePath } from '../practice';
+import { IDLE_MINUTES, KIND_LABEL, endReasonText, leaseClock, leasePath } from '../practice';
 
 /** Fast while something is about to change (setup, wind-down), slow once
  *  the server is just running. */
@@ -133,10 +133,10 @@ export function LeasePanel({ lease, onChanged }: { lease: PracticeLease; onChang
         <p class="practice__warn" role="alert">A PUG needs this server. It closes within a minute: ranked matches always come first.</p>
       )}
       {lease.state === 'ending' && (
-        <p class="practice__note">Closing because {END_REASON[lease.endReason ?? 'owner']}. The server restarts and goes back to the PUG pool.</p>
+        <p class="practice__note">Closing because {endReasonText(lease.endReason, lease.kind)}. The server restarts and goes back to the PUG pool.</p>
       )}
       {lease.state === 'ended' && (
-        <p class="practice__note">This practice server closed because {END_REASON[lease.endReason ?? 'owner']}.</p>
+        <p class="practice__note">This practice server closed because {endReasonText(lease.endReason, lease.kind)}.</p>
       )}
 
       {open && lease.connect && (
@@ -152,7 +152,7 @@ export function LeasePanel({ lease, onChanged }: { lease: PracticeLease; onChang
           <div><dt>Map</dt><dd>{lease.map ? mapName(lease.map) : 'loading'}</dd></div>
           <div>
             <dt>Time left</dt>
-            <dd class="num" title="Extended while people are on it. Closes after 10 minutes with nobody on.">{leaseClock(left)}</dd>
+            <dd class="num" title={`Extended while people are on it. Closes after ${IDLE_MINUTES[lease.kind]} minutes with nobody on.`}>{leaseClock(left)}</dd>
           </div>
           <div><dt>Started by</dt><dd><a href={`/player/${lease.owner.steamid}`}>{lease.owner.name}</a></dd></div>
         </dl>

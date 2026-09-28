@@ -1,5 +1,10 @@
 import type { PracticeEndReason, PracticeKind } from './api';
 
+/** Minutes with nobody on before a lease closes itself. Mirrors IDLE_END_MS
+ *  in src/practiceLeases.ts (the park is shared and gives its box back
+ *  sooner). */
+export const IDLE_MINUTES: Record<PracticeKind, number> = { park: 5, drill: 10 };
+
 /**
  * Words for practice server leases (src/practiceLeases.ts), shared by the
  * Play page card, the invite page and the admin board so the three never
@@ -16,7 +21,7 @@ export const KIND_LABEL: Record<PracticeKind, string> = {
 export const END_REASON: Record<PracticeEndReason, string> = {
   owner: 'whoever started it closed it',
   admin: 'an admin closed it',
-  idle: 'nobody was on it for 10 minutes',
+  idle: 'nobody was on it',
   expired: 'its time ran out',
   preempted: 'a PUG needed the server (ranked matches always come first)',
   setup_failed: 'the server could not be set up',
@@ -35,3 +40,10 @@ export function leaseClock(seconds: number): string {
 
 /** The invite page of a lease, as a path. */
 export const leasePath = (id: number) => `/practice/${id}`;
+
+/** The END_REASON sentence ending for a lease, with the idle time its kind
+ *  actually waited. */
+export function endReasonText(reason: PracticeEndReason | null, kind: PracticeKind): string {
+  if (reason === 'idle') return `nobody was on it for ${IDLE_MINUTES[kind]} minutes`;
+  return END_REASON[reason ?? 'owner'];
+}

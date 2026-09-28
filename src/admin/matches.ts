@@ -49,6 +49,10 @@ export function adminOverview(db: DB, logAuth?: LogAuth) {
   ).all() as ({ id: number; logMode: string; hasLogSecret: number } & Record<string, unknown>)[])
     .map(({ logMode, hasLogSecret, ...s }) => ({
       ...s,
+      // A box lent out for practice is 'idle' in status (a lease is a row,
+      // not a status; see src/practiceLeases.ts), so without this the table
+      // would call a box people are practising on idle.
+      practice: practiceOn(db, s.id),
       logAuth: {
         mode: logMode,
         hasSecret: hasLogSecret === 1,
@@ -121,4 +125,16 @@ export function voidMatch(db: DB, matchId: number, reason: string): ActionResult
     recomputeSeasonRatings(db, m.season_id);
   })();
   return { ok: true };
+}
+
+/** The open practice lease holding this server, for the admin Servers
+ *  table, or null. Winding down counts: the box is not free until its
+ *  restart has finished. */
+function practiceOn(db: DB, serverId: number): { leaseId: number; kind: 'park' | 'drill'; ownerName: string; ending: boolean } | null {
+  const row = db.prepare(
+    `SELECT l.id, l.kind, l.end_reason, COALESCE(p.name, l.owner_player_id) AS ownerName
+     FROM practice_leases l LEFT JOIN players p ON p.steamid = l.owner_player_id
+     WHERE l.server_id = ? AND l.ended_at IS NULL ORDER BY l.id DESC LIMIT 1`,
+  ).get(serverId) as { id: number; kind: 'park' | 'drill'; end_reason: string | null; ownerName: string } | undefined;
+  return row ? { leaseId: row.id, kind: row.kind, ownerName: row.ownerName, ending: row.end_reason !== null } : null;
 }
