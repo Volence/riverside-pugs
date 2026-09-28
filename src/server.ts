@@ -65,6 +65,7 @@ import { handleConduct } from './conductFlags.js';
 import { handleModCall } from './modCalls.js';
 import { ModCallPoster } from './discord/modCallPoster.js';
 import { WeeklyPoster } from './discord/weeklyPoster.js';
+import { SkeetStreakPoster } from './discord/skeetStreakPoster.js';
 import { MOD_CALL_PREFIX } from './discord/modCallCard.js';
 import { refreshSteamSignals, startSteamSignalRefresh, type SignalDeps } from './steamSignals.js';
 import { authRoutes } from './routes/auth.js';
@@ -1457,6 +1458,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   let adminFeed: AdminFeedPoster | null = null;
   let modCalls: ModCallPoster | null = null;
   let weekly: WeeklyPoster | null = null;
+  let skeetStreaks: SkeetStreakPoster | null = null;
   let ticketSync: TicketSync | null = null;
   let ticketMirror: TicketMirror | null = null;
   let reportButton: ReportButton | null = null;
@@ -1514,6 +1516,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         modCalls.start();
         weekly = new WeeklyPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
         weekly.start();
+        skeetStreaks = new SkeetStreakPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
+        skeetStreaks.start();
         for (const text of bootProblems.splice(0)) publishAdminEvent({ kind: 'problem', text });
         // Built before the reconciler so its hook can reach it. Which of the
         // two starts first decides nothing: start() only queues a first pass
@@ -1596,6 +1600,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     adminFeed?.stop();
     modCalls?.stop();
     weekly?.stop();
+    skeetStreaks?.stop();
     await bot?.stop();
     clearInterval(reaper);
     clearInterval(presenceSweep);
