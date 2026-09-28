@@ -42,20 +42,40 @@ function Winners({ a }: { a: WeeklyAward }) {
 }
 
 export function WeeklyBoard({ week, onWeek }: { week?: string; onWeek: (w: string | undefined) => void }) {
-  const { data, error } = useFetch((s) => api.weekly(s, week), [week]);
   const { data: list } = useFetch((s) => api.weeklyWeeks(s).catch(() => ({ current: '', weeks: [] as string[] })), []);
-  if (error) return <Empty>Could not load this week.</Empty>;
+  // The Discord post and profile chips link `?week=<that week's Monday>`.
+  // Once that week is the live one again (a new week started), the linked
+  // Monday IS the current week, so treat it as no week at all (live) rather
+  // than asking the API for a week id that no longer means anything special.
+  const effectiveWeek = list && week && week === list.current ? undefined : week;
+  const { data, error } = useFetch((s) => api.weekly(s, effectiveWeek), [effectiveWeek]);
+
+  const picker = (
+    <select
+      class="season-picker" aria-label="Week" value={effectiveWeek ?? ''}
+      onChange={(e) => onWeek((e.currentTarget as HTMLSelectElement).value || undefined)}
+    >
+      <option value="">This week</option>
+      {(list?.weeks ?? []).map((w) => <option key={w} value={w}>{weekName(w)}</option>)}
+    </select>
+  );
+
+  // Keep the picker on screen even when the week itself failed to load, so a
+  // bad or stale week id does not strand the reader on a dead page: they can
+  // still pick another week or fall back to "This week".
+  if (error) {
+    return (
+      <div class="weekly">
+        <div class="weekly__bar">{picker}</div>
+        <Empty>Could not load this week.</Empty>
+      </div>
+    );
+  }
   if (!data) return null;
   return (
     <div class="weekly">
       <div class="weekly__bar">
-        <select
-          class="season-picker" aria-label="Week" value={week ?? ''}
-          onChange={(e) => onWeek((e.currentTarget as HTMLSelectElement).value || undefined)}
-        >
-          <option value="">This week</option>
-          {(list?.weeks ?? []).map((w) => <option key={w} value={w}>{weekName(w)}</option>)}
-        </select>
+        {picker}
         {data.live && <span class="weekly__note">Live. Averages need {data.minGames}+ games; final Monday 00:00 UTC.</span>}
       </div>
       {data.awards.length === 0 && <Empty>No awards yet this week.</Empty>}
