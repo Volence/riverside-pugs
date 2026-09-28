@@ -550,6 +550,7 @@ No config exec and no restart: it tracks the game already being played. Implies 
 	HookEvent("infected_death", Event_InfectedDeath);
 	HookEvent("revive_success", Event_ReviveSuccess);
 	LeaveInit();
+	RatesInit();
 	PauseInit();
 	ModCall_Init();
 	StaffChat_Init();
@@ -3803,6 +3804,7 @@ public void OnClientDisconnect(int client)
 	int slot = g_iClientRoster[client];
 	g_iClientRoster[client] = -1;
 	g_iLockAttempts[client] = 0;
+	RatesClientReset(client);
 	if (slot != -1 && g_State != MS_None)
 	{
 		EmitPug("PLAYER steamid=%s event=disconnect", g_sRosterId[slot]);
@@ -4026,6 +4028,11 @@ public Action Timer_TeamLock(Handle timer)
 		int want = g_iPugSide[g_iRosterTeam[slot]];
 		if (want == 0) continue;
 		int have = GetClientTeam(c);
+		// Before the placement below, and before the "already on their side"
+		// shortcut: a failing player on their side during ready-up is moved to
+		// spectator in here, and one in spectator is never placed. Without
+		// this the lock and lerptracker bounced a 100 ms player (match 199).
+		if (RatesHold(c, have)) { g_iLockAttempts[c] = 0; continue; }
 		if (have == want) { g_iLockAttempts[c] = 0; continue; }
 		if (g_iLockAttempts[c] >= LOCK_ATTEMPT_CAP)
 		{
@@ -5530,6 +5537,7 @@ public void Event_PounceStopped(Event event, const char[] name, bool dontBroadca
 }
 
 #include "pug-leave.inc"
+#include "pug-rates.inc"
 // After pug-leave.inc: this module reads its pause state and its absence check.
 #include "pug-pause.inc"
 #include "pug-modcall.inc"
