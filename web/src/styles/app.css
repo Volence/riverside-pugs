@@ -1298,6 +1298,10 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .feed { margin-top: var(--sp-4); }
 .feed__more { margin-top: var(--sp-2); }
 .match__maps { margin-bottom: var(--sp-3); }
+/* The round tabs (with Report this moment and Drill this) sit between the
+ * map title and the viewer's Show / For filters. The same step as the map
+ * tabs above the title, so the three rows read as three rows. */
+.match__rounds { margin: var(--sp-3) 0; }
 .match__sides { margin: var(--sp-2) 0 0; }
 .feed h4 {
   margin: 0 0 var(--sp-2);

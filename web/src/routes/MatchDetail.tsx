@@ -46,7 +46,7 @@ function MapReplay(
 
   return (
     <>
-      <div class="replay__rounds">
+      <div class="replay__rounds match__rounds">
         <button class={`chip ${half === 1 ? 'is-on' : ''}`} onClick={() => setHalf(1)}>Round 1</button>
         <button class={`chip ${half === 2 ? 'is-on' : ''}`} onClick={() => setHalf(2)}>Round 2</button>
         {onMoment && (
