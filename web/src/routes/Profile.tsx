@@ -70,6 +70,7 @@ export function Profile(
           eyebrow={`Joined ${fmtDate(player.createdAt)}`}
           name={player.name}
           avatar={player.avatar}
+          avatarHref={`https://steamcommunity.com/profiles/${steamid}`}
           pronouns={player.pronouns}
           countryCode={player.country}
           countryLabel={countryName(player.country)}
