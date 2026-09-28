@@ -16,6 +16,7 @@ let db: DB;
 let app: FastifyInstance;
 let leases: PracticeLeases;
 let sent: string[][];
+const kindOn = new Map<number, string>();
 let owner: Record<string, string>;
 let friend: Record<string, string>;
 let admin: Record<string, string>;
@@ -32,9 +33,24 @@ function seedServers(n: number): void {
 beforeEach(async () => {
   db = openDb(':memory:');
   sent = [];
+  kindOn.clear();
   leases = new PracticeLeases({
     db, publicUrl: 'https://riversidepug.com',
-    rcon: async (_s, cmds) => { sent.push(cmds); return cmds.map((c) => (c === 'status' ? 'players : 0 humans, 0 bots (31 max)' : '')); },
+    // A box takes whichever practice cfg was last exec'd on it, and says so
+    // in the two cvars setup verifies (the verify logic has its own tests).
+    rcon: async (s, cmds) => {
+      const reads = cmds.every((c) => c === 'l4d_game_type_name' || c === 'l4d_practice_mode');
+      if (!reads) sent.push(cmds);
+      return cmds.map((c) => {
+        const m = /^exec practice_(park|drill)\.cfg$/.exec(c);
+        if (m) kindOn.set(s.id, m[1]);
+        const k = kindOn.get(s.id);
+        if (c === 'status') return 'players : 0 humans, 0 bots (31 max)';
+        if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${k === 'park' ? 'Practice' : k === 'drill' ? 'Rotoblin 4v4 PUG' : 'Rotoblin Pub VS'}"`;
+        if (c === 'l4d_practice_mode') return `"l4d_practice_mode" = "${k ?? ''}"`;
+        return '';
+      });
+    },
     release: async () => true,
     restart: async () => true,
     sleep: async () => {},
