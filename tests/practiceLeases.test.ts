@@ -81,15 +81,10 @@ describe('pickLeaseServer', () => {
     expect(pickLeaseServer(db).ok).toBe(true);
   });
 
-  it('counts any claimable box toward the reserve but only lends restart-after-match boxes', () => {
-    const a = seedServer('a'); seedServer('bb', { restart: 0 });
+  it('lends any enabled box, restart toggle or not (ending restarts it regardless)', () => {
+    seedServer('a', { restart: 0 }); const b = seedServer('bb', { restart: 0 });
     const pick = pickLeaseServer(db);
-    expect(pick.ok && pick.server.id).toBe(a);
-  });
-
-  it('says so when no box is set up to restart at all', () => {
-    seedServer('a', { restart: 0 }); seedServer('bb', { restart: 0 });
-    expect(pickLeaseServer(db)).toEqual({ ok: false, reason: 'none_eligible' });
+    expect(pick.ok && pick.server.id).toBe(b);
   });
 
   it('ignores disabled, busy and already leased boxes', () => {
@@ -140,20 +135,28 @@ describe('the pool with a lease open', () => {
 });
 
 describe('judgeLease', () => {
-  const lease = { last_human_at: new Date(T0).toISOString(), ends_at: new Date(T0 + LEASE_MS).toISOString() };
+  const lease = { kind: 'drill' as const, last_human_at: new Date(T0).toISOString(), ends_at: new Date(T0 + LEASE_MS).toISOString() };
 
   it('keeps a lease with people on it and stamps them', () => {
     const v = judgeLease(lease, 3, T0 + 5 * 60_000);
     expect(v).toEqual({ end: null, lastHumanAt: new Date(T0 + 5 * 60_000).toISOString(), endsAt: lease.ends_at });
   });
 
-  it('ends one nobody has been on for ten minutes, not before', () => {
-    expect(judgeLease(lease, 0, T0 + IDLE_END_MS - 1).end).toBeNull();
-    expect(judgeLease(lease, 0, T0 + IDLE_END_MS).end).toBe('idle');
+  it('ends a drill server nobody has been on for ten minutes, not before', () => {
+    expect(IDLE_END_MS.drill).toBe(10 * 60_000);
+    expect(judgeLease(lease, 0, T0 + IDLE_END_MS.drill - 1).end).toBeNull();
+    expect(judgeLease(lease, 0, T0 + IDLE_END_MS.drill).end).toBe('idle');
+  });
+
+  it('ends an empty park after five minutes', () => {
+    expect(IDLE_END_MS.park).toBe(5 * 60_000);
+    const park = { ...lease, kind: 'park' as const };
+    expect(judgeLease(park, 0, T0 + 5 * 60_000 - 1).end).toBeNull();
+    expect(judgeLease(park, 0, T0 + 5 * 60_000).end).toBe('idle');
   });
 
   it('a failed poll counts as nobody, so a dead box drifts to the idle end', () => {
-    expect(judgeLease(lease, null, T0 + IDLE_END_MS).end).toBe('idle');
+    expect(judgeLease(lease, null, T0 + IDLE_END_MS.drill).end).toBe('idle');
   });
 
   it('extends past the time limit while people are on, and ends it when they are not', () => {
@@ -350,9 +353,12 @@ describe('PracticeLeases.tick', () => {
     }]);
   });
 
-  it('ends a lease nobody joined within ten minutes', async () => {
+  it('ends a park nobody joined within five minutes', async () => {
     const m = await leased();
-    now = T0 + IDLE_END_MS;
+    now = T0 + IDLE_END_MS.park - 1;
+    await m.tick();
+    expect(getLease(db, 1)!.end_reason).toBeNull();
+    now = T0 + IDLE_END_MS.park;
     await m.tick();
     await flush();
     expect(getLease(db, 1)!.end_reason).toBe('idle');
@@ -508,5 +514,17 @@ describe('releaser hooks the lease relies on', () => {
     await releaser.settled();
     expect(back).toBe(false);
     expect(getServer(db, id)!.status).toBe('offline');
+  });
+});
+
+describe('admin overview', () => {
+  it('marks a leased server as in use for practice, with the owner', async () => {
+    const { adminOverview } = await import('../src/admin/matches.js');
+    seedServer('a'); seedServer('bb');
+    mgr = manager();
+    await mgr.create(ME, 'drill');
+    const rows = adminOverview(db).servers as unknown as { id: number; status: string; practice: unknown }[];
+    expect(rows.find((r) => r.id === 1)!.practice).toBeNull();
+    expect(rows.find((r) => r.id === 2)).toMatchObject({ status: 'idle', practice: { leaseId: 1, kind: 'drill', ownerName: 'me', ending: false } });
   });
 });

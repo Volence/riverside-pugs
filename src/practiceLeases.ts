@@ -24,12 +24,13 @@
  * path, with the minute tick as the fallback).
  *
  * Ending a lease always restarts srcds, through the releaser's own restart
- * machinery (src/serverRelease.ts, forceRestart), so nothing a practice config
- * set can reach the next PUG. That is not paranoia: the 2026-09-25 config
- * audit found the existing practice mode already leaking z_ghost_delay_minspawn
- * into ranked play. Because a restart is the reset, only boxes an admin has
- * set to restart after matches (restart_after_match, the one flag that says
- * "this box comes back from quit") are ever lent.
+ * machinery (src/serverRelease.ts, forceRestart), whatever the box's
+ * restart_after_match toggle says, so nothing a practice config set can
+ * reach the next PUG. That is not paranoia: the 2026-09-25 config audit
+ * found the existing practice mode already leaking z_ghost_delay_minspawn
+ * into ranked play. Any enabled box may be lent (owner, 2026-09-28); one
+ * whose supervisor does not bring it back after `quit` stays offline and is
+ * reported, as for a match release.
  *
  * The lease row holds its box until that restart has finished: end_reason is
  * set when the wind-down starts and ended_at only once the box is back. A
@@ -78,8 +79,12 @@ export interface LeaseRow {
 
 /** Humans the park takes. The owner's number; the box itself allows more. */
 export const PARK_CAPACITY = 8;
-/** A lease with nobody on it for this long ends. Also the grace to join. */
-export const IDLE_END_MS = 10 * 60_000;
+/** A lease with nobody on it for this long ends. Also the grace to join.
+ *  Shorter for the park (owner, 2026-09-28): it is a shared box that exists
+ *  for whoever turns up, and an empty one is a box the queue could have. A
+ *  drill server is one person's, set up for a planned session, and gets the
+ *  longer wait for friends to connect. */
+export const IDLE_END_MS: Record<LeaseKind, number> = { park: 5 * 60_000, drill: 10 * 60_000 };
 /** How long a lease runs before it ends unless people are still on it. */
 export const LEASE_MS = 90 * 60_000;
 /** Each extension past LEASE_MS while humans are connected. */
@@ -165,32 +170,27 @@ function claimableServers(db: DB): ServerRow[] {
 
 export type PickResult =
   | { ok: true; server: ServerRow }
-  | { ok: false; reason: 'off' | 'max_leases' | 'queue_waiting' | 'no_server' | 'none_eligible' };
+  | { ok: false; reason: 'off' | 'max_leases' | 'queue_waiting' | 'no_server' };
 
 /**
  * Which server a new lease may take, or why none.
  *
- * The highest id that qualifies, because matches fill from the lowest
- * (claimIdle orders by id), so the box lent out is the one a PUG would reach
- * for last. It qualifies when it is enabled, idle, unleased and set to
- * restart after matches (see the file comment), AND taking it still leaves
- * `practice_reserve_idle` other claimable boxes for the queue. Any claimable
- * box counts toward that reserve, restart flag or not.
+ * The highest id that qualifies, the reverse of the order matches claim
+ * boxes in (claimIdle takes the lowest id), so the box lent out is the one a
+ * PUG would reach for last. Any enabled, idle, unleased box qualifies, as
+ * long as taking it still leaves `practice_reserve_idle` other claimable
+ * boxes for the queue. Whether the box restarts after matches does not
+ * matter here: ending a lease restarts srcds regardless (owner, 2026-09-28).
  */
 export function pickLeaseServer(db: DB): PickResult {
   const max = settingNumber(db, 'practice_max_leases', 2, { integer: true, min: 0 });
   if (max === 0) return { ok: false, reason: 'off' };
   if (openLeases(db).length >= max) return { ok: false, reason: 'max_leases' };
   if (matchesWaiting(db) > 0) return { ok: false, reason: 'queue_waiting' };
-  const anyEligible = (db.prepare(
-    'SELECT COUNT(*) AS n FROM servers WHERE enabled = 1 AND restart_after_match = 1',
-  ).get() as { n: number }).n > 0;
-  if (!anyEligible) return { ok: false, reason: 'none_eligible' };
   const reserve = settingNumber(db, 'practice_reserve_idle', 1, { integer: true, min: 0 });
   const free = claimableServers(db);
-  if (free.length - 1 < reserve) return { ok: false, reason: 'no_server' };
-  const pick = [...free].reverse().find((s) => s.restart_after_match === 1);
-  return pick ? { ok: true, server: pick } : { ok: false, reason: 'no_server' };
+  if (free.length === 0 || free.length - 1 < reserve) return { ok: false, reason: 'no_server' };
+  return { ok: true, server: free[free.length - 1] };
 }
 
 /** What a player is told when no lease could be made. */
@@ -199,7 +199,6 @@ export const PICK_ERRORS: Record<Exclude<PickResult, { ok: true }>['reason'], st
   max_leases: 'Every practice server slot is in use. Try again when one closes, or join the Practice Park.',
   queue_waiting: 'A PUG is waiting for a server, so none can be spared right now.',
   no_server: 'All servers are busy with PUGs right now. Try again in a few minutes.',
-  none_eligible: 'No server is set up for practice yet.',
 };
 
 /**
@@ -210,7 +209,7 @@ export const PICK_ERRORS: Record<Exclude<PickResult, { ok: true }>['reason'], st
  * rather than being held for ever.
  */
 export function judgeLease(
-  lease: Pick<LeaseRow, 'last_human_at' | 'ends_at'>, humans: number | null, nowMs: number,
+  lease: Pick<LeaseRow, 'kind' | 'last_human_at' | 'ends_at'>, humans: number | null, nowMs: number,
 ): { end: 'idle' | 'expired' } | { end: null; lastHumanAt: string; endsAt: string } {
   const present = humans !== null && humans > 0;
   const lastHumanAt = present ? iso(nowMs) : lease.last_human_at;
@@ -219,7 +218,7 @@ export function judgeLease(
     if (!present) return { end: 'expired' };
     endsAt = iso(nowMs + EXTEND_MS);
   }
-  if (!present && nowMs - Date.parse(lease.last_human_at) >= IDLE_END_MS) return { end: 'idle' };
+  if (!present && nowMs - Date.parse(lease.last_human_at) >= IDLE_END_MS[lease.kind]) return { end: 'idle' };
   return { end: null, lastHumanAt, endsAt };
 }
 
@@ -251,7 +250,7 @@ export function identityLines(lease: Pick<LeaseRow, 'password' | 'owner_player_i
 const END_SAY: Record<EndReason, string> = {
   owner: 'the owner closed it',
   admin: 'an admin closed it',
-  idle: 'nobody was on it for 10 minutes',
+  idle: 'nobody was on it for a while',
   expired: 'its time ran out',
   preempted: 'a PUG needs this server',
   setup_failed: 'it could not be set up',

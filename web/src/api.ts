@@ -811,6 +811,10 @@ export interface AdminOverview {
     tvPort: number | null; tvPassword: string | null; tvEnabled: number; restartAfterMatch?: number;
     /** Signed log lines. Optional: a payload from before it existed has none. */
     logAuth?: ServerLogAuth;
+    /** The open practice lease holding this box (src/practiceLeases.ts). A
+     *  leased box is 'idle' in status, so this is what says it is in use.
+     *  Optional only for a browser holding new JS against an older server. */
+    practice?: { leaseId: number; kind: PracticeKind; ownerName: string; ending: boolean } | null;
   }[];
   recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[]; readyups: MatchReadyup[] }[];
   /** Ended with no result. `abandonedBy` names the leaver when the abandon
