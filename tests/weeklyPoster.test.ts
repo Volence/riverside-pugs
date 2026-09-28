@@ -48,12 +48,39 @@ describe('WeeklyPoster', () => {
     expect(inWeekly().map(kind)).toEqual(['recap', 'awards']);
   });
 
-  it('does not freeze or post the week still in progress', async () => {
-    now = new Date('2026-09-24T12:00:00Z');
+  it('freezes and posts nothing while the first tracked week is still open', async () => {
+    now = new Date('2026-09-24T12:00:00Z');   // inside the week of 2026-09-21, WEEKLY_FIRST_WEEK
     poster.start(); await poster.idle();
-    expect(db.prepare("SELECT week_start FROM weekly_award_weeks").all()).toEqual([{ week_start: '2026-09-14' }]);
-    // Last week had no matches: a short "no matches" recap and no awards embed.
+    expect(db.prepare('SELECT week_start FROM weekly_award_weeks').all()).toEqual([]);
+    expect(inWeekly()).toHaveLength(0);
+  });
+
+  it('catches up one week on the next tick after an outage', async () => {
+    poster.start(); await poster.idle();   // freezes and posts 2026-09-21
+    expect(inWeekly()).toHaveLength(2);
+    now = new Date('2026-10-06T00:10:00Z');   // the week after 2026-09-28 closed
+    await poster.tickNow();
+    expect(db.prepare('SELECT week_start FROM weekly_award_weeks ORDER BY week_start').all())
+      .toEqual([{ week_start: '2026-09-21' }, { week_start: '2026-09-28' }]);
+    // 2026-09-28 had no matches: only a "no matches" recap gets posted for it.
+    expect(inWeekly()).toHaveLength(3);
+    expect(inWeekly()[2].payload.content).toContain('Weekly recap, week of Sep 28');
+    expect(inWeekly()[2].payload.content).toContain('No matches were played');
+    expect(db.prepare("SELECT posted_at FROM weekly_award_weeks WHERE week_start = '2026-09-28'").get()).not.toEqual({ posted_at: null });
+  });
+
+  it('catches up every closed week from a cold start, posting only the newest', async () => {
+    now = new Date('2026-10-13T00:10:00Z');   // three weeks have closed since WEEKLY_FIRST_WEEK
+    poster.start(); await poster.idle();
+    expect(db.prepare('SELECT week_start FROM weekly_award_weeks ORDER BY week_start').all())
+      .toEqual([{ week_start: '2026-09-21' }, { week_start: '2026-09-28' }, { week_start: '2026-10-05' }]);
+    // Only the newest week is ever posted; the older catch-up weeks are frozen silently.
+    expect(db.prepare("SELECT posted_at FROM weekly_award_weeks WHERE week_start != '2026-10-05'").all())
+      .toEqual([{ posted_at: null }, { posted_at: null }]);
+    expect(db.prepare("SELECT posted_at FROM weekly_award_weeks WHERE week_start = '2026-10-05'").get())
+      .not.toEqual({ posted_at: null });
     expect(inWeekly()).toHaveLength(1);
+    expect(inWeekly()[0].payload.content).toContain('Weekly recap, week of Oct 5');
     expect(inWeekly()[0].payload.content).toContain('No matches were played');
   });
 });

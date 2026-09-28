@@ -7,6 +7,12 @@ import { renderAwards, renderRecap } from './weeklyCard.js';
 
 const TICK_MS = 60 * 60_000;
 
+// The first week that closes after the weekly awards feature shipped. Weeks
+// before it are never frozen automatically: nobody was tracking them, so a
+// naive catch-up would freeze a pile of ancient, meaningless weeks the first
+// time this poster ever ran. scripts/weekly-awards.ts can freeze one by hand.
+export const WEEKLY_FIRST_WEEK = '2026-09-21';
+
 /**
  * Freezes the week that just closed and posts it: the recap, then the awards.
  *
@@ -15,9 +21,11 @@ const TICK_MS = 60 * 60_000;
  * posted_at only once both are in, so a restart or an outage between the two
  * sends resends only the missing one and never posts a week twice.
  *
- * Only the week before the current one is ever frozen here, so weeks from
- * before this shipped are left alone (scripts/weekly-awards.ts freezes one by
- * hand).
+ * Every tick also catches up: if the poster was down for a while, it freezes
+ * every week from the last one it knows about (or WEEKLY_FIRST_WEEK) through
+ * the one that just closed. freezeWeek is idempotent, so re-freezing a week
+ * that already froze is harmless. Only the most recently closed week is ever
+ * posted; older catch-up weeks are frozen silently.
  */
 export class WeeklyPoster {
   private chain: Promise<void> = Promise.resolve();
@@ -50,8 +58,14 @@ export class WeeklyPoster {
 
   private async tick(): Promise<void> {
     const { db, transport, publicUrl } = this.deps;
-    const week = addWeeks(weekStartOf((this.deps.now ?? (() => new Date()))()), -1);
-    freezeWeek(db, week);
+    const now = (this.deps.now ?? (() => new Date()))();
+    const last = addWeeks(weekStartOf(now), -1);
+    if (last < WEEKLY_FIRST_WEEK) return;   // the first tracked week has not even closed yet
+    const newest = db.prepare('SELECT MAX(week_start) AS w FROM weekly_award_weeks').get() as { w: string | null };
+    const newestPlus = newest.w ? addWeeks(newest.w, 1) : WEEKLY_FIRST_WEEK;
+    const start = newestPlus > WEEKLY_FIRST_WEEK ? newestPlus : WEEKLY_FIRST_WEEK;
+    for (let w = start; w <= last; w = addWeeks(w, 1)) freezeWeek(db, w, now);
+    const week = last;
     const channelId = getSetting(db, 'discord_weekly_channel_id') ?? '';
     if (!channelId) return;
     const row = db.prepare(
