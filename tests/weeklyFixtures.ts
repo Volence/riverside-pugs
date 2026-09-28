@@ -13,7 +13,7 @@ export function seedPlayers(db: DB, n: number): string[] {
   return ids;
 }
 
-type Fixed = 'si_damage' | 'si_kills' | 'common_kills' | 'revives';
+type Fixed = 'si_damage' | 'si_kills' | 'common_kills' | 'revives' | 'ff_dealt';
 export interface SeedLine {
   id: string;
   team: 'a' | 'b';
@@ -42,11 +42,11 @@ export function seedMatch(db: DB, o: SeedMatch): number {
     o.endedAt, o.wentLiveAt ?? null, o.voided ? o.endedAt : null,
   ).lastInsertRowid);
   const mp = db.prepare(
-    'INSERT INTO match_players (match_id, player_id, team, si_damage, si_kills, common_kills, revives) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO match_players (match_id, player_id, team, si_damage, si_kills, common_kills, revives, ff_dealt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
   );
   const st = db.prepare('INSERT INTO match_player_stats (match_id, player_id, stat, value) VALUES (?, ?, ?, ?)');
   for (const l of o.lines) {
-    mp.run(id, l.id, l.team, l.fixed?.si_damage ?? 0, l.fixed?.si_kills ?? 0, l.fixed?.common_kills ?? 0, l.fixed?.revives ?? 0);
+    mp.run(id, l.id, l.team, l.fixed?.si_damage ?? 0, l.fixed?.si_kills ?? 0, l.fixed?.common_kills ?? 0, l.fixed?.revives ?? 0, l.fixed?.ff_dealt ?? 0);
     for (const [k, v] of Object.entries(l.stats ?? {})) st.run(id, l.id, k, v);
   }
   return id;

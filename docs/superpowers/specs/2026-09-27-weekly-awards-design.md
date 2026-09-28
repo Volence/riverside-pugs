@@ -81,13 +81,13 @@ Shame (single winner each, min `weekly_min_games` matches):
 | key | Label | Rule |
 |---|---|---|
 | slow_ready | Slowest ready-up | highest average `match_readyup_players.seconds` per ready-up |
-| incap_damage | Kicking them while they're down | highest per-match average `dmg_to_incapped` |
+| friendly_fire | Friendly fire | highest per-match average `match_players.ff_dealt` |
 | group_hug | Group hug | highest per-match average `times_quadded` |
 
 Left out on purpose: self clears (owner), highest SR (owner agreed to skip: it
 is the season leaderboard's #1 every week), stats that are always zero on L4D1 (deadstops, tongue
-cuts, sniper and melee skeets, survivors biled), and every `self`-visibility
-stat such as times skeeted.
+cuts, sniper and melee skeets, survivors biled), every `self`-visibility
+stat such as times skeeted, and most damage to incapped survivors (owner: it does not mean anything).
 
 Known bias, accepted: displayed SR is mu - 2 sigma, and sigma shrinks with
 every game, so a newer player climbs a little even at a 50 % win rate. The

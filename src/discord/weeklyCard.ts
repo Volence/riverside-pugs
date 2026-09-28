@@ -14,7 +14,7 @@ import type { MessagePayload } from './transport.js';
 
 const RECAP_LIMIT = 2000;
 const EMBED_LIMIT = 4096;
-const DAMAGE = new Set(['si_damage', 'tank_damage', 'damage_as_si', 'pounce_damage', 'hunter_damage', 'smoker_damage', 'incap_damage']);
+const DAMAGE = new Set(['si_damage', 'tank_damage', 'damage_as_si', 'pounce_damage', 'hunter_damage', 'smoker_damage', 'friendly_fire']);
 const GROUPS: { group: AwardGroup; title: string }[] = [
   { group: 'survivor', title: 'Survivor' },
   { group: 'infected', title: 'Infected' },

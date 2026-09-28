@@ -138,11 +138,23 @@ describe('shame awards', () => {
     expect(s.winners.map((w) => [w.steamid, w.value])).toEqual([[P[0], 30]]);
   });
 
-  it('incap damage and group hug are per-match averages', () => {
-    play(P[0], 5, { dmg_to_incapped: 300, times_quadded: 1 });
-    play(P[1], 5, { dmg_to_incapped: 100, times_quadded: 2 });
+  it('friendly fire and group hug are per-match averages', () => {
+    for (let i = 0; i < 5; i++) {
+      seedMatch(db, {
+        endedAt: at(i),
+        lines: [
+          { id: P[0], team: 'a', fixed: { ff_dealt: 30 }, stats: { times_quadded: 1 } },
+          { id: P[1], team: 'b', fixed: { ff_dealt: 10 }, stats: { times_quadded: 2 } },
+        ],
+      });
+    }
+    // Four matches only: below the min-games gate, so a huge ff_dealt does not win.
+    for (let i = 0; i < 4; i++) {
+      seedMatch(db, { endedAt: at(i, '09:00:00'), lines: [{ id: P[2], team: 'a', fixed: { ff_dealt: 500 } }] });
+    }
     const r = computeWeek(db, W);
-    expect(find(r, 'incap_damage', 'single')!.winners[0].steamid).toBe(P[0]);
+    expect(find(r, 'friendly_fire', 'single')!.winners.map((w) => [w.steamid, w.value])).toEqual([[P[0], 30]]);
     expect(find(r, 'group_hug', 'single')!.winners[0]).toMatchObject({ steamid: P[1], value: 2 });
+    expect(find(r, 'incap_damage', 'single')).toBeUndefined();
   });
 });
