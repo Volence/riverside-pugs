@@ -4,7 +4,7 @@ import { parseReplay } from '../replayFormat.js';
 import { buildDrill } from '../drillSpec.js';
 import { createDrill, drillForMoment, drillsCreatedSince, fetchDrill, normalizeCode, DRILLS_PER_HOUR } from '../practiceDrills.js';
 import {
-  adminLeaseRows, getLease, leaseView, openLeaseOf, parkListings, type LeaseKind, type PracticeLeases,
+  adminLeaseRows, getLease, leaseView, openDrillLeaseOf, parkListings, type LeaseKind, type PracticeLeases,
 } from '../practiceLeases.js';
 import { getPlayer } from '../players.js';
 import { logAdmin } from '../admin/audit.js';
@@ -208,12 +208,13 @@ export async function practiceRoutes(
   /**
    * The Practice Park, publicly: which parks are open, how full, on what
    * map. No host and no password; those are behind a login on the lease page.
-   * A logged-in viewer also learns the id of their own open lease, so the
-   * Play page can link back to it.
+   * A logged-in viewer also learns the id of their own open drill server,
+   * so the Play page and the Drill this panel can link back to it (parks
+   * are ownerless and never count as anyone's).
    */
   app.get('/api/practice/park', async (req) => {
     const viewer = optionalViewer(req);
-    const mine = viewer ? openLeaseOf(db, viewer) : undefined;
+    const mine = viewer ? openDrillLeaseOf(db, viewer) : undefined;
     return {
       available: leases !== null,
       parks: parkListings(db),
@@ -280,10 +281,16 @@ export async function practiceRoutes(
     const lease = Number.isInteger(id) ? getLease(db, id) : undefined;
     if (!lease) return reply.code(404).send({ error: 'No such practice server.' });
     const isAdmin = getPlayer(db, steamid)?.is_admin === 1;
-    if (lease.owner_player_id !== steamid && !isAdmin) {
-      return reply.code(403).send({ error: 'Only whoever started this practice server, or an admin, can close it.' });
+    // A park is ownerless: only an admin ends one early, and otherwise it
+    // closes itself 5 minutes after the last person leaves.
+    const byOwner = lease.kind === 'drill' && lease.owner_player_id === steamid;
+    if (!byOwner && !isAdmin) {
+      return reply.code(403).send({
+        error: lease.kind === 'park'
+          ? 'Only an admin can close the Practice Park. It closes on its own 5 minutes after everyone leaves.'
+          : 'Only whoever started this drill server, or an admin, can close it.',
+      });
     }
-    const byOwner = lease.owner_player_id === steamid;
     if (!leases.end(lease.id, byOwner ? 'owner' : 'admin')) {
       return reply.code(409).send({ error: 'That practice server is already closing.' });
     }

@@ -61,7 +61,8 @@ describe('POST /api/practice/leases', () => {
     seedServers(3);
     const a = await start({ kind: 'park' });
     expect(a.statusCode).toBe(200);
-    expect(a.json()).toMatchObject({ joined: false, lease: { id: 1, kind: 'park', server: 'Box 3', isOwner: true, capacity: 8 } });
+    // Ownerless: the starter is recorded but is not its owner and cannot end it.
+    expect(a.json()).toMatchObject({ joined: false, lease: { id: 1, kind: 'park', server: 'Box 3', isOwner: false, canEnd: false, capacity: 8, owner: { steamid: OWNER } } });
     const b = await start({ kind: 'park' }, friend);
     expect(b.json()).toMatchObject({ joined: true, lease: { id: 1, isOwner: false } });
   });
@@ -100,15 +101,19 @@ describe('POST /api/practice/leases', () => {
 
 describe('GET /api/practice/park', () => {
   it('lists parks without host or password, and tells a logged-in viewer their own lease', async () => {
-    seedServers(2);
+    seedServers(3);
     await start({ kind: 'park' });
     const anon = await app.inject({ method: 'GET', url: '/api/practice/park' });
-    expect(anon.json()).toMatchObject({ available: true, mine: null, parks: [{ id: 1, server: 'Box 2', humans: 0, capacity: 8 }] });
+    expect(anon.json()).toMatchObject({ available: true, mine: null, parks: [{ id: 1, server: 'Box 3', humans: 0, capacity: 8 }] });
     const body = anon.body;
     expect(body).not.toContain(getLease(db, 1)!.password);
-    expect(body).not.toContain('10.0.0.2');
+    expect(body).not.toContain('10.0.0.3');
+    // A park is nobody's: starting one is not having a server.
     const mine = await app.inject({ method: 'GET', url: '/api/practice/park', cookies: owner });
-    expect(mine.json().mine).toEqual({ id: 1, kind: 'park' });
+    expect(mine.json().mine).toBeNull();
+    await start({ kind: 'drill' }, owner);
+    const drill = await app.inject({ method: 'GET', url: '/api/practice/park', cookies: owner });
+    expect(drill.json().mine).toEqual({ id: 2, kind: 'drill' });
   });
 });
 
@@ -139,6 +144,30 @@ describe('POST /api/practice/leases/:id/end', () => {
     expect((await end(owner)).statusCode).toBe(409);
     expect(db.prepare("SELECT action, target FROM admin_actions WHERE action = 'practice_end'").all())
       .toEqual([{ action: 'practice_end', target: '1' }]);
+  });
+});
+
+describe('parks are ownerless', () => {
+  it('whoever started a park can start a drill server straight away, and only an admin ends the park', async () => {
+    seedServers(4);
+    await start({ kind: 'park' });
+    const d = await start({ kind: 'drill' });
+    expect(d.statusCode).toBe(200);
+    expect(d.json().lease.kind).toBe('drill');
+    const endPark = (c: Record<string, string>) => app.inject({ method: 'POST', url: '/api/practice/leases/1/end', cookies: c });
+    const r = await endPark(owner);
+    expect(r.statusCode).toBe(403);
+    expect(r.json().error).toBe('Only an admin can close the Practice Park. It closes on its own 5 minutes after everyone leaves.');
+    expect((await endPark(admin)).statusCode).toBe(200);
+    expect(getLease(db, 1)!.end_reason).toBe('admin');
+  });
+
+  it('a second drill server of your own is still refused', async () => {
+    seedServers(4);
+    await start({ kind: 'drill' });
+    const r = await start({ kind: 'drill' });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().error).toBe('You already have a drill server open. Close it before starting another.');
   });
 });
 

@@ -6,7 +6,11 @@
  *   park   The shared Practice Park. Anyone logged in may join, eight humans
  *          at most, and it is listed publicly on the Play page. Starting one
  *          when a park with room already exists hands back that park instead
- *          of leasing a second box.
+ *          of leasing a second box. Ownerless (owner, 2026-09-28): who
+ *          started it is recorded ("started by", for the admin board and
+ *          logs), but only an admin can end it early, it does not count as
+ *          that player's server, and it closes itself 5 minutes after the
+ *          last person leaves.
  *   drill  A private server for replay drills. Only its owner may drive the
  *          drill commands in game; the invite link /practice/<id> gives any
  *          logged-in player the connect line and password.
@@ -130,10 +134,12 @@ export function openLeases(db: DB): LeaseRow[] {
 /** Open and not winding down: a lease people can still join. */
 const isActive = (l: LeaseRow) => l.ended_at === null && l.end_reason === null;
 
-/** The player's open lease, if any. One at a time per player. */
-export function openLeaseOf(db: DB, steamid: string): LeaseRow | undefined {
+/** The player's open drill server, if any. One at a time per player.
+ *  Parks are ownerless (owner, 2026-09-28): starting one is not "having a
+ *  server", so a park never counts here and never blocks a drill server. */
+export function openDrillLeaseOf(db: DB, steamid: string): LeaseRow | undefined {
   return db.prepare(
-    'SELECT * FROM practice_leases WHERE owner_player_id = ? AND ended_at IS NULL ORDER BY id DESC LIMIT 1',
+    "SELECT * FROM practice_leases WHERE owner_player_id = ? AND kind = 'drill' AND ended_at IS NULL ORDER BY id DESC LIMIT 1",
   ).get(steamid) as LeaseRow | undefined;
 }
 
@@ -236,13 +242,15 @@ function quoted(v: string): string {
   return `"${v}"`;
 }
 
-/** The lines that tell the box who it is for. Sent twice; see SETUP_RESEND_MS. */
-export function identityLines(lease: Pick<LeaseRow, 'password' | 'owner_player_id'>, publicUrl: string): string[] {
+/** The lines that tell the box who it is for. Sent twice; see SETUP_RESEND_MS.
+ *  A park has no owner in game (its plugin mode does not use one), so its
+ *  owner cvar is set empty rather than to whoever happened to start it. */
+export function identityLines(lease: Pick<LeaseRow, 'kind' | 'password' | 'owner_player_id'>, publicUrl: string): string[] {
   if (!/^[a-z0-9]+$/.test(lease.password)) throw new Error('lease password has unexpected characters');
-  if (!/^\d{17}$/.test(lease.owner_player_id)) throw new Error('lease owner is not a SteamID64');
+  if (lease.kind === 'drill' && !/^\d{17}$/.test(lease.owner_player_id)) throw new Error('lease owner is not a SteamID64');
   return [
     `sm_cvar sv_password ${quoted(lease.password)}`,
-    `l4d_practice_owner ${lease.owner_player_id}`,
+    lease.kind === 'drill' ? `l4d_practice_owner ${lease.owner_player_id}` : 'l4d_practice_owner ""',
     `l4d_practice_site ${quoted(publicUrl)}`,
   ];
 }
@@ -312,11 +320,11 @@ export class PracticeLeases {
       const park = joinableParks(this.db)[0];
       if (park) return { ok: true, lease: park, joined: true };
     }
-    const mine = openLeaseOf(this.db, owner);
+    const mine = kind === 'drill' ? openDrillLeaseOf(this.db, owner) : undefined;
     if (mine) {
       return {
         ok: false, status: 409, leaseId: mine.id,
-        error: 'You already have a practice server open. Close it before starting another.',
+        error: 'You already have a drill server open. Close it before starting another.',
       };
     }
     if (leasesStartedSince(this.db, owner, iso(this.now() - 3_600_000)) >= LEASES_PER_HOUR) {
@@ -647,7 +655,9 @@ export function leaseView(db: DB, l: LeaseRow, viewer: string, viewerIsAdmin: bo
   const server = getServer(db, l.server_id);
   const owner = getPlayer(db, l.owner_player_id);
   const state = leaseState(l);
-  const isOwner = viewer === l.owner_player_id;
+  // A park is ownerless: whoever started it is recorded (`owner`, shown as
+  // "started by") but has no more say over it than anyone else.
+  const isOwner = l.kind === 'drill' && viewer === l.owner_player_id;
   return {
     id: l.id,
     kind: l.kind,

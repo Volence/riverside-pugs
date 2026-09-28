@@ -83,7 +83,11 @@ export function AdminServersPanel({ servers, busy, run, health }: {
                       <span class="admin-status admin-status--reserved">
                         {s.practice.ending ? 'practice, closing' : `practice (${s.practice.kind})`}
                       </span>{' '}
-                      <a class="muted" href={`/practice/${s.practice.leaseId}`}>{s.practice.ownerName}</a>
+                      {/* A park is ownerless: who started it is a fact, not
+                          a link to someone's server. */}
+                      {s.practice.kind === 'park'
+                        ? <span class="muted">started by {s.practice.ownerName}</span>
+                        : <a class="muted" href={`/practice/${s.practice.leaseId}`}>{s.practice.ownerName}</a>}
                     </>
                   ) : <span class={`admin-status admin-status--${s.status}`}>{s.status}</span>}
                 </td>

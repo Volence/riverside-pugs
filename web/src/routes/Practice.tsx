@@ -24,7 +24,9 @@ const POLL_SLOW_MS = 15_000;
  * why the password is on the page at all, and why the page needs a login:
  * the park list on the Play page is public and carries neither.
  *
- * The owner, and admins, also get End. Everything else a lease does (the 10
+ * A drill server's owner, and admins, also get End. The Practice Park is
+ * ownerless: only an admin ends it early, and the page says it closes
+ * itself 5 minutes after everyone leaves. Everything else a lease does (the 10
  * minute idle end, the time limit, a PUG taking the box back) happens on the
  * server's minute tick, and this page just reports it as it polls.
  */
@@ -127,6 +129,9 @@ export function LeasePanel({ lease, onChanged }: { lease: PracticeLease; onChang
         {' · '}{lease.server}
       </p>
 
+      {lease.kind === 'park' && open && (
+        <p class="practice__note">Practice Park, closes 5 minutes after everyone leaves.</p>
+      )}
       {lease.state === 'setting_up' && (
         <p class="practice__note">The server is loading the practice config. That takes about half a minute; you can connect now and it finishes around you.</p>
       )}
@@ -151,10 +156,14 @@ export function LeasePanel({ lease, onChanged }: { lease: PracticeLease; onChang
         <dl class="practice__facts">
           <div><dt>Players</dt><dd class="num">{lease.humans}{lease.capacity !== null ? ` / ${lease.capacity}` : ''}</dd></div>
           <div><dt>Map</dt><dd>{lease.map ? mapName(lease.map) : 'loading'}</dd></div>
-          <div>
-            <dt>Time left</dt>
-            <dd class="num" title={`Extended while people are on it. Closes after ${IDLE_MINUTES[lease.kind]} minutes with nobody on.`}>{leaseClock(left)}</dd>
-          </div>
+          {/* A park has no time limit anyone needs to watch: it runs while
+              people are on it (see the note above). */}
+          {lease.kind === 'drill' && (
+            <div>
+              <dt>Time left</dt>
+              <dd class="num" title={`Extended while people are on it. Closes after ${IDLE_MINUTES[lease.kind]} minutes with nobody on.`}>{leaseClock(left)}</dd>
+            </div>
+          )}
           <div><dt>Started by</dt><dd><a href={`/player/${lease.owner.steamid}`}>{lease.owner.name}</a></dd></div>
         </dl>
       )}

@@ -11,12 +11,20 @@ const server = (over: Partial<AdminOverview['servers'][number]> = {}): AdminOver
 });
 
 describe('AdminServersPanel and practice leases', () => {
-  it('shows a leased box as in use for practice, with the owner linking to the lease, not as idle', () => {
+  it('shows a drill server as in use for practice, with its owner linking to the lease, not as idle', () => {
+    render(<AdminServersPanel busy={false} run={async () => {}}
+      servers={[server({ practice: { leaseId: 7, kind: 'drill', ownerName: 'mayhem', ending: false } })]} />);
+    expect(screen.getByText('practice (drill)')).toBeTruthy();
+    expect(screen.queryByText('idle')).toBeNull();
+    expect(screen.getByRole('link', { name: 'mayhem' }).getAttribute('href')).toBe('/practice/7');
+  });
+
+  it('shows a park as practice, with who started it and no owner link', () => {
     render(<AdminServersPanel busy={false} run={async () => {}}
       servers={[server({ practice: { leaseId: 7, kind: 'park', ownerName: 'mayhem', ending: false } })]} />);
     expect(screen.getByText('practice (park)')).toBeTruthy();
-    expect(screen.queryByText('idle')).toBeNull();
-    expect(screen.getByRole('link', { name: 'mayhem' }).getAttribute('href')).toBe('/practice/7');
+    expect(screen.getByText('started by mayhem')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'mayhem' })).toBeNull();
   });
 
   it('says closing while the lease winds down, and offers no Set idle meanwhile', () => {
