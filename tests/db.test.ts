@@ -27,7 +27,7 @@ describe('openDb', () => {
       'matches', 'matchmaker_state',
       'mod_calls',
       'penalties', 'pending_reports', 'player_aliases', 'player_links', 'player_networks', 'player_notes', 'player_ratings',
-      'player_reviews', 'player_steam_signals', 'players',
+      'player_reviews', 'player_steam_signals', 'players', 'practice_drills',
       'rating_history', 'relay_messages', 'release_boxes', 'releases', 'report_message', 'reporter_chat_pings', 'reports', 'round_metric_context', 'round_metrics', 'seasons', 'servers', 'settings', 'signon_drops',
       'skeet_streak_scans', 'skeet_streaks',
       'sourcetv_server_events', 'sourcetv_sessions', 'steam_signal_alerts',
