@@ -19,13 +19,16 @@ const CATEGORIES = [
  * reports as tickets; the reported player is never told who filed one.
  */
 export function ReportPlayer(
-  { matchId, target: fixed, moment, onClearMoment, entry }: {
+  { matchId, target: fixed, moment, onClearMoment, entry, onClose }: {
     matchId?: number; target?: { steamid: string; name: string };
     /** A shared community entry by `target` that the report is about. Needs `target`. */
     entry?: { id: number; kind: 'hud' | 'crosshair'; title: string };
     /** A replay moment picked in the viewer above. Match pages only. */
     moment?: ReportMoment | null;
     onClearMoment?: () => void;
+    /** Where the form's Close goes instead of folding back to its button:
+     *  theater's panel closes itself with it. */
+    onClose?: () => void;
   },
 ) {
   const [open, setOpen] = useState(false);
@@ -125,7 +128,7 @@ export function ReportPlayer(
             onInput={(e) => setText((e.target as HTMLTextAreaElement).value)} />
           <div class="admin-form">
             <button class="btn" type="submit" disabled={busy || (!fixed && !target) || !category || (needsText && !text.trim())}>Send report</button>
-            <button class="chip" type="button" onClick={() => setOpen(false)}>Close</button>
+            <button class="chip" type="button" onClick={() => (onClose ? onClose() : setOpen(false))}>Close</button>
           </div>
         </form>
       )}

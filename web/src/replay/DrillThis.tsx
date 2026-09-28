@@ -47,10 +47,18 @@ type State =
  * press it, rather than never learning the feature exists.
  */
 export function DrillThis(
-  { matchId, ordinal, half, momentRef, signedIn }: {
+  { matchId, ordinal, half, momentRef, signedIn, autoStart = false, onHide }: {
     matchId: number; ordinal: number; half: number;
     momentRef: { current: number };
     signedIn: boolean;
+    /** Make the drill on mount, as if the button had been pressed. Theater
+     *  mode's own "Drill this" chip opens this panel already meaning "drill
+     *  what is on screen now", so a second press inside it would be noise. */
+    autoStart?: boolean;
+    /** Given by a container that closes (theater's overlay): Hide becomes
+     *  Close and calls this, and the sign-in and error states get a Close
+     *  too, since the overlay has no other way out but its toolbar chip. */
+    onHide?: () => void;
   },
 ) {
   const [state, setState] = useState<State>({ kind: 'idle' });
@@ -120,6 +128,14 @@ export function DrillThis(
     }
   };
 
+  // Once, on mount; never again on a re-render.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!autoStart || autoStarted.current) return;
+    autoStarted.current = true;
+    void create();
+  }, []);
+
   const button = (
     <button class="chip" type="button" disabled={state.kind === 'busy'}
       title="Pause on the setup you want to practise, then press this" onClick={create}>
@@ -136,12 +152,18 @@ export function DrillThis(
         {button}{' '}
         {/* target _top: /auth/steam is a backend route, see Play.tsx. */}
         <a href={`/auth/steam?next=${encodeURIComponent(next)}`} target="_top" rel="noopener">Log in to create drills</a>
+        {onHide && <button class="chip" type="button" onClick={onHide}>Close</button>}
       </span>
     );
   }
 
   if (state.kind === 'error') {
-    return <span class="drill__note">{button} <span class="drill__error" role="alert">{state.message}</span></span>;
+    return (
+      <span class="drill__note">
+        {button} <span class="drill__error" role="alert">{state.message}</span>
+        {onHide && <button class="chip" type="button" onClick={onHide}>Close</button>}
+      </span>
+    );
   }
 
   const { code, spec } = state;
@@ -150,7 +172,7 @@ export function DrillThis(
     <div class="drill" role="region" aria-label="Replay drill">
       <div class="drill__head">
         <p class="eyebrow">Replay drill · {formatTime(spec.source.tMs)}</p>
-        <button class="chip" type="button" onClick={() => setState({ kind: 'idle' })}>Hide</button>
+        <button class="chip" type="button" onClick={() => { setState({ kind: 'idle' }); onHide?.(); }}>{onHide ? 'Close' : 'Hide'}</button>
       </div>
       <p class="drill__code" aria-label={`Drill code ${code}`}>{code}</p>
       <p class="drill__how">Type <code>{line}</code> in a practice server</p>

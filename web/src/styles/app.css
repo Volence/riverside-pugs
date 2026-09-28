@@ -1915,6 +1915,26 @@ body.is-theater { overflow: hidden; }
 .replay--theater.is-idle .theater__top:hover,
 .replay--theater.is-idle .theater__top:focus-within { opacity: 1; }
 .replay--theater .chip { background: rgba(5, 4, 3, 0.78); }
+/* What theater's Report this moment and Drill this chips open: a panel over
+   the map, under the toolbar and clear of the edge HUD columns, scrolling
+   inside itself when its content (a report form, a drill's actor list) is
+   taller than the room left. Outside .theater__top on purpose, so it does
+   not fade when the pointer rests while someone reads a code. */
+.theater__panel {
+  position: absolute; z-index: 4;
+  top: var(--edge-top, 150px); left: 50%; transform: translateX(-50%);
+  width: min(34rem, calc(100% - 2 * var(--sp-3)));
+  max-height: calc(100% - var(--edge-top, 150px) - 72px);
+  overflow-y: auto;
+  padding: var(--sp-4);
+  background: rgba(21, 17, 14, 0.96);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--rule);
+}
+.theater-tool .report h3 { margin-top: 0; }
+/* The drill panel is already a boxed panel on the page; in here the
+   overlay is the box. */
+.theater-tool .drill { margin-top: 0; padding: 0; background: none; border: 0; }
 
 /* Edge HUD: survivors down the left, infected down the right, as plates
    over the map. The right column sits inboard of the rail when the rail is

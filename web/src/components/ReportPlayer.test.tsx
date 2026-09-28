@@ -72,6 +72,16 @@ describe('ReportPlayer on a match page', () => {
     await waitFor(() => expect(cleared).toHaveBeenCalled());
   });
 
+  it('hands Close to its container when given onClose (theater\'s panel)', async () => {
+    mockApi.reportEligibility.mockResolvedValue({ canReport: true, targets: [] });
+    const onClose = vi.fn();
+    render(<ReportPlayer matchId={66} moment={{ ordinal: 0, half: 1, tMs: 4000 }} onClose={onClose} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalled();
+    // Still open: the container decides what closing means.
+    expect(screen.getByText('Report a player', { selector: 'h3' })).toBeTruthy();
+  });
+
   it('a moment can be taken off again before sending', async () => {
     mockApi.reportEligibility.mockResolvedValue({ canReport: true, targets: [] });
     const cleared = vi.fn();

@@ -166,6 +166,33 @@ describe('Viewer theater', () => {
   });
 });
 
+describe('Viewer theater tools', () => {
+  it('puts the page\'s chips in the theater toolbar, draws the panel over the map, and closes it when theater closes', () => {
+    const onClose = vi.fn();
+    const tools = (panel: boolean) => ({
+      chips: <button type="button" class="chip">Drill this</button>,
+      panel: panel ? <p>the panel</p> : null,
+      onClose,
+    });
+    const { container, rerender } = render(
+      <Viewer spec={{ kind: 'file', name: 'x' }} names={NAMES} timeline={DEFAULT_TIMELINE} theaterTools={tools(false)} />,
+    );
+    // Not in the page layout: the page carries its own buttons there.
+    expect(screen.queryByRole('button', { name: 'Drill this' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Theater' }));
+    expect(container.querySelector('.theater__toggles')!.textContent).toContain('Drill this');
+    expect(container.querySelector('.theater__panel')).toBeNull();
+    rerender(<Viewer spec={{ kind: 'file', name: 'x' }} names={NAMES} timeline={DEFAULT_TIMELINE} theaterTools={tools(true)} />);
+    const panel = container.querySelector('.theater__panel')!;
+    expect(panel.textContent).toBe('the panel');
+    // Outside the toolbar, so it does not fade with it.
+    expect(panel.closest('.theater__top')).toBeNull();
+    onClose.mockClear();
+    act(() => { fireEvent.keyDown(window, { key: 'Escape' }); });
+    expect(onClose).toHaveBeenCalled();
+  });
+});
+
 describe('Viewer hover and click-to-seek', () => {
   it('renders once for a new hover and not again for a second pointermove over the same hit', () => {
     mockHits = [{ kind: 'player', px: 40, py: 30, r: 17, slot: 0 }];
