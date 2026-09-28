@@ -24,6 +24,7 @@ import { Admin } from './routes/Admin';
 import { ADMIN_ROUTE_PATHS } from './routes/admin/adminRoutes';
 import { HowToPlay } from './routes/HowToPlay';
 import { HelpConsistency } from './routes/HelpConsistency';
+import { Practice } from './routes/Practice';
 
 // The HUD editor carries ~170 KB of base HUD files, so it stays out of the main bundle.
 const Hud = lazy(() => import('./routes/Hud'));
@@ -95,6 +96,8 @@ export function AppRoutes(
       <Route path="/community" component={Community} session={session} />
       <Route path="/community/:id" component={CommunityEntry} session={session} />
       <Route path="/replay/file/:name" component={ReplayPage} />
+      {/* A practice server's invite page (src/practiceLeases.ts). */}
+      <Route path="/practice/:id" component={Practice} session={session} />
       <Route path="/map/:map" component={MapDetail} />
       <Route path="/player/:steamid" component={Profile} session={session} refresh={refresh} />
       {/* Every screen in the panel is a path now, so the shell needs the

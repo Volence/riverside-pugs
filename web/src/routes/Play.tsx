@@ -12,6 +12,7 @@ import { ConnectPanel } from '../components/ConnectPanel';
 import { SpectatePanel } from '../components/SpectatePanel';
 import { PageHeader } from '../components/PageHeader';
 import { SetupChecklist } from '../components/SetupChecklist';
+import { PracticeCard } from '../components/PracticeCard';
 import type { Session } from '../hooks/useLiveState';
 
 
@@ -42,6 +43,9 @@ export function Play(
     <div class={`page ${wide ? 'page--play-teams' : 'page--play'}`}>
       <PageHeader eyebrow="Riverside" title="Ranked 4v4" />
       <Live state={state} me={session.me.steamid} sessionMe={session.me} refresh={refresh} />
+      {/* Below the queue, never above it: ranked is what this page is for.
+          And not at all while this player is in a pop or a match. */}
+      {!state.match && !state.lobby && <PracticeCard signedIn />}
     </div>
   );
 }
@@ -87,6 +91,7 @@ function SignIn() {
           <Slots players={q.players} />
         </Panel>
       )}
+      <PracticeCard signedIn={false} />
       <Landing />
     </div>
   );

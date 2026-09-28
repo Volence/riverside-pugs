@@ -8,6 +8,7 @@ import { Empty, Panel } from '../../components/bits';
 import { SpectatePanel } from '../../components/SpectatePanel';
 import { useAction, type Run } from './useAction';
 import { AdminQueuePanel, AdminServersPanel, OpenMatchesPanel, RecentResultsPanel } from './MatchPanels';
+import { PracticeLeasesPanel } from './PracticeLeasesPanel';
 import { OLD_PLUGIN_REASON, SELF_STARTED_REASON, countdown, countUp, isLow, liveFromUrl, reasonText } from '../../liveBoard';
 
 /** A safety net under the websocket, not the mechanism: a nudge lost while
@@ -72,6 +73,8 @@ export function AdminLive() {
       ) : (
         <Panel><p class="muted">Loading...</p></Panel>
       )}
+
+      <PracticeLeasesPanel nudge={nudge} />
 
       {panels.error && <p class="error">{panels.error}</p>}
       {overview.error && <p class="error">Could not load the servers, queue and recent results.</p>}

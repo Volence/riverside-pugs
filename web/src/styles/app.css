@@ -1716,6 +1716,48 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
   .drill__actor { grid-template-columns: 4.5rem 4.5rem minmax(0, 1fr); }
   .drill__hp { grid-column: 2 / -1; }
 }
+/* The drill panel's "Start a drill server with this drill" row. */
+.drill__server { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin-top: var(--sp-3); font-size: var(--fs-dense); }
+.drill__server p { margin: 0; }
+
+/* ---------- practice servers (src/practiceLeases.ts) ---------- */
+
+/* The Play page card. One row per open park: who is there is the headline,
+ * so the count gets the tabular figures and the map stays quiet. */
+.practice-card__blurb { margin: 0 0 var(--sp-3); font-size: var(--fs-dense); }
+.practice-card__empty { margin: 0 0 var(--sp-3); color: var(--text-muted); }
+.practice-card__parks { list-style: none; margin: 0 0 var(--sp-3); padding: 0; display: grid; gap: 1px; background: var(--border); border: 1px solid var(--border); }
+.practice-card__park {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  gap: var(--sp-3);
+  align-items: center;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface);
+}
+.practice-card__server { color: var(--text-bright); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.practice-card__count { font-family: var(--font-display); font-size: var(--fs-h3); color: var(--text-bright); }
+.practice-card__map { font-size: var(--fs-dense); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.practice-card__mine { margin: var(--sp-3) 0 0; font-size: var(--fs-dense); }
+
+/* The invite page, /practice/:id. */
+.practice__note { margin: 0 0 var(--sp-3); }
+.practice__warn { margin: 0 0 var(--sp-3); padding: var(--sp-2) var(--sp-3); border-left: 3px solid var(--accent); background: var(--surface-2); color: var(--text-bright); }
+.practice__copy { margin-top: var(--sp-4); }
+.practice__copy .eyebrow { margin: 0; }
+.practice__hint { margin: var(--sp-1) 0 0; font-size: var(--fs-dense); }
+.practice__facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); margin: var(--sp-4) 0 0; }
+.practice__facts div { min-width: 0; }
+.practice__facts dt { font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.practice__facts dd { margin: 0; color: var(--text-bright); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.practice__drill { margin: var(--sp-4) 0 0; }
+.practice__drill code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-bright); }
+.practice__end { margin-top: var(--sp-4); }
+@media (max-width: 480px) {
+  .practice-card__park { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .practice-card__map { display: none; }
+  .practice__facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .replay__time { font-family: var(--font-label); font-variant-numeric: tabular-nums; font-size: var(--fs-dense); color: var(--text-muted); letter-spacing: 0.08em; }
 .chip--slot { gap: 0.35rem; }
 /* Inherits the chip's inline slot colour. A 0.6rem dot is a graphical
