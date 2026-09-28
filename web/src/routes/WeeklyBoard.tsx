@@ -8,7 +8,7 @@ const GROUPS = [
   { group: 'overall', title: 'Overall' },
   { group: 'shame', title: 'Shame' },
 ] as const;
-const DAMAGE = new Set(['si_damage', 'tank_damage', 'damage_as_si', 'pounce_damage', 'hunter_damage', 'smoker_damage', 'incap_damage']);
+const DAMAGE = new Set(['si_damage', 'tank_damage', 'damage_as_si', 'pounce_damage', 'hunter_damage', 'smoker_damage', 'friendly_fire']);
 
 const n0 = (v: number) => Math.round(v).toLocaleString('en-US');
 const weekName = (w: string) =>

@@ -19,7 +19,7 @@ export interface Winner { steamid: string; name: string; value: number; games: n
 export interface AwardResult { key: string; label: string; group: AwardGroup; kind: AwardKind; winners: Winner[] }
 export interface AwardDef { key: string; label: string; group: AwardGroup }
 
-type FixedColumn = 'si_damage' | 'si_kills' | 'common_kills' | 'revives';
+type FixedColumn = 'si_damage' | 'si_kills' | 'common_kills' | 'revives' | 'ff_dealt';
 interface StatAward extends AwardDef { fixed?: FixedColumn; stats?: string[] }
 
 /** Stat awards: an average and a total each. Order is display order. */
@@ -56,7 +56,7 @@ const SINGLE_AWARDS: AwardDef[] = [
   { key: 'matches', label: 'Iron man', group: 'overall' },
   { key: 'win_rate', label: 'Best win rate', group: 'overall' },
   { key: 'slow_ready', label: 'Slowest ready-up', group: 'shame' },
-  { key: 'incap_damage', label: "Kicking them while they're down", group: 'shame' },
+  { key: 'friendly_fire', label: 'Friendly fire', group: 'shame' },
   { key: 'group_hug', label: 'Group hug', group: 'shame' },
 ];
 
@@ -190,7 +190,7 @@ function computeSingles(db: DB, week: string, games: Map<string, PlayerGames>, m
   const results = resultsByPlayer(db, week);
   const climbs = srClimbs(db, week);
   const ready = slowReadyAverages(db, week);
-  const incap = statTotals(db, week, { key: '', label: '', group: 'shame', stats: ['dmg_to_incapped'] });
+  const ff = statTotals(db, week, { key: '', label: '', group: 'shame', fixed: 'ff_dealt' });
   const hugs = statTotals(db, week, { key: '', label: '', group: 'shame', stats: ['times_quadded'] });
   const all = [...games.values()];
   const gated = all.filter((g) => g.games >= min);
@@ -209,7 +209,7 @@ function computeSingles(db: DB, week: string, games: Map<string, PlayerGames>, m
       .map((r) => ({ ...r, value: r.w / (r.w + r.l) })))
       .map((r) => winner(r.g, r.value, `${r.w}-${r.l}`)),
     slow_ready: topOf(gated.map((g) => ({ g, value: ready.get(g.steamid) ?? 0 }))).map((r) => winner(r.g, r.value)),
-    incap_damage: topOf(gated.map((g) => ({ g, value: (incap.get(g.steamid) ?? 0) / g.games }))).map((r) => winner(r.g, r.value)),
+    friendly_fire: topOf(gated.map((g) => ({ g, value: (ff.get(g.steamid) ?? 0) / g.games }))).map((r) => winner(r.g, r.value)),
     group_hug: topOf(gated.map((g) => ({ g, value: (hugs.get(g.steamid) ?? 0) / g.games }))).map((r) => winner(r.g, r.value)),
   };
   return SINGLE_AWARDS

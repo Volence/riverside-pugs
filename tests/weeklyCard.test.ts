@@ -21,6 +21,7 @@ describe('formatAwardValue', () => {
     expect(formatAwardValue('sr_climb', 'single', w('1', 'a', 767))).toBe('+767 SR');
     expect(formatAwardValue('win_rate', 'single', w('1', 'a', 0.79, '15-4'))).toBe('15-4');
     expect(formatAwardValue('slow_ready', 'single', w('1', 'a', 53.8))).toBe('54s per ready-up');
+    expect(formatAwardValue('friendly_fire', 'single', w('1', 'a', 21.8))).toBe('22/g');
   });
 });
 
