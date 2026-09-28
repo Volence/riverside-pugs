@@ -102,6 +102,10 @@ const KEYED: [table: string, column: string][] = [
   // Primary key (week_start, award, kind, player_id): a tie between the two
   // accounts on the same award collapses into one row.
   ['weekly_awards', 'player_id'],
+  // A triple skeet is keyed on the moment it happened, so if both accounts
+  // somehow logged the same match/map/half/tMs (impossible in practice, one
+  // human hit the burst), the survivor's row is kept and the other dropped.
+  ['skeet_streaks', 'player_id'],
 ];
 
 /** A merge that cannot be done because of what was asked for, as opposed to

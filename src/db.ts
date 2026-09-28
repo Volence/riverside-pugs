@@ -762,6 +762,24 @@ CREATE TABLE IF NOT EXISTS weekly_award_weeks (
   awards_message_id TEXT,
   posted_at         TEXT
 );
+-- Triple (or better) skeets found in completed matches, and whether the
+-- weekly channel has been told. The database is the queue, as for mod calls.
+CREATE TABLE IF NOT EXISTS skeet_streaks (
+  match_id    INTEGER NOT NULL REFERENCES matches(id),
+  player_id   TEXT    NOT NULL REFERENCES players(steamid),
+  map_ordinal INTEGER NOT NULL,
+  half        INTEGER NOT NULL,
+  t_ms        INTEGER NOT NULL,
+  count       INTEGER NOT NULL,
+  span_ms     INTEGER NOT NULL,
+  message_id  TEXT,
+  posted_at   TEXT,
+  PRIMARY KEY (match_id, player_id, map_ordinal, half, t_ms)
+);
+CREATE TABLE IF NOT EXISTS skeet_streak_scans (
+  match_id   INTEGER PRIMARY KEY REFERENCES matches(id),
+  scanned_at TEXT NOT NULL
+);
 `;
 
 export const DEFAULT_SETTINGS: Record<string, string> = {
