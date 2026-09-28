@@ -155,7 +155,7 @@ export function LeasePanel({ lease, onChanged }: { lease: PracticeLease; onChang
       {open && (
         <dl class="practice__facts">
           <div><dt>Players</dt><dd class="num">{lease.humans}{lease.capacity !== null ? ` / ${lease.capacity}` : ''}</dd></div>
-          <div><dt>Map</dt><dd>{lease.map ? mapName(lease.map) : 'loading'}</dd></div>
+          <div><dt>Map</dt><dd>{mapLabel(lease)}</dd></div>
           {/* A park has no time limit anyone needs to watch: it runs while
               people are on it (see the note above). */}
           {lease.kind === 'drill' && (
@@ -188,4 +188,15 @@ export function LeasePanel({ lease, onChanged }: { lease: PracticeLease; onChang
       {error && <p class="error" role="alert">{error}</p>}
     </Panel>
   );
+}
+
+/** While a lease sets up, the box is still on its startup map (The
+ *  Greenhouse) and the page read as if the park had gone to the wrong place.
+ *  A park is always No Mercy 1, so say where it is going; a drill server
+ *  just says loading until its map is known. */
+function mapLabel(lease: { state: string; kind: string; map: string | null }): string {
+  if (lease.state === 'setting_up') {
+    return lease.kind === 'park' ? `${mapName('l4d_vs_hospital01_apartment')} (loading)` : 'loading';
+  }
+  return lease.map ? mapName(lease.map) : 'loading';
 }
