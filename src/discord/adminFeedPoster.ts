@@ -290,6 +290,11 @@ export class AdminFeedPoster {
         return `${who} ${d.rotated ? 'rotated' : 'pushed'} the log secret for server ${e.target}${d.pushed ? '' : ' (it did NOT reach the box)'}`;
       case 'server_log_auth': return `${who} set log signing on server ${e.target} to \`${String(d.mode)}\``;
       case 'queue_remove': return `${who} removed ${target} from the queue`;
+      case 'practice_kick': {
+        const where = d.kind === 'drill' ? 'a drill server' : 'the Practice Park';
+        const why = d.reason && d.reason !== 'Removed by an admin' ? `: ${escapeName(String(d.reason))}` : '';
+        return `${who} kicked ${escapeName(String(d.name ?? target))} from ${where} on ${escapeName(String(d.server ?? ''))}${why}`;
+      }
       case 'setting': return 'from' in d
         ? `${who} changed the ${e.target} setting from \`${String(d.from)}\` to \`${String(d.to)}\``
         : `${who} changed the ${e.target} setting`;

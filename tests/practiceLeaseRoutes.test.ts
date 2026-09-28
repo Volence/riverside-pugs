@@ -6,6 +6,7 @@ import { practiceRoutes } from '../src/routes/practice.js';
 import { addServer } from '../src/serverPool.js';
 import { PracticeLeases, getLease } from '../src/practiceLeases.js';
 import { authedCookie } from './helpers.js';
+import { upsertPlayer } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
 
 const OWNER = '76561199000000061';
@@ -17,6 +18,11 @@ let app: FastifyInstance;
 let leases: PracticeLeases;
 let sent: string[][];
 const kindOn = new Map<number, string>();
+/** What the fake boxes' `status` lists after the header, and what
+ *  `sm_practice_who` answers; set by the players and kick tests once their
+ *  lease exists (a box with people on it cannot be leased). */
+let statusLines = '';
+let whoReply = 'Unknown command "sm_practice_who"';
 let owner: Record<string, string>;
 let friend: Record<string, string>;
 let admin: Record<string, string>;
@@ -34,6 +40,8 @@ beforeEach(async () => {
   db = openDb(':memory:');
   sent = [];
   kindOn.clear();
+  statusLines = '';
+  whoReply = 'Unknown command "sm_practice_who"';
   leases = new PracticeLeases({
     db, publicUrl: 'https://riversidepug.com',
     // A box takes whichever practice cfg was last exec'd on it, and says so
@@ -45,7 +53,8 @@ beforeEach(async () => {
         const m = /^exec practice_(park|drill)\.cfg$/.exec(c);
         if (m) kindOn.set(s.id, m[1]);
         const k = kindOn.get(s.id);
-        if (c === 'status') return 'players : 0 humans, 0 bots (31 max)';
+        if (c === 'status') return `players : 0 humans, 0 bots (31 max)\n${statusLines}`;
+        if (c === 'sm_practice_who') return whoReply;
         if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${k === 'park' ? 'Practice' : k === 'drill' ? 'Rotoblin 4v4 PUG' : 'Rotoblin Pub VS'}"`;
         if (c === 'l4d_practice_mode') return `"l4d_practice_mode" = "${k ?? ''}"`;
         return '';
@@ -288,5 +297,77 @@ describe('the practice_leasing rollout switch', () => {
     const anon = (await app.inject({ method: 'GET', url: '/api/practice/park' })).json();
     expect(anon.available).toBe(true);
     expect(anon.parks).toHaveLength(1);
+  });
+});
+
+describe('admin: players on a practice server, and kicking one', () => {
+  const STATUS = [
+    '# userid name uniqueid connected ping loss state rate adr',
+    `#  7 1 "Dust" STEAM_1:1:35074132 05:09 33 0 active 128000 192.168.4.85:27005`,
+    '# 3 "Bill" BOT active',
+    '#  9 2 "Rolling "Six"" STEAM_ID_LAN 1:02:03 61 0 active 30000 10.0.0.9:27005',
+    '#end',
+  ].join('\n');
+  const players = (c: Record<string, string> | undefined) =>
+    app.inject({ method: 'GET', url: '/api/admin/practice/1/players', cookies: c });
+  const kick = (payload: object, c: Record<string, string> | undefined = admin) =>
+    app.inject({ method: 'POST', url: '/api/admin/practice/1/kick', payload, cookies: c });
+
+  async function parkWithPeople() {
+    seedServers(2);
+    await start({ kind: 'park' });
+    await flush();
+    statusLines = STATUS;
+  }
+
+  it('lists the humans only, with team and trainer when the plugin says, and who the site knows', async () => {
+    await parkWithPeople();
+    upsertPlayer(db, { steamid: '76561198030413993', name: 'dust on site', avatar: null }, []);
+    whoReply = 'WHO 1 Dust team=2 bot=0 alive=1 trainer=1 target=0\nWHO 3 Bill team=2 bot=1 trainer=0\nWHO 2 Rolling "Six" team=1';
+    const r = await players(admin);
+    expect(r.statusCode).toBe(200);
+    expect(r.json().players).toEqual([
+      { userid: 7, name: 'Dust', steamid64: '76561198030413993', connectedFor: '05:09', ping: 33, team: 2, trainer: 1, onSite: true },
+      { userid: 9, name: 'Rolling "Six"', steamid64: null, connectedFor: '1:02:03', ping: 61, team: 1, trainer: null, onSite: false },
+    ]);
+  });
+
+  it('still lists them, without teams, where the plugin has no sm_practice_who', async () => {
+    await parkWithPeople();
+    const r = await players(admin);
+    expect(r.json().players.map((p: { name: string; team: number | null }) => [p.name, p.team])).toEqual([['Dust', null], ['Rolling "Six"', null]]);
+  });
+
+  it('is admin only', async () => {
+    await parkWithPeople();
+    expect((await players(undefined)).statusCode).toBe(401);
+    expect((await players(owner)).statusCode).toBe(403);
+    expect((await kick({ userid: 7 }, owner)).statusCode).toBe(403);
+    expect((await app.inject({ method: 'GET', url: '/api/admin/practice/99/players', cookies: admin })).statusCode).toBe(404);
+  });
+
+  it('kicks by userid with a cleaned reason, and logs who was kicked from where', async () => {
+    await parkWithPeople();
+    sent = [];
+    const r = await kick({ userid: 7, reason: 'spawn "camping"; quit\nnow' });
+    expect(r.statusCode).toBe(200);
+    expect(sent).toEqual([['status'], ['sm_kick #7 "spawn camping quit now"']]);
+    const row = db.prepare("SELECT target, detail FROM admin_actions WHERE action = 'practice_kick'").get() as { target: string; detail: string };
+    expect(row.target).toBe('76561198030413993');
+    expect(JSON.parse(row.detail)).toMatchObject({ name: 'Dust', server: 'Box 2', kind: 'park', reason: 'spawn camping quit now' });
+  });
+
+  it('defaults the reason, and refuses a userid not on the box or a closed lease', async () => {
+    await parkWithPeople();
+    sent = [];
+    await kick({ userid: 9 });
+    expect(sent.at(-1)).toEqual(['sm_kick #9 "Removed by an admin"']);
+    const gone = await kick({ userid: 42 });
+    expect(gone.statusCode).toBe(404);
+    expect(gone.json().error).toBe('That player is not on this server any more.');
+    expect((await kick({ userid: 'x' })).statusCode).toBe(400);
+    leases.end(1, 'admin');
+    await flush();
+    expect((await kick({ userid: 7 })).statusCode).toBe(409);
   });
 });
