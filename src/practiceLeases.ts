@@ -97,8 +97,33 @@ export const EXTEND_MS = 15 * 60_000;
 /** The warning a lease gets before a PUG takes its box back. */
 export const PREEMPT_WARN_MS = 60_000;
 /** After `exec practice_<kind>.cfg`: the cfg changes map or restarts the
- *  round, so the password and owner lines wait for that to settle. */
-export const SETUP_SETTLE_MS = 20_000;
+ *  round, so the check that it took (and the password and owner lines)
+ *  wait for that to settle. */
+export const SETUP_SETTLE_MS = 15_000;
+/**
+ * A freshly restarted box answers rcon BEFORE its own startup has finished:
+ * server.cfg runs server_startup.cfg, which ends in `exec rotoblin_pub.cfg`,
+ * and that lands after the first rcon answer. A practice cfg exec'd in that
+ * gap was overwritten by Pub VS (lease 3 on the local rig, 2026-09-28; the
+ * live boxes boot the same way). So setup polls `l4d_game_type_name` until
+ * it reports the startup config (it contains "Pub"), this many times this
+ * far apart, then waits STARTUP_GRACE_MS more.
+ */
+export const STARTUP_POLLS = 10;
+export const STARTUP_POLL_MS = 2_000;
+export const STARTUP_GRACE_MS = 4_000;
+/** Tries at exec'ing the practice cfg and seeing it take. */
+export const CFG_TRIES = 3;
+
+/** What `l4d_game_type_name` must contain once each practice cfg has taken. */
+export const GAME_TYPE_MARK: Record<LeaseKind, string> = { park: 'Practice', drill: '4v4 PUG' };
+
+/** A cvar's value from its console echo (`"name" = "value" ( def. ... )`),
+ *  or null when the reply does not carry one (unknown cvar, dropped reply). */
+export function cvarValue(reply: string | undefined, name: string): string | null {
+  const m = new RegExp(`"${name}"\\s*=\\s*"([^"]*)"`).exec(reply ?? '');
+  return m ? m[1] : null;
+}
 /** The same lines again this much later: the per-map cfg that l4dready
  *  re-execs on the new map can reset cvars set in between. */
 export const SETUP_RESEND_MS = 5_000;
@@ -443,14 +468,21 @@ export class PracticeLeases {
       phase('resetting');
       if (!(await this.deps.restart(server))) throw new Error('the server did not come back from its restart');
       if (!this.stillActive(id)) return;
+      // 'loading' until the cfg is verified and the lines are in: the page
+      // says "you can connect now" from here, which is true (the box is up),
+      // and says ready only once it really is the practice config.
       phase('loading');
-      await this.deps.rcon(server, [`exec practice_${first.kind}.cfg`]);
-      await this.sleep(SETUP_SETTLE_MS);
+      await this.waitForStartup(server);
+      if (!this.stillActive(id)) return;
+      await this.execVerified(server, first.kind);
       let lease = this.stillActive(id);
       if (!lease) return;
       const lines = identityLines(lease, this.deps.publicUrl);
       await this.deps.rcon(server, lines);
       await this.sleep(SETUP_RESEND_MS);
+      // The per-map cfg re-exec on the new map can reset what was just set;
+      // one more look that the practice cfg still holds before the resend.
+      if (!(await this.configHolds(server, lease.kind)).ok) await this.execVerified(server, lease.kind);
       lease = this.stillActive(id);
       if (!lease) return;
       const again = [...lines];
@@ -472,6 +504,55 @@ export class PracticeLeases {
       });
       this.end(id, 'setup_failed');
     }
+  }
+
+  /** Poll until the box's own startup config has run (see STARTUP_POLLS),
+   *  or the polls run out, then give it STARTUP_GRACE_MS more. Never
+   *  throws: a box that never says "Pub" may run a different startup cfg,
+   *  and the verify step after this is what decides. */
+  private async waitForStartup(server: ServerRow): Promise<void> {
+    for (let i = 0; i < STARTUP_POLLS; i++) {
+      try {
+        const [reply] = await this.deps.rcon(server, ['l4d_game_type_name']);
+        if ((cvarValue(reply, 'l4d_game_type_name') ?? '').includes('Pub')) break;
+      } catch {
+        // Still coming up; poll again.
+      }
+      await this.sleep(STARTUP_POLL_MS);
+    }
+    await this.sleep(STARTUP_GRACE_MS);
+  }
+
+  /** Whether the practice cfg of `kind` is what the box is running. */
+  private async configHolds(server: ServerRow, kind: LeaseKind): Promise<{ ok: boolean; seen: string }> {
+    try {
+      const [type, mode] = await this.deps.rcon(server, ['l4d_game_type_name', 'l4d_practice_mode']);
+      const t = cvarValue(type, 'l4d_game_type_name') ?? '';
+      const m = cvarValue(mode, 'l4d_practice_mode') ?? '';
+      return { ok: t.includes(GAME_TYPE_MARK[kind]) && m === kind, seen: `game type "${t}", l4d_practice_mode "${m}"` };
+    } catch (err) {
+      return { ok: false, seen: `no answer (${err instanceof Error ? err.message : String(err)})` };
+    }
+  }
+
+  /** Exec the practice cfg, let it settle, and check it took; up to
+   *  CFG_TRIES times. Throws with what was seen when it never does. */
+  private async execVerified(server: ServerRow, kind: LeaseKind): Promise<void> {
+    let seen = '';
+    for (let attempt = 1; attempt <= CFG_TRIES; attempt++) {
+      try {
+        await this.deps.rcon(server, [`exec practice_${kind}.cfg`]);
+      } catch (err) {
+        seen = `exec failed (${err instanceof Error ? err.message : String(err)})`;
+        continue;
+      }
+      await this.sleep(SETUP_SETTLE_MS);
+      const check = await this.configHolds(server, kind);
+      if (check.ok) return;
+      seen = check.seen;
+      console.warn(`[practice] ${server.name}: practice_${kind}.cfg did not take (try ${attempt}/${CFG_TRIES}): ${seen}`);
+    }
+    throw new Error(`practice_${kind}.cfg did not take after ${CFG_TRIES} tries; last seen ${seen}`);
   }
 
   /**

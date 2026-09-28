@@ -4,10 +4,11 @@ import { addServer, claimIdle, getServer, markLive, type ServerRow } from '../sr
 import { ServerReleaser, reconcileServers } from '../src/serverRelease.js';
 import { upsertPlayer } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
+import { subscribeAdminEvents } from '../src/adminFeed.js';
 import {
   EXTEND_MS, IDLE_END_MS, LEASE_MS, LEASES_PER_HOUR, PARK_CAPACITY, PREEMPT_WARN_MS, PICK_ERRORS,
   PracticeLeases, getLease, identityLines, joinableParks, judgeLease, leaseView, newLeasePassword,
-  parkListings, parseStatusMap, pickLeaseServer, adminLeaseRows,
+  parkListings, parseStatusMap, pickLeaseServer, adminLeaseRows, cvarValue, CFG_TRIES,
 } from '../src/practiceLeases.js';
 
 const ME = '76561199000000001';
@@ -23,6 +24,16 @@ let rconDown: Set<string>;
 let released: number[];
 let releaseBack: boolean;
 let restartBack: boolean;
+/** Each fake box's practice state: what `l4d_game_type_name` and
+ *  `l4d_practice_mode` answer. A restart puts it back to the startup Pub
+ *  config; an exec of practice_<kind>.cfg switches it unless `swallow`
+ *  says the startup exec is still to land on top of it. */
+let box: Record<string, { type: string; mode: string; swallow: number }>;
+/** The cvar reads setup makes, kept apart from `sent` so the order of the
+ *  commands that change something stays readable. */
+let reads: string[];
+const PUB = 'Rotoblin Pub VS';
+const boxOf = (name: string) => (box[name] ??= { type: PUB, mode: '', swallow: 0 });
 
 function seedServer(name: string, over: { restart?: number; enabled?: number; status?: ServerRow['status'] } = {}): number {
   const id = addServer(db, { name, host: `10.0.0.${name.length}`, port: 27015, rconPort: 27015, rconPassword: 'x' });
@@ -40,12 +51,28 @@ function manager(over: Partial<ConstructorParameters<typeof PracticeLeases>[0]> 
     publicUrl: URL,
     rcon: async (server, cmds) => {
       if (rconDown.has(server.name)) throw new Error('rcon connect timeout');
-      sent.push({ server: server.name, cmds });
-      return cmds.map((c) => (c === 'status' ? status(humansOn[server.name] ?? 0) : ''));
+      const b = boxOf(server.name);
+      if (cmds.every((c) => c === 'l4d_game_type_name' || c === 'l4d_practice_mode')) reads.push(...cmds);
+      else sent.push({ server: server.name, cmds });
+      return cmds.map((c) => {
+        if (c === 'status') return status(humansOn[server.name] ?? 0);
+        if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${b.type}" ( def. "" )`;
+        if (c === 'l4d_practice_mode') return `"l4d_practice_mode" = "${b.mode}"`;
+        const m = /^exec practice_(park|drill)\.cfg$/.exec(c);
+        if (m) {
+          if (b.swallow > 0) b.swallow--;
+          else { b.type = m[1] === 'park' ? 'Practice (drills)' : 'Rotoblin 4v4 PUG'; b.mode = m[1]; }
+        }
+        return '';
+      });
     },
     release: async (id) => { released.push(id); if (releaseBack) db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id); return releaseBack; },
     // Recorded in `sent` so the order against the rcon lines is visible.
-    restart: async (server) => { sent.push({ server: server.name, cmds: ['(restart)'] }); return restartBack; },
+    restart: async (server) => {
+      sent.push({ server: server.name, cmds: ['(restart)'] });
+      box[server.name] = { type: PUB, mode: '', swallow: boxOf(server.name).swallow };
+      return restartBack;
+    },
     sleep: async () => {},
     now: () => now,
     ...over,
@@ -58,6 +85,8 @@ const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((r) =
 beforeEach(() => {
   db = openDb(':memory:');
   now = T0;
+  box = {};
+  reads = [];
   sent = [];
   humansOn = {};
   rconDown = new Set();
@@ -308,6 +337,57 @@ describe('PracticeLeases.create', () => {
     release();
     await flush();
     expect(leaseView(db, getLease(db, 1)!, ME, false)).toMatchObject({ state: 'ready', setupPhase: null });
+  });
+
+  it('waits for the startup Pub config before exec\'ing, and re-execs a cfg the startup overwrote', async () => {
+    seedServer('a'); seedServer('bb');
+    // The startup exec lands on top of the first practice exec (lease 3 on the local rig).
+    box.bb = { type: PUB, mode: '', swallow: 1 };
+    mgr = manager();
+    await mgr.create(ME, 'park');
+    await flush();
+    const execs = sent.filter((x) => x.cmds[0] === 'exec practice_park.cfg');
+    expect(execs).toHaveLength(2);
+    // The startup check read the game type before the first exec.
+    expect(reads[0]).toBe('l4d_game_type_name');
+    const l = getLease(db, 1)!;
+    expect(l.ready_at).not.toBeNull();
+    expect(l.end_reason).toBeNull();
+  });
+
+  it('a drill server must read "4v4 PUG" and mode drill before it is ready', async () => {
+    seedServer('a'); seedServer('bb');
+    mgr = manager();
+    await mgr.create(ME, 'drill');
+    await flush();
+    expect(box.bb).toMatchObject({ type: 'Rotoblin 4v4 PUG', mode: 'drill' });
+    expect(getLease(db, 1)!.ready_at).not.toBeNull();
+  });
+
+  it('a cfg that never takes in three tries ends the lease as setup_failed and says so in the admin feed', async () => {
+    seedServer('a'); const b = seedServer('bb');
+    box.bb = { type: PUB, mode: '', swallow: 99 };
+    const feed: string[] = [];
+    const off = subscribeAdminEvents((e) => { if (e.kind === 'problem') feed.push(e.text); });
+    try {
+      mgr = manager();
+      await mgr.create(ME, 'park');
+      await flush();
+    } finally {
+      off();
+    }
+    expect(sent.filter((x) => x.cmds[0] === 'exec practice_park.cfg')).toHaveLength(CFG_TRIES);
+    // The password lines never went out on a box that is not the practice config.
+    expect(sent.some((x) => x.cmds[0].startsWith('sm_cvar sv_password'))).toBe(false);
+    expect(getLease(db, 1)!.end_reason).toBe('setup_failed');
+    expect(released).toEqual([b]);
+    expect(feed[0]).toMatch(/practice_park\.cfg did not take after 3 tries; last seen game type "Rotoblin Pub VS"/);
+  });
+
+  it('reads cvar values out of their console echo', () => {
+    expect(cvarValue('"l4d_game_type_name" = "Practice (drills)" ( def. "" )', 'l4d_game_type_name')).toBe('Practice (drills)');
+    expect(cvarValue('Unknown command "l4d_practice_mode"', 'l4d_practice_mode')).toBeNull();
+    expect(cvarValue(undefined, 'x')).toBeNull();
   });
 
   it('a setup that fails is wound down through the release', async () => {
