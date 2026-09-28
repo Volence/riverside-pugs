@@ -36,7 +36,7 @@ describe('WeeklyBoard', () => {
     expect(screen.getByText('VII')).toBeTruthy();
     expect(screen.getByText('epx')).toBeTruthy();
     expect(screen.getByText('15-4')).toBeTruthy();
-    expect(screen.getByText(/final Monday 00:00 UTC/)).toBeTruthy();
+    expect(screen.getByText(/final Monday 12:00 UTC/)).toBeTruthy();
   });
 
   it('offers past weeks in the picker', async () => {

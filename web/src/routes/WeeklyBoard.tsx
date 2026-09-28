@@ -76,7 +76,7 @@ export function WeeklyBoard({ week, onWeek }: { week?: string; onWeek: (w: strin
     <div class="weekly">
       <div class="weekly__bar">
         {picker}
-        {data.live && <span class="weekly__note">Live. Averages need {data.minGames}+ games; final Monday 00:00 UTC.</span>}
+        {data.live && <span class="weekly__note">Live. Averages need {data.minGames}+ games; final Monday 12:00 UTC.</span>}
       </div>
       {data.awards.length === 0 && <Empty>No awards yet this week.</Empty>}
       {GROUPS.map(({ group, title }) => {
