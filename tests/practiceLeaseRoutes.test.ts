@@ -103,7 +103,7 @@ describe('POST /api/practice/leases', () => {
     expect(r.statusCode).toBe(200);
     expect(r.json().lease.drillCode).toBe('K7QX');
     await flush();
-    expect(sent.at(-1)?.at(-1)).toBe('sm_drill_load K7QX');
+    expect(sent.at(-2)?.at(-1)).toBe('sm_drill_load K7QX');   // the last send is the ready-time status read
   });
 
   it('a second lease of your own is a 409 naming the first', async () => {

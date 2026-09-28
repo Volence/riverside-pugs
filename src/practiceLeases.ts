@@ -496,8 +496,15 @@ export class PracticeLeases {
         again.push(`sm_drill_load ${lease.drill_code}`);
       }
       await this.deps.rcon(server, again);
-      this.db.prepare('UPDATE practice_leases SET ready_at = ?, setup_phase = NULL WHERE id = ? AND ended_at IS NULL')
-        .run(iso(this.now()), id);
+      // Record the map now rather than at the next minute's tick, or the page
+      // keeps showing the startup map (The Greenhouse) after a park is ready.
+      let map: string | null = null;
+      try {
+        const [status] = await this.deps.rcon(server, ['status']);
+        map = parseStatusMap(status ?? '');
+      } catch { /* the tick fills it in */ }
+      this.db.prepare('UPDATE practice_leases SET ready_at = ?, setup_phase = NULL, map = COALESCE(?, map) WHERE id = ? AND ended_at IS NULL')
+        .run(iso(this.now()), map, id);
       console.log(`[practice] lease ${id} (${lease.kind}) is ready on ${server.name}`);
     } catch (err) {
       console.error(`[practice] lease ${id}: setup on ${server.name} failed:`, err);

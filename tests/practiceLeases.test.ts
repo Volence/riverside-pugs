@@ -241,7 +241,7 @@ describe('PracticeLeases.create', () => {
     const pw = getLease(db, r.lease.id)!.password;
     const id = [`sm_cvar sv_password "${pw}"`, `l4d_practice_password "${pw}"`, 'l4d_practice_owner ""', `l4d_practice_site "${URL}"`];
     // Status first (nobody on it), then a restart for a clean slate, then the cfg.
-    expect(sent.map((s) => s.cmds)).toEqual([['status'], ['(restart)'], ['exec practice_park.cfg'], id, id]);
+    expect(sent.map((s) => s.cmds)).toEqual([['status'], ['(restart)'], ['exec practice_park.cfg'], id, id, ['status']]);
     expect(getLease(db, r.lease.id)!.setup_phase).toBeNull();
     expect(sent.every((s) => s.server === 'bb')).toBe(true);
     expect(getLease(db, r.lease.id)!.ready_at).toBe(new Date(T0).toISOString());
