@@ -73,6 +73,22 @@ export interface RealOrchestratorDeps {
   /** Where the plugin writes replay files. Empty disables replay recording on
    *  the site, the same convention as demoDir. */
   replayDir?: string;
+  /** Take a box a side game is already holding, if the campaign can run
+   *  there. Returns null when nothing is held, `runsOn` says no (the side
+   *  game closes itself in that case), or the take otherwise fails; the
+   *  caller then falls back to claimIdle. */
+  takeHeld?: (campaign: string, runsOn: (s: ServerRow) => boolean) => { server: ServerRow; firstCommands: string[] } | null;
+}
+
+/** Whether this box can run the campaign: a custom one must be installed on
+ *  it, a dlc4 one needs the mappack. The same two checks setupMatch has always
+ *  made before changelevel. */
+export function campaignRunsOn(db: DB, campaign: string, server: ServerRow): boolean {
+  const entry = campaignRegistry(db).get(campaign);
+  if (!entry) return false;
+  if (entry.custom && !isInstalledEverywhere(db, campaign, [server.id])) return false;
+  if (entry.requiresDlc4 && !server.has_dlc4) return false;
+  return true;
 }
 
 interface MatchRow {
@@ -94,6 +110,7 @@ export class RealOrchestrator implements Orchestrator {
   private replayDir: string;
   onNoServer?: (matchId: number) => void;
   private beforeLive?: (rcon: RconClient) => Promise<void>;
+  private takeHeld?: RealOrchestratorDeps['takeHeld'];
 
   constructor(deps: RealOrchestratorDeps) {
     this.db = deps.db;
@@ -106,6 +123,7 @@ export class RealOrchestrator implements Orchestrator {
     this.replayDir = deps.replayDir ?? '';
     this.onNoServer = deps.onNoServer;
     this.beforeLive = deps.beforeLive;
+    this.takeHeld = deps.takeHeld;
   }
 
   /** Give the box its log secret, when it has one. Never fatal: a match is
@@ -129,7 +147,13 @@ export class RealOrchestrator implements Orchestrator {
   }
 
   async setupMatch(matchId: number): Promise<void> {
-    const server = claimIdle(this.db);
+    const match = this.db.prepare('SELECT id, campaign FROM matches WHERE id = ?').get(matchId) as
+      | { id: number; campaign: string }
+      | undefined;
+    if (!match) return;
+
+    const held = this.takeHeld?.(match.campaign, (s) => campaignRunsOn(this.db, match.campaign, s)) ?? null;
+    const server = held?.server ?? claimIdle(this.db);
     if (!server) {
       // Wait, do not abort. The match stays 'configuring' and the pending list
       // retries it when a box frees. Only the no-server case pends: an rcon
@@ -137,14 +161,6 @@ export class RealOrchestrator implements Orchestrator {
       // would pin the queue on a server that is not going to work.
       console.warn(`[orchestrator] no idle server for match ${matchId}; waiting`);
       this.onNoServer?.(matchId);
-      return;
-    }
-
-    const match = this.db.prepare('SELECT id, campaign FROM matches WHERE id = ?').get(matchId) as
-      | { id: number; campaign: string }
-      | undefined;
-    if (!match) {
-      this.releaser.release(server.id);
       return;
     }
     const roster = this.db
@@ -159,6 +175,9 @@ export class RealOrchestrator implements Orchestrator {
     let live = false;
     try {
       rcon = await this.connectRcon(server);
+      for (const c of held?.firstCommands ?? []) {
+        try { await rcon.exec(c); } catch (err) { console.warn(`[orchestrator] ${c.split(' ')[0]} failed (non-fatal):`, err); }
+      }
       await rcon.exec(`logaddress_add ${this.logPublicAddress}`);
       await this.pushSecret(rcon, server);
       await rcon.exec('exec pug_match');
