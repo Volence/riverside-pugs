@@ -235,6 +235,14 @@ describe('GET /api/admin/practice/leases', () => {
     expect(r.json().leases).toMatchObject([{ id: 1, kind: 'park', owner: { steamid: OWNER } }]);
   });
 
+  it('each row names its server id, so the Live board can open its chat', async () => {
+    seedServers(2);
+    await start({ kind: 'park' });
+    const serverId = (db.prepare('SELECT server_id FROM practice_leases WHERE id = 1').get() as { server_id: number }).server_id;
+    const r = await app.inject({ method: 'GET', url: '/api/admin/practice/leases', cookies: admin });
+    expect(r.json().leases[0].serverId).toBe(serverId);
+  });
+
   it('a moderator reads the leases too', async () => {
     seedServers(2);
     await start({ kind: 'park' });

@@ -43,9 +43,10 @@ const STATE_LABEL: Record<AdminPracticeLease['state'], string> = {
  *
  * `nudge` is the board's own refresh counter, so this refetches whenever
  * the board does. Each row also reads who is on its server (LeaseRow), and
- * opens into a table of them with a Kick for each.
+ * opens into a table of them with a Kick for each. `onChat` opens a server's
+ * chat drawer on the Live board.
  */
-export function PracticeLeasesPanel({ nudge }: { nudge: number }) {
+export function PracticeLeasesPanel({ nudge, onChat }: { nudge: number; onChat?: (serverId: number) => void }) {
   const leases = useFetch((s) => adminApi.practiceLeases(s), [nudge]);
   const { busy, error, run } = useAction(() => leases.reload());
   const rows = leases.data?.leases ?? [];
@@ -58,7 +59,7 @@ export function PracticeLeasesPanel({ nudge }: { nudge: number }) {
           <thead><tr><th>Server</th><th>Kind</th><th>Started by</th><th>State</th><th>Players</th><th>Map</th><th /></tr></thead>
           <tbody>
             {rows.map((l) => (
-              <LeaseRow key={l.id} lease={l} busy={busy} run={run} />
+              <LeaseRow key={l.id} lease={l} busy={busy} run={run} onChat={onChat} />
             ))}
           </tbody>
         </table>
@@ -78,7 +79,9 @@ export function PracticeLeasesPanel({ nudge }: { nudge: number }) {
  * inline. No confirm dialog: the reason box is the pause, and a kick is
  * undone by the player reconnecting.
  */
-function LeaseRow({ lease: l, busy, run }: { lease: AdminPracticeLease; busy: boolean; run: Run }) {
+function LeaseRow({ lease: l, busy, run, onChat }: {
+  lease: AdminPracticeLease; busy: boolean; run: Run; onChat?: (serverId: number) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [players, setPlayers] = useState<AdminPracticePlayer[] | null>(null);
   const [readError, setReadError] = useState('');
@@ -116,18 +119,23 @@ function LeaseRow({ lease: l, busy, run }: { lease: AdminPracticeLease; busy: bo
         </td>
         <td class="practice-row__players">{playersCell(players, l.humans)}</td>
         <td class="muted">{l.map ? mapName(l.map) : ''}</td>
-        <td>{live && (
-          <button class="chip" type="button" disabled={busy}
-            onClick={(e) => {
-              e.stopPropagation();
-              void run(() => api.endPractice(l.id), {
-                title: `Close ${l.owner.name}'s ${KIND_LABEL[l.kind].toLowerCase()} on ${l.server}?`,
-                body: 'Everyone on it is kicked, and the server restarts and goes back to the PUG pool.',
-                confirmLabel: 'Close it',
-                danger: true,
-              });
-            }}>End</button>
-        )}</td>
+        <td>
+          {onChat && (
+            <button class="chip" type="button" onClick={(e) => { e.stopPropagation(); onChat(l.serverId); }}>Chat</button>
+          )}{' '}
+          {live && (
+            <button class="chip" type="button" disabled={busy}
+              onClick={(e) => {
+                e.stopPropagation();
+                void run(() => api.endPractice(l.id), {
+                  title: `Close ${l.owner.name}'s ${KIND_LABEL[l.kind].toLowerCase()} on ${l.server}?`,
+                  body: 'Everyone on it is kicked, and the server restarts and goes back to the PUG pool.',
+                  confirmLabel: 'Close it',
+                  danger: true,
+                });
+              }}>End</button>
+          )}
+        </td>
       </tr>
       {open && (
         <tr class="practice-row__detail">
