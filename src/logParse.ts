@@ -221,8 +221,16 @@ export type LogEvent =
   // or not, for the conduct alerts (src/conductFlags.ts). The rostered-only
   // CHAT line above still feeds the match chat log; these feed nothing else.
   // `team` is the game's team number: 1 spectator, 2 survivors, 3 infected.
-  | { kind: 'say'; steamid: string; team: number | null; message: string }
+  // `scope` is whether the player typed to everyone or to their team
+  // (pug-match 0.3.16 on); null from an older plugin.
+  | { kind: 'say'; steamid: string; team: number | null; message: string; scope: 'all' | 'team' | null }
   | { kind: 'name'; steamid: string; event: 'connect' | 'change'; name: string }
+  // A player's private message to staff (/staff, src/serverChat.ts). Same
+  // text-last rule as PUGSAY.
+  | { kind: 'staff_in'; steamid: string; team: number | null; message: string }
+  // pug-match's answer to sm_pug_staffsay: how many players the send with
+  // this id reached. 0 is a whisper to a player who is not on the server.
+  | { kind: 'staff_sent'; sendId: number; delivered: number }
   // An in-game /mod call (src/modCalls.ts). `target` is a SteamID64 or one of
   // the targetless words the plugin sends when the caller did not aim at a
   // player. `matchId`/`ordinal`/`half`/`tMs` are the round moment, present
@@ -590,21 +598,35 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
   // rather than from the engine's own say and "changed name" lines, whose
   // player-controlled name comes FIRST and can be built to look like someone
   // else's <uid><steamid><team>.
-  if (body.startsWith('PUGSAY ') || body.startsWith('PUGNAME ')) {
+  if (body.startsWith('PUGSAY ') || body.startsWith('PUGNAME ') || body.startsWith('PUGSTAFF ')) {
     const say = body.startsWith('PUGSAY ');
-    const marker = say ? ' msg=' : ' name=';
+    const staff = body.startsWith('PUGSTAFF ');
+    const marker = say || staff ? ' msg=' : ' name=';
     const at = body.indexOf(marker);
     if (at < 0) return null;
     const head = kv(body.slice(0, at).split(/\s+/).slice(1));
     const text = body.slice(at + marker.length);
     const steamid = steamId64Of(head.steamid ?? '');
     if (!steamid || !text.trim()) return null;
+    const teamNo = intOf(head.team);
+    const team = teamNo !== null && teamNo >= 0 && teamNo <= 3 ? teamNo : null;
+    if (staff) return { kind: 'staff_in', steamid, team, message: text };
     if (say) {
-      const team = intOf(head.team);
-      return { kind: 'say', steamid, team: team !== null && team >= 0 && team <= 3 ? team : null, message: text };
+      const scope = head.scope === 'all' || head.scope === 'team' ? head.scope : null;
+      return { kind: 'say', steamid, team, scope, message: text };
     }
     if (head.event !== 'connect' && head.event !== 'change') return null;
     return { kind: 'name', steamid, event: head.event, name: text.slice(0, 128) };
+  }
+
+  // Token-less like PUGNET: the marker opens the line, nothing a player types
+  // can reach it, and neither field is player text.
+  if (body.startsWith('PUGSTAFFSENT ')) {
+    const f = kv(body.slice('PUGSTAFFSENT '.length).split(/\s+/));
+    const sendId = intOf(f.id);
+    const delivered = intOf(f.delivered);
+    if (sendId === null || sendId < 1 || delivered === null || delivered < 0) return null;
+    return { kind: 'staff_sent', sendId, delivered };
   }
 
   // An in-game /mod call (src/modCalls.ts). Same treatment as PUGSAY: the
