@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { countdown, countUp, isLow, liveFromUrl, reasonText, OLD_PLUGIN_REASON } from './liveBoard';
+import { chatFromUrl, countdown, countUp, isLow, liveFromUrl, reasonText, OLD_PLUGIN_REASON } from './liveBoard';
 
 describe('countdown', () => {
   it('runs down from what the server said, by whole seconds since it said it', () => {
@@ -52,6 +52,15 @@ describe('liveFromUrl', () => {
     expect(liveFromUrl()).toBeNull();
     history.replaceState(null, '', '/admin');
     expect(liveFromUrl()).toBeNull();
+  });
+});
+
+describe('chatFromUrl', () => {
+  it('reads ?chat= as a server id', () => {
+    expect(chatFromUrl('?chat=3')).toBe(3);
+    expect(chatFromUrl('?live=5&chat=12')).toBe(12);
+    expect(chatFromUrl('?chat=x')).toBeNull();
+    expect(chatFromUrl('')).toBeNull();
   });
 });
 

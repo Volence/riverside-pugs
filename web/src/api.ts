@@ -1485,11 +1485,28 @@ export interface ModCallView {
   handledBy: string | null; handledAt: string | null; folded: ModCallView[];
 }
 
+/** Server chat (src/routes/serverChat.ts). */
+export interface ChatServerView { id: number; name: string; state: 'match' | 'practice' | 'idle' | 'offline'; lastAt: number | null }
+export interface ChatLineView {
+  id: number; at: number; kind: 'say' | 'staff_in' | 'staff_out'; steamid: string | null; name: string | null;
+  team: number | null; scope: 'all' | 'team' | null; message: string; matchId: number | null;
+  to: { kind: 'all' | 'team' | 'player'; value: string | null; name: string | null } | null;
+  delivered: number | null;
+}
+export type ChatSendBody =
+  | { to: 'all'; message: string }
+  | { to: 'team'; team: 1 | 2 | 3; message: string }
+  | { to: 'player'; steamid: string; message: string };
+
 export const modApi = {
   calls: (filter: 'open' | 'all', signal?: AbortSignal) =>
     get<{ calls: ModCallView[]; discordReady: boolean }>(`/api/mod/calls?filter=${filter}`, signal),
   /** Mark an in-game call handled, as the Discord card's button does. */
   handleCall: (id: number) => post<{ ok: true }>(`/api/mod/calls/${id}/handle`),
+  chatServers: (signal?: AbortSignal) => get<{ servers: ChatServerView[] }>('/api/mod/chat/servers', signal),
+  chatLines: (serverId: number, after: number, signal?: AbortSignal) =>
+    get<{ server: { id: number; name: string }; lines: ChatLineView[] }>(`/api/mod/chat/${serverId}?after=${after}`, signal),
+  chatSend: (serverId: number, body: ChatSendBody) => post<{ ok: true; id: number }>(`/api/mod/chat/${serverId}`, body),
   tickets: (filter: 'open' | 'mine' | 'closed', signal?: AbortSignal) =>
     get<{ tickets: TicketSummary[]; counts: TicketCounts }>(`/api/mod/tickets?filter=${filter}`, signal),
   ticket: (id: number, signal?: AbortSignal) => get<TicketDetail>(`/api/mod/tickets/${id}`, signal),

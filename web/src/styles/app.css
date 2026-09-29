@@ -3029,3 +3029,23 @@ tbody tr.is-lifted td { opacity: 0.55; }
   .cast__side--b { text-align: left; }
   .cast__scores { order: -1; }
 }
+
+/* Chat drawer on the Live board: one server's chat, live, sliding in over
+ * the right edge so the board underneath stays put. */
+.chat-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100vw); z-index: 40;
+  display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4);
+  background: var(--surface); border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
+}
+.chat-drawer__head { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
+.chat-log { flex: 1; overflow-y: auto; font-size: var(--fs-dense); display: flex; flex-direction: column; gap: 2px; }
+.chat-line--surv { border-left: 3px solid var(--c-no-mercy); padding-left: var(--sp-2); }
+.chat-line--inf { border-left: 3px solid var(--loss); padding-left: var(--sp-2); }
+.chat-line--spec { border-left: 3px solid var(--text-muted); padding-left: var(--sp-2); }
+.chat-line--staff { border-left: 3px solid var(--win); padding-left: var(--sp-2); }
+.chat-line--to-staff { background: color-mix(in srgb, var(--win) 12%, transparent); }
+.chat-tag { margin-left: var(--sp-2); font-size: 0.8em; padding: 0 var(--sp-1); border-radius: var(--radius); background: var(--win); color: var(--accent-ink); }
+.chat-send { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.chat-send input { flex: 1; min-width: 10rem; }
+.linkish { background: none; border: 0; padding: 0; font: inherit; color: inherit; font-weight: 600; cursor: pointer; text-decoration: underline dotted; }
