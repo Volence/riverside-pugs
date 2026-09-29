@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import type { ChatLineView } from '../../api';
 
-const { mockMod } = vi.hoisted(() => ({ mockMod: { chatServers: vi.fn(), chatLines: vi.fn(), chatSend: vi.fn() } }));
+const { mockMod } = vi.hoisted(() => ({ mockMod: { chatServers: vi.fn(), chatLines: vi.fn(), chatSend: vi.fn(), chatPlayers: vi.fn() } }));
 vi.mock('../../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api')>();
   return { ...actual, modApi: { ...actual.modApi, ...mockMod } };
@@ -172,5 +172,33 @@ describe('ChatDrawer', () => {
       await new Promise((r) => setTimeout(r, 0));
       expect(writes).toEqual([]);
     });
+  });
+
+  it('Whisper... picks someone on the server now, with no chat line needed', async () => {
+    mockMod.chatLines.mockResolvedValue({ server: { id: 3, name: 'Dallas' }, lines: [] });
+    mockMod.chatPlayers.mockResolvedValue({ players: [{ steamid: P, name: 'Zoey' }, { steamid: '76561198000000002', name: 'Francis' }] });
+    mockMod.chatSend.mockResolvedValue({ ok: true, id: 9 });
+    render(<ChatDrawer serverId={3} onPick={() => {}} onClose={() => {}} />);
+    fireEvent.change(await screen.findByLabelText('Send to'), { target: { value: 'whisper' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Francis' }));
+    expect(mockMod.chatPlayers).toHaveBeenCalledWith(3);
+    expect(screen.getByText('Whisper to Francis')).toBeTruthy();
+    fireEvent.input(screen.getByLabelText('Message'), { target: { value: 'check your rates' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mockMod.chatSend).toHaveBeenCalledWith(3, { to: 'player', steamid: '76561198000000002', message: 'check your rates' }));
+  });
+
+  it('Whisper... says so when nobody is on or the server cannot be reached', async () => {
+    const { ApiError } = await import('../../api');
+    mockMod.chatLines.mockResolvedValue({ server: { id: 3, name: 'Dallas' }, lines: [] });
+    mockMod.chatPlayers.mockResolvedValueOnce({ players: [] });
+    render(<ChatDrawer serverId={3} onPick={() => {}} onClose={() => {}} />);
+    fireEvent.change(await screen.findByLabelText('Send to'), { target: { value: 'whisper' } });
+    expect(await screen.findByText('Nobody is on the server.')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
+    mockMod.chatPlayers.mockRejectedValueOnce(new ApiError(502, 'Could not reach the server.'));
+    fireEvent.change(screen.getByLabelText('Send to'), { target: { value: 'all' } });
+    fireEvent.change(screen.getByLabelText('Send to'), { target: { value: 'whisper' } });
+    expect(await screen.findByText('Could not reach the server.')).toBeTruthy();
   });
 });

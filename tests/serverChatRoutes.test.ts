@@ -14,6 +14,7 @@ let app: FastifyInstance;
 let sid: number;
 let sent: string[];
 let rconReply: string;
+let rconFails: boolean;
 let hub: Hub;
 let heard: Record<string, string[]>;
 const cookie: Record<string, Record<string, string>> = {};
@@ -22,6 +23,7 @@ beforeEach(async () => {
   db = openDb(':memory:');
   sent = [];
   rconReply = '';
+  rconFails = false;
   hub = new Hub();
   heard = {};
   for (const id of IDS) {
@@ -31,7 +33,7 @@ beforeEach(async () => {
   app = await buildServer({
     hub,
     config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {},
-    chatRcon: async (_s, cmds) => { sent.push(...cmds); return [rconReply]; },
+    chatRcon: async (_s, cmds) => { sent.push(...cmds); if (rconFails) throw new Error('rcon connect timeout'); return [rconReply]; },
   });
   for (const id of IDS) cookie[id] = authedCookie(app, db, id);
   db.prepare("UPDATE players SET is_mod = 1, name = 'Mod Person' WHERE steamid = ?").run(MOD);
@@ -121,5 +123,45 @@ describe('server chat routes', () => {
   it('does not notify for a refused send', async () => {
     expect((await send(MOD, { to: 'all', message: ' ; ' })).statusCode).toBe(400);
     expect(heard[MOD].filter((e) => e === 'server_chat')).toHaveLength(0);
+  });
+
+  describe('players on the server now', () => {
+    const STATUS = `hostname: Dallas
+# userid name uniqueid connected ping loss state rate adr
+#  2 1 "Mal" STEAM_1:1:35074132 01:12 33 0 active 128000 192.168.4.85:27005
+# 3 "Bill" BOT active
+#  3 2 "lan" STEAM_ID_LAN 00:04 5 0 active 30000 loopback
+# 11 5 "a "quoted" name" STEAM_1:0:7 1:02:03 120 4 spawning 30000 10.1.1.1:27005
+#end`;
+    const players = (as: string | null, id: number | string = sid) => get(as, `/api/mod/chat/${id}/players`);
+
+    it('is staff only', async () => {
+      expect((await players(null)).statusCode).toBe(401);
+      expect((await players(PLAYER)).statusCode).toBe(403);
+      expect(sent).toEqual([]);
+    });
+
+    it('404s an unknown server without calling rcon', async () => {
+      expect((await players(MOD, 999)).statusCode).toBe(404);
+      expect(sent).toEqual([]);
+    });
+
+    it('reads humans with a SteamID64 from status', async () => {
+      rconReply = STATUS;
+      const r = await players(MOD);
+      expect(r.statusCode).toBe(200);
+      expect(sent).toEqual(['status']);
+      expect(r.json()).toEqual({ players: [
+        { steamid: '76561198030413993', name: 'Mal' },
+        { steamid: '76561197960265742', name: 'a "quoted" name' },
+      ] });
+    });
+
+    it('502s when the server cannot be reached', async () => {
+      rconFails = true;
+      const r = await players(MOD);
+      expect(r.statusCode).toBe(502);
+      expect(r.json()).toEqual({ error: 'Could not reach the server.' });
+    });
   });
 });
