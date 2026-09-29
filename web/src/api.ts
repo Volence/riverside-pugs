@@ -1813,6 +1813,7 @@ export interface AdminPracticePlayer {
   ping: number;
   team: number | null;
   trainer: number | null;
+  station: string | null;
   /** The site knows this SteamID: the name links to the profile and the file. */
   onSite: boolean;
 }

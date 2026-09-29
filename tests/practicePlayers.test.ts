@@ -40,9 +40,9 @@ describe('parseWho', () => {
       'WHO 6 Spec Tator team=1',
       'noise',
     ].join('\n'));
-    expect(who.get(1)).toEqual({ team: 3, bot: false, trainer: null });
-    expect(who.get(5)).toEqual({ team: 2, bot: false, trainer: 2 });
-    expect(who.get(6)).toEqual({ team: 1, bot: false, trainer: null });
+    expect(who.get(1)).toEqual({ team: 3, bot: false, trainer: null, station: null });
+    expect(who.get(5)).toEqual({ team: 2, bot: false, trainer: 2, station: null });
+    expect(who.get(6)).toEqual({ team: 1, bot: false, trainer: null, station: null });
     expect(who.size).toBe(3);
   });
 
@@ -65,5 +65,17 @@ describe('kickReason', () => {
     expect(kickReason(undefined)).toBe('Removed by an admin');
     expect(kickReason(42)).toBe('Removed by an admin');
     expect(kickReason('x'.repeat(300))).toHaveLength(120);
+  });
+});
+
+describe('station', () => {
+  it('reads the station the plugin prints before team=', () => {
+    const who = 'WHO 3 Dust station=pit team=2 bot=0 alive=1 zc=-1 trainer=0 target=-1\nWHO 4 Six station=none team=3 bot=0 alive=1 zc=3 trainer=0 target=-1';
+    const m = parseWho(who);
+    expect(m.get(3)?.station).toBe('pit');
+    expect(m.get(4)?.station).toBeNull();
+  });
+  it('is null for a plugin that predates it', () => {
+    expect(parseWho('WHO 3 Dust team=2 bot=0 trainer=1').get(3)?.station).toBeNull();
   });
 });
