@@ -153,6 +153,9 @@ export function renderModCallCard(db: DB, call: ModCallRow, publicUrl: string): 
     });
   }
   if (ticketUrl) row.push({ kind: 'link', label: 'Ticket', url: ticketUrl });
+  if (call.server_id !== null) {
+    row.push({ kind: 'link', label: 'Server chat', url: `${publicUrl}/admin/live?chat=${call.server_id}` });
+  }
 
   const role = getSetting(db, 'mod_call_role_id') ?? '';
   const ping = call.pinged === 1 && role !== '';

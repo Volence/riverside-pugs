@@ -235,6 +235,12 @@ describe('ModCallPoster', () => {
     expect(desc).not.toContain('Join:');
   });
 
+  it('links to that server\'s chat', async () => {
+    call(); await poster.idle();
+    const buttons = inAdmin()[0].payload.components[0];
+    expect(buttons).toContainEqual({ kind: 'link', label: 'Server chat', url: `https://pug.test/admin/live?chat=${serverId}` });
+  });
+
   it('links the Steam profile of a caller or target with no Discord linked', async () => {
     db.prepare('UPDATE players SET discord_id = NULL WHERE steamid IN (?, ?)').run(IDS[0], IDS[5]);
     call(); await poster.idle();
