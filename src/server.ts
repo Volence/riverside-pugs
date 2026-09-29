@@ -965,7 +965,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           return;
         }
         if (ev.kind === 'say' || ev.kind === 'name' || ev.kind === 'staff_in' || ev.kind === 'staff_sent') {
-          const sid = serverOf(source, meta);
+          // Same guard as SIGNON_DROP's dropServer above: a lookup failure
+          // must not lose the line, and must not take down the listener that
+          // also carries match_end. handleConduct and handleServerChatEvent
+          // both accept a null server.
+          let sid: number | null = null;
+          try { sid = serverOf(source, meta); } catch { /* unknown server */ }
           // Conduct alerts first, then the staff chat store. Neither is on
           // the critical path: a failure here must not take down the
           // listener that also carries match_end.
