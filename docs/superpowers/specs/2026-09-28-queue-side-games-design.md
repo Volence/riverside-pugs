@@ -14,7 +14,9 @@ recorded or shown anywhere.
 - Opt-in. Only queued players who ask for side games count.
 - Rulesets: `rotoblin_hardcore_2v2` and `rotoblin_hardcore_3v3`, as they are.
 - Teams are balanced by the site from SR and locked in game.
-- Size changes (2v2 to 3v3 and back) happen only between maps.
+- Growing (2v2 to 3v3) happens only between maps. Shrinking is handled at
+  once: a sitter subs in, or the map restarts at the smaller size, or the
+  game ends below 4 (see "When someone leaves").
 - Odd numbers rotate: the extra player sits out a map, and the longest
   sitter comes in for the longest player at each map change.
 - At 8 the side game ends immediately, mid-round, and the server is set up
@@ -65,10 +67,29 @@ Rotation at a map change: the player who has sat out longest comes in, and
 the player who has played the most consecutive maps sits out. Ties are
 broken by queue position (earlier queued plays).
 
-A game that drops below 4 (someone left the queue) finishes the current map
-if it is live, then closes. The server goes back to idle. It stays reserved
-for 3 minutes after dropping below 4, in case someone rejoins, before it is
-released.
+## When someone leaves
+
+Growing waits for the map to end, because the running game is still fair.
+Shrinking is handled at once, because the running game is already broken
+and nothing is recorded, so there is no score to protect.
+
+What counts as leaving:
+- **Disconnects but is still queued** (crash, game restart): a 90 s grace.
+  A bot covers a survivor slot; an infected team plays one short. On
+  reconnect the team lock puts them back in their slot.
+- **Leaves the queue, or the 90 s grace runs out:** gone. Someone still in
+  the server after leaving the queue is moved to spectate and dropped from
+  the roster.
+
+Then, in order:
+1. **Someone is sitting out:** the longest sitter subs into the empty slot
+   straight away, mid-round. No restart; the size does not change.
+2. **Nobody is sitting out and 4 or more remain** (for example 6 to 5):
+   the current map restarts straight away at the new size. The site
+   rebalances, execs the matching config and changes level to the same map.
+3. **3 or fewer remain:** the game ends straight away. The server stays
+   held for 3 minutes in case someone opts in or reconnects, then is closed
+   and released.
 
 ## Server lifecycle
 
@@ -84,14 +105,15 @@ New `servers.status` value: `sidegame`.
 - **Pop to match:** the side game claimed its box with the same `claimIdle`
   a match uses, so it holds the server the match would have taken anyway.
   `setupMatch` takes the `sidegame` server instead of claiming a fresh one.
+  It sends `sm_side_stop`, then runs the normal sequence (`exec pug_match`,
+  new `sv_password`, `sm_pug_match`, roster, changelevel). Connected clients
+  survive the password change and the changelevel. Anyone connected who is
+  not in the roster is kicked with "Queue match starting" (not spectated,
+  unlike a normal match).
   The one exception: if the voted campaign cannot run there (custom campaign
   not installed, or dlc4 missing), which the pool rules normally prevent,
   `setupMatch` closes the side game and falls back to `claimIdle` as today;
-  players then reconnect to the new box with the link the site already shows. It sends `sm_side_stop`, then runs the normal sequence (`exec
-  pug_match`, new `sv_password`, `sm_pug_match`, roster, changelevel).
-  Connected clients survive the password change and the changelevel.
-  Anyone connected who is not in the roster is kicked with "Queue match
-  starting" (not spectated, unlike a normal match).
+  players then reconnect to the new box with the link the site already shows.
 - **Restart-after-match** does not apply: no match ended.
 - **Close:** `sm_side_stop`, `exec secrets.cfg` (the standing password, as
   `ServerReleaser` does today), set `sm_pug_auto_track` back to 1, change
@@ -144,7 +166,9 @@ side-game bug must not be able to touch a real match.
   `PUGSIDE VOTE <token> <steamid> <campaign>`.
 - Map end (both halves done) logs `PUGSIDE MAPEND <token> <map>` so the site
   can rebalance and change level.
-- Connect and disconnect log `PUGSIDE JOIN|PART <token> <steamid>`.
+- Connect and disconnect log `PUGSIDE JOIN|PART <token> <steamid>`. The site
+  runs the 90 s reconnect grace and sends `sm_side_roster` for a sub-in;
+  the plugin moves the sub into the open slot mid-round.
 - `sm_side_stop` clears everything and removes the team lock.
 Lines go through the existing signed log channel (`pug-logauth.inc`), and
 `logParse.ts` gets a `PUGSIDE ` branch like `PUGCALL `.

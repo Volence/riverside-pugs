@@ -165,3 +165,43 @@ describe('server chat routes', () => {
     });
   });
 });
+
+describe('the drawer\'s view of a server', () => {
+  const matchOn = (state: string) => Number(db.prepare(
+    "INSERT INTO matches (season_id, state, campaign, server_id) VALUES (1, ?, 'no_mercy', ?)",
+  ).run(state, sid).lastInsertRowid);
+  const lines = async (q = '') => (await app.inject({ method: 'GET', url: `/api/mod/chat/${sid}${q}`, cookies: cookie[MOD] })).json();
+
+  it('during a live match shows that match only, and says earlier chat exists', async () => {
+    const old = matchOn('live');
+    recordSay(db, sid, { steamid: PLAYER, team: 2, scope: null, message: 'last match' });
+    db.prepare("UPDATE matches SET state = 'completed' WHERE id = ?").run(old);
+    recordSay(db, sid, { steamid: PLAYER, team: 2, scope: null, message: 'lobby' });
+    const now = matchOn('live');
+    recordSay(db, sid, { steamid: PLAYER, team: 2, scope: null, message: 'this match' });
+    const body = await lines();
+    expect(body.lines.map((l: { message: string }) => l.message)).toEqual(['this match']);
+    expect(body.currentMatchId).toBe(now);
+    expect(body.hasEarlier).toBe(true);
+    const earlier = await lines(`?before=${body.lines[0].id}`);
+    expect(earlier.lines.map((l: { message: string; matchId: number | null }) => [l.message, l.matchId])).toEqual([['last match', old], ['lobby', null]]);
+    expect(earlier.hasEarlier).toBe(false);
+  });
+
+  it('with no match shows the newest lines, as before', async () => {
+    recordSay(db, sid, { steamid: PLAYER, team: 2, scope: null, message: 'a' });
+    const body = await lines();
+    expect(body.lines.map((l: { message: string }) => l.message)).toEqual(['a']);
+    expect(body.currentMatchId).toBeNull();
+    expect(body.hasEarlier).toBe(false);
+  });
+
+  it('a live match with no chat yet still offers the earlier chat', async () => {
+    recordSay(db, sid, { steamid: PLAYER, team: 2, scope: null, message: 'lobby' });
+    matchOn('live');
+    const body = await lines();
+    expect(body.lines).toEqual([]);
+    expect(body.hasEarlier).toBe(true);
+  });
+});
+
