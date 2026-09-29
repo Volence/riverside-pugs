@@ -15,7 +15,10 @@ import { SetupChecklist } from '../components/SetupChecklist';
 import { PracticeCard } from '../components/PracticeCard';
 import type { Session } from '../hooks/useLiveState';
 
-
+/** Display only: the server's `sidegames_min_players` setting still decides
+ *  when a side game actually opens. This just controls when the checkbox
+ *  shows up. */
+const SIDE_GAME_MIN = 4;
 
 export function Play(
   { session, state, refresh }: { session: Session; state: StateSnapshot | null; refresh: () => void },
@@ -275,6 +278,7 @@ function Live(
       <QueuePanel
         count={queue.count} joined={queue.joined} players={queue.players} refresh={refresh}
         timeout={state.timeout ?? null} queueBlock={state.queueBlock ?? null} me={sessionMe}
+        sideOptIn={queue.sideOptIn} sideGame={state.sideGame ?? null}
       />
     </>
   );
@@ -338,7 +342,7 @@ export function LobbyNotice(
 }
 
 export function QueuePanel(
-  { count, joined, players, refresh, timeout = null, queueBlock = null, me = null }:
+  { count, joined, players, refresh, timeout = null, queueBlock = null, me = null, sideOptIn, sideGame = null }:
     {
       count: number; joined: boolean; players: NamedPlayer[]; refresh: () => void;
       /** A queue timeout being served; the join button is disabled until it ends. */
@@ -346,6 +350,10 @@ export function QueuePanel(
       /** A Discord step still missing; replaces the join button with the checklist. */
       queueBlock?: 'link_discord' | 'join_discord' | null;
       me?: Me | null;
+      /** Whether the viewer has opted into the side game while queued. */
+      sideOptIn?: boolean;
+      /** The unrecorded 2v2/3v3 running (or closing) while the queue fills. */
+      sideGame?: StateSnapshot['sideGame'];
     },
 ) {
   const [error, setError] = useState('');
@@ -388,6 +396,23 @@ export function QueuePanel(
       ) : (
         <button class="btn btn--block" onClick={() => act(api.joinQueue)}>Join queue</button>
       )}
+      {joined && (count >= SIDE_GAME_MIN || sideOptIn) && (
+        <label class="side-toggle">
+          <input type="checkbox" checked={!!sideOptIn}
+            onChange={(e) => act(() => api.setSideOptIn((e.target as HTMLInputElement).checked))} />
+          Play 2v2/3v3 while I wait
+        </label>
+      )}
+      {sideGame && (sideGame.youIn && sideGame.connect ? (
+        <div class="side-game">
+          <p>{sideGame.phase === 'popped' ? 'Queue popped: ready up here or in game (!ready).'
+            : sideGame.phase === 'closing' ? `Side game paused: waiting for players (${sideGame.players})`
+            : `Side game open: ${sideGame.size}v${sideGame.size}, ${sideGame.players} playing`}</p>
+          {sideGame.phase === 'running' && <ConnectPanel connect={sideGame.connect} />}
+        </div>
+      ) : (
+        <p class="side-game side-game--muted">Side game running ({sideGame.players} players)</p>
+      ))}
       {error && <p class="error">{error}</p>}
     </Panel>
   );

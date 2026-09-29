@@ -28,6 +28,7 @@ const { mockApi } = vi.hoisted(() => ({
     site: vi.fn(),
     unlinkDiscord: vi.fn(),
     endorseState: vi.fn(),
+    setSideOptIn: vi.fn(async () => {}),
   },
 }));
 
@@ -1012,6 +1013,42 @@ describe('Play', () => {
     expect(screen.getByText('dizzy')).toBeTruthy();
     expect(screen.getByText('mayhem')).toBeTruthy();
     expect(document.querySelectorAll('.slot').length).toBe(8);
+  });
+
+  describe('side game', () => {
+    const me = { steamid: '1', name: 'alice', avatar: null, status: 'active', isAdmin: false };
+
+    it('hides the toggle below 4 queued unless already opted in', () => {
+      const { rerender } = render(
+        <QueuePanel count={3} joined={true} players={[]} refresh={noop} sideOptIn={false} sideGame={null} me={me} />,
+      );
+      expect(screen.queryByRole('checkbox', { name: /2v2\/3v3 while I wait/i })).toBeNull();
+      rerender(
+        <QueuePanel count={3} joined={true} players={[]} refresh={noop} sideOptIn={true} sideGame={null} me={me} />,
+      );
+      expect(screen.getByRole('checkbox', { name: /2v2\/3v3 while I wait/i })).toBeTruthy();
+    });
+
+    it('offers the side game toggle to a queued player at 4+', async () => {
+      render(<QueuePanel count={4} joined={true} players={[]} refresh={noop} sideOptIn={false} sideGame={null} me={me} />);
+      const box = screen.getByRole('checkbox', { name: /2v2\/3v3 while I wait/i });
+      fireEvent.click(box);
+      await waitFor(() => expect(mockApi.setSideOptIn).toHaveBeenCalledWith(true));
+    });
+
+    it('shows the side game with connect details to a participant', () => {
+      render(<QueuePanel count={5} joined={true} players={[]} refresh={noop} sideOptIn={true}
+        sideGame={{ phase: 'running', size: 2, players: 5, youIn: true, connect: { host: '1.2.3.4', port: 27015, password: 'side_ab' } }} me={me} />);
+      expect(screen.getByText(/Side game open: 2v2, 5 playing/)).toBeTruthy();
+      expect(screen.getByText(/password side_ab; connect 1\.2\.3\.4:27015/)).toBeTruthy();
+    });
+
+    it('shows only a status line to someone not in it', () => {
+      render(<QueuePanel count={5} joined={true} players={[]} refresh={noop} sideOptIn={false}
+        sideGame={{ phase: 'running', size: 2, players: 4, youIn: false, connect: null }} me={me} />);
+      expect(screen.getByText(/Side game running \(4 players\)/)).toBeTruthy();
+      expect(screen.queryByText(/connect 1\.2/)).toBeNull();
+    });
   });
 });
 
