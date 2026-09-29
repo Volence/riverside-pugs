@@ -2,6 +2,10 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* The site is dark only: native widgets (an open dropdown list, scrollbars)
+ * follow suit instead of drawing white. */
+:root { color-scheme: dark; }
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -131,13 +135,14 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .xh__row select, .xh__row input[type='text'] {
   width: 100%;
   min-width: 6rem;
-  background: var(--surface-2);
+  background-color: var(--surface-2);
   color: var(--text);
   border: 1px solid var(--border);
   padding: var(--sp-2);
   font: inherit;
   font-size: var(--fs-dense);
 }
+.xh__row select { padding-right: calc(var(--sp-2) + 18px); }
 .xh__row input[type='color'] {
   width: 100%; height: 32px; padding: 2px;
   background: var(--surface-2); border: 1px solid var(--border);
@@ -161,7 +166,7 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .xh__status { margin-top: var(--sp-3); font-size: var(--fs-dense); }
 
 .xh__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); font-size: var(--fs-dense); color: var(--text-muted); }
-.xh__toolbar select { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font: inherit; font-size: var(--fs-dense); }
+.xh__toolbar select { background-color: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font: inherit; font-size: var(--fs-dense); padding-right: calc(var(--sp-2) + 18px); }
 .xh__note { margin-left: auto; }
 /* Actual size or whole screen: two chips, pressed one on, kept to the selects' height. */
 .xh__view { display: flex; gap: var(--sp-1); }
@@ -219,7 +224,7 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .hud__toolbar .btn--ghost[aria-pressed]::before { content: ''; width: 7px; height: 7px; border-radius: 50%; border: 1px solid currentColor; }
 .hud__toolbar .btn--ghost[aria-pressed='true'] { color: var(--text); border-color: var(--accent); }
 .hud__toolbar .btn--ghost[aria-pressed='true']::before { background: var(--accent); border-color: var(--accent); }
-.hud__toolbar select { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font: inherit; font-size: var(--fs-dense); }
+.hud__toolbar select { background-color: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font: inherit; font-size: var(--fs-dense); padding-right: calc(var(--sp-2) + 18px); }
 .hud__tbsep { width: 1px; align-self: stretch; background: var(--border); }
 
 /* The backing store is sized to this box every draw, 1:1, so it must never be
@@ -302,13 +307,14 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .hud__row input[type='range'] { width: 100%; accent-color: var(--accent); }
 .hud__row select, .hud__row input[type='number'] {
   width: 100%;
-  background: var(--surface-2);
+  background-color: var(--surface-2);
   color: var(--text);
   border: 1px solid var(--border);
   padding: var(--sp-2);
   font: inherit;
   font-size: var(--fs-dense);
 }
+.hud__row select { padding-right: calc(var(--sp-2) + 18px); }
 
 /* A slider with its number box: a wider last column, room for "-200". */
 .hud__row--num { grid-template-columns: 5.5rem 1fr 3.75rem; }
@@ -407,12 +413,13 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .hud__band-btn:hover { color: var(--text); }
 .hud__band--on .hud__band-chip { outline: 2px solid var(--text); }
 .hud__stylerow select {
-  background: var(--surface-2);
+  background-color: var(--surface-2);
   color: var(--text);
   border: 1px solid var(--border);
   padding: var(--sp-1) var(--sp-2);
   font: inherit;
   font-size: var(--fs-dense);
+  padding-right: calc(var(--sp-2) + 18px);
 }
 .hud__stylerow input[type='color'] { width: 40px; height: 28px; padding: 2px; background: var(--surface-2); border: 1px solid var(--border); }
 .hud__stylerow input[type='range'] { width: 100px; accent-color: var(--accent); }
@@ -690,6 +697,32 @@ input {
   font-size: var(--fs-body);
 }
 input:focus { border-color: var(--accent); }
+
+/* Every dropdown on the site, by default. Native selects rendered as the
+ * browser's white boxes, out of place on every dark panel; this gives them the
+ * site's surface, border, text and a chevron in the muted text colour. Rules
+ * further down that style a particular select set background-COLOR, never the
+ * background shorthand, or they would wipe the chevron. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--surface-2);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23958770' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--sp-2) center;
+  background-size: 10px 6px;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-1) calc(var(--sp-2) + 18px) var(--sp-1) var(--sp-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-dense);
+  cursor: pointer;
+}
+select:hover { border-color: var(--border-strong); }
+select:focus { border-color: var(--accent); }
+select:disabled { opacity: 0.5; cursor: not-allowed; }
+option, optgroup { background-color: var(--surface-2); color: var(--text); }
 
 /* ---------- tables ---------- */
 
@@ -1526,7 +1559,7 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 
 .replay__filters { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; padding: 0 var(--sp-2); }
 .replay__filter { display: inline-flex; align-items: center; gap: var(--sp-1); font-family: var(--font-label); font-size: var(--fs-dense); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
-.replay__filter select { background: rgba(21, 17, 14, 0.85); color: var(--text); border: 1px solid var(--border); padding: 2px 6px; font: inherit; text-transform: none; letter-spacing: 0; min-height: 32px; }
+.replay__filter select { background-color: rgba(21, 17, 14, 0.85); color: var(--text); border: 1px solid var(--border); padding: 2px 6px; font: inherit; text-transform: none; letter-spacing: 0; min-height: 32px; padding-right: calc(var(--sp-2) + 18px); }
 
 /* The film frame: sprocket bands either side of the stage. The stage owns
    the shape (inline aspect-ratio and max-width from the map's content box);
@@ -2030,8 +2063,9 @@ body.is-theater { overflow: hidden; }
 .admin-search, .admin-form { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-3); }
 .admin-search input, .admin-form input { flex: 1 1 12rem; min-width: 0; }
 .admin-form select, .admin-setting select {
-  background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+  background-color: var(--surface-2); color: var(--text); border: 1px solid var(--border);
   padding: var(--sp-2); font: inherit; min-height: 40px;
+  padding-right: calc(var(--sp-2) + 18px);
 }
 
 /* Button plus its Force escape hatch, on one line. */
@@ -2292,9 +2326,10 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .report { margin-top: var(--sp-4); }
 .report__form { display: grid; gap: var(--sp-3); margin-top: var(--sp-3); max-width: 36rem; }
 .report__form select, .report__form textarea {
-  background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+  background-color: var(--surface-2); color: var(--text); border: 1px solid var(--border);
   padding: var(--sp-2); font: inherit; min-height: 40px; width: 100%; box-sizing: border-box;
 }
+.report__form select { padding-right: calc(var(--sp-2) + 18px); }
 .report__form textarea { min-height: 6rem; resize: vertical; }
 
 .queue-timeout { margin-top: var(--sp-3); color: var(--loss); }
@@ -2975,7 +3010,7 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .share__field textarea:focus { border-color: var(--accent); }
 .share__check { display: flex; gap: var(--sp-2); align-items: flex-start; }
 .share__mode { border: 1px solid var(--border); padding: var(--sp-2) var(--sp-3); margin: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-.share__mode select { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font: inherit; margin-left: var(--sp-5); }
+.share__mode select { background-color: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font: inherit; margin-left: var(--sp-5); padding-right: calc(var(--sp-2) + 18px); }
 .share__mode .share__cap { margin: 0; }
 .share__cap p, .share__left p { margin: 0; }
 .share__cap ul, .share__left ul { margin: var(--sp-1) 0 0; padding-left: var(--sp-5); overflow-wrap: anywhere; }
