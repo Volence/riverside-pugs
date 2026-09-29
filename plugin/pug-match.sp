@@ -3306,6 +3306,7 @@ public void OnConfigsExecuted()
 public void OnMapStart()
 {
 	ModCall_OnMapStart();
+	StaffChat_OnMapStart();
 	// Past the finale, FinalizeMap never runs (it lives behind the MS_Live
 	// guard in Event_RoundEnd), so nothing else would advance the replay map
 	// sequence and every post-finale map would reuse one ordinal and overwrite

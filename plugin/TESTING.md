@@ -1099,6 +1099,9 @@ this task; left for the owner.
 1. **Broadcast.** `L 'sm_pug_staffsay all "Test" "hello everyone" 3'` while
    connected.
    - [ ] a colour-coded `[Staff] Test: hello everyone` line in chat: ____
+   - [x] each player it reaches hears `ui/beepclear.wav` (the only way a staff
+     line stands out: L4D1 chat has just white, green and orange): confirmed by
+     the owner on the local server 2026-09-28
 2. **Team.** `L 'sm_pug_staffsay survivors "Test" "hi survivors" 4'` (repeat
    for `infected`/`spectators`).
    - [ ] only clients on that team see it, labelled `[Staff → Survivors]` (etc): ____
