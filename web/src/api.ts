@@ -1476,7 +1476,7 @@ export const ticketAttachmentUrl = (ticketId: number, attachmentId: number): str
 
 /** One in-game /mod call on the In-game calls desk. Mirrors src/routes/modCalls.ts. */
 export interface ModCallView {
-  id: number; createdAt: string; serverName: string | null; map: string | null; matchId: number | null;
+  id: number; createdAt: string; serverId: number | null; serverName: string | null; map: string | null; matchId: number | null;
   moment: { ordinal: number; half: number; tMs: number } | null;
   reason: string; reasonLabel: string; via: 'game' | 'tv';
   caller: { steamid: string; name: string };

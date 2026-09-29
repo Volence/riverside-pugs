@@ -147,6 +147,16 @@ describe('GET /api/mod/calls', () => {
     expect((await get(MOD, '/api/mod/calls?filter=open')).json().calls.map((c: { text: string }) => c.text)).toEqual(['posted']);
     expect((await get(MOD, '/api/mod/calls?filter=all')).json().calls.map((c: { text: string }) => c.text)).toEqual(['skipped', 'posted']);
   });
+
+  it('gives each call its server id', async () => {
+    const sid = Number(db.prepare(
+      "INSERT INTO servers (name, host, port, rcon_port, rcon_password, tv_port, tv_enabled) VALUES ('Dallas', '1.2.3.4', 27015, 27015, 'x', 27020, 1)",
+    ).run().lastInsertRowid);
+    call({ server_id: sid });
+    call({ text: 'no server' });
+    const body = (await get(MOD, '/api/mod/calls?filter=all')).json();
+    expect(body.calls.map((c: { serverId: number | null }) => c.serverId)).toEqual([null, sid]);
+  });
 });
 
 describe('POST /api/mod/calls/:id/handle', () => {

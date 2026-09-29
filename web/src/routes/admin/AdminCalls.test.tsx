@@ -17,7 +17,7 @@ const call = (over: Partial<ModCallView> = {}): ModCallView => ({
   caller: { steamid: '76561198000000001', name: 'Caller One' },
   target: { kind: 'player', steamid: '76561198000000002', name: 'The Accused' },
   text: 'walls', ticketId: 5, note: '', postState: 'posted', pinged: true,
-  handledBy: null, handledAt: null, folded: [], ...over,
+  handledBy: null, handledAt: null, folded: [], serverId: 3, ...over,
 });
 
 beforeEach(() => { mockMod.calls.mockReset(); mockMod.handleCall.mockReset(); });
@@ -60,6 +60,12 @@ describe('AdminCalls', () => {
     render(<AdminCalls />);
     expect(await screen.findByText('about their team')).toBeTruthy();
     expect(screen.getByText(/Handled by Mod Person/)).toBeTruthy();
+  });
+
+  it('links each call to its server chat', async () => {
+    mockMod.calls.mockResolvedValue({ calls: [call()], discordReady: true });
+    render(<AdminCalls />);
+    expect((await screen.findByText('server chat')).getAttribute('href')).toBe('/admin/live?chat=3');
   });
 
   it('offers Mark handled on an unhandled parent only, not on a handled one or a folded call', async () => {

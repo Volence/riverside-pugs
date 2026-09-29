@@ -9,7 +9,7 @@ import { canSeeTicket, getTicketRow } from '../tickets/store.js';
 import { makeRequireMod } from './guards.js';
 
 export interface ModCallView {
-  id: number; createdAt: string; serverName: string | null; map: string | null; matchId: number | null;
+  id: number; createdAt: string; serverId: number | null; serverName: string | null; map: string | null; matchId: number | null;
   moment: { ordinal: number; half: number; tMs: number } | null;
   reason: string; reasonLabel: string; via: 'game' | 'tv';
   caller: { steamid: string; name: string };
@@ -64,7 +64,7 @@ export async function modCallRoutes(app: FastifyInstance, opts: { db: DB }): Pro
     }
     const server = c.server_id !== null ? serverName.get(c.server_id) as { name: string } | undefined : undefined;
     return {
-      id: c.id, createdAt: c.created_at, serverName: server?.name ?? null, map: c.map, matchId: c.match_id,
+      id: c.id, createdAt: c.created_at, serverId: c.server_id, serverName: server?.name ?? null, map: c.map, matchId: c.match_id,
       moment: c.map_ordinal === null || c.half === null || c.t_ms === null
         ? null : { ordinal: c.map_ordinal, half: c.half, tMs: c.t_ms },
       reason: c.reason, reasonLabel: REASON_LABELS[c.reason] ?? c.reason, via: c.via,

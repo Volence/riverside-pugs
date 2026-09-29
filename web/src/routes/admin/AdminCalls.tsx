@@ -39,6 +39,7 @@ function CallRow({ c, action }: { c: ModCallView; action?: ComponentChildren }) 
           <> · <a href={`/match/${c.matchId}?ordinal=${c.moment.ordinal}&half=${c.moment.half}&t=${c.moment.tMs}`}>replay moment</a></>
         )}
         {c.ticketId !== null && <> · <a href={ticketUrl(c.ticketId)}>ticket #{c.ticketId}</a></>}
+        {c.serverId !== null && <> · <a href={`/admin/live?chat=${c.serverId}`}>server chat</a></>}
         {action && <> {action}</>}
       </p>
       {c.text && <blockquote>{c.text}</blockquote>}
