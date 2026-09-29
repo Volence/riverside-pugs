@@ -1267,7 +1267,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         beforeLive: (rcon) => banSync.pushAll((c) => rcon.exec(c)),
         // A side game's own pop takes the box it is already holding, rather
         // than waiting on a fresh idle one.
-        takeHeld: (c, runsOn) => sideGamesRef?.takeForMatch(c, runsOn) ?? null,
+        takeHeld: (id, c, runsOn) => sideGamesRef?.takeForMatch(id, c, runsOn) ?? null,
       });
 
       // Re-arm the listener for matches that were already running when this

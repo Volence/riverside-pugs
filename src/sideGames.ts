@@ -108,6 +108,9 @@ interface Active {
    *  matchmaker requeues its players after lobbyFailed, so the resume
    *  decision waits for the stateChanged that follows). */
   poppedLobby: string | null;
+  /** The match the popped lobby became (lobbyCompleted), the only match
+   *  takeForMatch hands the box to. */
+  poppedMatch: number | null;
   resumePending: boolean;
   voteSentFor: string | null;
   closeTimer: Timer | null;
@@ -136,7 +139,7 @@ export class SideGames {
       stateChanged: () => { this.sync(); this.maybeSendVote(); },
       lobbyStarted: (id, players) => this.onPop(id, players),
       lobbyFailed: (id) => this.onLobbyFailed(id),
-      lobbyCompleted: (id) => this.onLobbyCompleted(id),
+      lobbyCompleted: (id, matchId) => this.onLobbyCompleted(id, matchId),
     });
   }
 
@@ -217,7 +220,7 @@ export class SideGames {
     const a: Active = {
       rowId, server, token, password, phase: 'running', size, seats: [], seen: false,
       connected: new Set(), away: new Map(), gone: new Set(), satOut: new Map(), played: new Map(),
-      poppedLobby: null, resumePending: false, voteSentFor: null, closeTimer: null, handoverTimer: null,
+      poppedLobby: null, poppedMatch: null, resumePending: false, voteSentFor: null, closeTimer: null, handoverTimer: null,
     };
     a.seats = this.lineup(a, cands, size);
     this.active = a;
@@ -364,6 +367,7 @@ export class SideGames {
   private windDown(a: Active): void {
     a.phase = 'closing';
     a.poppedLobby = null;
+    a.poppedMatch = null;
     a.seats = a.seats.map((s) => ({ ...s, team: 'S' }));
     this.send(a.server, [
       this.rosterCommand(a.seats),
@@ -385,6 +389,7 @@ export class SideGames {
     a.phase = 'running';
     a.size = size;
     a.poppedLobby = null;
+    a.poppedMatch = null;
     a.voteSentFor = null;
     a.gone.clear();
     a.seats = this.lineup(a, cands, size);
@@ -444,6 +449,7 @@ export class SideGames {
     a.handoverTimer = null;
     a.phase = 'popped';
     a.poppedLobby = lobbyId;
+    a.poppedMatch = null;
     a.resumePending = false;
     a.voteSentFor = null;
     this.send(a.server, ['sm_side_popped']);
@@ -468,9 +474,10 @@ export class SideGames {
   /** The popped lobby became a match. That match should take the box through
    *  takeForMatch; if it never does (setup failed first), the side game
    *  would hold the box for good, so it is closed after HANDOVER_GRACE_MS. */
-  private onLobbyCompleted(lobbyId: string): void {
+  private onLobbyCompleted(lobbyId: string, matchId: number): void {
     const a = this.active;
     if (!a || a.phase !== 'popped' || a.poppedLobby !== lobbyId) return;
+    a.poppedMatch = matchId;
     a.handoverTimer?.cancel();
     a.handoverTimer = this.setTimer(() => {
       if (this.active === a && a.phase === 'popped' && a.poppedLobby === lobbyId) this.close('orphaned');
@@ -478,11 +485,12 @@ export class SideGames {
   }
 
   /** The pop's match takes the held box, if the campaign can run there. Only
-   *  the side game's own pop: a running or closing game is never handed to
-   *  an unrelated match (those reach it through needServer). */
-  takeForMatch(_campaign: string, runsOn: (server: ServerRow) => boolean): { server: ServerRow; firstCommands: string[] } | null {
+   *  the match the popped lobby became: a running or closing game, or an
+   *  older match retried from the pending list while this one is popped, is
+   *  never handed the box (those reach it through needServer). */
+  takeForMatch(matchId: number, _campaign: string, runsOn: (server: ServerRow) => boolean): { server: ServerRow; firstCommands: string[] } | null {
     const a = this.active;
-    if (!a || a.phase !== 'popped') return null;
+    if (!a || a.phase !== 'popped' || a.poppedMatch !== matchId) return null;
     const server = getServer(this.deps.db, a.server.id);
     if (!server || !runsOn(server)) { this.close('campaign'); return null; }
     const db = this.deps.db;

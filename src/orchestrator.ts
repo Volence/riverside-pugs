@@ -73,11 +73,12 @@ export interface RealOrchestratorDeps {
   /** Where the plugin writes replay files. Empty disables replay recording on
    *  the site, the same convention as demoDir. */
   replayDir?: string;
-  /** Take a box a side game is already holding, if the campaign can run
-   *  there. Returns null when nothing is held, `runsOn` says no (the side
-   *  game closes itself in that case), or the take otherwise fails; the
-   *  caller then falls back to claimIdle. */
-  takeHeld?: (campaign: string, runsOn: (s: ServerRow) => boolean) => { server: ServerRow; firstCommands: string[] } | null;
+  /** Take a box a side game is already holding for this match (the one its
+   *  popped lobby became), if the campaign can run there. Returns null when
+   *  nothing is held for this match, `runsOn` says no (the side game closes
+   *  itself in that case), or the take otherwise fails; the caller then
+   *  falls back to claimIdle. */
+  takeHeld?: (matchId: number, campaign: string, runsOn: (s: ServerRow) => boolean) => { server: ServerRow; firstCommands: string[] } | null;
 }
 
 /** Whether this box can run the campaign: a custom one must be installed on
@@ -164,7 +165,7 @@ export class RealOrchestrator implements Orchestrator {
     // release, so the held box cannot be handed straight back.
     let rcon: RconClient | null = null;
     let heldServer: ServerRow | null = null;
-    const held = this.takeHeld?.(match.campaign, (s) => campaignRunsOn(this.db, match.campaign, s)) ?? null;
+    const held = this.takeHeld?.(matchId, match.campaign, (s) => campaignRunsOn(this.db, match.campaign, s)) ?? null;
     if (held) {
       try {
         rcon = await this.connectRcon(held.server);
