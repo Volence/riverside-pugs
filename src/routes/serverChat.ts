@@ -4,7 +4,7 @@ import type { LeaseRcon } from '../practiceLeases.js';
 import { getPlayer } from '../players.js';
 import { parseStatusPlayers } from '../practicePlayers.js';
 import { getServer, isLeased, listServers } from '../serverPool.js';
-import { listLines, liveMatchOn, type ChatLineRow } from '../serverChat.js';
+import { hasLinesBefore, listLines, listLinesBefore, listMatchLines, liveMatchOn, type ChatLineRow } from '../serverChat.js';
 import { SendLimiter, cleanChatText, sendStaffChat, MESSAGE_MAX, MESSAGE_MAX_BYTES, NAME_MAX, NAME_MAX_BYTES, type SendTarget } from '../staffChatSend.js';
 import { makeRequireMod } from './guards.js';
 
@@ -54,11 +54,23 @@ export async function serverChatRoutes(
     if (!requireMod(req, reply)) return;
     const id = serverId((req.params as { serverId: string }).serverId);
     if (id === null) return reply.code(404).send({ error: 'no such server' });
-    const q = req.query as { after?: string; limit?: string };
+    const q = req.query as { after?: string; before?: string; limit?: string };
     const after = Math.max(0, Number.parseInt(q.after ?? '0', 10) || 0);
+    const before = Math.max(0, Number.parseInt(q.before ?? '0', 10) || 0);
     const limit = Math.min(500, Math.max(1, Number.parseInt(q.limit ?? '200', 10) || 200));
     const server = getServer(db, id)!;
-    const lines: ChatLineView[] = listLines(db, id, after, limit).map((r) => ({
+    // Three reads. `before`: one page further back, any match, for Show
+    // earlier chat. `after`: what came since. Neither: the drawer's opening
+    // view, which during a live match is that match's chat only (owner,
+    // 2026-09-29: the previous match's chat on the same box was confusing).
+    const currentMatchId = liveMatchOn(db, id);
+    const rows = before > 0 ? listLinesBefore(db, id, before, limit)
+      : after > 0 ? listLines(db, id, after, limit)
+      : currentMatchId !== null ? listMatchLines(db, id, currentMatchId, limit)
+      : listLines(db, id, 0, limit);
+    const oldest = rows.length > 0 ? rows[0].id : Number.MAX_SAFE_INTEGER;
+    const hasEarlier = hasLinesBefore(db, id, before > 0 && rows.length === 0 ? before : oldest);
+    const lines: ChatLineView[] = rows.map((r) => ({
       id: r.id, at: r.at, kind: r.kind, steamid: r.steamid, name: r.name, team: r.team, scope: r.scope,
       message: r.message, matchId: r.match_id, delivered: r.delivered,
       to: r.to_kind === null ? null : {
@@ -66,7 +78,7 @@ export async function serverChatRoutes(
         name: r.to_kind === 'player' && r.to_value ? getPlayer(db, r.to_value)?.name ?? null : null,
       },
     }));
-    return { server: { id: server.id, name: server.name }, lines };
+    return { server: { id: server.id, name: server.name }, lines, currentMatchId, hasEarlier };
   });
 
   // Who is on the server right now, for the drawer's Whisper picker: a /mod

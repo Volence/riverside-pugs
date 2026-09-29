@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { Fragment } from 'preact';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { ApiError, modApi, type ChatLineView, type ChatSendBody } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { useHubEvent } from '../../hooks/useHubEvent';
@@ -22,6 +23,17 @@ export function ChatDrawer({ serverId, onPick, onClose }: {
 }) {
   const servers = useFetch((s) => modApi.chatServers(s), []);
   const [lines, setLines] = useState<ChatLineView[]>([]);
+  // Opened during a live match, the drawer shows that match only; Show
+  // earlier chat pages back from there, any match, with a divider wherever
+  // the match changes (owner, 2026-09-29).
+  const [currentMatchId, setCurrentMatchId] = useState<number | null>(null);
+  const [older, setOlder] = useState<ChatLineView[]>([]);
+  const [earlierLeft, setEarlierLeft] = useState(false);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  // Height below the viewport's top before older lines were put above it,
+  // so prepending leaves staff looking at the same line.
+  const keepFromBottom = useRef<number | null>(null);
+  const olderCount = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>({ kind: 'all' });
   const [text, setText] = useState('');
@@ -51,9 +63,12 @@ export function ChatDrawer({ serverId, onPick, onClose }: {
     const ctrl = new AbortController();
     linesAbort.current = ctrl;
     try {
-      const r = await modApi.chatLines(id, 0, ctrl.signal);
+      const r = await modApi.chatLines(id, ctrl.signal);
       if (shownId.current !== id) return; // the drawer moved to another server meanwhile
       setLines(r.lines);
+      setCurrentMatchId(r.currentMatchId ?? null);
+      // Once older pages are loaded, their own answer says what is left.
+      if (olderCount.current === 0) setEarlierLeft(r.hasEarlier === true);
       setError(null);
     } catch (err) {
       if (shownId.current !== id) return;
@@ -67,6 +82,10 @@ export function ChatDrawer({ serverId, onPick, onClose }: {
     stick.current = true;
     setMode({ kind: 'all' });
     setLines([]);
+    setOlder([]);
+    olderCount.current = 0;
+    setEarlierLeft(false);
+    setCurrentMatchId(null);
     void load();
     return () => linesAbort.current?.abort();
   }, [serverId]);
@@ -78,6 +97,39 @@ export function ChatDrawer({ serverId, onPick, onClose }: {
     const log = logRef.current;
     if (log && stick.current) log.scrollTop = log.scrollHeight;
   }, [lastId]);
+  useLayoutEffect(() => {
+    const log = logRef.current;
+    if (log && keepFromBottom.current !== null) log.scrollTop = log.scrollHeight - keepFromBottom.current;
+    keepFromBottom.current = null;
+  }, [older.length]);
+
+  // Older lines stop where the current view starts: a refresh can move that
+  // start (a match ends, a new one begins) and nothing is shown twice.
+  const firstCurrent = lines.length > 0 ? lines[0].id : Number.MAX_SAFE_INTEGER;
+  const shown = [...older.filter((o) => o.id < firstCurrent), ...lines];
+
+  const loadEarlier = async () => {
+    const id = serverId;
+    const before = shown.length > 0 ? shown[0].id : Number.MAX_SAFE_INTEGER;
+    setLoadingEarlier(true);
+    try {
+      const r = await modApi.chatEarlier(id, before, new AbortController().signal);
+      if (shownId.current !== id) return;
+      const log = logRef.current;
+      if (log) keepFromBottom.current = log.scrollHeight - log.scrollTop;
+      setOlder((o) => {
+        const next = [...r.lines, ...o];
+        olderCount.current = next.length;
+        return next;
+      });
+      setEarlierLeft(r.hasEarlier);
+    } catch {
+      if (shownId.current === id) setError('Could not load earlier chat.');
+    } finally {
+      if (shownId.current === id) setLoadingEarlier(false);
+    }
+  };
+
   const onScroll = () => {
     const log = logRef.current;
     if (log) stick.current = log.scrollHeight - log.scrollTop - log.clientHeight <= 40;
@@ -136,8 +188,18 @@ export function ChatDrawer({ serverId, onPick, onClose }: {
         <button type="button" class="chip" aria-label="Close chat" onClick={onClose}>×</button>
       </header>
       <div class="chat-log" role="log" ref={logRef} onScroll={onScroll}>
-        {lines.length === 0 && <Empty>No chat yet.</Empty>}
-        {lines.map((l) => <Line key={l.id} line={l} onName={(steamid, n) => setMode({ kind: 'player', steamid, name: n })} />)}
+        {earlierLeft && (
+          <button type="button" class="chip chat-earlier" disabled={loadingEarlier} onClick={() => { void loadEarlier(); }}>
+            Show earlier chat
+          </button>
+        )}
+        {shown.length === 0 && <Empty>{currentMatchId !== null ? 'No chat in this match yet.' : 'No chat yet.'}</Empty>}
+        {shown.map((l, i) => (
+          <Fragment key={l.id}>
+            {(i === 0 || shown[i - 1].matchId !== l.matchId) && <Divider matchId={l.matchId} />}
+            <Line line={l} onName={(steamid, n) => setMode({ kind: 'player', steamid, name: n })} />
+          </Fragment>
+        ))}
       </div>
       {error && <p class="error">{error}</p>}
       <form class="chat-send" onSubmit={(e) => { e.preventDefault(); void send(); }}>
@@ -179,6 +241,15 @@ export function ChatDrawer({ serverId, onPick, onClose }: {
         <button type="submit" disabled={sending || !text.trim() || mode.kind === 'pick'}>Send</button>
       </form>
     </aside>
+  );
+}
+
+/** Where one match's chat starts, or chat outside any match. */
+function Divider({ matchId }: { matchId: number | null }) {
+  return (
+    <div class="chat-divider" role="separator">
+      {matchId !== null ? <a href={`/match/${matchId}`}>Match #{matchId}</a> : <span>Between matches</span>}
+    </div>
   );
 }
 
