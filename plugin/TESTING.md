@@ -1067,6 +1067,11 @@ of the owner runbook.
 
 ## Staff chat (0.3.16)
 
+**Run this section against the LOCAL test server only.** `R` above is the
+live Dallas box. Here `L` is the local one:
+
+    L() { python3 /home/volence/l4d1-ds/rcon-local.py "$@"; }
+
 `sm_pug_staffsay` (the site pushing a message into the game, `src/staffChatSend.ts`)
 and `/staff` (a player's private line back to staff), both in `pug-staffchat.inc`.
 `EmitConductSay` now also carries `scope=all|team`, set by `OnClientSayCommand`
@@ -1076,8 +1081,8 @@ in `pug-modcall.inc` from whichever of `say`/`say_team` the client used.
 
 No client needed. Only with the server empty (`status` shows 0 humans).
 
-    R 'sm_pug_staffsay all "Test" "hello" 1'
-    R 'sm_pug_staffsay 76561199048276493 "Test" "hi" 2'
+    L 'sm_pug_staffsay all "Test" "hello" 1'
+    L 'sm_pug_staffsay 76561199048276493 "Test" "hi" 2'
 
 - [x] both print `staffsay delivered=0` on the console: confirmed 2026-09-28
 - [x] the server log has `PUGSTAFFSENT id=1 delivered=0` and
@@ -1091,13 +1096,13 @@ No client needed. Only with the server empty (`status` shows 0 humans).
 Needs a real client connected to the local test server. Not run as part of
 this task; left for the owner.
 
-1. **Broadcast.** `R 'sm_pug_staffsay all "Test" "hello everyone" 3'` while
+1. **Broadcast.** `L 'sm_pug_staffsay all "Test" "hello everyone" 3'` while
    connected.
    - [ ] a colour-coded `[Staff] Test: hello everyone` line in chat: ____
-2. **Team.** `R 'sm_pug_staffsay survivors "Test" "hi survivors" 4'` (repeat
+2. **Team.** `L 'sm_pug_staffsay survivors "Test" "hi survivors" 4'` (repeat
    for `infected`/`spectators`).
    - [ ] only clients on that team see it, labelled `[Staff → Survivors]` (etc): ____
-3. **Whisper.** `R 'sm_pug_staffsay <your steamid64> "Test" "hi you" 5'`.
+3. **Whisper.** `L 'sm_pug_staffsay <your steamid64> "Test" "hi you" 5'`.
    - [ ] only you see it, labelled `[Staff → you]`, plus a
      "Reply privately with /staff <message>" hint line: ____
    - [ ] `staffsay delivered=1` and a matching `PUGSTAFFSENT` line: ____
