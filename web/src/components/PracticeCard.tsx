@@ -120,7 +120,7 @@ export function PracticeCard({ signedIn }: { signedIn: boolean }) {
             )}
           </div>
           <p class="muted practice-card__need">
-            Hunter Training needs its map (222 MB). {/* target _blank: a real file, which the SPA router would otherwise swallow. */}
+            Hunter Training needs its map, an 87 MB download. {/* target _blank: a real file, which the SPA router would otherwise swallow. */}
             <a href={HUNTER_DOWNLOAD} target="_blank" rel="noopener">Get the Hunter Training map</a>, then
             restart Left 4 Dead before joining.
           </p>
