@@ -122,6 +122,7 @@ import { pruneLiveFilesSafely } from './replayPush.js';
 import { apiRoutes } from './routes/api.js';
 import { ticketRoutes } from './routes/tickets.js';
 import { modCallRoutes } from './routes/modCalls.js';
+import { serverChatRoutes } from './routes/serverChat.js';
 import { castRoutes } from './routes/cast.js';
 import { statsRoutes } from './routes/stats.js';
 import { weeklyRoutes } from './routes/weekly.js';
@@ -166,6 +167,8 @@ export interface ServerDeps {
   serverRestarter?: ServerRestarter;
   /** Tests stand in for the game servers a practice lease talks to. */
   practiceRcon?: LeaseRcon;
+  /** Staff chat sends (src/routes/serverChat.ts). Tests inject a fake. */
+  chatRcon?: LeaseRcon;
   /** Tests inject a fake box writer for releases. */
   releaseWriter?: (s: ServerRow) => TreeWriter | null;
   /** Tests inject the player count a release waits on before restarting. */
@@ -708,22 +711,25 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // practice cvar reaches the next PUG, and the lease holds its box until
   // that restart settles. Unlike the syncs below it runs in dev mode too: it
   // only ever touches a box somebody leased, and a dev database's servers are
-  // disabled or local. One short rcon connection per burst, never one held
-  // across the setup's twenty second wait (see src/rcon.ts on turns).
+  // disabled or local.
+  // One short rcon connection per burst, never one held across the setup's
+  // twenty second wait (see src/rcon.ts on turns). Shared by practice leases
+  // and staff chat.
+  const realServerRcon: LeaseRcon = async (server, commands) => {
+    const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+    try {
+      await rcon.connect();
+      const out: string[] = [];
+      for (const c of commands) out.push(await rcon.exec(c));
+      return out;
+    } finally {
+      rcon.close();
+    }
+  };
   const practiceLeases = new PracticeLeases({
     db: deps.db,
     publicUrl: deps.config.publicUrl,
-    rcon: deps.practiceRcon ?? (async (server, commands) => {
-      const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
-      try {
-        await rcon.connect();
-        const out: string[] = [];
-        for (const c of commands) out.push(await rcon.exec(c));
-        return out;
-      } finally {
-        rcon.close();
-      }
-    }),
+    rcon: deps.practiceRcon ?? realServerRcon,
     release: (serverId) => new Promise<boolean>((resolve) => {
       releaser.release(serverId, { restart: true, forceRestart: true }, resolve);
     }),
@@ -1691,6 +1697,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     chats: () => deps.reporterChats ?? reporterChats,
   });
   await app.register(modCallRoutes, { db: deps.db });
+  await app.register(serverChatRoutes, { db: deps.db, rcon: deps.chatRcon ?? realServerRcon });
   await app.register(castRoutes, { db: deps.db });
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,
