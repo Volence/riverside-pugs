@@ -3,12 +3,12 @@ import type { DB } from '../db.js';
 import type { LeaseRcon } from '../practiceLeases.js';
 import { getPlayer } from '../players.js';
 import { parseStatusPlayers } from '../practicePlayers.js';
-import { getServer, isLeased, listServers } from '../serverPool.js';
+import { getServer, isLeased, isSideHeld, listServers } from '../serverPool.js';
 import { hasLinesBefore, listLines, listLinesBefore, listMatchLines, liveMatchOn, type ChatLineRow } from '../serverChat.js';
 import { SendLimiter, cleanChatText, sendStaffChat, MESSAGE_MAX, MESSAGE_MAX_BYTES, NAME_MAX, NAME_MAX_BYTES, type SendTarget } from '../staffChatSend.js';
 import { makeRequireMod } from './guards.js';
 
-export interface ChatServerView { id: number; name: string; state: 'match' | 'practice' | 'idle' | 'offline'; lastAt: number | null }
+export interface ChatServerView { id: number; name: string; state: 'match' | 'practice' | 'side' | 'idle' | 'offline'; lastAt: number | null }
 export interface ChatLineView {
   id: number; at: number; kind: ChatLineRow['kind']; steamid: string | null; name: string | null;
   team: number | null; scope: 'all' | 'team' | null; message: string; matchId: number | null;
@@ -44,7 +44,7 @@ export async function serverChatRoutes(
       .filter((s) => s.enabled === 1 || isLeased(db, s.id))
       .map((s) => ({
         id: s.id, name: s.name,
-        state: isLeased(db, s.id) ? 'practice' : liveMatchOn(db, s.id) !== null ? 'match' : s.status === 'offline' ? 'offline' : 'idle',
+        state: isLeased(db, s.id) ? 'practice' : isSideHeld(db, s.id) ? 'side' : liveMatchOn(db, s.id) !== null ? 'match' : s.status === 'offline' ? 'offline' : 'idle',
         lastAt: (lastAt.get(s.id) as { at: number | null }).at,
       }));
     return { servers };

@@ -202,6 +202,21 @@ describe('ReleaseEngine', () => {
     expect(getServer(db, s1)!.status).toBe('offline');
   });
 
+  it('waits on an idle box a queue side game holds, and takes it once the game ends', async () => {
+    db.prepare("INSERT INTO side_games (server_id, token, password) VALUES (?, 't', 'p')").run(s1);
+    const e = engine();
+    const id = stage();
+    e.deploy(id, { targets: [s1], canary: null, balance: later, adminId: '1' });
+    await e.tick(); await e.settled();
+    expect(boxState(id, s1).state).toBe('waiting');
+    expect(boxes[s1].fs.get(A)!.toString()).toBe('A1');
+    expect(getServer(db, s1)!.status).toBe('idle');
+    expect(restarts).toEqual([]);
+    db.prepare("UPDATE side_games SET ended_at = datetime('now')").run();
+    await e.tick(); await e.settled();
+    expect(boxes[s1].fs.get(A)!.toString()).toBe('A2');
+  });
+
   it('refuses a stale plan and an undo under a newer release', async () => {
     const e = engine();
     const older = stage();
