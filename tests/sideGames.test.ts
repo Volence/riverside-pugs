@@ -419,6 +419,23 @@ describe('SideGames', () => {
     expect(t.cancelled).toBe(true);
   });
 
+  it('a re-pop onto a new lobby cancels the old lobby\'s handover timer', async () => {
+    await openWith(4);
+    q.listener.lobbyStarted!('lob_1', ids(8));
+    q.listener.lobbyCompleted!('lob_1', 7);
+    const handover = timers.filter((t) => t.ms === HANDOVER_GRACE_MS);
+    expect(handover).toHaveLength(1);
+    q.listener.lobbyStarted!('lob_2', ids(8));
+    expect(handover[0].cancelled).toBe(true);
+    // Run the stale callback anyway: it must see the lobby changed.
+    handover[0].fn();
+    await sg.settled();
+    expect(sg.view(ids(1)[0])!.phase).toBe('popped');
+    expect(openRows()).toHaveLength(1);
+    expect(released).toEqual([]);
+    expect(sg.takeForMatch('no_mercy', () => true)).not.toBeNull();
+  });
+
   it('a failed ready check that pops again at once stays popped on the new lobby', async () => {
     await openWith(5);
     q.listener.lobbyStarted!('lob_1', ids(8));
