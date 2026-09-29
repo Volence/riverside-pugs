@@ -33,7 +33,7 @@ describe('GET /api/queue', () => {
     const body = await app.inject({ method: 'GET', url: '/api/queue' }).then((r) => r.json());
     // A concrete equality check, not a substring match: it proves no extra
     // field (connect, a password, anything) sneaks into the shape at all.
-    expect(body).toEqual({ count: 0, players: [], phase: null, sideGame: null });
+    expect(body).toEqual({ count: 0, players: [], phase: null, sideGame: null, sideGamesEnabled: false });
   });
 
   it('does not leak a live match token or its derived password through the public queue', async () => {

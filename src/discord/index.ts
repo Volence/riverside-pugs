@@ -2,6 +2,7 @@ import type { Config } from '../config.js';
 import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
 import type { Hub } from '../ws.js';
+import type { SidePublicView } from '../sideGames.js';
 import { handleButton, type ControllerDeps } from './controller.js';
 import { DiscordSync, type VoiceHook } from './sync.js';
 import type { BotInteraction, BotTransport, InteractionReply, SlashCommandDef } from './transport.js';
@@ -19,7 +20,7 @@ export interface BotDeps {
   controller?: Partial<Pick<ControllerDeps, 'queueBlock' | 'banMessage' | 'sideGameView'>>;
   voice?: (transport: BotTransport) => VoiceHook;
   /** A side game currently running, or null. Absent when side games are not wired up. */
-  sideGame?: () => { size: 2 | 3 | null; players: number } | null;
+  sideGame?: () => SidePublicView | null;
   /** Filled from the server's member list for the queue gate. */
   membership?: GuildMembership;
   /** Filled from the server's voice states for the ready gate. */

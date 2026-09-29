@@ -1017,37 +1017,62 @@ describe('Play', () => {
 
   describe('side game', () => {
     const me = { steamid: '1', name: 'alice', avatar: null, status: 'active', isAdmin: false };
+    const toggle = () => screen.queryByRole('checkbox', { name: /2v2\/3v3 while I wait/i });
 
     it('hides the toggle below 4 queued unless already opted in', () => {
       const { rerender } = render(
-        <QueuePanel count={3} joined={true} players={[]} refresh={noop} sideOptIn={false} sideGame={null} me={me} />,
+        <QueuePanel count={3} joined={true} players={[]} refresh={noop} sideGamesEnabled sideOptIn={false} sideGame={null} me={me} />,
       );
-      expect(screen.queryByRole('checkbox', { name: /2v2\/3v3 while I wait/i })).toBeNull();
+      expect(toggle()).toBeNull();
       rerender(
-        <QueuePanel count={3} joined={true} players={[]} refresh={noop} sideOptIn={true} sideGame={null} me={me} />,
+        <QueuePanel count={3} joined={true} players={[]} refresh={noop} sideGamesEnabled sideOptIn={true} sideGame={null} me={me} />,
       );
-      expect(screen.getByRole('checkbox', { name: /2v2\/3v3 while I wait/i })).toBeTruthy();
+      expect(toggle()).toBeTruthy();
     });
 
     it('offers the side game toggle to a queued player at 4+', async () => {
-      render(<QueuePanel count={4} joined={true} players={[]} refresh={noop} sideOptIn={false} sideGame={null} me={me} />);
-      const box = screen.getByRole('checkbox', { name: /2v2\/3v3 while I wait/i });
-      fireEvent.click(box);
+      render(<QueuePanel count={4} joined={true} players={[]} refresh={noop} sideGamesEnabled sideOptIn={false} sideGame={null} me={me} />);
+      fireEvent.click(toggle()!);
       await waitFor(() => expect(mockApi.setSideOptIn).toHaveBeenCalledWith(true));
     });
 
+    it('with side games off the panel is the plain queue: no toggle, no side game line', () => {
+      const { container, rerender } = render(
+        <QueuePanel count={6} joined={true} players={[]} refresh={noop} sideGamesEnabled={false} sideOptIn={true}
+          sideGame={{ phase: 'running', size: 3, players: 6, youIn: false, connect: null }} me={me} />,
+      );
+      expect(toggle()).toBeNull();
+      expect(container.querySelector('.side-game')).toBeNull();
+      const off = container.innerHTML;
+      rerender(<QueuePanel count={6} joined={true} players={[]} refresh={noop} me={me} />);
+      expect(container.innerHTML).toBe(off);
+    });
+
     it('shows the side game with connect details to a participant', () => {
-      render(<QueuePanel count={5} joined={true} players={[]} refresh={noop} sideOptIn={true}
+      render(<QueuePanel count={5} joined={true} players={[]} refresh={noop} sideGamesEnabled sideOptIn={true}
         sideGame={{ phase: 'running', size: 2, players: 5, youIn: true, connect: { host: '1.2.3.4', port: 27015, password: 'side_ab' } }} me={me} />);
-      expect(screen.getByText(/Side game open: 2v2, 5 playing/)).toBeTruthy();
+      expect(screen.getByText('Side game open: 2v2, 5 in the game')).toBeTruthy();
       expect(screen.getByText(/password side_ab; connect 1\.2\.3\.4:27015/)).toBeTruthy();
     });
 
-    it('shows only a status line to someone not in it', () => {
-      render(<QueuePanel count={5} joined={true} players={[]} refresh={noop} sideOptIn={false}
-        sideGame={{ phase: 'running', size: 2, players: 4, youIn: false, connect: null }} me={me} />);
-      expect(screen.getByText(/Side game running \(4 players\)/)).toBeTruthy();
+    it('a participant sees a paused game as paused', () => {
+      render(<QueuePanel count={3} joined={true} players={[]} refresh={noop} sideGamesEnabled sideOptIn={true}
+        sideGame={{ phase: 'closing', size: null, players: 2, youIn: true, connect: { host: '1.2.3.4', port: 27015, password: 'side_ab' } }} me={me} />);
+      expect(screen.getByText('Side game paused: waiting for more players')).toBeTruthy();
       expect(screen.queryByText(/connect 1\.2/)).toBeNull();
+    });
+
+    it('shows only a phase-aware status line to someone not in it', () => {
+      const { rerender } = render(<QueuePanel count={5} joined={true} players={[]} refresh={noop} sideGamesEnabled sideOptIn={false}
+        sideGame={{ phase: 'running', size: 2, players: 4, youIn: false, connect: null }} me={me} />);
+      expect(screen.getByText('Side game running: 2v2, 4 in the game')).toBeTruthy();
+      expect(screen.queryByText(/connect 1\.2/)).toBeNull();
+      rerender(<QueuePanel count={5} joined={true} players={[]} refresh={noop} sideGamesEnabled sideOptIn={false}
+        sideGame={{ phase: 'closing', size: null, players: 2, youIn: false, connect: null }} me={me} />);
+      expect(screen.getByText('Side game paused: waiting for more players')).toBeTruthy();
+      rerender(<QueuePanel count={0} joined={true} players={[]} refresh={noop} sideGamesEnabled sideOptIn={false}
+        sideGame={{ phase: 'popped', size: null, players: 4, youIn: false, connect: null }} me={me} />);
+      expect(screen.getByText('Side game paused: the queue popped')).toBeTruthy();
     });
   });
 });

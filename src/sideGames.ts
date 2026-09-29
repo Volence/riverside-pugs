@@ -39,6 +39,12 @@ export const HANDOVER_GRACE_MS = 60_000;
 const CONFIG: Record<SideSize, string> = { 2: 'rotoblin_hardcore_2v2', 3: 'rotoblin_hardcore_3v3' };
 const FALLBACK_FIRST_MAP = 'l4d_vs_hospital01_apartment';
 
+/** The admin switch (default off). Everything that offers the opt-in reads
+ *  this, so with it off the queue looks exactly as it did before side games. */
+export function sideGamesEnabled(db: DB): boolean {
+  return getSetting(db, 'sidegames_enabled') === '1';
+}
+
 /** The part of the Matchmaker a side game reads. */
 export interface SideQueue {
   sideCandidates(): string[];
@@ -72,10 +78,14 @@ export interface SideGameDeps {
 export interface SideGameView {
   phase: 'running' | 'popped' | 'closing';
   size: SideSize | null;
+  /** Players in the game: the two teams, plus sitters on the box. */
   players: number;
   youIn: boolean;
   connect: { host: string; port: number; password: string } | null;
 }
+
+/** What everyone sees (public queue, the Discord card). */
+export type SidePublicView = Pick<SideGameView, 'phase' | 'size' | 'players'>;
 
 export interface SideLogLine {
   event: SideLogEvent;
@@ -171,7 +181,7 @@ export class SideGames {
     do { w = this.work; await w; } while (w !== this.work);
   }
 
-  private enabled(): boolean { return getSetting(this.deps.db, 'sidegames_enabled') === '1'; }
+  private enabled(): boolean { return sideGamesEnabled(this.deps.db); }
 
   private minPlayers(): number {
     return Math.max(4, Number(getSetting(this.deps.db, 'sidegames_min_players') ?? 4) || 4);
@@ -622,6 +632,12 @@ export class SideGames {
     return !!entry && entry.maps.length > 0 && entry.maps[entry.maps.length - 1].toLowerCase() === map.toLowerCase();
   }
 
+  /** Players in the game: everyone on a team, plus sitters connected to the
+   *  box. Opted-in players who never joined, or dropped, are not counted. */
+  private inGame(a: Active): number {
+    return a.seats.filter((s) => s.team !== 'S' || (!a.gone.has(s.steamid) && a.connected.has(s.steamid))).length;
+  }
+
   view(steamid: string): SideGameView | null {
     const a = this.active;
     if (!a) return null;
@@ -629,14 +645,14 @@ export class SideGames {
     return {
       phase: a.phase,
       size: a.phase === 'running' ? a.size : null,
-      players: a.seats.length,
+      players: this.inGame(a),
       youIn,
       connect: youIn ? { host: a.server.host, port: a.server.port, password: a.password } : null,
     };
   }
 
-  publicView(): { size: SideSize | null; players: number } | null {
+  publicView(): SidePublicView | null {
     const a = this.active;
-    return a ? { size: a.phase === 'running' ? a.size : null, players: a.seats.length } : null;
+    return a ? { phase: a.phase, size: a.phase === 'running' ? a.size : null, players: this.inGame(a) } : null;
   }
 }

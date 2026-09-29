@@ -69,7 +69,15 @@ describe('discord buttons', () => {
     expect(body(await press(0, 'q:leave'))).toMatch(/not in the queue/i);
   });
 
+  it('q:side from an old card while side games are off says so and opts nobody in', async () => {
+    await press(0, 'q:join');
+    const r = await press(0, 'q:side');
+    expect(mm.isSideOptedIn(IDS[0])).toBe(false);
+    expect(body(r)).toMatch(/side games are off/i);
+  });
+
   it('q:side toggles the opt-in and replies with connect details when a game is open', async () => {
+    setSetting(db, 'sidegames_enabled', '1');
     await press(0, 'q:join');
     const r1 = await press(0, 'q:side');
     expect(mm.isSideOptedIn(IDS[0])).toBe(true);
@@ -80,6 +88,7 @@ describe('discord buttons', () => {
   });
 
   it('q:side asks an unqueued player to join first', async () => {
+    setSetting(db, 'sidegames_enabled', '1');
     const r = await press(0, 'q:side');
     expect(body(r)).toMatch(/join the queue first/i);
   });
