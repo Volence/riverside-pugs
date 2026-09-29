@@ -26,18 +26,42 @@ export function ChatDrawer({ serverId, onPick, onClose }: {
   const [sending, setSending] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
 
+  // Which server the drawer shows right now, in a ref rather than the
+  // `serverId` prop: a `load` call closes over the prop as it was when the
+  // call was made, and never sees it change, so only a ref can tell a
+  // response that arrives after staff switched servers that it is stale.
+  const shownId = useRef(serverId);
+  // The in-flight /chat/:id request, if any, so switching servers again (or
+  // the same server refreshing twice) can abort the one that lost the race
+  // instead of just letting it land after being ignored.
+  const linesAbort = useRef<AbortController | null>(null);
+
   // A delivery report changes an old row, so a refresh re-reads the whole
   // window rather than only what is after the last id.
   const load = async () => {
+    const id = serverId;
+    linesAbort.current?.abort();
+    const ctrl = new AbortController();
+    linesAbort.current = ctrl;
     try {
-      const r = await modApi.chatLines(serverId, 0);
+      const r = await modApi.chatLines(id, 0, ctrl.signal);
+      if (shownId.current !== id) return; // the drawer moved to another server meanwhile
       setLines(r.lines);
       setError(null);
-    } catch {
+    } catch (err) {
+      if (shownId.current !== id) return;
+      // An abort is this request losing a race, not a failure to report.
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       setError('Could not load the chat.');
     }
   };
-  useEffect(() => { setMode({ kind: 'all' }); setLines([]); void load(); }, [serverId]);
+  useEffect(() => {
+    shownId.current = serverId;
+    setMode({ kind: 'all' });
+    setLines([]);
+    void load();
+    return () => linesAbort.current?.abort();
+  }, [serverId]);
   useHubEvent(['server_chat'], () => { void load(); });
   useEffect(() => { bottom.current?.scrollIntoView?.({ block: 'end' }); }, [lines.length]);
 

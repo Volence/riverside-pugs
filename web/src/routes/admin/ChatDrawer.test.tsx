@@ -79,6 +79,28 @@ describe('ChatDrawer', () => {
     await waitFor(() => expect(mockMod.chatSend).toHaveBeenCalledWith(3, { to: 'team', team: 3, message: 'hold' }));
   });
 
+  it('drops a late answer for a server it no longer shows', async () => {
+    let resolveThree!: (v: { server: { id: number; name: string }; lines: ChatLineView[] }) => void;
+    const threePromise = new Promise<{ server: { id: number; name: string }; lines: ChatLineView[] }>((resolve) => {
+      resolveThree = resolve;
+    });
+    mockMod.chatLines.mockImplementation((id: number) => {
+      if (id === 3) return threePromise;
+      return Promise.resolve({ server: { id: 4, name: 'Riverside #3' }, lines: [line({ id: 9, message: 'from four' })] });
+    });
+    const { rerender } = render(<ChatDrawer serverId={3} onPick={() => {}} onClose={() => {}} />);
+    rerender(<ChatDrawer serverId={4} onPick={() => {}} onClose={() => {}} />);
+    await screen.findByText('from four');
+
+    // The server-3 request, which lost the race, answers only now. Flush a
+    // macrotask so its `await` settles and its (dropped) continuation runs
+    // before asserting nothing changed on the strength of it.
+    resolveThree({ server: { id: 3, name: 'Dallas' }, lines: [line({ id: 8, message: 'from three' })] });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByText('from four')).toBeTruthy();
+    expect(screen.queryByText('from three')).toBeNull();
+  });
+
   it('shows the server error on a failed send', async () => {
     mockMod.chatLines.mockResolvedValue({ server: { id: 3, name: 'Dallas' }, lines: [] });
     const { ApiError } = await import('../../api');
