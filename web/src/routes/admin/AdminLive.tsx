@@ -9,7 +9,8 @@ import { SpectatePanel } from '../../components/SpectatePanel';
 import { useAction, type Run } from './useAction';
 import { AdminQueuePanel, AdminServersPanel, OpenMatchesPanel, RecentResultsPanel } from './MatchPanels';
 import { PracticeLeasesPanel } from './PracticeLeasesPanel';
-import { OLD_PLUGIN_REASON, SELF_STARTED_REASON, countdown, countUp, isLow, liveFromUrl, reasonText } from '../../liveBoard';
+import { ChatDrawer } from './ChatDrawer';
+import { chatFromUrl, OLD_PLUGIN_REASON, SELF_STARTED_REASON, countdown, countUp, isLow, liveFromUrl, reasonText } from '../../liveBoard';
 
 /** A safety net under the websocket, not the mechanism: a nudge lost while
  *  the socket was reconnecting must not leave a countdown wrong for long. */
@@ -53,6 +54,16 @@ export function AdminLive({ isAdmin }: { isAdmin: boolean }) {
   const panels = useAction(() => overview.reload());
   const target = useRef(liveFromUrl()).current;
 
+  const [chat, setChat] = useState<number | null>(() => chatFromUrl());
+  const openChat = (id: number | null) => {
+    setChat(id);
+    // Keep the URL shareable and the back button sane: replace, not push.
+    const q = new URLSearchParams(location.search);
+    if (id === null) q.delete('chat'); else q.set('chat', String(id));
+    const qs = q.toString();
+    history.replaceState(null, '', `${location.pathname}${qs ? `?${qs}` : ''}`);
+  };
+
   // Two requests, two independent halves of the page. They used to share one
   // gate, so a failing board took Abort and every panel below it down with it
   // even though their own request had answered.
@@ -65,7 +76,7 @@ export function AdminLive({ isAdmin }: { isAdmin: boolean }) {
             <Panel><Empty>No match is running.</Empty></Panel>
           ) : board.data.matches.map((m) => (
             <MatchCard key={m.id} match={m} elapsedS={elapsedS} holdMaxMinutes={board.data.holdMaxMinutes}
-              lowAlertSeconds={board.data.lowAlertSeconds} reload={live.reload} isTarget={m.id === target} />
+              lowAlertSeconds={board.data.lowAlertSeconds} reload={live.reload} isTarget={m.id === target} onChat={openChat} />
           ))}
         </>
       ) : live.error ? (
@@ -85,19 +96,21 @@ export function AdminLive({ isAdmin }: { isAdmin: boolean }) {
           <OpenMatchesPanel open={overview.data.open} busy={panels.busy} run={panels.run} />
           <div class="admin-split admin-split--even">
             <AdminServersPanel servers={overview.data.servers} busy={panels.busy} run={panels.run}
-              health={overview.data.captureHealth} canManage={isAdmin} />
+              health={overview.data.captureHealth} canManage={isAdmin} onChat={openChat} />
             <AdminQueuePanel queue={overview.data.queue} busy={panels.busy} run={panels.run} />
           </div>
           <RecentResultsPanel data={overview.data} busy={panels.busy} run={panels.run} />
         </>
       )}
+
+      {chat !== null && <ChatDrawer serverId={chat} onPick={openChat} onClose={() => openChat(null)} />}
     </div>
   );
 }
 
-function MatchCard({ match: m, elapsedS, holdMaxMinutes, lowAlertSeconds, reload, isTarget }: {
+function MatchCard({ match: m, elapsedS, holdMaxMinutes, lowAlertSeconds, reload, isTarget, onChat }: {
   match: LiveBoardMatch; elapsedS: number; holdMaxMinutes: number; lowAlertSeconds: number;
-  reload: () => void; isTarget: boolean;
+  reload: () => void; isTarget: boolean; onChat: (id: number) => void;
 }) {
   // The error is per card, so a failure shows on the match it happened to.
   // Busy is per PLAYER: an rcon call can take the whole rcon timeout against
@@ -128,6 +141,7 @@ function MatchCard({ match: m, elapsedS, holdMaxMinutes, lowAlertSeconds, reload
     <section class={`panel live-card${isTarget ? ' is-target' : ''}`} ref={el}>
       <header class="live-card__line">
         <h3><a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)}</h3>
+        {m.server && <button type="button" class="chip" onClick={() => onChat(m.server!.id)}>Chat</button>}
         <span class="muted">{m.map ? mapName(m.map) : 'no map yet'}</span>
         <span class={`admin-status admin-status--${m.state === 'live' ? 'idle' : 'reserved'}`}>
           {m.state === 'waiting' ? 'waiting for a server' : m.state}

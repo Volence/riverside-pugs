@@ -47,3 +47,10 @@ export const liveFromUrl = (): number | null => {
   const id = raw === null ? NaN : Number(raw);
   return Number.isInteger(id) && id > 0 ? id : null;
 };
+
+/** The server whose chat drawer ?chat= asks for, from a link on a mod call
+ *  card, the admin feed, or In-game calls. */
+export function chatFromUrl(search: string = typeof location === 'undefined' ? '' : location.search): number | null {
+  const v = new URLSearchParams(search).get('chat');
+  return v !== null && /^\d{1,6}$/.test(v) ? Number(v) : null;
+}

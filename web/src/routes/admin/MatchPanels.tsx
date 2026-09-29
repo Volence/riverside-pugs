@@ -61,12 +61,15 @@ export function CaptureHealthLine({ health }: { health: CaptureHealth }) {
   );
 }
 
-export function AdminServersPanel({ servers, busy, run, health, canManage = true }: {
+export function AdminServersPanel({ servers, busy, run, health, canManage = true, onChat = () => {} }: {
   servers: AdminOverview['servers']; busy: boolean; run: Run; health?: CaptureHealth;
   /** Server controls (pool, restart, SourceTV, log signing, idle, admin sync)
    *  stay admin only (owner ruling 2026-09-28); a moderator sees the same
    *  rows, read only, plus everything else on the Live desk. */
   canManage?: boolean;
+  /** Opens the chat drawer on this server. Not a server control, so it shows
+   *  for a moderator and an admin alike. */
+  onChat?: (id: number) => void;
 }) {
   return (
     <Panel class="panel--table">
@@ -78,7 +81,7 @@ export function AdminServersPanel({ servers, busy, run, health, canManage = true
           <tbody>
             {servers.map((s) => (
               <tr key={s.id} class={s.enabled === 1 ? undefined : 'is-dim'}>
-                <td>{s.name} <span class="muted mono">{s.host}:{s.port}</span></td>
+                <td>{s.name} <span class="muted mono">{s.host}:{s.port}</span>{' '}<button type="button" class="chip" onClick={() => onChat(s.id)}>Chat</button></td>
                 <td>
                   {/* A leased box is 'idle' in status only (a lease is a
                       row, not a status), so the lease speaks for it here. */}

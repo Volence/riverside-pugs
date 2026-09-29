@@ -3,13 +3,14 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import type { LiveBoard, LiveBoardPlayer, LiveBoardStatus, LiveBoardReason } from '../../api';
 import { ConfirmHost } from '../../components/Confirm';
 
-const { mockAdmin } = vi.hoisted(() => ({
+const { mockAdmin, mockMod } = vi.hoisted(() => ({
   mockAdmin: { live: vi.fn(), overview: vi.fn(), leaveClock: vi.fn(), abortMatch: vi.fn() },
+  mockMod: { chatServers: vi.fn(), chatLines: vi.fn(), chatSend: vi.fn() },
 }));
 
 vi.mock('../../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api')>();
-  return { ...actual, adminApi: { ...actual.adminApi, ...mockAdmin } };
+  return { ...actual, adminApi: { ...actual.adminApi, ...mockAdmin }, modApi: { ...actual.modApi, ...mockMod } };
 });
 
 const { AdminLive } = await import('./AdminLive');
@@ -59,6 +60,7 @@ const openMatch = () => ({
 
 beforeEach(() => {
   for (const fn of Object.values(mockAdmin)) fn.mockReset();
+  for (const fn of Object.values(mockMod)) fn.mockReset();
   mockAdmin.live.mockResolvedValue(board());
   mockAdmin.overview.mockResolvedValue(emptyOverview);
   mockAdmin.leaveClock.mockResolvedValue({ ok: true, reply: 'PUGOK leave' });
@@ -340,5 +342,18 @@ describe('the live board', () => {
     expect(screen.queryByRole('button', { name: 'Take out' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Set idle' })).toBeNull();
     expect(screen.getByText('in pool')).toBeTruthy();
+  });
+
+  it('opens the chat drawer from a server row and from ?chat=', async () => {
+    // same overview mock as the other render tests, one server with id 1
+    mockAdmin.overview.mockResolvedValue({
+      ...emptyOverview,
+      servers: [{ id: 1, name: 'Dallas', host: '1.2.3.4', port: 27015, status: 'live', enabled: 1, tvEnabled: 0, tvPort: null, tvPassword: null }],
+    });
+    mockMod.chatServers.mockResolvedValue({ servers: [{ id: 1, name: 'Dallas', state: 'match', lastAt: null }] });
+    mockMod.chatLines.mockResolvedValue({ server: { id: 1, name: 'Dallas' }, lines: [] });
+    render(<AdminLive isAdmin />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Chat' }))[0]);
+    expect(await screen.findByRole('complementary', { name: 'Server chat' })).toBeTruthy();
   });
 });
