@@ -93,9 +93,10 @@ A player's first `/staff` message in 10 minutes also posts one quiet line to the
   SteamID). 404 for an unknown server.
 - `POST /api/mod/chat/:serverId`, body `{ to: 'all' } | { to: 'team', team: 1 | 2 | 3 } | { to:
   'player', steamid }` plus `message` on all three:
-  - message: `;`, `"` and line breaks stripped, trimmed, 1-190 characters after stripping (400 if
+  - message: `;`, `"` and line breaks stripped, trimmed, 1-190 characters and at most 180 UTF-8 bytes after stripping, cut on whole characters (400 if
     empty after stripping, or if `to` and its fields do not match one of the three shapes);
-  - staff name: the sender's site name with the same stripping, capped at 32;
+  - staff name: the sender's site name with the same stripping, capped at 32 characters and 48 bytes (the engine and
+    plugin buffers count bytes, so a Cyrillic or CJK line could otherwise overflow them);
   - rate limit 5 sends per 10 s per staff member (429 past it);
   - row stored first (delivered null), then `sm_pug_staffsay <to> "<name>" "<message>" <id>` over
     rcon. `staffSayCommand` (`src/staffChatSend.ts`) cleans the name and message again itself, and

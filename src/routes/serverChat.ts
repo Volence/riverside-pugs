@@ -4,7 +4,7 @@ import type { LeaseRcon } from '../practiceLeases.js';
 import { getPlayer } from '../players.js';
 import { getServer, isLeased, listServers } from '../serverPool.js';
 import { listLines, liveMatchOn, type ChatLineRow } from '../serverChat.js';
-import { SendLimiter, cleanChatText, sendStaffChat, MESSAGE_MAX, NAME_MAX, type SendTarget } from '../staffChatSend.js';
+import { SendLimiter, cleanChatText, sendStaffChat, MESSAGE_MAX, MESSAGE_MAX_BYTES, NAME_MAX, NAME_MAX_BYTES, type SendTarget } from '../staffChatSend.js';
 import { makeRequireMod } from './guards.js';
 
 export interface ChatServerView { id: number; name: string; state: 'match' | 'practice' | 'idle' | 'offline'; lastAt: number | null }
@@ -68,7 +68,7 @@ export async function serverChatRoutes(app: FastifyInstance, opts: { db: DB; rco
     const id = serverId((req.params as { serverId: string }).serverId);
     if (id === null) return reply.code(404).send({ error: 'no such server' });
     const body = (req.body ?? {}) as { to?: unknown; team?: unknown; steamid?: unknown; message?: unknown };
-    const message = cleanChatText(body.message, MESSAGE_MAX);
+    const message = cleanChatText(body.message, MESSAGE_MAX, MESSAGE_MAX_BYTES);
     if (!message) return reply.code(400).send({ error: 'Type a message.' });
     let target: SendTarget;
     if (body.to === 'all') target = { to: 'all' };
@@ -76,7 +76,7 @@ export async function serverChatRoutes(app: FastifyInstance, opts: { db: DB; rco
     else if (body.to === 'player' && typeof body.steamid === 'string' && /^\d{17}$/.test(body.steamid)) target = { to: 'player', steamid: body.steamid };
     else return reply.code(400).send({ error: 'Pick who the message is for.' });
     if (!limiter.allow(me)) return reply.code(429).send({ error: 'Slow down: 5 messages per 10 seconds.' });
-    const name = cleanChatText(getPlayer(db, me)?.name ?? '', NAME_MAX) || 'Staff';
+    const name = cleanChatText(getPlayer(db, me)?.name ?? '', NAME_MAX, NAME_MAX_BYTES) || 'Staff';
     const r = await sendStaffChat(db, rcon, { serverId: id, sentBy: me, name, target, message });
     if (!r.ok) return reply.code(502).send({ error: r.error, id: r.id });
     return { ok: true, id: r.id };

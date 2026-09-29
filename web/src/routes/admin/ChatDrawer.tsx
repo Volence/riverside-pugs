@@ -126,7 +126,7 @@ export function ChatDrawer({ serverId, onPick, onClose }: {
             </select>
           </label>
         )}
-        <input aria-label="Message" maxLength={190} value={text}
+        <input aria-label="Message" maxLength={180} value={text}
           onInput={(e) => setText((e.target as HTMLInputElement).value)} />
         <button type="submit" disabled={sending || !text.trim()}>Send</button>
       </form>
