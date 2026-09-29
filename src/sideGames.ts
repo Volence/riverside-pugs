@@ -119,6 +119,10 @@ interface Active {
 
 export class SideGames {
   private active: Active | null = null;
+  /** Set while sync() works through the queue: roster pushes and config
+   *  execs are gathered here and sent as one batch at the end, so two
+   *  leavers in one change restart the map at most once. */
+  private batch: { exec: boolean; roster: boolean } | null = null;
   private work: Promise<void> = Promise.resolve();
   private retryAfter = 0;
   private readonly now: () => number;
@@ -192,15 +196,22 @@ export class SideGames {
       else a.seats = cands.map((steamid) => ({ steamid, team: 'S' }));
       return;
     }
-    for (const s of a.seats.map((x) => x.steamid)) {
-      if (!cands.includes(s)) this.gone(a, s, 'left');
-      if (a.phase !== 'running') return;
+    const batch = { exec: false, roster: false };
+    this.batch = batch;
+    try {
+      for (const s of a.seats.map((x) => x.steamid)) {
+        if (!cands.includes(s)) this.gone(a, s, 'left');
+        if (a.phase !== 'running') return;
+      }
+      const added = cands.filter((c) => !a.seats.some((s) => s.steamid === c));
+      if (added.length) {
+        a.seats = [...a.seats, ...added.map((steamid) => ({ steamid, team: 'S' as const }))];
+        this.pushRoster(a);
+      }
+    } finally {
+      this.batch = null;
     }
-    const added = cands.filter((c) => !a.seats.some((s) => s.steamid === c));
-    if (added.length) {
-      a.seats = [...a.seats, ...added.map((steamid) => ({ steamid, team: 'S' as const }))];
-      this.pushRoster(a);
-    }
+    if (batch.roster) this.pushRoster(a, batch.exec);
   }
 
   private maybeOpen(cands: string[]): void {
@@ -280,8 +291,16 @@ export class SideGames {
     return `sm_side_roster ${seats.map((s) => `"${s.steamid}:${s.team}"`).join(' ')}`;
   }
 
-  private pushRoster(a: Active): void {
-    this.send(a.server, [this.rosterCommand(a.seats)]);
+  /** Push the roster, after re-execing the size's config when `exec` (the
+   *  config ends in sm_restartmap, so that restarts the map). Inside sync()
+   *  this only marks the batch. */
+  private pushRoster(a: Active, exec = false): void {
+    if (this.batch) {
+      this.batch.roster = true;
+      this.batch.exec ||= exec;
+      return;
+    }
+    this.send(a.server, [...(exec ? [`exec ${CONFIG[a.size]}`] : []), this.rosterCommand(a.seats)]);
     this.deps.broadcast();
   }
 
@@ -355,11 +374,12 @@ export class SideGames {
       this.pushRoster(a);
       return;
     }
+    // Only a new size re-execs the config (which restarts the map); the same
+    // size, when nobody on the bench could sub, is a roster push.
+    const resized = action.size !== a.size;
     a.size = action.size;
     a.seats = this.relineup(a, action.size);
-    // The config ends in sm_restartmap: this restarts the map at the new size.
-    this.send(a.server, [`exec ${CONFIG[action.size]}`, this.rosterCommand(a.seats)]);
-    this.deps.broadcast();
+    this.pushRoster(a, resized);
   }
 
   /** Under 4: stop the game at once but hold the box for CLOSE_GRACE_MS, in
