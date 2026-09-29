@@ -1507,6 +1507,8 @@ export const modApi = {
   chatLines: (serverId: number, after: number, signal?: AbortSignal) =>
     get<{ server: { id: number; name: string }; lines: ChatLineView[] }>(`/api/mod/chat/${serverId}?after=${after}`, signal),
   chatSend: (serverId: number, body: ChatSendBody) => post<{ ok: true; id: number }>(`/api/mod/chat/${serverId}`, body),
+  /** Humans on the server right now (rcon status), for the Whisper picker. */
+  chatPlayers: (serverId: number) => get<{ players: { steamid: string; name: string }[] }>(`/api/mod/chat/${serverId}/players`),
   tickets: (filter: 'open' | 'mine' | 'closed', signal?: AbortSignal) =>
     get<{ tickets: TicketSummary[]; counts: TicketCounts }>(`/api/mod/tickets?filter=${filter}`, signal),
   ticket: (id: number, signal?: AbortSignal) => get<TicketDetail>(`/api/mod/tickets/${id}`, signal),

@@ -104,6 +104,8 @@ A player's first `/staff` message in 10 minutes also posts one quiet line to the
     target can never reach rcon even if a caller skipped the route's own checks;
   - an rcon failure, or an "Unknown command" reply from an old plugin, sets delivered = -1 and
     answers 502 with an error string; nothing is retried.
+  - every stored send, good or failed, sends the staff-only `server_chat` hub event, so
+    all open drawers show the row; a failure never overwrites a delivery count that already came back.
 
 ### 5. Web: UI
 
@@ -112,7 +114,10 @@ A player's first `/staff` message in 10 minutes also posts one quiet line to the
   them on each `server_chat` hub event (a delivery report changes an old row).
 - Lines are coloured by team; `/staff` messages show as "to staff" with a distinct style; staff sends
   show who sent them, where to, and the delivered count.
-- Send box with All / Team ▾ / Whisper. Clicking a name switches to Whisper for that player.
+- Send box with All / Team ▾ / Whisper. Clicking a name switches to Whisper for that player;
+  "Whisper..." in the Send to list reads `GET /api/mod/chat/:serverId/players` (rcon `status`, humans
+  with a SteamID64; 502 when the server cannot be reached) and lists who is on the server now, so a
+  /mod caller, a reported player or someone only on voice can be whispered without a chat line.
 - The mod call Discord card gets a "Server chat" link button, and the In-game calls page a "server
   chat" link, both to `/admin/live?chat=<serverId>`. The admin feed line for `/staff` links there too.
 - Moderators see the Live desk with the server controls hidden (read-only values instead).

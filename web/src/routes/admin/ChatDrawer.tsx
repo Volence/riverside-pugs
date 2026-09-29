@@ -7,7 +7,9 @@ import { Empty } from '../../components/bits';
 const TEAM_CLASS: Record<number, string> = { 1: 'chat-line--spec', 2: 'chat-line--surv', 3: 'chat-line--inf' };
 const TEAM_NAME: Record<string, string> = { '1': 'Spectators', '2': 'Survivors', '3': 'Infected' };
 
-type Mode = { kind: 'all' } | { kind: 'team'; team: 1 | 2 | 3 } | { kind: 'player'; steamid: string; name: string };
+type Mode = { kind: 'all' } | { kind: 'team'; team: 1 | 2 | 3 } | { kind: 'player'; steamid: string; name: string }
+  | { kind: 'pick' };
+type Roster = { state: 'loading' } | { state: 'ready'; players: { steamid: string; name: string }[] } | { state: 'error'; error: string };
 
 /**
  * The Live board's chat drawer: one server's chat, live, and a box that sends
@@ -24,6 +26,7 @@ export function ChatDrawer({ serverId, onPick, onClose }: {
   const [mode, setMode] = useState<Mode>({ kind: 'all' });
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [roster, setRoster] = useState<Roster>({ state: 'loading' });
   const logRef = useRef<HTMLDivElement>(null);
   // Whether the log sat at (or within 40px of) the bottom as of the last
   // scroll. Only then does a new line pull it down: staff scrolled up to read
@@ -80,9 +83,23 @@ export function ChatDrawer({ serverId, onPick, onClose }: {
     if (log) stick.current = log.scrollHeight - log.scrollTop - log.clientHeight <= 40;
   };
 
+  // "Whisper...": a /mod caller, a reported player or someone only on voice
+  // has no chat line to click, so list who is on the server now.
+  const pickPlayer = async () => {
+    const id = serverId;
+    setMode({ kind: 'pick' });
+    setRoster({ state: 'loading' });
+    try {
+      const r = await modApi.chatPlayers(id);
+      if (shownId.current === id) setRoster({ state: 'ready', players: r.players });
+    } catch (err) {
+      if (shownId.current === id) setRoster({ state: 'error', error: err instanceof ApiError ? err.message : 'Could not load the players.' });
+    }
+  };
+
   const send = async () => {
     const message = text.trim();
-    if (!message) return;
+    if (!message || mode.kind === 'pick') return;
     const body: ChatSendBody = mode.kind === 'all' ? { to: 'all', message }
       : mode.kind === 'team' ? { to: 'team', team: mode.team, message }
       : { to: 'player', steamid: mode.steamid, message };
@@ -103,7 +120,7 @@ export function ChatDrawer({ serverId, onPick, onClose }: {
     }
   };
 
-  const modeValue = mode.kind === 'team' ? `team:${mode.team}` : mode.kind;
+  const modeValue = mode.kind === 'team' ? `team:${mode.team}` : mode.kind === 'pick' ? 'whisper' : mode.kind;
   return (
     <aside class="chat-drawer" aria-label="Server chat">
       <header class="chat-drawer__head">
@@ -135,18 +152,31 @@ export function ChatDrawer({ serverId, onPick, onClose }: {
             <select aria-label="Send to" value={modeValue}
               onChange={(e) => {
                 const v = (e.target as HTMLSelectElement).value;
+                if (v === 'whisper') { void pickPlayer(); return; }
                 setMode(v === 'all' ? { kind: 'all' } : { kind: 'team', team: Number(v.split(':')[1]) as 1 | 2 | 3 });
               }}>
               <option value="all">All</option>
               <option value="team:2">Survivors</option>
               <option value="team:3">Infected</option>
               <option value="team:1">Spectators</option>
+              <option value="whisper">Whisper...</option>
             </select>
           </label>
         )}
+        {mode.kind === 'pick' && (
+          <div class="chat-pick" aria-label="Whisper to">
+            {roster.state === 'loading' && <span class="muted">Loading players...</span>}
+            {roster.state === 'error' && <span class="error">{roster.error}</span>}
+            {roster.state === 'ready' && roster.players.length === 0 && <span class="muted">Nobody is on the server.</span>}
+            {roster.state === 'ready' && roster.players.map((p) => (
+              <button key={p.steamid} type="button" class="chip"
+                onClick={() => setMode({ kind: 'player', steamid: p.steamid, name: p.name })}>{p.name}</button>
+            ))}
+          </div>
+        )}
         <input aria-label="Message" maxLength={180} value={text}
           onInput={(e) => setText((e.target as HTMLInputElement).value)} />
-        <button type="submit" disabled={sending || !text.trim()}>Send</button>
+        <button type="submit" disabled={sending || !text.trim() || mode.kind === 'pick'}>Send</button>
       </form>
     </aside>
   );

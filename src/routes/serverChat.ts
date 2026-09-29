@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { DB } from '../db.js';
 import type { LeaseRcon } from '../practiceLeases.js';
 import { getPlayer } from '../players.js';
+import { parseStatusPlayers } from '../practicePlayers.js';
 import { getServer, isLeased, listServers } from '../serverPool.js';
 import { listLines, liveMatchOn, type ChatLineRow } from '../serverChat.js';
 import { SendLimiter, cleanChatText, sendStaffChat, MESSAGE_MAX, MESSAGE_MAX_BYTES, NAME_MAX, NAME_MAX_BYTES, type SendTarget } from '../staffChatSend.js';
@@ -66,6 +67,26 @@ export async function serverChatRoutes(
       },
     }));
     return { server: { id: server.id, name: server.name }, lines };
+  });
+
+  // Who is on the server right now, for the drawer's Whisper picker: a /mod
+  // caller, a reported player or someone only on voice has no chat line to
+  // click. Humans with a SteamID64 only, since a whisper needs one.
+  app.get('/api/mod/chat/:serverId/players', async (req, reply) => {
+    if (!requireMod(req, reply)) return;
+    const id = serverId((req.params as { serverId: string }).serverId);
+    if (id === null) return reply.code(404).send({ error: 'no such server' });
+    let status: string;
+    try {
+      [status = ''] = await rcon(getServer(db, id)!, ['status']);
+    } catch (err) {
+      console.error(`[serverchat] status on server ${id} failed:`, err);
+      return reply.code(502).send({ error: 'Could not reach the server.' });
+    }
+    const players = parseStatusPlayers(status)
+      .filter((p): p is typeof p & { steamid64: string } => p.steamid64 !== null)
+      .map((p) => ({ steamid: p.steamid64, name: p.name }));
+    return { players };
   });
 
   app.post('/api/mod/chat/:serverId', async (req, reply) => {
