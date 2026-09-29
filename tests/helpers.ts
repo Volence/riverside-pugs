@@ -37,6 +37,32 @@ export function stubOrchestrator(): Orchestrator {
  *      rejected. Only a quoted arg survives. Emulating this is what turns the
  *      original unquoted-roster bug into a regression test.
  */
+/** The arguments a Source console command reaches a plugin with: quoted
+ *  strings kept whole (quotes dropped), and outside quotes the tokenizer's
+ *  break characters `{}()':` each stand as an argument of their own, so an
+ *  unquoted `7656...:A` becomes three. Confirmed live 2026-08-29
+ *  (sm_pug_roster) and 2026-09-29 (sm_side_roster replied roster=0). */
+export function sourceArgs(cmd: string): string[] {
+  const out: string[] = [];
+  let i = 0;
+  while (i < cmd.length) {
+    const ch = cmd[i];
+    if (/\s/.test(ch)) { i++; continue; }
+    if (ch === '"') {
+      const end = cmd.indexOf('"', i + 1);
+      out.push(cmd.slice(i + 1, end < 0 ? cmd.length : end));
+      i = end < 0 ? cmd.length : end + 1;
+      continue;
+    }
+    if ("{}()':".includes(ch)) { out.push(ch); i++; continue; }
+    let j = i;
+    while (j < cmd.length && !/\s/.test(cmd[j]) && !"{}()':\"".includes(cmd[j])) j++;
+    out.push(cmd.slice(i, j));
+    i = j;
+  }
+  return out.slice(1);
+}
+
 export function pugReply(cmd: string, dumpBody: string | ((cmd: string) => string)): string {
   const name = cmd.split(' ')[0];
   const rest = cmd.slice(name.length).trim();

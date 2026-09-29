@@ -156,7 +156,8 @@ identical so ranked balancing does not change.
 Rcon sequences (see `src/sideGames.ts` for the exact commands sent):
 - open (also a re-open after a close-grace restart): `sv_password
   "side_<token8>"`, `exec rotoblin_hardcore_{2v2|3v3}`, `sm_side_start
-  <token> <password>`, `sm_side_roster <id64>:<A|B|S> ...` (one command,
+  <token> <password>`, `sm_side_roster "<id64>:<A|B|S>" ...` (each seat quoted, since Source's
+  tokenizer splits an unquoted `id:A` on ':'; one command,
   all seats), `changelevel <map>`. The site never sends `sm_pug_auto_track`;
   the plugin itself saves, zeroes and restores `sm_pug_auto_track` for as
   long as a side game is active.

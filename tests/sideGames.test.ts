@@ -10,6 +10,7 @@ import { setMissionsDirs } from '../src/campaignRegistry.js';
 import type { LobbySnapshot } from '../src/lobby.js';
 import type { MatchmakerListener } from '../src/matchmaker.js';
 import type { SideLogEvent } from '../src/logParse.js';
+import { sourceArgs } from './helpers.js';
 import { SideGames, RECONNECT_GRACE_MS, CLOSE_GRACE_MS, HANDOVER_GRACE_MS, type SideQueue } from '../src/sideGames.js';
 
 // Two stock campaigns with chapter lists, so the finale check and the first
@@ -61,8 +62,11 @@ let s2: number;
 
 const flat = () => rconLog.flat();
 const lastRoster = () => [...flat()].reverse().find((c) => c.startsWith('sm_side_roster '))!;
-const teamOf = (roster: string, id: string) => roster.split(' ').slice(1).find((e) => e.startsWith(`${id}:`))!.slice(-1);
-const countTeam = (roster: string, t: string) => roster.split(' ').slice(1).filter((e) => e.endsWith(`:${t}`)).length;
+// Read the roster the way the plugin receives it (Source tokenizer), so an
+// unquoted seat that the engine would split on ':' fails here too.
+const seatsOf = (roster: string) => sourceArgs(roster);
+const teamOf = (roster: string, id: string) => seatsOf(roster).find((e) => e.startsWith(`${id}:`))!.slice(-1);
+const countTeam = (roster: string, t: string) => seatsOf(roster).filter((e) => e.endsWith(`:${t}`)).length;
 const fire = (ms: number) => { for (const t of timers.filter((x) => x.ms === ms && !x.cancelled)) { t.cancelled = true; t.fn(); } };
 const log = (event: SideLogEvent, extra: { steamid?: string; map?: string; campaign?: string; token?: string } = {}) =>
   sg.onLog({ event, token: extra.token ?? token(), steamid: extra.steamid ?? null, map: extra.map ?? null, campaign: extra.campaign ?? null });
@@ -144,13 +148,24 @@ describe('SideGames', () => {
     expect(openRows()).toMatchObject([{ server_id: s2 }]);
   });
 
+  it('quotes every seat, so the roster survives the Source tokenizer', async () => {
+    // Unquoted, `id:A` reaches the plugin as "id", ":", "A" and it replies
+    // PUGOK roster=0 (seen on the local box, 2026-09-29).
+    await openWith(5);
+    const roster = rconLog[0].find((c) => c.startsWith('sm_side_roster '))!;
+    const seats = sourceArgs(roster);
+    expect(seats).toHaveLength(5);
+    for (const seat of seats) expect(seat).toMatch(/^\d{17}:[ABS]$/);
+    expect(new Set(seats.map((x) => x.slice(0, 17)))).toEqual(new Set(ids(5)));
+  });
+
   it('seats a mid-map joiner as S at once', async () => {
     await openWith(4);
     rconLog = [];
     await openWith(5);
     expect(rconLog).toHaveLength(1);
     const roster = rconLog[0][0];
-    expect(roster.split(' ').slice(1)).toHaveLength(5);
+    expect(seatsOf(roster)).toHaveLength(5);
     expect(teamOf(roster, ids(5)[4])).toBe('S');
     expect(sg.publicView()).toEqual({ size: 2, players: 5 });
   });
