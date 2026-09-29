@@ -15,10 +15,29 @@ export type SendResult = { ok: true; id: number } | { ok: false; id: number; err
 
 export const NAME_MAX = 32;
 export const MESSAGE_MAX = 190;
+/** The engine and the plugin count bytes, not characters: PrintToChat holds
+ *  about 254 and a console command 512, and the plugin buffers name[64] and
+ *  message[256]. A Cyrillic or CJK message within 190 characters can pass all
+ *  of those, so both texts are capped in UTF-8 bytes as well. */
+export const NAME_MAX_BYTES = 48;
+export const MESSAGE_MAX_BYTES = 180;
 
-export function cleanChatText(raw: unknown, max: number): string {
+/** Cleans, then keeps whole characters (code points, never half a surrogate
+ *  pair) while both the character and the UTF-8 byte count fit. */
+export function cleanChatText(raw: unknown, maxChars: number, maxBytes: number): string {
   if (typeof raw !== 'string') return '';
-  return raw.replace(/["\r\n;]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trim();
+  const cleaned = raw.replace(/["\r\n;]/g, ' ').replace(/\s+/g, ' ').trim();
+  let out = '';
+  let chars = 0;
+  let bytes = 0;
+  for (const ch of cleaned) {
+    const b = Buffer.byteLength(ch, 'utf8');
+    if (chars + 1 > maxChars || bytes + b > maxBytes) break;
+    out += ch;
+    chars += 1;
+    bytes += b;
+  }
+  return out.trim();
 }
 
 export class SendLimiter {
@@ -46,8 +65,8 @@ export function staffSayCommand(target: SendTarget, name: string, message: strin
     throw new Error('staffSayCommand: bad SteamID64');
   }
   const to = target.to === 'all' ? 'all' : target.to === 'team' ? TEAM_WORD[target.team] : target.steamid;
-  const safeName = cleanChatText(name, NAME_MAX) || 'Staff';
-  const safeMessage = cleanChatText(message, MESSAGE_MAX);
+  const safeName = cleanChatText(name, NAME_MAX, NAME_MAX_BYTES) || 'Staff';
+  const safeMessage = cleanChatText(message, MESSAGE_MAX, MESSAGE_MAX_BYTES);
   return `sm_pug_staffsay ${to} "${safeName}" "${safeMessage}" ${sendId}`;
 }
 

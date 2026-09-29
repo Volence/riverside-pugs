@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { listLines, markDelivered } from '../src/serverChat.js';
-import { SendLimiter, cleanChatText, sendStaffChat, staffSayCommand } from '../src/staffChatSend.js';
+import {
+  SendLimiter, cleanChatText, sendStaffChat, staffSayCommand, MESSAGE_MAX, MESSAGE_MAX_BYTES, NAME_MAX, NAME_MAX_BYTES,
+} from '../src/staffChatSend.js';
 
 const P = '76561199048276493';
 const MOD = '76561199000000009';
@@ -11,13 +13,41 @@ const server = (db: DB, name: string): number => Number(db.prepare(
 
 describe('cleanChatText', () => {
   it('turns quotes, semicolons and line breaks into spaces and trims', () => {
-    expect(cleanChatText('hi"; quit\nnow', 190)).toBe('hi quit now');
-    expect(cleanChatText('  a   b  ', 190)).toBe('a b');
+    expect(cleanChatText('hi"; quit\nnow', 190, 180)).toBe('hi quit now');
+    expect(cleanChatText('  a   b  ', 190, 180)).toBe('a b');
   });
   it('caps the length after cleaning and returns empty for nothing left', () => {
-    expect(cleanChatText('x'.repeat(300), 190)).toHaveLength(190);
-    expect(cleanChatText(';;"\n', 190)).toBe('');
-    expect(cleanChatText(42, 190)).toBe('');
+    expect(cleanChatText('x'.repeat(300), 190, 999)).toHaveLength(190);
+    expect(cleanChatText(';;"\n', 190, 180)).toBe('');
+    expect(cleanChatText(42, 190, 180)).toBe('');
+  });
+});
+
+describe('cleanChatText byte caps', () => {
+  const bytes = (t: string) => Buffer.byteLength(t, 'utf8');
+  it('the caps are 190 chars / 180 bytes for a message and 32 chars / 48 bytes for a name', () => {
+    expect([MESSAGE_MAX, MESSAGE_MAX_BYTES, NAME_MAX, NAME_MAX_BYTES]).toEqual([190, 180, 32, 48]);
+  });
+  it('cuts Cyrillic (2 bytes a letter) to the byte cap', () => {
+    const m = cleanChatText('я'.repeat(190), MESSAGE_MAX, MESSAGE_MAX_BYTES);
+    expect(m).toBe('я'.repeat(90));
+    expect(cleanChatText('Ж'.repeat(40), NAME_MAX, NAME_MAX_BYTES)).toBe('Ж'.repeat(24));
+  });
+  it('cuts CJK (3 bytes a character) without splitting one', () => {
+    const m = cleanChatText('a' + '字'.repeat(100), MESSAGE_MAX, MESSAGE_MAX_BYTES);
+    expect(m).toBe('a' + '字'.repeat(59));
+    expect(bytes(m)).toBe(178);
+    expect(cleanChatText('名'.repeat(40), NAME_MAX, NAME_MAX_BYTES)).toBe('名'.repeat(16));
+  });
+  it('never splits a 4-byte character or a surrogate pair', () => {
+    const m = cleanChatText('😀'.repeat(100), MESSAGE_MAX, MESSAGE_MAX_BYTES);
+    expect(m).toBe('😀'.repeat(45));
+    expect(cleanChatText('😀'.repeat(200), 190, 9999)).toBe('😀'.repeat(190));
+  });
+  it('staffSayCommand applies the byte caps itself', () => {
+    const cmd = staffSayCommand({ to: 'all' }, 'Ж'.repeat(40), '字'.repeat(100), 1);
+    expect(cmd).toBe(`sm_pug_staffsay all "${'Ж'.repeat(24)}" "${'字'.repeat(60)}" 1`);
+    expect(bytes(cmd)).toBeLessThan(512);
   });
 });
 
@@ -49,9 +79,9 @@ describe('staffSayCommand', () => {
     expect(staffSayCommand({ to: 'all' }, ';;"\n', 'hi', 1)).toBe('sm_pug_staffsay all "Staff" "hi" 1');
   });
 
-  it('cuts a long message to 190 inside the quotes', () => {
+  it('cuts a long ASCII message to the 180-byte cap inside the quotes', () => {
     const cmd = staffSayCommand({ to: 'all' }, 'V', 'x'.repeat(300), 1);
-    expect(cmd).toBe(`sm_pug_staffsay all "V" "${'x'.repeat(190)}" 1`);
+    expect(cmd).toBe(`sm_pug_staffsay all "V" "${'x'.repeat(180)}" 1`);
   });
 
   it('throws for a player target that is not a 17-digit SteamID64', () => {
