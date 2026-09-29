@@ -811,3 +811,43 @@ describe('firstMapOf', () => {
     expect(firstMapOf(db, 'unknown')).toMatch(/^l4d_vs_/);
   });
 });
+
+describe('setupMatch with a held side-game box', () => {
+  async function build(takeHeld: ConstructorParameters<typeof RealOrchestrator>[0]['takeHeld']) {
+    const listener = new LogListener(() => {}); await listener.listen(0); cleanup.push(() => listener.close());
+    const releaser = new ServerReleaser(db, async () => {});
+    return new RealOrchestrator({ db, listener, logPublicAddress: '127.0.0.1:27500', releaser, makeRcon: (o) => o, takeHeld });
+  }
+
+  it('uses the held box and sends its first commands before exec pug_match', async () => {
+    const srv = await fakeServer(''); cleanup.push(srv.close);
+    const held = addServer(db, { name: 'held', host: '127.0.0.1', port: 27016, rconPort: srv.port, rconPassword: 'secret' });
+    addServer(db, { name: 'other', host: '127.0.0.1', port: 27017, rconPort: 1, rconPassword: 'x' });
+    const orch = await build(() => ({ server: { ...getServer(db, held)!, status: 'reserved' }, firstCommands: ['sm_side_stop abc'] }));
+    const matchId = seedMatch(db, 'no_mercy');
+    await orch.setupMatch(matchId);
+    expect(srv.cmds[0]).toBe('sm_side_stop abc');
+    expect(srv.cmds.indexOf('exec pug_match')).toBeGreaterThan(0);
+    expect(db.prepare('SELECT server_id FROM matches WHERE id = ?').get(matchId)).toEqual({ server_id: held });
+  });
+
+  it('falls back when the campaign cannot run there', async () => {
+    const srv = await fakeServer(''); cleanup.push(srv.close);
+    // The held box lacks the dlc4 mappack (has_dlc4 defaults to 0); the other has it.
+    const heldNoDlc4 = addServer(db, { name: 'held', host: '127.0.0.1', port: 27016, rconPort: 1, rconPassword: 'x' });
+    const other = addServer(db, { name: 'other', host: '127.0.0.1', port: 27017, rconPort: srv.port, rconPassword: 'secret' });
+    setHasDlc4(db, other, true);
+    // What SideGames does: hide the held box from claimIdle while it is held,
+    // ask runsOn, and on false close the game and answer null.
+    db.prepare("INSERT INTO side_games (server_id, token, password) VALUES (?, 't', 'p')").run(heldNoDlc4);
+    let asked: boolean | null = null;
+    const orch = await build((_c, runsOn) => {
+      asked = runsOn(getServer(db, heldNoDlc4)!);
+      return null;
+    });
+    const matchId = seedMatch(db, 'dead_center');
+    await orch.setupMatch(matchId);
+    expect(asked).toBe(false);
+    expect(db.prepare('SELECT server_id FROM matches WHERE id = ?').get(matchId)).toEqual({ server_id: other });
+  });
+});
