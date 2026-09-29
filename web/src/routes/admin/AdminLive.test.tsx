@@ -344,6 +344,37 @@ describe('the live board', () => {
     expect(screen.getByText('in pool')).toBeTruthy();
   });
 
+  it('a moderator gets no restart, SourceTV, log signing or admin sync controls, but keeps the rescue ones', async () => {
+    mockAdmin.overview.mockResolvedValue({
+      ...emptyOverview,
+      servers: [{
+        id: 1, name: 'Dallas', host: '1.2.3.4', port: 27015, status: 'live', enabled: 1, tvEnabled: 1, tvPort: 27020, tvPassword: 'tv',
+        restartAfterMatch: 1,
+        logAuth: { mode: 'log', hasSecret: true, counters: { ok: 1, missing: 0, badMac: 0, replay: 0, lastOkAt: null, lastFailAt: null, lastFail: null } },
+      }],
+      queue: [{ steamid: '9', name: 'queued', avatar: null }],
+    });
+    render(<AdminLive isAdmin={false} />);
+    await screen.findByText('Servers');
+    await screen.findByText('queued');
+    // Restart after match: the value, no toggle.
+    expect(screen.queryByRole('button', { name: 'Turn off' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Turn on' })).toBeNull();
+    // SourceTV: no port or password fields, no Save.
+    expect(screen.queryByLabelText('SourceTV port for Dallas')).toBeNull();
+    expect(screen.queryByLabelText('SourceTV password for Dallas')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+    // Log signing: the mode, no select and no re-push.
+    expect(screen.queryByLabelText('Log signing mode for Dallas')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Push again' })).toBeNull();
+    expect(screen.getByText('log')).toBeTruthy();
+    // Admin sync.
+    expect(screen.queryByRole('button', { name: 'Push admins to servers' })).toBeNull();
+    // Rescue controls stay: Hold on a dropped player's clock, Remove from the queue.
+    expect(within(await row('bob')).getByRole('button', { name: 'Hold' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy();
+  });
+
   it('opens the chat drawer from a server row and from ?chat=', async () => {
     // same overview mock as the other render tests, one server with id 1
     mockAdmin.overview.mockResolvedValue({
