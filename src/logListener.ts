@@ -78,7 +78,7 @@ export class LogListener {
         if (ev.kind === 'signon_drop' || ev.kind === 'entered' || ev.kind === 'player_net'
             || ev.kind === 'input_burst' || ev.kind === 'input_cap' || ev.kind === 'lilac_flag'
             || ev.kind === 'cvar_flag' || ev.kind === 'say' || ev.kind === 'name' || ev.kind === 'sourcetv'
-            || ev.kind === 'call' || ev.kind === 'staff_in' || ev.kind === 'staff_sent') {
+            || ev.kind === 'call' || ev.kind === 'staff_in' || ev.kind === 'staff_sent' || ev.kind === 'side') {
           if (fromGameServer()) this.onEvent(ev, rinfo.address, meta);
           return;
         }

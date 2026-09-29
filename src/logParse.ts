@@ -18,6 +18,10 @@ export type CvarAct = typeof CVAR_ACTS[number];
  *  a PUGCALL line is refused. */
 export const MOD_CALL_REASONS = ['cheating', 'toxicity', 'griefing', 'afk', 'english', 'broke', 'other'] as const;
 export type ModCallReason = (typeof MOD_CALL_REASONS)[number];
+/** Events emitted by the queue side games plugin (pug-sidegame.sp). */
+export const SIDE_EVENTS = ['join', 'part', 'ready', 'vote', 'mapstart', 'mapend'] as const;
+export type SideLogEvent = typeof SIDE_EVENTS[number];
+const SIDE_PLAYER_EVENTS: readonly SideLogEvent[] = ['join', 'part', 'ready', 'vote'];
 
 export interface Phase {
   state: PhaseState;
@@ -239,7 +243,11 @@ export type LogEvent =
   // still says where it came from; null from an older plugin.
   | { kind: 'call'; steamid: string; target: string; callerTeam: number | null; reason: ModCallReason;
       matchId: number | null; ordinal: number | null; half: number | null; tMs: number | null;
-      via: 'game' | 'tv'; map: string | null; text: string };
+      via: 'game' | 'tv'; map: string | null; text: string }
+  // Queue side games (plugin/pug-sidegame.sp). Token-less as far as the
+  // listener is concerned: src/sideGames.ts compares the token to the game
+  // it is running and drops anything else.
+  | { kind: 'side'; event: SideLogEvent; token: string; steamid: string | null; map: string | null; campaign: string | null };
 
 /** Parse `key=val key=val` pairs from the remainder of a PUG line. */
 /** The phase fields shared by PHASE and HEARTBEAT. Plugin team numbers are
@@ -627,6 +635,25 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     const delivered = intOf(f.delivered);
     if (sendId === null || sendId < 1 || delivered === null || delivered < 0) return null;
     return { kind: 'staff_sent', sendId, delivered };
+  }
+
+  // Queue side games (plugin/pug-sidegame.sp). Token-less as far as the
+  // listener is concerned: src/sideGames.ts compares the token to the game
+  // it is running and drops anything else.
+  if (body.startsWith('PUGSIDE ')) {
+    const head = kv(body.split(/\s+/).slice(1));
+    const event = head.event as SideLogEvent;
+    if (!(SIDE_EVENTS as readonly string[]).includes(event)) return null;
+    const token = head.token ?? '';
+    if (!/^[0-9a-f]{8,64}$/.test(token)) return null;
+    let steamid: string | null = null;
+    if ((SIDE_PLAYER_EVENTS as readonly string[]).includes(event)) {
+      steamid = steamId64Of(head.steamid ?? '');
+      if (!steamid) return null;
+    }
+    const map = head.map !== undefined && /^[A-Za-z0-9_.-]{1,64}$/.test(head.map) ? head.map : null;
+    const campaign = head.campaign !== undefined && /^[a-z0-9_]{1,64}$/.test(head.campaign) ? head.campaign : null;
+    return { kind: 'side', event, token, steamid, map, campaign };
   }
 
   // An in-game /mod call (src/modCalls.ts). Same treatment as PUGSAY: the
