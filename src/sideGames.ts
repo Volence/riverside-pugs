@@ -186,6 +186,7 @@ export class SideGames {
       // failed lobby, once its players are back in the queue, ends the pop.
       if (!a.resumePending) return;
       a.resumePending = false;
+      if (!this.enabled()) { this.close('disabled'); return; }
       const cands = this.deps.queue.sideCandidates();
       if (cands.length >= this.minPlayers()) { this.restart(a, cands); return; }
       this.send(a.server, ['sm_side_resume']);
@@ -193,6 +194,9 @@ export class SideGames {
       this.windDown(a);
       return;
     }
+    // Turned off while one runs: it ends now. A popped game is left to its
+    // pop (the match takes the box, or a failed lobby ends it just above).
+    if (!this.enabled()) { this.close('disabled'); return; }
     const cands = this.deps.queue.sideCandidates();
     if (a.phase === 'closing') {
       // Held for CLOSE_GRACE_MS after dropping under 4: back to the minimum

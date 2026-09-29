@@ -629,6 +629,44 @@ describe('SideGames', () => {
     expect(db.prepare('SELECT end_reason FROM side_games').get()).toEqual({ end_reason: 'preempted' });
   });
 
+  it('turning side games off closes a running or closing game, never a popped one', async () => {
+    await openWith(4);
+    setSetting(db, 'sidegames_enabled', '0');
+    sg.sync();
+    await sg.settled();
+    expect(released).toEqual([s1]);
+    expect(db.prepare('SELECT end_reason FROM side_games').get()).toEqual({ end_reason: 'disabled' });
+    expect(sg.publicView()).toBeNull();
+
+    setSetting(db, 'sidegames_enabled', '1');
+    await openWith(4);
+    q.candidates = ids(3);
+    sg.sync();
+    expect(sg.view(ids(1)[0])!.phase).toBe('closing');
+    setSetting(db, 'sidegames_enabled', '0');
+    sg.sync();
+    await sg.settled();
+    expect(released).toEqual([s1, s1]);
+    expect(sg.publicView()).toBeNull();
+
+    setSetting(db, 'sidegames_enabled', '1');
+    await openWith(4);
+    q.listener.lobbyStarted!('lob_1', ids(8));
+    setSetting(db, 'sidegames_enabled', '0');
+    sg.sync();
+    await sg.settled();
+    expect(released).toEqual([s1, s1]);
+    expect(sg.view(ids(1)[0])!.phase).toBe('popped');
+    // The pop fails while off: the game does not resume, it closes.
+    q.listener.lobbyFailed!('lob_1', ids(6), ids(8).slice(6));
+    q.candidates = ids(6);
+    q.listener.stateChanged!();
+    await sg.settled();
+    expect(released).toEqual([s1, s1, s1]);
+    expect(sg.publicView()).toBeNull();
+    expect(db.prepare('SELECT end_reason FROM side_games ORDER BY id DESC LIMIT 1').get()).toEqual({ end_reason: 'disabled' });
+  });
+
   it('views: connect details only for a participant', async () => {
     expect(sg.view(ids(1)[0])).toBeNull();
     expect(sg.publicView()).toBeNull();
