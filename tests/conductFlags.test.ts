@@ -15,7 +15,7 @@ const parse = (line: string) => parseLogDatagram(Buffer.from(line, 'utf8'));
 describe('PUGSAY and PUGNAME parsing', () => {
   it('reads a chat line, message last', () => {
     expect(parse(`PUGSAY steamid=${P} team=3 msg=he was on my angle`))
-      .toEqual({ kind: 'say', steamid: P, team: 3, message: 'he was on my angle' });
+      .toEqual({ kind: 'say', steamid: P, team: 3, scope: null, message: 'he was on my angle' });
   });
 
   it('reads a connect and a rename, name last', () => {
@@ -63,7 +63,7 @@ describe('canonicalise', () => {
     upsertPlayer(db, { steamid: P, name: 'zero', avatar: null }, []);
     upsertPlayer(db, { steamid: ALT, name: 'alt', avatar: null }, []);
     addAlias(db, { steamid: ALT, canonical: P, by: 'admin' });
-    expect(canonicalise(db, { kind: 'say', steamid: ALT, team: 2, message: 'x' })).toMatchObject({ steamid: P });
+    expect(canonicalise(db, { kind: 'say', steamid: ALT, team: 2, scope: null, message: 'x' })).toMatchObject({ steamid: P });
     expect(canonicalise(db, { kind: 'name', steamid: ALT, event: 'connect', name: 'x' })).toMatchObject({ steamid: P });
   });
 });
@@ -85,14 +85,14 @@ describe('handleConduct', () => {
   afterEach(() => unsubscribe());
 
   it('ignores clean chat and clean names', () => {
-    handleConduct(db, { kind: 'say', steamid: P, team: 3, message: 'he was on my angle' }, null, t0);
+    handleConduct(db, { kind: 'say', steamid: P, team: 3, scope: null, message: 'he was on my angle' }, null, t0);
     handleConduct(db, { kind: 'name', steamid: P, event: 'connect', name: 'zerovercome' }, null, t0);
     expect(posted).toEqual([]);
     expect(flags()).toEqual([]);
   });
 
   it('stores and posts a slur in chat', () => {
-    handleConduct(db, { kind: 'say', steamid: P, team: 3, message: 'nigger' }, 1, t0);
+    handleConduct(db, { kind: 'say', steamid: P, team: 3, scope: null, message: 'nigger' }, 1, t0);
     expect(posted).toEqual([{
       kind: 'conduct_flag', steamid: P, where: 'chat', text: 'nigger', slurs: ['n-word'], matchId: null, serverId: 1,
     }]);
@@ -103,7 +103,7 @@ describe('handleConduct', () => {
     db.prepare("INSERT INTO servers (id, name, host, port, rcon_port, rcon_password) VALUES (1, 'Dallas', '127.0.0.1', 27015, 27015, 'x')").run();
     db.prepare("INSERT INTO matches (id, season_id, state, campaign, server_id, token) VALUES (140, 1, 'live', 'no_mercy', 1, 'abc')").run();
     db.prepare("INSERT INTO match_players (match_id, player_id, team) VALUES (140, ?, 'b')").run(P);
-    handleConduct(db, { kind: 'say', steamid: P, team: 3, message: 'nigger' }, 1, t0);
+    handleConduct(db, { kind: 'say', steamid: P, team: 3, scope: null, message: 'nigger' }, 1, t0);
     expect(posted[0]).toMatchObject({ matchId: 140 });
   });
 
@@ -111,10 +111,10 @@ describe('handleConduct', () => {
   // still evidence and stays on the file. A post needs a quiet minute since
   // the player's last slur, so a steady stream is one post, not one a minute.
   it('posts again only after a quiet minute, and stores every line', () => {
-    handleConduct(db, { kind: 'say', steamid: P, team: 3, message: 'nigger' }, null, t0);
-    handleConduct(db, { kind: 'say', steamid: P, team: 3, message: 'faggot' }, null, at(50));
-    handleConduct(db, { kind: 'say', steamid: P, team: 3, message: 'retard' }, null, at(100));
-    handleConduct(db, { kind: 'say', steamid: P, team: 3, message: 'kys' }, null, at(170));
+    handleConduct(db, { kind: 'say', steamid: P, team: 3, scope: null, message: 'nigger' }, null, t0);
+    handleConduct(db, { kind: 'say', steamid: P, team: 3, scope: null, message: 'faggot' }, null, at(50));
+    handleConduct(db, { kind: 'say', steamid: P, team: 3, scope: null, message: 'retard' }, null, at(100));
+    handleConduct(db, { kind: 'say', steamid: P, team: 3, scope: null, message: 'kys' }, null, at(170));
     expect(posted.map((e) => (e as { text: string }).text)).toEqual(['nigger', 'kys']);
     expect(flags()).toHaveLength(4);
   });
