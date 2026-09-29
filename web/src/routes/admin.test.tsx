@@ -102,9 +102,10 @@ describe('Admin page', () => {
     expect(mockPeople.people).not.toHaveBeenCalled();
   });
 
-  it('does not offer the live board to a moderator', () => {
+  it('offers the live board to a moderator too (owner ruling 2026-09-28)', () => {
     renderAdmin('/admin/people', { kind: 'active', me: { ...me, isAdmin: false, isMod: true } });
-    expect(screen.queryByRole('tab', { name: 'Live' })).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Live' })).toBeTruthy();
+    // People, and nothing loaded yet: the render is on /admin/people.
     expect(mockAdmin.live).not.toHaveBeenCalled();
   });
 
@@ -611,23 +612,22 @@ describe('AdminCampaigns', () => {
 describe('the panel shell', () => {
   const asMod = { kind: 'active' as const, me: { ...me, isAdmin: false, isMod: true } };
 
-  it('lands an admin on Live and a moderator on People', async () => {
+  it('lands an admin, and a moderator too, on Live (owner ruling 2026-09-28)', async () => {
     renderAdmin('/admin');
     await waitFor(() => expect(location.pathname).toBe('/admin/live'));
     cleanup();
     renderAdmin('/admin', asMod);
-    await waitFor(() => expect(location.pathname).toBe('/admin/people'));
+    await waitFor(() => expect(location.pathname).toBe('/admin/live'));
   });
 
-  it('keeps a moderator out of the other two desks, and off their APIs', async () => {
+  it('keeps a moderator out of the other two desks, but not off Live, and off their APIs', async () => {
     renderAdmin('/admin/setup/settings', asMod);
     await waitFor(() => expect(location.pathname).toBe('/admin/people'));
     expect(mockAdmin.settings).not.toHaveBeenCalled();
     cleanup();
     renderAdmin('/admin/live', asMod);
-    await waitFor(() => expect(location.pathname).toBe('/admin/people'));
-    expect(mockAdmin.live).not.toHaveBeenCalled();
-    expect(mockAdmin.overview).not.toHaveBeenCalled();
+    await waitFor(() => expect(location.pathname).toBe('/admin/live'));
+    expect(await screen.findByText('No match is running.')).toBeTruthy();
   });
 
   // The low-allowance post in the admin feed is this link, and the card it

@@ -12,7 +12,7 @@ import { kickReason, knownOnSite } from '../practicePlayers.js';
 import { getSetting } from '../settings.js';
 import { campaignRegistry, resolveCampaignForMap } from '../campaignRegistry.js';
 import { finishedReplayBytes, type ReplaySources } from './replays.js';
-import { makeOptionalViewer, makeRequireActive, makeRequireAdmin } from './guards.js';
+import { makeOptionalViewer, makeRequireActive, makeRequireMod } from './guards.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -76,7 +76,10 @@ export async function practiceRoutes(
 ): Promise<void> {
   const { db } = opts;
   const requireActive = makeRequireActive(db);
-  const requireAdmin = makeRequireAdmin(db);
+  // The three admin-practice routes below (players, kick, leases) are open
+  // to moderators too (owner ruling 2026-09-28): practice servers are part
+  // of the Live desk they may run.
+  const requireStaff = makeRequireMod(db);
   const optionalViewer = makeOptionalViewer(db);
   const leases = opts.leases ?? null;
   // Players with a drill being built right now. The hourly count below is
@@ -283,7 +286,7 @@ export async function practiceRoutes(
     return leaseView(db, getLease(db, lease.id)!, steamid, getPlayer(db, steamid)?.is_admin === 1);
   });
 
-  /** End a lease: its owner, or any admin. */
+  /** End a lease: its owner, or any staff member (owner ruling 2026-09-28). */
   app.post('/api/practice/leases/:id/end', async (req, reply) => {
     const steamid = requireActive(req, reply);
     if (!steamid) return reply;
@@ -291,22 +294,23 @@ export async function practiceRoutes(
     const id = Number((req.params as { id: string }).id);
     const lease = Number.isInteger(id) ? getLease(db, id) : undefined;
     if (!lease) return reply.code(404).send({ error: 'No such practice server.' });
-    const isAdmin = getPlayer(db, steamid)?.is_admin === 1;
-    // A park is ownerless: only an admin ends one early, and otherwise it
+    const me = getPlayer(db, steamid);
+    const isStaff = me?.is_admin === 1 || me?.is_mod === 1;
+    // A park is ownerless: only staff ends one early, and otherwise it
     // closes itself 5 minutes after the last person leaves.
     const byOwner = lease.kind === 'drill' && lease.owner_player_id === steamid;
-    if (!byOwner && !isAdmin) {
+    if (!byOwner && !isStaff) {
       return reply.code(403).send({
         error: lease.kind === 'park'
-          ? 'Only an admin can close the Practice Park. It closes on its own 5 minutes after everyone leaves.'
-          : 'Only whoever started this drill server, or an admin, can close it.',
+          ? 'Only staff can close the Practice Park. It closes on its own 5 minutes after everyone leaves.'
+          : 'Only whoever started this drill server, or staff, can close it.',
       });
     }
     if (!leases.end(lease.id, byOwner ? 'owner' : 'admin')) {
       return reply.code(409).send({ error: 'That practice server is already closing.' });
     }
     if (!byOwner) logAdmin(db, steamid, 'practice_end', lease.id, { owner: lease.owner_player_id, kind: lease.kind });
-    return leaseView(db, getLease(db, lease.id)!, steamid, isAdmin);
+    return leaseView(db, getLease(db, lease.id)!, steamid, isStaff);
   });
 
   /**
@@ -315,7 +319,7 @@ export async function practiceRoutes(
    * practice plugin when it says, and whether each is known to the site.
    */
   app.get('/api/admin/practice/:leaseId/players', async (req, reply) => {
-    if (!requireAdmin(req, reply)) return reply;
+    if (!requireStaff(req, reply)) return reply;
     if (!leases) return reply.code(503).send({ error: 'Practice servers are not available on this site.' });
     const id = Number((req.params as { leaseId: string }).leaseId);
     if (!Number.isInteger(id) || !getLease(db, id)) return reply.code(404).send({ error: 'No such practice server.' });
@@ -338,7 +342,7 @@ export async function practiceRoutes(
    * and logged to the admin feed like any other admin action.
    */
   app.post('/api/admin/practice/:leaseId/kick', async (req, reply) => {
-    const adminId = requireAdmin(req, reply);
+    const adminId = requireStaff(req, reply);
     if (!adminId) return reply;
     if (!leases) return reply.code(503).send({ error: 'Practice servers are not available on this site.' });
     const id = Number((req.params as { leaseId: string }).leaseId);
@@ -357,7 +361,7 @@ export async function practiceRoutes(
 
   /** Every open lease, for the admin live board. */
   app.get('/api/admin/practice/leases', async (req, reply) => {
-    if (!requireAdmin(req, reply)) return reply;
+    if (!requireStaff(req, reply)) return reply;
     return { leases: adminLeaseRows(db) };
   });
 }

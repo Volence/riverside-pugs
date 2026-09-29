@@ -64,9 +64,12 @@ export const BALANCE_TABS: { key: string; label: string; path: string }[] = [
  */
 export const ADMIN_ROUTE_PATHS: readonly string[] = ['/admin', '/admin/*'];
 
-export const landingFor = (isAdmin: boolean): string => (isAdmin ? '/admin/live' : '/admin/people');
+export const landingFor = (_isAdmin: boolean): string => '/admin/live';
 export const fileUrl = (steamid: string): string => `/admin/people/${encodeURIComponent(steamid)}`;
 export const ticketUrl = (id: number | string): string => `/admin/people/tickets/${id}`;
+
+/** The desk strip: a moderator has Live and People (owner ruling 2026-09-28). */
+export const deskItems = (isAdmin: boolean) => (isAdmin ? DESKS : DESKS.filter((d) => d.key === 'live' || d.key === 'people'));
 
 const STEAMID = /^\d{17}$/;
 const TICKET = /^\d+$/;
@@ -104,9 +107,12 @@ export function parseAdminPath(path: string, opts: { isAdmin: boolean }): AdminR
     return { ...NOWHERE, desk: 'people' };
   };
 
-  // A moderator has one desk. Anything else lands on it rather than on a
-  // screen every call inside would be refused on anyway.
-  if (!opts.isAdmin) return desk === 'people' ? people() : { desk: 'people', section: 'search', param: null };
+  // A moderator has Live and People. Anything else lands on People rather
+  // than on a screen every call inside would be refused on anyway.
+  if (!opts.isAdmin) {
+    if (desk === 'live' || desk === '') return { desk: 'live', section: 'board', param: null };
+    return desk === 'people' ? people() : { desk: 'people', section: 'search', param: null };
+  }
   if (desk === 'people') return people();
   if (desk === 'setup') {
     const section = a === '' ? 'settings' : a;
@@ -141,14 +147,15 @@ export function legacyRedirect(path: string, search: string, isAdmin: boolean): 
     if (ticket !== null && /^\d+$/.test(ticket)) return ticketUrl(ticket);
     // The board reads ?live= itself, so that one is carried over rather than
     // dropped: it is the whole point of the link the admin feed posts when a
-    // dropped player is nearly out of reconnect time.
+    // dropped player is nearly out of reconnect time. A moderator reads the
+    // Live desk too, so the carry-over is not admin-only.
     const live = q.get('live');
-    if (isAdmin && live !== null && /^\d+$/.test(live)) return `/admin/live?live=${live}`;
+    if (live !== null && /^\d+$/.test(live)) return `/admin/live?live=${live}`;
     return landingFor(isAdmin);
   }
   // The People desk itself or something inside it. A prefix test alone would
   // count /admin/peoplefoo as inside.
   const inPeople = path === '/admin/people' || path.startsWith('/admin/people/');
-  if (!isAdmin && !inPeople) return '/admin/people';
+  if (!isAdmin && !(inPeople || path.startsWith('/admin/live'))) return '/admin/people';
   return null;
 }

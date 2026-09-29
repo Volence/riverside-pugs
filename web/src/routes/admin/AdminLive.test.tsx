@@ -73,12 +73,12 @@ const row = async (name: string) => (await screen.findByText(name)).closest('li'
 describe('the live board', () => {
   it('says so when nothing is running', async () => {
     mockAdmin.live.mockResolvedValue({ ...board(), matches: [] });
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     expect(await screen.findByText('No match is running.')).toBeTruthy();
   });
 
   it('shows the match line and one status per player', async () => {
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     const card = (await screen.findByText(/#81/)).closest('section') as HTMLElement;
     expect(card.textContent).toContain('Dallas');
     expect(card.textContent).toContain('412 - 380');
@@ -95,14 +95,14 @@ describe('the live board', () => {
   });
 
   it('holds a dropped player\'s clock in one click, with no dialog in the way', async () => {
-    render(<><AdminLive /><ConfirmHost /></>);
+    render(<><AdminLive isAdmin /><ConfirmHost /></>);
     fireEvent.click(within(await row('bob')).getByRole('button', { name: 'Hold' }));
     await waitFor(() => expect(mockAdmin.leaveClock).toHaveBeenCalledWith(81, '2', 'hold'));
     expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 
   it('adds five minutes', async () => {
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     fireEvent.click(within(await row('bob')).getByRole('button', { name: '+5 min' }));
     await waitFor(() => expect(mockAdmin.leaveClock).toHaveBeenCalledWith(81, '2', 'add', 300));
   });
@@ -111,7 +111,7 @@ describe('the live board', () => {
     mockAdmin.live.mockResolvedValue(board({
       teamA: [player('2', 'bob', 'a', { kind: 'dropped', sinceS: 90, remainingS: 250, held: true, holdLeftS: 1700 })],
     }));
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     const bob = await row('bob');
     expect(bob.textContent).toContain('on hold');
     expect(bob.textContent).toContain('releases itself in 28:20');
@@ -121,7 +121,7 @@ describe('the live board', () => {
   });
 
   it('asks, in the site\'s own dialog, before ending someone\'s time', async () => {
-    render(<><AdminLive /><ConfirmHost /></>);
+    render(<><AdminLive isAdmin /><ConfirmHost /></>);
     fireEvent.click(within(await row('bob')).getByRole('button', { name: 'End now' }));
     const dialog = await waitFor(() => screen.getByRole('alertdialog'));
     expect(dialog.textContent).toContain('End bob\'s reconnect time now?');
@@ -132,7 +132,7 @@ describe('the live board', () => {
   });
 
   it('lets an admin grant time to someone who is connected but has used some', async () => {
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     fireEvent.click(within(await row('frank')).getByRole('button', { name: '+5 min' }));
     await waitFor(() => expect(mockAdmin.leaveClock).toHaveBeenCalledWith(81, '6', 'add', 300));
     expect(within(await row('alice')).queryByRole('button')).toBeNull();
@@ -140,7 +140,7 @@ describe('the live board', () => {
 
   it('disables the controls, and says why, on a server with an old plugin', async () => {
     mockAdmin.live.mockResolvedValue(board({ leaveControl: 'old_plugin' }));
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     const bob = await row('bob');
     for (const name of ['Hold', '+5 min', 'End now']) {
       expect((within(bob).getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
@@ -154,7 +154,7 @@ describe('the live board', () => {
     // The plugin runs no reconnect clock for a self-started match, so every
     // one of these buttons would come back PUGERR. Say so before it is pressed.
     mockAdmin.live.mockResolvedValue(board({ leaveTracking: false }));
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     const bob = await row('bob');
     for (const name of ['Hold', '+5 min', 'End now']) {
       expect((within(bob).getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
@@ -176,7 +176,7 @@ describe('the live board', () => {
       teamB: [],
     }));
     mockAdmin.leaveClock.mockReturnValue(new Promise(() => {}));
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     fireEvent.click(within(await row('bob')).getByRole('button', { name: 'Hold' }));
     await waitFor(() => expect(mockAdmin.leaveClock).toHaveBeenCalledWith(81, '2', 'hold'));
     expect((within(await row('bob')).getByRole('button', { name: 'Hold' }) as HTMLButtonElement).disabled).toBe(true);
@@ -190,7 +190,7 @@ describe('the live board', () => {
   it('turns a countdown red at the threshold the admin feed warns at, not a number in the markup', async () => {
     // bob has 4:18 left: not low under the default 90 seconds, low under 300.
     mockAdmin.live.mockResolvedValue({ ...board(), lowAlertSeconds: 300 });
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     const bob = await row('bob');
     expect(bob.querySelector('.live-row__left.is-low')).toBeTruthy();
     expect(document.querySelector('.live-clock.is-low')).toBeTruthy();
@@ -198,7 +198,7 @@ describe('the live board', () => {
 
   it('never goes red when the warning is turned off', async () => {
     mockAdmin.live.mockResolvedValue({ ...board(), lowAlertSeconds: 0 });
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     const bob = await row('bob');
     expect(bob.querySelector('.live-row__left.is-low')).toBeNull();
     expect(document.querySelector('.live-clock.is-low')).toBeNull();
@@ -209,7 +209,7 @@ describe('the live board', () => {
     // is a match that has not been probed, and greying out is the failure that
     // costs a match; a button that explains itself when pressed does not.
     mockAdmin.live.mockResolvedValue(board({ leaveControl: 'unknown' }));
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     const bob = await row('bob');
     for (const name of ['Hold', '+5 min', 'End now']) {
       expect((within(bob).getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(false);
@@ -222,7 +222,7 @@ describe('the live board', () => {
   it('keeps the last board up when a re-fetch fails, still counting from when THAT board arrived', async () => {
     vi.useFakeTimers();
     try {
-      render(<AdminLive />);
+      render(<AdminLive isAdmin />);
       await vi.advanceTimersByTimeAsync(0);
       const line = () => (screen.getByText('bob').closest('li') as HTMLElement).textContent ?? '';
       expect(line()).toContain('4:18 left');
@@ -242,14 +242,14 @@ describe('the live board', () => {
 
   it('puts a failure on the card it happened on', async () => {
     mockAdmin.leaveClock.mockRejectedValue(new ApiError(502, 'could not reach Dallas: rcon connect timeout'));
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     fireEvent.click(within(await row('bob')).getByRole('button', { name: 'Hold' }));
     const card = (await screen.findByText(/#81/)).closest('section') as HTMLElement;
     await waitFor(() => expect(within(card).getByText('could not reach Dallas: rcon connect timeout')).toBeTruthy());
   });
 
   it('keeps room for a sub action and builds nothing in it', async () => {
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     const bob = await row('bob');
     const slot = bob.querySelector('.live-row__sub') as HTMLElement;
     expect(slot).toBeTruthy();
@@ -257,7 +257,7 @@ describe('the live board', () => {
   });
 
   it('fetches again when the hub says refresh, and not for the spectator feed', async () => {
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     await screen.findByText(/#81/);
     expect(mockAdmin.live).toHaveBeenCalledTimes(1);
     FakeSocket.all[0].onmessage?.({ data: JSON.stringify({ event: 'live' }) });
@@ -267,7 +267,7 @@ describe('the live board', () => {
 
   it('marks the card the admin feed linked to', async () => {
     history.replaceState(null, '', '/admin?live=81');
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     const card = (await screen.findByText(/#81/)).closest('section') as HTMLElement;
     expect(card.className).toContain('is-target');
   });
@@ -278,7 +278,7 @@ describe('the live board', () => {
   it('keeps the panels and Abort working when the board fails', async () => {
     mockAdmin.live.mockRejectedValue(new ApiError(500, 'boom'));
     mockAdmin.overview.mockResolvedValue({ ...emptyOverview, open: [openMatch()] });
-    render(<><AdminLive /><ConfirmHost /></>);
+    render(<><AdminLive isAdmin /><ConfirmHost /></>);
     expect(await screen.findByRole('heading', { name: 'Open matches' })).toBeTruthy();
     expect(screen.getByText(/Could not load the board/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Abort' }));
@@ -289,7 +289,7 @@ describe('the live board', () => {
 
   it('keeps the board up when the panels below fail', async () => {
     mockAdmin.overview.mockRejectedValue(new ApiError(500, 'boom'));
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     await screen.findByText(/#81/);
     expect(screen.getByText(/Could not load the servers, queue and recent results/)).toBeTruthy();
     expect((await row('bob')).textContent).toContain('Dropped');
@@ -299,7 +299,7 @@ describe('the live board', () => {
   // replaces it, and it is the one control that ends a stuck match.
   it('lists the open matches under the board, and aborts one after asking', async () => {
     mockAdmin.overview.mockResolvedValue({ ...emptyOverview, open: [openMatch()] });
-    render(<><AdminLive /><ConfirmHost /></>);
+    render(<><AdminLive isAdmin /><ConfirmHost /></>);
     const panel = (await screen.findByRole('heading', { name: 'Open matches' })).closest('.panel') as HTMLElement;
     expect(panel.textContent).toContain('7/8');
     expect(panel.textContent).toContain('connect 45.32.199.85:27015');
@@ -319,7 +319,7 @@ describe('the live board', () => {
         endedAt: '2026-09-21T18:00:00.000Z', forecast: null, pauses: [], readyups: [],
       }],
     });
-    render(<AdminLive />);
+    render(<AdminLive isAdmin />);
     expect(await screen.findByRole('heading', { name: 'Servers' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Queue' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Recent results' })).toBeTruthy();
@@ -327,5 +327,18 @@ describe('the live board', () => {
     // The Void button lives in the last column, and at phone width the rest
     // of the table scrolls sideways under it.
     expect(document.querySelector('.admin-table--recent.admin-table--pin-last')).toBeTruthy();
+  });
+
+  it('a moderator sees the servers without their controls', async () => {
+    // same mocks as the admin render test in this file
+    mockAdmin.overview.mockResolvedValue({
+      ...emptyOverview,
+      servers: [{ id: 1, name: 'Dallas', host: '1.2.3.4', port: 27015, status: 'live', enabled: 1, tvEnabled: 0, tvPort: null, tvPassword: null }],
+    });
+    render(<AdminLive isAdmin={false} />);
+    await screen.findByText('Servers');
+    expect(screen.queryByRole('button', { name: 'Take out' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Set idle' })).toBeNull();
+    expect(screen.getByText('in pool')).toBeTruthy();
   });
 });

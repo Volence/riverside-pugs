@@ -12,6 +12,9 @@ import { setSetting } from '../src/settings.js';
 const OWNER = '76561199000000061';
 const FRIEND = '76561199000000062';
 const ADMIN = '76561199000000063';
+/** Staff, but not an admin: the Live desk's practice controls are open to a
+ *  moderator (owner ruling 2026-09-28); starting or joining a lease is not. */
+const MOD = '76561199000000064';
 
 let db: DB;
 let app: FastifyInstance;
@@ -26,6 +29,7 @@ let whoReply = 'Unknown command "sm_practice_who"';
 let owner: Record<string, string>;
 let friend: Record<string, string>;
 let admin: Record<string, string>;
+let mod: Record<string, string>;
 
 const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); };
 
@@ -71,7 +75,9 @@ beforeEach(async () => {
   owner = authedCookie(app, db, OWNER);
   friend = authedCookie(app, db, FRIEND);
   admin = authedCookie(app, db, ADMIN);
+  mod = authedCookie(app, db, MOD);
   db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
+  db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
   // Most tests are about leases, not the rollout switch: open to everyone.
   setSetting(db, 'practice_leasing', 'everyone');
 });
@@ -174,10 +180,22 @@ describe('POST /api/practice/leases/:id/end', () => {
     expect(db.prepare("SELECT action, target FROM admin_actions WHERE action = 'practice_end'").all())
       .toEqual([{ action: 'practice_end', target: '1' }]);
   });
+
+  it('a moderator may end someone else\'s drill server too, and it is audited', async () => {
+    seedServers(2);
+    await start({ kind: 'drill' });
+    await flush();
+    const end = (c: Record<string, string>) => app.inject({ method: 'POST', url: '/api/practice/leases/1/end', cookies: c });
+    const r = await end(mod);
+    expect(r.statusCode).toBe(200);
+    expect(getLease(db, 1)!.end_reason).toBe('admin');
+    expect(db.prepare("SELECT action, target FROM admin_actions WHERE action = 'practice_end'").all())
+      .toEqual([{ action: 'practice_end', target: '1' }]);
+  });
 });
 
 describe('parks are ownerless', () => {
-  it('whoever started a park can start a drill server straight away, and only an admin ends the park', async () => {
+  it('whoever started a park can start a drill server straight away, and only staff ends the park', async () => {
     seedServers(4);
     await start({ kind: 'park' });
     const d = await start({ kind: 'drill' });
@@ -186,8 +204,16 @@ describe('parks are ownerless', () => {
     const endPark = (c: Record<string, string>) => app.inject({ method: 'POST', url: '/api/practice/leases/1/end', cookies: c });
     const r = await endPark(owner);
     expect(r.statusCode).toBe(403);
-    expect(r.json().error).toBe('Only an admin can close the Practice Park. It closes on its own 5 minutes after everyone leaves.');
+    expect(r.json().error).toBe('Only staff can close the Practice Park. It closes on its own 5 minutes after everyone leaves.');
     expect((await endPark(admin)).statusCode).toBe(200);
+    expect(getLease(db, 1)!.end_reason).toBe('admin');
+  });
+
+  it('a moderator can close the park too', async () => {
+    seedServers(4);
+    await start({ kind: 'park' });
+    const endPark = (c: Record<string, string>) => app.inject({ method: 'POST', url: '/api/practice/leases/1/end', cookies: c });
+    expect((await endPark(mod)).statusCode).toBe(200);
     expect(getLease(db, 1)!.end_reason).toBe('admin');
   });
 
@@ -201,11 +227,19 @@ describe('parks are ownerless', () => {
 });
 
 describe('GET /api/admin/practice/leases', () => {
-  it('is admin only', async () => {
+  it('is staff only', async () => {
     seedServers(2);
     await start({ kind: 'park' });
     expect((await app.inject({ method: 'GET', url: '/api/admin/practice/leases', cookies: friend })).statusCode).toBe(403);
     const r = await app.inject({ method: 'GET', url: '/api/admin/practice/leases', cookies: admin });
+    expect(r.json().leases).toMatchObject([{ id: 1, kind: 'park', owner: { steamid: OWNER } }]);
+  });
+
+  it('a moderator reads the leases too', async () => {
+    seedServers(2);
+    await start({ kind: 'park' });
+    const r = await app.inject({ method: 'GET', url: '/api/admin/practice/leases', cookies: mod });
+    expect(r.statusCode).toBe(200);
     expect(r.json().leases).toMatchObject([{ id: 1, kind: 'park', owner: { steamid: OWNER } }]);
   });
 });
@@ -338,12 +372,26 @@ describe('admin: players on a practice server, and kicking one', () => {
     expect(r.json().players.map((p: { name: string; team: number | null }) => [p.name, p.team])).toEqual([['Dust', null], ['Rolling "Six"', null]]);
   });
 
-  it('is admin only', async () => {
+  it('is staff only', async () => {
     await parkWithPeople();
     expect((await players(undefined)).statusCode).toBe(401);
     expect((await players(owner)).statusCode).toBe(403);
     expect((await kick({ userid: 7 }, owner)).statusCode).toBe(403);
     expect((await app.inject({ method: 'GET', url: '/api/admin/practice/99/players', cookies: admin })).statusCode).toBe(404);
+  });
+
+  it('a moderator lists the players and their kick is accepted and logged with their steamid', async () => {
+    await parkWithPeople();
+    whoReply = 'WHO 1 Dust team=2 bot=0 alive=1 trainer=1 target=0';
+    const r = await players(mod);
+    expect(r.statusCode).toBe(200);
+    expect(r.json().players.find((p: { name: string }) => p.name === 'Dust')).toMatchObject({ userid: 7, team: 2 });
+
+    sent = [];
+    const k = await kick({ userid: 7 }, mod);
+    expect(k.statusCode).toBe(200);
+    const row = db.prepare("SELECT admin_id, target FROM admin_actions WHERE action = 'practice_kick'").get() as { admin_id: string; target: string };
+    expect(row.admin_id).toBe(MOD);
   });
 
   it('kicks by userid with a cleaned reason, and logs who was kicked from where', async () => {

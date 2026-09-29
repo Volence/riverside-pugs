@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ADMIN_ROUTE_PATHS, fileUrl, landingFor, legacyRedirect, parseAdminPath, ticketUrl } from './adminRoutes';
+import { ADMIN_ROUTE_PATHS, deskItems, fileUrl, landingFor, legacyRedirect, parseAdminPath, ticketUrl } from './adminRoutes';
 import { exec } from 'preact-iso/router';
 
 const asAdmin = { isAdmin: true };
@@ -48,10 +48,19 @@ describe('the panel URL parser', () => {
     expect(legacyRedirect('/admin/setup/patches', '', true)).toBe('/admin/balance/patches');
   });
 
-  it('gives a moderator the People desk whatever the URL says', () => {
-    expect(parseAdminPath('/admin/live', asMod)).toEqual({ desk: 'people', section: 'search', param: null });
+  it('gives a moderator Live or People and nothing else', () => {
+    expect(parseAdminPath('/admin/live', asMod)).toEqual({ desk: 'live', section: 'board', param: null });
     expect(parseAdminPath('/admin/setup/settings', asMod)).toEqual({ desk: 'people', section: 'search', param: null });
     expect(parseAdminPath('/admin/people/review', asMod)).toEqual({ desk: 'people', section: 'review', param: null });
+  });
+
+  it('a moderator can open the Live desk and lands on it', () => {
+    expect(parseAdminPath('/admin/live', { isAdmin: false })).toEqual({ desk: 'live', section: 'board', param: null });
+    expect(parseAdminPath('/admin/setup/settings', { isAdmin: false }).desk).toBe('people');
+    expect(parseAdminPath('/admin/balance', { isAdmin: false }).desk).toBe('people');
+    expect(landingFor(false)).toBe('/admin/live');
+    expect(deskItems(false).map((d) => d.key)).toEqual(['live', 'people']);
+    expect(deskItems(true).map((d) => d.key)).toEqual(['live', 'people', 'setup', 'balance']);
   });
 
   it('sends the old links and the bare /admin somewhere real', () => {
@@ -60,10 +69,11 @@ describe('the panel URL parser', () => {
     // redirect: every low-allowance post in the admin feed is that link.
     expect(legacyRedirect('/admin', '?live=81', true)).toBe('/admin/live?live=81');
     expect(legacyRedirect('/admin', '?live=nonsense', true)).toBe('/admin/live');
-    expect(legacyRedirect('/admin', '?live=81', false)).toBe('/admin/people');
+    // The ?live= carry-over is for staff generally, not admins only.
+    expect(legacyRedirect('/admin', '?live=81', false)).toBe('/admin/live?live=81');
     expect(legacyRedirect('/admin', '', true)).toBe('/admin/live');
-    expect(legacyRedirect('/admin', '', false)).toBe('/admin/people');
-    expect(legacyRedirect('/admin/live', '', false)).toBe('/admin/people');
+    expect(legacyRedirect('/admin', '', false)).toBe('/admin/live');
+    expect(legacyRedirect('/admin/live', '', false)).toBeNull();
     // Not a People path, however much it looks like one from the left.
     expect(legacyRedirect('/admin/peoplefoo', '', false)).toBe('/admin/people');
     expect(legacyRedirect('/admin/people', '', false)).toBeNull();
@@ -91,7 +101,7 @@ describe('the panel URL parser', () => {
 
   it('builds the links everything else points at', () => {
     expect(landingFor(true)).toBe('/admin/live');
-    expect(landingFor(false)).toBe('/admin/people');
+    expect(landingFor(false)).toBe('/admin/live');
     expect(fileUrl('76561199000000001')).toBe('/admin/people/76561199000000001');
     expect(ticketUrl(12)).toBe('/admin/people/tickets/12');
   });

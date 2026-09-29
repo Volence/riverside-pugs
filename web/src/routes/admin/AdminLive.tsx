@@ -30,7 +30,7 @@ const ADD_SECONDS = 300;
  * gives every figure in seconds as of its own `now`; this counts on from the
  * moment the payload arrived, with one ticker for the whole board.
  */
-export function AdminLive() {
+export function AdminLive({ isAdmin }: { isAdmin: boolean }) {
   const [nudge, setNudge] = useState(0);
   useHubEvent(['refresh'], () => setNudge((n) => n + 1));
   useEffect(() => {
@@ -84,7 +84,8 @@ export function AdminLive() {
               and the cards above it can never disagree about a match. */}
           <OpenMatchesPanel open={overview.data.open} busy={panels.busy} run={panels.run} />
           <div class="admin-split admin-split--even">
-            <AdminServersPanel servers={overview.data.servers} busy={panels.busy} run={panels.run} health={overview.data.captureHealth} />
+            <AdminServersPanel servers={overview.data.servers} busy={panels.busy} run={panels.run}
+              health={overview.data.captureHealth} canManage={isAdmin} />
             <AdminQueuePanel queue={overview.data.queue} busy={panels.busy} run={panels.run} />
           </div>
           <RecentResultsPanel data={overview.data} busy={panels.busy} run={panels.run} />

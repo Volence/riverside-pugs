@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DB } from '../db.js';
 import { hasStaffFlag } from '../tickets/store.js';
 import type { Matchmaker } from '../matchmaker.js';
-import { makeRequireAdmin } from './guards.js';
+import { makeRequireAdmin, makeRequireMod } from './guards.js';
 import type { ServerReleaser } from '../serverRelease.js';
 import { getServer, listServers, serversMissingDlc4, setEnabled, setHasDlc4, setRestartAfterMatch, type ServerRow } from '../serverPool.js';
 import { serverHasDlc4 } from '../dlc4.js';
@@ -75,11 +75,19 @@ export interface AdminRouteOpts {
   adminSteamIds: string[];
 }
 
-/** Everything under /api/admin. Each route starts with requireAdmin and each
- *  mutation ends with logAdmin. */
+/** Everything under /api/admin. Each route starts with requireAdmin, except
+ *  the Live desk's board and its match-rescue actions (GET /overview,
+ *  GET /live, POST /live/:matchId/players/:steamid/leave, POST
+ *  /matches/:id/abort, POST /matches/:id/void, POST /queue/remove), which
+ *  start with requireStaff and are open to a moderator (owner ruling
+ *  2026-09-28); every server control stays requireAdmin. Each mutation ends
+ *  with logAdmin. */
 export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): Promise<void> {
   const { db, matchmaker, releaser, broadcast, integrityJobs, adminSync, logAuth, logSecretPusher, serverQuery, adminSteamIds } = opts;
   const requireAdmin = makeRequireAdmin(db);
+  // The Live desk is open to moderators (owner ruling 2026-09-28): the board
+  // itself and the match-rescue actions. Server controls stay requireAdmin.
+  const requireStaff = makeRequireMod(db);
   const dlc4Probe = opts.dlc4Probe ?? serverHasDlc4;
 
   app.get('/api/admin/players', async (req, reply) => {
@@ -323,12 +331,12 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
   });
 
   app.get('/api/admin/overview', async (req, reply) => {
-    if (!requireAdmin(req, reply)) return reply;
+    if (!requireStaff(req, reply)) return reply;
     return { ...adminOverview(db, logAuth), queue: matchmaker.publicQueue().players };
   });
 
   app.post('/api/admin/matches/:id/abort', async (req, reply) => {
-    const adminId = requireAdmin(req, reply);
+    const adminId = requireStaff(req, reply);
     if (!adminId) return reply;
     const id = Number((req.params as { id: string }).id);
     const r = abortMatch(db, releaser, id);
@@ -339,7 +347,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
   });
 
   app.post('/api/admin/matches/:id/void', async (req, reply) => {
-    const adminId = requireAdmin(req, reply);
+    const adminId = requireStaff(req, reply);
     if (!adminId) return reply;
     const id = Number((req.params as { id: string }).id);
     const { reason } = (req.body ?? {}) as { reason?: unknown };
@@ -354,7 +362,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
   });
 
   app.get('/api/admin/live', async (req, reply) => {
-    if (!requireAdmin(req, reply)) return reply;
+    if (!requireStaff(req, reply)) return reply;
     return buildLiveBoard(db, { voice: opts.voice ?? null });
   });
 
@@ -368,7 +376,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
    * either way, the same way the log secret push is.
    */
   app.post('/api/admin/live/:matchId/players/:steamid/leave', async (req, reply) => {
-    const adminId = requireAdmin(req, reply);
+    const adminId = requireStaff(req, reply);
     if (!adminId) return reply;
     const { matchId: rawId, steamid } = req.params as { matchId: string; steamid: string };
     const matchId = Number(rawId);
@@ -610,7 +618,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
   });
 
   app.post('/api/admin/queue/remove', async (req, reply) => {
-    const adminId = requireAdmin(req, reply);
+    const adminId = requireStaff(req, reply);
     if (!adminId) return reply;
     const { steamid } = (req.body ?? {}) as { steamid?: unknown };
     if (typeof steamid !== 'string') return reply.code(400).send({ error: 'steamid required' });
