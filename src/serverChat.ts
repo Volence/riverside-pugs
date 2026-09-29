@@ -105,6 +105,23 @@ export function listLines(db: DB, serverId: number, after: number, limit: number
     .all(serverId, limit) as ChatLineRow[]).reverse();
 }
 
+/** The `limit` lines just before `before`, oldest first: one page further back. */
+export function listLinesBefore(db: DB, serverId: number, before: number, limit: number): ChatLineRow[] {
+  return (db.prepare('SELECT * FROM server_chat WHERE server_id = ? AND id < ? ORDER BY id DESC LIMIT ?')
+    .all(serverId, before, limit) as ChatLineRow[]).reverse();
+}
+
+/** One match's newest `limit` lines, oldest first. */
+export function listMatchLines(db: DB, serverId: number, matchId: number, limit: number): ChatLineRow[] {
+  return (db.prepare('SELECT * FROM server_chat WHERE server_id = ? AND match_id = ? ORDER BY id DESC LIMIT ?')
+    .all(serverId, matchId, limit) as ChatLineRow[]).reverse();
+}
+
+/** Whether this server has any line older than `before`. */
+export function hasLinesBefore(db: DB, serverId: number, before: number): boolean {
+  return db.prepare('SELECT 1 FROM server_chat WHERE server_id = ? AND id < ? LIMIT 1').get(serverId, before) !== undefined;
+}
+
 /** One admin feed line per player per this long; the page has the rest. */
 export const STAFF_FEED_QUIET_MS = 10 * 60_000;
 const lastFeed = new Map<string, number>();
