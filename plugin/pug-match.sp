@@ -997,7 +997,10 @@ void EmitConductSay(int client, Event event)
 {
 	if (!IsClientInGame(client) || IsFakeClient(client)) return;
 	char id[32];
-	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) return;
+	// ModCall_AuthId, not GetClientAuthId: the same id /mod and /staff use,
+	// which on the sv_lan 1 test server converts Steam2 by hand (the engine
+	// has no SteamID64 there). On every live box it is plain GetClientAuthId.
+	if (!ModCall_AuthId(client, id, sizeof(id))) return;
 	char text[256];
 	event.GetString("text", text, sizeof(text));
 	SanitizeChat(text, sizeof(text));
