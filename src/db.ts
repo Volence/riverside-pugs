@@ -951,6 +951,64 @@ export const ORIGIN_BACKFILL_SQL = `UPDATE matches SET origin = CASE
     THEN 'queue' ELSE 'in_game' END
   WHERE origin IS NULL`;
 
+/** Table definitions widenCheck may rebuild from. One copy, used by openDb too. */
+const CURRENT_DDL: Record<string, string> = {
+  practice_leases: `CREATE TABLE IF NOT EXISTS practice_leases (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      server_id       INTEGER NOT NULL REFERENCES servers(id),
+      kind            TEXT NOT NULL CHECK (kind IN ('park','drill','hunter')),
+      owner_player_id TEXT NOT NULL REFERENCES players(steamid),
+      password        TEXT NOT NULL,
+      drill_code      TEXT,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      ready_at        TEXT,
+      setup_phase     TEXT,
+      last_human_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      ends_at         TEXT NOT NULL,
+      humans          INTEGER NOT NULL DEFAULT 0,
+      map             TEXT,
+      warned_at       TEXT,
+      ending_at       TEXT,
+      ended_at        TEXT,
+      end_reason      TEXT
+    )`,
+};
+
+const PRACTICE_LEASE_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS practice_leases_open ON practice_leases (server_id) WHERE ended_at IS NULL',
+  'CREATE INDEX IF NOT EXISTS practice_leases_owner ON practice_leases (owner_player_id, created_at)',
+];
+
+/**
+ * Rebuild `table` from CURRENT_DDL when its stored definition lacks `marker`
+ * (a value a widened CHECK now allows). SQLite cannot alter a CHECK, so this is
+ * its standard procedure: a new table from the current definition, copy the
+ * shared columns, drop the old, rename, then the indexes (they go with the
+ * dropped table). Foreign keys are off for the swap and back on after; nothing
+ * may reference `table`, which the caller checks.
+ */
+function widenCheck(db: DB, table: string, marker: string, indexes: string[]): void {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) as { sql: string } | undefined;
+  if (!row || row.sql.includes(marker)) return;
+  const current = CURRENT_DDL[table];
+  if (!current) throw new Error(`widenCheck: no current definition for ${table}`);
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.transaction(() => {
+      db.exec(current.replace(`CREATE TABLE IF NOT EXISTS ${table} (`, `CREATE TABLE ${table}_new (`));
+      const oldCols = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+      const newCols = new Set((db.prepare(`PRAGMA table_info(${table}_new)`).all() as { name: string }[]).map((c) => c.name));
+      const cols = oldCols.filter((c) => newCols.has(c)).join(', ');
+      db.exec(`INSERT INTO ${table}_new (${cols}) SELECT ${cols} FROM ${table}`);
+      db.exec(`DROP TABLE ${table}`);
+      db.exec(`ALTER TABLE ${table}_new RENAME TO ${table}`);
+      for (const sql of indexes) db.exec(sql);
+    })();
+  } finally {
+    db.pragma('foreign_keys = ON');
+  }
+}
+
 /** Add a column if the table lacks it. No-op when already present. */
 function ensureColumn(db: DB, table: string, column: string, ddl: string): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -1562,33 +1620,19 @@ export function openDb(path: string): DB {
   // setup finished; humans and map are the last `status` reading, for the
   // public park list; warned_at is when a PUG asked for the box back.
   // password is per lease, random, and never derived from anything public.
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS practice_leases (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      server_id       INTEGER NOT NULL REFERENCES servers(id),
-      kind            TEXT NOT NULL CHECK (kind IN ('park','drill')),
-      owner_player_id TEXT NOT NULL REFERENCES players(steamid),
-      password        TEXT NOT NULL,
-      drill_code      TEXT,
-      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-      ready_at        TEXT,
-      setup_phase     TEXT,
-      last_human_at   TEXT NOT NULL DEFAULT (datetime('now')),
-      ends_at         TEXT NOT NULL,
-      humans          INTEGER NOT NULL DEFAULT 0,
-      map             TEXT,
-      warned_at       TEXT,
-      ending_at       TEXT,
-      ended_at        TEXT,
-      end_reason      TEXT
-    );
-    CREATE INDEX IF NOT EXISTS practice_leases_open ON practice_leases (server_id) WHERE ended_at IS NULL;
-    CREATE INDEX IF NOT EXISTS practice_leases_owner ON practice_leases (owner_player_id, created_at);
-  `);
+  db.exec(CURRENT_DDL.practice_leases);
+  db.exec(PRACTICE_LEASE_INDEXES.join(';\n'));
   // Which step of its setup a lease is on, for the page's status line:
   // 'resetting' (srcds restarting for a clean slate), 'loading' (the
   // practice cfg and the password lines), NULL once ready or before setup.
   ensureColumn(db, 'practice_leases', 'setup_phase', 'TEXT');
+  // 'hunter' joined 'park' and 'drill' on 2026-09-28 (Hunter Training). CREATE
+  // TABLE IF NOT EXISTS leaves an older table's CHECK as it was, so a table
+  // without it is rebuilt once. Nothing references practice_leases.
+  widenCheck(db, 'practice_leases', "'hunter'", PRACTICE_LEASE_INDEXES);
+  // Practice-only campaigns (Hunter Training) install everywhere and are
+  // downloadable, but are never offered for the PUG map pool.
+  ensureColumn(db, 'custom_campaigns', 'practice_only', 'INTEGER NOT NULL DEFAULT 0');
 
   seed(db);
   return db;
