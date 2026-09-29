@@ -29,6 +29,10 @@ export interface PracticePlayer {
   /** The practice trainer running for this client: 1 skeet, 2 crown,
    *  3 rocks; null for none or unknown. */
   trainer: number | null;
+  /** The park station or trainer the plugin reports (pit, lane, dp, climb,
+   *  skeet, crown, rocks, drill), or null when the plugin predates it or the
+   *  player is doing nothing in particular. */
+  station: string | null;
 }
 
 /**
@@ -45,8 +49,8 @@ export interface PracticePlayer {
  * SourceTV out. The name is matched greedily up to the last `" ` before the
  * id, since a name may itself contain quotes.
  */
-export function parseStatusPlayers(status: string): Omit<PracticePlayer, 'team' | 'trainer'>[] {
-  const out: Omit<PracticePlayer, 'team' | 'trainer'>[] = [];
+export function parseStatusPlayers(status: string): Omit<PracticePlayer, 'team' | 'trainer' | 'station'>[] {
+  const out: Omit<PracticePlayer, 'team' | 'trainer' | 'station'>[] = [];
   const re = /^#\s*(\d+)\s+(\d+)\s+"(.*)"\s+(\S+)\s+(\d+(?::\d+){1,2})\s+(\d+)\s+\d+\s+\S+/;
   for (const line of status.split('\n')) {
     const m = re.exec(line.trim());
@@ -69,13 +73,13 @@ export function parseStatusPlayers(status: string): Omit<PracticePlayer, 'team' 
  * Team and trainer per client index from `sm_practice_who`, which prints
  *
  *   WHO <client> <name> team=<n>                        (spectators, unassigned)
- *   WHO <client> <name> team=<n> bot=<0|1> ... trainer=<n> ...
+ *   WHO <client> <name> station=<s> team=<n> bot=<0|1> ... trainer=<n> ...
  *
  * The name is free text, so the fields are read by key from after the first
  * ` team=`. An empty map when the command is missing.
  */
-export function parseWho(body: string): Map<number, { team: number; bot: boolean; trainer: number | null }> {
-  const out = new Map<number, { team: number; bot: boolean; trainer: number | null }>();
+export function parseWho(body: string): Map<number, { team: number; bot: boolean; trainer: number | null; station: string | null }> {
+  const out = new Map<number, { team: number; bot: boolean; trainer: number | null; station: string | null }>();
   for (const line of body.split('\n')) {
     const m = /^WHO (\d+) .*? team=(\d+)(.*)$/.exec(line.trim());
     if (!m) continue;
@@ -83,7 +87,11 @@ export function parseWho(body: string): Map<number, { team: number; bot: boolean
     const bot = /(?:^|\s)bot=1(?:\s|$)/.test(rest);
     const t = /(?:^|\s)trainer=(\d+)(?:\s|$)/.exec(rest);
     const trainer = t && Number(t[1]) > 0 ? Number(t[1]) : null;
-    out.set(Number(m[1]), { team: Number(m[2]), bot, trainer });
+    // station= sits just before team= (the plugin prints it there since
+    // 2026-09-28); older plugins have none.
+    const st = /\sstation=([a-z]+) team=\d+/.exec(line.trim());
+    const station = st && st[1] !== 'none' ? st[1] : null;
+    out.set(Number(m[1]), { team: Number(m[2]), bot, trainer, station });
   }
   return out;
 }
@@ -93,7 +101,7 @@ export function practicePlayers(status: string, who: string): PracticePlayer[] {
   const teams = parseWho(who);
   return parseStatusPlayers(status).map((p) => {
     const w = teams.get(p.index);
-    return { ...p, team: w ? w.team : null, trainer: w ? w.trainer : null };
+    return { ...p, team: w ? w.team : null, trainer: w ? w.trainer : null, station: w ? w.station : null };
   });
 }
 
