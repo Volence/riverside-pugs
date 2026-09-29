@@ -20,8 +20,14 @@ export interface ChatLineView {
  * one way the site talks into a game. Staff see team chat too (owner ruling
  * 2026-09-28: teams are on voice, typed team chat hides nothing).
  */
-export async function serverChatRoutes(app: FastifyInstance, opts: { db: DB; rcon: LeaseRcon }): Promise<void> {
+export async function serverChatRoutes(
+  app: FastifyInstance,
+  opts: { db: DB; rcon: LeaseRcon; notify?: () => void },
+): Promise<void> {
   const { db, rcon } = opts;
+  // The same staff-only hub event the log ingest sends, so every open drawer
+  // (not just the sender's) shows the new row and, on failure, its -1.
+  const notify = opts.notify ?? (() => {});
   const requireMod = makeRequireMod(db);
   const limiter = new SendLimiter();
   const lastAt = db.prepare('SELECT MAX(at) AS at FROM server_chat WHERE server_id = ?');
@@ -78,6 +84,7 @@ export async function serverChatRoutes(app: FastifyInstance, opts: { db: DB; rco
     if (!limiter.allow(me)) return reply.code(429).send({ error: 'Slow down: 5 messages per 10 seconds.' });
     const name = cleanChatText(getPlayer(db, me)?.name ?? '', NAME_MAX, NAME_MAX_BYTES) || 'Staff';
     const r = await sendStaffChat(db, rcon, { serverId: id, sentBy: me, name, target, message });
+    try { notify(); } catch (err) { console.error('[serverchat] notify failed:', err); }
     if (!r.ok) return reply.code(502).send({ error: r.error, id: r.id });
     return { ok: true, id: r.id };
   });

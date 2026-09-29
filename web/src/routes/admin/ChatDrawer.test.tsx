@@ -110,4 +110,19 @@ describe('ChatDrawer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(await screen.findByText('This server needs pug-match 0.3.16 to send.')).toBeTruthy();
   });
+
+  it('reloads after a failed send so the row shows "not sent", and keeps the error', async () => {
+    const { ApiError } = await import('../../api');
+    mockMod.chatLines.mockResolvedValueOnce({ server: { id: 3, name: 'Dallas' }, lines: [] });
+    mockMod.chatLines.mockResolvedValue({ server: { id: 3, name: 'Dallas' }, lines: [
+      line({ id: 7, kind: 'staff_out', steamid: null, name: 'Volence', to: { kind: 'all', value: null, name: null }, delivered: -1, message: 'x' }),
+    ] });
+    mockMod.chatSend.mockRejectedValue(new ApiError(502, 'Could not reach the server.'));
+    render(<ChatDrawer serverId={3} onPick={() => {}} onClose={() => {}} />);
+    fireEvent.input(await screen.findByLabelText('Message'), { target: { value: 'x' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(await screen.findByText('not sent')).toBeTruthy();
+    expect(mockMod.chatLines).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('Could not reach the server.')).toBeTruthy();
+  });
 });
