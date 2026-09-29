@@ -93,6 +93,8 @@ describe('PracticeCard', () => {
     expect(link.getAttribute('href')).toBe('/download/campaign/huntertraining');
     // A real file, not a route: without a target the SPA router swallows the click.
     expect(link.getAttribute('target')).toBe('_blank');
+    // What the player downloads is the 87 MB zip, not the 222 MB VPK inside it.
+    expect(link.closest('p')!.textContent).toContain('an 87 MB download');
   });
 
   it('links back to your own Hunter Training server instead of offering another', async () => {
