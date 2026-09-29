@@ -1697,7 +1697,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     chats: () => deps.reporterChats ?? reporterChats,
   });
   await app.register(modCallRoutes, { db: deps.db });
-  await app.register(serverChatRoutes, { db: deps.db, rcon: deps.chatRcon ?? realServerRcon });
+  await app.register(serverChatRoutes, {
+    db: deps.db, rcon: deps.chatRcon ?? realServerRcon,
+    notify: () => hub.sendTo('server_chat', (id) => isActiveStaff(deps.db, id)),
+  });
   await app.register(castRoutes, { db: deps.db });
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,

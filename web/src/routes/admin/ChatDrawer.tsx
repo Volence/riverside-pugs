@@ -78,7 +78,11 @@ export function ChatDrawer({ serverId, onPick, onClose }: {
       setError(null);
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not send.');
+      // The row was stored before the send failed and is now marked -1, so
+      // re-read to show it; the error is set after, since a good load clears it.
+      const msg = err instanceof ApiError ? err.message : 'Could not send.';
+      await load();
+      if (shownId.current === serverId) setError(msg);
     } finally {
       setSending(false);
     }

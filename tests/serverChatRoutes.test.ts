@@ -4,6 +4,7 @@ import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { recordSay } from '../src/serverChat.js';
+import { Hub } from '../src/ws.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 
 const IDS = Array.from({ length: 3 }, (_, i) => `7656119900000000${i}`);
@@ -13,13 +14,22 @@ let app: FastifyInstance;
 let sid: number;
 let sent: string[];
 let rconReply: string;
+let hub: Hub;
+let heard: Record<string, string[]>;
 const cookie: Record<string, Record<string, string>> = {};
 
 beforeEach(async () => {
   db = openDb(':memory:');
   sent = [];
   rconReply = '';
+  hub = new Hub();
+  heard = {};
+  for (const id of IDS) {
+    heard[id] = [];
+    hub.add({ readyState: 1, send: (m: string) => heard[id].push(JSON.parse(m).event) }, id);
+  }
   app = await buildServer({
+    hub,
     config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {},
     chatRcon: async (_s, cmds) => { sent.push(...cmds); return [rconReply]; },
   });
@@ -91,5 +101,25 @@ describe('server chat routes', () => {
     const r = await send(MOD, { to: 'all', message: 'x' });
     expect(r.statusCode).toBe(502);
     expect(r.json().error).toBe('This server needs pug-match 0.3.16 to send.');
+  });
+
+  it('tells every staff drawer after a send, once, and only staff', async () => {
+    const other = IDS[2];
+    db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(other);
+    expect((await send(MOD, { to: 'all', message: 'one' })).statusCode).toBe(200);
+    expect(heard[MOD].filter((e) => e === 'server_chat')).toHaveLength(1);
+    expect(heard[other].filter((e) => e === 'server_chat')).toHaveLength(1);
+    expect(heard[PLAYER].filter((e) => e === 'server_chat')).toHaveLength(0);
+  });
+
+  it('tells staff drawers after a failed send too', async () => {
+    rconReply = 'Unknown command "sm_pug_staffsay"';
+    expect((await send(MOD, { to: 'all', message: 'x' })).statusCode).toBe(502);
+    expect(heard[MOD].filter((e) => e === 'server_chat')).toHaveLength(1);
+  });
+
+  it('does not notify for a refused send', async () => {
+    expect((await send(MOD, { to: 'all', message: ' ; ' })).statusCode).toBe(400);
+    expect(heard[MOD].filter((e) => e === 'server_chat')).toHaveLength(0);
   });
 });
