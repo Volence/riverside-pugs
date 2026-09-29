@@ -30,6 +30,9 @@ export const RECONNECT_GRACE_MS = 90_000;
 export const CLOSE_GRACE_MS = 180_000;
 /** After a box refuses to open a side game, wait this long before trying again. */
 const OPEN_RETRY_MS = 60_000;
+/** A box that refused to open one (pug-sidegame not loaded, or not
+ *  answering) is skipped by maybeOpen for this long. */
+const REFUSED_BOX_MS = 30 * 60_000;
 /** After the popped lobby completes, how long the match has to take the box
  *  (takeForMatch) before the side game is closed as orphaned. */
 export const HANDOVER_GRACE_MS = 60_000;
@@ -125,6 +128,8 @@ export class SideGames {
   private batch: { exec: boolean; roster: boolean } | null = null;
   private work: Promise<void> = Promise.resolve();
   private retryAfter = 0;
+  /** Box id to the time it may be tried again, after it refused to open. */
+  private readonly refusedUntil = new Map<number, number>();
   private readonly now: () => number;
   private readonly setTimer: NonNullable<SideGameDeps['setTimer']>;
   private readonly rng: () => number;
@@ -218,9 +223,12 @@ export class SideGames {
     if (!this.enabled() || cands.length < this.minPlayers()) return;
     if (this.now() < this.retryAfter || matchesWaiting(this.deps.db) > 0) return;
     // The lowest id claimable box: the one claimIdle would give the match.
-    const server = this.deps.db.prepare(
-      `SELECT * FROM servers WHERE status = 'idle' AND enabled = 1 AND ${NOT_LEASED_SQL} ORDER BY id LIMIT 1`,
-    ).get() as ServerRow | undefined;
+    // A box that recently refused is skipped (refusedUntil).
+    const now = this.now();
+    for (const [id, until] of this.refusedUntil) if (until <= now) this.refusedUntil.delete(id);
+    const server = (this.deps.db.prepare(
+      `SELECT * FROM servers WHERE status = 'idle' AND enabled = 1 AND ${NOT_LEASED_SQL} ORDER BY id`,
+    ).all() as ServerRow[]).find((s) => !this.refusedUntil.has(s.id));
     if (!server) return;
     const token = newToken();
     const password = `side_${token.slice(0, 8)}`;
@@ -244,8 +252,17 @@ export class SideGames {
       `changelevel ${this.randomFirstMap(null)}`,
     ];
     // Without the plugin armed there is no team lock and no tracking guard,
-    // so a refused sm_side_start closes the game and backs off.
-    this.send(server, commands, (r) => (r[2] ?? '').startsWith('PUGOK'), () => {
+    // so a refused sm_side_start closes the game and backs off, and the box
+    // is left alone for REFUSED_BOX_MS rather than tried again every minute.
+    let refused = false;
+    this.send(server, commands, (r) => {
+      refused = !(r[2] ?? '').startsWith('PUGOK');
+      return !refused;
+    }, () => {
+      this.refusedUntil.set(server.id, this.now() + REFUSED_BOX_MS);
+      console.warn(refused
+        ? `[sidegame] pug-sidegame not loaded on ${server.name} (sm_side_start refused); skipping it for side games for 30 minutes`
+        : `[sidegame] could not open a side game on ${server.name}; skipping it for side games for 30 minutes`);
       if (this.active !== a) return;
       this.retryAfter = this.now() + OPEN_RETRY_MS;
       this.close('rcon_failed');
