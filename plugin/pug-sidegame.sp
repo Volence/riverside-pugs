@@ -66,7 +66,14 @@
 
 #include <sourcemod>
 #include <sdktools>
+// Optional: readyup may not be loaded yet at srcds boot, before a Rotoblin
+// config loads ready-up. REQUIRE_PLUGIN is on by default (sourcemod.inc), so
+// it has to be undef'd here or this plugin would refuse to load at all on a
+// box where readyup is not running, same pattern pug-match.sp uses around
+// its own #include <readyup>.
+#undef REQUIRE_PLUGIN
 #include <readyup>
+#define REQUIRE_PLUGIN
 #include "pug-logauth.inc"
 
 #define PLUGIN_VERSION "0.1.0"
