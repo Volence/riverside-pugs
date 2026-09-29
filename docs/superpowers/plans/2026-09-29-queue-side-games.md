@@ -1554,8 +1554,15 @@ git commit -m "side games: wiring, POST /api/queue/side, sideGame on state and p
 - [ ] **Step 1: Write the failing component tests**
 
 ```tsx
-it('offers the side game toggle to a queued player', async () => {
-  render(<QueuePanel count={3} joined={true} players={[]} refresh={noop} sideOptIn={false} sideGame={null} me={me} />);
+it('hides the toggle below 4 queued unless already opted in', () => {
+  const { rerender } = render(<QueuePanel count={3} joined={true} players={[]} refresh={noop} sideOptIn={false} sideGame={null} me={me} />);
+  expect(screen.queryByRole('checkbox', { name: /2v2\/3v3 while I wait/i })).toBeNull();
+  rerender(<QueuePanel count={3} joined={true} players={[]} refresh={noop} sideOptIn={true} sideGame={null} me={me} />);
+  expect(screen.getByRole('checkbox', { name: /2v2\/3v3 while I wait/i })).toBeTruthy();
+});
+
+it('offers the side game toggle to a queued player at 4+', async () => {
+  render(<QueuePanel count={4} joined={true} players={[]} refresh={noop} sideOptIn={false} sideGame={null} me={me} />);
   const box = screen.getByRole('checkbox', { name: /2v2\/3v3 while I wait/i });
   fireEvent.click(box);
   await waitFor(() => expect(mockApi.setSideOptIn).toHaveBeenCalledWith(true));
@@ -1593,10 +1600,10 @@ Expected: FAIL.
 
 (use the same `post` helper the neighbours use).
 
-`Play.tsx`, inside `QueuePanel`, below the join/leave button block, only when `joined`:
+`Play.tsx`, inside `QueuePanel`, below the join/leave button block. Shown only when `joined` AND (4+ queued OR already opted in), so a queue bouncing between 3 and 4 does not hide a tick someone already gave:
 
 ```tsx
-{joined && (
+{joined && (count >= SIDE_GAME_MIN || sideOptIn) && (
   <label class="side-toggle">
     <input type="checkbox" checked={!!sideOptIn}
       onChange={(e) => act(() => api.setSideOptIn((e.target as HTMLInputElement).checked))} />
@@ -1614,7 +1621,7 @@ Expected: FAIL.
 ))}
 ```
 
-Pass `sideOptIn={state.queue.sideOptIn}` and `sideGame={state.sideGame ?? null}` from `Live`. Add minimal CSS for `.side-toggle` and `.side-game` next to the queue panel styles (match the existing spacing tokens; no new colors).
+Define `const SIDE_GAME_MIN = 4;` at the top of `Play.tsx` (display only; the server's `sidegames_min_players` still decides when a game opens). Pass `sideOptIn={state.queue.sideOptIn}` and `sideGame={state.sideGame ?? null}` from `Live`. Add minimal CSS for `.side-toggle` and `.side-game` next to the queue panel styles (match the existing spacing tokens; no new colors).
 
 - [ ] **Step 4: Run tests and typecheck**
 
@@ -1648,11 +1655,17 @@ git commit -m "web: side game toggle, status line and connect panel on the queue
 
 ```ts
 // discordPresenter.test.ts
+it('offers Side games only at 4+ queued', () => {
+  const few = renderPanel({ publicUrl: 'https://x', size: 8, players: players(3), phase: null, sideGame: null });
+  expect(few.components.flat().some((b) => b.kind === 'button' && b.customId === 'q:side')).toBe(false);
+});
+
 it('shows a running side game on the queue card', () => {
-  const p = renderPanel({ publicUrl: 'https://x', size: 8, players: [], phase: null, sideGame: { size: 2, players: 5 } });
+  const p = renderPanel({ publicUrl: 'https://x', size: 8, players: players(5), phase: null, sideGame: { size: 2, players: 5 } });
   expect(p.embeds[0].description).toContain('Side game: 2v2, 5 playing');
   expect(p.components[0].some((b) => b.kind === 'button' && b.customId === 'q:side')).toBe(true);
 });
+// players(n): n PlayerView fixtures, built the way this file's existing panel tests build them.
 
 // discordController.test.ts (use its existing linked-player fixture)
 it('q:side toggles the opt-in and replies with connect details when a game is open', async () => {
@@ -1685,10 +1698,12 @@ Expected: FAIL.
     : '';
 ```
 
-append `${side}` to the description after `${status}`, and add after the Leave button:
+append `${side}` to the description after `${status}`, and add after the Leave button, only at 4+ queued (the card is shared, so it cannot know who is already opted in; an opted-in player whose queue dips to 3 simply keeps their opt-in, and turns it off by leaving the queue or on the site):
 
 ```ts
-      { kind: 'button', customId: 'q:side', label: 'Side games', style: 'secondary' },
+      ...(v.players.length >= 4 || v.sideGame
+        ? [{ kind: 'button' as const, customId: 'q:side', label: 'Side games', style: 'secondary' as const }]
+        : []),
 ```
 
 (Check the Discord 5-buttons-per-row limit: Join, Leave, Side games, Notify me, Website, Leaderboard is 6. Move the two link buttons to a second row: `components: [[join, leave, side, ...notify], [website, leaderboard]]`, and update any presenter test that pins the single row.)

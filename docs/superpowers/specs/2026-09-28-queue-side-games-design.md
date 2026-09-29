@@ -29,7 +29,9 @@ recorded or shown anywhere.
 
 1. Queue panel (site) and the Discord queue card get a toggle:
    "Play 2v2/3v3 while I wait". It is per queue entry and clears when the
-   player leaves the queue.
+   player leaves the queue. It only appears once 4 or more are queued (on
+   the site it also stays visible for anyone already opted in, so a queue
+   dipping to 3 does not hide their tick; the opt-in itself is kept).
 2. When 4 opted-in players are queued and a server is free, the site opens a
    side game. The queue panel shows "Side game open: 2v2, 4 playing" with the
    usual connect button and console line (side-game password). Discord shows
