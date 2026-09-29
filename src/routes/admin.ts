@@ -332,6 +332,9 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
 
   app.get('/api/admin/overview', async (req, reply) => {
     if (!requireStaff(req, reply)) return reply;
+    // open[].connect.password is a live match's sv_password. Staff open by
+    // the same 2026-09-28 ruling that opened this route: a moderator already
+    // sees it on the mod call card's Join line.
     return { ...adminOverview(db, logAuth), queue: matchmaker.publicQueue().players };
   });
 
