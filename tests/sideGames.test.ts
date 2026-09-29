@@ -167,7 +167,8 @@ describe('SideGames', () => {
     const roster = rconLog[0][0];
     expect(seatsOf(roster)).toHaveLength(5);
     expect(teamOf(roster, ids(5)[4])).toBe('S');
-    expect(sg.publicView()).toEqual({ size: 2, players: 5 });
+    // Not on the box yet, so not counted as in the game.
+    expect(sg.publicView()).toEqual({ phase: 'running', size: 2, players: 4 });
   });
 
   it('grows to 3v3 at the next mapstart', async () => {
@@ -181,7 +182,7 @@ describe('SideGames', () => {
     expect(rconLog[0][0]).toBe('exec rotoblin_hardcore_3v3');
     expect(countTeam(rconLog[0][1], 'A')).toBe(3);
     expect(countTeam(rconLog[0][1], 'B')).toBe(3);
-    expect(sg.publicView()).toEqual({ size: 3, players: 6 });
+    expect(sg.publicView()).toEqual({ phase: 'running', size: 3, players: 6 });
   });
 
   it('rotates the sitter in and the longest streak out at a map change', async () => {
@@ -677,7 +678,30 @@ describe('SideGames', () => {
       connect: { host: '10.0.0.1', port: 27015, password: pw },
     });
     expect(sg.view('76561198999999999')).toEqual({ phase: 'running', size: 2, players: 4, youIn: false, connect: null });
-    expect(sg.publicView()).toEqual({ size: 2, players: 4 });
+    expect(sg.publicView()).toEqual({ phase: 'running', size: 2, players: 4 });
+  });
+
+  it('players counts those in the game: the two teams plus sitters on the box', async () => {
+    await openWith(5);
+    const sitter = ids(5).find((id) => teamOf(lastRoster(), id) === 'S')!;
+    expect(sg.publicView()!.players).toBe(4);
+    log('join', { steamid: sitter });
+    expect(sg.publicView()!.players).toBe(5);
+    // A sitter who drops is not in the game.
+    log('part', { steamid: sitter });
+    expect(sg.publicView()!.players).toBe(4);
+    // A player whose grace ran out is benched as gone: not counted.
+    const [p] = ids(5).filter((id) => id !== sitter);
+    log('join', { steamid: sitter });
+    log('join', { steamid: p });
+    log('part', { steamid: p });
+    fire(RECONNECT_GRACE_MS);
+    await sg.settled();
+    expect(sg.publicView()).toEqual({ phase: 'running', size: 2, players: 4 });
+    // Closing: everyone sits, only those still on the box count.
+    q.candidates = [sitter, ids(5).find((id) => id !== sitter && id !== p)!];
+    sg.sync();
+    expect(sg.publicView()).toEqual({ phase: 'closing', size: null, players: 1 });
   });
 
   it('skips a box that refused sm_side_start for 30 minutes, with one warning', async () => {

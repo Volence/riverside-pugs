@@ -15,6 +15,7 @@ import {
 } from './presenter.js';
 import { getSetting } from '../settings.js';
 import { safeThresholds } from '../matchmaker.js';
+import { sideGamesEnabled, type SidePublicView } from '../sideGames.js';
 
 /** Shortest gap between two queue alerts.
  *
@@ -46,7 +47,7 @@ export interface DiscordSyncDeps {
   voice?: VoiceHook;
   /** A side game currently running, or null. Absent in tests that do not
    *  exercise side games. */
-  sideGame?: () => { size: 2 | 3 | null; players: number } | null;
+  sideGame?: () => SidePublicView | null;
   now?: () => number;
   /** Off in tests that drive pass() by hand. */
   autoSchedule?: boolean;
@@ -304,6 +305,7 @@ export class DiscordSync {
       phase: q.phase,
       alertRoleId: getSetting(db, 'discord_pug_role_id') || undefined,
       sideGame: this.deps.sideGame?.() ?? null,
+      sideGamesEnabled: sideGamesEnabled(db),
     });
     const stored = getMessage(db, 'panel', 'queue');
     if (stored && posted) {

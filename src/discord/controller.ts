@@ -9,7 +9,7 @@ import { getSetting } from '../settings.js';
 import { ENDORSE_ERROR_TEXT, ENDORSE_LABEL, endorseState, giveEndorsement } from '../endorsements.js';
 import { escapeName, renderEndorseKinds, renderEndorsePicker } from './presenter.js';
 import { MERGED_MESSAGE, standingOf } from '../standing.js';
-import type { SideGameView } from '../sideGames.js';
+import { sideGamesEnabled, type SideGameView } from '../sideGames.js';
 
 export interface ControllerDeps {
   db: DB;
@@ -118,6 +118,8 @@ export async function handleButton(
 
   if (parts[0] === 'q' && parts[1] === 'side') {
     const on = !mm.isSideOptedIn(steamid);
+    // A card posted before the switch went off can still carry the button.
+    if (on && !sideGamesEnabled(deps.db)) return say('Side games are off.');
     const r = mm.setSideOptIn(steamid, on);
     if (!r.ok) return say(`Could not change side games: ${r.error}.`);
     if (!on) return say('Side games off. You stay in the queue.');

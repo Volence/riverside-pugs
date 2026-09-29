@@ -71,20 +71,35 @@ describe('renderPanel', () => {
     name: `p${i}`, discordId: null, sr: null,
   }));
 
+  const hasSide = (p: ReturnType<typeof renderPanel>) => p.components.flat().some((b) => b.kind === 'button' && b.customId === 'q:side');
+
   it('offers Side games only at 4+ queued', () => {
-    const few = renderPanel({ publicUrl: URL_, size: 8, players: players(3), phase: null, sideGame: null });
-    expect(few.components.flat().some((b) => b.kind === 'button' && b.customId === 'q:side')).toBe(false);
+    const few = renderPanel({ publicUrl: URL_, size: 8, players: players(3), phase: null, sideGame: null, sideGamesEnabled: true });
+    expect(hasSide(few)).toBe(false);
   });
 
   it('shows a running side game on the queue card', () => {
-    const p = renderPanel({ publicUrl: URL_, size: 8, players: players(5), phase: null, sideGame: { size: 2, players: 5 } });
-    expect(p.embeds[0].description).toContain('Side game: 2v2, 5 playing');
-    expect(p.components[0].some((b) => b.kind === 'button' && b.customId === 'q:side')).toBe(true);
+    const p = renderPanel({ publicUrl: URL_, size: 8, players: players(5), phase: null, sideGamesEnabled: true, sideGame: { phase: 'running', size: 2, players: 5 } });
+    expect(p.embeds[0].description).toContain('Side game: 2v2, 5 in the game (opt in with Side games).');
+    expect(hasSide(p)).toBe(true);
+  });
+
+  it('says a paused side game is paused', () => {
+    const closing = renderPanel({ publicUrl: URL_, size: 8, players: players(3), phase: null, sideGamesEnabled: true, sideGame: { phase: 'closing', size: null, players: 3 } });
+    expect(closing.embeds[0].description).toContain('Side game: paused, waiting for more players (opt in with Side games).');
+    const popped = renderPanel({ publicUrl: URL_, size: 8, players: players(0), phase: 'ready_check', sideGamesEnabled: true, sideGame: { phase: 'popped', size: null, players: 4 } });
+    expect(popped.embeds[0].description).toContain('Side game: paused, the queue popped.');
   });
 
   it('offers Side games at 4+ queued even without a running game', () => {
-    const p = renderPanel({ publicUrl: URL_, size: 8, players: players(4), phase: null, sideGame: null });
-    expect(p.components[0].some((b) => b.kind === 'button' && b.customId === 'q:side')).toBe(true);
+    const p = renderPanel({ publicUrl: URL_, size: 8, players: players(4), phase: null, sideGame: null, sideGamesEnabled: true });
+    expect(hasSide(p)).toBe(true);
+  });
+
+  it('with side games off the card is exactly the plain queue card', () => {
+    const off = renderPanel({ publicUrl: URL_, size: 8, players: players(6), phase: null, sideGamesEnabled: false, sideGame: { phase: 'running', size: 3, players: 6 } });
+    expect(hasSide(off)).toBe(false);
+    expect(off).toEqual(renderPanel({ publicUrl: URL_, size: 8, players: players(6), phase: null }));
   });
 
   it('keeps the two link buttons on their own row', () => {

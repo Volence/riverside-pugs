@@ -61,6 +61,10 @@ export interface PublicQueue {
   count: number;
   players: NamedPlayer[];
   phase: LobbyPhase | null;
+  /** A side game up while the queue fills (players = the two teams plus
+   *  sitters on the box), and the switch that allows them. */
+  sideGame?: { phase: 'running' | 'popped' | 'closing'; size: 2 | 3 | null; players: number } | null;
+  sideGamesEnabled?: boolean;
 }
 
 export interface StateSnapshot {
@@ -93,6 +97,8 @@ export interface StateSnapshot {
   /** `removed` is set instead of `notReady` when the pop was cancelled because
    *  a player was taken out of it (banned mid ready check). */
   lobbyNotice?: { notReady: NamedPlayer[]; youWereReady: boolean; removed?: NamedPlayer } | null;
+  /** The sidegames_enabled switch: off, nothing about side games shows. */
+  sideGamesEnabled?: boolean;
   /** The unrecorded 2v2/3v3 running (or closing) while the queue fills. */
   sideGame?: {
     phase: 'running' | 'popped' | 'closing';

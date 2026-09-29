@@ -278,7 +278,7 @@ function Live(
       <QueuePanel
         count={queue.count} joined={queue.joined} players={queue.players} refresh={refresh}
         timeout={state.timeout ?? null} queueBlock={state.queueBlock ?? null} me={sessionMe}
-        sideOptIn={queue.sideOptIn} sideGame={state.sideGame ?? null}
+        sideGamesEnabled={state.sideGamesEnabled ?? false} sideOptIn={queue.sideOptIn} sideGame={state.sideGame ?? null}
       />
     </>
   );
@@ -342,7 +342,7 @@ export function LobbyNotice(
 }
 
 export function QueuePanel(
-  { count, joined, players, refresh, timeout = null, queueBlock = null, me = null, sideOptIn, sideGame = null }:
+  { count, joined, players, refresh, timeout = null, queueBlock = null, me = null, sideGamesEnabled = false, sideOptIn, sideGame = null }:
     {
       count: number; joined: boolean; players: NamedPlayer[]; refresh: () => void;
       /** A queue timeout being served; the join button is disabled until it ends. */
@@ -350,6 +350,9 @@ export function QueuePanel(
       /** A Discord step still missing; replaces the join button with the checklist. */
       queueBlock?: 'link_discord' | 'join_discord' | null;
       me?: Me | null;
+      /** The sidegames_enabled switch. Off, the panel is the plain queue:
+       *  no opt-in and no side game line. */
+      sideGamesEnabled?: boolean;
       /** Whether the viewer has opted into the side game while queued. */
       sideOptIn?: boolean;
       /** The unrecorded 2v2/3v3 running (or closing) while the queue fills. */
@@ -396,22 +399,24 @@ export function QueuePanel(
       ) : (
         <button class="btn btn--block" onClick={() => act(api.joinQueue)}>Join queue</button>
       )}
-      {joined && (count >= SIDE_GAME_MIN || sideOptIn) && (
+      {sideGamesEnabled && joined && (count >= SIDE_GAME_MIN || sideOptIn) && (
         <label class="side-toggle">
           <input type="checkbox" checked={!!sideOptIn}
             onChange={(e) => act(() => api.setSideOptIn((e.target as HTMLInputElement).checked))} />
           Play 2v2/3v3 while I wait
         </label>
       )}
-      {sideGame && (sideGame.youIn && sideGame.connect ? (
+      {sideGamesEnabled && sideGame && (sideGame.youIn && sideGame.connect ? (
         <div class="side-game">
           <p>{sideGame.phase === 'popped' ? 'Queue popped: ready up here or in game (!ready).'
-            : sideGame.phase === 'closing' ? `Side game paused: waiting for players (${sideGame.players})`
-            : `Side game open: ${sideGame.size}v${sideGame.size}, ${sideGame.players} playing`}</p>
+            : sideGame.phase === 'closing' ? 'Side game paused: waiting for more players'
+            : `Side game open: ${sideGame.size}v${sideGame.size}, ${sideGame.players} in the game`}</p>
           {sideGame.phase === 'running' && <ConnectPanel connect={sideGame.connect} />}
         </div>
       ) : (
-        <p class="side-game side-game--muted">Side game running ({sideGame.players} players)</p>
+        <p class="side-game side-game--muted">{sideGame.phase === 'popped' ? 'Side game paused: the queue popped'
+          : sideGame.phase === 'closing' ? 'Side game paused: waiting for more players'
+          : `Side game running: ${sideGame.size}v${sideGame.size}, ${sideGame.players} in the game`}</p>
       ))}
       {error && <p class="error">{error}</p>}
     </Panel>

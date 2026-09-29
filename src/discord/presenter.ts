@@ -1,6 +1,7 @@
 import type { ActionRow, Button, Embed, MessagePayload } from './transport.js';
 import { ENDORSE_KINDS, ENDORSE_LABEL, type EndorseKind } from '../endorsements.js';
 import { escapeName, sameName } from '../identity.js';
+import type { SidePublicView } from '../sideGames.js';
 
 // Moved to src/identity.ts, which src/discord/adminFeedPoster.ts and
 // src/discord/commands.ts also need; re-exported so nothing else here changes.
@@ -60,9 +61,12 @@ export interface PanelView {
   /** The opt-in alert role, when one is configured. Drives whether the panel
    *  offers a Notify me toggle at all. */
   alertRoleId?: string;
-  /** A side game currently running, or null. The card is shared by everyone,
+  /** A side game currently up, or null. The card is shared by everyone,
    *  so this cannot say who is opted in, only that a game is up. */
-  sideGame?: { size: 2 | 3 | null; players: number } | null;
+  sideGame?: SidePublicView | null;
+  /** The sidegames_enabled switch. Off (or absent), the card is exactly the
+   *  plain queue card: no Side games button, no side game line. */
+  sideGamesEnabled?: boolean;
 }
 
 export function renderPanel(v: PanelView): MessagePayload {
@@ -74,9 +78,11 @@ export function renderPanel(v: PanelView): MessagePayload {
     : v.phase === 'map_vote'
       ? '\nA queue just popped: campaign vote in progress.'
       : '';
-  const side = v.sideGame
-    ? `\nSide game: ${v.sideGame.size ? `${v.sideGame.size}v${v.sideGame.size}, ` : ''}${v.sideGame.players} playing (opt in with Side games).`
-    : '';
+  const sg = v.sideGamesEnabled ? v.sideGame : null;
+  const side = !sg ? ''
+    : sg.phase === 'popped' ? '\nSide game: paused, the queue popped.'
+    : sg.phase === 'closing' ? '\nSide game: paused, waiting for more players (opt in with Side games).'
+    : `\nSide game: ${sg.size}v${sg.size}, ${sg.players} in the game (opt in with Side games).`;
   const embed: Embed = {
     title: 'Riverside PUG Queue',
     url: `${v.publicUrl}/`,
@@ -90,11 +96,12 @@ export function renderPanel(v: PanelView): MessagePayload {
       [
         { kind: 'button', customId: 'q:join', label: 'Join Queue', style: 'success' },
         { kind: 'button', customId: 'q:leave', label: 'Leave Queue', style: 'danger' },
-        // Only when 4+ are queued, or a side game is already running: the card
-        // is shared by everyone, so it cannot know who is already opted in. A
+        // Only with side games on, and when 4+ are queued or a side game is
+        // already up: the card is shared by everyone, so it cannot know who
+        // is already opted in. A
         // player who opted in when the queue dips below 4 keeps their opt-in
         // and turns it off by leaving the queue or on the site.
-        ...(v.players.length >= 4 || v.sideGame
+        ...(v.sideGamesEnabled && (v.players.length >= 4 || v.sideGame)
           ? [{ kind: 'button' as const, customId: 'q:side', label: 'Side games', style: 'secondary' as const }]
           : []),
         // Only when an alert role is configured. Offering a toggle that silently

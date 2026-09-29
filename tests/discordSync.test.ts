@@ -375,6 +375,20 @@ describe('DiscordSync', () => {
   });
 });
 
+describe('Side games button', () => {
+  const panelButtons = () => (t.byId(panelId())!.payload.components.flat() as { customId?: string }[]).map((b) => b.customId ?? '');
+
+  it('is offered at 4 queued only while side games are on', async () => {
+    await build().start();
+    for (let i = 0; i < 4; i++) mm.join(IDS[i]);
+    await sync.pass();
+    expect(panelButtons()).not.toContain('q:side');
+    setSetting(db, 'sidegames_enabled', '1');
+    await sync.pass();
+    expect(panelButtons()).toContain('q:side');
+  });
+});
+
 describe('queue-filling alert', () => {
   const ROLE = '55501';
   const setRole = (id = ROLE) => setSetting(db, 'discord_pug_role_id', id);
