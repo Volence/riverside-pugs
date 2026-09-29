@@ -73,10 +73,10 @@ describe('the Tickets section', () => {
     expect(mockMod.tickets).not.toHaveBeenCalled();
   });
 
-  it('a moderator sees the People desk only, and never calls the admin API', async () => {
+  it('a moderator sees Live and People only, and never calls the admin API', async () => {
     renderAdmin('/admin/people/tickets', mod);
     await screen.findByText('Walls');
-    expect(screen.queryByRole('tab', { name: 'Live' })).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Live' })).toBeTruthy();
     expect(screen.queryByRole('tab', { name: 'Setup' })).toBeNull();
     expect(screen.getByRole('tab', { name: 'Needs a look' })).toBeTruthy();
     expect(mockAdmin.players).not.toHaveBeenCalled();

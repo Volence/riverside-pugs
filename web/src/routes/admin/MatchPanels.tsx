@@ -61,8 +61,12 @@ export function CaptureHealthLine({ health }: { health: CaptureHealth }) {
   );
 }
 
-export function AdminServersPanel({ servers, busy, run, health }: {
+export function AdminServersPanel({ servers, busy, run, health, canManage = true }: {
   servers: AdminOverview['servers']; busy: boolean; run: Run; health?: CaptureHealth;
+  /** Server controls (pool, restart, SourceTV, log signing, idle, admin sync)
+   *  stay admin only (owner ruling 2026-09-28); a moderator sees the same
+   *  rows, read only, plus everything else on the Live desk. */
+  canManage?: boolean;
 }) {
   return (
     <Panel class="panel--table">
@@ -95,7 +99,11 @@ export function AdminServersPanel({ servers, busy, run, health }: {
                     status it has and simply stops being claimed, so a match
                     already on it plays out untouched. */}
                 <td>
-                  {s.enabled === 1 ? (
+                  {!canManage ? (
+                    <span class="admin-status admin-status--offline">
+                      {s.enabled === 1 ? 'in pool' : 'out of pool'}
+                    </span>
+                  ) : s.enabled === 1 ? (
                     <button class="chip" disabled={busy}
                       onClick={() => run(
                         () => adminApi.serverEnabled(s.id, false),
@@ -113,10 +121,10 @@ export function AdminServersPanel({ servers, busy, run, health }: {
                     </>
                   )}
                 </td>
-                <td><RestartCell server={s} busy={busy} run={run} /></td>
-                <td><SourceTvCell server={s} busy={busy} run={run} /></td>
-                <td><LogAuthCell server={s} busy={busy} run={run} /></td>
-                <td>{s.status !== 'idle' && !s.practice && (
+                <td>{canManage ? <RestartCell server={s} busy={busy} run={run} /> : <RestartText server={s} />}</td>
+                <td>{canManage ? <SourceTvCell server={s} busy={busy} run={run} /> : <SourceTvText server={s} />}</td>
+                <td>{canManage ? <LogAuthCell server={s} busy={busy} run={run} /> : <LogAuthText server={s} />}</td>
+                <td>{canManage && s.status !== 'idle' && !s.practice && (
                   <button class="chip" disabled={busy}
                     onClick={() => run(() => adminApi.serverIdle(s.id), {
                       title: `Set ${s.name} idle?`,
@@ -131,7 +139,7 @@ export function AdminServersPanel({ servers, busy, run, health }: {
         </div>
       )}
       {health && <CaptureHealthLine health={health} />}
-      <AdminSyncButton />
+      {canManage && <AdminSyncButton />}
     </Panel>
   );
 }
@@ -304,6 +312,13 @@ export function RecentResultsPanel({ data, busy, run }: { data: AdminOverview; b
  * gone until someone opens its host's control panel. Hence the confirm, and
  * hence doing it one box at a time.
  */
+/** Read-only stand-in for RestartCell, for a moderator: the value with
+ *  nothing to change it. */
+function RestartText({ server: s }: { server: { restartAfterMatch?: number } }) {
+  const on = s.restartAfterMatch === 1;
+  return <span class={`admin-status admin-status--${on ? 'idle' : 'offline'}`}>{on ? 'on' : 'off'}</span>;
+}
+
 function RestartCell({ server: s, busy, run }: {
   server: { id: number; name: string; restartAfterMatch?: number };
   busy: boolean;
@@ -347,6 +362,15 @@ function RestartCell({ server: s, busy, run }: {
  * plugins, set `log`, play a match and watch `unsigned` stop climbing, then
  * `enforce`. The counters are since the website last restarted.
  */
+/** Read-only stand-in for LogAuthCell, for a moderator: the mode with
+ *  nothing to change it. */
+function LogAuthText({ server: s }: { server: { logAuth?: ServerLogAuth } }) {
+  const la = s.logAuth;
+  if (!la) return null;
+  const tone = la.mode === 'enforce' ? 'idle' : la.mode === 'log' ? 'reserved' : 'offline';
+  return <span class={`admin-status admin-status--${tone}`}>{la.mode}</span>;
+}
+
 function LogAuthCell({ server: s, busy, run }: {
   server: { id: number; name: string; logAuth?: ServerLogAuth };
   busy: boolean;
@@ -447,6 +471,13 @@ export function readyupText(r: MatchReadyup): string {
   const length = r.seconds === null ? 'still open' : formatTime(r.seconds * 1000);
   const last = r.lastUnreadyNames.length ? `, last ${r.lastUnreadyNames.join(', ')}` : '';
   return `${length} on map ${r.mapOrdinal + 1}${last}`;
+}
+
+/** Read-only stand-in for SourceTvCell, for a moderator: on or off, with
+ *  nothing to change it. */
+function SourceTvText({ server }: { server: { tvEnabled?: number } }) {
+  const on = server.tvEnabled === 1;
+  return <span class={`admin-status admin-status--${on ? 'active' : 'offline'}`}>{on ? 'on' : 'off'}</span>;
 }
 
 function SourceTvCell(

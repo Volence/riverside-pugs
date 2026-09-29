@@ -163,11 +163,45 @@ describe('POST /api/admin/live/:matchId/players/:steamid/leave', () => {
     expect(sent).toEqual([]);
   });
 
-  it('a moderator is not an admin here: refused by both routes, and nothing is dialled', async () => {
-    // is_mod opens tickets, not the board that can end a ranked match.
-    expect((await act({ action: 'hold' }, MOD)).statusCode).toBe(403);
-    expect((await app.inject({ method: 'GET', url: '/api/admin/live', cookies: cookies[MOD] })).statusCode).toBe(403);
-    expect(sent).toEqual([]);
+  it('a moderator reads the board and can use the abandon clock', async () => {
+    expect((await app.inject({ method: 'GET', url: '/api/admin/live', cookies: cookies[MOD] })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: cookies[MOD] })).statusCode).toBe(200);
+    expect((await act({ action: 'hold' }, MOD)).statusCode).toBe(200);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('a moderator may remove from the queue, abort and void, and the audit names them', async () => {
+    const post = (url: string, payload?: object) => app.inject({ method: 'POST', url, cookies: cookies[MOD], payload });
+    expect((await post('/api/admin/queue/remove', { steamid: IDS[0] })).statusCode).toBe(200);
+    const audit = db.prepare("SELECT admin_id FROM admin_actions WHERE action = 'queue_remove'").get() as { admin_id: string };
+    expect(audit.admin_id).toBe(MOD);
+    // abort and void answer with their own business errors for this fixture;
+    // what matters is that the guard let a moderator through (not 401/403).
+    expect([401, 403]).not.toContain((await post(`/api/admin/matches/${matchId}/abort`)).statusCode);
+    expect([401, 403]).not.toContain((await post(`/api/admin/matches/${matchId}/void`, { reason: 'test' })).statusCode);
+  });
+
+  it('server controls stay admin only', async () => {
+    const serverId = (db.prepare('SELECT id FROM servers LIMIT 1').get() as { id: number }).id;
+    const post = (url: string, payload?: object) => app.inject({ method: 'POST', url, cookies: cookies[MOD], payload });
+    for (const [url, body] of [
+      [`/api/admin/servers/${serverId}/enabled`, { enabled: false }],
+      [`/api/admin/servers/${serverId}/idle`, undefined],
+      [`/api/admin/servers/${serverId}/restart-after-match`, { on: true }],
+      [`/api/admin/servers/${serverId}/log-secret`, undefined],
+      [`/api/admin/servers/${serverId}/log-auth`, { mode: 'off' }],
+      [`/api/admin/servers/${serverId}/sourcetv`, { enabled: true }],
+      ['/api/admin/servers/dlc4-check', undefined],
+      ['/api/admin/servers/admins-sync', undefined],
+    ] as [string, object | undefined][]) {
+      expect((await post(url, body)).statusCode, url).toBe(403);
+    }
+    expect((await app.inject({ method: 'GET', url: '/api/admin/settings', cookies: cookies[MOD] })).statusCode).toBe(403);
+  });
+
+  it('a plain player is still refused the board', async () => {
+    expect((await app.inject({ method: 'GET', url: '/api/admin/live', cookies: cookies[PLAYER] })).statusCode).toBe(403);
+    expect((await act({ action: 'hold' }, PLAYER)).statusCode).toBe(403);
   });
 
   it('says so plainly where no server query is wired up at all', async () => {
