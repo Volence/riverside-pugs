@@ -201,3 +201,96 @@ the team-lock timer moving a real client, the in-game `!ready` interception
 in practice, the vote menu rendering, and the signed `PUGSIDE` lines
 actually appearing on a UDP listener. Re-run steps 1-9 above once the box is
 confirmed empty.
+
+---
+
+## Step 1 results, 2026-09-29 (this session, run for real)
+
+The shared local box still had a human player connected (see Results
+above), so only the offline suite was run. All four commands were run for
+real, from the worktree `/home/volence/l4d/pug/.claude/worktrees/side-games`:
+
+- `npx vitest run`: **513 test files passed, 8157 tests passed.** No
+  failures. The run prints a handful of `ECONNRESET`/`ECONNREFUSED` stack
+  traces to stderr; those are expected noise from tests that exercise
+  unreachable-server error paths, not failures (the summary line confirms
+  0 failed). Duration about 39 s.
+- `npm run typecheck`: **clean**, no output beyond the two `tsc --noEmit`
+  invocations it runs (root, then `web/tsconfig.json`). No errors.
+- `npm run build`: **succeeded** (`vite build`, 375 modules transformed).
+  One pre-existing warning, unrelated to side games: the main JS chunk
+  (`dist/public/assets/index-*.js`, ~1.17 MB) is larger than the 500 kB
+  chunk-size guideline Vite warns about by default.
+- `plugin/build-sidegame.sh`: **succeeded**, output
+  `plugin/pug-sidegame.smx` (28708 bytes code, 8332 bytes data). One
+  compiler warning, the same pre-existing one noted in the Results section
+  above: `include\halflife.inc(655): symbol "CreateDialog" is marked as
+  deprecated`, inside a vendored stock include this plugin does not call
+  into. Nothing in `pug-sidegame.sp` itself triggers a warning. The `.smx`
+  is covered by `plugin/*.smx` in `.gitignore` and was not committed.
+
+## End-to-end rehearsal, not yet run
+
+The shared local box (`/home/volence/l4d1-ds`) had a human player connected
+throughout this session (see Results above), so nothing in this section has
+been run. Both halves below are blocked by the same rule as the rest of this
+file: check `status` first (step 0), and do not touch the box while a human
+is on it. Everything here is marked **NOT YET RUN**; whoever runs it next
+should update these lines with real results, the same way the Results
+section above was filled in.
+
+### A. Plugin-only rcon checks (steps 1-9 above)
+
+Steps 1 through 9 already in this document, in order, are **NOT YET RUN**:
+start clean, arm a side game and check the basics, confirm the password
+survives a changelevel, confirm signed `PUGSIDE` lines, queue pop and
+in-game ready, vote, stop and confirm cleanup, confirm nothing was
+recorded, clean up. Follow them exactly as written once the box is
+confirmed empty of humans.
+
+### B. Full web-queue end-to-end (the plan's Step 2)
+
+With the box confirmed empty, run `npm run dev` pointed at the local server
+as its only pool box. The `DevOrchestrator` path does not run real rcon, so
+this needs a local non-dev config with the `l4d1-ds` box as the single
+server, the same way the earlier web-queue rehearsal did. Script four queue
+joins and opt-ins using the signed-cookie method from that rehearsal
+(session memory `pug-web-queue-to-server`), using obviously invalid
+steamids (`76561190000000001`-style values that are not real accounts, so
+nothing here collides with a real player), and clean up the `players` and
+`player_ratings` rows it creates afterwards.
+
+Checks, all **NOT YET RUN**:
+
+- [ ] NOT YET RUN: the side game opens on the box, the site shows the
+  connect line, and you are placed in game.
+- [ ] NOT YET RUN: a 5th opt-in appears as `S` and is seated at the next
+  map.
+- [ ] NOT YET RUN: four more joins pop the queue; `!ready` in game readies
+  you on the site.
+- [ ] NOT YET RUN: the match goes onto the same box and
+  `side_games.end_reason = 'match'`.
+- [ ] NOT YET RUN: no `matches` row exists for the side game period and no
+  replay was written.
+
+## Go-live notes (not executed)
+
+These are notes for going live, not a record of anything done. No live box
+has been touched.
+
+1. Stage `pug-sidegame.smx` on all pool boxes via
+   `deploy/tools/stage-on-restart.sh` so it lands between matches.
+2. Deploy web with `deploy-web.sh`.
+3. Turn on `sidegames_enabled` from the admin panel while the owner watches
+   the first one.
+4. Turn the setting on only after the live rehearsal above (sections A and
+   B) has actually passed, not before, and not on the strength of the
+   offline Step 1 results alone.
+5. Before turning the setting on, confirm the plugin is staged on *every*
+   pool box, not just one or a few. A side game can open on any idle box
+   the matchmaker would otherwise claim; a side game opened on a box that
+   does not have `pug-sidegame.smx` loaded would get back `PUGERR` or an
+   unknown-command error from `sm_side_start`, and the site treats that
+   exactly like any other refused open: `rcon_failed`, and it closes the
+   side game right away.
+6. Live boxes are never touched without the owner's explicit go-ahead.

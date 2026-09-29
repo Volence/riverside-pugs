@@ -153,15 +153,27 @@ It enumerates splits with player 0 on team A, and the 8-player path stays
 identical so ranked balancing does not change.
 
 ### Site: `SideGameOrchestrator` (in `src/sideGames.ts` or its own file)
-Rcon sequences:
-- open/next map: `sm_pug_auto_track 0`, `sv_password "side_<token8>"`,
-  `exec rotoblin_hardcore_{2v2|3v3}`, `sm_side_start <token> <password>`,
-  `sm_side_roster "<steamid>:<A|B|S>"` per player, `changelevel <map>`.
+Rcon sequences (see `src/sideGames.ts` for the exact commands sent):
+- open (also a re-open after a close-grace restart): `sv_password
+  "side_<token8>"`, `exec rotoblin_hardcore_{2v2|3v3}`, `sm_side_start
+  <token> <password>`, `sm_side_roster <id64>:<A|B|S> ...` (one command,
+  all seats), `changelevel <map>`. The site never sends `sm_pug_auto_track`;
+  the plugin itself saves, zeroes and restores `sm_pug_auto_track` for as
+  long as a side game is active.
+- grow, shrink, or rotate to a new map: `exec rotoblin_hardcore_{2v2|3v3}`
+  (only when the size changes) followed by a fresh `sm_side_roster ...`.
+- pop: `sm_side_popped` (no argument), then, once the map vote starts,
+  `sm_side_vote "<slug>=<Display Name>" ...` (one command, one quoted
+  `slug=Name` pair per campaign).
+- resume: `sm_side_resume`, sent when a failed lobby returns players to the
+  queue and the side game keeps its box.
+- notice: `sm_side_notice <id64> "<text>"`, sent when an in-game `!ready` is
+  refused.
 - stop: `sm_side_stop <token>`.
-- pop: `sm_side_popped <readySeconds>`, then `sm_side_vote <token>
-  <campaign>...` when the vote phase starts.
-The side-game password reuses `serverPasswordFor` with a separate token so
-strangers stay out (the standing `sv_password` rule in the web-queue memory
+The side-game password follows the same `<prefix>_<token8>` shape as a
+match's (`serverPasswordFor`), but with its own `side_` prefix and its own
+token, so strangers stay out and a side-game token can never double as a
+match password (the standing `sv_password` rule in the web-queue memory
 still holds: never blank it).
 
 Map choice: the first map is a random `l4d_vs_` map 1 from the stock
