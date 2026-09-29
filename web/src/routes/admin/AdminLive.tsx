@@ -85,7 +85,7 @@ export function AdminLive({ isAdmin }: { isAdmin: boolean }) {
         <Panel><p class="muted">Loading...</p></Panel>
       )}
 
-      <PracticeLeasesPanel nudge={nudge} />
+      <PracticeLeasesPanel nudge={nudge} onChat={openChat} />
 
       {panels.error && <p class="error">{panels.error}</p>}
       {overview.error && <p class="error">Could not load the servers, queue and recent results.</p>}

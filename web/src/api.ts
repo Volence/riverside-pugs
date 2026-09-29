@@ -1840,6 +1840,7 @@ export interface AdminPracticeLease {
   id: number;
   kind: PracticeKind;
   server: string;
+  serverId: number;
   owner: { steamid: string; name: string };
   state: PracticeState;
   humans: number;

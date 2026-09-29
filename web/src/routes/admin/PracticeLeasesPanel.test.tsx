@@ -17,7 +17,7 @@ const { PracticeLeasesPanel, playersCell } = await import('./PracticeLeasesPanel
 const { ApiError } = await import('../../api');
 
 const ROW: AdminPracticeLease = {
-  id: 2, kind: 'park', server: 'Riverside #4', owner: { steamid: '76561199000000001', name: 'mayhem' },
+  id: 2, kind: 'park', server: 'Riverside #4', serverId: 4, owner: { steamid: '76561199000000001', name: 'mayhem' },
   state: 'ready', humans: 6, map: 'l4d_vs_hospital01_apartment', createdAt: '', endsAt: '', warnedAt: null, endReason: null,
 };
 
@@ -32,6 +32,15 @@ const P = (over: Partial<AdminPracticePlayer> = {}): AdminPracticePlayer => ({
 });
 
 describe('PracticeLeasesPanel', () => {
+  it('Chat opens that server in the chat drawer, without toggling the row', async () => {
+    mockAdmin.practiceLeases.mockResolvedValue({ leases: [ROW] });
+    const onChat = vi.fn();
+    render(<PracticeLeasesPanel nudge={0} onChat={onChat} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Chat' }));
+    expect(onChat).toHaveBeenCalledWith(4);
+    expect(screen.getByRole('link', { name: 'Riverside #4' }).closest('tr')?.getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('lists open practice servers and ends one after asking', async () => {
     mockAdmin.practiceLeases.mockResolvedValue({ leases: [ROW] });
     mockConfirm.mockResolvedValue(true);

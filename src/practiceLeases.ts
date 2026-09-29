@@ -900,6 +900,8 @@ export interface AdminLeaseRow {
   id: number;
   kind: LeaseKind;
   server: string;
+  /** The Live board opens this server's chat drawer by id. */
+  serverId: number;
   owner: { steamid: string; name: string };
   state: LeaseView['state'];
   humans: number;
@@ -915,6 +917,7 @@ export function adminLeaseRows(db: DB): AdminLeaseRow[] {
     id: l.id,
     kind: l.kind,
     server: getServer(db, l.server_id)?.name ?? `server ${l.server_id}`,
+    serverId: l.server_id,
     owner: { steamid: l.owner_player_id, name: getPlayer(db, l.owner_player_id)?.name ?? l.owner_player_id },
     state: leaseState(l),
     humans: l.humans,
