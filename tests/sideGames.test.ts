@@ -376,10 +376,11 @@ describe('SideGames', () => {
   });
 
   it('takeForMatch hands the held box to the match', async () => {
-    expect(sg.takeForMatch('no_mercy', () => true)).toBeNull();
+    expect(sg.takeForMatch(7, 'no_mercy', () => true)).toBeNull();
     await openWith(4);
     q.listener.lobbyStarted!('lob_1', ids(8));
-    const took = sg.takeForMatch('no_mercy', () => true)!;
+    q.listener.lobbyCompleted!('lob_1', 7);
+    const took = sg.takeForMatch(7, 'no_mercy', () => true)!;
     expect(took.server.id).toBe(s1);
     expect(took.firstCommands).toEqual([`sm_side_stop ${token()}`]);
     expect(db.prepare('SELECT status FROM servers WHERE id = ?').get(s1)).toEqual({ status: 'reserved' });
@@ -392,7 +393,8 @@ describe('SideGames', () => {
   it('takeForMatch falls back when the campaign cannot run there', async () => {
     await openWith(4);
     q.listener.lobbyStarted!('lob_1', ids(8));
-    expect(sg.takeForMatch('custom_x', () => false)).toBeNull();
+    q.listener.lobbyCompleted!('lob_1', 7);
+    expect(sg.takeForMatch(7, 'custom_x', () => false)).toBeNull();
     await sg.settled();
     expect(released).toEqual([s1]);
     expect(db.prepare('SELECT status FROM servers WHERE id = ?').get(s1)).toEqual({ status: 'idle' });
@@ -402,11 +404,11 @@ describe('SideGames', () => {
 
   it('takeForMatch never takes a game that has not popped', async () => {
     await openWith(4);
-    expect(sg.takeForMatch('no_mercy', () => true)).toBeNull();
+    expect(sg.takeForMatch(7, 'no_mercy', () => true)).toBeNull();
     q.candidates = ids(3);
     sg.sync();
     expect(sg.view(ids(1)[0])!.phase).toBe('closing');
-    expect(sg.takeForMatch('no_mercy', () => true)).toBeNull();
+    expect(sg.takeForMatch(7, 'no_mercy', () => true)).toBeNull();
     await sg.settled();
     expect(openRows()).toHaveLength(1);
     expect(released).toEqual([]);
@@ -430,7 +432,7 @@ describe('SideGames', () => {
     q.listener.lobbyStarted!('lob_2', ids(8));
     q.listener.lobbyCompleted!('lob_2', 8);
     const t = timers.filter((x) => x.ms === HANDOVER_GRACE_MS).at(-1)!;
-    expect(sg.takeForMatch('no_mercy', () => true)).not.toBeNull();
+    expect(sg.takeForMatch(8, 'no_mercy', () => true)).not.toBeNull();
     expect(t.cancelled).toBe(true);
   });
 
@@ -448,7 +450,24 @@ describe('SideGames', () => {
     expect(sg.view(ids(1)[0])!.phase).toBe('popped');
     expect(openRows()).toHaveLength(1);
     expect(released).toEqual([]);
-    expect(sg.takeForMatch('no_mercy', () => true)).not.toBeNull();
+    q.listener.lobbyCompleted!('lob_2', 9);
+    expect(sg.takeForMatch(9, 'no_mercy', () => true)).not.toBeNull();
+  });
+
+  it('takeForMatch hands over only to the match the popped lobby became', async () => {
+    await openWith(4);
+    q.listener.lobbyStarted!('lob_1', ids(8));
+    // Popped, the lobby not complete yet: an older match retried from the
+    // pending list must not take the box.
+    expect(sg.takeForMatch(5, 'no_mercy', () => true)).toBeNull();
+    q.listener.lobbyCompleted!('lob_1', 7);
+    expect(sg.takeForMatch(5, 'no_mercy', () => true)).toBeNull();
+    await sg.settled();
+    expect(released).toEqual([]);
+    expect(openRows()).toHaveLength(1);
+    expect(sg.view(ids(1)[0])!.phase).toBe('popped');
+    expect(db.prepare('SELECT status FROM servers WHERE id = ?').get(s1)).toEqual({ status: 'idle' });
+    expect(sg.takeForMatch(7, 'no_mercy', () => true)!.server.id).toBe(s1);
   });
 
   it('a failed ready check that pops again at once stays popped on the new lobby', async () => {

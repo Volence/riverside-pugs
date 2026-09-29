@@ -890,7 +890,7 @@ describe('setupMatch with a held side-game box', () => {
     // ask runsOn, and on false close the game and answer null.
     db.prepare("INSERT INTO side_games (server_id, token, password) VALUES (?, 't', 'p')").run(heldNoDlc4);
     let asked: boolean | null = null;
-    const orch = await build((_c, runsOn) => {
+    const orch = await build((_id, _c, runsOn) => {
       asked = runsOn(getServer(db, heldNoDlc4)!);
       return null;
     });
