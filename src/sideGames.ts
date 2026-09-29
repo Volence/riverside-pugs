@@ -431,6 +431,8 @@ export class SideGames {
     if (a.phase === 'popped' && !a.resumePending && lobbyId === a.poppedLobby) return;
     a.closeTimer?.cancel();
     a.closeTimer = null;
+    a.handoverTimer?.cancel();
+    a.handoverTimer = null;
     a.phase = 'popped';
     a.poppedLobby = lobbyId;
     a.resumePending = false;
@@ -462,7 +464,7 @@ export class SideGames {
     if (!a || a.phase !== 'popped' || a.poppedLobby !== lobbyId) return;
     a.handoverTimer?.cancel();
     a.handoverTimer = this.setTimer(() => {
-      if (this.active === a && a.phase === 'popped') this.close('orphaned');
+      if (this.active === a && a.phase === 'popped' && a.poppedLobby === lobbyId) this.close('orphaned');
     }, HANDOVER_GRACE_MS);
   }
 
