@@ -112,6 +112,11 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 	StripQuotes(text);
 	TrimString(text);
 
+	// Staff chat reads every say: it records team versus all chat for PUGSAY
+	// and takes !staff. A pending /mod detail line still wins below.
+	g_bSayTeam[client] = StrEqual(command, "say_team", false);
+	if (!g_bAwaitDetails[client] && StaffChat_OnSay(client, text)) return Plugin_Stop;
+
 	if (g_bAwaitDetails[client])
 	{
 		if (StrEqual(text, "/skip", false) || StrEqual(text, "!skip", false))
