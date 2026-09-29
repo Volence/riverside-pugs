@@ -27,4 +27,25 @@ describe('balanceTeams', () => {
     const { pWinA } = balanceTeams(players);
     expect(Math.abs(pWinA - 0.5)).toBeLessThan(0.1);
   });
+
+  it('splits 4 into 2v2 and 6 into 3v3', () => {
+    for (const n of [4, 6]) {
+      const players = Array.from({ length: n }, (_, i) => p(`p${i}`, 20 + i));
+      const { teamA, teamB } = balanceTeams(players);
+      expect(teamA).toHaveLength(n / 2);
+      expect(teamB).toHaveLength(n / 2);
+      expect([...teamA, ...teamB].sort()).toEqual(players.map((x) => x.steamid).sort());
+    }
+  });
+
+  it('separates the two strongest in a 2v2', () => {
+    const { teamA, teamB } = balanceTeams([p('s1', 40), p('s2', 40), p('a', 20), p('b', 20)]);
+    expect(teamA.includes('s1')).not.toBe(teamA.includes('s2'));
+    expect(teamB).toHaveLength(2);
+  });
+
+  it('refuses sizes other than 4, 6 and 8', () => {
+    expect(() => balanceTeams([p('a', 25), p('b', 25), p('c', 25)])).toThrow(/4, 6 or 8/);
+    expect(() => balanceTeams(Array.from({ length: 10 }, (_, i) => p(`p${i}`, 25)))).toThrow(/4, 6 or 8/);
+  });
 });
