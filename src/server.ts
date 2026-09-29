@@ -84,6 +84,7 @@ import { inputThresholds, recordInputBurst, recordInputCap } from './inputBursts
 import { resolveServerBySource, isKnownServerAddress, type ServerRow } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
+import { SideGames } from './sideGames.js';
 import { RconClient as RealRcon } from './rcon.js';
 import type { ServerQuery } from './leaveControl.js';
 import { ServerBanSync, type ServerExec } from './serverBans.js';
@@ -789,6 +790,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // Assigned further down, once the bot variable it reads exists: the same
   // forward reference selfStarted uses, null-safe for the same reason.
   let signonDrops: SignonDropNotifier | null = null;
+  // Forward reference, same shape as `pending` below: RealOrchestrator's
+  // takeHeld and onNoServer close over this before it has a value (the
+  // matchmaker, and so SideGames, only exist once this whole block has run),
+  // and it is read again once the actual SideGames is built after the
+  // matchmaker (or left null in dev mode).
+  let sideGamesRef: SideGames | null = null;
   if (!orchestrator) {
     if (deps.config.devMode) {
       orchestrator = new DevOrchestrator();
@@ -1003,6 +1010,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           } catch (err) {
             console.error('[modcall] failed to handle a call:', err);
           }
+          return;
+        }
+        if (ev.kind === 'side') {
+          try { sideGamesRef?.onLog(ev); } catch (err) { console.error('[sidegame] log line failed:', err); }
           return;
         }
         if (ev.kind === 'player_net') {
@@ -1252,8 +1263,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         // Ranked always wins: a PUG with no box takes one back from practice
         // (the newest lease, after a 60 second warning in game). The pending
         // list then gets it when the lease's release frees the box.
-        onNoServer: (id) => { pending?.add(id); practiceLeases.needServer(); },
+        onNoServer: (id) => { pending?.add(id); practiceLeases.needServer(); sideGamesRef?.needServer(); },
         beforeLive: (rcon) => banSync.pushAll((c) => rcon.exec(c)),
+        // A side game's own pop takes the box it is already holding, rather
+        // than waiting on a fresh idle one.
+        takeHeld: (c, runsOn) => sideGamesRef?.takeForMatch(c, runsOn) ?? null,
       });
 
       // Re-arm the listener for matches that were already running when this
@@ -1354,6 +1368,28 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // Before the bot starts, so restored lobbies keep their Discord cards.
   matchmaker.restore();
   app.decorate('matchmaker', matchmaker);
+  // Side games need a real box to hold (rcon, a forced-restart release), so
+  // there is none in dev mode: the route layer already treats a null
+  // decoration as "no side game running" (see routes/api.ts). Built only now,
+  // after the matchmaker exists (its constructor reads the queue at once) and
+  // after reconcileServers has settled server statuses above, so its own
+  // recover() (which closes any row left open from a previous boot, through
+  // the same releaser) never races that reconcile.
+  if (!deps.config.devMode) {
+    const sideGames = new SideGames({
+      db: deps.db,
+      queue: matchmaker,
+      rcon: deps.practiceRcon ?? realServerRcon,
+      release: (serverId) => new Promise<boolean>((resolve) => {
+        releaser.release(serverId, { restart: true, forceRestart: true }, resolve);
+      }),
+      broadcast: () => hub.broadcast('refresh'),
+    });
+    sideGames.recover();
+    sideGames.sync();
+    sideGamesRef = sideGames;
+  }
+  app.decorate('sideGames', sideGamesRef);
   // Sweep matches the game server has forgotten. Without it a plugin reload,
   // an srcds restart or a crash leaves a match 'live' forever: permanently
   // "no signal" on the live page, and its server row stuck reserved so no new
@@ -1831,5 +1867,6 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 declare module 'fastify' {
   interface FastifyInstance {
     matchmaker: Matchmaker;
+    sideGames: SideGames | null;
   }
 }

@@ -41,6 +41,16 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
     return { ok: true };
   });
 
+  app.post('/api/queue/side', async (req, reply) => {
+    const steamid = requireActive(req, reply);
+    if (!steamid) return;
+    const { on } = (req.body ?? {}) as { on?: unknown };
+    if (typeof on !== 'boolean') return reply.code(400).send({ error: 'on must be true or false' });
+    const r = matchmaker.setSideOptIn(steamid, on);
+    if (!r.ok) return reply.code(409).send({ error: r.error });
+    return { ok: true };
+  });
+
   /** Dismiss the "your ready check failed" notice on the Play page. */
   app.post('/api/lobby/dismiss-notice', async (req, reply) => {
     const steamid = requireActive(req, reply);
@@ -70,7 +80,7 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
   app.get('/api/state', async (req, reply) => {
     const steamid = requireActive(req, reply);
     if (!steamid) return;
-    return matchmaker.stateFor(steamid);
+    return { ...matchmaker.stateFor(steamid), sideGame: app.sideGames?.view(steamid) ?? null };
   });
 
   app.get('/api/matches/:id/report-eligibility', async (req, reply) => {
@@ -92,7 +102,7 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
 
   // Public on purpose: the point is that people can watch the queue fill
   // without signing in. Carries nothing viewer-relative and no connect block.
-  app.get('/api/queue', async () => matchmaker.publicQueue());
+  app.get('/api/queue', async () => ({ ...matchmaker.publicQueue(), sideGame: app.sideGames?.publicView() ?? null }));
 
   /** The ban list. Admins only for now (owner's ruling, 2026-09-20): it was
    *  built to be public and publicBans still returns nothing an ordinary
