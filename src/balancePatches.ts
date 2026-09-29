@@ -371,6 +371,9 @@ export interface PatchSummary {
    *  among them, and whether plugins are all that differ. Empty for a
    *  balance patch. */
   triageBase: { id: number; number: number; name: string | null; needsTriage?: boolean } | null;
+  /** The patch folded into triageBase whose inputs the diff used, when the
+   *  base has none of its own (a historical patch). */
+  comparedWith: { id: number; number: number; name: string | null } | null;
   changes: string[];
   plugins: string[];
   onlyPluginsChanged: boolean;
@@ -405,7 +408,7 @@ export function listPatches(db: DB, lists: Lists = { versionless: [], ignored: [
       id: r.id, number: r.number, name: r.name, notes: r.notes, source: r.source,
       firstSeenAt: r.first_seen_at, reviewed: r.reviewed === 1, rounds: r.rounds, countedRounds: r.counted_rounds,
       merged: r.triage === 'folded', triage: r.triage, foldedInto: r.folded_into, releaseId: r.release_id,
-      triageBase: info?.base ?? null, changes: info?.changes ?? [], plugins: info?.plugins ?? [],
+      triageBase: info?.base ?? null, comparedWith: info?.comparedWith ?? null, changes: info?.changes ?? [], plugins: info?.plugins ?? [],
       onlyPluginsChanged: info?.onlyPluginsChanged ?? false,
       servers: servers.filter((s) => s.patch_id === r.id)
         .map((s) => ({ serverId: s.server_id, name: s.name, lastSeenAt: s.last_seen_at })),
