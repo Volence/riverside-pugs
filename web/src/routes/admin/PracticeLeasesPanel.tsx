@@ -13,6 +13,10 @@ export const PLAYERS_POLL_MS = 15_000;
 
 const TEAM_LABEL: Record<number, string> = { 1: 'Spectator', 2: 'Survivor', 3: 'Infected' };
 const TRAINER_LABEL: Record<number, string> = { 1: 'Skeet trainer', 2: 'Crown trainer', 3: 'Rocks trainer' };
+const STATION_LABEL: Record<string, string> = {
+  pit: 'Hunter pit', lane: 'Skeet lane', dp: 'DP yard', climb: 'Wall-kick climb',
+  skeet: 'Skeet trainer', crown: 'Witch crown', rocks: 'Tank rocks', drill: 'In the drill',
+};
 
 /** "2: Dust, RollingSix", or the lease's last minute count until the first
  *  read answers, or "0" for an empty server. */
@@ -133,7 +137,7 @@ function LeaseRow({ lease: l, busy, run }: { lease: AdminPracticeLease; busy: bo
               : players.length === 0 ? <p class="muted">Nobody is on this server.</p>
               : (
                 <table class="admin-table practice-players">
-                  <thead><tr><th>Name</th><th>Team</th><th>Trainer</th><th>Connected</th><th>Ping</th><th /></tr></thead>
+                  <thead><tr><th>Name</th><th>Team</th><th>Station</th><th>Connected</th><th>Ping</th><th /></tr></thead>
                   <tbody>
                     {players.map((p) => (
                       <PlayerRow key={p.userid} leaseId={l.id} player={p} onKicked={() => setTick((n) => n + 1)} />
@@ -171,7 +175,8 @@ function PlayerRow({ leaseId, player: p, onKicked }: { leaseId: number; player: 
         {p.onSite && p.steamid64 && <> <a class="muted" href={fileUrl(p.steamid64)}>file</a></>}
       </td>
       <td>{p.team !== null ? TEAM_LABEL[p.team] ?? `team ${p.team}` : <span class="muted">unknown</span>}</td>
-      <td>{p.trainer !== null ? TRAINER_LABEL[p.trainer] ?? `trainer ${p.trainer}` : <span class="muted">none</span>}</td>
+      <td>{p.station ? STATION_LABEL[p.station] ?? p.station
+        : p.trainer !== null ? TRAINER_LABEL[p.trainer] ?? `trainer ${p.trainer}` : <span class="muted">none</span>}</td>
       <td class="num">{p.connectedFor}</td>
       <td class="num">{p.ping}</td>
       <td>

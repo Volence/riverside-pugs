@@ -28,7 +28,7 @@ beforeEach(() => {
 });
 
 const P = (over: Partial<AdminPracticePlayer> = {}): AdminPracticePlayer => ({
-  userid: 7, name: 'Dust', steamid64: '76561198030413993', connectedFor: '05:09', ping: 33, team: 2, trainer: 1, onSite: true, ...over,
+  userid: 7, name: 'Dust', steamid64: '76561198030413993', connectedFor: '05:09', ping: 33, team: 2, trainer: 1, station: null, onSite: true, ...over,
 });
 
 describe('PracticeLeasesPanel', () => {
