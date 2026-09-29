@@ -266,6 +266,39 @@ describe('SideGames', () => {
     expect(countTeam(roster, 'S')).toBe(1);
   });
 
+  it('a rebuild at the same size pushes the roster without re-execing the config', async () => {
+    // 5 at 2v2, the sitter never joined the box: a player leaving has no
+    // connected sub, and 4 left is still a 2v2, so the map is not restarted.
+    await openWith(5);
+    const roster = lastRoster();
+    const sitter = ids(5).find((id) => teamOf(roster, id) === 'S')!;
+    for (const id of ids(5).filter((x) => x !== sitter)) log('join', { steamid: id });
+    const leaver = ids(5).find((id) => id !== sitter)!;
+    rconLog = [];
+    q.candidates = ids(5).filter((x) => x !== leaver);
+    sg.sync();
+    await sg.settled();
+    expect(rconLog).toHaveLength(1);
+    expect(rconLog[0]).toHaveLength(1);
+    expect(rconLog[0][0]).toMatch(/^sm_side_roster /);
+    expect(countTeam(rconLog[0][0], 'A')).toBe(2);
+    expect(countTeam(rconLog[0][0], 'B')).toBe(2);
+  });
+
+  it('two leavers in one sync make one batch', async () => {
+    await openWith(6);
+    rconLog = [];
+    q.candidates = ids(6).slice(2);
+    sg.sync();
+    await sg.settled();
+    expect(rconLog).toHaveLength(1);
+    expect(rconLog[0][0]).toBe('exec rotoblin_hardcore_2v2');
+    expect(rconLog[0]).toHaveLength(2);
+    expect(countTeam(rconLog[0][1], 'A')).toBe(2);
+    expect(countTeam(rconLog[0][1], 'B')).toBe(2);
+    expect(countTeam(rconLog[0][1], 'S')).toBe(0);
+  });
+
   it('winds down at 3, holds the box, then closes after the grace', async () => {
     await openWith(4);
     rconLog = [];
