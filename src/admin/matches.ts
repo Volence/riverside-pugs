@@ -16,13 +16,17 @@ export function adminOverview(db: DB, logAuth?: LogAuth) {
             (SELECT COUNT(*) FROM match_players mp WHERE mp.match_id = m.id) AS rostered
      FROM matches m WHERE m.state IN ('configuring', 'live') ORDER BY m.id DESC`,
   ).all() as (Record<string, unknown> & { id: number; serverId: number | null; token: string | null })[];
-  // Two admin-only additions per open match.
+  // Two staff additions per open match. This overview is read by admins AND
+  // moderators (moderators see the Live desk with its server controls
+  // hidden), and both fields go to both.
   //
-  // `connect` is the real game server, not SourceTV: an admin joining to see
-  // what is happening needs the address and the match's own sv_password, which
-  // is derived from the token and never stored. The token itself does not go
-  // out; the password derived from it does, which is the thing you can type
-  // into a console.
+  // `connect` is the real game server, not SourceTV (SourceTV's address is
+  // public anyway, see src/spectate.ts): staff joining to see what is
+  // happening, say after a /mod call, need the address and the match's own
+  // sv_password, which is derived from the token and never stored. Moderators
+  // get it by owner ruling 2026-09-28 (see the caster guard in
+  // src/routes/guards.ts). The token itself does not go out; the password
+  // derived from it does, which is the thing you can type into a console.
   //
   // `forecast` for a live match comes from current ratings, which while a
   // match is in flight ARE the pre-match ratings, since nothing updates until
