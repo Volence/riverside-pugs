@@ -4,6 +4,8 @@ import { Matchmaker } from '../src/matchmaker.js';
 import { upsertPlayer } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
 import { addServer } from '../src/serverPool.js';
+import { insertDraft, publishCampaign, setPracticeOnly } from '../src/customCampaigns.js';
+import { invalidateCampaignCache } from '../src/campaignRegistry.js';
 import type { Scheduler } from '../src/lobby.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119800000000${i + 1}`);
@@ -107,6 +109,20 @@ describe('Matchmaker', () => {
     expect(st.lobby).toBeNull();
     expect(st.match?.campaign).toBe('dead_air');
     expect(st.match?.teamA).toHaveLength(4);
+  });
+
+  it('never offers a practice-only campaign in the vote, even if the saved pool still has it', () => {
+    insertDraft(db, {
+      slug: 'hunter_training', name: 'Hunter Training', vpkFilename: 'hunter_training.vpk',
+      sizeBytes: 1, sha256: 'b'.repeat(64), uploadedBy: null,
+    }, [{ map: 'hunter_training_map', display: 'Training Grounds', isFinale: true }]);
+    publishCampaign(db, 'hunter_training', 'Hunter Training');
+    setPracticeOnly(db, 'hunter_training', true);
+    invalidateCampaignCache();
+    setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'hunter_training']));
+    fillQueue();
+    for (const id of IDS) mm.ready(id);
+    expect(mm.lobbies()[0].snapshot.options).toEqual(['no_mercy']);
   });
 
   it('returns ready players to queue front on failed ready check', () => {

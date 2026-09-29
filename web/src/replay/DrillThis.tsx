@@ -12,6 +12,9 @@ type ServerState =
   | { kind: 'checking' }
   | { kind: 'unavailable' }
   | { kind: 'none' }
+  /** The viewer's one owned server is a Hunter Training server: a drill
+   *  server would be refused until they close it. */
+  | { kind: 'hunter'; leaseId: number }
   | { kind: 'own'; lease: PracticeLease; loaded: boolean }
   | { kind: 'started'; lease: PracticeLease };
 
@@ -169,6 +172,7 @@ export function DrillThis(
         // Practice servers are not open to this viewer (the rollout switch):
         // the panel is the code alone, as it was before servers existed.
         if (!available) { if (alive) setServer({ kind: 'unavailable' }); return; }
+        if (mine?.kind === 'hunter') { if (alive) setServer({ kind: 'hunter', leaseId: mine.id }); return; }
         if (!mine || mine.kind !== 'drill') { if (alive) setServer({ kind: 'none' }); return; }
         const lease = await api.practiceLease(mine.id);
         if (alive) setServer(lease.state === 'ready' || lease.state === 'setting_up' ? { kind: 'own', lease, loaded: false } : { kind: 'none' });
@@ -284,6 +288,12 @@ export function DrillThis(
             </button>
             <p class="muted drill__hint">A private server with this drill loaded. Share its invite link to bring friends; only you run the drill.</p>
           </>
+        )}
+        {server.kind === 'hunter' && (
+          <p class="muted drill__hint">
+            Close <a href={leasePath(server.leaseId)}>your Hunter Training server</a> first to start a drill server:
+            you can have one of your own at a time.
+          </p>
         )}
         {server.kind === 'own' && !server.loaded && (
           <button class="btn btn--block" type="button" disabled={serverBusy || server.lease.state !== 'ready'}

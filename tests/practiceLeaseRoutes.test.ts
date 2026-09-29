@@ -214,6 +214,18 @@ describe('POST /api/practice/leases/:id/end', () => {
       .toEqual([{ action: 'practice_end', target: '1' }]);
   });
 
+  it('the owner of a Hunter Training server can close it; another player cannot', async () => {
+    seedServers(2);
+    await start({ kind: 'hunter' });
+    await flush();
+    const end = (c: Record<string, string>) => app.inject({ method: 'POST', url: '/api/practice/leases/1/end', cookies: c });
+    const refused = await end(friend);
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json().error).toBe('Only whoever started this Hunter Training server, or staff, can close it.');
+    expect((await end(owner)).statusCode).toBe(200);
+    expect(getLease(db, 1)!.end_reason).toBe('owner');
+  });
+
   it('a moderator may end someone else\'s drill server too, and it is audited', async () => {
     seedServers(2);
     await start({ kind: 'drill' });

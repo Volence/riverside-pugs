@@ -4,7 +4,7 @@ import { parseReplay } from '../replayFormat.js';
 import { buildDrill } from '../drillSpec.js';
 import { createDrill, drillForMoment, drillsCreatedSince, fetchDrill, normalizeCode, DRILLS_PER_HOUR } from '../practiceDrills.js';
 import {
-  adminLeaseRows, getLease, hunterListings, leaseView, openOwnedLeaseOf, parkListings, practiceAccess, practiceClosedMessage, type LeaseKind, type PracticeLeases,
+  adminLeaseRows, getLease, hunterListings, leaseView, openOwnedLeaseOf, OWNED_KINDS, parkListings, practiceAccess, practiceClosedMessage, type LeaseKind, type PracticeLeases,
 } from '../practiceLeases.js';
 import { getPlayer } from '../players.js';
 import { logAdmin } from '../admin/audit.js';
@@ -299,12 +299,12 @@ export async function practiceRoutes(
     const isStaff = me?.is_admin === 1 || me?.is_mod === 1;
     // A park is ownerless: only staff ends one early, and otherwise it
     // closes itself 5 minutes after the last person leaves.
-    const byOwner = lease.kind === 'drill' && lease.owner_player_id === steamid;
+    const byOwner = OWNED_KINDS.includes(lease.kind) && lease.owner_player_id === steamid;
     if (!byOwner && !isStaff) {
       return reply.code(403).send({
         error: lease.kind === 'park'
           ? 'Only staff can close the Practice Park. It closes on its own 5 minutes after everyone leaves.'
-          : 'Only whoever started this drill server, or staff, can close it.',
+          : `Only whoever started this ${lease.kind === 'hunter' ? 'Hunter Training' : 'drill'} server, or staff, can close it.`,
       });
     }
     if (!leases.end(lease.id, byOwner ? 'owner' : 'admin')) {

@@ -301,7 +301,7 @@ export class AdminFeedPoster {
       case 'server_log_auth': return `${who} set log signing on server ${e.target} to \`${String(d.mode)}\``;
       case 'queue_remove': return `${who} removed ${target} from the queue`;
       case 'practice_kick': {
-        const where = d.kind === 'drill' ? 'a drill server' : 'the Practice Park';
+        const where = d.kind === 'drill' ? 'a drill server' : d.kind === 'hunter' ? 'a Hunter Training server' : 'the Practice Park';
         const why = d.reason && d.reason !== 'Removed by an admin' ? `: ${escapeName(String(d.reason))}` : '';
         return `${who} kicked ${escapeName(String(d.name ?? target))} from ${where} on ${escapeName(String(d.server ?? ''))}${why}`;
       }
