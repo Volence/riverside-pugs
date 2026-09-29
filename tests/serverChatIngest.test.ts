@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import dgram from 'node:dgram';
+import type { AddressInfo } from 'node:net';
+import type { FastifyInstance } from 'fastify';
 import { openDb, type DB } from '../src/db.js';
+import { loadConfig } from '../src/config.js';
+import { buildServer } from '../src/server.js';
+import { Hub } from '../src/ws.js';
 import { upsertPlayer, activatePlayer } from '../src/players.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import {
@@ -88,5 +94,47 @@ describe('isActiveStaff', () => {
     expect(isActiveStaff(db, MOD)).toBe(true);
     expect(isActiveStaff(db, P)).toBe(false);
     expect(isActiveStaff(db, '76561199000000077')).toBe(false);
+  });
+});
+
+describe('a chat line from the UDP socket to the table', () => {
+  let app: FastifyInstance | null = null;
+  afterEach(async () => { await app?.close(); app = null; });
+
+  const freeUdpPort = (): Promise<number> => new Promise((resolve, reject) => {
+    const s = dgram.createSocket('udp4');
+    s.on('error', reject);
+    s.bind(0, '127.0.0.1', () => {
+      const { port } = s.address() as AddressInfo;
+      s.close(() => resolve(port));
+    });
+  });
+  const sendLine = (port: number, body: string): Promise<void> => new Promise((resolve, reject) => {
+    const c = dgram.createSocket('udp4');
+    const text = Buffer.from(`L 09/28/2026 - 20:00:00: ${body}\n`, 'utf8');
+    const pkt = Buffer.concat([Buffer.from([0xff, 0xff, 0xff, 0xff, 0x52]), text]);
+    c.send(pkt, port, '127.0.0.1', (err) => { c.close(); err ? reject(err) : resolve(); });
+  });
+
+  it('a PUGSAY from a known server address is stored against that server and tells staff', async () => {
+    const local = Number(db.prepare(
+      "INSERT INTO servers (name, host, port, rcon_port, rcon_password, tv_port, tv_enabled) VALUES ('Local', '127.0.0.1', 27015, 27015, 'x', 27020, 1)",
+    ).run().lastInsertRowid);
+    upsertPlayer(db, { steamid: MOD, name: 'Mod', avatar: null }, []);
+    activatePlayer(db, MOD);
+    db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
+    const hub = new Hub();
+    const heard: string[] = [];
+    hub.add({ readyState: 1, send: (m: string) => heard.push(JSON.parse(m).event) }, MOD);
+    const port = await freeUdpPort();
+    app = await buildServer({
+      config: { ...loadConfig({}), devMode: false, logListenPort: port }, db, hub,
+      serverExec: async () => {}, serverCleaner: async () => {},
+    });
+    await sendLine(port, `PUGSAY steamid=${P} team=2 scope=team msg=rush the tank`);
+    await vi.waitFor(() => expect(listLines(db, local, 0, 10)).toHaveLength(1), { timeout: 2000 });
+    expect(listLines(db, local, 0, 10)[0]).toMatchObject({ kind: 'say', steamid: P, team: 2, scope: 'team', message: 'rush the tank' });
+    expect(listLines(db, s1, 0, 10)).toHaveLength(0);
+    expect(heard).toContain('server_chat');
   });
 });
