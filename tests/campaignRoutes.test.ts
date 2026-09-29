@@ -956,3 +956,43 @@ describe('POST /api/admin/campaigns/:slug/maps-to-play', () => {
     expect(getMapsToPlay(db, 'five')).toBeNull();
   });
 });
+
+describe('POST /api/admin/campaigns/:slug/practice-only', () => {
+  const ADMIN_ID = '76561198000000001';
+  const publishHt = () => {
+    insertDraft(db, {
+      slug: 'hunter_training', name: 'Hunter Training', vpkFilename: 'hunter_training.vpk',
+      sizeBytes: 9, sha256: 'b'.repeat(64), uploadedBy: null,
+    }, [{ map: 'hunter_training_map', display: 'Training Grounds', isFinale: true }]);
+    publishCampaign(db, 'hunter_training', 'Hunter Training');
+  };
+  const post = (app: FastifyInstance, slug: string, payload: object, steamid = ADMIN_ID) =>
+    app.inject({
+      method: 'POST', url: `/api/admin/campaigns/${slug}/practice-only`,
+      cookies: steamid === ADMIN_ID ? adminCookie(app, steamid) : authedCookie(app, db, steamid),
+      payload,
+    });
+  const publicRow = async (app: FastifyInstance) =>
+    (await app.inject({ method: 'GET', url: '/api/campaigns/custom' })).json()
+      .campaigns.find((c: { slug: string }) => c.slug === 'hunter_training');
+
+  it('sets the flag, which the public list and the admin list both report', async () => {
+    publishHt();
+    const app = await buildTestApp({ db, addonsDir: addons });
+    expect((await publicRow(app)).practiceOnly).toBe(false);
+    expect((await post(app, 'hunter_training', { practiceOnly: true })).statusCode).toBe(200);
+    expect((await publicRow(app)).practiceOnly).toBe(true);
+    const admin = await app.inject({ method: 'GET', url: '/api/admin/campaigns', cookies: authedCookie(app, db, ADMIN_ID) });
+    expect(admin.json().campaigns.find((c: { slug: string }) => c.slug === 'hunter_training').practiceOnly).toBe(true);
+    expect((await post(app, 'hunter_training', { practiceOnly: false })).statusCode).toBe(200);
+    expect((await publicRow(app)).practiceOnly).toBe(false);
+  });
+
+  it('refuses a bad body, an unknown campaign, and a non-admin', async () => {
+    publishHt();
+    const app = await buildTestApp({ db, addonsDir: addons });
+    expect((await post(app, 'hunter_training', { practiceOnly: 'yes' })).statusCode).toBe(400);
+    expect((await post(app, 'nope', { practiceOnly: true })).statusCode).toBe(404);
+    expect((await post(app, 'hunter_training', { practiceOnly: true }, '76561198000000077')).statusCode).toBe(403);
+  });
+});

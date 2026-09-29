@@ -29,6 +29,9 @@ export interface CampaignEntry {
   /** Lives in left4dead_dlc4, so a server without the mappack cannot load it.
    *  Gated separately from `custom`, which means "has its own VPK to install". */
   requiresDlc4: boolean;
+  /** A practice map (Hunter Training): installed and downloadable, never a
+   *  PUG map. Always false for the stock campaigns. */
+  practiceOnly: boolean;
 }
 
 /** The map a match changelevels into, per campaign.
@@ -88,7 +91,7 @@ function build(db: DB): NonNullable<typeof cache> {
     registry.set(slug, {
       slug, name: c.name, firstMap: STOCK_FIRST[slug],
       maps: (stockMissions.get(slug) ?? []).map((ch) => ch.map), custom: false,
-      requiresDlc4: DLC4_CAMPAIGNS.has(slug),
+      requiresDlc4: DLC4_CAMPAIGNS.has(slug), practiceOnly: false,
     });
   }
 
@@ -106,7 +109,7 @@ function build(db: DB): NonNullable<typeof cache> {
     registry.set(row.slug, {
       slug: row.slug, name: row.name, firstMap: played[0].map,
       maps: played.map((c) => c.map), custom: true,
-      requiresDlc4: false,
+      requiresDlc4: false, practiceOnly: row.practice_only === 1,
     });
     // Every chapter claims its map, included or not: a match standing on an
     // excluded chapter is still that campaign for attribution purposes.
@@ -183,6 +186,8 @@ export function poolableCampaigns(
   // ask the same question and the answer cannot change inside one call.
   const dlc4Everywhere = allServersHaveDlc4(db);
   return [...campaignRegistry(db).values()].filter((c) => {
+    // Before alsoAllow: a practice map is never a PUG map, whatever the saved pool says.
+    if (c.practiceOnly) return false;
     if (already.has(c.slug)) return true;
     // A dlc4 campaign on a server without the mappack is a match that dies
     // on the first changelevel, so this gate is the same kind of thing as

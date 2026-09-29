@@ -51,15 +51,16 @@ beforeEach(async () => {
     // A box takes whichever practice cfg was last exec'd on it, and says so
     // in the two cvars setup verifies (the verify logic has its own tests).
     rcon: async (s, cmds) => {
-      const reads = cmds.every((c) => c === 'l4d_game_type_name' || c === 'l4d_practice_mode');
+      const reads = cmds.every((c) => c === 'l4d_game_type_name' || c === 'l4d_practice_mode' || c === 'l4d_ht_enable');
       if (!reads) sent.push(cmds);
       return cmds.map((c) => {
-        const m = /^exec practice_(park|drill)\.cfg$/.exec(c);
+        const m = /^exec practice_(park|drill|hunter)\.cfg$/.exec(c);
         if (m) kindOn.set(s.id, m[1]);
         const k = kindOn.get(s.id);
         if (c === 'status') return `players : 0 humans, 0 bots (31 max)\n${statusLines}`;
         if (c === 'sm_practice_who') return whoReply;
-        if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${k === 'park' ? 'Practice' : k === 'drill' ? 'Rotoblin 4v4 PUG' : 'Rotoblin Pub VS'}"`;
+        if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${k === 'park' ? 'Practice' : k === 'drill' ? 'Rotoblin 4v4 PUG' : k === 'hunter' ? 'Hunter Training' : 'Rotoblin Pub VS'}"`;
+        if (c === 'l4d_ht_enable') return `"l4d_ht_enable" = "${k === 'hunter' ? '1' : '0'}"`;
         if (c === 'l4d_practice_mode') return `"l4d_practice_mode" = "${k ?? ''}"`;
         return '';
       });
@@ -132,6 +133,20 @@ describe('POST /api/practice/leases', () => {
   it('rejects an unknown kind', async () => {
     expect((await start({ kind: 'ranked' })).statusCode).toBe(400);
   });
+
+  it('starts a Hunter Training server of your own', async () => {
+    seedServers(3);
+    const res = await start({ kind: 'hunter' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ joined: false, lease: { kind: 'hunter', isOwner: true, capacity: 1 } });
+    await flush();
+    expect(sent).toContainEqual(['exec practice_hunter.cfg']);
+  });
+
+  it('refuses a drill code on a Hunter Training server', async () => {
+    seedServers(3);
+    expect((await start({ kind: 'hunter', drillCode: 'K7QX' })).statusCode).toBe(400);
+  });
 });
 
 describe('GET /api/practice/park', () => {
@@ -149,6 +164,24 @@ describe('GET /api/practice/park', () => {
     await start({ kind: 'drill' }, owner);
     const drill = await app.inject({ method: 'GET', url: '/api/practice/park', cookies: owner });
     expect(drill.json().mine).toEqual({ id: 2, kind: 'drill' });
+  });
+
+  it('lists Hunter Training servers apart from parks, and names yours', async () => {
+    seedServers(3);
+    await start({ kind: 'hunter' }, owner);
+    await flush();
+    const anon = (await app.inject({ method: 'GET', url: '/api/practice/park' })).json();
+    expect(anon.parks).toEqual([]);
+    expect(anon.hunters).toEqual([expect.objectContaining({ id: 1, server: 'Box 3', ready: true, inUse: false })]);
+    expect(JSON.stringify(anon)).not.toContain(getLease(db, 1)!.password);
+    const mine = (await app.inject({ method: 'GET', url: '/api/practice/park', cookies: owner })).json();
+    expect(mine.mine).toEqual({ id: 1, kind: 'hunter' });
+  });
+
+  it('answers an empty hunters list where practice is unavailable', async () => {
+    setSetting(db, 'practice_leasing', 'off');
+    const res = (await app.inject({ method: 'GET', url: '/api/practice/park' })).json();
+    expect(res).toEqual({ available: false, parks: [], hunters: [], mine: null });
   });
 });
 
@@ -316,7 +349,7 @@ describe('the practice_leasing rollout switch', () => {
     expect((await start({ kind: 'park' }, admin)).statusCode).toBe(200);
     // A player (or a visitor) is shown nothing; an admin sees the park.
     expect((await app.inject({ method: 'GET', url: '/api/practice/park', cookies: owner })).json())
-      .toEqual({ available: false, parks: [], mine: null });
+      .toEqual({ available: false, parks: [], hunters: [], mine: null });
     expect((await app.inject({ method: 'GET', url: '/api/practice/park' })).json().available).toBe(false);
     expect((await app.inject({ method: 'GET', url: '/api/practice/park', cookies: admin })).json().parks).toHaveLength(1);
     // Joining follows the switch too.

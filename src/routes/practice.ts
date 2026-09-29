@@ -4,7 +4,7 @@ import { parseReplay } from '../replayFormat.js';
 import { buildDrill } from '../drillSpec.js';
 import { createDrill, drillForMoment, drillsCreatedSince, fetchDrill, normalizeCode, DRILLS_PER_HOUR } from '../practiceDrills.js';
 import {
-  adminLeaseRows, getLease, leaseView, openOwnedLeaseOf, parkListings, practiceAccess, practiceClosedMessage, type LeaseKind, type PracticeLeases,
+  adminLeaseRows, getLease, hunterListings, leaseView, openOwnedLeaseOf, parkListings, practiceAccess, practiceClosedMessage, type LeaseKind, type PracticeLeases,
 } from '../practiceLeases.js';
 import { getPlayer } from '../players.js';
 import { logAdmin } from '../admin/audit.js';
@@ -195,7 +195,7 @@ export async function practiceRoutes(
     if (!leases) return reply.code(503).send({ error: 'Practice servers are not available on this site.' });
     const body = (req.body ?? {}) as { kind?: unknown; drillCode?: unknown };
     const kind = body.kind;
-    if (kind !== 'park' && kind !== 'drill') return reply.code(400).send({ error: 'kind must be park or drill' });
+    if (kind !== 'park' && kind !== 'drill' && kind !== 'hunter') return reply.code(400).send({ error: 'kind must be park, drill or hunter' });
     let code: string | null = null;
     if (body.drillCode !== undefined && body.drillCode !== null && body.drillCode !== '') {
       if (kind !== 'drill') return reply.code(400).send({ error: 'only a drill server takes a drill code' });
@@ -212,8 +212,8 @@ export async function practiceRoutes(
   });
 
   /**
-   * The Practice Park, publicly: which parks are open, how full, on what
-   * map. No host and no password; those are behind a login on the lease page.
+   * The Practice Park and Hunter Training, publicly: which parks are open,
+   * how full, on what map, and which Hunter Training servers exist. No host and no password; those are behind a login on the lease page.
    * A logged-in viewer also learns the id of their own open drill server,
    * so the Play page and the Drill this panel can link back to it (parks
    * are ownerless and never count as anyone's).
@@ -226,10 +226,11 @@ export async function practiceRoutes(
     // Open to everyone, a signed-out visitor sees the list too (and is asked
     // to sign in to join), as the Play page's landing block intends.
     const visible = getSetting(db, 'practice_leasing') === 'everyone' || practiceAccess(db, viewer);
-    if (leases === null || !visible) return { available: false, parks: [], mine: null };
+    if (leases === null || !visible) return { available: false, parks: [], hunters: [], mine: null };
     return {
       available: true,
       parks: parkListings(db),
+      hunters: hunterListings(db),
       mine: mine ? { id: mine.id, kind: mine.kind } : null,
     };
   });

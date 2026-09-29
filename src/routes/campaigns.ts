@@ -16,7 +16,7 @@ import { transportFor } from '../addonsTransport.js';
 import { installCampaign, uninstallCampaign, type InstallTarget } from '../campaignInstall.js';
 import {
   chaptersOf, deleteCampaign, getCampaign, insertDraft, installsOf,
-  listCampaigns, publishCampaign,
+  listCampaigns, publishCampaign, setPracticeOnly,
 } from '../customCampaigns.js';
 import { listVpkPaths, missionFromVpk, MissionError } from '../vpk.js';
 import { collisionMessage, consistencyCollisions, loadConsistencyList } from '../consistencyList.js';
@@ -101,6 +101,7 @@ export async function campaignRoutes(
         // is one, else null and the raw VPK at sizeBytes.
         zipBytes: zipOf(c)?.bytes ?? null,
         filename: c.vpk_filename, notes: c.notes, inPool: pool.has(c.slug),
+        practiceOnly: c.practice_only === 1,
         chapters: chaptersOf(db, c.slug).map((ch) => ({
           map: ch.map, display: ch.display, included: ch.included === 1,
         })),
@@ -163,6 +164,7 @@ export async function campaignRoutes(
       mapsToPlay: rules.get(c.slug) ?? null,
       maps: registry.get(c.slug)?.maps ?? [],
       stock: false,
+      practiceOnly: c.practice_only === 1,
     }));
     // The stock four have no custom_campaigns row, but an admin wants to drop
     // a stock finale for exactly the same reason as a custom one, so they get
@@ -362,6 +364,20 @@ export async function campaignRoutes(
     }
     setMapsToPlay(db, slug, raw);
     logAdmin(db, adminId, 'campaign_maps_to_play', slug, { maps: raw });
+    return { ok: true };
+  });
+
+  // A practice map (Hunter Training) installs and downloads like any custom
+  // campaign but is never offered for the PUG pool (poolableCampaigns).
+  app.post('/api/admin/campaigns/:slug/practice-only', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const { slug } = req.params as { slug: string };
+    const raw = (req.body as { practiceOnly?: unknown } | undefined)?.practiceOnly;
+    if (typeof raw !== 'boolean') return reply.code(400).send({ error: 'practiceOnly must be true or false' });
+    if (!setPracticeOnly(db, slug, raw)) return reply.code(404).send({ error: 'no such campaign' });
+    invalidateCampaignCache();
+    logAdmin(db, adminId, 'campaign_practice_only', slug, { practiceOnly: raw });
     return { ok: true };
   });
 
