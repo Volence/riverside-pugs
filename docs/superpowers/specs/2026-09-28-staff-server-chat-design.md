@@ -18,6 +18,12 @@ it in front of them.
 - A whisper always carries a second line telling the player how to answer with `/staff`.
 - Chat is kept for good, like `match_chat` (which is never pruned).
 - No general rcon box. The site only ever sends the one staff-say command.
+- The chat is a drawer on the Live board, and the Live desk opens to moderators (owner, 2026-09-28).
+  Moderators may use: the abandon clock (Hold / +5 min / End now), queue removal, practice servers
+  (players list, kick, end a lease), abort / void. Server controls stay admin-only: pool in/out,
+  restart after match, SourceTV, log signing, Set idle, DLC check, admin sync, settings. The board
+  payloads never carry the rcon password or the log secret; they do carry a live match's join
+  password, which moderators already see on the mod call card's Join line.
 
 ## What exists today
 
@@ -69,19 +75,20 @@ line, and the drawer shows it in order with the rest. `mergePlayers` gets `serve
 `src/server.ts`: after the conduct check, each `say` event is stored with the server from
 `serverOf(source, meta)` and the match currently running there, if any. New log kinds `staff_in`
 (PUGSTAFF) and `staff_sent` (PUGSTAFFSENT) are parsed and stored. Each new row calls
-`hub.sendTo('server_chat:<serverId>', isActiveStaff)`. All of it is off the critical path, wrapped
+`hub.sendTo('server_chat', isActiveStaff)`. All of it is off the critical path, wrapped
 the same way the conduct and mod call handlers are.
 
 A player's first `/staff` message in 10 minutes also posts one quiet line to the admin feed
-("<player> messaged staff on <server>: <text>"), no role ping. `/mod` stays the urgent route.
+("<player> messaged staff on <server>: <text>"), no role ping, behind its own toggle
+`admin_feed_staff_messages`. `/mod` stays the urgent route.
 
-### 4. Web: API (all `requireMod`)
+### 4. Web: API (all `requireMod`, under `/api/mod/chat`)
 
-- `GET /api/admin/chat/servers`: enabled servers with a practice / match / idle label and the time of
+- `GET /api/mod/chat/servers`: enabled servers with a practice / match / idle label and the time of
   the last line.
-- `GET /api/admin/chat/:serverId?after=<id>&limit=200`: lines in order, names resolved from the
+- `GET /api/mod/chat/:serverId?after=<id>&limit=200`: lines in order, names resolved from the
   players table (unknown SteamIDs show the last PUGNAME seen, else the SteamID).
-- `POST /api/admin/chat/:serverId` `{ to: 'all' | 'team' | 'player', value?, message }`:
+- `POST /api/mod/chat/:serverId` `{ to: 'all' | 'team' | 'player', value?, message }`:
   - message: `;`, `"` and line breaks stripped, trimmed, 1-190 characters after stripping;
   - staff name: the sender's site name with the same stripping, capped at 32;
   - rate limit 5 sends per 10 s per staff member (429 past it);
@@ -90,19 +97,20 @@ A player's first `/staff` message in 10 minutes also posts one quiet line to the
 
 ### 5. Web: UI
 
-- Admin → Live gets a Chat drawer per server. It loads the last 200 lines, then follows the
-  `server_chat:<id>` event by fetching `after=<last id>`.
+- Admin → Live gets a chat drawer (`/admin/live?chat=<serverId>`), opened from a Chat button on each
+  server row and match card, with a server picker inside. It loads the last 200 lines and re-reads
+  them on each `server_chat` hub event (a delivery report changes an old row).
 - Lines are coloured by team; `/staff` messages show as "to staff" with a distinct style; staff sends
   show who sent them, where to, and the delivered count.
 - Send box with All / Team ▾ / Whisper. Clicking a name switches to Whisper for that player.
-- Mod call Discord card and the in-game calls page get "Reply on server", which opens that server's
-  drawer.
+- The mod call Discord card gets a "Server chat" link button, and the In-game calls page a "server
+  chat" link, both to `/admin/live?chat=<serverId>`. The admin feed line for `/staff` links there too.
+- Moderators see the Live desk with the server controls hidden (read-only values instead).
 
 ## Traps and limits
 
-- Team chat versus all chat: PUGSAY does not record which one a line was. The drawer shows the
-  speaker's team only. Adding the flag is a one-field plugin change and can ride along in 0.3.16 if
-  the `player_say` event or a `say_team` listener gives it cheaply; otherwise it waits.
+- Team chat versus all chat: 0.3.16 adds `scope=all|team` to PUGSAY, read from the command name in
+  `OnClientSayCommand` (`say` or `say_team`). Lines from 0.3.15 servers have no scope.
 - Not shown: other plugins' announcements, and SourceTV spectators' chat.
 - Old plugin: a server still on 0.3.15 returns "Unknown command" for `sm_pug_staffsay`; the site
   reports that as delivered = -1 with "server needs pug-match 0.3.16".

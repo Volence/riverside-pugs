@@ -4,7 +4,7 @@
 
 **Goal:** Staff read every server's chat live on the site and answer to all, one team, or one player; players answer staff privately with `/staff`.
 
-**Architecture:** pug-match already streams every human chat line as a signed `PUGSAY` log line. The site starts storing those in a new `server_chat` table and tells staff browsers over the existing hub (`Hub.sendTo`). Sends go out over rcon as one new pug-match server command, `sm_pug_staffsay`, which prints the message in colour and logs a signed `PUGSTAFFSENT` delivery line. Players' `/staff` messages are a new signed `PUGSTAFF` line. The page lives on the People desk because moderators cannot open the Live desk.
+**Architecture:** pug-match already streams every human chat line as a signed `PUGSAY` log line. The site starts storing those in a new `server_chat` table and tells staff browsers over the existing hub (`Hub.sendTo`). Sends go out over rcon as one new pug-match server command, `sm_pug_staffsay`, which prints the message in colour and logs a signed `PUGSTAFFSENT` delivery line. Players' `/staff` messages are a new signed `PUGSTAFF` line. The chat is a drawer on the Live board (`/admin/live?chat=<serverId>`), and the Live desk opens to moderators with the match-rescue actions; server controls stay admin-only.
 
 **Tech Stack:** TypeScript, Fastify, better-sqlite3, vitest, Preact (web), SourcePawn 1.12 (plugin, built by `plugin/build.sh` under wine).
 
@@ -15,6 +15,7 @@
 - Work in the worktree `/home/volence/l4d/pug/.claude/worktrees/staff-chat`, branch `staff-chat`. Never commit to master. Start every task with `git -C /home/volence/l4d/pug/.claude/worktrees/staff-chat branch --show-current` and stop if it does not print `staff-chat`.
 - Staff means `players.is_admin = 1 OR players.is_mod = 1` AND `inGoodStanding` (`makeRequireMod` for routes).
 - Staff see everything, team chat included, in any match. No hiding rules.
+- Moderators get the whole Live desk and these actions: abandon clock (Hold / +5 min / End now), queue removal, practice servers (players, kick, end), abort / void. Admin-only: pool in/out, restart after match, SourceTV, log signing, Set idle, DLC check, admin sync, settings.
 - Chat is kept for good. No pruning.
 - The site only ever sends `sm_pug_staffsay`. No other command is built from user input.
 - Message: `;`, `"`, `\r`, `\n` become spaces, whitespace collapsed, trimmed, 1 to 190 characters after that. Staff name: same stripping, capped at 32, fallback `Staff`.
@@ -30,7 +31,7 @@
 1. A chat message containing `steamid=`, ` msg=`, ` id=` or ` delivered=` must not change who said it or which send it confirms (text is always last on the line).
 2. A `PUGSTAFFSENT` line from server B must not mark a send made to server A as delivered (delivery is matched on send id AND server id).
 3. A staff message containing `"; quit` or a line break must reach the game as plain text, never as a second console command.
-4. A server still on pug-match 0.3.15 answers `Unknown command`; the send is stored with delivered = -1 and the page says the server needs 0.3.16, never "delivered".
+4. A moderator calling a server-control route directly (pool, restart, SourceTV, log signing, Set idle, DLC check, admin sync, settings) gets 403, even though the Live desk now renders for them.
 5. A demoted or banned moderator with an open tab stops receiving chat events and gets 403 on every chat route.
 
 ---
@@ -582,7 +583,7 @@ Add to `tests/discordAdminFeed.test.ts`, inside the describe that has the source
     expect(line).toContain('**player2**');
     expect(line).toContain('messaged staff');
     expect(line).toContain('he is \\*throwing\\*');
-    expect(line).toContain('https://pug.test/admin/people/chat/1');
+    expect(line).toContain('https://pug.test/admin/live?chat=1');
   });
 ```
 
@@ -640,7 +641,7 @@ In `src/adminFeed.ts`, add to the union after `sourcetv_watch`:
 
 ```ts
   // A player's /staff message (src/serverChat.ts). One per player per ten
-  // minutes; the Server chat page holds the whole conversation.
+  // minutes; the chat drawer on Live holds the whole conversation.
   | { kind: 'staff_message'; steamid: string; serverId: number; text: string }
 ```
 
@@ -649,7 +650,7 @@ and to FEED_SETTING: `staff_message: 'admin_feed_staff_messages',`.
 In `src/settingsSchema.ts`, after the `admin_feed_conduct` entry:
 
 ```ts
-  { key: 'admin_feed_staff_messages', group: 'Admin feed', label: 'Messages to staff', help: 'A player typed /staff in game. One line per player per ten minutes, no ping; the whole conversation is on People, Server chat.', type: { kind: 'bool' } },
+  { key: 'admin_feed_staff_messages', group: 'Admin feed', label: 'Messages to staff', help: 'A player typed /staff in game. One line per player per ten minutes, no ping; the whole conversation is in the chat drawer on Live.', type: { kind: 'bool' } },
 ```
 
 In `src/db.ts` defaults, after `admin_feed_conduct: '1',` add `admin_feed_staff_messages: '1',`.
@@ -663,7 +664,7 @@ In `src/discord/adminFeedPoster.ts`, add before `case 'signon_drop':`:
         const server = this.deps.db.prepare('SELECT name FROM servers WHERE id = ?').get(e.serverId) as { name: string } | undefined;
         return {
           text: `💬 ${this.name(e.steamid)} messaged staff on ${escapeName(server?.name ?? 'a server')}: "${escapeName(e.text)}". `
-            + `[Answer in Server chat](${this.deps.publicUrl}/admin/people/chat/${e.serverId})`,
+            + `[Answer in Server chat](${this.deps.publicUrl}/admin/live?chat=${e.serverId})`,
           color: COLOR.account,
         };
       }
@@ -1373,19 +1374,194 @@ git commit -m "pug-match 0.3.16: sm_pug_staffsay, /staff, team/all scope on PUGS
 
 ---
 
-### Task 7: The Server chat page
+### Task 7: Open the Live desk to moderators
+
+Owner ruling 2026-09-28: moderators see the whole Live desk and may use the abandon clock (Hold / +5 min / End now), queue removal, practice servers (players list, kick, end a lease), and abort / void. Server controls stay admin-only: pool in/out, restart after match, SourceTV, log signing (secret and mode), Set idle, DLC check, admin sync, settings.
+
+**Files:**
+- Modify: `src/routes/admin.ts` (guards on the routes listed below)
+- Modify: `src/routes/practice.ts` (the three `/api/admin/practice/...` routes; the end route at line ~287)
+- Modify: `web/src/routes/admin/adminRoutes.ts` (`parseAdminPath`, `legacyRedirect`, `landingFor`, a `DESKS` filter)
+- Modify: `web/src/routes/Admin.tsx` (desk strip for mods; pass `isAdmin` to AdminLive)
+- Modify: `web/src/routes/admin/AdminLive.tsx`, `web/src/routes/admin/MatchPanels.tsx` (hide server controls for mods)
+- Test: `tests/adminLive.test.ts`, `tests/practiceRoutes.test.ts`, `web/src/routes/admin/adminRoutes.test.ts`, `web/src/routes/admin/AdminLive.test.tsx`
+
+**Interfaces:**
+- Produces: `deskItems(isAdmin: boolean)` in adminRoutes.ts (Live + People for a mod, all four for an admin); `AdminLive({ isAdmin }: { isAdmin: boolean })`; `AdminServersPanel` gains `canManage: boolean`.
+
+- [ ] **Step 1: Failing backend tests**
+
+In `tests/adminLive.test.ts`, replace the test "a moderator is not an admin here: refused by both routes, and nothing is dialled" with:
+
+```ts
+  it('a moderator reads the board and can use the abandon clock', async () => {
+    expect((await app.inject({ method: 'GET', url: '/api/admin/live', cookies: cookies[MOD] })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: cookies[MOD] })).statusCode).toBe(200);
+    expect((await act({ action: 'hold' }, MOD)).statusCode).toBe(200);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('a moderator may remove from the queue, abort and void, and the audit names them', async () => {
+    const post = (url: string, payload?: object) => app.inject({ method: 'POST', url, cookies: cookies[MOD], payload });
+    expect((await post('/api/admin/queue/remove', { steamid: IDS[0] })).statusCode).toBe(200);
+    const audit = db.prepare("SELECT admin_id FROM admin_actions WHERE action = 'queue_remove'").get() as { admin_id: string };
+    expect(audit.admin_id).toBe(MOD);
+    // abort and void answer with their own business errors for this fixture;
+    // what matters is that the guard let a moderator through (not 401/403).
+    expect([401, 403]).not.toContain((await post(`/api/admin/matches/${matchId}/abort`)).statusCode);
+    expect([401, 403]).not.toContain((await post(`/api/admin/matches/${matchId}/void`, { reason: 'test' })).statusCode);
+  });
+
+  it('server controls stay admin only', async () => {
+    const serverId = (db.prepare('SELECT id FROM servers LIMIT 1').get() as { id: number }).id;
+    const post = (url: string, payload?: object) => app.inject({ method: 'POST', url, cookies: cookies[MOD], payload });
+    for (const [url, body] of [
+      [`/api/admin/servers/${serverId}/enabled`, { enabled: false }],
+      [`/api/admin/servers/${serverId}/idle`, undefined],
+      [`/api/admin/servers/${serverId}/restart-after-match`, { on: true }],
+      [`/api/admin/servers/${serverId}/log-secret`, undefined],
+      [`/api/admin/servers/${serverId}/log-auth`, { mode: 'off' }],
+      [`/api/admin/servers/${serverId}/sourcetv`, { enabled: true }],
+      ['/api/admin/servers/dlc4-check', undefined],
+      ['/api/admin/servers/admins-sync', undefined],
+    ] as [string, object | undefined][]) {
+      expect((await post(url, body)).statusCode, url).toBe(403);
+    }
+    expect((await app.inject({ method: 'GET', url: '/api/admin/settings', cookies: cookies[MOD] })).statusCode).toBe(403);
+  });
+
+  it('a plain player is still refused the board', async () => {
+    expect((await app.inject({ method: 'GET', url: '/api/admin/live', cookies: cookies[PLAYER] })).statusCode).toBe(403);
+    expect((await act({ action: 'hold' }, PLAYER)).statusCode).toBe(403);
+  });
+```
+
+Check `admin_actions` column names first (`grep -n "CREATE TABLE IF NOT EXISTS admin_actions" -A8 src/db.ts`) and use the real name of the actor column in the audit assertion.
+
+In `tests/practiceRoutes.test.ts`, find the existing tests for `/api/admin/practice/:leaseId/players`, `/kick`, `/api/admin/practice/leases` and `/api/practice/leases/:id/end` (grep for them) and add, using the file's own fixtures and a moderator made the way it makes an admin (`UPDATE players SET is_mod = 1`):
+- a moderator gets 200 on `GET /api/admin/practice/leases` and on the players list;
+- a moderator's kick is accepted and logged with their steamid;
+- a moderator can end a park lease, and the 403 text for a non-staff player now says "Only staff can close the Practice Park..." / "Only whoever started this drill server, or staff, can close it."
+
+Run: `npx vitest run tests/adminLive.test.ts tests/practiceRoutes.test.ts`
+Expected: the new cases FAIL with 403.
+
+- [ ] **Step 2: Change the guards**
+
+In `src/routes/admin.ts`, add next to `const requireAdmin = makeRequireAdmin(db);`:
+
+```ts
+  // The Live desk is open to moderators (owner ruling 2026-09-28): the board
+  // itself and the match-rescue actions. Server controls stay requireAdmin.
+  const requireStaff = makeRequireMod(db);
+```
+
+and use `requireStaff` instead of `requireAdmin` in exactly these routes: `GET /api/admin/overview`, `POST /api/admin/matches/:id/abort`, `POST /api/admin/matches/:id/void`, `GET /api/admin/live`, `POST /api/admin/live/:matchId/players/:steamid/leave`, `POST /api/admin/queue/remove`. Import `makeRequireMod` from `./guards.js`. Update the file's header comment ("Each route starts with requireAdmin") to say which routes take requireStaff and why.
+
+In `src/routes/practice.ts`: the three `/api/admin/practice/...` routes use `makeRequireMod(db)` instead of requireAdmin. In the end route, replace `const isAdmin = getPlayer(db, steamid)?.is_admin === 1;` with
+
+```ts
+    const me = getPlayer(db, steamid);
+    const isStaff = me?.is_admin === 1 || me?.is_mod === 1;
+```
+
+use `isStaff` in the condition and the `logAdmin` branch, and change the two 403 texts to "Only staff can close the Practice Park. It closes on its own 5 minutes after everyone leaves." and "Only whoever started this drill server, or staff, can close it." Update any existing test that asserts the old wording.
+
+Run the Step 1 tests again: PASS. Then `npx vitest run tests/` for anything else that asserted a moderator 403 on these routes (fix those assertions to the new rule; do not loosen any other route).
+
+- [ ] **Step 3: Front end routing, failing tests first**
+
+Add to `web/src/routes/admin/adminRoutes.test.ts`:
+
+```ts
+  it('a moderator can open the Live desk and lands on it', () => {
+    expect(parseAdminPath('/admin/live', { isAdmin: false })).toEqual({ desk: 'live', section: 'board', param: null });
+    expect(parseAdminPath('/admin/setup/settings', { isAdmin: false }).desk).toBe('people');
+    expect(parseAdminPath('/admin/balance', { isAdmin: false }).desk).toBe('people');
+    expect(landingFor(false)).toBe('/admin/live');
+    expect(deskItems(false).map((d) => d.key)).toEqual(['live', 'people']);
+    expect(deskItems(true).map((d) => d.key)).toEqual(['live', 'people', 'setup', 'balance']);
+  });
+```
+
+Existing tests that expect a moderator on `/admin/live` to land on People, or `landingFor(false)` to be `/admin/people`, change to the new rule. Run: `npx vitest run web/src/routes/admin/adminRoutes.test.ts`, see it fail.
+
+In `adminRoutes.ts`:
+
+```ts
+export const landingFor = (_isAdmin: boolean): string => '/admin/live';
+
+/** The desk strip: a moderator has Live and People (owner ruling 2026-09-28). */
+export const deskItems = (isAdmin: boolean) => (isAdmin ? DESKS : DESKS.filter((d) => d.key === 'live' || d.key === 'people'));
+```
+
+In `parseAdminPath`, replace the moderator line with:
+
+```ts
+  // A moderator has Live and People. Anything else lands on People rather
+  // than on a screen every call inside would be refused on anyway.
+  if (!opts.isAdmin) {
+    if (desk === 'live' || desk === '') return { desk: 'live', section: 'board', param: null };
+    return desk === 'people' ? people() : { desk: 'people', section: 'search', param: null };
+  }
+```
+
+In `legacyRedirect`, allow the `?live=` carry-over for moderators too (drop the `isAdmin &&` on that line), and change the `if (!isAdmin && !inPeople) return '/admin/people';` rule so `/admin/live` is not redirected for a moderator (`inPeople || path.startsWith('/admin/live')`). Read the function whole before editing; keep its other rules.
+
+In `Admin.tsx`: render the desk strip for every staff member with `items={deskItems(isAdmin)}` (drop the `isAdmin &&` wrapper), and `<AdminLive isAdmin={isAdmin} />`.
+
+- [ ] **Step 4: Hide server controls for moderators**
+
+`AdminLive` takes `{ isAdmin }` and passes `canManage={isAdmin}` to `AdminServersPanel`. In `AdminServersPanel`, when `canManage` is false:
+- the In pool cell shows plain text ("in pool" / "out of pool"), no Take out / Put back button;
+- `RestartCell`, `SourceTvCell`, `LogAuthCell` are replaced by read-only text of their current value (`restart_after_match` on/off, SourceTV on/off, log signing mode);
+- no Set idle button, no `<AdminSyncButton />`.
+
+Everything else on the board (Hold / +5 min / End now, Abort, Void, queue Remove, practice End / Kick) renders for both.
+
+Add to `web/src/routes/admin/AdminLive.test.tsx`, using its existing mocks and fixtures:
+
+```tsx
+  it('a moderator sees the servers without their controls', async () => {
+    // same mocks as the admin render test in this file
+    render(<AdminLive isAdmin={false} />);
+    await screen.findByText('Servers');
+    expect(screen.queryByRole('button', { name: 'Take out' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Set idle' })).toBeNull();
+    expect(screen.getByText('in pool')).toBeTruthy();
+  });
+```
+
+Copy the mock setup from the nearest existing render test in that file so the overview has one enabled server; existing renders become `<AdminLive isAdmin />`.
+
+- [ ] **Step 5: Run everything touched and build**
+
+Run: `npx vitest run tests/adminLive.test.ts tests/practiceRoutes.test.ts web/src/routes && npm run typecheck && npm run build`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/ web/ tests/
+git commit -m "admin: open the Live desk to moderators; server controls stay admin only"
+```
+
+---
+
+### Task 8: Chat drawer on the Live board
 
 **Files:**
 - Modify: `web/src/api.ts` (types + `modApi` methods, beside `calls` near line 1489)
-- Modify: `web/src/routes/admin/adminRoutes.ts` (PEOPLE_TABS; `people()` parser)
-- Modify: `web/src/routes/Admin.tsx` (render the section)
-- Create: `web/src/routes/admin/ServerChat.tsx`
-- Modify: `web/src/styles/app.css` (a few classes)
-- Test: `web/src/routes/admin/ServerChat.test.tsx`, `web/src/routes/admin/adminRoutes.test.ts`
+- Create: `web/src/routes/admin/ChatDrawer.tsx`
+- Modify: `web/src/routes/admin/AdminLive.tsx` (drawer state from `?chat=`; open buttons)
+- Modify: `web/src/routes/admin/MatchPanels.tsx` (a Chat button per server row, for everyone)
+- Modify: `web/src/liveBoard.ts` (`chatFromUrl`)
+- Modify: `web/src/styles/app.css`
+- Test: `web/src/routes/admin/ChatDrawer.test.tsx`, `web/src/liveBoard.test.ts` (or wherever `liveFromUrl` is tested: `grep -rn liveFromUrl web/src --include=*.test.*`)
 
 **Interfaces:**
 - Consumes: Task 5 routes; `useHubEvent(['server_chat'], fn)`.
-- Produces: route `/admin/people/chat` (server list) and `/admin/people/chat/<serverId>` (one server), section key `chat`, param = server id string.
+- Produces: `/admin/live?chat=<serverId>` opens the drawer on that server (the link Task 3's feed line and Task 9's links use); `chatFromUrl(search?: string): number | null`; `ChatDrawer({ serverId, onPick, onClose })`.
 
 - [ ] **Step 1: API client**
 
@@ -1415,43 +1591,36 @@ and to `modApi`:
   chatSend: (serverId: number, body: ChatSendBody) => post<{ ok: true; id: number }>(`/api/mod/chat/${serverId}`, body),
 ```
 
-- [ ] **Step 2: Routing, with a failing test**
+- [ ] **Step 2: `chatFromUrl`, test first**
 
-Add to `web/src/routes/admin/adminRoutes.test.ts`:
+Beside the existing `liveFromUrl` tests:
 
 ```ts
-  it('parses the server chat section for mods and admins', () => {
-    for (const isAdmin of [true, false]) {
-      expect(parseAdminPath('/admin/people/chat', { isAdmin })).toEqual({ desk: 'people', section: 'chat', param: null });
-      expect(parseAdminPath('/admin/people/chat/3', { isAdmin })).toEqual({ desk: 'people', section: 'chat', param: '3' });
-      expect(parseAdminPath('/admin/people/chat/x', { isAdmin }).section).not.toBe('chat');
-    }
+  it('reads ?chat= as a server id', () => {
+    expect(chatFromUrl('?chat=3')).toBe(3);
+    expect(chatFromUrl('?live=5&chat=12')).toBe(12);
+    expect(chatFromUrl('?chat=x')).toBeNull();
+    expect(chatFromUrl('')).toBeNull();
   });
 ```
 
-Run: `npx vitest run web/src/routes/admin/adminRoutes.test.ts` and see it fail.
-
-In `adminRoutes.ts`, add `{ key: 'chat', label: 'Server chat', path: '/admin/people/chat' },` to PEOPLE_TABS after `calls`, and in `people()` before the tickets branch:
+In `web/src/liveBoard.ts`, next to `liveFromUrl` (match its style and default argument):
 
 ```ts
-    if (a === 'chat') {
-      if (b === '') return { desk: 'people', section: 'chat', param: null };
-      return /^\d{1,6}$/.test(b) ? { desk: 'people', section: 'chat', param: b } : { ...NOWHERE, desk: 'people' };
-    }
+/** The server whose chat drawer ?chat= asks for, from a link on a mod call
+ *  card, the admin feed, or In-game calls. */
+export function chatFromUrl(search: string = typeof location === 'undefined' ? '' : location.search): number | null {
+  const v = new URLSearchParams(search).get('chat');
+  return v !== null && /^\d{1,6}$/.test(v) ? Number(v) : null;
+}
 ```
 
-In `Admin.tsx`, beside the calls line:
+Run the test: PASS.
+
+- [ ] **Step 3: Drawer component test (failing)**
 
 ```tsx
-        {r.desk === 'people' && r.section === 'chat' && <ServerChat serverId={r.param ? Number(r.param) : null} />}
-```
-
-Run the routes test again: PASS.
-
-- [ ] **Step 3: Component test (failing)**
-
-```tsx
-// web/src/routes/admin/ServerChat.test.tsx
+// web/src/routes/admin/ChatDrawer.test.tsx
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import type { ChatLineView } from '../../api';
@@ -1463,26 +1632,39 @@ vi.mock('../../api', async (importOriginal) => {
 });
 vi.mock('../../hooks/useHubEvent', () => ({ useHubEvent: () => {} }));
 
-const { ServerChat } = await import('./ServerChat');
+const { ChatDrawer } = await import('./ChatDrawer');
 
 const P = '76561198000000001';
 const line = (over: Partial<ChatLineView> = {}): ChatLineView => ({
   id: 1, at: Date.UTC(2026, 8, 28, 20, 0), kind: 'say', steamid: P, name: 'Zoey', team: 2, scope: 'all',
   message: 'hello', matchId: null, to: null, delivered: null, ...over,
 });
+const SERVERS = { servers: [{ id: 3, name: 'Dallas', state: 'match', lastAt: null }, { id: 4, name: 'Riverside #3', state: 'practice', lastAt: null }] };
 
-beforeEach(() => { for (const f of Object.values(mockMod)) f.mockReset(); });
+beforeEach(() => {
+  for (const f of Object.values(mockMod)) f.mockReset();
+  mockMod.chatServers.mockResolvedValue(SERVERS);
+});
 afterEach(() => cleanup());
 
-describe('ServerChat', () => {
-  it('lists servers when none is picked', async () => {
-    mockMod.chatServers.mockResolvedValue({ servers: [{ id: 3, name: 'Dallas', state: 'match', lastAt: null }] });
-    render(<ServerChat serverId={null} />);
-    expect((await screen.findByText('Dallas')).closest('a')?.getAttribute('href')).toBe('/admin/people/chat/3');
+describe('ChatDrawer', () => {
+  it('picks another server', async () => {
+    mockMod.chatLines.mockResolvedValue({ server: { id: 3, name: 'Dallas' }, lines: [] });
+    const onPick = vi.fn();
+    render(<ChatDrawer serverId={3} onPick={onPick} onClose={() => {}} />);
+    fireEvent.change(await screen.findByLabelText('Server'), { target: { value: '4' } });
+    expect(onPick).toHaveBeenCalledWith(4);
+  });
+
+  it('closes', async () => {
+    mockMod.chatLines.mockResolvedValue({ server: { id: 3, name: 'Dallas' }, lines: [] });
+    const onClose = vi.fn();
+    render(<ChatDrawer serverId={3} onPick={() => {}} onClose={onClose} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Close chat' }));
+    expect(onClose).toHaveBeenCalled();
   });
 
   it('shows lines with team chat and staff messages marked', async () => {
-    mockMod.chatServers.mockResolvedValue({ servers: [] });
     mockMod.chatLines.mockResolvedValue({ server: { id: 3, name: 'Dallas' }, lines: [
       line(),
       line({ id: 2, scope: 'team', message: 'rush' }),
@@ -1490,20 +1672,19 @@ describe('ServerChat', () => {
       line({ id: 4, kind: 'staff_out', steamid: null, name: 'Volence', to: { kind: 'player', value: P, name: 'Zoey' }, delivered: 1, message: 'watching' }),
       line({ id: 5, kind: 'staff_out', steamid: null, name: 'Volence', to: { kind: 'player', value: P, name: 'Zoey' }, delivered: 0, message: 'gone?' }),
     ] });
-    render(<ServerChat serverId={3} />);
+    render(<ChatDrawer serverId={3} onPick={() => {}} onClose={() => {}} />);
     await screen.findByText('hello');
     expect(screen.getByText('(team)')).toBeTruthy();
     expect(screen.getByText('to staff')).toBeTruthy();
-    expect(screen.getByText(/whisper to Zoey/)).toBeTruthy();
+    expect(screen.getAllByText(/whisper to Zoey/)).toHaveLength(2);
     expect(screen.getByText('delivered to 1')).toBeTruthy();
     expect(screen.getByText('not on the server')).toBeTruthy();
   });
 
   it('clicking a name switches to a whisper and sends it', async () => {
-    mockMod.chatServers.mockResolvedValue({ servers: [] });
     mockMod.chatLines.mockResolvedValue({ server: { id: 3, name: 'Dallas' }, lines: [line()] });
     mockMod.chatSend.mockResolvedValue({ ok: true, id: 9 });
-    render(<ServerChat serverId={3} />);
+    render(<ChatDrawer serverId={3} onPick={() => {}} onClose={() => {}} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Zoey' }));
     expect(screen.getByText('Whisper to Zoey')).toBeTruthy();
     fireEvent.input(screen.getByLabelText('Message'), { target: { value: 'on it' } });
@@ -1512,10 +1693,9 @@ describe('ServerChat', () => {
   });
 
   it('sends to a team', async () => {
-    mockMod.chatServers.mockResolvedValue({ servers: [] });
     mockMod.chatLines.mockResolvedValue({ server: { id: 3, name: 'Dallas' }, lines: [] });
     mockMod.chatSend.mockResolvedValue({ ok: true, id: 9 });
-    render(<ServerChat serverId={3} />);
+    render(<ChatDrawer serverId={3} onPick={() => {}} onClose={() => {}} />);
     fireEvent.change(await screen.findByLabelText('Send to'), { target: { value: 'team:3' } });
     fireEvent.input(screen.getByLabelText('Message'), { target: { value: 'hold' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -1523,11 +1703,10 @@ describe('ServerChat', () => {
   });
 
   it('shows the server error on a failed send', async () => {
-    mockMod.chatServers.mockResolvedValue({ servers: [] });
     mockMod.chatLines.mockResolvedValue({ server: { id: 3, name: 'Dallas' }, lines: [] });
     const { ApiError } = await import('../../api');
     mockMod.chatSend.mockRejectedValue(new ApiError(502, 'This server needs pug-match 0.3.16 to send.'));
-    render(<ServerChat serverId={3} />);
+    render(<ChatDrawer serverId={3} onPick={() => {}} onClose={() => {}} />);
     fireEvent.input(await screen.findByLabelText('Message'), { target: { value: 'x' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(await screen.findByText('This server needs pug-match 0.3.16 to send.')).toBeTruthy();
@@ -1535,17 +1714,16 @@ describe('ServerChat', () => {
 });
 ```
 
-Run: `npx vitest run web/src/routes/admin/ServerChat.test.tsx`
-Expected: FAIL, module not found.
+Run: `npx vitest run web/src/routes/admin/ChatDrawer.test.tsx`. Expected: FAIL, module not found.
 
-- [ ] **Step 4: Implement `ServerChat.tsx`**
+- [ ] **Step 4: Implement `ChatDrawer.tsx`**
 
 ```tsx
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ApiError, modApi, type ChatLineView, type ChatSendBody } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { useHubEvent } from '../../hooks/useHubEvent';
-import { Empty, Panel } from '../../components/bits';
+import { Empty } from '../../components/bits';
 
 const TEAM_CLASS: Record<number, string> = { 1: 'chat-line--spec', 2: 'chat-line--surv', 3: 'chat-line--inf' };
 const TEAM_NAME: Record<string, string> = { '1': 'Spectators', '2': 'Survivors', '3': 'Infected' };
@@ -1553,41 +1731,20 @@ const TEAM_NAME: Record<string, string> = { '1': 'Spectators', '2': 'Survivors',
 type Mode = { kind: 'all' } | { kind: 'team'; team: 1 | 2 | 3 } | { kind: 'player'; steamid: string; name: string };
 
 /**
- * People, Server chat. With no server picked, the list of servers; with one,
- * its chat live, and a box that sends to everyone, a team, or one player.
- * Staff see team chat too (owner ruling 2026-09-28).
+ * The Live board's chat drawer: one server's chat, live, and a box that sends
+ * to everyone, a team, or one player. Staff see team chat too (owner ruling
+ * 2026-09-28). Opened by ?chat=<serverId>, so a mod call card or the admin
+ * feed can link straight into it.
  */
-export function ServerChat({ serverId }: { serverId: number | null }) {
-  if (serverId === null) return <ServerList />;
-  return <ServerLog serverId={serverId} />;
-}
-
-function ServerList() {
+export function ChatDrawer({ serverId, onPick, onClose }: {
+  serverId: number; onPick: (id: number) => void; onClose: () => void;
+}) {
   const servers = useFetch((s) => modApi.chatServers(s), []);
-  if (servers.error) return <Panel><p class="error">Could not load the servers.</p></Panel>;
-  if (!servers.data) return <Panel><p class="muted">Loading...</p></Panel>;
-  if (servers.data.servers.length === 0) return <Panel><Empty>No servers.</Empty></Panel>;
-  return (
-    <Panel>
-      <ul class="chat-servers">
-        {servers.data.servers.map((s) => (
-          <li key={s.id}>
-            <a href={`/admin/people/chat/${s.id}`}>{s.name}</a> <span class="muted">{s.state}</span>
-          </li>
-        ))}
-      </ul>
-    </Panel>
-  );
-}
-
-function ServerLog({ serverId }: { serverId: number }) {
   const [lines, setLines] = useState<ChatLineView[]>([]);
-  const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>({ kind: 'all' });
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
-  const lastId = useRef(0);
   const bottom = useRef<HTMLDivElement>(null);
 
   // A delivery report changes an old row, so a refresh re-reads the whole
@@ -1595,15 +1752,13 @@ function ServerLog({ serverId }: { serverId: number }) {
   const load = async () => {
     try {
       const r = await modApi.chatLines(serverId, 0);
-      setName(r.server.name);
       setLines(r.lines);
-      lastId.current = r.lines.length ? r.lines[r.lines.length - 1].id : 0;
       setError(null);
     } catch {
       setError('Could not load the chat.');
     }
   };
-  useEffect(() => { void load(); }, [serverId]);
+  useEffect(() => { setMode({ kind: 'all' }); setLines([]); void load(); }, [serverId]);
   useHubEvent(['server_chat'], () => { void load(); });
   useEffect(() => { bottom.current?.scrollIntoView?.({ block: 'end' }); }, [lines.length]);
 
@@ -1628,8 +1783,19 @@ function ServerLog({ serverId }: { serverId: number }) {
 
   const modeValue = mode.kind === 'team' ? `team:${mode.team}` : mode.kind;
   return (
-    <Panel class="chat">
-      <h3><a href="/admin/people/chat">Server chat</a> / {name}</h3>
+    <aside class="chat-drawer" aria-label="Server chat">
+      <header class="chat-drawer__head">
+        <label>
+          <span class="sr-only">Server</span>
+          <select aria-label="Server" value={String(serverId)}
+            onChange={(e) => onPick(Number((e.target as HTMLSelectElement).value))}>
+            {(servers.data?.servers ?? [{ id: serverId, name: `Server ${serverId}`, state: 'idle', lastAt: null }]).map((s) => (
+              <option key={s.id} value={String(s.id)}>{s.name} ({s.state})</option>
+            ))}
+          </select>
+        </label>
+        <button type="button" class="chip" aria-label="Close chat" onClick={onClose}>×</button>
+      </header>
       <div class="chat-log" role="log">
         {lines.length === 0 && <Empty>No chat yet.</Empty>}
         {lines.map((l) => <Line key={l.id} line={l} onName={(steamid, n) => setMode({ kind: 'player', steamid, name: n })} />)}
@@ -1661,7 +1827,7 @@ function ServerLog({ serverId }: { serverId: number }) {
           onInput={(e) => setText((e.target as HTMLInputElement).value)} />
         <button type="submit" disabled={sending || !text.trim()}>Send</button>
       </form>
-    </Panel>
+    </aside>
   );
 }
 
@@ -1686,7 +1852,7 @@ function Line({ line: l, onName }: { line: ChatLineView; onName: (steamid: strin
       {l.steamid
         ? <button type="button" class="linkish" onClick={() => onName(l.steamid!, who)}>{who}</button>
         : <strong>{who}</strong>}
-      {l.scope === 'team' && <span class="muted"> (team)</span>}
+      {l.scope === 'team' && <>{' '}<span class="muted">(team)</span></>}
       {l.kind === 'staff_in' && <span class="chat-tag">to staff</span>}
       : {l.message}
     </div>
@@ -1694,49 +1860,92 @@ function Line({ line: l, onName }: { line: ChatLineView; onName: (steamid: strin
 }
 ```
 
-`(team)` is rendered with a leading space inside the span; if `getByText('(team)')` fails on the whitespace, render `{' '}<span class="muted">(team)</span>` instead. `Panel` (takes `class`) and `Empty` come from `web/src/components/bits.tsx`; `.sr-only` already exists in app.css, `.linkish` is added below.
+`Empty` comes from `web/src/components/bits.tsx`; `.sr-only` already exists in app.css.
 
 Add to `web/src/styles/app.css`:
 
 ```css
-.chat-log { max-height: 60vh; overflow-y: auto; font-size: 0.95rem; display: flex; flex-direction: column; gap: 2px; }
+.chat-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100vw); z-index: 40; display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; background: var(--bg, #15120f); border-left: 1px solid rgba(255, 255, 255, 0.12); box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4); }
+.chat-drawer__head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.chat-log { flex: 1; overflow-y: auto; font-size: 0.95rem; display: flex; flex-direction: column; gap: 2px; }
 .chat-line--surv { border-left: 3px solid #4a90d9; padding-left: 6px; }
 .chat-line--inf { border-left: 3px solid #d94a4a; padding-left: 6px; }
 .chat-line--spec { border-left: 3px solid #888; padding-left: 6px; }
 .chat-line--staff { border-left: 3px solid #45b39c; padding-left: 6px; }
 .chat-line--to-staff { background: rgba(69, 179, 156, 0.12); }
 .chat-tag { margin-left: 6px; font-size: 0.8em; padding: 0 4px; border-radius: 3px; background: #45b39c; color: #111; }
-.chat-send { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-.chat-send input { flex: 1; min-width: 12rem; }
-.chat-servers { list-style: none; padding: 0; }
+.chat-send { display: flex; gap: 8px; flex-wrap: wrap; }
+.chat-send input { flex: 1; min-width: 10rem; }
 .linkish { background: none; border: 0; padding: 0; font: inherit; color: inherit; font-weight: 600; cursor: pointer; text-decoration: underline dotted; }
 ```
 
-- [ ] **Step 5: Run the tests and build**
+Check the real background token name (`grep -n "^\s*--bg\|--surface\|--panel" web/src/styles/app.css | head`) and use the one panels use, so the drawer matches the site in both themes.
 
-Run: `npx vitest run web/src/routes/admin && npm run typecheck && npm run build`
+- [ ] **Step 5: Wire it into the board**
+
+In `AdminLive.tsx`:
+
+```tsx
+  const [chat, setChat] = useState<number | null>(() => chatFromUrl());
+  const openChat = (id: number | null) => {
+    setChat(id);
+    // Keep the URL shareable and the back button sane: replace, not push.
+    const q = new URLSearchParams(location.search);
+    if (id === null) q.delete('chat'); else q.set('chat', String(id));
+    const qs = q.toString();
+    history.replaceState(null, '', `${location.pathname}${qs ? `?${qs}` : ''}`);
+  };
+```
+
+Render `{chat !== null && <ChatDrawer serverId={chat} onPick={openChat} onClose={() => openChat(null)} />}` as the last child of the page's outer `div`. Pass `onChat={openChat}` to `AdminServersPanel` and to `MatchCard` (which has `match.server`).
+
+In `AdminServersPanel` (MatchPanels.tsx), for every row and for mods and admins alike, after the host span in the name cell:
+
+```tsx
+{' '}<button type="button" class="chip" onClick={() => onChat(s.id)}>Chat</button>
+```
+
+In `MatchCard`, next to the card's heading, when `m.server` is set:
+
+```tsx
+<button type="button" class="chip" onClick={() => onChat(m.server!.id)}>Chat</button>
+```
+
+Add to `AdminLive.test.tsx` (mock `ChatDrawer` or `modApi.chat*` the way the file mocks other modules):
+
+```tsx
+  it('opens the chat drawer from a server row and from ?chat=', async () => {
+    // same overview mock as the other render tests, one server with id 1
+    render(<AdminLive isAdmin />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Chat' }))[0]);
+    expect(await screen.findByRole('complementary', { name: 'Server chat' })).toBeTruthy();
+  });
+```
+
+- [ ] **Step 6: Run the tests and build**
+
+Run: `npx vitest run web/src && npm run typecheck && npm run build`
 Expected: PASS and a clean build (`web/src/styles/app.css.test.ts` parses the stylesheet, so an unclosed brace fails here).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add web/
-git commit -m "staff chat: People, Server chat page"
+git commit -m "staff chat: chat drawer on the Live board"
 ```
 
 ---
 
-### Task 8: Links in: Servers panel, mod call card, In-game calls
+### Task 9: Links in: mod call card, In-game calls
 
 **Files:**
-- Modify: `web/src/routes/admin/MatchPanels.tsx` (AdminServersPanel, server name cell at line 77)
 - Modify: `src/discord/modCallCard.ts` (link row near line 147)
 - Modify: `src/routes/modCalls.ts` and `web/src/api.ts` (`serverId` on ModCallView)
 - Modify: `web/src/routes/admin/AdminCalls.tsx` (a link per call)
 - Test: `tests/modCallPoster.test.ts`, `tests/modCallRoutes.test.ts`, `web/src/routes/admin/AdminCalls.test.tsx`
 
 **Interfaces:**
-- Consumes: the `/admin/people/chat/<serverId>` route (Task 7).
+- Consumes: `/admin/live?chat=<serverId>` (Task 8).
 - Produces: `ModCallView.serverId: number | null`.
 
 - [ ] **Step 1: Failing tests**
@@ -1747,11 +1956,11 @@ In `tests/modCallPoster.test.ts`, after the Join-line tests (its `call()` helper
   it('links to that server\'s chat', async () => {
     call(); await poster.idle();
     const buttons = inAdmin()[0].payload.components[0];
-    expect(buttons).toContainEqual({ kind: 'link', label: 'Server chat', url: `https://pug.test/admin/people/chat/${serverId}` });
+    expect(buttons).toContainEqual({ kind: 'link', label: 'Server chat', url: `https://pug.test/admin/live?chat=${serverId}` });
   });
 ```
 
-In `tests/modCallRoutes.test.ts`, add a test:
+In `tests/modCallRoutes.test.ts`, add:
 
 ```ts
   it('gives each call its server id', async () => {
@@ -1771,7 +1980,7 @@ In `web/src/routes/admin/AdminCalls.test.tsx`, add `serverId: 3` to the `call()`
   it('links each call to its server chat', async () => {
     mockMod.calls.mockResolvedValue({ calls: [call()], discordReady: true });
     render(<AdminCalls />);
-    expect((await screen.findByText('server chat')).getAttribute('href')).toBe('/admin/people/chat/3');
+    expect((await screen.findByText('server chat')).getAttribute('href')).toBe('/admin/live?chat=3');
   });
 ```
 
@@ -1783,24 +1992,17 @@ Run: `npx vitest run tests/modCallPoster.test.ts tests/modCallRoutes.test.ts web
 
 ```ts
   if (call.server_id !== null) {
-    row.push({ kind: 'link', label: 'Server chat', url: `${publicUrl}/admin/people/chat/${call.server_id}` });
+    row.push({ kind: 'link', label: 'Server chat', url: `${publicUrl}/admin/live?chat=${call.server_id}` });
   }
 ```
 
-Discord allows 5 components per row: Handling it, Replay moment, Ticket, Server chat is 4. Fine.
+Discord allows 5 components per row: Handling it, Replay moment, Ticket, Server chat is 4.
 
 `src/routes/modCalls.ts`: add `serverId: number | null;` to `ModCallView` and `serverId: c.server_id,` in `view()`. Same field in `web/src/api.ts` ModCallView.
 
 `AdminCalls.tsx`: beside the existing "replay moment" link for a call, add
-`{c.serverId !== null && <a href={`/admin/people/chat/${c.serverId}`}>server chat</a>}`
-using the same separator markup its neighbours use.
-
-`MatchPanels.tsx` AdminServersPanel, server name cell:
-
-```tsx
-                <td>{s.name} <span class="muted mono">{s.host}:{s.port}</span>{' '}
-                  <a class="chip" href={`/admin/people/chat/${s.id}`}>Chat</a></td>
-```
+`{c.serverId !== null && <a href={`/admin/live?chat=${c.serverId}`}>server chat</a>}`
+with the same separator markup its neighbours use.
 
 - [ ] **Step 3: Run the tests and build**
 
@@ -1811,22 +2013,19 @@ Expected: PASS.
 
 ```bash
 git add src/ web/ tests/
-git commit -m "staff chat: link to a server's chat from Servers, mod call cards and In-game calls"
+git commit -m "staff chat: Server chat links on mod call cards and In-game calls"
 ```
 
 ---
 
-### Task 9: Spec touch-up and full check
+### Task 10: Spec touch-up and full check
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-09-28-staff-server-chat-design.md`
 
-- [ ] **Step 1: Update the spec to what was built**
+- [ ] **Step 1: Check the spec against what was built**
 
-- Section 5 (UI): the chat is the People desk section "Server chat" at `/admin/people/chat[/<serverId>]`, not a drawer on Live, because moderators cannot open the Live desk. The Servers panel on Live links to it.
-- Traps and limits: team versus all chat IS recorded (`scope` on PUGSAY, from `OnClientSayCommand`'s command name); remove the "waits" wording.
-- Section 4: routes are under `/api/mod/chat` (mod guard), matching the mod call routes.
-- The admin feed line has its own toggle, `admin_feed_staff_messages`.
+The spec was updated on 2026-09-28 for the drawer, the Live desk opening and the team/all scope. Read it against the branch and fix anything that drifted during the build (route names, labels, toggle name).
 
 - [ ] **Step 2: Full suite**
 
@@ -1837,7 +2036,7 @@ Expected: all green. `server.test.ts` malformed-URL may fail in a fresh worktree
 
 ```bash
 git add docs/
-git commit -m "spec: staff chat as built (People desk page, team/all scope, feed toggle)"
+git commit -m "spec: staff chat as built"
 ```
 
 Shipping (web deploy, then pug-match 0.3.16 on empty servers) is NOT part of this plan: it needs the owner's go-ahead per server.
