@@ -813,11 +813,59 @@ describe('firstMapOf', () => {
 });
 
 describe('setupMatch with a held side-game box', () => {
+  let releases: [number, unknown][];
+  let noServer: number[];
   async function build(takeHeld: ConstructorParameters<typeof RealOrchestrator>[0]['takeHeld']) {
     const listener = new LogListener(() => {}); await listener.listen(0); cleanup.push(() => listener.close());
     const releaser = new ServerReleaser(db, async () => {});
-    return new RealOrchestrator({ db, listener, logPublicAddress: '127.0.0.1:27500', releaser, makeRcon: (o) => o, takeHeld });
+    releases = [];
+    noServer = [];
+    const real = releaser.release.bind(releaser);
+    releaser.release = (id, opts, onSettled) => { releases.push([id, opts]); real(id, opts, onSettled); };
+    return new RealOrchestrator({
+      db, listener, logPublicAddress: '127.0.0.1:27500', releaser, makeRcon: (o) => o, takeHeld,
+      onNoServer: (id) => noServer.push(id),
+    });
   }
+  const FORCED = { restart: true, forceRestart: true };
+  const matchRow = (id: number) => db.prepare('SELECT state, server_id, token FROM matches WHERE id = ?').get(id) as { state: string; server_id: number | null; token: string | null };
+
+  it('a refused sm_side_stop force-releases the held box and the match takes another', async () => {
+    const heldSrv = await fakeServer('', { sm_side_stop: 'PUGERR token' }); cleanup.push(heldSrv.close);
+    const otherSrv = await fakeServer(''); cleanup.push(otherSrv.close);
+    const held = addServer(db, { name: 'held', host: '127.0.0.1', port: 27016, rconPort: heldSrv.port, rconPassword: 'secret' });
+    const other = addServer(db, { name: 'other', host: '127.0.0.1', port: 27017, rconPort: otherSrv.port, rconPassword: 'secret' });
+    db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(held);
+    const orch = await build(() => ({ server: { ...getServer(db, held)!, status: 'reserved' }, firstCommands: ['sm_side_stop abc'] }));
+    const matchId = seedMatch(db, 'no_mercy');
+    await orch.setupMatch(matchId);
+    expect(heldSrv.cmds).toEqual(['sm_side_stop abc']);
+    expect(releases).toEqual([[held, FORCED]]);
+    expect(matchRow(matchId)).toMatchObject({ state: 'live', server_id: other });
+    expect(otherSrv.cmds).not.toContain('sm_side_stop abc');
+  });
+
+  it('an unreachable held box is force-released, and with no other box the match waits', async () => {
+    const held = addServer(db, { name: 'held', host: '127.0.0.1', port: 27016, rconPort: 1, rconPassword: 'x' });
+    db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(held);
+    const orch = await build(() => ({ server: { ...getServer(db, held)!, status: 'reserved' }, firstCommands: ['sm_side_stop abc'] }));
+    const matchId = seedMatch(db, 'no_mercy');
+    await orch.setupMatch(matchId);
+    expect(releases).toEqual([[held, FORCED]]);
+    expect(noServer).toEqual([matchId]);
+    expect(matchRow(matchId)).toEqual({ state: 'configuring', server_id: null, token: null });
+  });
+
+  it('a later setup failure on a taken held box releases it with a forced restart', async () => {
+    const srv = await fakeServer('', { sm_pug_match: 'PUGERR busy' }); cleanup.push(srv.close);
+    const held = addServer(db, { name: 'held', host: '127.0.0.1', port: 27016, rconPort: srv.port, rconPassword: 'secret' });
+    db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(held);
+    const orch = await build(() => ({ server: { ...getServer(db, held)!, status: 'reserved' }, firstCommands: ['sm_side_stop abc'] }));
+    const matchId = seedMatch(db, 'no_mercy');
+    await orch.setupMatch(matchId);
+    expect(releases).toEqual([[held, FORCED]]);
+    expect(matchRow(matchId).state).toBe('aborted');
+  });
 
   it('uses the held box and sends its first commands before exec pug_match', async () => {
     const srv = await fakeServer(''); cleanup.push(srv.close);
@@ -829,6 +877,7 @@ describe('setupMatch with a held side-game box', () => {
     expect(srv.cmds[0]).toBe('sm_side_stop abc');
     expect(srv.cmds.indexOf('exec pug_match')).toBeGreaterThan(0);
     expect(db.prepare('SELECT server_id FROM matches WHERE id = ?').get(matchId)).toEqual({ server_id: held });
+    expect(releases).toEqual([]);
   });
 
   it('falls back when the campaign cannot run there', async () => {

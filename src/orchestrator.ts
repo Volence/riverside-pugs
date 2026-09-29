@@ -91,6 +91,10 @@ export function campaignRunsOn(db: DB, campaign: string, server: ServerRow): boo
   return true;
 }
 
+/** How a box that held a side game is released when the match does not go
+ *  live on it: the restart is what clears pug-sidegame's state. */
+const FORCED_RESTART = { restart: true, forceRestart: true };
+
 interface MatchRow {
   id: number;
   state: string;
@@ -152,8 +156,28 @@ export class RealOrchestrator implements Orchestrator {
       | undefined;
     if (!match) return;
 
+    // A held box first has to stop its side game. pug-sidegame answers PUGOK;
+    // anything else (a refusal, no answer, no connection) leaves it armed,
+    // swallowing sm_ready and re-asserting its password every map, so the box
+    // goes back through a forced restart, which clears the plugin, and the
+    // match looks for another box. The fallback is claimed before that
+    // release, so the held box cannot be handed straight back.
+    let rcon: RconClient | null = null;
+    let heldServer: ServerRow | null = null;
     const held = this.takeHeld?.(match.campaign, (s) => campaignRunsOn(this.db, match.campaign, s)) ?? null;
-    const server = held?.server ?? claimIdle(this.db);
+    if (held) {
+      try {
+        rcon = await this.connectRcon(held.server);
+        for (const c of held.firstCommands) await expectPugOk(rcon, c);
+        heldServer = held.server;
+      } catch (err) {
+        console.error(`[orchestrator] handing ${held.server.name} over from its side game failed for match ${matchId}:`, err);
+        rcon?.close();
+        rcon = null;
+      }
+    }
+    const server = heldServer ?? claimIdle(this.db);
+    if (held && !heldServer) this.releaser.release(held.server.id, FORCED_RESTART);
     if (!server) {
       // Wait, do not abort. The match stays 'configuring' and the pending list
       // retries it when a box frees. Only the no-server case pends: an rcon
@@ -171,13 +195,9 @@ export class RealOrchestrator implements Orchestrator {
     this.db.prepare('UPDATE matches SET server_id = ?, token = ? WHERE id = ?').run(server.id, token, matchId);
     this.listener.register(token);
 
-    let rcon: RconClient | null = null;
     let live = false;
     try {
-      rcon = await this.connectRcon(server);
-      for (const c of held?.firstCommands ?? []) {
-        try { await rcon.exec(c); } catch (err) { console.warn(`[orchestrator] ${c.split(' ')[0]} failed (non-fatal):`, err); }
-      }
+      rcon ??= await this.connectRcon(server);
       await rcon.exec(`logaddress_add ${this.logPublicAddress}`);
       await this.pushSecret(rcon, server);
       await rcon.exec('exec pug_match');
@@ -270,7 +290,7 @@ export class RealOrchestrator implements Orchestrator {
     } catch (err) {
       console.error(`[orchestrator] setup failed for match ${matchId}:`, err);
       this.listener.unregister(token);
-      this.releaser.release(server.id);
+      this.releaser.release(server.id, server === heldServer ? FORCED_RESTART : undefined);
       this.db.prepare("UPDATE matches SET state = 'aborted' WHERE id = ?").run(matchId);
     } finally {
       rcon?.close();

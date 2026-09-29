@@ -71,6 +71,7 @@ export function pugReply(cmd: string, dumpBody: string | ((cmd: string) => strin
   if (name === 'sm_pug_dump') return typeof dumpBody === 'function' ? dumpBody(cmd) : dumpBody;
   if (name === 'sm_pug_match') return 'PUGOK match=1';
   if (name === 'sm_pug_abort') return 'PUGOK aborted';
+  if (name === 'sm_side_stop') return 'PUGOK side stop';
   if (name === 'sm_pug_roster') {
     const arg = rest.startsWith('"') ? rest.slice(1, rest.indexOf('"', 1)) : rest.split(':')[0];
     return /^\d{17}:[ab]$/.test(arg) ? 'PUGOK roster=1' : `PUGERR bad roster arg: ${arg}`;
