@@ -78,6 +78,20 @@ CREATE TABLE IF NOT EXISTS servers (
   rcon_password TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'offline' CHECK (status IN ('idle','reserved','live','offline'))
 );
+-- A box held for a queue side game (2v2/3v3 while the queue fills). A row,
+-- not a servers.status value, for the practice_leases reasons: see the
+-- comment on that table. Internal bookkeeping only; nothing reads it for
+-- display, and side games are never recorded anywhere else.
+CREATE TABLE IF NOT EXISTS side_games (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  server_id   INTEGER NOT NULL REFERENCES servers(id),
+  token       TEXT NOT NULL,
+  password    TEXT NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  ended_at    TEXT,
+  end_reason  TEXT
+);
+CREATE INDEX IF NOT EXISTS side_games_open ON side_games (server_id) WHERE ended_at IS NULL;
 CREATE TABLE IF NOT EXISTS matches (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   season_id INTEGER NOT NULL REFERENCES seasons(id),
@@ -926,6 +940,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // first, for the staged rollout (owner, 2026-09-28).
   practice_leasing: 'admins',
   practice_max_leases: '2',
+  sidegames_enabled: '0',
+  sidegames_min_players: '4',
 };
 
 /** Patch triage backfill (sub-project 1 of the balance catalogue roadmap).
