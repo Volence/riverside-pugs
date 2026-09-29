@@ -17,6 +17,8 @@ export interface CustomCampaignRow {
   /** R2 key of the zipped VPK, or null before campaignZip.ts has made one. */
   zip_key: string | null;
   zip_bytes: number | null;
+  /** 1: installs and downloads, never offered for the PUG pool. */
+  practice_only: number;
 }
 
 export interface ChapterRow {
@@ -89,6 +91,10 @@ export function listCampaigns(
   if (opts.state) { where.push('state = ?'); args.push(opts.state); }
   const sql = `SELECT * FROM custom_campaigns${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY name`;
   return db.prepare(sql).all(...args) as CustomCampaignRow[];
+}
+
+export function setPracticeOnly(db: DB, slug: string, practiceOnly: boolean): boolean {
+  return db.prepare('UPDATE custom_campaigns SET practice_only = ? WHERE slug = ?').run(practiceOnly ? 1 : 0, slug).changes > 0;
 }
 
 export function chaptersOf(db: DB, slug: string): ChapterRow[] {

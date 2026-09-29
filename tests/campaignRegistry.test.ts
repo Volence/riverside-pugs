@@ -335,3 +335,16 @@ describe('poolableCampaigns and dlc4', () => {
     expect(serversMissingDlc4(db)).toEqual(['Dallas']);
   });
 });
+
+describe('practice-only campaigns', () => {
+  it('are never offered for the pool, even when the saved pool already has them', () => {
+    publish('hunter_training');
+    expect(poolableCampaigns(db).map((c) => c.slug)).toContain('hunter_training');
+    db.prepare("UPDATE custom_campaigns SET practice_only = 1 WHERE slug = 'hunter_training'").run();
+    invalidateCampaignCache();
+    expect(poolableCampaigns(db).map((c) => c.slug)).not.toContain('hunter_training');
+    expect(poolableCampaigns(db, { alsoAllow: ['hunter_training'] }).map((c) => c.slug)).not.toContain('hunter_training');
+    // Still a known campaign: its maps resolve and it has a name.
+    expect(campaignRegistry(db).get('hunter_training')?.practiceOnly).toBe(true);
+  });
+});
