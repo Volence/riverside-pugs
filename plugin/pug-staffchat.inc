@@ -12,6 +12,11 @@
 // nobody in game sees it, and it goes out as a signed PUGSTAFF line.
 
 #define STAFFCHAT_COOLDOWN 5.0
+// Played to each player a staff message reaches. L4D1 chat has only white,
+// green and orange, and every plugin already uses all three, so a staff line
+// cannot stand out by colour; the beep is what makes it noticed (owner's
+// pick after an in-game test, 2026-09-28). Stock game sound, nothing to ship.
+#define STAFFCHAT_SOUND "ui/beepclear.wav"
 
 // g_fStaffLast and g_bSayTeam are declared in pug-match.sp, ahead of
 // EmitConductSay and of pug-modcall.inc's OnClientSayCommand: see the comment
@@ -21,6 +26,11 @@ void StaffChat_Init()
 {
 	RegServerCmd("sm_pug_staffsay", Cmd_StaffSay, "sm_pug_staffsay <all|survivors|infected|spectators|steamid64> \"<name>\" \"<message>\" <send id>");
 	RegConsoleCmd("sm_staff", Cmd_Staff, "Message the staff privately. Only staff see it.");
+}
+
+void StaffChat_OnMapStart()
+{
+	PrecacheSound(STAFFCHAT_SOUND, true);
 }
 
 void StaffChat_OnDisconnect(int client)
@@ -72,6 +82,7 @@ public Action Cmd_StaffSay(int args)
 		}
 		PrintToChat(c, "\x04[%s]\x01 %s: %s", label, name, message);
 		if (whisper) PrintToChat(c, "\x05Reply privately with /staff <message>");
+		EmitSoundToClient(c, STAFFCHAT_SOUND);
 		delivered++;
 	}
 	PugLog("PUGSTAFFSENT id=%d delivered=%d", sendId, delivered);
