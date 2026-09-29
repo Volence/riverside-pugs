@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import type { ChatLineView } from '../../api';
 
-const { mockMod } = vi.hoisted(() => ({ mockMod: { chatServers: vi.fn(), chatLines: vi.fn(), chatSend: vi.fn(), chatPlayers: vi.fn() } }));
+const { mockMod } = vi.hoisted(() => ({ mockMod: { chatServers: vi.fn(), chatLines: vi.fn(), chatEarlier: vi.fn(), chatSend: vi.fn(), chatPlayers: vi.fn() } }));
 vi.mock('../../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api')>();
   return { ...actual, modApi: { ...actual.modApi, ...mockMod } };
@@ -201,4 +201,34 @@ describe('ChatDrawer', () => {
     fireEvent.change(screen.getByLabelText('Send to'), { target: { value: 'whisper' } });
     expect(await screen.findByText('Could not reach the server.')).toBeTruthy();
   });
+
+  it('heads the current match, and Show earlier chat adds older lines with their own dividers', async () => {
+    mockMod.chatLines.mockResolvedValue({
+      server: { id: 3, name: 'Dallas' }, currentMatchId: 12, hasEarlier: true,
+      lines: [line({ id: 20, matchId: 12, message: 'now' })],
+    });
+    mockMod.chatEarlier.mockResolvedValue({
+      server: { id: 3, name: 'Dallas' }, hasEarlier: false,
+      lines: [line({ id: 5, matchId: 11, message: 'last game' }), line({ id: 9, matchId: null, message: 'lobby' })],
+    });
+    render(<ChatDrawer serverId={3} onPick={() => {}} onClose={() => {}} />);
+    await screen.findByText('now');
+    expect(screen.getByText('Match #12')).toBeTruthy();
+    expect(screen.queryByText('last game')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show earlier chat' }));
+    await screen.findByText('last game');
+    expect(mockMod.chatEarlier).toHaveBeenCalledWith(3, 20, expect.anything());
+    expect(screen.getByText('Match #11')).toBeTruthy();
+    expect(screen.getByText('Between matches')).toBeTruthy();
+    // Nothing older is left, so the button goes.
+    expect(screen.queryByRole('button', { name: 'Show earlier chat' })).toBeNull();
+  });
+
+  it('offers no earlier chat when there is none', async () => {
+    mockMod.chatLines.mockResolvedValue({ server: { id: 3, name: 'Dallas' }, currentMatchId: null, hasEarlier: false, lines: [line()] });
+    render(<ChatDrawer serverId={3} onPick={() => {}} onClose={() => {}} />);
+    await screen.findByText('hello');
+    expect(screen.queryByRole('button', { name: 'Show earlier chat' })).toBeNull();
+  });
 });
+

@@ -1493,6 +1493,7 @@ export interface ChatLineView {
   to: { kind: 'all' | 'team' | 'player'; value: string | null; name: string | null } | null;
   delivered: number | null;
 }
+export interface ChatLinesPage { server: { id: number; name: string }; lines: ChatLineView[]; hasEarlier: boolean }
 export type ChatSendBody =
   | { to: 'all'; message: string }
   | { to: 'team'; team: 1 | 2 | 3; message: string }
@@ -1504,8 +1505,12 @@ export const modApi = {
   /** Mark an in-game call handled, as the Discord card's button does. */
   handleCall: (id: number) => post<{ ok: true }>(`/api/mod/calls/${id}/handle`),
   chatServers: (signal?: AbortSignal) => get<{ servers: ChatServerView[] }>('/api/mod/chat/servers', signal),
-  chatLines: (serverId: number, after: number, signal?: AbortSignal) =>
-    get<{ server: { id: number; name: string }; lines: ChatLineView[] }>(`/api/mod/chat/${serverId}?after=${after}`, signal),
+  /** The drawer's opening view: during a live match, that match's chat only. */
+  chatLines: (serverId: number, signal?: AbortSignal) =>
+    get<ChatLinesPage & { currentMatchId: number | null }>(`/api/mod/chat/${serverId}`, signal),
+  /** One page further back than line `before`, any match. */
+  chatEarlier: (serverId: number, before: number, signal?: AbortSignal) =>
+    get<ChatLinesPage>(`/api/mod/chat/${serverId}?before=${before}`, signal),
   chatSend: (serverId: number, body: ChatSendBody) => post<{ ok: true; id: number }>(`/api/mod/chat/${serverId}`, body),
   /** Humans on the server right now (rcon status), for the Whisper picker. */
   chatPlayers: (serverId: number) => get<{ players: { steamid: string; name: string }[] }>(`/api/mod/chat/${serverId}/players`),

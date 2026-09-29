@@ -3074,6 +3074,13 @@ tbody tr.is-lifted td { opacity: 0.55; }
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
 }
 .chat-drawer__head { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
+.chat-earlier { align-self: center; margin-bottom: var(--sp-2); }
+/* Where one match's chat starts: a thin rule with the match (or "Between
+   matches") in the middle, so two games on one server never run together. */
+.chat-divider { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0 var(--sp-1); font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.chat-divider::before, .chat-divider::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+.chat-divider a { color: var(--text-muted); }
+.chat-divider a:hover { color: var(--text); }
 .chat-log { flex: 1; overflow-y: auto; font-size: var(--fs-dense); display: flex; flex-direction: column; gap: 2px; }
 .chat-line--surv { border-left: 3px solid var(--c-no-mercy); padding-left: var(--sp-2); }
 .chat-line--inf { border-left: 3px solid var(--loss); padding-left: var(--sp-2); }

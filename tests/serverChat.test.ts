@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer } from '../src/players.js';
 import {
-  _resetNames, listLines, markDelivered, markSendFailed, noteName, recordSay, recordStaffIn, recordStaffOut,
+  _resetNames, hasLinesBefore, listLines, listLinesBefore, listMatchLines, markDelivered, markSendFailed, noteName,
+  recordSay, recordStaffIn, recordStaffOut,
 } from '../src/serverChat.js';
 
 const P = '76561199048276493';
@@ -89,4 +90,20 @@ describe('server_chat store', () => {
     recordSay(db, s1, { steamid: P, team: 2, scope: null, message: 'x' });
     expect(listLines(db, s1, 0, 200)[0].match_id).toBe(m);
   });
+
+  it('pages backwards from an id, oldest first, and says whether more is left', () => {
+    const ids = [0, 1, 2, 3, 4].map((i) => recordSay(db, s1, { steamid: P, team: 2, scope: null, message: `m${i}` }));
+    recordSay(db, s2, { steamid: P, team: 2, scope: null, message: 'other server' });
+    expect(listLinesBefore(db, s1, ids[4], 2).map((r) => r.message)).toEqual(['m2', 'm3']);
+    expect(hasLinesBefore(db, s1, ids[2])).toBe(true);
+    expect(hasLinesBefore(db, s1, ids[0])).toBe(false);
+  });
+
+  it('lists one match\'s lines only', () => {
+    recordSay(db, s1, { steamid: P, team: 2, scope: null, message: 'before the match' });
+    const m = Number(db.prepare("INSERT INTO matches (season_id, state, campaign, server_id) VALUES (1, 'live', 'no_mercy', ?)").run(s1).lastInsertRowid);
+    recordSay(db, s1, { steamid: P, team: 2, scope: null, message: 'in the match' });
+    expect(listMatchLines(db, s1, m, 200).map((r) => r.message)).toEqual(['in the match']);
+  });
 });
+
