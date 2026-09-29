@@ -84,7 +84,10 @@ export function makeRequireMod(db: DB) {
 
 /** Per-route guard for the caster page: an active caster or admin's steamid,
  *  or the 401/403 reply sent and null. Moderators are not let in by their
- *  flag: working tickets is no reason to hold a live match password. */
+ *  flag here either, but not for secrecy: a moderator already sees live
+ *  match passwords on the Live desk (owner ruling 2026-09-28). This is role
+ *  separation, not a password to withhold: casting is its own role, granted
+ *  on its own, and working tickets is no reason to have it. */
 export function makeRequireCaster(db: DB) {
   return function requireCaster(req: FastifyRequest, reply: FastifyReply): string | null {
     const steamid = getSession(req, db);
