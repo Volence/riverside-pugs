@@ -7,7 +7,10 @@ vi.mock('../../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api')>();
   return { ...actual, modApi: { ...actual.modApi, ...mockMod } };
 });
-vi.mock('../../hooks/useHubEvent', () => ({ useHubEvent: () => {} }));
+const hubHandlers = vi.hoisted(() => [] as (() => void)[]);
+vi.mock('../../hooks/useHubEvent', () => ({ useHubEvent: (_e: string[], fn: () => void) => { hubHandlers.push(fn); } }));
+/** The latest render's server_chat handler, i.e. what a hub event would run. */
+const hubEvent = () => hubHandlers[hubHandlers.length - 1]();
 
 const { ChatDrawer } = await import('./ChatDrawer');
 
@@ -19,6 +22,7 @@ const line = (over: Partial<ChatLineView> = {}): ChatLineView => ({
 const SERVERS = { servers: [{ id: 3, name: 'Dallas', state: 'match', lastAt: null }, { id: 4, name: 'Riverside #3', state: 'practice', lastAt: null }] };
 
 beforeEach(() => {
+  hubHandlers.length = 0;
   for (const f of Object.values(mockMod)) f.mockReset();
   mockMod.chatServers.mockResolvedValue(SERVERS);
 });
@@ -124,5 +128,49 @@ describe('ChatDrawer', () => {
     expect(await screen.findByText('not sent')).toBeTruthy();
     expect(mockMod.chatLines).toHaveBeenCalledTimes(2);
     expect(screen.getByText('Could not reach the server.')).toBeTruthy();
+  });
+
+  describe('following new chat', () => {
+    const window200 = (last: number) => ({ server: { id: 3, name: 'Dallas' },
+      lines: Array.from({ length: 200 }, (_, i) => line({ id: last - 199 + i, message: `m${last - 199 + i}` })) });
+    /** jsdom has no layout: give the log a 1000px body in a 200px box and
+     *  record every scrollTop write. */
+    const fakeLayout = (log: HTMLElement) => {
+      const writes: number[] = [];
+      let top = 0;
+      Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => 1000 });
+      Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 200 });
+      Object.defineProperty(log, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => { top = v; writes.push(v); } });
+      return { writes, scrollTo: (v: number) => { top = v; fireEvent.scroll(log); } };
+    };
+
+    it('scrolls to a new last line even when the window stays at 200', async () => {
+      mockMod.chatLines.mockResolvedValue(window200(200));
+      render(<ChatDrawer serverId={3} onPick={() => {}} onClose={() => {}} />);
+      await screen.findByText('m200');
+      const log = screen.getByRole('log');
+      const { writes, scrollTo } = fakeLayout(log);
+      scrollTo(790); // within 40px of the bottom (800)
+      writes.length = 0;
+      mockMod.chatLines.mockResolvedValue(window200(201));
+      hubEvent();
+      await screen.findByText('m201');
+      await waitFor(() => expect(writes).toContain(1000));
+    });
+
+    it('leaves staff reading history where they are', async () => {
+      mockMod.chatLines.mockResolvedValue(window200(200));
+      render(<ChatDrawer serverId={3} onPick={() => {}} onClose={() => {}} />);
+      await screen.findByText('m200');
+      const log = screen.getByRole('log');
+      const { writes, scrollTo } = fakeLayout(log);
+      scrollTo(300);
+      writes.length = 0;
+      mockMod.chatLines.mockResolvedValue(window200(201));
+      hubEvent();
+      await screen.findByText('m201');
+      await new Promise((r) => setTimeout(r, 0));
+      expect(writes).toEqual([]);
+    });
   });
 });

@@ -24,7 +24,11 @@ export function ChatDrawer({ serverId, onPick, onClose }: {
   const [mode, setMode] = useState<Mode>({ kind: 'all' });
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
-  const bottom = useRef<HTMLDivElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+  // Whether the log sat at (or within 40px of) the bottom as of the last
+  // scroll. Only then does a new line pull it down: staff scrolled up to read
+  // history are left where they are.
+  const stick = useRef(true);
 
   // Which server the drawer shows right now, in a ref rather than the
   // `serverId` prop: a `load` call closes over the prop as it was when the
@@ -57,13 +61,24 @@ export function ChatDrawer({ serverId, onPick, onClose }: {
   };
   useEffect(() => {
     shownId.current = serverId;
+    stick.current = true;
     setMode({ kind: 'all' });
     setLines([]);
     void load();
     return () => linesAbort.current?.abort();
   }, [serverId]);
   useHubEvent(['server_chat'], () => { void load(); });
-  useEffect(() => { bottom.current?.scrollIntoView?.({ block: 'end' }); }, [lines.length]);
+  // Keyed on the last line's id, not the count: a busy server's window is
+  // always 200 lines, so the count stops changing while the chat goes on.
+  const lastId = lines.length > 0 ? lines[lines.length - 1].id : 0;
+  useEffect(() => {
+    const log = logRef.current;
+    if (log && stick.current) log.scrollTop = log.scrollHeight;
+  }, [lastId]);
+  const onScroll = () => {
+    const log = logRef.current;
+    if (log) stick.current = log.scrollHeight - log.scrollTop - log.clientHeight <= 40;
+  };
 
   const send = async () => {
     const message = text.trim();
@@ -103,10 +118,9 @@ export function ChatDrawer({ serverId, onPick, onClose }: {
         </label>
         <button type="button" class="chip" aria-label="Close chat" onClick={onClose}>×</button>
       </header>
-      <div class="chat-log" role="log">
+      <div class="chat-log" role="log" ref={logRef} onScroll={onScroll}>
         {lines.length === 0 && <Empty>No chat yet.</Empty>}
         {lines.map((l) => <Line key={l.id} line={l} onName={(steamid, n) => setMode({ kind: 'player', steamid, name: n })} />)}
-        <div ref={bottom} />
       </div>
       {error && <p class="error">{error}</p>}
       <form class="chat-send" onSubmit={(e) => { e.preventDefault(); void send(); }}>
