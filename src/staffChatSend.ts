@@ -1,7 +1,7 @@
 import type { DB } from './db.js';
 import type { LeaseRcon } from './practiceLeases.js';
 import { getServer } from './serverPool.js';
-import { recordStaffOut } from './serverChat.js';
+import { markSendFailed, recordStaffOut } from './serverChat.js';
 
 /**
  * Staff messages into a game server. The ONLY command built from user text is
@@ -62,7 +62,7 @@ export async function sendStaffChat(
     message: input.message,
   });
   const failed = (error: string): SendResult => {
-    db.prepare('UPDATE server_chat SET delivered = -1 WHERE id = ?').run(id);
+    markSendFailed(db, id);
     return { ok: false, id, error };
   };
   const server = getServer(db, input.serverId);

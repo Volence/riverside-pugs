@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer } from '../src/players.js';
 import {
-  _resetNames, listLines, markDelivered, noteName, recordSay, recordStaffIn, recordStaffOut,
+  _resetNames, listLines, markDelivered, markSendFailed, noteName, recordSay, recordStaffIn, recordStaffOut,
 } from '../src/serverChat.js';
 
 const P = '76561199048276493';
@@ -63,6 +63,20 @@ describe('server_chat store', () => {
     expect(markDelivered(db, s2, id, 8)).toBe(false);
     expect(markDelivered(db, s1, id, 4)).toBe(true);
     expect(listLines(db, s1, 0, 200)[0].delivered).toBe(4);
+  });
+
+  it('marks a send failed only while no delivery count has come back', () => {
+    const id = recordStaffOut(db, s1, { sentBy: MOD, name: 'V', toKind: 'all', toValue: null, message: 'hi' });
+    const late = recordStaffOut(db, s1, { sentBy: MOD, name: 'V', toKind: 'all', toValue: null, message: 'hi' });
+    markDelivered(db, s1, late, 4);
+    const say = recordSay(db, s1, { steamid: P, team: 2, scope: null, message: 'x' });
+    markSendFailed(db, id);
+    markSendFailed(db, late);
+    markSendFailed(db, say);
+    const rows = listLines(db, s1, 0, 200);
+    expect(rows.find((r) => r.id === id)?.delivered).toBe(-1);
+    expect(rows.find((r) => r.id === late)?.delivered).toBe(4);
+    expect(rows.find((r) => r.id === say)?.delivered).toBeNull();
   });
 
   it('never marks delivery on a player line', () => {

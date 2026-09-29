@@ -88,6 +88,13 @@ export function markDelivered(db: DB, serverId: number, sendId: number, delivere
     .run(delivered, sendId, serverId).changes > 0;
 }
 
+/** A send that failed on the site's side. Only a staff_out row still waiting
+ *  for its report: a timeout that lands after the plugin already answered must
+ *  not overwrite the real delivery count. */
+export function markSendFailed(db: DB, sendId: number): void {
+  db.prepare("UPDATE server_chat SET delivered = -1 WHERE id = ? AND kind = 'staff_out' AND delivered IS NULL").run(sendId);
+}
+
 /** Oldest first. `after = 0` means "the newest `limit` lines". */
 export function listLines(db: DB, serverId: number, after: number, limit: number): ChatLineRow[] {
   if (after > 0) {
