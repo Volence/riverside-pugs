@@ -66,6 +66,34 @@ describe('renderPanel', () => {
   it('says the queue is empty rather than listing nothing', () => {
     expect(text(renderPanel({ publicUrl: URL_, size: 8, players: [], phase: null }))).toContain('empty');
   });
+
+  const players = (n: number) => Array.from({ length: n }, (_, i) => ({
+    name: `p${i}`, discordId: null, sr: null,
+  }));
+
+  it('offers Side games only at 4+ queued', () => {
+    const few = renderPanel({ publicUrl: URL_, size: 8, players: players(3), phase: null, sideGame: null });
+    expect(few.components.flat().some((b) => b.kind === 'button' && b.customId === 'q:side')).toBe(false);
+  });
+
+  it('shows a running side game on the queue card', () => {
+    const p = renderPanel({ publicUrl: URL_, size: 8, players: players(5), phase: null, sideGame: { size: 2, players: 5 } });
+    expect(p.embeds[0].description).toContain('Side game: 2v2, 5 playing');
+    expect(p.components[0].some((b) => b.kind === 'button' && b.customId === 'q:side')).toBe(true);
+  });
+
+  it('offers Side games at 4+ queued even without a running game', () => {
+    const p = renderPanel({ publicUrl: URL_, size: 8, players: players(4), phase: null, sideGame: null });
+    expect(p.components[0].some((b) => b.kind === 'button' && b.customId === 'q:side')).toBe(true);
+  });
+
+  it('keeps the two link buttons on their own row', () => {
+    const p = renderPanel({ publicUrl: URL_, size: 8, players: [alice, bob], phase: null });
+    expect(p.components).toHaveLength(2);
+    const links = p.components[1];
+    expect(links.every((b) => b.kind === 'link')).toBe(true);
+    expect(links).toHaveLength(2);
+  });
 });
 
 describe('renderLobby', () => {

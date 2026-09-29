@@ -60,6 +60,9 @@ export interface PanelView {
   /** The opt-in alert role, when one is configured. Drives whether the panel
    *  offers a Notify me toggle at all. */
   alertRoleId?: string;
+  /** A side game currently running, or null. The card is shared by everyone,
+   *  so this cannot say who is opted in, only that a game is up. */
+  sideGame?: { size: 2 | 3 | null; players: number } | null;
 }
 
 export function renderPanel(v: PanelView): MessagePayload {
@@ -71,26 +74,40 @@ export function renderPanel(v: PanelView): MessagePayload {
     : v.phase === 'map_vote'
       ? '\nA queue just popped: campaign vote in progress.'
       : '';
+  const side = v.sideGame
+    ? `\nSide game: ${v.sideGame.size ? `${v.sideGame.size}v${v.sideGame.size}, ` : ''}${v.sideGame.players} playing (opt in with Side games).`
+    : '';
   const embed: Embed = {
     title: 'Riverside PUG Queue',
     url: `${v.publicUrl}/`,
     color: COLOR.accent,
-    description: `**${v.players.length}/${v.size}** in queue${status}\n\n${lines}`,
+    description: `**${v.players.length}/${v.size}** in queue${status}${side}\n\n${lines}`,
     footer: 'Ranked 4v4 Left 4 Dead. Queue here or on the website, it is the same queue.',
   };
   return {
     embeds: [embed],
-    components: [[
-      { kind: 'button', customId: 'q:join', label: 'Join Queue', style: 'success' },
-      { kind: 'button', customId: 'q:leave', label: 'Leave Queue', style: 'danger' },
-      // Only when an alert role is configured. Offering a toggle that silently
-      // does nothing is worse than not offering it.
-      ...(v.alertRoleId
-        ? [{ kind: 'button' as const, customId: 'q:notify', label: 'Notify me', style: 'secondary' as const }]
-        : []),
-      link(`${v.publicUrl}/`, 'Website'),
-      link(`${v.publicUrl}/leaderboard`, 'Leaderboard'),
-    ]],
+    components: [
+      [
+        { kind: 'button', customId: 'q:join', label: 'Join Queue', style: 'success' },
+        { kind: 'button', customId: 'q:leave', label: 'Leave Queue', style: 'danger' },
+        // Only when 4+ are queued, or a side game is already running: the card
+        // is shared by everyone, so it cannot know who is already opted in. A
+        // player who opted in when the queue dips below 4 keeps their opt-in
+        // and turns it off by leaving the queue or on the site.
+        ...(v.players.length >= 4 || v.sideGame
+          ? [{ kind: 'button' as const, customId: 'q:side', label: 'Side games', style: 'secondary' as const }]
+          : []),
+        // Only when an alert role is configured. Offering a toggle that silently
+        // does nothing is worse than not offering it.
+        ...(v.alertRoleId
+          ? [{ kind: 'button' as const, customId: 'q:notify', label: 'Notify me', style: 'secondary' as const }]
+          : []),
+      ],
+      [
+        link(`${v.publicUrl}/`, 'Website'),
+        link(`${v.publicUrl}/leaderboard`, 'Leaderboard'),
+      ],
+    ],
     mentionUserIds: [],
   };
 }

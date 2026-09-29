@@ -9,6 +9,7 @@ import { getSetting } from '../settings.js';
 import { ENDORSE_ERROR_TEXT, ENDORSE_LABEL, endorseState, giveEndorsement } from '../endorsements.js';
 import { escapeName, renderEndorseKinds, renderEndorsePicker } from './presenter.js';
 import { MERGED_MESSAGE, standingOf } from '../standing.js';
+import type { SideGameView } from '../sideGames.js';
 
 export interface ControllerDeps {
   db: DB;
@@ -21,6 +22,9 @@ export interface ControllerDeps {
   /** Add and remove the opt-in queue-alert role. Absent in tests that do not
    *  exercise it, and when absent the toggle says so rather than lying. */
   roles?: RoleOps;
+  /** A player's side game state, for the connect details after opting in.
+   *  Absent in tests that do not exercise side games. */
+  sideGameView?: (steamid: string) => SideGameView | null;
 }
 
 const say = (content: string, extra: Partial<MessagePayload> = {}): InteractionReply => ({
@@ -67,7 +71,7 @@ export function resolve(
  * Every button the bot posts. Each calls exactly what the website's HTTP route
  * calls, so the two surfaces cannot disagree about who may do what.
  *
- * custom_id scheme: q:join, q:leave, l:<lobbyId>:ready,
+ * custom_id scheme: q:join, q:leave, q:side, l:<lobbyId>:ready,
  * l:<lobbyId>:vote:<campaign>, m:<matchId>:connect, m:<matchId>:endorse,
  * e:<matchId>:p:<steamid>, e:<matchId>:k:<steamid>:<kind>.
  *
@@ -78,7 +82,7 @@ export async function handleButton(
   deps: ControllerDeps, i: Extract<BotInteraction, { kind: 'button' }>,
 ): Promise<InteractionReply> {
   const parts = i.customId.split(':');
-  const known = (parts[0] === 'q' && (parts[1] === 'join' || parts[1] === 'leave' || parts[1] === 'notify'))
+  const known = (parts[0] === 'q' && (parts[1] === 'join' || parts[1] === 'leave' || parts[1] === 'notify' || parts[1] === 'side'))
     || (parts[0] === 'l' && parts.length >= 3)
     || (parts[0] === 'm' && (parts[2] === 'connect' || parts[2] === 'spectate' || parts[2] === 'endorse'))
     || (parts[0] === 'e' && parts.length >= 4 && (parts[2] === 'p' || parts[2] === 'k'));
@@ -110,6 +114,17 @@ export async function handleButton(
     if (!mm.stateFor(steamid).queue.joined) return say('You are not in the queue.');
     mm.leave(steamid);
     return say('You left the queue.');
+  }
+
+  if (parts[0] === 'q' && parts[1] === 'side') {
+    const on = !mm.isSideOptedIn(steamid);
+    const r = mm.setSideOptIn(steamid, on);
+    if (!r.ok) return say(`Could not change side games: ${r.error}.`);
+    if (!on) return say('Side games off. You stay in the queue.');
+    const v = deps.sideGameView?.(steamid);
+    return say(v?.connect
+      ? `Side games on. Join: \`password ${v.connect.password}; connect ${v.connect.host}:${v.connect.port}\``
+      : 'Side games on. You will get connect details here and on the website when a game opens.');
   }
 
   if (parts[0] === 'l') {
