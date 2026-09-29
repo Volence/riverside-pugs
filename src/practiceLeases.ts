@@ -1,7 +1,7 @@
 /**
  * Practice server leases: lending an idle pool server out for practice.
  *
- * Two kinds, both decided by the owner on 2026-09-28:
+ * Three kinds, decided by the owner on 2026-09-28:
  *
  *   park   The shared Practice Park. Anyone logged in may join, eight humans
  *          at most, and it is listed publicly on the Play page. Starting one
@@ -14,6 +14,11 @@
  *   drill  A private server for replay drills. Only its owner may drive the
  *          drill commands in game; the invite link /practice/<id> gives any
  *          logged-in player the connect line and password.
+ *   hunter A private server running Hunter Training (eyeonus's map, cheats
+ *          off; l4d/practice/l4d_hunter_training.sp). One player: the map
+ *          moves one shared set of target bots, so two hunters would break
+ *          each other's rooms. Owned like a drill server, and a player has
+ *          one owned server (drill or hunter) at a time.
  *
  * A lease is a row of practice_leases and never a servers.status value: the
  * box stays 'idle' in servers, and claimIdle (with the two between-matches
@@ -56,7 +61,9 @@ import { getPlayer } from './players.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { practicePlayers, type PracticePlayer } from './practicePlayers.js';
 
-export type LeaseKind = 'park' | 'drill';
+export type LeaseKind = 'park' | 'drill' | 'hunter';
+/** Kinds a player owns: private, one open at a time per player. */
+export const OWNED_KINDS: readonly LeaseKind[] = ['drill', 'hunter'];
 
 /** Why a lease ended. Stored as text in end_reason. */
 export type EndReason =
@@ -85,12 +92,14 @@ export interface LeaseRow {
 
 /** Humans the park takes. The owner's number; the box itself allows more. */
 export const PARK_CAPACITY = 8;
+/** Humans a Hunter Training server takes: its owner. */
+export const HUNTER_CAPACITY = 1;
 /** A lease with nobody on it for this long ends. Also the grace to join.
  *  Shorter for the park (owner, 2026-09-28): it is a shared box that exists
  *  for whoever turns up, and an empty one is a box the queue could have. A
  *  drill server is one person's, set up for a planned session, and gets the
  *  longer wait for friends to connect. */
-export const IDLE_END_MS: Record<LeaseKind, number> = { park: 5 * 60_000, drill: 10 * 60_000 };
+export const IDLE_END_MS: Record<LeaseKind, number> = { park: 5 * 60_000, drill: 10 * 60_000, hunter: 5 * 60_000 };
 /** How long a lease runs before it ends unless people are still on it. */
 export const LEASE_MS = 90 * 60_000;
 /** Each extension past LEASE_MS while humans are connected. */
@@ -117,7 +126,15 @@ export const STARTUP_GRACE_MS = 4_000;
 export const CFG_TRIES = 3;
 
 /** What `l4d_game_type_name` must contain once each practice cfg has taken. */
-export const GAME_TYPE_MARK: Record<LeaseKind, string> = { park: 'Practice', drill: '4v4 PUG' };
+export const GAME_TYPE_MARK: Record<LeaseKind, string> = { park: 'Practice', drill: '4v4 PUG', hunter: 'Hunter Training' };
+/** The cvar that says which practice plugin mode a box is in, and the value
+ *  each kind must read. park and drill share l4d_practice's mode cvar; the
+ *  hunter box runs l4d_hunter_training instead, which has its own switch. */
+export const MODE_CHECK: Record<LeaseKind, { cvar: string; value: string }> = {
+  park: { cvar: 'l4d_practice_mode', value: 'park' },
+  drill: { cvar: 'l4d_practice_mode', value: 'drill' },
+  hunter: { cvar: 'l4d_ht_enable', value: '1' },
+};
 
 /** A cvar's value from its console echo (`"name" = "value" ( def. ... )`),
  *  or null when the reply does not carry one (unknown cvar, dropped reply). */
@@ -182,13 +199,14 @@ export function practiceClosedMessage(db: DB): string {
 /** Open and not winding down: a lease people can still join. */
 const isActive = (l: LeaseRow) => l.ended_at === null && l.end_reason === null;
 
-/** The player's open drill server, if any. One at a time per player.
- *  Parks are ownerless (owner, 2026-09-28): starting one is not "having a
- *  server", so a park never counts here and never blocks a drill server. */
-export function openDrillLeaseOf(db: DB, steamid: string): LeaseRow | undefined {
+/** The player's open owned server (drill or hunter), if any. One at a time
+ *  per player. Parks are ownerless (owner, 2026-09-28): starting one is not
+ *  "having a server", so a park never counts here and never blocks one. */
+export function openOwnedLeaseOf(db: DB, steamid: string): LeaseRow | undefined {
   return db.prepare(
-    "SELECT * FROM practice_leases WHERE owner_player_id = ? AND kind = 'drill' AND ended_at IS NULL ORDER BY id DESC LIMIT 1",
-  ).get(steamid) as LeaseRow | undefined;
+    `SELECT * FROM practice_leases WHERE owner_player_id = ? AND kind IN (${OWNED_KINDS.map(() => '?').join(',')})
+       AND ended_at IS NULL ORDER BY id DESC LIMIT 1`,
+  ).get(steamid, ...OWNED_KINDS) as LeaseRow | undefined;
 }
 
 /** Parks people can join right now: active, with room, fullest first so
@@ -295,7 +313,17 @@ function quoted(v: string): string {
  *  owner cvar is set empty rather than to whoever happened to start it. */
 export function identityLines(lease: Pick<LeaseRow, 'kind' | 'password' | 'owner_player_id'>, publicUrl: string): string[] {
   if (!/^[a-z0-9]+$/.test(lease.password)) throw new Error('lease password has unexpected characters');
-  if (lease.kind === 'drill' && !/^\d{17}$/.test(lease.owner_player_id)) throw new Error('lease owner is not a SteamID64');
+  if (OWNED_KINDS.includes(lease.kind) && !/^\d{17}$/.test(lease.owner_player_id)) throw new Error('lease owner is not a SteamID64');
+  // Quoted up front so a bad site URL throws for every kind, hunter included.
+  const site = quoted(publicUrl);
+  if (lease.kind === 'hunter') {
+    // l4d_hunter_training's own cvars: l4d_practice is not loaded on this box.
+    return [
+      `sm_cvar sv_password ${quoted(lease.password)}`,
+      `l4d_ht_password ${quoted(lease.password)}`,
+      `l4d_ht_owner ${lease.owner_player_id}`,
+    ];
+  }
   return [
     `sm_cvar sv_password ${quoted(lease.password)}`,
     // The plugin re-applies this after every map load: server.cfg's
@@ -303,7 +331,7 @@ export function identityLines(lease: Pick<LeaseRow, 'kind' | 'password' | 'owner
     // players got "bad password" until the next resend (2026-09-28).
     `l4d_practice_password ${quoted(lease.password)}`,
     lease.kind === 'drill' ? `l4d_practice_owner ${lease.owner_player_id}` : 'l4d_practice_owner ""',
-    `l4d_practice_site ${quoted(publicUrl)}`,
+    `l4d_practice_site ${site}`,
   ];
 }
 
@@ -380,11 +408,11 @@ export class PracticeLeases {
       const park = joinableParks(this.db)[0];
       if (park) return { ok: true, lease: park, joined: true };
     }
-    const mine = kind === 'drill' ? openDrillLeaseOf(this.db, owner) : undefined;
+    const mine = OWNED_KINDS.includes(kind) ? openOwnedLeaseOf(this.db, owner) : undefined;
     if (mine) {
       return {
         ok: false, status: 409, leaseId: mine.id,
-        error: 'You already have a drill server open. Close it before starting another.',
+        error: `You already have a ${mine.kind === 'drill' ? 'drill' : 'Hunter Training'} server open. Close it before starting another.`,
       };
     }
     // Admins are exempt: the limit is anti-spam, and it locked the owner out
@@ -540,11 +568,12 @@ export class PracticeLeases {
 
   /** Whether the practice cfg of `kind` is what the box is running. */
   private async configHolds(server: ServerRow, kind: LeaseKind): Promise<{ ok: boolean; seen: string }> {
+    const mode = MODE_CHECK[kind];
     try {
-      const [type, mode] = await this.deps.rcon(server, ['l4d_game_type_name', 'l4d_practice_mode']);
+      const [type, modeReply] = await this.deps.rcon(server, ['l4d_game_type_name', mode.cvar]);
       const t = cvarValue(type, 'l4d_game_type_name') ?? '';
-      const m = cvarValue(mode, 'l4d_practice_mode') ?? '';
-      return { ok: t.includes(GAME_TYPE_MARK[kind]) && m === kind, seen: `game type "${t}", l4d_practice_mode "${m}"` };
+      const m = cvarValue(modeReply, mode.cvar) ?? '';
+      return { ok: t.includes(GAME_TYPE_MARK[kind]) && m === mode.value, seen: `game type "${t}", ${mode.cvar} "${m}"` };
     } catch (err) {
       return { ok: false, seen: `no answer (${err instanceof Error ? err.message : String(err)})` };
     }
@@ -631,7 +660,7 @@ export class PracticeLeases {
     if (!/^[A-Z0-9]{4,5}$/.test(code)) return { ok: false, status: 400, error: 'That is not a drill code.' };
     const lease = this.stillActive(id);
     if (!lease) return { ok: false, status: 409, error: 'That practice server has closed.' };
-    if (lease.kind !== 'drill') return { ok: false, status: 409, error: 'Drills load on a drill server, not the Practice Park.' };
+    if (lease.kind !== 'drill') return { ok: false, status: 409, error: lease.kind === 'hunter' ? 'Drills load on a drill server, not a Hunter Training server.' : 'Drills load on a drill server, not the Practice Park.' };
     if (lease.ready_at === null) return { ok: false, status: 409, error: 'Your server is still setting up. Try again in a few seconds.' };
     const server = getServer(this.db, lease.server_id);
     if (!server) return { ok: false, status: 409, error: 'That practice server has closed.' };
@@ -843,7 +872,7 @@ export function leaseView(db: DB, l: LeaseRow, viewer: string, viewerIsAdmin: bo
   const state = leaseState(l);
   // A park is ownerless: whoever started it is recorded (`owner`, shown as
   // "started by") but has no more say over it than anyone else.
-  const isOwner = l.kind === 'drill' && viewer === l.owner_player_id;
+  const isOwner = OWNED_KINDS.includes(l.kind) && viewer === l.owner_player_id;
   return {
     id: l.id,
     kind: l.kind,
@@ -857,13 +886,14 @@ export function leaseView(db: DB, l: LeaseRow, viewer: string, viewerIsAdmin: bo
     setupPhase: state === 'setting_up' ? (l.setup_phase ?? 'resetting') : null,
     endsAt: l.ends_at,
     humans: l.humans,
-    capacity: l.kind === 'park' ? PARK_CAPACITY : null,
+    capacity: l.kind === 'park' ? PARK_CAPACITY : l.kind === 'hunter' ? HUNTER_CAPACITY : null,
     map: l.map,
     warnedAt: l.warned_at,
     state,
     endReason: l.end_reason,
     endedAt: l.ended_at,
-    connect: server && (state === 'setting_up' || state === 'ready')
+    // A hunter server is one player's: the invite link is not a way in for others.
+    connect: server && (state === 'setting_up' || state === 'ready') && (l.kind !== 'hunter' || isOwner || viewerIsAdmin)
       ? { host: server.host, port: server.port, password: l.password }
       : null,
   };
@@ -891,6 +921,28 @@ export function parkListings(db: DB): ParkListing[] {
     capacity: PARK_CAPACITY,
     map: l.map,
     ready: l.ready_at !== null,
+    endsAt: l.ends_at,
+  }));
+}
+
+/** One Hunter Training server on the public list. No password, no host. */
+export interface HunterListing {
+  id: number;
+  server: string;
+  ready: boolean;
+  /** Its one player is on. */
+  inUse: boolean;
+  endsAt: string;
+}
+
+export function hunterListings(db: DB): HunterListing[] {
+  return (db.prepare(
+    "SELECT * FROM practice_leases WHERE kind = 'hunter' AND ended_at IS NULL AND end_reason IS NULL ORDER BY id",
+  ).all() as LeaseRow[]).map((l) => ({
+    id: l.id,
+    server: getServer(db, l.server_id)?.name ?? `server ${l.server_id}`,
+    ready: l.ready_at !== null,
+    inUse: l.humans >= HUNTER_CAPACITY,
     endsAt: l.ends_at,
   }));
 }

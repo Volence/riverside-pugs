@@ -4,7 +4,7 @@ import { parseReplay } from '../replayFormat.js';
 import { buildDrill } from '../drillSpec.js';
 import { createDrill, drillForMoment, drillsCreatedSince, fetchDrill, normalizeCode, DRILLS_PER_HOUR } from '../practiceDrills.js';
 import {
-  adminLeaseRows, getLease, leaseView, openDrillLeaseOf, parkListings, practiceAccess, practiceClosedMessage, type LeaseKind, type PracticeLeases,
+  adminLeaseRows, getLease, leaseView, openOwnedLeaseOf, parkListings, practiceAccess, practiceClosedMessage, type LeaseKind, type PracticeLeases,
 } from '../practiceLeases.js';
 import { getPlayer } from '../players.js';
 import { logAdmin } from '../admin/audit.js';
@@ -220,7 +220,7 @@ export async function practiceRoutes(
    */
   app.get('/api/practice/park', async (req) => {
     const viewer = optionalViewer(req);
-    const mine = viewer ? openDrillLeaseOf(db, viewer) : undefined;
+    const mine = viewer ? openOwnedLeaseOf(db, viewer) : undefined;
     // The staged rollout switch hides all of it, list included, from anyone
     // it keeps out: a park they cannot join is not worth advertising.
     // Open to everyone, a signed-out visitor sees the list too (and is asked
