@@ -195,6 +195,17 @@ describe('DrillThis', () => {
     expect(mockApi.practiceLease).not.toHaveBeenCalled();
   });
 
+  it('with a Hunter Training server of your own: says to close it first, links to it, offers no drill server', async () => {
+    mockApi.createDrill.mockResolvedValue({ code: 'K7QX', spec: SPEC });
+    mockApi.practiceParks.mockResolvedValue({ available: true, parks: [], hunters: [], mine: { id: 7, kind: 'hunter' } });
+    render(<DrillThis {...props()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Drill this' }));
+    const link = await screen.findByRole('link', { name: 'your Hunter Training server' });
+    expect(link.getAttribute('href')).toBe('/practice/7');
+    expect(screen.queryByRole('button', { name: 'Start a drill server' })).toBeNull();
+    expect(mockApi.practiceLease).not.toHaveBeenCalled();
+  });
+
   it('in theater\'s panel: drills at once, and its Close empties and closes the panel', async () => {
     mockApi.createDrill.mockResolvedValue({ code: 'K7QX', spec: SPEC });
     const onHide = vi.fn();

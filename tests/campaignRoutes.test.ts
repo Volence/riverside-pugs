@@ -988,6 +988,25 @@ describe('POST /api/admin/campaigns/:slug/practice-only', () => {
     expect((await publicRow(app)).practiceOnly).toBe(false);
   });
 
+  it('takes a pooled campaign out of map_pool when it is flagged, so it can never reach the vote', async () => {
+    publishHt();
+    setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'hunter_training', 'death_toll']));
+    const app = await buildTestApp({ db, addonsDir: addons });
+    expect((await post(app, 'hunter_training', { practiceOnly: true })).statusCode).toBe(200);
+    expect(getJsonSetting<string[]>(db, 'map_pool')).toEqual(['no_mercy', 'death_toll']);
+  });
+
+  it('refuses to flag the only campaign in the pool, and leaves both alone', async () => {
+    publishHt();
+    setSetting(db, 'map_pool', JSON.stringify(['hunter_training']));
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const res = await post(app, 'hunter_training', { practiceOnly: true });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('Hunter Training is the only campaign in the pool; add another to the pool before making it practice only');
+    expect(getJsonSetting<string[]>(db, 'map_pool')).toEqual(['hunter_training']);
+    expect((await publicRow(app)).practiceOnly).toBe(false);
+  });
+
   it('refuses a bad body, an unknown campaign, and a non-admin', async () => {
     publishHt();
     const app = await buildTestApp({ db, addonsDir: addons });

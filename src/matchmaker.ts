@@ -6,6 +6,7 @@ import { balanceTeams } from './balance.js';
 import { getRatings, getPlayer, currentSeasonId } from './players.js';
 import { getSetting, getJsonSetting } from './settings.js';
 import { getServer } from './serverPool.js';
+import { campaignRegistry } from './campaignRegistry.js';
 import { spectateFor, type SpectateInfo } from './spectate.js';
 import { activeTimeout, recordPenalty } from './penalties.js';
 import { QUEUE_BLOCK_MESSAGE, type QueueBlock } from './queueGate.js';
@@ -175,7 +176,10 @@ export class Matchmaker {
     return {
       readySeconds: Number(getSetting(this.db, 'ready_seconds') ?? 120),
       voteSeconds: Number(getSetting(this.db, 'vote_seconds') ?? 30),
-      mapPool: getJsonSetting<string[]>(this.db, 'map_pool'),
+      // A practice map is never a vote option, even if the saved pool still
+      // names it: the practice-only switch prunes the pool, this is the backstop.
+      mapPool: getJsonSetting<string[]>(this.db, 'map_pool')
+        .filter((slug) => campaignRegistry(this.db).get(slug)?.practiceOnly !== true),
       rng: this.deps.rng,
     };
   }

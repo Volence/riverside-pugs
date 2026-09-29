@@ -70,6 +70,12 @@ describe('admin feed', () => {
     expect(second).not.toContain('Removed by an admin');
   });
 
+  it('a kick from a Hunter Training server says so', async () => {
+    logAdmin(db, ADMIN, 'practice_kick', 'lease 5', { name: 'Dust', server: 'Riverside #6', kind: 'hunter', reason: 'Removed by an admin', leaseId: 5 });
+    await settled();
+    expect(JSON.stringify(inFeed()[0]?.payload)).toContain('kicked Dust from a Hunter Training server on Riverside #6');
+  });
+
   it('with no forum set, posts one plain line for a new ticket and another for a further report, each saying who reported whom', async () => {
     const a = fileReport(db, IDS[0], { targetId: IDS[5], category: 'griefing', text: 'kept killing us', matchId }, { adminSteamIds: [] }) as { ticketId: number };
     fileReport(db, IDS[1], { targetId: IDS[5], category: 'cheating', text: '' }, { adminSteamIds: [] });

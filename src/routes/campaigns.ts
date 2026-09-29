@@ -375,7 +375,25 @@ export async function campaignRoutes(
     const { slug } = req.params as { slug: string };
     const raw = (req.body as { practiceOnly?: unknown } | undefined)?.practiceOnly;
     if (typeof raw !== 'boolean') return reply.code(400).send({ error: 'practiceOnly must be true or false' });
-    if (!setPracticeOnly(db, slug, raw)) return reply.code(404).send({ error: 'no such campaign' });
+    const c = getCampaign(db, slug);
+    if (!c) return reply.code(404).send({ error: 'no such campaign' });
+    // poolableCampaigns hides a practice map from the pool editor, and the
+    // lobby reads map_pool as saved, so a flagged campaign still sitting in
+    // the pool would stay a vote option nobody could see to untick. Pruned
+    // here, with the same "only campaign in the pool" refusal as DELETE.
+    if (raw) {
+      const pool = getCampaignPool(db);
+      if (pool.includes(slug)) {
+        const pruned = pool.filter((s) => s !== slug);
+        if (pruned.length === 0) {
+          return reply.code(409).send({
+            error: `${c.name} is the only campaign in the pool; add another to the pool before making it practice only`,
+          });
+        }
+        setSetting(db, 'map_pool', JSON.stringify(pruned));
+      }
+    }
+    setPracticeOnly(db, slug, raw);
     invalidateCampaignCache();
     logAdmin(db, adminId, 'campaign_practice_only', slug, { practiceOnly: raw });
     return { ok: true };
