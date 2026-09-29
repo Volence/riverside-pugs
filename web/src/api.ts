@@ -64,7 +64,7 @@ export interface PublicQueue {
 }
 
 export interface StateSnapshot {
-  queue: { count: number; joined: boolean; players: NamedPlayer[] };
+  queue: { count: number; joined: boolean; players: NamedPlayer[]; sideOptIn?: boolean };
   lobby: LobbySnapshot | null;
   match: {
     id: number;

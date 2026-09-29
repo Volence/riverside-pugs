@@ -45,7 +45,7 @@ export interface NamedPlayer {
 }
 
 export interface StateSnapshot {
-  queue: { count: number; joined: boolean; players: NamedPlayer[] };
+  queue: { count: number; joined: boolean; players: NamedPlayer[]; sideOptIn: boolean };
   lobby:
     | (Omit<LobbySnapshot, 'players'> & {
       /** Each player's own ready block, so the roster can show who is
@@ -100,6 +100,8 @@ export interface MatchmakerListener {
   lobbyStarted?(lobbyId: string, players: string[]): void;
   lobbyCompleted?(lobbyId: string, matchId: number): void;
   lobbyFailed?(lobbyId: string, ready: string[], notReady: string[]): void;
+  /** Anything changed (queue, lobbies, opt-ins). Fired after the state is saved. */
+  stateChanged?(): void;
 }
 
 /** Distinguishes this process's lobby ids from a previous run's, so a stored
@@ -119,6 +121,9 @@ export class Matchmaker {
    *  deliberately not persisted: it is about something that happened seconds
    *  ago, and a notice that outlived a restart would be noise. */
   private notices = new Map<string, { notReady: string[]; youWereReady: boolean; removed?: string }>();
+  /** Queued players who asked for side games (2v2/3v3 while waiting). Kept
+   *  through a pop so a failed ready check resumes the game; see sideGames.ts. */
+  private sideOptIn = new Set<string>();
 
   constructor(private db: DB, private deps: MatchmakerDeps) {}
 
@@ -136,6 +141,7 @@ export class Matchmaker {
         lobbies: [...this.lobbyMap.values()]
           .map((l) => l.persist())
           .filter((l) => l.phase === 'ready_check' || l.phase === 'map_vote'),
+        sideOptIn: [...this.sideOptIn],
       };
       this.db.prepare(
         `INSERT INTO matchmaker_state (id, json, updated_at) VALUES (1, ?, datetime('now'))
@@ -145,6 +151,7 @@ export class Matchmaker {
       console.error('[matchmaker] could not save queue state:', err);
     }
     this.deps.broadcast('refresh');
+    this.emit('stateChanged');
   }
 
   /** Bring back the queue and lobbies saved by the previous process. Call once
@@ -152,7 +159,7 @@ export class Matchmaker {
   restore(): void {
     const row = this.db.prepare('SELECT json FROM matchmaker_state WHERE id = 1').get() as { json: string } | undefined;
     if (!row) return;
-    let state: { queue: string[]; lobbies: PersistedLobby[] };
+    let state: { queue: string[]; lobbies: PersistedLobby[]; sideOptIn?: string[] };
     try {
       state = JSON.parse(row.json);
     } catch {
@@ -165,6 +172,9 @@ export class Matchmaker {
     }
     for (const id of state.queue ?? []) {
       if (!this.playerLobby.has(id)) this.queue.join(id);
+    }
+    for (const id of state.sideOptIn ?? []) {
+      if (this.queue.has(id) || this.playerLobby.has(id)) this.sideOptIn.add(id);
     }
     if (state.queue?.length || state.lobbies?.length) {
       console.log(`[matchmaker] restored ${state.queue?.length ?? 0} queued and ${state.lobbies?.length ?? 0} lobbies`);
@@ -247,6 +257,7 @@ export class Matchmaker {
 
   leave(steamid: string): void {
     this.queue.leave(steamid);
+    this.sideOptIn.delete(steamid);
     this.changed();
   }
 
@@ -267,6 +278,7 @@ export class Matchmaker {
   remove(steamid: string): void {
     const lobbyId = this.playerLobby.get(steamid);
     if (!lobbyId && !this.queue.has(steamid)) return;
+    this.sideOptIn.delete(steamid);
     this.queue.leave(steamid);
     if (lobbyId) {
       const others = this.dissolveLobby(lobbyId).filter((p) => p !== steamid);
@@ -299,6 +311,31 @@ export class Matchmaker {
 
   vote(steamid: string, campaign: string): boolean {
     return this.lobbyFor(steamid)?.castVote(steamid, campaign) ?? false;
+  }
+
+  setSideOptIn(steamid: string, on: boolean): { ok: boolean; error?: string } {
+    if (!this.queue.has(steamid)) return { ok: false, error: 'join the queue first' };
+    if (on) this.sideOptIn.add(steamid); else this.sideOptIn.delete(steamid);
+    this.changed();
+    return { ok: true };
+  }
+
+  isSideOptedIn(steamid: string): boolean {
+    return this.sideOptIn.has(steamid);
+  }
+
+  /** Queued players who opted in, in queue order. Lobby members are not
+   *  queued, so this is empty for them while a pop is running. */
+  sideCandidates(): string[] {
+    return this.queue.list().filter((id) => this.sideOptIn.has(id));
+  }
+
+  queuePosition(steamid: string): number {
+    return this.queue.list().indexOf(steamid);
+  }
+
+  lobbyOf(steamid: string): LobbySnapshot | null {
+    return this.lobbyFor(steamid)?.snapshot() ?? null;
   }
 
   /** All players currently in any lobby (dev tooling). */
@@ -362,6 +399,7 @@ export class Matchmaker {
       }
       this.emit('lobbyFailed', id, [...ready], [...notReady]);
       this.dissolveLobby(id);
+      for (const p of notReady) this.sideOptIn.delete(p);
       this.queue.requeueFront(ready);
       this.maybeStartLobby();
     } catch (err) {
@@ -374,6 +412,7 @@ export class Matchmaker {
   private onLobbyComplete(id: string, result: { players: string[]; campaign: string }): void {
     try {
       this.dissolveLobby(id);
+      for (const p of result.players) this.sideOptIn.delete(p);
       const ratings = getRatings(this.db, result.players);
       const { teamA, teamB } = balanceTeams(
         result.players.map((steamid) => {
@@ -462,6 +501,7 @@ export class Matchmaker {
         count: this.queue.count(),
         joined: this.queue.has(steamid),
         players: this.queue.list().map(named),
+        sideOptIn: this.sideOptIn.has(steamid),
       },
       lobby: snap && lobby
         ? {
