@@ -61,10 +61,12 @@ pug-logauth, and pug-match already holds that secret and the chat sanitizer.
 ### 2. Storage
 
 `server_chat` (kept for good):
-`id, server_id, at (unix ms), steamid, team, kind ('say' | 'staff_in' | 'staff_out'), message,
-match_id (null outside a match), to_kind (for staff_out: 'all' | 'team' | 'player'), to_value
-(team number or SteamID64), sent_by (staff SteamID64, staff_out only), delivered (null until the
-plugin answers)`.
+`id, server_id, at (unix ms), steamid, name (a snapshot: the in-game name last seen, else the site
+name, so an old line still says who it was after a rename), team, scope ('all' | 'team' for a `say`
+row, null otherwise; a `say` line from a 0.3.15 server has no scope), kind ('say' | 'staff_in' |
+'staff_out'), message, match_id (null outside a match), to_kind (for staff_out: 'all' | 'team' |
+'player'), to_value (team number or SteamID64), sent_by (staff SteamID64, staff_out only), delivered
+(null until the plugin answers)`.
 
 Indexed on `(server_id, id)`. One table rather than a separate audit table: a staff send IS a chat
 line, and the drawer shows it in order with the rest. `mergePlayers` gets `server_chat.steamid`,
@@ -86,14 +88,21 @@ A player's first `/staff` message in 10 minutes also posts one quiet line to the
 
 - `GET /api/mod/chat/servers`: enabled servers with a practice / match / idle label and the time of
   the last line.
-- `GET /api/mod/chat/:serverId?after=<id>&limit=200`: lines in order, names resolved from the
-  players table (unknown SteamIDs show the last PUGNAME seen, else the SteamID).
-- `POST /api/mod/chat/:serverId` `{ to: 'all' | 'team' | 'player', value?, message }`:
-  - message: `;`, `"` and line breaks stripped, trimmed, 1-190 characters after stripping;
+- `GET /api/mod/chat/:serverId?after=<id>&limit=<n>` (limit default 200, max 500): lines in order,
+  names resolved from the players table (unknown SteamIDs show the last PUGNAME seen, else the
+  SteamID). 404 for an unknown server.
+- `POST /api/mod/chat/:serverId`, body `{ to: 'all' } | { to: 'team', team: 1 | 2 | 3 } | { to:
+  'player', steamid }` plus `message` on all three:
+  - message: `;`, `"` and line breaks stripped, trimmed, 1-190 characters after stripping (400 if
+    empty after stripping, or if `to` and its fields do not match one of the three shapes);
   - staff name: the sender's site name with the same stripping, capped at 32;
   - rate limit 5 sends per 10 s per staff member (429 past it);
-  - row stored first (delivered null), then `sm_pug_staffsay <to> "<name>" "<message>" <id>`;
-  - rcon failure sets delivered = -1 and the reply says so; nothing is retried.
+  - row stored first (delivered null), then `sm_pug_staffsay <to> "<name>" "<message>" <id>` over
+    rcon. `staffSayCommand` (`src/staffChatSend.ts`) cleans the name and message again itself, and
+    refuses a whisper target that is not a 17-digit SteamID64 ("Bad whisper target."), so a bad
+    target can never reach rcon even if a caller skipped the route's own checks;
+  - an rcon failure, or an "Unknown command" reply from an old plugin, sets delivered = -1 and
+    answers 502 with an error string; nothing is retried.
 
 ### 5. Web: UI
 
