@@ -90,7 +90,7 @@ describe('PracticeCard', () => {
     mockApi.practiceParks.mockResolvedValue(parks({ parks: [], hunters: [] }));
     render(<PracticeCard signedIn />);
     const link = await screen.findByRole('link', { name: 'Get the Hunter Training map' });
-    expect(link.getAttribute('href')).toBe('/download/campaign/hunter_training');
+    expect(link.getAttribute('href')).toBe('/download/campaign/huntertraining');
     // A real file, not a route: without a target the SPA router swallows the click.
     expect(link.getAttribute('target')).toBe('_blank');
   });

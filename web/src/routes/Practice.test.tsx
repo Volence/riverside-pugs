@@ -126,7 +126,7 @@ describe('Practice (invite page)', () => {
     render(<Practice id="4" session={ACTIVE} />);
     expect(await screen.findByText('password abcd2345; connect 66.59.208.5:27016')).toBeTruthy();
     const dl = screen.getByRole('link', { name: 'download it' });
-    expect(dl.getAttribute('href')).toBe('/download/campaign/hunter_training');
+    expect(dl.getAttribute('href')).toBe('/download/campaign/huntertraining');
     expect(dl.getAttribute('target')).toBe('_blank');
     expect(screen.getByText(/This server is yours alone/)).toBeTruthy();
     expect(screen.queryByText('Invite link')).toBeNull();

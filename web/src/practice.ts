@@ -17,8 +17,9 @@ export const KIND_LABEL: Record<PracticeKind, string> = {
   hunter: 'Hunter Training',
 };
 
-/** The Hunter Training map's download (a published, practice-only custom campaign). */
-export const HUNTER_DOWNLOAD = '/download/campaign/hunter_training';
+/** The Hunter Training map's download (a published, practice-only custom campaign). The slug
+ *  comes from the mission's Name, "HunterTraining" (src/routes/campaigns.ts upload). */
+export const HUNTER_DOWNLOAD = '/download/campaign/huntertraining';
 
 /** Why a lease ended, finishing the sentence "This practice server closed
  *  because ...". */
