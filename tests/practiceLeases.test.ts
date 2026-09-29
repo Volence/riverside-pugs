@@ -9,6 +9,7 @@ import {
   EXTEND_MS, IDLE_END_MS, LEASE_MS, LEASES_PER_HOUR, PARK_CAPACITY, PREEMPT_WARN_MS, PICK_ERRORS,
   PracticeLeases, getLease, identityLines, joinableParks, judgeLease, leaseView, newLeasePassword,
   parkListings, parseStatusMap, pickLeaseServer, adminLeaseRows, cvarValue, CFG_TRIES,
+  HUNTER_CAPACITY, hunterListings, openOwnedLeaseOf,
 } from '../src/practiceLeases.js';
 
 const ME = '76561199000000001';
@@ -52,16 +53,17 @@ function manager(over: Partial<ConstructorParameters<typeof PracticeLeases>[0]> 
     rcon: async (server, cmds) => {
       if (rconDown.has(server.name)) throw new Error('rcon connect timeout');
       const b = boxOf(server.name);
-      if (cmds.every((c) => c === 'l4d_game_type_name' || c === 'l4d_practice_mode')) reads.push(...cmds);
+      if (cmds.every((c) => c === 'l4d_game_type_name' || c === 'l4d_practice_mode' || c === 'l4d_ht_enable')) reads.push(...cmds);
       else sent.push({ server: server.name, cmds });
       return cmds.map((c) => {
         if (c === 'status') return status(humansOn[server.name] ?? 0);
         if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${b.type}" ( def. "" )`;
         if (c === 'l4d_practice_mode') return `"l4d_practice_mode" = "${b.mode}"`;
-        const m = /^exec practice_(park|drill)\.cfg$/.exec(c);
+        if (c === 'l4d_ht_enable') return `"l4d_ht_enable" = "${b.mode === 'hunter' ? '1' : '0'}"`;
+        const m = /^exec practice_(park|drill|hunter)\.cfg$/.exec(c);
         if (m) {
           if (b.swallow > 0) b.swallow--;
-          else { b.type = m[1] === 'park' ? 'Practice (drills)' : 'Rotoblin 4v4 PUG'; b.mode = m[1]; }
+          else { b.type = m[1] === 'park' ? 'Practice (drills)' : m[1] === 'hunter' ? 'Hunter Training' : 'Rotoblin 4v4 PUG'; b.mode = m[1]; }
         }
         return '';
       });
@@ -648,5 +650,81 @@ describe('admin overview', () => {
     const rows = adminOverview(db).servers as unknown as { id: number; status: string; practice: unknown }[];
     expect(rows.find((r) => r.id === 1)!.practice).toBeNull();
     expect(rows.find((r) => r.id === 2)).toMatchObject({ status: 'idle', practice: { leaseId: 1, kind: 'drill', ownerName: 'me', ending: false } });
+  });
+});
+
+describe('hunter leases', () => {
+  it('execs the hunter cfg, checks l4d_ht_enable, and sends the ht password and owner twice', async () => {
+    seedServer('a'); seedServer('bb');
+    mgr = manager();
+    const r = await mgr.create(ME, 'hunter');
+    expect(r.ok && !r.joined).toBe(true);
+    if (!r.ok) return;
+    await flush();
+    const pw = getLease(db, r.lease.id)!.password;
+    const id = [`sm_cvar sv_password "${pw}"`, `l4d_ht_password "${pw}"`, `l4d_ht_owner ${ME}`];
+    expect(sent.map((s) => s.cmds)).toEqual([['status'], ['(restart)'], ['exec practice_hunter.cfg'], id, id, ['status']]);
+    expect(reads).toContain('l4d_ht_enable');
+    expect(reads).not.toContain('l4d_practice_mode');
+    expect(getLease(db, r.lease.id)!.ready_at).not.toBeNull();
+  });
+
+  it('one owned server per player: a drill blocks a hunter server and the other way round', async () => {
+    seedServer('a'); seedServer('bb'); seedServer('ccc'); seedServer('dddd');
+    mgr = manager();
+    const d = await mgr.create(ME, 'drill');
+    expect(await mgr.create(ME, 'hunter')).toMatchObject({ ok: false, status: 409, leaseId: d.ok ? d.lease.id : -1 });
+    const h = await mgr.create(YOU, 'hunter');
+    expect(openOwnedLeaseOf(db, YOU)?.id).toBe(h.ok ? h.lease.id : -1);
+    expect(await mgr.create(YOU, 'drill')).toMatchObject({ ok: false, status: 409 });
+  });
+
+  it("never hands back someone else's hunter server the way a park is shared", async () => {
+    seedServer('a'); seedServer('bb'); seedServer('ccc');
+    mgr = manager();
+    const mine = await mgr.create(ME, 'hunter');
+    const yours = await mgr.create(YOU, 'hunter');
+    expect(yours.ok && !yours.joined).toBe(true);
+    expect(yours.ok && mine.ok && yours.lease.id !== mine.lease.id).toBe(true);
+  });
+
+  it('ends an empty hunter server after five minutes', () => {
+    expect(IDLE_END_MS.hunter).toBe(5 * 60_000);
+  });
+
+  it('lists hunter servers as in use from the first human, never with a password', async () => {
+    seedServer('a'); seedServer('bb');
+    mgr = manager();
+    const r = await mgr.create(ME, 'hunter');
+    await flush();
+    expect(hunterListings(db)).toEqual([
+      expect.objectContaining({ id: r.ok ? r.lease.id : -1, server: 'bb', ready: true, inUse: false }),
+    ]);
+    db.prepare('UPDATE practice_leases SET humans = ?').run(HUNTER_CAPACITY);
+    expect(hunterListings(db)[0].inUse).toBe(true);
+    expect(JSON.stringify(hunterListings(db))).not.toContain(getLease(db, r.ok ? r.lease.id : -1)!.password);
+  });
+
+  it('the invite page gives the connect line to the owner and admins only', async () => {
+    seedServer('a'); seedServer('bb');
+    mgr = manager();
+    const r = await mgr.create(ME, 'hunter');
+    if (!r.ok) throw new Error('no lease');
+    const lease = getLease(db, r.lease.id)!;
+    expect(leaseView(db, lease, ME, false).connect).not.toBeNull();
+    expect(leaseView(db, lease, YOU, true).connect).not.toBeNull();
+    expect(leaseView(db, lease, YOU, false).connect).toBeNull();
+    expect(leaseView(db, lease, YOU, false).capacity).toBe(HUNTER_CAPACITY);
+  });
+});
+
+describe('hunter leases and drills', () => {
+  it('refuses a drill on a hunter server, naming the server it is', async () => {
+    seedServer('a'); seedServer('bb');
+    mgr = manager();
+    const r = await mgr.create(ME, 'hunter');
+    await flush();
+    const res = await mgr.loadDrill(r.ok ? r.lease.id : -1, 'K7QX');
+    expect(res).toEqual({ ok: false, status: 409, error: 'Drills load on a drill server, not a Hunter Training server.' });
   });
 });
