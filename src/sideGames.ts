@@ -270,8 +270,11 @@ export class SideGames {
     return [...this.lineup(a, present, size), ...[...a.gone].map((steamid) => ({ steamid, team: 'S' as const }))];
   }
 
+  /** Each seat quoted: Source's console tokenizer splits UNQUOTED arguments
+   *  on ':', so a bare `id:A` reaches the plugin as three args. Same rule as
+   *  sm_pug_roster in src/orchestrator.ts. */
   private rosterCommand(seats: Seat[]): string {
-    return `sm_side_roster ${seats.map((s) => `${s.steamid}:${s.team}`).join(' ')}`;
+    return `sm_side_roster ${seats.map((s) => `"${s.steamid}:${s.team}"`).join(' ')}`;
   }
 
   private pushRoster(a: Active): void {

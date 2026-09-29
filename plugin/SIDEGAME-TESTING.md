@@ -29,14 +29,17 @@ python3 rcon-local.py "sm plugins load pug-sidegame"
 
 ```
 python3 rcon-local.py "sm_side_start deadbeef01 side_deadbeef" \
-                       "sm_side_roster <your id64>:A <stranger id64>:S" \
+                       'sm_side_roster "<your id64>:A" "<stranger id64>:S"' \
                        "exec rotoblin_hardcore_2v2" \
                        "sm_pug_auto_track"
 ```
 
 Expect:
 - `sm_side_start` replies `PUGOK side start`.
-- `sm_side_roster` replies `PUGOK roster=2`.
+- `sm_side_roster` replies `PUGOK roster=2`. Each seat is quoted, as the
+  site sends it: unquoted, Source's tokenizer splits `id:A` on ':' (the
+  plugin still accepts that split form, and refuses any seat it cannot read
+  with `PUGERR bad seat: ...`).
 - `sm_pug_auto_track` reads `0` (was whatever it was before `sm_side_start`).
 - Your client is walked onto its assigned side within ~2s (`sm_sur`/`sm_inf`
   fired via the lock timer); the stranger's seat (`S`) is pushed to

@@ -12,7 +12,7 @@
  * PrintToServer, which the site's rcon caller reads back:
  *
  *   sm_side_start <token> <password>   arm a side game
- *   sm_side_roster <id64>:<A|B|S> ...  replace the whole seat list
+ *   sm_side_roster "<id64>:<A|B|S>" ... replace the whole seat list (each seat quoted)
  *   sm_side_popped                     queue popped: bench everyone, ready check
  *   sm_side_resume                     ready check failed: side game back on
  *   sm_side_vote "slug=Name" ...       show a campaign-vote menu to seated players
@@ -81,7 +81,7 @@
 #define TEAM_SPEC 1
 #define TEAM_SURVIVOR 2
 #define TEAM_INFECTED 3
-#define MAX_SEATS 8
+#define MAX_SEATS 32
 #define LOCK_ATTEMPT_CAP 5
 
 public Plugin myinfo = {
@@ -118,7 +118,7 @@ public void OnPluginStart()
 		FCVAR_NOTIFY | FCVAR_DONTRECORD);
 	PugLogAuth_Init();
 	RegServerCmd("sm_side_start", Cmd_Start, "sm_side_start <token> <password>");
-	RegServerCmd("sm_side_roster", Cmd_Roster, "sm_side_roster <id64>:<A|B|S> ...");
+	RegServerCmd("sm_side_roster", Cmd_Roster, "sm_side_roster \"<id64>:<A|B|S>\" ...");
 	RegServerCmd("sm_side_popped", Cmd_Popped, "sm_side_popped");
 	RegServerCmd("sm_side_resume", Cmd_Resume, "sm_side_resume");
 	RegServerCmd("sm_side_vote", Cmd_Vote, "sm_side_vote \"slug=Name\" ...");
@@ -160,20 +160,50 @@ public Action Cmd_Start(int args)
 public Action Cmd_Roster(int args)
 {
 	if (!g_bActive) { PrintToServer("PUGERR not active"); return Plugin_Handled; }
-	g_iSeats = 0;
-	char arg[48];
-	for (int i = 1; i <= args && g_iSeats < MAX_SEATS; i++)
+	// ':' is one of the engine tokenizer's break characters: an unquoted
+	// "id:A" arrives as three args ("id", ":", "A"), which a plain one-arg
+	// loop reads as no seat at all (seen on the local box: "PUGOK roster=0"
+	// for a five-seat roster). The site quotes each seat, the same as
+	// sm_pug_roster; the split form is still accepted here. Any seat that
+	// cannot be read refuses the whole roster, loudly, and the previous one
+	// stays in force.
+	char ids[MAX_SEATS][32];
+	char teams[MAX_SEATS];
+	int n = 0;
+	char arg[48], colon[8], team[8];
+	for (int i = 1; i <= args; i++)
 	{
 		GetCmdArg(i, arg, sizeof(arg));
+		if (arg[0] == '\0') continue;
+		if (FindCharInString(arg, ':') < 0 && i + 2 <= args)
+		{
+			GetCmdArg(i + 1, colon, sizeof(colon));
+			GetCmdArg(i + 2, team, sizeof(team));
+			if (StrEqual(colon, ":"))
+			{
+				StrCat(arg, sizeof(arg), ":");
+				StrCat(arg, sizeof(arg), team);
+				i += 2;
+			}
+		}
 		int sep = FindCharInString(arg, ':');
-		if (sep < 1) continue;
-		char t = arg[sep + 1];
-		if (t != 'A' && t != 'B' && t != 'S') continue;
+		char t = '\0';
+		if (sep > 0) t = arg[sep + 1];
+		bool ok = sep > 0 && sep < 32 && (t == 'A' || t == 'B' || t == 'S') && arg[sep + 2] == '\0';
+		for (int k = 0; ok && k < sep; k++) if (arg[k] < '0' || arg[k] > '9') ok = false;
+		if (!ok) { PrintToServer("PUGERR bad seat: %s", arg); return Plugin_Handled; }
+		if (n >= MAX_SEATS) { PrintToServer("PUGERR too many seats"); return Plugin_Handled; }
 		arg[sep] = '\0';
-		strcopy(g_sSeatId[g_iSeats], 32, arg);
-		g_cSeatTeam[g_iSeats] = t;
-		g_iSeats++;
+		strcopy(ids[n], sizeof(ids[]), arg);
+		teams[n] = t;
+		n++;
 	}
+	for (int i = 0; i < n; i++)
+	{
+		strcopy(g_sSeatId[i], sizeof(g_sSeatId[]), ids[i]);
+		g_cSeatTeam[i] = teams[i];
+	}
+	g_iSeats = n;
 	for (int c = 1; c <= MaxClients; c++) g_iAttempts[c] = 0;
 	PrintToServer("PUGOK roster=%d", g_iSeats);
 	return Plugin_Handled;
