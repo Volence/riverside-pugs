@@ -120,4 +120,29 @@ describe('Practice (invite page)', () => {
     render(<Practice id="99" session={ACTIVE} />);
     expect((await screen.findByRole('alert')).textContent).toBe('There is no practice server with that link.');
   });
+
+  it('Hunter Training: says it needs the map and is yours alone, no drill or invite', async () => {
+    mockApi.practiceLease.mockResolvedValue(lease({ kind: 'hunter', drillCode: null, capacity: 1, humans: 0, map: 'hunter_training_map' }));
+    render(<Practice id="4" session={ACTIVE} />);
+    expect(await screen.findByText('password abcd2345; connect 66.59.208.5:27016')).toBeTruthy();
+    const dl = screen.getByRole('link', { name: 'download it' });
+    expect(dl.getAttribute('href')).toBe('/download/campaign/hunter_training');
+    expect(dl.getAttribute('target')).toBe('_blank');
+    expect(screen.getByText(/This server is yours alone/)).toBeTruthy();
+    expect(screen.queryByText('Invite link')).toBeNull();
+    expect(screen.getByText('0 / 1')).toBeTruthy();
+  });
+
+  it("Hunter Training that is someone else's: no connect line, sends you to start your own", async () => {
+    mockApi.practiceLease.mockResolvedValue(lease({ kind: 'hunter', drillCode: null, capacity: 1, isOwner: false, canEnd: false, connect: null }));
+    render(<Practice id="4" session={ACTIVE} />);
+    expect(await screen.findByText(/belongs to mayhem/)).toBeTruthy();
+    expect(screen.queryByText(/connect 66\.59\.208\.5/)).toBeNull();
+  });
+
+  it('Hunter Training while setting up says where it is going', async () => {
+    mockApi.practiceLease.mockResolvedValue(lease({ kind: 'hunter', drillCode: null, capacity: 1, state: 'setting_up', readyAt: null, setupPhase: 'loading', map: null }));
+    render(<Practice id="4" session={ACTIVE} />);
+    expect(await screen.findByText('Hunter Training (loading)')).toBeTruthy();
+  });
 });

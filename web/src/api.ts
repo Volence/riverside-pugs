@@ -393,6 +393,8 @@ export interface CustomCampaignRow {
    *  VPK (a campaign whose zip has not been made yet). */
   zipBytes: number | null;
   filename: string; notes: string | null; inPool: boolean;
+  /** A practice map (Hunter Training): downloadable, never in the vote. */
+  practiceOnly?: boolean;
   chapters: CustomCampaignChapter[];
 }
 
@@ -1118,6 +1120,8 @@ export interface AdminCampaign {
    *  see this campaign's chapters (e.g. a stock campaign with no
    *  MISSIONS_DIR configured), which is also what disables this control. */
   maps: string[];
+  /** Custom campaigns only: installs and downloads, never offered for the PUG pool. */
+  practiceOnly?: boolean;
   /** True for the stock four, which have no custom_campaigns row and so no
    *  upload, reinstall or delete controls. */
   stock: boolean;
@@ -1665,6 +1669,8 @@ export const adminApi = {
     post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/reinstall`, {}),
   setMapsToPlay: (slug: string, maps: number | null) =>
     post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/maps-to-play`, { maps }),
+  setCampaignPracticeOnly: (slug: string, practiceOnly: boolean) =>
+    post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/practice-only`, { practiceOnly }),
   deleteCampaign: (slug: string) =>
     del<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}`),
   balancePatches: (signal?: AbortSignal) => get<{ patches: PatchSummary[] }>('/api/admin/balance/patches', signal),
@@ -1784,8 +1790,8 @@ export interface DrillMoment { matchId: number; ordinal: number; half: number; t
 /** Practice server leases (src/practiceLeases.ts). Declared here rather than
  *  imported, because that module pulls in node:crypto, which the web build
  *  cannot resolve even for a type. Kept field for field with LeaseView,
- *  ParkListing and AdminLeaseRow there. */
-export type PracticeKind = 'park' | 'drill';
+ *  ParkListing, HunterListing and AdminLeaseRow there. */
+export type PracticeKind = 'park' | 'drill' | 'hunter';
 export type PracticeState = 'setting_up' | 'ready' | 'ending' | 'ended';
 export type PracticeEndReason =
   | 'owner' | 'admin' | 'idle' | 'expired' | 'preempted' | 'setup_failed' | 'players_on_server' | 'interrupted';
@@ -1814,10 +1820,15 @@ export interface PracticeLease {
 export interface PracticeParkListing {
   id: number; server: string; humans: number; capacity: number; map: string | null; ready: boolean; endsAt: string;
 }
+export interface PracticeHunterListing {
+  id: number; server: string; ready: boolean; inUse: boolean; endsAt: string;
+}
 export interface PracticeParks {
   /** False on an install with no lease manager: the card hides itself. */
   available: boolean;
   parks: PracticeParkListing[];
+  /** Open Hunter Training servers: one player each, so no Join. */
+  hunters: PracticeHunterListing[];
   /** The viewer's own open lease, when logged in and they have one. */
   mine: { id: number; kind: PracticeKind } | null;
 }

@@ -80,6 +80,27 @@ function MapsToPlay(
   );
 }
 
+/** A practice map (Hunter Training) is installed and downloadable like any
+ *  custom campaign but never offered for the PUG pool. */
+function PracticeOnly(
+  { c, busy, run }: { c: AdminCampaign; busy: boolean; run: Run },
+) {
+  return (
+    <label>
+      <input
+        type="checkbox"
+        disabled={busy}
+        checked={c.practiceOnly === true}
+        onChange={(e) => {
+          const on = (e.target as HTMLInputElement).checked;
+          run(() => adminApi.setCampaignPracticeOnly(c.slug, on));
+        }}
+      />
+      {' '}Practice only (never in the PUG pool)
+    </label>
+  );
+}
+
 /** How many maps a mapsToPlay-less card should treat as played, for dimming
  *  purposes: the same default the plugin and stopAfterMap fall back to. */
 function playCountOf(c: AdminCampaign): number {
@@ -142,6 +163,7 @@ function PublishedCard(
       </div>
       <ChapterList chapters={c.chapters} playCount={playCountOf(c)} />
       <MapsToPlay c={c} busy={busy} run={run} />
+      <PracticeOnly c={c} busy={busy} run={run} />
       <InstallList installs={c.installs} serverNames={serverNames} />
       <div class="admin-row">
         <button class="chip" disabled={busy} onClick={() => run(() => adminApi.reinstallCampaign(c.slug))}>
