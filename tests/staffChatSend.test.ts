@@ -39,6 +39,24 @@ describe('staffSayCommand', () => {
     expect(staffSayCommand({ to: 'team', team: 1 }, 'V', 'go', 10)).toBe('sm_pug_staffsay spectators "V" "go" 10');
     expect(staffSayCommand({ to: 'player', steamid: P }, 'V', 'psst', 11)).toBe(`sm_pug_staffsay ${P} "V" "psst" 11`);
   });
+
+  it('cleans its own inputs regardless of what the caller passed in', () => {
+    expect(staffSayCommand({ to: 'all' }, 'Na"me;x', 'hi"; quit\nnow', 1))
+      .toBe('sm_pug_staffsay all "Na me x" "hi quit now" 1');
+  });
+
+  it('falls back to "Staff" when the name is empty after cleaning', () => {
+    expect(staffSayCommand({ to: 'all' }, ';;"\n', 'hi', 1)).toBe('sm_pug_staffsay all "Staff" "hi" 1');
+  });
+
+  it('cuts a long message to 190 inside the quotes', () => {
+    const cmd = staffSayCommand({ to: 'all' }, 'V', 'x'.repeat(300), 1);
+    expect(cmd).toBe(`sm_pug_staffsay all "V" "${'x'.repeat(190)}" 1`);
+  });
+
+  it('throws for a player target that is not a 17-digit SteamID64', () => {
+    expect(() => staffSayCommand({ to: 'player', steamid: '123' }, 'V', 'hi', 1)).toThrow();
+  });
 });
 
 describe('sendStaffChat', () => {
@@ -73,5 +91,20 @@ describe('sendStaffChat', () => {
     });
     expect(r).toMatchObject({ ok: false, error: 'This server needs pug-match 0.3.16 to send.' });
     expect(listLines(db, sid, 0, 10)[0].delivered).toBe(-1);
+  });
+
+  it('a bad whisper target marks the row -1 and says so', async () => {
+    const r = await sendStaffChat(db, async () => [''], {
+      serverId: sid, sentBy: MOD, name: 'V', target: { to: 'player', steamid: '123' }, message: 'hi',
+    });
+    expect(r).toMatchObject({ ok: false, error: 'Bad whisper target.' });
+    expect(listLines(db, sid, 0, 10)[0].delivered).toBe(-1);
+  });
+
+  it('an unknown server id fails without ever calling rcon', async () => {
+    const r = await sendStaffChat(db, async () => { throw new Error('should not be called'); }, {
+      serverId: sid + 999, sentBy: MOD, name: 'V', target: { to: 'all' }, message: 'hi',
+    });
+    expect(r).toMatchObject({ ok: false, error: 'No such server.' });
   });
 });

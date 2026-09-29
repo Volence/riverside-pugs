@@ -13,6 +13,9 @@ import { recordStaffOut } from './serverChat.js';
 export type SendTarget = { to: 'all' } | { to: 'team'; team: 1 | 2 | 3 } | { to: 'player'; steamid: string };
 export type SendResult = { ok: true; id: number } | { ok: false; id: number; error: string };
 
+export const NAME_MAX = 32;
+export const MESSAGE_MAX = 190;
+
 export function cleanChatText(raw: unknown, max: number): string {
   if (typeof raw !== 'string') return '';
   return raw.replace(/["\r\n;]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trim();
@@ -32,9 +35,20 @@ export class SendLimiter {
 
 const TEAM_WORD = { 1: 'spectators', 2: 'survivors', 3: 'infected' } as const;
 
+/**
+ * The one place a console command is assembled from user text. It cleans its
+ * own inputs rather than trusting a caller to have run cleanChatText first,
+ * so the spec's guarantee (a message with `"; quit` or a line break never
+ * becomes a second console command) holds here regardless of what callers do.
+ */
 export function staffSayCommand(target: SendTarget, name: string, message: string, sendId: number): string {
+  if (target.to === 'player' && !/^\d{17}$/.test(target.steamid)) {
+    throw new Error('staffSayCommand: bad SteamID64');
+  }
   const to = target.to === 'all' ? 'all' : target.to === 'team' ? TEAM_WORD[target.team] : target.steamid;
-  return `sm_pug_staffsay ${to} "${name}" "${message}" ${sendId}`;
+  const safeName = cleanChatText(name, NAME_MAX) || 'Staff';
+  const safeMessage = cleanChatText(message, MESSAGE_MAX);
+  return `sm_pug_staffsay ${to} "${safeName}" "${safeMessage}" ${sendId}`;
 }
 
 export async function sendStaffChat(
@@ -53,9 +67,16 @@ export async function sendStaffChat(
   };
   const server = getServer(db, input.serverId);
   if (!server) return failed('No such server.');
+  let command: string;
+  try {
+    command = staffSayCommand(target, input.name, input.message, id);
+  } catch (err) {
+    console.error(`[serverchat] send ${id} built a bad command:`, err);
+    return failed('Bad whisper target.');
+  }
   let reply: string;
   try {
-    [reply = ''] = await rcon(server, [staffSayCommand(target, input.name, input.message, id)]);
+    [reply = ''] = await rcon(server, [command]);
   } catch (err) {
     console.error(`[serverchat] send ${id} to ${server.name} failed:`, err);
     return failed('Could not reach the server.');
