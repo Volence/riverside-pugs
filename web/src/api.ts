@@ -93,6 +93,14 @@ export interface StateSnapshot {
   /** `removed` is set instead of `notReady` when the pop was cancelled because
    *  a player was taken out of it (banned mid ready check). */
   lobbyNotice?: { notReady: NamedPlayer[]; youWereReady: boolean; removed?: NamedPlayer } | null;
+  /** The unrecorded 2v2/3v3 running (or closing) while the queue fills. */
+  sideGame?: {
+    phase: 'running' | 'popped' | 'closing';
+    size: 2 | 3 | null;
+    players: number;
+    youIn: boolean;
+    connect: { host: string; port: number; password: string } | null;
+  } | null;
 }
 
 /** What a merge is about to move, or just moved. */
@@ -1938,6 +1946,7 @@ export const api = {
   reportChat: (reportId: number) => post<{ ok: true; url: string }>(`/api/reports/${reportId}/chat`),
   joinQueue: () => post('/api/queue/join'),
   leaveQueue: () => post('/api/queue/leave'),
+  setSideOptIn: (on: boolean) => post('/api/queue/side', { on }),
   ready: () => post('/api/lobby/ready'),
   dismissNotice: () => post('/api/lobby/dismiss-notice'),
   vote: (campaign: string) => post('/api/lobby/vote', { campaign }),
