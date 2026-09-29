@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
-import { listLines } from '../src/serverChat.js';
+import { listLines, markDelivered } from '../src/serverChat.js';
 import { SendLimiter, cleanChatText, sendStaffChat, staffSayCommand } from '../src/staffChatSend.js';
 
 const P = '76561199048276493';
@@ -83,6 +83,16 @@ describe('sendStaffChat', () => {
     });
     expect(r).toMatchObject({ ok: false, error: 'Could not reach the server.' });
     expect(listLines(db, sid, 0, 10)[0].delivered).toBe(-1);
+  });
+
+  it('a timeout after the delivery report came back keeps the real count', async () => {
+    const r = await sendStaffChat(db, async (_s, cmds) => {
+      const id = Number(cmds[0].split(' ').pop());
+      markDelivered(db, sid, id, 4);
+      throw new Error('rcon read timeout');
+    }, { serverId: sid, sentBy: MOD, name: 'V', target: { to: 'all' }, message: 'hi' });
+    expect(r).toMatchObject({ ok: false, error: 'Could not reach the server.' });
+    expect(listLines(db, sid, 0, 10)[0].delivered).toBe(4);
   });
 
   it('an old plugin (Unknown command) marks -1 and names the version', async () => {
