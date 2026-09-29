@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { openDb } from '../src/db.js';
 import { getSetting, setSetting, getJsonSetting } from '../src/settings.js';
 
@@ -154,5 +157,59 @@ describe('social profile schema', () => {
     expect(get('endorse_window_hours')).toBe('24');
     expect(get('endorse_title_min')).toBe('5');
     expect(get('endorse_title_min_games')).toBe('10');
+  });
+});
+
+describe('practice_leases kinds', () => {
+  const seed = (db: ReturnType<typeof openDb>) => {
+    db.prepare("INSERT INTO players (steamid, name) VALUES ('76561199000000001', 'me')").run();
+    db.prepare("INSERT INTO servers (name, host, port, rcon_port, rcon_password) VALUES ('a', 'h', 27015, 27015, 'x')").run();
+  };
+
+  it('a new database takes hunter leases and still refuses unknown kinds', () => {
+    const db = openDb(':memory:');
+    seed(db);
+    expect(() => db.prepare(`INSERT INTO practice_leases (server_id, kind, owner_player_id, password, ends_at)
+      VALUES (1, 'hunter', '76561199000000001', 'x', 'x')`).run()).not.toThrow();
+    expect(() => db.prepare(`INSERT INTO practice_leases (server_id, kind, owner_player_id, password, ends_at)
+      VALUES (1, 'nonsense', '76561199000000001', 'x', 'x')`).run()).toThrow(/CHECK/);
+  });
+
+  it('an existing park/drill table is widened with its rows and indexes kept', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'pugdb-')), 'pug.db');
+    let db = openDb(path);
+    seed(db);
+    // Put the table back the way production has it today.
+    db.exec(`DROP TABLE practice_leases;
+      CREATE TABLE practice_leases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER NOT NULL REFERENCES servers(id),
+        kind TEXT NOT NULL CHECK (kind IN ('park','drill')), owner_player_id TEXT NOT NULL REFERENCES players(steamid),
+        password TEXT NOT NULL, drill_code TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), ready_at TEXT,
+        last_human_at TEXT NOT NULL DEFAULT (datetime('now')), ends_at TEXT NOT NULL, humans INTEGER NOT NULL DEFAULT 0,
+        map TEXT, warned_at TEXT, ending_at TEXT, ended_at TEXT, end_reason TEXT, setup_phase TEXT);
+      CREATE INDEX practice_leases_open ON practice_leases (server_id) WHERE ended_at IS NULL;
+      CREATE INDEX practice_leases_owner ON practice_leases (owner_player_id, created_at);
+      INSERT INTO practice_leases (server_id, kind, owner_player_id, password, ends_at, humans)
+        VALUES (1, 'park', '76561199000000001', 'pw1', 'e1', 3), (1, 'drill', '76561199000000001', 'pw2', 'e2', 0);`);
+    db.close();
+    db = openDb(path);
+    expect(db.prepare('SELECT id, kind, password, humans FROM practice_leases ORDER BY id').all()).toEqual([
+      { id: 1, kind: 'park', password: 'pw1', humans: 3 },
+      { id: 2, kind: 'drill', password: 'pw2', humans: 0 },
+    ]);
+    db.prepare(`INSERT INTO practice_leases (server_id, kind, owner_player_id, password, ends_at)
+      VALUES (1, 'hunter', '76561199000000001', 'x', 'x')`).run();
+    // AUTOINCREMENT carried on from the old table.
+    expect(db.prepare("SELECT id FROM practice_leases WHERE kind = 'hunter'").get()).toEqual({ id: 3 });
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'practice_leases' ORDER BY name").all())
+      .toEqual([{ name: 'practice_leases_open' }, { name: 'practice_leases_owner' }]);
+    expect(db.pragma('foreign_keys', { simple: true })).toBe(1);
+    db.close();
+  });
+
+  it('custom campaigns default to not practice-only', () => {
+    const db = openDb(':memory:');
+    const cols = db.prepare('PRAGMA table_info(custom_campaigns)').all() as { name: string; dflt_value: string }[];
+    expect(cols.find((c) => c.name === 'practice_only')?.dflt_value).toBe('0');
   });
 });
