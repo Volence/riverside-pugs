@@ -262,7 +262,7 @@ public Action Listen_Ready(int client, const char[] command, int argc)
 {
 	if (!g_bActive || !g_bPopped || client <= 0 || SeatOf(client) < 0) return Plugin_Continue;
 	char id[32];
-	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) return Plugin_Handled;
+	if (!SideAuthId(client, id, sizeof(id))) return Plugin_Handled;
 	g_bReadied[client] = true;
 	PugLog("PUGSIDE event=ready token=%s steamid=%s", g_sToken, id);
 	return Plugin_Handled;
@@ -283,7 +283,7 @@ public int MenuHandler_Vote(Menu menu, MenuAction action, int client, int item)
 	if (action != MenuAction_Select || !g_bActive || !g_bPopped) return 0;
 	char slug[64], id[32];
 	menu.GetItem(item, slug, sizeof(slug));
-	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) return 0;
+	if (!SideAuthId(client, id, sizeof(id))) return 0;
 	PugLog("PUGSIDE event=vote token=%s steamid=%s campaign=%s", g_sToken, id, slug);
 	PrintToChat(client, "\x04[Side]\x01 Vote sent.");
 	return 0;
@@ -307,11 +307,76 @@ void RemindAll()
 
 // ---------- team lock ----------
 
+/** A client's SteamID64. On every live box (sv_lan 0) this is exactly
+ *  GetClientAuthId(AuthId_SteamID64), Steam-validated. On a LAN server
+ *  (sv_lan 1, only the local test box) Steam never validates anyone and the
+ *  engine has no SteamID64 for a real client at all, so the STEAM_X:Y:Z form
+ *  is converted by hand instead. Same logic as pug-match's ModCall_AuthId
+ *  (pug-modcall.inc), copied rather than included so this plugin does not
+ *  pull in the mod-call code. */
+bool SideAuthId(int client, char[] id, int maxlen)
+{
+	static ConVar lan = null;
+	if (lan == null) lan = FindConVar("sv_lan");
+	if (lan == null || !lan.BoolValue) return GetClientAuthId(client, AuthId_SteamID64, id, maxlen);
+	if (GetClientAuthId(client, AuthId_SteamID64, id, maxlen, false)) return true;
+	char steam2[32];
+	if (!GetClientAuthId(client, AuthId_Steam2, steam2, sizeof(steam2), false)) return false;
+	return SideSteam2To64(steam2, id, maxlen);
+}
+
+/** STEAM_X:Y:Z to SteamID64: 76561197960265728 + Z*2 + Y. Done in decimal
+ *  strings because Z*2 can pass the 32-bit int range. */
+bool SideSteam2To64(const char[] steam2, char[] out, int maxlen)
+{
+	char parts[3][16];
+	if (StrContains(steam2, "STEAM_") != 0) return false;
+	if (ExplodeString(steam2[6], ":", parts, sizeof(parts), sizeof(parts[])) != 3) return false;
+	int y = StringToInt(parts[1]);
+	if (y != 0 && y != 1) return false;
+	char base[] = "76561197960265728";
+	char z[16];
+	strcopy(z, sizeof(z), parts[2]);
+	int zl = strlen(z);
+	if (zl == 0 || zl > 10) return false;
+	char add[16];
+	int carry = y;
+	int digits[16];
+	int n = 0;
+	for (int i = zl - 1; i >= 0; i--)
+	{
+		if (z[i] < '0' || z[i] > '9') return false;
+		int d = (view_as<int>(z[i]) - '0') * 2 + carry;
+		digits[n++] = d % 10;
+		carry = d / 10;
+	}
+	if (carry > 0) digits[n++] = carry;
+	for (int i = 0; i < n; i++) add[i] = view_as<char>('0' + digits[n - 1 - i]);
+	add[n] = '\0';
+	int bl = strlen(base);
+	char sum[24];
+	int c = 0;
+	int ai = n - 1;
+	for (int i = bl - 1; i >= 0; i--)
+	{
+		int extra = 0;
+		if (ai >= 0) extra = view_as<int>(add[ai]) - '0';
+		int d = view_as<int>(base[i]) - '0' + c + extra;
+		ai--;
+		sum[i] = view_as<char>('0' + d % 10);
+		c = d / 10;
+	}
+	sum[bl] = '\0';
+	if (c != 0 || ai >= 0) return false;
+	strcopy(out, maxlen, sum);
+	return true;
+}
+
 int SeatOf(int client)
 {
 	if (!IsClientInGame(client) || IsFakeClient(client)) return -1;
 	char id[32];
-	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) return -1;
+	if (!SideAuthId(client, id, sizeof(id))) return -1;
 	for (int i = 0; i < g_iSeats; i++) if (StrEqual(g_sSeatId[i], id)) return i;
 	return -1;
 }
@@ -322,7 +387,7 @@ int ClientOfId(const char[] id)
 	for (int c = 1; c <= MaxClients; c++)
 	{
 		if (!IsClientInGame(c) || IsFakeClient(c)) continue;
-		if (GetClientAuthId(c, AuthId_SteamID64, cid, sizeof(cid)) && StrEqual(cid, id)) return c;
+		if (SideAuthId(c, cid, sizeof(cid)) && StrEqual(cid, id)) return c;
 	}
 	return 0;
 }
@@ -376,7 +441,7 @@ public void OnClientPostAdminCheck(int client)
 {
 	if (!g_bActive || IsFakeClient(client)) return;
 	char id[32];
-	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) return;
+	if (!SideAuthId(client, id, sizeof(id))) return;
 	g_iAttempts[client] = 0;
 	g_bReadied[client] = false;
 	PugLog("PUGSIDE event=join token=%s steamid=%s", g_sToken, id);
@@ -388,11 +453,11 @@ public void OnClientDisconnect(int client)
 	// No IsClientInGame guard: someone who quits while still loading (most
 	// commonly during a changelevel) is exactly when a part needs to be
 	// reported, so the site's 90s reconnect grace actually starts.
-	// IsFakeClient only needs a connected client, and GetClientAuthId below
+	// IsFakeClient only needs a connected client, and SideAuthId below
 	// already refuses anyone who was never authorized.
 	if (!g_bActive || IsFakeClient(client)) return;
 	char id[32];
-	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) return;
+	if (!SideAuthId(client, id, sizeof(id))) return;
 	PugLog("PUGSIDE event=part token=%s steamid=%s", g_sToken, id);
 }
 
