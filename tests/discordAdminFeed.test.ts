@@ -313,6 +313,20 @@ describe('admin feed', () => {
     expect(line).toContain('\\*evil\\*');
   });
 
+  it('a message to staff names the player and the server, and says where to answer', async () => {
+    const serverId = Number(db.prepare(
+      "INSERT INTO servers (name, host, port, rcon_port, rcon_password) VALUES ('Dallas', '1.2.3.4', 27015, 27015, 'x')",
+    ).run().lastInsertRowid);
+    publishAdminEvent({ kind: 'staff_message', steamid: IDS[2], serverId, text: 'he is *throwing*' });
+    await feed.idle();
+    const line = t.live()[0].payload.embeds[0].description ?? '';
+    expect(line).toContain('**player2**');
+    expect(line).toContain('messaged staff');
+    expect(line).toContain('Dallas');
+    expect(line).toContain('he is \\*throwing\\*');
+    expect(line).toContain(`https://pug.test/admin/live?chat=${serverId}`);
+  });
+
   it('a secret setting change never shows its value', async () => {
     logAdmin(db, ADMIN, 'setting', 'invite_code', { changed: true });
     await feed.idle();

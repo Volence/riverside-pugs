@@ -62,6 +62,7 @@ import type { AddonsTransport } from './addonsTransport.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
 import { backfillPersonas } from './personaBackfill.js';
 import { handleConduct } from './conductFlags.js';
+import { handleServerChatEvent, isActiveStaff } from './serverChat.js';
 import { handleModCall } from './modCalls.js';
 import { ModCallPoster } from './discord/modCallPoster.js';
 import { WeeklyPoster } from './discord/weeklyPoster.js';
@@ -963,13 +964,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           return;
         }
-        if (ev.kind === 'say' || ev.kind === 'name') {
-          // Conduct alerts. Never on the critical path: a failure here must
-          // not take down the listener that also carries match_end.
+        if (ev.kind === 'say' || ev.kind === 'name' || ev.kind === 'staff_in' || ev.kind === 'staff_sent') {
+          const sid = serverOf(source, meta);
+          // Conduct alerts first, then the staff chat store. Neither is on
+          // the critical path: a failure here must not take down the
+          // listener that also carries match_end.
+          if (ev.kind === 'say' || ev.kind === 'name') {
+            try {
+              handleConduct(deps.db, ev, sid);
+            } catch (err) {
+              console.error('[conduct] failed to check a line:', err);
+            }
+          }
           try {
-            handleConduct(deps.db, ev, serverOf(source, meta));
+            handleServerChatEvent(deps.db, ev, sid, () => hub.sendTo('server_chat', (id) => isActiveStaff(deps.db, id)));
           } catch (err) {
-            console.error('[conduct] failed to check a line:', err);
+            console.error('[serverchat] failed to store a line:', err);
           }
           return;
         }
