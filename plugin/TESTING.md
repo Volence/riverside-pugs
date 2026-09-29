@@ -1064,3 +1064,53 @@ Not covered here: the production chain itself (this instance's copy of
 `rotoblin_pug_4v4_map.cfg` predates the votes block, which sets no knob), and
 the web app writing the file over each box's transport. Both are steps 2 to 5
 of the owner runbook.
+
+## Staff chat (0.3.16)
+
+`sm_pug_staffsay` (the site pushing a message into the game, `src/staffChatSend.ts`)
+and `/staff` (a player's private line back to staff), both in `pug-staffchat.inc`.
+`EmitConductSay` now also carries `scope=all|team`, set by `OnClientSayCommand`
+in `pug-modcall.inc` from whichever of `say`/`say_team` the client used.
+
+### 1. Empty server: `sm_pug_staffsay` answers and logs correctly
+
+No client needed. Only with the server empty (`status` shows 0 humans).
+
+    R 'sm_pug_staffsay all "Test" "hello" 1'
+    R 'sm_pug_staffsay 76561199048276493 "Test" "hi" 2'
+
+- [x] both print `staffsay delivered=0` on the console: confirmed 2026-09-28
+- [x] the server log has `PUGSTAFFSENT id=1 delivered=0` and
+  `PUGSTAFFSENT id=2 delivered=0`: confirmed 2026-09-28 (server runs
+  `sv_logflush 0`, so the log lines land after the usual engine flush delay,
+  not immediately; toggling `sv_logflush 1` for the check and back to `0`
+  after is enough to see them right away)
+
+### 2. Real client (pending, needs a human)
+
+Needs a real client connected to the local test server. Not run as part of
+this task; left for the owner.
+
+1. **Broadcast.** `R 'sm_pug_staffsay all "Test" "hello everyone" 3'` while
+   connected.
+   - [ ] a colour-coded `[Staff] Test: hello everyone` line in chat: ____
+2. **Team.** `R 'sm_pug_staffsay survivors "Test" "hi survivors" 4'` (repeat
+   for `infected`/`spectators`).
+   - [ ] only clients on that team see it, labelled `[Staff → Survivors]` (etc): ____
+3. **Whisper.** `R 'sm_pug_staffsay <your steamid64> "Test" "hi you" 5'`.
+   - [ ] only you see it, labelled `[Staff → you]`, plus a
+     "Reply privately with /staff <message>" hint line: ____
+   - [ ] `staffsay delivered=1` and a matching `PUGSTAFFSENT` line: ____
+4. **`/staff` is silent.** Type `/staff hello` in chat.
+   - [ ] nothing appears in the public chat feed: ____
+   - [ ] you see `[PUG] Sent to staff.`: ____
+   - [ ] the server log has a `PUGSTAFF steamid=<you> team=<n> msg=hello` line: ____
+5. **`!staff` in chat is caught the same way.** Type `!staff hi again` in
+   normal (all) chat.
+   - [ ] same as above, and the `!staff` text never appears as a public say: ____
+6. **Cooldown.** Send two `/staff` messages within 5 seconds.
+   - [ ] the second answers `[PUG] Wait a few seconds before your next /staff message.`: ____
+7. **Say scope on PUGSAY.** Say something in team chat (`say_team`, bound to
+   the team-chat key) and something in all chat.
+   - [ ] the team-chat `PUGSAY` line has `scope=team`: ____
+   - [ ] the all-chat `PUGSAY` line has `scope=all`: ____

@@ -20,7 +20,7 @@
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.3.15"
+#define PLUGIN_VERSION "0.3.16"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -232,6 +232,13 @@ int g_iPugSide[3];                       // [1] = game team of pug team a, [2] =
 int g_iClientRoster[MAXPLAYERS + 1];     // client -> roster slot, -1 = not rostered
 int g_iLockAttempts[MAXPLAYERS + 1];
 int g_iLastHealth[MAXPLAYERS + 1];       // for SI overkill remainder
+
+// Staff chat (pug-staffchat.inc). Declared here, not there, because
+// EmitConductSay below reads g_bSayTeam and pug-modcall.inc's
+// OnClientSayCommand sets it, and both appear ahead of that include in this
+// file; SourcePawn resolves a forward function call but not a forward global.
+float g_fStaffLast[MAXPLAYERS + 1];
+bool g_bSayTeam[MAXPLAYERS + 1];         // the say this client is typing right now went to team chat
 
 /** Friendly fire damage accumulated per attacker/victim pair, not yet emitted
  *  as an event. See FlushFriendlyFire. The g_iStatFf counter is credited per
@@ -505,6 +512,7 @@ No config exec and no restart: it tracks the game already being played. Implies 
 	LeaveInit();
 	PauseInit();
 	ModCall_Init();
+	StaffChat_Init();
 	HookEvent("player_spawn", Event_PlayerSpawn);
 	HookEvent("player_now_it", Event_PlayerBoomed);
 
@@ -994,7 +1002,7 @@ void EmitConductSay(int client, Event event)
 	event.GetString("text", text, sizeof(text));
 	SanitizeChat(text, sizeof(text));
 	if (text[0] == '\0') return;
-	PugLog("PUGSAY steamid=%s team=%d msg=%s", id, GetClientTeam(client), text);
+	PugLog("PUGSAY steamid=%s team=%d scope=%s msg=%s", id, GetClientTeam(client), g_bSayTeam[client] ? "team" : "all", text);
 }
 
 void EmitConductName(const char[] id, const char[] event, const char[] rawName)
@@ -3102,6 +3110,7 @@ public void OnClientPostAdminCheck(int client)
 public void OnClientDisconnect(int client)
 {
 	ModCall_OnDisconnect(client);
+	StaffChat_OnDisconnect(client);
 	int slot = g_iClientRoster[client];
 	g_iClientRoster[client] = -1;
 	g_iLockAttempts[client] = 0;
@@ -4628,3 +4637,4 @@ public void Event_PounceStopped(Event event, const char[] name, bool dontBroadca
 // After pug-leave.inc: this module reads its pause state and its absence check.
 #include "pug-pause.inc"
 #include "pug-modcall.inc"
+#include "pug-staffchat.inc"
