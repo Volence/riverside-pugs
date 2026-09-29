@@ -65,12 +65,20 @@ export function getServer(db: DB, id: number): ServerRow | undefined {
  * writer and the release engine). A lease being wound down still counts as
  * open: it holds its box until the restart that clears the practice config
  * has finished.
+ * A box held for a queue side game is invisible the same way (side_games).
  */
-export const NOT_LEASED_SQL = 'id NOT IN (SELECT server_id FROM practice_leases WHERE ended_at IS NULL)';
+export const NOT_LEASED_SQL =
+  'id NOT IN (SELECT server_id FROM practice_leases WHERE ended_at IS NULL)'
+  + ' AND id NOT IN (SELECT server_id FROM side_games WHERE ended_at IS NULL)';
 
 /** Whether an open practice lease holds this server. */
 export function isLeased(db: DB, serverId: number): boolean {
   return db.prepare('SELECT 1 FROM practice_leases WHERE server_id = ? AND ended_at IS NULL').get(serverId) !== undefined;
+}
+
+/** Whether an open queue side game holds this server (src/sideGames.ts). */
+export function isSideHeld(db: DB, serverId: number): boolean {
+  return db.prepare('SELECT 1 FROM side_games WHERE server_id = ? AND ended_at IS NULL').get(serverId) !== undefined;
 }
 
 /** Atomically reserve one idle, enabled server; returns it, or null if none is
