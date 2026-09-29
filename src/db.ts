@@ -296,6 +296,28 @@ CREATE TABLE IF NOT EXISTS match_chat (
   message     TEXT    NOT NULL,
   PRIMARY KEY (match_id, seq)
 );
+-- Every human chat line on every server, in a match or not, plus players'
+-- /staff messages and what staff sent back (src/serverChat.ts). Kept for
+-- good, like match_chat. steamid is NULL on a staff_out row, whose author is
+-- sent_by. name is a snapshot: the in-game name last seen, else the site
+-- name, so an old line still says who it was after a rename.
+CREATE TABLE IF NOT EXISTS server_chat (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  server_id  INTEGER NOT NULL,
+  at         INTEGER NOT NULL,
+  steamid    TEXT,
+  name       TEXT,
+  team       INTEGER,
+  scope      TEXT,
+  kind       TEXT    NOT NULL,
+  message    TEXT    NOT NULL,
+  match_id   INTEGER,
+  to_kind    TEXT,
+  to_value   TEXT,
+  sent_by    TEXT,
+  delivered  INTEGER
+);
+CREATE INDEX IF NOT EXISTS server_chat_by_server ON server_chat (server_id, id);
 CREATE TABLE IF NOT EXISTS match_demos (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   ordinal  INTEGER NOT NULL,

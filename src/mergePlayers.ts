@@ -25,6 +25,11 @@ import { publishTicketSignal } from './tickets/signals.js';
  *  simply be rewritten. A player id here is a reference, not part of a key. */
 const PLAIN: [table: string, column: string][] = [
   ['match_chat', 'steamid'],
+  ['server_chat', 'steamid'],
+  ['server_chat', 'sent_by'],
+  // A whisper target. On a team or all row to_value is a team number or
+  // NULL, which never equals a SteamID64, so a plain rewrite is safe.
+  ['server_chat', 'to_value'],
   ['match_live_events', 'actor'],
   ['match_live_events', 'target'],
   ['admin_actions', 'target'],
