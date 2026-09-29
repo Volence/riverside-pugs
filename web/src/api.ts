@@ -1498,7 +1498,7 @@ export interface ModCallView {
 }
 
 /** Server chat (src/routes/serverChat.ts). */
-export interface ChatServerView { id: number; name: string; state: 'match' | 'practice' | 'idle' | 'offline'; lastAt: number | null }
+export interface ChatServerView { id: number; name: string; state: 'match' | 'practice' | 'side' | 'idle' | 'offline'; lastAt: number | null }
 export interface ChatLineView {
   id: number; at: number; kind: 'say' | 'staff_in' | 'staff_out'; steamid: string | null; name: string | null;
   team: number | null; scope: 'all' | 'team' | null; message: string; matchId: number | null;

@@ -70,6 +70,12 @@ describe('server chat routes', () => {
     expect(body.lines[0]).toMatchObject({ kind: 'say', steamid: PLAYER, team: 2, scope: 'team', message: 'rush', to: null });
   });
 
+  it('shows a box a queue side game holds as side', async () => {
+    db.prepare("INSERT INTO side_games (server_id, token, password) VALUES (?, 't', 'p')").run(sid);
+    const servers = (await get(MOD, '/api/mod/chat/servers')).json();
+    expect(servers.servers[0].state).toBe('side');
+  });
+
   it('404s an unknown server', async () => {
     expect((await get(MOD, '/api/mod/chat/999')).statusCode).toBe(404);
     expect((await app.inject({ method: 'POST', url: '/api/mod/chat/999', cookies: cookie[MOD], payload: { to: 'all', message: 'x' } })).statusCode).toBe(404);
