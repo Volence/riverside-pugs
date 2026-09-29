@@ -3,7 +3,7 @@ import type { PracticeEndReason, PracticeKind, PracticeLease } from './api';
 /** Minutes with nobody on before a lease closes itself. Mirrors IDLE_END_MS
  *  in src/practiceLeases.ts (the park is shared and gives its box back
  *  sooner). */
-export const IDLE_MINUTES: Record<PracticeKind, number> = { park: 5, drill: 10 };
+export const IDLE_MINUTES: Record<PracticeKind, number> = { park: 5, drill: 10, hunter: 5 };
 
 /**
  * Words for practice server leases (src/practiceLeases.ts), shared by the
@@ -14,7 +14,11 @@ export const IDLE_MINUTES: Record<PracticeKind, number> = { park: 5, drill: 10 }
 export const KIND_LABEL: Record<PracticeKind, string> = {
   park: 'Practice Park',
   drill: 'Drill server',
+  hunter: 'Hunter Training',
 };
+
+/** The Hunter Training map's download (a published, practice-only custom campaign). */
+export const HUNTER_DOWNLOAD = '/download/campaign/hunter_training';
 
 /** Why a lease ended, finishing the sentence "This practice server closed
  *  because ...". */
@@ -52,7 +56,7 @@ export function endReasonText(reason: PracticeEndReason | null, kind: PracticeKi
  *  reset is a real srcds restart (30 to 60 seconds), and connecting during
  *  it just gets you dropped, so the line says to wait until it is loading. */
 export function setupText(lease: Pick<PracticeLease, 'kind' | 'server' | 'setupPhase'>): string {
-  const what = lease.kind === 'park' ? 'the Practice Park' : 'your drill server';
+  const what = lease.kind === 'park' ? 'the Practice Park' : lease.kind === 'hunter' ? 'your Hunter Training server' : 'your drill server';
   if (lease.setupPhase === 'loading') {
     return `Loading ${what} on ${lease.server}. You can connect now; it finishes around you.`;
   }

@@ -1654,6 +1654,16 @@ describe('CustomCampaigns', () => {
   // preact-iso intercepts same-origin clicks whose target is absent or _self
   // (router.js:45). The download is a real file, not a route, so without a
   // target the click lands on the SPA's not-found instead of downloading.
+  it('marks a practice-only campaign as a practice map instead of a vote option', async () => {
+    mockApi.customCampaigns.mockResolvedValue({ campaigns: [{ ...campaign, slug: 'hunter_training', name: 'Hunter Training', inPool: false, practiceOnly: true }] });
+    render(<CustomCampaigns />);
+    const badge = await waitFor(() => screen.getByText('Practice map'));
+    // Scoped to this campaign's heading: the L4D2 pack block has vote badges of its own.
+    const heading = badge.closest('h3')!;
+    expect(heading.textContent).toContain('Hunter Training');
+    expect(heading.textContent).not.toContain('In the vote');
+  });
+
   it('opts the download link out of the SPA router', async () => {
     mockApi.customCampaigns.mockResolvedValue({ campaigns: [campaign] });
     render(<CustomCampaigns />);

@@ -84,6 +84,7 @@ function CampaignList({ data, error }: { data: { campaigns: CustomCampaignRow[] 
                   <h3>
                     {c.name}
                     {c.inPool && <span class="ccamp__pool">In the vote</span>}
+                    {c.practiceOnly && <span class="ccamp__pool">Practice map</span>}
                   </h3>
                   <a class="btn" href={`/download/campaign/${encodeURIComponent(c.slug)}`}
                      target="_blank" rel="noopener">

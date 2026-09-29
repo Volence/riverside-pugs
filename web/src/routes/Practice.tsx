@@ -8,7 +8,7 @@ import { ConnectPanel } from '../components/ConnectPanel';
 import { CopyRow } from '../components/CopyRow';
 import { useSecondsLeft } from '../components/Countdown';
 import { confirm } from '../components/Confirm';
-import { IDLE_MINUTES, KIND_LABEL, endReasonText, leaseClock, leasePath, setupText } from '../practice';
+import { HUNTER_DOWNLOAD, IDLE_MINUTES, KIND_LABEL, endReasonText, leaseClock, leasePath, setupText } from '../practice';
 
 /** Fast while something is about to change (setup, wind-down), slow once
  *  the server is just running. */
@@ -132,6 +132,13 @@ export function LeasePanel({ lease, onChanged }: { lease: PracticeLease; onChang
       {lease.kind === 'park' && open && (
         <p class="practice__note">Practice Park, closes 5 minutes after everyone leaves.</p>
       )}
+      {lease.kind === 'hunter' && open && (
+        <p class="practice__note">
+          Hunter Training runs on eyeonus's map. If you have not installed it: <a href={HUNTER_DOWNLOAD} target="_blank" rel="noopener">download it</a>,
+          put the .vpk in left4dead/addons, and restart Left 4 Dead. This server is yours alone; anyone else who joins
+          watches from spectator.
+        </p>
+      )}
       {lease.state === 'setting_up' && (
         <p class="practice__note" role="status">{setupText(lease)}</p>
       )}
@@ -150,6 +157,11 @@ export function LeasePanel({ lease, onChanged }: { lease: PracticeLease; onChang
           <ConnectPanel connect={lease.connect} />
           <CopyRow label="Password" value={lease.connect.password} />
         </>
+      )}
+      {open && !lease.connect && lease.kind === 'hunter' && (
+        <p class="practice__note">
+          This Hunter Training server belongs to {lease.owner.name}. Start your own from the <a href="/">Play page</a>.
+        </p>
       )}
 
       {open && (
@@ -192,11 +204,12 @@ export function LeasePanel({ lease, onChanged }: { lease: PracticeLease; onChang
 
 /** While a lease sets up, the box is still on its startup map (The
  *  Greenhouse) and the page read as if the park had gone to the wrong place.
- *  A park is always No Mercy 1, so say where it is going; a drill server
- *  just says loading until its map is known. */
+ *  A park is always No Mercy 1 and Hunter Training its own map, so say where
+ *  each is going; a drill server just says loading until its map is known. */
 function mapLabel(lease: { state: string; kind: string; map: string | null }): string {
   if (lease.state === 'setting_up') {
-    return lease.kind === 'park' ? `${mapName('l4d_vs_hospital01_apartment')} (loading)` : 'loading';
+    if (lease.kind === 'park') return `${mapName('l4d_vs_hospital01_apartment')} (loading)`;
+    return lease.kind === 'hunter' ? 'Hunter Training (loading)' : 'loading';
   }
   return lease.map ? mapName(lease.map) : 'loading';
 }

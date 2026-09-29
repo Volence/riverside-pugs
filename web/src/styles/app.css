@@ -1790,6 +1790,12 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
   background: var(--surface);
 }
 .practice-card__server { color: var(--text-bright); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.practice-card__where { display: grid; min-width: 0; }
+.practice-card__kind { font-size: var(--fs-dense); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.practice-card__park--hunter { grid-template-columns: minmax(0, 1fr) auto; }
+.practice-card__starts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.practice-card__starts > .btn { flex: 1 1 12rem; }
+.practice-card__need { margin: var(--sp-2) 0 0; font-size: var(--fs-dense); }
 .practice-card__count { font-family: var(--font-display); font-size: var(--fs-h3); color: var(--text-bright); }
 .practice-card__map { font-size: var(--fs-dense); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .practice-card__mine { margin: var(--sp-3) 0 0; font-size: var(--fs-dense); }
@@ -1818,6 +1824,7 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 @media (max-width: 480px) {
   .practice-card__park { grid-template-columns: minmax(0, 1fr) auto auto; }
   .practice-card__map { display: none; }
+  .practice-card__park--hunter .practice-card__map { display: block; }
   .practice__facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .replay__time { font-family: var(--font-label); font-variant-numeric: tabular-nums; font-size: var(--fs-dense); color: var(--text-muted); letter-spacing: 0.08em; }

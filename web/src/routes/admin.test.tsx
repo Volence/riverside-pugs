@@ -20,7 +20,7 @@ const { mockAdmin, mockApi, mockPeople, mockMod } = vi.hoisted(() => ({
     audit: vi.fn(), serverLogSecret: vi.fn(), serverLogAuth: vi.fn(),
     integrityJob: vi.fn(),
     campaigns: vi.fn(), uploadCampaign: vi.fn(), publishCampaign: vi.fn(),
-    reinstallCampaign: vi.fn(), deleteCampaign: vi.fn(), setMapsToPlay: vi.fn(),
+    reinstallCampaign: vi.fn(), deleteCampaign: vi.fn(), setMapsToPlay: vi.fn(), setCampaignPracticeOnly: vi.fn(),
     balancePatches: vi.fn(), balanceDrift: vi.fn(), balanceIgnoredPlugins: vi.fn(), balancePatch: vi.fn(), editBalancePatch: vi.fn(),
   },
   mockApi: { reportEligibility: vi.fn(), report: vi.fn() },
@@ -409,6 +409,23 @@ describe('AdminCampaigns', () => {
     expect(rows).toEqual(['Alley', 'Mall', 'Docksfinale']);
   });
 
+  it('a practice-only checkbox per published campaign, sent to the server as a boolean', async () => {
+    const ht = {
+      slug: 'hunter_training', name: 'Hunter Training', state: 'published', enabled: 1,
+      size_bytes: 9, sha256: 'b'.repeat(64), vpk_filename: 'hunter_training.vpk',
+      uploaded_by: null, uploaded_at: 0, notes: null,
+      chapters: [{ slug: 'hunter_training', ordinal: 1, map: 'hunter_training_map', display: 'Training Grounds', is_finale: 1, included: 1, play_order: 1 }],
+      installs: [], mapsToPlay: null, maps: ['hunter_training_map'], stock: false, practiceOnly: false,
+    };
+    mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [ht] });
+    mockAdmin.setCampaignPracticeOnly.mockResolvedValue({ ok: true });
+    renderAdmin('/admin/setup/campaigns');
+    const box = await waitFor(() => screen.getByRole('checkbox', { name: /Practice only/ })) as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    fireEvent.click(box);
+    await waitFor(() => expect(mockAdmin.setCampaignPracticeOnly).toHaveBeenCalledWith('hunter_training', true));
+  });
+
   // The first real upload was a 372 MB file and the page looked frozen for
   // minutes, because nothing reported progress. This asserts the percentage
   // reaches the screen, not merely that the request was made.
@@ -493,7 +510,9 @@ describe('AdminCampaigns', () => {
     expect(await waitFor(() => screen.getByText(/cannot be added to the vote/i))).toBeTruthy();
     // It must not claim the download is blocked, because it is not.
     expect(screen.getByText(/can still download/i)).toBeTruthy();
-    expect(screen.queryByRole('checkbox')).toBeNull();
+    // The one checkbox on the card is Practice only; none puts it in the vote.
+    expect(screen.getAllByRole('checkbox').map((b) => b.closest('label')?.textContent?.trim()))
+      .toEqual(['Practice only (never in the PUG pool)']);
   });
 
   const draft = (over: Record<string, unknown> = {}) => ({
