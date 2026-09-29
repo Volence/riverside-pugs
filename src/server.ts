@@ -1384,6 +1384,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         releaser.release(serverId, { restart: true, forceRestart: true }, resolve);
       }),
       broadcast: () => hub.broadcast('refresh'),
+      // Same drain a practice lease or a held release triggers: a match
+      // waiting on a box (PendingMatches) gets another look once this row's
+      // ended_at is actually written, not when the release merely settles.
+      freed: () => holdFreed(),
     });
     sideGames.recover();
     sideGames.sync();

@@ -55,6 +55,12 @@ export interface SideGameDeps {
   release: (serverId: number) => Promise<boolean>;
   /** Hub 'refresh'. */
   broadcast: () => void;
+  /** The same drain a practice lease or a held release triggers once its hold
+   *  ends: called right after `ended_at` is written for a row that release
+   *  closed, so a match waiting on a box (PendingMatches) gets another look.
+   *  Never called for the takeForMatch path: there the box goes straight to
+   *  the match, nothing is freed for anyone else to claim. */
+  freed?: () => void;
   now?: () => number;
   setTimer?: (fn: () => void, ms: number) => { cancel(): void };
   rng?: () => number;
@@ -517,14 +523,23 @@ export class SideGames {
   }
 
   /** The reason is written now; ended_at only once the release is done, so
-   *  the row keeps the box out of the pool through the forced restart. */
+   *  the row keeps the box out of the pool through the forced restart.
+   *  `freed` fires right after that write, never before: ServerReleaser runs
+   *  its onFreed waiters (this same drain, for a practice lease or a held
+   *  release) synchronously as soon as the release settles, which is a beat
+   *  before this row's own ended_at write lands; firing `freed` any earlier
+   *  would let a drained match's claimIdle see the row still open and skip
+   *  the box it was just given. */
   private releaseRow(rowId: number, serverId: number, reason: string): void {
     const db = this.deps.db;
     db.prepare('UPDATE side_games SET end_reason = ? WHERE id = ? AND ended_at IS NULL').run(reason, rowId);
     this.work = this.work
       .then(() => this.deps.release(serverId))
       .catch((err) => { console.error(`[sidegame] releasing server ${serverId} failed:`, err); })
-      .then(() => { db.prepare("UPDATE side_games SET ended_at = datetime('now') WHERE id = ? AND ended_at IS NULL").run(rowId); })
+      .then(() => {
+        db.prepare("UPDATE side_games SET ended_at = datetime('now') WHERE id = ? AND ended_at IS NULL").run(rowId);
+        try { this.deps.freed?.(); } catch (err) { console.error(`[sidegame] freed callback for row ${rowId} failed:`, err); }
+      })
       // Never leave `work` rejected: every later send would fail with it.
       .catch((err) => { console.error(`[sidegame] ending side game row ${rowId} failed:`, err); });
   }

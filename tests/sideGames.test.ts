@@ -485,6 +485,46 @@ describe('SideGames', () => {
     expect(db.prepare('SELECT end_reason FROM side_games').get()).toEqual({ end_reason: 'preempted' });
   });
 
+  it('calls freed once, only after ended_at is actually written', async () => {
+    const freedCalls: (string | null)[] = [];
+    sg = new SideGames({
+      db, queue: q,
+      rcon: async (_s, commands) => { rconLog.push(commands); return commands.map(() => 'PUGOK'); },
+      release: async (id) => { released.push(id); return true; },
+      broadcast: () => {},
+      setTimer: (fn, ms) => { const t = { fn, ms, cancelled: false }; timers.push(t); return { cancel: () => { t.cancelled = true; } }; },
+      rng: () => 0,
+      // Reading the row from inside the callback is the point: if `freed`
+      // ever fired before the ended_at write (the bug a waiting match hit,
+      // where ServerReleaser's onFreed waiters ran a beat ahead of this row's
+      // own write), this would see it still open.
+      freed: () => { freedCalls.push((db.prepare('SELECT ended_at FROM side_games ORDER BY id DESC LIMIT 1').get() as { ended_at: string | null }).ended_at); },
+    });
+    await openWith(4);
+    sg.needServer();
+    await sg.settled();
+    expect(freedCalls).toHaveLength(1);
+    expect(freedCalls[0]).not.toBeNull();
+    expect(db.prepare('SELECT end_reason FROM side_games').get()).toEqual({ end_reason: 'preempted' });
+  });
+
+  it('recover also calls freed once ended_at is written for each row it closes', async () => {
+    db.prepare("INSERT INTO side_games (server_id, token, password) VALUES (?, 'a', 'p'), (?, 'b', 'p')").run(s1, s2);
+    const freedCalls: number[] = [];
+    sg = new SideGames({
+      db, queue: q,
+      rcon: async (_s, commands) => { rconLog.push(commands); return commands.map(() => 'PUGOK'); },
+      release: async (id) => { released.push(id); return true; },
+      broadcast: () => {},
+      setTimer: (fn, ms) => { const t = { fn, ms, cancelled: false }; timers.push(t); return { cancel: () => { t.cancelled = true; } }; },
+      rng: () => 0,
+      freed: () => { freedCalls.push((db.prepare('SELECT COUNT(*) AS n FROM side_games WHERE ended_at IS NOT NULL').get() as { n: number }).n); },
+    });
+    sg.recover();
+    await sg.settled();
+    expect(freedCalls).toEqual([1, 2]);
+  });
+
   it('recover closes open rows left by the previous process', async () => {
     db.prepare("INSERT INTO side_games (server_id, token, password) VALUES (?, 'a', 'p'), (?, 'b', 'p')").run(s1, s2);
     make();
