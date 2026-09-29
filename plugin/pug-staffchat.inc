@@ -80,7 +80,7 @@ public Action Cmd_StaffSay(int args)
 		{
 			continue;
 		}
-		PrintToChat(c, "\x04[%s]\x01 %s: %s", label, name, message);
+		PrintToChat(c, "\x04[%s]\x05 %s\x01: %s", label, name, message);
 		if (whisper) PrintToChat(c, "\x05Reply privately with /staff <message>");
 		EmitSoundToClient(c, STAFFCHAT_SOUND);
 		delivered++;
