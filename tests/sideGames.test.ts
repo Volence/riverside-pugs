@@ -642,6 +642,46 @@ describe('SideGames', () => {
     expect(sg.publicView()).toEqual({ size: 2, players: 4 });
   });
 
+  it('skips a box that refused sm_side_start for 30 minutes, with one warning', async () => {
+    let now = 1_000_000;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    sg = new SideGames({
+      db, queue: q,
+      rcon: async (server, commands) => {
+        rconLog.push(commands);
+        return commands.map((c) => server.id === s1 && c.startsWith('sm_side_start') ? 'Unknown command "sm_side_start"' : 'PUGOK');
+      },
+      release: async (id) => { released.push(id); return true; },
+      broadcast: () => {},
+      setTimer: (fn, ms) => { const t = { fn, ms, cancelled: false }; timers.push(t); return { cancel: () => { t.cancelled = true; } }; },
+      rng: () => 0,
+      now: () => now,
+    });
+    await openWith(4);
+    expect(released).toEqual([s1]);
+    const notLoaded = () => warn.mock.calls.filter((c) => String(c[0]).includes('pug-sidegame not loaded on One'));
+    expect(notLoaded()).toHaveLength(1);
+    now += 60_000;
+    sg.sync();
+    await sg.settled();
+    expect(openRows()).toMatchObject([{ server_id: s2 }]);
+    // The game on Two ends; One is still skipped until the 30 minutes are up.
+    sg.needServer();
+    await sg.settled();
+    now += 60_000;
+    sg.sync();
+    await sg.settled();
+    expect(openRows()).toMatchObject([{ server_id: s2 }]);
+    expect(notLoaded()).toHaveLength(1);
+    sg.needServer();
+    await sg.settled();
+    now += 30 * 60_000;
+    sg.sync();
+    await sg.settled();
+    expect(db.prepare('SELECT server_id FROM side_games ORDER BY id DESC LIMIT 1').get()).toEqual({ server_id: s1 });
+    warn.mockRestore();
+  });
+
   it('closes and backs off for a minute when the box refuses sm_side_start', async () => {
     let now = 1_000_000;
     let refuse = true;
