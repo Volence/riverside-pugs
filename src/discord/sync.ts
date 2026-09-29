@@ -44,6 +44,9 @@ export interface DiscordSyncDeps {
   publicUrl: string;
   channelId: string;
   voice?: VoiceHook;
+  /** A side game currently running, or null. Absent in tests that do not
+   *  exercise side games. */
+  sideGame?: () => { size: 2 | 3 | null; players: number } | null;
   now?: () => number;
   /** Off in tests that drive pass() by hand. */
   autoSchedule?: boolean;
@@ -300,6 +303,7 @@ export class DiscordSync {
       players: q.players.map((p) => this.player(p.steamid)),
       phase: q.phase,
       alertRoleId: getSetting(db, 'discord_pug_role_id') || undefined,
+      sideGame: this.deps.sideGame?.() ?? null,
     });
     const stored = getMessage(db, 'panel', 'queue');
     if (stored && posted) {

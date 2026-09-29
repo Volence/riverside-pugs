@@ -1607,7 +1607,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             ? `You are on a queue timeout for missed ready checks or no-shows. You can queue again <t:${Math.floor(t.until.getTime() / 1000)}:R>.`
             : null;
         },
+        sideGameView: (s) => sideGamesRef?.view(s) ?? null,
       },
+      sideGame: () => sideGamesRef?.publicView() ?? null,
       voice: (t) => new VoiceChannels({ db: deps.db, voice: t.voice }),
       membership,
       presence,

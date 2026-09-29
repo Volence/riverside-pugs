@@ -69,6 +69,21 @@ describe('discord buttons', () => {
     expect(body(await press(0, 'q:leave'))).toMatch(/not in the queue/i);
   });
 
+  it('q:side toggles the opt-in and replies with connect details when a game is open', async () => {
+    await press(0, 'q:join');
+    const r1 = await press(0, 'q:side');
+    expect(mm.isSideOptedIn(IDS[0])).toBe(true);
+    expect(body(r1)).toMatch(/side games on/i);
+    const r2 = await press(0, 'q:side');
+    expect(mm.isSideOptedIn(IDS[0])).toBe(false);
+    expect(body(r2)).toMatch(/side games off/i);
+  });
+
+  it('q:side asks an unqueued player to join first', async () => {
+    const r = await press(0, 'q:side');
+    expect(body(r)).toMatch(/join the queue first/i);
+  });
+
   it('an account that has been merged into another cannot queue from Discord, even with a row left over', async () => {
     const { addAlias } = await import('../src/aliases.js');
     addAlias(db, { steamid: IDS[0], canonical: IDS[1], by: 'test' });

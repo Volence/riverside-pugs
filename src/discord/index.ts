@@ -15,9 +15,11 @@ export interface BotDeps {
   hub: Hub;
   /** Builds the gateway connection. Injected in tests. */
   connect: () => Promise<BotTransport & { destroy?(): Promise<void> }>;
-  /** Extra controller hooks (bans, timeouts) supplied by later features. */
-  controller?: Partial<Pick<ControllerDeps, 'queueBlock' | 'banMessage'>>;
+  /** Extra controller hooks (bans, timeouts, side games) supplied by later features. */
+  controller?: Partial<Pick<ControllerDeps, 'queueBlock' | 'banMessage' | 'sideGameView'>>;
   voice?: (transport: BotTransport) => VoiceHook;
+  /** A side game currently running, or null. Absent when side games are not wired up. */
+  sideGame?: () => { size: 2 | 3 | null; players: number } | null;
   /** Filled from the server's member list for the queue gate. */
   membership?: GuildMembership;
   /** Filled from the server's voice states for the ready gate. */
@@ -110,6 +112,7 @@ export async function startBot(deps: BotDeps): Promise<RunningBot | null> {
     publicUrl: deps.config.publicUrl,
     channelId,
     voice: deps.voice?.(transport),
+    sideGame: deps.sideGame,
   });
   await sync.start();
 
