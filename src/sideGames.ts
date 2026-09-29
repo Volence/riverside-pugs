@@ -30,6 +30,9 @@ export const RECONNECT_GRACE_MS = 90_000;
 export const CLOSE_GRACE_MS = 180_000;
 /** After a box refuses to open a side game, wait this long before trying again. */
 const OPEN_RETRY_MS = 60_000;
+/** After the popped lobby completes, how long the match has to take the box
+ *  (takeForMatch) before the side game is closed as orphaned. */
+export const HANDOVER_GRACE_MS = 60_000;
 const CONFIG: Record<SideSize, string> = { 2: 'rotoblin_hardcore_2v2', 3: 'rotoblin_hardcore_3v3' };
 const FALLBACK_FIRST_MAP = 'l4d_vs_hospital01_apartment';
 
@@ -102,6 +105,7 @@ interface Active {
   resumePending: boolean;
   voteSentFor: string | null;
   closeTimer: Timer | null;
+  handoverTimer: Timer | null;
 }
 
 export class SideGames {
@@ -126,6 +130,7 @@ export class SideGames {
       stateChanged: () => { this.sync(); this.maybeSendVote(); },
       lobbyStarted: (id, players) => this.onPop(id, players),
       lobbyFailed: (id) => this.onLobbyFailed(id),
+      lobbyCompleted: (id) => this.onLobbyCompleted(id),
     });
   }
 
@@ -206,7 +211,7 @@ export class SideGames {
     const a: Active = {
       rowId, server, token, password, phase: 'running', size, seats: [], seen: false,
       connected: new Set(), away: new Map(), gone: new Set(), satOut: new Map(), played: new Map(),
-      poppedLobby: null, resumePending: false, voteSentFor: null, closeTimer: null,
+      poppedLobby: null, resumePending: false, voteSentFor: null, closeTimer: null, handoverTimer: null,
     };
     a.seats = this.lineup(a, cands, size);
     this.active = a;
@@ -414,14 +419,22 @@ export class SideGames {
     if (cmds.length) { this.send(a.server, cmds); this.deps.broadcast(); }
   }
 
+  /**
+   * The queue popped with side players in it. Also taken while already
+   * popped when this is a new lobby: a failed ready check requeues its
+   * players and can pop again at once, before the stateChanged that would
+   * otherwise resume the side game.
+   */
   private onPop(lobbyId: string, players: string[]): void {
     const a = this.active;
-    if (!a || a.phase === 'popped' || !a.seats.some((s) => players.includes(s.steamid))) return;
+    if (!a || !a.seats.some((s) => players.includes(s.steamid))) return;
+    if (a.phase === 'popped' && !a.resumePending && lobbyId === a.poppedLobby) return;
     a.closeTimer?.cancel();
     a.closeTimer = null;
     a.phase = 'popped';
     a.poppedLobby = lobbyId;
     a.resumePending = false;
+    a.voteSentFor = null;
     this.send(a.server, ['sm_side_popped']);
     this.deps.broadcast();
   }
@@ -441,10 +454,24 @@ export class SideGames {
     if (a?.phase === 'popped' && a.poppedLobby === lobbyId) a.resumePending = true;
   }
 
-  /** The pop's match takes the held box, if the campaign can run there. */
+  /** The popped lobby became a match. That match should take the box through
+   *  takeForMatch; if it never does (setup failed first), the side game
+   *  would hold the box for good, so it is closed after HANDOVER_GRACE_MS. */
+  private onLobbyCompleted(lobbyId: string): void {
+    const a = this.active;
+    if (!a || a.phase !== 'popped' || a.poppedLobby !== lobbyId) return;
+    a.handoverTimer?.cancel();
+    a.handoverTimer = this.setTimer(() => {
+      if (this.active === a && a.phase === 'popped') this.close('orphaned');
+    }, HANDOVER_GRACE_MS);
+  }
+
+  /** The pop's match takes the held box, if the campaign can run there. Only
+   *  the side game's own pop: a running or closing game is never handed to
+   *  an unrelated match (those reach it through needServer). */
   takeForMatch(_campaign: string, runsOn: (server: ServerRow) => boolean): { server: ServerRow; firstCommands: string[] } | null {
     const a = this.active;
-    if (!a) return null;
+    if (!a || a.phase !== 'popped') return null;
     const server = getServer(this.deps.db, a.server.id);
     if (!server || !runsOn(server)) { this.close('campaign'); return null; }
     const db = this.deps.db;
@@ -495,7 +522,9 @@ export class SideGames {
     this.work = this.work
       .then(() => this.deps.release(serverId))
       .catch((err) => { console.error(`[sidegame] releasing server ${serverId} failed:`, err); })
-      .then(() => { db.prepare("UPDATE side_games SET ended_at = datetime('now') WHERE id = ? AND ended_at IS NULL").run(rowId); });
+      .then(() => { db.prepare("UPDATE side_games SET ended_at = datetime('now') WHERE id = ? AND ended_at IS NULL").run(rowId); })
+      // Never leave `work` rejected: every later send would fail with it.
+      .catch((err) => { console.error(`[sidegame] ending side game row ${rowId} failed:`, err); });
   }
 
   private stopTimers(a: Active): void {
@@ -503,6 +532,8 @@ export class SideGames {
     a.away.clear();
     a.closeTimer?.cancel();
     a.closeTimer = null;
+    a.handoverTimer?.cancel();
+    a.handoverTimer = null;
   }
 
   /** The base game's campaigns, which every box carries; custom and dlc4 are skipped. */

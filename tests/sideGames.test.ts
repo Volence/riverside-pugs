@@ -10,7 +10,7 @@ import { setMissionsDirs } from '../src/campaignRegistry.js';
 import type { LobbySnapshot } from '../src/lobby.js';
 import type { MatchmakerListener } from '../src/matchmaker.js';
 import type { SideLogEvent } from '../src/logParse.js';
-import { SideGames, RECONNECT_GRACE_MS, CLOSE_GRACE_MS, type SideQueue } from '../src/sideGames.js';
+import { SideGames, RECONNECT_GRACE_MS, CLOSE_GRACE_MS, HANDOVER_GRACE_MS, type SideQueue } from '../src/sideGames.js';
 
 // Two stock campaigns with chapter lists, so the finale check and the first
 // map have something to read (the registry's maps come from missions files).
@@ -363,6 +363,7 @@ describe('SideGames', () => {
   it('takeForMatch hands the held box to the match', async () => {
     expect(sg.takeForMatch('no_mercy', () => true)).toBeNull();
     await openWith(4);
+    q.listener.lobbyStarted!('lob_1', ids(8));
     const took = sg.takeForMatch('no_mercy', () => true)!;
     expect(took.server.id).toBe(s1);
     expect(took.firstCommands).toEqual([`sm_side_stop ${token()}`]);
@@ -375,12 +376,80 @@ describe('SideGames', () => {
 
   it('takeForMatch falls back when the campaign cannot run there', async () => {
     await openWith(4);
+    q.listener.lobbyStarted!('lob_1', ids(8));
     expect(sg.takeForMatch('custom_x', () => false)).toBeNull();
     await sg.settled();
     expect(released).toEqual([s1]);
     expect(db.prepare('SELECT status FROM servers WHERE id = ?').get(s1)).toEqual({ status: 'idle' });
     expect(db.prepare('SELECT end_reason FROM side_games').get()).toEqual({ end_reason: 'campaign' });
     expect(sg.publicView()).toBeNull();
+  });
+
+  it('takeForMatch never takes a game that has not popped', async () => {
+    await openWith(4);
+    expect(sg.takeForMatch('no_mercy', () => true)).toBeNull();
+    q.candidates = ids(3);
+    sg.sync();
+    expect(sg.view(ids(1)[0])!.phase).toBe('closing');
+    expect(sg.takeForMatch('no_mercy', () => true)).toBeNull();
+    await sg.settled();
+    expect(openRows()).toHaveLength(1);
+    expect(released).toEqual([]);
+    expect(db.prepare('SELECT status FROM servers WHERE id = ?').get(s1)).toEqual({ status: 'idle' });
+  });
+
+  it('closes a popped game whose completed lobby never takes the box', async () => {
+    await openWith(4);
+    q.listener.lobbyStarted!('lob_1', ids(8));
+    q.listener.lobbyCompleted!('lob_other', 7);
+    expect(timers.some((t) => t.ms === HANDOVER_GRACE_MS)).toBe(false);
+    q.listener.lobbyCompleted!('lob_1', 7);
+    fire(HANDOVER_GRACE_MS);
+    await sg.settled();
+    expect(released).toEqual([s1]);
+    expect(db.prepare('SELECT end_reason FROM side_games').get()).toEqual({ end_reason: 'orphaned' });
+    expect(sg.publicView()).toBeNull();
+
+    // A match that does take the box cancels the timer.
+    await openWith(4);
+    q.listener.lobbyStarted!('lob_2', ids(8));
+    q.listener.lobbyCompleted!('lob_2', 8);
+    const t = timers.filter((x) => x.ms === HANDOVER_GRACE_MS).at(-1)!;
+    expect(sg.takeForMatch('no_mercy', () => true)).not.toBeNull();
+    expect(t.cancelled).toBe(true);
+  });
+
+  it('a failed ready check that pops again at once stays popped on the new lobby', async () => {
+    await openWith(5);
+    q.listener.lobbyStarted!('lob_1', ids(8));
+    q.candidates = [];
+    // Matchmaker order: lobbyFailed, requeue, the re-pop, then stateChanged.
+    q.listener.lobbyFailed!('lob_1', ids(7), ids(8).slice(7));
+    q.listener.lobbyStarted!('lob_2', ids(8));
+    const snap: LobbySnapshot = { id: 'lob_2', phase: 'map_vote', players: ids(8), ready: [], options: ['dead_air'], votes: {}, deadline: 0 };
+    q.lobbyList = [{ id: 'lob_2', snapshot: snap }];
+    await sg.settled();
+    rconLog = [];
+    q.listener.stateChanged!();
+    await sg.settled();
+    expect(sg.view(ids(1)[0])!.phase).toBe('popped');
+    expect(flat()).toEqual(['sm_side_vote "dead_air=Dead Air"']);
+    log('ready', { steamid: ids(1)[0] });
+    expect(q.ready).toHaveBeenCalledWith(ids(1)[0]);
+  });
+
+  it('a release whose row write throws does not jam later rcon', async () => {
+    await openWith(4);
+    q.listener.lobbyStarted!('lob_1', ids(8));
+    db.exec("CREATE TRIGGER boom BEFORE UPDATE OF ended_at ON side_games BEGIN SELECT RAISE(ABORT, 'boom'); END");
+    sg.needServer();
+    await sg.settled();
+    expect(released).toEqual([s1]);
+    db.exec('DROP TRIGGER boom');
+    rconLog = [];
+    await openWith(4);
+    expect(flat()[0]).toMatch(/^sv_password /);
+    expect(openRows()).toHaveLength(2);
   });
 
   it('needServer closes the side game when no practice lease is open', async () => {
