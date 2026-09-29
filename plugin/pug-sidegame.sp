@@ -66,6 +66,7 @@
 
 #include <sourcemod>
 #include <sdktools>
+#include <readyup>
 #include "pug-logauth.inc"
 
 #define PLUGIN_VERSION "0.1.0"
@@ -95,6 +96,10 @@ int g_iSideOfA;                   // TEAM_SURVIVOR or TEAM_INFECTED, 0 = unknown
 int g_iAttempts[MAXPLAYERS + 1];
 bool g_bReadied[MAXPLAYERS + 1];
 bool g_bRoundEnded;
+/** Set by the readyup forward OnRoundIsLive; cleared on round_start and map
+ *  start. A round_end without this true is not a real end of play (e.g. the
+ *  sm_restartmap a shrink's `exec` ends in), and must never log mapend. */
+bool g_bHalfWasLive;
 int g_iSavedAutoTrack = -1;
 char g_sVoteSlug[16][64];
 char g_sVoteName[16][64];
@@ -373,7 +378,12 @@ public void OnClientPostAdminCheck(int client)
 
 public void OnClientDisconnect(int client)
 {
-	if (!g_bActive || !IsClientInGame(client) || IsFakeClient(client)) return;
+	// No IsClientInGame guard: someone who quits while still loading (most
+	// commonly during a changelevel) is exactly when a part needs to be
+	// reported, so the site's 90s reconnect grace actually starts.
+	// IsFakeClient only needs a connected client, and GetClientAuthId below
+	// already refuses anyone who was never authorized.
+	if (!g_bActive || IsFakeClient(client)) return;
 	char id[32];
 	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) return;
 	PugLog("PUGSIDE event=part token=%s steamid=%s", g_sToken, id);
@@ -383,6 +393,7 @@ public void OnConfigsExecuted()
 {
 	if (!g_bActive) return;
 	g_bRoundEnded = false;
+	g_bHalfWasLive = false;
 	// Re-assert every map: server.cfg re-execs on every map change, local.cfg
 	// runs from it, and local.cfg execs secrets.cfg, which would otherwise
 	// silently put the box's standing password back about a second after
@@ -394,12 +405,27 @@ public void OnConfigsExecuted()
 	PugLog("PUGSIDE event=mapstart token=%s map=%s", g_sToken, map);
 }
 
-public void Event_RoundStart(Event e, const char[] n, bool d) { g_bRoundEnded = false; }
+public void Event_RoundStart(Event e, const char[] n, bool d)
+{
+	g_bRoundEnded = false;
+	g_bHalfWasLive = false;
+	for (int c = 0; c <= MAXPLAYERS; c++) g_iAttempts[c] = 0;
+}
+
+/** Rotoblin ready-up go-live signal (global forward; fires even though we
+ *  never call any readyup native). A half that never went live (e.g. a
+ *  shrink's `exec ...` ending in sm_restartmap mid-map) must never be read
+ *  as a real end of play by Event_RoundEnd below. */
+public void OnRoundIsLive()
+{
+	g_bHalfWasLive = true;
+}
 
 public void Event_RoundEnd(Event e, const char[] n, bool d)
 {
-	// round_end can fire twice; only the second half's first one ends the map.
-	if (!g_bActive || g_bRoundEnded) return;
+	// round_end can fire twice, and can fire for a round that never actually
+	// went live; only a genuine second half's first live round_end ends the map.
+	if (!g_bActive || g_bRoundEnded || !g_bHalfWasLive) return;
 	g_bRoundEnded = true;
 	if (!view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound"))) return;
 	char map[64];
