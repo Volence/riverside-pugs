@@ -31,6 +31,7 @@ export function TriageCard({ patch, targets, run, busy }: {
       <p class="muted">
         Compared with {base ? label(base) : 'no earlier patch'}
         {base?.needsTriage && ' (not triaged yet, so nothing can be folded into it: triage that one first)'}
+        {patch.comparedWith && ` (using ${label(patch.comparedWith)}, folded into it, since it has no recorded config of its own)`}
         {patch.servers.length > 0 && <>; running on {patch.servers.map((s) => s.name).join(', ')}</>}.
       </p>
       {patch.releaseId != null && <p class="muted">From release {patch.releaseId}.</p>}
