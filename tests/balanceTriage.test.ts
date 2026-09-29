@@ -73,7 +73,7 @@ describe('triage decisions', () => {
 
   it('the card info: base is where the server came from, changes worded, plugin-only hint', () => {
     expect(triageInfo(db, noisy, LISTS)).toEqual({
-      base: { id: base, number: 1, name: 'Base' }, changes: ['plugin added: l4d_tvwatch'],
+      base: { id: base, number: 1, name: 'Base' }, comparedWith: null, changes: ['plugin added: l4d_tvwatch'],
       plugins: ['l4d_tvwatch.smx'], onlyPluginsChanged: true,
     });
     // No came_from: falls back to the newest earlier balance patch with inputs.
@@ -96,6 +96,25 @@ describe('triage decisions', () => {
     expect(info.base).toEqual({ id: base, number: 1, name: null, needsTriage: true });
     expect(info.changes).toEqual(['plugin added: l4d_tvwatch']);
     expect(triageInfo(db, base, LISTS).base).toBeNull();
+  });
+
+  it('a base with no inputs (historical) is diffed against the config folded into it', () => {
+    // Production 2026-09-29: #18 folded into historical Saferoom lock, #19
+    // came from #18; the card read "No recorded differences" for both.
+    const hist = Number(db.prepare("INSERT INTO balance_patches (name, source, first_seen_at, triage) VALUES ('Saferoom lock', 'historical', '2026-09-19 00:00:00', 'balance')").run().lastInsertRowid);
+    db.prepare("UPDATE balance_patches SET triage = 'folded', folded_into = ? WHERE id IN (?, ?)").run(hist, base, noisy);
+    const next = Number(db.prepare("INSERT INTO balance_patches (fingerprint, source, inputs_json, first_seen_at, triage, came_from_patch_id) VALUES ('n', 'detected', ?, '2026-09-23 00:00:00', 'pending', ?)")
+      .run(JSON.stringify({ ...BASE, 'p:l4d_tvwatch.smx': '3.c', 'c:z_tank_health': '7000' }), noisy).lastInsertRowid);
+    const info = triageInfo(db, next, LISTS);
+    expect(info.base?.id).toBe(hist);
+    expect(info.comparedWith?.id).toBe(noisy);
+    expect(info.changes).toEqual(['z_tank_health 8000 -> 7000']);
+    // A plugin-only step on top of the folded config can still be ignored into the base.
+    const plug = Number(db.prepare("INSERT INTO balance_patches (fingerprint, source, inputs_json, first_seen_at, triage, came_from_patch_id) VALUES ('q', 'detected', ?, '2026-09-24 00:00:00', 'pending', ?)")
+      .run(JSON.stringify({ ...BASE, 'p:l4d_tvwatch.smx': '3.c', 'p:l4d_other.smx': '1.a' }), noisy).lastInsertRowid);
+    expect(triageInfo(db, plug, LISTS)).toMatchObject({ comparedWith: { id: noisy }, onlyPluginsChanged: true, plugins: ['l4d_other.smx'] });
+    expect(triageIgnore(db, plug, { into: hist, plugins: ['l4d_other.smx'], versionless: LISTS.versionless, knobsIgnored: [], adminId: '1' }))
+      .toMatchObject({ ok: true });
   });
 
   it('balance needs a name and only applies to a pending patch', () => {

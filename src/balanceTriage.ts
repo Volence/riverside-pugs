@@ -113,15 +113,38 @@ function comparisonOnlyId(db: DB, id: number): number | null {
   return prev?.id ?? null;
 }
 
+/** Whose inputs stand for balance patch `baseId` when patch `id` is diffed
+ *  against it. A historical balance patch has no inputs of its own, so the
+ *  config its servers actually ran stands in: the patch `id`'s first server
+ *  came from, when that folds into the base, else the newest earlier patch
+ *  folded into the base. Null when nothing folded into it has inputs. */
+function standInId(db: DB, id: number, baseId: number): number | null {
+  const b = row(db, baseId);
+  if (b?.inputs_json) return baseId;
+  const r = row(db, id);
+  if (!r) return null;
+  const into = (x: number) => { try { return resolvePatch(db, x) === baseId; } catch { return false; } };
+  if (r.came_from_patch_id !== null && r.came_from_patch_id !== id && row(db, r.came_from_patch_id)?.inputs_json
+    && into(r.came_from_patch_id)) return r.came_from_patch_id;
+  const prev = db.prepare(`SELECT id FROM balance_patches WHERE inputs_json IS NOT NULL AND triage = 'folded'
+    AND id != ? AND (first_seen_at < ? OR (first_seen_at = ? AND id < ?)) ORDER BY first_seen_at DESC, id DESC`)
+    .all(id, r.first_seen_at, r.first_seen_at, id) as { id: number }[];
+  return prev.find((p) => into(p.id))?.id ?? null;
+}
+
 export function triageInfo(db: DB, id: number, lists: Lists) {
   const foldBase = triageBaseId(db, id);
   const baseId = foldBase ?? comparisonOnlyId(db, id);
   const b = baseId === null ? undefined : row(db, baseId);
+  const diffId = baseId === null ? null : standInId(db, id, baseId);
+  const s = diffId === null || diffId === baseId ? undefined : row(db, diffId);
   const mine = inputsOf(db, id, lists.ignored);
-  const theirs = baseId === null ? null : inputsOf(db, baseId, lists.ignored);
+  const theirs = diffId === null ? null : inputsOf(db, diffId, lists.ignored);
   const d = mine && theirs ? describeChanges(theirs, mine, lists.versionless, lists.labels) : { lines: [], plugins: [], onlyPlugins: false };
   return {
     base: b ? { id: b.id, number: patchNumber(db, b.id), name: b.name, ...(foldBase === null ? { needsTriage: true } : {}) } : null,
+    /** Set when the diff is against a patch folded into the base, because the base has no inputs. */
+    comparedWith: s ? { id: s.id, number: patchNumber(db, s.id), name: s.name } : null,
     changes: d.lines, plugins: d.plugins, onlyPluginsChanged: d.onlyPlugins,
   };
 }
@@ -172,7 +195,8 @@ export function triageIgnore(db: DB, id: number, p: {
     const c = checkFold(db, id, p.into, ['pending']);
     if (!c.ok) return c;
     const ignored = effectiveIgnored(db, p.knobsIgnored);
-    const mine = inputsOf(db, id, ignored), theirs = inputsOf(db, c.into, ignored);
+    const standIn = standInId(db, id, c.into);
+    const mine = inputsOf(db, id, ignored), theirs = standIn === null ? null : inputsOf(db, standIn, ignored);
     if (!mine || !theirs) return { ok: false, status: 400, error: 'both patches need recorded inputs' };
     const d = describeChanges(theirs, mine, p.versionless);
     if (!d.onlyPlugins) return { ok: false, status: 400, error: 'ignoring plugins is only offered when every difference is a plugin' };
