@@ -73,7 +73,10 @@ export type AdminEvent =
   // carries every matched player in one post. Evidence a connection is
   // shared, not a claim the spectator is any of them: a household or a LAN
   // cafe looks the same as one person watching their own game.
-  | { kind: 'sourcetv_watch'; matchId: number; serverId: number; spectatorName: string; steamids: string[] };
+  | { kind: 'sourcetv_watch'; matchId: number; serverId: number; spectatorName: string; steamids: string[] }
+  // A player's /staff message (src/serverChat.ts). One per player per ten
+  // minutes; the chat drawer on Live holds the whole conversation.
+  | { kind: 'staff_message'; steamid: string; serverId: number; text: string };
 
 /** The settings toggle that silences each kind in the admin channel. */
 export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
@@ -91,6 +94,7 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   lilac_flag: 'admin_feed_problems',
   steam_signal: 'admin_feed_problems',
   sourcetv_watch: 'admin_feed_problems',
+  staff_message: 'admin_feed_staff_messages',
 };
 
 type Listener = (e: AdminEvent) => void;

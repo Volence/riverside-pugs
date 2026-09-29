@@ -231,6 +231,16 @@ export class AdminFeedPoster {
           color: COLOR.problem,
         };
       }
+      case 'staff_message': {
+        // Not a ping: /mod is the urgent route. A link straight to that
+        // server's chat, where a whisper answers them.
+        const server = this.deps.db.prepare('SELECT name FROM servers WHERE id = ?').get(e.serverId) as { name: string } | undefined;
+        return {
+          text: `💬 ${this.name(e.steamid)} messaged staff on ${escapeName(server?.name ?? 'a server')}: "${escapeName(e.text)}". `
+            + `[Answer in Server chat](${this.deps.publicUrl}/admin/live?chat=${e.serverId})`,
+          color: COLOR.account,
+        };
+      }
       case 'signon_drop': {
         // Known players get the full identity (both worlds); an unknown
         // steamid has never signed in and has no account to look up, so an

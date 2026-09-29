@@ -1,4 +1,7 @@
 import type { DB } from './db.js';
+import type { LogEvent } from './logParse.js';
+import { publishAdminEvent } from './adminFeed.js';
+import { inGoodStanding } from './standing.js';
 
 /**
  * Live server chat for staff (spec 2026-09-28-staff-server-chat-design.md).
@@ -93,4 +96,35 @@ export function listLines(db: DB, serverId: number, after: number, limit: number
   }
   return (db.prepare('SELECT * FROM server_chat WHERE server_id = ? ORDER BY id DESC LIMIT ?')
     .all(serverId, limit) as ChatLineRow[]).reverse();
+}
+
+/** One admin feed line per player per this long; the page has the rest. */
+export const STAFF_FEED_QUIET_MS = 10 * 60_000;
+const lastFeed = new Map<string, number>();
+export function _resetFeedQuiet(): void { lastFeed.clear(); }
+
+/** Who may read server chat: checked per event, so a demotion or a ban takes
+ *  effect on the next line rather than when the tab reloads. */
+export function isActiveStaff(db: DB, steamid: string): boolean {
+  const p = db.prepare('SELECT is_admin, is_mod FROM players WHERE steamid = ?').get(steamid) as
+    { is_admin: number; is_mod: number } | undefined;
+  return !!p && (p.is_admin === 1 || p.is_mod === 1) && inGoodStanding(db, steamid);
+}
+
+type ChatEvent = Extract<LogEvent, { kind: 'say' | 'name' | 'staff_in' | 'staff_sent' }>;
+
+export function handleServerChatEvent(
+  db: DB, ev: ChatEvent, serverId: number | null, notify: () => void, now = Date.now(),
+): void {
+  if (ev.kind === 'name') { noteName(ev.steamid, ev.name); return; }
+  if (serverId === null) return;
+  if (ev.kind === 'say') { recordSay(db, serverId, ev, now); notify(); return; }
+  if (ev.kind === 'staff_sent') { if (markDelivered(db, serverId, ev.sendId, ev.delivered)) notify(); return; }
+  recordStaffIn(db, serverId, ev, now);
+  notify();
+  const last = lastFeed.get(ev.steamid);
+  if (last === undefined || now - last > STAFF_FEED_QUIET_MS) {
+    lastFeed.set(ev.steamid, now);
+    publishAdminEvent({ kind: 'staff_message', steamid: ev.steamid, serverId, text: ev.message });
+  }
 }
