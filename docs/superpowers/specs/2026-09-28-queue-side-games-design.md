@@ -117,12 +117,12 @@ engine all leave it alone.
   claimable box. It takes the LOWEST id claimable box, the one `claimIdle`
   would give the match.
 - **Pre-emption:** a configuring match that finds no idle server may take a
-  `sidegame` server. The side game ends, and its players stay in the queue.
-  Only the pop of the side game's own queue normally ends it, because every
-  side-game player is in that queue.
+  server holding a side game. The side game ends, and its players stay in the
+  queue. Only the pop of the side game's own queue normally ends it, because
+  every side-game player is in that queue.
 - **Pop to match:** the side game claimed its box with the same `claimIdle`
   a match uses, so it holds the server the match would have taken anyway.
-  `setupMatch` takes the `sidegame` server instead of claiming a fresh one.
+  `setupMatch` takes the side game's server instead of claiming a fresh one.
   It sends `sm_side_stop`, then runs the normal sequence (`exec pug_match`,
   new `sv_password`, `sm_pug_match`, roster, changelevel). Connected clients
   survive the password change and the changelevel.
@@ -173,7 +173,10 @@ Kept out of `pug-match.sp` on purpose: that plugin is the ranked core, and a
 side-game bug must not be able to touch a real match.
 - Team lock for the side roster (same approach as `Timer_TeamLock`: place
   rostered players, keep `S` players and strangers in spectate).
-- `sm_side_start <token> <password>`: the plugin stores the side-game password and re-asserts `sv_password` in OnConfigsExecuted while a game is active, because server.cfg re-execs on every map change and restores the standing password (pug-match does the same).
+- `sm_side_start <token> <password>`: the plugin stores the side-game password
+  and re-asserts `sv_password` in OnConfigsExecuted while a game is active,
+  because server.cfg re-execs on every map change and restores the standing
+  password (pug-match does the same).
 - `sm_side_popped`: center text plus a chat line every 15 s until the player
   types `!ready`. Each `!ready` logs `PUGSIDE READY <token> <steamid>`.
 - `sm_side_vote`: shows a menu of the campaigns; a pick logs
@@ -207,7 +210,7 @@ must match the current side game, or the line is ignored.
   is 8, which a side game never reaches, as a second guard).
 - No `matches` row and no call to anything in `matchResult`, `rating`,
   `replays` or `weeklyAwards`.
-- Log lines from a `sidegame` server that are not `PUGSIDE` (conduct,
+- Log lines from a server holding a side game that are not `PUGSIDE` (conduct,
   input stats, LilAC, mod calls) are still handled: they are about people,
   not matches. Conduct alerts and mod calls should still work in a side
   game. Implementation check: the input-stats and macro detectors must not
@@ -230,7 +233,7 @@ must match the current side game, or the line is ignored.
   voice gate on the in-game ready path.
 - Integration (fake rcon): open at 4, 5 sits one out, grow to 6 at map end,
   pop at 8 prefers the side-game server, ready-fail resumes the side game,
-  pre-emption by a waiting match, boot reconcile of `sidegame`.
+  pre-emption by a waiting match, boot closes any open `side_games` row.
 - Local server (`l4d1-ds`, shared, check `status` first): the plugin's team
   lock, `!ready`, the vote menu, map-end line, and that no match or replay
   appears. Then a supervised first run on Dallas with the setting on.
