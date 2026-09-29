@@ -301,8 +301,14 @@ public void OnHunterHighPounce(int hunter, int victim, int actualDamage, float c
 	AddStat(hunter, PS_PounceDamageHigh, actualDamage);
 }
 
+// skill_detect fires this for every vomit, including one that hit nobody (amount 0),
+// so only a vomit that caught at least one survivor counts as a bile landed.
 public void OnBoomerVomitLanded(int boomer, int amount)
-{ AddStat(boomer, PS_BilesLanded); AddStat(boomer, PS_SurvivorsBiled, amount); }
+{
+	if (amount <= 0) return;
+	AddStat(boomer, PS_BilesLanded);
+	AddStat(boomer, PS_SurvivorsBiled, amount);
+}
 
 static ConVar g_cvInstaClearTime;
 static bool g_bInstaClearTimeCached;
