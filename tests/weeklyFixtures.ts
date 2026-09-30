@@ -30,16 +30,19 @@ export interface SeedMatch {
   campaign?: string;
   state?: 'completed' | 'aborted' | 'live';
   voided?: boolean;
+  kind?: 'pug' | 'scrim' | 'tournament';
+  visibility?: 'public' | 'participants' | 'staff';
   lines: SeedLine[];
 }
 
 export function seedMatch(db: DB, o: SeedMatch): number {
   const id = Number(db.prepare(
-    `INSERT INTO matches (season_id, state, campaign, winner, team_a_score, team_b_score, ended_at, went_live_at, voided_at)
-     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO matches (season_id, state, campaign, winner, team_a_score, team_b_score, ended_at, went_live_at, voided_at, kind, visibility)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     o.state ?? 'completed', o.campaign ?? 'no_mercy', o.winner ?? 'a', o.a ?? 500, o.b ?? 400,
     o.endedAt, o.wentLiveAt ?? null, o.voided ? o.endedAt : null,
+    o.kind ?? 'pug', o.visibility ?? 'public',
   ).lastInsertRowid);
   const mp = db.prepare(
     'INSERT INTO match_players (match_id, player_id, team, si_damage, si_kills, common_kills, revives, ff_dealt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
