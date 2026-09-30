@@ -3,6 +3,7 @@ import { openDb, type DB } from '../src/db.js';
 import { finishWithRetry } from '../src/server.js';
 import type { RealOrchestrator, FinishOutcome } from '../src/orchestrator.js';
 import { ServerReleaser } from '../src/serverRelease.js';
+import { watchCauselessAborts } from './helpers.js';
 
 let db: DB;
 let mid: number;
@@ -31,6 +32,23 @@ describe('finishWithRetry', () => {
     await finishWithRetry(db, orch, mid, releaser, { delays: [1, 1], sleep: async () => {} });
     expect(calls.finish).toBe(3);
     expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('aborted');
+  });
+
+  // The dump pull is an await between the abort and everything after it, and
+  // a Discord sync in that gap closes the card from what the row says then.
+  it('writes the abort cause with the state, before it waits on the dump', async () => {
+    let seen: unknown;
+    const orch = {
+      finishMatch: async () => 'retry' as FinishOutcome,
+      pullDump: async () => {
+        seen = db.prepare('SELECT state, abort_cause FROM matches WHERE id = ?').get(mid);
+        return '';
+      },
+    } as unknown as RealOrchestrator;
+    const causeless = watchCauselessAborts(db);
+    await finishWithRetry(db, orch, mid, new ServerReleaser(db, async () => {}), { delays: [1], sleep: async () => {} });
+    expect(seen).toEqual({ state: 'aborted', abort_cause: 'uncollected' });
+    expect(causeless()).toEqual([]);
   });
 
   // The retries end in an abort and a release, and the release sends

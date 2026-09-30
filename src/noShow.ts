@@ -108,14 +108,14 @@ export function reapNoShowMatches(db: DB, releaser: ServerReleaser): number[] {
     // clears them because it runs on matches that WERE heartbeating and so
     // have a full scratch set worth reclaiming; a no-show match has almost
     // none. Adding the call would be harmless, but nothing depends on it.
-    db.prepare("UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ?")
-      .run(r.id);
-    if (r.server_id !== null) releaser.release(r.server_id, { teardown: true });
     // Only the "nobody turned up" rule names culprits. The no-round rule means
     // everyone connected and the game never started, which is nobody's no-show.
     // A player the file check turned away did try to connect, so they are no
     // no-show either; the match still aborts, since they are not in it.
     const noShowRule = noShows(r);
+    db.prepare("UPDATE matches SET state = 'aborted', abort_cause = ?, ended_at = datetime('now') WHERE id = ?")
+      .run(noShowRule ? 'no_show' : 'no_round', r.id);
+    if (r.server_id !== null) releaser.release(r.server_id, { teardown: true });
     let culprits: string[] = [];
     let rejected: string[] = [];
     if (noShowRule) {

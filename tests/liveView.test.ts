@@ -8,6 +8,7 @@ import {
   recordRoundStart, recordRoundEnd, roundsFor, recordChat, recordPhase, pausesFor, readyupsFor, slowToReady,
 } from '../src/liveView.js';
 import { clearLive } from '../src/matchArchive.js';
+import { watchCauselessAborts } from './helpers.js';
 
 const TOKEN = '0123456789abcdef0123456789abcdef';
 const A = ['76561198000000001', '76561198000000002'];
@@ -408,8 +409,10 @@ describe('reapOrphanedMatches', () => {
     db.prepare('UPDATE match_live SET last_seen = ?').run(stamp(ORPHAN_AFTER_MS + 60_000));
 
     const releaser = new ServerReleaser(db, async () => {});
+    const causeless = watchCauselessAborts(db);
     expect(reapOrphanedMatches(db, releaser)).toEqual([id]);
     expect(db.prepare('SELECT state FROM matches WHERE id = ?').get(id)).toEqual({ state: 'aborted' });
+    expect(causeless()).toEqual([]);
     expect(db.prepare('SELECT status FROM servers WHERE id = 1').get()).toEqual({ status: 'idle' });
     expect(getLiveMatches(db)).toEqual([]);
   });

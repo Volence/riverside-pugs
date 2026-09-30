@@ -78,3 +78,21 @@ export function pugReply(cmd: string, dumpBody: string | ((cmd: string) => strin
   }
   return 'ok';
 }
+
+/**
+ * Record every write that turns a match 'aborted' without an abort_cause in
+ * the same statement. The Discord sync reads the two together, and a sync
+ * landing between a causeless state write and a later cause write closes the
+ * card with no #queue-here line. A trigger, because "the same UPDATE" is the
+ * property: checking the row afterwards cannot tell one write from two.
+ * Returns the ids caught so far.
+ */
+export function watchCauselessAborts(db: DB): () => number[] {
+  db.exec(`
+    CREATE TEMP TABLE IF NOT EXISTS causeless_aborts (match_id INTEGER);
+    CREATE TEMP TRIGGER IF NOT EXISTS causeless_abort AFTER UPDATE OF state ON matches
+      WHEN NEW.state = 'aborted' AND OLD.state != 'aborted' AND NEW.abort_cause IS NULL AND NEW.voided_at IS NULL
+      BEGIN INSERT INTO causeless_aborts (match_id) VALUES (NEW.id); END;
+  `);
+  return () => (db.prepare('SELECT match_id FROM temp.causeless_aborts').all() as { match_id: number }[]).map((r) => r.match_id);
+}

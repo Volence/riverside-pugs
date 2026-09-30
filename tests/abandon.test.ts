@@ -7,6 +7,7 @@ import { handleAbandon, abandonBanMinutes, statusShowsAbandoner } from '../src/a
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { activeBan } from '../src/admin/players.js';
 import { subscribeBanChanges, type BanChange } from '../src/banEvents.js';
+import { watchCauselessAborts } from './helpers.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const TOKEN = 'a'.repeat(32);
@@ -51,8 +52,10 @@ describe('handleAbandon', () => {
   it('aborts the match, frees the server, bans the leaver for a day, and tells admins', async () => {
     const events: AdminEvent[] = [];
     const off = subscribeAdminEvents((e) => events.push(e));
+    const causeless = watchCauselessAborts(db);
     expect(await handleAbandon(deps(), TOKEN, IDS[2])).toBe(matchId);
     off();
+    expect(causeless()).toEqual([]);
     expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(matchId) as { state: string }).state).toBe('aborted');
     expect(released).toEqual([serverId]);
     expect(db.prepare('SELECT 1 FROM match_live WHERE match_id = ?').get(matchId)).toBeUndefined();

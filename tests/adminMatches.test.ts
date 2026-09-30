@@ -7,7 +7,7 @@ import { completeMatch } from '../src/matchResult.js';
 import { recomputeSeasonRatings } from '../src/rating.js';
 import { addServer, markLive, serversMissingDlc4 } from '../src/serverPool.js';
 import type { Dump } from '../src/dumpParse.js';
-import { authedCookie, stubOrchestrator } from './helpers.js';
+import { authedCookie, stubOrchestrator, watchCauselessAborts } from './helpers.js';
 import { recordPhase } from '../src/liveView.js';
 import { abortMatch } from '../src/admin/matches.js';
 import { ServerReleaser } from '../src/serverRelease.js';
@@ -257,7 +257,9 @@ describe('admin abort teardown', () => {
     ).run(serverId, 'b'.repeat(32)).lastInsertRowid);
     const seen: boolean[] = [];
     const releaser = new ServerReleaser(db, async (_s, _t, opts) => { seen.push(opts.teardown); });
+    const causeless = watchCauselessAborts(db);
     expect(abortMatch(db, releaser, mid)).toEqual({ ok: true });
+    expect(causeless()).toEqual([]);
     await new Promise((r) => setImmediate(r));
     expect(seen).toEqual([true]);
   });

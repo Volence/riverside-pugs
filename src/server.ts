@@ -289,11 +289,13 @@ export async function finishWithRetry(
   // the pinned server and the queue is dead.
   //
   // Guarded on state = 'live' so a completion that lands in the same tick as
-  // this write is never clobbered.
+  // this write is never clobbered. The cause goes in the same write: the dump
+  // pull below is an await, and a Discord sync in it would otherwise close
+  // the card with no cause and never post the #queue-here line.
   const row = db.prepare('SELECT server_id, token FROM matches WHERE id = ?').get(matchId) as
     { server_id: number | null; token: string | null } | undefined;
   const changed = db
-    .prepare("UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ? AND state = 'live'")
+    .prepare("UPDATE matches SET state = 'aborted', abort_cause = 'uncollected', ended_at = datetime('now') WHERE id = ? AND state = 'live'")
     .run(matchId).changes;
   if (changed === 0) return;
 

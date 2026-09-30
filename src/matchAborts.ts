@@ -11,9 +11,11 @@ import type { DB } from './db.js';
  * and queue again at the back. Each path now reports here once, right after
  * its own state write, and this does the rest the same way for all of them:
  *
- *   - the cause goes on the match row, and its public wording (ABORT_REASON)
- *     is what the Discord channel says, so it never names anyone at fault
- *     (the admin feed already does that);
+ *   - the cause is on the match row, written by the path in the SAME UPDATE
+ *     as state = 'aborted': the Discord sync can run between any two awaits,
+ *     and a card it closes with no cause never gets its #queue-here line.
+ *     Its public wording (ABORT_REASON) is what the channel says, so it never
+ *     names anyone at fault (the admin feed already does that);
  *   - every rostered player gets a notice on the site that outlives a reload
  *     until they dismiss it;
  *   - the players not at fault go back to the FRONT of the queue, as a failed
@@ -91,7 +93,9 @@ export function noteMatchAborted(db: DB, a: MatchAbort): void {
     const role = (p: string): AbortRole => culprits.has(p) ? 'culprit' : fileCheck.has(p) ? 'file_check' : 'innocent';
     const now = new Date().toISOString();
     db.transaction(() => {
-      db.prepare('UPDATE matches SET abort_cause = ? WHERE id = ?').run(a.cause, a.matchId);
+      // Only a backstop for a writer that forgot: the path's own state write
+      // is where the cause belongs, and it is never overwritten here.
+      db.prepare('UPDATE matches SET abort_cause = COALESCE(abort_cause, ?) WHERE id = ?').run(a.cause, a.matchId);
       const ins = db.prepare(
         `INSERT INTO match_abort_notices (match_id, player_id, role, requeued, created_at) VALUES (?, ?, ?, 0, ?)
          ON CONFLICT(match_id, player_id) DO NOTHING`,

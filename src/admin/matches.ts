@@ -117,7 +117,7 @@ export function abortMatch(db: DB, releaser: ServerReleaser, matchId: number): A
     | { state: string; server_id: number | null } | undefined;
   if (!m) return { ok: false, status: 404, error: 'no such match' };
   if (m.state !== 'configuring' && m.state !== 'live') return { ok: false, status: 409, error: `match is ${m.state}` };
-  db.prepare("UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ?").run(matchId);
+  db.prepare("UPDATE matches SET state = 'aborted', abort_cause = 'admin', ended_at = datetime('now') WHERE id = ?").run(matchId);
   // Archive BEFORE releasing: the release tells the plugin to change level, and
   // a heartbeat naming the reset map must not land before the record is taken.
   archiveAborted(db, matchId);
