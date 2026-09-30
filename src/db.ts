@@ -105,6 +105,26 @@ CREATE TABLE IF NOT EXISTS matches (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   ended_at TEXT
 );
+-- Competitive platform (docs/superpowers/specs/2026-09-30-competitive-foundation-design.md).
+-- Game configs staff approve for events and bookings; the balance layer
+-- everyone plays by default is 'standard' (pug_match.cfg).
+CREATE TABLE IF NOT EXISTS game_configs (
+  key     TEXT PRIMARY KEY,
+  label   TEXT NOT NULL,
+  cfg     TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1
+);
+-- Named match-rule profiles. A match copies the rules it was played under into
+-- matches.rules_json, so editing a ruleset never rewrites history.
+CREATE TABLE IF NOT EXISTS rulesets (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL UNIQUE,
+  rules_json  TEXT NOT NULL,
+  template    INTEGER NOT NULL DEFAULT 0,
+  created_by  TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  archived_at TEXT
+);
 CREATE TABLE IF NOT EXISTS match_players (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   player_id TEXT NOT NULL REFERENCES players(steamid),
@@ -1661,6 +1681,18 @@ export function openDb(path: string): DB {
   // Why a match was aborted, as one of src/matchAborts.ts's causes. NULL for
   // an abort from before the column, and for a voided match.
   ensureColumn(db, 'matches', 'abort_cause', 'TEXT');
+  // Competitive platform. Every row that exists today, and every row the queue
+  // or an in-game !load creates, is a public PUG; only later code creates
+  // other kinds. See src/matchKinds.ts and src/matchVisibility.ts.
+  ensureColumn(db, 'matches', 'kind', "TEXT NOT NULL DEFAULT 'pug' CHECK (kind IN ('pug','scrim','tournament'))");
+  ensureColumn(db, 'matches', 'visibility', "TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public','participants','staff'))");
+  // The rules and game config a match was played under, copied at creation.
+  // NULL means a PUG created before rulesets existed: today's PUG rules.
+  ensureColumn(db, 'matches', 'rules_json', 'TEXT');
+  ensureColumn(db, 'matches', 'game_config', 'TEXT');
+  db.prepare(
+    "INSERT OR IGNORE INTO game_configs (key, label, cfg) VALUES ('standard', 'Standard (Rotoblin PUG 4v4)', 'pug_match')",
+  ).run();
   // One row per rostered player per aborted match: the notice on their Play
   // page, whether they were at fault, and whether they went back in the queue.
   db.exec(`
