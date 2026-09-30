@@ -3,6 +3,7 @@ import type { DB } from '../db.js';
 import { hasStaffFlag } from '../tickets/store.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { makeRequireAdmin, makeRequireMod } from './guards.js';
+import { queueActivity } from '../queueActivity.js';
 import type { ServerReleaser } from '../serverRelease.js';
 import { getServer, listServers, serversMissingDlc4, setEnabled, setHasDlc4, setRestartAfterMatch, type ServerRow } from '../serverPool.js';
 import { serverHasDlc4 } from '../dlc4.js';
@@ -344,6 +345,17 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     // those who can open their file.
     logAdmin(db, t.adminId, 'note', t.steamid, hasStaffFlag(db, t.steamid) ? {} : { text: text.trim() });
     return { ok: true };
+  });
+
+  /** When people play (queue pops by UTC weekday and hour over four weeks)
+   *  and how long the queue takes to pop. Admin only, by the owner's ruling
+   *  (2026-09-30): shown to players it told them when not to bother queueing,
+   *  which keeps the quiet hours quiet. Cached a minute. */
+  let activityCache: { at: number; body: ReturnType<typeof queueActivity> } | null = null;
+  app.get('/api/admin/activity', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    if (!activityCache || Date.now() - activityCache.at > 60_000) activityCache = { at: Date.now(), body: queueActivity(db) };
+    return activityCache.body;
   });
 
   app.get('/api/admin/overview', async (req, reply) => {

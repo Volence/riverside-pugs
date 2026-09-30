@@ -29,7 +29,6 @@ const { mockApi } = vi.hoisted(() => ({
     unlinkDiscord: vi.fn(),
     endorseState: vi.fn(),
     setSideOptIn: vi.fn(async () => {}),
-    activity: vi.fn(),
   },
 }));
 
@@ -64,8 +63,6 @@ beforeEach(() => {
   // mock existed; tests that care about the queue panel override it.
   mockApi.queue.mockResolvedValue({ count: 0, players: [], phase: null });
   mockApi.seasons.mockResolvedValue({ seasons: [] });
-  // Play renders the When people play panel, which fetches on mount.
-  mockApi.activity.mockResolvedValue({ days: 28, pops: [], totalPops: 0, waits: { medianSec: null, byHourSec: [], popped: 0, left: 0, leftMedianSec: null } });
   // Every MatchDetail fixture rendered with a signed-in viewer reaches
   // EndorsePanel, which polls this on mount. Without a default it rejects and
   // exercises only the panel's failure path, whichever test happens to render it.

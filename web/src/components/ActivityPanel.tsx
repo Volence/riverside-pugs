@@ -1,4 +1,4 @@
-import { api } from '../api';
+import { adminApi } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import {
   busiestWindow, hourLabel, localActivity, nowLevel, ROW_DAYS, waitWords, type NowLevel,
@@ -19,14 +19,16 @@ const NOW_TEXT: Record<NowLevel, string> = {
 
 /**
  * "When people play": four weeks of queue pops as a weekday by hour grid, in
- * the viewer's own time zone, with the busiest stretch and the typical wait.
+ * the viewer's own time zone, with the busiest stretch and how long the queue
+ * takes to pop.
  *
- * For the player deciding when to queue. Most pops land in a few evening
- * hours (US time), and someone who queues at noon UTC sits alone at 1 / 8;
- * this is the page telling them so before they find out.
+ * Admin only, on the Live desk. It was on Play for a morning (2026-09-30) and
+ * the owner moved it: a grid telling players when nobody is around teaches
+ * them not to be around then, so the quiet hours stay quiet. For staff it
+ * answers when to schedule events and whether waits are getting longer.
  */
 export function ActivityPanel() {
-  const { data } = useFetch((s) => api.activity(s), []);
+  const { data } = useFetch((s) => adminApi.activity(s), []);
   if (!data || data.totalPops < MIN_POPS) return null;
 
   const now = new Date();
@@ -44,6 +46,17 @@ export function ActivityPanel() {
         {win && <>Busiest from <strong>{hourLabel(win.start)}</strong> to <strong>{hourLabel(win.end)}</strong> your time. </>}
         {NOW_TEXT[level]}
         {wait !== null && <> A queue at this hour takes <strong>{waitWords(wait)}</strong> to pop.</>}
+      </p>
+      <p class="activity__waits muted">
+        {data.waits.popped + data.waits.left === 0
+          ? 'Queue waits are recorded from 2026-09-30; none yet.'
+          : <>
+              {data.waits.popped} queue{data.waits.popped === 1 ? '' : 's'} reached a pop
+              {data.waits.medianSec !== null && <> (median wait {waitWords(data.waits.medianSec).replace('about ', '')})</>}
+              ; {data.waits.left} left before one
+              {data.waits.leftMedianSec !== null && <> (median {waitWords(data.waits.leftMedianSec).replace('about ', '')} in)</>}.
+              {' '}Waits count until a ready check starts; requeues after a failed pop are left out.
+            </>}
       </p>
       <div class="activity__grid" role="img"
         aria-label={win ? `Queue pops by day and hour. Busiest from ${hourLabel(win.start)} to ${hourLabel(win.end)} your time.` : 'Queue pops by day and hour.'}>
@@ -72,7 +85,7 @@ export function ActivityPanel() {
         </div>
       </div>
       <p class="activity__legend muted">
-        Brighter squares had more games. Queue at the busy times and the pop comes quicker.
+        Brighter squares had more games. Hover a square for games a week.
       </p>
     </Panel>
   );

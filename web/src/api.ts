@@ -1657,6 +1657,7 @@ export const adminApi = {
     post<{ ok: true; refreshed: number }>(`/api/admin/players/${steamid}/steam-refresh`),
   note: (steamid: string, text: string) => post(`/api/admin/players/${steamid}/notes`, { text }),
   overview: (signal?: AbortSignal) => get<AdminOverview>('/api/admin/overview', signal),
+  activity: (signal?: AbortSignal) => get<QueueActivity>('/api/admin/activity', signal),
   live: (signal?: AbortSignal) => get<LiveBoard>('/api/admin/live', signal),
   practiceLeases: (signal?: AbortSignal) => get<{ leases: AdminPracticeLease[] }>('/api/admin/practice/leases', signal),
   practicePlayers: (leaseId: number, signal?: AbortSignal) =>
@@ -1969,7 +1970,6 @@ export const api = {
   live: (signal?: AbortSignal) => get<{ matches: LiveMatch[] }>('/api/live', signal),
   streams: (all = false, signal?: AbortSignal) =>
     get<StreamsView>(`/api/streams${all ? '?all=1' : ''}`, signal),
-  activity: (signal?: AbortSignal) => get<QueueActivity>('/api/activity', signal),
   maps: (signal?: AbortSignal) => get<{ maps: MapIndexRow[]; pool: string[] }>('/api/maps', signal),
   campaignNames: (signal?: AbortSignal) =>
     get<{ names: Record<string, string> }>('/api/campaigns/names', signal),

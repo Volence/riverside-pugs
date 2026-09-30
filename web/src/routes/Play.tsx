@@ -13,7 +13,6 @@ import { SpectatePanel } from '../components/SpectatePanel';
 import { PageHeader } from '../components/PageHeader';
 import { SetupChecklist } from '../components/SetupChecklist';
 import { PracticeCard } from '../components/PracticeCard';
-import { ActivityPanel } from '../components/ActivityPanel';
 import type { Session } from '../hooks/useLiveState';
 
 /** Display only: the server's `sidegames_min_players` setting still decides
@@ -49,7 +48,6 @@ export function Play(
       <Live state={state} me={session.me.steamid} sessionMe={session.me} refresh={refresh} />
       {/* Below the queue, never above it: ranked is what this page is for.
           And not at all while this player is in a pop or a match. */}
-      {!state.match && !state.lobby && <ActivityPanel />}
       {!state.match && !state.lobby && <PracticeCard signedIn />}
     </div>
   );
@@ -96,7 +94,6 @@ function SignIn() {
           <Slots players={q.players} />
         </Panel>
       )}
-      <ActivityPanel />
       <PracticeCard signedIn={false} />
       <Landing />
     </div>

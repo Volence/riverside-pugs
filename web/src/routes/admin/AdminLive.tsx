@@ -7,6 +7,7 @@ import { campaignName, fmtClock, mapName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
 import { SpectatePanel } from '../../components/SpectatePanel';
 import { useAction, type Run } from './useAction';
+import { ActivityPanel } from '../../components/ActivityPanel';
 import { AdminQueuePanel, AdminServersPanel, OpenMatchesPanel, RecentResultsPanel, abortMatchAsked } from './MatchPanels';
 import { PracticeLeasesPanel } from './PracticeLeasesPanel';
 import { ChatDrawer } from './ChatDrawer';
@@ -102,6 +103,7 @@ export function AdminLive({ isAdmin }: { isAdmin: boolean }) {
           <RecentResultsPanel data={overview.data} busy={panels.busy} run={panels.run} />
         </>
       )}
+      {isAdmin && <ActivityPanel />}
 
       {chat !== null && <ChatDrawer serverId={chat} onPick={openChat} onClose={() => openChat(null)} />}
     </div>
