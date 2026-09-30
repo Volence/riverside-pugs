@@ -15,7 +15,9 @@ reason to use the board (scrim.tf died because it offered nothing Discord did no
 
 - Teams and pickup groups can both post and accept.
 - The accepting side can ask for campaigns of its own.
-- Reliability is public as a factual badge; reviews are private.
+- Reliability is recorded but NOT public for now (owner undecided): staff and the side itself see
+  it. A setting can make the badge public later without new work. Reviews are private.
+- Either side can cancel a booked scrim at any time; emergencies happen.
 - Casters can cast a scrim only when both captains invite them (foundation, visibility).
 
 ## 1. Looking-for-scrim posts
@@ -28,7 +30,7 @@ created_at, target_team_id (null = public; set = a direct challenge).
 - Posting checks capacity for the slot (foundation capacity rule) and the side's booking allowance
   up front, so a post can always be booked.
 - Board `/scrims`: open posts filtered by time (viewer's time zone) and by SR range fit. Each post
-  shows the side (Team badge with logo, or Pickup), average SR, reliability badge, time, length and
+  shows the side (Team badge with logo, or Pickup), average SR, time, length and
   campaigns.
 - Discord: each public post gets a card in a `#scrims` channel (setting), with an Accept button
   that deep-links to the site.
@@ -53,14 +55,33 @@ Computed from bookings, never from opinions. Per side (team, or captain for pick
 
 - **Shown**: bookings where the side had at least 4 players on the server within the grace.
 - **No-show**: the grace ran out with the side short (foundation no-show path).
-- **Late cancel**: cancelled less than 2 hours before the start (setting).
+- **Late cancel**: cancelled less than 2 hours before the start (setting), unless excused
+  (section 3a).
 
-Badge, public on posts and team pages: "Reliable: 14 of 15 shown" plus a late-cancel count when
-nonzero. Sides with fewer than 3 bookings show "New". The same numbers drive the foundation's
-booking allowance (each no-show in 30 days lowers it).
+Visibility: the record ("14 of 15 shown", late cancels) is shown to staff (admin People desk and
+on the booking) and to the side itself on its team page. It is not shown on posts, the board or
+public team pages. Setting `scrim_reliability_public` (default off) turns on a public badge ("Reliable:
+14 of 15 shown", "New" under 3 bookings) if the owner decides to later. The same numbers drive the
+foundation's booking allowance (each no-show in 30 days lowers it).
 
 For pickup groups the record belongs to the captain who booked, so a player cannot escape a bad
 record by forming a new group.
+
+## 3a. Cancelling a scrim
+
+Either side's captain (or co-captain) can cancel a booked scrim at any time from the booking page or
+a Cancel button on the Discord reminder, with an optional reason.
+
+- The other side is told at once by DM and site notice, with the reason if given.
+- The booking goes to `cancelled`: capacity is released, a held box goes back to the pool (a box
+  already set up is released through `ServerReleaser`), the voice channels are removed, reminders
+  stop.
+- More than 2 hours before the start: no record at all.
+- Inside 2 hours: recorded as a late cancel, but the other side's captain gets an **"All good, no
+  hard feelings"** button that excuses it, and staff can excuse it too. Excused cancels never count.
+- The cancelled post can be reopened as a new post by either side in one click.
+- Staff can cancel any booking from the admin calendar (never counted against anyone).
+- The cancel reason is visible only to the two sides and staff.
 
 ## 4. Private reviews
 
@@ -99,7 +120,8 @@ highlighted.
 Behind `competitive_enabled`, after foundation plan 4 (bookings). Plans:
 
 1. Posts, board, accept with campaign requests, confirm into bookings, Discord cards.
-2. Reliability badge and reviews, scrim night banner.
+2. Cancelling, reliability record (staff and own side; public badge behind a setting), reviews,
+   scrim night banner.
 
 ## Later
 

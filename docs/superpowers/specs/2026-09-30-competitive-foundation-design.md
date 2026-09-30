@@ -286,6 +286,9 @@ now while the slot after is free." Reminders at 30, 10 and 5 minutes left.
 
 ### Lifecycle
 
+- **Cancel**: either side's captain can cancel at any time; the booking goes to `cancelled`, capacity
+  and any held box are released, voice and reminders stop, the other side is told. How late cancels
+  are recorded and excused is part 4.
 - **No-show**: if a side is not on the server 15 minutes after the start, the other side may end
   the booking; the absent side gets a no-show on its reliability record (spec 4 turns that into a
   score).
