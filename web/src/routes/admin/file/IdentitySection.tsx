@@ -6,8 +6,8 @@ import { fileUrl } from '../adminRoutes';
 import { SteamAccountPanel } from '../SteamAccountPanel';
 import { countryName } from '../../../countries';
 
-/** Aliases, Discord history, the Steam account and shared connections, then
- *  the merge tool that all of it is evidence for. Moderators see every row
+/** Names played under, aliases, Discord history, the Steam account and
+ *  shared connections, then the merge tool that all of it is evidence for. Moderators see every row
  *  here, network sightings included: the owner ruled on that the same day.
  *  Only the merge form (and, inside SteamAccountPanel, the Steam refresh) is
  *  admin-only.
@@ -39,6 +39,24 @@ export function IdentitySection(
   return (
     <Panel class="file-section">
       <h3 id="identity">Identity</h3>
+
+      {(id.names?.length ?? 0) > 0 && (
+        <>
+          <p><strong>Names played under:</strong></p>
+          <ul class="admin-list">
+            {id.names!.map((n) => (
+              <li key={n.key}>
+                {n.name}{' '}
+                <span class="muted">
+                  {n.matches} {n.matches === 1 ? 'match' : 'matches'}
+                  {' · '}{n.sources.map((src) => (src === 'steam' ? 'Steam' : 'in game')).join(' and ')}
+                  {' · '}first {fmtTime(n.firstSeen)}, last {fmtTime(n.lastSeen)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
 
       {id.discordHistory.length > 0 && (
         <ul class="admin-list">

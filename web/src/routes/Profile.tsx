@@ -77,6 +77,7 @@ export function Profile(
           countryFlag={countryFlag(player.country)}
           bio={player.bio}
           title={data.endorsements?.title}
+          aka={data.alsoKnownAs}
           rating={rating ? rating.sr : null}
           delta={lastDelta}
           stats={rating ? [

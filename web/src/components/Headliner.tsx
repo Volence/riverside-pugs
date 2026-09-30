@@ -14,7 +14,7 @@ import { TitleTag } from './TitleTag';
 export function Headliner(
   {
     eyebrow, name, rating, delta, stats, avatar, avatarHref,
-    pronouns, countryCode, countryLabel, countryFlag, bio, title,
+    pronouns, countryCode, countryLabel, countryFlag, bio, title, aka,
   }: {
     eyebrow: string;
     name: string;
@@ -33,6 +33,9 @@ export function Headliner(
     bio?: string | null;
     /** The endorsement title, shown beside the name. */
     title?: EndorseKind | null;
+    /** Other names the player has played matches under, shown under the
+     *  name so somebody who renamed is still recognisable. */
+    aka?: { name: string; matches: number }[];
   },
 ) {
   const hasIdentity = Boolean(countryFlag || pronouns);
@@ -48,6 +51,18 @@ export function Headliner(
         : <img class="headliner__avatar" src={avatar} alt="" />)}
       <p class="eyebrow headliner__eyebrow">{eyebrow}</p>
       <h2 class="headliner__name">{name}<TitleTag kind={title} /></h2>
+      {aka && aka.length > 0 && (
+        <p class="headliner__aka">
+          also{' '}
+          {aka.map((a, i) => (
+            <span key={a.name}>
+              {i > 0 && ', '}
+              <span class="headliner__aka-name">{a.name}</span>{' '}
+              <span class="headliner__aka-count">({a.matches} {a.matches === 1 ? 'match' : 'matches'})</span>
+            </span>
+          ))}
+        </p>
+      )}
       {hasIdentity && (
         <div class="headliner__identity">
           {countryFlag && (
