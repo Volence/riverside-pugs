@@ -149,15 +149,14 @@ export function AdminServersPanel({ servers, busy, run, health, canManage = true
 }
 
 /** The abort question, shared by the live card and the Open matches table so
- *  the two say the same thing. `clear` is read after the dialog closes. */
-export function abortAsk(matchId: number, clear: ConfirmChoice): ConfirmOptions {
+ *  the two say the same thing. */
+export function abortAsk(matchId: number): ConfirmOptions {
   return {
     title: `Abort match #${matchId}?`,
     body: 'The server is freed and nothing is rated. The roster and how far it got stay on the match page. '
       + 'Everyone on it is told why, and those who may queue go back to the front of the queue.',
     confirmLabel: 'Abort match',
     danger: true,
-    choices: [clear],
   };
 }
 
@@ -167,7 +166,7 @@ export function abortAsk(matchId: number, clear: ConfirmChoice): ConfirmOptions 
  * The live board above it says who is missing and holds the clocks; this
  * says what an admin needs about the match itself, the console line for the
  * real server included. Abort is here and on the live card, with the same
- * dialog (abortAsk) and its "clear the no-shows" box.
+ * dialog (abortAsk).
  */
 export function OpenMatchesPanel({ open, busy, run }: { open: AdminOverview['open']; busy: boolean; run: Run }) {
   return (
@@ -193,10 +192,7 @@ export function OpenMatchesPanel({ open, busy, run }: { open: AdminOverview['ope
                     : <span class="muted">no server yet</span>}</td>
                   <td>{fmtTime(m.wentLiveAt) || <span class="muted">not yet</span>}</td>
                   <td><button class="chip" disabled={busy}
-                    onClick={() => {
-                      const clear: ConfirmChoice = { label: 'Also clear the no-show penalties this match handed out', checked: false };
-                      void run(() => adminApi.abortMatch(m.id, { clearNoShows: clear.checked }), abortAsk(m.id, clear));
-                    }}>Abort</button></td>
+                    onClick={() => run(() => adminApi.abortMatch(m.id), abortAsk(m.id))}>Abort</button></td>
                 </tr>
               ))}
             </tbody>
