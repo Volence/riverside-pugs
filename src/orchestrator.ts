@@ -307,7 +307,7 @@ export class RealOrchestrator implements Orchestrator {
       // Guarded on 'configuring' so an admin abort that landed while setup was
       // still dialling is not written over or announced twice.
       const aborted = this.db.prepare(
-        "UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ? AND state = 'configuring'",
+        "UPDATE matches SET state = 'aborted', abort_cause = 'setup_failed', ended_at = datetime('now') WHERE id = ? AND state = 'configuring'",
       ).run(matchId).changes > 0;
       if (aborted) archiveAborted(this.db, matchId);
       this.releaser.release(server.id, server === heldServer ? FORCED_RESTART : undefined);

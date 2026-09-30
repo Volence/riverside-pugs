@@ -5,6 +5,7 @@ import { ServerReleaser } from '../src/serverRelease.js';
 import { currentSeasonId } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
 import { recordPlayerConnect, reapNoShowMatches } from '../src/noShow.js';
+import { watchCauselessAborts } from './helpers.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119800000000${i + 1}`);
 
@@ -60,10 +61,12 @@ describe('no-show reaper', () => {
     const db = openDb(':memory:');
     const { id, serverId } = liveMatch(db, 11);
     for (const sid of IDS.slice(0, 3)) recordPlayerConnect(db, 'tok', sid);
+    const causeless = watchCauselessAborts(db);
 
     const reaped = reapNoShowMatches(db, new ServerReleaser(db, async () => {}));
 
     expect(reaped).toEqual([id]);
+    expect(causeless()).toEqual([]);
     expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(id) as any).state).toBe('aborted');
     expect(getServer(db, serverId)!.status).toBe('idle');
   });
@@ -88,8 +91,11 @@ describe('no-show reaper', () => {
     const db = openDb(':memory:');
     const { id } = liveMatch(db, 31);
     for (const sid of IDS) recordPlayerConnect(db, 'tok', sid);
+    const causeless = watchCauselessAborts(db);
 
     expect(reapNoShowMatches(db, new ServerReleaser(db, async () => {}))).toEqual([id]);
+    expect(causeless()).toEqual([]);
+    expect(db.prepare('SELECT abort_cause FROM matches WHERE id = ?').get(id)).toEqual({ abort_cause: 'no_round' });
   });
 
   it('records the first connect only, so a reconnect does not move the timestamp', () => {

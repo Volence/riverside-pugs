@@ -77,7 +77,7 @@ export async function handleAbandon(deps: AbandonDeps, token: string, steamid: s
     const minutes = abandonBanMinutes(db, steamid);
     const reason = `Abandoned match #${match.id}`;
     const changed = db.transaction(() => {
-      const n = db.prepare("UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ? AND state IN ('configuring', 'live')")
+      const n = db.prepare("UPDATE matches SET state = 'aborted', abort_cause = 'abandon', ended_at = datetime('now') WHERE id = ? AND state IN ('configuring', 'live')")
         .run(match.id).changes;
       if (n === 0) return false;
       insertBan(db, steamid, 'system', reason, minutes);

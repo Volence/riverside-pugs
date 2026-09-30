@@ -14,7 +14,7 @@ import {
   decodePackets, encodePacket, SERVERDATA_AUTH, SERVERDATA_AUTH_RESPONSE,
   SERVERDATA_EXECCOMMAND, SERVERDATA_RESPONSE_VALUE,
 } from '../src/rconPacket.js';
-import { pugReply } from './helpers.js';
+import { pugReply, watchCauselessAborts } from './helpers.js';
 import { deleteCampaign, insertDraft, publishCampaign, setInstall } from '../src/customCampaigns.js';
 import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistry.js';
 
@@ -279,6 +279,7 @@ describe('RealOrchestrator', () => {
     const offEvents = subscribeAdminEvents((e) => events.push(e as never));
     const requeued: string[][] = [];
     const offAborts = subscribeMatchAborts((e) => { if (e.db === db) requeued.push(e.requeueIds); });
+    const causeless = watchCauselessAborts(db);
 
     try {
       await orch.setupMatch(mid);
@@ -286,6 +287,7 @@ describe('RealOrchestrator', () => {
       offEvents();
       offAborts();
     }
+    expect(causeless()).toEqual([]);
 
     const row = db.prepare('SELECT state, ended_at, abort_cause, token FROM matches WHERE id = ?').get(mid) as
       { state: string; ended_at: string | null; abort_cause: string | null; token: string };

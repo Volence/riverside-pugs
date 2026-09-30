@@ -813,7 +813,7 @@ export function reapOrphanedMatches(
     .all(cutoff) as { id: number; server_id: number | null }[];
 
   for (const r of rows) {
-    db.prepare("UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ?")
+    db.prepare("UPDATE matches SET state = 'aborted', abort_cause = 'server_lost', ended_at = datetime('now') WHERE id = ?")
       .run(r.id);
     // Through the releaser, not a raw status write: a reaped match is exactly
     // the one whose sv_password nobody is left to clear by hand.
