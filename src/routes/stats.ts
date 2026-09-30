@@ -15,6 +15,7 @@ import { getLiveMatches, mapStatsFor, eventsFor } from '../liveView.js';
 const MATCH_EVENT_LIMIT = 20_000;
 import { getCampaignPool } from '../settings.js';
 import { completedPug } from '../matchKinds.js';
+import { viewerFor, canViewMatch, visibleMatchesSql } from '../matchVisibility.js';
 import { mapDetail, mapIndex } from '../playerStats.js';
 import { displaySr, matchForecast } from '../rating.js';
 import { currentSeasonId, getPlayer, saveProfileFields } from '../players.js';
@@ -163,11 +164,16 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     return d;
   });
 
-  app.get('/api/matches', async () => {
+  app.get('/api/matches', async (req) => {
+    // A scrim or tournament match with participants-only or staff-only
+    // visibility has no business in the public recent-matches list; vis.sql
+    // narrows the row set the same way canViewMatch would judge each row.
+    const v = viewerFor(db, viewerOf(req));
+    const vis = visibleMatchesSql(v, 'm');
     const matches = db.prepare(
-      `SELECT id, campaign, ended_at AS endedAt, team_a_score AS teamAScore, team_b_score AS teamBScore, winner
-       FROM matches WHERE state = 'completed' ORDER BY id DESC LIMIT ?`,
-    ).all(RECENT_MATCH_LIMIT);
+      `SELECT m.id, m.campaign, m.ended_at AS endedAt, m.team_a_score AS teamAScore, m.team_b_score AS teamBScore, m.winner
+       FROM matches m WHERE m.state = 'completed' AND ${vis.sql} ORDER BY m.id DESC LIMIT ?`,
+    ).all(...vis.params, RECENT_MATCH_LIMIT);
     return { matches };
   });
 
@@ -184,6 +190,9 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       'SELECT campaign, state, server_id AS serverId FROM matches WHERE id = ?',
     ).get(id) as { campaign: string; state: string; serverId: number | null } | undefined;
     if (!inProgress) return reply.code(404).send({ error: 'no such match' });
+    // Same 404, same body, as a match that does not exist at all: an id must
+    // not leak whether a scrim or staff-only match is out there, live or not.
+    if (!canViewMatch(db, viewerFor(db, viewer), id)) return reply.code(404).send({ error: 'no such match' });
     if (inProgress.state === 'configuring' || inProgress.state === 'live') {
       const state = inProgress.state === 'live' ? 'live' : inProgress.serverId === null ? 'waiting' : 'configuring';
       return { ongoing: true, id, campaign: inProgress.campaign, state };
@@ -351,6 +360,12 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
    */
   app.get('/api/matches/:id/demos/:ordinal', async (req, reply) => {
     const { id, ordinal } = req.params as { id: string; ordinal: string };
+    // Same rule as the match page: a demo behind participants-only or
+    // staff-only visibility answers like it does not exist, not like it is
+    // merely forbidden.
+    if (!canViewMatch(db, viewerFor(db, viewerOf(req)), Number(id))) {
+      return reply.code(404).send({ error: 'no such demo' });
+    }
 
     // R2 first. Once a demo is up there the bytes never come through this
     // process again: the redirect hands the browser straight to Cloudflare, the
