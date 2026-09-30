@@ -855,6 +855,8 @@ export interface AdminOverview {
      *  Null until the match is live and has a server. Not SourceTV. */
     connect: { host: string; port: number; password: string } | null;
     forecast: Forecast | null;
+    /** For the abort dialog's leave-out boxes. Optional for an older server. */
+    roster?: { steamid: string; name: string }[];
   }[];
   servers: {
     id: number; name: string; host: string; port: number; status: string; enabled: number;
@@ -1663,7 +1665,8 @@ export const adminApi = {
     post<{ ok: true }>(`/api/admin/practice/${leaseId}/kick`, { userid, reason }),
   leaveClock: (matchId: number, steamid: string, action: LeaveClockAction, seconds?: number) =>
     post<{ ok: true; reply: string }>(`/api/admin/live/${matchId}/players/${steamid}/leave`, { action, seconds }),
-  abortMatch: (id: number) => post(`/api/admin/matches/${id}/abort`),
+  /** `leaveOut`: rostered players to tell but not put back in the queue. */
+  abortMatch: (id: number, leaveOut: string[]) => post(`/api/admin/matches/${id}/abort`, { leaveOut }),
   clearMatchNoShows: (id: number) => post<{ ok: true; cleared: string[] }>(`/api/admin/matches/${id}/clear-noshows`),
   /** Five more minutes on this match's no-show deadline, for everyone missing. */
   noShowExtend: (matchId: number) => post<{ ok: true; extraMinutes: number }>(`/api/admin/live/${matchId}/noshow-extend`),

@@ -5,7 +5,7 @@ import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction, type Run } from './useAction';
 import { formatTime } from '../../replay/ReplayControls';
 import { SlowToReadyTable } from './SlowToReady';
-import type { ConfirmChoice, ConfirmOptions } from '../../components/Confirm';
+import type { ConfirmChoice } from '../../components/Confirm';
 import type { MatchPause, MatchReadyup } from '../../api';
 
 /**
@@ -148,16 +148,29 @@ export function AdminServersPanel({ servers, busy, run, health, canManage = true
   );
 }
 
-/** The abort question, shared by the live card and the Open matches table so
- *  the two say the same thing. */
-export function abortAsk(matchId: number): ConfirmOptions {
-  return {
+/** One "Leave X out of the queue" box per player, for Cancel pop and Abort.
+ *  The dialog writes `checked` back, so the caller reads the ticked ids from
+ *  the same array after it resolves (see ConfirmOptions.choices). */
+export type LeaveOutChoice = ConfirmChoice & { steamid: string };
+export function leaveOutChoices(players: { steamid: string; name: string }[]): LeaveOutChoice[] {
+  return players.map((p) => ({ steamid: p.steamid, label: `Leave ${p.name} out of the queue`, checked: false }));
+}
+export const ticked = (choices: LeaveOutChoice[]): string[] => choices.filter((c) => c.checked).map((c) => c.steamid);
+
+/** Abort a match, asked the same way from the live card and the Open matches
+ *  table. The leave-out boxes are Cancel pop's: eight back at the front of
+ *  the queue re-pop at once, so the player staff are about to ban would be
+ *  in the next lobby before the ban exists. */
+export function abortMatchAsked(run: Run, matchId: number, roster: { steamid: string; name: string }[]): void {
+  const leaveOut = leaveOutChoices(roster);
+  void run(() => adminApi.abortMatch(matchId, ticked(leaveOut)), {
     title: `Abort match #${matchId}?`,
     body: 'The server is freed and nothing is rated. The roster and how far it got stay on the match page. '
-      + 'Everyone on it is told why, and those who may queue go back to the front of the queue.',
+      + 'Everyone on it is told why, and those who may queue go back to the front of the queue, except anyone ticked below.',
     confirmLabel: 'Abort match',
     danger: true,
-  };
+    choices: leaveOut,
+  });
 }
 
 /**
@@ -166,7 +179,7 @@ export function abortAsk(matchId: number): ConfirmOptions {
  * The live board above it says who is missing and holds the clocks; this
  * says what an admin needs about the match itself, the console line for the
  * real server included. Abort is here and on the live card, with the same
- * dialog (abortAsk).
+ * dialog (abortMatchAsked).
  */
 export function OpenMatchesPanel({ open, busy, run }: { open: AdminOverview['open']; busy: boolean; run: Run }) {
   return (
@@ -192,7 +205,7 @@ export function OpenMatchesPanel({ open, busy, run }: { open: AdminOverview['ope
                     : <span class="muted">no server yet</span>}</td>
                   <td>{fmtTime(m.wentLiveAt) || <span class="muted">not yet</span>}</td>
                   <td><button class="chip" disabled={busy}
-                    onClick={() => run(() => adminApi.abortMatch(m.id), abortAsk(m.id))}>Abort</button></td>
+                    onClick={() => abortMatchAsked(run, m.id, m.roster ?? [])}>Abort</button></td>
                 </tr>
               ))}
             </tbody>
@@ -219,10 +232,8 @@ export function AdminQueuePanel({ queue, lobbies = [], busy, run }: {
             // One box per player: tick whoever should NOT go back in the
             // queue (the player being removed). Everyone else goes back to
             // the front, as after a failed ready check.
-            const leaveOut: (ConfirmChoice & { steamid: string })[] = l.players.map((p) => ({
-              steamid: p.steamid, label: `Leave ${p.name} out of the queue`, checked: false,
-            }));
-            void run(() => adminApi.cancelPop(l.id, leaveOut.filter((c) => c.checked).map((c) => c.steamid)), {
+            const leaveOut = leaveOutChoices(l.players);
+            void run(() => adminApi.cancelPop(l.id, ticked(leaveOut)), {
               title: 'Cancel this pop?',
               body: 'The lobby ends now and nobody is penalised. Everyone not ticked below goes back to the front of the queue, '
                 + 'and if that fills it again a fresh ready check starts at once.',

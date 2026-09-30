@@ -406,6 +406,28 @@ describe('aborting from the admin panel', () => {
     expect((await app.inject({ method: 'GET', url: '/api/state', cookies: cookies[IDS[0]] })).json().abortNotice).toBeNull();
   });
 
+  // Requeueing all eight at the front re-pops the same lobby at once, with the
+  // player staff are about to ban in it. Ticked players are told but stay out.
+  it('leaves out whoever staff tick, tells them anyway, and requeues the rest', async () => {
+    const overview = (await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: cookies[ADMIN] })).json();
+    expect(overview.open[0].roster).toHaveLength(8);
+    expect(overview.open[0].roster[0]).toEqual({ steamid: expect.any(String), name: expect.any(String) });
+    const res = await abort({ leaveOut: [IDS[3]] });
+    expect(res.json()).toEqual({ ok: true });
+    const q = (await app.inject({ method: 'GET', url: '/api/queue' })).json();
+    expect(q.count).toBe(7);
+    expect(q.players.map((p: { steamid: string }) => p.steamid)).not.toContain(IDS[3]);
+    const left = (await app.inject({ method: 'GET', url: '/api/state', cookies: cookies[IDS[3]] })).json();
+    expect(left.abortNotice).toMatchObject({ matchId, cause: 'admin', role: 'innocent', requeued: false });
+    expect((await audit())[0]).toMatchObject({ action: 'abort_match', detail: { leftOut: [IDS[3]] } });
+  });
+
+  it('400s on a bad leave-out list, before it aborts anything', async () => {
+    expect((await abort({ leaveOut: 'x' })).statusCode).toBe(400);
+    expect((await abort({ leaveOut: [1] })).statusCode).toBe(400);
+    expect(db.prepare('SELECT state FROM matches WHERE id = ?').get(matchId)).toEqual({ state: 'live' });
+  });
+
   // Only the no-show reaper hands out no-shows, and it does so as it aborts,
   // so a match an admin can still abort has none of its own: the abort does
   // not touch penalties, and the Aborted list's button clears them after.
@@ -415,7 +437,7 @@ describe('aborting from the admin panel', () => {
     pen.run(IDS[7], other, new Date().toISOString());
     expect((await abort({ clearNoShows: true })).json()).toEqual({ ok: true });
     expect(noShows()).toBe(1);
-    expect((await audit())[0]).toMatchObject({ action: 'abort_match', detail: {} });
+    expect((await audit())[0]).toMatchObject({ action: 'abort_match', detail: { leftOut: [] } });
     const res = await app.inject({ method: 'POST', url: `/api/admin/matches/${other}/clear-noshows`, cookies: cookies[MOD] });
     expect(res.json()).toEqual({ ok: true, cleared: [IDS[7]] });
     expect(noShows()).toBe(0);

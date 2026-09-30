@@ -354,13 +354,19 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     return { ...adminOverview(db, logAuth), queue: matchmaker.publicQueue().players, lobbies: matchmaker.adminLobbies() };
   });
 
+  /** `leaveOut` is the dialog's ticked "Leave X out of the queue" boxes, as
+   *  for Cancel pop: told, but not put back at the front. */
   app.post('/api/admin/matches/:id/abort', async (req, reply) => {
     const adminId = requireStaff(req, reply);
     if (!adminId) return reply;
     const id = Number((req.params as { id: string }).id);
-    const r = abortMatch(db, releaser, id);
+    const { leaveOut = [] } = (req.body ?? {}) as { leaveOut?: unknown };
+    if (!Array.isArray(leaveOut) || leaveOut.length > 8 || !leaveOut.every((x) => typeof x === 'string')) {
+      return reply.code(400).send({ error: 'leaveOut must be a list of up to 8 steamids' });
+    }
+    const r = abortMatch(db, releaser, id, leaveOut);
     if (!r.ok) return reply.code(r.status).send({ error: r.error });
-    logAdmin(db, adminId, 'abort_match', id, {});
+    logAdmin(db, adminId, 'abort_match', id, { leftOut: leaveOut });
     broadcast('refresh');
     return { ok: true };
   });

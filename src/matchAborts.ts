@@ -61,6 +61,10 @@ export interface MatchAbort {
   /** Whether the innocent go back to the front of the queue. False where the
    *  match was played out (uncollected) or everyone let it die (no_round). */
   requeue: boolean;
+  /** Innocent players staff chose not to put back, such as one they are
+   *  about to ban: requeued with the rest, the same eight re-pop at once.
+   *  Still told, as innocent and not requeued. */
+  leaveOut?: string[];
 }
 
 export interface MatchAbortEvent extends MatchAbort {
@@ -110,7 +114,8 @@ export function noteMatchAborted(db: DB, a: MatchAbort): AbortOutcome {
     // started in game (!load_4v4p) rostered whoever was on the server, who
     // never queued here and may not play PUGs at all.
     const origin = (db.prepare('SELECT origin FROM matches WHERE id = ?').get(a.matchId) as { origin: string | null } | undefined)?.origin;
-    const requeueIds = a.requeue && origin !== 'in_game' ? roster.filter((p) => role(p) === 'innocent') : [];
+    const leaveOut = new Set(a.leaveOut ?? []);
+    const requeueIds = a.requeue && origin !== 'in_game' ? roster.filter((p) => role(p) === 'innocent' && !leaveOut.has(p)) : [];
     const back = new Set<string>();
     for (const fn of listeners) {
       try {

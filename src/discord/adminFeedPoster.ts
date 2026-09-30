@@ -311,7 +311,7 @@ export class AdminFeedPoster {
         return `${who} added a note on ${target}:\n${clipped.split('\n').map((l) => `> ${escapeName(l)}`).join('\n')}`;
       }
       case 'clear_penalties': return `${who} cleared ${target}'s penalties`;
-      case 'abort_match': return `${who} aborted match ${match}`;
+      case 'abort_match': return `${who} aborted match ${match}${Array.isArray(d.leftOut) && d.leftOut.length ? `, left out of the queue: ${d.leftOut.map((s) => this.name(String(s))).join(', ')}` : ''}`;
       case 'clear_noshows': return `${who} cleared the ${String(d.cleared)} no-show penalties from match ${match}`;
       case 'clear_penalty': return `${who} cleared one of ${target}'s penalties`;
       case 'noshow_extend': return `${who} moved match ${match}'s no-show deadline to ${String(d.extraMinutes)} minutes later than usual`;
