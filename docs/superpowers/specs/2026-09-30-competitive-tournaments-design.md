@@ -4,7 +4,7 @@ Date: 2026-09-30. Status: design approved in conversation, awaiting written-spec
 Depends on part 1, `2026-09-30-competitive-foundation-design.md` (match kinds, rulesets, teams,
 bookings, crash recovery, notifications, live delay, side-locked spectating).
 Research: `~/l4d/research/competitive-2026-09-30/tournaments.md`, `l4d-history.md`,
-`elemental-overlay.md`.
+`elemental-overlay.md` (ideas only).
 
 ## Goal
 
@@ -28,7 +28,7 @@ died when organizers burned out or sites disappeared.
 - Match flow: veto, booking, lineup lock, connect.
 - No public SourceTV; the public watches casters' streams or the live viewer delayed 90 s.
 - Prize pools are recorded on the site; money moves off-site, handled by staff.
-- Caster overlays via an API that the owner's Elemental Production tool can consume (v1.1).
+- Caster overlays via a caster studio built into the site (v1.1); Elemental stays Overwatch-only.
 - Tournament matches never touch PUG SR.
 
 ## 1. Events and stages
@@ -261,24 +261,37 @@ existing card reconcile (`DiscordSync`).
 - `event_donors`: event_id, display_name, amount, show_publicly, note. Staff enter them.
 - The site never moves money.
 
-## 8. Caster API (v1.1)
+## 8. Caster studio (v1.1)
 
-Designed now so the data model supports it; built after the first cup.
+Designed now so the data model supports it; built after the first cup. It lives entirely on
+riversidepug.com. The owner's Elemental Production tool (Overwatch) is not touched or linked: the
+games and communities are separate. We reuse its ideas, not its code.
 
-- **Snapshot**: `GET /api/caster/match/:id`: event, stage, round; both entries (name, tag, logo
-  URL, colour, roster with starters); campaigns with chapters, and per chapter per half which entry
-  was survivors and the score; series score; veto log; tank and witch percentages per chapter;
-  status. Shaped so Elemental Production can poll it like its FACEIT source.
-- **Live**: a websocket channel with per-second state for one match: survivor health and state,
-  infected lineup and classes, progress, tank HP and control, positions for the 2D map. Built from
-  the same live push data the viewer uses.
-- **Auth**: a personal API key for each user with the caster role, sent as a header; staff can
-  revoke. Casters get no delay; the same API without a key is not offered.
-- **Elemental side** (separate spec, separate repo): a "Riverside" provider next to its FACEIT
-  source, L4D campaigns instead of the Overwatch map list, and new scenes (side badges, chapter x
-  half score table, tank/witch %, live round HUD, 2D map, L4D stat cards, bracket/standings).
+- **Overlay pages** `/overlay/<scene>?match=<id>`: scorebug (names, tags, logos, colours, current
+  side, campaign score), chapter x half score table, veto result, lineups and player cards (L4D
+  stats), bracket and standings, starting soon with countdown, BRB, lower third, series winner,
+  live round HUD (survivor health and state, infected lineup and classes, progress, tank HP and
+  control, tank and witch %), live 2D map. Added to OBS as browser sources.
+- **Producer panel** `/cast/studio` (caster role): pick the match, switch scenes, edit the lower
+  third, countdown and theme, and override any field. Overrides survive data updates (Elemental's
+  override idea) until cleared.
+- **OBS control from the browser**: the panel connects to the caster's local obs-websocket
+  (`ws://localhost:4455`) with obs-websocket-js, so scene switches happen from the page with
+  nothing installed. Optional; the overlays work without it.
+- **Data**: everything comes from the event and live data we already hold; casters type nothing
+  but their own names. Studio state (current scene, overrides, theme) is per caster session in the
+  database so a panel reload loses nothing.
+- **One connection for many sources**: OBS runs out of connections with 13+ browser sources each
+  holding a live socket (learned in Elemental). The overlay pages share one connection through a
+  SharedWorker; if that is unavailable they fall back to one socket per page for the live HUD and
+  2D map only, and polling for the static scenes.
+- **Auth and delay**: overlay URLs carry a per-caster signed token (revocable by staff); casters get
+  no delay. Without a caster token the overlays refuse live data.
+- **Theming**: event colours and fonts become CSS variables; an event can set its own palette and
+  banner art.
 
-v1.1 also adds the event MVP. Pick'Em predictions are later.
+v1.1 also adds the event MVP. A public API for third-party tools, and Pick'Em predictions, are
+later.
 
 ## Error handling
 
@@ -313,7 +326,7 @@ Behind `competitive_enabled`. Plans in order, after foundation plans 1-4:
    `!admin`.
 4. Window scheduling and reschedules.
 5. Discord flow, trophies, archive, prizes.
-6. v1.1: caster API and event MVP (Elemental provider and scenes as their own spec).
+6. v1.1: caster studio and event MVP.
 
 ## Out of scope here
 
