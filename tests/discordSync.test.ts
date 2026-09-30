@@ -339,6 +339,30 @@ describe('DiscordSync', () => {
     expect(t.messages.filter((m) => m.channelId === 'admin-chan' && !m.deleted)).toHaveLength(1);
   });
 
+  it('an aborted match with a cause gets one neutral line in the queue channel, naming nobody and pinging nobody', async () => {
+    setSetting(db, 'discord_admin_channel_id', 'admin-chan');
+    await build().start();
+    const matchId = await toLive();
+    db.prepare("UPDATE matches SET state = 'aborted', abort_cause = 'abandon' WHERE id = ?").run(matchId);
+    db.prepare("INSERT INTO match_abort_notices (match_id, player_id, role, requeued, created_at) VALUES (?, ?, 'innocent', 1, datetime('now'))")
+      .run(matchId, IDS[0]);
+    await sync.pass();
+    await sync.pass();
+    const lines = t.messages.filter((m) => m.channelId === CH && !m.deleted && JSON.stringify(m.payload).includes('was aborted'));
+    expect(lines).toHaveLength(1);
+    const text = JSON.stringify(lines[0].payload);
+    expect(text).toContain(`PUG #${matchId} was aborted: a player ran out of reconnect time.`);
+    expect(text).toContain('back at the front of the queue');
+    expect(lines[0].payload.mentionUserIds ?? []).toEqual([]);
+    // The panel is still the channel's last message.
+    const live = t.live().filter((m) => m.channelId === CH);
+    expect(live[live.length - 1].id).toBe(panelId());
+    // And it goes after its time.
+    db.prepare("UPDATE discord_messages SET created_at = datetime('now', '-16 minutes') WHERE kind = 'aborted'").run();
+    await sync.pass();
+    expect(t.byId(lines[0].id)!.deleted).toBe(true);
+  });
+
   it('on start, a lobby card left open by the previous process is cancelled', async () => {
     const stale = await t.send(CH, { embeds: [{ title: 'Queue popped! Ready up' }], components: [[{ kind: 'button', customId: 'l:lob_old_1:ready', label: 'Ready', style: 'success' }]] });
     saveMessage(db, { kind: 'match', ref: 'lob_old_1', channelId: CH, messageId: stale });
