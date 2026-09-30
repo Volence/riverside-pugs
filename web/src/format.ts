@@ -686,3 +686,16 @@ export function chapterName(display: string | null, map: string): string {
   const stripped = raw.replace(/^\d+\s*[:.)\-]\s*/, '').trim();
   return stripped || raw;
 }
+
+/** "2 no-shows", "1 missed ready check": what a queue timeout is counting. */
+export function timeoutOffenses(t: { offenses: number; kind?: 'ready_fail' | 'no_show' }): string {
+  const what = t.kind === 'no_show' ? 'no-show' : t.kind === 'ready_fail' ? 'missed ready check' : 'offense';
+  return `${t.offenses} ${what}${t.offenses === 1 ? '' : 's'}`;
+}
+
+/** Why a player is on a queue timeout, for the player's own view. */
+export function timeoutCause(kind: 'ready_fail' | 'no_show' | undefined): string {
+  return kind === 'no_show' ? 'not connecting to a match'
+    : kind === 'ready_fail' ? 'missed ready checks'
+    : 'missed ready checks or no-shows';
+}

@@ -910,6 +910,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   penalties_enabled: '1',
   penalty_window_days: '7',
   penalty_minutes: JSON.stringify([5, 15, 60, 1440]),
+  // No-shows climb their own, steeper ladder (src/penalties.ts).
+  noshow_penalty_minutes: JSON.stringify([60, 180, 1440]),
   // Minimum shared matches before a with/against win rate is worth showing.
   // Its own knob rather than a reuse of standing_min_games for the reason
   // given in 5d2ae85: "we have played five together" and "is your per-match

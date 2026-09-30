@@ -1,8 +1,8 @@
 import { penaltyHistory } from '../../penalties.js';
 import { ROW_LIMIT, toIso, type TimelineAdapter, type TimelineItem } from './types.js';
 
-/** No-shows and missed ready checks. These are what the queue timeout ladder
- *  counts, so they belong on the file even though each one is ordinary. */
+/** No-shows and missed ready checks. These are what the two queue timeout
+ *  ladders count, so they belong on the file even though each one is ordinary. */
 export const penaltiesAdapter: TimelineAdapter = {
   source: 'penalty',
   items({ db, ids }): TimelineItem[] {

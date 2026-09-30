@@ -1,7 +1,7 @@
 import type { DB } from '../db.js';
 import { aliasesOf, resolveAlias } from '../aliases.js';
 import { getPlayer } from '../players.js';
-import { activeTimeout, penaltyHistory } from '../penalties.js';
+import { activeTimeout, penaltyHistory, type PenaltyKind } from '../penalties.js';
 import { sharesAddressWith } from '../playerNetworks.js';
 import { ticketsAbout } from '../tickets/views.js';
 import { activeBan, searchPlayers, type BanRow } from './players.js';
@@ -56,7 +56,7 @@ export interface PlayerFileSummary {
   activeBan: BanRow | null;
   bans: number;
   penalties: number;
-  timeout: { until: string; offenses: number } | null;
+  timeout: { until: string; offenses: number; kind: PenaltyKind } | null;
   openTickets: number;
   aliases: number;
   sharesAddressWith: { steamid: string; name: string }[];
@@ -114,7 +114,7 @@ export function playerFileSummary(
     activeBan: ban ? redact(ban) : null,
     bans: (db.prepare('SELECT COUNT(*) AS n FROM bans WHERE player_id = ?').get(canonical) as { n: number }).n,
     penalties: penaltyHistory(db, canonical).length,
-    timeout: timeout ? { until: timeout.until.toISOString(), offenses: timeout.offenses } : null,
+    timeout: timeout ? { until: timeout.until.toISOString(), offenses: timeout.offenses, kind: timeout.kind } : null,
     openTickets: ticketsAbout(db, canonical, viewer.steamid).filter((t) => t.status === 'open').length,
     aliases: aliasesOf(db, canonical).length,
     sharesAddressWith: sharesAddressWith(db, canonical).map((s) => ({ steamid: s.steamid, name: s.name })),

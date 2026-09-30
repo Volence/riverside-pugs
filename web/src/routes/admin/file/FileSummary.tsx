@@ -1,5 +1,6 @@
 import type { FileSummaryData } from '../../../api';
 import { fmtTime } from '../useAction';
+import { timeoutOffenses } from '../../../format';
 import { SOURCE_LABEL } from './GlanceRow';
 
 /**
@@ -17,7 +18,7 @@ export function FileSummary({ s }: { s: FileSummaryData }) {
       <p class="muted">
         {s.status} · SR {s.sr ?? 'n/a'} · {s.games} games
         {s.activeBan ? ` · banned: ${s.activeBan.reason}` : ''}
-        {s.timeout ? ` · queue timeout, ${s.timeout.offenses} offenses` : ''}
+        {s.timeout ? ` · queue timeout, ${timeoutOffenses(s.timeout)}` : ''}
       </p>
       <ul class="admin-list">
         <li>
