@@ -11,24 +11,36 @@ import { noteMatchAborted } from './matchAborts.js';
 export const NOSHOW_EXTEND_STEP_MIN = 5;
 export const NOSHOW_EXTEND_MAX_MIN = 30;
 
-/** sqlite's datetime('now') or an ISO string, as epoch milliseconds. */
-const toMs = (t: string): number => Date.parse(t.includes('T') ? t : `${t.replace(' ', 'T')}Z`);
+/** sqlite's datetime('now') or an ISO string, as epoch milliseconds. Shared
+ *  with the live board, which reads the same pop and live times. */
+export const toMs = (t: string): number => Date.parse(t.includes('T') ? t : `${t.replace(' ', 'T')}Z`);
+
+/**
+ * Every rostered player with a connect drop since the pop and no entry after
+ * it (markEntered stamps every open drop the moment the same steamid gets
+ * in), with when the latest one was. The one query behind both the live
+ * board's "rejected by the file check" and fileCheckRejects below, so the
+ * board and the reaper cannot disagree about who was turned away.
+ */
+export function signonDropsSincePop(db: DB, matchId: number): Map<string, { at: string; connected: boolean }> {
+  const m = db.prepare('SELECT created_at FROM matches WHERE id = ?').get(matchId) as { created_at: string } | undefined;
+  if (!m) return new Map();
+  const poppedIso = new Date(toMs(m.created_at)).toISOString();
+  const rows = db.prepare(
+    `SELECT mp.player_id, MAX(d.at) AS at, mp.connected_at IS NOT NULL AS connected FROM match_players mp
+     JOIN signon_drops d ON d.steamid = mp.player_id AND d.at >= ? AND d.entered_after_at IS NULL
+     WHERE mp.match_id = ? GROUP BY mp.player_id`,
+  ).all(poppedIso, matchId) as { player_id: string; at: string; connected: number }[];
+  return new Map(rows.map((r) => [r.player_id, { at: r.at, connected: r.connected === 1 }]));
+}
 
 /**
  * Rostered players the file check turned away since the pop and who have not
- * got in since: the same "rejected by the file check" the live board shows
- * (src/admin/liveBoard.ts reads the same rows). They tried to connect, so a
- * no-show abort does not penalise them.
+ * got in since: the same "rejected by the file check" the live board shows.
+ * They tried to connect, so a no-show abort does not penalise them.
  */
 export function fileCheckRejects(db: DB, matchId: number): string[] {
-  const m = db.prepare('SELECT created_at FROM matches WHERE id = ?').get(matchId) as { created_at: string } | undefined;
-  if (!m) return [];
-  const poppedIso = new Date(toMs(m.created_at)).toISOString();
-  return (db.prepare(
-    `SELECT DISTINCT mp.player_id FROM match_players mp
-     JOIN signon_drops d ON d.steamid = mp.player_id AND d.at >= ? AND d.entered_after_at IS NULL
-     WHERE mp.match_id = ? AND mp.connected_at IS NULL`,
-  ).all(poppedIso, matchId) as { player_id: string }[]).map((r) => r.player_id);
+  return [...signonDropsSincePop(db, matchId)].filter(([, d]) => !d.connected).map(([p]) => p);
 }
 
 /**
