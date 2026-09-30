@@ -151,6 +151,10 @@ export function recordNameUses(
  * (src/personaBackfill.ts), so their players.name is an in-game name off a
  * roster line and is not recorded as a persona.
  *
+ * A roster row the server's own result does not list is skipped: a forged
+ * MATCH_ROSTER line looks exactly like that (src/matchResult.ts), and its
+ * name is whatever the forger typed.
+ *
  * Called after the result commits and never allowed to throw into it: name
  * history is bookkeeping, and the match result is not.
  */
@@ -164,7 +168,8 @@ export function foldMatchNames(db: DB, matchId: number, now = new Date()): void 
   const queue = getSetting(db, 'admin_feed_renames') !== '0';
   const roster = db.prepare(
     `SELECT mp.player_id AS steamid, p.name, p.avatar FROM match_players mp
-       JOIN players p ON p.steamid = mp.player_id WHERE mp.match_id = ?`,
+       JOIN players p ON p.steamid = mp.player_id
+      WHERE mp.match_id = ? AND COALESCE(mp.unrated_reason, '') != 'not_in_dump'`,
   ).all(matchId) as { steamid: string; name: string; avatar: string | null }[];
   const sightings = db.prepare('SELECT name FROM match_name_sightings WHERE match_id = ? AND steamid = ?');
   const lastName = db.prepare(

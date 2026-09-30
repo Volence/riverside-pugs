@@ -333,6 +333,26 @@ describe('admin feed', () => {
     expect(line).toContain(`https://pug.test/admin/live?chat=${serverId}`);
   });
 
+  it('the rename digest is one post with each player\'s chain, and can be turned off', async () => {
+    publishAdminEvent({
+      kind: 'rename_digest',
+      players: [
+        { steamid: IDS[2], chain: ['amour plastique', 'v'], earlier: 0 },
+        { steamid: IDS[3], chain: ['b', 'c'], earlier: 2 },
+      ],
+    });
+    await feed.idle();
+    expect(inFeed()).toHaveLength(1);
+    const line = inFeed()[0].payload.embeds[0].description ?? '';
+    expect(line).toContain('**player2** (<@902>): `amour plastique` -> `v`');
+    expect(line).toContain(`https://pug.test/admin/people/${IDS[2]}`);
+    expect(line).toContain('(2 earlier) `b` -> `c`');
+    setSetting(db, 'admin_feed_renames', '0');
+    publishAdminEvent({ kind: 'rename_digest', players: [{ steamid: IDS[2], chain: ['x', 'y'], earlier: 0 }] });
+    await feed.idle();
+    expect(inFeed()).toHaveLength(1);
+  });
+
   it('a secret setting change never shows its value', async () => {
     logAdmin(db, ADMIN, 'setting', 'invite_code', { changed: true });
     await feed.idle();

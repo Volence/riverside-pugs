@@ -62,6 +62,7 @@ import type { AddonsTransport } from './addonsTransport.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
 import { backfillPersonas } from './personaBackfill.js';
 import { handleConduct } from './conductFlags.js';
+import { noteInGameName, takeRenameDigest } from './playerNames.js';
 import { handleServerChatEvent, isActiveStaff } from './serverChat.js';
 import { handleModCall } from './modCalls.js';
 import { ModCallPoster } from './discord/modCallPoster.js';
@@ -994,6 +995,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
               console.error('[conduct] failed to check a line:', err);
             }
           }
+          // Name history. Every name is kept as the player's latest, and
+          // counted against their match when they are rostered in a live
+          // one on this server (src/playerNames.ts).
+          if (ev.kind === 'name') {
+            try {
+              noteInGameName(deps.db, ev.steamid, ev.name, liveMatchOf(deps.db, sid, ev.steamid));
+            } catch (err) {
+              console.error('[playerNames] failed to record a name:', err);
+            }
+          }
           try {
             handleServerChatEvent(deps.db, ev, sid, () => hub.sendTo('server_chat', (id) => isActiveStaff(deps.db, id)));
           } catch (err) {
@@ -1103,6 +1114,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
                   WHERE m.token = ? AND m.state = 'live' AND mp.player_id = ?`,
               ).get(ev.token, ev.steamid) as { id: number } | undefined;
               if (rostered) refreshSignals([ev.steamid], { sharing: true, matchId: rostered.id, freshMs: 60 * 60 * 1000 });
+              // The roster line carries the name the sub is playing under,
+              // and no PUGNAME connect follows it. Only for a row that
+              // exists: a refused roster line names nobody we rostered.
+              if (rostered) noteInGameName(deps.db, ev.steamid, ev.name, rostered.id);
             } catch (err) {
               console.error('[steamSignals] could not check a late joiner:', err);
             }
@@ -1490,6 +1505,19 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }, 5_000);
   presenceSweep.unref();
 
+  // The staff rename digest. Hourly, and takeRenameDigest itself holds it to
+  // once a day, so a restart neither skips a day nor posts twice: the last
+  // post's time is in the database, not in this timer.
+  const renameDigestTimer = setInterval(() => {
+    try {
+      const players = takeRenameDigest(deps.db);
+      if (players) publishAdminEvent({ kind: 'rename_digest', players });
+    } catch (err) {
+      console.error('[playerNames] rename digest failed:', err);
+    }
+  }, 60 * 60 * 1000);
+  renameDigestTimer.unref();
+
   // Daily replay prune. Interval rather than cron because there is no
   // scheduler here and the exact hour does not matter: the window is 90 days.
   // unref so the timer never holds the process open in tests.
@@ -1710,6 +1738,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     clearInterval(practiceTick);
     practiceLeases.stop();
     clearInterval(presenceSweep);
+    clearInterval(renameDigestTimer);
     clearInterval(pruneTimer);
     clearInterval(livePruneTimer);
     stopTwitchPoll?.();
