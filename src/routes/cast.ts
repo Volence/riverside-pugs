@@ -58,13 +58,15 @@ export async function castRoutes(app: FastifyInstance, opts: { db: DB }): Promis
     const viewer = requireCaster(req, reply);
     if (!viewer) return reply;
 
+    // Casters see every PUG and tournament match; a scrim is invisible here
+    // unless both captains invite a caster, which arrives with bookings.
     const rows = db.prepare(
       `SELECT m.id, m.campaign, m.token, m.origin, m.server_id AS serverId, l.current_map AS currentMap,
               s.name AS serverName, s.host, s.port
        FROM matches m
        LEFT JOIN match_live l ON l.match_id = m.id
        LEFT JOIN servers s ON s.id = m.server_id
-       WHERE m.state = 'live'
+       WHERE m.state = 'live' AND m.kind IN ('pug', 'tournament')
        ORDER BY m.id DESC`,
     ).all() as {
       id: number; campaign: string; token: string | null; origin: string | null; serverId: number | null;

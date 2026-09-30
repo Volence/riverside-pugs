@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, utimesSync, readFileSync, createRea
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
+import cookie from '@fastify/cookie';
 import { replayRoutes, concatHeadAndStream, readRange } from '../src/routes/replays.js';
 import { openDb, type DB } from '../src/db.js';
 import { buildServer } from '../src/server.js';
@@ -59,6 +60,7 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'rplroutes-'));
   db = openDb(':memory:');
   app = Fastify();
+  await app.register(cookie, { secret: 'x'.repeat(32) });
   await app.register(replayRoutes, { db, replayDir: dir });
   await app.ready();
 });
@@ -636,6 +638,7 @@ describe('GET /api/replays/timeline/:matchId/:ordinal/:half', () => {
     ).run();
 
     const app2 = Fastify();
+    await app2.register(cookie, { secret: 'x'.repeat(32) });
     await app2.register(replayRoutes, { db, replayDir: dir });
     await app2.ready();
 
@@ -688,6 +691,7 @@ describe('GET /api/replays/timeline/:matchId/:ordinal/:half', () => {
     ).run();
 
     const app2 = Fastify();
+    await app2.register(cookie, { secret: 'x'.repeat(32) });
     await app2.register(replayRoutes, { db, replayDir: dir });
     await app2.ready();
 
@@ -734,6 +738,7 @@ describe('the live directory', () => {
     liveDir = join(dir, 'live');
     mkdirSync(liveDir);
     liveApp = Fastify();
+    await liveApp.register(cookie, { secret: 'x'.repeat(32) });
     await liveApp.register(replayRoutes, { db, replayDir: dir, liveDir });
     await liveApp.ready();
   });
@@ -775,6 +780,7 @@ describe('the live directory', () => {
 describe('GET /api/replays/match/:id/:ordinal/:half from R2', () => {
   async function appWithR2(store: Map<string, Buffer>, fail = false) {
     const a = Fastify();
+    await a.register(cookie, { secret: 'x'.repeat(32) });
     const r2Get = async (_cfg: unknown, key: string, from: number) => {
       if (fail) throw new Error('r2 down');
       const b = store.get(key);
@@ -873,6 +879,7 @@ describe('GET /api/replays/match/:id/:ordinal/:half from R2', () => {
 
     let calls = 0;
     const a = Fastify();
+    await a.register(cookie, { secret: 'x'.repeat(32) });
     const r2Get = async () => { calls++; return null; };
     await a.register(replayRoutes, { db, replayDir: dir, r2: CFG, r2Get: r2Get as never });
     await a.ready();
