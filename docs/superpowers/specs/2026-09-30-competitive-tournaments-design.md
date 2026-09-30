@@ -272,6 +272,8 @@ games and communities are separate. We reuse its ideas, not its code.
   stats), bracket and standings, starting soon with countdown, BRB, lower third, series winner,
   live round HUD (survivor health and state, infected lineup and classes, progress, tank HP and
   control, tank and witch %), live 2D map. Added to OBS as browser sources.
+- **Which matches**: any PUG, any tournament match, and a scrim only when both captains invited
+  that caster (foundation, visibility).
 - **Producer panel** `/cast/studio` (caster role): pick the match, switch scenes, edit the lower
   third, countdown and theme, and override any field. Overrides survive data updates (Elemental's
   override idea) until cleared.

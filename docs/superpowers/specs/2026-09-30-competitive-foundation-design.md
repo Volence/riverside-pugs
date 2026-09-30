@@ -117,6 +117,11 @@ PUG behaviour does not change.
   Riverside News watch, the cast page, Discord result/live cards, profile history, the
   "replay ready" websocket push, weekly awards and skeet posts (already PUG-only by kind).
 - Participants = the players, ringers and approved spectators of either side of that match.
+- **Casters** (caster role): every PUG and every tournament match, with no delay, through the
+  caster studio (part 2). A scrim only when **both** sides' captains invite that caster for the
+  booking (`booking_casters`: booking_id, caster_steamid, invited_by_a, invited_by_b). An invited
+  caster gets the studio, the no-delay live feed and the SourceTV relay for that booking; the scrim
+  stays `participants` for everyone else.
   Staff and the anti-cheat analyzers (LOS, macro, LilAC, integrity) always see everything.
 - **Live data delay.** The live viewer shows player positions, so it is a ghosting tool if served
   in real time. The servers keep pushing frames every second (live push, pug-match 0.3.6); the
