@@ -153,7 +153,13 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
    *  and how long the queue takes to pop. Public: its main audience is the
    *  signed-out visitor deciding whether anyone is around. Aggregates only,
    *  no player is named or countable from it. */
-  app.get('/api/activity', async () => queueActivity(db));
+  let activityCache: { at: number; body: ReturnType<typeof queueActivity> } | null = null;
+  app.get('/api/activity', async () => {
+    // Anonymous and on the front page, so cached: a minute stale is nothing
+    // for a four week heatmap.
+    if (!activityCache || Date.now() - activityCache.at > 60_000) activityCache = { at: Date.now(), body: queueActivity(db) };
+    return activityCache.body;
+  });
 
   /** Every map that has been played, so the map pages are discoverable. */
   // `pool` is the current vote rotation, so the page can put what you might
