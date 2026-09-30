@@ -6,6 +6,7 @@ import { ensureCommunitySchema } from './community/schema.js';
 import { migrateLegacyReports } from './tickets/migrate.js';
 import { widenTicketIdentity } from './tickets/identityMigration.js';
 import { deploySlug } from './releaseStage.js';
+import { seedRulesetTemplates } from './rulesets.js';
 
 export type DB = Database.Database;
 
@@ -1693,6 +1694,8 @@ export function openDb(path: string): DB {
   db.prepare(
     "INSERT OR IGNORE INTO game_configs (key, label, cfg) VALUES ('standard', 'Standard (Rotoblin PUG 4v4)', 'pug_match')",
   ).run();
+  // PUG, Standard Cup and Casual Scrim: see src/rulesets.ts for what each sets.
+  seedRulesetTemplates(db);
   // One row per rostered player per aborted match: the notice on their Play
   // page, whether they were at fault, and whether they went back in the queue.
   db.exec(`
