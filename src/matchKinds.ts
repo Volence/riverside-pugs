@@ -14,7 +14,9 @@
 export type MatchKind = 'pug' | 'scrim' | 'tournament';
 export type MatchVisibility = 'public' | 'participants' | 'staff';
 
+const COMPLETED_STATE = 'completed';
+
 export function completedPug(alias?: string): string {
   const p = alias ? `${alias}.` : '';
-  return `${p}state = 'completed' AND ${p}kind = 'pug'`;
+  return `${p}state = '${COMPLETED_STATE}' AND ${p}kind = 'pug'`;
 }
