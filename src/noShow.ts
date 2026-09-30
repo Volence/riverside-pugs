@@ -172,6 +172,8 @@ export function noShowClock(db: DB, matchId: number, now = new Date()): NoShowCl
   const why = m.state !== 'live' || m.went_live_at === null ? 'the match is not live yet'
     : m.rounds > 0 ? 'a round has been played, so the no-show rule no longer applies'
     : m.absent === 0 ? 'everyone has connected'
+    // The rule is already off, so a later deadline would change nothing.
+    : m.connected >= minConnected ? `enough players have connected (${m.connected} of ${minConnected} needed), so the no-show rule will not end this match`
     : m.extra + NOSHOW_EXTEND_STEP_MIN > NOSHOW_EXTEND_MAX_MIN ? `the deadline is already ${m.extra} minutes later, the most it can move`
     : null;
   const applies = running && m.absent > 0;
