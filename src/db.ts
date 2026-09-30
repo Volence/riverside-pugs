@@ -1069,6 +1069,10 @@ export function openDb(path: string): DB {
   // bytes sitting in a freed page until something else overwrites it.
   db.pragma('secure_delete = ON');
   db.exec(SCHEMA);
+  // open_server_holds is recreated at the end of openDb. Dropped first because
+  // widenCheck below rebuilds practice_leases with ALTER TABLE ... RENAME,
+  // which SQLite refuses while a view names the table.
+  db.exec('DROP VIEW IF EXISTS open_server_holds');
   // CREATE TABLE IF NOT EXISTS never adds a column to a table that already
   // exists, so a column introduced after a database was created needs this.
   // Idempotent and cheap; there is no migration framework here by design.
@@ -1779,6 +1783,21 @@ export function openDb(path: string): DB {
       requeued  INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS queue_stints_ended ON queue_stints (ended_at);
+  `);
+
+  // Everything besides a match that holds a box out of the pool: one row per
+  // open hold. A holder's box stays 'idle' in servers (see practice_leases
+  // above for why), so everything that takes an idle box for itself asks this
+  // view, through NOT_HELD_SQL in src/serverHolds.ts. Open means ended_at IS
+  // NULL: a lease or side game being wound down holds its box until the
+  // restart that clears it has finished. rank orders two holds on one box
+  // (lower first). A new kind of hold is a new UNION ALL arm here and a new
+  // HoldKind, nothing else.
+  db.exec(`
+    CREATE VIEW open_server_holds AS
+      SELECT server_id, 'practice' AS kind, id AS row_id, 1 AS rank FROM practice_leases WHERE ended_at IS NULL
+      UNION ALL
+      SELECT server_id, 'side' AS kind, id AS row_id, 2 AS rank FROM side_games WHERE ended_at IS NULL
   `);
 
   seed(db);
