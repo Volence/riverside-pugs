@@ -34,6 +34,7 @@ char g_sAbandoner[32];              // steamid64 once someone ran out, else ""
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
 {
 	MarkNativeAsOptional("IsInPause");
+	MarkNativeAsOptional("Score_GetTeamCampaignScore");
 	// REST in Pawn is optional: see pug-livepush.inc.
 	LivePushMarkOptional();
 	return APLRes_Success;
