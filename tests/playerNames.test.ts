@@ -77,6 +77,23 @@ describe('foldMatchNames', () => {
     expect(names(AMOUR)).toEqual([['warmup name', 1]]);
   });
 
+  it('ignores a last name seen after the match went live, such as on a practice server while the result was retried', () => {
+    db.prepare('UPDATE players SET avatar = NULL WHERE steamid = ?').run(AMOUR);
+    noteInGameName(db, AMOUR, 'warmup name', null, new Date('2026-09-19T21:55:00Z'));
+    liveMatch(1, [AMOUR]);
+    noteInGameName(db, AMOUR, 'practice name', null, new Date('2026-09-19T22:30:00Z'));
+    complete(1, new Date('2026-09-19T23:00:00Z'));
+    expect(names(AMOUR)).toEqual([]);
+  });
+
+  it('still takes a last name from the first moments of the match, as players load in', () => {
+    db.prepare('UPDATE players SET avatar = NULL WHERE steamid = ?').run(AMOUR);
+    liveMatch(1, [AMOUR]);
+    noteInGameName(db, AMOUR, 'loading in', null, new Date('2026-09-19T22:01:00Z'));
+    complete(1, new Date('2026-09-19T23:00:00Z'));
+    expect(names(AMOUR)).toEqual([['loading in', 1]]);
+  });
+
   it('ignores a last name older than the window', () => {
     noteInGameName(db, AMOUR, 'last week', null, new Date('2026-09-12T21:55:00Z'));
     liveMatch(1, [AMOUR]);

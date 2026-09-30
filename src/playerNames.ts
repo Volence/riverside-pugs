@@ -29,6 +29,13 @@ export const DIGEST_EVERY_MS = 24 * 60 * 60 * 1000;
  *  matches without reconnecting. */
 const LAST_NAME_WINDOW = '-12 hours';
 
+/** And how far after. The fallback is for a name held from before the match,
+ *  so a sighting well after it went live is somewhere else: a practice server
+ *  while this match's result was still being retried, or the next match. Two
+ *  minutes covers the clock skew between the live stamp and the connect lines
+ *  of players loading into the first map. */
+const LAST_NAME_GRACE = '+2 minutes';
+
 /** Chain length in the digest. Somebody who has been through twenty names
  *  does not need all twenty in a Discord line; the latest few say who it is. */
 const DIGEST_CHAIN_MAX = 6;
@@ -173,14 +180,15 @@ export function foldMatchNames(db: DB, matchId: number, now = new Date()): void 
   ).all(matchId) as { steamid: string; name: string; avatar: string | null }[];
   const sightings = db.prepare('SELECT name FROM match_name_sightings WHERE match_id = ? AND steamid = ?');
   const lastName = db.prepare(
-    `SELECT name FROM player_ingame_last WHERE steamid = ? AND seen_at >= datetime(?, '${LAST_NAME_WINDOW}')`,
+    `SELECT name FROM player_ingame_last WHERE steamid = ?
+        AND seen_at >= datetime(?, '${LAST_NAME_WINDOW}') AND seen_at <= datetime(?, '${LAST_NAME_GRACE}')`,
   );
   db.transaction(() => {
     for (const p of roster) {
       const uses: NameUse[] = (sightings.all(matchId, p.steamid) as { name: string }[])
         .map((s) => ({ source: 'ingame', name: s.name }));
       if (uses.length === 0) {
-        const last = lastName.get(p.steamid, match.since) as { name: string } | undefined;
+        const last = lastName.get(p.steamid, match.since, match.since) as { name: string } | undefined;
         if (last) uses.push({ source: 'ingame', name: last.name });
       }
       if (p.avatar !== null) uses.push({ source: 'steam', name: p.name });
