@@ -86,6 +86,7 @@ Rules JSON fields (all optional, template supplies defaults):
 | `penalties` | whether PUG no-show/abandon penalties apply (false for scrims) |
 | `bosses` | `random_published` / `fixed` / `voteboss` |
 | `sideRule` | `higher_seed_chooses` / `non_picker_chooses` / `coin` |
+| `spectate.sideLocked` | side-locked spectating for team spectators (see section 3) |
 
 Every match stores `matches.rules_json` and `matches.game_config` as a **copy** made at creation.
 Editing a ruleset later never rewrites history, and the match page can show the exact rules a game
@@ -117,6 +118,11 @@ PUG behaviour does not change.
   "replay ready" websocket push, weekly awards and skeet posts (already PUG-only by kind).
 - Participants = the players, ringers and approved spectators of either side of that match.
   Staff and the anti-cheat analyzers (LOS, macro, LilAC, integrity) always see everything.
+- **Live data delay.** The live viewer shows player positions, so it is a ghosting tool if served
+  in real time. The servers keep pushing frames every second (live push, pug-match 0.3.6); the
+  site's live route decides what to serve: kind pug as today; kind tournament only up to
+  `now - live_delay_seconds` (setting, default 90) for everyone except staff and casters; kind
+  scrim only to participants and staff. The delay is applied server-side, never in the viewer.
 - Scrims default to `participants`. A scrim becomes public only if both captains tick "make public".
   Tournament matches are public.
 - A test walks every route that returns match data with a non-participant viewer and a private
@@ -289,6 +295,20 @@ now while the slot after is free." Reminders at 30, 10 and 5 minutes left.
 SourceTV records every booked game (demos stay available to the participants, like replays), but
 there is no public relay: `tv_password` is random per booking and never shown to players, and
 booked servers are left out of the Riverside News watch, `/cast`, and every public server list.
+Tournament matches work the same way: no public relay; staff and casters get the relay password
+through `/cast`. The public watches through caster streams and the delayed live viewer.
+
+### Side-locked spectating
+
+In stock L4D1 a spectator (team 1) can cycle through every player on both sides and free-roam, and
+the server sends ghost positions to every client (proven for survivors in the 2026-09-23
+ghost-transmit work). A new plugin piece locks a side's spectators (subs, coach, approved
+spectators) to the players of the side their team is playing right now, swaps automatically at
+half time, disables free-roam for them, and applies the `l4d_ghost_transmit` filter to them as if
+they were on their current side, so the data never reaches their client. On by default for
+tournaments, a rules option for scrims (`spectate.sideLocked`). Staff and casters are never
+restricted. Before building: a probe on the local server with the owner's client (camera lock,
+half-time swap, ghost filter on a spectator).
 
 ### Voice
 
