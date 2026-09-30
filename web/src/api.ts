@@ -55,8 +55,6 @@ export interface LobbySnapshot {
   myVote: string | null;
 }
 
-/** The GET /api/queue shape: public, so carries nothing viewer-relative and
- *  no connect block, unlike StateSnapshot['queue']. */
 /** A queue timeout being served. `offenses` counts the ladder named by
  *  `kind` only: missed ready checks and no-shows climb separate ladders, and
  *  the timeout shown is whichever of the two ends later. */
@@ -73,6 +71,8 @@ export interface AbortNotice {
   requeued: boolean;
 }
 
+/** The GET /api/queue shape: public, so carries nothing viewer-relative and
+ *  no connect block, unlike StateSnapshot['queue']. */
 export interface PublicQueue {
   count: number;
   players: NamedPlayer[];
