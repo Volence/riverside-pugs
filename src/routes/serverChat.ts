@@ -3,7 +3,8 @@ import type { DB } from '../db.js';
 import type { LeaseRcon } from '../practiceLeases.js';
 import { getPlayer } from '../players.js';
 import { parseStatusPlayers } from '../practicePlayers.js';
-import { getServer, isLeased, isSideHeld, listServers } from '../serverPool.js';
+import { getServer, listServers } from '../serverPool.js';
+import { holdFor } from '../serverHolds.js';
 import { hasLinesBefore, listLines, listLinesBefore, listMatchLines, liveMatchOn, type ChatLineRow } from '../serverChat.js';
 import { SendLimiter, cleanChatText, sendStaffChat, MESSAGE_MAX, MESSAGE_MAX_BYTES, NAME_MAX, NAME_MAX_BYTES, type SendTarget } from '../staffChatSend.js';
 import { makeRequireMod } from './guards.js';
@@ -44,10 +45,11 @@ export async function serverChatRoutes(
   app.get('/api/mod/chat/servers', async (req, reply) => {
     if (!requireMod(req, reply)) return;
     const servers: ChatServerView[] = listServers(db)
-      .filter((s) => s.enabled === 1 || isLeased(db, s.id))
-      .map((s) => ({
+      .map((s) => ({ s, hold: holdFor(db, s.id) }))
+      .filter(({ s, hold }) => s.enabled === 1 || hold?.kind === 'practice')
+      .map(({ s, hold }) => ({
         id: s.id, name: s.name,
-        state: isLeased(db, s.id) ? 'practice' : isSideHeld(db, s.id) ? 'side' : liveMatchOn(db, s.id) !== null ? 'match' : s.status === 'offline' ? 'offline' : 'idle',
+        state: hold?.kind === 'practice' ? 'practice' : hold?.kind === 'side' ? 'side' : liveMatchOn(db, s.id) !== null ? 'match' : s.status === 'offline' ? 'offline' : 'idle',
         lastAt: (lastAt.get(s.id) as { at: number | null }).at,
       }));
     return { servers };

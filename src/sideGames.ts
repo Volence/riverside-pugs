@@ -4,8 +4,8 @@
  *
  * State lives in memory, like the matchmaker's. The only table is
  * side_games, and a row there does one thing: it holds the box (the box
- * stays 'idle' in servers, and NOT_LEASED_SQL keeps claimIdle and friends
- * away from it, the practice_leases pattern). Nothing about a side game is
+ * stays 'idle' in servers, and open_server_holds keeps claimIdle and friends
+ * away from it (src/serverHolds.ts), the practice_leases pattern). Nothing about a side game is
  * recorded anywhere else.
  *
  * The rules (sizes, who sits out, who subs in) are the pure functions in
@@ -13,7 +13,7 @@
  * PUGSIDE log lines from plugin/pug-sidegame.sp.
  */
 import type { DB } from './db.js';
-import { NOT_LEASED_SQL, getServer, type ServerRow } from './serverPool.js';
+import { claimableServers, getServer, type ServerRow } from './serverPool.js';
 import { openLeases, matchesWaiting, type LeaseRcon } from './practiceLeases.js';
 import { newToken } from './matchToken.js';
 import { getRatings } from './players.js';
@@ -240,9 +240,7 @@ export class SideGames {
     // A box that recently refused is skipped (refusedUntil).
     const now = this.now();
     for (const [id, until] of this.refusedUntil) if (until <= now) this.refusedUntil.delete(id);
-    const server = (this.deps.db.prepare(
-      `SELECT * FROM servers WHERE status = 'idle' AND enabled = 1 AND ${NOT_LEASED_SQL} ORDER BY id`,
-    ).all() as ServerRow[]).find((s) => !this.refusedUntil.has(s.id));
+    const server = claimableServers(this.deps.db).find((s) => !this.refusedUntil.has(s.id));
     if (!server) return;
     const token = newToken();
     const password = `side_${token.slice(0, 8)}`;
