@@ -69,6 +69,26 @@ export class ServerReleaser {
   }
 
   /**
+   * Tell the waiters a box may be claimable, without releasing anything.
+   *
+   * For a box that joins the pool some other way than a release: an admin
+   * re-enabling a disabled server. A match waiting for a server was only ever
+   * woken by a release, so re-enabling an idle box next to one left the match
+   * 'configuring' until some unrelated match happened to end. Runs the same
+   * waiters a release does; each drains at most one match and re-checks what
+   * it claims, so a wake with nothing claimable is a no-op.
+   */
+  wake(): void {
+    for (const fn of this.waiters) {
+      try {
+        fn();
+      } catch (err) {
+        console.error('[serverRelease] waiter threw:', err);
+      }
+    }
+  }
+
+  /**
    * Resolves once every cleanup started BEFORE this call has settled.
    *
    * For boot, which is the one moment that frees servers outside the waiter
