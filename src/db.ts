@@ -1043,6 +1043,9 @@ function widenCheck(db: DB, table: string, marker: string, indexes: string[]): v
       const newCols = new Set((db.prepare(`PRAGMA table_info(${table}_new)`).all() as { name: string }[]).map((c) => c.name));
       const cols = oldCols.filter((c) => newCols.has(c)).join(', ');
       db.exec(`INSERT INTO ${table}_new (${cols}) SELECT ${cols} FROM ${table}`);
+      // SQLite refuses the RENAME while a view names the table; the view is
+      // put back by ensureServerHoldsView at the end of openDb.
+      db.exec('DROP VIEW IF EXISTS open_server_holds');
       db.exec(`DROP TABLE ${table}`);
       db.exec(`ALTER TABLE ${table}_new RENAME TO ${table}`);
       for (const sql of indexes) db.exec(sql);
@@ -1050,6 +1053,25 @@ function widenCheck(db: DB, table: string, marker: string, indexes: string[]): v
   } finally {
     db.pragma('foreign_keys = ON');
   }
+}
+
+const SERVER_HOLDS_VIEW = `CREATE VIEW open_server_holds AS
+  SELECT server_id, 'practice' AS kind, id AS row_id, 1 AS rank FROM practice_leases WHERE ended_at IS NULL
+  UNION ALL
+  SELECT server_id, 'side' AS kind, id AS row_id, 2 AS rank FROM side_games WHERE ended_at IS NULL`;
+
+/** Create open_server_holds, or replace it when its definition has changed.
+ *  An up-to-date view is left alone: scripts open the live database while the
+ *  web runs, and a drop there would make every hold check in the web throw
+ *  until the create landed. A replacement is one transaction, so no other
+ *  connection ever sees the view missing. */
+function ensureServerHoldsView(db: DB): void {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'view' AND name = 'open_server_holds'").get() as { sql: string } | undefined;
+  if (row?.sql === SERVER_HOLDS_VIEW) return;
+  db.transaction(() => {
+    db.exec('DROP VIEW IF EXISTS open_server_holds');
+    db.exec(SERVER_HOLDS_VIEW);
+  })();
 }
 
 /** Add a column if the table lacks it. No-op when already present. */
@@ -1069,10 +1091,6 @@ export function openDb(path: string): DB {
   // bytes sitting in a freed page until something else overwrites it.
   db.pragma('secure_delete = ON');
   db.exec(SCHEMA);
-  // open_server_holds is recreated at the end of openDb. Dropped first because
-  // widenCheck below rebuilds practice_leases with ALTER TABLE ... RENAME,
-  // which SQLite refuses while a view names the table.
-  db.exec('DROP VIEW IF EXISTS open_server_holds');
   // CREATE TABLE IF NOT EXISTS never adds a column to a table that already
   // exists, so a column introduced after a database was created needs this.
   // Idempotent and cheap; there is no migration framework here by design.
@@ -1793,12 +1811,7 @@ export function openDb(path: string): DB {
   // restart that clears it has finished. rank orders two holds on one box
   // (lower first). A new kind of hold is a new UNION ALL arm here and a new
   // HoldKind, nothing else.
-  db.exec(`
-    CREATE VIEW open_server_holds AS
-      SELECT server_id, 'practice' AS kind, id AS row_id, 1 AS rank FROM practice_leases WHERE ended_at IS NULL
-      UNION ALL
-      SELECT server_id, 'side' AS kind, id AS row_id, 2 AS rank FROM side_games WHERE ended_at IS NULL
-  `);
+  ensureServerHoldsView(db);
 
   seed(db);
   return db;
