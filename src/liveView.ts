@@ -893,7 +893,10 @@ export function eventsFor(db: DB, matchId: number, limit = LIVE_EVENT_LIMIT): {
  *  a token field would, and /api/replays/match/:id/:ordinal/:half resolves
  *  that pair to a file server-side. The token bytes in the replay header are
  *  zeroed on the way out by routes/replays.ts, so the file contents do not
- *  leak it either. */
+ *  leak it either.
+ *
+ *  Only `visibility = 'public'` matches are queried: this is the public live
+ *  page, so a scrim never appears on it even by campaign and score alone. */
 /** `showDiscordNames` defaults to false: /api/live has no session at all, and
  *  the only safe default for an anonymous, unauthenticated payload is to
  *  leave a player's linked Discord name out of it. The route decides when to
@@ -906,7 +909,7 @@ export function getLiveMatches(db: DB, showDiscordNames = false): LiveMatch[] {
       `SELECT m.id, m.campaign, m.server_id AS serverId, l.current_map AS currentMap, l.last_seen AS lastSeen
        FROM matches m
        LEFT JOIN match_live l ON l.match_id = m.id
-       WHERE m.state = 'live'
+       WHERE m.state = 'live' AND m.visibility = 'public'
        ORDER BY m.id DESC`,
     )
     .all() as { id: number; campaign: string; serverId: number | null; currentMap: string | null; lastSeen: string | null }[];

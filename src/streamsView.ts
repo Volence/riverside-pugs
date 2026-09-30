@@ -86,12 +86,15 @@ export function streamsView(
 
   // Who is on a live match roster, and which match. A player on two live
   // matches is not a state the matchmaker can produce, so first wins.
+  //
+  // `visibility = 'public'` only: this feeds a public card, so a streamer in
+  // a private scrim shows as merely live, not as "in a match" that names it.
   const liveMatches = db.prepare(
     `SELECT mp.player_id, m.id, m.campaign, ml.current_map
      FROM match_players mp
      JOIN matches m ON m.id = mp.match_id
      LEFT JOIN match_live ml ON ml.match_id = m.id
-     WHERE m.state = 'live'`,
+     WHERE m.state = 'live' AND m.visibility = 'public'`,
   ).all() as { player_id: string; id: number; campaign: string; current_map: string | null }[];
   const matchOf = new Map<string, StreamMatch>();
   for (const r of liveMatches) {

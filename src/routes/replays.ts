@@ -12,6 +12,8 @@ import { applyPush, errCode, parsePush, PUSH_BODY_LIMIT } from '../replayPush.js
 import { infectedMaskForHeader, rewriteHead } from '../replaySides.js';
 import { getRange, type R2Config } from '../r2.js';
 import { storedDemoShifts, type DemoSync } from '../logParse.js';
+import { canViewMatch, viewerFor, type Viewer } from '../matchVisibility.js';
+import { makeOptionalViewer } from './guards.js';
 
 /** How long a computed cutoff is reused.
  *
@@ -241,6 +243,23 @@ function finishedR2Key(db: DB, matchId: number, ordinal: number, half: number): 
   return row?.key ?? null;
 }
 
+/**
+ * Whether `viewer` may fetch a file addressed by name, as
+ * `/api/replays/file/:name` does.
+ *
+ * Most names served here are `!mix` sessions, which have no `match_replays`
+ * row and no match to hide behind: those pass through unchanged. A name that
+ * IS one round of a ranked match gets the same gate `/api/replays/match/:id/...`
+ * applies, so a private scrim's round cannot be fetched just by knowing (or
+ * guessing) its filename instead of its match id.
+ */
+export function replayFileVisible(db: DB, viewer: Viewer, filename: string): boolean {
+  const row = db.prepare('SELECT match_id AS matchId FROM match_replays WHERE filename = ?')
+    .get(filename) as { matchId: number } | undefined;
+  if (!row) return true;
+  return canViewMatch(db, viewer, row.matchId);
+}
+
 export interface ReplaySources {
   replayDir: string;
   liveDir?: string;
@@ -322,6 +341,7 @@ export async function replayRoutes(
   opts: { db: DB; replayDir: string; liveDir?: string; r2?: R2Config | null; r2Get?: typeof getRange },
 ): Promise<void> {
   const { db, replayDir, liveDir = '', r2 = null, r2Get = getRange } = opts;
+  const viewerOf = makeOptionalViewer(db);
 
   /**
    * Live replay bytes from a game server, about once a second per match.
@@ -388,6 +408,9 @@ export async function replayRoutes(
    */
   app.get('/api/replays/live/match/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
+    if (!canViewMatch(db, viewerFor(db, viewerOf(req)), Number(id))) {
+      return reply.code(404).send({ error: 'no replay for that match' });
+    }
     const row = db
       .prepare('SELECT token FROM matches WHERE id = ?')
       .get(Number(id)) as { token: string | null } | undefined;
@@ -431,6 +454,9 @@ export async function replayRoutes(
     const now = Date.now();
     const found = resolveByName(replayDir, name, now);
     if (!found) return reply.code(404).send({ error: 'no such replay' });
+    if (!replayFileVisible(db, viewerFor(db, viewerOf(req)), name)) {
+      return reply.code(404).send({ error: 'no such replay' });
+    }
     return sendSlice(reply, found.path, found.info, Number(since ?? 0), now);
   });
 
@@ -444,6 +470,9 @@ export async function replayRoutes(
    */
   app.get('/api/replays/match/:id/:ordinal/:half', async (req, reply) => {
     const { id, ordinal, half } = req.params as { id: string; ordinal: string; half: string };
+    if (!canViewMatch(db, viewerFor(db, viewerOf(req)), Number(id))) {
+      return reply.code(404).send({ error: 'no such replay' });
+    }
     const { since } = req.query as { since?: string };
     const now = Date.now();
     const row = resolveReplayPath(db, Number(id), Number(ordinal), Number(half), replayDir);
@@ -524,6 +553,9 @@ export async function replayRoutes(
   app.get('/api/replays/timeline/:matchId/:ordinal/:half', async (req, reply) => {
     const { matchId, ordinal, half } = req.params as
       { matchId: string; ordinal: string; half: string };
+    if (!canViewMatch(db, viewerFor(db, viewerOf(req)), Number(matchId))) {
+      return reply.code(404).send({ error: 'no such match' });
+    }
     const id = Number(matchId);
     const ord = Number(ordinal);
     const hf = Number(half);
