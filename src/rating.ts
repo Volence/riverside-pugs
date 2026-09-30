@@ -1,6 +1,7 @@
 import { rating, rate, predictWin } from 'openskill';
 import type { DB } from './db.js';
 import { ensureRating } from './players.js';
+import { completedPug } from './matchKinds.js';
 
 /** Cosmetic SR shown on site. Stored mu/sigma remain canonical. */
 export function displaySr(mu: number, sigma: number): number {
@@ -143,8 +144,9 @@ export const MIN_RATED_PER_TEAM = 2;
 export interface RatingOutcome {
   applied: boolean;
   /** Why not, when not. `too_few` is the only one worth telling anyone about:
-   *  the others are a match that is not finished, or one already rated. */
-  reason?: 'not_completed' | 'already' | 'too_few';
+   *  the others are a match that is not finished, one already rated, or one
+   *  that is not a PUG. */
+  reason?: 'not_completed' | 'already' | 'too_few' | 'not_pug';
   ratedA: number;
   ratedB: number;
 }
@@ -159,9 +161,11 @@ export interface RatingOutcome {
  *  lives on the row so a season recompute leaves the same people out. */
 export function applyMatchRatings(db: DB, matchId: number): RatingOutcome {
   const match = db
-    .prepare('SELECT id, season_id, state, winner FROM matches WHERE id = ?')
-    .get(matchId) as { id: number; season_id: number; state: string; winner: 'a' | 'b' | 'draw' | null } | undefined;
+    .prepare('SELECT id, season_id, state, winner, kind FROM matches WHERE id = ?')
+    .get(matchId) as { id: number; season_id: number; state: string; winner: 'a' | 'b' | 'draw' | null; kind: string } | undefined;
   if (!match || match.state !== 'completed' || !match.winner) return { applied: false, reason: 'not_completed', ratedA: 0, ratedB: 0 };
+  // Scrims and tournament matches never move SR (spec: foundation section 1).
+  if (match.kind !== 'pug') return { applied: false, reason: 'not_pug', ratedA: 0, ratedB: 0 };
   if (db.prepare('SELECT 1 FROM rating_history WHERE match_id = ? LIMIT 1').get(matchId)) {
     return { applied: false, reason: 'already', ratedA: 0, ratedB: 0 };
   }
@@ -220,7 +224,7 @@ export function recomputeSeasonRatings(db: DB, seasonId: number): void {
     db.prepare('UPDATE player_ratings SET mu = ?, sigma = ?, wins = 0, losses = 0 WHERE season_id = ?')
       .run(fresh.mu, fresh.sigma, seasonId);
     const matches = db.prepare(
-      `SELECT id FROM matches WHERE season_id = ? AND state = 'completed'
+      `SELECT id FROM matches WHERE season_id = ? AND ${completedPug()}
        ORDER BY COALESCE(ended_at, created_at), id`,
     ).all(seasonId) as { id: number }[];
     for (const m of matches) applyMatchRatings(db, m.id);
