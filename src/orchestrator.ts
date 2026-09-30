@@ -65,8 +65,9 @@ export interface RealOrchestratorDeps {
   /** Called when setupMatch finds no idle server. The match stays 'configuring'
    *  rather than aborting; the pending list is what retries it once one frees. */
   onNoServer?: (matchId: number) => void;
-  /** Run on the setup connection once the match is configured and before the
-   *  changelevel: anything the box must have before players can join. Today
+  /** Run on the setup connection before exec pug_match (see setupMatch for
+   *  why it must come first): anything the box must have before players can
+   *  join. Today
    *  that is the ban list (ServerBanSync.pushAll). Wrapped by the caller; a
    *  failure here is logged and never costs the match its server. */
   beforeLive?: (rcon: RconClient) => Promise<void>;
@@ -203,6 +204,20 @@ export class RealOrchestrator implements Orchestrator {
       rcon ??= await this.connectRcon(server);
       await rcon.exec(`logaddress_add ${this.logPublicAddress}`);
       await this.pushSecret(rcon, server);
+      // The ban push goes BEFORE exec pug_match. That config changes the game
+      // mode, so the game reloads the current map about two seconds later
+      // ("Staying on original map"), and the rcon connection stops answering
+      // while it loads. Everything after exec pug_match must fit inside that
+      // window. The push is dozens of commands, one round trip each, and on
+      // a box far from this one it outgrew the window: matches 342 to 345
+      // died on Riverside #5 on 2026-09-30 with an exec timeout mid-push.
+      if (this.beforeLive) {
+        try {
+          await this.beforeLive(rcon);
+        } catch (err) {
+          console.error(`[orchestrator] beforeLive hook failed for match ${matchId} (non-fatal):`, err);
+        }
+      }
       await rcon.exec('exec pug_match');
       // The first line of the in-game ready-up panel. After pug_match, whose
       // rotoblin_pug_4v4.cfg sets the generic "Riverside PUG"; nothing on the
@@ -271,13 +286,6 @@ export class RealOrchestrator implements Orchestrator {
       // match the same way, with no error anyone sees.
       if (entry.requiresDlc4 && !server.has_dlc4) {
         throw new Error(`${entry.name} requires the dlc4 mappack, which ${server.name} does not have`);
-      }
-      if (this.beforeLive) {
-        try {
-          await this.beforeLive(rcon);
-        } catch (err) {
-          console.error(`[orchestrator] beforeLive hook failed for match ${matchId} (non-fatal):`, err);
-        }
       }
       // Same assertion as the stop map above, and here there are no quotes
       // at all: ';' in the name would be a second command.
