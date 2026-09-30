@@ -1,4 +1,5 @@
 import type { DB } from './db.js';
+import { alsoKnownAs } from './playerNames.js';
 import { playerMapBreakdown } from './playerStats.js';
 import { displaySr } from './rating.js';
 import { getPlayer, currentSeasonId, getProfileFields, socialLinks } from './players.js';
@@ -156,6 +157,9 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
       // id is an internal join key and has no business leaving the server.
       twitchName: player.twitch_name ?? null,
     },
+    // Other names they have played matches under, most played first, so a
+    // player who renamed is still recognisable (src/playerNames.ts).
+    alsoKnownAs: alsoKnownAs(db, steamid, player.name),
     social: socialLinks(db, steamid),
     rating: r ? { sr: displaySr(r.mu, r.sigma), mu: r.mu, sigma: r.sigma, wins: r.wins, losses: r.losses } : null,
     totals, matches, history,

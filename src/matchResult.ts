@@ -4,6 +4,7 @@ import { applyMatchRatings, MIN_RATED_PER_TEAM, type RatingOutcome } from './rat
 import { statDef } from './statKeys.js';
 import { canonicaliseDump } from './aliases.js';
 import { publishAdminEvent } from './adminFeed.js';
+import { foldMatchNames } from './playerNames.js';
 
 /** Persist a finished match (result, per-map scores, per-player stats) and
  *  apply ratings, atomically. Returns false when the match is missing or
@@ -97,6 +98,13 @@ export function completeMatch(db: DB, matchId: number, rawDump: Dump): boolean {
     );
   }
   for (const text of problems) publishAdminEvent({ kind: 'problem', matchId, text });
+  // After the commit and guarded: name history is bookkeeping, and a fault in
+  // it must never cost a match its result.
+  try {
+    foldMatchNames(db, matchId);
+  } catch (err) {
+    console.error(`[playerNames] could not record the names in match ${matchId}:`, err);
+  }
   return true;
 }
 
