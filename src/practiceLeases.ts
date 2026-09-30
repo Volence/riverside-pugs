@@ -22,9 +22,10 @@
  *
  * A lease is a row of practice_leases and never a servers.status value: the
  * box stays 'idle' in servers, and claimIdle (with the two between-matches
- * writers that hold idle boxes) reads this table to keep away from it. See
- * NOT_LEASED_SQL in src/serverPool.ts and the table comment in src/db.ts for
- * why a status was the wrong tool.
+ * writers that hold idle boxes) reads this table to keep away from it,
+ * through open_server_holds in src/db.ts and NOT_HELD_SQL in
+ * src/serverHolds.ts. See the table comment in src/db.ts for why a status
+ * was the wrong tool.
  *
  * Ranked always wins. A server is only lent while `practice_reserve_idle`
  * other enabled servers stay idle, never while a PUG is waiting for a box,
@@ -54,7 +55,7 @@
  */
 import { randomInt } from 'node:crypto';
 import type { DB } from './db.js';
-import { getServer, NOT_LEASED_SQL, type ServerRow } from './serverPool.js';
+import { claimableServers, getServer, type ServerRow } from './serverPool.js';
 import { getSetting, settingNumber } from './settings.js';
 import { parseHumans } from './serverRestart.js';
 import { getPlayer } from './players.js';
@@ -231,13 +232,6 @@ export function matchesWaiting(db: DB): number {
   return (db.prepare(
     "SELECT COUNT(*) AS n FROM matches WHERE state = 'configuring' AND server_id IS NULL",
   ).get() as { n: number }).n;
-}
-
-/** Enabled idle boxes that no lease holds: what the queue could claim now. */
-function claimableServers(db: DB): ServerRow[] {
-  return db.prepare(
-    `SELECT * FROM servers WHERE status = 'idle' AND enabled = 1 AND ${NOT_LEASED_SQL} ORDER BY id`,
-  ).all() as ServerRow[];
 }
 
 export type PickResult =

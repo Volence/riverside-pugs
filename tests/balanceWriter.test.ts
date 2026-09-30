@@ -82,6 +82,25 @@ describe('BalanceRolloutWriter', () => {
     expect(f.disk.get(`${s2}/pug_balance.cfg`)).toBe('CONTENT');
   });
 
+  it('never holds a box a practice lease or a side game holds, and writes it once they end', async () => {
+    db.prepare("INSERT INTO players (steamid, name) VALUES ('76561199000000009', 'o')").run();
+    db.prepare(`INSERT INTO practice_leases (server_id, kind, owner_player_id, password, ends_at)
+      VALUES (?, 'park', '76561199000000009', 'pw', datetime('now', '+1 hour'))`).run(s1);
+    db.prepare("INSERT INTO side_games (server_id, token, password) VALUES (?, 't', 'p')").run(s2);
+    const f = fakeBoxes();
+    const w = new BalanceRolloutWriter({ db, transport: f.transport });
+    await w.sync();
+    expect(f.disk.size).toBe(0);
+    expect(state(s1).state).not.toBe('written');
+    expect(state(s2).state).not.toBe('written');
+    expect((db.prepare('SELECT status FROM servers ORDER BY id').all() as { status: string }[]).map((r) => r.status))
+      .toEqual(['idle', 'idle']);
+    db.prepare("UPDATE practice_leases SET ended_at = datetime('now')").run();
+    db.prepare("UPDATE side_games SET ended_at = datetime('now')").run();
+    await w.sync();
+    expect(state(s1).state).toBe('written');
+    expect(state(s2).state).toBe('written');
+  });
   it('the release path writes an idle box', async () => {
     const f = fakeBoxes();
     await new BalanceRolloutWriter({ db, transport: f.transport }).writeForRelease(s2);

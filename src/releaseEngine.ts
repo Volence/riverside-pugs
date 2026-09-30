@@ -3,8 +3,8 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { DB } from './db.js';
 import { publishAdminEvent } from './adminFeed.js';
-import { getServer, isLeased, isSideHeld, markOffline, type ServerRow } from './serverPool.js';
-import { ServerHolds } from './serverHolds.js';
+import { getServer, markOffline, type ServerRow } from './serverPool.js';
+import { isHeld, ServerHolds } from './serverHolds.js';
 import { restartOutcome, type RestartOutcome, type ServerRestarter } from './serverRestart.js';
 import { treeWriterFor, type TreeWriter } from './fleetWrite.js';
 import type { Op } from './releaseStage.js';
@@ -285,10 +285,10 @@ export class ReleaseEngine {
     // means parked or unverified (see reconcileServers), and must never be
     // written, restarted or turned idle from here.
     const releaserRestarting = hook?.live === true && s.status === 'offline';
-    // A box lent out as a practice server, or held by a queue side game, is
-    // idle in status only. It waits like a busy one; the lease or the game
-    // ends through the releaser, whose hook is the releaserRestarting path above.
-    if (!releaserRestarting && (s.status !== 'idle' || isLeased(db, s.id) || isSideHeld(db, s.id))) { this.setBox(r.id, b.server_id, 'waiting'); return; }
+    // A box held by a practice lease or a side game (src/serverHolds.ts) is
+    // idle in status only. It waits like a busy one; the holder ends through
+    // the releaser, whose hook is the releaserRestarting path above.
+    if (!releaserRestarting && (s.status !== 'idle' || isHeld(db, s.id))) { this.setBox(r.id, b.server_id, 'waiting'); return; }
     const writer = (this.d.writer ?? treeWriterFor)(s);
     if (!writer) { this.setBox(r.id, b.server_id, 'failed', 'no transport configured'); return; }
     const held = s.status === 'idle';

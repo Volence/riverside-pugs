@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
-import { addServer, claimIdle, isSideHeld } from '../src/serverPool.js';
+import { addServer, claimIdle } from '../src/serverPool.js';
+import { holdFor } from '../src/serverHolds.js';
 import { getSetting } from '../src/settings.js';
 
 let db: DB;
@@ -15,14 +16,14 @@ describe('side_games', () => {
     const a = add('a');
     const b = add('b');
     db.prepare("INSERT INTO side_games (server_id, token, password) VALUES (?, 'tok', 'side_x')").run(a);
-    expect(isSideHeld(db, a)).toBe(true);
+    expect(holdFor(db, a)?.kind).toBe('side');
     expect(claimIdle(db)?.id).toBe(b);
   });
 
   it('gives the box back once the row is ended', () => {
     const a = add('a');
     db.prepare("INSERT INTO side_games (server_id, token, password, ended_at) VALUES (?, 't', 'p', datetime('now'))").run(a);
-    expect(isSideHeld(db, a)).toBe(false);
+    expect(holdFor(db, a)).toBeNull();
     expect(claimIdle(db)?.id).toBe(a);
   });
 
