@@ -9,10 +9,22 @@ import { publishBanChange } from './banEvents.js';
 const LADDER_MINUTES = [1440, 4320, 10080];
 const WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
+/**
+ * The next abandon ban's length, from the abandons already on record.
+ *
+ * A ban staff lifted by hand does not count: lifting one is staff saying the
+ * abandon was not the player's doing (a crash, our server, a mistaken end),
+ * and it used to push the player's next real abandon up the ladder anyway. A
+ * ban that ran out still counts, lifted_by 'system' being the expiry sweep
+ * (liftExpiredBans), and so does one a human lifted only after it had already
+ * run out, since that one was served in full.
+ */
 export function abandonBanMinutes(db: DB, steamid: string, now = new Date()): number {
   const since = new Date(now.getTime() - WINDOW_MS).toISOString();
   const { n } = db.prepare(
-    "SELECT COUNT(*) AS n FROM bans WHERE player_id = ? AND reason LIKE 'Abandoned match #%' AND created_at >= ?",
+    `SELECT COUNT(*) AS n FROM bans
+     WHERE player_id = ? AND reason LIKE 'Abandoned match #%' AND created_at >= ?
+       AND (lifted_at IS NULL OR lifted_by = 'system' OR (expires_at IS NOT NULL AND lifted_at >= expires_at))`,
   ).get(steamid, since) as { n: number };
   return LADDER_MINUTES[Math.min(n, LADDER_MINUTES.length - 1)];
 }
