@@ -127,11 +127,10 @@ export function abortMatch(db: DB, releaser: ServerReleaser, matchId: number): A
 }
 
 /**
- * Clear the no-show penalties one match handed out. For the abort dialog's
- * "Also clear the no-show penalties" box and for an aborted match whose
- * no-shows turn out not to be the players' doing (our server, a Steam
+ * Clear the no-show penalties one match handed out, for an aborted match
+ * whose no-shows turn out not to be the players' doing (our server, a Steam
  * outage). Only an aborted match can have handed any out: the reaper records
- * them as it aborts.
+ * them as it aborts, which is also why the abort dialog offers no such box.
  */
 export function clearNoShowsOf(db: DB, matchId: number, by: string): { ok: true; cleared: string[] } | { ok: false; status: number; error: string } {
   const m = db.prepare('SELECT state FROM matches WHERE id = ?').get(matchId) as { state: string } | undefined;

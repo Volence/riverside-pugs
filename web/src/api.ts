@@ -1663,7 +1663,7 @@ export const adminApi = {
     post<{ ok: true }>(`/api/admin/practice/${leaseId}/kick`, { userid, reason }),
   leaveClock: (matchId: number, steamid: string, action: LeaveClockAction, seconds?: number) =>
     post<{ ok: true; reply: string }>(`/api/admin/live/${matchId}/players/${steamid}/leave`, { action, seconds }),
-  abortMatch: (id: number, opts: { clearNoShows?: boolean } = {}) => post(`/api/admin/matches/${id}/abort`, opts),
+  abortMatch: (id: number) => post(`/api/admin/matches/${id}/abort`),
   clearMatchNoShows: (id: number) => post<{ ok: true; cleared: string[] }>(`/api/admin/matches/${id}/clear-noshows`),
   /** Five more minutes on this match's no-show deadline, for everyone missing. */
   noShowExtend: (matchId: number) => post<{ ok: true; extraMinutes: number }>(`/api/admin/live/${matchId}/noshow-extend`),

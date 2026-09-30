@@ -39,7 +39,7 @@ export interface ConfirmOptions {
   /** Red confirm button, for something destructive or hard to undo. */
   danger?: boolean;
   /**
-   * Checkboxes under the body, such as "Also clear the no-show penalties".
+   * Checkboxes under the body, such as "Leave this player out of the queue".
    * The dialog writes each box's state back onto its own object as it
    * changes, so the caller keeps a reference and reads `checked` after the
    * confirm resolves true. That keeps confirm() a boolean, which is what the

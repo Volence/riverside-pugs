@@ -406,15 +406,16 @@ describe('aborting from the admin panel', () => {
     expect((await app.inject({ method: 'GET', url: '/api/state', cookies: cookies[IDS[0]] })).json().abortNotice).toBeNull();
   });
 
-  it('clears this match\'s no-show penalties only when asked', async () => {
+  // Only the no-show reaper hands out no-shows, and it does so as it aborts,
+  // so a match an admin can still abort has none of its own: the abort does
+  // not touch penalties, and the Aborted list's button clears them after.
+  it('leaves penalties alone, and clears an aborted match\'s no-shows after the fact', async () => {
     const other = Number(db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'aborted', 'dead_air')").run().lastInsertRowid);
     const pen = db.prepare("INSERT INTO penalties (player_id, kind, match_id, created_at) VALUES (?, 'no_show', ?, ?)");
-    pen.run(IDS[6], matchId, new Date().toISOString());
     pen.run(IDS[7], other, new Date().toISOString());
-    expect((await abort({ clearNoShows: true })).json()).toMatchObject({ ok: true, clearedNoShows: [IDS[6]] });
+    expect((await abort({ clearNoShows: true })).json()).toEqual({ ok: true });
     expect(noShows()).toBe(1);
-    expect((await audit())[0]).toMatchObject({ action: 'abort_match', detail: { clearedNoShows: 1 } });
-    // And after the fact, for the aborted match that handed one out.
+    expect((await audit())[0]).toMatchObject({ action: 'abort_match', detail: {} });
     const res = await app.inject({ method: 'POST', url: `/api/admin/matches/${other}/clear-noshows`, cookies: cookies[MOD] });
     expect(res.json()).toEqual({ ok: true, cleared: [IDS[7]] });
     expect(noShows()).toBe(0);

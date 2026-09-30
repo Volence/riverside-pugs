@@ -7,7 +7,6 @@ import { campaignName, fmtClock, mapName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
 import { SpectatePanel } from '../../components/SpectatePanel';
 import { useAction, type Run } from './useAction';
-import type { ConfirmChoice } from '../../components/Confirm';
 import { AdminQueuePanel, AdminServersPanel, OpenMatchesPanel, RecentResultsPanel, abortAsk } from './MatchPanels';
 import { PracticeLeasesPanel } from './PracticeLeasesPanel';
 import { ChatDrawer } from './ChatDrawer';
@@ -154,10 +153,8 @@ function MatchCard({ match: m, elapsedS, holdMaxMinutes, lowAlertSeconds, reload
         {/* On the card, not only in the Open matches table below: a match
             waiting for a server, or stuck with no connect line, is exactly
             the one someone is looking at up here. */}
-        <button type="button" class="chip" disabled={cardBusy} onClick={() => {
-          const clear: ConfirmChoice = { label: 'Also clear the no-show penalties this match handed out', checked: false };
-          void run(() => adminApi.abortMatch(m.id, { clearNoShows: clear.checked }), abortAsk(m.id, clear));
-        }}>Abort</button>
+        <button type="button" class="chip" disabled={cardBusy}
+          onClick={() => run(() => adminApi.abortMatch(m.id), abortAsk(m.id))}>Abort</button>
       </header>
 
       {m.noShow?.applies && (

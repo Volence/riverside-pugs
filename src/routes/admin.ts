@@ -354,20 +354,15 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     return { ...adminOverview(db, logAuth), queue: matchmaker.publicQueue().players, lobbies: matchmaker.adminLobbies() };
   });
 
-  /** `clearNoShows` is the abort dialog's "Also clear the no-show penalties
-   *  this match handed out" box. Cleared after the abort, so the audit row
-   *  says how many went. */
   app.post('/api/admin/matches/:id/abort', async (req, reply) => {
     const adminId = requireStaff(req, reply);
     if (!adminId) return reply;
     const id = Number((req.params as { id: string }).id);
-    const { clearNoShows } = (req.body ?? {}) as { clearNoShows?: unknown };
     const r = abortMatch(db, releaser, id);
     if (!r.ok) return reply.code(r.status).send({ error: r.error });
-    const cleared = clearNoShows === true ? clearNoShowsOf(db, id, adminId) : null;
-    logAdmin(db, adminId, 'abort_match', id, cleared?.ok ? { clearedNoShows: cleared.cleared.length } : {});
+    logAdmin(db, adminId, 'abort_match', id, {});
     broadcast('refresh');
-    return { ok: true, ...(cleared?.ok ? { clearedNoShows: cleared.cleared } : {}) };
+    return { ok: true };
   });
 
   /** Clear every no-show one match handed out, after the fact: the no-show

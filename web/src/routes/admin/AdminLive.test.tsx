@@ -286,7 +286,7 @@ describe('the live board', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Abort' }));
     const dialog = await waitFor(() => screen.getByRole('alertdialog'));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
-    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, { clearNoShows: false }));
+    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81));
   });
 
   it('keeps the board up when the panels below fail', async () => {
@@ -308,7 +308,7 @@ describe('the live board', () => {
     fireEvent.click(within(panel).getByRole('button', { name: 'Abort' }));
     const dialog = await waitFor(() => screen.getByRole('alertdialog'));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
-    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, { clearNoShows: false }));
+    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81));
   });
 
   it('renders the servers, queue and recent results underneath', async () => {
@@ -429,14 +429,14 @@ describe('the match-lifecycle controls', () => {
     expect(card.querySelector('.live-card__noshow')).toBeNull();
   });
 
-  it('aborts from the card, and the box clears the match\'s no-shows only when ticked', async () => {
+  it('aborts from the card, with no box offering to clear no-shows a match being aborted cannot have', async () => {
     render(<><AdminLive isAdmin /><ConfirmHost /></>);
     const card = (await screen.findByText(/#81/)).closest('section') as HTMLElement;
     fireEvent.click(within(card).getByRole('button', { name: 'Abort' }));
     const dialog = await waitFor(() => screen.getByRole('alertdialog'));
-    fireEvent.click(within(dialog).getByRole('checkbox'));
+    expect(within(dialog).queryByText(/no-show penalties/)).toBeNull();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
-    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, { clearNoShows: true }));
+    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81));
   });
 
   it('cancels a pop from the queue panel, leaving out whoever is ticked', async () => {
