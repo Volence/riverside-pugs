@@ -1,4 +1,5 @@
 import type { DB } from './db.js';
+import { completedPug } from './matchKinds.js';
 
 export interface SeasonRow {
   id: number;
@@ -13,7 +14,7 @@ export interface SeasonRow {
 export function listSeasons(db: DB): SeasonRow[] {
   return (db.prepare(
     `SELECT s.id, s.name, s.started_at, s.ended_at,
-            (SELECT COUNT(*) FROM matches m WHERE m.season_id = s.id AND m.state = 'completed') AS matches
+            (SELECT COUNT(*) FROM matches m WHERE m.season_id = s.id AND ${completedPug('m')}) AS matches
      FROM seasons s ORDER BY s.id DESC`,
   ).all() as { id: number; name: string; started_at: string; ended_at: string | null; matches: number }[])
     .map((s) => ({ id: s.id, name: s.name, startedAt: s.started_at, endedAt: s.ended_at, current: s.ended_at === null, matches: s.matches }));

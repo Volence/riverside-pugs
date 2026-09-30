@@ -11,6 +11,7 @@ import { steamAccountView } from './steamAccount.js';
 import { ticketsAbout } from '../tickets/views.js';
 import type { BanRow } from './banTypes.js';
 import { banIsWithheld, banRedactor, WITHHELD_REASON } from './banRedaction.js';
+import { completedPug } from '../matchKinds.js';
 
 // BanRow lives in its own leaf module: banRedaction.ts redacts the BanRow
 // shape this file produces, so importing banRedaction here and BanRow there
@@ -172,7 +173,7 @@ export function searchPlayers(db: DB, q: string, limit = 200): AdminPlayerRow[] 
   const rows = db.prepare(
     `SELECT p.steamid, p.name, p.avatar, p.status, p.is_admin, p.is_mod, p.discord_name, p.created_at, pr.mu, pr.sigma,
             (SELECT COUNT(*) FROM match_players mp JOIN matches m ON m.id = mp.match_id
-              WHERE mp.player_id = p.steamid AND m.state = 'completed') AS games
+              WHERE mp.player_id = p.steamid AND ${completedPug('m')}) AS games
      FROM players p LEFT JOIN player_ratings pr ON pr.player_id = p.steamid AND pr.season_id = ?
      WHERE ? = '' OR p.name LIKE ? ESCAPE '\\' OR p.steamid LIKE ? ESCAPE '\\' OR p.discord_name LIKE ? ESCAPE '\\'
      ORDER BY p.name COLLATE NOCASE LIMIT ?`,

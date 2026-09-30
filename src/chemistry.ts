@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import { resolveAlias } from './aliases.js';
 import { getSetting } from './settings.js';
+import { completedPug } from './matchKinds.js';
 
 /**
  * Who a player wins with and loses to. Three lines on the profile and no
@@ -42,7 +43,7 @@ export function chemistryFor(db: DB, steamid: string): Chemistry {
     `WITH roster AS (
        SELECT DISTINCT mp.match_id, COALESCE(pa.canonical_id, mp.player_id) AS pid, mp.team
        FROM match_players mp
-       JOIN matches m ON m.id = mp.match_id AND m.state = 'completed'
+       JOIN matches m ON m.id = mp.match_id AND ${completedPug('m')}
        LEFT JOIN player_aliases pa ON pa.steamid = mp.player_id
      )
      SELECT o.pid AS steamid, p.name AS name,

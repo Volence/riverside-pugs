@@ -14,6 +14,7 @@ import { getLiveMatches, mapStatsFor, eventsFor } from '../liveView.js';
  *  page, not to window anything a real match produces. */
 const MATCH_EVENT_LIMIT = 20_000;
 import { getCampaignPool } from '../settings.js';
+import { completedPug } from '../matchKinds.js';
 import { mapDetail, mapIndex } from '../playerStats.js';
 import { displaySr, matchForecast } from '../rating.js';
 import { currentSeasonId, getPlayer, saveProfileFields } from '../players.js';
@@ -103,7 +104,7 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
        FROM match_player_stats mps
        JOIN matches m ON m.id = mps.match_id
        JOIN players p ON p.steamid = mps.player_id
-       WHERE mps.stat = ? AND m.season_id = ? AND m.state = 'completed'
+       WHERE mps.stat = ? AND m.season_id = ? AND ${completedPug('m')}
        GROUP BY mps.player_id
        ORDER BY total DESC, p.name ASC
        LIMIT ?`,
