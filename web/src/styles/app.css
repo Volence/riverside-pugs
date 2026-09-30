@@ -3135,3 +3135,4 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .activity__row--axis { align-items: start; }
 .activity__tick { font-size: var(--fs-label); color: var(--text-muted); white-space: nowrap; overflow: visible; }
 .activity__legend { margin: var(--sp-3) 0 0; font-size: var(--fs-dense); }
+.activity__waits { margin: 0 0 var(--sp-3); font-size: var(--fs-dense); }

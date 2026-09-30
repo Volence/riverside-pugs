@@ -5,7 +5,7 @@ import type { QueueActivity } from '../api';
 const { mockApi } = vi.hoisted(() => ({ mockApi: { activity: vi.fn() } }));
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
-  return { ...actual, api: { ...actual.api, ...mockApi } };
+  return { ...actual, adminApi: { ...actual.adminApi, ...mockApi } };
 });
 
 const { ActivityPanel } = await import('./ActivityPanel');
@@ -33,6 +33,23 @@ describe('ActivityPanel', () => {
     // The one busy cell is fully shaded; an empty one is not.
     const shaded = [...container.querySelectorAll<HTMLElement>('.activity__cell')].filter((c) => c.style.getPropertyValue('--v') === '1.000');
     expect(shaded).toHaveLength(1);
+  });
+
+  it('says when no waits are recorded yet, and counts them once there are', async () => {
+    mockApi.activity.mockResolvedValue(data(40));
+    const { container, unmount } = render(<ActivityPanel />);
+    await screen.findByText('When people play');
+    expect(container.querySelector('.activity__waits')?.textContent).toContain('none yet');
+    unmount();
+    const d = data(40, 300);
+    d.waits.popped = 12; d.waits.left = 3;
+    mockApi.activity.mockResolvedValue(d);
+    const second = render(<ActivityPanel />);
+    await screen.findByText('When people play');
+    const text = second.container.querySelector('.activity__waits')?.textContent ?? '';
+    expect(text).toContain('12 queues reached a pop');
+    expect(text).toContain('median wait 5 minutes');
+    expect(text).toContain('3 left before one');
   });
 
   it('leaves the wait out until there is one', async () => {

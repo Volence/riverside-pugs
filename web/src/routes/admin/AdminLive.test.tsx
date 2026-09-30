@@ -4,7 +4,7 @@ import type { LiveBoard, LiveBoardPlayer, LiveBoardStatus, LiveBoardReason } fro
 import { ConfirmHost } from '../../components/Confirm';
 
 const { mockAdmin, mockMod } = vi.hoisted(() => ({
-  mockAdmin: { live: vi.fn(), overview: vi.fn(), leaveClock: vi.fn(), abortMatch: vi.fn(), noShowExtend: vi.fn(), cancelPop: vi.fn() },
+  mockAdmin: { live: vi.fn(), overview: vi.fn(), leaveClock: vi.fn(), abortMatch: vi.fn(), noShowExtend: vi.fn(), cancelPop: vi.fn(), activity: vi.fn(async () => ({ days: 28, pops: [], totalPops: 0, waits: { medianSec: null, byHourSec: [], popped: 0, left: 0, leftMedianSec: null } })) },
   mockMod: { chatServers: vi.fn(), chatLines: vi.fn(), chatSend: vi.fn() },
 }));
 

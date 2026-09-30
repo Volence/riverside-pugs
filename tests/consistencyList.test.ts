@@ -65,7 +65,7 @@ describe('loadConsistencyList', () => {
     const script = readFileSync(join(CONSISTENCY_CFG, '..', '..', '..', 'deploy-web.sh'), 'utf8');
     const excludes = [...script.matchAll(/--exclude '([^']+)'/g)].map((m) => m[1]);
     // Sanity: the regex really is reading the rsync excludes.
-    expect(excludes).toContain('node_modules/');
+    expect(excludes).toContain('node_modules');
     const wouldDropTheList = excludes.filter((e) => e.startsWith('consistency') || e === 'configs/' || e === '*.cfg');
     expect(wouldDropTheList).toEqual([]);
   });
