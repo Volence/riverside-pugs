@@ -6,6 +6,7 @@ import { statDef } from './statKeys.js';
 import type { LogEvent, Phase } from './logParse.js';
 import type { ServerReleaser } from './serverRelease.js';
 import { archiveAborted } from './matchArchive.js';
+import { noteMatchAborted } from './matchAborts.js';
 
 /** How long without a HEARTBEAT before a match is shown as stale. The plugin
  *  emits one every 30s, so this tolerates three consecutive losses on a lossy
@@ -821,6 +822,8 @@ export function reapOrphanedMatches(
     // so the live scratch is the only record it will ever have.
     archiveAborted(db, r.id);
     publishAdminEvent({ kind: 'problem', matchId: r.id, text: `Match #${r.id} aborted: the game server stopped reporting it.` });
+    // Nobody on it did anything wrong: the whole roster goes back in front.
+    noteMatchAborted(db, { matchId: r.id, cause: 'server_lost', requeue: true });
     console.warn(`[liveView] reaped orphaned match ${r.id}: no heartbeat for ${olderThanMs}ms`);
   }
   return rows.map((r) => r.id);

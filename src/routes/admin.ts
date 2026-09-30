@@ -6,7 +6,8 @@ import { makeRequireAdmin, makeRequireMod } from './guards.js';
 import type { ServerReleaser } from '../serverRelease.js';
 import { getServer, listServers, serversMissingDlc4, setEnabled, setHasDlc4, setRestartAfterMatch, type ServerRow } from '../serverPool.js';
 import { serverHasDlc4 } from '../dlc4.js';
-import { abortMatch, adminOverview, voidMatch } from '../admin/matches.js';
+import { abortMatch, adminOverview, clearNoShowsOf, voidMatch } from '../admin/matches.js';
+import { extendNoShow } from '../noShow.js';
 import { SETTINGS_SCHEMA, settingDef, validateSetting } from '../settingsSchema.js';
 import { getCampaignPool, getSetting, setSetting } from '../settings.js';
 import { logAdmin, recentActions } from '../admin/audit.js';
@@ -15,7 +16,7 @@ import {
 } from '../admin/players.js';
 import { activatePlayer, getPlayer, unlinkDiscord } from '../players.js';
 import { poolableCampaigns } from '../campaignRegistry.js';
-import { clearPenalties } from '../penalties.js';
+import { clearPenalties, clearPenalty } from '../penalties.js';
 import { listSeasons, renameSeason, startNewSeason } from '../seasons.js';
 import { integrityBoard, integrityPlayer } from '../admin/integrity.js';
 import { captureHealth, recentFlagFeed } from '../integrityFlags.js';
@@ -78,7 +79,9 @@ export interface AdminRouteOpts {
 /** Everything under /api/admin. Each route starts with requireAdmin, except
  *  the Live desk's board and its match-rescue actions (GET /overview,
  *  GET /live, POST /live/:matchId/players/:steamid/leave, POST
- *  /matches/:id/abort, POST /matches/:id/void, POST /queue/remove), which
+ *  /live/:matchId/noshow-extend, POST /matches/:id/abort, POST
+ *  /matches/:id/clear-noshows, POST /matches/:id/void, POST /queue/remove,
+ *  POST /queue/cancel-pop), which
  *  start with requireStaff and are open to a moderator (owner ruling
  *  2026-09-28); every server control stays requireAdmin. Each mutation ends
  *  with logAdmin. */
@@ -298,6 +301,19 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     return { ok: true };
   });
 
+  /** One offense, for the per-row button: clear the no-show our server
+   *  caused without also wiping the ready checks they really missed. */
+  app.post('/api/admin/players/:steamid/penalties/:id/clear', async (req, reply) => {
+    const t = target(req, reply);
+    if (!t) return reply;
+    const id = Number((req.params as { id: string }).id);
+    if (!Number.isInteger(id) || !clearPenalty(db, t.steamid, id, t.adminId)) {
+      return reply.code(404).send({ error: 'no such uncleared penalty on this player' });
+    }
+    logAdmin(db, t.adminId, 'clear_penalty', t.steamid, { penaltyId: id });
+    return { ok: true };
+  });
+
   app.post('/api/admin/players/:steamid/clear-penalties', async (req, reply) => {
     const t = target(req, reply);
     if (!t) return reply;
@@ -335,18 +351,50 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     // open[].connect.password is a live match's sv_password. Staff open by
     // the same 2026-09-28 ruling that opened this route: a moderator already
     // sees it on the mod call card's Join line.
-    return { ...adminOverview(db, logAuth), queue: matchmaker.publicQueue().players };
+    return { ...adminOverview(db, logAuth), queue: matchmaker.publicQueue().players, lobbies: matchmaker.adminLobbies() };
   });
 
+  /** `clearNoShows` is the abort dialog's "Also clear the no-show penalties
+   *  this match handed out" box. Cleared after the abort, so the audit row
+   *  says how many went. */
   app.post('/api/admin/matches/:id/abort', async (req, reply) => {
     const adminId = requireStaff(req, reply);
     if (!adminId) return reply;
     const id = Number((req.params as { id: string }).id);
+    const { clearNoShows } = (req.body ?? {}) as { clearNoShows?: unknown };
     const r = abortMatch(db, releaser, id);
     if (!r.ok) return reply.code(r.status).send({ error: r.error });
-    logAdmin(db, adminId, 'abort_match', id);
+    const cleared = clearNoShows === true ? clearNoShowsOf(db, id, adminId) : null;
+    logAdmin(db, adminId, 'abort_match', id, cleared?.ok ? { clearedNoShows: cleared.cleared.length } : {});
     broadcast('refresh');
-    return { ok: true };
+    return { ok: true, ...(cleared?.ok ? { clearedNoShows: cleared.cleared } : {}) };
+  });
+
+  /** Clear every no-show one match handed out, after the fact: the no-show
+   *  reaper records them as it aborts, so an aborted match is where they are. */
+  app.post('/api/admin/matches/:id/clear-noshows', async (req, reply) => {
+    const adminId = requireStaff(req, reply);
+    if (!adminId) return reply;
+    const id = Number((req.params as { id: string }).id);
+    const r = clearNoShowsOf(db, id, adminId);
+    if (!r.ok) return reply.code(r.status).send({ error: r.error });
+    logAdmin(db, adminId, 'clear_noshows', id, { cleared: r.cleared.length, players: r.cleared });
+    broadcast('refresh');
+    return { ok: true, cleared: r.cleared };
+  });
+
+  /** "+5 min" for players who never connected: moves this match's no-show
+   *  deadline five minutes later for all of them (src/noShow.ts). Nothing
+   *  goes to the game server; the reaper that would abort is ours. */
+  app.post('/api/admin/live/:matchId/noshow-extend', async (req, reply) => {
+    const adminId = requireStaff(req, reply);
+    if (!adminId) return reply;
+    const matchId = Number((req.params as { matchId: string }).matchId);
+    const r = extendNoShow(db, matchId);
+    if (!r.ok) return reply.code(r.status).send({ error: r.error });
+    logAdmin(db, adminId, 'noshow_extend', matchId, { extraMinutes: r.extraMinutes });
+    broadcast('refresh');
+    return { ok: true, extraMinutes: r.extraMinutes };
   });
 
   app.post('/api/admin/matches/:id/void', async (req, reply) => {
@@ -621,6 +669,27 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const results = await adminSync.sync();
     logAdmin(db, adminId, 'server_admins_sync', 'all', { results });
     return { results };
+  });
+
+  /**
+   * Cancel a pop at any phase, ready check or campaign vote. `exclude` are
+   * players not to put back in the queue (the one being removed); everyone
+   * else goes back to the front. Staff, like the other match-rescue actions:
+   * the case it exists for is a moderator watching a player who has to be
+   * banned slip into a full lobby.
+   */
+  app.post('/api/admin/queue/cancel-pop', async (req, reply) => {
+    const adminId = requireStaff(req, reply);
+    if (!adminId) return reply;
+    const { lobbyId, exclude } = (req.body ?? {}) as { lobbyId?: unknown; exclude?: unknown };
+    if (lobbyId !== undefined && typeof lobbyId !== 'string') return reply.code(400).send({ error: 'lobbyId must be a string' });
+    if (exclude !== undefined && (!Array.isArray(exclude) || exclude.length > 8 || !exclude.every((x) => typeof x === 'string'))) {
+      return reply.code(400).send({ error: 'exclude must be a list of steamids' });
+    }
+    const r = matchmaker.cancelLobby(lobbyId, (exclude as string[] | undefined) ?? []);
+    if (!r.ok) return reply.code(409).send({ error: r.error });
+    logAdmin(db, adminId, 'cancel_pop', r.lobbyId, { requeued: r.requeued.length, excluded: r.excluded });
+    return { ok: true, requeued: r.requeued, excluded: r.excluded };
   });
 
   app.post('/api/admin/queue/remove', async (req, reply) => {

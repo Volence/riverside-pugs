@@ -6,6 +6,7 @@ import { publicBans } from '../admin/players.js';
 import { fileReport, matchReportTargets } from '../tickets/filing.js';
 import { streamsView } from '../streamsView.js';
 import { sideGamesEnabled } from '../sideGames.js';
+import { dismissAbortNotices } from '../matchAborts.js';
 
 export interface ApiRouteOpts {
   db: DB;
@@ -60,6 +61,15 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
     const steamid = requireActive(req, reply);
     if (!steamid) return;
     matchmaker.dismissNotice(steamid);
+    return { ok: true };
+  });
+
+  /** Dismiss the "your match was aborted" notice on the Play page. Stored
+   *  (src/matchAborts.ts), so this is what clears it, not a reload. */
+  app.post('/api/match/dismiss-abort-notice', async (req, reply) => {
+    const steamid = requireActive(req, reply);
+    if (!steamid) return;
+    dismissAbortNotices(db, steamid);
     return { ok: true };
   });
 

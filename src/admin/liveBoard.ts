@@ -3,6 +3,7 @@ import type { PhaseState } from '../logParse.js';
 import { phaseFor } from '../liveView.js';
 import { spectateFor, type SpectateInfo } from '../spectate.js';
 import { holdMaxSeconds, lowAlertSeconds, remainingNow, type PresenceRow } from '../presence.js';
+import { noShowClock, type NoShowClock } from '../noShow.js';
 
 /**
  * The admin live board: every ongoing match, who is missing from it, and the
@@ -25,7 +26,9 @@ export type BoardReason = { kind: 'signon_drop'; at: string } | { kind: 'not_in_
 
 export type BoardStatus =
   | { kind: 'connected'; remainingS: number | null }
-  | { kind: 'never_connected'; sincePopS: number }
+  /** deadlineS: seconds until the no-show rule aborts the match, with any
+   *  extension staff added, or null when it will not (see NoShowClock). */
+  | { kind: 'never_connected'; sincePopS: number; deadlineS: number | null }
   | { kind: 'dropped'; sinceS: number; remainingS: number | null; held: boolean; holdLeftS: number | null };
 
 export interface BoardPlayer { steamid: string; name: string; team: 'a' | 'b'; status: BoardStatus; reason: BoardReason | null }
@@ -57,6 +60,8 @@ export interface BoardMatch {
   teamA: BoardPlayer[];
   teamB: BoardPlayer[];
   clocks: BoardClock[];
+  /** The no-show rule against this match, for the "+5 min" button. */
+  noShow: NoShowClock | null;
 }
 
 export interface LiveBoard {
@@ -129,6 +134,7 @@ export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: 
       const phase = m.state === 'live' ? phaseFor(db, m.id) : null;
       const score = scoreOf.get(m.id) as { a: number; b: number };
 
+      const noShow = noShowClock(db, m.id, now);
       const players = (playersOf.all(m.id) as PlayerRow[]).map((p): BoardPlayer => {
         let status: BoardStatus;
         if (p.state === 'dropped' && p.since) {
@@ -153,7 +159,7 @@ export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: 
           // connected" for the whole match.
           status = { kind: 'connected', remainingS: p.remaining_s ?? null };
         } else {
-          status = { kind: 'never_connected', sincePopS: secondsSince(poppedMs, now) };
+          status = { kind: 'never_connected', sincePopS: secondsSince(poppedMs, now), deadlineS: noShow?.deadlineS ?? null };
         }
 
         let reason: BoardReason | null = null;
@@ -194,6 +200,7 @@ export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: 
         teamA: players.filter((p) => p.team === 'a'),
         teamB: players.filter((p) => p.team === 'b'),
         clocks,
+        noShow,
       };
     }),
   };

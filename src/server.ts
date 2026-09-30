@@ -115,6 +115,7 @@ import { linkReleaseSighting } from './releaseBalance.js';
 import { expectedPatchFor, confirmOnSighting } from './balanceRollouts.js';
 import { recordRoundMark, recordRoundStat, recordRoundStatsEnd, resetRoundLines } from './roundStatLines.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
+import { noteMatchAborted, subscribeMatchAborts } from './matchAborts.js';
 import { recordPresenceLine, sweepPresence } from './presence.js';
 import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
@@ -345,6 +346,9 @@ export async function finishWithRetry(
   // authoritative dump was lost, and they cost nothing, since every reader
   // filters on state = 'live'.
   if (row?.server_id != null) releaser.release(row.server_id);
+  // Told, not requeued: they played the match out, so putting all eight back
+  // at the front of the queue would be a second match nobody asked for.
+  noteMatchAborted(db, { matchId, cause: 'uncollected', requeue: false });
 }
 
 /** Vite builds web/ to dist/public (see vite.config.ts). In dev the Vite
@@ -1367,6 +1371,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   // Before the bot starts, so restored lobbies keep their Discord cards.
   matchmaker.restore();
+  // Every abort path reports to src/matchAborts.ts; this is where the
+  // blameless go back to the front of the queue. The refresh is for the
+  // notice, which the abort paths that do not broadcast (the reapers) would
+  // otherwise leave unseen until the next unrelated change.
+  const offMatchAborts = subscribeMatchAborts((e) => {
+    if (e.db !== deps.db) return undefined;
+    const back = matchmaker.requeueAfterAbort(e.requeueIds);
+    hub.broadcast('refresh');
+    return back;
+  });
   app.decorate('matchmaker', matchmaker);
   // Side games need a real box to hold (rcon, a forced-restart release), so
   // there is none in dev mode: the route layer already treats a null
@@ -1701,6 +1715,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     ticketMirror?.stop();
     ticketSync?.stop();
     offTicketNudge();
+    offMatchAborts();
     adminFeed?.stop();
     modCalls?.stop();
     weekly?.stop();

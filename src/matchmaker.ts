@@ -12,6 +12,8 @@ import { activeTimeout, recordPenalty, timeoutCause, type PenaltyKind } from './
 import { QUEUE_BLOCK_MESSAGE, type QueueBlock } from './queueGate.js';
 import { READY_BLOCK_MESSAGE, type ReadyBlock } from './readyGate.js';
 import type { Orchestrator } from './orchestrator.js';
+import { inGoodStanding } from './standing.js';
+import { abortNoticeFor, type AbortNotice } from './matchAborts.js';
 
 export interface MatchmakerDeps {
   broadcast: (event: string) => void;
@@ -90,7 +92,16 @@ export interface StateSnapshot {
     /** Set instead when nobody failed to ready: this player was taken out of
      *  the lobby (banned mid ready check) and the pop was cancelled for it. */
     removed?: NamedPlayer;
+    /** Set instead when staff cancelled the pop outright (cancelLobby). */
+    cancelled?: true;
   } | null;
+  /**
+   * The match the viewer was on, if it was aborted and they have not
+   * dismissed the notice. Persisted (src/matchAborts.ts), unlike lobbyNotice:
+   * an aborted match can have cost them a timeout, and a reload must not be
+   * the way they lose the only explanation.
+   */
+  abortNotice: AbortNotice | null;
 }
 
 /** Lifecycle events the broadcast cannot carry, because it sends only an
@@ -120,7 +131,7 @@ export class Matchmaker {
   /** Per-player "your ready check failed", keyed by steamid. In memory and
    *  deliberately not persisted: it is about something that happened seconds
    *  ago, and a notice that outlived a restart would be noise. */
-  private notices = new Map<string, { notReady: string[]; youWereReady: boolean; removed?: string }>();
+  private notices = new Map<string, { notReady: string[]; youWereReady: boolean; removed?: string; cancelled?: true }>();
   /** Queued players who asked for side games (2v2/3v3 while waiting). Kept
    *  through a pop so a failed ready check resumes the game; see sideGames.ts. */
   private sideOptIn = new Set<string>();
@@ -223,6 +234,17 @@ export class Matchmaker {
     return [...this.lobbyMap.values()].map((l) => ({ id: l.id, snapshot: l.snapshot() }));
   }
 
+  /** The pops in progress, named, for the admin Live desk's Cancel pop. */
+  adminLobbies(): { id: string; phase: LobbyPhase; deadline: number; players: (NamedPlayer & { ready: boolean })[] }[] {
+    return [...this.lobbyMap.values()]
+      .map((l) => l.snapshot())
+      .filter((s) => s.phase === 'ready_check' || s.phase === 'map_vote')
+      .map((s) => ({
+        id: s.id, phase: s.phase, deadline: s.deadline,
+        players: s.players.map((p) => ({ ...this.named(p), ready: s.ready.includes(p) })),
+      }));
+  }
+
   /** Who readied and who did not, for a lobby that failed in this process. */
   lastFailure(lobbyId: string): { ready: string[]; notReady: string[] } | null {
     return this.failures.get(lobbyId) ?? null;
@@ -288,6 +310,65 @@ export class Matchmaker {
       this.maybeStartLobby();
     }
     this.changed();
+  }
+
+  /**
+   * Staff cancel a pop at whatever phase it is in, ready check or campaign
+   * vote. Before this the only way to stop one was to wait for it to become a
+   * match and abort that: a player who had to be banned slipped into a full
+   * lobby, and staff sat through the ready check and the vote before they
+   * could do anything (owner, 2026-09-29).
+   *
+   * The same path remove() takes, for the whole lobby: dissolve it, put the
+   * players back at the FRONT of the queue in their old order, and pop again
+   * if the queue can fill one. `exclude` are players NOT to requeue (the one
+   * being removed). Nobody is penalised and no failure is recorded, so the
+   * Discord card closes as cancelled. With no id the only open lobby is
+   * meant; with two open and no id this refuses rather than guess.
+   */
+  cancelLobby(lobbyId?: string, exclude: string[] = []):
+    { ok: true; lobbyId: string; requeued: string[]; excluded: string[] } | { ok: false; error: string } {
+    const open = [...this.lobbyMap.values()].filter((l) => {
+      const phase = l.snapshot().phase;
+      return phase === 'ready_check' || phase === 'map_vote';
+    });
+    const lobby = lobbyId ? open.find((l) => l.id === lobbyId) : open.length === 1 ? open[0] : undefined;
+    if (!lobby) {
+      return { ok: false, error: lobbyId || open.length === 0 ? 'no such pop is running' : 'more than one pop is running; name one' };
+    }
+    const players = this.dissolveLobby(lobby.id);
+    const skip = new Set(exclude);
+    const back = players.filter((p) => !skip.has(p));
+    const excluded = players.filter((p) => skip.has(p));
+    for (const p of excluded) this.sideOptIn.delete(p);
+    for (const p of back) this.notices.set(p, { notReady: [], youWereReady: true, cancelled: true });
+    this.emit('lobbyFailed', lobby.id, [...back], []);
+    this.queue.requeueFront(back);
+    this.maybeStartLobby();
+    this.changed();
+    return { ok: true, lobbyId: lobby.id, requeued: back, excluded };
+  }
+
+  /**
+   * Put the blameless players of an aborted match back at the FRONT of the
+   * queue, the way a failed ready check puts back the ones who readied
+   * (src/matchAborts.ts). Only those who may queue right now: in good
+   * standing (no ban), no queue timeout, the Discord requirement met, and not
+   * already queued, in a pop or on another open match. The ready-time voice
+   * rule is not a queue rule and is left to the ready check, as for anyone.
+   * Returns who went back.
+   */
+  requeueAfterAbort(steamids: string[]): string[] {
+    const back = steamids.filter((id) =>
+      !this.queue.has(id) && !this.playerLobby.has(id) && !this.hasOpenMatch(id)
+      && inGoodStanding(this.db, id)
+      && !this.deps.queueGate?.(id)
+      && !activeTimeout(this.db, id));
+    if (back.length === 0) return [];
+    this.queue.requeueFront(back);
+    this.maybeStartLobby();
+    this.changed();
+    return back;
   }
 
   ready(steamid: string): { ok: boolean; error?: string } {
@@ -523,8 +604,10 @@ export class Matchmaker {
         return {
           notReady: n.notReady.map(named), youWereReady: n.youWereReady,
           ...(n.removed ? { removed: named(n.removed) } : {}),
+          ...(n.cancelled ? { cancelled: true as const } : {}),
         };
       })(),
+      abortNotice: abortNoticeFor(this.db, steamid),
     };
   }
 

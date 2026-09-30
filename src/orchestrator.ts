@@ -13,7 +13,9 @@ import type { ServerReleaser } from './serverRelease.js';
 import { completeMatch } from './matchResult.js';
 import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
-import { clearLive } from './matchArchive.js';
+import { archiveAborted, clearLive } from './matchArchive.js';
+import { noteMatchAborted } from './matchAborts.js';
+import { redactSecrets } from './redact.js';
 import { CAMPAIGNS, isMapName } from './campaigns.js';
 import { campaignDisplayName, campaignRegistry, firstMapOf } from './campaignRegistry.js';
 import { isInstalledEverywhere } from './campaignInstall.js';
@@ -291,8 +293,26 @@ export class RealOrchestrator implements Orchestrator {
     } catch (err) {
       console.error(`[orchestrator] setup failed for match ${matchId}:`, err);
       this.listener.unregister(token);
+      // The same ending every other abort gets, which this one used to skip:
+      // ended_at (without it the match sorted as never finished), the record
+      // archived, the admin feed told why, and the roster told and requeued.
+      // Guarded on 'configuring' so an admin abort that landed while setup was
+      // still dialling is not written over or announced twice.
+      const aborted = this.db.prepare(
+        "UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ? AND state = 'configuring'",
+      ).run(matchId).changes > 0;
+      if (aborted) archiveAborted(this.db, matchId);
       this.releaser.release(server.id, server === heldServer ? FORCED_RESTART : undefined);
-      this.db.prepare("UPDATE matches SET state = 'aborted' WHERE id = ?").run(matchId);
+      if (aborted) {
+        // The error quotes the rcon command that failed, and two of them carry
+        // secrets: the token (this match's sv_password) and the log secret.
+        const why = redactSecrets(err instanceof Error ? err.message : String(err), [token, server.log_secret]);
+        publishAdminEvent({
+          kind: 'problem', matchId,
+          text: `Match #${matchId} aborted: setting up ${server.name} failed (${why}). The players went back to the front of the queue.`,
+        });
+        noteMatchAborted(this.db, { matchId, cause: 'setup_failed', requeue: true });
+      }
     } finally {
       rcon?.close();
     }

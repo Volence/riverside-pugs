@@ -169,3 +169,46 @@ describe('no-show teardown', () => {
     }));
   });
 });
+
+describe('no-show deadline extension and file check rejects', () => {
+  const releaser = (db: DB) => new ServerReleaser(db, async () => {});
+
+  it('extra minutes on the match push the whole deadline back', () => {
+    const db = openDb(':memory:');
+    const { id } = liveMatch(db, 12);
+    db.prepare('UPDATE matches SET noshow_extra_minutes = 5 WHERE id = ?').run(id);
+    expect(reapNoShowMatches(db, releaser(db))).toEqual([]);
+    db.prepare("UPDATE matches SET went_live_at = datetime('now', '-16 minutes') WHERE id = ?").run(id);
+    expect(reapNoShowMatches(db, releaser(db))).toEqual([id]);
+  });
+
+  it('a player the file check rejected tried to connect: no no-show for them, and the admin feed says so', async () => {
+    const { penaltyHistory } = await import('../src/penalties.js');
+    const { subscribeAdminEvents } = await import('../src/adminFeed.js');
+    const db = openDb(':memory:');
+    const { id } = liveMatch(db, 20);
+    db.prepare("UPDATE matches SET created_at = datetime('now', '-25 minutes') WHERE id = ?").run(id);
+    // Five in, three out: two never tried, one was turned away by the file check.
+    for (const p of IDS.slice(0, 5)) recordPlayerConnect(db, 'tok', p);
+    db.prepare('INSERT INTO signon_drops (steamid, name, secs_connected, forced_count, at) VALUES (?, ?, 20, 3, ?)')
+      .run(IDS[5], 'x', new Date(Date.now() - 10 * 60_000).toISOString());
+    // A drop from before the pop is about some other match and spares nobody.
+    db.prepare('INSERT INTO signon_drops (steamid, name, secs_connected, forced_count, at) VALUES (?, ?, 20, 3, ?)')
+      .run(IDS[6], 'y', new Date(Date.now() - 60 * 60_000).toISOString());
+    const texts: string[] = [];
+    const off = subscribeAdminEvents((e) => { if (e.kind === 'problem') texts.push(e.text); });
+    try {
+      expect(reapNoShowMatches(db, releaser(db))).toEqual([id]);
+    } finally {
+      off();
+    }
+    expect(penaltyHistory(db, IDS[5])).toEqual([]);
+    expect(penaltyHistory(db, IDS[6]).map((p) => p.kind)).toEqual(['no_show']);
+    expect(penaltyHistory(db, IDS[7]).map((p) => p.kind)).toEqual(['no_show']);
+    expect(texts[0]).toMatch(/One player was rejected by the file check/);
+    const roles = db.prepare('SELECT player_id, role FROM match_abort_notices WHERE match_id = ? ORDER BY player_id').all(id);
+    expect(roles).toContainEqual({ player_id: IDS[5], role: 'file_check' });
+    expect(roles).toContainEqual({ player_id: IDS[7], role: 'culprit' });
+    expect(roles).toContainEqual({ player_id: IDS[0], role: 'innocent' });
+  });
+});

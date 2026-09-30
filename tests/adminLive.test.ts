@@ -294,3 +294,132 @@ describe('GET /api/admin/live', () => {
     expect(after.matches[0].leaveControl).toBe('ok');
   });
 });
+
+describe('POST /api/admin/live/:matchId/noshow-extend', () => {
+  const extend = (as = ADMIN, id = matchId) =>
+    app.inject({ method: 'POST', url: `/api/admin/live/${id}/noshow-extend`, cookies: cookies[as] });
+  const board = async () => (await app.inject({ method: 'GET', url: '/api/admin/live', cookies: cookies[ADMIN] })).json().matches[0];
+  beforeEach(() => {
+    // Went live two minutes ago; three of eight are in, five never connected.
+    db.prepare("UPDATE matches SET went_live_at = datetime('now', '-2 minutes') WHERE id = ?").run(matchId);
+    for (const p of IDS.slice(0, 3)) db.prepare("UPDATE match_players SET connected_at = datetime('now') WHERE match_id = ? AND player_id = ?").run(matchId, p);
+    setSetting(db, 'noshow_minutes', '7');
+  });
+
+  it('is staff only, and a moderator may use it', async () => {
+    expect((await extend(PLAYER)).statusCode).toBe(403);
+    expect((await extend(MOD)).statusCode).toBe(200);
+  });
+
+  it('moves the whole match\'s deadline five minutes, audited, and the board counts down to the new one', async () => {
+    const before = await board();
+    const nc = before.teamB.find((p: { status: { kind: string } }) => p.status.kind === 'never_connected');
+    expect(nc.status.deadlineS).toBeGreaterThan(4 * 60);
+    expect(nc.status.deadlineS).toBeLessThanOrEqual(5 * 60);
+    expect(before.noShow).toMatchObject({ extraMinutes: 0, canExtend: true });
+
+    const res = await extend();
+    expect(res.json()).toEqual({ ok: true, extraMinutes: 5 });
+    const after = await board();
+    const nc2 = after.teamB.find((p: { status: { kind: string } }) => p.status.kind === 'never_connected');
+    expect(nc2.status.deadlineS).toBeGreaterThan(9 * 60);
+    expect((await audit())[0]).toMatchObject({ action: 'noshow_extend', target: String(matchId), detail: { extraMinutes: 5 } });
+  });
+
+  it('stops at thirty minutes in total', async () => {
+    for (let i = 0; i < 6; i++) expect((await extend()).statusCode).toBe(200);
+    const res = await extend();
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatch(/30 minutes/);
+  });
+
+  it('refuses once a round has been played, or when everyone has connected', async () => {
+    db.prepare("UPDATE match_players SET connected_at = datetime('now') WHERE match_id = ?").run(matchId);
+    expect((await extend()).statusCode).toBe(409);
+    db.prepare("UPDATE match_players SET connected_at = NULL WHERE match_id = ? AND player_id = ?").run(matchId, IDS[7]);
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team) VALUES (?, 0, 1, 'a')").run(matchId);
+    expect((await extend()).statusCode).toBe(409);
+  });
+});
+
+describe('POST /api/admin/queue/cancel-pop', () => {
+  const cancel = (payload: object, as = ADMIN) =>
+    app.inject({ method: 'POST', url: '/api/admin/queue/cancel-pop', cookies: cookies[as], payload });
+  const LOBBY = Array.from({ length: 8 }, (_, i) => `7656119900000010${i}`);
+  beforeEach(async () => {
+    // The live match's roster is busy, so a fresh eight fill the pop.
+    for (const id of LOBBY) cookies[id] = authedCookie(app, db, id);
+    for (const id of LOBBY) await app.inject({ method: 'POST', url: '/api/queue/join', cookies: cookies[id] });
+  });
+
+  it('is staff only', async () => {
+    expect((await cancel({}, PLAYER)).statusCode).toBe(403);
+  });
+
+  it('cancels the pop, leaves the excluded out, requeues the rest, and shows the pop on the overview first', async () => {
+    const overview = (await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: cookies[MOD] })).json();
+    expect(overview.lobbies).toHaveLength(1);
+    expect(overview.lobbies[0]).toMatchObject({ phase: 'ready_check' });
+    expect(overview.lobbies[0].players).toHaveLength(8);
+
+    const res = await cancel({ exclude: [LOBBY[4]] }, MOD);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().excluded).toEqual([LOBBY[4]]);
+    const q = (await app.inject({ method: 'GET', url: '/api/queue' })).json();
+    expect(q.count).toBe(7);
+    expect(q.players.map((p: { steamid: string }) => p.steamid)).not.toContain(LOBBY[4]);
+    expect((await audit())[0]).toMatchObject({ action: 'cancel_pop', detail: { requeued: 7, excluded: [LOBBY[4]] } });
+  });
+
+  it('409s with nothing to cancel, and 400s on a bad body', async () => {
+    expect((await cancel({ exclude: 'x' })).statusCode).toBe(400);
+    expect((await cancel({ exclude: [LOBBY[0], LOBBY[1]] })).statusCode).toBe(200);
+    expect((await cancel({})).statusCode).toBe(409);
+  });
+});
+
+describe('aborting from the admin panel', () => {
+  const abort = (payload: object = {}, id = matchId) =>
+    app.inject({ method: 'POST', url: `/api/admin/matches/${id}/abort`, cookies: cookies[ADMIN], payload });
+  const noShows = () => (db.prepare("SELECT COUNT(*) AS n FROM penalties WHERE kind = 'no_show' AND cleared_at IS NULL").get() as { n: number }).n;
+
+  it('tells every player and puts them back at the front of the queue', async () => {
+    expect((await abort()).statusCode).toBe(200);
+    // Eight back at the front is a full queue, so they are straight into a
+    // fresh ready check together.
+    const state = (await app.inject({ method: 'GET', url: '/api/state', cookies: cookies[IDS[0]] })).json();
+    expect(state.lobby).toMatchObject({ phase: 'ready_check' });
+    expect(state.lobby.players).toHaveLength(8);
+    expect(state.abortNotice).toMatchObject({ matchId, cause: 'admin', role: 'innocent', requeued: true });
+    // Dismissed, it stays gone across a reload.
+    await app.inject({ method: 'POST', url: '/api/match/dismiss-abort-notice', cookies: cookies[IDS[0]] });
+    expect((await app.inject({ method: 'GET', url: '/api/state', cookies: cookies[IDS[0]] })).json().abortNotice).toBeNull();
+  });
+
+  it('clears this match\'s no-show penalties only when asked', async () => {
+    const other = Number(db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'aborted', 'dead_air')").run().lastInsertRowid);
+    const pen = db.prepare("INSERT INTO penalties (player_id, kind, match_id, created_at) VALUES (?, 'no_show', ?, ?)");
+    pen.run(IDS[6], matchId, new Date().toISOString());
+    pen.run(IDS[7], other, new Date().toISOString());
+    expect((await abort({ clearNoShows: true })).json()).toMatchObject({ ok: true, clearedNoShows: [IDS[6]] });
+    expect(noShows()).toBe(1);
+    expect((await audit())[0]).toMatchObject({ action: 'abort_match', detail: { clearedNoShows: 1 } });
+    // And after the fact, for the aborted match that handed one out.
+    const res = await app.inject({ method: 'POST', url: `/api/admin/matches/${other}/clear-noshows`, cookies: cookies[MOD] });
+    expect(res.json()).toEqual({ ok: true, cleared: [IDS[7]] });
+    expect(noShows()).toBe(0);
+  });
+
+  it('clears one penalty from a player file, and only that one', async () => {
+    const pen = db.prepare("INSERT INTO penalties (player_id, kind, match_id, created_at) VALUES (?, ?, NULL, ?)");
+    const a = Number(pen.run(IDS[1], 'no_show', new Date().toISOString()).lastInsertRowid);
+    pen.run(IDS[1], 'ready_fail', new Date().toISOString());
+    const clear = (who: string, id: number) =>
+      app.inject({ method: 'POST', url: `/api/admin/players/${who}/penalties/${id}/clear`, cookies: cookies[ADMIN] });
+    expect((await clear(IDS[2], a)).statusCode).toBe(404);
+    expect((await clear(IDS[1], a)).statusCode).toBe(200);
+    expect((await clear(IDS[1], a)).statusCode).toBe(404);
+    expect(db.prepare('SELECT kind FROM penalties WHERE player_id = ? AND cleared_at IS NULL').all(IDS[1])).toEqual([{ kind: 'ready_fail' }]);
+    expect((await audit())[0]).toMatchObject({ action: 'clear_penalty', target: IDS[1], detail: { penaltyId: a } });
+  });
+});

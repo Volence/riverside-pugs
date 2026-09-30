@@ -82,8 +82,15 @@ describe('the match line', () => {
 });
 
 describe('exactly one status per player', () => {
-  it('never connected, with how long since the pop', () => {
-    expect(find(IDS[0]).status).toEqual({ kind: 'never_connected', sincePopS: 600 });
+  it('never connected, with how long since the pop and how long to the no-show deadline', () => {
+    // Live at 20:02, noshow_minutes 10 by default: the reaper acts at 20:12.
+    expect(find(IDS[0]).status).toEqual({ kind: 'never_connected', sincePopS: 600, deadlineS: 120 });
+  });
+
+  it('the deadline counts the minutes staff added to this match', () => {
+    db.prepare('UPDATE matches SET noshow_extra_minutes = 5 WHERE id = ?').run(matchId);
+    expect(find(IDS[0]).status).toMatchObject({ deadlineS: 420 });
+    expect(board().matches[0].noShow).toMatchObject({ extraMinutes: 5, deadlineS: 420, canExtend: true });
   });
 
   it('on the server, from a presence row or from connected_at alone', () => {
