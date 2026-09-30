@@ -10,12 +10,19 @@ import {
   getMessage, messagesInState, rekeyMessage, saveMessage, setMessageState,
 } from './messageStore.js';
 import {
-  renderCancelled, renderLobby, renderLobbyFailed, renderMatch, renderPanel, renderQueueAlert,
+  renderCancelled, renderLobby, renderLobbyFailed, renderMatch, renderMatchAborted, renderPanel, renderQueueAlert,
   renderResult, type MatchCardState, type PlayerView, type ResultPlayer,
 } from './presenter.js';
 import { getSetting } from '../settings.js';
 import { safeThresholds } from '../matchmaker.js';
 import { sideGamesEnabled, type SidePublicView } from '../sideGames.js';
+import { ABORT_REASON, anyRequeued, type AbortCause } from '../matchAborts.js';
+
+/** How long the "PUG #N was aborted" line stays in #queue-here. Long enough
+ *  for the people watching the queue to read it, short enough that aborts do
+ *  not pile up between the panel and the people queueing, which is what moved
+ *  aborted cards out of the channel in the first place (owner, 2026-09-20). */
+const ABORT_LINE_TTL_MIN = 15;
 
 /** Shortest gap between two queue alerts.
  *
@@ -58,6 +65,7 @@ export interface DiscordSyncDeps {
 interface MatchRow {
   id: number;
   state: string;
+  abort_cause: AbortCause | null;
   campaign: string;
   server_id: number | null;
   winner: 'a' | 'b' | 'draw' | null;
@@ -215,7 +223,7 @@ export class DiscordSync {
       if (m.ref.startsWith('lob_')) continue;
       const matchId = Number(m.ref);
       const row = db.prepare(
-        'SELECT id, state, campaign, server_id, winner, team_a_score, team_b_score FROM matches WHERE id = ?',
+        'SELECT id, state, abort_cause, campaign, server_id, winner, team_a_score, team_b_score FROM matches WHERE id = ?',
       ).get(matchId) as MatchRow | undefined;
       if (!row) {
         setMessageState(db, 'match', m.ref, 'done');
@@ -287,8 +295,28 @@ export class DiscordSync {
       } else if (state === 'aborted') {
         await this.closeMatchCard(m, payload);
         await this.drop('live', m.ref);
+        // Only for an abort that says why: one from before the cause was
+        // recorded, or written by hand, gets no line rather than a vague one.
+        if (row.abort_cause && !getMessage(db, 'aborted', m.ref)) {
+          try {
+            const messageId = await this.deps.transport.send(channelId, renderMatchAborted({
+              matchId, reason: ABORT_REASON[row.abort_cause], requeued: anyRequeued(db, matchId),
+            }));
+            saveMessage(db, { kind: 'aborted', ref: m.ref, channelId, messageId, state: 'open' });
+            posted = true;
+          } catch (err) {
+            console.error('[discord] posting the aborted line failed:', err);
+          }
+        }
       }
     }
+
+    // Aborted lines past their time go, so they never pile up in the channel.
+    const stale = db.prepare(
+      `SELECT ref FROM discord_messages WHERE kind = 'aborted' AND state = 'open'
+       AND created_at <= datetime('now', ?)`,
+    ).all(`-${ABORT_LINE_TTL_MIN} minutes`) as { ref: string }[];
+    for (const s of stale) await this.drop('aborted', s.ref);
 
     if (this.deps.voice) await this.deps.voice.sweep().catch((err) => console.error('[discord] voice sweep failed:', err));
 

@@ -243,6 +243,26 @@ export function renderCancelled(): MessagePayload {
   };
 }
 
+/**
+ * The one line #queue-here gets when a match is aborted.
+ *
+ * The card itself goes to the admin channel (DiscordSync.closeMatchCard), so
+ * without this the people watching the queue saw a match simply vanish.
+ * Neutral by design: the reason never names who was at fault, and nobody is
+ * pinged. Each player is told the rest on the site.
+ */
+export function renderMatchAborted(v: { matchId: number; reason: string; requeued: boolean }): MessagePayload {
+  return {
+    embeds: [{
+      color: COLOR.muted,
+      description: `PUG #${v.matchId} was aborted: ${v.reason}. Nothing was rated.`
+        + (v.requeued ? ' Everyone who was not at fault is back at the front of the queue.' : ''),
+    }],
+    components: [],
+    mentionUserIds: [],
+  };
+}
+
 // ---------- match card ----------
 
 export type MatchCardState = 'configuring' | 'waiting' | 'live' | 'finished' | 'aborted';
