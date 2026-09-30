@@ -11,6 +11,10 @@ import { noteMatchAborted } from '../matchAborts.js';
 import { clearMatchNoShows } from '../penalties.js';
 
 export function adminOverview(db: DB, logAuth?: LogAuth) {
+  const rosterOf = db.prepare(
+    `SELECT mp.player_id AS steamid, COALESCE(p.name, mp.player_id) AS name FROM match_players mp
+     LEFT JOIN players p ON p.steamid = mp.player_id WHERE mp.match_id = ? ORDER BY mp.team, mp.rowid`,
+  );
   const openRows = db.prepare(
     `SELECT m.id, m.campaign, m.state, m.server_id AS serverId, m.token, m.created_at AS createdAt,
             m.went_live_at AS wentLiveAt,
@@ -41,6 +45,8 @@ export function adminOverview(db: DB, logAuth?: LogAuth) {
         ? { host: server.host, port: server.port, password: serverPasswordFor(token) }
         : null,
       forecast: matchForecast(db, m.id),
+      // For the abort dialog's "leave out of the queue" boxes.
+      roster: rosterOf.all(m.id) as { steamid: string; name: string }[],
     };
   });
   // Never the rcon password, and never the log secret: this goes to a browser.
@@ -111,8 +117,10 @@ export type ActionResult = { ok: true } | { ok: false; status: number; error: st
  *  frozen into the permanent tables so the match page can still show who was
  *  in and how far they got. Everyone on it is told, and goes back to the
  *  front of the queue if they may queue: staff pulling the plug is nobody's
- *  fault on the roster, and a player being banned is kept out by the ban. */
-export function abortMatch(db: DB, releaser: ServerReleaser, matchId: number): ActionResult {
+ *  fault on the roster. `leaveOut` is who staff ticked to keep out: a ban
+ *  keeps a player out only once it exists, and eight back at the front
+ *  re-pop at once, before staff have filed it. */
+export function abortMatch(db: DB, releaser: ServerReleaser, matchId: number, leaveOut: string[] = []): ActionResult {
   const m = db.prepare('SELECT state, server_id FROM matches WHERE id = ?').get(matchId) as
     | { state: string; server_id: number | null } | undefined;
   if (!m) return { ok: false, status: 404, error: 'no such match' };
@@ -122,7 +130,7 @@ export function abortMatch(db: DB, releaser: ServerReleaser, matchId: number): A
   // a heartbeat naming the reset map must not land before the record is taken.
   archiveAborted(db, matchId);
   if (m.server_id !== null) releaser.release(m.server_id, { teardown: true, restart: true });
-  noteMatchAborted(db, { matchId, cause: 'admin', requeue: true });
+  noteMatchAborted(db, { matchId, cause: 'admin', requeue: true, leaveOut });
   return { ok: true };
 }
 

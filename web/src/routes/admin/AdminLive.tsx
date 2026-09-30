@@ -7,7 +7,7 @@ import { campaignName, fmtClock, mapName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
 import { SpectatePanel } from '../../components/SpectatePanel';
 import { useAction, type Run } from './useAction';
-import { AdminQueuePanel, AdminServersPanel, OpenMatchesPanel, RecentResultsPanel, abortAsk } from './MatchPanels';
+import { AdminQueuePanel, AdminServersPanel, OpenMatchesPanel, RecentResultsPanel, abortMatchAsked } from './MatchPanels';
 import { PracticeLeasesPanel } from './PracticeLeasesPanel';
 import { ChatDrawer } from './ChatDrawer';
 import { chatFromUrl, OLD_PLUGIN_REASON, SELF_STARTED_REASON, countdown, countUp, isLow, liveFromUrl, reasonText } from '../../liveBoard';
@@ -154,7 +154,7 @@ function MatchCard({ match: m, elapsedS, holdMaxMinutes, lowAlertSeconds, reload
             waiting for a server, or stuck with no connect line, is exactly
             the one someone is looking at up here. */}
         <button type="button" class="chip" disabled={cardBusy}
-          onClick={() => run(() => adminApi.abortMatch(m.id), abortAsk(m.id))}>Abort</button>
+          onClick={() => abortMatchAsked(run, m.id, [...m.teamA, ...m.teamB])}>Abort</button>
       </header>
 
       {m.noShow?.applies && (
