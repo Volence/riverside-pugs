@@ -92,6 +92,29 @@ describe('handleAbandon', () => {
   });
 });
 
+describe('abandonBanMinutes and lifted bans', () => {
+  const ban = (lifted: { by: string; at: string } | null, expires: string) =>
+    db.prepare("INSERT INTO bans (player_id, reason, created_by, created_at, expires_at, lifted_by, lifted_at) VALUES (?, 'Abandoned match #7', 'system', ?, ?, ?, ?)")
+      .run(IDS[2], new Date(Date.now() - 3600_000).toISOString(), expires, lifted?.by ?? null, lifted?.at ?? null);
+  const future = () => new Date(Date.now() + 86_400_000).toISOString();
+  const past = () => new Date(Date.now() - 60_000).toISOString();
+
+  it('a ban staff lifted early stops counting toward the next one', () => {
+    ban({ by: IDS[7], at: new Date().toISOString() }, future());
+    expect(abandonBanMinutes(db, IDS[2])).toBe(1440);
+  });
+
+  it('a ban that ran out and was lifted by the expiry sweep still counts: it was served', () => {
+    ban({ by: 'system', at: new Date().toISOString() }, past());
+    expect(abandonBanMinutes(db, IDS[2])).toBe(4320);
+  });
+
+  it('a ban a human lifted after it had already run out still counts', () => {
+    ban({ by: IDS[7], at: new Date().toISOString() }, new Date(Date.now() - 3000_000).toISOString());
+    expect(abandonBanMinutes(db, IDS[2])).toBe(4320);
+  });
+});
+
 describe('statusShowsAbandoner', () => {
   const body = `STATUS state=live match=1\nSTATUS leave abandoner=${IDS[2]} budget=300 autounpause=1 paused=1\nSTATUS end`;
   it('matches only the recorded abandoner', () => {
