@@ -469,6 +469,9 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const { enabled } = (req.body ?? {}) as { enabled?: unknown };
     if (typeof enabled !== 'boolean') return reply.code(400).send({ error: 'enabled must be true or false' });
     setEnabled(db, id, enabled);
+    // A match may be waiting for exactly this box. Only a release used to wake
+    // one, so re-enabling an idle server left it sitting there unclaimed.
+    if (enabled) releaser.wake();
     logAdmin(db, adminId, enabled ? 'server_enable' : 'server_disable', id);
     broadcast('refresh');
     return { ok: true };

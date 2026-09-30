@@ -278,3 +278,42 @@ describe('admin abort teardown', () => {
       .toEqual({ a: 120, b: 90 });
   });
 });
+
+// Its own bare app: the waiting-match wake-up is wired to a real releaser and
+// a real pending list here, the way server.ts wires them, so the test sees
+// the same path a live re-enable takes rather than a spy on the route.
+describe('re-enabling a server wakes a match waiting for one', () => {
+  it('drains the pending list on enable, and not on disable', async () => {
+    const Fastify = (await import('fastify')).default;
+    const cookie = (await import('@fastify/cookie')).default;
+    const { adminRoutes } = await import('../src/routes/admin.js');
+    const { PendingMatches } = await import('../src/pendingMatches.js');
+    const db2 = openDb(':memory:');
+    const releaser = new ServerReleaser(db2, async () => {});
+    const setups: number[] = [];
+    const pending = new PendingMatches(db2, async (id) => { setups.push(id); });
+    releaser.onFreed(() => pending.drain());
+    const bare = Fastify();
+    await bare.register(cookie, { secret: loadConfig({}).cookieSecret });
+    await bare.register(adminRoutes, {
+      db: db2, matchmaker: {} as never, releaser, broadcast: () => {}, adminSteamIds: [],
+    });
+    await bare.ready();
+    try {
+      const who = authedCookie(bare, db2, ADMIN);
+      db2.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
+      const serverId = addServer(db2, { name: 's1', host: '1.2.3.4', port: 27015, rconPort: 27015, rconPassword: 'x', status: 'idle' });
+      db2.prepare('UPDATE servers SET enabled = 0 WHERE id = ?').run(serverId);
+      const waiting = Number(db2.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'configuring', 'dead_air')").run().lastInsertRowid);
+      pending.add(waiting);
+
+      const set = (enabled: boolean) => bare.inject({ method: 'POST', url: `/api/admin/servers/${serverId}/enabled`, cookies: who, payload: { enabled } });
+      expect((await set(false)).statusCode).toBe(200);
+      expect(setups).toEqual([]);
+      expect((await set(true)).statusCode).toBe(200);
+      expect(setups).toEqual([waiting]);
+    } finally {
+      await bare.close();
+    }
+  });
+});
