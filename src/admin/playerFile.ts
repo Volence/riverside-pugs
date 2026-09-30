@@ -1,5 +1,6 @@
 import type { DB } from '../db.js';
 import { aliasesOf, resolveAlias } from '../aliases.js';
+import { nameHistory } from '../playerNames.js';
 import { discordHistoryOf, getPlayer } from '../players.js';
 import { penaltyHistory, activeTimeout } from '../penalties.js';
 import { networksOf, sharesAddressWith } from '../playerNetworks.js';
@@ -64,6 +65,9 @@ export interface PlayerFile {
 function identity(db: DB, steamid: string) {
   return {
     aliases: aliasesOf(db, steamid),
+    // Every name played under in a match, with when and how often. The
+    // profile shows a few; staff get all of them.
+    names: nameHistory(db, steamid),
     discordHistory: discordHistoryOf(db, steamid),
     steamAccount: steamAccountView(db, steamid),
     networks: networksOf(db, steamid),

@@ -4,6 +4,7 @@ import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { upsertPlayer } from '../src/players.js';
+import { recordNameUses } from '../src/playerNames.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 
 const P1 = '76561198000000001';
@@ -23,6 +24,17 @@ beforeEach(async () => {
   upsertPlayer(db, { steamid: P2, name: 'bob', avatar: null }, []);
 });
 afterEach(async () => { await app.close(); });
+
+describe('GET /api/players/:steamid also known as', () => {
+  it('lists earlier names with their match counts, never the current one', async () => {
+    for (let i = 0; i < 12; i++) {
+      recordNameUses(db, P2, `m:${i}`, [{ source: 'ingame', name: 'amour plastique' }], '2026-09-19 00:00:00', { queue: false });
+    }
+    recordNameUses(db, P2, 'm:20', [{ source: 'steam', name: 'bob' }], '2026-09-24 00:00:00', { queue: false });
+    const res = await app.inject({ method: 'GET', url: `/api/players/${P2}` });
+    expect(res.json().alsoKnownAs).toEqual([{ name: 'amour plastique', matches: 12 }]);
+  });
+});
 
 describe('POST /api/profile', () => {
   it('needs a session', async () => {
