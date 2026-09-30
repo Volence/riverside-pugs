@@ -107,6 +107,11 @@ afterEach(async () => { await app.close(); rmSync(replayDir, { recursive: true, 
 
 const get = (url: string, who?: string) =>
   app.inject({ method: 'GET', url, cookies: who ? authedCookie(app, db, who) : undefined });
+const post = (url: string, payload: unknown, who?: string) =>
+  app.inject({
+    method: 'POST', url, payload: payload as object,
+    cookies: who ? authedCookie(app, db, who) : undefined,
+  });
 
 describe('replays and live data respect visibility', () => {
   it('live/match/:id answers a private scrim like a missing match for outsiders, and opens it to participants and staff', async () => {
@@ -172,5 +177,21 @@ describe('replayFileVisible', () => {
   it('a ranked-shaped name whose token belongs to no match (a standalone !mix session) passes through', () => {
     const filename = `pug_${TOKEN_MIX}_0_1.rpl`;
     expect(replayFileVisible(db, viewerFor(db, outsider), filename)).toBe(true);
+  });
+});
+
+describe('POST /api/practice/drills respects visibility', () => {
+  it('answers a private scrim like a missing match for an outsider, and builds normally for a participant', async () => {
+    const body = { matchId: donePriv, ordinal: 1, half: 1, tMs: 200 };
+    const missing = await post('/api/practice/drills', { ...body, matchId: 999999 }, ids[0]);
+    expect(missing.statusCode).toBe(404);
+
+    const asOutsider = await post('/api/practice/drills', body, outsider);
+    expect(asOutsider.statusCode).toBe(404);
+    expect(asOutsider.json()).toEqual(missing.json());
+
+    const asParticipant = await post('/api/practice/drills', body, ids[0]);
+    expect(asParticipant.statusCode).toBe(200);
+    expect(asParticipant.json().spec).toBeTruthy();
   });
 });

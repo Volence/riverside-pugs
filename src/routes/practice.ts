@@ -13,6 +13,7 @@ import { getSetting } from '../settings.js';
 import { campaignRegistry, resolveCampaignForMap } from '../campaignRegistry.js';
 import { finishedReplayBytes, type ReplaySources } from './replays.js';
 import { makeOptionalViewer, makeRequireActive, makeRequireMod } from './guards.js';
+import { canViewMatch, viewerFor } from '../matchVisibility.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -114,7 +115,12 @@ export async function practiceRoutes(
     }
 
     const match = db.prepare('SELECT state FROM matches WHERE id = ?').get(matchId) as { state: string } | undefined;
-    if (!match) return reply.code(404).send({ error: 'no such match' });
+    // A hidden match answers exactly like a missing one: an active player who
+    // is not a participant (or staff) must not be able to turn a private
+    // scrim's replay, ghosts included, into a public drill.
+    if (!match || !canViewMatch(db, viewerFor(db, steamid), matchId)) {
+      return reply.code(404).send({ error: 'no such match' });
+    }
     if (match.state !== 'completed' && match.state !== 'aborted') {
       return reply.code(403).send({ error: 'Drills can only be made from finished matches.' });
     }
