@@ -25,6 +25,7 @@ import { leaderboardData, profileData } from '../playerQueries.js';
 import { listSeasons } from '../seasons.js';
 import { sameName } from '../identity.js';
 import { sessionsForMatch } from '../sourcetvSessions.js';
+import { queueActivity } from '../queueActivity.js';
 
 export interface StatsRouteOpts { db: DB; demoDir?: string; r2?: R2Config | null }
 
@@ -147,6 +148,12 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
    *  or merged (see standing.ts inGoodStanding, which viewerOf already
    *  applies). discord_id itself is never selected at all. */
   app.get('/api/live', async (req) => ({ matches: getLiveMatches(db, viewerOf(req) !== null) }));
+
+  /** When people play (queue pops by UTC weekday and hour over four weeks)
+   *  and how long the queue takes to pop. Public: its main audience is the
+   *  signed-out visitor deciding whether anyone is around. Aggregates only,
+   *  no player is named or countable from it. */
+  app.get('/api/activity', async () => queueActivity(db));
 
   /** Every map that has been played, so the map pages are discoverable. */
   // `pool` is the current vote rotation, so the page can put what you might

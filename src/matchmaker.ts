@@ -14,6 +14,7 @@ import { READY_BLOCK_MESSAGE, type ReadyBlock } from './readyGate.js';
 import type { Orchestrator } from './orchestrator.js';
 import { inGoodStanding } from './standing.js';
 import { abortNoticeFor, type AbortNotice } from './matchAborts.js';
+import { recordQueueStint } from './queueActivity.js';
 
 export interface MatchmakerDeps {
   broadcast: (event: string) => void;
@@ -121,7 +122,7 @@ const BOOT = Date.now().toString(36);
 let instanceSeq = 0;
 
 export class Matchmaker {
-  private queue = new Queue();
+  private queue: Queue;
   private lobbyMap = new Map<string, Lobby>();
   private playerLobby = new Map<string, string>();
   private lobbySeq = 0;
@@ -136,7 +137,11 @@ export class Matchmaker {
    *  through a pop so a failed ready check resumes the game; see sideGames.ts. */
   private sideOptIn = new Set<string>();
 
-  constructor(private db: DB, private deps: MatchmakerDeps) {}
+  constructor(private db: DB, private deps: MatchmakerDeps) {
+    // Built here rather than as a field initializer so `db` is certainly
+    // assigned before the hook can use it.
+    this.queue = new Queue({ onStintEnd: (stint) => recordQueueStint(db, stint) });
+  }
 
   /**
    * Save the queue and open lobbies, then tell every surface.
@@ -149,6 +154,7 @@ export class Matchmaker {
     try {
       const state = {
         queue: this.queue.list(),
+        queueJoinedAt: this.queue.joinTimes(),
         lobbies: [...this.lobbyMap.values()]
           .map((l) => l.persist())
           .filter((l) => l.phase === 'ready_check' || l.phase === 'map_vote'),
@@ -170,7 +176,7 @@ export class Matchmaker {
   restore(): void {
     const row = this.db.prepare('SELECT json FROM matchmaker_state WHERE id = 1').get() as { json: string } | undefined;
     if (!row) return;
-    let state: { queue: string[]; lobbies: PersistedLobby[]; sideOptIn?: string[] };
+    let state: { queue: string[]; queueJoinedAt?: Record<string, number>; lobbies: PersistedLobby[]; sideOptIn?: string[] };
     try {
       state = JSON.parse(row.json);
     } catch {
@@ -182,7 +188,7 @@ export class Matchmaker {
       for (const player of p.players) this.playerLobby.set(player, p.id);
     }
     for (const id of state.queue ?? []) {
-      if (!this.playerLobby.has(id)) this.queue.join(id);
+      if (!this.playerLobby.has(id)) this.queue.join(id, state.queueJoinedAt?.[id]);
     }
     for (const id of state.sideOptIn ?? []) {
       if (this.queue.has(id) || this.playerLobby.has(id)) this.sideOptIn.add(id);

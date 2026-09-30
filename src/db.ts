@@ -1729,6 +1729,23 @@ export function openDb(path: string): DB {
     CREATE INDEX IF NOT EXISTS player_name_digest_pending ON player_name_digest (posted_at);
   `);
 
+  // One row per stretch a player spent in the queue (src/queue.ts), written as
+  // it ends. Nothing reads it back into the matchmaker: it exists so the site
+  // can say how long a wait really is (src/queueActivity.ts). Epoch ms, since
+  // waits are measured in seconds and compared, never displayed raw. Old rows
+  // are pruned by the same module.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS queue_stints (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      player_id TEXT NOT NULL,
+      joined_at INTEGER NOT NULL,
+      ended_at  INTEGER NOT NULL,
+      outcome   TEXT NOT NULL CHECK (outcome IN ('popped','left')),
+      requeued  INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS queue_stints_ended ON queue_stints (ended_at);
+  `);
+
   seed(db);
   return db;
 }
