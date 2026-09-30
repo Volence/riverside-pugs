@@ -3113,6 +3113,7 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .chat-line--staff { border-left: 3px solid var(--win); padding-left: var(--sp-2); }
 .chat-line--to-staff { background: color-mix(in srgb, var(--win) 12%, transparent); }
 .chat-tag { margin-left: var(--sp-2); font-size: 0.8em; padding: 0 var(--sp-1); border-radius: var(--radius); background: var(--win); color: var(--accent-ink); }
+.chat-team { font-size: 0.8em; padding: 0 var(--sp-1); border: 1px solid var(--border); border-radius: var(--radius); }
 .chat-send { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 .chat-send input { flex: 1; min-width: 10rem; }
 .chat-pick { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: var(--sp-1); max-height: 8rem; overflow-y: auto; }

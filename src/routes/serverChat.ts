@@ -12,6 +12,11 @@ export interface ChatServerView { id: number; name: string; state: 'match' | 'pr
 export interface ChatLineView {
   id: number; at: number; kind: ChatLineRow['kind']; steamid: string | null; name: string | null;
   team: number | null; scope: 'all' | 'team' | null; message: string; matchId: number | null;
+  /** The speaker's site name, which the Live board's rosters use; `name` is
+   *  whatever they call themselves in game. */
+  siteName: string | null;
+  /** Which roster the speaker is on in this line's match. */
+  matchTeam: 'a' | 'b' | null;
   to: { kind: 'all' | 'team' | 'player'; value: string | null; name: string | null } | null;
   delivered: number | null;
 }
@@ -70,9 +75,21 @@ export async function serverChatRoutes(
       : listLines(db, id, 0, limit);
     const oldest = rows.length > 0 ? rows[0].id : Number.MAX_SAFE_INTEGER;
     const hasEarlier = hasLinesBefore(db, id, before > 0 && rows.length === 0 ? before : oldest);
+    // In-game names rarely match site names (owner, 2026-09-30: "who is
+    // Spoken For?"), so each line carries the name and team the board shows.
+    const siteNames = new Map<string, string | null>();
+    const siteName = (steamid: string | null): string | null => {
+      if (!steamid) return null;
+      if (!siteNames.has(steamid)) siteNames.set(steamid, getPlayer(db, steamid)?.name ?? null);
+      return siteNames.get(steamid)!;
+    };
+    const teamOf = db.prepare('SELECT team FROM match_players WHERE match_id = ? AND player_id = ?');
     const lines: ChatLineView[] = rows.map((r) => ({
       id: r.id, at: r.at, kind: r.kind, steamid: r.steamid, name: r.name, team: r.team, scope: r.scope,
       message: r.message, matchId: r.match_id, delivered: r.delivered,
+      siteName: r.kind === 'staff_out' ? null : siteName(r.steamid),
+      matchTeam: r.match_id !== null && r.steamid && r.kind !== 'staff_out'
+        ? (teamOf.get(r.match_id, r.steamid) as { team: 'a' | 'b' } | undefined)?.team ?? null : null,
       to: r.to_kind === null ? null : {
         kind: r.to_kind, value: r.to_value,
         name: r.to_kind === 'player' && r.to_value ? getPlayer(db, r.to_value)?.name ?? null : null,

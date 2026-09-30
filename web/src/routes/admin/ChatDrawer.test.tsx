@@ -17,7 +17,7 @@ const { ChatDrawer } = await import('./ChatDrawer');
 const P = '76561198000000001';
 const line = (over: Partial<ChatLineView> = {}): ChatLineView => ({
   id: 1, at: Date.UTC(2026, 8, 28, 20, 0), kind: 'say', steamid: P, name: 'Zoey', team: 2, scope: 'all',
-  message: 'hello', matchId: null, to: null, delivered: null, ...over,
+  message: 'hello', matchId: null, siteName: null, matchTeam: null, to: null, delivered: null, ...over,
 });
 const SERVERS = { servers: [{ id: 3, name: 'Dallas', state: 'match', lastAt: null }, { id: 4, name: 'Riverside #3', state: 'practice', lastAt: null }] };
 
@@ -55,7 +55,7 @@ describe('ChatDrawer', () => {
     ] });
     render(<ChatDrawer serverId={3} onPick={() => {}} onClose={() => {}} />);
     await screen.findByText('hello');
-    expect(screen.getByText('(team)')).toBeTruthy();
+    expect(screen.getByText('(Survivor team chat)')).toBeTruthy();
     expect(screen.getByText('to staff')).toBeTruthy();
     expect(screen.getAllByText(/whisper to Zoey/)).toHaveLength(2);
     expect(screen.getByText('delivered to 1')).toBeTruthy();
@@ -232,3 +232,24 @@ describe('ChatDrawer', () => {
   });
 });
 
+
+describe('ChatDrawer speaker names', () => {
+  it('leads with the site name and team, and shows the in-game name and team chat side', async () => {
+    mockMod.chatLines.mockResolvedValue({ server: { id: 3, name: 'Dallas' }, currentMatchId: 367, hasEarlier: false,
+      lines: [line({ name: 'Spoken For', siteName: 'Anna', matchTeam: 'a', scope: 'team', matchId: 367 })] });
+    render(<ChatDrawer serverId={3} onPick={() => {}} onClose={() => {}} />);
+    const log = await screen.findByRole('log');
+    await waitFor(() => expect(log.textContent).toContain('Team A'));
+    expect(screen.getByRole('button', { name: 'Anna' })).toBeTruthy();
+    expect(log.textContent).toContain('as "Spoken For"');
+    expect(log.textContent).toContain('(Survivor team chat)');
+  });
+
+  it('shows no in-game name when it matches the site name', async () => {
+    mockMod.chatLines.mockResolvedValue({ server: { id: 3, name: 'Dallas' }, currentMatchId: null, hasEarlier: false,
+      lines: [line({ siteName: 'Zoey' })] });
+    render(<ChatDrawer serverId={3} onPick={() => {}} onClose={() => {}} />);
+    await screen.findByRole('button', { name: 'Zoey' });
+    expect(screen.getByRole('log').textContent).not.toContain('as "');
+  });
+});
