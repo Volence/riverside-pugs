@@ -535,7 +535,12 @@ describe('RealOrchestrator', () => {
     });
   });
 
-  it('runs beforeLive on the setup connection after the roster and before the changelevel', async () => {
+  // exec pug_match makes the game reload the current map about two seconds
+  // later ("Staying on original map"), and the rcon connection goes quiet
+  // while it loads. Every command after it has to fit inside that window, so
+  // the ban push (dozens of commands) must be done before it. Matches 342 to
+  // 345 died on Riverside #5 on 2026-09-30 when the push outgrew the window.
+  it('runs beforeLive on the setup connection before exec pug_match', async () => {
     const srv = await fakeServer('');
     cleanup.push(srv.close);
     addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
@@ -550,10 +555,9 @@ describe('RealOrchestrator', () => {
     const mid = seedMatch(db);
     await orch.setupMatch(mid);
     const ban = srv.cmds.indexOf('sm_addban 0 "STEAM_1:1:35074132" "probe"');
-    const lastRoster = srv.cmds.map((c) => c.startsWith('sm_pug_roster')).lastIndexOf(true);
-    const change = srv.cmds.findIndex((c) => c.startsWith('changelevel'));
-    expect(ban).toBeGreaterThan(lastRoster);
-    expect(ban).toBeLessThan(change);
+    const config = srv.cmds.indexOf('exec pug_match');
+    expect(ban).toBeGreaterThanOrEqual(0);
+    expect(ban).toBeLessThan(config);
   });
 
   it('a failing beforeLive does not cost the match its server', async () => {
