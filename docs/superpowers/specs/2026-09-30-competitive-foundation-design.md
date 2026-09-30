@@ -195,9 +195,13 @@ player who then forms a group), side B confirms. The public looking-for-scrim bo
 
 ### Limits (settings)
 
+Every number in this section is a setting in the Settings desk (new group "Competitive"), not a
+constant.
+
 - Length 1 to 3 hours, in 30-minute steps; booked up to 14 days ahead.
-- Up to 4 upcoming bookings per team or pickup captain. Each no-show in the last 30 days lowers
-  that by one (minimum 1).
+- Up to 4 upcoming bookings per team or pickup captain (setting `booking_max_upcoming`, admin
+  editable like every other limit in this section). Each no-show in the last 30 days lowers that by
+  one (minimum 1).
 - No cap on evening (peak-hour) booking for now; the PUG reserve already protects the queue. Add a
   weekly peak-hours cap only if one team starts taking every evening slot.
 - Playlist: up to 4 campaigns. The form suggests about 1 campaign per hour and warns when the
