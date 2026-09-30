@@ -1,4 +1,5 @@
 import type { DB } from '../db.js';
+import { completedPug } from '../matchKinds.js';
 import { getSetting } from '../settings.js';
 import { findSkeetStreaks } from '../skeetStreaks.js';
 import { renderSkeetStreak, type SkeetStreakRow } from './skeetStreakCard.js';
@@ -70,7 +71,7 @@ export class SkeetStreakPoster {
     //    shipped and has not been scanned yet.
     const matches = db.prepare(
       `SELECT id FROM matches
-       WHERE state = 'completed' AND voided_at IS NULL AND ended_at >= ?
+       WHERE ${completedPug()} AND voided_at IS NULL AND ended_at >= ?
          AND id NOT IN (SELECT match_id FROM skeet_streak_scans)`,
     ).all(SKEET_STREAKS_SINCE) as { id: number }[];
     const insertStreak = db.prepare(

@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import { onPluginList, pluginFile, withoutIgnored } from './balancePatches.js';
 import { resolvePatch } from './balanceFold.js';
+import { completedPug } from './matchKinds.js';
 import type { BalanceKnobs } from './balanceKnobs.js';
 import { compareSides } from './metrics/compare/compare.js';
 import { memo, parseSideParams } from './metrics/compare/cache.js';
@@ -35,7 +36,7 @@ export function patchTimeline(db: DB): (PublicPatch & { hasInputs: boolean })[] 
       FROM round_metric_context c
       JOIN matches m ON m.id = c.match_id
       LEFT JOIN match_rounds r ON r.match_id = c.match_id AND r.ordinal = c.ordinal AND r.half = c.half
-      WHERE m.state = 'completed' AND m.voided_at IS NULL AND c.patch_id IS NOT NULL
+      WHERE ${completedPug('m')} AND m.voided_at IS NULL AND c.patch_id IS NOT NULL
       GROUP BY c.patch_id
     ) s ON s.patch_id = p.id`).all() as {
       id: number; name: string | null; notes: string; source: PublicPatch['source']; first_seen_at: string;

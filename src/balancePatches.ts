@@ -4,6 +4,7 @@ import { publishAdminEvent } from './adminFeed.js';
 import { currentOrdinal } from './liveView.js';
 import { chainOf, foldInto, resolvePatch } from './balanceFold.js';
 import { triageInfo, type Lists } from './balanceTriage.js';
+import { completedPug } from './matchKinds.js';
 
 type Inventory = Record<string, string>;
 
@@ -394,7 +395,7 @@ export function listPatches(db: DB, lists: Lists = { versionless: [], ignored: [
            ROW_NUMBER() OVER (ORDER BY p.first_seen_at, p.id) AS number,
            (SELECT COUNT(*) FROM match_rounds r WHERE r.patch_id = p.id) AS rounds,
            (SELECT COUNT(*) FROM round_metric_context c JOIN matches m ON m.id = c.match_id
-             WHERE c.patch_id = p.id AND m.state = 'completed' AND m.voided_at IS NULL) AS counted_rounds
+             WHERE c.patch_id = p.id AND ${completedPug('m')} AND m.voided_at IS NULL) AS counted_rounds
     FROM balance_patches p ORDER BY number`).all() as {
       id: number; name: string | null; notes: string; source: PatchSource; first_seen_at: string;
       reviewed: number; published_at: string | null; triage: TriageState; folded_into: number | null; release_id: number | null;

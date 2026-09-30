@@ -1,4 +1,5 @@
 import type { DB } from '../../db.js';
+import { completedPug } from '../../matchKinds.js';
 import { FAILED_SUFFIX } from '../job.js';
 import { ENGINE } from '../registry.js';
 import type { Phase } from '../types.js';
@@ -23,7 +24,7 @@ export const PHASE_KNOWN_SQL = "(rm.phase NOT IN ('event', 'normal') OR c.has_st
 /** WHERE fragment over c (round_metric_context) and m (matches). */
 export function sideFilterSql(q: SideQuery): { sql: string; params: (string | number)[] } {
   const params: (string | number)[] = [];
-  const parts = ["m.state = 'completed'", 'm.voided_at IS NULL'];
+  const parts = [completedPug('m'), 'm.voided_at IS NULL'];
   parts.push(`c.patch_id IN (${q.patchIds.map(() => '?').join(',') || 'NULL'})`);
   params.push(...q.patchIds);
   if (q.origin !== 'all') { parts.push('c.origin = ?'); params.push(q.origin); }
