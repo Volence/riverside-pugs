@@ -19,6 +19,9 @@
 #undef REQUIRE_PLUGIN
 #include <readyup>
 #define REQUIRE_PLUGIN
+// Rotoblin's l4dscores.smx: its own campaign tally for the given game team
+// (2 survivors, 3 infected). Optional, marked in AskPluginLoad2.
+native int Score_GetTeamCampaignScore(int team);
 
 #define PLUGIN_VERSION "0.3.18"
 
@@ -237,6 +240,7 @@ int g_iLockAttempts[MAXPLAYERS + 1];
 #define SEED_HOLD_SECS 20.0
 bool g_bSeedHold;
 float g_fSeedHoldUntil;
+int g_iNextFirstL4ds;                    // pug team l4dscores will send out first next map; 0 = unknown
 int g_iLastHealth[MAXPLAYERS + 1];       // for SI overkill remainder
 
 // Staff chat (pug-staffchat.inc). Declared here, not there, because
@@ -2944,6 +2948,7 @@ void ResetMatchState()
 	g_iPugSide[2] = 0;
 	g_bSeedHold = false;
 	g_fSeedHoldUntil = 0.0;
+	g_iNextFirstL4ds = 0;
 	for (int i = 0; i < MAX_ROSTER; i++)
 	{
 		g_sRosterId[i][0] = '\0';
@@ -3185,6 +3190,8 @@ void SeedNewMapSides(int prevRound1Surv)
 {
 	g_bSeedHold = false;
 	g_fSeedHoldUntil = 0.0;
+	int l4ds = g_iNextFirstL4ds;
+	g_iNextFirstL4ds = 0;
 	if (g_State != MS_Live || g_iMapCount < 1) return;
 
 	int totA, totB;
@@ -3194,6 +3201,15 @@ void SeedNewMapSides(int prevRound1Surv)
 		totB += g_iMapScoreB[i];
 	}
 	int first = (totA > totB) ? 1 : (totB > totA) ? 2 : prevRound1Surv;
+	// l4dscores is what actually places players at load-in, and its tally is
+	// the one !setscores rewrites, so when the two disagree follow it: seeding
+	// against it would have the lock and l4dscores fighting over every player.
+	if (l4ds != 0 && l4ds != first)
+	{
+		LogError("[pug] map %s: l4dscores sends pug team %s out first but this plugin's totals (a=%d b=%d) say %s; following l4dscores",
+			g_sCurrentMap, l4ds == 1 ? "a" : "b", totA, totB, first == 1 ? "a" : first == 2 ? "b" : "unknown");
+		first = l4ds;
+	}
 	if (first != 1 && first != 2)
 	{
 		LogMessage("[pug] map %s: no side seed (totals a=%d b=%d tied, previous order unknown)", g_sCurrentMap, totA, totB);
@@ -3205,6 +3221,34 @@ void SeedNewMapSides(int prevRound1Surv)
 	for (int c = 1; c <= MaxClients; c++) g_iLockAttempts[c] = 0;
 	LogMessage("[pug] map %s: seeded sides, pug team %s survives first (totals a=%d b=%d%s)",
 		g_sCurrentMap, first == 1 ? "a" : "b", totA, totB, totA == totB ? ", tie keeps previous order" : "");
+}
+
+/** Record which pug team l4dscores will send out as survivors on the next map.
+ *
+ *  l4dscores decides it at the half-2 round_end from its own campaign tally
+ *  (GetClientTeamForNextMap, HighestScoreSurvivorFirst): this half's survivors
+ *  go first again only if their total is strictly higher. Its round_end hook
+ *  is Pre, so the tally already includes this half by the time this runs.
+ *  That tally is also what !setscores rewrites, and !setscores does not touch
+ *  the engine's own campaign score, so it can disagree with this plugin's
+ *  totals; SeedNewMapSides follows it when it does. Also logs the engine's
+ *  campaign scores so a disagreement can be traced later. */
+void CaptureNextMapOrder(int survPug)
+{
+	g_iNextFirstL4ds = 0;
+	if (GetFeatureStatus(FeatureType_Native, "Score_GetTeamCampaignScore") != FeatureStatus_Available) return;
+	if (survPug != 1 && survPug != 2)
+	{
+		if (g_iPugSide[1] == TEAM_SURVIVOR) survPug = 1;
+		else if (g_iPugSide[2] == TEAM_SURVIVOR) survPug = 2;
+		else return;
+	}
+	int surv = Score_GetTeamCampaignScore(TEAM_SURVIVOR);
+	int inf = Score_GetTeamCampaignScore(TEAM_INFECTED);
+	g_iNextFirstL4ds = (surv > inf) ? survPug : 3 - survPug;
+	LogMessage("[pug] map %s end: l4dscores totals survivors(%s)=%d infected=%d, engine campaign 1=%d 2=%d; next map pug team %s first",
+		g_sCurrentMap, survPug == 1 ? "a" : "b", surv, inf,
+		L4D_GetTeamScore(1, true), L4D_GetTeamScore(2, true), g_iNextFirstL4ds == 1 ? "a" : "b");
 }
 
 /** Observation-based cohesion lock. Every tick:
@@ -3772,6 +3816,8 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 	// this half and EmitRoundEnd has not yet zeroed g_fRoundLiveAt. Left to
 	// the periodic sweep, the last burst of a round would be stamped t=-1.
 	FlushFriendlyFire();
+
+	if (second) CaptureNextMapOrder(survPug);
 
 	int score = TryReadRoundScore(second);
 	if (score >= 0)
