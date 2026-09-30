@@ -196,10 +196,10 @@ player who then forms a group), side B confirms. The public looking-for-scrim bo
 ### Limits (settings)
 
 - Length 1 to 3 hours, in 30-minute steps; booked up to 14 days ahead.
-- Up to 4 upcoming bookings per team or pickup captain.
-- At most 6 prime-time hours booked per team or pickup captain per week (prime time is a setting,
-  20:00-06:00 UTC today from the queue-activity peak). Each no-show in the last 30 days lowers the
-  allowance by 2 hours.
+- Up to 4 upcoming bookings per team or pickup captain. Each no-show in the last 30 days lowers
+  that by one (minimum 1).
+- No cap on evening (peak-hour) booking for now; the PUG reserve already protects the queue. Add a
+  weekly peak-hours cap only if one team starts taking every evening slot.
 - Playlist: up to 4 campaigns. The form suggests about 1 campaign per hour and warns when the
   playlist will not fit.
 
@@ -238,7 +238,9 @@ anyone else on connect with a reason, so a leaked password is not enough to scou
 - Approved spectators are added by a side's captain on the site (Steam account). They can
   spectate in game and join that side's voice channel only.
 - A captain can also `!allow <name>` in game during a 60-second grace window after someone
-  connects; that adds a ringer or spectator for this booking. Otherwise the grace ends in a kick.
+  connects; that adds a ringer or spectator for this booking. Otherwise the grace ends in a kick,
+  and that player cannot rejoin this booking's server for 30 minutes (setting). A captain adding
+  them on the site lifts the block at once.
 - Ringers are always marked as ringers on the scrim record.
 
 ### Player control
@@ -299,9 +301,21 @@ booking ends.
 
 ### Crash recovery (shared by scrims and tournaments)
 
-If a booked box stops answering rcon for 60 seconds, or srcds restarts mid-game:
+rcon alone is never the signal: rcon to our boxes drops out regularly (the ban and admins pushes
+log timeouts) while the game runs fine. Detection uses the same heartbeat as the orphan reaper
+(`reapOrphanedMatches`): the plugin reports over the UDP log feed every 30 seconds.
 
-1. The booking moves to another free box in the region (setup replayed, same password).
+- **srcds restarted** (the box answers again but the plugin reports no match, or the log shows a
+  fresh server start): restore on the **same box**. This is the common case, since systemd brings
+  srcds back in under a minute.
+- **Box gone**: no heartbeat for 3 minutes AND no answer to an A2S query (a separate UDP path from
+  rcon) for the same period. Only then does the booking move to another box. If A2S still shows
+  players on the box, nothing moves; staff get an alert instead.
+
+Recovery:
+
+1. If the box is gone, the booking moves to another free box in the region (setup replayed, same
+   password). Otherwise setup is replayed on the same box.
 2. The match is restored to the map it was on, with scores from our own `match_rounds`.
    `!setscores` never writes the engine score, so the restore uses the seed-and-hold approach from
    pug-match 0.3.18 and gets its own test on the local server.
