@@ -1,4 +1,5 @@
 import type { DB } from './db.js';
+import { completedPug } from './matchKinds.js';
 import { displaySr } from './rating.js';
 import { settingNumber } from './settings.js';
 
@@ -116,7 +117,7 @@ export function weeklyMinGames(db: DB): number {
 
 /** The matches that count for a week, as a reusable SQL fragment. */
 export const WEEK_MATCHES =
-  "SELECT id FROM matches WHERE state = 'completed' AND voided_at IS NULL AND ended_at >= ? AND ended_at < ?";
+  `SELECT id FROM matches WHERE ${completedPug()} AND voided_at IS NULL AND ended_at >= ? AND ended_at < ?`;
 
 interface PlayerGames { steamid: string; name: string; games: number }
 

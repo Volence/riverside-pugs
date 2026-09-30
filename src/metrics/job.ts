@@ -1,4 +1,5 @@
 import type { DB } from '../db.js';
+import { completedPug } from '../matchKinds.js';
 import { loadRoundInput } from './loadRound.js';
 import { loadRoundReplay } from './replayRound.js';
 import { computeRound, ENGINE } from './registry.js';
@@ -42,7 +43,7 @@ export function pendingRounds(db: DB, opts: { engine: string; replayWaitMin: num
     JOIN matches m ON m.id = r.match_id
     LEFT JOIN round_metric_context c ON c.match_id = r.match_id AND c.ordinal = r.ordinal AND c.half = r.half
     LEFT JOIN match_replays rp ON rp.match_id = r.match_id AND rp.ordinal = r.ordinal AND rp.half = r.half AND rp.pruned_at IS NULL
-    WHERE m.state = 'completed' AND m.voided_at IS NULL AND r.ended_at IS NOT NULL
+    WHERE ${completedPug('m')} AND m.voided_at IS NULL AND r.ended_at IS NOT NULL
       AND (
         c.match_id IS NULL
         OR (c.engine != ? AND c.engine != (? || '${FAILED_SUFFIX}') AND c.engine != (? || '${FROZEN_SUFFIX}'))

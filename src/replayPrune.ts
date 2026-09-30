@@ -1,6 +1,7 @@
 import { rmSync, statfsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import type { DB } from './db.js';
+import { completedPug } from './matchKinds.js';
 import { getSetting } from './settings.js';
 
 const NAME_RE = /^pug_[0-9a-f]{32}_\d+_[12]\.rpl$/;
@@ -86,7 +87,7 @@ export function planPrune(
                          WHERE c.match_id = r.match_id AND c.ordinal = r.ordinal AND c.half = r.half)
         AND NOT EXISTS (SELECT 1 FROM integrity_reviews v
                          WHERE v.match_id = r.match_id AND v.ordinal = r.ordinal AND v.half = r.half)
-        AND NOT (m.state = 'completed' AND m.voided_at IS NULL AND EXISTS (
+        AND NOT (${completedPug('m')} AND m.voided_at IS NULL AND EXISTS (
               SELECT 1 FROM match_rounds mr
                 LEFT JOIN round_metric_context c
                   ON c.match_id = mr.match_id AND c.ordinal = mr.ordinal AND c.half = mr.half

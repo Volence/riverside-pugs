@@ -1,4 +1,5 @@
 import type { DB } from '../db.js';
+import { completedPug } from '../matchKinds.js';
 import { HEADER_BYTES } from '../replayFormat.js';
 import { resolveReplayPath } from '../replays.js';
 import { infectedMaskForHeader } from '../replaySides.js';
@@ -23,7 +24,7 @@ export function roundsToRecomputeFromR2(db: DB, replayDir: string): R2Round[] {
     JOIN matches m ON m.id = r.match_id
     JOIN match_replays rp ON rp.match_id = r.match_id AND rp.ordinal = r.ordinal AND rp.half = r.half
     LEFT JOIN round_metric_context c ON c.match_id = r.match_id AND c.ordinal = r.ordinal AND c.half = r.half
-    WHERE m.state = 'completed' AND m.voided_at IS NULL AND r.ended_at IS NOT NULL
+    WHERE ${completedPug('m')} AND m.voided_at IS NULL AND r.ended_at IS NOT NULL
       AND rp.r2_key IS NOT NULL
       AND (c.match_id IS NULL OR c.has_replay = 0 OR c.engine != ?)
     ORDER BY m.ended_at, r.match_id, r.ordinal, r.half`).all(ENGINE) as R2Round[];
