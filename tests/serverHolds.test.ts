@@ -120,3 +120,29 @@ describe('open_server_holds survives reopening and table rebuilds', () => {
     fdb.close();
   });
 });
+
+describe('open_server_holds is only rewritten when its definition changes', () => {
+  it('reopening an up-to-date database leaves the schema untouched, so other connections never see the view missing', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'pugholds-')), 'pug.db');
+    openDb(path).close();
+    const before = openDb(path);
+    const version = before.pragma('schema_version', { simple: true });
+    const again = openDb(path);
+    expect(before.pragma('schema_version', { simple: true })).toBe(version);
+    again.close(); before.close();
+  });
+
+  it('a stale definition from an older build is replaced', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'pugholds-')), 'pug.db');
+    let fdb = openDb(path);
+    fdb.exec("DROP VIEW open_server_holds; CREATE VIEW open_server_holds AS SELECT server_id, 'practice' AS kind, id AS row_id, 1 AS rank FROM practice_leases WHERE ended_at IS NULL");
+    seedOwner(fdb);
+    const a = box(fdb, 'a');
+    sideGame(fdb, a);
+    expect(holdFor(fdb, a)).toBeNull();
+    fdb.close();
+    fdb = openDb(path);
+    expect(holdFor(fdb, a)?.kind).toBe('side');
+    fdb.close();
+  });
+});
