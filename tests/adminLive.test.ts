@@ -340,6 +340,16 @@ describe('POST /api/admin/live/:matchId/noshow-extend', () => {
     db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team) VALUES (?, 0, 1, 'a')").run(matchId);
     expect((await extend()).statusCode).toBe(409);
   });
+
+  it('refuses once enough have connected that the no-show rule cannot fire, and the board says so', async () => {
+    // Six of eight in, the default noshow_min_connected: two still missing,
+    // but the rule is off, so five more minutes would move nothing.
+    for (const p of IDS.slice(3, 6)) db.prepare("UPDATE match_players SET connected_at = datetime('now') WHERE match_id = ? AND player_id = ?").run(matchId, p);
+    expect((await board()).noShow).toMatchObject({ deadlineS: null, canExtend: false });
+    const res = await extend();
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatch(/enough players have connected/);
+  });
 });
 
 describe('POST /api/admin/queue/cancel-pop', () => {
