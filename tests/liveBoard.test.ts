@@ -7,6 +7,7 @@ import { recordSignonDrop, markEntered } from '../src/signonDrops.js';
 import { recordPresenceLine } from '../src/presence.js';
 import { setSetting } from '../src/settings.js';
 import { buildLiveBoard, type BoardPlayer } from '../src/admin/liveBoard.js';
+import { fileCheckRejects } from '../src/noShow.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const TOKEN = 'a'.repeat(32);
@@ -159,6 +160,16 @@ describe('a reason, when known and never guessed', () => {
     expect(find(IDS[0]).reason).toEqual({ kind: 'signon_drop', at: at(4).toISOString() });
     markEntered(db, IDS[0], at(5));
     expect(find(IDS[0]).reason).toBeNull();
+  });
+
+  it('names exactly the players the no-show reaper would spare as file check rejects', () => {
+    recordSignonDrop(db, { steamid: IDS[0], name: 'p0', secs: 14, forced: 651 }, at(4));
+    recordSignonDrop(db, { steamid: IDS[5], name: 'p5', secs: 14, forced: 651 }, at(6));
+    recordSignonDrop(db, { steamid: IDS[6], name: 'p6', secs: 14, forced: 651 }, new Date(Date.UTC(2026, 8, 21, 19, 0, 0)));
+    const m = board().matches[0];
+    const onBoard = [...m.teamA, ...m.teamB].filter((p) => p.reason?.kind === 'signon_drop').map((p) => p.steamid);
+    expect(onBoard.sort()).toEqual(fileCheckRejects(db, matchId).sort());
+    expect(onBoard.sort()).toEqual([IDS[0], IDS[5]]);
   });
 
   it('ignores a connect drop from before this match popped', () => {

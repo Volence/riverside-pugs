@@ -3,7 +3,7 @@ import type { PhaseState } from '../logParse.js';
 import { phaseFor } from '../liveView.js';
 import { spectateFor, type SpectateInfo } from '../spectate.js';
 import { holdMaxSeconds, lowAlertSeconds, remainingNow, type PresenceRow } from '../presence.js';
-import { noShowClock, type NoShowClock } from '../noShow.js';
+import { noShowClock, signonDropsSincePop, toMs, type NoShowClock } from '../noShow.js';
 
 /**
  * The admin live board: every ongoing match, who is missing from it, and the
@@ -79,8 +79,6 @@ export interface LiveBoard {
   matches: BoardMatch[];
 }
 
-/** sqlite's datetime('now') or an ISO string, as epoch milliseconds. */
-const toMs = (t: string): number => Date.parse(t.includes('T') ? t : `${t.replace(' ', 'T')}Z`);
 const secondsSince = (ms: number, now: Date): number => Math.max(0, Math.floor((now.getTime() - ms) / 1000));
 
 interface MatchRow {
@@ -118,11 +116,6 @@ export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: 
   const scoreOf = db.prepare(
     'SELECT COALESCE(SUM(team_a_score), 0) AS a, COALESCE(SUM(team_b_score), 0) AS b FROM match_live_maps WHERE match_id = ?',
   );
-  // Since the pop, and with no entry after it: markEntered stamps every open
-  // drop the moment the same steamid gets in, so this is "still not in".
-  const dropOf = db.prepare(
-    'SELECT at FROM signon_drops WHERE steamid = ? AND at >= ? AND entered_after_at IS NULL ORDER BY id DESC LIMIT 1',
-  );
 
   return {
     now: now.toISOString(),
@@ -130,7 +123,9 @@ export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: 
     lowAlertSeconds: lowAlertSeconds(db),
     matches: matches.map((m) => {
       const poppedMs = toMs(m.createdAt);
-      const poppedIso = new Date(poppedMs).toISOString();
+      // The reaper's own read (src/noShow.ts), so a player the board calls
+      // rejected by the file check is one the no-show abort spares.
+      const drops = signonDropsSincePop(db, m.id);
       const phase = m.state === 'live' ? phaseFor(db, m.id) : null;
       const score = scoreOf.get(m.id) as { a: number; b: number };
 
@@ -164,7 +159,7 @@ export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: 
 
         let reason: BoardReason | null = null;
         if (status.kind !== 'connected') {
-          const drop = dropOf.get(p.steamid, poppedIso) as { at: string } | undefined;
+          const drop = drops.get(p.steamid);
           if (drop) reason = { kind: 'signon_drop', at: drop.at };
           else if (opts.voice && p.discordId && opts.voice.inVoice(p.discordId) === false) reason = { kind: 'not_in_voice' };
         }
