@@ -84,3 +84,15 @@ describe('Queue stints', () => {
     expect(q.list()).toEqual(['b']);
   });
 });
+
+describe('Queue requeue flag survives a restore', () => {
+  it('a restored requeued stint stays marked requeued', () => {
+    const ended: import('../src/queue.js').QueueStint[] = [];
+    const q = new Queue({ now: () => 10, onStintEnd: (s) => ended.push(s) });
+    q.requeueFront(['a']); q.join('b');
+    expect(q.requeuedIds()).toEqual(['a']);
+    const r = new Queue({ now: () => 20, onStintEnd: (s) => ended.push(s) });
+    r.join('a', 10, true); r.takeBatch(1);
+    expect(ended[0].requeued).toBe(true);
+  });
+});

@@ -47,10 +47,10 @@ export class Queue {
 
   /** `joinedAt` is for restoring a queue saved by a previous process, so a
    *  deploy does not reset everyone's wait to zero. */
-  join(steamid: string, joinedAt?: number): void {
+  join(steamid: string, joinedAt?: number, requeued = false): void {
     if (this.order.includes(steamid)) return;
     this.order.push(steamid);
-    this.since.set(steamid, { at: joinedAt ?? this.now(), requeued: false });
+    this.since.set(steamid, { at: joinedAt ?? this.now(), requeued });
   }
 
   leave(steamid: string): void {
@@ -81,6 +81,13 @@ export class Queue {
     return out;
   }
 
+  /** Queued players whose current stint is a requeue, for saving. */
+  requeuedIds(): string[] {
+    return this.order.filter((id) => this.since.get(id)?.requeued);
+  }
+
+  /** A pop ends the stint even if its ready check later fails: a wait here
+   *  is the wait until a ready check started. */
   takeBatch(n: number): string[] {
     const taken = this.order.splice(0, n);
     for (const id of taken) this.end(id, 'popped');

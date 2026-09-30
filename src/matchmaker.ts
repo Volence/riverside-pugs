@@ -155,6 +155,7 @@ export class Matchmaker {
       const state = {
         queue: this.queue.list(),
         queueJoinedAt: this.queue.joinTimes(),
+        queueRequeued: this.queue.requeuedIds(),
         lobbies: [...this.lobbyMap.values()]
           .map((l) => l.persist())
           .filter((l) => l.phase === 'ready_check' || l.phase === 'map_vote'),
@@ -176,7 +177,7 @@ export class Matchmaker {
   restore(): void {
     const row = this.db.prepare('SELECT json FROM matchmaker_state WHERE id = 1').get() as { json: string } | undefined;
     if (!row) return;
-    let state: { queue: string[]; queueJoinedAt?: Record<string, number>; lobbies: PersistedLobby[]; sideOptIn?: string[] };
+    let state: { queue: string[]; queueJoinedAt?: Record<string, number>; queueRequeued?: string[]; lobbies: PersistedLobby[]; sideOptIn?: string[] };
     try {
       state = JSON.parse(row.json);
     } catch {
@@ -188,7 +189,7 @@ export class Matchmaker {
       for (const player of p.players) this.playerLobby.set(player, p.id);
     }
     for (const id of state.queue ?? []) {
-      if (!this.playerLobby.has(id)) this.queue.join(id, state.queueJoinedAt?.[id]);
+      if (!this.playerLobby.has(id)) this.queue.join(id, state.queueJoinedAt?.[id], state.queueRequeued?.includes(id) ?? false);
     }
     for (const id of state.sideOptIn ?? []) {
       if (this.queue.has(id) || this.playerLobby.has(id)) this.sideOptIn.add(id);
