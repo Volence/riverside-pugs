@@ -182,6 +182,19 @@ describe('no-show deadline extension and file check rejects', () => {
     expect(reapNoShowMatches(db, releaser(db))).toEqual([id]);
   });
 
+  it('the extension moves the no-round backstop too, so it cannot end a match the no-show rule is still waiting on', () => {
+    const db = openDb(':memory:');
+    setSetting(db, 'noshow_minutes', '10');
+    setSetting(db, 'no_round_minutes', '30');
+    const { id } = liveMatch(db, 31);
+    for (const sid of IDS.slice(0, 3)) recordPlayerConnect(db, 'tok', sid);
+    db.prepare('UPDATE matches SET noshow_extra_minutes = 25 WHERE id = ?').run(id);
+    // 31 minutes live: past 30 but inside 10 + 25 and inside 30 + 25.
+    expect(reapNoShowMatches(db, releaser(db))).toEqual([]);
+    db.prepare("UPDATE matches SET went_live_at = datetime('now', '-56 minutes') WHERE id = ?").run(id);
+    expect(reapNoShowMatches(db, releaser(db))).toEqual([id]);
+  });
+
   it('a player the file check rejected tried to connect: no no-show for them, and the admin feed says so', async () => {
     const { penaltyHistory } = await import('../src/penalties.js');
     const { subscribeAdminEvents } = await import('../src/adminFeed.js');

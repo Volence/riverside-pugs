@@ -60,8 +60,8 @@ export function recordPlayerConnect(db: DB, token: string, steamid: string): voi
  *   1. Past noshow_minutes, plus whatever staff added to this match from the
  *      live board (matches.noshow_extra_minutes), with fewer than
  *      noshow_min_connected of the roster ever connected: nobody turned up.
- *   2. Past no_round_minutes with no round ever recorded: everyone turned up
- *      and then nobody readied.
+ *   2. Past no_round_minutes, plus the same extra minutes, with no round
+ *      ever recorded: everyone turned up and then nobody readied.
  */
 export function reapNoShowMatches(db: DB, releaser: ServerReleaser): number[] {
   // settingNumber, not Number(): a blank row here once aborted every live
@@ -83,7 +83,10 @@ export function reapNoShowMatches(db: DB, releaser: ServerReleaser): number[] {
     .all() as { id: number; server_id: number | null; extra: number; age_min: number; connected: number; rounds: number }[];
 
   const noShows = (r: (typeof rows)[number]) => r.age_min >= noShowMin + r.extra && r.connected < minConnected;
-  const doomed = rows.filter((r) => noShows(r) || (r.age_min >= noRoundMin && r.rounds === 0));
+  // The extension moves this rule too. Otherwise extending past the no-round
+  // deadline buys nothing: the players staff are waiting for connect, nobody
+  // can have readied yet, and the backstop ends the match on the old clock.
+  const doomed = rows.filter((r) => noShows(r) || (r.age_min >= noRoundMin + r.extra && r.rounds === 0));
 
   for (const r of doomed) {
     // No clearLive() here, unlike the sibling reapOrphanedMatches, and that is
