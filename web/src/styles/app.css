@@ -3117,3 +3117,21 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .chat-send input { flex: 1; min-width: 10rem; }
 .chat-pick { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: var(--sp-1); max-height: 8rem; overflow-y: auto; }
 .linkish { background: none; border: 0; padding: 0; font: inherit; color: inherit; font-weight: 600; cursor: pointer; text-decoration: underline dotted; }
+
+/* "When people play" (components/ActivityPanel.tsx). 24 columns have to fit a
+   phone, so the cells are fluid and the axis only labels every sixth hour. */
+.activity__summary { margin: 0 0 var(--sp-3); }
+.activity__grid { display: grid; gap: 2px; }
+.activity__row { display: grid; grid-template-columns: 2.25rem repeat(24, minmax(0, 1fr)); gap: 2px; align-items: center; }
+.activity__day { font-family: var(--font-label); font-size: var(--fs-label); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.activity__day.is-today { color: var(--text-bright); }
+.activity__cell {
+  aspect-ratio: 1;
+  min-height: 8px;
+  background: color-mix(in srgb, var(--accent) calc(var(--v, 0) * 100%), var(--surface-2));
+  border: 1px solid transparent;
+}
+.activity__cell.is-now { border-color: var(--text-bright); }
+.activity__row--axis { align-items: start; }
+.activity__tick { font-size: var(--fs-label); color: var(--text-muted); white-space: nowrap; overflow: visible; }
+.activity__legend { margin: var(--sp-3) 0 0; font-size: var(--fs-dense); }

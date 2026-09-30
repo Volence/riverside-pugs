@@ -1940,6 +1940,21 @@ export interface AdminPracticeLease {
   endReason: PracticeEndReason | null;
 }
 
+/** When people play and how long the queue takes (src/queueActivity.ts).
+ *  `pops` is indexed [UTC weekday, 0 = Sunday][UTC hour]. */
+export interface QueueActivity {
+  days: number;
+  pops: number[][];
+  totalPops: number;
+  waits: {
+    medianSec: number | null;
+    byHourSec: (number | null)[];
+    popped: number;
+    left: number;
+    leftMedianSec: number | null;
+  };
+}
+
 export const api = {
   me: (signal?: AbortSignal) => get<Me>('/api/me', signal),
   site: (signal?: AbortSignal) => get<SiteInfo>('/api/site', signal),
@@ -1954,6 +1969,7 @@ export const api = {
   live: (signal?: AbortSignal) => get<{ matches: LiveMatch[] }>('/api/live', signal),
   streams: (all = false, signal?: AbortSignal) =>
     get<StreamsView>(`/api/streams${all ? '?all=1' : ''}`, signal),
+  activity: (signal?: AbortSignal) => get<QueueActivity>('/api/activity', signal),
   maps: (signal?: AbortSignal) => get<{ maps: MapIndexRow[]; pool: string[] }>('/api/maps', signal),
   campaignNames: (signal?: AbortSignal) =>
     get<{ names: Record<string, string> }>('/api/campaigns/names', signal),
