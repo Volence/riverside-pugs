@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer, ensureRating, currentSeasonId } from '../src/players.js';
 import { mergePlayers, MERGE_HANDLED_PLAYER_COLUMNS } from '../src/mergePlayers.js';
+import { nameHistory, recordNameUses } from '../src/playerNames.js';
 
 const MAIN = '76561198005192652';
 const ALT = '76561199861598482';
@@ -36,6 +37,20 @@ describe('mergePlayers', () => {
     expect(() => mergePlayers(db, { from: MAIN, into: MAIN })).toThrow(/same/i);
     expect(() => mergePlayers(db, { from: '76561199999999999', into: MAIN })).toThrow(/not found/i);
     expect(() => mergePlayers(db, { from: ALT, into: '76561199999999999' })).toThrow(/not found/i);
+  });
+
+  it('folds the alt\'s name history into the main, one use per match', () => {
+    const use = (id: string, key: string, name: string) =>
+      recordNameUses(db, id, key, [{ source: 'ingame', name }], '2026-09-20 00:00:00', { queue: false });
+    use(MAIN, 'm:1', 'mayhem');
+    use(ALT, 'm:1', 'mayhem');
+    use(ALT, 'm:2', 'mayhem');
+    use(ALT, 'm:3', 'alt name');
+
+    mergePlayers(db, { from: ALT, into: MAIN });
+
+    expect(nameHistory(db, MAIN).map((r) => [r.name, r.matches])).toEqual([['mayhem', 2], ['alt name', 1]]);
+    expect(db.prepare('SELECT 1 FROM player_name_uses WHERE steamid = ?').get(ALT)).toBeUndefined();
   });
 
   it('moves a match only the alt played onto the main', () => {
