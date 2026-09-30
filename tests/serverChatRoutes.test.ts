@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
-import { recordSay } from '../src/serverChat.js';
+import { noteName, recordSay } from '../src/serverChat.js';
 import { Hub } from '../src/ws.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 
@@ -192,6 +192,16 @@ describe('the drawer\'s view of a server', () => {
     const earlier = await lines(`?before=${body.lines[0].id}`);
     expect(earlier.lines.map((l: { message: string; matchId: number | null }) => [l.message, l.matchId])).toEqual([['last match', old], ['lobby', null]]);
     expect(earlier.hasEarlier).toBe(false);
+  });
+
+  it('names each speaker by site name and match team, whatever they call themselves in game', async () => {
+    db.prepare("UPDATE players SET name = 'Anna' WHERE steamid = ?").run(PLAYER);
+    const m = matchOn('live');
+    db.prepare("INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'a')").run(m, PLAYER);
+    noteName(PLAYER, 'Spoken For');
+    recordSay(db, sid, { steamid: PLAYER, team: 2, scope: 'team', message: 'hey' });
+    const body = await lines();
+    expect(body.lines[0]).toMatchObject({ name: 'Spoken For', siteName: 'Anna', matchTeam: 'a' });
   });
 
   it('with no match shows the newest lines, as before', async () => {

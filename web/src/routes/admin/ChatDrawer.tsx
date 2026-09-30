@@ -7,6 +7,7 @@ import { Empty } from '../../components/bits';
 
 const TEAM_CLASS: Record<number, string> = { 1: 'chat-line--spec', 2: 'chat-line--surv', 3: 'chat-line--inf' };
 const TEAM_NAME: Record<string, string> = { '1': 'Spectators', '2': 'Survivors', '3': 'Infected' };
+const TEAM_SIDE: Record<number, string> = { 1: 'Spectator', 2: 'Survivor', 3: 'Infected' };
 
 type Mode = { kind: 'all' } | { kind: 'team'; team: 1 | 2 | 3 } | { kind: 'player'; steamid: string; name: string }
   | { kind: 'pick' };
@@ -268,14 +269,20 @@ function Line({ line: l, onName }: { line: ChatLineView; onName: (steamid: strin
       </div>
     );
   }
-  const who = l.name ?? l.steamid ?? '?';
+  // Lead with the site name the Live board's rosters use; the in-game name
+  // follows only when it differs.
+  const who = l.siteName ?? l.name ?? l.steamid ?? '?';
+  const inGame = l.name && l.name !== who ? l.name : null;
+  const side = TEAM_SIDE[l.team ?? 0];
   return (
     <div class={`chat-line ${TEAM_CLASS[l.team ?? 0] ?? ''}${l.kind === 'staff_in' ? ' chat-line--to-staff' : ''}`}>
       <span class="muted">{time}</span>{' '}
+      {l.matchTeam && <><span class="chat-team">Team {l.matchTeam.toUpperCase()}</span>{' '}</>}
       {l.steamid
         ? <button type="button" class="linkish" onClick={() => onName(l.steamid!, who)}>{who}</button>
         : <strong>{who}</strong>}
-      {l.scope === 'team' && <>{' '}<span class="muted">(team)</span></>}
+      {inGame && <>{' '}<span class="muted">as "{inGame}"</span></>}
+      {l.scope === 'team' && <>{' '}<span class="muted">({side ? `${side} team chat` : 'team chat'})</span></>}
       {l.kind === 'staff_in' && <span class="chat-tag">to staff</span>}
       : <span class="chat-line__msg">{l.message}</span>
     </div>

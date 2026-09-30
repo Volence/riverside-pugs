@@ -1560,6 +1560,7 @@ export interface ChatServerView { id: number; name: string; state: 'match' | 'pr
 export interface ChatLineView {
   id: number; at: number; kind: 'say' | 'staff_in' | 'staff_out'; steamid: string | null; name: string | null;
   team: number | null; scope: 'all' | 'team' | null; message: string; matchId: number | null;
+  siteName: string | null; matchTeam: 'a' | 'b' | null;
   to: { kind: 'all' | 'team' | 'player'; value: string | null; name: string | null } | null;
   delivered: number | null;
 }
