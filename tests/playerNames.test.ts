@@ -38,13 +38,13 @@ describe('normaliseName', () => {
     expect(normaliseName('(S)amour plastique')).toEqual({ display: 'amour plastique', key: 'amour plastique' });
     expect(normaliseName('(S)(1)  amour   plastique ')?.display).toBe('amour plastique');
     expect(normaliseName('(1)v')?.display).toBe('v');
-    expect(normaliseName('v​')?.display).toBe('v');
+    expect(normaliseName('v\u200B')?.display).toBe('v');
   });
 
   it('refuses a blank name', () => {
     expect(normaliseName('')).toBeNull();
     expect(normaliseName('   ')).toBeNull();
-    expect(normaliseName('​')).toBeNull();
+    expect(normaliseName('\u200B')).toBeNull();
     expect(normaliseName('(S)')).toBeNull();
   });
 
