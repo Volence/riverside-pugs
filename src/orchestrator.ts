@@ -315,11 +315,15 @@ export class RealOrchestrator implements Orchestrator {
         // The error quotes the rcon command that failed, and two of them carry
         // secrets: the token (this match's sv_password) and the log secret.
         const why = redactSecrets(err instanceof Error ? err.message : String(err), [token, server.log_secret]);
+        // Requeue first, so the line says who really went back: a banned or
+        // timed-out player, or one already in another match, does not.
+        const { rostered, requeued } = noteMatchAborted(this.db, { matchId, cause: 'setup_failed', requeue: true });
+        const back = requeued.length === 0 ? 'Nobody went back to the queue.'
+          : `${requeued.length} of ${rostered} players went back to the front of the queue.`;
         publishAdminEvent({
           kind: 'problem', matchId,
-          text: `Match #${matchId} aborted: setting up ${server.name} failed (${why}). The players went back to the front of the queue.`,
+          text: `Match #${matchId} aborted: setting up ${server.name} failed (${why}). ${back}`,
         });
-        noteMatchAborted(this.db, { matchId, cause: 'setup_failed', requeue: true });
       }
     } finally {
       rcon?.close();
