@@ -34,8 +34,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # overwriting them but because --delete would otherwise remove them outright,
 # which is exactly what happened on 2026-09-11: the sync wiped the env file and
 # the service could not start. Do not remove these two excludes.
+#
+# node_modules WITHOUT the trailing slash, for the same reason as .git: a
+# worktree often symlinks node_modules to the main checkout's, and
+# 'node_modules/' only matches a directory. On 2026-09-30 a worktree deploy
+# sent the symlink, --delete emptied the box's node_modules to make room for
+# it, and only rsync's own error (before the restart) kept the site up.
 rsync -az --delete --info=stats1 \
-  --exclude 'node_modules/' \
+  --exclude 'node_modules' \
   --exclude 'data/' \
   --exclude 'dist/' \
   --exclude '.git/' \
