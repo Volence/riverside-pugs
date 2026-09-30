@@ -2199,6 +2199,10 @@ h3.values-rules-head {
 /* Folded configs under their target patch: one per line, Unfold at the end. */
 .patch-folded { list-style: none; margin: var(--sp-1) 0 0; padding: 0; }
 .patch-folded li { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: 2px 0; }
+/* Folded config lines list whole plugin and file changes: they wrap, so one
+ * long line cannot stretch the patches table off the screen. */
+.admin-table td.patch-folded-cell { white-space: normal; position: static; }
+.patch-folded li > span { min-width: 0; overflow-wrap: anywhere; }
 .balance-map { margin-top: var(--sp-3); }
 .balance-map__row { margin-bottom: var(--sp-3); font-size: var(--fs-dense); }
 .balance-map__bar { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: 3px; }

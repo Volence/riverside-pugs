@@ -47,7 +47,7 @@ export function TriageCard({ patch, targets, run, busy }: {
       }}>
         <input value={name} maxLength={60} placeholder="Patch name" aria-label={`Name for patch ${patch.number}`}
           onInput={(e) => setName((e.target as HTMLInputElement).value)} />
-        <textarea value={notes} maxLength={2000} placeholder="Notes" aria-label={`Notes for patch ${patch.number}`}
+        <textarea value={notes} maxLength={20000} placeholder="Notes" aria-label={`Notes for patch ${patch.number}`}
           onInput={(e) => setNotes((e.target as HTMLTextAreaElement).value)} />
         <button class="btn" type="submit" disabled={busy || name.trim() === ''}>Balance patch</button>
       </form>

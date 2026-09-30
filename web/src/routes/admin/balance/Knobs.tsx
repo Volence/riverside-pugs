@@ -143,7 +143,7 @@ export function Knobs() {
               <input value={name} maxLength={60} placeholder="Patch name" aria-label="Patch name" onInput={(e) => setName((e.target as HTMLInputElement).value)} />
             )}
             {(!existing || !existing.notes) && (
-              <textarea value={patchNotes} maxLength={2000} placeholder="What changed and why" aria-label="Patch notes"
+              <textarea value={patchNotes} maxLength={20000} placeholder="What changed and why" aria-label="Patch notes"
                 onInput={(e) => setPatchNotes((e.target as HTMLTextAreaElement).value)} />
             )}
             <p class="muted">Servers: {data.active?.servers.map((s) => s.name).join(', ') || 'every enabled server'}. Each gets the file between matches.</p>

@@ -69,7 +69,7 @@ export function AdminPatches() {
         {patches.error && <Empty>Could not load the patch list.</Empty>}
         {!patches.error && (
           <div class="table-wrap">
-            <table class="admin-table">
+            <table class="admin-table admin-table--pin-last">
               <thead><tr><th>#</th><th>Name</th><th>Source</th><th>Since</th><th>Rounds</th><th>Servers</th><th>Public</th><th /></tr></thead>
               <tbody>
                 {/* Newest first: the patch that matters is the latest one. */}
@@ -91,7 +91,7 @@ export function AdminPatches() {
                   return [main, (
                     <tr key={`${p.id}-folded`}>
                       <td />
-                      <td colSpan={7} class="muted">
+                      <td colSpan={7} class="muted patch-folded-cell">
                         Includes {folded.length} folded config{folded.length === 1 ? '' : 's'}:
                         <ul class="patch-folded">
                           {folded.map((f) => (
@@ -142,7 +142,7 @@ export function AdminPatches() {
             <input value={name} placeholder="Patch name" aria-label="Patch name" onInput={(e) => setName((e.target as HTMLInputElement).value)} />
             <textarea
               value={notes}
-              maxLength={2000}
+              maxLength={20000}
               placeholder="Notes"
               aria-label="Patch notes"
               onInput={(e) => setNotes((e.target as HTMLTextAreaElement).value)}

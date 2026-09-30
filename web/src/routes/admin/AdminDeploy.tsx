@@ -96,7 +96,7 @@ function ReviewPanel({ r, busy, devMode, inFlight, run }: { r: ReleaseReviewView
           </fieldset>
           {decision === 'balance' && <>
             <input value={name} maxLength={60} placeholder="Patch name" aria-label="Patch name" onInput={(e) => setName((e.target as HTMLInputElement).value)} />
-            <textarea value={notes} maxLength={2000} placeholder="Notes" aria-label="Patch notes" onInput={(e) => setNotes((e.target as HTMLTextAreaElement).value)} />
+            <textarea value={notes} maxLength={20000} placeholder="Notes" aria-label="Patch notes" onInput={(e) => setNotes((e.target as HTMLTextAreaElement).value)} />
           </>}
           <button class="btn" type="submit" disabled={busy || !ready}>Deploy</button>
         </form>

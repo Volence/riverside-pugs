@@ -1,5 +1,6 @@
 import type { DB } from './db.js';
 import type { BalanceKnobs } from './balanceKnobs.js';
+import { PATCH_NOTES_MAX } from './balanceTriage.js';
 import {
   diffIgnoringVersionless, latestRolloutId, patchNumber, predictInventory, previewKnobs, renderBalanceCfg, type Inventory, type KnobPreview,
 } from './balanceControl.js';
@@ -50,7 +51,7 @@ export function applyKnobs(db: DB, knobs: BalanceKnobs, req: {
     const name = text(req.name);
     const notes = typeof req.notes === 'string' ? req.notes.trim() : '';
     if (name.length > 60) return { ok: false, status: 400, error: 'A patch name is up to 60 characters.', preview };
-    if (notes.length > 2000) return { ok: false, status: 400, error: 'Notes are up to 2000 characters.', preview };
+    if (notes.length > PATCH_NOTES_MAX) return { ok: false, status: 400, error: `Notes are up to ${PATCH_NOTES_MAX} characters.`, preview };
 
     let patchId: number;
     let notesSet = false;
