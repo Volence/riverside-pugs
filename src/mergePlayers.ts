@@ -86,6 +86,9 @@ const PLAIN: [table: string, column: string][] = [
   // hourly limit see the merged account's leases on the survivor, and the
   // survivor can still end a lease the other account opened.
   ['practice_leases', 'owner_player_id'],
+  // The rename digest's queue. The chain it posts is read off the survivor's
+  // name history, which by then holds both accounts' names.
+  ['player_name_digest', 'steamid'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`
@@ -118,6 +121,13 @@ const KEYED: [table: string, column: string][] = [
   // somehow logged the same match/map/half/tMs (impossible in practice, one
   // human hit the burst), the survivor's row is kept and the other dropped.
   ['skeet_streaks', 'player_id'],
+  // Name history (src/playerNames.ts). A name is one row per match, so where
+  // both accounts played one match under one name, that is one use, and the
+  // alt's other names join the survivor's history. The scratch tables follow
+  // the same rule; for the latest in-game name the survivor keeps its own.
+  ['player_name_uses', 'steamid'],
+  ['match_name_sightings', 'steamid'],
+  ['player_ingame_last', 'steamid'],
 ];
 
 /** A merge that cannot be done because of what was asked for, as opposed to
