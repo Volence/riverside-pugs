@@ -8,7 +8,7 @@ import { getSetting, getJsonSetting } from './settings.js';
 import { getServer } from './serverPool.js';
 import { campaignRegistry } from './campaignRegistry.js';
 import { spectateFor, type SpectateInfo } from './spectate.js';
-import { activeTimeout, recordPenalty } from './penalties.js';
+import { activeTimeout, recordPenalty, timeoutCause, type PenaltyKind } from './penalties.js';
 import { QUEUE_BLOCK_MESSAGE, type QueueBlock } from './queueGate.js';
 import { READY_BLOCK_MESSAGE, type ReadyBlock } from './readyGate.js';
 import type { Orchestrator } from './orchestrator.js';
@@ -70,7 +70,7 @@ export interface StateSnapshot {
     waitingForServer: boolean;
   } | null;
   /** A queue timeout the viewer is serving, as an ISO time. */
-  timeout: { until: string; offenses: number } | null;
+  timeout: { until: string; offenses: number; kind: PenaltyKind } | null;
   /** What the viewer still has to do on Discord before they may queue. */
   queueBlock: QueueBlock | null;
   /** What the viewer still has to do before they may press Ready. */
@@ -240,7 +240,7 @@ export class Matchmaker {
     if (block) return { ok: false, error: QUEUE_BLOCK_MESSAGE[block] };
     const timeout = activeTimeout(this.db, steamid);
     if (timeout) {
-      return { ok: false, error: `timed out for missed ready checks or no-shows until ${timeout.until.toISOString()}` };
+      return { ok: false, error: `timed out for ${timeoutCause(timeout.kind)} until ${timeout.until.toISOString()}` };
     }
     // Queueing again is moving on: the notice is about the pop they just
     // lost, and holding it over the next one would be wrong.
@@ -513,7 +513,7 @@ export class Matchmaker {
       match,
       timeout: (() => {
         const t = activeTimeout(this.db, steamid);
-        return t ? { until: t.until.toISOString(), offenses: t.offenses } : null;
+        return t ? { until: t.until.toISOString(), offenses: t.offenses, kind: t.kind } : null;
       })(),
       queueBlock: this.deps.queueGate?.(steamid) ?? null,
       readyBlock: this.readyBlock(steamid),

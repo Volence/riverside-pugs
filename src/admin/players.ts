@@ -277,7 +277,7 @@ export function playerDetail(db: DB, steamid: string, viewer: string = '') {
     steamAccount: steamAccountView(db, steamid),
     timeout: (() => {
       const t = activeTimeout(db, steamid);
-      return t ? { until: t.until.toISOString(), offenses: t.offenses } : null;
+      return t ? { until: t.until.toISOString(), offenses: t.offenses, kind: t.kind } : null;
     })(),
   };
 }

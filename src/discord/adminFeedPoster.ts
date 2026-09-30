@@ -100,7 +100,11 @@ export class AdminFeedPoster {
           ? `never connected to match${e.matchId ? ` [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})` : ''}`
           : 'missed a ready check';
         const minutes = t ? Math.round((t.until.getTime() - Date.now()) / 60_000) : 0;
-        const timeout = t ? ` · ${fmtMinutes(minutes)} queue timeout (offense ${t.offenses} this week)` : '';
+        // The timeout is whichever ladder ends later, which need not be the
+        // kind this line is about, so it says which one it is counting.
+        const timeout = t
+          ? ` · ${fmtMinutes(minutes)} queue timeout (${t.kind === 'no_show' ? 'no-show' : 'missed ready check'} ${t.offenses} in the window)`
+          : '';
         return { text: `${this.name(e.steamid)} ${what}${timeout}`, color: COLOR.penalty };
       }
       case 'account':

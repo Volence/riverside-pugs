@@ -57,6 +57,11 @@ export interface LobbySnapshot {
 
 /** The GET /api/queue shape: public, so carries nothing viewer-relative and
  *  no connect block, unlike StateSnapshot['queue']. */
+/** A queue timeout being served. `offenses` counts the ladder named by
+ *  `kind` only: missed ready checks and no-shows climb separate ladders, and
+ *  the timeout shown is whichever of the two ends later. */
+export interface QueueTimeout { until: string; offenses: number; kind?: 'ready_fail' | 'no_show' }
+
 export interface PublicQueue {
   count: number;
   players: NamedPlayer[];
@@ -86,7 +91,7 @@ export interface StateSnapshot {
     waitingForServer: boolean;
   } | null;
   /** A queue timeout the viewer is serving (missed ready checks, no-shows). */
-  timeout?: { until: string; offenses: number } | null;
+  timeout?: QueueTimeout | null;
   /** The Discord step still missing before the viewer may queue. */
   queueBlock?: 'link_discord' | 'join_discord' | null;
   /** The step still missing before the viewer may press Ready. */
@@ -707,7 +712,7 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
   notes: { id: number; authorId: string; authorName: string | null; text: string; createdAt: string }[];
   matches: { id: number; campaign: string; state: string; endedAt: string | null; winner: string | null; team: string; connectedAt: string | null }[];
   penalties: { id: number; kind: string; matchId: number | null; createdAt: string; clearedBy: string | null; clearedAt: string | null }[];
-  timeout: { until: string; offenses: number } | null;
+  timeout: QueueTimeout | null;
   tickets: TicketSummary[];
   /** Connects that ended before the player was in game, on a map that forced
    *  files. Likely a file-consistency rejection; a cancelled loading screen
@@ -1378,7 +1383,7 @@ export interface FileSummaryData {
   steamid: string; name: string; avatar: string | null; status: string;
   isAdmin: boolean; isMod: boolean; sr: number | null; games: number; createdAt: string | null;
   activeBan: AdminBan | null; bans: number; penalties: number;
-  timeout: { until: string; offenses: number } | null;
+  timeout: QueueTimeout | null;
   openTickets: number; aliases: number;
   sharesAddressWith: { steamid: string; name: string }[];
   steamFlags: { kind: string; text: string }[];

@@ -5,6 +5,10 @@ import { publishAdminEvent } from './adminFeed.js';
 export type PenaltyKind = 'ready_fail' | 'no_show';
 
 const DEFAULT_LADDER = [5, 15, 60, 1440];
+/** Never connecting to a match costs seven other people a whole evening's
+ *  slot, where a missed ready check costs them a minute, so it has its own,
+ *  much steeper ladder (owner, 2026-09-29). */
+const DEFAULT_NOSHOW_LADDER = [60, 180, 1440];
 
 function enabled(db: DB): boolean {
   return getSetting(db, 'penalties_enabled') !== '0';
@@ -15,12 +19,15 @@ function windowDays(db: DB): number {
   return Number.isFinite(n) && n > 0 ? n : 7;
 }
 
-function ladder(db: DB): number[] {
+function ladder(db: DB, kind: PenaltyKind): number[] {
+  const [key, fallback] = kind === 'no_show'
+    ? ['noshow_penalty_minutes', DEFAULT_NOSHOW_LADDER]
+    : ['penalty_minutes', DEFAULT_LADDER];
   try {
-    const v = JSON.parse(getSetting(db, 'penalty_minutes') ?? '');
+    const v = JSON.parse(getSetting(db, key) ?? '');
     if (Array.isArray(v) && v.length && v.every((x) => Number.isInteger(x) && x > 0)) return v;
   } catch { /* fall through to the default */ }
-  return DEFAULT_LADDER;
+  return fallback;
 }
 
 /** Note an offense. No-op when penalties are switched off. */
@@ -31,31 +38,75 @@ export function recordPenalty(db: DB, steamid: string, kind: PenaltyKind, matchI
   publishAdminEvent({ kind: 'penalty', steamid, penalty: kind, matchId });
 }
 
-/**
- * The queue timeout a player is serving right now, or null.
- *
- * Escalates with the number of uncleared offenses inside the window: the
- * first costs 5 minutes, then 15, 60, and a day for every one after that.
- * Timed from the most recent offense, so an old one cannot keep someone out.
- */
-export function activeTimeout(db: DB, steamid: string, now = new Date()): { until: Date; offenses: number } | null {
-  if (!enabled(db)) return null;
+export interface ActiveTimeout {
+  until: Date;
+  /** Offenses of `kind` in the window, the count that picked the rung. */
+  offenses: number;
+  /** Which ladder the timeout came from. */
+  kind: PenaltyKind;
+}
+
+/** One ladder's timeout, or null when it is not running at `now`. */
+function ladderTimeout(db: DB, steamid: string, kind: PenaltyKind, now: Date): ActiveTimeout | null {
   const since = new Date(now.getTime() - windowDays(db) * 24 * 60 * 60 * 1000).toISOString();
   const rows = db.prepare(
     `SELECT created_at FROM penalties
-     WHERE player_id = ? AND cleared_at IS NULL AND created_at >= ? AND created_at <= ?
+     WHERE player_id = ? AND kind = ? AND cleared_at IS NULL AND created_at >= ? AND created_at <= ?
      ORDER BY created_at DESC`,
-  ).all(steamid, since, now.toISOString()) as { created_at: string }[];
+  ).all(steamid, kind, since, now.toISOString()) as { created_at: string }[];
   if (rows.length === 0) return null;
-  const steps = ladder(db);
+  const steps = ladder(db, kind);
   const minutes = steps[Math.min(rows.length, steps.length) - 1];
   const until = new Date(Date.parse(rows[0].created_at) + minutes * 60_000);
-  return until > now ? { until, offenses: rows.length } : null;
+  return until > now ? { until, offenses: rows.length, kind } : null;
+}
+
+/**
+ * The queue timeout a player is serving right now, or null.
+ *
+ * Two ladders, each counted over its own kind only: missed ready checks climb
+ * penalty_minutes and no-shows climb noshow_penalty_minutes, so a player's
+ * first no-show costs the no-show rung one however many ready checks they
+ * missed, and the other way about. The window is shared. Each ladder is timed
+ * from its own most recent offense, so an old one cannot keep someone out, and
+ * the player serves whichever of the two ends later.
+ */
+export function activeTimeout(db: DB, steamid: string, now = new Date()): ActiveTimeout | null {
+  if (!enabled(db)) return null;
+  const a = ladderTimeout(db, steamid, 'ready_fail', now);
+  const b = ladderTimeout(db, steamid, 'no_show', now);
+  if (!a || !b) return a ?? b;
+  return b.until > a.until ? b : a;
+}
+
+/** What a timeout is for, in words, for the surfaces that tell the player. */
+export function timeoutCause(kind: PenaltyKind): string {
+  return kind === 'no_show' ? 'not connecting to a match' : 'missed ready checks';
 }
 
 export function clearPenalties(db: DB, steamid: string, by: string, now = new Date()): number {
   return db.prepare('UPDATE penalties SET cleared_by = ?, cleared_at = ? WHERE player_id = ? AND cleared_at IS NULL')
     .run(by, now.toISOString(), steamid).changes;
+}
+
+/** Clear one offense, for the per-row button on the player file: the right
+ *  answer to "that no-show was our server's fault" without also wiping the
+ *  ready checks they really did miss. The player's id is part of the match so
+ *  a stale page cannot clear somebody else's row. */
+export function clearPenalty(db: DB, steamid: string, id: number, by: string, now = new Date()): boolean {
+  return db.prepare('UPDATE penalties SET cleared_by = ?, cleared_at = ? WHERE id = ? AND player_id = ? AND cleared_at IS NULL')
+    .run(by, now.toISOString(), id, steamid).changes > 0;
+}
+
+/** Clear the no-shows one match handed out, for an abort whose no-shows were
+ *  not the players' doing. Returns who had one cleared. */
+export function clearMatchNoShows(db: DB, matchId: number, by: string, now = new Date()): string[] {
+  const rows = db.prepare(
+    "SELECT id, player_id FROM penalties WHERE match_id = ? AND kind = 'no_show' AND cleared_at IS NULL",
+  ).all(matchId) as { id: number; player_id: string }[];
+  const clear = db.prepare('UPDATE penalties SET cleared_by = ?, cleared_at = ? WHERE id = ?');
+  for (const r of rows) clear.run(by, now.toISOString(), r.id);
+  return rows.map((r) => r.player_id);
 }
 
 export interface PenaltyRow {

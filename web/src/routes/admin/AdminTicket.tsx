@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks';
 import { modApi, type TicketDiscussion, type DiscordSanction } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { useTicketNudge } from '../../hooks/useTicketNudge';
-import { campaignName } from '../../format';
+import { campaignName, timeoutOffenses } from '../../format';
 import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction } from './useAction';
 import { reportLine } from './AdminTickets';
@@ -148,7 +148,7 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
         <section>
           <h4>{data.summary ? 'Case file' : `About ${c.name}`}</h4>
           {!data.summary && (
-            <p class="muted">{c.status} · SR {c.sr ?? 'n/a'} · {c.games} games{c.activeBan ? ` · banned: ${c.activeBan.reason}` : ''}{c.timeout ? ` · queue timeout, ${c.timeout.offenses} offenses` : ''}</p>
+            <p class="muted">{c.status} · SR {c.sr ?? 'n/a'} · {c.games} games{c.activeBan ? ` · banned: ${c.activeBan.reason}` : ''}{c.timeout ? ` · queue timeout, ${timeoutOffenses(c.timeout)}` : ''}</p>
           )}
           <ul class="admin-list">
             <li>{c.bans.length} ban{c.bans.length === 1 ? '' : 's'} on record, {c.penalties.length} penalt{c.penalties.length === 1 ? 'y' : 'ies'}, {c.inputFlags.length} input flag{c.inputFlags.length === 1 ? '' : 's'}</li>

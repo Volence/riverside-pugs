@@ -47,7 +47,48 @@ describe('timeout ladder', () => {
     recordPenalty(db, P, 'no_show', null, later);
     const to = activeTimeout(db, P, later)!;
     expect(to.offenses).toBe(1);
-    expect(Math.round((to.until.getTime() - later.getTime()) / 60_000)).toBe(5);
+    expect(Math.round((to.until.getTime() - later.getTime()) / 60_000)).toBe(60);
+  });
+
+  it('no-shows climb their own ladder: 60, 180, then 1440 minutes', () => {
+    let t = T0;
+    for (const mins of [60, 180, 1440, 1440]) {
+      recordPenalty(db, P, 'no_show', 9, t);
+      const to = activeTimeout(db, P, t)!;
+      expect(to.kind).toBe('no_show');
+      expect(Math.round((to.until.getTime() - t.getTime()) / 60_000)).toBe(mins);
+      t = new Date(to.until.getTime() + 1000);
+    }
+  });
+
+  it('each ladder counts only its own kind', () => {
+    // Three missed ready checks do not push a first no-show up the ladder...
+    for (let i = 0; i < 3; i++) recordPenalty(db, P, 'ready_fail', null, plus(-300 + i * 90));
+    recordPenalty(db, P, 'no_show', 4, T0);
+    const to = activeTimeout(db, P, T0)!;
+    expect(to).toMatchObject({ kind: 'no_show', offenses: 1 });
+    expect(Math.round((to.until.getTime() - T0.getTime()) / 60_000)).toBe(60);
+    // ...and a no-show does not push the next ready check up its ladder.
+    const Q = IDS[1];
+    recordPenalty(db, Q, 'no_show', 4, T0);
+    recordPenalty(db, Q, 'ready_fail', null, plus(61));
+    const rf = activeTimeout(db, Q, plus(61))!;
+    expect(rf).toMatchObject({ kind: 'ready_fail', offenses: 1 });
+    expect(Math.round((rf.until.getTime() - plus(61).getTime()) / 60_000)).toBe(5);
+  });
+
+  it('the timeout served is whichever ladder ends later', () => {
+    recordPenalty(db, P, 'no_show', 4, T0);
+    recordPenalty(db, P, 'ready_fail', null, plus(10));
+    // no-show ends at +60, ready check at +15: the no-show wins.
+    expect(activeTimeout(db, P, plus(10))).toMatchObject({ kind: 'no_show' });
+    expect(activeTimeout(db, P, plus(10))!.until.getTime()).toBe(plus(60).getTime());
+  });
+
+  it('the no-show ladder is its own setting', () => {
+    setSetting(db, 'noshow_penalty_minutes', JSON.stringify([2]));
+    recordPenalty(db, P, 'no_show', 4, T0);
+    expect(activeTimeout(db, P, T0)!.until.getTime()).toBe(plus(2).getTime());
   });
 
   it('cleared offenses do not count, and history keeps them marked', () => {

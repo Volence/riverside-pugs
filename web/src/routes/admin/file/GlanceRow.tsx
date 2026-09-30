@@ -1,5 +1,6 @@
 import type { PlayerFileData, TimelineSource } from '../../../api';
 import { fmtTime } from '../useAction';
+import { timeoutOffenses } from '../../../format';
 
 /** One word per source, in the panel's own vocabulary. The badge is the same
  *  neutral shape for every source on purpose: colouring "LilAC" differently
@@ -59,7 +60,7 @@ export function GlanceRow({ d }: { d: PlayerFileData }) {
           {g.activeBan.expiresAt ? `, until ${fmtTime(g.activeBan.expiresAt)}` : ', permanently'}.
         </p>
       )}
-      {g.timeout && <p class="admin-warn">Queue timeout until {fmtTime(g.timeout.until)}, {g.timeout.offenses} offenses this week.</p>}
+      {g.timeout && <p class="admin-warn">Queue timeout until {fmtTime(g.timeout.until)}, {timeoutOffenses(g.timeout)} in the penalty window.</p>}
       {g.steamFlags.map((f) => <p key={f.kind} class="muted">{f.text}</p>)}
       <p class="muted">
         {d.lastReview

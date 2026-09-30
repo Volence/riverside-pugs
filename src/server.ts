@@ -26,7 +26,7 @@ import { canonicalise } from './aliases.js';
 import { recordPlayerNet } from './playerNetworks.js';
 import { onSourceTv } from './sourcetvSessions.js';
 import { publishAdminEvent } from './adminFeed.js';
-import { activeTimeout } from './penalties.js';
+import { activeTimeout, timeoutCause } from './penalties.js';
 import { adminRoutes } from './routes/admin.js';
 import { adminBalanceKnobRoutes } from './routes/adminBalanceKnobs.js';
 import { adminBalancePatchRoutes } from './routes/adminBalancePatches.js';
@@ -1604,7 +1604,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         queueBlock: (steamid) => {
           const t = activeTimeout(deps.db, steamid);
           return t
-            ? `You are on a queue timeout for missed ready checks or no-shows. You can queue again <t:${Math.floor(t.until.getTime() / 1000)}:R>.`
+            ? `You are on a queue timeout for ${timeoutCause(t.kind)}. You can queue again <t:${Math.floor(t.until.getTime() / 1000)}:R>.`
             : null;
         },
         sideGameView: (s) => sideGamesRef?.view(s) ?? null,

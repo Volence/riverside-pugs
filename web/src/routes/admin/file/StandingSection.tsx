@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import { adminApi, type FileAction, type PlayerFileData } from '../../../api';
 import { Panel } from '../../../components/bits';
 import { fmtTime, type Run } from '../useAction';
+import { timeoutOffenses } from '../../../format';
 import { sanctionText } from '../AdminTicket';
 
 const LENGTHS: [value: string, label: string][] = [
@@ -80,7 +81,7 @@ export function StandingSection(
 
       <h4>
         Penalties
-        {s.timeout && <span class="admin-warn"> on timeout until {fmtTime(s.timeout.until)}</span>}
+        {s.timeout && <span class="admin-warn"> on timeout until {fmtTime(s.timeout.until)} ({timeoutOffenses(s.timeout)})</span>}
       </h4>
       {s.penalties.length === 0 ? <p class="muted">None.</p> : (
         <ul class="admin-list">

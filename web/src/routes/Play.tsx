@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'preact/hooks';
 import {
-  api, ApiError, type Me, type LobbySnapshot, type NamedPlayer, type PublicQueue, type ReadyBlock, type StateSnapshot,
+  api, ApiError, type Me, type LobbySnapshot, type NamedPlayer, type PublicQueue, type ReadyBlock, type StateSnapshot, type QueueTimeout,
 } from '../api';
-import { campaignName, fmtClock, winnerLabel } from '../format';
+import { campaignName, fmtClock, timeoutCause, winnerLabel } from '../format';
 import { Countdown, useSecondsLeft } from '../components/Countdown';
 import { QUEUE_SIZE } from '../queueSize';
 import { Empty, Panel, PlayerLink } from '../components/bits';
@@ -329,7 +329,7 @@ export function LobbyNotice(
                 and you went back to the front of the queue.</>
             ) : (
               <>You did not ready up in time, so the pop was cancelled for everyone.
-                That is a queue timeout; it gets longer each time within a week.</>
+                That is a queue timeout; it gets longer each time within the penalty window.</>
             )}
           </p>
         </div>
@@ -346,7 +346,7 @@ export function QueuePanel(
     {
       count: number; joined: boolean; players: NamedPlayer[]; refresh: () => void;
       /** A queue timeout being served; the join button is disabled until it ends. */
-      timeout?: { until: string; offenses: number } | null;
+      timeout?: QueueTimeout | null;
       /** A Discord step still missing; replaces the join button with the checklist. */
       queueBlock?: 'link_discord' | 'join_discord' | null;
       me?: Me | null;
@@ -394,7 +394,7 @@ export function QueuePanel(
       ) : timeout && Date.parse(timeout.until) > Date.now() ? (
         <>
           <button class="btn btn--block" disabled>Join queue</button>
-          <TimeoutNotice until={Date.parse(timeout.until)} onDone={refresh} />
+          <TimeoutNotice until={Date.parse(timeout.until)} kind={timeout.kind} onDone={refresh} />
         </>
       ) : (
         <button class="btn btn--block" onClick={() => act(api.joinQueue)}>Join queue</button>
@@ -525,7 +525,7 @@ function MapVote({ lobby, refresh }: { lobby: LobbySnapshot; refresh: () => void
 
 /** "You can queue again in 12:04", ticking, then a refresh when it runs out so
  *  the join button comes back without a reload. */
-function TimeoutNotice({ until, onDone }: { until: number; onDone: () => void }) {
+function TimeoutNotice({ until, kind, onDone }: { until: number; kind?: QueueTimeout['kind']; onDone: () => void }) {
   const left = useSecondsLeft(until);
   useEffect(() => {
     if (left === 0) onDone();
@@ -534,7 +534,7 @@ function TimeoutNotice({ until, onDone }: { until: number; onDone: () => void })
   const clock = h > 0 ? `${h}h ${String(Math.floor((left % 3600) / 60)).padStart(2, '0')}m` : fmtClock(left);
   return (
     <p class="queue-timeout">
-      Queue timeout for missed ready checks or no-shows. You can queue again in {clock}.
+      Queue timeout for {timeoutCause(kind)}. You can queue again in {clock}.
     </p>
   );
 }
