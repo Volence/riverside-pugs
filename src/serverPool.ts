@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { deploySlug } from './releaseStage.js';
+import { NOT_HELD_SQL } from './serverHolds.js';
 
 export interface ServerRow {
   id: number;
@@ -81,18 +82,24 @@ export function isSideHeld(db: DB, serverId: number): boolean {
   return db.prepare('SELECT 1 FROM side_games WHERE server_id = ? AND ended_at IS NULL').get(serverId) !== undefined;
 }
 
+/** Idle, enabled boxes that nothing holds (src/serverHolds.ts), lowest id
+ *  first: what the queue could take right now. claimIdle takes the first;
+ *  a practice lease picks from the other end. */
+export function claimableServers(db: DB): ServerRow[] {
+  return db.prepare(`SELECT * FROM servers WHERE status = 'idle' AND enabled = 1 AND ${NOT_HELD_SQL} ORDER BY id`)
+    .all() as ServerRow[];
+}
+
 /** Atomically reserve one idle, enabled server; returns it, or null if none is
  *  available. A disabled box is invisible here however idle it looks, which is
  *  the whole point: an admin can pull a misbehaving server out of rotation
  *  mid-evening without stopping it, kicking anyone, or editing the database.
- *  A box lent out as a practice server is invisible the same way; a PUG that
- *  finds nothing else takes one back through the practice lease manager's
- *  preemption (src/practiceLeases.ts), never by claiming it here. */
+ *  A held box (practice lease, side game) is invisible the same way; a PUG
+ *  that finds nothing else takes one back through that holder's preemption
+ *  (src/practiceLeases.ts, src/sideGames.ts), never by claiming it here. */
 export function claimIdle(db: DB): ServerRow | null {
   return db.transaction(() => {
-    const row = db
-      .prepare(`SELECT * FROM servers WHERE status = 'idle' AND enabled = 1 AND ${NOT_LEASED_SQL} ORDER BY id LIMIT 1`)
-      .get() as ServerRow | undefined;
+    const row = claimableServers(db)[0];
     if (!row) return null;
     db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(row.id);
     return { ...row, status: 'reserved' as const };
