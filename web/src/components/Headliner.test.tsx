@@ -18,6 +18,17 @@ describe('Headliner', () => {
     expect(screen.getByText('153').classList.contains('headliner__stat-value--loss')).toBe(true);
   });
 
+  it('lists earlier names under the name, and nothing when there are none', () => {
+    const { container, rerender } = render(
+      <Headliner eyebrow="Rating" name="v" rating={1000} stats={[]}
+        aka={[{ name: 'amour plastique', matches: 12 }, { name: 'xX', matches: 1 }]} />,
+    );
+    expect(container.querySelector('.headliner__aka')?.textContent)
+      .toBe('also amour plastique (12 matches), xX (1 match)');
+    rerender(<Headliner eyebrow="Rating" name="v" rating={1000} stats={[]} aka={[]} />);
+    expect(container.querySelector('.headliner__aka')).toBeNull();
+  });
+
   it('says Unrated when there is no rating', () => {
     render(<Headliner eyebrow="Rating" name="bob" rating={null} stats={[]} />);
     expect(screen.getByText(/unrated/i)).toBeTruthy();
