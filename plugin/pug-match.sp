@@ -20,7 +20,7 @@
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.3.17"
+#define PLUGIN_VERSION "0.3.18"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -231,6 +231,12 @@ bool g_bPendingFinalize;                 // set when 2nd-half round_end fires; c
 int g_iPugSide[3];                       // [1] = game team of pug team a, [2] = of pug b (0 = unknown)
 int g_iClientRoster[MAXPLAYERS + 1];     // client -> roster slot, -1 = not rostered
 int g_iLockAttempts[MAXPLAYERS + 1];
+// New-map side seed (SeedNewMapSides). While g_bSeedHold is set the orientation
+// vote may not overturn the seeded mapping; the hold ends SEED_HOLD_SECS after
+// the first rostered player lands on a side (g_fSeedHoldUntil, 0 = not yet).
+#define SEED_HOLD_SECS 20.0
+bool g_bSeedHold;
+float g_fSeedHoldUntil;
 int g_iLastHealth[MAXPLAYERS + 1];       // for SI overkill remainder
 
 // Staff chat (pug-staffchat.inc). Declared here, not there, because
@@ -2798,9 +2804,10 @@ public Action Cmd_Status(int args)
 		g_sCampaign[0] == '\0' ? "(none)" : g_sCampaign,
 		g_sCurrentMap,
 		g_sStopAfterMap[0] == '\0' ? "(none)" : g_sStopAfterMap);
-	DumpLine("STATUS orient a=%s b=%s round1Logical=%d round1SurvPug=%d logicalOfA=%d minOrient=%d debug=%d",
+	DumpLine("STATUS orient a=%s b=%s round1Logical=%d round1SurvPug=%d logicalOfA=%d minOrient=%d debug=%d seedHold=%d",
 		SideName(g_iPugSide[1]), SideName(g_iPugSide[2]),
-		g_iRound1Logical, g_iRound1SurvPug, g_iLogicalOfPugA, g_cvMinOrient.IntValue, g_cvDebug.IntValue);
+		g_iRound1Logical, g_iRound1SurvPug, g_iLogicalOfPugA, g_cvMinOrient.IntValue, g_cvDebug.IntValue,
+		g_bSeedHold ? 1 : 0);
 	DumpLine("STATUS half a=%d b=%d pendingFinalize=%d readyup=%d",
 		g_iHalfScoreA, g_iHalfScoreB, g_bPendingFinalize ? 1 : 0, g_bReadyUpAvailable ? 1 : 0);
 	DumpLine("STATUS selfStarted=%d teamLock=%d recordDemos=%d",
@@ -2935,6 +2942,8 @@ void ResetMatchState()
 	g_bPendingFinalize = false;
 	g_iPugSide[1] = 0;
 	g_iPugSide[2] = 0;
+	g_bSeedHold = false;
+	g_fSeedHoldUntil = 0.0;
 	for (int i = 0; i < MAX_ROSTER; i++)
 	{
 		g_sRosterId[i][0] = '\0';
@@ -3157,6 +3166,47 @@ bool TeamLockActive()
 	return true;
 }
 
+/** Set the sides for half 1 of a new map of a live match, instead of carrying
+ *  over the previous map's half-2 mapping.
+ *
+ *  The carried-over mapping is wrong on every map where the same team is still
+ *  ahead, because L4D1 versus sends the team with the higher campaign score out
+ *  as survivors first, and on a tie keeps the previous map's order. Over 910
+ *  map starts to 2026-09-30 the recorded half-1 survivors followed that rule
+ *  every time bar match 12 and 17, which predate the lock's current form. The
+ *  lock only recovered from the stale mapping when the first players to load in
+ *  happened to vote the right way; in match 357 (2026-09-30, map 4) they did
+ *  not, and the lock put the trailing team on survivors.
+ *
+ *  Uses this plugin's own map totals, which are the engine's round scores as
+ *  read at each round end. Leaves the old behaviour in place when there is no
+ *  previous map or the tie cannot be broken. */
+void SeedNewMapSides(int prevRound1Surv)
+{
+	g_bSeedHold = false;
+	g_fSeedHoldUntil = 0.0;
+	if (g_State != MS_Live || g_iMapCount < 1) return;
+
+	int totA, totB;
+	for (int i = 0; i < g_iMapCount && i < MAX_MAPS; i++)
+	{
+		totA += g_iMapScoreA[i];
+		totB += g_iMapScoreB[i];
+	}
+	int first = (totA > totB) ? 1 : (totB > totA) ? 2 : prevRound1Surv;
+	if (first != 1 && first != 2)
+	{
+		LogMessage("[pug] map %s: no side seed (totals a=%d b=%d tied, previous order unknown)", g_sCurrentMap, totA, totB);
+		return;
+	}
+	g_iPugSide[first] = TEAM_SURVIVOR;
+	g_iPugSide[3 - first] = TEAM_INFECTED;
+	g_bSeedHold = true;
+	for (int c = 1; c <= MaxClients; c++) g_iLockAttempts[c] = 0;
+	LogMessage("[pug] map %s: seeded sides, pug team %s survives first (totals a=%d b=%d%s)",
+		g_sCurrentMap, first == 1 ? "a" : "b", totA, totB, totA == totB ? ", tie keeps previous order" : "");
+}
+
 /** Observation-based cohesion lock. Every tick:
  *  1. Adopt the pug-team<->side mapping from where rostered players actually sit,
  *     via a single JOINT orientation vote (not two independent per-team votes, because
@@ -3178,12 +3228,26 @@ public Action Timer_TeamLock(Handle timer)
 	OrientationVote(straight, inverted);
 	int need = g_cvMinOrient.IntValue;
 	int wasA = g_iPugSide[1];
-	if (straight > inverted && straight >= need)
+
+	// New-map load-in: the seed from SeedNewMapSides stands against the vote
+	// until the arrivals have settled. The engine's own placement of players
+	// reconnecting across a changelevel is noisy, and a vote taken over the
+	// first few arrivals can come out wrong; enforcement then drags everyone
+	// else to match it and the vote confirms itself (match 357 map 4).
+	bool holding = false;
+	if (g_bSeedHold)
+	{
+		float now = GetEngineTime();
+		if (g_fSeedHoldUntil == 0.0 && straight + inverted > 0) g_fSeedHoldUntil = now + SEED_HOLD_SECS;
+		if (g_fSeedHoldUntil == 0.0 || now < g_fSeedHoldUntil) holding = true;
+		else g_bSeedHold = false;
+	}
+	if (!holding && straight > inverted && straight >= need)
 	{
 		g_iPugSide[1] = TEAM_SURVIVOR;
 		g_iPugSide[2] = TEAM_INFECTED;
 	}
-	else if (inverted > straight && inverted >= need)
+	else if (!holding && inverted > straight && inverted >= need)
 	{
 		g_iPugSide[1] = TEAM_INFECTED;
 		g_iPugSide[2] = TEAM_SURVIVOR;
@@ -3356,6 +3420,7 @@ public void OnMapStart()
 	// I Hate Mountains, ended after one map).
 	if (g_State == MS_Pending && g_bSelfStarted)
 		strcopy(g_sCampaign, sizeof(g_sCampaign), g_sCurrentMap);
+	int prevRound1Surv = g_iRound1SurvPug;
 	g_iHalfScoreA = 0;
 	g_iHalfScoreB = 0;
 	g_iRound1Logical = 0;
@@ -3393,6 +3458,9 @@ public void OnMapStart()
 		EndMatchNow("finale loaded");
 
 	if (g_State == MS_Pending || g_State == MS_Live) StartMatchDemo();
+
+	// After the finale and campaign-change checks, which can end the match.
+	SeedNewMapSides(prevRound1Surv);
 
 	// pug_match.cfg unloads l4d2_spec_stays_spec because it fights the team
 	// lock, but server_custom_convars.cfg leaves plugin loading unlocked on
