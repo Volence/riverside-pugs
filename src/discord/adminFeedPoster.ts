@@ -293,7 +293,11 @@ export class AdminFeedPoster {
         return `${who} added a note on ${target}:\n${clipped.split('\n').map((l) => `> ${escapeName(l)}`).join('\n')}`;
       }
       case 'clear_penalties': return `${who} cleared ${target}'s penalties`;
-      case 'abort_match': return `${who} aborted match ${match}`;
+      case 'abort_match': return `${who} aborted match ${match}${d.clearedNoShows !== undefined ? ` and cleared its ${String(d.clearedNoShows)} no-show penalties` : ''}`;
+      case 'clear_noshows': return `${who} cleared the ${String(d.cleared)} no-show penalties from match ${match}`;
+      case 'clear_penalty': return `${who} cleared one of ${target}'s penalties`;
+      case 'noshow_extend': return `${who} moved match ${match}'s no-show deadline to ${String(d.extraMinutes)} minutes later than usual`;
+      case 'cancel_pop': return `${who} cancelled a pop: ${String(d.requeued)} back in the queue${Array.isArray(d.excluded) && d.excluded.length ? `, left out ${d.excluded.map((s) => this.name(String(s))).join(', ')}` : ''}`;
       case 'void_match': return `${who} voided match ${match}: ${escapeName(String(d.reason ?? ''))}. Season ratings were recomputed.`;
       case 'new_season': return `${who} started a new season: **${escapeName(String(d.name ?? ''))}**. Everyone's rating starts fresh.`;
       case 'rename_season': return `${who} renamed season ${e.target} to **${escapeName(String(d.name ?? ''))}**`;

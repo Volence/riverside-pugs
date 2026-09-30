@@ -103,6 +103,9 @@ const KEYED: [table: string, column: string][] = [
   // Live scratch, like the rows above: if both accounts somehow have a row in
   // one match, the survivor's is as good as the one dropped.
   ['match_presence', 'steamid'],
+  // "Your match was aborted" notices. Both accounts on one roster is the
+  // alt-account case itself; the survivor's notice is kept.
+  ['match_abort_notices', 'player_id'],
   // A handle per platform. Where both accounts have one, `into` keeps its own.
   ['player_links', 'player_id'],
   // Summed first, below, where both accounts were seen on one address.

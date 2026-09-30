@@ -7,6 +7,8 @@ import { matchForecast, recomputeSeasonRatings } from '../rating.js';
 import { getServer } from '../serverPool.js';
 import type { LogAuth } from '../logAuth.js';
 import { serverPasswordFor } from '../matchToken.js';
+import { noteMatchAborted } from '../matchAborts.js';
+import { clearMatchNoShows } from '../penalties.js';
 
 export function adminOverview(db: DB, logAuth?: LogAuth) {
   const openRows = db.prepare(
@@ -102,7 +104,9 @@ export type ActionResult = { ok: true } | { ok: false; status: number; error: st
 /** End a configuring or live match now: aborted, server freed through the
  *  releaser (which also tells the plugin), and what the live feed captured
  *  frozen into the permanent tables so the match page can still show who was
- *  in and how far they got. */
+ *  in and how far they got. Everyone on it is told, and goes back to the
+ *  front of the queue if they may queue: staff pulling the plug is nobody's
+ *  fault on the roster, and a player being banned is kept out by the ban. */
 export function abortMatch(db: DB, releaser: ServerReleaser, matchId: number): ActionResult {
   const m = db.prepare('SELECT state, server_id FROM matches WHERE id = ?').get(matchId) as
     | { state: string; server_id: number | null } | undefined;
@@ -113,7 +117,21 @@ export function abortMatch(db: DB, releaser: ServerReleaser, matchId: number): A
   // a heartbeat naming the reset map must not land before the record is taken.
   archiveAborted(db, matchId);
   if (m.server_id !== null) releaser.release(m.server_id, { teardown: true, restart: true });
+  noteMatchAborted(db, { matchId, cause: 'admin', requeue: true });
   return { ok: true };
+}
+
+/**
+ * Clear the no-show penalties one match handed out. For the abort dialog's
+ * "Also clear the no-show penalties" box and for an aborted match whose
+ * no-shows turn out not to be the players' doing (our server, a Steam
+ * outage). Only an aborted match can have handed any out: the reaper records
+ * them as it aborts.
+ */
+export function clearNoShowsOf(db: DB, matchId: number, by: string): { ok: true; cleared: string[] } | { ok: false; status: number; error: string } {
+  const m = db.prepare('SELECT state FROM matches WHERE id = ?').get(matchId) as { state: string } | undefined;
+  if (!m) return { ok: false, status: 404, error: 'no such match' };
+  return { ok: true, cleared: clearMatchNoShows(db, matchId, by) };
 }
 
 /** Void a completed match: it stops counting anywhere, and the season's

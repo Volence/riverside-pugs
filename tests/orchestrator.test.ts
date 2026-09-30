@@ -1,4 +1,5 @@
 import { subscribeAdminEvents } from '../src/adminFeed.js';
+import { subscribeMatchAborts } from '../src/matchAborts.js';
 import { setLogSecret } from '../src/logAuth.js';
 import { setSetting } from '../src/settings.js';
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
@@ -274,15 +275,36 @@ describe('RealOrchestrator', () => {
       onNoServer: (id) => pended.push(id),
     });
     const mid = seedMatch(db);
+    const events: { kind: string; text?: string; matchId?: number }[] = [];
+    const offEvents = subscribeAdminEvents((e) => events.push(e as never));
+    const requeued: string[][] = [];
+    const offAborts = subscribeMatchAborts((e) => { if (e.db === db) requeued.push(e.requeueIds); });
 
-    await orch.setupMatch(mid);
+    try {
+      await orch.setupMatch(mid);
+    } finally {
+      offEvents();
+      offAborts();
+    }
 
-    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('aborted');
+    const row = db.prepare('SELECT state, ended_at, abort_cause, token FROM matches WHERE id = ?').get(mid) as
+      { state: string; ended_at: string | null; abort_cause: string | null; token: string };
+    expect(row.state).toBe('aborted');
     expect(getServer(db, serverId)!.status).toBe('idle');
     // The invariant this task introduces: a broken setup must never be
     // mistaken for "no server was free" and pended, or a permanently broken
     // box would pin the queue retrying a setup that can never succeed.
     expect(pended).toEqual([]);
+    // The same ending as every other abort: ended_at, a cause, the feed told
+    // why without the token, and the whole roster handed back for requeue.
+    expect(row.ended_at).not.toBeNull();
+    expect(row.abort_cause).toBe('setup_failed');
+    const problem = events.find((e) => e.kind === 'problem' && e.matchId === mid);
+    expect(problem?.text).toMatch(/setting up s failed/);
+    expect(problem?.text).toContain('bad campaign');
+    expect(problem?.text).not.toContain(row.token);
+    expect(requeued).toEqual([IDS]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM match_abort_notices WHERE match_id = ?').get(mid)).toEqual({ n: 8 });
   });
 
   it('finishMatch pulls the dump, persists scores/stats, resets server, completes match', async () => {

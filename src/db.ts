@@ -1651,6 +1651,26 @@ export function openDb(path: string): DB {
   // Practice-only campaigns (Hunter Training) install everywhere and are
   // downloadable, but are never offered for the PUG map pool.
   ensureColumn(db, 'custom_campaigns', 'practice_only', 'INTEGER NOT NULL DEFAULT 0');
+  // Minutes staff added to this match's no-show deadline from the live board
+  // (src/noShow.ts). Per match: it moves the whole rule, not one player's.
+  ensureColumn(db, 'matches', 'noshow_extra_minutes', 'INTEGER NOT NULL DEFAULT 0');
+  // Why a match was aborted, as one of src/matchAborts.ts's causes. NULL for
+  // an abort from before the column, and for a voided match.
+  ensureColumn(db, 'matches', 'abort_cause', 'TEXT');
+  // One row per rostered player per aborted match: the notice on their Play
+  // page, whether they were at fault, and whether they went back in the queue.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS match_abort_notices (
+      match_id INTEGER NOT NULL REFERENCES matches(id),
+      player_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('innocent', 'culprit', 'file_check')),
+      requeued INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      dismissed_at TEXT,
+      PRIMARY KEY (match_id, player_id)
+    );
+    CREATE INDEX IF NOT EXISTS match_abort_notices_player ON match_abort_notices(player_id, created_at);
+  `);
 
   seed(db);
   return db;

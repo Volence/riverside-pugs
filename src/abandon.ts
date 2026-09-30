@@ -4,6 +4,7 @@ import { archiveAborted } from './matchArchive.js';
 import { insertBan } from './admin/players.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { publishBanChange } from './banEvents.js';
+import { noteMatchAborted } from './matchAborts.js';
 
 /** Abandon bans escalate within this window: 1 day, then 3, then 7. */
 const LADDER_MINUTES = [1440, 4320, 10080];
@@ -88,6 +89,9 @@ export async function handleAbandon(deps: AbandonDeps, token: string, steamid: s
     archiveAborted(db, match.id);
     deps.releaser.release(match.server_id, { teardown: true, restart: true });
     publishAdminEvent({ kind: 'abandon', steamid, matchId: match.id, minutes });
+    // The seven who stayed go back to the front of the queue; the leaver is
+    // banned, which keeps them out of it anyway.
+    noteMatchAborted(db, { matchId: match.id, cause: 'abandon', culprits: [steamid], requeue: true });
     console.warn(`[abandon] match ${match.id} ended: ${steamid} abandoned it; banned for ${minutes} minutes`);
     return match.id;
   } finally {
