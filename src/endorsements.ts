@@ -1,5 +1,6 @@
 import type { DB } from './db.js';
 import { getSetting } from './settings.js';
+import { completedPug } from './matchKinds.js';
 
 /**
  * Post-match endorsements: every rule lives here, and both surfaces (the HTTP
@@ -181,13 +182,13 @@ export function endorsementSummary(db: DB, steamid: string): EndorsementSummary 
   const counts = emptyCounts();
   const rows = db.prepare(
     `SELECT e.kind, COUNT(*) AS n
-     FROM endorsements e JOIN matches m ON m.id = e.match_id AND m.state = 'completed'
+     FROM endorsements e JOIN matches m ON m.id = e.match_id AND ${completedPug('m')}
      WHERE e.to_id = ? GROUP BY e.kind`,
   ).all(steamid) as { kind: EndorseKind; n: number }[];
   for (const r of rows) counts[r.kind] = r.n;
   const { games } = db.prepare(
     `SELECT COUNT(*) AS games FROM match_players mp
-     JOIN matches m ON m.id = mp.match_id AND m.state = 'completed'
+     JOIN matches m ON m.id = mp.match_id AND ${completedPug('m')}
      WHERE mp.player_id = ?`,
   ).get(steamid) as { games: number };
   const total = counts.caller + counts.clutch + counts.vibes;
@@ -208,7 +209,7 @@ export function allTitles(db: DB): Map<string, EndorseKind> {
   const byPlayer = new Map<string, EndorseCounts>();
   const rows = db.prepare(
     `SELECT e.to_id AS steamid, e.kind, COUNT(*) AS n
-     FROM endorsements e JOIN matches m ON m.id = e.match_id AND m.state = 'completed'
+     FROM endorsements e JOIN matches m ON m.id = e.match_id AND ${completedPug('m')}
      GROUP BY e.to_id, e.kind`,
   ).all() as { steamid: string; kind: EndorseKind; n: number }[];
   for (const r of rows) {
@@ -220,7 +221,7 @@ export function allTitles(db: DB): Map<string, EndorseKind> {
   if (byPlayer.size === 0) return out;
   const games = new Map((db.prepare(
     `SELECT mp.player_id AS steamid, COUNT(*) AS games FROM match_players mp
-     JOIN matches m ON m.id = mp.match_id AND m.state = 'completed'
+     JOIN matches m ON m.id = mp.match_id AND ${completedPug('m')}
      GROUP BY mp.player_id`,
   ).all() as { steamid: string; games: number }[]).map((r) => [r.steamid, r.games]));
   for (const [steamid, counts] of byPlayer) {
@@ -239,7 +240,7 @@ export function pendingEndorsements(db: DB, steamid: string): { matchId: number;
     `SELECT m.id AS matchId,
             (SELECT COUNT(*) FROM endorsements e WHERE e.match_id = m.id AND e.from_id = mp.player_id) AS used
      FROM matches m JOIN match_players mp ON mp.match_id = m.id AND mp.player_id = ?
-     WHERE m.state = 'completed' AND datetime(m.ended_at, '+' || ? || ' hours') > datetime('now')
+     WHERE ${completedPug('m')} AND datetime(m.ended_at, '+' || ? || ' hours') > datetime('now')
      ORDER BY m.id DESC`,
   ).all(steamid, hours) as { matchId: number; used: number }[];
   return rows.filter((r) => r.used < budget).map((r) => ({ matchId: r.matchId, remaining: budget - r.used }));

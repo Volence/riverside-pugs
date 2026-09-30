@@ -2,6 +2,7 @@ import type { DB } from './db.js';
 import { mapStatsFor } from './liveView.js';
 import { campaignRegistry, resolveCampaignForMap } from './campaignRegistry.js';
 import { unrecordedOrdinals } from './roundStats.js';
+import { completedPug } from './matchKinds.js';
 
 /** Which of a match's maps have a real score. Same rule as the match page's
  *  `recorded` flag (roundStats.ts). An unrecorded map still counts as played
@@ -113,7 +114,7 @@ function roundAggregates(db: DB, maps: string[]): Map<string, RoundAggregate> {
        FROM match_rounds r
        JOIN match_maps mm ON mm.match_id = r.match_id AND mm.ordinal = r.ordinal
        JOIN matches m ON m.id = r.match_id
-       WHERE m.state = 'completed'
+       WHERE ${completedPug('m')}
          AND r.reliable = 1
          AND r.ended_at IS NOT NULL
          AND r.started_at IS NOT NULL
@@ -190,7 +191,7 @@ export function playerMapBreakdown(db: DB, steamid: string): MapBreakdownRow[] {
     .prepare(
       `SELECT m.id, mp.team, mp.joined_map AS joinedMap FROM match_players mp
        JOIN matches m ON m.id = mp.match_id
-       WHERE mp.player_id = ? AND m.state = 'completed'`,
+       WHERE mp.player_id = ? AND ${completedPug('m')}`,
     )
     .all(steamid) as { id: number; team: 'a' | 'b'; joinedMap: number }[];
   if (played.length === 0) return [];
@@ -324,7 +325,7 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
     .prepare(
       `SELECT mm.match_id, mm.ordinal, mm.team_a_score AS a, mm.team_b_score AS b
        FROM match_maps mm JOIN matches m ON m.id = mm.match_id
-       WHERE mm.map = ? AND m.state = 'completed'
+       WHERE mm.map = ? AND ${completedPug('m')}
        ORDER BY mm.match_id`,
     )
     .all(map) as { match_id: number; ordinal: number; a: number; b: number }[];
@@ -435,7 +436,7 @@ export function mapIndex(db: DB): MapIndexRow[] {
     .prepare(
       `SELECT mm.match_id, mm.ordinal, mm.map, mm.team_a_score AS a, mm.team_b_score AS b
        FROM match_maps mm JOIN matches m ON m.id = mm.match_id
-       WHERE m.state = 'completed'
+       WHERE ${completedPug('m')}
        ORDER BY mm.map`,
     )
     .all() as { match_id: number; ordinal: number; map: string; a: number; b: number }[];

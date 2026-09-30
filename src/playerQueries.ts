@@ -9,6 +9,7 @@ import { resolveCampaignForMap, campaignDisplayName } from './campaignRegistry.j
 import { chemistryFor } from './chemistry.js';
 import { allTitles, endorsementSummary } from './endorsements.js';
 import { playerWeeklyAwards } from './weeklyStore.js';
+import { completedPug } from './matchKinds.js';
 
 /** Read models shared by the HTTP routes and the Discord slash commands, so a
  *  number on the site and the same number in Discord come from one query. */
@@ -37,14 +38,14 @@ export function leaderboardData(db: DB, requestedSeason?: number) {
             COALESCE(SUM(mp.ff_dealt),0)     AS ff,
             COALESCE(SUM(mp.revives),0)      AS rev
      FROM match_players mp JOIN matches m ON m.id = mp.match_id
-     WHERE m.season_id = ? AND m.state = 'completed'
+     WHERE m.season_id = ? AND ${completedPug('m')}
      GROUP BY mp.player_id`,
   ).all(seasonId) as Record<string, number | string>[];
 
   const skill = db.prepare(
     `SELECT mps.player_id AS steamid, mps.stat, SUM(mps.value) AS total
      FROM match_player_stats mps JOIN matches m ON m.id = mps.match_id
-     WHERE m.season_id = ? AND m.state = 'completed'
+     WHERE m.season_id = ? AND ${completedPug('m')}
      GROUP BY mps.player_id, mps.stat`,
   ).all(seasonId) as { steamid: string; stat: string; total: number }[];
 
@@ -103,7 +104,7 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
     `SELECT COUNT(*) AS games, COALESCE(SUM(mp.si_damage),0) AS siDamage, COALESCE(SUM(mp.si_kills),0) AS siKills,
             COALESCE(SUM(mp.common_kills),0) AS commonKills, COALESCE(SUM(mp.ff_dealt),0) AS ffDealt, COALESCE(SUM(mp.revives),0) AS revives
      FROM match_players mp JOIN matches m ON m.id = mp.match_id
-     WHERE mp.player_id = ? AND m.state = 'completed'`,
+     WHERE mp.player_id = ? AND ${completedPug('m')}`,
   ).get(steamid) as { games: number; siDamage: number; siKills: number; commonKills: number; ffDealt: number; revives: number };
 
   const matches = (db.prepare(
@@ -112,7 +113,7 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
      FROM match_players mp
      JOIN matches m ON m.id = mp.match_id
      LEFT JOIN rating_history rh ON rh.match_id = m.id AND rh.player_id = mp.player_id
-     WHERE mp.player_id = ? AND m.state = 'completed'
+     WHERE mp.player_id = ? AND ${completedPug('m')}
      ORDER BY m.id DESC LIMIT ?`,
   ).all(steamid, PROFILE_MATCH_LIMIT) as any[]).map((m) => ({
     id: m.id, campaign: m.campaign, endedAt: m.ended_at,
@@ -129,7 +130,7 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
   const statRows = db.prepare(
     `SELECT mps.stat, SUM(mps.value) AS total
      FROM match_player_stats mps JOIN matches m ON m.id = mps.match_id
-     WHERE mps.player_id = ? AND m.state = 'completed'
+     WHERE mps.player_id = ? AND ${completedPug('m')}
      GROUP BY mps.stat`,
   ).all(steamid) as { stat: string; total: number }[];
 

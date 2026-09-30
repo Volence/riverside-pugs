@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import { getSetting } from './settings.js';
 import { STAT_DEFS } from './statKeys.js';
+import { completedPug } from './matchKinds.js';
 
 /** Games before a player holds a rank. Under this they are listed as
  *  provisional: one lucky night at high sigma should not top the board. */
@@ -68,13 +69,13 @@ export function playerStandings(db: DB, seasonId: number, steamid: string): Reco
             COALESCE(SUM(mp.si_damage),0) AS sidmg, COALESCE(SUM(mp.si_kills),0) AS sikill,
             COALESCE(SUM(mp.common_kills),0) AS ck, COALESCE(SUM(mp.revives),0) AS rev
      FROM match_players mp JOIN matches m ON m.id = mp.match_id
-     WHERE m.season_id = ? AND m.state = 'completed'
+     WHERE m.season_id = ? AND ${completedPug('m')}
      GROUP BY mp.player_id`,
   ).all(seasonId) as ({ steamid: string; matches: number } & Record<string, number>)[];
   const skill = db.prepare(
     `SELECT mps.player_id AS steamid, mps.stat, SUM(mps.value) AS total
      FROM match_player_stats mps JOIN matches m ON m.id = mps.match_id
-     WHERE m.season_id = ? AND m.state = 'completed'
+     WHERE m.season_id = ? AND ${completedPug('m')}
      GROUP BY mps.player_id, mps.stat`,
   ).all(seasonId) as { steamid: string; stat: string; total: number }[];
 

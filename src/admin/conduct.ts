@@ -97,7 +97,7 @@ export function conductOf(db: DB, canonical: string): ConductSection {
   // match began before the first named pause, so a date cut would drop it.
   const matchesSince = since === null ? 0 : (db.prepare(
     `SELECT COUNT(DISTINCT mp.match_id) AS n FROM match_players mp
-     JOIN matches m ON m.id = mp.match_id AND m.voided_at IS NULL AND m.state IN ('completed', 'aborted')
+     JOIN matches m ON m.id = mp.match_id AND m.voided_at IS NULL AND m.state IN ('completed', 'aborted') AND m.kind = 'pug'
      WHERE ${inIds}
        AND mp.match_id >= (SELECT MIN(match_id) FROM match_pauses WHERE called_by IS NOT NULL)`,
   ).get(...ids) as { n: number }).n;
