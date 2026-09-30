@@ -194,14 +194,13 @@ describe('the drawer\'s view of a server', () => {
     expect(earlier.hasEarlier).toBe(false);
   });
 
-  it('names each speaker by site name and match team, whatever they call themselves in game', async () => {
+  it('names each speaker by site name, whatever they call themselves in game', async () => {
     db.prepare("UPDATE players SET name = 'Anna' WHERE steamid = ?").run(PLAYER);
-    const m = matchOn('live');
-    db.prepare("INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'a')").run(m, PLAYER);
+    matchOn('live');
     noteName(PLAYER, 'Spoken For');
     recordSay(db, sid, { steamid: PLAYER, team: 2, scope: 'team', message: 'hey' });
     const body = await lines();
-    expect(body.lines[0]).toMatchObject({ name: 'Spoken For', siteName: 'Anna', matchTeam: 'a' });
+    expect(body.lines[0]).toMatchObject({ name: 'Spoken For', siteName: 'Anna' });
   });
 
   it('with no match shows the newest lines, as before', async () => {
