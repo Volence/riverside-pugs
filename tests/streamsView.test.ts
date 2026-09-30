@@ -176,6 +176,18 @@ describe('streamsView', () => {
     expect(v.offline.map((o) => o.steamid).sort()).toEqual(['1', '2']);
   });
 
+  it('leaves out a roster on a live but participants-only scrim', () => {
+    player('1', 'alice');
+    linked('1', '11', 'alicetv');
+    status('1', true);
+    liveMatch(7, 'blood_harvest', 'l4d_farm01_hilltop', ['1']);
+    db.prepare("UPDATE matches SET visibility = 'participants' WHERE id = 7").run();
+    const v = streamsView(db, { engaged: [], now: T0 });
+    expect(v.inPug).toEqual([]);
+    expect(v.live.map((s) => s.steamid)).toEqual(['1']);
+    expect(v.live[0].match).toBe(null);
+  });
+
   it('ignores a roster on a match that is not live', () => {
     player('1', 'alice');
     linked('1', '11', 'alicetv');
