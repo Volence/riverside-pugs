@@ -631,6 +631,21 @@ export interface Profile {
   endorsements?: EndorsementSummary;
   /** Optional only for a server older than the feature. */
   weeklyAwards?: PlayerAward[];
+  /** Other names played under in matches, most played first, never the
+   *  current one. Optional only for a server older than the feature. */
+  alsoKnownAs?: { name: string; matches: number }[];
+}
+
+/** One name from a player's name history (src/playerNames.ts). `name` is the
+ *  spelling used most; `sources` says whether it was a Steam persona, an
+ *  in-game name, or both. */
+export interface NameHistoryRow {
+  name: string;
+  key: string;
+  matches: number;
+  firstSeen: string;
+  lastSeen: string;
+  sources: ('steam' | 'ingame')[];
 }
 
 /** A place on this season's board: `rank` of `of` ranked players. Ties share. */
@@ -1435,6 +1450,9 @@ export interface PlayerFileData {
       steamAccount: SteamAccount | null;
       networks: AdminPlayerDetail['networks'];
       sharesAddressWith: AdminPlayerDetail['sharesAddressWith'];
+      /** Every name played under in a match, most played first. Optional
+       *  only for a browser holding new JS against an older server. */
+      names?: NameHistoryRow[];
     };
     standing: {
       activeBan: AdminBan | null;

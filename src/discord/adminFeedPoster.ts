@@ -245,6 +245,24 @@ export class AdminFeedPoster {
           color: COLOR.account,
         };
       }
+      case 'rename_digest': {
+        // One embed for the day. Discord caps a description at 4096
+        // characters, so the lines stop short of that and the rest are
+        // counted; a busy day is rare and every chain is on the player file.
+        const lines: string[] = [];
+        let length = 0;
+        let left = e.players.length;
+        for (const p of e.players) {
+          const chain = p.chain.map((n) => `\`${n.replace(/`/g, "'")}\``).join(' -> ');
+          const line = `${this.name(p.steamid)}: ${p.earlier > 0 ? `(${p.earlier} earlier) ` : ''}${chain} [File](${this.file(p.steamid)})`;
+          if (length + line.length > 3600) break;
+          lines.push(line);
+          length += line.length + 1;
+          left -= 1;
+        }
+        if (left > 0) lines.push(`and ${left} more.`);
+        return { text: `🏷️ New names played under since the last digest:\n${lines.join('\n')}`, color: COLOR.account };
+      }
       case 'signon_drop': {
         // Known players get the full identity (both worlds); an unknown
         // steamid has never signed in and has no account to look up, so an

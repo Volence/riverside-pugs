@@ -78,6 +78,7 @@ describe('the Player File', () => {
     // The owner reversed the first ruling: mods see network rows too.
     expect(asMod.sections.identity).toHaveProperty('sharesAddressWith');
     expect(asMod.sections.identity).toHaveProperty('networks');
+    expect(asMod.sections.identity).toHaveProperty('names');
     expect(playerFile(db, P, fileViewer(db, ADMIN))!.actions).toContain('ban');
   });
 

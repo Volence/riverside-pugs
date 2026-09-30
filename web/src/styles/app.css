@@ -2602,6 +2602,10 @@ tbody tr.is-lifted td { opacity: 0.55; }
 /* pre-line, so the line breaks a player typed survive, while runs of spaces
  * still collapse the way they do everywhere else on the page. */
 .headliner__bio { margin: var(--sp-2) 0 0; max-width: 52ch; color: var(--text); font-size: var(--fs-dense); white-space: pre-line; }
+/* Earlier names, under the name: quiet, because the current name is who
+ * they are now and this is only for recognising them. */
+.headliner__aka { margin: var(--sp-1) 0 0; font-size: var(--fs-dense); color: var(--text-muted); }
+.headliner__aka-name { color: var(--text); }
 
 /* ---- Social chips ---- */
 

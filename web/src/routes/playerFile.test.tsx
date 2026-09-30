@@ -130,6 +130,25 @@ describe('the Player File', () => {
     expect(screen.getByText(/4 connects, United States/)).toBeTruthy();
   });
 
+  it('lists every name played under, with counts, sources and dates', async () => {
+    mockPeople.file.mockResolvedValue(file({
+      sections: {
+        ...file().sections,
+        identity: {
+          ...file().sections.identity,
+          names: [
+            { name: 'amour plastique', key: 'amour plastique', matches: 12, firstSeen: '2026-09-19 22:33:25', lastSeen: '2026-09-24 01:00:00', sources: ['ingame', 'steam'] },
+            { name: 'v', key: 'v', matches: 1, firstSeen: '2026-09-25 20:00:00', lastSeen: '2026-09-25 20:00:00', sources: ['steam'] },
+          ],
+        },
+      },
+    }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    expect(await screen.findByText('Names played under:')).toBeTruthy();
+    expect(screen.getByText(/12 matches · in game and Steam/)).toBeTruthy();
+    expect(screen.getByText(/1 match · Steam · first/)).toBeTruthy();
+  });
+
   it('lists Discord sanctions from before the player linked Steam', async () => {
     const base = file();
     mockPeople.file.mockResolvedValue(file({

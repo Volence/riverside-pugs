@@ -76,7 +76,12 @@ export type AdminEvent =
   | { kind: 'sourcetv_watch'; matchId: number; serverId: number; spectatorName: string; steamids: string[] }
   // A player's /staff message (src/serverChat.ts). One per player per ten
   // minutes; the chat drawer on Live holds the whole conversation.
-  | { kind: 'staff_message'; steamid: string; serverId: number; text: string };
+  | { kind: 'staff_message'; steamid: string; serverId: number; text: string }
+  // The once-a-day rename digest (src/playerNames.ts): every player who played
+  // a match under a name new to them since the last one, with their names in
+  // the order first used. One post for the day rather than one per rename,
+  // because people rename for fun and staff only need to keep up.
+  | { kind: 'rename_digest'; players: { steamid: string; chain: string[]; earlier: number }[] };
 
 /** The settings toggle that silences each kind in the admin channel. */
 export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
@@ -95,6 +100,7 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   steam_signal: 'admin_feed_problems',
   sourcetv_watch: 'admin_feed_problems',
   staff_message: 'admin_feed_staff_messages',
+  rename_digest: 'admin_feed_renames',
 };
 
 type Listener = (e: AdminEvent) => void;
