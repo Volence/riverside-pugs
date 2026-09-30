@@ -1674,6 +1674,7 @@ export function openDb(path: string): DB {
       PRIMARY KEY (match_id, player_id)
     );
     CREATE INDEX IF NOT EXISTS match_abort_notices_player ON match_abort_notices(player_id, created_at);
+  `);
   // Name history (src/playerNames.ts). players.name is overwritten from Steam
   // at every login, so staff lost track of who "v" used to be.
   //
