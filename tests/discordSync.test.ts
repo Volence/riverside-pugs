@@ -357,8 +357,11 @@ describe('DiscordSync', () => {
     // The panel is still the channel's last message.
     const live = t.live().filter((m) => m.channelId === CH);
     expect(live[live.length - 1].id).toBe(panelId());
-    // And it goes after its time.
-    db.prepare("UPDATE discord_messages SET created_at = datetime('now', '-16 minutes') WHERE kind = 'aborted'").run();
+    // It stays a few minutes, then goes.
+    db.prepare("UPDATE discord_messages SET created_at = datetime('now', '-4 minutes') WHERE kind = 'aborted'").run();
+    await sync.pass();
+    expect(t.byId(lines[0].id)!.deleted).toBeFalsy();
+    db.prepare("UPDATE discord_messages SET created_at = datetime('now', '-6 minutes') WHERE kind = 'aborted'").run();
     await sync.pass();
     expect(t.byId(lines[0].id)!.deleted).toBe(true);
   });

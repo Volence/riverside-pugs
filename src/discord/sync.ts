@@ -21,8 +21,9 @@ import { ABORT_REASON, anyRequeued, type AbortCause } from '../matchAborts.js';
 /** How long the "PUG #N was aborted" line stays in #queue-here. Long enough
  *  for the people watching the queue to read it, short enough that aborts do
  *  not pile up between the panel and the people queueing, which is what moved
- *  aborted cards out of the channel in the first place (owner, 2026-09-20). */
-const ABORT_LINE_TTL_MIN = 15;
+ *  aborted cards out of the channel in the first place (owner, 2026-09-20).
+ *  Was 15; the owner cut it to 5 on 2026-09-30. */
+const ABORT_LINE_TTL_MIN = 5;
 
 /** Shortest gap between two queue alerts.
  *
