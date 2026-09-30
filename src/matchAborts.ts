@@ -98,7 +98,11 @@ export function noteMatchAborted(db: DB, a: MatchAbort): void {
       );
       for (const p of roster) ins.run(a.matchId, p, role(p), now);
     })();
-    const requeueIds = a.requeue ? roster.filter((p) => role(p) === 'innocent') : [];
+    // Only a match the site's queue made puts anyone back in it. A match
+    // started in game (!load_4v4p) rostered whoever was on the server, who
+    // never queued here and may not play PUGs at all.
+    const origin = (db.prepare('SELECT origin FROM matches WHERE id = ?').get(a.matchId) as { origin: string | null } | undefined)?.origin;
+    const requeueIds = a.requeue && origin !== 'in_game' ? roster.filter((p) => role(p) === 'innocent') : [];
     const back = new Set<string>();
     for (const fn of listeners) {
       try {

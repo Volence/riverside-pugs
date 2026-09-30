@@ -93,6 +93,14 @@ describe('noteMatchAborted', () => {
     expect(mm.stateFor(IDS[1]).abortNotice).toMatchObject({ matchId: id });
   });
 
+  it('never requeues the roster of a match started in game', () => {
+    const id = abortedMatch();
+    db.prepare("UPDATE matches SET origin = 'in_game' WHERE id = ?").run(id);
+    noteMatchAborted(db, { matchId: id, cause: 'server_lost', requeue: true });
+    expect(mm.publicQueue().count).toBe(0);
+    expect(abortNoticeFor(db, IDS[0])).toMatchObject({ requeued: false });
+  });
+
   it('ignores an abort in another database', () => {
     const other = openDb(':memory:');
     for (const p of IDS) { upsertPlayer(other, { steamid: p, name: p, avatar: null }, []); activatePlayer(other, p); }
