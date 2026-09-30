@@ -4,7 +4,7 @@ import type { LiveBoard, LiveBoardPlayer, LiveBoardStatus, LiveBoardReason } fro
 import { ConfirmHost } from '../../components/Confirm';
 
 const { mockAdmin, mockMod } = vi.hoisted(() => ({
-  mockAdmin: { live: vi.fn(), overview: vi.fn(), leaveClock: vi.fn(), abortMatch: vi.fn() },
+  mockAdmin: { live: vi.fn(), overview: vi.fn(), leaveClock: vi.fn(), abortMatch: vi.fn(), noShowExtend: vi.fn(), cancelPop: vi.fn() },
   mockMod: { chatServers: vi.fn(), chatLines: vi.fn(), chatSend: vi.fn() },
 }));
 
@@ -286,7 +286,7 @@ describe('the live board', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Abort' }));
     const dialog = await waitFor(() => screen.getByRole('alertdialog'));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
-    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81));
+    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, { clearNoShows: false }));
   });
 
   it('keeps the board up when the panels below fail', async () => {
@@ -297,8 +297,8 @@ describe('the live board', () => {
     expect((await row('bob')).textContent).toContain('Dropped');
   });
 
-  // Abort lives on the board until the cancel dialog with its penalty choice
-  // replaces it, and it is the one control that ends a stuck match.
+  // Abort is the one control that ends a stuck match. It is on the card as
+  // well now, with the same dialog.
   it('lists the open matches under the board, and aborts one after asking', async () => {
     mockAdmin.overview.mockResolvedValue({ ...emptyOverview, open: [openMatch()] });
     render(<><AdminLive isAdmin /><ConfirmHost /></>);
@@ -308,7 +308,7 @@ describe('the live board', () => {
     fireEvent.click(within(panel).getByRole('button', { name: 'Abort' }));
     const dialog = await waitFor(() => screen.getByRole('alertdialog'));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
-    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81));
+    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, { clearNoShows: false }));
   });
 
   it('renders the servers, queue and recent results underneath', async () => {
@@ -386,5 +386,75 @@ describe('the live board', () => {
     render(<AdminLive isAdmin />);
     fireEvent.click((await screen.findAllByRole('button', { name: 'Chat' }))[0]);
     expect(await screen.findByRole('complementary', { name: 'Server chat' })).toBeTruthy();
+  });
+});
+
+describe('the match-lifecycle controls', () => {
+  const noShow = { extraMinutes: 0, deadlineS: 190, applies: true, canExtend: true, why: null };
+
+  it('shows each never-connected row the time left to the no-show deadline', async () => {
+    mockAdmin.live.mockResolvedValue(board({
+      noShow,
+      teamB: [player('5', 'eve', 'b', { kind: 'never_connected', sincePopS: 200, deadlineS: 190 })],
+    }));
+    render(<AdminLive isAdmin />);
+    expect((await row('eve')).textContent).toMatch(/3:10 to the no-show deadline/);
+  });
+
+  it('+5 min moves the whole match\'s deadline, one click, no dialog', async () => {
+    mockAdmin.live.mockResolvedValue(board({ noShow }));
+    mockAdmin.noShowExtend.mockResolvedValue({ ok: true, extraMinutes: 5 });
+    render(<AdminLive isAdmin />);
+    const card = (await screen.findByText(/#81/)).closest('section') as HTMLElement;
+    expect(card.textContent).toMatch(/No-show deadline in 3:10/);
+    const plus = within(card).getAllByRole('button', { name: '+5 min' }).find((b) => b.closest('.live-card__noshow'))!;
+    fireEvent.click(plus);
+    await waitFor(() => expect(mockAdmin.noShowExtend).toHaveBeenCalledWith(81));
+  });
+
+  it('greys +5 min out with the reason once the deadline is as late as it goes', async () => {
+    mockAdmin.live.mockResolvedValue(board({ noShow: { ...noShow, extraMinutes: 30, canExtend: false, why: 'the most it can move' } }));
+    render(<AdminLive isAdmin />);
+    const card = (await screen.findByText(/#81/)).closest('section') as HTMLElement;
+    const plus = within(card).getAllByRole('button', { name: '+5 min' }).find((b) => b.closest('.live-card__noshow')) as HTMLButtonElement;
+    expect(plus.disabled).toBe(true);
+    expect(plus.title).toBe('the most it can move');
+    expect(card.textContent).toContain('30 minutes added');
+  });
+
+  it('has no +5 min line when the rule does not apply', async () => {
+    mockAdmin.live.mockResolvedValue(board({ noShow: { ...noShow, applies: false } }));
+    render(<AdminLive isAdmin />);
+    const card = (await screen.findByText(/#81/)).closest('section') as HTMLElement;
+    expect(card.querySelector('.live-card__noshow')).toBeNull();
+  });
+
+  it('aborts from the card, and the box clears the match\'s no-shows only when ticked', async () => {
+    render(<><AdminLive isAdmin /><ConfirmHost /></>);
+    const card = (await screen.findByText(/#81/)).closest('section') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Abort' }));
+    const dialog = await waitFor(() => screen.getByRole('alertdialog'));
+    fireEvent.click(within(dialog).getByRole('checkbox'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
+    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, { clearNoShows: true }));
+  });
+
+  it('cancels a pop from the queue panel, leaving out whoever is ticked', async () => {
+    mockAdmin.overview.mockResolvedValue({
+      ...emptyOverview,
+      lobbies: [{
+        id: 'lob_x_1', phase: 'map_vote', deadline: 0,
+        players: [{ steamid: '11', name: 'ann', avatar: null, ready: true }, { steamid: '12', name: 'cheater', avatar: null, ready: true }],
+      }],
+    });
+    mockAdmin.cancelPop.mockResolvedValue({ ok: true });
+    render(<><AdminLive isAdmin /><ConfirmHost /></>);
+    const panel = (await screen.findByRole('heading', { name: 'Queue' })).closest('.panel') as HTMLElement;
+    expect(panel.textContent).toContain('Campaign vote');
+    fireEvent.click(within(panel).getByRole('button', { name: 'Cancel pop' }));
+    const dialog = await waitFor(() => screen.getByRole('alertdialog'));
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Leave cheater out/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel pop' }));
+    await waitFor(() => expect(mockAdmin.cancelPop).toHaveBeenCalledWith('lob_x_1', ['12']));
   });
 });

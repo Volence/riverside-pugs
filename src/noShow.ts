@@ -138,6 +138,9 @@ export interface NoShowClock {
    *  when it cannot: enough of the roster has connected, a round has been
    *  played, or the match is not live. Never negative. */
   deadlineS: number | null;
+  /** Whether the "+5 min" button belongs on the card at all: the match is
+   *  live, nobody has played a round, and someone has never connected. */
+  applies: boolean;
   /** Whether "+5 min" may be pressed now, and if not, why not. */
   canExtend: boolean;
   why: string | null;
@@ -168,7 +171,8 @@ export function noShowClock(db: DB, matchId: number, now = new Date()): NoShowCl
     : m.absent === 0 ? 'everyone has connected'
     : m.extra + NOSHOW_EXTEND_STEP_MIN > NOSHOW_EXTEND_MAX_MIN ? `the deadline is already ${m.extra} minutes later, the most it can move`
     : null;
-  return { extraMinutes: m.extra, deadlineS, canExtend: why === null, why };
+  const applies = running && m.absent > 0;
+  return { extraMinutes: m.extra, deadlineS, applies, canExtend: why === null, why };
 }
 
 /** Move one match's no-show deadline five minutes later. The whole rule

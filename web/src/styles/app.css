@@ -2321,6 +2321,8 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .live-row__left.is-low { color: var(--loss); }
 .live-row__left.is-held { color: var(--rating); }
 .live-row__reason { display: block; font-size: var(--fs-dense); }
+.live-card__noshow { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: baseline; margin: 0; }
+.admin-lobby { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: baseline; margin: 0 0 var(--sp-3); }
 .live-row__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: flex-end; }
 @media (max-width: 640px) {
   .live-row { grid-template-columns: minmax(0, 1fr); }
@@ -2788,6 +2790,9 @@ tbody tr.is-lifted td { opacity: 0.55; }
   color: var(--text-muted);
   max-width: 52ch;
 }
+
+.modal__choices { margin-top: var(--sp-4); display: grid; gap: var(--sp-2); }
+.modal__choice { display: flex; gap: var(--sp-2); align-items: baseline; cursor: pointer; }
 
 .modal__actions {
   display: flex;

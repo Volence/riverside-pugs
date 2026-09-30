@@ -22,6 +22,12 @@ import { useEffect, useRef, useState } from 'preact/hooks';
  * cancels, the alertdialog role, and the page behind it not scrolling.
  */
 
+/** One checkbox in the dialog. Mutable on purpose: see ConfirmOptions.choices. */
+export interface ConfirmChoice {
+  label: string;
+  checked: boolean;
+}
+
 export interface ConfirmOptions {
   /** The question. Kept short: it is the heading. */
   title: string;
@@ -32,6 +38,14 @@ export interface ConfirmOptions {
   cancelLabel?: string;
   /** Red confirm button, for something destructive or hard to undo. */
   danger?: boolean;
+  /**
+   * Checkboxes under the body, such as "Also clear the no-show penalties".
+   * The dialog writes each box's state back onto its own object as it
+   * changes, so the caller keeps a reference and reads `checked` after the
+   * confirm resolves true. That keeps confirm() a boolean, which is what the
+   * one call site in useAction depends on: its fn runs only after the answer.
+   */
+  choices?: ConfirmChoice[];
 }
 
 interface Pending extends ConfirmOptions {
@@ -71,6 +85,8 @@ export function confirm(opts: ConfirmOptions | string): Promise<boolean> {
 /** Mounted once, in App. Renders nothing until something asks. */
 export function ConfirmHost() {
   const [pending, setPending] = useState<Pending | null>(null);
+  // Re-render on a tick; the truth is on the choice objects themselves.
+  const [, setTick] = useState(0);
   const panel = useRef<HTMLDivElement | null>(null);
   const confirmBtn = useRef<HTMLButtonElement | null>(null);
   /** What had focus when the dialog opened, to give it back on close. */
@@ -149,6 +165,17 @@ export function ConfirmHost() {
       >
         <h2 class={`modal__title ${pending.danger ? 'modal__title--danger' : ''}`} id="modal-title">{pending.title}</h2>
         {pending.body && <p class="modal__body" id="modal-body">{pending.body}</p>}
+        {(pending.choices ?? []).length > 0 && (
+          <div class="modal__choices">
+            {pending.choices!.map((c, i) => (
+              <label key={i} class="modal__choice">
+                <input type="checkbox" checked={c.checked}
+                  onChange={(e) => { c.checked = (e.currentTarget as HTMLInputElement).checked; setTick((n) => n + 1); }} />
+                {' '}{c.label}
+              </label>
+            ))}
+          </div>
+        )}
         <div class="modal__actions">
           <button
             class="btn--ghost"
