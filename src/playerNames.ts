@@ -35,7 +35,7 @@ const DIGEST_CHAIN_MAX = 6;
 
 /** Characters that render as nothing. A "blank" name is usually one of these,
  *  and a real name padded with one is the same name. */
-const INVISIBLE = /[​-‍⁠﻿­]/g;
+const INVISIBLE = /[\u200B-\u200D\u2060\uFEFF\u00AD]/g;
 
 /** A clan tag at either end: [TAG] or |TAG|, eight characters or fewer inside.
  *  Only brackets and pipes, the two conventions seen on these servers; round
