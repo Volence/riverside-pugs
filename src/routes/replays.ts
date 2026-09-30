@@ -243,21 +243,36 @@ function finishedR2Key(db: DB, matchId: number, ordinal: number, half: number): 
   return row?.key ?? null;
 }
 
+/** The same naming pattern replaySessions.ts parses filenames with,
+ *  duplicated privately here as replayPush.ts already does elsewhere: capture
+ *  the token so a round with no `match_replays` row yet can still be traced
+ *  back to its match. */
+const NAME_TOKEN_RE = /^pug_([0-9a-f]{32})_\d+_[12]\.rpl$/;
+
 /**
  * Whether `viewer` may fetch a file addressed by name, as
  * `/api/replays/file/:name` does.
  *
- * Most names served here are `!mix` sessions, which have no `match_replays`
- * row and no match to hide behind: those pass through unchanged. A name that
- * IS one round of a ranked match gets the same gate `/api/replays/match/:id/...`
- * applies, so a private scrim's round cannot be fetched just by knowing (or
- * guessing) its filename instead of its match id.
+ * `match_replays` rows are written at round_end, so a round still being
+ * played has none yet. Treating "no row" as always visible would then let an
+ * in-progress private round leak by filename alone, which defeats the whole
+ * point of this check: the caller never has to prove it knows the match id.
+ * So a name with no row is checked a second way instead: its own token,
+ * parsed exactly as replaySessions.ts's NAME_RE does, resolved against
+ * `matches.token`. A token that belongs to no match is a standalone `!mix`
+ * session, which has no visibility to gate and passes through unchanged,
+ * same as before.
  */
 export function replayFileVisible(db: DB, viewer: Viewer, filename: string): boolean {
   const row = db.prepare('SELECT match_id AS matchId FROM match_replays WHERE filename = ?')
     .get(filename) as { matchId: number } | undefined;
-  if (!row) return true;
-  return canViewMatch(db, viewer, row.matchId);
+  if (row) return canViewMatch(db, viewer, row.matchId);
+
+  const m = NAME_TOKEN_RE.exec(filename);
+  if (!m) return true;
+  const match = db.prepare('SELECT id FROM matches WHERE token = ?').get(m[1]) as { id: number } | undefined;
+  if (!match) return true;
+  return canViewMatch(db, viewer, match.id);
 }
 
 export interface ReplaySources {
