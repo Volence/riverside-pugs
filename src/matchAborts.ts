@@ -79,12 +79,16 @@ export function subscribeMatchAborts(fn: Listener): () => void {
   return () => listeners.delete(fn);
 }
 
+/** What noteMatchAborted did: the roster size and who actually went back,
+ *  for a caller whose admin feed line says so. */
+export interface AbortOutcome { rostered: number; requeued: string[] }
+
 /**
  * Report an abort that has just been written. Call it after the state write
  * and outside any transaction: the listener requeues, which can pop a lobby.
  * Never throws; a failure here must not undo or block the abort itself.
  */
-export function noteMatchAborted(db: DB, a: MatchAbort): void {
+export function noteMatchAborted(db: DB, a: MatchAbort): AbortOutcome {
   try {
     const roster = (db.prepare('SELECT player_id FROM match_players WHERE match_id = ? ORDER BY rowid').all(a.matchId) as
       { player_id: string }[]).map((r) => r.player_id);
@@ -119,8 +123,10 @@ export function noteMatchAborted(db: DB, a: MatchAbort): void {
       const mark = db.prepare('UPDATE match_abort_notices SET requeued = 1 WHERE match_id = ? AND player_id = ?');
       for (const id of back) mark.run(a.matchId, id);
     }
+    return { rostered: roster.length, requeued: [...back] };
   } catch (err) {
     console.error(`[matchAborts] could not note the abort of match ${a.matchId}:`, err);
+    return { rostered: 0, requeued: [] };
   }
 }
 

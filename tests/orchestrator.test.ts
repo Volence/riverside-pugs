@@ -276,9 +276,17 @@ describe('RealOrchestrator', () => {
     });
     const mid = seedMatch(db);
     const events: { kind: string; text?: string; matchId?: number }[] = [];
-    const offEvents = subscribeAdminEvents((e) => events.push(e as never));
+    const order: string[] = [];
+    const offEvents = subscribeAdminEvents((e) => { events.push(e as never); order.push(e.kind); });
     const requeued: string[][] = [];
-    const offAborts = subscribeMatchAborts((e) => { if (e.db === db) requeued.push(e.requeueIds); });
+    // Three of the eight cannot queue right now (a ban, a timeout), so the
+    // matchmaker puts five back, and the feed line must say five.
+    const offAborts = subscribeMatchAborts((e) => {
+      if (e.db !== db) return;
+      requeued.push(e.requeueIds);
+      order.push('requeue');
+      return e.requeueIds.slice(0, 5);
+    });
     const causeless = watchCauselessAborts(db);
 
     try {
@@ -305,6 +313,8 @@ describe('RealOrchestrator', () => {
     expect(problem?.text).toMatch(/setting up s failed/);
     expect(problem?.text).toContain('bad campaign');
     expect(problem?.text).not.toContain(row.token);
+    expect(problem?.text).toContain('5 of 8 players went back to the front of the queue');
+    expect(order.indexOf('requeue')).toBeLessThan(order.indexOf('problem'));
     expect(requeued).toEqual([IDS]);
     expect(db.prepare('SELECT COUNT(*) AS n FROM match_abort_notices WHERE match_id = ?').get(mid)).toEqual({ n: 8 });
   });
