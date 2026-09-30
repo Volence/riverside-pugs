@@ -6,7 +6,7 @@ import type { BalanceKnobs } from '../balanceKnobs.js';
 import { loadCatalogue, weaponLabels } from '../balanceCatalogue.js';
 import { editPatch, listPatches, patchDetail, refingerprintPatches, serverDrift } from '../balancePatches.js';
 import { effectiveIgnored, listIgnored, PLUGIN_FILE_RE, removeIgnored } from '../balanceIgnore.js';
-import { triageBalance, triageFold, triageIgnore, triageUnfold, type Lists } from '../balanceTriage.js';
+import { PATCH_NOTES_MAX, triageBalance, triageFold, triageIgnore, triageUnfold, type Lists } from '../balanceTriage.js';
 
 export interface PatchRouteOpts {
   db: DB;
@@ -63,7 +63,7 @@ export async function adminBalancePatchRoutes(app: FastifyInstance, opts: PatchR
       edit.name = b.name === null || b.name.trim() === '' ? null : b.name.trim();
     }
     if (b.notes !== undefined) {
-      if (typeof b.notes !== 'string' || b.notes.length > 2000) return reply.code(400).send({ error: 'notes are up to 2000 characters' });
+      if (typeof b.notes !== 'string' || b.notes.length > PATCH_NOTES_MAX) return reply.code(400).send({ error: `notes are up to ${PATCH_NOTES_MAX} characters` });
       edit.notes = b.notes;
     }
     if (b.reviewed !== undefined) {

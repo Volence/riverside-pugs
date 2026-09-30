@@ -149,6 +149,9 @@ export function triageInfo(db: DB, id: number, lists: Lists) {
   };
 }
 
+/** Longest patch notes any form accepts (triage, patch edit, knob apply, release). */
+export const PATCH_NOTES_MAX = 20_000;
+
 const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
 export function triageBalance(db: DB, id: number, p: { name: unknown; notes: unknown }): TriageResult {
@@ -158,7 +161,7 @@ export function triageBalance(db: DB, id: number, p: { name: unknown; notes: unk
   const name = text(p.name), notes = typeof p.notes === 'string' ? p.notes.trim() : '';
   if (!name) return { ok: false, status: 400, error: 'a balance patch needs a name' };
   if (name.length > 60) return { ok: false, status: 400, error: 'a patch name is up to 60 characters' };
-  if (notes.length > 2000) return { ok: false, status: 400, error: 'notes are up to 2000 characters' };
+  if (notes.length > PATCH_NOTES_MAX) return { ok: false, status: 400, error: `notes are up to ${PATCH_NOTES_MAX} characters` };
   db.prepare("UPDATE balance_patches SET triage = 'balance', name = ?, notes = ?, reviewed = 1 WHERE id = ?").run(name, notes, id);
   return { ok: true };
 }

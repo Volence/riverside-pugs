@@ -8,6 +8,7 @@ import { ServerHolds } from './serverHolds.js';
 import { restartOutcome, type RestartOutcome, type ServerRestarter } from './serverRestart.js';
 import { treeWriterFor, type TreeWriter } from './fleetWrite.js';
 import type { Op } from './releaseStage.js';
+import { PATCH_NOTES_MAX } from './balanceTriage.js';
 
 /**
  * Sends a staged release to the boxes, one box at a time: wait until idle,
@@ -116,7 +117,7 @@ export class ReleaseEngine {
     const notes = typeof p.balance.notes === 'string' ? p.balance.notes.trim() : '';
     if (decision === 'balance' && !name) return { ok: false, status: 400, error: 'a balance patch needs a name' };
     if (name.length > 60) return { ok: false, status: 400, error: 'a patch name is up to 60 characters' };
-    if (notes.length > 2000) return { ok: false, status: 400, error: 'notes are up to 2000 characters' };
+    if (notes.length > PATCH_NOTES_MAX) return { ok: false, status: 400, error: `notes are up to ${PATCH_NOTES_MAX} characters` };
     this.d.db.transaction(() => {
       this.d.db.prepare(`UPDATE releases SET state = 'deploying', canary_server_id = ?, balance_decision = ?, balance_name = ?, balance_notes = ?,
         deployed_by = ?, deployed_at = ? WHERE id = ?`).run(p.canary, decision, decision === 'balance' ? name : null, decision === 'balance' ? notes : null, p.adminId, this.now(), id);
