@@ -885,6 +885,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   admin_feed_problems: '1',
   admin_feed_conduct: '1',
   admin_feed_staff_messages: '1',
+  // The once-a-day rename digest (src/playerNames.ts). Off also stops names
+  // being queued, so turning it on later starts from that day rather than
+  // posting everything since.
+  admin_feed_renames: '1',
   replay_retention_days: '90',
   demo_retention_days: '90',
   demo_autorecord_days: '7',
@@ -1649,6 +1653,59 @@ export function openDb(path: string): DB {
   // Practice-only campaigns (Hunter Training) install everywhere and are
   // downloadable, but are never offered for the PUG map pool.
   ensureColumn(db, 'custom_campaigns', 'practice_only', 'INTEGER NOT NULL DEFAULT 0');
+  // Name history (src/playerNames.ts). players.name is overwritten from Steam
+  // at every login, so staff lost track of who "v" used to be.
+  //
+  // player_name_uses is a ledger, one row per name per match, and every count
+  // is derived from it rather than kept as a counter: a UDP line delivered
+  // twice, a backfill run twice or two merged accounts in one match all
+  // collapse on the primary key instead of counting twice. match_key is
+  // 'm:<match id>' for a match this site ran and 'log:...' for one the
+  // backfill found in old server logs, which never had an id. name_key is
+  // the normalised form (case, spacing, "(S)", clan tags); name is the
+  // display form as it was typed.
+  //
+  // match_name_sightings holds in-game names seen during a live match until
+  // the match completes, so an aborted match never counts. player_ingame_last
+  // is every player's latest in-game name from anywhere, for the player who
+  // connected before the match went live and never renamed during it.
+  // player_name_digest is the staff rename digest's queue.
+  //
+  // No foreign keys, deliberately: the backfill writes names for SteamIDs the
+  // site may never have seen, and the merge moves these by hand.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS player_name_uses (
+      steamid   TEXT NOT NULL,
+      name_key  TEXT NOT NULL,
+      source    TEXT NOT NULL CHECK (source IN ('steam','ingame')),
+      match_key TEXT NOT NULL,
+      name      TEXT NOT NULL,
+      seen_at   TEXT NOT NULL,
+      PRIMARY KEY (steamid, name_key, source, match_key)
+    );
+    CREATE TABLE IF NOT EXISTS match_name_sightings (
+      match_id INTEGER NOT NULL,
+      steamid  TEXT NOT NULL,
+      name     TEXT NOT NULL,
+      seen_at  TEXT NOT NULL,
+      PRIMARY KEY (match_id, steamid, name)
+    );
+    CREATE TABLE IF NOT EXISTS player_ingame_last (
+      steamid TEXT PRIMARY KEY,
+      name    TEXT NOT NULL,
+      seen_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS player_name_digest (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      steamid   TEXT NOT NULL,
+      name_key  TEXT NOT NULL,
+      name      TEXT NOT NULL,
+      match_key TEXT NOT NULL,
+      queued_at TEXT NOT NULL,
+      posted_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS player_name_digest_pending ON player_name_digest (posted_at);
+  `);
 
   seed(db);
   return db;
