@@ -182,9 +182,11 @@ function matches(deps: CommandDeps, i: Cmd): InteractionReply {
       extra: m.result === 'win' ? ' · won' : m.result === 'loss' ? ' · lost' : ' · draw',
     }));
   } else {
+    // Anonymous audience: nobody here is verified as a participant or staff,
+    // so only public matches show. Same reasoning as /api/matches.
     rows = (deps.db.prepare(
       `SELECT id, campaign, team_a_score AS teamAScore, team_b_score AS teamBScore, winner
-       FROM matches WHERE state = 'completed' ORDER BY id DESC LIMIT 5`,
+       FROM matches WHERE state = 'completed' AND visibility = 'public' ORDER BY id DESC LIMIT 5`,
     ).all() as { id: number; campaign: string; teamAScore: number; teamBScore: number; winner: string }[])
       .map((m) => ({ ...m, extra: m.winner === 'draw' ? ' · draw' : ` · Team ${m.winner.toUpperCase()} won` }));
   }
