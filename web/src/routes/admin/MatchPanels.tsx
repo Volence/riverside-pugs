@@ -5,6 +5,7 @@ import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction, type Run } from './useAction';
 import { formatTime } from '../../replay/ReplayControls';
 import { SlowToReadyTable } from './SlowToReady';
+import type { ConfirmChoice, ConfirmOptions } from '../../components/Confirm';
 import type { MatchPause, MatchReadyup } from '../../api';
 
 /**
@@ -147,13 +148,26 @@ export function AdminServersPanel({ servers, busy, run, health, canManage = true
   );
 }
 
+/** The abort question, shared by the live card and the Open matches table so
+ *  the two say the same thing. `clear` is read after the dialog closes. */
+export function abortAsk(matchId: number, clear: ConfirmChoice): ConfirmOptions {
+  return {
+    title: `Abort match #${matchId}?`,
+    body: 'The server is freed and nothing is rated. The roster and how far it got stay on the match page. '
+      + 'Everyone on it is told why, and those who may queue go back to the front of the queue.',
+    confirmLabel: 'Abort match',
+    danger: true,
+    choices: [clear],
+  };
+}
+
 /**
  * Every match that is configuring or live, as a table.
  *
  * The live board above it says who is missing and holds the clocks; this
  * says what an admin needs about the match itself, the console line for the
- * real server included. Abort stays here until the cancel dialog with its
- * penalty choice replaces it, which is a later plan.
+ * real server included. Abort is here and on the live card, with the same
+ * dialog (abortAsk) and its "clear the no-shows" box.
  */
 export function OpenMatchesPanel({ open, busy, run }: { open: AdminOverview['open']; busy: boolean; run: Run }) {
   return (
@@ -179,12 +193,10 @@ export function OpenMatchesPanel({ open, busy, run }: { open: AdminOverview['ope
                     : <span class="muted">no server yet</span>}</td>
                   <td>{fmtTime(m.wentLiveAt) || <span class="muted">not yet</span>}</td>
                   <td><button class="chip" disabled={busy}
-                    onClick={() => run(() => adminApi.abortMatch(m.id), {
-                      title: `Abort match #${m.id}?`,
-                      body: 'The server is freed and nothing is rated. The roster and how far it got stay on the match page.',
-                      confirmLabel: 'Abort match',
-                      danger: true,
-                    })}>Abort</button></td>
+                    onClick={() => {
+                      const clear: ConfirmChoice = { label: 'Also clear the no-show penalties this match handed out', checked: false };
+                      void run(() => adminApi.abortMatch(m.id, { clearNoShows: clear.checked }), abortAsk(m.id, clear));
+                    }}>Abort</button></td>
                 </tr>
               ))}
             </tbody>
@@ -195,10 +207,37 @@ export function OpenMatchesPanel({ open, busy, run }: { open: AdminOverview['ope
   );
 }
 
-export function AdminQueuePanel({ queue, busy, run }: { queue: AdminOverview['queue']; busy: boolean; run: Run }) {
+export function AdminQueuePanel({ queue, lobbies = [], busy, run }: {
+  queue: AdminOverview['queue']; lobbies?: AdminOverview['lobbies']; busy: boolean; run: Run;
+}) {
   return (
     <Panel class="panel--table">
       <h3>Queue</h3>
+      {/* A pop can be cancelled at any phase. Before this the only way to
+          stop one was to wait for it to become a match and abort that. */}
+      {(lobbies ?? []).map((l) => (
+        <div key={l.id} class="admin-lobby">
+          <strong>{l.phase === 'ready_check' ? 'Ready check' : 'Campaign vote'}</strong>
+          <span class="muted">{l.players.map((p) => p.name).join(', ')}</span>
+          <button class="chip" type="button" disabled={busy} onClick={() => {
+            // One box per player: tick whoever should NOT go back in the
+            // queue (the player being removed). Everyone else goes back to
+            // the front, as after a failed ready check.
+            const leaveOut: (ConfirmChoice & { steamid: string })[] = l.players.map((p) => ({
+              steamid: p.steamid, label: `Leave ${p.name} out of the queue`, checked: false,
+            }));
+            void run(() => adminApi.cancelPop(l.id, leaveOut.filter((c) => c.checked).map((c) => c.steamid)), {
+              title: 'Cancel this pop?',
+              body: 'The lobby ends now and nobody is penalised. Everyone not ticked below goes back to the front of the queue, '
+                + 'and if that fills it again a fresh ready check starts at once.',
+              confirmLabel: 'Cancel pop',
+              cancelLabel: 'Keep it',
+              danger: true,
+              choices: leaveOut,
+            });
+          }}>Cancel pop</button>
+        </div>
+      ))}
       {queue.length === 0 ? <Empty>The queue is empty.</Empty> : (
         <div class="table-wrap">
         <table class="admin-table">
@@ -290,6 +329,16 @@ export function RecentResultsPanel({ data, busy, run }: { data: AdminOverview; b
                 <a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)} {m.teamAScore} - {m.teamBScore}
                 {m.abandonedBy ? <> · left: {m.abandonedBy}</> : null}
                 {' '}<span class="muted">({fmtTime(m.endedAt)})</span>
+                {(m.noShows ?? 0) > 0 && (
+                  <>
+                    {' '}<button class="chip" type="button" disabled={busy}
+                      onClick={() => run(() => adminApi.clearMatchNoShows(m.id), {
+                        title: `Clear the ${m.noShows} no-show penalties from match #${m.id}?`,
+                        body: 'For no-shows that were not the players\' doing, such as our server or a Steam outage. Their queue timeouts are recomputed without them.',
+                        confirmLabel: 'Clear no-shows',
+                      })}>Clear {m.noShows} no-show{m.noShows === 1 ? '' : 's'}</button>
+                  </>
+                )}
               </li>
             ))}
           </ul>

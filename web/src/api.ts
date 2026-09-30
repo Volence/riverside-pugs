@@ -62,6 +62,17 @@ export interface LobbySnapshot {
  *  the timeout shown is whichever of the two ends later. */
 export interface QueueTimeout { until: string; offenses: number; kind?: 'ready_fail' | 'no_show' }
 
+export type AbortCause = 'admin' | 'no_show' | 'no_round' | 'setup_failed' | 'abandon' | 'server_lost' | 'uncollected';
+export interface AbortNotice {
+  matchId: number;
+  cause: AbortCause;
+  /** Public wording, never naming anyone: "not enough players connected in time". */
+  reason: string;
+  /** culprit: the no-show or the abandoner. file_check: turned away by the file check. */
+  role: 'innocent' | 'culprit' | 'file_check';
+  requeued: boolean;
+}
+
 export interface PublicQueue {
   count: number;
   players: NamedPlayer[];
@@ -101,7 +112,10 @@ export interface StateSnapshot {
    *  where they find out. */
   /** `removed` is set instead of `notReady` when the pop was cancelled because
    *  a player was taken out of it (banned mid ready check). */
-  lobbyNotice?: { notReady: NamedPlayer[]; youWereReady: boolean; removed?: NamedPlayer } | null;
+  lobbyNotice?: { notReady: NamedPlayer[]; youWereReady: boolean; removed?: NamedPlayer; cancelled?: true } | null;
+  /** The match the viewer was on, aborted, until they dismiss it. Stored on
+   *  the server (src/matchAborts.ts), so a reload keeps it. */
+  abortNotice?: AbortNotice | null;
   /** The sidegames_enabled switch: off, nothing about side games shows. */
   sideGamesEnabled?: boolean;
   /** The unrecorded 2v2/3v3 running (or closing) while the queue fills. */
@@ -840,9 +854,16 @@ export interface AdminOverview {
   recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[]; readyups: MatchReadyup[] }[];
   /** Ended with no result. `abandonedBy` names the leaver when the abandon
    *  path ended it, and is null for an admin abort or a reaped match. */
-  aborted: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; abandonedBy: string | null }[];
+  aborted: {
+    id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; abandonedBy: string | null;
+    /** Uncleared no-show penalties it handed out. Optional for an older server. */
+    noShows?: number;
+  }[];
   voided: { id: number; campaign: string; voidedAt: string; voidReason: string }[];
   queue: NamedPlayer[];
+  /** Pops in progress (ready check or campaign vote), for Cancel pop.
+   *  Optional only for a browser holding new JS against an older server. */
+  lobbies?: { id: string; phase: 'ready_check' | 'map_vote'; deadline: number; players: (NamedPlayer & { ready: boolean })[] }[];
   /** Across every counted match: who is habitually the one holding up the ready-up. */
   slowToReady: SlowToReady[];
   /** Optional only for a browser holding new JS against an older server. */
@@ -856,7 +877,9 @@ export interface AdminOverview {
 export type LiveBoardReason = { kind: 'signon_drop'; at: string } | { kind: 'not_in_voice' };
 export type LiveBoardStatus =
   | { kind: 'connected'; remainingS: number | null }
-  | { kind: 'never_connected'; sincePopS: number }
+  /** deadlineS: until the no-show rule aborts the match, extension included;
+   *  null when it will not (enough connected, a round played). */
+  | { kind: 'never_connected'; sincePopS: number; deadlineS?: number | null }
   | { kind: 'dropped'; sinceS: number; remainingS: number | null; held: boolean; holdLeftS: number | null };
 export interface LiveBoardPlayer {
   steamid: string; name: string; team: 'a' | 'b'; status: LiveBoardStatus; reason: LiveBoardReason | null;
@@ -883,6 +906,9 @@ export interface LiveBoardMatch {
   teamA: LiveBoardPlayer[];
   teamB: LiveBoardPlayer[];
   clocks: LiveBoardClock[];
+  /** The no-show rule against this match (src/noShow.ts noShowClock).
+   *  Optional only for a browser holding new JS against an older server. */
+  noShow?: { extraMinutes: number; deadlineS: number | null; applies: boolean; canExtend: boolean; why: string | null } | null;
 }
 export interface LiveBoard {
   now: string;
@@ -1603,6 +1629,7 @@ export const adminApi = {
   /** Ends every session the player holds, on every device. */
   signOutPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/sign-out`),
   clearPenalties: (steamid: string) => post(`/api/admin/players/${steamid}/clear-penalties`),
+  clearPenalty: (steamid: string, id: number) => post(`/api/admin/players/${steamid}/penalties/${id}/clear`),
   mergePlayer: (steamid: string, into: string, dryRun = false) =>
     post<{ plan: MergePlan; ok?: true }>(`/api/admin/players/${steamid}/merge`, { into, dryRun }),
   unaliasPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/unalias`),
@@ -1618,13 +1645,18 @@ export const adminApi = {
     post<{ ok: true }>(`/api/admin/practice/${leaseId}/kick`, { userid, reason }),
   leaveClock: (matchId: number, steamid: string, action: LeaveClockAction, seconds?: number) =>
     post<{ ok: true; reply: string }>(`/api/admin/live/${matchId}/players/${steamid}/leave`, { action, seconds }),
-  abortMatch: (id: number) => post(`/api/admin/matches/${id}/abort`),
+  abortMatch: (id: number, opts: { clearNoShows?: boolean } = {}) => post(`/api/admin/matches/${id}/abort`, opts),
+  clearMatchNoShows: (id: number) => post<{ ok: true; cleared: string[] }>(`/api/admin/matches/${id}/clear-noshows`),
+  /** Five more minutes on this match's no-show deadline, for everyone missing. */
+  noShowExtend: (matchId: number) => post<{ ok: true; extraMinutes: number }>(`/api/admin/live/${matchId}/noshow-extend`),
   voidMatch: (id: number, reason: string) => post(`/api/admin/matches/${id}/void`, { reason }),
   serverIdle: (id: number) => post(`/api/admin/servers/${id}/idle`),
   serverEnabled: (id: number, enabled: boolean) => post(`/api/admin/servers/${id}/enabled`, { enabled }),
   serverSourcetv: (id: number, enabled: boolean, port: string, password: string) =>
     post(`/api/admin/servers/${id}/sourcetv`, { enabled, port, password }),
   queueRemove: (steamid: string) => post('/api/admin/queue/remove', { steamid }),
+  /** Cancel a pop at any phase; `exclude` are players not to put back in the queue. */
+  cancelPop: (lobbyId: string, exclude: string[]) => post('/api/admin/queue/cancel-pop', { lobbyId, exclude }),
   settings: (signal?: AbortSignal) =>
     get<{ settings: AdminSetting[]; campaigns: { slug: string; name: string }[]; serversMissingDlc4: string[] }>('/api/admin/settings', signal),
   saveSetting: (key: string, value: unknown) => put<{ ok: true; value: string }>(`/api/admin/settings/${key}`, { value }),
@@ -1961,6 +1993,7 @@ export const api = {
   setSideOptIn: (on: boolean) => post('/api/queue/side', { on }),
   ready: () => post('/api/lobby/ready'),
   dismissNotice: () => post('/api/lobby/dismiss-notice'),
+  dismissAbortNotice: () => post('/api/match/dismiss-abort-notice'),
   vote: (campaign: string) => post('/api/lobby/vote', { campaign }),
 
   dev: {

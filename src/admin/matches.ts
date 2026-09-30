@@ -93,6 +93,11 @@ export function adminOverview(db: DB, logAuth?: LogAuth) {
        LEFT JOIN players p ON p.steamid = b.player_id
        WHERE b.reason = ? ORDER BY b.id LIMIT 1`,
     ).get(`Abandoned match #${m.id}`) as { name: string } | undefined)?.name ?? null,
+    // The no-shows it handed out and nobody has cleared, for the row's
+    // "Clear no-shows" button: the no-show reaper records them as it aborts.
+    noShows: (db.prepare(
+      "SELECT COUNT(*) AS n FROM penalties WHERE match_id = ? AND kind = 'no_show' AND cleared_at IS NULL",
+    ).get(m.id) as { n: number }).n,
   }));
   // The anti-cheat capture pipeline's health sits with the servers it comes
   // from, not on the People queue, which is about people.

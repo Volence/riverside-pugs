@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import {
-  api, ApiError, type Me, type LobbySnapshot, type NamedPlayer, type PublicQueue, type ReadyBlock, type StateSnapshot, type QueueTimeout,
+  api, ApiError, type Me, type LobbySnapshot, type NamedPlayer, type PublicQueue, type ReadyBlock, type StateSnapshot, type QueueTimeout, type AbortNotice,
 } from '../api';
 import { campaignName, fmtClock, timeoutCause, winnerLabel } from '../format';
 import { Countdown, useSecondsLeft } from '../components/Countdown';
@@ -227,6 +227,19 @@ function Register({ me, onDone }: { me: Me; onDone: () => void }) {
 }
 
 function Live(
+  props: { state: StateSnapshot; me: string; sessionMe: Me; refresh: () => void },
+) {
+  // Above whatever else the page shows: the blameless are often straight
+  // into a fresh ready check, and that is exactly when they need to know why.
+  return (
+    <>
+      {props.state.abortNotice && <AbortNoticePanel notice={props.state.abortNotice} refresh={props.refresh} />}
+      <LiveBody {...props} />
+    </>
+  );
+}
+
+function LiveBody(
   { state, me, sessionMe, refresh }: { state: StateSnapshot; me: string; sessionMe: Me; refresh: () => void },
 ) {
   const { queue, lobby, match } = state;
@@ -319,9 +332,11 @@ export function LobbyNotice(
     <Panel>
       <div class="lobby-notice">
         <div>
-          <h3>{notice.removed ? 'Pop cancelled' : 'Ready check failed'}</h3>
+          <h3>{notice.removed || notice.cancelled ? 'Pop cancelled' : 'Ready check failed'}</h3>
           <p>
-            {notice.removed ? (
+            {notice.cancelled ? (
+              <>Staff cancelled the pop. Nobody was penalised, and you went back to the front of the queue.</>
+            ) : notice.removed ? (
               <>The pop was cancelled because {notice.removed.name} was removed from it by an admin.
                 You went back to the front of the queue.</>
             ) : notice.youWereReady ? (
@@ -331,6 +346,60 @@ export function LobbyNotice(
               <>You did not ready up in time, so the pop was cancelled for everyone.
                 That is a queue timeout; it gets longer each time within the penalty window.</>
             )}
+          </p>
+        </div>
+        <button type="button" class="btn btn--ghost" onClick={dismiss} disabled={going}>
+          Dismiss
+        </button>
+      </div>
+    </Panel>
+  );
+}
+
+/** What the notice says to this player beyond the reason itself. */
+function abortWhatNow(n: AbortNotice): string {
+  if (n.role === 'culprit') {
+    return n.cause === 'abandon'
+      ? 'You ran out of reconnect time, so it ended as an abandon on your record.'
+      : 'You never connected, so it counts as a no-show and a queue timeout.';
+  }
+  if (n.role === 'file_check') {
+    return 'The file check turned your game away, so it is not a no-show. Make sure your game files match the server before you queue again.';
+  }
+  if (n.requeued) return 'You are back at the front of the queue.';
+  if (n.cause === 'uncollected') return 'You played it out, so you were not put back in the queue.';
+  if (n.cause === 'no_round') return 'Nobody was put back in the queue. Join again when you are ready to play.';
+  return 'You were not put back in the queue. Join again when you can.';
+}
+
+/**
+ * "The match you were on was aborted, and here is why."
+ *
+ * Every abort path records this (src/matchAborts.ts), where before the match
+ * card simply vanished from this page. Stored on the server and cleared only
+ * by Dismiss, so a reload does not lose the one explanation a player gets.
+ * The reason never names who was at fault; the player's own part is said to
+ * them alone.
+ */
+export function AbortNoticePanel({ notice, refresh }: { notice: AbortNotice; refresh: () => void }) {
+  const [going, setGoing] = useState(false);
+  const dismiss = async () => {
+    setGoing(true);
+    try {
+      await api.dismissAbortNotice();
+      refresh();
+    } catch {
+      setGoing(false);
+    }
+  };
+  return (
+    <Panel>
+      <div class="lobby-notice">
+        <div>
+          <h3>Match <a href={`/match/${notice.matchId}`}>#{notice.matchId}</a> was aborted</h3>
+          <p>
+            It ended because {notice.reason}, so nothing was rated. {abortWhatNow(notice)}
+            {notice.role === 'file_check' && <> <a href="/help/consistency">How to fix it</a>.</>}
           </p>
         </div>
         <button type="button" class="btn btn--ghost" onClick={dismiss} disabled={going}>

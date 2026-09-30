@@ -7,7 +7,8 @@ import { campaignName, fmtClock, mapName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
 import { SpectatePanel } from '../../components/SpectatePanel';
 import { useAction, type Run } from './useAction';
-import { AdminQueuePanel, AdminServersPanel, OpenMatchesPanel, RecentResultsPanel } from './MatchPanels';
+import type { ConfirmChoice } from '../../components/Confirm';
+import { AdminQueuePanel, AdminServersPanel, OpenMatchesPanel, RecentResultsPanel, abortAsk } from './MatchPanels';
 import { PracticeLeasesPanel } from './PracticeLeasesPanel';
 import { ChatDrawer } from './ChatDrawer';
 import { chatFromUrl, OLD_PLUGIN_REASON, SELF_STARTED_REASON, countdown, countUp, isLow, liveFromUrl, reasonText } from '../../liveBoard';
@@ -97,7 +98,7 @@ export function AdminLive({ isAdmin }: { isAdmin: boolean }) {
           <div class="admin-split admin-split--even">
             <AdminServersPanel servers={overview.data.servers} busy={panels.busy} run={panels.run}
               health={overview.data.captureHealth} canManage={isAdmin} onChat={openChat} />
-            <AdminQueuePanel queue={overview.data.queue} busy={panels.busy} run={panels.run} />
+            <AdminQueuePanel queue={overview.data.queue} lobbies={overview.data.lobbies} busy={panels.busy} run={panels.run} />
           </div>
           <RecentResultsPanel data={overview.data} busy={panels.busy} run={panels.run} />
         </>
@@ -116,7 +117,7 @@ function MatchCard({ match: m, elapsedS, holdMaxMinutes, lowAlertSeconds, reload
   // Busy is per PLAYER: an rcon call can take the whole rcon timeout against
   // a slow box, and for that window the one thing that must stay pressable is
   // Hold for the other player whose clock is still running.
-  const { error, run } = useAction(reload);
+  const { busy: cardBusy, error, run } = useAction(reload);
   const [busyId, setBusyId] = useState<string | null>(null);
   const runFor = (steamid: string): Run => async (fn, ask) => {
     setBusyId(steamid);
@@ -150,7 +151,29 @@ function MatchCard({ match: m, elapsedS, holdMaxMinutes, lowAlertSeconds, reload
         <span class="muted">{m.server ? m.server.name : 'no server'}</span>
         <span class="muted mono" title="Since it went live, or since the pop while it has not">{fmtClock(countUp(m.elapsedS, elapsedS))}</span>
         {m.spectate && <SpectatePanel spectate={m.spectate} />}
+        {/* On the card, not only in the Open matches table below: a match
+            waiting for a server, or stuck with no connect line, is exactly
+            the one someone is looking at up here. */}
+        <button type="button" class="chip" disabled={cardBusy} onClick={() => {
+          const clear: ConfirmChoice = { label: 'Also clear the no-show penalties this match handed out', checked: false };
+          void run(() => adminApi.abortMatch(m.id, { clearNoShows: clear.checked }), abortAsk(m.id, clear));
+        }}>Abort</button>
       </header>
+
+      {m.noShow?.applies && (
+        <p class="live-card__noshow">
+          <span>
+            {m.noShow.deadlineS === null
+              ? <span class="muted">Enough players are in; the no-show rule will not end this match.</span>
+              : <>No-show deadline in <span class="mono">{fmtClock(countdown(m.noShow.deadlineS, true, elapsedS) ?? 0)}</span></>}
+            {m.noShow.extraMinutes > 0 && <span class="muted"> ({m.noShow.extraMinutes} minutes added)</span>}
+          </span>
+          {/* For the whole match, not one player: everyone still missing gets
+              the same five minutes, and so does nobody else's clock. */}
+          <button class="chip" type="button" disabled={cardBusy || !m.noShow.canExtend} title={m.noShow.why ?? 'Five more minutes for everyone who has not connected yet'}
+            onClick={() => run(() => adminApi.noShowExtend(m.id))}>+5 min</button>
+        </p>
+      )}
 
       <p class="live-card__clocks">
         {m.clocks.length === 0 ? <span class="muted">No clocks running.</span> : m.clocks.map((c) => {
@@ -204,7 +227,14 @@ function PlayerRow({ match: m, player: p, elapsedS, holdMaxMinutes, lowAlertSeco
         {s.kind === 'connected' && (
           <>On the server{s.remainingS !== null && <span class="muted">, {fmtClock(s.remainingS)} of reconnect time left</span>}</>
         )}
-        {s.kind === 'never_connected' && <>Never connected, {fmtClock(countUp(s.sincePopS, elapsedS))} since the pop</>}
+        {s.kind === 'never_connected' && (
+          <>
+            Never connected, {fmtClock(countUp(s.sincePopS, elapsedS))} since the pop
+            {s.deadlineS != null && (
+              <span class="muted">, {fmtClock(countdown(s.deadlineS, true, elapsedS) ?? 0)} to the no-show deadline</span>
+            )}
+          </>
+        )}
         {s.kind === 'dropped' && (() => {
           const left = countdown(s.remainingS, !s.held, elapsedS);
           const holdLeft = countdown(s.holdLeftS, s.held, elapsedS);

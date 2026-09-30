@@ -7,7 +7,7 @@ const { mockPeople, mockAdmin, mockMod } = vi.hoisted(() => ({
   mockPeople: { people: vi.fn(), file: vi.fn(), review: vi.fn(), bans: vi.fn(), note: vi.fn(), lookedAt: vi.fn() },
   mockAdmin: {
     ban: vi.fn(), unban: vi.fn(), activate: vi.fn(), setAdmin: vi.fn(), setMod: vi.fn(),
-    signOutPlayer: vi.fn(), clearPenalties: vi.fn(), unlinkDiscord: vi.fn(),
+    signOutPlayer: vi.fn(), clearPenalties: vi.fn(), clearPenalty: vi.fn(), unlinkDiscord: vi.fn(),
     mergePlayer: vi.fn(), unaliasPlayer: vi.fn(), steamRefresh: vi.fn(), integrityReview: vi.fn(),
   },
   mockMod: { open: vi.fn() },
@@ -678,5 +678,16 @@ describe('the evidence detail', () => {
     expect(screen.queryByRole('button', { name: /Mark this round reviewed/ })).toBeNull();
     // Mods see what admins see here; only the review buttons are admin-only.
     expect(screen.getByText('dismissed: heard the spawn')).toBeTruthy();
+  });
+});
+
+describe('clearing one penalty', () => {
+  it('each uncleared row has its own Clear, which clears just that row', async () => {
+    mockPeople.file.mockResolvedValue(file());
+    mockAdmin.clearPenalty.mockResolvedValue({ ok: true });
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    const item = (await screen.findByText(/No-show/)).closest('li') as HTMLElement;
+    fireEvent.click(within(item).getByRole('button', { name: 'Clear' }));
+    await waitFor(() => expect(mockAdmin.clearPenalty).toHaveBeenCalledWith(P, 1));
   });
 });

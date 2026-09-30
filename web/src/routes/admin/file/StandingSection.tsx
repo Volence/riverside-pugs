@@ -90,13 +90,19 @@ export function StandingSection(
               {fmtTime(p.createdAt)}: {p.kind === 'no_show' ? 'No-show' : 'Missed ready check'}
               {p.matchId && <> on <a href={`/match/${p.matchId}`}>#{p.matchId}</a></>}
               {p.clearedAt && `, cleared by ${p.clearedBy}`}
+              {/* One row at a time, for the no-show our server caused, without
+                  also wiping the ready checks they really did miss. */}
+              {!p.clearedAt && can('timeout') && (
+                <>{' '}<button class="chip" type="button" disabled={busy}
+                  onClick={() => run(() => adminApi.clearPenalty(d.steamid, p.id))}>Clear</button></>
+              )}
             </li>
           ))}
         </ul>
       )}
       {can('timeout') && s.penalties.some((p) => !p.clearedAt) && (
         <button class="chip" type="button" disabled={busy}
-          onClick={() => run(() => adminApi.clearPenalties(d.steamid))}>Clear penalties</button>
+          onClick={() => run(() => adminApi.clearPenalties(d.steamid))}>Clear all penalties</button>
       )}
     </Panel>
   );
