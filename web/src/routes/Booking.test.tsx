@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/preact';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 
-const { mockBookings } = vi.hoisted(() => ({ mockBookings: { get: vi.fn(), act: vi.fn(), cancel: vi.fn() } }));
+const { mockBookings, mockAdmin } = vi.hoisted(() => ({
+  mockBookings: { get: vi.fn(), act: vi.fn(), cancel: vi.fn() },
+  mockAdmin: { cancelBooking: vi.fn(), extendBooking: vi.fn(), endBooking: vi.fn() },
+}));
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
-  return { ...actual, bookingsApi: mockBookings };
+  return { ...actual, bookingsApi: mockBookings, adminApi: { ...actual.adminApi, ...mockAdmin } };
 });
 const { Booking } = await import('./Booking');
 
@@ -22,7 +25,11 @@ const VIEW = (over: Record<string, unknown> = {}) => ({
 });
 const session = { kind: 'active', me: { steamid: 'x0', name: 'p0', avatar: null, status: 'active', isAdmin: false, teams: true } } as never;
 
-afterEach(() => { cleanup(); for (const f of Object.values(mockBookings)) f.mockReset(); });
+afterEach(() => {
+  cleanup();
+  for (const f of Object.values(mockBookings)) f.mockReset();
+  for (const f of Object.values(mockAdmin)) f.mockReset();
+});
 beforeEach(() => { mockBookings.get.mockResolvedValue(VIEW()); });
 
 describe('Booking page', () => {
@@ -67,5 +74,22 @@ describe('Booking page', () => {
     expect(screen.getByRole('button', { name: 'Decline' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Cancel booking' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Extend 30 min' })).toBeNull();
+  });
+
+  // A staff viewer who does not themselves manage a confirmed side (the
+  // admin-desk case) has to go through the admin routes: the player routes
+  // never pass a staff flag, so those buttons would just fail with
+  // "not a manager".
+  it('a staff-only viewer sees Cancel and Extend on a scheduled booking, no No-show, and uses the admin routes', async () => {
+    const staffView = VIEW({ state: 'scheduled', connect: null, server: null, viewer: { side: null, manages: [], staff: true, invited: false } });
+    mockBookings.get.mockResolvedValueOnce(staffView).mockResolvedValueOnce({ ...staffView, state: 'cancelled' });
+    mockAdmin.cancelBooking.mockResolvedValue({ ok: true });
+    render(<Booking id="7" session={session} />);
+    expect(await screen.findByRole('button', { name: 'Cancel booking' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Extend 30 min' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'They did not show' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel booking' }));
+    await waitFor(() => expect(mockAdmin.cancelBooking).toHaveBeenCalledWith(7, ''));
+    await waitFor(() => expect(mockBookings.get).toHaveBeenCalledTimes(2));
   });
 });

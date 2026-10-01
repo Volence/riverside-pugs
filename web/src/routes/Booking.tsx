@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { bookingsApi, teamsApi, type BookingRole, type BookingSide, type BookingView } from '../api';
+import { adminApi, bookingsApi, teamsApi, type BookingRole, type BookingSide, type BookingView } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
@@ -75,6 +75,23 @@ export function Booking({ id, session }: { id: string; session: Session }) {
     }
   };
 
+  // The admin routes (used by staff who do not themselves manage a confirmed
+  // side) answer { ok: true }, not a fresh view: the view is keyed to a side
+  // the viewer manages, which a staff-only viewer has none of. Reload it
+  // separately instead of trying to read one out of the action's result.
+  const staffAct = async (fn: () => Promise<unknown>) => {
+    setError(null);
+    setBusy(true);
+    try {
+      await fn();
+      setV(await bookingsApi.get(id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (missing || session.kind !== 'active') return <main class="page page--profile bookingpage"><PageHeader title="Booking" /><Empty>No such booking.</Empty></main>;
   if (!v) return null;
   const open = !v.ending && ['scheduled', 'held', 'setup', 'ready', 'active'].includes(v.state);
@@ -83,13 +100,15 @@ export function Booking({ id, session }: { id: string; session: Session }) {
   const unconfirmedB = !b.confirmed;
   // A side's captain or co-captain may only Cancel, Extend or End once their
   // own side has confirmed; an unconfirmed side gets Confirm/Decline instead
-  // (below), never the run of the booking. Staff can always reach this panel.
+  // (below), never the run of the booking. A side manager always goes
+  // through the player routes, even when they are also staff. A staff
+  // viewer who manages no confirmed side (the admin desk case) has to go
+  // through the admin routes instead: the player routes never pass a staff
+  // flag, so those buttons would just fail with "not a manager".
   const managesConfirmedSide = v.viewer.manages.some((s) => v.sides.find((side) => side.side === s)?.confirmed);
-  const canManage = open && (managesConfirmedSide || v.viewer.staff);
-  // Extend is a running-booking (or staff) action: a player may only extend
-  // while the server is actually ready or active, never a booking that has
-  // not taken its server yet.
-  const canExtend = canManage && (running || v.viewer.staff);
+  const playerManage = open && managesConfirmedSide;
+  const staffOnly = open && v.viewer.staff && !playerManage;
+  const canManage = playerManage || staffOnly;
 
   return (
     <main class="page page--profile bookingpage">
@@ -136,16 +155,30 @@ export function Booking({ id, session }: { id: string; session: Session }) {
         <Panel>
           <h3>Booking</h3>
           <p>
-            {canExtend && <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.act(v.id, 'extend'))}>Extend {v.extendMinutes} min</button>}
-            {running && <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.act(v.id, 'end'))}>End now</button>}
-            {running && Date.now() >= Date.parse(v.noShowFrom) && (
+            {/* A player may only extend a booking that has actually taken a
+                server; staff may extend any open booking, through the admin
+                route, since the player route has no staff bypass. */}
+            {playerManage && running && (
+              <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.act(v.id, 'extend'))}>Extend {v.extendMinutes} min</button>
+            )}
+            {staffOnly && (
+              <button class="btn btn--ghost" disabled={busy} onClick={() => staffAct(() => adminApi.extendBooking(v.id))}>Extend {v.extendMinutes} min</button>
+            )}
+            {playerManage && running && <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.act(v.id, 'end'))}>End now</button>}
+            {staffOnly && running && <button class="btn btn--ghost" disabled={busy} onClick={() => staffAct(() => adminApi.endBooking(v.id))}>End now</button>}
+            {/* No-show is a side's own call on its opponent; staff clean up
+                through Cancel or End instead, never this button. */}
+            {playerManage && running && Date.now() >= Date.parse(v.noShowFrom) && (
               <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.act(v.id, 'no-show'))}>They did not show</button>
             )}
           </p>
           <p>
             <input aria-label="Cancel reason" value={reason} maxLength={300} placeholder="Reason (optional, only the two sides and staff see it)"
               onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
-            <button class="btn btn--danger" disabled={busy} onClick={() => act(() => bookingsApi.cancel(v.id, reason))}>Cancel booking</button>
+            <button class="btn btn--danger" disabled={busy}
+              onClick={() => playerManage ? act(() => bookingsApi.cancel(v.id, reason)) : staffAct(() => adminApi.cancelBooking(v.id, reason))}>
+              Cancel booking
+            </button>
           </p>
         </Panel>
       )}
