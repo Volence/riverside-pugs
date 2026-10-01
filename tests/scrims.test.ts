@@ -6,7 +6,7 @@ import { createTeam, disbandTeam, invitePlayer, respondInvite, setRole } from '.
 import { BOOKING_ERRORS, cancelBooking, confirmBooking, createBooking, getBooking, sideRow, peopleOf } from '../src/bookings/bookings.js';
 import {
   acceptPost, board, confirmAccept, createPost, declineAccept, expire, repostFromBooking, withdrawAccept, withdrawPost,
-  type ScrimResult,
+  SCRIM_ERRORS, type ScrimResult,
 } from '../src/scrims/scrims.js';
 import { blockTarget } from '../src/scrims/blocks.js';
 
@@ -203,6 +203,8 @@ describe('acceptPost', () => {
     rate(P[0], 25); // 1500
     rate(P[1], 26); // 1600
     rate(P[2], 30); // 2000
+    // Room for the third campaign the accepter adds (240 minutes).
+    setSetting(db, 'booking_max_minutes', '240');
     const id = post({ srRange: 200 });
     const r = value(acceptPost(db, { postId: id, by: P[1], campaigns: ['dead_air'], now: NOW }));
     expect(r.fits).toBe(true);
@@ -334,11 +336,18 @@ describe('withdrawAccept and declineAccept', () => {
 describe('confirmAccept', () => {
   it('books the server with both sides confirmed, the playlist alternated, and the other accepts taken', () => {
     const id = post({ campaigns: ['no_mercy', 'death_toll'] });
+    // Three campaigns need a 240 minute slot, over the default longest
+    // booking, so the accept itself is refused rather than left to stick.
+    expect(acceptPost(db, { postId: id, by: P[1], campaigns: ['dead_air'], now: NOW }))
+      .toEqual({ ok: false, error: 'too_many_campaigns' });
+    expect(SCRIM_ERRORS.too_many_campaigns.status).toBe(400);
+    setSetting(db, 'booking_max_minutes', '240');
     const a1 = accept(id, P[1], { campaigns: ['dead_air'] });
     const a2 = accept(id, P[2]);
     const a3 = accept(id, P[3]);
     value(withdrawAccept(db, { acceptId: a3, by: P[3], now: NOW }));
-    // Three campaigns need a 240 minute slot, over the default longest booking.
+    // Staff lowering the longest booking after the accept: confirm re-checks.
+    setSetting(db, 'booking_max_minutes', '180');
     expect(confirmAccept(db, { acceptId: a1, by: P[0], now: NOW })).toEqual({ ok: false, error: 'too_long', text: BOOKING_ERRORS.too_long.text });
     expect(bookingCount()).toBe(0);
     setSetting(db, 'booking_max_minutes', '240');
@@ -554,7 +563,10 @@ describe('board', () => {
     rate(P[0], 25); // 1500
     rate(P[1], 30); // 2000
     const id = post({ srRange: 100, campaigns: ['no_mercy', 'death_toll'], minutes: 120 });
+    setSetting(db, 'booking_max_minutes', '240');
     const a = accept(id, P[1], { campaigns: ['dead_air'] });
+    // Lowered again after the accept: the poster's view says it no longer fits.
+    setSetting(db, 'booking_max_minutes', '180');
     const mine = board(db, viewer(P[0]), { now: NOW })[0];
     expect(mine.mine).toBe(true);
     expect(mine.accepts).toEqual([{

@@ -57,6 +57,7 @@ export const SCRIM_ERRORS = {
   already_accepted: { status: 409, text: 'That side has already accepted this post.' },
   challenge_side: { status: 400, text: 'This challenge is for your team; accept it as that team.' },
   too_late: { status: 409, text: 'Too close to the start: an acceptance needs at least 30 minutes to be answered.' },
+  too_many_campaigns: { status: 400, text: 'With your campaigns this scrim would be too long for one booked server. Add fewer.' },
   too_many_posts: { status: 409, text: 'That side already has 3 open scrim posts. Withdraw one first.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type ScrimError = keyof typeof SCRIM_ERRORS;
@@ -327,6 +328,10 @@ export function acceptPost(db: DB, o: {
     if (side.team_id === null && p.team_id !== null && roleOf(db, p.team_id, o.by) !== null) return fail('own_post');
     // A blocked pair never accepts each other, whichever side blocked.
     if (blocked(db, partyOf(side), partyOf(p))) return fail('not_available');
+    // The merged playlist is never trimmed, so one that would not fit one
+    // booking could only ever be refused at confirm, leaving the post stuck
+    // pending on an offer nobody can take. Refuse it here instead.
+    if (!proposedPlaylist(db, campaignsOf(p), campaigns).fits) return fail('too_many_campaigns');
 
     const already = side.team_id !== null
       ? db.prepare("SELECT 1 FROM scrim_accepts WHERE post_id = ? AND status = 'pending' AND team_id = ?").get(p.id, side.team_id)

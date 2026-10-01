@@ -616,7 +616,6 @@ export function addCampaign(db: DB, o: {
 }): Result<{ gamesAllowed: number; endsAt: string; campaign: string | null }> {
   const now = o.now ?? new Date();
   const campaign = o.campaign === undefined || o.campaign === null ? null : o.campaign;
-  if (campaign !== null && !isPoolCampaign(db, campaign)) return fail('bad_campaign');
   return db.transaction((): Result<{ gamesAllowed: number; endsAt: string; campaign: string | null }> => {
     const b = getBooking(db, o.bookingId);
     if (!b) return fail('not_found');
@@ -626,6 +625,8 @@ export function addCampaign(db: DB, o: {
       if ((b.state !== 'ready' && b.state !== 'active') || b.ending_at !== null) return fail('wrong_state');
       if (actingSides(db, b.id, o.by).length === 0) return fail('not_manager');
     }
+    // After the gate, so a stranger learns nothing from a bad slug.
+    if (campaign !== null && !isPoolCampaign(db, campaign)) return fail('bad_campaign');
     const minutes = addCampaignMinutes(db, campaign);
     const from = Date.parse(b.ends_at);
     if (capacityProblem(db, { region: b.region, startMs: from, endMs: from + minutes * 60_000, exceptId: b.id }) !== null) {
@@ -634,6 +635,8 @@ export function addCampaign(db: DB, o: {
     const endsAt = iso(from + minutes * 60_000);
     const gamesAllowed = b.games_allowed + 1;
     const playlist = JSON.parse(b.playlist_json) as string[];
+    // A +1 may take the playlist past booking_playlist_max on purpose: that
+    // cap is for booking up front, and +1 is how a running booking goes on.
     if (campaign !== null) playlist.push(campaign);
     db.prepare(
       `UPDATE bookings SET ends_at = ?, games_allowed = ?, playlist_json = ?, extended_minutes = extended_minutes + ?,

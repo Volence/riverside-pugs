@@ -610,7 +610,12 @@ export class BookingRunner {
 
   /** One look at a running booking's box (minute watch: presence, active,
    *  done/time/idle ends, the slot warning). */
-  private async watch(b: BookingRow, now: Date): Promise<void> {
+  private async watch(listed: BookingRow, now: Date): Promise<void> {
+    // Read the row again: `listed` came from the tick's list, and the watches
+    // before this one awaited rcon, so a +1 campaign made meanwhile (which
+    // clears the closing grace) must not be undone by a stale close_at.
+    const b = this.running(listed.id);
+    if (!b) return;
     const server = b.server_id !== null ? getServer(this.db, b.server_id) : undefined;
     if (!server) return;
     // The done and time ends need no answer from the box: a dead box still ends.
@@ -820,7 +825,10 @@ export class BookingRunner {
       // Nothing loads during the grace: a campaign added in it is announced by onExtended.
       if (b.next_campaign !== null) setNext(this.db, b.id, null, null, new Date(nowMs));
       if (!setCloseAt(this.db, b.id, played, new Date(nowMs + CLOSE_GRACE_MS).toISOString(), new Date(nowMs))) return;
-      line = `say [Booking] That was campaign ${b.games_allowed} of ${b.games_allowed}. Type !addcampaign to play one more, or the server closes in 5 minutes.`;
+      // A game started inside an earlier grace can take played past the count.
+      line = played > b.games_allowed
+        ? 'say [Booking] That was past the last booked campaign. Type !addcampaign to play one more, or the server closes in 5 minutes.'
+        : `say [Booking] That was campaign ${b.games_allowed} of ${b.games_allowed}. Type !addcampaign to play one more, or the server closes in 5 minutes.`;
     } else if (nowMs >= Date.parse(b.ends_at)) {
       return;
     } else {
@@ -1110,8 +1118,9 @@ export class BookingRunner {
       console.warn(`[booking] ${id}: +1 campaign notice not sent:`, err instanceof Error ? err.message : err);
       return;
     }
-    lines.push(`say [Booking] +1 campaign: now ${b.games_allowed} to play (until about ${b.ends_at.slice(11, 16)} UTC).`);
     const played = gamesPlayed(this.db, id);
+    const left = b.games_allowed - played;
+    lines.push(`say [Booking] +1 campaign: ${left} left to play, ${b.games_allowed} booked in all (until about ${b.ends_at.slice(11, 16)} UTC).`);
     if (played < b.games_allowed && b.next_campaign === null && !liveBookingGame(this.db, id) && this.sittingOnFinished(id)) {
       lines.push(this.scheduleNext(b, played, this.now()));
     }
