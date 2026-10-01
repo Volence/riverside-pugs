@@ -389,3 +389,16 @@ rejoining cannot buy a fresh one. Grace and block are kept per SteamID64 and
 survive map changes. `sm_booking_status` prints whether the box is booked,
 whether a list is loaded, its size, the staged size (-1 when none), and each
 running grace and block with its time left; it never prints the ids.
+
+1.2.1: when the site refuses an `!allow` (the booking rules say no, the
+sender is not a captain of a confirmed side, or the booking is winding down)
+it sends `sm_booking_allow_refuse <id64>`, which takes the player back off
+the active list and, if they are still connected and not exempt, starts
+their grace over with the notices of a fresh connect. A captain's `!allow`
+on a box without its log secret adds nobody and says `[Booking] The site
+cannot hear this server right now; use the booking page.`, leaving the grace
+running. Emptying `l4d_booking_password` clears the active list, the loaded
+flag, every grace and every block. `l4d_booking_grace` is at least 15
+seconds, the site setting's own minimum. A client whose SteamID is not yet
+known is let through on purpose; `sv_password` still keeps out anyone the
+booking did not give it to.

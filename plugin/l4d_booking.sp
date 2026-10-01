@@ -41,6 +41,15 @@
  * cannot reset them. Nothing is enforced until the box is booked and a list
  * has been committed.
  *
+ * 1.2.1: when the site refuses an !allow it sends sm_booking_allow_refuse
+ * <id64>, which takes the player back off the active list and, if they are
+ * still here, starts their grace again (the notices of a fresh connect)
+ * rather than kicking them outright. Without the log secret a captain's
+ * !allow adds nobody, since the site would never hear of it. Emptying
+ * l4d_booking_password forgets the list, graces and blocks, so nothing
+ * carries into a later booking on the same srcds. l4d_booking_grace is at
+ * least 15 seconds, the site's own minimum.
+ *
  * Build: ./build-booking.sh
  */
 #pragma semicolon 1
@@ -48,7 +57,7 @@
 #include <sourcemod>
 #include "pug-logauth.inc"
 
-#define PLUGIN_VERSION "1.2.0"
+#define PLUGIN_VERSION "1.2.1"
 
 /** Longest arg= text on a PUGBOOK line, plus the null terminator. Matches
  *  the site parser's cap (Task 6). */
@@ -94,7 +103,7 @@ public void OnPluginStart()
 	g_cvTvPassword = CreateConVar("l4d_booking_tv_password", "", "The booking's SourceTV password.", FCVAR_PROTECTED | FCVAR_DONTRECORD);
 	g_cvNotice = CreateConVar("l4d_booking_notice", "", "Ready-up panel line for the booking.", FCVAR_DONTRECORD);
 	g_cvCaptains = CreateConVar("l4d_booking_captains", "", "Comma-separated SteamID64s of this booking's captains.", FCVAR_DONTRECORD);
-	g_cvGrace = CreateConVar("l4d_booking_grace", "60", "Seconds a captain has to !allow someone who is not on the booking.", FCVAR_DONTRECORD, true, 1.0);
+	g_cvGrace = CreateConVar("l4d_booking_grace", "60", "Seconds a captain has to !allow someone who is not on the booking.", FCVAR_DONTRECORD, true, 15.0);
 	g_cvBlock = CreateConVar("l4d_booking_block", "30", "Minutes someone kicked for not being on the booking stays out; 0 for no block.", FCVAR_DONTRECORD, true, 0.0);
 	g_cvPassword.AddChangeHook(OnBookingCvarChanged);
 	g_cvTvPassword.AddChangeHook(OnBookingCvarChanged);
@@ -109,6 +118,7 @@ public void OnPluginStart()
 	RegServerCmd("sm_booking_allow_begin", Cmd_AllowBegin, "sm_booking_allow_begin - start staging a new allowlist");
 	RegServerCmd("sm_booking_allow_add", Cmd_AllowAdd, "sm_booking_allow_add <steamid64> [steamid64...] - add ids to the staged allowlist");
 	RegServerCmd("sm_booking_allow_commit", Cmd_AllowCommit, "sm_booking_allow_commit - make the staged allowlist the active one");
+	RegServerCmd("sm_booking_allow_refuse", Cmd_AllowRefuse, "sm_booking_allow_refuse <steamid64> - the site refused an !allow: take them off the active list and start their grace again");
 	RegServerCmd("sm_booking_status", Cmd_BookingStatus, "sm_booking_status - whether a list is loaded, its size, running graces and blocks");
 	// No TIMER_FLAG_NO_MAPCHANGE: graces keep running through a map change.
 	CreateTimer(1.0, Timer_Graces, _, TIMER_REPEAT);
@@ -121,7 +131,18 @@ public void OnConfigsExecuted()
 
 public void OnBookingCvarChanged(ConVar cv, const char[] oldValue, const char[] newValue)
 {
+	// Not booked any more: forget this booking's people, so nothing it left
+	// behind can carry into a later booking on the same srcds.
+	if (cv == g_cvPassword && newValue[0] == '\0') ResetAllowlist();
 	Apply();
+}
+
+void ResetAllowlist()
+{
+	g_hAllowed.Clear();
+	g_bListLoaded = false;
+	g_hGrace.Clear();
+	g_hBlocked.Clear();
 }
 
 void Apply()
@@ -425,15 +446,48 @@ public Action Cmd_BookingStatus(int args)
 	return Plugin_Handled;
 }
 
+/** Never held to the list: bots, SourceTV, replay and SourceMod admins. */
+bool IsExempt(int client)
+{
+	return IsFakeClient(client) || IsClientSourceTV(client) || IsClientReplay(client) || GetUserAdmin(client) != INVALID_ADMIN_ID;
+}
+
+/** sm_booking_allow_refuse <steamid64>: the site refused a captain's !allow
+ *  that ChatAllow had already let through. Off the active list again, and if
+ *  they are still here (and not exempt) their grace starts over, with the
+ *  notices of a fresh connect, rather than an outright kick. */
+public Action Cmd_AllowRefuse(int args)
+{
+	char id[32];
+	GetCmdArg(1, id, sizeof(id));
+	if (args != 1 || !IsSteamId64(id))
+	{
+		PrintToServer("usage: sm_booking_allow_refuse <steamid64> - steamid64 is 17 digits");
+		return Plugin_Handled;
+	}
+	g_hAllowed.Remove(id);
+	g_hGrace.Remove(id);
+	int client = FindClientById(id);
+	bool restarted = false;
+	if (client > 0 && IsClientInGame(client) && !IsExempt(client) && Enforcing())
+	{
+		StartGrace(client, id);
+		restarted = true;
+	}
+	PrintToServer("PUGOK booking allow refuse grace=%d", restarted);
+	return Plugin_Handled;
+}
+
 /** Runs on every connect, map changes included (clients re-run admin checks
  *  on each map), which is why a grace already running is kept, not restarted. */
 public void OnClientPostAdminCheck(int client)
 {
 	if (!Enforcing()) return;
-	if (IsFakeClient(client) || IsClientSourceTV(client) || IsClientReplay(client)) return;
-	if (GetUserAdmin(client) != INVALID_ADMIN_ID) return;
+	if (IsExempt(client)) return;
 
 	char id[32];
+	// No SteamID yet (Steam auth not back): deliberately let through, since
+	// sv_password still keeps out anyone the booking did not give it to.
 	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id)) || !IsSteamId64(id)) return;
 	if (IsAllowed(id)) return;
 
@@ -456,8 +510,14 @@ public void OnClientPostAdminCheck(int client)
 		return;
 	}
 
+	StartGrace(client, id);
+}
+
+/** A fresh grace for this player, told to every captain here and to them. */
+void StartGrace(int client, const char[] id)
+{
 	int grace = g_cvGrace.IntValue;
-	g_hGrace.SetValue(id, now + grace);
+	g_hGrace.SetValue(id, GetTime() + grace);
 	char name[MAX_NAME_LENGTH];
 	GetClientName(client, name, sizeof(name));
 	for (int i = 1; i <= MaxClients; i++)
@@ -525,6 +585,13 @@ void ChatAllow(int client, const char[] rawQuery)
 		PrintToChat(client, "[Booking] Only a captain can do that.");
 		return;
 	}
+	// The site would never hear of it, so it would never land on the
+	// booking: add nobody and leave the grace running.
+	if (!HasLogSecret())
+	{
+		PrintToChat(client, "[Booking] The site cannot hear this server right now; use the booking page.");
+		return;
+	}
 
 	char query[MAX_NAME_LENGTH];
 	strcopy(query, sizeof(query), rawQuery);
@@ -565,5 +632,4 @@ void ChatAllow(int client, const char[] rawQuery)
 	char arg[256];
 	Format(arg, sizeof(arg), "%s %s", id, name);
 	EmitBookingCmd(by, "allow", arg);
-	if (!HasLogSecret()) PrintToChat(client, "[Booking] The site cannot hear this server right now; use the booking page.");
 }
