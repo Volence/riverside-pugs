@@ -8,6 +8,9 @@ import { getBooking, sideName, sidesOf } from './bookings.js';
 /** "2026-10-02 20:00 UTC". DMs have no viewer time zone; the site shows local time. */
 export const whenUtc = (iso: string): string => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 
+/** Added to a late cancel's notice for the side that was cancelled on. */
+export const LATE_CANCEL_LINE = 'This is a late cancel. If it is fine with you, excuse it on the booking page so it does not count against them.';
+
 /** The six booking notice types this module knows how to word. Narrower than
  *  the full NotifyType (which also carries the scrim board's types, worded
  *  elsewhere) so the switch below stays exhaustive as NotifyType grows. */
@@ -18,7 +21,7 @@ export type BookingNotifyType =
  *  Every player-chosen name goes through escapeName, as in teamButtons.ts. */
 export function bookingMessage(
   db: DB, publicUrl: string, bookingId: number, type: BookingNotifyType,
-  extra: { minutes?: number; reason?: string | null; addedBy?: string } = {},
+  extra: { minutes?: number; reason?: string | null; addedBy?: string; lateCancel?: boolean } = {},
 ): MessagePayload | null {
   const b = getBooking(db, bookingId);
   if (!b) return null;
@@ -49,15 +52,22 @@ export function bookingMessage(
     }
     case 'booking_cancelled':
       content = `${vs} on ${when} is cancelled${extra.reason ? `: ${escapeName(extra.reason)}` : '.'}`;
+      // Only the other side's people are sent this one (runner.onCancelled).
+      if (extra.lateCancel) content += `\n${LATE_CANCEL_LINE}`;
       break;
     case 'booking_no_show':
       content = `Your side was recorded as a no-show for ${vs} on ${when}.`;
       break;
   }
+  const page = `${publicUrl}/booking/${b.id}`;
+  const links = [{ kind: 'link' as const, url: page, label: 'Open the booking' }];
+  // The reminder's Cancel (plan 2 Ruling 3) is a link to the cancel confirm,
+  // so cancelling stays in one place.
+  if (type === 'booking_starting') links.push({ kind: 'link', url: `${page}?cancel=1`, label: 'Cancel' });
   return {
     content,
     embeds: [],
-    components: [[{ kind: 'link', url: `${publicUrl}/booking/${b.id}`, label: 'Open the booking' }]],
+    components: [links],
     mentionUserIds: [],
   };
 }

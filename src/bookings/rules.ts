@@ -1,6 +1,7 @@
 import type { DB } from '../db.js';
 import { settingNumber } from '../settings.js';
 import { completedPug } from '../matchKinds.js';
+import type { BookingRow } from './bookings.js';
 
 /**
  * The numbers and arithmetic of server bookings (spec part 1 section 3):
@@ -89,7 +90,7 @@ export function capacityProblem(db: DB, o: { region: string; startMs: number; en
  *  (scrim spec section 3: a pickup group's record is its captain's). */
 export type Party = { teamId: number } | { captain: string };
 
-function partyWhere(party: Party): { sql: string; arg: number | string } {
+export function partyWhere(party: Party): { sql: string; arg: number | string } {
   return 'teamId' in party
     ? { sql: 's.team_id = ?', arg: party.teamId }
     : { sql: 's.team_id IS NULL AND s.captain_steamid = ?', arg: party.captain };
@@ -107,8 +108,30 @@ export function upcomingCount(db: DB, party: Party): number {
 export function recentNoShows(db: DB, party: Party, nowMs: number): number {
   const w = partyWhere(party);
   return (db.prepare(
-    `SELECT COUNT(*) AS n FROM booking_sides s WHERE ${w.sql} AND s.no_show_at IS NOT NULL AND s.no_show_at > ?`,
+    `SELECT COUNT(*) AS n FROM booking_sides s
+      WHERE ${w.sql} AND s.no_show_at IS NOT NULL AND s.no_show_at > ? AND s.excused_at IS NULL`,
   ).get(w.arg, iso(nowMs - NO_SHOW_WINDOW_DAYS * 86_400_000)) as { n: number }).n;
+}
+
+/** A side's own cancel this close to the start is a late cancel (scrim spec
+ *  section 3a); 0 means never. */
+export function lateCancelHours(db: DB): number {
+  return settingNumber(db, 'scrim_late_cancel_hours', 2, { integer: true, min: 0, max: 24 });
+}
+
+/**
+ * Whether this booking ended in a late cancel by `cancel_side`: a side's own
+ * cancel (end_reason 'cancelled', so never a staff, decline or system end)
+ * of a booked scrim, made less than scrim_late_cancel_hours before the start.
+ * "Booked" means both sides had confirmed: pulling an invite nobody accepted
+ * yet costs nobody anything. Excuses are the caller's business.
+ */
+export function isLateCancel(db: DB, b: BookingRow): boolean {
+  if (b.state !== 'cancelled' || b.end_reason !== 'cancelled' || b.cancel_side === null || b.ending_at === null) return false;
+  const hours = lateCancelHours(db);
+  if (hours === 0) return false;
+  if (Date.parse(b.starts_at) - Date.parse(b.ending_at) >= hours * 3_600_000) return false;
+  return !db.prepare('SELECT 1 FROM booking_sides WHERE booking_id = ? AND confirmed_at IS NULL').get(b.id);
 }
 
 export function allowance(db: DB, party: Party, nowMs: number): number {

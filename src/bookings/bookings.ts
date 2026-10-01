@@ -14,8 +14,9 @@ import { NOT_HELD_SQL } from '../serverHolds.js';
 import { getServer } from '../serverPool.js';
 import { bookingGames, type BookingGameView } from './games.js';
 import { castersOf, type CasterView } from './casters.js';
+import { canSeeReliability, reliability, type Reliability } from '../scrims/reliability.js';
 import {
-  allowance, bookingLimits, capacityProblem, iso, upcomingCount, OPEN_STATES_SQL, PEOPLE_PER_SIDE, SHOWN_MIN, STEP_MINUTES,
+  allowance, bookingLimits, capacityProblem, isLateCancel, iso, upcomingCount, OPEN_STATES_SQL, PEOPLE_PER_SIDE, SHOWN_MIN, STEP_MINUTES,
   UNCONFIRMED_CUTOFF_MS, UNCONFIRMED_TTL_MS, type BookingLimits, type BookingState, type Party,
 } from './rules.js';
 
@@ -49,6 +50,7 @@ export interface BookingRow {
 export interface SideRow {
   booking_id: number; side: Side; team_id: number | null; captain_steamid: string; confirmed_at: string | null;
   peak_present: number; no_show_at: string | null;
+  excused_at: string | null; excused_by: string | null; excuse_note: string | null;
 }
 export interface PersonRow {
   booking_id: number; side: Side; steamid: string; role: PersonRole; status: 'invited' | 'accepted'; added_by: string; added_at: string;
@@ -81,6 +83,7 @@ export const BOOKING_ERRORS = {
   not_shown: { status: 409, text: 'Your side has to be on the server first.' },
   they_showed: { status: 409, text: 'The other side is on the server.' },
   not_caster: { status: 400, text: 'That player is not a caster.' },
+  already_excused: { status: 409, text: 'That is already excused.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type BookingError = keyof typeof BOOKING_ERRORS;
 export type Result<T> = { ok: true; value: T } | { ok: false; error: BookingError };
@@ -523,6 +526,45 @@ export function cancelBooking(db: DB, o: { bookingId: number; by: string; staff?
   })();
 }
 
+/** The longest excuse note kept. */
+const EXCUSE_NOTE_MAX = 200;
+
+/**
+ * Excuse a side's mark on a booking (plan 2 Ruling 2): excused marks never
+ * count, not in the record and not in the allowance. A side's manager may
+ * excuse the OTHER side's late cancel ("All good, no hard feelings"), and only
+ * that; staff name the side and may excuse its late cancel or its no-show (a
+ * crash that was nobody's fault). One excuse per side per booking.
+ */
+export function excuseMark(db: DB, o: {
+  bookingId: number; by: string; staff?: boolean; side?: unknown; note?: unknown; now?: Date;
+}): Result<{ side: Side }> {
+  const now = o.now ?? new Date();
+  const note = typeof o.note === 'string' && o.note.trim() ? o.note.trim().slice(0, EXCUSE_NOTE_MAX) : null;
+  if (o.staff && o.side !== 'a' && o.side !== 'b') return fail('bad_side');
+  return db.transaction((): Result<{ side: Side }> => {
+    const b = getBooking(db, o.bookingId);
+    if (!b) return fail('not_found');
+    const late = isLateCancel(db, b);
+    let side: Side;
+    if (o.staff) {
+      side = o.side as Side;
+      const marked = (late && b.cancel_side === side) || sideRow(db, b.id, side)!.no_show_at !== null;
+      if (!marked) return fail('wrong_state');
+    } else {
+      if (!late) return fail('wrong_state');
+      side = b.cancel_side!;
+      const other: Side = side === 'a' ? 'b' : 'a';
+      if (!actingSides(db, b.id, o.by).includes(other)) return fail('not_manager');
+    }
+    if (sideRow(db, b.id, side)!.excused_at !== null) return fail('already_excused');
+    db.prepare('UPDATE booking_sides SET excused_at = ?, excused_by = ?, excuse_note = ? WHERE booking_id = ? AND side = ?')
+      .run(now.toISOString(), o.by, note, b.id, side);
+    logEvent(db, b.id, o.by, 'excused', { side, staff: !!o.staff }, now);
+    return ok({ side });
+  })();
+}
+
 export function extendBooking(db: DB, o: { bookingId: number; by: string; staff?: boolean; now?: Date }): Result<{ endsAt: string }> {
   const now = o.now ?? new Date();
   return db.transaction((): Result<{ endsAt: string }> => {
@@ -722,6 +764,12 @@ export interface BookingPersonView { steamid: string; name: string; avatar: stri
 export interface BookingSideView {
   side: Side; name: string; team: { id: number; slug: string; name: string; tag: string; logoKey: string | null } | null;
   captain: { steamid: string; name: string }; confirmed: boolean; peakPresent: number; noShow: boolean; people: BookingPersonView[];
+  /** This side cancelled late (plan 2), and whether its mark is excused. */
+  lateCancel: boolean; excused: boolean;
+  /** The viewer manages the other side and may excuse this side's late cancel. */
+  canExcuse: boolean;
+  /** The side's record, only for those canSeeReliability lets see it. */
+  record?: Reliability;
 }
 export interface BookingView {
   id: number; purpose: 'scrim' | 'tournament'; state: BookingState; ending: boolean; startsAt: string; endsAt: string;
@@ -759,6 +807,8 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
   const canConnect = viewer.staff || me?.status === 'accepted';
   const config = db.prepare('SELECT key, label FROM game_configs WHERE key = ?').get(b.game_config) as { key: string; label: string } | undefined;
   const rules = bookingRules(b);
+  const late = isLateCancel(db, b);
+  const acting = actingSides(db, id, viewer.steamid);
   // The games follow canViewMatch's rule for a booking game (src/matchVisibility.ts)
   // as far as this page's viewers go: staff, an accepted person, or a manager
   // of a confirmed side. A plain team member who is none of these sees the
@@ -773,6 +823,7 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
     sides: sidesOf(db, id).map((s) => {
       const t = s.team_id !== null ? getTeam(db, s.team_id) : undefined;
       const captainId = t ? t.captain_steamid : s.captain_steamid;
+      const lateCancel = late && b.cancel_side === s.side;
       return {
         side: s.side, name: sideName(db, s),
         team: t ? { id: t.id, slug: t.slug, name: t.name, tag: t.tag, logoKey: t.logo_key } : null,
@@ -782,6 +833,9 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
           const pl = getPlayer(db, p.steamid);
           return { steamid: p.steamid, name: pl?.name ?? p.steamid, avatar: pl?.avatar ?? null, role: p.role, status: p.status };
         }),
+        lateCancel, excused: s.excused_at !== null,
+        canExcuse: lateCancel && s.excused_at === null && acting.includes(s.side === 'a' ? 'b' : 'a'),
+        ...(viewer.staff || canSeeReliability(db, partyOf(s), viewer.steamid) ? { record: reliability(db, partyOf(s)) } : {}),
       };
     }),
     server: server ? { name: server.name } : null,

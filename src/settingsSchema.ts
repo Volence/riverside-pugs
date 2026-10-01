@@ -117,6 +117,8 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'booking_allow_grace_seconds', group: 'Competitive', label: 'Time to !allow someone (seconds)', help: 'Someone not on a booking who joins its server is kicked after this long unless a captain types !allow for them in game, which adds them as a ringer.', type: { kind: 'int', min: 15, max: 300 } },
   { key: 'booking_allow_block_minutes', group: 'Competitive', label: 'Keep a kicked player out for (minutes)', help: 'After that kick, how long they cannot rejoin that booked server. A captain adding them to the booking on the site lets them back in at once. 0 means they can rejoin straight away.', type: { kind: 'int', min: 0, max: 240 } },
   { key: 'scrim_accept_campaigns_max', group: 'Competitive', label: 'Campaigns an accepter may add', help: 'How many campaigns of their own the accepting captain may add to a scrim post, on top of the poster\'s list. 0 means they can only take the poster\'s list as is.', type: { kind: 'int', min: 0, max: 4 } },
+  { key: 'scrim_late_cancel_hours', group: 'Competitive', label: 'Late cancel (hours before the start)', help: 'A side that cancels a booked scrim less than this long before the start gets a late cancel on its record, unless the other side or staff excuse it. 0 means never.', type: { kind: 'int', min: 0, max: 24 } },
+  { key: 'scrim_reliability_public', group: 'Competitive', label: 'Scrim record public', help: 'Off: a side\'s scrim record is shown only to staff and to the side itself. On: everyone sees a Reliable badge on posts and team pages.', type: { kind: 'choice', options: [{ value: 'off', label: 'Off' }, { value: 'on', label: 'On' }] } },
 ];
 
 const BY_KEY = new Map(SETTINGS_SCHEMA.map((d) => [d.key, d]));

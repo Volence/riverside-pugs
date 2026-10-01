@@ -294,6 +294,30 @@ describe('notices', () => {
     expect(dms.map((d) => d.to).sort()).toEqual(['d1', 'd5']);
     expect(dms[0].content).toContain('sick');
   });
+
+  it("a late cancel asks only the other side's people to excuse it", () => {
+    const id = book();
+    addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[5], role: 'ringer', now: new Date(now) });
+    respondPerson(db, { bookingId: id, steamid: P[5], accept: true, now: new Date(now) });
+    addPerson(db, { bookingId: id, by: P[1], side: 'b', steamid: P[6], role: 'ringer', now: new Date(now) });
+    respondPerson(db, { bookingId: id, steamid: P[6], accept: true, now: new Date(now) });
+    dms = [];
+    cancelBooking(db, { bookingId: id, by: P[0], reason: 'sick', now: new Date(START - 60 * MIN) });
+    runner.onCancelled(id, P[0], 'sick');
+    const late = 'This is a late cancel. If it is fine with you, excuse it on the booking page so it does not count against them.';
+    expect(dms.filter((d) => d.content.includes(late)).map((d) => d.to).sort()).toEqual(['d1', 'd6']);
+    expect(dms.filter((d) => !d.content.includes(late)).map((d) => d.to)).toEqual(['d5']);
+    expect(dms.every((d) => d.content.includes('sick'))).toBe(true);
+  });
+
+  it('an early cancel carries no late-cancel line', () => {
+    const id = book();
+    dms = [];
+    cancelBooking(db, { bookingId: id, by: P[0], now: new Date(START - 5 * 60 * MIN) });
+    runner.onCancelled(id, P[0], null);
+    expect(dms.map((d) => d.to)).toEqual(['d1']);
+    expect(dms[0].content).not.toContain('late cancel');
+  });
 });
 
 describe('tick resilience', () => {

@@ -53,6 +53,19 @@ export async function adminBookingRoutes(app: FastifyInstance, opts: { db: DB; r
     return { ok: true };
   });
 
+  /** Excuse a side's late cancel or no-show (plan 2 Ruling 2); answers the
+   *  refreshed booking view, as the player actions do. */
+  app.post('/api/admin/bookings/:id/excuse', async (req, reply) => {
+    const me = requireStaff(req, reply);
+    if (!me) return;
+    const id = idOf(req.params);
+    const b = (req.body ?? {}) as { side?: unknown; note?: unknown };
+    const r = B.excuseMark(db, { bookingId: id, by: me, staff: true, side: b.side, note: b.note });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'booking_excuse', id, { side: r.value.side, note: typeof b.note === 'string' ? b.note.trim().slice(0, 200) : null });
+    return B.bookingView(db, id, { steamid: me, staff: true });
+  });
+
   app.post('/api/admin/bookings/:id/extend', async (req, reply) => {
     const me = requireStaff(req, reply);
     if (!me) return;
