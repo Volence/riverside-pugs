@@ -111,21 +111,40 @@ export function adminOverview(db: DB, logAuth?: LogAuth) {
 }
 
 export type ActionResult = { ok: true } | { ok: false; status: number; error: string };
+export type AbortResult = { ok: true; bookingContinues?: true } | { ok: false; status: number; error: string };
+/** Tells a booked box to drop one of its games (BookingRunner.abortGame). */
+export type BookingGameAborter = (matchId: number, token: string) => Promise<void> | void;
 
 /** End a configuring or live match now: aborted, server freed through the
- *  releaser (which also tells the plugin), and what the live feed captured
+ *  releaser (which also tells the plugin; a booking game instead goes through
+ *  `abortBookingGame` and its box stays with the booking), and what the live feed captured
  *  frozen into the permanent tables so the match page can still show who was
  *  in and how far they got. Everyone on it is told, and goes back to the
  *  front of the queue if they may queue: staff pulling the plug is nobody's
  *  fault on the roster. `leaveOut` is who staff ticked to keep out: a ban
  *  keeps a player out only once it exists, and eight back at the front
  *  re-pop at once, before staff have filed it. */
-export function abortMatch(db: DB, releaser: ServerReleaser, matchId: number, leaveOut: string[] = []): ActionResult {
-  const m = db.prepare('SELECT state, server_id FROM matches WHERE id = ?').get(matchId) as
-    | { state: string; server_id: number | null } | undefined;
+export function abortMatch(
+  db: DB, releaser: ServerReleaser, matchId: number, leaveOut: string[] = [], abortBookingGame?: BookingGameAborter,
+): AbortResult {
+  const m = db.prepare('SELECT state, server_id, booking_id, token FROM matches WHERE id = ?').get(matchId) as
+    | { state: string; server_id: number | null; booking_id: number | null; token: string | null } | undefined;
   if (!m) return { ok: false, status: 404, error: 'no such match' };
   if (m.state !== 'configuring' && m.state !== 'live') return { ok: false, status: 409, error: `match is ${m.state}` };
   db.prepare("UPDATE matches SET state = 'aborted', abort_cause = 'admin', ended_at = datetime('now') WHERE id = ?").run(matchId);
+  if (m.booking_id !== null) {
+    // A game inside a booked block: the box stays with the booking (the
+    // releaser would refuse it anyway), so the plugin is told to drop the
+    // match directly and the booking carries on. Nobody is put in the PUG queue.
+    archiveAborted(db, matchId);
+    if (m.token !== null && abortBookingGame) {
+      void Promise.resolve(abortBookingGame(matchId, m.token)).catch((err) => {
+        console.warn(`[admin] booking game ${matchId}: telling the box to abort failed:`, err instanceof Error ? err.message : err);
+      });
+    }
+    noteMatchAborted(db, { matchId, cause: 'admin', requeue: false });
+    return { ok: true, bookingContinues: true };
+  }
   // Archive BEFORE releasing: the release tells the plugin to change level, and
   // a heartbeat naming the reset map must not land before the record is taken.
   archiveAborted(db, matchId);

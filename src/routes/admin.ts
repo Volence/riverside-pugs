@@ -7,7 +7,8 @@ import { queueActivity } from '../queueActivity.js';
 import type { ServerReleaser } from '../serverRelease.js';
 import { getServer, listServers, serversMissingDlc4, setEnabled, setHasDlc4, setRestartAfterMatch, type ServerRow } from '../serverPool.js';
 import { serverHasDlc4 } from '../dlc4.js';
-import { abortMatch, adminOverview, clearNoShowsOf, voidMatch } from '../admin/matches.js';
+import { abortMatch, adminOverview, clearNoShowsOf, voidMatch, type BookingGameAborter } from '../admin/matches.js';
+import { holdFor } from '../serverHolds.js';
 import { extendNoShow } from '../noShow.js';
 import { SETTINGS_SCHEMA, settingDef, validateSetting } from '../settingsSchema.js';
 import { getCampaignPool, getSetting, setSetting } from '../settings.js';
@@ -75,6 +76,9 @@ export interface AdminRouteOpts {
   /** config.adminSteamIds: who is let into a ticket that becomes restricted
    *  because the player it is about was just promoted. */
   adminSteamIds: string[];
+  /** Tells a booked box to drop an aborted booking game (BookingRunner.abortGame).
+   *  Absent in tests that do not exercise it. */
+  abortBookingGame?: BookingGameAborter;
 }
 
 /** Everything under /api/admin. Each route starts with requireAdmin, except
@@ -376,10 +380,11 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (!Array.isArray(leaveOut) || leaveOut.length > 8 || !leaveOut.every((x) => typeof x === 'string')) {
       return reply.code(400).send({ error: 'leaveOut must be a list of up to 8 steamids' });
     }
-    const r = abortMatch(db, releaser, id, leaveOut);
+    const r = abortMatch(db, releaser, id, leaveOut, opts.abortBookingGame);
     if (!r.ok) return reply.code(r.status).send({ error: r.error });
-    logAdmin(db, adminId, 'abort_match', id, { leftOut: leaveOut });
+    logAdmin(db, adminId, 'abort_match', id, { leftOut: leaveOut, booking: r.bookingContinues === true });
     broadcast('refresh');
+    if (r.bookingContinues) return { ok: true, message: 'This was a booking game: it is aborted and the booking continues on its server.' };
     return { ok: true };
   });
 
@@ -511,6 +516,8 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (!adminId) return reply;
     const id = Number((req.params as { id: string }).id);
     if (!getServer(db, id)) return reply.code(404).send({ error: 'no such server' });
+    // The releaser refuses a booked box; say so rather than answer ok.
+    if (holdFor(db, id)?.kind === 'booking') return reply.code(409).send({ error: 'held by a booking; end the booking instead' });
     releaser.release(id);
     logAdmin(db, adminId, 'server_idle', id);
     broadcast('refresh');
