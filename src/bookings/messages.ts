@@ -3,16 +3,21 @@ import type { MessagePayload } from '../discord/transport.js';
 import { escapeName } from '../identity.js';
 import { getPlayer } from '../players.js';
 import { getServer } from '../serverPool.js';
-import type { NotifyType } from '../notify/notify.js';
 import { getBooking, sideName, sidesOf } from './bookings.js';
 
 /** "2026-10-02 20:00 UTC". DMs have no viewer time zone; the site shows local time. */
 export const whenUtc = (iso: string): string => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 
+/** The six booking notice types this module knows how to word. Narrower than
+ *  the full NotifyType (which also carries the scrim board's types, worded
+ *  elsewhere) so the switch below stays exhaustive as NotifyType grows. */
+export type BookingNotifyType =
+  'booking_invite' | 'booking_confirmed' | 'booking_starting' | 'booking_ready' | 'booking_cancelled' | 'booking_no_show';
+
 /** The DM for one booking notification, or null for a booking that is gone.
  *  Every player-chosen name goes through escapeName, as in teamButtons.ts. */
 export function bookingMessage(
-  db: DB, publicUrl: string, bookingId: number, type: NotifyType,
+  db: DB, publicUrl: string, bookingId: number, type: BookingNotifyType,
   extra: { minutes?: number; reason?: string | null; addedBy?: string } = {},
 ): MessagePayload | null {
   const b = getBooking(db, bookingId);

@@ -108,6 +108,10 @@ const PLAIN: [table: string, column: string][] = [
   // Who invited a caster to a booking, per side.
   ['booking_casters', 'invited_by_a'],
   ['booking_casters', 'invited_by_b'],
+  // Scrim board posts and accepts (src/scrims/scrims.ts) follow their
+  // captain, same as a booking side.
+  ['scrim_posts', 'captain_steamid'],
+  ['scrim_accepts', 'captain_steamid'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`
