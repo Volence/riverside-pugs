@@ -47,6 +47,9 @@ export interface BookingRow {
   setup_attempts: number; last_human_at: string | null; reminded_60_at: string | null; reminded_15_at: string | null;
   warned_minutes: number | null; ending_at: string | null; ended_at: string | null; end_reason: string | null;
   cancelled_by: string | null; cancel_side: Side | null; cancel_reason: string | null;
+  /** The ruleset the booking was made under; null for one made before the
+   *  Rulesets editor. rules_json is the snapshot the booking plays by. */
+  ruleset_id: number | null;
   playlist_pos: number; next_campaign: string | null; next_at: string | null;
   /** The campaigns this booking may play (bookings by campaign): the
    *  playlist's length at creation, plus one per +1 campaign. */
@@ -203,15 +206,17 @@ export function parsePlaylist(db: DB, raw: unknown, max: number): string[] | nul
   }
   return out;
 }
-function pickRules(db: DB, raw: unknown): string | null {
+/** The ruleset a booking is made under: its id (kept on the booking so the
+ *  Rulesets desk can count it) and the scrim snapshot of its rules. */
+function pickRules(db: DB, raw: unknown): { id: number; json: string } | null {
   const row = (raw === undefined || raw === null
-    ? db.prepare("SELECT rules_json FROM rulesets WHERE name = 'Casual Scrim' AND archived_at IS NULL").get()
+    ? db.prepare("SELECT id, rules_json FROM rulesets WHERE name = 'Casual Scrim' AND archived_at IS NULL").get()
     : Number.isInteger(raw)
-      ? db.prepare('SELECT rules_json FROM rulesets WHERE id = ? AND archived_at IS NULL').get(raw)
-      : undefined) as { rules_json: string } | undefined;
+      ? db.prepare('SELECT id, rules_json FROM rulesets WHERE id = ? AND archived_at IS NULL').get(raw)
+      : undefined) as { id: number; rules_json: string } | undefined;
   if (!row) return null;
   try {
-    return JSON.stringify(rulesForKind('scrim', parseRules(row.rules_json)));
+    return { id: row.id, json: JSON.stringify(rulesForKind('scrim', parseRules(row.rules_json))) };
   } catch {
     return null;
   }
@@ -300,9 +305,9 @@ export function createBooking(db: DB, o: {
     const endMs = startMs + minutes * 60_000;
     if (capacityProblem(db, { region, startMs, endMs }) !== null) return fail('no_capacity');
     const id = Number(db.prepare(
-      `INSERT INTO bookings (purpose, region, starts_at, ends_at, password, tv_password, game_config, rules_json, playlist_json, games_allowed, created_by, created_at)
-       VALUES ('scrim', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(region, iso(startMs), iso(endMs), newLeasePassword(), newLeasePassword(), config, rules, JSON.stringify(playlist), playlist.length,
+      `INSERT INTO bookings (purpose, region, starts_at, ends_at, password, tv_password, game_config, rules_json, ruleset_id, playlist_json, games_allowed, created_by, created_at)
+       VALUES ('scrim', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(region, iso(startMs), iso(endMs), newLeasePassword(), newLeasePassword(), config, rules.json, rules.id, JSON.stringify(playlist), playlist.length,
       o.by, now.toISOString()).lastInsertRowid);
     const side = db.prepare('INSERT INTO booking_sides (booking_id, side, team_id, captain_steamid, confirmed_at) VALUES (?, ?, ?, ?, ?)');
     side.run(id, 'a', teamId, aCaptain, now.toISOString());

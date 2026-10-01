@@ -13,6 +13,11 @@ describe('rulesets', () => {
     }
   });
 
+  it('the templates are copies of nothing', () => {
+    const db = openDb(':memory:');
+    expect(db.prepare('SELECT DISTINCT based_on FROM rulesets').all()).toEqual([{ based_on: null }]);
+  });
+
   it('only the PUG template is rated', () => {
     expect(TEMPLATES.PUG.rated).toBe(true);
     expect(TEMPLATES['Standard Cup'].rated).toBe(false);
