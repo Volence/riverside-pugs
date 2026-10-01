@@ -709,4 +709,28 @@ describe('clearing one penalty', () => {
     fireEvent.click(within(item).getByRole('button', { name: 'Clear' }));
     await waitFor(() => expect(mockAdmin.clearPenalty).toHaveBeenCalledWith(P, 1));
   });
+
+  it('shows the pickup record and each current team\'s under a Scrims heading', async () => {
+    mockPeople.file.mockResolvedValue(file({
+      sections: {
+        ...file().sections,
+        scrims: {
+          pickup: { shown: 1, booked: 2, noShows: 1, lateCancels: 0, excused: 0 },
+          teams: [{ teamId: 3, slug: 'rats', name: 'Rats', tag: 'RR', record: { shown: 4, booked: 6, noShows: 1, lateCancels: 1, excused: 1 } }],
+        },
+      },
+    }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    const heading = await screen.findByRole('heading', { name: 'Scrims' });
+    const section = heading.closest('section') as HTMLElement;
+    expect(within(section).getByText('New')).toBeTruthy();
+    expect(within(section).getByText('Shown 4 of 6 · No-shows 1 · Late cancels 1')).toBeTruthy();
+    expect((within(section).getByRole('link', { name: '[RR] Rats' }) as HTMLAnchorElement).getAttribute('href')).toBe('/team/rats');
+  });
+
+  it('has no Scrims section for an older server that sends none', async () => {
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    await screen.findByRole('heading', { name: /griefer/ });
+    expect(screen.queryByRole('heading', { name: 'Scrims' })).toBeNull();
+  });
 });

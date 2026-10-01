@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
+import { LocationProvider } from 'preact-iso';
 
-const { mockBookings, mockAdmin } = vi.hoisted(() => ({
+const { mockBookings, mockAdmin, mockConfirm } = vi.hoisted(() => ({
   mockBookings: {
     get: vi.fn(), act: vi.fn(), cancel: vi.fn(), options: vi.fn(), next: vi.fn(), stay: vi.fn(),
-    casters: vi.fn(), inviteCaster: vi.fn(), withdrawCaster: vi.fn(),
+    casters: vi.fn(), inviteCaster: vi.fn(), withdrawCaster: vi.fn(), excuse: vi.fn(),
   },
-  mockAdmin: { cancelBooking: vi.fn(), extendBooking: vi.fn(), endBooking: vi.fn() },
+  mockAdmin: { cancelBooking: vi.fn(), extendBooking: vi.fn(), endBooking: vi.fn(), excuseBooking: vi.fn() },
+  mockConfirm: vi.fn(),
 }));
+vi.mock('../components/Confirm', () => ({ confirm: mockConfirm }));
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
   return { ...actual, bookingsApi: mockBookings, adminApi: { ...actual.adminApi, ...mockAdmin } };
@@ -35,6 +38,8 @@ afterEach(() => {
   cleanup();
   for (const f of Object.values(mockBookings)) f.mockReset();
   for (const f of Object.values(mockAdmin)) f.mockReset();
+  mockConfirm.mockReset();
+  history.replaceState(null, '', '/');
 });
 beforeEach(() => {
   mockBookings.get.mockResolvedValue(VIEW());
@@ -225,6 +230,97 @@ describe('Booking page', () => {
       expect(withdraws).toHaveLength(1);
       fireEvent.click(withdraws[0]);
       await waitFor(() => expect(mockBookings.withdrawCaster).toHaveBeenCalledWith(7, 'c1'));
+    });
+  });
+
+  describe('late cancels and the record (plan 2)', () => {
+    const SIDE_A = { side: 'a', name: "p0's group", team: null, captain: { steamid: 'x0', name: 'p0' }, confirmed: true, peakPresent: 0, noShow: false, people: [], lateCancel: false, excused: false, canExcuse: false };
+    const SIDE_B = { side: 'b', name: 'Mice', team: { id: 1, slug: 'mice', name: 'Mice', tag: 'MM', logoKey: null }, captain: { steamid: 'x1', name: 'p1' }, confirmed: true, peakPresent: 0, noShow: false, people: [], lateCancel: false, excused: false, canExcuse: false };
+    const cancelled = (a: object, b: object = {}, over: Record<string, unknown> = {}) => VIEW({
+      state: 'cancelled', ending: true, connect: null, server: null, cancel: { side: 'a', reason: null },
+      sides: [{ ...SIDE_A, ...a }, { ...SIDE_B, ...b }], viewer: { side: 'b', manages: ['b'], staff: false, invited: false }, ...over,
+    });
+
+    it('the other side sees the late cancel and excuses it with one tap', async () => {
+      mockBookings.get.mockResolvedValue(cancelled({ lateCancel: true, canExcuse: true }));
+      mockBookings.excuse.mockResolvedValue(cancelled({ lateCancel: true, excused: true }));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByText("Late cancel by p0's group")).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'All good, no hard feelings' }));
+      await waitFor(() => expect(mockBookings.excuse).toHaveBeenCalledWith(7));
+      expect(await screen.findByText('Excused')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'All good, no hard feelings' })).toBeNull();
+    });
+
+    it('no button when the viewer may not excuse it', async () => {
+      mockBookings.get.mockResolvedValue(cancelled({ lateCancel: true }, {}, { viewer: { side: 'a', manages: ['a'], staff: false, invited: false } }));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByText("Late cancel by p0's group")).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'All good, no hard feelings' })).toBeNull();
+    });
+
+    it('staff excuse each marked side with an optional note through the admin route', async () => {
+      const staffView = cancelled({ lateCancel: true }, {}, { viewer: { side: null, manages: [], staff: true, invited: false } });
+      mockBookings.get.mockResolvedValueOnce(staffView).mockResolvedValueOnce(cancelled({ lateCancel: true, excused: true }, {}, { viewer: { side: null, manages: [], staff: true, invited: false } }));
+      mockAdmin.excuseBooking.mockResolvedValue({ ok: true });
+      render(<Booking id="7" session={session} />);
+      const note = await screen.findByLabelText("Excuse note (p0's group)");
+      // Only side a has a mark, so only one Excuse control.
+      expect(screen.getAllByRole('button', { name: 'Excuse' })).toHaveLength(1);
+      fireEvent.input(note, { target: { value: 'server crashed' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Excuse' }));
+      await waitFor(() => expect(mockAdmin.excuseBooking).toHaveBeenCalledWith(7, 'a', 'server crashed'));
+      expect(await screen.findByText('Excused')).toBeTruthy();
+    });
+
+    it('staff also get Excuse on a no-show side', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({
+        state: 'no_show', connect: null, sides: [{ ...SIDE_A }, { ...SIDE_B, noShow: true }],
+        viewer: { side: null, manages: [], staff: true, invited: false },
+      }));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByLabelText('Excuse note (Mice)')).toBeTruthy();
+    });
+
+    it('shows a side\'s record line when the server sends one, "New" under 3 booked', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({
+        sides: [
+          { ...SIDE_A, record: { shown: 1, booked: 2, noShows: 1, lateCancels: 0, excused: 0 } },
+          { ...SIDE_B, record: { shown: 5, booked: 7, noShows: 1, lateCancels: 1, excused: 0 } },
+        ],
+      }));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByText('New')).toBeTruthy();
+      expect(screen.getByText('Shown 5 of 7 · No-shows 1 · Late cancels 1')).toBeTruthy();
+    });
+
+    const renderAt = (path: string) => {
+      history.replaceState(null, '', path);
+      return render(<LocationProvider><Booking id="7" session={session} /></LocationProvider>);
+    };
+
+    it('?cancel=1 opens the cancel confirm at once for a manager, and cancels on yes', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ state: 'scheduled', connect: null, server: null }));
+      mockBookings.cancel.mockResolvedValue(VIEW({ state: 'cancelled', ending: true, connect: null, server: null }));
+      mockConfirm.mockResolvedValue(true);
+      renderAt('/booking/7?cancel=1');
+      await waitFor(() => expect(mockConfirm).toHaveBeenCalledTimes(1));
+      expect(mockConfirm.mock.calls[0][0]).toMatchObject({ confirmLabel: 'Cancel booking', danger: true });
+      await waitFor(() => expect(mockBookings.cancel).toHaveBeenCalledWith(7, ''));
+    });
+
+    it('?cancel=1 does nothing on no, and is ignored for a viewer who may not cancel', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ state: 'scheduled', connect: null, server: null }));
+      mockConfirm.mockResolvedValue(false);
+      renderAt('/booking/7?cancel=1');
+      await waitFor(() => expect(mockConfirm).toHaveBeenCalledTimes(1));
+      expect(mockBookings.cancel).not.toHaveBeenCalled();
+      cleanup();
+      mockConfirm.mockReset();
+      mockBookings.get.mockResolvedValue(VIEW({ state: 'scheduled', connect: null, server: null, viewer: { side: 'a', manages: [], staff: false, invited: false } }));
+      renderAt('/booking/7?cancel=1');
+      await screen.findByText(/Booked\./);
+      expect(mockConfirm).not.toHaveBeenCalled();
     });
   });
 });

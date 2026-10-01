@@ -42,6 +42,7 @@ import { compareSides, metricDetail } from '../metrics/compare/compare.js';
 import { memo, parseSideParams } from '../metrics/compare/cache.js';
 import { METRICS } from '../metrics/registry.js';
 import { SUB_PHASES, type Phase } from '../metrics/types.js';
+import { scrimRecordOf } from '../scrims/reliability.js';
 
 export interface AdminRouteOpts {
   db: DB;
@@ -109,7 +110,8 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (!adminId) return reply;
     const detail = playerDetail(db, (req.params as { steamid: string }).steamid, adminId);
     if (!detail) return reply.code(404).send({ error: 'no such player' });
-    return detail;
+    // Plan 2: their scrim record as a pickup captain and each current team's.
+    return { ...detail, scrimRecord: scrimRecordOf(db, detail.steamid) };
   });
 
   /** Shared preamble for per-player mutations: admin, then the target exists. */

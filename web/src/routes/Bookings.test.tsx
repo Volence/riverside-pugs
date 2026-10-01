@@ -51,6 +51,23 @@ describe('Bookings page', () => {
     await waitFor(() => expect(mockBookings.setPref).toHaveBeenCalledWith('booking_ready', false));
   });
 
+  it('a captain with pickup bookings sees their own pickup record; "New" under 3 booked', async () => {
+    mockBookings.mine.mockResolvedValue({ ...MINE, record: { shown: 1, booked: 2, noShows: 0, lateCancels: 0, excused: 0 } });
+    render(<Bookings session={session} />);
+    expect(await screen.findByText('Your pickup record')).toBeTruthy();
+    expect(screen.getByText('New')).toBeTruthy();
+    cleanup();
+    mockBookings.mine.mockResolvedValue({ ...MINE, record: { shown: 4, booked: 5, noShows: 1, lateCancels: 0, excused: 0 } });
+    render(<Bookings session={session} />);
+    expect(await screen.findByText('Shown 4 of 5 · No-shows 1')).toBeTruthy();
+  });
+
+  it('no pickup record section without a record', async () => {
+    render(<Bookings session={session} />);
+    await screen.findByRole('button', { name: 'Confirm' });
+    expect(screen.queryByText('Your pickup record')).toBeNull();
+  });
+
   it('a closed switch says so', async () => {
     const { ApiError } = await import('../api');
     mockBookings.mine.mockRejectedValue(new ApiError(404, 'not found'));

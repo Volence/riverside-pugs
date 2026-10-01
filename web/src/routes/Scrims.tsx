@@ -9,6 +9,7 @@ import type { Session } from '../hooks/useLiveState';
 import { fitWarning, localLabel, toUtcIso } from '../bookingTime';
 import { campaignName } from '../format';
 import { TeamBadge } from './Teams';
+import { reliableBadge } from '../components/ScrimRecord';
 
 /** The board's SR range select (spec part 4): open, or one of a few common
  *  widths. The server accepts any integer 50..1000 (scrim_sr_range), but the
@@ -179,6 +180,7 @@ function BoardRow({
         </span>
         <span class="teamroster__meta">{post.campaigns.map((c) => campaignName(c)).join(', ')}</span>
         {post.note && <span class="teamroster__meta">{post.note}</span>}
+        {post.record && <span class="teamchip scrimbadge">{reliableBadge(post.record)}</span>}
       </div>
       {post.mine
         ? <span class="teamchip teamchip--captain">Your post</span>

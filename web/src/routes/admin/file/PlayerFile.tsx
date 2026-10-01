@@ -12,6 +12,7 @@ import { ConductSection } from './ConductSection';
 import { NotesSection } from './NotesSection';
 import { Timeline } from './Timeline';
 import { EvidenceDetail } from './EvidenceDetail';
+import { RecordLine, recordText } from '../../../components/ScrimRecord';
 
 /**
  * Everything known about one player, at one URL.
@@ -73,6 +74,20 @@ export function PlayerFile({ steamid, me }: { steamid: string; me: string }) {
       </Panel>
 
       <NotesSection d={d} busy={busy} run={run} can={can} />
+
+      {d.sections.scrims && (
+        <Panel class="file-section">
+          <h3>Scrims</h3>
+          <RecordLine record={d.sections.scrims.pickup} label="As a pickup captain" />
+          {d.sections.scrims.teams.map((t) => (
+            <p key={t.teamId} class="scrimrecord">
+              <a href={`/team/${t.slug}`}>[{t.tag}] {t.name}</a>
+              <span class="muted">: </span>
+              <span>{recordText(t.record)}</span>
+            </p>
+          ))}
+        </Panel>
+      )}
 
       <Panel class="file-section">
         <h3>Recent matches</h3>

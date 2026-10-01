@@ -1,6 +1,6 @@
 import type { DB } from '../db.js';
 import { getPlayer } from '../players.js';
-import { settingNumber } from '../settings.js';
+import { getSetting, settingNumber } from '../settings.js';
 import { findSlurs } from '../slurs.js';
 import { activeMembers, getTeam, myTeams, roleOf } from '../teams/teams.js';
 import {
@@ -8,6 +8,7 @@ import {
 } from '../bookings/bookings.js';
 import { allowance, bookingLimits, capacityProblem, iso, upcomingCount, type Party } from '../bookings/rules.js';
 import { nearestFreeSlot, proposedPlaylist, sideSr, srFits, type ScrimSide } from './rules.js';
+import { reliability, type Reliability } from './reliability.js';
 
 /**
  * Every rule about the scrim board (spec part 4, sections 1-2; scrim board
@@ -461,6 +462,9 @@ export interface BoardPost {
   /** The viewer's side's own pending acceptance of this post, if any. */
   myAcceptId: number | null;
   accepts: BoardAccept[] | null;
+  /** The posting side's scrim record (plan 2), only while
+   *  scrim_reliability_public is on; never there otherwise, staff included. */
+  record?: Reliability;
 }
 
 function boardSide(db: DB, s: SideRef): BoardSide {
@@ -491,6 +495,7 @@ export function board(
   const captained = teams.find((t) => t.role === 'captain');
   const viewerSr = me && opts.fitsOnly ? sideSr(db, captained ? { teamId: captained.id } : { captain: me }) : null;
 
+  const showRecord = getSetting(db, 'scrim_reliability_public') === 'on';
   const rows = db.prepare("SELECT * FROM scrim_posts WHERE status IN ('open','pending') AND starts_at > ? ORDER BY starts_at, id")
     .all(now.toISOString()) as PostRow[];
   const out: BoardPost[] = [];
@@ -519,6 +524,7 @@ export function board(
           };
         })
         : null,
+      ...(showRecord ? { record: reliability(db, scrimSide(p), now.getTime()) } : {}),
     });
   }
   return out;

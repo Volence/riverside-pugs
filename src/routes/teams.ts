@@ -9,6 +9,7 @@ import * as T from '../teams/teams.js';
 import { checkLogo, LOGO_MAX_BYTES } from '../community/validate.js';
 import { teamScrims } from '../bookings/games.js';
 import { seesBooking } from '../bookings/bookings.js';
+import { canSeeReliability, reliability, type Reliability } from '../scrims/reliability.js';
 import type { CommunityStore } from '../community/store.js';
 import type { DmFn } from '../signonDropNotify.js';
 import { teamInviteDm } from '../discord/teamButtons.js';
@@ -22,6 +23,9 @@ export interface TeamView {
   captain: string; members: TeamMemberView[]; former: { steamid: string; name: string; leftAt: string }[];
   viewer: { role: T.TeamRole | null; staff: boolean };
   manage: { invites: { id: number; steamid: string; name: string; createdAt: string }[]; joinLinkToken: string | null } | null;
+  /** The team's scrim record (plan 2): only for its members and staff, or
+   *  anyone once scrim_reliability_public is on. Omitted otherwise. */
+  record?: Reliability;
 }
 
 export interface TeamRoutesOpts {
@@ -184,6 +188,7 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
             joinLinkToken: staff || role === 'captain' ? t.join_link_token : null,
           }
         : null,
+      ...(canSeeReliability(db, { teamId: t.id }, v.viewer) ? { record: reliability(db, { teamId: t.id }) } : {}),
     };
     return view;
   });
