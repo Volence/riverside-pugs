@@ -20,6 +20,7 @@ import {
   SERVERDATA_EXECCOMMAND, SERVERDATA_RESPONSE_VALUE,
 } from '../src/rconPacket.js';
 import { pugReply } from './helpers.js';
+import { subscribeAdminEvents } from '../src/adminFeed.js';
 
 const P = Array.from({ length: 10 }, (_, i) => `765611990000009${String(i).padStart(2, '0')}`);
 const START = Date.parse('2026-10-02T20:00:00.000Z');
@@ -71,7 +72,7 @@ beforeEach(() => {
 
 /** A confirmed booking with three accepted people a side (a: P0 P2 P3, b: P1
  *  P4 P5), held and set up on server 3 (state ready). */
-function readyBooking(serverId = 3): number {
+function readyBooking(serverId = 3, stage: 'setup' | 'ready' = 'ready'): number {
   const created = new Date(START - 2 * 24 * 60 * MIN);
   const r = createBooking(db, {
     by: P[0], opponent: { steamid: P[1] }, startsAt: new Date(START).toISOString(), minutes: 120,
@@ -88,7 +89,7 @@ function readyBooking(serverId = 3): number {
   const at = new Date(START - 15 * MIN);
   if (!holdBox(db, id, serverId, at)) throw new Error('hold failed');
   markSetup(db, id, at);
-  if (!markReady(db, id, at)) throw new Error('ready failed');
+  if (stage === 'ready' && !markReady(db, id, at)) throw new Error('ready failed');
   return id;
 }
 
@@ -178,6 +179,53 @@ describe('adopting a game started in game', () => {
     const id = readyBooking();
     await burst(3, SIDE_B, SIDE_A);
     expect(row()).toMatchObject({ booking_id: id, booking_side_a: 'b' });
+  });
+
+  describe('on a box a booking holds while the booking is not running', () => {
+    let problems: string[];
+    let unsub: () => void;
+    beforeEach(() => {
+      problems = [];
+      unsub = subscribeAdminEvents((e) => { if (e.kind === 'problem') problems.push(e.text); });
+    });
+    afterEach(() => unsub());
+
+    async function refusedBurst() {
+      const s = adopter(3);
+      s.handle({ kind: 'match_create', token: TOKEN, map: MAP, players: 6 } as LogEvent, 'src');
+      for (const id of SIDE_A) s.handle({ kind: 'match_roster', token: TOKEN, steamid: id, team: 'a', name: id, joinedMap: 0 } as LogEvent, 'src');
+      for (const id of SIDE_B) s.handle({ kind: 'match_roster', token: TOKEN, steamid: id, team: 'b', name: id, joinedMap: 0 } as LogEvent, 'src');
+      s.handle({ kind: 'match_create_end', token: TOKEN, players: 6 } as LogEvent, 'src');
+      // setMatchId is fire and forget; give a wrongly adopted match the same
+      // chance to report itself that the adopting tests wait for.
+      await new Promise((r) => setTimeout(r, 10));
+    }
+
+    function expectRefused() {
+      expect(db.prepare('SELECT COUNT(*) AS n FROM matches').get()).toEqual({ n: 0 });
+      expect(getServer(db, 3)!.status).toBe('idle');
+      expect(notified).toEqual([]);
+      expect(registered).toEqual([]);
+      expect(setIds).toEqual([]);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain('booked server whose booking is not running');
+    }
+
+    it('refuses a game while the booking is still being set up', async () => {
+      const id = readyBooking(3, 'setup');
+      expect(getBooking(db, id)!.state).toBe('setup');
+      await refusedBurst();
+      expectRefused();
+      expect(getBooking(db, id)!.state).toBe('setup');
+    });
+
+    it('refuses a game while the booking is ending', async () => {
+      const id = readyBooking();
+      db.prepare("UPDATE bookings SET ending_at = '2026-10-02T20:30:00.000Z' WHERE id = ?").run(id);
+      await refusedBurst();
+      expectRefused();
+      expect(getBooking(db, id)!.state).toBe('ready');
+    });
   });
 
   it('adopts a game on a box no booking holds exactly as before', async () => {
