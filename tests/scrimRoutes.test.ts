@@ -344,7 +344,11 @@ describe('repost (plan 2, Task 3)', () => {
 
   it('refuses a non-manager, a booking not from a post, and a non-integer id', async () => {
     const bookingId = await bookAndCancel(P[0]);
-    expect((await call('POST', `/api/scrims/repost/${bookingId}`, P[2])).statusCode).toBe(403);
+    // A stranger the booking is hidden from gets the same flat 404 as a
+    // booking that does not exist, so the route is no existence oracle.
+    const stranger = await call('POST', `/api/scrims/repost/${bookingId}`, P[2]);
+    expect(stranger.statusCode).toBe(404);
+    expect(stranger.json()).toEqual((await call('POST', '/api/scrims/repost/999999', P[2])).json());
     expect((await call('POST', '/api/scrims/repost/not-a-number', P[0])).statusCode).toBe(404);
 
     const plain = await call('POST', '/api/bookings', P[3], {
