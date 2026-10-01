@@ -23,6 +23,10 @@
  * sm_booking_cmd emits the same line without the captain check, for testing
  * and staff.
  *
+ * 1.1.1: the chat words match in any case (!NextMap), and a captain is told
+ * "Sent to the site" only when the box has its log secret; without one the
+ * site cannot verify the line, so the captain is pointed at the booking page.
+ *
  * Build: ./build-booking.sh
  */
 #pragma semicolon 1
@@ -30,7 +34,7 @@
 #include <sourcemod>
 #include "pug-logauth.inc"
 
-#define PLUGIN_VERSION "1.1.0"
+#define PLUGIN_VERSION "1.1.1"
 
 /** Longest arg= text on a PUGBOOK line, plus the null terminator. Matches
  *  the site parser's cap (Task 6). */
@@ -124,7 +128,7 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 	int idx = -1;
 	for (int i = 0; i < sizeof(g_sChatWords); i++)
 	{
-		if (strcmp(chatWord, g_sChatWords[i]) == 0) { idx = i; break; }
+		if (strcmp(chatWord, g_sChatWords[i], false) == 0) { idx = i; break; }
 	}
 	if (idx == -1) return Plugin_Continue;
 
@@ -143,7 +147,10 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 	else strcopy(rawArg, sizeof(rawArg), text[pos]);
 
 	EmitBookingCmd(id, g_sCmdWords[idx], rawArg);
-	PrintToChat(client, "[Booking] Sent to the site.");
+	// Without the log secret the site drops the line as unsigned: say so
+	// rather than claim it arrived.
+	if (HasLogSecret()) PrintToChat(client, "[Booking] Sent to the site.");
+	else PrintToChat(client, "[Booking] The site cannot hear this server right now; use the booking page.");
 	return Plugin_Continue;
 }
 
@@ -173,7 +180,7 @@ public Action Cmd_BookingCmd(int args)
 	int idx = -1;
 	for (int i = 0; i < sizeof(g_sCmdWords); i++)
 	{
-		if (strcmp(cmdWord, g_sCmdWords[i]) == 0) { idx = i; break; }
+		if (strcmp(cmdWord, g_sCmdWords[i], false) == 0) { idx = i; break; }
 	}
 	if (idx == -1)
 	{
@@ -188,6 +195,17 @@ public Action Cmd_BookingCmd(int args)
 	EmitBookingCmd(id, g_sCmdWords[idx], rawArg);
 	PrintToServer("PUGOK booking cmd=%s steamid=%s", g_sCmdWords[idx], id);
 	return Plugin_Handled;
+}
+
+/** Whether the site has pushed this box its log secret (sm_pug_log_secret,
+ *  from pug-logauth.inc): without it a PUGBOOK line is never accepted. */
+bool HasLogSecret()
+{
+	ConVar cv = FindConVar("sm_pug_log_secret");
+	if (cv == null) return false;
+	char secret[8];
+	cv.GetString(secret, sizeof(secret));
+	return secret[0] != '\0';
 }
 
 /** A SteamID64 is always exactly 17 decimal digits. Catches a typo or a
