@@ -12,6 +12,7 @@ import { activeCasters, inviteCaster, withdrawCaster } from '../bookings/casters
 import { bookingLimits, typicalCampaignMinutes, STEP_MINUTES } from '../bookings/rules.js';
 import { isNotifyType, prefsOf, setPref } from '../notify/notify.js';
 import type { BookingRunner } from '../bookings/runner.js';
+import { hasPickupBookings, reliability } from '../scrims/reliability.js';
 import { logAdmin } from '../admin/audit.js';
 
 export interface BookingRoutesOpts {
@@ -93,7 +94,12 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
   app.get('/api/bookings/mine', async (req, reply) => {
     const me = allowed(req, reply);
     if (!me) return;
-    return { ...B.myBookings(db, me), prefs: prefsOf(db, me) };
+    // Plan 2: the viewer's own pickup record, only once they have captained
+    // a pickup side. It is theirs, so no privacy gate applies.
+    return {
+      ...B.myBookings(db, me), prefs: prefsOf(db, me),
+      ...(hasPickupBookings(db, me) ? { record: reliability(db, { captain: me }) } : {}),
+    };
   });
 
   app.post('/api/bookings/prefs', async (req, reply) => {

@@ -123,6 +123,17 @@ describe('booking flow', () => {
   });
 });
 
+describe('the viewer\'s own pickup record (plan 2)', () => {
+  it('/api/bookings/mine carries the record only for a captain with a pickup booking', async () => {
+    expect((await call('GET', '/api/bookings/mine', P[0])).json().record).toBeUndefined();
+    await create();
+    expect((await call('GET', '/api/bookings/mine', P[0])).json().record).toEqual({ shown: 0, booked: 0, noShows: 0, lateCancels: 0, excused: 0 });
+    // Side b's pickup captain has a pickup booking side too.
+    expect((await call('GET', '/api/bookings/mine', P[1])).json().record).toBeDefined();
+    expect((await call('GET', '/api/bookings/mine', P[2])).json().record).toBeUndefined();
+  });
+});
+
 describe('staff', () => {
   it('lists bookings for staff only, and a staff cancel is audited and counts against nobody', async () => {
     const id = await create();

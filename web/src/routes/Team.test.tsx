@@ -194,6 +194,19 @@ describe('Team', () => {
     expect(await screen.findByText('vs Other Crew')).toBeTruthy();
   });
 
+  it('shows the team\'s record line in the Scrims panel for a member', async () => {
+    mockTeams.get.mockResolvedValue(view({ viewer: { role: 'member', staff: false }, record: { shown: 6, booked: 7, noShows: 1, lateCancels: 0, excused: 0 } }));
+    render(<Team slug="rats" session={session('2')} />);
+    expect(await screen.findByText('Shown 6 of 7 · No-shows 1')).toBeTruthy();
+    expect(screen.getByText('Shown 6 of 7 · No-shows 1').closest('section')?.textContent).toContain('Scrims');
+  });
+
+  it('a member\'s team under 3 booked reads "New"', async () => {
+    mockTeams.get.mockResolvedValue(view({ viewer: { role: 'member', staff: false }, record: { shown: 0, booked: 0, noShows: 0, lateCancels: 0, excused: 0 } }));
+    render(<Team slug="rats" session={session('2')} />);
+    expect(await screen.findByText('New')).toBeTruthy();
+  });
+
   it('never fetches or shows the Scrims panel for a non-member, non-staff viewer', async () => {
     mockTeams.get.mockResolvedValue(view());
     render(<Team slug="rats" session={session('9')} />);

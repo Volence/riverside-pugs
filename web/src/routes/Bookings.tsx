@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { ApiError, bookingsApi, teamsApi, type BookingOptions, type BookingSummary, type NotifyPref } from '../api';
+import { ApiError, bookingsApi, teamsApi, type BookingOptions, type BookingSummary, type NotifyPref, type ScrimReliability } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 import { fitWarning, localLabel, toUtcIso } from '../bookingTime';
+import { RecordLine } from '../components/ScrimRecord';
 
 const STATE_LABEL: Record<BookingSummary['state'], string> = {
   scheduled: 'Booked', held: 'Server taken', setup: 'Setting up', ready: 'Ready', active: 'Playing',
@@ -141,7 +142,7 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
 
 export function Bookings({ session }: { session: Session }) {
   const signedIn = session.kind === 'active';
-  const [mine, setMine] = useState<{ open: BookingSummary[]; recent: BookingSummary[]; prefs: NotifyPref[] } | null>(null);
+  const [mine, setMine] = useState<{ open: BookingSummary[]; recent: BookingSummary[]; prefs: NotifyPref[]; record?: ScrimReliability } | null>(null);
   const [options, setOptions] = useState<BookingOptions | null>(null);
   const [closed, setClosed] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -173,6 +174,13 @@ export function Bookings({ session }: { session: Session }) {
           ? <Empty>Nothing booked.</Empty>
           : <ul class="bookinglist">{mine.open.map((b) => <Row key={b.id} b={b} busy={busy} act={act} />)}</ul>}
       </Panel>
+      {mine?.record && (
+        <Panel>
+          <h3>Your pickup record</h3>
+          <p class="muted">Bookings you captained as a pickup group. Only you and staff see it.</p>
+          <RecordLine record={mine.record} />
+        </Panel>
+      )}
       {options && (
         <Panel>
           <h3>Book a server</h3>

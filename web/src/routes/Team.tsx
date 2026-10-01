@@ -6,6 +6,7 @@ import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 import { toLogoPng } from '../teamLogo';
 import { campaignName } from '../format';
+import { RecordLine } from '../components/ScrimRecord';
 
 const ROLE_LABEL = { captain: 'Captain', cocaptain: 'Co-captain', member: 'Member' } as const;
 /** Mirrors Bookings.tsx's STATE_LABEL; a scrim's state is a plain string
@@ -186,6 +187,7 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
       {scrims !== null && (
         <Panel>
           <h3>Scrims</h3>
+          {team.record && <RecordLine record={team.record} label="Record" />}
           {scrims.length === 0 ? <Empty>No scrims yet.</Empty> : (
             <ul class="bookinglist">
               {scrims.map((s) => (

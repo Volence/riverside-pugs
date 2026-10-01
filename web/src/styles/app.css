@@ -3336,6 +3336,13 @@ a.teamrow:hover .teamrow__name { color: var(--accent); }
 .scrimmine { display: flex; flex-direction: column; gap: var(--sp-2); }
 .scrimaccepts { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
 .scrimaccepts > li { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) 0 0; border-top: 1px solid var(--border); }
+
+/* Plan 2: the reliability record line, the board badge, and a side's late
+   cancel with its excuse controls. All wrap, so nothing overflows at 390 px. */
+.scrimrecord { margin: 0 0 var(--sp-2); font-size: var(--fs-dense); overflow-wrap: anywhere; }
+.scrimbadge { align-self: flex-start; max-width: 100%; white-space: normal; }
+.bookinglate, .bookingexcuse { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.bookingexcuse input { flex: 1 1 12rem; min-width: 0; }
 @media (max-width: 560px) {
   .scrimrow { align-items: flex-start; }
 }

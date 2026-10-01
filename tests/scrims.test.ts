@@ -492,6 +492,20 @@ describe('board', () => {
     expect(board(db, viewer(null), { now: at('2026-10-03T00:00:00.000Z') }).map((p) => p.id)).toEqual([late]);
   });
 
+  // Plan 2: the record is never on the board unless scrim_reliability_public
+  // is on, not even for the poster or staff.
+  it('a post carries the posting side\'s record only while scrim_reliability_public is on', () => {
+    const rats = team(P[0], 'Rats', 'RR');
+    post({ teamId: rats });
+    post({ by: P[5], startsAt: '2026-10-03T20:00:00.000Z' });
+    for (const v of [viewer(P[7]), viewer(P[0]), viewer(null), viewer(P[9], true)]) {
+      for (const p of board(db, v, { now: NOW })) expect(p).not.toHaveProperty('record');
+    }
+    setSetting(db, 'scrim_reliability_public', 'on');
+    const zero = { shown: 0, booked: 0, noShows: 0, lateCancels: 0, excused: 0 };
+    expect(board(db, viewer(null), { now: NOW }).map((p) => p.record)).toEqual([zero, zero]);
+  });
+
   it('shows the side, average SR, time, length, campaigns, note and acceptance count', () => {
     rate(P[0], 30); // 2000
     rate(P[2], 20); // 1000

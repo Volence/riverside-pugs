@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { adminApi, bookingsApi, teamsApi, type BookingOptions, type BookingRole, type BookingSide, type BookingView } from '../api';
 import { Empty, Panel } from '../components/bits';
@@ -6,6 +6,8 @@ import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 import { localLabel } from '../bookingTime';
 import { campaignName } from '../format';
+import { confirm } from '../components/Confirm';
+import { RecordLine } from '../components/ScrimRecord';
 
 const STATE_LINE: Record<BookingView['state'], string> = {
   scheduled: 'Booked. The server is taken and set up 15 minutes before the start.',
@@ -38,6 +40,22 @@ function AddPerson({ id, side, onDone }: { id: number; side: BookingSide; onDone
       <ul>{found.map((p) => <li key={p.steamid}><button class="btn btn--ghost" onClick={() => add(p.steamid)}>{p.name}</button></li>)}</ul>
       {error && <p class="error" role="alert">{error}</p>}
     </div>
+  );
+}
+
+/** Staff's excuse for one side's mark (plan 2): a late cancel or a no-show,
+ *  with an optional note. Excused marks count nowhere, not in the record and
+ *  not in the booking allowance. */
+function StaffExcuse({ v, side, busy, staffAct }: {
+  v: BookingView; side: BookingView['sides'][number]; busy: boolean; staffAct: (fn: () => Promise<unknown>) => void;
+}) {
+  const [note, setNote] = useState('');
+  return (
+    <p class="bookingexcuse">
+      <input aria-label={`Excuse note (${side.name})`} value={note} maxLength={200} placeholder="Note (optional, staff only)"
+        onInput={(e) => setNote((e.target as HTMLInputElement).value)} />
+      <button class="btn btn--ghost" disabled={busy} onClick={() => staffAct(() => adminApi.excuseBooking(v.id, side.side, note))}>Excuse</button>
+    </p>
   );
 }
 
@@ -91,7 +109,9 @@ function Casters({ v, mySide, open, busy, act }: {
 }
 
 export function Booking({ id, session }: { id: string; session: Session }) {
-  const { route } = useLocation();
+  const { route, query } = useLocation();
+  /** The reminder DM's Cancel link (`?cancel=1`) asks once per page load. */
+  const askedCancel = useRef(false);
   const [v, setV] = useState<BookingView | null>(null);
   const [missing, setMissing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -148,6 +168,26 @@ export function Booking({ id, session }: { id: string; session: Session }) {
     }
   };
 
+  // The reminder DM's Cancel link lands here with ?cancel=1 (plan 2 Ruling 3):
+  // open the cancel confirm at once, but only for a viewer who may cancel.
+  // Anyone else just sees the page.
+  useEffect(() => {
+    if (!v || askedCancel.current || query?.cancel !== '1') return;
+    askedCancel.current = true;
+    const open = !v.ending && ['scheduled', 'held', 'setup', 'ready', 'active'].includes(v.state);
+    const player = open && v.viewer.manages.some((s) => v.sides.find((side) => side.side === s)?.confirmed);
+    const staff = open && v.viewer.staff && !player;
+    if (!player && !staff) return;
+    (async () => {
+      const ok = await confirm({
+        title: 'Cancel this booking?', body: 'Both sides are told. A cancel close to the start counts as a late cancel on your side.',
+        confirmLabel: 'Cancel booking', cancelLabel: 'Keep it', danger: true,
+      });
+      if (!ok) return;
+      if (player) act(() => bookingsApi.cancel(v.id, '')); else staffAct(() => adminApi.cancelBooking(v.id, ''));
+    })();
+  }, [v, query?.cancel]);
+
   if (missing || session.kind !== 'active') return <main class="page page--profile bookingpage"><PageHeader title="Booking" /><Empty>No such booking.</Empty></main>;
   if (!v) return null;
   const open = !v.ending && ['scheduled', 'held', 'setup', 'ready', 'active'].includes(v.state);
@@ -202,6 +242,16 @@ export function Booking({ id, session }: { id: string; session: Session }) {
       {v.sides.map((s) => (
         <Panel key={s.side}>
           <h3>{s.name}{!s.confirmed ? ' (not confirmed yet)' : ''}{s.noShow ? ' · no-show' : ''}</h3>
+          {s.record && <RecordLine record={s.record} label="Record" />}
+          {s.lateCancel && (
+            <p class="bookinglate">
+              <span>Late cancel by {s.name}</span>
+              {s.excused ? <span class="teamchip">Excused</span>
+                : s.canExcuse && <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.excuse(v.id))}>All good, no hard feelings</button>}
+            </p>
+          )}
+          {s.noShow && s.excused && !s.lateCancel && <p class="bookinglate"><span class="teamchip">Excused</span></p>}
+          {v.viewer.staff && (s.lateCancel || s.noShow) && !s.excused && <StaffExcuse v={v} side={s} busy={busy} staffAct={staffAct} />}
           <ul class="bookingpeople">
             {s.people.map((p) => (
               <li key={p.steamid}>

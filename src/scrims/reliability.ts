@@ -2,7 +2,7 @@ import type { DB } from '../db.js';
 import type { BookingRow } from '../bookings/bookings.js';
 import { getPlayer } from '../players.js';
 import { getSetting } from '../settings.js';
-import { roleOf } from '../teams/teams.js';
+import { myTeams, roleOf } from '../teams/teams.js';
 import { isLateCancel, iso, partyWhere, SHOWN_MIN, type Party } from '../bookings/rules.js';
 
 /**
@@ -55,4 +55,24 @@ export function canSeeReliability(db: DB, party: Party, viewer: string | null): 
   const p = getPlayer(db, viewer);
   if (p && (p.is_admin === 1 || p.is_mod === 1)) return true;
   return 'teamId' in party ? roleOf(db, party.teamId, viewer) !== null : party.captain === viewer;
+}
+
+/** A player's scrim records for the staff People desk: theirs as a pickup
+ *  captain, and each current team's. Staff only; never sent to a player. */
+export interface ScrimRecord {
+  pickup: Reliability;
+  teams: { teamId: number; slug: string; name: string; tag: string; record: Reliability }[];
+}
+
+export function scrimRecordOf(db: DB, steamid: string, nowMs: number = Date.now()): ScrimRecord {
+  return {
+    pickup: reliability(db, { captain: steamid }, nowMs),
+    teams: myTeams(db, steamid).map((t) => ({ teamId: t.id, slug: t.slug, name: t.name, tag: t.tag, record: reliability(db, { teamId: t.id }, nowMs) })),
+  };
+}
+
+/** Whether this player has ever captained a pickup side on a booking, so
+ *  their own Bookings page has a pickup record worth showing. */
+export function hasPickupBookings(db: DB, steamid: string): boolean {
+  return db.prepare('SELECT 1 FROM booking_sides WHERE team_id IS NULL AND captain_steamid = ? LIMIT 1').get(steamid) !== undefined;
 }

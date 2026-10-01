@@ -781,6 +781,8 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
   /** What Steam says about the account. Null until Steam has been asked, and
    *  for good on an install with no api key. Context, never a verdict. */
   steamAccount?: SteamAccount | null;
+  /** Scrim records (plan 2): as a pickup captain and each current team's. */
+  scrimRecord?: ScrimRecord;
 }
 
 export interface SteamAccount {
@@ -1480,6 +1482,8 @@ export interface PlayerFileData {
     matches: AdminPlayerDetail['matches'];
     /** Optional only for a browser holding new JS against an older server. */
     conduct?: ConductSection;
+    /** Scrim records (plan 2). Optional only for an older server. */
+    scrims?: ScrimRecord;
     tickets: TicketSummary[];
     notes: AdminPlayerDetail['notes'];
     evidence: {
@@ -1665,6 +1669,9 @@ export interface TeamView {
   captain: string; members: TeamMemberView[]; former: { steamid: string; name: string; leftAt: string }[];
   viewer: { role: TeamRole | null; staff: boolean };
   manage: { invites: { id: number; steamid: string; name: string; createdAt: string }[]; joinLinkToken: string | null } | null;
+  /** The team's scrim record: members and staff only, unless the record is
+   *  public. Absent for everyone else. */
+  record?: ScrimReliability;
 }
 
 export const logoUrl = (key: string): string => `/api/teams/logos/${key}.png`;
@@ -1721,10 +1728,24 @@ export interface BookingSummary {
   mySide: BookingSide | null; needs: 'confirm' | 'accept' | null;
 }
 export interface NotifyPref { type: string; label: string; enabled: boolean }
+/** Mirrors src/scrims/reliability.ts's Reliability (plan 2 Ruling 1): shown
+ *  of booked, the marks, and excused marks counted in neither. */
+export interface ScrimReliability { shown: number; booked: number; noShows: number; lateCancels: number; excused: number }
+/** Staff only: a player's pickup record and each current team's. */
+export interface ScrimRecord {
+  pickup: ScrimReliability;
+  teams: { teamId: number; slug: string; name: string; tag: string; record: ScrimReliability }[];
+}
 export interface BookingPerson { steamid: string; name: string; avatar: string | null; role: BookingRole; status: 'invited' | 'accepted' }
 export interface BookingSideView {
   side: BookingSide; name: string; team: { id: number; slug: string; name: string; tag: string; logoKey: string | null } | null;
   captain: { steamid: string; name: string }; confirmed: boolean; peakPresent: number; noShow: boolean; people: BookingPerson[];
+  /** This side cancelled late (plan 2), and whether its mark is excused. */
+  lateCancel: boolean; excused: boolean;
+  /** The viewer manages the other side and may excuse this late cancel. */
+  canExcuse: boolean;
+  /** The side's record, only for staff and the side itself (or anyone when public). */
+  record?: ScrimReliability;
 }
 export interface BookingGameView {
   matchId: number; campaign: string; state: string; scoreA: number; scoreB: number; sideA: BookingSide | null;
@@ -1749,12 +1770,15 @@ export interface NewBooking {
 
 export const bookingsApi = {
   options: (signal?: AbortSignal) => get<BookingOptions>('/api/bookings/options', signal),
-  mine: (signal?: AbortSignal) => get<{ open: BookingSummary[]; recent: BookingSummary[]; prefs: NotifyPref[] }>('/api/bookings/mine', signal),
+  /** `record` is the viewer's own pickup record, once they have captained a pickup side. */
+  mine: (signal?: AbortSignal) => get<{ open: BookingSummary[]; recent: BookingSummary[]; prefs: NotifyPref[]; record?: ScrimReliability }>('/api/bookings/mine', signal),
   get: (id: number | string, signal?: AbortSignal) => get<BookingView>(`/api/bookings/${enc(String(id))}`, signal),
   create: (b: NewBooking) => post<{ id: number }>('/api/bookings', b),
   act: (id: number, action: 'confirm' | 'decline' | 'accept' | 'leave' | 'extend' | 'no-show' | 'end') =>
     post<BookingView>(`/api/bookings/${id}/${action}`),
   cancel: (id: number, reason: string) => post<BookingView>(`/api/bookings/${id}/cancel`, { reason }),
+  /** The other side excuses a late cancel (plan 2): "All good, no hard feelings". */
+  excuse: (id: number) => post<BookingView>(`/api/bookings/${id}/excuse`),
   addPerson: (id: number, side: BookingSide, steamid: string, role: BookingRole) =>
     post<BookingView>(`/api/bookings/${id}/people`, { side, steamid, role }),
   removePerson: (id: number, steamid: string) => post<BookingView>(`/api/bookings/${id}/people/${enc(steamid)}/remove`),
@@ -1804,6 +1828,8 @@ export interface ScrimBoardPost {
   /** The viewer's side's own pending acceptance of this post, if any. */
   myAcceptId: number | null;
   accepts: ScrimBoardAccept[] | null;
+  /** The posting side's record, only while the record is public. */
+  record?: ScrimReliability;
 }
 
 export interface NewScrimPost {
@@ -1889,6 +1915,8 @@ export const adminApi = {
   cancelBooking: (id: number, reason: string) => post(`/api/admin/bookings/${id}/cancel`, { reason }),
   extendBooking: (id: number) => post(`/api/admin/bookings/${id}/extend`),
   endBooking: (id: number) => post(`/api/admin/bookings/${id}/end`),
+  /** Staff excuse a side's late cancel or no-show (plan 2), with an optional note. */
+  excuseBooking: (id: number, side: BookingSide, note: string) => post(`/api/admin/bookings/${id}/excuse`, { side, note }),
   audit: (signal?: AbortSignal) => get<{ actions: AuditEntry[] }>('/api/admin/audit', signal),
   renameSeason: (id: number, name: string) => post(`/api/admin/seasons/${id}/rename`, { name }),
   newSeason: (name: string) => post<{ ok: true; id: number }>('/api/admin/seasons/new', { name }),

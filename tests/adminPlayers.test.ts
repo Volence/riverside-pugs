@@ -7,6 +7,7 @@ import { getPlayer, linkDiscord } from '../src/players.js';
 import { liftExpiredBans, banMessage } from '../src/admin/players.js';
 import { recordSignonDrop, markEntered } from '../src/signonDrops.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
+import { createTeam } from '../src/teams/teams.js';
 
 const ADMIN = '76561198000000001';
 const P2 = '76561198000000002';
@@ -43,6 +44,19 @@ describe('admin guard', () => {
       expect((await app.inject({ method: method as 'GET', url, cookies: user, payload: method === 'POST' ? {} : undefined })).statusCode, url).toBe(403);
       expect((await app.inject({ method: method as 'GET', url, payload: method === 'POST' ? {} : undefined })).statusCode, url).toBe(401);
     }
+  });
+});
+
+describe('player detail scrim record (plan 2)', () => {
+  it('includes the pickup record and each current team\'s record', async () => {
+    const t = createTeam(db, { creator: P3, name: 'Rats', tag: 'RR', now: new Date('2026-09-01T00:00:00.000Z') });
+    if (!t.ok) throw new Error(t.error);
+    const d = (await get(`/api/admin/players/${P3}`, admin)).json();
+    const zero = { shown: 0, booked: 0, noShows: 0, lateCancels: 0, excused: 0 };
+    expect(d.scrimRecord).toEqual({
+      pickup: zero,
+      teams: [{ teamId: t.value.id, slug: t.value.slug, name: 'Rats', tag: 'RR', record: zero }],
+    });
   });
 });
 

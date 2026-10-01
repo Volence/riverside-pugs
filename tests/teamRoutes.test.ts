@@ -290,6 +290,27 @@ describe('scrims', () => {
     db.prepare("UPDATE settings SET value = 'off' WHERE key = 'competitive_enabled'").run();
     expect((await call('GET', `/api/teams/${slug}/scrims`, P[0])).statusCode).toBe(404);
   });
+
+  // Plan 2: the reliability record rides on the team view for its members and
+  // staff only, unless scrim_reliability_public is on.
+  it('the team view carries the record for members and staff, never for a stranger or a signed-out visitor while the setting is off', async () => {
+    const slug = await create(P[0], 'Rats', 'RR');
+    const teamId = getTeamBySlug(db, slug)!.id;
+    // Long past, so the record counts it whatever the real clock says.
+    const past = Date.parse('2026-01-10T20:00:00.000Z');
+    const id = booking(P[0], teamId, { steamid: P[4] }, past);
+    db.prepare("UPDATE booking_sides SET confirmed_at = ?, peak_present = 4 WHERE booking_id = ?").run(new Date(past - DAY).toISOString(), id);
+    db.prepare("UPDATE bookings SET state = 'ended', end_reason = 'time', ending_at = ?, ended_at = ? WHERE id = ?")
+      .run(new Date(past + DAY / 12).toISOString(), new Date(past + DAY / 12).toISOString(), id);
+    const record = async (who?: string) => (await call('GET', `/api/teams/${slug}`, who)).json().record;
+    expect(await record(P[0])).toEqual({ shown: 1, booked: 1, noShows: 0, lateCancels: 0, excused: 0 });
+    expect(await record(MOD)).toEqual({ shown: 1, booked: 1, noShows: 0, lateCancels: 0, excused: 0 });
+    expect(await record(P[3])).toBeUndefined();
+    expect(await record()).toBeUndefined();
+    db.prepare("UPDATE settings SET value = 'on' WHERE key = 'scrim_reliability_public'").run();
+    expect(await record(P[3])).toEqual({ shown: 1, booked: 1, noShows: 0, lateCancels: 0, excused: 0 });
+    expect(await record()).toEqual({ shown: 1, booked: 1, noShows: 0, lateCancels: 0, excused: 0 });
+  });
 });
 
 describe('leave and kick over HTTP', () => {

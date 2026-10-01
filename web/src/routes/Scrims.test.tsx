@@ -106,4 +106,20 @@ describe('Scrims page', () => {
     const other = container.querySelector('#scrim-6');
     expect(other?.className).not.toContain('scrimrow--highlight');
   });
+
+  it('a board row shows the reliability badge only when the server sends a record', async () => {
+    mockScrims.board.mockResolvedValue({ posts: [OPEN_POST, MY_POST] });
+    renderScrims();
+    await screen.findByText('Rats');
+    expect(screen.queryByText(/Reliable:/)).toBeNull();
+    expect(screen.queryByText('New')).toBeNull();
+    cleanup();
+    mockScrims.board.mockResolvedValue({ posts: [
+      { ...OPEN_POST, record: { shown: 5, booked: 6, noShows: 1, lateCancels: 0, excused: 0 } },
+      { ...MY_POST, mine: false, accepts: null, id: 8, record: { shown: 1, booked: 1, noShows: 0, lateCancels: 0, excused: 0 } },
+    ] });
+    renderScrims();
+    expect(await screen.findByText('Reliable: 5 of 6 shown')).toBeTruthy();
+    expect(screen.getByText('New')).toBeTruthy();
+  });
 });

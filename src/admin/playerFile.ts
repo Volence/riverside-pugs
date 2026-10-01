@@ -22,6 +22,7 @@ import { playerFileSummary, type PlayerFileSummary } from './playerFileSummary.j
 import { playerTimeline } from './playerTimeline.js';
 import type { TimelineItem } from './timeline/types.js';
 import { conductOf, type ConductSection } from './conduct.js';
+import { scrimRecordOf, type ScrimRecord } from '../scrims/reliability.js';
 
 export interface PlayerFile {
   steamid: string;
@@ -51,6 +52,8 @@ export interface PlayerFile {
     };
     matches: RecentMatchRow[];
     conduct: ConductSection;
+    /** Scrim records (plan 2): as a pickup captain and each current team's. */
+    scrims: ScrimRecord;
     tickets: ReturnType<typeof ticketsAbout>;
     notes: PlayerNoteRow[];
     evidence: ReturnType<typeof evidence>;
@@ -155,6 +158,7 @@ export function playerFile(
       },
       matches,
       conduct: conductOf(db, canonical),
+      scrims: scrimRecordOf(db, canonical, now.getTime()),
       tickets: ticketsAbout(db, canonical, viewer.steamid),
       notes,
       evidence: ev,
