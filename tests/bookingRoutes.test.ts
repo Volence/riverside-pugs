@@ -81,7 +81,7 @@ describe('booking flow', () => {
     expect(r.campaigns.map((c: { slug: string }) => c.slug)).toEqual(['no_mercy', 'death_toll']);
     expect(r.campaigns[0].minutes).toBe(60);
     expect(r.limits).toEqual({ daysAhead: 14, playlistMax: 4 });
-    expect(r.estimate).toEqual({ perCampaign: { no_mercy: 60, death_toll: 60 }, base: 15, slack: 10, step: 30, min: 60, max: 180 });
+    expect(r.estimate).toEqual({ perCampaign: { no_mercy: 60, death_toll: 60 }, base: 15, slack: 10, step: 30, min: 60, max: 300 });
     expect(r.rulesets.map((x: { name: string }) => x.name)).toContain('Casual Scrim');
   });
 

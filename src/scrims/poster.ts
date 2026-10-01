@@ -49,6 +49,15 @@ function sideTitle(db: DB, s: SideRef): string {
   return escapeName(getPlayer(db, s.captain_steamid)?.name ?? 'Someone');
 }
 
+/** "2 campaigns, about 2 h 30" (bookings by campaign, Ruling 6): the card
+ *  shows what a post books, with its estimated slot, as the board does. */
+function lengthLabel(campaigns: number, minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  const slot = h === 0 ? `${m} min` : m === 0 ? `${h} h` : `${h} h ${m}`;
+  return `${campaigns} campaign${campaigns === 1 ? '' : 's'}, about ${slot}`;
+}
+
 const sideOf = (s: SideRef): ScrimSide => (s.team_id !== null ? { teamId: s.team_id } : { captain: s.captain_steamid });
 
 const hashOf = (p: MessagePayload) => createHash('sha256').update(JSON.stringify(p)).digest('hex').slice(0, 16);
@@ -70,7 +79,7 @@ function renderOpenCard(db: DB, p: PostRow, publicUrl: string): MessagePayload {
   const fields = [
     { name: 'Status', value: p.status === 'pending' ? 'An offer is under review' : 'Open' },
     { name: 'When', value: `<t:${unix}:F>` },
-    { name: 'Length', value: `${p.block_minutes} min` },
+    { name: 'Length', value: lengthLabel(campaigns.length, p.block_minutes) },
     { name: 'Campaigns', value: campaigns.length > 0 ? campaigns.join(', ') : 'Any' },
     { name: 'Average SR', value: `${sr} (${range})` },
     ...(note !== '' ? [{ name: 'Note', value: escapeName(note) }] : []),

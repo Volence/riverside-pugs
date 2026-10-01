@@ -1726,11 +1726,19 @@ export interface TeamScrim {
 export type BookingState = 'scheduled' | 'held' | 'setup' | 'ready' | 'active' | 'ended' | 'cancelled' | 'no_show';
 export type BookingSide = 'a' | 'b';
 export type BookingRole = 'player' | 'ringer' | 'spectator';
+/** The slot estimate's inputs, as both options routes send them
+ *  (src/bookings/rules.ts estimateOptions). */
+export interface SlotEstimate {
+  perCampaign: Record<string, number>; base: number; slack: number; step: number; min: number; max: number;
+}
 export interface BookingOptions {
   campaigns: { slug: string; name: string; minutes: number }[];
   rulesets: { id: number; name: string }[];
   gameConfigs: { key: string; label: string }[];
-  limits: { minMinutes: number; maxMinutes: number; daysAhead: number; playlistMax: number; stepMinutes: number; extendMinutes: number };
+  limits: { daysAhead: number; playlistMax: number };
+  /** The slot is estimated from the campaigns (bookings by campaign); these
+   *  are its inputs, for the live "About 2 h 30" line. */
+  estimate: SlotEstimate;
   myTeams: { id: number; slug: string; name: string; tag: string }[];
   teams: { id: number; slug: string; name: string; tag: string }[];
 }
@@ -1786,7 +1794,11 @@ export interface BookingView {
   /** The close has finished; ending stays true for ever after it. */
   ended: boolean;
   startsAt: string; endsAt: string;
-  extendedMinutes: number; extendMinutes: number; createdAt: string; playlist: { slug: string; name: string }[];
+  extendedMinutes: number; createdAt: string;
+  /** Bookings by campaign: how many campaigns the booking may play, how many
+   *  have finished, and the 5 minute closing deadline once all are played. */
+  gamesAllowed: number; gamesPlayed: number; closeAt: string | null;
+  playlist: { slug: string; name: string }[];
   rules: { noShowGraceMinutes: number } | null; gameConfig: { key: string; label: string };
   sides: BookingSideView[]; server: { name: string } | null; connect: { host: string; port: number; password: string } | null;
   cancel: { side: BookingSide | null; reason: string | null } | null; endReason: string | null; noShowFrom: string;
@@ -1806,7 +1818,7 @@ export interface BookingView {
 }
 export interface BookingCaster { steamid: string; name: string; a: boolean; b: boolean }
 export interface NewBooking {
-  teamId: number | null; opponent: { teamId: number } | { steamid: string }; startsAt: string; minutes: number;
+  teamId: number | null; opponent: { teamId: number } | { steamid: string }; startsAt: string;
   playlist: string[]; rulesetId?: number; gameConfig?: string;
 }
 
@@ -1819,6 +1831,9 @@ export const bookingsApi = {
   create: (b: NewBooking) => post<{ id: number }>('/api/bookings', b),
   act: (id: number, action: 'confirm' | 'decline' | 'accept' | 'leave' | 'extend' | 'no-show' | 'end') =>
     post<BookingView>(`/api/bookings/${id}/${action}`),
+  /** +1 campaign (the extend route): a named campaign is appended to the
+   *  playlist; none leaves the pick for later. */
+  addCampaign: (id: number, campaign?: string) => post<BookingView>(`/api/bookings/${id}/extend`, campaign ? { campaign } : {}),
   cancel: (id: number, reason: string) => post<BookingView>(`/api/bookings/${id}/cancel`, { reason }),
   /** The other side excuses a late cancel (plan 2): "All good, no hard feelings". */
   excuse: (id: number) => post<BookingView>(`/api/bookings/${id}/excuse`),
@@ -1843,9 +1858,9 @@ export const bookingsApi = {
 export interface ScrimOptions {
   campaigns: { slug: string; name: string; minutes: number }[];
   limits: {
-    minMinutes: number; maxMinutes: number; daysAhead: number; playlistMax: number; stepMinutes: number;
-    noteMax: number; acceptCampaignsMax: number;
+    daysAhead: number; playlistMax: number; noteMax: number; acceptCampaignsMax: number;
   };
+  estimate: SlotEstimate;
   myTeams: { id: number; slug: string; name: string; tag: string }[];
   teams: { id: number; slug: string; name: string; tag: string }[];
 }
@@ -1865,7 +1880,7 @@ export interface ScrimBoardAccept {
  *  posts" and the `?post=` highlight all read. */
 export interface ScrimBoardPost {
   id: number; status: 'open' | 'pending' | 'booked' | 'expired' | 'withdrawn'; side: ScrimSide; sr: number;
-  srRange: number | null; startsAt: string; minutes: number; campaigns: string[]; note: string; createdAt: string;
+  srRange: number | null; startsAt: string; minutes: number; campaigns: string[]; campaignCount: number; note: string; createdAt: string;
   challenge: { teamId: number; name: string } | null;
   acceptCount: number;
   /** Plan 2: whether this post's start falls inside the weekly scrim night
@@ -1881,7 +1896,7 @@ export interface ScrimBoardPost {
 }
 
 export interface NewScrimPost {
-  teamId: number | null; startsAt: string; minutes: number; campaigns: string[]; srRange: number | null;
+  teamId: number | null; startsAt: string; campaigns: string[]; srRange: number | null;
   note: string; targetTeamId?: number | null;
 }
 
@@ -1993,7 +2008,8 @@ export const adminApi = {
   syncServerAdmins: () => post<{ results: { serverId: number; server: string; ok: boolean; error?: string }[] }>('/api/admin/servers/admins-sync'),
   bookings: (signal?: AbortSignal) => get<{ bookings: AdminBookingRow[] }>('/api/admin/bookings', signal),
   cancelBooking: (id: number, reason: string) => post(`/api/admin/bookings/${id}/cancel`, { reason }),
-  extendBooking: (id: number) => post(`/api/admin/bookings/${id}/extend`),
+  /** +1 campaign, staff side: a named campaign is appended to the playlist. */
+  extendBooking: (id: number, campaign?: string) => post(`/api/admin/bookings/${id}/extend`, campaign ? { campaign } : {}),
   endBooking: (id: number) => post(`/api/admin/bookings/${id}/end`),
   /** Staff excuse a side's late cancel or no-show (plan 2), with an optional note. */
   excuseBooking: (id: number, side: BookingSide, note: string) => post(`/api/admin/bookings/${id}/excuse`, { side, note }),

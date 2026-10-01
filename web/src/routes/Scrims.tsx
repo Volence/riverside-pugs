@@ -7,15 +7,14 @@ import {
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
-import { fitWarning, localLabel, nightRangeLabel, toUtcIso } from '../bookingTime';
+import { TOO_LONG_TEXT, estimateLine, estimateSlot, localLabel, mergedPlaylist, nightRangeLabel, slotSummary, toUtcIso } from '../bookingTime';
 import { campaignName } from '../format';
 import { TeamBadge } from './Teams';
 import { reliableBadge } from '../components/ScrimRecord';
 
 /** The board's SR range select (spec part 4): open, or one of a few common
  *  widths. The server accepts any integer 50..1000 (scrim_sr_range), but the
- *  page only offers these, the same way the length select only offers
- *  step-aligned lengths rather than any minute count. */
+ *  page only offers these. */
 const SR_RANGES: readonly { value: string; label: string }[] = [
   { value: '', label: 'Open (any SR)' },
   { value: '100', label: '± 100' },
@@ -23,6 +22,10 @@ const SR_RANGES: readonly { value: string; label: string }[] = [
   { value: '300', label: '± 300' },
   { value: '500', label: '± 500' },
 ];
+
+/** The server's too_many_campaigns text (src/scrims/scrims.ts SCRIM_ERRORS):
+ *  an acceptance whose merged playlist would not fit one booking. */
+const TOO_MANY_CAMPAIGNS_TEXT = 'With your campaigns this scrim would be too long for one booked server. Add fewer.';
 
 const srRangeLabel = (range: number | null): string => range === null ? 'Open' : `± ${range}`;
 
@@ -57,21 +60,19 @@ function SideLabel({ side }: { side: ScrimBoardPost['side'] }) {
     );
 }
 
-/** "Post a scrim": side, start, length, campaigns, SR range, note and an
+/** "Post a scrim": side, start, campaigns (the block is estimated from
+ *  them), SR range, note and an
  *  optional direct challenge. Mirrors Bookings.tsx's BookForm. */
 function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: boolean; onSubmit: (b: NewScrimPost) => Promise<boolean> }) {
   const [teamId, setTeamId] = useState<number | null>(options.myTeams[0]?.id ?? null);
   const [when, setWhen] = useState('');
-  const [minutes, setMinutes] = useState(options.limits.minMinutes * 2 <= options.limits.maxMinutes ? options.limits.minMinutes * 2 : options.limits.minMinutes);
   const [campaigns, setCampaigns] = useState<string[]>([]);
   const [srRange, setSrRange] = useState('');
   const [note, setNote] = useState('');
   const [targetTeamId, setTargetTeamId] = useState('');
 
-  const lengths: number[] = [];
-  for (let m = options.limits.minMinutes; m <= options.limits.maxMinutes; m += options.limits.stepMinutes) lengths.push(m);
-  const playMinutes = campaigns.reduce((s, slug) => s + (options.campaigns.find((c) => c.slug === slug)?.minutes ?? 60), 0);
-  const warning = campaigns.length > 0 ? fitWarning(minutes, playMinutes) : null;
+  const estimate = estimateSlot(options.estimate, campaigns);
+  const tooLong = estimate > options.estimate.max;
   const toggle = (slug: string) => setCampaigns((p) => p.includes(slug) ? p.filter((s) => s !== slug) : p.length < options.limits.playlistMax ? [...p, slug] : p);
 
   const submit = async (ev: Event) => {
@@ -79,7 +80,7 @@ function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: bo
     const startsAt = toUtcIso(when);
     if (!startsAt) return;
     await onSubmit({
-      teamId, startsAt, minutes, campaigns, srRange: srRange === '' ? null : Number(srRange), note,
+      teamId, startsAt, campaigns, srRange: srRange === '' ? null : Number(srRange), note,
       targetTeamId: targetTeamId === '' ? undefined : Number(targetTeamId),
     });
   };
@@ -93,11 +94,6 @@ function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: bo
         </select>
       </label>
       <label class="teamfield">Start (your time)<input aria-label="Start" type="datetime-local" value={when} onInput={(e) => setWhen((e.target as HTMLInputElement).value)} /></label>
-      <label class="teamfield">Length
-        <select aria-label="Length" value={String(minutes)} onChange={(e) => setMinutes(Number((e.target as HTMLSelectElement).value))}>
-          {lengths.map((m) => <option key={m} value={String(m)}>{m / 60} h</option>)}
-        </select>
-      </label>
       <label class="teamfield">SR range
         <select aria-label="SR range" value={srRange} onChange={(e) => setSrRange((e.target as HTMLSelectElement).value)}>
           {SR_RANGES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
@@ -112,7 +108,8 @@ function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: bo
             <span class="muted"> · about {c.minutes} min{campaigns.includes(c.slug) ? ` · #${campaigns.indexOf(c.slug) + 1}` : ''}</span>
           </label>
         ))}
-        {warning && <p class="warning">{warning}</p>}
+        {campaigns.length > 0 && <p class="muted">{estimateLine(estimate, campaigns.length)}</p>}
+        {tooLong && <p class="warning">{TOO_LONG_TEXT}</p>}
       </fieldset>
       <label class="teamfield">Note<input aria-label="Note" value={note} maxLength={options.limits.noteMax} onInput={(e) => setNote((e.target as HTMLInputElement).value)} /></label>
       {options.teams.length > 0 && (
@@ -123,7 +120,7 @@ function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: bo
           </select>
         </label>
       )}
-      <button class="btn" type="submit" disabled={busy || campaigns.length === 0 || !when}>Post the scrim</button>
+      <button class="btn" type="submit" disabled={busy || campaigns.length === 0 || !when || tooLong}>Post the scrim</button>
     </form>
   );
 }
@@ -142,6 +139,12 @@ function AcceptForm({
   const [campaigns, setCampaigns] = useState<string[]>([]);
   const max = options.limits.acceptCampaignsMax;
   const toggle = (slug: string) => setCampaigns((p) => p.includes(slug) ? p.filter((s) => s !== slug) : p.length < max ? [...p, slug] : p);
+  // The playlist this acceptance would propose, merged as the server merges
+  // it, and its slot: one too long for a single booking is refused there
+  // (too_many_campaigns), so it is not sent.
+  const merged = mergedPlaylist(post.campaigns, campaigns, options.limits.playlistMax);
+  const estimate = estimateSlot(options.estimate, merged);
+  const tooLong = estimate > options.estimate.max;
 
   return (
     <form
@@ -165,8 +168,10 @@ function AcceptForm({
           ))}
         </fieldset>
       )}
+      <p class="muted">{estimateLine(estimate, merged.length)}</p>
+      {tooLong && <p class="warning">{TOO_MANY_CAMPAIGNS_TEXT}</p>}
       <p class="scrimaccept__actions">
-        <button class="btn btn--sm" type="submit" disabled={busy}>Send acceptance</button>
+        <button class="btn btn--sm" type="submit" disabled={busy || tooLong}>Send acceptance</button>
         <button class="btn btn--ghost btn--sm" type="button" disabled={busy} onClick={onCancel}>Cancel</button>
       </p>
     </form>
@@ -188,7 +193,7 @@ function BoardRow({
       <div class="scrimrow__main">
         <SideLabel side={post.side} />
         <span class="teamroster__meta">
-          {localLabel(post.startsAt)} · {post.minutes / 60} h · SR {post.sr} ({srRangeLabel(post.srRange)})
+          {localLabel(post.startsAt)} · {slotSummary(post.campaignCount, post.minutes)} · SR {post.sr} ({srRangeLabel(post.srRange)})
           {post.challenge && ' · direct challenge'}
         </span>
         <span class="teamroster__meta">{post.campaigns.map((c) => campaignName(c)).join(', ')}</span>
@@ -226,7 +231,7 @@ function MyPostPanel({
       <div class="scrimrow__main">
         <SideLabel side={post.side} />
         <span class="teamroster__meta">
-          {localLabel(post.startsAt)} · {post.minutes / 60} h · SR {post.sr} ({srRangeLabel(post.srRange)})
+          {localLabel(post.startsAt)} · {slotSummary(post.campaignCount, post.minutes)} · SR {post.sr} ({srRangeLabel(post.srRange)})
           {post.challenge && ` · challenged ${post.challenge.name}`}
         </span>
         <span class="teamroster__meta">{post.campaigns.map((c) => campaignName(c)).join(', ')}</span>
@@ -239,9 +244,9 @@ function MyPostPanel({
               <SideLabel side={a.side} />
               <span class={`teamchip${a.fits ? ' teamchip--captain' : ''}`}>SR {a.sr} · {a.fits ? 'fits' : 'outside your range'}</span>
               <span class="teamroster__meta">
-                Proposed: {a.proposed.playlist.map((c) => campaignName(c)).join(', ')} ({a.proposed.minutes} min)
+                Proposed: {a.proposed.playlist.map((c) => campaignName(c)).join(', ')} ({slotSummary(a.proposed.playlist.length, a.proposed.minutes)})
               </span>
-              {!a.proposed.fits && <p class="warning">{fitWarning(post.minutes, a.proposed.minutes)}</p>}
+              {!a.proposed.fits && <p class="warning">{TOO_LONG_TEXT}</p>}
               <span class="teamconfirm">
                 <button class="btn btn--sm" disabled={busy} onClick={() => onConfirm(a.id)}>Confirm</button>
                 <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => onDecline(a.id)}>Decline</button>

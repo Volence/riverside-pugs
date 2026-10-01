@@ -23,13 +23,13 @@ afterEach(cleanup);
 beforeEach(() => { for (const fn of [...Object.values(mockAdmin), mockConfirm]) fn.mockReset(); });
 
 describe('BookingsPanel', () => {
-  it('lists bookings with their server and turnout, with Cancel, Extend and End', async () => {
+  it('lists bookings with their server and turnout, with Cancel, +1 campaign and End', async () => {
     mockAdmin.bookings.mockResolvedValue({ bookings: [ROW] });
     render(<BookingsPanel nudge={0} />);
     expect(await screen.findByText("Rats vs p1's group")).toBeTruthy();
     expect(screen.getByText('Riverside #3')).toBeTruthy();
     expect(screen.getByText('4 / 3')).toBeTruthy();
-    for (const name of ['Cancel', 'Extend', 'End']) expect(screen.getByRole('button', { name })).toBeTruthy();
+    for (const name of ['Cancel', '+1 campaign', 'End']) expect(screen.getByRole('button', { name })).toBeTruthy();
   });
 
   it('Cancel asks first, then cancels', async () => {

@@ -97,6 +97,8 @@ describe('creating', () => {
 
   it('refuses too_long when the campaigns need more than the longest booking', () => {
     const three = { playlist: ['no_mercy', 'death_toll', 'dead_air'] };
+    // 180, the longest booking production stores (the default is 300).
+    setSetting(db, 'booking_max_minutes', '180');
     expect(createBooking(db, base(three) as Parameters<typeof createBooking>[1])).toEqual({ ok: false, error: 'too_long' });
     expect(BOOKING_ERRORS.too_long).toEqual({
       status: 400, text: 'That many campaigns will not fit in one booking; book fewer, and add one later with +1 campaign.',

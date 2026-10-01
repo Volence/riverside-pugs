@@ -354,10 +354,11 @@ are opened to anyone: setup refuses a box without `l4d_booking_version`.
 1.1.0 adds the booking's captain commands. The site lists the booking's
 captains (SteamID64s of the managers of a confirmed side) in
 `l4d_booking_captains`. While `l4d_booking_password` is set, a captain's
-`!nextmap [text]`, `!stay`, `!end` and `!extend` in chat go out as a signed
+`!nextmap [text]`, `!stay`, `!end` and `!extend` (and, since 1.3.0,
+`!addcampaign [name]`) in chat go out as a signed
 `PUGBOOK` line (through `pug-logauth.inc`, the same signing `pug-match` and
 `l4d_tvwatch` use):
-`PUGBOOK event=cmd cmd=<nextmap|stay|end|extend> steamid=<id64> arg=<text>`,
+`PUGBOOK event=cmd cmd=<nextmap|stay|end|extend|addcampaign> steamid=<id64> arg=<text>`,
 `arg=` last and at most 64 characters, with `"`, `;` and line breaks removed.
 Anyone else typing one of those commands gets "Only a captain can do that."
 in chat; the chat line itself is never hidden. The plugin's captain list is
@@ -402,3 +403,12 @@ flag, every grace and every block. `l4d_booking_grace` is at least 15
 seconds, the site setting's own minimum. A client whose SteamID is not yet
 known is let through on purpose; `sv_password` still keeps out anyone the
 booking did not give it to.
+
+1.3.0: a booking is a number of campaigns, and +1 campaign replaces Extend.
+A captain's `!addcampaign [name]` goes out as
+`PUGBOOK event=cmd cmd=addcampaign steamid=<id64> arg=<name>` (`arg=` empty
+without a name, sanitized like every other arg); the site adds one campaign
+to the booking and appends a named one to its playlist, matching the name
+the way `!nextmap` does. `!extend` is kept and still emits `cmd=extend`,
+which the site treats as `!addcampaign` with no name.
+`sm_booking_cmd <id64> addcampaign [name]` emits the same line.

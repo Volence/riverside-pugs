@@ -74,7 +74,7 @@ describe('ScrimPoster', () => {
     expect(msg.payload.embeds[0].title).toBe('p0');
     const fields = msg.payload.embeds[0].fields as { name: string; value: string }[];
     expect(fields.find((f) => f.name === 'When')!.value).toBe(`<t:${Math.floor(Date.parse(START) / 1000)}:F>`);
-    expect(fields.find((f) => f.name === 'Length')!.value).toBe('90 min');
+    expect(fields.find((f) => f.name === 'Length')!.value).toBe('1 campaign, about 1 h 30');
     expect(fields.find((f) => f.name === 'Campaigns')!.value).toBe('No Mercy');
     expect(fields.find((f) => f.name === 'Average SR')).toBeTruthy();
     expect(msg.payload.components).toEqual([[{ kind: 'link', url: `${PUBLIC_URL}/scrims?post=${publicId}`, label: 'Accept on the site' }]]);

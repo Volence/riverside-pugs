@@ -4,7 +4,7 @@ import { adminApi, bookingsApi, scrimsApi, teamsApi, type BookingOptions, type B
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
-import { localLabel } from '../bookingTime';
+import { campaignsLabel, localLabel } from '../bookingTime';
 import { campaignName } from '../format';
 import { confirm } from '../components/Confirm';
 import { RecordLine } from '../components/ScrimRecord';
@@ -182,6 +182,8 @@ export function Booking({ id, session }: { id: string; session: Session }) {
   const [reason, setReason] = useState('');
   const [campaigns, setCampaigns] = useState<BookingOptions['campaigns']>([]);
   const [pick, setPick] = useState('');
+  /** The +1 campaign select: empty is "pick later". */
+  const [addPick, setAddPick] = useState('');
 
   const load = () => { bookingsApi.get(id).then(setV, () => setMissing(true)); };
   useEffect(load, [id]);
@@ -272,7 +274,7 @@ export function Booking({ id, session }: { id: string; session: Session }) {
   const running = open && (v.state === 'ready' || v.state === 'active');
   const [a, b] = v.sides;
   const unconfirmedB = !b.confirmed;
-  // A side's captain or co-captain may only Cancel, Extend or End once their
+  // A side's captain or co-captain may only Cancel, +1 campaign or End once their
   // own side has confirmed; an unconfirmed side gets Confirm/Decline instead
   // (below), never the run of the booking. A side manager always goes
   // through the player routes, even when they are also staff. A staff
@@ -289,18 +291,32 @@ export function Booking({ id, session }: { id: string; session: Session }) {
   // running, with nothing live right now, to whoever may call `!nextmap` /
   // `!stay` on the box itself (a manager of a confirmed side, or staff). Both
   // player routes take a staff caller too, so there is no admin-only variant
-  // here the way Extend/End/Cancel have one.
+  // here the way +1 campaign/End/Cancel have one. Once every booked campaign
+  // is played the box refuses both, so the controls wait for +1 campaign.
   const liveGame = v.games.some((g) => g.state === 'live');
-  const canPlayGames = running && !liveGame && (managesConfirmedSide || v.viewer.staff);
+  const allPlayed = v.gamesPlayed >= v.gamesAllowed;
+  const canPlayGames = running && !liveGame && !allPlayed && (managesConfirmedSide || v.viewer.staff);
+  // Bookings by campaign: the one to play next (or now, while a game is live),
+  // counted from the finished ones.
+  const countLine = allPlayed
+    ? (v.gamesAllowed === 1 ? 'The booked campaign is played' : `All ${v.gamesAllowed} campaigns played`)
+    : `Campaign ${v.gamesPlayed + 1} of ${v.gamesAllowed}`;
+  const addCampaign = () => {
+    const campaign = addPick || undefined;
+    setAddPick('');
+    if (playerManage) act(() => bookingsApi.addCampaign(v.id, campaign)); else staffAct(() => adminApi.extendBooking(v.id, campaign));
+  };
 
   return (
     <main class="page page--profile bookingpage">
       <PageHeader eyebrow="Booked server" title={`${a.name} vs ${b.name}`}>
-        <p>{localLabel(v.startsAt)} to {localLabel(v.endsAt)}{v.extendedMinutes > 0 ? ` (extended ${v.extendedMinutes} min)` : ''} · {v.playlist.map((c) => c.name).join(', ')}</p>
+        <p>{localLabel(v.startsAt)} to about {localLabel(v.endsAt)} · {campaignsLabel(v.gamesAllowed)}: {v.playlist.map((c) => c.name).join(', ')}</p>
       </PageHeader>
       {error && <p class="error" role="alert">{error}</p>}
       <Panel>
         <p>{v.ending && !v.ended && v.state !== 'cancelled' && v.state !== 'no_show' ? 'Closing.' : STATE_LINE[v.state]}{v.cancel?.reason ? ` Reason: ${v.cancel.reason}` : ''}</p>
+        {running && <p class="bookingcount">{countLine}</p>}
+        {running && v.closeAt && <p class="warning">Closing in about 5 minutes. +1 campaign keeps the server for one more.</p>}
         {v.connect && (
           <p class="bookingconnect">In the game console: <code>{`connect ${v.connect.host}:${v.connect.port}; password ${v.connect.password}`}</code></p>
         )}
@@ -389,14 +405,19 @@ export function Booking({ id, session }: { id: string; session: Session }) {
         <Panel>
           <h3>Booking</h3>
           <p>
-            {/* A player may only extend a booking that has actually taken a
-                server; staff may extend any open booking, through the admin
-                route, since the player route has no staff bypass. */}
-            {playerManage && running && (
-              <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.act(v.id, 'extend'))}>Extend {v.extendMinutes} min</button>
-            )}
-            {staffOnly && (
-              <button class="btn btn--ghost" disabled={busy} onClick={() => staffAct(() => adminApi.extendBooking(v.id))}>Extend {v.extendMinutes} min</button>
+            {/* A player may only add a campaign to a booking that has
+                actually taken a server; staff may add one to any open
+                booking, through the admin route, since the player route has
+                no staff bypass. Without a pick, the captains choose it with
+                !nextmap when the time comes (the default replays the last). */}
+            {((playerManage && running) || staffOnly) && (
+              <>
+                <select aria-label="Campaign to add" value={addPick} onChange={(e) => setAddPick((e.target as HTMLSelectElement).value)}>
+                  <option value="">Pick later</option>
+                  {campaigns.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
+                </select>
+                <button class="btn btn--ghost" disabled={busy} onClick={addCampaign}>+1 campaign</button>
+              </>
             )}
             {playerManage && running && <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.act(v.id, 'end'))}>End now</button>}
             {staffOnly && running && <button class="btn btn--ghost" disabled={busy} onClick={() => staffAct(() => adminApi.endBooking(v.id))}>End now</button>}

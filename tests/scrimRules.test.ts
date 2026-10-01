@@ -110,6 +110,8 @@ describe('proposedPlaylist', () => {
   });
 
   it('is never trimmed to a block: a playlist longer than the longest booking does not fit', () => {
+    // 180, the longest booking production stores (the default is 300).
+    setSetting(db, 'booking_max_minutes', '180');
     const r = proposedPlaylist(db, ['no_mercy', 'death_toll'], ['dead_air']);
     expect(r.playlist).toEqual(['no_mercy', 'dead_air', 'death_toll']);
     expect(r.minutes).toBe(240);

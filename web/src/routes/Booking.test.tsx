@@ -4,7 +4,7 @@ import { LocationProvider } from 'preact-iso';
 
 const { mockBookings, mockAdmin, mockScrims, mockConfirm } = vi.hoisted(() => ({
   mockBookings: {
-    get: vi.fn(), act: vi.fn(), cancel: vi.fn(), options: vi.fn(), next: vi.fn(), stay: vi.fn(),
+    get: vi.fn(), act: vi.fn(), addCampaign: vi.fn(), cancel: vi.fn(), options: vi.fn(), next: vi.fn(), stay: vi.fn(),
     casters: vi.fn(), inviteCaster: vi.fn(), withdrawCaster: vi.fn(), excuse: vi.fn(), review: vi.fn(),
   },
   mockAdmin: { cancelBooking: vi.fn(), extendBooking: vi.fn(), endBooking: vi.fn(), excuseBooking: vi.fn() },
@@ -20,7 +20,7 @@ const { Booking } = await import('./Booking');
 
 const VIEW = (over: Record<string, unknown> = {}) => ({
   id: 7, purpose: 'scrim', state: 'ready', ending: false, ended: false, startsAt: '2026-10-02T20:00:00.000Z', endsAt: '2026-10-02T22:00:00.000Z',
-  extendedMinutes: 0, extendMinutes: 30, createdAt: '2026-10-01T12:00:00.000Z', playlist: [{ slug: 'no_mercy', name: 'No Mercy' }], rules: null,
+  extendedMinutes: 0, gamesAllowed: 2, gamesPlayed: 0, closeAt: null, createdAt: '2026-10-01T12:00:00.000Z', playlist: [{ slug: 'no_mercy', name: 'No Mercy' }], rules: null,
   gameConfig: { key: 'standard', label: 'Standard' }, server: { name: 'Riverside #3' },
   connect: { host: '1.2.3.4', port: 27015, password: 'abcd2345' }, cancel: null, endReason: null, noShowFrom: '2026-10-02T20:15:00.000Z',
   sides: [
@@ -56,20 +56,20 @@ describe('Booking page', () => {
     expect(await screen.findByText('connect 1.2.3.4:27015; password abcd2345')).toBeTruthy();
   });
 
-  it('a manager sees Cancel and no connect line before ready, but not Extend (the booking is not running yet)', async () => {
+  it('a manager sees Cancel and no connect line before ready, but not +1 campaign (the booking is not running yet)', async () => {
     mockBookings.get.mockResolvedValue(VIEW({ state: 'scheduled', connect: null, server: null }));
     render(<Booking id="7" session={session} />);
     expect(await screen.findByRole('button', { name: 'Cancel booking' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Extend 30 min' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '+1 campaign' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'End now' })).toBeNull();
     expect(screen.queryByText(/connect /)).toBeNull();
   });
 
-  it('a manager sees Extend once the booking is running', async () => {
+  it('a manager sees +1 campaign once the booking is running', async () => {
     mockBookings.get.mockResolvedValue(VIEW({ state: 'ready' }));
     render(<Booking id="7" session={session} />);
     expect(await screen.findByRole('button', { name: 'Cancel booking' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Extend 30 min' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '+1 campaign' })).toBeTruthy();
   });
 
   it('an invited person sees Accept', async () => {
@@ -78,7 +78,7 @@ describe('Booking page', () => {
     expect(await screen.findByRole('button', { name: 'Accept' })).toBeTruthy();
   });
 
-  it('an unconfirmed side only sees Confirm and Decline, never Cancel or Extend', async () => {
+  it('an unconfirmed side only sees Confirm and Decline, never Cancel or +1 campaign', async () => {
     mockBookings.get.mockResolvedValue(VIEW({
       state: 'scheduled', connect: null, server: null,
       sides: [
@@ -91,24 +91,66 @@ describe('Booking page', () => {
     expect(await screen.findByRole('button', { name: 'Confirm' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Decline' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Cancel booking' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Extend 30 min' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '+1 campaign' })).toBeNull();
   });
 
   // A staff viewer who does not themselves manage a confirmed side (the
   // admin-desk case) has to go through the admin routes: the player routes
   // never pass a staff flag, so those buttons would just fail with
   // "not a manager".
-  it('a staff-only viewer sees Cancel and Extend on a scheduled booking, no No-show, and uses the admin routes', async () => {
+  it('a staff-only viewer sees Cancel and +1 campaign on a scheduled booking, no No-show, and uses the admin routes', async () => {
     const staffView = VIEW({ state: 'scheduled', connect: null, server: null, viewer: { side: null, manages: [], staff: true, invited: false } });
     mockBookings.get.mockResolvedValueOnce(staffView).mockResolvedValueOnce({ ...staffView, state: 'cancelled' });
     mockAdmin.cancelBooking.mockResolvedValue({ ok: true });
     render(<Booking id="7" session={session} />);
     expect(await screen.findByRole('button', { name: 'Cancel booking' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Extend 30 min' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '+1 campaign' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'They did not show' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel booking' }));
     await waitFor(() => expect(mockAdmin.cancelBooking).toHaveBeenCalledWith(7, ''));
     await waitFor(() => expect(mockBookings.get).toHaveBeenCalledTimes(2));
+  });
+
+  describe('by campaign', () => {
+    it('counts campaigns: the next one to play, then all played, and the closing line while closeAt is set', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ state: 'active', gamesPlayed: 0, gamesAllowed: 2 }));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByText('Campaign 1 of 2')).toBeTruthy();
+      expect(screen.queryByText(/Closing in about 5 minutes/)).toBeNull();
+      cleanup();
+      mockBookings.get.mockResolvedValue(VIEW({ state: 'active', gamesPlayed: 1, gamesAllowed: 2 }));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByText('Campaign 2 of 2')).toBeTruthy();
+      cleanup();
+      mockBookings.get.mockResolvedValue(VIEW({ state: 'active', gamesPlayed: 2, gamesAllowed: 2, closeAt: '2026-10-02T22:05:00.000Z' }));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByText('All 2 campaigns played')).toBeTruthy();
+      expect(screen.getByText(/Closing in about 5 minutes/)).toBeTruthy();
+    });
+
+    it('+1 campaign posts the picked campaign, or none for "pick later"', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ state: 'active' }));
+      mockBookings.addCampaign.mockResolvedValue(VIEW({ state: 'active', gamesAllowed: 3 }));
+      render(<Booking id="7" session={session} />);
+      fireEvent.click(await screen.findByRole('button', { name: '+1 campaign' }));
+      await waitFor(() => expect(mockBookings.addCampaign).toHaveBeenCalledWith(7, undefined));
+      await screen.findByText('Campaign 1 of 3');
+      await screen.findAllByRole('option', { name: 'Death Toll' });
+      fireEvent.change(screen.getByLabelText('Campaign to add'), { target: { value: 'death_toll' } });
+      fireEvent.click(screen.getByRole('button', { name: '+1 campaign' }));
+      await waitFor(() => expect(mockBookings.addCampaign).toHaveBeenCalledWith(7, 'death_toll'));
+    });
+
+    it('a staff-only viewer adds a campaign through the admin route', async () => {
+      const staffView = VIEW({ state: 'active', viewer: { side: null, manages: [], staff: true, invited: false } });
+      mockBookings.get.mockResolvedValue(staffView);
+      mockAdmin.extendBooking.mockResolvedValue({ ok: true });
+      render(<Booking id="7" session={session} />);
+      await screen.findAllByRole('option', { name: 'Death Toll' });
+      fireEvent.change(await screen.findByLabelText('Campaign to add'), { target: { value: 'death_toll' } });
+      fireEvent.click(screen.getByRole('button', { name: '+1 campaign' }));
+      await waitFor(() => expect(mockAdmin.extendBooking).toHaveBeenCalledWith(7, 'death_toll'));
+    });
   });
 
   describe('games (plan 4b, Task 7)', () => {
@@ -132,7 +174,7 @@ describe('Booking page', () => {
     it('hides the next-campaign controls while a game is live, even for a manager of a confirmed side', async () => {
       mockBookings.get.mockResolvedValue(VIEW({ games: [{ ...GAME, state: 'live' }] }));
       render(<Booking id="7" session={session} />);
-      await screen.findByText('No Mercy');
+      await screen.findByText("p0's group 5 : 3 Mice");
       expect(screen.queryByRole('button', { name: 'Play this next' })).toBeNull();
       expect(screen.queryByRole('button', { name: 'Replay last campaign' })).toBeNull();
     });

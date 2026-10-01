@@ -46,7 +46,7 @@ export function BookingsPanel({ nudge }: { nudge: number }) {
                   <td>
                     {open && <button class="btn btn--ghost" disabled={busy}
                       onClick={() => run(() => adminApi.cancelBooking(b.id, ''), { title: `Cancel ${b.aName} vs ${b.bName}?`, body: 'Both sides are told. It counts against neither side.', confirmLabel: 'Cancel booking', danger: true })}>Cancel</button>}
-                    {open && <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => adminApi.extendBooking(b.id))}>Extend</button>}
+                    {open && <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => adminApi.extendBooking(b.id))}>+1 campaign</button>}
                     {running && <button class="btn btn--ghost" disabled={busy}
                       onClick={() => run(() => adminApi.endBooking(b.id), { title: `End ${b.aName} vs ${b.bName} now?`, body: 'Everyone on the server is kicked and the box restarts.', confirmLabel: 'End now', danger: true })}>End</button>}
                   </td>

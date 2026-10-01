@@ -4,7 +4,7 @@ import { ApiError, bookingsApi, teamsApi, type BookingOptions, type BookingSumma
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
-import { fitWarning, localLabel, toUtcIso } from '../bookingTime';
+import { TOO_LONG_TEXT, estimateLine, estimateSlot, localLabel, toUtcIso } from '../bookingTime';
 import { RecordLine } from '../components/ScrimRecord';
 
 const STATE_LABEL: Record<BookingSummary['state'], string> = {
@@ -49,7 +49,6 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
   const [found, setFound] = useState<{ steamid: string; name: string }[]>([]);
   const [oppPlayer, setOppPlayer] = useState<{ steamid: string; name: string } | null>(null);
   const [when, setWhen] = useState('');
-  const [minutes, setMinutes] = useState(options.limits.minMinutes * 2 <= options.limits.maxMinutes ? options.limits.minMinutes * 2 : options.limits.minMinutes);
   const [playlist, setPlaylist] = useState<string[]>([]);
   const [rulesetId, setRulesetId] = useState<number | undefined>(options.rulesets.find((r) => r.name === 'Casual Scrim')?.id);
   const [busy, setBusy] = useState(false);
@@ -61,10 +60,10 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
     return () => ctl.abort();
   }, [q]);
 
-  const lengths: number[] = [];
-  for (let m = options.limits.minMinutes; m <= options.limits.maxMinutes; m += options.limits.stepMinutes) lengths.push(m);
-  const playMinutes = playlist.reduce((s, slug) => s + (options.campaigns.find((c) => c.slug === slug)?.minutes ?? 60), 0);
-  const warning = playlist.length > 0 ? fitWarning(minutes, playMinutes) : null;
+  // No length picker: the slot is estimated from the campaigns, the way the
+  // server will compute it, and too many for one booking cannot be sent.
+  const estimate = estimateSlot(options.estimate, playlist);
+  const tooLong = estimate > options.estimate.max;
   const toggle = (slug: string) => setPlaylist((p) => p.includes(slug) ? p.filter((s) => s !== slug) : p.length < options.limits.playlistMax ? [...p, slug] : p);
 
   const submit = async (ev: Event) => {
@@ -76,7 +75,7 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
     if (!opponent) { onError('Pick who you are playing against.'); return; }
     setBusy(true);
     try {
-      const { id } = await bookingsApi.create({ teamId, opponent, startsAt, minutes, playlist, rulesetId });
+      const { id } = await bookingsApi.create({ teamId, opponent, startsAt, playlist, rulesetId });
       route(`/booking/${id}`);
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));
@@ -112,11 +111,6 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
             </div>}
       </fieldset>
       <label class="teamfield">Start (your time)<input aria-label="Start" type="datetime-local" value={when} onInput={(e) => setWhen((e.target as HTMLInputElement).value)} /></label>
-      <label class="teamfield">Length
-        <select aria-label="Length" value={String(minutes)} onChange={(e) => setMinutes(Number((e.target as HTMLSelectElement).value))}>
-          {lengths.map((m) => <option key={m} value={String(m)}>{m / 60} h</option>)}
-        </select>
-      </label>
       <fieldset class="bookform__fieldset">
         <legend class="teamsub">Campaigns (up to {options.limits.playlistMax}, in play order)</legend>
         {options.campaigns.map((c) => (
@@ -126,7 +120,8 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
             <span class="muted"> · about {c.minutes} min{playlist.includes(c.slug) ? ` · #${playlist.indexOf(c.slug) + 1}` : ''}</span>
           </label>
         ))}
-        {warning && <p class="warning">{warning}</p>}
+        {playlist.length > 0 && <p class="muted">{estimateLine(estimate, playlist.length)}</p>}
+        {tooLong && <p class="warning">{TOO_LONG_TEXT}</p>}
       </fieldset>
       {options.rulesets.length > 1 && (
         <label class="teamfield">Rules
@@ -135,7 +130,7 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
           </select>
         </label>
       )}
-      <button class="btn" type="submit" disabled={busy || playlist.length === 0}>Book the server</button>
+      <button class="btn" type="submit" disabled={busy || playlist.length === 0 || tooLong}>Book the server</button>
     </form>
   );
 }

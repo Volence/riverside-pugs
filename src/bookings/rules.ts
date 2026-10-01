@@ -43,7 +43,7 @@ export function bookingLimits(db: DB): BookingLimits {
   const holdLeadMinutes = n('booking_hold_lead_minutes', 15, 5, 60);
   return {
     minMinutes: n('booking_min_minutes', 60, 30, 360),
-    maxMinutes: n('booking_max_minutes', 180, 30, 360),
+    maxMinutes: n('booking_max_minutes', 300, 30, 360),
     daysAhead: n('booking_days_ahead', 14, 1, 60),
     playlistMax: n('booking_playlist_max', 4, 1, 8),
     maxUpcoming: n('booking_max_upcoming', 4, 1, 20),
