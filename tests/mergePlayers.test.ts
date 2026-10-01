@@ -472,4 +472,29 @@ describe('mergePlayers', () => {
     mergePlayers(db, { from: ALT, into: MAIN });
     expect(db.prepare('SELECT COUNT(*) AS n FROM player_steam_signals').get()).toEqual({ n: 0 });
   });
+
+  it('moves team rows, closing the alt membership where both are on one team, and keeps the captaincy', () => {
+    const t = Number(db.prepare(
+      `INSERT INTO teams (name, name_key, tag, tag_key, slug, captain_steamid, created_by)
+       VALUES ('Rats', 'rats', 'RR', 'RR', 'rats', ?, ?)`,
+    ).run(ALT, ALT).lastInsertRowid);
+    const t2 = Number(db.prepare(
+      `INSERT INTO teams (name, name_key, tag, tag_key, slug, captain_steamid, created_by)
+       VALUES ('Mice', 'mice', 'MM', 'MM', 'mice', ?, ?)`,
+    ).run(OTHER, OTHER).lastInsertRowid);
+    const mem = db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, ?, '2026-09-30')");
+    mem.run(t, ALT, 'captain');
+    mem.run(t, MAIN, 'member');
+    mem.run(t2, OTHER, 'captain');
+    db.prepare("INSERT INTO team_invites (team_id, steamid, invited_by, created_at) VALUES (?, ?, ?, '2026-09-30'), (?, ?, ?, '2026-09-30')")
+      .run(t2, ALT, OTHER, t2, MAIN, OTHER);
+
+    mergePlayers(db, { from: ALT, into: MAIN });
+
+    expect(db.prepare('SELECT captain_steamid, created_by FROM teams WHERE id = ?').get(t)).toEqual({ captain_steamid: MAIN, created_by: MAIN });
+    expect(db.prepare('SELECT steamid, role FROM team_members WHERE team_id = ? AND left_at IS NULL').all(t))
+      .toEqual([{ steamid: MAIN, role: 'captain' }]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM team_invites WHERE team_id = ? AND responded_at IS NULL').get(t2)).toEqual({ n: 1 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM team_members WHERE steamid = ?").get(ALT)).toEqual({ n: 0 });
+  });
 });
