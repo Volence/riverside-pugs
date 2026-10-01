@@ -2,13 +2,15 @@ import type { DB } from './db.js';
 import { managesSide, sidesOf } from './bookings/bookings.js';
 import { fullyInvited } from './bookings/casters.js';
 import { inGoodStanding } from './standing.js';
+import { roleOf } from './teams/teams.js';
 
 /**
  * Who may see a match (spec: foundation section 1, Visibility).
  *
  * public: everyone. participants: staff, the players of that match, and, for
  * a match that is a booking's game (plan 4b), that booking's accepted people,
- * the managers of its confirmed sides, and a caster both sides invited
+ * the managers of its confirmed sides, the current members of its confirmed
+ * team sides, and a caster both sides invited
  * (plan 4c, src/bookings/casters.ts). staff: staff only. Every route that
  * returns a match, its demos, replays, timeline or live round goes through
  * canViewMatch or visibleMatchesSql, and answers a match the viewer may not
@@ -33,15 +35,17 @@ export function viewerFor(db: DB, steamid: string | null): Viewer {
   };
 }
 
-/** True when steamid is an accepted person of this booking, or manages one
- *  of its confirmed sides (pickup captain, or captain/co-captain of a team
- *  side). An unconfirmed side's prospective manager only confirms or
- *  declines (see actingSides in bookings/bookings.ts), so they do not see
- *  the booking's games through managing it either. */
+/** True when steamid is an accepted person of this booking, manages one of
+ *  its confirmed sides (pickup captain), or is a current member, any role, of
+ *  a confirmed team side (spec section 2: members see their team's scrim
+ *  history, replays and stats). An unconfirmed side's prospective manager
+ *  only confirms or declines (see actingSides in bookings/bookings.ts), and
+ *  an unconfirmed team's members get nothing from the booking either. */
 function bookingParticipant(db: DB, bookingId: number, steamid: string): boolean {
   if (db.prepare("SELECT 1 FROM booking_people WHERE booking_id = ? AND steamid = ? AND status = 'accepted'")
     .get(bookingId, steamid)) return true;
-  return sidesOf(db, bookingId).some((s) => s.confirmed_at !== null && managesSide(db, s, steamid));
+  return sidesOf(db, bookingId).some((s) => s.confirmed_at !== null
+    && (s.team_id !== null ? roleOf(db, s.team_id, steamid) !== null : managesSide(db, s, steamid)));
 }
 
 export function canViewMatch(db: DB, viewer: Viewer, matchId: number): boolean {
@@ -76,8 +80,7 @@ export function visibleMatchesSql(viewer: Viewer, alias: string): { sql: string;
             OR EXISTS (SELECT 1 FROM booking_sides vis_bs WHERE vis_bs.booking_id = ${alias}.booking_id
               AND vis_bs.team_id IS NULL AND vis_bs.captain_steamid = ? AND vis_bs.confirmed_at IS NOT NULL)
             OR EXISTS (SELECT 1 FROM booking_sides vis_bs2
-              JOIN team_members vis_tm ON vis_tm.team_id = vis_bs2.team_id
-                AND vis_tm.left_at IS NULL AND vis_tm.role IN ('captain','cocaptain')
+              JOIN team_members vis_tm ON vis_tm.team_id = vis_bs2.team_id AND vis_tm.left_at IS NULL
               WHERE vis_bs2.booking_id = ${alias}.booking_id AND vis_tm.steamid = ? AND vis_bs2.confirmed_at IS NOT NULL)${casterSql}
           )))`,
     params: [viewer.steamid, viewer.steamid, viewer.steamid, viewer.steamid, ...(viewer.caster ? [viewer.steamid] : [])],

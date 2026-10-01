@@ -735,21 +735,33 @@ export interface BookingView {
   casters: CasterView[];
 }
 
+/** Whether bookingView would answer this viewer at all: staff, anyone on
+ *  the booking's people list (invited or accepted), or a manager of either
+ *  side. A team member who is none of these sees the booking's games
+ *  (src/matchVisibility.ts) but not the booking page itself. */
+export function seesBooking(db: DB, id: number, viewer: { steamid: string; staff: boolean }): boolean {
+  if (viewer.staff) return true;
+  if (db.prepare('SELECT 1 FROM booking_people WHERE booking_id = ? AND steamid = ?').get(id, viewer.steamid)) return true;
+  return managedSides(db, id, viewer.steamid).length > 0;
+}
+
 export function bookingView(db: DB, id: number, viewer: { steamid: string; staff: boolean }): BookingView | null {
   const b = getBooking(db, id);
   if (!b) return null;
+  if (!seesBooking(db, id, viewer)) return null;
   const people = peopleOf(db, id);
   const me = people.find((p) => p.steamid === viewer.steamid);
   const manages = managedSides(db, id, viewer.steamid);
-  if (!me && manages.length === 0 && !viewer.staff) return null;
   const registry = campaignRegistry(db);
   const server = b.server_id !== null ? getServer(db, b.server_id) : undefined;
   const running = (b.state === 'ready' || b.state === 'active') && b.ending_at === null;
   const canConnect = viewer.staff || me?.status === 'accepted';
   const config = db.prepare('SELECT key, label FROM game_configs WHERE key = ?').get(b.game_config) as { key: string; label: string } | undefined;
   const rules = bookingRules(b);
-  // The games follow canViewMatch's rule for a booking game (src/matchVisibility.ts):
-  // staff, an accepted person, or a manager of a confirmed side.
+  // The games follow canViewMatch's rule for a booking game (src/matchVisibility.ts)
+  // as far as this page's viewers go: staff, an accepted person, or a manager
+  // of a confirmed side. A plain team member who is none of these sees the
+  // games from the team's Scrims section instead, never this page.
   const seesGames = viewer.staff || me?.status === 'accepted'
     || sidesOf(db, id).some((s) => s.confirmed_at !== null && manages.includes(s.side));
   return {
