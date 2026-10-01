@@ -1,6 +1,6 @@
 import type { DB } from '../db.js';
 import { holdFor } from '../serverHolds.js';
-import { getBooking, peopleOf, type BookingRow, type Side } from './bookings.js';
+import { getBooking, peopleOf, sideName, sidesOf, type BookingRow, type Side } from './bookings.js';
 
 /**
  * Games inside a booked block.
@@ -74,6 +74,35 @@ export function bookingGames(db: DB, bookingId: number): BookingGameView[] {
 export function liveBookingGame(db: DB, bookingId: number): { id: number; token: string; campaign: string } | null {
   return (db.prepare("SELECT id, token, campaign FROM matches WHERE booking_id = ? AND state = 'live' ORDER BY id DESC LIMIT 1")
     .get(bookingId) as { id: number; token: string; campaign: string } | undefined) ?? null;
+}
+
+export interface TeamScrim {
+  bookingId: number; opponent: string; startsAt: string; state: string;
+  games: { matchId: number; campaign: string; state: string; us: number; them: number }[];
+}
+
+/** A team's Scrims tab (plan 4c, ruling 5): every booking the team was a
+ *  side of, newest first, at most 50. Each game's score is oriented to the
+ *  team's own side of the booking, via that game's own booking_side_a (ruling
+ *  2: which match team is which booking side is decided per game, at
+ *  adoption, so two games of the same booking can disagree). */
+export function teamScrims(db: DB, teamId: number): TeamScrim[] {
+  const rows = db.prepare(
+    `SELECT b.id, b.state, b.starts_at, s.side
+       FROM bookings b JOIN booking_sides s ON s.booking_id = b.id AND s.team_id = ?
+       ORDER BY b.starts_at DESC, b.id DESC LIMIT 50`,
+  ).all(teamId) as { id: number; state: string; starts_at: string; side: Side }[];
+  return rows.map((r) => {
+    const other = sidesOf(db, r.id).find((s) => s.side !== r.side)!;
+    return {
+      bookingId: r.id, opponent: sideName(db, other), startsAt: r.starts_at, state: r.state,
+      games: bookingGames(db, r.id).map((g) => ({
+        matchId: g.matchId, campaign: g.campaign, state: g.state,
+        us: g.sideA === r.side ? g.scoreA : g.scoreB,
+        them: g.sideA === r.side ? g.scoreB : g.scoreA,
+      })),
+    };
+  });
 }
 
 /** Abort a live booking game because its booking ended. Returns the match

@@ -1687,7 +1687,13 @@ export const teamsApi = {
   rename: (slug: string, body: { name?: string; tag?: string }) => post<{ name: string; tag: string }>(`/api/teams/${enc(slug)}/rename`, body),
   disband: (slug: string) => post(`/api/teams/${enc(slug)}/disband`),
   logo: (slug: string, png: string) => post<{ logoKey: string }>(`/api/teams/${enc(slug)}/logo`, { png }),
+  scrims: (slug: string, signal?: AbortSignal) => get<{ scrims: TeamScrim[] }>(`/api/teams/${enc(slug)}/scrims`, signal),
 };
+
+export interface TeamScrim {
+  bookingId: number; opponent: string; startsAt: string; state: string;
+  games: { matchId: number; campaign: string; state: string; us: number; them: number }[];
+}
 
 // ---------- bookings ----------
 

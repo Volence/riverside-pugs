@@ -1,11 +1,12 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
-import type { TeamView } from '../api';
+import type { TeamScrim, TeamView } from '../api';
 
 const { mockTeams } = vi.hoisted(() => ({
   mockTeams: {
     get: vi.fn(), search: vi.fn(), invite: vi.fn(), cancelInvite: vi.fn(), joinLink: vi.fn(), leave: vi.fn(),
     kick: vi.fn(), setRole: vi.fn(), makeCaptain: vi.fn(), rename: vi.fn(), disband: vi.fn(), logo: vi.fn(),
+    scrims: vi.fn(),
   },
 }));
 vi.mock('../api', async (importOriginal) => {
@@ -15,6 +16,9 @@ vi.mock('../api', async (importOriginal) => {
 vi.mock('../teamLogo', () => ({ toLogoPng: vi.fn(async () => 'BASE64') }));
 
 const { Team } = await import('./Team');
+// Only the scrims-focused tests care about this call; everyone else gets an
+// empty list so the panel's own fetch never breaks an unrelated test.
+beforeEach(() => { mockTeams.scrims.mockResolvedValue({ scrims: [] }); });
 afterEach(() => { cleanup(); for (const f of Object.values(mockTeams)) f.mockReset(); });
 
 const view = (over: Partial<TeamView> = {}): TeamView => ({
@@ -149,5 +153,43 @@ describe('Team', () => {
     render(<Team slug="rats" session={session('9')} />);
     expect(await screen.findByText(/Disbanded/)).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  const scrim = (over: Partial<TeamScrim> = {}): TeamScrim => ({
+    bookingId: 42, opponent: 'Other Crew', startsAt: '2026-10-05T20:00:00.000Z', state: 'ended',
+    games: [{ matchId: 7, campaign: 'no_mercy', state: 'completed', us: 2, them: 1 }],
+    ...over,
+  });
+
+  it('fetches and shows the Scrims panel for a member', async () => {
+    mockTeams.get.mockResolvedValue(view({ viewer: { role: 'member', staff: false } }));
+    mockTeams.scrims.mockResolvedValue({ scrims: [scrim()] });
+    render(<Team slug="rats" session={session('2')} />);
+    await screen.findByText('Riverside Rats');
+    await waitFor(() => expect(mockTeams.scrims).toHaveBeenCalledWith('rats', expect.anything()));
+    expect(await screen.findByText('vs Other Crew')).toBeTruthy();
+    expect(screen.getByText('Over')).toBeTruthy();
+    expect(screen.getByText('No Mercy')).toBeTruthy();
+    expect(screen.getByText('2 : 1')).toBeTruthy();
+    const matchLink = screen.getByRole('link', { name: 'View' }) as HTMLAnchorElement;
+    expect(matchLink.getAttribute('href')).toBe('/match/7');
+    const bookingLink = screen.getByText('vs Other Crew').closest('a') as HTMLAnchorElement;
+    expect(bookingLink.getAttribute('href')).toBe('/booking/42');
+  });
+
+  it('shows the Scrims panel for staff not on the team', async () => {
+    mockTeams.get.mockResolvedValue(view({ viewer: { role: null, staff: true }, manage: { invites: [], joinLinkToken: 'tok' } }));
+    mockTeams.scrims.mockResolvedValue({ scrims: [scrim({ games: [] })] });
+    render(<Team slug="rats" session={session('9')} />);
+    await screen.findByText('Riverside Rats');
+    expect(await screen.findByText('vs Other Crew')).toBeTruthy();
+  });
+
+  it('never fetches or shows the Scrims panel for a non-member, non-staff viewer', async () => {
+    mockTeams.get.mockResolvedValue(view());
+    render(<Team slug="rats" session={session('9')} />);
+    await screen.findByText('Riverside Rats');
+    expect(mockTeams.scrims).not.toHaveBeenCalled();
+    expect(screen.queryByText('Scrims')).toBeNull();
   });
 });
