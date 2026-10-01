@@ -12,7 +12,8 @@ import type { GuildMembership } from '../discord/membership.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { activeBan } from '../admin/players.js';
 import { resolveAlias } from '../aliases.js';
-import { MERGED_MESSAGE } from '../standing.js';
+import { MERGED_MESSAGE, inGoodStanding } from '../standing.js';
+import { competitiveAccess } from '../teams/access.js';
 
 const NEXT_COOKIE = 'pug_next';
 
@@ -126,6 +127,8 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
       isAdmin: player.is_admin === 1,
       isMod: player.is_mod === 1,
       isCaster: player.is_caster === 1,
+      // Whether to show Teams in the nav: the competitive switch, read per request.
+      teams: competitiveAccess(db, inGoodStanding(db, player.steamid) ? player.steamid : null),
       discordEnabled: config.discord !== null,
       discord: player.discord_id ? { id: player.discord_id, name: player.discord_name ?? '' } : null,
       // Only your own session ever sees your twitch id. Everywhere public it

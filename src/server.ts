@@ -139,6 +139,8 @@ import { sweepCampaignZips, type CampaignZipDeps } from './campaignZip.js';
 import { communityRoutes } from './routes/community.js';
 import { CommunityStore } from './community/store.js';
 import { sweepCommunity } from './community/sweep.js';
+import { teamRoutes } from './routes/teams.js';
+import { handleTeamButton, TEAM_BUTTON_PREFIX } from './discord/teamButtons.js';
 import { settingNumber } from './settings.js';
 import type { InstallTarget } from './campaignInstall.js';
 import { notifyDiscord } from './discord.js';
@@ -1716,6 +1718,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         't:': (i) => handleTicketButton({ db: deps.db, publicUrl: deps.config.publicUrl, chats: () => deps.reporterChats ?? reporterChats }, i),
         'rp:': (i) => handleReportButton({ db: deps.db, adminSteamIds: deps.config.adminSteamIds, chats: () => deps.reporterChats ?? reporterChats }, i),
         [MOD_CALL_PREFIX]: (i) => modCalls!.handleButton(i),
+        [TEAM_BUTTON_PREFIX]: (i) => handleTeamButton({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
       },
       extraModals: {
         't:': (i) => handleTicketModal({ db: deps.db, publicUrl: deps.config.publicUrl, chats: () => deps.reporterChats ?? reporterChats }, i),
@@ -1868,6 +1871,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     maxBytes: () => settingNumber(deps.db, 'community_store_mb', 1024, { min: 100, max: 20000, integer: true }) * 2 ** 20,
   });
   await app.register(communityRoutes, { db: deps.db, store: getCommunityStore, uploadTimeoutMs: deps.communityUploadTimeoutMs });
+
+  await app.register(teamRoutes, {
+    db: deps.db, store: getCommunityStore, publicUrl: deps.config.publicUrl,
+    // Read per invite: the bot logs in some seconds after this runs.
+    dm: () => { const transport = bot?.transport; return transport ? (userId, payload) => transport.dm(userId, payload) : null; },
+  });
 
   // Purge community tombstones past their 30 days, once at start and then
   // daily. With no community folder yet nothing was ever written, so only
