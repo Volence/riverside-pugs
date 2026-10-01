@@ -1172,26 +1172,83 @@ describe('booked games (plan 4b)', () => {
       for (const t of [...logged, ...feed]) expect(t.includes(P[0]) || t.includes(P[1])).toBe(false);
     });
 
-    it('a refused !allow pushes nothing and says the reason; a malformed arg is refused', async () => {
+    it('a refused !allow pushes no list, says the reason and takes the player back off the box\'s list; a malformed arg is only refused', async () => {
       await running();
       db.prepare("INSERT INTO bans (player_id, reason, created_by, created_at) VALUES (?, 'x', 'system', '2026-09-01T00:00:00.000Z')").run(P[7]);
       runner.onCommand(3, P[0], 'allow', `${P[7]} banned guy`);
       await flush();
-      expect(cmds()).toEqual(['say [Booking] That is not an active player.']);
+      // The plugin added them on its own when the captain typed it: the
+      // refuse line takes that back and restarts their grace.
+      expect(cmds()).toEqual(['say [Booking] That is not an active player.', `sm_booking_allow_refuse ${P[7]}`]);
       sent = [];
       runner.onCommand(3, P[0], 'allow', 'nobody');
       await flush();
       expect(cmds()).toEqual(['say [Booking] That is not an active player.']);
     });
 
-    it('a non-captain cannot !allow anyone', async () => {
+    it('a refusal from the booking rules (a full side) also takes the player back off', async () => {
+      const id = await running();
+      const ins = db.prepare("INSERT INTO booking_people (booking_id, side, steamid, role, status, added_by, added_at) VALUES (?, 'a', ?, 'player', 'accepted', ?, '2026-09-01T00:00:00.000Z')");
+      // Twelve more on side a: past PEOPLE_PER_SIDE whoever was there already.
+      for (let i = 0; i < 12; i++) {
+        const sid = `765611993333333${String(i).padStart(2, '0')}`;
+        db.prepare("INSERT INTO players (steamid, name, status) VALUES (?, 'x', 'active')").run(sid);
+        ins.run(id, sid, P[0]);
+      }
+      runner.onCommand(3, P[0], 'allow', '76561199222222222 x');
+      await flush();
+      expect(cmds()).toEqual(['say [Booking] That side is full.', 'sm_booking_allow_refuse 76561199222222222']);
+    });
+
+    it('a non-captain cannot !allow anyone, and the box takes back what its plugin let in', async () => {
       const id = await running();
       const log = vi.spyOn(console, 'log').mockImplementation(() => {});
       runner.onCommand(3, P[5], 'allow', '76561199222222222 x');
       await flush();
       log.mockRestore();
-      expect(cmds()).toEqual([]);
+      expect(cmds()).toEqual(['say [Booking] Only a captain or co-captain of that side can do that.', 'sm_booking_allow_refuse 76561199222222222']);
       expect(db.prepare('SELECT 1 FROM booking_people WHERE booking_id = ? AND steamid = ?').get(id, '76561199222222222')).toBeUndefined();
+    });
+
+    it('an !allow on a box a booking still holds while it winds down is taken back too', async () => {
+      const r = build({ release: () => new Promise<boolean>(() => {}) });
+      const id = await running(['no_mercy'], r);
+      r.endFromGame(id, P[0]);
+      await flush();
+      sent = [];
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      r.onCommand(3, P[0], 'allow', '76561199222222222 x');
+      await flush();
+      log.mockRestore();
+      expect(cmds()).toEqual(['say [Booking] The booking is past that point.', 'sm_booking_allow_refuse 76561199222222222']);
+    });
+
+    it('an !allow on a box no booking holds sends nothing, and a non-allow command from a non-captain still sends nothing', async () => {
+      await running();
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      runner.onCommand(1, P[0], 'allow', '76561199222222222 x');
+      runner.onCommand(3, P[5], 'stay', '');
+      await flush();
+      log.mockRestore();
+      expect(cmds()).toEqual([]);
+    });
+
+    it('a failed refuse line logs no steamid', async () => {
+      await running();
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const failing = build({
+        rcon: async (server, c) => {
+          const line = c.find((x) => x.startsWith('sm_booking_allow_refuse'));
+          if (line) throw new Error(`rcon exec timeout: ${line}`);
+          return fakeRcon(server, c);
+        },
+      });
+      failing.onCommand(3, P[5], 'allow', '76561199222222222 x');
+      await flush();
+      const logged = warn.mock.calls.map((a) => a.map(String).join(' '));
+      warn.mockRestore();
+      expect(logged.length).toBeGreaterThan(0);
+      expect(logged.some((t) => /\d{17}/.test(t))).toBe(false);
     });
 
     it('a failed allowlist push logs a count, never the ids', async () => {
