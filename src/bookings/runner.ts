@@ -255,6 +255,9 @@ export class BookingRunner {
   /** Bookings just moved to another box by relocate: recoverOnce restarts
    *  that box first, as setup does a fresh one (plan 5). */
   private readonly freshBox = new Set<number>();
+  /** Unanswered A2S queries in a row per booking while rcon fails (plan 5).
+   *  In memory: a web restart starts the count again, which only delays a move. */
+  private readonly a2sMisses = new Map<number, number>();
   /** rcon answers in a row per gone box (plan 5 ruling 4); two put it back. */
   private readonly goneAnswers = new Map<number, number>();
   /** Gone boxes being given back through the releaser right now, by server id. */
@@ -491,6 +494,7 @@ export class BookingRunner {
     }
     markReleased(this.db, id, new Date(this.now()));
     this.emptyWatches.delete(id);
+    this.a2sMisses.delete(id);
     this.announced.delete(id);
     try {
       this.deps.freed?.();
@@ -734,20 +738,23 @@ export class BookingRunner {
    *  the watch must stop here (a recovery started, or the box is quiet). */
   private async checkBox(b: BookingRow, server: ServerRow, now: Date, rconOk: boolean, marker: string | null): Promise<boolean> {
     const nowMs = now.getTime();
-    if (rconOk) noteAlive(this.db, b.id);
+    if (rconOk) { noteAlive(this.db, b.id); this.a2sMisses.delete(b.id); }
     const lostSince = rconOk ? null : noteLost(this.db, b.id, now);
     const live = liveBookingGame(this.db, b.id);
     const hb = live ? (this.db.prepare('SELECT last_seen FROM match_live WHERE match_id = ?').get(live.id) as { last_seen: string } | undefined) : undefined;
     const limits = bookingLimits(this.db);
     const goneMs = limits.goneMinutes * 60_000;
     let a2sPlayers: number | null = null;
-    if (!rconOk && lostSince !== null && nowMs - Date.parse(lostSince) >= goneMs) {
+    // Asked on every watch from the first failed one, so an answer anywhere
+    // in the outage is seen (between games there is no heartbeat).
+    if (!rconOk && this.deps.a2s) {
       try {
-        const r = await this.deps.a2s?.(server.host, server.port);
+        const r = await this.deps.a2s(server.host, server.port);
         if (r) { a2sPlayers = r.players; noteA2s(this.db, b.id, now); }
       } catch {
         // Treated as no answer.
       }
+      this.a2sMisses.set(b.id, a2sPlayers !== null ? 0 : (this.a2sMisses.get(b.id) ?? 0) + 1);
     }
     // Read after this check's noteA2s, so an answer now is the latest seen.
     const a2sSeen = rconOk ? null : getBooking(this.db, b.id)?.a2s_seen_at ?? null;
@@ -755,14 +762,16 @@ export class BookingRunner {
       rconOk, marker, bookingId: b.id, nowMs,
       lostSinceMs: lostSince !== null ? Date.parse(lostSince) : null,
       heartbeatMs: hb ? sqlMs(hb.last_seen) : null,
-      a2sPlayers, a2sSeenMs: a2sSeen !== null ? Date.parse(a2sSeen) : null, goneMs,
+      a2sPlayers, a2sSeenMs: a2sSeen !== null ? Date.parse(a2sSeen) : null,
+      a2sMisses: this.a2sMisses.get(b.id) ?? 0, goneMisses: limits.goneMinutes, goneMs,
     });
     switch (v.kind) {
       case 'ok': return false;
       case 'quiet': return true;
       case 'up_no_rcon':
         if (markUpAlerted(this.db, b.id, now)) {
-          publishAdminEvent({ kind: 'problem', text: `Booking ${b.id}: ${server.name} has not answered rcon for ${limits.goneMinutes}+ minutes but answers the server browser (${v.players} players). Nothing was moved; check the box.` });
+          const browser = v.players !== null ? `answers the server browser (${v.players} players)` : 'answered the server browser during this outage';
+          publishAdminEvent({ kind: 'problem', text: `Booking ${b.id}: ${server.name} has not answered rcon for ${limits.goneMinutes}+ minutes but ${browser}. Nothing was moved; check the box.` });
         }
         return true;
       case 'restarted':
@@ -784,6 +793,7 @@ export class BookingRunner {
    *  queue, and take the first one that is free. */
   private onGone(b: BookingRow, server: ServerRow, now: Date): void {
     if (!beginRecovery(this.db, b.id, 'gone', now)) return;
+    this.a2sMisses.delete(b.id);
     if (dropBox(this.db, b.id, now) === null) return;
     console.warn(`[booking] ${b.id}: ${server.name} is gone; marked offline, moving to another server`);
     publishAdminEvent({
@@ -972,6 +982,7 @@ export class BookingRunner {
     if (parseStatusMap(st) !== map) throw new Error(`${map} did not load (the box is on ${parseStatusMap(st) ?? 'no map'})`);
     if (!finishRecovery(this.db, b.id, new Date(this.now()))) return;
     this.emptyWatches.delete(b.id);
+    this.a2sMisses.delete(b.id);
     this.announced.delete(b.id);
     if (loadedNext) {
       this.announced.add(b.id);
