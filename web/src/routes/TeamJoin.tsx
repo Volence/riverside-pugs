@@ -23,10 +23,10 @@ export function TeamJoin({ token, session }: { token: string; session: Session }
     setError(null);
     try { route(`/team/${(await teamsApi.join(token)).slug}`); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
-  if (session.kind === 'loading') return <main class="page" />;
+  if (session.kind === 'loading') return <main class="page page--play" />;
   if (!signedIn) {
     return (
-      <main class="page">
+      <main class="page page--play">
         <PageHeader title="Join a team" />
         <Panel>
           <p>Sign in to join this team.</p>
@@ -39,7 +39,7 @@ export function TeamJoin({ token, session }: { token: string; session: Session }
     );
   }
   return (
-    <main class="page">
+    <main class="page page--play">
       <PageHeader title="Join a team" />
       {error && <p class="error" role="alert">{error}</p>}
       {team

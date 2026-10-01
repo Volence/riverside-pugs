@@ -59,10 +59,10 @@ export function Teams({ session }: { session: Session }) {
     }
   };
 
-  if (closed) return <main class="page"><PageHeader title="Teams" /><Empty>Teams are not open yet.</Empty></main>;
+  if (closed) return <main class="page page--profile teampage"><PageHeader title="Teams" /><Empty>Teams are not open yet.</Empty></main>;
 
   return (
-    <main class="page">
+    <main class="page page--profile teampage">
       <PageHeader title="Teams" />
       {error && <p class="error" role="alert">{error}</p>}
       {mine && mine.invites.length > 0 && (
@@ -92,7 +92,7 @@ export function Teams({ session }: { session: Session }) {
           <h3>Start a team</h3>
           <form class="teamform" onSubmit={create}>
             <label>Team name<input value={name} maxLength={24} onInput={(e) => setName((e.target as HTMLInputElement).value)} /></label>
-            <label>Tag<input value={tag} maxLength={5} onInput={(e) => setTag((e.target as HTMLInputElement).value)} /></label>
+            <label class="teamfield--tag">Tag<input value={tag} maxLength={5} onInput={(e) => setTag((e.target as HTMLInputElement).value)} /></label>
             <button class="btn" type="submit" disabled={busy}>Create team</button>
           </form>
         </Panel>
