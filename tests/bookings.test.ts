@@ -93,6 +93,15 @@ describe('creating', () => {
     expect(peopleOf(db, id).filter((p) => p.side === 'a').map((p) => p.steamid).sort()).toEqual([P[0], P[2]].sort());
   });
 
+  it('refuses a team opponent the booker captains or co-captains', () => {
+    const rats = team(P[0], 'Rats', 'RR', [P[2]]);
+    expect(createBooking(db, base({ opponent: { teamId: rats } }) as Parameters<typeof createBooking>[1]))
+      .toEqual({ ok: false, error: 'bad_opponent' });
+    setRole(db, { teamId: rats, by: P[0], target: P[2], role: 'cocaptain' });
+    expect(createBooking(db, base({ by: P[2], opponent: { teamId: rats } }) as Parameters<typeof createBooking>[1]))
+      .toEqual({ ok: false, error: 'bad_opponent' });
+  });
+
   it('refuses a slot without capacity, and the allowance', () => {
     create({ opponent: { steamid: P[1] } });
     create({ by: P[2], opponent: { steamid: P[3] } });
@@ -164,6 +173,23 @@ describe('people', () => {
     for (const sid of P.slice(2, 13)) addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: sid, role: 'player', now: NOW });
     expect(addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[13], role: 'player', now: NOW })).toEqual({ ok: false, error: 'side_full' });
   });
+
+  it('accepting re-checks standing; a player who fell out of it cannot accept', () => {
+    const id = create();
+    addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[5], role: 'player', now: NOW });
+    db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(P[5]);
+    expect(respondPerson(db, { bookingId: id, steamid: P[5], accept: true, now: NOW })).toEqual({ ok: false, error: 'not_open' });
+  });
+
+  it("a team side's captain follows a transfer: the new captain cannot be removed, the old one can", () => {
+    const rats = team(P[0], 'Rats', 'RR', [P[2]]);
+    const id = create({ teamId: rats });
+    transferCaptain(db, { teamId: rats, by: P[0], target: P[2] });
+    expect(removePerson(db, { bookingId: id, by: P[2], steamid: P[2], now: NOW })).toEqual({ ok: false, error: 'is_captain' });
+    expect(removePerson(db, { bookingId: id, by: P[2], steamid: P[0], now: NOW }).ok).toBe(true);
+    const v = bookingView(db, id, { steamid: P[2], staff: false })!;
+    expect(v.sides.find((s) => s.side === 'a')!.captain.steamid).toBe(P[2]);
+  });
 });
 
 describe('cancel, extend, end, no-show', () => {
@@ -190,14 +216,29 @@ describe('cancel, extend, end, no-show', () => {
     expect(getBooking(db, id)!.ended_at).not.toBeNull();
   });
 
-  it('extends only while the capacity rule holds for the extra time', () => {
+  it('extends only while the capacity rule holds for the extra time (staff, any open state)', () => {
     const id = create();
     create({ by: P[2], opponent: { steamid: P[3] }, startsAt: '2026-10-02T22:00:00.000Z' });
     create({ by: P[4], opponent: { steamid: P[5] }, startsAt: '2026-10-02T22:00:00.000Z' });
-    expect(extendBooking(db, { bookingId: id, by: P[0], now: NOW })).toEqual({ ok: false, error: 'no_capacity' });
+    expect(extendBooking(db, { bookingId: id, by: P[9], staff: true, now: NOW })).toEqual({ ok: false, error: 'no_capacity' });
     setSetting(db, 'pug_reserve_servers', '1');
-    expect(extendBooking(db, { bookingId: id, by: P[0], now: NOW })).toEqual({ ok: true, value: { endsAt: '2026-10-02T22:30:00.000Z' } });
+    expect(extendBooking(db, { bookingId: id, by: P[9], staff: true, now: NOW })).toEqual({ ok: true, value: { endsAt: '2026-10-02T22:30:00.000Z' } });
     expect(getBooking(db, id)).toMatchObject({ extended_minutes: 30, warned_minutes: null });
+  });
+
+  it('a captain cannot extend a scheduled booking, only a ready or active one, and only a confirmed side', () => {
+    const id = create();
+    confirmBooking(db, { bookingId: id, by: P[1], now: NOW });
+    expect(extendBooking(db, { bookingId: id, by: P[0], now: NOW })).toEqual({ ok: false, error: 'wrong_state' });
+    holdBox(db, id, servers[3], at(START, -15));
+    markSetup(db, id, at(START, -15));
+    markReady(db, id, at(START, -12));
+    expect(extendBooking(db, { bookingId: id, by: P[0], now: at(START, -12) })).toEqual({ ok: true, value: { endsAt: '2026-10-02T22:30:00.000Z' } });
+  });
+
+  it('an unconfirmed side acts only through confirm or decline, not cancel, extend, end or no-show', () => {
+    const id = create();
+    expect(cancelBooking(db, { bookingId: id, by: P[1], now: NOW })).toEqual({ ok: false, error: 'not_manager' });
   });
 
   it('a no-show is claimed only after the grace, by a side that showed, against one that did not', () => {
@@ -250,6 +291,14 @@ describe('runner writes', () => {
     holdBox(db, id, servers[1], NOW);
     expect(markSetup(db, id, NOW)).toBe(1);
     expect(markSetup(db, id, NOW)).toBe(2);
+  });
+
+  it('markReleased does nothing before an end has started', () => {
+    const id = create();
+    confirmBooking(db, { bookingId: id, by: P[1], now: NOW });
+    holdBox(db, id, servers[1], NOW);
+    markReleased(db, id, NOW);
+    expect(getBooking(db, id)).toMatchObject({ state: 'held', ended_at: null });
   });
 });
 

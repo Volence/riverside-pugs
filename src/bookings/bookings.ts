@@ -114,6 +114,19 @@ export function managesSide(db: DB, s: SideRow, steamid: string): boolean {
 export function managedSides(db: DB, id: number, steamid: string): Side[] {
   return sidesOf(db, id).filter((s) => managesSide(db, s, steamid)).map((s) => s.side);
 }
+/** Sides this steamid manages AND that have confirmed: an invited pickup
+ *  captain (side b before it confirms) manages the side in the sense that
+ *  they will become its captain, but they act only through confirm or
+ *  decline until then, never cancel, extend, end or claim a no-show. */
+function actingSides(db: DB, id: number, steamid: string): Side[] {
+  return sidesOf(db, id).filter((s) => managesSide(db, s, steamid) && s.confirmed_at !== null).map((s) => s.side);
+}
+/** The side's captain right now: for a team side, the team's current captain
+ *  (transferCaptain may have moved it since the row was written); for a
+ *  pickup side, the stored captain_steamid, which is stable. */
+function currentCaptain(db: DB, s: Pick<SideRow, 'team_id' | 'captain_steamid'>): string {
+  return s.team_id !== null ? getTeam(db, s.team_id)!.captain_steamid : s.captain_steamid;
+}
 export function sideName(db: DB, s: SideRow): string {
   if (s.team_id !== null) return getTeam(db, s.team_id)?.name ?? 'A team';
   return `${getPlayer(db, s.captain_steamid)?.name ?? 'Someone'}'s group`;
@@ -235,6 +248,8 @@ export function createBooking(db: DB, o: {
     if ('teamId' in opp) {
       const t = getTeam(db, opp.teamId);
       if (!t || t.disbanded_at || t.id === teamId) return fail('bad_opponent');
+      const oppRole = roleOf(db, t.id, o.by);
+      if (oppRole === 'captain' || oppRole === 'cocaptain') return fail('bad_opponent');
       if (!canUse(db, t.captain_steamid)) return fail('not_open');
       bTeam = t.id;
       bCaptain = t.captain_steamid;
@@ -361,8 +376,12 @@ export function respondPerson(db: DB, o: { bookingId: number; steamid: string; a
     // Side b's invited captain answers through confirm/decline, not here.
     const s = sideRow(db, b.id, row.side)!;
     if (s.confirmed_at === null) return fail('wrong_state');
-    if (o.accept) db.prepare("UPDATE booking_people SET status = 'accepted' WHERE booking_id = ? AND steamid = ?").run(b.id, o.steamid);
-    else db.prepare('DELETE FROM booking_people WHERE booking_id = ? AND steamid = ?').run(b.id, o.steamid);
+    if (o.accept) {
+      if (!canUse(db, o.steamid)) return fail('not_open');
+      db.prepare("UPDATE booking_people SET status = 'accepted' WHERE booking_id = ? AND steamid = ?").run(b.id, o.steamid);
+    } else {
+      db.prepare('DELETE FROM booking_people WHERE booking_id = ? AND steamid = ?').run(b.id, o.steamid);
+    }
     logEvent(db, b.id, o.steamid, o.accept ? 'person_accepted' : 'person_declined', {}, now);
     return ok(null);
   })();
@@ -377,7 +396,7 @@ export function removePerson(db: DB, o: { bookingId: number; by: string; steamid
     const row = db.prepare('SELECT * FROM booking_people WHERE booking_id = ? AND steamid = ?').get(b.id, o.steamid) as PersonRow | undefined;
     if (!row) return fail('not_person');
     const s = sideRow(db, b.id, row.side)!;
-    if (s.captain_steamid === o.steamid) return fail('is_captain');
+    if (currentCaptain(db, s) === o.steamid) return fail('is_captain');
     if (!o.staff && o.by !== o.steamid && !managesSide(db, s, o.by)) return fail('not_manager');
     db.prepare('DELETE FROM booking_people WHERE booking_id = ? AND steamid = ?').run(b.id, o.steamid);
     logEvent(db, b.id, o.by, o.by === o.steamid ? 'person_left' : 'person_removed', { steamid: o.steamid }, now);
@@ -392,7 +411,7 @@ export function cancelBooking(db: DB, o: { bookingId: number; by: string; staff?
     const b = getBooking(db, o.bookingId);
     if (!b) return fail('not_found');
     if (!isOpen(b)) return fail('wrong_state');
-    const mine = managedSides(db, b.id, o.by);
+    const mine = actingSides(db, b.id, o.by);
     if (!o.staff && mine.length === 0) return fail('not_manager');
     // Staff cancels belong to no side (scrim spec 3a: never counted against anyone).
     const side = o.staff ? null : mine[0];
@@ -407,8 +426,14 @@ export function extendBooking(db: DB, o: { bookingId: number; by: string; staff?
   return db.transaction((): Result<{ endsAt: string }> => {
     const b = getBooking(db, o.bookingId);
     if (!b) return fail('not_found');
-    if (!isOpen(b)) return fail('wrong_state');
-    if (!o.staff && managedSides(db, b.id, o.by).length === 0) return fail('not_manager');
+    if (o.staff) {
+      if (!isOpen(b)) return fail('wrong_state');
+    } else {
+      // A captain only extends a booking that is already running, and only
+      // as a confirmed side; staff may extend any open booking.
+      if ((b.state !== 'ready' && b.state !== 'active') || b.ending_at !== null) return fail('wrong_state');
+      if (actingSides(db, b.id, o.by).length === 0) return fail('not_manager');
+    }
     const ext = bookingLimits(db).extendMinutes;
     const from = Date.parse(b.ends_at);
     if (capacityProblem(db, { region: b.region, startMs: from, endMs: from + ext * 60_000, exceptId: b.id }) !== null) return fail('no_capacity');
@@ -425,7 +450,7 @@ export function claimNoShow(db: DB, o: { bookingId: number; by: string; now?: Da
     const b = getBooking(db, o.bookingId);
     if (!b) return fail('not_found');
     if ((b.state !== 'ready' && b.state !== 'active') || b.ending_at !== null) return fail('wrong_state');
-    const mine = managedSides(db, b.id, o.by)[0];
+    const mine = actingSides(db, b.id, o.by)[0];
     if (!mine) return fail('not_manager');
     const absent: Side = mine === 'a' ? 'b' : 'a';
     const grace = bookingRules(b)?.noShowGraceMinutes ?? 15;
@@ -445,7 +470,7 @@ export function endBooking(db: DB, o: { bookingId: number; by: string; staff?: b
     const b = getBooking(db, o.bookingId);
     if (!b) return fail('not_found');
     if ((b.state !== 'ready' && b.state !== 'active') || b.ending_at !== null) return fail('wrong_state');
-    if (!o.staff && managedSides(db, b.id, o.by).length === 0) return fail('not_manager');
+    if (!o.staff && actingSides(db, b.id, o.by).length === 0) return fail('not_manager');
     close(db, b.id, 'ended', o.staff ? 'staff' : 'captain', now);
     logEvent(db, b.id, o.by, 'ended', { staff: !!o.staff }, now);
     return ok(null);
@@ -512,7 +537,7 @@ export function closeBooking(db: DB, id: number, state: 'ended' | 'cancelled', r
 /** The box is back in the pool (or there was none): the booking holds nothing. */
 export function markReleased(db: DB, id: number, now: Date): void {
   db.transaction(() => {
-    if (db.prepare('UPDATE bookings SET ended_at = ? WHERE id = ? AND ended_at IS NULL').run(now.toISOString(), id).changes > 0) {
+    if (db.prepare('UPDATE bookings SET ended_at = ? WHERE id = ? AND ended_at IS NULL AND ending_at IS NOT NULL').run(now.toISOString(), id).changes > 0) {
       logEvent(db, id, null, 'released', {}, now);
     }
   })();
@@ -590,10 +615,11 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
     rules, gameConfig: config ?? { key: b.game_config, label: b.game_config },
     sides: sidesOf(db, id).map((s) => {
       const t = s.team_id !== null ? getTeam(db, s.team_id) : undefined;
+      const captainId = t ? t.captain_steamid : s.captain_steamid;
       return {
         side: s.side, name: sideName(db, s),
         team: t ? { id: t.id, slug: t.slug, name: t.name, tag: t.tag, logoKey: t.logo_key } : null,
-        captain: { steamid: s.captain_steamid, name: getPlayer(db, s.captain_steamid)?.name ?? s.captain_steamid },
+        captain: { steamid: captainId, name: getPlayer(db, captainId)?.name ?? captainId },
         confirmed: s.confirmed_at !== null, peakPresent: s.peak_present, noShow: s.no_show_at !== null,
         people: people.filter((p) => p.side === s.side).map((p) => {
           const pl = getPlayer(db, p.steamid);
