@@ -14,7 +14,7 @@ import { bookingMessage } from './messages.js';
 import { bookingLimits } from './rules.js';
 import {
   acceptedPeople, bookingRules, closeBooking, expireUnconfirmed, getBooking, markActive, markReady, markReleased, markSetup,
-  openBookings, recordPresence, setReminded, setWarned, sideName, sidesOf, holdBox, type BookingRow, type Side, type SideRow,
+  openBookings, recordPresence, resetSetupAttempts, setReminded, setWarned, sideName, sidesOf, holdBox, type BookingRow, type Side, type SideRow,
 } from './bookings.js';
 
 /**
@@ -96,6 +96,8 @@ export class BookingRunner {
   /** Bookings with a setup or wind-down running; nothing else starts on them. */
   private readonly busy = new Map<number, Promise<void>>();
   private ticking = false;
+  /** Bookings already alerted as started-with-no-server; once per process. */
+  private readonly latePublished = new Set<number>();
 
   constructor(private readonly deps: BookingRunnerDeps) {
     this.db = deps.db;
@@ -120,7 +122,11 @@ export class BookingRunner {
   resume(): void {
     for (const b of openBookings(this.db)) {
       if (b.ending_at !== null) this.track(b.id, () => this.windDown(b.id, false));
-      else if (b.state === 'held' || b.state === 'setup') this.track(b.id, () => this.setup(b.id));
+      else if (b.state === 'held' || b.state === 'setup') {
+        // A web restart is not a failed try: start the retry count fresh.
+        resetSetupAttempts(this.db, b.id);
+        this.track(b.id, () => this.setup(b.id));
+      }
     }
   }
 
@@ -135,7 +141,17 @@ export class BookingRunner {
       if (Date.parse(b.starts_at) - lead > nowMs) continue;
       if (sidesOf(this.db, b.id).some((s) => s.confirmed_at === null)) continue;
       const server = this.pickBox(b);
-      if (!server || !holdBox(this.db, b.id, server.id, new Date(nowMs))) { waiting = true; continue; }
+      if (!server || !holdBox(this.db, b.id, server.id, new Date(nowMs))) {
+        waiting = true;
+        if (nowMs >= Date.parse(b.starts_at) && !this.latePublished.has(b.id)) {
+          this.latePublished.add(b.id);
+          publishAdminEvent({
+            kind: 'problem',
+            text: `Booking ${b.id} started at ${b.starts_at.slice(11, 16)} UTC and still has no server: no idle box in its region can load its playlist, or every box is busy.`,
+          });
+        }
+        continue;
+      }
       console.log(`[booking] ${b.id} holds ${server.name}`);
       this.track(b.id, () => this.setup(b.id));
     }
@@ -178,7 +194,12 @@ export class BookingRunner {
         if (attempt < SETUP_TRIES) continue;
         publishAdminEvent({ kind: 'problem', text: `Booking ${id} could not be set up on ${server.name} (${why}). It is cancelled and the box is going back to the pool.` });
         if (closeBooking(this.db, id, 'cancelled', 'setup_failed', new Date(this.now()))) {
-          this.tell(id, this.everyone(id), 'booking_cancelled', { reason: 'the server could not be set up' });
+          // A notice that fails to send must never block the box going back to the pool below.
+          try {
+            this.tell(id, this.everyone(id), 'booking_cancelled', { reason: 'the server could not be set up' });
+          } catch (notifyErr) {
+            console.warn(`[booking] ${id}: setup_failed notice failed:`, notifyErr instanceof Error ? notifyErr.message : notifyErr);
+          }
         }
         break;
       }
@@ -270,16 +291,93 @@ export class BookingRunner {
     this.track(id, () => this.windDown(id, true));
   }
 
-  /** The minute pass. Task 8 adds expiry, reminders and the watch. */
+  /** The minute pass. Never runs two at once. */
   async tick(): Promise<void> {
     if (this.ticking) return;
     this.ticking = true;
     try {
+      const now = new Date(this.now());
+      for (const id of expireUnconfirmed(this.db, now)) {
+        this.tell(id, this.everyone(id), 'booking_cancelled', { reason: 'it was not confirmed in time' });
+      }
+      this.remind(now);
       this.allocate();
-      for (const b of openBookings(this.db)) if (b.ending_at !== null) this.settle(b.id);
+      for (const b of openBookings(this.db)) {
+        if (b.ending_at !== null) { this.settle(b.id); continue; }
+        if ((b.state === 'ready' || b.state === 'active') && !this.busy.has(b.id)) await this.watch(b, now);
+      }
     } finally {
       this.ticking = false;
     }
+  }
+
+  /** 60 and 15 minutes before the start, once each, to everyone accepted. A
+   *  booking made 40 minutes ahead gets the first one at once ("in 40"). */
+  private remind(now: Date): void {
+    for (const b of openBookings(this.db)) {
+      if (b.ending_at !== null || b.state === 'active') continue;
+      if (sidesOf(this.db, b.id).some((s) => s.confirmed_at === null)) continue;
+      const left = Date.parse(b.starts_at) - now.getTime();
+      if (left <= 0) continue;
+      const minutes = Math.round(left / 60_000);
+      const to = acceptedPeople(this.db, b.id).map((p) => p.steamid);
+      if (left <= 15 * 60_000 && b.reminded_15_at === null) {
+        setReminded(this.db, b.id, 15, now);
+        setReminded(this.db, b.id, 60, now);
+        this.tell(b.id, to, 'booking_starting', { minutes });
+      } else if (left <= 60 * 60_000 && left > 15 * 60_000 && b.reminded_60_at === null) {
+        setReminded(this.db, b.id, 60, now);
+        this.tell(b.id, to, 'booking_starting', { minutes });
+      }
+    }
+  }
+
+  /** One look at a running booking's box (minute watch: presence, active,
+   *  time/idle ends, minutes-left warnings). */
+  private async watch(b: BookingRow, now: Date): Promise<void> {
+    const server = b.server_id !== null ? getServer(this.db, b.server_id) : undefined;
+    if (!server) return;
+    let humans: ReturnType<typeof parseStatusPlayers>;
+    try {
+      const [st] = await this.deps.rcon(server, ['status']);
+      humans = parseStatusPlayers(st);
+    } catch (err) {
+      console.warn(`[booking] ${b.id}: status on ${server.name} failed:`, err instanceof Error ? err.message : err);
+      return;
+    }
+    const on = new Set(humans.map((h) => h.steamid64).filter((s): s is string => s !== null));
+    const people = acceptedPeople(this.db, b.id);
+    const present = {
+      a: people.filter((p) => p.side === 'a' && on.has(p.steamid)).length,
+      b: people.filter((p) => p.side === 'b' && on.has(p.steamid)).length,
+    };
+    recordPresence(this.db, b.id, present, humans.length > 0, now);
+    if (b.state === 'ready' && present.a + present.b > 0) markActive(this.db, b.id, now);
+
+    const fresh = getBooking(this.db, b.id)!;
+    const nowMs = now.getTime();
+    const endsMs = Date.parse(fresh.ends_at);
+    if (nowMs >= endsMs) { this.endNow(b.id, 'time', now); return; }
+    const limits = bookingLimits(this.db);
+    const grace = (bookingRules(fresh)?.noShowGraceMinutes ?? 15) * 60_000;
+    const idleFrom = Math.max(fresh.last_human_at ? Date.parse(fresh.last_human_at) : 0, Date.parse(fresh.starts_at) + grace);
+    if (humans.length === 0 && nowMs - idleFrom >= limits.idleEndMinutes * 60_000) { this.endNow(b.id, 'idle', now); return; }
+
+    const leftMin = (endsMs - nowMs) / 60_000;
+    const crossed = WARN_AT_MINUTES.filter((m) => leftMin <= m && (fresh.warned_minutes === null || fresh.warned_minutes > m));
+    if (crossed.length > 0) {
+      const m = Math.min(...crossed);
+      setWarned(this.db, b.id, m);
+      try {
+        await this.deps.rcon(server, [`say [Booking] About ${m} minutes left on this booking (until ${fresh.ends_at.slice(11, 16)} UTC).`]);
+      } catch {
+        // Best effort.
+      }
+    }
+  }
+
+  private endNow(id: number, reason: 'time' | 'idle', now: Date): void {
+    if (closeBooking(this.db, id, 'ended', reason, now)) this.settle(id);
   }
 
   // ---------- notices ----------

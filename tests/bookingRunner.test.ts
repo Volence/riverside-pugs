@@ -131,6 +131,22 @@ describe('allocation', () => {
     const id = book({ playlist: ['dead_center'] });
     expect(runner.pickBox(getBooking(db, id)!)?.id).toBe(1);
   });
+
+  it('alerts staff once when a confirmed booking is past its start with still no server', () => {
+    const events: AdminEvent[] = [];
+    const unsubscribe = subscribeAdminEvents((e) => events.push(e));
+    const id = book();
+    db.prepare("UPDATE servers SET status = 'live'").run();
+    now = START + MIN;
+    runner.allocate();
+    runner.allocate();
+    unsubscribe();
+    const alerts = events.filter((e) => e.kind === 'problem' && e.text.includes(`Booking ${id} `));
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({
+      text: `Booking ${id} started at 20:00 UTC and still has no server: no idle box in its region can load its playlist, or every box is busy.`,
+    });
+  });
 });
 
 describe('setup failures', () => {
@@ -151,6 +167,20 @@ describe('setup failures', () => {
     expect(events.some((e) => e.kind === 'problem' && /l4d_booking/.test(e.text))).toBe(true);
     expect(dms.filter((d) => /cancelled/.test(d.content)).map((d) => d.to).sort()).toEqual(['d0', 'd1']);
     expect(sideRow(db, id, 'a')!.no_show_at).toBeNull();
+  });
+
+  it('a setup_failed notice that fails to send does not block releasing the box', async () => {
+    const broken = new Notifier({ db, dm: () => { throw new Error('boom'); } });
+    const r = build({ notifier: broken });
+    box.ccc.plugin = false;
+    const id = book();
+    now = START - 15 * MIN;
+    r.allocate();
+    await r.idle();
+    const b = getBooking(db, id)!;
+    expect(b).toMatchObject({ state: 'cancelled', end_reason: 'setup_failed' });
+    expect(b.ended_at).not.toBeNull();
+    expect(released).toEqual([3]);
   });
 
   it('a config that takes on the second try still makes the booking ready', async () => {
@@ -191,6 +221,21 @@ describe('resume after a web restart', () => {
     expect(getBooking(db, ending)!.ended_at).not.toBeNull();
     expect(sent.filter((s) => s.server === 'bb').flatMap((s) => s.cmds).some((c) => c.startsWith('say '))).toBe(false);
   });
+
+  it('does not spend a setup try on a web restart: a booking caught mid-setup gets a full retry', async () => {
+    const id = book();
+    now = START - 15 * MIN;
+    holdBox(db, id, 3, new Date(now));
+    markSetup(db, id, new Date(now));
+    expect(getBooking(db, id)!.setup_attempts).toBe(1);
+    box.ccc.plugin = false;
+    const fresh = build();
+    fresh.resume();
+    await fresh.idle();
+    const b = getBooking(db, id)!;
+    expect(b).toMatchObject({ state: 'cancelled', end_reason: 'setup_failed', setup_attempts: 2 });
+    expect(restarted).toEqual(['ccc', 'ccc']);
+  });
 });
 
 describe('notices', () => {
@@ -219,5 +264,118 @@ describe('bookingLines', () => {
     db.prepare("UPDATE players SET name = 'a\"b;c ü' WHERE steamid = ?").run(P[0]);
     const lines = bookingLines(db, getBooking(db, id)!);
     expect(lines.find((l) => l.startsWith('l4d_booking_notice'))).toBe('l4d_booking_notice "Booked: abc ?\'s group vs p1\'s group until 22:00 UTC"');
+  });
+});
+
+describe('the minute watch', () => {
+  const ready = async () => {
+    const id = book();
+    now = START - 15 * MIN;
+    runner.allocate();
+    await runner.idle();
+    sent = []; dms = [];
+    return id;
+  };
+
+  it('reminds once at 60 and once at 15 minutes before the start', async () => {
+    const id = book();
+    now = START - 61 * MIN;
+    await runner.tick();
+    expect(dms).toEqual([]);
+    now = START - 59 * MIN;
+    await runner.tick();
+    await runner.tick();
+    expect(dms.filter((d) => /starts in 59 minutes/.test(d.content)).map((d) => d.to).sort()).toEqual(['d0', 'd1']);
+    now = START - 15 * MIN;
+    await runner.tick();
+    await runner.idle();
+    expect(dms.filter((d) => /starts in 15 minutes/.test(d.content))).toHaveLength(2);
+    expect(getBooking(db, id)!.reminded_15_at).not.toBeNull();
+  });
+
+  it('records presence per side, turns active, and keeps the peak', async () => {
+    const id = await ready();
+    addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[2], role: 'player', now: new Date(now) });
+    respondPerson(db, { bookingId: id, steamid: P[2], accept: true, now: new Date(now) });
+    box.ccc.humans = [P[0], P[2], P[1], '76561199999999999'];
+    now = START - 5 * MIN;
+    await runner.tick();
+    expect(getBooking(db, id)!.state).toBe('active');
+    expect(sideRow(db, id, 'a')!.peak_present).toBe(2);
+    expect(sideRow(db, id, 'b')!.peak_present).toBe(1);
+    box.ccc.humans = [P[0]];
+    now += MIN;
+    await runner.tick();
+    expect(sideRow(db, id, 'a')!.peak_present).toBe(2);
+  });
+
+  it('ends an empty booking after the grace plus the idle time, with a goodbye, kick and release', async () => {
+    const id = await ready();
+    // Casual Scrim grace is 15 minutes, idle end 10: nobody ever came, so 25 minutes after the start.
+    now = START + 24 * MIN;
+    await runner.tick();
+    expect(getBooking(db, id)!.ending_at).toBeNull();
+    now = START + 25 * MIN;
+    await runner.tick();
+    await runner.idle();
+    const b = getBooking(db, id)!;
+    expect(b).toMatchObject({ state: 'ended', end_reason: 'idle' });
+    expect(b.ended_at).not.toBeNull();
+    const cmds = sent.flatMap((s) => s.cmds);
+    expect(cmds).toContain('say [Booking] This booked server is closing: nobody was on it.');
+    expect(cmds).toContain('sm_kick @humans "The booking is over. Thanks for playing."');
+    expect(released).toEqual([3]);
+  });
+
+  it('a box people left late counts idle from the last human seen', async () => {
+    const id = await ready();
+    box.ccc.humans = [P[0]];
+    now = START + 60 * MIN;
+    await runner.tick();
+    box.ccc.humans = [];
+    now = START + 69 * MIN;
+    await runner.tick();
+    expect(getBooking(db, id)!.ending_at).toBeNull();
+    now = START + 70 * MIN;
+    await runner.tick();
+    expect(getBooking(db, id)!.end_reason).toBe('idle');
+  });
+
+  it('warns at 30, 10 and 5 minutes left, once each, then ends on time', async () => {
+    const id = await ready();
+    box.ccc.humans = [P[0]];
+    const says = () => sent.flatMap((s) => s.cmds).filter((c) => c.startsWith('say [Booking] About'));
+    now = START + 89 * MIN; await runner.tick();
+    expect(says()).toEqual([]);
+    now = START + 90 * MIN; await runner.tick();
+    now = START + 91 * MIN; await runner.tick();
+    expect(says()).toEqual(['say [Booking] About 30 minutes left on this booking (until 22:00 UTC).']);
+    now = START + 110 * MIN; await runner.tick();
+    now = START + 115 * MIN; await runner.tick();
+    now = START + 116 * MIN; await runner.tick();
+    expect(says()).toEqual([
+      'say [Booking] About 30 minutes left on this booking (until 22:00 UTC).',
+      'say [Booking] About 10 minutes left on this booking (until 22:00 UTC).',
+      'say [Booking] About 5 minutes left on this booking (until 22:00 UTC).',
+    ]);
+    now = START + 120 * MIN; await runner.tick();
+    await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ state: 'ended', end_reason: 'time' });
+  });
+
+  it('judges nothing while rcon is down', async () => {
+    const id = await ready();
+    box.ccc.down = true;
+    now = START + 60 * MIN;
+    await runner.tick();
+    expect(getBooking(db, id)!.ending_at).toBeNull();
+  });
+
+  it('expires an unconfirmed invite and tells both sides', async () => {
+    const id = book({ confirm: false });
+    now = START - 29 * MIN;
+    await runner.tick();
+    expect(getBooking(db, id)).toMatchObject({ state: 'cancelled', end_reason: 'unconfirmed' });
+    expect(dms.map((d) => d.to).sort()).toEqual(['d0', 'd1']);
   });
 });

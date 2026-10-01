@@ -494,6 +494,12 @@ export function holdBox(db: DB, id: number, serverId: number, now: Date): boolea
   })();
 }
 
+/** A web restart must not spend a setup try: bookkeeping only (no audit
+ *  row), called by the runner's resume() before it re-runs setup. */
+export function resetSetupAttempts(db: DB, id: number): void {
+  db.prepare("UPDATE bookings SET setup_attempts = 0 WHERE id = ? AND state IN ('held','setup') AND ending_at IS NULL").run(id);
+}
+
 /** Start (or restart) setup; the attempt number, or null when the booking is
  *  not held or ending. */
 export function markSetup(db: DB, id: number, now: Date): number | null {
