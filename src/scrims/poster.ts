@@ -5,6 +5,7 @@ import { escapeName } from '../identity.js';
 import { getMessage, messagesInState, saveMessage, setMessageState } from '../discord/messageStore.js';
 import { getPlayer } from '../players.js';
 import { getSetting } from '../settings.js';
+import { competitivePublic } from '../teams/access.js';
 import { getTeam } from '../teams/teams.js';
 import type { BotTransport, MessagePayload } from '../discord/transport.js';
 import { sideSr, type ScrimSide } from './rules.js';
@@ -136,9 +137,12 @@ export class ScrimPoster {
   }
 
   /** Posts a card for every open or pending public post with none yet, and
-   *  edits any whose rendered payload changed. A blank channel setting just
-   *  leaves posts with no card waiting for the next tick; posts that already
-   *  have one keep being edited in their own stored channel regardless. */
+   *  edits any whose rendered payload changed. A blank channel setting, or
+   *  competitive play not yet public (`competitivePublic`, off under 'off'
+   *  and 'admins'), just leaves posts with no card waiting for the next tick;
+   *  posts that already have one keep being edited in their own stored
+   *  channel regardless, so an existing card still updates or closes even
+   *  after the switch moves back off 'everyone'. */
   private async postAndEdit(): Promise<void> {
     const { db, transport, publicUrl } = this.deps;
     const channelId = getSetting(db, 'discord_scrims_channel_id') ?? '';
@@ -153,7 +157,7 @@ export class ScrimPoster {
       const row = getMessage(db, KIND, ref);
 
       if (!row) {
-        if (!channelId) continue;
+        if (!channelId || !competitivePublic(db)) continue;
         try {
           const messageId = await transport.send(channelId, payload);
           saveMessage(db, { kind: KIND, ref, channelId, messageId });
