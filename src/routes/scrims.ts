@@ -119,6 +119,10 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
     if (id === null) return reply.code(404).send(NOT_FOUND);
     const r = S.withdrawPost(db, { postId: id, by: me });
     if (!r.ok) return refuse(reply, r);
+    for (const acceptId of r.value.acceptIds) {
+      const accept = S.getAccept(db, acceptId);
+      if (accept) tell(scrimSideManagers(db, accept), 'scrim_declined', id, { reason: 'the post was withdrawn' });
+    }
     return r.value;
   });
 
@@ -150,11 +154,11 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
     if (!me) return;
     const id = idParam(req);
     if (id === null) return reply.code(404).send(NOT_FOUND);
-    // Read before declineAccept writes: its own captain, for the notice.
+    // Read before declineAccept writes: its own side, for the notice.
     const accept = S.getAccept(db, id);
     const r = S.declineAccept(db, { acceptId: id, by: me });
     if (!r.ok) return refuse(reply, r);
-    if (accept) tell([accept.captain_steamid], 'scrim_declined', accept.post_id);
+    if (accept) tell(scrimSideManagers(db, accept), 'scrim_declined', accept.post_id);
     return r.value;
   });
 
@@ -168,17 +172,28 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
     const accept = S.getAccept(db, id);
     const post = accept ? S.getPost(db, accept.post_id) : undefined;
     const r = S.confirmAccept(db, { acceptId: id, by: me });
-    if (!r.ok) return refuse(reply, r);
+    if (!r.ok) {
+      // The slot was taken from under this acceptance: the poster already
+      // sees the refusal (and its nearestSlot) in this response, but the
+      // accepting side only learns about it if told, so tell their managers.
+      if (r.error === 'no_capacity' && accept) {
+        tell(scrimSideManagers(db, accept), 'scrim_declined', accept.post_id, { nearestSlot: r.nearestSlot ?? null });
+      }
+      return refuse(reply, r);
+    }
     const { bookingId, takenAcceptIds } = r.value;
-    runner?.onCreated(bookingId);
-    runner?.onConfirmed(bookingId);
+    // The booking is already created AND confirmed inside confirmAccept's own
+    // transaction; onCreated/onConfirmed would send booking_invite and
+    // booking_confirmed DMs that are stale or duplicate here (scrim_booked,
+    // below, is the one notice this flow sends). allocate() still runs, as
+    // every booking needs its box claimed.
     runner?.allocate();
     if (post && accept) {
       tell([...scrimSideManagers(db, post), ...scrimSideManagers(db, accept)], 'scrim_booked', post.id, { bookingId });
     }
     for (const takenId of takenAcceptIds) {
       const taken = S.getAccept(db, takenId);
-      if (taken) tell([taken.captain_steamid], 'scrim_taken', taken.post_id);
+      if (taken) tell(scrimSideManagers(db, taken), 'scrim_taken', taken.post_id);
     }
     return reply.code(200).send({ bookingId });
   });

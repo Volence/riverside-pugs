@@ -13,18 +13,19 @@ export type ScrimNotifyType = 'scrim_challenge' | 'scrim_accepted' | 'scrim_book
 
 type SideRef = Pick<PostRow, 'team_id' | 'captain_steamid'>;
 
-/** Everyone who manages a side right now: a team's captain and co-captains,
- *  or the pickup captain. The same rule as scrims.ts's own (private)
- *  managersOf, and src/bookings/runner.ts's sideManagers; duplicated here
- *  because neither is exported for a route or a tick to call. */
-export function scrimSideManagers(db: DB, s: SideRef): string[] {
-  if (s.team_id !== null) return activeMembers(db, s.team_id).filter((m) => m.role === 'captain' || m.role === 'cocaptain').map((m) => m.steamid);
-  return [s.captain_steamid];
-}
-
-/** The target team's current managers, for a direct challenge notice. */
+/** A team's current captain and co-captains, for a direct challenge notice
+ *  and the one rule scrimSideManagers shares with it below. The same rule as
+ *  scrims.ts's own (private) managersOf, and src/bookings/runner.ts's
+ *  sideManagers; duplicated here because neither is exported for a route or
+ *  a tick to call. */
 export function teamManagers(db: DB, teamId: number): string[] {
   return activeMembers(db, teamId).filter((m) => m.role === 'captain' || m.role === 'cocaptain').map((m) => m.steamid);
+}
+
+/** Everyone who manages a side right now: a team's current managers
+ *  (teamManagers), or the pickup captain alone. */
+export function scrimSideManagers(db: DB, s: SideRef): string[] {
+  return s.team_id !== null ? teamManagers(db, s.team_id) : [s.captain_steamid];
 }
 
 function sideLabel(db: DB, s: SideRef): string {
@@ -37,7 +38,7 @@ function sideLabel(db: DB, s: SideRef): string {
  *  src/bookings/messages.ts. */
 export function scrimMessage(
   db: DB, publicUrl: string, postId: number, type: ScrimNotifyType,
-  extra: { acceptId?: number; bookingId?: number; reason?: string } = {},
+  extra: { acceptId?: number; bookingId?: number; reason?: string; nearestSlot?: string | null } = {},
 ): MessagePayload | null {
   const p = getPost(db, postId);
   if (!p) return null;
@@ -64,6 +65,12 @@ export function scrimMessage(
       content = `Another side was chosen for ${posterLabel}'s scrim post (${when}); this acceptance is closed.`;
       break;
     case 'scrim_declined': {
+      if (extra.nearestSlot !== undefined) {
+        content = extra.nearestSlot
+          ? `The slot for ${posterLabel}'s scrim post is no longer free. The nearest free slot is ${whenUtc(extra.nearestSlot)}; the poster can re-post it.`
+          : `The slot for ${posterLabel}'s scrim post is no longer free, and no nearby slot is open either. The poster can re-post it for another time.`;
+        break;
+      }
       const why = extra.reason ?? 'the poster declined it';
       content = `Your scrim accept for ${posterLabel}'s post (${when}) is closed: ${escapeName(why)}.`;
       break;
