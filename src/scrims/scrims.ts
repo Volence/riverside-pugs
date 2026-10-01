@@ -52,7 +52,7 @@ export const SCRIM_ERRORS = {
   own_post: { status: 409, text: 'That is your own post.' },
   already_accepted: { status: 409, text: 'That side has already accepted this post.' },
   challenge_side: { status: 400, text: 'This challenge is for your team; accept it as that team.' },
-  too_late: { status: 409, text: 'Too close to the start to accept; post a new scrim instead.' },
+  too_late: { status: 409, text: 'Too close to the start: an acceptance needs at least 30 minutes to be answered.' },
   too_many_posts: { status: 409, text: 'That side already has 3 open scrim posts. Withdraw one first.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type ScrimError = keyof typeof SCRIM_ERRORS;
@@ -185,6 +185,10 @@ export function createPost(db: DB, o: {
   if (!canUse(db, o.by)) return fail('not_open');
   const startMs = parseStart(o.startsAt, nowMs, limits);
   if (startMs === null) return fail('bad_time');
+  // A post starting inside the cutoff could never be accepted (acceptPost
+  // refuses it too_late), yet would still show on the board and get a
+  // Discord card with a live-looking Accept button. Refuse it up front.
+  if (startMs - nowMs <= ACCEPT_CUTOFF_MS) return fail('too_late');
   const minutes = parseMinutes(o.minutes, limits);
   if (minutes === null) return fail('bad_length');
   const campaigns = parsePlaylist(db, o.campaigns, limits.playlistMax);
@@ -382,8 +386,12 @@ export function confirmAccept(db: DB, o: { acceptId: number; by: string; now?: D
  * Open or pending posts whose posting or challenged team was disbanded are
  * withdrawn first, with their pending acceptances. Then open or pending posts
  * at or past their start expire, with their pending acceptances. Pending
- * acceptances ACCEPT_TTL_MS old, or within ACCEPT_CUTOFF_MS of their post's
- * start, expire too, and a post left with none pending is open again.
+ * acceptances ACCEPT_TTL_MS old expire too, and a post left with none
+ * pending is open again. A pending acceptance that instead times out because
+ * its post's start has come within ACCEPT_CUTOFF_MS also expires, but its
+ * post is closed (expired) rather than reopened: a new acceptance that close
+ * to the start would itself be refused too_late, so an Open post with a live
+ * Accept button nobody could use would be worse than just closing it early.
  * Returns what expired and what was withdrawn, for notices.
  */
 export function expire(db: DB, now: Date): { posts: number[]; accepts: number[]; withdrawn: { posts: number[]; accepts: number[] } } {
@@ -412,15 +420,25 @@ export function expire(db: DB, now: Date): { posts: number[]; accepts: number[];
         WHERE a.status = 'pending' AND p.status = 'pending'`,
     ).all() as { id: number; post_id: number; created_at: string; starts_at: string }[];
     const touched = new Set<number>();
+    const closesPost = new Set<number>();
     for (const a of stale) {
       if (acceptTimedOut(a.created_at, a.starts_at, nowMs)) {
         accepts.push(a.id);
         touched.add(a.post_id);
+        if (Date.parse(a.starts_at) - ACCEPT_CUTOFF_MS <= nowMs) closesPost.add(a.post_id);
       }
     }
     const setExpired = db.prepare("UPDATE scrim_accepts SET status = 'expired', responded_at = ? WHERE id = ?");
     for (const id of accepts) setExpired.run(t, id);
-    for (const id of touched) reopenIfIdle(db, id);
+    const closePost = db.prepare("UPDATE scrim_posts SET status = 'expired' WHERE id = ? AND status = 'pending'");
+    for (const id of touched) {
+      if (closesPost.has(id)) {
+        if (closePost.run(id).changes > 0) posts.push(id);
+      } else {
+        reopenIfIdle(db, id);
+      }
+    }
+    posts.sort((x, y) => x - y);
     return { posts, accepts: accepts.sort((x, y) => x - y), withdrawn };
   })();
 }
