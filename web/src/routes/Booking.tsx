@@ -317,6 +317,15 @@ export function Booking({ id, session }: { id: string; session: Session }) {
         <p>{v.ending && !v.ended && v.state !== 'cancelled' && v.state !== 'no_show' ? 'Closing.' : STATE_LINE[v.state]}{v.cancel?.reason ? ` Reason: ${v.cancel.reason}` : ''}</p>
         {running && <p class="bookingcount">{countLine}</p>}
         {running && v.closeAt && <p class="warning">Closing soon. +1 campaign keeps the server for one more.</p>}
+        {v.recovery && (
+          <p class="warning">
+            {v.recovery.waiting
+              ? 'The server went down. Waiting for another one; the new connect line will show here and in your DMs.'
+              : v.recovery.moved
+                ? 'The server went down. Setting up another one now.'
+                : 'The server restarted. Setting it up again; your game comes back on the map it was on.'}
+          </p>
+        )}
         {v.connect && (
           <p class="bookingconnect">In the game console: <code>{`connect ${v.connect.host}:${v.connect.port}; password ${v.connect.password}`}</code></p>
         )}
@@ -377,6 +386,9 @@ export function Booking({ id, session }: { id: string; session: Session }) {
                   <span>{campaignName(g.campaign)}</span>
                   <span>{sideA.name} {scoreA} : {scoreB} {sideB.name}</span>
                   <span class="muted">{g.state}</span>
+                  {g.restoredAtMap !== null && (
+                    <span class="muted">Stats from map {g.restoredAtMap + 1} on: the server restarted</span>
+                  )}
                   <a href={`/match/${g.matchId}`}>View</a>
                 </li>
               );

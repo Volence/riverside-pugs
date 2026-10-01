@@ -950,6 +950,12 @@ export interface BookingView {
   connect: { host: string; port: number; password: string } | null;
   cancel: { side: Side | null; reason: string | null } | null; endReason: string | null;
   noShowFrom: string;
+  /** Crash recovery (plan 5): present while the booking's box is being set up
+   *  again after a restart, or while it waits for another box after the old
+   *  one was lost. `moved` is true for the latter (recover_reason 'gone');
+   *  `waiting` is true once the old box has been let go and a new one has not
+   *  yet been found (server_id is null, so `connect` above is also null). */
+  recovery: { since: string; moved: boolean; waiting: boolean } | null;
   viewer: { side: Side | null; manages: Side[]; staff: boolean; invited: boolean };
   games: BookingGameView[];
   /** Casters either side invited, and which halves are set (plan 4c). */
@@ -1031,6 +1037,8 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
     cancel: b.state === 'cancelled' ? { side: b.cancel_side, reason: b.cancel_reason } : null,
     endReason: b.end_reason,
     noShowFrom: iso(Date.parse(b.starts_at) + (rules?.noShowGraceMinutes ?? 15) * 60_000),
+    recovery: b.recovering_at !== null && b.ending_at === null
+      ? { since: b.recovering_at, moved: b.recover_reason === 'gone', waiting: b.server_id === null } : null,
     viewer: { side: me?.side ?? manages[0] ?? null, manages, staff: viewer.staff, invited: me?.status === 'invited' },
     games: seesGames ? bookingGames(db, id) : [],
     casters: castersOf(db, id),

@@ -364,7 +364,12 @@ export interface MatchDetail {
   /** `winner` is null on an aborted match: it never reached a result. The
    *  void fields are set only when a COMPLETED match was voided afterwards,
    *  which the schema also records as state 'aborted'. */
-  match: MatchSummary & { state: string; winner: Winner | null; voidedAt?: string | null; voidReason?: string | null };
+  match: MatchSummary & {
+    state: string; winner: Winner | null; voidedAt?: string | null; voidReason?: string | null;
+    /** Plan 5: the ordinal of the map this game was replayed from after a
+     *  restart, null when it was never restored. */
+    restoredAtMap: number | null;
+  };
   maps: {
     ordinal: number; map: string; teamAScore: number; teamBScore: number;
     /** Per-player stats for this map, keyed by steamid. Empty for matches
@@ -1788,6 +1793,9 @@ export interface BookingSideView {
 export interface BookingGameView {
   matchId: number; campaign: string; state: string; scoreA: number; scoreB: number; sideA: BookingSide | null;
   startedAt: string; endedAt: string | null;
+  /** Plan 5: the ordinal of the map this game was replayed from after a
+   *  restart, null when it was never restored. */
+  restoredAtMap: number | null;
 }
 export interface BookingView {
   id: number; purpose: 'scrim' | 'tournament'; state: BookingState; ending: boolean;
@@ -1802,6 +1810,11 @@ export interface BookingView {
   rules: { noShowGraceMinutes: number } | null; gameConfig: { key: string; label: string };
   sides: BookingSideView[]; server: { name: string } | null; connect: { host: string; port: number; password: string } | null;
   cancel: { side: BookingSide | null; reason: string | null } | null; endReason: string | null; noShowFrom: string;
+  /** Crash recovery (plan 5): present while the box is being set up again
+   *  after a restart, or while the booking waits for another box. `moved` is
+   *  true once the old box was given up (recover_reason 'gone'); `waiting` is
+   *  true while no box is held yet (connect above is then also null). */
+  recovery: { since: string; moved: boolean; waiting: boolean } | null;
   viewer: { side: BookingSide | null; manages: BookingSide[]; staff: boolean; invited: boolean };
   games: BookingGameView[];
   /** Casters either side invited, and which sides' halves are set. */
