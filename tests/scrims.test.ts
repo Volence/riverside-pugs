@@ -106,6 +106,13 @@ describe('createPost', () => {
     expect(r({ campaigns: ['no_mercy', 'death_toll', 'dead_air', 'blood_harvest'] })).toBe('ok');
   });
 
+  it('refuses a start less than the 30 minute acceptance cutoff away', () => {
+    const r = (startsAt: string) => err(createPost(db, postInput({ startsAt })));
+    expect(r(new Date(NOW.getTime() + 29 * MIN).toISOString())).toBe('too_late');
+    expect(r(new Date(NOW.getTime() + 30 * MIN).toISOString())).toBe('too_late');
+    expect(r(new Date(NOW.getTime() + 31 * MIN).toISOString())).toBe('ok');
+  });
+
   it('an SR range is open (null) or a whole number from 50 to 1000', () => {
     const r = (srRange: unknown) => err(createPost(db, postInput({ srRange } as Partial<PostIn>)));
     expect(r(49)).toBe('bad_sr_range');
@@ -450,12 +457,15 @@ describe('expire', () => {
     expect(postRow(id).status).toBe('open');
   });
 
-  it('a pending acceptance expires 30 minutes before the start', () => {
+  it('a pending acceptance expiring within 30 minutes of the start closes the post, not reopens it', () => {
     const id = post();
     const a = value(acceptPost(db, { postId: id, by: P[1], now: at(START, -60) })).id;
     expect(expire(db, at(START, -31))).toEqual({ posts: [], accepts: [], withdrawn: { posts: [], accepts: [] } });
-    expect(expire(db, at(START, -30))).toEqual({ posts: [], accepts: [a], withdrawn: { posts: [], accepts: [] } });
-    expect(postRow(id).status).toBe('open');
+    // A new acceptance made now would itself be too_late, so the post is
+    // closed (expired) instead of going back to Open with a dead Accept
+    // button.
+    expect(expire(db, at(START, -30))).toEqual({ posts: [id], accepts: [a], withdrawn: { posts: [], accepts: [] } });
+    expect(postRow(id).status).toBe('expired');
   });
 
   it('leaves booked posts and answered acceptances alone', () => {
