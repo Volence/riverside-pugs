@@ -458,14 +458,57 @@ describe('who may be on the box (plan 4b2)', () => {
     expect(r(P[0], P[6])).toBe('wrong_state');
   });
 
-  it('someone already in is added: false and nothing changes', () => {
+  it('someone already accepted is added: false and nothing changes', () => {
+    const id = running();
+    allowInGame(db, { bookingId: id, by: P[0], steamid: P[6], name: 'n', now: NOW });
+    const before = peopleOf(db, id);
+    expect(allowInGame(db, { bookingId: id, by: P[1], steamid: P[6], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'b', added: false } });
+    expect(allowInGame(db, { bookingId: id, by: P[1], steamid: P[0], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'b', added: false } });
+    expect(peopleOf(db, id)).toEqual(before);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM booking_events WHERE event = 'person_allowed_in_game'").get()).toEqual({ n: 1 });
+  });
+
+  it("an open invite on the captain's side is accepted (role kept) and goes on the list", () => {
+    const id = running();
+    addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[5], role: 'spectator', now: NOW }); // invited on a
+    expect(allowList(db, id)).not.toContain(P[5]);
+    expect(allowInGame(db, { bookingId: id, by: P[0], steamid: P[5], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'a', added: true } });
+    expect(peopleOf(db, id).find((p) => p.steamid === P[5])).toMatchObject({ side: 'a', role: 'spectator', status: 'accepted', added_by: P[0] });
+    expect(db.prepare("SELECT actor, detail FROM booking_events WHERE booking_id = ? AND event = 'person_allowed_in_game'").get(id))
+      .toEqual({ actor: P[0], detail: JSON.stringify({ steamid: P[5], side: 'a', accepted: true }) });
+    expect(allowList(db, id)).toContain(P[5]);
+  });
+
+  it("an open invite from the other side is refused as invited_elsewhere and left alone", () => {
     const id = running();
     addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[5], role: 'player', now: NOW }); // invited on a
     const before = peopleOf(db, id);
-    expect(allowInGame(db, { bookingId: id, by: P[1], steamid: P[5], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'b', added: false } });
-    expect(allowInGame(db, { bookingId: id, by: P[1], steamid: P[0], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'b', added: false } });
+    expect(allowInGame(db, { bookingId: id, by: P[1], steamid: P[5], name: 'n', now: NOW })).toEqual({ ok: false, error: 'invited_elsewhere' });
     expect(peopleOf(db, id)).toEqual(before);
     expect(db.prepare("SELECT COUNT(*) AS n FROM booking_events WHERE event = 'person_allowed_in_game'").get()).toEqual({ n: 0 });
+  });
+
+  it('a merged alt is refused, with or without a players row of its own', () => {
+    const id = running();
+    const alias = (alt: string) => db.prepare("INSERT INTO player_aliases (steamid, canonical_id, created_at, created_by) VALUES (?, ?, '2026-09-01T00:00:00.000Z', 'admin')").run(alt, P[9]);
+    alias(P[8]);
+    const rowless = '76561199123456700';
+    alias(rowless);
+    expect(allowInGame(db, { bookingId: id, by: P[0], steamid: P[8], name: 'n', now: NOW })).toEqual({ ok: false, error: 'not_player' });
+    expect(allowInGame(db, { bookingId: id, by: P[0], steamid: rowless, name: 'n', now: NOW })).toEqual({ ok: false, error: 'not_player' });
+    expect(db.prepare('SELECT 1 FROM players WHERE steamid = ?').get(rowless)).toBeUndefined();
+  });
+
+  it('allowList drops accepted people who are banned, banned by status, or merged away, but keeps an invited-status ringer', () => {
+    const id = running();
+    const ringer = '76561199123456701';
+    allowInGame(db, { bookingId: id, by: P[0], steamid: ringer, name: 'r', now: NOW });
+    for (const sid of [P[5], P[6], P[7]]) allowInGame(db, { bookingId: id, by: P[0], steamid: sid, name: 'n', now: NOW });
+    expect(allowList(db, id)).toEqual([P[0], P[1], P[5], P[6], P[7], ringer].sort());
+    ban(P[5]);
+    db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(P[6]);
+    db.prepare("INSERT INTO player_aliases (steamid, canonical_id, created_at, created_by) VALUES (?, ?, '2026-09-01T00:00:00.000Z', 'admin')").run(P[7], P[9]);
+    expect(allowList(db, id)).toEqual([P[0], P[1], ringer].sort());
   });
 
   it('a full side is side_full', () => {

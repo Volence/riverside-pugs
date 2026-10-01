@@ -1130,6 +1130,48 @@ describe('booked games (plan 4b)', () => {
       expect(c.at(-1)).toBe("say [Booking] Some Name is in, as a ringer for p1's group.");
     });
 
+    it('!allow log lines name the booking and the outcome, never a steamid', async () => {
+      const id = await running();
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      runner.onCommand(3, P[1], 'allow', '76561199222222222 Some Name');
+      runner.onCommand(3, P[1], 'allow', '123 bad');
+      runner.onCommand(3, P[5], 'allow', '76561199222222223 x');
+      runner.onCommand(1, P[0], 'allow', '76561199222222224 x');
+      await flush();
+      const lines = log.mock.calls.map((a) => a.map(String).join(' '));
+      log.mockRestore();
+      expect(lines.some((l) => l.includes(`${id}: !allow added`))).toBe(true);
+      expect(lines.some((l) => l.includes(`${id}: !allow refused (not_player)`))).toBe(true);
+      expect(lines).toHaveLength(4);
+      expect(lines.some((l) => /\d{17}/.test(l))).toBe(false);
+    });
+
+    it('a setup failure on an allowlist line hides the ids in the console and the admin feed', async () => {
+      const events: AdminEvent[] = [];
+      const unsubscribe = subscribeAdminEvents((e) => events.push(e));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const failing = build({
+        rcon: async (server, c) => {
+          const add = c.find((x) => x.startsWith('sm_booking_allow_add'));
+          if (add) throw new Error(`rcon exec timeout: ${add}`);
+          return fakeRcon(server, c);
+        },
+      });
+      const id = book();
+      now = START - 15 * MIN;
+      failing.allocate();
+      await failing.idle();
+      const logged = warn.mock.calls.map((a) => a.map(String).join(' '));
+      warn.mockRestore();
+      unsubscribe();
+      expect(getBooking(db, id)!.end_reason).toBe('setup_failed');
+      const feed = events.map((e) => JSON.stringify(e)).filter((t) => t.includes('could not be set up'));
+      expect(feed).toHaveLength(1);
+      expect(feed[0]).toContain('sm_booking_allow_add (2 ids)');
+      expect(logged.some((t) => t.includes('sm_booking_allow_add (2 ids)'))).toBe(true);
+      for (const t of [...logged, ...feed]) expect(t.includes(P[0]) || t.includes(P[1])).toBe(false);
+    });
+
     it('a refused !allow pushes nothing and says the reason; a malformed arg is refused', async () => {
       await running();
       db.prepare("INSERT INTO bans (player_id, reason, created_by, created_at) VALUES (?, 'x', 'system', '2026-09-01T00:00:00.000Z')").run(P[7]);
