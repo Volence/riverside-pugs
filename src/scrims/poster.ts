@@ -9,7 +9,7 @@ import { competitivePublic } from '../teams/access.js';
 import { getTeam } from '../teams/teams.js';
 import type { BotTransport, MessagePayload } from '../discord/transport.js';
 import { nightWindow } from './night.js';
-import { sideSr, type ScrimSide } from './rules.js';
+import { lengthLabel, sideSr, type ScrimSide } from './rules.js';
 import { getPost, type PostRow, type PostStatus } from './scrims.js';
 
 /**
@@ -47,15 +47,6 @@ type SideRef = Pick<PostRow, 'team_id' | 'captain_steamid'>;
 function sideTitle(db: DB, s: SideRef): string {
   if (s.team_id !== null) return escapeName(getTeam(db, s.team_id)?.name ?? 'A team');
   return escapeName(getPlayer(db, s.captain_steamid)?.name ?? 'Someone');
-}
-
-/** "2 campaigns, about 2 h 30" (bookings by campaign, Ruling 6): the card
- *  shows what a post books, with its estimated slot, as the board does. */
-function lengthLabel(campaigns: number, minutes: number): string {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  const slot = h === 0 ? `${m} min` : m === 0 ? `${h} h` : `${h} h ${m}`;
-  return `${campaigns} campaign${campaigns === 1 ? '' : 's'}, about ${slot}`;
 }
 
 const sideOf = (s: SideRef): ScrimSide => (s.team_id !== null ? { teamId: s.team_id } : { captain: s.captain_steamid });

@@ -124,3 +124,13 @@ export function nearestFreeSlot(
   }
   return null;
 }
+
+/** "2 campaigns, about 2 h 30" (bookings by campaign, Ruling 6): the card
+ *  shows what a post books, with its estimated slot, as the board does, and
+ *  the challenge DM says the same. */
+export function lengthLabel(campaigns: number, minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  const slot = h === 0 ? `${m} min` : m === 0 ? `${h} h` : `${h} h ${m}`;
+  return `${campaigns} campaign${campaigns === 1 ? '' : 's'}, about ${slot}`;
+}
