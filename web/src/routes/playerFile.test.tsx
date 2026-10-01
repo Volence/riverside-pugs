@@ -767,4 +767,41 @@ describe('clearing one penalty', () => {
     await screen.findByRole('heading', { name: 'Scrims' });
     expect(screen.queryByText('Toxic tags')).toBeNull();
   });
+
+  it('lists a player\'s blocks, pickup and per team, read-only, under Scrims', async () => {
+    mockPeople.file.mockResolvedValue(file({
+      sections: {
+        ...file().sections,
+        scrims: {
+          pickup: { shown: 1, booked: 2, noShows: 1, lateCancels: 0, excused: 0 },
+          teams: [{ teamId: 3, slug: 'rats', name: 'Rats', tag: 'RR', record: { shown: 4, booked: 6, noShows: 1, lateCancels: 1, excused: 1 } }],
+        },
+        scrimBlocks: {
+          pickup: [{ target: { kind: 'player', steamid: '76561199000000700', name: 'Grudge' }, createdAt: '2026-09-28T00:00:00.000Z' }],
+          teams: [{
+            teamId: 3, slug: 'rats', name: 'Rats', tag: 'RR',
+            blocks: [{ target: { kind: 'team', id: 9, name: 'Wasps', tag: 'WP' }, createdAt: '2026-09-27T00:00:00.000Z' }],
+          }],
+        },
+      },
+    }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    const heading = await screen.findByRole('heading', { name: 'Scrims' });
+    const section = heading.closest('section') as HTMLElement;
+    expect(within(section).getByText(/Grudge/)).toBeTruthy();
+    expect(within(section).getByText(/\[WP\] Wasps/)).toBeTruthy();
+    expect(within(section).queryByRole('button', { name: /Unblock/ })).toBeNull();
+  });
+
+  it('has no Blocks listing when the server sends no scrimBlocks', async () => {
+    mockPeople.file.mockResolvedValue(file({
+      sections: {
+        ...file().sections,
+        scrims: { pickup: { shown: 1, booked: 2, noShows: 1, lateCancels: 0, excused: 0 }, teams: [] },
+      },
+    }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    await screen.findByRole('heading', { name: 'Scrims' });
+    expect(screen.queryByText('Blocks')).toBeNull();
+  });
 });

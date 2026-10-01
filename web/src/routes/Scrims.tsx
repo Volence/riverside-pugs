@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import {
-  ApiError, scrimsApi, type NewScrimPost, type ScrimBoardPost, type ScrimNightWindow, type ScrimOptions,
+  ApiError, scrimsApi, teamsApi, type BlockEntry, type BlockTargetInput, type NewScrimPost, type ScrimBoardPost,
+  type ScrimNightWindow, type ScrimOptions,
 } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
@@ -254,6 +255,114 @@ function MyPostPanel({
   );
 }
 
+/** A block's target, as a single short line: a team's badge-free "[TAG]
+ *  Name" the way the challenge select writes it, or a player's name alone. */
+function blockTargetLabel(entry: BlockEntry): string {
+  return entry.target.kind === 'team' ? `[${entry.target.tag}] ${entry.target.name}` : entry.target.name;
+}
+
+/** "Blocked": the side picker (the same "Your side" choices as Post a
+ *  scrim), its block list with an Unblock button each, and an add row that
+ *  blocks a live team from a select or a player found by search (the same
+ *  pattern Team.tsx's invite search uses). Shown below "Your posts", for
+ *  anyone who can post. Silent on both ends (Ruling 4): nothing here tells a
+ *  blocked side it was blocked. */
+function BlockedPanel({ options }: { options: ScrimOptions }) {
+  const [side, setSide] = useState<number | null>(options.myTeams[0]?.id ?? null);
+  const [blocks, setBlocks] = useState<BlockEntry[] | null>(null);
+  const [mode, setMode] = useState<'team' | 'player'>('team');
+  const [addTeamId, setAddTeamId] = useState('');
+  const [q, setQ] = useState('');
+  const [found, setFound] = useState<{ steamid: string; name: string }[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = () => { scrimsApi.blocks(side).then((r) => setBlocks(r.blocks), () => {}); };
+  useEffect(load, [side]);
+
+  useEffect(() => {
+    if (q.trim().length < 2) { setFound([]); return; }
+    const ctl = new AbortController();
+    teamsApi.search(q.trim(), ctl.signal).then((r) => setFound(r.players), () => {});
+    return () => ctl.abort();
+  }, [q]);
+
+  const act = async (fn: () => Promise<unknown>, after?: () => void) => {
+    setError(null);
+    setBusy(true);
+    try { await fn(); after?.(); load(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  };
+  const block = (target: BlockTargetInput) => act(() => scrimsApi.block(side, target), () => { setAddTeamId(''); setQ(''); setFound([]); });
+  const unblock = (target: BlockTargetInput) => act(() => scrimsApi.unblock(side, target));
+
+  return (
+    <Panel>
+      <h3>Blocked</h3>
+      <p class="teamsub">
+        Blocked sides never see your scrim posts and you never see theirs; neither can accept, challenge or book the other. They are not told.
+      </p>
+      {error && <p class="error" role="alert">{error}</p>}
+      <label class="teamfield">Your side
+        <select aria-label="Blocked side" value={side === null ? '' : String(side)} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setSide(v ? Number(v) : null); }}>
+          {options.myTeams.map((t) => <option key={t.id} value={String(t.id)}>[{t.tag}] {t.name}</option>)}
+          <option value="">A pickup group (just me for now)</option>
+        </select>
+      </label>
+      {blocks === null ? null : blocks.length === 0
+        ? <Empty>No blocks.</Empty>
+        : (
+          <ul class="teamlist">
+            {blocks.map((b) => (
+              <li key={b.target.kind === 'team' ? `team-${b.target.id}` : `player-${b.target.steamid}`}>
+                <span>{blockTargetLabel(b)}</span>
+                <button
+                  class="btn btn--ghost btn--sm" disabled={busy}
+                  aria-label={`Unblock ${b.target.name}`}
+                  onClick={() => unblock(b.target.kind === 'team' ? { teamId: b.target.id } : { steamid: b.target.steamid })}
+                >
+                  Unblock
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      <p class="scrimaccept__actions">
+        <button class={`btn btn--sm${mode === 'team' ? '' : ' btn--ghost'}`} type="button" onClick={() => setMode('team')}>Team</button>
+        <button class={`btn btn--sm${mode === 'player' ? '' : ' btn--ghost'}`} type="button" onClick={() => setMode('player')}>Player</button>
+      </p>
+      {mode === 'team'
+        ? (
+          <>
+            <label class="teamfield">Team
+              <select aria-label="Team to block" value={addTeamId} onChange={(e) => setAddTeamId((e.target as HTMLSelectElement).value)}>
+                <option value="">Pick a team</option>
+                {options.teams.map((t) => <option key={t.id} value={String(t.id)}>[{t.tag}] {t.name}</option>)}
+              </select>
+            </label>
+            <button class="btn btn--sm" disabled={busy || addTeamId === ''} onClick={() => block({ teamId: Number(addTeamId) })}>Block team</button>
+          </>
+        )
+        : (
+          <>
+            <label class="teamfield">Find a player to block
+              <input value={q} placeholder="Type at least two letters" onInput={(e) => setQ((e.target as HTMLInputElement).value)} />
+            </label>
+            {found.length > 0 && (
+              <ul class="teamlist">
+                {found.map((p) => (
+                  <li key={p.steamid}>
+                    <span>{p.name}</span>
+                    <button class="btn btn--sm" disabled={busy} aria-label={`Block ${p.name}`} onClick={() => block({ steamid: p.steamid })}>Block</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+    </Panel>
+  );
+}
+
 export function Scrims({ session }: { session: Session }) {
   const { query, route } = useLocation();
   const signedIn = session.kind === 'active';
@@ -366,6 +475,8 @@ export function Scrims({ session }: { session: Session }) {
           </ul>
         </Panel>
       )}
+
+      {options && <BlockedPanel options={options} />}
     </main>
   );
 }

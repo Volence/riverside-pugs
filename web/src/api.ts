@@ -1487,6 +1487,9 @@ export interface PlayerFileData {
     /** Review aggregates and toxic flags (plan 2 Ruling 6), beside scrims.
      *  Optional only for an older server. */
     scrimReviews?: ScrimReviews;
+    /** A player's scrim blocks (scrim blocks plan), beside scrims: read-only
+     *  for staff. Optional only for an older server. */
+    scrimBlocks?: ScrimBlocks;
     tickets: TicketSummary[];
     notes: AdminPlayerDetail['notes'];
     evidence: {
@@ -1885,6 +1888,20 @@ export interface NewScrimPost {
 /** Plan 2 Ruling 7: the weekly scrim night window, null while it is off. */
 export interface ScrimNightWindow { startsAt: string; endsAt: string }
 
+/** A block's target, as src/scrims/blocks.ts's blocksOf sends it: a team or
+ *  a player, by name, never a bare id or steamid alone. */
+export type BlockTargetView = { kind: 'team'; id: number; name: string; tag: string } | { kind: 'player'; steamid: string; name: string };
+export interface BlockEntry { target: BlockTargetView; createdAt: string }
+/** A single party's target to block or unblock, as the routes take it. */
+export type BlockTargetInput = { teamId: number } | { steamid: string };
+/** A player's blocks for the staff People desk (scrim blocks plan): as a
+ *  pickup captain, and each current team's. Mirrors src/scrims/blocks.ts's
+ *  ScrimBlocks. */
+export interface ScrimBlocks {
+  pickup: BlockEntry[];
+  teams: { teamId: number; slug: string; name: string; tag: string; blocks: BlockEntry[] }[];
+}
+
 export const scrimsApi = {
   options: (signal?: AbortSignal) => get<ScrimOptions>('/api/scrims/options', signal),
   board: (fitsOnly: boolean, signal?: AbortSignal) =>
@@ -1903,6 +1920,13 @@ export const scrimsApi = {
    *  `no_capacity` refusal reads the same as createPost's own (nearestSlot on
    *  ApiError for the latter). */
   repost: (bookingId: number) => post<{ id: number }>(`/api/scrims/repost/${bookingId}`),
+  /** A side's block list (scrim blocks plan): `teamId` null is the viewer as
+   *  a pickup captain. */
+  blocks: (teamId: number | null, signal?: AbortSignal) =>
+    get<{ blocks: BlockEntry[] }>(`/api/scrims/blocks${teamId === null ? '' : `?teamId=${teamId}`}`, signal),
+  block: (teamId: number | null, target: BlockTargetInput) => post<{ added: boolean }>('/api/scrims/blocks', { teamId, target }),
+  unblock: (teamId: number | null, target: BlockTargetInput) =>
+    post<{ removed: boolean }>('/api/scrims/blocks/remove', { teamId, target }),
 };
 
 export interface AdminBookingRow {

@@ -1,17 +1,19 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import { LocationProvider } from 'preact-iso';
-import type { ScrimBoardPost, ScrimOptions } from '../api';
+import type { BlockEntry, ScrimBoardPost, ScrimOptions } from '../api';
 
-const { mockScrims } = vi.hoisted(() => ({
+const { mockScrims, mockTeams } = vi.hoisted(() => ({
   mockScrims: {
     options: vi.fn(), board: vi.fn(), create: vi.fn(), withdraw: vi.fn(), accept: vi.fn(),
     withdrawAccept: vi.fn(), decline: vi.fn(), confirm: vi.fn(),
+    blocks: vi.fn(), block: vi.fn(), unblock: vi.fn(),
   },
+  mockTeams: { search: vi.fn() },
 }));
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
-  return { ...actual, scrimsApi: mockScrims };
+  return { ...actual, scrimsApi: mockScrims, teamsApi: { ...actual.teamsApi, ...mockTeams } };
 });
 const { Scrims } = await import('./Scrims');
 const { ApiError } = await import('../api');
@@ -47,7 +49,12 @@ const renderScrims = (path = '/scrims') => {
   return render(<LocationProvider><Scrims session={session} /></LocationProvider>);
 };
 
-afterEach(() => { cleanup(); for (const f of Object.values(mockScrims)) f.mockReset(); history.replaceState(null, '', '/'); });
+afterEach(() => {
+  cleanup();
+  for (const f of Object.values(mockScrims)) f.mockReset();
+  for (const f of Object.values(mockTeams)) f.mockReset();
+  history.replaceState(null, '', '/');
+});
 beforeEach(() => {
   mockScrims.options.mockResolvedValue(OPTIONS);
   mockScrims.board.mockImplementation((fitsOnly: boolean) => Promise.resolve({ posts: fitsOnly ? [MY_POST] : [OPEN_POST, MY_POST], night: null }));
@@ -55,6 +62,10 @@ beforeEach(() => {
   mockScrims.decline.mockResolvedValue({ postId: 6, reopened: true });
   mockScrims.withdraw.mockResolvedValue({ acceptIds: [] });
   mockScrims.withdrawAccept.mockResolvedValue({ postId: 5, reopened: true });
+  mockScrims.blocks.mockResolvedValue({ blocks: [] });
+  mockScrims.block.mockResolvedValue({ added: true });
+  mockScrims.unblock.mockResolvedValue({ removed: true });
+  mockTeams.search.mockResolvedValue({ players: [] });
 });
 
 describe('Scrims page', () => {
@@ -158,5 +169,57 @@ describe('Scrims page', () => {
     const other = container.querySelector('#scrim-6');
     expect(other?.className).not.toContain('scrimrow--night');
     expect(screen.getAllByText('Scrim night').length).toBeGreaterThan(0);
+  });
+});
+
+describe('the Blocked panel', () => {
+  it('lists the side\'s blocks and unblocks posts the remove', async () => {
+    const blocks: BlockEntry[] = [
+      { target: { kind: 'team', id: 2, name: 'Rats', tag: 'RT' }, createdAt: '2026-09-30T00:00:00.000Z' },
+      { target: { kind: 'player', steamid: '76561199000000400', name: 'Eve' }, createdAt: '2026-09-29T00:00:00.000Z' },
+    ];
+    mockScrims.blocks.mockResolvedValue({ blocks });
+    renderScrims();
+    await screen.findByText('Rats');
+    await screen.findByText('Eve');
+    expect(mockScrims.blocks).toHaveBeenCalledWith(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unblock Eve' }));
+    await waitFor(() => expect(mockScrims.unblock).toHaveBeenCalledWith(1, { steamid: '76561199000000400' }));
+  });
+
+  it('adding a team block and a player block posts the right body', async () => {
+    renderScrims();
+    await screen.findByText('Rats');
+
+    fireEvent.change(screen.getByLabelText('Team to block'), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Block team' }));
+    await waitFor(() => expect(mockScrims.block).toHaveBeenCalledWith(1, { teamId: 2 }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Player' }));
+    mockTeams.search.mockResolvedValue({ players: [{ steamid: '76561199000000500', name: 'Mallory', avatar: null }] });
+    fireEvent.input(screen.getByLabelText('Find a player to block'), { target: { value: 'mal' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Block Mallory' }));
+    await waitFor(() => expect(mockScrims.block).toHaveBeenCalledWith(1, { steamid: '76561199000000500' }));
+  });
+
+  it('switching the side reloads the block list', async () => {
+    renderScrims();
+    await screen.findByText('Rats');
+    await waitFor(() => expect(mockScrims.blocks).toHaveBeenCalledWith(1));
+
+    fireEvent.change(screen.getByLabelText('Blocked side'), { target: { value: '' } });
+    await waitFor(() => expect(mockScrims.blocks).toHaveBeenCalledWith(null));
+  });
+
+  it('is absent for someone who cannot post', async () => {
+    mockScrims.options.mockRejectedValue(new ApiError(404, 'not found'));
+    mockScrims.board.mockResolvedValue({ posts: [], night: null });
+    renderScrims();
+    await screen.findByRole('heading', { name: 'Board' });
+    await waitFor(() => expect(mockScrims.options).toHaveBeenCalled());
+    expect(screen.queryByRole('heading', { name: 'Post a scrim' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Blocked' })).toBeNull();
+    expect(mockScrims.blocks).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import { peopleApi, type FileAction, type PlayerFileData } from '../../../api';
+import { peopleApi, type BlockEntry, type FileAction, type PlayerFileData } from '../../../api';
 import { useFetch } from '../../../hooks/useFetch';
 import { Empty, Panel } from '../../../components/bits';
 import { campaignName } from '../../../format';
@@ -14,6 +14,13 @@ import { Timeline } from './Timeline';
 import { EvidenceDetail } from './EvidenceDetail';
 import { RecordLine, recordText } from '../../../components/ScrimRecord';
 import { reviewSummaryText } from '../../../components/ReviewSummary';
+
+/** One party's block list (scrim blocks plan), read-only on the People desk:
+ *  each entry's target by name, or "None." for an empty list. */
+function blockListText(blocks: BlockEntry[]): string {
+  if (blocks.length === 0) return 'None.';
+  return blocks.map((b) => (b.target.kind === 'team' ? `[${b.target.tag}] ${b.target.name}` : b.target.name)).join(', ');
+}
 
 /**
  * Everything known about one player, at one URL.
@@ -100,6 +107,22 @@ export function PlayerFile({ steamid, me }: { steamid: string; me: string }) {
               </p>
             );
           })}
+          {d.sections.scrimBlocks && (
+            <>
+              <h4>Blocks</h4>
+              <p class="scrimrecord">
+                <span class="muted">As a pickup captain: </span>
+                <span>{blockListText(d.sections.scrimBlocks.pickup)}</span>
+              </p>
+              {d.sections.scrimBlocks.teams.map((t) => (
+                <p key={t.teamId} class="scrimrecord">
+                  <a href={`/team/${t.slug}`}>[{t.tag}] {t.name}</a>
+                  <span class="muted">: </span>
+                  <span>{blockListText(t.blocks)}</span>
+                </p>
+              ))}
+            </>
+          )}
         </Panel>
       )}
 
