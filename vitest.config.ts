@@ -12,6 +12,7 @@ export default defineConfig({
           name: 'server',
           environment: 'node',
           include: ['tests/**/*.test.ts'],
+          globalSetup: ['tests/setup/tmpdir.ts'],
         },
       },
       {
