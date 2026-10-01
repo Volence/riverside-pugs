@@ -35,6 +35,7 @@ const CommunityEntry = lazy(() => import('./routes/CommunityEntry'));
 // Teams: behind the competitive switch, so most viewers never load it.
 const Teams = lazy(() => import('./routes/Teams'));
 const TeamJoin = lazy(() => import('./routes/TeamJoin'));
+const Team = lazy(() => import('./routes/Team'));
 
 /** The 404.
  *
@@ -113,7 +114,7 @@ export function AppRoutes(
       <Route path="/link/discord" component={LinkDiscord} session={session} refresh={refresh} />
       <Route path="/teams" component={Teams} session={session} />
       <Route path="/team/join/:token" component={TeamJoin} />
-      {/* /team/:slug lands in Task 8, once the Team page component exists. */}
+      <Route path="/team/:slug" component={Team} session={session} refresh={refresh} />
       <Route default component={NotFound} />
     </Router>
   );
