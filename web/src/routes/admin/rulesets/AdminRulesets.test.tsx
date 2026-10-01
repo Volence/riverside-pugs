@@ -107,6 +107,15 @@ describe('AdminRulesets', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Save ruleset' })).toBeNull());
   });
 
+  it('the side-choice options are short enough to read at 390px', async () => {
+    render(<AdminRulesets />);
+    await screen.findByText('Late Night', { selector: 'strong' });
+    fireEvent.click(within(rowOf('Late Night')).button('Edit')!);
+    const texts = Array.from((screen.getByLabelText('Side choice') as HTMLSelectElement).options).map((o) => o.textContent);
+    expect(texts).toEqual(['Higher seed picks sides', 'Non-picker picks sides', 'Coin toss']);
+    for (const t of texts) expect((t ?? '').length, t ?? '').toBeLessThanOrEqual(28);
+  });
+
   it('a built-in keeps its name, and a blank grace is caught before anything is sent', async () => {
     render(<AdminRulesets />);
     await screen.findByText('Late Night', { selector: 'strong' });
@@ -118,14 +127,16 @@ describe('AdminRulesets', () => {
     expect(mockAdmin.updateRuleset).not.toHaveBeenCalled();
   });
 
-  it('a refusal keeps the form open and shows the reason', async () => {
+  it('a refusal keeps the form open and shows the reason next to Save, not off at the top of the page', async () => {
     mockAdmin.updateRuleset.mockRejectedValue(new ApiError(409, 'Another ruleset already has that name.'));
     render(<AdminRulesets />);
     await screen.findByText('Late Night', { selector: 'strong' });
     fireEvent.click(within(rowOf('Late Night')).button('Edit')!);
     fireEvent.input(screen.getByLabelText('Ruleset name'), { target: { value: 'casual scrim' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save ruleset' }));
-    expect(await screen.findByText('Another ruleset already has that name.')).toBeTruthy();
+    const message = await screen.findByText('Another ruleset already has that name.');
+    expect(rowOf('Late Night').contains(message)).toBe(true);
+    expect(screen.getByRole('button', { name: 'Save ruleset' }).parentElement?.contains(message)).toBe(true);
     expect(screen.getByRole('button', { name: 'Save ruleset' })).toBeTruthy();
   });
 });

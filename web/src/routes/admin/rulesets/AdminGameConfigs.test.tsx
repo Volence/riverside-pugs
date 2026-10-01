@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
+import { cleanup, fireEvent, render, screen, waitFor, within as withinEl } from '@testing-library/preact';
 import type { AdminGameConfig } from '../../../api';
 
 const { mockAdmin, mockConfirm } = vi.hoisted(() => ({
@@ -56,12 +56,37 @@ describe('AdminGameConfigs', () => {
     expect(mockConfirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete Spare config?', danger: true }));
   });
 
+  it('shows the label edit as a Settings row (label left, control right) with its accessible name kept, and the key/cfg/state above it', async () => {
+    render(<AdminGameConfigs />);
+    await screen.findByText('ZoneMod 4v4', { selector: 'strong' });
+    const row = rowOf('ZoneMod 4v4');
+    const labelInput = screen.getByLabelText('Label for zonemod');
+    expect(row.contains(labelInput)).toBe(true);
+    const rowLabel = row.querySelector('.admin-setting__label');
+    expect(rowLabel?.textContent).toBe('Label');
+    expect(row.textContent).toContain('What the pickers show');
+    expect(row.textContent).toContain('zonemod');
+    expect(row.textContent).toContain('exec zonemod_4v4');
+  });
+
+  it('scrolls a refusal into view instead of leaving it off screen above a long list', async () => {
+    const scrolled = vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => {});
+    mockAdmin.deleteGameConfig.mockRejectedValueOnce(new ApiError(409, 'Something still uses that config.'));
+    render(<AdminGameConfigs />);
+    await screen.findByText('ZoneMod 4v4', { selector: 'strong' });
+    fireEvent.click(button(rowOf('Spare config'), 'Delete')!);
+    expect(await screen.findByText('Something still uses that config.')).toBeTruthy();
+    await waitFor(() => expect(scrolled).toHaveBeenCalled());
+    scrolled.mockRestore();
+  });
+
   it('adds a config, warning that the cfg must be on every pool server, and shows a refusal', async () => {
     mockAdmin.createGameConfig.mockRejectedValueOnce(new ApiError(400, 'A cfg name is lowercase letters, digits and underscores, without .cfg.'));
     render(<AdminGameConfigs />);
     await screen.findByText('ZoneMod 4v4', { selector: 'strong' });
+    const newForm = screen.getByRole('button', { name: 'Add config' }).closest('form') as HTMLElement;
     fireEvent.input(screen.getByLabelText('Key'), { target: { value: 'confogl' } });
-    fireEvent.input(screen.getByLabelText('Label'), { target: { value: 'Confogl 4v4' } });
+    fireEvent.input(withinEl(newForm).getByLabelText('Label'), { target: { value: 'Confogl 4v4' } });
     fireEvent.input(screen.getByLabelText('Cfg'), { target: { value: 'confogl.cfg' } });
     expect(screen.getByText(/must already be on every pool server/).textContent).toContain('exec confogl.cfg');
     fireEvent.click(screen.getByRole('button', { name: 'Add config' }));

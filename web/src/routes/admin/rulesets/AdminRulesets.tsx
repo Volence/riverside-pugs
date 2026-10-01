@@ -35,25 +35,7 @@ export function AdminRulesets() {
 
   return (
     <div class="stack">
-      {error && <p class="error" role="alert">{error}</p>}
-      <Panel>
-        <h3>New ruleset</h3>
-        <p class="muted">A new ruleset starts as a copy of another. Copies are never rated and never give PUG penalties.</p>
-        <form class="eventform" onSubmit={create}>
-          <FormRow label="Copy from" for={`${uid}-from`}>
-            <select id={`${uid}-from`} aria-label="Copy from" value={source === null ? '' : String(source)}
-              onChange={(e) => setCopyFrom(Number((e.target as HTMLSelectElement).value))}>
-              {data.rulesets.map((r) => <option key={r.id} value={String(r.id)}>{r.name}{r.archived ? ' (archived)' : ''}</option>)}
-            </select>
-          </FormRow>
-          <FormRow label="Name" help="3 to 40 characters, not used by another ruleset." for={`${uid}-name`}>
-            <input id={`${uid}-name`} aria-label="New ruleset name" value={name} maxLength={40} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
-          </FormRow>
-          <div class="eventform__actions">
-            <button class="btn" type="submit" disabled={busy || name.trim().length < 3}>Create copy</button>
-          </div>
-        </form>
-      </Panel>
+      {editing === null && error && <p class="error" role="alert">{error}</p>}
       <Panel>
         <h3>Rulesets</h3>
         <p class="muted">Changes apply to new bookings and events; running and finished ones keep the rules they started with.</p>
@@ -80,13 +62,31 @@ export function AdminRulesets() {
                         })}>Archive</button>)}
                 </div>
                 {editing === r.id && r.rules && (
-                  <RulesetForm ruleset={r} rules={r.rules} busy={busy} onCancel={() => setEditing(null)}
+                  <RulesetForm ruleset={r} rules={r.rules} busy={busy} error={error} onCancel={() => setEditing(null)}
                     onSave={(n, rules) => void run(async () => { await adminApi.updateRuleset(r.id, n, rules); setEditing(null); })} />
                 )}
               </li>
             ))}
           </ul>
         )}
+      </Panel>
+      <Panel>
+        <h3>New ruleset</h3>
+        <p class="muted">A new ruleset starts as a copy of another. Copies are never rated and never give PUG penalties.</p>
+        <form class="eventform" onSubmit={create}>
+          <FormRow label="Copy from" for={`${uid}-from`}>
+            <select id={`${uid}-from`} aria-label="Copy from" value={source === null ? '' : String(source)}
+              onChange={(e) => setCopyFrom(Number((e.target as HTMLSelectElement).value))}>
+              {data.rulesets.map((r) => <option key={r.id} value={String(r.id)}>{r.name}{r.archived ? ' (archived)' : ''}</option>)}
+            </select>
+          </FormRow>
+          <FormRow label="Name" help="3 to 40 characters, not used by another ruleset." for={`${uid}-name`}>
+            <input id={`${uid}-name`} aria-label="New ruleset name" value={name} maxLength={40} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
+          </FormRow>
+          <div class="eventform__actions">
+            <button class="btn" type="submit" disabled={busy || name.trim().length < 3}>Create copy</button>
+          </div>
+        </form>
       </Panel>
     </div>
   );

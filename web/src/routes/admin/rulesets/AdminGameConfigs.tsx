@@ -1,4 +1,4 @@
-import { useId, useState } from 'preact/hooks';
+import { useEffect, useId, useRef, useState } from 'preact/hooks';
 import { adminApi, type AdminGameConfig } from '../../../api';
 import { useFetch } from '../../../hooks/useFetch';
 import { Empty, Panel } from '../../../components/bits';
@@ -11,6 +11,7 @@ import { inUseText } from './AdminRulesets';
 function ConfigRow({ c, busy, run }: { c: AdminGameConfig; busy: boolean; run: Run }) {
   const [label, setLabel] = useState(c.label);
   const unused = c.inUse.bookings === 0 && c.inUse.events === 0;
+  const uid = useId();
   return (
     <li>
       <strong>{c.label}</strong>{' '}
@@ -18,8 +19,8 @@ function ConfigRow({ c, busy, run }: { c: AdminGameConfig; busy: boolean; run: R
       {c.locked && <><span class="teamchip">Default</span>{' '}</>}
       {!c.enabled && <><span class="teamchip teamchip--cancelled">Off</span>{' '}</>}
       <span class="muted">· exec {c.cfg} · {inUseText(c.inUse)}</span>
-      <div class="inlinerow">
-        <input aria-label={`Label for ${c.key}`} value={label} maxLength={60} onInput={(e) => setLabel((e.target as HTMLInputElement).value)} />
+      <FormRow label="Label" help="What the pickers show." for={`${uid}-label`}>
+        <input id={`${uid}-label`} aria-label={`Label for ${c.key}`} value={label} maxLength={60} onInput={(e) => setLabel((e.target as HTMLInputElement).value)} />
         <button class="btn btn--ghost btn--sm" type="button" disabled={busy || label.trim() === c.label}
           onClick={() => void run(() => adminApi.updateGameConfig(c.key, { label, enabled: c.enabled }))}>Save label</button>
         {!c.locked && (
@@ -34,7 +35,7 @@ function ConfigRow({ c, busy, run }: { c: AdminGameConfig; busy: boolean; run: R
               title: `Delete ${c.label}?`, body: 'Finished bookings and events that used it keep showing its key.', confirmLabel: 'Delete', danger: true,
             })}>Delete</button>
         )}
-      </div>
+      </FormRow>
     </li>
   );
 }
@@ -48,6 +49,11 @@ export function AdminGameConfigs() {
   const [label, setLabel] = useState('');
   const [cfg, setCfg] = useState('');
   const uid = useId();
+  const errorRef = useRef<HTMLParagraphElement>(null);
+  // A row's own Save sits wherever that row is in a possibly long list, so a
+  // refusal from it can land off screen above; bring it into view instead of
+  // leaving the admin to go hunting for why nothing happened.
+  useEffect(() => { if (error) errorRef.current?.scrollIntoView({ block: 'center' }); }, [error]);
   if (!data) return <Panel><p class="muted">Loading...</p></Panel>;
 
   const create = (e: Event) => {
@@ -60,7 +66,7 @@ export function AdminGameConfigs() {
 
   return (
     <div class="stack">
-      {error && <p class="error" role="alert">{error}</p>}
+      {error && <p class="error" role="alert" ref={errorRef}>{error}</p>}
       <Panel>
         <h3>Game configs</h3>
         <p class="muted">What a booked or tournament server runs. Off takes a config out of the pickers; what already uses it keeps it.</p>
