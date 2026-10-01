@@ -3450,3 +3450,9 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .eventstrip__stage { display: flex; flex-direction: column; gap: var(--sp-1); flex: 1 1 200px; min-width: 0; padding: var(--sp-3); border: 1px solid var(--border); }
 .eventrules { margin: var(--sp-2) 0; padding-left: var(--sp-5); }
 .eventpool { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-2) 0 0; }
+
+/* Setup > Rulesets and Game configs (rulesets editor plan): rows in the
+   admin-list look, a summary line under the name, the row's buttons below. */
+.rulesetlist li > p { margin: var(--sp-1) 0 0; }
+.rulesetlist .inlinerow { margin-top: var(--sp-2); }
+.rulesetlist .inlinerow:empty { display: none; }

@@ -2042,6 +2042,28 @@ export interface AdminEventOptions {
   defaults: { eligibility: EventEligibility; checkin: EventCheckin; roster: EventRoster };
 }
 
+/** Mirrors src/rulesets.ts MatchRules. */
+export interface MatchRules {
+  rated: boolean;
+  pause: { limit: number | null; seconds: number | null; mutualUnpause: boolean; techPauses: number };
+  teamLock: boolean;
+  playerMapControl: boolean;
+  restartHalf: { allowed: boolean; lockAfterDamage: boolean };
+  noShowGraceMinutes: number;
+  penalties: boolean;
+  bosses: 'random_published' | 'fixed' | 'voteboss';
+  sideRule: 'higher_seed_chooses' | 'non_picker_chooses' | 'coin';
+  spectate: { sideLocked: boolean };
+}
+/** What the Rulesets editor sends: everything but rated and penalties,
+ *  which the server sets to false on every ruleset but PUG. */
+export type EditableRules = Omit<MatchRules, 'rated' | 'penalties'>;
+/** Mirrors src/rulesetStore.ts RulesetListItem. */
+export interface AdminRuleset {
+  id: number; name: string; template: boolean; basedOn: string | null; readOnly: boolean; archived: boolean;
+  summary: string; rules: MatchRules | null; inUse: { bookings: number; events: number };
+}
+
 export const adminApi = {
   ban: (steamid: string, reason: string, minutes: number | null) =>
     post(`/api/admin/players/${steamid}/ban`, { reason, minutes }),
@@ -2122,6 +2144,12 @@ export const adminApi = {
   removeEventBanner: (id: number) => post(`/api/admin/events/${id}/banner/remove`),
   /** Drafts only: a draft is deleted, never cancelled. */
   deleteEvent: (id: number) => post(`/api/admin/events/${id}/delete`),
+  /** Setup > Rulesets and Game configs (rulesets editor plan). */
+  rulesets: (signal?: AbortSignal) => get<{ rulesets: AdminRuleset[] }>('/api/admin/rulesets', signal),
+  createRuleset: (copyFrom: number, name: string) => post<{ id: number }>('/api/admin/rulesets', { copyFrom, name }),
+  updateRuleset: (id: number, name: string, rules: EditableRules) => post(`/api/admin/rulesets/${id}`, { name, rules }),
+  archiveRuleset: (id: number) => post(`/api/admin/rulesets/${id}/archive`),
+  unarchiveRuleset: (id: number) => post(`/api/admin/rulesets/${id}/unarchive`),
   audit: (signal?: AbortSignal) => get<{ actions: AuditEntry[] }>('/api/admin/audit', signal),
   renameSeason: (id: number, name: string) => post(`/api/admin/seasons/${id}/rename`, { name }),
   newSeason: (name: string) => post<{ ok: true; id: number }>('/api/admin/seasons/new', { name }),
