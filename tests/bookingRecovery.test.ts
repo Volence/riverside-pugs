@@ -10,6 +10,7 @@ import {
 } from '../src/bookings/bookings.js';
 import { bookingLimits, bookingsDue } from '../src/bookings/rules.js';
 import { BookingRunner } from '../src/bookings/runner.js';
+import { classifyBox, type BoxSignals } from '../src/bookings/recovery.js';
 
 const P = Array.from({ length: 10 }, (_, i) => `765611990000009${String(i).padStart(2, '0')}`);
 const START = Date.parse('2026-10-02T20:00:00.000Z');
@@ -166,5 +167,30 @@ describe('recovery writes', () => {
     setSetting(db, 'booking_gone_minutes', '1');
     setSetting(db, 'booking_recover_wait_minutes', '999');
     expect(bookingLimits(db)).toMatchObject({ goneMinutes: 2, recoverWaitMinutes: 60 });
+  });
+});
+
+describe('classifyBox', () => {
+  const base: BoxSignals = { rconOk: true, marker: '7', bookingId: 7, nowMs: 1_000_000, lostSinceMs: null, heartbeatMs: null, a2sPlayers: null, goneMs: 3 * MIN };
+  it('ok when rcon answers with our marker, or with no marker cvar at all (old plugin)', () => {
+    expect(classifyBox(base)).toEqual({ kind: 'ok' });
+    expect(classifyBox({ ...base, marker: null })).toEqual({ kind: 'ok' });
+  });
+  it('restarted when rcon answers and the marker is empty or another booking', () => {
+    expect(classifyBox({ ...base, marker: '' })).toEqual({ kind: 'restarted' });
+    expect(classifyBox({ ...base, marker: '8' })).toEqual({ kind: 'restarted' });
+  });
+  it('quiet while rcon has failed for less than the limit', () => {
+    expect(classifyBox({ ...base, rconOk: false, lostSinceMs: base.nowMs - 2 * MIN })).toEqual({ kind: 'quiet' });
+  });
+  it('quiet while the live game still heartbeats, however long rcon has failed', () => {
+    expect(classifyBox({ ...base, rconOk: false, lostSinceMs: base.nowMs - 10 * MIN, heartbeatMs: base.nowMs - 40_000 })).toEqual({ kind: 'quiet' });
+  });
+  it('up_no_rcon when A2S answers past the limit, with or without players', () => {
+    expect(classifyBox({ ...base, rconOk: false, lostSinceMs: base.nowMs - 3 * MIN, a2sPlayers: 5 })).toEqual({ kind: 'up_no_rcon', players: 5 });
+    expect(classifyBox({ ...base, rconOk: false, lostSinceMs: base.nowMs - 3 * MIN, a2sPlayers: 0 })).toEqual({ kind: 'up_no_rcon', players: 0 });
+  });
+  it('gone when rcon, heartbeat and A2S are all silent past the limit', () => {
+    expect(classifyBox({ ...base, rconOk: false, lostSinceMs: base.nowMs - 3 * MIN, heartbeatMs: base.nowMs - 4 * MIN })).toEqual({ kind: 'gone' });
   });
 });
