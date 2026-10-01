@@ -417,6 +417,42 @@ describe('reapOrphanedMatches', () => {
     expect(getLiveMatches(db)).toEqual([]);
   });
 
+  for (const newer of ['live', 'configuring'] as const) {
+    it(`aborts a stale match but does not release its box when a newer match is ${newer} on it`, () => {
+      db.prepare(
+        "INSERT INTO servers (name, host, port, rcon_port, rcon_password, status) VALUES ('t','127.0.0.1',27015,27015,'x','live')",
+      ).run();
+      const id = seedLive();
+      db.prepare('UPDATE matches SET server_id = 1 WHERE id = ?').run(id);
+      recordHeartbeat(db, TOKEN);
+      db.prepare('UPDATE match_live SET last_seen = ?').run(stamp(ORPHAN_AFTER_MS + 60_000));
+      // The box has since gone on to a newer match (a PUG on a box a booking gave back).
+      db.prepare("INSERT INTO matches (season_id, state, campaign, token, server_id) VALUES (1, ?, 'no_mercy', 'tok-newer', 1)").run(newer);
+
+      const released: number[] = [];
+      const releaser = new ServerReleaser(db, async () => {});
+      const real = releaser.release.bind(releaser);
+      releaser.release = ((sid: number) => { released.push(sid); return real(sid); }) as typeof releaser.release;
+      expect(reapOrphanedMatches(db, releaser)).toEqual([id]);
+      expect(db.prepare('SELECT state FROM matches WHERE id = ?').get(id)).toEqual({ state: 'aborted' });
+      expect(released).toEqual([]);
+      expect(db.prepare('SELECT status FROM servers WHERE id = 1').get()).toEqual({ status: 'live' });
+    });
+  }
+
+  it('still releases the box when the only newer match on it is finished', () => {
+    db.prepare(
+      "INSERT INTO servers (name, host, port, rcon_port, rcon_password, status) VALUES ('t','127.0.0.1',27015,27015,'x','live')",
+    ).run();
+    const id = seedLive();
+    db.prepare('UPDATE matches SET server_id = 1 WHERE id = ?').run(id);
+    recordHeartbeat(db, TOKEN);
+    db.prepare('UPDATE match_live SET last_seen = ?').run(stamp(ORPHAN_AFTER_MS + 60_000));
+    db.prepare("INSERT INTO matches (season_id, state, campaign, token, server_id) VALUES (1, 'completed', 'no_mercy', 'tok-done', 1)").run();
+    expect(reapOrphanedMatches(db, new ServerReleaser(db, async () => {}))).toEqual([id]);
+    expect(db.prepare('SELECT status FROM servers WHERE id = 1').get()).toEqual({ status: 'idle' });
+  });
+
   it('leaves a match that is merely stale but still within the window', () => {
     seedLive();
     recordHeartbeat(db, TOKEN);

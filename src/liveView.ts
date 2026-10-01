@@ -816,8 +816,13 @@ export function reapOrphanedMatches(
     db.prepare("UPDATE matches SET state = 'aborted', abort_cause = 'server_lost', ended_at = datetime('now') WHERE id = ?")
       .run(r.id);
     // Through the releaser, not a raw status write: a reaped match is exactly
-    // the one whose sv_password nobody is left to clear by hand.
-    if (r.server_id !== null) releaser.release(r.server_id);
+    // the one whose sv_password nobody is left to clear by hand. Not when the
+    // box has since moved on to a newer match (configuring or live): the box
+    // is that match's now, and releasing it would end a running PUG.
+    const movedOn = r.server_id !== null && db.prepare(
+      "SELECT 1 FROM matches WHERE server_id = ? AND id > ? AND state IN ('configuring', 'live') LIMIT 1",
+    ).get(r.server_id, r.id) !== undefined;
+    if (r.server_id !== null && !movedOn) releaser.release(r.server_id);
     // archiveAborted, not clearLive: a reaped match never gets a dump either,
     // so the live scratch is the only record it will ever have.
     archiveAborted(db, r.id);

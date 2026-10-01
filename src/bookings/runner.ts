@@ -121,10 +121,12 @@ export function bookingLines(db: DB, b: BookingRow): string[] {
  *  humans, the ruleset's pause limits (0 turns a limit off), the captains
  *  list (every manager of a confirmed side, Task 6) so the plugin's own
  *  `!nextmap`/`!stay`/`!end`/`!extend` courtesy check has someone to check
- *  against, and when the site has a log address, logging to it plus the log
- *  secret exactly as pushLogSecret (src/logAuth.ts) sends it. The secret is a
- *  console line: callers must redact it from anything they log (redactSecrets). */
-export function gameLines(db: DB, b: BookingRow, server: ServerRow, logAddress?: string): string[] {
+ *  against, and when the site has a log address, logging to it plus (with
+ *  `withSecret`, the default) the log secret exactly as pushLogSecret
+ *  (src/logAuth.ts) sends it. The secret goes only at setup and after a
+ *  campaign load, not in the minute re-push. It is a console line: callers
+ *  must redact it from anything they log (redactSecrets). */
+export function gameLines(db: DB, b: BookingRow, server: ServerRow, logAddress?: string, withSecret = true): string[] {
   const pause = bookingRules(b)?.pause;
   const captains = [...new Set(sidesOf(db, b.id).filter((s) => s.confirmed_at !== null).flatMap((s) => sideManagers(db, s)))];
   const lines = [
@@ -136,7 +138,7 @@ export function gameLines(db: DB, b: BookingRow, server: ServerRow, logAddress?:
   ];
   if (logAddress && /^[A-Za-z0-9.-]+:\d{1,5}$/.test(logAddress)) {
     lines.push(`logaddress_add ${logAddress}`);
-    if (server.log_secret && /^[0-9a-f]{32,64}$/.test(server.log_secret)) {
+    if (withSecret && server.log_secret && /^[0-9a-f]{32,64}$/.test(server.log_secret)) {
       lines.push('sv_rcon_log 0', `sm_pug_log_secret "${server.log_secret}"`, 'sv_rcon_log 1');
     }
   }
@@ -176,8 +178,6 @@ export class BookingRunner {
   private readonly latePublished = new Set<number>();
   /** Empty minute watches in a row, per booking (everyone-left end). */
   private readonly emptyWatches = new Map<number, number>();
-  /** Booking game tokens to send sm_pug_abort for at the start of the wind-down. */
-  private readonly abortTokens = new Map<number, string>();
   /** Bookings whose box has had a campaign start said by loadNext: the
    *  go-active announcement of the first campaign is then moot (a captain
    *  picked a campaign before anyone was on, and it was already announced). */
@@ -352,18 +352,20 @@ export class BookingRunner {
   private async windDown(id: number, sayGoodbye: boolean): Promise<void> {
     const b = getBooking(this.db, id);
     if (!b || b.ended_at !== null) return;
+    // Whatever the end (time, idle, everyone left, a cancel, staff, !end), a
+    // live game of this booking is aborted first. Left 'live', the orphan
+    // reaper would later release the box it names, which by then may be
+    // running a PUG.
+    const tokens: string[] = [];
+    for (let live = liveBookingGame(this.db, id); live; live = liveBookingGame(this.db, id)) {
+      const token = abortBookingGame(this.db, live.id, new Date(this.now()));
+      if (token === null) break;
+      this.forgetToken(id, token);
+      tokens.push(token);
+    }
     if (b.server_id === null) { markReleased(this.db, id, new Date(this.now())); return; }
     const server = getServer(this.db, b.server_id);
-    const token = this.abortTokens.get(id);
-    this.abortTokens.delete(id);
-    if (server && token) {
-      try {
-        await this.deps.rcon(server, [`sm_pug_abort ${token}`]);
-      } catch (err) {
-        // Best effort: the restart below ends the plugin's match either way.
-        console.warn(`[booking] ${id}: sm_pug_abort on ${server.name} failed:`, redactSecrets(err instanceof Error ? err.message : String(err), [token]));
-      }
-    }
+    if (server) for (const token of tokens) await this.sendAbort(id, server, token);
     if (server && sayGoodbye) {
       try {
         await this.deps.rcon(server, [`say [Booking] This booked server is closing: ${END_SAY[b.end_reason ?? 'time'] ?? 'the booking is over'}.`]);
@@ -395,6 +397,38 @@ export class BookingRunner {
     } catch (err) {
       console.error(`[booking] ${id}: the freed hook failed:`, err);
     }
+  }
+
+  private forgetToken(id: number, token: string): void {
+    try {
+      this.deps.unregisterToken?.(token);
+    } catch (err) {
+      console.error(`[booking] ${id}: unregistering the aborted game's token failed:`, err);
+    }
+  }
+
+  /** Best effort: the plugin drops its match. At the end of a booking the
+   *  restart ends it either way. */
+  private async sendAbort(id: number, server: ServerRow, token: string): Promise<void> {
+    try {
+      await this.deps.rcon(server, [`sm_pug_abort ${token}`]);
+    } catch (err) {
+      console.warn(`[booking] ${id}: sm_pug_abort on ${server.name} failed:`, redactSecrets(err instanceof Error ? err.message : String(err), [token]));
+    }
+  }
+
+  /** Staff aborted a booking game (src/admin/matches.ts has already marked
+   *  the row aborted): stop listening for its token and tell the plugin to
+   *  drop the match. The box stays with the booking, which carries on. */
+  async abortGame(matchId: number, token: string): Promise<void> {
+    const m = this.db.prepare('SELECT booking_id, server_id FROM matches WHERE id = ?').get(matchId) as
+      { booking_id: number | null; server_id: number | null } | undefined;
+    if (!m || m.booking_id === null) return;
+    this.forgetToken(m.booking_id, token);
+    const b = getBooking(this.db, m.booking_id);
+    const serverId = b?.server_id ?? m.server_id;
+    const server = serverId !== null ? getServer(this.db, serverId) : undefined;
+    if (server) await this.sendAbort(m.booking_id, server, token);
   }
 
   /** Finish any end a route or the tick started. Idempotent. */
@@ -481,8 +515,9 @@ export class BookingRunner {
     }
     // The booking and game lines go again each minute, in their own burst
     // (best effort; the status above stands either way): cheap, idempotent,
-    // and a map change can reset cvars a cfg sets.
-    await this.push(b.id, server, () => [...bookingLines(this.db, b), ...gameLines(this.db, b, server, this.deps.logPublicAddress)], 're-pushing the booking lines');
+    // and a map change can reset cvars a cfg sets. The log secret is not
+    // among them: setup and every campaign load send it.
+    await this.push(b.id, server, () => [...bookingLines(this.db, b), ...gameLines(this.db, b, server, this.deps.logPublicAddress, false)], 're-pushing the booking lines');
     const on = new Set(humans.map((h) => h.steamid64).filter((s): s is string => s !== null));
     const people = acceptedPeople(this.db, b.id);
     const present = {
@@ -526,13 +561,18 @@ export class BookingRunner {
     }
   }
 
-  /** Ruling 4: a finished game, none live, and the last one ended long
-   *  enough ago that a map change between campaigns is not mistaken for it. */
+  /** Ruling 4: a finished game, none live, and both the last game's end and
+   *  the last campaign load long enough ago that a map change between
+   *  campaigns is not mistaken for it. */
   private everyoneLeftAfterGame(id: number, nowMs: number): boolean {
     const games = bookingGames(this.db, id);
     if (!games.some((g) => g.state === 'completed') || games.some((g) => g.state === 'live')) return false;
     const last = games.at(-1)!;
-    return last.endedAt !== null && nowMs - sqlMs(last.endedAt) >= LEFT_AFTER_GAME_MS;
+    if (last.endedAt === null) return false;
+    const loaded = this.db.prepare("SELECT at FROM booking_events WHERE booking_id = ? AND event = 'campaign_loaded' ORDER BY id DESC LIMIT 1")
+      .get(id) as { at: string } | undefined;
+    const since = Math.max(sqlMs(last.endedAt), loaded ? sqlMs(loaded.at) : 0);
+    return nowMs - since >= LEFT_AFTER_GAME_MS;
   }
 
   private endNow(id: number, reason: 'time' | 'idle' | 'done', now: Date): void {
@@ -569,6 +609,8 @@ export class BookingRunner {
     // Moved on first: a box that does not take the changelevel is not sent it
     // again every minute; a captain can pick the campaign again.
     advancePlaylist(this.db, id, at >= 0 ? at : b.playlist_pos, new Date(this.now()));
+    // A campaign load empties the box for a moment: the everyone-left count starts again.
+    this.emptyWatches.delete(id);
     try {
       await this.deps.rcon(server, [`changelevel ${map}`]);
     } catch {
@@ -627,7 +669,8 @@ export class BookingRunner {
   }
 
   /** A booking game finished (finishMatch keeps the box with the booking and
-   *  calls this): announce the next playlist campaign and load it 60 s later,
+   *  calls this): announce the next playlist campaign and load it on the first
+   *  minute watch at least 60 s later (so 60 to 120 s: "in about a minute"),
    *  or say the playlist is used up. */
   onGameEnded(matchId: number): void {
     const m = this.db.prepare('SELECT booking_id FROM matches WHERE id = ?').get(matchId) as { booking_id: number | null } | undefined;
@@ -642,7 +685,7 @@ export class BookingRunner {
     if (next !== null) {
       setNext(this.db, b.id, next, new Date(nowMs + NEXT_DELAY_MS).toISOString(), new Date(nowMs));
       const name = consoleText(campaignRegistry(this.db).get(next)?.name ?? next, 60);
-      line = `say [Booking] Next: ${name} in 60 s. !nextmap to pick another, !stay to replay this one, !end to finish.`;
+      line = `say [Booking] Next: ${name} in about a minute. !nextmap to pick another, !stay to replay this one, !end to finish.`;
     } else {
       line = 'say [Booking] That was the last campaign on the playlist. !nextmap <campaign> to play another, or !end to finish.';
     }
@@ -706,22 +749,12 @@ export class BookingRunner {
     return { ok: false, error: `"${shown}" matches more than one campaign: ${found.map((e) => e.name).join(', ')}.` };
   }
 
-  /** `!end` (ruling 3): a live game is aborted (booking_ended) and the
-   *  plugin told to drop it, then the booking ends and winds down. */
+  /** `!end` (ruling 3): the booking ends and winds down; the wind-down
+   *  aborts a live game (booking_ended) and tells the plugin to drop it, as
+   *  it does for every end. A refused end aborts nothing. */
   endFromGame(id: number, by: string, staff = false): { ok: true } | { ok: false; error: string } {
-    const nowDate = new Date(this.now());
-    const r = endBooking(this.db, { bookingId: id, by, staff, now: nowDate });
+    const r = endBooking(this.db, { bookingId: id, by, staff, now: new Date(this.now()) });
     if (!r.ok) return { ok: false, error: BOOKING_ERRORS[r.error].text };
-    const live = liveBookingGame(this.db, id);
-    const token = live ? abortBookingGame(this.db, live.id, nowDate) : null;
-    if (token) {
-      try {
-        this.deps.unregisterToken?.(token);
-      } catch (err) {
-        console.error(`[booking] ${id}: unregistering the aborted game's token failed:`, err);
-      }
-      this.abortTokens.set(id, token);
-    }
     this.settle(id);
     return { ok: true };
   }
