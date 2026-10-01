@@ -6,6 +6,7 @@ import { escapeName } from '../src/identity.js';
 import { createTeam } from '../src/teams/teams.js';
 import { acceptPost, confirmAccept, createPost, withdrawPost, type ScrimResult } from '../src/scrims/scrims.js';
 import { ScrimPoster } from '../src/scrims/poster.js';
+import { scrimMessage } from '../src/scrims/messages.js';
 import { FakeTransport, type FakeMessage } from './fakes/fakeTransport.js';
 
 const P = Array.from({ length: 3 }, (_, i) => `765611990000050${String(i).padStart(2, '0')}`);
@@ -76,7 +77,8 @@ describe('ScrimPoster', () => {
     expect(fields.find((f) => f.name === 'When')!.value).toBe(`<t:${Math.floor(Date.parse(START) / 1000)}:F>`);
     expect(fields.find((f) => f.name === 'Length')!.value).toBe('1 campaign, about 1 h 30');
     expect(fields.find((f) => f.name === 'Campaigns')!.value).toBe('No Mercy');
-    expect(fields.find((f) => f.name === 'Average SR')).toBeTruthy();
+    // SR is hidden on scrims for now: no field names or shows it.
+    expect(fields.some((f) => /\bSR\b/.test(f.name) || /\bSR\b/.test(f.value))).toBe(false);
     expect(msg.payload.components).toEqual([[{ kind: 'link', url: `${PUBLIC_URL}/scrims?post=${publicId}`, label: 'Accept on the site' }]]);
   });
 
@@ -363,5 +365,33 @@ describe('ScrimPoster', () => {
     expect(closed.id).toBe(card.message_id);
     expect(closed.payload.embeds[0].description).toBe('Booked');
     expect(closed.payload.components).toEqual([]);
+  });
+});
+
+describe('scrim_show_sr on the card and in the DMs', () => {
+  const fieldsOf = (id: number) => byId(cardRow(id)!.message_id).payload.embeds[0].fields as { name: string; value: string }[];
+
+  it('off (the default): the card has no SR field and an accept DM names no SR', async () => {
+    setSetting(db, 'discord_scrims_channel_id', CHANNEL);
+    const id = postId();
+    await poster.tickNow();
+    expect(fieldsOf(id).some((f) => /\bSR\b/.test(f.name) || /\bSR\b/.test(f.value))).toBe(false);
+    const acceptId = value(acceptPost(db, { postId: id, by: P[1], now: NOW })).id;
+    const dm = scrimMessage(db, PUBLIC_URL, id, 'scrim_accepted', { acceptId })!;
+    expect(dm.content).toMatch(/^p1 accepted your scrim post/);
+    expect(dm.content).not.toMatch(/\bSR\b/);
+  });
+
+  it('on: the card shows the average SR and range, and an accept DM gives the accepter\'s SR', async () => {
+    setSetting(db, 'discord_scrims_channel_id', CHANNEL);
+    setSetting(db, 'scrim_show_sr', 'on');
+    const id = value(createPost(db, {
+      by: P[0], startsAt: START, minutes: 90, campaigns: ['no_mercy'], srRange: 200, note: '', now: NOW,
+    })).id;
+    await poster.tickNow();
+    expect(fieldsOf(id).find((f) => f.name === 'Average SR')!.value).toMatch(/^\d+ \(± 200\)$/);
+    const acceptId = value(acceptPost(db, { postId: id, by: P[1], now: NOW })).id;
+    const dm = scrimMessage(db, PUBLIC_URL, id, 'scrim_accepted', { acceptId })!;
+    expect(dm.content).toMatch(/^p1 \(SR \d+\) accepted your scrim post/);
   });
 });

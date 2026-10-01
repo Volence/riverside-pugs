@@ -3242,7 +3242,7 @@ a.teamrow:hover .teamrow__name { color: var(--accent); }
 .teamlist { list-style: none; margin: var(--sp-2) 0 0; padding: 0; }
 .teamlist li { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); }
 .teamlist li:last-child { border-bottom: 0; }
-.teamlink { display: flex; gap: var(--sp-2); margin: var(--sp-3) 0; }
+.teamlink { margin: var(--sp-3) 0; }
 .teamlink input { flex: 1 1 auto; min-width: 0; font-family: ui-monospace, monospace; font-size: var(--fs-dense); }
 
 .teamsetting { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-3) 0; border-bottom: 1px solid var(--border); }
@@ -3265,6 +3265,18 @@ a.teamrow:hover .teamrow__name { color: var(--accent); }
 .teamdanger { border: 1px solid color-mix(in srgb, var(--loss) 35%, transparent); padding: 0 var(--sp-5); }
 .btn--quietdanger { color: var(--loss); border-color: color-mix(in srgb, var(--loss) 45%, transparent); }
 .btn--quietdanger:hover:not(:disabled) { background: color-mix(in srgb, var(--loss) 12%, transparent); color: var(--loss); }
+
+/* ---------- Inline control rows -----------------------------------------
+   The one rule for an input or select sitting on a line with its buttons
+   (Booking, Bookings, Scrims, Team): a steady gap between every control, a
+   text field that takes the spare width, and a wrap onto the next line on a
+   phone rather than a squeeze. */
+.inlinerow, .bookingadd, .bookingexcuse, .bookinglate, .bookingreview, .teamlink {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3);
+}
+.inlinerow > input:not([type='checkbox']):not([type='radio']),
+.bookingadd > input, .bookingexcuse > input, .teamlink > input { flex: 1 1 14rem; min-width: 0; }
+.inlinerow > select, .bookingadd > select { max-width: 100%; }
 
 /* ---------- Bookings (routes/Bookings.tsx, routes/Booking.tsx) ----------
    Layout only: the list rows and form fields reuse the Teams look above
@@ -3300,10 +3312,10 @@ a.teamrow:hover .teamrow__name { color: var(--accent); }
   .bookform > .btn { grid-column: 1 / -1; justify-self: start; }
 }
 
-.bookingpeople { list-style: none; margin: 0; padding: 0; }
-.bookingpeople li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); }
-.bookingpeople li:last-child { border-bottom: 0; }
-.bookingadd { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: var(--sp-3); }
+.bookingpeople, .bookingcasters { list-style: none; margin: 0; padding: 0; }
+.bookingpeople li, .bookingcasters li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); }
+.bookingpeople li:last-child, .bookingcasters li:last-child { border-bottom: 0; }
+.bookingadd { margin-top: var(--sp-3); }
 .bookingadd ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 
 .bookingconnect code { font-family: ui-monospace, monospace; font-size: var(--fs-dense); }
@@ -3325,10 +3337,33 @@ a.teamrow:hover .teamrow__name { color: var(--accent); }
 
 .scrimside { display: flex; align-items: center; gap: var(--sp-2); }
 
-.scrimrow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2) var(--sp-3); scroll-margin-top: var(--sp-5); }
+.scrimrow { display: flex; flex-direction: column; gap: var(--sp-3); scroll-margin-top: var(--sp-5); }
+.scrimrow > .inlinerow { margin: 0; }
 .scrimrow--highlight { background: var(--surface-2); border-left: 2px solid var(--rule); padding-left: var(--sp-3); }
 .scrimrow--night { background: var(--surface-2); }
-.scrimrow__main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+/* A post or an offer: side and start time on top (the time drops under the
+   name on a phone), the campaigns numbered in play order, a muted count and
+   estimate. */
+.scrimcard { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.scrimcard__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-1) var(--sp-4); min-width: 0; }
+.scrimcard__head .scrimside { min-width: 0; }
+.scrimcard__when {
+  font-family: var(--font-display); font-size: var(--fs-h3); line-height: 1.1; letter-spacing: 0.02em;
+  text-transform: uppercase; color: var(--text-bright); white-space: nowrap;
+}
+.scrimcard__list { list-style: none; counter-reset: scrimcamp; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.scrimcard__list li { counter-increment: scrimcamp; display: flex; align-items: baseline; gap: var(--sp-2); color: var(--text); }
+.scrimcard__list li::before {
+  content: counter(scrimcamp); min-width: 1.25rem;
+  font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; color: var(--accent);
+}
+.scrimcard__meta { margin: 0; color: var(--text-muted); font-size: var(--fs-dense); }
+.scrimcard__note { margin: 0; color: var(--text); font-size: var(--fs-dense); overflow-wrap: anywhere; }
+.scrimcard__tags { margin: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+@media (max-width: 480px) {
+  .scrimcard__head { flex-direction: column; align-items: flex-start; }
+}
 
 /* Plan 2 Ruling 7: the scrim night banner and a board row inside it. */
 .scrimnight { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-3); padding: var(--sp-2) var(--sp-3); background: var(--surface-2); border-radius: var(--radius); font-size: var(--fs-dense); }
@@ -3337,26 +3372,21 @@ a.teamrow:hover .teamrow__name { color: var(--accent); }
 
 .scrimaccept { display: flex; flex-direction: column; gap: var(--sp-2); }
 .scrimaccept .bookform__fieldset label { font-size: var(--fs-dense); }
-.scrimaccept__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 
-.scrimmine { display: flex; flex-direction: column; gap: var(--sp-2); }
-.scrimaccepts { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-.scrimaccepts > li { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) 0 0; border-top: 1px solid var(--border); }
+.scrimaccepts { list-style: none; margin: 0; padding: 0 0 0 var(--sp-3); border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: var(--sp-3); }
+.scrimaccepts > li { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) 0 0; border-top: 1px solid var(--border); }
+.scrimaccepts > li:first-child { border-top: 0; padding-top: 0; }
+.scrimaccepts .scrimcard__when { font-size: var(--fs-body); }
+.scrimaccepts > li > .inlinerow { margin: 0; }
 
 /* Plan 2: the reliability record line, the board badge, and a side's late
    cancel with its excuse controls. All wrap, so nothing overflows at 390 px. */
 .scrimrecord { margin: 0 0 var(--sp-2); font-size: var(--fs-dense); overflow-wrap: anywhere; }
 .scrimbadge { align-self: flex-start; max-width: 100%; white-space: normal; }
-.bookinglate, .bookingexcuse { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-.bookingexcuse input { flex: 1 1 12rem; min-width: 0; }
 /* The review card's thumbs/tag toggles and the staff review list. */
-.bookingreview { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .bookingreviews { list-style: none; margin: 0; padding: 0; }
 .bookingreviews li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); }
 .bookingreviews li:last-child { border-bottom: 0; }
 /* A toxic flag: red text on the People desk, a red-bordered chip on the
    admin bookings panel (plan 2 Ruling 6). */
 .teamchip--toxic { border-color: var(--loss); color: var(--loss); }
-@media (max-width: 560px) {
-  .scrimrow { align-items: flex-start; }
-}

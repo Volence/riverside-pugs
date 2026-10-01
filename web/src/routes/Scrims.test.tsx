@@ -24,6 +24,7 @@ const OPTIONS: ScrimOptions = {
   estimate: { perCampaign: { no_mercy: 70, death_toll: 45 }, base: 15, slack: 10, step: 30, min: 60 },
   myTeams: [{ id: 1, slug: 'mice', name: 'Mice', tag: 'MM' }],
   teams: [{ id: 1, slug: 'mice', name: 'Mice', tag: 'MM' }, { id: 2, slug: 'rats', name: 'Rats', tag: 'RT' }],
+  showSr: false,
 };
 
 const OPEN_POST: ScrimBoardPost = {
@@ -58,7 +59,7 @@ afterEach(() => {
 });
 beforeEach(() => {
   mockScrims.options.mockResolvedValue(OPTIONS);
-  mockScrims.board.mockImplementation((fitsOnly: boolean) => Promise.resolve({ posts: fitsOnly ? [MY_POST] : [OPEN_POST, MY_POST], night: null }));
+  mockScrims.board.mockResolvedValue({ posts: [OPEN_POST, MY_POST], night: null, showSr: false });
   mockScrims.accept.mockResolvedValue({ id: 99, sr: 1450, fits: true });
   mockScrims.decline.mockResolvedValue({ postId: 6, reopened: true });
   mockScrims.withdraw.mockResolvedValue({ acceptIds: [] });
@@ -70,16 +71,56 @@ beforeEach(() => {
 });
 
 describe('Scrims page', () => {
-  it('renders the board and the fit toggle filters it', async () => {
+  it('with scrim_show_sr on: the SR range, the fit filter, SR on rows and the fit chip on offers', async () => {
+    mockScrims.options.mockResolvedValue({ ...OPTIONS, showSr: true });
+    mockScrims.board.mockImplementation((fitsOnly: boolean) =>
+      Promise.resolve({ posts: fitsOnly ? [MY_POST] : [OPEN_POST, MY_POST], night: null, showSr: true }));
     renderScrims();
-    expect(await screen.findByText('Rats')).toBeTruthy();
-    expect(screen.getAllByText('Mice').length).toBeGreaterThan(0);
-    expect(mockScrims.board).toHaveBeenCalledWith(false);
+    await screen.findByText('Rats');
+    expect(document.querySelector('#scrim-5 .scrimcard__meta')?.textContent).toBe('1 campaign · about 2 h · SR 1500 (± 200)');
+    expect(document.querySelector('#scrim-6 .scrimcard__meta')?.textContent).toBe('1 campaign · about 1 h 30 · SR 1400 (Open)');
+    expect(screen.getByText('SR 1420 · fits')).toBeTruthy();
+
+    fireEvent.input(screen.getByLabelText('Start'), { target: { value: '2026-10-02T20:00' } });
+    fireEvent.click(screen.getByLabelText('No Mercy'));
+    fireEvent.change(screen.getByLabelText('SR range'), { target: { value: '200' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Post the scrim' }));
+    await waitFor(() => expect(mockScrims.create).toHaveBeenCalled());
+    expect(mockScrims.create.mock.calls[0][0].srRange).toBe(200);
 
     fireEvent.click(screen.getByLabelText('Fits my SR'));
     await waitFor(() => expect(mockScrims.board).toHaveBeenCalledWith(true));
     await waitFor(() => expect(screen.queryByText('Rats')).toBeNull());
     expect(screen.getAllByText('Mice').length).toBeGreaterThan(0);
+  });
+
+  it('renders the board unfiltered, with no SR fit toggle', async () => {
+    renderScrims();
+    expect(await screen.findByText('Rats')).toBeTruthy();
+    expect(screen.getAllByText('Mice').length).toBeGreaterThan(0);
+    expect(mockScrims.board).toHaveBeenCalledWith(false);
+    expect(mockScrims.board).not.toHaveBeenCalledWith(true);
+    expect(screen.queryByLabelText('Fits my SR')).toBeNull();
+  });
+
+  it('with scrim_show_sr off, shows no SR anywhere: not on rows, offers, the post form or the board', async () => {
+    const { container } = renderScrims();
+    await screen.findByText('Rats');
+    await screen.findByRole('heading', { name: 'Post a scrim' });
+    await screen.findByRole('button', { name: 'Confirm' });
+    expect(container.textContent).not.toMatch(/\bSR\b/);
+    expect(screen.queryByLabelText('SR range')).toBeNull();
+    for (const el of container.querySelectorAll('[aria-label]')) expect(el.getAttribute('aria-label')).not.toMatch(/\bSR\b/);
+  });
+
+  it('with scrim_show_sr off, the post form never sends an SR range', async () => {
+    renderScrims();
+    await screen.findByRole('heading', { name: 'Post a scrim' });
+    fireEvent.input(screen.getByLabelText('Start'), { target: { value: '2026-10-02T20:00' } });
+    fireEvent.click(screen.getByLabelText('No Mercy'));
+    fireEvent.click(screen.getByRole('button', { name: 'Post the scrim' }));
+    await waitFor(() => expect(mockScrims.create).toHaveBeenCalled());
+    expect('srRange' in mockScrims.create.mock.calls[0][0]).toBe(false);
   });
 
   it('the accept form posts the chosen side and campaigns', async () => {
@@ -91,13 +132,27 @@ describe('Scrims page', () => {
     await waitFor(() => expect(mockScrims.accept).toHaveBeenCalledWith(5, 1, ['no_mercy']));
   });
 
-  it('a board row reads its campaign count and estimated slot', async () => {
+  it('a row leads with the side and start time, lists its campaigns in order, then the count and estimate', async () => {
     renderScrims();
     await screen.findByText('Rats');
     const row = document.querySelector('#scrim-5')!;
-    expect(row.textContent).toContain('1 campaign, about 2 h');
-    // "Your posts" shows the offer's merged playlist the same way.
-    expect(screen.getByText(/Proposed: Death Toll, No Mercy \(2 campaigns, about 2 h 30\)/)).toBeTruthy();
+    const head = row.querySelector('.scrimcard__head')!;
+    expect(head.textContent).toContain('Rats');
+    expect(head.querySelector('time')?.getAttribute('datetime')).toBe(OPEN_POST.startsAt);
+    const items = [...row.querySelectorAll('ol.scrimcard__list > li')].map((li) => li.textContent);
+    expect(items).toEqual(['No Mercy']);
+    expect(row.querySelector('.scrimcard__meta')?.textContent).toBe('1 campaign · about 2 h');
+  });
+
+  it('an offer shows the proposed playlist as the same numbered list, with Confirm and Decline', async () => {
+    renderScrims();
+    const list = await screen.findByRole('list', { name: 'Proposed playlist (offer 42)' });
+    expect([...list.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['Death Toll', 'No Mercy']);
+    const offer = list.closest('li')!;
+    expect(offer.querySelector('.scrimcard__head')?.textContent).toContain('p9');
+    expect(offer.querySelector('.scrimcard__meta')?.textContent).toBe('Proposed · 2 campaigns · about 2 h 30');
+    expect(offer.querySelector('button')?.textContent).toBe('Confirm');
+    expect(screen.getByRole('button', { name: 'Decline' })).toBeTruthy();
   });
 
   it('the accept form estimate grows with the accepter\'s campaigns', async () => {
@@ -155,7 +210,7 @@ describe('Scrims page', () => {
   });
 
   it('a board row shows the reliability badge only when the server sends a record', async () => {
-    mockScrims.board.mockResolvedValue({ posts: [OPEN_POST, MY_POST], night: null });
+    mockScrims.board.mockResolvedValue({ posts: [OPEN_POST, MY_POST], night: null, showSr: false });
     renderScrims();
     await screen.findByText('Rats');
     expect(screen.queryByText(/Reliable:/)).toBeNull();
@@ -164,7 +219,7 @@ describe('Scrims page', () => {
     mockScrims.board.mockResolvedValue({ posts: [
       { ...OPEN_POST, record: { shown: 5, booked: 6, noShows: 1, lateCancels: 0, excused: 0 } },
       { ...MY_POST, mine: false, accepts: null, id: 8, record: { shown: 1, booked: 1, noShows: 0, lateCancels: 0, excused: 0 } },
-    ], night: null });
+    ], night: null, showSr: false });
     renderScrims();
     expect(await screen.findByText('Reliable: 5 of 6 shown')).toBeTruthy();
     expect(screen.getByText('New')).toBeTruthy();
@@ -174,6 +229,7 @@ describe('Scrims page', () => {
     mockScrims.board.mockResolvedValue({
       posts: [OPEN_POST, MY_POST],
       night: { startsAt: '2026-10-08T21:00:00.000Z', endsAt: '2026-10-09T01:00:00.000Z' },
+      showSr: false,
     });
     renderScrims();
     await screen.findByText('Rats');
@@ -186,6 +242,7 @@ describe('Scrims page', () => {
     mockScrims.board.mockResolvedValue({
       posts: [OPEN_POST, MY_POST],
       night: { startsAt: '2026-10-08T21:00:00.000Z', endsAt: '2026-10-09T01:00:00.000Z' },
+      showSr: false,
     });
     renderScrims();
     await screen.findByText('Rats');
@@ -197,6 +254,7 @@ describe('Scrims page', () => {
     mockScrims.board.mockResolvedValue({
       posts: [{ ...OPEN_POST, night: true }, MY_POST],
       night: { startsAt: '2026-10-08T21:00:00.000Z', endsAt: '2026-10-09T01:00:00.000Z' },
+      showSr: false,
     });
     const { container } = renderScrims();
     await screen.findByText('Rats');
@@ -273,7 +331,7 @@ describe('the Blocked panel', () => {
 
   it('is absent for someone who cannot post', async () => {
     mockScrims.options.mockRejectedValue(new ApiError(404, 'not found'));
-    mockScrims.board.mockResolvedValue({ posts: [], night: null });
+    mockScrims.board.mockResolvedValue({ posts: [], night: null, showSr: false });
     renderScrims();
     await screen.findByRole('heading', { name: 'Board' });
     await waitFor(() => expect(mockScrims.options).toHaveBeenCalled());

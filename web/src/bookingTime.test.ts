@@ -30,7 +30,7 @@ describe('booking time helpers', () => {
     const e = { perCampaign: { no_mercy: 48, dead_air: 49, suicide_blitz: 62 }, base: 15, slack: 10, step: 30, min: 60 };
     expect(playMinutes(e, ['no_mercy', 'dead_air', 'suicide_blitz', 'death_aboard'])).toBe(220);
     expect(estimateSlot(e, ['no_mercy', 'dead_air', 'suicide_blitz', 'death_aboard'])).toBe(300);
-    expect(slotSummary(2, 150)).toBe('2 campaigns, about 2 h 30');
+    expect(slotSummary(2, 150)).toBe('2 campaigns · about 2 h 30');
   });
 
   it('merges an accept the way the server does: alternating, poster first, no repeats, capped', () => {

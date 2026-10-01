@@ -46,8 +46,8 @@ export function playMinutes(e: SlotEstimate, playlist: string[]): number {
 export const estimateLine = (play: number, slot: number, campaigns: number): string =>
   `About ${slotLabel(play)} of play for ${campaignsLabel(campaigns)}. The server is held for up to ${slotLabel(slot)} and closes when you finish.`;
 
-/** On the board: "2 campaigns, about 2 h 30". */
-export const slotSummary = (campaigns: number, minutes: number): string => `${campaignsLabel(campaigns)}, about ${slotLabel(minutes)}`;
+/** On the board: "2 campaigns · about 2 h 30". */
+export const slotSummary = (campaigns: number, minutes: number): string => `${campaignsLabel(campaigns)} · about ${slotLabel(minutes)}`;
 
 /** The server's proposedPlaylist (src/scrims/rules.ts): the poster's and the
  *  accepter's picks alternate, poster first, repeats skipped, capped. */

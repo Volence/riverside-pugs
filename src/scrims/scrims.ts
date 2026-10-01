@@ -9,7 +9,7 @@ import {
 } from '../bookings/bookings.js';
 import { allowance, bookingLimits, capacityProblem, estimateMinutes, iso, upcomingCount, type Party } from '../bookings/rules.js';
 import { inNight } from './night.js';
-import { nearestFreeSlot, proposedPlaylist, sideSr, srFits, type ScrimSide } from './rules.js';
+import { nearestFreeSlot, proposedPlaylist, showSr, sideSr, srFits, type ScrimSide } from './rules.js';
 import { reliability, type Reliability } from './reliability.js';
 import { blocked } from './blocks.js';
 
@@ -199,7 +199,9 @@ export function createPost(db: DB, o: {
   const campaigns = parsePlaylist(db, o.campaigns, limits.playlistMax);
   if (!campaigns) return fail('bad_playlist');
   const minutes = estimateMinutes(db, campaigns);
-  const srRange = parseSrRange(o.srRange);
+  // While scrim_show_sr is off the range is ignored, so a stale client (or a
+  // re-post of an older post) cannot set one nobody can see: it is stored open.
+  const srRange = showSr(db) ? parseSrRange(o.srRange) : null;
   if (srRange === undefined) return fail('bad_sr_range');
   const note = parseNote(o.note);
   if (!note.ok) return fail(note.error);
@@ -533,7 +535,7 @@ function boardSide(db: DB, s: SideRef): BoardSide {
  * poster's side also gets each pending acceptance with its proposed playlist
  * and SR fit. `fitsOnly` (ruling 2) keeps posts whose range the viewer's side
  * fits, judging the viewer as the first team they captain, else alone; the
- * viewer's own posts always stay.
+ * viewer's own posts always stay. It is ignored while scrim_show_sr is off.
  */
 export function board(
   db: DB, viewer: { steamid: string | null; staff: boolean }, opts: { fitsOnly?: boolean; now?: Date } = {},
@@ -546,7 +548,7 @@ export function board(
   // left off, whichever side blocked (the viewer's own posts stay).
   const viewerParties: Party[] = me ? [...[...managed].map((teamId) => ({ teamId })), { captain: me }] : [];
   const captained = teams.find((t) => t.role === 'captain');
-  const viewerSr = me && opts.fitsOnly ? sideSr(db, captained ? { teamId: captained.id } : { captain: me }) : null;
+  const viewerSr = me && opts.fitsOnly && showSr(db) ? sideSr(db, captained ? { teamId: captained.id } : { captain: me }) : null;
 
   const showRecord = getSetting(db, 'scrim_reliability_public') === 'on';
   const rows = db.prepare("SELECT * FROM scrim_posts WHERE status IN ('open','pending') AND starts_at > ? ORDER BY starts_at, id")

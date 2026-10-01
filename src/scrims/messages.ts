@@ -5,7 +5,7 @@ import { getPlayer } from '../players.js';
 import { activeMembers, getTeam } from '../teams/teams.js';
 import { whenUtc } from '../bookings/messages.js';
 import { getAccept, getPost, type AcceptRow, type PostRow } from './scrims.js';
-import { lengthLabel } from './rules.js';
+import { lengthLabel, showSr, sideSr, type ScrimSide } from './rules.js';
 
 /** The five scrim board notice types this module knows how to word (the
  *  scrim half of NotifyType; the booking half is worded in
@@ -34,6 +34,14 @@ function sideLabel(db: DB, s: SideRef): string {
   return escapeName(getPlayer(db, s.captain_steamid)?.name ?? 'Someone');
 }
 
+/** " (SR 1500)" after a side's name while scrim_show_sr is on, else nothing:
+ *  the side's average SR, as the board and the Discord card show it. */
+function srSuffix(db: DB, s: SideRef): string {
+  if (!showSr(db)) return '';
+  const side: ScrimSide = s.team_id !== null ? { teamId: s.team_id } : { captain: s.captain_steamid };
+  return ` (SR ${sideSr(db, side)})`;
+}
+
 /** The DM for one scrim board notification, or null for a post or acceptance
  *  that is gone. Every player-chosen name goes through escapeName, as in
  *  src/bookings/messages.ts. */
@@ -50,11 +58,11 @@ export function scrimMessage(
   let link = postLink;
   switch (type) {
     case 'scrim_challenge':
-      content = `${posterLabel} challenges you to a scrim: ${when}, ${lengthLabel((JSON.parse(p.campaigns_json) as string[]).length, p.block_minutes)}. Accept it on the site, or let it pass.`;
+      content = `${posterLabel}${srSuffix(db, p)} challenges you to a scrim: ${when}, ${lengthLabel((JSON.parse(p.campaigns_json) as string[]).length, p.block_minutes)}. Accept it on the site, or let it pass.`;
       break;
     case 'scrim_accepted': {
       const a: AcceptRow | undefined = extra.acceptId !== undefined ? getAccept(db, extra.acceptId) : undefined;
-      const accepterLabel = a ? sideLabel(db, a) : 'Someone';
+      const accepterLabel = a ? `${sideLabel(db, a)}${srSuffix(db, a)}` : 'Someone';
       content = `${accepterLabel} accepted your scrim post for ${when}. Pick one acceptance on the site.`;
       break;
     }

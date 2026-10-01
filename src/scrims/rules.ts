@@ -2,6 +2,7 @@ import { rating } from 'openskill';
 import type { DB } from '../db.js';
 import { displaySr } from '../rating.js';
 import { currentSeasonId } from '../players.js';
+import { getSetting } from '../settings.js';
 import { activeMembers } from '../teams/teams.js';
 import { bookingLimits, capacityProblem, estimateMinutes, STEP_MINUTES, iso } from '../bookings/rules.js';
 
@@ -46,6 +47,14 @@ export function sideSr(db: DB, side: ScrimSide): number {
     return Math.round(total / members.length);
   }
   return srOf(db, side.captain, season);
+}
+
+/** Whether scrims show SR at all (scrim_show_sr). Off, SR is left out of
+ *  the board, the post form, the Discord card and the DMs, a post's SR range
+ *  is ignored (stored open) and the board's fit filter is ignored. The SR
+ *  data itself is kept either way. */
+export function showSr(db: DB): boolean {
+  return getSetting(db, 'scrim_show_sr') === 'on';
 }
 
 /** Whether `sr` is within `range` of a post's `postSr`. A null range is open:

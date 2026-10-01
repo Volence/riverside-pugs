@@ -97,7 +97,7 @@ function Casters({ v, mySide, open, busy, act }: {
         </ul>
       )}
       {open && (
-        <p>
+        <p class="inlinerow">
           <select aria-label="Caster" value={pick} onChange={(e) => setPick((e.target as HTMLSelectElement).value)}>
             <option value="">Pick a caster</option>
             {invitable.map((c) => <option key={c.steamid} value={c.steamid}>{c.name}</option>)}
@@ -324,13 +324,13 @@ export function Booking({ id, session }: { id: string; session: Session }) {
           <p><button class="btn" disabled={busy} onClick={repost}>Re-post this scrim</button></p>
         )}
         {v.viewer.invited && v.viewer.manages.length === 0 && open && (
-          <p>
+          <p class="inlinerow">
             <button class="btn" disabled={busy} onClick={() => act(() => bookingsApi.act(v.id, 'accept'))}>Accept</button>
             <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.act(v.id, 'leave'))}>Decline</button>
           </p>
         )}
         {unconfirmedB && v.viewer.manages.includes('b') && open && (
-          <p>
+          <p class="inlinerow">
             <button class="btn" disabled={busy} onClick={() => act(() => bookingsApi.act(v.id, 'confirm'))}>Confirm</button>
             <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.act(v.id, 'decline'))}>Decline</button>
           </p>
@@ -391,7 +391,7 @@ export function Booking({ id, session }: { id: string; session: Session }) {
         <Panel>
           <h3>Next campaign</h3>
           <p class="muted">Picking an earlier playlist campaign moves the playlist back to it.</p>
-          <p>
+          <p class="inlinerow">
             <select aria-label="Campaign" value={pick} onChange={(e) => setPick((e.target as HTMLSelectElement).value)}>
               <option value="">Next on the playlist</option>
               {campaigns.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
@@ -404,7 +404,7 @@ export function Booking({ id, session }: { id: string; session: Session }) {
       {canManage && (
         <Panel>
           <h3>Booking</h3>
-          <p>
+          <p class="inlinerow">
             {/* A player may only add a campaign to a booking that has
                 actually taken a server; staff may add one to any open
                 booking, through the admin route, since the player route has
@@ -427,7 +427,7 @@ export function Booking({ id, session }: { id: string; session: Session }) {
               <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.act(v.id, 'no-show'))}>They did not show</button>
             )}
           </p>
-          <p>
+          <p class="inlinerow">
             <input aria-label="Cancel reason" value={reason} maxLength={300} placeholder="Reason (optional, only the two sides and staff see it)"
               onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
             <button class="btn btn--danger" disabled={busy}
