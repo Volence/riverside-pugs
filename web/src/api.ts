@@ -933,6 +933,9 @@ export interface LiveBoardMatch {
   /** The no-show rule against this match (src/noShow.ts noShowClock).
    *  Optional only for a browser holding new JS against an older server. */
   noShow?: { extraMinutes: number; deadlineS: number | null; applies: boolean; canExtend: boolean; why: string | null } | null;
+  /** The booking this game belongs to, or null for a PUG. Optional only for
+   *  a browser holding new JS against an older server. */
+  bookingId?: number | null;
 }
 export interface LiveBoard {
   now: string;

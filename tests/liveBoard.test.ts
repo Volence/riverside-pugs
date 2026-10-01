@@ -80,6 +80,16 @@ describe('the match line', () => {
     db.prepare("UPDATE matches SET state = 'completed' WHERE id = ?").run(matchId);
     expect(board().matches).toEqual([]);
   });
+
+  it('carries the booking a game belongs to, so the card can abort it as one', () => {
+    expect(board().matches[0].bookingId).toBeNull();
+    const booking = Number(db.prepare(
+      `INSERT INTO bookings (purpose, starts_at, ends_at, state, password, tv_password, game_config, rules_json, playlist_json, created_by, created_at)
+       VALUES ('scrim', '2026-09-21T20:00:00.000Z', '2026-09-21T22:00:00.000Z', 'active', 'pw', 'tvpw', 'pug_match', '{}', '["no_mercy"]', ?, '2026-09-21T19:00:00.000Z')`,
+    ).run(IDS[0]).lastInsertRowid);
+    db.prepare('UPDATE matches SET booking_id = ? WHERE id = ?').run(booking, matchId);
+    expect(board().matches[0].bookingId).toBe(booking);
+  });
 });
 
 describe('exactly one status per player', () => {

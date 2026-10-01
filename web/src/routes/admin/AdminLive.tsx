@@ -57,6 +57,7 @@ export function AdminLive({ isAdmin }: { isAdmin: boolean }) {
   const target = useRef(liveFromUrl()).current;
 
   const [chat, setChat] = useState<number | null>(() => chatFromUrl());
+  const [abortNotice, setAbortNotice] = useState<string | null>(null);
   const openChat = (id: number | null) => {
     setChat(id);
     // Keep the URL shareable and the back button sane: replace, not push.
@@ -74,11 +75,13 @@ export function AdminLive({ isAdmin }: { isAdmin: boolean }) {
       {board ? (
         <>
           {live.error && <p class="error">Could not refresh the board. Showing the last one that loaded.</p>}
+          {abortNotice && <p class="muted">{abortNotice}</p>}
           {board.data.matches.length === 0 ? (
             <Panel><Empty>No match is running.</Empty></Panel>
           ) : board.data.matches.map((m) => (
             <MatchCard key={m.id} match={m} elapsedS={elapsedS} holdMaxMinutes={board.data.holdMaxMinutes}
-              lowAlertSeconds={board.data.lowAlertSeconds} reload={live.reload} isTarget={m.id === target} onChat={openChat} />
+              lowAlertSeconds={board.data.lowAlertSeconds} reload={live.reload} isTarget={m.id === target} onChat={openChat}
+              onAbortNotice={setAbortNotice} />
           ))}
         </>
       ) : live.error ? (
@@ -112,9 +115,13 @@ export function AdminLive({ isAdmin }: { isAdmin: boolean }) {
   );
 }
 
-function MatchCard({ match: m, elapsedS, holdMaxMinutes, lowAlertSeconds, reload, isTarget, onChat }: {
+function MatchCard({ match: m, elapsedS, holdMaxMinutes, lowAlertSeconds, reload, isTarget, onChat, onAbortNotice }: {
   match: LiveBoardMatch; elapsedS: number; holdMaxMinutes: number; lowAlertSeconds: number;
   reload: () => void; isTarget: boolean; onChat: (id: number) => void;
+  /** The abort route's own message (a booking game's says the booking
+   *  carries on). Held by the page, not the card: the aborted match leaves
+   *  the board on the reload that follows, and its card with it. */
+  onAbortNotice: (message: string | null) => void;
 }) {
   // The error is per card, so a failure shows on the match it happened to.
   // Busy is per PLAYER: an rcon call can take the whole rcon timeout against
@@ -158,7 +165,10 @@ function MatchCard({ match: m, elapsedS, holdMaxMinutes, lowAlertSeconds, reload
             waiting for a server, or stuck with no connect line, is exactly
             the one someone is looking at up here. */}
         <button type="button" class="chip" disabled={cardBusy}
-          onClick={() => abortMatchAsked(run, m.id, [...m.teamA, ...m.teamB])}>Abort</button>
+          onClick={() => {
+            onAbortNotice(null);
+            abortMatchAsked(run, m.id, [...m.teamA, ...m.teamB], m.bookingId, (msg) => onAbortNotice(`#${m.id}: ${msg}`));
+          }}>Abort</button>
       </header>
 
       {m.noShow?.applies && (

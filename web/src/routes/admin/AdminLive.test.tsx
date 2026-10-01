@@ -36,7 +36,7 @@ const board = (over: Partial<LiveBoard['matches'][number]> = {}): LiveBoard => (
   matches: [{
     id: 81, campaign: 'no_mercy', map: 'l4d_hospital02_subway', state: 'paused', phase: 'paused',
     server: { id: 1, name: 'Dallas' }, teamAScore: 412, teamBScore: 380, elapsedS: 1325,
-    spectate: null, leaveControl: 'ok', leaveTracking: true,
+    spectate: null, leaveControl: 'ok', leaveTracking: true, bookingId: null,
     teamA: [
       player('1', 'alice', 'a', { kind: 'connected', remainingS: null }),
       player('2', 'bob', 'a', { kind: 'dropped', sinceS: 42, remainingS: 258, held: false, holdLeftS: null }, { kind: 'signon_drop', at: '2026-09-21T20:09:00.000Z' }),
@@ -440,6 +440,26 @@ describe('the match-lifecycle controls', () => {
     fireEvent.click(within(dialog).getByRole('checkbox', { name: /Leave bob out/ }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
     await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, ['2']));
+  });
+
+  it('aborts a booking game from the card as one: no leave-out boxes, and the route\'s message stays up after the card goes', async () => {
+    const message = 'This was a booking game: it is aborted and the booking continues on its server.';
+    mockAdmin.live.mockResolvedValue(board({ bookingId: 5 }));
+    mockAdmin.abortMatch.mockImplementation(async () => {
+      // The reload after the abort no longer has the match, so its card goes.
+      mockAdmin.live.mockResolvedValue({ ...board(), matches: [] });
+      return { ok: true, message };
+    });
+    render(<><AdminLive isAdmin /><ConfirmHost /></>);
+    const card = (await screen.findByText(/#81/)).closest('section') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Abort' }));
+    const dialog = await waitFor(() => screen.getByRole('alertdialog'));
+    expect(dialog.textContent).toContain('the booking keeps its server and carries on');
+    expect(within(dialog).queryAllByRole('checkbox')).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
+    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, []));
+    expect(await screen.findByText('No match is running.')).toBeTruthy();
+    expect(screen.getByText(`#81: ${message}`)).toBeTruthy();
   });
 
   it('aborts from the Open matches table with the same leave-out boxes', async () => {

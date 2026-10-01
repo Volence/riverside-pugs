@@ -62,6 +62,9 @@ export interface BoardMatch {
   clocks: BoardClock[];
   /** The no-show rule against this match, for the "+5 min" button. */
   noShow: NoShowClock | null;
+  /** The booking this game belongs to (plan 4b), or null for a PUG. Abort
+   *  says the booking carries on, and offers no leave-out boxes, for one. */
+  bookingId: number | null;
 }
 
 export interface LiveBoard {
@@ -84,6 +87,7 @@ const secondsSince = (ms: number, now: Date): number => Math.max(0, Math.floor((
 interface MatchRow {
   id: number; campaign: string; state: 'configuring' | 'live'; serverId: number | null; serverName: string | null;
   createdAt: string; wentLiveAt: string | null; leaveControl: number | null; currentMap: string | null;
+  bookingId: number | null;
 }
 
 interface PlayerRow extends Partial<Pick<PresenceRow, 'state' | 'since' | 'remaining_s' | 'remaining_at' | 'held' | 'hold_until'>> {
@@ -97,7 +101,7 @@ export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: 
   const matches = db.prepare(
     `SELECT m.id, m.campaign, m.state, m.server_id AS serverId, s.name AS serverName,
             m.created_at AS createdAt, m.went_live_at AS wentLiveAt, m.leave_control AS leaveControl,
-            l.current_map AS currentMap
+            l.current_map AS currentMap, m.booking_id AS bookingId
      FROM matches m
      LEFT JOIN servers s ON s.id = m.server_id
      LEFT JOIN match_live l ON l.match_id = m.id
@@ -196,6 +200,7 @@ export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: 
         teamB: players.filter((p) => p.team === 'b'),
         clocks,
         noShow,
+        bookingId: m.bookingId,
       };
     }),
   };
