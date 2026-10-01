@@ -2063,6 +2063,10 @@ export interface AdminRuleset {
   id: number; name: string; template: boolean; basedOn: string | null; readOnly: boolean; archived: boolean;
   summary: string; rules: MatchRules | null; inUse: { bookings: number; events: number };
 }
+/** Mirrors src/gameConfigStore.ts GameConfigListItem. */
+export interface AdminGameConfig {
+  key: string; label: string; cfg: string; enabled: boolean; locked: boolean; inUse: { bookings: number; events: number };
+}
 
 export const adminApi = {
   ban: (steamid: string, reason: string, minutes: number | null) =>
@@ -2150,6 +2154,10 @@ export const adminApi = {
   updateRuleset: (id: number, name: string, rules: EditableRules) => post(`/api/admin/rulesets/${id}`, { name, rules }),
   archiveRuleset: (id: number) => post(`/api/admin/rulesets/${id}/archive`),
   unarchiveRuleset: (id: number) => post(`/api/admin/rulesets/${id}/unarchive`),
+  gameConfigs: (signal?: AbortSignal) => get<{ gameConfigs: AdminGameConfig[] }>('/api/admin/game-configs', signal),
+  createGameConfig: (body: { key: string; label: string; cfg: string }) => post<{ key: string }>('/api/admin/game-configs', body),
+  updateGameConfig: (key: string, body: { label: string; enabled: boolean }) => post(`/api/admin/game-configs/${enc(key)}`, body),
+  deleteGameConfig: (key: string) => post(`/api/admin/game-configs/${enc(key)}/delete`),
   audit: (signal?: AbortSignal) => get<{ actions: AuditEntry[] }>('/api/admin/audit', signal),
   renameSeason: (id: number, name: string) => post(`/api/admin/seasons/${id}/rename`, { name }),
   newSeason: (name: string) => post<{ ok: true; id: number }>('/api/admin/seasons/new', { name }),

@@ -25,6 +25,7 @@ import { PlayerFile } from './admin/file/PlayerFile';
 import { EventsDesk } from './admin/events/EventsDesk';
 import { EventEditor } from './admin/events/EventEditor';
 import { AdminRulesets } from './admin/rulesets/AdminRulesets';
+import { AdminGameConfigs } from './admin/rulesets/AdminGameConfigs';
 
 /**
  * Desk and section navigation, in the site's tab and chip shapes.
@@ -133,6 +134,7 @@ export function Admin({ session }: { session: Session }) {
         {r.desk === 'setup' && r.section === 'deploy' && <AdminDeploy />}
         {r.desk === 'setup' && r.section === 'seasons' && <AdminSeasons />}
         {r.desk === 'setup' && r.section === 'rulesets' && <AdminRulesets />}
+        {r.desk === 'setup' && r.section === 'configs' && <AdminGameConfigs />}
         {r.desk === 'setup' && r.section === 'settings' && <AdminSettings />}
         {r.desk === 'setup' && r.section === 'audit' && <AdminAudit />}
         {r.desk === 'balance' && r.section === 'compare' && <Compare />}
