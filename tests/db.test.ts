@@ -15,7 +15,7 @@ describe('openDb', () => {
     expect(names).toEqual([
       'admin_actions',
       'balance_ignored_plugins', 'balance_patch_servers', 'balance_patches', 'balance_rollout_servers', 'balance_rollouts', 'balance_server_state',
-      'bans', 'campaign_play_rules',
+      'bans', 'booking_events', 'booking_people', 'booking_sides', 'bookings', 'campaign_play_rules',
       'community_entries', 'community_likes',
       'custom_campaign_chapters', 'custom_campaign_installs', 'custom_campaigns',
       'discord_link_codes', 'discord_link_history', 'discord_messages', 'discord_sanctions', 'discord_voice', 'discord_voice_origin',
@@ -30,6 +30,7 @@ describe('openDb', () => {
       'match_readyup_players', 'match_readyups', 'match_replays', 'match_round_marks', 'match_round_stats', 'match_rounds',
       'matches', 'matchmaker_state',
       'mod_calls',
+      'notification_prefs',
       'penalties', 'pending_reports', 'player_aliases', 'player_ingame_last', 'player_links', 'player_name_digest', 'player_name_uses', 'player_networks', 'player_notes', 'player_ratings',
       'player_reviews', 'player_steam_signals', 'players', 'practice_drills', 'practice_leases', 'queue_stints',
       'rating_history', 'relay_messages', 'release_boxes', 'releases', 'report_message', 'reporter_chat_pings', 'reports', 'round_metric_context', 'round_metrics', 'rulesets', 'seasons', 'server_chat', 'servers', 'settings', 'side_games', 'signon_drops',

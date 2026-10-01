@@ -172,6 +172,84 @@ CREATE TABLE IF NOT EXISTS team_invites (
   response     TEXT CHECK (response IN ('accepted','declined','cancelled'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS team_invites_open ON team_invites (team_id, steamid) WHERE responded_at IS NULL;
+-- Server bookings (competitive platform, spec part 1 section 3; plan 4a).
+-- A booking reserves capacity in a region from the moment it is made. At its
+-- start minus booking_hold_lead_minutes it takes a concrete box, which it
+-- holds through open_server_holds (kind 'booking', rank 0) until the
+-- wind-down restart has finished: ending_at is set when the end starts,
+-- ended_at only once the box is back, as for practice_leases. A booking that
+-- never had a box gets both at once. state says how it is going; the
+-- terminal states are ended, cancelled and no_show.
+CREATE TABLE IF NOT EXISTS bookings (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  purpose          TEXT NOT NULL CHECK (purpose IN ('scrim','tournament')),
+  region           TEXT NOT NULL DEFAULT 'na',
+  starts_at        TEXT NOT NULL,
+  ends_at          TEXT NOT NULL,
+  state            TEXT NOT NULL DEFAULT 'scheduled'
+                   CHECK (state IN ('scheduled','held','setup','ready','active','ended','cancelled','no_show')),
+  server_id        INTEGER REFERENCES servers(id),
+  password         TEXT NOT NULL,
+  tv_password      TEXT NOT NULL,
+  game_config      TEXT NOT NULL,
+  rules_json       TEXT NOT NULL,
+  playlist_json    TEXT NOT NULL,
+  extended_minutes INTEGER NOT NULL DEFAULT 0,
+  created_by       TEXT NOT NULL REFERENCES players(steamid),
+  created_at       TEXT NOT NULL,
+  held_at          TEXT,
+  ready_at         TEXT,
+  setup_attempts   INTEGER NOT NULL DEFAULT 0,
+  last_human_at    TEXT,
+  reminded_60_at   TEXT,
+  reminded_15_at   TEXT,
+  warned_minutes   INTEGER,
+  ending_at        TEXT,
+  ended_at         TEXT,
+  end_reason       TEXT,
+  cancelled_by     TEXT REFERENCES players(steamid),
+  cancel_side      TEXT CHECK (cancel_side IN ('a','b')),
+  cancel_reason    TEXT
+);
+CREATE INDEX IF NOT EXISTS bookings_open ON bookings (starts_at) WHERE ended_at IS NULL;
+CREATE TABLE IF NOT EXISTS booking_sides (
+  booking_id      INTEGER NOT NULL REFERENCES bookings(id),
+  side            TEXT NOT NULL CHECK (side IN ('a','b')),
+  team_id         INTEGER REFERENCES teams(id),
+  captain_steamid TEXT NOT NULL REFERENCES players(steamid),
+  confirmed_at    TEXT,
+  peak_present    INTEGER NOT NULL DEFAULT 0,
+  no_show_at      TEXT,
+  PRIMARY KEY (booking_id, side)
+);
+CREATE TABLE IF NOT EXISTS booking_people (
+  booking_id INTEGER NOT NULL REFERENCES bookings(id),
+  side       TEXT NOT NULL CHECK (side IN ('a','b')),
+  steamid    TEXT NOT NULL REFERENCES players(steamid),
+  role       TEXT NOT NULL CHECK (role IN ('player','ringer','spectator')),
+  status     TEXT NOT NULL CHECK (status IN ('invited','accepted')),
+  added_by   TEXT NOT NULL REFERENCES players(steamid),
+  added_at   TEXT NOT NULL,
+  PRIMARY KEY (booking_id, steamid)
+);
+-- The audit trail: one row per state change or edit, written in the same
+-- transaction. actor is null for the runner's own changes.
+CREATE TABLE IF NOT EXISTS booking_events (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  booking_id INTEGER NOT NULL REFERENCES bookings(id),
+  at         TEXT NOT NULL,
+  actor      TEXT,
+  event      TEXT NOT NULL,
+  detail     TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS booking_events_booking ON booking_events (booking_id, id);
+-- Opt-outs from src/notify/. A missing row means the player gets that type.
+CREATE TABLE IF NOT EXISTS notification_prefs (
+  steamid TEXT NOT NULL REFERENCES players(steamid),
+  type    TEXT NOT NULL,
+  enabled INTEGER NOT NULL,
+  PRIMARY KEY (steamid, type)
+);
 CREATE TABLE IF NOT EXISTS match_players (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   player_id TEXT NOT NULL REFERENCES players(steamid),
@@ -1019,6 +1097,17 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // everyone. Off hides every team page and route.
   competitive_enabled: 'off',
   team_membership_cap: '3',
+  // Server bookings (plan 4a). Every number in spec section 3 is a setting.
+  booking_max_upcoming: '4',
+  pug_reserve_servers: '2',
+  booking_days_ahead: '14',
+  booking_min_minutes: '60',
+  booking_max_minutes: '180',
+  booking_playlist_max: '4',
+  booking_hold_lead_minutes: '15',
+  booking_protect_minutes: '75',
+  booking_idle_end_minutes: '10',
+  booking_extend_minutes: '30',
 };
 
 /** Patch triage backfill (sub-project 1 of the balance catalogue roadmap).
@@ -1106,6 +1195,8 @@ function widenCheck(db: DB, table: string, marker: string, indexes: string[]): v
 }
 
 const SERVER_HOLDS_VIEW = `CREATE VIEW open_server_holds AS
+  SELECT server_id, 'booking' AS kind, id AS row_id, 0 AS rank FROM bookings WHERE server_id IS NOT NULL AND ended_at IS NULL
+  UNION ALL
   SELECT server_id, 'practice' AS kind, id AS row_id, 1 AS rank FROM practice_leases WHERE ended_at IS NULL
   UNION ALL
   SELECT server_id, 'side' AS kind, id AS row_id, 2 AS rank FROM side_games WHERE ended_at IS NULL`;
@@ -1361,6 +1452,9 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'servers', 'log_auth', "TEXT NOT NULL DEFAULT 'off'");
   ensureColumn(db, 'servers', 'log_auth_boot', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'servers', 'log_auth_seq', 'INTEGER NOT NULL DEFAULT 0');
+  // Competitive bookings count capacity per region (spec part 1 section 4).
+  // Every box today is NA; nothing shows a region while only one exists.
+  ensureColumn(db, 'servers', 'region', "TEXT NOT NULL DEFAULT 'na'");
   // Why a membership ended, where it matters: 'kicked' keeps that player
   // from rejoining through the team's join link (src/teams/teams.ts).
   ensureColumn(db, 'team_members', 'left_reason', 'TEXT');

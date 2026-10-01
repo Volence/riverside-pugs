@@ -98,6 +98,13 @@ const PLAIN: [table: string, column: string][] = [
   ['team_members', 'steamid'],
   ['team_invites', 'steamid'],
   ['team_invites', 'invited_by'],
+  // Bookings (src/bookings/bookings.ts) follow the person: the booking they
+  // made, the side they captain, what they did on it, a cancel they made.
+  ['bookings', 'created_by'],
+  ['bookings', 'cancelled_by'],
+  ['booking_sides', 'captain_steamid'],
+  ['booking_people', 'added_by'],
+  ['booking_events', 'actor'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`
@@ -140,6 +147,11 @@ const KEYED: [table: string, column: string][] = [
   ['player_name_uses', 'steamid'],
   ['match_name_sightings', 'steamid'],
   ['player_ingame_last', 'steamid'],
+  // One place per person per booking. Where both accounts were in one booking
+  // (on one side or on both), the survivor's row is kept.
+  ['booking_people', 'steamid'],
+  // One opt-out per type; where both accounts set one, the survivor's stands.
+  ['notification_prefs', 'steamid'],
 ];
 
 /** A merge that cannot be done because of what was asked for, as opposed to
