@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fitWarning, nightRangeLabel, toUtcIso } from './bookingTime';
+import { campaignsLabel, estimateLine, estimateSlot, mergedPlaylist, slotLabel, slotSummary, nightRangeLabel, toUtcIso } from './bookingTime';
 
 describe('booking time helpers', () => {
   it('reads a datetime-local value in the viewer zone', () => {
@@ -9,9 +9,29 @@ describe('booking time helpers', () => {
     expect(toUtcIso('nonsense')).toBeNull();
   });
 
-  it('warns when the playlist will not fit', () => {
-    expect(fitWarning(120, 110)).toBeNull();
-    expect(fitWarning(60, 130)).toBe('These campaigns usually take about 130 minutes; the booking is 60. Extend later, or pick fewer.');
+  const EST = { perCampaign: { no_mercy: 70, death_toll: 45 }, base: 15, slack: 10, step: 30, min: 60, max: 180 };
+
+  it('estimates the slot the way the server does: 15, each campaign plus 10, up to the step, raised to the minimum', () => {
+    expect(estimateSlot(EST, [])).toBe(60);
+    expect(estimateSlot(EST, ['no_mercy'])).toBe(120);
+    expect(estimateSlot(EST, ['no_mercy', 'death_toll'])).toBe(150);
+    // A campaign the options do not list counts as 60, the server's default.
+    expect(estimateSlot(EST, ['no_mercy', 'unknown'])).toBe(180);
+  });
+
+  it('labels slots and counts', () => {
+    expect(slotLabel(150)).toBe('2 h 30');
+    expect(slotLabel(120)).toBe('2 h');
+    expect(slotLabel(30)).toBe('30 min');
+    expect(campaignsLabel(1)).toBe('1 campaign');
+    expect(campaignsLabel(2)).toBe('2 campaigns');
+    expect(estimateLine(150, 2)).toBe('About 2 h 30 for 2 campaigns');
+    expect(slotSummary(2, 150)).toBe('2 campaigns, about 2 h 30');
+  });
+
+  it('merges an accept the way the server does: alternating, poster first, no repeats, capped', () => {
+    expect(mergedPlaylist(['a', 'b'], ['c', 'a', 'd'], 4)).toEqual(['a', 'c', 'b', 'd']);
+    expect(mergedPlaylist(['a', 'b'], ['c', 'd'], 3)).toEqual(['a', 'c', 'b']);
   });
 
   it('labels the scrim night window with its weekday and local start-end', () => {

@@ -1206,7 +1206,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   pug_reserve_servers: '2',
   booking_days_ahead: '14',
   booking_min_minutes: '60',
-  booking_max_minutes: '180',
+  booking_max_minutes: '300',
   booking_playlist_max: '4',
   booking_hold_lead_minutes: '15',
   booking_protect_minutes: '75',

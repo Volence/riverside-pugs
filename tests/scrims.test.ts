@@ -102,14 +102,18 @@ describe('createPost', () => {
     expect(r({ campaigns: ['no_mercy', 'no_mercy'] })).toBe('bad_playlist');
     expect(r({ campaigns: ['the_sacrifice'] })).toBe('bad_playlist');
     expect(r({ campaigns: ['no_mercy', 'death_toll', 'dead_air', 'blood_harvest', 'crash_course'] })).toBe('bad_playlist');
-    // Four campaigns are within the playlist limit but need a 300 minute slot.
+    // Four campaigns are within the playlist limit but need a 300 minute
+    // slot, over the 180 production stores (the default is 300).
+    setSetting(db, 'booking_max_minutes', '180');
     expect(r({ campaigns: ['no_mercy', 'death_toll', 'dead_air', 'blood_harvest'] })).toBe('too_long');
     setSetting(db, 'booking_max_minutes', '300');
     expect(r({ campaigns: ['no_mercy', 'death_toll', 'dead_air', 'blood_harvest'] })).toBe('ok');
   });
 
   it("a post's block is estimated from its campaigns, whatever minutes are sent", () => {
-    // 15 + (60 + 10) * 2 = 155, up to 180.
+    // 15 + (60 + 10) * 2 = 155, up to 180, the longest booking production
+    // stores (the default is 300).
+    setSetting(db, 'booking_max_minutes', '180');
     expect(postRow(post({ minutes: 45 })).block_minutes).toBe(180);
     expect(postRow(post({ by: P[1], minutes: 'x' as unknown as number, campaigns: ['dead_air'] })).block_minutes).toBe(90);
     expect(err(createPost(db, postInput({ by: P[2], campaigns: ['no_mercy', 'death_toll', 'dead_air'] })))).toBe('too_long');
@@ -336,8 +340,10 @@ describe('withdrawAccept and declineAccept', () => {
 describe('confirmAccept', () => {
   it('books the server with both sides confirmed, the playlist alternated, and the other accepts taken', () => {
     const id = post({ campaigns: ['no_mercy', 'death_toll'] });
-    // Three campaigns need a 240 minute slot, over the default longest
-    // booking, so the accept itself is refused rather than left to stick.
+    // Three campaigns need a 240 minute slot, over the 180 production stores
+    // as its longest booking, so the accept itself is refused rather than
+    // left to stick.
+    setSetting(db, 'booking_max_minutes', '180');
     expect(acceptPost(db, { postId: id, by: P[1], campaigns: ['dead_air'], now: NOW }))
       .toEqual({ ok: false, error: 'too_many_campaigns' });
     expect(SCRIM_ERRORS.too_many_campaigns.status).toBe(400);

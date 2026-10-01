@@ -50,6 +50,12 @@
  * carries into a later booking on the same srcds. l4d_booking_grace is at
  * least 15 seconds, the site's own minimum.
  *
+ * 1.3.0: a booking is a number of campaigns, and +1 campaign replaces
+ * Extend. A captain's !addcampaign [name] goes out as cmd=addcampaign with
+ * the name as arg= (sanitized like every other arg), for the site to add one
+ * campaign and, when named, append it to the playlist. !extend still emits
+ * cmd=extend, which the site treats as !addcampaign with no name.
+ *
  * Build: ./build-booking.sh
  */
 #pragma semicolon 1
@@ -57,7 +63,7 @@
 #include <sourcemod>
 #include "pug-logauth.inc"
 
-#define PLUGIN_VERSION "1.2.1"
+#define PLUGIN_VERSION "1.3.0"
 
 /** Longest arg= text on a PUGBOOK line, plus the null terminator. Matches
  *  the site parser's cap (Task 6). */
@@ -82,10 +88,11 @@ StringMap g_hGrace;
 /** SteamID64 -> GetTime() a block ends. */
 StringMap g_hBlocked;
 
-/** The four captain chat commands, chat form (leading '!', as typed) and the
- *  bare cmd= word the PUGBOOK line uses. Parallel arrays, same order. */
-static const char g_sChatWords[][] = { "!nextmap", "!stay", "!end", "!extend" };
-static const char g_sCmdWords[][] = { "nextmap", "stay", "end", "extend" };
+/** The captain chat commands, chat form (leading '!', as typed) and the
+ *  bare cmd= word the PUGBOOK line uses. Parallel arrays, same order.
+ *  !extend (1.1.0) is kept as the old name of !addcampaign (1.3.0). */
+static const char g_sChatWords[][] = { "!nextmap", "!stay", "!end", "!extend", "!addcampaign" };
+static const char g_sCmdWords[][] = { "nextmap", "stay", "end", "extend", "addcampaign" };
 
 public Plugin myinfo = {
 	name = "L4D1 Booked Server",
@@ -255,7 +262,7 @@ public Action Cmd_BookingCmd(int args)
 	}
 	if (idx == -1)
 	{
-		PrintToServer("usage: sm_booking_cmd <steamid64> <cmd> [arg...] - cmd is nextmap, stay, end or extend");
+		PrintToServer("usage: sm_booking_cmd <steamid64> <cmd> [arg...] - cmd is nextmap, stay, end, extend or addcampaign");
 		return Plugin_Handled;
 	}
 

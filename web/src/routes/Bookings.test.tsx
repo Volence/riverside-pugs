@@ -11,9 +11,10 @@ vi.mock('../api', async (importOriginal) => {
 const { Bookings } = await import('./Bookings');
 
 const OPTIONS = {
-  campaigns: [{ slug: 'no_mercy', name: 'No Mercy', minutes: 70 }, { slug: 'death_toll', name: 'Death Toll', minutes: 60 }],
+  campaigns: [{ slug: 'no_mercy', name: 'No Mercy', minutes: 70 }, { slug: 'death_toll', name: 'Death Toll', minutes: 45 }],
   rulesets: [{ id: 3, name: 'Casual Scrim' }], gameConfigs: [{ key: 'standard', label: 'Standard' }],
-  limits: { minMinutes: 60, maxMinutes: 180, daysAhead: 14, playlistMax: 4, stepMinutes: 30, extendMinutes: 30 },
+  limits: { daysAhead: 14, playlistMax: 4 },
+  estimate: { perCampaign: { no_mercy: 70, death_toll: 45 }, base: 15, slack: 10, step: 30, min: 60, max: 180 },
   myTeams: [], teams: [{ id: 1, slug: 'mice', name: 'Mice', tag: 'MM' }],
 };
 const MINE = {
@@ -37,12 +38,39 @@ describe('Bookings page', () => {
     await waitFor(() => expect(mockBookings.act).toHaveBeenCalledWith(7, 'confirm'));
   });
 
-  it('the form warns when the playlist will not fit the length', async () => {
+  it('the form has no length picker and shows the estimated slot as campaigns are ticked', async () => {
     render(<Bookings session={session} />);
-    fireEvent.change(await screen.findByLabelText('Length'), { target: { value: '60' } });
-    fireEvent.click(screen.getByLabelText('No Mercy'));
+    fireEvent.click(await screen.findByLabelText('No Mercy'));
+    expect(screen.queryByLabelText('Length')).toBeNull();
+    expect(screen.getByText('About 2 h for 1 campaign')).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Death Toll'));
-    expect(screen.getByText(/usually take about 130 minutes/)).toBeTruthy();
+    expect(screen.getByText('About 2 h 30 for 2 campaigns')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Book the server' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('too many campaigns for the longest booking shows the too_long text and disables submit', async () => {
+    mockBookings.options.mockResolvedValue({ ...OPTIONS, estimate: { ...OPTIONS.estimate, max: 120 } });
+    render(<Bookings session={session} />);
+    fireEvent.click(await screen.findByLabelText('No Mercy'));
+    expect(screen.queryByText(/will not fit in one booking/)).toBeNull();
+    fireEvent.click(screen.getByLabelText('Death Toll'));
+    expect(screen.getByText('That many campaigns will not fit in one booking; book fewer, and add one later with +1 campaign.')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Book the server' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('submits the campaigns without a length', async () => {
+    mockBookings.create.mockResolvedValue({ id: 9 });
+    const { LocationProvider } = await import('preact-iso');
+    render(<LocationProvider><Bookings session={session} /></LocationProvider>);
+    fireEvent.change(await screen.findByLabelText('Opponent team'), { target: { value: '1' } });
+    fireEvent.input(screen.getByLabelText('Start'), { target: { value: '2026-10-02T20:00' } });
+    fireEvent.click(screen.getByLabelText('No Mercy'));
+    fireEvent.click(screen.getByRole('button', { name: 'Book the server' }));
+    await waitFor(() => expect(mockBookings.create).toHaveBeenCalled());
+    const sent = mockBookings.create.mock.calls[0][0];
+    expect(sent.playlist).toEqual(['no_mercy']);
+    expect('minutes' in sent).toBe(false);
+    history.replaceState(null, '', '/');
   });
 
   it('the notification toggle posts the change', async () => {
