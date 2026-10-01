@@ -736,7 +736,14 @@ export class BookingRunner {
    *  calls (the campaign-start lines, the goodbye, or the extend notice). */
   onCommand(serverId: number, steamid: string, cmd: 'nextmap' | 'stay' | 'end' | 'extend', arg: string): void {
     const b = bookingOnServer(this.db, serverId);
-    if (!b || actingSides(this.db, b.id, steamid).length === 0) return;
+    if (!b) {
+      console.log(`[booking] onCommand: no open booking on server ${serverId} (steamid ${steamid}, cmd ${cmd})`);
+      return;
+    }
+    if (actingSides(this.db, b.id, steamid).length === 0) {
+      console.log(`[booking] ${b.id}: onCommand: ${steamid} does not manage a confirmed side (server ${serverId}, cmd ${cmd})`);
+      return;
+    }
     let error: string | null = null;
     switch (cmd) {
       case 'nextmap': {

@@ -985,17 +985,26 @@ describe('booked games (plan 4b)', () => {
       expect(cmds()).toContain(CAPTAINS_DT);
     });
 
-    it('does nothing, and sends nothing, for a non-captain', async () => {
+    it('does nothing, and sends nothing, for a non-captain, and logs one line naming the server, steamid and cmd', async () => {
       const id = await running();
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
       runner.onCommand(3, P[5], 'nextmap', '');
       await runner.idle();
+      // mockRestore() also clears mock.calls, so read it before restoring.
+      const lines = log.mock.calls.map((a) => a.map(String).join(' '));
+      log.mockRestore();
       expect(getBooking(db, id)!.playlist_pos).toBe(0);
       expect(cmds()).toEqual([]);
+      expect(lines.some((l) => l.includes('server 3') && l.includes(P[5]) && l.includes('cmd nextmap'))).toBe(true);
     });
 
-    it('does nothing on a box with no booking', () => {
+    it('does nothing on a box with no booking, and logs one line naming the server, steamid and cmd', () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
       expect(() => runner.onCommand(1, P[0], 'stay', '')).not.toThrow();
+      const lines = log.mock.calls.map((a) => a.map(String).join(' '));
+      log.mockRestore();
       expect(cmds()).toEqual([]);
+      expect(lines.some((l) => l.includes('server 1') && l.includes(P[0]) && l.includes('cmd stay'))).toBe(true);
     });
 
     it('does nothing once the booking has started ending', async () => {
@@ -1007,6 +1016,27 @@ describe('booked games (plan 4b)', () => {
       runner.onCommand(3, P[0], 'stay', '');
       await runner.idle();
       expect(cmds()).toEqual([]);
+    });
+
+    it('does nothing while the wind-down is still running (ending_at set, ended_at still null)', async () => {
+      // A release that never resolves pins windDown just past the goodbye and
+      // CLEAR_LINES bursts, in the exact window the booking row sits in
+      // (ending_at set, ended_at still null, state already the terminal one):
+      // the hold (open_server_holds) is still open through ended_at IS NULL,
+      // so onCommand must refuse on ending_at, not on the hold being gone.
+      const r = build({ release: () => new Promise<boolean>(() => {}) });
+      const id = await running(['no_mercy'], r);
+      r.endFromGame(id, P[0]);
+      await flush();
+      const mid = getBooking(db, id)!;
+      expect(mid.ending_at).not.toBeNull();
+      expect(mid.ended_at).toBeNull();
+      expect(mid.state).toBe('ended');
+      sent = [];
+      r.onCommand(3, P[0], 'stay', '');
+      await flush();
+      expect(cmds()).toEqual([]);
+      expect(getBooking(db, id)!.playlist_pos).toBe(0);
     });
 
     it('extends the booking and says the new end on the box', async () => {
