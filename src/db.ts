@@ -351,6 +351,105 @@ CREATE UNIQUE INDEX IF NOT EXISTS scrim_blocks_pickup_pair
   ON scrim_blocks (blocker_steamid, COALESCE(target_team_id, 0), COALESCE(target_steamid, '')) WHERE blocker_steamid IS NOT NULL;
 CREATE INDEX IF NOT EXISTS scrim_blocks_target_team ON scrim_blocks (target_team_id);
 CREATE INDEX IF NOT EXISTS scrim_blocks_target_steamid ON scrim_blocks (target_steamid);
+-- Tournaments (spec part 2 sections 1 and 2; plan T1a). An event is a chain
+-- of stages. status walks draft -> announced -> registration -> checkin ->
+-- live -> finished, or stops at cancelled; every value the later plans need
+-- is in the CHECK now, because widening one means rebuilding the table. Only
+-- src/events/events.ts writes events, event_stages and event_log, each write
+-- one transaction together with its event_log row (tests/eventLogGuard.test.ts).
+-- eligibility_json, checkin_json and roster_json hold the shapes in
+-- src/events/validate.ts. banner_key is the banner's community store key
+-- (sha256), set by src/events/events.ts setEventBanner.
+CREATE TABLE IF NOT EXISTS events (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug              TEXT NOT NULL UNIQUE,
+  name              TEXT NOT NULL,
+  banner_key        TEXT,
+  region            TEXT NOT NULL DEFAULT 'na',
+  organizer_steamid TEXT NOT NULL REFERENCES players(steamid),
+  official          INTEGER NOT NULL DEFAULT 1 CHECK (official IN (0,1)),
+  entry_kind        TEXT NOT NULL CHECK (entry_kind IN ('team','draft')),
+  status            TEXT NOT NULL DEFAULT 'draft'
+                    CHECK (status IN ('draft','announced','registration','checkin','live','finished','cancelled')),
+  starts_at         TEXT NOT NULL,
+  description       TEXT NOT NULL DEFAULT '',
+  eligibility_json  TEXT NOT NULL,
+  team_cap          INTEGER,
+  checkin_json      TEXT NOT NULL,
+  roster_json       TEXT NOT NULL,
+  created_at        TEXT NOT NULL,
+  updated_at        TEXT NOT NULL,
+  finished_at       TEXT,
+  cancelled_at      TEXT,
+  cancel_reason     TEXT
+);
+CREATE INDEX IF NOT EXISTS events_starts ON events (starts_at);
+-- rules_json is the ruleset snapshot: null while the event is a draft, taken
+-- at publish and on every stage edit after it, frozen once the stage starts
+-- (a later plan). chapters null means standard (every chapter but the
+-- finale). Reordering goes through negative ordinals inside one transaction,
+-- so the unique index never sees two stages on one number.
+CREATE TABLE IF NOT EXISTS event_stages (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id           INTEGER NOT NULL REFERENCES events(id),
+  ordinal            INTEGER NOT NULL,
+  type               TEXT NOT NULL CHECK (type IN ('single_elim','double_elim','round_robin','swiss','league')),
+  config_json        TEXT NOT NULL,
+  ruleset_id         INTEGER NOT NULL REFERENCES rulesets(id),
+  rules_json         TEXT,
+  game_config        TEXT NOT NULL DEFAULT 'standard',
+  campaign_pool_json TEXT NOT NULL,
+  veto_type          TEXT NOT NULL CHECK (veto_type IN ('ban_to_one','home_away','pick_ban')),
+  chapters           INTEGER,
+  scheduling         TEXT NOT NULL CHECK (scheduling IN ('rolling','window')),
+  advance_count      INTEGER,
+  status             TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','live','finished')),
+  created_at         TEXT NOT NULL,
+  updated_at         TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS event_stages_ordinal ON event_stages (event_id, ordinal);
+-- Entries and their rosters (spec part 2 section 2). Made here so the schema
+-- lands in one piece; tournaments plan T1b writes them. name, tag and
+-- logo_key are snapshots taken at registration, so a later rename or disband
+-- never rewrites an archived event. A place on a roster is closed with
+-- removed_at, never deleted.
+CREATE TABLE IF NOT EXISTS event_entries (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id      INTEGER NOT NULL REFERENCES events(id),
+  team_id       INTEGER REFERENCES teams(id),
+  name          TEXT NOT NULL,
+  tag           TEXT NOT NULL DEFAULT '',
+  logo_key      TEXT,
+  seed          INTEGER,
+  status        TEXT NOT NULL DEFAULT 'registered'
+                CHECK (status IN ('registered','checked_in','dropped','disqualified','eliminated','placed')),
+  placement     INTEGER,
+  registered_by TEXT NOT NULL REFERENCES players(steamid),
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS event_entries_event ON event_entries (event_id);
+CREATE TABLE IF NOT EXISTS event_entry_players (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  entry_id   INTEGER NOT NULL REFERENCES event_entries(id),
+  steamid    TEXT NOT NULL REFERENCES players(steamid),
+  role       TEXT NOT NULL CHECK (role IN ('starter','sub','coach')),
+  added_at   TEXT NOT NULL,
+  removed_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS event_entry_players_active ON event_entry_players (entry_id, steamid) WHERE removed_at IS NULL;
+CREATE INDEX IF NOT EXISTS event_entry_players_player ON event_entry_players (steamid) WHERE removed_at IS NULL;
+-- The audit trail, shaped like booking_events: one row per state change or
+-- edit, written in the same transaction. actor is null for the engine's own
+-- changes (later plans).
+CREATE TABLE IF NOT EXISTS event_log (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id INTEGER NOT NULL REFERENCES events(id),
+  at       TEXT NOT NULL,
+  actor    TEXT,
+  action   TEXT NOT NULL,
+  detail   TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS event_log_event ON event_log (event_id, id);
 CREATE TABLE IF NOT EXISTS match_players (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   player_id TEXT NOT NULL REFERENCES players(steamid),
