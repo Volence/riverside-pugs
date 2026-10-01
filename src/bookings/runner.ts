@@ -16,11 +16,11 @@ import type { Notifier, NotifyType } from '../notify/notify.js';
 import { bookingMessage } from './messages.js';
 import { bookingLimits, typicalCampaignMinutes } from './rules.js';
 import {
-  acceptedPeople, actingSides, advancePlaylist, bookingRules, closeBooking, endBooking, expireUnconfirmed, getBooking, markActive, markReady,
-  markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
+  acceptedPeople, actingSides, advancePlaylist, bookingRules, closeBooking, endBooking, expireUnconfirmed, extendBooking, getBooking, markActive,
+  markReady, markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
   BOOKING_ERRORS, type BookingRow, type Side, type SideRow,
 } from './bookings.js';
-import { abortBookingGame, bookingGames, liveBookingGame } from './games.js';
+import { abortBookingGame, bookingGames, bookingOnServer, liveBookingGame } from './games.js';
 
 /**
  * The part of bookings that talks to game servers (spec part 1 section 3;
@@ -118,17 +118,21 @@ export function bookingLines(db: DB, b: BookingRow): string[] {
 
 /** The lines that make the box record the booking's games (plan 4b): the
  *  plugin's auto-track starts a match when both teams go live with enough
- *  humans, the ruleset's pause limits (0 turns a limit off), and when the site
- *  has a log address, logging to it plus the log secret exactly as
- *  pushLogSecret (src/logAuth.ts) sends it. The secret is a console line:
- *  callers must redact it from anything they log (redactSecrets). */
+ *  humans, the ruleset's pause limits (0 turns a limit off), the captains
+ *  list (every manager of a confirmed side, Task 6) so the plugin's own
+ *  `!nextmap`/`!stay`/`!end`/`!extend` courtesy check has someone to check
+ *  against, and when the site has a log address, logging to it plus the log
+ *  secret exactly as pushLogSecret (src/logAuth.ts) sends it. The secret is a
+ *  console line: callers must redact it from anything they log (redactSecrets). */
 export function gameLines(db: DB, b: BookingRow, server: ServerRow, logAddress?: string): string[] {
   const pause = bookingRules(b)?.pause;
+  const captains = [...new Set(sidesOf(db, b.id).filter((s) => s.confirmed_at !== null).flatMap((s) => sideManagers(db, s)))];
   const lines = [
     'sm_pug_auto_track 1',
     `sm_pug_auto_min_players ${settingNumber(db, 'booking_game_min_players', 6, { min: 2, max: 8, integer: true })}`,
     `sm_pug_pause_limit ${Math.max(0, Math.trunc(pause?.limit ?? 0))}`,
     `sm_pug_pause_seconds ${Math.max(0, Math.trunc(pause?.seconds ?? 0))}`,
+    `l4d_booking_captains ${quoted(captains.join(','))}`,
   ];
   if (logAddress && /^[A-Za-z0-9.-]+:\d{1,5}$/.test(logAddress)) {
     lines.push(`logaddress_add ${logAddress}`);
@@ -720,6 +724,49 @@ export class BookingRunner {
     }
     this.settle(id);
     return { ok: true };
+  }
+
+  /** A captain's in-game command (plugin l4d_booking 1.1.0's signed PUGBOOK
+   *  line, Task 6). The plugin's own captains cvar (gameLines) is only a
+   *  courtesy: this re-checks the sender against the booking actually
+   *  holding this box right now. Nothing happens for a box with no running
+   *  booking (bookingOnServer already excludes an ending one) or a sender who
+   *  does not manage one of its confirmed sides. A refusal is said on the box
+   *  as `[Booking] <reason>`; a success is already said by the method it
+   *  calls (the campaign-start lines, the goodbye, or the extend notice). */
+  onCommand(serverId: number, steamid: string, cmd: 'nextmap' | 'stay' | 'end' | 'extend', arg: string): void {
+    const b = bookingOnServer(this.db, serverId);
+    if (!b || actingSides(this.db, b.id, steamid).length === 0) return;
+    let error: string | null = null;
+    switch (cmd) {
+      case 'nextmap': {
+        const r = this.chooseNext(b.id, steamid, arg || null);
+        if (!r.ok) error = r.error;
+        break;
+      }
+      case 'stay': {
+        const r = this.stay(b.id, steamid);
+        if (!r.ok) error = r.error;
+        break;
+      }
+      case 'end': {
+        const r = this.endFromGame(b.id, steamid);
+        if (!r.ok) error = r.error;
+        break;
+      }
+      case 'extend': {
+        const r = extendBooking(this.db, { bookingId: b.id, by: steamid, now: new Date(this.now()) });
+        if (r.ok) this.onExtended(b.id);
+        else error = BOOKING_ERRORS[r.error].text;
+        break;
+      }
+    }
+    if (error === null) return;
+    const server = getServer(this.db, serverId);
+    if (!server) return;
+    this.deps.rcon(server, [`say [Booking] ${consoleText(error, 150)}`]).catch((err) => {
+      console.warn(`[booking] ${b.id}: command refusal on ${server.name} failed:`, err instanceof Error ? err.message : err);
+    });
   }
 
   // ---------- notices ----------

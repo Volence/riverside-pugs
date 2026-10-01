@@ -607,3 +607,56 @@ describe('balance and per-round lines', () => {
     expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_MARK half=2 kind=boom t=1`))).toBeNull();
   });
 });
+
+// A captain's in-game command (plugin/l4d_booking.sp 1.1.0, plan 4b). No
+// token: the listener admits it on the sender's address, address-gated like
+// PUGTV (see tests/logListener.test.ts and tests/playerNetworks.test.ts).
+describe('PUGBOOK parsing', () => {
+  it('parses a good line', () => {
+    const ev = parseLogDatagram(framed('PUGBOOK event=cmd cmd=nextmap steamid=76561198000000001 arg=dead air'));
+    expect(ev).toEqual({ kind: 'booking_cmd', steamid: '76561198000000001', cmd: 'nextmap', arg: 'dead air' });
+  });
+
+  it('rejects a bad steamid', () => {
+    expect(parseLogDatagram(framed('PUGBOOK event=cmd cmd=nextmap steamid=123 arg='))).toBeNull();
+    expect(parseLogDatagram(framed('PUGBOOK event=cmd cmd=nextmap steamid=STEAM_1:0:nope arg='))).toBeNull();
+  });
+
+  it('rejects an unknown cmd', () => {
+    expect(parseLogDatagram(framed('PUGBOOK event=cmd cmd=changemap steamid=76561198000000001 arg='))).toBeNull();
+  });
+
+  // arg is free text and LAST on the line, so cmd and steamid are read from
+  // the slice BEFORE the first ' arg=' only, exactly as PUGTV reads its
+  // reason=: text typed into arg can never overwrite the real cmd.
+  it('an arg= carrying cmd=end text does not change the real cmd', () => {
+    const ev = parseLogDatagram(framed('PUGBOOK event=cmd cmd=nextmap steamid=76561198000000001 arg=cmd=end please'));
+    expect(ev).toEqual({ kind: 'booking_cmd', steamid: '76561198000000001', cmd: 'nextmap', arg: 'cmd=end please' });
+  });
+
+  // Verified on the local server (Task 5): the plugin always emits `arg=` as
+  // the last field, with nothing after it when the captain gave no text.
+  it('arg= with nothing after it parses as an empty arg', () => {
+    const ev = parseLogDatagram(framed('PUGBOOK event=cmd cmd=stay steamid=76561199000000001 arg='));
+    expect(ev).toEqual({ kind: 'booking_cmd', steamid: '76561199000000001', cmd: 'stay', arg: '' });
+  });
+
+  // No ` arg=` marker anywhere on the line at all (not even a trailing empty
+  // one) is refused, the same treatment as PUGCALL's ' text=' and PUGTV's
+  // ' name=': the marker is how the grammar tells player-controlled text
+  // apart from the fields before it, so its total absence is a malformed line.
+  it('a line with no arg= marker at all is refused', () => {
+    expect(parseLogDatagram(framed('PUGBOOK event=cmd cmd=stay steamid=76561199000000001'))).toBeNull();
+  });
+
+  it('arg is trimmed and capped at 64 characters', () => {
+    const ev = parseLogDatagram(framed(`PUGBOOK event=cmd cmd=nextmap steamid=76561198000000001 arg=  ${'x'.repeat(80)}  `));
+    expect(ev).toMatchObject({ kind: 'booking_cmd', arg: 'x'.repeat(64) });
+  });
+
+  it('a PUGBOOK line not opening the line (after the engine stamp) is refused', () => {
+    expect(parseLogDatagram(framed(
+      '"x<1><STEAM_1:0:1><>" say "PUGBOOK event=cmd cmd=nextmap steamid=76561198000000001 arg="',
+    ))).toBeNull();
+  });
+});

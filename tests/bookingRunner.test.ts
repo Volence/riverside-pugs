@@ -962,4 +962,79 @@ describe('booked games (plan 4b)', () => {
       expect(logged.some((t) => t.includes(secret))).toBe(false);
     });
   });
+
+  // Task 6: the plugin's signed PUGBOOK line reaches here as
+  // runner.onCommand(serverId, steamid, cmd, arg). The plugin's own captains
+  // cvar (gameLines, tested above) is only a courtesy: onCommand re-checks
+  // rights against the booking actually on the box right now.
+  describe('onCommand (Task 6: the plugin\'s PUGBOOK line)', () => {
+    it('schedules and loads the next campaign for a captain, with no arg', async () => {
+      const id = await running();
+      runner.onCommand(3, P[0], 'nextmap', '');
+      await runner.idle();
+      expect(getBooking(db, id)).toMatchObject({ playlist_pos: 1, next_campaign: null });
+      expect(cmds().filter((c) => c.startsWith('changelevel'))).toEqual(['changelevel l4d_vs_smalltown01_caves']);
+      expect(cmds()).toContain(CAPTAINS_DT);
+    });
+
+    it('passes a named campaign through to chooseNext as `arg`', async () => {
+      const id = await running();
+      runner.onCommand(3, P[1], 'nextmap', 'death');
+      await runner.idle();
+      expect(getBooking(db, id)).toMatchObject({ playlist_pos: 1, next_campaign: null });
+      expect(cmds()).toContain(CAPTAINS_DT);
+    });
+
+    it('does nothing, and sends nothing, for a non-captain', async () => {
+      const id = await running();
+      runner.onCommand(3, P[5], 'nextmap', '');
+      await runner.idle();
+      expect(getBooking(db, id)!.playlist_pos).toBe(0);
+      expect(cmds()).toEqual([]);
+    });
+
+    it('does nothing on a box with no booking', () => {
+      expect(() => runner.onCommand(1, P[0], 'stay', '')).not.toThrow();
+      expect(cmds()).toEqual([]);
+    });
+
+    it('does nothing once the booking has started ending', async () => {
+      const id = await running();
+      runner.endFromGame(id, P[0]);
+      await runner.idle();
+      expect(getBooking(db, id)!.state).toBe('ended');
+      sent = [];
+      runner.onCommand(3, P[0], 'stay', '');
+      await runner.idle();
+      expect(cmds()).toEqual([]);
+    });
+
+    it('extends the booking and says the new end on the box', async () => {
+      const id = await running();
+      const before = getBooking(db, id)!.ends_at;
+      runner.onCommand(3, P[1], 'extend', '');
+      await flush();
+      const b = getBooking(db, id)!;
+      expect(Date.parse(b.ends_at)).toBe(Date.parse(before) + 30 * MIN);
+      expect(cmds()).toContain(`say [Booking] Extended: this booking now runs until ${b.ends_at.slice(11, 16)} UTC.`);
+    });
+
+    it('ends the booking', async () => {
+      const id = await running(['no_mercy']);
+      runner.onCommand(3, P[1], 'end', '');
+      await runner.idle();
+      expect(getBooking(db, id)).toMatchObject({ state: 'ended', end_reason: 'captain' });
+      expect(released).toEqual([3]);
+    });
+
+    it('a refusal from the method it calls is said on the box as [Booking] <reason>', async () => {
+      const id = await running();
+      runner.onCommand(3, P[0], 'nextmap', 'xyz');
+      await flush();
+      // consoleText strips the quotes around the campaign name.
+      expect(cmds()).toContain('say [Booking] No campaign in the map pool matches xyz.');
+      expect(getBooking(db, id)!.next_campaign).toBeNull();
+    });
+
+  });
 });
