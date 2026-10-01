@@ -253,6 +253,20 @@ describe('scrims', () => {
     expect(scrims.find((s) => s.bookingId === id2)!.games.map((g) => [g.us, g.them])).toEqual([[7, 2]]);
   });
 
+  it('each scrim says whether the viewer may open its booking page: the captain and staff yes, a member who joined after it was booked no', async () => {
+    const slug = await create(P[0], 'Rats', 'RR');
+    const teamId = getTeamBySlug(db, slug)!.id;
+    // Booked before P1 joins, so P1 is not on its people list.
+    const id = booking(P[0], teamId, { steamid: P[4] }, START);
+    const tok = (await call('POST', `/api/teams/${slug}/join-link`, P[0], { on: true })).json().token as string;
+    await call('POST', `/api/teams/join/${tok}`, P[1]);
+    const flag = async (who: string) => ((await call('GET', `/api/teams/${slug}/scrims`, who)).json().scrims as
+      { bookingId: number; canView: boolean }[]).find((x) => x.bookingId === id)!.canView;
+    expect(await flag(P[0])).toBe(true);
+    expect(await flag(ADMIN)).toBe(true);
+    expect(await flag(P[1])).toBe(false);
+  });
+
   it('staff see a team\'s scrims without being a member', async () => {
     const slug = await create(P[0], 'Rats', 'RR');
     expect((await call('GET', `/api/teams/${slug}/scrims`, ADMIN)).statusCode).toBe(200);

@@ -15,9 +15,11 @@ let teamCoCaptain: string;
 let teamMember: string;
 let formerCaptain: string;
 let unconfirmedCaptain: string;
+let unconfirmedTeamMember: string;
 let pub: number, priv: number, staffOnly: number, bookingGame: number;
 let teamGame: number;
 let unconfirmedGame: number;
+let unconfirmedTeamGame: number;
 let bookingId: number;
 
 const newBookingRow = (createdBy: string): number => Number(db.prepare(
@@ -74,9 +76,26 @@ function seedUnconfirmedBooking(): number {
   return id;
 }
 
+/** A booking whose side b is a team that has not confirmed: a current
+ *  member of that team gets nothing from the booking until it does. */
+function seedUnconfirmedTeamBooking(): number {
+  const id = newBookingRow(captainA);
+  const teamId = Number(db.prepare(
+    `INSERT INTO teams (name, name_key, tag, tag_key, slug, captain_steamid, created_by, created_at)
+     VALUES ('Team Y', 'team-y', 'TY', 'ty', 'team-y', ?, ?, '2026-09-21T09:00:00.000Z')`,
+  ).run(unconfirmedTeamMember, unconfirmedTeamMember).lastInsertRowid);
+  db.prepare('INSERT INTO team_members (team_id, steamid, role, joined_at, left_at) VALUES (?, ?, ?, ?, ?)')
+    .run(teamId, unconfirmedTeamMember, 'member', '2026-09-21T09:00:00.000Z', null);
+  db.prepare('INSERT INTO booking_sides (booking_id, side, captain_steamid, confirmed_at) VALUES (?, ?, ?, ?)')
+    .run(id, 'a', captainB, '2026-09-21T10:00:00.000Z');
+  db.prepare('INSERT INTO booking_sides (booking_id, side, team_id, captain_steamid, confirmed_at) VALUES (?, ?, ?, ?, ?)')
+    .run(id, 'b', teamId, unconfirmedTeamMember, null);
+  return id;
+}
+
 beforeEach(() => {
   db = openDb(':memory:');
-  const all = seedPlayers(db, 18);
+  const all = seedPlayers(db, 19);
   ids = all.slice(0, 8);
   outsider = all[8];
   mod = all[9];
@@ -88,6 +107,7 @@ beforeEach(() => {
   teamMember = all[15];
   formerCaptain = all[16];
   unconfirmedCaptain = all[17];
+  unconfirmedTeamMember = all[18];
   db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(mod);
   const lines = ids.map((id, i) => ({ id, team: (i < 4 ? 'a' : 'b') as 'a' | 'b' }));
   pub = seedMatch(db, { endedAt: '2026-09-21 12:00:00', lines });
@@ -102,6 +122,9 @@ beforeEach(() => {
   const unconfirmedBookingId = seedUnconfirmedBooking();
   unconfirmedGame = seedMatch(db, { endedAt: '2026-09-21 17:00:00', kind: 'scrim', visibility: 'participants', lines });
   db.prepare('UPDATE matches SET booking_id = ? WHERE id = ?').run(unconfirmedBookingId, unconfirmedGame);
+  const unconfirmedTeamBookingId = seedUnconfirmedTeamBooking();
+  unconfirmedTeamGame = seedMatch(db, { endedAt: '2026-09-21 18:00:00', kind: 'scrim', visibility: 'participants', lines });
+  db.prepare('UPDATE matches SET booking_id = ? WHERE id = ?').run(unconfirmedTeamBookingId, unconfirmedTeamGame);
 });
 
 describe('canViewMatch', () => {
@@ -147,8 +170,12 @@ describe('canViewMatch', () => {
     expect(canViewMatch(db, viewerFor(db, teamCoCaptain), teamGame)).toBe(true);
   });
 
-  it('a plain member of a team side cannot view the game', () => {
-    expect(canViewMatch(db, viewerFor(db, teamMember), teamGame)).toBe(false);
+  it('a current plain member of a confirmed team side can view the game (scrim history for members)', () => {
+    expect(canViewMatch(db, viewerFor(db, teamMember), teamGame)).toBe(true);
+  });
+
+  it("a current member of an unconfirmed team side cannot view the booking's game", () => {
+    expect(canViewMatch(db, viewerFor(db, unconfirmedTeamMember), unconfirmedTeamGame)).toBe(false);
   });
 
   it('a captain who has since left the team side cannot view the game', () => {
@@ -173,8 +200,8 @@ describe('visibleMatchesSql', () => {
     // played in the line-up).
     expect(idsFor(null)).toEqual([pub]);
     expect(idsFor(outsider)).toEqual([pub]);
-    expect(idsFor(ids[0])).toEqual([pub, priv, bookingGame, teamGame, unconfirmedGame]);
-    expect(idsFor(mod)).toEqual([pub, priv, staffOnly, bookingGame, teamGame, unconfirmedGame]);
+    expect(idsFor(ids[0])).toEqual([pub, priv, bookingGame, teamGame, unconfirmedGame, unconfirmedTeamGame]);
+    expect(idsFor(mod)).toEqual([pub, priv, staffOnly, bookingGame, teamGame, unconfirmedGame, unconfirmedTeamGame]);
   });
 
   it("lists the booking's scrim match for an accepted spectator and a pickup captain, but not for an invited-not-accepted person", () => {
@@ -183,14 +210,18 @@ describe('visibleMatchesSql', () => {
     // unconfirmed booking (only their side b is unconfirmed), so they see
     // all three booking games.
     expect(idsFor(captainA)).toEqual([pub, bookingGame, teamGame, unconfirmedGame]);
-    expect(idsFor(captainB)).toEqual([pub, bookingGame]);
+    expect(idsFor(captainB)).toEqual([pub, bookingGame, unconfirmedTeamGame]);
     expect(idsFor(invitedPlayer)).toEqual([pub]);
   });
 
-  it("lists a team side's game for its current co-captain, but not for a plain member or a former captain", () => {
+  it("lists a team side's game for its current co-captain and plain member, but not for a former captain", () => {
     expect(idsFor(teamCoCaptain)).toEqual([pub, teamGame]);
-    expect(idsFor(teamMember)).toEqual([pub]);
+    expect(idsFor(teamMember)).toEqual([pub, teamGame]);
     expect(idsFor(formerCaptain)).toEqual([pub]);
+  });
+
+  it("leaves out a current member of an unconfirmed team side", () => {
+    expect(idsFor(unconfirmedTeamMember)).toEqual([pub]);
   });
 
   it("leaves out an unconfirmed side's prospective pickup captain", () => {

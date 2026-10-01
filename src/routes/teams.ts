@@ -8,6 +8,7 @@ import { competitiveAccess, competitivePublic } from '../teams/access.js';
 import * as T from '../teams/teams.js';
 import { checkLogo, LOGO_MAX_BYTES } from '../community/validate.js';
 import { teamScrims } from '../bookings/games.js';
+import { seesBooking } from '../bookings/bookings.js';
 import type { CommunityStore } from '../community/store.js';
 import type { DmFn } from '../signonDropNotify.js';
 import { teamInviteDm } from '../discord/teamButtons.js';
@@ -196,7 +197,10 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
     if (!t) return refuse(reply, 'not_found');
     const role = v.viewer ? T.roleOf(db, t.id, v.viewer) : null;
     if (role === null && !isStaff(v.viewer)) return refuse(reply, 'not_found');
-    return { scrims: teamScrims(db, t.id) };
+    // The match links work for every current member (src/matchVisibility.ts),
+    // but the booking page is only for its people, managers and staff.
+    const who = { steamid: v.viewer ?? '', staff: isStaff(v.viewer) };
+    return { scrims: teamScrims(db, t.id).map((s) => ({ ...s, canView: seesBooking(db, s.bookingId, who) })) };
   });
 
   app.post('/api/teams/:slug/invites', async (req, reply) => {

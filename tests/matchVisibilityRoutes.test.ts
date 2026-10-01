@@ -21,6 +21,11 @@ let staffOnly: number;
 let bookingGame: number;
 let bookingSpectator: string;
 let bookingInvited: string;
+let teamGame: number;
+let unconfirmedTeamGame: number;
+let teamMember: string;
+let formerMember: string;
+let unconfirmedMember: string;
 let demoDir: string;
 
 // The real file backing priv's demo ordinal 1: a regression guard has to
@@ -34,7 +39,7 @@ const DEMO_BYTES = 64;
 beforeEach(async () => {
   db = openDb(':memory:');
   demoDir = mkdtempSync(join(tmpdir(), 'pugdemo-vis-'));
-  const all = seedPlayers(db, 14);
+  const all = seedPlayers(db, 17);
   ids = all.slice(0, 8);
   outsider = all[8];
   mod = all[9];
@@ -42,6 +47,9 @@ beforeEach(async () => {
   const bookingCaptainB = all[11];
   bookingSpectator = all[12];
   bookingInvited = all[13];
+  teamMember = all[14];
+  formerMember = all[15];
+  unconfirmedMember = all[16];
   db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(mod);
   app = await buildServer({
     config: loadConfig({ DEMO_DIR: demoDir }), db, orchestrator: stubOrchestrator(),
@@ -77,6 +85,35 @@ beforeEach(async () => {
   const bookingLines = [{ id: bookingCaptainA, team: 'a' as const }, { id: bookingCaptainB, team: 'b' as const }];
   bookingGame = seedMatch(db, { endedAt: '2026-09-21 18:00:00', kind: 'scrim', visibility: 'participants', lines: bookingLines });
   db.prepare('UPDATE matches SET booking_id = ? WHERE id = ?').run(bookingId, bookingGame);
+
+  // Two team bookings (side b a team): one confirmed, one not. A current
+  // plain member and a former member of the confirmed team, and a current
+  // member of the unconfirmed one; none is a booking person or played.
+  const team = (name: string, members: [string, string | null][]) => {
+    const teamId = Number(db.prepare(
+      `INSERT INTO teams (name, name_key, tag, tag_key, slug, captain_steamid, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, '2026-09-21T09:00:00.000Z')`,
+    ).run(name, name, name, name, name, bookingCaptainB, bookingCaptainB).lastInsertRowid);
+    for (const [sid, left] of members) {
+      db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at, left_at) VALUES (?, ?, 'member', '2026-09-21T09:00:00.000Z', ?)")
+        .run(teamId, sid, left);
+    }
+    return teamId;
+  };
+  const teamBooking = (teamId: number, confirmed: string | null) => {
+    const id = Number(db.prepare(
+      `INSERT INTO bookings (purpose, region, starts_at, ends_at, password, tv_password, game_config, rules_json, playlist_json, created_by, created_at)
+       VALUES ('scrim', 'na', '2026-09-21T15:00:00.000Z', '2026-09-21T17:00:00.000Z', 'pw', 'tvpw', 'standard', '{}', '[]', ?, '2026-09-21T14:00:00.000Z')`,
+    ).run(bookingCaptainA).lastInsertRowid);
+    side.run(id, 'a', bookingCaptainA, '2026-09-21T14:00:00.000Z');
+    db.prepare('INSERT INTO booking_sides (booking_id, side, team_id, captain_steamid, confirmed_at) VALUES (?, ?, ?, ?, ?)')
+      .run(id, 'b', teamId, bookingCaptainB, confirmed);
+    const game = seedMatch(db, { endedAt: '2026-09-21 19:00:00', kind: 'scrim', visibility: 'participants', lines: bookingLines });
+    db.prepare('UPDATE matches SET booking_id = ? WHERE id = ?').run(id, game);
+    return game;
+  };
+  teamGame = teamBooking(team('teamx', [[teamMember, null], [formerMember, '2026-09-21T09:30:00.000Z']]), '2026-09-21T14:00:00.000Z');
+  unconfirmedTeamGame = teamBooking(team('teamy', [[unconfirmedMember, null]]), null);
 });
 afterEach(async () => { await app.close(); rmSync(demoDir, { recursive: true, force: true }); });
 
@@ -128,6 +165,20 @@ describe('match routes respect visibility', () => {
   it('shows a staff-only match to a mod but not to its own participant', async () => {
     expect((await get(`/api/matches/${staffOnly}`, ids[0])).statusCode).toBe(404);
     expect((await get(`/api/matches/${staffOnly}`, mod)).statusCode).toBe(200);
+  });
+
+  it("shows a confirmed team side's game and its replay timeline to a current member who is no booking person; not to a former member or an unconfirmed side's member", async () => {
+    const listed = async (who: string) => ((await get('/api/matches', who)).json().matches as { id: number }[]).map((m) => m.id);
+    expect((await get(`/api/matches/${teamGame}`, teamMember)).statusCode).toBe(200);
+    expect((await get(`/api/replays/timeline/${teamGame}/1/1`, teamMember)).statusCode).toBe(200);
+    expect(await listed(teamMember)).toContain(teamGame);
+    for (const who of [formerMember, unconfirmedMember]) {
+      for (const game of [teamGame, unconfirmedTeamGame]) {
+        expect((await get(`/api/matches/${game}`, who)).statusCode).toBe(404);
+        expect((await get(`/api/replays/timeline/${game}/1/1`, who)).statusCode).toBe(404);
+        expect(await listed(who)).not.toContain(game);
+      }
+    }
   });
 
   it("shows the booking's game to its accepted spectator, and hides it from an invited-but-not-accepted person", async () => {

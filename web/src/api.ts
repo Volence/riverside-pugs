@@ -1694,6 +1694,9 @@ export const teamsApi = {
 
 export interface TeamScrim {
   bookingId: number; opponent: string; startsAt: string; state: string;
+  /** Whether the viewer may open the booking page (its people, managers
+   *  and staff); every member may open the game links. */
+  canView: boolean;
   games: { matchId: number; campaign: string; state: string; us: number; them: number }[];
 }
 
