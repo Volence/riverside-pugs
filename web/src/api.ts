@@ -654,9 +654,12 @@ export interface NameHistoryRow {
 export interface Standing { rank: number; of: number }
 
 /** Thrown for any non-OK response, carrying the status so callers can tell
- *  "not logged in" (401/403) and "no such thing" (404) apart from a real fault. */
+ *  "not logged in" (401/403) and "no such thing" (404) apart from a real fault.
+ *  `nearestSlot` carries the scrim confirm route's `no_capacity` refusal
+ *  (src/routes/scrims.ts's `refuse`), which rides alongside `error` in the
+ *  body; undefined for every other response. */
 export class ApiError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(readonly status: number, message: string, readonly nearestSlot?: string | null) {
     super(message);
     this.name = 'ApiError';
   }
@@ -686,7 +689,7 @@ async function post<T = unknown>(path: string, body?: unknown): Promise<T> {
   const parsed = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = (parsed as { error?: string }).error ?? `POST ${path} → ${res.status}`;
-    throw new ApiError(res.status, msg);
+    throw new ApiError(res.status, msg, (parsed as { nearestSlot?: string | null }).nearestSlot);
   }
   return parsed as T;
 }
@@ -1764,6 +1767,62 @@ export const bookingsApi = {
   casters: (signal?: AbortSignal) => get<{ casters: { steamid: string; name: string; avatar: string | null }[] }>('/api/bookings/casters', signal),
   inviteCaster: (id: number, steamid: string) => post<BookingView>(`/api/bookings/${id}/casters`, { steamid }),
   withdrawCaster: (id: number, steamid: string) => post<BookingView>(`/api/bookings/${id}/casters/${enc(steamid)}/withdraw`),
+};
+
+// ---------- scrims (the /scrims board, scrim board plan 1) ----------
+
+export interface ScrimOptions {
+  campaigns: { slug: string; name: string; minutes: number }[];
+  limits: {
+    minMinutes: number; maxMinutes: number; daysAhead: number; playlistMax: number; stepMinutes: number;
+    noteMax: number; acceptCampaignsMax: number;
+  };
+  myTeams: { id: number; slug: string; name: string; tag: string }[];
+  teams: { id: number; slug: string; name: string; tag: string }[];
+}
+
+/** Mirrors src/scrims/scrims.ts's BoardSide: a team (with its badge) or a
+ *  pickup group named by its captain. */
+export type ScrimSide =
+  | { kind: 'team'; teamId: number; name: string; tag: string; slug: string; logoKey: string | null }
+  | { kind: 'pickup'; steamid: string; name: string };
+
+export interface ScrimBoardAccept {
+  id: number; side: ScrimSide; sr: number; fits: boolean; campaigns: string[]; createdAt: string;
+  proposed: { playlist: string[]; minutes: number; fits: boolean };
+}
+
+/** Mirrors src/scrims/scrims.ts's BoardPost, the one shape the board, "Your
+ *  posts" and the `?post=` highlight all read. */
+export interface ScrimBoardPost {
+  id: number; status: 'open' | 'pending' | 'booked' | 'expired' | 'withdrawn'; side: ScrimSide; sr: number;
+  srRange: number | null; startsAt: string; minutes: number; campaigns: string[]; note: string; createdAt: string;
+  challenge: { teamId: number; name: string } | null;
+  acceptCount: number;
+  /** The viewer manages the posting side: `accepts` is filled in. */
+  mine: boolean;
+  /** The viewer's side's own pending acceptance of this post, if any. */
+  myAcceptId: number | null;
+  accepts: ScrimBoardAccept[] | null;
+}
+
+export interface NewScrimPost {
+  teamId: number | null; startsAt: string; minutes: number; campaigns: string[]; srRange: number | null;
+  note: string; targetTeamId?: number | null;
+}
+
+export const scrimsApi = {
+  options: (signal?: AbortSignal) => get<ScrimOptions>('/api/scrims/options', signal),
+  board: (fitsOnly: boolean, signal?: AbortSignal) => get<{ posts: ScrimBoardPost[] }>(`/api/scrims${fitsOnly ? '?fitsOnly=1' : ''}`, signal),
+  create: (b: NewScrimPost) => post<{ id: number }>('/api/scrims', b),
+  withdraw: (postId: number) => post<{ acceptIds: number[] }>(`/api/scrims/${postId}/withdraw`),
+  accept: (postId: number, teamId: number | null, campaigns: string[]) =>
+    post<{ id: number; sr: number; fits: boolean }>(`/api/scrims/${postId}/accept`, { teamId, campaigns }),
+  withdrawAccept: (acceptId: number) => post<{ postId: number; reopened: boolean }>(`/api/scrims/accepts/${acceptId}/withdraw`),
+  decline: (acceptId: number) => post<{ postId: number; reopened: boolean }>(`/api/scrims/accepts/${acceptId}/decline`),
+  /** On a `no_capacity` refusal the nearest free slot rides on the thrown
+   *  ApiError's `nearestSlot` (see post(), above), not in this return type. */
+  confirm: (acceptId: number) => post<{ bookingId: number }>(`/api/scrims/accepts/${acceptId}/confirm`),
 };
 
 export interface AdminBookingRow {

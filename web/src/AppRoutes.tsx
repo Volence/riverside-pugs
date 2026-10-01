@@ -39,6 +39,8 @@ const Team = lazy(() => import('./routes/Team'));
 // Bookings: behind the same competitive switch as Teams.
 const Bookings = lazy(() => import('./routes/Bookings'));
 const Booking = lazy(() => import('./routes/Booking'));
+// Scrims: the scrim board, behind the same competitive switch.
+const Scrims = lazy(() => import('./routes/Scrims'));
 
 /** The 404.
  *
@@ -120,6 +122,7 @@ export function AppRoutes(
       <Route path="/team/:slug" component={Team} session={session} refresh={refresh} />
       <Route path="/bookings" component={Bookings} session={session} />
       <Route path="/booking/:id" component={Booking} session={session} />
+      <Route path="/scrims" component={Scrims} session={session} />
       <Route default component={NotFound} />
     </Router>
   );
