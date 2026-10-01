@@ -38,13 +38,25 @@ describe('Bookings page', () => {
     await waitFor(() => expect(mockBookings.act).toHaveBeenCalledWith(7, 'confirm'));
   });
 
+  it('greys out the other campaigns once the cap is reached, so one past it cannot look ticked', async () => {
+    mockBookings.options.mockResolvedValue({ ...OPTIONS, limits: { ...OPTIONS.limits, playlistMax: 1 } });
+    render(<Bookings session={session} />);
+    const nm = (await screen.findByLabelText('No Mercy')) as HTMLInputElement;
+    const dt = screen.getByLabelText('Death Toll') as HTMLInputElement;
+    fireEvent.click(nm);
+    expect(nm.checked).toBe(true);
+    expect(dt.disabled).toBe(true);
+    fireEvent.click(nm);
+    expect(dt.disabled).toBe(false);
+  });
+
   it('the form has no length picker and shows the estimated slot as campaigns are ticked', async () => {
     render(<Bookings session={session} />);
     fireEvent.click(await screen.findByLabelText('No Mercy'));
     expect(screen.queryByLabelText('Length')).toBeNull();
-    expect(screen.getByText('About 2 h for 1 campaign')).toBeTruthy();
+    expect(screen.getByText('About 1 h 10 of play for 1 campaign. The server is held for up to 2 h and closes when you finish.')).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Death Toll'));
-    expect(screen.getByText('About 2 h 30 for 2 campaigns')).toBeTruthy();
+    expect(screen.getByText('About 1 h 55 of play for 2 campaigns. The server is held for up to 2 h 30 and closes when you finish.')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Book the server' }) as HTMLButtonElement).disabled).toBe(false);
   });
 

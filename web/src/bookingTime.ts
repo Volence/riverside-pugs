@@ -34,8 +34,17 @@ export function slotLabel(minutes: number): string {
 
 export const campaignsLabel = (n: number): string => `${n} campaign${n === 1 ? '' : 's'}`;
 
-/** Under a form's campaign boxes: "About 2 h 30 for 2 campaigns". */
-export const estimateLine = (minutes: number, campaigns: number): string => `About ${slotLabel(minutes)} for ${campaignsLabel(campaigns)}`;
+/** The play itself: each campaign's typical length on our servers, summed,
+ *  to the nearest 5 minutes. No setup or slack, unlike estimateSlot. */
+export function playMinutes(e: SlotEstimate, playlist: string[]): number {
+  return Math.round(playlist.reduce((sum, c) => sum + (e.perCampaign[c] ?? DEFAULT_CAMPAIGN_MINUTES), 0) / 5) * 5;
+}
+
+/** Under a form's campaign boxes: the expected play first, then the slot
+ *  the server is held for, which is only for planning servers: a booking
+ *  closes when its campaigns are played, not when the slot runs out. */
+export const estimateLine = (play: number, slot: number, campaigns: number): string =>
+  `About ${slotLabel(play)} of play for ${campaignsLabel(campaigns)}. The server is held for up to ${slotLabel(slot)} and closes when you finish.`;
 
 /** On the board: "2 campaigns, about 2 h 30". */
 export const slotSummary = (campaigns: number, minutes: number): string => `${campaignsLabel(campaigns)}, about ${slotLabel(minutes)}`;
