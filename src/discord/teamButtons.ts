@@ -2,15 +2,22 @@ import type { DB } from '../db.js';
 import type { BotInteraction, InteractionReply, MessagePayload } from './transport.js';
 import { playerByDiscordId } from '../players.js';
 import { inGoodStanding } from '../standing.js';
+import { escapeName } from '../identity.js';
 import { competitiveAccess } from '../teams/access.js';
 import { getInvite, getTeam, respondInvite, TEAM_ERRORS } from '../teams/teams.js';
 
 /** Custom ids: tm:<inviteId>:a (accept), tm:<inviteId>:d (decline). */
 export const TEAM_BUTTON_PREFIX = 'tm:';
 
+/** teamName and invitedByName both come from player input (a team's name is
+ *  nothing but a slur-filtered string, see teams.ts). Unescaped, a name like
+ *  "[Nitro](https://evil)" would render as a masked link in the DM, so both
+ *  are escaped with the same escapeName used everywhere else a player-chosen
+ *  name reaches Discord markdown. The tag is not: normalizeTag restricts it
+ *  to ASCII letters and digits, which escapeName has nothing to do to. */
 export function teamInviteDm(o: { inviteId: number; teamName: string; tag: string; invitedByName: string; url: string }): MessagePayload {
   return {
-    content: `${o.invitedByName} invited you to join **[${o.tag}] ${o.teamName}**.`,
+    content: `${escapeName(o.invitedByName)} invited you to join **[${o.tag}] ${escapeName(o.teamName)}**.`,
     embeds: [],
     components: [[
       { kind: 'button', customId: `${TEAM_BUTTON_PREFIX}${o.inviteId}:a`, label: 'Accept', style: 'success' },
@@ -43,7 +50,8 @@ export async function handleTeamButton(
   const r = respondInvite(deps.db, { inviteId, steamid: player.steamid, accept: choice === 'a' });
   if (!r.ok) return say(TEAM_ERRORS[r.error].text);
   const team = getTeam(deps.db, r.value.teamId);
+  const name = team ? escapeName(team.name) : 'the team';
   return choice === 'a'
-    ? say(`You joined ${team?.name ?? 'the team'}: ${deps.publicUrl}/team/${r.value.slug}`)
-    : say(`You declined the invite to ${team?.name ?? 'the team'}.`);
+    ? say(`You joined ${name}: ${deps.publicUrl}/team/${r.value.slug}`)
+    : say(`You declined the invite to ${name}.`);
 }

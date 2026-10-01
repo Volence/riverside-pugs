@@ -15,3 +15,14 @@ export function competitiveAccess(db: DB, viewer: string | null): boolean {
   if (mode === 'admins') return getPlayer(db, viewer)?.is_admin === 1;
   return false;
 }
+
+/**
+ * Whether the read-only team pages (list, one team, a logo) are open to a
+ * signed-out visitor: true only once the switch is all the way to `everyone`.
+ * Under `admins`, the feature is still being tried out and nothing about it
+ * is public yet, not even to a stranger who just wants to look; a signed-in
+ * viewer there still goes through competitiveAccess as always.
+ */
+export function competitivePublic(db: DB): boolean {
+  return (getSetting(db, 'competitive_enabled') ?? 'off') === 'everyone';
+}

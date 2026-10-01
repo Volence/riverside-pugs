@@ -113,7 +113,7 @@ export function AppRoutes(
       <Route path="/help/consistency" component={HelpConsistency} />
       <Route path="/link/discord" component={LinkDiscord} session={session} refresh={refresh} />
       <Route path="/teams" component={Teams} session={session} />
-      <Route path="/team/join/:token" component={TeamJoin} />
+      <Route path="/team/join/:token" component={TeamJoin} session={session} />
       <Route path="/team/:slug" component={Team} session={session} refresh={refresh} />
       <Route default component={NotFound} />
     </Router>

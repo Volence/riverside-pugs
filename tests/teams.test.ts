@@ -13,6 +13,9 @@ beforeEach(() => {
   db = openDb(':memory:');
   const ins = db.prepare("INSERT INTO players (steamid, name, status) VALUES (?, ?, 'active')");
   P.forEach((id, i) => ins.run(id, `p${i}`));
+  // invitePlayer now refuses a target the switch keeps out (finding 4); these
+  // tests are about team rules, not the rollout switch, so open it wide.
+  db.prepare("UPDATE settings SET value = 'everyone' WHERE key = 'competitive_enabled'").run();
 });
 const t0 = new Date('2026-10-01T12:00:00.000Z');
 const at = (min: number) => new Date(t0.getTime() + min * 60_000);
@@ -41,6 +44,24 @@ describe('names and tags', () => {
     expect(normalizeTag('RRRRRR')).toEqual({ ok: false, error: 'bad_tag' });
     expect(normalizeTag('R R')).toEqual({ ok: false, error: 'bad_tag' });
   });
+
+  it('refuses a name carrying an invisible (default-ignorable) character', () => {
+    // U+2060 WORD JOINER sits inside "Rats⁠Team", invisible but present,
+    // so a naive key would let it stand apart from "ratsteam".
+    expect(normalizeName('Rats⁠Team')).toEqual({ ok: false, error: 'bad_name' });
+    // U+3164 HANGUL FILLER x3: renders blank, but is not whitespace, so the
+    // length and trim checks alone let it through.
+    expect(normalizeName('ㅤㅤㅤ')).toEqual({ ok: false, error: 'bad_name' });
+  });
+
+  it('keys full-width letters the same as their plain ascii form', () => {
+    // U+FF32 U+FF21 U+FF34 U+FF33 = fullwidth "RATS"; NFKC folds it to ascii.
+    expect(normalizeName('ＲＡＴＳ')).toEqual({ ok: true, name: 'ＲＡＴＳ', key: 'rats' });
+  });
+
+  it('a tag cannot carry an invisible character either: the ascii-only pattern already refuses it', () => {
+    expect(normalizeTag('R⁠R')).toEqual({ ok: false, error: 'bad_tag' });
+  });
 });
 
 describe('createTeam', () => {
@@ -63,6 +84,11 @@ describe('createTeam', () => {
     const { slug } = make(P[0], 'Riverside Rats', 'RR');
     db.prepare("UPDATE teams SET disbanded_at = '2026-10-01T13:00:00.000Z' WHERE slug = ?").run(slug);
     expect(make(P[1], 'Riverside Rats', 'RR').slug).toBe('riverside-rats-2');
+  });
+
+  it('a full-width name collides with its plain ascii form', () => {
+    make(P[0], 'Rats', 'RR');
+    expect(createTeam(db, { creator: P[1], name: 'ＲＡＴＳ', tag: 'XX' })).toEqual({ ok: false, error: 'name_taken' });
   });
 
   it('a name that slugs to nothing or to a reserved word gets a usable slug', () => {
@@ -150,6 +176,15 @@ describe('invites', () => {
     const inv = invite(id, P[0], P[1]);
     db.prepare("UPDATE teams SET disbanded_at = '2026-10-01T13:00:00.000Z' WHERE id = ?").run(id);
     expect(respondInvite(db, { inviteId: inv, steamid: P[1], accept: true })).toEqual({ ok: false, error: 'invite_closed' });
+  });
+
+  it('refuses to invite a player the switch keeps out, even when the inviting captain is an admin', () => {
+    db.prepare("UPDATE settings SET value = 'admins' WHERE key = 'competitive_enabled'").run();
+    db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(P[0]);
+    const { id } = make(P[0], 'Rats', 'RR');
+    expect(invitePlayer(db, { teamId: id, by: P[0], target: P[1] })).toEqual({ ok: false, error: 'not_open' });
+    db.prepare("UPDATE settings SET value = 'everyone' WHERE key = 'competitive_enabled'").run();
+    expect(invitePlayer(db, { teamId: id, by: P[0], target: P[1] }).ok).toBe(true);
   });
 
   it('managers cancel invites', () => {

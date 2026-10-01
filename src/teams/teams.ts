@@ -5,6 +5,7 @@ import { hasUnsafeChars } from '../profileFields.js';
 import { settingNumber } from '../settings.js';
 import { inGoodStanding } from '../standing.js';
 import { getPlayer } from '../players.js';
+import { competitiveAccess } from './access.js';
 
 /**
  * Every rule about teams (spec part 1, section 2). The routes and the Discord
@@ -54,6 +55,7 @@ export const TEAM_ERRORS = {
   not_member: { status: 400, text: 'That player is not on this team.' },
   already_member: { status: 409, text: 'Already on this team.' },
   already_invited: { status: 409, text: 'Already invited.' },
+  not_open: { status: 409, text: 'That player cannot use teams yet.' },
   invite_closed: { status: 410, text: 'That invite is no longer open.' },
   link_off: { status: 404, text: 'That join link is turned off or was replaced.' },
   is_captain: { status: 400, text: 'Hand the captaincy over first.' },
@@ -69,12 +71,24 @@ export function membershipCap(db: DB): number {
   return settingNumber(db, 'team_membership_cap', 3, { integer: true, min: 1, max: 10 });
 }
 
+/** Any code point Unicode marks "default ignorable": invisible by design
+ *  (joiners, variation selectors, Hangul filler and friends). hasUnsafeChars
+ *  already refuses the bidi and zero-width characters most likely to be
+ *  pasted by accident, but it does not cover this whole class, and a name
+ *  built entirely from them looks blank while passing the length check. */
+const DEFAULT_IGNORABLE = /\p{Default_Ignorable_Code_Point}/u;
+
 export function normalizeName(raw: unknown): { ok: true; name: string; key: string } | { ok: false; error: TeamError } {
   if (typeof raw !== 'string') return fail('bad_name');
   const name = raw.normalize('NFC').trim().replace(/\s+/g, ' ');
-  if (name.length < NAME_MIN || name.length > NAME_MAX || hasUnsafeChars(name)) return fail('bad_name');
+  if (name.length < NAME_MIN || name.length > NAME_MAX || hasUnsafeChars(name) || DEFAULT_IGNORABLE.test(name)) {
+    return fail('bad_name');
+  }
   if (findSlurs(name).length > 0) return fail('name_not_allowed');
-  return { ok: true, name, key: name.toLowerCase() };
+  // NFKC before lower-casing, so compatibility variants (full-width letters,
+  // ligatures) key the same as their plain ascii form: "ＲＡＴＳ" and "rats"
+  // must not be able to look like two different teams.
+  return { ok: true, name, key: name.normalize('NFKC').toLowerCase() };
 }
 
 export function normalizeTag(raw: unknown): { ok: true; tag: string; key: string } | { ok: false; error: TeamError } {
@@ -244,6 +258,10 @@ export function invitePlayer(
     if (!team) return fail('not_found');
     if (!isManager(roleOf(db, team.id, o.by))) return fail('not_manager');
     if (!getPlayer(db, o.target) || !inGoodStanding(db, o.target)) return fail('not_player');
+    // Admin-only mode is for trying the feature out before anyone else sees
+    // it; an admin captain inviting an ordinary player must not pull them in
+    // (or DM them) while the switch still keeps them out everywhere else.
+    if (!competitiveAccess(db, o.target)) return fail('not_open');
     if (roleOf(db, team.id, o.target)) return fail('already_member');
     if (db.prepare('SELECT 1 FROM team_invites WHERE team_id = ? AND steamid = ? AND responded_at IS NULL').get(team.id, o.target)) {
       return fail('already_invited');
@@ -279,6 +297,19 @@ export function respondInvite(
     if (!added.ok) return added;
     return ok({ teamId: team.id, slug: team.slug });
   })();
+}
+
+/** Whether this team already invited `steamid` within the 24 hours before
+ *  `before` (an ISO timestamp), counting any row but `exceptId`: declared,
+ *  responded or cancelled all still count as an invite that was sent. Used to
+ *  cap the Discord DM, not the invite itself: a captain can still invite,
+ *  cancel and invite again on the site as often as the rules otherwise allow,
+ *  this only decides whether that invite also pings the target's DMs. */
+export function invitedRecently(db: DB, teamId: number, steamid: string, before: string, exceptId: number): boolean {
+  const cutoff = new Date(new Date(before).getTime() - 24 * 60 * 60 * 1000).toISOString();
+  return db.prepare(
+    'SELECT 1 FROM team_invites WHERE team_id = ? AND steamid = ? AND id != ? AND created_at >= ? AND created_at <= ?',
+  ).get(teamId, steamid, exceptId, cutoff, before) !== undefined;
 }
 
 export function cancelInvite(db: DB, o: { inviteId: number; by: string; now?: Date }): Result<null> {
