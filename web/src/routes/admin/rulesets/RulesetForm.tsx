@@ -7,15 +7,15 @@ const BOSSES: [MatchRules['bosses'], string][] = [
   ['random_published', 'Random, shown in game'], ['fixed', 'Fixed'], ['voteboss', 'Voted by the teams'],
 ];
 const SIDE_RULES: [MatchRules['sideRule'], string][] = [
-  ['higher_seed_chooses', 'Higher seed picks sides'], ['non_picker_chooses', 'The team that did not pick the campaign picks sides'], ['coin', 'Coin toss'],
+  ['higher_seed_chooses', 'Higher seed picks sides'], ['non_picker_chooses', 'Non-picker picks sides'], ['coin', 'Coin toss'],
 ];
 const val = (e: Event): string => (e.target as HTMLInputElement).value;
 
 /** One ruleset's name and rules, laid out like the Settings desk. Rated and
  *  penalties are not here: only PUG has them, and PUG is read only. Saving
  *  hands the name and rules up; the desk sends them. */
-export function RulesetForm({ ruleset, rules, busy, onSave, onCancel }: {
-  ruleset: AdminRuleset; rules: MatchRules; busy: boolean; onSave: (name: string, rules: EditableRules) => void; onCancel: () => void;
+export function RulesetForm({ ruleset, rules, busy, error, onSave, onCancel }: {
+  ruleset: AdminRuleset; rules: MatchRules; busy: boolean; error?: string; onSave: (name: string, rules: EditableRules) => void; onCancel: () => void;
 }) {
   const [name, setName] = useState(ruleset.name);
   const [d, setD] = useState<EditableRules>(() => editableFrom(rules));
@@ -83,6 +83,7 @@ export function RulesetForm({ ruleset, rules, busy, onSave, onCancel }: {
       <div class="eventform__actions">
         <button class="btn" type="submit" disabled={busy}>Save ruleset</button>
         <button class="btn btn--ghost" type="button" onClick={onCancel}>Cancel</button>
+        {error && <p class="error" role="alert">{error}</p>}
       </div>
     </form>
   );
