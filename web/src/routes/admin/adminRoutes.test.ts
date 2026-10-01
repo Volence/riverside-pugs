@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ADMIN_ROUTE_PATHS, deskItems, fileUrl, landingFor, legacyRedirect, parseAdminPath, ticketUrl } from './adminRoutes';
+import { ADMIN_ROUTE_PATHS, deskItems, eventAdminUrl, fileUrl, landingFor, legacyRedirect, parseAdminPath, ticketUrl } from './adminRoutes';
 import { exec } from 'preact-iso/router';
 
 const asAdmin = { isAdmin: true };
@@ -59,8 +59,8 @@ describe('the panel URL parser', () => {
     expect(parseAdminPath('/admin/setup/settings', { isAdmin: false }).desk).toBe('people');
     expect(parseAdminPath('/admin/balance', { isAdmin: false }).desk).toBe('people');
     expect(landingFor(false)).toBe('/admin/live');
-    expect(deskItems(false).map((d) => d.key)).toEqual(['live', 'people']);
-    expect(deskItems(true).map((d) => d.key)).toEqual(['live', 'people', 'setup', 'balance']);
+    expect(deskItems(false).map((d) => d.key)).toEqual(['live', 'people', 'events']);
+    expect(deskItems(true).map((d) => d.key)).toEqual(['live', 'people', 'events', 'setup', 'balance']);
   });
 
   it('sends the old links and the bare /admin somewhere real', () => {
@@ -93,6 +93,7 @@ describe('the panel URL parser', () => {
     for (const url of [
       '/admin', '/admin/live', '/admin/people', '/admin/people/review', '/admin/people/bans',
       '/admin/people/tickets', '/admin/people/tickets/12', '/admin/people/calls', '/admin/people/76561199000000001',
+      '/admin/events', '/admin/events/12',
       '/admin/setup', '/admin/setup/settings', '/admin/setup/audit',
       '/admin/balance', '/admin/balance/patches',
     ]) expect(matched(url), url).toBe(true);
@@ -104,5 +105,18 @@ describe('the panel URL parser', () => {
     expect(landingFor(false)).toBe('/admin/live');
     expect(fileUrl('76561199000000001')).toBe('/admin/people/76561199000000001');
     expect(ticketUrl(12)).toBe('/admin/people/tickets/12');
+  });
+
+  it('parses the Events desk, for admins and (to read) moderators', () => {
+    for (const who of [asAdmin, asMod]) {
+      expect(parseAdminPath('/admin/events', who)).toEqual({ desk: 'events', section: 'list', param: null });
+      expect(parseAdminPath('/admin/events/12', who)).toEqual({ desk: 'events', section: 'event', param: '12' });
+      expect(parseAdminPath('/admin/events/abc', who)).toEqual({ desk: 'events', section: 'unknown', param: null });
+      expect(parseAdminPath('/admin/events/12/x', who)).toEqual({ desk: 'events', section: 'unknown', param: null });
+    }
+    expect(legacyRedirect('/admin/events', '', false)).toBeNull();
+    expect(legacyRedirect('/admin/events/12', '', false)).toBeNull();
+    expect(legacyRedirect('/admin/eventsfoo', '', false)).toBe('/admin/people');
+    expect(eventAdminUrl(12)).toBe('/admin/events/12');
   });
 });

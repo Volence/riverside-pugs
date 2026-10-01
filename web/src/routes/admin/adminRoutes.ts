@@ -10,7 +10,7 @@
  * exist so the shell has three desks from the start and so nothing has to be
  * renamed when they arrive.
  */
-export type Desk = 'live' | 'people' | 'setup' | 'balance';
+export type Desk = 'live' | 'people' | 'events' | 'setup' | 'balance';
 
 export interface AdminRoute {
   /** 'unknown' is a path that names no desk at all, such as /admin/servers. */
@@ -24,6 +24,7 @@ export interface AdminRoute {
 export const DESKS: { key: Desk; label: string; path: string }[] = [
   { key: 'live', label: 'Live', path: '/admin/live' },
   { key: 'people', label: 'People', path: '/admin/people' },
+  { key: 'events', label: 'Events', path: '/admin/events' },
   { key: 'setup', label: 'Setup', path: '/admin/setup' },
   { key: 'balance', label: 'Balance', path: '/admin/balance' },
 ];
@@ -67,9 +68,12 @@ export const ADMIN_ROUTE_PATHS: readonly string[] = ['/admin', '/admin/*'];
 export const landingFor = (_isAdmin: boolean): string => '/admin/live';
 export const fileUrl = (steamid: string): string => `/admin/people/${encodeURIComponent(steamid)}`;
 export const ticketUrl = (id: number | string): string => `/admin/people/tickets/${id}`;
+export const eventAdminUrl = (id: number | string): string => `/admin/events/${id}`;
 
-/** The desk strip: a moderator has Live and People (owner ruling 2026-09-28). */
-export const deskItems = (isAdmin: boolean) => (isAdmin ? DESKS : DESKS.filter((d) => d.key === 'live' || d.key === 'people'));
+/** The desk strip: a moderator has Live and People (owner ruling 2026-09-28),
+ *  and Events to read (tournaments plan T1a, Ruling 2). */
+export const deskItems = (isAdmin: boolean) =>
+  (isAdmin ? DESKS : DESKS.filter((d) => d.key === 'live' || d.key === 'people' || d.key === 'events'));
 
 const STEAMID = /^\d{17}$/;
 const TICKET = /^\d+$/;
@@ -107,13 +111,22 @@ export function parseAdminPath(path: string, opts: { isAdmin: boolean }): AdminR
     return { ...NOWHERE, desk: 'people' };
   };
 
+  // Events (tournaments plan T1a): the list, or one event by id. A moderator
+  // reads the same screens; the screens leave out every control (Ruling 2).
+  const events = (): AdminRoute => {
+    if (a === '') return { desk: 'events', section: 'list', param: null };
+    return TICKET.test(a) && b === '' ? { desk: 'events', section: 'event', param: a } : { ...NOWHERE, desk: 'events' };
+  };
+
   // A moderator has Live and People. Anything else lands on People rather
   // than on a screen every call inside would be refused on anyway.
   if (!opts.isAdmin) {
     if (desk === 'live' || desk === '') return { desk: 'live', section: 'board', param: null };
+    if (desk === 'events') return events();
     return desk === 'people' ? people() : { desk: 'people', section: 'search', param: null };
   }
   if (desk === 'people') return people();
+  if (desk === 'events') return events();
   if (desk === 'setup') {
     const section = a === '' ? 'settings' : a;
     return SETUP_TABS.some((t) => t.key === section)
@@ -156,6 +169,7 @@ export function legacyRedirect(path: string, search: string, isAdmin: boolean): 
   // The People desk itself or something inside it. A prefix test alone would
   // count /admin/peoplefoo as inside.
   const inPeople = path === '/admin/people' || path.startsWith('/admin/people/');
-  if (!isAdmin && !(inPeople || path.startsWith('/admin/live'))) return '/admin/people';
+  const inEvents = path === '/admin/events' || path.startsWith('/admin/events/');
+  if (!isAdmin && !(inPeople || inEvents || path.startsWith('/admin/live'))) return '/admin/people';
   return null;
 }

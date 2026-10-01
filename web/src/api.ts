@@ -1718,6 +1718,57 @@ export const teamsApi = {
   scrims: (slug: string, signal?: AbortSignal) => get<{ scrims: TeamScrim[] }>(`/api/teams/${enc(slug)}/scrims`, signal),
 };
 
+// ---------- events (tournaments plan T1a; mirrors src/events/validate.ts, src/events/views.ts) ----------
+
+export type EventStatus = 'draft' | 'announced' | 'registration' | 'checkin' | 'live' | 'finished' | 'cancelled';
+export type EntryKind = 'team' | 'draft';
+export type StageType = 'single_elim' | 'double_elim' | 'round_robin' | 'swiss' | 'league';
+export type VetoType = 'ban_to_one' | 'home_away' | 'pick_ban';
+export type Scheduling = 'rolling' | 'window';
+export interface EventEligibility { minPugs: number; requireDiscord: boolean; srFloor: number | null; srCeiling: number | null }
+export interface EventCheckin { enabled: boolean; opensMinutes: number; closesMinutes: number }
+export type RosterLock = { kind: 'none' } | { kind: 'at'; at: string } | { kind: 'after_round'; stage: number; round: number };
+export interface EventRoster { starters: 4; maxSubs: number; lock: RosterLock; maxAdditions: number | null }
+export interface StageConfigs {
+  single_elim: { thirdPlace: boolean };
+  double_elim: { grandFinalReset: boolean };
+  round_robin: { groups: number };
+  swiss: { rounds: number };
+  league: { weeks: number; matchesPerWeek: number; pairing: 'swiss' | 'round_robin' };
+}
+export type StageConfig = StageConfigs[StageType];
+export interface StageSettings {
+  type: StageType; config: StageConfig; rulesetId: number; gameConfig: string; campaignPool: string[];
+  vetoType: VetoType; chapters: number | null; scheduling: Scheduling; advanceCount: number | null;
+}
+export interface EventFields {
+  name: string; startsAt: string; entryKind: EntryKind; official: boolean; teamCap: number | null; description: string;
+  eligibility: EventEligibility; checkin: EventCheckin; roster: EventRoster;
+}
+export interface EventListItem {
+  slug: string; name: string; status: EventStatus; entryKind: EntryKind; official: boolean; startsAt: string; bannerKey: string | null;
+  format: string[]; entries: number;
+}
+export interface EventStageView {
+  ordinal: number; type: StageType; summary: string; veto: string; chapters: string; scheduling: Scheduling;
+  rulesetName: string | null; rules: string[]; gameConfig: string; campaigns: { slug: string; name: string }[];
+}
+export interface EventEntryView { name: string; tag: string; seed: number | null; status: string }
+export interface EventView {
+  slug: string; name: string; status: EventStatus; entryKind: EntryKind; official: boolean; organizerName: string | null;
+  bannerKey: string | null; startsAt: string; description: string; teamCap: number | null;
+  eligibility: EventEligibility; checkin: EventCheckin; roster: EventRoster;
+  stages: EventStageView[]; entries: EventEntryView[];
+  finishedAt: string | null; cancelledAt: string | null; cancelReason: string | null;
+}
+
+export const bannerUrl = (key: string): string => `/api/events/banners/${key}`;
+
+export const eventsApi = {
+  list: (signal?: AbortSignal) => get<{ events: EventListItem[] }>('/api/events', signal),
+  get: (slug: string, signal?: AbortSignal) => get<EventView>(`/api/events/${enc(slug)}`, signal),
+};
+
 export interface TeamScrim {
   bookingId: number; opponent: string; startsAt: string; state: string;
   /** Whether the viewer may open the booking page (its people, managers
@@ -1970,6 +2021,24 @@ export interface AdminBookingRow {
   toxic: { a: boolean; b: boolean };
 }
 
+/** src/routes/adminEvents.ts */
+export interface AdminEventRow {
+  id: number; slug: string; name: string; status: EventStatus; entryKind: EntryKind; startsAt: string; stages: number; updatedAt: string;
+}
+export interface AdminEventStage { id: number; ordinal: number; summary: string; settings: StageSettings; rulesSnapshotted: boolean }
+export interface AdminEventDetail {
+  id: number; slug: string; status: EventStatus; fields: EventFields; bannerKey: string | null;
+  cancelReason: string | null; createdAt: string; updatedAt: string;
+  stages: AdminEventStage[];
+  log: { at: string; actorName: string | null; action: string; detail: Record<string, unknown> }[];
+}
+export interface AdminEventOptions {
+  campaigns: { slug: string; name: string }[]; defaultPool: string[];
+  rulesets: { id: number; name: string }[]; defaultRulesetId: number | null;
+  gameConfigs: { key: string; label: string }[];
+  defaults: { eligibility: EventEligibility; checkin: EventCheckin; roster: EventRoster };
+}
+
 export const adminApi = {
   ban: (steamid: string, reason: string, minutes: number | null) =>
     post(`/api/admin/players/${steamid}/ban`, { reason, minutes }),
@@ -2032,6 +2101,22 @@ export const adminApi = {
   endBooking: (id: number) => post(`/api/admin/bookings/${id}/end`),
   /** Staff excuse a side's late cancel or no-show (plan 2), with an optional note. */
   excuseBooking: (id: number, side: BookingSide, note: string) => post(`/api/admin/bookings/${id}/excuse`, { side, note }),
+  /** The Events desk (tournaments plan T1a). */
+  events: (signal?: AbortSignal) => get<{ events: AdminEventRow[] }>('/api/admin/events', signal),
+  eventOptions: (signal?: AbortSignal) => get<AdminEventOptions>('/api/admin/events/options', signal),
+  event: (id: number, signal?: AbortSignal) => get<AdminEventDetail>(`/api/admin/events/${id}`, signal),
+  createEvent: (body: { name: string; startsAt: string; entryKind: EntryKind }) => post<{ id: number; slug: string }>('/api/admin/events', body),
+  updateEvent: (id: number, fields: Partial<EventFields>) => post(`/api/admin/events/${id}`, fields),
+  addStage: (id: number, stage: StageSettings) => post(`/api/admin/events/${id}/stages`, stage),
+  updateStage: (id: number, stageId: number, stage: StageSettings) => post(`/api/admin/events/${id}/stages/${stageId}`, stage),
+  removeStage: (id: number, stageId: number) => post(`/api/admin/events/${id}/stages/${stageId}/remove`),
+  reorderStages: (id: number, order: number[]) => post(`/api/admin/events/${id}/stages/order`, { order }),
+  publishEvent: (id: number) => post(`/api/admin/events/${id}/publish`),
+  openEventRegistration: (id: number) => post(`/api/admin/events/${id}/open-registration`),
+  cancelEvent: (id: number, reason: string) => post(`/api/admin/events/${id}/cancel`, { reason }),
+  /** `image` is base64 of the 1600 x 400 banner from toBannerImage, no data: prefix. */
+  setEventBanner: (id: number, image: string) => post<{ bannerKey: string }>(`/api/admin/events/${id}/banner`, { image }),
+  removeEventBanner: (id: number) => post(`/api/admin/events/${id}/banner/remove`),
   audit: (signal?: AbortSignal) => get<{ actions: AuditEntry[] }>('/api/admin/audit', signal),
   renameSeason: (id: number, name: string) => post(`/api/admin/seasons/${id}/rename`, { name }),
   newSeason: (name: string) => post<{ ok: true; id: number }>('/api/admin/seasons/new', { name }),
