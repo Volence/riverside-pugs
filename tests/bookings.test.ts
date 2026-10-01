@@ -340,6 +340,19 @@ describe('views', () => {
     expect(bookingView(db, id, { steamid: P[9], staff: true })!.connect).not.toBeNull();
   });
 
+  it('an open booking has no late cancel on either side; a side cancel 10 minutes out is one, a staff cancel is not', () => {
+    const id = create();
+    confirmBooking(db, { bookingId: id, by: P[1], now: NOW });
+    const marks = (as: string) => bookingView(db, id, { steamid: as, staff: false })!.sides.map((s) => [s.lateCancel, s.excused, s.canExcuse]);
+    expect(marks(P[1])).toEqual([[false, false, false], [false, false, false]]);
+    cancelBooking(db, { bookingId: id, by: P[1], now: at(START, -10) });
+    expect(marks(P[0])).toEqual([[false, false, false], [true, false, true]]);
+    const staffed = create({ startsAt: '2026-10-03T20:00:00.000Z' });
+    confirmBooking(db, { bookingId: staffed, by: P[1], now: NOW });
+    cancelBooking(db, { bookingId: staffed, by: P[9], staff: true, now: at('2026-10-03T20:00:00.000Z', -10) });
+    expect(bookingView(db, staffed, { steamid: P[0], staff: false })!.sides.map((s) => s.lateCancel)).toEqual([false, false]);
+  });
+
   it("bookingView lists the booking's games oldest first", () => {
     const id = create();
     expect(bookingView(db, id, { steamid: P[0], staff: false })!.games).toEqual([]);

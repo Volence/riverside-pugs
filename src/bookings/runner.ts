@@ -14,7 +14,7 @@ import { consoleText, cvarValue, quoted, waitForStartup, type BoxRcon } from '..
 import { activeMembers } from '../teams/teams.js';
 import type { Notifier } from '../notify/notify.js';
 import { bookingMessage, type BookingNotifyType } from './messages.js';
-import { bookingLimits, typicalCampaignMinutes } from './rules.js';
+import { bookingLimits, isLateCancel, typicalCampaignMinutes } from './rules.js';
 import {
   acceptedPeople, actingSides, advancePlaylist, allowInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, extendBooking, gameName, getBooking, markActive,
   markReady, markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
@@ -936,7 +936,7 @@ export class BookingRunner {
   /** Never throws: a notice runs after a committed state change, and a
    *  failure to word or send it must not undo the caller's work (a route's
    *  answer, a release). */
-  private tell(id: number, steamids: Iterable<string>, type: BookingNotifyType, extra: { minutes?: number; reason?: string | null; addedBy?: string } = {}): void {
+  private tell(id: number, steamids: Iterable<string>, type: BookingNotifyType, extra: { minutes?: number; reason?: string | null; addedBy?: string; lateCancel?: boolean } = {}): void {
     try {
       const payload = bookingMessage(this.db, this.deps.publicUrl, id, type, extra);
       if (payload) this.deps.notifier.send(steamids, type, payload);
@@ -965,8 +965,22 @@ export class BookingRunner {
     if (row) this.tell(id, [steamid], 'booking_invite', { addedBy: by });
   }
 
+  /** A late cancel (plan 2) asks the other side's people, and only them, to
+   *  excuse it; everyone else gets the plain notice. */
   onCancelled(id: number, by: string | null, reason: string | null): void {
-    this.tell(id, this.everyone(id).filter((s) => s !== by), 'booking_cancelled', { reason });
+    const to = this.everyone(id).filter((s) => s !== by);
+    const b = getBooking(this.db, id);
+    const other = b && isLateCancel(this.db, b) ? sidesOf(this.db, id).find((s) => s.side !== b.cancel_side) : undefined;
+    if (other) {
+      const theirs = new Set([
+        ...acceptedPeople(this.db, id).filter((p) => p.side === other.side).map((p) => p.steamid), ...sideManagers(this.db, other),
+      ]);
+      this.tell(id, to.filter((s) => theirs.has(s)), 'booking_cancelled', { reason, lateCancel: true });
+      const rest = to.filter((s) => !theirs.has(s));
+      if (rest.length > 0) this.tell(id, rest, 'booking_cancelled', { reason });
+    } else {
+      this.tell(id, to, 'booking_cancelled', { reason });
+    }
     this.settle(id);
   }
 

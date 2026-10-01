@@ -8,7 +8,7 @@ import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { addServer } from '../src/serverPool.js';
-import { holdBox, markReady, markSetup } from '../src/bookings/bookings.js';
+import { cancelBooking, holdBox, markReady, markSetup } from '../src/bookings/bookings.js';
 import { bookingRoutes } from '../src/routes/bookings.js';
 import type { BookingRunner } from '../src/bookings/runner.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
@@ -225,5 +225,46 @@ describe('next and stay (plan 4b, Task 7)', () => {
     expect((await bare.inject({ method: 'POST', url: `/api/bookings/${id}/next`, cookies: as0 })).statusCode).toBe(503);
     expect((await bare.inject({ method: 'POST', url: `/api/bookings/${id}/stay`, cookies: as0 })).statusCode).toBe(503);
     await bare.close();
+  });
+});
+
+describe('excusing a late cancel', () => {
+  /** A confirmed booking side a cancelled an hour before the start. */
+  const lateCancelled = async () => {
+    const id = await create();
+    await call('POST', `/api/bookings/${id}/confirm`, P[1]);
+    const r = cancelBooking(db, { bookingId: id, by: P[0], now: new Date(START.getTime() - 3_600_000) });
+    expect(r.ok).toBe(true);
+    return id;
+  };
+
+  it('the other side excuses it and gets the fresh view; the cancelling side and strangers cannot', async () => {
+    const id = await lateCancelled();
+    const own = await call('POST', `/api/bookings/${id}/excuse`, P[0]);
+    expect(own.statusCode).toBe(403);
+    expect((await call('POST', `/api/bookings/${id}/excuse`, P[2])).statusCode).toBe(404);
+    const before = (await call('GET', `/api/bookings/${id}`, P[1])).json();
+    expect(before.sides[0]).toMatchObject({ lateCancel: true, excused: false, canExcuse: true });
+    expect('record' in before.sides[0]).toBe(false);
+    expect(before.sides[1].record).toBeDefined();
+    const r = await call('POST', `/api/bookings/${id}/excuse`, P[1], { note: 'no hard feelings' });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().sides[0]).toMatchObject({ lateCancel: true, excused: true, canExcuse: false });
+    const again = await call('POST', `/api/bookings/${id}/excuse`, P[1]);
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error).toBe('That is already excused.');
+  });
+
+  it('staff excuse a side with a reason; players get 403 and the action is audited', async () => {
+    const id = await lateCancelled();
+    expect((await call('POST', `/api/admin/bookings/${id}/excuse`, P[1], { side: 'a' })).statusCode).toBe(403);
+    expect((await call('POST', `/api/admin/bookings/${id}/excuse`, MOD, { side: 'b' })).statusCode).toBe(409);
+    const r = await call('POST', `/api/admin/bookings/${id}/excuse`, MOD, { side: 'a', note: 'their server crashed' });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().sides[0]).toMatchObject({ lateCancel: true, excused: true });
+    expect(r.json().sides[0].record).toBeDefined();
+    expect(db.prepare('SELECT excuse_note, excused_by FROM booking_sides WHERE booking_id = ? AND side = ?').get(id, 'a'))
+      .toEqual({ excuse_note: 'their server crashed', excused_by: MOD });
+    expect(db.prepare("SELECT action FROM admin_actions WHERE action = 'booking_excuse'").all()).toHaveLength(1);
   });
 });

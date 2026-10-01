@@ -158,6 +158,8 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
   });
   action('cancel', (me, id, req) => B.cancelBooking(db, { bookingId: id, by: me, reason: body(req).reason }),
     (me, id) => runner?.onCancelled(id, me, B.getBooking(db, id)?.cancel_reason ?? null));
+  // Plan 2: a manager excuses the other side's late cancel.
+  action('excuse', (me, id, req) => B.excuseMark(db, { bookingId: id, by: me, note: body(req).note }));
   action('extend', (me, id) => B.extendBooking(db, { bookingId: id, by: me }), (_me, id) => runner?.onExtended(id));
   action('no-show', (me, id) => B.claimNoShow(db, { bookingId: id, by: me }),
     (_me, id, value) => runner?.onNoShow(id, (value as { absent: B.Side }).absent));

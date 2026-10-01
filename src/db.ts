@@ -1181,6 +1181,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // Scrim board plan 1: campaigns the accepting captain may add on top of the
   // poster's list.
   scrim_accept_campaigns_max: '2',
+  // Scrim board plan 2: how close to the start a side's cancel is a late
+  // cancel, and whether the reliability record is public.
+  scrim_late_cancel_hours: '2',
+  scrim_reliability_public: 'off',
 };
 
 /** Patch triage backfill (sub-project 1 of the balance catalogue roadmap).
@@ -1943,6 +1947,11 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'bookings', 'playlist_pos', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'bookings', 'next_campaign', 'TEXT');
   ensureColumn(db, 'bookings', 'next_at', 'TEXT');
+  // Scrim board plan 2: an excuse for the side's mark on this booking (a late
+  // cancel, or for staff a no-show too). Excused marks never count.
+  ensureColumn(db, 'booking_sides', 'excused_at', 'TEXT');
+  ensureColumn(db, 'booking_sides', 'excused_by', 'TEXT');
+  ensureColumn(db, 'booking_sides', 'excuse_note', 'TEXT');
   db.prepare(
     "INSERT OR IGNORE INTO game_configs (key, label, cfg) VALUES ('standard', 'Standard (Rotoblin PUG 4v4)', 'pug_match')",
   ).run();
