@@ -2648,11 +2648,35 @@ public Action Timer_EndKick(Handle timer)
  *  The leading "l4d_" is skipped first. Its '4' is a digit that sits before
  *  the campaign word, and until 2026-09-13 the first-digit rule stopped there
  *  and called every stock map one campaign: auto-track never ended a match on
- *  !cm, and Dead Air was recorded as maps 3 to 6 of a No Mercy match. */
+ *  !cm, and Dead Air was recorded as maps 3 to 6 of a No Mercy match.
+ *
+ *  L4D2 maps (the dlc4 campaigns) are named c<N>m<M>_<name>: the first digit
+ *  sits right after the 'c', so the rule above called every L4D2 map one
+ *  campaign and "campaign changed" never fired between them. When both names
+ *  start c<digits>m<digit>, they are one campaign only if the c<digits>
+ *  parts are equal. Every other name keeps the prefix rule.
+ *
+ *  Checked by hand (no SourcePawn test harness):
+ *    c1m4_hotel vs c1m1_hotel                                 same
+ *    c1m4_hotel vs c2m1_highway                               different
+ *    c10m1_caves vs c1m1_hotel                                different
+ *    l4d_vs_hospital03_sewers vs l4d_vs_hospital04_interior   same
+ *    l4d_vs_hospital05_rooftop vs l4d_vs_smalltown01_caves    different */
 bool SameCampaign(const char[] mapA, const char[] mapB)
 {
 	int a = (StrContains(mapA, "l4d_", false) == 0) ? 4 : 0;
 	int b = (StrContains(mapB, "l4d_", false) == 0) ? 4 : 0;
+	int ca = L4D2CampaignLen(mapA, a);
+	int cb = L4D2CampaignLen(mapB, b);
+	if (ca > 0 && cb > 0)
+	{
+		if (ca != cb) return false;
+		for (int k = 0; k < ca; k++)
+		{
+			if (mapA[a + k] != mapB[b + k]) return false;
+		}
+		return true;
+	}
 	int i = 0;
 	while (mapA[a + i] != '\0' && mapB[b + i] != '\0')
 	{
@@ -2663,6 +2687,18 @@ bool SameCampaign(const char[] mapA, const char[] mapB)
 		i++;
 	}
 	return mapA[a + i] == mapB[b + i];
+}
+
+/** Length of the c<digits> part when map[start] begins an L4D2 name
+ *  c<digits>m<digit> (c1m4_hotel gives 2, c10m1_caves gives 3), else 0. */
+int L4D2CampaignLen(const char[] map, int start)
+{
+	if (map[start] != 'c') return 0;
+	int i = start + 1;
+	while (map[i] >= '0' && map[i] <= '9') i++;
+	if (i == start + 1 || map[i] != 'm') return 0;
+	if (map[i + 1] < '0' || map[i + 1] > '9') return 0;
+	return i - start;
 }
 
 /** Humans on survivor or infected right now. Bots and spectators do not count. */
