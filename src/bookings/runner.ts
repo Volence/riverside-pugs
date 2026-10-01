@@ -756,22 +756,18 @@ export class BookingRunner {
       }
       this.a2sMisses.set(b.id, a2sPlayers !== null ? 0 : (this.a2sMisses.get(b.id) ?? 0) + 1);
     }
-    // Read after this check's noteA2s, so an answer now is the latest seen.
-    const a2sSeen = rconOk ? null : getBooking(this.db, b.id)?.a2s_seen_at ?? null;
     const v = classifyBox({
       rconOk, marker, bookingId: b.id, nowMs,
       lostSinceMs: lostSince !== null ? Date.parse(lostSince) : null,
       heartbeatMs: hb ? sqlMs(hb.last_seen) : null,
-      a2sPlayers, a2sSeenMs: a2sSeen !== null ? Date.parse(a2sSeen) : null,
-      a2sMisses: this.a2sMisses.get(b.id) ?? 0, goneMisses: limits.goneMinutes, goneMs,
+      a2sPlayers, a2sMisses: this.a2sMisses.get(b.id) ?? 0, goneMisses: limits.goneMinutes, goneMs,
     });
     switch (v.kind) {
       case 'ok': return false;
       case 'quiet': return true;
       case 'up_no_rcon':
         if (markUpAlerted(this.db, b.id, now)) {
-          const browser = v.players !== null ? `answers the server browser (${v.players} players)` : 'answered the server browser during this outage';
-          publishAdminEvent({ kind: 'problem', text: `Booking ${b.id}: ${server.name} has not answered rcon for ${limits.goneMinutes}+ minutes but ${browser}. Nothing was moved; check the box.` });
+          publishAdminEvent({ kind: 'problem', text: `Booking ${b.id}: ${server.name} has not answered rcon for ${limits.goneMinutes}+ minutes but answers the server browser (${v.players} players). Nothing was moved; check the box.` });
         }
         return true;
       case 'restarted':

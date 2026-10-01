@@ -190,7 +190,7 @@ describe('recovery writes', () => {
 });
 
 describe('classifyBox', () => {
-  const base: BoxSignals = { rconOk: true, marker: '7', bookingId: 7, nowMs: 1_000_000, lostSinceMs: null, heartbeatMs: null, a2sPlayers: null, a2sSeenMs: null, a2sMisses: 0, goneMisses: 3, goneMs: 3 * MIN };
+  const base: BoxSignals = { rconOk: true, marker: '7', bookingId: 7, nowMs: 1_000_000, lostSinceMs: null, heartbeatMs: null, a2sPlayers: null, a2sMisses: 0, goneMisses: 3, goneMs: 3 * MIN };
   /** rcon silent for `lost` minutes, no heartbeat. */
   const down = (lost: number, o: Partial<BoxSignals> = {}): BoxSignals => ({ ...base, rconOk: false, lostSinceMs: base.nowMs - lost * MIN, ...o });
   it('ok when rcon answers with our marker, or with no marker cvar at all (old plugin)', () => {
@@ -219,14 +219,11 @@ describe('classifyBox', () => {
     expect(classifyBox(down(3, { a2sMisses: 2 }))).toEqual({ kind: 'quiet' });
     expect(classifyBox(down(10, { a2sMisses: 0 }))).toEqual({ kind: 'quiet' });
   });
-  it('an A2S answer at any time in this outage keeps the box: up_no_rcon (no move), whatever the misses since', () => {
-    // Answered once early in the window, then silent.
-    expect(classifyBox(down(8, { a2sSeenMs: base.nowMs - 7 * MIN, a2sMisses: 7 }))).toEqual({ kind: 'up_no_rcon', players: null });
+  it('rolling: an earlier A2S answer only resets the misses; gone once the last limit of queries all went unanswered', () => {
     // One dropped reply at the limit after earlier answers.
-    expect(classifyBox(down(3, { a2sSeenMs: base.nowMs - MIN, a2sMisses: 1 }))).toEqual({ kind: 'up_no_rcon', players: null });
-  });
-  it('an A2S answer from before this outage does not count', () => {
-    expect(classifyBox(down(3, { a2sSeenMs: base.nowMs - 4 * MIN, a2sMisses: 3 }))).toEqual({ kind: 'gone' });
+    expect(classifyBox(down(3, { a2sMisses: 1 }))).toEqual({ kind: 'quiet' });
+    // Answered early in the outage, then silent for the limit: gone.
+    expect(classifyBox(down(8, { a2sMisses: 3 }))).toEqual({ kind: 'gone' });
   });
 });
 
@@ -550,8 +547,20 @@ describe('box gone', () => {
     expect(asked).toBe(2);
   });
 
-  it('A2S answers once early in the window then goes silent: no move', async () => {
-    const answers = [true];
+  it('A2S answers early in the outage, then is silent for the limit of minutes in a row: moves', async () => {
+    const answers = [true, true];
+    runner = build({ a2s: async () => (answers.shift() ? { players: 0, map: 'x' } : null) });
+    const id = await running();
+    kill();
+    // Answers at 0 and 1 minutes, misses at 2, 3 and 4.
+    for (let i = 0; i < 4; i++) { await runner.tick(); await runner.idle(); now += MIN; }
+    expect(getBooking(db, id)).toMatchObject({ server_id: 3, recovering_at: null });
+    await runner.tick(); await runner.idle();
+    expect(getBooking(db, id)!.server_id).not.toBe(3);
+  });
+
+  it('one dropped A2S reply among answers never moves the booking', async () => {
+    const answers = [true, true, true, false, true, true, false, true, true, true];
     runner = build({ a2s: async () => (answers.shift() ? { players: 0, map: 'x' } : null) });
     const id = await running();
     kill();
