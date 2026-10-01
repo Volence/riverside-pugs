@@ -147,6 +147,7 @@ import { Notifier } from './notify/notify.js';
 import { bookingRoutes } from './routes/bookings.js';
 import { adminBookingRoutes } from './routes/adminBookings.js';
 import { ScrimBoard, TICK_MS as SCRIM_TICK_MS } from './scrims/board.js';
+import { ScrimPoster } from './scrims/poster.js';
 import { scrimRoutes } from './routes/scrims.js';
 import { settingNumber } from './settings.js';
 import type { InstallTarget } from './campaignInstall.js';
@@ -1656,6 +1657,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   let ticketMirror: TicketMirror | null = null;
   let reportButton: ReportButton | null = null;
   let reporterChats: ReporterChats | null = null;
+  let scrimPoster: ScrimPoster | null = null;
   // Only where a real listener exists to feed it. `bot` is read per drop,
   // because the bot logs in some seconds after this line runs, and stays null
   // for good when Discord is not configured: drops are then stored and shown
@@ -1713,6 +1715,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         weekly.start();
         skeetStreaks = new SkeetStreakPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
         skeetStreaks.start();
+        scrimPoster = new ScrimPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
+        scrimPoster.start();
         for (const text of bootProblems.splice(0)) publishAdminEvent({ kind: 'problem', text });
         // Built before the reconciler so its hook can reach it. Which of the
         // two starts first decides nothing: start() only queues a first pass
@@ -1798,6 +1802,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     modCalls?.stop();
     weekly?.stop();
     skeetStreaks?.stop();
+    scrimPoster?.stop();
     await bot?.stop();
     clearInterval(reaper);
     clearInterval(practiceTick);
@@ -1963,9 +1968,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // (a confirmed scrim's booking is set up and allocated exactly like one
   // made from /api/bookings) and the same Notifier. Its own minute tick
   // expires posts and stale acceptances and tells the accepters who lost one
-  // that way; the Discord poster (plan 1 Task 4) is not built yet, so it
-  // runs with no poster to refresh.
-  const scrimBoard = new ScrimBoard({ db: deps.db, notifier, publicUrl: deps.config.publicUrl });
+  // that way, then refreshes the Discord poster (plan 1 Task 4). `poster` is
+  // read per tick rather than captured now: scrimBoard is built here, before
+  // the bot has necessarily logged in and built scrimPoster inside
+  // onConnected above.
+  const scrimBoard = new ScrimBoard({ db: deps.db, notifier, publicUrl: deps.config.publicUrl, poster: () => scrimPoster });
   const scrimTick = setInterval(() => { void scrimBoard.tick(); }, SCRIM_TICK_MS);
   scrimTick.unref();
   await app.register(scrimRoutes, { db: deps.db, runner: bookingRunner, notifier, publicUrl: deps.config.publicUrl });
