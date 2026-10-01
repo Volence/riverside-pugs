@@ -120,6 +120,49 @@ describe('ScrimPoster', () => {
     expect(t.sends).toBe(0);
   });
 
+  it('sends no new card while competitive play is not public (admins or off), but keeps updating and closing one already posted', async () => {
+    setSetting(db, 'discord_scrims_channel_id', CHANNEL);
+    setSetting(db, 'competitive_enabled', 'admins');
+    db.prepare("UPDATE players SET is_admin = 1 WHERE steamid = ?").run(P[0]); // canUse needs it, under 'admins'
+    const underAdmins = postId();
+    await poster.tickNow();
+    expect(cardRow(underAdmins)).toBeUndefined();
+    expect(t.sends).toBe(0);
+
+    setSetting(db, 'competitive_enabled', 'off');
+    await poster.tickNow();
+    expect(cardRow(underAdmins)).toBeUndefined();
+    expect(t.sends).toBe(0);
+    // Withdrawn while never public, so it never gets a card even once the
+    // switch later moves to 'everyone'.
+    value(withdrawPost(db, { postId: underAdmins, by: P[0], now: NOW }));
+
+    // A post whose card went out while public stays alive: it still updates
+    // and closes after the switch moves back off 'everyone'.
+    setSetting(db, 'competitive_enabled', 'everyone');
+    const live = postId();
+    await poster.tickNow();
+    const card = cardRow(live)!;
+    expect(t.sends).toBe(1);
+
+    // acceptPost and withdrawPost need the switch at 'everyone' themselves
+    // (they gate on canUse); only the poster's own behavior is under test.
+    value(acceptPost(db, { postId: live, by: P[1], now: NOW }));
+    setSetting(db, 'competitive_enabled', 'admins');
+    await poster.tickNow();
+    expect(t.edits).toBe(1);
+    expect(statusField(byId(cardRow(live)!.message_id))).toMatch(/under review/);
+
+    setSetting(db, 'competitive_enabled', 'everyone');
+    value(withdrawPost(db, { postId: live, by: P[0], now: NOW }));
+    setSetting(db, 'competitive_enabled', 'off');
+    await poster.tickNow();
+    const closed = byId(cardRow(live)!.message_id);
+    expect(closed.id).toBe(card.message_id);
+    expect(closed.payload.embeds[0].description).toBe('Withdrawn');
+    expect(cardRow(live)!.state).toBe('closed');
+  });
+
   it('retries an edit that throws on the next tick, without losing or duplicating the card', async () => {
     setSetting(db, 'discord_scrims_channel_id', CHANNEL);
     const id = postId();
