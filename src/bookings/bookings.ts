@@ -40,6 +40,7 @@ export interface BookingRow {
   setup_attempts: number; last_human_at: string | null; reminded_60_at: string | null; reminded_15_at: string | null;
   warned_minutes: number | null; ending_at: string | null; ended_at: string | null; end_reason: string | null;
   cancelled_by: string | null; cancel_side: Side | null; cancel_reason: string | null;
+  playlist_pos: number; next_campaign: string | null; next_at: string | null;
 }
 export interface SideRow {
   booking_id: number; side: Side; team_id: number | null; captain_steamid: string; confirmed_at: string | null;
@@ -119,7 +120,7 @@ export function managedSides(db: DB, id: number, steamid: string): Side[] {
  *  captain (side b before it confirms) manages the side in the sense that
  *  they will become its captain, but they act only through confirm or
  *  decline until then, never cancel, extend, end or claim a no-show. */
-function actingSides(db: DB, id: number, steamid: string): Side[] {
+export function actingSides(db: DB, id: number, steamid: string): Side[] {
   return sidesOf(db, id).filter((s) => managesSide(db, s, steamid) && s.confirmed_at !== null).map((s) => s.side);
 }
 /** The side's captain right now: for a team side, the team's current captain
@@ -556,6 +557,31 @@ export function markReleased(db: DB, id: number, now: Date): void {
     if (db.prepare('UPDATE bookings SET ended_at = ? WHERE id = ? AND ended_at IS NULL AND ending_at IS NOT NULL').run(now.toISOString(), id).changes > 0) {
       logEvent(db, id, null, 'released', {}, now);
     }
+  })();
+}
+
+/** The campaign the box loads next and when it is due (both null clears
+ *  it). Only on a running booking: ready or active, no end started. */
+export function setNext(db: DB, id: number, campaign: string | null, atIso: string | null, now: Date = new Date(), actor: string | null = null): boolean {
+  return db.transaction(() => {
+    const changed = db.prepare(
+      "UPDATE bookings SET next_campaign = ?, next_at = ? WHERE id = ? AND state IN ('ready','active') AND ending_at IS NULL",
+    ).run(campaign, atIso, id).changes > 0;
+    if (changed) logEvent(db, id, actor, 'next_set', { campaign, at: atIso }, now);
+    return changed;
+  })();
+}
+
+/** The box has been sent the next campaign: the playlist position moves to
+ *  `pos` and nothing is due any more. Only on a running booking. */
+export function advancePlaylist(db: DB, id: number, pos: number, now: Date = new Date()): boolean {
+  return db.transaction(() => {
+    const b = getBooking(db, id);
+    const changed = db.prepare(
+      "UPDATE bookings SET playlist_pos = ?, next_campaign = NULL, next_at = NULL WHERE id = ? AND state IN ('ready','active') AND ending_at IS NULL",
+    ).run(pos, id).changes > 0;
+    if (changed) logEvent(db, id, null, 'campaign_loaded', { campaign: b?.next_campaign ?? null, pos }, now);
+    return changed;
   })();
 }
 

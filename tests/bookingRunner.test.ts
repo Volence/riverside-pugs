@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { addServer, type ServerRow } from '../src/serverPool.js';
 import { setSetting } from '../src/settings.js';
+import { currentSeasonId } from '../src/players.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { Notifier } from '../src/notify/notify.js';
 import {
@@ -508,5 +509,319 @@ describe('fix wave (final review)', () => {
     await runner.tick();
     await runner.idle();
     expect(getBooking(db, id)!.state).toBe('ready');
+  });
+});
+
+describe('booked games (plan 4b)', () => {
+  const NEXT_DT = 'say [Booking] Next: Death Toll in 60 s. !nextmap to pick another, !stay to replay this one, !end to finish.';
+  const CAPTAINS_DT = 'say [Booking] Death Toll: !nextmap, !stay, !end and !extend are yours, captains.';
+  const cmds = () => sent.flatMap((s) => s.cmds);
+  const flush = () => new Promise((r) => setImmediate(r));
+  /** `YYYY-MM-DD HH:MM:SS`, as datetime('now') writes matches.ended_at. */
+  const sqlTime = (ms: number) => new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
+
+  const running = async (playlist: string[] = ['no_mercy', 'death_toll'], r: BookingRunner = runner) => {
+    const id = book({ playlist });
+    now = START - 15 * MIN;
+    r.allocate();
+    await r.idle();
+    sent = []; dms = [];
+    return id;
+  };
+  function insertGame(bookingId: number, o: { state: string; campaign?: string; token?: string; endedAt?: number }): number {
+    return Number(db.prepare(
+      `INSERT INTO matches (season_id, state, campaign, server_id, token, origin, kind, visibility, booking_id, booking_side_a, ended_at)
+       VALUES (?, ?, ?, 3, ?, 'in_game', 'scrim', 'participants', ?, 'a', ?)`,
+    ).run(currentSeasonId(db), o.state, o.campaign ?? 'no_mercy', o.token ?? `t${Math.random()}`, bookingId,
+      o.endedAt === undefined ? null : sqlTime(o.endedAt)).lastInsertRowid);
+  }
+  const events = (id: number, event: string) =>
+    db.prepare('SELECT detail FROM booking_events WHERE booking_id = ? AND event = ? ORDER BY rowid').all(id, event) as { detail: string }[];
+
+  it('setup turns on auto-track with the min players setting and the ruleset pause rules, and no log lines without an address', async () => {
+    await running(['no_mercy']);
+    // `running` cleared `sent`; set up a second booking and look at its burst.
+    const id = book();
+    now = START - 15 * MIN;
+    runner.allocate();
+    await runner.idle();
+    expect(getBooking(db, id)!.state).toBe('ready');
+    const c = sent.filter((s) => s.server === 'bb').flatMap((s) => s.cmds);
+    expect(c).toContain('sm_pug_auto_track 1');
+    expect(c).toContain('sm_pug_auto_min_players 6');
+    // Casual Scrim has no pause limits (null/null): 0 turns both off.
+    expect(c).toContain('sm_pug_pause_limit 0');
+    expect(c).toContain('sm_pug_pause_seconds 0');
+    expect(c.indexOf('sm_pug_auto_track 1')).toBeGreaterThan(c.indexOf(`l4d_booking_password "${getBooking(db, id)!.password}"`));
+    expect(c.some((x) => x.startsWith('logaddress_add') || x.startsWith('sm_pug_log_secret'))).toBe(false);
+  });
+
+  it('setup follows the booking_game_min_players setting', async () => {
+    setSetting(db, 'booking_game_min_players', '4');
+    const id = book();
+    now = START - 15 * MIN;
+    runner.allocate();
+    await runner.idle();
+    expect(getBooking(db, id)!.state).toBe('ready');
+    expect(cmds()).toContain('sm_pug_auto_min_players 4');
+  });
+
+  it('setup sends logaddress_add and the log secret (as pushLogSecret does) in one burst when the box has a secret', async () => {
+    const secret = 'ab'.repeat(16);
+    db.prepare('UPDATE servers SET log_secret = ? WHERE id = 3').run(secret);
+    const r = build({ logPublicAddress: '203.0.113.5:27500' });
+    const id = book();
+    now = START - 15 * MIN;
+    r.allocate();
+    await r.idle();
+    expect(getBooking(db, id)!.state).toBe('ready');
+    const burst = sent.find((s) => s.cmds.includes('logaddress_add 203.0.113.5:27500'))!;
+    expect(burst).toBeDefined();
+    const i = burst.cmds.indexOf('logaddress_add 203.0.113.5:27500');
+    expect(burst.cmds.slice(i + 1, i + 4)).toEqual(['sv_rcon_log 0', `sm_pug_log_secret "${secret}"`, 'sv_rcon_log 1']);
+
+    // A box with no secret gets the address only.
+    db.prepare('UPDATE servers SET log_secret = NULL WHERE id = 2').run();
+    sent = [];
+    const other = book();
+    now = START - 15 * MIN;
+    r.allocate();
+    await r.idle();
+    expect(getBooking(db, other)!.server_id).toBe(2);
+    const c = sent.flatMap((s) => s.cmds);
+    expect(c).toContain('logaddress_add 203.0.113.5:27500');
+    expect(c.some((x) => x.startsWith('sm_pug_log_secret'))).toBe(false);
+  });
+
+  it('the minute watch re-sends the booking and game lines', async () => {
+    const id = await running();
+    box.ccc.humans = [P[0]];
+    now = START + 5 * MIN;
+    await runner.tick();
+    const c = cmds();
+    expect(c).toContain('sm_pug_auto_track 1');
+    expect(c).toContain(`l4d_booking_password "${getBooking(db, id)!.password}"`);
+  });
+
+  it('after a game the next campaign is announced, then loaded 60 s later with the captains line and the extend warning', async () => {
+    const id = await running();
+    box.ccc.humans = [P[0], P[1]];
+    now = START + 89 * MIN;
+    const game = insertGame(id, { state: 'completed', endedAt: now });
+    runner.onGameEnded(game);
+    await flush();
+    expect(cmds()).toContain(NEXT_DT);
+    expect(getBooking(db, id)).toMatchObject({ next_campaign: 'death_toll', next_at: new Date(now + MIN).toISOString() });
+    expect(events(id, 'next_set')).toHaveLength(1);
+
+    sent = [];
+    now += 59_000;
+    await runner.tick();
+    await runner.idle();
+    expect(cmds().some((c) => c.startsWith('changelevel'))).toBe(false);
+    expect(getBooking(db, id)!.playlist_pos).toBe(0);
+
+    now = START + 90 * MIN;
+    await runner.tick();
+    await runner.idle();
+    expect(cmds().filter((c) => c.startsWith('changelevel'))).toEqual(['changelevel l4d_vs_smalltown01_caves']);
+    expect(getBooking(db, id)).toMatchObject({ playlist_pos: 1, next_campaign: null, next_at: null });
+    expect(cmds()).toContain(CAPTAINS_DT);
+    // Death Toll has no PUG history: the 60 minute default, with 30 left.
+    expect(cmds()).toContain('say [Booking] About 30 min left, this campaign usually takes 60. !extend now while the slot after is free.');
+    expect(JSON.parse(events(id, 'campaign_loaded')[0].detail)).toEqual({ campaign: 'death_toll', pos: 1 });
+
+    // Loaded once: the next watch does not load it again.
+    sent = [];
+    now += MIN;
+    await runner.tick();
+    await runner.idle();
+    expect(cmds().some((c) => c.startsWith('changelevel'))).toBe(false);
+  });
+
+  it('no extend warning when the campaign fits in the time left', async () => {
+    const id = await running();
+    box.ccc.humans = [P[0]];
+    now = START + 10 * MIN;
+    runner.onGameEnded(insertGame(id, { state: 'completed', endedAt: now }));
+    now += MIN;
+    await runner.tick();
+    await runner.idle();
+    expect(cmds()).toContain(CAPTAINS_DT);
+    expect(cmds().some((c) => c.includes('this campaign usually takes'))).toBe(false);
+  });
+
+  it('a game ending on the last playlist campaign says so and schedules nothing', async () => {
+    const id = await running(['no_mercy']);
+    now = START + 60 * MIN;
+    runner.onGameEnded(insertGame(id, { state: 'completed', endedAt: now }));
+    await flush();
+    expect(cmds()).toContain('say [Booking] That was the last campaign on the playlist. !nextmap <campaign> to play another, or !end to finish.');
+    expect(getBooking(db, id)).toMatchObject({ next_campaign: null, next_at: null });
+  });
+
+  it('onGameEnded does nothing for a booking that is ending', async () => {
+    const id = await running();
+    const game = insertGame(id, { state: 'completed', endedAt: now });
+    cancelBooking(db, { bookingId: id, by: P[0], now: new Date(now) });
+    runner.onGameEnded(game);
+    await flush();
+    expect(cmds().some((c) => c.includes('Next:'))).toBe(false);
+  });
+
+  it('the next load waits for a live game to finish', async () => {
+    const id = await running();
+    box.ccc.humans = [P[0]];
+    now = START + 30 * MIN;
+    runner.onGameEnded(insertGame(id, { state: 'completed', endedAt: now }));
+    insertGame(id, { state: 'live', campaign: 'no_mercy' });
+    now += 2 * MIN;
+    await runner.tick();
+    await runner.idle();
+    expect(cmds().some((c) => c.startsWith('changelevel'))).toBe(false);
+    expect(getBooking(db, id)!.next_campaign).toBe('death_toll');
+  });
+
+  it('chooseNext resolves a campaign by prefix and loads it at once; refuses unknown names, a live game and non-captains', async () => {
+    const id = await running();
+    expect(runner.chooseNext(id, P[0], 'xyz')).toEqual({ ok: false, error: expect.stringContaining('xyz') });
+    expect(runner.chooseNext(id, P[5], 'death')).toEqual({ ok: false, error: 'Only a captain or co-captain of that side can do that.' });
+    const live = insertGame(id, { state: 'live' });
+    expect(runner.chooseNext(id, P[0], 'death')).toEqual({ ok: false, error: 'Finish this game or use !end first.' });
+    db.prepare("UPDATE matches SET state = 'completed' WHERE id = ?").run(live);
+    sent = [];
+    expect(runner.chooseNext(id, P[1], 'death')).toEqual({ ok: true, campaign: 'death_toll' });
+    await runner.idle();
+    expect(cmds().filter((c) => c.startsWith('changelevel'))).toEqual(['changelevel l4d_vs_smalltown01_caves']);
+    expect(getBooking(db, id)).toMatchObject({ playlist_pos: 1, next_campaign: null });
+    // The watch right after does not load it a second time.
+    await runner.tick();
+    await runner.idle();
+    expect(cmds().filter((c) => c.startsWith('changelevel'))).toHaveLength(1);
+  });
+
+  it('chooseNext matches names and slugs case-insensitively, takes the next playlist campaign with no name, and lets staff through', async () => {
+    const id = await running();
+    expect(runner.chooseNext(id, P[0], 'NO MERCY')).toEqual({ ok: true, campaign: 'no_mercy' });
+    await runner.idle();
+    expect(runner.chooseNext(id, P[0], null)).toEqual({ ok: true, campaign: 'death_toll' });
+    await runner.idle();
+    expect(runner.chooseNext(id, P[9], 'no_mercy', true)).toEqual({ ok: true, campaign: 'no_mercy' });
+    await runner.idle();
+    // no_mercy is first on the playlist: picking it goes back to position 0.
+    expect(getBooking(db, id)!.playlist_pos).toBe(0);
+  });
+
+  it('chooseNext refuses a campaign outside the pool or one this box cannot load', async () => {
+    const id = await running();
+    expect(runner.chooseNext(id, P[0], 'blood')).toMatchObject({ ok: false }); // Blood Harvest: not in the pool
+    expect(runner.chooseNext(id, P[0], 'dead center')).toMatchObject({ ok: false, error: expect.stringContaining('cannot load') }); // dlc4
+    expect(getBooking(db, id)!.next_campaign).toBeNull();
+  });
+
+  it('stay replays the campaign of the last game, or the current one with no game yet', async () => {
+    const id = await running();
+    expect(runner.stay(id, P[0])).toEqual({ ok: true, campaign: 'no_mercy' });
+    await runner.idle();
+    insertGame(id, { state: 'completed', campaign: 'death_toll', endedAt: now });
+    sent = [];
+    expect(runner.stay(id, P[1])).toEqual({ ok: true, campaign: 'death_toll' });
+    await runner.idle();
+    expect(cmds()).toContain('changelevel l4d_vs_smalltown01_caves');
+    expect(getBooking(db, id)!.playlist_pos).toBe(1);
+  });
+
+  it('endFromGame aborts a live game, stops listening for it, sends sm_pug_abort, then ends and winds down', async () => {
+    const unregistered: string[] = [];
+    const r = build({ unregisterToken: (t) => { unregistered.push(t); } });
+    const id = await running(['no_mercy'], r);
+    const live = insertGame(id, { state: 'live', token: 'tok-live' });
+    expect(r.endFromGame(id, P[5])).toEqual({ ok: false, error: 'Only a captain or co-captain of that side can do that.' });
+    expect(db.prepare('SELECT state FROM matches WHERE id = ?').get(live)).toEqual({ state: 'live' });
+    expect(r.endFromGame(id, P[1])).toEqual({ ok: true });
+    await r.idle();
+    expect(db.prepare('SELECT state, abort_cause FROM matches WHERE id = ?').get(live)).toEqual({ state: 'aborted', abort_cause: 'booking_ended' });
+    expect(unregistered).toEqual(['tok-live']);
+    const c = cmds();
+    expect(c).toContain('sm_pug_abort tok-live');
+    expect(c.indexOf('sm_pug_abort tok-live')).toBeLessThan(c.indexOf('say [Booking] This booked server is closing: a captain ended it.'));
+    const b = getBooking(db, id)!;
+    expect(b).toMatchObject({ state: 'ended', end_reason: 'captain' });
+    expect(b.ended_at).not.toBeNull();
+    expect(released).toEqual([3]);
+  });
+
+  it('endFromGame with no game live just ends; staff end as staff', async () => {
+    const id = await running(['no_mercy']);
+    expect(runner.endFromGame(id, P[9], true)).toEqual({ ok: true });
+    await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ state: 'ended', end_reason: 'staff' });
+    expect(cmds().some((c) => c.startsWith('sm_pug_abort'))).toBe(false);
+  });
+
+  it('everyone leaving after a finished game ends the booking: two empty watches, the game over 2 minutes ago', async () => {
+    const id = await running();
+    // Someone was on a minute ago, so the 4a idle end is far off.
+    box.ccc.humans = [P[0]];
+    now = START + 39 * MIN;
+    await runner.tick();
+    box.ccc.humans = [];
+    now = START + 40 * MIN;
+    insertGame(id, { state: 'completed', endedAt: now - 3 * MIN });
+    await runner.tick();
+    expect(getBooking(db, id)!.ending_at).toBeNull(); // one empty watch is not enough
+    now += MIN;
+    await runner.tick();
+    await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ state: 'ended', end_reason: 'done' });
+    expect(cmds()).toContain('say [Booking] This booked server is closing: everyone left.');
+  });
+
+  it('a map change between campaigns does not end the booking: empty watches within 2 minutes of the game end', async () => {
+    const id = await running();
+    box.ccc.humans = [P[0]];
+    now = START + 39 * MIN;
+    await runner.tick();
+    box.ccc.humans = [];
+    now = START + 40 * MIN;
+    insertGame(id, { state: 'completed', endedAt: now - 30_000 });
+    await runner.tick();
+    now += MIN;
+    await runner.tick();
+    expect(getBooking(db, id)!.ending_at).toBeNull();
+  });
+
+  it('a human in between resets the empty count, and no game or a live game never ends it as done', async () => {
+    const id = await running();
+    box.ccc.humans = [P[0]];
+    now = START + 39 * MIN;
+    await runner.tick();
+    now = START + 40 * MIN;
+    insertGame(id, { state: 'completed', endedAt: now - 10 * MIN });
+    box.ccc.humans = [];
+    await runner.tick();
+    box.ccc.humans = [P[0]];
+    now += MIN; await runner.tick();
+    box.ccc.humans = [];
+    now += MIN; await runner.tick();
+    expect(getBooking(db, id)!.ending_at).toBeNull();
+    insertGame(id, { state: 'live' });
+    now += MIN; await runner.tick();
+    now += MIN; await runner.tick();
+    expect(getBooking(db, id)!.ending_at).toBeNull();
+  });
+
+  it('with no finished game, empty watches leave it to the 4a idle end', async () => {
+    const id = await running();
+    box.ccc.humans = [P[0]];
+    now = START + 39 * MIN;
+    await runner.tick();
+    box.ccc.humans = [];
+    insertGame(id, { state: 'aborted', endedAt: now - 10 * MIN });
+    for (let i = 1; i <= 9; i++) { now = START + (39 + i) * MIN; await runner.tick(); }
+    expect(getBooking(db, id)!.ending_at).toBeNull();
+    now = START + 49 * MIN;
+    await runner.tick();
+    expect(getBooking(db, id)!.end_reason).toBe('idle');
   });
 });
