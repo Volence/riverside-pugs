@@ -15,13 +15,13 @@ export const LATE_CANCEL_LINE = 'This is a late cancel. If it is fine with you, 
  *  the full NotifyType (which also carries the scrim board's types, worded
  *  elsewhere) so the switch below stays exhaustive as NotifyType grows. */
 export type BookingNotifyType =
-  'booking_invite' | 'booking_confirmed' | 'booking_starting' | 'booking_ready' | 'booking_cancelled' | 'booking_no_show';
+  'booking_invite' | 'booking_confirmed' | 'booking_starting' | 'booking_ready' | 'booking_recovered' | 'booking_cancelled' | 'booking_no_show';
 
 /** The DM for one booking notification, or null for a booking that is gone.
  *  Every player-chosen name goes through escapeName, as in teamButtons.ts. */
 export function bookingMessage(
   db: DB, publicUrl: string, bookingId: number, type: BookingNotifyType,
-  extra: { minutes?: number; reason?: string | null; addedBy?: string; lateCancel?: boolean } = {},
+  extra: { minutes?: number; reason?: string | null; addedBy?: string; lateCancel?: boolean; moved?: boolean; restored?: string | null } = {},
 ): MessagePayload | null {
   const b = getBooking(db, bookingId);
   if (!b) return null;
@@ -58,6 +58,15 @@ export function bookingMessage(
     case 'booking_no_show':
       content = `Your side was recorded as a no-show for ${vs} on ${when}.`;
       break;
+    case 'booking_recovered': {
+      const s = b.server_id !== null ? getServer(db, b.server_id) : undefined;
+      const head = extra.moved
+        ? `The server for ${vs} went down, so the booking moved to another server.`
+        : `The server for ${vs} restarted and is set up again.`;
+      const game = extra.restored ? ` ${escapeName(extra.restored)}.` : '';
+      content = s ? `${head}${game} Reconnect in the game console:\n\`connect ${s.host}:${s.port}; password ${b.password}\`` : `${head}${game}`;
+      break;
+    }
   }
   const page = `${publicUrl}/booking/${b.id}`;
   const links = [{ kind: 'link' as const, url: page, label: 'Open the booking' }];

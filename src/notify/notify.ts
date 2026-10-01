@@ -13,7 +13,7 @@ import { getPlayer } from '../players.js';
  * and nothing a DM does can fail the request or tick that caused it.
  */
 export type NotifyType =
-  | 'booking_invite' | 'booking_confirmed' | 'booking_starting' | 'booking_ready' | 'booking_cancelled' | 'booking_no_show'
+  | 'booking_invite' | 'booking_confirmed' | 'booking_starting' | 'booking_ready' | 'booking_recovered' | 'booking_cancelled' | 'booking_no_show'
   | 'scrim_challenge' | 'scrim_accepted' | 'scrim_booked' | 'scrim_taken' | 'scrim_declined'
   | 'scrim_review';
 
@@ -22,6 +22,7 @@ export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'booking_confirmed', label: 'The other side confirms my booking' },
   { type: 'booking_starting', label: 'A booking starts in 60 and in 15 minutes' },
   { type: 'booking_ready', label: 'My booked server is ready, with the connect line' },
+  { type: 'booking_recovered', label: 'My booked server restarted or moved, with the new connect line' },
   { type: 'booking_cancelled', label: 'A booking I am in is cancelled' },
   { type: 'booking_no_show', label: 'My side is recorded as a no-show' },
   { type: 'scrim_challenge', label: 'A team directly challenges mine to a scrim' },

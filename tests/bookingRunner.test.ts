@@ -20,7 +20,7 @@ const PUB = 'Rotoblin Pub VS';
 let db: DB;
 let now: number;
 let sent: { server: string; cmds: string[] }[];
-let box: Record<string, { type: string; plugin: boolean; map: string; humans: string[]; down: boolean; execs: number; failExec: number }>;
+let box: Record<string, { type: string; plugin: boolean; map: string; humans: string[]; down: boolean; execs: number; failExec: number; marker: string; bookingPlugin: string }>;
 let released: number[];
 let restarted: string[];
 let dms: { to: string; content: string }[];
@@ -44,6 +44,9 @@ const fakeRcon = async (server: ServerRow, cmds: string[]): Promise<string[]> =>
     if (c === 'status') return status(b);
     if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${b.type}" ( def. "" )`;
     if (c === 'l4d_booking_version') return b.plugin ? '"l4d_booking_version" = "1.0.0" ( def. "1.0.0" )' : 'Unknown command "l4d_booking_version"';
+    if (c === 'l4d_booking_id') return b.bookingPlugin >= '1.4.0' ? `"l4d_booking_id" = "${b.marker}" ( def. "" )` : 'Unknown command "l4d_booking_id"';
+    const mk = /^l4d_booking_id "(\d*)"$/.exec(c);
+    if (mk) b.marker = mk[1];
     if (c === 'exec pug_match') { b.execs++; if (b.failExec > 0) b.failExec--; else b.type = 'Rotoblin 4v4 PUG'; }
     const m = /^changelevel (\S+)$/.exec(c);
     if (m) b.map = m[1];
@@ -57,7 +60,7 @@ function build(over: Partial<ConstructorParameters<typeof BookingRunner>[0]> = {
     publicUrl: 'https://riversidepug.com',
     rcon: fakeRcon,
     release: async (id) => { released.push(id); db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id); return true; },
-    restart: async (server) => { restarted.push(server.name); box[server.name].type = PUB; box[server.name].map = 'l4d_vs_hospital01_apartment'; return true; },
+    restart: async (server) => { restarted.push(server.name); box[server.name].type = PUB; box[server.name].map = 'l4d_vs_hospital01_apartment'; box[server.name].marker = ''; return true; },
     notifier: new Notifier({ db, dm: () => async (to, p) => { dms.push({ to, content: p.content ?? '' }); } }),
     preempt: () => { preempts++; },
     sleep: async () => {},
@@ -78,7 +81,7 @@ beforeEach(() => {
   for (const n of ['a', 'bb', 'ccc']) {
     const id = addServer(db, { name: n, host: '10.0.0.1', port: 27014 + n.length, rconPort: 1, rconPassword: 'x' });
     db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id);
-    box[n] = { type: PUB, plugin: true, map: 'l4d_vs_hospital01_apartment', humans: [], down: false, execs: 0, failExec: 0 };
+    box[n] = { type: PUB, plugin: true, map: 'l4d_vs_hospital01_apartment', humans: [], down: false, execs: 0, failExec: 0, marker: '', bookingPlugin: '1.4.0' };
   }
   runner = build();
 });
