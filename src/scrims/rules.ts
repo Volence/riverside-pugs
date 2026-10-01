@@ -101,24 +101,33 @@ const SEARCH_WINDOW_MINUTES = 3 * 60;
 /**
  * Ruling 4: when the slot a confirm wanted is gone, the nearest slot (same
  * length, same region) that currently has capacity, searched in 30 minute
- * steps out to 3 hours either side of `startMs`, closest first. Later and
- * earlier candidates at the same distance are both free or both are not; when
- * only one of a tied pair is free, the later one wins the tie (scrims are
- * proposed ahead of time, so sliding later is the smaller ask). Null when
- * nothing in the window has room. Offers a slot; books nothing.
+ * steps out to 3 hours either side of `startMs`, closest first; at each
+ * distance the later candidate is tried before the earlier one, so a tie
+ * between two free candidates favours the later one (scrims are proposed
+ * ahead of time, so sliding later is the smaller ask). A candidate that would
+ * fail the booking start rule is never offered: it must be strictly after
+ * `nowMs` and no more than `bookingLimits(db).daysAhead` days ahead of it,
+ * the same bounds `parseStart` in src/bookings/bookings.ts enforces. Null
+ * when nothing in the window has room. Offers a slot; books nothing.
  */
-export function nearestFreeSlot(db: DB, region: string, startMs: number, minutes: number): string | null {
+export function nearestFreeSlot(
+  db: DB, region: string, startMs: number, minutes: number, nowMs: number = Date.now(),
+): string | null {
   const durationMs = minutes * 60_000;
   const stepMs = STEP_MINUTES * 60_000;
   const maxSteps = Math.floor(SEARCH_WINDOW_MINUTES / STEP_MINUTES);
+  const maxStartMs = nowMs + bookingLimits(db).daysAhead * 86_400_000;
+  const inWindow = (ms: number): boolean => ms > nowMs && ms <= maxStartMs;
   const free = (ms: number): boolean => capacityProblem(db, { region, startMs: ms, endMs: ms + durationMs }) === null;
+  const offer = (ms: number): string | null => (inWindow(ms) && free(ms)) ? iso(ms) : null;
 
-  if (free(startMs)) return iso(startMs);
+  const exact = offer(startMs);
+  if (exact) return exact;
   for (let step = 1; step <= maxSteps; step++) {
-    const later = startMs + step * stepMs;
-    const earlier = startMs - step * stepMs;
-    if (free(later)) return iso(later);
-    if (free(earlier)) return iso(earlier);
+    const later = offer(startMs + step * stepMs);
+    if (later) return later;
+    const earlier = offer(startMs - step * stepMs);
+    if (earlier) return earlier;
   }
   return null;
 }

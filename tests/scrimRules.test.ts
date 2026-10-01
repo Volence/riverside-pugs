@@ -154,22 +154,64 @@ describe('nearestFreeSlot', () => {
     setSetting(db, 'pug_reserve_servers', '0'); // 1 server, 0 reserve: room for exactly one booking at a time
   });
 
+  // A fixed "now" well before every candidate these tests search (the widest
+  // is 3 hours either side of T0), so the booking-window bounds added below
+  // never interfere with the capacity scenarios already being tested.
+  const NOW = T0 - 5 * H;
+
   it('returns the post start itself when it already has room', () => {
-    expect(nearestFreeSlot(db, 'na', T0, 60)).toBe(new Date(T0).toISOString());
+    expect(nearestFreeSlot(db, 'na', T0, 60, NOW)).toBe(new Date(T0).toISOString());
   });
 
   it('steps out 30 minutes at a time and returns the closest free slot, preferring later on a tie', () => {
     book(T0, T0 + H); // blocks the start and the +-30 min candidates; +-60 min are both free (back to back)
-    expect(nearestFreeSlot(db, 'na', T0, 60)).toBe(new Date(T0 + H).toISOString());
+    expect(nearestFreeSlot(db, 'na', T0, 60, NOW)).toBe(new Date(T0 + H).toISOString());
   });
 
   it('returns the earlier slot when only the earlier side has room', () => {
     book(T0, T0 + 5 * H); // every later candidate within the 3 hour window stays inside this booking
-    expect(nearestFreeSlot(db, 'na', T0, 60)).toBe(new Date(T0 - H).toISOString());
+    expect(nearestFreeSlot(db, 'na', T0, 60, NOW)).toBe(new Date(T0 - H).toISOString());
   });
 
   it('returns null when nothing is free within 3 hours either side', () => {
     book(T0 - 4 * H, T0 + 4 * H); // covers the whole search window plus the slot length on both ends
-    expect(nearestFreeSlot(db, 'na', T0, 60)).toBeNull();
+    expect(nearestFreeSlot(db, 'na', T0, 60, NOW)).toBeNull();
+  });
+
+  it('defaults nowMs to the real clock when the caller passes none', () => {
+    // T0 is a few days ahead of the real clock in this suite's fictional
+    // calendar, so the exact start is both free and inside the default
+    // booking window without any booking rows at all.
+    expect(nearestFreeSlot(db, 'na', T0, 60)).toBe(new Date(T0).toISOString());
+  });
+
+  it('skips a free earlier candidate that falls at or before now, and returns a later one instead', () => {
+    book(T0, T0 + 90 * 60_000); // occupies [T0, T0+90m): blocks the exact start and the +-30/+-60 min candidates
+    // T0-60m (step 2 earlier) would otherwise be the nearest free slot (back
+    // to back with the booking's start), but with "now" only 30 minutes
+    // before T0 it falls before now and must be skipped. The next free
+    // candidate going outward is T0+90m (step 3 later, back to back with the
+    // booking's end), which is still ahead of now.
+    const now = T0 - 30 * 60_000;
+    expect(nearestFreeSlot(db, 'na', T0, 60, now)).toBe(new Date(T0 + 90 * 60_000).toISOString());
+  });
+
+  it('returns null when the only free candidates are not strictly after now', () => {
+    book(T0, T0 + 5 * H); // every later candidate within the 3 hour window stays inside this booking
+    // With now at T0 itself, nothing at or before T0 (which is every earlier
+    // candidate, and the exact start) qualifies, and the booking above rules
+    // out every later one.
+    expect(nearestFreeSlot(db, 'na', T0, 60, T0)).toBeNull();
+  });
+
+  it('never offers a slot beyond booking_days_ahead, even when it is the closer free candidate', () => {
+    setSetting(db, 'booking_days_ahead', '1'); // the schema's minimum
+    book(T0 - 30 * 60_000, T0 + 30 * 60_000); // occupies [T0-30m, T0+30m): blocks the exact start and the +-30 min candidates
+    // The window only reaches one minute past T0, so every later candidate
+    // (all of them free, since nothing is booked out there) must be skipped.
+    // The nearest candidate that is both free and inside the window is
+    // T0-90m (step 3 earlier, back to back with the booking's start).
+    const now = T0 - 24 * H + 60_000;
+    expect(nearestFreeSlot(db, 'na', T0, 60, now)).toBe(new Date(T0 - 90 * 60_000).toISOString());
   });
 });
