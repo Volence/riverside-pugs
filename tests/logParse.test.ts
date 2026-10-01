@@ -622,6 +622,11 @@ describe('PUGBOOK parsing', () => {
     expect(parseLogDatagram(framed('PUGBOOK event=cmd cmd=nextmap steamid=STEAM_1:0:nope arg='))).toBeNull();
   });
 
+  it('parses an allow line, the steamid and name in arg', () => {
+    const ev = parseLogDatagram(framed('PUGBOOK event=cmd cmd=allow steamid=76561198000000001 arg=76561199000000002 Some Name'));
+    expect(ev).toEqual({ kind: 'booking_cmd', steamid: '76561198000000001', cmd: 'allow', arg: '76561199000000002 Some Name' });
+  });
+
   it('rejects an unknown cmd', () => {
     expect(parseLogDatagram(framed('PUGBOOK event=cmd cmd=changemap steamid=76561198000000001 arg='))).toBeNull();
   });

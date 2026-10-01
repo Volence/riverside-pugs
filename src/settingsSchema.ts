@@ -113,6 +113,8 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'booking_idle_end_minutes', group: 'Competitive', label: 'End an empty booking after (minutes)', help: 'A booked server with nobody on it for this long, after the start and the no-show grace, is closed and goes back to the pool.', type: { kind: 'int', min: 5, max: 60 } },
   { key: 'booking_extend_minutes', group: 'Competitive', label: 'Extend by (minutes)', help: 'What one Extend adds, if enough servers stay free for the extra time.', type: { kind: 'int', min: 15, max: 120 } },
   { key: 'booking_game_min_players', group: 'Competitive', label: 'Players on teams to record a booked game', help: 'A game on a booked server is recorded once both teams go live with at least this many humans on teams in total.', type: { kind: 'int', min: 2, max: 8 } },
+  { key: 'booking_allow_grace_seconds', group: 'Competitive', label: 'Time to !allow someone (seconds)', help: 'Someone not on a booking who joins its server is kicked after this long unless a captain types !allow for them in game, which adds them as a ringer.', type: { kind: 'int', min: 15, max: 300 } },
+  { key: 'booking_allow_block_minutes', group: 'Competitive', label: 'Keep a kicked player out for (minutes)', help: 'After that kick, how long they cannot rejoin that booked server. A captain adding them to the booking on the site lets them back in at once. 0 means they can rejoin straight away.', type: { kind: 'int', min: 0, max: 240 } },
 ];
 
 const BY_KEY = new Map(SETTINGS_SCHEMA.map((d) => [d.key, d]));

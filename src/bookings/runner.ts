@@ -16,7 +16,7 @@ import type { Notifier, NotifyType } from '../notify/notify.js';
 import { bookingMessage } from './messages.js';
 import { bookingLimits, typicalCampaignMinutes } from './rules.js';
 import {
-  acceptedPeople, actingSides, advancePlaylist, bookingRules, closeBooking, endBooking, expireUnconfirmed, extendBooking, getBooking, markActive,
+  acceptedPeople, actingSides, advancePlaylist, allowInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, extendBooking, gameName, getBooking, markActive,
   markReady, markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
   BOOKING_ERRORS, type BookingRow, type Side, type SideRow,
 } from './bookings.js';
@@ -116,7 +116,8 @@ export function bookingLines(db: DB, b: BookingRow): string[] {
   ];
 }
 
-/** The lines that make the box record the booking's games (plan 4b): the
+/** The lines that make the box record the booking's games (plan 4b), and
+ *  since plan 4b2 the allowlist (allowLines) at the end: the
  *  plugin's auto-track starts a match when both teams go live with enough
  *  humans, the ruleset's pause limits (0 turns a limit off), the captains
  *  list (every manager of a confirmed side, Task 6) so the plugin's own
@@ -142,7 +143,32 @@ export function gameLines(db: DB, b: BookingRow, server: ServerRow, logAddress?:
       lines.push('sv_rcon_log 0', `sm_pug_log_secret "${server.log_secret}"`, 'sv_rcon_log 1');
     }
   }
+  lines.push(...allowLines(db, b));
   return lines;
+}
+
+/** Steamids per `sm_booking_allow_add` line: well under the console's line length. */
+export const ALLOW_CHUNK = 10;
+
+/** Who may be on the box (plan 4b2), pushed whole each time so the plugin
+ *  never holds a half list: begin, the ids in chunks, commit. Then how long a
+ *  captain has to `!allow` someone who is not on it, and how long a kicked
+ *  one stays out. The ids must never reach a log line: hideAllowIds. */
+export function allowLines(db: DB, b: BookingRow): string[] {
+  const ids = allowList(db, b.id).filter((id) => /^\d{17}$/.test(id));
+  const lines = ['sm_booking_allow_begin'];
+  for (let i = 0; i < ids.length; i += ALLOW_CHUNK) lines.push(`sm_booking_allow_add ${ids.slice(i, i + ALLOW_CHUNK).join(' ')}`);
+  lines.push(
+    'sm_booking_allow_commit',
+    `l4d_booking_grace ${settingNumber(db, 'booking_allow_grace_seconds', 60, { min: 15, max: 300, integer: true })}`,
+    `l4d_booking_block ${settingNumber(db, 'booking_allow_block_minutes', 30, { min: 0, max: 240, integer: true })}`,
+  );
+  return lines;
+}
+
+/** An rcon error names the command it was on: an allowlist line becomes a count. */
+export function hideAllowIds(message: string): string {
+  return message.replace(/sm_booking_allow_add((?:\s+\d+)*)/g, (_, ids: string) => `sm_booking_allow_add (${ids.trim() === '' ? 0 : ids.trim().split(/\s+/).length} ids)`);
 }
 
 /** Folded for name matching: lower case, `_`, `-` and spaces as one space. */
@@ -280,7 +306,7 @@ export class BookingRunner {
         break;
       } catch (err) {
         // An rcon error names the command it was on, and one of them carries the log secret.
-        const why = redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret]);
+        const why = hideAllowIds(redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret]));
         console.warn(`[booking] ${id}: setup try ${attempt} on ${server.name} failed: ${why}`);
         if (!this.stillSettingUp(id)) break;
         if (attempt < SETUP_TRIES) continue;
@@ -664,7 +690,7 @@ export class BookingRunner {
     try {
       await this.deps.rcon(server, lines());
     } catch (err) {
-      console.warn(`[booking] ${id}: ${what} on ${server.name} failed:`, redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret]));
+      console.warn(`[booking] ${id}: ${what} on ${server.name} failed:`, hideAllowIds(redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret])));
     }
   }
 
@@ -766,8 +792,9 @@ export class BookingRunner {
    *  booking (bookingOnServer already excludes an ending one) or a sender who
    *  does not manage one of its confirmed sides. A refusal is said on the box
    *  as `[Booking] <reason>`; a success is already said by the method it
-   *  calls (the campaign-start lines, the goodbye, or the extend notice). */
-  onCommand(serverId: number, steamid: string, cmd: 'nextmap' | 'stay' | 'end' | 'extend', arg: string): void {
+   *  calls (the campaign-start lines, the goodbye, the extend notice, or
+   *  allowFromGame's who-is-in line). */
+  onCommand(serverId: number, steamid: string, cmd: 'nextmap' | 'stay' | 'end' | 'extend' | 'allow', arg: string): void {
     const b = bookingOnServer(this.db, serverId);
     if (!b) {
       console.log(`[booking] onCommand: no open booking on server ${serverId} (steamid ${steamid}, cmd ${cmd})`);
@@ -800,6 +827,10 @@ export class BookingRunner {
         else error = BOOKING_ERRORS[r.error].text;
         break;
       }
+      case 'allow': {
+        error = this.allowFromGame(b.id, serverId, steamid, arg);
+        break;
+      }
     }
     if (error === null) return;
     const server = getServer(this.db, serverId);
@@ -807,6 +838,28 @@ export class BookingRunner {
     this.deps.rcon(server, [`say [Booking] ${consoleText(error, 150)}`]).catch((err) => {
       console.warn(`[booking] ${b.id}: command refusal on ${server.name} failed:`, err instanceof Error ? err.message : err);
     });
+  }
+
+  /** `!allow` (plan 4b2): `arg` is `<steamid64> <name...>` from the plugin,
+   *  the name as the game shows it (untrusted). On success the whole list goes
+   *  to the box at once, with the line saying who is in; the refusal text
+   *  otherwise (said by onCommand). */
+  private allowFromGame(id: number, serverId: number, by: string, arg: string): string | null {
+    const m = /^(\S+)\s*([\s\S]*)$/.exec(arg.trim());
+    const steamid = m?.[1] ?? '';
+    const r = allowInGame(this.db, { bookingId: id, by, steamid, name: m?.[2] ?? '', now: new Date(this.now()) });
+    if (!r.ok) return BOOKING_ERRORS[r.error].text;
+    const b = getBooking(this.db, id);
+    const server = getServer(this.db, serverId);
+    const side = sidesOf(this.db, id).find((s) => s.side === r.value.side);
+    if (!b || !server || !side) return null;
+    const who = consoleText(gameName(steamid, m?.[2]), 40);
+    const said = r.value.added
+      ? `say [Booking] ${who} is in, as a ringer for ${consoleText(sideName(this.db, side), 60)}.`
+      : `say [Booking] ${who} is already in this booking.`;
+    if (r.value.added) console.log(`[booking] ${id}: ${by} allowed a ringer in game; the list now has ${allowList(this.db, id).length} ids`);
+    void this.push(id, server, () => [...allowLines(this.db, b), said], 'the allowlist');
+    return null;
   }
 
   // ---------- notices ----------

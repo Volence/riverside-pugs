@@ -1,6 +1,8 @@
 import type { DB } from '../db.js';
 import { getPlayer } from '../players.js';
 import { inGoodStanding } from '../standing.js';
+import { hasActiveBan } from '../banState.js';
+import { hasUnsafeChars } from '../profileFields.js';
 import { competitiveAccess } from '../teams/access.js';
 import { activeMembers, getTeam, roleOf } from '../teams/teams.js';
 import { getCampaignPool } from '../settings.js';
@@ -373,6 +375,57 @@ export function addPerson(db: DB, o: {
     insertPerson(db, b.id, side, steamid, role, status, o.by, now);
     logEvent(db, b.id, o.by, 'person_added', { steamid, side, role, status }, now);
     return ok({ status });
+  })();
+}
+
+/** Who may be on the booked box (plan 4b2): the steamids of the booking's
+ *  accepted people, plus every admin and mod in good standing. De-duplicated
+ *  and sorted, so the same list is pushed the same way each time. */
+export function allowList(db: DB, bookingId: number): string[] {
+  const ids = new Set(acceptedPeople(db, bookingId).map((p) => p.steamid));
+  const staff = db.prepare('SELECT steamid FROM players WHERE is_admin = 1 OR is_mod = 1').all() as { steamid: string }[];
+  for (const { steamid } of staff) if (inGoodStanding(db, steamid)) ids.add(steamid);
+  return [...ids].sort();
+}
+
+/** The longest name kept for someone a captain lets in from the game. */
+const GAME_NAME_MAX = 32;
+
+/** A name from the game, made safe to store: trimmed, cut to 32
+ *  characters, and the steamid when it is empty or has unsafe characters
+ *  (the same rule players' own text goes through). */
+export function gameName(steamid: string, raw: unknown): string {
+  const trimmed = typeof raw === 'string' ? [...raw.trim()].slice(0, GAME_NAME_MAX).join('').trim() : '';
+  return trimmed === '' || hasUnsafeChars(trimmed) ? steamid : trimmed;
+}
+
+/** A captain's in-game `!allow` (plan 4b2): the person connecting joins the
+ *  captain's side as an accepted ringer. Only a manager of a confirmed side of
+ *  an open booking that is ready or active, and only through the runner's
+ *  signed PUGBOOK line. It touches nothing but `players` (a row inserted if
+ *  absent, status invited, never an admin) and `booking_people`. The name
+ *  comes from the game and is untrusted: trimmed, cut to 32 characters, and
+ *  replaced by the steamid when it is empty or has unsafe characters. */
+export function allowInGame(db: DB, o: { bookingId: number; by: string; steamid: unknown; name: unknown; now?: Date }): Result<{ side: Side; added: boolean }> {
+  const now = o.now ?? new Date();
+  if (typeof o.steamid !== 'string' || !/^\d{17}$/.test(o.steamid)) return fail('not_player');
+  const steamid = o.steamid;
+  const name = gameName(steamid, o.name);
+  return db.transaction((): Result<{ side: Side; added: boolean }> => {
+    const b = getBooking(db, o.bookingId);
+    if (!b) return fail('not_found');
+    if (!isOpen(b) || (b.state !== 'ready' && b.state !== 'active')) return fail('wrong_state');
+    const side = actingSides(db, b.id, o.by)[0];
+    if (!side) return fail('not_manager');
+    const p = getPlayer(db, steamid);
+    if (p?.status === 'banned' || hasActiveBan(db, steamid, now)) return fail('not_player');
+    if (db.prepare('SELECT 1 FROM booking_people WHERE booking_id = ? AND steamid = ?').get(b.id, steamid)) return ok({ side, added: false });
+    const count = (db.prepare('SELECT COUNT(*) AS n FROM booking_people WHERE booking_id = ? AND side = ?').get(b.id, side) as { n: number }).n;
+    if (count >= PEOPLE_PER_SIDE) return fail('side_full');
+    db.prepare("INSERT OR IGNORE INTO players (steamid, name, status) VALUES (?, ?, 'invited')").run(steamid, name);
+    insertPerson(db, b.id, side, steamid, 'ringer', 'accepted', o.by, now);
+    logEvent(db, b.id, o.by, 'person_allowed_in_game', { steamid, side }, now);
+    return ok({ side, added: true });
   })();
 }
 

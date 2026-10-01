@@ -5,7 +5,7 @@ import { setSetting } from '../src/settings.js';
 import { createTeam, invitePlayer, respondInvite, setRole, transferCaptain } from '../src/teams/teams.js';
 import { currentSeasonId } from '../src/players.js';
 import {
-  addPerson, bookingView, cancelBooking, claimNoShow, closeBooking, confirmBooking, createBooking, declineBooking,
+  addPerson, allowInGame, allowList, bookingView, cancelBooking, claimNoShow, closeBooking, confirmBooking, createBooking, declineBooking,
   endBooking, expireUnconfirmed, extendBooking, getBooking, holdBox, markActive, markReady, markReleased, markSetup,
   myBookings, peopleOf, recordPresence, removePerson, respondPerson, sideRow,
 } from '../src/bookings/bookings.js';
@@ -380,5 +380,101 @@ describe('views', () => {
     const id = create();
     expect(myBookings(db, P[1]).open.map((b) => [b.id, b.needs])).toEqual([[id, 'confirm']]);
     expect(myBookings(db, P[0]).open.map((b) => b.needs)).toEqual([null]);
+  });
+});
+
+describe('who may be on the box (plan 4b2)', () => {
+  const running = () => {
+    const id = create();
+    confirmBooking(db, { bookingId: id, by: P[1], now: NOW });
+    holdBox(db, id, servers[1], NOW);
+    markSetup(db, id, NOW);
+    markReady(db, id, NOW);
+    return id;
+  };
+  const ban = (steamid: string) => db.prepare("INSERT INTO bans (player_id, reason, created_by, created_at) VALUES (?, 'x', 'system', ?)")
+    .run(steamid, '2026-09-01T00:00:00.000Z');
+
+  it('allowList is the accepted people plus staff in good standing, sorted, no invited people, no banned admin', () => {
+    const id = running();
+    addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[5], role: 'player', now: NOW }); // invited
+    db.prepare('UPDATE players SET is_admin = 1 WHERE steamid IN (?, ?)').run(P[9], P[0]);
+    db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(P[10]);
+    db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(P[11]);
+    ban(P[11]);
+    const list = allowList(db, id);
+    expect(list).toEqual([P[0], P[1], P[9], P[10]].sort());
+    expect(list).not.toContain(P[5]);
+    expect(list).not.toContain(P[11]);
+  });
+
+  it('a captain adds a ringer to their side, creating a players row for an unknown id', () => {
+    const id = running();
+    const unknown = '76561199123456789';
+    const r = allowInGame(db, { bookingId: id, by: P[1], steamid: unknown, name: '  Some Name  ', now: NOW });
+    expect(r).toEqual({ ok: true, value: { side: 'b', added: true } });
+    expect(db.prepare('SELECT name, status, is_admin FROM players WHERE steamid = ?').get(unknown)).toEqual({ name: 'Some Name', status: 'invited', is_admin: 0 });
+    expect(peopleOf(db, id).find((p) => p.steamid === unknown)).toMatchObject({ side: 'b', role: 'ringer', status: 'accepted', added_by: P[1] });
+    expect(db.prepare("SELECT actor, detail FROM booking_events WHERE booking_id = ? AND event = 'person_allowed_in_game'").get(id))
+      .toEqual({ actor: P[1], detail: JSON.stringify({ steamid: unknown, side: 'b' }) });
+    expect(allowList(db, id)).toContain(unknown);
+  });
+
+  it('an existing player keeps their row; an unsafe or long name is cut or falls back to the steamid', () => {
+    const id = running();
+    expect(allowInGame(db, { bookingId: id, by: P[0], steamid: P[6], name: 'whatever', now: NOW })).toEqual({ ok: true, value: { side: 'a', added: true } });
+    expect(db.prepare('SELECT name, status FROM players WHERE steamid = ?').get(P[6])).toEqual({ name: 'p6', status: 'active' });
+    const long = '76561199123456780';
+    allowInGame(db, { bookingId: id, by: P[0], steamid: long, name: 'x'.repeat(40), now: NOW });
+    expect((db.prepare('SELECT name FROM players WHERE steamid = ?').get(long) as { name: string }).name).toBe('x'.repeat(32));
+    const bad = '76561199123456781';
+    allowInGame(db, { bookingId: id, by: P[0], steamid: bad, name: 'evil\u202Ename', now: NOW });
+    expect((db.prepare('SELECT name FROM players WHERE steamid = ?').get(bad) as { name: string }).name).toBe(bad);
+    const blank = '76561199123456782';
+    allowInGame(db, { bookingId: id, by: P[0], steamid: blank, name: 42, now: NOW });
+    expect((db.prepare('SELECT name FROM players WHERE steamid = ?').get(blank) as { name: string }).name).toBe(blank);
+  });
+
+  it('refuses a non-captain, a bad id, a banned id, and a booking that is not running', () => {
+    const id = create();
+    const r = (by: string, steamid: unknown) => {
+      const res = allowInGame(db, { bookingId: id, by, steamid, name: 'n', now: NOW });
+      return res.ok ? 'ok' : res.error;
+    };
+    expect(r(P[0], P[7])).toBe('wrong_state'); // scheduled, not running
+    confirmBooking(db, { bookingId: id, by: P[1], now: NOW });
+    holdBox(db, id, servers[1], NOW);
+    markSetup(db, id, NOW);
+    markReady(db, id, NOW);
+    expect(r(P[7], P[8])).toBe('not_manager');
+    expect(r(P[0], '123')).toBe('not_player');
+    expect(r(P[0], 76561199000000799)).toBe('not_player');
+    ban(P[7]);
+    expect(r(P[0], P[7])).toBe('not_player');
+    db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(P[8]);
+    expect(r(P[0], P[8])).toBe('not_player');
+    expect(peopleOf(db, id).map((p) => p.steamid)).toEqual([P[0], P[1]]);
+    endBooking(db, { bookingId: id, by: P[0], now: NOW });
+    expect(r(P[0], P[6])).toBe('wrong_state');
+  });
+
+  it('someone already in is added: false and nothing changes', () => {
+    const id = running();
+    addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[5], role: 'player', now: NOW }); // invited on a
+    const before = peopleOf(db, id);
+    expect(allowInGame(db, { bookingId: id, by: P[1], steamid: P[5], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'b', added: false } });
+    expect(allowInGame(db, { bookingId: id, by: P[1], steamid: P[0], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'b', added: false } });
+    expect(peopleOf(db, id)).toEqual(before);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM booking_events WHERE event = 'person_allowed_in_game'").get()).toEqual({ n: 0 });
+  });
+
+  it('a full side is side_full', () => {
+    const id = running();
+    for (let i = 0; i < 11; i++) {
+      expect(allowInGame(db, { bookingId: id, by: P[1], steamid: `765611991000000${String(i).padStart(2, '0')}`, name: `r${i}`, now: NOW }).ok).toBe(true);
+    }
+    const r = allowInGame(db, { bookingId: id, by: P[1], steamid: '76561199100000099', name: 'late', now: NOW });
+    expect(r).toEqual({ ok: false, error: 'side_full' });
+    expect(db.prepare('SELECT 1 FROM players WHERE steamid = ?').get('76561199100000099')).toBeUndefined();
   });
 });

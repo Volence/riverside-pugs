@@ -1109,6 +1109,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   booking_idle_end_minutes: '10',
   booking_extend_minutes: '30',
   booking_game_min_players: '6',
+  // Who may be on a booked box (plan 4b2): how long a captain has to !allow
+  // someone who is not on the list, and how long a kicked one stays out.
+  booking_allow_grace_seconds: '60',
+  booking_allow_block_minutes: '30',
 };
 
 /** Patch triage backfill (sub-project 1 of the balance catalogue roadmap).
