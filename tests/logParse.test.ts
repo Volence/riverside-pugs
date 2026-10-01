@@ -641,12 +641,13 @@ describe('PUGBOOK parsing', () => {
     expect(ev).toEqual({ kind: 'booking_cmd', steamid: '76561199000000001', cmd: 'stay', arg: '' });
   });
 
-  // No ` arg=` marker anywhere on the line at all (not even a trailing empty
-  // one) is refused, the same treatment as PUGCALL's ' text=' and PUGTV's
-  // ' name=': the marker is how the grammar tells player-controlled text
-  // apart from the fields before it, so its total absence is a malformed line.
-  it('a line with no arg= marker at all is refused', () => {
-    expect(parseLogDatagram(framed('PUGBOOK event=cmd cmd=stay steamid=76561199000000001'))).toBeNull();
+  // No ` arg=` marker anywhere on the line (not even a trailing empty one)
+  // still parses, with arg empty: unlike PUGCALL's ' text=' and PUGTV's
+  // ' name=', a PUGBOOK line with no arg= has no free text anywhere on it to
+  // protect against, so there is nothing for a missing marker to risk.
+  it('a line with no arg= marker at all still parses, with arg empty', () => {
+    const ev = parseLogDatagram(framed('PUGBOOK event=cmd cmd=stay steamid=76561199000000001'));
+    expect(ev).toEqual({ kind: 'booking_cmd', steamid: '76561199000000001', cmd: 'stay', arg: '' });
   });
 
   it('arg is trimmed and capped at 64 characters', () => {

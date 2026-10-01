@@ -399,6 +399,24 @@ function isPageRequest(method: string, url: string): boolean {
   return !['/api/', '/auth/', '/ws'].some((prefix) => url.startsWith(prefix));
 }
 
+/**
+ * Which server a signed PUGBOOK line is from, or null to drop it.
+ *
+ * A booking command changes box state (the map, the booking's end time) on a
+ * captain's say-so, so it is acted on only when the line's signature
+ * verified: `meta.serverId` is set by LogAuth (src/logAuth.ts) only in that
+ * case, never from the sender's address and port alone, which is the
+ * fallback `serverOf` uses for every other kind. An unsigned or badly signed
+ * PUGBOOK line is logged once and otherwise ignored.
+ */
+export function bookingCommandServerId(meta: LogMeta, steamid: string, cmd: string): number | null {
+  if (meta.serverId === null) {
+    console.warn(`[booking] unsigned PUGBOOK ignored (steamid ${steamid}, cmd ${cmd})`);
+    return null;
+  }
+  return meta.serverId;
+}
+
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: false,
@@ -1069,7 +1087,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         }
         if (ev.kind === 'booking_cmd') {
           try {
-            const sid = serverOf(source, meta);
+            const sid = bookingCommandServerId(meta, ev.steamid, ev.cmd);
             if (sid !== null) bookingRunnerRef?.onCommand(sid, ev.steamid, ev.cmd, ev.arg);
           } catch (err) {
             console.error('[booking] command line failed:', err);

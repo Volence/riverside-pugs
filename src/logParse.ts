@@ -704,12 +704,14 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
   // A captain's in-game command (plugin/l4d_booking.sp 1.1.0). Same treatment
   // as PUGCALL and PUGTV's reason=: `arg` is free text and LAST on the line,
   // so `cmd` and `steamid` are read from the slice BEFORE the first ` arg=`
-  // only, and nothing a captain types into arg can forge either one.
+  // only, and nothing a captain types into arg can forge either one. The
+  // plugin always sends `arg=`, possibly with nothing after it; a line
+  // missing the marker entirely still parses, with arg empty, since in that
+  // case there is no free text on the line at all to protect against.
   if (body.startsWith('PUGBOOK ')) {
     const at = body.indexOf(' arg=');
-    if (at < 0) return null;
-    const head = kv(body.slice(0, at).split(/\s+/).slice(1));
-    const arg = body.slice(at + ' arg='.length).trim().slice(0, 64);
+    const head = kv((at < 0 ? body : body.slice(0, at)).split(/\s+/).slice(1));
+    const arg = at < 0 ? '' : body.slice(at + ' arg='.length).trim().slice(0, 64);
     const steamid = steamId64Of(head.steamid ?? '');
     const cmd = head.cmd;
     if (!steamid || (cmd !== 'nextmap' && cmd !== 'stay' && cmd !== 'end' && cmd !== 'extend')) return null;
