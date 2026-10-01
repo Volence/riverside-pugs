@@ -8,7 +8,7 @@ import { liveTeams, myTeams } from '../teams/teams.js';
 import { getCampaignPool, settingNumber } from '../settings.js';
 import { campaignRegistry } from '../campaignRegistry.js';
 import { bookingLimits, typicalCampaignMinutes, STEP_MINUTES } from '../bookings/rules.js';
-import { canUse } from '../bookings/bookings.js';
+import { canUse, seesBooking } from '../bookings/bookings.js';
 import type { BookingRunner } from '../bookings/runner.js';
 import type { Notifier } from '../notify/notify.js';
 import * as S from '../scrims/scrims.js';
@@ -122,6 +122,10 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
     if (!me) return;
     const bookingId = Number((req.params as { bookingId: string }).bookingId);
     if (!Number.isInteger(bookingId) || bookingId <= 0) return reply.code(404).send(NOT_FOUND);
+    // Someone the booking is hidden from gets the same flat 404 as the
+    // booking routes give, so the refusals below never tell a stranger
+    // whether a booking exists or what state it is in.
+    if (!seesBooking(db, bookingId, { steamid: me, staff: isStaff(me) })) return reply.code(404).send(NOT_FOUND);
     const r = S.repostFromBooking(db, { bookingId, by: me });
     if (!r.ok) return refuse(reply, r);
     return reply.code(201).send({ id: r.value.id });
