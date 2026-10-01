@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
@@ -158,11 +158,31 @@ describe('admin matches', () => {
     expect((db.prepare('SELECT status FROM servers WHERE id = ?').get(serverId) as { status: string }).status).toBe('idle');
   });
 
-  it('Set idle on a box that went down under a booking puts it back: idle, gone_since cleared', async () => {
-    const serverId = addServer(db, { name: 's1', host: '1.2.3.4', port: 27015, rconPort: 27015, rconPassword: 'x', status: 'offline' });
-    db.prepare("UPDATE servers SET gone_since = '2026-10-02T20:00:00.000Z' WHERE id = ?").run(serverId);
-    expect((await post(`/api/admin/servers/${serverId}/idle`)).statusCode).toBe(200);
-    expect(db.prepare('SELECT status, gone_since FROM servers WHERE id = ?').get(serverId)).toEqual({ status: 'idle', gone_since: null });
+  it('Set idle on a gone box gives it the forced restart, answers that it is restarting, and clears gone_since once it is back', async () => {
+    const restarts: number[] = [];
+    let finish: (back: boolean) => void = () => {};
+    const app2 = await buildServer({
+      config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {},
+      serverRestarter: { restart: (s) => { restarts.push(s.id); return new Promise<boolean>((r) => { finish = r; }); } },
+    });
+    try {
+      const cookies = authedCookie(app2, db, ADMIN);
+      const serverId = addServer(db, { name: 's1', host: '1.2.3.4', port: 27015, rconPort: 27015, rconPassword: 'x', status: 'offline' });
+      db.prepare("UPDATE servers SET gone_since = '2026-10-02T20:00:00.000Z' WHERE id = ?").run(serverId);
+      const res = await app2.inject({ method: 'POST', url: `/api/admin/servers/${serverId}/idle`, cookies, payload: {} });
+      expect(res.statusCode).toBe(202);
+      expect(res.json()).toEqual({ ok: true, restarting: true });
+      await vi.waitFor(() => expect(restarts).toEqual([serverId]));
+      // Restarting: not claimable, still gone, and a second click is refused.
+      expect(db.prepare('SELECT status, gone_since FROM servers WHERE id = ?').get(serverId)).toEqual({ status: 'offline', gone_since: '2026-10-02T20:00:00.000Z' });
+      expect((await app2.inject({ method: 'POST', url: `/api/admin/servers/${serverId}/idle`, cookies, payload: {} })).statusCode).toBe(409);
+      finish(true);
+      await vi.waitFor(() => expect(db.prepare('SELECT status, gone_since FROM servers WHERE id = ?').get(serverId)).toEqual({ status: 'idle', gone_since: null }));
+      expect(restarts).toEqual([serverId]);
+    } finally {
+      finish(false);
+      await app2.close();
+    }
   });
 
   it('enable and disable a server, which the overview reports', async () => {

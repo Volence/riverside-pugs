@@ -56,6 +56,8 @@ export type ServerCleaner = (server: ServerRow, token: string | null, opts: Rele
 export class ServerReleaser {
   private waiters: Array<() => void> = [];
   private inFlight = new Set<Promise<void>>();
+  /** Boxes whose release restart has not settled yet. */
+  private restartingIds = new Set<number>();
 
   constructor(
     private db: DB,
@@ -73,6 +75,13 @@ export class ServerReleaser {
      *  the box offline. Every other restart is exactly as before. */
     private releaseRestart: { owns(serverId: number): boolean; after(serverId: number, res: RestartOutcome): boolean } | null = null,
   ) {}
+
+  /** True while a release of this box is restarting it (offline until it
+   *  answers). Staff Set idle and the booking runner's gone give-back read it
+   *  so a gone box is never restarted twice over itself. */
+  isRestarting(serverId: number): boolean {
+    return this.restartingIds.has(serverId);
+  }
 
   /** Called when a box frees, so a match waiting for one can claim it. */
   onFreed(fn: () => void): void {
@@ -173,7 +182,7 @@ export class ServerReleaser {
     // the one whose match the plugin may still be holding. A stale or already
     // aborted token is harmless: the plugin answers PUGERR and changes nothing.
     const token = lastTokenOn(this.db, serverId);
-    if (restarting) markOffline(this.db, serverId);
+    if (restarting) { markOffline(this.db, serverId); this.restartingIds.add(serverId); }
     else release(this.db, serverId);
     const done = this.cleanServer(server, token, full)
       .catch((err) => {
@@ -209,6 +218,7 @@ export class ServerReleaser {
         console.error(`[serverRelease] restart of ${server.name} failed:`, err);
       })
       .then(() => {
+        if (restarting) this.restartingIds.delete(serverId);
         try {
           onSettled?.(backInPool);
         } catch (err) {

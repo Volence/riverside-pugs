@@ -1945,6 +1945,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     release: (serverId, opts) => new Promise<boolean>((resolve) => {
       releaser.release(serverId, { restart: true, forceRestart: true, booking: true, gone: opts?.gone ?? false }, resolve);
     }),
+    releasing: (serverId) => releaser.isRestarting(serverId),
     restart: (server) => restarter.restart(server),
     notifier,
     preempt: () => { practiceLeases.needServer(); sideGamesRef?.needServer(); },
