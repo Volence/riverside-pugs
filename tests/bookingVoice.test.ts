@@ -123,6 +123,36 @@ describe('BookingVoice.ensure', () => {
   });
 });
 
+describe('BookingVoice.ensure failures part way and the staff fallback', () => {
+  it('a creation that fails after the category leaves no channel behind and records nothing', async () => {
+    const id = book();
+    t.failVoiceAt = 'teamB';
+    await voice.ensure(id);
+    expect(t.channels.size).toBe(0);
+    expect(row(id)).toBeUndefined();
+    expect(events.filter((e) => e.kind === 'problem')).toHaveLength(1);
+  });
+
+  it('when the staff role is refused, the channels are still made and staff are told once that they cannot see them', async () => {
+    const id = book();
+    t.refuseStaffRole = true;
+    await voice.ensure(id);
+    expect(row(id)).toBeDefined();
+    const problems = events.filter((e) => e.kind === 'problem');
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatchObject({ text: expect.stringContaining(`Booking ${id}`) });
+    expect(problems[0]).toMatchObject({ text: expect.stringContaining('staff cannot see') });
+    await voice.ensure(id);
+    expect(events.filter((e) => e.kind === 'problem')).toHaveLength(1);
+  });
+
+  it('a working staff role says nothing', async () => {
+    const id = book();
+    await voice.ensure(id);
+    expect(events).toEqual([]);
+  });
+});
+
 describe('BookingVoice.sync', () => {
   it('lets in a newly accepted person and takes out a removed one', async () => {
     const id = book();
@@ -229,7 +259,32 @@ describe('BookingVoice.close', () => {
     });
     await expect(v.close(id)).resolves.toBeUndefined();
     expect(deleted).toEqual([r.side_a_id, r.side_b_id, r.category_id]);
-    expect(row(id)!.deleted_at).not.toBeNull();
+  });
+
+  it('a failed delete keeps the row open so closeEnded retries, and tells staff once per booking', async () => {
+    const id = book();
+    await voice.ensure(id);
+    const r = row(id)!;
+    db.prepare("UPDATE bookings SET state = 'ended', ending_at = ?, ended_at = ? WHERE id = ?").run(new Date(NOW).toISOString(), new Date(NOW).toISOString(), id);
+    t.failChannelDeletes.add(r.side_a_id);
+    await voice.close(id);
+    expect(row(id)!.deleted_at).toBeNull();
+    expect(t.channels.has(r.side_a_id)).toBe(true);
+    expect(t.channels.has(r.side_b_id)).toBe(false);
+    expect(t.channels.has(r.category_id)).toBe(false);
+    const problems = () => events.filter((e) => e.kind === 'problem');
+    expect(problems()).toHaveLength(1);
+    expect(problems()[0]).toMatchObject({ text: expect.stringContaining(`Booking ${id}`) });
+
+    await voice.closeEnded(); // still refused: retried, not reported again
+    expect(row(id)!.deleted_at).toBeNull();
+    expect(problems()).toHaveLength(1);
+
+    t.failChannelDeletes.clear();
+    await voice.closeEnded();
+    expect(row(id)!.deleted_at).toBe(new Date(NOW).toISOString());
+    expect(t.channels.size).toBe(0);
+    expect(problems()).toHaveLength(1);
   });
 
   it('does nothing with no bot connected, keeping the row for a later close', async () => {
