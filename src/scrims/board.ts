@@ -14,10 +14,12 @@ import { scrimMessage, scrimSideManagers } from './messages.js';
 export const TICK_MS = 60_000;
 
 /** The scrim board's Discord poster (plan 1, Task 4): refreshes the
- *  `#scrims` cards. Not built yet; ScrimBoard calls it only when one is
- *  wired, so this task's tick works with or without it. */
+ *  `#scrims` cards (src/scrims/poster.ts). ScrimBoard calls it only when one
+ *  is wired, so this task's tick works with or without it. The real
+ *  tickNow() returns a promise, but always resolves: it catches its own
+ *  chain, so a caller never needs to await or catch it. */
 export interface ScrimPoster {
-  tickNow(): void;
+  tickNow(): Promise<void> | void;
 }
 
 export interface ScrimBoardDeps {
@@ -58,7 +60,7 @@ export class ScrimBoard {
         console.error('[scrims] expire() failed:', err instanceof Error ? err.message : err);
       }
       try {
-        this.deps.poster?.()?.tickNow();
+        void this.deps.poster?.()?.tickNow();
       } catch (err) {
         console.error('[scrims] poster.tickNow() failed:', err instanceof Error ? err.message : err);
       }
