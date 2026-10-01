@@ -12,8 +12,8 @@ import { redactSecrets } from '../redact.js';
 import { TEMPLATES } from '../rulesets.js';
 import { consoleText, cvarValue, quoted, waitForStartup, type BoxRcon } from '../serverSetup.js';
 import { activeMembers } from '../teams/teams.js';
-import type { Notifier, NotifyType } from '../notify/notify.js';
-import { bookingMessage } from './messages.js';
+import type { Notifier } from '../notify/notify.js';
+import { bookingMessage, type BookingNotifyType } from './messages.js';
 import { bookingLimits, typicalCampaignMinutes } from './rules.js';
 import {
   acceptedPeople, actingSides, advancePlaylist, allowInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, extendBooking, gameName, getBooking, markActive,
@@ -932,7 +932,7 @@ export class BookingRunner {
   /** Never throws: a notice runs after a committed state change, and a
    *  failure to word or send it must not undo the caller's work (a route's
    *  answer, a release). */
-  private tell(id: number, steamids: Iterable<string>, type: NotifyType, extra: { minutes?: number; reason?: string | null; addedBy?: string } = {}): void {
+  private tell(id: number, steamids: Iterable<string>, type: BookingNotifyType, extra: { minutes?: number; reason?: string | null; addedBy?: string } = {}): void {
     try {
       const payload = bookingMessage(this.db, this.deps.publicUrl, id, type, extra);
       if (payload) this.deps.notifier.send(steamids, type, payload);

@@ -272,6 +272,46 @@ CREATE TABLE IF NOT EXISTS notification_prefs (
   enabled INTEGER NOT NULL,
   PRIMARY KEY (steamid, type)
 );
+-- Looking-for-scrim posts (scrim board plan 1, spec part 4 section 1). A post
+-- reserves nothing: createPost (src/scrims/scrims.ts) only checks that the
+-- slot COULD be booked (capacity, booking allowance) up front, so accepting
+-- it later can always succeed. target_team_id null is a public post; set, a
+-- direct challenge seen only by that team's managers. booking_id is filled in
+-- once confirmAccept books the server.
+CREATE TABLE IF NOT EXISTS scrim_posts (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  side_kind       TEXT NOT NULL CHECK (side_kind IN ('team','pickup')),
+  team_id         INTEGER REFERENCES teams(id),
+  captain_steamid TEXT NOT NULL REFERENCES players(steamid),
+  region          TEXT NOT NULL DEFAULT 'na',
+  starts_at       TEXT NOT NULL,
+  block_minutes   INTEGER NOT NULL,
+  campaigns_json  TEXT NOT NULL,
+  sr_range        INTEGER,
+  note            TEXT NOT NULL DEFAULT '',
+  status          TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','pending','booked','expired','withdrawn')),
+  created_at      TEXT NOT NULL,
+  target_team_id  INTEGER REFERENCES teams(id),
+  booking_id      INTEGER REFERENCES bookings(id)
+);
+CREATE INDEX IF NOT EXISTS scrim_posts_status_starts ON scrim_posts (status, starts_at);
+-- Acceptances of a scrim post (plan 1 section 2). Several sides may accept
+-- one open post; confirmAccept picks one, which becomes 'chosen', and every
+-- other pending acceptance on that post becomes 'declined'. campaigns_json is
+-- the accepter's own picks, up to scrim_accept_campaigns_max, empty meaning
+-- they take the poster's list as is.
+CREATE TABLE IF NOT EXISTS scrim_accepts (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id         INTEGER NOT NULL REFERENCES scrim_posts(id),
+  side_kind       TEXT NOT NULL CHECK (side_kind IN ('team','pickup')),
+  team_id         INTEGER REFERENCES teams(id),
+  captain_steamid TEXT NOT NULL REFERENCES players(steamid),
+  campaigns_json  TEXT NOT NULL DEFAULT '[]',
+  status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','chosen','declined','expired','withdrawn')),
+  created_at      TEXT NOT NULL,
+  responded_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS scrim_accepts_post_status ON scrim_accepts (post_id, status);
 CREATE TABLE IF NOT EXISTS match_players (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   player_id TEXT NOT NULL REFERENCES players(steamid),
@@ -1026,6 +1066,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   discord_tickets_forum_id: '',
   discord_tickets_channel_id: '',
   discord_report_channel_id: '',
+  // Each public scrim post gets a card here (scrim board plan 1). Empty: no
+  // cards, a direct challenge never gets one either way.
+  discord_scrims_channel_id: '',
   // Games before a player's per-match figures are ranked for the profile
   // badges. Deliberately higher than RANKED_MIN_GAMES: three games is enough
   // for a rating to be worth showing and nowhere near enough for a per-match
@@ -1135,6 +1178,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // someone who is not on the list, and how long a kicked one stays out.
   booking_allow_grace_seconds: '60',
   booking_allow_block_minutes: '30',
+  // Scrim board plan 1: campaigns the accepting captain may add on top of the
+  // poster's list.
+  scrim_accept_campaigns_max: '2',
 };
 
 /** Patch triage backfill (sub-project 1 of the balance catalogue roadmap).
