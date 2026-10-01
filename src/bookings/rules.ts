@@ -36,11 +36,17 @@ export const iso = (ms: number): string => new Date(ms).toISOString();
 export interface BookingLimits {
   minMinutes: number; daysAhead: number; playlistMax: number; maxUpcoming: number;
   reserve: number; holdLeadMinutes: number; protectMinutes: number; idleEndMinutes: number;
+  goneMinutes: number; recoverWaitMinutes: number;
 }
 
 export function bookingLimits(db: DB): BookingLimits {
   const n = (key: string, fallback: number, min: number, max: number) => settingNumber(db, key, fallback, { integer: true, min, max });
   const holdLeadMinutes = n('booking_hold_lead_minutes', 15, 5, 60);
+  // Crash recovery (plan 5): clamped to the bound rather than rejected to the
+  // fallback, since a number outside 2..15 or 5..60 still means something
+  // close to that edge, not "ignore this and use the default instead".
+  const bounded = (key: string, fallback: number, min: number, max: number) =>
+    Math.min(max, Math.max(min, settingNumber(db, key, fallback, { integer: true })));
   return {
     minMinutes: n('booking_min_minutes', 60, 30, 360),
     daysAhead: n('booking_days_ahead', 14, 1, 60),
@@ -51,6 +57,8 @@ export function bookingLimits(db: DB): BookingLimits {
     // Never shorter than the lead: a box kept back must still be kept at T-lead.
     protectMinutes: Math.max(holdLeadMinutes, n('booking_protect_minutes', 75, 5, 180)),
     idleEndMinutes: n('booking_idle_end_minutes', 10, 5, 60),
+    goneMinutes: bounded('booking_gone_minutes', 3, 2, 15),
+    recoverWaitMinutes: bounded('booking_recover_wait_minutes', 20, 5, 60),
   };
 }
 
@@ -195,17 +203,16 @@ export function addCampaignMinutes(db: DB, campaign: string | null): number {
   return upToStep((campaign ? typicalCampaignMinutes(db, campaign) : DEFAULT_CAMPAIGN_MINUTES) + ESTIMATE_SLACK_MINUTES);
 }
 
-/**
- * Confirmed bookings without a box that start within `withinMinutes` of now
- * (or should already have started, and have not yet ended: a booking whose
- * time is over keeps nothing back): how many idle boxes the queue, practice
- * leases and side games must leave alone right now (claimIdle), or how many
- * bookings are waiting on a box at all (withinMinutes = the hold lead).
- */
+/** Idle boxes claimIdle keeps back: one per confirmed booking without a box
+ *  that starts within the window, and one per running booking whose box was
+ *  given up and is waiting for another (plan 5: the only time a booking is
+ *  ahead of the PUG queue). */
 export function bookingsDue(db: DB, nowMs: number, withinMinutes: number): number {
   return (db.prepare(
     `SELECT COUNT(*) AS n FROM bookings b
-      WHERE b.state = 'scheduled' AND b.server_id IS NULL AND b.ending_at IS NULL AND b.starts_at <= ? AND b.ends_at > ?
-        AND NOT EXISTS (SELECT 1 FROM booking_sides s WHERE s.booking_id = b.id AND s.confirmed_at IS NULL)`,
+      WHERE b.server_id IS NULL AND b.ending_at IS NULL AND (
+        (b.state = 'scheduled' AND b.starts_at <= ? AND b.ends_at > ?
+          AND NOT EXISTS (SELECT 1 FROM booking_sides s WHERE s.booking_id = b.id AND s.confirmed_at IS NULL))
+        OR (b.state IN ('ready','active') AND b.waiting_since IS NOT NULL))`,
   ).get(iso(nowMs + withinMinutes * 60_000), iso(nowMs)) as { n: number }).n;
 }
