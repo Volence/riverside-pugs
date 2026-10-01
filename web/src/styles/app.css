@@ -3409,6 +3409,37 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .eventbanner { display: block; width: 100%; height: auto; aspect-ratio: 4 / 1; object-fit: cover; border: 1px solid var(--border); }
 .eventrow__banner { width: 160px; height: 40px; object-fit: cover; border: 1px solid var(--border); }
 .eventdesc-preview { padding: var(--sp-3); border: 1px dashed var(--border); }
+/* The admin event forms (EventsDesk, EventFieldsForm, StageForm): Settings
+   desk rows (.admin-setting) under titled groups. Numbers are narrow, dates
+   and selects keep their natural width, text fills its column. */
+.eventform { display: flex; flex-direction: column; min-width: 0; }
+.eventform__group { border: 0; margin: var(--sp-6) 0 0; padding: 0; min-width: 0; }
+.eventform__head {
+  float: left; width: 100%; padding: 0 0 var(--sp-2); margin: 0;
+  font-family: var(--font-label); font-size: var(--fs-body); font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-bright); border-bottom: 1px solid var(--border-strong);
+}
+.eventform__head + * { clear: both; }
+.eventform .admin-setting__control > input[type='number'] { flex: 0 0 8rem; width: 8rem; }
+.eventform .admin-setting__control > input[type='datetime-local'] { flex: 0 1 auto; max-width: 100%; }
+.eventform .admin-setting__control > select { max-width: 100%; }
+.eventform .admin-setting__control > textarea {
+  flex: 1 1 100%; width: 100%; min-height: 8rem; resize: vertical;
+  padding: var(--sp-3); border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit;
+}
+.eventform .admin-setting__control > textarea:focus { border-color: var(--accent); }
+.eventform .admin-setting__control > .eventdesc-preview { flex: 1 1 100%; min-width: 0; }
+.eventform__row--wide { grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
+.eventform__labelrow { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); }
+.eventform__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-5); }
+/* A stage's form opens inside its row of the stage list: inset it. */
+.eventform--stage { margin: var(--sp-3) 0 var(--sp-2); padding: 0 var(--sp-4) var(--sp-4); border: 1px solid var(--border); background: var(--surface-2); font-size: var(--fs-body); }
+.eventform--stage .eventform__group:first-of-type { margin-top: var(--sp-4); }
+@media (max-width: 640px) { .eventform--stage { padding: 0 var(--sp-3) var(--sp-3); } }
+/* A stage in the editor's stage list: its summary, and its buttons at the right. */
+.eventstage__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2) var(--sp-3); padding: var(--sp-1) 0; }
+.eventstage__head > .inlinerow { margin: 0; }
+.eventstages { margin-bottom: var(--sp-4); }
 /* The safe markdown subset (web/src/components/RichText.tsx). */
 .richtext > :first-child { margin-top: 0; }
 .richtext > :last-child { margin-bottom: 0; }

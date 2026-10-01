@@ -85,7 +85,7 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
         {!canEdit && <p class="muted">Read only: admins run events.</p>}
         {error && <p class="error" role="alert">{error}</p>}
         {canEdit && (
-          <div class="inlinerow">
+          <div class="admin-row">
             {ev.status === 'draft' && (
               <button class="btn" disabled={busy}
                 onClick={() => void run(() => adminApi.publishEvent(id), 'Publish this event? Everyone the competitive switch lets in will see it on /events.')}>
@@ -97,16 +97,14 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
                 Open registration
               </button>
             )}
-          </div>
-        )}
-        {canEdit && ev.status === 'draft' && (
-          <div class="inlinerow">
-            <button class="btn btn--danger" disabled={busy} onClick={() => void run(async () => {
-              await adminApi.deleteEvent(id);
-              route(DESK_URL);
-            }, 'Delete this draft? Its stages and history go with it. Nobody outside staff has seen it.')}>
-              Delete draft
-            </button>
+            {ev.status === 'draft' && (
+              <button class="btn btn--danger" disabled={busy} onClick={() => void run(async () => {
+                await adminApi.deleteEvent(id);
+                route(DESK_URL);
+              }, 'Delete this draft? Its stages and history go with it. Nobody outside staff has seen it.')}>
+                Delete draft
+              </button>
+            )}
           </div>
         )}
         {canEdit && !over && ev.status !== 'draft' && (
@@ -147,19 +145,21 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
       <Panel>
         <h3>Stages</h3>
         {ev.stages.length === 0 ? <Empty>No stages yet. An event needs at least one before it can be published.</Empty> : (
-          <ol class="admin-list">
+          <ol class="admin-list eventstages">
             {ev.stages.map((s, i) => (
               <li key={s.id}>
-                <strong>Stage {s.ordinal}</strong> <span>{s.summary}</span>
-                {stagesOpen && (
-                  <span class="inlinerow">
-                    <button class="btn btn--ghost btn--sm" aria-label={`Move stage ${s.ordinal} up`} disabled={busy || i === 0} onClick={() => move(i, -1)}>Up</button>
-                    <button class="btn btn--ghost btn--sm" aria-label={`Move stage ${s.ordinal} down`} disabled={busy || i === ev.stages.length - 1} onClick={() => move(i, 1)}>Down</button>
-                    <button class="btn btn--ghost btn--sm" aria-label={`Edit stage ${s.ordinal}`} disabled={editing !== null} onClick={() => setEditing(s.id)}>Edit</button>
-                    <button class="btn btn--ghost btn--sm" aria-label={`Remove stage ${s.ordinal}`} disabled={busy}
-                      onClick={() => void run(() => adminApi.removeStage(id, s.id), `Remove stage ${s.ordinal}?`)}>Remove</button>
-                  </span>
-                )}
+                <div class="eventstage__head">
+                  <span><strong>Stage {s.ordinal}</strong> <span>{s.summary}</span></span>
+                  {stagesOpen && (
+                    <span class="inlinerow">
+                      <button class="btn btn--ghost btn--sm" aria-label={`Move stage ${s.ordinal} up`} disabled={busy || i === 0} onClick={() => move(i, -1)}>Up</button>
+                      <button class="btn btn--ghost btn--sm" aria-label={`Move stage ${s.ordinal} down`} disabled={busy || i === ev.stages.length - 1} onClick={() => move(i, 1)}>Down</button>
+                      <button class="btn btn--ghost btn--sm" aria-label={`Edit stage ${s.ordinal}`} disabled={editing !== null} onClick={() => setEditing(s.id)}>Edit</button>
+                      <button class="btn btn--ghost btn--sm" aria-label={`Remove stage ${s.ordinal}`} disabled={busy}
+                        onClick={() => void run(() => adminApi.removeStage(id, s.id), `Remove stage ${s.ordinal}?`)}>Remove</button>
+                    </span>
+                  )}
+                </div>
                 {editing === s.id && (
                   <StageForm options={options} initial={s.settings} busy={busy} onCancel={() => setEditing(null)}
                     onSave={(st) => saveStage(() => adminApi.updateStage(id, s.id, st))} />
