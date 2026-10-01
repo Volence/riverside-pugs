@@ -175,15 +175,8 @@ describe('bookings due', () => {
 
   it('reads the limits from settings', () => {
     expect(bookingLimits(db)).toEqual({
-      minMinutes: 60, maxMinutes: 300, daysAhead: 14, playlistMax: 4, maxUpcoming: 4, reserve: 2,
+      minMinutes: 60, daysAhead: 14, playlistMax: 4, maxUpcoming: 4, reserve: 2,
       holdLeadMinutes: 15, protectMinutes: 75, idleEndMinutes: 10,
     });
-  });
-
-  it('the longest booking defaults to 300 minutes, seeded or not, and a stored value wins', () => {
-    db.prepare("DELETE FROM settings WHERE key = 'booking_max_minutes'").run();
-    expect(bookingLimits(db).maxMinutes).toBe(300);
-    db.prepare("INSERT INTO settings (key, value) VALUES ('booking_max_minutes', '180')").run();
-    expect(bookingLimits(db).maxMinutes).toBe(180);
   });
 });

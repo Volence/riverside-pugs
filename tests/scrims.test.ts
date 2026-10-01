@@ -6,7 +6,7 @@ import { createTeam, disbandTeam, invitePlayer, respondInvite, setRole } from '.
 import { BOOKING_ERRORS, cancelBooking, confirmBooking, createBooking, getBooking, sideRow, peopleOf } from '../src/bookings/bookings.js';
 import {
   acceptPost, board, confirmAccept, createPost, declineAccept, expire, repostFromBooking, withdrawAccept, withdrawPost,
-  SCRIM_ERRORS, type ScrimResult,
+  type ScrimResult,
 } from '../src/scrims/scrims.js';
 import { blockTarget } from '../src/scrims/blocks.js';
 
@@ -102,21 +102,14 @@ describe('createPost', () => {
     expect(r({ campaigns: ['no_mercy', 'no_mercy'] })).toBe('bad_playlist');
     expect(r({ campaigns: ['the_sacrifice'] })).toBe('bad_playlist');
     expect(r({ campaigns: ['no_mercy', 'death_toll', 'dead_air', 'blood_harvest', 'crash_course'] })).toBe('bad_playlist');
-    // Four campaigns are within the playlist limit but need a 300 minute
-    // slot, over the 180 production stores (the default is 300).
-    setSetting(db, 'booking_max_minutes', '180');
-    expect(r({ campaigns: ['no_mercy', 'death_toll', 'dead_air', 'blood_harvest'] })).toBe('too_long');
-    setSetting(db, 'booking_max_minutes', '300');
+    // Four campaigns are within the playlist limit, whatever slot they need.
     expect(r({ campaigns: ['no_mercy', 'death_toll', 'dead_air', 'blood_harvest'] })).toBe('ok');
   });
 
   it("a post's block is estimated from its campaigns, whatever minutes are sent", () => {
-    // 15 + (60 + 10) * 2 = 155, up to 180, the longest booking production
-    // stores (the default is 300).
-    setSetting(db, 'booking_max_minutes', '180');
+    // 15 + (60 + 10) * 2 = 155, up to 180.
     expect(postRow(post({ minutes: 45 })).block_minutes).toBe(180);
     expect(postRow(post({ by: P[1], minutes: 'x' as unknown as number, campaigns: ['dead_air'] })).block_minutes).toBe(90);
-    expect(err(createPost(db, postInput({ by: P[2], campaigns: ['no_mercy', 'death_toll', 'dead_air'] })))).toBe('too_long');
   });
 
   it('refuses a start less than the 30 minute acceptance cutoff away', () => {
@@ -207,8 +200,6 @@ describe('acceptPost', () => {
     rate(P[0], 25); // 1500
     rate(P[1], 26); // 1600
     rate(P[2], 30); // 2000
-    // Room for the third campaign the accepter adds (240 minutes).
-    setSetting(db, 'booking_max_minutes', '240');
     const id = post({ srRange: 200 });
     const r = value(acceptPost(db, { postId: id, by: P[1], campaigns: ['dead_air'], now: NOW }));
     expect(r.fits).toBe(true);
@@ -340,23 +331,10 @@ describe('withdrawAccept and declineAccept', () => {
 describe('confirmAccept', () => {
   it('books the server with both sides confirmed, the playlist alternated, and the other accepts taken', () => {
     const id = post({ campaigns: ['no_mercy', 'death_toll'] });
-    // Three campaigns need a 240 minute slot, over the 180 production stores
-    // as its longest booking, so the accept itself is refused rather than
-    // left to stick.
-    setSetting(db, 'booking_max_minutes', '180');
-    expect(acceptPost(db, { postId: id, by: P[1], campaigns: ['dead_air'], now: NOW }))
-      .toEqual({ ok: false, error: 'too_many_campaigns' });
-    expect(SCRIM_ERRORS.too_many_campaigns.status).toBe(400);
-    setSetting(db, 'booking_max_minutes', '240');
     const a1 = accept(id, P[1], { campaigns: ['dead_air'] });
     const a2 = accept(id, P[2]);
     const a3 = accept(id, P[3]);
     value(withdrawAccept(db, { acceptId: a3, by: P[3], now: NOW }));
-    // Staff lowering the longest booking after the accept: confirm re-checks.
-    setSetting(db, 'booking_max_minutes', '180');
-    expect(confirmAccept(db, { acceptId: a1, by: P[0], now: NOW })).toEqual({ ok: false, error: 'too_long', text: BOOKING_ERRORS.too_long.text });
-    expect(bookingCount()).toBe(0);
-    setSetting(db, 'booking_max_minutes', '240');
     const r = value(confirmAccept(db, { acceptId: a1, by: P[0], now: NOW }));
     expect(r.takenAcceptIds).toEqual([a2]);
     const b = getBooking(db, r.bookingId)!;
@@ -370,6 +348,15 @@ describe('confirmAccept', () => {
     expect(acceptRow(a1)).toMatchObject({ status: 'chosen', responded_at: NOW.toISOString() });
     expect(acceptRow(a2)).toMatchObject({ status: 'declined', responded_at: NOW.toISOString() });
     expect(acceptRow(a3).status).toBe('withdrawn');
+  });
+
+  it('a scrim accept bringing the merged playlist to the campaign cap (4) is accepted and confirmable', () => {
+    const id = post({ campaigns: ['no_mercy', 'death_toll'] });
+    const a = accept(id, P[1], { campaigns: ['dead_air', 'blood_harvest'] });
+    const r = value(confirmAccept(db, { acceptId: a, by: P[0], now: NOW }));
+    const b = getBooking(db, r.bookingId)!;
+    expect(JSON.parse(b.playlist_json)).toEqual(['no_mercy', 'dead_air', 'death_toll', 'blood_harvest']);
+    expect(b.games_allowed).toBe(4);
   });
 
   it('an accepted longer playlist confirms into a longer booking, never trimmed to the block', () => {
@@ -569,15 +556,12 @@ describe('board', () => {
     rate(P[0], 25); // 1500
     rate(P[1], 30); // 2000
     const id = post({ srRange: 100, campaigns: ['no_mercy', 'death_toll'], minutes: 120 });
-    setSetting(db, 'booking_max_minutes', '240');
     const a = accept(id, P[1], { campaigns: ['dead_air'] });
-    // Lowered again after the accept: the poster's view says it no longer fits.
-    setSetting(db, 'booking_max_minutes', '180');
     const mine = board(db, viewer(P[0]), { now: NOW })[0];
     expect(mine.mine).toBe(true);
     expect(mine.accepts).toEqual([{
       id: a, side: { kind: 'pickup', steamid: P[1], name: 'p1' }, sr: 2000, fits: false, campaigns: ['dead_air'],
-      createdAt: NOW.toISOString(), proposed: { playlist: ['no_mercy', 'dead_air', 'death_toll'], minutes: 240, fits: false },
+      createdAt: NOW.toISOString(), proposed: { playlist: ['no_mercy', 'dead_air', 'death_toll'], minutes: 240 },
     }]);
     const theirs = board(db, viewer(P[1]), { now: NOW })[0];
     expect(theirs).toMatchObject({ mine: false, accepts: null, myAcceptId: a });
@@ -741,7 +725,6 @@ describe('repostFromBooking', () => {
   // Alternated to 4 campaigns at the default 60-minute fallback (no_mercy,
   // dead_air, death_toll, blood_harvest), a 300 minute slot.
   const booked = (posterBy = P[0], accepterBy = P[1], teamId?: number): number => {
-    setSetting(db, 'booking_max_minutes', '300');
     const id = post({ by: posterBy, teamId, campaigns: ['no_mercy', 'death_toll'] });
     const a = accept(id, accepterBy, { campaigns: ['dead_air', 'blood_harvest'] });
     return value(confirmAccept(db, { acceptId: a, by: posterBy, now: NOW })).bookingId;

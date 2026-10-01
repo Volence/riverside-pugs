@@ -60,15 +60,14 @@ export function srFits(postSr: number, range: number | null, sr: number): boolea
  * accepter's picks alternate, poster first, duplicates skipped wherever they
  * recur, capped at `booking_playlist_max`. It is never trimmed to the post's
  * block (bookings by campaign, Ruling 6): `minutes` is the slot it would
- * hold (estimateMinutes, src/bookings/rules.ts), which is the booking length
- * at confirm, and `fits` says whether that is within booking_max_minutes
- * (a confirm of one that does not is refused too_long).
+ * hold (estimateMinutes, src/bookings/rules.ts), the booking length at
+ * confirm, whatever that comes out to; the campaign count is the only limit.
  */
 export function proposedPlaylist(
   db: DB,
   posterPicks: string[],
   accepterPicks: string[],
-): { playlist: string[]; minutes: number; fits: boolean } {
+): { playlist: string[]; minutes: number } {
   const max = bookingLimits(db).playlistMax;
   const seen = new Set<string>();
   const alternated: string[] = [];
@@ -85,7 +84,7 @@ export function proposedPlaylist(
   }
   const playlist = alternated.slice(0, max);
   const minutes = estimateMinutes(db, playlist);
-  return { playlist, minutes, fits: minutes <= bookingLimits(db).maxMinutes };
+  return { playlist, minutes };
 }
 
 /** How far nearestFreeSlot searches either side of the post's start. */

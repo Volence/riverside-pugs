@@ -96,26 +96,15 @@ describe('proposedPlaylist', () => {
   // every campaign, making the minutes in these tests predictable.
 
   it('alternates poster and accepter picks, poster first, with the estimated slot', () => {
-    setSetting(db, 'booking_max_minutes', '240');
     const r = proposedPlaylist(db, ['no_mercy', 'death_toll'], ['dead_air']);
     expect(r.playlist).toEqual(['no_mercy', 'dead_air', 'death_toll']);
     // 15 + 70 * 3 = 225, up to 240.
     expect(r.minutes).toBe(240);
-    expect(r.fits).toBe(true);
   });
 
   it('skips a campaign that already appeared, wherever it recurs', () => {
     const r = proposedPlaylist(db, ['no_mercy', 'death_toll'], ['no_mercy', 'dead_air']);
     expect(r.playlist).toEqual(['no_mercy', 'death_toll', 'dead_air']);
-  });
-
-  it('is never trimmed to a block: a playlist longer than the longest booking does not fit', () => {
-    // 180, the longest booking production stores (the default is 300).
-    setSetting(db, 'booking_max_minutes', '180');
-    const r = proposedPlaylist(db, ['no_mercy', 'death_toll'], ['dead_air']);
-    expect(r.playlist).toEqual(['no_mercy', 'dead_air', 'death_toll']);
-    expect(r.minutes).toBe(240);
-    expect(r.fits).toBe(false);
   });
 
   it('never exceeds booking_playlist_max', () => {
