@@ -34,7 +34,7 @@ export const UNCONFIRMED_CUTOFF_MS = 30 * 60_000;
 export const iso = (ms: number): string => new Date(ms).toISOString();
 
 export interface BookingLimits {
-  minMinutes: number; maxMinutes: number; daysAhead: number; playlistMax: number; maxUpcoming: number;
+  minMinutes: number; daysAhead: number; playlistMax: number; maxUpcoming: number;
   reserve: number; holdLeadMinutes: number; protectMinutes: number; idleEndMinutes: number;
 }
 
@@ -43,7 +43,6 @@ export function bookingLimits(db: DB): BookingLimits {
   const holdLeadMinutes = n('booking_hold_lead_minutes', 15, 5, 60);
   return {
     minMinutes: n('booking_min_minutes', 60, 30, 360),
-    maxMinutes: n('booking_max_minutes', 300, 30, 360),
     daysAhead: n('booking_days_ahead', 14, 1, 60),
     playlistMax: n('booking_playlist_max', 4, 1, 8),
     maxUpcoming: n('booking_max_upcoming', 4, 1, 20),
@@ -169,8 +168,8 @@ const upToStep = (m: number): number => Math.ceil(m / STEP_MINUTES) * STEP_MINUT
  * The slot a booking of these campaigns holds (bookings by campaign, Ruling
  * 1): 15 minutes, plus each campaign's typical length and 10, rounded up to
  * the 30 minute step and raised to booking_min_minutes. It is never capped:
- * an estimate above booking_max_minutes is the caller's too_long. The slot
- * only holds capacity; the campaign count is what the box enforces.
+ * the campaign count (booking_playlist_max) is the only limit on a playlist,
+ * whatever the slot it works out to.
  */
 export function estimateMinutes(db: DB, playlist: string[]): number {
   const raw = ESTIMATE_BASE_MINUTES + playlist.reduce((sum, c) => sum + typicalCampaignMinutes(db, c) + ESTIMATE_SLACK_MINUTES, 0);
@@ -180,12 +179,12 @@ export function estimateMinutes(db: DB, playlist: string[]): number {
 /** estimateMinutes' inputs for these campaigns, so a form can show the
  *  estimate live as campaigns are ticked (GET options). */
 export function estimateOptions(db: DB, campaigns: string[]): {
-  perCampaign: Record<string, number>; base: number; slack: number; step: number; min: number; max: number;
+  perCampaign: Record<string, number>; base: number; slack: number; step: number; min: number;
 } {
   const limits = bookingLimits(db);
   return {
     perCampaign: Object.fromEntries(campaigns.map((c) => [c, typicalCampaignMinutes(db, c)])),
-    base: ESTIMATE_BASE_MINUTES, slack: ESTIMATE_SLACK_MINUTES, step: STEP_MINUTES, min: limits.minMinutes, max: limits.maxMinutes,
+    base: ESTIMATE_BASE_MINUTES, slack: ESTIMATE_SLACK_MINUTES, step: STEP_MINUTES, min: limits.minMinutes,
   };
 }
 

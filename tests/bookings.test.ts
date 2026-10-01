@@ -95,17 +95,11 @@ describe('creating', () => {
     expect(getBooking(db, one)).toMatchObject({ ends_at: '2026-10-02T21:30:00.000Z', games_allowed: 1 });
   });
 
-  it('refuses too_long when the campaigns need more than the longest booking', () => {
-    const three = { playlist: ['no_mercy', 'death_toll', 'dead_air'] };
-    // 180, the longest booking production stores (the default is 300).
-    setSetting(db, 'booking_max_minutes', '180');
-    expect(createBooking(db, base(three) as Parameters<typeof createBooking>[1])).toEqual({ ok: false, error: 'too_long' });
-    expect(BOOKING_ERRORS.too_long).toEqual({
-      status: 400, text: 'That many campaigns will not fit in one booking; book fewer, and add one later with +1 campaign.',
-    });
-    setSetting(db, 'booking_max_minutes', '240');
-    const id = create(three);
-    expect(getBooking(db, id)).toMatchObject({ ends_at: '2026-10-03T00:00:00.000Z', games_allowed: 3 });
+  it('a 4-campaign booking with no history is created fine with the default settings', () => {
+    const four = { playlist: ['no_mercy', 'death_toll', 'dead_air', 'blood_harvest'] };
+    // No history anywhere, so every campaign falls back to 60: 15 + (60 + 10) * 4 = 295, up to 300 (about 5 h).
+    const id = create(four);
+    expect(getBooking(db, id)).toMatchObject({ ends_at: '2026-10-03T01:00:00.000Z', games_allowed: 4 });
   });
 
   it('only a captain or co-captain books for a team', () => {

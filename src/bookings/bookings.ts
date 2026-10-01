@@ -69,7 +69,6 @@ export const BOOKING_ERRORS = {
   not_open: { status: 409, text: 'That player cannot use scrims yet.' },
   not_player: { status: 400, text: 'That is not an active player.' },
   bad_time: { status: 400, text: 'Pick a start time in the future, inside the booking window.' },
-  too_long: { status: 400, text: 'That many campaigns will not fit in one booking; book fewer, and add one later with +1 campaign.' },
   bad_playlist: { status: 400, text: 'Pick campaigns from the map pool, each once, up to the limit.' },
   bad_ruleset: { status: 400, text: 'Pick one of the listed rule sets.' },
   bad_config: { status: 400, text: 'Pick one of the listed game configs.' },
@@ -247,7 +246,6 @@ export function createBooking(db: DB, o: {
   const playlist = parsePlaylist(db, o.playlist, limits.playlistMax);
   if (!playlist) return fail('bad_playlist');
   const minutes = estimateMinutes(db, playlist);
-  if (minutes > limits.maxMinutes) return fail('too_long');
   const rules = pickRules(db, o.rulesetId);
   if (!rules) return fail('bad_ruleset');
   const config = pickConfig(db, o.gameConfig);

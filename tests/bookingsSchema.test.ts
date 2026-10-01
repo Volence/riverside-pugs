@@ -68,7 +68,6 @@ describe('booking schema', () => {
     expect(getSetting(db, 'pug_reserve_servers')).toBe('2');
     expect(getSetting(db, 'booking_max_upcoming')).toBe('4');
     expect(getSetting(db, 'booking_protect_minutes')).toBe('75');
-    expect(validateSetting('booking_max_minutes', '600').ok).toBe(false);
     expect(validateSetting('booking_hold_lead_minutes', '20')).toEqual({ ok: true, value: '20' });
   });
 

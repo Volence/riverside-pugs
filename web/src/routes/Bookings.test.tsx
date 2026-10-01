@@ -14,7 +14,7 @@ const OPTIONS = {
   campaigns: [{ slug: 'no_mercy', name: 'No Mercy', minutes: 70 }, { slug: 'death_toll', name: 'Death Toll', minutes: 45 }],
   rulesets: [{ id: 3, name: 'Casual Scrim' }], gameConfigs: [{ key: 'standard', label: 'Standard' }],
   limits: { daysAhead: 14, playlistMax: 4 },
-  estimate: { perCampaign: { no_mercy: 70, death_toll: 45 }, base: 15, slack: 10, step: 30, min: 60, max: 180 },
+  estimate: { perCampaign: { no_mercy: 70, death_toll: 45 }, base: 15, slack: 10, step: 30, min: 60 },
   myTeams: [], teams: [{ id: 1, slug: 'mice', name: 'Mice', tag: 'MM' }],
 };
 const MINE = {
@@ -46,16 +46,6 @@ describe('Bookings page', () => {
     fireEvent.click(screen.getByLabelText('Death Toll'));
     expect(screen.getByText('About 2 h 30 for 2 campaigns')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Book the server' }) as HTMLButtonElement).disabled).toBe(false);
-  });
-
-  it('too many campaigns for the longest booking shows the too_long text and disables submit', async () => {
-    mockBookings.options.mockResolvedValue({ ...OPTIONS, estimate: { ...OPTIONS.estimate, max: 120 } });
-    render(<Bookings session={session} />);
-    fireEvent.click(await screen.findByLabelText('No Mercy'));
-    expect(screen.queryByText(/will not fit in one booking/)).toBeNull();
-    fireEvent.click(screen.getByLabelText('Death Toll'));
-    expect(screen.getByText('That many campaigns will not fit in one booking; book fewer, and add one later with +1 campaign.')).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Book the server' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('submits the campaigns without a length', async () => {

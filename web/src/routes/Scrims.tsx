@@ -7,7 +7,7 @@ import {
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
-import { TOO_LONG_TEXT, estimateLine, estimateSlot, localLabel, mergedPlaylist, nightRangeLabel, slotSummary, toUtcIso } from '../bookingTime';
+import { estimateLine, estimateSlot, localLabel, mergedPlaylist, nightRangeLabel, slotSummary, toUtcIso } from '../bookingTime';
 import { campaignName } from '../format';
 import { TeamBadge } from './Teams';
 import { reliableBadge } from '../components/ScrimRecord';
@@ -22,10 +22,6 @@ const SR_RANGES: readonly { value: string; label: string }[] = [
   { value: '300', label: '± 300' },
   { value: '500', label: '± 500' },
 ];
-
-/** The server's too_many_campaigns text (src/scrims/scrims.ts SCRIM_ERRORS):
- *  an acceptance whose merged playlist would not fit one booking. */
-const TOO_MANY_CAMPAIGNS_TEXT = 'With your campaigns this scrim would be too long for one booked server. Add fewer.';
 
 const srRangeLabel = (range: number | null): string => range === null ? 'Open' : `± ${range}`;
 
@@ -72,7 +68,6 @@ function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: bo
   const [targetTeamId, setTargetTeamId] = useState('');
 
   const estimate = estimateSlot(options.estimate, campaigns);
-  const tooLong = estimate > options.estimate.max;
   const toggle = (slug: string) => setCampaigns((p) => p.includes(slug) ? p.filter((s) => s !== slug) : p.length < options.limits.playlistMax ? [...p, slug] : p);
 
   const submit = async (ev: Event) => {
@@ -109,7 +104,6 @@ function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: bo
           </label>
         ))}
         {campaigns.length > 0 && <p class="muted">{estimateLine(estimate, campaigns.length)}</p>}
-        {tooLong && <p class="warning">{TOO_LONG_TEXT}</p>}
       </fieldset>
       <label class="teamfield">Note<input aria-label="Note" value={note} maxLength={options.limits.noteMax} onInput={(e) => setNote((e.target as HTMLInputElement).value)} /></label>
       {options.teams.length > 0 && (
@@ -120,7 +114,7 @@ function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: bo
           </select>
         </label>
       )}
-      <button class="btn" type="submit" disabled={busy || campaigns.length === 0 || !when || tooLong}>Post the scrim</button>
+      <button class="btn" type="submit" disabled={busy || campaigns.length === 0 || !when}>Post the scrim</button>
     </form>
   );
 }
@@ -140,11 +134,10 @@ function AcceptForm({
   const max = options.limits.acceptCampaignsMax;
   const toggle = (slug: string) => setCampaigns((p) => p.includes(slug) ? p.filter((s) => s !== slug) : p.length < max ? [...p, slug] : p);
   // The playlist this acceptance would propose, merged as the server merges
-  // it, and its slot: one too long for a single booking is refused there
-  // (too_many_campaigns), so it is not sent.
+  // it, and its slot: never trimmed to the post's block, whatever that comes
+  // out to (the campaign count is the only limit).
   const merged = mergedPlaylist(post.campaigns, campaigns, options.limits.playlistMax);
   const estimate = estimateSlot(options.estimate, merged);
-  const tooLong = estimate > options.estimate.max;
 
   return (
     <form
@@ -169,9 +162,8 @@ function AcceptForm({
         </fieldset>
       )}
       <p class="muted">{estimateLine(estimate, merged.length)}</p>
-      {tooLong && <p class="warning">{TOO_MANY_CAMPAIGNS_TEXT}</p>}
       <p class="scrimaccept__actions">
-        <button class="btn btn--sm" type="submit" disabled={busy || tooLong}>Send acceptance</button>
+        <button class="btn btn--sm" type="submit" disabled={busy}>Send acceptance</button>
         <button class="btn btn--ghost btn--sm" type="button" disabled={busy} onClick={onCancel}>Cancel</button>
       </p>
     </form>
@@ -246,7 +238,6 @@ function MyPostPanel({
               <span class="teamroster__meta">
                 Proposed: {a.proposed.playlist.map((c) => campaignName(c)).join(', ')} ({slotSummary(a.proposed.playlist.length, a.proposed.minutes)})
               </span>
-              {!a.proposed.fits && <p class="warning">{TOO_LONG_TEXT}</p>}
               <span class="teamconfirm">
                 <button class="btn btn--sm" disabled={busy} onClick={() => onConfirm(a.id)}>Confirm</button>
                 <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => onDecline(a.id)}>Decline</button>

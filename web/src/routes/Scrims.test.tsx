@@ -21,7 +21,7 @@ const { ApiError } = await import('../api');
 const OPTIONS: ScrimOptions = {
   campaigns: [{ slug: 'no_mercy', name: 'No Mercy', minutes: 70 }, { slug: 'death_toll', name: 'Death Toll', minutes: 45 }],
   limits: { daysAhead: 14, playlistMax: 4, noteMax: 200, acceptCampaignsMax: 2 },
-  estimate: { perCampaign: { no_mercy: 70, death_toll: 45 }, base: 15, slack: 10, step: 30, min: 60, max: 180 },
+  estimate: { perCampaign: { no_mercy: 70, death_toll: 45 }, base: 15, slack: 10, step: 30, min: 60 },
   myTeams: [{ id: 1, slug: 'mice', name: 'Mice', tag: 'MM' }],
   teams: [{ id: 1, slug: 'mice', name: 'Mice', tag: 'MM' }, { id: 2, slug: 'rats', name: 'Rats', tag: 'RT' }],
 };
@@ -39,7 +39,7 @@ const MY_POST: ScrimBoardPost = {
   acceptCount: 1, night: false, mine: true, myAcceptId: null,
   accepts: [{
     id: 42, side: { kind: 'pickup', steamid: 'x9', name: 'p9' }, sr: 1420, fits: true, campaigns: ['no_mercy'], createdAt: '2026-10-01T11:00:00.000Z',
-    proposed: { playlist: ['death_toll', 'no_mercy'], minutes: 150, fits: true },
+    proposed: { playlist: ['death_toll', 'no_mercy'], minutes: 150 },
   }],
 };
 
@@ -100,18 +100,6 @@ describe('Scrims page', () => {
     expect(screen.getByText(/Proposed: Death Toll, No Mercy \(2 campaigns, about 2 h 30\)/)).toBeTruthy();
   });
 
-  it('the accept form shows the merged estimate and refuses one over the maximum', async () => {
-    mockScrims.options.mockResolvedValue({ ...OPTIONS, estimate: { ...OPTIONS.estimate, max: 150 } });
-    mockScrims.board.mockResolvedValue({ posts: [{ ...OPEN_POST, campaigns: ['no_mercy', 'c3'], campaignCount: 2, minutes: 180 }], night: null });
-    renderScrims();
-    await screen.findByText('Rats');
-    fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
-    // Poster's two alone: 15 + 80 + 70 = 165, so 180, already over 150.
-    expect(screen.getByText('About 3 h for 2 campaigns')).toBeTruthy();
-    expect(screen.getByText('With your campaigns this scrim would be too long for one booked server. Add fewer.')).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Send acceptance' }) as HTMLButtonElement).disabled).toBe(true);
-  });
-
   it('the accept form estimate grows with the accepter\'s campaigns', async () => {
     renderScrims();
     await screen.findByText('Rats');
@@ -122,7 +110,7 @@ describe('Scrims page', () => {
     expect((screen.getByRole('button', { name: 'Send acceptance' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('the post form has no length picker, shows the estimate, and too_long disables Post', async () => {
+  it('the post form has no length picker and shows the estimate', async () => {
     renderScrims();
     await screen.findByRole('heading', { name: 'Post a scrim' });
     const form = screen.getByRole('button', { name: 'Post the scrim' }).closest('form')!;
@@ -136,16 +124,6 @@ describe('Scrims page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Post the scrim' }));
     await waitFor(() => expect(mockScrims.create).toHaveBeenCalled());
     expect('minutes' in mockScrims.create.mock.calls[0][0]).toBe(false);
-
-    cleanup();
-    mockScrims.options.mockResolvedValue({ ...OPTIONS, estimate: { ...OPTIONS.estimate, max: 120 } });
-    renderScrims();
-    await screen.findByRole('heading', { name: 'Post a scrim' });
-    fireEvent.input(screen.getByLabelText('Start'), { target: { value: '2026-10-02T20:00' } });
-    fireEvent.click(screen.getByLabelText('No Mercy'));
-    fireEvent.click(screen.getByLabelText('Death Toll'));
-    expect(screen.getByText('That many campaigns will not fit in one booking; book fewer, and add one later with +1 campaign.')).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Post the scrim' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('confirm navigates to the booking on success, and shows the nearest slot on no_capacity', async () => {

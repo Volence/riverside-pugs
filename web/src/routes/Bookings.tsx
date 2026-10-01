@@ -4,7 +4,7 @@ import { ApiError, bookingsApi, teamsApi, type BookingOptions, type BookingSumma
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
-import { TOO_LONG_TEXT, estimateLine, estimateSlot, localLabel, toUtcIso } from '../bookingTime';
+import { estimateLine, estimateSlot, localLabel, toUtcIso } from '../bookingTime';
 import { RecordLine } from '../components/ScrimRecord';
 
 const STATE_LABEL: Record<BookingSummary['state'], string> = {
@@ -61,9 +61,8 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
   }, [q]);
 
   // No length picker: the slot is estimated from the campaigns, the way the
-  // server will compute it, and too many for one booking cannot be sent.
+  // server will compute it. The campaign cap (playlistMax) is the only limit.
   const estimate = estimateSlot(options.estimate, playlist);
-  const tooLong = estimate > options.estimate.max;
   const toggle = (slug: string) => setPlaylist((p) => p.includes(slug) ? p.filter((s) => s !== slug) : p.length < options.limits.playlistMax ? [...p, slug] : p);
 
   const submit = async (ev: Event) => {
@@ -121,7 +120,6 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
           </label>
         ))}
         {playlist.length > 0 && <p class="muted">{estimateLine(estimate, playlist.length)}</p>}
-        {tooLong && <p class="warning">{TOO_LONG_TEXT}</p>}
       </fieldset>
       {options.rulesets.length > 1 && (
         <label class="teamfield">Rules
@@ -130,7 +128,7 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
           </select>
         </label>
       )}
-      <button class="btn" type="submit" disabled={busy || playlist.length === 0 || tooLong}>Book the server</button>
+      <button class="btn" type="submit" disabled={busy || playlist.length === 0}>Book the server</button>
     </form>
   );
 }

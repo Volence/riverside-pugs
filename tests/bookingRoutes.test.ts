@@ -81,7 +81,7 @@ describe('booking flow', () => {
     expect(r.campaigns.map((c: { slug: string }) => c.slug)).toEqual(['no_mercy', 'death_toll']);
     expect(r.campaigns[0].minutes).toBe(60);
     expect(r.limits).toEqual({ daysAhead: 14, playlistMax: 4 });
-    expect(r.estimate).toEqual({ perCampaign: { no_mercy: 60, death_toll: 60 }, base: 15, slack: 10, step: 30, min: 60, max: 300 });
+    expect(r.estimate).toEqual({ perCampaign: { no_mercy: 60, death_toll: 60 }, base: 15, slack: 10, step: 30, min: 60 });
     expect(r.rulesets.map((x: { name: string }) => x.name)).toContain('Casual Scrim');
   });
 
@@ -99,13 +99,6 @@ describe('booking flow', () => {
     expect(mine.open.map((b: { id: number }) => b.id)).toEqual([id]);
     const cancelled = await call('POST', `/api/bookings/${id}/cancel`, P[1], { reason: 'cannot make it' });
     expect(cancelled.json()).toMatchObject({ state: 'cancelled', cancel: { side: 'b', reason: 'cannot make it' } });
-  });
-
-  it('refusals carry the reason text and status', async () => {
-    db.prepare("UPDATE settings SET value = '120' WHERE key = 'booking_max_minutes'").run();
-    const r = await call('POST', '/api/bookings', P[0], { opponent: { steamid: P[1] }, startsAt: START.toISOString(), playlist: ['no_mercy', 'death_toll'] });
-    expect(r.statusCode).toBe(400);
-    expect(r.json().error).toBe('That many campaigns will not fit in one booking; book fewer, and add one later with +1 campaign.');
   });
 
   it('people: add, accept, remove', async () => {

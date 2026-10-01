@@ -1729,7 +1729,7 @@ export type BookingRole = 'player' | 'ringer' | 'spectator';
 /** The slot estimate's inputs, as both options routes send them
  *  (src/bookings/rules.ts estimateOptions). */
 export interface SlotEstimate {
-  perCampaign: Record<string, number>; base: number; slack: number; step: number; min: number; max: number;
+  perCampaign: Record<string, number>; base: number; slack: number; step: number; min: number;
 }
 export interface BookingOptions {
   campaigns: { slug: string; name: string; minutes: number }[];
@@ -1873,7 +1873,7 @@ export type ScrimSide =
 
 export interface ScrimBoardAccept {
   id: number; side: ScrimSide; sr: number; fits: boolean; campaigns: string[]; createdAt: string;
-  proposed: { playlist: string[]; minutes: number; fits: boolean };
+  proposed: { playlist: string[]; minutes: number };
 }
 
 /** Mirrors src/scrims/scrims.ts's BoardPost, the one shape the board, "Your

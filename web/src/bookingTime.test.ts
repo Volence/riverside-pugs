@@ -9,7 +9,7 @@ describe('booking time helpers', () => {
     expect(toUtcIso('nonsense')).toBeNull();
   });
 
-  const EST = { perCampaign: { no_mercy: 70, death_toll: 45 }, base: 15, slack: 10, step: 30, min: 60, max: 180 };
+  const EST = { perCampaign: { no_mercy: 70, death_toll: 45 }, base: 15, slack: 10, step: 30, min: 60 };
 
   it('estimates the slot the way the server does: 15, each campaign plus 10, up to the step, raised to the minimum', () => {
     expect(estimateSlot(EST, [])).toBe(60);
