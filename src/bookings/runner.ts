@@ -987,16 +987,15 @@ export class BookingRunner {
     if (row) this.tell(id, [steamid], 'booking_invite', { addedBy: by });
   }
 
-  /** A late cancel (plan 2) asks the other side's people, and only them, to
-   *  excuse it; everyone else gets the plain notice. */
+  /** A late cancel (plan 2) asks the other side's managers, and only them,
+   *  to excuse it, since only they have the button; everyone else, the other
+   *  side's plain players too, gets the plain notice. */
   onCancelled(id: number, by: string | null, reason: string | null): void {
     const to = this.everyone(id).filter((s) => s !== by);
     const b = getBooking(this.db, id);
     const other = b && isLateCancel(this.db, b) ? sidesOf(this.db, id).find((s) => s.side !== b.cancel_side) : undefined;
     if (other) {
-      const theirs = new Set([
-        ...acceptedPeople(this.db, id).filter((p) => p.side === other.side).map((p) => p.steamid), ...sideManagers(this.db, other),
-      ]);
+      const theirs = new Set(sideManagers(this.db, other));
       this.tell(id, to.filter((s) => theirs.has(s)), 'booking_cancelled', { reason, lateCancel: true });
       const rest = to.filter((s) => !theirs.has(s));
       if (rest.length > 0) this.tell(id, rest, 'booking_cancelled', { reason });

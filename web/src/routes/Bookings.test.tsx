@@ -62,6 +62,17 @@ describe('Bookings page', () => {
     expect(await screen.findByText('Shown 4 of 5 · No-shows 1')).toBeTruthy();
   });
 
+  it('says who sees the pickup record, by whether it is public', async () => {
+    mockBookings.mine.mockResolvedValue({ ...MINE, record: { shown: 4, booked: 5, noShows: 1, lateCancels: 0, excused: 0 }, recordPublic: false });
+    render(<Bookings session={session} />);
+    expect(await screen.findByText(/Only you and staff see it\./)).toBeTruthy();
+    cleanup();
+    mockBookings.mine.mockResolvedValue({ ...MINE, record: { shown: 4, booked: 5, noShows: 1, lateCancels: 0, excused: 0 }, recordPublic: true });
+    render(<Bookings session={session} />);
+    expect(await screen.findByText(/Records are public, so everyone sees it as a badge on your board posts\./)).toBeTruthy();
+    expect(screen.queryByText(/Only you and staff see it/)).toBeNull();
+  });
+
   it('no pickup record section without a record', async () => {
     render(<Bookings session={session} />);
     await screen.findByRole('button', { name: 'Confirm' });

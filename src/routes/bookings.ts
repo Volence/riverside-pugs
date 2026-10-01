@@ -12,7 +12,7 @@ import { activeCasters, inviteCaster, withdrawCaster } from '../bookings/casters
 import { bookingLimits, typicalCampaignMinutes, STEP_MINUTES } from '../bookings/rules.js';
 import { isNotifyType, prefsOf, setPref } from '../notify/notify.js';
 import type { BookingRunner } from '../bookings/runner.js';
-import { hasPickupBookings, reliability } from '../scrims/reliability.js';
+import { hasPickupBookings, reliability, reliabilityPublic } from '../scrims/reliability.js';
 import { submitReview } from '../scrims/reviews.js';
 import { logAdmin } from '../admin/audit.js';
 
@@ -99,7 +99,7 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
     // a pickup side. It is theirs, so no privacy gate applies.
     return {
       ...B.myBookings(db, me), prefs: prefsOf(db, me),
-      ...(hasPickupBookings(db, me) ? { record: reliability(db, { captain: me }) } : {}),
+      ...(hasPickupBookings(db, me) ? { record: reliability(db, { captain: me }), recordPublic: reliabilityPublic(db) } : {}),
     };
   });
 

@@ -19,7 +19,7 @@ vi.mock('../api', async (importOriginal) => {
 const { Booking } = await import('./Booking');
 
 const VIEW = (over: Record<string, unknown> = {}) => ({
-  id: 7, purpose: 'scrim', state: 'ready', ending: false, startsAt: '2026-10-02T20:00:00.000Z', endsAt: '2026-10-02T22:00:00.000Z',
+  id: 7, purpose: 'scrim', state: 'ready', ending: false, ended: false, startsAt: '2026-10-02T20:00:00.000Z', endsAt: '2026-10-02T22:00:00.000Z',
   extendedMinutes: 0, extendMinutes: 30, createdAt: '2026-10-01T12:00:00.000Z', playlist: [{ slug: 'no_mercy', name: 'No Mercy' }], rules: null,
   gameConfig: { key: 'standard', label: 'Standard' }, server: { name: 'Riverside #3' },
   connect: { host: '1.2.3.4', port: 27015, password: 'abcd2345' }, cancel: null, endReason: null, noShowFrom: '2026-10-02T20:15:00.000Z',
@@ -285,6 +285,27 @@ describe('Booking page', () => {
       expect(await screen.findByLabelText('Excuse note (Mice)')).toBeTruthy();
     });
 
+    it('staff get Excuse on a short side of an ended booking with no no-show claimed, and see it excused after', async () => {
+      const staff = { viewer: { side: null, manages: [], staff: true, invited: false } };
+      const over = (b: object) => VIEW({ state: 'ended', ending: true, ended: true, connect: null, sides: [{ ...SIDE_A, peakPresent: 4 }, { ...SIDE_B, short: true, ...b }], ...staff });
+      mockBookings.get.mockResolvedValueOnce(over({})).mockResolvedValueOnce(over({ excused: true }));
+      mockAdmin.excuseBooking.mockResolvedValue({ ok: true });
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByLabelText('Excuse note (Mice)')).toBeTruthy();
+      expect(screen.getAllByRole('button', { name: 'Excuse' })).toHaveLength(1);
+      fireEvent.click(screen.getByRole('button', { name: 'Excuse' }));
+      await waitFor(() => expect(mockAdmin.excuseBooking).toHaveBeenCalledWith(7, 'b', ''));
+      expect(await screen.findByText('Excused')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Excuse' })).toBeNull();
+    });
+
+    it('a short side shows no Excuse control to a non-staff viewer', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ state: 'ended', ending: true, ended: true, connect: null, sides: [{ ...SIDE_A }, { ...SIDE_B, short: true }] }));
+      render(<Booking id="7" session={session} />);
+      await screen.findByText('Over.');
+      expect(screen.queryByRole('button', { name: 'Excuse' })).toBeNull();
+    });
+
     it('shows a side\'s record line when the server sends one, "New" under 3 booked', async () => {
       mockBookings.get.mockResolvedValue(VIEW({
         sides: [
@@ -351,6 +372,19 @@ describe('Booking page', () => {
       renderAt('/booking/7?cancel=1');
       await screen.findByText(/Booked\./);
       expect(mockConfirm).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the state line while closing and once closed', () => {
+    it('"Closing." only while the close is still running, then the plain state line', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ state: 'ended', ending: true, ended: false, connect: null }));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByText('Closing.')).toBeTruthy();
+      cleanup();
+      mockBookings.get.mockResolvedValue(VIEW({ state: 'ended', ending: true, ended: true, connect: null }));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByText('Over.')).toBeTruthy();
+      expect(screen.queryByText('Closing.')).toBeNull();
     });
   });
 

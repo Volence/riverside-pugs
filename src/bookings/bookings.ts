@@ -533,11 +533,23 @@ export function cancelBooking(db: DB, o: { bookingId: number; by: string; staff?
 const EXCUSE_NOTE_MAX = 200;
 
 /**
+ * A confirmed side of a booking that closed as ended or no_show and never had
+ * SHOWN_MIN people on the box: the record counts it booked but not shown,
+ * whether or not anyone claimed the no-show (an idle end nobody joined, or a
+ * scrim the two sides moved between themselves), so staff may excuse it.
+ */
+export function shortSide(b: BookingRow, s: SideRow): boolean {
+  return (b.state === 'ended' || b.state === 'no_show') && s.confirmed_at !== null && s.peak_present < SHOWN_MIN;
+}
+
+/**
  * Excuse a side's mark on a booking (plan 2 Ruling 2): excused marks never
  * count, not in the record and not in the allowance. A side's manager may
  * excuse the OTHER side's late cancel ("All good, no hard feelings"), and only
- * that; staff name the side and may excuse its late cancel or its no-show (a
- * crash that was nobody's fault). One excuse per side per booking.
+ * that, and never while they also manage the cancelling side; staff name the
+ * side and may excuse its late cancel, its no-show (a crash that was nobody's
+ * fault), or a short side (shortSide) nobody claimed. One excuse per side per
+ * booking.
  */
 export function excuseMark(db: DB, o: {
   bookingId: number; by: string; staff?: boolean; side?: unknown; note?: unknown; now?: Date;
@@ -552,13 +564,16 @@ export function excuseMark(db: DB, o: {
     let side: Side;
     if (o.staff) {
       side = o.side as Side;
-      const marked = (late && b.cancel_side === side) || sideRow(db, b.id, side)!.no_show_at !== null;
+      const row = sideRow(db, b.id, side)!;
+      const marked = (late && b.cancel_side === side) || row.no_show_at !== null || shortSide(b, row);
       if (!marked) return fail('wrong_state');
     } else {
       if (!late) return fail('wrong_state');
       side = b.cancel_side!;
       const other: Side = side === 'a' ? 'b' : 'a';
-      if (!actingSides(db, b.id, o.by).includes(other)) return fail('not_manager');
+      // Someone who manages both sides would be excusing their own cancel.
+      const mine = actingSides(db, b.id, o.by);
+      if (!mine.includes(other) || mine.includes(side)) return fail('not_manager');
     }
     if (sideRow(db, b.id, side)!.excused_at !== null) return fail('already_excused');
     db.prepare('UPDATE booking_sides SET excused_at = ?, excused_by = ?, excuse_note = ? WHERE booking_id = ? AND side = ?')
@@ -769,13 +784,20 @@ export interface BookingSideView {
   captain: { steamid: string; name: string }; confirmed: boolean; peakPresent: number; noShow: boolean; people: BookingPersonView[];
   /** This side cancelled late (plan 2), and whether its mark is excused. */
   lateCancel: boolean; excused: boolean;
-  /** The viewer manages the other side and may excuse this side's late cancel. */
+  /** The viewer manages the other side (and not this one) and may excuse
+   *  this side's late cancel. */
   canExcuse: boolean;
+  /** shortSide: closed as ended or no_show with this side under SHOWN_MIN,
+   *  claimed or not, so staff may excuse it. */
+  short: boolean;
   /** The side's record, only for those canSeeReliability lets see it. */
   record?: Reliability;
 }
 export interface BookingView {
-  id: number; purpose: 'scrim' | 'tournament'; state: BookingState; ending: boolean; startsAt: string; endsAt: string;
+  id: number; purpose: 'scrim' | 'tournament'; state: BookingState; ending: boolean;
+  /** The close has finished (ended_at set): ending stays true for ever after. */
+  ended: boolean;
+  startsAt: string; endsAt: string;
   extendedMinutes: number; extendMinutes: number; createdAt: string; playlist: { slug: string; name: string }[]; rules: MatchRules | null;
   gameConfig: { key: string; label: string }; sides: BookingSideView[]; server: { name: string } | null;
   connect: { host: string; port: number; password: string } | null;
@@ -791,8 +813,9 @@ export interface BookingView {
    *  here; a start too close to post again comes back as the click's own
    *  refusal. */
   repost: { allowed: boolean };
-  /** Plan 2 Ruling 5: present only when the viewer manages a confirmed side
-   *  of a scrim that closed as ended or no_show. open says whether the 7 day
+  /** Plan 2 Ruling 5: present only when the viewer manages exactly one
+   *  confirmed side of a scrim that closed as ended or no_show (managing both
+   *  would be reviewing yourself). open says whether the 7 day
    *  window still takes a review; mine is the viewer's own side's review. The
    *  other side's review is never here. */
   review?: { open: boolean; mine: { thumbs: 1 | -1; tags: ReviewTag[] } | null };
@@ -832,7 +855,7 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
   const seesGames = viewer.staff || me?.status === 'accepted'
     || sidesOf(db, id).some((s) => s.confirmed_at !== null && manages.includes(s.side));
   return {
-    id: b.id, purpose: b.purpose, state: b.state, ending: b.ending_at !== null, startsAt: b.starts_at, endsAt: b.ends_at,
+    id: b.id, purpose: b.purpose, state: b.state, ending: b.ending_at !== null, ended: b.ended_at !== null, startsAt: b.starts_at, endsAt: b.ends_at,
     extendedMinutes: b.extended_minutes, extendMinutes: bookingLimits(db).extendMinutes, createdAt: b.created_at,
     playlist: (JSON.parse(b.playlist_json) as string[]).map((slug) => ({ slug, name: registry.get(slug)?.name ?? slug })),
     rules, gameConfig: config ?? { key: b.game_config, label: b.game_config },
@@ -850,7 +873,8 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
           return { steamid: p.steamid, name: pl?.name ?? p.steamid, avatar: pl?.avatar ?? null, role: p.role, status: p.status };
         }),
         lateCancel, excused: s.excused_at !== null,
-        canExcuse: lateCancel && s.excused_at === null && acting.includes(s.side === 'a' ? 'b' : 'a'),
+        canExcuse: lateCancel && s.excused_at === null && acting.includes(s.side === 'a' ? 'b' : 'a') && !acting.includes(s.side),
+        short: shortSide(b, s),
         ...(viewer.staff || canSeeReliability(db, partyOf(s), viewer.steamid) ? { record: reliability(db, partyOf(s)) } : {}),
       };
     }),
@@ -866,7 +890,7 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
       allowed: b.state === 'cancelled' && b.purpose === 'scrim' && manages.length > 0
         && !!db.prepare('SELECT 1 FROM scrim_posts WHERE booking_id = ?').get(b.id),
     },
-    ...(acting.length > 0 && reviewable(b) ? { review: { open: reviewOpen(b, nowMs), mine: ownReview(db, b.id, acting[0]) } } : {}),
+    ...(acting.length === 1 && reviewable(b) ? { review: { open: reviewOpen(b, nowMs), mine: ownReview(db, b.id, acting[0]) } } : {}),
     ...(viewer.staff ? { reviews: staffReviews(db, b.id) } : {}),
   };
 }

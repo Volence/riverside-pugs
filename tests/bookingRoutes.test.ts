@@ -132,6 +132,14 @@ describe('the viewer\'s own pickup record (plan 2)', () => {
     expect((await call('GET', '/api/bookings/mine', P[1])).json().record).toBeDefined();
     expect((await call('GET', '/api/bookings/mine', P[2])).json().record).toBeUndefined();
   });
+
+  it('says whether the record is public, so the page can word who sees it', async () => {
+    await create();
+    expect((await call('GET', '/api/bookings/mine', P[0])).json().recordPublic).toBe(false);
+    db.prepare("UPDATE settings SET value = 'on' WHERE key = 'scrim_reliability_public'").run();
+    expect((await call('GET', '/api/bookings/mine', P[0])).json().recordPublic).toBe(true);
+    expect((await call('GET', '/api/bookings/mine', P[2])).json().recordPublic).toBeUndefined();
+  });
 });
 
 describe('staff', () => {

@@ -190,6 +190,49 @@ describe('excuseMark', () => {
     expect(JSON.parse(ev.detail)).toEqual({ side: 'b', staff: true });
   });
 
+  it('staff can excuse an unclaimed short side of an ended booking; it leaves booked, and the allowance never moved', () => {
+    // An idle end nobody joined: both sides booked and not shown, no no-show claimed.
+    const idle = booked(2); played(idle.id, { a: 0, b: 1 });
+    const fine = booked(3); played(fine.id, { a: 4, b: 4 });
+    const atEnd = Date.parse(getBooking(db, idle.id)!.ended_at!) + HOUR;
+    expect(reliability(db, { captain: P[0] }, LATER)).toEqual({ shown: 1, booked: 2, noShows: 0, lateCancels: 0, excused: 0 });
+    expect(allowance(db, { captain: P[0] }, atEnd)).toBe(4);
+    // A side cannot excuse it, a side that showed has nothing to excuse.
+    expect(excuseMark(db, { bookingId: idle.id, by: P[1] })).toEqual({ ok: false, error: 'wrong_state' });
+    expect(excuseMark(db, { bookingId: fine.id, by: STAFF, staff: true, side: 'a' })).toEqual({ ok: false, error: 'wrong_state' });
+    expect(excuseMark(db, { bookingId: idle.id, by: STAFF, staff: true, side: 'a', note: 'moved to Friday' })).toEqual({ ok: true, value: { side: 'a' } });
+    expect(excuseMark(db, { bookingId: idle.id, by: STAFF, staff: true, side: 'b' })).toEqual({ ok: true, value: { side: 'b' } });
+    expect(reliability(db, { captain: P[0] }, LATER)).toEqual({ shown: 1, booked: 1, noShows: 0, lateCancels: 0, excused: 1 });
+    expect(reliability(db, { captain: P[1] }, LATER)).toEqual({ shown: 1, booked: 1, noShows: 0, lateCancels: 0, excused: 1 });
+    expect(allowance(db, { captain: P[0] }, atEnd)).toBe(4);
+  });
+
+  it('staff can excuse the short side of a no_show booking with no claim on it, but not the side that claimed', () => {
+    const { id } = booked(2);
+    played(id, { a: 4, b: 2 });
+    db.prepare("UPDATE bookings SET state = 'no_show' WHERE id = ?").run(id);
+    expect(excuseMark(db, { bookingId: id, by: STAFF, staff: true, side: 'a' })).toEqual({ ok: false, error: 'wrong_state' });
+    expect(excuseMark(db, { bookingId: id, by: STAFF, staff: true, side: 'b' })).toEqual({ ok: true, value: { side: 'b' } });
+  });
+
+  it('a short side of a cancelled booking is no mark: nothing to excuse', () => {
+    const { id } = booked(2);
+    cancelAt(id, P[0], 5 * HOUR);
+    expect(excuseMark(db, { bookingId: id, by: STAFF, staff: true, side: 'b' })).toEqual({ ok: false, error: 'wrong_state' });
+  });
+
+  it('someone who manages both sides cannot excuse the late cancel', () => {
+    const rats = team(P[1], 'Rats', 'RR');
+    const { id, start } = booked(2, { by: P[0], opponent: { teamId: rats } });
+    cancelAt(id, P[0], HOUR);
+    // P[0] captained pickup side a and later became a co-captain of side b's team.
+    db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, 'cocaptain', ?)").run(rats, P[0], new Date(start).toISOString());
+    expect(excuseMark(db, { bookingId: id, by: P[0], now: new Date(start) })).toEqual({ ok: false, error: 'not_manager' });
+    expect(bookingView(db, id, { steamid: P[0], staff: false })!.sides[0]).toMatchObject({ lateCancel: true, canExcuse: false });
+    expect(bookingView(db, id, { steamid: P[1], staff: false })!.sides[0]).toMatchObject({ lateCancel: true, canExcuse: true });
+    expect(excuseMark(db, { bookingId: id, by: P[1], now: new Date(start) }).ok).toBe(true);
+  });
+
   it('staff can excuse a late cancel too', () => {
     const { id } = booked(2);
     cancelAt(id, P[1], HOUR);
@@ -250,6 +293,26 @@ describe('bookingView', () => {
     expect(side(P[1], 1)).toMatchObject({ lateCancel: false, excused: false, canExcuse: false });
     excuseMark(db, { bookingId: id, by: P[1], now: new Date(start) });
     expect(side(P[1], 0)).toMatchObject({ lateCancel: true, excused: true, canExcuse: false });
+  });
+});
+
+describe('bookingView short and ended', () => {
+  it('marks a short side of an ended booking for the staff control, and says when the close has finished', () => {
+    const { id } = booked(2);
+    const view = () => bookingView(db, id, { steamid: STAFF, staff: true })!;
+    expect(view().sides.map((s) => s.short)).toEqual([false, false]);
+    expect(view()).toMatchObject({ ending: false, ended: false });
+    played(id, { a: 4, b: 2 });
+    expect(view().sides.map((s) => s.short)).toEqual([false, true]);
+    expect(view()).toMatchObject({ ending: true, ended: true });
+    db.prepare('UPDATE bookings SET ended_at = NULL WHERE id = ?').run(id);
+    expect(view()).toMatchObject({ ending: true, ended: false });
+  });
+
+  it('a cancelled booking has no short side', () => {
+    const { id } = booked(2);
+    cancelAt(id, P[0], 5 * HOUR);
+    expect(bookingView(db, id, { steamid: STAFF, staff: true })!.sides.map((s) => s.short)).toEqual([false, false]);
   });
 });
 

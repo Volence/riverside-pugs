@@ -1675,6 +1675,8 @@ export interface TeamView {
   /** The team's scrim record: members and staff only, unless the record is
    *  public. Absent for everyone else. */
   record?: ScrimReliability;
+  /** Sent with record: whether the record is public, so it shows as a badge. */
+  recordPublic?: boolean;
   /** The aggregate of reviews the team received (plan 2): current members and
    *  staff only, regardless of scrim_reliability_public. Absent otherwise. */
   reviews?: ReviewSummary;
@@ -1744,8 +1746,9 @@ export interface ScrimRecord {
 }
 /** Mirrors src/scrims/reviews.ts's REVIEW_TAGS (plan 2 Ruling 5). */
 export type ReviewTag = 'on_time' | 'good_comms' | 'good_sport' | 'left_early' | 'toxic';
-/** A review aggregate: under SUMMARY_MIN (3) there is no percentage or top tag. */
-export interface ReviewSummary { count: number; positivePct: number | null; topTag: ReviewTag | null }
+/** A review aggregate: under SUMMARY_MIN (3) there is no percentage or top
+ *  tag, and no count unless the viewer is staff. */
+export interface ReviewSummary { count?: number; positivePct: number | null; topTag: ReviewTag | null }
 /** A single side's review of the other, staff only. */
 export interface StaffReview {
   side: BookingSide; reviewer: string; reviewerName: string; thumbs: 1 | -1; tags: ReviewTag[]; createdAt: string; updatedAt: string;
@@ -1762,8 +1765,12 @@ export interface BookingSideView {
   captain: { steamid: string; name: string }; confirmed: boolean; peakPresent: number; noShow: boolean; people: BookingPerson[];
   /** This side cancelled late (plan 2), and whether its mark is excused. */
   lateCancel: boolean; excused: boolean;
-  /** The viewer manages the other side and may excuse this late cancel. */
+  /** The viewer manages the other side (and not this one) and may excuse
+   *  this late cancel. */
   canExcuse: boolean;
+  /** Closed as ended or no_show with this side under the shown minimum,
+   *  claimed or not, so staff may excuse it. */
+  short: boolean;
   /** The side's record, only for staff and the side itself (or anyone when public). */
   record?: ScrimReliability;
 }
@@ -1772,7 +1779,10 @@ export interface BookingGameView {
   startedAt: string; endedAt: string | null;
 }
 export interface BookingView {
-  id: number; purpose: 'scrim' | 'tournament'; state: BookingState; ending: boolean; startsAt: string; endsAt: string;
+  id: number; purpose: 'scrim' | 'tournament'; state: BookingState; ending: boolean;
+  /** The close has finished; ending stays true for ever after it. */
+  ended: boolean;
+  startsAt: string; endsAt: string;
   extendedMinutes: number; extendMinutes: number; createdAt: string; playlist: { slug: string; name: string }[];
   rules: { noShowGraceMinutes: number } | null; gameConfig: { key: string; label: string };
   sides: BookingSideView[]; server: { name: string } | null; connect: { host: string; port: number; password: string } | null;
@@ -1784,8 +1794,8 @@ export interface BookingView {
   /** Re-posting a cancelled scrim in one click (plan 2): true only when the
    *  booking is cancelled, came from a post, and the viewer manages a side. */
   repost: { allowed: boolean };
-  /** Plan 2 Ruling 5: present only when the viewer manages a confirmed side
-   *  of a scrim that closed as ended or no_show. open says whether the 7 day
+  /** Plan 2 Ruling 5: present only when the viewer manages exactly one
+   *  confirmed side of a scrim that closed as ended or no_show. open says whether the 7 day
    *  window still takes a review; mine is the viewer's own side's review. */
   review?: { open: boolean; mine: { thumbs: 1 | -1; tags: ReviewTag[] } | null };
   /** Both sides' single reviews, staff only. */
@@ -1799,8 +1809,9 @@ export interface NewBooking {
 
 export const bookingsApi = {
   options: (signal?: AbortSignal) => get<BookingOptions>('/api/bookings/options', signal),
-  /** `record` is the viewer's own pickup record, once they have captained a pickup side. */
-  mine: (signal?: AbortSignal) => get<{ open: BookingSummary[]; recent: BookingSummary[]; prefs: NotifyPref[]; record?: ScrimReliability }>('/api/bookings/mine', signal),
+  /** `record` is the viewer's own pickup record, once they have captained a
+   *  pickup side; `recordPublic` comes with it and says whether everyone sees it. */
+  mine: (signal?: AbortSignal) => get<{ open: BookingSummary[]; recent: BookingSummary[]; prefs: NotifyPref[]; record?: ScrimReliability; recordPublic?: boolean }>('/api/bookings/mine', signal),
   get: (id: number | string, signal?: AbortSignal) => get<BookingView>(`/api/bookings/${enc(String(id))}`, signal),
   create: (b: NewBooking) => post<{ id: number }>('/api/bookings', b),
   act: (id: number, action: 'confirm' | 'decline' | 'accept' | 'leave' | 'extend' | 'no-show' | 'end') =>

@@ -97,6 +97,18 @@ describe('submitReview', () => {
     expect(submitReview(db, { bookingId: id, by: P[2], thumbs: 1, tags: [], now: new Date(end + HOUR) })).toEqual({ ok: true, value: { side: 'a' } });
   });
 
+  it('refuses someone who manages both sides: they cannot review either one', () => {
+    const t = team(P[1], 'Rats', 'RR');
+    const id = booked(START, { by: P[0], opponent: { teamId: t } });
+    const end = closed(id);
+    // P[0] captains pickup side a and later becomes a co-captain of side b's team.
+    db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, 'cocaptain', ?)").run(t, P[0], new Date(end).toISOString());
+    expect(submitReview(db, { bookingId: id, by: P[0], thumbs: -1, tags: ['toxic'], now: new Date(end + HOUR) })).toEqual({ ok: false, error: 'not_manager' });
+    expect(staffReviews(db, id)).toEqual([]);
+    expect(bookingView(db, id, { steamid: P[0], staff: false })!.review).toBeUndefined();
+    expect(submitReview(db, { bookingId: id, by: P[1], thumbs: 1, tags: [], now: new Date(end + HOUR) })).toEqual({ ok: true, value: { side: 'b' } });
+  });
+
   it('refuses bad thumbs and bad tags', () => {
     const id = booked(START);
     const now = new Date(closed(id) + HOUR);
@@ -143,10 +155,10 @@ describe('reviewSummary', () => {
   };
 
   it('has no percentage or top tag under 3 reviews', () => {
-    expect(reviewSummary(db, { captain: P[1] })).toEqual({ count: 0, positivePct: null, topTag: null });
+    expect(reviewSummary(db, { captain: P[1] }, { staff: true })).toEqual({ count: 0, positivePct: null, topTag: null });
     review(0, 1, ['on_time']);
     review(1, -1, ['on_time']);
-    expect(reviewSummary(db, { captain: P[1] })).toEqual({ count: 2, positivePct: null, topTag: null });
+    expect(reviewSummary(db, { captain: P[1] }, { staff: true })).toEqual({ count: 2, positivePct: null, topTag: null });
   });
 
   it('at 3 and above: the rounded percentage positive and the most common tag, counting only reviews received', () => {
@@ -157,8 +169,20 @@ describe('reviewSummary', () => {
     const back = booked(START + 3 * DAY);
     const end = closed(back);
     submitReview(db, { bookingId: back, by: P[1], thumbs: -1, tags: ['toxic'], now: new Date(end + HOUR) });
-    expect(reviewSummary(db, { captain: P[1] })).toEqual({ count: 3, positivePct: 67, topTag: 'good_sport' });
-    expect(reviewSummary(db, { captain: P[0] })).toEqual({ count: 1, positivePct: null, topTag: null });
+    expect(reviewSummary(db, { captain: P[1] }, { staff: true })).toEqual({ count: 3, positivePct: 67, topTag: 'good_sport' });
+    expect(reviewSummary(db, { captain: P[0] }, { staff: true })).toEqual({ count: 1, positivePct: null, topTag: null });
+  });
+
+  it('a non-staff viewer gets no count under 3, only "not enough yet"; at 3 the count comes back', () => {
+    const member = { staff: false };
+    expect(reviewSummary(db, { captain: P[1] }, member)).toEqual({ positivePct: null, topTag: null });
+    review(0, 1, ['on_time']);
+    review(1, -1, ['on_time']);
+    const two = reviewSummary(db, { captain: P[1] }, member);
+    expect(two).toEqual({ positivePct: null, topTag: null });
+    expect('count' in two).toBe(false);
+    review(2, 1, ['on_time']);
+    expect(reviewSummary(db, { captain: P[1] }, member)).toEqual({ count: 3, positivePct: 67, topTag: 'on_time' });
   });
 
   it('a team party collects reviews of its team sides, not its captain\'s pickup sides', () => {
@@ -167,8 +191,8 @@ describe('reviewSummary', () => {
     review(1, 1, ['good_comms'], { opponent: { teamId: t } });
     review(2, -1, [], { opponent: { teamId: t } });
     review(3, -1, ['toxic']);
-    expect(reviewSummary(db, { teamId: t })).toEqual({ count: 3, positivePct: 67, topTag: 'good_comms' });
-    expect(reviewSummary(db, { captain: P[1] })).toEqual({ count: 1, positivePct: null, topTag: null });
+    expect(reviewSummary(db, { teamId: t }, { staff: true })).toEqual({ count: 3, positivePct: 67, topTag: 'good_comms' });
+    expect(reviewSummary(db, { captain: P[1] }, { staff: true })).toEqual({ count: 1, positivePct: null, topTag: null });
   });
 });
 
