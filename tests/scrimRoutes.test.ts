@@ -291,7 +291,7 @@ describe('direct challenges', () => {
     // The captain and the co-captain of the target team both get the DM.
     expect(dms).toHaveLength(2);
     expect(dms.map((d) => d.to).sort()).toEqual([discordOf(P[1]), discordOf(P[2])].sort());
-    expect(dms[0].content).toMatch(/challenges you to a scrim/);
+    expect(dms[0].content).toMatch(/challenges you to a scrim: .*, \d+ campaigns?, about \d/);
     // The target has no decline action, only accept or let it pass.
     expect(dms[0].content).toMatch(/Accept it on the site, or let it pass\./);
     expect(dms[0].content).not.toMatch(/decline/i);

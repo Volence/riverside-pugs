@@ -316,7 +316,7 @@ export function Booking({ id, session }: { id: string; session: Session }) {
       <Panel>
         <p>{v.ending && !v.ended && v.state !== 'cancelled' && v.state !== 'no_show' ? 'Closing.' : STATE_LINE[v.state]}{v.cancel?.reason ? ` Reason: ${v.cancel.reason}` : ''}</p>
         {running && <p class="bookingcount">{countLine}</p>}
-        {running && v.closeAt && <p class="warning">Closing in about 5 minutes. +1 campaign keeps the server for one more.</p>}
+        {running && v.closeAt && <p class="warning">Closing soon. +1 campaign keeps the server for one more.</p>}
         {v.connect && (
           <p class="bookingconnect">In the game console: <code>{`connect ${v.connect.host}:${v.connect.port}; password ${v.connect.password}`}</code></p>
         )}

@@ -5,6 +5,7 @@ import { getPlayer } from '../players.js';
 import { activeMembers, getTeam } from '../teams/teams.js';
 import { whenUtc } from '../bookings/messages.js';
 import { getAccept, getPost, type AcceptRow, type PostRow } from './scrims.js';
+import { lengthLabel } from './rules.js';
 
 /** The five scrim board notice types this module knows how to word (the
  *  scrim half of NotifyType; the booking half is worded in
@@ -49,7 +50,7 @@ export function scrimMessage(
   let link = postLink;
   switch (type) {
     case 'scrim_challenge':
-      content = `${posterLabel} challenges you to a scrim: ${when}, ${p.block_minutes} min. Accept it on the site, or let it pass.`;
+      content = `${posterLabel} challenges you to a scrim: ${when}, ${lengthLabel((JSON.parse(p.campaigns_json) as string[]).length, p.block_minutes)}. Accept it on the site, or let it pass.`;
       break;
     case 'scrim_accepted': {
       const a: AcceptRow | undefined = extra.acceptId !== undefined ? getAccept(db, extra.acceptId) : undefined;

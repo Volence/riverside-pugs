@@ -116,7 +116,7 @@ describe('Booking page', () => {
       mockBookings.get.mockResolvedValue(VIEW({ state: 'active', gamesPlayed: 0, gamesAllowed: 2 }));
       render(<Booking id="7" session={session} />);
       expect(await screen.findByText('Campaign 1 of 2')).toBeTruthy();
-      expect(screen.queryByText(/Closing in about 5 minutes/)).toBeNull();
+      expect(screen.queryByText(/Closing soon/)).toBeNull();
       cleanup();
       mockBookings.get.mockResolvedValue(VIEW({ state: 'active', gamesPlayed: 1, gamesAllowed: 2 }));
       render(<Booking id="7" session={session} />);
@@ -125,7 +125,7 @@ describe('Booking page', () => {
       mockBookings.get.mockResolvedValue(VIEW({ state: 'active', gamesPlayed: 2, gamesAllowed: 2, closeAt: '2026-10-02T22:05:00.000Z' }));
       render(<Booking id="7" session={session} />);
       expect(await screen.findByText('All 2 campaigns played')).toBeTruthy();
-      expect(screen.getByText(/Closing in about 5 minutes/)).toBeTruthy();
+      expect(screen.getByText(/Closing soon/)).toBeTruthy();
     });
 
     it('+1 campaign posts the picked campaign, or none for "pick later"', async () => {
