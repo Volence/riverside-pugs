@@ -215,6 +215,30 @@ describe('ServerReleaser', () => {
   });
 });
 
+describe('ServerReleaser and a gone box', () => {
+  it('refuses a box whose gone_since is set, booking or not, unless it is the gone give-back', async () => {
+    const db = openDb(':memory:');
+    const id = seedServer(db);
+    markOffline(db, id);
+    db.prepare("UPDATE servers SET gone_since = '2026-10-02T20:00:00.000Z' WHERE id = ?").run(id);
+    const cleaned: string[] = [];
+    const releaser = new ServerReleaser(db, async (s) => { cleaned.push(s.name); });
+    const settled: boolean[] = [];
+    releaser.release(id, {}, (back) => settled.push(back));
+    releaser.release(id, { restart: true, forceRestart: true, booking: true }, (back) => settled.push(back));
+    await releaser.settled();
+    expect(cleaned).toEqual([]);
+    expect(getServer(db, id)!.status).toBe('offline');
+    expect(settled).toEqual([false, false]);
+
+    releaser.release(id, { gone: true }, (back) => settled.push(back));
+    await releaser.settled();
+    expect(cleaned).toEqual(['test']);
+    expect(getServer(db, id)!.status).toBe('idle');
+    expect(settled).toEqual([false, false, true]);
+  });
+});
+
 describe('reconcileServers', () => {
   function seedMatch(db: ReturnType<typeof openDb>, state: string, serverId: number | null): void {
     // openDb seeds 'Season 1' as id 1 already.

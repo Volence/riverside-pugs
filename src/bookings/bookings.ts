@@ -350,14 +350,16 @@ export function confirmBooking(db: DB, o: { bookingId: number; by: string; now?:
 }
 
 /** Close a booking: the terminal state, why, and the end started. With no box
- *  there is nothing to release, so ended_at is set too. False when it was
- *  already ending (another end got there first). */
+ *  there is nothing to release, so ended_at is set too, except for a running
+ *  booking waiting for a box after its own went down (plan 5): that one may
+ *  have a live game to abort, so the runner's settle and wind-down finish it.
+ *  False when it was already ending (another end got there first). */
 function close(db: DB, id: number, state: 'ended' | 'cancelled' | 'no_show', reason: string, now: Date,
   extra: { cancelledBy?: string | null; cancelSide?: Side | null; cancelReason?: string | null } = {}): boolean {
   const t = now.toISOString();
   return db.prepare(
     `UPDATE bookings SET state = ?, end_reason = ?, ending_at = ?,
-       ended_at = CASE WHEN server_id IS NULL THEN ? ELSE NULL END,
+       ended_at = CASE WHEN server_id IS NULL AND waiting_since IS NULL THEN ? ELSE NULL END,
        cancelled_by = COALESCE(?, cancelled_by), cancel_side = COALESCE(?, cancel_side), cancel_reason = COALESCE(?, cancel_reason)
      WHERE id = ? AND ending_at IS NULL AND state IN ${OPEN_STATES_SQL}`,
   ).run(state, reason, t, t, extra.cancelledBy ?? null, extra.cancelSide ?? null, extra.cancelReason ?? null, id).changes > 0;

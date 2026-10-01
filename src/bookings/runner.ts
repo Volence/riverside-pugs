@@ -98,8 +98,10 @@ export interface BookingRunnerDeps {
   rcon: BoxRcon;
   publicUrl: string;
   /** Give the box back with a forced restart; resolves once it is back (true)
-   *  or reported offline (false). */
-  release: (serverId: number) => Promise<boolean>;
+   *  or reported offline (false). `gone`: the give-back of a box that went
+   *  down under a booking and answers again (the releaser refuses a gone box
+   *  to everyone else). */
+  release: (serverId: number, opts?: { gone?: boolean }) => Promise<boolean>;
   /** The quit-and-wait before setup, without a release (the booking still holds the box). */
   restart: (server: ServerRow) => Promise<boolean>;
   notifier: Notifier;
@@ -251,6 +253,8 @@ export class BookingRunner {
   private readonly freshBox = new Set<number>();
   /** rcon answers in a row per gone box (plan 5 ruling 4); two put it back. */
   private readonly goneAnswers = new Map<number, number>();
+  /** Gone boxes being given back through the releaser right now, by server id. */
+  private readonly returning = new Map<number, Promise<void>>();
 
   constructor(private readonly deps: BookingRunnerDeps) {
     this.db = deps.db;
@@ -266,7 +270,7 @@ export class BookingRunner {
 
   /** Resolves once no setup or wind-down is running. For tests and shutdown. */
   async idle(): Promise<void> {
-    while (this.busy.size > 0) await Promise.all([...this.busy.values()]);
+    while (this.busy.size > 0 || this.returning.size > 0) await Promise.all([...this.busy.values(), ...this.returning.values()]);
   }
 
   /** Boot: nothing in memory survived. An end that had started finishes
@@ -806,13 +810,17 @@ export class BookingRunner {
   }
 
   /** Plan 5 ruling 4: a gone box gets one `status` per tick (one short rcon
-   *  burst, nothing held across ticks); two answers in a row put it back in
-   *  the pool. A box staff already set idle only has gone_since cleared. */
+   *  burst, nothing held across ticks); two answers in a row give it back
+   *  through the releaser, whose forced restart clears whatever the old
+   *  booking left on it (a box cut off rather than crashed may still run its
+   *  plugin match, passwords and players). A box staff already set idle only
+   *  has gone_since cleared. */
   private async returnGone(): Promise<void> {
     const gone = this.db.prepare('SELECT * FROM servers WHERE gone_since IS NOT NULL').all() as ServerRow[];
     const ids = new Set(gone.map((s) => s.id));
     for (const id of this.goneAnswers.keys()) if (!ids.has(id)) this.goneAnswers.delete(id);
     for (const server of gone) {
+      if (this.returning.has(server.id)) continue;
       if (server.status !== 'offline') {
         this.db.prepare('UPDATE servers SET gone_since = NULL WHERE id = ?').run(server.id);
         this.goneAnswers.delete(server.id);
@@ -831,20 +839,37 @@ export class BookingRunner {
       this.goneAnswers.set(server.id, n);
       if (n < 2) continue;
       this.goneAnswers.delete(server.id);
-      const back = this.db.prepare(
-        "UPDATE servers SET status = 'idle', gone_since = NULL WHERE id = ? AND gone_since IS NOT NULL AND status = 'offline'",
-      ).run(server.id).changes > 0;
-      if (!back) continue;
-      const under = this.db.prepare(
-        "SELECT booking_id FROM booking_events WHERE event = 'box_dropped' AND json_extract(detail, '$.serverId') = ? ORDER BY id DESC LIMIT 1",
-      ).get(server.id) as { booking_id: number } | undefined;
-      console.log(`[booking] gone box ${server.name} answers again; back in the pool`);
-      publishAdminEvent({ kind: 'problem', text: `Server ${server.name} answers again after it went down under booking ${under?.booking_id ?? '?'}; it is back in the pool.` });
-      try {
-        this.deps.freed?.();
-      } catch (err) {
-        console.error(`[booking] the freed hook failed after ${server.name} came back:`, err);
-      }
+      const still = this.db.prepare("SELECT 1 FROM servers WHERE id = ? AND status = 'offline' AND gone_since IS NOT NULL").get(server.id);
+      if (!still) continue;
+      const p = this.giveBack(server).finally(() => { this.returning.delete(server.id); });
+      this.returning.set(server.id, p);
+    }
+  }
+
+  /** The releaser's forced restart, then gone_since clears and staff hear of it.
+   *  A restart that never comes back leaves the box offline and gone, so the
+   *  next ticks try again. Never rejects. */
+  private async giveBack(server: ServerRow): Promise<void> {
+    let back = false;
+    try {
+      back = await this.deps.release(server.id, { gone: true });
+    } catch (err) {
+      console.error(`[booking] giving back gone box ${server.name} failed:`, err instanceof Error ? redactSecrets(err.message, [server.log_secret]) : err);
+    }
+    if (!back) {
+      console.warn(`[booking] gone box ${server.name} answered but did not come back from its restart; trying again later`);
+      return;
+    }
+    this.db.prepare('UPDATE servers SET gone_since = NULL WHERE id = ?').run(server.id);
+    const under = this.db.prepare(
+      "SELECT booking_id FROM booking_events WHERE event = 'box_dropped' AND json_extract(detail, '$.serverId') = ? ORDER BY id DESC LIMIT 1",
+    ).get(server.id) as { booking_id: number } | undefined;
+    console.log(`[booking] gone box ${server.name} answers again; back in the pool`);
+    publishAdminEvent({ kind: 'problem', text: `Server ${server.name} answers again after it went down under booking ${under?.booking_id ?? '?'}; it is back in the pool.` });
+    try {
+      this.deps.freed?.();
+    } catch (err) {
+      console.error(`[booking] the freed hook failed after ${server.name} came back:`, err);
     }
   }
 
