@@ -13,6 +13,7 @@ import {
 } from '../src/bookings/bookings.js';
 import { bookingLimits, bookingsDue } from '../src/bookings/rules.js';
 import { BookingRunner } from '../src/bookings/runner.js';
+import { claimIdle } from '../src/serverPool.js';
 import { bookingMessage } from '../src/bookings/messages.js';
 import { classifyBox, type BoxSignals } from '../src/bookings/recovery.js';
 import { setMissionsDirs, invalidateCampaignCache } from '../src/campaignRegistry.js';
@@ -274,7 +275,8 @@ function liveGame(id: number): number {
   return m;
 }
 
-describe('srcds restarted', () => {
+/** The No Mercy missions dir for the describe it is called in. */
+function useMissions(): void {
   let missionsDir: string;
   beforeEach(() => {
     missionsDir = mkdtempSync(join(tmpdir(), 'missions-'));
@@ -287,6 +289,10 @@ describe('srcds restarted', () => {
     invalidateCampaignCache();
     rmSync(missionsDir, { recursive: true, force: true });
   });
+}
+
+describe('srcds restarted', () => {
+  useMissions();
 
   it('sets the booking up again on the same box and resumes the live game on the map it was on', async () => {
     const id = await running();
@@ -426,5 +432,128 @@ describe('srcds restarted', () => {
     await runner.idle();
     expect(getBooking(db, id)!.recovering_at).toBeNull();
     expect(sent.flatMap((s) => s.cmds)).not.toContain('sm_pug_auto_track 0');
+  });
+});
+
+describe('box gone', () => {
+  useMissions();
+  const kill = (name = 'ccc') => { box[name].down = true; };
+
+  it('is quiet before the limit, then moves to another box after rcon, heartbeat and A2S are silent for 3 minutes', async () => {
+    runner = build({ a2s: async () => null });
+    const id = await running();
+    const m = liveGame(id);
+    db.prepare("UPDATE match_live SET last_seen = datetime('now', '-10 minutes') WHERE match_id = ?").run(m);
+    kill();
+    await runner.tick(); await runner.idle();
+    expect(getBooking(db, id)!.server_id).toBe(3);
+    now += 3 * MIN;
+    await runner.tick(); await runner.idle();
+    const b = getBooking(db, id)!;
+    expect(b).toMatchObject({ server_id: 2, recovering_at: null, recoveries: 1 });
+    expect((db.prepare('SELECT status FROM servers WHERE id = 3').get() as { status: string }).status).toBe('offline');
+    expect(restarted).toContain('bb');
+    expect(db.prepare('SELECT server_id, state FROM matches WHERE id = ?').get(m)).toEqual({ server_id: 2, state: 'live' });
+    expect(dms.some((d) => d.content.includes('moved to another server'))).toBe(true);
+  });
+
+  it('never moves while A2S answers; staff are told once', async () => {
+    const seen: AdminEvent[] = [];
+    const off = subscribeAdminEvents((e) => seen.push(e));
+    try {
+      runner = build({ a2s: async () => ({ players: 6, map: 'x' }) });
+      const id = await running();
+      kill();
+      for (let i = 0; i < 6; i++) { await runner.tick(); await runner.idle(); now += MIN; }
+      expect(getBooking(db, id)).toMatchObject({ server_id: 3, recovering_at: null });
+      expect(seen.filter((e) => e.kind === 'problem' && e.text.includes('answers the server browser')).length).toBe(1);
+    } finally {
+      off();
+    }
+  });
+
+  it('never moves while the live game still heartbeats', async () => {
+    runner = build({ a2s: async () => null });
+    const id = await running();
+    const m = liveGame(id);
+    kill();
+    for (let i = 0; i < 5; i++) {
+      db.prepare('UPDATE match_live SET last_seen = ? WHERE match_id = ?').run(new Date(now).toISOString().replace('T', ' ').slice(0, 19), m);
+      await runner.tick(); await runner.idle(); now += MIN;
+    }
+    expect(getBooking(db, id)!.server_id).toBe(3);
+  });
+
+  it('with no free box: waits ahead of PUGs, takes the first freed box, gives up after the wait', async () => {
+    runner = build({ a2s: async () => null });
+    const id = await running();
+    db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 2)").run();
+    kill();
+    await runner.tick(); now += 3 * MIN; await runner.tick(); await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ server_id: null });
+    expect(getBooking(db, id)!.waiting_since).not.toBeNull();
+    expect(preempts).toBeGreaterThan(0);
+    db.prepare("UPDATE servers SET status = 'idle' WHERE id = 1").run();
+    expect(claimIdle(db, now)).toBeNull(); // kept back for the waiting booking
+    runner.allocate(); await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ server_id: 1, recoveries: 1 });
+  });
+
+  it('gives up after booking_recover_wait_minutes', async () => {
+    runner = build({ a2s: async () => null });
+    const id = await running();
+    const m = liveGame(id);
+    db.prepare("UPDATE match_live SET last_seen = datetime('now', '-30 minutes') WHERE match_id = ?").run(m);
+    db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 2)").run();
+    kill();
+    await runner.tick(); now += 3 * MIN; await runner.tick(); await runner.idle();
+    now += 20 * MIN;
+    await runner.tick(); await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ state: 'cancelled', end_reason: 'server_lost' });
+    expect(getBooking(db, id)!.ended_at).not.toBeNull();
+    expect(db.prepare('SELECT abort_cause FROM matches WHERE id = ?').get(m)).toEqual({ abort_cause: 'server_lost' });
+  });
+
+  it('a waiting booking survives a web restart', async () => {
+    runner = build({ a2s: async () => null });
+    const id = await running();
+    db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 2)").run();
+    kill();
+    await runner.tick(); now += 3 * MIN; await runner.tick(); await runner.idle();
+    const fresh = build({ a2s: async () => null });
+    fresh.resume();
+    db.prepare("UPDATE servers SET status = 'idle' WHERE id = 2").run();
+    await fresh.tick(); await fresh.idle();
+    expect(getBooking(db, id)).toMatchObject({ server_id: 2, recoveries: 1 });
+  });
+
+  it('a gone box goes back to idle by itself after answering twice in a row', async () => {
+    runner = build({ a2s: async () => null });
+    const id = await running();
+    kill();
+    await runner.tick(); now += 3 * MIN; await runner.tick(); await runner.idle();
+    expect((db.prepare('SELECT status, gone_since FROM servers WHERE id = 3').get() as { status: string; gone_since: string | null }).gone_since).not.toBeNull();
+    box.ccc.down = false;
+    await runner.tick(); await runner.idle();
+    expect((db.prepare('SELECT status FROM servers WHERE id = 3').get() as { status: string }).status).toBe('offline');
+    await runner.tick(); await runner.idle();
+    expect(db.prepare('SELECT status, gone_since FROM servers WHERE id = 3').get()).toEqual({ status: 'idle', gone_since: null });
+    expect(getBooking(db, id)!.server_id).not.toBe(3);
+  });
+
+  it('a miss between two answers starts the count again; a box staff set idle only loses gone_since', async () => {
+    runner = build({ a2s: async () => null });
+    await running();
+    kill();
+    await runner.tick(); now += 3 * MIN; await runner.tick(); await runner.idle();
+    const row = () => db.prepare('SELECT status, gone_since FROM servers WHERE id = 3').get() as { status: string; gone_since: string | null };
+    box.ccc.down = false; await runner.tick(); await runner.idle();
+    box.ccc.down = true; await runner.tick(); await runner.idle();
+    box.ccc.down = false; await runner.tick(); await runner.idle();
+    expect(row().status).toBe('offline');
+    db.prepare("UPDATE servers SET status = 'idle' WHERE id = 3").run();
+    box.ccc.down = true;
+    await runner.tick(); await runner.idle();
+    expect(row()).toEqual({ status: 'idle', gone_since: null });
   });
 });
