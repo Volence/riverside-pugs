@@ -117,6 +117,15 @@ const PLAIN: [table: string, column: string][] = [
   // Who made a scrim block. The blocker and target columns are moved by
   // hand below: they sit inside the blocks' unique pair indexes.
   ['scrim_blocks', 'created_by'],
+  // Events (src/events/events.ts) follow the person: the organizer and the
+  // audit actor, like a booking's creator and booking_events.actor.
+  ['events', 'organizer_steamid'],
+  ['event_log', 'actor'],
+  // Entries (tournaments plan T1b writes them): who registered one, and a
+  // place on an entry's roster. Where both accounts hold a live place on one
+  // entry, the alt's is closed first (below), as for team_members.
+  ['event_entries', 'registered_by'],
+  ['event_entry_players', 'steamid'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`
@@ -351,6 +360,8 @@ export function mergePlayers(
       AND team_id IN (SELECT team_id FROM team_members WHERE steamid = ? AND left_at IS NULL)`).run(teamsNow, from, into);
     db.prepare(`UPDATE team_invites SET responded_at = ?, response = 'cancelled' WHERE steamid = ? AND responded_at IS NULL
       AND team_id IN (SELECT team_id FROM team_invites WHERE steamid = ? AND responded_at IS NULL)`).run(teamsNow, from, into);
+    db.prepare(`UPDATE event_entry_players SET removed_at = ? WHERE steamid = ? AND removed_at IS NULL
+      AND entry_id IN (SELECT entry_id FROM event_entry_players WHERE steamid = ? AND removed_at IS NULL)`).run(teamsNow, from, into);
 
     for (const [table, column] of PLAIN) {
       db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`).run(into, from);

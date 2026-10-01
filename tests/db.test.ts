@@ -19,7 +19,7 @@ describe('openDb', () => {
       'community_entries', 'community_likes',
       'custom_campaign_chapters', 'custom_campaign_installs', 'custom_campaigns',
       'discord_link_codes', 'discord_link_history', 'discord_messages', 'discord_sanctions', 'discord_voice', 'discord_voice_origin',
-      'endorsements', 'fleet_files', 'fleet_readings',
+      'endorsements', 'event_entries', 'event_entry_players', 'event_log', 'event_stages', 'events', 'fleet_files', 'fleet_readings',
       'game_configs',
       'input_bursts', 'input_caps', 'input_detections',
       'integrity_clips', 'integrity_flags', 'integrity_prior', 'integrity_prior_rounds', 'integrity_reviews', 'integrity_rounds',
