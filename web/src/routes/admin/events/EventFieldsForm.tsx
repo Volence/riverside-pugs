@@ -29,7 +29,13 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
 
   const submit = (e: Event) => {
     e.preventDefault();
-    const startsAt = fromLocalInput(start);
+    // Only re-derive startsAt from the input when it was actually touched.
+    // fromLocalInput(toLocalInput(x)) is not always x: a stored time that
+    // falls in a DST fall-back repeated hour round-trips to the EARLIER of
+    // the two instants, so re-sending it on every unrelated save would walk
+    // the event's start back an hour each time. Untouched, the stored ISO is
+    // sent back exactly as it came.
+    const startsAt = start === toLocalInput(fields.startsAt) ? fields.startsAt : fromLocalInput(start);
     if (!startsAt) { setProblem('Pick a start time.'); return; }
     let rosterLock: RosterLock = lock;
     if (lock.kind === 'at') {
