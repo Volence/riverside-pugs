@@ -3136,3 +3136,41 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .activity__tick { font-size: var(--fs-label); color: var(--text-muted); white-space: nowrap; overflow: visible; }
 .activity__legend { margin: var(--sp-3) 0 0; font-size: var(--fs-dense); }
 .activity__waits { margin: 0 0 var(--sp-3); font-size: var(--fs-dense); }
+
+/* ---------- Teams (routes/Teams.tsx, routes/TeamJoin.tsx) ---------- */
+
+.teamgrid { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.teamcard {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3);
+  background: var(--surface-2); border: 1px solid var(--border); padding: var(--sp-3);
+  color: var(--text);
+}
+.teamcard:hover { border-color: var(--border-strong); text-decoration: none; }
+.teamcard__name { font-family: var(--font-label); font-weight: 600; color: var(--text-bright, var(--text)); }
+.teamcard__line { flex-basis: 100%; color: var(--text-muted); font-size: var(--fs-dense); }
+
+.teambadge {
+  width: 40px; height: 40px; flex: none;
+  border-radius: var(--radius); object-fit: cover;
+}
+.teambadge--tag {
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); background: var(--surface);
+  font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.06em; color: var(--text-muted);
+}
+
+.teaminvites { display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+.teaminvites li {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) 0; border-bottom: 1px solid var(--border);
+}
+.teaminvites li:last-child { border-bottom: 0; }
+.teaminvites li span { flex: 1 1 auto; }
+.teaminvites li .btn, .teaminvites li .btn--ghost { margin-left: auto; }
+
+.teamform { display: flex; flex-wrap: wrap; align-items: end; gap: var(--sp-3); }
+.teamform label { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); color: var(--text-muted); }
+.teamform .btn { align-self: center; }
+@media (max-width: 480px) { .teamform { flex-direction: column; align-items: stretch; } }
+
+.teamjoin { display: flex; align-items: center; justify-content: center; gap: var(--sp-3); flex-wrap: wrap; padding: var(--sp-4) 0; }

@@ -29,6 +29,8 @@ export interface Me {
   twitchEnabled?: boolean;
   twitch?: { id: string; name: string } | null;
   ban?: { reason: string; expiresAt: string | null } | null;
+  /** Show Teams: the competitive switch lets this viewer in. */
+  teams?: boolean;
 }
 
 export interface NamedPlayer {
@@ -1636,6 +1638,47 @@ export interface CastMatch {
 
 export const castApi = {
   list: (signal?: AbortSignal) => get<{ matches: CastMatch[] }>('/api/cast', signal),
+};
+
+// ---------- teams ----------
+
+export type TeamRole = 'captain' | 'cocaptain' | 'member';
+export interface TeamListItem { slug: string; name: string; tag: string; logoKey: string | null; members: number }
+export interface MyTeamItem { slug: string; name: string; tag: string; logoKey: string | null; role: TeamRole }
+export interface TeamInviteItem { id: number; slug: string; name: string; tag: string; invitedByName: string | null; createdAt: string }
+export interface TeamMemberView { steamid: string; name: string; avatar: string | null; role: TeamRole; joinedAt: string }
+export interface TeamView {
+  slug: string; name: string; tag: string; logoKey: string | null; createdAt: string; disbandedAt: string | null;
+  captain: string; members: TeamMemberView[]; former: { steamid: string; name: string; leftAt: string }[];
+  viewer: { role: TeamRole | null; staff: boolean };
+  manage: { invites: { id: number; steamid: string; name: string; createdAt: string }[]; joinLinkToken: string | null } | null;
+}
+
+export const logoUrl = (key: string): string => `/api/teams/logos/${key}.png`;
+
+const enc = encodeURIComponent;
+export const teamsApi = {
+  list: (signal?: AbortSignal) => get<{ teams: TeamListItem[] }>('/api/teams', signal),
+  mine: (signal?: AbortSignal) => get<{ teams: MyTeamItem[]; invites: TeamInviteItem[]; canCreate: boolean }>('/api/teams/mine', signal),
+  get: (slug: string, signal?: AbortSignal) => get<TeamView>(`/api/teams/${enc(slug)}`, signal),
+  search: (q: string, signal?: AbortSignal) =>
+    get<{ players: { steamid: string; name: string; avatar: string | null }[] }>(`/api/teams/player-search?q=${enc(q)}`, signal),
+  create: (name: string, tag: string) => post<{ slug: string }>('/api/teams', { name, tag }),
+  invite: (slug: string, steamid: string) => post<{ inviteId: number }>(`/api/teams/${enc(slug)}/invites`, { steamid }),
+  accept: (id: number) => post<{ slug: string }>(`/api/teams/invites/${id}/accept`),
+  decline: (id: number) => post<{ slug: string }>(`/api/teams/invites/${id}/decline`),
+  cancelInvite: (id: number) => post(`/api/teams/invites/${id}/cancel`),
+  joinLink: (slug: string, on: boolean) => post<{ token: string | null }>(`/api/teams/${enc(slug)}/join-link`, { on }),
+  joinInfo: (token: string, signal?: AbortSignal) =>
+    get<{ slug: string; name: string; tag: string; logoKey: string | null }>(`/api/teams/join/${enc(token)}`, signal),
+  join: (token: string) => post<{ slug: string }>(`/api/teams/join/${enc(token)}`),
+  leave: (slug: string) => post<{ disbanded: boolean; captain: string | null }>(`/api/teams/${enc(slug)}/leave`),
+  kick: (slug: string, steamid: string) => post(`/api/teams/${enc(slug)}/members/${enc(steamid)}/kick`),
+  setRole: (slug: string, steamid: string, role: 'cocaptain' | 'member') => post(`/api/teams/${enc(slug)}/members/${enc(steamid)}/role`, { role }),
+  makeCaptain: (slug: string, steamid: string) => post(`/api/teams/${enc(slug)}/captain`, { steamid }),
+  rename: (slug: string, body: { name?: string; tag?: string }) => post<{ name: string; tag: string }>(`/api/teams/${enc(slug)}/rename`, body),
+  disband: (slug: string) => post(`/api/teams/${enc(slug)}/disband`),
+  logo: (slug: string, png: string) => post<{ logoKey: string }>(`/api/teams/${enc(slug)}/logo`, { png }),
 };
 
 export const adminApi = {
