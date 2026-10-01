@@ -518,7 +518,7 @@ describe('preemption', () => {
     expect(newest.server_id).toBe(2);
     expect(newest.warned_at).not.toBeNull();
     expect(getLease(db, 1)!.warned_at).toBeNull();
-    expect(sent).toEqual([{ server: 'bb', cmds: ['say [Practice] A PUG needs this server in 60 seconds. Ranked matches always come first.'] }]);
+    expect(sent).toEqual([{ server: 'bb', cmds: ['say [Practice] A ranked match or a booked server needs this box in 60 seconds. Those always come first.'] }]);
 
     // Not yet.
     now = T0 + PREEMPT_WARN_MS - 1;
@@ -567,6 +567,26 @@ describe('preemption', () => {
     humansOn.bb = 2;
     await mgr.tick();
     expect(getLease(db, 1)!.warned_at).not.toBeNull();
+  });
+
+  it('ends the warned lease for a booking that waits on a box, with no PUG waiting', async () => {
+    seedServer('a'); seedServer('bb');
+    setSetting(db, 'practice_reserve_idle', '0');
+    mgr = manager();
+    await mgr.create(ME, 'park');
+    await flush();
+    db.prepare("UPDATE servers SET status = 'live' WHERE id = 1").run();
+    // A confirmed booking starting now, with no box.
+    const id = Number(db.prepare(
+      `INSERT INTO bookings (purpose, starts_at, ends_at, password, tv_password, game_config, rules_json, playlist_json, created_by, created_at)
+       VALUES ('scrim', ?, ?, 'p', 't', 'standard', '{}', '[]', ?, 'x')`,
+    ).run(new Date(T0).toISOString(), new Date(T0 + 3_600_000).toISOString(), ME).lastInsertRowid);
+    db.prepare("INSERT INTO booking_sides (booking_id, side, captain_steamid, confirmed_at) VALUES (?, 'a', ?, 'x'), (?, 'b', ?, 'x')").run(id, ME, id, YOU);
+    mgr.needServer();
+    now = T0 + PREEMPT_WARN_MS;
+    await mgr.tick();
+    await flush();
+    expect(getLease(db, 1)!.end_reason).toBe('preempted');
   });
 });
 

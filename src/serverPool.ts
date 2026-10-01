@@ -2,6 +2,7 @@ import type { DB } from './db.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { deploySlug } from './releaseStage.js';
 import { NOT_HELD_SQL } from './serverHolds.js';
+import { bookingLimits, bookingsDue } from './bookings/rules.js';
 
 export interface ServerRow {
   id: number;
@@ -69,13 +70,17 @@ export function claimableServers(db: DB): ServerRow[] {
  *  available. A disabled box is invisible here however idle it looks, which is
  *  the whole point: an admin can pull a misbehaving server out of rotation
  *  mid-evening without stopping it, kicking anyone, or editing the database.
- *  A held box (practice lease, side game) is invisible the same way; a PUG
- *  that finds nothing else takes one back through that holder's preemption
- *  (src/practiceLeases.ts, src/sideGames.ts), never by claiming it here. */
-export function claimIdle(db: DB): ServerRow | null {
+ *  A held box (booking, practice lease, side game) is invisible the same way;
+ *  a PUG that finds nothing else takes one back through that holder's
+ *  preemption (src/practiceLeases.ts, src/sideGames.ts), never by claiming it
+ *  here. One idle box is also kept back for each confirmed booking without a
+ *  box that starts within booking_protect_minutes (src/bookings/rules.ts), so
+ *  a PUG started now is not still running when the booking needs the box. */
+export function claimIdle(db: DB, nowMs: number = Date.now()): ServerRow | null {
   return db.transaction(() => {
-    const row = claimableServers(db)[0];
-    if (!row) return null;
+    const free = claimableServers(db);
+    if (free.length <= bookingsDue(db, nowMs, bookingLimits(db).protectMinutes)) return null;
+    const row = free[0];
     db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(row.id);
     return { ...row, status: 'reserved' as const };
   })();
