@@ -278,6 +278,21 @@ export function checkPreview(bytes: Uint8Array, aspect: Aspect, what = 'The prev
   return pass(size);
 }
 
+// ---- Team logo -------------------------------------------------------------
+
+/** Team logos are square PNGs the page draws at up to 128 px; the browser
+ *  resizes whatever the captain picks to exactly this before upload. */
+export const LOGO_SIDE = 256;
+export const LOGO_MAX_BYTES = 300 * 1024;
+
+export function checkLogo(bytes: Uint8Array): Checked<{ w: number; h: number }> {
+  if (bytes.length > LOGO_MAX_BYTES) return tooBig('The logo is over 300 KB.');
+  const size = pngSize(bytes);
+  if (!size) return bad('The logo is not a PNG.');
+  if (size.w !== LOGO_SIDE || size.h !== LOGO_SIDE) return bad(`The logo must be ${LOGO_SIDE} x ${LOGO_SIDE}.`);
+  return pass(size);
+}
+
 // ---- Imported HUD ----------------------------------------------------------
 
 /**
