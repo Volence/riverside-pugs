@@ -62,6 +62,10 @@ import { getPlayer } from './players.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { practicePlayers, type PracticePlayer } from './practicePlayers.js';
 import { bookingLimits, bookingsDue } from './bookings/rules.js';
+import { cvarValue, quoted, waitForStartup, type BoxRcon } from './serverSetup.js';
+export { STARTUP_POLLS, STARTUP_POLL_MS, STARTUP_GRACE_MS, cvarValue } from './serverSetup.js';
+/** Runs these commands on one short connection and returns each reply. */
+export type LeaseRcon = BoxRcon;
 
 export type LeaseKind = 'park' | 'drill' | 'hunter';
 /** Kinds a player owns: private, one open at a time per player. */
@@ -112,18 +116,6 @@ export const PREEMPT_WARN_MS = 60_000;
  *  round, so the check that it took (and the password and owner lines)
  *  wait for that to settle. */
 export const SETUP_SETTLE_MS = 15_000;
-/**
- * A freshly restarted box answers rcon BEFORE its own startup has finished:
- * server.cfg runs server_startup.cfg, which ends in `exec rotoblin_pub.cfg`,
- * and that lands after the first rcon answer. A practice cfg exec'd in that
- * gap was overwritten by Pub VS (lease 3 on the local rig, 2026-09-28; the
- * live boxes boot the same way). So setup polls `l4d_game_type_name` until
- * it reports the startup config (it contains "Pub"), this many times this
- * far apart, then waits STARTUP_GRACE_MS more.
- */
-export const STARTUP_POLLS = 10;
-export const STARTUP_POLL_MS = 2_000;
-export const STARTUP_GRACE_MS = 4_000;
 /** Tries at exec'ing the practice cfg and seeing it take. */
 export const CFG_TRIES = 3;
 
@@ -138,12 +130,6 @@ export const MODE_CHECK: Record<LeaseKind, { cvar: string; value: string }> = {
   hunter: { cvar: 'l4d_ht_enable', value: '1' },
 };
 
-/** A cvar's value from its console echo (`"name" = "value" ( def. ... )`),
- *  or null when the reply does not carry one (unknown cvar, dropped reply). */
-export function cvarValue(reply: string | undefined, name: string): string | null {
-  const m = new RegExp(`"${name}"\\s*=\\s*"([^"]*)"`).exec(reply ?? '');
-  return m ? m[1] : null;
-}
 /** The same lines again this much later: the per-map cfg that l4dready
  *  re-execs on the new map can reset cvars set in between. */
 export const SETUP_RESEND_MS = 5_000;
@@ -297,14 +283,6 @@ export function parseStatusMap(status: string): string | null {
   return m ? m[1] : null;
 }
 
-/** Quoted for the console: a URL carries `//`, which starts a comment
- *  unquoted. Quotes and line breaks are refused rather than escaped, since
- *  the Source console has no escape for either. */
-function quoted(v: string): string {
-  if (/["\r\n;]/.test(v)) throw new Error(`refusing to send ${JSON.stringify(v)} to a game server console`);
-  return `"${v}"`;
-}
-
 /** The lines that tell the box who it is for. Sent twice; see SETUP_RESEND_MS.
  *  A park has no owner in game (its plugin mode does not use one), so its
  *  owner cvar is set empty rather than to whoever happened to start it. */
@@ -342,9 +320,6 @@ const END_SAY: Record<EndReason, string> = {
   players_on_server: 'it was not free',
   interrupted: 'the site restarted while it was being set up',
 };
-
-/** Runs these commands on one short connection and returns each reply. */
-export type LeaseRcon = (server: ServerRow, commands: string[]) => Promise<string[]>;
 
 export interface PracticeLeaseDeps {
   db: DB;
@@ -505,7 +480,7 @@ export class PracticeLeases {
       // says "you can connect now" from here, which is true (the box is up),
       // and says ready only once it really is the practice config.
       phase('loading');
-      await this.waitForStartup(server);
+      await waitForStartup(this.deps.rcon, server, (ms) => this.sleep(ms));
       if (!this.stillActive(id)) return;
       await this.execVerified(server, first.kind);
       let lease = this.stillActive(id);
@@ -544,23 +519,6 @@ export class PracticeLeases {
       });
       this.end(id, 'setup_failed');
     }
-  }
-
-  /** Poll until the box's own startup config has run (see STARTUP_POLLS),
-   *  or the polls run out, then give it STARTUP_GRACE_MS more. Never
-   *  throws: a box that never says "Pub" may run a different startup cfg,
-   *  and the verify step after this is what decides. */
-  private async waitForStartup(server: ServerRow): Promise<void> {
-    for (let i = 0; i < STARTUP_POLLS; i++) {
-      try {
-        const [reply] = await this.deps.rcon(server, ['l4d_game_type_name']);
-        if ((cvarValue(reply, 'l4d_game_type_name') ?? '').includes('Pub')) break;
-      } catch {
-        // Still coming up; poll again.
-      }
-      await this.sleep(STARTUP_POLL_MS);
-    }
-    await this.sleep(STARTUP_GRACE_MS);
   }
 
   /** Whether the practice cfg of `kind` is what the box is running. */
