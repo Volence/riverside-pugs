@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { setSetting } from '../src/settings.js';
 import { sideSr, srFits, proposedPlaylist, nearestFreeSlot } from '../src/scrims/rules.js';
@@ -179,10 +179,16 @@ describe('nearestFreeSlot', () => {
   });
 
   it('defaults nowMs to the real clock when the caller passes none', () => {
-    // T0 is a few days ahead of the real clock in this suite's fictional
-    // calendar, so the exact start is both free and inside the default
-    // booking window without any booking rows at all.
-    expect(nearestFreeSlot(db, 'na', T0, 60)).toBe(new Date(T0).toISOString());
+    // Fixed rather than relying on the actual wall clock being before T0,
+    // which would start failing once real time catches up to the fictional
+    // calendar this suite's dates live in.
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    try {
+      expect(nearestFreeSlot(db, 'na', T0, 60)).toBe(new Date(T0).toISOString());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('skips a free earlier candidate that falls at or before now, and returns a later one instead', () => {
