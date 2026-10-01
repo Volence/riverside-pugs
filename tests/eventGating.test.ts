@@ -99,7 +99,7 @@ describe('event route gating', () => {
         expect((await call('GET', `/api/events/${draft.slug}`, who)).statusCode, 'draft page').toBe(DRAFT[sw][who]);
         expect((await call('GET', `/api/events/banners/${publishedBannerKey}`, who)).statusCode, 'banner').toBe(PUBLIC[sw][who]);
         expect((await call('GET', `/api/events/banners/${draftBannerKey}`, who)).statusCode, 'draft banner').toBe(DRAFT[sw][who]);
-        for (const url of ['/api/admin/events', '/api/admin/events/options', `/api/admin/events/${draft.id}`]) {
+        for (const url of ['/api/admin/events', '/api/admin/events/options', `/api/admin/events/${draft.id}`, `/api/admin/events/${draft.id}/banner`]) {
           expect((await call('GET', url, who)).statusCode, url).toBe(DESK_READ[who]);
         }
         if (PUBLIC[sw][who] === 200) {
@@ -118,6 +118,7 @@ describe('event route gating', () => {
       expect((await call('POST', `/api/admin/events/${draft.id}/publish`, who)).statusCode).toBe(DESK_WRITE[who]);
       expect((await call('POST', `/api/admin/events/${published.id}/cancel`, who, { reason: 'x' })).statusCode).toBe(DESK_WRITE[who]);
       expect((await call('POST', `/api/admin/events/${published.id}/banner/remove`, who)).statusCode).toBe(DESK_WRITE[who]);
+      expect((await call('POST', `/api/admin/events/${draft.id}/delete`, who)).statusCode).toBe(DESK_WRITE[who]);
     }
     expect(JSON.stringify([db.prepare('SELECT * FROM events').all(), db.prepare('SELECT COUNT(*) FROM event_log').get()])).toBe(before);
   });

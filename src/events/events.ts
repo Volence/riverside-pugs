@@ -345,3 +345,27 @@ export function setEventBanner(db: DB, o: { eventId: number; by: string; bannerK
     return V.ok(getEvent(db, ev.id)!);
   })();
 }
+
+/**
+ * Delete a draft outright: it was never public, so there is nothing to keep
+ * (cancelling it would publish it under Past). One transaction removes its
+ * event_log rows, its stages and the event row, in that order for the
+ * foreign keys. This is the one write here that adds no event_log row, as the
+ * rows it would add to are the ones it deletes; the admin audit row the route
+ * writes (event_delete, with the name and slug) is the record that it
+ * existed. tests/eventLogGuard.test.ts holds it to leaving no row behind and
+ * to writing nothing when any delete fails. A draft cannot have entries; if
+ * one somehow does, it is refused rather than orphaned.
+ */
+export function deleteDraftEvent(db: DB, o: { eventId: number; by: string }): EventResult<EventRow> {
+  return db.transaction((): EventResult<EventRow> => {
+    const ev = getEvent(db, o.eventId);
+    if (!ev) return V.fail('not_found');
+    if (ev.status !== 'draft') return V.fail('wrong_status');
+    if (db.prepare('SELECT 1 FROM event_entries WHERE event_id = ? LIMIT 1').get(ev.id)) return V.fail('has_entries');
+    db.prepare('DELETE FROM event_log WHERE event_id = ?').run(ev.id);
+    db.prepare('DELETE FROM event_stages WHERE event_id = ?').run(ev.id);
+    db.prepare('DELETE FROM events WHERE id = ?').run(ev.id);
+    return V.ok(ev);
+  })();
+}

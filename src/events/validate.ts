@@ -67,6 +67,7 @@ export const EVENT_ERRORS = {
   stages_locked: { status: 409, text: 'Stages cannot change once the event is live.' },
   kind_locked: { status: 409, text: 'The entry kind can only change while the event is a draft.' },
   draft_signups_later: { status: 409, text: 'Signups for a draft event arrive with the draft plan.' },
+  has_entries: { status: 409, text: 'This draft has entries, so it cannot be deleted.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type EventError = keyof typeof EVENT_ERRORS;
 
@@ -111,9 +112,12 @@ const intOrNull = (v: unknown, min: number, max: number): number | null | undefi
   v === null || v === undefined ? null : isInt(v, min, max) ? v : undefined;
 const oneOf = <T extends string>(list: readonly T[], v: unknown): v is T => typeof v === 'string' && (list as readonly string[]).includes(v);
 
-/** An ISO date and time with a zone, as UTC; null for anything else. */
+/** An ISO date and time with a zone (Z or +HH:MM / -HH:MM), as UTC; null
+ *  for anything else. A time with no zone is refused, not read in the
+ *  server's own zone. */
+const ISO_WITH_ZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 export function parseTime(v: unknown): string | null {
-  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v)) return null;
+  if (typeof v !== 'string' || !ISO_WITH_ZONE.test(v)) return null;
   const ms = Date.parse(v);
   return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }
@@ -368,8 +372,13 @@ export function checkChain(stages: { advanceCount: number | null }[], o: { teamC
 export const EVENT_EDITABLE: ReadonlySet<EventStatus> = new Set<EventStatus>(['draft', 'announced', 'registration']);
 export const STAGES_LOCKED: ReadonlySet<EventStatus> = new Set<EventStatus>(['live', 'finished', 'cancelled']);
 
+/** Where an event can be cancelled from. Never a draft: nobody outside
+ *  staff has seen it, so it is deleted instead (deleteDraftEvent), and a
+ *  cancelled event is public under Past. */
+const CANCELLABLE: ReadonlySet<EventStatus> = new Set<EventStatus>(['announced', 'registration', 'checkin', 'live']);
+
 /** The moves T1a makes (Ruling 3); check-in, live and finished come later. */
 export function nextStatusAllowed(from: EventStatus, to: EventStatus): boolean {
-  if (to === 'cancelled') return from !== 'finished' && from !== 'cancelled';
+  if (to === 'cancelled') return CANCELLABLE.has(from);
   return (from === 'draft' && to === 'announced') || (from === 'announced' && to === 'registration');
 }

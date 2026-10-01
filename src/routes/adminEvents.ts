@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { DB } from '../db.js';
 import type { CommunityStore } from '../community/store.js';
-import { BANNER_MAX_BYTES, checkBanner } from '../community/validate.js';
+import { BANNER_MAX_BYTES, bannerType, checkBanner } from '../community/validate.js';
 import { makeRequireAdmin, makeRequireMod } from './guards.js';
 import { logAdmin } from '../admin/audit.js';
 import { getPlayer } from '../players.js';
@@ -99,6 +99,24 @@ export async function adminEventRoutes(app: FastifyInstance, opts: { db: DB; sto
     return adminEventDetail(db, ev);
   });
 
+  /** The event's current banner for the desk itself. The public banner route
+   *  sits behind competitive_enabled and hides drafts from mods while the
+   *  switch is at admins, and the desk is not behind the switch (Ruling 13),
+   *  so it reads the bytes here: staff only, same lockdown headers, private. */
+  app.get('/api/admin/events/:id/banner', async (req, reply) => {
+    if (!requireStaff(req, reply)) return;
+    const id = idOf((req.params as { id: string }).id);
+    const key = id === null ? null : E.getEvent(db, id)?.banner_key ?? null;
+    const bytes = key ? opts.store().readBanner(key) : null;
+    const type = bytes ? bannerType(bytes) : null;
+    if (!bytes || !type) return refuse(reply, 'not_found');
+    return reply
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Content-Security-Policy', "default-src 'none'; sandbox")
+      .header('Cache-Control', 'private, max-age=3600')
+      .type(type === 'png' ? 'image/png' : 'image/webp').send(bytes);
+  });
+
   app.post('/api/admin/events', async (req, reply) => {
     const me = requireAdmin(req, reply);
     if (!me) return;
@@ -175,6 +193,19 @@ export async function adminEventRoutes(app: FastifyInstance, opts: { db: DB; sto
     if (!r.ok) return refuse(reply, r.error);
     logAdmin(db, me, 'event_banner', id, { bannerKey: name });
     return { bannerKey: name };
+  });
+
+  /** A draft is deleted, not cancelled (cancelling would publish it). The
+   *  name and slug go in the audit row, the only record left of it. */
+  app.post('/api/admin/events/:id/delete', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const id = idOf((req.params as { id: string }).id);
+    if (id === null) return refuse(reply, 'not_found');
+    const r = E.deleteDraftEvent(db, { eventId: id, by: me });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'event_delete', id, { name: r.value.name, slug: r.value.slug });
+    return { ok: true };
   });
 
   action('/api/admin/events/:id/banner/remove', 'event_banner_remove',

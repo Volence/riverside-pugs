@@ -155,4 +155,26 @@ describe('banner routes', () => {
     expect((await call('GET', '/api/events/banners/not-a-key')).statusCode).toBe(404);
     expect(db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'event_banner_remove'").get()).toEqual({ n: 1 });
   });
+
+  it('the desk serves the event banner to staff whatever the switch says, privately', async () => {
+    const ev = draftEvent();
+    const { bannerKey } = (await call('POST', `/api/admin/events/${ev.id}/banner`, ADMIN, { image: png(1600, 400).toString('base64') })).json();
+    expect(bannerKey).toMatch(/^[0-9a-f]{64}$/);
+    for (const sw of ['off', 'admins']) {
+      db.prepare("UPDATE settings SET value = ? WHERE key = 'competitive_enabled'").run(sw);
+      for (const who of [ADMIN, MOD]) {
+        const r = await call('GET', `/api/admin/events/${ev.id}/banner`, who);
+        expect([r.statusCode, r.headers['content-type'], r.headers['x-content-type-options'], r.headers['content-security-policy']], `${sw} ${who}`)
+          .toEqual([200, 'image/png', 'nosniff', "default-src 'none'; sandbox"]);
+        expect(r.headers['cache-control']).toMatch(/^private\b/);
+        expect(r.rawPayload.equals(png(1600, 400))).toBe(true);
+      }
+      expect((await call('GET', `/api/admin/events/${ev.id}/banner`, PLAYER)).statusCode).toBe(403);
+      expect((await call('GET', `/api/admin/events/${ev.id}/banner`)).statusCode).toBe(401);
+    }
+    expect((await call('GET', '/api/admin/events/999/banner', ADMIN)).statusCode).toBe(404);
+    expect((await call('GET', '/api/admin/events/abc/banner', ADMIN)).statusCode).toBe(404);
+    await call('POST', `/api/admin/events/${ev.id}/banner/remove`, ADMIN);
+    expect((await call('GET', `/api/admin/events/${ev.id}/banner`, ADMIN)).statusCode).toBe(404);
+  });
 });
