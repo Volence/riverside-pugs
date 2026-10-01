@@ -199,6 +199,13 @@ export interface VoiceOps {
     /** A role let into BOTH team channels, or null for none. Staff, so an
      *  admin can drop into either side without being on the roster. */
     staffRoleId: string | null,
+    /** `privateView`: @everyone is denied ViewChannel as well as Connect,
+     *  instead of today's "anyone can see in, only the roster can join". For
+     *  a booked scrim, where the side's players, ringers, approved spectators
+     *  and staff are each let in one at a time through setMemberAccess, and
+     *  nobody else should even see the channel exists. Omitted (or false),
+     *  behaviour is exactly as it always has been. */
+    opts?: { privateView?: boolean },
   ): Promise<{ categoryId: string; teamAId: string; teamBId: string }>;
   /** The voice channel a guild member is sitting in, or null. */
   memberVoiceChannel(userId: string): Promise<string | null>;
@@ -208,6 +215,17 @@ export interface VoiceOps {
   /** Who is currently in the channel; null when it no longer exists. */
   channelMemberIds(channelId: string): Promise<string[] | null>;
   deleteChannel(channelId: string): Promise<void>;
+  /**
+   * Give or take one member's own access to a channel, for a booking's
+   * private team voice: a ringer or an approved spectator added after the
+   * channel was made, or someone whose access must be pulled. `allow: true`
+   * adds a Member overwrite with View, Connect and Speak, a no-op when the
+   * member already has one; `allow: false` removes it. Ignores an unknown
+   * channel or an unknown member (the channel was already deleted, or the
+   * member has left the guild) rather than throwing, the way deleteChannel
+   * ignores a channel that is already gone.
+   */
+  setMemberAccess(channelId: string, userId: string, allow: boolean): Promise<void>;
 }
 
 /** Adding and removing one opt-in role, for the queue-alert toggle.
