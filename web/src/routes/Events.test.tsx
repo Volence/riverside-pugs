@@ -56,4 +56,10 @@ describe('Events', () => {
     render(<Events session={session} />);
     expect(await screen.findByText('Events are not open yet.')).toBeTruthy();
   });
+
+  it('says it could not load on any other failure, instead of staying blank', async () => {
+    mockEvents.list.mockRejectedValue(new ApiError(500, 'boom'));
+    render(<Events session={session} />);
+    expect((await screen.findByRole('alert')).textContent).toBe('Could not load events. Try again in a moment.');
+  });
 });

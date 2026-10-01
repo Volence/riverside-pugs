@@ -42,17 +42,24 @@ function entryLines(ev: EventView): string[] {
 export function EventPage({ slug, session }: { slug: string; session: Session }) {
   const [ev, setEv] = useState<EventView | null>(null);
   const [missing, setMissing] = useState(false);
+  const [failed, setFailed] = useState(false);
   const now = useNow();
 
   useEffect(() => {
     const ctl = new AbortController();
     setEv(null);
     setMissing(false);
-    eventsApi.get(slug, ctl.signal).then(setEv, (e) => { if (e instanceof ApiError && e.status === 404) setMissing(true); });
+    setFailed(false);
+    eventsApi.get(slug, ctl.signal).then(setEv, (e) => {
+      if (ctl.signal.aborted) return;
+      if (e instanceof ApiError && e.status === 404) setMissing(true);
+      else setFailed(true);
+    });
     return () => ctl.abort();
   }, [slug, session.kind]);
 
   if (missing) return <main class="page page--profile"><PageHeader title="Event" /><Empty>No such event, or events are not open yet.</Empty></main>;
+  if (failed) return <main class="page page--profile"><PageHeader title="Event" /><p class="error" role="alert">Could not load this event. Try again in a moment.</p></main>;
   if (!ev) return <main class="page page--profile"><PageHeader title="Event" /></main>;
 
   return (

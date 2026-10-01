@@ -102,4 +102,10 @@ describe('EventPage', () => {
     render(<EventPage slug="nope" session={session} />);
     expect(await screen.findByText('No such event, or events are not open yet.')).toBeTruthy();
   });
+
+  it('says it could not load on any other failure, instead of staying blank', async () => {
+    mockEvents.get.mockRejectedValue(new ApiError(500, 'boom'));
+    render(<EventPage slug="riverside-cup" session={session} />);
+    expect((await screen.findByRole('alert')).textContent).toBe('Could not load this event. Try again in a moment.');
+  });
 });
