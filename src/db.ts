@@ -253,6 +253,18 @@ CREATE TABLE IF NOT EXISTS booking_voice (
   created_at  TEXT NOT NULL,
   deleted_at  TEXT
 );
+-- Casters both captains invited to a booked scrim (plan 4c). Each side's
+-- manager sets their half; the caster sees the booking's games, live feed and
+-- relay only while both halves are set and they still hold is_caster in good
+-- standing (src/bookings/casters.ts). A row with both halves empty is deleted.
+CREATE TABLE IF NOT EXISTS booking_casters (
+  booking_id     INTEGER NOT NULL REFERENCES bookings(id),
+  caster_steamid TEXT NOT NULL REFERENCES players(steamid),
+  invited_by_a   TEXT,
+  invited_by_b   TEXT,
+  created_at     TEXT NOT NULL,
+  PRIMARY KEY (booking_id, caster_steamid)
+);
 -- Opt-outs from src/notify/. A missing row means the player gets that type.
 CREATE TABLE IF NOT EXISTS notification_prefs (
   steamid TEXT NOT NULL REFERENCES players(steamid),

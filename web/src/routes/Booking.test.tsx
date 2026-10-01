@@ -2,7 +2,10 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 
 const { mockBookings, mockAdmin } = vi.hoisted(() => ({
-  mockBookings: { get: vi.fn(), act: vi.fn(), cancel: vi.fn(), options: vi.fn(), next: vi.fn(), stay: vi.fn() },
+  mockBookings: {
+    get: vi.fn(), act: vi.fn(), cancel: vi.fn(), options: vi.fn(), next: vi.fn(), stay: vi.fn(),
+    casters: vi.fn(), inviteCaster: vi.fn(), withdrawCaster: vi.fn(),
+  },
   mockAdmin: { cancelBooking: vi.fn(), extendBooking: vi.fn(), endBooking: vi.fn() },
 }));
 vi.mock('../api', async (importOriginal) => {
@@ -22,6 +25,7 @@ const VIEW = (over: Record<string, unknown> = {}) => ({
   ],
   viewer: { side: 'a', manages: ['a'], staff: false, invited: false },
   games: [],
+  casters: [],
   ...over,
 });
 const session = { kind: 'active', me: { steamid: 'x0', name: 'p0', avatar: null, status: 'active', isAdmin: false, teams: true } } as never;
@@ -35,6 +39,7 @@ afterEach(() => {
 beforeEach(() => {
   mockBookings.get.mockResolvedValue(VIEW());
   mockBookings.options.mockResolvedValue(OPTIONS);
+  mockBookings.casters.mockResolvedValue({ casters: [{ steamid: 'c1', name: 'Caster One', avatar: null }, { steamid: 'c2', name: 'Caster Two', avatar: null }] });
 });
 
 describe('Booking page', () => {
@@ -148,6 +153,74 @@ describe('Booking page', () => {
       render(<Booking id="7" session={session} />);
       await waitFor(() => expect(mockBookings.get).toHaveBeenCalled());
       expect(screen.queryByRole('button', { name: 'Play this next' })).toBeNull();
+    });
+  });
+
+  describe('casters (plan 4c)', () => {
+    const C1 = { steamid: 'c1', name: 'Caster One', a: true, b: false };
+
+    it("shows each caster's status per side to a manager of a confirmed side", async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ casters: [C1] }));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByText('Casters')).toBeTruthy();
+      expect(screen.getByText("· p0's group ✓ / Mice pending", { exact: false })).toBeTruthy();
+    });
+
+    it('invites a picked caster, leaving out those this side already invited', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ casters: [C1] }));
+      mockBookings.inviteCaster.mockResolvedValue(VIEW({ casters: [C1, { steamid: 'c2', name: 'Caster Two', a: true, b: false }] }));
+      render(<Booking id="7" session={session} />);
+      const select = await screen.findByLabelText('Caster') as HTMLSelectElement;
+      await waitFor(() => expect(select.querySelectorAll('option')).toHaveLength(2));
+      expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toEqual(['Pick a caster', 'Caster Two']);
+      fireEvent.change(select, { target: { value: 'c2' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Invite' }));
+      await waitFor(() => expect(mockBookings.inviteCaster).toHaveBeenCalledWith(7, 'c2'));
+      expect(await screen.findByText('Caster Two')).toBeTruthy();
+    });
+
+    it("withdraws only this side's half: no Withdraw on a caster only the other side invited", async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ casters: [C1, { steamid: 'c2', name: 'Caster Two', a: false, b: true }] }));
+      mockBookings.withdrawCaster.mockResolvedValue(VIEW({ casters: [{ steamid: 'c2', name: 'Caster Two', a: false, b: true }] }));
+      render(<Booking id="7" session={session} />);
+      await screen.findByText('Caster One');
+      const withdraws = screen.getAllByRole('button', { name: 'Withdraw' });
+      expect(withdraws).toHaveLength(1);
+      expect(withdraws[0].closest('li')?.textContent).toContain('Caster One');
+      fireEvent.click(withdraws[0]);
+      await waitFor(() => expect(mockBookings.withdrawCaster).toHaveBeenCalledWith(7, 'c1'));
+    });
+
+    it('acts for side b when the viewer manages side b', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({
+        casters: [C1], viewer: { side: 'b', manages: ['b'], staff: false, invited: false },
+      }));
+      render(<Booking id="7" session={session} />);
+      const select = await screen.findByLabelText('Caster') as HTMLSelectElement;
+      // Side a's invite of Caster One leaves them invitable for side b.
+      await waitFor(() => expect(select.querySelectorAll('option')).toHaveLength(3));
+      expect(screen.queryByRole('button', { name: 'Withdraw' })).toBeNull();
+    });
+
+    it('has no casters panel for a player who manages nothing, nor for a staff-only viewer', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ casters: [C1], viewer: { side: 'a', manages: [], staff: false, invited: false } }));
+      render(<Booking id="7" session={session} />);
+      await waitFor(() => expect(mockBookings.get).toHaveBeenCalled());
+      await screen.findByText(/The server is ready/);
+      expect(screen.queryByText('Casters')).toBeNull();
+      cleanup();
+      mockBookings.get.mockResolvedValue(VIEW({ casters: [C1], viewer: { side: null, manages: [], staff: true, invited: false } }));
+      render(<Booking id="7" session={session} />);
+      await screen.findByText(/The server is ready/);
+      expect(screen.queryByText('Casters')).toBeNull();
+    });
+
+    it('lists but offers no invite or withdraw once the booking is over', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ state: 'ended', connect: null, casters: [C1] }));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByText('Caster One')).toBeTruthy();
+      expect(screen.queryByLabelText('Caster')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Withdraw' })).toBeNull();
     });
   });
 });

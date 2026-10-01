@@ -8,6 +8,7 @@ import { liveTeams, myTeams } from '../teams/teams.js';
 import { getCampaignPool } from '../settings.js';
 import { campaignRegistry } from '../campaignRegistry.js';
 import * as B from '../bookings/bookings.js';
+import { activeCasters, inviteCaster, withdrawCaster } from '../bookings/casters.js';
 import { bookingLimits, typicalCampaignMinutes, STEP_MINUTES } from '../bookings/rules.js';
 import { isNotifyType, prefsOf, setPref } from '../notify/notify.js';
 import type { BookingRunner } from '../bookings/runner.js';
@@ -82,6 +83,13 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
     };
   });
 
+  /** Casters a side's manager may invite (plan 4c): is_caster, in good standing. */
+  app.get('/api/bookings/casters', async (req, reply) => {
+    const me = allowed(req, reply);
+    if (!me) return;
+    return { casters: activeCasters(db) };
+  });
+
   app.get('/api/bookings/mine', async (req, reply) => {
     const me = allowed(req, reply);
     if (!me) return;
@@ -148,6 +156,18 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
     const b = body(req);
     return B.addPerson(db, { bookingId: id, by: me, side: b.side, steamid: b.steamid, role: b.role });
   }, (me, id, _value, req) => runner?.onPersonAdded(id, String(body(req).steamid), me));
+
+  // Casters (plan 4c): each confirmed side's manager sets or takes back their
+  // side's half of the invite; only both halves let the caster in.
+  action('casters', (me, id, req) => inviteCaster(db, { bookingId: id, by: me, caster: String(body(req).steamid ?? '') }));
+
+  app.post('/api/bookings/:id/casters/:steamid/withdraw', async (req, reply) => {
+    const v = visible(req, reply);
+    if (!v) return;
+    const r = withdrawCaster(db, { bookingId: v.id, by: v.me, caster: (req.params as { steamid: string }).steamid });
+    if (!r.ok) return refuse(reply, r.error);
+    return view(v.me, v.id);
+  });
 
   app.post('/api/bookings/:id/people/:steamid/remove', async (req, reply) => {
     const v = visible(req, reply);

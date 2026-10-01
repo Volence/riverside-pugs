@@ -74,6 +74,9 @@ function CastCard({ m }: { m: CastMatch }) {
   const status = phase && m.half && (m.phase === 'live' || m.phase === 'paused')
     ? `${phase} · Round ${m.half}` : phase;
   const lead = (mine: number, theirs: number) => (mine > theirs ? ' cast__score--lead' : '');
+  const tvLine = m.spectate && (m.spectate.password
+    ? `password ${m.spectate.password}; connect ${m.spectate.host}:${m.spectate.port}`
+    : `connect ${m.spectate.host}:${m.spectate.port}`);
   return (
     <section class="panel cast" style={{ '--cast-tint': campaignTint(m.campaign) }}>
       <div class="cast__top">
@@ -112,14 +115,19 @@ function CastCard({ m }: { m: CastMatch }) {
             <code>password {m.connect.password}; connect {m.connect.host}:{m.connect.port}</code>
             <CopyChip label="Copy" text={`password ${m.connect.password}; connect ${m.connect.host}:${m.connect.port}`} />
             <a class="chip" href={`steam://connect/${m.connect.host}:${m.connect.port}/${m.connect.password}`}>Steam</a>
-            {m.spectate && (
-              <CopyChip label="SourceTV" title="Copy the SourceTV connect line"
-                text={m.spectate.password
-                  ? `password ${m.spectate.password}; connect ${m.spectate.host}:${m.spectate.port}`
-                  : `connect ${m.spectate.host}:${m.spectate.port}`} />
-            )}
+            {tvLine && <CopyChip label="SourceTV" title="Copy the SourceTV connect line" text={tvLine} />}
           </div>
           <p class="muted cast__hint">Paste it into the console. Through Steam, press Enter on the password prompt.</p>
+        </>
+      ) : m.booked ? (
+        <>
+          {tvLine && (
+            <div class="cast__connect">
+              <code>{tvLine}</code>
+              <CopyChip label="Copy" text={tvLine} />
+            </div>
+          )}
+          <p class="muted cast__hint">A booked scrim: watch it through SourceTV. The game server is only for the two sides.</p>
         </>
       ) : (
         <p class="muted cast__hint">Started in game, so the site does not know this server's password. Ask an admin for it.</p>

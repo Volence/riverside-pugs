@@ -41,6 +41,53 @@ function AddPerson({ id, side, onDone }: { id: number; side: BookingSide; onDone
   );
 }
 
+/** Casters for a booked scrim (plan 4c): a caster sees the games, live feed
+ *  and relay only once both sides invite them, so each side's manager sets or
+ *  takes back their own side's half here. */
+function Casters({ v, mySide, open, busy, act }: {
+  v: BookingView; mySide: BookingSide; open: boolean; busy: boolean; act: (fn: () => Promise<BookingView>) => void;
+}) {
+  const [choices, setChoices] = useState<{ steamid: string; name: string }[]>([]);
+  const [pick, setPick] = useState('');
+  useEffect(() => {
+    if (!open) return;
+    const ctl = new AbortController();
+    bookingsApi.casters(ctl.signal).then((r) => setChoices(r.casters), () => {});
+    return () => ctl.abort();
+  }, [open]);
+  const nameOf = (side: BookingSide) => v.sides.find((s) => s.side === side)!.name;
+  const mine = (c: BookingView['casters'][number]) => (mySide === 'a' ? c.a : c.b);
+  const invitable = choices.filter((c) => !v.casters.some((x) => x.steamid === c.steamid && mine(x)));
+  return (
+    <Panel>
+      <h3>Casters</h3>
+      <p class="muted">A caster sees this scrim's games, live feed and SourceTV only once both sides invite them.</p>
+      {v.casters.length > 0 && (
+        <ul class="bookingcasters">
+          {v.casters.map((c) => (
+            <li key={c.steamid}>
+              <span>{c.name}</span>
+              <span class="muted"> · {nameOf('a')} {c.a ? '✓' : 'pending'} / {nameOf('b')} {c.b ? '✓' : 'pending'}</span>
+              {open && mine(c) && (
+                <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.withdrawCaster(v.id, c.steamid))}>Withdraw</button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {open && (
+        <p>
+          <select aria-label="Caster" value={pick} onChange={(e) => setPick((e.target as HTMLSelectElement).value)}>
+            <option value="">Pick a caster</option>
+            {invitable.map((c) => <option key={c.steamid} value={c.steamid}>{c.name}</option>)}
+          </select>
+          <button class="btn" disabled={busy || !pick} onClick={() => { act(() => bookingsApi.inviteCaster(v.id, pick)); setPick(''); }}>Invite</button>
+        </p>
+      )}
+    </Panel>
+  );
+}
+
 export function Booking({ id, session }: { id: string; session: Session }) {
   const { route } = useLocation();
   const [v, setV] = useState<BookingView | null>(null);
@@ -113,6 +160,8 @@ export function Booking({ id, session }: { id: string; session: Session }) {
   // through the admin routes instead: the player routes never pass a staff
   // flag, so those buttons would just fail with "not a manager".
   const managesConfirmedSide = v.viewer.manages.some((s) => v.sides.find((side) => side.side === s)?.confirmed);
+  // The side this viewer acts for, as the server picks it (actingSides()[0]).
+  const actingSide = v.viewer.manages.find((s) => v.sides.find((side) => side.side === s)?.confirmed) ?? null;
   const playerManage = open && managesConfirmedSide;
   const staffOnly = open && v.viewer.staff && !playerManage;
   const canManage = playerManage || staffOnly;
@@ -186,6 +235,7 @@ export function Booking({ id, session }: { id: string; session: Session }) {
           </ul>
         </Panel>
       )}
+      {actingSide && <Casters v={v} mySide={actingSide} open={open} busy={busy} act={act} />}
       {canPlayGames && (
         <Panel>
           <h3>Next campaign</h3>

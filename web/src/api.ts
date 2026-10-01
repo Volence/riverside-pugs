@@ -1642,6 +1642,8 @@ export interface CastMatch {
   /** Null for a match started in game: its password is the box's own. */
   connect: { host: string; port: number; password: string } | null;
   spectate: SpectateInfo | null;
+  /** A booking's game (plan 4c): connect is always null, SourceTV only. */
+  booked: boolean;
 }
 
 export const castApi = {
@@ -1730,7 +1732,10 @@ export interface BookingView {
   cancel: { side: BookingSide | null; reason: string | null } | null; endReason: string | null; noShowFrom: string;
   viewer: { side: BookingSide | null; manages: BookingSide[]; staff: boolean; invited: boolean };
   games: BookingGameView[];
+  /** Casters either side invited, and which sides' halves are set. */
+  casters: BookingCaster[];
 }
+export interface BookingCaster { steamid: string; name: string; a: boolean; b: boolean }
 export interface NewBooking {
   teamId: number | null; opponent: { teamId: number } | { steamid: string }; startsAt: string; minutes: number;
   playlist: string[]; rulesetId?: number; gameConfig?: string;
@@ -1752,6 +1757,10 @@ export const bookingsApi = {
    *  playlist one when omitted), or replay the last game's campaign. */
   next: (id: number, campaign?: string) => post<BookingView>(`/api/bookings/${id}/next`, campaign ? { campaign } : undefined),
   stay: (id: number) => post<BookingView>(`/api/bookings/${id}/stay`),
+  /** Casters (plan 4c): who may be invited, and a side's half of an invite. */
+  casters: (signal?: AbortSignal) => get<{ casters: { steamid: string; name: string; avatar: string | null }[] }>('/api/bookings/casters', signal),
+  inviteCaster: (id: number, steamid: string) => post<BookingView>(`/api/bookings/${id}/casters`, { steamid }),
+  withdrawCaster: (id: number, steamid: string) => post<BookingView>(`/api/bookings/${id}/casters/${enc(steamid)}/withdraw`),
 };
 
 export interface AdminBookingRow {

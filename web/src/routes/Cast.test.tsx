@@ -20,6 +20,7 @@ const match = (over: Partial<CastMatch> = {}): CastMatch => ({
   teamA: ['alice', 'bob'], teamB: ['carol', 'dave'],
   connect: { host: '1.2.3.4', port: 27015, password: 'pug_abc' },
   spectate: null,
+  booked: false,
   ...over,
 });
 
@@ -46,6 +47,17 @@ describe('Cast', () => {
     render(<Cast />);
     expect(await screen.findByText(/does not know this server's password/)).toBeTruthy();
     expect(screen.queryByText(/^password /)).toBeNull();
+  });
+
+  it('a booked scrim shows only its SourceTV line with the relay password, never a game server line', async () => {
+    mockCast.list.mockResolvedValue({ matches: [match({
+      connect: null, booked: true, spectate: { host: '5.6.7.8', port: 27020, password: 'tvbooked', delay: 0 },
+    })] });
+    render(<Cast />);
+    expect(await screen.findByText('password tvbooked; connect 5.6.7.8:27020')).toBeTruthy();
+    expect(screen.getByText(/A booked scrim: watch it through SourceTV/)).toBeTruthy();
+    expect(screen.queryByText(/does not know this server's password/)).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Steam' })).toBeNull();
   });
 
   it('says so when nothing is live', async () => {
