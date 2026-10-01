@@ -18,6 +18,8 @@ import { bookingMessage } from '../src/bookings/messages.js';
 import { classifyBox, type BoxSignals } from '../src/bookings/recovery.js';
 import { setMissionsDirs, invalidateCampaignCache } from '../src/campaignRegistry.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
+import { reapOrphanedMatches } from '../src/liveView.js';
+import { ServerReleaser } from '../src/serverRelease.js';
 
 const P = Array.from({ length: 10 }, (_, i) => `765611990000009${String(i).padStart(2, '0')}`);
 const START = Date.parse('2026-10-02T20:00:00.000Z');
@@ -188,7 +190,7 @@ describe('recovery writes', () => {
 });
 
 describe('classifyBox', () => {
-  const base: BoxSignals = { rconOk: true, marker: '7', bookingId: 7, nowMs: 1_000_000, lostSinceMs: null, heartbeatMs: null, a2sPlayers: null, goneMs: 3 * MIN };
+  const base: BoxSignals = { rconOk: true, marker: '7', bookingId: 7, nowMs: 1_000_000, lostSinceMs: null, heartbeatMs: null, a2sPlayers: null, a2sSeenMs: null, goneMs: 3 * MIN };
   it('ok when rcon answers with our marker, or with no marker cvar at all (old plugin)', () => {
     expect(classifyBox(base)).toEqual({ kind: 'ok' });
     expect(classifyBox({ ...base, marker: null })).toEqual({ kind: 'ok' });
@@ -209,6 +211,12 @@ describe('classifyBox', () => {
   });
   it('gone when rcon, heartbeat and A2S are all silent past the limit', () => {
     expect(classifyBox({ ...base, rconOk: false, lostSinceMs: base.nowMs - 3 * MIN, heartbeatMs: base.nowMs - 4 * MIN })).toEqual({ kind: 'gone' });
+  });
+  it('quiet, not gone, when this A2S query got no answer but one within the limit did (one lost UDP reply)', () => {
+    expect(classifyBox({ ...base, rconOk: false, lostSinceMs: base.nowMs - 5 * MIN, a2sSeenMs: base.nowMs - MIN })).toEqual({ kind: 'quiet' });
+  });
+  it('gone once the last A2S answer is older than the limit', () => {
+    expect(classifyBox({ ...base, rconOk: false, lostSinceMs: base.nowMs - 8 * MIN, a2sSeenMs: base.nowMs - 3 * MIN })).toEqual({ kind: 'gone' });
   });
 });
 
@@ -303,7 +311,8 @@ describe('srcds restarted', () => {
     const cmds = sent.filter((s) => s.server === 'ccc').flatMap((s) => s.cmds);
     const resume = cmds.indexOf(`sm_pug_resume ${m} tok123 l4d_vs_hospital01_apartment a ${1}`);
     expect(resume).toBeGreaterThan(-1);
-    expect(cmds.indexOf('sm_pug_auto_track 0')).toBeLessThan(resume);
+    // The resume leads its burst: sm_pug_auto_track 0 never kept auto-track off (gameLines sets it to 1 in the same burst).
+    expect(cmds).not.toContain('sm_pug_auto_track 0');
     expect(cmds).toContain('sm_pug_resume_map l4d_vs_hospital01_apartment 400 300');
     expect(cmds).toContain('changelevel l4d_vs_hospital02_subway');
     expect(box.ccc.marker).toBe(String(id));
@@ -426,12 +435,51 @@ describe('srcds restarted', () => {
     expect(getBooking(db, id)).toMatchObject({ recovering_at: null, recoveries: 1 });
   });
 
-  it('a box that answers with our marker is left alone', async () => {
+  it('an End that arrives during the recovery winds the booking down with no booking_recovered notice', async () => {
     const id = await running();
+    crash();
+    let ended = false;
+    const rcon = async (server: ServerRow, cmds: string[]): Promise<string[]> => {
+      if (!ended && cmds.some((c) => c.startsWith('changelevel '))) {
+        ended = true;
+        expect(endBooking(db, { bookingId: id, by: P[0], now: new Date(now) }).ok).toBe(true);
+      }
+      return fakeRcon(server, cmds);
+    };
+    const r = build({ rcon });
+    await r.tick();
+    await r.idle();
+    expect(ended).toBe(true);
+    expect(dms.some((d) => d.content.includes('restarted'))).toBe(false);
+    expect(getBooking(db, id)).toMatchObject({ state: 'ended' });
+    expect(getBooking(db, id)!.ended_at).not.toBeNull();
+    expect(sent.flatMap((s) => s.cmds).some((c) => c.startsWith('say [Booking] Restored'))).toBe(false);
+  });
+
+  it('a restart between games is not read as everyone leaving after the game', async () => {
+    const id = await running();
+    now = START + 40 * MIN;
+    const sql = (ms: number) => new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
+    db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, server_id, token, origin, kind, visibility, booking_id, booking_side_a, ended_at) VALUES (?, 'completed', 'no_mercy', 3, 'tokdone', 'in_game', 'scrim', 'participants', ?, 'a', ?)",
+    ).run(currentSeasonId(db), id, sql(now - 10 * MIN));
+    crash();
     await runner.tick();
     await runner.idle();
-    expect(getBooking(db, id)!.recovering_at).toBeNull();
-    expect(sent.flatMap((s) => s.cmds)).not.toContain('sm_pug_auto_track 0');
+    expect(getBooking(db, id)).toMatchObject({ recovering_at: null, recoveries: 1 });
+    // Two empty watches within a minute of the restore: everyone is reconnecting.
+    now += 30_000; await runner.tick(); await runner.idle();
+    now += 30_000; await runner.tick(); await runner.idle();
+    expect(getBooking(db, id)!.ending_at).toBeNull();
+  });
+
+  it('a box that answers with our marker is left alone', async () => {
+    const id = await running();
+    sent = [];
+    await runner.tick();
+    await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ recovering_at: null, recoveries: 0 });
+    expect(sent.flatMap((s) => s.cmds)).not.toContain('exec pug_match');
   });
 });
 
@@ -470,6 +518,20 @@ describe('box gone', () => {
     } finally {
       off();
     }
+  });
+
+  it('one lost A2S reply does not move a booking whose box answered the server browser a minute ago', async () => {
+    const answers = [true, false, false, false, false];
+    runner = build({ a2s: async () => (answers.shift() ? { players: 0, map: 'x' } : null) });
+    const id = await running();
+    kill();
+    await runner.tick(); await runner.idle();
+    now += 3 * MIN; await runner.tick(); await runner.idle(); // A2S answers
+    now += MIN; await runner.tick(); await runner.idle(); // one reply lost
+    expect(getBooking(db, id)).toMatchObject({ server_id: 3, recovering_at: null });
+    // Silent for the whole limit since the last answer: now it is gone.
+    now += 3 * MIN; await runner.tick(); await runner.idle();
+    expect(getBooking(db, id)!.server_id).not.toBe(3);
   });
 
   it('never moves while the live game still heartbeats', async () => {
@@ -560,6 +622,18 @@ describe('box gone', () => {
     expect(row()).toEqual({ status: 'idle', gone_since: null });
   });
 
+  it('a gone box the releaser is already restarting (staff Set idle) is not given back a second time', async () => {
+    runner = build({ a2s: async () => null, releasing: (sid) => sid === 3 });
+    await running();
+    kill();
+    await runner.tick(); now += 3 * MIN; await runner.tick(); await runner.idle();
+    box.ccc.down = false;
+    await runner.tick(); await runner.idle();
+    await runner.tick(); await runner.idle();
+    await runner.tick(); await runner.idle();
+    expect(released).toEqual([]);
+  });
+
   /** Booking `id` waiting for a box (both others busy) with its live game. */
   async function waitingWithGame(r: BookingRunner): Promise<{ id: number; m: number }> {
     runner = r;
@@ -584,6 +658,17 @@ describe('box gone', () => {
     expect(db.prepare('SELECT state, abort_cause FROM matches WHERE id = ?').get(m)).toEqual({ state: 'aborted', abort_cause: 'booking_ended' });
     expect(unregistered).toContain('tok123');
     expect(released).toEqual([]);
+  });
+
+  it('a reap right after a long-wait move leaves the moved game alone', async () => {
+    const { id, m } = await waitingWithGame(build({ a2s: async () => null }));
+    now += 15 * MIN;
+    db.prepare("UPDATE servers SET status = 'idle' WHERE id = 2").run();
+    await runner.tick(); await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ server_id: 2, recovering_at: null, recoveries: 1 });
+    // The fresh plugin's first heartbeat has not landed yet.
+    expect(reapOrphanedMatches(db, new ServerReleaser(db, async () => {}))).toEqual([]);
+    expect(db.prepare('SELECT state FROM matches WHERE id = ?').get(m)).toEqual({ state: 'live' });
   });
 
   it('a staff cancel during the wait aborts the live game and closes the booking', async () => {
