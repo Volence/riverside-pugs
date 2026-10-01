@@ -40,6 +40,7 @@ function isCurrent(href: string, path: string): boolean {
   if (href === '/balance') return path === href || path.startsWith('/balance/');
   if (href === '/teams') return path === '/teams' || path.startsWith('/team/');
   if (href === '/bookings') return path === '/bookings' || path.startsWith('/booking/');
+  if (href === '/events') return path === '/events' || path.startsWith('/event/');
   return path === href;
 }
 
@@ -67,9 +68,12 @@ export function Nav(
   };
   const me = session.kind === 'active' || session.kind === 'pending' ? session.me : null;
   const live = state?.match && state.match.state === 'live' ? state.match : null;
-  // Teams, Bookings and Scrims only for viewers the competitive switch lets in (/api/me teams).
+  // Teams, Bookings, Scrims and Events only for viewers the competitive switch lets in (/api/me teams).
   const links = me?.teams
-    ? [...NAV_LINKS.slice(0, 5), ['/teams', 'Teams'] as const, ['/bookings', 'Bookings'] as const, ['/scrims', 'Scrims'] as const, ...NAV_LINKS.slice(5)]
+    ? [
+      ...NAV_LINKS.slice(0, 5), ['/teams', 'Teams'] as const, ['/bookings', 'Bookings'] as const, ['/scrims', 'Scrims'] as const,
+      ['/events', 'Events'] as const, ...NAV_LINKS.slice(5),
+    ]
     : NAV_LINKS;
 
   return (
