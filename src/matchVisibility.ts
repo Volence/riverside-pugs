@@ -6,11 +6,11 @@ import { managesSide, sidesOf } from './bookings/bookings.js';
  *
  * public: everyone. participants: staff, the players of that match, and, for
  * a match that is a booking's game (plan 4b), that booking's accepted people
- * and its side managers (later plans add ringers, approved spectators and
- * invited casters). staff: staff only. Every route that returns a match, its
- * demos, replays, timeline or live round goes through canViewMatch or
- * visibleMatchesSql, and answers a match the viewer may not see exactly like
- * a match that does not exist.
+ * and the managers of its confirmed sides (later plans add ringers, approved
+ * spectators and invited casters). staff: staff only. Every route that
+ * returns a match, its demos, replays, timeline or live round goes through
+ * canViewMatch or visibleMatchesSql, and answers a match the viewer may not
+ * see exactly like a match that does not exist.
  */
 export interface Viewer { steamid: string | null; staff: boolean }
 
@@ -22,11 +22,14 @@ export function viewerFor(db: DB, steamid: string | null): Viewer {
 }
 
 /** True when steamid is an accepted person of this booking, or manages one
- *  of its sides (pickup captain, or captain/co-captain of a team side). */
+ *  of its confirmed sides (pickup captain, or captain/co-captain of a team
+ *  side). An unconfirmed side's prospective manager only confirms or
+ *  declines (see actingSides in bookings/bookings.ts), so they do not see
+ *  the booking's games through managing it either. */
 function bookingParticipant(db: DB, bookingId: number, steamid: string): boolean {
   if (db.prepare("SELECT 1 FROM booking_people WHERE booking_id = ? AND steamid = ? AND status = 'accepted'")
     .get(bookingId, steamid)) return true;
-  return sidesOf(db, bookingId).some((s) => managesSide(db, s, steamid));
+  return sidesOf(db, bookingId).some((s) => s.confirmed_at !== null && managesSide(db, s, steamid));
 }
 
 export function canViewMatch(db: DB, viewer: Viewer, matchId: number): boolean {
@@ -48,11 +51,11 @@ export function visibleMatchesSql(viewer: Viewer, alias: string): { sql: string;
             OR EXISTS (SELECT 1 FROM booking_people vis_bp WHERE vis_bp.booking_id = ${alias}.booking_id
               AND vis_bp.steamid = ? AND vis_bp.status = 'accepted')
             OR EXISTS (SELECT 1 FROM booking_sides vis_bs WHERE vis_bs.booking_id = ${alias}.booking_id
-              AND vis_bs.team_id IS NULL AND vis_bs.captain_steamid = ?)
+              AND vis_bs.team_id IS NULL AND vis_bs.captain_steamid = ? AND vis_bs.confirmed_at IS NOT NULL)
             OR EXISTS (SELECT 1 FROM booking_sides vis_bs2
               JOIN team_members vis_tm ON vis_tm.team_id = vis_bs2.team_id
                 AND vis_tm.left_at IS NULL AND vis_tm.role IN ('captain','cocaptain')
-              WHERE vis_bs2.booking_id = ${alias}.booking_id AND vis_tm.steamid = ?)
+              WHERE vis_bs2.booking_id = ${alias}.booking_id AND vis_tm.steamid = ? AND vis_bs2.confirmed_at IS NOT NULL)
           )))`,
     params: [viewer.steamid, viewer.steamid, viewer.steamid, viewer.steamid],
   };
