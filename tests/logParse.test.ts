@@ -631,6 +631,20 @@ describe('PUGBOOK parsing', () => {
     expect(parseLogDatagram(framed('PUGBOOK event=cmd cmd=changemap steamid=76561198000000001 arg='))).toBeNull();
   });
 
+  // Bookings by campaign: l4d_booking 1.3.0's !addcampaign, a campaign name
+  // in arg or none; !extend stays as its own cmd with no arg.
+  it('parses an addcampaign line, with a campaign name or with none', () => {
+    expect(parseLogDatagram(framed('PUGBOOK event=cmd cmd=addcampaign steamid=76561198000000001 arg=dead air'))).toEqual(
+      { kind: 'booking_cmd', steamid: '76561198000000001', cmd: 'addcampaign', arg: 'dead air' },
+    );
+    expect(parseLogDatagram(framed('PUGBOOK event=cmd cmd=addcampaign steamid=76561198000000001 arg='))).toEqual(
+      { kind: 'booking_cmd', steamid: '76561198000000001', cmd: 'addcampaign', arg: '' },
+    );
+    expect(parseLogDatagram(framed('PUGBOOK event=cmd cmd=extend steamid=76561198000000001 arg='))).toEqual(
+      { kind: 'booking_cmd', steamid: '76561198000000001', cmd: 'extend', arg: '' },
+    );
+  });
+
   // arg is free text and LAST on the line, so cmd and steamid are read from
   // the slice BEFORE the first ' arg=' only, exactly as PUGTV reads its
   // reason=: text typed into arg can never overwrite the real cmd.

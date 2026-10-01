@@ -793,6 +793,21 @@ export function setWarned(db: DB, id: number, minutes: number): void {
   db.prepare('UPDATE bookings SET warned_minutes = ? WHERE id = ?').run(minutes, id);
 }
 
+/** Bookings by campaign, Ruling 3: `played` finished games have reached
+ *  games_allowed, so the booking closes at `atIso` unless +1 campaign
+ *  (addCampaign, which clears close_at) comes first. Only on a running
+ *  booking whose count has really been reached. ending_at stays null through
+ *  the grace, so a captain can still add a campaign. */
+export function setCloseAt(db: DB, id: number, played: number, atIso: string, now: Date): boolean {
+  return db.transaction(() => {
+    const changed = db.prepare(
+      "UPDATE bookings SET close_at = ? WHERE id = ? AND state IN ('ready','active') AND ending_at IS NULL AND games_allowed <= ?",
+    ).run(atIso, id, played).changes > 0;
+    if (changed) logEvent(db, id, null, 'close_set', { at: atIso, played }, now);
+    return changed;
+  })();
+}
+
 /** Invites nobody confirmed in time (rules.ts UNCONFIRMED_*), cancelled. */
 export function expireUnconfirmed(db: DB, now: Date): number[] {
   const nowMs = now.getTime();
