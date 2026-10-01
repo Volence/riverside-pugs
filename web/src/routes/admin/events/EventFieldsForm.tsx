@@ -2,19 +2,46 @@ import { useState } from 'preact/hooks';
 import type { EntryKind, EventFields, EventStatus, RosterLock } from '../../../api';
 import { fromLocalInput, toLocalInput } from '../../../eventFormat';
 import { RichText } from '../../../components/RichText';
+import { readWhole } from './wholeNumber';
 
 const val = (e: Event): string => (e.target as HTMLInputElement).value;
-const numOrNull = (v: string): number | null => (v.trim() === '' ? null : Number(v));
+
+/** The number fields, kept as typed and read only at Save (wholeNumber.ts).
+ *  Blank means "not set" for the four whose null means that. */
+type NumKey = 'teamCap' | 'minPugs' | 'srFloor' | 'srCeiling' | 'opensMinutes' | 'closesMinutes' | 'maxSubs' | 'lockStage' | 'lockRound' | 'maxAdditions';
+const NUM_LABEL: Record<NumKey, string> = {
+  teamCap: 'Team cap', minPugs: 'Minimum completed PUGs', srFloor: 'SR floor', srCeiling: 'SR ceiling',
+  opensMinutes: 'Check-in opens', closesMinutes: 'Check-in closes', maxSubs: 'Max subs',
+  lockStage: 'Lock after stage', lockRound: 'Lock after round', maxAdditions: 'Max roster additions',
+};
+const BLANK_IS_NONE: ReadonlySet<NumKey> = new Set<NumKey>(['teamCap', 'srFloor', 'srCeiling', 'maxAdditions']);
+const str = (n: number | null): string => (n === null ? '' : String(n));
+function typedOf(f: EventFields): Record<NumKey, string> {
+  const lock = f.roster.lock;
+  return {
+    teamCap: str(f.teamCap), minPugs: str(f.eligibility.minPugs), srFloor: str(f.eligibility.srFloor), srCeiling: str(f.eligibility.srCeiling),
+    opensMinutes: str(f.checkin.opensMinutes), closesMinutes: str(f.checkin.closesMinutes), maxSubs: str(f.roster.maxSubs),
+    lockStage: lock.kind === 'after_round' ? String(lock.stage) : '1', lockRound: lock.kind === 'after_round' ? String(lock.round) : '1',
+    maxAdditions: str(f.roster.maxAdditions),
+  };
+}
 
 /** The event's own settings. Times are typed in the admin's zone and sent as
- *  UTC (Ruling 11); the server checks every range. Keyed by the event's
- *  updatedAt in the editor, so a save that reloads starts it afresh. */
+ *  UTC (Ruling 11); the server checks every range. The editor keys it by the
+ *  event id and remounts it only after its own successful save, so a banner
+ *  upload or a stage change that reloads the event keeps unsaved typing. */
 export function EventFieldsForm({ fields, status, busy, onSave }: {
   fields: EventFields; status: EventStatus; busy: boolean; onSave: (f: EventFields) => void;
 }) {
   const [f, setF] = useState<EventFields>(fields);
   const [start, setStart] = useState(toLocalInput(fields.startsAt));
   const [lockAt, setLockAt] = useState(fields.roster.lock.kind === 'at' ? toLocalInput(fields.roster.lock.at) : '');
+  /** The instant the lock input was filled from, and how it read then: an
+   *  untouched input sends that instant back, not a DST round-trip of it. */
+  const [lockFrom, setLockFrom] = useState(fields.roster.lock.kind === 'at'
+    ? { local: toLocalInput(fields.roster.lock.at), iso: fields.roster.lock.at } : null);
+  const [typed, setTyped] = useState<Record<NumKey, string>>(() => typedOf(fields));
+  const typeInto = (k: NumKey) => (e: Event) => { const v = val(e); setTyped((x) => ({ ...x, [k]: v })); };
   const [problem, setProblem] = useState<string | null>(null);
   const [preview, setPreview] = useState(false);
   const set = (patch: Partial<EventFields>) => setF((x) => ({ ...x, ...patch }));
@@ -23,7 +50,10 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
   const roster = (patch: Partial<EventFields['roster']>) => set({ roster: { ...f.roster, ...patch } });
   const lock = f.roster.lock;
   const setLockKind = (kind: RosterLock['kind']) => {
-    if (kind === 'at' && !lockAt) setLockAt(toLocalInput(f.startsAt));
+    if (kind === 'at' && !lockAt) {
+      setLockAt(toLocalInput(f.startsAt));
+      setLockFrom({ local: toLocalInput(f.startsAt), iso: f.startsAt });
+    }
     roster({ lock: kind === 'none' ? { kind } : kind === 'at' ? { kind, at: f.startsAt } : { kind, stage: 1, round: 1 } });
   };
 
@@ -37,14 +67,32 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
     // sent back exactly as it came.
     const startsAt = start === toLocalInput(fields.startsAt) ? fields.startsAt : fromLocalInput(start);
     if (!startsAt) { setProblem('Pick a start time.'); return; }
+    const used: NumKey[] = ['teamCap', 'minPugs', 'srFloor', 'srCeiling', 'maxSubs', 'maxAdditions',
+      ...(f.checkin.enabled ? ['opensMinutes' as const, 'closesMinutes' as const] : []),
+      ...(lock.kind === 'after_round' ? ['lockStage' as const, 'lockRound' as const] : [])];
+    const n: Partial<Record<NumKey, number | null>> = {};
+    for (const k of used) {
+      const r = readWhole(typed[k], NUM_LABEL[k], BLANK_IS_NONE.has(k));
+      if (!r.ok) { setProblem(r.error); return; }
+      n[k] = r.value;
+    }
+    const whole = (k: NumKey): number => n[k] as number;
     let rosterLock: RosterLock = lock;
     if (lock.kind === 'at') {
-      const at = fromLocalInput(lockAt);
+      // Same rule as the start time, for the same DST reason.
+      const at = lockFrom && lockAt === lockFrom.local ? lockFrom.iso : fromLocalInput(lockAt);
       if (!at) { setProblem('Pick when the rosters lock.'); return; }
       rosterLock = { kind: 'at', at };
+    } else if (lock.kind === 'after_round') {
+      rosterLock = { kind: 'after_round', stage: whole('lockStage'), round: whole('lockRound') };
     }
     setProblem(null);
-    onSave({ ...f, startsAt, roster: { ...f.roster, lock: rosterLock } });
+    onSave({
+      ...f, startsAt, teamCap: n.teamCap ?? null,
+      eligibility: { ...f.eligibility, minPugs: whole('minPugs'), srFloor: n.srFloor ?? null, srCeiling: n.srCeiling ?? null },
+      checkin: f.checkin.enabled ? { ...f.checkin, opensMinutes: whole('opensMinutes'), closesMinutes: whole('closesMinutes') } : f.checkin,
+      roster: { ...f.roster, maxSubs: whole('maxSubs'), maxAdditions: n.maxAdditions ?? null, lock: rosterLock },
+    });
   };
 
   return (
@@ -60,7 +108,7 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
       </label>
       <label><input type="checkbox" aria-label="Official event" checked={f.official} onChange={() => set({ official: !f.official })} /> Official event</label>
       <label class="teamfield">Team cap (blank for none)
-        <input aria-label="Team cap" type="number" min={2} max={256} value={f.teamCap ?? ''} onInput={(e) => set({ teamCap: numOrNull(val(e)) })} />
+        <input aria-label="Team cap" type="number" min={2} max={256} value={typed.teamCap} onInput={typeInto('teamCap')} />
       </label>
       <div class="teamfield">
         <span class="inlinerow">
@@ -74,14 +122,14 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
       <fieldset class="bookform__fieldset">
         <legend class="teamsub">Eligibility</legend>
         <label class="teamfield">Minimum completed PUGs
-          <input aria-label="Minimum completed PUGs" type="number" min={0} max={1000} value={f.eligibility.minPugs} onInput={(e) => elig({ minPugs: Number(val(e)) })} />
+          <input aria-label="Minimum completed PUGs" type="number" min={0} max={1000} value={typed.minPugs} onInput={typeInto('minPugs')} />
         </label>
         <label><input type="checkbox" aria-label="Discord linked" checked={f.eligibility.requireDiscord} onChange={() => elig({ requireDiscord: !f.eligibility.requireDiscord })} /> Discord linked</label>
         <label class="teamfield">SR floor (blank for none)
-          <input aria-label="SR floor" type="number" min={0} value={f.eligibility.srFloor ?? ''} onInput={(e) => elig({ srFloor: numOrNull(val(e)) })} />
+          <input aria-label="SR floor" type="number" min={0} value={typed.srFloor} onInput={typeInto('srFloor')} />
         </label>
         <label class="teamfield">SR ceiling (blank for none)
-          <input aria-label="SR ceiling" type="number" min={0} value={f.eligibility.srCeiling ?? ''} onInput={(e) => elig({ srCeiling: numOrNull(val(e)) })} />
+          <input aria-label="SR ceiling" type="number" min={0} value={typed.srCeiling} onInput={typeInto('srCeiling')} />
         </label>
       </fieldset>
       <fieldset class="bookform__fieldset">
@@ -90,10 +138,10 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
         {f.checkin.enabled && (
           <>
             <label class="teamfield">Opens (minutes before the start)
-              <input aria-label="Check-in opens" type="number" min={10} max={1440} value={f.checkin.opensMinutes} onInput={(e) => checkin({ opensMinutes: Number(val(e)) })} />
+              <input aria-label="Check-in opens" type="number" min={10} max={1440} value={typed.opensMinutes} onInput={typeInto('opensMinutes')} />
             </label>
             <label class="teamfield">Closes (minutes before the start)
-              <input aria-label="Check-in closes" type="number" min={0} max={1435} value={f.checkin.closesMinutes} onInput={(e) => checkin({ closesMinutes: Number(val(e)) })} />
+              <input aria-label="Check-in closes" type="number" min={0} max={1435} value={typed.closesMinutes} onInput={typeInto('closesMinutes')} />
             </label>
           </>
         )}
@@ -101,7 +149,7 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
       <fieldset class="bookform__fieldset">
         <legend class="teamsub">Rosters (4 starters)</legend>
         <label class="teamfield">Max subs
-          <input aria-label="Max subs" type="number" min={0} max={4} value={f.roster.maxSubs} onInput={(e) => roster({ maxSubs: Number(val(e)) })} />
+          <input aria-label="Max subs" type="number" min={0} max={4} value={typed.maxSubs} onInput={typeInto('maxSubs')} />
         </label>
         <label class="teamfield">Roster lock
           <select aria-label="Roster lock" value={lock.kind} onChange={(e) => setLockKind((e.target as HTMLSelectElement).value as RosterLock['kind'])}>
@@ -116,15 +164,15 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
         {lock.kind === 'after_round' && (
           <>
             <label class="teamfield">After stage
-              <input aria-label="Lock after stage" type="number" min={1} max={5} value={lock.stage} onInput={(e) => roster({ lock: { ...lock, stage: Number(val(e)) } })} />
+              <input aria-label="Lock after stage" type="number" min={1} max={5} value={typed.lockStage} onInput={typeInto('lockStage')} />
             </label>
             <label class="teamfield">Round
-              <input aria-label="Lock after round" type="number" min={1} max={20} value={lock.round} onInput={(e) => roster({ lock: { ...lock, round: Number(val(e)) } })} />
+              <input aria-label="Lock after round" type="number" min={1} max={20} value={typed.lockRound} onInput={typeInto('lockRound')} />
             </label>
           </>
         )}
         <label class="teamfield">Max roster additions before the lock (blank for no limit)
-          <input aria-label="Max roster additions" type="number" min={0} max={20} value={f.roster.maxAdditions ?? ''} onInput={(e) => roster({ maxAdditions: numOrNull(val(e)) })} />
+          <input aria-label="Max roster additions" type="number" min={0} max={20} value={typed.maxAdditions} onInput={typeInto('maxAdditions')} />
         </label>
       </fieldset>
       <button class="btn" type="submit" disabled={busy}>Save event</button>

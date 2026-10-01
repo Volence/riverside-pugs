@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { AdminEventOptions, StageSettings } from '../../../api';
-import { configOf, draftFrom, settingsFrom } from './stageDraft';
+import { configOf, draftFrom, settingsFrom, staleValues } from './stageDraft';
 
 const OPTIONS: AdminEventOptions = {
   campaigns: [{ slug: 'no_mercy', name: 'No Mercy' }, { slug: 'dead_air', name: 'Dead Air' }],
@@ -34,5 +34,16 @@ describe('stage drafts', () => {
   it('a league is always sent as window scheduled', () => {
     const d = { ...draftFrom(null, OPTIONS), type: 'league' as const, scheduling: 'rolling' as const };
     expect(settingsFrom(d).scheduling).toBe('window');
+  });
+
+  it('names the saved values that are no longer offered, so the form can show them to be cleared', () => {
+    const old: StageSettings = {
+      type: 'swiss', config: { rounds: 4 }, rulesetId: 9, gameConfig: 'retired', campaignPool: ['no_mercy', 'hard_rain'],
+      vetoType: 'ban_to_one', chapters: null, scheduling: 'rolling', advanceCount: 8,
+    };
+    expect(staleValues(old, OPTIONS)).toEqual({ rulesetId: 9, gameConfig: 'retired', campaigns: ['hard_rain'] });
+    expect(staleValues({ ...old, rulesetId: 2, gameConfig: 'standard', campaignPool: ['dead_air'] }, OPTIONS))
+      .toEqual({ rulesetId: null, gameConfig: null, campaigns: [] });
+    expect(staleValues(null, OPTIONS)).toEqual({ rulesetId: null, gameConfig: null, campaigns: [] });
   });
 });
