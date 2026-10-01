@@ -3393,3 +3393,29 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 /* A toxic flag: red text on the People desk, a red-bordered chip on the
    admin bookings panel (plan 2 Ruling 6). */
 .teamchip--toxic { border-color: var(--loss); color: var(--loss); }
+
+/* Events (tournaments plan T1a): the list, the status chip, the event page,
+   the banner (also on the desk) and the description preview. */
+.eventlist { list-style: none; margin: 0; padding: 0; }
+.eventrow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); padding: var(--sp-3) 0; border-bottom: 1px solid var(--border); color: inherit; text-decoration: none; }
+.eventlist li:last-child .eventrow { border-bottom: 0; }
+.eventrow__name { font-weight: 600; overflow-wrap: anywhere; }
+.eventrow__meta { flex-basis: 100%; color: var(--text-muted); font-size: var(--fs-dense); }
+.eventstatus--registration, .eventstatus--checkin, .eventstatus--live { border-color: var(--rule); color: var(--accent); }
+.eventstatus--cancelled { color: var(--loss); }
+.eventstatus--draft { border-style: dashed; }
+.eventpage__when { margin: var(--sp-2) 0 0; }
+.eventdesc { overflow-wrap: anywhere; }
+.eventbanner { display: block; width: 100%; height: auto; aspect-ratio: 4 / 1; object-fit: cover; border: 1px solid var(--border); }
+.eventrow__banner { width: 160px; height: 40px; object-fit: cover; border: 1px solid var(--border); }
+.eventdesc-preview { padding: var(--sp-3); border: 1px dashed var(--border); }
+/* The safe markdown subset (web/src/components/RichText.tsx). */
+.richtext > :first-child { margin-top: 0; }
+.richtext > :last-child { margin-bottom: 0; }
+.richtext p, .richtext ul, .richtext ol { margin: 0 0 var(--sp-3); }
+.richtext ul, .richtext ol { padding-left: var(--sp-5); }
+.richtext a { overflow-wrap: anywhere; }
+.eventstrip { display: flex; flex-wrap: wrap; gap: var(--sp-3); list-style: none; margin: 0; padding: 0; }
+.eventstrip__stage { display: flex; flex-direction: column; gap: var(--sp-1); flex: 1 1 200px; min-width: 0; padding: var(--sp-3); border: 1px solid var(--border); }
+.eventrules { margin: var(--sp-2) 0; padding-left: var(--sp-5); }
+.eventpool { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-2) 0 0; }

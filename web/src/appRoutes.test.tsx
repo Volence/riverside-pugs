@@ -48,6 +48,15 @@ describe('the site route table', () => {
     expect(await screen.findByText('This entry was removed.')).toBeTruthy();
   });
 
+  it('mounts the events list and an event page, not the 404', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
+    const first = open('/events');
+    expect(await screen.findByText('Events are not open yet.')).toBeTruthy();
+    first.unmount();
+    open('/event/riverside-cup');
+    expect(await screen.findByText('No such event, or events are not open yet.')).toBeTruthy();
+  });
+
   it.each([
     ['/hud', 'HUD editor'],
     ['/crosshair', 'Crosshair'],
