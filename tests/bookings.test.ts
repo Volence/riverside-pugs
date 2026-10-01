@@ -67,6 +67,13 @@ describe('creating', () => {
     expect(peopleOf(db, id).map((p) => [p.side, p.steamid, p.status])).toEqual([['a', P[0], 'accepted'], ['b', P[1], 'invited']]);
   });
 
+  it('keeps the ruleset a booking was made under next to its snapshot', () => {
+    const id = (name: string) => (db.prepare('SELECT id FROM rulesets WHERE name = ?').get(name) as { id: number }).id;
+    expect(getBooking(db, create())!.ruleset_id).toBe(id('Casual Scrim'));
+    const cup = create({ by: P[2], opponent: { steamid: P[3] }, rulesetId: id('Standard Cup') });
+    expect(getBooking(db, cup)!.ruleset_id).toBe(id('Standard Cup'));
+  });
+
   it('refuses bad input with a reason', () => {
     const r = (over: Record<string, unknown>) => {
       const res = createBooking(db, base(over) as Parameters<typeof createBooking>[1]);

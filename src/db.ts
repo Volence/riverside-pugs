@@ -2124,6 +2124,12 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'bookings', 'games_allowed', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'bookings', 'close_at', 'TEXT');
   db.prepare('UPDATE bookings SET games_allowed = json_array_length(playlist_json) WHERE games_allowed = 0').run();
+  // Rulesets editor: the ruleset a copy was made from (null for the three
+  // templates and for rows from before the editor), and the ruleset a booking
+  // was made under, so the desk can count open bookings that use one. A
+  // booking made before this column has null and is not counted.
+  ensureColumn(db, 'rulesets', 'based_on', 'INTEGER REFERENCES rulesets(id)');
+  ensureColumn(db, 'bookings', 'ruleset_id', 'INTEGER REFERENCES rulesets(id)');
   db.prepare(
     "INSERT OR IGNORE INTO game_configs (key, label, cfg) VALUES ('standard', 'Standard (Rotoblin PUG 4v4)', 'pug_match')",
   ).run();

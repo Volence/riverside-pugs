@@ -56,3 +56,19 @@ export function rulesLines(r: MatchRules): string[] {
   if (r.spectate.sideLocked) lines.push('Team spectators see only their own side');
   return lines;
 }
+
+const SIDE_SHORT: Record<MatchRules['sideRule'], string> = {
+  higher_seed_chooses: 'higher seed picks sides',
+  non_picker_chooses: 'non-picker picks sides',
+  coin: 'coin toss for sides',
+};
+
+/** A ruleset in one line, for a picker's help text and the Rulesets desk:
+ *  the pauses, how sides are chosen and the no-show grace. */
+export function rulesSummary(r: MatchRules): string {
+  const each = r.pause.seconds === null ? '' : ` of ${r.pause.seconds} s`;
+  const pauses = r.pause.limit === null
+    ? `Unlimited pauses${each}`
+    : r.pause.limit === 0 ? 'No pauses' : `${r.pause.limit} pause${r.pause.limit === 1 ? '' : 's'}${each}`;
+  return `${pauses} · ${SIDE_SHORT[r.sideRule]} · ${r.noShowGraceMinutes} min no-show grace`;
+}
