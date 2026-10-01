@@ -522,7 +522,14 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (!getServer(db, id)) return reply.code(404).send({ error: 'no such server' });
     // The releaser refuses a booked box; say so rather than answer ok.
     if (holdFor(db, id)?.kind === 'booking') return reply.code(409).send({ error: 'held by a booking; end the booking instead' });
-    releaser.release(id);
+    // Staff Set idle is the explicit override for a box that went down under
+    // a booking (plan 5 ruling 4: the gone alert sends staff here), so it
+    // passes the gone give-back the releaser otherwise refuses. With no
+    // restart asked the release is synchronous, so the row says at once
+    // whether it took; a refused release never answers ok.
+    releaser.release(id, { gone: true });
+    if (getServer(db, id)?.status !== 'idle') return reply.code(409).send({ error: 'the release was refused; see the server log' });
+    db.prepare('UPDATE servers SET gone_since = NULL WHERE id = ?').run(id);
     logAdmin(db, adminId, 'server_idle', id);
     broadcast('refresh');
     return { ok: true };
