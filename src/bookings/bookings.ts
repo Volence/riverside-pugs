@@ -656,6 +656,10 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
   const canConnect = viewer.staff || me?.status === 'accepted';
   const config = db.prepare('SELECT key, label FROM game_configs WHERE key = ?').get(b.game_config) as { key: string; label: string } | undefined;
   const rules = bookingRules(b);
+  // The games follow canViewMatch's rule for a booking game (src/matchVisibility.ts):
+  // staff, an accepted person, or a manager of a confirmed side.
+  const seesGames = viewer.staff || me?.status === 'accepted'
+    || sidesOf(db, id).some((s) => s.confirmed_at !== null && manages.includes(s.side));
   return {
     id: b.id, purpose: b.purpose, state: b.state, ending: b.ending_at !== null, startsAt: b.starts_at, endsAt: b.ends_at,
     extendedMinutes: b.extended_minutes, extendMinutes: bookingLimits(db).extendMinutes, createdAt: b.created_at,
@@ -681,7 +685,7 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
     endReason: b.end_reason,
     noShowFrom: iso(Date.parse(b.starts_at) + (rules?.noShowGraceMinutes ?? 15) * 60_000),
     viewer: { side: me?.side ?? manages[0] ?? null, manages, staff: viewer.staff, invited: me?.status === 'invited' },
-    games: bookingGames(db, id),
+    games: seesGames ? bookingGames(db, id) : [],
   };
 }
 

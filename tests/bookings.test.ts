@@ -357,6 +357,25 @@ describe('views', () => {
     ]);
   });
 
+  it('games show only to staff and to those who may see a booking game: not an invited person, not an unconfirmed side manager', () => {
+    const id = create();
+    db.prepare(
+      `INSERT INTO matches (season_id, state, campaign, token, origin, kind, visibility, booking_id, booking_side_a)
+       VALUES (?, 'completed', 'no_mercy', 'tg', 'in_game', 'scrim', 'participants', ?, 'a')`,
+    ).run(currentSeasonId(db), id);
+    expect(addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[5], role: 'player', now: NOW })).toMatchObject({ ok: true, value: { status: 'invited' } });
+    const games = (steamid: string, staff = false) => bookingView(db, id, { steamid, staff })!.games.length;
+    expect(games(P[0])).toBe(1);
+    expect(games(P[5])).toBe(0); // invited, not accepted
+    expect(games(P[1])).toBe(0); // side b's captain before side b confirms
+    expect(games(P[9], true)).toBe(1);
+    confirmBooking(db, { bookingId: id, by: P[1], now: NOW });
+    expect(games(P[1])).toBe(1);
+    expect(games(P[5])).toBe(0);
+    respondPerson(db, { bookingId: id, steamid: P[5], accept: true, now: NOW });
+    expect(games(P[5])).toBe(1);
+  });
+
   it('myBookings lists what needs the viewer', () => {
     const id = create();
     expect(myBookings(db, P[1]).open.map((b) => [b.id, b.needs])).toEqual([[id, 'confirm']]);
