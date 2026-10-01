@@ -10,6 +10,7 @@ import { checkLogo, LOGO_MAX_BYTES } from '../community/validate.js';
 import { teamScrims } from '../bookings/games.js';
 import { seesBooking } from '../bookings/bookings.js';
 import { canSeeReliability, reliability, type Reliability } from '../scrims/reliability.js';
+import { reviewSummary, type ReviewSummary } from '../scrims/reviews.js';
 import type { CommunityStore } from '../community/store.js';
 import type { DmFn } from '../signonDropNotify.js';
 import { teamInviteDm } from '../discord/teamButtons.js';
@@ -26,6 +27,10 @@ export interface TeamView {
   /** The team's scrim record (plan 2): only for its members and staff, or
    *  anyone once scrim_reliability_public is on. Omitted otherwise. */
   record?: Reliability;
+  /** The aggregate of the reviews the team received (plan 2): only for its
+   *  current members and staff, whatever any setting says. Never a single
+   *  review. Omitted otherwise. */
+  reviews?: ReviewSummary;
 }
 
 export interface TeamRoutesOpts {
@@ -189,6 +194,7 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
           }
         : null,
       ...(canSeeReliability(db, { teamId: t.id }, v.viewer) ? { record: reliability(db, { teamId: t.id }) } : {}),
+      ...(role !== null || staff ? { reviews: reviewSummary(db, { teamId: t.id }) } : {}),
     };
     return view;
   });

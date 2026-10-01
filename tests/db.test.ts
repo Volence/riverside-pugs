@@ -33,7 +33,7 @@ describe('openDb', () => {
       'notification_prefs',
       'penalties', 'pending_reports', 'player_aliases', 'player_ingame_last', 'player_links', 'player_name_digest', 'player_name_uses', 'player_networks', 'player_notes', 'player_ratings',
       'player_reviews', 'player_steam_signals', 'players', 'practice_drills', 'practice_leases', 'queue_stints',
-      'rating_history', 'relay_messages', 'release_boxes', 'releases', 'report_message', 'reporter_chat_pings', 'reports', 'round_metric_context', 'round_metrics', 'rulesets', 'scrim_accepts', 'scrim_posts', 'seasons', 'server_chat', 'servers', 'settings', 'side_games', 'signon_drops',
+      'rating_history', 'relay_messages', 'release_boxes', 'releases', 'report_message', 'reporter_chat_pings', 'reports', 'round_metric_context', 'round_metrics', 'rulesets', 'scrim_accepts', 'scrim_posts', 'scrim_reviews', 'seasons', 'server_chat', 'servers', 'settings', 'side_games', 'signon_drops',
       'skeet_streak_scans', 'skeet_streaks',
       'sourcetv_server_events', 'sourcetv_sessions', 'steam_signal_alerts',
       'team_invites', 'team_members', 'teams',

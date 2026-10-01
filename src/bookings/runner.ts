@@ -13,7 +13,8 @@ import { TEMPLATES } from '../rulesets.js';
 import { consoleText, cvarValue, quoted, waitForStartup, type BoxRcon } from '../serverSetup.js';
 import { activeMembers } from '../teams/teams.js';
 import type { Notifier } from '../notify/notify.js';
-import { bookingMessage, type BookingNotifyType } from './messages.js';
+import { bookingMessage, reviewAskMessage, type BookingNotifyType } from './messages.js';
+import { claimReviewAsk } from '../scrims/reviews.js';
 import { bookingLimits, isLateCancel, typicalCampaignMinutes } from './rules.js';
 import {
   acceptedPeople, actingSides, advancePlaylist, allowInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, extendBooking, gameName, getBooking, markActive,
@@ -485,11 +486,32 @@ export class BookingRunner {
     if (server) await this.sendAbort(m.booking_id, server, token);
   }
 
-  /** Finish any end a route or the tick started. Idempotent. */
+  /** Finish any end a route or the tick started. Idempotent. Every end of a
+   *  booking (time, idle, done, !end, a captain's or staff End, a no-show)
+   *  comes through here, so this is where a scrim's review ask goes out. */
   settle(id: number): void {
     const b = getBooking(this.db, id);
-    if (!b || b.ending_at === null || b.ended_at !== null) return;
+    if (!b) return;
+    this.askReview(b);
+    if (b.ending_at === null || b.ended_at !== null) return;
     this.track(id, () => this.windDown(id, true));
+  }
+
+  /** Plan 2 Ruling 5: once a scrim closes as ended or no_show, each side's
+   *  managers are asked for a private review of the other side. Once per
+   *  booking: claimReviewAsk writes the review_asked event, so a second
+   *  settle sends nothing. Never throws, like tell(). */
+  private askReview(b: BookingRow): void {
+    if (b.purpose !== 'scrim' || (b.state !== 'ended' && b.state !== 'no_show')) return;
+    try {
+      if (!claimReviewAsk(this.db, b.id, new Date(this.now()))) return;
+      for (const s of sidesOf(this.db, b.id)) {
+        const payload = reviewAskMessage(this.db, this.deps.publicUrl, b.id, s.side);
+        if (payload) this.deps.notifier.send(sideManagers(this.db, s), 'scrim_review', payload);
+      }
+    } catch (err) {
+      console.warn(`[booking] ${b.id}: scrim_review notice failed:`, err instanceof Error ? err.message : err);
+    }
   }
 
   /** The minute pass. Never runs two at once, and never rejects: a timer

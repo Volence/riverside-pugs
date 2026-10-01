@@ -5,10 +5,13 @@ import { logAdmin } from '../admin/audit.js';
 import { getServer } from '../serverPool.js';
 import * as B from '../bookings/bookings.js';
 import type { BookingRunner } from '../bookings/runner.js';
+import { toxicFlag } from '../scrims/reviews.js';
 
 export interface AdminBookingRow {
   id: number; state: string; ending: boolean; startsAt: string; endsAt: string; aName: string; bName: string;
   server: string | null; peak: { a: number; b: number }; endReason: string | null;
+  /** Plan 2 Ruling 6: a side whose team (or pickup captain) carries the toxic flag. */
+  toxic: { a: boolean; b: boolean };
 }
 
 /**
@@ -27,7 +30,9 @@ export async function adminBookingRoutes(app: FastifyInstance, opts: { db: DB; r
 
   app.get('/api/admin/bookings', async (req, reply) => {
     if (!requireStaff(req, reply)) return;
-    const since = new Date(Date.now() - 86_400_000).toISOString();
+    const nowMs = Date.now();
+    const since = new Date(nowMs - 86_400_000).toISOString();
+    const party = (s: B.SideRow) => (s.team_id !== null ? { teamId: s.team_id } : { captain: s.captain_steamid });
     const rows = db.prepare('SELECT * FROM bookings WHERE ended_at IS NULL OR ended_at > ? ORDER BY starts_at, id').all(since) as B.BookingRow[];
     const bookings: AdminBookingRow[] = rows.map((b) => {
       const [a, s] = B.sidesOf(db, b.id);
@@ -36,6 +41,7 @@ export async function adminBookingRoutes(app: FastifyInstance, opts: { db: DB; r
         aName: B.sideName(db, a), bName: B.sideName(db, s),
         server: b.server_id !== null ? getServer(db, b.server_id)?.name ?? null : null,
         peak: { a: a.peak_present, b: s.peak_present }, endReason: b.end_reason,
+        toxic: { a: toxicFlag(db, party(a), nowMs), b: toxicFlag(db, party(s), nowMs) },
       };
     });
     return { bookings };
