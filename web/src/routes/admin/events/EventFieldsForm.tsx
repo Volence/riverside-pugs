@@ -1,8 +1,9 @@
-import { useState } from 'preact/hooks';
+import { useId, useState } from 'preact/hooks';
 import type { EntryKind, EventFields, EventStatus, RosterLock } from '../../../api';
 import { fromLocalInput, toLocalInput } from '../../../eventFormat';
 import { RichText } from '../../../components/RichText';
 import { readWhole } from './wholeNumber';
+import { FormGroup, FormRow, ToggleRow } from './FormRow';
 
 const val = (e: Event): string => (e.target as HTMLInputElement).value;
 
@@ -42,6 +43,8 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
     ? { local: toLocalInput(fields.roster.lock.at), iso: fields.roster.lock.at } : null);
   const [typed, setTyped] = useState<Record<NumKey, string>>(() => typedOf(fields));
   const typeInto = (k: NumKey) => (e: Event) => { const v = val(e); setTyped((x) => ({ ...x, [k]: v })); };
+  const uid = useId();
+  const id = (k: string): string => `${uid}-${k}`;
   const [problem, setProblem] = useState<string | null>(null);
   const [preview, setPreview] = useState(false);
   const set = (patch: Partial<EventFields>) => setF((x) => ({ ...x, ...patch }));
@@ -96,86 +99,90 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
   };
 
   return (
-    <form class="admin-form admin-form--stack" onSubmit={submit}>
+    <form class="eventform" onSubmit={submit}>
       {problem && <p class="error" role="alert">{problem}</p>}
-      <label class="teamfield">Name<input aria-label="Name" value={f.name} maxLength={60} onInput={(e) => set({ name: val(e) })} /></label>
-      <label class="teamfield">Starts at (your time)<input aria-label="Starts at" type="datetime-local" value={start} onInput={(e) => setStart(val(e))} /></label>
-      <label class="teamfield">Entries
-        <select aria-label="Entry kind" value={f.entryKind} disabled={status !== 'draft'} onChange={(e) => set({ entryKind: (e.target as HTMLSelectElement).value as EntryKind })}>
+      <FormRow label="Name" help="Shown on /events and the event page." for={id('name')}>
+        <input id={id('name')} aria-label="Name" value={f.name} maxLength={60} onInput={(e) => set({ name: val(e) })} />
+      </FormRow>
+      <FormRow label="Starts at" help="In your own time zone." for={id('start')}>
+        <input id={id('start')} aria-label="Starts at" type="datetime-local" value={start} onInput={(e) => setStart(val(e))} />
+      </FormRow>
+      <FormRow label="Entries" help={status === 'draft' ? 'Teams sign up as rosters, or players sign up alone for a draft.' : 'Fixed once the event is published.'} for={id('kind')}>
+        <select id={id('kind')} aria-label="Entry kind" value={f.entryKind} disabled={status !== 'draft'} onChange={(e) => set({ entryKind: (e.target as HTMLSelectElement).value as EntryKind })}>
           <option value="team">Teams register</option>
           <option value="draft">Draft (individual signups)</option>
         </select>
-      </label>
-      <label><input type="checkbox" aria-label="Official event" checked={f.official} onChange={() => set({ official: !f.official })} /> Official event</label>
-      <label class="teamfield">Team cap (blank for none)
-        <input aria-label="Team cap" type="number" min={2} max={256} value={typed.teamCap} onInput={typeInto('teamCap')} />
-      </label>
-      <div class="teamfield">
-        <span class="inlinerow">
-          Description (# heading, **bold**, *italic*, - list, [text](https://...))
-          <button type="button" class="btn btn--ghost btn--sm" aria-pressed={preview} onClick={() => setPreview(!preview)}>{preview ? 'Edit' : 'Preview'}</button>
-        </span>
-        {preview
-          ? <div class="eventdesc-preview"><RichText text={f.description} /></div>
-          : <textarea aria-label="Description" maxLength={4000} value={f.description} onInput={(e) => set({ description: (e.target as HTMLTextAreaElement).value })} />}
-      </div>
-      <fieldset class="bookform__fieldset">
-        <legend class="teamsub">Eligibility</legend>
-        <label class="teamfield">Minimum completed PUGs
-          <input aria-label="Minimum completed PUGs" type="number" min={0} max={1000} value={typed.minPugs} onInput={typeInto('minPugs')} />
-        </label>
-        <label><input type="checkbox" aria-label="Discord linked" checked={f.eligibility.requireDiscord} onChange={() => elig({ requireDiscord: !f.eligibility.requireDiscord })} /> Discord linked</label>
-        <label class="teamfield">SR floor (blank for none)
-          <input aria-label="SR floor" type="number" min={0} value={typed.srFloor} onInput={typeInto('srFloor')} />
-        </label>
-        <label class="teamfield">SR ceiling (blank for none)
-          <input aria-label="SR ceiling" type="number" min={0} value={typed.srCeiling} onInput={typeInto('srCeiling')} />
-        </label>
-      </fieldset>
-      <fieldset class="bookform__fieldset">
-        <legend class="teamsub">Check-in</legend>
-        <label><input type="checkbox" aria-label="Check-in on" checked={f.checkin.enabled} onChange={() => checkin({ enabled: !f.checkin.enabled })} /> Check-in on</label>
+      </FormRow>
+      <ToggleRow label="Official event" help="A Riverside event, not a community one." checked={f.official} onChange={() => set({ official: !f.official })} />
+      <FormRow label="Team cap" help="Most teams that can register. Blank for no cap." for={id('cap')}>
+        <input id={id('cap')} aria-label="Team cap" type="number" min={2} max={256} value={typed.teamCap} onInput={typeInto('teamCap')} />
+      </FormRow>
+      <FormGroup title="Description">
+        <FormRow wide label="Event page text" help="# heading, **bold**, *italic*, - list, [text](https://...)" for={id('desc')}
+          aside={<button type="button" class="btn btn--ghost btn--sm" aria-pressed={preview} onClick={() => setPreview(!preview)}>{preview ? 'Edit' : 'Preview'}</button>}>
+          {preview
+            ? <div class="eventdesc-preview"><RichText text={f.description} /></div>
+            : <textarea id={id('desc')} aria-label="Description" maxLength={4000} value={f.description} onInput={(e) => set({ description: (e.target as HTMLTextAreaElement).value })} />}
+        </FormRow>
+      </FormGroup>
+      <FormGroup title="Eligibility">
+        <FormRow label="Minimum completed PUGs" help="Ranked PUGs a player must have finished to sign up." for={id('minpugs')}>
+          <input id={id('minpugs')} aria-label="Minimum completed PUGs" type="number" min={0} max={1000} value={typed.minPugs} onInput={typeInto('minPugs')} />
+        </FormRow>
+        <ToggleRow label="Discord linked" help="Players need a linked Discord account." checked={f.eligibility.requireDiscord} onChange={() => elig({ requireDiscord: !f.eligibility.requireDiscord })} />
+        <FormRow label="SR floor" help="Lowest SR that can sign up. Blank for none." for={id('floor')}>
+          <input id={id('floor')} aria-label="SR floor" type="number" min={0} value={typed.srFloor} onInput={typeInto('srFloor')} />
+        </FormRow>
+        <FormRow label="SR ceiling" help="Highest SR that can sign up. Blank for none." for={id('ceiling')}>
+          <input id={id('ceiling')} aria-label="SR ceiling" type="number" min={0} value={typed.srCeiling} onInput={typeInto('srCeiling')} />
+        </FormRow>
+      </FormGroup>
+      <FormGroup title="Check-in">
+        <ToggleRow label="Check-in" help="Entries confirm they are present before the start." ariaLabel="Check-in on" checked={f.checkin.enabled} onChange={() => checkin({ enabled: !f.checkin.enabled })} />
         {f.checkin.enabled && (
           <>
-            <label class="teamfield">Opens (minutes before the start)
-              <input aria-label="Check-in opens" type="number" min={10} max={1440} value={typed.opensMinutes} onInput={typeInto('opensMinutes')} />
-            </label>
-            <label class="teamfield">Closes (minutes before the start)
-              <input aria-label="Check-in closes" type="number" min={0} max={1435} value={typed.closesMinutes} onInput={typeInto('closesMinutes')} />
-            </label>
+            <FormRow label="Opens" help="Minutes before the start. (10 to 1440)" for={id('opens')}>
+              <input id={id('opens')} aria-label="Check-in opens" type="number" min={10} max={1440} value={typed.opensMinutes} onInput={typeInto('opensMinutes')} />
+            </FormRow>
+            <FormRow label="Closes" help="Minutes before the start. (0 to 1435)" for={id('closes')}>
+              <input id={id('closes')} aria-label="Check-in closes" type="number" min={0} max={1435} value={typed.closesMinutes} onInput={typeInto('closesMinutes')} />
+            </FormRow>
           </>
         )}
-      </fieldset>
-      <fieldset class="bookform__fieldset">
-        <legend class="teamsub">Rosters (4 starters)</legend>
-        <label class="teamfield">Max subs
-          <input aria-label="Max subs" type="number" min={0} max={4} value={typed.maxSubs} onInput={typeInto('maxSubs')} />
-        </label>
-        <label class="teamfield">Roster lock
-          <select aria-label="Roster lock" value={lock.kind} onChange={(e) => setLockKind((e.target as HTMLSelectElement).value as RosterLock['kind'])}>
+      </FormGroup>
+      <FormGroup title="Rosters">
+        <FormRow label="Max subs" help="Substitutes on top of the 4 starters. (0 to 4)" for={id('subs')}>
+          <input id={id('subs')} aria-label="Max subs" type="number" min={0} max={4} value={typed.maxSubs} onInput={typeInto('maxSubs')} />
+        </FormRow>
+        <FormRow label="Roster lock" help="When teams can no longer change their rosters." for={id('lock')}>
+          <select id={id('lock')} aria-label="Roster lock" value={lock.kind} onChange={(e) => setLockKind((e.target as HTMLSelectElement).value as RosterLock['kind'])}>
             <option value="none">No lock</option>
             <option value="at">At a time</option>
             <option value="after_round">After a round</option>
           </select>
-        </label>
+        </FormRow>
         {lock.kind === 'at' && (
-          <label class="teamfield">Lock at (your time)<input aria-label="Lock at" type="datetime-local" value={lockAt} onInput={(e) => setLockAt(val(e))} /></label>
+          <FormRow label="Lock at" help="In your own time zone." for={id('lockat')}>
+            <input id={id('lockat')} aria-label="Lock at" type="datetime-local" value={lockAt} onInput={(e) => setLockAt(val(e))} />
+          </FormRow>
         )}
         {lock.kind === 'after_round' && (
           <>
-            <label class="teamfield">After stage
-              <input aria-label="Lock after stage" type="number" min={1} max={5} value={typed.lockStage} onInput={typeInto('lockStage')} />
-            </label>
-            <label class="teamfield">Round
-              <input aria-label="Lock after round" type="number" min={1} max={20} value={typed.lockRound} onInput={typeInto('lockRound')} />
-            </label>
+            <FormRow label="After stage" help="The stage whose round locks the rosters. (1 to 5)" for={id('lstage')}>
+              <input id={id('lstage')} aria-label="Lock after stage" type="number" min={1} max={5} value={typed.lockStage} onInput={typeInto('lockStage')} />
+            </FormRow>
+            <FormRow label="Round" help="Rosters lock once this round is over. (1 to 20)" for={id('lround')}>
+              <input id={id('lround')} aria-label="Lock after round" type="number" min={1} max={20} value={typed.lockRound} onInput={typeInto('lockRound')} />
+            </FormRow>
           </>
         )}
-        <label class="teamfield">Max roster additions before the lock (blank for no limit)
-          <input aria-label="Max roster additions" type="number" min={0} max={20} value={typed.maxAdditions} onInput={typeInto('maxAdditions')} />
-        </label>
-      </fieldset>
-      <button class="btn" type="submit" disabled={busy}>Save event</button>
+        <FormRow label="Max roster additions" help="Players a team can add before the lock. Blank for no limit." for={id('adds')}>
+          <input id={id('adds')} aria-label="Max roster additions" type="number" min={0} max={20} value={typed.maxAdditions} onInput={typeInto('maxAdditions')} />
+        </FormRow>
+      </FormGroup>
+      <div class="eventform__actions">
+        <button class="btn" type="submit" disabled={busy}>Save event</button>
+      </div>
     </form>
   );
 }
