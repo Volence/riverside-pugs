@@ -1,21 +1,25 @@
 import type { DB } from '../db.js';
 import { getServer, type ServerRow } from '../serverPool.js';
 import { NOT_HELD_SQL } from '../serverHolds.js';
-import { campaignRegistry, firstMapOf } from '../campaignRegistry.js';
+import { campaignRegistry, firstMapOf, type CampaignEntry } from '../campaignRegistry.js';
 import { isInstalledEverywhere } from '../campaignInstall.js';
 import { isMapName } from '../campaigns.js';
 import { parseStatusMap } from '../practiceLeases.js';
 import { parseStatusPlayers } from '../practicePlayers.js';
 import { publishAdminEvent } from '../adminFeed.js';
+import { getCampaignPool, settingNumber } from '../settings.js';
+import { redactSecrets } from '../redact.js';
 import { consoleText, cvarValue, quoted, waitForStartup, type BoxRcon } from '../serverSetup.js';
 import { activeMembers } from '../teams/teams.js';
 import type { Notifier, NotifyType } from '../notify/notify.js';
 import { bookingMessage } from './messages.js';
-import { bookingLimits } from './rules.js';
+import { bookingLimits, typicalCampaignMinutes } from './rules.js';
 import {
-  acceptedPeople, bookingRules, closeBooking, expireUnconfirmed, getBooking, markActive, markReady, markReleased, markSetup,
-  openBookings, recordPresence, resetSetupAttempts, setReminded, setWarned, sideName, sidesOf, holdBox, type BookingRow, type Side, type SideRow,
+  acceptedPeople, actingSides, advancePlaylist, bookingRules, closeBooking, endBooking, expireUnconfirmed, getBooking, markActive, markReady,
+  markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
+  BOOKING_ERRORS, type BookingRow, type Side, type SideRow,
 } from './bookings.js';
+import { abortBookingGame, bookingGames, liveBookingGame } from './games.js';
 
 /**
  * The part of bookings that talks to game servers (spec part 1 section 3;
@@ -40,6 +44,13 @@ export const MAP_SETTLE_MS = 20_000;
 export const GOODBYE_MS = 3_000;
 /** Minutes left at which the box says so in chat, once each. */
 export const WARN_AT_MINUTES = [30, 10, 5] as const;
+/** After a game, how long the box waits before loading the next campaign. */
+export const NEXT_DELAY_MS = 60_000;
+/** Empty minute watches in a row before "everyone left" may end a booking. */
+export const EMPTY_WATCHES_TO_END = 2;
+/** The last game must have ended at least this long ago for "everyone left":
+ *  players reloading into the next campaign are briefly not on the box. */
+export const LEFT_AFTER_GAME_MS = 2 * 60_000;
 
 const END_SAY: Record<string, string> = {
   time: 'its time is up',
@@ -49,6 +60,7 @@ const END_SAY: Record<string, string> = {
   cancelled: 'it was cancelled',
   no_show: 'the other side did not show',
   setup_failed: 'it could not be set up',
+  done: 'everyone left',
 };
 
 /** Sent before the release: if the end restart is ever skipped, the box must
@@ -73,6 +85,11 @@ export interface BookingRunnerDeps {
    *  the hold still hides the box, so a PUG waiting on a box is woken here
    *  (server.ts wires the same drain side games use). */
   freed?: () => void;
+  /** The ip:port the site's log listener receives on. Set, the box is told to
+   *  send its logs there (and gets its log secret); absent, both are skipped. */
+  logPublicAddress?: string;
+  /** Stop listening for a match token (an aborted booking game). */
+  unregisterToken?: (token: string) => void;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }
@@ -92,6 +109,45 @@ export function bookingLines(db: DB, b: BookingRow): string[] {
   ];
 }
 
+/** The lines that make the box record the booking's games (plan 4b): the
+ *  plugin's auto-track starts a match when both teams go live with enough
+ *  humans, the ruleset's pause limits (0 turns a limit off), and when the site
+ *  has a log address, logging to it plus the log secret exactly as
+ *  pushLogSecret (src/logAuth.ts) sends it. The secret is a console line:
+ *  callers must redact it from anything they log (redactSecrets). */
+export function gameLines(db: DB, b: BookingRow, server: ServerRow, logAddress?: string): string[] {
+  const pause = bookingRules(b)?.pause;
+  const lines = [
+    'sm_pug_auto_track 1',
+    `sm_pug_auto_min_players ${settingNumber(db, 'booking_game_min_players', 6, { min: 2, max: 8, integer: true })}`,
+    `sm_pug_pause_limit ${Math.max(0, Math.trunc(pause?.limit ?? 0))}`,
+    `sm_pug_pause_seconds ${Math.max(0, Math.trunc(pause?.seconds ?? 0))}`,
+  ];
+  if (logAddress && /^[A-Za-z0-9.-]+:\d{1,5}$/.test(logAddress)) {
+    lines.push(`logaddress_add ${logAddress}`);
+    if (server.log_secret && /^[0-9a-f]{32,64}$/.test(server.log_secret)) {
+      lines.push('sv_rcon_log 0', `sm_pug_log_secret "${server.log_secret}"`, 'sv_rcon_log 1');
+    }
+  }
+  return lines;
+}
+
+/** Folded for name matching: lower case, `_`, `-` and spaces as one space. */
+const fold = (s: string): string => s.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+
+/** A `YYYY-MM-DD HH:MM:SS` (datetime('now'), UTC) or ISO time, in ms. */
+function sqlMs(t: string): number {
+  return Date.parse(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(t) ? `${t.replace(' ', 'T')}Z` : t);
+}
+
+/** Whether this box can load the campaign: known, installed if custom, and
+ *  the dlc4 mappack for an L4D2 campaign. */
+function loadsOn(db: DB, e: CampaignEntry | undefined, s: ServerRow): boolean {
+  return !!e && (!e.custom || isInstalledEverywhere(db, e.slug, [s.id])) && (!e.requiresDlc4 || s.has_dlc4 === 1);
+}
+
+export type ChooseResult = { ok: true; campaign: string } | { ok: false; error: string };
+
 /** Who runs a side: a team's captain and co-captains, or the pickup captain. */
 function sideManagers(db: DB, s: SideRow): string[] {
   if (s.team_id === null) return [s.captain_steamid];
@@ -107,6 +163,10 @@ export class BookingRunner {
   private ticking = false;
   /** Bookings already alerted as started-with-no-server; once per process. */
   private readonly latePublished = new Set<number>();
+  /** Empty minute watches in a row, per booking (everyone-left end). */
+  private readonly emptyWatches = new Map<number, number>();
+  /** Booking game tokens to send sm_pug_abort for at the start of the wind-down. */
+  private readonly abortTokens = new Map<number, string>();
 
   constructor(private readonly deps: BookingRunnerDeps) {
     this.db = deps.db;
@@ -186,10 +246,7 @@ export class BookingRunner {
     ).all(b.region) as ServerRow[];
     const registry = campaignRegistry(this.db);
     const playlist = JSON.parse(b.playlist_json) as string[];
-    return rows.find((s) => playlist.every((c) => {
-      const e = registry.get(c);
-      return !!e && (!e.custom || isInstalledEverywhere(this.db, c, [s.id])) && (!e.requiresDlc4 || s.has_dlc4 === 1);
-    })) ?? null;
+    return rows.find((s) => playlist.every((c) => loadsOn(this.db, registry.get(c), s))) ?? null;
   }
 
   private stillSettingUp(id: number): BookingRow | null {
@@ -207,7 +264,8 @@ export class BookingRunner {
         await this.setupOnce(id, server);
         break;
       } catch (err) {
-        const why = err instanceof Error ? err.message : String(err);
+        // An rcon error names the command it was on, and one of them carries the log secret.
+        const why = redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret]);
         console.warn(`[booking] ${id}: setup try ${attempt} on ${server.name} failed: ${why}`);
         if (!this.stillSettingUp(id)) break;
         if (attempt < SETUP_TRIES) continue;
@@ -233,7 +291,7 @@ export class BookingRunner {
     await this.execVerified(server, b);
     const [version] = await this.deps.rcon(server, ['l4d_booking_version']);
     if (cvarValue(version, 'l4d_booking_version') === null) throw new Error('the l4d_booking plugin is not loaded on this box');
-    const lines = bookingLines(this.db, b);
+    const lines = [...bookingLines(this.db, b), ...gameLines(this.db, b, server, this.deps.logPublicAddress)];
     const playlist = JSON.parse(b.playlist_json) as string[];
     const firstMap = firstMapOf(this.db, playlist[0]);
     if (!isMapName(firstMap)) throw new Error(`${playlist[0]} starts on ${JSON.stringify(firstMap)}, which is not a valid map name`);
@@ -281,6 +339,16 @@ export class BookingRunner {
     if (!b || b.ended_at !== null) return;
     if (b.server_id === null) { markReleased(this.db, id, new Date(this.now())); return; }
     const server = getServer(this.db, b.server_id);
+    const token = this.abortTokens.get(id);
+    this.abortTokens.delete(id);
+    if (server && token) {
+      try {
+        await this.deps.rcon(server, [`sm_pug_abort ${token}`]);
+      } catch (err) {
+        // Best effort: the restart below ends the plugin's match either way.
+        console.warn(`[booking] ${id}: sm_pug_abort on ${server.name} failed:`, redactSecrets(err instanceof Error ? err.message : String(err), [token]));
+      }
+    }
     if (server && sayGoodbye) {
       try {
         await this.deps.rcon(server, [`say [Booking] This booked server is closing: ${END_SAY[b.end_reason ?? 'time'] ?? 'the booking is over'}.`]);
@@ -305,6 +373,7 @@ export class BookingRunner {
       console.error(`[booking] ${id}: releasing server ${b.server_id} failed:`, err);
     }
     markReleased(this.db, id, new Date(this.now()));
+    this.emptyWatches.delete(id);
     try {
       this.deps.freed?.();
     } catch (err) {
@@ -386,10 +455,14 @@ export class BookingRunner {
     if (now.getTime() >= Date.parse(b.ends_at)) { this.endNow(b.id, 'time', now); return; }
     let humans: ReturnType<typeof parseStatusPlayers>;
     try {
-      const [st] = await this.deps.rcon(server, ['status']);
+      // The booking and game lines ride along each minute: cheap, idempotent,
+      // and a map change can reset cvars a cfg sets.
+      const [st] = await this.deps.rcon(server, ['status', ...bookingLines(this.db, b), ...gameLines(this.db, b, server, this.deps.logPublicAddress)]);
       humans = parseStatusPlayers(st);
     } catch (err) {
-      console.warn(`[booking] ${b.id}: status on ${server.name} failed:`, err instanceof Error ? err.message : err);
+      // Says nothing about who is on: the empty run starts again.
+      this.emptyWatches.delete(b.id);
+      console.warn(`[booking] ${b.id}: status on ${server.name} failed:`, redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret]));
       return;
     }
     const on = new Set(humans.map((h) => h.steamid64).filter((s): s is string => s !== null));
@@ -409,6 +482,13 @@ export class BookingRunner {
     const grace = (bookingRules(fresh)?.noShowGraceMinutes ?? 15) * 60_000;
     const idleFrom = Math.max(fresh.last_human_at ? Date.parse(fresh.last_human_at) : 0, Date.parse(fresh.starts_at) + grace);
     if (humans.length === 0 && nowMs - idleFrom >= limits.idleEndMinutes * 60_000) { this.endNow(b.id, 'idle', now); return; }
+    const empties = humans.length === 0 ? (this.emptyWatches.get(b.id) ?? 0) + 1 : 0;
+    this.emptyWatches.set(b.id, empties);
+    if (empties >= EMPTY_WATCHES_TO_END && this.everyoneLeftAfterGame(b.id, nowMs)) { this.endNow(b.id, 'done', now); return; }
+
+    if (fresh.next_campaign !== null && fresh.next_at !== null && Date.parse(fresh.next_at) <= nowMs && !liveBookingGame(this.db, b.id)) {
+      this.track(b.id, () => this.loadNext(b.id));
+    }
 
     const leftMin = (endsMs - nowMs) / 60_000;
     const crossed = WARN_AT_MINUTES.filter((m) => leftMin <= m && (fresh.warned_minutes === null || fresh.warned_minutes > m));
@@ -423,8 +503,171 @@ export class BookingRunner {
     }
   }
 
-  private endNow(id: number, reason: 'time' | 'idle', now: Date): void {
+  /** Ruling 4: a finished game, none live, and the last one ended long
+   *  enough ago that a map change between campaigns is not mistaken for it. */
+  private everyoneLeftAfterGame(id: number, nowMs: number): boolean {
+    const games = bookingGames(this.db, id);
+    if (!games.some((g) => g.state === 'completed') || games.some((g) => g.state === 'live')) return false;
+    const last = games.at(-1)!;
+    return last.endedAt !== null && nowMs - sqlMs(last.endedAt) >= LEFT_AFTER_GAME_MS;
+  }
+
+  private endNow(id: number, reason: 'time' | 'idle' | 'done', now: Date): void {
+    this.emptyWatches.delete(id);
     if (closeBooking(this.db, id, 'ended', reason, now)) this.settle(id);
+  }
+
+  // ---------- the playlist ----------
+
+  /** A running booking (ready or active, no end started, a box), or null. */
+  private running(id: number): BookingRow | null {
+    const b = getBooking(this.db, id);
+    return b && b.ending_at === null && b.server_id !== null && (b.state === 'ready' || b.state === 'active') ? b : null;
+  }
+
+  /** Load the due next campaign: one changelevel, the playlist moves on, and
+   *  once the map is up the campaign-start lines. Runs as tracked work, so the
+   *  watch and a captain's pick cannot both load it. */
+  private async loadNext(id: number): Promise<void> {
+    const b = this.running(id);
+    if (!b || b.next_campaign === null || b.next_at === null || Date.parse(b.next_at) > this.now()) return;
+    if (liveBookingGame(this.db, id)) return;
+    const server = getServer(this.db, b.server_id!);
+    if (!server) return;
+    const campaign = b.next_campaign;
+    const map = firstMapOf(this.db, campaign);
+    if (!isMapName(map)) {
+      console.warn(`[booking] ${id}: ${campaign} starts on ${JSON.stringify(map)}, which is not a valid map name; not loading it`);
+      setNext(this.db, id, null, null, new Date(this.now()));
+      return;
+    }
+    const playlist = JSON.parse(b.playlist_json) as string[];
+    const at = playlist.indexOf(campaign);
+    // Moved on first: a box that does not take the changelevel is not sent it
+    // again every minute; a captain can pick the campaign again.
+    advancePlaylist(this.db, id, at >= 0 ? at : b.playlist_pos, new Date(this.now()));
+    try {
+      await this.deps.rcon(server, [`changelevel ${map}`]);
+    } catch {
+      // A changelevel can drop the connection it came in on.
+    }
+    await this.sleep(MAP_SETTLE_MS);
+    const after = this.running(id);
+    if (after) {
+      const name = campaignRegistry(this.db).get(campaign)?.name ?? campaign;
+      const say = [`say [Booking] ${consoleText(name, 60)}: !nextmap, !stay, !end and !extend are yours, captains.`];
+      const left = Math.floor((Date.parse(after.ends_at) - this.now()) / 60_000);
+      const typical = typicalCampaignMinutes(this.db, campaign);
+      if (typical > left) say.push(`say [Booking] About ${left} min left, this campaign usually takes ${typical}. !extend now while the slot after is free.`);
+      try {
+        await this.deps.rcon(server, [...bookingLines(this.db, after), ...gameLines(this.db, after, server, this.deps.logPublicAddress), ...say]);
+      } catch (err) {
+        console.warn(`[booking] ${id}: campaign start lines on ${server.name} failed:`, redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret]));
+      }
+    }
+    // An end that came in while this ran is ours to finish (settle skipped it).
+    const end = getBooking(this.db, id);
+    if (end && end.ending_at !== null && end.ended_at === null) await this.windDown(id, true);
+  }
+
+  /** A booking game finished (finishMatch keeps the box with the booking and
+   *  calls this): announce the next playlist campaign and load it 60 s later,
+   *  or say the playlist is used up. */
+  onGameEnded(matchId: number): void {
+    const m = this.db.prepare('SELECT booking_id FROM matches WHERE id = ?').get(matchId) as { booking_id: number | null } | undefined;
+    if (!m || m.booking_id === null) return;
+    const b = this.running(m.booking_id);
+    if (!b) return;
+    const server = getServer(this.db, b.server_id!);
+    const playlist = JSON.parse(b.playlist_json) as string[];
+    const next = playlist[b.playlist_pos + 1] ?? null;
+    const nowMs = this.now();
+    let line: string;
+    if (next !== null) {
+      setNext(this.db, b.id, next, new Date(nowMs + NEXT_DELAY_MS).toISOString(), new Date(nowMs));
+      const name = consoleText(campaignRegistry(this.db).get(next)?.name ?? next, 60);
+      line = `say [Booking] Next: ${name} in 60 s. !nextmap to pick another, !stay to replay this one, !end to finish.`;
+    } else {
+      line = 'say [Booking] That was the last campaign on the playlist. !nextmap <campaign> to play another, or !end to finish.';
+    }
+    if (!server) return;
+    this.deps.rcon(server, [line]).catch((err) => {
+      console.warn(`[booking] ${b.id}: next campaign line on ${server.name} failed:`, err instanceof Error ? err.message : err);
+    });
+  }
+
+  /** A captain (or staff) picks the next campaign; it loads at once. Ruling 5:
+   *  `wanted` matches a pool campaign by slug or name, case-insensitive, a
+   *  unique prefix allowed; null means the next playlist campaign. */
+  chooseNext(id: number, by: string, wanted: string | null, staff = false): ChooseResult {
+    return this.choose(id, by, staff, (b) => {
+      const playlist = JSON.parse(b.playlist_json) as string[];
+      if (wanted === null || wanted.trim() === '') {
+        const next = playlist[b.playlist_pos + 1];
+        return next !== undefined ? { ok: true, campaign: next } : { ok: false, error: 'That was the last campaign on the playlist. Name one: !nextmap <campaign>.' };
+      }
+      return this.resolveCampaign(wanted);
+    });
+  }
+
+  /** Replay the campaign of the last game, or the current playlist one when
+   *  no game has been played yet. */
+  stay(id: number, by: string, staff = false): ChooseResult {
+    return this.choose(id, by, staff, (b) => {
+      const last = bookingGames(this.db, id).at(-1);
+      const campaign = last?.campaign ?? (JSON.parse(b.playlist_json) as string[])[b.playlist_pos];
+      return campaign ? { ok: true, campaign } : { ok: false, error: 'There is no campaign to replay.' };
+    });
+  }
+
+  private choose(id: number, by: string, staff: boolean, resolve: (b: BookingRow) => ChooseResult): ChooseResult {
+    const b = getBooking(this.db, id);
+    if (!b) return { ok: false, error: BOOKING_ERRORS.not_found.text };
+    if (!staff && actingSides(this.db, id, by).length === 0) return { ok: false, error: BOOKING_ERRORS.not_manager.text };
+    if (!this.running(id)) return { ok: false, error: 'The booking is not running.' };
+    if (liveBookingGame(this.db, id)) return { ok: false, error: 'Finish this game or use !end first.' };
+    const r = resolve(b);
+    if (!r.ok) return r;
+    const server = getServer(this.db, b.server_id!);
+    const entry = campaignRegistry(this.db).get(r.campaign);
+    if (!server || !loadsOn(this.db, entry, server)) return { ok: false, error: `This server cannot load ${entry?.name ?? r.campaign}.` };
+    const nowMs = this.now();
+    if (!setNext(this.db, id, r.campaign, new Date(nowMs).toISOString(), new Date(nowMs), by)) return { ok: false, error: 'The booking is not running.' };
+    // Loaded now; were a load already running, the next watch picks this up.
+    this.track(id, () => this.loadNext(id));
+    return r;
+  }
+
+  private resolveCampaign(wanted: string): ChooseResult {
+    const registry = campaignRegistry(this.db);
+    const pool = getCampaignPool(this.db).flatMap((slug) => { const e = registry.get(slug); return e ? [e] : []; });
+    const w = fold(wanted);
+    const exact = pool.filter((e) => fold(e.slug) === w || fold(e.name) === w);
+    const found = exact.length > 0 ? exact : pool.filter((e) => fold(e.slug).startsWith(w) || fold(e.name).startsWith(w));
+    const shown = consoleText(wanted, 40);
+    if (found.length === 1) return { ok: true, campaign: found[0].slug };
+    if (found.length === 0) return { ok: false, error: `No campaign in the map pool matches "${shown}".` };
+    return { ok: false, error: `"${shown}" matches more than one campaign: ${found.map((e) => e.name).join(', ')}.` };
+  }
+
+  /** `!end` (ruling 3): a live game is aborted (booking_ended) and the
+   *  plugin told to drop it, then the booking ends and winds down. */
+  endFromGame(id: number, by: string, staff = false): { ok: true } | { ok: false; error: string } {
+    const nowDate = new Date(this.now());
+    const r = endBooking(this.db, { bookingId: id, by, staff, now: nowDate });
+    if (!r.ok) return { ok: false, error: BOOKING_ERRORS[r.error].text };
+    const live = liveBookingGame(this.db, id);
+    const token = live ? abortBookingGame(this.db, live.id, nowDate) : null;
+    if (token) {
+      try {
+        this.deps.unregisterToken?.(token);
+      } catch (err) {
+        console.error(`[booking] ${id}: unregistering the aborted game's token failed:`, err);
+      }
+      this.abortTokens.set(id, token);
+    }
+    this.settle(id);
+    return { ok: true };
   }
 
   // ---------- notices ----------
@@ -493,8 +736,4 @@ export class BookingRunner {
     this.settle(id);
   }
 
-  /** A game inside a booking finished (RealOrchestrator.finishMatch keeps the
-   *  box with the booking and calls this). Empty for now: Task 4 of plan 4b
-   *  fills it with the playlist flow (announce the next campaign, load it). */
-  onGameEnded(matchId: number): void {}
 }

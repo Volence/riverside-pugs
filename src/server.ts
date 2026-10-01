@@ -1911,6 +1911,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     notifier,
     preempt: () => { practiceLeases.needServer(); sideGamesRef?.needServer(); },
     freed: () => holdFreed(),
+    // Booked games (plan 4b): the box logs to the site and signs its lines,
+    // and an aborted game's token stops being listened for.
+    logPublicAddress: deps.config.logPublicAddress,
+    unregisterToken: (token) => logListener?.unregister(token),
   });
   bookingRunnerRef = bookingRunner;
   bookingRunner.resume();
