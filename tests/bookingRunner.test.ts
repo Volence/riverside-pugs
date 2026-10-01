@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { addServer, type ServerRow } from '../src/serverPool.js';
 import { setSetting } from '../src/settings.js';
@@ -33,24 +33,27 @@ const status = (b: { map: string; humans: string[] }) => [
 /** SteamID64 -> STEAM_1:Y:Z, the form `status` prints. */
 const steam2 = (sid: string) => { const n = BigInt(sid) - 76561197960265728n; return `STEAM_1:${n % 2n}:${n / 2n}`; };
 
+/** The fake box: records each burst and answers like srcds would. */
+const fakeRcon = async (server: ServerRow, cmds: string[]): Promise<string[]> => {
+  const b = box[server.name];
+  if (b.down) throw new Error('rcon connect timeout');
+  sent.push({ server: server.name, cmds });
+  return cmds.map((c) => {
+    if (c === 'status') return status(b);
+    if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${b.type}" ( def. "" )`;
+    if (c === 'l4d_booking_version') return b.plugin ? '"l4d_booking_version" = "1.0.0" ( def. "1.0.0" )' : 'Unknown command "l4d_booking_version"';
+    if (c === 'exec pug_match') { b.execs++; if (b.failExec > 0) b.failExec--; else b.type = 'Rotoblin 4v4 PUG'; }
+    const m = /^changelevel (\S+)$/.exec(c);
+    if (m) b.map = m[1];
+    return '';
+  });
+};
+
 function build(over: Partial<ConstructorParameters<typeof BookingRunner>[0]> = {}) {
   return new BookingRunner({
     db,
     publicUrl: 'https://riversidepug.com',
-    rcon: async (server: ServerRow, cmds: string[]) => {
-      const b = box[server.name];
-      if (b.down) throw new Error('rcon connect timeout');
-      sent.push({ server: server.name, cmds });
-      return cmds.map((c) => {
-        if (c === 'status') return status(b);
-        if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${b.type}" ( def. "" )`;
-        if (c === 'l4d_booking_version') return b.plugin ? '"l4d_booking_version" = "1.0.0" ( def. "1.0.0" )' : 'Unknown command "l4d_booking_version"';
-        if (c === 'exec pug_match') { b.execs++; if (b.failExec > 0) b.failExec--; else b.type = 'Rotoblin 4v4 PUG'; }
-        const m = /^changelevel (\S+)$/.exec(c);
-        if (m) b.map = m[1];
-        return '';
-      });
-    },
+    rcon: fakeRcon,
     release: async (id) => { released.push(id); db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id); return true; },
     restart: async (server) => { restarted.push(server.name); box[server.name].type = PUB; box[server.name].map = 'l4d_vs_hospital01_apartment'; return true; },
     notifier: new Notifier({ db, dm: () => async (to, p) => { dms.push({ to, content: p.content ?? '' }); } }),
@@ -377,7 +380,7 @@ describe('the minute watch', () => {
   it('warns at 30, 10 and 5 minutes left, once each, then ends on time', async () => {
     const id = await ready();
     box.ccc.humans = [P[0]];
-    const says = () => sent.flatMap((s) => s.cmds).filter((c) => c.startsWith('say [Booking] About'));
+    const says = () => sent.flatMap((s) => s.cmds).filter((c) => c.startsWith('say [Booking] About') && c.includes('on this booking'));
     now = START + 89 * MIN; await runner.tick();
     expect(says()).toEqual([]);
     now = START + 90 * MIN; await runner.tick();
@@ -452,7 +455,11 @@ describe('fix wave (final review)', () => {
     await runner.idle();
     const cmds = sent.flatMap((s) => s.cmds);
     for (const line of CLEAR_LINES) expect(cmds).toContain(line);
-    expect(CLEAR_LINES).toEqual(['l4d_booking_password ""', 'l4d_booking_tv_password ""', 'l4d_booking_notice ""']);
+    // The scrim rules go back to PUG values too, so a skipped end restart cannot leak them into the next PUG.
+    expect(CLEAR_LINES).toEqual([
+      'l4d_booking_password ""', 'l4d_booking_tv_password ""', 'l4d_booking_notice ""',
+      'sm_pug_pause_limit 3', 'sm_pug_pause_seconds 120', 'sm_pug_auto_min_players 8',
+    ]);
     expect(cmds.indexOf('l4d_booking_password ""')).toBeGreaterThan(cmds.indexOf('sm_kick @humans "The booking is over. Thanks for playing."'));
 
     // The resume path (no goodbye) still clears them.
@@ -823,5 +830,122 @@ describe('booked games (plan 4b)', () => {
     now = START + 49 * MIN;
     await runner.tick();
     expect(getBooking(db, id)!.end_reason).toBe('idle');
+  });
+  describe('fix round 1', () => {
+    it('the first campaign gets the captains line and the extend warning once, when the booking goes active', async () => {
+      const id = await running();
+      box.ccc.humans = [P[0]];
+      now = START + 70 * MIN; // 50 min left, No Mercy defaults to 60
+      await runner.tick();
+      expect(getBooking(db, id)!.state).toBe('active');
+      expect(cmds()).toContain('say [Booking] No Mercy: !nextmap, !stay, !end and !extend are yours, captains.');
+      expect(cmds()).toContain('say [Booking] About 50 min left, this campaign usually takes 60. !extend now while the slot after is free.');
+      sent = [];
+      now += MIN;
+      await runner.tick();
+      expect(cmds().some((c) => c.includes('are yours, captains'))).toBe(false);
+    });
+
+    it('no extend warning at go-active when the campaign fits', async () => {
+      await running();
+      box.ccc.humans = [P[0]];
+      now = START;
+      await runner.tick();
+      expect(cmds()).toContain('say [Booking] No Mercy: !nextmap, !stay, !end and !extend are yours, captains.');
+      expect(cmds().some((c) => c.includes('usually takes'))).toBe(false);
+    });
+
+    it('a failing re-push burst does not lose that minute\'s presence', async () => {
+      const id = await running();
+      const r = build({
+        rcon: async (server, c) => {
+          if (c.includes('sm_pug_auto_track 1')) throw new Error('rcon exec timeout: sm_pug_auto_track 1');
+          return fakeRcon(server, c);
+        },
+      });
+      box.ccc.humans = [P[0], P[1]];
+      now = START + 5 * MIN;
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await r.tick();
+      warn.mockRestore();
+      const b = getBooking(db, id)!;
+      expect(b.state).toBe('active');
+      expect(b.last_human_at).toBe(new Date(now).toISOString());
+      expect(sideRow(db, id, 'a')!.peak_present).toBe(1);
+    });
+
+    it('a next campaign the box does not load is not announced; staff hear of it', async () => {
+      const id = await running();
+      const r = build({
+        rcon: async (server, c) => fakeRcon(server, c.filter((x) => !x.startsWith('changelevel'))),
+      });
+      box.ccc.humans = [P[0]];
+      now = START + 30 * MIN;
+      r.onGameEnded(insertGame(id, { state: 'completed', endedAt: now }));
+      const events: AdminEvent[] = [];
+      const unsubscribe = subscribeAdminEvents((e) => events.push(e));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      now += MIN;
+      await r.tick();
+      await r.idle();
+      unsubscribe();
+      expect(warn.mock.calls.some((a) => String(a[0]).includes('l4d_vs_smalltown01_caves did not load'))).toBe(true);
+      warn.mockRestore();
+      expect(cmds()).not.toContain(CAPTAINS_DT);
+      expect(events.some((e) => e.kind === 'problem' && e.text.includes(`Booking ${id}`) && e.text.includes('l4d_vs_smalltown01_caves'))).toBe(true);
+    });
+
+    it('a failing burst that carries the log secret is reported with the secret redacted', async () => {
+      const secret = 'cd'.repeat(16);
+      db.prepare('UPDATE servers SET log_secret = ?').run(secret);
+      const r = build({
+        logPublicAddress: '203.0.113.5:27500',
+        rcon: async (server, c) => {
+          const line = c.find((x) => x.startsWith('sm_pug_log_secret'));
+          if (line) throw new Error(`rcon exec timeout: ${line}`);
+          return fakeRcon(server, c);
+        },
+      });
+      const events: AdminEvent[] = [];
+      const unsubscribe = subscribeAdminEvents((e) => events.push(e));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      // Setup: the burst fails twice, the booking is cancelled, staff are told why.
+      const id = book();
+      now = START - 15 * MIN;
+      r.allocate();
+      await r.idle();
+      unsubscribe();
+      expect(getBooking(db, id)).toMatchObject({ state: 'cancelled', end_reason: 'setup_failed' });
+      const feed = events.flatMap((e) => (e.kind === 'problem' ? [e.text] : []));
+      const problem = feed.find((t) => t.includes(`Booking ${id} could not be set up`))!;
+      expect(problem).toContain('<redacted>');
+      const texts = [...feed, ...warn.mock.calls.map((a) => a.map(String).join(' '))];
+      expect(texts.some((t) => t.includes('<redacted>'))).toBe(true);
+      expect(texts.some((t) => t.includes(secret))).toBe(false);
+      warn.mockRestore();
+    });
+
+    it('the minute watch re-push failure is logged redacted', async () => {
+      const id = await running();
+      const secret = 'ef'.repeat(16);
+      db.prepare('UPDATE servers SET log_secret = ? WHERE id = 3').run(secret);
+      const r = build({
+        logPublicAddress: '203.0.113.5:27500',
+        rcon: async (server, c) => {
+          const line = c.find((x) => x.startsWith('sm_pug_log_secret'));
+          if (line) throw new Error(`rcon exec timeout: ${line}`);
+          return fakeRcon(server, c);
+        },
+      });
+      box.ccc.humans = [P[0]];
+      now = START + 5 * MIN;
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await r.tick();
+      const logged = warn.mock.calls.map((a) => a.map(String).join(' '));
+      warn.mockRestore();
+      expect(getBooking(db, id)!.state).toBe('active');
+      expect(logged.some((t) => t.includes('re-pushing the booking lines') && t.includes('<redacted>'))).toBe(true);
+      expect(logged.some((t) => t.includes(secret))).toBe(false);
+    });
   });
 });
