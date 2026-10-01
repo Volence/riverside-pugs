@@ -182,7 +182,7 @@ describe('the Blocked panel', () => {
     renderScrims();
     await screen.findByText('Rats');
     await screen.findByText('Eve');
-    expect(mockScrims.blocks).toHaveBeenCalledWith(1);
+    expect(mockScrims.blocks).toHaveBeenCalledWith(1, expect.anything());
 
     fireEvent.click(screen.getByRole('button', { name: 'Unblock Eve' }));
     await waitFor(() => expect(mockScrims.unblock).toHaveBeenCalledWith(1, { steamid: '76561199000000400' }));
@@ -206,10 +206,33 @@ describe('the Blocked panel', () => {
   it('switching the side reloads the block list', async () => {
     renderScrims();
     await screen.findByText('Rats');
-    await waitFor(() => expect(mockScrims.blocks).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(mockScrims.blocks).toHaveBeenCalledWith(1, expect.anything()));
 
-    fireEvent.change(screen.getByLabelText('Blocked side'), { target: { value: '' } });
-    await waitFor(() => expect(mockScrims.blocks).toHaveBeenCalledWith(null));
+    fireEvent.change(screen.getByLabelText('Your side for blocks'), { target: { value: '' } });
+    await waitFor(() => expect(mockScrims.blocks).toHaveBeenCalledWith(null, expect.anything()));
+  });
+
+  it('a slow response for the old side does not render after switching sides', async () => {
+    let resolveOld: ((r: { blocks: BlockEntry[] }) => void) | null = null;
+    mockScrims.blocks.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+    renderScrims();
+    await screen.findByText('Rats');
+    await waitFor(() => expect(mockScrims.blocks).toHaveBeenCalledWith(1, expect.anything()));
+
+    const newBlocks: BlockEntry[] = [{ target: { kind: 'player', steamid: '76561199000000400', name: 'Eve' }, createdAt: '2026-09-29T00:00:00.000Z' }];
+    mockScrims.blocks.mockResolvedValueOnce({ blocks: newBlocks });
+    fireEvent.change(screen.getByLabelText('Your side for blocks'), { target: { value: '' } });
+    await waitFor(() => expect(mockScrims.blocks).toHaveBeenCalledWith(null, expect.anything()));
+    await screen.findByText('Eve');
+
+    // The old side's response arrives late; it must not replace the new side's list.
+    resolveOld!({ blocks: [{ target: { kind: 'team', id: 2, name: 'Rats', tag: 'RT' }, createdAt: '2026-09-30T00:00:00.000Z' }] });
+    await Promise.resolve();
+    await Promise.resolve();
+    const panel = screen.getByRole('heading', { name: 'Blocked' }).closest('section')!;
+    const blockList = panel.querySelector('ul.teamlist');
+    expect(blockList?.textContent).not.toContain('Rats');
+    expect(blockList?.textContent).toContain('Eve');
   });
 
   it('is absent for someone who cannot post', async () => {
