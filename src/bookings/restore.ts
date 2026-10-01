@@ -86,7 +86,10 @@ export function resumeLines(s: RestoreSnapshot): string[] {
   return [
     `sm_pug_resume ${s.matchId} ${s.token} ${s.firstMap} ${s.firstSurv} ${s.nextSeq}`,
     ...s.maps.map((x) => `sm_pug_resume_map ${x.map} ${Math.trunc(x.a)} ${Math.trunc(x.b)}`),
-    ...s.roster.filter((r) => /^\d{17}$/.test(r.steamid)).map((r) => `sm_pug_roster ${r.steamid}:${r.team}:${r.joinedMap}`),
+    // Quoted: Source's console tokenizer splits unquoted arguments on ':',
+    // so an unquoted roster arg reaches the plugin as a bare steamid and is
+    // refused (as orchestrator.ts already quotes its own sm_pug_roster call).
+    ...s.roster.filter((r) => /^\d{17}$/.test(r.steamid)).map((r) => `sm_pug_roster "${r.steamid}:${r.team}:${r.joinedMap}"`),
     'sm_pug_resume_commit',
   ];
 }

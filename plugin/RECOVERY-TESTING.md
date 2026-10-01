@@ -47,8 +47,8 @@ Result: _not run_
 cd /home/volence/l4d1-ds
 python3 rcon-local.py "sm_pug_resume 999 abc123 l4d_vs_hospital01_apartment b 50" \
   "sm_pug_resume_map l4d_vs_hospital01_apartment 400 300" \
-  "sm_pug_roster 76561199000000001:a:0" \
-  "sm_pug_roster 76561199000000002:b:0" \
+  'sm_pug_roster "76561199000000001:a:0"' \
+  'sm_pug_roster "76561199000000002:b:0"' \
   "sm_pug_resume_commit"
 python3 rcon-local.py "changelevel l4d_vs_hospital02_subway"
 python3 rcon-local.py sm_pug_status
@@ -67,6 +67,11 @@ Expected:
   the log feed.
 
 Result: _not run_
+
+Step 2 was run 2026-10-01 on a private copy of the local server (port 27065):
+PUGOK resume, resume_map, roster x2 (quoted), resumed maps=1 roster=2; after
+changelevel state=pending, seedHold=1, pug team b survives first. Unquoted
+roster args are refused by the console tokenizer (found by this run).
 
 ## 3. With the owner's client plus bots (needs the owner)
 

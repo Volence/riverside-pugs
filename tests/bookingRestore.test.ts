@@ -122,7 +122,7 @@ describe('resumeLines and prepareRestore', () => {
     expect(resumeLines(s)).toEqual([
       `sm_pug_resume ${m} tok123 l4d_vs_hospital01_apartment a ${s.nextSeq}`,
       'sm_pug_resume_map l4d_vs_hospital01_apartment 400 350',
-      `sm_pug_roster ${A[0]}:a:0`, `sm_pug_roster ${A[1]}:a:0`, `sm_pug_roster ${B[0]}:b:1`, `sm_pug_roster ${B[1]}:b:1`,
+      `sm_pug_roster "${A[0]}:a:0"`, `sm_pug_roster "${A[1]}:a:0"`, `sm_pug_roster "${B[0]}:b:1"`, `sm_pug_roster "${B[1]}:b:1"`,
       'sm_pug_resume_commit',
     ]);
     prepareRestore(db, s);

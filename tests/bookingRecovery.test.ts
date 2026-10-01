@@ -56,9 +56,14 @@ const fakeRcon = async (server: ServerRow, cmds: string[]): Promise<string[]> =>
     if (c === 'l4d_booking_id') return b.bookingPlugin >= '1.4.0' ? `"l4d_booking_id" = "${b.marker}" ( def. "" )` : 'Unknown command "l4d_booking_id"';
     if (/^sm_pug_(resume|roster)/.test(c)) {
       if (b.pugMatch < '0.3.19') return `Unknown command "${c.split(' ')[0]}"`;
-      if (c === 'sm_pug_resume_commit') return `PUGOK resumed maps=${cmds.filter((x) => x.startsWith('sm_pug_resume_map ')).length} roster=${cmds.filter((x) => x.startsWith('sm_pug_roster ')).length}`;
+      // Mirrors the real console tokenizer: it splits an unquoted arg on ':',
+      // so only a quoted `sm_pug_roster "steamid:team:map"` is accepted. A
+      // regression to the unquoted form is counted as rejected here, same as
+      // the live box.
+      const rosterOk = (x: string) => /^sm_pug_roster "\d{17}:[ab]:\d+"$/.test(x);
+      if (c === 'sm_pug_resume_commit') return `PUGOK resumed maps=${cmds.filter((x) => x.startsWith('sm_pug_resume_map ')).length} roster=${cmds.filter(rosterOk).length}`;
       if (c.startsWith('sm_pug_resume_map ')) return `PUGOK resume_map=${cmds.filter((x) => x.startsWith('sm_pug_resume_map ')).indexOf(c) + 1}`;
-      if (c.startsWith('sm_pug_roster ')) return `PUGOK roster=${cmds.filter((x) => x.startsWith('sm_pug_roster ')).indexOf(c) + 1}`;
+      if (c.startsWith('sm_pug_roster ')) return rosterOk(c) ? `PUGOK roster=${cmds.filter(rosterOk).indexOf(c) + 1}` : 'PUGERR bad roster arg';
       return `PUGOK resume=${c.split(' ')[1]}`;
     }
     const mk = /^l4d_booking_id "(\d*)"$/.exec(c);
@@ -321,6 +326,10 @@ describe('srcds restarted', () => {
     // The resume leads its burst: sm_pug_auto_track 0 never kept auto-track off (gameLines sets it to 1 in the same burst).
     expect(cmds).not.toContain('sm_pug_auto_track 0');
     expect(cmds).toContain('sm_pug_resume_map l4d_vs_hospital01_apartment 400 300');
+    // Quoted, as the console tokenizer requires (fakeRcon rejects the
+    // unquoted form the same way the real box does).
+    expect(cmds).toContain(`sm_pug_roster "${P[0]}:a:0"`);
+    expect(cmds).toContain(`sm_pug_roster "${P[1]}:b:0"`);
     expect(cmds).toContain('changelevel l4d_vs_hospital02_subway');
     expect(box.ccc.marker).toBe(String(id));
     expect(getBooking(db, id)).toMatchObject({ recovering_at: null, recoveries: 1, server_id: 3 });
