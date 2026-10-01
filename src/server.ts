@@ -146,6 +146,8 @@ import { BookingVoice } from './bookings/voice.js';
 import { Notifier } from './notify/notify.js';
 import { bookingRoutes } from './routes/bookings.js';
 import { adminBookingRoutes } from './routes/adminBookings.js';
+import { ScrimBoard, TICK_MS as SCRIM_TICK_MS } from './scrims/board.js';
+import { scrimRoutes } from './routes/scrims.js';
 import { settingNumber } from './settings.js';
 import type { InstallTarget } from './campaignInstall.js';
 import { notifyDiscord } from './discord.js';
@@ -1801,6 +1803,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     clearInterval(practiceTick);
     practiceLeases.stop();
     clearInterval(bookingTick);
+    clearInterval(scrimTick);
     clearInterval(presenceSweep);
     clearInterval(renameDigestTimer);
     clearInterval(pruneTimer);
@@ -1955,6 +1958,17 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   bookingTick.unref();
   await app.register(bookingRoutes, { db: deps.db, runner: bookingRunner });
   await app.register(adminBookingRoutes, { db: deps.db, runner: bookingRunner });
+
+  // The scrim board (scrim board plan 1, Task 3): shares the booking runner
+  // (a confirmed scrim's booking is set up and allocated exactly like one
+  // made from /api/bookings) and the same Notifier. Its own minute tick
+  // expires posts and stale acceptances and tells the accepters who lost one
+  // that way; the Discord poster (plan 1 Task 4) is not built yet, so it
+  // runs with no poster to refresh.
+  const scrimBoard = new ScrimBoard({ db: deps.db, notifier, publicUrl: deps.config.publicUrl });
+  const scrimTick = setInterval(() => { void scrimBoard.tick(); }, SCRIM_TICK_MS);
+  scrimTick.unref();
+  await app.register(scrimRoutes, { db: deps.db, runner: bookingRunner, notifier, publicUrl: deps.config.publicUrl });
 
   await app.register(teamRoutes, {
     db: deps.db, store: getCommunityStore, publicUrl: deps.config.publicUrl,
