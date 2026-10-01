@@ -17,11 +17,11 @@ export function adminOverview(db: DB, logAuth?: LogAuth) {
   );
   const openRows = db.prepare(
     `SELECT m.id, m.campaign, m.state, m.server_id AS serverId, m.token, m.created_at AS createdAt,
-            m.went_live_at AS wentLiveAt,
+            m.went_live_at AS wentLiveAt, m.booking_id AS bookingId,
             (SELECT COUNT(*) FROM match_players mp WHERE mp.match_id = m.id AND mp.connected_at IS NOT NULL) AS connected,
             (SELECT COUNT(*) FROM match_players mp WHERE mp.match_id = m.id) AS rostered
      FROM matches m WHERE m.state IN ('configuring', 'live') ORDER BY m.id DESC`,
-  ).all() as (Record<string, unknown> & { id: number; serverId: number | null; token: string | null })[];
+  ).all() as (Record<string, unknown> & { id: number; serverId: number | null; token: string | null; bookingId: number | null })[];
   // Two staff additions per open match. This overview is read by admins AND
   // moderators (moderators see the Live desk with its server controls
   // hidden), and both fields go to both.

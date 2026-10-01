@@ -859,6 +859,11 @@ export interface AdminOverview {
     forecast: Forecast | null;
     /** For the abort dialog's leave-out boxes. Optional for an older server. */
     roster?: { steamid: string; name: string }[];
+    /** The booking this game belongs to, or null for an ordinary PUG match.
+     *  Aborting a booking game drops the game but leaves the booking's
+     *  server with it, so the abort dialog reads this to say so and skip
+     *  the leave-out boxes. Optional for an older server. */
+    bookingId?: number | null;
   }[];
   servers: {
     id: number; name: string; host: string; port: number; status: string; enabled: number;
@@ -1774,8 +1779,11 @@ export const adminApi = {
     post<{ ok: true }>(`/api/admin/practice/${leaseId}/kick`, { userid, reason }),
   leaveClock: (matchId: number, steamid: string, action: LeaveClockAction, seconds?: number) =>
     post<{ ok: true; reply: string }>(`/api/admin/live/${matchId}/players/${steamid}/leave`, { action, seconds }),
-  /** `leaveOut`: rostered players to tell but not put back in the queue. */
-  abortMatch: (id: number, leaveOut: string[]) => post(`/api/admin/matches/${id}/abort`, { leaveOut }),
+  /** `leaveOut`: rostered players to tell but not put back in the queue.
+   *  `message`, when present, is read out to the admin after the abort: a
+   *  booking game's route says the booking carries on. */
+  abortMatch: (id: number, leaveOut: string[]) =>
+    post<{ ok: true; message?: string }>(`/api/admin/matches/${id}/abort`, { leaveOut }),
   clearMatchNoShows: (id: number) => post<{ ok: true; cleared: string[] }>(`/api/admin/matches/${id}/clear-noshows`),
   /** Five more minutes on this match's no-show deadline, for everyone missing. */
   noShowExtend: (matchId: number) => post<{ ok: true; extraMinutes: number }>(`/api/admin/live/${matchId}/noshow-extend`),

@@ -72,6 +72,18 @@ describe('admin matches', () => {
     expect(JSON.stringify(o)).not.toContain('rcon');
   });
 
+  it('overview tells an ordinary open match apart from a booking game by bookingId', async () => {
+    const serverId = addServer(db, { name: 's2', host: '1.2.3.5', port: 27016, rconPort: 27016, rconPassword: 'x', status: 'live' });
+    const booking = holdForBooking(db, serverId);
+    const plain = Number(db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'live', 'dead_air')").run().lastInsertRowid);
+    const booked = Number(db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, server_id, token, origin, kind, visibility, booking_id) VALUES (1, 'live', 'dead_air', ?, 'tok-o', 'in_game', 'scrim', 'participants', ?)",
+    ).run(serverId, booking).lastInsertRowid);
+    const o = (await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: admin })).json();
+    expect(o.open.find((m: { id: number }) => m.id === plain).bookingId).toBeNull();
+    expect(o.open.find((m: { id: number }) => m.id === booked).bookingId).toBe(booking);
+  });
+
   it('overview lists each recent match\'s pauses, for when a team complains about the other side\'s', async () => {
     const token = 'c'.repeat(32);
     const matchId = Number(db.prepare("INSERT INTO matches (season_id, state, campaign, token) VALUES (1, 'live', 'dead_air', ?)").run(token).lastInsertRowid);
