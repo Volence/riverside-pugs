@@ -75,9 +75,6 @@ beforeEach(() => {
   setSetting(db, 'competitive_enabled', 'everyone');
   setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'death_toll', 'dead_center']));
   setSetting(db, 'pug_reserve_servers', '1');
-  // The slot is estimated from the campaigns now; a one-campaign booking is
-  // raised to this, keeping the 2 hour slot these timings were written for.
-  setSetting(db, 'booking_min_minutes', '120');
   for (const n of ['a', 'bb', 'ccc']) {
     const id = addServer(db, { name: n, host: '10.0.0.1', port: 27014 + n.length, rconPort: 1, rconPassword: 'x' });
     db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id);
@@ -86,9 +83,11 @@ beforeEach(() => {
   runner = build();
 });
 
+/** The slot is estimated from the campaigns (no PUG history, so 60 each):
+ *  one campaign is a 90 minute slot (until 21:30 UTC), two are 180 (23:00). */
 const book = (o: { playlist?: string[]; confirm?: boolean } = {}) => {
   const r = createBooking(db, {
-    by: P[0], opponent: { steamid: P[1] }, startsAt: new Date(START).toISOString(), minutes: 120,
+    by: P[0], opponent: { steamid: P[1] }, startsAt: new Date(START).toISOString(),
     playlist: o.playlist ?? ['no_mercy'], now: new Date(now),
   });
   if (!r.ok) throw new Error(r.error);
@@ -345,7 +344,7 @@ describe('bookingLines', () => {
     const id = book();
     db.prepare("UPDATE players SET name = 'a\"b;c ü' WHERE steamid = ?").run(P[0]);
     const lines = bookingLines(db, getBooking(db, id)!);
-    expect(lines.find((l) => l.startsWith('l4d_booking_notice'))).toBe('l4d_booking_notice "Booked: abc ?\'s group vs p1\'s group until 22:00 UTC"');
+    expect(lines.find((l) => l.startsWith('l4d_booking_notice'))).toBe('l4d_booking_notice "Booked: abc ?\'s group vs p1\'s group until 21:30 UTC"');
   });
 });
 
@@ -423,24 +422,20 @@ describe('the minute watch', () => {
     expect(getBooking(db, id)!.end_reason).toBe('idle');
   });
 
-  it('warns at 30, 10 and 5 minutes left, once each, then ends on time', async () => {
+  // Ruling 4: one warning, about 10 minutes before the slot's end, in place
+  // of the old 30, 10 and 5 minute ones.
+  it('warns once, about 10 minutes before the slot ends, then an idle booking ends on time', async () => {
     const id = await ready();
     box.ccc.humans = [P[0]];
-    const says = () => sent.flatMap((s) => s.cmds).filter((c) => c.startsWith('say [Booking] About') && c.includes('on this booking'));
-    now = START + 89 * MIN; await runner.tick();
+    const says = () => sent.flatMap((s) => s.cmds).filter((c) => c.includes('of the booked slot left'));
+    now = START + 79 * MIN; await runner.tick();
     expect(says()).toEqual([]);
+    now = START + 80 * MIN; await runner.tick();
+    now = START + 81 * MIN; await runner.tick();
+    now = START + 85 * MIN; await runner.tick();
+    expect(says()).toEqual(['say [Booking] About 10 minutes of the booked slot left (until 21:30 UTC).']);
+    expect(sent.flatMap((s) => s.cmds).some((c) => /About \d+ minutes left on this booking/.test(c))).toBe(false);
     now = START + 90 * MIN; await runner.tick();
-    now = START + 91 * MIN; await runner.tick();
-    expect(says()).toEqual(['say [Booking] About 30 minutes left on this booking (until 22:00 UTC).']);
-    now = START + 110 * MIN; await runner.tick();
-    now = START + 115 * MIN; await runner.tick();
-    now = START + 116 * MIN; await runner.tick();
-    expect(says()).toEqual([
-      'say [Booking] About 30 minutes left on this booking (until 22:00 UTC).',
-      'say [Booking] About 10 minutes left on this booking (until 22:00 UTC).',
-      'say [Booking] About 5 minutes left on this booking (until 22:00 UTC).',
-    ]);
-    now = START + 120 * MIN; await runner.tick();
     await runner.idle();
     expect(getBooking(db, id)).toMatchObject({ state: 'ended', end_reason: 'time' });
   });
@@ -451,10 +446,10 @@ describe('the minute watch', () => {
     now = START + 60 * MIN;
     await runner.tick();
     expect(getBooking(db, id)!.ending_at).toBeNull();
-    now = START + 119 * MIN;
+    now = START + 89 * MIN;
     await runner.tick();
     expect(getBooking(db, id)!.ending_at).toBeNull();
-    now = START + 120 * MIN;
+    now = START + 90 * MIN;
     await runner.tick();
     await runner.idle();
     const b = getBooking(db, id)!;
@@ -536,15 +531,15 @@ describe('fix wave (final review)', () => {
     expect(() => r.onCancelled(id, P[0], null)).not.toThrow();
   });
 
-  it('onExtended re-sends the notice and says the new end on a running box', async () => {
+  it('onExtended re-sends the notice and says the new count and end on a running box', async () => {
     const id = await ready();
     expect(addCampaign(db, { bookingId: id, by: P[0], staff: true, now: new Date(now) }).ok).toBe(true);
     runner.onExtended(id);
     await new Promise((r) => setImmediate(r));
     const cmds = sent.flatMap((s) => s.cmds);
-    // +1 campaign with none named: 60 + 10, up to 90 minutes.
-    expect(cmds).toContain('say [Booking] Extended: this booking now runs until 23:30 UTC.');
-    expect(cmds.find((c) => c.startsWith('l4d_booking_notice'))).toContain('until 23:30 UTC');
+    // +1 campaign with none named: 60 + 10, up to 90 minutes, from 21:30.
+    expect(cmds).toContain('say [Booking] +1 campaign: now 2 to play (until about 23:00 UTC).');
+    expect(cmds.find((c) => c.startsWith('l4d_booking_notice'))).toContain('until 23:00 UTC');
   });
 
   it('onExtended does nothing for a booking with no box yet', () => {
@@ -568,7 +563,10 @@ describe('fix wave (final review)', () => {
 
 describe('booked games (plan 4b)', () => {
   const NEXT_DT = 'say [Booking] Next: Death Toll in about a minute. !nextmap to pick another, !stay to replay this one, !end to finish.';
-  const CAPTAINS_DT = 'say [Booking] Death Toll: !nextmap, !stay, !end and !extend are yours, captains.';
+  const CAPTAINS_DT = 'say [Booking] Death Toll: !nextmap, !stay, !end and !addcampaign are yours, captains.';
+  /** Ruling 3: said when the finished-game count reaches games_allowed. */
+  const CLOSE_1 = 'say [Booking] That was campaign 1 of 1. Type !addcampaign to play one more, or the server closes in 5 minutes.';
+  const CLOSE_2 = 'say [Booking] That was campaign 2 of 2. Type !addcampaign to play one more, or the server closes in 5 minutes.';
   const cmds = () => sent.flatMap((s) => s.cmds);
   const flush = () => new Promise((r) => setImmediate(r));
   /** `YYYY-MM-DD HH:MM:SS`, as datetime('now') writes matches.ended_at. */
@@ -657,11 +655,8 @@ describe('booked games (plan 4b)', () => {
     expect(c).toContain(`l4d_booking_password "${getBooking(db, id)!.password}"`);
   });
 
-  it('after a game the next campaign is announced, then loaded 60 s later with the captains line and the extend warning', async () => {
+  it('after a game the next campaign is announced, then loaded 60 s later with the captains line', async () => {
     const id = await running();
-    // These time warnings were written for a 2 hour slot; two campaigns are
-    // now estimated at 3 hours, so the slot is set back to 2 hours here.
-    db.prepare('UPDATE bookings SET ends_at = ? WHERE id = ?').run(new Date(START + 120 * MIN).toISOString(), id);
     box.ccc.humans = [P[0], P[1]];
     now = START + 89 * MIN;
     const game = insertGame(id, { state: 'completed', endedAt: now });
@@ -684,8 +679,8 @@ describe('booked games (plan 4b)', () => {
     expect(cmds().filter((c) => c.startsWith('changelevel'))).toEqual(['changelevel l4d_vs_smalltown01_caves']);
     expect(getBooking(db, id)).toMatchObject({ playlist_pos: 1, next_campaign: null, next_at: null });
     expect(cmds()).toContain(CAPTAINS_DT);
-    // Death Toll has no PUG history: the 60 minute default, with 30 left.
-    expect(cmds()).toContain('say [Booking] About 30 min left, this campaign usually takes 60. !extend now while the slot after is free.');
+    // Ruling 4: time never cuts a live game, so there is no hint to extend.
+    expect(cmds().some((c) => c.includes('usually takes'))).toBe(false);
     expect(JSON.parse(events(id, 'campaign_loaded')[0].detail)).toEqual({ campaign: 'death_toll', pos: 1 });
 
     // Loaded once: the next watch does not load it again.
@@ -696,10 +691,10 @@ describe('booked games (plan 4b)', () => {
     expect(cmds().some((c) => c.startsWith('changelevel'))).toBe(false);
   });
 
-  it('no extend warning when the campaign fits in the time left', async () => {
+  it('no extend hint at a campaign start, even with little of the slot left', async () => {
     const id = await running();
     box.ccc.humans = [P[0]];
-    now = START + 10 * MIN;
+    now = START + 150 * MIN; // 30 minutes left; Death Toll defaults to 60
     runner.onGameEnded(insertGame(id, { state: 'completed', endedAt: now }));
     now += MIN;
     await runner.tick();
@@ -708,13 +703,13 @@ describe('booked games (plan 4b)', () => {
     expect(cmds().some((c) => c.includes('this campaign usually takes'))).toBe(false);
   });
 
-  it('a game ending on the last playlist campaign says so and schedules nothing', async () => {
+  it('a game ending on the last booked campaign says the close and schedules nothing', async () => {
     const id = await running(['no_mercy']);
     now = START + 60 * MIN;
     runner.onGameEnded(insertGame(id, { state: 'completed', endedAt: now }));
     await flush();
-    expect(cmds()).toContain('say [Booking] That was the last campaign on the playlist. !nextmap <campaign> to play another, or !end to finish.');
-    expect(getBooking(db, id)).toMatchObject({ next_campaign: null, next_at: null });
+    expect(cmds()).toContain(CLOSE_1);
+    expect(getBooking(db, id)).toMatchObject({ next_campaign: null, next_at: null, close_at: new Date(now + 5 * MIN).toISOString() });
   });
 
   it('onGameEnded does nothing for a booking that is ending', async () => {
@@ -923,17 +918,14 @@ describe('booked games (plan 4b)', () => {
     expect(getBooking(db, id)!.end_reason).toBe('idle');
   });
   describe('fix round 1', () => {
-    it('the first campaign gets the captains line and the extend warning once, when the booking goes active', async () => {
+    it('the first campaign gets the captains line once, when the booking goes active', async () => {
       const id = await running();
-      // These time warnings were written for a 2 hour slot; two campaigns are
-      // now estimated at 3 hours, so the slot is set back to 2 hours here.
-      db.prepare('UPDATE bookings SET ends_at = ? WHERE id = ?').run(new Date(START + 120 * MIN).toISOString(), id);
       box.ccc.humans = [P[0]];
-      now = START + 70 * MIN; // 50 min left, No Mercy defaults to 60
+      now = START + 140 * MIN; // 40 min left, No Mercy defaults to 60: still no extend hint
       await runner.tick();
       expect(getBooking(db, id)!.state).toBe('active');
-      expect(cmds()).toContain('say [Booking] No Mercy: !nextmap, !stay, !end and !extend are yours, captains.');
-      expect(cmds()).toContain('say [Booking] About 50 min left, this campaign usually takes 60. !extend now while the slot after is free.');
+      expect(cmds()).toContain('say [Booking] No Mercy: !nextmap, !stay, !end and !addcampaign are yours, captains.');
+      expect(cmds().some((c) => c.includes('usually takes'))).toBe(false);
       sent = [];
       now += MIN;
       await runner.tick();
@@ -954,12 +946,12 @@ describe('booked games (plan 4b)', () => {
       expect(cmds().filter((c) => c.includes('are yours, captains'))).toEqual([CAPTAINS_DT]);
     });
 
-    it('no extend warning at go-active when the campaign fits', async () => {
+    it('no extend hint at go-active when the campaign fits', async () => {
       await running();
       box.ccc.humans = [P[0]];
       now = START;
       await runner.tick();
-      expect(cmds()).toContain('say [Booking] No Mercy: !nextmap, !stay, !end and !extend are yours, captains.');
+      expect(cmds()).toContain('say [Booking] No Mercy: !nextmap, !stay, !end and !addcampaign are yours, captains.');
       expect(cmds().some((c) => c.includes('usually takes'))).toBe(false);
     });
 
@@ -1136,15 +1128,57 @@ describe('booked games (plan 4b)', () => {
       expect(getBooking(db, id)!.playlist_pos).toBe(0);
     });
 
-    it('extends the booking and says the new end on the box', async () => {
+    it('!extend is +1 campaign with none named, and says the new count and end on the box', async () => {
       const id = await running();
       const before = getBooking(db, id)!.ends_at;
-      runner.onCommand(3, P[1], 'extend', '');
+      runner.onCommand(3, P[1], 'extend', 'death');
       await flush();
       const b = getBooking(db, id)!;
       expect(Date.parse(b.ends_at)).toBe(Date.parse(before) + 90 * MIN);
       expect(b.games_allowed).toBe(3);
-      expect(cmds()).toContain(`say [Booking] Extended: this booking now runs until ${b.ends_at.slice(11, 16)} UTC.`);
+      // !extend takes no campaign: an arg is ignored.
+      expect(JSON.parse(b.playlist_json)).toEqual(['no_mercy', 'death_toll']);
+      expect(cmds()).toContain('say [Booking] +1 campaign: now 3 to play (until about 00:30 UTC).');
+    });
+
+    it('!addcampaign with a campaign name appends it to the playlist; with none it adds a campaign to pick later', async () => {
+      const id = await running(['no_mercy']);
+      runner.onCommand(3, P[0], 'addcampaign', 'death');
+      await flush();
+      let b = getBooking(db, id)!;
+      expect(JSON.parse(b.playlist_json)).toEqual(['no_mercy', 'death_toll']);
+      expect(b.games_allowed).toBe(2);
+      // Death Toll has no history: 60 + 10, up to 90, from 21:30.
+      expect(b.ends_at).toBe(new Date(START + 180 * MIN).toISOString());
+      expect(cmds()).toContain('say [Booking] +1 campaign: now 2 to play (until about 23:00 UTC).');
+      runner.onCommand(3, P[1], 'addcampaign', '');
+      await flush();
+      b = getBooking(db, id)!;
+      expect(JSON.parse(b.playlist_json)).toEqual(['no_mercy', 'death_toll']);
+      expect(b.games_allowed).toBe(3);
+      expect(events(id, 'campaign_added').map((e) => JSON.parse(e.detail).campaign)).toEqual(['death_toll', null]);
+    });
+
+    it('!addcampaign with a name matching no pool campaign is refused on the box and adds nothing', async () => {
+      const id = await running(['no_mercy']);
+      runner.onCommand(3, P[0], 'addcampaign', 'xyz');
+      await flush();
+      expect(cmds()).toContain('say [Booking] No campaign in the map pool matches xyz.');
+      expect(getBooking(db, id)!.games_allowed).toBe(1);
+      expect(events(id, 'campaign_added')).toHaveLength(0);
+    });
+
+    it('a refused +1 campaign is said on the box', async () => {
+      const id = await running(['no_mercy']); // 20:00 to 21:30
+      // Two more bookings from 21:30 fill the two bookable boxes (one is reserved for PUGs).
+      for (const [a, b] of [[2, 3], [4, 5]]) {
+        const r = createBooking(db, { by: P[a], opponent: { steamid: P[b] }, startsAt: new Date(START + 90 * MIN).toISOString(), playlist: ['no_mercy'], now: new Date(now) });
+        expect(r.ok).toBe(true);
+      }
+      runner.onCommand(3, P[0], 'addcampaign', '');
+      await flush();
+      expect(cmds()).toContain('say [Booking] No server is free for another campaign after this slot.');
+      expect(getBooking(db, id)!.games_allowed).toBe(1);
     });
 
     it('ends the booking', async () => {
@@ -1164,6 +1198,270 @@ describe('booked games (plan 4b)', () => {
       expect(getBooking(db, id)!.next_campaign).toBeNull();
     });
 
+  });
+
+  // Bookings by campaign, Task 2: a booking is N campaigns. The runner
+  // counts finished games, closes 5 minutes after the Nth, and the slot's
+  // end never cuts a live game.
+  describe('by campaign', () => {
+    const finish = (id: number, campaign = 'no_mercy') => {
+      const game = insertGame(id, { state: 'completed', campaign, endedAt: now });
+      runner.onGameEnded(game);
+      return game;
+    };
+    const closeAt = (id: number) => getBooking(db, id)!.close_at;
+
+    it('two finished games of two: the close line, then the close 5 minutes later', async () => {
+      const id = await running();
+      box.ccc.humans = [P[0], P[1]];
+      now = START + 60 * MIN;
+      finish(id);
+      await flush();
+      expect(cmds()).toContain(NEXT_DT);
+      expect(closeAt(id)).toBeNull();
+      now = START + 150 * MIN;
+      finish(id, 'death_toll');
+      await flush();
+      expect(cmds()).toContain(CLOSE_2);
+      expect(cmds().filter((c) => c.startsWith('say [Booking] Next:'))).toHaveLength(1);
+      // The grace lives in close_at only: ending_at stays null, so +1 campaign still works.
+      expect(getBooking(db, id)).toMatchObject({ close_at: new Date(now + 5 * MIN).toISOString(), ending_at: null, next_campaign: null });
+      now = START + 154 * MIN;
+      await runner.tick();
+      await runner.idle();
+      expect(getBooking(db, id)!.ending_at).toBeNull();
+      now = START + 155 * MIN;
+      await runner.tick();
+      await runner.idle();
+      const b = getBooking(db, id)!;
+      expect(b).toMatchObject({ state: 'ended', end_reason: 'done' });
+      expect(b.ended_at).not.toBeNull();
+      expect(cmds()).toContain('say [Booking] This booked server is closing: every booked campaign is played.');
+      expect(released).toEqual([3]);
+    });
+
+    it('an aborted game does not count', async () => {
+      const id = await running();
+      box.ccc.humans = [P[0]];
+      now = START + 60 * MIN;
+      insertGame(id, { state: 'aborted', endedAt: now - 30 * MIN });
+      finish(id);
+      await flush();
+      expect(cmds()).toContain(NEXT_DT);
+      expect(cmds()).not.toContain(CLOSE_2);
+      expect(closeAt(id)).toBeNull();
+    });
+
+    it('a !stay replay and an off-playlist campaign each count as one of the N', async () => {
+      const id = await running();
+      box.ccc.humans = [P[0]];
+      now = START + 60 * MIN;
+      finish(id, 'no_mercy');
+      now = START + 120 * MIN;
+      finish(id, 'dead_air');
+      await flush();
+      expect(cmds()).toContain(CLOSE_2);
+      expect(closeAt(id)).toBe(new Date(now + 5 * MIN).toISOString());
+    });
+
+    it('the next campaign goes by the count, and replays the last one when the playlist is shorter than the count', async () => {
+      const id = await running(['no_mercy']);
+      // +1 campaign with none named: 2 allowed, the playlist still 1 long.
+      expect(addCampaign(db, { bookingId: id, by: P[0], now: new Date(now) }).ok).toBe(true);
+      box.ccc.humans = [P[0]];
+      now = START + 60 * MIN;
+      finish(id);
+      await flush();
+      expect(cmds()).toContain('say [Booking] Next: No Mercy in about a minute. !nextmap to pick another, !stay to replay this one, !end to finish.');
+      expect(getBooking(db, id)!.next_campaign).toBe('no_mercy');
+    });
+
+    it('a captain\'s +1 campaign during the grace succeeds and cancels the close, once', async () => {
+      const id = await running(['no_mercy']); // 20:00 to 21:30
+      box.ccc.humans = [P[0], P[1]];
+      now = START + 60 * MIN;
+      finish(id);
+      await flush();
+      expect(cmds()).toContain(CLOSE_1);
+      expect(closeAt(id)).not.toBeNull();
+      now = START + 62 * MIN;
+      // The model call itself, as a captain (not staff), inside the grace.
+      expect(addCampaign(db, { bookingId: id, by: P[1], now: new Date(now) })).toMatchObject({ ok: true, value: { gamesAllowed: 2 } });
+      expect(closeAt(id)).toBeNull();
+      // And in game: !addcampaign from the other captain adds another.
+      sent = [];
+      runner.onCommand(3, P[0], 'addcampaign', 'death');
+      await flush();
+      expect(getBooking(db, id)).toMatchObject({ games_allowed: 3, close_at: null, ending_at: null });
+      expect(cmds()).toContain('say [Booking] +1 campaign: now 3 to play (until about 00:30 UTC).');
+      // The box sat on a finished campaign: the next one by the count (the
+      // named one, second on the playlist now) is announced and loaded.
+      expect(getBooking(db, id)!.next_campaign).toBe('death_toll');
+      expect(cmds()).toContain(NEXT_DT);
+      // Past the old close: still open.
+      now = START + 66 * MIN;
+      await runner.tick();
+      await runner.idle();
+      expect(getBooking(db, id)!.ending_at).toBeNull();
+      expect(cmds()).toContain('changelevel l4d_vs_smalltown01_caves');
+      // Played to the new count: one close line, one close.
+      now = START + 150 * MIN;
+      finish(id, 'death_toll');
+      now = START + 200 * MIN;
+      finish(id);
+      await flush();
+      expect(cmds().filter((c) => c.startsWith('say [Booking] That was campaign 3 of 3.'))).toHaveLength(1);
+      now = START + 205 * MIN;
+      await runner.tick();
+      await runner.idle();
+      expect(getBooking(db, id)).toMatchObject({ state: 'ended', end_reason: 'done' });
+      expect(events(id, 'ended')).toHaveLength(1);
+    });
+
+    it('a game finishing after the close has fired reopens nothing', async () => {
+      const id = await running(['no_mercy']);
+      box.ccc.humans = [P[0]];
+      now = START + 60 * MIN;
+      finish(id);
+      now = START + 65 * MIN;
+      await runner.tick();
+      await runner.idle();
+      const ended = getBooking(db, id)!;
+      expect(ended).toMatchObject({ state: 'ended', end_reason: 'done' });
+      sent = [];
+      now = START + 66 * MIN;
+      finish(id);
+      await flush();
+      expect(cmds()).toEqual([]);
+      expect(getBooking(db, id)).toEqual(ended);
+      expect(addCampaign(db, { bookingId: id, by: P[0], now: new Date(now) })).toEqual({ ok: false, error: 'wrong_state' });
+    });
+
+    it('!stay and !nextmap are refused after N of N', async () => {
+      const id = await running();
+      box.ccc.humans = [P[0]];
+      now = START + 60 * MIN;
+      finish(id);
+      now = START + 120 * MIN;
+      finish(id, 'death_toll');
+      await flush();
+      sent = [];
+      const refused = { ok: false, error: 'All 2 campaigns are played. !addcampaign for one more.' };
+      expect(runner.stay(id, P[0])).toEqual(refused);
+      expect(runner.chooseNext(id, P[1], 'death')).toEqual(refused);
+      runner.onCommand(3, P[0], 'nextmap', '');
+      runner.onCommand(3, P[1], 'stay', '');
+      await flush();
+      expect(cmds()).toEqual([
+        'say [Booking] All 2 campaigns are played. !addcampaign for one more.',
+        'say [Booking] All 2 campaigns are played. !addcampaign for one more.',
+      ]);
+      expect(getBooking(db, id)!.next_campaign).toBeNull();
+      // One more added: allowed again.
+      expect(addCampaign(db, { bookingId: id, by: P[0], now: new Date(now) }).ok).toBe(true);
+      expect(runner.stay(id, P[0])).toEqual({ ok: true, campaign: 'death_toll' });
+    });
+
+    it('a live game at the slot end keeps the booking open; it ends after the game', async () => {
+      const id = await running(); // 20:00 to 23:00, 2 campaigns
+      box.ccc.humans = [P[0], P[1]];
+      now = START + 100 * MIN;
+      const live = insertGame(id, { state: 'live' });
+      now = START + 180 * MIN;
+      await runner.tick();
+      await runner.idle();
+      now = START + 200 * MIN;
+      await runner.tick();
+      await runner.idle();
+      expect(getBooking(db, id)!.ending_at).toBeNull();
+      expect(db.prepare('SELECT state FROM matches WHERE id = ?').get(live)).toEqual({ state: 'live' });
+      // The first of two games finishes past the slot: no next campaign is announced, and the booking ends.
+      db.prepare("UPDATE matches SET state = 'completed', ended_at = ? WHERE id = ?").run(sqlTime(now), live);
+      sent = [];
+      runner.onGameEnded(live);
+      await flush();
+      expect(cmds().some((c) => c.startsWith('say [Booking] Next:'))).toBe(false);
+      now += MIN;
+      await runner.tick();
+      await runner.idle();
+      expect(getBooking(db, id)).toMatchObject({ state: 'ended', end_reason: 'time' });
+      expect(cmds()).toContain('say [Booking] This booked server is closing: its time is up.');
+    });
+
+    it('the Nth game finishing past the slot end still gets the 5 minute grace', async () => {
+      const id = await running(['no_mercy']); // 20:00 to 21:30
+      box.ccc.humans = [P[0], P[1]];
+      const live = insertGame(id, { state: 'live' });
+      now = START + 100 * MIN;
+      await runner.tick();
+      expect(getBooking(db, id)!.ending_at).toBeNull();
+      db.prepare("UPDATE matches SET state = 'completed', ended_at = ? WHERE id = ?").run(sqlTime(now), live);
+      runner.onGameEnded(live);
+      await flush();
+      expect(cmds()).toContain(CLOSE_1);
+      now = START + 104 * MIN;
+      await runner.tick();
+      await runner.idle();
+      expect(getBooking(db, id)!.ending_at).toBeNull();
+      now = START + 105 * MIN;
+      await runner.tick();
+      await runner.idle();
+      expect(getBooking(db, id)).toMatchObject({ state: 'ended', end_reason: 'done' });
+    });
+
+    it('a game started during the grace is not cut by the close', async () => {
+      const id = await running(['no_mercy']);
+      box.ccc.humans = [P[0], P[1]];
+      now = START + 60 * MIN;
+      finish(id);
+      const live = insertGame(id, { state: 'live' });
+      now = START + 70 * MIN;
+      await runner.tick();
+      await runner.idle();
+      expect(getBooking(db, id)!.ending_at).toBeNull();
+      expect(db.prepare('SELECT state FROM matches WHERE id = ?').get(live)).toEqual({ state: 'live' });
+    });
+
+    it('an idle booking past the slot end still ends, even with rcon down', async () => {
+      const id = await running();
+      box.ccc.down = true;
+      now = START + 180 * MIN;
+      await runner.tick();
+      await runner.idle();
+      expect(getBooking(db, id)).toMatchObject({ state: 'ended', end_reason: 'time' });
+    });
+
+    it('the 10 minute warning is said only between games, never during the grace', async () => {
+      const id = await running(); // until 23:00
+      box.ccc.humans = [P[0], P[1]];
+      const says = () => cmds().filter((c) => c.includes('of the booked slot left'));
+      const live = insertGame(id, { state: 'live' });
+      now = START + 170 * MIN;
+      await runner.tick();
+      now = START + 171 * MIN;
+      await runner.tick();
+      expect(says()).toEqual([]);
+      db.prepare("UPDATE matches SET state = 'completed', ended_at = ? WHERE id = ?").run(sqlTime(now), live);
+      runner.onGameEnded(live);
+      now = START + 172 * MIN;
+      await runner.tick();
+      await runner.idle();
+      expect(says()).toEqual(['say [Booking] About 8 minutes of the booked slot left (until 23:00 UTC).']);
+
+    });
+
+    it('no 10 minute warning during the closing grace: the close line says it all', async () => {
+      const id = await running(['no_mercy']); // until 21:30
+      box.ccc.humans = [P[0]];
+      now = START + 78 * MIN;
+      finish(id);
+      now = START + 81 * MIN;
+      await runner.tick();
+      await runner.idle();
+      expect(cmds()).toContain(CLOSE_1);
+      expect(cmds().filter((c) => c.includes('of the booked slot left'))).toEqual([]);
+      expect(getBooking(db, id)!.ending_at).toBeNull();
+    });
   });
 
   describe('the allowlist (plan 4b2)', () => {
@@ -1391,15 +1689,18 @@ describe('booked games (plan 4b)', () => {
       expect(c.indexOf('sm_pug_abort tok-live')).toBeLessThan(bye);
     };
 
-    it('a time end aborts a live game before the goodbye', async () => {
+    // Ruling 4: the slot's end never cuts a live game (the by-campaign tests
+    // below follow it to the end); the other ends still abort one.
+    it('the slot end does not abort a live game', async () => {
       const { id, live } = await start();
       box.ccc.humans = [P[0]];
       now = START + 180 * MIN; // two campaigns: an estimated 3 hour slot
       await r.tick();
       await r.idle();
-      expect(getBooking(db, id)!.end_reason).toBe('time');
-      expectAborted(live);
-      expectNoLiveGame(id);
+      expect(getBooking(db, id)!.ending_at).toBeNull();
+      expect(db.prepare('SELECT state FROM matches WHERE id = ?').get(live)).toEqual({ state: 'live' });
+      expect(unregistered).toEqual([]);
+      expect(cmds().some((c) => c.startsWith('sm_pug_abort'))).toBe(false);
     });
 
     it('an idle end aborts a live game', async () => {
