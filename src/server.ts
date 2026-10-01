@@ -140,6 +140,7 @@ import { communityRoutes } from './routes/community.js';
 import { CommunityStore } from './community/store.js';
 import { sweepCommunity } from './community/sweep.js';
 import { teamRoutes } from './routes/teams.js';
+import { eventRoutes } from './routes/events.js';
 import { handleTeamButton, TEAM_BUTTON_PREFIX } from './discord/teamButtons.js';
 import { BookingRunner, TICK_MS as BOOKING_TICK_MS } from './bookings/runner.js';
 import { BookingVoice } from './bookings/voice.js';
@@ -1991,6 +1992,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // Read per invite: the bot logs in some seconds after this runs.
     dm: () => { const transport = bot?.transport; return transport ? (userId, payload) => transport.dm(userId, payload) : null; },
   });
+
+  // Events (tournaments plan T1a): read only, behind the competitive switch.
+  await app.register(eventRoutes, { db: deps.db });
 
   // Purge community tombstones past their 30 days, once at start and then
   // daily. With no community folder yet nothing was ever written, so only
