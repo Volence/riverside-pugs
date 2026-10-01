@@ -60,6 +60,14 @@ describe('Cast', () => {
     expect(screen.queryByRole('link', { name: 'Steam' })).toBeNull();
   });
 
+  it('a booked scrim on a box with SourceTV off says so, with no SourceTV line', async () => {
+    mockCast.list.mockResolvedValue({ matches: [match({ connect: null, booked: true, spectate: null })] });
+    render(<Cast />);
+    expect(await screen.findByText('SourceTV is off on this server.')).toBeTruthy();
+    expect(screen.queryByText(/watch it through SourceTV/)).toBeNull();
+    expect(screen.queryByText(/does not know this server's password/)).toBeNull();
+  });
+
   it('says so when nothing is live', async () => {
     mockCast.list.mockResolvedValue({ matches: [] });
     render(<Cast />);

@@ -59,7 +59,8 @@ export interface CastMatch {
  *
  * Each caster's first read of a match's password goes in the admin log
  * (quietly, no feed post: the page is polled), so a leaked password has a
- * short list of people who could have seen it.
+ * short list of people who could have seen it: cast_connect for a PUG's game
+ * server password, cast_relay for a booking's relay password.
  */
 export async function castRoutes(app: FastifyInstance, opts: { db: DB }): Promise<void> {
   const { db } = opts;
@@ -95,7 +96,7 @@ export async function castRoutes(app: FastifyInstance, opts: { db: DB }): Promis
     );
     const registry = campaignRegistry(db);
     const seen = db.prepare(
-      "SELECT 1 FROM admin_actions WHERE action = 'cast_connect' AND admin_id = ? AND target = ? LIMIT 1",
+      'SELECT 1 FROM admin_actions WHERE action = ? AND admin_id = ? AND target = ? LIMIT 1',
     );
 
     /** The booked box's relay with the booking's own password. */
@@ -109,8 +110,14 @@ export async function castRoutes(app: FastifyInstance, opts: { db: DB }): Promis
       const connect = r.bookingId === null && r.origin === 'queue' && r.token && r.host !== null && r.port !== null
         ? { host: r.host, port: r.port, password: serverPasswordFor(r.token) }
         : null;
-      if (connect && !seen.get(viewer, String(r.id))) {
+      if (connect && !seen.get('cast_connect', viewer, String(r.id))) {
         logAdmin(db, viewer, 'cast_connect', r.id, { server: r.serverName }, { quiet: true });
+      }
+      const spectate = r.bookingId === null ? spectateFor(db, r.serverId) : bookingRelay(r.serverId, r.bookingId);
+      // A booking's relay password is the one secret this route hands out
+      // for a booked box: who first read it, per match, goes in the log too.
+      if (r.bookingId !== null && spectate && !seen.get('cast_relay', viewer, String(r.id))) {
+        logAdmin(db, viewer, 'cast_relay', r.id, { booking: r.bookingId, server: r.serverName }, { quiet: true });
       }
       const score = scoresOf.get(r.id) as { done: number; a: number; b: number };
       const chapters = registry.get(r.campaign)?.maps ?? [];
@@ -131,7 +138,7 @@ export async function castRoutes(app: FastifyInstance, opts: { db: DB }): Promis
         teamB: (teamOf.all(r.id, 'b') as { name: string }[]).map((p) => p.name),
         connect,
         booked: r.bookingId !== null,
-        spectate: r.bookingId === null ? spectateFor(db, r.serverId) : bookingRelay(r.serverId, r.bookingId),
+        spectate,
       };
     });
     return { matches };

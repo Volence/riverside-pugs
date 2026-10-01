@@ -11,6 +11,7 @@ import { closeBooking, getBooking, holdBox, markReady, markSetup } from '../src/
 import { castersOf, fullyInvited, inviteCaster, withdrawCaster } from '../src/bookings/casters.js';
 import { canViewMatch, viewerFor, visibleMatchesSql } from '../src/matchVisibility.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
+import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 
 const P = Array.from({ length: 3 }, (_, i) => `7656119900000045${i}`);
 const [CAPT_A, CAPT_B, STRANGER] = P;
@@ -252,6 +253,27 @@ describe('/api/cast for booked games', () => {
     expect(m).toMatchObject({ id: gameId, booked: true, connect: null, spectate: { host: '9.9.9.9', port: 27120, password: tvPassword() } });
     expect(m.spectate!.password).not.toBe('servertv');
     expect(JSON.stringify(m)).not.toContain(getBooking(db, bookingId)!.password);
+  });
+
+  it("records, quietly, a caster's first read of a booking's relay password, once per match", async () => {
+    const relayRows = () => db.prepare("SELECT admin_id, target, detail FROM admin_actions WHERE action = 'cast_relay'").all() as
+      { admin_id: string; target: string; detail: string }[];
+    expect(await listed(CASTER)).toEqual([]);
+    expect(relayRows()).toEqual([]); // not invited: nothing read, nothing logged
+    inviteBoth(CASTER);
+    const feed: AdminEvent[] = [];
+    const off = subscribeAdminEvents((e) => feed.push(e));
+    await listed(CASTER);
+    await listed(CASTER);
+    off();
+    expect(feed.filter((e) => e.kind === 'admin_action')).toEqual([]);
+    const rows = relayRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ admin_id: CASTER, target: String(gameId) });
+    expect(JSON.parse(rows[0].detail)).toMatchObject({ booking: bookingId });
+    expect(rows[0].detail).not.toContain(tvPassword());
+    // Not the PUG connect log: a booked game has no game server line.
+    expect(db.prepare("SELECT 1 FROM admin_actions WHERE action = 'cast_connect'").all()).toEqual([]);
   });
 
   it('lists it to staff without any invite', async () => {

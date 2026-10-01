@@ -68,7 +68,9 @@ function Casters({ v, mySide, open, busy, act }: {
             <li key={c.steamid}>
               <span>{c.name}</span>
               <span class="muted"> · {nameOf('a')} {c.a ? '✓' : 'pending'} / {nameOf('b')} {c.b ? '✓' : 'pending'}</span>
-              {open && mine(c) && (
+              {/* Withdraw stays after the booking closes: taking back an
+                  invite is always this side's to do, and the API allows it. */}
+              {mine(c) && (
                 <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.withdrawCaster(v.id, c.steamid))}>Withdraw</button>
               )}
             </li>
