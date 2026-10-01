@@ -1,12 +1,20 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { ApiError, logoUrl, teamsApi, type TeamView } from '../api';
+import { ApiError, logoUrl, teamsApi, type TeamScrim, type TeamView } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 import { toLogoPng } from '../teamLogo';
+import { campaignName } from '../format';
 
 const ROLE_LABEL = { captain: 'Captain', cocaptain: 'Co-captain', member: 'Member' } as const;
+/** Mirrors Bookings.tsx's STATE_LABEL; a scrim's state is a plain string
+ *  server-side (it covers tournament bookings too), so an unknown value
+ *  falls back to itself rather than failing to render. */
+const SCRIM_STATE_LABEL: Record<string, string> = {
+  scheduled: 'Booked', held: 'Server taken', setup: 'Setting up', ready: 'Ready', active: 'Playing',
+  ended: 'Over', cancelled: 'Cancelled', no_show: 'No-show',
+};
 const day = (iso: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '');
 /** Mirrors src/teams/teams.ts: a full roster, and the players an event needs. */
 const ROSTER_MAX = 8;
@@ -30,6 +38,7 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
   const [confirmKick, setConfirmKick] = useState<string | null>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [scrims, setScrims] = useState<TeamScrim[] | null>(null);
   const me = session.kind === 'active' ? session.me.steamid : null;
 
   const load = (signal?: AbortSignal) =>
@@ -43,6 +52,16 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
     void load(ctl.signal);
     return () => ctl.abort();
   }, [slug]);
+
+  // Members and staff only (the server 404s this route for anyone else): the
+  // request waits for the team view so it can read viewer.role/viewer.staff,
+  // and is never sent at all for someone who cannot see it.
+  useEffect(() => {
+    if (!team || !(team.viewer.role || team.viewer.staff)) { setScrims(null); return; }
+    const ctl = new AbortController();
+    teamsApi.scrims(slug, ctl.signal).then((r) => setScrims(r.scrims), () => {});
+    return () => ctl.abort();
+  }, [slug, team?.viewer.role, team?.viewer.staff]);
 
   useEffect(() => {
     if (q.trim().length < 2) { setFound([]); return; }
@@ -163,6 +182,39 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
           </p>
         )}
       </Panel>
+
+      {scrims !== null && (
+        <Panel>
+          <h3>Scrims</h3>
+          {scrims.length === 0 ? <Empty>No scrims yet.</Empty> : (
+            <ul class="bookinglist">
+              {scrims.map((s) => (
+                <li key={s.bookingId}>
+                  <div class="bookingrow">
+                    <a class="teamrow__who" href={`/booking/${s.bookingId}`}>
+                      <span class="teamrow__name">vs {s.opponent}</span>
+                      <span class="teamroster__meta">{day(s.startsAt)}</span>
+                    </a>
+                    <span class={`teamchip teamchip--${s.state}`}>{SCRIM_STATE_LABEL[s.state] ?? s.state}</span>
+                  </div>
+                  {s.games.length > 0 && (
+                    <ul class="bookinggames">
+                      {s.games.map((g) => (
+                        <li key={g.matchId}>
+                          <span>{campaignName(g.campaign)}</span>
+                          <span>{g.us} : {g.them}</span>
+                          <span class="muted">{g.state}</span>
+                          <a href={`/match/${g.matchId}`}>View</a>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+      )}
 
       {(canManage || isCaptain) && (
         <div class="teamgrid2">

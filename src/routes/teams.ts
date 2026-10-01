@@ -7,6 +7,7 @@ import { makeOptionalViewer, makeRequireActive } from './guards.js';
 import { competitiveAccess, competitivePublic } from '../teams/access.js';
 import * as T from '../teams/teams.js';
 import { checkLogo, LOGO_MAX_BYTES } from '../community/validate.js';
+import { teamScrims } from '../bookings/games.js';
 import type { CommunityStore } from '../community/store.js';
 import type { DmFn } from '../signonDropNotify.js';
 import { teamInviteDm } from '../discord/teamButtons.js';
@@ -184,6 +185,18 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
         : null,
     };
     return view;
+  });
+
+  // 404 for anyone but a current member or staff (not even a 403), so a
+  // stranger learns nothing about whether this route exists for this team.
+  app.get('/api/teams/:slug/scrims', async (req, reply) => {
+    const v = allowedViewer(req, reply);
+    if (!v) return;
+    const t = teamOf(req);
+    if (!t) return refuse(reply, 'not_found');
+    const role = v.viewer ? T.roleOf(db, t.id, v.viewer) : null;
+    if (role === null && !isStaff(v.viewer)) return refuse(reply, 'not_found');
+    return { scrims: teamScrims(db, t.id) };
   });
 
   app.post('/api/teams/:slug/invites', async (req, reply) => {

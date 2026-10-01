@@ -12,8 +12,9 @@ import {
   addPerson, confirmBooking, createBooking, getBooking, holdBox, markReady, markSetup, respondPerson,
 } from '../src/bookings/bookings.js';
 import {
-  abortBookingGame, bookingGames, bookingOnServer, bookingSideForTeamA, liveBookingGame,
+  abortBookingGame, bookingGames, bookingOnServer, bookingSideForTeamA, liveBookingGame, teamScrims,
 } from '../src/bookings/games.js';
+import { createTeam } from '../src/teams/teams.js';
 import net from 'node:net';
 import {
   decodePackets, encodePacket, SERVERDATA_AUTH, SERVERDATA_AUTH_RESPONSE,
@@ -342,5 +343,66 @@ describe('finishing a booking game', () => {
     expect(released).toEqual([[serverId, { restart: true }]]);
     expect(notified).toHaveLength(1);
     expect(ended).toEqual([]);
+  });
+});
+
+describe('teamScrims', () => {
+  function insertGame(bookingId: number, state: string, sideA: 'a' | 'b', scoreA: number, scoreB: number, token: string): number {
+    return Number(db.prepare(
+      `INSERT INTO matches (season_id, state, campaign, server_id, token, origin, kind, visibility, booking_id, booking_side_a, team_a_score, team_b_score)
+       VALUES (?, ?, 'no_mercy', 3, ?, 'in_game', 'scrim', 'participants', ?, ?, ?, ?)`,
+    ).run(currentSeasonId(db), state, token, bookingId, sideA, scoreA, scoreB).lastInsertRowid);
+  }
+
+  function teamBooking(o: { by: string; teamId?: number; opponent: { teamId: number } | { steamid: string }; startsAt: number }): number {
+    const created = new Date(o.startsAt - 2 * 24 * 60 * MIN);
+    const r = createBooking(db, {
+      by: o.by, teamId: o.teamId, opponent: o.opponent, startsAt: new Date(o.startsAt).toISOString(), minutes: 120,
+      playlist: ['no_mercy'], now: created,
+    });
+    if (!r.ok) throw new Error(r.error);
+    return r.value.id;
+  }
+
+  it('lists only the team\'s own bookings, newest first, each game oriented to the team\'s own booking side', () => {
+    const alpha = createTeam(db, { creator: P[0], name: 'Team Alpha', tag: 'ALF' });
+    if (!alpha.ok) throw new Error(alpha.error);
+    const teamId = alpha.value.id;
+
+    // Booking 1: team Alpha books as side a against a pickup group (P4).
+    const id1 = teamBooking({ by: P[0], teamId, opponent: { steamid: P[4] }, startsAt: START });
+    insertGame(id1, 'completed', 'a', 10, 20, 't1'); // sideA matches the team's side: us is scoreA
+    insertGame(id1, 'completed', 'b', 30, 5, 't2'); // sideA is the other side: us is scoreB
+
+    // Booking 2: a pickup group (P5) books against team Alpha, who is side b.
+    const id2 = teamBooking({ by: P[5], opponent: { teamId }, startsAt: START + 24 * 60 * MIN });
+    insertGame(id2, 'completed', 'b', 7, 2, 't3'); // sideA matches the team's side (b): us is scoreA
+    insertGame(id2, 'live', 'a', 1, 9, 't4'); // sideA is the other side: us is scoreB
+
+    // A booking team Alpha was never in must never be listed.
+    teamBooking({ by: P[6], opponent: { steamid: P[7] }, startsAt: START + 2 * 24 * 60 * MIN });
+
+    const scrims = teamScrims(db, teamId);
+    expect(scrims.map((s) => s.bookingId)).toEqual([id2, id1]);
+
+    const s1 = scrims.find((s) => s.bookingId === id1)!;
+    expect(s1.opponent).toBe("p4's group");
+    expect(s1.state).toBe('scheduled');
+    expect(s1.games.map((g) => [g.matchId, g.campaign, g.state, g.us, g.them])).toEqual([
+      [expect.any(Number), 'no_mercy', 'completed', 10, 20],
+      [expect.any(Number), 'no_mercy', 'completed', 5, 30],
+    ]);
+
+    const s2 = scrims.find((s) => s.bookingId === id2)!;
+    expect(s2.opponent).toBe("p5's group");
+    expect(s2.games.map((g) => [g.us, g.them])).toEqual([[7, 2], [9, 1]]);
+  });
+
+  it('never lists another team\'s bookings', () => {
+    const alpha = createTeam(db, { creator: P[0], name: 'Team Alpha', tag: 'ALF' });
+    const bravo = createTeam(db, { creator: P[1], name: 'Team Bravo', tag: 'BRV' });
+    if (!alpha.ok || !bravo.ok) throw new Error('setup');
+    teamBooking({ by: P[1], teamId: bravo.value.id, opponent: { steamid: P[4] }, startsAt: START });
+    expect(teamScrims(db, alpha.value.id)).toEqual([]);
   });
 });

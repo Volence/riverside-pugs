@@ -8,6 +8,10 @@ import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import { png } from './pngFixture.js';
+import { createBooking } from '../src/bookings/bookings.js';
+import { getTeamBySlug } from '../src/teams/teams.js';
+import { currentSeasonId } from '../src/players.js';
+import { addServer } from '../src/serverPool.js';
 
 const P = Array.from({ length: 6 }, (_, i) => `7656119900000020${i}`);
 const ADMIN = '76561199000000290';
@@ -200,6 +204,77 @@ describe('logo', () => {
     expect((await call('POST', `/api/teams/${slug}/logo`, MOD, { png: png(256, 256).toString('base64') })).statusCode).toBe(200);
     expect(db.prepare("SELECT admin_id, action FROM admin_actions WHERE action LIKE 'team_%'").all())
       .toEqual([{ admin_id: MOD, action: 'team_logo' }]);
+  });
+});
+
+describe('scrims', () => {
+  const START = Date.parse('2026-10-05T20:00:00.000Z');
+  const DAY = 24 * 60 * 60 * 1000;
+
+  // Capacity needs enabled, idle servers (pug_reserve_servers defaults to 2).
+  beforeEach(() => {
+    for (const n of ['a', 'bb', 'ccc'] as const) addServer(db, { name: n, host: '10.0.0.1', port: 27014 + n.length, rconPort: 1, rconPassword: 'x' });
+  });
+
+  const booking = (by: string, teamId: number | undefined, opponent: { teamId: number } | { steamid: string }, startsAt: number): number => {
+    const r = createBooking(db, {
+      by, teamId, opponent, startsAt: new Date(startsAt).toISOString(), minutes: 120, playlist: ['no_mercy'],
+      now: new Date(startsAt - 2 * DAY),
+    });
+    if (!r.ok) throw new Error(r.error);
+    return r.value.id;
+  };
+  const insertGame = (bookingId: number, sideA: 'a' | 'b', scoreA: number, scoreB: number, token: string): void => {
+    db.prepare(
+      `INSERT INTO matches (season_id, state, campaign, token, origin, kind, visibility, booking_id, booking_side_a, team_a_score, team_b_score)
+       VALUES (?, 'completed', 'no_mercy', ?, 'in_game', 'scrim', 'participants', ?, ?, ?, ?)`,
+    ).run(currentSeasonId(db), token, bookingId, sideA, scoreA, scoreB);
+  };
+
+  it('a member sees the team\'s scrims, newest first, oriented to the team\'s own side, including when the team is side b', async () => {
+    const slug = await create(P[0], 'Rats', 'RR');
+    const teamId = getTeamBySlug(db, slug)!.id;
+    // Rats book as side a against a pickup group (P4).
+    const id1 = booking(P[0], teamId, { steamid: P[4] }, START);
+    insertGame(id1, 'a', 10, 20, 't1'); // sideA matches the Rats' own side: us is scoreA
+    insertGame(id1, 'b', 30, 5, 't2'); // sideA is the other side: us is scoreB
+    // A pickup group (P5) books against the Rats, who are side b here.
+    const id2 = booking(P[5], undefined, { teamId }, START + DAY);
+    insertGame(id2, 'b', 7, 2, 't3'); // sideA matches the Rats' own side (b): us is scoreA
+    // A booking the Rats were never in must never show up.
+    booking(P[2], undefined, { steamid: P[3] }, START + 2 * DAY);
+
+    const r = await call('GET', `/api/teams/${slug}/scrims`, P[0]);
+    expect(r.statusCode).toBe(200);
+    const scrims = r.json().scrims as { bookingId: number; opponent: string; games: { us: number; them: number }[] }[];
+    expect(scrims.map((s) => s.bookingId)).toEqual([id2, id1]);
+    expect(scrims.find((s) => s.bookingId === id1)!.opponent).toBe("player4's group");
+    expect(scrims.find((s) => s.bookingId === id1)!.games.map((g) => [g.us, g.them])).toEqual([[10, 20], [5, 30]]);
+    expect(scrims.find((s) => s.bookingId === id2)!.games.map((g) => [g.us, g.them])).toEqual([[7, 2]]);
+  });
+
+  it('staff see a team\'s scrims without being a member', async () => {
+    const slug = await create(P[0], 'Rats', 'RR');
+    expect((await call('GET', `/api/teams/${slug}/scrims`, ADMIN)).statusCode).toBe(200);
+    expect((await call('GET', `/api/teams/${slug}/scrims`, MOD)).statusCode).toBe(200);
+  });
+
+  it('a former member, a stranger and a signed-out visitor all get 404, the same as a missing team', async () => {
+    const slug = await create(P[0], 'Rats', 'RR');
+    const tok = (await call('POST', `/api/teams/${slug}/join-link`, P[0], { on: true })).json().token as string;
+    await call('POST', `/api/teams/join/${tok}`, P[1]);
+    await call('POST', `/api/teams/${slug}/leave`, P[1]);
+    const notFound = { error: 'No such team.' };
+    expect((await call('GET', `/api/teams/${slug}/scrims`, P[1])).json()).toEqual(notFound); // former member
+    expect((await call('GET', `/api/teams/${slug}/scrims`, P[3])).json()).toEqual(notFound); // stranger
+    expect((await call('GET', `/api/teams/${slug}/scrims`)).statusCode).toBe(404); // signed-out
+    expect((await call('GET', '/api/teams/no-such-team/scrims', P[0])).statusCode).toBe(404);
+  });
+
+  it('the switch hides the route like every other team route', async () => {
+    const slug = await create(P[0], 'Rats', 'RR');
+    db.prepare("UPDATE settings SET value = 'off' WHERE key = 'competitive_enabled'").run();
+    expect((await call('GET', `/api/teams/${slug}/scrims`, P[0])).statusCode).toBe(404);
   });
 });
 
