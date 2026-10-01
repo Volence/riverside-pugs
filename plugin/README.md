@@ -350,3 +350,18 @@ didn't work" into a specific line.
 and ready-up line across map changes (plan 4a). Build with
 `./build-booking.sh`. It must be loaded on every pool box before bookings
 are opened to anyone: setup refuses a box without `l4d_booking_version`.
+
+1.1.0 adds the booking's captain commands. The site lists the booking's
+captains (SteamID64s of the managers of a confirmed side) in
+`l4d_booking_captains`. While `l4d_booking_password` is set, a captain's
+`!nextmap [text]`, `!stay`, `!end` and `!extend` in chat go out as a signed
+`PUGBOOK` line (through `pug-logauth.inc`, the same signing `pug-match` and
+`l4d_tvwatch` use):
+`PUGBOOK event=cmd cmd=<nextmap|stay|end|extend> steamid=<id64> arg=<text>`,
+`arg=` last and at most 64 characters, with `"`, `;` and line breaks removed.
+Anyone else typing one of those commands gets "Only a captain can do that."
+in chat; the chat line itself is never hidden. The plugin's captain list is
+only a courtesy filter, not an admission control: the site re-checks every
+command against its own idea of who is a captain. `sm_booking_cmd
+<steamid64> <cmd> [arg...]` emits the same line without the captain check,
+for testing and staff.
