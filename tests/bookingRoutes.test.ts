@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
+import cookie from '@fastify/cookie';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +8,8 @@ import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { addServer } from '../src/serverPool.js';
+import { holdBox, markReady, markSetup } from '../src/bookings/bookings.js';
+import { bookingRoutes } from '../src/routes/bookings.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 
 const P = Array.from({ length: 4 }, (_, i) => `7656119900000030${i}`);
@@ -128,5 +131,81 @@ describe('staff', () => {
     expect((await call('POST', `/api/admin/bookings/${id}/cancel`, MOD, { reason: 'test' })).statusCode).toBe(200);
     expect(db.prepare('SELECT state, cancel_side FROM bookings WHERE id = ?').get(id)).toEqual({ state: 'cancelled', cancel_side: null });
     expect(db.prepare("SELECT action FROM admin_actions WHERE action = 'booking_cancel'").all()).toHaveLength(1);
+  });
+});
+
+describe('next and stay (plan 4b, Task 7)', () => {
+  /** Holds, sets up and readies a booking on server `a`, bypassing the
+   *  runner's own rcon-driven setup (route tests build no fake box). */
+  const ready = (id: number) => {
+    const serverId = (db.prepare("SELECT id FROM servers WHERE name = 'a'").get() as { id: number }).id;
+    const at = new Date();
+    expect(holdBox(db, id, serverId, at)).toBe(true);
+    markSetup(db, id, at);
+    expect(markReady(db, id, at)).toBe(true);
+  };
+
+  it('a manager of a confirmed side can pick the next campaign or stay; a stranger gets 404', async () => {
+    const r = await call('POST', '/api/bookings', P[0], {
+      opponent: { steamid: P[1] }, startsAt: START.toISOString(), minutes: 90, playlist: ['no_mercy', 'death_toll'],
+    });
+    const id = r.json().id as number;
+    await call('POST', `/api/bookings/${id}/confirm`, P[1]);
+    ready(id);
+    expect((await call('POST', `/api/bookings/${id}/next`, P[2])).statusCode).toBe(404);
+    // Loading starts at once: by the time the route answers, the playlist has
+    // already moved to death_toll's position (plan 4b, runner.chooseNext).
+    const next = await call('POST', `/api/bookings/${id}/next`, P[0], { campaign: 'death_toll' });
+    expect(next.statusCode).toBe(200);
+    expect(next.json().state).toBe('ready');
+    expect(db.prepare('SELECT playlist_pos, next_campaign FROM bookings WHERE id = ?').get(id))
+      .toEqual({ playlist_pos: 1, next_campaign: null });
+    const stay = await call('POST', `/api/bookings/${id}/stay`, P[1]);
+    expect(stay.statusCode).toBe(200);
+  });
+
+  it('refuses with the runner\'s own text when the caller does not manage a confirmed side', async () => {
+    const id = await create();
+    await call('POST', `/api/bookings/${id}/confirm`, P[1]);
+    ready(id);
+    const added = await call('POST', `/api/bookings/${id}/people`, P[0], { side: 'a', steamid: P[2], role: 'player' });
+    expect(added.statusCode).toBe(200);
+    expect((await call('POST', `/api/bookings/${id}/accept`, P[2])).statusCode).toBe(200);
+    const next = await call('POST', `/api/bookings/${id}/next`, P[2], { campaign: 'death_toll' });
+    expect(next.statusCode).toBe(409);
+    expect(next.json().error).toBe('Only a captain or co-captain of that side can do that.');
+    const stay = await call('POST', `/api/bookings/${id}/stay`, P[2]);
+    expect(stay.statusCode).toBe(409);
+    expect(stay.json().error).toBe('Only a captain or co-captain of that side can do that.');
+  });
+
+  it('a staff caller acting outside their own side is audited; one managing a side is not', async () => {
+    const id = await create();
+    await call('POST', `/api/bookings/${id}/confirm`, P[1]);
+    ready(id);
+    const next = await call('POST', `/api/bookings/${id}/next`, ADMIN, { campaign: 'death_toll' });
+    expect(next.statusCode).toBe(200);
+    expect(db.prepare("SELECT admin_id, action, target, detail FROM admin_actions WHERE action = 'booking_next'").all())
+      .toEqual([{ admin_id: ADMIN, action: 'booking_next', target: String(id), detail: JSON.stringify({ campaign: 'death_toll' }) }]);
+    const stay = await call('POST', `/api/bookings/${id}/stay`, ADMIN);
+    expect(stay.statusCode).toBe(200);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'booking_stay'").get()).toEqual({ n: 1 });
+    // The side-a captain (P[0]) also happens to be an admin here? No: P[0]
+    // manages side a and is not staff, so acting as themselves never audits.
+    expect((await call('POST', `/api/bookings/${id}/stay`, P[0])).statusCode).toBe(200);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'booking_stay'").get()).toEqual({ n: 1 });
+  });
+
+  it('answers 503 for next and stay when no runner is wired (routes built bare)', async () => {
+    const id = await create();
+    await call('POST', `/api/bookings/${id}/confirm`, P[1]);
+    const bare = Fastify();
+    await bare.register(cookie, { secret: 'x'.repeat(32) });
+    await bare.register(bookingRoutes, { db, runner: null });
+    await bare.ready();
+    const as0 = authedCookie(bare, db, P[0]);
+    expect((await bare.inject({ method: 'POST', url: `/api/bookings/${id}/next`, cookies: as0 })).statusCode).toBe(503);
+    expect((await bare.inject({ method: 'POST', url: `/api/bookings/${id}/stay`, cookies: as0 })).statusCode).toBe(503);
+    await bare.close();
   });
 });

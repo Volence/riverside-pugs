@@ -1734,6 +1734,10 @@ export const bookingsApi = {
     post<BookingView>(`/api/bookings/${id}/people`, { side, steamid, role }),
   removePerson: (id: number, steamid: string) => post<BookingView>(`/api/bookings/${id}/people/${enc(steamid)}/remove`),
   setPref: (type: string, enabled: boolean) => post<{ prefs: NotifyPref[] }>('/api/bookings/prefs', { type, enabled }),
+  /** Between-games playlist control (plan 4b): pick a campaign (or the next
+   *  playlist one when omitted), or replay the last game's campaign. */
+  next: (id: number, campaign?: string) => post<BookingView>(`/api/bookings/${id}/next`, campaign ? { campaign } : undefined),
+  stay: (id: number) => post<BookingView>(`/api/bookings/${id}/stay`),
 };
 
 export interface AdminBookingRow {

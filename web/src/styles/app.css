@@ -3309,3 +3309,7 @@ a.teamrow:hover .teamrow__name { color: var(--accent); }
 .bookingconnect code { font-family: ui-monospace, monospace; font-size: var(--fs-dense); }
 .bookingpref { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); }
 .bookingpref:last-child { border-bottom: 0; }
+
+.bookinggames { list-style: none; margin: 0; padding: 0; }
+.bookinggames li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); }
+.bookinggames li:last-child { border-bottom: 0; }

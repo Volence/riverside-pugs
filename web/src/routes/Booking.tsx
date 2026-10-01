@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { adminApi, bookingsApi, teamsApi, type BookingRole, type BookingSide, type BookingView } from '../api';
+import { adminApi, bookingsApi, teamsApi, type BookingOptions, type BookingRole, type BookingSide, type BookingView } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 import { localLabel } from '../bookingTime';
+import { campaignName } from '../format';
 
 const STATE_LINE: Record<BookingView['state'], string> = {
   scheduled: 'Booked. The server is taken and set up 15 minutes before the start.',
@@ -47,9 +48,15 @@ export function Booking({ id, session }: { id: string; session: Session }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState('');
+  const [campaigns, setCampaigns] = useState<BookingOptions['campaigns']>([]);
+  const [pick, setPick] = useState('');
 
   const load = () => { bookingsApi.get(id).then(setV, () => setMissing(true)); };
   useEffect(load, [id]);
+  // The campaign pool, for the "Play this next" select. Loaded once; nobody
+  // needs it until the booking is running anyway, and it costs nothing to
+  // have it ready before then.
+  useEffect(() => { bookingsApi.options().then((o) => setCampaigns(o.campaigns), () => {}); }, []);
   useEffect(() => {
     // The state moves on its own (held, ready, active): re-read while it can.
     if (!v || v.ending || ['ended', 'cancelled', 'no_show'].includes(v.state)) return;
@@ -109,6 +116,13 @@ export function Booking({ id, session }: { id: string; session: Session }) {
   const playerManage = open && managesConfirmedSide;
   const staffOnly = open && v.viewer.staff && !playerManage;
   const canManage = playerManage || staffOnly;
+  // Between-games controls (plan 4b): shown once the booking is actually
+  // running, with nothing live right now, to whoever may call `!nextmap` /
+  // `!stay` on the box itself (a manager of a confirmed side, or staff). Both
+  // player routes take a staff caller too, so there is no admin-only variant
+  // here the way Extend/End/Cancel have one.
+  const liveGame = v.games.some((g) => g.state === 'live');
+  const canPlayGames = running && !liveGame && (managesConfirmedSide || v.viewer.staff);
 
   return (
     <main class="page page--profile bookingpage">
@@ -151,6 +165,41 @@ export function Booking({ id, session }: { id: string; session: Session }) {
           {open && s.confirmed && v.viewer.manages.includes(s.side) && <AddPerson id={v.id} side={s.side} onDone={setV} />}
         </Panel>
       ))}
+      {v.games.length > 0 && (
+        <Panel>
+          <h3>Games</h3>
+          <ul class="bookinggames">
+            {v.games.map((g) => {
+              const sideA = v.sides.find((s) => s.side === 'a')!;
+              const sideB = v.sides.find((s) => s.side === 'b')!;
+              const scoreA = g.sideA === 'b' ? g.scoreB : g.scoreA;
+              const scoreB = g.sideA === 'b' ? g.scoreA : g.scoreB;
+              return (
+                <li key={g.matchId}>
+                  <span>{campaignName(g.campaign)}</span>
+                  <span>{sideA.name} {scoreA} : {scoreB} {sideB.name}</span>
+                  <span class="muted">{g.state}</span>
+                  <a href={`/match/${g.matchId}`}>View</a>
+                </li>
+              );
+            })}
+          </ul>
+        </Panel>
+      )}
+      {canPlayGames && (
+        <Panel>
+          <h3>Next campaign</h3>
+          <p class="muted">Picking an earlier playlist campaign moves the playlist back to it.</p>
+          <p>
+            <select aria-label="Campaign" value={pick} onChange={(e) => setPick((e.target as HTMLSelectElement).value)}>
+              <option value="">Next on the playlist</option>
+              {campaigns.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
+            </select>
+            <button class="btn" disabled={busy} onClick={() => act(() => bookingsApi.next(v.id, pick || undefined))}>Play this next</button>
+            <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.stay(v.id))}>Replay last campaign</button>
+          </p>
+        </Panel>
+      )}
       {canManage && (
         <Panel>
           <h3>Booking</h3>
