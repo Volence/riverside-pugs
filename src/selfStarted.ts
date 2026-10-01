@@ -6,7 +6,7 @@ import { publishAdminEvent } from './adminFeed.js';
 import { QUEUE_SIZE } from './queue.js';
 import { resolveAlias } from './aliases.js';
 import { hasActiveBan } from './banState.js';
-import { bookingOnServer, bookingSideForTeamA } from './bookings/games.js';
+import { bookingOnServer, bookingSideForTeamA, liveBookingGame } from './bookings/games.js';
 import { logBookingEvent, markActive, type BookingRow } from './bookings/bookings.js';
 import { holdFor } from './serverHolds.js';
 
@@ -337,6 +337,10 @@ export class SelfStartedMatches {
         // being set up, or ending) is nobody's to play a PUG on: adopting
         // would make a public, rated match on a box the booking keeps.
         if (!booking && holdFor(db, serverId)?.kind === 'booking') return null;
+
+        // Plan 5: a booking being set up again after a restart already has a
+        // game to restore; a fresh go-live on the box must not become a second one.
+        if (booking && booking.recovering_at !== null && liveBookingGame(db, booking.id)) return null;
 
         // Insert-if-absent, never update: a player who has signed in already
         // has a real Steam persona and avatar, and an in-game nickname must

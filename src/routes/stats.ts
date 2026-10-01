@@ -208,7 +208,7 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // reason rides along for the page to say so.
     const match = db.prepare(
       `SELECT id, campaign, state, ended_at AS endedAt, team_a_score AS teamAScore, team_b_score AS teamBScore,
-              winner, voided_at AS voidedAt, void_reason AS voidReason
+              winner, voided_at AS voidedAt, void_reason AS voidReason, restored_at_map AS restoredAtMap
        FROM matches WHERE id = ? AND state IN ('completed', 'aborted')`,
     ).get(id);
     if (!match) return reply.code(404).send({ error: 'no such match' });

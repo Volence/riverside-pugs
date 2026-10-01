@@ -569,6 +569,12 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
         </Panel>
       )}
 
+      {match.restoredAtMap !== null && (
+        <Panel>
+          <p class="muted">Stats from map {match.restoredAtMap + 1} on: the server restarted</p>
+        </Panel>
+      )}
+
       <VersusHeader
         teamA={teamPlayers('a').map(versusName)}
         teamB={teamPlayers('b').map(versusName)}

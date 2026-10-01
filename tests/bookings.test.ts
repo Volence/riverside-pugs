@@ -420,8 +420,8 @@ describe('views', () => {
     const v = bookingView(db, id, { steamid: P[0], staff: false })!;
     expect(v.games.map((g) => g.matchId)).toEqual([first, second]);
     expect(v.games).toEqual([
-      { matchId: first, campaign: 'no_mercy', state: 'completed', scoreA: 300, scoreB: 200, sideA: 'a', startedAt: expect.any(String), endedAt: null },
-      { matchId: second, campaign: 'no_mercy', state: 'live', scoreA: 10, scoreB: 5, sideA: 'a', startedAt: expect.any(String), endedAt: null },
+      { matchId: first, campaign: 'no_mercy', state: 'completed', scoreA: 300, scoreB: 200, sideA: 'a', startedAt: expect.any(String), endedAt: null, restoredAtMap: null },
+      { matchId: second, campaign: 'no_mercy', state: 'live', scoreA: 10, scoreB: 5, sideA: 'a', startedAt: expect.any(String), endedAt: null, restoredAtMap: null },
     ]);
   });
 

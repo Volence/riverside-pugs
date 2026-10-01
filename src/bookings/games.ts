@@ -53,20 +53,24 @@ export interface BookingGameView {
    *  match never stamps went_live_at (see SelfStartedMatches.commit). */
   startedAt: string;
   endedAt: string | null;
+  /** Plan 5: the ordinal of the map the game was replayed from after a
+   *  restart, or null when it was never restored. Stats before this map are
+   *  not this game's: they belong to the interrupted attempt. */
+  restoredAtMap: number | null;
 }
 
 /** Every game of a booking, oldest first. */
 export function bookingGames(db: DB, bookingId: number): BookingGameView[] {
   const rows = db.prepare(
-    `SELECT id, campaign, state, team_a_score, team_b_score, booking_side_a, created_at, ended_at
+    `SELECT id, campaign, state, team_a_score, team_b_score, booking_side_a, created_at, ended_at, restored_at_map
        FROM matches WHERE booking_id = ? ORDER BY id`,
   ).all(bookingId) as {
     id: number; campaign: string; state: string; team_a_score: number; team_b_score: number;
-    booking_side_a: Side | null; created_at: string; ended_at: string | null;
+    booking_side_a: Side | null; created_at: string; ended_at: string | null; restored_at_map: number | null;
   }[];
   return rows.map((r) => ({
     matchId: r.id, campaign: r.campaign, state: r.state, scoreA: r.team_a_score, scoreB: r.team_b_score,
-    sideA: r.booking_side_a, startedAt: r.created_at, endedAt: r.ended_at,
+    sideA: r.booking_side_a, startedAt: r.created_at, endedAt: r.ended_at, restoredAtMap: r.restored_at_map,
   }));
 }
 

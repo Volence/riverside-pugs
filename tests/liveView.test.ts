@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
-import { upsertPlayer, linkDiscord } from '../src/players.js';
+import { upsertPlayer, linkDiscord, currentSeasonId } from '../src/players.js';
 import { ServerReleaser } from '../src/serverRelease.js';
 import {
   recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent, getLiveMatches,
@@ -491,6 +491,19 @@ describe('reapOrphanedMatches', () => {
       .toEqual({ common_kills: 5 });
     expect(db.prepare('SELECT team_a_score AS a, team_b_score AS b, winner FROM matches WHERE id = ?').get(id))
       .toEqual({ a: 100, b: 50, winner: null });
+  });
+
+  it('skips a recovering booking\'s game', () => {
+    // A booking in recovery, its live game silent for an hour.
+    upsertPlayer(db, { steamid: A[0], name: 'p1', avatar: null }, []);
+    const b = Number(db.prepare(
+      `INSERT INTO bookings (purpose, starts_at, ends_at, state, password, tv_password, game_config, rules_json, playlist_json, created_by, created_at, recovering_at)
+       VALUES ('scrim', '2026-10-02T20:00:00Z', '2026-10-02T22:00:00Z', 'active', 'pw', 'tv', 'pug', '{}', '["no_mercy"]', ?, '2026-10-01T00:00:00Z', '2026-10-02T20:30:00Z')`,
+    ).run(A[0]).lastInsertRowid);
+    const m = Number(db.prepare("INSERT INTO matches (season_id, state, campaign, token, origin, booking_id) VALUES (?, 'live', 'no_mercy', 't', 'in_game', ?)").run(currentSeasonId(db), b).lastInsertRowid);
+    db.prepare("INSERT INTO match_live (match_id, last_seen) VALUES (?, datetime('now', '-60 minutes'))").run(m);
+    const releaser = new ServerReleaser(db, async () => {});
+    expect(reapOrphanedMatches(db, releaser)).not.toContain(m);
   });
 });
 

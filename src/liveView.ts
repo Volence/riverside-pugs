@@ -808,7 +808,9 @@ export function reapOrphanedMatches(
     .prepare(
       `SELECT m.id, m.server_id FROM matches m
        JOIN match_live l ON l.match_id = m.id
-       WHERE m.state = 'live' AND l.last_seen < ?`,
+       WHERE m.state = 'live' AND l.last_seen < ?
+         -- A booking in crash recovery (plan 5) owns its game's fate: restored, or aborted as server_lost by its give-up.
+         AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.id = m.booking_id AND b.recovering_at IS NOT NULL AND b.ending_at IS NULL)`,
     )
     .all(cutoff) as { id: number; server_id: number | null }[];
 

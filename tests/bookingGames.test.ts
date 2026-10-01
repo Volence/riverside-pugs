@@ -229,6 +229,28 @@ describe('adopting a game started in game', () => {
     });
   });
 
+  it('refuses a match started in-game while a recovering booking already has a live game', async () => {
+    const id = readyBooking();
+    // The booking's own game is still live (on a box other than the one this
+    // burst targets: a dead box it has not let go of yet, or none at all),
+    // so the busy check on server 3 alone would not catch this.
+    db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, token, server_id, booking_id) VALUES (?, 'live', 'no_mercy', 'already-live', NULL, ?)",
+    ).run(currentSeasonId(db), id);
+    db.prepare("UPDATE bookings SET recovering_at = '2026-10-02T20:30:00.000Z', recover_reason = 'restart' WHERE id = ?").run(id);
+
+    const s = adopter(3);
+    s.handle({ kind: 'match_create', token: TOKEN, map: MAP, players: 6 } as LogEvent, 'src');
+    for (const pid of SIDE_A) s.handle({ kind: 'match_roster', token: TOKEN, steamid: pid, team: 'a', name: pid, joinedMap: 0 } as LogEvent, 'src');
+    for (const pid of SIDE_B) s.handle({ kind: 'match_roster', token: TOKEN, steamid: pid, team: 'b', name: pid, joinedMap: 0 } as LogEvent, 'src');
+    s.handle({ kind: 'match_create_end', token: TOKEN, players: 6 } as LogEvent, 'src');
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(db.prepare('SELECT COUNT(*) AS n FROM matches').get()).toEqual({ n: 1 });
+    expect(setIds).toEqual([]);
+    expect(registered).toEqual([]);
+  });
+
   it('adopts a game on a box no booking holds exactly as before', async () => {
     readyBooking();
     await burst(1, SIDE_A, SIDE_B);

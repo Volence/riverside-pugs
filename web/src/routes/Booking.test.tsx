@@ -56,6 +56,18 @@ describe('Booking page', () => {
     expect(await screen.findByText('connect 1.2.3.4:27015; password abcd2345')).toBeTruthy();
   });
 
+  it('shows a restart recovery banner', async () => {
+    mockBookings.get.mockResolvedValue(VIEW({ recovery: { since: '2026-10-02T20:30:00.000Z', moved: false, waiting: false } }));
+    render(<Booking id="7" session={session} />);
+    expect(await screen.findByText(/The server restarted\. Setting it up again/)).toBeTruthy();
+  });
+
+  it('shows a waiting-for-another-box recovery banner', async () => {
+    mockBookings.get.mockResolvedValue(VIEW({ recovery: { since: '2026-10-02T20:30:00.000Z', moved: true, waiting: true }, connect: null }));
+    render(<Booking id="7" session={session} />);
+    expect(await screen.findByText(/The server went down\. Waiting for another one/)).toBeTruthy();
+  });
+
   it('a manager sees Cancel and no connect line before ready, but not +1 campaign (the booking is not running yet)', async () => {
     mockBookings.get.mockResolvedValue(VIEW({ state: 'scheduled', connect: null, server: null }));
     render(<Booking id="7" session={session} />);
