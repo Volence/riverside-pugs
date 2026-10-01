@@ -21,6 +21,10 @@ export type ModCallReason = (typeof MOD_CALL_REASONS)[number];
 /** Events emitted by the queue side games plugin (pug-sidegame.sp). */
 export const SIDE_EVENTS = ['join', 'part', 'ready', 'vote', 'mapstart', 'mapend'] as const;
 export type SideLogEvent = typeof SIDE_EVENTS[number];
+/** A captain's in-game booking commands (plugin/l4d_booking.sp); `allow`
+ *  (plan 4b2) carries `<steamid64> <name...>` in its arg. */
+export const BOOKING_CMDS = ['nextmap', 'stay', 'end', 'extend', 'allow'] as const;
+export type BookingCmd = typeof BOOKING_CMDS[number];
 const SIDE_PLAYER_EVENTS: readonly SideLogEvent[] = ['join', 'part', 'ready', 'vote'];
 
 export interface Phase {
@@ -255,7 +259,7 @@ export type LogEvent =
   // plugin's own captain list is only a courtesy. `arg` is free text, at most
   // 64 characters, trimmed; empty when the plugin sent `arg=` with nothing
   // after it.
-  | { kind: 'booking_cmd'; steamid: string; cmd: 'nextmap' | 'stay' | 'end' | 'extend'; arg: string };
+  | { kind: 'booking_cmd'; steamid: string; cmd: BookingCmd; arg: string };
 
 /** Parse `key=val key=val` pairs from the remainder of a PUG line. */
 /** The phase fields shared by PHASE and HEARTBEAT. Plugin team numbers are
@@ -714,8 +718,8 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     const arg = at < 0 ? '' : body.slice(at + ' arg='.length).trim().slice(0, 64);
     const steamid = steamId64Of(head.steamid ?? '');
     const cmd = head.cmd;
-    if (!steamid || (cmd !== 'nextmap' && cmd !== 'stay' && cmd !== 'end' && cmd !== 'extend')) return null;
-    return { kind: 'booking_cmd', steamid, cmd, arg };
+    if (!steamid || !BOOKING_CMDS.includes(cmd as BookingCmd)) return null;
+    return { kind: 'booking_cmd', steamid, cmd: cmd as BookingCmd, arg };
   }
 
   // Where a client connected from. Same protection as SIGNON_DROP and for the

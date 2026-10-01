@@ -8,7 +8,7 @@ import { Notifier } from '../src/notify/notify.js';
 import {
   addPerson, cancelBooking, confirmBooking, createBooking, extendBooking, getBooking, holdBox, markSetup, respondPerson, sideRow,
 } from '../src/bookings/bookings.js';
-import { BookingRunner, CLEAR_LINES, bookingLines } from '../src/bookings/runner.js';
+import { BookingRunner, CLEAR_LINES, allowLines, bookingLines } from '../src/bookings/runner.js';
 
 const P = Array.from({ length: 10 }, (_, i) => `765611990000009${String(i).padStart(2, '0')}`);
 const START = Date.parse('2026-10-02T20:00:00.000Z');
@@ -1069,6 +1069,107 @@ describe('booked games (plan 4b)', () => {
       expect(getBooking(db, id)!.next_campaign).toBeNull();
     });
 
+  });
+
+  describe('the allowlist (plan 4b2)', () => {
+    const STAFF = Array.from({ length: 12 }, (_, i) => `765611991100000${String(i).padStart(2, '0')}`);
+    const addStaff = () => {
+      const ins = db.prepare("INSERT INTO players (steamid, name, status, is_admin) VALUES (?, ?, 'active', 1)");
+      STAFF.forEach((id, i) => ins.run(id, `staff${i}`));
+    };
+    /** The allowlist lines of one burst, in the order sent. */
+    const allowPart = (burst: string[]) => burst.filter((c) => /^(sm_booking_allow_|l4d_booking_grace |l4d_booking_block )/.test(c));
+    const expectList = (burst: string[], ids: string[], grace = 60, block = 30) => {
+      const sorted = [...ids].sort();
+      const chunks: string[] = [];
+      for (let i = 0; i < sorted.length; i += 10) chunks.push(`sm_booking_allow_add ${sorted.slice(i, i + 10).join(' ')}`);
+      expect(allowPart(burst)).toEqual(['sm_booking_allow_begin', ...chunks, 'sm_booking_allow_commit', `l4d_booking_grace ${grace}`, `l4d_booking_block ${block}`]);
+    };
+
+    it('allowLines chunks the list at 10 ids a line between begin and commit, then the grace and block settings', () => {
+      addStaff();
+      const id = book();
+      setSetting(db, 'booking_allow_grace_seconds', '90');
+      setSetting(db, 'booking_allow_block_minutes', '0');
+      const lines = allowLines(db, getBooking(db, id)!);
+      expect(lines).toHaveLength(6);
+      expect(lines[1].split(' ')).toHaveLength(11);
+      expect(lines[2].split(' ')).toHaveLength(5);
+      expectList(lines, [P[0], P[1], ...STAFF], 90, 0);
+    });
+
+    it('setup pushes the whole list, and so does every minute watch', async () => {
+      addStaff();
+      const id = book();
+      now = START - 15 * MIN;
+      runner.allocate();
+      await runner.idle();
+      expect(getBooking(db, id)!.state).toBe('ready');
+      // The setup burst before the changelevel, and the one after it.
+      const setupBursts = sent.filter((s) => s.cmds.includes('sm_booking_allow_begin'));
+      expect(setupBursts).toHaveLength(2);
+      for (const burst of setupBursts) expectList(burst.cmds, [P[0], P[1], ...STAFF]);
+      sent = [];
+      box.ccc.humans = [P[0]];
+      now = START + 5 * MIN;
+      await runner.tick();
+      const minute = sent.filter((s) => s.cmds.includes('sm_booking_allow_begin'));
+      expect(minute).toHaveLength(1);
+      expectList(minute[0].cmds, [P[0], P[1], ...STAFF]);
+    });
+
+    it("a captain's !allow adds the ringer, re-pushes the list at once and says so", async () => {
+      const id = await running();
+      const ringer = '76561199222222222';
+      runner.onCommand(3, P[1], 'allow', `${ringer} Some Name`);
+      await flush();
+      expect(db.prepare('SELECT side, role, status, added_by FROM booking_people WHERE booking_id = ? AND steamid = ?').get(id, ringer))
+        .toEqual({ side: 'b', role: 'ringer', status: 'accepted', added_by: P[1] });
+      const c = cmds();
+      expectList(c, [P[0], P[1], ringer]);
+      expect(c.at(-1)).toBe("say [Booking] Some Name is in, as a ringer for p1's group.");
+    });
+
+    it('a refused !allow pushes nothing and says the reason; a malformed arg is refused', async () => {
+      await running();
+      db.prepare("INSERT INTO bans (player_id, reason, created_by, created_at) VALUES (?, 'x', 'system', '2026-09-01T00:00:00.000Z')").run(P[7]);
+      runner.onCommand(3, P[0], 'allow', `${P[7]} banned guy`);
+      await flush();
+      expect(cmds()).toEqual(['say [Booking] That is not an active player.']);
+      sent = [];
+      runner.onCommand(3, P[0], 'allow', 'nobody');
+      await flush();
+      expect(cmds()).toEqual(['say [Booking] That is not an active player.']);
+    });
+
+    it('a non-captain cannot !allow anyone', async () => {
+      const id = await running();
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      runner.onCommand(3, P[5], 'allow', '76561199222222222 x');
+      await flush();
+      log.mockRestore();
+      expect(cmds()).toEqual([]);
+      expect(db.prepare('SELECT 1 FROM booking_people WHERE booking_id = ? AND steamid = ?').get(id, '76561199222222222')).toBeUndefined();
+    });
+
+    it('a failed allowlist push logs a count, never the ids', async () => {
+      await running();
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const failing = build({
+        rcon: async (server, c) => {
+          const add = c.find((x) => x.startsWith('sm_booking_allow_add'));
+          if (add) throw new Error(`rcon exec timeout: ${add}`);
+          return fakeRcon(server, c);
+        },
+      });
+      failing.onCommand(3, P[0], 'allow', '76561199222222222 x');
+      await flush();
+      const logged = warn.mock.calls.map((a) => a.map(String).join(' '));
+      warn.mockRestore();
+      expect(logged.length).toBeGreaterThan(0);
+      expect(logged.some((t) => t.includes(P[0]) || t.includes('76561199222222222'))).toBe(false);
+      expect(logged.some((t) => t.includes('3 ids'))).toBe(true);
+    });
   });
 
   describe('final review fixes', () => {
