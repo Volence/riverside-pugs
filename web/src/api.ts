@@ -1761,6 +1761,9 @@ export interface BookingView {
   games: BookingGameView[];
   /** Casters either side invited, and which sides' halves are set. */
   casters: BookingCaster[];
+  /** Re-posting a cancelled scrim in one click (plan 2): true only when the
+   *  booking is cancelled, came from a post, and the viewer manages a side. */
+  repost: { allowed: boolean };
 }
 export interface BookingCaster { steamid: string; name: string; a: boolean; b: boolean }
 export interface NewBooking {
@@ -1849,6 +1852,11 @@ export const scrimsApi = {
   /** On a `no_capacity` refusal the nearest free slot rides on the thrown
    *  ApiError's `nearestSlot` (see post(), above), not in this return type. */
   confirm: (acceptId: number) => post<{ bookingId: number }>(`/api/scrims/accepts/${acceptId}/confirm`),
+  /** Re-post a cancelled scrim in one click (plan 2): a fresh public post for
+   *  the caller's own side, built from the booking. A `too_late` or
+   *  `no_capacity` refusal reads the same as createPost's own (nearestSlot on
+   *  ApiError for the latter). */
+  repost: (bookingId: number) => post<{ id: number }>(`/api/scrims/repost/${bookingId}`),
 };
 
 export interface AdminBookingRow {

@@ -2,18 +2,19 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import { LocationProvider } from 'preact-iso';
 
-const { mockBookings, mockAdmin, mockConfirm } = vi.hoisted(() => ({
+const { mockBookings, mockAdmin, mockScrims, mockConfirm } = vi.hoisted(() => ({
   mockBookings: {
     get: vi.fn(), act: vi.fn(), cancel: vi.fn(), options: vi.fn(), next: vi.fn(), stay: vi.fn(),
     casters: vi.fn(), inviteCaster: vi.fn(), withdrawCaster: vi.fn(), excuse: vi.fn(),
   },
   mockAdmin: { cancelBooking: vi.fn(), extendBooking: vi.fn(), endBooking: vi.fn(), excuseBooking: vi.fn() },
+  mockScrims: { repost: vi.fn() },
   mockConfirm: vi.fn(),
 }));
 vi.mock('../components/Confirm', () => ({ confirm: mockConfirm }));
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
-  return { ...actual, bookingsApi: mockBookings, adminApi: { ...actual.adminApi, ...mockAdmin } };
+  return { ...actual, bookingsApi: mockBookings, adminApi: { ...actual.adminApi, ...mockAdmin }, scrimsApi: mockScrims };
 });
 const { Booking } = await import('./Booking');
 
@@ -29,6 +30,7 @@ const VIEW = (over: Record<string, unknown> = {}) => ({
   viewer: { side: 'a', manages: ['a'], staff: false, invited: false },
   games: [],
   casters: [],
+  repost: { allowed: false },
   ...over,
 });
 const session = { kind: 'active', me: { steamid: 'x0', name: 'p0', avatar: null, status: 'active', isAdmin: false, teams: true } } as never;
@@ -38,6 +40,7 @@ afterEach(() => {
   cleanup();
   for (const f of Object.values(mockBookings)) f.mockReset();
   for (const f of Object.values(mockAdmin)) f.mockReset();
+  for (const f of Object.values(mockScrims)) f.mockReset();
   mockConfirm.mockReset();
   history.replaceState(null, '', '/');
 });
@@ -298,6 +301,33 @@ describe('Booking page', () => {
       history.replaceState(null, '', path);
       return render(<LocationProvider><Booking id="7" session={session} /></LocationProvider>);
     };
+
+    describe('re-posting a cancelled scrim (plan 2, Task 3)', () => {
+      it('no button when repost is not allowed', async () => {
+        mockBookings.get.mockResolvedValue(cancelled({}, {}, { repost: { allowed: false } }));
+        render(<Booking id="7" session={session} />);
+        expect(await screen.findByText('Cancelled.')).toBeTruthy();
+        expect(screen.queryByRole('button', { name: 'Re-post this scrim' })).toBeNull();
+      });
+
+      it('routes to the board on success', async () => {
+        mockBookings.get.mockResolvedValue(cancelled({}, {}, { repost: { allowed: true } }));
+        mockScrims.repost.mockResolvedValue({ id: 123 });
+        renderAt('/booking/7');
+        fireEvent.click(await screen.findByRole('button', { name: 'Re-post this scrim' }));
+        await waitFor(() => expect(mockScrims.repost).toHaveBeenCalledWith(7));
+        await waitFor(() => expect(location.pathname + location.search).toBe('/scrims?post=123'));
+      });
+
+      it('shows the refusal text on failure, without navigating', async () => {
+        mockBookings.get.mockResolvedValue(cancelled({}, {}, { repost: { allowed: true } }));
+        mockScrims.repost.mockRejectedValue(new Error('Too close to the start: an acceptance needs at least 30 minutes to be answered.'));
+        renderAt('/booking/7');
+        fireEvent.click(await screen.findByRole('button', { name: 'Re-post this scrim' }));
+        expect(await screen.findByText('Too close to the start: an acceptance needs at least 30 minutes to be answered.')).toBeTruthy();
+        expect(location.pathname).toBe('/booking/7');
+      });
+    });
 
     it('?cancel=1 opens the cancel confirm at once for a manager, and cancels on yes', async () => {
       mockBookings.get.mockResolvedValue(VIEW({ state: 'scheduled', connect: null, server: null }));

@@ -3,9 +3,9 @@ import { openDb, type DB } from '../src/db.js';
 import { addServer } from '../src/serverPool.js';
 import { setSetting } from '../src/settings.js';
 import { createTeam, disbandTeam, invitePlayer, respondInvite, setRole } from '../src/teams/teams.js';
-import { BOOKING_ERRORS, confirmBooking, createBooking, getBooking, sideRow, peopleOf } from '../src/bookings/bookings.js';
+import { BOOKING_ERRORS, cancelBooking, confirmBooking, createBooking, getBooking, sideRow, peopleOf } from '../src/bookings/bookings.js';
 import {
-  acceptPost, board, confirmAccept, createPost, declineAccept, expire, withdrawAccept, withdrawPost,
+  acceptPost, board, confirmAccept, createPost, declineAccept, expire, repostFromBooking, withdrawAccept, withdrawPost,
   type ScrimResult,
 } from '../src/scrims/scrims.js';
 
@@ -689,5 +689,71 @@ describe('review fix round 1', () => {
     expect(r).toMatchObject({ ok: false, error: 'no_capacity', text: BOOKING_ERRORS.no_capacity.text });
     // A refusal of the scrim's own carries no booking text.
     expect(confirmAccept(db, { acceptId: a2, by: P[3], now: NOW })).toEqual({ ok: false, error: 'not_manager' });
+  });
+});
+
+describe('repostFromBooking', () => {
+  // Alternated to 3 campaigns at the default 60-minute fallback (no_mercy,
+  // dead_air, death_toll): a fourth would push the block past 180 minutes.
+  const booked = (posterBy = P[0], accepterBy = P[1], teamId?: number): number => {
+    const id = post({ by: posterBy, teamId, minutes: 180, campaigns: ['no_mercy', 'death_toll'] });
+    const a = accept(id, accepterBy, { campaigns: ['dead_air', 'blood_harvest'] });
+    return value(confirmAccept(db, { acceptId: a, by: posterBy, now: NOW })).bookingId;
+  };
+
+  it('the poster side re-posts', () => {
+    const bookingId = booked();
+    value(cancelBooking(db, { bookingId, by: P[0], now: NOW }));
+    const id = value(repostFromBooking(db, { bookingId, by: P[0], now: NOW })).id;
+    expect(postRow(id)).toMatchObject({
+      side_kind: 'pickup', team_id: null, captain_steamid: P[0], starts_at: START, block_minutes: 180,
+      sr_range: null, note: '', status: 'open', target_team_id: null, booking_id: null,
+    });
+    expect(JSON.parse(postRow(id).campaigns_json as string)).toEqual(['no_mercy', 'dead_air', 'death_toll']);
+    expect(getBooking(db, bookingId)!.state).toBe('cancelled'); // the original booking is untouched
+  });
+
+  it('the accepter side re-posts as its own side', () => {
+    const bookingId = booked();
+    value(cancelBooking(db, { bookingId, by: P[1], now: NOW }));
+    const id = value(repostFromBooking(db, { bookingId, by: P[1], now: NOW })).id;
+    expect(postRow(id)).toMatchObject({ side_kind: 'pickup', team_id: null, captain_steamid: P[1], status: 'open' });
+  });
+
+  it('a team side re-posts as the team', () => {
+    const rats = team(P[2], 'Rats', 'RR');
+    const bookingId = booked(P[2], P[1], rats);
+    value(cancelBooking(db, { bookingId, by: P[2], now: NOW }));
+    const id = value(repostFromBooking(db, { bookingId, by: P[2], now: NOW })).id;
+    expect(postRow(id)).toMatchObject({ side_kind: 'team', team_id: rats, captain_steamid: P[2] });
+  });
+
+  it('a start too close refuses with too_late', () => {
+    const bookingId = booked();
+    value(cancelBooking(db, { bookingId, by: P[0], now: NOW }));
+    expect(err(repostFromBooking(db, { bookingId, by: P[0], now: at(START, -29) }))).toBe('too_late');
+    expect(err(repostFromBooking(db, { bookingId, by: P[0], now: at(START, -31) }))).toBe('ok');
+  });
+
+  it('a booking not from a post refuses', () => {
+    const r = createBooking(db, { by: P[0], opponent: { steamid: P[1] }, startsAt: START, minutes: 120, playlist: ['no_mercy'], now: NOW });
+    if (!r.ok) throw new Error(r.error);
+    value(cancelBooking(db, { bookingId: r.value.id, by: P[0], now: NOW }));
+    expect(err(repostFromBooking(db, { bookingId: r.value.id, by: P[0], now: NOW }))).toBe('not_found');
+  });
+
+  it('a non-manager refuses', () => {
+    const bookingId = booked();
+    value(cancelBooking(db, { bookingId, by: P[0], now: NOW }));
+    expect(err(repostFromBooking(db, { bookingId, by: P[5], now: NOW }))).toBe('not_manager');
+  });
+
+  it('the playlist is trimmed to the post campaign limit', () => {
+    const bookingId = booked();
+    expect(JSON.parse(getBooking(db, bookingId)!.playlist_json)).toEqual(['no_mercy', 'dead_air', 'death_toll']);
+    value(cancelBooking(db, { bookingId, by: P[0], now: NOW }));
+    setSetting(db, 'booking_playlist_max', '2');
+    const id = value(repostFromBooking(db, { bookingId, by: P[0], now: NOW })).id;
+    expect(JSON.parse(postRow(id).campaigns_json as string)).toEqual(['no_mercy', 'dead_air']);
   });
 });
