@@ -19,7 +19,7 @@ import { bookingLimits, isLateCancel } from './rules.js';
 import {
   acceptedPeople, actingSides, advancePlaylist, allowInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
   markReady, markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setCloseAt, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
-  beginRecovery, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost,
+  beginRecovery, dropBox, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost, reholdBox,
   BOOKING_ERRORS, type BookingRow, type Side, type SideRow,
 } from './bookings.js';
 import { classifyBox } from './recovery.js';
@@ -246,6 +246,11 @@ export class BookingRunner {
   private readonly announced = new Set<number>();
   /** Recovery attempts so far, per booking (plan 5); SETUP_TRIES at most. */
   private readonly recoverTries = new Map<number, number>();
+  /** Bookings just moved to another box by relocate: recoverOnce restarts
+   *  that box first, as setup does a fresh one (plan 5). */
+  private readonly freshBox = new Set<number>();
+  /** rcon answers in a row per gone box (plan 5 ruling 4); two put it back. */
+  private readonly goneAnswers = new Map<number, number>();
 
   constructor(private readonly deps: BookingRunnerDeps) {
     this.db = deps.db;
@@ -282,6 +287,8 @@ export class BookingRunner {
   /** Take a box for every confirmed booking at its hold time. Run by the
    *  tick and whenever the releaser frees a box. */
   allocate(): void {
+    // Waiting bookings first: the only time a booking goes ahead of PUGs.
+    this.relocate();
     const nowMs = this.now();
     const lead = bookingLimits(this.db).holdLeadMinutes * 60_000;
     let preempt = false;
@@ -556,12 +563,14 @@ export class BookingRunner {
         this.tell(id, this.everyone(id), 'booking_cancelled', { reason: 'it was not confirmed in time' });
       }
       this.remind(now);
+      this.relocate();
       this.allocate();
       this.closeServerless(now);
       for (const b of openBookings(this.db)) {
         if (b.ending_at !== null) { this.settle(b.id); continue; }
         if ((b.state === 'ready' || b.state === 'active') && !this.busy.has(b.id)) await this.watch(b, now);
       }
+      await this.returnGone();
       try {
         await this.deps.voice?.closeEnded();
       } catch (err) {
@@ -753,14 +762,90 @@ export class BookingRunner {
         }
         return true;
       case 'gone':
-        this.onGone(b, server, now);
+        // With no A2S probe wired there is no proof the server browser is
+        // silent too, so the box is never taken as gone (constraint: rcon,
+        // heartbeat and A2S all silent).
+        if (this.deps.a2s) this.onGone(b, server, now);
         return true;
     }
   }
 
-  /** A box gone for good. Task 8 moves the booking to another box. */
-  private onGone(b: BookingRow, server: ServerRow, _now: Date): void {
-    console.warn(`[booking] ${b.id}: ${server.name} looks gone (Task 8 moves it)`);
+  /** Plan 5: the box is gone. Let go of it, keep a box back from the PUG
+   *  queue, and take the first one that is free. */
+  private onGone(b: BookingRow, server: ServerRow, now: Date): void {
+    if (!beginRecovery(this.db, b.id, 'gone', now)) return;
+    if (dropBox(this.db, b.id, now) === null) return;
+    console.warn(`[booking] ${b.id}: ${server.name} is gone; marked offline, moving to another server`);
+    publishAdminEvent({
+      kind: 'problem',
+      text: `Booking ${b.id}: ${server.name} is gone (no rcon, no heartbeat, no server browser answer for ${bookingLimits(this.db).goneMinutes} minutes). It is marked offline; set it idle on the Servers desk once it answers (it also goes back by itself after answering rcon twice in a row). The booking is moving to another server.`,
+    });
+    this.relocate();
+  }
+
+  /** Waiting bookings first: the only time a booking goes ahead of PUGs.
+   *  Each takes the first box free for it, or is cancelled after the wait. */
+  private relocate(): void {
+    const nowMs = this.now();
+    const wait = bookingLimits(this.db).recoverWaitMinutes * 60_000;
+    let preempt = false;
+    for (const b of openBookings(this.db)) {
+      if (b.waiting_since === null || b.server_id !== null || b.ending_at !== null || this.busy.has(b.id)) continue;
+      if (nowMs - Date.parse(b.waiting_since) >= wait) {
+        this.giveUp(b.id, `no server came free within ${wait / 60_000} minutes after its server went down`, 'the server went down and no other server was free');
+        this.track(b.id, () => this.windDown(b.id, false));
+        continue;
+      }
+      const s = this.pickBox(b);
+      if (!s || !reholdBox(this.db, b.id, s.id, new Date(nowMs))) { preempt = true; continue; }
+      console.log(`[booking] ${b.id} moves to ${s.name}`);
+      this.freshBox.add(b.id);
+      this.track(b.id, () => this.recover(b.id));
+    }
+    if (preempt) this.deps.preempt();
+  }
+
+  /** Plan 5 ruling 4: a gone box gets one `status` per tick (one short rcon
+   *  burst, nothing held across ticks); two answers in a row put it back in
+   *  the pool. A box staff already set idle only has gone_since cleared. */
+  private async returnGone(): Promise<void> {
+    const gone = this.db.prepare('SELECT * FROM servers WHERE gone_since IS NOT NULL').all() as ServerRow[];
+    const ids = new Set(gone.map((s) => s.id));
+    for (const id of this.goneAnswers.keys()) if (!ids.has(id)) this.goneAnswers.delete(id);
+    for (const server of gone) {
+      if (server.status !== 'offline') {
+        this.db.prepare('UPDATE servers SET gone_since = NULL WHERE id = ?').run(server.id);
+        this.goneAnswers.delete(server.id);
+        continue;
+      }
+      try {
+        await this.deps.rcon(server, ['status']);
+      } catch (err) {
+        this.goneAnswers.set(server.id, 0);
+        // An rcon error names the command it was on; `status` carries no secret,
+        // but the redaction stays as everywhere else.
+        console.warn(`[booking] gone box ${server.name} still does not answer: ${redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret])}`);
+        continue;
+      }
+      const n = (this.goneAnswers.get(server.id) ?? 0) + 1;
+      this.goneAnswers.set(server.id, n);
+      if (n < 2) continue;
+      this.goneAnswers.delete(server.id);
+      const back = this.db.prepare(
+        "UPDATE servers SET status = 'idle', gone_since = NULL WHERE id = ? AND gone_since IS NOT NULL AND status = 'offline'",
+      ).run(server.id).changes > 0;
+      if (!back) continue;
+      const under = this.db.prepare(
+        "SELECT booking_id FROM booking_events WHERE event = 'box_dropped' AND json_extract(detail, '$.serverId') = ? ORDER BY id DESC LIMIT 1",
+      ).get(server.id) as { booking_id: number } | undefined;
+      console.log(`[booking] gone box ${server.name} answers again; back in the pool`);
+      publishAdminEvent({ kind: 'problem', text: `Server ${server.name} answers again after it went down under booking ${under?.booking_id ?? '?'}; it is back in the pool.` });
+      try {
+        this.deps.freed?.();
+      } catch (err) {
+        console.error(`[booking] the freed hook failed after ${server.name} came back:`, err);
+      }
+    }
   }
 
   /** Set a restarted box up again, and put its live game back. Tracked work. */
@@ -801,6 +886,8 @@ export class BookingRunner {
   }
 
   private async recoverOnce(b: BookingRow, server: ServerRow): Promise<void> {
+    // A box just taken by a move gets the forced restart setup gives a fresh box.
+    if (this.freshBox.delete(b.id) && !(await this.deps.restart(server))) throw new Error('the new box did not come back from its restart');
     await waitForStartup(this.deps.rcon, server, this.sleep);
     await this.execVerified(server, b);
     const [version, mk] = await this.deps.rcon(server, ['l4d_booking_version', 'l4d_booking_id']);

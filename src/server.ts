@@ -153,6 +153,7 @@ import { settingNumber } from './settings.js';
 import type { InstallTarget } from './campaignInstall.js';
 import { notifyDiscord } from './discord.js';
 import { setMissionsDirs } from './campaignRegistry.js';
+import { a2sInfo } from './a2s.js';
 
 export interface ServerDeps {
   config: Config;
@@ -1948,6 +1949,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     notifier,
     preempt: () => { practiceLeases.needServer(); sideGamesRef?.needServer(); },
     freed: () => holdFreed(),
+    // Plan 5: a box that does not answer rcon is asked over the server browser
+    // protocol before it counts as gone.
+    a2s: a2sInfo,
     // Booked games (plan 4b): the box logs to the site and signs its lines,
     // and an aborted game's token stops being listened for.
     logPublicAddress: deps.config.logPublicAddress,
