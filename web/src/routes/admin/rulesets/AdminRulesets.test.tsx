@@ -139,4 +139,32 @@ describe('AdminRulesets', () => {
     expect(screen.getByRole('button', { name: 'Save ruleset' }).parentElement?.contains(message)).toBe(true);
     expect(screen.getByRole('button', { name: 'Save ruleset' })).toBeTruthy();
   });
+
+  it('a Create copy refusal while an editor is open shows by the create form, not in the editor', async () => {
+    mockAdmin.createRuleset.mockRejectedValue(new ApiError(409, 'Another ruleset already has that name.'));
+    render(<AdminRulesets />);
+    await screen.findByText('Late Night', { selector: 'strong' });
+    fireEvent.click(within(rowOf('Late Night')).button('Edit')!);
+    fireEvent.input(screen.getByLabelText('New ruleset name'), { target: { value: 'Casual Scrim' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create copy' }));
+    const message = await screen.findByText('Another ruleset already has that name.');
+    expect(screen.getByRole('button', { name: 'Create copy' }).parentElement?.contains(message)).toBe(true);
+    expect(rowOf('Late Night').contains(message)).toBe(false);
+    // The open editor's own Save is unaffected by the create form's refusal.
+    expect(screen.getByRole('button', { name: 'Save ruleset' })).toBeTruthy();
+  });
+
+  it('an Archive refusal for one row shows at the top, scrolled into view, not inside another row\'s open editor', async () => {
+    const scrolled = vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => {});
+    mockAdmin.archiveRuleset.mockRejectedValueOnce(new ApiError(409, 'That ruleset is a built-in.'));
+    render(<AdminRulesets />);
+    await screen.findByText('Late Night', { selector: 'strong' });
+    fireEvent.click(within(rowOf('Casual Scrim')).button('Edit')!);
+    fireEvent.click(within(rowOf('Late Night')).button('Archive')!);
+    const message = await screen.findByText('That ruleset is a built-in.');
+    expect(rowOf('Casual Scrim').contains(message)).toBe(false);
+    expect(rowOf('Late Night').contains(message)).toBe(false);
+    await waitFor(() => expect(scrolled).toHaveBeenCalled());
+    scrolled.mockRestore();
+  });
 });
