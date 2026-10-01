@@ -94,6 +94,13 @@ describe('Scrims page', () => {
     expect(screen.getAllByText('Mice').length).toBeGreaterThan(0);
   });
 
+  it('a side\'s name links to its team page, or a pickup group to its captain\'s profile', async () => {
+    renderScrims();
+    await screen.findByText('Rats');
+    expect(screen.getByText('Rats').closest('a')!.getAttribute('href')).toBe('/team/rats');
+    expect(screen.getByText('p9').closest('a')!.getAttribute('href')).toBe('/player/x9');
+  });
+
   it('renders the board unfiltered, with no SR fit toggle', async () => {
     renderScrims();
     expect(await screen.findByText('Rats')).toBeTruthy();
