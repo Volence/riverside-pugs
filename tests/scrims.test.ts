@@ -76,7 +76,7 @@ describe('createPost', () => {
   it('stores a pickup post, open, with the poster as captain and the note trimmed', () => {
     const id = post({ note: '  gl hf  ', srRange: 200 });
     expect(postRow(id)).toMatchObject({
-      side_kind: 'pickup', team_id: null, captain_steamid: P[0], region: 'na', starts_at: START, block_minutes: 120,
+      side_kind: 'pickup', team_id: null, captain_steamid: P[0], region: 'na', starts_at: START, block_minutes: 180,
       sr_range: 200, note: 'gl hf', status: 'open', target_team_id: null, booking_id: null, created_at: NOW.toISOString(),
     });
     expect(JSON.parse(postRow(id).campaigns_json as string)).toEqual(['no_mercy', 'death_toll']);
@@ -98,13 +98,21 @@ describe('createPost', () => {
     expect(r({ startsAt: '2026-10-01T11:00:00.000Z' })).toBe('bad_time');
     expect(r({ startsAt: '2026-10-20T11:00:00.000Z' })).toBe('bad_time');
     expect(r({ startsAt: 'tomorrow' })).toBe('bad_time');
-    expect(r({ minutes: 45 })).toBe('bad_length');
-    expect(r({ minutes: 240 })).toBe('bad_length');
     expect(r({ campaigns: [] })).toBe('bad_playlist');
     expect(r({ campaigns: ['no_mercy', 'no_mercy'] })).toBe('bad_playlist');
     expect(r({ campaigns: ['the_sacrifice'] })).toBe('bad_playlist');
     expect(r({ campaigns: ['no_mercy', 'death_toll', 'dead_air', 'blood_harvest', 'crash_course'] })).toBe('bad_playlist');
+    // Four campaigns are within the playlist limit but need a 300 minute slot.
+    expect(r({ campaigns: ['no_mercy', 'death_toll', 'dead_air', 'blood_harvest'] })).toBe('too_long');
+    setSetting(db, 'booking_max_minutes', '300');
     expect(r({ campaigns: ['no_mercy', 'death_toll', 'dead_air', 'blood_harvest'] })).toBe('ok');
+  });
+
+  it("a post's block is estimated from its campaigns, whatever minutes are sent", () => {
+    // 15 + (60 + 10) * 2 = 155, up to 180.
+    expect(postRow(post({ minutes: 45 })).block_minutes).toBe(180);
+    expect(postRow(post({ by: P[1], minutes: 'x' as unknown as number, campaigns: ['dead_air'] })).block_minutes).toBe(90);
+    expect(err(createPost(db, postInput({ by: P[2], campaigns: ['no_mercy', 'death_toll', 'dead_air'] })))).toBe('too_long');
   });
 
   it('refuses a start less than the 30 minute acceptance cutoff away', () => {
@@ -325,15 +333,19 @@ describe('withdrawAccept and declineAccept', () => {
 
 describe('confirmAccept', () => {
   it('books the server with both sides confirmed, the playlist alternated, and the other accepts taken', () => {
-    const id = post({ campaigns: ['no_mercy', 'death_toll'], minutes: 180 });
+    const id = post({ campaigns: ['no_mercy', 'death_toll'] });
     const a1 = accept(id, P[1], { campaigns: ['dead_air'] });
     const a2 = accept(id, P[2]);
     const a3 = accept(id, P[3]);
     value(withdrawAccept(db, { acceptId: a3, by: P[3], now: NOW }));
+    // Three campaigns need a 240 minute slot, over the default longest booking.
+    expect(confirmAccept(db, { acceptId: a1, by: P[0], now: NOW })).toEqual({ ok: false, error: 'too_long', text: BOOKING_ERRORS.too_long.text });
+    expect(bookingCount()).toBe(0);
+    setSetting(db, 'booking_max_minutes', '240');
     const r = value(confirmAccept(db, { acceptId: a1, by: P[0], now: NOW }));
     expect(r.takenAcceptIds).toEqual([a2]);
     const b = getBooking(db, r.bookingId)!;
-    expect(b).toMatchObject({ purpose: 'scrim', state: 'scheduled', starts_at: START, ends_at: '2026-10-02T23:00:00.000Z', created_by: P[0] });
+    expect(b).toMatchObject({ purpose: 'scrim', state: 'scheduled', starts_at: START, ends_at: '2026-10-03T00:00:00.000Z', created_by: P[0], games_allowed: 3 });
     expect(JSON.parse(b.playlist_json)).toEqual(['no_mercy', 'dead_air', 'death_toll']);
     expect(sideRow(db, b.id, 'a')).toMatchObject({ team_id: null, captain_steamid: P[0] });
     expect(sideRow(db, b.id, 'b')).toMatchObject({ team_id: null, captain_steamid: P[1] });
@@ -345,11 +357,25 @@ describe('confirmAccept', () => {
     expect(acceptRow(a3).status).toBe('withdrawn');
   });
 
-  it('trims the playlist to the block', () => {
-    const id = post({ campaigns: ['no_mercy', 'death_toll'], minutes: 120 });
+  it('an accepted longer playlist confirms into a longer booking, never trimmed to the block', () => {
+    const id = post({ campaigns: ['no_mercy'] });
+    expect(postRow(id).block_minutes).toBe(90);
     const a = accept(id, P[1], { campaigns: ['dead_air'] });
     const r = value(confirmAccept(db, { acceptId: a, by: P[0], now: NOW }));
-    expect(JSON.parse(getBooking(db, r.bookingId)!.playlist_json)).toEqual(['no_mercy', 'dead_air']);
+    const b = getBooking(db, r.bookingId)!;
+    expect(JSON.parse(b.playlist_json)).toEqual(['no_mercy', 'dead_air']);
+    expect(b).toMatchObject({ starts_at: START, ends_at: '2026-10-02T23:00:00.000Z', games_allowed: 2 });
+  });
+
+  it('a longer accepted playlist with no room for its slot refuses no_capacity with the nearest slot that fits it', () => {
+    const id = post({ campaigns: ['no_mercy'] }); // 20:00 to 21:30
+    const a = accept(id, P[1], { campaigns: ['dead_air'] }); // 20:00 to 23:00
+    fillSlotAt('2026-10-02T21:30:00.000Z'); // two bookings 21:30-23:00: the block fits, the longer slot does not
+    const before = bookingCount();
+    const r = confirmAccept(db, { acceptId: a, by: P[0], now: NOW });
+    expect(r).toEqual({ ok: false, error: 'no_capacity', text: BOOKING_ERRORS.no_capacity.text, nearestSlot: '2026-10-02T18:30:00.000Z' });
+    expect(bookingCount()).toBe(before);
+    expect(postRow(id)).toMatchObject({ status: 'pending', booking_id: null });
   });
 
   it('team against team: the booking carries both teams and their rosters', () => {
@@ -396,10 +422,10 @@ describe('confirmAccept', () => {
   it('no_capacity: nothing changes, and the nearest free slot is offered', () => {
     const id = post();
     const a = accept(id, P[1]);
-    fillSlot(); // two bookings 20:00-22:00 fill the slot after the post was made
+    fillSlot(); // two bookings 20:00-21:30 fill the slot after the post was made
     const before = bookingCount();
     const r = confirmAccept(db, { acceptId: a, by: P[0], now: NOW });
-    expect(r).toEqual({ ok: false, error: 'no_capacity', text: BOOKING_ERRORS.no_capacity.text, nearestSlot: '2026-10-02T22:00:00.000Z' });
+    expect(r).toEqual({ ok: false, error: 'no_capacity', text: BOOKING_ERRORS.no_capacity.text, nearestSlot: '2026-10-02T21:30:00.000Z' });
     expect(bookingCount()).toBe(before);
     expect(postRow(id)).toMatchObject({ status: 'pending', booking_id: null });
     expect(acceptRow(a)).toMatchObject({ status: 'pending', responded_at: null });
@@ -518,10 +544,10 @@ describe('board', () => {
     const [teamEntry, pickupEntry] = board(db, viewer(P[7]), { now: NOW });
     expect(teamEntry).toMatchObject({
       id, side: { kind: 'team', teamId: rats, name: 'Rats', tag: 'RR', slug: expect.any(String), logoKey: null },
-      sr: 1500, srRange: 300, startsAt: START, minutes: 120, campaigns: ['dead_air'], note: 'bring snacks',
+      sr: 1500, srRange: 300, startsAt: START, minutes: 90, campaigns: ['dead_air'], campaignCount: 1, note: 'bring snacks',
       acceptCount: 1, mine: false, accepts: null, challenge: null, myAcceptId: null,
     });
-    expect(pickupEntry).toMatchObject({ id: pickup, side: { kind: 'pickup', steamid: P[5], name: 'p5' }, sr: 1500, srRange: null });
+    expect(pickupEntry).toMatchObject({ id: pickup, side: { kind: 'pickup', steamid: P[5], name: 'p5' }, sr: 1500, srRange: null, minutes: 180, campaignCount: 2 });
   });
 
   it('the poster gets each pending acceptance with its playlist and fit; the accepter sees its own acceptance id', () => {
@@ -533,7 +559,7 @@ describe('board', () => {
     expect(mine.mine).toBe(true);
     expect(mine.accepts).toEqual([{
       id: a, side: { kind: 'pickup', steamid: P[1], name: 'p1' }, sr: 2000, fits: false, campaigns: ['dead_air'],
-      createdAt: NOW.toISOString(), proposed: { playlist: ['no_mercy', 'dead_air'], minutes: 120, fits: true },
+      createdAt: NOW.toISOString(), proposed: { playlist: ['no_mercy', 'dead_air', 'death_toll'], minutes: 240, fits: false },
     }]);
     const theirs = board(db, viewer(P[1]), { now: NOW })[0];
     expect(theirs).toMatchObject({ mine: false, accepts: null, myAcceptId: a });
@@ -694,10 +720,11 @@ describe('review fix round 1', () => {
 });
 
 describe('repostFromBooking', () => {
-  // Alternated to 3 campaigns at the default 60-minute fallback (no_mercy,
-  // dead_air, death_toll): a fourth would push the block past 180 minutes.
+  // Alternated to 4 campaigns at the default 60-minute fallback (no_mercy,
+  // dead_air, death_toll, blood_harvest), a 300 minute slot.
   const booked = (posterBy = P[0], accepterBy = P[1], teamId?: number): number => {
-    const id = post({ by: posterBy, teamId, minutes: 180, campaigns: ['no_mercy', 'death_toll'] });
+    setSetting(db, 'booking_max_minutes', '300');
+    const id = post({ by: posterBy, teamId, campaigns: ['no_mercy', 'death_toll'] });
     const a = accept(id, accepterBy, { campaigns: ['dead_air', 'blood_harvest'] });
     return value(confirmAccept(db, { acceptId: a, by: posterBy, now: NOW })).bookingId;
   };
@@ -707,10 +734,10 @@ describe('repostFromBooking', () => {
     value(cancelBooking(db, { bookingId, by: P[0], now: NOW }));
     const id = value(repostFromBooking(db, { bookingId, by: P[0], now: NOW })).id;
     expect(postRow(id)).toMatchObject({
-      side_kind: 'pickup', team_id: null, captain_steamid: P[0], starts_at: START, block_minutes: 180,
+      side_kind: 'pickup', team_id: null, captain_steamid: P[0], starts_at: START, block_minutes: 300,
       sr_range: null, note: '', status: 'open', target_team_id: null, booking_id: null,
     });
-    expect(JSON.parse(postRow(id).campaigns_json as string)).toEqual(['no_mercy', 'dead_air', 'death_toll']);
+    expect(JSON.parse(postRow(id).campaigns_json as string)).toEqual(['no_mercy', 'dead_air', 'death_toll', 'blood_harvest']);
     expect(getBooking(db, bookingId)!.state).toBe('cancelled'); // the original booking is untouched
   });
 
@@ -751,7 +778,7 @@ describe('repostFromBooking', () => {
 
   it('the playlist is trimmed to the post campaign limit', () => {
     const bookingId = booked();
-    expect(JSON.parse(getBooking(db, bookingId)!.playlist_json)).toEqual(['no_mercy', 'dead_air', 'death_toll']);
+    expect(JSON.parse(getBooking(db, bookingId)!.playlist_json)).toEqual(['no_mercy', 'dead_air', 'death_toll', 'blood_harvest']);
     value(cancelBooking(db, { bookingId, by: P[0], now: NOW }));
     setSetting(db, 'booking_playlist_max', '2');
     const id = value(repostFromBooking(db, { bookingId, by: P[0], now: NOW })).id;

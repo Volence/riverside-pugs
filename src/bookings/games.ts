@@ -70,6 +70,12 @@ export function bookingGames(db: DB, bookingId: number): BookingGameView[] {
   }));
 }
 
+/** How many of a booking's games have finished: completed, through the
+ *  game-ended path. An aborted game or one still live is not counted. */
+export function gamesPlayed(db: DB, bookingId: number): number {
+  return bookingGames(db, bookingId).filter((g) => g.state === 'completed').length;
+}
+
 /** The booking's game being played right now, if any. */
 export function liveBookingGame(db: DB, bookingId: number): { id: number; token: string; campaign: string } | null {
   return (db.prepare("SELECT id, token, campaign FROM matches WHERE booking_id = ? AND state = 'live' ORDER BY id DESC LIMIT 1")

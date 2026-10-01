@@ -35,7 +35,7 @@ export const iso = (ms: number): string => new Date(ms).toISOString();
 
 export interface BookingLimits {
   minMinutes: number; maxMinutes: number; daysAhead: number; playlistMax: number; maxUpcoming: number;
-  reserve: number; holdLeadMinutes: number; protectMinutes: number; idleEndMinutes: number; extendMinutes: number;
+  reserve: number; holdLeadMinutes: number; protectMinutes: number; idleEndMinutes: number;
 }
 
 export function bookingLimits(db: DB): BookingLimits {
@@ -52,7 +52,6 @@ export function bookingLimits(db: DB): BookingLimits {
     // Never shorter than the lead: a box kept back must still be kept at T-lead.
     protectMinutes: Math.max(holdLeadMinutes, n('booking_protect_minutes', 75, 5, 180)),
     idleEndMinutes: n('booking_idle_end_minutes', 10, 5, 60),
-    extendMinutes: n('booking_extend_minutes', 30, 15, 120),
   };
 }
 
@@ -157,6 +156,44 @@ export function typicalCampaignMinutes(db: DB, campaign: string): number {
 
 export function playlistMinutes(db: DB, playlist: string[]): number {
   return playlist.reduce((sum, c) => sum + typicalCampaignMinutes(db, c), 0);
+}
+
+/** Setup and ready-up, once per booking, in the slot estimate. */
+export const ESTIMATE_BASE_MINUTES = 15;
+/** Slack per campaign for a slow round, in the slot estimate. */
+export const ESTIMATE_SLACK_MINUTES = 10;
+
+const upToStep = (m: number): number => Math.ceil(m / STEP_MINUTES) * STEP_MINUTES;
+
+/**
+ * The slot a booking of these campaigns holds (bookings by campaign, Ruling
+ * 1): 15 minutes, plus each campaign's typical length and 10, rounded up to
+ * the 30 minute step and raised to booking_min_minutes. It is never capped:
+ * an estimate above booking_max_minutes is the caller's too_long. The slot
+ * only holds capacity; the campaign count is what the box enforces.
+ */
+export function estimateMinutes(db: DB, playlist: string[]): number {
+  const raw = ESTIMATE_BASE_MINUTES + playlist.reduce((sum, c) => sum + typicalCampaignMinutes(db, c) + ESTIMATE_SLACK_MINUTES, 0);
+  return Math.max(bookingLimits(db).minMinutes, upToStep(raw));
+}
+
+/** estimateMinutes' inputs for these campaigns, so a form can show the
+ *  estimate live as campaigns are ticked (GET options). */
+export function estimateOptions(db: DB, campaigns: string[]): {
+  perCampaign: Record<string, number>; base: number; slack: number; step: number; min: number; max: number;
+} {
+  const limits = bookingLimits(db);
+  return {
+    perCampaign: Object.fromEntries(campaigns.map((c) => [c, typicalCampaignMinutes(db, c)])),
+    base: ESTIMATE_BASE_MINUTES, slack: ESTIMATE_SLACK_MINUTES, step: STEP_MINUTES, min: limits.minMinutes, max: limits.maxMinutes,
+  };
+}
+
+/** How far +1 campaign moves the slot's end (Ruling 5): that campaign's
+ *  typical length, or DEFAULT_CAMPAIGN_MINUTES when none is named, plus 10,
+ *  rounded up to the step. */
+export function addCampaignMinutes(db: DB, campaign: string | null): number {
+  return upToStep((campaign ? typicalCampaignMinutes(db, campaign) : DEFAULT_CAMPAIGN_MINUTES) + ESTIMATE_SLACK_MINUTES);
 }
 
 /**

@@ -80,7 +80,8 @@ describe('booking flow', () => {
     const r = (await call('GET', '/api/bookings/options', P[0])).json();
     expect(r.campaigns.map((c: { slug: string }) => c.slug)).toEqual(['no_mercy', 'death_toll']);
     expect(r.campaigns[0].minutes).toBe(60);
-    expect(r.limits).toMatchObject({ minMinutes: 60, maxMinutes: 180, stepMinutes: 30, playlistMax: 4 });
+    expect(r.limits).toEqual({ daysAhead: 14, playlistMax: 4 });
+    expect(r.estimate).toEqual({ perCampaign: { no_mercy: 60, death_toll: 60 }, base: 15, slack: 10, step: 30, min: 60, max: 180 });
     expect(r.rulesets.map((x: { name: string }) => x.name)).toContain('Casual Scrim');
   });
 
@@ -101,9 +102,10 @@ describe('booking flow', () => {
   });
 
   it('refusals carry the reason text and status', async () => {
-    const r = await call('POST', '/api/bookings', P[0], { opponent: { steamid: P[1] }, startsAt: START.toISOString(), minutes: 45, playlist: ['no_mercy'] });
+    db.prepare("UPDATE settings SET value = '120' WHERE key = 'booking_max_minutes'").run();
+    const r = await call('POST', '/api/bookings', P[0], { opponent: { steamid: P[1] }, startsAt: START.toISOString(), playlist: ['no_mercy', 'death_toll'] });
     expect(r.statusCode).toBe(400);
-    expect(r.json().error).toMatch(/length/);
+    expect(r.json().error).toBe('That many campaigns will not fit in one booking; book fewer, and add one later with +1 campaign.');
   });
 
   it('people: add, accept, remove', async () => {
@@ -182,6 +184,23 @@ describe('next and stay (plan 4b, Task 7)', () => {
       .toEqual({ playlist_pos: 1, next_campaign: null });
     const stay = await call('POST', `/api/bookings/${id}/stay`, P[1]);
     expect(stay.statusCode).toBe(200);
+  });
+
+  it('+1 campaign through the extend path: a named campaign is appended, staff may add one too', async () => {
+    const id = await create();
+    await call('POST', `/api/bookings/${id}/confirm`, P[1]);
+    ready(id);
+    const before = Date.parse((db.prepare('SELECT ends_at FROM bookings WHERE id = ?').get(id) as { ends_at: string }).ends_at);
+    const bad = await call('POST', `/api/bookings/${id}/extend`, P[0], { campaign: 'the_sacrifice' });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().error).toBe('Pick a campaign from the map pool.');
+    const added = await call('POST', `/api/bookings/${id}/extend`, P[0], { campaign: 'death_toll' });
+    expect(added.statusCode).toBe(200);
+    expect(added.json()).toMatchObject({ gamesAllowed: 2, gamesPlayed: 0, closeAt: null, playlist: [{ slug: 'no_mercy' }, { slug: 'death_toll' }] });
+    expect(Date.parse(added.json().endsAt)).toBe(before + 90 * 60_000);
+    expect((await call('POST', `/api/admin/bookings/${id}/extend`, MOD, {})).statusCode).toBe(200);
+    expect(db.prepare('SELECT games_allowed FROM bookings WHERE id = ?').get(id)).toEqual({ games_allowed: 3 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM booking_events WHERE booking_id = ? AND event = 'campaign_added'").get(id)).toEqual({ n: 2 });
   });
 
   it('refuses with the runner\'s own text when the caller does not manage a confirmed side', async () => {

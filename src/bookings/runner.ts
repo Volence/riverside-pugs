@@ -17,7 +17,7 @@ import { bookingMessage, reviewAskMessage, type BookingNotifyType } from './mess
 import { claimReviewAsk } from '../scrims/reviews.js';
 import { bookingLimits, isLateCancel, typicalCampaignMinutes } from './rules.js';
 import {
-  acceptedPeople, actingSides, advancePlaylist, allowInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, extendBooking, gameName, getBooking, markActive,
+  acceptedPeople, actingSides, advancePlaylist, allowInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
   markReady, markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
   BOOKING_ERRORS, type BookingRow, type Side, type SideRow,
 } from './bookings.js';
@@ -893,7 +893,7 @@ export class BookingRunner {
         break;
       }
       case 'extend': {
-        const r = extendBooking(this.db, { bookingId: b.id, by: steamid, now: new Date(this.now()) });
+        const r = addCampaign(this.db, { bookingId: b.id, by: steamid, now: new Date(this.now()) });
         if (r.ok) this.onExtended(b.id);
         else error = BOOKING_ERRORS[r.error].text;
         break;

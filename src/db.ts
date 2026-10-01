@@ -1211,7 +1211,6 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   booking_hold_lead_minutes: '15',
   booking_protect_minutes: '75',
   booking_idle_end_minutes: '10',
-  booking_extend_minutes: '30',
   booking_game_min_players: '6',
   // Who may be on a booked box (plan 4b2): how long a captain has to !allow
   // someone who is not on the list, and how long a kicked one stays out.
@@ -1996,6 +1995,15 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'booking_sides', 'excused_at', 'TEXT');
   ensureColumn(db, 'booking_sides', 'excused_by', 'TEXT');
   ensureColumn(db, 'booking_sides', 'excuse_note', 'TEXT');
+  // Bookings by campaign: a booking is games_allowed campaigns, and ends_at
+  // only holds the estimated slot. close_at is the "gg" grace deadline once
+  // the last allowed campaign has finished, null when none is running. A
+  // booking made before this had its playlist as its contract, so it gets
+  // the playlist's length, once: every booking written since sets its count,
+  // which is never 0 (a playlist has at least one campaign).
+  ensureColumn(db, 'bookings', 'games_allowed', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'bookings', 'close_at', 'TEXT');
+  db.prepare('UPDATE bookings SET games_allowed = json_array_length(playlist_json) WHERE games_allowed = 0').run();
   db.prepare(
     "INSERT OR IGNORE INTO game_configs (key, label, cfg) VALUES ('standard', 'Standard (Rotoblin PUG 4v4)', 'pug_match')",
   ).run();

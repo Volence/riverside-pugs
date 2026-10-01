@@ -12,14 +12,14 @@ import { parseRules, rulesForKind, type MatchRules } from '../rulesets.js';
 import { newLeasePassword } from '../practiceLeases.js';
 import { NOT_HELD_SQL } from '../serverHolds.js';
 import { getServer } from '../serverPool.js';
-import { bookingGames, type BookingGameView } from './games.js';
+import { bookingGames, gamesPlayed, type BookingGameView } from './games.js';
 import { castersOf, type CasterView } from './casters.js';
 import { canSeeReliability, reliability, type Reliability } from '../scrims/reliability.js';
 import { ownReview, reviewable, reviewOpen, staffReviews, type ReviewTag, type StaffReview } from '../scrims/reviews.js';
 import { blocked } from '../scrims/blocks.js';
 import {
-  allowance, bookingLimits, capacityProblem, isLateCancel, iso, upcomingCount, OPEN_STATES_SQL, PEOPLE_PER_SIDE, SHOWN_MIN, STEP_MINUTES,
-  UNCONFIRMED_CUTOFF_MS, UNCONFIRMED_TTL_MS, type BookingLimits, type BookingState, type Party,
+  addCampaignMinutes, allowance, bookingLimits, capacityProblem, estimateMinutes, isLateCancel, iso, upcomingCount, OPEN_STATES_SQL,
+  PEOPLE_PER_SIDE, SHOWN_MIN, UNCONFIRMED_CUTOFF_MS, UNCONFIRMED_TTL_MS, type BookingLimits, type BookingState, type Party,
 } from './rules.js';
 
 /**
@@ -48,6 +48,12 @@ export interface BookingRow {
   warned_minutes: number | null; ending_at: string | null; ended_at: string | null; end_reason: string | null;
   cancelled_by: string | null; cancel_side: Side | null; cancel_reason: string | null;
   playlist_pos: number; next_campaign: string | null; next_at: string | null;
+  /** The campaigns this booking may play (bookings by campaign): the
+   *  playlist's length at creation, plus one per +1 campaign. */
+  games_allowed: number;
+  /** When the box closes after the last allowed campaign (the 5 minute
+   *  "gg" grace); null when no close is pending. */
+  close_at: string | null;
 }
 export interface SideRow {
   booking_id: number; side: Side; team_id: number | null; captain_steamid: string; confirmed_at: string | null;
@@ -63,7 +69,7 @@ export const BOOKING_ERRORS = {
   not_open: { status: 409, text: 'That player cannot use scrims yet.' },
   not_player: { status: 400, text: 'That is not an active player.' },
   bad_time: { status: 400, text: 'Pick a start time in the future, inside the booking window.' },
-  bad_length: { status: 400, text: 'That length is not one of the allowed booking lengths.' },
+  too_long: { status: 400, text: 'That many campaigns will not fit in one booking; book fewer, and add one later with +1 campaign.' },
   bad_playlist: { status: 400, text: 'Pick campaigns from the map pool, each once, up to the limit.' },
   bad_ruleset: { status: 400, text: 'Pick one of the listed rule sets.' },
   bad_config: { status: 400, text: 'Pick one of the listed game configs.' },
@@ -72,6 +78,8 @@ export const BOOKING_ERRORS = {
   bad_role: { status: 400, text: 'A role is player, ringer or spectator.' },
   not_manager: { status: 403, text: 'Only a captain or co-captain of that side can do that.' },
   no_capacity: { status: 409, text: 'Not enough servers are free for that time. Try another slot.' },
+  bad_campaign: { status: 400, text: 'Pick a campaign from the map pool.' },
+  no_campaign_room: { status: 409, text: 'No server is free for another campaign after this slot.' },
   allowance: { status: 409, text: 'That side already has as many upcoming bookings as allowed.' },
   wrong_state: { status: 409, text: 'The booking is past that point.' },
   already_confirmed: { status: 409, text: 'Already confirmed.' },
@@ -180,18 +188,15 @@ export function parseStart(raw: unknown, nowMs: number, limits: BookingLimits): 
   if (start <= nowMs || start > nowMs + limits.daysAhead * 86_400_000) return null;
   return start;
 }
-export function parseMinutes(raw: unknown, limits: BookingLimits): number | null {
-  const m = typeof raw === 'number' ? raw : Number.NaN;
-  if (!Number.isInteger(m) || m % STEP_MINUTES !== 0 || m < limits.minMinutes || m > limits.maxMinutes) return null;
-  return m;
+/** Whether a slug is a campaign a booking may play: in the map pool and known. */
+function isPoolCampaign(db: DB, c: unknown): c is string {
+  return typeof c === 'string' && getCampaignPool(db).includes(c) && !!campaignRegistry(db).get(c);
 }
 export function parsePlaylist(db: DB, raw: unknown, max: number): string[] | null {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > max) return null;
-  const pool = new Set(getCampaignPool(db));
-  const registry = campaignRegistry(db);
   const out: string[] = [];
   for (const c of raw) {
-    if (typeof c !== 'string' || !pool.has(c) || !registry.get(c) || out.includes(c)) return null;
+    if (!isPoolCampaign(db, c) || out.includes(c)) return null;
     out.push(c);
   }
   return out;
@@ -227,8 +232,10 @@ const partyOf = (s: Pick<SideRow, 'team_id' | 'captain_steamid'>): Party =>
 
 // ---------- player writes ----------
 
+/** A booking's slot comes from its campaigns (estimateMinutes); `minutes`
+ *  is accepted from older callers and ignored. */
 export function createBooking(db: DB, o: {
-  by: string; teamId?: unknown; opponent: unknown; startsAt: unknown; minutes: unknown; playlist: unknown;
+  by: string; teamId?: unknown; opponent: unknown; startsAt: unknown; minutes?: unknown; playlist: unknown;
   rulesetId?: unknown; gameConfig?: unknown; now?: Date;
 }): Result<{ id: number }> {
   const now = o.now ?? new Date();
@@ -237,10 +244,10 @@ export function createBooking(db: DB, o: {
   if (!canUse(db, o.by)) return fail('not_open');
   const startMs = parseStart(o.startsAt, nowMs, limits);
   if (startMs === null) return fail('bad_time');
-  const minutes = parseMinutes(o.minutes, limits);
-  if (minutes === null) return fail('bad_length');
   const playlist = parsePlaylist(db, o.playlist, limits.playlistMax);
   if (!playlist) return fail('bad_playlist');
+  const minutes = estimateMinutes(db, playlist);
+  if (minutes > limits.maxMinutes) return fail('too_long');
   const rules = pickRules(db, o.rulesetId);
   if (!rules) return fail('bad_ruleset');
   const config = pickConfig(db, o.gameConfig);
@@ -292,9 +299,10 @@ export function createBooking(db: DB, o: {
     const endMs = startMs + minutes * 60_000;
     if (capacityProblem(db, { region, startMs, endMs }) !== null) return fail('no_capacity');
     const id = Number(db.prepare(
-      `INSERT INTO bookings (purpose, region, starts_at, ends_at, password, tv_password, game_config, rules_json, playlist_json, created_by, created_at)
-       VALUES ('scrim', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(region, iso(startMs), iso(endMs), newLeasePassword(), newLeasePassword(), config, rules, JSON.stringify(playlist), o.by, now.toISOString()).lastInsertRowid);
+      `INSERT INTO bookings (purpose, region, starts_at, ends_at, password, tv_password, game_config, rules_json, playlist_json, games_allowed, created_by, created_at)
+       VALUES ('scrim', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(region, iso(startMs), iso(endMs), newLeasePassword(), newLeasePassword(), config, rules, JSON.stringify(playlist), playlist.length,
+      o.by, now.toISOString()).lastInsertRowid);
     const side = db.prepare('INSERT INTO booking_sides (booking_id, side, team_id, captain_steamid, confirmed_at) VALUES (?, ?, ?, ?, ?)');
     side.run(id, 'a', teamId, aCaptain, now.toISOString());
     side.run(id, 'b', bTeam, bCaptain, null);
@@ -592,26 +600,47 @@ export function excuseMark(db: DB, o: {
   })();
 }
 
-export function extendBooking(db: DB, o: { bookingId: number; by: string; staff?: boolean; now?: Date }): Result<{ endsAt: string }> {
+/**
+ * +1 campaign (bookings by campaign, Ruling 5), which replaced Extend: one
+ * more game allowed, and the slot's end moved out by addCampaignMinutes,
+ * capacity-checked from the current end. A named campaign must be a pool
+ * campaign and is appended to the playlist (it may repeat one already
+ * there: a replay is still a game); without one the captains pick it in
+ * game when the time comes. Any pending close is cancelled. A captain adds
+ * only to a ready or active booking, as a confirmed side; staff to any open
+ * booking. Each call is its own transaction, so two at once add two, each
+ * checked against the capacity the other left.
+ */
+export function addCampaign(db: DB, o: {
+  bookingId: number; by: string; staff?: boolean; campaign?: unknown; now?: Date;
+}): Result<{ gamesAllowed: number; endsAt: string; campaign: string | null }> {
   const now = o.now ?? new Date();
-  return db.transaction((): Result<{ endsAt: string }> => {
+  const campaign = o.campaign === undefined || o.campaign === null ? null : o.campaign;
+  if (campaign !== null && !isPoolCampaign(db, campaign)) return fail('bad_campaign');
+  return db.transaction((): Result<{ gamesAllowed: number; endsAt: string; campaign: string | null }> => {
     const b = getBooking(db, o.bookingId);
     if (!b) return fail('not_found');
     if (o.staff) {
       if (!isOpen(b)) return fail('wrong_state');
     } else {
-      // A captain only extends a booking that is already running, and only
-      // as a confirmed side; staff may extend any open booking.
       if ((b.state !== 'ready' && b.state !== 'active') || b.ending_at !== null) return fail('wrong_state');
       if (actingSides(db, b.id, o.by).length === 0) return fail('not_manager');
     }
-    const ext = bookingLimits(db).extendMinutes;
+    const minutes = addCampaignMinutes(db, campaign);
     const from = Date.parse(b.ends_at);
-    if (capacityProblem(db, { region: b.region, startMs: from, endMs: from + ext * 60_000, exceptId: b.id }) !== null) return fail('no_capacity');
-    const endsAt = iso(from + ext * 60_000);
-    db.prepare('UPDATE bookings SET ends_at = ?, extended_minutes = extended_minutes + ?, warned_minutes = NULL WHERE id = ?').run(endsAt, ext, b.id);
-    logEvent(db, b.id, o.by, 'extended', { minutes: ext, endsAt, staff: !!o.staff }, now);
-    return ok({ endsAt });
+    if (capacityProblem(db, { region: b.region, startMs: from, endMs: from + minutes * 60_000, exceptId: b.id }) !== null) {
+      return fail('no_campaign_room');
+    }
+    const endsAt = iso(from + minutes * 60_000);
+    const gamesAllowed = b.games_allowed + 1;
+    const playlist = JSON.parse(b.playlist_json) as string[];
+    if (campaign !== null) playlist.push(campaign);
+    db.prepare(
+      `UPDATE bookings SET ends_at = ?, games_allowed = ?, playlist_json = ?, extended_minutes = extended_minutes + ?,
+         warned_minutes = NULL, close_at = NULL WHERE id = ?`,
+    ).run(endsAt, gamesAllowed, JSON.stringify(playlist), minutes, b.id);
+    logEvent(db, b.id, o.by, 'campaign_added', { campaign, gamesAllowed, minutes, endsAt, staff: !!o.staff }, now);
+    return ok({ gamesAllowed, endsAt, campaign });
   })();
 }
 
@@ -807,7 +836,11 @@ export interface BookingView {
   /** The close has finished (ended_at set): ending stays true for ever after. */
   ended: boolean;
   startsAt: string; endsAt: string;
-  extendedMinutes: number; extendMinutes: number; createdAt: string; playlist: { slug: string; name: string }[]; rules: MatchRules | null;
+  extendedMinutes: number; createdAt: string;
+  /** Campaigns this booking may play, finished booking games so far (an
+   *  aborted one is not a game), and when the box closes after the last one
+   *  (null when no close is pending). */
+  gamesAllowed: number; gamesPlayed: number; closeAt: string | null; playlist: { slug: string; name: string }[]; rules: MatchRules | null;
   gameConfig: { key: string; label: string }; sides: BookingSideView[]; server: { name: string } | null;
   connect: { host: string; port: number; password: string } | null;
   cancel: { side: Side | null; reason: string | null } | null; endReason: string | null;
@@ -865,7 +898,8 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
     || sidesOf(db, id).some((s) => s.confirmed_at !== null && manages.includes(s.side));
   return {
     id: b.id, purpose: b.purpose, state: b.state, ending: b.ending_at !== null, ended: b.ended_at !== null, startsAt: b.starts_at, endsAt: b.ends_at,
-    extendedMinutes: b.extended_minutes, extendMinutes: bookingLimits(db).extendMinutes, createdAt: b.created_at,
+    extendedMinutes: b.extended_minutes, createdAt: b.created_at,
+    gamesAllowed: b.games_allowed, gamesPlayed: gamesPlayed(db, id), closeAt: b.close_at,
     playlist: (JSON.parse(b.playlist_json) as string[]).map((slug) => ({ slug, name: registry.get(slug)?.name ?? slug })),
     rules, gameConfig: config ?? { key: b.game_config, label: b.game_config },
     sides: sidesOf(db, id).map((s) => {

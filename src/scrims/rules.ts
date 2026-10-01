@@ -3,7 +3,7 @@ import type { DB } from '../db.js';
 import { displaySr } from '../rating.js';
 import { currentSeasonId } from '../players.js';
 import { activeMembers } from '../teams/teams.js';
-import { bookingLimits, capacityProblem, typicalCampaignMinutes, STEP_MINUTES, iso } from '../bookings/rules.js';
+import { bookingLimits, capacityProblem, estimateMinutes, STEP_MINUTES, iso } from '../bookings/rules.js';
 
 /**
  * The pure rules behind the scrim board (spec part 4, sections 1-2, and the
@@ -58,16 +58,16 @@ export function srFits(postSr: number, range: number | null, sr: number): boolea
 /**
  * Ruling 3: the proposed playlist on an accept. The poster's picks and the
  * accepter's picks alternate, poster first, duplicates skipped wherever they
- * recur. The result is capped at `booking_playlist_max`, then trimmed to
- * whatever fits `blockMinutes` by typical campaign length
- * (typicalCampaignMinutes, src/bookings/rules.ts), always keeping at least
- * the first campaign even if it alone runs over the block.
+ * recur, capped at `booking_playlist_max`. It is never trimmed to the post's
+ * block (bookings by campaign, Ruling 6): `minutes` is the slot it would
+ * hold (estimateMinutes, src/bookings/rules.ts), which is the booking length
+ * at confirm, and `fits` says whether that is within booking_max_minutes
+ * (a confirm of one that does not is refused too_long).
  */
 export function proposedPlaylist(
   db: DB,
   posterPicks: string[],
   accepterPicks: string[],
-  blockMinutes: number,
 ): { playlist: string[]; minutes: number; fits: boolean } {
   const max = bookingLimits(db).playlistMax;
   const seen = new Set<string>();
@@ -83,16 +83,9 @@ export function proposedPlaylist(
       alternated.push(accepterPicks[i]);
     }
   }
-
-  const playlist: string[] = [];
-  let minutes = 0;
-  for (const campaign of alternated.slice(0, max)) {
-    const next = minutes + typicalCampaignMinutes(db, campaign);
-    if (playlist.length > 0 && next > blockMinutes) break;
-    playlist.push(campaign);
-    minutes = next;
-  }
-  return { playlist, minutes, fits: minutes <= blockMinutes };
+  const playlist = alternated.slice(0, max);
+  const minutes = estimateMinutes(db, playlist);
+  return { playlist, minutes, fits: minutes <= bookingLimits(db).maxMinutes };
 }
 
 /** How far nearestFreeSlot searches either side of the post's start. */

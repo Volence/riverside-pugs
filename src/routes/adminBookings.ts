@@ -76,9 +76,9 @@ export async function adminBookingRoutes(app: FastifyInstance, opts: { db: DB; r
     const me = requireStaff(req, reply);
     if (!me) return;
     const id = idOf(req.params);
-    const r = B.extendBooking(db, { bookingId: id, by: me, staff: true });
+    const r = B.addCampaign(db, { bookingId: id, by: me, staff: true, campaign: ((req.body ?? {}) as { campaign?: unknown }).campaign });
     if (!r.ok) return refuse(reply, r.error);
-    logAdmin(db, me, 'booking_extend', id, { endsAt: r.value.endsAt });
+    logAdmin(db, me, 'booking_extend', id, { endsAt: r.value.endsAt, gamesAllowed: r.value.gamesAllowed, campaign: r.value.campaign });
     runner?.onExtended(id);
     return { ok: true };
   });
