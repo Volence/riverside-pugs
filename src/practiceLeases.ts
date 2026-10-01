@@ -61,6 +61,7 @@ import { parseHumans } from './serverRestart.js';
 import { getPlayer } from './players.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { practicePlayers, type PracticePlayer } from './practicePlayers.js';
+import { bookingLimits, bookingsDue } from './bookings/rules.js';
 
 export type LeaseKind = 'park' | 'drill' | 'hunter';
 /** Kinds a player owns: private, one open at a time per player. */
@@ -248,14 +249,16 @@ export type PickResult =
  * boxes for the queue. Whether the box restarts after matches does not
  * matter here: ending a lease restarts srcds regardless (owner, 2026-09-28).
  */
-export function pickLeaseServer(db: DB): PickResult {
+export function pickLeaseServer(db: DB, nowMs: number = Date.now()): PickResult {
   const max = settingNumber(db, 'practice_max_leases', 2, { integer: true, min: 0 });
   if (max === 0) return { ok: false, reason: 'off' };
   if (openLeases(db).length >= max) return { ok: false, reason: 'max_leases' };
   if (matchesWaiting(db) > 0) return { ok: false, reason: 'queue_waiting' };
   const reserve = settingNumber(db, 'practice_reserve_idle', 1, { integer: true, min: 0 });
+  // Boxes kept back for bookings about to start count as already taken.
+  const kept = bookingsDue(db, nowMs, bookingLimits(db).protectMinutes);
   const free = claimableServers(db);
-  if (free.length === 0 || free.length - 1 < reserve) return { ok: false, reason: 'no_server' };
+  if (free.length === 0 || free.length - 1 - kept < reserve) return { ok: false, reason: 'no_server' };
   return { ok: true, server: free[free.length - 1] };
 }
 
@@ -334,7 +337,7 @@ const END_SAY: Record<EndReason, string> = {
   admin: 'an admin closed it',
   idle: 'nobody was on it for a while',
   expired: 'its time ran out',
-  preempted: 'a PUG needs this server',
+  preempted: 'a ranked match or a booked server needs it',
   setup_failed: 'it could not be set up',
   players_on_server: 'it was not free',
   interrupted: 'the site restarted while it was being set up',
@@ -427,7 +430,7 @@ export class PracticeLeases {
           const park = joinableParks(this.db)[0];
           if (park) return { ok: true, lease: park, joined: true };
         }
-        const pick = pickLeaseServer(this.db);
+        const pick = pickLeaseServer(this.db, this.now());
         if (!pick.ok) return { ok: false, status: 503, error: PICK_ERRORS[pick.reason] };
         const now = this.now();
         const id = Number(this.db.prepare(
@@ -714,11 +717,11 @@ export class PracticeLeases {
   }
 
   /**
-   * A PUG needs a server and found none. The newest active lease is warned
-   * in game and ended PREEMPT_WARN_MS later, unless the PUG found a box
-   * some other way by then. One lease at a time: a second call while a
-   * warning is running does nothing, so one waiting match cannot empty
-   * every practice server at once.
+   * A PUG, or a booking at its hold time, needs a server and found none. The
+   * newest active lease is warned in game and ended PREEMPT_WARN_MS later,
+   * unless the PUG found a box some other way by then. One lease at a time:
+   * a second call while a warning is running does nothing, so one waiting
+   * match cannot empty every practice server at once.
    */
   needServer(): void {
     const leases = openLeases(this.db);
@@ -732,7 +735,7 @@ export class PracticeLeases {
     const server = getServer(this.db, victim.server_id);
     if (server) {
       this.track(this.deps.rcon(server, [
-        `say [Practice] A PUG needs this server in ${PREEMPT_WARN_MS / 1000} seconds. Ranked matches always come first.`,
+        `say [Practice] A ranked match or a booked server needs this box in ${PREEMPT_WARN_MS / 1000} seconds. Those always come first.`,
       ]).then(() => {}, (err) => {
         console.warn(`[practice] preemption warning on ${server.name} failed:`, err instanceof Error ? err.message : err);
       }));
@@ -748,11 +751,14 @@ export class PracticeLeases {
   finishPreempt(id: number): void {
     const lease = this.stillActive(id);
     if (!lease || lease.warned_at === null) return;
-    if (matchesWaiting(this.db) === 0) {
+    // Still needed: a PUG waits, or more bookings wait at their hold time
+    // than there are boxes for them (src/bookings/runner.ts calls needServer).
+    const bookingsWaiting = bookingsDue(this.db, this.now(), bookingLimits(this.db).holdLeadMinutes);
+    if (matchesWaiting(this.db) === 0 && bookingsWaiting <= claimableServers(this.db).length) {
       this.db.prepare('UPDATE practice_leases SET warned_at = NULL WHERE id = ?').run(id);
       const server = getServer(this.db, lease.server_id);
       if (server) {
-        this.track(this.deps.rcon(server, ['say [Practice] Never mind: the PUG found another server. Carry on.'])
+        this.track(this.deps.rcon(server, ['say [Practice] Never mind: the server is not needed after all. Carry on.'])
           .then(() => {}, () => {}));
       }
       return;

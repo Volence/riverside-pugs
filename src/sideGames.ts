@@ -22,6 +22,7 @@ import { campaignRegistry, campaignDisplayName } from './campaignRegistry.js';
 import { campaignForMap } from './campaigns.js';
 import { getSetting } from './settings.js';
 import { sizeFor, choosePlaying, onLeave, type SideCandidate, type SideSize } from './sideGameRules.js';
+import { bookingLimits, bookingsDue } from './bookings/rules.js';
 import type { LobbySnapshot } from './lobby.js';
 import type { MatchmakerListener } from './matchmaker.js';
 import type { SideLogEvent } from './logParse.js';
@@ -240,7 +241,10 @@ export class SideGames {
     // A box that recently refused is skipped (refusedUntil).
     const now = this.now();
     for (const [id, until] of this.refusedUntil) if (until <= now) this.refusedUntil.delete(id);
-    const server = claimableServers(this.deps.db).find((s) => !this.refusedUntil.has(s.id));
+    const free = claimableServers(this.deps.db);
+    // Boxes kept back for bookings about to start are not the queue's to lend.
+    if (free.length <= bookingsDue(this.deps.db, now, bookingLimits(this.deps.db).protectMinutes)) return;
+    const server = free.find((s) => !this.refusedUntil.has(s.id));
     if (!server) return;
     const token = newToken();
     const password = `side_${token.slice(0, 8)}`;
