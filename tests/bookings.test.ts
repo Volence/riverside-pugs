@@ -3,6 +3,7 @@ import { openDb, type DB } from '../src/db.js';
 import { addServer } from '../src/serverPool.js';
 import { setSetting } from '../src/settings.js';
 import { createTeam, invitePlayer, respondInvite, setRole, transferCaptain } from '../src/teams/teams.js';
+import { currentSeasonId } from '../src/players.js';
 import {
   addPerson, bookingView, cancelBooking, claimNoShow, closeBooking, confirmBooking, createBooking, declineBooking,
   endBooking, expireUnconfirmed, extendBooking, getBooking, holdBox, markActive, markReady, markReleased, markSetup,
@@ -337,6 +338,23 @@ describe('views', () => {
     expect(v.connect).toEqual({ host: 'h', port: 27002, password: getBooking(db, id)!.password });
     expect(JSON.stringify(v)).not.toContain(getBooking(db, id)!.tv_password);
     expect(bookingView(db, id, { steamid: P[9], staff: true })!.connect).not.toBeNull();
+  });
+
+  it("bookingView lists the booking's games oldest first", () => {
+    const id = create();
+    expect(bookingView(db, id, { steamid: P[0], staff: false })!.games).toEqual([]);
+    const insertGame = (state: string, token: string, a: number, b: number): number => Number(db.prepare(
+      `INSERT INTO matches (season_id, state, campaign, token, origin, kind, visibility, booking_id, booking_side_a, team_a_score, team_b_score)
+       VALUES (?, ?, 'no_mercy', ?, 'in_game', 'scrim', 'participants', ?, 'a', ?, ?)`,
+    ).run(currentSeasonId(db), state, token, id, a, b).lastInsertRowid);
+    const first = insertGame('completed', 't1', 300, 200);
+    const second = insertGame('live', 't2', 10, 5);
+    const v = bookingView(db, id, { steamid: P[0], staff: false })!;
+    expect(v.games.map((g) => g.matchId)).toEqual([first, second]);
+    expect(v.games).toEqual([
+      { matchId: first, campaign: 'no_mercy', state: 'completed', scoreA: 300, scoreB: 200, sideA: 'a', startedAt: expect.any(String), endedAt: null },
+      { matchId: second, campaign: 'no_mercy', state: 'live', scoreA: 10, scoreB: 5, sideA: 'a', startedAt: expect.any(String), endedAt: null },
+    ]);
   });
 
   it('myBookings lists what needs the viewer', () => {

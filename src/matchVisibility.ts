@@ -1,13 +1,16 @@
 import type { DB } from './db.js';
+import { managesSide, sidesOf } from './bookings/bookings.js';
 
 /**
  * Who may see a match (spec: foundation section 1, Visibility).
  *
- * public: everyone. participants: staff and the players of that match (later
- * plans add ringers, approved spectators and invited casters). staff: staff
- * only. Every route that returns a match, its demos, replays, timeline or live
- * round goes through canViewMatch or visibleMatchesSql, and answers a match the
- * viewer may not see exactly like a match that does not exist.
+ * public: everyone. participants: staff, the players of that match, and, for
+ * a match that is a booking's game (plan 4b), that booking's accepted people
+ * and its side managers (later plans add ringers, approved spectators and
+ * invited casters). staff: staff only. Every route that returns a match, its
+ * demos, replays, timeline or live round goes through canViewMatch or
+ * visibleMatchesSql, and answers a match the viewer may not see exactly like
+ * a match that does not exist.
  */
 export interface Viewer { steamid: string | null; staff: boolean }
 
@@ -18,20 +21,39 @@ export function viewerFor(db: DB, steamid: string | null): Viewer {
   return { steamid, staff: row?.is_admin === 1 || row?.is_mod === 1 };
 }
 
+/** True when steamid is an accepted person of this booking, or manages one
+ *  of its sides (pickup captain, or captain/co-captain of a team side). */
+function bookingParticipant(db: DB, bookingId: number, steamid: string): boolean {
+  if (db.prepare("SELECT 1 FROM booking_people WHERE booking_id = ? AND steamid = ? AND status = 'accepted'")
+    .get(bookingId, steamid)) return true;
+  return sidesOf(db, bookingId).some((s) => managesSide(db, s, steamid));
+}
+
 export function canViewMatch(db: DB, viewer: Viewer, matchId: number): boolean {
-  const row = db.prepare('SELECT visibility FROM matches WHERE id = ?').get(matchId) as { visibility: string } | undefined;
+  const row = db.prepare('SELECT visibility, booking_id FROM matches WHERE id = ?').get(matchId) as
+    { visibility: string; booking_id: number | null } | undefined;
   if (!row) return false;
   if (row.visibility === 'public' || viewer.staff) return true;
   if (row.visibility !== 'participants' || !viewer.steamid) return false;
-  return db.prepare('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?').get(matchId, viewer.steamid) !== undefined;
+  if (db.prepare('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?').get(matchId, viewer.steamid)) return true;
+  return row.booking_id !== null && bookingParticipant(db, row.booking_id, viewer.steamid);
 }
 
 export function visibleMatchesSql(viewer: Viewer, alias: string): { sql: string; params: (string | number)[] } {
   if (viewer.staff) return { sql: '1 = 1', params: [] };
   if (!viewer.steamid) return { sql: `${alias}.visibility = 'public'`, params: [] };
   return {
-    sql: `(${alias}.visibility = 'public' OR (${alias}.visibility = 'participants' AND EXISTS (
-            SELECT 1 FROM match_players vis_mp WHERE vis_mp.match_id = ${alias}.id AND vis_mp.player_id = ?)))`,
-    params: [viewer.steamid],
+    sql: `(${alias}.visibility = 'public' OR (${alias}.visibility = 'participants' AND (
+            EXISTS (SELECT 1 FROM match_players vis_mp WHERE vis_mp.match_id = ${alias}.id AND vis_mp.player_id = ?)
+            OR EXISTS (SELECT 1 FROM booking_people vis_bp WHERE vis_bp.booking_id = ${alias}.booking_id
+              AND vis_bp.steamid = ? AND vis_bp.status = 'accepted')
+            OR EXISTS (SELECT 1 FROM booking_sides vis_bs WHERE vis_bs.booking_id = ${alias}.booking_id
+              AND vis_bs.team_id IS NULL AND vis_bs.captain_steamid = ?)
+            OR EXISTS (SELECT 1 FROM booking_sides vis_bs2
+              JOIN team_members vis_tm ON vis_tm.team_id = vis_bs2.team_id
+                AND vis_tm.left_at IS NULL AND vis_tm.role IN ('captain','cocaptain')
+              WHERE vis_bs2.booking_id = ${alias}.booking_id AND vis_tm.steamid = ?)
+          )))`,
+    params: [viewer.steamid, viewer.steamid, viewer.steamid, viewer.steamid],
   };
 }

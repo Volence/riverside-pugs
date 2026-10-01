@@ -9,6 +9,7 @@ import { parseRules, rulesForKind, type MatchRules } from '../rulesets.js';
 import { newLeasePassword } from '../practiceLeases.js';
 import { NOT_HELD_SQL } from '../serverHolds.js';
 import { getServer } from '../serverPool.js';
+import { bookingGames, type BookingGameView } from './games.js';
 import {
   allowance, bookingLimits, capacityProblem, iso, upcomingCount, OPEN_STATES_SQL, PEOPLE_PER_SIDE, SHOWN_MIN, STEP_MINUTES,
   UNCONFIRMED_CUTOFF_MS, UNCONFIRMED_TTL_MS, type BookingLimits, type BookingState, type Party,
@@ -613,6 +614,7 @@ export interface BookingView {
   cancel: { side: Side | null; reason: string | null } | null; endReason: string | null;
   noShowFrom: string;
   viewer: { side: Side | null; manages: Side[]; staff: boolean; invited: boolean };
+  games: BookingGameView[];
 }
 
 export function bookingView(db: DB, id: number, viewer: { steamid: string; staff: boolean }): BookingView | null {
@@ -653,6 +655,7 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
     endReason: b.end_reason,
     noShowFrom: iso(Date.parse(b.starts_at) + (rules?.noShowGraceMinutes ?? 15) * 60_000),
     viewer: { side: me?.side ?? manages[0] ?? null, manages, staff: viewer.staff, invited: me?.status === 'invited' },
+    games: bookingGames(db, id),
   };
 }
 
