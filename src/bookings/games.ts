@@ -111,17 +111,18 @@ export function teamScrims(db: DB, teamId: number): TeamScrim[] {
   });
 }
 
-/** Abort a live booking game because its booking ended. Returns the match
+/** Abort a live booking game because its booking ended (or, plan 5, its
+ *  box was lost and the game could not be restored: `server_lost`). Returns the match
  *  token so the caller can unregister it, or null when the match is not a
  *  live booking game. ended_at is written in the same `YYYY-MM-DD HH:MM:SS`
  *  form as datetime('now') everywhere else. */
-export function abortBookingGame(db: DB, matchId: number, now: Date): string | null {
+export function abortBookingGame(db: DB, matchId: number, now: Date, cause: 'booking_ended' | 'server_lost' = 'booking_ended'): string | null {
   return db.transaction(() => {
     const row = db.prepare("SELECT token FROM matches WHERE id = ? AND booking_id IS NOT NULL AND state = 'live'")
       .get(matchId) as { token: string } | undefined;
     if (!row) return null;
-    db.prepare("UPDATE matches SET state = 'aborted', abort_cause = 'booking_ended', ended_at = ? WHERE id = ? AND state = 'live'")
-      .run(now.toISOString().replace('T', ' ').slice(0, 19), matchId);
+    db.prepare("UPDATE matches SET state = 'aborted', abort_cause = ?, ended_at = ? WHERE id = ? AND state = 'live'")
+      .run(cause, now.toISOString().replace('T', ' ').slice(0, 19), matchId);
     return row.token;
   })();
 }

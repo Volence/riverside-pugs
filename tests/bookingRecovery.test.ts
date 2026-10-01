@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { openDb, type DB } from '../src/db.js';
 import { addServer, type ServerRow } from '../src/serverPool.js';
 import { setSetting } from '../src/settings.js';
@@ -12,6 +15,7 @@ import { bookingLimits, bookingsDue } from '../src/bookings/rules.js';
 import { BookingRunner } from '../src/bookings/runner.js';
 import { bookingMessage } from '../src/bookings/messages.js';
 import { classifyBox, type BoxSignals } from '../src/bookings/recovery.js';
+import { setMissionsDirs, invalidateCampaignCache } from '../src/campaignRegistry.js';
 
 const P = Array.from({ length: 10 }, (_, i) => `765611990000009${String(i).padStart(2, '0')}`);
 const START = Date.parse('2026-10-02T20:00:00.000Z');
@@ -21,7 +25,7 @@ const PUB = 'Rotoblin Pub VS';
 let db: DB;
 let now: number;
 let sent: { server: string; cmds: string[] }[];
-let box: Record<string, { type: string; plugin: boolean; map: string; humans: string[]; down: boolean; execs: number; failExec: number; marker: string; bookingPlugin: string }>;
+let box: Record<string, { type: string; plugin: boolean; map: string; humans: string[]; down: boolean; execs: number; failExec: number; marker: string; bookingPlugin: string; pugMatch: string }>;
 let released: number[];
 let restarted: string[];
 let dms: { to: string; content: string }[];
@@ -46,6 +50,13 @@ const fakeRcon = async (server: ServerRow, cmds: string[]): Promise<string[]> =>
     if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${b.type}" ( def. "" )`;
     if (c === 'l4d_booking_version') return b.plugin ? '"l4d_booking_version" = "1.0.0" ( def. "1.0.0" )' : 'Unknown command "l4d_booking_version"';
     if (c === 'l4d_booking_id') return b.bookingPlugin >= '1.4.0' ? `"l4d_booking_id" = "${b.marker}" ( def. "" )` : 'Unknown command "l4d_booking_id"';
+    if (/^sm_pug_(resume|roster)/.test(c)) {
+      if (b.pugMatch < '0.3.19') return `Unknown command "${c.split(' ')[0]}"`;
+      if (c === 'sm_pug_resume_commit') return `PUGOK resumed maps=${cmds.filter((x) => x.startsWith('sm_pug_resume_map ')).length} roster=${cmds.filter((x) => x.startsWith('sm_pug_roster ')).length}`;
+      if (c.startsWith('sm_pug_resume_map ')) return `PUGOK resume_map=${cmds.filter((x) => x.startsWith('sm_pug_resume_map ')).indexOf(c) + 1}`;
+      if (c.startsWith('sm_pug_roster ')) return `PUGOK roster=${cmds.filter((x) => x.startsWith('sm_pug_roster ')).indexOf(c) + 1}`;
+      return `PUGOK resume=${c.split(' ')[1]}`;
+    }
     const mk = /^l4d_booking_id "(\d*)"$/.exec(c);
     if (mk) b.marker = mk[1];
     if (c === 'exec pug_match') { b.execs++; if (b.failExec > 0) b.failExec--; else b.type = 'Rotoblin 4v4 PUG'; }
@@ -82,7 +93,7 @@ beforeEach(() => {
   for (const n of ['a', 'bb', 'ccc']) {
     const id = addServer(db, { name: n, host: '10.0.0.1', port: 27014 + n.length, rconPort: 1, rconPassword: 'x' });
     db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id);
-    box[n] = { type: PUB, plugin: true, map: 'l4d_vs_hospital01_apartment', humans: [], down: false, execs: 0, failExec: 0, marker: '', bookingPlugin: '1.4.0' };
+    box[n] = { type: PUB, plugin: true, map: 'l4d_vs_hospital01_apartment', humans: [], down: false, execs: 0, failExec: 0, marker: '', bookingPlugin: '1.4.0', pugMatch: '0.3.19' };
   }
   runner = build();
 });
@@ -224,5 +235,146 @@ describe('booking_recovered message', () => {
     expect(same.content).toContain('your game is back on map 3');
     const moved = bookingMessage(db, 'https://x', id, 'booking_recovered', { moved: true })!;
     expect(moved.content).toContain('moved to another server');
+  });
+});
+
+// The stock No Mercy chapter list in the mission-file shape the game ships
+// (as tests/bookingRestore.test.ts): without a missions directory the stock
+// registry entries carry `maps: []`, and restoreSnapshot needs the chapters.
+const NO_MERCY = `"mission"
+{
+  "Name" "hospital"
+  "DisplayTitle" "No Mercy"
+  "modes"
+  {
+    "versus"
+    {
+      "1" { "Map" "l4d_vs_hospital01_apartment" "DisplayName" "The Apartments" }
+      "2" { "Map" "l4d_vs_hospital02_subway" "DisplayName" "The Subway" }
+      "3" { "Map" "l4d_vs_hospital03_sewers" "DisplayName" "The Sewers" }
+      "4" { "Map" "l4d_vs_hospital04_interior" "DisplayName" "The Hospital" }
+      "5" { "Map" "l4d_vs_hospital05_rooftop" "DisplayName" "Rooftop Finale" }
+    }
+  }
+}
+`;
+
+/** Box ccc restarts under booking `id`: empty marker, Pub, the default map. */
+const crash = (name = 'ccc') => { box[name].marker = ''; box[name].type = PUB; box[name].map = 'l4d_vs_hospital01_apartment'; box[name].humans = []; };
+
+/** A live booking game on ccc with map 1 finished and map 2 under way. */
+function liveGame(id: number): number {
+  const m = Number(db.prepare(
+    "INSERT INTO matches (season_id, state, campaign, server_id, token, origin, kind, visibility, booking_id, booking_side_a) VALUES (?, 'live', 'no_mercy', 3, 'tok123', 'in_game', 'scrim', 'participants', ?, 'a')",
+  ).run(currentSeasonId(db), id).lastInsertRowid);
+  db.prepare("INSERT INTO match_players (match_id, player_id, team, source) VALUES (?, ?, 'a', 'udp'), (?, ?, 'b', 'udp')").run(m, P[0], m, P[1]);
+  db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, 0, 1, 'a', 400, 'x'), (?, 0, 2, 'b', 300, 'x'), (?, 1, 1, 'b', 50, NULL)").run(m, m, m);
+  db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (?, 'l4d_vs_hospital02_subway', datetime('now'))").run(m);
+  return m;
+}
+
+describe('srcds restarted', () => {
+  let missionsDir: string;
+  beforeEach(() => {
+    missionsDir = mkdtempSync(join(tmpdir(), 'missions-'));
+    writeFileSync(join(missionsDir, 'hospital.txt'), NO_MERCY);
+    setMissionsDirs([missionsDir]);
+    invalidateCampaignCache();
+  });
+  afterEach(() => {
+    setMissionsDirs([]);
+    invalidateCampaignCache();
+    rmSync(missionsDir, { recursive: true, force: true });
+  });
+
+  it('sets the booking up again on the same box and resumes the live game on the map it was on', async () => {
+    const id = await running();
+    const m = liveGame(id);
+    crash();
+    await runner.tick();
+    await runner.idle();
+    const cmds = sent.filter((s) => s.server === 'ccc').flatMap((s) => s.cmds);
+    const resume = cmds.indexOf(`sm_pug_resume ${m} tok123 l4d_vs_hospital01_apartment a ${1}`);
+    expect(resume).toBeGreaterThan(-1);
+    expect(cmds.indexOf('sm_pug_auto_track 0')).toBeLessThan(resume);
+    expect(cmds).toContain('sm_pug_resume_map l4d_vs_hospital01_apartment 400 300');
+    expect(cmds).toContain('changelevel l4d_vs_hospital02_subway');
+    expect(box.ccc.marker).toBe(String(id));
+    expect(getBooking(db, id)).toMatchObject({ recovering_at: null, recoveries: 1, server_id: 3 });
+    expect(db.prepare('SELECT state, restored_at_map FROM matches WHERE id = ?').get(m)).toEqual({ state: 'live', restored_at_map: 1 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM match_rounds WHERE match_id = ? AND ordinal = 1').get(m)).toEqual({ n: 0 });
+    expect(dms.some((d) => d.content.includes('restarted'))).toBe(true);
+    expect(cmds.some((c) => c.startsWith('say [Booking] Restored after a server restart'))).toBe(true);
+  });
+
+  it('with no live game, sets up again and loads the campaign it was on', async () => {
+    const id = await running();
+    crash();
+    box.ccc.map = 'c1m1_hotel';
+    await runner.tick();
+    await runner.idle();
+    expect(box.ccc.map).toBe('l4d_vs_hospital01_apartment');
+    expect(getBooking(db, id)).toMatchObject({ recovering_at: null, recoveries: 1 });
+  });
+
+  it('restores the loading campaign when a captain had picked the next one', async () => {
+    const id = await running();
+    db.prepare("UPDATE bookings SET next_campaign = 'death_toll', next_at = ? WHERE id = ?").run(new Date(now + 10 * MIN).toISOString(), id);
+    crash();
+    await runner.tick();
+    await runner.idle();
+    expect(box.ccc.map).toBe('l4d_vs_smalltown01_caves');
+  });
+
+  it('an old pug-match: the game is aborted as server_lost and the booking carries on', async () => {
+    const id = await running();
+    const m = liveGame(id);
+    box.ccc.pugMatch = '0.3.18';
+    crash();
+    await runner.tick();
+    await runner.idle();
+    expect(db.prepare('SELECT state, abort_cause FROM matches WHERE id = ?').get(m)).toEqual({ state: 'aborted', abort_cause: 'server_lost' });
+    expect(getBooking(db, id)).toMatchObject({ state: 'ready', recovering_at: null });
+  });
+
+  it('two failed set-ups close the booking as server_lost, not a no-show', async () => {
+    const id = await running();
+    crash();
+    box.ccc.failExec = 99;
+    await runner.tick();
+    await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ state: 'cancelled', end_reason: 'server_lost' });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM booking_sides WHERE booking_id = ? AND no_show_at IS NOT NULL').get(id)).toEqual({ n: 0 });
+  });
+
+  it('no idle end right after a restore', async () => {
+    const id = await running();
+    db.prepare("UPDATE bookings SET last_human_at = ? WHERE id = ?").run(new Date(now - 60 * MIN).toISOString(), id);
+    now = START + 40 * MIN;
+    crash();
+    await runner.tick();
+    await runner.idle();
+    now += MIN;
+    await runner.tick();
+    await runner.idle();
+    expect(getBooking(db, id)!.ending_at).toBeNull();
+  });
+
+  it('resume() restarts a recovery a web restart cut off', async () => {
+    const id = await running();
+    beginRecovery(db, id, 'restart', new Date(now));
+    crash();
+    const fresh = build();
+    fresh.resume();
+    await fresh.idle();
+    expect(getBooking(db, id)).toMatchObject({ recovering_at: null, recoveries: 1 });
+  });
+
+  it('a box that answers with our marker is left alone', async () => {
+    const id = await running();
+    await runner.tick();
+    await runner.idle();
+    expect(getBooking(db, id)!.recovering_at).toBeNull();
+    expect(sent.flatMap((s) => s.cmds)).not.toContain('sm_pug_auto_track 0');
   });
 });
