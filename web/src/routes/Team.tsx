@@ -24,6 +24,8 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
   const [newName, setNewName] = useState('');
   const [newTag, setNewTag] = useState('');
   const [renaming, setRenaming] = useState(false);
+  /** The member a Make captain press is waiting to be confirmed for. */
+  const [confirmCaptain, setConfirmCaptain] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const me = session.kind === 'active' ? session.me.steamid : null;
 
@@ -71,6 +73,7 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
   const starters = Math.min(team.members.length, ENTRY_MIN);
   const openSlots = live ? Math.max(0, ENTRY_MIN - team.members.length) : 0;
   const myRole = role ? ROLE_LABEL[role] : null;
+  const currentCaptain = team.members.find((m) => m.role === 'captain')?.name ?? null;
 
   return (
     <main class="page page--profile teampage">
@@ -110,13 +113,26 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
                       {role === 'captain' && (m.role === 'member'
                         ? <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => act(() => teamsApi.setRole(slug, m.steamid, 'cocaptain'))}>Make co-captain</button>
                         : <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => act(() => teamsApi.setRole(slug, m.steamid, 'member'))}>Make member</button>)}
-                      <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => act(() => teamsApi.makeCaptain(slug, m.steamid))}>Make captain</button>
+                      <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => setConfirmCaptain(m.steamid)}>Make captain</button>
                     </>
                   )}
                   {canManage && m.steamid !== me && m.role !== 'captain' && (role === 'captain' || m.role === 'member') && (
                     <button class="btn btn--ghost btn--sm btn--quietdanger" disabled={busy} onClick={() => act(() => teamsApi.kick(slug, m.steamid))}>Kick</button>
                   )}
                 </span>
+                {confirmCaptain === m.steamid && (
+                  <span class="teamconfirmrow">
+                    <span class="teamroster__meta">
+                      {role === 'captain'
+                        ? `${m.name} becomes captain. You will become a co-captain and can only get it back if they hand it over.`
+                        : `${m.name} becomes captain and ${currentCaptain ?? 'the current captain'} stops being captain (they become a co-captain).`}
+                    </span>
+                    <span class="teamconfirm">
+                      <button class="btn btn--sm" disabled={busy} onClick={() => act(() => teamsApi.makeCaptain(slug, m.steamid), () => setConfirmCaptain(null))}>Yes, make {m.name} captain</button>
+                      <button class="btn btn--ghost btn--sm" onClick={() => setConfirmCaptain(null)}>{role === 'captain' ? 'Keep captaincy' : 'Cancel'}</button>
+                    </span>
+                  </span>
+                )}
               </li>
             ))}
             {Array.from({ length: openSlots }, (_, i) => (

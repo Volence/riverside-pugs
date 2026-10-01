@@ -87,6 +87,27 @@ describe('Team', () => {
     await waitFor(() => expect(mockTeams.disband).toHaveBeenCalledWith('rats'));
   });
 
+  it('make captain warns the captain they give it up, and can be backed out of', async () => {
+    mockTeams.get.mockResolvedValue(view({ viewer: { role: 'captain', staff: false }, manage: { invites: [], joinLinkToken: null } }));
+    mockTeams.makeCaptain.mockResolvedValue({});
+    render(<Team slug="rats" session={session('1')} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Make captain' }));
+    expect(mockTeams.makeCaptain).not.toHaveBeenCalled();
+    expect(screen.getByText(/You will become a co-captain/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep captaincy' }));
+    expect(screen.queryByText(/You will become a co-captain/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Make captain' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, make bob captain' }));
+    await waitFor(() => expect(mockTeams.makeCaptain).toHaveBeenCalledWith('rats', '2'));
+  });
+
+  it('staff making someone captain are told it replaces the current captain', async () => {
+    mockTeams.get.mockResolvedValue(view({ viewer: { role: null, staff: true }, manage: { invites: [], joinLinkToken: null } }));
+    render(<Team slug="rats" session={session('9')} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Make captain' }));
+    expect(screen.getByText(/cap stops being captain/)).toBeTruthy();
+  });
+
   it('a member can leave; a disbanded team says so and offers nothing', async () => {
     mockTeams.get.mockResolvedValue(view({ viewer: { role: 'member', staff: false } }));
     render(<Team slug="rats" session={session('2')} />);

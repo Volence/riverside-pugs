@@ -3252,6 +3252,10 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .teamupload { cursor: pointer; }
 .teamupload:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .teamform { display: flex; flex-wrap: wrap; align-items: end; gap: var(--sp-3); padding-top: var(--sp-2); }
+.teamconfirmrow {
+  grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3); border-left: 2px solid var(--rule); background: var(--surface-2);
+}
 .teamconfirm { display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: flex-end; }
 @media (max-width: 560px) {
   .teamsetting { flex-direction: column; align-items: flex-start; }
