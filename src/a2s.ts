@@ -7,6 +7,10 @@ import dgram from 'node:dgram';
  * S2C_CHALLENGE (0x41) and want it repeated with the 4 challenge bytes
  * appended. Never throws. Note: some hosts never answer A2S (NFO's Chicago
  * box did not), and to the recovery that looks exactly like a box that is gone.
+ *
+ * The socket is connect()ed to host:port before sending, so the kernel
+ * drops any datagram from a different sender; otherwise a stray or spoofed
+ * reply arriving on the ephemeral port could be read as this box answering.
  */
 const HEADER = [0xff, 0xff, 0xff, 0xff];
 const REQUEST = Buffer.from([...HEADER, 0x54, ...Buffer.from('Source Engine Query\0', 'latin1')]);
@@ -31,13 +35,18 @@ export function a2sInfo(host: string, port: number, timeoutMs = 2_000): Promise<
       if (msg.length < 5 || msg.readInt32LE(0) !== -1) return;
       const kind = msg[4];
       if (kind === 0x41 && msg.length >= 9) {
-        sock.send(Buffer.concat([REQUEST, msg.subarray(5, 9)]), port, host);
+        sock.send(Buffer.concat([REQUEST, msg.subarray(5, 9)]), (err) => { if (err) finish(null); });
         return;
       }
       if (kind !== 0x49) return;
       finish(parseInfo(msg));
     });
-    sock.send(REQUEST, port, host, (err) => { if (err) finish(null); });
+    // connect() binds the remote peer: the socket will only ever deliver
+    // messages from host:port, so a reply from anyone else is dropped
+    // before it reaches the 'message' handler above.
+    sock.connect(port, host, () => {
+      sock.send(REQUEST, (err) => { if (err) finish(null); });
+    });
   });
 }
 
