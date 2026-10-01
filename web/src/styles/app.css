@@ -3313,3 +3313,29 @@ a.teamrow:hover .teamrow__name { color: var(--accent); }
 .bookinggames { list-style: none; margin: 0; padding: 0; }
 .bookinggames li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); }
 .bookinggames li:last-child { border-bottom: 0; }
+
+/* ---------- Scrims (routes/Scrims.tsx) -----------------------------------
+   Layout only: reuses the Teams/Bookings look above (.teambadge, .teamrow__name,
+   .teamroster__meta, .teamchip, .teamconfirm, .teamfield, .bookform). */
+.scrimfit { display: flex; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-3); font-size: var(--fs-dense); color: var(--text-muted); }
+
+.scrimrows { list-style: none; margin: 0; padding: 0; }
+.scrimrows > li { border-bottom: 1px solid var(--border); padding: var(--sp-3) 0; }
+.scrimrows > li:last-child { border-bottom: 0; }
+
+.scrimside { display: flex; align-items: center; gap: var(--sp-2); }
+
+.scrimrow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2) var(--sp-3); scroll-margin-top: var(--sp-5); }
+.scrimrow--highlight { background: var(--surface-2); border-left: 2px solid var(--rule); padding-left: var(--sp-3); }
+.scrimrow__main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.scrimaccept { display: flex; flex-direction: column; gap: var(--sp-2); }
+.scrimaccept .bookform__fieldset label { font-size: var(--fs-dense); }
+.scrimaccept__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+
+.scrimmine { display: flex; flex-direction: column; gap: var(--sp-2); }
+.scrimaccepts { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.scrimaccepts > li { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) 0 0; border-top: 1px solid var(--border); }
+@media (max-width: 560px) {
+  .scrimrow { align-items: flex-start; }
+}

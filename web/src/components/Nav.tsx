@@ -67,9 +67,9 @@ export function Nav(
   };
   const me = session.kind === 'active' || session.kind === 'pending' ? session.me : null;
   const live = state?.match && state.match.state === 'live' ? state.match : null;
-  // Teams and Bookings only for viewers the competitive switch lets in (/api/me teams).
+  // Teams, Bookings and Scrims only for viewers the competitive switch lets in (/api/me teams).
   const links = me?.teams
-    ? [...NAV_LINKS.slice(0, 5), ['/teams', 'Teams'] as const, ['/bookings', 'Bookings'] as const, ...NAV_LINKS.slice(5)]
+    ? [...NAV_LINKS.slice(0, 5), ['/teams', 'Teams'] as const, ['/bookings', 'Bookings'] as const, ['/scrims', 'Scrims'] as const, ...NAV_LINKS.slice(5)]
     : NAV_LINKS;
 
   return (
