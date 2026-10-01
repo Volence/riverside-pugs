@@ -15,10 +15,10 @@ export const FLOOR_BYTES = 12 * 1024 ** 3;
 
 const HEX64 = /^[0-9a-f]{64}$/;
 
-export type FileKind = 'preview' | 'import';
+export type FileKind = 'preview' | 'import' | 'logo';
 
-const FOLDER: Record<FileKind, string> = { preview: 'previews', import: 'imports' };
-const EXT: Record<FileKind, string> = { preview: '.png', import: '.vpk' };
+const FOLDER: Record<FileKind, string> = { preview: 'previews', import: 'imports', logo: 'logos' };
+const EXT: Record<FileKind, string> = { preview: '.png', import: '.vpk', logo: '.png' };
 
 /** Prefix of an in-flight write. The sweep deletes any left behind by a crash. */
 export const TEMP_PREFIX = '.tmp-';
@@ -36,10 +36,10 @@ export interface CommunityStoreOpts {
 }
 
 /**
- * The community files on local disk: previews/<sha256>.png and
- * imports/<hudId>.vpk. Both are content addressed, so a name that exists is
- * never written again, and every name is checked against 64 lowercase hex
- * before it is joined onto a path.
+ * The community files on local disk: previews/<sha256>.png,
+ * imports/<hudId>.vpk and logos/<sha256>.png. All are content addressed, so a
+ * name that exists is never written again, and every name is checked against
+ * 64 lowercase hex before it is joined onto a path.
  */
 export class CommunityStore {
   readonly dir: string;
@@ -94,6 +94,12 @@ export class CommunityStore {
     return { wrote: this.write('import', id, bytes) };
   }
 
+  /** A team logo (src/teams), content addressed like a preview. */
+  putLogo(bytes: Uint8Array): { name: string; wrote: boolean } {
+    const name = createHash('sha256').update(bytes).digest('hex');
+    return { name, wrote: this.write('logo', name, bytes) };
+  }
+
   private read(kind: FileKind, name: string): Buffer | null {
     if (!HEX64.test(name)) return null;
     try {
@@ -105,6 +111,7 @@ export class CommunityStore {
 
   readPreview(sha: string): Buffer | null { return this.read('preview', sha); }
   readImport(id: string): Buffer | null { return this.read('import', id); }
+  readLogo(sha: string): Buffer | null { return this.read('logo', sha); }
 
   has(kind: FileKind, name: string): boolean {
     return HEX64.test(name) && exists(this.path(kind, name));
