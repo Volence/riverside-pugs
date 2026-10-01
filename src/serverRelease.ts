@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import { getServer, markOffline, release, type ServerRow } from './serverPool.js';
 import { restartOutcome, restartsAfterMatch, type RestartOutcome, type ServerRestarter } from './serverRestart.js';
+import { holdFor } from './serverHolds.js';
 
 /** How a server is being freed. `teardown` is the ending that went wrong:
  *  abandon, no-show, admin abort. The roster is still on the box, possibly
@@ -21,6 +22,11 @@ export interface ReleaseOpts {
    *  config, and the restart is what guarantees none of it reaches the next
    *  PUG (src/practiceLeases.ts). Ignored without a restarter. */
   forceRestart?: boolean;
+  /** The booking runner releasing its own box at the end of a booking. Every
+   *  other caller is refused on a box a booking holds (plan 4b): a game
+   *  played inside a booking ends with the block still running, and nothing
+   *  but the booking's own end may restart that box. */
+  booking?: boolean;
 }
 
 /** Hands a server back: restore sv_password, and tell the plugin the match whose
@@ -136,6 +142,11 @@ export class ServerReleaser {
   ): void {
     const server = getServer(this.db, serverId);
     if (!server) { onSettled?.(false); return; }
+    if (!opts.booking && holdFor(this.db, serverId)?.kind === 'booking') {
+      console.log(`[serverRelease] ${server.name} is held by a booking; not releasing it (the booking ends it)`);
+      onSettled?.(false);
+      return;
+    }
     const full: ReleaseOpts = {
       teardown: opts.teardown ?? false, restart: opts.restart ?? false, forceRestart: opts.forceRestart ?? false,
     };

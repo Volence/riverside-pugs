@@ -189,6 +189,30 @@ describe('ServerReleaser', () => {
     await releaser.settled();
     expect(getServer(db, id)!.status).toBe('idle');
   });
+
+  it('refuses to release a box a booking holds unless the booking asks', async () => {
+    const db = openDb(':memory:');
+    const id = seedServer(db);
+    const cleaned: string[] = [];
+    const releaser = new ServerReleaser(db, async (s) => { cleaned.push(s.name); });
+    // A box held by an open booking.
+    db.prepare("INSERT INTO players (steamid, name, status) VALUES ('76561199000000001', 'a', 'active')").run();
+    db.prepare(
+      `INSERT INTO bookings (purpose, starts_at, ends_at, state, server_id, password, tv_password, game_config, rules_json, playlist_json, created_by, created_at)
+       VALUES ('scrim', 'x', 'y', 'active', ?, 'p', 't', 'standard', '{}', '[]', '76561199000000001', 'x')`,
+    ).run(id);
+
+    const settled: boolean[] = [];
+    releaser.release(id, { restart: true }, (back) => settled.push(back));
+    await releaser.settled();
+    expect(cleaned).toEqual([]);
+    expect(getServer(db, id)!.status).toBe('idle');
+    expect(settled).toEqual([false]);
+
+    releaser.release(id, { restart: true, forceRestart: true, booking: true }, (back) => settled.push(back));
+    await releaser.settled();
+    expect(cleaned).toHaveLength(1);
+  });
 });
 
 describe('reconcileServers', () => {

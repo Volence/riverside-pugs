@@ -112,6 +112,7 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'booking_protect_minutes', group: 'Competitive', label: 'Keep boxes back for bookings (minutes)', help: 'From this long before a booking starts, a new PUG will not take the last idle box that booking needs, so a PUG that starts now cannot still be running when the booking begins. Must be at least the take-the-box time.', type: { kind: 'int', min: 5, max: 180 } },
   { key: 'booking_idle_end_minutes', group: 'Competitive', label: 'End an empty booking after (minutes)', help: 'A booked server with nobody on it for this long, after the start and the no-show grace, is closed and goes back to the pool.', type: { kind: 'int', min: 5, max: 60 } },
   { key: 'booking_extend_minutes', group: 'Competitive', label: 'Extend by (minutes)', help: 'What one Extend adds, if enough servers stay free for the extra time.', type: { kind: 'int', min: 15, max: 120 } },
+  { key: 'booking_game_min_players', group: 'Competitive', label: 'Players on teams to record a booked game', help: 'A game on a booked server is recorded once both teams go live with at least this many humans on teams in total.', type: { kind: 'int', min: 2, max: 8 } },
 ];
 
 const BY_KEY = new Map(SETTINGS_SCHEMA.map((d) => [d.key, d]));
