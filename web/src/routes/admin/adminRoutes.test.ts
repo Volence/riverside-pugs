@@ -34,6 +34,8 @@ describe('the panel URL parser', () => {
     expect(parseAdminPath('/admin/setup', asAdmin)).toEqual({ desk: 'setup', section: 'settings', param: null });
     expect(parseAdminPath('/admin/setup/audit', asAdmin)).toEqual({ desk: 'setup', section: 'audit', param: null });
     expect(parseAdminPath('/admin/setup/campaigns', asAdmin)).toEqual({ desk: 'setup', section: 'campaigns', param: null });
+    expect(parseAdminPath('/admin/setup/rulesets', asAdmin)).toEqual({ desk: 'setup', section: 'rulesets', param: null });
+    expect(parseAdminPath('/admin/setup/rulesets', asMod)).toEqual({ desk: 'people', section: 'search', param: null });
   });
 
   it('parses the balance desk', () => {
