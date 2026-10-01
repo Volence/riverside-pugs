@@ -7,7 +7,8 @@ import { QUEUE_SIZE } from './queue.js';
 import { resolveAlias } from './aliases.js';
 import { hasActiveBan } from './banState.js';
 import { bookingOnServer, bookingSideForTeamA } from './bookings/games.js';
-import { logBookingEvent, markActive } from './bookings/bookings.js';
+import { logBookingEvent, markActive, type BookingRow } from './bookings/bookings.js';
+import { holdFor } from './serverHolds.js';
 
 /** How long to wait after MATCH_CREATE before committing with whatever roster
  *  lines arrived. The burst is emitted in one tick by the plugin, so this only
@@ -323,12 +324,20 @@ export class SelfStartedMatches {
     // A booking holding this box makes the match one of its games: a private
     // match filed under the booking, on a box the booking keeps throughout,
     // so servers.status is left alone and nothing is announced in public.
-    const booking = bookingOnServer(db, serverId);
+    // Read inside the transaction below, so a booking that starts ending
+    // between this read and the insert cannot slip a game through as a PUG.
+    let booking = null as BookingRow | null;
 
     p.committed = true;
-    let matchId: number;
+    let matchId: number | null;
     try {
-      matchId = db.transaction(() => {
+      matchId = db.transaction((): number | null => {
+        booking = bookingOnServer(db, serverId);
+        // A box a booking holds while that booking is not running (still
+        // being set up, or ending) is nobody's to play a PUG on: adopting
+        // would make a public, rated match on a box the booking keeps.
+        if (!booking && holdFor(db, serverId)?.kind === 'booking') return null;
+
         // Insert-if-absent, never update: a player who has signed in already
         // has a real Steam persona and avatar, and an in-game nickname must
         // not overwrite them.
@@ -392,6 +401,15 @@ export class SelfStartedMatches {
     } catch (err) {
       console.error(`[selfStarted] failed to adopt match ${token}:`, err);
       p.committed = false;
+      this.finish(token, p);
+      return;
+    }
+    if (matchId === null) {
+      p.committed = false;
+      publishAdminEvent({
+        kind: 'problem',
+        text: `Refused to adopt a game started on ${p.map} on a booked server whose booking is not running (it is still being set up or is ending).`,
+      });
       this.finish(token, p);
       return;
     }
