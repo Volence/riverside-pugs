@@ -206,6 +206,30 @@ describe('LogListener: token-less lines are admitted by source address alone', (
     expect(denied).toEqual([]);
   });
 
+  // PUGBOOK (a captain's in-game command) is the same one-line kind list as
+  // PUGNET and PUGTV: no token, admitted by source address alone.
+  it('delivers PUGBOOK from an allowed source and drops it from anywhere else', async () => {
+    const line = 'PUGBOOK event=cmd cmd=nextmap steamid=76561198030413993 arg=dead air';
+
+    const allowed: LogEvent[] = [];
+    listener = new LogListener((ev) => allowed.push(ev));
+    let port = await listener.listen(0, '127.0.0.1');
+    listener.allowMatchCreateFrom('127.0.0.1');
+    await send(port, line);
+    await settle();
+    expect(allowed).toEqual([
+      { kind: 'booking_cmd', steamid: '76561198030413993', cmd: 'nextmap', arg: 'dead air' },
+    ]);
+
+    await listener.close();
+    const denied: LogEvent[] = [];
+    listener = new LogListener((ev) => denied.push(ev));
+    port = await listener.listen(0, '127.0.0.1');
+    await send(port, line);
+    await settle();
+    expect(denied).toEqual([]);
+  });
+
   it('admits them through the per-datagram predicate too', async () => {
     // A game server added to the database after boot is only known to the
     // predicate, never to the fixed set.

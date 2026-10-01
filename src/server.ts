@@ -1067,6 +1067,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           return;
         }
+        if (ev.kind === 'booking_cmd') {
+          try {
+            const sid = serverOf(source, meta);
+            if (sid !== null) bookingRunnerRef?.onCommand(sid, ev.steamid, ev.cmd, ev.arg);
+          } catch (err) {
+            console.error('[booking] command line failed:', err);
+          }
+          return;
+        }
         if (ev.kind === 'entered') {
           try {
             signonDrops?.onEntered(ev.steamid);

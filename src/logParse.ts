@@ -247,7 +247,15 @@ export type LogEvent =
   // Queue side games (plugin/pug-sidegame.sp). Token-less as far as the
   // listener is concerned: src/sideGames.ts compares the token to the game
   // it is running and drops anything else.
-  | { kind: 'side'; event: SideLogEvent; token: string; steamid: string | null; map: string | null; campaign: string | null };
+  | { kind: 'side'; event: SideLogEvent; token: string; steamid: string | null; map: string | null; campaign: string | null }
+  // A captain's in-game command (plugin/l4d_booking.sp 1.1.0, plan 4b). No
+  // token: the plugin only emits this while a booking's password is on the
+  // box, and the site re-checks the sender against the booking's own
+  // confirmed sides (src/bookings/runner.ts onCommand) before acting, so the
+  // plugin's own captain list is only a courtesy. `arg` is free text, at most
+  // 64 characters, trimmed; empty when the plugin sent `arg=` with nothing
+  // after it.
+  | { kind: 'booking_cmd'; steamid: string; cmd: 'nextmap' | 'stay' | 'end' | 'extend'; arg: string };
 
 /** Parse `key=val key=val` pairs from the remainder of a PUG line. */
 /** The phase fields shared by PHASE and HEARTBEAT. Plugin team numbers are
@@ -691,6 +699,21 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
       half: half === 1 || half === 2 ? half : null,
       tMs: tms !== null && tms >= 0 ? tms : null,
     };
+  }
+
+  // A captain's in-game command (plugin/l4d_booking.sp 1.1.0). Same treatment
+  // as PUGCALL and PUGTV's reason=: `arg` is free text and LAST on the line,
+  // so `cmd` and `steamid` are read from the slice BEFORE the first ` arg=`
+  // only, and nothing a captain types into arg can forge either one.
+  if (body.startsWith('PUGBOOK ')) {
+    const at = body.indexOf(' arg=');
+    if (at < 0) return null;
+    const head = kv(body.slice(0, at).split(/\s+/).slice(1));
+    const arg = body.slice(at + ' arg='.length).trim().slice(0, 64);
+    const steamid = steamId64Of(head.steamid ?? '');
+    const cmd = head.cmd;
+    if (!steamid || (cmd !== 'nextmap' && cmd !== 'stay' && cmd !== 'end' && cmd !== 'extend')) return null;
+    return { kind: 'booking_cmd', steamid, cmd, arg };
   }
 
   // Where a client connected from. Same protection as SIGNON_DROP and for the
