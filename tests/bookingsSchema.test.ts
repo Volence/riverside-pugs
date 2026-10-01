@@ -103,4 +103,11 @@ describe('booking schema', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('has the crash recovery columns', () => {
+    const cols = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
+    expect(cols('bookings')).toEqual(expect.arrayContaining(['recovering_at', 'recover_reason', 'lost_since', 'a2s_seen_at', 'up_alerted_at', 'recoveries', 'waiting_since']));
+    expect(cols('matches')).toContain('restored_at_map');
+    expect(cols('servers')).toContain('gone_since');
+  });
 });

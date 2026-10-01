@@ -54,6 +54,9 @@ export interface BookingRow {
   /** When the box closes after the last allowed campaign (the 5 minute
    *  "gg" grace); null when no close is pending. */
   close_at: string | null;
+  /** Crash recovery (plan 5): see src/db.ts. */
+  recovering_at: string | null; recover_reason: 'restart' | 'gone' | null; lost_since: string | null;
+  a2s_seen_at: string | null; up_alerted_at: string | null; recoveries: number; waiting_since: string | null;
 }
 export interface SideRow {
   booking_id: number; side: Side; team_id: number | null; captain_steamid: string; confirmed_at: string | null;
@@ -828,6 +831,90 @@ export function expireUnconfirmed(db: DB, now: Date): number[] {
     }
   }
   return out;
+}
+
+// ---------- crash recovery (plan 5) ----------
+
+/** The first moment of the current outage (rcon stopped answering); kept
+ *  across calls so the gone clock never restarts while the box stays silent. */
+export function noteLost(db: DB, id: number, now: Date): string {
+  db.prepare('UPDATE bookings SET lost_since = ? WHERE id = ? AND lost_since IS NULL').run(now.toISOString(), id);
+  return (db.prepare('SELECT lost_since FROM bookings WHERE id = ?').get(id) as { lost_since: string }).lost_since;
+}
+
+/** rcon answered: the outage, if any, is over. Bookkeeping only. */
+export function noteAlive(db: DB, id: number): void {
+  db.prepare('UPDATE bookings SET lost_since = NULL, a2s_seen_at = NULL, up_alerted_at = NULL WHERE id = ? AND lost_since IS NOT NULL').run(id);
+}
+
+/** The box answered an A2S query during the outage. */
+export function noteA2s(db: DB, id: number, now: Date): void {
+  db.prepare('UPDATE bookings SET a2s_seen_at = ? WHERE id = ?').run(now.toISOString(), id);
+}
+
+/** True the first time in an outage: staff are told once that the box is up
+ *  but rcon is not answering. */
+export function markUpAlerted(db: DB, id: number, now: Date): boolean {
+  return db.prepare('UPDATE bookings SET up_alerted_at = ? WHERE id = ? AND up_alerted_at IS NULL').run(now.toISOString(), id).changes > 0;
+}
+
+export function beginRecovery(db: DB, id: number, reason: 'restart' | 'gone', now: Date): boolean {
+  return db.transaction(() => {
+    const changed = db.prepare(
+      `UPDATE bookings SET recovering_at = ?, recover_reason = ?
+        WHERE id = ? AND state IN ('ready','active') AND ending_at IS NULL AND recovering_at IS NULL AND server_id IS NOT NULL`,
+    ).run(now.toISOString(), reason, id).changes > 0;
+    if (changed) {
+      const serverId = (db.prepare('SELECT server_id FROM bookings WHERE id = ?').get(id) as { server_id: number }).server_id;
+      logEvent(db, id, null, 'recovery_started', { reason, serverId }, now);
+    }
+    return changed;
+  })();
+}
+
+/** The box is gone (plan 5 ruling 4): the booking lets go of it and waits for
+ *  another, and the box goes offline so nothing else is handed it. Returns
+ *  the box given up, or null when there was nothing to give up. */
+export function dropBox(db: DB, id: number, now: Date): number | null {
+  return db.transaction(() => {
+    const b = db.prepare("SELECT server_id FROM bookings WHERE id = ? AND recovering_at IS NOT NULL AND ending_at IS NULL AND server_id IS NOT NULL")
+      .get(id) as { server_id: number } | undefined;
+    if (!b) return null;
+    db.prepare('UPDATE bookings SET server_id = NULL, waiting_since = ? WHERE id = ?').run(now.toISOString(), id);
+    db.prepare("UPDATE servers SET status = 'offline', gone_since = ? WHERE id = ?").run(now.toISOString(), b.server_id);
+    logEvent(db, id, null, 'box_dropped', { serverId: b.server_id }, now);
+    return b.server_id;
+  })();
+}
+
+/** A waiting booking takes another box: idle, enabled, held by nothing. The
+ *  live game (if any) moves with it, so the dump is pulled from the right box. */
+export function reholdBox(db: DB, id: number, serverId: number, now: Date): boolean {
+  return db.transaction(() => {
+    const changed = db.prepare(
+      `UPDATE bookings SET server_id = ?, waiting_since = NULL
+        WHERE id = ? AND server_id IS NULL AND waiting_since IS NOT NULL AND recovering_at IS NOT NULL AND ending_at IS NULL
+          AND ? IN (SELECT id FROM servers WHERE status = 'idle' AND enabled = 1 AND ${NOT_HELD_SQL})`,
+    ).run(serverId, id, serverId).changes > 0;
+    if (!changed) return false;
+    db.prepare("UPDATE matches SET server_id = ? WHERE booking_id = ? AND state = 'live'").run(serverId, id);
+    logEvent(db, id, null, 'box_moved', { serverId }, now);
+    return true;
+  })();
+}
+
+/** The recovery is done: the outage fields clear and the idle clock restarts,
+ *  since everyone is reconnecting (Review Focus: no idle end right after). */
+export function finishRecovery(db: DB, id: number, now: Date): boolean {
+  return db.transaction(() => {
+    const changed = db.prepare(
+      `UPDATE bookings SET recovering_at = NULL, recover_reason = NULL, lost_since = NULL, a2s_seen_at = NULL,
+              up_alerted_at = NULL, waiting_since = NULL, recoveries = recoveries + 1, last_human_at = ?
+        WHERE id = ? AND recovering_at IS NOT NULL AND server_id IS NOT NULL`,
+    ).run(now.toISOString(), id).changes > 0;
+    if (changed) logEvent(db, id, null, 'recovered', {}, now);
+    return changed;
+  })();
 }
 
 // ---------- views ----------

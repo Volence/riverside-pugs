@@ -1215,6 +1215,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // someone who is not on the list, and how long a kicked one stays out.
   booking_allow_grace_seconds: '60',
   booking_allow_block_minutes: '30',
+  booking_gone_minutes: '3',
+  booking_recover_wait_minutes: '20',
   // Scrim board plan 1: campaigns the accepting captain may add on top of the
   // poster's list.
   scrim_accept_campaigns_max: '2',
@@ -1997,6 +1999,23 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'booking_sides', 'excused_at', 'TEXT');
   ensureColumn(db, 'booking_sides', 'excused_by', 'TEXT');
   ensureColumn(db, 'booking_sides', 'excuse_note', 'TEXT');
+  // Crash recovery (plan 5). recovering_at: a recovery is running (same box
+  // after an srcds restart, or a move). lost_since / a2s_seen_at /
+  // up_alerted_at: the current outage, cleared once rcon answers again.
+  // waiting_since: the box was given up and the booking waits for another.
+  ensureColumn(db, 'bookings', 'recovering_at', 'TEXT');
+  ensureColumn(db, 'bookings', 'recover_reason', "TEXT CHECK (recover_reason IN ('restart','gone'))");
+  ensureColumn(db, 'bookings', 'lost_since', 'TEXT');
+  ensureColumn(db, 'bookings', 'a2s_seen_at', 'TEXT');
+  ensureColumn(db, 'bookings', 'up_alerted_at', 'TEXT');
+  ensureColumn(db, 'bookings', 'recoveries', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'bookings', 'waiting_since', 'TEXT');
+  // The ordinal of the map a restored booking game was replayed from: its
+  // player stats cover only that map on (plan 5 ruling 2). Null: never restored.
+  ensureColumn(db, 'matches', 'restored_at_map', 'INTEGER');
+  // A box a booking judged gone (plan 5 ruling 4): offline until it answers
+  // rcon twice in a row, then the runner puts it back to idle by itself.
+  ensureColumn(db, 'servers', 'gone_since', 'TEXT');
   // Bookings by campaign: a booking is games_allowed campaigns, and ends_at
   // only holds the estimated slot. close_at is the "gg" grace deadline once
   // the last allowed campaign has finished, null when none is running. A

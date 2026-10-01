@@ -177,6 +177,7 @@ describe('bookings due', () => {
     expect(bookingLimits(db)).toEqual({
       minMinutes: 60, daysAhead: 14, playlistMax: 4, maxUpcoming: 4, reserve: 2,
       holdLeadMinutes: 15, protectMinutes: 75, idleEndMinutes: 10,
+      goneMinutes: 3, recoverWaitMinutes: 20,
     });
   });
 });
