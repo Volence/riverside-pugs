@@ -121,6 +121,20 @@ describe('join link', () => {
 });
 
 describe('staff', () => {
+  it('a staff no-op (captain already captain, rename to the same name) is not audited', async () => {
+    const slug = await create(P[0], 'Rats', 'RR');
+    expect((await call('POST', `/api/teams/${slug}/captain`, MOD, { steamid: P[0] })).statusCode).toBe(200);
+    expect((await call('POST', `/api/teams/${slug}/rename`, MOD, { name: 'Rats', tag: 'RR' })).statusCode).toBe(200);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action LIKE 'team_%'").get()).toEqual({ n: 0 });
+  });
+
+  it('player search leaves out banned players', async () => {
+    db.prepare("INSERT INTO bans (player_id, reason, created_by, created_at) VALUES (?, 'x', ?, '2026-09-01T00:00:00.000Z')").run(P[2], ADMIN);
+    const names = (await call('GET', '/api/teams/player-search?q=player', P[0])).json().players.map((p: { name: string }) => p.name);
+    expect(names).toContain('player1');
+    expect(names).not.toContain('player2');
+  });
+
   it('a mod renames and disbands a team they are not on, and both land in the audit log', async () => {
     const slug = await create(P[0], 'Rats', 'RR');
     expect((await call('POST', `/api/teams/${slug}/rename`, P[1], { name: 'Nope' })).statusCode).toBe(403);

@@ -473,6 +473,19 @@ describe('mergePlayers', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM player_steam_signals').get()).toEqual({ n: 0 });
   });
 
+  it('closes an invite the survivor holds to a team the merge made them a member of', () => {
+    const t = Number(db.prepare(
+      `INSERT INTO teams (name, name_key, tag, tag_key, slug, captain_steamid, created_by)
+       VALUES ('Rats', 'rats', 'RR', 'RR', 'rats', ?, ?)`,
+    ).run(OTHER, OTHER).lastInsertRowid);
+    db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, 'captain', '2026-09-30'), (?, ?, 'member', '2026-09-30')")
+      .run(t, OTHER, t, ALT);
+    db.prepare("INSERT INTO team_invites (team_id, steamid, invited_by, created_at) VALUES (?, ?, ?, '2026-09-30')").run(t, MAIN, OTHER);
+    mergePlayers(db, { from: ALT, into: MAIN });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM team_invites WHERE team_id = ? AND responded_at IS NULL').get(t)).toEqual({ n: 0 });
+    expect(db.prepare('SELECT role FROM team_members WHERE team_id = ? AND steamid = ? AND left_at IS NULL').get(t, MAIN)).toEqual({ role: 'member' });
+  });
+
   it('moves team rows, closing the alt membership where both are on one team, and keeps the captaincy', () => {
     const t = Number(db.prepare(
       `INSERT INTO teams (name, name_key, tag, tag_key, slug, captain_steamid, created_by)

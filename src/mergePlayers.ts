@@ -326,6 +326,11 @@ export function mergePlayers(
       db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`).run(into, from);
     }
 
+    // The alt's membership (or invite) is now the survivor's: an open invite
+    // to a team the survivor is on is moot, and would show as both.
+    db.prepare(`UPDATE team_invites SET responded_at = ?, response = 'cancelled' WHERE steamid = ? AND responded_at IS NULL
+      AND team_id IN (SELECT team_id FROM team_members WHERE steamid = ? AND left_at IS NULL)`).run(teamsNow, into, into);
+
     // A captain alt whose membership was closed above: teams.captain_steamid
     // has just moved to the survivor, whose own row still says member.
     db.prepare(`UPDATE team_members SET role = 'captain' WHERE steamid = ? AND left_at IS NULL

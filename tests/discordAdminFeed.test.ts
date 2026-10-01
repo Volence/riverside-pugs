@@ -44,6 +44,24 @@ const settled = async () => { await sync.idle(); await feed.idle(); };
 const inFeed = () => t.live().filter((m) => m.channelId === 'admins');
 
 describe('admin feed', () => {
+  it('team actions read as sentences with the team linked', async () => {
+    const team = Number(db.prepare(
+      `INSERT INTO teams (name, name_key, tag, tag_key, slug, captain_steamid, created_by) VALUES ('Rats', 'rats', 'RR', 'RR', 'rats', ?, ?)`,
+    ).run(IDS[1], IDS[1]).lastInsertRowid);
+    logAdmin(db, ADMIN, 'team_captain', team, { slug: 'rats', to: IDS[2] });
+    logAdmin(db, ADMIN, 'team_rename', team, { slug: 'rats', from: { name: 'Mice', tag: 'MM' }, to: { name: 'Rats', tag: 'RR' } });
+    logAdmin(db, ADMIN, 'team_logo', team, { slug: 'rats', logoKey: 'abc' });
+    logAdmin(db, ADMIN, 'team_disband', team, { slug: 'rats', name: 'Rats' });
+    await settled();
+    const lines = inFeed().map((m) => JSON.stringify(m.payload));
+    expect(lines[0]).toContain('captain of [**Rats**](https://pug.test/team/rats)');
+    expect(lines[0]).toContain('player2');
+    expect(lines[1]).toContain('renamed **[MM] Mice** to [**[RR] Rats**](https://pug.test/team/rats)');
+    expect(lines[2]).toContain('changed the logo of [**Rats**](https://pug.test/team/rats)');
+    expect(lines[3]).toContain('disbanded [**Rats**](https://pug.test/team/rats)');
+    for (const l of lines) expect(l).not.toMatch(/team (captain|rename|logo|disband) \d/);
+  });
+
   it('a note shows its text, quoted and escaped, but not when the note is about staff', async () => {
     logAdmin(db, ADMIN, 'note', IDS[2], { text: 'went afk twice\nsaid sorry after **no ping** @everyone' });
     await settled();

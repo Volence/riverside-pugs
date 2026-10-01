@@ -1361,6 +1361,9 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'servers', 'log_auth', "TEXT NOT NULL DEFAULT 'off'");
   ensureColumn(db, 'servers', 'log_auth_boot', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'servers', 'log_auth_seq', 'INTEGER NOT NULL DEFAULT 0');
+  // Why a membership ended, where it matters: 'kicked' keeps that player
+  // from rejoining through the team's join link (src/teams/teams.ts).
+  ensureColumn(db, 'team_members', 'left_reason', 'TEXT');
   // Moderators: may work tickets and nothing else. Deliberately not read by
   // serverAdmins.ts, so the flag grants nothing on a game server.
   ensureColumn(db, 'players', 'is_mod', 'INTEGER NOT NULL DEFAULT 0');

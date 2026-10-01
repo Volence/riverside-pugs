@@ -92,7 +92,7 @@ describe('createTeam', () => {
   });
 
   it('a name that slugs to nothing or to a reserved word gets a usable slug', () => {
-    expect(make(P[0], '!!!', 'AA').slug).toBe('team');
+    expect(make(P[0], 'Крысы', 'AA').slug).toBe('team');
     expect(make(P[1], 'Mine', 'BB').slug).toBe('mine-2');
   });
 
@@ -225,6 +225,32 @@ describe('join link', () => {
     if (!link.ok) throw new Error('link');
     joinByLink(db, { token: link.value.token!, steamid: P[1] });
     expect(openInvitesOf(db, id)).toEqual([]);
+  });
+});
+
+describe('polish', () => {
+  it('refuses a name with no letter or digit in it (braille blanks, punctuation only)', () => {
+    expect(normalizeName('\u2800\u2800\u2800')).toEqual({ ok: false, error: 'bad_name' });
+    expect(normalizeName('!!! ...')).toEqual({ ok: false, error: 'bad_name' });
+    expect(normalizeName('x\u2800y').ok).toBe(true);
+  });
+
+  it('a kicked player cannot walk back in through the join link, but an invite still works', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    const link = setJoinLink(db, { teamId: id, by: P[0], on: true });
+    if (!link.ok) throw new Error('link');
+    const token = link.value.token!;
+    joinByLink(db, { token, steamid: P[1] });
+    joinByLink(db, { token, steamid: P[2] });
+    kickMember(db, { teamId: id, by: P[0], target: P[1] });
+    leaveTeam(db, { teamId: id, steamid: P[2] });
+    expect(joinByLink(db, { token, steamid: P[1] })).toEqual({ ok: false, error: 'kicked' });
+    expect(joinByLink(db, { token, steamid: P[2] }).ok).toBe(true); // left on their own: welcome back
+    const inv = invitePlayer(db, { teamId: id, by: P[0], target: P[1] });
+    if (!inv.ok) throw new Error(inv.error);
+    expect(respondInvite(db, { inviteId: inv.value.inviteId, steamid: P[1], accept: true }).ok).toBe(true);
+    leaveTeam(db, { teamId: id, steamid: P[1] });
+    expect(joinByLink(db, { token, steamid: P[1] }).ok).toBe(true); // the latest exit was their own
   });
 });
 

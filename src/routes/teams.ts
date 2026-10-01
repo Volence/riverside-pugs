@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DB } from '../db.js';
 import { getPlayer } from '../players.js';
 import { logAdmin } from '../admin/audit.js';
+import { inGoodStanding } from '../standing.js';
 import { makeOptionalViewer, makeRequireActive } from './guards.js';
 import { competitiveAccess, competitivePublic } from '../teams/access.js';
 import * as T from '../teams/teams.js';
@@ -96,10 +97,12 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
     if (!allowedActive(req, reply)) return;
     const q = String((req.query as { q?: unknown }).q ?? '').trim();
     if (q.length < 2) return { players: [] };
+    // A few extra rows, so banned or merged accounts dropped by
+    // inGoodStanding still leave ten to show.
     const rows = db.prepare(
-      `SELECT steamid, name, avatar FROM players WHERE status = 'active' AND lower(name) LIKE ? ESCAPE '\\' ORDER BY lower(name) LIMIT 10`,
+      `SELECT steamid, name, avatar FROM players WHERE status = 'active' AND lower(name) LIKE ? ESCAPE '\\' ORDER BY lower(name) LIMIT 30`,
     ).all(`${q.toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`)}%`) as { steamid: string; name: string; avatar: string | null }[];
-    return { players: rows };
+    return { players: rows.filter((r) => inGoodStanding(db, r.steamid)).slice(0, 10) };
   });
 
   app.post('/api/teams', async (req, reply) => {
@@ -256,7 +259,8 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
     const target = String(((req.body ?? {}) as { steamid?: unknown }).steamid ?? '');
     const r = T.transferCaptain(db, { teamId: t.id, by: me, target, staff: isStaff(me) });
     if (!r.ok) return refuse(reply, r.error);
-    auditStaff(me, ownRole, t, 'team_captain', { to: target });
+    // Handing the captaincy to the captain changes nothing: not audited.
+    if (t.captain_steamid !== target) auditStaff(me, ownRole, t, 'team_captain', { to: target });
     return {};
   });
 
@@ -269,7 +273,9 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
     const { name, tag } = (req.body ?? {}) as { name?: unknown; tag?: unknown };
     const r = T.renameTeam(db, { teamId: t.id, by: me, staff: isStaff(me), name, tag });
     if (!r.ok) return refuse(reply, r.error);
-    auditStaff(me, ownRole, t, 'team_rename', { from: { name: t.name, tag: t.tag }, to: r.value });
+    if (r.value.name !== t.name || r.value.tag !== t.tag) {
+      auditStaff(me, ownRole, t, 'team_rename', { from: { name: t.name, tag: t.tag }, to: r.value });
+    }
     return r.value;
   });
 

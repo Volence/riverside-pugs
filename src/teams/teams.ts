@@ -58,6 +58,7 @@ export const TEAM_ERRORS = {
   not_open: { status: 409, text: 'That player cannot use teams yet.' },
   invite_closed: { status: 410, text: 'That invite is no longer open.' },
   link_off: { status: 404, text: 'That join link is turned off or was replaced.' },
+  kicked: { status: 403, text: 'You were removed from this team. Ask the captain for an invite.' },
   is_captain: { status: 400, text: 'Hand the captaincy over first.' },
   bad_role: { status: 400, text: 'A role is cocaptain or member.' },
 } as const satisfies Record<string, { status: number; text: string }>;
@@ -81,7 +82,9 @@ const DEFAULT_IGNORABLE = /\p{Default_Ignorable_Code_Point}/u;
 export function normalizeName(raw: unknown): { ok: true; name: string; key: string } | { ok: false; error: TeamError } {
   if (typeof raw !== 'string') return fail('bad_name');
   const name = raw.normalize('NFC').trim().replace(/\s+/g, ' ');
-  if (name.length < NAME_MIN || name.length > NAME_MAX || hasUnsafeChars(name) || DEFAULT_IGNORABLE.test(name)) {
+  // At least one letter or digit: U+2800 (braille blank) and friends are not
+  // default-ignorable, so a name of only those still looked blank.
+  if (name.length < NAME_MIN || name.length > NAME_MAX || hasUnsafeChars(name) || DEFAULT_IGNORABLE.test(name) || !/[\p{L}\p{N}]/u.test(name)) {
     return fail('bad_name');
   }
   if (findSlurs(name).length > 0) return fail('name_not_allowed');
@@ -344,6 +347,12 @@ export function joinByLink(db: DB, o: { token: string; steamid: string; now?: Da
   return db.transaction((): Result<{ slug: string }> => {
     const team = teamByJoinToken(db, o.token);
     if (!team) return fail('link_off');
+    // A link shared in Discord stays on after a kick; the kicked player must
+    // not be able to walk straight back in. Only their latest exit counts, so
+    // someone re-invited after a kick who later leaves on their own may.
+    const last = db.prepare('SELECT left_reason FROM team_members WHERE team_id = ? AND steamid = ? ORDER BY id DESC LIMIT 1')
+      .get(team.id, o.steamid) as { left_reason: string | null } | undefined;
+    if (last?.left_reason === 'kicked') return fail('kicked');
     const added = addMember(db, team, o.steamid, now);
     if (!added.ok) return added;
     return ok({ slug: team.slug });
@@ -401,7 +410,7 @@ export function kickMember(
     if (!theirs) return fail('not_member');
     if (theirs === 'captain') return fail(o.target === o.by ? 'is_captain' : 'not_allowed');
     if (mine === 'cocaptain' && theirs !== 'member') return fail('not_allowed');
-    db.prepare('UPDATE team_members SET left_at = ? WHERE team_id = ? AND steamid = ? AND left_at IS NULL').run(now, team.id, o.target);
+    db.prepare("UPDATE team_members SET left_at = ?, left_reason = 'kicked' WHERE team_id = ? AND steamid = ? AND left_at IS NULL").run(now, team.id, o.target);
     return ok(settleCaptaincy(db, team.id, now));
   })();
 }
