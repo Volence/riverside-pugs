@@ -27,6 +27,20 @@
  * "Sent to the site" only when the box has its log secret; without one the
  * site cannot verify the line, so the captain is pointed at the booking page.
  *
+ * 1.2.0: a booked server lets in only its people and staff. The site pushes
+ * the booking's allowlist (each side's players, ringers and approved
+ * spectators, plus staff) as sm_booking_allow_begin, sm_booking_allow_add
+ * <id64...> and sm_booking_allow_commit; the list is staged and swapped in
+ * whole on commit, so a push cut short leaves the last committed list in
+ * force. Anyone else who joins (not a bot, not SourceTV, not a SourceMod
+ * admin) gets l4d_booking_grace seconds for a captain to type
+ * !allow <name>, which adds them at once and tells the site (cmd=allow).
+ * When the grace runs out they are kicked and blocked from this box for
+ * l4d_booking_block minutes; a commit that carries their id lifts the block.
+ * Grace and block are kept per SteamID64, so a reconnect or a map change
+ * cannot reset them. Nothing is enforced until the box is booked and a list
+ * has been committed.
+ *
  * Build: ./build-booking.sh
  */
 #pragma semicolon 1
@@ -34,7 +48,7 @@
 #include <sourcemod>
 #include "pug-logauth.inc"
 
-#define PLUGIN_VERSION "1.1.1"
+#define PLUGIN_VERSION "1.2.0"
 
 /** Longest arg= text on a PUGBOOK line, plus the null terminator. Matches
  *  the site parser's cap (Task 6). */
@@ -44,6 +58,20 @@ ConVar g_cvPassword;
 ConVar g_cvTvPassword;
 ConVar g_cvNotice;
 ConVar g_cvCaptains;
+ConVar g_cvGrace;
+ConVar g_cvBlock;
+
+/** The committed allowlist (SteamID64 -> true) and whether one has ever been
+ *  committed. Plugin globals survive map changes; an srcds restart (every
+ *  booking ends with one) empties them. */
+StringMap g_hAllowed;
+bool g_bListLoaded;
+/** The list being staged between begin and commit; null when none is. */
+StringMap g_hStaged;
+/** SteamID64 -> GetTime() deadline of a running grace. */
+StringMap g_hGrace;
+/** SteamID64 -> GetTime() a block ends. */
+StringMap g_hBlocked;
 
 /** The four captain chat commands, chat form (leading '!', as typed) and the
  *  bare cmd= word the PUGBOOK line uses. Parallel arrays, same order. */
@@ -60,17 +88,30 @@ public Plugin myinfo = {
 
 public void OnPluginStart()
 {
-	CreateConVar("l4d_booking_version", PLUGIN_VERSION, "L4D1 Booked Server version", FCVAR_NOTIFY | FCVAR_DONTRECORD);
+	// SetString: a cvar left by an earlier load keeps its old value otherwise.
+	CreateConVar("l4d_booking_version", PLUGIN_VERSION, "L4D1 Booked Server version", FCVAR_NOTIFY | FCVAR_DONTRECORD).SetString(PLUGIN_VERSION);
 	g_cvPassword = CreateConVar("l4d_booking_password", "", "The booking's sv_password; empty when the box is not booked.", FCVAR_PROTECTED | FCVAR_DONTRECORD);
 	g_cvTvPassword = CreateConVar("l4d_booking_tv_password", "", "The booking's SourceTV password.", FCVAR_PROTECTED | FCVAR_DONTRECORD);
 	g_cvNotice = CreateConVar("l4d_booking_notice", "", "Ready-up panel line for the booking.", FCVAR_DONTRECORD);
 	g_cvCaptains = CreateConVar("l4d_booking_captains", "", "Comma-separated SteamID64s of this booking's captains.", FCVAR_DONTRECORD);
+	g_cvGrace = CreateConVar("l4d_booking_grace", "60", "Seconds a captain has to !allow someone who is not on the booking.", FCVAR_DONTRECORD, true, 1.0);
+	g_cvBlock = CreateConVar("l4d_booking_block", "30", "Minutes someone kicked for not being on the booking stays out; 0 for no block.", FCVAR_DONTRECORD, true, 0.0);
 	g_cvPassword.AddChangeHook(OnBookingCvarChanged);
 	g_cvTvPassword.AddChangeHook(OnBookingCvarChanged);
 	g_cvNotice.AddChangeHook(OnBookingCvarChanged);
 
 	PugLogAuth_Init();
 	RegServerCmd("sm_booking_cmd", Cmd_BookingCmd, "sm_booking_cmd <steamid64> <cmd> [arg...] - emit a PUGBOOK line without the captain check, for testing and staff");
+
+	g_hAllowed = new StringMap();
+	g_hGrace = new StringMap();
+	g_hBlocked = new StringMap();
+	RegServerCmd("sm_booking_allow_begin", Cmd_AllowBegin, "sm_booking_allow_begin - start staging a new allowlist");
+	RegServerCmd("sm_booking_allow_add", Cmd_AllowAdd, "sm_booking_allow_add <steamid64> [steamid64...] - add ids to the staged allowlist");
+	RegServerCmd("sm_booking_allow_commit", Cmd_AllowCommit, "sm_booking_allow_commit - make the staged allowlist the active one");
+	RegServerCmd("sm_booking_status", Cmd_BookingStatus, "sm_booking_status - whether a list is loaded, its size, running graces and blocks");
+	// No TIMER_FLAG_NO_MAPCHANGE: graces keep running through a map change.
+	CreateTimer(1.0, Timer_Graces, _, TIMER_REPEAT);
 }
 
 public void OnConfigsExecuted()
@@ -124,6 +165,15 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 
 	char chatWord[16];
 	int pos = BreakString(text, chatWord, sizeof(chatWord));
+
+	if (strcmp(chatWord, "!allow", false) == 0)
+	{
+		char rest[256];
+		if (pos == -1) rest[0] = '\0';
+		else strcopy(rest, sizeof(rest), text[pos]);
+		ChatAllow(client, rest);
+		return Plugin_Continue;
+	}
 
 	int idx = -1;
 	for (int i = 0; i < sizeof(g_sChatWords); i++)
@@ -261,4 +311,259 @@ void SanitizeBookingArg(const char[] raw, char[] out, int maxlen)
 		out[w++] = c;
 	}
 	out[w] = '\0';
+}
+
+// ---------- allowlist (1.2.0) ----------
+
+/** Enforcement is live only on a booked box with a committed list. */
+bool Enforcing()
+{
+	if (!g_bListLoaded) return false;
+	char pw[64];
+	g_cvPassword.GetString(pw, sizeof(pw));
+	return pw[0] != '\0';
+}
+
+bool IsAllowed(const char[] id64)
+{
+	bool v;
+	return g_hAllowed.GetValue(id64, v);
+}
+
+public Action Cmd_AllowBegin(int args)
+{
+	delete g_hStaged;
+	g_hStaged = new StringMap();
+	PrintToServer("PUGOK booking allow begin");
+	return Plugin_Handled;
+}
+
+public Action Cmd_AllowAdd(int args)
+{
+	if (g_hStaged == null)
+	{
+		PrintToServer("PUGERR booking allow add without begin");
+		return Plugin_Handled;
+	}
+	int added = 0, skipped = 0;
+	char id[32];
+	for (int i = 1; i <= args; i++)
+	{
+		GetCmdArg(i, id, sizeof(id));
+		if (!IsSteamId64(id)) { skipped++; continue; }
+		g_hStaged.SetValue(id, true);
+		added++;
+	}
+	PrintToServer("PUGOK booking allow add added=%d skipped=%d", added, skipped);
+	return Plugin_Handled;
+}
+
+public Action Cmd_AllowCommit(int args)
+{
+	if (g_hStaged == null)
+	{
+		PrintToServer("PUGERR booking allow commit without begin");
+		return Plugin_Handled;
+	}
+	delete g_hAllowed;
+	g_hAllowed = g_hStaged;
+	g_hStaged = null;
+	g_bListLoaded = true;
+
+	// Someone now on the list is neither blocked nor waiting.
+	int lifted = DropListed(g_hBlocked);
+	DropListed(g_hGrace);
+	PrintToServer("PUGOK booking allow commit ids=%d lifted=%d", g_hAllowed.Size, lifted);
+	return Plugin_Handled;
+}
+
+/** Removes every key of `map` that is on the active list; returns how many. */
+int DropListed(StringMap map)
+{
+	StringMapSnapshot snap = map.Snapshot();
+	int dropped = 0;
+	char id[32];
+	for (int i = 0; i < snap.Length; i++)
+	{
+		snap.GetKey(i, id, sizeof(id));
+		if (IsAllowed(id)) { map.Remove(id); dropped++; }
+	}
+	delete snap;
+	return dropped;
+}
+
+/** Counts and times only, never the ids. */
+public Action Cmd_BookingStatus(int args)
+{
+	char pw[64];
+	g_cvPassword.GetString(pw, sizeof(pw));
+	PrintToServer("PUGOK booking status booked=%d loaded=%d ids=%d staged=%d graces=%d blocks=%d",
+		pw[0] != '\0', g_bListLoaded, g_hAllowed.Size, g_hStaged == null ? -1 : g_hStaged.Size, g_hGrace.Size, g_hBlocked.Size);
+
+	int now = GetTime();
+	char id[32], name[MAX_NAME_LENGTH];
+	int until;
+	StringMapSnapshot snap = g_hGrace.Snapshot();
+	for (int i = 0; i < snap.Length; i++)
+	{
+		snap.GetKey(i, id, sizeof(id));
+		g_hGrace.GetValue(id, until);
+		int client = FindClientById(id);
+		if (client > 0) GetClientName(client, name, sizeof(name));
+		else strcopy(name, sizeof(name), "(not connected)");
+		PrintToServer("grace: %s %ds left", name, until - now);
+	}
+	delete snap;
+	snap = g_hBlocked.Snapshot();
+	for (int i = 0; i < snap.Length; i++)
+	{
+		snap.GetKey(i, id, sizeof(id));
+		g_hBlocked.GetValue(id, until);
+		PrintToServer("block: %ds left", until - now);
+	}
+	delete snap;
+	return Plugin_Handled;
+}
+
+/** Runs on every connect, map changes included (clients re-run admin checks
+ *  on each map), which is why a grace already running is kept, not restarted. */
+public void OnClientPostAdminCheck(int client)
+{
+	if (!Enforcing()) return;
+	if (IsFakeClient(client) || IsClientSourceTV(client) || IsClientReplay(client)) return;
+	if (GetUserAdmin(client) != INVALID_ADMIN_ID) return;
+
+	char id[32];
+	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id)) || !IsSteamId64(id)) return;
+	if (IsAllowed(id)) return;
+
+	int now = GetTime();
+	int until;
+	if (g_hBlocked.GetValue(id, until))
+	{
+		if (until > now)
+		{
+			KickClient(client, "This server is booked. You were not let in a few minutes ago; ask a captain to add you on the site.");
+			return;
+		}
+		g_hBlocked.Remove(id);
+	}
+
+	if (g_hGrace.GetValue(id, until))
+	{
+		// Back from a reconnect or a map change: the same grace runs on.
+		PrintToChat(client, "[Booking] This server is booked. A captain has %d seconds to let you in.", until - now > 0 ? until - now : 0);
+		return;
+	}
+
+	int grace = g_cvGrace.IntValue;
+	g_hGrace.SetValue(id, now + grace);
+	char name[MAX_NAME_LENGTH];
+	GetClientName(client, name, sizeof(name));
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsClientInGame(i) || IsFakeClient(i)) continue;
+		char cid[32];
+		if (!GetClientAuthId(i, AuthId_SteamID64, cid, sizeof(cid)) || !IsCaptain(cid)) continue;
+		PrintToChat(i, "[Booking] %s joined and is not on the booking. Type !allow %s within %d seconds to let them play as a ringer.", name, name, grace);
+	}
+	PrintToChat(client, "[Booking] This server is booked. A captain has %d seconds to let you in.", grace);
+}
+
+/** Once a second: an expired grace ends in a kick and a block. A grace whose
+ *  owner has left still ends in a block, so leaving and rejoining after the
+ *  window cannot buy a fresh one. */
+public Action Timer_Graces(Handle timer)
+{
+	if (g_hGrace.Size == 0) return Plugin_Continue;
+	if (!Enforcing())
+	{
+		g_hGrace.Clear();
+		return Plugin_Continue;
+	}
+	int now = GetTime();
+	int until;
+	char id[32];
+	StringMapSnapshot snap = g_hGrace.Snapshot();
+	for (int i = 0; i < snap.Length; i++)
+	{
+		snap.GetKey(i, id, sizeof(id));
+		if (!g_hGrace.GetValue(id, until) || until > now) continue;
+		g_hGrace.Remove(id);
+		if (IsAllowed(id)) continue;
+		int minutes = g_cvBlock.IntValue;
+		if (minutes > 0) g_hBlocked.SetValue(id, now + minutes * 60);
+		int client = FindClientById(id);
+		if (client > 0) KickClient(client, "This server is booked. Ask a captain to add you to the booking on the site.");
+	}
+	delete snap;
+	return Plugin_Continue;
+}
+
+/** The connected human with this SteamID64, or 0. */
+int FindClientById(const char[] id64)
+{
+	char id[32];
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsClientConnected(i) || IsFakeClient(i)) continue;
+		if (!GetClientAuthId(i, AuthId_SteamID64, id, sizeof(id))) continue;
+		if (strcmp(id, id64) == 0) return i;
+	}
+	return 0;
+}
+
+/** !allow <name> from chat: one waiting player, matched case-insensitively
+ *  by substring, is added to the active list at once and the site is told. */
+void ChatAllow(int client, const char[] rawQuery)
+{
+	if (client < 1 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client)) return;
+	char by[32];
+	if (!GetClientAuthId(client, AuthId_SteamID64, by, sizeof(by))) return;
+	if (!IsCaptain(by))
+	{
+		PrintToChat(client, "[Booking] Only a captain can do that.");
+		return;
+	}
+
+	char query[MAX_NAME_LENGTH];
+	strcopy(query, sizeof(query), rawQuery);
+	TrimString(query);
+
+	int match = 0, found = 0;
+	char id[32], name[MAX_NAME_LENGTH];
+	int until;
+	if (query[0] != '\0')
+	{
+		for (int i = 1; i <= MaxClients; i++)
+		{
+			if (!IsClientConnected(i) || IsFakeClient(i)) continue;
+			if (!GetClientAuthId(i, AuthId_SteamID64, id, sizeof(id)) || !g_hGrace.GetValue(id, until)) continue;
+			GetClientName(i, name, sizeof(name));
+			if (StrContains(name, query, false) == -1) continue;
+			match = i;
+			found++;
+		}
+	}
+	if (found == 0)
+	{
+		PrintToChat(client, "[Booking] No one waiting matches that name.");
+		return;
+	}
+	if (found > 1)
+	{
+		PrintToChat(client, "[Booking] More than one player matches; type more of the name.");
+		return;
+	}
+
+	GetClientAuthId(match, AuthId_SteamID64, id, sizeof(id));
+	GetClientName(match, name, sizeof(name));
+	g_hAllowed.SetValue(id, true);
+	g_hGrace.Remove(id);
+	g_hBlocked.Remove(id);
+
+	char arg[256];
+	Format(arg, sizeof(arg), "%s %s", id, name);
+	EmitBookingCmd(by, "allow", arg);
+	if (!HasLogSecret()) PrintToChat(client, "[Booking] The site cannot hear this server right now; use the booking page.");
 }
