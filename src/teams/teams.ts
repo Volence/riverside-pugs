@@ -1,7 +1,10 @@
+import { randomBytes } from 'node:crypto';
 import type { DB } from '../db.js';
 import { findSlurs } from '../slurs.js';
 import { hasUnsafeChars } from '../profileFields.js';
 import { settingNumber } from '../settings.js';
+import { inGoodStanding } from '../standing.js';
+import { getPlayer } from '../players.js';
 
 /**
  * Every rule about teams (spec part 1, section 2). The routes and the Discord
@@ -189,5 +192,129 @@ export function createTeam(
     ).run(n.name, n.key, t.tag, t.key, slug, o.creator, o.creator, now).lastInsertRowid);
     db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, 'captain', ?)").run(id, o.creator, now);
     return ok({ id, slug });
+  })();
+}
+
+export interface InviteRow {
+  id: number; team_id: number; steamid: string; invited_by: string; created_at: string;
+  responded_at: string | null; response: 'accepted' | 'declined' | 'cancelled' | null;
+}
+
+const isManager = (role: TeamRole | null): boolean => role === 'captain' || role === 'cocaptain';
+
+function liveTeam(db: DB, teamId: number): TeamRow | null {
+  const t = getTeam(db, teamId);
+  return t && !t.disbanded_at ? t : null;
+}
+
+export function getInvite(db: DB, id: number): InviteRow | undefined {
+  return db.prepare('SELECT * FROM team_invites WHERE id = ?').get(id) as InviteRow | undefined;
+}
+
+export function openInvitesOf(db: DB, teamId: number): InviteRow[] {
+  return db.prepare('SELECT * FROM team_invites WHERE team_id = ? AND responded_at IS NULL ORDER BY id').all(teamId) as InviteRow[];
+}
+
+export function pendingInvitesFor(db: DB, steamid: string): (InviteRow & { slug: string; name: string; tag: string })[] {
+  return db.prepare(
+    `SELECT i.*, t.slug, t.name, t.tag FROM team_invites i JOIN teams t ON t.id = i.team_id
+      WHERE i.steamid = ? AND i.responded_at IS NULL AND t.disbanded_at IS NULL ORDER BY i.id`,
+  ).all(steamid) as (InviteRow & { slug: string; name: string; tag: string })[];
+}
+
+/** Add a player to a live team as a member, with every joining rule. Also
+ *  closes any open invite they had to this team. Call inside a transaction. */
+function addMember(db: DB, team: TeamRow, steamid: string, now: string): Result<null> {
+  if (roleOf(db, team.id, steamid)) return fail('already_member');
+  if (!getPlayer(db, steamid) || !inGoodStanding(db, steamid)) return fail('not_player');
+  if (rosterSize(db, team.id) >= ROSTER_MAX) return fail('roster_full');
+  if (activeMembershipCount(db, steamid) >= membershipCap(db)) return fail('your_cap');
+  db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, 'member', ?)").run(team.id, steamid, now);
+  db.prepare("UPDATE team_invites SET responded_at = ?, response = 'accepted' WHERE team_id = ? AND steamid = ? AND responded_at IS NULL")
+    .run(now, team.id, steamid);
+  return ok(null);
+}
+
+export function invitePlayer(
+  db: DB, o: { teamId: number; by: string; target: string; now?: Date },
+): Result<{ inviteId: number }> {
+  const now = (o.now ?? new Date()).toISOString();
+  return db.transaction((): Result<{ inviteId: number }> => {
+    const team = liveTeam(db, o.teamId);
+    if (!team) return fail('not_found');
+    if (!isManager(roleOf(db, team.id, o.by))) return fail('not_manager');
+    if (!getPlayer(db, o.target) || !inGoodStanding(db, o.target)) return fail('not_player');
+    if (roleOf(db, team.id, o.target)) return fail('already_member');
+    if (db.prepare('SELECT 1 FROM team_invites WHERE team_id = ? AND steamid = ? AND responded_at IS NULL').get(team.id, o.target)) {
+      return fail('already_invited');
+    }
+    if (rosterSize(db, team.id) >= ROSTER_MAX) return fail('roster_full');
+    if (activeMembershipCount(db, o.target) >= membershipCap(db)) return fail('their_cap');
+    const inviteId = Number(db.prepare('INSERT INTO team_invites (team_id, steamid, invited_by, created_at) VALUES (?, ?, ?, ?)')
+      .run(team.id, o.target, o.by, now).lastInsertRowid);
+    return ok({ inviteId });
+  })();
+}
+
+/** Accept or decline. A refusal at accept time (cap, roster) leaves the
+ *  invite open, so the player can make room and accept later. */
+export function respondInvite(
+  db: DB, o: { inviteId: number; steamid: string; accept: boolean; now?: Date },
+): Result<{ teamId: number; slug: string }> {
+  const now = (o.now ?? new Date()).toISOString();
+  return db.transaction((): Result<{ teamId: number; slug: string }> => {
+    const inv = getInvite(db, o.inviteId);
+    if (!inv || inv.steamid !== o.steamid) return fail('not_found');
+    if (inv.responded_at) return fail('invite_closed');
+    const team = liveTeam(db, inv.team_id);
+    if (!team) {
+      db.prepare("UPDATE team_invites SET responded_at = ?, response = 'cancelled' WHERE id = ?").run(now, inv.id);
+      return fail('invite_closed');
+    }
+    if (!o.accept) {
+      db.prepare("UPDATE team_invites SET responded_at = ?, response = 'declined' WHERE id = ?").run(now, inv.id);
+      return ok({ teamId: team.id, slug: team.slug });
+    }
+    const added = addMember(db, team, o.steamid, now);
+    if (!added.ok) return added;
+    return ok({ teamId: team.id, slug: team.slug });
+  })();
+}
+
+export function cancelInvite(db: DB, o: { inviteId: number; by: string; now?: Date }): Result<null> {
+  const now = (o.now ?? new Date()).toISOString();
+  return db.transaction((): Result<null> => {
+    const inv = getInvite(db, o.inviteId);
+    if (!inv || inv.responded_at) return fail('invite_closed');
+    if (!isManager(roleOf(db, inv.team_id, o.by))) return fail('not_manager');
+    db.prepare("UPDATE team_invites SET responded_at = ?, response = 'cancelled' WHERE id = ?").run(now, inv.id);
+    return ok(null);
+  })();
+}
+
+/** On: a fresh random token (replacing any old one). Off: none. Captain only. */
+export function setJoinLink(db: DB, o: { teamId: number; by: string; on: boolean }): Result<{ token: string | null }> {
+  return db.transaction((): Result<{ token: string | null }> => {
+    const team = liveTeam(db, o.teamId);
+    if (!team) return fail('not_found');
+    if (roleOf(db, team.id, o.by) !== 'captain') return fail('not_allowed');
+    const token = o.on ? randomBytes(16).toString('base64url') : null;
+    db.prepare('UPDATE teams SET join_link_token = ? WHERE id = ?').run(token, team.id);
+    return ok({ token });
+  })();
+}
+
+export function teamByJoinToken(db: DB, token: string): TeamRow | undefined {
+  return db.prepare('SELECT * FROM teams WHERE join_link_token = ? AND disbanded_at IS NULL').get(token) as TeamRow | undefined;
+}
+
+export function joinByLink(db: DB, o: { token: string; steamid: string; now?: Date }): Result<{ slug: string }> {
+  const now = (o.now ?? new Date()).toISOString();
+  return db.transaction((): Result<{ slug: string }> => {
+    const team = teamByJoinToken(db, o.token);
+    if (!team) return fail('link_off');
+    const added = addMember(db, team, o.steamid, now);
+    if (!added.ok) return added;
+    return ok({ slug: team.slug });
   })();
 }

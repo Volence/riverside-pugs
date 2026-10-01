@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import {
   activeMembers, canCreate, createTeam, getTeamBySlug, myTeams, normalizeName, normalizeTag, roleOf,
+  invitePlayer, respondInvite, cancelInvite, openInvitesOf, pendingInvitesFor, setJoinLink, teamByJoinToken, joinByLink,
 } from '../src/teams/teams.js';
 
 export const P = Array.from({ length: 12 }, (_, i) => `765611990000001${String(i).padStart(2, '0')}`);
@@ -85,5 +86,108 @@ describe('createTeam', () => {
     db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES ((SELECT id FROM teams WHERE slug = ?), ?, 'member', ?)")
       .run(b.slug, P[0], at(1).toISOString());
     expect(myTeams(db, P[0]).map((t) => [t.slug, t.role])).toEqual([['alpha', 'captain'], ['bravo', 'member']]);
+  });
+});
+
+describe('invites', () => {
+  const invite = (teamId: number, by: string, target: string) => {
+    const r = invitePlayer(db, { teamId, by, target, now: at(1) });
+    if (!r.ok) throw new Error(r.error);
+    return r.value.inviteId;
+  };
+
+  it('captain and co-captains invite; the player accepts and joins as a member', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    const inv = invite(id, P[0], P[1]);
+    expect(pendingInvitesFor(db, P[1]).map((i) => [i.id, i.slug])).toEqual([[inv, 'rats']]);
+    expect(respondInvite(db, { inviteId: inv, steamid: P[1], accept: true, now: at(2) })).toEqual({ ok: true, value: { teamId: id, slug: 'rats' } });
+    expect(roleOf(db, id, P[1])).toBe('member');
+    expect(pendingInvitesFor(db, P[1])).toEqual([]);
+    expect(invitePlayer(db, { teamId: id, by: P[1], target: P[2] })).toEqual({ ok: false, error: 'not_manager' });
+    db.prepare("UPDATE team_members SET role = 'cocaptain' WHERE steamid = ?").run(P[1]);
+    expect(invitePlayer(db, { teamId: id, by: P[1], target: P[2] }).ok).toBe(true);
+  });
+
+  it('refuses a duplicate invite, a member, and a player who is not active', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    invite(id, P[0], P[1]);
+    expect(invitePlayer(db, { teamId: id, by: P[0], target: P[1] })).toEqual({ ok: false, error: 'already_invited' });
+    expect(invitePlayer(db, { teamId: id, by: P[0], target: P[0] })).toEqual({ ok: false, error: 'already_member' });
+    db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(P[2]);
+    expect(invitePlayer(db, { teamId: id, by: P[0], target: P[2] })).toEqual({ ok: false, error: 'not_player' });
+    expect(invitePlayer(db, { teamId: id, by: P[0], target: '76561199999999999' })).toEqual({ ok: false, error: 'not_player' });
+  });
+
+  it('only the invited player can answer, and only once', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    const inv = invite(id, P[0], P[1]);
+    expect(respondInvite(db, { inviteId: inv, steamid: P[2], accept: true })).toEqual({ ok: false, error: 'not_found' });
+    expect(respondInvite(db, { inviteId: inv, steamid: P[1], accept: false }).ok).toBe(true);
+    expect(respondInvite(db, { inviteId: inv, steamid: P[1], accept: true })).toEqual({ ok: false, error: 'invite_closed' });
+    expect(roleOf(db, id, P[1])).toBeNull();
+  });
+
+  it('re-checks the cap and the roster at accept time', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    const inv = invite(id, P[0], P[1]);
+    // P[1] fills their cap after the invite was sent.
+    make(P[1], 'Alpha One', 'A1'); make(P[1], 'Alpha Two', 'A2'); make(P[1], 'Alpha Three', 'A3');
+    expect(respondInvite(db, { inviteId: inv, steamid: P[1], accept: true })).toEqual({ ok: false, error: 'your_cap' });
+    // The invite stays open, so freeing a slot lets them accept later.
+    expect(openInvitesOf(db, id).map((i) => i.id)).toEqual([inv]);
+
+    const inv2 = invite(id, P[0], P[2]);
+    // P[3]..P[9] join: with the captain that is 8, a full roster.
+    for (let i = 3; i <= 9; i++) respondInvite(db, { inviteId: invite(id, P[0], P[i]), steamid: P[i], accept: true });
+    expect(rosterCount(id)).toBe(8);
+    expect(respondInvite(db, { inviteId: inv2, steamid: P[2], accept: true })).toEqual({ ok: false, error: 'roster_full' });
+    expect(invitePlayer(db, { teamId: id, by: P[0], target: P[10] })).toEqual({ ok: false, error: 'roster_full' });
+  });
+
+  it('an invite to a disbanded team is closed', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    const inv = invite(id, P[0], P[1]);
+    db.prepare("UPDATE teams SET disbanded_at = '2026-10-01T13:00:00.000Z' WHERE id = ?").run(id);
+    expect(respondInvite(db, { inviteId: inv, steamid: P[1], accept: true })).toEqual({ ok: false, error: 'invite_closed' });
+  });
+
+  it('managers cancel invites', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    const inv = invite(id, P[0], P[1]);
+    expect(cancelInvite(db, { inviteId: inv, by: P[1] })).toEqual({ ok: false, error: 'not_manager' });
+    expect(cancelInvite(db, { inviteId: inv, by: P[0] })).toEqual({ ok: true, value: null });
+    expect(respondInvite(db, { inviteId: inv, steamid: P[1], accept: true })).toEqual({ ok: false, error: 'invite_closed' });
+  });
+});
+
+const rosterCount = (teamId: number) =>
+  (db.prepare('SELECT COUNT(*) AS n FROM team_members WHERE team_id = ? AND left_at IS NULL').get(teamId) as { n: number }).n;
+
+describe('join link', () => {
+  it('only the captain turns it on; a new token replaces the old one; off kills it', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, 'cocaptain', ?)").run(id, P[1], at(1).toISOString());
+    expect(setJoinLink(db, { teamId: id, by: P[1], on: true })).toEqual({ ok: false, error: 'not_allowed' });
+    const first = setJoinLink(db, { teamId: id, by: P[0], on: true });
+    const second = setJoinLink(db, { teamId: id, by: P[0], on: true });
+    if (!first.ok || !second.ok) throw new Error('link');
+    expect(first.value.token).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(second.value.token).not.toBe(first.value.token);
+    expect(joinByLink(db, { token: first.value.token!, steamid: P[2] })).toEqual({ ok: false, error: 'link_off' });
+    expect(teamByJoinToken(db, second.value.token!)?.id).toBe(id);
+    expect(joinByLink(db, { token: second.value.token!, steamid: P[2] })).toEqual({ ok: true, value: { slug: 'rats' } });
+    expect(roleOf(db, id, P[2])).toBe('member');
+    expect(joinByLink(db, { token: second.value.token!, steamid: P[2] })).toEqual({ ok: false, error: 'already_member' });
+    setJoinLink(db, { teamId: id, by: P[0], on: false });
+    expect(joinByLink(db, { token: second.value.token!, steamid: P[3] })).toEqual({ ok: false, error: 'link_off' });
+  });
+
+  it('joining by link closes an open invite to the same team', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    invitePlayer(db, { teamId: id, by: P[0], target: P[1] });
+    const link = setJoinLink(db, { teamId: id, by: P[0], on: true });
+    if (!link.ok) throw new Error('link');
+    joinByLink(db, { token: link.value.token!, steamid: P[1] });
+    expect(openInvitesOf(db, id)).toEqual([]);
   });
 });
