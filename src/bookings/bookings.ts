@@ -782,6 +782,12 @@ export interface BookingView {
   games: BookingGameView[];
   /** Casters either side invited, and which halves are set (plan 4c). */
   casters: CasterView[];
+  /** Re-posting a cancelled scrim in one click (plan 2 Ruling 4): true only
+   *  when the booking is cancelled, its purpose is scrim, it came from a
+   *  post, and the viewer manages a side. The time is never pre-checked
+   *  here; a start too close to post again comes back as the click's own
+   *  refusal. */
+  repost: { allowed: boolean };
 }
 
 /** Whether bookingView would answer this viewer at all: staff, anyone on
@@ -846,6 +852,10 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
     viewer: { side: me?.side ?? manages[0] ?? null, manages, staff: viewer.staff, invited: me?.status === 'invited' },
     games: seesGames ? bookingGames(db, id) : [],
     casters: castersOf(db, id),
+    repost: {
+      allowed: b.state === 'cancelled' && b.purpose === 'scrim' && manages.length > 0
+        && !!db.prepare('SELECT 1 FROM scrim_posts WHERE booking_id = ?').get(b.id),
+    },
   };
 }
 

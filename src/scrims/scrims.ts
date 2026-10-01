@@ -4,7 +4,8 @@ import { getSetting, settingNumber } from '../settings.js';
 import { findSlurs } from '../slurs.js';
 import { activeMembers, getTeam, myTeams, roleOf } from '../teams/teams.js';
 import {
-  BOOKING_ERRORS, canUse, confirmBooking, createBooking, parseMinutes, parsePlaylist, parseStart, type BookingError,
+  BOOKING_ERRORS, canUse, confirmBooking, createBooking, getBooking, managedSides, parseMinutes, parsePlaylist, parseStart,
+  sideRow, type BookingError,
 } from '../bookings/bookings.js';
 import { allowance, bookingLimits, capacityProblem, iso, upcomingCount, type Party } from '../bookings/rules.js';
 import { nearestFreeSlot, proposedPlaylist, sideSr, srFits, type ScrimSide } from './rules.js';
@@ -230,6 +231,34 @@ export function createPost(db: DB, o: {
       srRange, note.note, now.toISOString(), targetId).lastInsertRowid);
     return ok({ id });
   })();
+}
+
+/**
+ * Re-post a cancelled scrim in one click (plan 2 Ruling 4): either side of a
+ * cancelled booking that came from a post (scrim_posts.booking_id) opens a
+ * fresh public post for its own side, with the booking's start, its actual
+ * length and its playlist (trimmed to the current post campaign limit), and
+ * the original post's sr_range. It goes straight through createPost, so
+ * every plan 1 rule (the cutoff, the allowance, the open-posts limit,
+ * capacity) applies the same as a hand-made post, and a refusal comes back
+ * unchanged. The original post stays booked; nothing is written back to it
+ * or to the booking.
+ */
+export function repostFromBooking(db: DB, o: { bookingId: number; by: string; now?: Date }): ScrimResult<{ id: number }> {
+  const now = o.now ?? new Date();
+  const b = getBooking(db, o.bookingId);
+  if (!b) return fail('not_found');
+  const post = db.prepare('SELECT * FROM scrim_posts WHERE booking_id = ?').get(b.id) as PostRow | undefined;
+  if (!post || b.purpose !== 'scrim') return fail('not_found');
+  if (b.state !== 'cancelled') return fail('wrong_state');
+  const side = managedSides(db, b.id, o.by)[0];
+  if (!side) return fail('not_manager');
+  const s = sideRow(db, b.id, side)!;
+  const campaigns = (JSON.parse(b.playlist_json) as string[]).slice(0, bookingLimits(db).playlistMax);
+  const minutes = Math.round((Date.parse(b.ends_at) - Date.parse(b.starts_at)) / 60_000);
+  return createPost(db, {
+    by: o.by, teamId: s.team_id, startsAt: b.starts_at, minutes, campaigns, srRange: post.sr_range, note: '', now,
+  });
 }
 
 /** The poster's side withdraws a post that is not booked yet. Its pending

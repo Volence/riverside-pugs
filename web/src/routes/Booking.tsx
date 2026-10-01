@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { adminApi, bookingsApi, teamsApi, type BookingOptions, type BookingRole, type BookingSide, type BookingView } from '../api';
+import { adminApi, bookingsApi, scrimsApi, teamsApi, type BookingOptions, type BookingRole, type BookingSide, type BookingView } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
@@ -190,6 +190,21 @@ export function Booking({ id, session }: { id: string; session: Session }) {
 
   if (missing || session.kind !== 'active') return <main class="page page--profile bookingpage"><PageHeader title="Booking" /><Empty>No such booking.</Empty></main>;
   if (!v) return null;
+  // Re-posting a cancelled scrim (plan 2): unlike act(), this returns the
+  // new post's id, not a fresh BookingView, so success routes to the board
+  // instead of re-rendering this page; a refusal just shows its text here.
+  const repost = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      const { id } = await scrimsApi.repost(v.id);
+      route(`/scrims?post=${id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
   const open = !v.ending && ['scheduled', 'held', 'setup', 'ready', 'active'].includes(v.state);
   const running = open && (v.state === 'ready' || v.state === 'active');
   const [a, b] = v.sides;
@@ -225,6 +240,9 @@ export function Booking({ id, session }: { id: string; session: Session }) {
         <p>{v.ending && v.state !== 'cancelled' && v.state !== 'no_show' ? 'Closing.' : STATE_LINE[v.state]}{v.cancel?.reason ? ` Reason: ${v.cancel.reason}` : ''}</p>
         {v.connect && (
           <p class="bookingconnect">In the game console: <code>{`connect ${v.connect.host}:${v.connect.port}; password ${v.connect.password}`}</code></p>
+        )}
+        {v.repost.allowed && (
+          <p><button class="btn" disabled={busy} onClick={repost}>Re-post this scrim</button></p>
         )}
         {v.viewer.invited && v.viewer.manages.length === 0 && open && (
           <p>

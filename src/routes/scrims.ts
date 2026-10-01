@@ -117,6 +117,16 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
     return reply.code(201).send({ id: r.value.id });
   });
 
+  app.post('/api/scrims/repost/:bookingId', async (req, reply) => {
+    const me = allowed(req, reply);
+    if (!me) return;
+    const bookingId = Number((req.params as { bookingId: string }).bookingId);
+    if (!Number.isInteger(bookingId) || bookingId <= 0) return reply.code(404).send(NOT_FOUND);
+    const r = S.repostFromBooking(db, { bookingId, by: me });
+    if (!r.ok) return refuse(reply, r);
+    return reply.code(201).send({ id: r.value.id });
+  });
+
   app.post('/api/scrims/:id/withdraw', async (req, reply) => {
     const me = allowed(req, reply);
     if (!me) return;

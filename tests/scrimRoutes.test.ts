@@ -323,3 +323,35 @@ describe('direct challenges', () => {
     expect(dms.map((d) => d.to)).toEqual([discordOf(P[1])]);
   });
 });
+
+describe('repost (plan 2, Task 3)', () => {
+  const bookAndCancel = async (cancelBy: string): Promise<number> => {
+    const id = await post(P[0]);
+    const acceptId = await accept(id, P[1]);
+    const bookingId = (await call('POST', `/api/scrims/accepts/${acceptId}/confirm`, P[0])).json().bookingId as number;
+    const r = await call('POST', `/api/bookings/${bookingId}/cancel`, cancelBy, { reason: '' });
+    expect(r.statusCode).toBe(200);
+    return bookingId;
+  };
+
+  it('either side re-posts a cancelled scrim and lands on the board', async () => {
+    const bookingId = await bookAndCancel(P[0]);
+    const r = await call('POST', `/api/scrims/repost/${bookingId}`, P[0]);
+    expect(r.statusCode).toBe(201);
+    const newId = r.json().id as number;
+    expect((await call('GET', '/api/scrims', P[0])).json().posts.map((p: { id: number }) => p.id)).toEqual([newId]);
+  });
+
+  it('refuses a non-manager, a booking not from a post, and a non-integer id', async () => {
+    const bookingId = await bookAndCancel(P[0]);
+    expect((await call('POST', `/api/scrims/repost/${bookingId}`, P[2])).statusCode).toBe(403);
+    expect((await call('POST', '/api/scrims/repost/not-a-number', P[0])).statusCode).toBe(404);
+
+    const plain = await call('POST', '/api/bookings', P[3], {
+      opponent: { steamid: P[4] }, startsAt: '2026-10-03T20:00:00.000Z', minutes: 90, playlist: ['no_mercy'],
+    });
+    const plainId = plain.json().id as number;
+    await call('POST', `/api/bookings/${plainId}/cancel`, P[3], { reason: '' });
+    expect((await call('POST', `/api/scrims/repost/${plainId}`, P[3])).statusCode).toBe(404);
+  });
+});

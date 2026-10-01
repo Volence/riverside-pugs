@@ -9,6 +9,7 @@ import {
   endBooking, expireUnconfirmed, extendBooking, getBooking, holdBox, markActive, markReady, markReleased, markSetup,
   myBookings, peopleOf, recordPresence, removePerson, respondPerson, sideRow,
 } from '../src/bookings/bookings.js';
+import { acceptPost, confirmAccept, createPost } from '../src/scrims/scrims.js';
 
 const P = Array.from({ length: 14 }, (_, i) => `765611990000007${String(i).padStart(2, '0')}`);
 const NOW = new Date('2026-10-01T12:00:00.000Z');
@@ -393,6 +394,37 @@ describe('views', () => {
     const id = create();
     expect(myBookings(db, P[1]).open.map((b) => [b.id, b.needs])).toEqual([[id, 'confirm']]);
     expect(myBookings(db, P[0]).open.map((b) => b.needs)).toEqual([null]);
+  });
+});
+
+describe('repost (plan 2)', () => {
+  const bookFromPost = (startsAt = START): number => {
+    const r1 = createPost(db, { by: P[0], startsAt, minutes: 120, campaigns: ['no_mercy'], srRange: null, note: '', now: NOW });
+    if (!r1.ok) throw new Error(r1.error);
+    const r2 = acceptPost(db, { postId: r1.value.id, by: P[1], now: NOW });
+    if (!r2.ok) throw new Error(r2.error);
+    const r3 = confirmAccept(db, { acceptId: r2.value.id, by: P[0], now: NOW });
+    if (!r3.ok) throw new Error(r3.error);
+    return r3.value.bookingId;
+  };
+
+  it('is allowed once cancelled, for a manager of either side; not before, and not to an outsider', () => {
+    const id = bookFromPost();
+    expect(bookingView(db, id, { steamid: P[0], staff: false })!.repost).toEqual({ allowed: false }); // not cancelled yet
+    cancelBooking(db, { bookingId: id, by: P[0], now: NOW });
+    expect(bookingView(db, id, { steamid: P[0], staff: false })!.repost).toEqual({ allowed: true });
+    expect(bookingView(db, id, { steamid: P[1], staff: false })!.repost).toEqual({ allowed: true });
+    expect(bookingView(db, id, { steamid: P[5], staff: false })).toBeNull();
+  });
+
+  it('is never allowed for a staff viewer who manages no side, nor for a cancelled booking not from a post', () => {
+    const id = bookFromPost();
+    cancelBooking(db, { bookingId: id, by: P[0], now: NOW });
+    expect(bookingView(db, id, { steamid: P[9], staff: true })!.repost).toEqual({ allowed: false });
+    const plain = create({ startsAt: '2026-10-03T20:00:00.000Z' });
+    confirmBooking(db, { bookingId: plain, by: P[1], now: NOW });
+    cancelBooking(db, { bookingId: plain, by: P[0], now: NOW });
+    expect(bookingView(db, plain, { steamid: P[0], staff: false })!.repost).toEqual({ allowed: false });
   });
 });
 
