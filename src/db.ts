@@ -243,6 +243,16 @@ CREATE TABLE IF NOT EXISTS booking_events (
   detail     TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS booking_events_booking ON booking_events (booking_id, id);
+-- A booked scrim's private voice (plan 4c): one category and a channel per
+-- side, made when the booking is ready. deleted_at when the end removed them.
+CREATE TABLE IF NOT EXISTS booking_voice (
+  booking_id  INTEGER PRIMARY KEY REFERENCES bookings(id),
+  category_id TEXT NOT NULL,
+  side_a_id   TEXT NOT NULL,
+  side_b_id   TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  deleted_at  TEXT
+);
 -- Opt-outs from src/notify/. A missing row means the player gets that type.
 CREATE TABLE IF NOT EXISTS notification_prefs (
   steamid TEXT NOT NULL REFERENCES players(steamid),

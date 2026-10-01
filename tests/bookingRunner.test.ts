@@ -9,6 +9,8 @@ import {
   addPerson, cancelBooking, confirmBooking, createBooking, extendBooking, getBooking, holdBox, markSetup, respondPerson, sideRow,
 } from '../src/bookings/bookings.js';
 import { BookingRunner, CLEAR_LINES, allowLines, bookingLines } from '../src/bookings/runner.js';
+import { BookingVoice } from '../src/bookings/voice.js';
+import { FakeTransport } from './fakes/fakeTransport.js';
 
 const P = Array.from({ length: 10 }, (_, i) => `765611990000009${String(i).padStart(2, '0')}`);
 const START = Date.parse('2026-10-02T20:00:00.000Z');
@@ -1432,5 +1434,90 @@ describe('booked games (plan 4b)', () => {
       // Two empty watches, but the load was 90 s ago.
       expect(getBooking(db, id)!.ending_at).toBeNull();
     });
+  });
+});
+
+describe('booking voice (plan 4c)', () => {
+  let t: FakeTransport;
+  const voiceRow = (id: number) => db.prepare('SELECT * FROM booking_voice WHERE booking_id = ?').get(id) as
+    { category_id: string; side_a_id: string; side_b_id: string; deleted_at: string | null } | undefined;
+  const ready = async (r: BookingRunner) => {
+    const id = book();
+    now = START - 15 * MIN;
+    r.allocate();
+    await r.idle();
+    sent = []; dms = [];
+    return id;
+  };
+  beforeEach(() => {
+    t = new FakeTransport();
+    setSetting(db, 'discord_voice_enabled', '1');
+  });
+
+  it('a booking turning ready gets its side channels', async () => {
+    const r = build({ voice: new BookingVoice({ db, voice: () => t.voice, now: () => now }) });
+    const id = await ready(r);
+    expect(getBooking(db, id)!.state).toBe('ready');
+    const v = voiceRow(id)!;
+    expect(t.channels.get(v.side_a_id)!.allowed).toEqual(['d0']);
+    expect(t.channels.get(v.side_b_id)!.allowed).toEqual(['d1']);
+  });
+
+  it('the minute watch makes the channels for a ready booking that has none, and syncs members', async () => {
+    let connected = false;
+    const r = build({ voice: new BookingVoice({ db, voice: () => (connected ? t.voice : null), now: () => now }) });
+    const id = await ready(r);
+    expect(voiceRow(id)).toBeUndefined();
+    connected = true; // the bot logged in after the booking was set up
+    now = START - 10 * MIN;
+    await r.tick();
+    const v = voiceRow(id)!;
+    expect(t.channels.get(v.side_a_id)!.allowed).toEqual(['d0']);
+    addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[2], role: 'player', now: new Date(now) });
+    respondPerson(db, { bookingId: id, steamid: P[2], accept: true, now: new Date(now) });
+    now += MIN;
+    await r.tick();
+    expect(t.channels.get(v.side_a_id)!.allowed).toEqual(['d0', 'd2']);
+    expect(t.channels.size).toBe(3);
+  });
+
+  it('the wind-down closes voice before the release', async () => {
+    const order: string[] = [];
+    setSetting(db, 'discord_lobby_channel_id', 'lobby');
+    t.channels.set('lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleId: null });
+    const ops = { ...t.voice, deleteChannel: async (c: string) => { order.push(`delete ${c}`); await t.voice.deleteChannel(c); } };
+    const r = build({
+      voice: new BookingVoice({ db, voice: () => ops, now: () => now }),
+      release: async (sid) => { order.push('release'); released.push(sid); db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(sid); return true; },
+    });
+    const id = await ready(r);
+    const v = voiceRow(id)!;
+    await t.voice.move('d0', v.side_a_id);
+    cancelBooking(db, { bookingId: id, by: P[0], now: new Date(now) });
+    r.settle(id);
+    await r.idle();
+    expect(order).toEqual([`delete ${v.side_a_id}`, `delete ${v.side_b_id}`, `delete ${v.category_id}`, 'release']);
+    expect(t.moves.at(-1)).toEqual({ userId: 'd0', channelId: 'lobby' });
+    expect(voiceRow(id)!.deleted_at).not.toBeNull();
+    expect(getBooking(db, id)!.ended_at).not.toBeNull();
+  });
+
+  it('a voice that throws stops neither the setup, the watch nor the wind-down', async () => {
+    const boom = async () => { throw new Error('voice exploded'); };
+    const thrower = { ensure: boom, sync: boom, close: boom } as unknown as BookingVoice;
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const r = build({ voice: thrower });
+    const id = await ready(r);
+    expect(getBooking(db, id)!.state).toBe('ready');
+    box.ccc.humans = [P[0]];
+    now = START - 5 * MIN;
+    await r.tick();
+    expect(getBooking(db, id)!.state).toBe('active');
+    cancelBooking(db, { bookingId: id, by: P[0], now: new Date(now) });
+    r.settle(id);
+    await r.idle();
+    err.mockRestore();
+    expect(released).toEqual([3]);
+    expect(getBooking(db, id)!.ended_at).not.toBeNull();
   });
 });

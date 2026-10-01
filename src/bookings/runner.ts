@@ -21,6 +21,7 @@ import {
   BOOKING_ERRORS, type BookingRow, type Side, type SideRow,
 } from './bookings.js';
 import { abortBookingGame, bookingGames, bookingOnServer, liveBookingGame } from './games.js';
+import type { BookingVoice } from './voice.js';
 
 /**
  * The part of bookings that talks to game servers (spec part 1 section 3;
@@ -97,6 +98,9 @@ export interface BookingRunnerDeps {
   logPublicAddress?: string;
   /** Stop listening for a match token (an aborted booking game). */
   unregisterToken?: (token: string) => void;
+  /** A booked scrim's private team voice (plan 4c). Absent, there is none.
+   *  Every call is guarded (voiceStep): voice never blocks a booking. */
+  voice?: BookingVoice;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }
@@ -356,6 +360,20 @@ export class BookingRunner {
     if (!markReady(this.db, id, new Date(this.now()))) return;
     console.log(`[booking] ${id} ready on ${server.name}`);
     this.tell(id, acceptedPeople(this.db, id).map((p) => p.steamid), 'booking_ready');
+    await this.voiceStep(id, 'ensure');
+  }
+
+  /** One BookingVoice call. BookingVoice already never throws; this is the
+   *  belt to its braces, so a voice bug can never stop a setup, a watch or a
+   *  wind-down. */
+  private async voiceStep(id: number, step: 'ensure' | 'sync' | 'close'): Promise<void> {
+    const voice = this.deps.voice;
+    if (!voice) return;
+    try {
+      await voice[step](id);
+    } catch (err) {
+      console.error(`[booking] ${id}: voice ${step} failed:`, err);
+    }
   }
 
   /** Exec the booking's game config and see it take (the box's game type no
@@ -409,6 +427,9 @@ export class BookingRunner {
         console.warn(`[booking] ${id}: goodbye on ${server.name} failed:`, err instanceof Error ? err.message : err);
       }
     }
+    // Before the release (ruling 3): everyone in the side channels goes to
+    // the lobby and the channels go.
+    await this.voiceStep(id, 'close');
     if (server) {
       try {
         await this.deps.rcon(server, [...CLEAR_LINES]);
@@ -487,6 +508,11 @@ export class BookingRunner {
         if (b.ending_at !== null) { this.settle(b.id); continue; }
         if ((b.state === 'ready' || b.state === 'active') && !this.busy.has(b.id)) await this.watch(b, now);
       }
+      try {
+        await this.deps.voice?.closeEnded();
+      } catch (err) {
+        console.error('[booking] voice closeEnded failed:', err);
+      }
     } finally {
       this.ticking = false;
     }
@@ -536,6 +562,11 @@ export class BookingRunner {
     if (!server) return;
     // The time end needs no answer from the box: a dead box still ends on time.
     if (now.getTime() >= Date.parse(b.ends_at)) { this.endNow(b.id, 'time', now); return; }
+    // Voice needs no answer from the box either. Ensure is a no-op once the
+    // channels exist; it makes them for a booking that was ready before voice
+    // was turned on or the bot connected. Sync keeps the members in step.
+    await this.voiceStep(b.id, 'ensure');
+    await this.voiceStep(b.id, 'sync');
     let humans: ReturnType<typeof parseStatusPlayers>;
     try {
       const [st] = await this.deps.rcon(server, ['status']);
