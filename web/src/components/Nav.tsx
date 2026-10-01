@@ -38,6 +38,7 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
 function isCurrent(href: string, path: string): boolean {
   if (href === '/hud') return hudTabFor(path) !== null;
   if (href === '/balance') return path === href || path.startsWith('/balance/');
+  if (href === '/teams') return path === '/teams' || path.startsWith('/team/');
   return path === href;
 }
 
@@ -65,12 +66,14 @@ export function Nav(
   };
   const me = session.kind === 'active' || session.kind === 'pending' ? session.me : null;
   const live = state?.match && state.match.state === 'live' ? state.match : null;
+  // Teams only for viewers the competitive switch lets in (/api/me teams).
+  const links = me?.teams ? [...NAV_LINKS.slice(0, 5), ['/teams', 'Teams'] as const, ...NAV_LINKS.slice(5)] : NAV_LINKS;
 
   return (
     <header class="nav">
       <a class="nav__brand" href="/">Riverside</a>
       <nav class="nav__links">
-        {NAV_LINKS.map(([href, label, target]) => (
+        {links.map(([href, label, target]) => (
           <a key={href} href={href} target={target}
              rel={target ? 'noopener' : undefined}
              aria-current={isCurrent(href, path) ? 'page' : undefined}>{label}</a>

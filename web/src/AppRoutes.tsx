@@ -32,6 +32,9 @@ const Hud = lazy(() => import('./routes/Hud'));
 // neither weighs on the first load of the pages people land on most.
 const Community = lazy(() => import('./routes/Community'));
 const CommunityEntry = lazy(() => import('./routes/CommunityEntry'));
+// Teams: behind the competitive switch, so most viewers never load it.
+const Teams = lazy(() => import('./routes/Teams'));
+const TeamJoin = lazy(() => import('./routes/TeamJoin'));
 
 /** The 404.
  *
@@ -108,6 +111,9 @@ export function AppRoutes(
       <Route path="/how-to-play" component={HowToPlay} session={session} />
       <Route path="/help/consistency" component={HelpConsistency} />
       <Route path="/link/discord" component={LinkDiscord} session={session} refresh={refresh} />
+      <Route path="/teams" component={Teams} session={session} />
+      <Route path="/team/join/:token" component={TeamJoin} />
+      {/* /team/:slug lands in Task 8, once the Team page component exists. */}
       <Route default component={NotFound} />
     </Router>
   );
