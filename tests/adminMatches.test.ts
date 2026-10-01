@@ -281,6 +281,73 @@ describe('admin abort teardown', () => {
   });
 });
 
+/** A booking holding the box, straight into the table: only the hold matters here. */
+function holdForBooking(db: DB, serverId: number): number {
+  return Number(db.prepare(
+    `INSERT INTO bookings (purpose, starts_at, ends_at, state, server_id, password, tv_password, game_config, rules_json, playlist_json, created_by, created_at)
+     VALUES ('scrim', '2026-10-01T20:00:00.000Z', '2026-10-01T22:00:00.000Z', 'active', ?, 'pw', 'tvpw', 'pug_match', '{}', '["no_mercy"]', ?, '2026-10-01T19:00:00.000Z')`,
+  ).run(serverId, ADMIN).lastInsertRowid);
+}
+
+describe('booking games and booked boxes (plan 4b final review)', () => {
+  it('abortMatch on a booking game marks it aborted and tells the runner, without a release', async () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO players (steamid, name, status) VALUES (?, 'admin', 'active')").run(ADMIN);
+    const serverId = addServer(db, { name: 's', host: '10.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    markLive(db, serverId);
+    const booking = holdForBooking(db, serverId);
+    const mid = Number(db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, server_id, token, origin, kind, visibility, booking_id) VALUES (1, 'live', 'no_mercy', ?, 'tok-b', 'in_game', 'scrim', 'participants', ?)",
+    ).run(serverId, booking).lastInsertRowid);
+    const restarts: unknown[] = [];
+    const releaser = new ServerReleaser(db, async (...a) => { restarts.push(a); });
+    const told: [number, string][] = [];
+    const causeless = watchCauselessAborts(db);
+    expect(abortMatch(db, releaser, mid, [], (m, t) => { told.push([m, t]); })).toEqual({ ok: true, bookingContinues: true });
+    expect(causeless()).toEqual([]);
+    await new Promise((r) => setImmediate(r));
+    expect(db.prepare('SELECT state, abort_cause FROM matches WHERE id = ?').get(mid)).toEqual({ state: 'aborted', abort_cause: 'admin' });
+    expect(db.prepare('SELECT ended_at IS NOT NULL AS ended FROM matches WHERE id = ?').get(mid)).toEqual({ ended: 1 });
+    expect(told).toEqual([[mid, 'tok-b']]);
+    expect(restarts).toEqual([]);
+    expect(db.prepare('SELECT ended_at FROM bookings WHERE id = ?').get(booking)).toEqual({ ended_at: null });
+  });
+
+  it('the abort route says the booking continues, and calls the runner wired in server.ts', async () => {
+    const serverId = addServer(db, { name: 's1', host: '1.2.3.4', port: 27015, rconPort: 27015, rconPassword: 'x', status: 'live' });
+    const booking = holdForBooking(db, serverId);
+    const id = Number(db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, server_id, token, origin, kind, visibility, booking_id) VALUES (1, 'live', 'dead_air', ?, 'tok-r', 'in_game', 'scrim', 'participants', ?)",
+    ).run(serverId, booking).lastInsertRowid);
+    // Its own app with a fake booking rcon, so the runner's sm_pug_abort is seen and never dials 1.2.3.4.
+    const sent: string[] = [];
+    const app2 = await buildServer({
+      config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {},
+      bookingRcon: async (_server, cmds) => { sent.push(...cmds); return cmds.map(() => ''); },
+    });
+    try {
+      const res = await app2.inject({ method: 'POST', url: `/api/admin/matches/${id}/abort`, cookies: authedCookie(app2, db, ADMIN), payload: {} });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ ok: true, message: expect.stringContaining('the booking continues') });
+      await new Promise((r) => setImmediate(r));
+      expect(sent).toEqual(['sm_pug_abort tok-r']);
+    } finally {
+      await app2.close();
+    }
+    expect(db.prepare('SELECT state FROM matches WHERE id = ?').get(id)).toEqual({ state: 'aborted' });
+    expect(db.prepare('SELECT status FROM servers WHERE id = ?').get(serverId)).toEqual({ status: 'live' });
+  });
+
+  it('Set idle on a box a booking holds is refused, and changes nothing', async () => {
+    const serverId = addServer(db, { name: 's1', host: '1.2.3.4', port: 27015, rconPort: 27015, rconPassword: 'x', status: 'live' });
+    holdForBooking(db, serverId);
+    const res = await post(`/api/admin/servers/${serverId}/idle`);
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: 'held by a booking; end the booking instead' });
+    expect(db.prepare('SELECT status FROM servers WHERE id = ?').get(serverId)).toEqual({ status: 'live' });
+  });
+});
+
 // Its own bare app: the waiting-match wake-up is wired to a real releaser and
 // a real pending list here, the way server.ts wires them, so the test sees
 // the same path a live re-enable takes rather than a spy on the route.
