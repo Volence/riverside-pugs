@@ -365,3 +365,27 @@ only a courtesy filter, not an admission control: the site re-checks every
 command against its own idea of who is a captain. `sm_booking_cmd
 <steamid64> <cmd> [arg...]` emits the same line without the captain check,
 for testing and staff.
+
+1.2.0 lets a booked server in only to its people and staff (plan 4b2). The
+site pushes the allowlist (each side's players, ringers and approved
+spectators, plus staff) as `sm_booking_allow_begin`, then
+`sm_booking_allow_add <id64> [id64...]` lines (ids that are not 17 digits
+are skipped), then `sm_booking_allow_commit`, which swaps the staged list in
+whole and lifts any block on an id now on it. A begin with no commit leaves
+the last committed list in force. Nothing is enforced until
+`l4d_booking_password` is set and a list has been committed. Bots, SourceTV
+and SourceMod admins are never checked.
+
+Anyone else who joins gets `l4d_booking_grace` seconds (default 60). Every
+captain is told `[Booking] <name> joined and is not on the booking. Type
+!allow <name> within <n> seconds to let them play as a ringer.`; a captain's
+`!allow <name>` (case-insensitive substring, exactly one waiting player)
+adds them at once and sends
+`PUGBOOK event=cmd cmd=allow steamid=<captain> arg=<target id64> <name>`.
+When the grace runs out they are kicked and blocked for `l4d_booking_block`
+minutes (default 30, 0 for none); a blocked id is kicked on connect. A grace
+whose player left before it ran out still ends in a block, so leaving and
+rejoining cannot buy a fresh one. Grace and block are kept per SteamID64 and
+survive map changes. `sm_booking_status` prints whether the box is booked,
+whether a list is loaded, its size, the staged size (-1 when none), and each
+running grace and block with its time left; it never prints the ids.
