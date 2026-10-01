@@ -28,9 +28,9 @@
 1. **The interrupted map is replayed from its start.** Half 1 of a map cannot be resumed in the engine, and the plugin cannot attribute a resumed half 2 (`g_iRound1*` would be 0). Completed maps keep their exact scores. Any `match_rounds` rows of the interrupted map are deleted at restore, so its rows are rewritten when it is played again.
 2. **Player stats of a restored game cover only the maps played after the restore.** Plugin stats live in memory and die with srcds, and the dump at the end is the authoritative record. Scores stay exact. The match row records `restored_at_map` (the ordinal of the replayed map), and the booking page and the match page say "Stats from map N on: the server restarted".
 3. **A booking waits at most `booking_recover_wait_minutes` (20) for a replacement box.** After that, its live game is aborted (`server_lost`) and the booking closes as `cancelled` / `server_lost`. That is not a no-show and not a late cancel for anyone.
-4. **A box judged gone is marked offline** (`servers.status = 'offline'`), and staff are told to set it idle on the Servers desk once it answers again. Nothing automatic puts it back.
+4. **A box judged gone is marked offline** (`servers.status = 'offline'`, `servers.gone_since` set), so the queue is not handed a dead box the moment the booking lets go of it. Owner 2026-10-01: no manual step. The runner asks every gone box for `status` each minute, and after two answers in a row the box goes back to idle (`gone_since` cleared), with an admin feed line. Two answers, so a box that is still flapping is not handed straight to a PUG.
 5. **If setting a restart up again fails twice** (exec, map or plugin check), the booking closes as `cancelled` / `server_lost`, the same as rule 3. If only the game's restore fails (for example an old pug-match without `sm_pug_resume`), the game is aborted (`server_lost`), the booking carries on with the box set up for the next campaign, and staff are told.
-6. **The in-game scoreboard total** (the engine's own campaign score) shows only the maps played since the restore. Writing it needs a left4dhooks call whose team mapping is unverified. l4dscores' tally, which is what decides who survives first on the next map, is seeded, and the restore line in chat states the real score.
+6. **The in-game scoreboard total** (the engine's own campaign score) shows only the maps played since the restore, unless Task 10 step 3b proves left4dhooks' `L4D_SetCampaignScores` team mapping, in which case pug-match writes it too (owner 2026-10-01: fine if nothing can be done). l4dscores' tally, which is what decides who survives first on the next map, is always seeded, and the restore line in chat states the real score.
 
 ## Review Focus
 
@@ -179,6 +179,7 @@ it('has the crash recovery columns', () => {
   const cols = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
   expect(cols('bookings')).toEqual(expect.arrayContaining(['recovering_at', 'recover_reason', 'lost_since', 'a2s_seen_at', 'up_alerted_at', 'recoveries', 'waiting_since']));
   expect(cols('matches')).toContain('restored_at_map');
+  expect(cols('servers')).toContain('gone_since');
 });
 ```
 
@@ -215,6 +216,9 @@ Expected: FAIL (`beginRecovery` is not exported; the columns are missing).
   // The ordinal of the map a restored booking game was replayed from: its
   // player stats cover only that map on (plan 5 ruling 2). Null: never restored.
   ensureColumn(db, 'matches', 'restored_at_map', 'INTEGER');
+  // A box a booking judged gone (plan 5 ruling 4): offline until it answers
+  // rcon twice in a row, then the runner puts it back to idle by itself.
+  ensureColumn(db, 'servers', 'gone_since', 'TEXT');
 ```
 
 `src/settingsSchema.ts`, after the `booking_allow_block_minutes` entry:
@@ -308,7 +312,7 @@ export function dropBox(db: DB, id: number, now: Date): number | null {
       .get(id) as { server_id: number } | undefined;
     if (!b) return null;
     db.prepare('UPDATE bookings SET server_id = NULL, waiting_since = ? WHERE id = ?').run(now.toISOString(), id);
-    db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(b.server_id);
+    db.prepare("UPDATE servers SET status = 'offline', gone_since = ? WHERE id = ?").run(now.toISOString(), b.server_id);
     logEvent(db, id, null, 'box_dropped', { serverId: b.server_id }, now);
     return b.server_id;
   })();
@@ -1622,6 +1626,8 @@ git commit -m "Bookings: notice an srcds restart from the boot marker, set the b
 
 `onGone(b, server, now)`: `beginRecovery(db, b.id, 'gone', now)` (if false, return). Then `dropBox`, an admin problem event naming the box ("marked offline; set it idle on the Servers desk once it answers"), `this.deps.preempt()` if no box is free, and `relocate()`.
 
+`returnGone()` (ruling 4, automatic): every server with `gone_since` set gets one `status` over rcon per tick. Count answers in a row in memory (`private readonly goneAnswers = new Map<number, number>()`; a failure resets it to 0). At 2, run `UPDATE servers SET status = 'idle', gone_since = NULL WHERE id = ? AND gone_since IS NOT NULL AND status = 'offline'`, publish `Server <name> answers again after it went down under booking N; it is back in the pool.`, and call `this.deps.freed?.()`. A server an admin has already set idle (status no longer offline) only has `gone_since` cleared. After a web restart the count starts again from 0, which costs two minutes at most.
+
 `relocate()`: for each open booking with `waiting_since` not null and no box: if `now - waiting_since >= recoverWaitMinutes`, call `giveUp(id, 'no server came free within N minutes after its server went down', 'the server went down and no other server was free')` and then `track(windDown(id,false))`. Otherwise `s = pickBox(b)`. If `s` is null, set preempt. Otherwise, if `reholdBox`, `track(recover(id))`. The new box was idle with a standing config, so `recover`'s `waitForStartup`/exec path sets it up, and the moved `matches.server_id` lets `finishMatch` pull the dump from it later. Before `recover` on a moved box, the box gets the same forced restart setup gives a fresh box: in `recover`, when `b.recover_reason === 'gone'` and the box was just taken, call `this.deps.restart(server)` first (track this with a `Set<number>` of `freshBox` ids filled by `relocate`).
 
 - [ ] **Step 1: Write the failing tests**
@@ -1716,6 +1722,24 @@ describe('box gone', () => {
 });
 ```
 
+Add one more test:
+
+```ts
+  it('a gone box goes back to idle by itself after answering twice in a row', async () => {
+    runner = build({ a2s: async () => null });
+    const id = await running();
+    kill();
+    await runner.tick(); now += 3 * MIN; await runner.tick(); await runner.idle();
+    expect((db.prepare('SELECT status, gone_since FROM servers WHERE id = 3').get() as { status: string; gone_since: string | null }).gone_since).not.toBeNull();
+    box.ccc.down = false;
+    await runner.tick(); await runner.idle();
+    expect((db.prepare('SELECT status FROM servers WHERE id = 3').get() as { status: string }).status).toBe('offline');
+    await runner.tick(); await runner.idle();
+    expect(db.prepare('SELECT status, gone_since FROM servers WHERE id = 3').get()).toEqual({ status: 'idle', gone_since: null });
+    expect(getBooking(db, id)!.server_id).not.toBe(3);
+  });
+```
+
 Import `claimIdle` from `../src/serverPool.js`. The fake `release` and `restart` must not undo `down` for the box under test; `restart` of `bb` must bring `bb` up as Pub with an empty marker.
 
 - [ ] **Step 2: Run them and see them fail**
@@ -1768,7 +1792,7 @@ Add the field `private readonly freshBox = new Set<number>();`. At the top of `r
     if (this.freshBox.delete(b.id) && !(await this.deps.restart(server))) throw new Error('the new box did not come back from its restart');
 ```
 
-Call `this.relocate();` first thing in `allocate()`, and in `tick()` right after `this.remind(now);`. Because of the busy guard, a call from both places is harmless.
+Call `this.relocate();` first thing in `allocate()`, and in `tick()` right after `this.remind(now);`. Call `await this.returnGone();` in `tick()` after the watches. Because of the busy guard, a call from both places is harmless.
 
 In `resume()`, a waiting booking (`recovering_at` set, `server_id` null) needs nothing: the next tick's `relocate` picks it up. A booking with `recovering_at` set and a box re-runs `recover` (Task 7). That box may be a fresh box from a move whose restart a web restart cut off; the setup path's `waitForStartup` plus exec covers that, because a box mid-restart answers once it is up.
 
@@ -1918,6 +1942,12 @@ On the owner's go-ahead, launch their client through the HUD harness. Roster the
 - The final `sm_pug_dump abc123` lists map 1 at 400/300 plus the played map.
 
 Note whether `mapCounter` = map number or 1 is right for the finale swap, and fix `SeedL4dscoresTally` if needed.
+
+- [ ] **Step 3b: The engine's campaign score (ruling 6)**
+
+In the same session, during ready-up of the resumed match, run `sm_pug_los`-style probe code: a throwaway admin command in a scratch plugin that calls `L4D_SetCampaignScores(300, 400)` (left4dhooks; the L4D1 linux symbol `_ZN16CTerrorGameRules17SetCampaignScoresEii` is in its gamedata). Then read the scoreboard (Tab) on the owner's client and `L4D_GetCampaignScores` / `m_iCampaignScore` on both logical teams.
+- If the 300 lands on the team on survivors (or provably on a fixed logical team you can map from `g_iLogicalOfPugA`), add the call to `SeedL4dscoresTally` with that mapping, rebuild, re-check, and commit as part of pug-match 0.3.19.
+- If the mapping cannot be pinned in one session, leave it out (the owner accepted that) and write what was seen in RECOVERY-TESTING.md.
 
 - [ ] **Step 4: A real crash under the site (dev server)**
 
