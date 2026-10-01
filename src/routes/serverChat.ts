@@ -9,7 +9,7 @@ import { hasLinesBefore, listLines, listLinesBefore, listMatchLines, liveMatchOn
 import { SendLimiter, cleanChatText, sendStaffChat, MESSAGE_MAX, MESSAGE_MAX_BYTES, NAME_MAX, NAME_MAX_BYTES, type SendTarget } from '../staffChatSend.js';
 import { makeRequireMod } from './guards.js';
 
-export interface ChatServerView { id: number; name: string; state: 'match' | 'practice' | 'side' | 'idle' | 'offline'; lastAt: number | null }
+export interface ChatServerView { id: number; name: string; state: 'match' | 'booking' | 'practice' | 'side' | 'idle' | 'offline'; lastAt: number | null }
 export interface ChatLineView {
   id: number; at: number; kind: ChatLineRow['kind']; steamid: string | null; name: string | null;
   team: number | null; scope: 'all' | 'team' | null; message: string; matchId: number | null;
@@ -49,7 +49,7 @@ export async function serverChatRoutes(
       .filter(({ s, hold }) => s.enabled === 1 || hold?.kind === 'practice')
       .map(({ s, hold }) => ({
         id: s.id, name: s.name,
-        state: hold?.kind === 'practice' ? 'practice' : hold?.kind === 'side' ? 'side' : liveMatchOn(db, s.id) !== null ? 'match' : s.status === 'offline' ? 'offline' : 'idle',
+        state: hold?.kind === 'booking' ? 'booking' : hold?.kind === 'practice' ? 'practice' : hold?.kind === 'side' ? 'side' : liveMatchOn(db, s.id) !== null ? 'match' : s.status === 'offline' ? 'offline' : 'idle',
         lastAt: (lastAt.get(s.id) as { at: number | null }).at,
       }));
     return { servers };
