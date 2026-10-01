@@ -59,7 +59,7 @@ const SIDE_RULES: readonly MatchRules['sideRule'][] = ['higher_seed_chooses', 'n
 export const NAME_MIN = 3;
 export const NAME_MAX = 40;
 
-const isPug = (r: Pick<RulesetRow, 'template' | 'name'>): boolean => r.template === 1 && r.name === 'PUG';
+export const isPug = (r: Pick<RulesetRow, 'template' | 'name'>): boolean => r.template === 1 && r.name === 'PUG';
 const whole = (v: unknown, min: number, max: number): v is number => Number.isInteger(v) && (v as number) >= min && (v as number) <= max;
 
 export function getRuleset(db: DB, id: number): RulesetRow | undefined {
@@ -206,10 +206,12 @@ export function setRulesetArchived(db: DB, o: { by: string; id: number; archived
   })();
 }
 
-/** The live rulesets a picker offers, each with its one-line summary. */
+/** The live rulesets a picker offers, each with its one-line summary. PUG is
+ *  left out: it is for PUGs, not bookings or events, and is not offered as a
+ *  source to pick (ruleset_store Ruling: PUG stays out of every picker). */
 export function rulesetOptions(db: DB): { id: number; name: string; summary: string }[] {
   const rows = db.prepare('SELECT * FROM rulesets WHERE archived_at IS NULL ORDER BY id').all() as RulesetRow[];
-  return rows.map((r) => {
+  return rows.filter((r) => !isPug(r)).map((r) => {
     const rules = rulesOf(r);
     return { id: r.id, name: r.name, summary: rules ? rulesSummary(rules) : '' };
   });

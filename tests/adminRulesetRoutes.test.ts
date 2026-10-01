@@ -107,16 +107,27 @@ describe('the Rulesets desk routes', () => {
 
   it('an archived ruleset leaves the booking and event pickers; a booking or stage cannot pick it; publish refuses a draft on it', async () => {
     const id = await copy('Old Rules');
-    expect(await pickerNames()).toEqual({ bookings: ['PUG', 'Standard Cup', 'Casual Scrim', 'Old Rules'], events: ['PUG', 'Standard Cup', 'Casual Scrim', 'Old Rules'] });
+    expect(await pickerNames()).toEqual({ bookings: ['Standard Cup', 'Casual Scrim', 'Old Rules'], events: ['Standard Cup', 'Casual Scrim', 'Old Rules'] });
     const ev = (await call('POST', '/api/admin/events', ADMIN, { name: 'Old Cup', startsAt: START.toISOString(), entryKind: 'team' })).json().id;
     expect((await call('POST', `/api/admin/events/${ev}/stages`, ADMIN, { type: 'single_elim', config: { thirdPlace: false }, rulesetId: id })).statusCode).toBe(200);
     await call('POST', `/api/admin/rulesets/${id}/archive`, ADMIN);
-    expect(await pickerNames()).toEqual({ bookings: ['PUG', 'Standard Cup', 'Casual Scrim'], events: ['PUG', 'Standard Cup', 'Casual Scrim'] });
+    expect(await pickerNames()).toEqual({ bookings: ['Standard Cup', 'Casual Scrim'], events: ['Standard Cup', 'Casual Scrim'] });
     const booking = await call('POST', '/api/bookings', P[0], { opponent: { steamid: P[1] }, startsAt: START.toISOString(), playlist: ['no_mercy'], rulesetId: id });
     expect(booking.statusCode).toBe(400);
     expect((await call('POST', `/api/admin/events/${ev}/stages`, ADMIN, { type: 'swiss', config: { rounds: 4 }, rulesetId: id })).statusCode).toBe(400);
     expect((await call('POST', `/api/admin/events/${ev}/publish`, ADMIN)).statusCode).toBe(400);
     expect((await call('GET', `/api/admin/events/${ev}`, ADMIN)).json().status).toBe('draft');
+  });
+
+  it('PUG is never in a picker, and naming it for a booking or a stage is refused with its own sentence', async () => {
+    const pug = idOf('PUG');
+    const booking = await call('POST', '/api/bookings', P[0], { opponent: { steamid: P[1] }, startsAt: START.toISOString(), playlist: ['no_mercy'], rulesetId: pug });
+    expect(booking.statusCode).toBe(400);
+    expect(booking.json()).toEqual({ error: 'PUG rules are for PUGs; copy them into a new ruleset for scrims and events.' });
+    const ev = (await call('POST', '/api/admin/events', ADMIN, { name: 'No Pug Cup', startsAt: START.toISOString(), entryKind: 'team' })).json().id;
+    const stage = await call('POST', `/api/admin/events/${ev}/stages`, ADMIN, { type: 'single_elim', config: { thirdPlace: false }, rulesetId: pug });
+    expect(stage.statusCode).toBe(400);
+    expect(stage.json()).toEqual({ error: 'PUG rules are for PUGs; copy them into a new ruleset for scrims and events.' });
   });
 
   it('editing a ruleset leaves a booking and a published stage on the rules they took', async () => {

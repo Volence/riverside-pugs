@@ -170,11 +170,10 @@ describe('archiving a ruleset', () => {
 });
 
 describe('picker options', () => {
-  it('offers the live rulesets in id order, each with its summary, and leaves archived ones out', () => {
+  it('offers the live rulesets in id order, each with its summary, leaves archived ones out, and leaves PUG out', () => {
     const { id } = okOf(createRuleset(db, { by: ADMIN, copyFrom: idOf('Casual Scrim'), name: 'Gone Soon' }));
     okOf(setRulesetArchived(db, { by: ADMIN, id, archived: true }));
     expect(rulesetOptions(db)).toEqual([
-      { id: idOf('PUG'), name: 'PUG', summary: '3 pauses of 120 s · coin toss for sides · 10 min no-show grace' },
       { id: idOf('Standard Cup'), name: 'Standard Cup', summary: '3 pauses of 120 s · higher seed picks sides · 15 min no-show grace' },
       { id: idOf('Casual Scrim'), name: 'Casual Scrim', summary: 'Unlimited pauses · non-picker picks sides · 15 min no-show grace' },
     ]);

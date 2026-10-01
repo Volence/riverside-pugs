@@ -2,6 +2,7 @@ import type { DB } from '../db.js';
 import { getCampaignPool } from '../settings.js';
 import { poolableCampaigns } from '../campaignRegistry.js';
 import { parseRules, rulesForKind } from '../rulesets.js';
+import { isPug } from '../rulesetStore.js';
 import * as V from './validate.js';
 
 /**
@@ -67,12 +68,18 @@ export function stageSettingsOf(s: StageRow): V.StageSettings {
   };
 }
 
-/** The lists a stage is checked against, read now (Ruling 20). */
+/** The lists a stage is checked against, read now (Ruling 20). PUG is left
+ *  out of rulesetIds (it is for PUGs, not events) and named separately so a
+ *  stage that picks it gets its own refusal, not a generic "no such ruleset". */
 export function stageContext(db: DB): V.StageContext {
   const campaigns = new Set(poolableCampaigns(db).map((c) => c.slug));
+  const rulesets = db.prepare('SELECT id, template, name FROM rulesets WHERE archived_at IS NULL').all() as
+    { id: number; template: number; name: string }[];
+  const pug = rulesets.find((r) => isPug(r));
   return {
     campaigns,
-    rulesetIds: new Set((db.prepare('SELECT id FROM rulesets WHERE archived_at IS NULL').all() as { id: number }[]).map((r) => r.id)),
+    rulesetIds: new Set(rulesets.filter((r) => !isPug(r)).map((r) => r.id)),
+    pugRulesetId: pug ? pug.id : null,
     gameConfigs: new Set((db.prepare('SELECT key FROM game_configs WHERE enabled = 1').all() as { key: string }[]).map((r) => r.key)),
     defaultPool: getCampaignPool(db).filter((s) => campaigns.has(s)).slice(0, V.POOL_MAX),
   };
@@ -101,10 +108,13 @@ function slugFor(db: DB, name: string): string {
   }
 }
 
-/** Ruling 7: the ruleset as a tournament plays it, or null if it is gone or unreadable. */
+/** Ruling 7: the ruleset as a tournament plays it, or null if it is gone,
+ *  unreadable, or PUG (stageContext already keeps a stage off PUG, but this
+ *  is the last line before a snapshot is written, so it checks again). */
 function rulesSnapshot(db: DB, rulesetId: number): string | null {
-  const row = db.prepare('SELECT rules_json FROM rulesets WHERE id = ? AND archived_at IS NULL').get(rulesetId) as { rules_json: string } | undefined;
-  if (!row) return null;
+  const row = db.prepare('SELECT rules_json, template, name FROM rulesets WHERE id = ? AND archived_at IS NULL').get(rulesetId) as
+    { rules_json: string; template: number; name: string } | undefined;
+  if (!row || isPug(row)) return null;
   try {
     return JSON.stringify(rulesForKind('tournament', parseRules(row.rules_json)));
   } catch {

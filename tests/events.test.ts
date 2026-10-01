@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as E from '../src/events/events.js';
 import { TEMPLATES, rulesForKind } from '../src/rulesets.js';
-import { ADMIN, NOW, START, cupId, eventFixture, must, stageBody } from './eventFixture.js';
+import { ADMIN, NOW, START, cupId, eventFixture, must, pugId, stageBody } from './eventFixture.js';
 
 const err = (r: E.EventResult<unknown>) => (r.ok ? null : r.error);
 const LATER = new Date('2026-10-11T00:00:00.000Z');
@@ -97,6 +97,11 @@ describe('stages', () => {
     const s = must(E.addStage(f.db, { eventId: f.eventId, by: ADMIN, stage: { type: 'swiss', rulesetId: cupId(f.db) }, now: NOW }));
     expect(E.stageSettingsOf(s).campaignPool).toEqual(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest']);
     expect(err(E.addStage(f.db, { eventId: f.eventId, by: ADMIN, stage: stageBody(f.db, { vetoType: 'pick_ban' }), now: NOW }))).toBe('bad_pool_for_veto');
+  });
+
+  it('refuses a stage on the PUG ruleset: PUG is for PUGs, not events', () => {
+    const f = eventFixture();
+    expect(err(E.addStage(f.db, { eventId: f.eventId, by: ADMIN, stage: stageBody(f.db, { rulesetId: pugId(f.db) }), now: NOW }))).toBe('pug_ruleset');
   });
 
   it('locks every stage change once the event is live', () => {

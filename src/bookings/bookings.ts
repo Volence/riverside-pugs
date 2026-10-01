@@ -9,6 +9,7 @@ import { activeMembers, getTeam, roleOf } from '../teams/teams.js';
 import { getCampaignPool } from '../settings.js';
 import { campaignRegistry } from '../campaignRegistry.js';
 import { parseRules, rulesForKind, type MatchRules } from '../rulesets.js';
+import { isPug } from '../rulesetStore.js';
 import { newLeasePassword } from '../practiceLeases.js';
 import { NOT_HELD_SQL } from '../serverHolds.js';
 import { getServer } from '../serverPool.js';
@@ -77,6 +78,7 @@ export const BOOKING_ERRORS = {
   bad_time: { status: 400, text: 'Pick a start time in the future, inside the booking window.' },
   bad_playlist: { status: 400, text: 'Pick campaigns from the map pool, each once, up to the limit.' },
   bad_ruleset: { status: 400, text: 'Pick one of the listed rule sets.' },
+  pug_ruleset: { status: 400, text: 'PUG rules are for PUGs; copy them into a new ruleset for scrims and events.' },
   bad_config: { status: 400, text: 'Pick one of the listed game configs.' },
   bad_opponent: { status: 400, text: 'Pick another team or player to play against.' },
   bad_side: { status: 400, text: 'A side is a or b.' },
@@ -207,8 +209,16 @@ export function parsePlaylist(db: DB, raw: unknown, max: number): string[] | nul
   return out;
 }
 /** The ruleset a booking is made under: its id (kept on the booking so the
- *  Rulesets desk can count it) and the scrim snapshot of its rules. */
-function pickRules(db: DB, raw: unknown): { id: number; json: string } | null {
+ *  Rulesets desk can count it) and the scrim snapshot of its rules. PUG is
+ *  never pickable here (it is for PUGs, not scrims): named by id, it is
+ *  refused with its own sentence rather than falling through to "no such
+ *  ruleset". */
+function pickRules(db: DB, raw: unknown): { id: number; json: string } | null | 'pug' {
+  if (Number.isInteger(raw)) {
+    const named = db.prepare('SELECT template, name FROM rulesets WHERE id = ? AND archived_at IS NULL').get(raw) as
+      { template: number; name: string } | undefined;
+    if (named && isPug(named)) return 'pug';
+  }
   const row = (raw === undefined || raw === null
     ? db.prepare("SELECT id, rules_json FROM rulesets WHERE name = 'Casual Scrim' AND archived_at IS NULL").get()
     : Number.isInteger(raw)
@@ -255,6 +265,7 @@ export function createBooking(db: DB, o: {
   if (!playlist) return fail('bad_playlist');
   const minutes = estimateMinutes(db, playlist);
   const rules = pickRules(db, o.rulesetId);
+  if (rules === 'pug') return fail('pug_ruleset');
   if (!rules) return fail('bad_ruleset');
   const config = pickConfig(db, o.gameConfig);
   if (!config) return fail('bad_config');
