@@ -263,7 +263,14 @@ describe('ScrimPoster', () => {
       // The window starts 2026-10-01T21:00:00.000Z (a Thursday); 19:30 is
       // inside the 2 hour lead.
       poster = new ScrimPoster({ db, transport: t, publicUrl: PUBLIC_URL, tickMs: 0 });
-      await poster.tickNow();
+      // Before the lead, on a fixed clock: on the real one this tick sent the
+      // reminder every Thursday 19:00 to 21:00 UTC and the test failed.
+      const beforeLead = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-01T18:00:00.000Z'));
+      try {
+        await poster.tickNow();
+      } finally {
+        beforeLead.mockRestore();
+      }
       expect(t.sends).toBe(0);
 
       const inLead = new Date('2026-10-01T19:30:00.000Z');
