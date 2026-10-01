@@ -143,7 +143,8 @@ export function bookingRules(b: BookingRow): MatchRules | null {
   try { return parseRules(b.rules_json); } catch { return null; }
 }
 
-const canUse = (db: DB, steamid: string): boolean => competitiveAccess(db, steamid) && inGoodStanding(db, steamid);
+/** May use competitive play now: the switch lets them in and they are in good standing. */
+export const canUse = (db: DB, steamid: string): boolean => competitiveAccess(db, steamid) && inGoodStanding(db, steamid);
 
 function logEvent(db: DB, id: number, actor: string | null, event: string, detail: object, now: Date): void {
   db.prepare('INSERT INTO booking_events (booking_id, at, actor, event, detail) VALUES (?, ?, ?, ?, ?)')
@@ -161,7 +162,7 @@ function insertPerson(db: DB, id: number, side: Side, steamid: string, role: Per
 
 // ---------- input parsing ----------
 
-function parseStart(raw: unknown, nowMs: number, limits: BookingLimits): number | null {
+export function parseStart(raw: unknown, nowMs: number, limits: BookingLimits): number | null {
   if (typeof raw !== 'string') return null;
   const t = Date.parse(raw);
   if (!Number.isFinite(t)) return null;
@@ -169,12 +170,12 @@ function parseStart(raw: unknown, nowMs: number, limits: BookingLimits): number 
   if (start <= nowMs || start > nowMs + limits.daysAhead * 86_400_000) return null;
   return start;
 }
-function parseMinutes(raw: unknown, limits: BookingLimits): number | null {
+export function parseMinutes(raw: unknown, limits: BookingLimits): number | null {
   const m = typeof raw === 'number' ? raw : Number.NaN;
   if (!Number.isInteger(m) || m % STEP_MINUTES !== 0 || m < limits.minMinutes || m > limits.maxMinutes) return null;
   return m;
 }
-function parsePlaylist(db: DB, raw: unknown, max: number): string[] | null {
+export function parsePlaylist(db: DB, raw: unknown, max: number): string[] | null {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > max) return null;
   const pool = new Set(getCampaignPool(db));
   const registry = campaignRegistry(db);
