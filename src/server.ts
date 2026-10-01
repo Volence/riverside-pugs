@@ -141,6 +141,10 @@ import { CommunityStore } from './community/store.js';
 import { sweepCommunity } from './community/sweep.js';
 import { teamRoutes } from './routes/teams.js';
 import { handleTeamButton, TEAM_BUTTON_PREFIX } from './discord/teamButtons.js';
+import { BookingRunner, TICK_MS as BOOKING_TICK_MS } from './bookings/runner.js';
+import { Notifier } from './notify/notify.js';
+import { bookingRoutes } from './routes/bookings.js';
+import { adminBookingRoutes } from './routes/adminBookings.js';
 import { settingNumber } from './settings.js';
 import type { InstallTarget } from './campaignInstall.js';
 import { notifyDiscord } from './discord.js';
@@ -172,6 +176,8 @@ export interface ServerDeps {
   serverRestarter?: ServerRestarter;
   /** Tests stand in for the game servers a practice lease talks to. */
   practiceRcon?: LeaseRcon;
+  /** Booking runner rcon; the real one when absent. Tests inject a fake. */
+  bookingRcon?: LeaseRcon;
   /** Staff chat sends (src/routes/serverChat.ts). Tests inject a fake. */
   chatRcon?: LeaseRcon;
   /** Tests inject a fake box writer for releases. */
@@ -1757,6 +1763,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     clearInterval(reaper);
     clearInterval(practiceTick);
     practiceLeases.stop();
+    clearInterval(bookingTick);
     clearInterval(presenceSweep);
     clearInterval(renameDigestTimer);
     clearInterval(pruneTimer);
@@ -1871,6 +1878,32 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     maxBytes: () => settingNumber(deps.db, 'community_store_mb', 1024, { min: 100, max: 20000, integer: true }) * 2 ** 20,
   });
   await app.register(communityRoutes, { db: deps.db, store: getCommunityStore, uploadTimeoutMs: deps.communityUploadTimeoutMs });
+
+  // Server bookings (plan 4a). After `bot`: the notifier reads its transport
+  // per DM. resume() finishes any end or setup a restart interrupted; the
+  // releaser's waiters let a booking waiting for a box take one the moment a
+  // release frees it, ahead of the PUG queue (claimIdle keeps it back too).
+  const notifier = new Notifier({
+    db: deps.db,
+    dm: () => { const transport = bot?.transport; return transport ? (userId, payload) => transport.dm(userId, payload) : null; },
+  });
+  const bookingRunner = new BookingRunner({
+    db: deps.db,
+    publicUrl: deps.config.publicUrl,
+    rcon: deps.bookingRcon ?? realServerRcon,
+    release: (serverId) => new Promise<boolean>((resolve) => {
+      releaser.release(serverId, { restart: true, forceRestart: true }, resolve);
+    }),
+    restart: (server) => restarter.restart(server),
+    notifier,
+    preempt: () => { practiceLeases.needServer(); sideGamesRef?.needServer(); },
+  });
+  bookingRunner.resume();
+  releaser.onFreed(() => bookingRunner.allocate());
+  const bookingTick = setInterval(() => { void bookingRunner.tick(); }, BOOKING_TICK_MS);
+  bookingTick.unref();
+  await app.register(bookingRoutes, { db: deps.db, runner: bookingRunner });
+  await app.register(adminBookingRoutes, { db: deps.db, runner: bookingRunner });
 
   await app.register(teamRoutes, {
     db: deps.db, store: getCommunityStore, publicUrl: deps.config.publicUrl,
