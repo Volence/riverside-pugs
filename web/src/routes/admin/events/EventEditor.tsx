@@ -1,5 +1,6 @@
-import { useState } from 'preact/hooks';
-import { adminApi, ApiError, bannerUrl, type AdminEventDetail } from '../../../api';
+import { useEffect, useState } from 'preact/hooks';
+import { useLocation } from 'preact-iso';
+import { adminApi, adminBannerUrl, ApiError, type AdminEventDetail } from '../../../api';
 import { useFetch } from '../../../hooks/useFetch';
 import { Empty, Panel } from '../../../components/bits';
 import { RichText } from '../../../components/RichText';
@@ -8,6 +9,9 @@ import { toBannerImage } from '../../../eventBanner';
 import { fmtTime, useAction } from '../useAction';
 import { EventFieldsForm } from './EventFieldsForm';
 import { StageForm } from './StageForm';
+import { DESKS } from '../adminRoutes';
+
+const DESK_URL = DESKS.find((d) => d.key === 'events')!.path;
 
 /** Mirrors V.EVENT_EDITABLE and V.STAGES_LOCKED (src/events/validate.ts). */
 const EDITABLE: readonly string[] = ['draft', 'announced', 'registration'];
@@ -41,6 +45,18 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
   const { busy, error, run } = useAction(reload);
   const [editing, setEditing] = useState<number | 'new' | null>(null);
   const [reason, setReason] = useState('');
+  const { route } = useLocation();
+  /** The fields form is keyed by the event id plus this, and it moves only
+   *  once the event has reloaded after the form's own successful save, so
+   *  the form then shows what the server stored. Any other reload (a banner,
+   *  a stage) leaves unsaved typing alone. */
+  const [formGen, setFormGen] = useState(0);
+  const [resetForm, setResetForm] = useState(false);
+  useEffect(() => {
+    if (!resetForm) return;
+    setResetForm(false);
+    setFormGen((g) => g + 1);
+  }, [ev]);
 
   if (loadError instanceof ApiError && loadError.status === 404) return <Panel><Empty>No such event.</Empty></Panel>;
   if (!ev || !options) return <Panel><p class="muted">Loading...</p></Panel>;
@@ -55,6 +71,9 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
   /** Closes the stage form only once the server took the stage. */
   const saveStage = (call: () => Promise<unknown>) => {
     void run(async () => { await call(); setEditing(null); });
+  };
+  const saveFields = (f: AdminEventDetail['fields']) => {
+    void run(async () => { await adminApi.updateEvent(id, f); setResetForm(true); });
   };
 
   return (
@@ -80,7 +99,17 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
             )}
           </div>
         )}
-        {canEdit && !over && (
+        {canEdit && ev.status === 'draft' && (
+          <div class="inlinerow">
+            <button class="btn btn--danger" disabled={busy} onClick={() => void run(async () => {
+              await adminApi.deleteEvent(id);
+              route(DESK_URL);
+            }, 'Delete this draft? Its stages and history go with it. Nobody outside staff has seen it.')}>
+              Delete draft
+            </button>
+          </div>
+        )}
+        {canEdit && !over && ev.status !== 'draft' && (
           <form class="admin-form" onSubmit={(e) => { e.preventDefault(); void run(() => adminApi.cancelEvent(id, reason), 'Cancel this event? It cannot be reopened.'); }}>
             <input aria-label="Cancel reason" placeholder="Reason, shown on the event page" maxLength={300} value={reason}
               onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
@@ -91,12 +120,12 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
       <Panel>
         <h3>Event</h3>
         {canEdit && EDITABLE.includes(ev.status)
-          ? <EventFieldsForm key={ev.updatedAt} fields={ev.fields} status={ev.status} busy={busy} onSave={(f) => void run(() => adminApi.updateEvent(id, f))} />
+          ? <EventFieldsForm key={`${ev.id}:${formGen}`} fields={ev.fields} status={ev.status} busy={busy} onSave={saveFields} />
           : <Details ev={ev} />}
       </Panel>
       <Panel>
         <h3>Banner</h3>
-        {ev.bannerKey ? <img class="eventbanner" src={bannerUrl(ev.bannerKey)} alt="" width={1600} height={400} /> : <Empty>No banner.</Empty>}
+        {ev.bannerKey ? <img class="eventbanner" src={adminBannerUrl(ev.id, ev.bannerKey)} alt="" width={1600} height={400} /> : <Empty>No banner.</Empty>}
         {canEdit && (
           <div class="inlinerow">
             <label class="btn btn--ghost btn--sm">

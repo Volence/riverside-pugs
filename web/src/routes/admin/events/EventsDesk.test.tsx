@@ -57,6 +57,7 @@ describe('EventsDesk', () => {
     mockAdmin.events.mockResolvedValue({ events: [] });
     show();
     await screen.findByText('No events yet.');
+    expect(screen.getByText(/a draft only staff can see/)).toBeTruthy();
     fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Spring Cup' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
     expect(await screen.findByText('Pick a start time.')).toBeTruthy();

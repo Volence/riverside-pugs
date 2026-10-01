@@ -34,7 +34,7 @@ export function EventsDesk({ canEdit }: { canEdit: boolean }) {
       {canEdit && (
       <Panel>
         <h3>New event</h3>
-        <p class="muted">It starts as a draft only admins can see. Add its stages, then publish it.</p>
+        <p class="muted">It starts as a draft only staff can see. Add its stages, then publish it.</p>
         {(problem ?? error) && <p class="error" role="alert">{problem ?? error}</p>}
         <form class="admin-form admin-form--stack" onSubmit={create}>
           <label class="teamfield">Name

@@ -48,3 +48,20 @@ export function settingsFrom(d: StageDraft): StageSettings {
     vetoType: d.vetoType, chapters: d.chapters, scheduling: d.type === 'league' ? 'window' : d.scheduling, advanceCount: d.advanceCount,
   };
 }
+
+/** Saved values the options no longer offer: an archived ruleset, a game
+ *  config turned off, a campaign no longer poolable. StageForm shows each as
+ *  "(no longer available)" so the admin sees it and can change or untick it,
+ *  instead of a select quietly showing its first option while the old value
+ *  is what gets sent. */
+export interface StaleValues { rulesetId: number | null; gameConfig: string | null; campaigns: string[] }
+
+export function staleValues(s: StageSettings | null, o: AdminEventOptions): StaleValues {
+  if (!s) return { rulesetId: null, gameConfig: null, campaigns: [] };
+  const offered = new Set(o.campaigns.map((c) => c.slug));
+  return {
+    rulesetId: o.rulesets.some((r) => r.id === s.rulesetId) ? null : s.rulesetId,
+    gameConfig: o.gameConfigs.some((g) => g.key === s.gameConfig) ? null : s.gameConfig,
+    campaigns: s.campaignPool.filter((c) => !offered.has(c)),
+  };
+}

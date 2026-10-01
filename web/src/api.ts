@@ -1763,6 +1763,9 @@ export interface EventView {
 }
 
 export const bannerUrl = (key: string): string => `/api/events/banners/${key}`;
+/** The Events desk's own copy of an event's banner, staff only and not
+ *  behind the competitive switch. The key only busts the cache on a new one. */
+export const adminBannerUrl = (eventId: number, key: string): string => `/api/admin/events/${eventId}/banner?k=${key}`;
 
 export const eventsApi = {
   list: (signal?: AbortSignal) => get<{ events: EventListItem[] }>('/api/events', signal),
@@ -2117,6 +2120,8 @@ export const adminApi = {
   /** `image` is base64 of the 1600 x 400 banner from toBannerImage, no data: prefix. */
   setEventBanner: (id: number, image: string) => post<{ bannerKey: string }>(`/api/admin/events/${id}/banner`, { image }),
   removeEventBanner: (id: number) => post(`/api/admin/events/${id}/banner/remove`),
+  /** Drafts only: a draft is deleted, never cancelled. */
+  deleteEvent: (id: number) => post(`/api/admin/events/${id}/delete`),
   audit: (signal?: AbortSignal) => get<{ actions: AuditEntry[] }>('/api/admin/audit', signal),
   renameSeason: (id: number, name: string) => post(`/api/admin/seasons/${id}/rename`, { name }),
   newSeason: (name: string) => post<{ ok: true; id: number }>('/api/admin/seasons/new', { name }),

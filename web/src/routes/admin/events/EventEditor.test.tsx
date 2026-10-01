@@ -6,7 +6,7 @@ const { mockAdmin, mockConfirm } = vi.hoisted(() => ({
   mockAdmin: {
     event: vi.fn(), eventOptions: vi.fn(), updateEvent: vi.fn(), addStage: vi.fn(), updateStage: vi.fn(), removeStage: vi.fn(),
     reorderStages: vi.fn(), publishEvent: vi.fn(), openEventRegistration: vi.fn(), cancelEvent: vi.fn(),
-    setEventBanner: vi.fn(), removeEventBanner: vi.fn(),
+    setEventBanner: vi.fn(), removeEventBanner: vi.fn(), deleteEvent: vi.fn(),
   },
   mockConfirm: vi.fn(),
 }));
@@ -18,6 +18,7 @@ vi.mock('../../../components/Confirm', () => ({ confirm: mockConfirm }));
 vi.mock('../../../eventBanner', () => ({ toBannerImage: vi.fn(async () => 'BASE64') }));
 const { EventEditor } = await import('./EventEditor');
 const { ApiError } = await import('../../../api');
+const { LocationProvider } = await import('preact-iso');
 
 const OPTIONS: AdminEventOptions = {
   campaigns: [{ slug: 'no_mercy', name: 'No Mercy' }, { slug: 'dead_air', name: 'Dead Air' }, { slug: 'death_toll', name: 'Death Toll' }],
@@ -49,14 +50,14 @@ const detail = (over: Partial<AdminEventDetail> = {}): AdminEventDetail => ({
   ...over,
 });
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); history.replaceState(null, '', '/'); });
 beforeEach(() => {
   for (const f of [...Object.values(mockAdmin), mockConfirm]) f.mockReset();
   mockAdmin.eventOptions.mockResolvedValue(OPTIONS);
   mockConfirm.mockResolvedValue(true);
   for (const f of [mockAdmin.updateEvent, mockAdmin.addStage, mockAdmin.updateStage, mockAdmin.removeStage, mockAdmin.reorderStages,
     mockAdmin.publishEvent, mockAdmin.openEventRegistration, mockAdmin.cancelEvent, mockAdmin.setEventBanner,
-    mockAdmin.removeEventBanner]) f.mockResolvedValue({ ok: true });
+    mockAdmin.removeEventBanner, mockAdmin.deleteEvent]) f.mockResolvedValue({ ok: true });
 });
 
 describe('EventEditor', () => {
@@ -196,7 +197,8 @@ describe('EventEditor', () => {
     expect(screen.getByText('Read only: admins run events.')).toBeTruthy();
     expect(screen.getByText(/boss · Created/)).toBeTruthy();
     expect(screen.getByText('Team event').tagName).toBe('EM');
-    expect(container.querySelector('img.eventbanner')).toBeTruthy();
+    // The desk's own banner route: the public one is behind the switch.
+    expect(container.querySelector('img.eventbanner')!.getAttribute('src')).toBe(`/api/admin/events/3/banner?k=${'e'.repeat(64)}`);
     expect(screen.queryAllByRole('button')).toHaveLength(0);
     expect(container.querySelectorAll('input, select, textarea')).toHaveLength(0);
   });
@@ -205,5 +207,89 @@ describe('EventEditor', () => {
     mockAdmin.event.mockRejectedValue(new ApiError(404, 'No such event.'));
     render(<EventEditor id={99} canEdit />);
     expect(await screen.findByText('No such event.')).toBeTruthy();
+  });
+
+  it('a draft is deleted, not cancelled: Delete draft asks, deletes and goes back to the desk', async () => {
+    mockAdmin.event.mockResolvedValue(detail());
+    history.replaceState(null, '', '/admin/events/3');
+    render(<LocationProvider><EventEditor id={3} canEdit /></LocationProvider>);
+    await screen.findByText('Swiss, 4 rounds, top 8 advance');
+    expect(screen.queryByRole('button', { name: 'Cancel event' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete draft' }));
+    await waitFor(() => expect(mockAdmin.deleteEvent).toHaveBeenCalledWith(3));
+    expect(mockConfirm).toHaveBeenCalled();
+    await waitFor(() => expect(location.pathname).toBe('/admin/events'));
+  });
+
+  it('stays on the draft when Delete draft is refused, and offers it only on a draft', async () => {
+    mockAdmin.event.mockResolvedValue(detail());
+    mockAdmin.deleteEvent.mockRejectedValue(new ApiError(409, 'The event is not at a step that allows that.'));
+    history.replaceState(null, '', '/admin/events/3');
+    const first = render(<LocationProvider><EventEditor id={3} canEdit /></LocationProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete draft' }));
+    expect(await screen.findByText('The event is not at a step that allows that.')).toBeTruthy();
+    expect(location.pathname).toBe('/admin/events/3');
+    first.unmount();
+    mockAdmin.event.mockResolvedValue(detail({ status: 'announced' }));
+    render(<EventEditor id={3} canEdit />);
+    await screen.findByText('Swiss, 4 rounds, top 8 advance');
+    expect(screen.queryByRole('button', { name: 'Delete draft' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Cancel event' })).toBeTruthy();
+  });
+
+  it('keeps unsaved typing through a banner upload that reloads the event', async () => {
+    mockAdmin.event.mockResolvedValue(detail());
+    render(<EventEditor id={3} canEdit />);
+    fireEvent.input(await screen.findByLabelText('Description'), { target: { value: 'Half written' } });
+    mockAdmin.event.mockResolvedValue(detail({ bannerKey: 'e'.repeat(64), updatedAt: '2026-10-01T13:00:00.000Z' }));
+    fireEvent.change(screen.getByLabelText('Banner'), { target: { files: [new File(['x'], 'b.png', { type: 'image/png' })] } });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Remove banner' })).toBeTruthy());
+    expect((screen.getByLabelText('Description') as HTMLTextAreaElement).value).toBe('Half written');
+  });
+
+  it('after its own save, the form shows the event as the server stored it', async () => {
+    mockAdmin.event.mockResolvedValue(detail());
+    render(<EventEditor id={3} canEdit />);
+    fireEvent.input(await screen.findByLabelText('Description'), { target: { value: '  Bring snacks  ' } });
+    mockAdmin.event.mockResolvedValue(detail({ fields: { ...FIELDS, description: 'Bring snacks' }, updatedAt: '2026-10-01T13:00:00.000Z' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save event' }));
+    await waitFor(() => expect((screen.getByLabelText('Description') as HTMLTextAreaElement).value).toBe('Bring snacks'));
+  });
+
+  it('shows stage values that are no longer offered, so they can be cleared', async () => {
+    const old = stage(10, 1, true);
+    old.settings = { ...old.settings, rulesetId: 9, gameConfig: 'retired', campaignPool: ['no_mercy', 'hard_rain'] };
+    mockAdmin.event.mockResolvedValue(detail({ stages: [old, stage(11, 2, false)] }));
+    render(<EventEditor id={3} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit stage 1' }));
+    const ruleset = screen.getByLabelText('Ruleset') as HTMLSelectElement;
+    expect(ruleset.value).toBe('9');
+    expect(ruleset.selectedOptions[0]!.textContent).toBe('Ruleset 9 (no longer available)');
+    const config = screen.getByLabelText('Game config') as HTMLSelectElement;
+    expect(config.value).toBe('retired');
+    expect(config.selectedOptions[0]!.textContent).toBe('retired (no longer available)');
+    const stale = screen.getByLabelText('hard_rain (no longer available)') as HTMLInputElement;
+    expect(stale.checked).toBe(true);
+    fireEvent.click(stale);
+    fireEvent.change(ruleset, { target: { value: '2' } });
+    fireEvent.change(config, { target: { value: 'standard' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save stage' }));
+    await waitFor(() => expect(mockAdmin.updateStage).toHaveBeenCalledWith(3, 10, expect.objectContaining({
+      rulesetId: 2, gameConfig: 'standard', campaignPool: ['no_mercy'],
+    })));
+  });
+
+  it('a blank stage number that must be set is an error and nothing is sent; a blank advance count is none', async () => {
+    mockAdmin.event.mockResolvedValue(detail());
+    render(<EventEditor id={3} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit stage 1' }));
+    fireEvent.input(screen.getByLabelText('Rounds'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save stage' }));
+    expect(await screen.findByText('Rounds needs a whole number.')).toBeTruthy();
+    expect(mockAdmin.updateStage).not.toHaveBeenCalled();
+    fireEvent.input(screen.getByLabelText('Rounds'), { target: { value: '5' } });
+    fireEvent.input(screen.getByLabelText('Advance count'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save stage' }));
+    await waitFor(() => expect(mockAdmin.updateStage).toHaveBeenCalledWith(3, 10, expect.objectContaining({ config: { rounds: 5 }, advanceCount: null })));
   });
 });
