@@ -4,7 +4,7 @@ import { addServer } from '../src/serverPool.js';
 import { setSetting } from '../src/settings.js';
 import { escapeName } from '../src/identity.js';
 import { createTeam } from '../src/teams/teams.js';
-import { acceptPost, createPost, withdrawPost, type ScrimResult } from '../src/scrims/scrims.js';
+import { acceptPost, confirmAccept, createPost, withdrawPost, type ScrimResult } from '../src/scrims/scrims.js';
 import { ScrimPoster } from '../src/scrims/poster.js';
 import { FakeTransport, type FakeMessage } from './fakes/fakeTransport.js';
 
@@ -163,5 +163,61 @@ describe('ScrimPoster', () => {
     const field = (msg.payload.embeds[0].fields as { name: string; value: string }[]).find((f) => f.name === 'Note')!;
     expect(field.value).toBe(escapeName(note));
     expect(field.value).not.toBe(note);
+  });
+
+  it('sends a fresh closed card when the open message was deleted by hand', async () => {
+    setSetting(db, 'discord_scrims_channel_id', CHANNEL);
+    const id = postId();
+    await poster.tickNow();
+    const card = cardRow(id)!;
+    t.messages.find((m) => m.id === card.message_id)!.deleted = true;
+
+    value(withdrawPost(db, { postId: id, by: P[0], now: NOW }));
+    await poster.tickNow();
+
+    const after = cardRow(id)!;
+    expect(after.message_id).not.toBe(card.message_id);
+    expect(after.channel_id).toBe(CHANNEL);
+    expect(after.state).toBe('closed');
+    const reposted = byId(after.message_id);
+    expect(reposted.payload.embeds[0].description).toBe('Withdrawn');
+    expect(reposted.payload.components).toEqual([]);
+  });
+
+  it('leaves the row open when the close edit throws, and closes it on the next tick', async () => {
+    setSetting(db, 'discord_scrims_channel_id', CHANNEL);
+    const id = postId();
+    await poster.tickNow();
+    const card = cardRow(id)!;
+
+    value(withdrawPost(db, { postId: id, by: P[0], now: NOW }));
+    t.failEdits = 1;
+    await poster.tickNow();
+
+    expect(cardRow(id)).toEqual(card);
+    expect(t.edits).toBe(0);
+
+    await poster.tickNow();
+    const closedRow = cardRow(id)!;
+    expect(closedRow.state).toBe('closed');
+    expect(byId(closedRow.message_id).payload.embeds[0].description).toBe('Withdrawn');
+  });
+
+  it('closes a booked post with the Booked line', async () => {
+    setSetting(db, 'discord_scrims_channel_id', CHANNEL);
+    const id = postId();
+    await poster.tickNow();
+    const card = cardRow(id)!;
+
+    const acceptId = value(acceptPost(db, { postId: id, by: P[1], now: NOW })).id;
+    value(confirmAccept(db, { acceptId, by: P[0], now: NOW }));
+    await poster.tickNow();
+
+    const closedRow = cardRow(id)!;
+    expect(closedRow.state).toBe('closed');
+    const closed = byId(closedRow.message_id);
+    expect(closed.id).toBe(card.message_id);
+    expect(closed.payload.embeds[0].description).toBe('Booked');
+    expect(closed.payload.components).toEqual([]);
   });
 });
