@@ -26,7 +26,8 @@ export const NO_SHOW_WINDOW_DAYS = 30;
 export const DEFAULT_CAMPAIGN_MINUTES = 60;
 /** An invite nobody confirms expires this long after it was made... */
 export const UNCONFIRMED_TTL_MS = 24 * 3_600_000;
-/** ...or this long before the start, whichever comes first. */
+/** ...or this long before the start, whichever comes first. A booking made
+ *  less than this far ahead has until its start instead. */
 export const UNCONFIRMED_CUTOFF_MS = 30 * 60_000;
 
 export const iso = (ms: number): string => new Date(ms).toISOString();
@@ -137,14 +138,15 @@ export function playlistMinutes(db: DB, playlist: string[]): number {
 
 /**
  * Confirmed bookings without a box that start within `withinMinutes` of now
- * (or should already have started): how many idle boxes the queue, practice
+ * (or should already have started, and have not yet ended: a booking whose
+ * time is over keeps nothing back): how many idle boxes the queue, practice
  * leases and side games must leave alone right now (claimIdle), or how many
  * bookings are waiting on a box at all (withinMinutes = the hold lead).
  */
 export function bookingsDue(db: DB, nowMs: number, withinMinutes: number): number {
   return (db.prepare(
     `SELECT COUNT(*) AS n FROM bookings b
-      WHERE b.state = 'scheduled' AND b.server_id IS NULL AND b.ending_at IS NULL AND b.starts_at <= ?
+      WHERE b.state = 'scheduled' AND b.server_id IS NULL AND b.ending_at IS NULL AND b.starts_at <= ? AND b.ends_at > ?
         AND NOT EXISTS (SELECT 1 FROM booking_sides s WHERE s.booking_id = b.id AND s.confirmed_at IS NULL)`,
-  ).get(iso(nowMs + withinMinutes * 60_000)) as { n: number }).n;
+  ).get(iso(nowMs + withinMinutes * 60_000), iso(nowMs)) as { n: number }).n;
 }

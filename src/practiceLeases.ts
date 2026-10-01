@@ -343,6 +343,12 @@ export interface PracticeLeaseDeps {
    * must not be marked idle or handed to a waiting match.
    */
   restart: (server: ServerRow) => Promise<boolean>;
+  /**
+   * The lease's hold is gone (ended_at written) after its release. The
+   * releaser's own waiters run before that, while the hold still hides the
+   * box, so production wires the pending-match drain here as side games do.
+   */
+  freed?: () => void;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }
@@ -672,6 +678,11 @@ export class PracticeLeases {
     }
     this.db.prepare('UPDATE practice_leases SET ended_at = ? WHERE id = ? AND ended_at IS NULL').run(iso(this.now()), id);
     console.log(`[practice] lease ${id} ended; server ${lease.server_id} ${back ? 'is back in the pool' : 'did not come back and stays offline'}`);
+    try {
+      this.deps.freed?.();
+    } catch (err) {
+      console.error(`[practice] lease ${id}: the freed hook failed:`, err);
+    }
   }
 
   /**
@@ -685,7 +696,9 @@ export class PracticeLeases {
     const leases = openLeases(this.db);
     if (leases.length === 0) return;
     if (leases.some((l) => l.warned_at !== null && l.ended_at === null)) return;
-    if (claimableServers(this.db).length > 0) return;
+    // Boxes kept back for bookings about to start are not free (as in pickLeaseServer).
+    const kept = bookingsDue(this.db, this.now(), bookingLimits(this.db).protectMinutes);
+    if (claimableServers(this.db).length - kept > 0) return;
     const victim = [...leases].reverse().find(isActive);
     if (!victim) return;
     this.db.prepare('UPDATE practice_leases SET warned_at = ? WHERE id = ?').run(iso(this.now()), victim.id);

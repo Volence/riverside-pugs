@@ -48,13 +48,26 @@ const create = async (as = P[0], opponent: object = { steamid: P[1] }) => {
 };
 
 describe('the switch', () => {
-  it('off hides every route; admins-only lets admins through', async () => {
+  it('off hides every route from players; admins-only lets admins through', async () => {
     db.prepare("UPDATE settings SET value = 'off' WHERE key = 'competitive_enabled'").run();
-    expect((await call('GET', '/api/bookings/mine', ADMIN)).statusCode).toBe(404);
+    expect((await call('GET', '/api/bookings/mine', P[0])).statusCode).toBe(404);
+    expect((await call('GET', '/api/bookings/mine')).statusCode).toBe(404);
     db.prepare("UPDATE settings SET value = 'admins' WHERE key = 'competitive_enabled'").run();
     expect((await call('GET', '/api/bookings/mine', ADMIN)).statusCode).toBe(200);
     expect((await call('GET', '/api/bookings/mine', P[0])).statusCode).toBe(404);
     expect((await call('GET', '/api/bookings/options')).statusCode).toBe(404);
+  });
+
+  it('staff in good standing open a booking page under admins and under off', async () => {
+    const id = await create();
+    for (const mode of ['admins', 'off']) {
+      db.prepare("UPDATE settings SET value = ? WHERE key = 'competitive_enabled'").run(mode);
+      expect((await call('GET', `/api/bookings/${id}`, MOD)).statusCode).toBe(200);
+      expect((await call('GET', `/api/bookings/${id}`, ADMIN)).statusCode).toBe(200);
+      expect((await call('GET', `/api/bookings/${id}`, P[1])).statusCode).toBe(404);
+    }
+    db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(MOD);
+    expect((await call('GET', `/api/bookings/${id}`, MOD)).statusCode).toBe(404);
   });
 });
 

@@ -3,6 +3,7 @@ import type { DB } from '../db.js';
 import { makeOptionalViewer, makeRequireActive } from './guards.js';
 import { getPlayer } from '../players.js';
 import { competitiveAccess } from '../teams/access.js';
+import { inGoodStanding } from '../standing.js';
 import { liveTeams, myTeams } from '../teams/teams.js';
 import { getCampaignPool } from '../settings.js';
 import { campaignRegistry } from '../campaignRegistry.js';
@@ -21,8 +22,8 @@ const NOT_FOUND = { error: 'not found' };
 
 /**
  * Server bookings for players (plan 4a). Every route answers 404 to a viewer
- * the competitive switch keeps out, before anything else, so nothing says
- * the routes exist. Every /:id route answers 404 to a viewer the booking is
+ * the competitive switch keeps out (staff in good standing excepted), before
+ * anything else, so nothing says the routes exist. Every /:id route answers 404 to a viewer the booking is
  * not shown to (bookingView null), so a stranger cannot learn which ids exist.
  * The domain module decides everything; these only translate.
  */
@@ -34,8 +35,13 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
     const p = getPlayer(db, steamid);
     return !!p && (p.is_admin === 1 || p.is_mod === 1);
   };
+  /** Staff in good standing pass whatever the switch says, so a moderator
+   *  can open a booking page under 'admins' or 'off' (the domain still
+   *  decides what they may do there). */
   const allowed = (req: FastifyRequest, reply: FastifyReply): string | null => {
-    if (!competitiveAccess(db, optionalViewer(req))) { reply.code(404).send(NOT_FOUND); return null; }
+    const viewer = optionalViewer(req);
+    const staffViewer = !!viewer && isStaff(viewer) && inGoodStanding(db, viewer);
+    if (!staffViewer && !competitiveAccess(db, viewer)) { reply.code(404).send(NOT_FOUND); return null; }
     return requireActive(req, reply);
   };
   const refuse = (reply: FastifyReply, error: B.BookingError) =>
@@ -132,7 +138,7 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
   });
   action('cancel', (me, id, req) => B.cancelBooking(db, { bookingId: id, by: me, reason: body(req).reason }),
     (me, id) => runner?.onCancelled(id, me, B.getBooking(db, id)?.cancel_reason ?? null));
-  action('extend', (me, id) => B.extendBooking(db, { bookingId: id, by: me }));
+  action('extend', (me, id) => B.extendBooking(db, { bookingId: id, by: me }), (_me, id) => runner?.onExtended(id));
   action('no-show', (me, id) => B.claimNoShow(db, { bookingId: id, by: me }),
     (_me, id, value) => runner?.onNoShow(id, (value as { absent: B.Side }).absent));
   action('end', (me, id) => B.endBooking(db, { bookingId: id, by: me }), (_me, id) => runner?.settle(id));

@@ -136,6 +136,12 @@ describe('bookings due', () => {
     expect(bookingsDue(db, T0 + 10 * 60_000, 75)).toBe(1); // late and still waiting
   });
 
+  it('a booking whose time is over keeps no box back', () => {
+    book(T0, T0 + H, { serverId: null });
+    expect(bookingsDue(db, T0 + H - 60_000, 75)).toBe(1);
+    expect(bookingsDue(db, T0 + H, 75)).toBe(0);
+  });
+
   it('reads the limits from settings', () => {
     expect(bookingLimits(db)).toEqual({
       minMinutes: 60, maxMinutes: 180, daysAhead: 14, playlistMax: 4, maxUpcoming: 4, reserve: 2,

@@ -439,6 +439,18 @@ describe('PracticeLeases.end', () => {
     expect(getLease(db, 1)!.end_reason).toBe('owner');
   });
 
+  it('runs the freed hook once ended_at is written, so a waiting PUG is drained', async () => {
+    seedServer('a'); seedServer('bb');
+    const seen: (string | null)[] = [];
+    mgr = manager({ freed: () => { seen.push(getLease(db, 1)!.ended_at); } });
+    await mgr.create(ME, 'park');
+    await flush();
+    mgr.end(1, 'owner');
+    await flush();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).not.toBeNull();
+  });
+
   it('a box that never answers still gets its lease closed and its restart', async () => {
     seedServer('a'); const b = seedServer('bb');
     mgr = manager();
@@ -555,6 +567,24 @@ describe('preemption', () => {
     await flush();
     mgr.needServer();
     expect(getLease(db, 1)!.warned_at).toBeNull();
+  });
+
+  it('warns a lease for a waiting PUG when the only idle box is kept back for a booking', async () => {
+    seedServer('a'); seedServer('bb');
+    setSetting(db, 'practice_reserve_idle', '0');
+    mgr = manager();
+    await mgr.create(ME, 'park');
+    await flush();
+    // Box 1 is idle but kept back for a confirmed booking starting soon.
+    const id = Number(db.prepare(
+      `INSERT INTO bookings (purpose, starts_at, ends_at, password, tv_password, game_config, rules_json, playlist_json, created_by, created_at)
+       VALUES ('scrim', ?, ?, 'p', 't', 'standard', '{}', '[]', ?, 'x')`,
+    ).run(new Date(T0 + 30 * 60_000).toISOString(), new Date(T0 + 90 * 60_000).toISOString(), ME).lastInsertRowid);
+    db.prepare("INSERT INTO booking_sides (booking_id, side, captain_steamid, confirmed_at) VALUES (?, 'a', ?, 'x'), (?, 'b', ?, 'x')").run(id, ME, id, YOU);
+    db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'configuring', 'no_mercy')").run();
+    expect(claimIdle(db, now)).toBeNull();
+    mgr.needServer();
+    expect(getLease(db, 1)!.warned_at).not.toBeNull();
   });
 
   it('the tick starts a preemption for a PUG that was already waiting', async () => {
