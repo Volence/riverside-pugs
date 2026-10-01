@@ -48,6 +48,7 @@ export const EVENT_ERRORS = {
   bad_stage_type: { status: 400, text: 'A stage is single elimination, double elimination, round robin, Swiss or league.' },
   bad_stage_config: { status: 400, text: 'Those stage settings are out of range.' },
   bad_ruleset: { status: 400, text: 'Pick a ruleset that is not archived.' },
+  pug_ruleset: { status: 400, text: 'PUG rules are for PUGs; copy them into a new ruleset for scrims and events.' },
   bad_game_config: { status: 400, text: 'Pick a game config that is turned on.' },
   bad_pool: { status: 400, text: `A campaign pool is 1 to ${POOL_MAX} different campaigns from the poolable list.` },
   bad_pool_for_veto: { status: 400, text: `Home and away needs at least 2 campaigns; pick and ban needs exactly ${PICK_BAN_POOL}.` },
@@ -94,7 +95,8 @@ export interface StageSettings {
   vetoType: VetoType; chapters: number | null; scheduling: Scheduling; advanceCount: number | null;
 }
 export interface StageContext {
-  campaigns: ReadonlySet<string>; rulesetIds: ReadonlySet<number>; gameConfigs: ReadonlySet<string>; defaultPool: string[];
+  campaigns: ReadonlySet<string>; rulesetIds: ReadonlySet<number>; pugRulesetId: number | null;
+  gameConfigs: ReadonlySet<string>; defaultPool: string[];
 }
 export interface EventFields {
   name: string; startsAt: string; entryKind: EntryKind; official: boolean; teamCap: number | null; description: string;
@@ -329,6 +331,7 @@ export function parseStage(raw: unknown, ctx: StageContext): Checked<StageSettin
   const config = parseStageConfig(type, raw.config);
   if (!config.ok) return config;
   const rulesetId = raw.rulesetId;
+  if (ctx.pugRulesetId !== null && rulesetId === ctx.pugRulesetId) return fail('pug_ruleset');
   if (!Number.isInteger(rulesetId) || !ctx.rulesetIds.has(rulesetId as number)) return fail('bad_ruleset');
   const gameConfig = raw.gameConfig ?? 'standard';
   if (typeof gameConfig !== 'string' || !ctx.gameConfigs.has(gameConfig)) return fail('bad_game_config');

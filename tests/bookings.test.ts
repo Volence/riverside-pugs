@@ -90,6 +90,8 @@ describe('creating', () => {
     expect(r({ opponent: { steamid: '76561199999999999' } })).toBe('not_player');
     expect(r({ gameConfig: 'nope' })).toBe('bad_config');
     expect(r({ rulesetId: 999 })).toBe('bad_ruleset');
+    const pugId = (db.prepare("SELECT id FROM rulesets WHERE name = 'PUG'").get() as { id: number }).id;
+    expect(r({ rulesetId: pugId })).toBe('pug_ruleset');
     setSetting(db, 'competitive_enabled', 'admins');
     expect(r({})).toBe('not_open');
   });

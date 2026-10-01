@@ -12,6 +12,10 @@ export function cupId(db: DB): number {
   return (db.prepare("SELECT id FROM rulesets WHERE name = 'Standard Cup'").get() as { id: number }).id;
 }
 
+export function pugId(db: DB): number {
+  return (db.prepare("SELECT id FROM rulesets WHERE name = 'PUG'").get() as { id: number }).id;
+}
+
 export function stageBody(db: DB, over: Record<string, unknown> = {}): Record<string, unknown> {
   return { type: 'swiss', config: { rounds: 4 }, rulesetId: cupId(db), campaignPool: ['no_mercy', 'dead_air'], advanceCount: 8, ...over };
 }

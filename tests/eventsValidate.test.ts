@@ -4,6 +4,7 @@ import * as V from '../src/events/validate.js';
 const CTX: V.StageContext = {
   campaigns: new Set(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest', 'dead_center', 'dark_carnival', 'swamp_fever', 'hard_rain']),
   rulesetIds: new Set([1, 2]),
+  pugRulesetId: 3,
   gameConfigs: new Set(['standard']),
   defaultPool: ['no_mercy', 'death_toll', 'dead_air', 'blood_harvest'],
 };
@@ -142,6 +143,7 @@ describe('stages', () => {
   it('refuses an unknown type, an archived ruleset, a config that is off, and a bad chapter count', () => {
     expect(bad(V.parseStage(stage({ type: 'ladder' }), CTX))).toBe('bad_stage_type');
     expect(bad(V.parseStage(stage({ rulesetId: 9 }), CTX))).toBe('bad_ruleset');
+    expect(bad(V.parseStage(stage({ rulesetId: 3 }), CTX))).toBe('pug_ruleset');
     expect(bad(V.parseStage(stage({ gameConfig: 'zonemod' }), CTX))).toBe('bad_game_config');
     expect(bad(V.parseStage(stage({ chapters: 6 }), CTX))).toBe('bad_chapters');
     expect(V.parseStage(stage({ chapters: 3 }), CTX).ok).toBe(true);

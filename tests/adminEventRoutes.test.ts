@@ -72,9 +72,9 @@ describe('the Events desk routes', () => {
     const o = r.json();
     expect(o.campaigns).toContainEqual({ slug: 'no_mercy', name: 'No Mercy' });
     expect(o.defaultPool).toEqual(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest']);
-    expect(o.rulesets.map((x: { name: string }) => x.name)).toEqual(['PUG', 'Standard Cup', 'Casual Scrim']);
+    expect(o.rulesets.map((x: { name: string }) => x.name)).toEqual(['Standard Cup', 'Casual Scrim']);
     expect(o.defaultRulesetId).toBe(cup());
-    expect(o.rulesets[1]).toEqual({ id: cup(), name: 'Standard Cup', summary: '3 pauses of 120 s · higher seed picks sides · 15 min no-show grace' });
+    expect(o.rulesets[0]).toEqual({ id: cup(), name: 'Standard Cup', summary: '3 pauses of 120 s · higher seed picks sides · 15 min no-show grace' });
     expect(o.gameConfigs.map((g: { key: string }) => g.key)).toContain('standard');
     expect(o.defaults.checkin).toEqual({ enabled: true, opensMinutes: 60, closesMinutes: 15 });
   });
