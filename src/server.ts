@@ -1972,7 +1972,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(adminBookingRoutes, { db: deps.db, runner: bookingRunner });
 
   // The Events desk (tournaments plan T1a): staff read, admins write, not behind the switch.
-  await app.register(adminEventRoutes, { db: deps.db });
+  await app.register(adminEventRoutes, { db: deps.db, store: getCommunityStore });
 
   // The scrim board (scrim board plan 1, Task 3): shares the booking runner
   // (a confirmed scrim's booking is set up and allocated exactly like one
@@ -1994,7 +1994,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
 
   // Events (tournaments plan T1a): read only, behind the competitive switch.
-  await app.register(eventRoutes, { db: deps.db });
+  await app.register(eventRoutes, { db: deps.db, store: getCommunityStore });
 
   // Purge community tombstones past their 30 days, once at start and then
   // daily. With no community folder yet nothing was ever written, so only

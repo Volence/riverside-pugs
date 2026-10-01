@@ -15,10 +15,12 @@ export const FLOOR_BYTES = 12 * 1024 ** 3;
 
 const HEX64 = /^[0-9a-f]{64}$/;
 
-export type FileKind = 'preview' | 'import' | 'logo';
+export type FileKind = 'preview' | 'import' | 'logo' | 'banner';
 
-const FOLDER: Record<FileKind, string> = { preview: 'previews', import: 'imports', logo: 'logos' };
-const EXT: Record<FileKind, string> = { preview: '.png', import: '.vpk', logo: '.png' };
+const FOLDER: Record<FileKind, string> = { preview: 'previews', import: 'imports', logo: 'logos', banner: 'banners' };
+// A banner is a PNG or a WebP (src/community/validate.ts checkBanner); the
+// banner route reads which from the bytes, so the name does not say.
+const EXT: Record<FileKind, string> = { preview: '.png', import: '.vpk', logo: '.png', banner: '.img' };
 
 /** Prefix of an in-flight write. The sweep deletes any left behind by a crash. */
 export const TEMP_PREFIX = '.tmp-';
@@ -100,6 +102,12 @@ export class CommunityStore {
     return { name, wrote: this.write('logo', name, bytes) };
   }
 
+  /** An event banner (src/events), content addressed like a logo. */
+  putBanner(bytes: Uint8Array): { name: string; wrote: boolean } {
+    const name = createHash('sha256').update(bytes).digest('hex');
+    return { name, wrote: this.write('banner', name, bytes) };
+  }
+
   private read(kind: FileKind, name: string): Buffer | null {
     if (!HEX64.test(name)) return null;
     try {
@@ -112,6 +120,7 @@ export class CommunityStore {
   readPreview(sha: string): Buffer | null { return this.read('preview', sha); }
   readImport(id: string): Buffer | null { return this.read('import', id); }
   readLogo(sha: string): Buffer | null { return this.read('logo', sha); }
+  readBanner(sha: string): Buffer | null { return this.read('banner', sha); }
 
   has(kind: FileKind, name: string): boolean {
     return HEX64.test(name) && exists(this.path(kind, name));

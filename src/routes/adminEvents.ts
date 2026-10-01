@@ -1,5 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { DB } from '../db.js';
+import type { CommunityStore } from '../community/store.js';
+import { BANNER_MAX_BYTES, checkBanner } from '../community/validate.js';
 import { makeRequireAdmin, makeRequireMod } from './guards.js';
 import { logAdmin } from '../admin/audit.js';
 import { getPlayer } from '../players.js';
@@ -49,7 +51,7 @@ export function adminEventDetail(db: DB, ev: E.EventRow): AdminEventDetail {
  * and on success adds logAdmin (Ruling 10) after the event's own transaction
  * has committed its event_log row.
  */
-export async function adminEventRoutes(app: FastifyInstance, opts: { db: DB }): Promise<void> {
+export async function adminEventRoutes(app: FastifyInstance, opts: { db: DB; store: () => CommunityStore }): Promise<void> {
   const { db } = opts;
   const requireAdmin = makeRequireAdmin(db);
   const requireStaff = makeRequireMod(db);
@@ -153,4 +155,28 @@ export async function adminEventRoutes(app: FastifyInstance, opts: { db: DB }): 
   action('/api/admin/events/:id/cancel', 'event_cancel',
     (me, id, body) => E.cancelEvent(db, { eventId: id, by: me, reason: body.reason }),
     (body) => ({ reason: typeof body.reason === 'string' ? body.reason.slice(0, V.CANCEL_REASON_MAX) : null }));
+
+  /** Upload a banner (Ruling 4): base64 of the browser's 1600 x 400 PNG or
+   *  WebP, checked, stored content addressed, then set on the event. */
+  app.post('/api/admin/events/:id/banner', { bodyLimit: Math.ceil(BANNER_MAX_BYTES * 1.4) + 1024 }, async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const id = idOf((req.params as { id: string }).id);
+    if (id === null || !E.getEvent(db, id)) return refuse(reply, 'not_found');
+    const raw = ((req.body ?? {}) as { image?: unknown }).image;
+    if (typeof raw !== 'string') return reply.code(400).send({ error: 'The banner is missing.' });
+    const bytes = Buffer.from(raw, 'base64');
+    const checked = checkBanner(bytes);
+    if (!checked.ok) return reply.code(checked.status).send({ error: checked.error });
+    const store = opts.store();
+    if (!(await store.canTake(bytes.length))) return reply.code(507).send({ error: 'The community shelf is full right now.' });
+    const { name } = store.putBanner(bytes);
+    const r = E.setEventBanner(db, { eventId: id, by: me, bannerKey: name });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'event_banner', id, { bannerKey: name });
+    return { bannerKey: name };
+  });
+
+  action('/api/admin/events/:id/banner/remove', 'event_banner_remove',
+    (me, id) => E.setEventBanner(db, { eventId: id, by: me, bannerKey: null }));
 }

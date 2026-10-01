@@ -293,6 +293,59 @@ export function checkLogo(bytes: Uint8Array): Checked<{ w: number; h: number }> 
   return pass(size);
 }
 
+// ---- Event banner ----------------------------------------------------------
+
+/** Event banners (tournaments plan T1a) are 4:1. The admin's browser crops
+ *  and scales whatever they pick (PNG, JPEG or WebP) to exactly this size and
+ *  re-encodes it as WebP, or PNG where the browser cannot write WebP
+ *  (web/src/eventBanner.ts), so the server only ever stores those two. */
+export const BANNER_W = 1600;
+export const BANNER_H = 400;
+export const BANNER_MAX_BYTES = 1024 * 1024;
+export type BannerType = 'png' | 'webp';
+
+/** Width and height from a WebP's first chunk (VP8, VP8L or VP8X), or null
+ *  when the bytes are not a WebP. */
+export function webpSize(b: Uint8Array): { w: number; h: number } | null {
+  if (b.length < 30) return null;
+  const tag = (o: number) => String.fromCharCode(b[o]!, b[o + 1]!, b[o + 2]!, b[o + 3]!);
+  if (tag(0) !== 'RIFF' || tag(8) !== 'WEBP') return null;
+  const chunk = tag(12);
+  let w = 0;
+  let h = 0;
+  if (chunk === 'VP8 ') {
+    if (b[23] !== 0x9d || b[24] !== 0x01 || b[25] !== 0x2a) return null;
+    w = (b[26]! | (b[27]! << 8)) & 0x3fff;
+    h = (b[28]! | (b[29]! << 8)) & 0x3fff;
+  } else if (chunk === 'VP8L') {
+    if (b[20] !== 0x2f) return null;
+    w = 1 + (b[21]! | ((b[22]! & 0x3f) << 8));
+    h = 1 + ((b[22]! >> 6) | (b[23]! << 2) | ((b[24]! & 0x0f) << 10));
+  } else if (chunk === 'VP8X') {
+    w = 1 + (b[24]! | (b[25]! << 8) | (b[26]! << 16));
+    h = 1 + (b[27]! | (b[28]! << 8) | (b[29]! << 16));
+  } else {
+    return null;
+  }
+  return w > 0 && h > 0 ? { w, h } : null;
+}
+
+/** The image type from its first bytes: what the banner route serves it as. */
+export function bannerType(bytes: Uint8Array): BannerType | null {
+  if (pngSize(bytes)) return 'png';
+  if (webpSize(bytes)) return 'webp';
+  return null;
+}
+
+export function checkBanner(bytes: Uint8Array): Checked<{ w: number; h: number; type: BannerType }> {
+  if (bytes.length > BANNER_MAX_BYTES) return tooBig('The banner is over 1 MB.');
+  const png = pngSize(bytes);
+  const size = png ?? webpSize(bytes);
+  if (!size) return bad('The banner is not a PNG or WebP image.');
+  if (size.w !== BANNER_W || size.h !== BANNER_H) return bad(`The banner must be ${BANNER_W} x ${BANNER_H}.`);
+  return pass({ ...size, type: png ? 'png' : 'webp' });
+}
+
 // ---- Imported HUD ----------------------------------------------------------
 
 /**
