@@ -293,6 +293,17 @@ describe('GET /api/admin/live', () => {
     expect(after.matches[0].teamA.find((p: { steamid: string }) => p.steamid === DROPPED).status).toMatchObject({ kind: 'dropped', held: true, remainingS: 200 });
     expect(after.matches[0].leaveControl).toBe('ok');
   });
+
+  it('says which booking a game belongs to, null for a PUG', async () => {
+    const get = async () => (await app.inject({ method: 'GET', url: '/api/admin/live', cookies: cookies[ADMIN] })).json();
+    expect((await get()).matches[0].bookingId).toBeNull();
+    const booking = Number(db.prepare(
+      `INSERT INTO bookings (purpose, starts_at, ends_at, state, password, tv_password, game_config, rules_json, playlist_json, created_by, created_at)
+       VALUES ('scrim', '2026-10-01T20:00:00.000Z', '2026-10-01T22:00:00.000Z', 'active', 'pw', 'tvpw', 'pug_match', '{}', '["no_mercy"]', ?, '2026-10-01T19:00:00.000Z')`,
+    ).run(ADMIN).lastInsertRowid);
+    db.prepare('UPDATE matches SET booking_id = ? WHERE id = ?').run(booking, matchId);
+    expect((await get()).matches[0].bookingId).toBe(booking);
+  });
 });
 
 describe('POST /api/admin/live/:matchId/noshow-extend', () => {
