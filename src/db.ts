@@ -1108,6 +1108,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   booking_protect_minutes: '75',
   booking_idle_end_minutes: '10',
   booking_extend_minutes: '30',
+  booking_game_min_players: '6',
 };
 
 /** Patch triage backfill (sub-project 1 of the balance catalogue roadmap).
@@ -1860,6 +1861,16 @@ export function openDb(path: string): DB {
   // NULL means a PUG created before rulesets existed: today's PUG rules.
   ensureColumn(db, 'matches', 'rules_json', 'TEXT');
   ensureColumn(db, 'matches', 'game_config', 'TEXT');
+  // Booked games (plan 4b): the booking a scrim match was played under, and
+  // which booking side is the match's team a (decided at adoption).
+  ensureColumn(db, 'matches', 'booking_id', 'INTEGER REFERENCES bookings(id)');
+  ensureColumn(db, 'matches', 'booking_side_a', "TEXT CHECK (booking_side_a IN ('a','b'))");
+  db.exec('CREATE INDEX IF NOT EXISTS matches_booking ON matches (booking_id) WHERE booking_id IS NOT NULL');
+  // Where a booking is in its playlist, and the campaign it moves to next
+  // (and when), set when a game ends or a captain picks one.
+  ensureColumn(db, 'bookings', 'playlist_pos', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'bookings', 'next_campaign', 'TEXT');
+  ensureColumn(db, 'bookings', 'next_at', 'TEXT');
   db.prepare(
     "INSERT OR IGNORE INTO game_configs (key, label, cfg) VALUES ('standard', 'Standard (Rotoblin PUG 4v4)', 'pug_match')",
   ).run();
