@@ -1,0 +1,50 @@
+import type { AdminEventOptions, Scheduling, StageConfig, StageConfigs, StageSettings, StageType, VetoType } from '../../../api';
+
+/**
+ * The stage form's own state: every type's settings at once, so switching the
+ * type back and forth keeps what was typed. settingsFrom sends only the
+ * chosen type's settings; the server (src/events/validate.ts) is the judge of
+ * every range.
+ */
+export interface StageDraft {
+  type: StageType;
+  thirdPlace: boolean; grandFinalReset: boolean; groups: number; rounds: number;
+  weeks: number; matchesPerWeek: number; pairing: 'swiss' | 'round_robin';
+  rulesetId: number; gameConfig: string; campaignPool: string[]; vetoType: VetoType;
+  chapters: number | null; scheduling: Scheduling; advanceCount: number | null;
+}
+
+type AnyConfig = Partial<StageConfigs['single_elim'] & StageConfigs['double_elim'] & StageConfigs['round_robin'] & StageConfigs['swiss'] & StageConfigs['league']>;
+
+export function draftFrom(s: StageSettings | null, o: AdminEventOptions): StageDraft {
+  const c = (s?.config ?? {}) as AnyConfig;
+  return {
+    type: s?.type ?? 'single_elim',
+    thirdPlace: c.thirdPlace ?? false, grandFinalReset: c.grandFinalReset ?? true, groups: c.groups ?? 1, rounds: c.rounds ?? 4,
+    weeks: c.weeks ?? 6, matchesPerWeek: c.matchesPerWeek ?? 1, pairing: c.pairing ?? 'swiss',
+    rulesetId: s?.rulesetId ?? o.defaultRulesetId ?? o.rulesets[0]?.id ?? 0,
+    gameConfig: s?.gameConfig ?? 'standard',
+    campaignPool: s ? [...s.campaignPool] : [...o.defaultPool],
+    vetoType: s?.vetoType ?? 'ban_to_one',
+    chapters: s?.chapters ?? null,
+    scheduling: s?.scheduling ?? 'rolling',
+    advanceCount: s?.advanceCount ?? null,
+  };
+}
+
+export function configOf(d: StageDraft): StageConfig {
+  switch (d.type) {
+    case 'single_elim': return { thirdPlace: d.thirdPlace };
+    case 'double_elim': return { grandFinalReset: d.grandFinalReset };
+    case 'round_robin': return { groups: d.groups };
+    case 'swiss': return { rounds: d.rounds };
+    case 'league': return { weeks: d.weeks, matchesPerWeek: d.matchesPerWeek, pairing: d.pairing };
+  }
+}
+
+export function settingsFrom(d: StageDraft): StageSettings {
+  return {
+    type: d.type, config: configOf(d), rulesetId: d.rulesetId, gameConfig: d.gameConfig, campaignPool: d.campaignPool,
+    vetoType: d.vetoType, chapters: d.chapters, scheduling: d.type === 'league' ? 'window' : d.scheduling, advanceCount: d.advanceCount,
+  };
+}
