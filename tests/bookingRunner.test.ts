@@ -1,0 +1,223 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { openDb, type DB } from '../src/db.js';
+import { addServer, type ServerRow } from '../src/serverPool.js';
+import { setSetting } from '../src/settings.js';
+import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
+import { Notifier } from '../src/notify/notify.js';
+import {
+  addPerson, cancelBooking, confirmBooking, createBooking, getBooking, holdBox, markSetup, respondPerson, sideRow,
+} from '../src/bookings/bookings.js';
+import { BookingRunner, bookingLines } from '../src/bookings/runner.js';
+
+const P = Array.from({ length: 10 }, (_, i) => `765611990000009${String(i).padStart(2, '0')}`);
+const START = Date.parse('2026-10-02T20:00:00.000Z');
+const MIN = 60_000;
+const PUB = 'Rotoblin Pub VS';
+
+let db: DB;
+let now: number;
+let sent: { server: string; cmds: string[] }[];
+let box: Record<string, { type: string; plugin: boolean; map: string; humans: string[]; down: boolean; execs: number; failExec: number }>;
+let released: number[];
+let restarted: string[];
+let dms: { to: string; content: string }[];
+let preempts: number;
+let runner: BookingRunner;
+
+const status = (b: { map: string; humans: string[] }) => [
+  'hostname: test', `map     : ${b.map} at: 0 x, 0 y, 0 z`, `players : ${b.humans.length} humans, 0 bots (31 max)`,
+  '# userid name uniqueid connected ping loss state rate adr',
+  ...b.humans.map((sid, i) => `#  ${i + 2} ${i + 1} "h${i}" ${steam2(sid)} 01:12 33 0 active 128000 10.0.0.${i}:27005`),
+].join('\n');
+/** SteamID64 -> STEAM_1:Y:Z, the form `status` prints. */
+const steam2 = (sid: string) => { const n = BigInt(sid) - 76561197960265728n; return `STEAM_1:${n % 2n}:${n / 2n}`; };
+
+function build(over: Partial<ConstructorParameters<typeof BookingRunner>[0]> = {}) {
+  return new BookingRunner({
+    db,
+    publicUrl: 'https://riversidepug.com',
+    rcon: async (server: ServerRow, cmds: string[]) => {
+      const b = box[server.name];
+      if (b.down) throw new Error('rcon connect timeout');
+      sent.push({ server: server.name, cmds });
+      return cmds.map((c) => {
+        if (c === 'status') return status(b);
+        if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${b.type}" ( def. "" )`;
+        if (c === 'l4d_booking_version') return b.plugin ? '"l4d_booking_version" = "1.0.0" ( def. "1.0.0" )' : 'Unknown command "l4d_booking_version"';
+        if (c === 'exec pug_match') { b.execs++; if (b.failExec > 0) b.failExec--; else b.type = 'Rotoblin 4v4 PUG'; }
+        const m = /^changelevel (\S+)$/.exec(c);
+        if (m) b.map = m[1];
+        return '';
+      });
+    },
+    release: async (id) => { released.push(id); db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id); return true; },
+    restart: async (server) => { restarted.push(server.name); box[server.name].type = PUB; box[server.name].map = 'l4d_vs_hospital01_apartment'; return true; },
+    notifier: new Notifier({ db, dm: () => async (to, p) => { dms.push({ to, content: p.content ?? '' }); } }),
+    preempt: () => { preempts++; },
+    sleep: async () => {},
+    now: () => now,
+    ...over,
+  });
+}
+
+beforeEach(() => {
+  db = openDb(':memory:');
+  now = START - 2 * 24 * 60 * MIN;
+  sent = []; released = []; restarted = []; dms = []; preempts = 0; box = {};
+  const ins = db.prepare("INSERT INTO players (steamid, name, status, discord_id) VALUES (?, ?, 'active', ?)");
+  P.forEach((id, i) => ins.run(id, `p${i}`, `d${i}`));
+  setSetting(db, 'competitive_enabled', 'everyone');
+  setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'death_toll', 'dead_center']));
+  setSetting(db, 'pug_reserve_servers', '1');
+  for (const n of ['a', 'bb', 'ccc']) {
+    const id = addServer(db, { name: n, host: '10.0.0.1', port: 27014 + n.length, rconPort: 1, rconPassword: 'x' });
+    db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id);
+    box[n] = { type: PUB, plugin: true, map: 'l4d_vs_hospital01_apartment', humans: [], down: false, execs: 0, failExec: 0 };
+  }
+  runner = build();
+});
+
+const book = (o: { playlist?: string[]; confirm?: boolean } = {}) => {
+  const r = createBooking(db, {
+    by: P[0], opponent: { steamid: P[1] }, startsAt: new Date(START).toISOString(), minutes: 120,
+    playlist: o.playlist ?? ['no_mercy'], now: new Date(now),
+  });
+  if (!r.ok) throw new Error(r.error);
+  if (o.confirm !== false) confirmBooking(db, { bookingId: r.value.id, by: P[1], now: new Date(now) });
+  return r.value.id;
+};
+
+describe('allocation', () => {
+  it('takes the highest-id idle box at the hold time, not before, and sets it up', async () => {
+    const id = book();
+    now = START - 16 * MIN;
+    runner.allocate();
+    expect(getBooking(db, id)!.state).toBe('scheduled');
+    now = START - 15 * MIN;
+    runner.allocate();
+    await runner.idle();
+    const b = getBooking(db, id)!;
+    expect(b).toMatchObject({ state: 'ready', server_id: 3, setup_attempts: 1 });
+    expect(restarted).toEqual(['ccc']);
+    const cmds = sent.filter((s) => s.server === 'ccc').flatMap((s) => s.cmds);
+    expect(cmds).toContain('exec pug_match');
+    expect(cmds).toContain(`l4d_booking_password "${b.password}"`);
+    expect(cmds).toContain(`l4d_booking_tv_password "${b.tv_password}"`);
+    expect(cmds).toContain('changelevel l4d_vs_hospital01_apartment');
+    expect(cmds.indexOf('exec pug_match')).toBeLessThan(cmds.indexOf('changelevel l4d_vs_hospital01_apartment'));
+    // The connect line goes to the accepted people of both sides.
+    expect(dms.filter((d) => d.content.includes(`password ${b.password}`)).map((d) => d.to).sort()).toEqual(['d0', 'd1']);
+  });
+
+  it('waits for an unconfirmed booking, and asks practice to give a box back when none is free', async () => {
+    const unconfirmed = book({ confirm: false });
+    now = START - 10 * MIN;
+    runner.allocate();
+    expect(getBooking(db, unconfirmed)!.state).toBe('scheduled');
+    expect(preempts).toBe(0);
+    const id = book();
+    db.prepare("UPDATE servers SET status = 'live'").run();
+    runner.allocate();
+    expect(getBooking(db, id)!.state).toBe('scheduled');
+    expect(preempts).toBe(1);
+    db.prepare("UPDATE servers SET status = 'idle' WHERE id = 1").run();
+    runner.allocate();
+    await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ state: 'ready', server_id: 1 });
+  });
+
+  it('skips a box without the dlc4 mappack for an L4D2 campaign', () => {
+    db.prepare('UPDATE servers SET has_dlc4 = 1 WHERE id = 1').run();
+    const id = book({ playlist: ['dead_center'] });
+    expect(runner.pickBox(getBooking(db, id)!)?.id).toBe(1);
+  });
+});
+
+describe('setup failures', () => {
+  it('retries once, then cancels as setup_failed, tells staff and both sides, and releases the box', async () => {
+    const events: AdminEvent[] = [];
+    const unsubscribe = subscribeAdminEvents((e) => events.push(e));
+    box.ccc.plugin = false;
+    const id = book();
+    now = START - 15 * MIN;
+    runner.allocate();
+    await runner.idle();
+    unsubscribe();
+    const b = getBooking(db, id)!;
+    expect(b).toMatchObject({ state: 'cancelled', end_reason: 'setup_failed', setup_attempts: 2 });
+    expect(b.ended_at).not.toBeNull();
+    expect(restarted).toEqual(['ccc', 'ccc']);
+    expect(released).toEqual([3]);
+    expect(events.some((e) => e.kind === 'problem' && /l4d_booking/.test(e.text))).toBe(true);
+    expect(dms.filter((d) => /cancelled/.test(d.content)).map((d) => d.to).sort()).toEqual(['d0', 'd1']);
+    expect(sideRow(db, id, 'a')!.no_show_at).toBeNull();
+  });
+
+  it('a config that takes on the second try still makes the booking ready', async () => {
+    box.ccc.failExec = 1;
+    const id = book();
+    now = START - 15 * MIN;
+    runner.allocate();
+    await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ state: 'ready', setup_attempts: 1 });
+    expect(box.ccc.execs).toBe(2);
+  });
+
+  it('a cancel during setup stops it and winds the box down', async () => {
+    const id = book();
+    now = START - 15 * MIN;
+    holdBox(db, id, 3, new Date(now));
+    markSetup(db, id, new Date(now));
+    cancelBooking(db, { bookingId: id, by: P[0], now: new Date(now) });
+    runner.settle(id);
+    await runner.idle();
+    expect(getBooking(db, id)!.ended_at).not.toBeNull();
+    expect(released).toEqual([3]);
+  });
+});
+
+describe('resume after a web restart', () => {
+  it('reruns setup for a held booking and winds down an ending one without a goodbye', async () => {
+    const held = book();
+    now = START - 15 * MIN;
+    holdBox(db, held, 3, new Date(now));
+    const ending = book();
+    holdBox(db, ending, 2, new Date(now));
+    cancelBooking(db, { bookingId: ending, by: P[0], now: new Date(now) });
+    const fresh = build();
+    fresh.resume();
+    await fresh.idle();
+    expect(getBooking(db, held)!.state).toBe('ready');
+    expect(getBooking(db, ending)!.ended_at).not.toBeNull();
+    expect(sent.filter((s) => s.server === 'bb').flatMap((s) => s.cmds).some((c) => c.startsWith('say '))).toBe(false);
+  });
+});
+
+describe('notices', () => {
+  it('tells side b of the invite, side a of the confirm, an added person of their invite, everyone of a cancel', () => {
+    const id = book({ confirm: false });
+    runner.onCreated(id);
+    expect(dms.map((d) => d.to)).toEqual(['d1']);
+    confirmBooking(db, { bookingId: id, by: P[1], now: new Date(now) });
+    runner.onConfirmed(id);
+    expect(dms.map((d) => d.to)).toEqual(['d1', 'd0']);
+    addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[5], role: 'ringer', now: new Date(now) });
+    runner.onPersonAdded(id, P[5], P[0]);
+    expect(dms.at(-1)!.to).toBe('d5');
+    respondPerson(db, { bookingId: id, steamid: P[5], accept: true, now: new Date(now) });
+    dms = [];
+    cancelBooking(db, { bookingId: id, by: P[0], reason: 'sick', now: new Date(now) });
+    runner.onCancelled(id, P[0], 'sick');
+    expect(dms.map((d) => d.to).sort()).toEqual(['d1', 'd5']);
+    expect(dms[0].content).toContain('sick');
+  });
+});
+
+describe('bookingLines', () => {
+  it('keeps team names console-safe', () => {
+    const id = book();
+    db.prepare("UPDATE players SET name = 'a\"b;c ü' WHERE steamid = ?").run(P[0]);
+    const lines = bookingLines(db, getBooking(db, id)!);
+    expect(lines.find((l) => l.startsWith('l4d_booking_notice'))).toBe('l4d_booking_notice "Booked: abc ?\'s group vs p1\'s group until 22:00 UTC"');
+  });
+});
