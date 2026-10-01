@@ -3137,7 +3137,7 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .activity__legend { margin: var(--sp-3) 0 0; font-size: var(--fs-dense); }
 .activity__waits { margin: 0 0 var(--sp-3); font-size: var(--fs-dense); }
 
-/* ---------- Teams (routes/Teams.tsx, routes/TeamJoin.tsx) ---------- */
+/* ---------- Teams (routes/Teams.tsx, routes/TeamJoin.tsx, routes/Team.tsx) ---------- */
 
 .teamgrid { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
 .teamcard {
@@ -3174,3 +3174,26 @@ tbody tr.is-lifted td { opacity: 0.55; }
 @media (max-width: 480px) { .teamform { flex-direction: column; align-items: stretch; } }
 
 .teamjoin { display: flex; align-items: center; justify-content: center; gap: var(--sp-3); flex-wrap: wrap; padding: var(--sp-4) 0; }
+
+.teamhead { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); }
+.teamhead__logo {
+  width: 96px; height: 96px; flex: none; border-radius: var(--radius); object-fit: cover;
+  display: inline-flex; align-items: center; justify-content: center; font-size: var(--fs-title);
+}
+.teamhead__name { margin: 0; }
+.teamhead__line { margin: var(--sp-1) 0 0; color: var(--text-muted); font-size: var(--fs-dense); }
+@media (max-width: 480px) { .teamhead { flex-direction: column; align-items: flex-start; } }
+
+.teamroster { width: 100%; border-collapse: collapse; }
+.teamroster td { padding: var(--sp-2) var(--sp-2); border-bottom: 1px solid var(--border); vertical-align: middle; }
+.teamroster__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: flex-end; }
+
+.teamsearch { display: flex; flex-wrap: wrap; align-items: end; gap: var(--sp-3); }
+.teamsearch label { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); color: var(--text-muted); }
+.teamsearch__results { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.teamsearch__results li { display: flex; align-items: center; gap: var(--sp-2); }
+
+.teamsettings { display: flex; flex-direction: column; gap: var(--sp-3); align-items: flex-start; }
+.teamsettings label { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); color: var(--text-muted); }
+
+.teamformer { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); color: var(--text-muted); font-size: var(--fs-dense); }
