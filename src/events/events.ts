@@ -326,3 +326,22 @@ export function cancelEvent(db: DB, o: { eventId: number; by: string; reason: un
     return V.ok(getEvent(db, ev.id)!);
   })();
 }
+
+const BANNER_KEY = /^[0-9a-f]{64}$/;
+
+/** Set or clear the banner (Ruling 4). Any status: a finished event's page
+ *  keeps a banner, and a new one may still go up for the archive. The file is
+ *  already in the community store; setting the key that is there already
+ *  writes nothing. */
+export function setEventBanner(db: DB, o: { eventId: number; by: string; bannerKey: string | null; now?: Date }): EventResult<EventRow> {
+  const at = iso(o.now);
+  if (o.bannerKey !== null && !BANNER_KEY.test(o.bannerKey)) return V.fail('bad_request');
+  return db.transaction((): EventResult<EventRow> => {
+    const ev = getEvent(db, o.eventId);
+    if (!ev) return V.fail('not_found');
+    if (ev.banner_key === o.bannerKey) return V.ok(ev);
+    db.prepare('UPDATE events SET banner_key = ?, updated_at = ? WHERE id = ?').run(o.bannerKey, at, ev.id);
+    logEvent(db, ev.id, o.by, o.bannerKey ? 'banner_set' : 'banner_removed', at, { bannerKey: o.bannerKey, previous: ev.banner_key });
+    return V.ok(getEvent(db, ev.id)!);
+  })();
+}

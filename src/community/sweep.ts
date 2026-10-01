@@ -47,14 +47,22 @@ export function sweepCommunity(db: DB, store: CommunityStore | null, now: Date):
     preview: new Set([...inUse('preview'), ...inUse('preview_infected')]),
     import: inUse('import_id'),
     // A logo stays while any team, live or disbanded, points at it: a
-    // disbanded team's page still shows its logo.
-    logo: new Set((db.prepare('SELECT DISTINCT logo_key AS v FROM teams WHERE logo_key IS NOT NULL').all() as { v: string }[]).map((r) => r.v)),
+    // disbanded team's page still shows its logo. An event entry's logo is a
+    // snapshot of its team's (tournaments plan T1b) and keeps the file too,
+    // so an archived event never loses it to a later logo change.
+    logo: new Set((db.prepare(
+      `SELECT logo_key AS v FROM teams WHERE logo_key IS NOT NULL
+       UNION SELECT logo_key FROM event_entries WHERE logo_key IS NOT NULL`,
+    ).all() as { v: string }[]).map((r) => r.v)),
+    // A banner stays while any event, of any status, holds it: event pages
+    // are permanent.
+    banner: new Set((db.prepare('SELECT DISTINCT banner_key AS v FROM events WHERE banner_key IS NOT NULL').all() as { v: string }[]).map((r) => r.v)),
   };
 
   // Files of a just-purged row go at once whatever their age. Everything else
   // unreferenced (a crash between write and insert, a stray temp file) waits
   // out the grace period first.
-  const justPurged: Record<FileKind, Set<string>> = { preview: new Set(), import: new Set(), logo: new Set() };
+  const justPurged: Record<FileKind, Set<string>> = { preview: new Set(), import: new Set(), logo: new Set(), banner: new Set() };
   if (purged > 0) {
     for (const r of db.prepare('SELECT preview, preview_infected, import_id FROM community_entries WHERE purged_at = ?')
       .all(now.toISOString()) as { preview: string | null; preview_infected: string | null; import_id: string | null }[]) {
@@ -66,7 +74,7 @@ export function sweepCommunity(db: DB, store: CommunityStore | null, now: Date):
 
   const graceCutoff = now.getTime() - ORPHAN_GRACE_MS;
   let files = 0;
-  for (const kind of ['preview', 'import', 'logo'] as FileKind[]) {
+  for (const kind of ['preview', 'import', 'logo', 'banner'] as FileKind[]) {
     for (const f of store.list(kind)) {
       if (f.name && refs[kind].has(f.name)) continue;
       const old = f.mtimeMs < graceCutoff;

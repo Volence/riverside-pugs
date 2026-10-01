@@ -32,6 +32,7 @@ const MUTATIONS: Record<string, { from: 'draft' | 'announced'; action: string; r
   publishEvent: { from: 'draft', action: 'published', run: ({ db, eventId }) => E.publishEvent(db, { eventId, by: ADMIN, now: NOW }) },
   openRegistration: { from: 'announced', action: 'registration_opened', run: ({ db, eventId }) => E.openRegistration(db, { eventId, by: ADMIN, now: NOW }) },
   cancelEvent: { from: 'draft', action: 'cancelled', run: ({ db, eventId }) => E.cancelEvent(db, { eventId, by: ADMIN, reason: 'Not enough teams', now: NOW }) },
+  setEventBanner: { from: 'announced', action: 'banner_set', run: ({ db, eventId }) => E.setEventBanner(db, { eventId, by: ADMIN, bannerKey: 'a'.repeat(64), now: NOW }) },
 };
 
 const logCount = (f: Fixture) => (f.db.prepare('SELECT COUNT(*) AS n FROM event_log').get() as { n: number }).n;
