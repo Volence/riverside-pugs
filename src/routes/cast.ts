@@ -6,6 +6,9 @@ import { spectateFor, type SpectateInfo } from '../spectate.js';
 import { campaignDisplayName, campaignRegistry } from '../campaignRegistry.js';
 import { phaseFor, roundInProgress } from '../liveView.js';
 import { makeRequireCaster } from './guards.js';
+import { viewerFor } from '../matchVisibility.js';
+import { fullyInvited } from '../bookings/casters.js';
+import { getBooking } from '../bookings/bookings.js';
 
 export interface CastMatch {
   id: number;
@@ -31,9 +34,12 @@ export interface CastMatch {
   teamB: string[];
   /** The game server itself, to join as an in-game spectator. Null for a
    *  match started in game: that runs on the box's own sv_password from
-   *  secrets.cfg, which the site never knows. */
+   *  secrets.cfg, which the site never knows. Always null for a booking's
+   *  game: casters never get a booked box's game password. */
   connect: { host: string; port: number; password: string } | null;
   spectate: SpectateInfo | null;
+  /** A booking's game: watched through SourceTV only (connect is null). */
+  booked: boolean;
 }
 
 /**
@@ -45,6 +51,11 @@ export interface CastMatch {
  * Nothing on the game server keeps an extra spectator out: the plugin never
  * kicks an unrostered client, it only places the rostered eight. So this is
  * website work only.
+ *
+ * A booking's games (plan 4c) are listed only to staff and to a caster both
+ * sides invited (src/bookings/casters.ts), whatever their kind. For those the
+ * relay password is the booking's own tv_password, never servers.tv_password,
+ * and this route is the only one that ever returns it.
  *
  * Each caster's first read of a match's password goes in the admin log
  * (quietly, no feed post: the page is polled), so a leaked password has a
@@ -58,20 +69,22 @@ export async function castRoutes(app: FastifyInstance, opts: { db: DB }): Promis
     const viewer = requireCaster(req, reply);
     if (!viewer) return reply;
 
-    // Casters see every PUG and tournament match; a scrim is invisible here
-    // unless both captains invite a caster, which arrives with bookings.
-    const rows = db.prepare(
-      `SELECT m.id, m.campaign, m.token, m.origin, m.server_id AS serverId, l.current_map AS currentMap,
-              s.name AS serverName, s.host, s.port
+    // Casters see every PUG and tournament match. A booking's game (a scrim,
+    // or a tournament game on a booked box) only for staff or a caster both
+    // sides invited, checked live on every read.
+    const staff = viewerFor(db, viewer).staff;
+    const rows = (db.prepare(
+      `SELECT m.id, m.campaign, m.token, m.origin, m.server_id AS serverId, m.booking_id AS bookingId,
+              l.current_map AS currentMap, s.name AS serverName, s.host, s.port
        FROM matches m
        LEFT JOIN match_live l ON l.match_id = m.id
        LEFT JOIN servers s ON s.id = m.server_id
-       WHERE m.state = 'live' AND m.kind IN ('pug', 'tournament')
+       WHERE m.state = 'live' AND (m.booking_id IS NOT NULL OR m.kind IN ('pug', 'tournament'))
        ORDER BY m.id DESC`,
     ).all() as {
       id: number; campaign: string; token: string | null; origin: string | null; serverId: number | null;
-      currentMap: string | null; serverName: string | null; host: string | null; port: number | null;
-    }[];
+      bookingId: number | null; currentMap: string | null; serverName: string | null; host: string | null; port: number | null;
+    }[]).filter((r) => r.bookingId === null || staff || fullyInvited(db, r.bookingId, viewer));
     const teamOf = db.prepare(
       `SELECT p.name FROM match_players mp JOIN players p ON p.steamid = mp.player_id
        WHERE mp.match_id = ? AND mp.team = ? ORDER BY p.name COLLATE NOCASE`,
@@ -85,8 +98,15 @@ export async function castRoutes(app: FastifyInstance, opts: { db: DB }): Promis
       "SELECT 1 FROM admin_actions WHERE action = 'cast_connect' AND admin_id = ? AND target = ? LIMIT 1",
     );
 
+    /** The booked box's relay with the booking's own password. */
+    const bookingRelay = (serverId: number | null, bookingId: number): SpectateInfo | null => {
+      const tv = spectateFor(db, serverId);
+      const b = getBooking(db, bookingId);
+      return tv && b ? { ...tv, password: b.tv_password } : null;
+    };
+
     const matches: CastMatch[] = rows.map((r) => {
-      const connect = r.origin === 'queue' && r.token && r.host !== null && r.port !== null
+      const connect = r.bookingId === null && r.origin === 'queue' && r.token && r.host !== null && r.port !== null
         ? { host: r.host, port: r.port, password: serverPasswordFor(r.token) }
         : null;
       if (connect && !seen.get(viewer, String(r.id))) {
@@ -110,7 +130,8 @@ export async function castRoutes(app: FastifyInstance, opts: { db: DB }): Promis
         teamA: (teamOf.all(r.id, 'a') as { name: string }[]).map((p) => p.name),
         teamB: (teamOf.all(r.id, 'b') as { name: string }[]).map((p) => p.name),
         connect,
-        spectate: spectateFor(db, r.serverId),
+        booked: r.bookingId !== null,
+        spectate: r.bookingId === null ? spectateFor(db, r.serverId) : bookingRelay(r.serverId, r.bookingId),
       };
     });
     return { matches };

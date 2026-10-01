@@ -105,6 +105,9 @@ const PLAIN: [table: string, column: string][] = [
   ['booking_sides', 'captain_steamid'],
   ['booking_people', 'added_by'],
   ['booking_events', 'actor'],
+  // Who invited a caster to a booking, per side.
+  ['booking_casters', 'invited_by_a'],
+  ['booking_casters', 'invited_by_b'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`
@@ -150,6 +153,9 @@ const KEYED: [table: string, column: string][] = [
   // One place per person per booking. Where both accounts were in one booking
   // (on one side or on both), the survivor's row is kept.
   ['booking_people', 'steamid'],
+  // One invite per caster per booking. Where both accounts were invited to one
+  // booking, the survivor's row (and its halves) is kept.
+  ['booking_casters', 'caster_steamid'],
   // One opt-out per type; where both accounts set one, the survivor's stands.
   ['notification_prefs', 'steamid'],
 ];

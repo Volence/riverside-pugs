@@ -13,6 +13,7 @@ import { newLeasePassword } from '../practiceLeases.js';
 import { NOT_HELD_SQL } from '../serverHolds.js';
 import { getServer } from '../serverPool.js';
 import { bookingGames, type BookingGameView } from './games.js';
+import { castersOf, type CasterView } from './casters.js';
 import {
   allowance, bookingLimits, capacityProblem, iso, upcomingCount, OPEN_STATES_SQL, PEOPLE_PER_SIDE, SHOWN_MIN, STEP_MINUTES,
   UNCONFIRMED_CUTOFF_MS, UNCONFIRMED_TTL_MS, type BookingLimits, type BookingState, type Party,
@@ -79,6 +80,7 @@ export const BOOKING_ERRORS = {
   too_early: { status: 409, text: 'The other side still has time to arrive.' },
   not_shown: { status: 409, text: 'Your side has to be on the server first.' },
   they_showed: { status: 409, text: 'The other side is on the server.' },
+  not_caster: { status: 400, text: 'That player is not a caster.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type BookingError = keyof typeof BOOKING_ERRORS;
 export type Result<T> = { ok: true; value: T } | { ok: false; error: BookingError };
@@ -729,6 +731,8 @@ export interface BookingView {
   noShowFrom: string;
   viewer: { side: Side | null; manages: Side[]; staff: boolean; invited: boolean };
   games: BookingGameView[];
+  /** Casters either side invited, and which halves are set (plan 4c). */
+  casters: CasterView[];
 }
 
 export function bookingView(db: DB, id: number, viewer: { steamid: string; staff: boolean }): BookingView | null {
@@ -774,6 +778,7 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
     noShowFrom: iso(Date.parse(b.starts_at) + (rules?.noShowGraceMinutes ?? 15) * 60_000),
     viewer: { side: me?.side ?? manages[0] ?? null, manages, staff: viewer.staff, invited: me?.status === 'invited' },
     games: seesGames ? bookingGames(db, id) : [],
+    casters: castersOf(db, id),
   };
 }
 
