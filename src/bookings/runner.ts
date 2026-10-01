@@ -174,6 +174,10 @@ export class BookingRunner {
   private readonly emptyWatches = new Map<number, number>();
   /** Booking game tokens to send sm_pug_abort for at the start of the wind-down. */
   private readonly abortTokens = new Map<number, string>();
+  /** Bookings whose box has had a campaign start said by loadNext: the
+   *  go-active announcement of the first campaign is then moot (a captain
+   *  picked a campaign before anyone was on, and it was already announced). */
+  private readonly announced = new Set<number>();
 
   constructor(private readonly deps: BookingRunnerDeps) {
     this.db = deps.db;
@@ -381,6 +385,7 @@ export class BookingRunner {
     }
     markReleased(this.db, id, new Date(this.now()));
     this.emptyWatches.delete(id);
+    this.announced.delete(id);
     try {
       this.deps.freed?.();
     } catch (err) {
@@ -485,7 +490,7 @@ export class BookingRunner {
       // The first campaign was loaded by setup, before anyone was on: its
       // start lines are said once, when the booking goes active.
       const first = (JSON.parse(b.playlist_json) as string[])[b.playlist_pos];
-      if (first) await this.push(b.id, server, () => this.campaignStartLines(getBooking(this.db, b.id)!, first), 'the campaign start lines');
+      if (first && !this.announced.has(b.id)) await this.push(b.id, server, () => this.campaignStartLines(getBooking(this.db, b.id)!, first), 'the campaign start lines');
     }
 
     const fresh = getBooking(this.db, b.id)!;
@@ -584,6 +589,7 @@ export class BookingRunner {
       } else {
         const after = this.running(id);
         if (after) {
+          this.announced.add(id);
           await this.push(id, server, () => [
             ...bookingLines(this.db, after), ...gameLines(this.db, after, server, this.deps.logPublicAddress), ...this.campaignStartLines(after, campaign),
           ], 'the campaign start lines');

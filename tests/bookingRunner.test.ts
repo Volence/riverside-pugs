@@ -846,6 +846,20 @@ describe('booked games (plan 4b)', () => {
       expect(cmds().some((c) => c.includes('are yours, captains'))).toBe(false);
     });
 
+    it('a campaign a captain loaded while the booking was ready is not announced again when it goes active', async () => {
+      const id = await running();
+      expect(getBooking(db, id)!.state).toBe('ready');
+      expect(runner.chooseNext(id, P[0], 'death')).toEqual({ ok: true, campaign: 'death_toll' });
+      await runner.idle();
+      box.ccc.humans = [P[0]];
+      now = START;
+      await runner.tick();
+      expect(getBooking(db, id)!.state).toBe('active');
+      now += MIN;
+      await runner.tick();
+      expect(cmds().filter((c) => c.includes('are yours, captains'))).toEqual([CAPTAINS_DT]);
+    });
+
     it('no extend warning at go-active when the campaign fits', async () => {
       await running();
       box.ccc.humans = [P[0]];
