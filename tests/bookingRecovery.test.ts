@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +16,7 @@ import { BookingRunner } from '../src/bookings/runner.js';
 import { bookingMessage } from '../src/bookings/messages.js';
 import { classifyBox, type BoxSignals } from '../src/bookings/recovery.js';
 import { setMissionsDirs, invalidateCampaignCache } from '../src/campaignRegistry.js';
+import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 
 const P = Array.from({ length: 10 }, (_, i) => `765611990000009${String(i).padStart(2, '0')}`);
 const START = Date.parse('2026-10-02T20:00:00.000Z');
@@ -111,8 +112,8 @@ const book = (o: { playlist?: string[]; confirm?: boolean } = {}) => {
 };
 
 /** A booking set up and running on box ccc (server 3). */
-async function running(): Promise<number> {
-  const id = book();
+async function running(playlist?: string[]): Promise<number> {
+  const id = book({ playlist });
   now = START - 15 * MIN;
   runner.allocate();
   await runner.idle();
@@ -318,12 +319,61 @@ describe('srcds restarted', () => {
   });
 
   it('restores the loading campaign when a captain had picked the next one', async () => {
-    const id = await running();
+    const id = await running(['no_mercy', 'death_toll']);
     db.prepare("UPDATE bookings SET next_campaign = 'death_toll', next_at = ? WHERE id = ?").run(new Date(now + 10 * MIN).toISOString(), id);
     crash();
     await runner.tick();
     await runner.idle();
     expect(box.ccc.map).toBe('l4d_vs_smalltown01_caves');
+    expect(getBooking(db, id)).toMatchObject({ next_campaign: null, next_at: null, playlist_pos: 1 });
+    const cmds = () => sent.filter((s) => s.server === 'ccc').flatMap((s) => s.cmds);
+    expect(cmds().some((c) => c.startsWith('say [Booking] Death Toll: !nextmap'))).toBe(true);
+    const loads = cmds().filter((c) => c === 'changelevel l4d_vs_smalltown01_caves').length;
+    expect(loads).toBe(1);
+    // The minute watches after the restore load nothing again.
+    now += 11 * MIN;
+    await runner.tick();
+    await runner.idle();
+    now += MIN;
+    await runner.tick();
+    await runner.idle();
+    expect(cmds().filter((c) => c === 'changelevel l4d_vs_smalltown01_caves').length).toBe(loads);
+  });
+
+  it('a failed recovery burst never logs or alerts the game token or the booking passwords', async () => {
+    const id = await running();
+    const m = liveGame(id);
+    const b = getBooking(db, id)!;
+    crash();
+    const events: AdminEvent[] = [];
+    const off = subscribeAdminEvents((e) => events.push(e));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const rcon = async (server: ServerRow, cmds: string[]): Promise<string[]> => {
+      // As src/rcon.ts words a timeout: it names the command it was on.
+      const resume = cmds.find((c) => c.startsWith('sm_pug_resume '));
+      if (resume) throw new Error(`rcon exec timeout: ${resume}; ${cmds.find((c) => c.startsWith('sm_cvar sv_password'))}; ${cmds.find((c) => c.startsWith('sm_cvar tv_password'))}`);
+      return fakeRcon(server, cmds);
+    };
+    const r = build({ rcon });
+    try {
+      await r.tick();
+      await r.idle();
+    } finally {
+      off();
+      warn.mockRestore();
+      log.mockRestore();
+    }
+    expect(getBooking(db, id)).toMatchObject({ state: 'cancelled', end_reason: 'server_lost' });
+    const out = [
+      ...warn.mock.calls.flat().map((x) => (x instanceof Error ? x.message : String(x))),
+      ...events.map((e) => JSON.stringify(e)),
+    ].join('\n');
+    expect(out).toContain('rcon exec timeout: sm_pug_resume');
+    expect(out).not.toContain('tok123');
+    expect(out).not.toContain(b.password);
+    expect(out).not.toContain(b.tv_password);
+    expect(db.prepare('SELECT abort_cause FROM matches WHERE id = ?').get(m)).toEqual({ abort_cause: 'server_lost' });
   });
 
   it('an old pug-match: the game is aborted as server_lost and the booking carries on', async () => {

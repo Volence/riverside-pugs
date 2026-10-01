@@ -772,12 +772,17 @@ export class BookingRunner {
       if (!server) break;
       const attempt = (this.recoverTries.get(id) ?? 0) + 1;
       this.recoverTries.set(id, attempt);
+      // Read before the try: a game the try aborts is no longer live, but its
+      // token may still be in the error.
+      const token = liveBookingGame(this.db, id)?.token ?? null;
       try {
         await this.recoverOnce(b, server);
         break;
       } catch (err) {
-        // An rcon error names the command it was on: the log secret and the allowlist ids are hidden.
-        const why = hideAllowIds(redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret]));
+        // An rcon error names the command it was on (src/rcon.ts): the bursts
+        // carry the log secret, the booking passwords, the game's token
+        // (sm_pug_resume) and the allowlist ids, all hidden here.
+        const why = hideAllowIds(redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret, b.password, b.tv_password, token]));
         console.warn(`[booking] ${id}: recovery try ${attempt} on ${server.name} failed: ${why}`);
         if (attempt < SETUP_TRIES) continue;
         this.recoverTries.delete(id);
@@ -822,9 +827,18 @@ export class BookingRunner {
     }
     if (resumed) prepareRestore(this.db, snap!);
     const fresh = getBooking(this.db, b.id)!;
-    const campaign = fresh.next_campaign ?? (JSON.parse(fresh.playlist_json) as string[])[fresh.playlist_pos];
+    const playlist = JSON.parse(fresh.playlist_json) as string[];
+    const campaign = fresh.next_campaign ?? playlist[fresh.playlist_pos];
     const map = resumed ? snap!.map : firstMapOf(this.db, campaign);
     if (!isMapName(map)) throw new Error(`${campaign} starts on ${JSON.stringify(map)}, which is not a valid map name`);
+    // The campaign a captain had picked is loaded here, so it is moved on as
+    // loadNext does (next cleared, position advanced, campaign_loaded logged):
+    // left due, the next watch would changelevel the box to it a second time.
+    const loadedNext = !resumed && fresh.next_campaign !== null;
+    if (loadedNext) {
+      const at = playlist.indexOf(campaign);
+      advancePlaylist(this.db, b.id, at >= 0 ? at : fresh.playlist_pos, new Date(this.now()));
+    }
     try {
       await this.deps.rcon(server, [`changelevel ${map}`]);
     } catch {
@@ -836,6 +850,10 @@ export class BookingRunner {
     if (!finishRecovery(this.db, b.id, new Date(this.now()))) return;
     this.emptyWatches.delete(b.id);
     this.announced.delete(b.id);
+    if (loadedNext) {
+      this.announced.add(b.id);
+      await this.push(b.id, server, () => this.campaignStartLines(campaign), 'the campaign start lines');
+    }
     let restored: string | null = null;
     let adminTail = '';
     if (resumed) {
