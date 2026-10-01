@@ -165,6 +165,10 @@ export function gameLines(db: DB, b: BookingRow, server: ServerRow, logAddress?:
   return lines;
 }
 
+/** The boot marker (plan 5): written by setup and recovery only, never by the
+ *  minute re-push, so an empty one means srcds started since. */
+export const markerLine = (id: number): string => `l4d_booking_id "${id}"`;
+
 /** Steamids per `sm_booking_allow_add` line: well under the console's line length. */
 export const ALLOW_CHUNK = 10;
 
@@ -357,11 +361,13 @@ export class BookingRunner {
     await this.execVerified(server, b);
     const [version] = await this.deps.rcon(server, ['l4d_booking_version']);
     if (cvarValue(version, 'l4d_booking_version') === null) throw new Error('the l4d_booking plugin is not loaded on this box');
+    const [hasMarker] = await this.deps.rcon(server, ['l4d_booking_id']);
+    if (cvarValue(hasMarker, 'l4d_booking_id') === null) throw new Error('the l4d_booking plugin on this box is older than 1.4.0 (no l4d_booking_id)');
     const lines = [...bookingLines(this.db, b), ...gameLines(this.db, b, server, this.deps.logPublicAddress)];
     const playlist = JSON.parse(b.playlist_json) as string[];
     const firstMap = firstMapOf(this.db, playlist[0]);
     if (!isMapName(firstMap)) throw new Error(`${playlist[0]} starts on ${JSON.stringify(firstMap)}, which is not a valid map name`);
-    await this.deps.rcon(server, lines);
+    await this.deps.rcon(server, [...lines, markerLine(b.id)]);
     try {
       await this.deps.rcon(server, [`changelevel ${firstMap}`]);
     } catch {

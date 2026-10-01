@@ -10,6 +10,7 @@ import {
 } from '../src/bookings/bookings.js';
 import { bookingLimits, bookingsDue } from '../src/bookings/rules.js';
 import { BookingRunner } from '../src/bookings/runner.js';
+import { bookingMessage } from '../src/bookings/messages.js';
 import { classifyBox, type BoxSignals } from '../src/bookings/recovery.js';
 
 const P = Array.from({ length: 10 }, (_, i) => `765611990000009${String(i).padStart(2, '0')}`);
@@ -20,7 +21,7 @@ const PUB = 'Rotoblin Pub VS';
 let db: DB;
 let now: number;
 let sent: { server: string; cmds: string[] }[];
-let box: Record<string, { type: string; plugin: boolean; map: string; humans: string[]; down: boolean; execs: number; failExec: number }>;
+let box: Record<string, { type: string; plugin: boolean; map: string; humans: string[]; down: boolean; execs: number; failExec: number; marker: string; bookingPlugin: string }>;
 let released: number[];
 let restarted: string[];
 let dms: { to: string; content: string }[];
@@ -44,6 +45,9 @@ const fakeRcon = async (server: ServerRow, cmds: string[]): Promise<string[]> =>
     if (c === 'status') return status(b);
     if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${b.type}" ( def. "" )`;
     if (c === 'l4d_booking_version') return b.plugin ? '"l4d_booking_version" = "1.0.0" ( def. "1.0.0" )' : 'Unknown command "l4d_booking_version"';
+    if (c === 'l4d_booking_id') return b.bookingPlugin >= '1.4.0' ? `"l4d_booking_id" = "${b.marker}" ( def. "" )` : 'Unknown command "l4d_booking_id"';
+    const mk = /^l4d_booking_id "(\d*)"$/.exec(c);
+    if (mk) b.marker = mk[1];
     if (c === 'exec pug_match') { b.execs++; if (b.failExec > 0) b.failExec--; else b.type = 'Rotoblin 4v4 PUG'; }
     const m = /^changelevel (\S+)$/.exec(c);
     if (m) b.map = m[1];
@@ -57,7 +61,7 @@ function build(over: Partial<ConstructorParameters<typeof BookingRunner>[0]> = {
     publicUrl: 'https://riversidepug.com',
     rcon: fakeRcon,
     release: async (id) => { released.push(id); db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id); return true; },
-    restart: async (server) => { restarted.push(server.name); box[server.name].type = PUB; box[server.name].map = 'l4d_vs_hospital01_apartment'; return true; },
+    restart: async (server) => { restarted.push(server.name); box[server.name].type = PUB; box[server.name].map = 'l4d_vs_hospital01_apartment'; box[server.name].marker = ''; return true; },
     notifier: new Notifier({ db, dm: () => async (to, p) => { dms.push({ to, content: p.content ?? '' }); } }),
     preempt: () => { preempts++; },
     sleep: async () => {},
@@ -78,7 +82,7 @@ beforeEach(() => {
   for (const n of ['a', 'bb', 'ccc']) {
     const id = addServer(db, { name: n, host: '10.0.0.1', port: 27014 + n.length, rconPort: 1, rconPassword: 'x' });
     db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id);
-    box[n] = { type: PUB, plugin: true, map: 'l4d_vs_hospital01_apartment', humans: [], down: false, execs: 0, failExec: 0 };
+    box[n] = { type: PUB, plugin: true, map: 'l4d_vs_hospital01_apartment', humans: [], down: false, execs: 0, failExec: 0, marker: '', bookingPlugin: '1.4.0' };
   }
   runner = build();
 });
@@ -192,5 +196,33 @@ describe('classifyBox', () => {
   });
   it('gone when rcon, heartbeat and A2S are all silent past the limit', () => {
     expect(classifyBox({ ...base, rconOk: false, lostSinceMs: base.nowMs - 3 * MIN, heartbeatMs: base.nowMs - 4 * MIN })).toEqual({ kind: 'gone' });
+  });
+});
+
+describe('boot marker', () => {
+  it('setup writes the booking id marker', async () => {
+    const id = await running();
+    expect(box.ccc.marker).toBe(String(id));
+  });
+  it('setup refuses a box whose l4d_booking has no marker cvar', async () => {
+    for (const n of ['a', 'bb', 'ccc']) box[n].bookingPlugin = '1.3.0';
+    const id = book();
+    now = START - 15 * MIN;
+    runner.allocate();
+    await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ state: 'cancelled', end_reason: 'setup_failed' });
+  });
+});
+
+describe('booking_recovered message', () => {
+  it('names the connect line, says a move, and carries the restored line', async () => {
+    const id = await running();
+    const b = getBooking(db, id)!;
+    const same = bookingMessage(db, 'https://x', id, 'booking_recovered', { restored: 'your game is back on map 3, p0 812 - p1 640' })!;
+    expect(same.content).toContain('restarted');
+    expect(same.content).toContain(`password ${b.password}`);
+    expect(same.content).toContain('your game is back on map 3');
+    const moved = bookingMessage(db, 'https://x', id, 'booking_recovered', { moved: true })!;
+    expect(moved.content).toContain('moved to another server');
   });
 });
