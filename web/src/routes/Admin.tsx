@@ -22,6 +22,7 @@ import { PeopleSearch } from './admin/PeopleSearch';
 import { NeedsALook } from './admin/NeedsALook';
 import { PeopleBans } from './admin/PeopleBans';
 import { PlayerFile } from './admin/file/PlayerFile';
+import { EventsDesk } from './admin/events/EventsDesk';
 
 /**
  * Desk and section navigation, in the site's tab and chip shapes.
@@ -123,6 +124,7 @@ export function Admin({ session }: { session: Session }) {
             onOpen={(id) => route(ticketUrl(id))}
           />
         )}
+        {r.desk === 'events' && r.section === 'list' && <EventsDesk canEdit={isAdmin} />}
         {r.desk === 'setup' && r.section === 'campaigns' && <AdminCampaigns />}
         {r.desk === 'setup' && r.section === 'fleet' && <AdminFleet />}
         {r.desk === 'setup' && r.section === 'deploy' && <AdminDeploy />}
