@@ -814,6 +814,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // and it is read again once the actual SideGames is built after the
   // matchmaker (or left null in dev mode).
   let sideGamesRef: SideGames | null = null;
+  // Forward reference, same shape again: the booking runner is built near the
+  // end of buildServer, and the orchestrator hands it each finished booking
+  // game. Null until then, so an early call no-ops.
+  let bookingRunnerRef: BookingRunner | null = null;
   if (!orchestrator) {
     if (deps.config.devMode) {
       orchestrator = new DevOrchestrator();
@@ -1300,6 +1304,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         // A side game's own pop takes the box it is already holding, rather
         // than waiting on a fresh idle one.
         takeHeld: (id, c, runsOn) => sideGamesRef?.takeForMatch(id, c, runsOn) ?? null,
+        // A game inside a booking keeps its box; the runner moves the block on.
+        onBookingGameEnded: (id) => bookingRunnerRef?.onGameEnded(id),
       });
 
       // Re-arm the listener for matches that were already running when this
@@ -1906,6 +1912,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     preempt: () => { practiceLeases.needServer(); sideGamesRef?.needServer(); },
     freed: () => holdFreed(),
   });
+  bookingRunnerRef = bookingRunner;
   bookingRunner.resume();
   releaser.onFreed(() => bookingRunner.allocate());
   const bookingTick = setInterval(() => { void bookingRunner.tick(); }, BOOKING_TICK_MS);

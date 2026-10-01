@@ -82,6 +82,9 @@ export interface RealOrchestratorDeps {
    *  itself in that case), or the take otherwise fails; the caller then
    *  falls back to claimIdle. */
   takeHeld?: (matchId: number, campaign: string, runsOn: (s: ServerRow) => boolean) => { server: ServerRow; firstCommands: string[] } | null;
+  /** A game inside a booking finished (src/bookings/games.ts). finishMatch
+   *  calls this instead of releasing the box, which stays with the booking. */
+  onBookingGameEnded?: (matchId: number) => void;
 }
 
 /** Whether this box can run the campaign: a custom one must be installed on
@@ -119,6 +122,7 @@ export class RealOrchestrator implements Orchestrator {
   onNoServer?: (matchId: number) => void;
   private beforeLive?: (rcon: RconClient) => Promise<void>;
   private takeHeld?: RealOrchestratorDeps['takeHeld'];
+  private onBookingGameEnded?: (matchId: number) => void;
 
   constructor(deps: RealOrchestratorDeps) {
     this.db = deps.db;
@@ -132,6 +136,7 @@ export class RealOrchestrator implements Orchestrator {
     this.onNoServer = deps.onNoServer;
     this.beforeLive = deps.beforeLive;
     this.takeHeld = deps.takeHeld;
+    this.onBookingGameEnded = deps.onBookingGameEnded;
   }
 
   /** Give the box its log secret, when it has one. Never fatal: a match is
@@ -395,8 +400,8 @@ export class RealOrchestrator implements Orchestrator {
 
   async finishMatch(matchId: number): Promise<FinishOutcome> {
     const match = this.db
-      .prepare('SELECT id, state, campaign, server_id, token FROM matches WHERE id = ?')
-      .get(matchId) as MatchRow | undefined;
+      .prepare('SELECT id, state, campaign, server_id, token, booking_id FROM matches WHERE id = ?')
+      .get(matchId) as (MatchRow & { booking_id: number | null }) | undefined;
     if (!match || match.state !== 'live' || match.server_id === null || match.token === null) return 'skipped';
     const server = getServer(this.db, match.server_id);
     if (!server) return 'skipped';
@@ -479,6 +484,18 @@ export class RealOrchestrator implements Orchestrator {
       // The authoritative match_maps rows were just written by completeMatch.
       clearLive(this.db, matchId);
       this.listener.unregister(match.token);
+      if (match.booking_id !== null) {
+        // A game inside a booking: the block carries on, so the box is the
+        // booking's to keep and the result is private (participants only).
+        // Wrapped: the match is already completed, and a throw here would
+        // read to the caller as a finish that failed.
+        try {
+          this.onBookingGameEnded?.(matchId);
+        } catch (err) {
+          console.error(`[orchestrator] booking game end hook failed for match ${matchId} (non-fatal):`, err);
+        }
+        return 'completed';
+      }
       // restart: the match is over, the plugin has already kicked everyone
       // with the result, and the demo and replay scans above have run. A box
       // set to restart cycles here, before it can be claimed again.
