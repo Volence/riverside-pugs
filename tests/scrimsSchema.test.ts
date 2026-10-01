@@ -124,6 +124,41 @@ describe('scrim settings', () => {
     expect(validateSetting('scrim_accept_campaigns_max', 5).ok).toBe(false);
     expect(validateSetting('scrim_accept_campaigns_max', -1).ok).toBe(false);
   });
+
+  it('seeds scrim night off, 21:00 UTC and 4 hours', () => {
+    const db = openDb(':memory:');
+    expect(getSetting(db, 'scrim_night_day')).toBe('off');
+    expect(getSetting(db, 'scrim_night_start_utc')).toBe('21:00');
+    expect(getSetting(db, 'scrim_night_hours')).toBe('4');
+  });
+
+  it('scrim_night_day is a Competitive-group choice of off or a weekday', () => {
+    const def = settingDef('scrim_night_day');
+    expect(def?.group).toBe('Competitive');
+    expect(def?.help.length).toBeGreaterThan(0);
+    expect(validateSetting('scrim_night_day', 'off')).toEqual({ ok: true, value: 'off' });
+    expect(validateSetting('scrim_night_day', 'thursday')).toEqual({ ok: true, value: 'thursday' });
+    expect(validateSetting('scrim_night_day', 'someday').ok).toBe(false);
+  });
+
+  it('scrim_night_start_utc is a Competitive-group string up to 5 characters, never empty', () => {
+    const def = settingDef('scrim_night_start_utc');
+    expect(def?.group).toBe('Competitive');
+    expect(def?.help.length).toBeGreaterThan(0);
+    expect(validateSetting('scrim_night_start_utc', '21:00')).toEqual({ ok: true, value: '21:00' });
+    expect(validateSetting('scrim_night_start_utc', '').ok).toBe(false);
+    expect(validateSetting('scrim_night_start_utc', '123456').ok).toBe(false);
+  });
+
+  it('scrim_night_hours is a Competitive-group int from 1 to 12', () => {
+    const def = settingDef('scrim_night_hours');
+    expect(def?.group).toBe('Competitive');
+    expect(def?.help.length).toBeGreaterThan(0);
+    expect(validateSetting('scrim_night_hours', 1)).toEqual({ ok: true, value: '1' });
+    expect(validateSetting('scrim_night_hours', 12)).toEqual({ ok: true, value: '12' });
+    expect(validateSetting('scrim_night_hours', 13).ok).toBe(false);
+    expect(validateSetting('scrim_night_hours', 0).ok).toBe(false);
+  });
 });
 
 describe('scrim notify types', () => {

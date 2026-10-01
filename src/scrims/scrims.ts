@@ -8,6 +8,7 @@ import {
   sideRow, type BookingError,
 } from '../bookings/bookings.js';
 import { allowance, bookingLimits, capacityProblem, iso, upcomingCount, type Party } from '../bookings/rules.js';
+import { inNight } from './night.js';
 import { nearestFreeSlot, proposedPlaylist, sideSr, srFits, type ScrimSide } from './rules.js';
 import { reliability, type Reliability } from './reliability.js';
 
@@ -486,6 +487,9 @@ export interface BoardPost {
   id: number; status: PostStatus; side: BoardSide; sr: number; srRange: number | null; startsAt: string; minutes: number;
   campaigns: string[]; note: string; createdAt: string; challenge: { teamId: number; name: string } | null;
   acceptCount: number;
+  /** Plan 2 Ruling 7: whether this post's start falls inside the weekly
+   *  scrim night window, for the board row's highlight and tag. */
+  night: boolean;
   /** The viewer manages the posting side: `accepts` is then filled in. */
   mine: boolean;
   /** The viewer's side's own pending acceptance of this post, if any. */
@@ -542,6 +546,7 @@ export function board(
       campaigns, note: p.note, createdAt: p.created_at,
       challenge: target ? { teamId: target.id, name: target.name } : null,
       acceptCount: pending.length,
+      night: inNight(db, p.starts_at),
       mine,
       myAcceptId: me !== null ? (pending.find((a) => managesScrimSide(db, a, me))?.id ?? null) : null,
       accepts: mine

@@ -27,13 +27,13 @@ const OPEN_POST: ScrimBoardPost = {
   id: 5, status: 'open', side: { kind: 'team', teamId: 2, name: 'Rats', tag: 'RT', slug: 'rats', logoKey: null },
   sr: 1500, srRange: 200, startsAt: '2026-10-02T20:00:00.000Z', minutes: 120,
   campaigns: ['no_mercy'], note: 'gl hf', createdAt: '2026-10-01T10:00:00.000Z', challenge: null,
-  acceptCount: 0, mine: false, myAcceptId: null, accepts: null,
+  acceptCount: 0, night: false, mine: false, myAcceptId: null, accepts: null,
 };
 const MY_POST: ScrimBoardPost = {
   id: 6, status: 'pending', side: { kind: 'team', teamId: 1, name: 'Mice', tag: 'MM', slug: 'mice', logoKey: null },
   sr: 1400, srRange: null, startsAt: '2026-10-03T20:00:00.000Z', minutes: 90,
   campaigns: ['death_toll'], note: '', createdAt: '2026-10-01T09:00:00.000Z', challenge: null,
-  acceptCount: 1, mine: true, myAcceptId: null,
+  acceptCount: 1, night: false, mine: true, myAcceptId: null,
   accepts: [{
     id: 42, side: { kind: 'pickup', steamid: 'x9', name: 'p9' }, sr: 1420, fits: true, campaigns: ['no_mercy'], createdAt: '2026-10-01T11:00:00.000Z',
     proposed: { playlist: ['death_toll', 'no_mercy'], minutes: 130, fits: false },
@@ -50,7 +50,7 @@ const renderScrims = (path = '/scrims') => {
 afterEach(() => { cleanup(); for (const f of Object.values(mockScrims)) f.mockReset(); history.replaceState(null, '', '/'); });
 beforeEach(() => {
   mockScrims.options.mockResolvedValue(OPTIONS);
-  mockScrims.board.mockImplementation((fitsOnly: boolean) => Promise.resolve({ posts: fitsOnly ? [MY_POST] : [OPEN_POST, MY_POST] }));
+  mockScrims.board.mockImplementation((fitsOnly: boolean) => Promise.resolve({ posts: fitsOnly ? [MY_POST] : [OPEN_POST, MY_POST], night: null }));
   mockScrims.accept.mockResolvedValue({ id: 99, sr: 1450, fits: true });
   mockScrims.decline.mockResolvedValue({ postId: 6, reopened: true });
   mockScrims.withdraw.mockResolvedValue({ acceptIds: [] });
@@ -108,7 +108,7 @@ describe('Scrims page', () => {
   });
 
   it('a board row shows the reliability badge only when the server sends a record', async () => {
-    mockScrims.board.mockResolvedValue({ posts: [OPEN_POST, MY_POST] });
+    mockScrims.board.mockResolvedValue({ posts: [OPEN_POST, MY_POST], night: null });
     renderScrims();
     await screen.findByText('Rats');
     expect(screen.queryByText(/Reliable:/)).toBeNull();
@@ -117,9 +117,46 @@ describe('Scrims page', () => {
     mockScrims.board.mockResolvedValue({ posts: [
       { ...OPEN_POST, record: { shown: 5, booked: 6, noShows: 1, lateCancels: 0, excused: 0 } },
       { ...MY_POST, mine: false, accepts: null, id: 8, record: { shown: 1, booked: 1, noShows: 0, lateCancels: 0, excused: 0 } },
-    ] });
+    ], night: null });
     renderScrims();
     expect(await screen.findByText('Reliable: 5 of 6 shown')).toBeTruthy();
     expect(screen.getByText('New')).toBeTruthy();
+  });
+
+  it('shows the scrim night banner, with "On now" only while the window is running', async () => {
+    mockScrims.board.mockResolvedValue({
+      posts: [OPEN_POST, MY_POST],
+      night: { startsAt: '2026-10-08T21:00:00.000Z', endsAt: '2026-10-09T01:00:00.000Z' },
+    });
+    renderScrims();
+    await screen.findByText('Rats');
+    expect(await screen.findByText(/^Scrim night: /)).toBeTruthy();
+    expect(screen.queryByText('On now')).toBeNull();
+
+    cleanup();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-08T22:00:00.000Z'));
+    mockScrims.board.mockResolvedValue({
+      posts: [OPEN_POST, MY_POST],
+      night: { startsAt: '2026-10-08T21:00:00.000Z', endsAt: '2026-10-09T01:00:00.000Z' },
+    });
+    renderScrims();
+    await screen.findByText('Rats');
+    expect(await screen.findByText('On now')).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it('highlights a board row inside the scrim night window, with a tag', async () => {
+    mockScrims.board.mockResolvedValue({
+      posts: [{ ...OPEN_POST, night: true }, MY_POST],
+      night: { startsAt: '2026-10-08T21:00:00.000Z', endsAt: '2026-10-09T01:00:00.000Z' },
+    });
+    const { container } = renderScrims();
+    await screen.findByText('Rats');
+    const row = container.querySelector('#scrim-5');
+    expect(row?.className).toContain('scrimrow--night');
+    const other = container.querySelector('#scrim-6');
+    expect(other?.className).not.toContain('scrimrow--night');
+    expect(screen.getAllByText('Scrim night').length).toBeGreaterThan(0);
   });
 });

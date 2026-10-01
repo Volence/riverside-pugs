@@ -1202,6 +1202,11 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // cancel, and whether the reliability record is public.
   scrim_late_cancel_hours: '2',
   scrim_reliability_public: 'off',
+  // Scrim board plan 2 Ruling 7: an optional weekly scrim night, off by
+  // default. src/scrims/night.ts reads these three.
+  scrim_night_day: 'off',
+  scrim_night_start_utc: '21:00',
+  scrim_night_hours: '4',
 };
 
 /** Patch triage backfill (sub-project 1 of the balance catalogue roadmap).

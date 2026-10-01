@@ -17,3 +17,13 @@ export function fitWarning(minutes: number, playlistMinutes: number): string | n
     ? `These campaigns usually take about ${playlistMinutes} minutes; the booking is ${minutes}. Extend later, or pick fewer.`
     : null;
 }
+
+/** Plan 2's scrim night banner: "Thursday 5:00 PM-9:00 PM", the window's
+ *  weekday and start-end in the viewer's own time zone. The weekday is read
+ *  off the start, same as everywhere else a start becomes a local label. */
+export function nightRangeLabel(startsAt: string, endsAt: string): string {
+  const start = new Date(startsAt);
+  const end = new Date(endsAt);
+  const time = (d: Date) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return `${start.toLocaleDateString(undefined, { weekday: 'long' })} ${time(start)}-${time(end)}`;
+}

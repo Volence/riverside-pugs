@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import {
-  ApiError, scrimsApi, type NewScrimPost, type ScrimBoardPost, type ScrimOptions,
+  ApiError, scrimsApi, type NewScrimPost, type ScrimBoardPost, type ScrimNightWindow, type ScrimOptions,
 } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
-import { fitWarning, localLabel, toUtcIso } from '../bookingTime';
+import { fitWarning, localLabel, nightRangeLabel, toUtcIso } from '../bookingTime';
 import { campaignName } from '../format';
 import { TeamBadge } from './Teams';
 import { reliableBadge } from '../components/ScrimRecord';
@@ -24,6 +24,18 @@ const SR_RANGES: readonly { value: string; label: string }[] = [
 ];
 
 const srRangeLabel = (range: number | null): string => range === null ? 'Open' : `± ${range}`;
+
+/** Plan 2 Ruling 7: the board's banner for the weekly scrim night window,
+ *  with "On now" while the viewer is inside it. */
+function NightBanner({ night }: { night: ScrimNightWindow }) {
+  const live = Date.now() >= Date.parse(night.startsAt) && Date.now() < Date.parse(night.endsAt);
+  return (
+    <p class="scrimnight">
+      Scrim night: {nightRangeLabel(night.startsAt, night.endsAt)} (your time)
+      {live && <span class="teamchip teamchip--captain scrimnight__live">On now</span>}
+    </p>
+  );
+}
 
 /** A side's badge and name, reused on the board and in "Your posts": the
  *  team look (TeamBadge, from Teams.tsx) for a team side, "Pickup" in its
@@ -171,7 +183,7 @@ function BoardRow({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <li id={`scrim-${post.id}`} class={`scrimrow${highlighted ? ' scrimrow--highlight' : ''}`}>
+    <li id={`scrim-${post.id}`} class={`scrimrow${highlighted ? ' scrimrow--highlight' : ''}${post.night ? ' scrimrow--night' : ''}`}>
       <div class="scrimrow__main">
         <SideLabel side={post.side} />
         <span class="teamroster__meta">
@@ -181,6 +193,7 @@ function BoardRow({
         <span class="teamroster__meta">{post.campaigns.map((c) => campaignName(c)).join(', ')}</span>
         {post.note && <span class="teamroster__meta">{post.note}</span>}
         {post.record && <span class="teamchip scrimbadge">{reliableBadge(post.record)}</span>}
+        {post.night && <span class="teamchip scrimnighttag">Scrim night</span>}
       </div>
       {post.mine
         ? <span class="teamchip teamchip--captain">Your post</span>
@@ -246,6 +259,7 @@ export function Scrims({ session }: { session: Session }) {
   const signedIn = session.kind === 'active';
   const [options, setOptions] = useState<ScrimOptions | null>(null);
   const [posts, setPosts] = useState<ScrimBoardPost[] | null>(null);
+  const [night, setNight] = useState<ScrimNightWindow | null>(null);
   const [closed, setClosed] = useState(false);
   const [fitsOnly, setFitsOnly] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -254,7 +268,7 @@ export function Scrims({ session }: { session: Session }) {
 
   const load = () => {
     if (!signedIn) return;
-    scrimsApi.board(fitsOnly).then((r) => setPosts(r.posts), (e) => { if (e instanceof ApiError && e.status === 404) setClosed(true); });
+    scrimsApi.board(fitsOnly).then((r) => { setPosts(r.posts); setNight(r.night); }, (e) => { if (e instanceof ApiError && e.status === 404) setClosed(true); });
   };
   useEffect(load, [signedIn, fitsOnly]);
   useEffect(() => { if (signedIn) scrimsApi.options().then(setOptions, () => {}); }, [signedIn]);
@@ -322,6 +336,7 @@ export function Scrims({ session }: { session: Session }) {
 
       <Panel>
         <h3>Board</h3>
+        {night && <NightBanner night={night} />}
         <label class="scrimfit">
           <input type="checkbox" aria-label="Fits my SR" checked={fitsOnly} onChange={() => setFitsOnly((v) => !v)} />
           Fits my SR
