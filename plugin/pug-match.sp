@@ -23,7 +23,7 @@
 // (2 survivors, 3 infected). Optional, marked in AskPluginLoad2.
 native int Score_GetTeamCampaignScore(int team);
 
-#define PLUGIN_VERSION "0.3.18"
+#define PLUGIN_VERSION "0.3.19"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -165,6 +165,13 @@ char g_sRosterName[MAX_ROSTER][64];
 bool g_bSelfStarted;
 // l4d2_spec_stays_spec was not running when the last map ended; see OnMapStart.
 bool g_bSpecStaysWasOff;
+
+// Crash recovery (site plan 5): a match the backend rebuilt after srcds
+// restarted. g_iResumeFirst is the pug team (1 = a, 2 = b) that survives
+// first on the replayed map, applied once by SeedNewMapSides at the next map
+// start and then cleared.
+bool g_bResumed;
+int g_iResumeFirst;
 
 /** Monotonic per-match counter stamped on every EVENT line. UDP can deliver
  *  the same datagram twice, and an event feed that double-counts a deadly
@@ -438,6 +445,9 @@ public void OnPluginStart()
 	RegAdminCmd("sm_pug_los", Cmd_Los, ADMFLAG_ROOT, "sm_pug_los <viewer> <target> - line of sight per point, bots allowed; for testing");
 	RegAdminCmd("sm_pug_los_bench", Cmd_LosBench, ADMFLAG_ROOT, "sm_pug_los_bench <count> - time RplCanSee between the first survivor and infected found");
 	RegServerCmd("sm_pug_setid", Cmd_SetId, "sm_pug_setid <token> <matchid> - backend assigns the match id for a self-started match");
+	RegServerCmd("sm_pug_resume", Cmd_Resume, "sm_pug_resume <matchid> <token> <firstmap> <a|b> <nextseq> - rebuild a match after a server restart");
+	RegServerCmd("sm_pug_resume_map", Cmd_ResumeMap, "sm_pug_resume_map <map> <a> <b> - a map the resumed match already finished");
+	RegServerCmd("sm_pug_resume_commit", Cmd_ResumeCommit, "sm_pug_resume_commit - the resumed match is complete; seed sides at the next map start");
 	RegServerCmd("sm_pug_leave", Cmd_Leave, "sm_pug_leave <token> <steamid64> hold|release|add <seconds>|end");
 	RegServerCmd("sm_pug_endkick_now", Cmd_EndKickNow, "sm_pug_endkick_now - run the end-of-match kick now, before the backend restarts the box");
 
@@ -2063,8 +2073,88 @@ public Action Cmd_Roster(int args)
 	}
 	strcopy(g_sRosterId[g_iRosterCount], 32, arg);
 	g_iRosterTeam[g_iRosterCount] = team;
+	// Optional ":<joinedmap>" (site plan 5, resume): the map ordinal this
+	// player was rostered on in the match before the restart.
+	if (arg[sep + 2] == ':') g_iRosterJoinedMap[g_iRosterCount] = StringToInt(arg[sep + 3]);
 	g_iRosterCount++;
 	PrintToServer("PUGOK roster=%d", g_iRosterCount);
+	return Plugin_Handled;
+}
+
+/** Crash recovery (site plan 5). The backend rebuilds a booking game that
+ *  srcds lost: same match id and token, the finished maps with their scores,
+ *  the roster, and the next event seq. The match is self-started (it was
+ *  adopted by auto-track), so the booking's password and the team-lock rules
+ *  stay exactly as they were. The map it was on is replayed from its start. */
+public Action Cmd_Resume(int args)
+{
+	if (args < 5)
+	{
+		PrintToServer("PUGERR usage: sm_pug_resume <matchid> <token> <firstmap> <a|b> <nextseq>");
+		return Plugin_Handled;
+	}
+	char buf[65];
+	GetCmdArg(1, buf, sizeof(buf));
+	int matchId = StringToInt(buf);
+	GetCmdArg(4, buf, sizeof(buf));
+	int first = StrEqual(buf, "a") ? 1 : StrEqual(buf, "b") ? 2 : 0;
+	if (matchId <= 0 || first == 0)
+	{
+		PrintToServer("PUGERR bad resume args");
+		return Plugin_Handled;
+	}
+	CancelEndKick();
+	CancelTeardown();
+	ResetMatchState();
+	g_iMatchId = matchId;
+	GetCmdArg(2, g_sToken, sizeof(g_sToken));
+	GetCmdArg(3, g_sCampaign, sizeof(g_sCampaign));
+	GetCmdArg(5, buf, sizeof(buf));
+	g_iEventSeq = StringToInt(buf) - 1;
+	if (g_iEventSeq < 0) g_iEventSeq = 0;
+	g_bSelfStarted = true;
+	g_bResumed = true;
+	g_iResumeFirst = first;
+	g_State = MS_Pending;
+	PrintToServer("PUGOK resume=%d", g_iMatchId);
+	return Plugin_Handled;
+}
+
+public Action Cmd_ResumeMap(int args)
+{
+	if (!g_bResumed || g_State != MS_Pending || args < 3)
+	{
+		PrintToServer("PUGERR no resume in progress");
+		return Plugin_Handled;
+	}
+	if (g_iMapCount >= MAX_MAPS)
+	{
+		PrintToServer("PUGERR too many maps");
+		return Plugin_Handled;
+	}
+	char buf[64];
+	GetCmdArg(1, g_sMapName[g_iMapCount], 64);
+	GetCmdArg(2, buf, sizeof(buf));
+	g_iMapScoreA[g_iMapCount] = StringToInt(buf);
+	GetCmdArg(3, buf, sizeof(buf));
+	g_iMapScoreB[g_iMapCount] = StringToInt(buf);
+	g_iMapCount++;
+	PrintToServer("PUGOK resume_map=%d", g_iMapCount);
+	return Plugin_Handled;
+}
+
+public Action Cmd_ResumeCommit(int args)
+{
+	if (!g_bResumed || g_State != MS_Pending || g_iRosterCount == 0)
+	{
+		PrintToServer("PUGERR resume incomplete");
+		return Plugin_Handled;
+	}
+	// Replay files of the replayed map keep its ordinal (pug_<token>_<n>_<half>.rpl).
+	g_iRplMapSeq = g_iMapCount;
+	LogMessage("[pug] match %d resumed after a server restart: %d maps finished, %d rostered, pug team %s survives first",
+		g_iMatchId, g_iMapCount, g_iRosterCount, g_iResumeFirst == 1 ? "a" : "b");
+	PrintToServer("PUGOK resumed maps=%d roster=%d", g_iMapCount, g_iRosterCount);
 	return Plugin_Handled;
 }
 
@@ -2923,6 +3013,8 @@ void ResetMatchState()
 	g_sEndResult[0] = '\0';
 	g_iRosterCount = 0;
 	g_bSelfStarted = false;
+	g_bResumed = false;
+	g_iResumeFirst = 0;
 	g_iEventSeq = 0;
 	g_iBoomerClient = 0;
 	g_bHasBoomLanded = false;
@@ -3192,6 +3284,18 @@ void SeedNewMapSides(int prevRound1Surv)
 	g_fSeedHoldUntil = 0.0;
 	int l4ds = g_iNextFirstL4ds;
 	g_iNextFirstL4ds = 0;
+	// A resumed match (site plan 5): the backend says who survives first on
+	// the replayed map, from its own totals. Once, at the first map start.
+	if (g_bResumed && g_State == MS_Pending && g_iResumeFirst != 0)
+	{
+		g_iPugSide[g_iResumeFirst] = TEAM_SURVIVOR;
+		g_iPugSide[3 - g_iResumeFirst] = TEAM_INFECTED;
+		g_bSeedHold = true;
+		for (int c = 1; c <= MaxClients; c++) g_iLockAttempts[c] = 0;
+		LogMessage("[pug] map %s: resumed match, pug team %s survives first", g_sCurrentMap, g_iResumeFirst == 1 ? "a" : "b");
+		g_iResumeFirst = 0;
+		return;
+	}
 	if (g_State != MS_Live || g_iMapCount < 1) return;
 
 	int totA, totB;
@@ -3645,6 +3749,7 @@ public void OnRoundIsLive()
 		g_State = MS_Live;
 		SampleSkillDetect();
 		EmitPug("MATCH_START map=%s", g_sCurrentMap);
+		if (g_bResumed) SeedL4dscoresTally();
 	}
 
 	// readyup's go-live forward fires for every round on the box, PUG match or
@@ -4103,6 +4208,29 @@ void TotalScores(int &a, int &b)
 		a += g_iMapScoreA[i];
 		b += g_iMapScoreB[i];
 	}
+}
+
+/** A resumed match goes live on a fresh srcds whose l4dscores tally is 0-0,
+ *  and that tally decides who survives first on the next map. Seed it with
+ *  the real totals of whichever pug team is on survivors right now (counted
+ *  from the rostered players actually standing there). l4dscores 8.5.9-
+ *  riverside3 has the command; an older one ignores it, logged. */
+void SeedL4dscoresTally()
+{
+	int onSurv[3];
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		if (!IsClientInGame(c) || GetClientTeam(c) != TEAM_SURVIVOR) continue;
+		int r = g_iClientRoster[c];
+		if (r >= 0) onSurv[g_iRosterTeam[r]]++;
+	}
+	int survPug = (onSurv[2] > onSurv[1]) ? 2 : 1;
+	int a, b;
+	TotalScores(a, b);
+	int surv = (survPug == 1) ? a : b;
+	int inf = (survPug == 1) ? b : a;
+	ServerCommand("sm_l4dscores_seed %d %d %d", surv, inf, g_iMapCount + 1);
+	LogMessage("[pug] resumed match %d live: l4dscores seeded survivors=%d infected=%d (pug team %s on survivors)", g_iMatchId, surv, inf, survPug == 1 ? "a" : "b");
 }
 
 void WinnerOf(int a, int b, char[] out, int maxlen)

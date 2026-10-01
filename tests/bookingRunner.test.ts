@@ -498,6 +498,7 @@ describe('fix wave (final review)', () => {
     for (const line of CLEAR_LINES) expect(cmds).toContain(line);
     // The scrim rules go back to PUG values too, so a skipped end restart cannot leak them into the next PUG.
     expect(CLEAR_LINES).toEqual([
+      'l4d_booking_id ""',
       'l4d_booking_password ""', 'l4d_booking_tv_password ""', 'l4d_booking_notice ""',
       'sm_pug_pause_limit 3', 'sm_pug_pause_seconds 120', 'sm_pug_auto_min_players 8',
     ]);
