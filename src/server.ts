@@ -1942,8 +1942,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     db: deps.db,
     publicUrl: deps.config.publicUrl,
     rcon: deps.bookingRcon ?? realServerRcon,
-    release: (serverId) => new Promise<boolean>((resolve) => {
-      releaser.release(serverId, { restart: true, forceRestart: true, booking: true }, resolve);
+    release: (serverId, opts) => new Promise<boolean>((resolve) => {
+      releaser.release(serverId, { restart: true, forceRestart: true, booking: true, gone: opts?.gone ?? false }, resolve);
     }),
     restart: (server) => restarter.restart(server),
     notifier,

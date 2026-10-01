@@ -27,6 +27,11 @@ export interface ReleaseOpts {
    *  played inside a booking ends with the block still running, and nothing
    *  but the booking's own end may restart that box. */
   booking?: boolean;
+  /** The booking runner giving back a box that went down under a booking
+   *  (servers.gone_since set) once it answers again (plan 5 ruling 4). Every
+   *  other caller, a booking's own end included, is refused on a gone box:
+   *  only that give-back may restart it and put it back in the pool. */
+  gone?: boolean;
 }
 
 /** Hands a server back: restore sv_password, and tell the plugin the match whose
@@ -144,6 +149,12 @@ export class ServerReleaser {
     if (!server) { onSettled?.(false); return; }
     if (!opts.booking && holdFor(this.db, serverId)?.kind === 'booking') {
       console.log(`[serverRelease] ${server.name} is held by a booking; not releasing it (the booking ends it)`);
+      onSettled?.(false);
+      return;
+    }
+    const gone = (this.db.prepare('SELECT gone_since FROM servers WHERE id = ?').get(serverId) as { gone_since: string | null } | undefined)?.gone_since ?? null;
+    if (!opts.gone && gone !== null) {
+      console.log(`[serverRelease] ${server.name} went down under a booking; not releasing it (it goes back once it answers again)`);
       onSettled?.(false);
       return;
     }

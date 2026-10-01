@@ -8,7 +8,7 @@ import { setSetting } from '../src/settings.js';
 import { currentSeasonId } from '../src/players.js';
 import { Notifier } from '../src/notify/notify.js';
 import {
-  confirmBooking, createBooking, getBooking,
+  cancelBooking, confirmBooking, createBooking, endBooking, getBooking,
   beginRecovery, dropBox, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost, reholdBox,
 } from '../src/bookings/bookings.js';
 import { bookingLimits, bookingsDue } from '../src/bookings/rules.js';
@@ -539,6 +539,9 @@ describe('box gone', () => {
     await runner.tick(); await runner.idle();
     expect(db.prepare('SELECT status, gone_since FROM servers WHERE id = 3').get()).toEqual({ status: 'idle', gone_since: null });
     expect(getBooking(db, id)!.server_id).not.toBe(3);
+    // Given back through the releaser (its forced restart clears the old
+    // booking's plugin match, passwords and players), not a raw status write.
+    expect(released).toEqual([3]);
   });
 
   it('a miss between two answers starts the count again; a box staff set idle only loses gone_since', async () => {
@@ -555,5 +558,42 @@ describe('box gone', () => {
     box.ccc.down = true;
     await runner.tick(); await runner.idle();
     expect(row()).toEqual({ status: 'idle', gone_since: null });
+  });
+
+  /** Booking `id` waiting for a box (both others busy) with its live game. */
+  async function waitingWithGame(r: BookingRunner): Promise<{ id: number; m: number }> {
+    runner = r;
+    const id = await running();
+    const m = liveGame(id);
+    db.prepare("UPDATE match_live SET last_seen = datetime('now', '-30 minutes') WHERE match_id = ?").run(m);
+    db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 2)").run();
+    kill();
+    await runner.tick(); now += 3 * MIN; await runner.tick(); await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ server_id: null });
+    expect(getBooking(db, id)!.waiting_since).not.toBeNull();
+    return { id, m };
+  }
+
+  it('a captain End during the wait aborts the live game and closes the booking', async () => {
+    const unregistered: string[] = [];
+    const { id, m } = await waitingWithGame(build({ a2s: async () => null, unregisterToken: (t) => { unregistered.push(t); } }));
+    expect(endBooking(db, { bookingId: id, by: P[0], now: new Date(now) }).ok).toBe(true);
+    runner.settle(id); await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ state: 'ended' });
+    expect(getBooking(db, id)!.ended_at).not.toBeNull();
+    expect(db.prepare('SELECT state, abort_cause FROM matches WHERE id = ?').get(m)).toEqual({ state: 'aborted', abort_cause: 'booking_ended' });
+    expect(unregistered).toContain('tok123');
+    expect(released).toEqual([]);
+  });
+
+  it('a staff cancel during the wait aborts the live game and closes the booking', async () => {
+    const unregistered: string[] = [];
+    const { id, m } = await waitingWithGame(build({ a2s: async () => null, unregisterToken: (t) => { unregistered.push(t); } }));
+    expect(cancelBooking(db, { bookingId: id, by: P[5], staff: true, now: new Date(now) }).ok).toBe(true);
+    await runner.tick(); await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ state: 'cancelled', end_reason: 'staff' });
+    expect(getBooking(db, id)!.ended_at).not.toBeNull();
+    expect(db.prepare('SELECT state, abort_cause FROM matches WHERE id = ?').get(m)).toEqual({ state: 'aborted', abort_cause: 'booking_ended' });
+    expect(unregistered).toContain('tok123');
   });
 });
