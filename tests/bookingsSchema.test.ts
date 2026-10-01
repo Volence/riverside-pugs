@@ -4,6 +4,9 @@ import { holdFor } from '../src/serverHolds.js';
 import { claimableServers } from '../src/serverPool.js';
 import { validateSetting } from '../src/settingsSchema.js';
 import { getSetting } from '../src/settings.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const A = '76561199000000401';
 let db: DB;
@@ -67,5 +70,38 @@ describe('booking schema', () => {
     expect(getSetting(db, 'booking_protect_minutes')).toBe('75');
     expect(validateSetting('booking_max_minutes', '600').ok).toBe(false);
     expect(validateSetting('booking_hold_lead_minutes', '20')).toEqual({ ok: true, value: '20' });
+  });
+
+  it('drops the extend setting from the admin page', () => {
+    expect(validateSetting('booking_extend_minutes', '30').ok).toBe(false);
+  });
+
+  it('backfills games_allowed from the playlist once, and never over a count already set', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pug-games-allowed-'));
+    try {
+      const file = join(dir, 'pug.db');
+      let fdb = openDb(file);
+      fdb.prepare("INSERT INTO players (steamid, name, status) VALUES (?, 'a', 'active')").run(A);
+      const ins = fdb.prepare(
+        `INSERT INTO bookings (purpose, starts_at, ends_at, password, tv_password, game_config, rules_json, playlist_json, created_by, created_at)
+         VALUES ('scrim', '2026-10-02T20:00:00.000Z', '2026-10-02T22:00:00.000Z', 'p', 't', 'standard', '{}', ?, ?, 'x')`,
+      );
+      // Rows as an older site wrote them: no count yet.
+      const two = Number(ins.run('["no_mercy","death_toll"]', A).lastInsertRowid);
+      const one = Number(ins.run('["dead_air"]', A).lastInsertRowid);
+      fdb.close();
+      fdb = openDb(file);
+      const allowed = (id: number) => (fdb.prepare('SELECT games_allowed, ends_at, close_at FROM bookings WHERE id = ?').get(id));
+      expect(allowed(two)).toEqual({ games_allowed: 2, ends_at: '2026-10-02T22:00:00.000Z', close_at: null });
+      expect(allowed(one)).toEqual({ games_allowed: 1, ends_at: '2026-10-02T22:00:00.000Z', close_at: null });
+      fdb.prepare('UPDATE bookings SET games_allowed = 5 WHERE id = ?').run(two);
+      fdb.close();
+      fdb = openDb(file);
+      expect(allowed(two)).toMatchObject({ games_allowed: 5 });
+      expect(allowed(one)).toMatchObject({ games_allowed: 1 });
+      fdb.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

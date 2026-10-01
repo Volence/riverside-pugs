@@ -7,7 +7,7 @@ import { inGoodStanding } from '../standing.js';
 import { liveTeams, myTeams } from '../teams/teams.js';
 import { getCampaignPool, settingNumber } from '../settings.js';
 import { campaignRegistry } from '../campaignRegistry.js';
-import { bookingLimits, typicalCampaignMinutes, STEP_MINUTES } from '../bookings/rules.js';
+import { bookingLimits, estimateOptions, typicalCampaignMinutes } from '../bookings/rules.js';
 import { canUse, seesBooking } from '../bookings/bookings.js';
 import type { BookingRunner } from '../bookings/runner.js';
 import type { Notifier } from '../notify/notify.js';
@@ -79,14 +79,15 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
     const registry = campaignRegistry(db);
     const limits = bookingLimits(db);
     const team = (t: { id: number; slug: string; name: string; tag: string }) => ({ id: t.id, slug: t.slug, name: t.name, tag: t.tag });
+    const campaigns = getCampaignPool(db).filter((slug) => registry.get(slug));
     return {
-      campaigns: getCampaignPool(db).filter((slug) => registry.get(slug))
-        .map((slug) => ({ slug, name: registry.get(slug)!.name, minutes: typicalCampaignMinutes(db, slug) })),
+      campaigns: campaigns.map((slug) => ({ slug, name: registry.get(slug)!.name, minutes: typicalCampaignMinutes(db, slug) })),
       limits: {
-        minMinutes: limits.minMinutes, maxMinutes: limits.maxMinutes, daysAhead: limits.daysAhead,
-        playlistMax: limits.playlistMax, stepMinutes: STEP_MINUTES, noteMax: S.NOTE_MAX,
+        daysAhead: limits.daysAhead, playlistMax: limits.playlistMax, noteMax: S.NOTE_MAX,
         acceptCampaignsMax: settingNumber(db, 'scrim_accept_campaigns_max', 2, { integer: true, min: 0, max: 4 }),
       },
+      // A post's block is estimated from its campaigns, as a booking's slot is.
+      estimate: estimateOptions(db, campaigns),
       myTeams: myTeams(db, me).filter((t) => t.role !== 'member').map(team),
       teams: liveTeams(db).map(team),
     };
@@ -109,7 +110,7 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
     if (!me) return;
     const b = body(req);
     const r = S.createPost(db, {
-      by: me, teamId: b.teamId, startsAt: b.startsAt, minutes: b.minutes, campaigns: b.campaigns,
+      by: me, teamId: b.teamId, startsAt: b.startsAt, campaigns: b.campaigns,
       srRange: b.srRange, note: b.note, targetTeamId: b.targetTeamId,
     });
     if (!r.ok) return refuse(reply, r);

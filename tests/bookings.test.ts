@@ -6,7 +6,7 @@ import { createTeam, invitePlayer, respondInvite, setRole, transferCaptain } fro
 import { currentSeasonId } from '../src/players.js';
 import {
   BOOKING_ERRORS, addPerson, allowInGame, allowList, bookingView, cancelBooking, claimNoShow, closeBooking, confirmBooking, createBooking, declineBooking,
-  endBooking, expireUnconfirmed, extendBooking, getBooking, holdBox, markActive, markReady, markReleased, markSetup,
+  addCampaign, endBooking, expireUnconfirmed, getBooking, holdBox, markActive, markReady, markReleased, markSetup,
   myBookings, peopleOf, recordPresence, removePerson, respondPerson, sideRow,
 } from '../src/bookings/bookings.js';
 import { acceptPost, confirmAccept, createPost } from '../src/scrims/scrims.js';
@@ -56,7 +56,7 @@ describe('creating', () => {
   it('a pickup booking against a player: side a confirmed with its captain, side b invited', () => {
     const id = create();
     const b = getBooking(db, id)!;
-    expect(b).toMatchObject({ state: 'scheduled', purpose: 'scrim', region: 'na', starts_at: START, ends_at: '2026-10-02T22:00:00.000Z', game_config: 'standard' });
+    expect(b).toMatchObject({ state: 'scheduled', purpose: 'scrim', region: 'na', starts_at: START, ends_at: '2026-10-02T23:00:00.000Z', game_config: 'standard' });
     expect(JSON.parse(b.playlist_json)).toEqual(['no_mercy', 'death_toll']);
     expect(JSON.parse(b.rules_json).rated).toBe(false);
     expect(b.password).toMatch(/^[a-z0-9]{8}$/);
@@ -75,8 +75,6 @@ describe('creating', () => {
     expect(r({ startsAt: '2026-10-01T11:00:00.000Z' })).toBe('bad_time');
     expect(r({ startsAt: '2026-10-20T11:00:00.000Z' })).toBe('bad_time');
     expect(r({ startsAt: 'tomorrow' })).toBe('bad_time');
-    expect(r({ minutes: 45 })).toBe('bad_length');
-    expect(r({ minutes: 240 })).toBe('bad_length');
     expect(r({ playlist: [] })).toBe('bad_playlist');
     expect(r({ playlist: ['no_mercy', 'no_mercy'] })).toBe('bad_playlist');
     expect(r({ playlist: ['the_sacrifice'] })).toBe('bad_playlist'); // not in the pool
@@ -87,6 +85,25 @@ describe('creating', () => {
     expect(r({ rulesetId: 999 })).toBe('bad_ruleset');
     setSetting(db, 'competitive_enabled', 'admins');
     expect(r({})).toBe('not_open');
+  });
+
+  it('the length is estimated from the campaigns, whatever minutes are sent', () => {
+    const id = create({ minutes: 45 });
+    // 15 + (60 + 10) * 2 = 155, up to 180.
+    expect(getBooking(db, id)).toMatchObject({ starts_at: START, ends_at: '2026-10-02T23:00:00.000Z', games_allowed: 2, close_at: null });
+    const one = create({ by: P[2], opponent: { steamid: P[3] }, minutes: 'nope', playlist: ['dead_air'] });
+    expect(getBooking(db, one)).toMatchObject({ ends_at: '2026-10-02T21:30:00.000Z', games_allowed: 1 });
+  });
+
+  it('refuses too_long when the campaigns need more than the longest booking', () => {
+    const three = { playlist: ['no_mercy', 'death_toll', 'dead_air'] };
+    expect(createBooking(db, base(three) as Parameters<typeof createBooking>[1])).toEqual({ ok: false, error: 'too_long' });
+    expect(BOOKING_ERRORS.too_long).toEqual({
+      status: 400, text: 'That many campaigns will not fit in one booking; book fewer, and add one later with +1 campaign.',
+    });
+    setSetting(db, 'booking_max_minutes', '240');
+    const id = create(three);
+    expect(getBooking(db, id)).toMatchObject({ ends_at: '2026-10-03T00:00:00.000Z', games_allowed: 3 });
   });
 
   it('only a captain or co-captain books for a team', () => {
@@ -239,24 +256,59 @@ describe('cancel, extend, end, no-show', () => {
     expect(getBooking(db, id)!.ended_at).not.toBeNull();
   });
 
-  it('extends only while the capacity rule holds for the extra time (staff, any open state)', () => {
-    const id = create();
-    create({ by: P[2], opponent: { steamid: P[3] }, startsAt: '2026-10-02T22:00:00.000Z' });
-    create({ by: P[4], opponent: { steamid: P[5] }, startsAt: '2026-10-02T22:00:00.000Z' });
-    expect(extendBooking(db, { bookingId: id, by: P[9], staff: true, now: NOW })).toEqual({ ok: false, error: 'no_capacity' });
+  it('+1 campaign holds only while the capacity rule holds for the extra time (staff, any open state)', () => {
+    const id = create(); // 2 campaigns: 20:00 to 23:00
+    create({ by: P[2], opponent: { steamid: P[3] }, startsAt: '2026-10-02T23:00:00.000Z' });
+    create({ by: P[4], opponent: { steamid: P[5] }, startsAt: '2026-10-02T23:00:00.000Z' });
+    expect(addCampaign(db, { bookingId: id, by: P[9], staff: true, now: NOW })).toEqual({ ok: false, error: 'no_campaign_room' });
+    expect(getBooking(db, id)).toMatchObject({ games_allowed: 2, ends_at: '2026-10-02T23:00:00.000Z' });
     setSetting(db, 'pug_reserve_servers', '1');
-    expect(extendBooking(db, { bookingId: id, by: P[9], staff: true, now: NOW })).toEqual({ ok: true, value: { endsAt: '2026-10-02T22:30:00.000Z' } });
-    expect(getBooking(db, id)).toMatchObject({ extended_minutes: 30, warned_minutes: null });
+    // No campaign named: 60 + 10, up to 90.
+    expect(addCampaign(db, { bookingId: id, by: P[9], staff: true, now: NOW }))
+      .toEqual({ ok: true, value: { gamesAllowed: 3, endsAt: '2026-10-03T00:30:00.000Z', campaign: null } });
+    expect(getBooking(db, id)).toMatchObject({ games_allowed: 3, extended_minutes: 90, warned_minutes: null });
+    expect(JSON.parse(getBooking(db, id)!.playlist_json)).toEqual(['no_mercy', 'death_toll']);
   });
 
-  it('a captain cannot extend a scheduled booking, only a ready or active one, and only a confirmed side', () => {
+  it('+1 campaign appends a named pool campaign, and two calls add 2', () => {
+    const id = create();
+    expect(addCampaign(db, { bookingId: id, by: P[9], staff: true, campaign: 'the_sacrifice', now: NOW })).toEqual({ ok: false, error: 'bad_campaign' });
+    expect(addCampaign(db, { bookingId: id, by: P[9], staff: true, campaign: 7, now: NOW })).toEqual({ ok: false, error: 'bad_campaign' });
+    expect(addCampaign(db, { bookingId: id, by: P[9], staff: true, campaign: 'dead_air', now: NOW }))
+      .toEqual({ ok: true, value: { gamesAllowed: 3, endsAt: '2026-10-03T00:30:00.000Z', campaign: 'dead_air' } });
+    // A campaign already on the list is a replay, and still one more game.
+    expect(addCampaign(db, { bookingId: id, by: P[9], staff: true, campaign: 'no_mercy', now: NOW }))
+      .toEqual({ ok: true, value: { gamesAllowed: 4, endsAt: '2026-10-03T02:00:00.000Z', campaign: 'no_mercy' } });
+    expect(JSON.parse(getBooking(db, id)!.playlist_json)).toEqual(['no_mercy', 'death_toll', 'dead_air', 'no_mercy']);
+    const events = db.prepare("SELECT actor, detail FROM booking_events WHERE booking_id = ? AND event = 'campaign_added' ORDER BY id").all(id) as { actor: string; detail: string }[];
+    expect(events.map((e) => [e.actor, JSON.parse(e.detail)])).toEqual([
+      [P[9], { campaign: 'dead_air', gamesAllowed: 3, minutes: 90, endsAt: '2026-10-03T00:30:00.000Z', staff: true }],
+      [P[9], { campaign: 'no_mercy', gamesAllowed: 4, minutes: 90, endsAt: '2026-10-03T02:00:00.000Z', staff: true }],
+    ]);
+  });
+
+  it('+1 campaign during the closing grace cancels the close', () => {
+    const id = create();
+    db.prepare("UPDATE bookings SET close_at = '2026-10-02T22:05:00.000Z' WHERE id = ?").run(id);
+    expect(addCampaign(db, { bookingId: id, by: P[9], staff: true, now: NOW }).ok).toBe(true);
+    expect(getBooking(db, id)!.close_at).toBeNull();
+  });
+
+  it('a captain adds a campaign only to a ready or active booking, and only as a confirmed side', () => {
     const id = create();
     confirmBooking(db, { bookingId: id, by: P[1], now: NOW });
-    expect(extendBooking(db, { bookingId: id, by: P[0], now: NOW })).toEqual({ ok: false, error: 'wrong_state' });
+    expect(addCampaign(db, { bookingId: id, by: P[0], now: NOW })).toEqual({ ok: false, error: 'wrong_state' });
     holdBox(db, id, servers[3], at(START, -15));
     markSetup(db, id, at(START, -15));
     markReady(db, id, at(START, -12));
-    expect(extendBooking(db, { bookingId: id, by: P[0], now: at(START, -12) })).toEqual({ ok: true, value: { endsAt: '2026-10-02T22:30:00.000Z' } });
+    expect(addCampaign(db, { bookingId: id, by: P[5], now: at(START, -12) })).toEqual({ ok: false, error: 'not_manager' });
+    expect(addCampaign(db, { bookingId: id, by: P[0], now: at(START, -12) }))
+      .toEqual({ ok: true, value: { gamesAllowed: 3, endsAt: '2026-10-03T00:30:00.000Z', campaign: null } });
+    markActive(db, id, at(START, -5));
+    expect(addCampaign(db, { bookingId: id, by: P[1], now: at(START, 5) }).ok).toBe(true);
+    endBooking(db, { bookingId: id, by: P[0], now: at(START, 10) });
+    expect(addCampaign(db, { bookingId: id, by: P[0], now: at(START, 11) })).toEqual({ ok: false, error: 'wrong_state' });
+    expect(addCampaign(db, { bookingId: id, by: P[9], staff: true, now: at(START, 11) })).toEqual({ ok: false, error: 'wrong_state' });
   });
 
   it('an unconfirmed side acts only through confirm or decline, not cancel, extend, end or no-show', () => {
@@ -370,6 +422,23 @@ describe('views', () => {
       { matchId: first, campaign: 'no_mercy', state: 'completed', scoreA: 300, scoreB: 200, sideA: 'a', startedAt: expect.any(String), endedAt: null },
       { matchId: second, campaign: 'no_mercy', state: 'live', scoreA: 10, scoreB: 5, sideA: 'a', startedAt: expect.any(String), endedAt: null },
     ]);
+  });
+
+  it('bookingView counts campaigns: allowed, finished games played (an abort or a live game is not one), and the close deadline', () => {
+    const id = create();
+    const count = () => {
+      const v = bookingView(db, id, { steamid: P[0], staff: false })!;
+      return [v.gamesAllowed, v.gamesPlayed, v.closeAt];
+    };
+    expect(count()).toEqual([2, 0, null]);
+    for (const [state, token] of [['completed', 'c1'], ['aborted', 'c2'], ['live', 'c3']]) {
+      db.prepare(
+        `INSERT INTO matches (season_id, state, campaign, token, origin, kind, visibility, booking_id, booking_side_a)
+         VALUES (?, ?, 'no_mercy', ?, 'in_game', 'scrim', 'participants', ?, 'a')`,
+      ).run(currentSeasonId(db), state, token, id);
+    }
+    db.prepare("UPDATE bookings SET close_at = '2026-10-02T22:05:00.000Z' WHERE id = ?").run(id);
+    expect(count()).toEqual([2, 1, '2026-10-02T22:05:00.000Z']);
   });
 
   it('games show only to staff and to those who may see a booking game: not an invited person, not an unconfirmed side manager', () => {

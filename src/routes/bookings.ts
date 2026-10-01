@@ -9,7 +9,7 @@ import { getCampaignPool } from '../settings.js';
 import { campaignRegistry } from '../campaignRegistry.js';
 import * as B from '../bookings/bookings.js';
 import { activeCasters, inviteCaster, withdrawCaster } from '../bookings/casters.js';
-import { bookingLimits, typicalCampaignMinutes, STEP_MINUTES } from '../bookings/rules.js';
+import { bookingLimits, estimateOptions, typicalCampaignMinutes } from '../bookings/rules.js';
 import { isNotifyType, prefsOf, setPref } from '../notify/notify.js';
 import type { BookingRunner } from '../bookings/runner.js';
 import { hasPickupBookings, reliability, reliabilityPublic } from '../scrims/reliability.js';
@@ -71,15 +71,15 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
     const registry = campaignRegistry(db);
     const limits = bookingLimits(db);
     const team = (t: { id: number; slug: string; name: string; tag: string }) => ({ id: t.id, slug: t.slug, name: t.name, tag: t.tag });
+    const campaigns = getCampaignPool(db).filter((slug) => registry.get(slug));
     return {
-      campaigns: getCampaignPool(db).filter((slug) => registry.get(slug))
-        .map((slug) => ({ slug, name: registry.get(slug)!.name, minutes: typicalCampaignMinutes(db, slug) })),
+      campaigns: campaigns.map((slug) => ({ slug, name: registry.get(slug)!.name, minutes: typicalCampaignMinutes(db, slug) })),
       rulesets: db.prepare('SELECT id, name FROM rulesets WHERE archived_at IS NULL ORDER BY id').all(),
       gameConfigs: db.prepare('SELECT key, label FROM game_configs WHERE enabled = 1 ORDER BY key').all(),
-      limits: {
-        minMinutes: limits.minMinutes, maxMinutes: limits.maxMinutes, daysAhead: limits.daysAhead,
-        playlistMax: limits.playlistMax, stepMinutes: STEP_MINUTES, extendMinutes: limits.extendMinutes,
-      },
+      limits: { daysAhead: limits.daysAhead, playlistMax: limits.playlistMax },
+      // The slot length is estimated from the campaigns (estimateMinutes),
+      // and these are its inputs, so a form can show it as boxes are ticked.
+      estimate: estimateOptions(db, campaigns),
       myTeams: myTeams(db, me).filter((t) => t.role !== 'member').map(team),
       teams: liveTeams(db).map(team),
     };
@@ -117,7 +117,7 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
     if (!me) return;
     const b = body(req);
     const r = B.createBooking(db, {
-      by: me, teamId: b.teamId, opponent: b.opponent, startsAt: b.startsAt, minutes: b.minutes,
+      by: me, teamId: b.teamId, opponent: b.opponent, startsAt: b.startsAt,
       playlist: b.playlist, rulesetId: b.rulesetId, gameConfig: b.gameConfig,
     });
     if (!r.ok) return refuse(reply, r.error);
@@ -170,7 +170,8 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
   // Plan 2 Ruling 5: a manager's private review of the other side. The
   // answer is the viewer's own view, which carries only their side's review.
   action('review', (me, id, req) => submitReview(db, { bookingId: id, by: me, thumbs: body(req).thumbs, tags: body(req).tags }));
-  action('extend', (me, id) => B.extendBooking(db, { bookingId: id, by: me }), (_me, id) => runner?.onExtended(id));
+  // +1 campaign (Ruling 5); the path keeps its old name.
+  action('extend', (me, id, req) => B.addCampaign(db, { bookingId: id, by: me, campaign: body(req).campaign }), (_me, id) => runner?.onExtended(id));
   action('no-show', (me, id) => B.claimNoShow(db, { bookingId: id, by: me }),
     (_me, id, value) => runner?.onNoShow(id, (value as { absent: B.Side }).absent));
   action('end', (me, id) => B.endBooking(db, { bookingId: id, by: me }), (_me, id) => runner?.settle(id));

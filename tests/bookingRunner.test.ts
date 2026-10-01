@@ -6,7 +6,7 @@ import { currentSeasonId } from '../src/players.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { Notifier } from '../src/notify/notify.js';
 import {
-  addPerson, cancelBooking, confirmBooking, createBooking, extendBooking, getBooking, holdBox, markSetup, respondPerson, sideRow,
+  addPerson, cancelBooking, confirmBooking, createBooking, addCampaign, getBooking, holdBox, markSetup, respondPerson, sideRow,
 } from '../src/bookings/bookings.js';
 import { BookingRunner, CLEAR_LINES, allowLines, bookingLines } from '../src/bookings/runner.js';
 import { BookingVoice } from '../src/bookings/voice.js';
@@ -75,6 +75,9 @@ beforeEach(() => {
   setSetting(db, 'competitive_enabled', 'everyone');
   setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'death_toll', 'dead_center']));
   setSetting(db, 'pug_reserve_servers', '1');
+  // The slot is estimated from the campaigns now; a one-campaign booking is
+  // raised to this, keeping the 2 hour slot these timings were written for.
+  setSetting(db, 'booking_min_minutes', '120');
   for (const n of ['a', 'bb', 'ccc']) {
     const id = addServer(db, { name: n, host: '10.0.0.1', port: 27014 + n.length, rconPort: 1, rconPassword: 'x' });
     db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id);
@@ -535,12 +538,13 @@ describe('fix wave (final review)', () => {
 
   it('onExtended re-sends the notice and says the new end on a running box', async () => {
     const id = await ready();
-    expect(extendBooking(db, { bookingId: id, by: P[0], staff: true, now: new Date(now) }).ok).toBe(true);
+    expect(addCampaign(db, { bookingId: id, by: P[0], staff: true, now: new Date(now) }).ok).toBe(true);
     runner.onExtended(id);
     await new Promise((r) => setImmediate(r));
     const cmds = sent.flatMap((s) => s.cmds);
-    expect(cmds).toContain('say [Booking] Extended: this booking now runs until 22:30 UTC.');
-    expect(cmds.find((c) => c.startsWith('l4d_booking_notice'))).toContain('until 22:30 UTC');
+    // +1 campaign with none named: 60 + 10, up to 90 minutes.
+    expect(cmds).toContain('say [Booking] Extended: this booking now runs until 23:30 UTC.');
+    expect(cmds.find((c) => c.startsWith('l4d_booking_notice'))).toContain('until 23:30 UTC');
   });
 
   it('onExtended does nothing for a booking with no box yet', () => {
@@ -655,6 +659,9 @@ describe('booked games (plan 4b)', () => {
 
   it('after a game the next campaign is announced, then loaded 60 s later with the captains line and the extend warning', async () => {
     const id = await running();
+    // These time warnings were written for a 2 hour slot; two campaigns are
+    // now estimated at 3 hours, so the slot is set back to 2 hours here.
+    db.prepare('UPDATE bookings SET ends_at = ? WHERE id = ?').run(new Date(START + 120 * MIN).toISOString(), id);
     box.ccc.humans = [P[0], P[1]];
     now = START + 89 * MIN;
     const game = insertGame(id, { state: 'completed', endedAt: now });
@@ -918,6 +925,9 @@ describe('booked games (plan 4b)', () => {
   describe('fix round 1', () => {
     it('the first campaign gets the captains line and the extend warning once, when the booking goes active', async () => {
       const id = await running();
+      // These time warnings were written for a 2 hour slot; two campaigns are
+      // now estimated at 3 hours, so the slot is set back to 2 hours here.
+      db.prepare('UPDATE bookings SET ends_at = ? WHERE id = ?').run(new Date(START + 120 * MIN).toISOString(), id);
       box.ccc.humans = [P[0]];
       now = START + 70 * MIN; // 50 min left, No Mercy defaults to 60
       await runner.tick();
@@ -1132,7 +1142,8 @@ describe('booked games (plan 4b)', () => {
       runner.onCommand(3, P[1], 'extend', '');
       await flush();
       const b = getBooking(db, id)!;
-      expect(Date.parse(b.ends_at)).toBe(Date.parse(before) + 30 * MIN);
+      expect(Date.parse(b.ends_at)).toBe(Date.parse(before) + 90 * MIN);
+      expect(b.games_allowed).toBe(3);
       expect(cmds()).toContain(`say [Booking] Extended: this booking now runs until ${b.ends_at.slice(11, 16)} UTC.`);
     });
 
@@ -1383,7 +1394,7 @@ describe('booked games (plan 4b)', () => {
     it('a time end aborts a live game before the goodbye', async () => {
       const { id, live } = await start();
       box.ccc.humans = [P[0]];
-      now = START + 120 * MIN;
+      now = START + 180 * MIN; // two campaigns: an estimated 3 hour slot
       await r.tick();
       await r.idle();
       expect(getBooking(db, id)!.end_reason).toBe('time');

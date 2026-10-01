@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import {
-  allowance, bookingLimits, bookingsDue, capacityProblem, playlistMinutes, recentNoShows, typicalCampaignMinutes, upcomingCount,
-  DEFAULT_CAMPAIGN_MINUTES,
+  addCampaignMinutes, allowance, bookingLimits, bookingsDue, capacityProblem, estimateMinutes, playlistMinutes, recentNoShows,
+  typicalCampaignMinutes, upcomingCount, DEFAULT_CAMPAIGN_MINUTES,
 } from '../src/bookings/rules.js';
 
 const A = '76561199000000501';
@@ -124,6 +124,37 @@ describe('campaign timing', () => {
     expect(typicalCampaignMinutes(db, 'no_mercy')).toBe(70);
     expect(playlistMinutes(db, ['no_mercy', 'death_toll'])).toBe(70 + DEFAULT_CAMPAIGN_MINUTES);
   });
+
+  it('estimates a booking as 15 plus each campaign and 10, rounded up to the 30 minute step', () => {
+    // 15 + (60 + 10) = 85, up to 90.
+    expect(estimateMinutes(db, ['death_toll'])).toBe(90);
+    // 15 + 70 + 70 = 155, up to 180.
+    expect(estimateMinutes(db, ['death_toll', 'dead_air'])).toBe(180);
+    // 15 + 70 * 3 = 225, up to 240: above the default maximum, which the caller refuses.
+    expect(estimateMinutes(db, ['death_toll', 'dead_air', 'crash_course'])).toBe(240);
+    match('no_mercy', 50);
+    match('no_mercy', 50);
+    match('no_mercy', 50);
+    // 15 + (50 + 10) = 75, up to 90; an exact step stays as it is.
+    expect(estimateMinutes(db, ['no_mercy'])).toBe(90);
+    match('no_mercy', 65);
+    match('no_mercy', 65);
+    match('no_mercy', 65);
+    match('no_mercy', 65); // median 65: 15 + 75 = 90 exactly
+    expect(estimateMinutes(db, ['no_mercy'])).toBe(90);
+  });
+
+  it('raises the estimate to the shortest booking', () => {
+    expect(estimateMinutes(db, [])).toBe(60);
+    db.prepare("UPDATE settings SET value = '120' WHERE key = 'booking_min_minutes'").run();
+    expect(estimateMinutes(db, ['death_toll'])).toBe(120);
+  });
+
+  it('one more campaign adds its typical length and 10, rounded up to the step, 60 when none is named', () => {
+    expect(addCampaignMinutes(db, null)).toBe(90);
+    for (const m of [40, 40, 40]) match('no_mercy', m);
+    expect(addCampaignMinutes(db, 'no_mercy')).toBe(60);
+  });
 });
 
 describe('bookings due', () => {
@@ -145,7 +176,7 @@ describe('bookings due', () => {
   it('reads the limits from settings', () => {
     expect(bookingLimits(db)).toEqual({
       minMinutes: 60, maxMinutes: 180, daysAhead: 14, playlistMax: 4, maxUpcoming: 4, reserve: 2,
-      holdLeadMinutes: 15, protectMinutes: 75, idleEndMinutes: 10, extendMinutes: 30,
+      holdLeadMinutes: 15, protectMinutes: 75, idleEndMinutes: 10,
     });
   });
 });

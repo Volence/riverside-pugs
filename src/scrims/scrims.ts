@@ -4,10 +4,10 @@ import { getSetting, settingNumber } from '../settings.js';
 import { findSlurs } from '../slurs.js';
 import { activeMembers, getTeam, myTeams, roleOf } from '../teams/teams.js';
 import {
-  BOOKING_ERRORS, canUse, confirmBooking, createBooking, getBooking, managedSides, parseMinutes, parsePlaylist, parseStart,
+  BOOKING_ERRORS, canUse, confirmBooking, createBooking, getBooking, managedSides, parsePlaylist, parseStart,
   sideRow, type BookingError,
 } from '../bookings/bookings.js';
-import { allowance, bookingLimits, capacityProblem, iso, upcomingCount, type Party } from '../bookings/rules.js';
+import { allowance, bookingLimits, capacityProblem, estimateMinutes, iso, upcomingCount, type Party } from '../bookings/rules.js';
 import { inNight } from './night.js';
 import { nearestFreeSlot, proposedPlaylist, sideSr, srFits, type ScrimSide } from './rules.js';
 import { reliability, type Reliability } from './reliability.js';
@@ -179,8 +179,11 @@ function optionalId(raw: unknown): number | null | undefined {
 
 // ---------- posts ----------
 
+/** A post's block is estimated from its campaigns (estimateMinutes,
+ *  bookings by campaign Ruling 6); `minutes` is accepted from older callers
+ *  and ignored. */
 export function createPost(db: DB, o: {
-  by: string; teamId?: unknown; startsAt: unknown; minutes: unknown; campaigns: unknown; srRange: unknown; note: unknown;
+  by: string; teamId?: unknown; startsAt: unknown; minutes?: unknown; campaigns: unknown; srRange: unknown; note: unknown;
   targetTeamId?: unknown; now?: Date;
 }): ScrimResult<{ id: number }> {
   const now = o.now ?? new Date();
@@ -193,10 +196,10 @@ export function createPost(db: DB, o: {
   // refuses it too_late), yet would still show on the board and get a
   // Discord card with a live-looking Accept button. Refuse it up front.
   if (startMs - nowMs <= ACCEPT_CUTOFF_MS) return fail('too_late');
-  const minutes = parseMinutes(o.minutes, limits);
-  if (minutes === null) return fail('bad_length');
   const campaigns = parsePlaylist(db, o.campaigns, limits.playlistMax);
   if (!campaigns) return fail('bad_playlist');
+  const minutes = estimateMinutes(db, campaigns);
+  if (minutes > limits.maxMinutes) return fail('too_long');
   const srRange = parseSrRange(o.srRange);
   if (srRange === undefined) return fail('bad_sr_range');
   const note = parseNote(o.note);
@@ -240,8 +243,9 @@ export function createPost(db: DB, o: {
 /**
  * Re-post a cancelled scrim in one click (plan 2 Ruling 4): either side of a
  * cancelled booking that came from a post (scrim_posts.booking_id) opens a
- * fresh public post for its own side, with the booking's start, its actual
- * length and its playlist (trimmed to the current post campaign limit), and
+ * fresh public post for its own side, with the booking's start and its
+ * playlist (trimmed to the current post campaign limit; the block is
+ * estimated from it again, as for any post), and
  * the original post's sr_range. It goes straight through createPost, so
  * every plan 1 rule (the cutoff, the allowance, the open-posts limit,
  * capacity) applies the same as a hand-made post, and a refusal comes back
@@ -259,9 +263,8 @@ export function repostFromBooking(db: DB, o: { bookingId: number; by: string; no
   if (!side) return fail('not_manager');
   const s = sideRow(db, b.id, side)!;
   const campaigns = (JSON.parse(b.playlist_json) as string[]).slice(0, bookingLimits(db).playlistMax);
-  const minutes = Math.round((Date.parse(b.ends_at) - Date.parse(b.starts_at)) / 60_000);
   return createPost(db, {
-    by: o.by, teamId: s.team_id, startsAt: b.starts_at, minutes, campaigns, srRange: post.sr_range, note: '', now,
+    by: o.by, teamId: s.team_id, startsAt: b.starts_at, campaigns, srRange: post.sr_range, note: '', now,
   });
 }
 
@@ -367,11 +370,13 @@ export function declineAccept(db: DB, o: { acceptId: number; by: string; now?: D
 /**
  * The poster picks an acceptance and the server is booked, all in one
  * transaction: the booking is created by the poster's manager with the
- * proposed playlist and confirmed by the accepting side's captain, the post
+ * proposed playlist (never trimmed to the post's block; createBooking
+ * estimates the slot from it, Ruling 6) and confirmed by the accepting side's captain, the post
  * becomes booked, this acceptance chosen and every other pending one
  * declined (their ids come back as takenAcceptIds, for notices). If the
  * booking domain refuses either step, nothing is kept and its error comes
- * back; for no_capacity, with the nearest slot that does have room.
+ * back; for no_capacity, with the nearest slot that has room for the
+ * proposed playlist's slot.
  */
 export function confirmAccept(db: DB, o: { acceptId: number; by: string; now?: Date }): ScrimResult<{ bookingId: number; takenAcceptIds: number[] }> {
   const now = o.now ?? new Date();
@@ -391,10 +396,10 @@ export function confirmAccept(db: DB, o: { acceptId: number; by: string; now?: D
       // co-captain), so a confirm asks again.
       if (blocked(db, partyOf(p), partyOf(a))) return fail('not_available');
 
-      const { playlist } = proposedPlaylist(db, campaignsOf(p), campaignsOf(a), p.block_minutes);
+      const { playlist } = proposedPlaylist(db, campaignsOf(p), campaignsOf(a));
       const created = createBooking(db, {
         by: o.by, teamId: p.team_id, opponent: a.team_id !== null ? { teamId: a.team_id } : { steamid: a.captain_steamid },
-        startsAt: p.starts_at, minutes: p.block_minutes, playlist, now,
+        startsAt: p.starts_at, playlist, now,
       });
       if (!created.ok) throw new Refused(created.error);
       const bookingId = created.value.id;
@@ -415,8 +420,10 @@ export function confirmAccept(db: DB, o: { acceptId: number; by: string; now?: D
     if (!(e instanceof Refused)) throw e;
     const text = BOOKING_ERRORS[e.code].text;
     if (e.code !== 'no_capacity') return { ok: false, error: e.code, text };
-    const p = getPost(db, getAccept(db, o.acceptId)!.post_id)!;
-    return { ok: false, error: 'no_capacity', text, nearestSlot: nearestFreeSlot(db, p.region, Date.parse(p.starts_at), p.block_minutes, now.getTime()) };
+    const a = getAccept(db, o.acceptId)!;
+    const p = getPost(db, a.post_id)!;
+    const { minutes } = proposedPlaylist(db, campaignsOf(p), campaignsOf(a));
+    return { ok: false, error: 'no_capacity', text, nearestSlot: nearestFreeSlot(db, p.region, Date.parse(p.starts_at), minutes, now.getTime()) };
   }
 }
 
@@ -493,8 +500,10 @@ export interface BoardAccept {
   proposed: { playlist: string[]; minutes: number; fits: boolean };
 }
 export interface BoardPost {
-  id: number; status: PostStatus; side: BoardSide; sr: number; srRange: number | null; startsAt: string; minutes: number;
-  campaigns: string[]; note: string; createdAt: string; challenge: { teamId: number; name: string } | null;
+  id: number; status: PostStatus; side: BoardSide; sr: number; srRange: number | null; startsAt: string;
+  /** The block, estimated from the post's campaigns. */
+  minutes: number;
+  campaigns: string[]; campaignCount: number; note: string; createdAt: string; challenge: { teamId: number; name: string } | null;
   acceptCount: number;
   /** Plan 2 Ruling 7: whether this post's start falls inside the weekly
    *  scrim night window, for the board row's highlight and tag. */
@@ -556,7 +565,7 @@ export function board(
     const target = p.target_team_id !== null ? getTeam(db, p.target_team_id) : undefined;
     out.push({
       id: p.id, status: p.status, side: boardSide(db, p), sr, srRange: p.sr_range, startsAt: p.starts_at, minutes: p.block_minutes,
-      campaigns, note: p.note, createdAt: p.created_at,
+      campaigns, campaignCount: campaigns.length, note: p.note, createdAt: p.created_at,
       challenge: target ? { teamId: target.id, name: target.name } : null,
       acceptCount: pending.length,
       night: inNight(db, p.starts_at),
@@ -567,7 +576,7 @@ export function board(
           const asr = sideSr(db, scrimSide(a));
           return {
             id: a.id, side: boardSide(db, a), sr: asr, fits: srFits(sr, p.sr_range, asr), campaigns: campaignsOf(a), createdAt: a.created_at,
-            proposed: proposedPlaylist(db, campaigns, campaignsOf(a), p.block_minutes),
+            proposed: proposedPlaylist(db, campaigns, campaignsOf(a)),
           };
         })
         : null,
