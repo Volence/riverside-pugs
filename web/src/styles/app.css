@@ -3456,3 +3456,7 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .rulesetlist li > p { margin: var(--sp-1) 0 0; }
 .rulesetlist .inlinerow { margin-top: var(--sp-2); }
 .rulesetlist .inlinerow:empty { display: none; }
+.admin-warn {
+  margin: 0 0 var(--sp-3); padding: var(--sp-2) var(--sp-3); border-left: 3px solid var(--accent);
+  background: var(--surface-2); color: var(--text-bright); font-size: var(--fs-dense);
+}
