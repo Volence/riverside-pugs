@@ -119,6 +119,18 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'scrim_accept_campaigns_max', group: 'Competitive', label: 'Campaigns an accepter may add', help: 'How many campaigns of their own the accepting captain may add to a scrim post, on top of the poster\'s list. 0 means they can only take the poster\'s list as is.', type: { kind: 'int', min: 0, max: 4 } },
   { key: 'scrim_late_cancel_hours', group: 'Competitive', label: 'Late cancel (hours before the start)', help: 'A side that cancels a booked scrim less than this long before the start gets a late cancel on its record, unless the other side or staff excuse it. 0 means never.', type: { kind: 'int', min: 0, max: 24 } },
   { key: 'scrim_reliability_public', group: 'Competitive', label: 'Scrim record public', help: 'Off: a side\'s scrim record is shown only to staff and to the side itself. On: everyone sees a Reliable badge on posts and team pages.', type: { kind: 'choice', options: [{ value: 'off', label: 'Off' }, { value: 'on', label: 'On' }] } },
+  { key: 'scrim_night_day', group: 'Competitive', label: 'Scrim night day', help: 'A weekly scrim night to cluster activity: a banner on the scrim board, posts inside it highlighted, and a reminder in the scrims channel 2 hours before. Off hides it.', type: { kind: 'choice', options: [
+    { value: 'off', label: 'Off' },
+    { value: 'monday', label: 'Monday' },
+    { value: 'tuesday', label: 'Tuesday' },
+    { value: 'wednesday', label: 'Wednesday' },
+    { value: 'thursday', label: 'Thursday' },
+    { value: 'friday', label: 'Friday' },
+    { value: 'saturday', label: 'Saturday' },
+    { value: 'sunday', label: 'Sunday' },
+  ] } },
+  { key: 'scrim_night_start_utc', group: 'Competitive', label: 'Scrim night start (UTC)', help: 'When scrim night starts, as 24 hour HH:MM in UTC. An unreadable value is treated the same as scrim night being off.', type: { kind: 'string', maxLength: 5, allowEmpty: false } },
+  { key: 'scrim_night_hours', group: 'Competitive', label: 'Scrim night length (hours)', help: 'How long the scrim night window lasts, from its start. It may cross midnight UTC.', type: { kind: 'int', min: 1, max: 12 } },
 ];
 
 const BY_KEY = new Map(SETTINGS_SCHEMA.map((d) => [d.key, d]));

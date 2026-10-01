@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { addServer } from '../src/serverPool.js';
 import { setSetting } from '../src/settings.js';
@@ -244,6 +244,107 @@ describe('ScrimPoster', () => {
     const closedRow = cardRow(id)!;
     expect(closedRow.state).toBe('closed');
     expect(byId(closedRow.message_id).payload.embeds[0].description).toBe('Withdrawn');
+  });
+
+  describe('the weekly scrim night reminder', () => {
+    function thursdayNight() {
+      setSetting(db, 'scrim_night_day', 'thursday');
+      setSetting(db, 'scrim_night_start_utc', '21:00');
+      setSetting(db, 'scrim_night_hours', '4');
+    }
+    const reminderRow = () => db.prepare("SELECT * FROM discord_messages WHERE kind = 'scrim_night'")
+      .get() as { ref: string; channel_id: string; message_id: string; state: string } | undefined;
+
+    it('sends once, 2 hours before the window opens, and never again (even across a fresh poster instance)', async () => {
+      setSetting(db, 'discord_scrims_channel_id', CHANNEL);
+      thursdayNight();
+      // The window starts 2026-10-01T21:00:00.000Z (a Thursday); 19:30 is
+      // inside the 2 hour lead.
+      poster = new ScrimPoster({ db, transport: t, publicUrl: PUBLIC_URL, tickMs: 0 });
+      await poster.tickNow();
+      expect(t.sends).toBe(0);
+
+      const inLead = new Date('2026-10-01T19:30:00.000Z');
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(inLead.getTime());
+      try {
+        await poster.tickNow();
+        expect(liveIn(CHANNEL)).toHaveLength(1);
+        const row = reminderRow()!;
+        expect(row.ref).toBe('2026-10-01T21:00:00.000Z');
+        expect(row.state).toBe('closed');
+        const msg = byId(row.message_id);
+        expect(msg.payload.content).toContain('Scrim night starts in about 2 hours');
+        expect(msg.payload.content).toContain(`<t:${Math.floor(Date.parse('2026-10-01T21:00:00.000Z') / 1000)}:`);
+        expect(msg.payload.content).toContain(`${PUBLIC_URL}/scrims`);
+
+        // A second tick in the same lead window sends nothing more.
+        await poster.tickNow();
+        expect(t.sends).toBe(1);
+
+        // A restart (a fresh poster, same message store) still sends nothing.
+        const restarted = new ScrimPoster({ db, transport: t, publicUrl: PUBLIC_URL, tickMs: 0 });
+        await restarted.tickNow();
+        restarted.stop();
+        expect(t.sends).toBe(1);
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
+
+    it('sends nothing while competitive play is not public, or with no channel set', async () => {
+      thursdayNight();
+      const inLead = new Date('2026-10-01T19:30:00.000Z');
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(inLead.getTime());
+      try {
+        // No channel set at all.
+        await poster.tickNow();
+        expect(t.sends).toBe(0);
+        expect(reminderRow()).toBeUndefined();
+
+        // Channel set, but competitive play not public.
+        setSetting(db, 'discord_scrims_channel_id', CHANNEL);
+        setSetting(db, 'competitive_enabled', 'admins');
+        await poster.tickNow();
+        expect(t.sends).toBe(0);
+        expect(reminderRow()).toBeUndefined();
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
+
+    it('retries a failed send on the next tick', async () => {
+      setSetting(db, 'discord_scrims_channel_id', CHANNEL);
+      thursdayNight();
+      const inLead = new Date('2026-10-01T19:30:00.000Z');
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(inLead.getTime());
+      try {
+        t.failSends = 1;
+        await poster.tickNow();
+        expect(t.sends).toBe(0);
+        expect(reminderRow()).toBeUndefined();
+
+        await poster.tickNow();
+        expect(t.sends).toBe(1);
+        expect(reminderRow()).toBeTruthy();
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
+
+    it('sends nothing outside the 2 hour lead, before or after it opens', async () => {
+      setSetting(db, 'discord_scrims_channel_id', CHANNEL);
+      thursdayNight();
+      for (const at of ['2026-10-01T18:59:00.000Z', '2026-10-01T21:00:00.000Z', '2026-10-01T22:00:00.000Z']) {
+        const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(new Date(at).getTime());
+        try {
+          await poster.tickNow();
+        } finally {
+          nowSpy.mockRestore();
+        }
+      }
+      expect(t.sends).toBe(0);
+      expect(reminderRow()).toBeUndefined();
+    });
   });
 
   it('closes a booked post with the Booked line', async () => {

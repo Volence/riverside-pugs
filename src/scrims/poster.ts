@@ -8,6 +8,7 @@ import { getSetting } from '../settings.js';
 import { competitivePublic } from '../teams/access.js';
 import { getTeam } from '../teams/teams.js';
 import type { BotTransport, MessagePayload } from '../discord/transport.js';
+import { nightWindow } from './night.js';
 import { sideSr, type ScrimSide } from './rules.js';
 import { getPost, type PostRow, type PostStatus } from './scrims.js';
 
@@ -31,6 +32,9 @@ import { getPost, type PostRow, type PostStatus } from './scrims.js';
  */
 
 const KIND = 'scrim';
+const NIGHT_KIND = 'scrim_night';
+/** Plan 2 Ruling 7: how far ahead of the window's start the reminder goes out. */
+const NIGHT_REMINDER_LEAD_MS = 2 * 3_600_000;
 
 const CLOSED_LABEL: Partial<Record<PostStatus, string>> = {
   booked: 'Booked',
@@ -134,6 +138,7 @@ export class ScrimPoster {
   private async tick(): Promise<void> {
     await this.postAndEdit();
     await this.close();
+    await this.sendNightReminder();
   }
 
   /** Posts a card for every open or pending public post with none yet, and
@@ -213,6 +218,37 @@ export class ScrimPoster {
       } catch (err) {
         console.error('[scrims] poster close failed:', err instanceof Error ? err.message : err);
       }
+    }
+  }
+
+  /** The weekly scrim night reminder (plan 2 Ruling 7): once, 2 hours before
+   *  the window opens (never after it has opened), while competitive play is
+   *  public and the channel is set. discord_messages (kind scrim_night, ref
+   *  the window's own starts_at) is the record of having sent it, saved
+   *  already closed since there is no card to keep editing; a restart just
+   *  finds the row and sends nothing more. A thrown send leaves no row, so
+   *  the next tick inside the lead tries again. */
+  private async sendNightReminder(): Promise<void> {
+    const { db, transport, publicUrl } = this.deps;
+    const channelId = getSetting(db, 'discord_scrims_channel_id') ?? '';
+    if (!channelId || !competitivePublic(db)) return;
+    const window = nightWindow(db);
+    if (!window) return;
+    const startMs = Date.parse(window.startsAt);
+    const nowMs = Date.now();
+    if (nowMs < startMs - NIGHT_REMINDER_LEAD_MS || nowMs >= startMs) return;
+    if (getMessage(db, NIGHT_KIND, window.startsAt)) return;
+
+    const unix = Math.floor(startMs / 1000);
+    const payload: MessagePayload = {
+      content: `Scrim night starts in about 2 hours (<t:${unix}:R>). Post or accept a scrim: ${publicUrl}/scrims`,
+      embeds: [], components: [], mentionUserIds: [],
+    };
+    try {
+      const messageId = await transport.send(channelId, payload);
+      saveMessage(db, { kind: NIGHT_KIND, ref: window.startsAt, channelId, messageId, state: 'closed' });
+    } catch (err) {
+      console.error('[scrims] night reminder send failed:', err instanceof Error ? err.message : err);
     }
   }
 }

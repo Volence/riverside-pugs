@@ -13,6 +13,7 @@ import type { BookingRunner } from '../bookings/runner.js';
 import type { Notifier } from '../notify/notify.js';
 import * as S from '../scrims/scrims.js';
 import { scrimMessage, scrimSideManagers, teamManagers, type ScrimNotifyType } from '../scrims/messages.js';
+import { nightWindow } from '../scrims/night.js';
 
 export interface ScrimRoutesOpts {
   db: DB;
@@ -95,7 +96,11 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
     if (!me) return;
     reply.header('Cache-Control', 'no-store');
     const q = req.query as { fitsOnly?: string };
-    return { posts: S.board(db, { steamid: me, staff: isStaff(me) }, { fitsOnly: q.fitsOnly === '1' }) };
+    return {
+      posts: S.board(db, { steamid: me, staff: isStaff(me) }, { fitsOnly: q.fitsOnly === '1' }),
+      // Plan 2 Ruling 7: the board's banner, null while scrim night is off.
+      night: nightWindow(db),
+    };
   });
 
   app.post('/api/scrims', async (req, reply) => {
