@@ -59,9 +59,14 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
     reply.code(T.TEAM_ERRORS[error].status).send({ error: T.TEAM_ERRORS[error].text });
   const teamOf = (req: FastifyRequest): T.TeamRow | undefined =>
     T.getTeamBySlug(db, (req.params as { slug: string }).slug);
-  /** Staff acting on a team where they are not the captain: audited. */
-  const audit = (by: string, team: T.TeamRow, action: string, detail: object) => {
-    if (T.roleOf(db, team.id, by) !== 'captain') logAdmin(db, by, action, team.id, { slug: team.slug, ...detail });
+  /** A staff member acting on a team outside their own role there: audited.
+   *  `ownRole` must be judged BEFORE the write (a captain transfer or a
+   *  disband both change who holds a role), so every call site computes it
+   *  first and passes it in rather than re-reading roleOf afterwards. A
+   *  non-staff captain or co-captain acting on their own team is never
+   *  audited, whatever `ownRole` says, because isStaff(by) is false for them. */
+  const auditStaff = (by: string, ownRole: boolean, team: T.TeamRow, action: string, detail: object) => {
+    if (isStaff(by) && !ownRole) logAdmin(db, by, action, team.id, { slug: team.slug, ...detail });
   };
 
   app.get('/api/teams', async (req, reply) => {
@@ -236,10 +241,13 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
     if (!me) return;
     const t = teamOf(req);
     if (!t) return refuse(reply, 'not_found');
+    // Judged before the write: transferCaptain demotes the old captain to
+    // cocaptain, so reading the role afterwards would always say "not captain".
+    const ownRole = T.roleOf(db, t.id, me) === 'captain';
     const target = String(((req.body ?? {}) as { steamid?: unknown }).steamid ?? '');
     const r = T.transferCaptain(db, { teamId: t.id, by: me, target, staff: isStaff(me) });
     if (!r.ok) return refuse(reply, r.error);
-    audit(me, t, 'team_captain', { to: target });
+    auditStaff(me, ownRole, t, 'team_captain', { to: target });
     return {};
   });
 
@@ -248,10 +256,11 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
     if (!me) return;
     const t = teamOf(req);
     if (!t) return refuse(reply, 'not_found');
+    const ownRole = T.roleOf(db, t.id, me) === 'captain';
     const { name, tag } = (req.body ?? {}) as { name?: unknown; tag?: unknown };
     const r = T.renameTeam(db, { teamId: t.id, by: me, staff: isStaff(me), name, tag });
     if (!r.ok) return refuse(reply, r.error);
-    audit(me, t, 'team_rename', { from: { name: t.name, tag: t.tag }, to: r.value });
+    auditStaff(me, ownRole, t, 'team_rename', { from: { name: t.name, tag: t.tag }, to: r.value });
     return r.value;
   });
 
@@ -260,12 +269,11 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
     if (!me) return;
     const t = teamOf(req);
     if (!t) return refuse(reply, 'not_found');
-    // Audit before the write: after it nobody is captain, so audit() would
-    // log a captain disbanding their own team as a staff action.
-    const ownTeam = T.roleOf(db, t.id, me) === 'captain';
+    // Judged before the write: after it nobody is captain any more.
+    const ownRole = T.roleOf(db, t.id, me) === 'captain';
     const r = T.disbandTeam(db, { teamId: t.id, by: me, staff: isStaff(me) });
     if (!r.ok) return refuse(reply, r.error);
-    if (!ownTeam) logAdmin(db, me, 'team_disband', t.id, { slug: t.slug, name: t.name });
+    auditStaff(me, ownRole, t, 'team_disband', { name: t.name });
     return {};
   });
 
@@ -276,7 +284,11 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
     if (!t) return refuse(reply, 'not_found');
     const staff = isStaff(me);
     const role = T.roleOf(db, t.id, me);
-    if (!staff && role !== 'captain' && role !== 'cocaptain') return refuse(reply, 'not_manager');
+    // Judged before the write: "own role" for a logo is captain OR cocaptain,
+    // both already managers, unlike rename/disband/captain where only the
+    // captain acts under their own role.
+    const ownRole = role === 'captain' || role === 'cocaptain';
+    if (!staff && !ownRole) return refuse(reply, 'not_manager');
     const raw = ((req.body ?? {}) as { png?: unknown }).png;
     if (typeof raw !== 'string') return reply.code(400).send({ error: 'The logo is missing.' });
     const bytes = Buffer.from(raw, 'base64');
@@ -287,7 +299,7 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
     const { name } = store.putLogo(bytes);
     const r = T.setLogoKey(db, { teamId: t.id, by: me, staff, logoKey: name });
     if (!r.ok) return refuse(reply, r.error);
-    audit(me, t, 'team_logo', { logoKey: name });
+    auditStaff(me, ownRole, t, 'team_logo', { logoKey: name });
     return { logoKey: name };
   });
 }

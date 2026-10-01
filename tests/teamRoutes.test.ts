@@ -124,6 +124,23 @@ describe('staff', () => {
     await call('POST', `/api/teams/${slug}/rename`, P[0], { tag: 'RT' });
     expect(db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action LIKE 'team_%'").get()).toEqual({ n: 0 });
   });
+
+  it('a captain handing captaincy to a member leaves no team_% row', async () => {
+    const slug = await create(P[0], 'Rats', 'RR');
+    const inv = await call('POST', `/api/teams/${slug}/invites`, P[0], { steamid: P[1] });
+    await call('POST', `/api/teams/invites/${inv.json().inviteId}/accept`, P[1]);
+    expect((await call('POST', `/api/teams/${slug}/captain`, P[0], { steamid: P[1] })).statusCode).toBe(200);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action LIKE 'team_%'").get()).toEqual({ n: 0 });
+  });
+
+  it('a mod transferring captaincy on a team they are not on records one team_captain row', async () => {
+    const slug = await create(P[0], 'Rats', 'RR');
+    const inv = await call('POST', `/api/teams/${slug}/invites`, P[0], { steamid: P[1] });
+    await call('POST', `/api/teams/invites/${inv.json().inviteId}/accept`, P[1]);
+    expect((await call('POST', `/api/teams/${slug}/captain`, MOD, { steamid: P[1] })).statusCode).toBe(200);
+    expect(db.prepare("SELECT admin_id, action FROM admin_actions WHERE action LIKE 'team_%'").all())
+      .toEqual([{ admin_id: MOD, action: 'team_captain' }]);
+  });
 });
 
 describe('logo', () => {
@@ -140,6 +157,22 @@ describe('logo', () => {
     expect(file.headers['content-type']).toBe('image/png');
     expect((await call('GET', `/api/teams/logos/${'b'.repeat(64)}.png`, P[3])).statusCode).toBe(404);
     expect((await call('POST', `/api/teams/${slug}/logo`, P[3], { png: png(256, 256).toString('base64') })).statusCode).toBe(403);
+  });
+
+  it('a co-captain uploading a logo records no team_% row', async () => {
+    const slug = await create(P[0], 'Rats', 'RR');
+    const inv = await call('POST', `/api/teams/${slug}/invites`, P[0], { steamid: P[1] });
+    await call('POST', `/api/teams/invites/${inv.json().inviteId}/accept`, P[1]);
+    db.prepare("UPDATE team_members SET role = 'cocaptain' WHERE steamid = ?").run(P[1]);
+    expect((await call('POST', `/api/teams/${slug}/logo`, P[1], { png: png(256, 256).toString('base64') })).statusCode).toBe(200);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action LIKE 'team_%'").get()).toEqual({ n: 0 });
+  });
+
+  it('a mod uploading a logo to a team they are not on records one team_logo row', async () => {
+    const slug = await create(P[0], 'Rats', 'RR');
+    expect((await call('POST', `/api/teams/${slug}/logo`, MOD, { png: png(256, 256).toString('base64') })).statusCode).toBe(200);
+    expect(db.prepare("SELECT admin_id, action FROM admin_actions WHERE action LIKE 'team_%'").all())
+      .toEqual([{ admin_id: MOD, action: 'team_logo' }]);
   });
 });
 
