@@ -26,6 +26,9 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
   const [renaming, setRenaming] = useState(false);
   /** The member a Make captain press is waiting to be confirmed for. */
   const [confirmCaptain, setConfirmCaptain] = useState<string | null>(null);
+  /** The member a Kick press is waiting to be confirmed for. */
+  const [confirmKick, setConfirmKick] = useState<string | null>(null);
+  const [confirmLeave, setConfirmLeave] = useState(false);
   const [copied, setCopied] = useState(false);
   const me = session.kind === 'active' ? session.me.steamid : null;
 
@@ -113,13 +116,22 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
                       {role === 'captain' && (m.role === 'member'
                         ? <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => act(() => teamsApi.setRole(slug, m.steamid, 'cocaptain'))}>Make co-captain</button>
                         : <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => act(() => teamsApi.setRole(slug, m.steamid, 'member'))}>Make member</button>)}
-                      <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => setConfirmCaptain(m.steamid)}>Make captain</button>
+                      <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => { setConfirmKick(null); setConfirmCaptain(m.steamid); }}>Make captain</button>
                     </>
                   )}
                   {canManage && m.steamid !== me && m.role !== 'captain' && (role === 'captain' || m.role === 'member') && (
-                    <button class="btn btn--ghost btn--sm btn--quietdanger" disabled={busy} onClick={() => act(() => teamsApi.kick(slug, m.steamid))}>Kick</button>
+                    <button class="btn btn--ghost btn--sm btn--quietdanger" disabled={busy} onClick={() => { setConfirmCaptain(null); setConfirmKick(m.steamid); }}>Kick</button>
                   )}
                 </span>
+                {confirmKick === m.steamid && (
+                  <span class="teamconfirmrow">
+                    <span class="teamroster__meta">{m.name} leaves the team and cannot rejoin through the join link. You can invite them back later.</span>
+                    <span class="teamconfirm">
+                      <button class="btn btn--sm btn--danger" disabled={busy} onClick={() => act(() => teamsApi.kick(slug, m.steamid), () => setConfirmKick(null))}>Yes, kick {m.name}</button>
+                      <button class="btn btn--ghost btn--sm" onClick={() => setConfirmKick(null)}>Keep them</button>
+                    </span>
+                  </span>
+                )}
                 {confirmCaptain === m.steamid && (
                   <span class="teamconfirmrow">
                     <span class="teamroster__meta">
@@ -208,7 +220,7 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
         </div>
       )}
 
-      {staffControls && (
+      {(staffControls || canManage) && (
         <Panel>
           <h3>Team settings</h3>
           <div class="teamsetting">
@@ -221,11 +233,13 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
               }} />
             </label>
           </div>
-          <div class="teamsetting">
-            <div class="teamsetting__label">Name and tag<span class="teamroster__meta">{team.name} [{team.tag}]</span></div>
-            {!renaming && <button class="btn btn--ghost btn--sm" onClick={() => { setNewName(team.name); setNewTag(team.tag); setRenaming(true); }}>Rename</button>}
-          </div>
-          {renaming && (
+          {staffControls && (
+            <div class="teamsetting">
+              <div class="teamsetting__label">Name and tag<span class="teamroster__meta">{team.name} [{team.tag}]</span></div>
+              {!renaming && <button class="btn btn--ghost btn--sm" onClick={() => { setNewName(team.name); setNewTag(team.tag); setRenaming(true); }}>Rename</button>}
+            </div>
+          )}
+          {staffControls && renaming && (
             <form class="teamform" onSubmit={(e) => {
               e.preventDefault();
               void act(() => teamsApi.rename(slug, {
@@ -250,7 +264,12 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
                 {team.members.length === 1 ? 'You are the last player: leaving disbands the team.'
                   : role === 'captain' ? 'The captaincy passes to a co-captain, or the longest-serving player.' : 'You can be invited back later.'}
               </span></div>
-              <button class="btn btn--ghost btn--sm btn--quietdanger" disabled={busy} onClick={() => act(() => teamsApi.leave(slug), () => route('/teams'))}>Leave team</button>
+              {confirmLeave
+                ? <span class="teamconfirm">
+                    <button class="btn btn--sm btn--danger" disabled={busy} onClick={() => act(() => teamsApi.leave(slug), () => route('/teams'))}>Yes, leave {team.name}</button>
+                    <button class="btn btn--ghost btn--sm" onClick={() => setConfirmLeave(false)}>Stay</button>
+                  </span>
+                : <button class="btn btn--ghost btn--sm btn--quietdanger" onClick={() => setConfirmLeave(true)}>Leave team</button>}
             </div>
           )}
           {staffControls && (

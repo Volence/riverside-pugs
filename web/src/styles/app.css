@@ -3139,45 +3139,44 @@ tbody tr.is-lifted td { opacity: 0.55; }
 
 /* ---------- Teams (routes/Teams.tsx, routes/TeamJoin.tsx, routes/Team.tsx) ---------- */
 
-.teamgrid { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
-.teamcard {
-  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3);
-  background: var(--surface-2); border: 1px solid var(--border); padding: var(--sp-3);
-  color: var(--text);
-}
-.teamcard:hover { border-color: var(--border-strong); text-decoration: none; }
-.teamcard__name { font-family: var(--font-label); font-weight: 600; color: var(--text-bright, var(--text)); }
-.teamcard__line { flex-basis: 100%; color: var(--text-muted); font-size: var(--fs-dense); }
-
 .teambadge {
   width: 40px; height: 40px; flex: none;
-  border-radius: var(--radius); object-fit: cover;
+  object-fit: cover; border: 1px solid var(--border);
 }
 .teambadge--tag {
   display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid var(--border); background: var(--surface);
-  font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.06em; color: var(--text-muted);
+  background: var(--surface-2);
+  font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.06em; color: var(--text-muted); text-transform: uppercase;
 }
 
-.teaminvites { display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
-.teaminvites li {
-  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3);
-  padding: var(--sp-2) 0; border-bottom: 1px solid var(--border);
+/* ---- Teams list (/teams) and join link (/team/join/:token) ---------- */
+.teamrows { list-style: none; margin: 0; padding: 0; }
+.teamrows > li { border-bottom: 1px solid var(--border); }
+.teamrows > li:last-child { border-bottom: 0; }
+.teamrow {
+  display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-2); margin: 0 calc(-1 * var(--sp-2)); color: var(--text);
 }
-.teaminvites li:last-child { border-bottom: 0; }
-.teaminvites li span { flex: 1 1 auto; }
-.teaminvites li .btn, .teaminvites li .btn--ghost { margin-left: auto; }
+a.teamrow:hover { background: var(--surface-2); text-decoration: none; }
+a.teamrow:hover .teamrow__name { color: var(--accent); }
+.teamrow__who { display: flex; flex-direction: column; min-width: 0; }
+.teamrow__nameline { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+.teamrow__name { color: var(--text-bright); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.teamrow__tag { font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.1em; color: var(--text-muted); }
+.teamchip--open { border-style: dashed; }
+.teamcount { margin-left: var(--sp-2); font-family: var(--font-label); font-size: var(--fs-label); color: var(--text-muted); letter-spacing: 0.08em; }
+.teamnote--lead { margin: 0 0 var(--sp-3); color: var(--text); font-size: inherit; }
+@media (max-width: 560px) {
+  .teaminvite .teamrow { grid-template-columns: 40px minmax(0, 1fr); }
+  .teaminvite .teamconfirm { grid-column: 2 / -1; justify-content: flex-start; }
+}
 
-.teamform { display: flex; flex-wrap: wrap; align-items: end; gap: var(--sp-3); }
-.teamform label { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); color: var(--text-muted); }
-.teamform .btn { align-self: center; }
-@media (max-width: 480px) { .teamform { flex-direction: column; align-items: stretch; } }
-
-.teamjoin { display: flex; align-items: center; justify-content: center; gap: var(--sp-3); flex-wrap: wrap; padding: var(--sp-4) 0; }
-
-
-
-
+.teamjoincard {
+  display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-5);
+  padding: var(--sp-5); background: var(--surface); border: 1px solid var(--border); border-top: 3px solid var(--rule);
+}
+.teamjoincard .teamjoincard__actions { justify-content: flex-start; margin-top: var(--sp-3); }
+@media (max-width: 560px) { .teamjoincard { padding: var(--sp-4); } }
 
 .teamformer { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); color: var(--text-muted); font-size: var(--fs-dense); }
 
@@ -3252,6 +3251,8 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .teamupload { cursor: pointer; }
 .teamupload:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .teamform { display: flex; flex-wrap: wrap; align-items: end; gap: var(--sp-3); padding-top: var(--sp-2); }
+.teamform .teamfield:first-child { flex: 1 1 14rem; max-width: 20rem; }
+@media (max-width: 480px) { .teamform { flex-direction: column; align-items: stretch; } .teamform .teamfield:first-child { max-width: none; } }
 .teamconfirmrow {
   grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2) var(--sp-3);
   padding: var(--sp-2) var(--sp-3); border-left: 2px solid var(--rule); background: var(--surface-2);

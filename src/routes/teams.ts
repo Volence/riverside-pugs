@@ -11,8 +11,8 @@ import type { CommunityStore } from '../community/store.js';
 import type { DmFn } from '../signonDropNotify.js';
 import { teamInviteDm } from '../discord/teamButtons.js';
 
-export interface TeamListItem { slug: string; name: string; tag: string; logoKey: string | null; members: number }
-export interface MyTeamItem { slug: string; name: string; tag: string; logoKey: string | null; role: T.TeamRole }
+export interface TeamListItem { slug: string; name: string; tag: string; logoKey: string | null; members: number; captainName: string }
+export interface MyTeamItem { slug: string; name: string; tag: string; logoKey: string | null; role: T.TeamRole; members: number }
 export interface InviteItem { id: number; slug: string; name: string; tag: string; invitedByName: string | null; createdAt: string }
 export interface TeamMemberView { steamid: string; name: string; avatar: string | null; role: T.TeamRole; joinedAt: string }
 export interface TeamView {
@@ -78,7 +78,7 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
   app.get('/api/teams', async (req, reply) => {
     if (!allowedViewer(req, reply)) return;
     const teams: TeamListItem[] = T.liveTeams(db).map((t) => ({
-      slug: t.slug, name: t.name, tag: t.tag, logoKey: t.logo_key, members: T.rosterSize(db, t.id),
+      slug: t.slug, name: t.name, tag: t.tag, logoKey: t.logo_key, members: T.rosterSize(db, t.id), captainName: nameOf(t.captain_steamid),
     }));
     return { teams };
   });
@@ -86,7 +86,7 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
   app.get('/api/teams/mine', async (req, reply) => {
     const me = allowedActive(req, reply);
     if (!me) return;
-    const teams: MyTeamItem[] = T.myTeams(db, me).map((t) => ({ slug: t.slug, name: t.name, tag: t.tag, logoKey: t.logo_key, role: t.role }));
+    const teams: MyTeamItem[] = T.myTeams(db, me).map((t) => ({ slug: t.slug, name: t.name, tag: t.tag, logoKey: t.logo_key, role: t.role, members: T.rosterSize(db, t.id) }));
     const invites: InviteItem[] = T.pendingInvitesFor(db, me).map((i) => ({
       id: i.id, slug: i.slug, name: i.name, tag: i.tag, invitedByName: getPlayer(db, i.invited_by)?.name ?? null, createdAt: i.created_at,
     }));
@@ -118,7 +118,7 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
     if (!allowedActive(req, reply)) return;
     const t = T.teamByJoinToken(db, (req.params as { token: string }).token);
     if (!t) return refuse(reply, 'link_off');
-    return { slug: t.slug, name: t.name, tag: t.tag, logoKey: t.logo_key };
+    return { slug: t.slug, name: t.name, tag: t.tag, logoKey: t.logo_key, members: T.rosterSize(db, t.id), captainName: nameOf(t.captain_steamid) };
   });
 
   app.post('/api/teams/join/:token', async (req, reply) => {

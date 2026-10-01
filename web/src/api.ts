@@ -1643,8 +1643,8 @@ export const castApi = {
 // ---------- teams ----------
 
 export type TeamRole = 'captain' | 'cocaptain' | 'member';
-export interface TeamListItem { slug: string; name: string; tag: string; logoKey: string | null; members: number }
-export interface MyTeamItem { slug: string; name: string; tag: string; logoKey: string | null; role: TeamRole }
+export interface TeamListItem { slug: string; name: string; tag: string; logoKey: string | null; members: number; captainName: string }
+export interface MyTeamItem { slug: string; name: string; tag: string; logoKey: string | null; role: TeamRole; members: number }
 export interface TeamInviteItem { id: number; slug: string; name: string; tag: string; invitedByName: string | null; createdAt: string }
 export interface TeamMemberView { steamid: string; name: string; avatar: string | null; role: TeamRole; joinedAt: string }
 export interface TeamView {
@@ -1670,7 +1670,7 @@ export const teamsApi = {
   cancelInvite: (id: number) => post(`/api/teams/invites/${id}/cancel`),
   joinLink: (slug: string, on: boolean) => post<{ token: string | null }>(`/api/teams/${enc(slug)}/join-link`, { on }),
   joinInfo: (token: string, signal?: AbortSignal) =>
-    get<{ slug: string; name: string; tag: string; logoKey: string | null }>(`/api/teams/join/${enc(token)}`, signal),
+    get<{ slug: string; name: string; tag: string; logoKey: string | null; members: number; captainName: string }>(`/api/teams/join/${enc(token)}`, signal),
   join: (token: string) => post<{ slug: string }>(`/api/teams/join/${enc(token)}`),
   leave: (slug: string) => post<{ disbanded: boolean; captain: string | null }>(`/api/teams/${enc(slug)}/leave`),
   kick: (slug: string, steamid: string) => post(`/api/teams/${enc(slug)}/members/${enc(steamid)}/kick`),
