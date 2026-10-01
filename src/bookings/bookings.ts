@@ -399,6 +399,21 @@ export function allowList(db: DB, bookingId: number): string[] {
   return [...ids].sort();
 }
 
+/** Who belongs in each side's private voice channel (plan 4c, ruling 2):
+ *  the allowlist's people without staff (staff come in through the staff
+ *  role), that is the accepted people who are not barred, and only those with
+ *  a linked Discord account. */
+export function voiceMembers(db: DB, bookingId: number): { side: Side; discordId: string }[] {
+  const now = new Date();
+  const out: { side: Side; discordId: string }[] = [];
+  for (const p of acceptedPeople(db, bookingId)) {
+    if (barredFromBox(db, p.steamid, now)) continue;
+    const discordId = getPlayer(db, p.steamid)?.discord_id;
+    if (discordId) out.push({ side: p.side, discordId });
+  }
+  return out;
+}
+
 /** The longest name kept for someone a captain lets in from the game. */
 const GAME_NAME_MAX = 32;
 

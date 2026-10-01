@@ -142,6 +142,7 @@ import { sweepCommunity } from './community/sweep.js';
 import { teamRoutes } from './routes/teams.js';
 import { handleTeamButton, TEAM_BUTTON_PREFIX } from './discord/teamButtons.js';
 import { BookingRunner, TICK_MS as BOOKING_TICK_MS } from './bookings/runner.js';
+import { BookingVoice } from './bookings/voice.js';
 import { Notifier } from './notify/notify.js';
 import { bookingRoutes } from './routes/bookings.js';
 import { adminBookingRoutes } from './routes/adminBookings.js';
@@ -1943,6 +1944,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // and an aborted game's token stops being listened for.
     logPublicAddress: deps.config.logPublicAddress,
     unregisterToken: (token) => logListener?.unregister(token),
+    // A private voice channel per side (plan 4c). Read per call: the bot logs
+    // in some seconds after this runs, and may never (no bot, dev mode).
+    voice: new BookingVoice({ db: deps.db, voice: () => bot?.transport?.voice ?? null }),
   });
   bookingRunnerRef = bookingRunner;
   bookingRunner.resume();
