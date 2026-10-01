@@ -3,7 +3,7 @@ import { openDb, type DB } from '../src/db.js';
 import { addServer } from '../src/serverPool.js';
 import { setSetting } from '../src/settings.js';
 import { createTeam, disbandTeam, invitePlayer, respondInvite, setRole } from '../src/teams/teams.js';
-import { confirmBooking, createBooking, getBooking, sideRow, peopleOf } from '../src/bookings/bookings.js';
+import { BOOKING_ERRORS, confirmBooking, createBooking, getBooking, sideRow, peopleOf } from '../src/bookings/bookings.js';
 import {
   acceptPost, board, confirmAccept, createPost, declineAccept, expire, withdrawAccept, withdrawPost,
   type ScrimResult,
@@ -62,13 +62,14 @@ const accept = (postId: number, by: string, over: Partial<Parameters<typeof acce
 const postRow = (id: number) => db.prepare('SELECT * FROM scrim_posts WHERE id = ?').get(id) as Record<string, unknown>;
 const acceptRow = (id: number) => db.prepare('SELECT * FROM scrim_accepts WHERE id = ?').get(id) as Record<string, unknown>;
 const bookingCount = (): number => (db.prepare('SELECT COUNT(*) AS n FROM bookings').get() as { n: number }).n;
-/** Two other bookings over START: with room for 2, the slot is then full. */
-const fillSlot = (): void => {
+/** Two other bookings over a start (START by default): with room for 2, the slot is then full. */
+const fillSlotAt = (startsAt: string): void => {
   for (const [a, b] of [[P[10], P[11]], [P[12], P[13]]]) {
-    const r = createBooking(db, { by: a, opponent: { steamid: b }, startsAt: START, minutes: 120, playlist: ['no_mercy'], now: NOW });
+    const r = createBooking(db, { by: a, opponent: { steamid: b }, startsAt, minutes: 120, playlist: ['no_mercy'], now: NOW });
     if (!r.ok) throw new Error(r.error);
   }
 };
+const fillSlot = (): void => fillSlotAt(START);
 
 describe('createPost', () => {
   it('stores a pickup post, open, with the poster as captain and the note trimmed', () => {
@@ -378,7 +379,7 @@ describe('confirmAccept', () => {
   it('race: a post expired at its start cannot then be confirmed', () => {
     const id = post();
     const a = accept(id, P[1]);
-    expect(expire(db, at(START))).toEqual({ posts: [id], accepts: [a] });
+    expect(expire(db, at(START))).toEqual({ posts: [id], accepts: [a], withdrawn: { posts: [], accepts: [] } });
     expect(err(confirmAccept(db, { acceptId: a, by: P[0], now: at(START) }))).toBe('wrong_state');
     expect(postRow(id).status).toBe('expired');
     expect(bookingCount()).toBe(0);
@@ -390,7 +391,7 @@ describe('confirmAccept', () => {
     fillSlot(); // two bookings 20:00-22:00 fill the slot after the post was made
     const before = bookingCount();
     const r = confirmAccept(db, { acceptId: a, by: P[0], now: NOW });
-    expect(r).toEqual({ ok: false, error: 'no_capacity', nearestSlot: '2026-10-02T22:00:00.000Z' });
+    expect(r).toEqual({ ok: false, error: 'no_capacity', text: BOOKING_ERRORS.no_capacity.text, nearestSlot: '2026-10-02T22:00:00.000Z' });
     expect(bookingCount()).toBe(before);
     expect(postRow(id)).toMatchObject({ status: 'pending', booking_id: null });
     expect(acceptRow(a)).toMatchObject({ status: 'pending', responded_at: null });
@@ -405,7 +406,7 @@ describe('confirmAccept', () => {
     if (!other.ok) throw new Error(other.error);
     const before = bookingCount();
     const r = confirmAccept(db, { acceptId: a, by: P[0], now: NOW });
-    expect(r).toEqual({ ok: false, error: 'allowance' });
+    expect(r).toEqual({ ok: false, error: 'allowance', text: BOOKING_ERRORS.allowance.text });
     expect(bookingCount()).toBe(before);
     expect(db.prepare('SELECT COUNT(*) AS n FROM booking_sides').get()).toEqual({ n: 2 });
     expect(postRow(id).status).toBe('pending');
@@ -431,9 +432,9 @@ describe('expire', () => {
     const pending = post({ by: P[2], startsAt: '2026-10-02T21:00:00.000Z' });
     // Made an hour before START, so neither its 2 hours nor the 30 minute cutoff is up by START.
     const a = value(acceptPost(db, { postId: pending, by: P[3], now: at(START, -60) })).id;
-    expect(expire(db, at(START, -1))).toEqual({ posts: [], accepts: [] });
-    expect(expire(db, at(START))).toEqual({ posts: [open], accepts: [] });
-    expect(expire(db, at('2026-10-02T21:00:00.000Z'))).toEqual({ posts: [pending], accepts: [a] });
+    expect(expire(db, at(START, -1))).toEqual({ posts: [], accepts: [], withdrawn: { posts: [], accepts: [] } });
+    expect(expire(db, at(START))).toEqual({ posts: [open], accepts: [], withdrawn: { posts: [], accepts: [] } });
+    expect(expire(db, at('2026-10-02T21:00:00.000Z'))).toEqual({ posts: [pending], accepts: [a], withdrawn: { posts: [], accepts: [] } });
     expect(postRow(pending).status).toBe('expired');
     expect(acceptRow(a)).toMatchObject({ status: 'expired', responded_at: '2026-10-02T21:00:00.000Z' });
   });
@@ -442,18 +443,18 @@ describe('expire', () => {
     const id = post();
     const a1 = accept(id, P[1]);
     const a2 = value(acceptPost(db, { postId: id, by: P[2], now: at(NOW.toISOString(), 60) })).id;
-    expect(expire(db, at(NOW.toISOString(), 119))).toEqual({ posts: [], accepts: [] });
-    expect(expire(db, at(NOW.toISOString(), 120))).toEqual({ posts: [], accepts: [a1] });
+    expect(expire(db, at(NOW.toISOString(), 119))).toEqual({ posts: [], accepts: [], withdrawn: { posts: [], accepts: [] } });
+    expect(expire(db, at(NOW.toISOString(), 120))).toEqual({ posts: [], accepts: [a1], withdrawn: { posts: [], accepts: [] } });
     expect(postRow(id).status).toBe('pending');
-    expect(expire(db, at(NOW.toISOString(), 180))).toEqual({ posts: [], accepts: [a2] });
+    expect(expire(db, at(NOW.toISOString(), 180))).toEqual({ posts: [], accepts: [a2], withdrawn: { posts: [], accepts: [] } });
     expect(postRow(id).status).toBe('open');
   });
 
   it('a pending acceptance expires 30 minutes before the start', () => {
     const id = post();
     const a = value(acceptPost(db, { postId: id, by: P[1], now: at(START, -60) })).id;
-    expect(expire(db, at(START, -31))).toEqual({ posts: [], accepts: [] });
-    expect(expire(db, at(START, -30))).toEqual({ posts: [], accepts: [a] });
+    expect(expire(db, at(START, -31))).toEqual({ posts: [], accepts: [], withdrawn: { posts: [], accepts: [] } });
+    expect(expire(db, at(START, -30))).toEqual({ posts: [], accepts: [a], withdrawn: { posts: [], accepts: [] } });
     expect(postRow(id).status).toBe('open');
   });
 
@@ -461,7 +462,7 @@ describe('expire', () => {
     const id = post();
     const a = accept(id, P[1]);
     value(confirmAccept(db, { acceptId: a, by: P[0], now: NOW }));
-    expect(expire(db, at(START, 10))).toEqual({ posts: [], accepts: [] });
+    expect(expire(db, at(START, 10))).toEqual({ posts: [], accepts: [], withdrawn: { posts: [], accepts: [] } });
     expect(postRow(id).status).toBe('booked');
     expect(acceptRow(a).status).toBe('chosen');
   });
@@ -560,5 +561,109 @@ describe('board', () => {
     db.prepare('UPDATE player_ratings SET mu = 40 WHERE player_id = ?').run(P[3]); // now 3000
     expect(ids(P[3])).toContain(own);
     expect(ids(P[0])).not.toContain(own);
+  });
+});
+
+describe('review fix round 1', () => {
+  it('refuses an accept within 30 minutes of the start', () => {
+    const id = post();
+    expect(err(acceptPost(db, { postId: id, by: P[1], now: at(START, -30) }))).toBe('too_late');
+    expect(err(acceptPost(db, { postId: id, by: P[1], now: at(START, -1) }))).toBe('too_late');
+    expect(err(acceptPost(db, { postId: id, by: P[1], now: at(START, -31) }))).toBe('ok');
+  });
+
+  it('a side holds at most 3 open or pending posts', () => {
+    const days = ['2026-10-02T20:00:00.000Z', '2026-10-03T20:00:00.000Z', '2026-10-04T20:00:00.000Z', '2026-10-05T20:00:00.000Z'];
+    const first = post({ startsAt: days[0] });
+    accept(first, P[5]); // pending still counts
+    post({ startsAt: days[1] });
+    post({ startsAt: days[2] });
+    expect(err(createPost(db, postInput({ startsAt: days[3] })))).toBe('too_many_posts');
+    value(withdrawPost(db, { postId: first, by: P[0], now: NOW }));
+    expect(err(createPost(db, postInput({ startsAt: days[3] })))).toBe('ok');
+  });
+
+  it('the post limit counts a team by team, apart from its captain\'s pickup posts', () => {
+    const rats = team(P[0], 'Rats', 'RR', [P[2]]);
+    setRole(db, { teamId: rats, by: P[0], target: P[2], role: 'cocaptain' });
+    for (const d of ['2026-10-02T20:00:00.000Z', '2026-10-03T20:00:00.000Z', '2026-10-04T20:00:00.000Z']) post({ teamId: rats, startsAt: d });
+    expect(err(createPost(db, postInput({ by: P[2], teamId: rats, startsAt: '2026-10-05T20:00:00.000Z' })))).toBe('too_many_posts');
+    expect(err(createPost(db, postInput({ startsAt: '2026-10-05T20:00:00.000Z' })))).toBe('ok'); // P[0] as a pickup
+  });
+
+  it('confirm refuses an acceptance past its 2 hours, before any tick has run', () => {
+    const id = post();
+    const a = accept(id, P[1]);
+    expect(err(confirmAccept(db, { acceptId: a, by: P[0], now: at(NOW.toISOString(), 120) }))).toBe('wrong_state');
+    expect(bookingCount()).toBe(0);
+    expect(acceptRow(a).status).toBe('pending');
+    expect(confirmAccept(db, { acceptId: a, by: P[0], now: at(NOW.toISOString(), 119) }).ok).toBe(true);
+  });
+
+  it('confirm refuses an acceptance past the 30 minute cutoff, before any tick has run', () => {
+    const id = post();
+    const a = value(acceptPost(db, { postId: id, by: P[1], now: at(START, -60) })).id;
+    expect(err(confirmAccept(db, { acceptId: a, by: P[0], now: at(START, -30) }))).toBe('wrong_state');
+    expect(bookingCount()).toBe(0);
+    expect(confirmAccept(db, { acceptId: a, by: P[0], now: at(START, -31) }).ok).toBe(true);
+  });
+
+  it('a hidden challenge answers not_found to anyone managing neither side', () => {
+    const rats = team(P[0], 'Rats', 'RR', [P[4]]);
+    const mice = team(P[1], 'Mice', 'MM', [P[3]]);
+    const id = post({ teamId: rats, targetTeamId: mice });
+    const a = accept(id, P[1], { teamId: mice });
+    for (const who of [P[5], P[4], P[3]]) {
+      expect(err(withdrawPost(db, { postId: id, by: who, now: NOW }))).toBe('not_found');
+      expect(err(withdrawAccept(db, { acceptId: a, by: who, now: NOW }))).toBe('not_found');
+      expect(err(declineAccept(db, { acceptId: a, by: who, now: NOW }))).toBe('not_found');
+      expect(err(confirmAccept(db, { acceptId: a, by: who, now: NOW }))).toBe('not_found');
+    }
+    // Each side's managers can see it, so they get the ordinary answer.
+    expect(err(withdrawPost(db, { postId: id, by: P[1], now: NOW }))).toBe('not_manager');
+    expect(err(withdrawAccept(db, { acceptId: a, by: P[0], now: NOW }))).toBe('not_manager');
+    expect(err(confirmAccept(db, { acceptId: a, by: P[1], now: NOW }))).toBe('not_manager');
+    // A public post still says not_manager to a stranger.
+    const pub = post({ by: P[6] });
+    expect(err(withdrawPost(db, { postId: pub, by: P[5], now: NOW }))).toBe('not_manager');
+  });
+
+  it('a public post of a disbanded team leaves the board, cannot be accepted, and is withdrawn by expire', () => {
+    const rats = team(P[0], 'Rats', 'RR');
+    const id = post({ teamId: rats });
+    const a = accept(id, P[1]);
+    disbandTeam(db, { teamId: rats, by: P[0], now: NOW });
+    expect(board(db, { steamid: P[5], staff: false }, { now: NOW }).map((p) => p.id)).not.toContain(id);
+    expect(err(acceptPost(db, { postId: id, by: P[5], now: NOW }))).toBe('not_found');
+    expect(expire(db, NOW)).toEqual({ posts: [], accepts: [], withdrawn: { posts: [id], accepts: [a] } });
+    expect(postRow(id).status).toBe('withdrawn');
+    expect(acceptRow(a)).toMatchObject({ status: 'withdrawn', responded_at: NOW.toISOString() });
+    expect(expire(db, NOW)).toEqual({ posts: [], accepts: [], withdrawn: { posts: [], accepts: [] } });
+  });
+
+  it('a challenge to a disbanded team leaves the board, cannot be accepted, and is withdrawn by expire', () => {
+    const rats = team(P[0], 'Rats', 'RR');
+    const mice = team(P[1], 'Mice', 'MM');
+    const id = post({ teamId: rats, targetTeamId: mice });
+    disbandTeam(db, { teamId: mice, by: P[1], now: NOW });
+    expect(board(db, { steamid: P[0], staff: false }, { now: NOW }).map((p) => p.id)).not.toContain(id);
+    expect(err(acceptPost(db, { postId: id, by: P[1], teamId: mice, now: NOW }))).toBe('not_found');
+    expect(expire(db, NOW)).toEqual({ posts: [], accepts: [], withdrawn: { posts: [id], accepts: [] } });
+    expect(postRow(id).status).toBe('withdrawn');
+  });
+
+  it('a booking refusal from a confirm keeps the booking\'s own text', () => {
+    const id = post();
+    const a = accept(id, P[1]);
+    db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(P[1]);
+    expect(confirmAccept(db, { acceptId: a, by: P[0], now: NOW }))
+      .toEqual({ ok: false, error: 'not_player', text: BOOKING_ERRORS.not_player.text });
+    const id2 = post({ by: P[2], startsAt: '2026-10-03T20:00:00.000Z' });
+    const a2 = accept(id2, P[3]);
+    fillSlotAt('2026-10-03T20:00:00.000Z');
+    const r = confirmAccept(db, { acceptId: a2, by: P[2], now: NOW });
+    expect(r).toMatchObject({ ok: false, error: 'no_capacity', text: BOOKING_ERRORS.no_capacity.text });
+    // A refusal of the scrim's own carries no booking text.
+    expect(confirmAccept(db, { acceptId: a2, by: P[3], now: NOW })).toEqual({ ok: false, error: 'not_manager' });
   });
 });
