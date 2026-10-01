@@ -6,17 +6,17 @@
  * boot marker l4d_booking_id (l4d_booking 1.4.0, written only by setup and
  * recovery) is no longer this booking's. A box that does not answer rcon is
  * gone only when, for the whole limit, its live game has not heartbeated
- * either, A2S (a separate UDP path, asked on every watch of the outage) has
- * not answered at any time since rcon was lost, and at least the limit's
- * count of A2S queries in a row went unanswered. Between games there is no
- * heartbeat, so one dropped UDP reply must never move a healthy box.
+ * either and the last limit's count of A2S queries (a separate UDP path,
+ * asked on every watch of the outage, one a minute) all went unanswered.
+ * The count is rolling: any A2S answer starts it again. Between games there
+ * is no heartbeat, so one dropped UDP reply must never move a healthy box,
+ * while a box that answered early in an outage and then died still moves.
  */
 export type BoxVerdict =
   | { kind: 'ok' }
   | { kind: 'restarted' }
   | { kind: 'quiet' }
-  /** players: this check's A2S count, or null when A2S answered earlier in the outage but not now. */
-  | { kind: 'up_no_rcon'; players: number | null }
+  | { kind: 'up_no_rcon'; players: number }
   | { kind: 'gone' };
 
 export interface BoxSignals {
@@ -30,9 +30,7 @@ export interface BoxSignals {
   heartbeatMs: number | null;
   /** The A2S answer of this check: null for no answer, else the player count. Asked on every watch while rcon fails. */
   a2sPlayers: number | null;
-  /** bookings.a2s_seen_at in ms: the last A2S answer, or null. Only an answer at or after lostSinceMs counts. */
-  a2sSeenMs: number | null;
-  /** Unanswered A2S queries in a row, this check's included (kept in memory; a web restart starts it again). */
+  /** Unanswered A2S queries in a row, this check's included; any answer resets it (kept in memory; a web restart starts it again). */
   a2sMisses: number;
   /** Misses in a row needed for gone: booking_gone_minutes, one query per minute watch. */
   goneMisses: number;
@@ -51,9 +49,6 @@ export function classifyBox(s: BoxSignals): BoxVerdict {
   if (s.nowMs - since < s.goneMs) return { kind: 'quiet' };
   if (s.heartbeatMs !== null && s.nowMs - s.heartbeatMs < s.goneMs) return { kind: 'quiet' };
   if (s.a2sPlayers !== null) return { kind: 'up_no_rcon', players: s.a2sPlayers };
-  // Any A2S answer in this outage means the box was up after rcon went:
-  // nothing moves (staff get the one alert), however many replies drop since.
-  if (s.a2sSeenMs !== null && s.a2sSeenMs >= since) return { kind: 'up_no_rcon', players: null };
   // One lost UDP reply is not silence: gone needs the limit's count of
   // unanswered queries in a row as well as the whole window.
   if (s.a2sMisses < s.goneMisses) return { kind: 'quiet' };
