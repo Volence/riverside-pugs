@@ -148,6 +148,7 @@ import { Notifier } from './notify/notify.js';
 import { bookingRoutes } from './routes/bookings.js';
 import { adminBookingRoutes } from './routes/adminBookings.js';
 import { adminEventRoutes } from './routes/adminEvents.js';
+import { adminRulesetRoutes } from './routes/adminRulesets.js';
 import { ScrimBoard, TICK_MS as SCRIM_TICK_MS } from './scrims/board.js';
 import { ScrimPoster } from './scrims/poster.js';
 import { scrimRoutes } from './routes/scrims.js';
@@ -1973,6 +1974,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // The Events desk (tournaments plan T1a): staff read, admins write, not behind the switch.
   await app.register(adminEventRoutes, { db: deps.db, store: getCommunityStore });
+
+  // Setup > Rulesets and Game configs (rulesets editor plan): admins only.
+  await app.register(adminRulesetRoutes, { db: deps.db });
 
   // The scrim board (scrim board plan 1, Task 3): shares the booking runner
   // (a confirmed scrim's booking is set up and allocated exactly like one
