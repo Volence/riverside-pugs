@@ -815,6 +815,12 @@ describe('blocks: a blocked pair never meets, whichever side blocked', () => {
     // A pickup poster challenging a team that blocked them.
     block(P[2], { teamId: dogs }, { steamid: P[6] });
     expect(err(createPost(db, postInput({ by: P[6], targetTeamId: dogs })))).toBe('not_available');
+    // The other side makes the block this time: Foxes blocks Elk, not Elk blocks Foxes.
+    const elk = team(P[3], 'Elk', 'EL');
+    const foxes = team(P[4], 'Foxes', 'FX');
+    block(P[4], { teamId: foxes }, { teamId: elk });
+    expect(err(createPost(db, postInput({ by: P[3], teamId: elk, targetTeamId: foxes })))).toBe('not_available');
+    expect(err(createPost(db, postInput({ by: P[4], teamId: foxes, targetTeamId: elk })))).toBe('not_available');
   });
 
   it('accept: refused not_available whichever side blocked', () => {
@@ -829,6 +835,12 @@ describe('blocks: a blocked pair never meets, whichever side blocked', () => {
     block(P[6], { captain: P[6] }, { steamid: P[7] });
     expect(err(acceptPost(db, { postId: pickupPost, by: P[7], now: NOW }))).toBe('not_available');
     expect(err(acceptPost(db, { postId: pickupPost, by: P[8], now: NOW }))).toBe('ok');
+    // The other side makes the block this time: Elk blocks Foxes, not Foxes blocks Elk.
+    const elk = team(P[3], 'Elk', 'EL');
+    const foxes = team(P[4], 'Foxes', 'FX');
+    const foxesPost = post({ by: P[4], teamId: foxes, startsAt: '2026-10-03T22:00:00.000Z' });
+    block(P[3], { teamId: elk }, { teamId: foxes });
+    expect(err(acceptPost(db, { postId: foxesPost, by: P[3], teamId: elk, now: NOW }))).toBe('not_available');
   });
 
   it('confirm: a block that starts to match after the accept is refused not_available, nothing booked', () => {

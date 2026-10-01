@@ -117,8 +117,13 @@ export function managesBlockParty(db: DB, party: BlockParty, by: string): boolea
 function parseTarget(raw: unknown): BlockTarget | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const r = raw as Record<string, unknown>;
-  if (Number.isInteger(r.teamId)) return { teamId: r.teamId as number };
-  if (typeof r.steamid === 'string' && /^\d{17}$/.test(r.steamid)) return { steamid: r.steamid };
+  const hasTeamId = Number.isInteger(r.teamId);
+  const hasSteamid = typeof r.steamid === 'string' && /^\d{17}$/.test(r.steamid);
+  // A target naming both a team and a player is not a sharper target, it is
+  // a malformed one, so it is refused the same as a target naming neither.
+  if (hasTeamId && hasSteamid) return null;
+  if (hasTeamId) return { teamId: r.teamId as number };
+  if (hasSteamid) return { steamid: r.steamid as string };
   return null;
 }
 

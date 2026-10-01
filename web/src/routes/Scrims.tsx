@@ -277,8 +277,19 @@ function BlockedPanel({ options }: { options: ScrimOptions }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = () => { scrimsApi.blocks(side).then((r) => setBlocks(r.blocks), () => {}); };
-  useEffect(load, [side]);
+  const load = (signal?: AbortSignal) => {
+    scrimsApi.blocks(side, signal).then((r) => { if (!signal || !signal.aborted) setBlocks(r.blocks); }, () => {});
+  };
+  // A side switch clears the list right away and cancels the request for the
+  // side just left, so a slow response for it can never land after the
+  // viewer has moved on to the new side.
+  useEffect(() => {
+    setBlocks(null);
+    setError(null);
+    const ctl = new AbortController();
+    load(ctl.signal);
+    return () => ctl.abort();
+  }, [side]);
 
   useEffect(() => {
     if (q.trim().length < 2) { setFound([]); return; }
@@ -298,12 +309,12 @@ function BlockedPanel({ options }: { options: ScrimOptions }) {
   return (
     <Panel>
       <h3>Blocked</h3>
-      <p class="teamsub">
+      <p class="muted">
         Blocked sides never see your scrim posts and you never see theirs; neither can accept, challenge or book the other. They are not told.
       </p>
       {error && <p class="error" role="alert">{error}</p>}
       <label class="teamfield">Your side
-        <select aria-label="Blocked side" value={side === null ? '' : String(side)} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setSide(v ? Number(v) : null); }}>
+        <select aria-label="Your side for blocks" value={side === null ? '' : String(side)} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setSide(v ? Number(v) : null); }}>
           {options.myTeams.map((t) => <option key={t.id} value={String(t.id)}>[{t.tag}] {t.name}</option>)}
           <option value="">A pickup group (just me for now)</option>
         </select>

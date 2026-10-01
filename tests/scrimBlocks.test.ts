@@ -159,6 +159,8 @@ describe('blockTarget and unblock', () => {
     expect(r({ teamId: 999 })).toBe('not_found');
     expect(r({ steamid: '76561199999999999' })).toBe('not_found');
     expect(r({ steamid: P[4] })).toBe('ok');
+    // A target carrying both a team and a player is refused, not read as a team.
+    expect(r({ teamId: 999, steamid: P[4] })).toBe('bad_target');
   });
 
   it('Ruling 6: twice is a no-op success; never itself or a team it belongs to; at most 100', () => {
