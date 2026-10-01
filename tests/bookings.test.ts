@@ -270,6 +270,11 @@ describe('cancel, extend, end, no-show', () => {
     expect(JSON.parse(getBooking(db, id)!.playlist_json)).toEqual(['no_mercy', 'death_toll']);
   });
 
+  it('+1 campaign checks the caller before the campaign, so a stranger learns nothing from a bad slug', () => {
+    const id = create();
+    expect(addCampaign(db, { bookingId: id, by: P[9], campaign: 'the_sacrifice', now: NOW })).toEqual({ ok: false, error: 'wrong_state' });
+  });
+
   it('+1 campaign appends a named pool campaign, and two calls add 2', () => {
     const id = create();
     expect(addCampaign(db, { bookingId: id, by: P[9], staff: true, campaign: 'the_sacrifice', now: NOW })).toEqual({ ok: false, error: 'bad_campaign' });

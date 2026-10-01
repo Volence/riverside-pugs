@@ -538,7 +538,7 @@ describe('fix wave (final review)', () => {
     await new Promise((r) => setImmediate(r));
     const cmds = sent.flatMap((s) => s.cmds);
     // +1 campaign with none named: 60 + 10, up to 90 minutes, from 21:30.
-    expect(cmds).toContain('say [Booking] +1 campaign: now 2 to play (until about 23:00 UTC).');
+    expect(cmds).toContain('say [Booking] +1 campaign: 2 left to play, 2 booked in all (until about 23:00 UTC).');
     expect(cmds.find((c) => c.startsWith('l4d_booking_notice'))).toContain('until 23:00 UTC');
   });
 
@@ -1138,7 +1138,7 @@ describe('booked games (plan 4b)', () => {
       expect(b.games_allowed).toBe(3);
       // !extend takes no campaign: an arg is ignored.
       expect(JSON.parse(b.playlist_json)).toEqual(['no_mercy', 'death_toll']);
-      expect(cmds()).toContain('say [Booking] +1 campaign: now 3 to play (until about 00:30 UTC).');
+      expect(cmds()).toContain('say [Booking] +1 campaign: 3 left to play, 3 booked in all (until about 00:30 UTC).');
     });
 
     it('!addcampaign with a campaign name appends it to the playlist; with none it adds a campaign to pick later', async () => {
@@ -1150,7 +1150,7 @@ describe('booked games (plan 4b)', () => {
       expect(b.games_allowed).toBe(2);
       // Death Toll has no history: 60 + 10, up to 90, from 21:30.
       expect(b.ends_at).toBe(new Date(START + 180 * MIN).toISOString());
-      expect(cmds()).toContain('say [Booking] +1 campaign: now 2 to play (until about 23:00 UTC).');
+      expect(cmds()).toContain('say [Booking] +1 campaign: 2 left to play, 2 booked in all (until about 23:00 UTC).');
       runner.onCommand(3, P[1], 'addcampaign', '');
       await flush();
       b = getBooking(db, id)!;
@@ -1293,7 +1293,7 @@ describe('booked games (plan 4b)', () => {
       runner.onCommand(3, P[0], 'addcampaign', 'death');
       await flush();
       expect(getBooking(db, id)).toMatchObject({ games_allowed: 3, close_at: null, ending_at: null });
-      expect(cmds()).toContain('say [Booking] +1 campaign: now 3 to play (until about 00:30 UTC).');
+      expect(cmds()).toContain('say [Booking] +1 campaign: 2 left to play, 3 booked in all (until about 00:30 UTC).');
       // The box sat on a finished campaign: the next one by the count (the
       // named one, second on the playlist now) is announced and loaded.
       expect(getBooking(db, id)!.next_campaign).toBe('death_toll');
@@ -1407,6 +1407,33 @@ describe('booked games (plan 4b)', () => {
       await runner.tick();
       await runner.idle();
       expect(getBooking(db, id)).toMatchObject({ state: 'ended', end_reason: 'done' });
+    });
+
+    it('a +1 made while an earlier booking is being watched is not undone by a stale close', async () => {
+      // The tick lists open bookings once, then awaits each watch in turn: a
+      // +1 on the second booking made during the first one's rcon must not be
+      // undone by the second watch reading its grace from the old list.
+      let hook: (() => void) | null = null;
+      runner = build({
+        rcon: async (server, c) => {
+          if (hook && c.includes('status')) { const h = hook; hook = null; h(); }
+          return fakeRcon(server, c);
+        },
+      });
+      const first = await running(['no_mercy']);
+      const second = await running(['no_mercy']);
+      for (const n of ['a', 'bb', 'ccc']) box[n].humans = [P[0], P[1]];
+      now = START + 60 * MIN;
+      finish(second);
+      await flush();
+      expect(closeAt(second)).not.toBeNull();
+      expect(closeAt(first)).toBeNull();
+      now = START + 66 * MIN;
+      hook = () => { expect(addCampaign(db, { bookingId: second, by: P[1], now: new Date(now) }).ok).toBe(true); };
+      await runner.tick();
+      await runner.idle();
+      expect(hook).toBeNull();
+      expect(getBooking(db, second)).toMatchObject({ ending_at: null, games_allowed: 2, close_at: null });
     });
 
     it('a game started during the grace is not cut by the close', async () => {
