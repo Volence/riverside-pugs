@@ -15,6 +15,7 @@ import type { BookingRunner } from '../bookings/runner.js';
 import { hasPickupBookings, reliability, reliabilityPublic } from '../scrims/reliability.js';
 import { submitReview } from '../scrims/reviews.js';
 import { logAdmin } from '../admin/audit.js';
+import { rulesetOptions } from '../rulesetStore.js';
 
 export interface BookingRoutesOpts {
   db: DB;
@@ -74,7 +75,7 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
     const campaigns = getCampaignPool(db).filter((slug) => registry.get(slug));
     return {
       campaigns: campaigns.map((slug) => ({ slug, name: registry.get(slug)!.name, minutes: typicalCampaignMinutes(db, slug) })),
-      rulesets: db.prepare('SELECT id, name FROM rulesets WHERE archived_at IS NULL ORDER BY id').all(),
+      rulesets: rulesetOptions(db),
       gameConfigs: db.prepare('SELECT key, label FROM game_configs WHERE enabled = 1 ORDER BY key').all(),
       limits: { daysAhead: limits.daysAhead, playlistMax: limits.playlistMax },
       // The slot length is estimated from the campaigns (estimateMinutes),

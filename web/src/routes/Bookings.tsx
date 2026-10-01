@@ -51,6 +51,8 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
   const [when, setWhen] = useState('');
   const [playlist, setPlaylist] = useState<string[]>([]);
   const [rulesetId, setRulesetId] = useState<number | undefined>(options.rulesets.find((r) => r.name === 'Casual Scrim')?.id);
+  const [gameConfig, setGameConfig] = useState<string>(options.gameConfigs.find((g) => g.key === 'standard')?.key ?? options.gameConfigs[0]?.key ?? 'standard');
+  const summary = options.rulesets.find((r) => r.id === rulesetId)?.summary ?? '';
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -74,7 +76,7 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
     if (!opponent) { onError('Pick who you are playing against.'); return; }
     setBusy(true);
     try {
-      const { id } = await bookingsApi.create({ teamId, opponent, startsAt, playlist, rulesetId });
+      const { id } = await bookingsApi.create({ teamId, opponent, startsAt, playlist, rulesetId, gameConfig });
       route(`/booking/${id}`);
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));
@@ -122,11 +124,25 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
         {playlist.length > 0 && <p class="muted">{estimateLine(playMinutes(options.estimate, playlist), estimate, playlist.length)}</p>}
       </fieldset>
       {options.rulesets.length > 1 && (
-        <label class="teamfield">Rules
-          <select aria-label="Rules" value={rulesetId === undefined ? '' : String(rulesetId)} onChange={(e) => setRulesetId(Number((e.target as HTMLSelectElement).value))}>
-            {options.rulesets.map((r) => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
-          </select>
-        </label>
+        <div class="bookform__pick">
+          <label class="teamfield">Rules
+            <select aria-label="Rules" value={rulesetId === undefined ? '' : String(rulesetId)} onChange={(e) => setRulesetId(Number((e.target as HTMLSelectElement).value))}>
+              {options.rulesets.map((r) => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
+            </select>
+          </label>
+          <p class="muted">Match rules: pauses, side choice, no-show grace.</p>
+          {summary && <p class="muted">{summary}</p>}
+        </div>
+      )}
+      {options.gameConfigs.length > 1 && (
+        <div class="bookform__pick">
+          <label class="teamfield">Game config
+            <select aria-label="Game config" value={gameConfig} onChange={(e) => setGameConfig((e.target as HTMLSelectElement).value)}>
+              {options.gameConfigs.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
+            </select>
+          </label>
+          <p class="muted">What the server runs (the cfg it loads).</p>
+        </div>
       )}
       <button class="btn" type="submit" disabled={busy || playlist.length === 0}>Book the server</button>
     </form>

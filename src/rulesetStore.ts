@@ -205,3 +205,12 @@ export function setRulesetArchived(db: DB, o: { by: string; id: number; archived
     return ok(null);
   })();
 }
+
+/** The live rulesets a picker offers, each with its one-line summary. */
+export function rulesetOptions(db: DB): { id: number; name: string; summary: string }[] {
+  const rows = db.prepare('SELECT * FROM rulesets WHERE archived_at IS NULL ORDER BY id').all() as RulesetRow[];
+  return rows.map((r) => {
+    const rules = rulesOf(r);
+    return { id: r.id, name: r.name, summary: rules ? rulesSummary(rules) : '' };
+  });
+}

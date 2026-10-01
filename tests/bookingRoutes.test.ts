@@ -83,6 +83,8 @@ describe('booking flow', () => {
     expect(r.limits).toEqual({ daysAhead: 14, playlistMax: 4 });
     expect(r.estimate).toEqual({ perCampaign: { no_mercy: 60, death_toll: 60 }, base: 15, slack: 10, step: 30, min: 60 });
     expect(r.rulesets.map((x: { name: string }) => x.name)).toContain('Casual Scrim');
+    expect(r.rulesets.find((x: { name: string }) => x.name === 'Casual Scrim').summary)
+      .toBe('Unlimited pauses · non-picker picks sides · 15 min no-show grace');
   });
 
   it('create, view, confirm, cancel', async () => {

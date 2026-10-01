@@ -9,6 +9,7 @@ import { campaignRegistry } from '../campaignRegistry.js';
 import * as E from '../events/events.js';
 import * as V from '../events/validate.js';
 import { stageSummary } from '../events/format.js';
+import { rulesetOptions } from '../rulesetStore.js';
 
 export interface AdminEventRow {
   id: number; slug: string; name: string; status: V.EventStatus; entryKind: V.EntryKind; startsAt: string; stages: number; updatedAt: string;
@@ -22,7 +23,7 @@ export interface AdminEventDetail {
 }
 export interface AdminEventOptions {
   campaigns: { slug: string; name: string }[]; defaultPool: string[];
-  rulesets: { id: number; name: string }[]; defaultRulesetId: number | null;
+  rulesets: { id: number; name: string; summary: string }[]; defaultRulesetId: number | null;
   gameConfigs: { key: string; label: string }[];
   defaults: { eligibility: V.Eligibility; checkin: V.Checkin; roster: V.RosterRules };
 }
@@ -78,7 +79,7 @@ export async function adminEventRoutes(app: FastifyInstance, opts: { db: DB; sto
     if (!requireStaff(req, reply)) return;
     const ctx = E.stageContext(db);
     const registry = campaignRegistry(db);
-    const rulesets = db.prepare('SELECT id, name FROM rulesets WHERE archived_at IS NULL ORDER BY id').all() as { id: number; name: string }[];
+    const rulesets = rulesetOptions(db);
     const cup = rulesets.find((r) => r.name === 'Standard Cup');
     const options: AdminEventOptions = {
       campaigns: [...ctx.campaigns].map((slug) => ({ slug, name: registry.get(slug)?.name ?? slug })),

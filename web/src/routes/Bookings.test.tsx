@@ -12,7 +12,8 @@ const { Bookings } = await import('./Bookings');
 
 const OPTIONS = {
   campaigns: [{ slug: 'no_mercy', name: 'No Mercy', minutes: 70 }, { slug: 'death_toll', name: 'Death Toll', minutes: 45 }],
-  rulesets: [{ id: 3, name: 'Casual Scrim' }], gameConfigs: [{ key: 'standard', label: 'Standard' }],
+  rulesets: [{ id: 3, name: 'Casual Scrim', summary: 'Unlimited pauses · non-picker picks sides · 15 min no-show grace' }],
+  gameConfigs: [{ key: 'standard', label: 'Standard' }],
   limits: { daysAhead: 14, playlistMax: 4 },
   estimate: { perCampaign: { no_mercy: 70, death_toll: 45 }, base: 15, slack: 10, step: 30, min: 60 },
   myTeams: [], teams: [{ id: 1, slug: 'mice', name: 'Mice', tag: 'MM' }],
@@ -73,6 +74,38 @@ describe('Bookings page', () => {
     expect(sent.playlist).toEqual(['no_mercy']);
     expect('minutes' in sent).toBe(false);
     history.replaceState(null, '', '/');
+  });
+
+  it('with more than one ruleset and config, says what each picker is, reads the chosen rules, and sends both', async () => {
+    mockBookings.options.mockResolvedValue({
+      ...OPTIONS,
+      rulesets: [...OPTIONS.rulesets, { id: 2, name: 'Standard Cup', summary: '3 pauses of 120 s · higher seed picks sides · 15 min no-show grace' }],
+      gameConfigs: [...OPTIONS.gameConfigs, { key: 'zonemod', label: 'ZoneMod 4v4' }],
+    });
+    mockBookings.create.mockResolvedValue({ id: 9 });
+    const { LocationProvider } = await import('preact-iso');
+    render(<LocationProvider><Bookings session={session} /></LocationProvider>);
+    expect(await screen.findByText('Match rules: pauses, side choice, no-show grace.')).toBeTruthy();
+    expect(screen.getByText('Unlimited pauses · non-picker picks sides · 15 min no-show grace')).toBeTruthy();
+    expect(screen.getByText('What the server runs (the cfg it loads).')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Rules'), { target: { value: '2' } });
+    expect(screen.getByText('3 pauses of 120 s · higher seed picks sides · 15 min no-show grace')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Game config'), { target: { value: 'zonemod' } });
+    fireEvent.change(screen.getByLabelText('Opponent team'), { target: { value: '1' } });
+    fireEvent.input(screen.getByLabelText('Start'), { target: { value: '2026-10-02T20:00' } });
+    fireEvent.click(screen.getByLabelText('No Mercy'));
+    fireEvent.click(screen.getByRole('button', { name: 'Book the server' }));
+    await waitFor(() => expect(mockBookings.create).toHaveBeenCalled());
+    expect(mockBookings.create.mock.calls[0][0]).toMatchObject({ rulesetId: 2, gameConfig: 'zonemod' });
+    history.replaceState(null, '', '/');
+  });
+
+  it('with one ruleset and one config there is nothing to pick and no help line', async () => {
+    render(<Bookings session={session} />);
+    await screen.findByLabelText('No Mercy');
+    expect(screen.queryByLabelText('Rules')).toBeNull();
+    expect(screen.queryByLabelText('Game config')).toBeNull();
+    expect(screen.queryByText('Match rules: pauses, side choice, no-show grace.')).toBeNull();
   });
 
   it('the notification toggle posts the change', async () => {
