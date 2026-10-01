@@ -6,6 +6,8 @@ import { publishAdminEvent } from './adminFeed.js';
 import { QUEUE_SIZE } from './queue.js';
 import { resolveAlias } from './aliases.js';
 import { hasActiveBan } from './banState.js';
+import { bookingOnServer, bookingSideForTeamA } from './bookings/games.js';
+import { logBookingEvent, markActive } from './bookings/bookings.js';
 
 /** How long to wait after MATCH_CREATE before committing with whatever roster
  *  lines arrived. The burst is emitted in one tick by the plugin, so this only
@@ -318,6 +320,11 @@ export class SelfStartedMatches {
       return;
     }
 
+    // A booking holding this box makes the match one of its games: a private
+    // match filed under the booking, on a box the booking keeps throughout,
+    // so servers.status is left alone and nothing is announced in public.
+    const booking = bookingOnServer(db, serverId);
+
     p.committed = true;
     let matchId: number;
     try {
@@ -348,17 +355,33 @@ export class SelfStartedMatches {
         // after go-live while it was being played, with the box handed to the
         // next queue pop to changelevel everyone out of. The reaper exists for
         // web-driven matches, which setupMatch stamps.
-        const id = Number(
-          db
-            .prepare(
-              `INSERT INTO matches (season_id, state, campaign, server_id, token, origin)
-               VALUES (?, 'live', ?, ?, ?, 'in_game')`,
-            )
-            .run(currentSeasonId(db), campaign, serverId, token).lastInsertRowid,
-        );
+        let id: number;
+        if (booking) {
+          const teamA = [...p.roster].filter(([, v]) => v.team === 'a').map(([s]) => s);
+          const teamB = [...p.roster].filter(([, v]) => v.team === 'b').map(([s]) => s);
+          id = Number(db.prepare(
+            `INSERT INTO matches (season_id, state, campaign, server_id, token, origin, kind, visibility, rules_json, game_config, booking_id, booking_side_a)
+             VALUES (?, 'live', ?, ?, ?, 'in_game', ?, 'participants', ?, ?, ?, ?)`,
+          ).run(currentSeasonId(db), campaign, serverId, token, booking.purpose, booking.rules_json, booking.game_config, booking.id,
+            bookingSideForTeamA(db, booking.id, teamA, teamB)).lastInsertRowid);
+        } else {
+          id = Number(
+            db
+              .prepare(
+                `INSERT INTO matches (season_id, state, campaign, server_id, token, origin)
+                 VALUES (?, 'live', ?, ?, ?, 'in_game')`,
+              )
+              .run(currentSeasonId(db), campaign, serverId, token).lastInsertRowid,
+          );
+        }
 
         const insMp = db.prepare("INSERT INTO match_players (match_id, player_id, team, source) VALUES (?, ?, ?, 'udp')");
         for (const [steamid, { team }] of p.roster) insMp.run(id, steamid, team);
+
+        // A booked box stays as the booking holds it (idle, held through
+        // open_server_holds): the hold already keeps claimIdle off it, and the
+        // booking's own end is what gives it back.
+        if (booking) return id;
 
         // The box is now busy. Without this, claimIdle could hand the same
         // server to a match queued on the website while a PUG is being played
@@ -382,6 +405,18 @@ export class SelfStartedMatches {
     // subscriber cannot roll back a match that is already being played.
     this.reportOverfull(matchId, p);
 
+    if (booking) {
+      // Outside the adoption transaction for the same reason: the audit row
+      // and the ready -> active step must not be able to undo the match.
+      try {
+        const now = new Date();
+        logBookingEvent(db, booking.id, null, 'game_started', { matchId }, now);
+        markActive(db, booking.id, now);
+      } catch (err) {
+        console.error(`[selfStarted] booking ${booking.id} bookkeeping failed for match ${matchId}:`, err);
+      }
+    }
+
     // Register before the rcon round trip: MATCH_START can arrive immediately.
     this.deps.listener.register(token);
 
@@ -392,9 +427,12 @@ export class SelfStartedMatches {
       console.error(`[selfStarted] sm_pug_setid failed for match ${matchId}:`, err);
     });
 
-    this.deps.notify?.(
-      `🎮 Match #${matchId} started in-game: ${campaign} with ${p.roster.size} players`,
-    );
+    // A booking game is private (participants only), so no public line.
+    if (!booking) {
+      this.deps.notify?.(
+        `🎮 Match #${matchId} started in-game: ${campaign} with ${p.roster.size} players`,
+      );
+    }
     this.finish(token, p);
   }
 

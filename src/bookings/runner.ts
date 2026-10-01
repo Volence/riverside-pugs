@@ -492,4 +492,9 @@ export class BookingRunner {
     this.tell(id, [...sideManagers(this.db, s), ...people], 'booking_no_show');
     this.settle(id);
   }
+
+  /** A game inside a booking finished (RealOrchestrator.finishMatch keeps the
+   *  box with the booking and calls this). Empty for now: Task 4 of plan 4b
+   *  fills it with the playlist flow (announce the next campaign, load it). */
+  onGameEnded(matchId: number): void {}
 }

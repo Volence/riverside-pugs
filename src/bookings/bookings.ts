@@ -141,6 +141,11 @@ function logEvent(db: DB, id: number, actor: string | null, event: string, detai
   db.prepare('INSERT INTO booking_events (booking_id, at, actor, event, detail) VALUES (?, ?, ?, ?, ?)')
     .run(id, now.toISOString(), actor, event, JSON.stringify(detail));
 }
+/** Write one booking audit row from outside this module (a booking game
+ *  starting is recorded by the match adopter, src/selfStarted.ts). */
+export function logBookingEvent(db: DB, id: number, actor: string | null, event: string, detail: object, now: Date): void {
+  logEvent(db, id, actor, event, detail, now);
+}
 function insertPerson(db: DB, id: number, side: Side, steamid: string, role: PersonRole, status: 'invited' | 'accepted', by: string, now: Date): void {
   db.prepare(`INSERT OR IGNORE INTO booking_people (booking_id, side, steamid, role, status, added_by, added_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)`).run(id, side, steamid, role, status, by, now.toISOString());
