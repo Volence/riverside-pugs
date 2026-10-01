@@ -1,4 +1,4 @@
-import { useId, useState } from 'preact/hooks';
+import { useEffect, useId, useRef, useState } from 'preact/hooks';
 import { adminApi, type AdminRuleset } from '../../../api';
 import { useFetch } from '../../../hooks/useFetch';
 import { Empty, Panel } from '../../../components/bits';
@@ -19,23 +19,33 @@ export function inUseText(u: AdminRuleset['inUse']): string {
  *  enforces both, the buttons only leave them out. */
 export function AdminRulesets() {
   const { data, reload } = useFetch((s) => adminApi.rulesets(s), []);
-  const { busy, error, run } = useAction(reload);
+  // Three independent actions, each with its own busy/error: Archive and
+  // Unarchive act on a row in the list (their refusal belongs at the top,
+  // scrolled into view); Create copy has its own form and button; the open
+  // editor's Save has its own. Sharing one `useAction` here used to put
+  // whichever action failed last next to whichever control the admin was
+  // looking at, which is only right when they are the same control.
+  const list = useAction(reload);
+  const copyAction = useAction(reload);
+  const edit = useAction(reload);
   const [editing, setEditing] = useState<number | null>(null);
   const [copyFrom, setCopyFrom] = useState<number | null>(null);
   const [name, setName] = useState('');
   const uid = useId();
+  const listErrorRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { if (list.error) listErrorRef.current?.scrollIntoView({ block: 'center' }); }, [list.error]);
   if (!data) return <Panel><p class="muted">Loading...</p></Panel>;
   const source = copyFrom ?? data.rulesets[0]?.id ?? null;
 
   const create = (e: Event) => {
     e.preventDefault();
     if (source === null) return;
-    void run(async () => { await adminApi.createRuleset(source, name); setName(''); });
+    void copyAction.run(async () => { await adminApi.createRuleset(source, name); setName(''); });
   };
 
   return (
     <div class="stack">
-      {editing === null && error && <p class="error" role="alert">{error}</p>}
+      {list.error && <p class="error" role="alert" ref={listErrorRef}>{list.error}</p>}
       <Panel>
         <h3>Rulesets</h3>
         <p class="muted">Changes apply to new bookings and events; running and finished ones keep the rules they started with.</p>
@@ -52,18 +62,18 @@ export function AdminRulesets() {
                 {r.readOnly && <p class="muted">Mirrors the live PUG config, so it is changed in the server cfg, not here.</p>}
                 <div class="inlinerow">
                   {!r.readOnly && r.rules && editing !== r.id && (
-                    <button class="btn btn--ghost btn--sm" type="button" disabled={busy} onClick={() => setEditing(r.id)}>Edit</button>
+                    <button class="btn btn--ghost btn--sm" type="button" disabled={list.busy} onClick={() => setEditing(r.id)}>Edit</button>
                   )}
                   {!r.template && (r.archived
-                    ? <button class="btn btn--ghost btn--sm" type="button" disabled={busy} onClick={() => void run(() => adminApi.unarchiveRuleset(r.id))}>Unarchive</button>
-                    : <button class="btn btn--ghost btn--sm" type="button" disabled={busy}
-                        onClick={() => void run(() => adminApi.archiveRuleset(r.id), {
+                    ? <button class="btn btn--ghost btn--sm" type="button" disabled={list.busy} onClick={() => void list.run(() => adminApi.unarchiveRuleset(r.id))}>Unarchive</button>
+                    : <button class="btn btn--ghost btn--sm" type="button" disabled={list.busy}
+                        onClick={() => void list.run(() => adminApi.archiveRuleset(r.id), {
                           title: `Archive ${r.name}?`, body: 'It leaves every picker. Bookings and events that already use it keep their rules.', confirmLabel: 'Archive',
                         })}>Archive</button>)}
                 </div>
                 {editing === r.id && r.rules && (
-                  <RulesetForm ruleset={r} rules={r.rules} busy={busy} error={error} onCancel={() => setEditing(null)}
-                    onSave={(n, rules) => void run(async () => { await adminApi.updateRuleset(r.id, n, rules); setEditing(null); })} />
+                  <RulesetForm ruleset={r} rules={r.rules} busy={edit.busy} error={edit.error} onCancel={() => setEditing(null)}
+                    onSave={(n, rules) => void edit.run(async () => { await adminApi.updateRuleset(r.id, n, rules); setEditing(null); })} />
                 )}
               </li>
             ))}
@@ -84,7 +94,8 @@ export function AdminRulesets() {
             <input id={`${uid}-name`} aria-label="New ruleset name" value={name} maxLength={40} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
           </FormRow>
           <div class="eventform__actions">
-            <button class="btn" type="submit" disabled={busy || name.trim().length < 3}>Create copy</button>
+            <button class="btn" type="submit" disabled={copyAction.busy || name.trim().length < 3}>Create copy</button>
+            {copyAction.error && <p class="error" role="alert">{copyAction.error}</p>}
           </div>
         </form>
       </Panel>
