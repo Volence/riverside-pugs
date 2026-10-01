@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { campaignsLabel, estimateLine, estimateSlot, mergedPlaylist, slotLabel, slotSummary, nightRangeLabel, toUtcIso } from './bookingTime';
+import { campaignsLabel, estimateLine, estimateSlot, mergedPlaylist, playMinutes, slotLabel, slotSummary, nightRangeLabel, toUtcIso } from './bookingTime';
 
 describe('booking time helpers', () => {
   it('reads a datetime-local value in the viewer zone', () => {
@@ -25,7 +25,11 @@ describe('booking time helpers', () => {
     expect(slotLabel(30)).toBe('30 min');
     expect(campaignsLabel(1)).toBe('1 campaign');
     expect(campaignsLabel(2)).toBe('2 campaigns');
-    expect(estimateLine(150, 2)).toBe('About 2 h 30 for 2 campaigns');
+    expect(estimateLine(115, 150, 2)).toBe('About 1 h 55 of play for 2 campaigns. The server is held for up to 2 h 30 and closes when you finish.');
+    // Play is the campaigns alone, to the nearest 5 minutes; unknown ones count 60.
+    const e = { perCampaign: { no_mercy: 48, dead_air: 49, suicide_blitz: 62 }, base: 15, slack: 10, step: 30, min: 60 };
+    expect(playMinutes(e, ['no_mercy', 'dead_air', 'suicide_blitz', 'death_aboard'])).toBe(220);
+    expect(estimateSlot(e, ['no_mercy', 'dead_air', 'suicide_blitz', 'death_aboard'])).toBe(300);
     expect(slotSummary(2, 150)).toBe('2 campaigns, about 2 h 30');
   });
 

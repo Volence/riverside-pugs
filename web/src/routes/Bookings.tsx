@@ -4,7 +4,7 @@ import { ApiError, bookingsApi, teamsApi, type BookingOptions, type BookingSumma
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
-import { estimateLine, estimateSlot, localLabel, toUtcIso } from '../bookingTime';
+import { estimateLine, estimateSlot, localLabel, playMinutes, toUtcIso } from '../bookingTime';
 import { RecordLine } from '../components/ScrimRecord';
 
 const STATE_LABEL: Record<BookingSummary['state'], string> = {
@@ -114,12 +114,12 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
         <legend class="teamsub">Campaigns (up to {options.limits.playlistMax}, in play order)</legend>
         {options.campaigns.map((c) => (
           <label key={c.slug}>
-            <input type="checkbox" aria-label={c.name} checked={playlist.includes(c.slug)} onChange={() => toggle(c.slug)} />
+            <input type="checkbox" aria-label={c.name} checked={playlist.includes(c.slug)} disabled={!playlist.includes(c.slug) && playlist.length >= options.limits.playlistMax} onChange={() => toggle(c.slug)} />
             {c.name}
             <span class="muted"> · about {c.minutes} min{playlist.includes(c.slug) ? ` · #${playlist.indexOf(c.slug) + 1}` : ''}</span>
           </label>
         ))}
-        {playlist.length > 0 && <p class="muted">{estimateLine(estimate, playlist.length)}</p>}
+        {playlist.length > 0 && <p class="muted">{estimateLine(playMinutes(options.estimate, playlist), estimate, playlist.length)}</p>}
       </fieldset>
       {options.rulesets.length > 1 && (
         <label class="teamfield">Rules

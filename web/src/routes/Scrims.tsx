@@ -7,7 +7,7 @@ import {
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
-import { estimateLine, estimateSlot, localLabel, mergedPlaylist, nightRangeLabel, slotSummary, toUtcIso } from '../bookingTime';
+import { estimateLine, estimateSlot, localLabel, mergedPlaylist, nightRangeLabel, playMinutes, slotSummary, toUtcIso } from '../bookingTime';
 import { campaignName } from '../format';
 import { TeamBadge } from './Teams';
 import { reliableBadge } from '../components/ScrimRecord';
@@ -98,12 +98,12 @@ function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: bo
         <legend class="teamsub">Campaigns (up to {options.limits.playlistMax}, in play order)</legend>
         {options.campaigns.map((c) => (
           <label key={c.slug}>
-            <input type="checkbox" aria-label={c.name} checked={campaigns.includes(c.slug)} onChange={() => toggle(c.slug)} />
+            <input type="checkbox" aria-label={c.name} checked={campaigns.includes(c.slug)} disabled={!campaigns.includes(c.slug) && campaigns.length >= options.limits.playlistMax} onChange={() => toggle(c.slug)} />
             {c.name}
             <span class="muted"> · about {c.minutes} min{campaigns.includes(c.slug) ? ` · #${campaigns.indexOf(c.slug) + 1}` : ''}</span>
           </label>
         ))}
-        {campaigns.length > 0 && <p class="muted">{estimateLine(estimate, campaigns.length)}</p>}
+        {campaigns.length > 0 && <p class="muted">{estimateLine(playMinutes(options.estimate, campaigns), estimate, campaigns.length)}</p>}
       </fieldset>
       <label class="teamfield">Note<input aria-label="Note" value={note} maxLength={options.limits.noteMax} onInput={(e) => setNote((e.target as HTMLInputElement).value)} /></label>
       {options.teams.length > 0 && (
@@ -155,13 +155,13 @@ function AcceptForm({
           <legend class="teamsub">Add up to {max} campaign{max === 1 ? '' : 's'} of your own</legend>
           {options.campaigns.map((c) => (
             <label key={c.slug}>
-              <input type="checkbox" aria-label={`${c.name} (post ${post.id})`} checked={campaigns.includes(c.slug)} onChange={() => toggle(c.slug)} />
+              <input type="checkbox" aria-label={`${c.name} (post ${post.id})`} checked={campaigns.includes(c.slug)} disabled={!campaigns.includes(c.slug) && campaigns.length >= max} onChange={() => toggle(c.slug)} />
               {c.name}
             </label>
           ))}
         </fieldset>
       )}
-      <p class="muted">{estimateLine(estimate, merged.length)}</p>
+      <p class="muted">{estimateLine(playMinutes(options.estimate, merged), estimate, merged.length)}</p>
       <p class="scrimaccept__actions">
         <button class="btn btn--sm" type="submit" disabled={busy}>Send acceptance</button>
         <button class="btn btn--ghost btn--sm" type="button" disabled={busy} onClick={onCancel}>Cancel</button>

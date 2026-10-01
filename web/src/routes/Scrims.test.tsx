@@ -104,9 +104,9 @@ describe('Scrims page', () => {
     renderScrims();
     await screen.findByText('Rats');
     fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
-    expect(screen.getByText('About 2 h for 1 campaign')).toBeTruthy();
+    expect(screen.getByText('About 1 h 10 of play for 1 campaign. The server is held for up to 2 h and closes when you finish.')).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Death Toll (post 5)'));
-    expect(screen.getByText('About 2 h 30 for 2 campaigns')).toBeTruthy();
+    expect(screen.getByText('About 1 h 55 of play for 2 campaigns. The server is held for up to 2 h 30 and closes when you finish.')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Send acceptance' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -117,9 +117,9 @@ describe('Scrims page', () => {
     expect(form.querySelector('[aria-label="Length"]')).toBeNull();
     fireEvent.input(screen.getByLabelText('Start'), { target: { value: '2026-10-02T20:00' } });
     fireEvent.click(screen.getByLabelText('No Mercy'));
-    expect(screen.getByText('About 2 h for 1 campaign')).toBeTruthy();
+    expect(screen.getByText('About 1 h 10 of play for 1 campaign. The server is held for up to 2 h and closes when you finish.')).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Death Toll'));
-    expect(screen.getByText('About 2 h 30 for 2 campaigns')).toBeTruthy();
+    expect(screen.getByText('About 1 h 55 of play for 2 campaigns. The server is held for up to 2 h 30 and closes when you finish.')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Post the scrim' }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Post the scrim' }));
     await waitFor(() => expect(mockScrims.create).toHaveBeenCalled());
