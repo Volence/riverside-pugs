@@ -186,16 +186,25 @@ export class ScrimPoster {
 
   /** Every card still marked 'open' whose post has since booked, withdrawn
    *  or expired gets edited to the closed line once, then its row's state is
-   *  set to 'closed' so it is never touched again. A thrown edit leaves the
-   *  state as 'open', so the next tick retries it. */
+   *  set to 'closed' so it is never touched again. If the message is gone
+   *  (edit returns false) a fresh closed card is sent to the row's own
+   *  channel and the row is updated to it, so the final state is always
+   *  shown somewhere rather than silently marked closed with nothing to see.
+   *  A thrown edit or send leaves the state as 'open', so the next tick
+   *  retries it. */
   private async close(): Promise<void> {
     const { db, transport } = this.deps;
     for (const row of messagesInState(db, KIND, 'open')) {
       const p = getPost(db, Number(row.ref));
       if (!p || (p.status !== 'booked' && p.status !== 'withdrawn' && p.status !== 'expired')) continue;
+      const payload = renderClosedCard(db, p);
       try {
-        await transport.edit(row.channel_id, row.message_id, renderClosedCard(db, p));
-        setMessageState(db, KIND, row.ref, 'closed');
+        if (await transport.edit(row.channel_id, row.message_id, payload)) {
+          setMessageState(db, KIND, row.ref, 'closed');
+        } else {
+          const messageId = await transport.send(row.channel_id, payload);
+          saveMessage(db, { kind: KIND, ref: row.ref, channelId: row.channel_id, messageId, state: 'closed' });
+        }
         this.hashes.delete(p.id);
       } catch (err) {
         console.error('[scrims] poster close failed:', err instanceof Error ? err.message : err);
