@@ -1863,6 +1863,8 @@ export interface ScrimOptions {
   estimate: SlotEstimate;
   myTeams: { id: number; slug: string; name: string; tag: string }[];
   teams: { id: number; slug: string; name: string; tag: string }[];
+  /** scrim_show_sr: off, the post form has no SR range and sends none. */
+  showSr: boolean;
 }
 
 /** Mirrors src/scrims/scrims.ts's BoardSide: a team (with its badge) or a
@@ -1895,8 +1897,10 @@ export interface ScrimBoardPost {
   record?: ScrimReliability;
 }
 
+/** srRange is only sent while scrim_show_sr is on; the server reads a
+ *  missing range as open, and ignores any range while the setting is off. */
 export interface NewScrimPost {
-  teamId: number | null; startsAt: string; campaigns: string[]; srRange: number | null;
+  teamId: number | null; startsAt: string; campaigns: string[]; srRange?: number | null;
   note: string; targetTeamId?: number | null;
 }
 
@@ -1919,8 +1923,10 @@ export interface ScrimBlocks {
 
 export const scrimsApi = {
   options: (signal?: AbortSignal) => get<ScrimOptions>('/api/scrims/options', signal),
-  board: (fitsOnly: boolean, signal?: AbortSignal) =>
-    get<{ posts: ScrimBoardPost[]; night: ScrimNightWindow | null }>(`/api/scrims${fitsOnly ? '?fitsOnly=1' : ''}`, signal),
+  /** `fitsOnly` is only sent when true, which the page only does while
+   *  `showSr` (scrim_show_sr) is on. */
+  board: (fitsOnly = false, signal?: AbortSignal) =>
+    get<{ posts: ScrimBoardPost[]; night: ScrimNightWindow | null; showSr: boolean }>(`/api/scrims${fitsOnly ? '?fitsOnly=1' : ''}`, signal),
   create: (b: NewScrimPost) => post<{ id: number }>('/api/scrims', b),
   withdraw: (postId: number) => post<{ acceptIds: number[] }>(`/api/scrims/${postId}/withdraw`),
   accept: (postId: number, teamId: number | null, campaigns: string[]) =>

@@ -102,7 +102,7 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
             </select>
           : <div class="bookform__search">
               {oppPlayer
-                ? <span>{oppPlayer.name} <button type="button" class="btn btn--ghost btn--sm" onClick={() => setOppPlayer(null)}>Change</button></span>
+                ? <span class="inlinerow">{oppPlayer.name}<button type="button" class="btn btn--ghost btn--sm" onClick={() => setOppPlayer(null)}>Change</button></span>
                 : <>
                     <input aria-label="Find a player" value={q} placeholder="Player name" onInput={(e) => setQ((e.target as HTMLInputElement).value)} />
                     <ul>{found.map((p) => <li key={p.steamid}><button type="button" class="btn btn--ghost btn--sm" onClick={() => { setOppPlayer(p); setQ(''); }}>{p.name}</button></li>)}</ul>

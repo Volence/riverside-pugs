@@ -9,7 +9,7 @@ import { competitivePublic } from '../teams/access.js';
 import { getTeam } from '../teams/teams.js';
 import type { BotTransport, MessagePayload } from '../discord/transport.js';
 import { nightWindow } from './night.js';
-import { lengthLabel, sideSr, type ScrimSide } from './rules.js';
+import { lengthLabel, showSr, sideSr, type ScrimSide } from './rules.js';
 import { getPost, type PostRow, type PostStatus } from './scrims.js';
 
 /**
@@ -44,35 +44,35 @@ const CLOSED_LABEL: Partial<Record<PostStatus, string>> = {
 
 type SideRef = Pick<PostRow, 'team_id' | 'captain_steamid'>;
 
+const sideOf = (s: SideRef): ScrimSide => (s.team_id !== null ? { teamId: s.team_id } : { captain: s.captain_steamid });
+
 function sideTitle(db: DB, s: SideRef): string {
   if (s.team_id !== null) return escapeName(getTeam(db, s.team_id)?.name ?? 'A team');
   return escapeName(getPlayer(db, s.captain_steamid)?.name ?? 'Someone');
 }
-
-const sideOf = (s: SideRef): ScrimSide => (s.team_id !== null ? { teamId: s.team_id } : { captain: s.captain_steamid });
 
 const hashOf = (p: MessagePayload) => createHash('sha256').update(JSON.stringify(p)).digest('hex').slice(0, 16);
 
 /**
  * The open (or pending) card. A Status field is included alongside the
  * fields Ruling 5 names (when, length, campaigns, average SR and range, the
- * note) because a post accepting an offer (open -> pending) is the one state
- * change this card can show without a new post id: without it, the card
+ * note; the SR field only while scrim_show_sr is on) because a post
+ * accepting an offer (open -> pending) is the one state change this card
+ * can show without a new post id: without it, the card
  * would sit unchanged in Discord while the site already shows an offer under
  * review.
  */
 function renderOpenCard(db: DB, p: PostRow, publicUrl: string): MessagePayload {
   const campaigns = (JSON.parse(p.campaigns_json) as string[]).map((c) => campaignDisplayName(db, c));
-  const sr = sideSr(db, sideOf(p));
-  const range = p.sr_range === null ? 'open' : `± ${p.sr_range}`;
   const unix = Math.floor(Date.parse(p.starts_at) / 1000);
   const note = p.note.trim();
+  const sr = showSr(db) ? `${sideSr(db, sideOf(p))} (${p.sr_range === null ? 'open' : `± ${p.sr_range}`})` : null;
   const fields = [
     { name: 'Status', value: p.status === 'pending' ? 'An offer is under review' : 'Open' },
     { name: 'When', value: `<t:${unix}:F>` },
     { name: 'Length', value: lengthLabel(campaigns.length, p.block_minutes) },
     { name: 'Campaigns', value: campaigns.length > 0 ? campaigns.join(', ') : 'Any' },
-    { name: 'Average SR', value: `${sr} (${range})` },
+    ...(sr !== null ? [{ name: 'Average SR', value: sr }] : []),
     ...(note !== '' ? [{ name: 'Note', value: escapeName(note) }] : []),
   ];
   return {

@@ -14,6 +14,7 @@ import type { Notifier } from '../notify/notify.js';
 import * as S from '../scrims/scrims.js';
 import { scrimMessage, scrimSideManagers, teamManagers, type ScrimNotifyType } from '../scrims/messages.js';
 import { nightWindow } from '../scrims/night.js';
+import { showSr } from '../scrims/rules.js';
 import { BLOCK_ERRORS, blocksOf, blockTarget, managesBlockParty, unblock, type BlockParty } from '../scrims/blocks.js';
 
 export interface ScrimRoutesOpts {
@@ -90,6 +91,9 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
       estimate: estimateOptions(db, campaigns),
       myTeams: myTeams(db, me).filter((t) => t.role !== 'member').map(team),
       teams: liveTeams(db).map(team),
+      // scrim_show_sr: off, the page hides the SR range, the fit filter and
+      // every SR figure.
+      showSr: showSr(db),
     };
   });
 
@@ -102,6 +106,7 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
       posts: S.board(db, { steamid: me, staff: isStaff(me) }, { fitsOnly: q.fitsOnly === '1' }),
       // Plan 2 Ruling 7: the board's banner, null while scrim night is off.
       night: nightWindow(db),
+      showSr: showSr(db),
     };
   });
 

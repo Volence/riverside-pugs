@@ -1222,6 +1222,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // cancel, and whether the reliability record is public.
   scrim_late_cancel_hours: '2',
   scrim_reliability_public: 'off',
+  // Whether scrims show SR (src/scrims/rules.ts showSr). Off by default while
+  // there are too few teams for it to mean much.
+  scrim_show_sr: 'off',
   // Scrim board plan 2 Ruling 7: an optional weekly scrim night, off by
   // default. src/scrims/night.ts reads these three.
   scrim_night_day: 'off',

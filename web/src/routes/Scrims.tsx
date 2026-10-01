@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
+import type { ComponentChildren } from 'preact';
 import {
   ApiError, scrimsApi, teamsApi, type BlockEntry, type BlockTargetInput, type NewScrimPost, type ScrimBoardPost,
   type ScrimNightWindow, type ScrimOptions,
@@ -14,7 +15,7 @@ import { reliableBadge } from '../components/ScrimRecord';
 
 /** The board's SR range select (spec part 4): open, or one of a few common
  *  widths. The server accepts any integer 50..1000 (scrim_sr_range), but the
- *  page only offers these. */
+ *  page only offers these. Shown only while scrim_show_sr is on. */
 const SR_RANGES: readonly { value: string; label: string }[] = [
   { value: '', label: 'Open (any SR)' },
   { value: '100', label: '± 100' },
@@ -56,9 +57,38 @@ function SideLabel({ side }: { side: ScrimBoardPost['side'] }) {
     );
 }
 
+/** The shared body of a post or an offer: the side and the start time on one
+ *  line (the time drops under the name on a phone), the campaigns as a
+ *  numbered list in play order, then a muted count and estimate. `meta`
+ *  leads that last line (an offer's "Proposed"), `extra` trails it (the SR
+ *  while scrim_show_sr is on, a challenge). */
+function ScrimCard({
+  side, startsAt, campaigns, minutes, label, meta, extra, children,
+}: {
+  side: ScrimBoardPost['side']; startsAt: string; campaigns: string[]; minutes: number; label: string;
+  meta?: string; extra?: (string | null | undefined)[]; children?: ComponentChildren;
+}) {
+  return (
+    <div class="scrimcard">
+      <div class="scrimcard__head">
+        <SideLabel side={side} />
+        <time class="scrimcard__when" dateTime={startsAt}>{localLabel(startsAt)}</time>
+      </div>
+      <ol class="scrimcard__list" aria-label={label}>
+        {campaigns.map((c) => <li key={c}>{campaignName(c)}</li>)}
+      </ol>
+      <p class="scrimcard__meta">
+        {[meta, slotSummary(campaigns.length, minutes), ...(extra ?? [])].filter(Boolean).join(' · ')}
+      </p>
+      {children}
+    </div>
+  );
+}
+
 /** "Post a scrim": side, start, campaigns (the block is estimated from
- *  them), SR range, note and an
- *  optional direct challenge. Mirrors Bookings.tsx's BookForm. */
+ *  them), SR range (only while scrim_show_sr is on; otherwise none is sent
+ *  and the post is open), note and an optional direct challenge. Mirrors
+ *  Bookings.tsx's BookForm. */
 function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: boolean; onSubmit: (b: NewScrimPost) => Promise<boolean> }) {
   const [teamId, setTeamId] = useState<number | null>(options.myTeams[0]?.id ?? null);
   const [when, setWhen] = useState('');
@@ -75,7 +105,8 @@ function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: bo
     const startsAt = toUtcIso(when);
     if (!startsAt) return;
     await onSubmit({
-      teamId, startsAt, campaigns, srRange: srRange === '' ? null : Number(srRange), note,
+      teamId, startsAt, campaigns, note,
+      ...(options.showSr ? { srRange: srRange === '' ? null : Number(srRange) } : {}),
       targetTeamId: targetTeamId === '' ? undefined : Number(targetTeamId),
     });
   };
@@ -89,11 +120,13 @@ function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: bo
         </select>
       </label>
       <label class="teamfield">Start (your time)<input aria-label="Start" type="datetime-local" value={when} onInput={(e) => setWhen((e.target as HTMLInputElement).value)} /></label>
-      <label class="teamfield">SR range
-        <select aria-label="SR range" value={srRange} onChange={(e) => setSrRange((e.target as HTMLSelectElement).value)}>
-          {SR_RANGES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-        </select>
-      </label>
+      {options.showSr && (
+        <label class="teamfield">SR range
+          <select aria-label="SR range" value={srRange} onChange={(e) => setSrRange((e.target as HTMLSelectElement).value)}>
+            {SR_RANGES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+          </select>
+        </label>
+      )}
       <fieldset class="bookform__fieldset">
         <legend class="teamsub">Campaigns (up to {options.limits.playlistMax}, in play order)</legend>
         {options.campaigns.map((c) => (
@@ -162,7 +195,7 @@ function AcceptForm({
         </fieldset>
       )}
       <p class="muted">{estimateLine(playMinutes(options.estimate, merged), estimate, merged.length)}</p>
-      <p class="scrimaccept__actions">
+      <p class="inlinerow">
         <button class="btn btn--sm" type="submit" disabled={busy}>Send acceptance</button>
         <button class="btn btn--ghost btn--sm" type="button" disabled={busy} onClick={onCancel}>Cancel</button>
       </p>
@@ -174,74 +207,81 @@ function AcceptForm({
  *  unless it is the viewer's own, or the viewer's side already offered on
  *  it. */
 function BoardRow({
-  post, options, highlighted, busy, onAccept, onWithdrawAccept,
+  post, options, showSr, highlighted, busy, onAccept, onWithdrawAccept,
 }: {
-  post: ScrimBoardPost; options: ScrimOptions; highlighted: boolean; busy: boolean;
+  post: ScrimBoardPost; options: ScrimOptions; showSr: boolean; highlighted: boolean; busy: boolean;
   onAccept: (teamId: number | null, campaigns: string[]) => Promise<boolean>; onWithdrawAccept: (acceptId: number) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <li id={`scrim-${post.id}`} class={`scrimrow${highlighted ? ' scrimrow--highlight' : ''}${post.night ? ' scrimrow--night' : ''}`}>
-      <div class="scrimrow__main">
-        <SideLabel side={post.side} />
-        <span class="teamroster__meta">
-          {localLabel(post.startsAt)} · {slotSummary(post.campaignCount, post.minutes)} · SR {post.sr} ({srRangeLabel(post.srRange)})
-          {post.challenge && ' · direct challenge'}
-        </span>
-        <span class="teamroster__meta">{post.campaigns.map((c) => campaignName(c)).join(', ')}</span>
-        {post.note && <span class="teamroster__meta">{post.note}</span>}
-        {post.record && <span class="teamchip scrimbadge">{reliableBadge(post.record)}</span>}
-        {post.night && <span class="teamchip scrimnighttag">Scrim night</span>}
-      </div>
+      <ScrimCard
+        side={post.side} startsAt={post.startsAt} campaigns={post.campaigns} minutes={post.minutes}
+        label={`Campaigns (post ${post.id})`}
+        extra={[showSr ? `SR ${post.sr} (${srRangeLabel(post.srRange)})` : null, post.challenge ? 'direct challenge' : null]}
+      >
+        {post.note && <p class="scrimcard__note">{post.note}</p>}
+        {(post.record || post.night) && (
+          <p class="scrimcard__tags">
+            {post.record && <span class="teamchip scrimbadge">{reliableBadge(post.record)}</span>}
+            {post.night && <span class="teamchip scrimnighttag">Scrim night</span>}
+          </p>
+        )}
+      </ScrimCard>
       {post.mine
-        ? <span class="teamchip teamchip--captain">Your post</span>
+        ? <p class="inlinerow"><span class="teamchip teamchip--captain">Your post</span></p>
         : post.myAcceptId !== null
           ? (
-            <span class="scrimaccept__actions">
+            <p class="inlinerow">
               <span class="teamchip">Pending your offer</span>
               <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => onWithdrawAccept(post.myAcceptId!)}>Withdraw</button>
-            </span>
+            </p>
           )
           : open
             ? <AcceptForm post={post} options={options} busy={busy} onSubmit={async (t, c) => { const ok = await onAccept(t, c); if (ok) setOpen(false); return ok; }} onCancel={() => setOpen(false)} />
-            : <button class="btn btn--sm" onClick={() => setOpen(true)}>Accept</button>}
+            : <p class="inlinerow"><button class="btn btn--sm" onClick={() => setOpen(true)}>Accept</button></p>}
     </li>
   );
 }
 
 /** "Your posts": each of the viewer's own open or pending posts, with its
- *  pending acceptances (the proposed playlist and SR fit) and Confirm /
+ *  pending acceptances (the proposed playlist, laid out like the post, and
+ *  the SR fit while scrim_show_sr is on) and Confirm /
  *  Decline, plus Withdraw for the post itself. */
 function MyPostPanel({
-  post, busy, onConfirm, onDecline, onWithdraw, confirmError,
+  post, showSr, busy, onConfirm, onDecline, onWithdraw, confirmError,
 }: {
-  post: ScrimBoardPost; busy: boolean; confirmError: { acceptId: number; message: string } | null;
+  post: ScrimBoardPost; showSr: boolean; busy: boolean; confirmError: { acceptId: number; message: string } | null;
   onConfirm: (acceptId: number) => Promise<void>; onDecline: (acceptId: number) => Promise<boolean>; onWithdraw: (postId: number) => Promise<boolean>;
 }) {
   return (
-    <li class="scrimmine">
-      <div class="scrimrow__main">
-        <SideLabel side={post.side} />
-        <span class="teamroster__meta">
-          {localLabel(post.startsAt)} · {slotSummary(post.campaignCount, post.minutes)} · SR {post.sr} ({srRangeLabel(post.srRange)})
-          {post.challenge && ` · challenged ${post.challenge.name}`}
-        </span>
-        <span class="teamroster__meta">{post.campaigns.map((c) => campaignName(c)).join(', ')}</span>
-      </div>
-      <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => onWithdraw(post.id)}>Withdraw</button>
+    <li class="scrimrow">
+      <ScrimCard
+        side={post.side} startsAt={post.startsAt} campaigns={post.campaigns} minutes={post.minutes}
+        label={`Campaigns (post ${post.id})`}
+        extra={[showSr ? `SR ${post.sr} (${srRangeLabel(post.srRange)})` : null, post.challenge ? `challenged ${post.challenge.name}` : null]}
+      />
+      <p class="inlinerow">
+        <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => onWithdraw(post.id)}>Withdraw</button>
+      </p>
       {post.accepts && post.accepts.length > 0 && (
         <ul class="scrimaccepts">
           {post.accepts.map((a) => (
             <li key={a.id}>
-              <SideLabel side={a.side} />
-              <span class={`teamchip${a.fits ? ' teamchip--captain' : ''}`}>SR {a.sr} · {a.fits ? 'fits' : 'outside your range'}</span>
-              <span class="teamroster__meta">
-                Proposed: {a.proposed.playlist.map((c) => campaignName(c)).join(', ')} ({slotSummary(a.proposed.playlist.length, a.proposed.minutes)})
-              </span>
-              <span class="teamconfirm">
+              <ScrimCard
+                side={a.side} startsAt={post.startsAt} campaigns={a.proposed.playlist} minutes={a.proposed.minutes}
+                label={`Proposed playlist (offer ${a.id})`} meta="Proposed"
+              >
+                {showSr && (
+                  <p class="scrimcard__tags">
+                    <span class={`teamchip${a.fits ? ' teamchip--captain' : ''}`}>SR {a.sr} · {a.fits ? 'fits' : 'outside your range'}</span>
+                  </p>
+                )}
+              </ScrimCard>
+              <p class="inlinerow">
                 <button class="btn btn--sm" disabled={busy} onClick={() => onConfirm(a.id)}>Confirm</button>
                 <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => onDecline(a.id)}>Decline</button>
-              </span>
+              </p>
               {confirmError && confirmError.acceptId === a.id && <p class="error" role="alert">{confirmError.message}</p>}
             </li>
           ))}
@@ -333,20 +373,20 @@ function BlockedPanel({ options }: { options: ScrimOptions }) {
             ))}
           </ul>
         )}
-      <p class="scrimaccept__actions">
+      <p class="inlinerow">
         <button class={`btn btn--sm${mode === 'team' ? '' : ' btn--ghost'}`} type="button" onClick={() => setMode('team')}>Team</button>
         <button class={`btn btn--sm${mode === 'player' ? '' : ' btn--ghost'}`} type="button" onClick={() => setMode('player')}>Player</button>
       </p>
       {mode === 'team'
         ? (
           <>
-            <label class="teamfield">Team
+            <p class="inlinerow">
               <select aria-label="Team to block" value={addTeamId} onChange={(e) => setAddTeamId((e.target as HTMLSelectElement).value)}>
                 <option value="">Pick a team</option>
                 {options.teams.map((t) => <option key={t.id} value={String(t.id)}>[{t.tag}] {t.name}</option>)}
               </select>
-            </label>
-            <button class="btn btn--sm" disabled={busy || addTeamId === ''} onClick={() => block({ teamId: Number(addTeamId) })}>Block team</button>
+              <button class="btn btn--sm" disabled={busy || addTeamId === ''} onClick={() => block({ teamId: Number(addTeamId) })}>Block team</button>
+            </p>
           </>
         )
         : (
@@ -377,6 +417,9 @@ export function Scrims({ session }: { session: Session }) {
   const [posts, setPosts] = useState<ScrimBoardPost[] | null>(null);
   const [night, setNight] = useState<ScrimNightWindow | null>(null);
   const [closed, setClosed] = useState(false);
+  // scrim_show_sr, as the board last reported it. Off, the fit filter is
+  // hidden and never sent, whatever it was left at.
+  const [showSr, setShowSr] = useState(false);
   const [fitsOnly, setFitsOnly] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmError, setConfirmError] = useState<{ acceptId: number; message: string } | null>(null);
@@ -384,7 +427,7 @@ export function Scrims({ session }: { session: Session }) {
 
   const load = () => {
     if (!signedIn) return;
-    scrimsApi.board(fitsOnly).then((r) => { setPosts(r.posts); setNight(r.night); }, (e) => { if (e instanceof ApiError && e.status === 404) setClosed(true); });
+    scrimsApi.board(showSr && fitsOnly).then((r) => { setPosts(r.posts); setNight(r.night); setShowSr(r.showSr); }, (e) => { if (e instanceof ApiError && e.status === 404) setClosed(true); });
   };
   useEffect(load, [signedIn, fitsOnly]);
   useEffect(() => { if (signedIn) scrimsApi.options().then(setOptions, () => {}); }, [signedIn]);
@@ -453,17 +496,19 @@ export function Scrims({ session }: { session: Session }) {
       <Panel>
         <h3>Board</h3>
         {night && <NightBanner night={night} />}
-        <label class="scrimfit">
-          <input type="checkbox" aria-label="Fits my SR" checked={fitsOnly} onChange={() => setFitsOnly((v) => !v)} />
-          Fits my SR
-        </label>
+        {showSr && (
+          <label class="scrimfit">
+            <input type="checkbox" aria-label="Fits my SR" checked={fitsOnly} onChange={() => setFitsOnly((v) => !v)} />
+            Fits my SR
+          </label>
+        )}
         {posts === null || options === null ? null : posts.length === 0
           ? <Empty>No open scrims right now.</Empty>
           : (
             <ul class="scrimrows">
               {posts.map((p) => (
                 <BoardRow
-                  key={p.id} post={p} options={options} highlighted={highlightId === p.id} busy={busy}
+                  key={p.id} post={p} options={options} showSr={showSr} highlighted={highlightId === p.id} busy={busy}
                   onAccept={(teamId, campaigns) => accept(p.id, teamId, campaigns)}
                   onWithdrawAccept={withdrawAccept}
                 />
@@ -477,7 +522,7 @@ export function Scrims({ session }: { session: Session }) {
           <h3>Your posts</h3>
           <ul class="scrimrows">
             {mine.map((p) => (
-              <MyPostPanel key={p.id} post={p} busy={busy} confirmError={confirmError} onConfirm={confirm} onDecline={decline} onWithdraw={withdraw} />
+              <MyPostPanel key={p.id} post={p} showSr={showSr} busy={busy} confirmError={confirmError} onConfirm={confirm} onDecline={decline} onWithdraw={withdraw} />
             ))}
           </ul>
         </Panel>

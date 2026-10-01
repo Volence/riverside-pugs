@@ -24,6 +24,9 @@ beforeEach(() => {
   P.forEach((id, i) => ins.run(id, `p${i}`));
   setSetting(db, 'competitive_enabled', 'everyone');
   setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest', 'crash_course']));
+  // Most of this file exercises SR ranges and the fit filter, so it runs with
+  // scrim_show_sr on; the 'scrim_show_sr off' block below covers the default.
+  setSetting(db, 'scrim_show_sr', 'on');
   for (const n of ['a', 'bb', 'ccc', 'dddd']) {
     const id = addServer(db, { name: n, host: 'h', port: 27000 + n.length, rconPort: 1, rconPassword: 'x' });
     db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id);
@@ -71,6 +74,30 @@ const fillSlotAt = (startsAt: string): void => {
   }
 };
 const fillSlot = (): void => fillSlotAt(START);
+
+describe('scrim_show_sr off (the default)', () => {
+  beforeEach(() => setSetting(db, 'scrim_show_sr', 'off'));
+
+  it('is off on a fresh database', () => {
+    const fresh = openDb(':memory:');
+    expect((fresh.prepare("SELECT value FROM settings WHERE key = 'scrim_show_sr'").get() as { value: string }).value).toBe('off');
+  });
+
+  it('createPost ignores any SR range, even a malformed one, and stores the post open', () => {
+    expect(postRow(post({ srRange: 200 })).sr_range).toBeNull();
+    expect(postRow(post({ srRange: 'nonsense' as unknown as number, startsAt: '2026-10-03T20:00:00.000Z' })).sr_range).toBeNull();
+  });
+
+  it('the board ignores fitsOnly', () => {
+    rate(P[0], 25); // 1500
+    rate(P[2], 30); // 2000
+    setSetting(db, 'scrim_show_sr', 'on');
+    const narrow = post({ srRange: 100 }); // 1400..1600, set while SR was on
+    setSetting(db, 'scrim_show_sr', 'off');
+    const viewer = { steamid: P[2], staff: false };
+    expect(board(db, viewer, { now: NOW, fitsOnly: true }).map((p) => p.id)).toEqual([narrow]);
+  });
+});
 
 describe('createPost', () => {
   it('stores a pickup post, open, with the poster as captain and the note trimmed', () => {
