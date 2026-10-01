@@ -3,6 +3,7 @@ import { openDb, type DB } from '../src/db.js';
 import {
   activeMembers, canCreate, createTeam, getTeamBySlug, myTeams, normalizeName, normalizeTag, roleOf,
   invitePlayer, respondInvite, cancelInvite, openInvitesOf, pendingInvitesFor, setJoinLink, teamByJoinToken, joinByLink,
+  leaveTeam, kickMember, setRole, transferCaptain, renameTeam, disbandTeam, setLogoKey, formerMembers,
 } from '../src/teams/teams.js';
 
 export const P = Array.from({ length: 12 }, (_, i) => `765611990000001${String(i).padStart(2, '0')}`);
@@ -189,5 +190,124 @@ describe('join link', () => {
     if (!link.ok) throw new Error('link');
     joinByLink(db, { token: link.value.token!, steamid: P[1] });
     expect(openInvitesOf(db, id)).toEqual([]);
+  });
+});
+
+describe('leaving and succession', () => {
+  const roster = (id: number, ...rest: [string, 'cocaptain' | 'member', number][]) => {
+    const ins = db.prepare('INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, ?, ?)');
+    for (const [s, role, min] of rest) ins.run(id, s, role, at(min).toISOString());
+  };
+
+  it('a captain leaving hands over to the earliest co-captain', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    roster(id, [P[1], 'member', 1], [P[2], 'cocaptain', 3], [P[3], 'cocaptain', 2]);
+    expect(leaveTeam(db, { teamId: id, steamid: P[0], now: at(10) })).toEqual({ ok: true, value: { disbanded: false, captain: P[3] } });
+    expect(roleOf(db, id, P[3])).toBe('captain');
+    expect(getTeamBySlug(db, 'rats')!.captain_steamid).toBe(P[3]);
+  });
+
+  it('with no co-captain, the longest-serving member, never someone who left', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    roster(id, [P[1], 'member', 1], [P[2], 'member', 2]);
+    leaveTeam(db, { teamId: id, steamid: P[1], now: at(5) });
+    expect(leaveTeam(db, { teamId: id, steamid: P[0], now: at(6) })).toEqual({ ok: true, value: { disbanded: false, captain: P[2] } });
+  });
+
+  it('the last member leaving disbands the team, its invites and its link', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    invitePlayer(db, { teamId: id, by: P[0], target: P[1] });
+    setJoinLink(db, { teamId: id, by: P[0], on: true });
+    expect(leaveTeam(db, { teamId: id, steamid: P[0], now: at(5) })).toEqual({ ok: true, value: { disbanded: true, captain: null } });
+    const t = getTeamBySlug(db, 'rats')!;
+    expect(t.disbanded_at).toBe(at(5).toISOString());
+    expect(t.join_link_token).toBeNull();
+    expect(openInvitesOf(db, id)).toEqual([]);
+    expect(make(P[1], 'Rats', 'RR').slug).toBe('rats-2');
+  });
+
+  it('a non-member cannot leave', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    expect(leaveTeam(db, { teamId: id, steamid: P[1] })).toEqual({ ok: false, error: 'not_member' });
+  });
+
+  it('former members are listed once, newest leave first', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    roster(id, [P[1], 'member', 1], [P[2], 'member', 2]);
+    leaveTeam(db, { teamId: id, steamid: P[1], now: at(3) });
+    leaveTeam(db, { teamId: id, steamid: P[2], now: at(4) });
+    expect(formerMembers(db, id)).toEqual([{ steamid: P[2], left_at: at(4).toISOString() }, { steamid: P[1], left_at: at(3).toISOString() }]);
+  });
+});
+
+describe('kicks, roles, captaincy', () => {
+  const setup = () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    const ins = db.prepare('INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, ?, ?)');
+    ins.run(id, P[1], 'cocaptain', at(1).toISOString());
+    ins.run(id, P[2], 'member', at(2).toISOString());
+    ins.run(id, P[3], 'member', at(3).toISOString());
+    return id;
+  };
+
+  it('captain kicks anyone but themselves; a co-captain kicks members only', () => {
+    const id = setup();
+    expect(kickMember(db, { teamId: id, by: P[1], target: P[0] })).toEqual({ ok: false, error: 'not_allowed' });
+    expect(kickMember(db, { teamId: id, by: P[1], target: P[2] }).ok).toBe(true);
+    expect(kickMember(db, { teamId: id, by: P[2], target: P[3] })).toEqual({ ok: false, error: 'not_manager' });
+    expect(kickMember(db, { teamId: id, by: P[0], target: P[0] })).toEqual({ ok: false, error: 'is_captain' });
+    expect(kickMember(db, { teamId: id, by: P[0], target: P[1] }).ok).toBe(true);
+    expect(activeMembers(db, id).map((m) => m.steamid)).toEqual([P[0], P[3]]);
+  });
+
+  it('only the captain sets roles, and never on themselves', () => {
+    const id = setup();
+    expect(setRole(db, { teamId: id, by: P[1], target: P[2], role: 'cocaptain' })).toEqual({ ok: false, error: 'not_allowed' });
+    expect(setRole(db, { teamId: id, by: P[0], target: P[2], role: 'cocaptain' })).toEqual({ ok: true, value: null });
+    expect(setRole(db, { teamId: id, by: P[0], target: P[0], role: 'member' })).toEqual({ ok: false, error: 'is_captain' });
+    expect(setRole(db, { teamId: id, by: P[0], target: P[2], role: 'captain' })).toEqual({ ok: false, error: 'bad_role' });
+    expect(roleOf(db, id, P[2])).toBe('cocaptain');
+  });
+
+  it('captaincy moves to a member; the old captain becomes a co-captain; staff can move it too', () => {
+    const id = setup();
+    expect(transferCaptain(db, { teamId: id, by: P[1], target: P[2] })).toEqual({ ok: false, error: 'not_allowed' });
+    expect(transferCaptain(db, { teamId: id, by: P[0], target: P[9] })).toEqual({ ok: false, error: 'not_member' });
+    expect(transferCaptain(db, { teamId: id, by: P[0], target: P[2] })).toEqual({ ok: true, value: null });
+    expect([roleOf(db, id, P[0]), roleOf(db, id, P[2])]).toEqual(['cocaptain', 'captain']);
+    expect(getTeamBySlug(db, 'rats')!.captain_steamid).toBe(P[2]);
+    expect(transferCaptain(db, { teamId: id, by: P[11], staff: true, target: P[3] }).ok).toBe(true);
+    expect(roleOf(db, id, P[3])).toBe('captain');
+  });
+});
+
+describe('rename, disband, logo', () => {
+  it('captain or staff renames; the rules and uniqueness still apply; the slug stays', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    make(P[1], 'Mice', 'MM');
+    expect(renameTeam(db, { teamId: id, by: P[2], name: 'New' })).toEqual({ ok: false, error: 'not_allowed' });
+    expect(renameTeam(db, { teamId: id, by: P[0], name: 'mice' })).toEqual({ ok: false, error: 'name_taken' });
+    expect(renameTeam(db, { teamId: id, by: P[0], tag: 'mm' })).toEqual({ ok: false, error: 'tag_taken' });
+    expect(renameTeam(db, { teamId: id, by: P[0], name: 'rats' })).toEqual({ ok: true, value: { name: 'rats', tag: 'RR' } });
+    expect(renameTeam(db, { teamId: id, by: P[11], staff: true, name: 'Big Rats', tag: 'BR' })).toEqual({ ok: true, value: { name: 'Big Rats', tag: 'BR' } });
+    expect(getTeamBySlug(db, 'rats')!.name).toBe('Big Rats');
+  });
+
+  it('captain or staff disbands; everyone leaves; nobody else can', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, 'cocaptain', ?)").run(id, P[1], at(1).toISOString());
+    expect(disbandTeam(db, { teamId: id, by: P[1] })).toEqual({ ok: false, error: 'not_allowed' });
+    expect(disbandTeam(db, { teamId: id, by: P[0], now: at(9) })).toEqual({ ok: true, value: null });
+    expect(activeMembers(db, id)).toEqual([]);
+    expect(disbandTeam(db, { teamId: id, by: P[0] })).toEqual({ ok: false, error: 'not_found' });
+    expect(myTeams(db, P[1])).toEqual([]);
+  });
+
+  it('captain, co-captain or staff sets the logo key', () => {
+    const { id } = make(P[0], 'Rats', 'RR');
+    const key = 'a'.repeat(64);
+    expect(setLogoKey(db, { teamId: id, by: P[2], logoKey: key })).toEqual({ ok: false, error: 'not_manager' });
+    expect(setLogoKey(db, { teamId: id, by: P[0], logoKey: key })).toEqual({ ok: true, value: null });
+    expect(getTeamBySlug(db, 'rats')!.logo_key).toBe(key);
   });
 });

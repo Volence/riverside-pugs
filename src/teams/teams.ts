@@ -318,3 +318,135 @@ export function joinByLink(db: DB, o: { token: string; steamid: string; now?: Da
     return ok({ slug: team.slug });
   })();
 }
+
+/** Close a team: every membership, open invite and the join link. Call
+ *  inside a transaction. */
+function closeTeam(db: DB, teamId: number, now: string): void {
+  db.prepare('UPDATE teams SET disbanded_at = ?, join_link_token = NULL WHERE id = ?').run(now, teamId);
+  db.prepare('UPDATE team_members SET left_at = ? WHERE team_id = ? AND left_at IS NULL').run(now, teamId);
+  db.prepare("UPDATE team_invites SET responded_at = ?, response = 'cancelled' WHERE team_id = ? AND responded_at IS NULL").run(now, teamId);
+}
+
+/** After someone left: disband an empty team, or give a captainless one to
+ *  the first in activeMembers order (earliest co-captain, else earliest
+ *  member). Call inside a transaction. */
+function settleCaptaincy(db: DB, teamId: number, now: string): { disbanded: boolean; captain: string | null } {
+  const members = activeMembers(db, teamId);
+  if (members.length === 0) {
+    closeTeam(db, teamId, now);
+    return { disbanded: true, captain: null };
+  }
+  const current = members.find((m) => m.role === 'captain');
+  if (current) return { disbanded: false, captain: current.steamid };
+  const next = members[0];
+  db.prepare("UPDATE team_members SET role = 'captain' WHERE id = ?").run(next.id);
+  db.prepare('UPDATE teams SET captain_steamid = ? WHERE id = ?').run(next.steamid, teamId);
+  return { disbanded: false, captain: next.steamid };
+}
+
+export function leaveTeam(
+  db: DB, o: { teamId: number; steamid: string; now?: Date },
+): Result<{ disbanded: boolean; captain: string | null }> {
+  const now = (o.now ?? new Date()).toISOString();
+  return db.transaction((): Result<{ disbanded: boolean; captain: string | null }> => {
+    const team = liveTeam(db, o.teamId);
+    if (!team) return fail('not_found');
+    if (!roleOf(db, team.id, o.steamid)) return fail('not_member');
+    db.prepare('UPDATE team_members SET left_at = ? WHERE team_id = ? AND steamid = ? AND left_at IS NULL').run(now, team.id, o.steamid);
+    return ok(settleCaptaincy(db, team.id, now));
+  })();
+}
+
+export function kickMember(
+  db: DB, o: { teamId: number; by: string; target: string; now?: Date },
+): Result<{ disbanded: boolean; captain: string | null }> {
+  const now = (o.now ?? new Date()).toISOString();
+  return db.transaction((): Result<{ disbanded: boolean; captain: string | null }> => {
+    const team = liveTeam(db, o.teamId);
+    if (!team) return fail('not_found');
+    const mine = roleOf(db, team.id, o.by);
+    if (!isManager(mine)) return fail('not_manager');
+    const theirs = roleOf(db, team.id, o.target);
+    if (!theirs) return fail('not_member');
+    if (theirs === 'captain') return fail(o.target === o.by ? 'is_captain' : 'not_allowed');
+    if (mine === 'cocaptain' && theirs !== 'member') return fail('not_allowed');
+    db.prepare('UPDATE team_members SET left_at = ? WHERE team_id = ? AND steamid = ? AND left_at IS NULL').run(now, team.id, o.target);
+    return ok(settleCaptaincy(db, team.id, now));
+  })();
+}
+
+export function setRole(db: DB, o: { teamId: number; by: string; target: string; role: unknown }): Result<null> {
+  if (o.role !== 'cocaptain' && o.role !== 'member') return fail('bad_role');
+  const role = o.role;
+  return db.transaction((): Result<null> => {
+    const team = liveTeam(db, o.teamId);
+    if (!team) return fail('not_found');
+    if (roleOf(db, team.id, o.by) !== 'captain') return fail('not_allowed');
+    const theirs = roleOf(db, team.id, o.target);
+    if (!theirs) return fail('not_member');
+    if (theirs === 'captain') return fail('is_captain');
+    db.prepare('UPDATE team_members SET role = ? WHERE team_id = ? AND steamid = ? AND left_at IS NULL').run(role, team.id, o.target);
+    return ok(null);
+  })();
+}
+
+export function transferCaptain(db: DB, o: { teamId: number; by: string; target: string; staff?: boolean }): Result<null> {
+  return db.transaction((): Result<null> => {
+    const team = liveTeam(db, o.teamId);
+    if (!team) return fail('not_found');
+    if (!o.staff && roleOf(db, team.id, o.by) !== 'captain') return fail('not_allowed');
+    const theirs = roleOf(db, team.id, o.target);
+    if (!theirs) return fail('not_member');
+    if (theirs === 'captain') return ok(null);
+    db.prepare("UPDATE team_members SET role = 'cocaptain' WHERE team_id = ? AND role = 'captain' AND left_at IS NULL").run(team.id);
+    db.prepare("UPDATE team_members SET role = 'captain' WHERE team_id = ? AND steamid = ? AND left_at IS NULL").run(team.id, o.target);
+    db.prepare('UPDATE teams SET captain_steamid = ? WHERE id = ?').run(o.target, team.id);
+    return ok(null);
+  })();
+}
+
+export function renameTeam(
+  db: DB, o: { teamId: number; by: string; staff?: boolean; name?: unknown; tag?: unknown },
+): Result<{ name: string; tag: string }> {
+  return db.transaction((): Result<{ name: string; tag: string }> => {
+    const team = liveTeam(db, o.teamId);
+    if (!team) return fail('not_found');
+    if (!o.staff && roleOf(db, team.id, o.by) !== 'captain') return fail('not_allowed');
+    let name = team.name, nameKey = team.name_key, tag = team.tag, tagKey = team.tag_key;
+    if (o.name !== undefined) {
+      const n = normalizeName(o.name);
+      if (!n.ok) return n;
+      if (nameTaken(db, n.key, team.id)) return fail('name_taken');
+      name = n.name; nameKey = n.key;
+    }
+    if (o.tag !== undefined) {
+      const t = normalizeTag(o.tag);
+      if (!t.ok) return t;
+      if (tagTaken(db, t.key, team.id)) return fail('tag_taken');
+      tag = t.tag; tagKey = t.key;
+    }
+    db.prepare('UPDATE teams SET name = ?, name_key = ?, tag = ?, tag_key = ? WHERE id = ?').run(name, nameKey, tag, tagKey, team.id);
+    return ok({ name, tag });
+  })();
+}
+
+export function disbandTeam(db: DB, o: { teamId: number; by: string; staff?: boolean; now?: Date }): Result<null> {
+  const now = (o.now ?? new Date()).toISOString();
+  return db.transaction((): Result<null> => {
+    const team = liveTeam(db, o.teamId);
+    if (!team) return fail('not_found');
+    if (!o.staff && roleOf(db, team.id, o.by) !== 'captain') return fail('not_allowed');
+    closeTeam(db, team.id, now);
+    return ok(null);
+  })();
+}
+
+export function setLogoKey(db: DB, o: { teamId: number; by: string; staff?: boolean; logoKey: string | null }): Result<null> {
+  return db.transaction((): Result<null> => {
+    const team = liveTeam(db, o.teamId);
+    if (!team) return fail('not_found');
+    if (!o.staff && !isManager(roleOf(db, team.id, o.by))) return fail('not_manager');
+    db.prepare('UPDATE teams SET logo_key = ? WHERE id = ?').run(o.logoKey, team.id);
+    return ok(null);
+  })();
+}
