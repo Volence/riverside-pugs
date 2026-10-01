@@ -41,6 +41,10 @@ export class BookingVoice {
    *  creation; after a web restart it is empty, and the first sync re-grants
    *  everyone who should be in (setMemberAccess is idempotent). */
   private readonly granted = new Map<number, Granted>();
+  /** Bookings whose channels could not all be deleted, already reported to
+   *  staff in this process: closeEnded keeps retrying every minute, and one
+   *  admin event per booking is enough. */
+  private readonly closeReported = new Set<number>();
 
   constructor(private readonly deps: { db: DB; voice: () => VoiceOps | null; now?: () => number }) {}
 
@@ -90,6 +94,12 @@ export class BookingVoice {
       db.prepare('INSERT INTO booking_voice (booking_id, category_id, side_a_id, side_b_id, created_at) VALUES (?, ?, ?, ?, ?)')
         .run(bookingId, made.categoryId, made.teamAId, made.teamBId, this.nowIso());
       this.granted.set(bookingId, { a: new Set(want.a), b: new Set(want.b) });
+      if (made.staffDropped) {
+        publishAdminEvent({
+          kind: 'problem',
+          text: `Booking ${bookingId}: Discord refused the staff role on its private voice channels, so staff cannot see them. Check the bot may grant discord_staff_role_id.`,
+        });
+      }
     } catch (err) {
       this.failed.add(bookingId);
       const why = err instanceof Error ? err.message : String(err);
@@ -143,8 +153,9 @@ export class BookingVoice {
 
   /** The booking is over (ruling 3): everyone in the two channels goes to
    *  the lobby channel when one is set, then both channels and the category
-   *  are deleted. Best effort per step; never throws. With no bot connected
-   *  nothing is done and the row stays, so a later close can still clean up. */
+   *  are deleted. Best effort per step; never throws. With no bot connected,
+   *  or when any delete fails, the row stays open so a later close (the
+   *  minute tick's closeEnded) can still clean up. */
   async close(bookingId: number): Promise<void> {
     try {
       const voice = this.deps.voice();
@@ -167,15 +178,31 @@ export class BookingVoice {
           }
         }
       }
+      // deleteChannel counts a channel that is already gone as deleted, so a
+      // retry after a partial failure only has the leftovers to do.
+      let failure: string | null = null;
       for (const channelId of [row.side_a_id, row.side_b_id, row.category_id]) {
         try {
           await voice.deleteChannel(channelId);
         } catch (err) {
+          failure ??= err instanceof Error ? err.message : String(err);
           console.error(`[booking] ${bookingId}: deleting voice channel ${channelId} failed:`, err);
         }
       }
+      if (failure !== null) {
+        // The row stays open so closeEnded tries again next minute.
+        if (!this.closeReported.has(bookingId)) {
+          this.closeReported.add(bookingId);
+          publishAdminEvent({
+            kind: 'problem',
+            text: `Booking ${bookingId}: could not delete its private voice channels (${failure}). Retrying every minute; delete them by hand if this keeps up.`,
+          });
+        }
+        return;
+      }
       this.deps.db.prepare('UPDATE booking_voice SET deleted_at = ? WHERE booking_id = ?').run(this.nowIso(), bookingId);
       this.granted.delete(bookingId);
+      this.closeReported.delete(bookingId);
     } catch (err) {
       console.error(`[booking] ${bookingId}: closing the scrim voice failed:`, err);
     }

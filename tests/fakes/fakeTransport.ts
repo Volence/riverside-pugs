@@ -41,6 +41,14 @@ export class FakeTransport implements BotTransport {
   rolesUnreadable = new Set<string>();
   moves: { userId: string; channelId: string }[] = [];
   failVoice = false;
+  /** Make createMatchChannels fail at this step, after the steps before it
+   *  succeeded, to see that it takes back what it made (as the real one does). */
+  failVoiceAt: 'category' | 'teamA' | 'teamB' | null = null;
+  /** Discord refuses the staff role overwrite: the channels are made without
+   *  it and the result says staffDropped, as the real transport does. */
+  refuseStaffRole = false;
+  /** Channel ids whose delete Discord refuses (missing permissions). */
+  failChannelDeletes = new Set<string>();
 
   /** Make the next N sends throw, for testing what a Discord outage does. */
   failSends = 0;
@@ -408,13 +416,26 @@ export class FakeTransport implements BotTransport {
     createMatchChannels: async (name, teamA, teamB, staffRoleId, opts) => {
       if (this.failVoice) throw new Error('missing permissions');
       const privateView = opts?.privateView ?? false;
-      const categoryId = `cat${++this.seq}`;
-      const teamAId = `va${++this.seq}`;
-      const teamBId = `vb${++this.seq}`;
-      this.channels.set(categoryId, { name, members: new Set(), allowed: [], staffRoleId: null, privateView });
-      this.channels.set(teamAId, { name: teamA.label, members: new Set(), allowed: teamA.userIds, staffRoleId, privateView });
-      this.channels.set(teamBId, { name: teamB.label, members: new Set(), allowed: teamB.userIds, staffRoleId, privateView });
-      return { categoryId, teamAId, teamBId };
+      // The real transport hides the category only when privateView, and
+      // gives it no staff role overwrite either way.
+      const staff = this.refuseStaffRole ? null : staffRoleId;
+      const steps: [step: 'category' | 'teamA' | 'teamB', id: string, name: string, allowed: string[], staffRoleId: string | null][] = [
+        ['category', `cat${++this.seq}`, name, [], null],
+        ['teamA', `va${++this.seq}`, teamA.label, teamA.userIds, staff],
+        ['teamB', `vb${++this.seq}`, teamB.label, teamB.userIds, staff],
+      ];
+      const made: string[] = [];
+      for (const [step, id, label, allowed, role] of steps) {
+        if (this.failVoiceAt === step) {
+          // Takes back what it made, channels then category, as the real one does.
+          for (const done of made.reverse()) this.channels.delete(done);
+          throw new Error('missing permissions');
+        }
+        this.channels.set(id, { name: label, members: new Set(), allowed: [...allowed], staffRoleId: role, privateView });
+        made.push(id);
+      }
+      const [categoryId, teamAId, teamBId] = made;
+      return { categoryId, teamAId, teamBId, staffDropped: staffRoleId !== null && this.refuseStaffRole };
     },
     memberVoiceChannel: async (userId) => this.voiceOf.get(userId) ?? null,
     move: async (userId, channelId) => {
@@ -433,7 +454,10 @@ export class FakeTransport implements BotTransport {
       const ch = this.channels.get(channelId);
       return ch ? [...ch.members] : null;
     },
-    deleteChannel: async (channelId) => { this.channels.delete(channelId); },
+    deleteChannel: async (channelId) => {
+      if (this.failChannelDeletes.has(channelId)) throw new Error('missing permissions');
+      this.channels.delete(channelId);
+    },
     setMemberAccess: async (channelId, userId, allow) => {
       // Ignores an unknown channel, as the real transport does.
       const ch = this.channels.get(channelId);

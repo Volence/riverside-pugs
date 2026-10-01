@@ -192,6 +192,9 @@ export interface SlashCommandDef {
 
 /** The voice operations team channels need. Ids are Discord snowflakes. */
 export interface VoiceOps {
+  /** A category with a voice channel per team. Never leaves part of its work
+   *  behind: when a later step fails it deletes whatever it already made
+   *  (channels, then the category) before rethrowing. */
   createMatchChannels(
     name: string,
     teamA: { label: string; userIds: string[] },
@@ -204,9 +207,16 @@ export interface VoiceOps {
      *  a booked scrim, where the side's players, ringers, approved spectators
      *  and staff are each let in one at a time through setMemberAccess, and
      *  nobody else should even see the channel exists. Omitted (or false),
-     *  behaviour is exactly as it always has been. */
+     *  behaviour is exactly as it always has been. With privateView the
+     *  category itself is hidden from @everyone too, so even its name (which
+     *  names both sides) is not on show. */
     opts?: { privateView?: boolean },
-  ): Promise<{ categoryId: string; teamAId: string; teamBId: string }>;
+  ): Promise<{
+    categoryId: string; teamAId: string; teamBId: string;
+    /** True when Discord refused the staff role overwrite and the channels
+     *  were made without it (staff cannot see them unless let in one by one). */
+    staffDropped?: boolean;
+  }>;
   /** The voice channel a guild member is sitting in, or null. */
   memberVoiceChannel(userId: string): Promise<string | null>;
   move(userId: string, channelId: string): Promise<void>;

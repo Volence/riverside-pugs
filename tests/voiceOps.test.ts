@@ -37,6 +37,36 @@ describe('VoiceOps: createMatchChannels privateView', () => {
   });
 });
 
+describe('VoiceOps: createMatchChannels, category, cleanup and staff fallback', () => {
+  it('the category is private only with privateView', async () => {
+    const t = new FakeTransport();
+    const pub = await t.voice.createMatchChannels('PUG #1', { label: 'A', userIds: [] }, { label: 'B', userIds: [] }, null);
+    expect(t.channels.get(pub.categoryId)!.privateView).toBe(false);
+    const priv = await t.voice.createMatchChannels('Scrim: X vs Y', { label: 'X', userIds: [] }, { label: 'Y', userIds: [] }, null, { privateView: true });
+    expect(t.channels.get(priv.categoryId)!.privateView).toBe(true);
+  });
+
+  it.each(['category', 'teamA', 'teamB'] as const)('a failure at %s leaves nothing behind and rethrows', async (step) => {
+    const t = new FakeTransport();
+    t.channels.set('lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleId: null });
+    t.failVoiceAt = step;
+    await expect(t.voice.createMatchChannels('Scrim', { label: 'A', userIds: ['1'] }, { label: 'B', userIds: ['2'] }, 'staff', { privateView: true }))
+      .rejects.toThrow('missing permissions');
+    expect([...t.channels.keys()]).toEqual(['lobby']);
+  });
+
+  it('a refused staff role makes the channels without it and says staffDropped', async () => {
+    const t = new FakeTransport();
+    t.refuseStaffRole = true;
+    const made = await t.voice.createMatchChannels('Scrim', { label: 'A', userIds: [] }, { label: 'B', userIds: [] }, 'staff', { privateView: true });
+    expect(made.staffDropped).toBe(true);
+    expect(t.channels.get(made.teamAId)!.staffRoleId).toBeNull();
+    t.refuseStaffRole = false;
+    const ok = await t.voice.createMatchChannels('Scrim', { label: 'A', userIds: [] }, { label: 'B', userIds: [] }, 'staff', { privateView: true });
+    expect(ok.staffDropped).toBe(false);
+  });
+});
+
 describe('VoiceOps: setMemberAccess', () => {
   it('allow: true adds the member to the channel', async () => {
     const t = new FakeTransport();
