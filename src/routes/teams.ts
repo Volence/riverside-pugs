@@ -3,7 +3,7 @@ import type { DB } from '../db.js';
 import { getPlayer } from '../players.js';
 import { logAdmin } from '../admin/audit.js';
 import { makeOptionalViewer, makeRequireActive } from './guards.js';
-import { competitiveAccess } from '../teams/access.js';
+import { competitiveAccess, competitivePublic } from '../teams/access.js';
 import * as T from '../teams/teams.js';
 import { checkLogo, LOGO_MAX_BYTES } from '../community/validate.js';
 import type { CommunityStore } from '../community/store.js';
@@ -43,10 +43,15 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
   };
   const nameOf = (steamid: string): string => getPlayer(db, steamid)?.name ?? steamid;
 
-  /** The switch, for routes anyone may read: 404 to whoever it keeps out. */
+  /** The switch, for routes anyone may read: 404 to whoever it keeps out. A
+   *  signed-in viewer always goes through competitiveAccess, same as every
+   *  other route; a signed-out one is let through only once the switch is at
+   *  `everyone` (competitivePublic), which is the "Public: logo, tag,
+   *  roster..." part of the spec, not a weaker version of the switch. */
   const allowedViewer = (req: FastifyRequest, reply: FastifyReply): { viewer: string | null } | null => {
     const viewer = optionalViewer(req);
-    if (!competitiveAccess(db, viewer)) { reply.code(404).send(NOT_FOUND); return null; }
+    const allowed = viewer ? competitiveAccess(db, viewer) : competitivePublic(db);
+    if (!allowed) { reply.code(404).send(NOT_FOUND); return null; }
     return { viewer };
   };
   /** An active player the switch lets in, or the reply sent. A closed switch
@@ -188,7 +193,11 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
     if (!r.ok) return refuse(reply, r.error);
     const discordId = getPlayer(db, target)?.discord_id;
     const dm = opts.dm?.();
-    if (discordId && dm) {
+    // A captain can invite, cancel and invite again as often as the rules
+    // allow (the site invite above is unaffected); this only caps the DM, so
+    // a loop of that cannot spam the target's Discord.
+    const invite = T.getInvite(db, r.value.inviteId)!;
+    if (discordId && dm && !T.invitedRecently(db, t.id, target, invite.created_at, invite.id)) {
       void dm(discordId, teamInviteDm({
         inviteId: r.value.inviteId, teamName: t.name, tag: t.tag, invitedByName: nameOf(me), url: `${opts.publicUrl}/team/${t.slug}`,
       })).catch((err) => console.warn(`[teams] could not DM ${target} about invite ${r.value.inviteId}:`, err instanceof Error ? err.message : err));

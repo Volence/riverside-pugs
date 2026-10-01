@@ -58,6 +58,18 @@ describe('the switch', () => {
   });
 });
 
+describe('public team pages', () => {
+  it('a signed-out visitor reads the list and a team page while the switch is everyone, not admins', async () => {
+    const slug = await create(P[0], 'Rats', 'RR');
+    expect((await call('GET', '/api/teams')).statusCode).toBe(200);
+    expect((await call('GET', `/api/teams/${slug}`)).statusCode).toBe(200);
+    expect((await call('POST', '/api/teams', undefined, { name: 'Mice', tag: 'MM' })).statusCode).toBe(404);
+    db.prepare("UPDATE settings SET value = 'admins' WHERE key = 'competitive_enabled'").run();
+    expect((await call('GET', '/api/teams')).statusCode).toBe(404);
+    expect((await call('GET', `/api/teams/${slug}`)).statusCode).toBe(404);
+  });
+});
+
 describe('create, invite, accept, page', () => {
   it('runs the whole flow and the page shows what each viewer may see', async () => {
     const slug = await create(P[0], 'Riverside Rats', 'RR');
@@ -155,6 +167,7 @@ describe('logo', () => {
     const file = await call('GET', `/api/teams/logos/${key}.png`, P[3]);
     expect(file.statusCode).toBe(200);
     expect(file.headers['content-type']).toBe('image/png');
+    expect((await call('GET', `/api/teams/logos/${key}.png`)).statusCode).toBe(200);
     expect((await call('GET', `/api/teams/logos/${'b'.repeat(64)}.png`, P[3])).statusCode).toBe(404);
     expect((await call('POST', `/api/teams/${slug}/logo`, P[3], { png: png(256, 256).toString('base64') })).statusCode).toBe(403);
   });

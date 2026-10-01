@@ -30,6 +30,15 @@ describe('team invite DM', () => {
     const ids = p.components.flat().map((b) => ('customId' in b ? b.customId : b.url));
     expect(ids).toEqual([`tm:${inviteId}:a`, `tm:${inviteId}:d`, 'https://example.test/team/rats']);
   });
+
+  it('escapes markdown in the team name and the inviter name, so a crafted name cannot look like a link', () => {
+    const p = teamInviteDm({
+      inviteId, teamName: '[Nitro](https://x.co/a)', tag: 'RR', invitedByName: '*evil*', url: 'https://example.test/team/rats',
+    });
+    expect(p.content).not.toMatch(/\]\(https/); // no unescaped link syntax
+    expect(p.content).toContain('\\[Nitro\\]\\(https://x.co/a\\)');
+    expect(p.content).toContain('\\*evil\\*');
+  });
 });
 
 describe('handleTeamButton', () => {
@@ -55,5 +64,18 @@ describe('handleTeamButton', () => {
   it('declines', async () => {
     expect((await press('d-inv', 'd')).payload.content).toMatch(/declined/i);
     expect((await press('d-inv', 'a')).payload.content).toMatch(/no longer open/i);
+  });
+
+  it('escapes markdown in the team name when announcing a join', async () => {
+    const evil = createTeam(db, { creator: CAP, name: '[Nitro](https://x.co/a)', tag: 'EV' });
+    if (!evil.ok) throw new Error(evil.error);
+    const inv = invitePlayer(db, { teamId: evil.value.id, by: CAP, target: INV });
+    if (!inv.ok) throw new Error(inv.error);
+    const r = await handleTeamButton(
+      { db, publicUrl: 'https://example.test' },
+      { kind: 'button', customId: `${TEAM_BUTTON_PREFIX}${inv.value.inviteId}:a`, userId: 'd-inv' } as never,
+    );
+    expect(r.payload.content).not.toMatch(/\]\(https/);
+    expect(r.payload.content).toContain('\\[Nitro\\]\\(https://x.co/a\\)');
   });
 });
