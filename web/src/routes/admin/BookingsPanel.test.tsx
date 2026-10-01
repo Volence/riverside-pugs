@@ -1,0 +1,50 @@
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
+import type { AdminBookingRow } from '../../api';
+
+const { mockAdmin, mockConfirm } = vi.hoisted(() => ({
+  mockAdmin: { bookings: vi.fn(), cancelBooking: vi.fn(), extendBooking: vi.fn(), endBooking: vi.fn() },
+  mockConfirm: vi.fn(),
+}));
+vi.mock('../../api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api')>();
+  return { ...actual, adminApi: { ...actual.adminApi, ...mockAdmin } };
+});
+vi.mock('../../components/Confirm', () => ({ confirm: mockConfirm }));
+const { BookingsPanel } = await import('./BookingsPanel');
+
+const ROW: AdminBookingRow = {
+  id: 4, state: 'active', ending: false, startsAt: '2026-10-02T20:00:00.000Z', endsAt: '2026-10-02T22:00:00.000Z',
+  aName: 'Rats', bName: "p1's group", server: 'Riverside #3', peak: { a: 4, b: 3 }, endReason: null,
+};
+
+afterEach(cleanup);
+beforeEach(() => { for (const fn of [...Object.values(mockAdmin), mockConfirm]) fn.mockReset(); });
+
+describe('BookingsPanel', () => {
+  it('lists bookings with their server and turnout, with Cancel, Extend and End', async () => {
+    mockAdmin.bookings.mockResolvedValue({ bookings: [ROW] });
+    render(<BookingsPanel nudge={0} />);
+    expect(await screen.findByText("Rats vs p1's group")).toBeTruthy();
+    expect(screen.getByText('Riverside #3')).toBeTruthy();
+    expect(screen.getByText('4 / 3')).toBeTruthy();
+    for (const name of ['Cancel', 'Extend', 'End']) expect(screen.getByRole('button', { name })).toBeTruthy();
+  });
+
+  it('Cancel asks first, then cancels', async () => {
+    mockAdmin.bookings.mockResolvedValue({ bookings: [ROW] });
+    mockConfirm.mockResolvedValue(true);
+    mockAdmin.cancelBooking.mockResolvedValue({ ok: true });
+    render(<BookingsPanel nudge={0} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(mockAdmin.cancelBooking).toHaveBeenCalledWith(4, ''));
+    expect(mockConfirm).toHaveBeenCalled();
+  });
+
+  it('renders nothing with no bookings', async () => {
+    mockAdmin.bookings.mockResolvedValue({ bookings: [] });
+    const { container } = render(<BookingsPanel nudge={0} />);
+    await waitFor(() => expect(mockAdmin.bookings).toHaveBeenCalled());
+    expect(container.textContent).toBe('');
+  });
+});

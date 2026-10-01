@@ -9,6 +9,7 @@ import { SpectatePanel } from '../../components/SpectatePanel';
 import { useAction, type Run } from './useAction';
 import { ActivityPanel } from '../../components/ActivityPanel';
 import { AdminQueuePanel, AdminServersPanel, OpenMatchesPanel, RecentResultsPanel, abortMatchAsked } from './MatchPanels';
+import { BookingsPanel } from './BookingsPanel';
 import { PracticeLeasesPanel } from './PracticeLeasesPanel';
 import { ChatDrawer } from './ChatDrawer';
 import { chatFromUrl, OLD_PLUGIN_REASON, SELF_STARTED_REASON, countdown, countUp, isLow, liveFromUrl, reasonText } from '../../liveBoard';
@@ -86,6 +87,7 @@ export function AdminLive({ isAdmin }: { isAdmin: boolean }) {
         <Panel><p class="muted">Loading...</p></Panel>
       )}
 
+      <BookingsPanel nudge={nudge} />
       <PracticeLeasesPanel nudge={nudge} onChat={openChat} />
 
       {panels.error && <p class="error">{panels.error}</p>}
