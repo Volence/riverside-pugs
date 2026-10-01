@@ -359,3 +359,88 @@ describe('repost (plan 2, Task 3)', () => {
     expect((await call('POST', `/api/scrims/repost/${plainId}`, P[3])).statusCode).toBe(404);
   });
 });
+
+describe('blocks', () => {
+  it('a manager adds, lists and removes a team\'s blocks; a pickup captain their own', async () => {
+    const rats = team(P[0], 'Rats', 'RR', [P[1]]);
+    const cats = team(P[2], 'Cats', 'CC');
+    const add = await call('POST', '/api/scrims/blocks', P[1], { teamId: rats, target: { teamId: cats } });
+    expect(add.statusCode).toBe(200);
+    expect(add.json()).toEqual({ added: true });
+    expect((await call('POST', '/api/scrims/blocks', P[1], { teamId: rats, target: { teamId: cats } })).json()).toEqual({ added: false });
+    const list = await call('GET', `/api/scrims/blocks?teamId=${rats}`, P[0]);
+    expect(list.statusCode).toBe(200);
+    expect(list.headers['cache-control']).toBe('no-store');
+    expect(list.json()).toEqual({ blocks: [{ target: { kind: 'team', id: cats, name: 'Cats', tag: 'CC' }, createdAt: expect.any(String) }] });
+
+    expect((await call('POST', '/api/scrims/blocks', P[3], { target: { steamid: P[4] } })).json()).toEqual({ added: true });
+    const mine = (await call('GET', '/api/scrims/blocks', P[3])).json();
+    expect(mine.blocks.map((b: { target: unknown }) => b.target)).toEqual([{ kind: 'player', steamid: P[4], name: expect.any(String) }]);
+
+    const removed = await call('POST', '/api/scrims/blocks/remove', P[0], { teamId: rats, target: { teamId: cats } });
+    expect(removed.json()).toEqual({ removed: true });
+    expect((await call('GET', `/api/scrims/blocks?teamId=${rats}`, P[0])).json()).toEqual({ blocks: [] });
+  });
+
+  it('refusals carry the block domain\'s own text and status', async () => {
+    const rats = team(P[0], 'Rats', 'RR');
+    const self = await call('POST', '/api/scrims/blocks', P[0], { teamId: rats, target: { teamId: rats } });
+    expect(self.statusCode).toBe(400);
+    expect(self.json().error).toEqual(expect.any(String));
+    const bad = await call('POST', '/api/scrims/blocks', P[0], { target: 'x' });
+    expect(bad.statusCode).toBe(400);
+    expect((await call('POST', '/api/scrims/blocks', P[3], { teamId: rats, target: { steamid: P[4] } })).statusCode).toBe(403);
+  });
+
+  it('a list is 404 to anyone who does not manage the side, and every block route is behind the switch', async () => {
+    const rats = team(P[0], 'Rats', 'RR', [P[1]]);
+    setRole(db, { teamId: rats, by: P[0], target: P[1], role: 'member' });
+    for (const who of [P[1], P[3], ADMIN]) {
+      expect((await call('GET', `/api/scrims/blocks?teamId=${rats}`, who)).statusCode).toBe(404);
+    }
+    expect((await call('GET', '/api/scrims/blocks?teamId=999', P[0])).statusCode).toBe(404);
+    expect((await call('GET', '/api/scrims/blocks?teamId=abc', P[0])).statusCode).toBe(404);
+    expect((await call('GET', '/api/scrims/blocks')).statusCode).toBe(404);
+    setSetting(db, 'competitive_enabled', 'off');
+    expect((await call('GET', '/api/scrims/blocks', P[0])).statusCode).toBe(404);
+    expect((await call('POST', '/api/scrims/blocks', P[0], { target: { steamid: P[4] } })).statusCode).toBe(404);
+    expect((await call('POST', '/api/scrims/blocks/remove', P[0], { target: { steamid: P[4] } })).statusCode).toBe(404);
+  });
+
+  it('blocking declines the blocked side\'s pending acceptance with the ordinary scrim_declined DM', async () => {
+    const id = await post(P[0]);
+    await accept(id, P[1]);
+    dms.length = 0;
+    expect((await call('POST', '/api/scrims/blocks', P[0], { target: { steamid: P[1] } })).statusCode).toBe(200);
+    expect(dms).toHaveLength(1);
+    expect(dms[0].to).toBe(discordOf(P[1]));
+    expect(dms[0].content).toMatch(/is closed: the poster declined it/);
+    expect(dms[0].content.toLowerCase()).not.toContain('block');
+  });
+
+  it('the blocked side is never told: no "block" anywhere in what it gets back', async () => {
+    const rats = team(P[0], 'Rats', 'RR');
+    const cats = team(P[2], 'Cats', 'CC');
+    const ratsPost = await post(P[0], { teamId: rats });
+    expect((await call('POST', '/api/scrims/blocks', P[0], { teamId: rats, target: { teamId: cats } })).statusCode).toBe(200);
+    const seen: string[] = [];
+    const board = await call('GET', '/api/scrims', P[2]);
+    expect(board.json().posts).toEqual([]);
+    seen.push(board.body, (await call('GET', '/api/scrims/options', P[2])).body);
+    const acc = await call('POST', `/api/scrims/${ratsPost}/accept`, P[2], { teamId: cats });
+    expect(acc.statusCode).toBe(409);
+    expect(acc.json()).toEqual({ error: 'This scrim is not available to you.' });
+    const challenge = await call('POST', '/api/scrims', P[2], postBody({ teamId: cats, targetTeamId: rats }));
+    expect(challenge.statusCode).toBe(409);
+    expect(challenge.json()).toEqual({ error: 'This scrim is not available to you.' });
+    const booking = await call('POST', '/api/bookings', P[2], {
+      teamId: cats, opponent: { teamId: rats }, startsAt: START, minutes: 120, playlist: ['no_mercy'],
+    });
+    expect(booking.statusCode).toBe(409);
+    expect(booking.json()).toEqual({ error: 'This scrim is not available to you.' });
+    seen.push(acc.body, challenge.body, booking.body);
+    // Cats' own list (a key named blocks, so checked apart) does not hold Rats.
+    expect((await call('GET', `/api/scrims/blocks?teamId=${cats}`, P[2])).json()).toEqual({ blocks: [] });
+    for (const body of seen) expect(body.toLowerCase()).not.toContain('block');
+  });
+});

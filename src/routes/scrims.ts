@@ -14,6 +14,7 @@ import type { Notifier } from '../notify/notify.js';
 import * as S from '../scrims/scrims.js';
 import { scrimMessage, scrimSideManagers, teamManagers, type ScrimNotifyType } from '../scrims/messages.js';
 import { nightWindow } from '../scrims/night.js';
+import { BLOCK_ERRORS, blocksOf, blockTarget, managesBlockParty, unblock, type BlockParty } from '../scrims/blocks.js';
 
 export interface ScrimRoutesOpts {
   db: DB;
@@ -134,6 +135,57 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
     const r = S.repostFromBooking(db, { bookingId, by: me });
     if (!r.ok) return refuse(reply, r);
     return reply.code(201).send({ id: r.value.id });
+  });
+
+  // ---------- blocks (scrim blocks plan) ----------
+  // The side is a team the viewer manages (teamId), or, without one, the
+  // viewer as a pickup captain. Only the side's managers ever see its list.
+
+  /** The party a block route acts for, or undefined for a teamId that is
+   *  not a positive integer. */
+  const blockParty = (raw: unknown, me: string): BlockParty | undefined => {
+    if (raw === undefined || raw === null || raw === '') return { captain: me };
+    const id = typeof raw === 'string' ? Number(raw) : raw;
+    return Number.isInteger(id) && (id as number) > 0 ? { teamId: id as number } : undefined;
+  };
+  const refuseBlock = (reply: FastifyReply, error: keyof typeof BLOCK_ERRORS) =>
+    reply.code(BLOCK_ERRORS[error].status).send({ error: BLOCK_ERRORS[error].text });
+
+  app.get('/api/scrims/blocks', async (req, reply) => {
+    const me = allowed(req, reply);
+    if (!me) return;
+    const party = blockParty((req.query as { teamId?: string }).teamId, me);
+    if (!party || !managesBlockParty(db, party, me)) return reply.code(404).send(NOT_FOUND);
+    reply.header('Cache-Control', 'no-store');
+    return { blocks: blocksOf(db, party) };
+  });
+
+  app.post('/api/scrims/blocks', async (req, reply) => {
+    const me = allowed(req, reply);
+    if (!me) return;
+    const b = body(req);
+    const party = blockParty(b.teamId, me);
+    if (!party) return reply.code(404).send(NOT_FOUND);
+    const r = blockTarget(db, { by: me, party, target: b.target });
+    if (!r.ok) return refuseBlock(reply, r.error);
+    // Ruling 5: the blocked side's acceptances declined here get the
+    // ordinary decline notice, which names no block.
+    for (const acceptId of r.value.declinedAcceptIds) {
+      const accept = S.getAccept(db, acceptId);
+      if (accept) tell(scrimSideManagers(db, accept), 'scrim_declined', accept.post_id);
+    }
+    return { added: r.value.added };
+  });
+
+  app.post('/api/scrims/blocks/remove', async (req, reply) => {
+    const me = allowed(req, reply);
+    if (!me) return;
+    const b = body(req);
+    const party = blockParty(b.teamId, me);
+    if (!party) return reply.code(404).send(NOT_FOUND);
+    const r = unblock(db, { by: me, party, target: b.target });
+    if (!r.ok) return refuseBlock(reply, r.error);
+    return r.value;
   });
 
   app.post('/api/scrims/:id/withdraw', async (req, reply) => {

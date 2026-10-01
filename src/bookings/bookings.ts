@@ -16,6 +16,7 @@ import { bookingGames, type BookingGameView } from './games.js';
 import { castersOf, type CasterView } from './casters.js';
 import { canSeeReliability, reliability, type Reliability } from '../scrims/reliability.js';
 import { ownReview, reviewable, reviewOpen, staffReviews, type ReviewTag, type StaffReview } from '../scrims/reviews.js';
+import { blocked } from '../scrims/blocks.js';
 import {
   allowance, bookingLimits, capacityProblem, isLateCancel, iso, upcomingCount, OPEN_STATES_SQL, PEOPLE_PER_SIDE, SHOWN_MIN, STEP_MINUTES,
   UNCONFIRMED_CUTOFF_MS, UNCONFIRMED_TTL_MS, type BookingLimits, type BookingState, type Party,
@@ -87,6 +88,9 @@ export const BOOKING_ERRORS = {
   already_excused: { status: 409, text: 'That is already excused.' },
   bad_review: { status: 400, text: 'A review is a thumbs up or down, with tags from the list, each once.' },
   review_closed: { status: 409, text: 'Reviews close 7 days after the scrim.' },
+  // Scrim blocks (Ruling 4): the one refusal a blocked pair gets anywhere,
+  // worded so it never says why.
+  not_available: { status: 409, text: 'This scrim is not available to you.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type BookingError = keyof typeof BOOKING_ERRORS;
 export type Result<T> = { ok: true; value: T } | { ok: false; error: BookingError };
@@ -282,6 +286,9 @@ export function createBooking(db: DB, o: {
       bInvitee = opp.steamid;
     }
 
+    // A blocked pair never books each other, whichever side blocked.
+    if (blocked(db, aParty, bTeam !== null ? { teamId: bTeam } : { captain: bCaptain })) return fail('not_available');
+
     const endMs = startMs + minutes * 60_000;
     if (capacityProblem(db, { region, startMs, endMs }) !== null) return fail('no_capacity');
     const id = Number(db.prepare(
@@ -310,6 +317,8 @@ export function confirmBooking(db: DB, o: { bookingId: number; by: string; now?:
     if (!managesSide(db, s, o.by)) return fail('not_manager');
     if (!canUse(db, o.by)) return fail('not_open');
     const party = partyOf(s);
+    // A scrim invite sent before a block cannot then be taken up.
+    if (b.purpose === 'scrim' && blocked(db, partyOf(sideRow(db, b.id, 'a')!), party)) return fail('not_available');
     if (upcomingCount(db, party) >= allowance(db, party, now.getTime())) return fail('allowance');
     if (capacityProblem(db, { region: b.region, startMs: Date.parse(b.starts_at), endMs: Date.parse(b.ends_at), exceptId: b.id }) !== null) {
       return fail('no_capacity');

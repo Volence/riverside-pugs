@@ -8,6 +8,7 @@ import {
   acceptPost, board, confirmAccept, createPost, declineAccept, expire, repostFromBooking, withdrawAccept, withdrawPost,
   type ScrimResult,
 } from '../src/scrims/scrims.js';
+import { blockTarget } from '../src/scrims/blocks.js';
 
 const P = Array.from({ length: 14 }, (_, i) => `765611990000008${String(i).padStart(2, '0')}`);
 const MIN = 60_000;
@@ -755,5 +756,111 @@ describe('repostFromBooking', () => {
     setSetting(db, 'booking_playlist_max', '2');
     const id = value(repostFromBooking(db, { bookingId, by: P[0], now: NOW })).id;
     expect(JSON.parse(postRow(id).campaigns_json as string)).toEqual(['no_mercy', 'dead_air']);
+  });
+});
+
+describe('blocks: a blocked pair never meets, whichever side blocked', () => {
+  type Party = { teamId: number } | { captain: string };
+  const block = (by: string, party: Party, target: unknown): void => {
+    const r = blockTarget(db, { by, party, target, now: NOW });
+    if (!r.ok) throw new Error(r.error);
+  };
+  const ids = (who: string) => board(db, { steamid: who, staff: false }, { now: NOW }).map((p) => p.id);
+
+  it('board: neither side sees the other\'s posts, a third side sees both', () => {
+    for (const ratsBlocks of [true, false]) {
+      db = openDb(':memory:');
+      const ins = db.prepare("INSERT INTO players (steamid, name, status) VALUES (?, ?, 'active')");
+      P.forEach((id, i) => ins.run(id, `p${i}`));
+      setSetting(db, 'competitive_enabled', 'everyone');
+      setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'death_toll']));
+      for (const n of ['a', 'bb', 'ccc', 'dddd']) {
+        const id = addServer(db, { name: n, host: 'h', port: 27000 + n.length, rconPort: 1, rconPassword: 'x' });
+        db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id);
+      }
+      const rats = team(P[0], 'Rats', 'RR');
+      const cats = team(P[1], 'Cats', 'CC');
+      if (ratsBlocks) block(P[0], { teamId: rats }, { teamId: cats });
+      else block(P[1], { teamId: cats }, { teamId: rats });
+      const ratsPost = post({ teamId: rats });
+      const catsPost = post({ by: P[1], teamId: cats });
+      expect(ids(P[0])).toEqual([ratsPost]);
+      expect(ids(P[1])).toEqual([catsPost]);
+      expect(ids(P[5])).toEqual([ratsPost, catsPost]);
+    }
+  });
+
+  it('board: a player block hides the pickup they post and the posts of a team they manage, from any side the viewer manages', () => {
+    const rats = team(P[0], 'Rats', 'RR');
+    block(P[0], { teamId: rats }, { steamid: P[5] });
+    const pickup = post({ by: P[5] });
+    const mice = team(P[5], 'Mice', 'MM');
+    const micePost = post({ by: P[5], teamId: mice, startsAt: '2026-10-03T20:00:00.000Z' });
+    expect(ids(P[0])).not.toContain(pickup);
+    expect(ids(P[0])).not.toContain(micePost);
+    // P[5] sees nothing of Rats either.
+    const ratsPost = post({ teamId: rats, startsAt: '2026-10-03T21:00:00.000Z' });
+    expect(ids(P[5])).not.toContain(ratsPost);
+    expect(ids(P[6])).toEqual([pickup, micePost, ratsPost]);
+  });
+
+  it('challenge: createPost refuses not_available whichever side blocked', () => {
+    const rats = team(P[0], 'Rats', 'RR');
+    const cats = team(P[1], 'Cats', 'CC');
+    const dogs = team(P[2], 'Dogs', 'DD');
+    block(P[0], { teamId: rats }, { teamId: cats });
+    expect(err(createPost(db, postInput({ teamId: rats, targetTeamId: cats })))).toBe('not_available');
+    expect(err(createPost(db, postInput({ by: P[1], teamId: cats, targetTeamId: rats })))).toBe('not_available');
+    expect(err(createPost(db, postInput({ teamId: rats, targetTeamId: dogs })))).toBe('ok');
+    // A pickup poster challenging a team that blocked them.
+    block(P[2], { teamId: dogs }, { steamid: P[6] });
+    expect(err(createPost(db, postInput({ by: P[6], targetTeamId: dogs })))).toBe('not_available');
+  });
+
+  it('accept: refused not_available whichever side blocked', () => {
+    const rats = team(P[0], 'Rats', 'RR');
+    const cats = team(P[1], 'Cats', 'CC');
+    const ratsPost = post({ teamId: rats });
+    const pickupPost = post({ by: P[6], startsAt: '2026-10-03T20:00:00.000Z' });
+    block(P[0], { teamId: rats }, { teamId: cats });
+    expect(err(acceptPost(db, { postId: ratsPost, by: P[1], teamId: cats, now: NOW }))).toBe('not_available');
+    const catsPost = post({ by: P[1], teamId: cats, startsAt: '2026-10-03T21:00:00.000Z' });
+    expect(err(acceptPost(db, { postId: catsPost, by: P[0], teamId: rats, now: NOW }))).toBe('not_available');
+    block(P[6], { captain: P[6] }, { steamid: P[7] });
+    expect(err(acceptPost(db, { postId: pickupPost, by: P[7], now: NOW }))).toBe('not_available');
+    expect(err(acceptPost(db, { postId: pickupPost, by: P[8], now: NOW }))).toBe('ok');
+  });
+
+  it('confirm: a block that starts to match after the accept is refused not_available, nothing booked', () => {
+    // Rats blocked P[5] while P[5] was a plain member of Cats; Cats accepts,
+    // then P[5] becomes a co-captain of Cats before Rats confirms.
+    const rats = team(P[0], 'Rats', 'RR', [P[6]]);
+    const cats = team(P[1], 'Cats', 'CC', [P[5]]);
+    block(P[0], { teamId: rats }, { steamid: P[5] });
+    const ratsPost = post({ teamId: rats });
+    const a = accept(ratsPost, P[1], { teamId: cats });
+    setRole(db, { teamId: cats, by: P[1], target: P[5], role: 'cocaptain' });
+    expect(err(confirmAccept(db, { acceptId: a, by: P[0], now: NOW }))).toBe('not_available');
+    expect(bookingCount()).toBe(0);
+    expect(acceptRow(a).status).toBe('pending');
+
+    // The other direction: Cats blocked P[6], a plain member of Rats, who is
+    // then made co-captain.
+    setRole(db, { teamId: cats, by: P[1], target: P[5], role: 'member' });
+    block(P[1], { teamId: cats }, { steamid: P[6] });
+    expect(err(confirmAccept(db, { acceptId: a, by: P[0], now: NOW }))).toBe('ok');
+    const post2 = post({ teamId: rats, startsAt: '2026-10-03T20:00:00.000Z' });
+    const a2 = accept(post2, P[1], { teamId: cats });
+    setRole(db, { teamId: rats, by: P[0], target: P[6], role: 'cocaptain' });
+    expect(err(confirmAccept(db, { acceptId: a2, by: P[0], now: NOW }))).toBe('not_available');
+  });
+
+  it('confirm: a block row written between accept and confirm is caught there', () => {
+    const id = post();
+    const a = accept(id, P[1]);
+    db.prepare(`INSERT INTO scrim_blocks (blocker_steamid, target_steamid, created_by, created_at) VALUES (?, ?, ?, ?)`)
+      .run(P[1], P[0], P[1], NOW.toISOString());
+    expect(confirmAccept(db, { acceptId: a, by: P[0], now: NOW })).toEqual({ ok: false, error: 'not_available' });
+    expect(bookingCount()).toBe(0);
   });
 });

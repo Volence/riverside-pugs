@@ -329,6 +329,28 @@ CREATE TABLE IF NOT EXISTS scrim_reviews (
   UNIQUE (booking_id, by_side)
 );
 CREATE INDEX IF NOT EXISTS scrim_reviews_booking ON scrim_reviews (booking_id);
+-- Scrim blocks (scrim blocks plan): a party (a team, or a pickup captain for
+-- themselves) that never meets a team or a player through the scrim system,
+-- in either direction (src/scrims/blocks.ts). Exactly one blocker column and
+-- exactly one target column is set. The unique indexes fold the NULL target
+-- column with COALESCE, so the same pair cannot be stored twice.
+CREATE TABLE IF NOT EXISTS scrim_blocks (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  blocker_team_id INTEGER REFERENCES teams(id),
+  blocker_steamid TEXT REFERENCES players(steamid),
+  target_team_id  INTEGER REFERENCES teams(id),
+  target_steamid  TEXT REFERENCES players(steamid),
+  created_by      TEXT NOT NULL REFERENCES players(steamid),
+  created_at      TEXT NOT NULL,
+  CHECK ((blocker_team_id IS NULL) <> (blocker_steamid IS NULL)),
+  CHECK ((target_team_id IS NULL) <> (target_steamid IS NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS scrim_blocks_team_pair
+  ON scrim_blocks (blocker_team_id, COALESCE(target_team_id, 0), COALESCE(target_steamid, '')) WHERE blocker_team_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS scrim_blocks_pickup_pair
+  ON scrim_blocks (blocker_steamid, COALESCE(target_team_id, 0), COALESCE(target_steamid, '')) WHERE blocker_steamid IS NOT NULL;
+CREATE INDEX IF NOT EXISTS scrim_blocks_target_team ON scrim_blocks (target_team_id);
+CREATE INDEX IF NOT EXISTS scrim_blocks_target_steamid ON scrim_blocks (target_steamid);
 CREATE TABLE IF NOT EXISTS match_players (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   player_id TEXT NOT NULL REFERENCES players(steamid),

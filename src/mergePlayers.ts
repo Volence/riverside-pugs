@@ -114,6 +114,9 @@ const PLAIN: [table: string, column: string][] = [
   ['scrim_accepts', 'captain_steamid'],
   // A private scrim review (plan 2) follows the captain who wrote it.
   ['scrim_reviews', 'reviewer'],
+  // Who made a scrim block. The blocker and target columns are moved by
+  // hand below: they sit inside the blocks' unique pair indexes.
+  ['scrim_blocks', 'created_by'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`
@@ -194,6 +197,8 @@ export const MERGE_HANDLED_PLAYER_COLUMNS: [table: string, column: string][] = [
   // simply be repointed, tickets_one_open would refuse the second.
   ['tickets', 'target_id'],
   ['ticket_access', 'steamid'],
+  ['scrim_blocks', 'blocker_steamid'],
+  ['scrim_blocks', 'target_steamid'],
 ];
 
 export interface MergePlan {
@@ -242,6 +247,7 @@ export function mergePlayers(
   note('twitch_status', count('SELECT COUNT(*) AS n FROM twitch_status WHERE player_id = ?', from));
   note('player_steam_signals', count('SELECT COUNT(*) AS n FROM player_steam_signals WHERE steamid = ?', from));
   note('steam_signal_alerts', count('SELECT COUNT(*) AS n FROM steam_signal_alerts WHERE player_id = ?', from));
+  note('scrim_blocks', count('SELECT COUNT(*) AS n FROM scrim_blocks WHERE blocker_steamid = ? OR target_steamid = ?', from, from));
 
   const matchesMoved = count('SELECT COUNT(DISTINCT match_id) AS n FROM match_players WHERE player_id = ?', from);
   const matchesCollapsed = count(
@@ -426,6 +432,15 @@ export function mergePlayers(
     db.prepare('UPDATE OR IGNORE endorsements SET to_id = ? WHERE to_id = ?').run(into, from);
     db.prepare('DELETE FROM endorsements WHERE to_id = ?').run(from);
     db.prepare('DELETE FROM endorsements WHERE from_id = to_id').run();
+
+    // 5. Scrim blocks, the same way: a pickup block or a player target moves
+    //    to the survivor unless the survivor already holds that same block,
+    //    and a block that now names the survivor on both ends is dropped.
+    db.prepare('UPDATE OR IGNORE scrim_blocks SET blocker_steamid = ? WHERE blocker_steamid = ?').run(into, from);
+    db.prepare('DELETE FROM scrim_blocks WHERE blocker_steamid = ?').run(from);
+    db.prepare('UPDATE OR IGNORE scrim_blocks SET target_steamid = ? WHERE target_steamid = ?').run(into, from);
+    db.prepare('DELETE FROM scrim_blocks WHERE target_steamid = ?').run(from);
+    db.prepare('DELETE FROM scrim_blocks WHERE blocker_steamid = target_steamid').run();
 
     // The alias outlives the player row and is the whole reason this merge
     // is not a one-off tidy-up: without it the same person logs in on the
