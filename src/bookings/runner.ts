@@ -83,6 +83,7 @@ function allPlayedText(n: number): string {
  *  limits go back to the PUG template and the auto-track threshold to the
  *  plugin's default (8), so the next PUG on the box plays PUG rules. */
 export const CLEAR_LINES: readonly string[] = [
+  'l4d_booking_id ""',
   'l4d_booking_password ""', 'l4d_booking_tv_password ""', 'l4d_booking_notice ""',
   `sm_pug_pause_limit ${TEMPLATES.PUG.pause.limit ?? 0}`, `sm_pug_pause_seconds ${TEMPLATES.PUG.pause.seconds ?? 0}`,
   'sm_pug_auto_min_players 8',

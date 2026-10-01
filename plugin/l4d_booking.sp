@@ -63,7 +63,7 @@
 #include <sourcemod>
 #include "pug-logauth.inc"
 
-#define PLUGIN_VERSION "1.3.0"
+#define PLUGIN_VERSION "1.4.0"
 
 /** Longest arg= text on a PUGBOOK line, plus the null terminator. Matches
  *  the site parser's cap (Task 6). */
@@ -112,6 +112,10 @@ public void OnPluginStart()
 	g_cvCaptains = CreateConVar("l4d_booking_captains", "", "Comma-separated SteamID64s of this booking's captains.", FCVAR_DONTRECORD);
 	g_cvGrace = CreateConVar("l4d_booking_grace", "60", "Seconds a captain has to !allow someone who is not on the booking.", FCVAR_DONTRECORD, true, 15.0);
 	g_cvBlock = CreateConVar("l4d_booking_block", "30", "Minutes someone kicked for not being on the booking stays out; 0 for no block.", FCVAR_DONTRECORD, true, 0.0);
+	// Crash recovery (site plan 5): the booking id, written only by the
+	// site's setup and recovery, never by its minute re-push. A fresh srcds
+	// starts with it empty, which is how the site tells a restart.
+	CreateConVar("l4d_booking_id", "", "The booking this box was set up for; empty after a server start.", FCVAR_DONTRECORD);
 	g_cvPassword.AddChangeHook(OnBookingCvarChanged);
 	g_cvTvPassword.AddChangeHook(OnBookingCvarChanged);
 	g_cvNotice.AddChangeHook(OnBookingCvarChanged);
