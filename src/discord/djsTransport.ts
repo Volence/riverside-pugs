@@ -372,8 +372,9 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
   };
 
   const voice: VoiceOps = {
-    async createMatchChannels(name, teamA, teamB, staffRoleId) {
+    async createMatchChannels(name, teamA, teamB, staffRoleId, opts) {
       const me = client.user!.id;
+      const privateView = opts?.privateView ?? false;
       // An overwrite for someone who is not in the guild is rejected by
       // Discord, which would fail the whole channel; keep members only.
       const members = async (ids: string[]) => {
@@ -392,7 +393,13 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         type: ChannelType.GuildVoice,
         parent: category.id,
         permissionOverwrites: [
-          { id: guild.roles.everyone.id, allow: [PermissionFlagsBits.ViewChannel], deny: [PermissionFlagsBits.Connect] },
+          // Private: nobody sees the channel exists until setMemberAccess
+          // lets them in one at a time. Public (today's behaviour, and what
+          // every existing caller still gets): anyone can see in, only the
+          // roster below can connect.
+          privateView
+            ? { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect] }
+            : { id: guild.roles.everyone.id, allow: [PermissionFlagsBits.ViewChannel], deny: [PermissionFlagsBits.Connect] },
           ...(await members(ids)).map((id) => ({
             id, type: OverwriteType.Member,
             allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak],
@@ -449,6 +456,24 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
       await ch?.delete().catch((err: unknown) => {
         if (codeOf(err) !== UNKNOWN_CHANNEL) throw err;
       });
+    },
+    async setMemberAccess(channelId, userId, allow) {
+      const ch = await channelById(channelId);
+      if (!ch || !('permissionOverwrites' in ch)) return;
+      try {
+        if (allow) {
+          // PermissionOverwriteManager.create replaces an existing overwrite
+          // with these exact values rather than refusing, so this is a no-op
+          // for a member who already has one.
+          await ch.permissionOverwrites.create(userId, {
+            ViewChannel: true, Connect: true, Speak: true,
+          });
+        } else {
+          await ch.permissionOverwrites.delete(userId);
+        }
+      } catch (err) {
+        if (codeOf(err) !== UNKNOWN_CHANNEL && codeOf(err) !== UNKNOWN_MEMBER) throw err;
+      }
     },
   };
 

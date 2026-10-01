@@ -32,7 +32,7 @@ export class FakeTransport implements BotTransport {
   private seq = 0;
 
   // Voice world.
-  channels = new Map<string, { name: string; members: Set<string>; allowed: string[]; staffRoleId: string | null }>();
+  channels = new Map<string, { name: string; members: Set<string>; allowed: string[]; staffRoleId: string | null; privateView?: boolean }>();
   voiceOf = new Map<string, string>();
   /** userId -> roles they hold. The queue-alert toggle is the only user. */
   rolesOf = new Map<string, Set<string>>();
@@ -405,14 +405,15 @@ export class FakeTransport implements BotTransport {
   };
 
   voice: VoiceOps = {
-    createMatchChannels: async (name, teamA, teamB, staffRoleId) => {
+    createMatchChannels: async (name, teamA, teamB, staffRoleId, opts) => {
       if (this.failVoice) throw new Error('missing permissions');
+      const privateView = opts?.privateView ?? false;
       const categoryId = `cat${++this.seq}`;
       const teamAId = `va${++this.seq}`;
       const teamBId = `vb${++this.seq}`;
-      this.channels.set(categoryId, { name, members: new Set(), allowed: [], staffRoleId: null });
-      this.channels.set(teamAId, { name: teamA.label, members: new Set(), allowed: teamA.userIds, staffRoleId });
-      this.channels.set(teamBId, { name: teamB.label, members: new Set(), allowed: teamB.userIds, staffRoleId });
+      this.channels.set(categoryId, { name, members: new Set(), allowed: [], staffRoleId: null, privateView });
+      this.channels.set(teamAId, { name: teamA.label, members: new Set(), allowed: teamA.userIds, staffRoleId, privateView });
+      this.channels.set(teamBId, { name: teamB.label, members: new Set(), allowed: teamB.userIds, staffRoleId, privateView });
       return { categoryId, teamAId, teamBId };
     },
     memberVoiceChannel: async (userId) => this.voiceOf.get(userId) ?? null,
@@ -433,5 +434,15 @@ export class FakeTransport implements BotTransport {
       return ch ? [...ch.members] : null;
     },
     deleteChannel: async (channelId) => { this.channels.delete(channelId); },
+    setMemberAccess: async (channelId, userId, allow) => {
+      // Ignores an unknown channel, as the real transport does.
+      const ch = this.channels.get(channelId);
+      if (!ch) return;
+      if (allow) {
+        if (!ch.allowed.includes(userId)) ch.allowed.push(userId);
+      } else {
+        ch.allowed = ch.allowed.filter((id) => id !== userId);
+      }
+    },
   };
 }
