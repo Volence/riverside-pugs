@@ -9,6 +9,7 @@ import { parseStatusPlayers } from '../practicePlayers.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { getCampaignPool, settingNumber } from '../settings.js';
 import { redactSecrets } from '../redact.js';
+import { TEMPLATES } from '../rulesets.js';
 import { consoleText, cvarValue, quoted, waitForStartup, type BoxRcon } from '../serverSetup.js';
 import { activeMembers } from '../teams/teams.js';
 import type { Notifier, NotifyType } from '../notify/notify.js';
@@ -64,8 +65,14 @@ const END_SAY: Record<string, string> = {
 };
 
 /** Sent before the release: if the end restart is ever skipped, the box must
- *  not keep the booking's passwords or notice. */
-export const CLEAR_LINES = ['l4d_booking_password ""', 'l4d_booking_tv_password ""', 'l4d_booking_notice ""'] as const;
+ *  not keep the booking's passwords or notice, nor its scrim rules: the pause
+ *  limits go back to the PUG template and the auto-track threshold to the
+ *  plugin's default (8), so the next PUG on the box plays PUG rules. */
+export const CLEAR_LINES: readonly string[] = [
+  'l4d_booking_password ""', 'l4d_booking_tv_password ""', 'l4d_booking_notice ""',
+  `sm_pug_pause_limit ${TEMPLATES.PUG.pause.limit ?? 0}`, `sm_pug_pause_seconds ${TEMPLATES.PUG.pause.seconds ?? 0}`,
+  'sm_pug_auto_min_players 8',
+];
 
 export interface BookingRunnerDeps {
   db: DB;
@@ -455,16 +462,18 @@ export class BookingRunner {
     if (now.getTime() >= Date.parse(b.ends_at)) { this.endNow(b.id, 'time', now); return; }
     let humans: ReturnType<typeof parseStatusPlayers>;
     try {
-      // The booking and game lines ride along each minute: cheap, idempotent,
-      // and a map change can reset cvars a cfg sets.
-      const [st] = await this.deps.rcon(server, ['status', ...bookingLines(this.db, b), ...gameLines(this.db, b, server, this.deps.logPublicAddress)]);
+      const [st] = await this.deps.rcon(server, ['status']);
       humans = parseStatusPlayers(st);
     } catch (err) {
       // Says nothing about who is on: the empty run starts again.
       this.emptyWatches.delete(b.id);
-      console.warn(`[booking] ${b.id}: status on ${server.name} failed:`, redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret]));
+      console.warn(`[booking] ${b.id}: status on ${server.name} failed:`, err instanceof Error ? err.message : err);
       return;
     }
+    // The booking and game lines go again each minute, in their own burst
+    // (best effort; the status above stands either way): cheap, idempotent,
+    // and a map change can reset cvars a cfg sets.
+    await this.push(b.id, server, () => [...bookingLines(this.db, b), ...gameLines(this.db, b, server, this.deps.logPublicAddress)], 're-pushing the booking lines');
     const on = new Set(humans.map((h) => h.steamid64).filter((s): s is string => s !== null));
     const people = acceptedPeople(this.db, b.id);
     const present = {
@@ -472,7 +481,12 @@ export class BookingRunner {
       b: people.filter((p) => p.side === 'b' && on.has(p.steamid)).length,
     };
     recordPresence(this.db, b.id, present, humans.length > 0, now);
-    if (b.state === 'ready' && present.a + present.b > 0) markActive(this.db, b.id, now);
+    if (b.state === 'ready' && present.a + present.b > 0 && markActive(this.db, b.id, now)) {
+      // The first campaign was loaded by setup, before anyone was on: its
+      // start lines are said once, when the booking goes active.
+      const first = (JSON.parse(b.playlist_json) as string[])[b.playlist_pos];
+      if (first) await this.push(b.id, server, () => this.campaignStartLines(getBooking(this.db, b.id)!, first), 'the campaign start lines');
+    }
 
     const fresh = getBooking(this.db, b.id)!;
     const nowMs = now.getTime();
@@ -552,22 +566,54 @@ export class BookingRunner {
       // A changelevel can drop the connection it came in on.
     }
     await this.sleep(MAP_SETTLE_MS);
-    const after = this.running(id);
-    if (after) {
-      const name = campaignRegistry(this.db).get(campaign)?.name ?? campaign;
-      const say = [`say [Booking] ${consoleText(name, 60)}: !nextmap, !stay, !end and !extend are yours, captains.`];
-      const left = Math.floor((Date.parse(after.ends_at) - this.now()) / 60_000);
-      const typical = typicalCampaignMinutes(this.db, campaign);
-      if (typical > left) say.push(`say [Booking] About ${left} min left, this campaign usually takes ${typical}. !extend now while the slot after is free.`);
+    if (this.running(id)) {
+      let onMap: string | null = null;
       try {
-        await this.deps.rcon(server, [...bookingLines(this.db, after), ...gameLines(this.db, after, server, this.deps.logPublicAddress), ...say]);
-      } catch (err) {
-        console.warn(`[booking] ${id}: campaign start lines on ${server.name} failed:`, redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret]));
+        const [st] = await this.deps.rcon(server, ['status']);
+        onMap = parseStatusMap(st);
+      } catch {
+        // No answer: treated as not loaded below.
+      }
+      if (onMap !== map) {
+        // Nothing is said about a campaign the box is not on.
+        console.warn(`[booking] ${id}: ${map} did not load on ${server.name} (it is on ${onMap ?? 'no map'})`);
+        publishAdminEvent({
+          kind: 'problem',
+          text: `Booking ${id}: ${server.name} was sent ${map} for the next campaign but is on ${onMap ?? 'no map'}. A captain can pick the campaign again.`,
+        });
+      } else {
+        const after = this.running(id);
+        if (after) {
+          await this.push(id, server, () => [
+            ...bookingLines(this.db, after), ...gameLines(this.db, after, server, this.deps.logPublicAddress), ...this.campaignStartLines(after, campaign),
+          ], 'the campaign start lines');
+        }
       }
     }
     // An end that came in while this ran is ours to finish (settle skipped it).
     const end = getBooking(this.db, id);
     if (end && end.ending_at !== null && end.ended_at === null) await this.windDown(id, true);
+  }
+
+  /** Said at the start of every campaign: the captains' commands, and the
+   *  extend hint when the campaign usually takes longer than the time left. */
+  private campaignStartLines(b: BookingRow, campaign: string): string[] {
+    const name = consoleText(campaignRegistry(this.db).get(campaign)?.name ?? campaign, 60);
+    const say = [`say [Booking] ${name}: !nextmap, !stay, !end and !extend are yours, captains.`];
+    const left = Math.floor((Date.parse(b.ends_at) - this.now()) / 60_000);
+    const typical = typicalCampaignMinutes(this.db, campaign);
+    if (typical > left) say.push(`say [Booking] About ${left} min left, this campaign usually takes ${typical}. !extend now while the slot after is free.`);
+    return say;
+  }
+
+  /** A best-effort burst. A failure is logged with the log secret redacted
+   *  (an rcon error names the command it was on) and never thrown. */
+  private async push(id: number, server: ServerRow, lines: () => string[], what: string): Promise<void> {
+    try {
+      await this.deps.rcon(server, lines());
+    } catch (err) {
+      console.warn(`[booking] ${id}: ${what} on ${server.name} failed:`, redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret]));
+    }
   }
 
   /** A booking game finished (finishMatch keeps the box with the booking and
