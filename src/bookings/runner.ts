@@ -19,8 +19,12 @@ import { bookingLimits, isLateCancel } from './rules.js';
 import {
   acceptedPeople, actingSides, advancePlaylist, allowInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
   markReady, markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setCloseAt, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
+  beginRecovery, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost,
   BOOKING_ERRORS, type BookingRow, type Side, type SideRow,
 } from './bookings.js';
+import { classifyBox } from './recovery.js';
+import { prepareRestore, restoreSnapshot, resumeLines } from './restore.js';
+import type { A2sFn } from '../a2s.js';
 import { abortBookingGame, bookingGames, bookingOnServer, gamesPlayed, liveBookingGame } from './games.js';
 import type { BookingVoice } from './voice.js';
 import type { BookingCmd } from '../logParse.js';
@@ -115,6 +119,9 @@ export interface BookingRunnerDeps {
   /** A booked scrim's private team voice (plan 4c). Absent, there is none.
    *  Every call is guarded (voiceStep): voice never blocks a booking. */
   voice?: BookingVoice;
+  /** A2S_INFO, asked only once rcon has failed for booking_gone_minutes
+   *  (plan 5). Absent, it is treated as never answering. */
+  a2s?: A2sFn;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }
@@ -237,6 +244,8 @@ export class BookingRunner {
    *  go-active announcement of the first campaign is then moot (a captain
    *  picked a campaign before anyone was on, and it was already announced). */
   private readonly announced = new Set<number>();
+  /** Recovery attempts so far, per booking (plan 5); SETUP_TRIES at most. */
+  private readonly recoverTries = new Map<number, number>();
 
   constructor(private readonly deps: BookingRunnerDeps) {
     this.db = deps.db;
@@ -261,6 +270,7 @@ export class BookingRunner {
   resume(): void {
     for (const b of openBookings(this.db)) {
       if (b.ending_at !== null) this.track(b.id, () => this.windDown(b.id, false));
+      else if (b.recovering_at !== null && b.server_id !== null) this.track(b.id, () => this.recover(b.id));
       else if (b.state === 'held' || b.state === 'setup') {
         // A web restart is not a failed try: start the retry count fresh.
         resetSetupAttempts(this.db, b.id);
@@ -634,15 +644,22 @@ export class BookingRunner {
     await this.voiceStep(b.id, 'ensure');
     await this.voiceStep(b.id, 'sync');
     let humans: ReturnType<typeof parseStatusPlayers>;
+    let marker: string | null = null;
+    let rconOk = true;
     try {
-      const [st] = await this.deps.rcon(server, ['status']);
+      const [st, mk] = await this.deps.rcon(server, ['status', 'l4d_booking_id']);
       humans = parseStatusPlayers(st);
+      marker = cvarValue(mk, 'l4d_booking_id');
     } catch (err) {
       // Says nothing about who is on: the empty run starts again.
+      rconOk = false;
+      humans = [];
       this.emptyWatches.delete(b.id);
       console.warn(`[booking] ${b.id}: status on ${server.name} failed:`, err instanceof Error ? err.message : err);
-      return;
     }
+    // Plan 5: a restarted or gone box is dealt with before the minute re-push.
+    if (await this.checkBox(b, server, now, rconOk, marker)) return;
+    if (!rconOk) return;
     // The booking and game lines go again each minute, in their own burst
     // (best effort; the status above stands either way): cheap, idempotent,
     // and a map change can reset cvars a cfg sets. The log secret is not
@@ -691,6 +708,166 @@ export class BookingRunner {
       } catch {
         // Best effort.
       }
+    }
+  }
+
+  // ---------- crash recovery (plan 5) ----------
+
+  /** After the watch's status: is the box still this booking's? True when
+   *  the watch must stop here (a recovery started, or the box is quiet). */
+  private async checkBox(b: BookingRow, server: ServerRow, now: Date, rconOk: boolean, marker: string | null): Promise<boolean> {
+    const nowMs = now.getTime();
+    if (rconOk) noteAlive(this.db, b.id);
+    const lostSince = rconOk ? null : noteLost(this.db, b.id, now);
+    const live = liveBookingGame(this.db, b.id);
+    const hb = live ? (this.db.prepare('SELECT last_seen FROM match_live WHERE match_id = ?').get(live.id) as { last_seen: string } | undefined) : undefined;
+    const limits = bookingLimits(this.db);
+    const goneMs = limits.goneMinutes * 60_000;
+    let a2sPlayers: number | null = null;
+    if (!rconOk && lostSince !== null && nowMs - Date.parse(lostSince) >= goneMs) {
+      try {
+        const r = await this.deps.a2s?.(server.host, server.port);
+        if (r) { a2sPlayers = r.players; noteA2s(this.db, b.id, now); }
+      } catch {
+        // Treated as no answer.
+      }
+    }
+    const v = classifyBox({
+      rconOk, marker, bookingId: b.id, nowMs,
+      lostSinceMs: lostSince !== null ? Date.parse(lostSince) : null,
+      heartbeatMs: hb ? sqlMs(hb.last_seen) : null,
+      a2sPlayers, goneMs,
+    });
+    switch (v.kind) {
+      case 'ok': return false;
+      case 'quiet': return true;
+      case 'up_no_rcon':
+        if (markUpAlerted(this.db, b.id, now)) {
+          publishAdminEvent({ kind: 'problem', text: `Booking ${b.id}: ${server.name} has not answered rcon for ${limits.goneMinutes}+ minutes but answers the server browser (${v.players} players). Nothing was moved; check the box.` });
+        }
+        return true;
+      case 'restarted':
+        if (beginRecovery(this.db, b.id, 'restart', now)) {
+          publishAdminEvent({ kind: 'problem', text: `Booking ${b.id}: ${server.name} restarted; setting it up again` });
+          this.track(b.id, () => this.recover(b.id));
+        }
+        return true;
+      case 'gone':
+        this.onGone(b, server, now);
+        return true;
+    }
+  }
+
+  /** A box gone for good. Task 8 moves the booking to another box. */
+  private onGone(b: BookingRow, server: ServerRow, _now: Date): void {
+    console.warn(`[booking] ${b.id}: ${server.name} looks gone (Task 8 moves it)`);
+  }
+
+  /** Set a restarted box up again, and put its live game back. Tracked work. */
+  private async recover(id: number): Promise<void> {
+    for (;;) {
+      const b = getBooking(this.db, id);
+      if (!b || b.recovering_at === null || b.ending_at !== null || b.server_id === null) break;
+      const server = getServer(this.db, b.server_id);
+      if (!server) break;
+      const attempt = (this.recoverTries.get(id) ?? 0) + 1;
+      this.recoverTries.set(id, attempt);
+      try {
+        await this.recoverOnce(b, server);
+        break;
+      } catch (err) {
+        // An rcon error names the command it was on: the log secret and the allowlist ids are hidden.
+        const why = hideAllowIds(redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret]));
+        console.warn(`[booking] ${id}: recovery try ${attempt} on ${server.name} failed: ${why}`);
+        if (attempt < SETUP_TRIES) continue;
+        this.recoverTries.delete(id);
+        this.giveUp(id, `it could not be set up again on ${server.name} (${why})`, 'the server went down and could not be set up again');
+        // Already tracked (this is the recovery's own work): wind down inline,
+        // with no goodbye: the box is broken.
+        await this.windDown(id, false);
+        return;
+      }
+    }
+    this.recoverTries.delete(id);
+    // An end that came in during the recovery (staff, a captain's End) is
+    // ours to finish, as in setup: settle skipped it while this was busy.
+    const after = getBooking(this.db, id);
+    if (after && after.ending_at !== null && after.ended_at === null) await this.windDown(id, true);
+  }
+
+  private async recoverOnce(b: BookingRow, server: ServerRow): Promise<void> {
+    await waitForStartup(this.deps.rcon, server, this.sleep);
+    await this.execVerified(server, b);
+    const [version, mk] = await this.deps.rcon(server, ['l4d_booking_version', 'l4d_booking_id']);
+    if (cvarValue(version, 'l4d_booking_version') === null) throw new Error('the l4d_booking plugin is not loaded on this box');
+    if (cvarValue(mk, 'l4d_booking_id') === null) throw new Error('the l4d_booking plugin on this box is older than 1.4.0 (no l4d_booking_id)');
+    // The resume goes only now, after the config exec has settled: a map start
+    // between sm_pug_resume and the changelevel below would use up the
+    // plugin's one-shot side seed.
+    const live = liveBookingGame(this.db, b.id);
+    const snap = live ? restoreSnapshot(this.db, live.id) : null;
+    const resume = snap ? resumeLines(snap) : [];
+    const lines = [...bookingLines(this.db, b), ...gameLines(this.db, b, server, this.deps.logPublicAddress), markerLine(b.id)];
+    const replies = await this.deps.rcon(server, ['sm_pug_auto_track 0', ...resume, ...lines]);
+    // The sm_pug_resume_commit reply: burst index resume.length (auto_track 0 is index 0).
+    const resumed = snap !== null && (replies[resume.length] ?? '').trim().startsWith('PUGOK resumed');
+    if (live && !resumed) {
+      // Ruling 5: the game cannot come back; the booking carries on without it.
+      const token = abortBookingGame(this.db, live.id, new Date(this.now()), 'server_lost');
+      if (token) this.forgetToken(b.id, token);
+      publishAdminEvent({
+        kind: 'problem', matchId: live.id,
+        text: `Booking ${b.id}: game #${live.id} could not be restored on ${server.name} (${snap ? 'pug-match did not take sm_pug_resume; is 0.3.19 staged?' : 'the site has no record of where it was'}). It is aborted; the booking carries on.`,
+      });
+    }
+    if (resumed) prepareRestore(this.db, snap!);
+    const fresh = getBooking(this.db, b.id)!;
+    const campaign = fresh.next_campaign ?? (JSON.parse(fresh.playlist_json) as string[])[fresh.playlist_pos];
+    const map = resumed ? snap!.map : firstMapOf(this.db, campaign);
+    if (!isMapName(map)) throw new Error(`${campaign} starts on ${JSON.stringify(map)}, which is not a valid map name`);
+    try {
+      await this.deps.rcon(server, [`changelevel ${map}`]);
+    } catch {
+      // A changelevel can drop the connection it came in on; the map check decides.
+    }
+    await this.sleep(MAP_SETTLE_MS);
+    const [st] = await this.deps.rcon(server, ['status', ...lines]);
+    if (parseStatusMap(st) !== map) throw new Error(`${map} did not load (the box is on ${parseStatusMap(st) ?? 'no map'})`);
+    if (!finishRecovery(this.db, b.id, new Date(this.now()))) return;
+    this.emptyWatches.delete(b.id);
+    this.announced.delete(b.id);
+    let restored: string | null = null;
+    let adminTail = '';
+    if (resumed) {
+      const s = snap!;
+      const [sa, sb] = sidesOf(this.db, b.id);
+      const sideA = (this.db.prepare('SELECT booking_side_a FROM matches WHERE id = ?').get(s.matchId) as { booking_side_a: Side | null } | undefined)?.booking_side_a ?? 'a';
+      const teamName = (t: 'a' | 'b') => sideName(this.db, (t === 'a') === (sideA === 'a') ? sa : sb);
+      const totA = s.maps.reduce((n, x) => n + x.a, 0);
+      const totB = s.maps.reduce((n, x) => n + x.b, 0);
+      const cname = campaignRegistry(this.db).get(s.campaign)?.name ?? s.campaign;
+      const score = `${cname} map ${s.maps.length + 1}, ${teamName('a')} ${totA} - ${teamName('b')} ${totB}`;
+      restored = `your game is back on ${score}`;
+      adminTail = ` (game #${s.matchId} back on ${s.map}, ${teamName('a')} ${totA} - ${teamName('b')} ${totB})`;
+      await this.push(b.id, server, () => [`say [Booking] ${consoleText(
+        `Restored after a server restart: ${score}. ${teamName(s.firstSurv)} survive first. Ready up when everyone is back.`, 220)}`], 'the restore line');
+    }
+    console.log(`[booking] ${b.id} restored on ${server.name}`);
+    this.tell(b.id, this.everyone(b.id), 'booking_recovered', { moved: fresh.recover_reason === 'gone', restored });
+    publishAdminEvent({ kind: 'problem', text: `Booking ${b.id}: restored on ${server.name}${adminTail}` });
+  }
+
+  /** Plan 5 rulings 3 and 5: the booking cannot go on. The caller winds down
+   *  (inline from recover, which is already tracked). */
+  private giveUp(id: number, staffWhy: string, playerWhy: string): void {
+    const live = liveBookingGame(this.db, id);
+    if (live) {
+      const token = abortBookingGame(this.db, live.id, new Date(this.now()), 'server_lost');
+      if (token) this.forgetToken(id, token);
+    }
+    publishAdminEvent({ kind: 'problem', text: `Booking ${id} is cancelled: ${staffWhy}.` });
+    if (closeBooking(this.db, id, 'cancelled', 'server_lost', new Date(this.now()))) {
+      this.tell(id, this.everyone(id), 'booking_cancelled', { reason: playerWhy });
     }
   }
 
@@ -1060,7 +1237,7 @@ export class BookingRunner {
   /** Never throws: a notice runs after a committed state change, and a
    *  failure to word or send it must not undo the caller's work (a route's
    *  answer, a release). */
-  private tell(id: number, steamids: Iterable<string>, type: BookingNotifyType, extra: { minutes?: number; reason?: string | null; addedBy?: string; lateCancel?: boolean } = {}): void {
+  private tell(id: number, steamids: Iterable<string>, type: BookingNotifyType, extra: { minutes?: number; reason?: string | null; addedBy?: string; lateCancel?: boolean; moved?: boolean; restored?: string | null } = {}): void {
     try {
       const payload = bookingMessage(this.db, this.deps.publicUrl, id, type, extra);
       if (payload) this.deps.notifier.send(steamids, type, payload);
