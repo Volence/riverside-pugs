@@ -287,6 +287,12 @@ export class AdminFeedPoster {
     }
   }
 
+  /** A team's current name, by id (admin_actions.target), for feed lines. */
+  private teamName(id: string): string {
+    const row = this.deps.db.prepare('SELECT name FROM teams WHERE id = ?').get(Number(id)) as { name: string } | undefined;
+    return row?.name ?? `team ${id}`;
+  }
+
   private actionText(e: Extract<AdminEvent, { kind: 'admin_action' }>): string {
     const who = this.name(e.adminId);
     const target = this.name(e.target);
@@ -330,6 +336,22 @@ export class AdminFeedPoster {
         const where = d.kind === 'drill' ? 'a drill server' : d.kind === 'hunter' ? 'a Hunter Training server' : 'the Practice Park';
         const why = d.reason && d.reason !== 'Removed by an admin' ? `: ${escapeName(String(d.reason))}` : '';
         return `${who} kicked ${escapeName(String(d.name ?? target))} from ${where} on ${escapeName(String(d.server ?? ''))}${why}`;
+      }
+      case 'team_captain': case 'team_rename': case 'team_logo': case 'team_disband': {
+        // target is the team id; detail.slug links the page, which outlives a disband.
+        const page = `${this.deps.publicUrl}/team/${encodeURIComponent(String(d.slug ?? ''))}`;
+        const named = (name: unknown, tag?: unknown) =>
+          `**${tag !== undefined ? `[${escapeName(String(tag))}] ` : ''}${escapeName(String(name ?? ''))}**`;
+        switch (e.action) {
+          case 'team_captain': return `${who} made ${this.name(String(d.to ?? ''))} captain of [${named(this.teamName(e.target))}](${page})`;
+          case 'team_rename': {
+            const from = (d.from ?? {}) as { name?: unknown; tag?: unknown };
+            const to = (d.to ?? {}) as { name?: unknown; tag?: unknown };
+            return `${who} renamed ${named(from.name, from.tag)} to [${named(to.name, to.tag)}](${page})`;
+          }
+          case 'team_logo': return `${who} changed the logo of [${named(this.teamName(e.target))}](${page})`;
+          default: return `${who} disbanded [${named(d.name ?? this.teamName(e.target))}](${page})`;
+        }
       }
       case 'setting': return 'from' in d
         ? `${who} changed the ${e.target} setting from \`${String(d.from)}\` to \`${String(d.to)}\``
