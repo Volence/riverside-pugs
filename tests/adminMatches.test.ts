@@ -158,6 +158,13 @@ describe('admin matches', () => {
     expect((db.prepare('SELECT status FROM servers WHERE id = ?').get(serverId) as { status: string }).status).toBe('idle');
   });
 
+  it('Set idle on a box that went down under a booking puts it back: idle, gone_since cleared', async () => {
+    const serverId = addServer(db, { name: 's1', host: '1.2.3.4', port: 27015, rconPort: 27015, rconPassword: 'x', status: 'offline' });
+    db.prepare("UPDATE servers SET gone_since = '2026-10-02T20:00:00.000Z' WHERE id = ?").run(serverId);
+    expect((await post(`/api/admin/servers/${serverId}/idle`)).statusCode).toBe(200);
+    expect(db.prepare('SELECT status, gone_since FROM servers WHERE id = ?').get(serverId)).toEqual({ status: 'idle', gone_since: null });
+  });
+
   it('enable and disable a server, which the overview reports', async () => {
     const serverId = addServer(db, { name: 's1', host: '1.2.3.4', port: 27015, rconPort: 27015, rconPassword: 'x' });
     const flagOf = async () => {
