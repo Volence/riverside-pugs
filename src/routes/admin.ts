@@ -524,12 +524,27 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (holdFor(db, id)?.kind === 'booking') return reply.code(409).send({ error: 'held by a booking; end the booking instead' });
     // Staff Set idle is the explicit override for a box that went down under
     // a booking (plan 5 ruling 4: the gone alert sends staff here), so it
-    // passes the gone give-back the releaser otherwise refuses. With no
-    // restart asked the release is synchronous, so the row says at once
-    // whether it took; a refused release never answers ok.
-    releaser.release(id, { gone: true });
+    // passes the gone give-back the releaser otherwise refuses, with the same
+    // forced restart the booking runner's give-back uses: a box cut off
+    // rather than crashed still has the booking's password, notice and
+    // allowlist cvars, which l4d_booking re-applies on every map. gone_since
+    // clears once the restart has settled with the box back in the pool; a
+    // restart that never comes back leaves it offline and gone.
+    const gone = (db.prepare('SELECT gone_since FROM servers WHERE id = ?').get(id) as { gone_since: string | null }).gone_since !== null;
+    if (gone) {
+      if (releaser.isRestarting(id)) return reply.code(409).send({ error: 'already restarting; it goes idle once it answers' });
+      releaser.release(id, { restart: true, forceRestart: true, gone: true }, (back) => {
+        if (back) db.prepare('UPDATE servers SET gone_since = NULL WHERE id = ?').run(id);
+        broadcast('refresh');
+      });
+      logAdmin(db, adminId, 'server_idle', id, { gone: true });
+      broadcast('refresh');
+      return reply.code(202).send({ ok: true, restarting: true });
+    }
+    // Any other box: with no restart asked the release is synchronous, so the
+    // row says at once whether it took; a refused release never answers ok.
+    releaser.release(id);
     if (getServer(db, id)?.status !== 'idle') return reply.code(409).send({ error: 'the release was refused; see the server log' });
-    db.prepare('UPDATE servers SET gone_since = NULL WHERE id = ?').run(id);
     logAdmin(db, adminId, 'server_idle', id);
     broadcast('refresh');
     return { ok: true };
