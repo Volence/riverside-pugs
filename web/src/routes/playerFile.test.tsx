@@ -733,4 +733,38 @@ describe('clearing one penalty', () => {
     await screen.findByRole('heading', { name: /griefer/ });
     expect(screen.queryByRole('heading', { name: 'Scrims' })).toBeNull();
   });
+
+  it('adds review summaries and a red Toxic tags flag under Scrims (plan 2 Ruling 6)', async () => {
+    mockPeople.file.mockResolvedValue(file({
+      sections: {
+        ...file().sections,
+        scrims: {
+          pickup: { shown: 1, booked: 2, noShows: 1, lateCancels: 0, excused: 0 },
+          teams: [{ teamId: 3, slug: 'rats', name: 'Rats', tag: 'RR', record: { shown: 4, booked: 6, noShows: 1, lateCancels: 1, excused: 1 } }],
+        },
+        scrimReviews: {
+          pickup: { summary: { count: 1, positivePct: null, topTag: null }, toxic: false },
+          teams: [{ teamId: 3, slug: 'rats', name: 'Rats', tag: 'RR', summary: { count: 3, positivePct: 67, topTag: 'on_time' }, toxic: true }],
+        },
+      },
+    }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    const heading = await screen.findByRole('heading', { name: 'Scrims' });
+    const section = heading.closest('section') as HTMLElement;
+    expect(within(section).getByText('Not enough reviews yet')).toBeTruthy();
+    expect(within(section).getByText('67% positive, top tag: On time')).toBeTruthy();
+    expect(within(section).getByText(/Toxic tags/)).toBeTruthy();
+  });
+
+  it('has no review summaries or Toxic tags flag when the server sends no scrimReviews', async () => {
+    mockPeople.file.mockResolvedValue(file({
+      sections: {
+        ...file().sections,
+        scrims: { pickup: { shown: 1, booked: 2, noShows: 1, lateCancels: 0, excused: 0 }, teams: [] },
+      },
+    }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    await screen.findByRole('heading', { name: 'Scrims' });
+    expect(screen.queryByText('Toxic tags')).toBeNull();
+  });
 });

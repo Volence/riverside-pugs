@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { adminApi, bookingsApi, scrimsApi, teamsApi, type BookingOptions, type BookingRole, type BookingSide, type BookingView } from '../api';
+import { adminApi, bookingsApi, scrimsApi, teamsApi, type BookingOptions, type BookingRole, type BookingSide, type BookingView, type ReviewTag } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
@@ -8,6 +8,7 @@ import { localLabel } from '../bookingTime';
 import { campaignName } from '../format';
 import { confirm } from '../components/Confirm';
 import { RecordLine } from '../components/ScrimRecord';
+import { REVIEW_TAGS, REVIEW_TAG_LABELS } from '../components/ReviewSummary';
 
 const STATE_LINE: Record<BookingView['state'], string> = {
   scheduled: 'Booked. The server is taken and set up 15 minutes before the start.',
@@ -103,6 +104,68 @@ function Casters({ v, mySide, open, busy, act }: {
           </select>
           <button class="btn" disabled={busy || !pick} onClick={() => { act(() => bookingsApi.inviteCaster(v.id, pick)); setPick(''); }}>Invite</button>
         </p>
+      )}
+    </Panel>
+  );
+}
+
+/** The viewer's own private review of the other side (plan 2 Ruling 5): a
+ *  thumbs up or down plus tags, pre-filled from `mine`, editable until the
+ *  7 day window closes. Only this side's own review is ever in this card. */
+function ReviewCard({ v, mySide, busy, act }: {
+  v: BookingView; mySide: BookingSide; busy: boolean; act: (fn: () => Promise<BookingView>) => void;
+}) {
+  const other = v.sides.find((s) => s.side !== mySide)!;
+  const mine = v.review?.mine ?? null;
+  const [thumbs, setThumbs] = useState<1 | -1 | null>(mine?.thumbs ?? null);
+  const [tags, setTags] = useState<ReviewTag[]>(mine?.tags ?? []);
+  const [saved, setSaved] = useState(false);
+  const pick = (t: 1 | -1) => { setSaved(false); setThumbs(t); };
+  const toggleTag = (t: ReviewTag) => { setSaved(false); setTags((ts) => (ts.includes(t) ? ts.filter((x) => x !== t) : [...ts, t])); };
+  const save = () => {
+    if (thumbs === null) return;
+    act(async () => { const r = await bookingsApi.review(v.id, thumbs, tags); setSaved(true); return r; });
+  };
+  return (
+    <Panel>
+      <h3>Review {other.name}</h3>
+      <p class="bookingreview">
+        <button type="button" class={`chip${thumbs === 1 ? ' is-on' : ''}`} aria-pressed={thumbs === 1} disabled={busy} onClick={() => pick(1)}>Thumbs up</button>
+        <button type="button" class={`chip${thumbs === -1 ? ' is-on' : ''}`} aria-pressed={thumbs === -1} disabled={busy} onClick={() => pick(-1)}>Thumbs down</button>
+      </p>
+      <p class="bookingreview">
+        {REVIEW_TAGS.map((t) => (
+          <button key={t} type="button" class={`chip${tags.includes(t) ? ' is-on' : ''}`} aria-pressed={tags.includes(t)} disabled={busy} onClick={() => toggleTag(t)}>
+            {REVIEW_TAG_LABELS[t]}
+          </button>
+        ))}
+      </p>
+      <p class="bookingreview">
+        <button class="btn" disabled={busy || thumbs === null} onClick={save}>Save</button>
+        {saved && <span class="muted">Saved. Only staff see single reviews.</span>}
+      </p>
+    </Panel>
+  );
+}
+
+/** Both sides' single reviews, staff only (plan 2 Ruling 5). Shown whenever
+ *  the server sends `reviews` at all, even empty, since only a staff viewer
+ *  ever gets the key. */
+function StaffReviews({ v }: { v: BookingView }) {
+  return (
+    <Panel>
+      <h3>Reviews (staff only)</h3>
+      {v.reviews!.length === 0 ? <p class="muted">No reviews yet.</p> : (
+        <ul class="bookingreviews">
+          {v.reviews!.map((r) => (
+            <li key={r.side}>
+              <span>{v.sides.find((s) => s.side === r.side)?.name ?? r.side}</span>
+              <span>{r.thumbs === 1 ? 'Thumbs up' : 'Thumbs down'}</span>
+              {r.tags.length > 0 && <span class="muted">{r.tags.map((t) => REVIEW_TAG_LABELS[t]).join(', ')}</span>}
+              <span class="muted">by {r.reviewerName}</span>
+            </li>
+          ))}
+        </ul>
       )}
     </Panel>
   );
@@ -306,6 +369,8 @@ export function Booking({ id, session }: { id: string; session: Session }) {
         </Panel>
       )}
       {actingSide && <Casters v={v} mySide={actingSide} open={open} busy={busy} act={act} />}
+      {actingSide && v.review?.open && <ReviewCard v={v} mySide={actingSide} busy={busy} act={act} />}
+      {v.reviews && <StaffReviews v={v} />}
       {canPlayGames && (
         <Panel>
           <h3>Next campaign</h3>

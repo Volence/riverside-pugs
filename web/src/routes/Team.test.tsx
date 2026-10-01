@@ -214,4 +214,31 @@ describe('Team', () => {
     expect(mockTeams.scrims).not.toHaveBeenCalled();
     expect(screen.queryByText('Scrims')).toBeNull();
   });
+
+  it('shows the opponents\' review aggregate in the Scrims panel for a member (plan 2 Ruling 5)', async () => {
+    mockTeams.get.mockResolvedValue(view({
+      viewer: { role: 'member', staff: false },
+      reviews: { count: 3, positivePct: 92, topTag: 'on_time' },
+    }));
+    render(<Team slug="rats" session={session('2')} />);
+    const line = await screen.findByText("Opponents' reviews: 92% positive, top tag: On time");
+    expect(line.closest('section')?.textContent).toContain('Scrims');
+  });
+
+  it('reads "Not enough reviews yet" under 3 reviews', async () => {
+    mockTeams.get.mockResolvedValue(view({
+      viewer: { role: 'member', staff: false },
+      reviews: { count: 1, positivePct: null, topTag: null },
+    }));
+    render(<Team slug="rats" session={session('2')} />);
+    expect(await screen.findByText('Not enough reviews yet')).toBeTruthy();
+  });
+
+  it('shows no review aggregate line when the server sends none', async () => {
+    mockTeams.get.mockResolvedValue(view({ viewer: { role: 'member', staff: false } }));
+    render(<Team slug="rats" session={session('2')} />);
+    await screen.findByText('Riverside Rats');
+    expect(screen.queryByText(/Opponents' reviews/)).toBeNull();
+    expect(screen.queryByText('Not enough reviews yet')).toBeNull();
+  });
 });

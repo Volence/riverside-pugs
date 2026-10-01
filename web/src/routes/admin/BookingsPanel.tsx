@@ -34,7 +34,11 @@ export function BookingsPanel({ nudge }: { nudge: number }) {
               const running = open && (b.state === 'ready' || b.state === 'active');
               return (
                 <tr key={b.id}>
-                  <td><a href={`/booking/${b.id}`}>{b.aName} vs {b.bName}</a></td>
+                  <td>
+                    <a href={`/booking/${b.id}`}>{b.aName} vs {b.bName}</a>
+                    {b.toxic.a && <span class="teamchip teamchip--toxic" title={`${b.aName}: repeated toxic tags`}>Toxic tags</span>}
+                    {b.toxic.b && <span class="teamchip teamchip--toxic" title={`${b.bName}: repeated toxic tags`}>Toxic tags</span>}
+                  </td>
                   <td>{localLabel(b.startsAt)} to {localLabel(b.endsAt)}</td>
                   <td>{STATE_LABEL[b.state]}{b.endReason ? ` (${b.endReason})` : ''}</td>
                   <td>{b.server ?? ''}</td>
