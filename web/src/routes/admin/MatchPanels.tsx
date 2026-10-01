@@ -160,16 +160,33 @@ export const ticked = (choices: LeaveOutChoice[]): string[] => choices.filter((c
 /** Abort a match, asked the same way from the live card and the Open matches
  *  table. The leave-out boxes are Cancel pop's: eight back at the front of
  *  the queue re-pop at once, so the player staff are about to ban would be
- *  in the next lobby before the ban exists. */
-export function abortMatchAsked(run: Run, matchId: number, roster: { steamid: string; name: string }[]): void {
+ *  in the next lobby before the ban exists.
+ *
+ *  A game inside a booked block (`bookingId` not null) is different: its box
+ *  stays with the booking rather than going back to the PUG pool, so there is
+ *  nobody to put at the front of a queue and no leave-out boxes to offer.
+ *  `onMessage`, when given, is handed the abort route's own `message` once it
+ *  answers; a booking game's route says in its own words that the booking
+ *  carries on, and that is what the caller should show, not a canned line
+ *  written here ahead of time. */
+export function abortMatchAsked(
+  run: Run, matchId: number, roster: { steamid: string; name: string }[],
+  bookingId?: number | null, onMessage?: (message: string) => void,
+): void {
+  const booking = bookingId != null;
   const leaveOut = leaveOutChoices(roster);
-  void run(() => adminApi.abortMatch(matchId, ticked(leaveOut)), {
+  void run(() => adminApi.abortMatch(matchId, booking ? [] : ticked(leaveOut)).then((r) => {
+    if (r.message) onMessage?.(r.message);
+  }), {
     title: `Abort match #${matchId}?`,
-    body: 'The server is freed and nothing is rated. The roster and how far it got stay on the match page. '
-      + 'Everyone on it is told why, and those who may queue go back to the front of the queue, except anyone ticked below.',
+    body: booking
+      ? 'The game is dropped; the booking keeps its server and carries on. Nothing is rated. '
+        + 'The roster and how far it got stay on the match page. Everyone on it is told why.'
+      : 'The server is freed and nothing is rated. The roster and how far it got stay on the match page. '
+        + 'Everyone on it is told why, and those who may queue go back to the front of the queue, except anyone ticked below.',
     confirmLabel: 'Abort match',
     danger: true,
-    choices: leaveOut,
+    choices: booking ? undefined : leaveOut,
   });
 }
 
@@ -182,9 +199,14 @@ export function abortMatchAsked(run: Run, matchId: number, roster: { steamid: st
  * dialog (abortMatchAsked).
  */
 export function OpenMatchesPanel({ open, busy, run }: { open: AdminOverview['open']; busy: boolean; run: Run }) {
+  // The route's own message after an abort, read out once it answers: a
+  // booking game's route says in its own words that the booking carries on.
+  // An ordinary match's route sends none, so this stays empty for it.
+  const [notice, setNotice] = useState<string | null>(null);
   return (
     <Panel class="panel--table">
       <h3>Open matches</h3>
+      {notice && <p class="muted">{notice}</p>}
       {open.length === 0 ? <Empty>No match is configuring or live.</Empty> : (
         <div class="table-wrap">
           <table class="admin-table">
@@ -205,7 +227,10 @@ export function OpenMatchesPanel({ open, busy, run }: { open: AdminOverview['ope
                     : <span class="muted">no server yet</span>}</td>
                   <td>{fmtTime(m.wentLiveAt) || <span class="muted">not yet</span>}</td>
                   <td><button class="chip" disabled={busy}
-                    onClick={() => abortMatchAsked(run, m.id, m.roster ?? [])}>Abort</button></td>
+                    onClick={() => {
+                      setNotice(null);
+                      abortMatchAsked(run, m.id, m.roster ?? [], m.bookingId, setNotice);
+                    }}>Abort</button></td>
                 </tr>
               ))}
             </tbody>
