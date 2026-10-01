@@ -39,6 +39,7 @@ function isCurrent(href: string, path: string): boolean {
   if (href === '/hud') return hudTabFor(path) !== null;
   if (href === '/balance') return path === href || path.startsWith('/balance/');
   if (href === '/teams') return path === '/teams' || path.startsWith('/team/');
+  if (href === '/bookings') return path === '/bookings' || path.startsWith('/booking/');
   return path === href;
 }
 
@@ -66,8 +67,10 @@ export function Nav(
   };
   const me = session.kind === 'active' || session.kind === 'pending' ? session.me : null;
   const live = state?.match && state.match.state === 'live' ? state.match : null;
-  // Teams only for viewers the competitive switch lets in (/api/me teams).
-  const links = me?.teams ? [...NAV_LINKS.slice(0, 5), ['/teams', 'Teams'] as const, ...NAV_LINKS.slice(5)] : NAV_LINKS;
+  // Teams and Bookings only for viewers the competitive switch lets in (/api/me teams).
+  const links = me?.teams
+    ? [...NAV_LINKS.slice(0, 5), ['/teams', 'Teams'] as const, ['/bookings', 'Bookings'] as const, ...NAV_LINKS.slice(5)]
+    : NAV_LINKS;
 
   return (
     <header class="nav">

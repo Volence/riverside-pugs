@@ -36,6 +36,9 @@ const CommunityEntry = lazy(() => import('./routes/CommunityEntry'));
 const Teams = lazy(() => import('./routes/Teams'));
 const TeamJoin = lazy(() => import('./routes/TeamJoin'));
 const Team = lazy(() => import('./routes/Team'));
+// Bookings: behind the same competitive switch as Teams.
+const Bookings = lazy(() => import('./routes/Bookings'));
+const Booking = lazy(() => import('./routes/Booking'));
 
 /** The 404.
  *
@@ -115,6 +118,8 @@ export function AppRoutes(
       <Route path="/teams" component={Teams} session={session} />
       <Route path="/team/join/:token" component={TeamJoin} session={session} />
       <Route path="/team/:slug" component={Team} session={session} refresh={refresh} />
+      <Route path="/bookings" component={Bookings} session={session} />
+      <Route path="/booking/:id" component={Booking} session={session} />
       <Route default component={NotFound} />
     </Router>
   );

@@ -1,0 +1,60 @@
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
+
+const { mockBookings } = vi.hoisted(() => ({
+  mockBookings: { options: vi.fn(), mine: vi.fn(), act: vi.fn(), setPref: vi.fn(), create: vi.fn() },
+}));
+vi.mock('../api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api')>();
+  return { ...actual, bookingsApi: mockBookings };
+});
+const { Bookings } = await import('./Bookings');
+
+const OPTIONS = {
+  campaigns: [{ slug: 'no_mercy', name: 'No Mercy', minutes: 70 }, { slug: 'death_toll', name: 'Death Toll', minutes: 60 }],
+  rulesets: [{ id: 3, name: 'Casual Scrim' }], gameConfigs: [{ key: 'standard', label: 'Standard' }],
+  limits: { minMinutes: 60, maxMinutes: 180, daysAhead: 14, playlistMax: 4, stepMinutes: 30, extendMinutes: 30 },
+  myTeams: [], teams: [{ id: 1, slug: 'mice', name: 'Mice', tag: 'MM' }],
+};
+const MINE = {
+  open: [{ id: 7, state: 'scheduled', ending: false, startsAt: '2026-10-02T20:00:00.000Z', endsAt: '2026-10-02T22:00:00.000Z', aName: "p0's group", bName: 'Mice', mySide: 'b', needs: 'confirm' }],
+  recent: [], prefs: [{ type: 'booking_ready', label: 'My booked server is ready', enabled: true }],
+};
+const session = { kind: 'active', me: { steamid: '76561199000000300', name: 'me', avatar: null, status: 'active', isAdmin: false, teams: true } } as never;
+
+afterEach(() => { cleanup(); for (const f of Object.values(mockBookings)) f.mockReset(); });
+beforeEach(() => {
+  mockBookings.options.mockResolvedValue(OPTIONS);
+  mockBookings.mine.mockResolvedValue(MINE);
+  mockBookings.act.mockResolvedValue({});
+  mockBookings.setPref.mockResolvedValue({ prefs: MINE.prefs });
+});
+
+describe('Bookings page', () => {
+  it('shows what needs me with a Confirm button', async () => {
+    render(<Bookings session={session} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(mockBookings.act).toHaveBeenCalledWith(7, 'confirm'));
+  });
+
+  it('the form warns when the playlist will not fit the length', async () => {
+    render(<Bookings session={session} />);
+    fireEvent.change(await screen.findByLabelText('Length'), { target: { value: '60' } });
+    fireEvent.click(screen.getByLabelText('No Mercy'));
+    fireEvent.click(screen.getByLabelText('Death Toll'));
+    expect(screen.getByText(/usually take about 130 minutes/)).toBeTruthy();
+  });
+
+  it('the notification toggle posts the change', async () => {
+    render(<Bookings session={session} />);
+    fireEvent.click(await screen.findByLabelText('My booked server is ready'));
+    await waitFor(() => expect(mockBookings.setPref).toHaveBeenCalledWith('booking_ready', false));
+  });
+
+  it('a closed switch says so', async () => {
+    const { ApiError } = await import('../api');
+    mockBookings.mine.mockRejectedValue(new ApiError(404, 'not found'));
+    render(<Bookings session={session} />);
+    expect(await screen.findByText('Booked servers are not open yet.')).toBeTruthy();
+  });
+});

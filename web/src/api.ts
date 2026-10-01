@@ -1681,6 +1681,61 @@ export const teamsApi = {
   logo: (slug: string, png: string) => post<{ logoKey: string }>(`/api/teams/${enc(slug)}/logo`, { png }),
 };
 
+// ---------- bookings ----------
+
+export type BookingState = 'scheduled' | 'held' | 'setup' | 'ready' | 'active' | 'ended' | 'cancelled' | 'no_show';
+export type BookingSide = 'a' | 'b';
+export type BookingRole = 'player' | 'ringer' | 'spectator';
+export interface BookingOptions {
+  campaigns: { slug: string; name: string; minutes: number }[];
+  rulesets: { id: number; name: string }[];
+  gameConfigs: { key: string; label: string }[];
+  limits: { minMinutes: number; maxMinutes: number; daysAhead: number; playlistMax: number; stepMinutes: number; extendMinutes: number };
+  myTeams: { id: number; slug: string; name: string; tag: string }[];
+  teams: { id: number; slug: string; name: string; tag: string }[];
+}
+export interface BookingSummary {
+  id: number; state: BookingState; ending: boolean; startsAt: string; endsAt: string; aName: string; bName: string;
+  mySide: BookingSide | null; needs: 'confirm' | 'accept' | null;
+}
+export interface NotifyPref { type: string; label: string; enabled: boolean }
+export interface BookingPerson { steamid: string; name: string; avatar: string | null; role: BookingRole; status: 'invited' | 'accepted' }
+export interface BookingSideView {
+  side: BookingSide; name: string; team: { id: number; slug: string; name: string; tag: string; logoKey: string | null } | null;
+  captain: { steamid: string; name: string }; confirmed: boolean; peakPresent: number; noShow: boolean; people: BookingPerson[];
+}
+export interface BookingView {
+  id: number; purpose: 'scrim' | 'tournament'; state: BookingState; ending: boolean; startsAt: string; endsAt: string;
+  extendedMinutes: number; extendMinutes: number; createdAt: string; playlist: { slug: string; name: string }[];
+  rules: { noShowGraceMinutes: number } | null; gameConfig: { key: string; label: string };
+  sides: BookingSideView[]; server: { name: string } | null; connect: { host: string; port: number; password: string } | null;
+  cancel: { side: BookingSide | null; reason: string | null } | null; endReason: string | null; noShowFrom: string;
+  viewer: { side: BookingSide | null; manages: BookingSide[]; staff: boolean; invited: boolean };
+}
+export interface NewBooking {
+  teamId: number | null; opponent: { teamId: number } | { steamid: string }; startsAt: string; minutes: number;
+  playlist: string[]; rulesetId?: number; gameConfig?: string;
+}
+
+export const bookingsApi = {
+  options: (signal?: AbortSignal) => get<BookingOptions>('/api/bookings/options', signal),
+  mine: (signal?: AbortSignal) => get<{ open: BookingSummary[]; recent: BookingSummary[]; prefs: NotifyPref[] }>('/api/bookings/mine', signal),
+  get: (id: number | string, signal?: AbortSignal) => get<BookingView>(`/api/bookings/${enc(String(id))}`, signal),
+  create: (b: NewBooking) => post<{ id: number }>('/api/bookings', b),
+  act: (id: number, action: 'confirm' | 'decline' | 'accept' | 'leave' | 'extend' | 'no-show' | 'end') =>
+    post<BookingView>(`/api/bookings/${id}/${action}`),
+  cancel: (id: number, reason: string) => post<BookingView>(`/api/bookings/${id}/cancel`, { reason }),
+  addPerson: (id: number, side: BookingSide, steamid: string, role: BookingRole) =>
+    post<BookingView>(`/api/bookings/${id}/people`, { side, steamid, role }),
+  removePerson: (id: number, steamid: string) => post<BookingView>(`/api/bookings/${id}/people/${enc(steamid)}/remove`),
+  setPref: (type: string, enabled: boolean) => post<{ prefs: NotifyPref[] }>('/api/bookings/prefs', { type, enabled }),
+};
+
+export interface AdminBookingRow {
+  id: number; state: BookingState; ending: boolean; startsAt: string; endsAt: string; aName: string; bName: string;
+  server: string | null; peak: { a: number; b: number }; endReason: string | null;
+}
+
 export const adminApi = {
   ban: (steamid: string, reason: string, minutes: number | null) =>
     post(`/api/admin/players/${steamid}/ban`, { reason, minutes }),
@@ -1733,6 +1788,10 @@ export const adminApi = {
   serverLogAuth: (id: number, mode: LogAuthMode) => post(`/api/admin/servers/${id}/log-auth`, { mode }),
   dlc4Check: () => post<{ results: { id: number; name: string; hasDlc4: boolean }[] }>('/api/admin/servers/dlc4-check'),
   syncServerAdmins: () => post<{ results: { serverId: number; server: string; ok: boolean; error?: string }[] }>('/api/admin/servers/admins-sync'),
+  bookings: (signal?: AbortSignal) => get<{ bookings: AdminBookingRow[] }>('/api/admin/bookings', signal),
+  cancelBooking: (id: number, reason: string) => post(`/api/admin/bookings/${id}/cancel`, { reason }),
+  extendBooking: (id: number) => post(`/api/admin/bookings/${id}/extend`),
+  endBooking: (id: number) => post(`/api/admin/bookings/${id}/end`),
   audit: (signal?: AbortSignal) => get<{ actions: AuditEntry[] }>('/api/admin/audit', signal),
   renameSeason: (id: number, name: string) => post(`/api/admin/seasons/${id}/rename`, { name }),
   newSeason: (name: string) => post<{ ok: true; id: number }>('/api/admin/seasons/new', { name }),
