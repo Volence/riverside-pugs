@@ -6,15 +6,21 @@ import { join } from 'node:path';
 import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
+import { CommunityStore } from '../src/community/store.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import * as E from '../src/events/events.js';
 import { must } from './eventFixture.js';
+import { png } from './pngFixture.js';
 
 /**
  * Every event route, for every competitive_enabled value and every kind of
  * viewer, in one table. Public routes follow the switch exactly as the team
  * pages do; a draft is staff only and otherwise an ordinary 404; the admin
- * desk ignores the switch, lets staff read and only admins write.
+ * desk ignores the switch, lets staff read and only admins write. The banner
+ * route (GET /api/events/banners/:key) is one of those public routes, so it
+ * is checked against the same PUBLIC/DRAFT tables as the list and the page,
+ * with real bytes in the store behind each key (a 404 from missing bytes
+ * would otherwise hide a gating bug).
  */
 
 const ADMIN = '76561199000000730';
@@ -46,11 +52,14 @@ let app: FastifyInstance;
 let cookies: Record<string, Record<string, string>>;
 let published: E.EventRow;
 let draft: E.EventRow;
+let publishedBannerKey: string;
+let draftBannerKey: string;
 
 beforeEach(async () => {
   db = openDb(':memory:');
+  const communityDir = mkdtempSync(join(tmpdir(), 'eventgating-'));
   app = await buildServer({
-    config: { ...loadConfig({}), communityDir: mkdtempSync(join(tmpdir(), 'eventgating-')) },
+    config: { ...loadConfig({}), communityDir },
     db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {},
   });
   cookies = {};
@@ -63,6 +72,14 @@ beforeEach(async () => {
   must(E.addStage(db, { eventId: published.id, by: ADMIN, stage: { type: 'single_elim', rulesetId: cup } }));
   must(E.publishEvent(db, { eventId: published.id, by: ADMIN }));
   draft = must(E.createEvent(db, { by: ADMIN, fields: { name: 'Secret Cup', startsAt, entryKind: 'team' } }));
+  // Real bytes behind each key, in the same directory the server's own store
+  // reads from, and distinct keys (content addressed) so the published
+  // event's banner cannot stand in for the draft's.
+  const store = new CommunityStore({ dir: communityDir, maxBytes: () => 1e9, freeBytes: async () => 1e12 });
+  publishedBannerKey = store.putBanner(png(1600, 400)).name;
+  draftBannerKey = store.putBanner(png(1600, 401)).name;
+  must(E.setEventBanner(db, { eventId: published.id, by: ADMIN, bannerKey: publishedBannerKey }));
+  must(E.setEventBanner(db, { eventId: draft.id, by: ADMIN, bannerKey: draftBannerKey }));
 });
 afterEach(async () => { await app.close(); });
 
@@ -80,6 +97,8 @@ describe('event route gating', () => {
         expect((await call('GET', '/api/events', who)).statusCode, 'list').toBe(PUBLIC[sw][who]);
         expect((await call('GET', `/api/events/${published.slug}`, who)).statusCode, 'page').toBe(PUBLIC[sw][who]);
         expect((await call('GET', `/api/events/${draft.slug}`, who)).statusCode, 'draft page').toBe(DRAFT[sw][who]);
+        expect((await call('GET', `/api/events/banners/${publishedBannerKey}`, who)).statusCode, 'banner').toBe(PUBLIC[sw][who]);
+        expect((await call('GET', `/api/events/banners/${draftBannerKey}`, who)).statusCode, 'draft banner').toBe(DRAFT[sw][who]);
         for (const url of ['/api/admin/events', '/api/admin/events/options', `/api/admin/events/${draft.id}`]) {
           expect((await call('GET', url, who)).statusCode, url).toBe(DESK_READ[who]);
         }
