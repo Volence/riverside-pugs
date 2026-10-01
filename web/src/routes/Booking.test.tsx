@@ -5,7 +5,7 @@ import { LocationProvider } from 'preact-iso';
 const { mockBookings, mockAdmin, mockScrims, mockConfirm } = vi.hoisted(() => ({
   mockBookings: {
     get: vi.fn(), act: vi.fn(), cancel: vi.fn(), options: vi.fn(), next: vi.fn(), stay: vi.fn(),
-    casters: vi.fn(), inviteCaster: vi.fn(), withdrawCaster: vi.fn(), excuse: vi.fn(),
+    casters: vi.fn(), inviteCaster: vi.fn(), withdrawCaster: vi.fn(), excuse: vi.fn(), review: vi.fn(),
   },
   mockAdmin: { cancelBooking: vi.fn(), extendBooking: vi.fn(), endBooking: vi.fn(), excuseBooking: vi.fn() },
   mockScrims: { repost: vi.fn() },
@@ -351,6 +351,63 @@ describe('Booking page', () => {
       renderAt('/booking/7?cancel=1');
       await screen.findByText(/Booked\./);
       expect(mockConfirm).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('private reviews (plan 2 Ruling 5, Task 5)', () => {
+    it('has no review card when review is missing', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ state: 'ended', connect: null }));
+      render(<Booking id="7" session={session} />);
+      await screen.findByText('Over.');
+      expect(screen.queryByText(/^Review /)).toBeNull();
+    });
+
+    it('shows the review card when open, pre-filled from mine, and posts thumbs and tags', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({
+        state: 'ended', connect: null, review: { open: true, mine: { thumbs: 1, tags: ['on_time'] } },
+      }));
+      mockBookings.review.mockResolvedValue(VIEW({
+        state: 'ended', connect: null, review: { open: true, mine: { thumbs: 1, tags: ['on_time', 'good_comms'] } },
+      }));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByText('Review Mice')).toBeTruthy();
+      const up = screen.getByRole('button', { name: 'Thumbs up' });
+      expect(up.getAttribute('aria-pressed')).toBe('true');
+      const onTime = screen.getByRole('button', { name: 'On time' });
+      expect(onTime.getAttribute('aria-pressed')).toBe('true');
+      fireEvent.click(screen.getByRole('button', { name: 'Good comms' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(mockBookings.review).toHaveBeenCalledWith(7, 1, ['on_time', 'good_comms']));
+      expect(await screen.findByText('Saved. Only staff see single reviews.')).toBeTruthy();
+    });
+
+    it('no review card once the window has closed', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({
+        state: 'ended', connect: null, review: { open: false, mine: { thumbs: 1, tags: [] } },
+      }));
+      render(<Booking id="7" session={session} />);
+      await screen.findByText('Over.');
+      expect(screen.queryByText(/^Review /)).toBeNull();
+    });
+
+    it('the staff block shows only when reviews is present, listing both sides', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({
+        state: 'ended', connect: null, viewer: { side: null, manages: [], staff: true, invited: false },
+        reviews: [
+          { side: 'a', reviewer: 'x1', reviewerName: 'p1', thumbs: 1, tags: ['on_time'], createdAt: '2026-10-02T22:00:00.000Z', updatedAt: '2026-10-02T22:00:00.000Z' },
+        ],
+      }));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByText('Reviews (staff only)')).toBeTruthy();
+      expect(screen.getByText('by p1')).toBeTruthy();
+      expect(screen.getByText('On time')).toBeTruthy();
+    });
+
+    it('no staff block when reviews is absent', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ state: 'ended', connect: null }));
+      render(<Booking id="7" session={session} />);
+      await screen.findByText('Over.');
+      expect(screen.queryByText('Reviews (staff only)')).toBeNull();
     });
   });
 });

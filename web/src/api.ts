@@ -1484,6 +1484,9 @@ export interface PlayerFileData {
     conduct?: ConductSection;
     /** Scrim records (plan 2). Optional only for an older server. */
     scrims?: ScrimRecord;
+    /** Review aggregates and toxic flags (plan 2 Ruling 6), beside scrims.
+     *  Optional only for an older server. */
+    scrimReviews?: ScrimReviews;
     tickets: TicketSummary[];
     notes: AdminPlayerDetail['notes'];
     evidence: {
@@ -1672,6 +1675,9 @@ export interface TeamView {
   /** The team's scrim record: members and staff only, unless the record is
    *  public. Absent for everyone else. */
   record?: ScrimReliability;
+  /** The aggregate of reviews the team received (plan 2): current members and
+   *  staff only, regardless of scrim_reliability_public. Absent otherwise. */
+  reviews?: ReviewSummary;
 }
 
 export const logoUrl = (key: string): string => `/api/teams/logos/${key}.png`;
@@ -1736,6 +1742,20 @@ export interface ScrimRecord {
   pickup: ScrimReliability;
   teams: { teamId: number; slug: string; name: string; tag: string; record: ScrimReliability }[];
 }
+/** Mirrors src/scrims/reviews.ts's REVIEW_TAGS (plan 2 Ruling 5). */
+export type ReviewTag = 'on_time' | 'good_comms' | 'good_sport' | 'left_early' | 'toxic';
+/** A review aggregate: under SUMMARY_MIN (3) there is no percentage or top tag. */
+export interface ReviewSummary { count: number; positivePct: number | null; topTag: ReviewTag | null }
+/** A single side's review of the other, staff only. */
+export interface StaffReview {
+  side: BookingSide; reviewer: string; reviewerName: string; thumbs: 1 | -1; tags: ReviewTag[]; createdAt: string; updatedAt: string;
+}
+/** A player's review aggregates and toxic flags (plan 2 Ruling 6), as a
+ *  pickup captain and each current team's. Staff only. */
+export interface ScrimReviews {
+  pickup: { summary: ReviewSummary; toxic: boolean };
+  teams: { teamId: number; slug: string; name: string; tag: string; summary: ReviewSummary; toxic: boolean }[];
+}
 export interface BookingPerson { steamid: string; name: string; avatar: string | null; role: BookingRole; status: 'invited' | 'accepted' }
 export interface BookingSideView {
   side: BookingSide; name: string; team: { id: number; slug: string; name: string; tag: string; logoKey: string | null } | null;
@@ -1764,6 +1784,12 @@ export interface BookingView {
   /** Re-posting a cancelled scrim in one click (plan 2): true only when the
    *  booking is cancelled, came from a post, and the viewer manages a side. */
   repost: { allowed: boolean };
+  /** Plan 2 Ruling 5: present only when the viewer manages a confirmed side
+   *  of a scrim that closed as ended or no_show. open says whether the 7 day
+   *  window still takes a review; mine is the viewer's own side's review. */
+  review?: { open: boolean; mine: { thumbs: 1 | -1; tags: ReviewTag[] } | null };
+  /** Both sides' single reviews, staff only. */
+  reviews?: StaffReview[];
 }
 export interface BookingCaster { steamid: string; name: string; a: boolean; b: boolean }
 export interface NewBooking {
@@ -1794,6 +1820,8 @@ export const bookingsApi = {
   casters: (signal?: AbortSignal) => get<{ casters: { steamid: string; name: string; avatar: string | null }[] }>('/api/bookings/casters', signal),
   inviteCaster: (id: number, steamid: string) => post<BookingView>(`/api/bookings/${id}/casters`, { steamid }),
   withdrawCaster: (id: number, steamid: string) => post<BookingView>(`/api/bookings/${id}/casters/${enc(steamid)}/withdraw`),
+  /** The viewer's own private review of the other side (plan 2 Ruling 5). */
+  review: (id: number, thumbs: 1 | -1, tags: ReviewTag[]) => post<BookingView>(`/api/bookings/${id}/review`, { thumbs, tags }),
 };
 
 // ---------- scrims (the /scrims board, scrim board plan 1) ----------
@@ -1826,6 +1854,9 @@ export interface ScrimBoardPost {
   srRange: number | null; startsAt: string; minutes: number; campaigns: string[]; note: string; createdAt: string;
   challenge: { teamId: number; name: string } | null;
   acceptCount: number;
+  /** Plan 2: whether this post's start falls inside the weekly scrim night
+   *  window, for the row highlight and tag. */
+  night: boolean;
   /** The viewer manages the posting side: `accepts` is filled in. */
   mine: boolean;
   /** The viewer's side's own pending acceptance of this post, if any. */
@@ -1840,9 +1871,13 @@ export interface NewScrimPost {
   note: string; targetTeamId?: number | null;
 }
 
+/** Plan 2 Ruling 7: the weekly scrim night window, null while it is off. */
+export interface ScrimNightWindow { startsAt: string; endsAt: string }
+
 export const scrimsApi = {
   options: (signal?: AbortSignal) => get<ScrimOptions>('/api/scrims/options', signal),
-  board: (fitsOnly: boolean, signal?: AbortSignal) => get<{ posts: ScrimBoardPost[] }>(`/api/scrims${fitsOnly ? '?fitsOnly=1' : ''}`, signal),
+  board: (fitsOnly: boolean, signal?: AbortSignal) =>
+    get<{ posts: ScrimBoardPost[]; night: ScrimNightWindow | null }>(`/api/scrims${fitsOnly ? '?fitsOnly=1' : ''}`, signal),
   create: (b: NewScrimPost) => post<{ id: number }>('/api/scrims', b),
   withdraw: (postId: number) => post<{ acceptIds: number[] }>(`/api/scrims/${postId}/withdraw`),
   accept: (postId: number, teamId: number | null, campaigns: string[]) =>
@@ -1862,6 +1897,8 @@ export const scrimsApi = {
 export interface AdminBookingRow {
   id: number; state: BookingState; ending: boolean; startsAt: string; endsAt: string; aName: string; bName: string;
   server: string | null; peak: { a: number; b: number }; endReason: string | null;
+  /** Plan 2 Ruling 6: a side whose team (or pickup captain) carries the toxic flag. */
+  toxic: { a: boolean; b: boolean };
 }
 
 export const adminApi = {

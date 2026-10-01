@@ -3327,7 +3327,13 @@ a.teamrow:hover .teamrow__name { color: var(--accent); }
 
 .scrimrow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2) var(--sp-3); scroll-margin-top: var(--sp-5); }
 .scrimrow--highlight { background: var(--surface-2); border-left: 2px solid var(--rule); padding-left: var(--sp-3); }
+.scrimrow--night { background: var(--surface-2); }
 .scrimrow__main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+/* Plan 2 Ruling 7: the scrim night banner and a board row inside it. */
+.scrimnight { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-3); padding: var(--sp-2) var(--sp-3); background: var(--surface-2); border-radius: var(--radius); font-size: var(--fs-dense); }
+.scrimnight__live { align-self: center; }
+.scrimnighttag { align-self: flex-start; color: var(--accent); border-color: var(--rule); }
 
 .scrimaccept { display: flex; flex-direction: column; gap: var(--sp-2); }
 .scrimaccept .bookform__fieldset label { font-size: var(--fs-dense); }
@@ -3343,6 +3349,14 @@ a.teamrow:hover .teamrow__name { color: var(--accent); }
 .scrimbadge { align-self: flex-start; max-width: 100%; white-space: normal; }
 .bookinglate, .bookingexcuse { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .bookingexcuse input { flex: 1 1 12rem; min-width: 0; }
+/* The review card's thumbs/tag toggles and the staff review list. */
+.bookingreview { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.bookingreviews { list-style: none; margin: 0; padding: 0; }
+.bookingreviews li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); }
+.bookingreviews li:last-child { border-bottom: 0; }
+/* A toxic flag: red text on the People desk, a red-bordered chip on the
+   admin bookings panel (plan 2 Ruling 6). */
+.teamchip--toxic { border-color: var(--loss); color: var(--loss); }
 @media (max-width: 560px) {
   .scrimrow { align-items: flex-start; }
 }

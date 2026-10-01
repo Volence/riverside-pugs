@@ -16,6 +16,7 @@ const { BookingsPanel } = await import('./BookingsPanel');
 const ROW: AdminBookingRow = {
   id: 4, state: 'active', ending: false, startsAt: '2026-10-02T20:00:00.000Z', endsAt: '2026-10-02T22:00:00.000Z',
   aName: 'Rats', bName: "p1's group", server: 'Riverside #3', peak: { a: 4, b: 3 }, endReason: null,
+  toxic: { a: false, b: false },
 };
 
 afterEach(cleanup);
@@ -46,5 +47,21 @@ describe('BookingsPanel', () => {
     const { container } = render(<BookingsPanel nudge={0} />);
     await waitFor(() => expect(mockAdmin.bookings).toHaveBeenCalled());
     expect(container.textContent).toBe('');
+  });
+
+  it('shows a Toxic tags chip only on flagged sides (plan 2 Ruling 6)', async () => {
+    mockAdmin.bookings.mockResolvedValue({ bookings: [{ ...ROW, toxic: { a: true, b: false } }] });
+    render(<BookingsPanel nudge={0} />);
+    await screen.findByText("Rats vs p1's group");
+    const chips = screen.getAllByText('Toxic tags');
+    expect(chips).toHaveLength(1);
+    expect(chips[0].getAttribute('title')).toBe('Rats: repeated toxic tags');
+  });
+
+  it('has no Toxic tags chip for a clean booking', async () => {
+    mockAdmin.bookings.mockResolvedValue({ bookings: [ROW] });
+    render(<BookingsPanel nudge={0} />);
+    await screen.findByText("Rats vs p1's group");
+    expect(screen.queryByText('Toxic tags')).toBeNull();
   });
 });

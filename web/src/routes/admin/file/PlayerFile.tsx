@@ -13,6 +13,7 @@ import { NotesSection } from './NotesSection';
 import { Timeline } from './Timeline';
 import { EvidenceDetail } from './EvidenceDetail';
 import { RecordLine, recordText } from '../../../components/ScrimRecord';
+import { reviewSummaryText } from '../../../components/ReviewSummary';
 
 /**
  * Everything known about one player, at one URL.
@@ -79,13 +80,26 @@ export function PlayerFile({ steamid, me }: { steamid: string; me: string }) {
         <Panel class="file-section">
           <h3>Scrims</h3>
           <RecordLine record={d.sections.scrims.pickup} label="As a pickup captain" />
-          {d.sections.scrims.teams.map((t) => (
-            <p key={t.teamId} class="scrimrecord">
-              <a href={`/team/${t.slug}`}>[{t.tag}] {t.name}</a>
-              <span class="muted">: </span>
-              <span>{recordText(t.record)}</span>
+          {d.sections.scrimReviews && (
+            <p class="scrimrecord">
+              <span class="muted">Reviews as a pickup captain: </span>
+              <span>{reviewSummaryText(d.sections.scrimReviews.pickup.summary)}</span>
+              {d.sections.scrimReviews.pickup.toxic && <span class="admin-warn"> · Toxic tags</span>}
             </p>
-          ))}
+          )}
+          {d.sections.scrims.teams.map((t) => {
+            const rt = d.sections.scrimReviews?.teams.find((x) => x.teamId === t.teamId);
+            return (
+              <p key={t.teamId} class="scrimrecord">
+                <a href={`/team/${t.slug}`}>[{t.tag}] {t.name}</a>
+                <span class="muted">: </span>
+                <span>{recordText(t.record)}</span>
+                {rt && <span class="muted"> · Reviews: </span>}
+                {rt && <span>{reviewSummaryText(rt.summary)}</span>}
+                {rt?.toxic && <span class="admin-warn"> · Toxic tags</span>}
+              </p>
+            );
+          })}
         </Panel>
       )}
 
