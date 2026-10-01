@@ -19,8 +19,9 @@ import type { DB } from './db.js';
  * restart the release engine's recover() takes back what it held.
  */
 
-/** A kind of database hold; one arm of open_server_holds each. */
-export type HoldKind = 'practice' | 'side';
+/** A kind of database hold; one arm of open_server_holds each. A booking
+ *  (rank 0) outranks a practice lease (1) and a side game (2). */
+export type HoldKind = 'booking' | 'practice' | 'side';
 
 export interface Hold {
   kind: HoldKind;

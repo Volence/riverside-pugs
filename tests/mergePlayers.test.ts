@@ -510,4 +510,26 @@ describe('mergePlayers', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM team_invites WHERE team_id = ? AND responded_at IS NULL').get(t2)).toEqual({ n: 1 });
     expect(db.prepare("SELECT COUNT(*) AS n FROM team_members WHERE steamid = ?").get(ALT)).toEqual({ n: 0 });
   });
+
+  it('moves booking rows, keeping one place per booking when both accounts were in it', () => {
+    const b = Number(db.prepare(
+      `INSERT INTO bookings (purpose, starts_at, ends_at, password, tv_password, game_config, rules_json, playlist_json, created_by, created_at)
+       VALUES ('scrim', '2026-10-02T20:00:00.000Z', '2026-10-02T22:00:00.000Z', 'p', 't', 'standard', '{}', '[]', ?, 'x')`,
+    ).run(ALT).lastInsertRowid);
+    db.prepare("INSERT INTO booking_sides (booking_id, side, captain_steamid, confirmed_at) VALUES (?, 'a', ?, 'x'), (?, 'b', ?, NULL)")
+      .run(b, ALT, b, OTHER);
+    const person = db.prepare("INSERT INTO booking_people (booking_id, side, steamid, role, status, added_by, added_at) VALUES (?, 'a', ?, 'player', 'accepted', ?, 'x')");
+    person.run(b, ALT, ALT);
+    person.run(b, MAIN, ALT);
+    db.prepare("INSERT INTO booking_events (booking_id, at, actor, event) VALUES (?, 'x', ?, 'created')").run(b, ALT);
+    db.prepare("INSERT INTO notification_prefs (steamid, type, enabled) VALUES (?, 'booking_ready', 0)").run(ALT);
+
+    mergePlayers(db, { from: ALT, into: MAIN });
+
+    expect(db.prepare('SELECT created_by FROM bookings WHERE id = ?').get(b)).toEqual({ created_by: MAIN });
+    expect(db.prepare("SELECT captain_steamid FROM booking_sides WHERE booking_id = ? AND side = 'a'").get(b)).toEqual({ captain_steamid: MAIN });
+    expect(db.prepare('SELECT steamid, added_by FROM booking_people WHERE booking_id = ?').all(b)).toEqual([{ steamid: MAIN, added_by: MAIN }]);
+    expect(db.prepare('SELECT actor FROM booking_events WHERE booking_id = ?').get(b)).toEqual({ actor: MAIN });
+    expect(db.prepare('SELECT steamid FROM notification_prefs').all()).toEqual([{ steamid: MAIN }]);
+  });
 });

@@ -33,6 +33,8 @@ export interface ServerRow {
   log_auth: 'off' | 'log' | 'enforce';
   /** The box's boxes/<slug>/ layer in the deploy repo; see src/db.ts. */
   deploy_slug: string | null;
+  /** Which region the box counts toward for bookings (default 'na'). */
+  region: string;
 }
 
 export function addServer(
