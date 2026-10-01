@@ -1704,6 +1704,10 @@ export interface BookingSideView {
   side: BookingSide; name: string; team: { id: number; slug: string; name: string; tag: string; logoKey: string | null } | null;
   captain: { steamid: string; name: string }; confirmed: boolean; peakPresent: number; noShow: boolean; people: BookingPerson[];
 }
+export interface BookingGameView {
+  matchId: number; campaign: string; state: string; scoreA: number; scoreB: number; sideA: BookingSide | null;
+  startedAt: string; endedAt: string | null;
+}
 export interface BookingView {
   id: number; purpose: 'scrim' | 'tournament'; state: BookingState; ending: boolean; startsAt: string; endsAt: string;
   extendedMinutes: number; extendMinutes: number; createdAt: string; playlist: { slug: string; name: string }[];
@@ -1711,6 +1715,7 @@ export interface BookingView {
   sides: BookingSideView[]; server: { name: string } | null; connect: { host: string; port: number; password: string } | null;
   cancel: { side: BookingSide | null; reason: string | null } | null; endReason: string | null; noShowFrom: string;
   viewer: { side: BookingSide | null; manages: BookingSide[]; staff: boolean; invited: boolean };
+  games: BookingGameView[];
 }
 export interface NewBooking {
   teamId: number | null; opponent: { teamId: number } | { steamid: string }; startsAt: string; minutes: number;
