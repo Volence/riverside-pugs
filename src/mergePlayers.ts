@@ -112,6 +112,8 @@ const PLAIN: [table: string, column: string][] = [
   // captain, same as a booking side.
   ['scrim_posts', 'captain_steamid'],
   ['scrim_accepts', 'captain_steamid'],
+  // A private scrim review (plan 2) follows the captain who wrote it.
+  ['scrim_reviews', 'reviewer'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`

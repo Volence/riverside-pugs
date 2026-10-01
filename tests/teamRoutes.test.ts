@@ -311,6 +311,29 @@ describe('scrims', () => {
     expect(await record(P[3])).toEqual({ shown: 1, booked: 1, noShows: 0, lateCancels: 0, excused: 0 });
     expect(await record()).toEqual({ shown: 1, booked: 1, noShows: 0, lateCancels: 0, excused: 0 });
   });
+
+  // Plan 2 Task 4: the review aggregate is for current members and staff
+  // only, whatever scrim_reliability_public says.
+  it('the team view carries the review aggregate for members and staff only', async () => {
+    const slug = await create(P[0], 'Rats', 'RR');
+    const teamId = getTeamBySlug(db, slug)!.id;
+    const past = Date.parse('2026-01-10T20:00:00.000Z');
+    const id = booking(P[4], undefined, { teamId }, past);
+    db.prepare("UPDATE booking_sides SET confirmed_at = ? WHERE booking_id = ?").run(new Date(past - DAY).toISOString(), id);
+    db.prepare("UPDATE bookings SET state = 'ended', end_reason = 'time', ending_at = ?, ended_at = ? WHERE id = ?")
+      .run(new Date(past + DAY / 12).toISOString(), new Date(past + DAY / 12).toISOString(), id);
+    db.prepare("INSERT INTO scrim_reviews (booking_id, by_side, reviewer, thumbs, tags_json, created_at, updated_at) VALUES (?, 'a', ?, -1, '[\"toxic\"]', ?, ?)")
+      .run(id, P[4], new Date(past + DAY / 6).toISOString(), new Date(past + DAY / 6).toISOString());
+    const view = async (who?: string) => (await call('GET', `/api/teams/${slug}`, who));
+    expect((await view(P[0])).json().reviews).toEqual({ count: 1, positivePct: null, topTag: null });
+    expect((await view(MOD)).json().reviews).toEqual({ count: 1, positivePct: null, topTag: null });
+    db.prepare("UPDATE settings SET value = 'on' WHERE key = 'scrim_reliability_public'").run();
+    for (const who of [P[3], P[4], undefined]) {
+      const r = await view(who);
+      expect(r.json().reviews, String(who)).toBeUndefined();
+      expect(r.body).not.toContain('toxic');
+    }
+  });
 });
 
 describe('leave and kick over HTTP', () => {

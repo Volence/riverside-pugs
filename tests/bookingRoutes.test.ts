@@ -8,7 +8,7 @@ import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { addServer } from '../src/serverPool.js';
-import { cancelBooking, holdBox, markReady, markSetup } from '../src/bookings/bookings.js';
+import { cancelBooking, confirmBooking, createBooking, holdBox, markReady, markSetup } from '../src/bookings/bookings.js';
 import { bookingRoutes } from '../src/routes/bookings.js';
 import type { BookingRunner } from '../src/bookings/runner.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
@@ -277,5 +277,70 @@ describe('excusing a late cancel', () => {
     expect(db.prepare('SELECT excuse_note, excused_by FROM booking_sides WHERE booking_id = ? AND side = ?').get(id, 'a'))
       .toEqual({ excuse_note: 'their server crashed', excused_by: MOD });
     expect(db.prepare("SELECT action FROM admin_actions WHERE action = 'booking_excuse'").all()).toHaveLength(1);
+  });
+});
+
+describe('private reviews (plan 2, Task 4)', () => {
+  /** A confirmed scrim that closed (as ended) just now, by the real clock,
+   *  since the routes have no clock of their own. */
+  const endedNow = async () => {
+    const id = await create();
+    expect((await call('POST', `/api/bookings/${id}/confirm`, P[1])).statusCode).toBe(200);
+    const t = new Date().toISOString();
+    db.prepare("UPDATE bookings SET state = 'ended', end_reason = 'time', ending_at = ?, ended_at = ? WHERE id = ?").run(t, t, id);
+    return id;
+  };
+
+  it('a side manager reviews and edits; the answer carries only their own review, and the other side never sees it', async () => {
+    const id = await endedNow();
+    expect((await call('POST', `/api/bookings/${id}/review`, P[2], { thumbs: 1, tags: [] })).statusCode).toBe(404);
+    const bad = await call('POST', `/api/bookings/${id}/review`, P[0], { thumbs: 0, tags: [] });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().error).toBe('A review is a thumbs up or down, with tags from the list, each once.');
+    const r = await call('POST', `/api/bookings/${id}/review`, P[0], { thumbs: -1, tags: ['toxic', 'left_early'] });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().review).toEqual({ open: true, mine: { thumbs: -1, tags: ['toxic', 'left_early'] } });
+    expect(r.json().reviews).toBeUndefined();
+    const edit = await call('POST', `/api/bookings/${id}/review`, P[0], { thumbs: 1, tags: ['toxic'] });
+    expect(edit.json().review.mine).toEqual({ thumbs: 1, tags: ['toxic'] });
+    // The reviewed side: its own (empty) review slot, and nothing of the other.
+    const other = await call('GET', `/api/bookings/${id}`, P[1]);
+    expect(other.json().review).toEqual({ open: true, mine: null });
+    expect(other.json().reviews).toBeUndefined();
+    expect(other.body).not.toContain('toxic');
+    // Staff see both sides' rows.
+    const staff = (await call('GET', `/api/bookings/${id}`, MOD)).json();
+    expect(staff.reviews).toEqual([expect.objectContaining({ side: 'a', reviewer: P[0], thumbs: 1, tags: ['toxic'] })]);
+  });
+
+  it('a booking that has not closed refuses with wrong_state', async () => {
+    const id = await create();
+    await call('POST', `/api/bookings/${id}/confirm`, P[1]);
+    const r = await call('POST', `/api/bookings/${id}/review`, P[0], { thumbs: 1, tags: [] });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().error).toBe('The booking is past that point.');
+  });
+
+  it('the admin Bookings list flags a toxic side for staff only', async () => {
+    const listed = await create();
+    // Three earlier scrims against P[1], each tagged toxic by side a.
+    const nowMs = Date.now();
+    for (let k = 1; k <= 3; k++) {
+      const start = new Date(START.getTime() + k * 24 * 3_600_000);
+      const r = createBooking(db, { by: P[0], opponent: { steamid: P[1] }, startsAt: start.toISOString(), minutes: 60, playlist: ['no_mercy'], now: new Date(nowMs) });
+      if (!r.ok) throw new Error(r.error);
+      confirmBooking(db, { bookingId: r.value.id, by: P[1], now: new Date(nowMs) });
+      const t = new Date(nowMs).toISOString();
+      db.prepare("UPDATE bookings SET state = 'ended', end_reason = 'time', ending_at = ?, ended_at = ? WHERE id = ?").run(t, t, r.value.id);
+      db.prepare("INSERT INTO scrim_reviews (booking_id, by_side, reviewer, thumbs, tags_json, created_at, updated_at) VALUES (?, 'a', ?, -1, '[\"toxic\"]', ?, ?)")
+        .run(r.value.id, P[0], t, t);
+    }
+    expect((await call('GET', '/api/admin/bookings', P[0])).statusCode).toBe(403);
+    expect((await call('GET', '/api/admin/bookings')).statusCode).toBe(401);
+    const list = (await call('GET', '/api/admin/bookings', MOD)).json().bookings as { id: number; toxic: { a: boolean; b: boolean } }[];
+    expect(list.find((b) => b.id === listed)!.toxic).toEqual({ a: false, b: true });
+    // Nothing a player can reach carries the flag.
+    const own = await call('GET', `/api/bookings/${listed}`, P[1]);
+    expect(own.body).not.toContain('toxic');
   });
 });

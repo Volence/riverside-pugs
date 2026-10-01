@@ -57,6 +57,13 @@ describe('player detail scrim record (plan 2)', () => {
       pickup: zero,
       teams: [{ teamId: t.value.id, slug: t.value.slug, name: 'Rats', tag: 'RR', record: zero }],
     });
+    // Task 4: review aggregates and toxic flags beside the record.
+    const none = { count: 0, positivePct: null, topTag: null };
+    expect(d.scrimReviews).toEqual({
+      pickup: { summary: none, toxic: false },
+      teams: [{ teamId: t.value.id, slug: t.value.slug, name: 'Rats', tag: 'RR', summary: none, toxic: false }],
+    });
+    expect((await get(`/api/admin/players/${P3}`, user)).statusCode).toBe(403);
   });
 });
 

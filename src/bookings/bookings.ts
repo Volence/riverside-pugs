@@ -15,6 +15,7 @@ import { getServer } from '../serverPool.js';
 import { bookingGames, type BookingGameView } from './games.js';
 import { castersOf, type CasterView } from './casters.js';
 import { canSeeReliability, reliability, type Reliability } from '../scrims/reliability.js';
+import { ownReview, reviewable, reviewOpen, staffReviews, type ReviewTag, type StaffReview } from '../scrims/reviews.js';
 import {
   allowance, bookingLimits, capacityProblem, isLateCancel, iso, upcomingCount, OPEN_STATES_SQL, PEOPLE_PER_SIDE, SHOWN_MIN, STEP_MINUTES,
   UNCONFIRMED_CUTOFF_MS, UNCONFIRMED_TTL_MS, type BookingLimits, type BookingState, type Party,
@@ -84,6 +85,8 @@ export const BOOKING_ERRORS = {
   they_showed: { status: 409, text: 'The other side is on the server.' },
   not_caster: { status: 400, text: 'That player is not a caster.' },
   already_excused: { status: 409, text: 'That is already excused.' },
+  bad_review: { status: 400, text: 'A review is a thumbs up or down, with tags from the list, each once.' },
+  review_closed: { status: 409, text: 'Reviews close 7 days after the scrim.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type BookingError = keyof typeof BOOKING_ERRORS;
 export type Result<T> = { ok: true; value: T } | { ok: false; error: BookingError };
@@ -788,6 +791,13 @@ export interface BookingView {
    *  here; a start too close to post again comes back as the click's own
    *  refusal. */
   repost: { allowed: boolean };
+  /** Plan 2 Ruling 5: present only when the viewer manages a confirmed side
+   *  of a scrim that closed as ended or no_show. open says whether the 7 day
+   *  window still takes a review; mine is the viewer's own side's review. The
+   *  other side's review is never here. */
+  review?: { open: boolean; mine: { thumbs: 1 | -1; tags: ReviewTag[] } | null };
+  /** Both sides' single reviews, for staff only. */
+  reviews?: StaffReview[];
 }
 
 /** Whether bookingView would answer this viewer at all: staff, anyone on
@@ -800,7 +810,7 @@ export function seesBooking(db: DB, id: number, viewer: { steamid: string; staff
   return managedSides(db, id, viewer.steamid).length > 0;
 }
 
-export function bookingView(db: DB, id: number, viewer: { steamid: string; staff: boolean }): BookingView | null {
+export function bookingView(db: DB, id: number, viewer: { steamid: string; staff: boolean }, nowMs: number = Date.now()): BookingView | null {
   const b = getBooking(db, id);
   if (!b) return null;
   if (!seesBooking(db, id, viewer)) return null;
@@ -856,6 +866,8 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
       allowed: b.state === 'cancelled' && b.purpose === 'scrim' && manages.length > 0
         && !!db.prepare('SELECT 1 FROM scrim_posts WHERE booking_id = ?').get(b.id),
     },
+    ...(acting.length > 0 && reviewable(b) ? { review: { open: reviewOpen(b, nowMs), mine: ownReview(db, b.id, acting[0]) } } : {}),
+    ...(viewer.staff ? { reviews: staffReviews(db, b.id) } : {}),
   };
 }
 

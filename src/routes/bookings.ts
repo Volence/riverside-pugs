@@ -13,6 +13,7 @@ import { bookingLimits, typicalCampaignMinutes, STEP_MINUTES } from '../bookings
 import { isNotifyType, prefsOf, setPref } from '../notify/notify.js';
 import type { BookingRunner } from '../bookings/runner.js';
 import { hasPickupBookings, reliability } from '../scrims/reliability.js';
+import { submitReview } from '../scrims/reviews.js';
 import { logAdmin } from '../admin/audit.js';
 
 export interface BookingRoutesOpts {
@@ -166,6 +167,9 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
     (me, id) => runner?.onCancelled(id, me, B.getBooking(db, id)?.cancel_reason ?? null));
   // Plan 2: a manager excuses the other side's late cancel.
   action('excuse', (me, id, req) => B.excuseMark(db, { bookingId: id, by: me, note: body(req).note }));
+  // Plan 2 Ruling 5: a manager's private review of the other side. The
+  // answer is the viewer's own view, which carries only their side's review.
+  action('review', (me, id, req) => submitReview(db, { bookingId: id, by: me, thumbs: body(req).thumbs, tags: body(req).tags }));
   action('extend', (me, id) => B.extendBooking(db, { bookingId: id, by: me }), (_me, id) => runner?.onExtended(id));
   action('no-show', (me, id) => B.claimNoShow(db, { bookingId: id, by: me }),
     (_me, id, value) => runner?.onNoShow(id, (value as { absent: B.Side }).absent));

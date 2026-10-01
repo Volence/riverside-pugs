@@ -3,7 +3,7 @@ import type { MessagePayload } from '../discord/transport.js';
 import { escapeName } from '../identity.js';
 import { getPlayer } from '../players.js';
 import { getServer } from '../serverPool.js';
-import { getBooking, sideName, sidesOf } from './bookings.js';
+import { getBooking, sideName, sidesOf, type Side } from './bookings.js';
 
 /** "2026-10-02 20:00 UTC". DMs have no viewer time zone; the site shows local time. */
 export const whenUtc = (iso: string): string => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
@@ -68,6 +68,22 @@ export function bookingMessage(
     content,
     embeds: [],
     components: [links],
+    mentionUserIds: [],
+  };
+}
+
+/** The private review ask (plan 2 Ruling 5) for one side's managers, naming
+ *  the other side; null for a booking that is gone. Sent once per booking by
+ *  the runner's settle. */
+export function reviewAskMessage(db: DB, publicUrl: string, bookingId: number, side: Side): MessagePayload | null {
+  const b = getBooking(db, bookingId);
+  if (!b) return null;
+  const other = sidesOf(db, b.id).find((s) => s.side !== side);
+  if (!other) return null;
+  return {
+    content: `How was ${escapeName(sideName(db, other))}? Leave a quick private review on the booking page. Only staff see single reviews.`,
+    embeds: [],
+    components: [[{ kind: 'link', url: `${publicUrl}/booking/${b.id}`, label: 'Open the booking' }]],
     mentionUserIds: [],
   };
 }

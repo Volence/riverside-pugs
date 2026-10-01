@@ -312,6 +312,23 @@ CREATE TABLE IF NOT EXISTS scrim_accepts (
   responded_at    TEXT
 );
 CREATE INDEX IF NOT EXISTS scrim_accepts_post_status ON scrim_accepts (post_id, status);
+-- Private reviews of the opponent after a booked scrim (scrim board plan 2,
+-- Ruling 5): one row per booking per reviewing side, edited in place until
+-- the window closes. Only staff ever see a row; teams see an aggregate of the
+-- reviews they received (src/scrims/reviews.ts). tags_json is an array of
+-- REVIEW_TAGS keys.
+CREATE TABLE IF NOT EXISTS scrim_reviews (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  booking_id INTEGER NOT NULL REFERENCES bookings(id),
+  by_side    TEXT NOT NULL CHECK (by_side IN ('a','b')),
+  reviewer   TEXT NOT NULL REFERENCES players(steamid),
+  thumbs     INTEGER NOT NULL CHECK (thumbs IN (1,-1)),
+  tags_json  TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (booking_id, by_side)
+);
+CREATE INDEX IF NOT EXISTS scrim_reviews_booking ON scrim_reviews (booking_id);
 CREATE TABLE IF NOT EXISTS match_players (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   player_id TEXT NOT NULL REFERENCES players(steamid),

@@ -14,7 +14,8 @@ import { getPlayer } from '../players.js';
  */
 export type NotifyType =
   | 'booking_invite' | 'booking_confirmed' | 'booking_starting' | 'booking_ready' | 'booking_cancelled' | 'booking_no_show'
-  | 'scrim_challenge' | 'scrim_accepted' | 'scrim_booked' | 'scrim_taken' | 'scrim_declined';
+  | 'scrim_challenge' | 'scrim_accepted' | 'scrim_booked' | 'scrim_taken' | 'scrim_declined'
+  | 'scrim_review';
 
 export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'booking_invite', label: 'Someone invites me to a booked server' },
@@ -28,6 +29,7 @@ export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'scrim_booked', label: 'My scrim accept is confirmed into a booking' },
   { type: 'scrim_taken', label: 'A scrim I accepted goes to another side instead' },
   { type: 'scrim_declined', label: 'My scrim accept is declined or expires' },
+  { type: 'scrim_review', label: 'Review my scrim opponent after a booked scrim' },
 ];
 
 export function isNotifyType(v: unknown): v is NotifyType {

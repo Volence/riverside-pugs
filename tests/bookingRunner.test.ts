@@ -809,6 +809,47 @@ describe('booked games (plan 4b)', () => {
     expect(cmds().some((c) => c.startsWith('sm_pug_abort'))).toBe(false);
   });
 
+  // Plan 2 Ruling 5: the private review ask goes once per side when a scrim
+  // closes as ended or no_show, guarded by a review_asked event.
+  const ASK = 'Leave a quick private review on the booking page. Only staff see single reviews.';
+  it('an ended scrim asks each side\'s managers once for a review, never again on a second settle', async () => {
+    const id = await running(['no_mercy']);
+    expect(runner.endFromGame(id, P[0])).toEqual({ ok: true });
+    await runner.idle();
+    const asks = dms.filter((d) => d.content.includes(ASK));
+    expect(asks.map((d) => [d.to, d.content]).sort()).toEqual([
+      ['d0', `How was p1's group? ${ASK}`],
+      ['d1', `How was p0's group? ${ASK}`],
+    ]);
+    expect(events(id, 'review_asked')).toHaveLength(1);
+    runner.settle(id);
+    await runner.tick();
+    await runner.idle();
+    runner.settle(id);
+    expect(dms.filter((d) => d.content.includes(ASK))).toHaveLength(2);
+    expect(events(id, 'review_asked')).toHaveLength(1);
+  });
+
+  it('a no-show scrim asks too; a cancelled one and a tournament booking never do', async () => {
+    const noShow = await running(['no_mercy']);
+    db.prepare("UPDATE bookings SET state = 'no_show', end_reason = 'no_show', ending_at = ? WHERE id = ?").run(new Date(now).toISOString(), noShow);
+    runner.onNoShow(noShow, 'b');
+    await runner.idle();
+    expect(dms.filter((d) => d.content.includes(ASK)).map((d) => d.to).sort()).toEqual(['d0', 'd1']);
+    dms = [];
+    const cancelled = book();
+    cancelBooking(db, { bookingId: cancelled, by: P[0], now: new Date(now) });
+    runner.onCancelled(cancelled, P[0], null);
+    await runner.idle();
+    expect(dms.some((d) => d.content.includes(ASK))).toBe(false);
+    const tournament = book();
+    db.prepare("UPDATE bookings SET purpose = 'tournament', state = 'ended', end_reason = 'staff', ending_at = ?, ended_at = ? WHERE id = ?")
+      .run(new Date(now).toISOString(), new Date(now).toISOString(), tournament);
+    runner.settle(tournament);
+    expect(dms.some((d) => d.content.includes(ASK))).toBe(false);
+    expect(events(tournament, 'review_asked')).toHaveLength(0);
+  });
+
   it('everyone leaving after a finished game ends the booking: two empty watches, the game over 2 minutes ago', async () => {
     const id = await running();
     // Someone was on a minute ago, so the 4a idle end is far off.

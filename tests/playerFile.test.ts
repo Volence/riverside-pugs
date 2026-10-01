@@ -57,9 +57,11 @@ describe('the Player File', () => {
     expect(file.glance.fileUrl).toBe(`/admin/people/${P}`);
     expect(file.timeline.length).toBeGreaterThan(0);
     expect(Object.keys(file.sections).sort())
-      .toEqual(['conduct', 'evidence', 'identity', 'matches', 'notes', 'scrims', 'standing', 'tickets']);
+      .toEqual(['conduct', 'evidence', 'identity', 'matches', 'notes', 'scrimReviews', 'scrims', 'standing', 'tickets']);
     // Plan 2: the pickup record and each current team's record.
     expect(file.sections.scrims).toEqual({ pickup: { shown: 0, booked: 0, noShows: 0, lateCancels: 0, excused: 0 }, teams: [] });
+    // Task 4: review aggregates and the toxic flag beside the record.
+    expect(file.sections.scrimReviews).toEqual({ pickup: { summary: { count: 0, positivePct: null, topTag: null }, toxic: false }, teams: [] });
     expect(file.sections.notes[0].text).toBe('spoke to them');
     expect(file.sections.standing.penalties).toHaveLength(1);
     expect(file.lastReview).toBeNull();
