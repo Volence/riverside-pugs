@@ -52,8 +52,15 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
 
   const live = team.disbandedAt === null;
   const role = team.viewer.role;
-  const captain = live && (role === 'captain' || team.viewer.staff);
-  const manager = live && team.manage !== null;
+  // The server has no staff bypass for invitePlayer, cancelInvite, kickMember
+  // or setJoinLink (src/teams/teams.ts): those need the viewer's own role to
+  // be captain or (for kick/invite/cancel) cocaptain. `team.manage` is sent
+  // to staff too, so it is never used alone to decide what to show here.
+  const isCaptain = live && role === 'captain';
+  const canManage = live && (role === 'captain' || role === 'cocaptain');
+  // transferCaptain, renameTeam, disbandTeam and setLogoKey DO have a staff
+  // bypass, so staff who are not on the team still get these.
+  const staffControls = live && (role === 'captain' || team.viewer.staff);
   const joinUrl = team.manage?.joinLinkToken ? `${location.origin}/team/join/${team.manage.joinLinkToken}` : null;
 
   return (
@@ -71,49 +78,40 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
       <Panel>
         <h3>Roster</h3>
         {team.members.length === 0 ? <Empty>Nobody is on this team.</Empty> : (
-          <table class="teamroster">
-            <tbody>
-              {team.members.map((m) => (
-                <tr key={m.steamid}>
-                  <td><a href={`/player/${m.steamid}`}>{m.name}</a></td>
-                  <td>{ROLE_LABEL[m.role]}</td>
-                  <td>joined {day(m.joinedAt)}</td>
-                  <td class="teamroster__actions">
-                    {captain && m.role !== 'captain' && (
-                      <>
-                        {role === 'captain' && (m.role === 'member'
-                          ? <button class="btn btn--sm" disabled={busy} onClick={() => act(() => teamsApi.setRole(slug, m.steamid, 'cocaptain'))}>Make co-captain</button>
-                          : <button class="btn btn--sm" disabled={busy} onClick={() => act(() => teamsApi.setRole(slug, m.steamid, 'member'))}>Make member</button>)}
-                        <button class="btn btn--sm" disabled={busy} onClick={() => act(() => teamsApi.makeCaptain(slug, m.steamid))}>Make captain</button>
-                      </>
-                    )}
-                    {manager && m.steamid !== me && m.role !== 'captain' && (role === 'captain' || team.viewer.staff || m.role === 'member') && (
-                      <button class="btn btn--sm btn--danger" disabled={busy} onClick={() => act(() => teamsApi.kick(slug, m.steamid))}>Kick</button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div class="table-wrap">
+            <table class="teamroster">
+              <tbody>
+                {team.members.map((m) => (
+                  <tr key={m.steamid}>
+                    <td><a href={`/player/${m.steamid}`}>{m.name}</a></td>
+                    <td>{ROLE_LABEL[m.role]}</td>
+                    <td>joined {day(m.joinedAt)}</td>
+                    <td class="teamroster__actions">
+                      {staffControls && m.role !== 'captain' && (
+                        <>
+                          {role === 'captain' && (m.role === 'member'
+                            ? <button class="btn btn--sm" disabled={busy} onClick={() => act(() => teamsApi.setRole(slug, m.steamid, 'cocaptain'))}>Make co-captain</button>
+                            : <button class="btn btn--sm" disabled={busy} onClick={() => act(() => teamsApi.setRole(slug, m.steamid, 'member'))}>Make member</button>)}
+                          <button class="btn btn--sm" disabled={busy} onClick={() => act(() => teamsApi.makeCaptain(slug, m.steamid))}>Make captain</button>
+                        </>
+                      )}
+                      {canManage && m.steamid !== me && m.role !== 'captain' && (role === 'captain' || m.role === 'member') && (
+                        <button class="btn btn--sm btn--danger" disabled={busy} onClick={() => act(() => teamsApi.kick(slug, m.steamid))}>Kick</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Panel>
 
-      {manager && (
+      {canManage && (
         <Panel>
           <h3>Invite</h3>
           <div class="teamsearch">
             <label>Find a player<input value={q} onInput={(e) => setQ((e.target as HTMLInputElement).value)} /></label>
-            {/* Hitting Invite (or Enter) with results showing invites the top
-             *  match; a specific row's own Invite button below picks any other
-             *  one when the search turned up more than one player. */}
-            <button
-              class="btn btn--sm"
-              type="button"
-              disabled={busy || found.length === 0}
-              onClick={() => { if (found[0]) void act(() => teamsApi.invite(slug, found[0].steamid), () => setQ('')); }}
-            >
-              Invite
-            </button>
           </div>
           <ul class="teamsearch__results">
             {found.map((p) => (
@@ -134,13 +132,13 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
         </Panel>
       )}
 
-      {captain && (
+      {staffControls && (
         <Panel>
           <h3>Team settings</h3>
           <div class="teamsettings">
-            {joinUrl
+            {isCaptain && (joinUrl
               ? <p>Join link: <code>{joinUrl}</code> <button class="btn btn--sm" disabled={busy} onClick={() => act(() => teamsApi.joinLink(slug, false))}>Turn off join link</button></p>
-              : <button class="btn" disabled={busy} onClick={() => act(() => teamsApi.joinLink(slug, true))}>Turn on join link</button>}
+              : <button class="btn" disabled={busy} onClick={() => act(() => teamsApi.joinLink(slug, true))}>Turn on join link</button>)}
             <label>Logo<input type="file" accept="image/*" disabled={busy} onChange={(e) => {
               const f = (e.target as HTMLInputElement).files?.[0];
               if (f) void act(async () => teamsApi.logo(slug, await toLogoPng(f)));

@@ -47,10 +47,24 @@ describe('Team', () => {
     mockTeams.get.mockResolvedValue(view({ viewer: { role: 'captain', staff: false }, manage: { invites: [], joinLinkToken: null } }));
     render(<Team slug="rats" session={session('1')} />);
     await screen.findByText('Riverside Rats');
-    for (const name of ['Invite', 'Make co-captain', 'Kick', 'Make captain', 'Turn on join link', 'Rename', 'Disband team']) {
+    for (const name of ['Make co-captain', 'Kick', 'Make captain', 'Turn on join link', 'Rename', 'Disband team']) {
+      expect(screen.getByRole('button', { name })).toBeTruthy();
+    }
+    expect(screen.getByLabelText('Find a player')).toBeTruthy();
+    expect(screen.getByLabelText('Logo')).toBeTruthy();
+  });
+
+  it('a staff viewer not on the team gets only the controls the server lets staff use', async () => {
+    mockTeams.get.mockResolvedValue(view({ viewer: { role: null, staff: true }, manage: { invites: [], joinLinkToken: 'tok' } }));
+    render(<Team slug="rats" session={session('9')} />);
+    await screen.findByText('Riverside Rats');
+    for (const name of ['Rename', 'Disband team', 'Make captain']) {
       expect(screen.getByRole('button', { name })).toBeTruthy();
     }
     expect(screen.getByLabelText('Logo')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Kick' })).toBeNull();
+    expect(screen.queryByLabelText('Find a player')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Turn on join link' })).toBeNull();
   });
 
   it('searches players and invites one', async () => {
