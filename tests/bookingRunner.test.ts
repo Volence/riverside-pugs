@@ -520,7 +520,7 @@ describe('fix wave (final review)', () => {
 });
 
 describe('booked games (plan 4b)', () => {
-  const NEXT_DT = 'say [Booking] Next: Death Toll in 60 s. !nextmap to pick another, !stay to replay this one, !end to finish.';
+  const NEXT_DT = 'say [Booking] Next: Death Toll in about a minute. !nextmap to pick another, !stay to replay this one, !end to finish.';
   const CAPTAINS_DT = 'say [Booking] Death Toll: !nextmap, !stay, !end and !extend are yours, captains.';
   const cmds = () => sent.flatMap((s) => s.cmds);
   const flush = () => new Promise((r) => setImmediate(r));
@@ -939,15 +939,16 @@ describe('booked games (plan 4b)', () => {
       warn.mockRestore();
     });
 
-    it('the minute watch re-push failure is logged redacted', async () => {
+    it('the minute watch re-push carries no log secret, and its failure is still logged without one', async () => {
       const id = await running();
       const secret = 'ef'.repeat(16);
       db.prepare('UPDATE servers SET log_secret = ? WHERE id = 3').run(secret);
+      const bursts: string[][] = [];
       const r = build({
         logPublicAddress: '203.0.113.5:27500',
         rcon: async (server, c) => {
-          const line = c.find((x) => x.startsWith('sm_pug_log_secret'));
-          if (line) throw new Error(`rcon exec timeout: ${line}`);
+          bursts.push(c);
+          if (c.some((x) => x.startsWith('logaddress_add'))) throw new Error(`rcon exec timeout: ${c.join('; ')}`);
           return fakeRcon(server, c);
         },
       });
@@ -958,7 +959,9 @@ describe('booked games (plan 4b)', () => {
       const logged = warn.mock.calls.map((a) => a.map(String).join(' '));
       warn.mockRestore();
       expect(getBooking(db, id)!.state).toBe('active');
-      expect(logged.some((t) => t.includes('re-pushing the booking lines') && t.includes('<redacted>'))).toBe(true);
+      expect(bursts.some((c) => c.includes('logaddress_add 203.0.113.5:27500'))).toBe(true);
+      expect(bursts.flat().some((x) => x.includes(secret))).toBe(false);
+      expect(logged.some((t) => t.includes('re-pushing the booking lines'))).toBe(true);
       expect(logged.some((t) => t.includes(secret))).toBe(false);
     });
   });
@@ -1066,5 +1069,168 @@ describe('booked games (plan 4b)', () => {
       expect(getBooking(db, id)!.next_campaign).toBeNull();
     });
 
+  });
+
+  describe('final review fixes', () => {
+    /** The invariant: a booking that has ended leaves no live match behind. */
+    const expectNoLiveGame = (bookingId: number) => {
+      expect(getBooking(db, bookingId)!.ended_at).not.toBeNull();
+      expect(db.prepare("SELECT id FROM matches WHERE booking_id = ? AND state = 'live'").all(bookingId)).toEqual([]);
+    };
+    let unregistered: string[];
+    let r: BookingRunner;
+    const start = async () => {
+      unregistered = [];
+      r = build({ unregisterToken: (t) => { unregistered.push(t); } });
+      const id = await running(['no_mercy', 'death_toll'], r);
+      const live = insertGame(id, { state: 'live', token: 'tok-live' });
+      return { id, live };
+    };
+    const expectAborted = (live: number) => {
+      expect(db.prepare('SELECT state, abort_cause FROM matches WHERE id = ?').get(live)).toEqual({ state: 'aborted', abort_cause: 'booking_ended' });
+      expect(unregistered).toEqual(['tok-live']);
+      const c = cmds();
+      expect(c).toContain('sm_pug_abort tok-live');
+      const bye = c.findIndex((x) => x.startsWith('say [Booking] This booked server is closing'));
+      expect(bye).toBeGreaterThan(-1);
+      expect(c.indexOf('sm_pug_abort tok-live')).toBeLessThan(bye);
+    };
+
+    it('a time end aborts a live game before the goodbye', async () => {
+      const { id, live } = await start();
+      box.ccc.humans = [P[0]];
+      now = START + 120 * MIN;
+      await r.tick();
+      await r.idle();
+      expect(getBooking(db, id)!.end_reason).toBe('time');
+      expectAborted(live);
+      expectNoLiveGame(id);
+    });
+
+    it('an idle end aborts a live game', async () => {
+      const { id, live } = await start();
+      now = START + 25 * MIN;
+      await r.tick();
+      await r.idle();
+      expect(getBooking(db, id)!.end_reason).toBe('idle');
+      expectAborted(live);
+      expectNoLiveGame(id);
+    });
+
+    it('a cancel aborts a live game', async () => {
+      const { id, live } = await start();
+      expect(cancelBooking(db, { bookingId: id, by: P[0], now: new Date(now) }).ok).toBe(true);
+      r.onCancelled(id, P[0], null);
+      await r.idle();
+      expect(getBooking(db, id)!.state).toBe('cancelled');
+      expectAborted(live);
+      expectNoLiveGame(id);
+    });
+
+    it('a staff end aborts a live game', async () => {
+      const { id, live } = await start();
+      expect(r.endFromGame(id, P[9], true)).toEqual({ ok: true });
+      await r.idle();
+      expect(getBooking(db, id)!.end_reason).toBe('staff');
+      expectAborted(live);
+      expectNoLiveGame(id);
+    });
+
+    it('an end that finishes after a web restart aborts the live game too (no goodbye)', async () => {
+      const { id, live } = await start();
+      cancelBooking(db, { bookingId: id, by: P[0], now: new Date(now) });
+      const fresh = build({ unregisterToken: (t) => { unregistered.push(t); } });
+      fresh.resume();
+      await fresh.idle();
+      expect(db.prepare('SELECT state FROM matches WHERE id = ?').get(live)).toEqual({ state: 'aborted' });
+      expect(cmds()).toContain('sm_pug_abort tok-live');
+      expectNoLiveGame(id);
+    });
+
+    it('a refused end aborts nothing', async () => {
+      const { id, live } = await start();
+      expect(r.endFromGame(id, P[5])).toMatchObject({ ok: false });
+      await r.idle();
+      expect(db.prepare('SELECT state FROM matches WHERE id = ?').get(live)).toEqual({ state: 'live' });
+      expect(unregistered).toEqual([]);
+      expect(cmds().some((c) => c.startsWith('sm_pug_abort'))).toBe(false);
+    });
+
+    it('abortGame stops listening for the token and tells the booked box, without releasing it or ending the booking', async () => {
+      const { id, live } = await start();
+      db.prepare("UPDATE matches SET state = 'aborted' WHERE id = ?").run(live);
+      await r.abortGame(live, 'tok-live');
+      expect(unregistered).toEqual(['tok-live']);
+      expect(cmds()).toEqual(['sm_pug_abort tok-live']);
+      expect(released).toEqual([]);
+      expect(getBooking(db, id)!.ending_at).toBeNull();
+    });
+
+    it('abortGame does nothing for a match with no booking', async () => {
+      await start();
+      const pug = Number(db.prepare(
+        "INSERT INTO matches (season_id, state, campaign, server_id, token) VALUES (?, 'aborted', 'no_mercy', 1, 'tok-pug')",
+      ).run(currentSeasonId(db)).lastInsertRowid);
+      await r.abortGame(pug, 'tok-pug');
+      expect(unregistered).toEqual([]);
+      expect(sent).toEqual([]);
+    });
+
+    it('the log secret goes at setup and with a campaign load, not in the minute re-push; the log address does', async () => {
+      const secret = 'cd'.repeat(16);
+      db.prepare('UPDATE servers SET log_secret = ? WHERE id = 3').run(secret);
+      const lr = build({ logPublicAddress: '203.0.113.5:27500' });
+      const id = await running(['no_mercy', 'death_toll'], lr);
+      box.ccc.humans = [P[0]];
+      now = START + 5 * MIN;
+      await lr.tick();
+      expect(cmds()).toContain('logaddress_add 203.0.113.5:27500');
+      expect(cmds().some((c) => c.startsWith('sm_pug_log_secret'))).toBe(false);
+      sent = [];
+      expect(lr.chooseNext(id, P[0], 'death')).toMatchObject({ ok: true });
+      await lr.idle();
+      expect(cmds()).toContain(`sm_pug_log_secret "${secret}"`);
+    });
+
+    it('everyone-left counts 2 minutes from the later of the last game end and the last campaign load, and a load resets the empty count', async () => {
+      const id = await running();
+      box.ccc.humans = [P[0]];
+      now = START + 39 * MIN;
+      await runner.tick();
+      // The game ended long ago, then an empty watch.
+      insertGame(id, { state: 'completed', endedAt: now - 10 * MIN });
+      box.ccc.humans = [];
+      now = START + 40 * MIN;
+      await runner.tick();
+      // A captain loads the next campaign: the box empties while it loads.
+      expect(runner.chooseNext(id, P[0], 'death')).toMatchObject({ ok: true });
+      await runner.idle();
+      // One more empty watch a minute after the load: the count started again,
+      // and the load was under 2 minutes ago.
+      now += MIN;
+      await runner.tick();
+      expect(getBooking(db, id)!.ending_at).toBeNull();
+      now += MIN;
+      await runner.tick();
+      await runner.idle();
+      // Two empty watches since the load, the load 2 minutes ago: everyone left.
+      expect(getBooking(db, id)).toMatchObject({ state: 'ended', end_reason: 'done' });
+    });
+
+    it('a load inside the 2 minutes holds off the everyone-left end even with two empty watches before it', async () => {
+      const id = await running();
+      box.ccc.humans = [P[0]];
+      now = START + 39 * MIN;
+      await runner.tick();
+      insertGame(id, { state: 'completed', endedAt: now - 10 * MIN });
+      box.ccc.humans = [];
+      now = START + 40 * MIN;
+      expect(runner.chooseNext(id, P[0], 'death')).toMatchObject({ ok: true });
+      await runner.idle();
+      now += 30_000; await runner.tick();
+      now += 60_000; await runner.tick();
+      // Two empty watches, but the load was 90 s ago.
+      expect(getBooking(db, id)!.ending_at).toBeNull();
+    });
   });
 });
