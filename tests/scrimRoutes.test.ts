@@ -8,6 +8,7 @@ import { createTeam, invitePlayer, respondInvite, setRole } from '../src/teams/t
 import { createBooking } from '../src/bookings/bookings.js';
 import { Notifier } from '../src/notify/notify.js';
 import { bookingRoutes } from '../src/routes/bookings.js';
+import type { BookingRunner } from '../src/bookings/runner.js';
 import { scrimRoutes } from '../src/routes/scrims.js';
 import { authedCookie } from './helpers.js';
 
@@ -16,11 +17,12 @@ const ADMIN = '76561199000001090';
 const MOD = '76561199000001091';
 const START = '2026-10-02T20:00:00.000Z';
 const NOW = new Date('2026-10-01T12:00:00.000Z');
+const PUBLIC_URL = 'https://riversidepug.com';
 
 let db: DB;
 let app: FastifyInstance;
 let cookies: Record<string, Record<string, string>>;
-let dms: { to: string; type: string; content: string }[];
+let dms: { to: string; content: string }[];
 
 beforeEach(async () => {
   db = openDb(':memory:');
@@ -29,12 +31,9 @@ beforeEach(async () => {
   await app.register(cookie, { secret: 'x'.repeat(32) });
   const notifier = new Notifier({
     db,
-    dm: () => async (to, p) => { dms.push({ to, type: '', content: p.content ?? '' }); },
+    dm: () => async (to, p) => { dms.push({ to, content: p.content ?? '' }); },
   });
-  // The send() call itself does not carry the type to the dm function, so
-  // notices are told apart by their wording in the assertions below; a
-  // wrapper here would only duplicate Notifier's own dispatch.
-  await app.register(scrimRoutes, { db, runner: null, notifier, publicUrl: 'https://riversidepug.com' });
+  await app.register(scrimRoutes, { db, runner: null, notifier, publicUrl: PUBLIC_URL });
   await app.register(bookingRoutes, { db, runner: null });
   await app.ready();
 
@@ -175,28 +174,83 @@ describe('post, accept, confirm: the booking and its notices', () => {
     expect(otherAcceptId).toBeTypeOf('number');
   });
 
-  it('a decline tells that accepter\'s captain (scrim_declined)', async () => {
+  it('a confirm calls only the runner\'s allocate(), never onCreated/onConfirmed, and each side gets exactly one scrim_booked DM', async () => {
+    const calls: string[] = [];
+    const stubRunner = {
+      onCreated: () => calls.push('onCreated'),
+      onConfirmed: () => calls.push('onConfirmed'),
+      allocate: () => calls.push('allocate'),
+    } as unknown as BookingRunner;
+    const notifier = new Notifier({ db, dm: () => async (to, p) => { dms.push({ to, content: p.content ?? '' }); } });
+    const stubApp = Fastify();
+    await stubApp.register(cookie, { secret: 'x'.repeat(32) });
+    await stubApp.register(scrimRoutes, { db, runner: stubRunner, notifier, publicUrl: PUBLIC_URL });
+    await stubApp.ready();
+
     const id = await post(P[0]);
     const acceptId = await accept(id, P[1]);
     dms.length = 0;
+    const r = await stubApp.inject({ method: 'POST', url: `/api/scrims/accepts/${acceptId}/confirm`, cookies: cookies[P[0]] });
+    expect(r.statusCode).toBe(200);
+    // onCreated/onConfirmed would send booking_invite/booking_confirmed DMs
+    // that are stale or duplicate here: the one notice is scrim_booked.
+    expect(calls).toEqual(['allocate']);
+    const booked = dms.filter((d) => d.content.includes('Your scrim is booked'));
+    expect(booked.map((d) => d.to).sort()).toEqual([discordOf(P[0]), discordOf(P[1])].sort());
+    expect(dms).toHaveLength(2);
+
+    await stubApp.close();
+  });
+
+  it('a decline tells every current manager of that accepter\'s side (scrim_declined), not only its stored captain', async () => {
+    const id = await post(P[0]);
+    const mice = team(P[1], 'Mice', 'MM', [P[2]]);
+    const acceptId = await accept(id, P[1], { teamId: mice });
+    dms.length = 0;
     const r = await call('POST', `/api/scrims/accepts/${acceptId}/decline`, P[0]);
     expect(r.statusCode).toBe(200);
-    expect(dms).toHaveLength(1);
-    expect(dms[0].to).toBe(discordOf(P[1]));
+    expect(dms.map((d) => d.to).sort()).toEqual([discordOf(P[1]), discordOf(P[2])].sort());
     expect(dms[0].content).toMatch(/is closed: the poster declined it/);
   });
 
-  it('a confirm offers the nearest slot when the capacity is gone by then', async () => {
+  it('withdrawing a post tells every current manager of each pending accepter\'s side (scrim_declined, "the post was withdrawn")', async () => {
+    const id = await post(P[0]);
+    const mice = team(P[1], 'Mice', 'MM', [P[2]]);
+    await accept(id, P[1], { teamId: mice });
+    dms.length = 0;
+    const r = await call('POST', `/api/scrims/${id}/withdraw`, P[0]);
+    expect(r.statusCode).toBe(200);
+    expect(dms.map((d) => d.to).sort()).toEqual([discordOf(P[1]), discordOf(P[2])].sort());
+    expect(dms[0].content).toMatch(/is closed: the post was withdrawn/);
+  });
+
+  it('withdrawing a post with no pending acceptance sends no notice', async () => {
+    const id = await post(P[0]);
+    dms.length = 0;
+    const r = await call('POST', `/api/scrims/${id}/withdraw`, P[0]);
+    expect(r.statusCode).toBe(200);
+    expect(dms).toEqual([]);
+  });
+
+  it('a confirm offers the nearest slot when the capacity is gone by then, and DMs the accepter\'s side managers about it', async () => {
     const id = await post(P[0], { startsAt: START, minutes: 60 });
-    const acceptId = await accept(id, P[1]);
+    const mice = team(P[1], 'Mice', 'MM', [P[2]]);
+    const acceptId = await accept(id, P[1], { teamId: mice });
     for (const [a, b] of [[P[3], P[4]], [P[5], P[6]]]) {
       const r = createBooking(db, { by: a, opponent: { steamid: b }, startsAt: START, minutes: 60, playlist: ['no_mercy'], now: NOW });
       expect(r.ok).toBe(true);
     }
+    dms.length = 0;
     const confirmed = await call('POST', `/api/scrims/accepts/${acceptId}/confirm`, P[0]);
     expect(confirmed.statusCode).toBe(409);
-    expect(confirmed.json()).toHaveProperty('nearestSlot');
     expect(confirmed.json().error).toMatch(/not enough servers/i);
+    expect(confirmed.json()).toHaveProperty('nearestSlot');
+    const nearestSlot = confirmed.json().nearestSlot as string | null;
+    expect(nearestSlot).toBeTruthy();
+
+    expect(dms.map((d) => d.to).sort()).toEqual([discordOf(P[1]), discordOf(P[2])].sort());
+    expect(dms[0].content).toMatch(/no longer free/);
+    expect(dms[0].content).toContain('The nearest free slot is');
   });
 });
 

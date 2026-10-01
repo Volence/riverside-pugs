@@ -1,7 +1,7 @@
 import type { DB } from '../db.js';
 import type { Notifier } from '../notify/notify.js';
 import { expire, getAccept } from './scrims.js';
-import { scrimMessage } from './messages.js';
+import { scrimMessage, scrimSideManagers } from './messages.js';
 
 /**
  * The scrim board's minute tick (plan 1, Task 3): expires posts and stale
@@ -41,26 +41,46 @@ export class ScrimBoard {
     this.now = deps.now ?? Date.now;
   }
 
-  /** The minute pass. Never runs two at once. */
+  /** The minute pass. Never runs two at once, and never rejects: a caller
+   *  only ever does `void board.tick()` from a timer, so a thrown error here
+   *  would otherwise surface as an unhandled rejection rather than a logged
+   *  line. expire() and poster.tickNow() are caught separately, so a poster
+   *  refresh still happens even if expiring posts failed, and vice versa. */
   async tick(): Promise<void> {
     if (this.ticking) return;
     this.ticking = true;
     try {
-      const result = expire(this.db, new Date(this.now()));
-      const lost = [...result.accepts, ...result.withdrawn.accepts];
-      for (const acceptId of lost) {
-        const a = getAccept(this.db, acceptId);
-        if (!a) continue;
-        try {
-          const payload = scrimMessage(this.db, this.deps.publicUrl, a.post_id, 'scrim_declined', { reason: 'it expired' });
-          if (payload) this.deps.notifier.send([a.captain_steamid], 'scrim_declined', payload);
-        } catch (err) {
-          console.warn(`[scrims] expiry notice for accept ${acceptId} failed:`, err instanceof Error ? err.message : err);
-        }
+      try {
+        const result = expire(this.db, new Date(this.now()));
+        this.notifyLost(result.accepts, 'it expired');
+        this.notifyLost(result.withdrawn.accepts, 'the team was disbanded');
+      } catch (err) {
+        console.error('[scrims] expire() failed:', err instanceof Error ? err.message : err);
       }
-      this.deps.poster?.()?.tickNow();
+      try {
+        this.deps.poster?.()?.tickNow();
+      } catch (err) {
+        console.error('[scrims] poster.tickNow() failed:', err instanceof Error ? err.message : err);
+      }
     } finally {
       this.ticking = false;
+    }
+  }
+
+  /** Tells every current manager of each lost accepter's side (not just the
+   *  acceptance's stored captain_steamid, which can be stale: a team accept
+   *  may since have grown a co-captain). A failure to word or send one
+   *  notice must not stop the rest. */
+  private notifyLost(acceptIds: number[], reason: string): void {
+    for (const acceptId of acceptIds) {
+      const a = getAccept(this.db, acceptId);
+      if (!a) continue;
+      try {
+        const payload = scrimMessage(this.db, this.deps.publicUrl, a.post_id, 'scrim_declined', { reason });
+        if (payload) this.deps.notifier.send(scrimSideManagers(this.db, a), 'scrim_declined', payload);
+      } catch (err) {
+        console.warn(`[scrims] expiry notice for accept ${acceptId} failed:`, err instanceof Error ? err.message : err);
+      }
     }
   }
 }

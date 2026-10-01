@@ -296,6 +296,23 @@ describe('notices', () => {
   });
 });
 
+describe('tick resilience', () => {
+  it('a pass that throws is logged and the tick resolves rather than rejecting, and the ticking flag is still reset', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    db.exec('DROP TABLE bookings');
+    await expect(runner.tick()).resolves.toBeUndefined();
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+    // The ticking flag was reset in finally: a second call is not silently
+    // skipped as "already running" (openBookings still fails, so this also
+    // proves it is not stuck true from the first call).
+    const spy2 = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(runner.tick()).resolves.toBeUndefined();
+    expect(spy2).toHaveBeenCalled();
+    spy2.mockRestore();
+  });
+});
+
 describe('bookingLines', () => {
   it('keeps team names console-safe', () => {
     const id = book();

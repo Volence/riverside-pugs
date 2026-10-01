@@ -492,7 +492,9 @@ export class BookingRunner {
     this.track(id, () => this.windDown(id, true));
   }
 
-  /** The minute pass. Never runs two at once. */
+  /** The minute pass. Never runs two at once, and never rejects: a timer
+   *  caller only ever does `void runner.tick()`, so a thrown error here would
+   *  otherwise surface as an unhandled rejection rather than a logged line. */
   async tick(): Promise<void> {
     if (this.ticking) return;
     this.ticking = true;
@@ -513,6 +515,8 @@ export class BookingRunner {
       } catch (err) {
         console.error('[booking] voice closeEnded failed:', err);
       }
+    } catch (err) {
+      console.error('[booking] tick failed:', err);
     } finally {
       this.ticking = false;
     }
