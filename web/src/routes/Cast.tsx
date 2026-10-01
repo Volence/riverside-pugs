@@ -120,15 +120,17 @@ function CastCard({ m }: { m: CastMatch }) {
           <p class="muted cast__hint">Paste it into the console. Through Steam, press Enter on the password prompt.</p>
         </>
       ) : m.booked ? (
-        <>
-          {tvLine && (
+        tvLine ? (
+          <>
             <div class="cast__connect">
               <code>{tvLine}</code>
               <CopyChip label="Copy" text={tvLine} />
             </div>
-          )}
-          <p class="muted cast__hint">A booked scrim: watch it through SourceTV. The game server is only for the two sides.</p>
-        </>
+            <p class="muted cast__hint">A booked scrim: watch it through SourceTV. The game server is only for the two sides.</p>
+          </>
+        ) : (
+          <p class="muted cast__hint">SourceTV is off on this server.</p>
+        )
       ) : (
         <p class="muted cast__hint">Started in game, so the site does not know this server's password. Ask an admin for it.</p>
       )}

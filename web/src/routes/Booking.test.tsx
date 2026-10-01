@@ -215,12 +215,16 @@ describe('Booking page', () => {
       expect(screen.queryByText('Casters')).toBeNull();
     });
 
-    it('lists but offers no invite or withdraw once the booking is over', async () => {
-      mockBookings.get.mockResolvedValue(VIEW({ state: 'ended', connect: null, casters: [C1] }));
+    it('once the booking is over, offers no invite but still lets a side withdraw its own half', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ state: 'ended', connect: null, casters: [C1, { steamid: 'c2', name: 'Caster Two', a: false, b: true }] }));
+      mockBookings.withdrawCaster.mockResolvedValue(VIEW({ state: 'ended', connect: null, casters: [{ steamid: 'c2', name: 'Caster Two', a: false, b: true }] }));
       render(<Booking id="7" session={session} />);
       expect(await screen.findByText('Caster One')).toBeTruthy();
       expect(screen.queryByLabelText('Caster')).toBeNull();
-      expect(screen.queryByRole('button', { name: 'Withdraw' })).toBeNull();
+      const withdraws = screen.getAllByRole('button', { name: 'Withdraw' });
+      expect(withdraws).toHaveLength(1);
+      fireEvent.click(withdraws[0]);
+      await waitFor(() => expect(mockBookings.withdrawCaster).toHaveBeenCalledWith(7, 'c1'));
     });
   });
 });
