@@ -1,6 +1,6 @@
 import type { DB } from '../db.js';
 import { getServer, type ServerRow } from '../serverPool.js';
-import { NOT_HELD_SQL } from '../serverHolds.js';
+import { NOT_HELD_SQL, holdFor } from '../serverHolds.js';
 import { campaignRegistry, firstMapOf, type CampaignEntry } from '../campaignRegistry.js';
 import { isInstalledEverywhere } from '../campaignInstall.js';
 import { isMapName } from '../campaigns.js';
@@ -166,9 +166,16 @@ export function allowLines(db: DB, b: BookingRow): string[] {
   return lines;
 }
 
-/** An rcon error names the command it was on: an allowlist line becomes a count. */
+/** An rcon error names the command it was on: an allowlist line (add or
+ *  refuse) becomes a count. */
 export function hideAllowIds(message: string): string {
-  return message.replace(/sm_booking_allow_add((?:\s+\d+)*)/g, (_, ids: string) => `sm_booking_allow_add (${ids.trim() === '' ? 0 : ids.trim().split(/\s+/).length} ids)`);
+  return message.replace(/sm_booking_allow_(add|refuse)((?:\s+\d+)*)/g, (_, what: string, ids: string) => `sm_booking_allow_${what} (${ids.trim() === '' ? 0 : ids.trim().split(/\s+/).length} ids)`);
+}
+
+/** The SteamID64 an `!allow` line names (its arg starts with it), or null. */
+function allowTarget(arg: string): string | null {
+  const first = arg.trim().split(/\s+/)[0] ?? '';
+  return /^\d{17}$/.test(first) ? first : null;
 }
 
 /** Folded for name matching: lower case, `_`, `-` and spaces as one space. */
@@ -800,10 +807,15 @@ export class BookingRunner {
     const b = bookingOnServer(this.db, serverId);
     if (!b) {
       console.log(`[booking] onCommand: no open booking on server ${serverId} (${cmd === 'allow' ? 'no steamid logged' : `steamid ${steamid}`}, cmd ${cmd})`);
+      // A booking winding down still holds the box and its plugin still
+      // enforces: what that plugin let in on its own is taken back.
+      const hold = holdFor(this.db, serverId);
+      if (cmd === 'allow' && hold?.kind === 'booking') this.refuseAllow(hold.rowId, serverId, arg, BOOKING_ERRORS.wrong_state.text);
       return;
     }
     if (actingSides(this.db, b.id, steamid).length === 0) {
       console.log(`[booking] ${b.id}: onCommand: ${who} does not manage a confirmed side (server ${serverId}, cmd ${cmd})`);
+      if (cmd === 'allow') this.refuseAllow(b.id, serverId, arg, BOOKING_ERRORS.not_manager.text);
       return;
     }
     let error: string | null = null;
@@ -844,15 +856,16 @@ export class BookingRunner {
 
   /** `!allow` (plan 4b2): `arg` is `<steamid64> <name...>` from the plugin,
    *  the name as the game shows it (untrusted). On success the whole list goes
-   *  to the box at once, with the line saying who is in; the refusal text
-   *  otherwise (said by onCommand). */
+   *  to the box at once, with the line saying who is in; a refusal is said
+   *  and taken back on the box (refuseAllow). Always null: it says its own. */
   private allowFromGame(id: number, serverId: number, by: string, arg: string): string | null {
     const m = /^(\S+)\s*([\s\S]*)$/.exec(arg.trim());
     const steamid = m?.[1] ?? '';
     const r = allowInGame(this.db, { bookingId: id, by, steamid, name: m?.[2] ?? '', now: new Date(this.now()) });
     if (!r.ok) {
       console.log(`[booking] ${id}: !allow refused (${r.error})`);
-      return BOOKING_ERRORS[r.error].text;
+      this.refuseAllow(id, serverId, arg, BOOKING_ERRORS[r.error].text);
+      return null;
     }
     const b = getBooking(this.db, id);
     const server = getServer(this.db, serverId);
@@ -866,6 +879,21 @@ export class BookingRunner {
     console.log(`[booking] ${id}: !allow ${r.value.added ? 'added' : 'already in'}; the list has ${allowList(this.db, id).length} ids`);
     void this.push(id, server, () => [...allowLines(this.db, b), said], 'the allowlist');
     return null;
+  }
+
+  /** A refused `!allow`. The plugin put the player on its active list the
+   *  moment the captain typed it (l4d_booking 1.2.0), so beside the reason
+   *  the box is told `sm_booking_allow_refuse <id>` (1.2.1): it takes them
+   *  back off and restarts their grace. Through push, so a failure logs the
+   *  line as a count (hideAllowIds), never the id. A malformed target gets
+   *  the reason alone. */
+  private refuseAllow(id: number, serverId: number, arg: string, reason: string): void {
+    const server = getServer(this.db, serverId);
+    if (!server) return;
+    const target = allowTarget(arg);
+    const lines = [`say [Booking] ${consoleText(reason, 150)}`];
+    if (target) lines.push(`sm_booking_allow_refuse ${target}`);
+    void this.push(id, server, () => lines, 'the !allow refusal');
   }
 
   // ---------- notices ----------
