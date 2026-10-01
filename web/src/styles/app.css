@@ -3460,3 +3460,7 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
   margin: 0 0 var(--sp-3); padding: var(--sp-2) var(--sp-3); border-left: 3px solid var(--accent);
   background: var(--surface-2); color: var(--text-bright); font-size: var(--fs-dense);
 }
+
+/* The booking form's Rules and Game config pickers, each with its help line. */
+.bookform__pick { display: flex; flex-direction: column; gap: var(--sp-1); }
+.bookform__pick p { margin: 0; font-size: var(--fs-dense); }

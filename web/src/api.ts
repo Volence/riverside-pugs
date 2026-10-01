@@ -1792,7 +1792,7 @@ export interface SlotEstimate {
 }
 export interface BookingOptions {
   campaigns: { slug: string; name: string; minutes: number }[];
-  rulesets: { id: number; name: string }[];
+  rulesets: RulesetOption[];
   gameConfigs: { key: string; label: string }[];
   limits: { daysAhead: number; playlistMax: number };
   /** The slot is estimated from the campaigns (bookings by campaign); these
@@ -2037,10 +2037,13 @@ export interface AdminEventDetail {
 }
 export interface AdminEventOptions {
   campaigns: { slug: string; name: string }[]; defaultPool: string[];
-  rulesets: { id: number; name: string }[]; defaultRulesetId: number | null;
+  rulesets: RulesetOption[]; defaultRulesetId: number | null;
   gameConfigs: { key: string; label: string }[];
   defaults: { eligibility: EventEligibility; checkin: EventCheckin; roster: EventRoster };
 }
+
+/** A ruleset a picker offers, with its one-line summary (src/events/format.ts rulesSummary). */
+export interface RulesetOption { id: number; name: string; summary: string }
 
 /** Mirrors src/rulesets.ts MatchRules. */
 export interface MatchRules {

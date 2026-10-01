@@ -55,6 +55,8 @@ export function StageForm({ options, initial, busy, onSave, onCancel }: {
     setProblem(null);
     onSave(settingsFrom(out));
   };
+  // The chosen ruleset in one line; an archived one (no longer offered) has none.
+  const summary = options.rulesets.find((r) => r.id === d.rulesetId)?.summary ?? '';
   const toggle = (slug: string) =>
     set({ campaignPool: d.campaignPool.includes(slug) ? d.campaignPool.filter((s) => s !== slug) : [...d.campaignPool, slug] });
 
@@ -104,13 +106,13 @@ export function StageForm({ options, initial, busy, onSave, onCancel }: {
         )}
       </FormGroup>
       <FormGroup title="Matches">
-        <FormRow label="Ruleset" for={id('ruleset')}>
+        <FormRow label="Ruleset" help={<>Match rules: pauses, side choice, no-show grace.{summary && <><br /><span>{summary}</span></>}</>} for={id('ruleset')}>
           <select id={id('ruleset')} aria-label="Ruleset" value={String(d.rulesetId)} onChange={(e) => set({ rulesetId: Number(pick(e)) })}>
             {stale.rulesetId !== null && <option value={String(stale.rulesetId)}>Ruleset {stale.rulesetId}{STALE}</option>}
             {options.rulesets.map((r) => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
           </select>
         </FormRow>
-        <FormRow label="Game config" for={id('config')}>
+        <FormRow label="Game config" help="What the server runs (the cfg it loads)." for={id('config')}>
           <select id={id('config')} aria-label="Game config" value={d.gameConfig} onChange={(e) => set({ gameConfig: pick(e) })}>
             {stale.gameConfig !== null && <option value={stale.gameConfig}>{stale.gameConfig}{STALE}</option>}
             {options.gameConfigs.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}

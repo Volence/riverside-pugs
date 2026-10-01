@@ -22,7 +22,8 @@ const { LocationProvider } = await import('preact-iso');
 
 const OPTIONS: AdminEventOptions = {
   campaigns: [{ slug: 'no_mercy', name: 'No Mercy' }, { slug: 'dead_air', name: 'Dead Air' }, { slug: 'death_toll', name: 'Death Toll' }],
-  defaultPool: ['no_mercy', 'dead_air'], rulesets: [{ id: 2, name: 'Standard Cup' }], defaultRulesetId: 2,
+  defaultPool: ['no_mercy', 'dead_air'], rulesets: [{ id: 2, name: 'Standard Cup', summary: '3 pauses of 120 s · higher seed picks sides · 15 min no-show grace' }],
+  defaultRulesetId: 2,
   gameConfigs: [{ key: 'standard', label: 'Standard' }],
   defaults: {
     eligibility: { minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: null },

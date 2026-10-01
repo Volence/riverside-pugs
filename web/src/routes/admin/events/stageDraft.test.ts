@@ -4,7 +4,10 @@ import { configOf, draftFrom, settingsFrom, staleValues } from './stageDraft';
 
 const OPTIONS: AdminEventOptions = {
   campaigns: [{ slug: 'no_mercy', name: 'No Mercy' }, { slug: 'dead_air', name: 'Dead Air' }],
-  defaultPool: ['no_mercy', 'dead_air'], rulesets: [{ id: 1, name: 'PUG' }, { id: 2, name: 'Standard Cup' }], defaultRulesetId: 2,
+  defaultPool: ['no_mercy', 'dead_air'], rulesets: [
+    { id: 1, name: 'PUG', summary: '3 pauses of 120 s · coin toss for sides · 10 min no-show grace' },
+    { id: 2, name: 'Standard Cup', summary: '3 pauses of 120 s · higher seed picks sides · 15 min no-show grace' },
+  ], defaultRulesetId: 2,
   gameConfigs: [{ key: 'standard', label: 'Standard' }],
   defaults: {
     eligibility: { minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: null },

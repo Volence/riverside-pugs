@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import type { DB } from '../src/db.js';
 import { TEMPLATES } from '../src/rulesets.js';
 import {
-  createRuleset, readEditableRules, rulesetList, setRulesetArchived, updateRuleset, type EditableRules,
+  createRuleset, readEditableRules, rulesetList, rulesetOptions, setRulesetArchived, updateRuleset, type EditableRules,
 } from '../src/rulesetStore.js';
 import { ADMIN, eventFixture, must } from './eventFixture.js';
 import * as E from '../src/events/events.js';
@@ -166,5 +166,17 @@ describe('archiving a ruleset', () => {
       expect(errOf(setRulesetArchived(db, { by: ADMIN, id: idOf(name), archived: true }))).toBe('template_locked');
     }
     expect(errOf(setRulesetArchived(db, { by: ADMIN, id: 999, archived: true }))).toBe('not_found');
+  });
+});
+
+describe('picker options', () => {
+  it('offers the live rulesets in id order, each with its summary, and leaves archived ones out', () => {
+    const { id } = okOf(createRuleset(db, { by: ADMIN, copyFrom: idOf('Casual Scrim'), name: 'Gone Soon' }));
+    okOf(setRulesetArchived(db, { by: ADMIN, id, archived: true }));
+    expect(rulesetOptions(db)).toEqual([
+      { id: idOf('PUG'), name: 'PUG', summary: '3 pauses of 120 s · coin toss for sides · 10 min no-show grace' },
+      { id: idOf('Standard Cup'), name: 'Standard Cup', summary: '3 pauses of 120 s · higher seed picks sides · 15 min no-show grace' },
+      { id: idOf('Casual Scrim'), name: 'Casual Scrim', summary: 'Unlimited pauses · non-picker picks sides · 15 min no-show grace' },
+    ]);
   });
 });
