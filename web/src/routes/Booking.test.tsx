@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 
 const { mockBookings, mockAdmin } = vi.hoisted(() => ({
-  mockBookings: { get: vi.fn(), act: vi.fn(), cancel: vi.fn() },
+  mockBookings: { get: vi.fn(), act: vi.fn(), cancel: vi.fn(), options: vi.fn(), next: vi.fn(), stay: vi.fn() },
   mockAdmin: { cancelBooking: vi.fn(), extendBooking: vi.fn(), endBooking: vi.fn() },
 }));
 vi.mock('../api', async (importOriginal) => {
@@ -21,16 +21,21 @@ const VIEW = (over: Record<string, unknown> = {}) => ({
     { side: 'b', name: 'Mice', team: { id: 1, slug: 'mice', name: 'Mice', tag: 'MM', logoKey: null }, captain: { steamid: 'x1', name: 'p1' }, confirmed: true, peakPresent: 0, noShow: false, people: [] },
   ],
   viewer: { side: 'a', manages: ['a'], staff: false, invited: false },
+  games: [],
   ...over,
 });
 const session = { kind: 'active', me: { steamid: 'x0', name: 'p0', avatar: null, status: 'active', isAdmin: false, teams: true } } as never;
+const OPTIONS = { campaigns: [{ slug: 'no_mercy', name: 'No Mercy', minutes: 60 }, { slug: 'death_toll', name: 'Death Toll', minutes: 65 }] };
 
 afterEach(() => {
   cleanup();
   for (const f of Object.values(mockBookings)) f.mockReset();
   for (const f of Object.values(mockAdmin)) f.mockReset();
 });
-beforeEach(() => { mockBookings.get.mockResolvedValue(VIEW()); });
+beforeEach(() => {
+  mockBookings.get.mockResolvedValue(VIEW());
+  mockBookings.options.mockResolvedValue(OPTIONS);
+});
 
 describe('Booking page', () => {
   it('shows the connect line when ready', async () => {
@@ -91,5 +96,58 @@ describe('Booking page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel booking' }));
     await waitFor(() => expect(mockAdmin.cancelBooking).toHaveBeenCalledWith(7, ''));
     await waitFor(() => expect(mockBookings.get).toHaveBeenCalledTimes(2));
+  });
+
+  describe('games (plan 4b, Task 7)', () => {
+    const GAME = {
+      matchId: 55, campaign: 'no_mercy', state: 'completed', scoreA: 3, scoreB: 5, sideA: 'b' as const,
+      startedAt: '2026-10-02T20:00:00.000Z', endedAt: '2026-10-02T20:30:00.000Z',
+    };
+
+    it('renders a game and orients its score to the booking sides, with a link to the match', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ games: [GAME] }));
+      render(<Booking id="7" session={session} />);
+      // sideA is 'b': booking side b was match team A (score 3), so booking
+      // side a (p0's group) shows the other score, 5.
+      expect(await screen.findByText("p0's group 5 : 3 Mice")).toBeTruthy();
+      expect(screen.getByText('completed')).toBeTruthy();
+      const link = screen.getByRole('link', { name: 'View' }) as HTMLAnchorElement;
+      expect(link.getAttribute('href')).toBe('/match/55');
+      expect(link.closest('li')?.textContent).toContain('No Mercy');
+    });
+
+    it('hides the next-campaign controls while a game is live, even for a manager of a confirmed side', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ games: [{ ...GAME, state: 'live' }] }));
+      render(<Booking id="7" session={session} />);
+      await screen.findByText('No Mercy');
+      expect(screen.queryByRole('button', { name: 'Play this next' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Replay last campaign' })).toBeNull();
+    });
+
+    it('a manager of a confirmed side can pick a campaign or replay the last one', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ games: [GAME] }));
+      mockBookings.next.mockResolvedValue(VIEW({ games: [GAME] }));
+      mockBookings.stay.mockResolvedValue(VIEW({ games: [GAME] }));
+      render(<Booking id="7" session={session} />);
+      const select = await screen.findByLabelText('Campaign') as HTMLSelectElement;
+      fireEvent.change(select, { target: { value: 'death_toll' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Play this next' }));
+      await waitFor(() => expect(mockBookings.next).toHaveBeenCalledWith(7, 'death_toll'));
+      fireEvent.click(screen.getByRole('button', { name: 'Replay last campaign' }));
+      await waitFor(() => expect(mockBookings.stay).toHaveBeenCalledWith(7));
+    });
+
+    it('a staff-only viewer who manages no side still sees the controls', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ viewer: { side: null, manages: [], staff: true, invited: false } }));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByRole('button', { name: 'Play this next' })).toBeTruthy();
+    });
+
+    it('hides the controls for a player who manages nothing and is not staff', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ viewer: { side: 'a', manages: [], staff: false, invited: false } }));
+      render(<Booking id="7" session={session} />);
+      await waitFor(() => expect(mockBookings.get).toHaveBeenCalled());
+      expect(screen.queryByRole('button', { name: 'Play this next' })).toBeNull();
+    });
   });
 });

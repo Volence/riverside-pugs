@@ -11,6 +11,7 @@ import * as B from '../bookings/bookings.js';
 import { bookingLimits, typicalCampaignMinutes, STEP_MINUTES } from '../bookings/rules.js';
 import { isNotifyType, prefsOf, setPref } from '../notify/notify.js';
 import type { BookingRunner } from '../bookings/runner.js';
+import { logAdmin } from '../admin/audit.js';
 
 export interface BookingRoutesOpts {
   db: DB;
@@ -19,6 +20,7 @@ export interface BookingRoutesOpts {
 }
 
 const NOT_FOUND = { error: 'not found' };
+const NO_RUNNER = { error: 'Booking game control is not available on this server.' };
 
 /**
  * Server bookings for players (plan 4a). Every route answers 404 to a viewer
@@ -152,6 +154,35 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
     if (!v) return;
     const r = B.removePerson(db, { bookingId: v.id, by: v.me, steamid: (req.params as { steamid: string }).steamid });
     if (!r.ok) return refuse(reply, r.error);
+    return view(v.me, v.id);
+  });
+
+  /** Between-games playlist control (plan 4b, Task 7): a manager of a
+   *  confirmed side or staff may pick the next campaign or replay the last
+   *  one. Both go through the runner, which re-checks who may act (the site
+   *  re-checks every in-game command too, Task 6); a staff caller acting
+   *  outside their own side is audited. 503 when no runner is wired (a route
+   *  built bare in tests). A refusal carries the runner's own text. */
+  app.post('/api/bookings/:id/next', async (req, reply) => {
+    const v = visible(req, reply);
+    if (!v) return;
+    if (!runner) return reply.code(503).send(NO_RUNNER);
+    const staff = isStaff(v.me);
+    const campaign = body(req).campaign;
+    const r = runner.chooseNext(v.id, v.me, typeof campaign === 'string' ? campaign : null, staff);
+    if (!r.ok) return reply.code(409).send({ error: r.error });
+    if (staff && B.actingSides(db, v.id, v.me).length === 0) logAdmin(db, v.me, 'booking_next', v.id, { campaign: r.campaign });
+    return view(v.me, v.id);
+  });
+
+  app.post('/api/bookings/:id/stay', async (req, reply) => {
+    const v = visible(req, reply);
+    if (!v) return;
+    if (!runner) return reply.code(503).send(NO_RUNNER);
+    const staff = isStaff(v.me);
+    const r = runner.stay(v.id, v.me, staff);
+    if (!r.ok) return reply.code(409).send({ error: r.error });
+    if (staff && B.actingSides(db, v.id, v.me).length === 0) logAdmin(db, v.me, 'booking_stay', v.id, { campaign: r.campaign });
     return view(v.me, v.id);
   });
 }
