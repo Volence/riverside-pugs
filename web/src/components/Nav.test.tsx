@@ -126,7 +126,7 @@ describe('Nav', () => {
     expect(screen.queryByRole('link', { name: 'Cast' })).toBeNull();
   });
 
-  it('offers Teams, Bookings and Scrims only to a viewer the competitive switch lets in', () => {
+  it('offers Teams, Bookings, Scrims and Events only to a viewer the competitive switch lets in', () => {
     const inCompetitive = { steamid: '1', name: 'alice', avatar: null, status: 'active', isAdmin: false, teams: true };
     const { unmount } = render(
       <LocationProvider><Nav session={{ kind: 'active', me: inCompetitive }} state={null} /></LocationProvider>,
@@ -134,12 +134,22 @@ describe('Nav', () => {
     expect((screen.getByRole('link', { name: 'Teams' }) as HTMLAnchorElement).getAttribute('href')).toBe('/teams');
     expect((screen.getByRole('link', { name: 'Bookings' }) as HTMLAnchorElement).getAttribute('href')).toBe('/bookings');
     expect((screen.getByRole('link', { name: 'Scrims' }) as HTMLAnchorElement).getAttribute('href')).toBe('/scrims');
+    expect((screen.getByRole('link', { name: 'Events' }) as HTMLAnchorElement).getAttribute('href')).toBe('/events');
     unmount();
     const outside = { steamid: '2', name: 'bob', avatar: null, status: 'active', isAdmin: false };
     render(<LocationProvider><Nav session={{ kind: 'active', me: outside }} state={null} /></LocationProvider>);
     expect(screen.queryByRole('link', { name: 'Teams' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Bookings' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Scrims' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Events' })).toBeNull();
+  });
+
+  it('keeps Events current on an event page', () => {
+    history.replaceState(null, '', '/event/riverside-cup');
+    const me = { steamid: '1', name: 'alice', avatar: null, status: 'active', isAdmin: false, teams: true };
+    render(<LocationProvider><Nav session={{ kind: 'active', me }} state={null} /></LocationProvider>);
+    expect(screen.getByRole('link', { name: 'Events' }).getAttribute('aria-current')).toBe('page');
+    history.replaceState(null, '', '/');
   });
 
   it('offers it to a pending or banned account too, and to nobody signed out', () => {
