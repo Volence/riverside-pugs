@@ -9,7 +9,10 @@ import { QueueBar } from './components/QueueBar';
 import { EndorseBar } from './components/EndorseBar';
 import { DevPanel } from './components/DevPanel';
 import { ConfirmHost } from './components/Confirm';
+import { installStaleBundleReload } from './staleBundle';
 import './styles/app.css';
+
+installStaleBundleReload();
 
 /** Live state is held at the root rather than inside the Play route, because
  *  the websocket connection and the ready-check countdown must survive
