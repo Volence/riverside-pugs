@@ -134,4 +134,26 @@ describe('the Events desk routes', () => {
     expect(list.map((e: { name: string; status: string; stages: number }) => [e.name, e.status, e.stages]))
       .toEqual([['Later Cup', 'draft', 0], ['First Cup', 'draft', 0]]);
   });
+
+  it('deletes a draft (admins only), audited with its name and slug; a published event is refused', async () => {
+    const { id, slug } = (await call('POST', '/api/admin/events', ADMIN, { name: 'Oops Cup', startsAt: start(), entryKind: 'team' })).json();
+    await call('POST', `/api/admin/events/${id}/stages`, ADMIN, { type: 'single_elim', rulesetId: cup() });
+    expect((await call('POST', `/api/admin/events/${id}/delete`, MOD)).statusCode).toBe(403);
+    expect((await call('POST', `/api/admin/events/${id}/delete`, PLAYER)).statusCode).toBe(403);
+    expect((await call('POST', `/api/admin/events/${id}/delete`)).statusCode).toBe(401);
+    expect((await call('POST', `/api/admin/events/${id}/cancel`, ADMIN, { reason: 'x' })).statusCode).toBe(EVENT_ERRORS.wrong_status.status);
+    const del = await call('POST', `/api/admin/events/${id}/delete`, ADMIN);
+    expect([del.statusCode, del.json()]).toEqual([200, { ok: true }]);
+    expect((await call('GET', `/api/admin/events/${id}`, ADMIN)).statusCode).toBe(404);
+    const audit = db.prepare("SELECT target, detail FROM admin_actions WHERE action = 'event_delete'").all() as { target: string; detail: string }[];
+    expect(audit.map((a) => [a.target, JSON.parse(a.detail)])).toEqual([[String(id), { name: 'Oops Cup', slug }]]);
+    expect((await call('POST', `/api/admin/events/${id}/delete`, ADMIN)).statusCode).toBe(404);
+
+    const pub = (await call('POST', '/api/admin/events', ADMIN, { name: 'Live Cup', startsAt: start(), entryKind: 'team' })).json();
+    await call('POST', `/api/admin/events/${pub.id}/stages`, ADMIN, { type: 'single_elim', rulesetId: cup() });
+    await call('POST', `/api/admin/events/${pub.id}/publish`, ADMIN);
+    const refused = await call('POST', `/api/admin/events/${pub.id}/delete`, ADMIN);
+    expect([refused.statusCode, refused.json()]).toEqual([EVENT_ERRORS.wrong_status.status, { error: EVENT_ERRORS.wrong_status.text }]);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'event_delete'").get()).toEqual({ n: 1 });
+  });
 });

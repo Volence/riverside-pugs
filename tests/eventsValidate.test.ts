@@ -49,6 +49,15 @@ describe('names, slugs, descriptions, reasons, times', () => {
     expect(V.parseTime('soon')).toBeNull();
     expect(V.parseTime(0)).toBeNull();
   });
+
+  it('refuses a time with no zone, which would be read in the server zone', () => {
+    expect(V.parseTime('2026-10-10T20:00')).toBeNull();
+    expect(V.parseTime('2026-10-10T20:00:00')).toBeNull();
+    expect(V.parseTime('2026-10-10T20:00:00.000')).toBeNull();
+    expect(V.parseTime('2026-10-10T20:00Z')).toBe('2026-10-10T20:00:00.000Z');
+    expect(V.parseTime('2026-10-10T20:00:00-05:00')).toBe('2026-10-11T01:00:00.000Z');
+    expect(V.parseTime('2026-10-10T20:00:00Z junk')).toBeNull();
+  });
 });
 
 describe('eligibility, check-in and roster rules', () => {
@@ -179,12 +188,13 @@ describe('the stage chain', () => {
 });
 
 describe('status rules', () => {
-  it('T1a moves draft to announced to registration, and cancels anything not over', () => {
+  it('T1a moves draft to announced to registration, and cancels anything published and not over', () => {
     expect(V.nextStatusAllowed('draft', 'announced')).toBe(true);
     expect(V.nextStatusAllowed('announced', 'registration')).toBe(true);
     expect(V.nextStatusAllowed('draft', 'registration')).toBe(false);
     expect(V.nextStatusAllowed('registration', 'checkin')).toBe(false);
-    for (const s of ['draft', 'announced', 'registration', 'checkin', 'live'] as const) expect(V.nextStatusAllowed(s, 'cancelled')).toBe(true);
+    for (const s of ['announced', 'registration', 'checkin', 'live'] as const) expect(V.nextStatusAllowed(s, 'cancelled')).toBe(true);
+    expect(V.nextStatusAllowed('draft', 'cancelled')).toBe(false);
     expect(V.nextStatusAllowed('finished', 'cancelled')).toBe(false);
     expect(V.nextStatusAllowed('cancelled', 'cancelled')).toBe(false);
   });

@@ -192,3 +192,52 @@ describe('cancelEvent', () => {
     expect(err(E.cancelEvent(f.db, { eventId: f.eventId, by: ADMIN, reason: null, now: NOW }))).toBe('wrong_status');
   });
 });
+
+describe('cancelling a draft', () => {
+  it('is refused: a draft is deleted, never cancelled into the public Past list', () => {
+    const f = eventFixture();
+    const n = E.eventLog(f.db, f.eventId).length;
+    expect(err(E.cancelEvent(f.db, { eventId: f.eventId, by: ADMIN, reason: null, now: NOW }))).toBe('wrong_status');
+    expect(E.getEvent(f.db, f.eventId)!.status).toBe('draft');
+    expect(E.eventLog(f.db, f.eventId)).toHaveLength(n);
+  });
+});
+
+describe('deleteDraftEvent', () => {
+  const count = (db: import('../src/db.js').DB, table: string, eventId: number) =>
+    (db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE event_id = ?`).get(eventId) as { n: number }).n;
+
+  it('deletes a draft with its stages and history, and leaves every other event alone', () => {
+    const f = eventFixture();
+    const other = must(E.createEvent(f.db, { by: ADMIN, fields: { name: 'Other Cup', startsAt: START, entryKind: 'team' }, now: NOW }));
+    must(E.addStage(f.db, { eventId: other.id, by: ADMIN, stage: stageBody(f.db), now: NOW }));
+    const gone = must(E.deleteDraftEvent(f.db, { eventId: f.eventId, by: ADMIN }));
+    expect(gone).toMatchObject({ id: f.eventId, slug: 'riverside-cup', name: 'Riverside Cup' });
+    expect(E.getEvent(f.db, f.eventId)).toBeUndefined();
+    for (const t of ['event_stages', 'event_log']) expect(count(f.db, t, f.eventId), t).toBe(0);
+    expect(E.getEvent(f.db, other.id)).toBeDefined();
+    expect(E.stagesOf(f.db, other.id)).toHaveLength(1);
+    expect(actions({ db: f.db, eventId: other.id })).toEqual(['created', 'stage_added']);
+  });
+
+  it('deletes only a draft, and only an existing one', () => {
+    const f = eventFixture('announced');
+    expect(err(E.deleteDraftEvent(f.db, { eventId: f.eventId, by: ADMIN }))).toBe('wrong_status');
+    for (const status of ['registration', 'checkin', 'live', 'finished', 'cancelled']) {
+      f.db.prepare('UPDATE events SET status = ? WHERE id = ?').run(status, f.eventId);
+      expect(err(E.deleteDraftEvent(f.db, { eventId: f.eventId, by: ADMIN })), status).toBe('wrong_status');
+    }
+    expect(E.getEvent(f.db, f.eventId)).toBeDefined();
+    expect(err(E.deleteDraftEvent(f.db, { eventId: 999, by: ADMIN }))).toBe('not_found');
+  });
+
+  it('refuses a draft that somehow has entries, and writes nothing', () => {
+    const f = eventFixture();
+    f.db.prepare("INSERT INTO event_entries (event_id, name, registered_by, created_at) VALUES (?, 'Rats', ?, 'x')").run(f.eventId, ADMIN);
+    const n = E.eventLog(f.db, f.eventId).length;
+    expect(err(E.deleteDraftEvent(f.db, { eventId: f.eventId, by: ADMIN }))).toBe('has_entries');
+    expect(E.getEvent(f.db, f.eventId)).toBeDefined();
+    expect(E.stagesOf(f.db, f.eventId)).toHaveLength(2);
+    expect(E.eventLog(f.db, f.eventId)).toHaveLength(n);
+  });
+});

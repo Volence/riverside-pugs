@@ -12,11 +12,17 @@ import { ADMIN, NOW, START, eventFixture, stageBody, type Fixture } from './even
  *  2. each exported mutation, on success, adds exactly one event_log row
  *     with its action, and when that row cannot be written nothing else is
  *     written either (an event_log trigger that always fails);
- *  3. every exported function of events.ts is either a known read or listed
- *     in MUTATIONS here, so a new mutation cannot skip guard 2.
+ *  3. every exported function of events.ts is either a known read, listed
+ *     in MUTATIONS here, or one of the SPECIAL cases below with its own
+ *     test, so a new mutation cannot skip guard 2.
+ *
+ * deleteDraftEvent is the one special case: it removes a draft's event_log
+ * rows along with the draft, so it cannot add one. Its guard instead is that
+ * it leaves no row of the event behind in any table, touches no other event,
+ * and writes nothing at all when any of its deletes fails.
  */
 
-const WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:events|event_stages|event_log)\b/g;
+const WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:events|event_stages|event_log)\b/gi;
 const READS = new Set(['getEvent', 'getEventBySlug', 'getStage', 'stagesOf', 'eventLog', 'fieldsOf', 'stageSettingsOf', 'stageContext']);
 
 const MUTATIONS: Record<string, { from: 'draft' | 'announced'; action: string; run: (f: Fixture) => E.EventResult<unknown> }> = {
@@ -31,9 +37,11 @@ const MUTATIONS: Record<string, { from: 'draft' | 'announced'; action: string; r
   reorderStages: { from: 'draft', action: 'stages_reordered', run: ({ db, eventId, s1, s2 }) => E.reorderStages(db, { eventId, by: ADMIN, order: [s2, s1], now: NOW }) },
   publishEvent: { from: 'draft', action: 'published', run: ({ db, eventId }) => E.publishEvent(db, { eventId, by: ADMIN, now: NOW }) },
   openRegistration: { from: 'announced', action: 'registration_opened', run: ({ db, eventId }) => E.openRegistration(db, { eventId, by: ADMIN, now: NOW }) },
-  cancelEvent: { from: 'draft', action: 'cancelled', run: ({ db, eventId }) => E.cancelEvent(db, { eventId, by: ADMIN, reason: 'Not enough teams', now: NOW }) },
+  cancelEvent: { from: 'announced', action: 'cancelled', run: ({ db, eventId }) => E.cancelEvent(db, { eventId, by: ADMIN, reason: 'Not enough teams', now: NOW }) },
   setEventBanner: { from: 'announced', action: 'banner_set', run: ({ db, eventId }) => E.setEventBanner(db, { eventId, by: ADMIN, bannerKey: 'a'.repeat(64), now: NOW }) },
 };
+
+const SPECIAL = new Set(['deleteDraftEvent']);
 
 const logCount = (f: Fixture) => (f.db.prepare('SELECT COUNT(*) AS n FROM event_log').get() as { n: number }).n;
 const snapshot = (f: Fixture) => JSON.stringify([
@@ -50,11 +58,14 @@ describe('event_log guard', () => {
       .filter((f) => f !== 'src/events/events.ts')
       .filter((f) => (readFileSync(join(root, f), 'utf8').match(WRITERS) ?? []).length > 0);
     expect(offenders).toEqual([]);
+    // Lower case SQL counts as a write too.
+    expect('delete from event_log where 1'.match(WRITERS)).toHaveLength(1);
   });
 
   it('every exported function of events.ts is a known read or a guarded mutation', () => {
     const fns = Object.entries(E).filter(([, v]) => typeof v === 'function').map(([k]) => k);
-    expect(fns.filter((k) => !READS.has(k)).sort()).toEqual(Object.keys(MUTATIONS).sort());
+    expect(fns.filter((k) => !READS.has(k) && !SPECIAL.has(k)).sort()).toEqual(Object.keys(MUTATIONS).sort());
+    expect(fns.filter((k) => SPECIAL.has(k)).sort()).toEqual([...SPECIAL].sort());
   });
 
   for (const [name, m] of Object.entries(MUTATIONS)) {
@@ -77,4 +88,40 @@ describe('event_log guard', () => {
       expect(logCount(f)).toBe(logs);
     });
   }
+
+  describe('deleteDraftEvent (special case)', () => {
+    const allRows = (f: Fixture) => JSON.stringify([
+      f.db.prepare('SELECT * FROM events ORDER BY id').all(),
+      f.db.prepare('SELECT * FROM event_stages ORDER BY id').all(),
+      f.db.prepare('SELECT * FROM event_log ORDER BY id').all(),
+    ]);
+    const withOther = () => {
+      const f = eventFixture('draft');
+      const other = E.createEvent(f.db, { by: ADMIN, fields: { name: 'Other Cup', startsAt: START, entryKind: 'team' }, now: NOW });
+      if (!other.ok) throw new Error(other.error);
+      return { f, otherId: other.value.id };
+    };
+
+    it('leaves no row of the draft in any event table, and no orphan anywhere', () => {
+      const { f, otherId } = withOther();
+      const otherLog = f.db.prepare('SELECT * FROM event_log WHERE event_id = ?').all(otherId);
+      expect(E.deleteDraftEvent(f.db, { eventId: f.eventId, by: ADMIN }).ok).toBe(true);
+      for (const t of ['event_stages', 'event_log', 'event_entries']) {
+        const orphans = f.db.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE event_id NOT IN (SELECT id FROM events)`).get();
+        expect(orphans, t).toEqual({ n: 0 });
+      }
+      expect(f.db.prepare('SELECT id FROM events').all()).toEqual([{ id: otherId }]);
+      expect(f.db.prepare('SELECT * FROM event_log WHERE event_id = ?').all(otherId)).toEqual(otherLog);
+    });
+
+    for (const table of ['event_log', 'event_stages', 'events']) {
+      it(`writes nothing when deleting from ${table} fails`, () => {
+        const f = eventFixture('draft');
+        const before = allRows(f);
+        f.db.exec(`CREATE TRIGGER ${table}_down BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT, '${table} down'); END`);
+        expect(() => E.deleteDraftEvent(f.db, { eventId: f.eventId, by: ADMIN })).toThrow(new RegExp(`${table} down`));
+        expect(allRows(f)).toBe(before);
+      });
+    }
+  });
 });
