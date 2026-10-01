@@ -114,6 +114,7 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 
 	char text[256];
 	strcopy(text, sizeof(text), sArgs);
+	StripQuotes(text);
 	TrimString(text);
 	if (text[0] != '!') return Plugin_Continue;
 
@@ -127,7 +128,7 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 	}
 	if (idx == -1) return Plugin_Continue;
 
-	if (client < 1 || client > MaxClients || !IsClientInGame(client)) return Plugin_Continue;
+	if (client < 1 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client)) return Plugin_Continue;
 	char id[32];
 	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) return Plugin_Continue;
 
@@ -160,6 +161,11 @@ public Action Cmd_BookingCmd(int args)
 		PrintToServer("usage: sm_booking_cmd <steamid64> <cmd> [arg...]");
 		return Plugin_Handled;
 	}
+	if (!IsSteamId64(id))
+	{
+		PrintToServer("usage: sm_booking_cmd <steamid64> <cmd> [arg...] - steamid64 is 17 digits");
+		return Plugin_Handled;
+	}
 
 	char cmdWord[16];
 	int pos2 = BreakString(full[pos], cmdWord, sizeof(cmdWord));
@@ -182,6 +188,19 @@ public Action Cmd_BookingCmd(int args)
 	EmitBookingCmd(id, g_sCmdWords[idx], rawArg);
 	PrintToServer("PUGOK booking cmd=%s steamid=%s", g_sCmdWords[idx], id);
 	return Plugin_Handled;
+}
+
+/** A SteamID64 is always exactly 17 decimal digits. Catches a typo or a
+ *  Steam2/Steam3 id typed into sm_booking_cmd by accident before it ever
+ *  reaches PugLog or IsCaptain's comma-wrapped match. */
+bool IsSteamId64(const char[] id)
+{
+	if (strlen(id) != 17) return false;
+	for (int i = 0; i < 17; i++)
+	{
+		if (id[i] < '0' || id[i] > '9') return false;
+	}
+	return true;
 }
 
 /** Exact comma-separated membership: both sides wrapped in commas so a
