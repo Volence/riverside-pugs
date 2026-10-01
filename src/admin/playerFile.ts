@@ -24,6 +24,7 @@ import type { TimelineItem } from './timeline/types.js';
 import { conductOf, type ConductSection } from './conduct.js';
 import { scrimRecordOf, type ScrimRecord } from '../scrims/reliability.js';
 import { scrimReviewsOf, type ScrimReviews } from '../scrims/reviews.js';
+import { scrimBlocksOf, type ScrimBlocks } from '../scrims/blocks.js';
 
 export interface PlayerFile {
   steamid: string;
@@ -57,6 +58,8 @@ export interface PlayerFile {
     scrims: ScrimRecord;
     /** Review aggregates and toxic flags (plan 2 Ruling 6), beside the record. */
     scrimReviews: ScrimReviews;
+    /** Scrim blocks: as a pickup captain and each current team's. Read-only. */
+    scrimBlocks: ScrimBlocks;
     tickets: ReturnType<typeof ticketsAbout>;
     notes: PlayerNoteRow[];
     evidence: ReturnType<typeof evidence>;
@@ -163,6 +166,7 @@ export function playerFile(
       conduct: conductOf(db, canonical),
       scrims: scrimRecordOf(db, canonical, now.getTime()),
       scrimReviews: scrimReviewsOf(db, canonical, now.getTime()),
+      scrimBlocks: scrimBlocksOf(db, canonical),
       tickets: ticketsAbout(db, canonical, viewer.steamid),
       notes,
       evidence: ev,

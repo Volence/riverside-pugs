@@ -11,6 +11,7 @@ import { allowance, bookingLimits, capacityProblem, iso, upcomingCount, type Par
 import { inNight } from './night.js';
 import { nearestFreeSlot, proposedPlaylist, sideSr, srFits, type ScrimSide } from './rules.js';
 import { reliability, type Reliability } from './reliability.js';
+import { blocked } from './blocks.js';
 
 /**
  * Every rule about the scrim board (spec part 4, sections 1-2; scrim board
@@ -222,6 +223,8 @@ export function createPost(db: DB, o: {
       if (!target || target.disbanded_at || target.id === teamId || isManagerRole(roleOf(db, target.id, o.by))) return fail('bad_target');
     }
     const side: SideRef = { team_id: teamId, captain_steamid: captain };
+    // A blocked pair cannot challenge each other, whichever side blocked.
+    if (targetId !== null && blocked(db, partyOf(side), { teamId: targetId })) return fail('not_available');
     if (openPostCount(db, side) >= SCRIM_MAX_OPEN_POSTS) return fail('too_many_posts');
     if (capacityProblem(db, { region, startMs, endMs: startMs + minutes * 60_000 }) !== null) return fail('no_capacity');
     if (outOfAllowance(db, partyOf(side), nowMs)) return fail('allowance');
@@ -319,6 +322,8 @@ export function acceptPost(db: DB, o: {
     const posterManagers = new Set(managersOf(db, p));
     if (managersOf(db, side).some((m) => posterManagers.has(m))) return fail('own_post');
     if (side.team_id === null && p.team_id !== null && roleOf(db, p.team_id, o.by) !== null) return fail('own_post');
+    // A blocked pair never accepts each other, whichever side blocked.
+    if (blocked(db, partyOf(side), partyOf(p))) return fail('not_available');
 
     const already = side.team_id !== null
       ? db.prepare("SELECT 1 FROM scrim_accepts WHERE post_id = ? AND status = 'pending' AND team_id = ?").get(p.id, side.team_id)
@@ -381,6 +386,10 @@ export function confirmAccept(db: DB, o: { acceptId: number; by: string; now?: D
       if (!managesScrimSide(db, p, o.by)) return fail('not_manager');
       // The tick may not have written it yet; a timed-out acceptance is never booked.
       if (acceptTimedOut(a.created_at, p.starts_at, now.getTime())) return fail('wrong_state');
+      // Blocking declines what is pending between the pair, but a player
+      // block can start to match after the accept (they are made a
+      // co-captain), so a confirm asks again.
+      if (blocked(db, partyOf(p), partyOf(a))) return fail('not_available');
 
       const { playlist } = proposedPlaylist(db, campaignsOf(p), campaignsOf(a), p.block_minutes);
       const created = createBooking(db, {
@@ -525,6 +534,9 @@ export function board(
   const me = viewer.steamid;
   const teams = me ? myTeams(db, me) : [];
   const managed = new Set(teams.filter((t) => isManagerRole(t.role)).map((t) => t.id));
+  // Every side the viewer could act as: a post blocked with any of them is
+  // left off, whichever side blocked (the viewer's own posts stay).
+  const viewerParties: Party[] = me ? [...[...managed].map((teamId) => ({ teamId })), { captain: me }] : [];
   const captained = teams.find((t) => t.role === 'captain');
   const viewerSr = me && opts.fitsOnly ? sideSr(db, captained ? { teamId: captained.id } : { captain: me }) : null;
 
@@ -536,6 +548,7 @@ export function board(
     if (postGone(db, p)) continue;
     const mine = me !== null && managesScrimSide(db, p, me);
     if (p.target_team_id !== null && !mine && !managed.has(p.target_team_id)) continue;
+    if (!mine && viewerParties.some((v) => blocked(db, v, partyOf(p)))) continue;
     const sr = sideSr(db, scrimSide(p));
     if (viewerSr !== null && !mine && !srFits(sr, p.sr_range, viewerSr)) continue;
     const pending = pendingAccepts(db, p.id);

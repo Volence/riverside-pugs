@@ -5,11 +5,12 @@ import { setSetting } from '../src/settings.js';
 import { createTeam, invitePlayer, respondInvite, setRole, transferCaptain } from '../src/teams/teams.js';
 import { currentSeasonId } from '../src/players.js';
 import {
-  addPerson, allowInGame, allowList, bookingView, cancelBooking, claimNoShow, closeBooking, confirmBooking, createBooking, declineBooking,
+  BOOKING_ERRORS, addPerson, allowInGame, allowList, bookingView, cancelBooking, claimNoShow, closeBooking, confirmBooking, createBooking, declineBooking,
   endBooking, expireUnconfirmed, extendBooking, getBooking, holdBox, markActive, markReady, markReleased, markSetup,
   myBookings, peopleOf, recordPresence, removePerson, respondPerson, sideRow,
 } from '../src/bookings/bookings.js';
 import { acceptPost, confirmAccept, createPost } from '../src/scrims/scrims.js';
+import { blockTarget } from '../src/scrims/blocks.js';
 
 const P = Array.from({ length: 14 }, (_, i) => `765611990000007${String(i).padStart(2, '0')}`);
 const NOW = new Date('2026-10-01T12:00:00.000Z');
@@ -564,5 +565,39 @@ describe('who may be on the box (plan 4b2)', () => {
     const r = allowInGame(db, { bookingId: id, by: P[1], steamid: '76561199100000099', name: 'late', now: NOW });
     expect(r).toEqual({ ok: false, error: 'side_full' });
     expect(db.prepare('SELECT 1 FROM players WHERE steamid = ?').get('76561199100000099')).toBeUndefined();
+  });
+});
+
+describe('blocks', () => {
+  type Party = { teamId: number } | { captain: string };
+  const block = (by: string, party: Party, target: unknown): void => {
+    const r = blockTarget(db, { by, party, target, now: NOW });
+    if (!r.ok) throw new Error(r.error);
+  };
+  const err = (over: Record<string, unknown>) => {
+    const r = createBooking(db, base(over) as Parameters<typeof createBooking>[1]);
+    return r.ok ? 'ok' : r.error;
+  };
+
+  it('createBooking refuses not_available between a blocked pair, whichever side blocked', () => {
+    const rats = team(P[0], 'Rats', 'RR');
+    const cats = team(P[1], 'Cats', 'CC');
+    block(P[0], { teamId: rats }, { teamId: cats });
+    expect(err({ teamId: rats, opponent: { teamId: cats } })).toBe('not_available');
+    expect(err({ by: P[1], teamId: cats, opponent: { teamId: rats } })).toBe('not_available');
+    // A pickup captain the other side blocked, in both directions.
+    block(P[2], { captain: P[2] }, { steamid: P[3] });
+    expect(err({ by: P[2], opponent: { steamid: P[3] } })).toBe('not_available');
+    expect(err({ by: P[3], opponent: { steamid: P[2] } })).toBe('not_available');
+    // A player block follows them into a team they captain.
+    expect(err({ by: P[2], opponent: { teamId: team(P[3], 'Mice', 'MM') } })).toBe('not_available');
+    expect(err({ by: P[4], opponent: { steamid: P[5] } })).toBe('ok');
+    expect(BOOKING_ERRORS.not_available).toEqual({ status: 409, text: 'This scrim is not available to you.' });
+  });
+
+  it('an invite sent before the block cannot then be confirmed', () => {
+    const id = create();
+    block(P[1], { captain: P[1] }, { steamid: P[0] });
+    expect(confirmBooking(db, { bookingId: id, by: P[1], now: NOW })).toEqual({ ok: false, error: 'not_available' });
   });
 });
