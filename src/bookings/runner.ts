@@ -795,13 +795,15 @@ export class BookingRunner {
    *  calls (the campaign-start lines, the goodbye, the extend notice, or
    *  allowFromGame's who-is-in line). */
   onCommand(serverId: number, steamid: string, cmd: 'nextmap' | 'stay' | 'end' | 'extend' | 'allow', arg: string): void {
+    // An allow line is about who may be on the box: its log lines carry no steamid.
+    const who = cmd === 'allow' ? 'the sender' : steamid;
     const b = bookingOnServer(this.db, serverId);
     if (!b) {
-      console.log(`[booking] onCommand: no open booking on server ${serverId} (steamid ${steamid}, cmd ${cmd})`);
+      console.log(`[booking] onCommand: no open booking on server ${serverId} (${cmd === 'allow' ? 'no steamid logged' : `steamid ${steamid}`}, cmd ${cmd})`);
       return;
     }
     if (actingSides(this.db, b.id, steamid).length === 0) {
-      console.log(`[booking] ${b.id}: onCommand: ${steamid} does not manage a confirmed side (server ${serverId}, cmd ${cmd})`);
+      console.log(`[booking] ${b.id}: onCommand: ${who} does not manage a confirmed side (server ${serverId}, cmd ${cmd})`);
       return;
     }
     let error: string | null = null;
@@ -848,16 +850,20 @@ export class BookingRunner {
     const m = /^(\S+)\s*([\s\S]*)$/.exec(arg.trim());
     const steamid = m?.[1] ?? '';
     const r = allowInGame(this.db, { bookingId: id, by, steamid, name: m?.[2] ?? '', now: new Date(this.now()) });
-    if (!r.ok) return BOOKING_ERRORS[r.error].text;
+    if (!r.ok) {
+      console.log(`[booking] ${id}: !allow refused (${r.error})`);
+      return BOOKING_ERRORS[r.error].text;
+    }
     const b = getBooking(this.db, id);
     const server = getServer(this.db, serverId);
     const side = sidesOf(this.db, id).find((s) => s.side === r.value.side);
     if (!b || !server || !side) return null;
     const who = consoleText(gameName(steamid, m?.[2]), 40);
+    const role = (this.db.prepare('SELECT role FROM booking_people WHERE booking_id = ? AND steamid = ?').get(id, steamid) as { role: string } | undefined)?.role ?? 'ringer';
     const said = r.value.added
-      ? `say [Booking] ${who} is in, as a ringer for ${consoleText(sideName(this.db, side), 60)}.`
+      ? `say [Booking] ${who} is in, as a ${role} for ${consoleText(sideName(this.db, side), 60)}.`
       : `say [Booking] ${who} is already in this booking.`;
-    if (r.value.added) console.log(`[booking] ${id}: ${by} allowed a ringer in game; the list now has ${allowList(this.db, id).length} ids`);
+    console.log(`[booking] ${id}: !allow ${r.value.added ? 'added' : 'already in'}; the list has ${allowList(this.db, id).length} ids`);
     void this.push(id, server, () => [...allowLines(this.db, b), said], 'the allowlist');
     return null;
   }

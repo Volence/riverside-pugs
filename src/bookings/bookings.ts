@@ -2,6 +2,7 @@ import type { DB } from '../db.js';
 import { getPlayer } from '../players.js';
 import { inGoodStanding } from '../standing.js';
 import { hasActiveBan } from '../banState.js';
+import { resolveAlias } from '../aliases.js';
 import { hasUnsafeChars } from '../profileFields.js';
 import { competitiveAccess } from '../teams/access.js';
 import { activeMembers, getTeam, roleOf } from '../teams/teams.js';
@@ -71,6 +72,7 @@ export const BOOKING_ERRORS = {
   already_confirmed: { status: 409, text: 'Already confirmed.' },
   already_in: { status: 409, text: 'That player is already in this booking.' },
   side_full: { status: 409, text: 'That side is full.' },
+  invited_elsewhere: { status: 409, text: 'They have an invite from the other side; they accept it on the site.' },
   not_person: { status: 404, text: 'That player is not in this booking.' },
   no_invite: { status: 410, text: 'That invite is no longer open.' },
   is_captain: { status: 400, text: "A side's captain cannot be removed." },
@@ -378,11 +380,20 @@ export function addPerson(db: DB, o: {
   })();
 }
 
+/** Kept off a booked box whatever the booking says: merged away into another
+ *  account, banned by status, or under an active ban. Unlike inGoodStanding,
+ *  a player still `invited` (a ringer let in from the game) is not barred. */
+function barredFromBox(db: DB, steamid: string, now: Date): boolean {
+  if (resolveAlias(db, steamid) !== steamid) return true;
+  return getPlayer(db, steamid)?.status === 'banned' || hasActiveBan(db, steamid, now);
+}
+
 /** Who may be on the booked box (plan 4b2): the steamids of the booking's
- *  accepted people, plus every admin and mod in good standing. De-duplicated
+ *  accepted people who are not barred (barredFromBox), plus every admin and mod in good standing. De-duplicated
  *  and sorted, so the same list is pushed the same way each time. */
 export function allowList(db: DB, bookingId: number): string[] {
-  const ids = new Set(acceptedPeople(db, bookingId).map((p) => p.steamid));
+  const now = new Date();
+  const ids = new Set(acceptedPeople(db, bookingId).map((p) => p.steamid).filter((id) => !barredFromBox(db, id, now)));
   const staff = db.prepare('SELECT steamid FROM players WHERE is_admin = 1 OR is_mod = 1').all() as { steamid: string }[];
   for (const { steamid } of staff) if (inGoodStanding(db, steamid)) ids.add(steamid);
   return [...ids].sort();
@@ -400,7 +411,8 @@ export function gameName(steamid: string, raw: unknown): string {
 }
 
 /** A captain's in-game `!allow` (plan 4b2): the person connecting joins the
- *  captain's side as an accepted ringer. Only a manager of a confirmed side of
+ *  captain's side as an accepted ringer, or, holding an open invite to a side
+ *  this captain runs, has it accepted. Already accepted is `added: false`. Only a manager of a confirmed side of
  *  an open booking that is ready or active, and only through the runner's
  *  signed PUGBOOK line. It touches nothing but `players` (a row inserted if
  *  absent, status invited, never an admin) and `booking_people`. The name
@@ -417,9 +429,17 @@ export function allowInGame(db: DB, o: { bookingId: number; by: string; steamid:
     if (!isOpen(b) || (b.state !== 'ready' && b.state !== 'active')) return fail('wrong_state');
     const side = actingSides(db, b.id, o.by)[0];
     if (!side) return fail('not_manager');
-    const p = getPlayer(db, steamid);
-    if (p?.status === 'banned' || hasActiveBan(db, steamid, now)) return fail('not_player');
-    if (db.prepare('SELECT 1 FROM booking_people WHERE booking_id = ? AND steamid = ?').get(b.id, steamid)) return ok({ side, added: false });
+    if (barredFromBox(db, steamid, now)) return fail('not_player');
+    const row = db.prepare('SELECT * FROM booking_people WHERE booking_id = ? AND steamid = ?').get(b.id, steamid) as PersonRow | undefined;
+    if (row?.status === 'accepted') return ok({ side, added: false });
+    if (row) {
+      // An open invite: a captain of that side letting them in accepts it
+      // for them (role kept); the other side's invite is theirs to answer.
+      if (!actingSides(db, b.id, o.by).includes(row.side)) return fail('invited_elsewhere');
+      db.prepare("UPDATE booking_people SET status = 'accepted' WHERE booking_id = ? AND steamid = ?").run(b.id, steamid);
+      logEvent(db, b.id, o.by, 'person_allowed_in_game', { steamid, side: row.side, accepted: true }, now);
+      return ok({ side: row.side, added: true });
+    }
     const count = (db.prepare('SELECT COUNT(*) AS n FROM booking_people WHERE booking_id = ? AND side = ?').get(b.id, side) as { n: number }).n;
     if (count >= PEOPLE_PER_SIDE) return fail('side_full');
     db.prepare("INSERT OR IGNORE INTO players (steamid, name, status) VALUES (?, ?, 'invited')").run(steamid, name);
