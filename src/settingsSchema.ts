@@ -21,7 +21,7 @@ export interface SettingDef {
   key: string;
   label: string;
   help: string;
-  group: 'Queue' | 'Match' | 'Stats' | 'Discord' | 'Admin feed' | 'Penalties' | 'Replays' | 'Community' | 'Practice';
+  group: 'Queue' | 'Match' | 'Stats' | 'Discord' | 'Admin feed' | 'Penalties' | 'Replays' | 'Community' | 'Practice' | 'Competitive';
   type: SettingType;
   /** Masked in the panel until revealed, and never written to the audit log. */
   secret?: boolean;
@@ -100,6 +100,8 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'practice_leasing', group: 'Practice', label: 'Practice servers for', help: 'Who can start and join practice servers (the Practice Park and drill servers) and sees the Practice card on the Play page. Admins only is for trying it out; nobody else sees any of it. Off stops new ones; servers already running carry on until they close.', type: { kind: 'choice', options: [{ value: 'off', label: 'Nobody (off)' }, { value: 'admins', label: 'Admins only' }, { value: 'everyone', label: 'Every player' }] } },
   { key: 'practice_max_leases', group: 'Practice', label: 'Practice servers at once', help: 'How many pool servers may be lent out as a Practice Park or a drill server at the same time. 0 turns practice servers off. A PUG that needs a server always takes one back, newest lease first, after a 60 second warning in game.', type: { kind: 'int', min: 0, max: 6 } },
   { key: 'practice_reserve_idle', group: 'Practice', label: 'Servers kept free for the queue', help: 'A practice server is only started while at least this many OTHER enabled servers stay idle for PUGs.', type: { kind: 'int', min: 0, max: 6 } },
+  { key: 'competitive_enabled', group: 'Competitive', label: 'Teams and competitive for', help: 'Who can see and use teams (and, later, scrims and tournaments). Admins only is for trying it out; nobody else sees any of it, not even the team pages. Off hides it all again; nothing is deleted.', type: { kind: 'choice', options: [{ value: 'off', label: 'Nobody (off)' }, { value: 'admins', label: 'Admins only' }, { value: 'everyone', label: 'Every player' }] } },
+  { key: 'team_membership_cap', group: 'Competitive', label: 'Teams per player', help: 'How many teams one player may be on at once, and how many teams one player may have created that are not disbanded. Lowering it removes nobody; it only stops new joins.', type: { kind: 'int', min: 1, max: 10 } },
 ];
 
 const BY_KEY = new Map(SETTINGS_SCHEMA.map((d) => [d.key, d]));

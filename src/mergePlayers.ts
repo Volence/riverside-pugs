@@ -89,6 +89,15 @@ const PLAIN: [table: string, column: string][] = [
   // The rename digest's queue. The chain it posts is read off the survivor's
   // name history, which by then holds both accounts' names.
   ['player_name_digest', 'steamid'],
+  // Teams (src/teams/teams.ts) follow the person. Where both accounts were
+  // active on one team, or both invited to one, the alt's row is closed first
+  // (in the transaction below), so one person never holds two places on a
+  // roster. The captaincy, if either held it, ends up on the survivor.
+  ['teams', 'captain_steamid'],
+  ['teams', 'created_by'],
+  ['team_members', 'steamid'],
+  ['team_invites', 'steamid'],
+  ['team_invites', 'invited_by'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`
@@ -307,9 +316,20 @@ export function mergePlayers(
     // while it is still one transaction.
     orphaned = reseedOrphanedTickets(db, owners, [from]).stillEmpty;
 
+    const teamsNow = new Date().toISOString();
+    db.prepare(`UPDATE team_members SET left_at = ? WHERE steamid = ? AND left_at IS NULL
+      AND team_id IN (SELECT team_id FROM team_members WHERE steamid = ? AND left_at IS NULL)`).run(teamsNow, from, into);
+    db.prepare(`UPDATE team_invites SET responded_at = ?, response = 'cancelled' WHERE steamid = ? AND responded_at IS NULL
+      AND team_id IN (SELECT team_id FROM team_invites WHERE steamid = ? AND responded_at IS NULL)`).run(teamsNow, from, into);
+
     for (const [table, column] of PLAIN) {
       db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`).run(into, from);
     }
+
+    // A captain alt whose membership was closed above: teams.captain_steamid
+    // has just moved to the survivor, whose own row still says member.
+    db.prepare(`UPDATE team_members SET role = 'captain' WHERE steamid = ? AND left_at IS NULL
+      AND team_id IN (SELECT id FROM teams WHERE captain_steamid = ? AND disbanded_at IS NULL)`).run(into, into);
 
     // An address both accounts were seen on is one sighting history, not two:
     // add the counts and take the widest span, then let KEYED drop the row.

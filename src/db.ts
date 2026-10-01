@@ -126,6 +126,52 @@ CREATE TABLE IF NOT EXISTS rulesets (
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   archived_at TEXT
 );
+-- Teams (competitive platform, spec part 1 section 2). Rows are never
+-- deleted: a disbanded team keeps its page and slug, and a member who left
+-- keeps their row with left_at set. name_key / tag_key are the
+-- case-insensitive forms the uniqueness rule compares; only live teams hold
+-- a name or tag. origin_ref is the draft event or scrim booking a team came
+-- from (specs 3 and 4).
+CREATE TABLE IF NOT EXISTS teams (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  name            TEXT NOT NULL,
+  name_key        TEXT NOT NULL,
+  tag             TEXT NOT NULL,
+  tag_key         TEXT NOT NULL,
+  slug            TEXT NOT NULL UNIQUE,
+  logo_key        TEXT,
+  region          TEXT NOT NULL DEFAULT 'na',
+  captain_steamid TEXT NOT NULL REFERENCES players(steamid),
+  created_by      TEXT NOT NULL REFERENCES players(steamid),
+  origin          TEXT NOT NULL DEFAULT 'site' CHECK (origin IN ('site','draft','pickup')),
+  origin_ref      TEXT,
+  join_link_token TEXT,
+  created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  disbanded_at    TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS teams_name_live ON teams (name_key) WHERE disbanded_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS teams_tag_live ON teams (tag_key) WHERE disbanded_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS teams_join_token ON teams (join_link_token) WHERE join_link_token IS NOT NULL;
+CREATE TABLE IF NOT EXISTS team_members (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id   INTEGER NOT NULL REFERENCES teams(id),
+  steamid   TEXT NOT NULL REFERENCES players(steamid),
+  role      TEXT NOT NULL CHECK (role IN ('captain','cocaptain','member')),
+  joined_at TEXT NOT NULL,
+  left_at   TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS team_members_active ON team_members (team_id, steamid) WHERE left_at IS NULL;
+CREATE INDEX IF NOT EXISTS team_members_player ON team_members (steamid) WHERE left_at IS NULL;
+CREATE TABLE IF NOT EXISTS team_invites (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id      INTEGER NOT NULL REFERENCES teams(id),
+  steamid      TEXT NOT NULL REFERENCES players(steamid),
+  invited_by   TEXT NOT NULL REFERENCES players(steamid),
+  created_at   TEXT NOT NULL,
+  responded_at TEXT,
+  response     TEXT CHECK (response IN ('accepted','declined','cancelled'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS team_invites_open ON team_invites (team_id, steamid) WHERE responded_at IS NULL;
 CREATE TABLE IF NOT EXISTS match_players (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   player_id TEXT NOT NULL REFERENCES players(steamid),
@@ -969,6 +1015,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   practice_max_leases: '2',
   sidegames_enabled: '0',
   sidegames_min_players: '4',
+  // Competitive platform (teams, later bookings and events): off | admins |
+  // everyone. Off hides every team page and route.
+  competitive_enabled: 'off',
+  team_membership_cap: '3',
 };
 
 /** Patch triage backfill (sub-project 1 of the balance catalogue roadmap).
