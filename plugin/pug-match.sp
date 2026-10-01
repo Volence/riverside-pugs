@@ -2085,7 +2085,13 @@ public Action Cmd_Roster(int args)
  *  srcds lost: same match id and token, the finished maps with their scores,
  *  the roster, and the next event seq. The match is self-started (it was
  *  adopted by auto-track), so the booking's password and the team-lock rules
- *  stay exactly as they were. The map it was on is replayed from its start. */
+ *  stay exactly as they were. The map it was on is replayed from its start.
+ *
+ *  The <firstmap> argument only holds until the next map start: the match is
+ *  Pending and self-started, so OnMapStart overwrites g_sCampaign with the
+ *  map the site changelevels to (the replayed map, which may be map 3, not
+ *  map 1), as it does for any self-started match waiting for its first
+ *  go-live. The campaign check from then on compares against that map. */
 public Action Cmd_Resume(int args)
 {
 	if (args < 5)

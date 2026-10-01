@@ -906,16 +906,27 @@ export function reholdBox(db: DB, id: number, serverId: number, now: Date): bool
 }
 
 /** The recovery is done: the outage fields clear and the idle clock restarts,
- *  since everyone is reconnecting (Review Focus: no idle end right after). */
+ *  since everyone is reconnecting (Review Focus: no idle end right after).
+ *  Refused once an end has come in: the caller winds the booking down instead.
+ *
+ *  The live game's heartbeat clock restarts too. The orphan reaper skips a
+ *  game only while its booking is recovering; after a long wait for a box the
+ *  last heartbeat is long past the reaper's limit, and the fresh plugin's
+ *  first one can land up to 30 s after this. Written as datetime('now'), the
+ *  clock and form the heartbeat writer and the reaper use. */
 export function finishRecovery(db: DB, id: number, now: Date): boolean {
   return db.transaction(() => {
     const changed = db.prepare(
       `UPDATE bookings SET recovering_at = NULL, recover_reason = NULL, lost_since = NULL, a2s_seen_at = NULL,
               up_alerted_at = NULL, waiting_since = NULL, recoveries = recoveries + 1, last_human_at = ?
-        WHERE id = ? AND recovering_at IS NOT NULL AND server_id IS NOT NULL`,
+        WHERE id = ? AND recovering_at IS NOT NULL AND ending_at IS NULL AND server_id IS NOT NULL`,
     ).run(now.toISOString(), id).changes > 0;
-    if (changed) logEvent(db, id, null, 'recovered', {}, now);
-    return changed;
+    if (!changed) return false;
+    db.prepare(
+      "UPDATE match_live SET last_seen = datetime('now') WHERE match_id IN (SELECT id FROM matches WHERE booking_id = ? AND state = 'live')",
+    ).run(id);
+    logEvent(db, id, null, 'recovered', {}, now);
+    return true;
   })();
 }
 

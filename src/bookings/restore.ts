@@ -59,6 +59,9 @@ export function restoreSnapshot(db: DB, matchId: number): RestoreSnapshot | null
   const finished = new Set(maps.map((x) => x.map));
   const map = inCampaign(current) && !finished.has(current) ? current : entry.maps[start + done.length];
   if (!map) return null;
+  // Never the finale: replaying it from the start would run the game past the
+  // plugin's finale backstop. A game lost on its finale is aborted instead.
+  if (map === entry.maps.at(-1)) return null;
 
   const totA = maps.reduce((n, x) => n + x.a, 0);
   const totB = maps.reduce((n, x) => n + x.b, 0);

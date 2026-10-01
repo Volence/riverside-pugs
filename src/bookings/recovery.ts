@@ -6,7 +6,7 @@
  * boot marker l4d_booking_id (l4d_booking 1.4.0, written only by setup and
  * recovery) is no longer this booking's. A box that does not answer rcon is
  * gone only when, for the whole limit, its live game has not heartbeated
- * either and it does not answer A2S, a separate UDP path.
+ * either and it has not answered A2S (a separate UDP path) for as long.
  */
 export type BoxVerdict =
   | { kind: 'ok' }
@@ -26,6 +26,8 @@ export interface BoxSignals {
   heartbeatMs: number | null;
   /** The A2S answer of this check: null for no answer, else the player count. Only asked when rcon failed. */
   a2sPlayers: number | null;
+  /** bookings.a2s_seen_at in ms: the last A2S answer in this outage, or null. */
+  a2sSeenMs: number | null;
   goneMs: number;
 }
 
@@ -41,5 +43,8 @@ export function classifyBox(s: BoxSignals): BoxVerdict {
   if (s.nowMs - since < s.goneMs) return { kind: 'quiet' };
   if (s.heartbeatMs !== null && s.nowMs - s.heartbeatMs < s.goneMs) return { kind: 'quiet' };
   if (s.a2sPlayers !== null) return { kind: 'up_no_rcon', players: s.a2sPlayers };
+  // One lost UDP reply is not silence: the box is gone only when the server
+  // browser has not answered for the whole limit either.
+  if (s.a2sSeenMs !== null && s.nowMs - s.a2sSeenMs < s.goneMs) return { kind: 'quiet' };
   return { kind: 'gone' };
 }

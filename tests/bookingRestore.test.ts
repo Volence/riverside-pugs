@@ -101,6 +101,20 @@ describe('restoreSnapshot', () => {
   });
 });
 
+describe('restoreSnapshot on the finale', () => {
+  it('null when the map to replay is the campaign\'s last map, so the finale is never replayed past the plugin\'s backstop', () => {
+    [0, 1, 2, 3].forEach((i) => { round(i, 1, 'a', 100); round(i, 2, 'b', 100); });
+    db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (?, 'l4d_vs_hospital05_rooftop', '2026-10-02 22:00:00')").run(m);
+    expect(restoreSnapshot(db, m)).toBeNull();
+  });
+
+  it('still restores the map before the finale', () => {
+    [0, 1, 2].forEach((i) => { round(i, 1, 'a', 100); round(i, 2, 'b', 100); });
+    db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (?, 'l4d_vs_hospital04_interior', '2026-10-02 22:00:00')").run(m);
+    expect(restoreSnapshot(db, m)!.map).toBe('l4d_vs_hospital04_interior');
+  });
+});
+
 describe('resumeLines and prepareRestore', () => {
   it('lines: resume, each finished map, the roster with joined maps', () => {
     round(0, 1, 'a', 400); round(0, 2, 'b', 350); round(1, 1, 'b', 100, true);

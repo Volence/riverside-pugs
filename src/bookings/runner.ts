@@ -102,6 +102,10 @@ export interface BookingRunnerDeps {
    *  down under a booking and answers again (the releaser refuses a gone box
    *  to everyone else). */
   release: (serverId: number, opts?: { gone?: boolean }) => Promise<boolean>;
+  /** True while the releaser is restarting this box (staff Set idle on a gone
+   *  box starts the same forced restart): the gone give-back leaves it alone
+   *  rather than restart it a second time. Absent, never. */
+  releasing?: (serverId: number) => boolean;
   /** The quit-and-wait before setup, without a release (the booking still holds the box). */
   restart: (server: ServerRow) => Promise<boolean>;
   notifier: Notifier;
@@ -745,11 +749,13 @@ export class BookingRunner {
         // Treated as no answer.
       }
     }
+    // Read after this check's noteA2s, so an answer now is the latest seen.
+    const a2sSeen = rconOk ? null : getBooking(this.db, b.id)?.a2s_seen_at ?? null;
     const v = classifyBox({
       rconOk, marker, bookingId: b.id, nowMs,
       lostSinceMs: lostSince !== null ? Date.parse(lostSince) : null,
       heartbeatMs: hb ? sqlMs(hb.last_seen) : null,
-      a2sPlayers, goneMs,
+      a2sPlayers, a2sSeenMs: a2sSeen !== null ? Date.parse(a2sSeen) : null, goneMs,
     });
     switch (v.kind) {
       case 'ok': return false;
@@ -814,13 +820,13 @@ export class BookingRunner {
    *  through the releaser, whose forced restart clears whatever the old
    *  booking left on it (a box cut off rather than crashed may still run its
    *  plugin match, passwords and players). A box staff already set idle only
-   *  has gone_since cleared. */
+   *  has gone_since cleared, and one staff Set idle is restarting is skipped. */
   private async returnGone(): Promise<void> {
     const gone = this.db.prepare('SELECT * FROM servers WHERE gone_since IS NOT NULL').all() as ServerRow[];
     const ids = new Set(gone.map((s) => s.id));
     for (const id of this.goneAnswers.keys()) if (!ids.has(id)) this.goneAnswers.delete(id);
     for (const server of gone) {
-      if (this.returning.has(server.id)) continue;
+      if (this.returning.has(server.id) || this.deps.releasing?.(server.id)) continue;
       if (server.status !== 'offline') {
         this.db.prepare('UPDATE servers SET gone_since = NULL WHERE id = ?').run(server.id);
         this.goneAnswers.delete(server.id);
@@ -925,16 +931,21 @@ export class BookingRunner {
     const snap = live ? restoreSnapshot(this.db, live.id) : null;
     const resume = snap ? resumeLines(snap) : [];
     const lines = [...bookingLines(this.db, b), ...gameLines(this.db, b, server, this.deps.logPublicAddress), markerLine(b.id)];
-    const replies = await this.deps.rcon(server, ['sm_pug_auto_track 0', ...resume, ...lines]);
-    // The sm_pug_resume_commit reply: burst index resume.length (auto_track 0 is index 0).
-    const resumed = snap !== null && (replies[resume.length] ?? '').trim().startsWith('PUGOK resumed');
+    // No sm_pug_auto_track 0 ahead of the resume: gameLines sets it to 1 in
+    // this same burst, so it never kept auto-track from adopting anything.
+    // What does is the plugin's state (sm_pug_resume leaves it Pending with a
+    // match, which auto-track never adopts over) and the site guards
+    // (selfStarted.ts leaves a recovering booking's game alone).
+    const replies = await this.deps.rcon(server, [...resume, ...lines]);
+    // The sm_pug_resume_commit reply is the last of the resume lines.
+    const resumed = snap !== null && (replies[resume.length - 1] ?? '').trim().startsWith('PUGOK resumed');
     if (live && !resumed) {
       // Ruling 5: the game cannot come back; the booking carries on without it.
       const token = abortBookingGame(this.db, live.id, new Date(this.now()), 'server_lost');
       if (token) this.forgetToken(b.id, token);
       publishAdminEvent({
         kind: 'problem', matchId: live.id,
-        text: `Booking ${b.id}: game #${live.id} could not be restored on ${server.name} (${snap ? 'pug-match did not take sm_pug_resume; is 0.3.19 staged?' : 'the site has no record of where it was'}). It is aborted; the booking carries on.`,
+        text: `Booking ${b.id}: game #${live.id} could not be restored on ${server.name} (${snap ? 'pug-match did not take sm_pug_resume; is 0.3.19 staged?' : 'it was on the finale, or the site has no record of where it was'}). It is aborted; the booking carries on.`,
       });
     }
     if (resumed) prepareRestore(this.db, snap!);
@@ -983,7 +994,8 @@ export class BookingRunner {
         `Restored after a server restart: ${score}. ${teamName(s.firstSurv)} survive first. Ready up when everyone is back.`, 220)}`], 'the restore line');
     }
     console.log(`[booking] ${b.id} restored on ${server.name}`);
-    this.tell(b.id, this.everyone(b.id), 'booking_recovered', { moved: fresh.recover_reason === 'gone', restored });
+    // The notice carries the password: accepted people only, as booking_ready.
+    this.tell(b.id, acceptedPeople(this.db, b.id).map((p) => p.steamid), 'booking_recovered', { moved: fresh.recover_reason === 'gone', restored });
     publishAdminEvent({ kind: 'problem', text: `Booking ${b.id}: restored on ${server.name}${adminTail}` });
   }
 
@@ -1001,15 +1013,18 @@ export class BookingRunner {
     }
   }
 
-  /** Ruling 4: a finished game, none live, and both the last game's end and
-   *  the last campaign load long enough ago that a map change between
-   *  campaigns is not mistaken for it. */
+  /** Ruling 4: a finished game, none live, and the last game's end, the last
+   *  campaign load and the last recovery all long enough ago that a map
+   *  change between campaigns, or everyone reconnecting after a restart
+   *  between games, is not mistaken for it. */
   private everyoneLeftAfterGame(id: number, nowMs: number): boolean {
     const games = bookingGames(this.db, id);
     if (!games.some((g) => g.state === 'completed') || games.some((g) => g.state === 'live')) return false;
     const last = games.at(-1)!;
     if (last.endedAt === null) return false;
-    const since = Math.max(sqlMs(last.endedAt), this.lastLoadMs(id));
+    const recovered = this.db.prepare("SELECT at FROM booking_events WHERE booking_id = ? AND event = 'recovered' ORDER BY id DESC LIMIT 1")
+      .get(id) as { at: string } | undefined;
+    const since = Math.max(sqlMs(last.endedAt), this.lastLoadMs(id), recovered ? sqlMs(recovered.at) : 0);
     return nowMs - since >= LEFT_AFTER_GAME_MS;
   }
 
@@ -1107,13 +1122,16 @@ export class BookingRunner {
     return [`say [Booking] ${name}: !nextmap, !stay, !end and !addcampaign are yours, captains.`];
   }
 
-  /** A best-effort burst. A failure is logged with the log secret redacted
-   *  (an rcon error names the command it was on) and never thrown. */
+  /** A best-effort burst. A failure is logged with the log secret and the
+   *  booking passwords redacted (an rcon error names the command it was on,
+   *  and the minute re-push carries sv_password and tv_password) and never thrown. */
   private async push(id: number, server: ServerRow, lines: () => string[], what: string): Promise<void> {
     try {
       await this.deps.rcon(server, lines());
     } catch (err) {
-      console.warn(`[booking] ${id}: ${what} on ${server.name} failed:`, hideAllowIds(redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret])));
+      const b = getBooking(this.db, id);
+      const secrets = [server.log_secret, b?.password ?? null, b?.tv_password ?? null];
+      console.warn(`[booking] ${id}: ${what} on ${server.name} failed:`, hideAllowIds(redactSecrets(err instanceof Error ? err.message : String(err), secrets)));
     }
   }
 
