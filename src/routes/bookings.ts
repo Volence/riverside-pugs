@@ -137,7 +137,17 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
     });
   };
 
-  action('confirm', (me, id) => B.confirmBooking(db, { bookingId: id, by: me }), (_me, id) => { runner?.onConfirmed(id); runner?.allocate(); });
+  action('confirm', (me, id) => B.confirmBooking(db, { bookingId: id, by: me }), (_me, id) => {
+    runner?.onConfirmed(id);
+    // A throw here must not cost the response: the booking is already
+    // committed, so the view below (and any notices onConfirmed just sent)
+    // still need to go out.
+    try {
+      runner?.allocate();
+    } catch (err) {
+      console.error(`[booking] ${id}: allocate() after confirm failed:`, err instanceof Error ? err.message : err);
+    }
+  });
   action('decline', (me, id) => B.declineBooking(db, { bookingId: id, by: me }), (me, id) => runner?.onCancelled(id, me, null));
   action('accept', (me, id) => B.respondPerson(db, { bookingId: id, steamid: me, accept: true }));
   action('leave', (me, id) => {

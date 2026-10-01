@@ -10,6 +10,7 @@ import { buildServer } from '../src/server.js';
 import { addServer } from '../src/serverPool.js';
 import { holdBox, markReady, markSetup } from '../src/bookings/bookings.js';
 import { bookingRoutes } from '../src/routes/bookings.js';
+import type { BookingRunner } from '../src/bookings/runner.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 
 const P = Array.from({ length: 4 }, (_, i) => `7656119900000030${i}`);
@@ -194,6 +195,23 @@ describe('next and stay (plan 4b, Task 7)', () => {
     // manages side a and is not staff, so acting as themselves never audits.
     expect((await call('POST', `/api/bookings/${id}/stay`, P[0])).statusCode).toBe(200);
     expect(db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'booking_stay'").get()).toEqual({ n: 1 });
+  });
+
+  it('a confirm still answers 200 even when allocate() throws', async () => {
+    const id = await create();
+    const stubRunner = {
+      onConfirmed: () => {},
+      allocate: () => { throw new Error('no idle box'); },
+    } as unknown as BookingRunner;
+    const bare = Fastify();
+    await bare.register(cookie, { secret: 'x'.repeat(32) });
+    await bare.register(bookingRoutes, { db, runner: stubRunner });
+    await bare.ready();
+    const as1 = authedCookie(bare, db, P[1]);
+    const r = await bare.inject({ method: 'POST', url: `/api/bookings/${id}/confirm`, cookies: as1 });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().sides[1].confirmed).toBe(true);
+    await bare.close();
   });
 
   it('answers 503 for next and stay when no runner is wired (routes built bare)', async () => {

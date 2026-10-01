@@ -202,6 +202,30 @@ describe('post, accept, confirm: the booking and its notices', () => {
     await stubApp.close();
   });
 
+  it('a confirm still answers and still sends scrim_booked even when allocate() throws', async () => {
+    const stubRunner = {
+      onCreated: () => {},
+      onConfirmed: () => {},
+      allocate: () => { throw new Error('no idle box'); },
+    } as unknown as BookingRunner;
+    const notifier = new Notifier({ db, dm: () => async (to, p) => { dms.push({ to, content: p.content ?? '' }); } });
+    const stubApp = Fastify();
+    await stubApp.register(cookie, { secret: 'x'.repeat(32) });
+    await stubApp.register(scrimRoutes, { db, runner: stubRunner, notifier, publicUrl: PUBLIC_URL });
+    await stubApp.ready();
+
+    const id = await post(P[0]);
+    const acceptId = await accept(id, P[1]);
+    dms.length = 0;
+    const r = await stubApp.inject({ method: 'POST', url: `/api/scrims/accepts/${acceptId}/confirm`, cookies: cookies[P[0]] });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toHaveProperty('bookingId');
+    const booked = dms.filter((d) => d.content.includes('Your scrim is booked'));
+    expect(booked.map((d) => d.to).sort()).toEqual([discordOf(P[0]), discordOf(P[1])].sort());
+
+    await stubApp.close();
+  });
+
   it('a decline tells every current manager of that accepter\'s side (scrim_declined), not only its stored captain', async () => {
     const id = await post(P[0]);
     const mice = team(P[1], 'Mice', 'MM', [P[2]]);
@@ -232,7 +256,7 @@ describe('post, accept, confirm: the booking and its notices', () => {
     expect(dms).toEqual([]);
   });
 
-  it('a confirm offers the nearest slot when the capacity is gone by then, and DMs the accepter\'s side managers about it', async () => {
+  it('a confirm offers the nearest slot inline when the capacity is gone by then, DMs nobody, and leaves the acceptance pending', async () => {
     const id = await post(P[0], { startsAt: START, minutes: 60 });
     const mice = team(P[1], 'Mice', 'MM', [P[2]]);
     const acceptId = await accept(id, P[1], { teamId: mice });
@@ -248,9 +272,11 @@ describe('post, accept, confirm: the booking and its notices', () => {
     const nearestSlot = confirmed.json().nearestSlot as string | null;
     expect(nearestSlot).toBeTruthy();
 
-    expect(dms.map((d) => d.to).sort()).toEqual([discordOf(P[1]), discordOf(P[2])].sort());
-    expect(dms[0].content).toMatch(/no longer free/);
-    expect(dms[0].content).toContain('The nearest free slot is');
+    // The poster already sees the nearestSlot right in this response; the
+    // accepter is not DMed, and nothing closes their pending acceptance.
+    expect(dms).toEqual([]);
+    const board = (await call('GET', '/api/scrims', P[0])).json().posts as { id: number; accepts: { id: number }[] | null }[];
+    expect(board.find((p) => p.id === id)?.accepts?.map((a) => a.id)).toEqual([acceptId]);
   });
 });
 
@@ -265,6 +291,9 @@ describe('direct challenges', () => {
     expect(dms).toHaveLength(2);
     expect(dms.map((d) => d.to).sort()).toEqual([discordOf(P[1]), discordOf(P[2])].sort());
     expect(dms[0].content).toMatch(/challenges you to a scrim/);
+    // The target has no decline action, only accept or let it pass.
+    expect(dms[0].content).toMatch(/Accept it on the site, or let it pass\./);
+    expect(dms[0].content).not.toMatch(/decline/i);
 
     // A stranger: 404 on every action, and it is absent from their board.
     expect((await call('GET', '/api/scrims', P[3])).json().posts).toEqual([]);
@@ -275,5 +304,22 @@ describe('direct challenges', () => {
     expect((await call('GET', '/api/scrims', P[1])).json().posts.map((p: { id: number }) => p.id)).toEqual([id]);
     const acc = await call('POST', `/api/scrims/${id}/accept`, P[1], { teamId: mice });
     expect(acc.statusCode).toBe(200);
+  });
+
+  it('DMs only target managers who can use competitive play, under admins', async () => {
+    const rats = team(P[0], 'Rats', 'RR');
+    const mice = team(P[1], 'Mice', 'MM', [P[2]]);
+    setSetting(db, 'competitive_enabled', 'admins');
+    db.prepare("UPDATE players SET is_admin = 1 WHERE steamid = ?").run(P[0]);
+    dms.length = 0;
+    // Neither of Mice's managers is an admin: nobody is DMed.
+    await post(P[0], { teamId: rats, targetTeamId: mice });
+    expect(dms).toEqual([]);
+
+    db.prepare("UPDATE players SET is_admin = 1 WHERE steamid = ?").run(P[1]);
+    dms.length = 0;
+    // Now P[1] can use the board: only P[1] is DMed, not the co-captain P[2].
+    await post(P[0], { teamId: rats, targetTeamId: mice });
+    expect(dms.map((d) => d.to)).toEqual([discordOf(P[1])]);
   });
 });

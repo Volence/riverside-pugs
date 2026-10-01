@@ -8,6 +8,7 @@ import { liveTeams, myTeams } from '../teams/teams.js';
 import { getCampaignPool, settingNumber } from '../settings.js';
 import { campaignRegistry } from '../campaignRegistry.js';
 import { bookingLimits, typicalCampaignMinutes, STEP_MINUTES } from '../bookings/rules.js';
+import { canUse } from '../bookings/bookings.js';
 import type { BookingRunner } from '../bookings/runner.js';
 import type { Notifier } from '../notify/notify.js';
 import * as S from '../scrims/scrims.js';
@@ -107,7 +108,11 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
     });
     if (!r.ok) return refuse(reply, r);
     if (typeof b.targetTeamId === 'number' && Number.isInteger(b.targetTeamId)) {
-      tell(teamManagers(db, b.targetTeamId), 'scrim_challenge', r.value.id);
+      // Only managers who could actually use the board get the DM: one who
+      // fails canUse (the same gate createPost and acceptPost check) would
+      // open a page that 404s for them.
+      const recipients = teamManagers(db, b.targetTeamId).filter((m) => canUse(db, m));
+      tell(recipients, 'scrim_challenge', r.value.id);
     }
     return reply.code(201).send({ id: r.value.id });
   });
@@ -173,12 +178,11 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
     const post = accept ? S.getPost(db, accept.post_id) : undefined;
     const r = S.confirmAccept(db, { acceptId: id, by: me });
     if (!r.ok) {
-      // The slot was taken from under this acceptance: the poster already
-      // sees the refusal (and its nearestSlot) in this response, but the
-      // accepting side only learns about it if told, so tell their managers.
-      if (r.error === 'no_capacity' && accept) {
-        tell(scrimSideManagers(db, accept), 'scrim_declined', accept.post_id, { nearestSlot: r.nearestSlot ?? null });
-      }
+      // The slot was taken from under this acceptance: the poster sees the
+      // refusal and its nearestSlot right here in this response. The
+      // acceptance itself stays pending (the poster can try again, or pick
+      // another), so the accepter is not DMed about it: that DM would read
+      // as final and would repeat on every further Confirm click.
       return refuse(reply, r);
     }
     const { bookingId, takenAcceptIds } = r.value;
@@ -186,8 +190,13 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
     // transaction; onCreated/onConfirmed would send booking_invite and
     // booking_confirmed DMs that are stale or duplicate here (scrim_booked,
     // below, is the one notice this flow sends). allocate() still runs, as
-    // every booking needs its box claimed.
-    runner?.allocate();
+    // every booking needs its box claimed; a throw there must not cost the
+    // response or the notices below, which is why it is caught here.
+    try {
+      runner?.allocate();
+    } catch (err) {
+      console.error('[scrims] allocate() after confirm failed:', err instanceof Error ? err.message : err);
+    }
     if (post && accept) {
       tell([...scrimSideManagers(db, post), ...scrimSideManagers(db, accept)], 'scrim_booked', post.id, { bookingId });
     }

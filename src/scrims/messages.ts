@@ -49,7 +49,7 @@ export function scrimMessage(
   let link = postLink;
   switch (type) {
     case 'scrim_challenge':
-      content = `${posterLabel} challenges you to a scrim: ${when}, ${p.block_minutes} min. Accept or decline it on the site.`;
+      content = `${posterLabel} challenges you to a scrim: ${when}, ${p.block_minutes} min. Accept it on the site, or let it pass.`;
       break;
     case 'scrim_accepted': {
       const a: AcceptRow | undefined = extra.acceptId !== undefined ? getAccept(db, extra.acceptId) : undefined;
