@@ -150,6 +150,26 @@ describe('confirming', () => {
     expect(expireUnconfirmed(db, at('2026-10-02T12:00:01.000Z'))).toEqual([early]);
     expect(getBooking(db, late)).toMatchObject({ state: 'cancelled', end_reason: 'unconfirmed' });
   });
+
+  it('a booking made 30 minutes or less ahead is not expired by the cutoff; it has until its start', () => {
+    const made = at('2026-10-01T12:00:00.000Z');
+    const id = create({ startsAt: '2026-10-01T12:30:00.000Z', minutes: 60, now: made });
+    expect(expireUnconfirmed(db, at('2026-10-01T12:01:00.000Z'))).toEqual([]);
+    expect(expireUnconfirmed(db, at('2026-10-01T12:29:00.000Z'))).toEqual([]);
+    expect(confirmBooking(db, { bookingId: id, by: P[1], now: at('2026-10-01T12:29:00.000Z') }).ok).toBe(true);
+    const unconfirmed = create({ by: P[2], opponent: { steamid: P[3] }, startsAt: '2026-10-01T12:30:00.000Z', minutes: 60, now: made });
+    expect(expireUnconfirmed(db, at('2026-10-01T12:30:00.000Z'))).toEqual([unconfirmed]);
+  });
+
+  it('team members out of good standing are not snapshotted onto either side', () => {
+    const rats = team(P[0], 'Rats', 'RR', [P[2], P[4]]);
+    const mice = team(P[1], 'Mice', 'MM', [P[3], P[5]]);
+    db.prepare("UPDATE players SET status = 'banned' WHERE steamid IN (?, ?)").run(P[4], P[5]);
+    const id = create({ teamId: rats, opponent: { teamId: mice } });
+    expect(confirmBooking(db, { bookingId: id, by: P[1], now: NOW }).ok).toBe(true);
+    const on = peopleOf(db, id).map((p) => p.steamid);
+    expect(on.sort()).toEqual([P[0], P[1], P[2], P[3]].sort());
+  });
 });
 
 describe('people', () => {

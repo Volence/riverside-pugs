@@ -5,9 +5,9 @@ import { setSetting } from '../src/settings.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { Notifier } from '../src/notify/notify.js';
 import {
-  addPerson, cancelBooking, confirmBooking, createBooking, getBooking, holdBox, markSetup, respondPerson, sideRow,
+  addPerson, cancelBooking, confirmBooking, createBooking, extendBooking, getBooking, holdBox, markSetup, respondPerson, sideRow,
 } from '../src/bookings/bookings.js';
-import { BookingRunner, bookingLines } from '../src/bookings/runner.js';
+import { BookingRunner, CLEAR_LINES, bookingLines } from '../src/bookings/runner.js';
 
 const P = Array.from({ length: 10 }, (_, i) => `765611990000009${String(i).padStart(2, '0')}`);
 const START = Date.parse('2026-10-02T20:00:00.000Z');
@@ -124,6 +124,38 @@ describe('allocation', () => {
     runner.allocate();
     await runner.idle();
     expect(getBooking(db, id)).toMatchObject({ state: 'ready', server_id: 1 });
+  });
+
+  it('does not preempt practice or side games when idle boxes exist but none can load the playlist', () => {
+    const id = book({ playlist: ['dead_center'] }); // needs dlc4; no box has it
+    now = START - 15 * MIN;
+    runner.allocate();
+    expect(getBooking(db, id)!.state).toBe('scheduled');
+    expect(preempts).toBe(0);
+    db.prepare("UPDATE servers SET status = 'live'").run();
+    runner.allocate();
+    expect(preempts).toBe(1);
+  });
+
+  it('closes a confirmed booking that never got a box once the grace after its start is over', async () => {
+    const events: AdminEvent[] = [];
+    const unsubscribe = subscribeAdminEvents((e) => events.push(e));
+    const id = book();
+    db.prepare("UPDATE servers SET status = 'live'").run();
+    now = START + 14 * MIN; // Casual Scrim grace is 15 minutes
+    await runner.tick();
+    expect(getBooking(db, id)!.state).toBe('scheduled');
+    dms = [];
+    now = START + 15 * MIN;
+    await runner.tick();
+    unsubscribe();
+    const b = getBooking(db, id)!;
+    expect(b).toMatchObject({ state: 'cancelled', end_reason: 'no_server' });
+    expect(b.ended_at).not.toBeNull();
+    expect(dms.filter((d) => d.content.includes('no server was free')).map((d) => d.to).sort()).toEqual(['d0', 'd1']);
+    expect(events.some((e) => e.kind === 'problem' && e.text.includes(`Booking ${id} never got a server`))).toBe(true);
+    expect(sideRow(db, id, 'a')!.no_show_at).toBeNull();
+    expect(sideRow(db, id, 'b')!.no_show_at).toBeNull();
   });
 
   it('skips a box without the dlc4 mappack for an L4D2 campaign', () => {
@@ -363,12 +395,22 @@ describe('the minute watch', () => {
     expect(getBooking(db, id)).toMatchObject({ state: 'ended', end_reason: 'time' });
   });
 
-  it('judges nothing while rcon is down', async () => {
+  it('makes no idle end while rcon is down, but still ends on time', async () => {
     const id = await ready();
     box.ccc.down = true;
     now = START + 60 * MIN;
     await runner.tick();
     expect(getBooking(db, id)!.ending_at).toBeNull();
+    now = START + 119 * MIN;
+    await runner.tick();
+    expect(getBooking(db, id)!.ending_at).toBeNull();
+    now = START + 120 * MIN;
+    await runner.tick();
+    await runner.idle();
+    const b = getBooking(db, id)!;
+    expect(b).toMatchObject({ state: 'ended', end_reason: 'time' });
+    expect(b.ended_at).not.toBeNull();
+    expect(released).toEqual([3]);
   });
 
   it('expires an unconfirmed invite and tells both sides', async () => {
@@ -377,5 +419,94 @@ describe('the minute watch', () => {
     await runner.tick();
     expect(getBooking(db, id)).toMatchObject({ state: 'cancelled', end_reason: 'unconfirmed' });
     expect(dms.map((d) => d.to).sort()).toEqual(['d0', 'd1']);
+  });
+});
+
+describe('fix wave (final review)', () => {
+  const ready = async (r: BookingRunner = runner) => {
+    const id = book();
+    now = START - 15 * MIN;
+    r.allocate();
+    await r.idle();
+    sent = []; dms = [];
+    return id;
+  };
+
+  it('runs the freed hook after ended_at is written, so a waiting PUG sees the box', async () => {
+    const seen: (string | null)[] = [];
+    let id = 0;
+    const r = build({ freed: () => { seen.push(getBooking(db, id)!.ended_at); } });
+    id = await ready(r);
+    cancelBooking(db, { bookingId: id, by: P[0], now: new Date(now) });
+    r.settle(id);
+    await r.idle();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).not.toBeNull();
+  });
+
+  it('clears the booking cvars before the release, with or without a goodbye', async () => {
+    const id = await ready();
+    cancelBooking(db, { bookingId: id, by: P[0], now: new Date(now) });
+    runner.settle(id);
+    await runner.idle();
+    const cmds = sent.flatMap((s) => s.cmds);
+    for (const line of CLEAR_LINES) expect(cmds).toContain(line);
+    expect(CLEAR_LINES).toEqual(['l4d_booking_password ""', 'l4d_booking_tv_password ""', 'l4d_booking_notice ""']);
+    expect(cmds.indexOf('l4d_booking_password ""')).toBeGreaterThan(cmds.indexOf('sm_kick @humans "The booking is over. Thanks for playing."'));
+
+    // The resume path (no goodbye) still clears them.
+    const other = book();
+    holdBox(db, other, 2, new Date(now));
+    cancelBooking(db, { bookingId: other, by: P[0], now: new Date(now) });
+    sent = [];
+    const fresh = build();
+    fresh.resume();
+    await fresh.idle();
+    expect(sent.filter((x) => x.server === 'bb').flatMap((x) => x.cmds)).toEqual([...CLEAR_LINES]);
+  });
+
+  it('still releases when clearing the cvars fails', async () => {
+    const id = await ready();
+    box.ccc.down = true;
+    cancelBooking(db, { bookingId: id, by: P[0], now: new Date(now) });
+    runner.settle(id);
+    await runner.idle();
+    expect(released).toEqual([3]);
+    expect(getBooking(db, id)!.ended_at).not.toBeNull();
+  });
+
+  it('a notice that throws never throws out of the runner', () => {
+    const r = build({ notifier: { send: () => { throw new Error('boom'); } } as unknown as Notifier });
+    const id = book({ confirm: false });
+    expect(() => r.onCreated(id)).not.toThrow();
+    expect(() => r.onCancelled(id, P[0], null)).not.toThrow();
+  });
+
+  it('onExtended re-sends the notice and says the new end on a running box', async () => {
+    const id = await ready();
+    expect(extendBooking(db, { bookingId: id, by: P[0], staff: true, now: new Date(now) }).ok).toBe(true);
+    runner.onExtended(id);
+    await new Promise((r) => setImmediate(r));
+    const cmds = sent.flatMap((s) => s.cmds);
+    expect(cmds).toContain('say [Booking] Extended: this booking now runs until 22:30 UTC.');
+    expect(cmds.find((c) => c.startsWith('l4d_booking_notice'))).toContain('until 22:30 UTC');
+  });
+
+  it('onExtended does nothing for a booking with no box yet', () => {
+    const id = book();
+    runner.onExtended(id);
+    expect(sent).toEqual([]);
+  });
+
+  it('a booking made 20 minutes ahead and confirmed is not expired, and gets its box', async () => {
+    now = START - 20 * MIN;
+    const id = book();
+    now = START - 19 * MIN;
+    await runner.tick();
+    expect(getBooking(db, id)!.state).toBe('scheduled');
+    now = START - 15 * MIN;
+    await runner.tick();
+    await runner.idle();
+    expect(getBooking(db, id)!.state).toBe('ready');
   });
 });

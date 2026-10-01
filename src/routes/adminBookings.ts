@@ -60,6 +60,7 @@ export async function adminBookingRoutes(app: FastifyInstance, opts: { db: DB; r
     const r = B.extendBooking(db, { bookingId: id, by: me, staff: true });
     if (!r.ok) return refuse(reply, r.error);
     logAdmin(db, me, 'booking_extend', id, { endsAt: r.value.endsAt });
+    runner?.onExtended(id);
     return { ok: true };
   });
 

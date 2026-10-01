@@ -271,7 +271,8 @@ export function createBooking(db: DB, o: {
     const side = db.prepare('INSERT INTO booking_sides (booking_id, side, team_id, captain_steamid, confirmed_at) VALUES (?, ?, ?, ?, ?)');
     side.run(id, 'a', teamId, aCaptain, now.toISOString());
     side.run(id, 'b', bTeam, bCaptain, null);
-    for (const sid of aPeople) insertPerson(db, id, 'a', sid, 'player', 'accepted', o.by, now);
+    // A member who may not use competitive play (switch, ban) is not put on the booking.
+    for (const sid of aPeople) if (canUse(db, sid)) insertPerson(db, id, 'a', sid, 'player', 'accepted', o.by, now);
     if (bInvitee) insertPerson(db, id, 'b', bInvitee, 'player', 'invited', o.by, now);
     logEvent(db, id, o.by, 'created', { minutes, playlist, opponent: opp }, now);
     return ok({ id });
@@ -298,7 +299,10 @@ export function confirmBooking(db: DB, o: { bookingId: number; by: string; now?:
       // The team's current roster, minus anyone already on side a (a player
       // may be on both teams; they play for the side that booked).
       const onA = new Set(peopleOf(db, b.id).filter((p) => p.side === 'a').map((p) => p.steamid));
-      for (const m of activeMembers(db, s.team_id)) if (!onA.has(m.steamid)) insertPerson(db, b.id, 'b', m.steamid, 'player', 'accepted', o.by, now);
+      // Members who may not use competitive play (switch, ban) are left off.
+      for (const m of activeMembers(db, s.team_id)) {
+        if (!onA.has(m.steamid) && canUse(db, m.steamid)) insertPerson(db, b.id, 'b', m.steamid, 'player', 'accepted', o.by, now);
+      }
     } else {
       db.prepare("UPDATE booking_people SET status = 'accepted' WHERE booking_id = ? AND steamid = ?").run(b.id, s.captain_steamid);
     }
@@ -531,7 +535,7 @@ export function markActive(db: DB, id: number, now: Date): boolean {
   })();
 }
 
-/** The runner's own ends: time, idle, setup_failed, unconfirmed. */
+/** The runner's own ends: time, idle, setup_failed, no_server, unconfirmed. */
 export function closeBooking(db: DB, id: number, state: 'ended' | 'cancelled', reason: string, now: Date, actor: string | null = null): boolean {
   return db.transaction(() => {
     const changed = close(db, id, state, reason, now);
@@ -577,7 +581,12 @@ export function expireUnconfirmed(db: DB, now: Date): number[] {
   ).all() as { id: number; created_at: string; starts_at: string }[];
   const out: number[] = [];
   for (const r of rows) {
-    if (Date.parse(r.created_at) + UNCONFIRMED_TTL_MS <= nowMs || Date.parse(r.starts_at) - UNCONFIRMED_CUTOFF_MS <= nowMs) {
+    const startMs = Date.parse(r.starts_at);
+    // A booking made the cutoff or less ahead was already at or inside it when it
+    // was made: it gets until its start to be confirmed instead.
+    const lateMade = Date.parse(r.created_at) >= startMs - UNCONFIRMED_CUTOFF_MS;
+    const cutoff = lateMade ? startMs : startMs - UNCONFIRMED_CUTOFF_MS;
+    if (Date.parse(r.created_at) + UNCONFIRMED_TTL_MS <= nowMs || cutoff <= nowMs) {
       if (closeBooking(db, r.id, 'cancelled', 'unconfirmed', now)) out.push(r.id);
     }
   }

@@ -51,6 +51,10 @@ const END_SAY: Record<string, string> = {
   setup_failed: 'it could not be set up',
 };
 
+/** Sent before the release: if the end restart is ever skipped, the box must
+ *  not keep the booking's passwords or notice. */
+export const CLEAR_LINES = ['l4d_booking_password ""', 'l4d_booking_tv_password ""', 'l4d_booking_notice ""'] as const;
+
 export interface BookingRunnerDeps {
   db: DB;
   rcon: BoxRcon;
@@ -64,6 +68,11 @@ export interface BookingRunnerDeps {
   /** No box for a booking at its hold time: ask practice leases and side
    *  games to give one back (server.ts wires both needServer calls). */
   preempt: () => void;
+  /** A box this runner held is back in the pool and the booking's hold is
+   *  gone (ended_at written). The releaser's own waiters run before that, while
+   *  the hold still hides the box, so a PUG waiting on a box is woken here
+   *  (server.ts wires the same drain side games use). */
+  freed?: () => void;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }
@@ -135,14 +144,17 @@ export class BookingRunner {
   allocate(): void {
     const nowMs = this.now();
     const lead = bookingLimits(this.db).holdLeadMinutes * 60_000;
-    let waiting = false;
+    let preempt = false;
     for (const b of openBookings(this.db)) {
       if (b.state !== 'scheduled' || b.server_id !== null || b.ending_at !== null) continue;
       if (Date.parse(b.starts_at) - lead > nowMs) continue;
       if (sidesOf(this.db, b.id).some((s) => s.confirmed_at === null)) continue;
       const server = this.pickBox(b);
       if (!server || !holdBox(this.db, b.id, server.id, new Date(nowMs))) {
-        waiting = true;
+        // Preempt practice and side games only when the region has no free
+        // box at all; an idle box that cannot load the playlist (dlc4, a
+        // custom campaign) would not be helped by emptying another one.
+        if (this.freeBoxes(b.region) === 0) preempt = true;
         if (nowMs >= Date.parse(b.starts_at) && !this.latePublished.has(b.id)) {
           this.latePublished.add(b.id);
           publishAdminEvent({
@@ -155,7 +167,14 @@ export class BookingRunner {
       console.log(`[booking] ${b.id} holds ${server.name}`);
       this.track(b.id, () => this.setup(b.id));
     }
-    if (waiting) this.deps.preempt();
+    if (preempt) this.deps.preempt();
+  }
+
+  /** Idle, enabled boxes in the region that nothing holds. */
+  private freeBoxes(region: string): number {
+    return (this.db.prepare(
+      `SELECT COUNT(*) AS n FROM servers WHERE status = 'idle' AND enabled = 1 AND region = ? AND ${NOT_HELD_SQL}`,
+    ).get(region) as { n: number }).n;
   }
 
   /** An idle box for this booking: enabled, in its region, held by nothing,
@@ -193,13 +212,9 @@ export class BookingRunner {
         if (!this.stillSettingUp(id)) break;
         if (attempt < SETUP_TRIES) continue;
         publishAdminEvent({ kind: 'problem', text: `Booking ${id} could not be set up on ${server.name} (${why}). It is cancelled and the box is going back to the pool.` });
+        // tell() never throws: a notice that fails must not block the box going back below.
         if (closeBooking(this.db, id, 'cancelled', 'setup_failed', new Date(this.now()))) {
-          // A notice that fails to send must never block the box going back to the pool below.
-          try {
-            this.tell(id, this.everyone(id), 'booking_cancelled', { reason: 'the server could not be set up' });
-          } catch (notifyErr) {
-            console.warn(`[booking] ${id}: setup_failed notice failed:`, notifyErr instanceof Error ? notifyErr.message : notifyErr);
-          }
+          this.tell(id, this.everyone(id), 'booking_cancelled', { reason: 'the server could not be set up' });
         }
         break;
       }
@@ -276,12 +291,25 @@ export class BookingRunner {
         console.warn(`[booking] ${id}: goodbye on ${server.name} failed:`, err instanceof Error ? err.message : err);
       }
     }
+    if (server) {
+      try {
+        await this.deps.rcon(server, [...CLEAR_LINES]);
+      } catch (err) {
+        // Best effort: the restart below clears them too.
+        console.warn(`[booking] ${id}: clearing the booking cvars on ${server.name} failed:`, err instanceof Error ? err.message : err);
+      }
+    }
     try {
       await this.deps.release(b.server_id);
     } catch (err) {
       console.error(`[booking] ${id}: releasing server ${b.server_id} failed:`, err);
     }
     markReleased(this.db, id, new Date(this.now()));
+    try {
+      this.deps.freed?.();
+    } catch (err) {
+      console.error(`[booking] ${id}: the freed hook failed:`, err);
+    }
   }
 
   /** Finish any end a route or the tick started. Idempotent. */
@@ -302,12 +330,29 @@ export class BookingRunner {
       }
       this.remind(now);
       this.allocate();
+      this.closeServerless(now);
       for (const b of openBookings(this.db)) {
         if (b.ending_at !== null) { this.settle(b.id); continue; }
         if ((b.state === 'ready' || b.state === 'active') && !this.busy.has(b.id)) await this.watch(b, now);
       }
     } finally {
       this.ticking = false;
+    }
+  }
+
+  /** A confirmed booking that never got a box (none free in its region, or
+   *  none able to load its playlist) closes once the no-show grace after its
+   *  start has passed, so it neither waits for ever nor keeps a box back. */
+  private closeServerless(now: Date): void {
+    for (const b of openBookings(this.db)) {
+      if (b.state !== 'scheduled' || b.server_id !== null || b.ending_at !== null) continue;
+      if (sidesOf(this.db, b.id).some((s) => s.confirmed_at === null)) continue;
+      const grace = (bookingRules(b)?.noShowGraceMinutes ?? 15) * 60_000;
+      if (now.getTime() < Date.parse(b.starts_at) + grace) continue;
+      if (!closeBooking(this.db, b.id, 'cancelled', 'no_server', now)) continue;
+      console.warn(`[booking] ${b.id}: no server was free by ${b.starts_at}; cancelled`);
+      publishAdminEvent({ kind: 'problem', text: `Booking ${b.id} never got a server and is cancelled (no_server). Both sides are told.` });
+      this.tell(b.id, this.everyone(b.id), 'booking_cancelled', { reason: 'no server was free' });
     }
   }
 
@@ -337,6 +382,8 @@ export class BookingRunner {
   private async watch(b: BookingRow, now: Date): Promise<void> {
     const server = b.server_id !== null ? getServer(this.db, b.server_id) : undefined;
     if (!server) return;
+    // The time end needs no answer from the box: a dead box still ends on time.
+    if (now.getTime() >= Date.parse(b.ends_at)) { this.endNow(b.id, 'time', now); return; }
     let humans: ReturnType<typeof parseStatusPlayers>;
     try {
       const [st] = await this.deps.rcon(server, ['status']);
@@ -382,9 +429,16 @@ export class BookingRunner {
 
   // ---------- notices ----------
 
+  /** Never throws: a notice runs after a committed state change, and a
+   *  failure to word or send it must not undo the caller's work (a route's
+   *  answer, a release). */
   private tell(id: number, steamids: Iterable<string>, type: NotifyType, extra: { minutes?: number; reason?: string | null; addedBy?: string } = {}): void {
-    const payload = bookingMessage(this.db, this.deps.publicUrl, id, type, extra);
-    if (payload) this.deps.notifier.send(steamids, type, payload);
+    try {
+      const payload = bookingMessage(this.db, this.deps.publicUrl, id, type, extra);
+      if (payload) this.deps.notifier.send(steamids, type, payload);
+    } catch (err) {
+      console.warn(`[booking] ${id}: ${type} notice failed:`, err instanceof Error ? err.message : err);
+    }
   }
 
   /** Everyone with a stake: accepted people and the managers of both sides. */
@@ -410,6 +464,25 @@ export class BookingRunner {
   onCancelled(id: number, by: string | null, reason: string | null): void {
     this.tell(id, this.everyone(id).filter((s) => s !== by), 'booking_cancelled', { reason });
     this.settle(id);
+  }
+
+  /** After an extend: a running box shows the new end in its notice and says
+   *  so in chat. Best effort; the minute watch already uses the new end. */
+  onExtended(id: number): void {
+    const b = getBooking(this.db, id);
+    if (!b || b.server_id === null || b.ending_at !== null || (b.state !== 'ready' && b.state !== 'active')) return;
+    const server = getServer(this.db, b.server_id);
+    if (!server) return;
+    let lines: string[];
+    try {
+      lines = bookingLines(this.db, b);
+    } catch (err) {
+      console.warn(`[booking] ${id}: extend notice not sent:`, err instanceof Error ? err.message : err);
+      return;
+    }
+    this.deps.rcon(server, [...lines, `say [Booking] Extended: this booking now runs until ${b.ends_at.slice(11, 16)} UTC.`]).catch((err) => {
+      console.warn(`[booking] ${id}: extend notice on ${server.name} failed:`, err instanceof Error ? err.message : err);
+    });
   }
 
   onNoShow(id: number, absent: Side): void {

@@ -752,6 +752,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // The clean slate before a lease's setup: the same quit-and-wait a
     // release uses, without the release (the lease still holds the box).
     restart: (server) => restarter.restart(server),
+    // The releaser's waiters run while the lease still holds the box; the
+    // pending-match drain runs again once ended_at is written (as side games).
+    freed: () => holdFreed(),
   });
   // A lease that was winding down when this process stopped has its box
   // offline mid-restart; nothing else would ever bring that box back.
@@ -1880,9 +1883,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(communityRoutes, { db: deps.db, store: getCommunityStore, uploadTimeoutMs: deps.communityUploadTimeoutMs });
 
   // Server bookings (plan 4a). After `bot`: the notifier reads its transport
-  // per DM. resume() finishes any end or setup a restart interrupted; the
-  // releaser's waiters let a booking waiting for a box take one the moment a
-  // release frees it, ahead of the PUG queue (claimIdle keeps it back too).
+  // per DM. resume() finishes any end or setup a restart interrupted. The
+  // releaser's waiter registered below runs after the PUG drain registered
+  // earlier, so it does not put a booking ahead of the queue; what keeps a box
+  // for a booking about to start is claimIdle, which leaves one idle box back
+  // per booking due (bookingsDue). When a booking gives its own box back, the
+  // releaser's waiters run while the booking still holds it, so `freed` runs
+  // the drain again once ended_at is written.
   const notifier = new Notifier({
     db: deps.db,
     dm: () => { const transport = bot?.transport; return transport ? (userId, payload) => transport.dm(userId, payload) : null; },
@@ -1897,6 +1904,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     restart: (server) => restarter.restart(server),
     notifier,
     preempt: () => { practiceLeases.needServer(); sideGamesRef?.needServer(); },
+    freed: () => holdFreed(),
   });
   bookingRunner.resume();
   releaser.onFreed(() => bookingRunner.allocate());
