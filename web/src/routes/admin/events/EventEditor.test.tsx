@@ -1,0 +1,209 @@
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
+import type { AdminEventDetail, AdminEventOptions, AdminEventStage, EventFields } from '../../../api';
+
+const { mockAdmin, mockConfirm } = vi.hoisted(() => ({
+  mockAdmin: {
+    event: vi.fn(), eventOptions: vi.fn(), updateEvent: vi.fn(), addStage: vi.fn(), updateStage: vi.fn(), removeStage: vi.fn(),
+    reorderStages: vi.fn(), publishEvent: vi.fn(), openEventRegistration: vi.fn(), cancelEvent: vi.fn(),
+    setEventBanner: vi.fn(), removeEventBanner: vi.fn(),
+  },
+  mockConfirm: vi.fn(),
+}));
+vi.mock('../../../api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../api')>();
+  return { ...actual, adminApi: { ...actual.adminApi, ...mockAdmin } };
+});
+vi.mock('../../../components/Confirm', () => ({ confirm: mockConfirm }));
+vi.mock('../../../eventBanner', () => ({ toBannerImage: vi.fn(async () => 'BASE64') }));
+const { EventEditor } = await import('./EventEditor');
+const { ApiError } = await import('../../../api');
+
+const OPTIONS: AdminEventOptions = {
+  campaigns: [{ slug: 'no_mercy', name: 'No Mercy' }, { slug: 'dead_air', name: 'Dead Air' }, { slug: 'death_toll', name: 'Death Toll' }],
+  defaultPool: ['no_mercy', 'dead_air'], rulesets: [{ id: 2, name: 'Standard Cup' }], defaultRulesetId: 2,
+  gameConfigs: [{ key: 'standard', label: 'Standard' }],
+  defaults: {
+    eligibility: { minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: null },
+    checkin: { enabled: true, opensMinutes: 60, closesMinutes: 15 },
+    roster: { starters: 4, maxSubs: 2, lock: { kind: 'none' }, maxAdditions: null },
+  },
+};
+const FIELDS: EventFields = {
+  name: 'Riverside Cup', startsAt: '2026-10-10T20:00:00.000Z', entryKind: 'team', official: true, teamCap: null, description: '',
+  eligibility: OPTIONS.defaults.eligibility, checkin: OPTIONS.defaults.checkin, roster: OPTIONS.defaults.roster,
+};
+const stage = (id: number, ordinal: number, swiss: boolean): AdminEventStage => ({
+  id, ordinal, rulesSnapshotted: false,
+  summary: swiss ? 'Swiss, 4 rounds, top 8 advance' : 'Single elimination',
+  settings: {
+    type: swiss ? 'swiss' : 'single_elim', config: swiss ? { rounds: 4 } : { thirdPlace: false }, rulesetId: 2, gameConfig: 'standard',
+    campaignPool: ['no_mercy', 'dead_air'], vetoType: 'ban_to_one', chapters: null, scheduling: 'rolling', advanceCount: swiss ? 8 : null,
+  },
+});
+const detail = (over: Partial<AdminEventDetail> = {}): AdminEventDetail => ({
+  id: 3, slug: 'riverside-cup', status: 'draft', fields: FIELDS, bannerKey: null, cancelReason: null,
+  createdAt: '2026-10-01T12:00:00.000Z', updatedAt: '2026-10-01T12:00:00.000Z',
+  stages: [stage(10, 1, true), stage(11, 2, false)],
+  log: [{ at: '2026-10-01T12:00:00.000Z', actorName: 'boss', action: 'created', detail: {} }],
+  ...over,
+});
+
+afterEach(cleanup);
+beforeEach(() => {
+  for (const f of [...Object.values(mockAdmin), mockConfirm]) f.mockReset();
+  mockAdmin.eventOptions.mockResolvedValue(OPTIONS);
+  mockConfirm.mockResolvedValue(true);
+  for (const f of [mockAdmin.updateEvent, mockAdmin.addStage, mockAdmin.updateStage, mockAdmin.removeStage, mockAdmin.reorderStages,
+    mockAdmin.publishEvent, mockAdmin.openEventRegistration, mockAdmin.cancelEvent, mockAdmin.setEventBanner,
+    mockAdmin.removeEventBanner]) f.mockResolvedValue({ ok: true });
+});
+
+describe('EventEditor', () => {
+  it('shows a draft with its stages, history, Publish and no Open registration', async () => {
+    mockAdmin.event.mockResolvedValue(detail());
+    render(<EventEditor id={3} canEdit />);
+    expect(await screen.findByText('Swiss, 4 rounds, top 8 advance')).toBeTruthy();
+    expect(screen.getByText('Single elimination')).toBeTruthy();
+    expect(screen.getByText(/boss · Created/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Publish' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Open registration' })).toBeNull();
+    expect((screen.getByLabelText('Entry kind') as HTMLSelectElement).disabled).toBe(false);
+  });
+
+  it('Publish asks first, then publishes and reloads', async () => {
+    mockAdmin.event.mockResolvedValue(detail());
+    render(<EventEditor id={3} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish' }));
+    await waitFor(() => expect(mockAdmin.publishEvent).toHaveBeenCalledWith(3));
+    expect(mockConfirm).toHaveBeenCalled();
+    await waitFor(() => expect(mockAdmin.event).toHaveBeenCalledTimes(2));
+  });
+
+  it('moves a stage up by sending the swapped order', async () => {
+    mockAdmin.event.mockResolvedValue(detail());
+    render(<EventEditor id={3} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Move stage 2 up' }));
+    await waitFor(() => expect(mockAdmin.reorderStages).toHaveBeenCalledWith(3, [11, 10]));
+    expect((screen.getByRole('button', { name: 'Move stage 1 up' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('adds a stage from the form, starting from the site pool', async () => {
+    mockAdmin.event.mockResolvedValue(detail());
+    render(<EventEditor id={3} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add stage' }));
+    expect((screen.getByLabelText('No Mercy') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText('Death Toll') as HTMLInputElement).checked).toBe(false);
+    fireEvent.change(screen.getByLabelText('Stage type'), { target: { value: 'swiss' } });
+    fireEvent.input(screen.getByLabelText('Rounds'), { target: { value: '5' } });
+    fireEvent.click(screen.getByLabelText('Death Toll'));
+    fireEvent.input(screen.getByLabelText('Advance count'), { target: { value: '4' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save stage' }));
+    await waitFor(() => expect(mockAdmin.addStage).toHaveBeenCalledWith(3, {
+      type: 'swiss', config: { rounds: 5 }, rulesetId: 2, gameConfig: 'standard', campaignPool: ['no_mercy', 'dead_air', 'death_toll'],
+      vetoType: 'ban_to_one', chapters: null, scheduling: 'rolling', advanceCount: 4,
+    }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save stage' })).toBeNull());
+  });
+
+  it('keeps the stage form open when the server refuses it', async () => {
+    mockAdmin.event.mockResolvedValue(detail());
+    mockAdmin.addStage.mockRejectedValue(new ApiError(400, 'An advance count is 2 to 128 teams.'));
+    render(<EventEditor id={3} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add stage' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save stage' }));
+    expect(await screen.findByText('An advance count is 2 to 128 teams.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save stage' })).toBeTruthy();
+  });
+
+  it('saves edited fields with the start time unchanged', async () => {
+    mockAdmin.event.mockResolvedValue(detail());
+    render(<EventEditor id={3} canEdit />);
+    fireEvent.input(await screen.findByLabelText('Team cap'), { target: { value: '16' } });
+    fireEvent.input(screen.getByLabelText('Description'), { target: { value: 'Line one\nLine two' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save event' }));
+    await waitFor(() => expect(mockAdmin.updateEvent).toHaveBeenCalledWith(3, { ...FIELDS, teamCap: 16, description: 'Line one\nLine two' }));
+  });
+
+  it('an announced team event offers Open registration and locks the entry kind; a draft-kind one does not offer it', async () => {
+    mockAdmin.event.mockResolvedValue(detail({ status: 'announced' }));
+    const first = render(<EventEditor id={3} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open registration' }));
+    await waitFor(() => expect(mockAdmin.openEventRegistration).toHaveBeenCalledWith(3));
+    expect((screen.getByLabelText('Entry kind') as HTMLSelectElement).disabled).toBe(true);
+    first.unmount();
+    mockAdmin.event.mockResolvedValue(detail({ status: 'announced', fields: { ...FIELDS, entryKind: 'draft' } }));
+    render(<EventEditor id={3} canEdit />);
+    await screen.findByText('Swiss, 4 rounds, top 8 advance');
+    expect(screen.queryByRole('button', { name: 'Open registration' })).toBeNull();
+  });
+
+  it('cancels with the reason typed, after asking', async () => {
+    mockAdmin.event.mockResolvedValue(detail({ status: 'registration' }));
+    render(<EventEditor id={3} canEdit />);
+    fireEvent.input(await screen.findByLabelText('Cancel reason'), { target: { value: 'Not enough teams' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel event' }));
+    await waitFor(() => expect(mockAdmin.cancelEvent).toHaveBeenCalledWith(3, 'Not enough teams'));
+    expect(mockConfirm).toHaveBeenCalled();
+  });
+
+  it('a live event has no stage controls, no field form and no cancel reason box beyond Cancel', async () => {
+    mockAdmin.event.mockResolvedValue(detail({ status: 'live' }));
+    render(<EventEditor id={3} canEdit />);
+    await screen.findByText('Swiss, 4 rounds, top 8 advance');
+    expect(screen.queryByRole('button', { name: 'Add stage' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Move stage 2 up' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save event' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Cancel event' })).toBeTruthy();
+  });
+
+  it('a cancelled event shows its reason and nothing to press', async () => {
+    mockAdmin.event.mockResolvedValue(detail({ status: 'cancelled', cancelReason: 'Not enough teams' }));
+    render(<EventEditor id={3} canEdit />);
+    expect(await screen.findByText('Cancelled: Not enough teams')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Cancel event' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Publish' })).toBeNull();
+  });
+
+  it('previews the description with the same formatter the event page uses', async () => {
+    mockAdmin.event.mockResolvedValue(detail());
+    render(<EventEditor id={3} canEdit />);
+    fireEvent.input(await screen.findByLabelText('Description'), { target: { value: '**Bring snacks**' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    expect(screen.getByText('Bring snacks').tagName).toBe('STRONG');
+    expect(screen.queryByLabelText('Description')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect((screen.getByLabelText('Description') as HTMLTextAreaElement).value).toBe('**Bring snacks**');
+  });
+
+  it('uploads a banner from the picked file, and removes one after asking', async () => {
+    mockAdmin.event.mockResolvedValue(detail());
+    const { rerender } = render(<EventEditor id={3} canEdit />);
+    const input = await screen.findByLabelText('Banner');
+    fireEvent.change(input, { target: { files: [new File(['x'], 'b.jpg', { type: 'image/jpeg' })] } });
+    await waitFor(() => expect(mockAdmin.setEventBanner).toHaveBeenCalledWith(3, 'BASE64'));
+    mockAdmin.event.mockResolvedValue(detail({ bannerKey: 'e'.repeat(64) }));
+    rerender(<EventEditor id={4} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove banner' }));
+    await waitFor(() => expect(mockAdmin.removeEventBanner).toHaveBeenCalledWith(4));
+    expect(mockConfirm).toHaveBeenCalled();
+  });
+
+  it('a mod reads the event, its banner, stages and history, with no control anywhere', async () => {
+    mockAdmin.event.mockResolvedValue(detail({ bannerKey: 'e'.repeat(64), fields: { ...FIELDS, description: '*Team event*' } }));
+    const { container } = render(<EventEditor id={3} canEdit={false} />);
+    expect(await screen.findByText('Swiss, 4 rounds, top 8 advance')).toBeTruthy();
+    expect(screen.getByText('Read only: admins run events.')).toBeTruthy();
+    expect(screen.getByText(/boss · Created/)).toBeTruthy();
+    expect(screen.getByText('Team event').tagName).toBe('EM');
+    expect(container.querySelector('img.eventbanner')).toBeTruthy();
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+    expect(container.querySelectorAll('input, select, textarea')).toHaveLength(0);
+  });
+
+  it('says so for an event that does not exist', async () => {
+    mockAdmin.event.mockRejectedValue(new ApiError(404, 'No such event.'));
+    render(<EventEditor id={99} canEdit />);
+    expect(await screen.findByText('No such event.')).toBeTruthy();
+  });
+});
