@@ -190,7 +190,9 @@ describe('recovery writes', () => {
 });
 
 describe('classifyBox', () => {
-  const base: BoxSignals = { rconOk: true, marker: '7', bookingId: 7, nowMs: 1_000_000, lostSinceMs: null, heartbeatMs: null, a2sPlayers: null, a2sSeenMs: null, goneMs: 3 * MIN };
+  const base: BoxSignals = { rconOk: true, marker: '7', bookingId: 7, nowMs: 1_000_000, lostSinceMs: null, heartbeatMs: null, a2sPlayers: null, a2sSeenMs: null, a2sMisses: 0, goneMisses: 3, goneMs: 3 * MIN };
+  /** rcon silent for `lost` minutes, no heartbeat. */
+  const down = (lost: number, o: Partial<BoxSignals> = {}): BoxSignals => ({ ...base, rconOk: false, lostSinceMs: base.nowMs - lost * MIN, ...o });
   it('ok when rcon answers with our marker, or with no marker cvar at all (old plugin)', () => {
     expect(classifyBox(base)).toEqual({ kind: 'ok' });
     expect(classifyBox({ ...base, marker: null })).toEqual({ kind: 'ok' });
@@ -200,23 +202,31 @@ describe('classifyBox', () => {
     expect(classifyBox({ ...base, marker: '8' })).toEqual({ kind: 'restarted' });
   });
   it('quiet while rcon has failed for less than the limit', () => {
-    expect(classifyBox({ ...base, rconOk: false, lostSinceMs: base.nowMs - 2 * MIN })).toEqual({ kind: 'quiet' });
+    expect(classifyBox(down(2, { a2sMisses: 3 }))).toEqual({ kind: 'quiet' });
   });
   it('quiet while the live game still heartbeats, however long rcon has failed', () => {
-    expect(classifyBox({ ...base, rconOk: false, lostSinceMs: base.nowMs - 10 * MIN, heartbeatMs: base.nowMs - 40_000 })).toEqual({ kind: 'quiet' });
+    expect(classifyBox(down(10, { heartbeatMs: base.nowMs - 40_000, a2sMisses: 10 }))).toEqual({ kind: 'quiet' });
   });
   it('up_no_rcon when A2S answers past the limit, with or without players', () => {
-    expect(classifyBox({ ...base, rconOk: false, lostSinceMs: base.nowMs - 3 * MIN, a2sPlayers: 5 })).toEqual({ kind: 'up_no_rcon', players: 5 });
-    expect(classifyBox({ ...base, rconOk: false, lostSinceMs: base.nowMs - 3 * MIN, a2sPlayers: 0 })).toEqual({ kind: 'up_no_rcon', players: 0 });
+    expect(classifyBox(down(3, { a2sPlayers: 5 }))).toEqual({ kind: 'up_no_rcon', players: 5 });
+    expect(classifyBox(down(3, { a2sPlayers: 0 }))).toEqual({ kind: 'up_no_rcon', players: 0 });
   });
-  it('gone when rcon, heartbeat and A2S are all silent past the limit', () => {
-    expect(classifyBox({ ...base, rconOk: false, lostSinceMs: base.nowMs - 3 * MIN, heartbeatMs: base.nowMs - 4 * MIN })).toEqual({ kind: 'gone' });
+  it('gone when rcon, heartbeat and A2S are all silent past the limit, with at least the limit of A2S misses in a row', () => {
+    expect(classifyBox(down(3, { heartbeatMs: base.nowMs - 4 * MIN, a2sMisses: 3 }))).toEqual({ kind: 'gone' });
+    expect(classifyBox(down(8, { a2sMisses: 9 }))).toEqual({ kind: 'gone' });
   });
-  it('quiet, not gone, when this A2S query got no answer but one within the limit did (one lost UDP reply)', () => {
-    expect(classifyBox({ ...base, rconOk: false, lostSinceMs: base.nowMs - 5 * MIN, a2sSeenMs: base.nowMs - MIN })).toEqual({ kind: 'quiet' });
+  it('not gone with fewer A2S misses in a row than the limit, however long rcon has failed', () => {
+    expect(classifyBox(down(3, { a2sMisses: 2 }))).toEqual({ kind: 'quiet' });
+    expect(classifyBox(down(10, { a2sMisses: 0 }))).toEqual({ kind: 'quiet' });
   });
-  it('gone once the last A2S answer is older than the limit', () => {
-    expect(classifyBox({ ...base, rconOk: false, lostSinceMs: base.nowMs - 8 * MIN, a2sSeenMs: base.nowMs - 3 * MIN })).toEqual({ kind: 'gone' });
+  it('an A2S answer at any time in this outage keeps the box: up_no_rcon (no move), whatever the misses since', () => {
+    // Answered once early in the window, then silent.
+    expect(classifyBox(down(8, { a2sSeenMs: base.nowMs - 7 * MIN, a2sMisses: 7 }))).toEqual({ kind: 'up_no_rcon', players: null });
+    // One dropped reply at the limit after earlier answers.
+    expect(classifyBox(down(3, { a2sSeenMs: base.nowMs - MIN, a2sMisses: 1 }))).toEqual({ kind: 'up_no_rcon', players: null });
+  });
+  it('an A2S answer from before this outage does not count', () => {
+    expect(classifyBox(down(3, { a2sSeenMs: base.nowMs - 4 * MIN, a2sMisses: 3 }))).toEqual({ kind: 'gone' });
   });
 });
 
@@ -486,6 +496,12 @@ describe('srcds restarted', () => {
 describe('box gone', () => {
   useMissions();
   const kill = (name = 'ccc') => { box[name].down = true; };
+  /** One watch a minute (TICK_MS) from the first failed one until rcon has
+   *  been silent for the 3 minute limit: four watches, four A2S queries. */
+  const tickOut = async () => {
+    await runner.tick(); await runner.idle();
+    for (let i = 0; i < 3; i++) { now += MIN; await runner.tick(); await runner.idle(); }
+  };
 
   it('is quiet before the limit, then moves to another box after rcon, heartbeat and A2S are silent for 3 minutes', async () => {
     runner = build({ a2s: async () => null });
@@ -493,9 +509,11 @@ describe('box gone', () => {
     const m = liveGame(id);
     db.prepare("UPDATE match_live SET last_seen = datetime('now', '-10 minutes') WHERE match_id = ?").run(m);
     kill();
-    await runner.tick(); await runner.idle();
-    expect(getBooking(db, id)!.server_id).toBe(3);
-    now += 3 * MIN;
+    for (let i = 0; i < 3; i++) {
+      await runner.tick(); await runner.idle();
+      expect(getBooking(db, id)!.server_id).toBe(3);
+      now += MIN;
+    }
     await runner.tick(); await runner.idle();
     const b = getBooking(db, id)!;
     expect(b).toMatchObject({ server_id: 2, recovering_at: null, recoveries: 1 });
@@ -520,17 +538,47 @@ describe('box gone', () => {
     }
   });
 
-  it('one lost A2S reply does not move a booking whose box answered the server browser a minute ago', async () => {
-    const answers = [true, false, false, false, false];
-    runner = build({ a2s: async () => (answers.shift() ? { players: 0, map: 'x' } : null) });
+  it('asks A2S on every watch from the first failed rcon watch on', async () => {
+    let asked = 0;
+    runner = build({ a2s: async () => { asked++; return { players: 0, map: 'x' }; } });
     const id = await running();
     kill();
     await runner.tick(); await runner.idle();
-    now += 3 * MIN; await runner.tick(); await runner.idle(); // A2S answers
-    now += MIN; await runner.tick(); await runner.idle(); // one reply lost
+    expect(asked).toBe(1);
+    expect(getBooking(db, id)!.a2s_seen_at).not.toBeNull();
+    now += MIN; await runner.tick(); await runner.idle();
+    expect(asked).toBe(2);
+  });
+
+  it('A2S answers once early in the window then goes silent: no move', async () => {
+    const answers = [true];
+    runner = build({ a2s: async () => (answers.shift() ? { players: 0, map: 'x' } : null) });
+    const id = await running();
+    kill();
+    for (let i = 0; i < 10; i++) { await runner.tick(); await runner.idle(); now += MIN; }
     expect(getBooking(db, id)).toMatchObject({ server_id: 3, recovering_at: null });
-    // Silent for the whole limit since the last answer: now it is gone.
-    now += 3 * MIN; await runner.tick(); await runner.idle();
+  });
+
+  it('one dropped A2S reply at the limit after earlier answers: no move', async () => {
+    const answers = [true, true, true, false];
+    runner = build({ a2s: async () => (answers.shift() ? { players: 0, map: 'x' } : null) });
+    const id = await running();
+    kill();
+    await tickOut();
+    expect(getBooking(db, id)).toMatchObject({ server_id: 3, recovering_at: null });
+  });
+
+  it('fewer A2S misses in a row than the limit: no move, even past the limit', async () => {
+    // A web restart mid-outage forgets the misses: the count starts again.
+    runner = build({ a2s: async () => null });
+    const id = await running();
+    kill();
+    for (let i = 0; i < 2; i++) { await runner.tick(); await runner.idle(); now += MIN; }
+    runner = build({ a2s: async () => null });
+    now += 5 * MIN;
+    for (let i = 0; i < 2; i++) { await runner.tick(); await runner.idle(); now += MIN; }
+    expect(getBooking(db, id)).toMatchObject({ server_id: 3, recovering_at: null });
+    await runner.tick(); await runner.idle();
     expect(getBooking(db, id)!.server_id).not.toBe(3);
   });
 
@@ -551,7 +599,7 @@ describe('box gone', () => {
     const id = await running();
     db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 2)").run();
     kill();
-    await runner.tick(); now += 3 * MIN; await runner.tick(); await runner.idle();
+    await tickOut();
     expect(getBooking(db, id)).toMatchObject({ server_id: null });
     expect(getBooking(db, id)!.waiting_since).not.toBeNull();
     expect(preempts).toBeGreaterThan(0);
@@ -568,7 +616,7 @@ describe('box gone', () => {
     db.prepare("UPDATE match_live SET last_seen = datetime('now', '-30 minutes') WHERE match_id = ?").run(m);
     db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 2)").run();
     kill();
-    await runner.tick(); now += 3 * MIN; await runner.tick(); await runner.idle();
+    await tickOut();
     now += 20 * MIN;
     await runner.tick(); await runner.idle();
     expect(getBooking(db, id)).toMatchObject({ state: 'cancelled', end_reason: 'server_lost' });
@@ -581,7 +629,7 @@ describe('box gone', () => {
     const id = await running();
     db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 2)").run();
     kill();
-    await runner.tick(); now += 3 * MIN; await runner.tick(); await runner.idle();
+    await tickOut();
     const fresh = build({ a2s: async () => null });
     fresh.resume();
     db.prepare("UPDATE servers SET status = 'idle' WHERE id = 2").run();
@@ -593,7 +641,7 @@ describe('box gone', () => {
     runner = build({ a2s: async () => null });
     const id = await running();
     kill();
-    await runner.tick(); now += 3 * MIN; await runner.tick(); await runner.idle();
+    await tickOut();
     expect((db.prepare('SELECT status, gone_since FROM servers WHERE id = 3').get() as { status: string; gone_since: string | null }).gone_since).not.toBeNull();
     box.ccc.down = false;
     await runner.tick(); await runner.idle();
@@ -610,7 +658,7 @@ describe('box gone', () => {
     runner = build({ a2s: async () => null });
     await running();
     kill();
-    await runner.tick(); now += 3 * MIN; await runner.tick(); await runner.idle();
+    await tickOut();
     const row = () => db.prepare('SELECT status, gone_since FROM servers WHERE id = 3').get() as { status: string; gone_since: string | null };
     box.ccc.down = false; await runner.tick(); await runner.idle();
     box.ccc.down = true; await runner.tick(); await runner.idle();
@@ -626,7 +674,7 @@ describe('box gone', () => {
     runner = build({ a2s: async () => null, releasing: (sid) => sid === 3 });
     await running();
     kill();
-    await runner.tick(); now += 3 * MIN; await runner.tick(); await runner.idle();
+    await tickOut();
     box.ccc.down = false;
     await runner.tick(); await runner.idle();
     await runner.tick(); await runner.idle();
@@ -642,7 +690,7 @@ describe('box gone', () => {
     db.prepare("UPDATE match_live SET last_seen = datetime('now', '-30 minutes') WHERE match_id = ?").run(m);
     db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 2)").run();
     kill();
-    await runner.tick(); now += 3 * MIN; await runner.tick(); await runner.idle();
+    await tickOut();
     expect(getBooking(db, id)).toMatchObject({ server_id: null });
     expect(getBooking(db, id)!.waiting_since).not.toBeNull();
     return { id, m };
