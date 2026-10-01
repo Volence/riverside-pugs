@@ -343,3 +343,10 @@ didn't work" into a specific line.
 10. `sm_pug_abort testtoken` → `PUGOK aborted`; after the abort, roster
     enforcement stops and rejoining players are no longer placed on teams.
 11. Heartbeats arrive every 30s throughout.
+
+## `l4d_booking`
+
+`l4d_booking` holds a booked server's private `sv_password`, `tv_password`
+and ready-up line across map changes (plan 4a). Build with
+`./build-booking.sh`. It must be loaded on every pool box before bookings
+are opened to anyone: setup refuses a box without `l4d_booking_version`.
