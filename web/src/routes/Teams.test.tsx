@@ -18,17 +18,38 @@ const signedIn = { kind: 'active', me: { steamid: '1', name: 'me', avatar: null,
 
 describe('Teams', () => {
   it('lists every team and the viewer\'s own teams and invites', async () => {
-    mockTeams.list.mockResolvedValue({ teams: [{ slug: 'rats', name: 'Riverside Rats', tag: 'RR', logoKey: null, members: 5 }] });
+    mockTeams.list.mockResolvedValue({ teams: [
+      { slug: 'rats', name: 'Riverside Rats', tag: 'RR', logoKey: null, members: 5, captainName: 'cap' },
+      { slug: 'owls', name: 'Owls', tag: 'OW', logoKey: null, members: 2, captainName: 'hoot' },
+    ] });
     mockTeams.mine.mockResolvedValue({
-      teams: [{ slug: 'mice', name: 'Mice', tag: 'MM', logoKey: null, role: 'captain' }],
+      teams: [{ slug: 'mice', name: 'Mice', tag: 'MM', logoKey: null, role: 'captain', members: 3 }],
       invites: [{ id: 7, slug: 'rats', name: 'Riverside Rats', tag: 'RR', invitedByName: 'cap', createdAt: '2026-10-01T00:00:00.000Z' }],
       canCreate: true,
     });
     render(<Teams session={signedIn} />);
-    expect(await screen.findByText('Riverside Rats', { selector: '.teamcard__name' })).toBeTruthy();
-    expect(screen.getByText(/5 players/)).toBeTruthy();
+    expect(await screen.findByText('Riverside Rats', { selector: 'a.teamrow .teamrow__name' })).toBeTruthy();
+    expect(screen.getByText('Captain cap · 5 / 8 players · ready for events')).toBeTruthy();
+    expect(screen.getByText('Captain hoot · 2 / 8 players · 2 more to enter events')).toBeTruthy();
+    expect(screen.getByText('Needs players')).toBeTruthy();
     expect(screen.getByText(/cap invited you/)).toBeTruthy();
-    expect(screen.getByText('Mice', { selector: '.teamcard__name' })).toBeTruthy();
+    expect(screen.getByText('Mice', { selector: '.teamrow__name' })).toBeTruthy();
+    expect(screen.getByText('3 / 8 players · 1 more to enter events')).toBeTruthy();
+  });
+
+  it('the start form waits behind a button for someone already on a team, and opens at once for someone on none', async () => {
+    mockTeams.list.mockResolvedValue({ teams: [] });
+    mockTeams.mine.mockResolvedValue({ teams: [{ slug: 'mice', name: 'Mice', tag: 'MM', logoKey: null, role: 'member', members: 4 }], invites: [], canCreate: true });
+    render(<Teams session={signedIn} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Start a team' }));
+    expect(screen.getByLabelText('Team name')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByLabelText('Team name')).toBeNull();
+    cleanup();
+    mockTeams.mine.mockResolvedValue({ teams: [], invites: [], canCreate: true });
+    render(<Teams session={signedIn} />);
+    expect(await screen.findByText(/You are not on a team yet/)).toBeTruthy();
+    expect(screen.getByLabelText('Team name')).toBeTruthy();
   });
 
   it('accepting an invite reloads the lists', async () => {

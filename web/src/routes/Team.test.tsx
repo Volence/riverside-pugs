@@ -101,6 +101,38 @@ describe('Team', () => {
     await waitFor(() => expect(mockTeams.makeCaptain).toHaveBeenCalledWith('rats', '2'));
   });
 
+  it('kick and leave each need a second press', async () => {
+    mockTeams.get.mockResolvedValue(view({ viewer: { role: 'captain', staff: false }, manage: { invites: [], joinLinkToken: null } }));
+    mockTeams.kick.mockResolvedValue({});
+    render(<Team slug="rats" session={session('1')} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Kick' }));
+    expect(mockTeams.kick).not.toHaveBeenCalled();
+    expect(screen.getByText(/cannot rejoin through the join link/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, kick bob' }));
+    await waitFor(() => expect(mockTeams.kick).toHaveBeenCalledWith('rats', '2'));
+    cleanup();
+    mockTeams.get.mockResolvedValue(view({ viewer: { role: 'member', staff: false } }));
+    mockTeams.leave.mockResolvedValue({ disbanded: false, captain: '1' });
+    render(<Team slug="rats" session={session('2')} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Leave team' }));
+    expect(mockTeams.leave).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, leave Riverside Rats' }));
+    await waitFor(() => expect(mockTeams.leave).toHaveBeenCalledWith('rats'));
+  });
+
+  it('a co-captain can change the logo but not rename', async () => {
+    mockTeams.get.mockResolvedValue(view({
+      viewer: { role: 'cocaptain', staff: false }, manage: { invites: [], joinLinkToken: null },
+      members: [
+        { steamid: '1', name: 'cap', avatar: null, role: 'captain', joinedAt: '2026-10-01T00:00:00.000Z' },
+        { steamid: '2', name: 'bob', avatar: null, role: 'cocaptain', joinedAt: '2026-10-02T00:00:00.000Z' },
+      ],
+    }));
+    render(<Team slug="rats" session={session('2')} />);
+    expect(await screen.findByLabelText('Logo')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Rename' })).toBeNull();
+  });
+
   it('staff making someone captain are told it replaces the current captain', async () => {
     mockTeams.get.mockResolvedValue(view({ viewer: { role: null, staff: true }, manage: { invites: [], joinLinkToken: null } }));
     render(<Team slug="rats" session={session('9')} />);

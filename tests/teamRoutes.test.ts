@@ -94,7 +94,7 @@ describe('create, invite, accept, page', () => {
     expect(asStranger.manage).toBeNull();
     expect((await call('GET', '/api/teams/no-such-team', P[3])).statusCode).toBe(404);
 
-    expect((await call('GET', '/api/teams', P[3])).json().teams).toEqual([{ slug, name: 'Riverside Rats', tag: 'RR', logoKey: null, members: 2 }]);
+    expect((await call('GET', '/api/teams', P[3])).json().teams).toEqual([{ slug, name: 'Riverside Rats', tag: 'RR', logoKey: null, members: 2, captainName: 'player0' }]);
   });
 
   it('player search finds active players by name prefix, at least two characters', async () => {
@@ -110,7 +110,7 @@ describe('join link', () => {
   it('the captain sees the token, a co-captain does not, a player joins with it', async () => {
     const slug = await create(P[0], 'Rats', 'RR');
     const tok = (await call('POST', `/api/teams/${slug}/join-link`, P[0], { on: true })).json().token as string;
-    expect((await call('GET', `/api/teams/join/${tok}`, P[2])).json()).toEqual({ slug, name: 'Rats', tag: 'RR', logoKey: null });
+    expect((await call('GET', `/api/teams/join/${tok}`, P[2])).json()).toEqual({ slug, name: 'Rats', tag: 'RR', logoKey: null, members: 1, captainName: 'player0' });
     expect((await call('POST', `/api/teams/join/${tok}`, P[2])).json()).toEqual({ slug });
     db.prepare("UPDATE team_members SET role = 'cocaptain' WHERE steamid = ?").run(P[2]);
     expect((await call('GET', `/api/teams/${slug}`, P[2])).json().manage.joinLinkToken).toBeNull();
