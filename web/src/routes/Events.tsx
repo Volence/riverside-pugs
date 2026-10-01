@@ -29,15 +29,22 @@ function EventRow({ ev }: { ev: EventListItem }) {
 export function Events({ session }: { session: Session }) {
   const [events, setEvents] = useState<EventListItem[] | null>(null);
   const [closed, setClosed] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const ctl = new AbortController();
-    eventsApi.list(ctl.signal).then((r) => setEvents(r.events), (e) => { if (e instanceof ApiError && e.status === 404) setClosed(true); });
+    setFailed(false);
+    eventsApi.list(ctl.signal).then((r) => setEvents(r.events), (e) => {
+      if (ctl.signal.aborted) return;
+      if (e instanceof ApiError && e.status === 404) setClosed(true);
+      else setFailed(true);
+    });
     return () => ctl.abort();
   }, [session.kind]);
 
   const head = <PageHeader eyebrow="Competitive" title="Events" />;
   if (closed) return <main class="page page--list">{head}<Empty>Events are not open yet.</Empty></main>;
+  if (failed) return <main class="page page--list">{head}<p class="error" role="alert">Could not load events. Try again in a moment.</p></main>;
   if (!events) return <main class="page page--list">{head}</main>;
   const upcoming = events.filter((e) => !OVER.has(e.status));
   const past = events.filter((e) => OVER.has(e.status));
