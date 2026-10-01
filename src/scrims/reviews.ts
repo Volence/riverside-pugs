@@ -68,8 +68,10 @@ export function submitReview(db: DB, o: { bookingId: number; by: string; thumbs:
     const b = getBooking(db, o.bookingId);
     if (!b) return { ok: false, error: 'not_found' };
     if (!reviewable(b)) return { ok: false, error: 'wrong_state' };
-    const side = actingSides(db, b.id, o.by)[0];
-    if (!side) return { ok: false, error: 'not_manager' };
+    // Someone who manages both sides would be reviewing themselves.
+    const acting = actingSides(db, b.id, o.by);
+    if (acting.length !== 1) return { ok: false, error: 'not_manager' };
+    const side = acting[0];
     if (!reviewOpen(b, now.getTime())) return { ok: false, error: 'review_closed' };
     const tags = parseTags(o.tags);
     if ((o.thumbs !== 1 && o.thumbs !== -1) || tags === null) return { ok: false, error: 'bad_review' };
@@ -114,15 +116,17 @@ function received(db: DB, party: Party): ReviewRow[] {
   ).all(w.arg) as ReviewRow[];
 }
 
-export interface ReviewSummary { count: number; positivePct: number | null; topTag: ReviewTag | null }
+/** count is absent for a non-staff viewer while under SUMMARY_MIN. */
+export interface ReviewSummary { count?: number; positivePct: number | null; topTag: ReviewTag | null }
 
 /** The aggregate a team (or pickup captain) may see of the reviews it
  *  received. Under SUMMARY_MIN there is no percentage and no top tag, so a
- *  single review cannot be read back out of it. Tied tags go to the first in
- *  REVIEW_TAGS order. */
-export function reviewSummary(db: DB, party: Party): ReviewSummary {
+ *  single review cannot be read back out of it, and only staff get the count:
+ *  a team watching it tick from 0 to 1 after a scrim would learn that the
+ *  opponent reviewed them. Tied tags go to the first in REVIEW_TAGS order. */
+export function reviewSummary(db: DB, party: Party, viewer: { staff: boolean }): ReviewSummary {
   const rows = received(db, party);
-  if (rows.length < SUMMARY_MIN) return { count: rows.length, positivePct: null, topTag: null };
+  if (rows.length < SUMMARY_MIN) return viewer.staff ? { count: rows.length, positivePct: null, topTag: null } : { positivePct: null, topTag: null };
   const counts = new Map<ReviewTag, number>();
   for (const r of rows) for (const t of parseTagsJson(r.tags_json)) counts.set(t, (counts.get(t) ?? 0) + 1);
   let topTag: ReviewTag | null = null;
@@ -153,10 +157,10 @@ export interface ScrimReviews {
 
 export function scrimReviewsOf(db: DB, steamid: string, nowMs: number = Date.now()): ScrimReviews {
   return {
-    pickup: { summary: reviewSummary(db, { captain: steamid }), toxic: toxicFlag(db, { captain: steamid }, nowMs) },
+    pickup: { summary: reviewSummary(db, { captain: steamid }, { staff: true }), toxic: toxicFlag(db, { captain: steamid }, nowMs) },
     teams: myTeams(db, steamid).map((t) => ({
       teamId: t.id, slug: t.slug, name: t.name, tag: t.tag,
-      summary: reviewSummary(db, { teamId: t.id }), toxic: toxicFlag(db, { teamId: t.id }, nowMs),
+      summary: reviewSummary(db, { teamId: t.id }, { staff: true }), toxic: toxicFlag(db, { teamId: t.id }, nowMs),
     })),
   };
 }

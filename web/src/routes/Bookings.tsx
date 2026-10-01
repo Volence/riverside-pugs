@@ -142,7 +142,7 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
 
 export function Bookings({ session }: { session: Session }) {
   const signedIn = session.kind === 'active';
-  const [mine, setMine] = useState<{ open: BookingSummary[]; recent: BookingSummary[]; prefs: NotifyPref[]; record?: ScrimReliability } | null>(null);
+  const [mine, setMine] = useState<{ open: BookingSummary[]; recent: BookingSummary[]; prefs: NotifyPref[]; record?: ScrimReliability; recordPublic?: boolean } | null>(null);
   const [options, setOptions] = useState<BookingOptions | null>(null);
   const [closed, setClosed] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -177,7 +177,9 @@ export function Bookings({ session }: { session: Session }) {
       {mine?.record && (
         <Panel>
           <h3>Your pickup record</h3>
-          <p class="muted">Bookings you captained as a pickup group. Only you and staff see it.</p>
+          <p class="muted">Bookings you captained as a pickup group. {mine.recordPublic
+            ? 'Records are public, so everyone sees it as a badge on your board posts.'
+            : 'Only you and staff see it.'}</p>
           <RecordLine record={mine.record} />
         </Panel>
       )}

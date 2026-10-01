@@ -201,6 +201,25 @@ describe('Team', () => {
     expect(screen.getByText('Shown 6 of 7 · No-shows 1').closest('section')?.textContent).toContain('Scrims');
   });
 
+  it('a non-member sees the public record as a badge in the team header', async () => {
+    mockTeams.get.mockResolvedValue(view({ record: { shown: 6, booked: 7, noShows: 1, lateCancels: 0, excused: 0 }, recordPublic: true }));
+    render(<Team slug="rats" session={session('9')} />);
+    const badge = await screen.findByText('Reliable: 6 of 7 shown');
+    expect(badge.closest('header')).toBeTruthy();
+    cleanup();
+    mockTeams.get.mockResolvedValue(view({ record: { shown: 1, booked: 2, noShows: 0, lateCancels: 0, excused: 0 }, recordPublic: true }));
+    render(<Team slug="rats" session={session('8')} />);
+    expect((await screen.findByText('New')).closest('header')).toBeTruthy();
+  });
+
+  it('no header badge while the record is private, even for staff who get it', async () => {
+    mockTeams.get.mockResolvedValue(view({ viewer: { role: null, staff: true }, record: { shown: 6, booked: 7, noShows: 1, lateCancels: 0, excused: 0 }, recordPublic: false }));
+    mockTeams.scrims.mockResolvedValue({ scrims: [] });
+    render(<Team slug="rats" session={session('9')} />);
+    await screen.findByText('Riverside Rats');
+    expect(screen.queryByText('Reliable: 6 of 7 shown')).toBeNull();
+  });
+
   it('a member\'s team under 3 booked reads "New"', async () => {
     mockTeams.get.mockResolvedValue(view({ viewer: { role: 'member', staff: false }, record: { shown: 0, booked: 0, noShows: 0, lateCancels: 0, excused: 0 } }));
     render(<Team slug="rats" session={session('2')} />);

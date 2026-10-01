@@ -303,13 +303,17 @@ describe('scrims', () => {
     db.prepare("UPDATE bookings SET state = 'ended', end_reason = 'time', ending_at = ?, ended_at = ? WHERE id = ?")
       .run(new Date(past + DAY / 12).toISOString(), new Date(past + DAY / 12).toISOString(), id);
     const record = async (who?: string) => (await call('GET', `/api/teams/${slug}`, who)).json().record;
+    const isPublic = async (who?: string) => (await call('GET', `/api/teams/${slug}`, who)).json().recordPublic;
     expect(await record(P[0])).toEqual({ shown: 1, booked: 1, noShows: 0, lateCancels: 0, excused: 0 });
+    expect(await isPublic(P[0])).toBe(false);
+    expect(await isPublic(P[3])).toBeUndefined();
     expect(await record(MOD)).toEqual({ shown: 1, booked: 1, noShows: 0, lateCancels: 0, excused: 0 });
     expect(await record(P[3])).toBeUndefined();
     expect(await record()).toBeUndefined();
     db.prepare("UPDATE settings SET value = 'on' WHERE key = 'scrim_reliability_public'").run();
     expect(await record(P[3])).toEqual({ shown: 1, booked: 1, noShows: 0, lateCancels: 0, excused: 0 });
     expect(await record()).toEqual({ shown: 1, booked: 1, noShows: 0, lateCancels: 0, excused: 0 });
+    expect(await isPublic()).toBe(true);
   });
 
   // Plan 2 Task 4: the review aggregate is for current members and staff
@@ -325,7 +329,11 @@ describe('scrims', () => {
     db.prepare("INSERT INTO scrim_reviews (booking_id, by_side, reviewer, thumbs, tags_json, created_at, updated_at) VALUES (?, 'a', ?, -1, '[\"toxic\"]', ?, ?)")
       .run(id, P[4], new Date(past + DAY / 6).toISOString(), new Date(past + DAY / 6).toISOString());
     const view = async (who?: string) => (await call('GET', `/api/teams/${slug}`, who));
-    expect((await view(P[0])).json().reviews).toEqual({ count: 1, positivePct: null, topTag: null });
+    // Under 3 a member gets no count at all (it would show the opponent just
+    // reviewed them), only "not enough yet"; staff keep the count.
+    const mine = (await view(P[0])).json().reviews;
+    expect(mine).toEqual({ positivePct: null, topTag: null });
+    expect('count' in mine).toBe(false);
     expect((await view(MOD)).json().reviews).toEqual({ count: 1, positivePct: null, topTag: null });
     db.prepare("UPDATE settings SET value = 'on' WHERE key = 'scrim_reliability_public'").run();
     for (const who of [P[3], P[4], undefined]) {

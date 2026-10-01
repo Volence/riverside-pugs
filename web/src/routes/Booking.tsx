@@ -44,8 +44,8 @@ function AddPerson({ id, side, onDone }: { id: number; side: BookingSide; onDone
   );
 }
 
-/** Staff's excuse for one side's mark (plan 2): a late cancel or a no-show,
- *  with an optional note. Excused marks count nowhere, not in the record and
+/** Staff's excuse for one side's mark (plan 2): a late cancel, a no-show, or
+ *  a short side nobody claimed (side.short), with an optional note. Excused marks count nowhere, not in the record and
  *  not in the booking allowance. */
 function StaffExcuse({ v, side, busy, staffAct }: {
   v: BookingView; side: BookingView['sides'][number]; busy: boolean; staffAct: (fn: () => Promise<unknown>) => void;
@@ -300,7 +300,7 @@ export function Booking({ id, session }: { id: string; session: Session }) {
       </PageHeader>
       {error && <p class="error" role="alert">{error}</p>}
       <Panel>
-        <p>{v.ending && v.state !== 'cancelled' && v.state !== 'no_show' ? 'Closing.' : STATE_LINE[v.state]}{v.cancel?.reason ? ` Reason: ${v.cancel.reason}` : ''}</p>
+        <p>{v.ending && !v.ended && v.state !== 'cancelled' && v.state !== 'no_show' ? 'Closing.' : STATE_LINE[v.state]}{v.cancel?.reason ? ` Reason: ${v.cancel.reason}` : ''}</p>
         {v.connect && (
           <p class="bookingconnect">In the game console: <code>{`connect ${v.connect.host}:${v.connect.port}; password ${v.connect.password}`}</code></p>
         )}
@@ -331,8 +331,8 @@ export function Booking({ id, session }: { id: string; session: Session }) {
                 : s.canExcuse && <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.excuse(v.id))}>All good, no hard feelings</button>}
             </p>
           )}
-          {s.noShow && s.excused && !s.lateCancel && <p class="bookinglate"><span class="teamchip">Excused</span></p>}
-          {v.viewer.staff && (s.lateCancel || s.noShow) && !s.excused && <StaffExcuse v={v} side={s} busy={busy} staffAct={staffAct} />}
+          {(s.noShow || s.short) && s.excused && !s.lateCancel && <p class="bookinglate"><span class="teamchip">Excused</span></p>}
+          {v.viewer.staff && (s.lateCancel || s.noShow || s.short) && !s.excused && <StaffExcuse v={v} side={s} busy={busy} staffAct={staffAct} />}
           <ul class="bookingpeople">
             {s.people.map((p) => (
               <li key={p.steamid}>

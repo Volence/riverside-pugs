@@ -6,7 +6,7 @@ import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 import { toLogoPng } from '../teamLogo';
 import { campaignName } from '../format';
-import { RecordLine } from '../components/ScrimRecord';
+import { RecordLine, reliableBadge } from '../components/ScrimRecord';
 import { opponentsReviewLine } from '../components/ReviewSummary';
 
 const ROLE_LABEL = { captain: 'Captain', cocaptain: 'Co-captain', member: 'Member' } as const;
@@ -111,6 +111,9 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
             {live ? <>Founded {day(team.createdAt)} · {team.members.length} / {ROSTER_MAX} players</>
               : <>Disbanded {day(team.disbandedAt!)}</>}
             {myRole && live && <span class="teamchip">You are {myRole.toLowerCase()}</span>}
+            {/* The public badge (scrim_reliability_public), for anyone not on
+                the team; members read the full line in the Scrims panel. */}
+            {team.record && team.recordPublic && role === null && <span class="teamchip scrimbadge">{reliableBadge(team.record)}</span>}
           </p>
         </div>
       </header>

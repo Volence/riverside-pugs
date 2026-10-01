@@ -15,8 +15,12 @@ import { isLateCancel, iso, partyWhere, SHOWN_MIN, type Party } from '../booking
  * booked: confirmed bookings whose start has passed that closed as ended or
  *   no_show, or that this side cancelled late, minus the excused ones.
  * shown: those of them where the side had SHOWN_MIN people on the box.
- * excused: excused marks (late cancels and no-shows), in neither count.
+ * excused: excused marks (late cancels, no-shows, and short sides staff
+ *   excused with no claim, bookings.ts shortSide), in neither count.
  * Early, staff and system cancels are in no count at all.
+ * The booking allowance (rules.ts allowance) moves only on claimed no-shows:
+ * an unclaimed short side is often an idle end nobody joined or a scrim both
+ * sides moved, so it lowers shown here but should not cost a booking slot.
  */
 export interface Reliability { shown: number; booked: number; noShows: number; lateCancels: number; excused: number }
 
@@ -38,7 +42,7 @@ export function reliability(db: DB, party: Party, nowMs: number = Date.now()): R
       continue;
     }
     // Only a side with a mark can be excused, so an excused row here is an
-    // excused no-show.
+    // excused no-show or an excused short side (bookings.ts shortSide).
     if (excused) { out.excused++; continue; }
     out.booked++;
     if (r.my_peak >= SHOWN_MIN) out.shown++;
@@ -47,10 +51,15 @@ export function reliability(db: DB, party: Party, nowMs: number = Date.now()): R
   return out;
 }
 
+/** Whether every side's record is public (scrim_reliability_public). */
+export function reliabilityPublic(db: DB): boolean {
+  return getSetting(db, 'scrim_reliability_public') === 'on';
+}
+
 /** Who may see a side's record: staff, a current member of the team, the
  *  pickup captain themselves, or anyone once scrim_reliability_public is on. */
 export function canSeeReliability(db: DB, party: Party, viewer: string | null): boolean {
-  if (getSetting(db, 'scrim_reliability_public') === 'on') return true;
+  if (reliabilityPublic(db)) return true;
   if (!viewer) return false;
   const p = getPlayer(db, viewer);
   if (p && (p.is_admin === 1 || p.is_mod === 1)) return true;
