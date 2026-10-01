@@ -3332,15 +3332,18 @@ a.teamrow:hover .teamrow__name { color: var(--accent); }
 .scrimfit { display: flex; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-3); font-size: var(--fs-dense); color: var(--text-muted); }
 
 .scrimrows { list-style: none; margin: 0; padding: 0; }
-.scrimrows > li { border-bottom: 1px solid var(--border); padding: var(--sp-3) 0; }
-.scrimrows > li:last-child { border-bottom: 0; }
+/* Each post is its own card, so one post is easy to tell from the next. */
+.scrimrows { display: flex; flex-direction: column; gap: var(--sp-3); }
+.scrimrows > li { border: 1px solid var(--border); background: var(--surface-2); padding: var(--sp-4); }
 
 .scrimside { display: flex; align-items: center; gap: var(--sp-2); }
 
 .scrimrow { display: flex; flex-direction: column; gap: var(--sp-3); scroll-margin-top: var(--sp-5); }
 .scrimrow > .inlinerow { margin: 0; }
-.scrimrow--highlight { background: var(--surface-2); border-left: 2px solid var(--rule); padding-left: var(--sp-3); }
-.scrimrow--night { background: var(--surface-2); }
+.scrimrows > li.scrimrow--highlight { border-color: var(--rule); box-shadow: inset 3px 0 0 var(--rule); }
+.scrimrows > li.scrimrow--night { border-color: var(--rule); }
+a.scrimside { color: inherit; text-decoration: none; }
+a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { text-decoration: underline; text-underline-offset: 3px; }
 
 /* A post or an offer: side and start time on top (the time drops under the
    name on a phone), the campaigns numbered in play order, a muted count and

@@ -40,20 +40,21 @@ function NightBanner({ night }: { night: ScrimNightWindow }) {
 
 /** A side's badge and name, reused on the board and in "Your posts": the
  *  team look (TeamBadge, from Teams.tsx) for a team side, "Pickup" in its
- *  place for a pickup group. */
+ *  place for a pickup group. The name links to the team page (its roster)
+ *  or, for a pickup group, to its captain's profile. */
 function SideLabel({ side }: { side: ScrimBoardPost['side'] }) {
   return side.kind === 'team'
     ? (
-      <span class="scrimside">
+      <a class="scrimside" href={`/team/${side.slug}`}>
         <TeamBadge tag={side.tag} logoKey={side.logoKey} size={32} />
         <span class="teamrow__name">{side.name}</span>
-      </span>
+      </a>
     )
     : (
-      <span class="scrimside">
+      <a class="scrimside" href={`/player/${side.steamid}`}>
         <span class="teambadge teambadge--tag" aria-hidden="true">Pickup</span>
         <span class="teamrow__name">{side.name}</span>
-      </span>
+      </a>
     );
 }
 
