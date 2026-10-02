@@ -35,8 +35,9 @@ export function allowedType(filename: string): { ext: string; mime: string; inli
   return t ? { ext, ...t } : null;
 }
 
-/** Fetch a URL's bytes. Injected, so tests never touch the network. */
-export type AttachmentFetcher = (url: string) => Promise<{ ok: boolean; body: AsyncIterable<Uint8Array> | null }>;
+/** Fetch a URL's bytes. Injected, so tests never touch the network.
+ *  `length` is the response's Content-Length, or null when it sent none. */
+export type AttachmentFetcher = (url: string) => Promise<{ ok: boolean; length?: number | null; body: AsyncIterable<Uint8Array> | null }>;
 
 export interface SaveResult {
   /** Bytes written when stored; otherwise what Discord said the size was. */
@@ -111,10 +112,12 @@ export class AttachmentStore {
         }
       };
       await pipeline(Readable.from(capped()), createWriteStream(part, { mode: 0o600 }));
-      // Discord's declared size is authoritative: a body that ends short (or
-      // ends long without ever crossing the cap) is not the file it claimed
-      // to be, and is refused exactly like any other failed download.
-      if (size !== a.size) {
+      // A body that ends short of (or past) the response's own length is not
+      // the whole file, and is refused like any other failed download. The
+      // size in the Discord payload is NOT that check: mobile uploads declare
+      // far less than the CDN serves (ticket 29: 210931 declared, 667277
+      // served), so it only ever gates the cheap refusals above.
+      if (res.length != null && size !== res.length) {
         rmSync(part, { force: true });
         return skip('fetch_failed');
       }
@@ -144,5 +147,6 @@ export const httpFetcher: AttachmentFetcher = async (url) => {
   }
   if (u.protocol !== 'https:' || !CDN_HOSTS.has(u.hostname)) return { ok: false, body: null };
   const res = await fetch(u, { redirect: 'error', signal: AbortSignal.timeout(120_000) });
-  return { ok: res.ok, body: res.body as unknown as AsyncIterable<Uint8Array> | null };
+  const length = res.headers.get('content-length');
+  return { ok: res.ok, length: length === null ? null : Number(length), body: res.body as unknown as AsyncIterable<Uint8Array> | null };
 };
