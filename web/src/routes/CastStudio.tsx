@@ -8,7 +8,7 @@ import { Overlay, setOverlayKey } from '../overlay/Scenes';
 import { sampleFeed } from '../overlay/sample';
 import '../overlay/overlay.css';
 import {
-  HUD_STYLES, LAYERS, MAX_CASTERS, SCENES, SCENE_LABELS, THEMES,
+  DEFAULT_INFECTED_RECT, HUD_STYLES, LAYERS, MAX_CASTERS, SCENES, SCENE_LABELS, THEMES,
   type CastMatchView, type LiveElements, type LiveHud, type OverlayFeed, type SceneKey, type StudioState, type TeamOverride,
 } from '../../../src/cast/types';
 
@@ -38,13 +38,13 @@ const THEME_LABELS: Record<(typeof THEMES)[number], string> = {
 };
 
 const ELEMENT_INFO: { key: keyof LiveElements; label: string; help: string }[] = [
-  { key: 'survivors', label: 'Survivor rows', help: 'Off by default. Health with temp health, down, ledge and pinned, and the kit, pills and throwable each one holds.' },
-  { key: 'infected', label: 'Infected rows', help: 'Off by default. Class, spawning or dead, and damage dealt this round.' },
+  { key: 'survivors', label: 'Survivor rows', help: 'Off by default: a spectator always has the survivor cards in the game\'s bottom band. Turn on for SourceTV or a clean feed.' },
+  { key: 'infected', label: 'Infected rows', help: 'On by default: a spectator never sees the infected. Class, spawning or dead, damage this round.' },
   { key: 'progress', label: 'Progress strip', help: 'How far the survivors are, with the tank and witch points on it.' },
   { key: 'rival', label: "Opponent's mark", help: 'Second half: how far the other team got on this map, marked on the strip.' },
   { key: 'dots', label: 'Survivor dots', help: "Each survivor's own progress on the strip: who is rushing or lagging." },
   { key: 'bosses', label: 'Tank and witch %', help: 'On the progress strip (bar) or under the scorebug.' },
-  { key: 'tank', label: 'Tank health', help: 'L4D1 shows tank health only to the tank itself.' },
+  { key: 'tank', label: 'Tank health', help: 'On by default: a spectator never sees the tank\'s health.' },
   { key: 'tankRecap', label: 'Tank damage card', help: "After a tank dies: each survivor's damage to it and their share, who played it, how long it lived." },
 ];
 
@@ -491,8 +491,8 @@ function LiveToggles({ state, update, map, hud }: { state: StudioState; update: 
       </div>
       {state.hudStyle === 'frame' && <FrameRectsBox state={state} update={update} />}
       <p class="muted studio__hint">
-        Each live element has its own switch. Turn survivor or infected rows on only with a clean-feed HUD or SourceTV or free cam:
-        in first person the game already shows that health, so it would be on screen twice.
+        Each live element has its own switch. A spectator already sees the survivor cards in the game's bottom band, so survivor rows
+        are for SourceTV or a clean feed only; the infected, the tank's health and the boss points the game never shows a spectator.
       </p>
       <div class="studio__toggles">
         {ELEMENT_INFO.map((el) => (
@@ -518,24 +518,38 @@ function LiveToggles({ state, update, map, hud }: { state: StudioState; update: 
   );
 }
 
-/** Frame mode's two holes, in overlay pixels (1920 x 1080). */
+/** Frame mode's holes, in overlay pixels (1920 x 1080): the survivor cards
+ *  in the spectator's bottom band, and optionally an infected panel. */
 function FrameRectsBox({ state, update }: { state: StudioState; update: Update }) {
   const set = (side: 'survivor' | 'infected', k: 'x' | 'y' | 'w' | 'h', v: string) => {
     const n = Math.round(Number(v));
     if (!Number.isFinite(n)) return;
-    update((s) => ({ ...s, frame: { ...s.frame, [side]: { ...s.frame[side], [k]: n } } }));
+    update((s) => {
+      const cur = side === 'survivor' ? s.frame.survivor : s.frame.infected ?? DEFAULT_INFECTED_RECT;
+      return { ...s, frame: { ...s.frame, [side]: { ...cur, [k]: n } } };
+    });
   };
+  const rect = (side: 'survivor' | 'infected', r: { x: number; y: number; w: number; h: number }) => (
+    <div key={side} class="studio__form studio__rect">
+      <span class="eyebrow">{side === 'survivor' ? 'Survivor cards' : 'Infected panel'}</span>
+      {(['x', 'y', 'w', 'h'] as const).map((k) => (
+        <label key={k}>{k.toUpperCase()}<input inputMode="numeric" value={r[k]} onInput={(e) => set(side, k, e.currentTarget.value)} /></label>
+      ))}
+    </div>
+  );
   return (
     <div class="studio__frames">
-      <p class="muted studio__hint">Where the caster HUD puts the game's own team panels, in overlay pixels (1920 x 1080). The overlay frames these holes.</p>
-      {(['survivor', 'infected'] as const).map((side) => (
-        <div key={side} class="studio__form studio__rect">
-          <span class="eyebrow">{side === 'survivor' ? 'Survivor panel' : 'Infected panel'}</span>
-          {(['x', 'y', 'w', 'h'] as const).map((k) => (
-            <label key={k}>{k.toUpperCase()}<input inputMode="numeric" value={state.frame[side][k]} onInput={(e) => set(side, k, e.currentTarget.value)} /></label>
-          ))}
-        </div>
-      ))}
+      <p class="muted studio__hint">
+        Where the game draws its team panels, in overlay pixels (1920 x 1080). A spectator gets the survivor cards in the bottom band;
+        the infected show in the free right part of that band, drawn by the overlay.
+      </p>
+      {rect('survivor', state.frame.survivor)}
+      {state.frame.infected && rect('infected', state.frame.infected)}
+      <label class="studio__toggle studio__toggle--small">
+        <input type="checkbox" checked={state.frame.infected !== null}
+          onChange={(e) => { const on = e.currentTarget.checked; update((s) => ({ ...s, frame: { ...s.frame, infected: on ? DEFAULT_INFECTED_RECT : null } }), true); }} />
+        <span>Frame an infected panel too (only with a caster HUD that shows one)</span>
+      </label>
     </div>
   );
 }

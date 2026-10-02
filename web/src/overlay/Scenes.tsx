@@ -1007,32 +1007,74 @@ function RailHud(props: HudProps) {
 }
 
 /**
- * FRAME. A caster HUD (client side) moves the game's own survivor and
- * infected team panels into two rects; the overlay frames those holes, tabs
- * each with the team on that side this half, and puts the centre plate
- * between. The game draws the health itself, live and once, so the overlay
- * never repeats it. The rects are the studio's `frame` setting.
+ * FRAME. The game draws its own survivor cards in the spectator's bottom band
+ * (ruling 30); the overlay frames that hole, tabs it with the team on
+ * survivors this half, and fills the band's free right part with the
+ * infected, which a spectator never sees: one card per player in the game
+ * cards' own shape, so the band reads as one strip half drawn by the game and
+ * half by us. An infected hole (for a caster HUD that shows one) is optional.
  */
 function FrameHud(props: HudProps) {
   const d = hudData(props);
   const f = props.studio.frame;
-  const hole = (r: typeof f.survivor, team: CastTeam | null, side: 'survivor' | 'infected', right: boolean) => (
-    <div class={`ov-frame ov-frame--${right ? 'r' : 'l'}`} data-side={side}
-      style={{ left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px`, ...teamVar(team, side === 'survivor' ? 'var(--win)' : 'var(--loss)') }}>
-      <span class="ov-frame__hole" />
-      <span class="ov-frame__tab">
-        <span class={`ov-sideword ov-sideword--${side}`}>{side === 'survivor' ? 'Survivors' : 'Infected'}</span>
-        {team && <span class="ov-frame__name">{team.name}</span>}
-        {team && <span class="ov-frame__pts">{team.score}</span>}
-      </span>
-    </div>
-  );
+  const hole = (r: NonNullable<typeof f.infected>, team: CastTeam | null, side: 'survivor' | 'infected') => {
+    const right = r.x + r.w / 2 > 960;
+    const low = r.y + r.h / 2 > 540;
+    return (
+      <div class={`ov-frame ov-frame--${right ? 'r' : 'l'}${low ? ' ov-frame--low' : ''}`} data-side={side}
+        style={{ left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px`, ...teamVar(team, side === 'survivor' ? 'var(--win)' : 'var(--loss)') }}>
+        <span class="ov-frame__hole" />
+        <span class="ov-frame__tab">
+          <span class={`ov-sideword ov-sideword--${side}`}>{side === 'survivor' ? 'Survivors' : 'Infected'}</span>
+          {team && <span class="ov-frame__name">{team.name}</span>}
+          {team && <span class="ov-frame__pts">{team.score}</span>}
+        </span>
+      </div>
+    );
+  };
+  const sv = f.survivor;
+  const bandLeft = sv.x + sv.w + 30;
+  const infected = d.el.infected && props.live && d.infTeam && 1880 - bandLeft >= 300 ? props.live.infected.slice(0, 4) : [];
+  const tankMax = props.live?.tank?.maxHealth ?? 0;
   return (
     <>
-      {hole(f.survivor, d.survTeam, 'survivor', f.survivor.x + f.survivor.w / 2 > 960)}
-      {hole(f.infected, d.infTeam, 'infected', f.infected.x + f.infected.w / 2 > 960)}
+      {hole(sv, d.survTeam, 'survivor')}
+      {f.infected && hole(f.infected, d.infTeam, 'infected')}
+      {infected.length > 0 && (
+        <div class="ov-band" style={{ left: `${bandLeft}px`, top: `${sv.y}px`, width: `${1880 - bandLeft}px`, height: `${sv.h}px`, ...teamVar(d.infTeam, 'var(--loss)') }}>
+          <span class="ov-band__tab">
+            <span class="ov-sideword ov-sideword--infected">Infected</span>
+            <span class="ov-frame__name">{d.infTeam!.name}</span>
+            <span class="ov-frame__pts">{d.infTeam!.score}</span>
+          </span>
+          {infected.map((i) => <BandCard key={i.slot} i={i} tankMax={tankMax} />)}
+        </div>
+      )}
       <PlateHud {...props} noStacks />
     </>
+  );
+}
+
+/** An infected player in the shape of the game's own survivor card: icon
+ *  and state over a slim bar, the name under it with damage this round. */
+function BandCard({ i, tankMax }: { i: CastInfected; tankMax: number }) {
+  const cls = i.cls ? i.cls[0]!.toUpperCase() + i.cls.slice(1) : '';
+  const max = i.cls === 'tank' ? tankMax || i.health : SI_MAX[i.cls] ?? 0;
+  const frac = i.alive && !i.ghost && max > 0 ? Math.max(0, Math.min(1, i.health / max)) : 0;
+  const status = !i.alive ? 'Dead' : i.ghost ? 'Spawning' : cls;
+  const tone = !i.alive ? 'dead' : i.ghost ? 'ghost' : i.cls === 'tank' ? 'tank' : 'up';
+  return (
+    <div class={`ov-bc is-${tone}`}>
+      <span class="ov-bc__top">
+        <span class="ov-bc__icon">{i.alive ? <ClassIcon cls={i.cls} /> : null}</span>
+        <b class="ov-bc__state">{status}</b>
+      </span>
+      <span class="ov-bc__bar"><span style={{ width: `${frac * 100}%` }} /></span>
+      <span class="ov-bc__bottom">
+        <span class="ov-bc__name">{i.name}</span>
+        {i.dmg !== null && <span class="ov-bc__dmg" title="Damage this round">{i.dmg}</span>}
+      </span>
+    </div>
   );
 }
 

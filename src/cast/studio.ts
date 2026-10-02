@@ -1,6 +1,6 @@
 import type { DB } from '../db.js';
 import {
-  defaultElements, defaultFrameRects, defaultStudioState, HUD_STYLES, MAX_CASTERS, SCENES, TEXT_MAX, THEMES,
+  DEFAULT_INFECTED_RECT, defaultElements, defaultFrameRects, defaultStudioState, HUD_STYLES, MAX_CASTERS, SCENES, TEXT_MAX, THEMES,
   type Callout, type CasterLine, type HudStyle, type Rect, type LiveElements, type SceneKey, type StudioState, type TeamOverride, type ThemeKey,
 } from './types.js';
 
@@ -148,7 +148,11 @@ export function cleanState(v: unknown): StudioState {
     frame: (() => {
       const f = (o.frame && typeof o.frame === 'object' ? o.frame : {}) as Record<string, unknown>;
       const fd = defaultFrameRects();
-      return { survivor: cleanRect(f.survivor, fd.survivor), infected: cleanRect(f.infected, fd.infected) };
+      return {
+        survivor: cleanRect(f.survivor, fd.survivor),
+        // Off unless the producer added one (a caster HUD that shows an infected panel).
+        infected: f.infected && typeof f.infected === 'object' ? cleanRect(f.infected, DEFAULT_INFECTED_RECT) : null,
+      };
     })(),
     callout: cleanCallout(o.callout),
   };
