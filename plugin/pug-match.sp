@@ -3199,6 +3199,50 @@ rock_skeets=%d dps_landed=%d biles_landed=%d survivors_biled=%d",
 	return Plugin_Continue;
 }
 
+// ---------- tank recap (caster studio) ----------
+// Each survivor's damage to one tank, from pug-match's own tank_damage hook,
+// as the delta between the tank's spawn and its death. One tank at a time:
+// a second tank spawning while the first lives restarts the window (rare in
+// versus; the recap then covers the second tank's life only).
+int g_iTankDmgAtSpawn[MAX_ROSTER];
+int g_iTankDealtAtSpawn[MAX_ROSTER];
+float g_fTankSpawnedAt;                   // GetGameTime() at tank_spawn; 0 = none tracked
+
+void TankRecapBegin()
+{
+	if (!StatsActive()) { g_fTankSpawnedAt = 0.0; return; }
+	for (int i = 0; i < MAX_ROSTER; i++)
+	{
+		g_iTankDmgAtSpawn[i] = g_iSkill[i][PS_TankDamage];
+		g_iTankDealtAtSpawn[i] = g_iSkill[i][PS_DmgAsTank];
+	}
+	g_fTankSpawnedAt = GetGameTime();
+}
+
+/** TANKDONE alive=<s> controller=<steamid|0> dealt=<dmg to survivors> p=<steamid>:<dmg>,...
+ *  Undelayed like LIVEHUD: the site keeps it in memory for the caster feed. */
+void TankRecapEnd(int tank)
+{
+	if (g_fTankSpawnedAt <= 0.0 || !StatsActive()) { g_fTankSpawnedAt = 0.0; return; }
+	int alive = RoundToFloor(GetGameTime() - g_fTankSpawnedAt);
+	g_fTankSpawnedAt = 0.0;
+	int dealt = 0;
+	char list[600];
+	list[0] = '\0';
+	for (int i = 0; i < g_iRosterCount; i++)
+	{
+		int dealtBy = g_iSkill[i][PS_DmgAsTank] - g_iTankDealtAtSpawn[i];
+		if (dealtBy > 0) dealt += dealtBy;
+		int dmg = g_iSkill[i][PS_TankDamage] - g_iTankDmgAtSpawn[i];
+		if (dmg <= 0) continue;
+		Format(list, sizeof(list), "%s%s%s:%d", list, list[0] == '\0' ? "" : ",", g_sRosterId[i], dmg);
+	}
+	char controller[32] = "0";
+	if (tank >= 1 && tank <= MaxClients && !IsFakeClient(tank) && g_iClientRoster[tank] >= 0)
+		strcopy(controller, sizeof(controller), g_sRosterId[g_iClientRoster[tank]]);
+	EmitPug("TANKDONE alive=%d controller=%s dealt=%d p=%s", alive, controller, dealt, list);
+}
+
 /** Survivor items as LIVEHUD bits: 1 kit, 2 pills, 4 pipe bomb, 8 molotov. */
 int LiveHudItems(int client)
 {
@@ -3917,6 +3961,7 @@ public void OnRoundIsLive()
 
 		EmitBalance();
 		RoundStatsBegin();
+		g_fTankSpawnedAt = 0.0;    // a tank from the half before is never this half's
 
 		RosterLateJoiners();
 		CheckRosterMismatch();
@@ -4590,7 +4635,11 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
 			victim, attacker, (attacker <= MaxClients) ? g_iClientRoster[attacker] : -1, freed);
 	}
 	if (GetClientTeam(victim) == TEAM_SURVIVOR) EmitClientEvent("death", victim, attacker, 0);
-	else if (IsTankClient(victim)) EmitClientEvent("tank_death", attacker, 0, 0);
+	else if (IsTankClient(victim))
+	{
+		EmitClientEvent("tank_death", attacker, 0, 0);
+		TankRecapEnd(victim);
+	}
 
 	int slot = (attacker <= MaxClients) ? g_iClientRoster[attacker] : -1;
 	if (slot == -1 || !IsSurvivorClient(attacker) || !IsInfectedClient(victim) || IsFakeClient(victim)) return;
@@ -4919,6 +4968,7 @@ public void Event_CarAlarm(Event event, const char[] name, bool dontBroadcast)
 
 public void Event_TankSpawn(Event event, const char[] name, bool dontBroadcast)
 {
+	TankRecapBegin();
 	EmitClientEvent("tank_spawn", GetClientOfUserId(event.GetInt("userid")), 0, 0);
 }
 

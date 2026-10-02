@@ -77,15 +77,33 @@ export interface StudioState {
   /** Where the scorebug sits: top centre by default, bottom centre when a
    *  caster's own HUD puts something at the top. Scorebug style only. */
   scorebugAt: 'top' | 'bottom';
-  /** The gameplay HUD: `bar`, the full-width broadcast bar across the top
-   *  (both teams' players, scores, map progress), or `scorebug`, the compact
-   *  top-centre bug with optional rows under it. */
+  /** The gameplay HUD look (plan ruling 23): `plate`, a centre score plate
+   *  with the progress strip and the players as medallion stacks down the
+   *  screen sides; `corners`, a team plate in each top corner with its
+   *  players hanging under it; `rail`, one board down the left edge with the
+   *  scores, a vertical progress gauge and both teams' players; `frame`,
+   *  holes framed for the game's own team panels (a caster HUD moves them
+   *  there) with the centre plate between; or `scorebug`, the original
+   *  compact top-centre bug. */
   hudStyle: HudStyle;
+  /** Frame mode's holes. */
+  frame: FrameRects;
   /** A highlight card fired by the producer, shown for CALLOUT_MS from `at`. */
   callout: Callout | null;
 }
 
-export const HUD_STYLES = ['bar', 'scorebug'] as const;
+export const HUD_STYLES = ['plate', 'corners', 'rail', 'frame', 'scorebug'] as const;
+
+/** A rect on the 1920x1080 overlay, in pixels. */
+export interface Rect { x: number; y: number; w: number; h: number }
+
+/** Frame mode: where the caster HUD puts the game's own team panels, so the
+ *  overlay can frame them (survivor team panel, infected team panel). The
+ *  defaults are a guess until an in-game probe sets them. */
+export interface FrameRects { survivor: Rect; infected: Rect }
+export function defaultFrameRects(): FrameRects {
+  return { survivor: { x: 20, y: 20, w: 560, h: 150 }, infected: { x: 1340, y: 20, w: 560, h: 150 } };
+}
 export type HudStyle = (typeof HUD_STYLES)[number];
 
 export interface Callout {
@@ -117,10 +135,18 @@ export interface LiveElements {
    *  with the boss points on it). Needs pug-match 0.3.20's LIVEHUD line; the
    *  strip hides itself on a server that does not send it. */
   progress: boolean;
+  /** The tank damage card for a few seconds after a tank dies. */
+  tankRecap: boolean;
+  /** On the progress strip in the second half: how far the other team got
+   *  on this map in the first half. */
+  rival: boolean;
+  /** On the progress strip: each survivor's own progress as a small face,
+   *  showing who is rushing ahead or lagging. */
+  dots: boolean;
 }
 
 export function defaultElements(): LiveElements {
-  return { survivors: false, infected: false, tank: true, bosses: true, progress: true };
+  return { survivors: false, infected: false, tank: true, bosses: true, progress: true, tankRecap: true, rival: true, dots: true };
 }
 
 export const MAX_CASTERS = 3;
@@ -141,7 +167,8 @@ export function defaultStudioState(): StudioState {
     bosses: { tank: null, witch: null, map: null },
     elements: defaultElements(),
     scorebugAt: 'top',
-    hudStyle: 'bar',
+    hudStyle: 'plate',
+    frame: defaultFrameRects(),
     callout: null,
   };
 }
@@ -158,9 +185,15 @@ export interface CastPlayer {
   stats: Record<string, number>;
   /** Displayed SR, or null where SR is not shown (scrims, tournaments). */
   sr: number | null;
-  /** Career PUG record, for the player card. */
-  career: CastCareer;
+  /** Career PUG record, for the player card: PUGs only, null on a scrim or
+   *  tournament match (their lineups show the roster, not PUG numbers). */
+  career: CastCareer | null;
+  /** Role on the team side of a booked game (team captain, co-captain,
+   *  member, or a pickup side's captain); null on a PUG. */
+  role: CastRole | null;
 }
+
+export type CastRole = 'captain' | 'cocaptain' | 'member';
 
 /** Career PUG numbers for the lineup cards (completed, unvoided PUGs),
  *  from the owner's stat set (2026-10-02): skeets, DPs, boomer %. */
@@ -214,6 +247,16 @@ export interface CastChapter {
   state: 'done' | 'playing' | 'next';
 }
 
+/** One live event for the producer's highlight list. */
+export interface CastEvent {
+  seq: number; kind: string; actor: string; actorTeam: 'a' | 'b' | null; target: string | null; value: number;
+  /** A skeet run (src/skeetStreaks.ts rules: one player, one map half, each
+   *  skeet within STREAK_WINDOW_MS of the run's first): how many skeets it
+   *  holds so far and who they were on. The list carries one entry per run,
+   *  its newest skeet, so a double upgrades the single instead of stacking. */
+  streak?: { count: number; targets: string[] };
+}
+
 export interface CastMatchView {
   id: number;
   kind: 'pug' | 'scrim' | 'tournament';
@@ -230,7 +273,7 @@ export interface CastMatchView {
   teams: { a: CastTeam; b: CastTeam };
   chapters: CastChapter[];
   /** Newest first. */
-  events: { seq: number; kind: string; actor: string; actorTeam: 'a' | 'b' | null; target: string | null; value: number }[];
+  events: CastEvent[];
   /** For a followed booking: which game of how many. */
   game: { number: number; of: number } | null;
 }
@@ -280,6 +323,9 @@ export interface LiveHud {
    *  plugin is absent, 0 for no boss this map; witch -2 is a witch party. */
   tank: number | null;
   witch: number | null;
+  /** Second half: the furthest the other team got on this map in the first
+   *  half (the opponent's mark), or null when not known. */
+  rivalReach: number | null;
 }
 
 export interface CastLiveRound {
@@ -297,6 +343,20 @@ export interface CastLiveRound {
   /** Null on a server without pug-match 0.3.20, or when its last LIVEHUD is
    *  older than a few seconds. */
   hud: LiveHud | null;
+  /** For a few seconds after a tank dies (pug-match 0.3.20 TANKDONE): each
+   *  survivor's damage to it from pug-match's own hook, exact, and the
+   *  tank's own line. */
+  tankRecap: TankRecap | null;
+}
+
+export interface TankRecap {
+  /** Milliseconds since it died, for the card's own timing. */
+  agoMs: number;
+  aliveS: number;
+  controller: string | null;
+  dealt: number;
+  /** Highest first; share is of the survivors' total damage to this tank. */
+  players: { name: string; dmg: number; share: number }[];
 }
 
 export interface OverlayFeed {

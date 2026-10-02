@@ -67,8 +67,8 @@ try {
     casters: [{ name: 'Volence', handle: '@volence', camUrl: '' }, { name: 'CasterOne', handle: 'twitch.tv/casterone', camUrl: '' }],
     countdownTo: new Date(Date.now() + 4 * 60_000 + 32_000).toISOString(),
     bosses: { tank: 74, witch: 31 },
-    elements: { survivors: true, infected: true, tank: true, bosses: true, progress: true },
-    hudStyle: 'bar', scorebugAt: 'top',
+    elements: { survivors: false, infected: false, tank: true, bosses: true, progress: true },
+    hudStyle: process.env.HUD ?? 'plate', scorebugAt: 'top',
     lowerThird: { show: true, title: 'Map 2: The Crane', text: 'Team A leads by 64 after the greenhouse' },
     theme: process.env.THEME ?? 'riverside',
   };
@@ -80,7 +80,7 @@ try {
   const layers = new Set(['gameplay', 'scorebug', 'roundhud', 'lowerthird']);
   const scenes = (process.env.SCENES ?? 'starting,casters,gameplay,mapintro,maps,lineups,stats,brb,winner,ending,scorebug,roundhud,lowerthird').split(',');
   for (const s of scenes) {
-    if (s === 'gameplay') await api('POST', '/api/cast/studio/callout', { title: 'Skeet', text: 'Volence skeets mira mid-air', team: 'a' });
+    if (s === 'gameplay') await api('POST', '/api/cast/studio/callout', { title: 'Triple skeet', text: 'Volence skeeted mira, gabe and Visceral', team: 'a' });
     await go(`${BASE}/overlay/${s}?k=${encodeURIComponent(key)}`);
     if (layers.has(s)) {
       await ev(`document.documentElement.style.background = 'url(/hud-backdrops/survivor-hilltop.jpg) center / cover'`);
@@ -89,19 +89,29 @@ try {
     await shot(`scene-${s}`);
   }
 
-  // The scorebug style with its rows, and the bar with nothing typed (boss %
-  // from the server) and the lower third hidden.
-  for (const [name, patch] of [
-    ['scene-gameplay-compact', { elements: { survivors: false, infected: false, tank: true, bosses: true, progress: true } }],
-    ['scene-gameplay-scorebug', { hudStyle: 'scorebug' }],
-    ['scene-gameplay-server-bosses', { bosses: { tank: null, witch: null, map: null } }],
-  ]) {
-    await api('PUT', '/api/cast/studio', { ...state, ...patch, lowerThird: { ...state.lowerThird, show: false } });
-    await go(`${BASE}/overlay/gameplay?k=${encodeURIComponent(key)}`);
-    await ev(`document.documentElement.style.background = 'url(/hud-backdrops/survivor-hilltop.jpg) center / cover'`);
-    await sleep(2400);
-    await shot(name);
+  // Every gameplay look, compact (the default: rows off) and with rows on.
+  const rowsOn = { survivors: true, infected: true, tank: true, bosses: true, progress: true };
+  const looks = (process.env.LOOKS ?? 'plate,corners,rail,frame,scorebug').split(',');
+  for (const look of looks) {
+    for (const rows of look === 'frame' ? [false] : [false, true]) {
+      await api('PUT', '/api/cast/studio', { ...state, hudStyle: look, elements: rows ? rowsOn : state.elements, lowerThird: { ...state.lowerThird, show: false } });
+      await api('POST', '/api/cast/studio/callout', { title: 'Triple skeet', text: 'Volence skeeted mira, gabe and Visceral', team: 'a' });
+      await go(`${BASE}/overlay/gameplay?k=${encodeURIComponent(key)}`);
+      await ev(`document.documentElement.style.background = 'url(/hud-backdrops/survivor-hilltop.jpg) center / cover'`);
+      await sleep(2400);
+      await shot(`gameplay-${look}-${rows ? 'rows' : 'compact'}`);
+    }
   }
+  // The tank damage card, on the default look.
+  await api('PUT', '/api/cast/studio', { ...state, hudStyle: 'plate', lowerThird: { ...state.lowerThird, show: false } });
+  await api('POST', '/api/dev/livehud', { token: 'a1'.repeat(16), tank: { aliveS: 84, controller: '76561198000009101', dealt: 312, players: [
+    { steamid: '76561198000009104', dmg: 2870 }, { steamid: '76561198000009105', dmg: 1940 }, { steamid: '76561198000009106', dmg: 2210 }, { steamid: '76561198000009107', dmg: 980 },
+  ] } });
+  await go(`${BASE}/overlay/gameplay?k=${encodeURIComponent(key)}`);
+  await ev(`document.documentElement.style.background = 'url(/hud-backdrops/survivor-hilltop.jpg) center / cover'`);
+  await sleep(2400);
+  await shot('gameplay-plate-tank-recap');
+
   // Nothing on air: the OBS page is transparent (shot over the still).
   await api('PUT', '/api/cast/studio', { ...state, matchId: null, lowerThird: { ...state.lowerThird, show: false } });
   await go(`${BASE}/overlay/gameplay?k=${encodeURIComponent(key)}`);

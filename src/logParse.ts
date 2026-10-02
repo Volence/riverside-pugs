@@ -1,4 +1,4 @@
-import type { LiveHudLine } from './cast/liveHud.js';
+import type { LiveHudLine, TankDone } from './cast/liveHud.js';
 import { steamId64Of } from './steamId.js';
 import { MAX_HOLDS, decodeIntervals } from './inputStats.js';
 
@@ -126,6 +126,9 @@ export type LogEvent =
   // progress, items, damage this half, boss %. Undelayed, so it is kept in
   // memory for the caster feed only (src/cast/liveHud.ts).
   | { kind: 'live_hud'; token: string; line: LiveHudLine }
+  // A tank died: each survivor's damage to it, its controller, how long it
+  // lived and what it dealt (pug-match 0.3.20). Caster studio only, memory.
+  | { kind: 'tank_done'; token: string; recap: TankDone }
   // One half of one map. Emitted at OnRoundIsLive and again at round_end.
   // The END value of `surv` is authoritative: the plugin's orientation
   // mapping is unreliable early in a round, which is exactly why that
@@ -934,6 +937,18 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
         if (m && Number(m[3]) <= 15) players.push({ steamid: m[1]!, flow: Number(m[2]), items: Number(m[3]), dmg: Number(m[4]) });
       }
       return { kind: 'live_hud', token, line: { prog, tank, witch, players: players.slice(0, 12) } };
+    }
+    case 'TANKDONE': {
+      const alive = intOf(rest.alive);
+      const dealt = intOf(rest.dealt);
+      if (alive === null || alive < 0 || dealt === null || dealt < 0) return null;
+      const controller = /^\d{17}$/.test(rest.controller ?? '') ? rest.controller! : null;
+      const players: TankDone['players'] = [];
+      for (const part of (rest.p ?? '').split(',')) {
+        const m = /^(\d{17}):(\d{1,6})$/.exec(part);
+        if (m) players.push({ steamid: m[1]!, dmg: Number(m[2]) });
+      }
+      return { kind: 'tank_done', token, recap: { aliveS: alive, controller, dealt, players: players.slice(0, 12) } };
     }
     case 'ROUND_START': {
       const half = halfOf(rest.half);

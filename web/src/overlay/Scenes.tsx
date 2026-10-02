@@ -1,8 +1,7 @@
 import { campaignTint, mapName } from '../format';
-import { PICTOGRAMS, type PictogramName } from '../replay/pictograms';
 import { camSlots } from '../../../src/cast/layout';
 import {
-  boomerRate, CALLOUT_MS, ITEM, skeetTotal, type CastChapter, type CastInfected, type CastLiveRound, type CastMatchView, type CastPlayer,
+  boomerRate, CALLOUT_MS, ITEM, skeetTotal, type CastChapter, type TankRecap, type CastInfected, type CastLiveRound, type CastMatchView, type CastPlayer,
   type CastSurvivor, type CastTeam, type OverlayFeed, type OverlayKey, type StudioState,
 } from '../../../src/cast/types';
 
@@ -294,30 +293,65 @@ function Chapters({ studio, match }: { studio: StudioState; match: CastMatchView
   );
 }
 
-function PlayerCard({ p, team, delay }: { p: CastPlayer; team: CastTeam; delay: number }) {
-  const winPct = p.career.wins + p.career.losses > 0 ? Math.round((p.career.wins / (p.career.wins + p.career.losses)) * 100) : null;
+function Avatar({ p }: { p: CastPlayer }) {
+  // The Steam avatar we keep for every player; a letter only when there is none.
+  return p.avatar
+    ? <img class="ov-card__avatar" src={p.avatar} alt="" referrerpolicy="no-referrer" />
+    : <span class="ov-card__avatar ov-card__avatar--none">{[...p.name][0]?.toUpperCase() ?? '?'}</span>;
+}
+
+const ROLE_LABEL: Record<NonNullable<CastPlayer['role']>, string | null> = { captain: 'Captain', cocaptain: 'Co-captain', member: null };
+
+/** A PUG lineup card: SR and the career PUG numbers (owner's stat set). */
+function PugCard({ p, team, delay }: { p: CastPlayer; team: CastTeam; delay: number }) {
+  const c = p.career!;
+  const winPct = c.wins + c.losses > 0 ? Math.round((c.wins / (c.wins + c.losses)) * 100) : null;
   return (
     <div class="ov-card" style={{ animationDelay: `${delay}ms`, '--c': `var(--team-${team.key})` } as Record<string, string>}>
-      {p.avatar ? <img class="ov-card__avatar" src={p.avatar} alt="" /> : <span class="ov-card__avatar ov-card__avatar--none">{[...p.name][0]?.toUpperCase() ?? '?'}</span>}
+      <Avatar p={p} />
       <div class="ov-card__body">
         <span class="ov-card__name">{p.name}</span>
         <span class="ov-card__line">
           {p.sr !== null && <b>{p.sr} SR</b>}
-          {p.career.matches} PUGs{winPct !== null ? ` · ${winPct}% won` : ''}
+          {c.matches} PUGs{winPct !== null ? ` · ${winPct}% won` : ''}
         </span>
       </div>
       <dl class="ov-card__stats">
-        <div><dt>Skeets</dt><dd>{p.career.skeets}</dd></div>
+        <div><dt>Skeets</dt><dd>{c.skeets}</dd></div>
         {/* Not upper-cased: "DPS" reads as damage per second. */}
-        <div><dt class="ov-keepcase">DPs</dt><dd>{p.career.dps}</dd></div>
-        <div><dt>Boomer %</dt><dd>{p.career.boomerRate === null ? '-' : `${p.career.boomerRate}%`}</dd></div>
+        <div><dt class="ov-keepcase">DPs</dt><dd>{c.dps}</dd></div>
+        <div><dt>Boomer %</dt><dd>{c.boomerRate === null ? '-' : `${c.boomerRate}%`}</dd></div>
       </dl>
+    </div>
+  );
+}
+
+/** A scrim or tournament lineup card: the team's roster, never PUG numbers
+ *  (owner, 2026-10-02). The right-hand slot is where event or team stats go
+ *  once they exist; it stays empty rather than inventing any. */
+function RosterCard({ p, team, delay }: { p: CastPlayer; team: CastTeam; delay: number }) {
+  const role = p.role ? ROLE_LABEL[p.role] : null;
+  return (
+    <div class="ov-card ov-card--roster" style={{ animationDelay: `${delay}ms`, '--c': `var(--team-${team.key})` } as Record<string, string>}>
+      <Avatar p={p} />
+      <div class="ov-card__body">
+        <span class="ov-card__name">{p.name}</span>
+        <span class="ov-card__line">
+          <b class="ov-card__tag">{team.tag}</b>
+          {role && <span class="ov-card__role">{role}</span>}
+        </span>
+      </div>
+      <div class="ov-card__slot" aria-hidden="true" />
     </div>
   );
 }
 
 function Lineups({ studio, match }: { studio: StudioState; match: CastMatchView | null }) {
   if (!match) return <div class="ov-full"><Backdrop /><Title studio={studio} fallback="Lineups" /></div>;
+  const pug = match.kind === 'pug';
+  // Captain first on a team roster; a PUG keeps its order.
+  const order = (ps: CastPlayer[]) => pug ? ps : [...ps].sort((x, y) => rank(x) - rank(y));
+  const rank = (p: CastPlayer) => (p.role === 'captain' ? 0 : p.role === 'cocaptain' ? 1 : 2);
   return (
     <div class="ov-full">
       <Backdrop art="infected-hunter" />
@@ -326,11 +360,14 @@ function Lineups({ studio, match }: { studio: StudioState; match: CastMatchView 
         {[match.teams.a, match.teams.b].map((t) => (
           <section key={t.key} class={`ov-lineups__team ov-lineups__team--${t.key}`} style={{ '--c': `var(--team-${t.key})` } as Record<string, string>}>
             <header class="ov-lineups__head"><Logo team={t} size={64} /><h2>{t.name}</h2></header>
-            {t.players.map((p, i) => <PlayerCard key={p.steamid} p={p} team={t} delay={200 + i * 90 + (t.key === 'b' ? 45 : 0)} />)}
+            {order(t.players).map((p, i) => {
+              const delay = 200 + i * 90 + (t.key === 'b' ? 45 : 0);
+              return pug && p.career ? <PugCard key={p.steamid} p={p} team={t} delay={delay} /> : <RosterCard key={p.steamid} p={p} team={t} delay={delay} />;
+            })}
           </section>
         ))}
       </div>
-      <p class="ov-foot-note">Career PUG numbers from riversidepug.com</p>
+      <p class="ov-foot-note">{pug ? 'Career PUG numbers from riversidepug.com' : 'Rosters from riversidepug.com'}</p>
     </div>
   );
 }
@@ -474,10 +511,13 @@ function Gameplay({ studio, match, live, now }: { studio: StudioState; match: Ca
   // Nothing on air: OBS gets a transparent frame, never a placeholder on
   // stream (the producer panel's preview shows a labelled sample instead).
   if (!match) return null;
-  if (studio.hudStyle === 'bar') {
+  if (studio.hudStyle !== 'scorebug') {
+    const Hud = studio.hudStyle === 'corners' ? CornersHud : studio.hudStyle === 'rail' ? RailHud : studio.hudStyle === 'frame' ? FrameHud : PlateHud;
+    const rows = studio.elements.survivors || studio.elements.infected;
     return (
-      <div class="ov-game ov-game--bar">
-        <HudBar studio={studio} match={match} live={live} />
+      <div class={`ov-game ov-game--${studio.hudStyle}${rows ? ' has-rows' : ''}`}>
+        <Hud studio={studio} match={match} live={live} />
+        {studio.elements.tankRecap && live?.tankRecap && <TankRecapCard r={live.tankRecap} />}
         <Callout studio={studio} match={match} now={now} />
       </div>
     );
@@ -488,6 +528,7 @@ function Gameplay({ studio, match, live, now }: { studio: StudioState; match: Ca
         <Scorebug studio={studio} match={match} live={live} />
         <RoundHud studio={studio} match={match} live={live} />
       </div>
+      {studio.elements.tankRecap && live?.tankRecap && <TankRecapCard r={live.tankRecap} />}
       <Callout studio={studio} match={match} now={now} />
     </div>
   );
@@ -567,7 +608,7 @@ function TankBar({ tank, team }: { tank: NonNullable<CastLiveRound['tank']>; tea
   const frac = tank.maxHealth > 0 ? Math.max(0, Math.min(1, tank.health / tank.maxHealth)) : 0;
   return (
     <div class="ov-tank">
-      <span class="ov-tank__label"><Picto name="tank" /> Tank</span>
+      <span class="ov-tank__label"><ClassIcon cls="tank" /> Tank</span>
       <span class="ov-tank__who">{tank.controller ?? 'AI'}{team ? ` · ${team.tag}` : ''}</span>
       <span class="ov-tank__bar"><span class="ov-tank__fill" style={{ width: `${frac * 100}%` }} /></span>
       <span class="ov-tank__hp">{tank.health.toLocaleString('en-US')}</span>
@@ -589,7 +630,7 @@ function SurvivorCard({ s }: { s: CastSurvivor }) {
   const tone = !s.alive ? 'dead' : s.incap || s.ledge ? 'down' : s.health + s.temp < 40 ? 'low' : 'ok';
   return (
     <div class={`ov-surv ov-surv--${tone}`}>
-      <img class="ov-surv__face" src={`/portraits/${s.alive ? (s.character || 'unknown') : 'dead'}.png`} alt="" />
+      <SurvivorFace s={s} class="ov-surv__face" />
       <div class="ov-surv__body">
         <span class="ov-surv__name">{s.name}</span>
         <span class="ov-surv__bar">
@@ -602,10 +643,36 @@ function SurvivorCard({ s }: { s: CastSurvivor }) {
   );
 }
 
-function Picto({ name }: { name: string }) {
-  const d = (PICTOGRAMS as Record<string, string>)[name as PictogramName];
-  if (!d) return <span class="ov-picto ov-picto--none" />;
-  return <svg class="ov-picto" viewBox="0 0 20 20" aria-hidden="true"><path d={d} /></svg>;
+/** The game's own art (scripts/export-cast-art.py): the released
+ *  character-select faces, the HUD's infected team icons, the witch from the
+ *  achievement art, and the inventory glyphs. */
+const SI_CLASSES = new Set(['hunter', 'smoker', 'boomer', 'tank']);
+function ClassIcon({ cls, class: extra = '' }: { cls: string; class?: string }) {
+  const src = SI_CLASSES.has(cls) ? `/cast-art/si-${cls}.png` : cls === 'witch' ? '/cast-art/witch.png' : null;
+  if (!src) return <span class={`ov-ci ov-ci--none ${extra}`} />;
+  return <img class={`ov-ci ov-ci--${cls} ${extra}`} src={src} alt={cls} />;
+}
+
+function SurvivorFace({ s, class: cls = '' }: { s: CastSurvivor; class?: string }) {
+  const known = ['bill', 'zoey', 'francis', 'louis'].includes(s.character);
+  if (!known) return <span class={`ov-face ov-face--none ${cls}`} />;
+  return <img class={`ov-face${s.alive ? '' : ' is-dead'} ${cls}`} src={`/cast-art/survivor-${s.character}.png`} alt={s.character} />;
+}
+
+function ItemIcon({ kind }: { kind: 'kit' | 'pills' | 'pipe' | 'molotov' }) {
+  const label = { kit: 'First aid kit', pills: 'Pain pills', pipe: 'Pipe bomb', molotov: 'Molotov' }[kind];
+  return <img class={`ov-item ov-item--${kind}`} src={`/cast-art/item-${kind}.png`} alt={label} />;
+}
+
+function Items({ items }: { items: number | null }) {
+  if (!items) return null;
+  return (
+    <span class="ov-items">
+      {items & ITEM.KIT ? <ItemIcon kind="kit" /> : null}
+      {items & ITEM.PILLS ? <ItemIcon kind="pills" /> : null}
+      {items & ITEM.MOLOTOV ? <ItemIcon kind="molotov" /> : items & ITEM.PIPE ? <ItemIcon kind="pipe" /> : null}
+    </span>
+  );
 }
 
 function InfectedCard({ i }: { i: CastInfected }) {
@@ -613,7 +680,7 @@ function InfectedCard({ i }: { i: CastInfected }) {
   const label = !i.alive ? (cls ? `${cls} · Dead` : 'Dead') : i.ghost ? `${cls || 'Spawning'} · Ghost` : `${cls} · ${i.health} HP`;
   return (
     <div class={`ov-inf${!i.alive ? ' ov-inf--dead' : i.ghost ? ' ov-inf--ghost' : ''}`}>
-      <Picto name={i.cls} />
+      <ClassIcon cls={i.cls} class="ov-inf__icon" />
       <div class="ov-inf__body">
         <span class="ov-inf__name">{i.name}</span>
         <span class="ov-inf__line">{label}</span>
@@ -638,7 +705,7 @@ function Callout({ studio, match, now }: { studio: StudioState; match: CastMatch
   );
 }
 
-/* ---------- gameplay: the broadcast bar ---------- */
+/* ---------- gameplay: the three broadcast looks (plan ruling 23) ---------- */
 
 /** Boss flow % for the map being played: what the producer typed for this
  *  map wins (an override, like the team fields), else what the server sends. */
@@ -652,200 +719,353 @@ function bossFlows(studio: StudioState, match: CastMatchView, live: CastLiveRoun
   };
 }
 
-/**
- * The broadcast bar across the top (owner, 2026-10-02). By default it holds
- * only what the game never shows a spectator: both teams and scores, the map
- * and game, a progress strip with the boss points, and the tank's health, in
- * a compact 840 px middle. With the survivor or infected rows switched on
- * (for a clean-feed HUD, SourceTV or free cam) it runs the full width with
- * each team's four players at the outer edges. Team A is always on the left,
- * as on every other scene; each panel draws survivor or infected rows for
- * the side that team is playing this half.
- */
-function HudBar({ studio, match, live }: { studio: StudioState; match: CastMatchView; live: CastLiveRound | null }) {
+interface HudProps { studio: StudioState; match: CastMatchView; live: CastLiveRound | null }
+
+/** What every look needs, worked out once. */
+function hudData({ studio, match, live }: HudProps) {
   const { a, b } = match.teams;
   const el = studio.elements;
-  const bosses = bossFlows(studio, match, live);
+  const bosses = el.bosses ? bossFlows(studio, match, live) : { tank: null, witch: null };
   const progress = live?.hud?.progress ?? null;
-  const showStrip = el.progress && live !== null && (progress !== null || (el.bosses && (bosses.tank !== null || bosses.witch !== null)));
+  const strip = el.progress && live !== null && (progress !== null || bosses.tank !== null || bosses.witch !== null);
   const survTeam = a.side === 'survivor' ? a : b.side === 'survivor' ? b : null;
-  // Rows off (the default: the game's own HUD shows them to a first-person
-  // spectator) leaves the compact middle: scores, map, strip, tank.
-  const full = el.survivors || el.infected;
-  return (
-    <div class={`ov-hud${full ? '' : ' ov-hud--compact'}${showStrip ? '' : ' ov-hud--nostrip'}`}>
-      <div class="ov-hud__bar">
-        {full && <HudTeam team={a} live={live} el={el} />}
-        <HudScore team={a} />
-        <HudCenter studio={studio} match={match} />
-        <HudScore team={b} right />
-        {full && <HudTeam team={b} live={live} el={el} right />}
-      </div>
-      {showStrip && (
-        <HudProgress progress={progress} bosses={el.bosses ? bosses : { tank: null, witch: null }} team={survTeam} />
-      )}
-      {el.tank && live?.tank && (
-        <div class="ov-hud__tank"><TankBar tank={live.tank} team={survTeam ? (survTeam.key === 'a' ? b : a) : null} /></div>
-      )}
-    </div>
-  );
-}
-
-function HudScore({ team, right = false }: { team: CastTeam; right?: boolean }) {
-  return (
-    <div class={`ov-hud__score${right ? ' ov-hud__score--r' : ''}`} style={{ '--c': `var(--team-${team.key})` } as Record<string, string>}>
-      {/* A team's logo when it has one; a PUG's lettered tag box only
-          repeats the name beside it, so it is left out. */}
-      {team.logoUrl && <Logo team={team} size={56} />}
-      <span class="ov-hud__ident">
-        <span class="ov-hud__name">{team.name}</span>
-        <span class={`ov-hud__side ov-hud__side--${team.side ?? 'none'}`}>
-          {team.side === 'survivor' ? 'Survivors' : team.side === 'infected' ? 'Infected' : 'Campaign'}
-        </span>
-      </span>
-      <span class="ov-hud__pts">{team.score}</span>
-    </div>
-  );
-}
-
-function HudCenter({ studio, match }: { studio: StudioState; match: CastMatchView }) {
+  const infTeam = survTeam ? (survTeam.key === 'a' ? b : a) : null;
   const chapter = match.chapters[match.mapNumber - 1];
+  const mapLabel = chapter ? mapName(chapter.map) : match.campaignName;
   const paused = match.phase === 'paused';
-  const bits = [
+  const meta = [
     match.mapCount ? `Map ${match.mapNumber} of ${match.mapCount}` : `Map ${match.mapNumber}`,
     paused ? null : match.phase === 'readyup' ? 'Ready-up' : match.half ? `Round ${match.half}` : null,
     match.game ? `Game ${match.game.number} of ${match.game.of}` : null,
-  ].filter(Boolean);
-  return (
-    <div class="ov-hud__mid">
-      <span class="ov-hud__event">{studio.title || 'Riverside PUGs'}</span>
-      <span class="ov-hud__map">{chapter ? mapName(chapter.map) : match.campaignName}</span>
-      <span class="ov-hud__meta">
-        {paused ? <b class="ov-hud__paused">Paused</b> : null}
-        {bits.join(' · ')}
-      </span>
-    </div>
-  );
+  ].filter(Boolean).join(' · ');
+  const tank = el.tank && live?.tank ? live.tank : null;
+  const reach = live?.hud?.rivalReach ?? null;
+  const rival = el.rival && reach !== null && infTeam ? { team: infTeam, reach } : null;
+  const dots = el.dots && live ? live.survivors.filter((s) => s.flow !== null && s.alive) : [];
+  return { a, b, el, bosses, progress, strip, survTeam, infTeam, mapLabel, paused, meta, tank, rival, dots };
 }
 
-/** One team's four rows: survivor or infected rows from the live frame for
- *  the side it is playing, or its roster while no round is running. */
-function HudTeam({ team, live, el, right = false }: {
-  team: CastTeam; live: CastLiveRound | null; el: StudioState["elements"]; right?: boolean;
-}) {
-  const style = { '--c': `var(--team-${team.key})` } as Record<string, string>;
-  const cls = `ov-hud__team${right ? ' ov-hud__team--r' : ''}`;
-  const roster = (
-    <div class={`${cls} ov-hud__team--idle`} style={style}>
-      {team.players.slice(0, 4).map((p) => (
-        <div key={p.steamid} class="ov-hrow">
-          <span class="ov-hrow__name">{p.name}</span>
-        </div>
-      ))}
-    </div>
-  );
-  if (!live || !team.side) return roster;
-  if (team.side === 'survivor') {
-    if (!el.survivors) return <div class={cls} style={style} />;
-    return (
-      <div class={cls} style={style}>
-        {live.survivors.slice(0, 4).map((s, i) => <HudSurvivor key={`${s.slot}:${i}`} s={s} />)}
-      </div>
-    );
-  }
-  if (!el.infected) return <div class={cls} style={style} />;
-  // A tank's max health for its row bar: the round's tank bar knows it.
-  const tankMax = live.tank?.maxHealth ?? 0;
-  return (
-    <div class={cls} style={style}>
-      {live.infected.slice(0, 4).map((i) => <HudInfected key={i.slot} i={i} tankMax={tankMax} />)}
-    </div>
-  );
+const teamVar = (t: CastTeam | null, fallback: string) =>
+  ({ '--c': t ? `var(--team-${t.key})` : fallback } as Record<string, string>);
+
+function SideWord({ team }: { team: CastTeam }) {
+  return <span class={`ov-sideword ov-sideword--${team.side ?? 'none'}`}>{team.side === 'survivor' ? 'Survivors' : team.side === 'infected' ? 'Infected' : 'Campaign'}</span>;
 }
 
-function ItemIcon({ kind }: { kind: 'kit' | 'pills' | 'pipe' | 'molotov' }) {
-  const label = { kit: 'First aid kit', pills: 'Pain pills', pipe: 'Pipe bomb', molotov: 'Molotov' }[kind];
+/** Health ring in the medallion: permanent health, then temp health in a
+ *  lighter tone, on a 64-unit circle starting at the top. */
+const RING_R = 29;
+const RING_C = 2 * Math.PI * RING_R;
+function Ring({ perm, temp, tone }: { perm: number; temp: number; tone: string }) {
   return (
-    <svg class={`ov-item ov-item--${kind}`} viewBox="0 0 16 16" role="img" aria-label={label}>
-      {kind === 'kit' && <><rect x="1.5" y="3.5" width="13" height="10" rx="1.5" /><path class="ov-item__mark" d="M7 5.5h2v2.5h2.5v2H9v2.5H7V10H4.5V8H7z" /></>}
-      {kind === 'pills' && <><rect x="4" y="2" width="8" height="12" rx="2.5" /><path class="ov-item__mark" d="M4 8h8v1H4z" /></>}
-      {kind === 'pipe' && <><rect x="3" y="5" width="9" height="8" rx="1" /><path class="ov-item__mark" d="M12 6.5h1.5v5H12z M13 5l2-3 0.8 0.5-2 3z" /></>}
-      {kind === 'molotov' && <><path d="M6 6h4l1 2v6.5H5V8z" /><path class="ov-item__flame" d="M8 0.5c1.6 1.6 1.8 3.2 0 5-1.8-1.8-1.6-3.4 0-5z" /></>}
+    <svg class={`ov-ring ov-ring--${tone}`} viewBox="0 0 64 64" aria-hidden="true">
+      <circle class="ov-ring__track" cx="32" cy="32" r={RING_R} />
+      {temp > 0 && <circle class="ov-ring__temp" cx="32" cy="32" r={RING_R} stroke-dasharray={`${temp * RING_C} ${RING_C}`} stroke-dashoffset={-perm * RING_C} />}
+      {perm > 0 && <circle class="ov-ring__perm" cx="32" cy="32" r={RING_R} stroke-dasharray={`${perm * RING_C} ${RING_C}`} />}
     </svg>
   );
 }
 
-function HudSurvivor({ s }: { s: CastSurvivor }) {
+/** A survivor medallion and its words: the released portrait in a ring of
+ *  health (temp health lighter), the state colour from the replay viewer's
+ *  state ring (down red, pinned gold, biled purple), held items. */
+function SurvivorRow({ s, layout }: { s: CastSurvivor; layout: 'row' | 'chip' }) {
   const max = s.incap || s.ledge ? 300 : 100;
   const perm = s.alive ? Math.max(0, Math.min(1, s.health / max)) : 0;
   const temp = s.alive && !s.incap && !s.ledge ? Math.max(0, Math.min(1 - perm, s.temp / 100)) : 0;
-  const total = s.health + s.temp;
   const state = !s.alive ? 'Dead' : s.ledge ? 'Ledge' : s.incap ? 'Down' : s.pinned ? 'Pinned' : s.biled ? 'Biled' : null;
-  const tone = !s.alive ? 'dead' : s.incap || s.ledge || s.pinned ? 'down' : total < 40 ? 'low' : 'ok';
-  const items = s.items ?? 0;
+  const tone = !s.alive ? 'dead' : s.incap || s.ledge ? 'down' : s.pinned ? 'pinned' : s.biled ? 'biled' : s.health + s.temp < 40 ? 'low' : 'ok';
+  const hp = s.alive ? (s.incap || s.ledge ? s.health : s.health + s.temp) : null;
   return (
-    <div class={`ov-hrow ov-hrow--surv is-${tone}`}>
-      <img class="ov-hrow__face" src={`/portraits/${s.alive ? (s.character || 'unknown') : 'dead'}.png`} alt="" />
-      <span class="ov-hrow__name">{s.name}</span>
-      <span class="ov-hrow__bar" aria-hidden="true">
-        <span class="ov-hrow__perm" style={{ width: `${perm * 100}%` }} />
-        <span class="ov-hrow__temp" style={{ left: `${perm * 100}%`, width: `${temp * 100}%` }} />
+    <div class={`ov-mrow ov-mrow--${layout} is-${tone}`}>
+      <span class="ov-med">
+        <SurvivorFace s={s} class="ov-med__img" />
+        <Ring perm={perm} temp={temp} tone={tone} />
       </span>
-      <span class="ov-hrow__val">{s.alive ? (s.incap || s.ledge ? s.health : total) : ''}</span>
-      <span class="ov-hrow__tail">
-        {state ? <b class="ov-hrow__state">{state}</b> : (
-          <span class="ov-hrow__items">
-            {items & ITEM.KIT ? <ItemIcon kind="kit" /> : null}
-            {items & ITEM.PILLS ? <ItemIcon kind="pills" /> : null}
-            {items & ITEM.MOLOTOV ? <ItemIcon kind="molotov" /> : items & ITEM.PIPE ? <ItemIcon kind="pipe" /> : null}
-          </span>
-        )}
+      <span class="ov-mrow__text">
+        <span class="ov-mrow__name">{s.name}</span>
+        <span class="ov-mrow__line">
+          {state ? <b class="ov-mrow__state">{state}</b> : null}
+          {hp !== null && <span class="ov-mrow__hp">{hp}</span>}
+          {s.alive && !state ? <Items items={s.items} /> : null}
+        </span>
       </span>
     </div>
   );
 }
 
-/** Spawn health by class, for an SI row's bar (L4D1 versus defaults; the
- *  bar is a glance, not a number, so a config tweak is harmless). */
+/** Spawn health by class for an SI ring (L4D1 versus defaults; a glance,
+ *  not a number, so a config tweak is harmless). */
 const SI_MAX: Record<string, number> = { smoker: 250, boomer: 50, hunter: 250 };
 
-function HudInfected({ i, tankMax }: { i: CastInfected; tankMax: number }) {
+function InfectedRow({ i, tankMax, layout }: { i: CastInfected; tankMax: number; layout: 'row' | 'chip' }) {
   const cls = i.cls ? i.cls[0]!.toUpperCase() + i.cls.slice(1) : '';
   const max = i.cls === 'tank' ? tankMax || i.health : SI_MAX[i.cls] ?? 0;
   const frac = i.alive && !i.ghost && max > 0 ? Math.max(0, Math.min(1, i.health / max)) : 0;
   const status = !i.alive ? 'Dead' : i.ghost ? 'Spawning' : cls;
   const tone = !i.alive ? 'dead' : i.ghost ? 'ghost' : i.cls === 'tank' ? 'tank' : 'up';
   return (
-    <div class={`ov-hrow ov-hrow--inf is-${tone}`}>
-      <span class="ov-hrow__class"><Picto name={i.alive ? i.cls : ''} /></span>
-      <span class="ov-hrow__name">{i.name}</span>
-      <span class="ov-hrow__status">{status}</span>
-      <span class="ov-hrow__bar ov-hrow__bar--si" aria-hidden="true"><span class="ov-hrow__perm" style={{ width: `${frac * 100}%` }} /></span>
-      <span class="ov-hrow__dmg">{i.dmg !== null ? <><em>Dmg</em> {i.dmg}</> : null}</span>
+    <div class={`ov-mrow ov-mrow--${layout} ov-mrow--inf is-${tone}`}>
+      <span class="ov-med ov-med--inf">
+        {i.alive ? <ClassIcon cls={i.cls} class="ov-med__img" /> : <span class="ov-med__img ov-med__img--empty" />}
+        <Ring perm={frac} temp={0} tone={tone} />
+      </span>
+      <span class="ov-mrow__text">
+        <span class="ov-mrow__name">{i.name}</span>
+        <span class="ov-mrow__line">
+          <b class="ov-mrow__state">{status}</b>
+          {i.dmg !== null && <span class="ov-mrow__dmg"><em>Dmg</em> {i.dmg}</span>}
+        </span>
+      </span>
     </div>
   );
 }
 
-/** The survivors' progress through the map, ten ticks, with the boss points. */
-function HudProgress({ progress, bosses, team }: {
-  progress: number | null; bosses: { tank: number | null; witch: number | null }; team: CastTeam | null;
+/** One team's players for the side it is playing, as medallions; nothing
+ *  while no round is running or when that side's switch is off. */
+function TeamMedallions({ team, live, el, layout, tankMax }: {
+  team: CastTeam; live: CastLiveRound | null; el: StudioState['elements']; layout: 'row' | 'chip'; tankMax: number;
 }) {
-  const pin = (pct: number, kind: 'tank' | 'witch', label: string) => (
-    <span class={`ov-prog__pin ov-prog__pin--${kind}${progress !== null && progress >= pct ? ' is-passed' : ''}`} style={{ left: `${pct}%` }}>
-      <Picto name={kind} /><b>{label}</b>
+  if (!live || !team.side) return null;
+  if (team.side === 'survivor') {
+    if (!el.survivors) return null;
+    return <>{live.survivors.slice(0, 4).map((s, k) => <SurvivorRow key={`${s.slot}:${k}`} s={s} layout={layout} />)}</>;
+  }
+  if (!el.infected) return null;
+  return <>{live.infected.slice(0, 4).map((i) => <InfectedRow key={i.slot} i={i} tankMax={tankMax} layout={layout} />)}</>;
+}
+
+/** Map progress: the furthest survivor's flow, ten ticks, and the tank and
+ *  witch spawn points pinned on it as the game's own icons. Every look keeps
+ *  it (owner, 2026-10-02). */
+function Progress({ progress, bosses, team, rival, dots }: {
+  progress: number | null; bosses: { tank: number | null; witch: number | null }; team: CastTeam | null;
+  /** The opponent's mark: the other team and how far it got here. */
+  rival: { team: CastTeam; reach: number } | null;
+  /** Survivors with a known flow, for the dots. */
+  dots: CastSurvivor[];
+}) {
+  const at = (pct: number) => ({ left: `${pct}%` });
+  const pin = (pct: number, kind: 'tank' | 'witch') => (
+    <span class={`ov-pg__pin ov-pg__pin--${kind}${progress !== null && progress >= pct ? ' is-passed' : ''}`} style={at(pct)}>
+      <ClassIcon cls={kind} /><b>{pct}%</b>
     </span>
   );
   return (
-    <div class="ov-prog" style={{ '--c': team ? `var(--team-${team.key})` : 'var(--win)' } as Record<string, string>}>
-      <span class="ov-prog__label">Progress</span>
-      <span class="ov-prog__track">
-        {progress !== null && <span class="ov-prog__fill" style={{ width: `${progress}%` }} />}
-        {Array.from({ length: 9 }, (_, k) => <span key={k} class="ov-prog__tick" style={{ left: `${(k + 1) * 10}%` }} />)}
-        {bosses.tank !== null && bosses.tank > 0 && pin(bosses.tank, 'tank', `${bosses.tank}%`)}
-        {bosses.witch !== null && bosses.witch > 0 && pin(bosses.witch, 'witch', `${bosses.witch}%`)}
+    <div class="ov-pg" style={teamVar(team, 'var(--win)')}>
+      <span class="ov-pg__label">Progress</span>
+      <span class="ov-pg__track">
+        {progress !== null && <span class="ov-pg__fill" style={{ width: `${progress}%` }} />}
+        {Array.from({ length: 9 }, (_, k) => <span key={k} class="ov-pg__tick" style={at((k + 1) * 10)} />)}
+        {rival && (
+          <span class="ov-pg__rival" style={{ left: `${rival.reach}%`, ...teamVar(rival.team, '') }}>
+            <b>{rival.team.tag} {rival.reach}%</b>
+          </span>
+        )}
+        {dots.map((s, k) => (
+          <span key={k} class={`ov-pg__dot${s.alive ? '' : ' is-dead'}`} style={{ left: `${s.flow}%` }} title={s.name}>
+            <SurvivorFace s={s} />
+          </span>
+        ))}
+        {bosses.tank !== null && bosses.tank > 0 && pin(bosses.tank, 'tank')}
+        {bosses.witch !== null && bosses.witch > 0 && pin(bosses.witch, 'witch')}
       </span>
-      <span class="ov-prog__pct">{progress !== null ? `${progress}%` : ''}</span>
-      {bosses.witch === -2 && <span class="ov-prog__note">Witch party</span>}
+      <span class="ov-pg__pct">{progress !== null ? `${progress}%` : ''}</span>
+      {bosses.witch === -2 && <span class="ov-pg__note">Witch party</span>}
+    </div>
+  );
+}
+
+function TankCard({ tank, team }: { tank: NonNullable<CastLiveRound['tank']>; team: CastTeam | null }) {
+  const frac = tank.maxHealth > 0 ? Math.max(0, Math.min(1, tank.health / tank.maxHealth)) : 0;
+  return (
+    <div class="ov-tc" style={teamVar(team, 'var(--loss)')}>
+      <ClassIcon cls="tank" class="ov-tc__icon" />
+      <span class="ov-tc__words">
+        <b>Tank</b>
+        <span>{tank.controller ?? 'AI'}{team ? ` · ${team.tag}` : ''}</span>
+      </span>
+      <span class="ov-tc__bar"><span class="ov-tc__fill" style={{ width: `${frac * 100}%` }} /></span>
+      <span class="ov-tc__hp">{tank.health.toLocaleString('en-US')}</span>
+    </div>
+  );
+}
+
+/**
+ * PLATE. A poster plate at top centre: each team's tag and score either side
+ * of the map in stencil type, cut at an angle, with the progress strip as
+ * its bottom rail. Rows on: each team's players as medallions stacked down
+ * its own side of the screen, mid height, clear of the game's corners.
+ */
+function PlateHud(props: HudProps & { noStacks?: boolean }) {
+  const d = hudData(props);
+  const tankMax = props.live?.tank?.maxHealth ?? 0;
+  const side = (t: CastTeam, right: boolean) => (
+    <div class={`ov-plate__team${right ? ' ov-plate__team--r' : ''}`} style={teamVar(t, '')}>
+      {t.logoUrl && <Logo team={t} size={52} />}
+      <span class="ov-plate__ident">
+        <span class="ov-plate__name">{t.name}</span>
+        <SideWord team={t} />
+      </span>
+      <span class="ov-plate__pts">{t.score}</span>
+    </div>
+  );
+  return (
+    <>
+      <div class="ov-plate">
+        <div class="ov-plate__main">
+          {side(d.a, false)}
+          <div class="ov-plate__mid">
+            <span class="ov-plate__event">{props.studio.title || 'Riverside PUGs'}</span>
+            <span class="ov-plate__map">{d.mapLabel}</span>
+            <span class="ov-plate__meta">{d.paused ? <b class="ov-paused">Paused</b> : null}{d.meta}</span>
+          </div>
+          {side(d.b, true)}
+        </div>
+        {d.strip && <Progress progress={d.progress} bosses={d.bosses} team={d.survTeam} rival={d.rival} dots={d.dots} />}
+        {d.tank && <div class="ov-plate__tank"><TankCard tank={d.tank} team={d.infTeam} /></div>}
+      </div>
+      {!props.noStacks && <div class="ov-stack ov-stack--l" style={teamVar(d.a, '')}><TeamMedallions team={d.a} live={props.live} el={d.el} layout="row" tankMax={tankMax} /></div>}
+      {!props.noStacks && <div class="ov-stack ov-stack--r" style={teamVar(d.b, '')}><TeamMedallions team={d.b} live={props.live} el={d.el} layout="row" tankMax={tankMax} /></div>}
+    </>
+  );
+}
+
+/**
+ * CORNERS. A plate in each top corner, like a team's sign hung on the wall:
+ * name, side and score, with its players hanging under it as a row of
+ * medallion chips when rows are on. The map and progress sit in a small tag
+ * at top centre.
+ */
+function CornersHud(props: HudProps) {
+  const d = hudData(props);
+  const tankMax = props.live?.tank?.maxHealth ?? 0;
+  const corner = (t: CastTeam, right: boolean) => (
+    <div class={`ov-corner${right ? ' ov-corner--r' : ''}`} style={teamVar(t, '')}>
+      <div class="ov-corner__plate">
+        {t.logoUrl && <Logo team={t} size={60} />}
+        <span class="ov-corner__ident">
+          <span class="ov-corner__name">{t.name}</span>
+          <SideWord team={t} />
+        </span>
+        <span class="ov-corner__pts">{t.score}</span>
+      </div>
+      <div class="ov-corner__chips"><TeamMedallions team={t} live={props.live} el={d.el} layout="chip" tankMax={tankMax} /></div>
+    </div>
+  );
+  return (
+    <>
+      {corner(d.a, false)}
+      <div class="ov-ctag">
+        <span class="ov-ctag__map">{d.mapLabel}</span>
+        <span class="ov-ctag__meta">{d.paused ? <b class="ov-paused">Paused</b> : null}{d.meta}</span>
+        {d.strip && <Progress progress={d.progress} bosses={d.bosses} team={d.survTeam} rival={d.rival} dots={d.dots} />}
+        {d.tank && <TankCard tank={d.tank} team={d.infTeam} />}
+      </div>
+      {corner(d.b, true)}
+    </>
+  );
+}
+
+/**
+ * RAIL. One board down the left edge, like the tally chalked by a safe room
+ * door: the map and the progress strip at the top, both teams with their
+ * scores, each team's players under its name when rows are on, the tank
+ * under that. The rest of the screen stays clean.
+ */
+function RailHud(props: HudProps) {
+  const d = hudData(props);
+  const tankMax = props.live?.tank?.maxHealth ?? 0;
+  const team = (t: CastTeam) => (
+    <div class="ov-rail__team" style={teamVar(t, '')}>
+      <div class="ov-rail__head">
+        {t.logoUrl && <Logo team={t} size={40} />}
+        <span class="ov-rail__ident">
+          <span class="ov-rail__name">{t.name}</span>
+          <SideWord team={t} />
+        </span>
+        <span class="ov-rail__pts">{t.score}</span>
+      </div>
+      <div class="ov-rail__rows"><TeamMedallions team={t} live={props.live} el={d.el} layout="row" tankMax={tankMax} /></div>
+    </div>
+  );
+  return (
+    <div class="ov-rail">
+      <div class="ov-rail__board">
+        <div class="ov-rail__top">
+          <span class="ov-rail__event">{props.studio.title || 'Riverside PUGs'}</span>
+          <span class="ov-rail__map">{d.mapLabel}</span>
+          <span class="ov-rail__meta">{d.paused ? <b class="ov-paused">Paused</b> : null}{d.meta}</span>
+        </div>
+        {d.strip && <Progress progress={d.progress} bosses={d.bosses} team={d.survTeam} rival={d.rival} dots={d.dots} />}
+        {team(d.a)}
+        {team(d.b)}
+        {d.tank && <TankCard tank={d.tank} team={d.infTeam} />}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * FRAME. A caster HUD (client side) moves the game's own survivor and
+ * infected team panels into two rects; the overlay frames those holes, tabs
+ * each with the team on that side this half, and puts the centre plate
+ * between. The game draws the health itself, live and once, so the overlay
+ * never repeats it. The rects are the studio's `frame` setting.
+ */
+function FrameHud(props: HudProps) {
+  const d = hudData(props);
+  const f = props.studio.frame;
+  const hole = (r: typeof f.survivor, team: CastTeam | null, side: 'survivor' | 'infected', right: boolean) => (
+    <div class={`ov-frame ov-frame--${right ? 'r' : 'l'}`} data-side={side}
+      style={{ left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px`, ...teamVar(team, side === 'survivor' ? 'var(--win)' : 'var(--loss)') }}>
+      <span class="ov-frame__hole" />
+      <span class="ov-frame__tab">
+        <span class={`ov-sideword ov-sideword--${side}`}>{side === 'survivor' ? 'Survivors' : 'Infected'}</span>
+        {team && <span class="ov-frame__name">{team.name}</span>}
+        {team && <span class="ov-frame__pts">{team.score}</span>}
+      </span>
+    </div>
+  );
+  return (
+    <>
+      {hole(f.survivor, d.survTeam, 'survivor', f.survivor.x + f.survivor.w / 2 > 960)}
+      {hole(f.infected, d.infTeam, 'infected', f.infected.x + f.infected.w / 2 > 960)}
+      <PlateHud {...props} noStacks />
+    </>
+  );
+}
+
+const fmtAlive = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+/**
+ * After a tank dies: each survivor's damage to it and their share, like the
+ * tank damage plugins print in chat, plus the tank's own line (who played
+ * it, how long it lived, what it dealt). The numbers are pug-match's own
+ * hook totals between the tank's spawn and its death, so they are exact.
+ */
+function TankRecapCard({ r }: { r: TankRecap }) {
+  return (
+    <div class="ov-recap" key={`${r.aliveS}:${r.dealt}`}>
+      <div class="ov-recap__head">
+        <ClassIcon cls="tank" class="ov-recap__icon" />
+        <span class="ov-recap__title">Tank down</span>
+        <span class="ov-recap__who">{r.controller ?? 'AI tank'}</span>
+      </div>
+      <div class="ov-recap__facts">
+        <span><em>Alive</em> {fmtAlive(r.aliveS)}</span>
+        <span><em>Dealt</em> {r.dealt}</span>
+      </div>
+      <ol class="ov-recap__rows">
+        {r.players.map((p) => (
+          <li key={p.name}>
+            <span class="ov-recap__name">{p.name}</span>
+            <span class="ov-recap__bar"><span style={{ width: `${p.share}%` }} /></span>
+            <span class="ov-recap__dmg">{p.dmg.toLocaleString('en-US')}</span>
+            <span class="ov-recap__pct">{p.share}%</span>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

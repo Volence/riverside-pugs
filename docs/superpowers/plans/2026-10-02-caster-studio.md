@@ -218,3 +218,50 @@ tournament broadcast bar (players at the edges, scores, distance) as the kind of
 Shipping the plugin side: pug-match 0.3.20 is a game-server plugin, so it goes through
 `deploy/tools/stage-on-restart.sh` on each pool box (installs at the next srcds restart, never on a
 box with humans). The web side works with or without it.
+
+## Our own look, the caster HUD direction, and the touches (2026-10-02, later)
+
+23. **The broadcast bar is gone; four looks replace it** (owner: the bar copied the tournament
+    reference too closely). `plate` (default): a poster plate at top centre, each team's name, side and
+    score either side of the map in stencil, cut at an angle, with the progress strip as its bottom rail;
+    rows on stack each team's players as medallions down its own side of the screen, mid height.
+    `corners`: a plate per team in the top corners with its players hanging under it as medallion chips,
+    the map and strip in a small tag at top centre. `rail`: one board down the left edge (map, strip,
+    both teams, players, tank). `frame`: see 24. `scorebug` stays. A saved `bar` reads as `plate`.
+    Pick: plate, because it is the only one that leaves both top corners free for the game's own team
+    panels (what frame mode and the caster HUD need) and reads as one object at a glance.
+24. **Frame mode** (owner, after the Neutral Casting HUD reference): a client caster HUD will move the
+    game's survivor and infected team panels to two rects; the overlay frames those holes, tabs each with
+    the team on that side this half, and puts the plate between. The rects are studio state (`frame`),
+    editable in the panel; the defaults (survivor 20,20 560x150, infected 1340,20 560x150) are a guess
+    until the in-game probe sets them. The caster HUD itself is not built here.
+25. **Game art only.** Survivors: the released character-select portraits (vgui/select_*), cropped to
+    the face. Infected: the HUD's own team icons (vgui/hud/zombieteamimage_*). Witch: L4D1 has no HUD
+    icon, so the "Don't awaken the witch" achievement art, cropped to the figure. Items: the game's
+    inventory glyphs. All exported by `scripts/export-cast-art.py` to `web/public/cast-art/`.
+26. **Streak callouts.** Skeets fold into runs by the Discord post's rules (`streakRuns` in
+    src/skeetStreaks.ts, 5 s from the run's first skeet, one player, one map half; triples first, then
+    doubles), so a TRIPLE here is a triple there; the highlight list carries one entry per run and the
+    card upgrades instead of stacking. Booms by one boomer in one window fold into a bile with everyone
+    it caught (Double / Triple / Quad bile). DP cards say "DP". The tank-killed callout is dropped.
+27. **Lineups by match kind.** PUGs show SR, PUGs, win % and career skeets, DPs, boomer %. Scrims and
+    tournaments show the roster (Steam avatar, name, team tag, captain or co-captain from the team or
+    the pickup side's captain) with an empty slot for event stats later; no PUG numbers are sent at all.
+28. **Touches the in-game HUD cannot have** (owner's guiding principle), each with a panel switch:
+    the progress strip with the tank and witch pins (kept in every look, owner); the **opponent's mark**
+    (second half: how far the other team got on this map, from LIVEHUD progress kept per half in memory
+    at ingest; a web restart during the first half loses it); **survivor dots** (each survivor's own
+    flow as a small face on the strip); the **tank damage card** for 12 s after a tank dies (pug-match
+    0.3.20 TANKDONE: each survivor's damage to that tank from pug-match's own hook, exact, its share of
+    the team's damage, the tank's player, time alive, damage it dealt).
+
+### Backlog (not built)
+
+- Score to beat: what the survivors need to pass the other team on this map or the campaign. Needs a
+  read of how Rotoblin scores versus (distance vs health bonus) before anything is shown.
+- Tank recap extras: passes (tank_take / tank_give events exist), rocks and punches landed per tank.
+- Round context: chapter scores as a mini strip on the plate, a round clock, a pause banner with the
+  pausing team and timer (the phase already carries both).
+- More callouts: witch crowned, team wipe, last survivor standing, insta-clear and tongue cut (crowns and
+  clears are counters today, not events; they need EVENT lines from the plugin).
+- Infected respawn timers are out (owner): the in-game infected HUD already shows them.

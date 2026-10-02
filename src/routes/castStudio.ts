@@ -57,7 +57,23 @@ export async function castStudioRoutes(
     const onAir = resolveOnAir(db, steamid, studio.state);
     const match = onAir.matchId !== null ? buildMatchView(db, onAir.matchId, studio.state, onAir.game) : null;
     const round = match && match.state === 'live' ? reader.read(db, match.id, nowMs) : null;
-    const live = round ? applyLiveHud(round, hud.get(tokenOf(match!.id) ?? '', nowMs)) : null;
+    const token = match ? tokenOf(match.id) ?? '' : '';
+    let live = round ? applyLiveHud(round, hud.get(token, nowMs), round.half === 2 ? hud.reach(token, round.ordinal, 1) : null) : null;
+    const tank = live && match ? hud.tank(token, nowMs) : null;
+    if (live && match && tank) {
+      const names = new Map([...match.teams.a.players, ...match.teams.b.players].map((p) => [p.steamid, p.name]));
+      const total = tank.recap.players.reduce((n, p) => n + p.dmg, 0);
+      live = {
+        ...live,
+        tankRecap: {
+          agoMs: tank.agoMs, aliveS: tank.recap.aliveS, dealt: tank.recap.dealt,
+          controller: tank.recap.controller ? names.get(tank.recap.controller) ?? null : null,
+          players: tank.recap.players
+            .map((p) => ({ name: names.get(p.steamid) ?? p.steamid, dmg: p.dmg, share: total > 0 ? Math.round((p.dmg / total) * 100) : 0 }))
+            .sort((x, y) => y.dmg - x.dmg),
+        },
+      };
+    }
     const feed: OverlayFeed = { rev: studio.rev, serverNow: nowMs, studio: studio.state, match, live };
     cache.set(steamid, { at: nowMs, rev: studio.rev, feed });
     return feed;

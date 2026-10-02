@@ -300,6 +300,15 @@ describe('parseLogDatagram: LIVEHUD', () => {
   });
 });
 
+describe('parseLogDatagram: TANKDONE', () => {
+  it('parses a tank recap, with an AI tank as no controller', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} TANKDONE alive=84 controller=76561198030413993 dealt=312 p=76561198030413994:4200,76561198030413995:1800`)))
+      .toEqual({ kind: 'tank_done', token: TOKEN, recap: { aliveS: 84, controller: '76561198030413993', dealt: 312, players: [{ steamid: '76561198030413994', dmg: 4200 }, { steamid: '76561198030413995', dmg: 1800 }] } });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} TANKDONE alive=10 controller=0 dealt=0 p=`))).toMatchObject({ recap: { controller: null, players: [] } });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} TANKDONE alive=-1 controller=0 dealt=0 p=`))).toBeNull();
+  });
+});
+
 describe('parseLogDatagram: LIVESTAT', () => {
   it('parses the core counters', () => {
     const ev = parseLogDatagram(framed(

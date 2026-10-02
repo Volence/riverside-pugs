@@ -9,7 +9,7 @@ import type { CastLiveRound, CastMatchView, CastPlayer, CastTeam, OverlayFeed, S
 
 const player = (steamid: string, name: string): CastPlayer => ({
   steamid, name, avatar: null, stats: { sidmg: 412, sikill: 7, ck: 96, skeets: 2, team_skeets: 1, dps_landed: 1, tank_damage: 940, boomer_spawns: 5, boom_successes: 2 }, sr: null,
-  career: { matches: 42, wins: 23, losses: 19, skeets: 31, dps: 12, boomerRate: 38 },
+  career: { matches: 42, wins: 23, losses: 19, skeets: 31, dps: 12, boomerRate: 38 }, role: null,
 });
 
 const team = (key: 'a' | 'b', name: string, tag: string, color: string, score: number, side: CastTeam['side'], names: string[]): CastTeam => ({
@@ -52,7 +52,8 @@ export function sampleFeed(studio: StudioState, now: number): OverlayFeed {
     ],
     tank: { health: 4200, maxHealth: 6000, controller: b.players[1]!.name },
     witches: 1,
-    hud: { progress: 52, tank: 74, witch: 31 },
+    hud: { progress: 52, tank: 74, witch: 31, rivalReach: 61 },
+    tankRecap: null,
   };
   return { rev: 0, serverNow: now, studio, match, live };
 }

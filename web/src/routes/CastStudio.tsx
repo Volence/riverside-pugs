@@ -8,7 +8,7 @@ import { Overlay, setOverlayKey } from '../overlay/Scenes';
 import { sampleFeed } from '../overlay/sample';
 import '../overlay/overlay.css';
 import {
-  LAYERS, MAX_CASTERS, SCENES, SCENE_LABELS, THEMES,
+  HUD_STYLES, LAYERS, MAX_CASTERS, SCENES, SCENE_LABELS, THEMES,
   type CastMatchView, type LiveElements, type LiveHud, type OverlayFeed, type SceneKey, type StudioState, type TeamOverride,
 } from '../../../src/cast/types';
 
@@ -25,6 +25,14 @@ const FEED_POLL_MS = 1500;
 const PANEL_POLL_MS = 15000;
 const OBS_PREFS = 'riverside.cast.obs';
 
+const HUD_STYLE_LABELS: Record<(typeof HUD_STYLES)[number], string> = {
+  plate: 'Plate: centre score plate, players down the sides',
+  corners: 'Corners: a plate per team in the top corners',
+  rail: 'Rail: one board down the left edge',
+  frame: 'Frame: holes for the game\'s team panels (caster HUD)',
+  scorebug: 'Scorebug: compact, top centre',
+};
+
 const THEME_LABELS: Record<(typeof THEMES)[number], string> = {
   riverside: 'Riverside', safehouse: 'Safehouse', night: 'Night', bile: 'Bile',
 };
@@ -33,23 +41,50 @@ const ELEMENT_INFO: { key: keyof LiveElements; label: string; help: string }[] =
   { key: 'survivors', label: 'Survivor rows', help: 'Off by default. Health with temp health, down, ledge and pinned, and the kit, pills and throwable each one holds.' },
   { key: 'infected', label: 'Infected rows', help: 'Off by default. Class, spawning or dead, and damage dealt this round.' },
   { key: 'progress', label: 'Progress strip', help: 'How far the survivors are, with the tank and witch points on it.' },
+  { key: 'rival', label: "Opponent's mark", help: 'Second half: how far the other team got on this map, marked on the strip.' },
+  { key: 'dots', label: 'Survivor dots', help: "Each survivor's own progress on the strip: who is rushing or lagging." },
   { key: 'bosses', label: 'Tank and witch %', help: 'On the progress strip (bar) or under the scorebug.' },
   { key: 'tank', label: 'Tank health', help: 'L4D1 shows tank health only to the tank itself.' },
+  { key: 'tankRecap', label: 'Tank damage card', help: "After a tank dies: each survivor's damage to it and their share, who played it, how long it lived." },
 ];
 
 /** Live events worth a callout, with the card title each gets. */
 const CALLOUT_KINDS: Record<string, (e: CastMatchView['events'][number]) => { title: string; text: string }> = {
-  skeet: (e) => ({ title: 'Skeet', text: `${e.actor} skeeted ${e.target ?? 'a hunter'}` }),
-  dp: (e) => ({ title: 'Big pounce', text: `${e.actor} pounced ${e.target ?? ''} for ${e.value}`.trim() }),
+  skeet: (e) => skeetCallout(e),
+  dp: (e) => ({ title: 'DP', text: `${e.actor} pounced ${e.target ?? 'a survivor'} for ${e.value}` }),
   tank_death: (e) => ({ title: 'Tank down', text: `${e.actor} finished the tank` }),
   tank_spawn: (e) => ({ title: 'Tank', text: `${e.actor} is on the tank` }),
   witch_killed: (e) => ({ title: 'Witch down', text: `${e.actor} killed the witch` }),
   witch_aggro: (e) => ({ title: 'Witch!', text: `${e.actor} startled the witch` }),
   death: (e) => ({ title: 'Survivor down', text: `${e.actor} was killed by ${e.target ?? 'the infected'}` }),
   incap: (e) => ({ title: 'Incapped', text: `${e.actor} went down to ${e.target ?? 'the infected'}` }),
-  boom: (e) => ({ title: 'Boomed', text: `${e.actor} boomed ${e.target ?? 'the survivors'}` }),
+  boom: (e) => bileCallout(e),
   car_alarm: (e) => ({ title: 'Car alarm', text: `${e.actor} set off a car alarm` }),
 };
+
+/** One card per skeet run (the feed folds a run into its newest skeet):
+ *  Skeet, then Double / Triple / Quad skeet as the same player keeps going,
+ *  counted by the Discord streak rules. */
+const STREAK_TITLES = ['Skeet', 'Double skeet', 'Triple skeet', 'Quad skeet'];
+const BILE_TITLES = ['Boomed', 'Double bile', 'Triple bile', 'Quad bile'];
+
+const listOf = (names: string[]): string =>
+  names.length <= 1 ? names[0] ?? '' : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+
+/** One card per bile: every survivor one boomer caught (a vomit or a pop). */
+export function bileCallout(e: CastMatchView['events'][number]): { title: string; text: string } {
+  const n = e.streak?.count ?? 1;
+  const targets = e.streak?.targets.length ? e.streak.targets : e.target ? [e.target] : [];
+  return { title: BILE_TITLES[n - 1] ?? 'Quad bile', text: `${e.actor} boomed ${targets.length ? listOf(targets) : 'the survivors'}` };
+}
+export function skeetCallout(e: CastMatchView['events'][number]): { title: string; text: string } {
+  const n = e.streak?.count ?? 1;
+  const title = STREAK_TITLES[n - 1] ?? `${n}x skeet`;
+  const targets = e.streak?.targets.length ? e.streak.targets : e.target ? [e.target] : [];
+  const who = targets.length === 0 ? (n > 1 ? `${n} hunters` : 'a hunter')
+    : targets.length === 1 ? targets[0] : `${targets.slice(0, -1).join(', ')} and ${targets[targets.length - 1]}`;
+  return { title, text: `${e.actor} skeeted ${who}` };
+}
 
 function sideOfEvent(kind: string): 'survivor' | 'infected' {
   return ['skeet', 'tank_death', 'witch_killed', 'witch_aggro', 'death', 'incap', 'car_alarm'].includes(kind) ? 'survivor' : 'infected';
@@ -441,9 +476,8 @@ function LiveToggles({ state, update, map, hud }: { state: StudioState; update: 
       <h3>Gameplay overlay</h3>
       <div class="studio__form studio__row3">
         <label>Style
-          <select value={state.hudStyle} onChange={(e) => { const v = e.currentTarget.value === 'scorebug' ? 'scorebug' : 'bar'; update((s) => ({ ...s, hudStyle: v }), true); }}>
-            <option value="bar">Broadcast bar (full width)</option>
-            <option value="scorebug">Scorebug (top centre)</option>
+          <select value={state.hudStyle} onChange={(e) => { const v = e.currentTarget.value as StudioState['hudStyle']; update((s) => ({ ...s, hudStyle: v }), true); }}>
+            {HUD_STYLES.map((h) => <option key={h} value={h}>{HUD_STYLE_LABELS[h]}</option>)}
           </select>
         </label>
         {state.hudStyle === 'scorebug' && (
@@ -455,6 +489,7 @@ function LiveToggles({ state, update, map, hud }: { state: StudioState; update: 
           </label>
         )}
       </div>
+      {state.hudStyle === 'frame' && <FrameRectsBox state={state} update={update} />}
       <p class="muted studio__hint">
         Each live element has its own switch. Turn survivor or infected rows on only with a clean-feed HUD or SourceTV or free cam:
         in first person the game already shows that health, so it would be on screen twice.
@@ -480,6 +515,28 @@ function LiveToggles({ state, update, map, hud }: { state: StudioState; update: 
           onInput={(e) => { const v = num(e.currentTarget.value); update((s) => ({ ...s, bosses: { witch: v, tank: stale ? null : s.bosses.tank, map } })); }} /></label>
       </div>
     </section>
+  );
+}
+
+/** Frame mode's two holes, in overlay pixels (1920 x 1080). */
+function FrameRectsBox({ state, update }: { state: StudioState; update: Update }) {
+  const set = (side: 'survivor' | 'infected', k: 'x' | 'y' | 'w' | 'h', v: string) => {
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n)) return;
+    update((s) => ({ ...s, frame: { ...s.frame, [side]: { ...s.frame[side], [k]: n } } }));
+  };
+  return (
+    <div class="studio__frames">
+      <p class="muted studio__hint">Where the caster HUD puts the game's own team panels, in overlay pixels (1920 x 1080). The overlay frames these holes.</p>
+      {(['survivor', 'infected'] as const).map((side) => (
+        <div key={side} class="studio__form studio__rect">
+          <span class="eyebrow">{side === 'survivor' ? 'Survivor panel' : 'Infected panel'}</span>
+          {(['x', 'y', 'w', 'h'] as const).map((k) => (
+            <label key={k}>{k.toUpperCase()}<input inputMode="numeric" value={state.frame[side][k]} onInput={(e) => set(side, k, e.currentTarget.value)} /></label>
+          ))}
+        </div>
+      ))}
+    </div>
   );
 }
 

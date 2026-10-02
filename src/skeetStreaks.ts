@@ -44,20 +44,11 @@ export function findSkeetStreaks(db: DB, matchId: number): SkeetStreak[] {
 
   const flush = (): void => {
     if (!current) return;
-    let i = 0;
-    while (i < times.length) {
-      let j = i;
-      while (j + 1 < times.length && times[j + 1] - times[i] <= STREAK_WINDOW_MS) j++;
-      const count = j - i + 1;
-      if (count >= STREAK_MIN) {
-        streaks.push({
-          matchId, steamid: current.actor, mapOrdinal: current.mapOrdinal, half: current.half,
-          tMs: times[i], count, spanMs: times[j] - times[i],
-        });
-        i = j + 1;
-      } else {
-        i++;
-      }
+    for (const [i, j] of streakRuns(times, STREAK_MIN)) {
+      streaks.push({
+        matchId, steamid: current.actor, mapOrdinal: current.mapOrdinal, half: current.half,
+        tMs: times[i]!, count: j - i + 1, spanMs: times[j]! - times[i]!,
+      });
     }
   };
 
@@ -74,4 +65,27 @@ export function findSkeetStreaks(db: DB, matchId: number): SkeetStreak[] {
   flush();
 
   return streaks;
+}
+
+/**
+ * The greedy scan findSkeetStreaks uses, on one player's sorted skeet times in
+ * one map half: [first, last] index pairs of each run of at least `min`
+ * skeets, every one within STREAK_WINDOW_MS of the run's first. Exported so
+ * the caster studio's DOUBLE / TRIPLE SKEET cards count exactly as the
+ * Discord post does.
+ */
+export function streakRuns(times: readonly number[], min: number): [number, number][] {
+  const out: [number, number][] = [];
+  let i = 0;
+  while (i < times.length) {
+    let j = i;
+    while (j + 1 < times.length && times[j + 1]! - times[i]! <= STREAK_WINDOW_MS) j++;
+    if (j - i + 1 >= min) {
+      out.push([i, j]);
+      i = j + 1;
+    } else {
+      i++;
+    }
+  }
+  return out;
 }
