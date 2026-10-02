@@ -422,9 +422,11 @@
 .ov-pg__pin.is-passed { opacity: 0.5; }
 .ov-pg__pct { font: 400 21px var(--font-display); color: var(--bone); text-align: right; font-variant-numeric: tabular-nums; }
 .ov-pg__note { position: absolute; right: 70px; top: -16px; font: 600 11px var(--font-label); letter-spacing: 0.16em; text-transform: uppercase; color: #c7a3e8; }
-/* The opponent's mark: a ghost line at how far the other team got here. */
-.ov-pg__rival { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 2px dashed var(--c); z-index: 1; }
-.ov-pg__rival b { position: absolute; top: 100%; left: 4px; margin-top: 1px; font: 600 10px/12px var(--font-label); letter-spacing: 0.06em; color: var(--c); white-space: nowrap; }
+/* The opponent's mark: a dashed notch at how far the other team got here,
+ * labelled above the rail to its left, so it never meets the survivor dots
+ * (below the rail) or a boss pin's label (above, to the pin's right). */
+.ov-pg__rival { position: absolute; top: -12px; bottom: -4px; width: 0; border-left: 2px dashed var(--c); z-index: 1; }
+.ov-pg__rival b { position: absolute; bottom: 100%; right: 4px; margin-bottom: 1px; font: 600 10px/12px var(--font-label); letter-spacing: 0.06em; color: var(--c); white-space: nowrap; }
 /* Survivor dots: each survivor's own progress, a small face under the track. */
 .ov-pg__dot { position: absolute; top: 100%; margin-top: 4px; transform: translateX(-50%); width: 18px; height: 18px; border-radius: 50%; overflow: hidden; border: 1px solid var(--c); background: #000; z-index: 0; }
 .ov-pg__dot .ov-face { width: 100%; height: 100%; }
