@@ -23,15 +23,18 @@ let off: () => void;
 let seq = 0;
 
 const bytes = (n: number) => new Uint8Array(n).fill(7);
-/** url -> what the CDN answers. 'fail' is a 404, 'throw' is a dead connection. */
-const fetcherOf = (map: Record<string, Uint8Array | 'fail' | 'throw'>): AttachmentFetcher => async (url) => {
+/** url -> what the CDN answers. 'fail' is a 404, 'throw' is a dead connection.
+ *  A `{ body, length }` pair sends a Content-Length that need not match. */
+type Answer = Uint8Array | { body: Uint8Array; length: number | null } | 'fail' | 'throw';
+const fetcherOf = (map: Record<string, Answer>): AttachmentFetcher => async (url) => {
   calls.push(url);
   const v = map[url];
   if (v === 'throw' || v === undefined) throw new Error('socket hang up');
   if (v === 'fail') return { ok: false, body: null };
+  const { body, length } = v instanceof Uint8Array ? { body: v, length: v.byteLength } : v;
   // Two chunks, so the streaming cap is exercised mid-body.
-  const half = Math.floor(v.byteLength / 2);
-  return { ok: true, body: (async function* () { yield v.subarray(0, half); yield v.subarray(half); })() };
+  const half = Math.floor(body.byteLength / 2);
+  return { ok: true, length, body: (async function* () { yield body.subarray(0, half); yield body.subarray(half); })() };
 };
 const att = (name: string, size: number, url = `https://cdn.discordapp.com/${name}`): InboundAttachment =>
   ({ id: `a${++seq}`, name, contentType: null, size, url });
@@ -153,11 +156,24 @@ describe('what goes wrong while downloading', () => {
     expect(onDisk()).toEqual([]);
   });
 
-  it('a body that ends cleanly short of the size Discord declared is fetch_failed, and nothing is left on disk', async () => {
+  it('a body that ends cleanly short of its Content-Length is fetch_failed, and nothing is left on disk', async () => {
     const a = att('short.png', 1000);
-    const store = new AttachmentStore({ db, dir, fetcher: fetcherOf({ [a.url]: bytes(400) }) });
+    const store = new AttachmentStore({ db, dir, fetcher: fetcherOf({ [a.url]: { body: bytes(400), length: 1000 } }) });
     expect(await store.save(ticket(IDS[1]), a)).toEqual({ size: 1000, sha256: null, storedName: null, skipReason: 'fetch_failed' });
     expect(onDisk()).toEqual([]);
+  });
+
+  // Ticket 29, 2026-10-01: every iPhone screenshot posted from Discord mobile
+  // declared about a third of what the CDN served (210931 vs 667277 bytes),
+  // so all six were refused. The size Discord declares is not the file.
+  it('a file bigger or smaller than Discord declared is stored at the size that arrived', async () => {
+    const id = ticket(IDS[1]);
+    const big = att('IMG_1980.png', 300);
+    const small = att('IMG_1979.png', 900);
+    const store = new AttachmentStore({ db, dir, fetcher: fetcherOf({ [big.url]: bytes(1000), [small.url]: { body: bytes(500), length: null } }) });
+    expect(await store.save(id, big)).toMatchObject({ size: 1000, skipReason: null });
+    expect(await store.save(id, small)).toMatchObject({ size: 500, skipReason: null });
+    expect(onDisk()).toHaveLength(2);
   });
 });
 
