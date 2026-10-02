@@ -2070,6 +2070,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // a 200 full of HTML and fail somewhere much less obvious. Non-GET methods
   // are likewise never a page navigation.
   app.setNotFoundHandler((req, reply) => {
+    // The caster studio's OBS overlays are their own page with no site chrome.
+    if (isPageRequest(req.method, req.url) && /^\/overlay\/[a-z]+(\?|$)/.test(req.url)) {
+      return reply.type('text/html').header('Cache-Control', 'no-cache').sendFile('overlay.html');
+    }
     if (isPageRequest(req.method, req.url)) return reply.type('text/html').sendFile('index.html');
     return reply.code(404).send({ error: 'not found' });
   });

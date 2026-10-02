@@ -135,6 +135,8 @@ const PLAIN: [table: string, column: string][] = [
  *  up instead are handled before this runs. */
 const KEYED: [table: string, column: string][] = [
   ['match_live_players', 'player_id'],
+  // Caster studio state: one row per caster; the surviving account's wins.
+  ['cast_studios', 'caster_steamid'],
   ['match_live_map_stats', 'player_id'],
   // Per-round deltas (balance analytics). Two accounts in one round is the
   // alt-account case itself; the survivor's row is kept, as for the rows above.

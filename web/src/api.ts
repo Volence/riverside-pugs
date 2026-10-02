@@ -5,6 +5,7 @@
 import type { TimelineEntry } from './replay/timeline';
 import type { DemoSync } from './replay/demoTick';
 import type { DrillSpec } from '../../src/drillSpec';
+import type { OverlayFeed, StudioState } from '../../src/cast/types';
 
 export type Team = 'a' | 'b';
 export type Winner = Team | 'draw';
@@ -1666,6 +1667,44 @@ export interface CastMatch {
 
 export const castApi = {
   list: (signal?: AbortSignal) => get<{ matches: CastMatch[] }>('/api/cast', signal),
+};
+
+/** Caster studio (src/routes/castStudio.ts). */
+export interface StudioPickMatch {
+  id: number; kind: string; state: string; campaign: string; campaignName: string;
+  teamA: string[]; teamB: string[]; scoreA: number; scoreB: number; bookingId: number | null;
+  createdAt: string; endedAt: string | null;
+}
+export interface StudioPickBooking {
+  id: number; purpose: string; state: string; startsAt: string; sideA: string; sideB: string; latestMatchId: number | null;
+}
+export interface StudioPanel {
+  studio: StudioState;
+  rev: number;
+  key: string;
+  matches: StudioPickMatch[];
+  bookings: StudioPickBooking[];
+  obsScenes: Record<string, string>;
+}
+export interface PrepSheet {
+  players: {
+    steamid: string; name: string; team: 'a' | 'b'; matches: number; form: ('W' | 'L' | 'D')[];
+    avg: { sidmg: number; ck: number; skeets: number; dps: number; tankDmg: number };
+    best: { label: string; value: number; matchId: number }[];
+    campaigns: { name: string; played: number; won: number }[];
+  }[];
+  rivalries: { a: string; b: string; met: number; aWon: number }[];
+  duos: { team: 'a' | 'b'; a: string; b: string; together: number; won: number }[];
+}
+
+export const studioApi = {
+  get: (signal?: AbortSignal) => get<StudioPanel>('/api/cast/studio', signal),
+  save: (state: StudioState) => put<{ studio: StudioState; rev: number }>('/api/cast/studio', state),
+  callout: (c: { title: string; text: string; team: 'a' | 'b' | null }) => post<{ studio: StudioState; rev: number }>('/api/cast/studio/callout', c),
+  newKey: () => post<{ key: string }>('/api/cast/studio/key'),
+  feed: (signal?: AbortSignal) => get<OverlayFeed>('/api/cast/studio/feed', signal),
+  prep: (matchId: number, signal?: AbortSignal) => get<PrepSheet>(`/api/cast/studio/prep/${matchId}`, signal),
+  revokeKey: (steamid: string) => post(`/api/admin/players/${steamid}/cast-key/revoke`),
 };
 
 // ---------- teams ----------
