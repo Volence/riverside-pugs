@@ -17,12 +17,18 @@ export const CAMPAIGNS: Record<string, { name: string }> = {
  * Names shown ONLY in the campaign vote (site tiles and Discord buttons), for
  * easter eggs. Everywhere else, match pages, history, stats, keeps the plain
  * name. The Parish plays with the l4d_nightmode plugin on (owner, 2026-10-01),
- * so its vote tile hints that something is off. Mirrored in web/src/format.ts.
+ * so its vote tile hints that something is off; Dead Center, Dark Carnival and
+ * Hard Rain joined it on 2026-10-02 when they went into the pool at night.
+ * Mirrored in web/src/format.ts.
  */
 export const VOTE_NAMES: Record<string, string> = {
   // "The Parish???" in glitch (Zalgo) text: combining marks stacked on the
   // letters, 42 UTF-16 units so a Discord button label (80 max) still fits
   // with its vote count.
+  // Same treatment, 44 UTF-16 units each.
+  dead_center: 'D\u0351\u0355\u036ee\u036b\u0348\u0351a\u0363\u0359\u0308d\u0307\u034e\u0357 C\u0367\u0326e\u0304\u0347n\u0311\u0324t\u0302\u0354e\u036c\u0318r\u0366\u033b?\u0351\u0325?\u0366\u0316?\u036d\u0353',
+  dark_carnival: 'D\u0357\u032ea\u0368\u0353r\u0368\u0333k\u0306\u033a C\u0300\u0339a\u0357\u032er\u0367\u0348n\u0369\u035ai\u030c\u0355v\u0300\u0324a\u0351\u0339l\u0307\u0332?\u036f\u032a?\u0301?\u0365',
+  hard_rain: 'H\u0310\u032f\u0368a\u0368\u0326\u0367r\u030c\u0324\u036ed\u030c\u0326\u0306 R\u0302\u0354\u036ea\u0308\u032f\u0300i\u0350\u0320\u036dn\u0368\u035a\u0300?\u0310\u0324\u0302?\u036e\u032d\u036d?\u0351\u0345',
   the_parish: 'T\u036e\u0356h\u0304\u0331\u0350e\u036a\u032e P\u0301\u0348\u0305a\u0314\u0326\u0307r\u0308\u0356i\u0367\u0318s\u0346\u032ah\u0369\u0332\u0351?\u0363\u031e?\u0314\u0359?\u030c\u0333\u0367',
 };
 
