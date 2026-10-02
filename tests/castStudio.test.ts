@@ -71,7 +71,7 @@ describe('studio state', () => {
       scene: 'bogus', theme: 'neon', title: 'x'.repeat(500), matchId: -3,
       overrides: { a: { name: ' Rats ', color: 'red', score: 12 }, b: { color: '#AABBCC', score: -1 } },
       casters: [{ name: 'A', camUrl: 'javascript:alert(1)' }, { name: 'B', camUrl: 'https://vdo.ninja/?view=x' }, {}, {}],
-      bosses: { tank: 74.6, witch: 140 },
+      bosses: { tank: 74.6, witch: 140, map: 'l4d_vs_airport02_offices' },
       elements: { survivors: true, tank: 'yes' },
       callout: { title: 'SKEET' },
     });
@@ -83,7 +83,7 @@ describe('studio state', () => {
     expect(s.casters).toHaveLength(3);
     expect(s.casters[0]!.camUrl).toBe('');
     expect(s.casters[1]!.camUrl).toBe('https://vdo.ninja/?view=x');
-    expect(s.bosses).toEqual({ tank: 75, witch: null });
+    expect(s.bosses).toEqual({ tank: 75, witch: null, map: 'l4d_vs_airport02_offices' });
     expect(s.elements).toEqual({ survivors: true, infected: false, tank: true, bosses: true });
     expect(s.callout).toBeNull();
   });

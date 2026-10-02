@@ -141,3 +141,16 @@ listed as a ruling to confirm.
 7. Overlay entry, feed worker, theme, scenes.
 8. Producer panel with OBS client.
 9. Screenshots of every scene at 1920x1080 and the panel at desktop and 390 px, review, fix wave.
+
+## Status (2026-10-02, overnight build)
+
+Built on branch `caster-studio`. Screenshots: `scripts/seed-cast-studio.ts` fills a scratch DB (and
+keeps a live replay file growing), `scripts/shoot-cast-studio.mjs` shoots every scene at 1920x1080 and
+the panel at 1440 and 390 px.
+
+Also built beyond the list above: per-map boss % (numbers typed for one map never show on the next),
+"Reset overlay links" on the admin player file, a one-minute cache of career numbers.
+
+Not tried yet: a real OBS (browser sources, obs-websocket connect and scene cuts, the scene collection
+import), SharedWorker sharing between OBS browser sources (falls back to one poll per source if OBS
+isolates them), the live round HUD against a real pushed replay file.

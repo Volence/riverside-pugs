@@ -55,7 +55,22 @@ function showSr(db: DB, kind: MatchRow['kind']): boolean {
   return false;
 }
 
-function career(db: DB, steamid: string): CastPlayer['career'] {
+/** Career numbers change once per finished match, and every overlay poll
+ *  would otherwise sum a player's whole history: a minute's cache. */
+const CAREER_TTL_MS = 60_000;
+const careerCache = new WeakMap<DB, Map<string, { at: number; value: CastPlayer['career'] }>>();
+
+function career(db: DB, steamid: string, nowMs = Date.now()): CastPlayer['career'] {
+  let byDb = careerCache.get(db);
+  if (!byDb) { byDb = new Map(); careerCache.set(db, byDb); }
+  const hit = byDb.get(steamid);
+  if (hit && nowMs - hit.at < CAREER_TTL_MS) return hit.value;
+  const value = careerUncached(db, steamid);
+  byDb.set(steamid, { at: nowMs, value });
+  return value;
+}
+
+function careerUncached(db: DB, steamid: string): CastPlayer['career'] {
   const wl = db.prepare('SELECT COALESCE(SUM(wins), 0) AS w, COALESCE(SUM(losses), 0) AS l FROM player_ratings WHERE player_id = ?')
     .get(steamid) as { w: number; l: number };
   const played = db.prepare(

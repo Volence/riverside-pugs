@@ -15,7 +15,7 @@ describe('openDb', () => {
     expect(names).toEqual([
       'admin_actions',
       'balance_ignored_plugins', 'balance_patch_servers', 'balance_patches', 'balance_rollout_servers', 'balance_rollouts', 'balance_server_state',
-      'bans', 'booking_casters', 'booking_events', 'booking_people', 'booking_sides', 'booking_voice', 'bookings', 'campaign_play_rules',
+      'bans', 'booking_casters', 'booking_events', 'booking_people', 'booking_sides', 'booking_voice', 'bookings', 'campaign_play_rules', 'cast_studios',
       'community_entries', 'community_likes',
       'custom_campaign_chapters', 'custom_campaign_installs', 'custom_campaigns',
       'discord_link_codes', 'discord_link_history', 'discord_messages', 'discord_sanctions', 'discord_voice', 'discord_voice_origin',
