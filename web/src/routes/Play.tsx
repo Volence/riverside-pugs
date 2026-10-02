@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import {
   api, ApiError, type Me, type LobbySnapshot, type NamedPlayer, type PublicQueue, type ReadyBlock, type StateSnapshot, type QueueTimeout, type AbortNotice,
 } from '../api';
-import { campaignName, fmtClock, timeoutCause, winnerLabel } from '../format';
+import { campaignName, campaignVoteName, fmtClock, timeoutCause, winnerLabel } from '../format';
 import { Countdown, useSecondsLeft } from '../components/Countdown';
 import { QUEUE_SIZE } from '../queueSize';
 import { Empty, Panel, PlayerLink } from '../components/bits';
@@ -582,6 +582,7 @@ function MapVote({ lobby, refresh }: { lobby: LobbySnapshot; refresh: () => void
           const leading = n > 0 && n === leader;
           return {
             slug: c,
+            name: campaignVoteName(c),
             sub: n === 0 ? 'No votes' : `${n} vote${n === 1 ? '' : 's'}${leading ? ' · leading' : ''}`,
             active: lobby.myVote === c,
           };

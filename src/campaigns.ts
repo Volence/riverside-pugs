@@ -14,6 +14,16 @@ export const CAMPAIGNS: Record<string, { name: string }> = {
 };
 
 /**
+ * Names shown ONLY in the campaign vote (site tiles and Discord buttons), for
+ * easter eggs. Everywhere else, match pages, history, stats, keeps the plain
+ * name. The Parish plays with the l4d_nightmode plugin on (owner, 2026-10-01),
+ * so its vote tile hints that something is off. Mirrored in web/src/format.ts.
+ */
+export const VOTE_NAMES: Record<string, string> = {
+  the_parish: 'The Parish???',
+};
+
+/**
  * What a map name may look like. A chapter's map name reaches an rcon command
  * line (`changelevel <map>`), and for a community campaign it comes out of a
  * file inside an uploaded VPK. Unquoted, a ';' in it starts a second command.

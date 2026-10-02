@@ -153,6 +153,22 @@ describe('campaignDisplayName', () => {
   });
 });
 
+describe('campaignVoteName', () => {
+  // The Parish plays with night mode on, and only its vote name says so.
+  it('gives The Parish its easter-egg name in the vote only', async () => {
+    const { campaignDisplayName, campaignVoteName } = await import('../src/campaignRegistry.js');
+    expect(campaignVoteName(db, 'the_parish')).toBe('The Parish???');
+    expect(campaignDisplayName(db, 'the_parish')).toBe('The Parish');
+  });
+
+  it('is the display name for every other campaign', async () => {
+    const { campaignVoteName } = await import('../src/campaignRegistry.js');
+    publish();
+    expect(campaignVoteName(db, 'dead_air')).toBe('Dead Air');
+    expect(campaignVoteName(db, 'dbd')).toBe('Dead Before Dawn');
+  });
+});
+
 describe('stock chapter lists', () => {
   const AIRPORT = `"mission"
 {

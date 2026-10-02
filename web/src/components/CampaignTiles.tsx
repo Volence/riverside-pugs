@@ -14,6 +14,8 @@ export interface CampaignTileItem {
   /** Makes the tile a link, e.g. to the campaign's table further down the
    *  same page. Ignored when the tiles are buttons. */
   href?: string;
+  /** Overrides the campaign's name, e.g. the vote's easter-egg names. */
+  name?: string;
 }
 
 /**
@@ -40,7 +42,7 @@ export function CampaignTiles(
         const body = (
           <>
             <span class="ctile__sub eyebrow">{it.sub}</span>
-            <span class="ctile__name">{campaignName(it.slug)}</span>
+            <span class="ctile__name">{it.name ?? campaignName(it.slug)}</span>
             {it.badge && <span class="ctile__badge">{it.badge}</span>}
           </>
         );

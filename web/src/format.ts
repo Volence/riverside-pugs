@@ -29,6 +29,16 @@ export function campaignName(slug: string): string {
   return CAMPAIGN_NAMES[slug] ?? REGISTERED.get(slug) ?? slug;
 }
 
+/** Easter-egg names shown only in the campaign vote. Mirrors VOTE_NAMES in
+ *  src/campaigns.ts; every other page keeps campaignName. */
+const VOTE_NAMES: Record<string, string> = {
+  the_parish: 'The Parish???',
+};
+
+export function campaignVoteName(slug: string): string {
+  return VOTE_NAMES[slug] ?? campaignName(slug);
+}
+
 /**
  * The color a campaign is tinted with, as a CSS color string.
  *
