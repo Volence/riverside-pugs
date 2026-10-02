@@ -127,6 +127,7 @@ import { ticketRoutes } from './routes/tickets.js';
 import { modCallRoutes } from './routes/modCalls.js';
 import { serverChatRoutes } from './routes/serverChat.js';
 import { castRoutes } from './routes/cast.js';
+import { castStudioRoutes } from './routes/castStudio.js';
 import { statsRoutes } from './routes/stats.js';
 import { weeklyRoutes } from './routes/weekly.js';
 import { balancePublicRoutes } from './routes/balancePublic.js';
@@ -2026,6 +2027,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // Events (tournaments plan T1a): read only, behind the competitive switch.
   await app.register(eventRoutes, { db: deps.db, store: getCommunityStore });
+  // Caster studio: the producer panel and the OBS overlay feed.
+  await app.register(castStudioRoutes, { db: deps.db, config: deps.config, store: getCommunityStore });
 
   // Purge community tombstones past their 30 days, once at start and then
   // daily. With no community folder yet nothing was ever written, so only

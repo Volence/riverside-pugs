@@ -2220,6 +2220,20 @@ export function openDb(path: string): DB {
     CREATE INDEX IF NOT EXISTS queue_stints_ended ON queue_stints (ended_at);
   `);
 
+  // Caster studio (docs/superpowers/plans/2026-10-02-caster-studio.md): one
+  // producer state per caster. key_gen is the overlay key generation: bumping
+  // it kills every overlay URL the caster has handed to OBS (src/cast/key.ts).
+  // rev counts saves, so overlays can tell a new scene from the same one.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cast_studios (
+      caster_steamid TEXT PRIMARY KEY REFERENCES players(steamid),
+      state_json     TEXT NOT NULL DEFAULT '{}',
+      key_gen        INTEGER NOT NULL DEFAULT 1,
+      rev            INTEGER NOT NULL DEFAULT 0,
+      updated_at     TEXT NOT NULL
+    );
+  `);
+
   // Everything besides a match that holds a box out of the pool: one row per
   // open hold. A holder's box stays 'idle' in servers (see practice_leases
   // above for why), so everything that takes an idle box for itself asks this
