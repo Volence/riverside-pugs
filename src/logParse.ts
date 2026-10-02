@@ -195,6 +195,12 @@ export type LogEvent =
   // per connection, only when the value is out of bounds. Only cpu_level so
   // far (0 thins smoke, fire and the boomer cloud enough to see through).
   | { kind: 'cvar_flag'; steamid: string; cvar: WatchedCvar; value: number; act: CvarAct }
+  // A crash spray (a malformed VTF, the L4D2-Community-Update #115 exploit)
+  // caught by spray_exploit_fixer, reported by l4d_spray_report.smx. Blocked
+  // already: this is the record of the attempt. `crc` is the spray's file
+  // name, `off` the header byte that failed (-2 for a size mismatch) and `val`
+  // the byte found there (-2 again for a size mismatch).
+  | { kind: 'spray_exploit'; steamid: string; crc: string; off: number; val: number }
   | {
       kind: 'input_burst'; steamid: string; burstKind: 'fire' | 'pounce' | 'bhop'; weapon: string;
       groundTicks: number; airPresses: number; serverTick: number; clientTick: number; intervals: number[];
@@ -549,6 +555,18 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
       kind: 'lilac_flag', steamid, cheat, banned: banned === '1',
       ...(hasReason ? { reason } : {}),
     };
+  }
+
+  // Crash sprays from l4d_spray_report.smx. Anchored like L4DL, and nothing
+  // free-text on it: a steamid, a hex file name and two small numbers.
+  if (body.startsWith('L4DS ')) {
+    const f = kv(body.split(/\s+/).slice(1));
+    const steamid = steamId64Of(f.id ?? '');
+    const crc = (f.crc ?? '').toLowerCase();
+    const off = intRange(f.off, -2, 63);
+    const val = intRange(f.val, -2, 255);
+    if (!steamid || !/^[0-9a-f]{8}$/.test(crc) || off === null || val === null) return null;
+    return { kind: 'spray_exploit', steamid, crc, off, val };
   }
 
   // Client settings from l4d_cvarwatch.smx. Anchored like L4DL, and the value

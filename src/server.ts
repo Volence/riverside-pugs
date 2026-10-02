@@ -948,6 +948,33 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           return;
         }
+        if (ev.kind === 'spray_exploit') {
+          // A crash spray. The server already blocked it; this is the record
+          // of the attempt. Every detection is stored (the plugin reports once
+          // per upload and once per spray), but staff hear about a given file
+          // from a given player at most once an hour. Never on the critical
+          // path, same as LilAC.
+          try {
+            let serverId: number | null = null;
+            try { serverId = serverOf(source, meta); } catch { /* unknown server */ }
+            const matchId = serverId === null ? null : liveMatchOf(deps.db, serverId, ev.steamid);
+            const detail = `crc=${ev.crc} off=${ev.off} val=${ev.val}`;
+            const hourAgo = new Date(Date.now() - 3_600_000).toISOString();
+            const announced = deps.db.prepare(
+              "SELECT 1 FROM integrity_flags WHERE source = 'spray' AND steamid = ? AND detail LIKE ? AND at > ? LIMIT 1",
+            ).get(ev.steamid, `crc=${ev.crc} %`, hourAgo);
+            const stored = recordIntegrityFlag(deps.db, {
+              matchId, serverId, steamid: ev.steamid, source: 'spray',
+              kind: 'crash_spray', severity: 'suspected', detail,
+            }, new Date(), { dedupeOnDetail: true });
+            if (stored && !announced) {
+              publishAdminEvent({ kind: 'spray_exploit', steamid: ev.steamid, crc: ev.crc, matchId, serverId });
+            }
+          } catch (err) {
+            console.error('[spray] failed to record a crash spray:', err);
+          }
+          return;
+        }
         if (ev.kind === 'cvar_flag') {
           // Evidence only, never on the critical path. Stored in or out of a
           // match, like a LilAC flag; the admin channel hears about each act

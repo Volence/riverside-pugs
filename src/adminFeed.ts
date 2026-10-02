@@ -41,6 +41,10 @@ export type AdminEvent =
   // Little Anti-Cheat raised a flag on a player. Posted once per player per
   // cheat per match; LilAC fires repeatedly while a cheat looks active.
   | { kind: 'lilac_flag'; steamid: string; cheat: string; banned: boolean; matchId: number | null }
+  // A player uploaded or sprayed a crash spray (src/logParse.ts spray_exploit).
+  // Already blocked on the server; posted so staff know someone tried. Once
+  // per player per spray file per hour.
+  | { kind: 'spray_exploit'; steamid: string; crc: string; matchId: number | null; serverId: number | null }
   | { kind: 'input_flag'; steamid: string; matchId: number | null; signature: string; detail: string }
   // A client setting out of bounds (cpu_level 0). Posted once per player per
   // match, and only for a player in a live match.
@@ -97,6 +101,7 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   cvar_flag: 'admin_feed_problems',
   conduct_flag: 'admin_feed_conduct',
   lilac_flag: 'admin_feed_problems',
+  spray_exploit: 'admin_feed_problems',
   steam_signal: 'admin_feed_problems',
   sourcetv_watch: 'admin_feed_problems',
   staff_message: 'admin_feed_staff_messages',
