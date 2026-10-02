@@ -274,3 +274,20 @@ box with humans). The web side works with or without it.
     viewer now draw the same game art: the released survivor portraits (was the beta set in
     /portraits) and the HUD's infected icons in medallions, the HUD strip and the Key panel; the path
     figures remain only as the fallback until the images load.
+30. **What a spectator sees (in-game probe 2026-10-02, real L4D1 dedicated-server spectator, stock
+    HUD, 1920x1080; runs /home/volence/l4d/hud/ingame-harness/runs/specds-112810 and specds-105632).**
+    A dark translucent top band y 0-115, full width, with "SPECTATING: name" at about x 1525-1790,
+    y 80-110 (red when spectating an infected). A bottom band y 962-1080 holding the four survivor cards
+    across x 60-1290 (portrait, name, health bar, DOWN); infected are never shown there, not even while
+    spectating the tank, and the right part of the band is empty. No tank HP, no SI classes or health
+    anywhere; no player HUD; Tab shows survivors and the versus score panel. Kill feed at the left
+    middle from about y 385; chat prints just above the band at x 330-690, y 905-945.
+    Caveat: the probe could only spawn AI infected, so a human-infected row may still appear; treated
+    as stock behaviour until a real match says otherwise.
+    So: survivor rows default OFF, infected rows ON, tank HP ON. Frame mode frames the bottom-band
+    survivor cards (default hole x 40, y 966, 1270x110), drops the infected hole unless the producer
+    adds one, and draws the infected as cards in the game cards' shape in the band's free right part,
+    so the band reads as one strip, half game and half overlay. Corner plates and the rail start under
+    the top band (the rail moved to the right edge, away from the kill feed), plate stacks start under
+    the kill feed (y 470), callouts stay above the kill feed, and the lower third sits clear of the
+    chat and the band.

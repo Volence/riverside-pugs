@@ -97,13 +97,17 @@ export const HUD_STYLES = ['plate', 'corners', 'rail', 'frame', 'scorebug'] as c
 /** A rect on the 1920x1080 overlay, in pixels. */
 export interface Rect { x: number; y: number; w: number; h: number }
 
-/** Frame mode: where the caster HUD puts the game's own team panels, so the
- *  overlay can frame them (survivor team panel, infected team panel). The
- *  defaults are a guess until an in-game probe sets them. */
-export interface FrameRects { survivor: Rect; infected: Rect }
+/** Frame mode: where the game draws its own team panels, so the overlay
+ *  can frame them (ruling 30). A stock spectator sees the four survivor cards
+ *  in the bottom band (x 60-1290, band y 962-1080) and no infected panel at
+ *  all, so the survivor hole defaults to that and the infected hole is off
+ *  (null) unless a caster HUD adds one. */
+export interface FrameRects { survivor: Rect; infected: Rect | null }
 export function defaultFrameRects(): FrameRects {
-  return { survivor: { x: 20, y: 20, w: 560, h: 150 }, infected: { x: 1340, y: 20, w: 560, h: 150 } };
+  return { survivor: { x: 40, y: 966, w: 1270, h: 110 }, infected: null };
 }
+/** Where an infected hole goes when the producer adds one. */
+export const DEFAULT_INFECTED_RECT: Rect = { x: 1340, y: 20, w: 560, h: 150 };
 export type HudStyle = (typeof HUD_STYLES)[number];
 
 export interface Callout {
@@ -119,15 +123,14 @@ export interface Callout {
 export const CALLOUT_MS = 8000;
 
 export interface LiveElements {
-  /** Survivor rows (health, status, items). Off by default: first-person
-   *  spectating a survivor already shows every survivor's health, so the
-   *  rows would show it twice. On for a clean-feed HUD, SourceTV or free cam. */
+  /** Survivor rows (health, status, items). Off by default: a spectator
+   *  always has the four survivor cards in the game's bottom band (spectator
+   *  probe 2026-10-02, ruling 30), so the rows would show them twice. */
   survivors: boolean;
-  /** Infected rows (class, spawning, dead, damage). Off by default for the
-   *  same reason: spectating an infected shows the infected team's row. */
+  /** Infected rows (class, spawning, dead, damage). On by default: the probe
+   *  found a spectator never sees infected state, classes or SI health. */
   infected: boolean;
-  /** Tank health. On: L4D1 shows a tank's health only to the tank itself (and
-   *  to whoever spectates the tank), never to survivors or other spectators. */
+  /** Tank health. On: a spectator never sees a tank HP bar (probe). */
   tank: boolean;
   /** Tank and witch flow %. On: the game never shows them on screen. */
   bosses: boolean;
@@ -146,7 +149,7 @@ export interface LiveElements {
 }
 
 export function defaultElements(): LiveElements {
-  return { survivors: false, infected: false, tank: true, bosses: true, progress: true, tankRecap: true, rival: true, dots: true };
+  return { survivors: false, infected: true, tank: true, bosses: true, progress: true, tankRecap: true, rival: true, dots: true };
 }
 
 export const MAX_CASTERS = 3;

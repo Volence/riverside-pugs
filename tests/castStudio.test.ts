@@ -86,7 +86,7 @@ describe('studio state', () => {
     expect(s.casters[0]!.camUrl).toBe('');
     expect(s.casters[1]!.camUrl).toBe('https://vdo.ninja/?view=x');
     expect(s.bosses).toEqual({ tank: 75, witch: null, map: 'l4d_vs_airport02_offices' });
-    expect(s.elements).toMatchObject({ survivors: true, infected: false, tank: true, bosses: true, progress: true });
+    expect(s.elements).toMatchObject({ survivors: true, infected: true, tank: true, bosses: true, progress: true });
     expect(s.hudStyle).toBe('plate');
     expect(s.callout).toBeNull();
   });
@@ -103,8 +103,10 @@ describe('studio state', () => {
   it('keeps frame rects on the canvas', () => {
     const f = cleanState({ frame: { survivor: { x: 1800, y: -5, w: 400, h: 2 }, infected: { x: 'a' } } }).frame;
     expect(f.survivor).toEqual({ x: 1800, y: 0, w: 120, h: 20 });
+    // An infected hole only when one was saved, with defaults for missing fields.
     expect(f.infected).toEqual({ x: 1340, y: 20, w: 560, h: 150 });
-    expect(cleanState({}).elements).toMatchObject({ survivors: false, infected: false, tank: true, bosses: true, progress: true });
+    expect(cleanState({}).frame).toEqual({ survivor: { x: 40, y: 966, w: 1270, h: 110 }, infected: null });
+    expect(cleanState({}).elements).toMatchObject({ survivors: false, infected: true, tank: true, bosses: true, progress: true });
   });
 
   it('lays cams out inside the canvas', () => {

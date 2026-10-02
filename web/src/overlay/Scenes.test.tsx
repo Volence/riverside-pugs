@@ -32,12 +32,11 @@ const feed = (patch: Partial<ReturnType<typeof defaultStudioState>> = {}): Overl
 const allOn = { survivors: true, infected: true, tank: true, bosses: true, progress: true, tankRecap: true, rival: true, dots: true };
 
 describe('gameplay overlay: the broadcast looks', () => {
-  it('by default (plate, rows off) shows only what the game does not', () => {
+  it('by default (plate) shows only what a spectator never sees: infected yes, survivors no', () => {
     const { container } = render(<Overlay which="gameplay" feed={feed()} now={Date.now()} />);
     const t = container.textContent ?? '';
-    for (const s of ['Rats', 'Crows', '512', '448', 'Tank Guy', '41%', '70%', '30%']) expect(t).toContain(s);
+    for (const s of ['Rats', 'Crows', '512', '448', 'Tank Guy', '41%', '70%', '30%', 'Hunter Main']) expect(t).toContain(s);
     expect(container.querySelector('.ov-plate')).not.toBeNull();
-    expect(container.querySelector('.ov-mrow')).toBeNull();
     expect(t).not.toContain('Survivor One');
     // The boss pins and the tank use the game's own icons.
     const srcs = [...container.querySelectorAll('img')].map((i) => i.getAttribute('src'));
@@ -60,15 +59,22 @@ describe('gameplay overlay: the broadcast looks', () => {
     });
   }
 
-  it('frame: frames the two holes, each tabbed with the team on that side this half', () => {
+  it('frame: frames the bottom-band survivor cards and draws the infected beside them', () => {
     const { container } = render(<Overlay which="gameplay" feed={feed({ hudStyle: 'frame', elements: allOn })} now={Date.now()} />);
     const surv = container.querySelector('[data-side="survivor"]') as HTMLElement;
-    const inf = container.querySelector('[data-side="infected"]') as HTMLElement;
-    expect(surv.style.left).toBe('20px');
+    expect(surv.style.left).toBe('40px');
+    expect(surv.style.top).toBe('966px');
     expect(surv.textContent).toContain('Rats');
-    expect(inf.textContent).toContain('Crows');
-    // The game draws the health in frame mode: no medallions, whatever the switches say.
+    expect(container.querySelector('[data-side="infected"]')).toBeNull();
+    const band = container.querySelector('.ov-band') as HTMLElement;
+    expect(band.textContent).toContain('Crows');
+    expect(band.textContent).toContain('Hunter Main');
+    expect(band.textContent).toContain('Spawning');
+    // No medallions in frame mode, whatever the switches say.
     expect(container.querySelector('.ov-mrow')).toBeNull();
+    // An infected hole when the producer adds one.
+    const withHole = render(<Overlay which="gameplay" feed={feed({ hudStyle: 'frame', frame: { survivor: { x: 40, y: 966, w: 1270, h: 110 }, infected: { x: 1340, y: 20, w: 560, h: 150 } } })} now={Date.now()} />).container;
+    expect(withHole.querySelector('[data-side="infected"]')?.textContent).toContain('Crows');
   });
 
   it("marks the opponent's reach and each survivor's own progress on the strip", () => {
