@@ -20,7 +20,10 @@ export const CAMPAIGNS: Record<string, { name: string }> = {
  * so its vote tile hints that something is off. Mirrored in web/src/format.ts.
  */
 export const VOTE_NAMES: Record<string, string> = {
-  the_parish: 'The Parish???',
+  // "The Parish???" in glitch (Zalgo) text: combining marks stacked on the
+  // letters, 42 UTF-16 units so a Discord button label (80 max) still fits
+  // with its vote count.
+  the_parish: 'T\u036e\u0356h\u0304\u0331\u0350e\u036a\u032e P\u0301\u0348\u0305a\u0314\u0326\u0307r\u0308\u0356i\u0367\u0318s\u0346\u032ah\u0369\u0332\u0351?\u0363\u031e?\u0314\u0359?\u030c\u0333\u0367',
 };
 
 /**
