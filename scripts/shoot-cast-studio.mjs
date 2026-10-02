@@ -98,6 +98,8 @@ try {
   const rowsOn = { survivors: true, infected: true, tank: true, bosses: true, progress: true };
   // The default: survivor rows off (the game's bottom band has them), infected on.
   const compact = { survivors: false, infected: true, tank: true, bosses: true, progress: true };
+  // DOTS=0: the same shots with the survivor dots switched off.
+  if (process.env.DOTS === '0') { rowsOn.dots = false; compact.dots = false; }
   const looks = (process.env.LOOKS ?? 'plate,corners,rail,frame,scorebug').split(',');
   for (const look of looks) {
     for (const rows of look === 'frame' ? [false] : [false, true]) {
