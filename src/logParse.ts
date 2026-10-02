@@ -948,7 +948,11 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
         const m = /^(\d{17}):(\d{1,6})$/.exec(part);
         if (m) players.push({ steamid: m[1]!, dmg: Number(m[2]) });
       }
-      return { kind: 'tank_done', token, recap: { aliveS: alive, controller, dealt, players: players.slice(0, 12) } };
+      // Optional (pug-match 0.3.20 sends both): tanks > 1 means overlapping
+      // tanks reported as one combined recap; passes counts tank passes.
+      const tanks = Math.max(1, intOf(rest.tanks) ?? 1);
+      const passes = Math.max(0, intOf(rest.passes) ?? 0);
+      return { kind: 'tank_done', token, recap: { aliveS: alive, controller, dealt, tanks, passes, players: players.slice(0, 12) } };
     }
     case 'ROUND_START': {
       const half = halfOf(rest.half);

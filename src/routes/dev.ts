@@ -47,7 +47,7 @@ export async function devRoutes(app: FastifyInstance, opts: DevRouteOpts): Promi
     };
     if (!token || !/^[0-9a-f]{32}$/.test(token)) return reply.code(400).send({ error: 'token' });
     if (line && Array.isArray(line.players)) liveHudStore.record(token, line, Date.now(), round ?? null);
-    if (tank && Array.isArray(tank.players)) liveHudStore.recordTank(token, tank);
+    if (tank && Array.isArray(tank.players)) liveHudStore.recordTank(token, { ...tank, tanks: tank.tanks ?? 1, passes: tank.passes ?? 0 });
     return { ok: true };
   });
 

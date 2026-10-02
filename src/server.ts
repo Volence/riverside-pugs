@@ -1288,6 +1288,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             // that the round row (and its ordinal) is settled.
             const rs = liveMatchRow(ev.token);
             if (rs) resetRoundLines(deps.db, rs.id, currentOrdinal(deps.db, rs.id), ev.half as 1 | 2);
+            // The caster studio's opponent mark starts over with the half.
+            if (rs) liveHudStore.resetReach(ev.token, currentOrdinal(deps.db, rs.id), ev.half);
           }
           else if (ev.kind === 'balance_part') {
             balanceAssembler.part(ev.token, ev.half, ev.part, ev.items, Date.now(), ev.sent);

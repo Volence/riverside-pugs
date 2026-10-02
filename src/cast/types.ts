@@ -358,6 +358,9 @@ export interface TankRecap {
   aliveS: number;
   controller: string | null;
   dealt: number;
+  /** More than 1: overlapping tanks in one combined recap. */
+  tanks: number;
+  passes: number;
   /** Highest first; share is of the survivors' total damage to this tank. */
   players: { name: string; dmg: number; share: number }[];
 }

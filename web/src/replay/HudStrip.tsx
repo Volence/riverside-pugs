@@ -27,7 +27,8 @@ function Panel(
       style={{ borderLeftColor: slotColor(p.slot) }}
     >
       <img class={`hudp__face${survivor ? '' : ' hudp__face--icon'}`}
-        src={survivor ? portraitFor(p.cls, header.version, true) : classIconUrl(pictogramFor(p.cls) ?? '') ?? portraitFor(0, 1, false)} alt="" />
+        src={survivor ? portraitFor(p.cls, header.version, true) : classIconUrl(pictogramFor(p.cls) ?? '') ?? portraitFor(0, 1, false)} alt=""
+        onError={fallbackToSilhouette} />
       <div class="hudp__body">
         <div class="hudp__top">
           {/* The number the map draws inside the dot. Map, panel and follow
@@ -123,4 +124,12 @@ export function HudStrip(
       {row(infected, 'Infected')}
     </div>
   );
+}
+
+/** A face or icon that failed to load shows the plain silhouette instead of
+ *  a broken image (once: the silhouette itself never retries). */
+function fallbackToSilhouette(e: Event): void {
+  const img = e.currentTarget as HTMLImageElement;
+  const unknown = portraitFor(0, 1, false);
+  if (!img.src.endsWith(unknown)) img.src = unknown;
 }

@@ -3200,30 +3200,78 @@ rock_skeets=%d dps_landed=%d biles_landed=%d survivors_biled=%d",
 }
 
 // ---------- tank recap (caster studio) ----------
-// Each survivor's damage to one tank, from pug-match's own tank_damage hook,
-// as the delta between the tank's spawn and its death. One tank at a time:
-// a second tank spawning while the first lives restarts the window (rare in
-// versus; the recap then covers the second tank's life only).
+// Each survivor's damage to the tank, from pug-match's own tank_damage hook,
+// as the delta between the tank's first spawn and its death.
+//
+// A pass is the same tank: L4D1 fires tank_spawn again for the new
+// controller, so a window already open stays open (the guard Rotoblin's
+// l4d_tank_witch_damage_announce uses), alive counts from the first spawn,
+// and the recap names the final controller with how many passes there were.
+//
+// Two tanks at once cannot be split: PS_TankDamage is per player, not per
+// tank. So overlapping tanks share one window, and one combined recap goes out
+// when the LAST of them dies, flagged with tanks=<n>, rather than a recap per
+// tank with numbers that mix both.
 int g_iTankDmgAtSpawn[MAX_ROSTER];
 int g_iTankDealtAtSpawn[MAX_ROSTER];
-float g_fTankSpawnedAt;                   // GetGameTime() at tank_spawn; 0 = none tracked
+float g_fTankSpawnedAt;                   // GetGameTime() at the window's first tank_spawn; 0 = none
+int g_iTankPasses;                        // tank_spawns in the window that were passes
+int g_iTanksInWindow;                     // most tanks alive at once in the window
+
+/** Live tank players, optionally not counting `except`. */
+int TanksAlive(int except = 0)
+{
+	int n = 0;
+	for (int c = 1; c <= MaxClients; c++)
+		if (c != except && IsClientInGame(c) && IsTankClient(c) && IsPlayerAlive(c)) n++;
+	return n;
+}
 
 void TankRecapBegin()
 {
 	if (!StatsActive()) { g_fTankSpawnedAt = 0.0; return; }
+	if (g_fTankSpawnedAt > 0.0)
+	{
+		// A window is open: a pass, or a second tank. The handoff can leave
+		// both clients as tanks for a moment, so look again shortly.
+		g_iTankPasses++;
+		CreateTimer(0.5, Timer_TankSpawnCheck, _, TIMER_FLAG_NO_MAPCHANGE);
+		return;
+	}
 	for (int i = 0; i < MAX_ROSTER; i++)
 	{
 		g_iTankDmgAtSpawn[i] = g_iSkill[i][PS_TankDamage];
 		g_iTankDealtAtSpawn[i] = g_iSkill[i][PS_DmgAsTank];
 	}
 	g_fTankSpawnedAt = GetGameTime();
+	g_iTankPasses = 0;
+	g_iTanksInWindow = 1;
 }
 
-/** TANKDONE alive=<s> controller=<steamid|0> dealt=<dmg to survivors> p=<steamid>:<dmg>,...
+/** Half a second after a tank_spawn inside an open window: two live tanks
+ *  means it was a second tank, not a pass. */
+public Action Timer_TankSpawnCheck(Handle timer)
+{
+	if (g_fTankSpawnedAt <= 0.0) return Plugin_Stop;
+	int n = TanksAlive();
+	if (n > 1)
+	{
+		if (g_iTankPasses > 0) g_iTankPasses--;
+		if (n > g_iTanksInWindow) g_iTanksInWindow = n;
+	}
+	return Plugin_Stop;
+}
+
+/** A tank died (any killer, the world included). Emits only when it was the
+ *  last live tank:
+ *
+ *    TANKDONE alive=<s> controller=<steamid|0> dealt=<dmg to survivors> tanks=<n> passes=<n> p=<steamid>:<dmg>,...
+ *
  *  Undelayed like LIVEHUD: the site keeps it in memory for the caster feed. */
 void TankRecapEnd(int tank)
 {
 	if (g_fTankSpawnedAt <= 0.0 || !StatsActive()) { g_fTankSpawnedAt = 0.0; return; }
+	if (TanksAlive(tank) > 0) return;     // another tank still up: the last one reports
 	int alive = RoundToFloor(GetGameTime() - g_fTankSpawnedAt);
 	g_fTankSpawnedAt = 0.0;
 	int dealt = 0;
@@ -3240,7 +3288,8 @@ void TankRecapEnd(int tank)
 	char controller[32] = "0";
 	if (tank >= 1 && tank <= MaxClients && !IsFakeClient(tank) && g_iClientRoster[tank] >= 0)
 		strcopy(controller, sizeof(controller), g_sRosterId[g_iClientRoster[tank]]);
-	EmitPug("TANKDONE alive=%d controller=%s dealt=%d p=%s", alive, controller, dealt, list);
+	EmitPug("TANKDONE alive=%d controller=%s dealt=%d tanks=%d passes=%d p=%s",
+		alive, controller, dealt, g_iTanksInWindow, g_iTankPasses, list);
 }
 
 /** Survivor items as LIVEHUD bits: 1 kit, 2 pills, 4 pipe bomb, 8 molotov. */
@@ -3268,7 +3317,9 @@ int LiveHudFlow(int client, float maxFlow)
 	if (maxFlow <= 0.0 || !IsPlayerAlive(client)) return -1;
 	Address area = L4D_GetLastKnownArea(client);
 	if (area == Address_Null) return -1;
-	int pct = RoundToFloor(L4D2Direct_GetTerrorNavAreaFlow(area) / maxFlow * 100.0);
+	// Rounded to nearest like !cur (l4d_current_survivor_progress), so the
+	// furthest survivor's value is the number !cur prints.
+	int pct = RoundToNearest(L4D2Direct_GetTerrorNavAreaFlow(area) / maxFlow * 100.0);
 	return pct < 0 ? 0 : (pct > 100 ? 100 : pct);
 }
 
@@ -3277,8 +3328,10 @@ int LiveHudFlow(int client, float maxFlow)
  *
  *    LIVEHUD prog=<team %> tank=<%> witch=<%> p=<steamid>:<flow %>:<items>:<dmg>,...
  *
- *  prog is the furthest survivor's flow % (the same number !cur prints), -1
- *  when the nav or the flow is unknown. tank/witch come from l4d_boss_percent:
+ *  prog is the furthest alive survivor's flow %, rounded to nearest and
+ *  capped at 100 like !cur, from the same calls (last known nav area flow
+ *  over the map's max flow), so it matches what !cur prints; -1 when the
+ *  nav or the flow is unknown. tank/witch come from l4d_boss_percent:
  *  -1 when that plugin is absent, 0 for no boss this map, -2 witch for a witch
  *  party. One p entry per rostered player in game on a playing team: flow is
  *  -1 for infected and the dead, items is LiveHudItems (0 for infected), and
@@ -3962,6 +4015,8 @@ public void OnRoundIsLive()
 		EmitBalance();
 		RoundStatsBegin();
 		g_fTankSpawnedAt = 0.0;    // a tank from the half before is never this half's
+		g_iTankPasses = 0;
+		g_iTanksInWindow = 0;
 
 		RosterLateJoiners();
 		CheckRosterMismatch();
@@ -4601,6 +4656,9 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
 	if (!StatsActive()) return;
 	int victim = GetClientOfUserId(event.GetInt("userid"));
 	int attacker = GetClientOfUserId(event.GetInt("attacker"));
+	// A tank killed by the world (fall, fire with no owner) has no attacker;
+	// its recap must still go out, so it is ended here, ahead of that return.
+	if (victim > 0 && IsTankClient(victim)) TankRecapEnd(victim);
 	if (attacker <= 0 || victim <= 0) return;
 
 	// Timeline emissions live here, ahead of the SI-kill stat guards below,
@@ -4635,11 +4693,7 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
 			victim, attacker, (attacker <= MaxClients) ? g_iClientRoster[attacker] : -1, freed);
 	}
 	if (GetClientTeam(victim) == TEAM_SURVIVOR) EmitClientEvent("death", victim, attacker, 0);
-	else if (IsTankClient(victim))
-	{
-		EmitClientEvent("tank_death", attacker, 0, 0);
-		TankRecapEnd(victim);
-	}
+	else if (IsTankClient(victim)) EmitClientEvent("tank_death", attacker, 0, 0);
 
 	int slot = (attacker <= MaxClients) ? g_iClientRoster[attacker] : -1;
 	if (slot == -1 || !IsSurvivorClient(attacker) || !IsInfectedClient(victim) || IsFakeClient(victim)) return;
