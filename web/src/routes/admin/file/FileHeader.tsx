@@ -91,11 +91,11 @@ export function FileHeader(
             {h.isCaster ? 'Remove caster' : 'Make caster'}
           </button>
         )}
-        {can('staff_flags') && h.isCaster && (
+        {can('staff_flags') && (h.isCaster || h.isAdmin) && (
           <button class="chip" type="button" disabled={busy}
             onClick={() => run(() => adminApi.revokeCastKey(h.steamid), {
               title: `Reset ${h.name}'s overlay links?`,
-              body: 'Every caster studio overlay link they have handed to OBS stops working at once. They can copy fresh links from the studio. For a leaked link; to take casting away, remove the caster flag instead.',
+              body: 'Every caster studio overlay link they have handed to OBS stops working at once. They can copy fresh links from the studio. For a leaked link; to take casting away from a caster, remove the flag instead.',
               confirmLabel: 'Reset links',
               danger: true,
             })}>

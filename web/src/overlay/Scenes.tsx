@@ -83,8 +83,13 @@ function SafeArrow({ class: cls = '' }: { class?: string }) {
   );
 }
 
+/** The overlay key, for logo URLs: the OBS page sets it from ?k=, the
+ *  producer panel's inline preview from its own key. */
+let overlayKey = '';
+export function setOverlayKey(k: string): void { overlayKey = k; }
+
 function Logo({ team, size }: { team: CastTeam; size: number }) {
-  const k = new URLSearchParams(location.search).get('k') ?? '';
+  const k = overlayKey;
   if (team.logoUrl) {
     return <img class="ov-logo" width={size} height={size} src={`/api/overlay/logo/${team.logoUrl}?k=${encodeURIComponent(k)}`} alt="" />;
   }
@@ -520,7 +525,7 @@ function RoundHud({ studio, match, live, force = false }: {
       {el.tank && live.tank && <TankBar tank={live.tank} team={infTeam} />}
       {el.survivors && live.survivors.length > 0 && (
         <div class="ov-round__row" style={{ '--c': survTeam ? `var(--team-${survTeam.key})` : 'var(--win)' } as Record<string, string>}>
-          {live.survivors.map((s) => <SurvivorCard key={s.slot} s={s} />)}
+          {live.survivors.map((s, i) => <SurvivorCard key={`${s.slot}:${i}`} s={s} />)}
         </div>
       )}
       {el.infected && live.infected.length > 0 && (

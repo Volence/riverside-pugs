@@ -7,24 +7,26 @@
  * lettering, the safe room arrow, hazard tape. Gameplay layers keep to the
  * free regions of the game HUD (ruling 15): top centre x 640-1280. */
 
-*, *::before, *::after { box-sizing: border-box; }
-html, body { margin: 0; background: transparent; overflow: hidden; }
-body {
-  width: 1920px; height: 1080px;
+/* Scoped to .ov so the producer panel can draw the same scenes inline as its
+ * preview (the site sends X-Frame-Options DENY, so no iframe). Page-level
+ * rules for the OBS page itself are in overlayPage.css. */
+:where(.ov, .ov *, .ov *::before, .ov *::after) { box-sizing: border-box; }
+.ov {
+  position: relative; width: 1920px; height: 1080px; overflow: hidden;
   color: var(--text);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
   --bone: #efe2c4;
   --stencil: "Saira Stencil One", "Anton", Impact, sans-serif;
   --hazard: #c9a45c;
   --panel: rgba(11, 9, 8, 0.9);
   --panel-2: rgba(28, 23, 19, 0.92);
 }
-p, h1, h2, dl, dd { margin: 0; }
-
-.ov { position: relative; width: 1920px; height: 1080px; }
+:where(.ov) :where(p, h1, h2, dl, dd) { margin: 0; }
 .ov__scene { position: absolute; inset: 0; }
 .ov-refused {
+  font-family: "Oswald", sans-serif;
   position: absolute; left: 24px; top: 24px; margin: 0; padding: 10px 16px;
   background: rgba(155, 42, 34, 0.92); color: #fff; font: 600 22px var(--font-label); letter-spacing: 0.04em;
 }

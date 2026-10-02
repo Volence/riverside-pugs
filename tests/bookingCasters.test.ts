@@ -297,3 +297,30 @@ describe('/api/cast for booked games', () => {
     expect((await call('GET', '/api/cast', CASTER)).statusCode).toBe(403);
   });
 });
+
+describe('caster studio on a booked game (src/cast/access.ts)', () => {
+  it('a fully invited caster may cast it, unless they have a stake in the booking', async () => {
+    const { canCastMatch, canCastBooking } = await import('../src/cast/access.js');
+    expect(canCastMatch(db, CASTER, gameId)).toBe(false);
+    inviteBoth(CASTER);
+    expect(canCastMatch(db, CASTER, gameId)).toBe(true);
+    expect(canCastBooking(db, CASTER, bookingId)).toBe(true);
+    // Added to a side's people list (even just invited): undelayed intel on
+    // their own game, so nothing.
+    db.prepare("INSERT INTO booking_people (booking_id, side, steamid, role, status, added_by, added_at) VALUES (?, 'a', ?, 'ringer', 'invited', ?, ?)")
+      .run(bookingId, CASTER, CAPT_A, new Date().toISOString());
+    expect(canCastMatch(db, CASTER, gameId)).toBe(false);
+    expect(canCastBooking(db, CASTER, bookingId)).toBe(false);
+  });
+
+  it('a side manager who is also a caster or admin gets nothing from it', async () => {
+    const { canCastMatch } = await import('../src/cast/access.js');
+    // Off the game's roster, so only the booking stake can refuse them.
+    db.prepare('DELETE FROM match_players WHERE match_id = ?').run(gameId);
+    db.prepare('UPDATE players SET is_caster = 1 WHERE steamid = ?').run(CAPT_A);
+    expect(canCastMatch(db, CAPT_A, gameId)).toBe(false);
+    db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(CAPT_B);
+    expect(canCastMatch(db, CAPT_B, gameId)).toBe(false);
+    expect(canCastMatch(db, ADMIN, gameId)).toBe(true);
+  });
+});

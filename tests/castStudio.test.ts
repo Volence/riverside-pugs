@@ -12,7 +12,7 @@ import { overlayKey, readOverlayKey } from '../src/cast/key.js';
 import { cleanState } from '../src/cast/studio.js';
 import { camSlots } from '../src/cast/layout.js';
 import { encodeFrame, encodeHeader, STATE, VERSION, type Frame, type PlayerSample } from '../src/replayFormat.js';
-import { LiveRoundReader } from '../src/cast/liveRound.js';
+import { findFrameBoundary, LiveRoundReader } from '../src/cast/liveRound.js';
 import { tagFrom } from '../src/cast/matchView.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000700${i}`);
@@ -133,9 +133,43 @@ describe('panel routes', () => {
     expect(Date.now() - Date.parse(at)).toBeLessThan(5000);
     const saved = await call('PUT', '/api/cast/studio', CASTER, { ...fired.json().studio, callout: { title: 'X', at: '2001-01-01T00:00:00Z' } });
     expect(saved.json().studio.callout.at).toBe(at);
-    const cleared = await call('PUT', '/api/cast/studio', CASTER, { ...fired.json().studio, callout: null });
+    // A debounced save that left before the fire carries callout: null; it
+    // must not clear the card.
+    const late = await call('PUT', '/api/cast/studio', CASTER, { ...fired.json().studio, callout: null });
+    expect(late.json().studio.callout.at).toBe(at);
+    const cleared = await call('POST', '/api/cast/studio/callout/clear', CASTER);
     expect(cleared.json().studio.callout).toBeNull();
     expect((await call('POST', '/api/cast/studio/callout', CASTER, { text: 'no title' })).statusCode).toBe(400);
+  });
+
+  it('refuses a match the caster is rostered in', async () => {
+    db.prepare("INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'a')").run(matchId, CASTER);
+    expect((await call('PUT', '/api/cast/studio', CASTER, { matchId })).statusCode).toBe(403);
+    expect((await call('GET', '/api/cast/studio', CASTER)).json().matches).toEqual([]);
+    // Staff too: an admin playing in it gets nothing either.
+    db.prepare("INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'b')").run(matchId, ADMIN);
+    expect((await call('PUT', '/api/cast/studio', ADMIN, { matchId })).statusCode).toBe(403);
+  });
+
+  it('refuses a tournament match the caster could not view', async () => {
+    const hidden = Number(db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, kind, visibility) VALUES (1, 'live', 'dead_air', 'tournament', 'staff')",
+    ).run().lastInsertRowid);
+    expect((await call('PUT', '/api/cast/studio', CASTER, { matchId: hidden })).statusCode).toBe(403);
+    expect((await call('PUT', '/api/cast/studio', ADMIN, { matchId: hidden })).statusCode).toBe(200);
+  });
+
+  it('only puts on air what the picker offers', async () => {
+    const old = Number(db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, ended_at) VALUES (1, 'completed', 'dead_air', datetime('now', '-2 days'))",
+    ).run().lastInsertRowid);
+    const recent = Number(db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, ended_at) VALUES (1, 'completed', 'dead_air', datetime('now', '-1 hours'))",
+    ).run().lastInsertRowid);
+    const aborted = Number(db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'aborted', 'dead_air')").run().lastInsertRowid);
+    expect((await call('PUT', '/api/cast/studio', CASTER, { matchId: old })).statusCode).toBe(403);
+    expect((await call('PUT', '/api/cast/studio', CASTER, { matchId: aborted })).statusCode).toBe(403);
+    expect((await call('PUT', '/api/cast/studio', CASTER, { matchId: recent })).statusCode).toBe(200);
   });
 
   it('serves a scene collection pointing at the caster key', async () => {
@@ -249,6 +283,55 @@ describe('live round reader', () => {
     expect(reader.read(db, matchId)!.tMs).toBe(200);
     appendFileSync(path, next.subarray(50));
     expect(reader.read(db, matchId)!.tank!.health).toBe(4000);
+  });
+
+  it('works out sides from the roster when the file has no side mask', () => {
+    db.prepare("INSERT INTO match_live (match_id, last_seen, phase, phase_since) VALUES (?, datetime('now'), 'live', datetime('now'))").run(matchId);
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, started_at) VALUES (?, 0, 1, 'b', datetime('now'))").run(matchId);
+    const h = header();
+    h[157] = 0; // sides flag: unknown
+    h[156] = 0;
+    writeFileSync(join(liveDir, `pug_${TOKEN}_0_1.rpl`), Buffer.concat([h, encodeFrame(frame(100, 6000)), encodeFrame(frame(200, 6000))]));
+    const r = new LiveRoundReader('', liveDir).read(db, matchId)!;
+    // Team b (slots 4-7) is on survivors this round, not slot order's 0-3.
+    expect(r.survivors.map((x) => x.steamid)).toEqual(IDS.slice(4));
+    expect(r.infected.map((x) => x.steamid)).toEqual(IDS.slice(0, 4));
+  });
+
+  it('reads only the tail of a long file, and keeps entities from the last sampled frame', () => {
+    setLive();
+    const parts: Uint8Array[] = [header()];
+    for (let i = 0; i < 4000; i++) {
+      const f = frame(100 + i * 100, 6000 - i);
+      if (i % 5 !== 0) f.entities = [];
+      parts.push(encodeFrame(f));
+    }
+    writeFileSync(join(liveDir, `pug_${TOKEN}_0_1.rpl`), Buffer.concat(parts));
+    const r = new LiveRoundReader('', liveDir).read(db, matchId)!;
+    expect(r.tMs).toBe(100 + 3999 * 100);
+    expect(r.tank!.health).toBe(6000 - 3999);
+    // The last frame sampled no entities; the witch is still there.
+    expect(r.witches).toBe(1);
+  });
+
+  it('finds a frame boundary in a window cut mid-frame', () => {
+    const bytes = Buffer.concat(Array.from({ length: 50 }, (_, i) => encodeFrame(frame(i * 100, 6000))));
+    const size = encodeFrame(frame(0, 6000)).length;
+    expect(findFrameBoundary(bytes.subarray(37))).toBe(size - 37);
+    expect(findFrameBoundary(bytes)).toBe(0);
+  });
+
+  it('lists a survivor bot after the players', () => {
+    db.prepare("INSERT INTO match_live (match_id, last_seen, phase, phase_since) VALUES (?, datetime('now'), 'live', datetime('now'))").run(matchId);
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, started_at) VALUES (?, 0, 1, 'a', datetime('now'))").run(matchId);
+    const h = header();
+    h[156] = 0xf8; // slot 3 plays infected: three survivors and a bot
+    const f = frame(100, 6000);
+    f.entities.push({ ref: 9, kind: 5, state: STATE.PRESENT | STATE.ALIVE, x: 0, y: 0, z: 0, health: 55 });
+    writeFileSync(join(liveDir, `pug_${TOKEN}_0_1.rpl`), Buffer.concat([h, encodeFrame(f), encodeFrame({ ...f, tMs: 200 })]));
+    const r = new LiveRoundReader('', liveDir).read(db, matchId)!;
+    expect(r.survivors).toHaveLength(4);
+    expect(r.survivors[3]).toMatchObject({ name: 'Bot', health: 55, alive: true });
   });
 
   it('is null between rounds', () => {

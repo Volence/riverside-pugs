@@ -2,9 +2,10 @@ import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { setCampaignNames } from '../format';
 import { useFeed } from './useFeed';
-import { Overlay } from './Scenes';
+import { Overlay, setOverlayKey } from './Scenes';
 import { SCENES, LAYERS, type OverlayKey } from '../../../src/cast/types';
 import './overlay.css';
+import './overlayPage.css';
 
 /**
  * OBS browser source entry (caster studio). /overlay/<scene>?k=<key>.
@@ -23,6 +24,7 @@ function sceneFromPath(path: string): OverlayKey | null {
 function App() {
   const params = new URLSearchParams(location.search);
   const key = params.get('k') ?? '';
+  setOverlayKey(key);
   const which = sceneFromPath(location.pathname);
   const state = useFeed(which ? key : '');
   // A clock for countdowns and callout expiry, ticking on its own so they
