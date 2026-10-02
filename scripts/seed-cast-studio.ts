@@ -36,7 +36,7 @@ activatePlayer(db, CASTER);
 db.prepare('UPDATE players SET is_caster = 1 WHERE steamid = ?').run(CASTER);
 
 // History: twenty finished PUGs among the eight, for the prep sheet and cards.
-const statKeys = ['skeets', 'dps_landed', 'tank_damage', 'deadstops', 'damage_as_si'];
+const statKeys = ['skeets', 'dps_landed', 'tank_damage', 'team_skeets', 'damage_as_si', 'boomer_spawns', 'boom_successes'];
 for (let m = 0; m < 20; m++) {
   const id = Number(db.prepare(
     `INSERT INTO matches (season_id, state, campaign, token, origin, winner, team_a_score, team_b_score, created_at, ended_at)
@@ -49,7 +49,7 @@ for (let m = 0; m < 20; m++) {
       .run(id, p, i < 4 ? 'a' : 'b', 400 + ((i * 37 + m * 11) % 500), 6 + (i % 5), 90 + ((i * 13 + m) % 60));
     for (const [k, key] of statKeys.entries()) {
       db.prepare('INSERT INTO match_player_stats (match_id, player_id, stat, value) VALUES (?, ?, ?, ?)')
-        .run(id, p, key, key === 'tank_damage' ? 800 + ((i * 97 + m * 31) % 1600) : (i + k + m) % 4);
+        .run(id, p, key, key === 'tank_damage' ? 800 + ((i * 97 + m * 31) % 1600) : key === 'boomer_spawns' ? 4 : (i + k + m) % 4);
     }
   });
 }
@@ -65,7 +65,7 @@ db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score,
 db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, started_at, ended_at) VALUES (?, 0, 2, 'a', 512, datetime('now','-20 minutes'), datetime('now','-12 minutes'))").run(live);
 db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, started_at) VALUES (?, 1, 1, 'a', 0, datetime('now','-3 minutes'))").run(live);
 IDS.forEach((p, i) => db.prepare('INSERT INTO match_live_players (match_id, player_id, stats_json) VALUES (?, ?, ?)')
-  .run(live, p, JSON.stringify({ sidmg: 300 + i * 41, sikill: 4 + (i % 4), ck: 70 + i * 6, skeets: i % 3, deadstops: (i + 1) % 3, dps_landed: i % 2, damage_as_si: 120 + i * 17, tank_damage: 400 + i * 50 })));
+  .run(live, p, JSON.stringify({ sidmg: 300 + i * 41, sikill: 4 + (i % 4), ck: 70 + i * 6, skeets: i % 3, team_skeets: (i + 1) % 2, dps_landed: i % 2, damage_as_si: 120 + i * 17, tank_damage: 400 + i * 50, ...(i % 4 === 3 ? {} : { boomer_spawns: 3 + (i % 3), boom_successes: 1 + (i % 2) }) })));
 const ev = (seq: number, kind: string, actor: number, target: number | null, value = 0) =>
   db.prepare('INSERT INTO match_live_events (match_id, map_ordinal, seq, kind, actor, target, value) VALUES (?, 1, ?, ?, ?, ?, ?)')
     .run(live, seq, kind, IDS[actor], target === null ? null : IDS[target], value);

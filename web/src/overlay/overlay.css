@@ -493,3 +493,11 @@
   width: 840px; margin-left: 540px; grid-template-columns: 260px 320px 260px;
   border-left: 0; border-right: 0;
 }
+/* Match stats: survivor and infected column groups. */
+.ov-stats thead .ov-stats__sides th { padding: 0 8px 6px; text-align: center; font: 600 15px var(--font-label); letter-spacing: 0.24em; }
+.ov-stats__side--survivor { color: var(--win) !important; border-bottom: 2px solid var(--win); }
+.ov-stats__side--infected { color: var(--loss) !important; border-bottom: 2px solid var(--loss); }
+.ov-stats .ov-stats__split { border-left: 2px solid rgba(255, 255, 255, 0.14); }
+.ov-stats thead tr { background: none !important; }
+/* "DPs" (damage pounces) keeps its case: upper-cased it reads as DPS. */
+.ov .ov-keepcase { text-transform: none; letter-spacing: 0.06em; }

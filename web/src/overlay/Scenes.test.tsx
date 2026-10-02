@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/preact';
 import { Overlay } from './Scenes';
-import { defaultStudioState, type CastMatchView, type CastTeam, type OverlayFeed } from '../../../src/cast/types';
+import { defaultStudioState, type CastMatchView, type CastPlayer, type CastTeam, type OverlayFeed } from '../../../src/cast/types';
 
 const team = (key: 'a' | 'b', side: CastTeam['side']): CastTeam => ({
   key, name: key === 'a' ? 'Rats' : 'Crows', tag: key === 'a' ? 'RAT' : 'CRW', color: '#123456', logoUrl: null, score: key === 'a' ? 512 : 448,
@@ -66,7 +66,7 @@ describe('gameplay overlay: broadcast bar (default)', () => {
   });
 
   it('shows rosters while no round is running', () => {
-    const m = { ...match, teams: { a: { ...match.teams.a, players: [{ steamid: '9', name: 'Waiting Wally', avatar: null, stats: {}, sr: null, career: { matches: 0, wins: 0, losses: 0, skeets: 0, dpsLanded: 0, tankDamage: 0 } }] }, b: match.teams.b } };
+    const m = { ...match, teams: { a: { ...match.teams.a, players: [{ steamid: '9', name: 'Waiting Wally', avatar: null, stats: {}, sr: null, career: { matches: 0, wins: 0, losses: 0, skeets: 0, dps: 0, boomerRate: null } }] }, b: match.teams.b } };
     const t = render(<Overlay which="gameplay" feed={{ ...feed({ elements: allOn }), match: m, live: null }} now={Date.now()} />).container.textContent ?? '';
     expect(t).toContain('Waiting Wally');
   });
@@ -107,5 +107,39 @@ describe('overlay basics', () => {
   it('program follows the producer scene', () => {
     const { container } = render(<Overlay which="program" feed={feed({ scene: 'brb' })} now={Date.now()} />);
     expect(container.querySelector('[data-scene="brb"]')).not.toBeNull();
+  });
+});
+
+describe('match stats and lineups', () => {
+  const pl = (name: string, stats: Record<string, number>, career: Partial<CastPlayer['career']> = {}): CastPlayer => ({
+    steamid: name, name, avatar: null, stats, sr: null,
+    career: { matches: 10, wins: 6, losses: 4, skeets: 0, dps: 0, boomerRate: null, ...career },
+  });
+  const withPlayers = (a: CastPlayer[], b: CastPlayer[]): OverlayFeed => ({
+    ...feed(), match: { ...match, teams: { a: { ...match.teams.a, players: a }, b: { ...match.teams.b, players: b } } },
+  });
+
+  it('shows the owner\'s columns, skeets counted once, boomer % only with boomers', () => {
+    const f = withPlayers(
+      [pl('Ana', { sidmg: 812, sikill: 9, ck: 140, skeets: 2, team_skeets: 1, skeets_shotgun: 3, tank_damage: 1500, dps_landed: 2, boomer_spawns: 4, boom_successes: 3 })],
+      [pl('Bo', { sidmg: 300, sikill: 3, ck: 90, dps_landed: 0 })],
+    );
+    const { container } = render(<Overlay which="stats" feed={f} now={Date.now()} />);
+    const head = [...container.querySelectorAll('thead tr:last-child th')].map((th) => th.textContent);
+    expect(head).toEqual(['', 'SI dmg', 'SI kills', 'Commons', 'Skeets', 'Tank dmg', 'DPs', 'Boomer %']);
+    const cells = (name: string) => [...[...container.querySelectorAll('tbody tr')].find((r) => r.textContent?.startsWith(name))!.querySelectorAll('td')].map((td) => td.textContent);
+    expect(cells('Ana')).toEqual(['812', '9', '140', '3', '1,500', '2', '75%']);
+    expect(cells('Bo')).toEqual(['300', '3', '90', '-', '-', '0', '-']);
+    expect(container.textContent).not.toMatch(/Deadstops|Dmg as SI/);
+  });
+
+  it('lineup cards show skeets, DPs and boomer %', () => {
+    const f = withPlayers([pl('Ana', {}, { skeets: 31, dps: 12, boomerRate: 38 })], [pl('Bo', {}, { boomerRate: null })]);
+    const { container } = render(<Overlay which="lineups" feed={f} now={Date.now()} />);
+    const cards = [...container.querySelectorAll('.ov-card')].map((c) => c.textContent);
+    expect(cards[0]).toContain('Skeets31');
+    expect(cards[0]).toContain('DPs12');
+    expect(cards[0]).toContain('Boomer %38%');
+    expect(cards[1]).toContain('Boomer %-');
   });
 });

@@ -8,8 +8,8 @@ import type { CastLiveRound, CastMatchView, CastPlayer, CastTeam, OverlayFeed, S
  */
 
 const player = (steamid: string, name: string): CastPlayer => ({
-  steamid, name, avatar: null, stats: { sidmg: 412, sikill: 7, ck: 96, skeets: 2, damage_as_si: 233, dps_landed: 1, tank_damage: 940 }, sr: null,
-  career: { matches: 42, wins: 23, losses: 19, skeets: 31, dpsLanded: 12, tankDamage: 18400 },
+  steamid, name, avatar: null, stats: { sidmg: 412, sikill: 7, ck: 96, skeets: 2, team_skeets: 1, dps_landed: 1, tank_damage: 940, boomer_spawns: 5, boom_successes: 2 }, sr: null,
+  career: { matches: 42, wins: 23, losses: 19, skeets: 31, dps: 12, boomerRate: 38 },
 });
 
 const team = (key: 'a' | 'b', name: string, tag: string, color: string, score: number, side: CastTeam['side'], names: string[]): CastTeam => ({
