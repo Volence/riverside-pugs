@@ -30,6 +30,7 @@ const ALLOWED: Record<string, number> = {
   'src/routes/stats.ts': 2,         // gated by visibleMatchesSql / canViewMatch
   'src/discord/commands.ts': 1,     // public matches only
   'src/matchArchive.ts': 1,         // comment
+  'src/cast/access.ts': 1,          // caster picker, gated by canCastMatch
 };
 
 const RAW = /state\s*=\s*'completed'|state\s+IN\s*\([^)]*'completed'/g;
