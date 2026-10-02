@@ -87,10 +87,14 @@ describe('gameplay overlay: the broadcast looks', () => {
   });
 
   it('shows the tank damage card with shares after a tank dies', () => {
-    const r = { agoMs: 500, aliveS: 84, controller: 'Tank Guy', dealt: 312, players: [{ name: 'Survivor One', dmg: 4200, share: 70 }, { name: 'Two', dmg: 1800, share: 30 }] };
+    const r = { agoMs: 500, aliveS: 84, controller: 'Tank Guy', dealt: 312, tanks: 1, passes: 1, players: [{ name: 'Survivor One', dmg: 4200, share: 70 }, { name: 'Two', dmg: 1800, share: 30 }] };
     const { container } = render(<Overlay which="gameplay" feed={{ ...feed(), live: { ...live!, tankRecap: r } }} now={Date.now()} />);
     const t = container.querySelector('.ov-recap')!.textContent ?? '';
-    for (const x of ['Tank down', 'Tank Guy', '1:24', '312', 'Survivor One', '4,200', '70%', '30%']) expect(t).toContain(x);
+    for (const x of ['Tank down', 'Tank Guy', '1:24', '312', 'Passed once', 'Survivor One', '4,200', '70%', '30%']) expect(t).toContain(x);
+    const two = render(<Overlay which="gameplay" feed={{ ...feed(), live: { ...live!, tankRecap: { ...r, tanks: 2, passes: 0 } } }} now={Date.now()} />).container.querySelector('.ov-recap')!.textContent ?? '';
+    expect(two).toContain('Tanks down');
+    expect(two).toContain('2 tanks, combined');
+    expect(two).not.toContain('Passed');
     const off = render(<Overlay which="gameplay" feed={{ ...feed({ elements: { ...allOn, tankRecap: false } }), live: { ...live!, tankRecap: r } }} now={Date.now()} />).container;
     expect(off.querySelector('.ov-recap')).toBeNull();
   });

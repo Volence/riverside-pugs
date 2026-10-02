@@ -11,7 +11,9 @@ function Swatch({ color, ring }: { color: string; ring?: boolean }) {
 
 function Pict({ name }: { name: PictogramName }) {
   return (
-    <img class="key__pict" src={classIconUrl(name) ?? ''} alt="" aria-hidden="true" />
+    <img class="key__pict" src={classIconUrl(name) ?? ''} alt="" aria-hidden="true"
+      // A missing icon hides rather than showing a broken image.
+      onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }} />
   );
 }
 

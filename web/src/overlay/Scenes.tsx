@@ -1091,12 +1091,13 @@ function TankRecapCard({ r }: { r: TankRecap }) {
     <div class="ov-recap" key={`${r.aliveS}:${r.dealt}`}>
       <div class="ov-recap__head">
         <ClassIcon cls="tank" class="ov-recap__icon" />
-        <span class="ov-recap__title">Tank down</span>
-        <span class="ov-recap__who">{r.controller ?? 'AI tank'}</span>
+        <span class="ov-recap__title">{r.tanks > 1 ? 'Tanks down' : 'Tank down'}</span>
+        <span class="ov-recap__who">{r.tanks > 1 ? `${r.tanks} tanks, combined` : r.controller ?? 'AI tank'}</span>
       </div>
       <div class="ov-recap__facts">
         <span><em>Alive</em> {fmtAlive(r.aliveS)}</span>
         <span><em>Dealt</em> {r.dealt}</span>
+        {r.passes > 0 && <span><em>Passed</em> {r.passes === 1 ? 'once' : `${r.passes} times`}</span>}
       </div>
       <ol class="ov-recap__rows">
         {r.players.map((p) => (

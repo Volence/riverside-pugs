@@ -37,6 +37,11 @@ export interface TankDone {
   controller: string | null;
   /** Damage the tank dealt to survivors over its life. */
   dealt: number;
+  /** More than 1: overlapping tanks, one combined recap (damage cannot be
+   *  split per tank), sent when the last of them died. */
+  tanks: number;
+  /** How many times the tank was passed (frustration or handoff). */
+  passes: number;
   players: { steamid: string; dmg: number }[];
 }
 
@@ -79,6 +84,12 @@ export class LiveHudStore {
     if (this.byToken.size > 64) {
       for (const [k, v] of this.byToken) if (nowMs - v.at > FORGET_MS) this.byToken.delete(k);
     }
+  }
+
+  /** A half (re)started: forget its reach, so a replayed half never takes
+   *  its opponent's mark from the abandoned attempt. */
+  resetReach(token: string, ordinal: number, half: number): void {
+    this.byToken.get(token)?.reach.delete(`${ordinal}:${half}`);
   }
 
   /** The furthest progress seen in one half, or null if none was recorded

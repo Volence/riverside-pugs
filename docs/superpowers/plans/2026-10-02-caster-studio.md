@@ -291,3 +291,10 @@ box with humans). The web side works with or without it.
     the top band (the rail moved to the right edge, away from the kill feed), plate stacks start under
     the kill feed (y 470), callouts stay above the kill feed, and the lower third sits clear of the
     chat and the band.
+31. **Tank recap windows (review, 2026-10-02).** L4D1 fires tank_spawn again on a pass, so an open
+    window is never restarted: a frustration or human pass keeps one recap (damage across every
+    controller, alive from the first spawn), naming the final controller and the pass count. Two tanks at
+    once cannot be split, because PS_TankDamage is per player, not per tank: overlapping tanks share
+    one window and one combined recap goes out when the last of them dies, flagged `tanks=<n>` and
+    shown as "Tanks down, N tanks, combined". A tank killed by the world (no attacker) still reports.
+    LIVEHUD progress rounds to nearest like !cur. The opponent's mark resets when a half (re)starts.

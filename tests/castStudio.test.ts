@@ -361,11 +361,16 @@ describe('LIVEHUD', () => {
     expect(store.reach(TOKEN, 2, 1)).toBe(74);
     expect(store.reach(TOKEN, 2, 2)).toBe(12);
     expect(store.reach(TOKEN, 1, 1)).toBeNull();
+    // A replayed first half starts its reach over.
+    store.resetReach(TOKEN, 2, 1);
+    expect(store.reach(TOKEN, 2, 1)).toBeNull();
+    store.record(TOKEN, line(20), 4000, { ordinal: 2, half: 1 });
+    expect(store.reach(TOKEN, 2, 1)).toBe(20);
   });
 
   it('keeps a tank recap for its card window only', () => {
     const store = new LiveHudStore();
-    store.recordTank(TOKEN, { aliveS: 80, controller: null, dealt: 200, players: [] }, 1000);
+    store.recordTank(TOKEN, { aliveS: 80, controller: null, dealt: 200, tanks: 1, passes: 0, players: [] }, 1000);
     expect(store.tank(TOKEN, 1000 + TANK_RECAP_MS)?.recap.aliveS).toBe(80);
     expect(store.tank(TOKEN, 1001 + TANK_RECAP_MS)).toBeNull();
   });
@@ -382,11 +387,11 @@ describe('LIVEHUD', () => {
     const fr = (tMs: number): Frame => ({ tMs, offset: 0, entities: [], players: [0, 1, 2, 3, 4, 5, 6, 7].map(p) });
     writeFileSync(join(liveDir, `pug_${TOKEN}_0_1.rpl`), Buffer.concat([h, encodeFrame(fr(100)), encodeFrame(fr(200))]));
     await call('PUT', '/api/cast/studio', CASTER, { matchId });
-    liveHudStore.recordTank(TOKEN, { aliveS: 84, controller: IDS[4]!, dealt: 312, players: [{ steamid: IDS[0]!, dmg: 1500 }, { steamid: IDS[1]!, dmg: 4500 }] });
+    liveHudStore.recordTank(TOKEN, { aliveS: 84, controller: IDS[4]!, dealt: 312, tanks: 1, passes: 1, players: [{ steamid: IDS[0]!, dmg: 1500 }, { steamid: IDS[1]!, dmg: 4500 }] });
     const f = (await feed(await keyOf(CASTER))).json();
     const name = (id: string) => (db.prepare('SELECT name FROM players WHERE steamid = ?').get(id) as { name: string }).name;
     expect(f.live.tankRecap).toMatchObject({
-      aliveS: 84, dealt: 312, controller: name(IDS[4]!),
+      aliveS: 84, dealt: 312, controller: name(IDS[4]!), tanks: 1, passes: 1,
       players: [{ name: name(IDS[1]!), dmg: 4500, share: 75 }, { name: name(IDS[0]!), dmg: 1500, share: 25 }],
     });
   });

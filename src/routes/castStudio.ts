@@ -66,7 +66,7 @@ export async function castStudioRoutes(
       live = {
         ...live,
         tankRecap: {
-          agoMs: tank.agoMs, aliveS: tank.recap.aliveS, dealt: tank.recap.dealt,
+          agoMs: tank.agoMs, aliveS: tank.recap.aliveS, dealt: tank.recap.dealt, tanks: tank.recap.tanks, passes: tank.recap.passes,
           controller: tank.recap.controller ? names.get(tank.recap.controller) ?? null : null,
           players: tank.recap.players
             .map((p) => ({ name: names.get(p.steamid) ?? p.steamid, dmg: p.dmg, share: total > 0 ? Math.round((p.dmg / total) * 100) : 0 }))
