@@ -157,7 +157,12 @@ describe('campaignVoteName', () => {
   // The Parish plays with night mode on, and only its vote name says so.
   it('gives The Parish its easter-egg name in the vote only', async () => {
     const { campaignDisplayName, campaignVoteName } = await import('../src/campaignRegistry.js');
-    expect(campaignVoteName(db, 'the_parish')).toBe('The Parish???');
+    const name = campaignVoteName(db, 'the_parish');
+    // Glitch text: The Parish??? under stacked combining marks.
+    expect(name.normalize('NFD').replace(/[\u0300-\u036f]/g, '')).toBe('The Parish???');
+    expect(name).not.toBe('The Parish???');
+    // A Discord button label holds 80, and the vote count follows the name.
+    expect(`${name} (12)`.length).toBeLessThanOrEqual(80);
     expect(campaignDisplayName(db, 'the_parish')).toBe('The Parish');
   });
 

@@ -32,7 +32,8 @@ export function campaignName(slug: string): string {
 /** Easter-egg names shown only in the campaign vote. Mirrors VOTE_NAMES in
  *  src/campaigns.ts; every other page keeps campaignName. */
 const VOTE_NAMES: Record<string, string> = {
-  the_parish: 'The Parish???',
+  // "The Parish???" in glitch (Zalgo) text, see src/campaigns.ts
+  the_parish: 'T\u036e\u0356h\u0304\u0331\u0350e\u036a\u032e P\u0301\u0348\u0305a\u0314\u0326\u0307r\u0308\u0356i\u0367\u0318s\u0346\u032ah\u0369\u0332\u0351?\u0363\u031e?\u0314\u0359?\u030c\u0333\u0367',
 };
 
 export function campaignVoteName(slug: string): string {
