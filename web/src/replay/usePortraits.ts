@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'preact/hooks';
 import { SURVIVOR_CHARACTERS } from '../../../src/replayFormat';
+import { CLASS_ICON_URLS } from './pictograms';
 
 /** Every portrait the map can ask for. `portraitFor` in hud.ts builds the
  *  same URLs; this list exists so they load once, up front, rather than on
  *  the first frame that needs each. */
 export const PORTRAIT_URLS: readonly string[] = [
-  ...SURVIVOR_CHARACTERS.map((n) => `/portraits/${n}.png`),
+  ...SURVIVOR_CHARACTERS.map((n) => `/cast-art/survivor-${n}.png`),
   '/portraits/unknown.png',
+  ...CLASS_ICON_URLS,
 ];
 
 /**

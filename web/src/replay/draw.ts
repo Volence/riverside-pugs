@@ -5,7 +5,7 @@ import {
   AVATAR_BASE_R, TANK_BASE_R, ENTITY_MEDAL_R, FOLLOW_RING_GAP, FOLLOW_RING_WIDTH, drawMedallion,
 } from './avatar';
 import { DEAD_COLOR, stateRingColor, statusGlyph } from './stateRing';
-import { pictogramFor } from './pictograms';
+import { classIconUrl, pictogramFor } from './pictograms';
 import { healthBar, portraitFor } from './hud';
 import type { ActiveBurst, MarkerKind, WorldPos } from './markers';
 import type { TimelineEvent } from './timeline';
@@ -717,6 +717,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
           x: p.px, y: p.py, r: style.radius,
           rim: startled ? WITCH_STARTLED_COLOR : style.color,
           pictogram: style.pictogram ?? null,
+          icon: style.pictogram ? iconOf(a, style.pictogram) : null,
           face: style.pictogram ? null : a.portraits[portraitFor(0, 1, true)] ?? null,
         });
         break;
@@ -840,6 +841,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       drawMedallion(ctx, {
         x: p.px, y: p.py, r, rim: GHOST_COLOR, hollow: true, alpha: 0.5,
         pictogram: survivor ? null : pictogramFor(pl.cls),
+        icon: survivor ? null : iconOf(a, pictogramFor(pl.cls)),
         badge: { text: slotNumber(pl.slot), ink: '#ffffff' },
       });
       if (a.show.names && avatarOnStage(p.px, p.py, r, a.width, a.height, a.shift)) {
@@ -884,6 +886,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       rim: alive ? color : DEAD_COLOR,
       face,
       pictogram,
+      icon: iconOf(a, pictogram),
       badge: alive ? { text: slotNumber(pl.slot), ink: numberInk(color) } : null,
       yaw: alive ? pl.yaw : null,
       ring: alive ? stateRingColor(pl.state) : null,
@@ -940,4 +943,10 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   }
 
   drawLabels(ctx, labels);
+}
+
+/** The loaded game icon for a class pictogram, if any (see classIconUrl). */
+function iconOf(a: { portraits: Record<string, HTMLImageElement> }, name: string | null): HTMLImageElement | null {
+  const url = name ? classIconUrl(name) : null;
+  return url ? a.portraits[url] ?? null : null;
 }

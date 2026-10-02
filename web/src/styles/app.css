@@ -1679,7 +1679,7 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .key li { display: flex; align-items: center; gap: 6px; line-height: 1.6; }
 .key__swatch { width: 12px; height: 12px; border-radius: 50%; background: currentColor; flex: none; }
 .key__swatch--ring { background: #14110f; border: 2.5px solid currentColor; }
-.key__pict { width: 14px; height: 14px; color: #fff; flex: none; }
+.key__pict { width: 18px; height: 18px; object-fit: contain; flex: none; }
 .key__tag { display: inline-flex; width: 12px; height: 12px; align-items: center; justify-content: center; border: 2px solid; background: rgba(5, 4, 3, 0.82); font: bold 7px sans-serif; color: #fff; flex: none; }
 
 /* Running box score (StatsPanel): bottom centre of the stage, above the
@@ -1863,6 +1863,7 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .hudp--empty { visibility: hidden; }
 .hudp--dead { filter: grayscale(1); opacity: 0.55; }
 .hudp__face { width: 34px; height: 34px; object-fit: cover; }
+.hudp__face--icon { object-fit: contain; padding: 3px; background: #14110f; }
 .hudp__body { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
 .hudp__top { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2); }
 .hudp__name { font-family: var(--font-label); font-size: var(--fs-dense); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-bright); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -265,3 +265,12 @@ box with humans). The web side works with or without it.
 - More callouts: witch crowned, team wipe, last survivor standing, insta-clear and tongue cut (crowns and
   clears are counters today, not events; they need EVENT lines from the plugin).
 - Infected respawn timers are out (owner): the in-game infected HUD already shows them.
+
+29. **Cleanup round (owner, 2026-10-02).** No hazard tape anywhere: thin accent rules and team-colour
+    edges instead. Boss points on the strip are slim notches with a small icon and % above the rail,
+    never boxes on the fill; the opponent's mark is a dashed notch labelled under the rail. Medallion
+    text columns grow and never shrink the HP or state, so long names ellipsize and "210 DOWN" always
+    fits. Survivor faces are re-cropped centred on the face for round medallions. The replay and live
+    viewer now draw the same game art: the released survivor portraits (was the beta set in
+    /portraits) and the HUD's infected icons in medallions, the HUD strip and the Key panel; the path
+    figures remain only as the fallback until the images load.

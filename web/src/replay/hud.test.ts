@@ -46,7 +46,7 @@ describe('portraitFor', () => {
   });
 
   it('is the real character for a version 2 survivor', () => {
-    expect(portraitFor(2, 2, true)).toBe('/portraits/francis.png');
+    expect(portraitFor(2, 2, true)).toBe('/cast-art/survivor-francis.png');
   });
 
   it('is the silhouette for an out of range character index', () => {
@@ -59,7 +59,7 @@ describe('portraitFor', () => {
 
   it('handles the current version without special casing', () => {
     expect(portraitFor(0, VERSION, true)).toBe(
-      VERSION >= 2 ? '/portraits/bill.png' : '/portraits/unknown.png',
+      VERSION >= 2 ? '/cast-art/survivor-bill.png' : '/portraits/unknown.png',
     );
   });
 });

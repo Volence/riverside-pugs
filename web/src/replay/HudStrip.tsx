@@ -1,6 +1,7 @@
 import { STATE, ZOMBIE_CLASSES, weaponName, type PlayerSample, type ReplayHeader } from '../../../src/replayFormat';
 import { isSurvivor, maxHealthOf, slotColor, slotLabel, slotNumber } from './draw';
 import { healthBar, portraitFor, statusFlags, TEMP_HEALTH_COLOR } from './hud';
+import { classIconUrl, pictogramFor } from './pictograms';
 
 function Panel(
   { p, header, name, showHp, showGuns }:
@@ -25,7 +26,8 @@ function Panel(
       // the map can be matched to a panel without reading anything.
       style={{ borderLeftColor: slotColor(p.slot) }}
     >
-      <img class="hudp__face" src={portraitFor(p.cls, header.version, survivor)} alt="" />
+      <img class={`hudp__face${survivor ? '' : ' hudp__face--icon'}`}
+        src={survivor ? portraitFor(p.cls, header.version, true) : classIconUrl(pictogramFor(p.cls) ?? '') ?? portraitFor(0, 1, false)} alt="" />
       <div class="hudp__body">
         <div class="hudp__top">
           {/* The number the map draws inside the dot. Map, panel and follow

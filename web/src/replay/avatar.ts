@@ -32,6 +32,8 @@ export interface MedallionSpec {
   rim: string;
   face?: HTMLImageElement | null;
   pictogram?: string | null;
+  /** The class's game icon, drawn instead of the pictogram once loaded. */
+  icon?: HTMLImageElement | null;
   badge?: { text: string; ink: string } | null;
   yaw?: number | null;
   ring?: string | null;
@@ -70,7 +72,13 @@ export function drawMedallion(ctx: CanvasRenderingContext2D, s: MedallionSpec): 
     ctx.strokeStyle = s.rim;
     ctx.lineWidth = 2;
     ctx.stroke();
-    if (s.pictogram) {
+    if (s.icon) {
+      const size = r * 2 * 0.72;
+      ctx.save();
+      ctx.globalAlpha *= 0.75;
+      ctx.drawImage(s.icon, x - size / 2, y - size / 2, size, size);
+      ctx.restore();
+    } else if (s.pictogram) {
       const path = pictogramPath(s.pictogram);
       if (path) {
         ctx.save();
@@ -125,6 +133,14 @@ export function drawMedallion(ctx: CanvasRenderingContext2D, s: MedallionSpec): 
     ctx.clip();
     if (s.dead) ctx.filter = 'grayscale(1) brightness(0.55)';
     ctx.drawImage(s.face, x - r, y - r, r * 2, r * 2);
+    ctx.restore();
+  } else if (s.icon) {
+    const size = inner * 2 * 0.86;
+    ctx.save();
+    circle(ctx, x, y, inner);
+    ctx.clip();
+    if (s.dead) ctx.filter = 'grayscale(1) brightness(0.6)';
+    ctx.drawImage(s.icon, x - size / 2, y - size / 2, size, size);
     ctx.restore();
   } else if (s.pictogram) {
     const path = pictogramPath(s.pictogram);
