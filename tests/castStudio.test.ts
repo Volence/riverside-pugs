@@ -14,6 +14,8 @@ import { camSlots } from '../src/cast/layout.js';
 import { encodeFrame, encodeHeader, STATE, VERSION, type Frame, type PlayerSample } from '../src/replayFormat.js';
 import { findFrameBoundary, LiveRoundReader } from '../src/cast/liveRound.js';
 import { tagFrom } from '../src/cast/matchView.js';
+import { LIVE_HUD_FRESH_MS, LiveHudStore, liveHudStore, type LiveHudLine } from '../src/cast/liveHud.js';
+import { ITEM } from '../src/cast/types.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000700${i}`);
 const ADMIN = '76561199000007091';
@@ -84,8 +86,17 @@ describe('studio state', () => {
     expect(s.casters[0]!.camUrl).toBe('');
     expect(s.casters[1]!.camUrl).toBe('https://vdo.ninja/?view=x');
     expect(s.bosses).toEqual({ tank: 75, witch: null, map: 'l4d_vs_airport02_offices' });
-    expect(s.elements).toEqual({ survivors: true, infected: false, tank: true, bosses: true });
+    expect(s.elements).toEqual({ survivors: true, infected: false, tank: true, bosses: true, progress: true });
+    expect(s.hudStyle).toBe('bar');
     expect(s.callout).toBeNull();
+  });
+
+  it('keeps the producer\'s switches and HUD style once the bar exists', () => {
+    const s = cleanState({ hudStyle: 'scorebug', elements: { survivors: false, infected: false, progress: false } });
+    expect(s.hudStyle).toBe('scorebug');
+    expect(s.elements).toEqual({ survivors: false, infected: false, tank: true, bosses: true, progress: false });
+    expect(cleanState({ hudStyle: 'giant' }).hudStyle).toBe('bar');
+    expect(cleanState({}).elements).toEqual({ survivors: false, infected: false, tank: true, bosses: true, progress: true });
   });
 
   it('lays cams out inside the canvas', () => {
@@ -230,6 +241,60 @@ describe('overlay feed', () => {
     expect(r.statusCode).toBe(200);
     expect(r.json().players).toHaveLength(8);
     expect((await call('GET', '/api/cast/studio/prep/99999', CASTER)).statusCode).toBe(404);
+  });
+});
+
+describe('LIVEHUD', () => {
+  const line = (prog = 40): LiveHudLine => ({
+    prog, tank: 70, witch: -2,
+    players: [
+      { steamid: IDS[0]!, flow: 40, items: ITEM.KIT | ITEM.PILLS, dmg: 120 },
+      { steamid: IDS[4]!, flow: -1, items: 0, dmg: 57 },
+    ],
+  });
+
+  it('keeps a line only while it is fresh', () => {
+    const store = new LiveHudStore();
+    store.record(TOKEN, line(), 1_000_000);
+    expect(store.get(TOKEN, 1_000_000 + LIVE_HUD_FRESH_MS)?.prog).toBe(40);
+    expect(store.get(TOKEN, 1_000_001 + LIVE_HUD_FRESH_MS)).toBeNull();
+    expect(store.get('f'.repeat(32), 1_000_000)).toBeNull();
+  });
+
+  it('reaches the overlay feed, matched by steamid, for the on-air match only', async () => {
+    db.prepare("INSERT INTO match_live (match_id, last_seen, phase, phase_since) VALUES (?, datetime('now'), 'live', datetime('now'))").run(matchId);
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, started_at) VALUES (?, 0, 1, 'a', datetime('now'))").run(matchId);
+    const h = encodeHeader({
+      version: VERSION, token: TOKEN, ordinal: 0, half: 1, playerHz: 10, entityHz: 2, map: 'l4d_vs_airport01_greenhouse',
+      startedUnix: Math.floor(Date.now() / 1000), indexOffset: 0, indexCount: 0, frameCount: 0,
+      slots: IDS, infectedMask: 0xf0, sidesKnown: true, losKnown: false,
+    });
+    const p = (slot: number, cls: number): PlayerSample => ({
+      slot, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, state: STATE.PRESENT | STATE.ALIVE, health: 100, temp: 1, cls, weapon: 0, clip: 0, reserve: 0,
+    });
+    const f = (tMs: number): Frame => ({ tMs, offset: 0, entities: [], players: [p(0, 0), p(1, 1), p(2, 2), p(3, 3), p(4, 3), p(5, 1), p(6, 2), p(7, 1)] });
+    writeFileSync(join(liveDir, `pug_${TOKEN}_0_1.rpl`), Buffer.concat([h, encodeFrame(f(100)), encodeFrame(f(200))]));
+    await call('PUT', '/api/cast/studio', CASTER, { matchId, scene: 'gameplay' });
+    const key = await keyOf(CASTER);
+
+    const before = (await feed(key)).json();
+    expect(before.live.hud).toBeNull();
+    expect(before.live.survivors[0].items).toBeNull();
+
+    liveHudStore.record(TOKEN, line());
+    await new Promise((r) => setTimeout(r, 950)); // past the feed cache
+    const after = (await feed(key)).json();
+    expect(after.live.hud).toEqual({ progress: 40, tank: 70, witch: -2 });
+    expect(after.live.survivors[0]).toMatchObject({ flow: 40, items: 3, dmg: 120 });
+    expect(after.live.survivors[1]).toMatchObject({ flow: null, items: null, dmg: null });
+    expect(after.live.infected[0]).toMatchObject({ steamid: IDS[4], dmg: 57 });
+  });
+
+  it('is not on the public live page', async () => {
+    liveHudStore.record(TOKEN, line(77));
+    const r = await app.inject({ method: 'GET', url: '/api/live' });
+    expect(r.body).not.toContain('"progress"');
+    expect(r.body).not.toContain('witch":-2');
   });
 });
 

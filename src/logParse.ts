@@ -1,3 +1,4 @@
+import type { LiveHudLine } from './cast/liveHud.js';
 import { steamId64Of } from './steamId.js';
 import { MAX_HOLDS, decodeIntervals } from './inputStats.js';
 
@@ -121,6 +122,10 @@ export type LogEvent =
   // Cosmetic: the identical counters are pulled authoritatively over rcon at
   // the end, so these are never read back when a result is computed.
   | { kind: 'live_stat'; token: string; steamid: string; stats: Record<string, number> }
+  // Caster studio extras every 2 s while a half is live (pug-match 0.3.20):
+  // progress, items, damage this half, boss %. Undelayed, so it is kept in
+  // memory for the caster feed only (src/cast/liveHud.ts).
+  | { kind: 'live_hud'; token: string; line: LiveHudLine }
   // One half of one map. Emitted at OnRoundIsLive and again at round_end.
   // The END value of `surv` is authoritative: the plugin's orientation
   // mapping is unreliable early in a round, which is exactly why that
@@ -917,6 +922,18 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       }
       if (Object.keys(stats).length === 0) return null;
       return { kind: 'live_stat', token, steamid: rest.steamid, stats };
+    }
+    case 'LIVEHUD': {
+      const prog = intOf(rest.prog);
+      const tank = intOf(rest.tank);
+      const witch = intOf(rest.witch);
+      if (prog === null || tank === null || witch === null) return null;
+      const players: LiveHudLine['players'] = [];
+      for (const part of (rest.p ?? '').split(',')) {
+        const m = /^(\d{17}):(-?\d{1,3}):(\d{1,2}):(\d{1,6})$/.exec(part);
+        if (m && Number(m[3]) <= 15) players.push({ steamid: m[1]!, flow: Number(m[2]), items: Number(m[3]), dmg: Number(m[4]) });
+      }
+      return { kind: 'live_hud', token, line: { prog, tank, witch, players: players.slice(0, 12) } };
     }
     case 'ROUND_START': {
       const half = halfOf(rest.half);

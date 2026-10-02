@@ -221,7 +221,7 @@ function summarise(db: DB, cur: Cursor, ageMs: number): CastLiveRound {
     if (slotInfected(h, p.slot)) {
       const cls = ZOMBIE_CLASSES[p.cls] ?? '';
       const ghost = (p.state & STATE.GHOST) !== 0;
-      infected.push({ slot: p.slot, steamid, name, cls, ghost, alive, health: alive && !ghost ? p.health : 0 });
+      infected.push({ slot: p.slot, steamid, name, cls, ghost, alive, health: alive && !ghost ? p.health : 0, dmg: null });
       if (cls === 'tank' && alive && !ghost) {
         tank = { health: p.health, maxHealth: Math.max(cur.tankMax, p.health), controller: name };
       }
@@ -235,7 +235,9 @@ function summarise(db: DB, cur: Cursor, ageMs: number): CastLiveRound {
         incap: (p.state & STATE.INCAP) !== 0,
         ledge: (p.state & STATE.LEDGED) !== 0,
         pinned: (p.state & STATE.PINNED) !== 0,
+        biled: (p.state & STATE.BILED) !== 0,
         weapon: weaponName(p.weapon),
+        flow: null, items: null, dmg: null,
       });
     }
   }
@@ -247,7 +249,8 @@ function summarise(db: DB, cur: Cursor, ageMs: number): CastLiveRound {
     const alive = (e.state & STATE.ALIVE) !== 0 || (e.state === 0 && e.health > 0);
     survivors.push({
       slot: -1, steamid: '', name: 'Bot', character: '', health: alive ? e.health : 0, temp: 0, alive,
-      incap: (e.state & STATE.INCAP) !== 0, ledge: (e.state & STATE.LEDGED) !== 0, pinned: (e.state & STATE.PINNED) !== 0, weapon: '',
+      incap: (e.state & STATE.INCAP) !== 0, ledge: (e.state & STATE.LEDGED) !== 0, pinned: (e.state & STATE.PINNED) !== 0,
+      biled: (e.state & STATE.BILED) !== 0, weapon: '', flow: null, items: null, dmg: null,
     });
   }
   if (!tank) {
@@ -258,5 +261,6 @@ function summarise(db: DB, cur: Cursor, ageMs: number): CastLiveRound {
     ordinal: h.ordinal, half: h.half, map: h.map, tMs: f.tMs, ageMs,
     survivors, infected, tank,
     witches: ents.filter((e) => e.kind === ENTITY_KIND.WITCH).length,
+    hud: null,
   };
 }

@@ -275,6 +275,31 @@ describe('parseLogDatagram: self-started match lines', () => {
   });
 });
 
+describe('parseLogDatagram: LIVEHUD', () => {
+  it('parses progress, boss % and the per-player list', () => {
+    const ev = parseLogDatagram(framed(
+      `PUG ${TOKEN} LIVEHUD prog=62 tank=74 witch=-2 p=76561198030413993:62:11:212,76561198030413994:-1:0:157`,
+    ));
+    expect(ev).toEqual({
+      kind: 'live_hud', token: TOKEN,
+      line: {
+        prog: 62, tank: 74, witch: -2,
+        players: [
+          { steamid: '76561198030413993', flow: 62, items: 11, dmg: 212 },
+          { steamid: '76561198030413994', flow: -1, items: 0, dmg: 157 },
+        ],
+      },
+    });
+  });
+
+  it('drops a malformed player entry, never the line, and needs the three numbers', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} LIVEHUD prog=-1 tank=-1 witch=-1 p=nope,76561198030413993:5:99:1`));
+    expect(ev).toMatchObject({ kind: 'live_hud', line: { prog: -1, players: [] } });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} LIVEHUD prog=5 tank=0 p=`))).toBeNull();
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} LIVEHUD prog=5 tank=0 witch=0 p=`))).toMatchObject({ line: { players: [] } });
+  });
+});
+
 describe('parseLogDatagram: LIVESTAT', () => {
   it('parses the core counters', () => {
     const ev = parseLogDatagram(framed(

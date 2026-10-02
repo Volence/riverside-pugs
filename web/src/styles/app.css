@@ -3556,6 +3556,17 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
   background: repeating-conic-gradient(#1c1713 0% 25%, #15110e 0% 50%) 50% / 24px 24px;
 }
 .studio__stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; pointer-events: none; }
+.studio__sample {
+  position: absolute; right: var(--sp-2); bottom: var(--sp-2); padding: 2px var(--sp-2);
+  font: 600 0.6875rem var(--font-label); letter-spacing: 0.14em; text-transform: uppercase;
+  color: #0b0908; background: var(--rating);
+}
+.studio__onair--empty { border-color: var(--rating); }
+.studio__pickme {
+  margin: 0 0 var(--sp-3); padding: var(--sp-2) var(--sp-3); font-size: var(--fs-dense);
+  border-left: 3px solid var(--rating); background: color-mix(in oklab, var(--rating) 10%, transparent);
+}
+.studio__pickme b { color: var(--rating); font-weight: 600; }
 .studio__obs-ok { margin: 0 0 var(--sp-2); font-size: var(--fs-dense); }
 .studio__obs-ok b { color: var(--win); font-weight: 500; }
 .studio__dl { margin: var(--sp-3) 0 var(--sp-1); }

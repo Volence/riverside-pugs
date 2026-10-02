@@ -8,6 +8,7 @@ import { QUEUE_SIZE } from '../queue.js';
 import type { Hub } from '../ws.js';
 import { completeMatch } from '../matchResult.js';
 import type { Dump } from '../dumpParse.js';
+import { liveHudStore, type LiveHudLine } from '../cast/liveHud.js';
 
 export interface DevRouteOpts {
   config: Config;
@@ -35,6 +36,15 @@ export async function devRoutes(app: FastifyInstance, opts: DevRouteOpts): Promi
     activatePlayer(db, steamid);
     setSession(reply, opts.db, steamid, opts.config.publicUrl.startsWith('https://'));
     return { ok: true, steamid };
+  });
+
+  /** Feed a LIVEHUD line for a match token, as the plugin would every 2 s
+   *  (the caster studio's screenshots; no game server in dev). */
+  app.post('/api/dev/livehud', async (req, reply) => {
+    const { token, line } = (req.body ?? {}) as { token?: string; line?: LiveHudLine };
+    if (!token || !/^[0-9a-f]{32}$/.test(token) || !line || !Array.isArray(line.players)) return reply.code(400).send({ error: 'token and line' });
+    liveHudStore.record(token, line);
+    return { ok: true };
   });
 
   /** Create fake active players and queue them until the queue would pop. */

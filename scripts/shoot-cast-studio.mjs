@@ -67,7 +67,8 @@ try {
     casters: [{ name: 'Volence', handle: '@volence', camUrl: '' }, { name: 'CasterOne', handle: 'twitch.tv/casterone', camUrl: '' }],
     countdownTo: new Date(Date.now() + 4 * 60_000 + 32_000).toISOString(),
     bosses: { tank: 74, witch: 31 },
-    elements: { survivors: true, infected: true, tank: true, bosses: true },
+    elements: { survivors: true, infected: true, tank: true, bosses: true, progress: true },
+    hudStyle: 'bar', scorebugAt: 'top',
     lowerThird: { show: true, title: 'Map 2: The Crane', text: 'Team A leads by 64 after the greenhouse' },
     theme: process.env.THEME ?? 'riverside',
   };
@@ -88,15 +89,35 @@ try {
     await shot(`scene-${s}`);
   }
 
-  // Default elements (survivor row and infected lineup off), as a caster starts.
-  await api('PUT', '/api/cast/studio', { ...state, elements: { survivors: false, infected: false, tank: true, bosses: true }, lowerThird: { ...state.lowerThird, show: false } });
+  // The scorebug style with its rows, and the bar with nothing typed (boss %
+  // from the server) and the lower third hidden.
+  for (const [name, patch] of [
+    ['scene-gameplay-compact', { elements: { survivors: false, infected: false, tank: true, bosses: true, progress: true } }],
+    ['scene-gameplay-scorebug', { hudStyle: 'scorebug' }],
+    ['scene-gameplay-server-bosses', { bosses: { tank: null, witch: null, map: null } }],
+  ]) {
+    await api('PUT', '/api/cast/studio', { ...state, ...patch, lowerThird: { ...state.lowerThird, show: false } });
+    await go(`${BASE}/overlay/gameplay?k=${encodeURIComponent(key)}`);
+    await ev(`document.documentElement.style.background = 'url(/hud-backdrops/survivor-hilltop.jpg) center / cover'`);
+    await sleep(2400);
+    await shot(name);
+  }
+  // Nothing on air: the OBS page is transparent (shot over the still).
+  await api('PUT', '/api/cast/studio', { ...state, matchId: null, lowerThird: { ...state.lowerThird, show: false } });
   await go(`${BASE}/overlay/gameplay?k=${encodeURIComponent(key)}`);
   await ev(`document.documentElement.style.background = 'url(/hud-backdrops/survivor-hilltop.jpg) center / cover'`);
-  await sleep(2400);
-  await shot('scene-gameplay-defaults');
+  await sleep(1500);
+  await shot('scene-gameplay-empty');
 
   await send('Emulation.clearDeviceMetricsOverride');
   await send('Emulation.setDefaultBackgroundColorOverride', {});
+  // The panel with nothing on air (sample preview), then on air.
+  await api('PUT', '/api/cast/studio', { ...state, matchId: null, scene: 'gameplay' });
+  await size(1440, 900);
+  await go(`${BASE}/cast/studio`);
+  await sleep(2500);
+  await shot('panel-1440-empty');
+  await api('PUT', '/api/cast/studio', { ...state, scene: 'gameplay' });
   for (const [w, h, mobile] of [[1440, 900, false], [390, 844, true]]) {
     await size(w, h, mobile);
     await go(`${BASE}/cast/studio`);

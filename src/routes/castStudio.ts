@@ -12,6 +12,7 @@ import {
 } from '../cast/access.js';
 import { buildMatchView } from '../cast/matchView.js';
 import { LiveRoundReader } from '../cast/liveRound.js';
+import { applyLiveHud, liveHudStore, type LiveHudStore } from '../cast/liveHud.js';
 import { prepSheet } from '../cast/prep.js';
 import { obsCollection, obsSceneName } from '../cast/obsCollection.js';
 import { SCENES, LAYERS, type OverlayFeed } from '../cast/types.js';
@@ -31,13 +32,21 @@ const FEED_CACHE_MS = 900;
 
 export async function castStudioRoutes(
   app: FastifyInstance,
-  opts: { db: DB; config: Pick<Config, 'cookieSecret' | 'publicUrl' | 'replayDir' | 'replayLiveDir'>; store: () => CommunityStore },
+  opts: {
+    db: DB; config: Pick<Config, 'cookieSecret' | 'publicUrl' | 'replayDir' | 'replayLiveDir'>; store: () => CommunityStore;
+    /** The LIVEHUD lines; the process-wide store unless a test passes one. */
+    hud?: LiveHudStore;
+  },
 ): Promise<void> {
   const { db, config } = opts;
   const requireCaster = makeRequireCaster(db);
   const requireAdmin = makeRequireAdmin(db);
   const reader = new LiveRoundReader(config.replayDir, config.replayLiveDir ?? '');
   const cache = new Map<string, { at: number; rev: number; feed: OverlayFeed }>();
+  const hud = opts.hud ?? liveHudStore;
+
+  const tokenOf = (id: number): string | null =>
+    (db.prepare('SELECT token FROM matches WHERE id = ?').get(id) as { token: string | null } | undefined)?.token ?? null;
 
   const keyFor = (steamid: string): string => overlayKey(config.cookieSecret, steamid, getStudio(db, steamid).keyGen);
 
@@ -47,7 +56,8 @@ export async function castStudioRoutes(
     if (hit && hit.rev === studio.rev && nowMs - hit.at < FEED_CACHE_MS) return { ...hit.feed, serverNow: nowMs };
     const onAir = resolveOnAir(db, steamid, studio.state);
     const match = onAir.matchId !== null ? buildMatchView(db, onAir.matchId, studio.state, onAir.game) : null;
-    const live = match && match.state === 'live' ? reader.read(db, match.id, nowMs) : null;
+    const round = match && match.state === 'live' ? reader.read(db, match.id, nowMs) : null;
+    const live = round ? applyLiveHud(round, hud.get(tokenOf(match!.id) ?? '', nowMs)) : null;
     const feed: OverlayFeed = { rev: studio.rev, serverNow: nowMs, studio: studio.state, match, live };
     cache.set(steamid, { at: nowMs, rev: studio.rev, feed });
     return feed;

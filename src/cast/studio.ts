@@ -1,7 +1,7 @@
 import type { DB } from '../db.js';
 import {
-  defaultElements, defaultStudioState, MAX_CASTERS, SCENES, TEXT_MAX, THEMES,
-  type Callout, type CasterLine, type LiveElements, type SceneKey, type StudioState, type TeamOverride, type ThemeKey,
+  defaultElements, defaultStudioState, HUD_STYLES, MAX_CASTERS, SCENES, TEXT_MAX, THEMES,
+  type Callout, type CasterLine, type HudStyle, type LiveElements, type SceneKey, type StudioState, type TeamOverride, type ThemeKey,
 } from './types.js';
 
 /**
@@ -98,7 +98,7 @@ function cleanElements(v: unknown): LiveElements {
   const d = defaultElements();
   const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
   const pick = (k: keyof LiveElements): boolean => (typeof o[k] === 'boolean' ? o[k] as boolean : d[k]);
-  return { survivors: pick('survivors'), infected: pick('infected'), tank: pick('tank'), bosses: pick('bosses') };
+  return { survivors: pick('survivors'), infected: pick('infected'), tank: pick('tank'), bosses: pick('bosses'), progress: pick('progress') };
 }
 
 function cleanCallout(v: unknown): Callout | null {
@@ -131,6 +131,7 @@ export function cleanState(v: unknown): StudioState {
     bosses: { tank: pct(bo.tank), witch: pct(bo.witch), map: str(bo.map, 64) || null },
     elements: cleanElements(o.elements),
     scorebugAt: o.scorebugAt === 'bottom' ? 'bottom' : 'top',
+    hudStyle: HUD_STYLES.includes(o.hudStyle as HudStyle) ? (o.hudStyle as HudStyle) : d.hudStyle,
     callout: cleanCallout(o.callout),
   };
 }
