@@ -159,7 +159,34 @@ export interface CastPlayer {
   /** Displayed SR, or null where SR is not shown (scrims, tournaments). */
   sr: number | null;
   /** Career PUG record, for the player card. */
-  career: { matches: number; wins: number; losses: number; skeets: number; dpsLanded: number; tankDamage: number };
+  career: CastCareer;
+}
+
+/** Career PUG numbers for the lineup cards (completed, unvoided PUGs),
+ *  from the owner's stat set (2026-10-02): skeets, DPs, boomer %. */
+export interface CastCareer {
+  matches: number; wins: number; losses: number;
+  /** skeets + team_skeets: every skeet, all weapons, counted once. */
+  skeets: number;
+  /** dps_landed: damage pounces. */
+  dps: number;
+  /** boom_successes / boomer_spawns in whole percent, null with no spawns. */
+  boomerRate: number | null;
+}
+
+/** The skeet total the overlays show: solo plus team skeets. The weapon
+ *  subsets are breakdowns of these two and are never added on top (see the
+ *  skeet ruleset in src/statKeys.ts). */
+export function skeetTotal(stats: Record<string, number>): number | null {
+  if (stats.skeets === undefined && stats.team_skeets === undefined) return null;
+  return (stats.skeets ?? 0) + (stats.team_skeets ?? 0);
+}
+
+/** Boomer % as the site computes it (src/standings.ts): booms landed per
+ *  boomer life, null when there were no boomers, never 0% from 0/0. */
+export function boomerRate(stats: Record<string, number>): number | null {
+  const spawns = stats.boomer_spawns ?? 0;
+  return spawns > 0 ? Math.round(((stats.boom_successes ?? 0) / spawns) * 100) : null;
 }
 
 export interface CastTeam {

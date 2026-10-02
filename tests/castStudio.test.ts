@@ -236,6 +236,22 @@ describe('overlay feed', () => {
     expect((await feed(key)).json().match).toBeNull();
   });
 
+  it('a finished match carries its skill stats, and cards carry career skeets, DPs and boomer %', async () => {
+    // A finished PUG for the career numbers, then the on-air match finished too.
+    const old = Number(db.prepare("INSERT INTO matches (season_id, state, campaign, token, origin, ended_at) VALUES (1, 'completed', 'dead_air', ?, 'queue', datetime('now', '-1 day'))").run('d'.repeat(32)).lastInsertRowid);
+    db.prepare('INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)').run(old, IDS[0], 'a');
+    const st = db.prepare('INSERT INTO match_player_stats (match_id, player_id, stat, value) VALUES (?, ?, ?, ?)');
+    for (const [k, v] of [['skeets', 4], ['team_skeets', 2], ['dps_landed', 3], ['boomer_spawns', 4], ['boom_successes', 1]] as const) st.run(old, IDS[0], k, v);
+    await call('PUT', '/api/cast/studio', CASTER, { matchId });
+    db.prepare("UPDATE matches SET state = 'completed', ended_at = datetime('now') WHERE id = ?").run(matchId);
+    db.prepare('UPDATE match_players SET si_damage = 900 WHERE match_id = ? AND player_id = ?').run(matchId, IDS[0]);
+    for (const [k, v] of [['skeets', 1], ['team_skeets', 1], ['dps_landed', 2]] as const) st.run(matchId, IDS[0], k, v);
+    const f = (await feed(await keyOf(CASTER))).json();
+    const p = [...f.match.teams.a.players, ...f.match.teams.b.players].find((x: { steamid: string }) => x.steamid === IDS[0]);
+    expect(p.stats).toMatchObject({ sidmg: 900, skeets: 1, team_skeets: 1, dps_landed: 2 });
+    expect(p.career).toMatchObject({ skeets: 8, dps: 5, boomerRate: 25 });
+  });
+
   it('serves a prep sheet for a castable match only', async () => {
     const r = await call('GET', `/api/cast/studio/prep/${matchId}`, CASTER);
     expect(r.statusCode).toBe(200);

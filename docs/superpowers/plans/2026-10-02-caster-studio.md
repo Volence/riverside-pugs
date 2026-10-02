@@ -178,3 +178,43 @@ isolates them), the live round HUD against a real pushed replay file.
   would blank an iframe of an overlay. So the panel's preview draws the scenes inline from its own feed
   (overlay styles are scoped to `.ov`) instead of framing `/overlay/program`. OBS browser sources are
   top-level pages, not frames, so they are unaffected.
+
+## Broadcast bar, LIVEHUD and the stat set (2026-10-02, branch hud-bar)
+
+The owner tried the deployed studio and saw no gameplay HUD: no match was on air (their studio row had
+`matchId` null and no PUG was running), and the scene draws nothing without one. They pointed at a
+tournament broadcast bar (players at the edges, scores, distance) as the kind of HUD wanted.
+
+18. **Gameplay HUD style `bar` (default) or `scorebug`.** The bar runs across the top. Its default
+    content is only what the game never shows a spectator (ruling 14 stands): both teams and scores,
+    map and game N of M, round or paused, a progress strip with the tank and witch points, and the
+    tank's health, in a compact 840 px middle (x 540-1380). With the survivor or infected rows on it
+    runs the full width, each team's four players at the outer edge (survivor rows: portrait, health
+    with temp health, DOWN / LEDGE / PINNED / BILED / DEAD, kit, pills, throwable; infected rows: class,
+    SPAWNING or DEAD, a health bar, damage this half). Team A is always on the left. Rows stay **off** by
+    default (owner, 2026-10-02) and the panel says to turn them on only with a clean-feed HUD, SourceTV
+    or free cam.
+19. **LIVEHUD (pug-match 0.3.20).** Every 2 s while a half is live the plugin emits
+    `LIVEHUD prog=<team %> tank=<%> witch=<%> p=<steamid>:<flow %>:<items>:<dmg>,...`: the furthest
+    survivor's flow % (the number `!cur` prints, true flow, no boss buffer), each survivor's own flow and
+    held kit/pills/throwable (bits 1/2/4/8), damage this half per player (SI damage as survivor, damage
+    as SI as infected, from the go-live snapshot), and l4d_boss_percent's tank and witch % through
+    optional natives (-1 absent, 0 none, witch -2 a witch party). The site keeps it **in memory only**,
+    keyed by token, read only by the caster feed (behind the key and the caster gate), dropped after
+    6 s, never in the DB or on the public live page. Without it (an older plugin) the strip and the item
+    icons hide themselves and the boss % falls back to what the producer typed.
+20. **Boss %: typed for this map wins, else the server's.** Same override idea as the team fields.
+21. **Nothing on air.** OBS gets a transparent frame (no placeholder on stream, no toggle). The panel's
+    preview draws a labelled sample match ("Sample: no match on air") from its own state, and the On air
+    box says to pick a match.
+22. **Stat set (owner, 2026-10-02).** Match stats shows SI dmg, SI kills, Commons, Skeets (skeets +
+    team_skeets, all weapons, counted once), Tank dmg under "As survivors", then DPs (damage pounces,
+    `dps_landed`) and Boomer % (booms landed per boomer life, "-" with no boomers, never 0% from 0/0)
+    under "As infected". Deadstops and "Dmg as SI" are gone. Every key is in the 10 s LIVESTAT line, and
+    a finished match now reads its skill stats from `match_player_stats` (match_players.stats_json holds
+    only the fixed five, so skeets, DPs and boomer % were blank on a finished match before). Lineup cards
+    show career Skeets, DPs and Boomer %. "DPs" is never upper-cased (it read as DPS).
+
+Shipping the plugin side: pug-match 0.3.20 is a game-server plugin, so it goes through
+`deploy/tools/stage-on-restart.sh` on each pool box (installs at the next srcds restart, never on a
+box with humans). The web side works with or without it.

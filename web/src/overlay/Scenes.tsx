@@ -2,7 +2,7 @@ import { campaignTint, mapName } from '../format';
 import { PICTOGRAMS, type PictogramName } from '../replay/pictograms';
 import { camSlots } from '../../../src/cast/layout';
 import {
-  CALLOUT_MS, ITEM, type CastChapter, type CastInfected, type CastLiveRound, type CastMatchView, type CastPlayer,
+  boomerRate, CALLOUT_MS, ITEM, skeetTotal, type CastChapter, type CastInfected, type CastLiveRound, type CastMatchView, type CastPlayer,
   type CastSurvivor, type CastTeam, type OverlayFeed, type OverlayKey, type StudioState,
 } from '../../../src/cast/types';
 
@@ -308,8 +308,9 @@ function PlayerCard({ p, team, delay }: { p: CastPlayer; team: CastTeam; delay: 
       </div>
       <dl class="ov-card__stats">
         <div><dt>Skeets</dt><dd>{p.career.skeets}</dd></div>
-        <div><dt>DPs</dt><dd>{p.career.dpsLanded}</dd></div>
-        <div><dt>Tank dmg</dt><dd>{p.career.tankDamage >= 10000 ? `${Math.round(p.career.tankDamage / 1000)}k` : p.career.tankDamage}</dd></div>
+        {/* Not upper-cased: "DPS" reads as damage per second. */}
+        <div><dt class="ov-keepcase">DPs</dt><dd>{p.career.dps}</dd></div>
+        <div><dt>Boomer %</dt><dd>{p.career.boomerRate === null ? '-' : `${p.career.boomerRate}%`}</dd></div>
       </dl>
     </div>
   );
@@ -334,30 +335,42 @@ function Lineups({ studio, match }: { studio: StudioState; match: CastMatchView 
   );
 }
 
-const STAT_COLS: { key: string; label: string }[] = [
-  { key: 'sidmg', label: 'SI dmg' },
-  { key: 'sikill', label: 'SI kills' },
-  { key: 'ck', label: 'Commons' },
-  { key: 'skeets', label: 'Skeets' },
-  { key: 'deadstops', label: 'Deadstops' },
-  { key: 'damage_as_si', label: 'Dmg as SI' },
-  { key: 'dps_landed', label: 'DPs' },
-  { key: 'tank_damage', label: 'Tank dmg' },
+/** The owner's stat set (2026-10-02), survivor columns then infected. Every
+ *  one is in the 10 s LIVESTAT line and in the final box score. Skeets is
+ *  solo plus team skeets, counted once; Boomer % is booms landed per boomer
+ *  life, absent (shown "-") with no boomers. */
+const STAT_COLS: { key: string; label: string; side: 'survivor' | 'infected'; get: (s: Record<string, number>) => number | null; pct?: boolean }[] = [
+  { key: 'sidmg', label: 'SI dmg', side: 'survivor', get: (s) => s.sidmg ?? null },
+  { key: 'sikill', label: 'SI kills', side: 'survivor', get: (s) => s.sikill ?? null },
+  { key: 'ck', label: 'Commons', side: 'survivor', get: (s) => s.ck ?? null },
+  { key: 'skeets', label: 'Skeets', side: 'survivor', get: skeetTotal },
+  { key: 'tank_damage', label: 'Tank dmg', side: 'survivor', get: (s) => s.tank_damage ?? null },
+  { key: 'dps_landed', label: 'DPs', side: 'infected', get: (s) => s.dps_landed ?? null },
+  { key: 'boomer_rate', label: 'Boomer %', side: 'infected', get: boomerRate, pct: true },
 ];
 
 function Stats({ studio, match }: { studio: StudioState; match: CastMatchView | null }) {
   if (!match) return <div class="ov-full"><Backdrop /><Title studio={studio} fallback="Match stats" /></div>;
   const best = new Map<string, number>();
   for (const c of STAT_COLS) {
-    best.set(c.key, Math.max(0, ...[...match.teams.a.players, ...match.teams.b.players].map((p) => p.stats[c.key] ?? 0)));
+    best.set(c.key, Math.max(0, ...[...match.teams.a.players, ...match.teams.b.players].map((p) => c.get(p.stats) ?? 0)));
   }
+  const nSurv = STAT_COLS.filter((c) => c.side === 'survivor').length;
   return (
     <div class="ov-full">
       <Backdrop art="infected-ghost" />
       <Title studio={studio} fallback={match.state === 'completed' ? 'Final stats' : 'Match stats'} />
       <table class="ov-table ov-stats">
         <thead>
-          <tr><th />{STAT_COLS.map((c) => <th key={c.key}>{c.label}</th>)}</tr>
+          <tr class="ov-stats__sides">
+            <th />
+            <th colSpan={nSurv} class="ov-stats__side ov-stats__side--survivor">As survivors</th>
+            <th colSpan={STAT_COLS.length - nSurv} class="ov-stats__side ov-stats__side--infected">As infected</th>
+          </tr>
+          <tr>
+            <th />
+            {STAT_COLS.map((c, i) => <th key={c.key} class={[i === nSurv ? 'ov-stats__split' : '', c.key === 'dps_landed' ? 'ov-keepcase' : ''].filter(Boolean).join(' ')}>{c.label}</th>)}
+          </tr>
         </thead>
         {[match.teams.a, match.teams.b].map((t) => (
           <tbody key={t.key} style={{ '--c': `var(--team-${t.key})` } as Record<string, string>}>
@@ -365,10 +378,11 @@ function Stats({ studio, match }: { studio: StudioState; match: CastMatchView | 
             {t.players.map((p) => (
               <tr key={p.steamid}>
                 <th class="ov-stats__name">{p.name}</th>
-                {STAT_COLS.map((c) => {
-                  const v = p.stats[c.key];
-                  const top = v !== undefined && v > 0 && v === best.get(c.key);
-                  return <td key={c.key} class={top ? 'is-top' : ''}>{v ?? <span class="ov-dim">-</span>}</td>;
+                {STAT_COLS.map((c, i) => {
+                  const v = c.get(p.stats);
+                  const top = v !== null && v > 0 && v === best.get(c.key);
+                  const cls = [top ? 'is-top' : '', i === nSurv ? 'ov-stats__split' : ''].filter(Boolean).join(' ');
+                  return <td key={c.key} class={cls}>{v === null ? <span class="ov-dim">-</span> : c.pct ? `${v}%` : v.toLocaleString('en-US')}</td>;
                 })}
               </tr>
             ))}

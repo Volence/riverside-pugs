@@ -9,6 +9,7 @@ import { getSetting } from '../settings.js';
 import { sideRow, sideName } from '../bookings/bookings.js';
 import { getTeam } from '../teams/teams.js';
 import { statDef } from '../statKeys.js';
+import { boomerRate } from './types.js';
 import type {
   CastChapter, CastMatchView, CastPlayer, CastSide, CastTeam, StudioState, TeamOverride,
 } from './types.js';
@@ -83,7 +84,8 @@ function careerUncached(db: DB, steamid: string): CastPlayer['career'] {
   ).get(steamid, stat) as { v: number }).v;
   return {
     matches: played.n, wins: wl.w, losses: wl.l,
-    skeets: sum('skeets'), dpsLanded: sum('dps_landed'), tankDamage: sum('tank_damage'),
+    skeets: sum('skeets') + sum('team_skeets'), dps: sum('dps_landed'),
+    boomerRate: boomerRate({ boomer_spawns: sum('boomer_spawns'), boom_successes: sum('boom_successes') }),
   };
 }
 
@@ -169,13 +171,25 @@ export function buildMatchView(
   }[];
   const liveStats = new Map((db.prepare('SELECT player_id, stats_json FROM match_live_players WHERE match_id = ?')
     .all(matchId) as { player_id: string; stats_json: string }[]).map((r) => [r.player_id, parseStats(r.stats_json)]));
+  const finalStats = new Map<string, Record<string, number>>();
+  if (completed) {
+    for (const row of db.prepare('SELECT player_id, stat, value FROM match_player_stats WHERE match_id = ?').all(matchId) as { player_id: string; stat: string; value: number }[]) {
+      if (statDef(row.stat)?.visibility === 'self') continue;
+      const bag = finalStats.get(row.player_id) ?? {};
+      bag[row.stat] = row.value;
+      finalStats.set(row.player_id, bag);
+    }
+  }
   const season = currentSeasonId(db);
   const srOn = showSr(db, m.kind);
   const srOf = db.prepare('SELECT mu, sigma FROM player_ratings WHERE player_id = ? AND season_id = ?');
   const player = (r: (typeof ps)[number]): CastPlayer => {
     let stats: Record<string, number>;
     if (completed) {
-      stats = parseStats(r.stats_json);
+      // The final box score: the fixed columns plus the skill stats, which
+      // finishMatch writes to match_player_stats (stats_json holds only the
+      // fixed five, as strings).
+      stats = { ...parseStats(r.stats_json), ...(finalStats.get(r.steamid) ?? {}) };
       for (const [k, col] of Object.entries(CORE_COLUMNS)) stats[k] = r[col];
     } else {
       stats = liveStats.get(r.steamid) ?? {};
