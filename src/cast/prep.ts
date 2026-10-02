@@ -70,7 +70,14 @@ export function prepSheet(db: DB, matchId: number): PrepSheet {
        WHERE s.player_id = ? AND s.stat = ? AND ${done}`,
     ).all(r.steamid, statKey, matchId) as { id: number; value: number }[];
     const n = history.length;
-    const sumStat = (k: string) => stat(k).reduce((t, x) => t + x.value, 0);
+    // Each stat read once: the sums and the best single match both use it.
+    const rows = new Map<string, { id: number; value: number }[]>();
+    const statRows = (k: string) => {
+      let r = rows.get(k);
+      if (!r) { r = stat(k); rows.set(k, r); }
+      return r;
+    };
+    const sumStat = (k: string) => statRows(k).reduce((t, x) => t + x.value, 0);
     const per = (v: number) => (n > 0 ? Math.round((v / n) * 10) / 10 : 0);
     const best: PrepPlayer['best'] = [];
     for (const b of BEST) {
@@ -81,7 +88,7 @@ export function prepSheet(db: DB, matchId: number): PrepSheet {
           if (!top || v > top.value) top = { id: h.id, value: v };
         }
       } else {
-        for (const x of stat(b.key)) if (!top || x.value > top.value) top = x;
+        for (const x of statRows(b.key)) if (!top || x.value > top.value) top = x;
       }
       if (top && top.value > 0) best.push({ label: b.label, value: top.value, matchId: top.id });
     }

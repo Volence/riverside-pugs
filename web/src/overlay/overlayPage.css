@@ -1,0 +1,4 @@
+/* The OBS overlay page itself: a transparent 1920x1080 page. The scenes'
+ * own styles are scoped to .ov in overlay.css. */
+html, body { margin: 0; background: transparent; overflow: hidden; }
+body { width: 1920px; height: 1080px; }

@@ -18,7 +18,7 @@ const overlayPages: Plugin = {
   name: 'overlay-pages',
   configureServer(server) {
     server.middlewares.use((req, _res, next) => {
-      if (req.url && /^\/overlay\/[a-z]+(\?|$)/.test(req.url)) req.url = `/overlay.html${req.url.slice(req.url.indexOf('?') >= 0 ? req.url.indexOf('?') : req.url.length)}`;
+      if (req.url && /^\/overlay\/[a-z]+\/?(\?|$)/.test(req.url)) req.url = `/overlay.html${req.url.slice(req.url.indexOf('?') >= 0 ? req.url.indexOf('?') : req.url.length)}`;
       next();
     });
   },

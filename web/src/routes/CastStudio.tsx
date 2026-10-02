@@ -4,6 +4,8 @@ import { PageHeader } from '../components/PageHeader';
 import { Empty } from '../components/bits';
 import { campaignTint } from '../format';
 import { connectObs, type ObsClient, type ObsStatus } from '../cast/obs';
+import { Overlay, setOverlayKey } from '../overlay/Scenes';
+import '../overlay/overlay.css';
 import {
   LAYERS, MAX_CASTERS, SCENES, SCENE_LABELS, THEMES,
   type CastMatchView, type LiveElements, type OverlayFeed, type SceneKey, type StudioState, type TeamOverride,
@@ -60,7 +62,20 @@ function useInterval(fn: () => void, ms: number) {
   }, [ms]);
 }
 
+/** The overlays' stencil face, which the site itself never loads. */
+function useStencilFont() {
+  useEffect(() => {
+    if (document.getElementById('studio-stencil-font')) return;
+    const l = document.createElement('link');
+    l.id = 'studio-stencil-font';
+    l.rel = 'stylesheet';
+    l.href = 'https://fonts.googleapis.com/css2?family=Saira+Stencil+One&display=swap';
+    document.head.appendChild(l);
+  }, []);
+}
+
 export default function CastStudio() {
+  useStencilFont();
   const [panel, setPanel] = useState<StudioPanel | null>(null);
   const [state, setState] = useState<StudioState | null>(null);
   const [denied, setDenied] = useState(false);
@@ -202,10 +217,13 @@ export default function CastStudio() {
             try {
               const r = await studioApi.callout(c);
               setState((s) => (s ? { ...s, callout: r.studio.callout } : s));
-              // A save queued before the fire must not carry the old (empty) callout.
-              if (pending.current) pending.current = { ...pending.current, callout: r.studio.callout };
             } catch (e) { setError((e as Error).message); }
-          }} onClear={() => update((s) => ({ ...s, callout: null }), true)} />
+          }} onClear={async () => {
+            try {
+              const r = await studioApi.clearCallout();
+              setState((s) => (s ? { ...s, callout: r.studio.callout } : s));
+            } catch (e) { setError((e as Error).message); }
+          }} />
           <LiveToggles state={state} update={update} map={match?.currentMap ?? null} />
           <LowerThirdBox state={state} update={update} />
           <CountdownBox state={state} update={update} />
@@ -216,8 +234,8 @@ export default function CastStudio() {
         <div class="studio__col studio__col--side">
           <section class="panel studio__preview">
             <h3>Program preview</h3>
-            <PreviewFrame src={url('program')} />
-            <p class="muted studio__hint">What /overlay/program shows right now. Transparent parts show as checkerboard.</p>
+            <PreviewFrame feed={feed} overlayKey={panel.key} />
+            <p class="muted studio__hint">What the Program overlay shows right now. Transparent parts show as checkerboard.</p>
           </section>
           <ObsBox
             status={obsStatus} error={obsError} url={obsUrl} setUrl={setObsUrl} password={obsPassword} setPassword={setObsPassword}
@@ -542,10 +560,15 @@ function ShowBox({ state, update }: { state: StudioState; update: Update }) {
 
 /* ---------- side column ---------- */
 
-/** The program overlay at 1920x1080, scaled to the column's width. */
-function PreviewFrame({ src }: { src: string }) {
+/**
+ * The program overlay at 1920x1080, scaled to the column's width. Drawn
+ * inline from the panel's own feed rather than in an iframe: the site sends
+ * X-Frame-Options DENY on every page, which would blank a framed overlay.
+ */
+function PreviewFrame({ feed, overlayKey }: { feed: OverlayFeed | null; overlayKey: string }) {
   const box = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.28);
+  const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const el = box.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
@@ -553,11 +576,26 @@ function PreviewFrame({ src }: { src: string }) {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, []);
+  useEffect(() => { setOverlayKey(overlayKey); }, [overlayKey]);
   return (
     <div class="studio__frame" ref={box}>
-      <iframe title="Program preview" src={src} loading="lazy" style={{ transform: `scale(${scale})` }} />
+      <div class="studio__stage" style={{ transform: `scale(${scale})` }}>
+        {feed && <Overlay which="program" feed={feed} now={now + (feed.serverNow - feedAt(feed))} />}
+      </div>
     </div>
   );
+}
+
+/** When the panel received a feed, for the server clock offset. */
+const receivedAt = new WeakMap<OverlayFeed, number>();
+function feedAt(f: OverlayFeed): number {
+  let t = receivedAt.get(f);
+  if (t === undefined) { t = Date.now(); receivedAt.set(f, t); }
+  return t;
 }
 
 function ObsBox(p: {

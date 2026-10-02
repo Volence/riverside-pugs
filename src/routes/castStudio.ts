@@ -27,7 +27,7 @@ import { SCENES, LAYERS, type OverlayFeed } from '../cast/types.js';
 
 /** Overlays poll once a second each; a caster with a dozen sources and no
  *  SharedWorker would otherwise build the same feed a dozen times. */
-const FEED_CACHE_MS = 400;
+const FEED_CACHE_MS = 900;
 
 export async function castStudioRoutes(
   app: FastifyInstance,
@@ -78,9 +78,10 @@ export async function castStudioRoutes(
     // applies on every read, checked here too so the panel hears about it.
     if (next.matchId !== null && !canCastMatch(db, me, next.matchId)) return reply.code(403).send({ error: 'not_castable' });
     if (next.bookingId !== null && !canCastBooking(db, me, next.bookingId)) return reply.code(403).send({ error: 'not_castable' });
-    // A callout's start time is the server's, set when it is fired: a save
-    // carries the stored one through and can never move it.
-    next.callout = next.callout ? getStudio(db, me).state.callout : null;
+    // A save never touches the callout: it is fired and cleared only through
+    // its own routes below. The panel debounces saves, so a save that left
+    // before a fire can land after it, and must not clear or move it.
+    next.callout = getStudio(db, me).state.callout;
     const saved = saveStudio(db, me, next);
     return { studio: saved.state, rev: saved.rev };
   });
@@ -92,6 +93,13 @@ export async function castStudioRoutes(
     const cur = getStudio(db, me).state;
     const saved = saveStudio(db, me, { ...cur, callout: { ...body, at: new Date().toISOString() } });
     if (!saved.state.callout) return reply.code(400).send({ error: 'A callout needs a title.' });
+    return { studio: saved.state, rev: saved.rev };
+  });
+
+  app.post('/api/cast/studio/callout/clear', async (req, reply) => {
+    const me = requireCaster(req, reply);
+    if (!me) return reply;
+    const saved = saveStudio(db, me, { ...getStudio(db, me).state, callout: null });
     return { studio: saved.state, rev: saved.rev };
   });
 

@@ -1701,6 +1701,7 @@ export const studioApi = {
   get: (signal?: AbortSignal) => get<StudioPanel>('/api/cast/studio', signal),
   save: (state: StudioState) => put<{ studio: StudioState; rev: number }>('/api/cast/studio', state),
   callout: (c: { title: string; text: string; team: 'a' | 'b' | null }) => post<{ studio: StudioState; rev: number }>('/api/cast/studio/callout', c),
+  clearCallout: () => post<{ studio: StudioState; rev: number }>('/api/cast/studio/callout/clear'),
   newKey: () => post<{ key: string }>('/api/cast/studio/key'),
   feed: (signal?: AbortSignal) => get<OverlayFeed>('/api/cast/studio/feed', signal),
   prep: (matchId: number, signal?: AbortSignal) => get<PrepSheet>(`/api/cast/studio/prep/${matchId}`, signal),

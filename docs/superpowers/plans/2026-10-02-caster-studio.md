@@ -154,3 +154,27 @@ Also built beyond the list above: per-map boss % (numbers typed for one map neve
 Not tried yet: a real OBS (browser sources, obs-websocket connect and scene cuts, the scene collection
 import), SharedWorker sharing between OBS browser sources (falls back to one poll per source if OBS
 isolates them), the live round HUD against a real pushed replay file.
+
+## Review fix wave (2026-10-02)
+
+- canCastMatch refuses a match the caster is rostered in, and a booking game (or booking to follow)
+  where the caster has any stake: on the people list (invited or accepted), managing a side, or a
+  member of either side's team. Staff included: undelayed ghost and infected intel on your own game is
+  never offered. It also requires canViewMatch for non-booking matches and keeps to the picker's
+  window (setting up, live, or finished within 6 hours).
+- A save never touches the callout; it is fired and cleared through its own routes.
+- The live reader takes sides from the roster when a file has no side mask, decodes only a 128 KB tail
+  on a first read (finding a frame boundary by walking frame lengths), keeps entities from the last
+  frame that sampled them, and lists survivor bots.
+- **The key in the URL and the proxy.** Overlay pages send `Referrer-Policy: no-referrer` (header and
+  meta tag), and Caddy already sends `strict-origin-when-cross-origin` site-wide, so `?k=` does not
+  leave in a Referer. But Caddy's access log (`/var/log/caddy/riversidepug.log`, from
+  `deploy/state/dallas/system/etc/caddy/Caddyfile`) records every request URI, so it holds the key, and
+  every overlay polls `/api/overlay/feed?k=...` once a second (a dozen sources is a dozen lines a
+  second, which also churns the 10 MB x 5 rotation). Not changed (prod config, owner's call). Options
+  for the Caddyfile: `log_skip /api/overlay/*` inside the site block to drop those lines, or a log
+  `format filter` with `request>uri query { replace k REDACTED }` to keep them scrubbed.
+- **X-Frame-Options DENY.** The same Caddyfile sends `X-Frame-Options DENY` on every response, which
+  would blank an iframe of an overlay. So the panel's preview draws the scenes inline from its own feed
+  (overlay styles are scoped to `.ov`) instead of framing `/overlay/program`. OBS browser sources are
+  top-level pages, not frames, so they are unaffected.

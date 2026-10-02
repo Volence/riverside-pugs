@@ -2,8 +2,9 @@ import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import type { DB } from '../db.js';
 import { roundInProgress } from '../liveView.js';
 import { resolveFurther } from '../replaySessions.js';
+import { infectedMaskForHeader } from '../replaySides.js';
 import {
-  decodeFrames, decodeHeader, ENTITY_KIND, frameBytes, HEADER_BYTES, slotInfected, STATE,
+  decodeFrames, decodeHeader, ENTITY_KIND, ENTITY_RECORD_BYTES, FRAME_HEADER_BYTES, frameBytes, HEADER_BYTES, PLAYER_BLOCK_BYTES, PLAYER_RECORD_BYTES, slotInfected, STATE,
   SURVIVOR_CHARACTERS, VERSION, weaponName, ZOMBIE_CLASSES, type Frame, type ReplayHeader,
 } from '../replayFormat.js';
 import type { CastInfected, CastLiveRound, CastSurvivor } from './types.js';
@@ -22,9 +23,11 @@ import type { CastInfected, CastLiveRound, CastSurvivor } from './types.js';
 /** Recorded temp health at or below this means none (the plugin writes
  *  temp=1 for every survivor with none: see web/src/replay/hud.ts). */
 const TEMP_NOISE_FLOOR = 1;
-/** Never read more than this per poll; a reader that fell far behind skips
- *  ahead to the tail instead of decoding minutes of frames it will discard. */
-const MAX_CHUNK = 4 * 1024 * 1024;
+/** Never decode more than this per poll. A first read of a long round, or a
+ *  reader that fell far behind, starts this far from the end instead of
+ *  decoding minutes of frames it would throw away. About 30 seconds of
+ *  frames, enough for the tank max (see tankMax) to be close. */
+const TAIL_BYTES = 128 * 1024;
 
 interface Cursor {
   path: string;
@@ -33,7 +36,14 @@ interface Cursor {
   /** File offset where the next undecoded frame starts. */
   offset: number;
   last: Frame | null;
-  /** Highest health any tank has had in this file: the max for the bar. */
+  /** The newest frame that sampled entities. The plugin samples entities on
+   *  one frame in N (entity Hz below player Hz), so most frames carry none and
+   *  reading AI tanks, witches and bots off `last` alone would flicker. */
+  lastEnt: Frame | null;
+  /** Highest health any tank has had in what this reader decoded: the max for
+   *  the bar. A reader that started mid-tank (first read of a long round only
+   *  decodes the tail) sees less than the spawn health, so the bar starts too
+   *  full until the tank's next spawn; accepted. */
   tankMax: number;
   usedAt: number;
 }
@@ -52,7 +62,7 @@ export class LiveRoundReader {
     if (!row?.token) return null;
     const found = resolveFurther(this.replayDir, this.liveDir, `pug_${row.token}_${rip.ordinal}_${rip.half}.rpl`, nowMs);
     if (!found) return null;
-    const cur = this.advance(found.path, nowMs);
+    const cur = this.advance(db, matchId, found.path, nowMs);
     this.sweep(nowMs);
     if (!cur?.last) return null;
     let mtimeMs = nowMs;
@@ -60,36 +70,51 @@ export class LiveRoundReader {
     return summarise(db, cur, Math.max(0, nowMs - mtimeMs));
   }
 
-  private advance(path: string, nowMs: number): Cursor | null {
+  private advance(db: DB, matchId: number, path: string, nowMs: number): Cursor | null {
     let size: number;
     try { size = statSync(path).size; } catch { return null; }
     let cur = this.cursors.get(path);
     const head = readBytes(path, 0, HEADER_BYTES);
     const header = head ? decodeHeader(head) : null;
     if (!header || header.version > VERSION) return null;
+    // A file from before the side mask (or one whose writer never filled it):
+    // the sides come from the round's survivor team and the roster, as the
+    // replay route works them out, never from slot order.
+    if (!header.sidesKnown && head) {
+      const mask = infectedMaskForHeader(db, Buffer.from(head), matchId, header.ordinal, header.half);
+      if (mask !== null) { header.infectedMask = mask; header.sidesKnown = true; }
+    }
     // A restarted round reuses the filename: a new start time or a shorter
     // file means start over.
     if (!cur || cur.startedUnix !== header.startedUnix || size < cur.offset) {
-      cur = { path, startedUnix: header.startedUnix, header, offset: HEADER_BYTES, last: null, tankMax: 0, usedAt: nowMs };
+      cur = { path, startedUnix: header.startedUnix, header, offset: HEADER_BYTES, last: null, lastEnt: null, tankMax: 0, usedAt: nowMs };
       this.cursors.set(path, cur);
     }
     cur.header = header;
     cur.usedAt = nowMs;
     const end = header.indexOffset > 0 && header.indexOffset <= size ? header.indexOffset : size;
-    if (end - cur.offset > MAX_CHUNK) {
-      // Too far behind to read it all: decode only the tail, starting from a
-      // frame boundary found by walking the frame headers (8 bytes each).
-      cur.offset = skipTo(path, cur.offset, end - MAX_CHUNK) ?? cur.offset;
+    if (end - cur.offset > TAIL_BYTES) {
+      // A first read of a long round (or a reader far behind): only the tail
+      // matters, and walking the whole file would block the event loop. Find
+      // a frame boundary near the start of the tail window and go from there.
+      const from = end - TAIL_BYTES;
+      const window = readBytes(path, from, TAIL_BYTES);
+      const at = window ? findFrameBoundary(window) : null;
+      if (at === null) return cur;
+      cur.offset = from + at;
     }
     if (end <= cur.offset) return cur;
-    const chunk = readBytes(path, cur.offset, Math.min(end - cur.offset, MAX_CHUNK));
+    const chunk = readBytes(path, cur.offset, end - cur.offset);
     if (!chunk) return cur;
     const { frames } = decodeFrames(chunk, 0, chunk.length, (slot) => slotInfected(header, slot));
     if (frames.length > 0) {
       const lastF = frames[frames.length - 1]!;
       cur.offset += lastF.offset + frameBytes(lastF.entities.length);
       cur.last = lastF;
-      for (const f of frames) cur.tankMax = Math.max(cur.tankMax, tankHealth(header, f));
+      for (const f of frames) {
+        cur.tankMax = Math.max(cur.tankMax, tankHealth(header, f));
+        if (f.entities.length > 0) cur.lastEnt = f;
+      }
     }
     return cur;
   }
@@ -114,23 +139,54 @@ function readBytes(path: string, at: number, len: number): Uint8Array | null {
   }
 }
 
-/** The first frame boundary at or after `target`, walking frame headers from
- *  a known boundary `from`. */
-function skipTo(path: string, from: number, target: number): number | null {
-  let at = from;
-  const h = new Uint8Array(8);
-  let fd: number;
-  try { fd = openSync(path, 'r'); } catch { return null; }
-  try {
-    while (at < target) {
-      if (readSync(fd, h, 0, 8, at) < 8) return at;
-      const count = h[4]! | (h[5]! << 8);
-      at += frameBytes(count);
+/** The largest entity count a plausible frame carries. Commons, witches,
+ *  rocks and bots together stay well under this; garbage read as a count
+ *  usually does not. */
+const MAX_ENTITIES = 128; // RPL_MAX_ENTITIES in plugin/pug-match.sp
+
+/**
+ * Where the first whole frame starts in a window cut from the middle of a
+ * file, or null. Frames carry no sync marker, so each candidate offset is
+ * checked by walking frame lengths from it: every frame on the way must have
+ * a sane entity count, entity kinds the format knows, player states that
+ * make sense, and a clock that moves forward by at most ten seconds, and the walk must reach
+ * the end of the window (a trailing part frame is fine). Only the first
+ * frame's worth of offsets can hold the boundary, so only those are tried.
+ * Exported for tests.
+ */
+export function findFrameBoundary(buf: Uint8Array): number | null {
+  const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const limit = Math.min(buf.length, frameBytes(MAX_ENTITIES));
+  const KINDS = new Set<number>(Object.values(ENTITY_KIND));
+  for (let start = 0; start < limit; start++) {
+    let off = start;
+    let prevT = -1;
+    let frames = 0;
+    let ok = true;
+    while (off + FRAME_HEADER_BYTES <= buf.length) {
+      const t = v.getUint32(off, true);
+      const count = v.getUint16(off + 4, true);
+      // The clock moves forward every frame (the writer samples at a fixed rate).
+      if (count > MAX_ENTITIES || (prevT >= 0 && (t <= prevT || t - prevT > 10_000))) { ok = false; break; }
+      const size = frameBytes(count);
+      if (off + size > buf.length) break; // the trailing part frame
+      // A player state with any bit set has PRESENT set (an empty slot is all zero).
+      for (let slot = 0; slot < 8; slot++) {
+        const st = buf[off + FRAME_HEADER_BYTES + slot * PLAYER_RECORD_BYTES + 9]!;
+        if (st !== 0 && (st & STATE.PRESENT) === 0) { ok = false; break; }
+      }
+      if (!ok) break;
+      for (let e = 0; e < count; e++) {
+        if (!KINDS.has(buf[off + FRAME_HEADER_BYTES + PLAYER_BLOCK_BYTES + e * ENTITY_RECORD_BYTES + 2]!)) { ok = false; break; }
+      }
+      if (!ok) break;
+      prevT = t;
+      frames++;
+      off += size;
     }
-    return at;
-  } finally {
-    closeSync(fd);
+    if (ok && frames >= 2) return start;
   }
+  return null;
 }
 
 function tankHealth(h: ReplayHeader, f: Frame): number {
@@ -183,13 +239,24 @@ function summarise(db: DB, cur: Cursor, ageMs: number): CastLiveRound {
       });
     }
   }
+  const ents = cur.lastEnt?.entities ?? [];
+  // Survivor bots (a survivor slot nobody holds) are entities, not roster
+  // slots: listed after the players, with no name or character to show.
+  for (const e of ents) {
+    if (e.kind !== ENTITY_KIND.SURVIVOR_BOT || survivors.length >= 4) continue;
+    const alive = (e.state & STATE.ALIVE) !== 0 || (e.state === 0 && e.health > 0);
+    survivors.push({
+      slot: -1, steamid: '', name: 'Bot', character: '', health: alive ? e.health : 0, temp: 0, alive,
+      incap: (e.state & STATE.INCAP) !== 0, ledge: (e.state & STATE.LEDGED) !== 0, pinned: (e.state & STATE.PINNED) !== 0, weapon: '',
+    });
+  }
   if (!tank) {
-    const ai = f.entities.find((e) => e.kind === ENTITY_KIND.TANK_AI && e.health > 0);
+    const ai = ents.find((e) => e.kind === ENTITY_KIND.TANK_AI && e.health > 0);
     if (ai) tank = { health: ai.health, maxHealth: Math.max(cur.tankMax, ai.health), controller: null };
   }
   return {
     ordinal: h.ordinal, half: h.half, map: h.map, tMs: f.tMs, ageMs,
     survivors, infected, tank,
-    witches: f.entities.filter((e) => e.kind === ENTITY_KIND.WITCH).length,
+    witches: ents.filter((e) => e.kind === ENTITY_KIND.WITCH).length,
   };
 }

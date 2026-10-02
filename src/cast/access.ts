@@ -1,9 +1,10 @@
 import type { DB } from '../db.js';
 import { getPlayer } from '../players.js';
 import { inGoodStanding } from '../standing.js';
-import { viewerFor } from '../matchVisibility.js';
+import { canViewMatch, viewerFor } from '../matchVisibility.js';
+import { roleOf } from '../teams/teams.js';
 import { fullyInvited } from '../bookings/casters.js';
-import { getBooking, isOpen, sideName, sidesOf } from '../bookings/bookings.js';
+import { getBooking, isOpen, managesSide, sideName, sidesOf } from '../bookings/bookings.js';
 import { campaignDisplayName } from '../campaignRegistry.js';
 
 /**
@@ -20,19 +21,48 @@ export function mayCast(db: DB, steamid: string): boolean {
   return !!p && (p.is_admin === 1 || p.is_caster === 1) && inGoodStanding(db, steamid);
 }
 
+/**
+ * Whether this person has a stake in the booking: anyone on its people list
+ * (invited or accepted), either side's manager, or a current member of either
+ * side's team, confirmed or not. A caster with a stake gets nothing from it:
+ * the feed is undelayed, so it would hand them ghost and infected intel on
+ * their own games. Wider than matchVisibility's bookingParticipant on purpose.
+ */
+export function bookingStake(db: DB, bookingId: number, steamid: string): boolean {
+  if (db.prepare('SELECT 1 FROM booking_people WHERE booking_id = ? AND steamid = ?').get(bookingId, steamid)) return true;
+  return sidesOf(db, bookingId).some((s) =>
+    managesSide(db, s, steamid) || (s.team_id !== null && roleOf(db, s.team_id, steamid) !== null));
+}
+
 export function canCastBooking(db: DB, steamid: string, bookingId: number): boolean {
   if (!mayCast(db, steamid)) return false;
   if (!getBooking(db, bookingId)) return false;
+  if (bookingStake(db, bookingId, steamid)) return false;
   return viewerFor(db, steamid).staff || fullyInvited(db, bookingId, steamid);
 }
 
+/** How long a finished match stays in the picker, for the stats and winner scenes. */
+export const RECENT_HOURS = 6;
+
+/**
+ * Whether this caster may put this match on air. The same rule as /cast,
+ * plus three more: never a match they are rostered in (undelayed intel on
+ * their own game), never one the site would not show them (canViewMatch, so a
+ * staff-only or participants-only tournament match cannot leak), and only
+ * what the picker offers: setting up, live, or finished within RECENT_HOURS.
+ */
 export function canCastMatch(db: DB, steamid: string, matchId: number): boolean {
   if (!mayCast(db, steamid)) return false;
-  const m = db.prepare('SELECT kind, booking_id AS bookingId FROM matches WHERE id = ?')
-    .get(matchId) as { kind: string; bookingId: number | null } | undefined;
-  if (!m) return false;
-  if (m.bookingId !== null) return viewerFor(db, steamid).staff || fullyInvited(db, m.bookingId, steamid);
-  return m.kind === 'pug' || m.kind === 'tournament';
+  const m = db.prepare(
+    `SELECT kind, booking_id AS bookingId,
+            (state IN ('configuring', 'live') OR (state = 'completed' AND ended_at >= datetime('now', ?))) AS recent
+     FROM matches WHERE id = ?`,
+  ).get(`-${RECENT_HOURS} hours`, matchId) as { kind: string; bookingId: number | null; recent: number } | undefined;
+  if (!m || m.recent !== 1) return false;
+  if (db.prepare('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?').get(matchId, steamid)) return false;
+  if (m.bookingId !== null) return canCastBooking(db, steamid, m.bookingId);
+  if (m.kind !== 'pug' && m.kind !== 'tournament') return false;
+  return canViewMatch(db, viewerFor(db, steamid), matchId);
 }
 
 export interface PickableMatch {
@@ -60,9 +90,6 @@ export interface PickableBooking {
   /** Newest game's match id, or null before the first. */
   latestMatchId: number | null;
 }
-
-/** How long a finished match stays in the picker, for the stats and winner scenes. */
-export const RECENT_HOURS = 6;
 
 export function pickableMatches(db: DB, steamid: string): PickableMatch[] {
   if (!mayCast(db, steamid)) return [];
@@ -127,6 +154,9 @@ export function resolveOnAir(
     const games = db.prepare('SELECT id FROM matches WHERE booking_id = ? ORDER BY id').all(pick.bookingId) as { id: number }[];
     const b = getBooking(db, pick.bookingId);
     if (games.length === 0) return { matchId: null, game: null };
+    // The game itself is checked too: a caster rostered into it (a ringer
+    // let in on the day) gets nothing, and an old game ages out.
+    if (!canCastMatch(db, steamid, games[games.length - 1]!.id)) return { matchId: null, game: null };
     return { matchId: games[games.length - 1]!.id, game: { number: games.length, of: Math.max(games.length, b?.games_allowed ?? 0) } };
   }
   if (pick.matchId !== null && canCastMatch(db, steamid, pick.matchId)) return { matchId: pick.matchId, game: null };

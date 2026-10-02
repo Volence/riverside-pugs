@@ -3555,7 +3555,7 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
   position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border: 1px solid var(--border);
   background: repeating-conic-gradient(#1c1713 0% 25%, #15110e 0% 50%) 50% / 24px 24px;
 }
-.studio__frame iframe { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; border: 0; transform-origin: 0 0; }
+.studio__stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; pointer-events: none; }
 .studio__obs-ok { margin: 0 0 var(--sp-2); font-size: var(--fs-dense); }
 .studio__obs-ok b { color: var(--win); font-weight: 500; }
 .studio__dl { margin: var(--sp-3) 0 var(--sp-1); }
