@@ -262,5 +262,6 @@ function summarise(db: DB, cur: Cursor, ageMs: number): CastLiveRound {
     survivors, infected, tank,
     witches: ents.filter((e) => e.kind === ENTITY_KIND.WITCH).length,
     hud: null,
+    tankRecap: null,
   };
 }

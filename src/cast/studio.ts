@@ -1,7 +1,7 @@
 import type { DB } from '../db.js';
 import {
-  defaultElements, defaultStudioState, HUD_STYLES, MAX_CASTERS, SCENES, TEXT_MAX, THEMES,
-  type Callout, type CasterLine, type HudStyle, type LiveElements, type SceneKey, type StudioState, type TeamOverride, type ThemeKey,
+  defaultElements, defaultFrameRects, defaultStudioState, HUD_STYLES, MAX_CASTERS, SCENES, TEXT_MAX, THEMES,
+  type Callout, type CasterLine, type HudStyle, type Rect, type LiveElements, type SceneKey, type StudioState, type TeamOverride, type ThemeKey,
 } from './types.js';
 
 /**
@@ -98,7 +98,19 @@ function cleanElements(v: unknown): LiveElements {
   const d = defaultElements();
   const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
   const pick = (k: keyof LiveElements): boolean => (typeof o[k] === 'boolean' ? o[k] as boolean : d[k]);
-  return { survivors: pick('survivors'), infected: pick('infected'), tank: pick('tank'), bosses: pick('bosses'), progress: pick('progress') };
+  return {
+    survivors: pick('survivors'), infected: pick('infected'), tank: pick('tank'), bosses: pick('bosses'), progress: pick('progress'),
+    tankRecap: pick('tankRecap'), rival: pick('rival'), dots: pick('dots'),
+  };
+}
+
+function cleanRect(v: unknown, d: Rect): Rect {
+  const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+  const n = (k: keyof Rect, min: number, max: number): number =>
+    typeof o[k] === 'number' && Number.isFinite(o[k]) ? Math.max(min, Math.min(max, Math.round(o[k] as number))) : d[k];
+  const x = n('x', 0, 1900);
+  const y = n('y', 0, 1060);
+  return { x, y, w: Math.min(n('w', 20, 1920), 1920 - x), h: Math.min(n('h', 20, 1080), 1080 - y) };
 }
 
 function cleanCallout(v: unknown): Callout | null {
@@ -131,7 +143,13 @@ export function cleanState(v: unknown): StudioState {
     bosses: { tank: pct(bo.tank), witch: pct(bo.witch), map: str(bo.map, 64) || null },
     elements: cleanElements(o.elements),
     scorebugAt: o.scorebugAt === 'bottom' ? 'bottom' : 'top',
+    // 'bar' was the first broadcast look (2026-10-02, replaced the same day).
     hudStyle: HUD_STYLES.includes(o.hudStyle as HudStyle) ? (o.hudStyle as HudStyle) : d.hudStyle,
+    frame: (() => {
+      const f = (o.frame && typeof o.frame === 'object' ? o.frame : {}) as Record<string, unknown>;
+      const fd = defaultFrameRects();
+      return { survivor: cleanRect(f.survivor, fd.survivor), infected: cleanRect(f.infected, fd.infected) };
+    })(),
     callout: cleanCallout(o.callout),
   };
 }

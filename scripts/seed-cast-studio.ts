@@ -25,8 +25,11 @@ const NAMES = ['Volence', 'Psicodelica', 'Harry Potter', 'mayhem', 'gabe', 'wasd
 const IDS = NAMES.map((_, i) => `7656119800000910${i}`);
 const TOKEN = 'a1'.repeat(16);
 
+// Steam's default avatar for half of them (a real Steam avatar URL, so the
+// overlay's <img> path is exercised), a letter for the rest.
+const STEAM_DEFAULT = 'https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg';
 for (const [i, id] of IDS.entries()) {
-  upsertPlayer(db, { steamid: id, name: NAMES[i]!, avatar: null }, []);
+  upsertPlayer(db, { steamid: id, name: NAMES[i]!, avatar: i % 2 === 0 ? STEAM_DEFAULT : null }, []);
   activatePlayer(db, id);
   db.prepare('INSERT OR REPLACE INTO player_ratings (player_id, season_id, mu, sigma, wins, losses) VALUES (?, 1, ?, ?, ?, ?)')
     .run(id, 25 + i * 1.3, 2.4, 20 + i * 3, 18 + (7 - i) * 2);
@@ -63,7 +66,10 @@ db.prepare("INSERT INTO match_live (match_id, current_map, last_seen, phase, pha
 db.prepare("INSERT INTO match_live_maps (match_id, map, ordinal, team_a_score, team_b_score) VALUES (?, 'l4d_vs_airport01_greenhouse', 0, 512, 448)").run(live);
 db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, started_at, ended_at) VALUES (?, 0, 1, 'b', 448, datetime('now','-30 minutes'), datetime('now','-22 minutes'))").run(live);
 db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, started_at, ended_at) VALUES (?, 0, 2, 'a', 512, datetime('now','-20 minutes'), datetime('now','-12 minutes'))").run(live);
-db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, started_at) VALUES (?, 1, 1, 'a', 0, datetime('now','-3 minutes'))").run(live);
+// Chapter 2: team A played survivors in the first half; team B is on
+// survivors now, so the opponent's mark has a first half to show.
+db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, started_at, ended_at) VALUES (?, 1, 1, 'a', 0, datetime('now','-12 minutes'), datetime('now','-4 minutes'))").run(live);
+db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, started_at) VALUES (?, 1, 2, 'b', 0, datetime('now','-3 minutes'))").run(live);
 IDS.forEach((p, i) => db.prepare('INSERT INTO match_live_players (match_id, player_id, stats_json) VALUES (?, ?, ?)')
   .run(live, p, JSON.stringify({ sidmg: 300 + i * 41, sikill: 4 + (i % 4), ck: 70 + i * 6, skeets: i % 3, team_skeets: (i + 1) % 2, dps_landed: i % 2, damage_as_si: 120 + i * 17, tank_damage: 400 + i * 50, ...(i % 4 === 3 ? {} : { boomer_spawns: 3 + (i % 3), boom_successes: 1 + (i % 2) }) })));
 const ev = (seq: number, kind: string, actor: number, target: number | null, value = 0) =>
@@ -80,11 +86,12 @@ console.log(JSON.stringify({ caster: CASTER, live }));
 const LIVE_DIR = process.env.LIVE_DIR;
 if (LIVE_DIR) {
   mkdirSync(LIVE_DIR, { recursive: true });
-  const path = join(LIVE_DIR, `pug_${TOKEN}_1_1.rpl`);
+  const path = join(LIVE_DIR, `pug_${TOKEN}_1_2.rpl`);
   writeFileSync(path, encodeHeader({
-    version: VERSION, token: TOKEN, ordinal: 1, half: 1, playerHz: 10, entityHz: 2, map: 'l4d_vs_airport02_offices',
+    version: VERSION, token: TOKEN, ordinal: 1, half: 2, playerHz: 10, entityHz: 2, map: 'l4d_vs_airport02_offices',
     startedUnix: Math.floor(Date.now() / 1000) - 180, indexOffset: 0, indexCount: 0, frameCount: 0,
-    slots: IDS, infectedMask: 0xf0, sidesKnown: true, losKnown: false,
+    // Slots 0-3 survivors (team B this half), 4-7 infected (team A).
+    slots: [...IDS.slice(4), ...IDS.slice(0, 4)], infectedMask: 0xf0, sidesKnown: true, losKnown: false,
   }));
   const s = (slot: number, p: Partial<PlayerSample>): PlayerSample => ({
     slot, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, state: STATE.PRESENT | STATE.ALIVE, health: 100, temp: 1, cls: 0, weapon: 0, clip: 0, reserve: 0, ...p,
@@ -116,18 +123,22 @@ if (LIVE_DIR) {
     const line = {
       prog, tank: 74, witch: 31,
       players: [
-        { steamid: IDS[0], flow: prog, items: 1 | 2 | 8, dmg: 212 },
-        { steamid: IDS[1], flow: prog - 3, items: 2, dmg: 145 },
-        { steamid: IDS[2], flow: prog - 6, items: 4, dmg: 88 },
-        { steamid: IDS[3], flow: prog - 1, items: 1, dmg: 61 },
-        { steamid: IDS[4], flow: -1, items: 0, dmg: 157 },
-        { steamid: IDS[5], flow: -1, items: 0, dmg: 61 },
-        { steamid: IDS[6], flow: -1, items: 0, dmg: 58 },
-        { steamid: IDS[7], flow: -1, items: 0, dmg: 30 },
+        { steamid: IDS[4], flow: prog, items: 1 | 2 | 8, dmg: 212 },
+        { steamid: IDS[5], flow: prog - 9, items: 2, dmg: 145 },
+        { steamid: IDS[6], flow: prog - 4, items: 4, dmg: 88 },
+        { steamid: IDS[7], flow: prog - 1, items: 1, dmg: 61 },
+        { steamid: IDS[0], flow: -1, items: 0, dmg: 157 },
+        { steamid: IDS[1], flow: -1, items: 0, dmg: 61 },
+        { steamid: IDS[2], flow: -1, items: 0, dmg: 58 },
+        { steamid: IDS[3], flow: -1, items: 0, dmg: 30 },
       ],
     };
     try {
-      await fetch(`${API}/api/dev/livehud`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN, line }) });
+      // Once: team A's first half on this map reached 62%.
+      if (n === 1) {
+        await fetch(`${API}/api/dev/livehud`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN, line: { ...line, prog: 62 }, round: { ordinal: 1, half: 1 } }) });
+      }
+      await fetch(`${API}/api/dev/livehud`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN, line, round: { ordinal: 1, half: 2 } }) });
     } catch { /* the API is not up yet */ }
   };
   tick();

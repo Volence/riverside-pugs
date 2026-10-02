@@ -22,38 +22,77 @@ const live: OverlayFeed['live'] = {
   ],
   tank: { health: 3000, maxHealth: 6000, controller: 'Tank Guy' },
   witches: 0,
-  hud: { progress: 41, tank: 70, witch: 30 },
+  hud: { progress: 41, tank: 70, witch: 30, rivalReach: 74 },
+  tankRecap: null,
 };
 const feed = (patch: Partial<ReturnType<typeof defaultStudioState>> = {}): OverlayFeed => ({
   rev: 1, serverNow: Date.now(), studio: { ...defaultStudioState(), ...patch }, match, live,
 });
 
-const allOn = { survivors: true, infected: true, tank: true, bosses: true, progress: true };
+const allOn = { survivors: true, infected: true, tank: true, bosses: true, progress: true, tankRecap: true, rival: true, dots: true };
 
-describe('gameplay overlay: broadcast bar (default)', () => {
-  it('by default shows only what the game does not: compact, no player rows', () => {
+describe('gameplay overlay: the broadcast looks', () => {
+  it('by default (plate, rows off) shows only what the game does not', () => {
     const { container } = render(<Overlay which="gameplay" feed={feed()} now={Date.now()} />);
     const t = container.textContent ?? '';
     for (const s of ['Rats', 'Crows', '512', '448', 'Tank Guy', '41%', '70%', '30%']) expect(t).toContain(s);
-    expect(container.querySelector('.ov-hud--compact')).not.toBeNull();
+    expect(container.querySelector('.ov-plate')).not.toBeNull();
+    expect(container.querySelector('.ov-mrow')).toBeNull();
     expect(t).not.toContain('Survivor One');
-    expect(t).not.toContain('Hunter Main');
+    // The boss pins and the tank use the game's own icons.
+    const srcs = [...container.querySelectorAll('img')].map((i) => i.getAttribute('src'));
+    expect(srcs).toContain('/cast-art/si-tank.png');
+    expect(srcs).toContain('/cast-art/witch.png');
   });
 
-  it('draws both teams, the rows, progress and boss points from the live round', () => {
-    const { container } = render(<Overlay which="gameplay" feed={feed({ elements: allOn })} now={Date.now()} />);
-    expect(container.querySelector('.ov-hud--compact')).toBeNull();
-    const t = container.textContent ?? '';
-    for (const s of ['Rats', 'Crows', 'Survivors', 'Infected', '512', '448', 'Survivor One', 'Hunter Main', 'Spawning', 'Tank Guy', '41%', '70%', '30%']) expect(t).toContain(s);
-    expect(container.querySelector('.ov-item--kit')).not.toBeNull();
-    expect(container.querySelector('.ov-item--pills')).not.toBeNull();
-    expect(t).toContain('Dmg 57');
+  for (const style of ['plate', 'corners', 'rail'] as const) {
+    it(`${style}: rows on draw medallions with the released portraits, items and SI icons`, () => {
+      const { container } = render(<Overlay which="gameplay" feed={feed({ hudStyle: style, elements: allOn })} now={Date.now()} />);
+      const t = container.textContent ?? '';
+      for (const s of ['Rats', 'Crows', 'Survivor One', 'Hunter Main', 'Spawning', 'Tank Guy']) expect(t).toContain(s);
+      const srcs = [...container.querySelectorAll('img')].map((i) => i.getAttribute('src'));
+      expect(srcs).toContain('/cast-art/survivor-bill.png');
+      expect(srcs).toContain('/cast-art/si-hunter.png');
+      expect(srcs).toContain('/cast-art/item-kit.png');
+      expect(srcs).toContain('/cast-art/item-pills.png');
+      expect(srcs.some((x) => x?.startsWith('/portraits/'))).toBe(false);
+      expect(t).toContain('Dmg 57');
+    });
+  }
+
+  it('frame: frames the two holes, each tabbed with the team on that side this half', () => {
+    const { container } = render(<Overlay which="gameplay" feed={feed({ hudStyle: 'frame', elements: allOn })} now={Date.now()} />);
+    const surv = container.querySelector('[data-side="survivor"]') as HTMLElement;
+    const inf = container.querySelector('[data-side="infected"]') as HTMLElement;
+    expect(surv.style.left).toBe('20px');
+    expect(surv.textContent).toContain('Rats');
+    expect(inf.textContent).toContain('Crows');
+    // The game draws the health in frame mode: no medallions, whatever the switches say.
+    expect(container.querySelector('.ov-mrow')).toBeNull();
+  });
+
+  it("marks the opponent's reach and each survivor's own progress on the strip", () => {
+    const { container } = render(<Overlay which="gameplay" feed={feed()} now={Date.now()} />);
+    expect(container.querySelector('.ov-pg__rival')?.textContent).toBe('CRW 74%');
+    expect((container.querySelector('.ov-pg__dot') as HTMLElement).style.left).toBe('41%');
+    const off = render(<Overlay which="gameplay" feed={feed({ elements: { ...allOn, survivors: false, infected: false, rival: false, dots: false } })} now={Date.now()} />).container;
+    expect(off.querySelector('.ov-pg__rival')).toBeNull();
+    expect(off.querySelector('.ov-pg__dot')).toBeNull();
+  });
+
+  it('shows the tank damage card with shares after a tank dies', () => {
+    const r = { agoMs: 500, aliveS: 84, controller: 'Tank Guy', dealt: 312, players: [{ name: 'Survivor One', dmg: 4200, share: 70 }, { name: 'Two', dmg: 1800, share: 30 }] };
+    const { container } = render(<Overlay which="gameplay" feed={{ ...feed(), live: { ...live!, tankRecap: r } }} now={Date.now()} />);
+    const t = container.querySelector('.ov-recap')!.textContent ?? '';
+    for (const x of ['Tank down', 'Tank Guy', '1:24', '312', 'Survivor One', '4,200', '70%', '30%']) expect(t).toContain(x);
+    const off = render(<Overlay which="gameplay" feed={{ ...feed({ elements: { ...allOn, tankRecap: false } }), live: { ...live!, tankRecap: r } }} now={Date.now()} />).container;
+    expect(off.querySelector('.ov-recap')).toBeNull();
   });
 
   it('hides the strip and item icons cleanly without LIVEHUD (an older plugin)', () => {
     const old = { ...live!, hud: null, survivors: live!.survivors.map((s) => ({ ...s, flow: null, items: null, dmg: null })) };
     const { container } = render(<Overlay which="gameplay" feed={{ ...feed({ elements: allOn }), live: old }} now={Date.now()} />);
-    expect(container.querySelector('.ov-prog')).toBeNull();
+    expect(container.querySelector('.ov-pg')).toBeNull();
     expect(container.querySelector('.ov-item')).toBeNull();
     expect(container.textContent).toContain('Survivor One');
   });
@@ -65,15 +104,8 @@ describe('gameplay overlay: broadcast bar (default)', () => {
     expect(t).not.toContain('70%');
   });
 
-  it('shows rosters while no round is running', () => {
-    const m = { ...match, teams: { a: { ...match.teams.a, players: [{ steamid: '9', name: 'Waiting Wally', avatar: null, stats: {}, sr: null, career: { matches: 0, wins: 0, losses: 0, skeets: 0, dps: 0, boomerRate: null } }] }, b: match.teams.b } };
-    const t = render(<Overlay which="gameplay" feed={{ ...feed({ elements: allOn }), match: m, live: null }} now={Date.now()} />).container.textContent ?? '';
-    expect(t).toContain('Waiting Wally');
-  });
-
   it('is empty with nothing on air', () => {
     const { container } = render(<Overlay which="gameplay" feed={{ ...feed(), match: null, live: null }} now={Date.now()} />);
-    expect(container.querySelector('.ov-hud')).toBeNull();
     expect(container.textContent).toBe('');
   });
 });
@@ -112,7 +144,7 @@ describe('overlay basics', () => {
 
 describe('match stats and lineups', () => {
   const pl = (name: string, stats: Record<string, number>, career: Partial<CastPlayer['career']> = {}): CastPlayer => ({
-    steamid: name, name, avatar: null, stats, sr: null,
+    steamid: name, name, avatar: null, stats, sr: null, role: null,
     career: { matches: 10, wins: 6, losses: 4, skeets: 0, dps: 0, boomerRate: null, ...career },
   });
   const withPlayers = (a: CastPlayer[], b: CastPlayer[]): OverlayFeed => ({
@@ -131,6 +163,17 @@ describe('match stats and lineups', () => {
     expect(cells('Ana')).toEqual(['812', '9', '140', '3', '1,500', '2', '75%']);
     expect(cells('Bo')).toEqual(['300', '3', '90', '-', '-', '0', '-']);
     expect(container.textContent).not.toMatch(/Deadstops|Dmg as SI/);
+  });
+
+  it('a scrim lineup is the roster: role and tag, no PUG numbers, avatar when known', () => {
+    const f = withPlayers([{ ...pl('Cap', {}), role: 'captain', avatar: 'https://avatars.example/cap.jpg', career: null }], [{ ...pl('Mem', {}), role: 'member', career: null }]);
+    const scrim = { ...f, match: { ...f.match!, kind: 'scrim' as const } };
+    const { container } = render(<Overlay which="lineups" feed={scrim} now={Date.now()} />);
+    const t = container.textContent ?? '';
+    expect(t).toContain('Captain');
+    expect(t).not.toMatch(/\d PUGs|Skeets|Boomer|\d SR/);
+    expect(container.querySelector('img.ov-card__avatar')?.getAttribute('src')).toBe('https://avatars.example/cap.jpg');
+    expect(container.querySelector('.ov-card__avatar--none')?.textContent).toBe('M');
   });
 
   it('lineup cards show skeets, DPs and boomer %', () => {

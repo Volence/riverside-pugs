@@ -14,7 +14,7 @@ import { camSlots } from '../src/cast/layout.js';
 import { encodeFrame, encodeHeader, STATE, VERSION, type Frame, type PlayerSample } from '../src/replayFormat.js';
 import { findFrameBoundary, LiveRoundReader } from '../src/cast/liveRound.js';
 import { tagFrom } from '../src/cast/matchView.js';
-import { LIVE_HUD_FRESH_MS, LiveHudStore, liveHudStore, type LiveHudLine } from '../src/cast/liveHud.js';
+import { LIVE_HUD_FRESH_MS, LiveHudStore, liveHudStore, TANK_RECAP_MS, type LiveHudLine } from '../src/cast/liveHud.js';
 import { ITEM } from '../src/cast/types.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000700${i}`);
@@ -86,17 +86,25 @@ describe('studio state', () => {
     expect(s.casters[0]!.camUrl).toBe('');
     expect(s.casters[1]!.camUrl).toBe('https://vdo.ninja/?view=x');
     expect(s.bosses).toEqual({ tank: 75, witch: null, map: 'l4d_vs_airport02_offices' });
-    expect(s.elements).toEqual({ survivors: true, infected: false, tank: true, bosses: true, progress: true });
-    expect(s.hudStyle).toBe('bar');
+    expect(s.elements).toMatchObject({ survivors: true, infected: false, tank: true, bosses: true, progress: true });
+    expect(s.hudStyle).toBe('plate');
     expect(s.callout).toBeNull();
   });
 
   it('keeps the producer\'s switches and HUD style once the bar exists', () => {
     const s = cleanState({ hudStyle: 'scorebug', elements: { survivors: false, infected: false, progress: false } });
     expect(s.hudStyle).toBe('scorebug');
-    expect(s.elements).toEqual({ survivors: false, infected: false, tank: true, bosses: true, progress: false });
-    expect(cleanState({ hudStyle: 'giant' }).hudStyle).toBe('bar');
-    expect(cleanState({}).elements).toEqual({ survivors: false, infected: false, tank: true, bosses: true, progress: true });
+    expect(s.elements).toMatchObject({ survivors: false, infected: false, tank: true, bosses: true, progress: false });
+    expect(cleanState({ hudStyle: 'giant' }).hudStyle).toBe('plate');
+    // The first broadcast look was 'bar'; a state saved with it reads as the plate.
+    expect(cleanState({ hudStyle: 'bar' }).hudStyle).toBe('plate');
+  });
+
+  it('keeps frame rects on the canvas', () => {
+    const f = cleanState({ frame: { survivor: { x: 1800, y: -5, w: 400, h: 2 }, infected: { x: 'a' } } }).frame;
+    expect(f.survivor).toEqual({ x: 1800, y: 0, w: 120, h: 20 });
+    expect(f.infected).toEqual({ x: 1340, y: 20, w: 560, h: 150 });
+    expect(cleanState({}).elements).toMatchObject({ survivors: false, infected: false, tank: true, bosses: true, progress: true });
   });
 
   it('lays cams out inside the canvas', () => {
@@ -252,6 +260,43 @@ describe('overlay feed', () => {
     expect(p.career).toMatchObject({ skeets: 8, dps: 5, boomerRate: 25 });
   });
 
+  it('folds skeets into runs by the Discord streak rules, newest first', async () => {
+    await call('PUT', '/api/cast/studio', CASTER, { matchId });
+    const ev = db.prepare('INSERT INTO match_live_events (match_id, seq, kind, actor, target, value, map_ordinal, half, t_ms) VALUES (?, ?, ?, ?, ?, 0, 0, 1, ?)');
+    // IDS[0]: three within 5 s (a triple), then one 20 s later (a single).
+    ev.run(matchId, 1, 'skeet', IDS[0], IDS[4], 1000);
+    ev.run(matchId, 2, 'skeet', IDS[0], IDS[5], 3000);
+    ev.run(matchId, 3, 'incap', IDS[1], IDS[6], 3500);
+    ev.run(matchId, 4, 'skeet', IDS[0], IDS[6], 5500);
+    ev.run(matchId, 5, 'skeet', IDS[0], IDS[7], 25000);
+    // IDS[2]: two within 5 s, a double.
+    ev.run(matchId, 6, 'skeet', IDS[2], IDS[4], 30000);
+    ev.run(matchId, 7, 'skeet', IDS[2], IDS[5], 32000);
+    const f = (await feed(await keyOf(CASTER))).json();
+    const skeets = f.match.events.filter((e: { kind: string }) => e.kind === 'skeet');
+    expect(skeets.map((e: { seq: number; streak: { count: number } }) => [e.seq, e.streak.count])).toEqual([[7, 2], [5, 1], [4, 3]]);
+    expect(skeets[2].streak.targets).toHaveLength(3);
+    expect(f.match.events.map((e: { seq: number }) => e.seq)).toEqual([7, 5, 4, 3]);
+  });
+
+  it('folds one boomer\'s booms into a bile with every survivor caught', async () => {
+    await call('PUT', '/api/cast/studio', CASTER, { matchId });
+    const ev = db.prepare('INSERT INTO match_live_events (match_id, seq, kind, actor, target, value, map_ordinal, half, t_ms) VALUES (?, ?, ?, ?, ?, 0, 0, 1, ?)');
+    ev.run(matchId, 1, 'boom', IDS[5], IDS[0], 1000);
+    ev.run(matchId, 2, 'boom', IDS[5], IDS[1], 1100);
+    ev.run(matchId, 3, 'boom', IDS[5], IDS[2], 1300);
+    const f = (await feed(await keyOf(CASTER))).json();
+    expect(f.match.events).toHaveLength(1);
+    expect(f.match.events[0]).toMatchObject({ seq: 3, kind: 'boom', streak: { count: 3 } });
+  });
+
+  it('a tournament match carries no PUG career numbers', async () => {
+    db.prepare("UPDATE matches SET kind = 'tournament' WHERE id = ?").run(matchId);
+    await call('PUT', '/api/cast/studio', ADMIN, { matchId });
+    const f = (await feed(await keyOf(ADMIN))).json();
+    expect(f.match.teams.a.players.every((p: { career: unknown }) => p.career === null)).toBe(true);
+  });
+
   it('serves a prep sheet for a castable match only', async () => {
     const r = await call('GET', `/api/cast/studio/prep/${matchId}`, CASTER);
     expect(r.statusCode).toBe(200);
@@ -300,10 +345,48 @@ describe('LIVEHUD', () => {
     liveHudStore.record(TOKEN, line());
     await new Promise((r) => setTimeout(r, 950)); // past the feed cache
     const after = (await feed(key)).json();
-    expect(after.live.hud).toEqual({ progress: 40, tank: 70, witch: -2 });
+    expect(after.live.hud).toEqual({ progress: 40, tank: 70, witch: -2, rivalReach: null });
     expect(after.live.survivors[0]).toMatchObject({ flow: 40, items: 3, dmg: 120 });
     expect(after.live.survivors[1]).toMatchObject({ flow: null, items: null, dmg: null });
     expect(after.live.infected[0]).toMatchObject({ steamid: IDS[4], dmg: 57 });
+  });
+
+  it('remembers how far each half got, for the opponent\'s mark', () => {
+    const store = new LiveHudStore();
+    store.record(TOKEN, line(30), 1000, { ordinal: 2, half: 1 });
+    store.record(TOKEN, line(74), 2000, { ordinal: 2, half: 1 });
+    store.record(TOKEN, line(12), 3000, { ordinal: 2, half: 2 });
+    expect(store.reach(TOKEN, 2, 1)).toBe(74);
+    expect(store.reach(TOKEN, 2, 2)).toBe(12);
+    expect(store.reach(TOKEN, 1, 1)).toBeNull();
+  });
+
+  it('keeps a tank recap for its card window only', () => {
+    const store = new LiveHudStore();
+    store.recordTank(TOKEN, { aliveS: 80, controller: null, dealt: 200, players: [] }, 1000);
+    expect(store.tank(TOKEN, 1000 + TANK_RECAP_MS)?.recap.aliveS).toBe(80);
+    expect(store.tank(TOKEN, 1001 + TANK_RECAP_MS)).toBeNull();
+  });
+
+  it('puts a tank recap on the feed with names and shares, then drops it', async () => {
+    db.prepare("INSERT INTO match_live (match_id, last_seen, phase, phase_since) VALUES (?, datetime('now'), 'live', datetime('now'))").run(matchId);
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, started_at) VALUES (?, 0, 1, 'a', datetime('now'))").run(matchId);
+    const h = encodeHeader({
+      version: VERSION, token: TOKEN, ordinal: 0, half: 1, playerHz: 10, entityHz: 2, map: 'l4d_vs_airport01_greenhouse',
+      startedUnix: Math.floor(Date.now() / 1000), indexOffset: 0, indexCount: 0, frameCount: 0,
+      slots: IDS, infectedMask: 0xf0, sidesKnown: true, losKnown: false,
+    });
+    const p = (slot: number): PlayerSample => ({ slot, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, state: STATE.PRESENT | STATE.ALIVE, health: 100, temp: 1, cls: 1, weapon: 0, clip: 0, reserve: 0 });
+    const fr = (tMs: number): Frame => ({ tMs, offset: 0, entities: [], players: [0, 1, 2, 3, 4, 5, 6, 7].map(p) });
+    writeFileSync(join(liveDir, `pug_${TOKEN}_0_1.rpl`), Buffer.concat([h, encodeFrame(fr(100)), encodeFrame(fr(200))]));
+    await call('PUT', '/api/cast/studio', CASTER, { matchId });
+    liveHudStore.recordTank(TOKEN, { aliveS: 84, controller: IDS[4]!, dealt: 312, players: [{ steamid: IDS[0]!, dmg: 1500 }, { steamid: IDS[1]!, dmg: 4500 }] });
+    const f = (await feed(await keyOf(CASTER))).json();
+    const name = (id: string) => (db.prepare('SELECT name FROM players WHERE steamid = ?').get(id) as { name: string }).name;
+    expect(f.live.tankRecap).toMatchObject({
+      aliveS: 84, dealt: 312, controller: name(IDS[4]!),
+      players: [{ name: name(IDS[1]!), dmg: 4500, share: 75 }, { name: name(IDS[0]!), dmg: 1500, share: 25 }],
+    });
   });
 
   it('is not on the public live page', async () => {

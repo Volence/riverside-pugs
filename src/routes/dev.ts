@@ -8,7 +8,7 @@ import { QUEUE_SIZE } from '../queue.js';
 import type { Hub } from '../ws.js';
 import { completeMatch } from '../matchResult.js';
 import type { Dump } from '../dumpParse.js';
-import { liveHudStore, type LiveHudLine } from '../cast/liveHud.js';
+import { liveHudStore, type LiveHudLine, type TankDone } from '../cast/liveHud.js';
 
 export interface DevRouteOpts {
   config: Config;
@@ -38,12 +38,16 @@ export async function devRoutes(app: FastifyInstance, opts: DevRouteOpts): Promi
     return { ok: true, steamid };
   });
 
-  /** Feed a LIVEHUD line for a match token, as the plugin would every 2 s
-   *  (the caster studio's screenshots; no game server in dev). */
+  /** Feed a LIVEHUD line (with the half it belongs to) or a TANKDONE recap
+   *  for a match token, as the plugin would (the caster studio's
+   *  screenshots; no game server in dev). */
   app.post('/api/dev/livehud', async (req, reply) => {
-    const { token, line } = (req.body ?? {}) as { token?: string; line?: LiveHudLine };
-    if (!token || !/^[0-9a-f]{32}$/.test(token) || !line || !Array.isArray(line.players)) return reply.code(400).send({ error: 'token and line' });
-    liveHudStore.record(token, line);
+    const { token, line, round, tank } = (req.body ?? {}) as {
+      token?: string; line?: LiveHudLine; round?: { ordinal: number; half: number }; tank?: TankDone;
+    };
+    if (!token || !/^[0-9a-f]{32}$/.test(token)) return reply.code(400).send({ error: 'token' });
+    if (line && Array.isArray(line.players)) liveHudStore.record(token, line, Date.now(), round ?? null);
+    if (tank && Array.isArray(tank.players)) liveHudStore.recordTank(token, tank);
     return { ok: true };
   });
 

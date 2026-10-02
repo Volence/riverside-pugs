@@ -7,11 +7,12 @@ import { currentSeasonId } from '../players.js';
 import { completedPug } from '../matchKinds.js';
 import { getSetting } from '../settings.js';
 import { sideRow, sideName } from '../bookings/bookings.js';
-import { getTeam } from '../teams/teams.js';
+import { activeMembers, getTeam } from '../teams/teams.js';
 import { statDef } from '../statKeys.js';
+import { STREAK_MIN, streakRuns } from '../skeetStreaks.js';
 import { boomerRate } from './types.js';
 import type {
-  CastChapter, CastMatchView, CastPlayer, CastSide, CastTeam, StudioState, TeamOverride,
+  CastChapter, CastEvent, CastMatchView, CastPlayer, CastRole, CastSide, CastTeam, StudioState, TeamOverride,
 } from './types.js';
 
 /**
@@ -198,7 +199,10 @@ export function buildMatchView(
     return {
       steamid: r.steamid, name: r.name, avatar: r.avatar, stats,
       sr: rating ? displaySr(rating.mu, rating.sigma) : null,
-      career: career(db, r.steamid),
+      // PUG numbers only on a PUG (owner, 2026-10-02): a scrim or a
+      // tournament lineup is the team's roster, not anyone's PUG record.
+      career: m.kind === 'pug' ? career(db, r.steamid) : null,
+      role: null,
     };
   };
 
@@ -207,6 +211,7 @@ export function buildMatchView(
     let name = t === 'a' ? 'Team A' : 'Team B';
     let tag = t === 'a' ? 'A' : 'B';
     let logoUrl: string | null = null;
+    const roles = new Map<string, CastRole>();
     if (m.booking_id !== null) {
       const bookingSide = (m.booking_side_a ?? 'a') === 'a' ? t : (t === 'a' ? 'b' : 'a');
       const s = sideRow(db, m.booking_id, bookingSide);
@@ -215,9 +220,12 @@ export function buildMatchView(
         const team = s.team_id !== null ? getTeam(db, s.team_id) : undefined;
         tag = team?.tag ?? tagFrom(name);
         if (team?.logo_key) logoUrl = `${team.logo_key}.png`;
+        // Roles: the team's own, else a pickup side's captain.
+        if (team) for (const mem of activeMembers(db, team.id)) roles.set(mem.steamid, mem.role);
+        else roles.set(s.captain_steamid, 'captain');
       }
     }
-    return { name, tag, logoUrl };
+    return { name, tag, logoUrl, roles };
   };
   const liveTotals = { a: scored.reduce((n, s) => n + s.a, 0), b: scored.reduce((n, s) => n + s.b, 0) };
   const team = (t: 'a' | 'b'): CastTeam => {
@@ -227,19 +235,14 @@ export function buildMatchView(
     return {
       key: t, name: o.name, tag: o.tag, color: o.color, score: o.score, overridden: o.overridden,
       logoUrl: base.logoUrl, side: completed ? null : sideOf(t),
-      players: ps.filter((p) => p.team === t).map(player),
+      players: ps.filter((p) => p.team === t).map(player).map((p) => ({ ...p, role: base.roles.get(p.steamid) ?? null })),
     };
   };
 
   const phase = completed ? null : phaseFor(db, matchId);
   const nameOf = new Map(ps.map((p) => [p.steamid, p.name]));
   const teamOf = new Map(ps.map((p) => [p.steamid, p.team]));
-  const events = completed ? [] : (db.prepare(
-    'SELECT seq, kind, actor, target, value FROM match_live_events WHERE match_id = ? ORDER BY seq DESC LIMIT 12',
-  ).all(matchId) as { seq: number; kind: string; actor: string; target: string | null; value: number }[]).map((e) => ({
-    seq: e.seq, kind: e.kind, actor: nameOf.get(e.actor) ?? e.actor, actorTeam: teamOf.get(e.actor) ?? null,
-    target: e.target ? nameOf.get(e.target) ?? e.target : null, value: e.value,
-  }));
+  const events = completed ? [] : highlightEvents(db, matchId, nameOf, teamOf);
 
   return {
     id: m.id, kind: m.kind, state: m.state, campaign: m.campaign, campaignName: campaignDisplayName(db, m.campaign),
@@ -249,4 +252,88 @@ export function buildMatchView(
     teams: { a: team('a'), b: team('b') },
     chapters, events, game,
   };
+}
+
+/** Newest-first events for the highlight list, with skeets folded into runs
+ *  by the Discord streak rules (src/skeetStreaks.ts streakRuns: same player,
+ *  same map half, each skeet within 5 s of the run's first). A run is one
+ *  entry, at its newest skeet, so the producer sees one "Double skeet" that
+ *  replaces the "Skeet" it grew from. */
+function highlightEvents(
+  db: DB, matchId: number, nameOf: Map<string, string>, teamOf: Map<string, 'a' | 'b'>,
+): CastEvent[] {
+  type Row = { seq: number; kind: string; actor: string; target: string | null; value: number; mapOrdinal: number; half: number; tMs: number };
+  const recent = db.prepare(
+    `SELECT seq, kind, actor, target, value, map_ordinal AS mapOrdinal, half, t_ms AS tMs
+     FROM match_live_events WHERE match_id = ? ORDER BY seq DESC LIMIT 24`,
+  ).all(matchId) as Row[];
+  // Every skeet of this match, to place each recent one in its run.
+  const skeets = db.prepare(
+    `SELECT seq, actor, target, map_ordinal AS mapOrdinal, half, t_ms AS tMs FROM match_live_events
+     WHERE match_id = ? AND kind = 'skeet' AND t_ms != -1 ORDER BY actor, map_ordinal, half, t_ms, seq`,
+  ).all(matchId) as Pick<Row, 'seq' | 'actor' | 'target' | 'mapOrdinal' | 'half' | 'tMs'>[];
+  // Runs per player and map half: the Discord triples first (STREAK_MIN, so
+  // a TRIPLE here is a triple there), then doubles among the skeets left.
+  const runOf = new Map<number, number>();
+  const runs: { seqs: number[]; targets: string[] }[] = [];
+  const groups = new Map<string, typeof skeets>();
+  for (const k of skeets) {
+    const key = `${k.actor}|${k.mapOrdinal}|${k.half}`;
+    groups.set(key, [...(groups.get(key) ?? []), k]);
+  }
+  for (const g of groups.values()) {
+    const place = (list: typeof skeets, min: number): typeof skeets => {
+      const taken = new Set<number>();
+      for (const [i, j] of streakRuns(list.map((k) => k.tMs), min)) {
+        const members = list.slice(i, j + 1);
+        runs.push({ seqs: members.map((k) => k.seq), targets: members.flatMap((k) => (k.target ? [nameOf.get(k.target) ?? k.target] : [])) });
+        for (const k of members) { runOf.set(k.seq, runs.length - 1); taken.add(k.seq); }
+      }
+      return list.filter((k) => !taken.has(k.seq));
+    };
+    const rest = place(place(g, STREAK_MIN), 2);
+    for (const k of rest) {
+      runs.push({ seqs: [k.seq], targets: k.target ? [nameOf.get(k.target) ?? k.target] : [] });
+      runOf.set(k.seq, runs.length - 1);
+    }
+  }
+  // Booms: one vomit (or a popped boomer) catches several survivors, each its
+  // own event; a boomer's booms within the same window are one bile with
+  // every survivor it caught (Double / Triple / Quad bile).
+  const booms = db.prepare(
+    `SELECT seq, actor, target, map_ordinal AS mapOrdinal, half, t_ms AS tMs FROM match_live_events
+     WHERE match_id = ? AND kind = 'boom' AND t_ms != -1 ORDER BY actor, map_ordinal, half, t_ms, seq`,
+  ).all(matchId) as typeof skeets;
+  const boomGroups = new Map<string, typeof skeets>();
+  for (const k of booms) {
+    const key = `${k.actor}|${k.mapOrdinal}|${k.half}`;
+    boomGroups.set(key, [...(boomGroups.get(key) ?? []), k]);
+  }
+  for (const g of boomGroups.values()) {
+    for (const [i, j] of streakRuns(g.map((k) => k.tMs), 1)) {
+      const members = g.slice(i, j + 1);
+      const targets = [...new Set(members.flatMap((k) => (k.target ? [nameOf.get(k.target) ?? k.target] : [])))];
+      runs.push({ seqs: members.map((k) => k.seq), targets });
+      for (const k of members) runOf.set(k.seq, runs.length - 1);
+    }
+  }
+  const out: CastEvent[] = [];
+  const shownRuns = new Set<number>();
+  for (const e of recent) {
+    const base: CastEvent = {
+      seq: e.seq, kind: e.kind, actor: nameOf.get(e.actor) ?? e.actor, actorTeam: teamOf.get(e.actor) ?? null,
+      target: e.target ? nameOf.get(e.target) ?? e.target : null, value: e.value,
+    };
+    const r = e.kind === 'skeet' || e.kind === 'boom' ? runOf.get(e.seq) : undefined;
+    if (r !== undefined) {
+      if (shownRuns.has(r)) continue; // an older event of a run already listed
+      shownRuns.add(r);
+      const run = runs[r]!;
+      // A skeet run counts skeets; a bile counts the survivors it caught.
+      base.streak = { count: e.kind === 'boom' ? Math.max(1, run.targets.length) : run.seqs.length, targets: run.targets };
+    }
+    out.push(base);
+    if (out.length >= 12) break;
+  }
+  return out;
 }
