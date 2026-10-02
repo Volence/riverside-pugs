@@ -1,5 +1,5 @@
 import type { DB } from './db.js';
-import { CAMPAIGNS, campaignForMap, DLC4_CAMPAIGNS } from './campaigns.js';
+import { CAMPAIGNS, campaignForMap, DLC4_CAMPAIGNS, VOTE_NAMES } from './campaigns.js';
 import { chaptersOf, listCampaigns } from './customCampaigns.js';
 import { isInstalledEverywhere } from './campaignInstall.js';
 import { enabledServerIds, allServersHaveDlc4 } from './serverPool.js';
@@ -206,4 +206,10 @@ export function poolableCampaigns(
  */
 export function campaignDisplayName(db: DB, slug: string): string {
   return campaignRegistry(db).get(slug)?.name ?? slug;
+}
+
+/** The name a campaign shows in the vote: an easter-egg name from VOTE_NAMES
+ *  when it has one, otherwise its display name. */
+export function campaignVoteName(db: DB, slug: string): string {
+  return VOTE_NAMES[slug] ?? campaignDisplayName(db, slug);
 }
