@@ -166,6 +166,20 @@ describe('campaignVoteName', () => {
     expect(campaignDisplayName(db, 'the_parish')).toBe('The Parish');
   });
 
+  // Dead Center, Dark Carnival and Hard Rain went into the pool at night too.
+  it.each([
+    ['dead_center', 'Dead Center'],
+    ['dark_carnival', 'Dark Carnival'],
+    ['hard_rain', 'Hard Rain'],
+  ])('glitches %s in the vote only', async (slug, plain) => {
+    const { campaignDisplayName, campaignVoteName } = await import('../src/campaignRegistry.js');
+    const name = campaignVoteName(db, slug);
+    expect(name.normalize('NFD').replace(/[\u0300-\u036f]/g, '')).toBe(`${plain}???`);
+    expect(name).not.toBe(`${plain}???`);
+    expect(`${name} (12)`.length).toBeLessThanOrEqual(80);
+    expect(campaignDisplayName(db, slug)).toBe(plain);
+  });
+
   it('is the display name for every other campaign', async () => {
     const { campaignVoteName } = await import('../src/campaignRegistry.js');
     publish();
