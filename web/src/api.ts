@@ -1396,7 +1396,7 @@ export interface TicketCounts { open: number; mine: number; closed: number }
 
 export type TimelineSource =
   | 'input' | 'lilac' | 'analyzer' | 'drop' | 'ticket' | 'penalty' | 'ban'
-  | 'note' | 'steam' | 'discord_link' | 'cvar' | 'conduct';
+  | 'note' | 'steam' | 'discord_link' | 'cvar' | 'conduct' | 'spray';
 
 /** One row of a player's merged history. The summary is written on the
  *  server so every surface says the same sentence about the same evidence. */

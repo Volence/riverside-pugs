@@ -85,6 +85,7 @@ const ID_FIELDS: Partial<Record<LogEvent['kind'], readonly string[]>> = {
   entered: ['steamid'],
   player_net: ['steamid'],
   lilac_flag: ['steamid'],
+  spray_exploit: ['steamid'],
   cvar_flag: ['steamid'],
   say: ['steamid'],
   staff_in: ['steamid'],

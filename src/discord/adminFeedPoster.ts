@@ -146,6 +146,22 @@ export class AdminFeedPoster {
           color: COLOR.problem,
         };
       }
+      case 'spray_exploit': {
+        // Stated as fact: the file failed the VTF header check, which no real
+        // spray does (all 89 on Dallas passed on 2026-10-02). It never
+        // reached anyone else.
+        const server = e.serverId === null ? null : (this.deps.db.prepare('SELECT name FROM servers WHERE id = ?')
+          .get(e.serverId) as { name: string } | undefined)?.name ?? null;
+        const where = [
+          e.matchId ? `in match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})` : '',
+          server ? `on ${server}` : '',
+        ].filter(Boolean).join(' ');
+        return {
+          text: `💣 ${this.name(e.steamid)} tried to use a crash spray${where ? ' ' + where : ''} (file \`${e.crc}\`). `
+            + `The server blocked it and kicked them; nobody saw it. [File](${this.file(e.steamid)})`,
+          color: COLOR.problem,
+        };
+      }
       case 'input_flag': {
         // Deliberately worded as something to look at, not as a verdict. The
         // signature is evidence from input timing, and the admin decides.
