@@ -8,6 +8,8 @@
 //
 // With LIVE_DIR set it then keeps appending one replay frame a second to the
 // live match's round file (so the live round HUD has fresh data) until killed.
+// With API set too (the DEV_MODE API's URL), it also posts the LIVEHUD line
+// the plugin would send every 2 s (progress, items, damage, boss %).
 import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openDb } from '../src/db.js';
@@ -106,6 +108,29 @@ if (LIVE_DIR) {
       ],
     }));
   };
+  const API = process.env.API;
+  let n = 0;
+  const hud = async () => {
+    n++;
+    const prog = Math.min(96, 38 + n);
+    const line = {
+      prog, tank: 74, witch: 31,
+      players: [
+        { steamid: IDS[0], flow: prog, items: 1 | 2 | 8, dmg: 212 },
+        { steamid: IDS[1], flow: prog - 3, items: 2, dmg: 145 },
+        { steamid: IDS[2], flow: prog - 6, items: 4, dmg: 88 },
+        { steamid: IDS[3], flow: prog - 1, items: 1, dmg: 61 },
+        { steamid: IDS[4], flow: -1, items: 0, dmg: 157 },
+        { steamid: IDS[5], flow: -1, items: 0, dmg: 61 },
+        { steamid: IDS[6], flow: -1, items: 0, dmg: 58 },
+        { steamid: IDS[7], flow: -1, items: 0, dmg: 30 },
+      ],
+    };
+    try {
+      await fetch(`${API}/api/dev/livehud`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN, line }) });
+    } catch { /* the API is not up yet */ }
+  };
   tick();
   setInterval(tick, 1000);
+  if (API) { void hud(); setInterval(() => void hud(), 2000); }
 }

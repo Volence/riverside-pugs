@@ -22,8 +22,12 @@
 // Rotoblin's l4dscores.smx: its own campaign tally for the given game team
 // (2 survivors, 3 infected). Optional, marked in AskPluginLoad2.
 native int Score_GetTeamCampaignScore(int team);
+// l4d_boss_percent (Riverside fork): this map's tank and witch flow %, in true
+// survivor flow. Optional, marked in AskPluginLoad2; read only by LIVEHUD.
+native int GetTankPercent();
+native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.19"
+#define PLUGIN_VERSION "0.3.20"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -611,6 +615,8 @@ No config exec and no restart: it tracks the game already being played. Implies 
 	// spectator refresh where 30s feels dead. Separate timers so neither
 	// constrains the other.
 	CreateTimer(10.0, Timer_LiveStats, _, TIMER_REPEAT);
+	// The caster HUD's extras (progress, items, boss %): see Timer_LiveHud.
+	CreateTimer(2.0, Timer_LiveHud, _, TIMER_REPEAT);
 	// Coalesces the per-bullet friendly fire events. See AccumulateFriendlyFire.
 	CreateTimer(FF_FLUSH_INTERVAL, Timer_FlushFf, _, TIMER_REPEAT);
 
@@ -3190,6 +3196,86 @@ rock_skeets=%d dps_landed=%d biles_landed=%d survivors_biled=%d",
 		// WriteSkillLines): a '%' in it would be read as a conversion.
 		EmitPug("%s", line);
 	}
+	return Plugin_Continue;
+}
+
+/** Survivor items as LIVEHUD bits: 1 kit, 2 pills, 4 pipe bomb, 8 molotov. */
+int LiveHudItems(int client)
+{
+	int bits = 0;
+	char cls[32];
+	int w = GetPlayerWeaponSlot(client, 3);
+	if (w > 0 && IsValidEntity(w)) { GetEntityClassname(w, cls, sizeof(cls)); if (StrEqual(cls, "weapon_first_aid_kit")) bits |= 1; }
+	w = GetPlayerWeaponSlot(client, 4);
+	if (w > 0 && IsValidEntity(w)) { GetEntityClassname(w, cls, sizeof(cls)); if (StrEqual(cls, "weapon_pain_pills")) bits |= 2; }
+	w = GetPlayerWeaponSlot(client, 2);
+	if (w > 0 && IsValidEntity(w))
+	{
+		GetEntityClassname(w, cls, sizeof(cls));
+		if (StrEqual(cls, "weapon_pipe_bomb")) bits |= 4;
+		else if (StrEqual(cls, "weapon_molotov")) bits |= 8;
+	}
+	return bits;
+}
+
+/** A survivor's own progress through the map in whole percent, or -1. */
+int LiveHudFlow(int client, float maxFlow)
+{
+	if (maxFlow <= 0.0 || !IsPlayerAlive(client)) return -1;
+	Address area = L4D_GetLastKnownArea(client);
+	if (area == Address_Null) return -1;
+	int pct = RoundToFloor(L4D2Direct_GetTerrorNavAreaFlow(area) / maxFlow * 100.0);
+	return pct < 0 ? 0 : (pct > 100 ? 100 : pct);
+}
+
+/** The caster studio's extras, every 2 s while a half is live: what the
+ *  replay frames do not carry.
+ *
+ *    LIVEHUD prog=<team %> tank=<%> witch=<%> p=<steamid>:<flow %>:<items>:<dmg>,...
+ *
+ *  prog is the furthest survivor's flow % (the same number !cur prints), -1
+ *  when the nav or the flow is unknown. tank/witch come from l4d_boss_percent:
+ *  -1 when that plugin is absent, 0 for no boss this map, -2 witch for a witch
+ *  party. One p entry per rostered player in game on a playing team: flow is
+ *  -1 for infected and the dead, items is LiveHudItems (0 for infected), and
+ *  dmg is this half's damage (SI damage dealt as a survivor, damage dealt as
+ *  SI as an infected), from the go-live snapshot in RoundStatsBegin.
+ *
+ *  Undelayed game state. The site keeps it in memory for the caster studio
+ *  only, behind the overlay key, and never on the public live page. Cosmetic
+ *  like LIVESTAT: a lost datagram is a stale bar for 2 s. */
+public Action Timer_LiveHud(Handle timer)
+{
+	if (g_State != MS_Live || g_fRoundLiveAt <= 0.0 || g_bRoundEnded) return Plugin_Continue;
+
+	float maxFlow = L4D2Direct_GetMapMaxFlowDistance();
+	int prog = -1;
+	char list[600];
+	list[0] = '\0';
+	for (int i = 0; i < g_iRosterCount; i++)
+	{
+		int client = ClientOfSlot(i);
+		if (client == -1) continue;
+		int team = GetClientTeam(client);
+		if (team != TEAM_SURVIVOR && team != TEAM_INFECTED) continue;
+		int flow = -1, items = 0, dmg;
+		if (team == TEAM_SURVIVOR)
+		{
+			flow = LiveHudFlow(client, maxFlow);
+			if (flow > prog) prog = flow;
+			items = IsPlayerAlive(client) ? LiveHudItems(client) : 0;
+			dmg = g_iStatSiDmg[i] - g_iCoreAtLive[i][1];
+		}
+		else dmg = g_iSkill[i][PS_DamageAsSi] - g_iSkillAtLive[i][PS_DamageAsSi];
+		if (dmg < 0) dmg = 0;
+		Format(list, sizeof(list), "%s%s%s:%d:%d:%d", list, list[0] == '\0' ? "" : ",", g_sRosterId[i], flow, items, dmg);
+	}
+
+	int tank = -1, witch = -1;
+	if (GetFeatureStatus(FeatureType_Native, "GetTankPercent") == FeatureStatus_Available) tank = GetTankPercent();
+	if (GetFeatureStatus(FeatureType_Native, "GetWitchPercent") == FeatureStatus_Available) witch = GetWitchPercent();
+
+	EmitPug("LIVEHUD prog=%d tank=%d witch=%d p=%s", prog, tank, witch, list);
 	return Plugin_Continue;
 }
 

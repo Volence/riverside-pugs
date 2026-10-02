@@ -127,6 +127,7 @@ import { ticketRoutes } from './routes/tickets.js';
 import { modCallRoutes } from './routes/modCalls.js';
 import { serverChatRoutes } from './routes/serverChat.js';
 import { castRoutes } from './routes/cast.js';
+import { liveHudStore } from './cast/liveHud.js';
 import { castStudioRoutes } from './routes/castStudio.js';
 import { statsRoutes } from './routes/stats.js';
 import { weeklyRoutes } from './routes/weekly.js';
@@ -1264,6 +1265,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             if (joined) refreshSignals([ev.steamid], { sharing: true, matchId: joined.id, freshMs: 60 * 60 * 1000 });
           }
           else if (ev.kind === 'live_stat') recordLiveStat(deps.db, ev.token, ev.steamid, ev.stats);
+          else if (ev.kind === 'live_hud') {
+            // Caster studio only, in memory (src/cast/liveHud.ts). Every 2 s
+            // per live match, and nothing public changed: no broadcast.
+            liveHudStore.record(ev.token, ev.line);
+            return;
+          }
           else if (ev.kind === 'live_event') recordLiveEvent(deps.db, ev.token, ev);
           else if (ev.kind === 'chat') recordChat(deps.db, ev.token, ev);
           else if (ev.kind === 'phase') recordPhase(deps.db, ev.token, ev.phase);

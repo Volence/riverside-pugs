@@ -75,11 +75,18 @@ export interface StudioState {
    *  caster spectates in first person defaults to off. */
   elements: LiveElements;
   /** Where the scorebug sits: top centre by default, bottom centre when a
-   *  caster's own HUD puts something at the top. */
+   *  caster's own HUD puts something at the top. Scorebug style only. */
   scorebugAt: 'top' | 'bottom';
+  /** The gameplay HUD: `bar`, the full-width broadcast bar across the top
+   *  (both teams' players, scores, map progress), or `scorebug`, the compact
+   *  top-centre bug with optional rows under it. */
+  hudStyle: HudStyle;
   /** A highlight card fired by the producer, shown for CALLOUT_MS from `at`. */
   callout: Callout | null;
 }
+
+export const HUD_STYLES = ['bar', 'scorebug'] as const;
+export type HudStyle = (typeof HUD_STYLES)[number];
 
 export interface Callout {
   /** Short label, for example SKEET or TANK DOWN. */
@@ -94,21 +101,26 @@ export interface Callout {
 export const CALLOUT_MS = 8000;
 
 export interface LiveElements {
-  /** Survivor health list. Off: first-person spectating a survivor already
-   *  shows every survivor's health (team panel plus own panel). */
+  /** Survivor rows (health, status, items). Off by default: first-person
+   *  spectating a survivor already shows every survivor's health, so the
+   *  rows would show it twice. On for a clean-feed HUD, SourceTV or free cam. */
   survivors: boolean;
-  /** Infected lineup. Off: first-person spectating an infected already shows
-   *  the infected team row with classes and health. */
+  /** Infected rows (class, spawning, dead, damage). Off by default for the
+   *  same reason: spectating an infected shows the infected team's row. */
   infected: boolean;
   /** Tank health. On: L4D1 shows a tank's health only to the tank itself (and
    *  to whoever spectates the tank), never to survivors or other spectators. */
   tank: boolean;
   /** Tank and witch flow %. On: the game never shows them on screen. */
   bosses: boolean;
+  /** The map progress strip under the bar (the furthest survivor's flow %,
+   *  with the boss points on it). Needs pug-match 0.3.20's LIVEHUD line; the
+   *  strip hides itself on a server that does not send it. */
+  progress: boolean;
 }
 
 export function defaultElements(): LiveElements {
-  return { survivors: false, infected: false, tank: true, bosses: true };
+  return { survivors: false, infected: false, tank: true, bosses: true, progress: true };
 }
 
 export const MAX_CASTERS = 3;
@@ -129,6 +141,7 @@ export function defaultStudioState(): StudioState {
     bosses: { tank: null, witch: null, map: null },
     elements: defaultElements(),
     scorebugAt: 'top',
+    hudStyle: 'bar',
     callout: null,
   };
 }
@@ -206,8 +219,18 @@ export interface CastSurvivor {
   incap: boolean;
   ledge: boolean;
   pinned: boolean;
+  biled: boolean;
   weapon: string;
+  /** From LIVEHUD (see LiveHud), null when the server does not send it:
+   *  this survivor's own map progress in %, held items (ITEM bits), and SI
+   *  damage dealt this half. */
+  flow: number | null;
+  items: number | null;
+  dmg: number | null;
 }
+
+/** LIVEHUD item bits, as plugin/pug-match.sp LiveHudItems sets them. */
+export const ITEM = { KIT: 1, PILLS: 2, PIPE: 4, MOLOTOV: 8 } as const;
 
 export interface CastInfected {
   slot: number;
@@ -218,6 +241,18 @@ export interface CastInfected {
   ghost: boolean;
   alive: boolean;
   health: number;
+  /** Damage dealt as SI this half, from LIVEHUD; null without it. */
+  dmg: number | null;
+}
+
+/** The plugin's LIVEHUD line (pug-match 0.3.20), merged into the round. */
+export interface LiveHud {
+  /** The furthest survivor's flow %, or null when the server could not tell. */
+  progress: number | null;
+  /** This map's tank and witch flow % from l4d_boss_percent: null when that
+   *  plugin is absent, 0 for no boss this map; witch -2 is a witch party. */
+  tank: number | null;
+  witch: number | null;
 }
 
 export interface CastLiveRound {
@@ -232,6 +267,9 @@ export interface CastLiveRound {
   infected: CastInfected[];
   tank: { health: number; maxHealth: number; controller: string | null } | null;
   witches: number;
+  /** Null on a server without pug-match 0.3.20, or when its last LIVEHUD is
+   *  older than a few seconds. */
+  hud: LiveHud | null;
 }
 
 export interface OverlayFeed {
