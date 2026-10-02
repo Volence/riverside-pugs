@@ -206,7 +206,7 @@ export default function CastStudio() {
               if (pending.current) pending.current = { ...pending.current, callout: r.studio.callout };
             } catch (e) { setError((e as Error).message); }
           }} onClear={() => update((s) => ({ ...s, callout: null }), true)} />
-          <LiveToggles state={state} update={update} />
+          <LiveToggles state={state} update={update} map={match?.currentMap ?? null} />
           <LowerThirdBox state={state} update={update} />
           <CountdownBox state={state} update={update} />
           <TeamsBox state={state} update={update} match={match} />
@@ -272,8 +272,8 @@ function Preflight({ state, feed, obsStatus }: { state: StudioState; feed: Overl
 function OnAir({ panel, state, update }: { panel: StudioPanel; state: StudioState; update: Update }) {
   const live = panel.matches.filter((m) => m.state === 'live' || m.state === 'configuring');
   const recent = panel.matches.filter((m) => m.state === 'completed');
-  const pickMatch = (id: number | null) => update((s) => ({ ...s, matchId: id, bookingId: null, overrides: { a: {}, b: {} }, bosses: { tank: null, witch: null } }), true);
-  const pickBooking = (id: number) => update((s) => ({ ...s, bookingId: id, matchId: null, overrides: { a: {}, b: {} }, bosses: { tank: null, witch: null } }), true);
+  const pickMatch = (id: number | null) => update((s) => ({ ...s, matchId: id, bookingId: null, overrides: { a: {}, b: {} }, bosses: { tank: null, witch: null, map: null } }), true);
+  const pickBooking = (id: number) => update((s) => ({ ...s, bookingId: id, matchId: null, overrides: { a: {}, b: {} }, bosses: { tank: null, witch: null, map: null } }), true);
   const row = (m: StudioPanel['matches'][number]) => {
     const on = state.bookingId === null && state.matchId === m.id;
     return (
@@ -395,7 +395,10 @@ function Highlights({ state, match, onFire, onClear }: {
 
 /* ---------- toggles ---------- */
 
-function LiveToggles({ state, update }: { state: StudioState; update: Update }) {
+function LiveToggles({ state, update, map }: { state: StudioState; update: Update; map: string | null }) {
+  const stale = state.bosses.map !== null && map !== null && state.bosses.map !== map;
+  const tank = stale ? null : state.bosses.tank;
+  const witch = stale ? null : state.bosses.witch;
   const num = (v: string): number | null => {
     if (v.trim() === '') return null;
     const n = Math.round(Number(v));
@@ -415,10 +418,10 @@ function LiveToggles({ state, update }: { state: StudioState; update: Update }) 
         ))}
       </div>
       <div class="studio__form studio__row3">
-        <label>Tank %<input inputMode="numeric" value={state.bosses.tank ?? ''} placeholder="-"
-          onInput={(e) => { const v = num(e.currentTarget.value); update((s) => ({ ...s, bosses: { ...s.bosses, tank: v } })); }} /></label>
-        <label>Witch %<input inputMode="numeric" value={state.bosses.witch ?? ''} placeholder="-"
-          onInput={(e) => { const v = num(e.currentTarget.value); update((s) => ({ ...s, bosses: { ...s.bosses, witch: v } })); }} /></label>
+        <label>Tank %<input inputMode="numeric" value={tank ?? ''} placeholder="-"
+          onInput={(e) => { const v = num(e.currentTarget.value); update((s) => ({ ...s, bosses: { tank: v, witch: stale ? null : s.bosses.witch, map } })); }} /></label>
+        <label>Witch %<input inputMode="numeric" value={witch ?? ''} placeholder="-"
+          onInput={(e) => { const v = num(e.currentTarget.value); update((s) => ({ ...s, bosses: { witch: v, tank: stale ? null : s.bosses.tank, map } })); }} /></label>
         <label>Scorebug
           <select value={state.scorebugAt} onChange={(e) => { const v = e.currentTarget.value === 'bottom' ? 'bottom' : 'top'; update((s) => ({ ...s, scorebugAt: v }), true); }}>
             <option value="top">Top centre</option>

@@ -66,8 +66,10 @@ export interface StudioState {
   theme: ThemeKey;
   overrides: { a: TeamOverride; b: TeamOverride };
   /** Boss flow percentages for the map being played, typed by the producer:
-   *  no plugin reports them yet. Null hides them. */
-  bosses: { tank: number | null; witch: number | null };
+   *  no plugin reports them yet. Null hides them. `map` is the map they were
+   *  typed for: the overlay drops them once the match moves to another map,
+   *  so last map's numbers never sit on the next one. */
+  bosses: { tank: number | null; witch: number | null; map: string | null };
   /** Live elements on the gameplay scene, each on its own toggle (duplication
    *  audit in the plan): what the game's own HUD already draws while a
    *  caster spectates in first person defaults to off. */
@@ -124,7 +126,7 @@ export function defaultStudioState(): StudioState {
     casters: [],
     theme: 'riverside',
     overrides: { a: {}, b: {} },
-    bosses: { tank: null, witch: null },
+    bosses: { tank: null, witch: null, map: null },
     elements: defaultElements(),
     scorebugAt: 'top',
     callout: null,

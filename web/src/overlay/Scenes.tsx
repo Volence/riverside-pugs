@@ -467,7 +467,9 @@ function Gameplay({ studio, match, live, now }: { studio: StudioState; match: Ca
 function Scorebug({ studio, match }: { studio: StudioState; match: CastMatchView }) {
   const { a, b } = match.teams;
   const chapter = match.chapters[match.mapNumber - 1];
-  const bosses = studio.elements.bosses && (studio.bosses.tank !== null || studio.bosses.witch !== null);
+  // Numbers typed for another map are last map's: never shown on this one.
+  const sameMap = studio.bosses.map === null || match.currentMap === null || studio.bosses.map === match.currentMap;
+  const bosses = studio.elements.bosses && sameMap && (studio.bosses.tank !== null || studio.bosses.witch !== null);
   const status = match.phase === 'paused' ? 'Paused' : match.phase === 'readyup' ? 'Ready-up' : match.half ? `Round ${match.half}` : null;
   return (
     <div class={`ov-bug ov-bug--${studio.scorebugAt}`}>

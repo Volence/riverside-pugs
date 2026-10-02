@@ -128,7 +128,7 @@ export function cleanState(v: unknown): StudioState {
     casters: cleanCasters(o.casters),
     theme: THEMES.includes(o.theme as ThemeKey) ? (o.theme as ThemeKey) : d.theme,
     overrides: { a: cleanOverride(ov.a), b: cleanOverride(ov.b) },
-    bosses: { tank: pct(bo.tank), witch: pct(bo.witch) },
+    bosses: { tank: pct(bo.tank), witch: pct(bo.witch), map: str(bo.map, 64) || null },
     elements: cleanElements(o.elements),
     scorebugAt: o.scorebugAt === 'bottom' ? 'bottom' : 'top',
     callout: cleanCallout(o.callout),

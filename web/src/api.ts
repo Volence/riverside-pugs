@@ -1704,7 +1704,6 @@ export const studioApi = {
   newKey: () => post<{ key: string }>('/api/cast/studio/key'),
   feed: (signal?: AbortSignal) => get<OverlayFeed>('/api/cast/studio/feed', signal),
   prep: (matchId: number, signal?: AbortSignal) => get<PrepSheet>(`/api/cast/studio/prep/${matchId}`, signal),
-  revokeKey: (steamid: string) => post(`/api/admin/players/${steamid}/cast-key/revoke`),
 };
 
 // ---------- teams ----------
@@ -2118,6 +2117,7 @@ export const adminApi = {
   setAdmin: (steamid: string, isAdmin: boolean) => post(`/api/admin/players/${steamid}/admin`, { isAdmin }),
   setMod: (steamid: string, isMod: boolean) => post(`/api/admin/players/${steamid}/mod`, { isMod }),
   setCaster: (steamid: string, isCaster: boolean) => post(`/api/admin/players/${steamid}/caster`, { isCaster }),
+  revokeCastKey: (steamid: string) => post(`/api/admin/players/${steamid}/cast-key/revoke`),
   unlinkDiscord: (steamid: string) => post(`/api/admin/players/${steamid}/unlink-discord`),
   /** Ends every session the player holds, on every device. */
   signOutPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/sign-out`),
