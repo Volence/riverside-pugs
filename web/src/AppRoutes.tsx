@@ -43,6 +43,8 @@ const Booking = lazy(() => import('./routes/Booking'));
 const Scrims = lazy(() => import('./routes/Scrims'));
 // Events: behind the same competitive switch.
 const Events = lazy(() => import('./routes/Events'));
+// The caster studio is a big page only casters open: its own chunk.
+const CastStudio = lazy(() => import('./routes/CastStudio'));
 const EventPage = lazy(() => import('./routes/Event'));
 
 /** The 404.
@@ -99,6 +101,7 @@ export function AppRoutes(
       <Route path="/balance/values" component={GameValues} />
       <Route path="/live" component={Live} me={me} />
       <Route path="/cast" component={Cast} />
+      <Route path="/cast/studio" component={CastStudio} />
       <Route path="/streams" component={Streams} />
       <Route path="/match/:id" component={MatchDetail} me={me} staff={staff} />
       <Route path="/maps" component={Maps} />

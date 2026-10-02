@@ -1,0 +1,353 @@
+@import '../styles/tokens.css';
+
+/* Caster studio overlays (docs/superpowers/plans/2026-10-02-caster-studio.md).
+ *
+ * A fixed 1920x1080 stage on a transparent page: OBS composites it over the
+ * game. The site's poster tokens, plus L4D touches (ruling 16): stencil
+ * lettering, the safe room arrow, hazard tape. Gameplay layers keep to the
+ * free regions of the game HUD (ruling 15): top centre x 640-1280. */
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; background: transparent; overflow: hidden; }
+body {
+  width: 1920px; height: 1080px;
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  --bone: #efe2c4;
+  --stencil: "Saira Stencil One", "Anton", Impact, sans-serif;
+  --hazard: #c9a45c;
+  --panel: rgba(11, 9, 8, 0.9);
+  --panel-2: rgba(28, 23, 19, 0.92);
+}
+p, h1, h2, dl, dd { margin: 0; }
+
+.ov { position: relative; width: 1920px; height: 1080px; }
+.ov__scene { position: absolute; inset: 0; }
+.ov-refused {
+  position: absolute; left: 24px; top: 24px; margin: 0; padding: 10px 16px;
+  background: rgba(155, 42, 34, 0.92); color: #fff; font: 600 22px var(--font-label); letter-spacing: 0.04em;
+}
+.ov-dim { color: var(--text-muted); }
+
+/* ---------- themes: variations of the site look only ---------- */
+.theme--riverside { --accent: #de4e40; --wash: rgba(120, 40, 30, 0.42); --base: #0b0908; }
+.theme--safehouse { --accent: #c8372d; --wash: rgba(70, 64, 58, 0.55); --base: #141311; }
+.theme--night { --accent: #7aa6e0; --wash: rgba(36, 58, 104, 0.5); --base: #06080d; }
+.theme--bile { --accent: #9cc43f; --wash: rgba(70, 96, 22, 0.45); --base: #090b06; }
+
+/* ---------- motion ---------- */
+@keyframes ov-rise { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: none; } }
+@keyframes ov-drop { from { opacity: 0; transform: translateY(-22px); } to { opacity: 1; transform: none; } }
+@keyframes ov-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes ov-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ov-spray { from { opacity: 0; filter: blur(6px); transform: scale(1.06); } to { opacity: 0.92; filter: none; transform: none; } }
+@keyframes ov-breathe { 0%, 100% { opacity: 0.85; } 50% { opacity: 1; } }
+@keyframes ov-drift { from { transform: scale(1.08) translateX(-1.5%); } to { transform: scale(1.08) translateX(1.5%); } }
+@keyframes ov-tape { from { background-position: 0 0; } to { background-position: 56px 0; } }
+@keyframes ov-flicker { 0%, 100% { opacity: 1; } 92% { opacity: 1; } 93% { opacity: 0.6; } 94% { opacity: 1; } 97% { opacity: 0.75; } }
+
+/* ---------- full-frame scenes ---------- */
+.ov-full { position: absolute; inset: 0; overflow: hidden; }
+.ov-bg { position: absolute; inset: 0; background: var(--base); }
+.ov-bg__art {
+  position: absolute; inset: 0; background-size: cover; background-position: center;
+  opacity: 0.32; filter: grayscale(0.55) contrast(1.1) brightness(0.7);
+  animation: ov-drift 40s ease-in-out infinite alternate;
+}
+.ov-bg__tint {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(100deg, color-mix(in oklab, var(--tint) 55%, transparent), transparent 55%),
+    radial-gradient(ellipse at 50% 0%, var(--wash), transparent 60%),
+    radial-gradient(ellipse at 50% 55%, transparent 35%, rgba(0, 0, 0, 0.88) 100%);
+}
+.ov-bg__grain { position: absolute; inset: 0; background-image: var(--grain); opacity: 0.9; mix-blend-mode: screen; }
+.theme--safehouse .ov-bg__art { opacity: 0.18; filter: grayscale(1) contrast(1.2) brightness(0.8); }
+.theme--safehouse .ov-bg__tint { background:
+  repeating-linear-gradient(0deg, rgba(255,255,255,0.018) 0 2px, transparent 2px 7px),
+  radial-gradient(ellipse at 50% 55%, transparent 35%, rgba(0, 0, 0, 0.85) 100%); }
+
+/* Holes for cams: the casters scene paints only around its frames. */
+.ov-full--holes { background: none; }
+
+.ov-stencil {
+  font-family: var(--stencil); font-weight: 400; text-transform: uppercase; letter-spacing: 0.02em;
+  color: var(--accent); line-height: 0.95;
+  text-shadow: 0 0 1px rgba(0,0,0,0.6), 0 6px 30px rgba(0,0,0,0.65);
+}
+
+.ov-title { position: absolute; left: 120px; top: 84px; right: 120px; animation: ov-drop 600ms cubic-bezier(.2,.7,.2,1) both; }
+.ov-title__eyebrow {
+  font: 500 24px var(--font-label); letter-spacing: 0.32em; text-transform: uppercase; color: var(--text-muted);
+}
+.ov-title__main {
+  font: 400 88px var(--font-display); text-transform: uppercase; letter-spacing: 0.02em; color: var(--bone);
+  border-bottom: 4px solid var(--accent); padding-bottom: 14px; margin-top: 6px; line-height: 1;
+}
+.ov-title__sub { font: 400 28px var(--font-body); color: var(--text); margin-top: 14px; }
+.ov-foot-note {
+  position: absolute; left: 120px; bottom: 56px; font: 500 20px var(--font-label); letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--text-muted); animation: ov-fade 900ms 900ms both;
+}
+.ov-full__foot { position: absolute; left: 0; right: 0; bottom: 64px; display: flex; justify-content: center; animation: ov-rise 700ms 500ms both; }
+
+/* The safe room arrow, sprayed on. */
+.ov-arrow { display: block; fill: var(--accent); opacity: 0.92; animation: ov-spray 900ms 300ms both; }
+.ov-arrow__drip { opacity: 0.85; }
+
+/* ---------- logos, sides, ribbon ---------- */
+.ov-logo { display: inline-block; object-fit: cover; background: #000; border: 2px solid var(--c, var(--border-strong)); flex: none; }
+.ov-logo--tag {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-display); color: var(--bone); background: color-mix(in oklab, var(--c, #333) 40%, #0b0908);
+}
+.ov-side {
+  display: inline-block; padding: 4px 12px; font: 600 18px var(--font-label); letter-spacing: 0.16em; text-transform: uppercase;
+}
+.ov-side--survivor { background: var(--win); color: #0b0908; }
+.ov-side--infected { background: var(--loss); color: #0b0908; }
+
+.ov-ribbon {
+  display: flex; align-items: stretch; height: 64px; background: var(--panel); border-top: 2px solid var(--accent);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+}
+.ov-ribbon__team {
+  display: flex; align-items: center; padding: 0 22px; font: 400 32px var(--font-display); letter-spacing: 0.04em;
+  color: #0b0908; background: var(--c);
+}
+.ov-ribbon__score { display: flex; align-items: center; padding: 0 22px; font: 400 38px var(--font-display); color: var(--bone); font-variant-numeric: tabular-nums; }
+.ov-ribbon__mid {
+  display: flex; align-items: center; padding: 0 30px; font: 500 22px var(--font-label); letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--text); border-inline: 1px solid var(--border);
+}
+
+/* ---------- starting / brb / ending ---------- */
+.ov-starting, .ov-brb, .ov-ending, .ov-intro, .ov-winner {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+}
+.ov-starting__eyebrow { font: 500 28px var(--font-label); letter-spacing: 0.4em; text-transform: uppercase; color: var(--text-muted); animation: ov-fade 800ms both; }
+.ov-starting__title { font-size: 156px; margin-top: 18px; max-width: 1680px; animation: ov-rise 800ms 100ms cubic-bezier(.2,.7,.2,1) both, ov-flicker 9s 2s infinite; }
+.ov-starting__arrow { width: 220px; margin: 26px 0 34px; }
+.ov-starting__campaign { margin-top: 18px; font: 500 26px var(--font-label); letter-spacing: 0.26em; text-transform: uppercase; color: var(--text); animation: ov-fade 900ms 700ms both; }
+.ov-count { margin-top: 46px; display: flex; flex-direction: column; align-items: center; gap: 6px; animation: ov-rise 700ms 800ms both; }
+.ov-count__label { font: 500 24px var(--font-label); letter-spacing: 0.3em; text-transform: uppercase; color: var(--text-muted); }
+.ov-count__clock { font: 400 120px var(--font-display); color: var(--bone); font-variant-numeric: tabular-nums; line-height: 1; }
+.ov-count--idle { font: 500 30px var(--font-label); letter-spacing: 0.34em; text-transform: uppercase; color: var(--bone); margin-top: 40px; animation: ov-breathe 3.2s ease-in-out infinite; }
+
+.ov-vs { display: flex; align-items: center; gap: 40px; animation: ov-rise 800ms 450ms both; }
+.ov-vs__team { display: flex; align-items: center; gap: 22px; }
+.ov-vs__team--a { --c: var(--team-a); }
+.ov-vs__team--b { --c: var(--team-b); }
+.ov-vs__name { font: 400 64px var(--font-display); text-transform: uppercase; color: var(--bone); letter-spacing: 0.02em; border-bottom: 5px solid var(--c); line-height: 1.05; }
+.ov-vs__mid { font: 400 40px var(--stencil); color: var(--accent); text-transform: uppercase; }
+.ov-vs--big .ov-vs__name { font-size: 92px; }
+
+.ov-brb__title { font-size: 180px; animation: ov-rise 800ms both, ov-flicker 11s 3s infinite; }
+.ov-brb__sub { margin-top: 26px; font: 400 32px var(--font-body); color: var(--text); animation: ov-fade 900ms 400ms both; }
+.ov-brb .ov-title__eyebrow { margin-bottom: 20px; animation: ov-fade 700ms both; }
+
+.ov-ending__title { font-size: 140px; animation: ov-rise 800ms both; }
+.ov-ending__arrow { width: 200px; margin: 30px 0; }
+.ov-ending__casters { display: flex; gap: 46px; font: 400 40px var(--font-display); text-transform: uppercase; color: var(--bone); animation: ov-fade 800ms 500ms both; }
+.ov-ending__casters em { font: 400 24px var(--font-label); font-style: normal; color: var(--text-muted); letter-spacing: 0.08em; text-transform: none; }
+.ov-ending__site { margin-top: 30px; font: 500 26px var(--font-label); letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-muted); animation: ov-fade 800ms 800ms both; }
+.ov-ending__site b { color: var(--accent); }
+
+/* ---------- casters ---------- */
+.ov-casters__top { position: absolute; left: 0; right: 0; top: 70px; text-align: center; animation: ov-drop 700ms both; }
+.ov-casters__title { font-size: 104px; margin-top: 8px; }
+.ov-cam {
+  position: absolute; border: 3px solid var(--accent);
+  box-shadow: 0 18px 60px rgba(0,0,0,0.55);
+  animation: ov-fade 600ms 200ms both;
+}
+.ov-holes { position: absolute; inset: 0; animation: ov-fade 500ms both; }
+.ov-cam__plate {
+  position: absolute; left: -3px; right: -3px; top: 100%; padding: 12px 18px;
+  display: flex; align-items: baseline; gap: 16px; background: var(--panel); border-top: 3px solid var(--accent);
+  animation: ov-wipe 600ms 500ms both;
+}
+.ov-cam__name { font: 400 38px var(--font-display); text-transform: uppercase; color: var(--bone); letter-spacing: 0.03em; }
+.ov-cam__handle { font: 500 22px var(--font-label); color: var(--text-muted); letter-spacing: 0.06em; }
+.ov-casters__bottom { position: absolute; left: 0; right: 0; bottom: 56px; display: flex; justify-content: center; animation: ov-rise 700ms 700ms both; }
+
+/* ---------- map intro ---------- */
+.ov-intro__eyebrow { font: 500 30px var(--font-label); letter-spacing: 0.4em; text-transform: uppercase; color: var(--text); animation: ov-fade 700ms both; }
+.ov-intro__chapter { margin-top: 18px; font: 400 44px var(--font-display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); animation: ov-fade 700ms 200ms both; }
+.ov-intro__map { font-size: 170px; max-width: 1700px; margin-top: 8px; animation: ov-rise 900ms 300ms cubic-bezier(.2,.7,.2,1) both; }
+.ov-intro__arrow { width: 240px; margin: 30px 0 24px; }
+.ov-intro__sides { display: flex; align-items: center; gap: 20px; animation: ov-rise 700ms 800ms both; }
+.ov-intro__team { font: 400 46px var(--font-display); text-transform: uppercase; }
+.ov-intro__team--muted { color: var(--text-muted); font-size: 32px; letter-spacing: 0.1em; }
+
+/* ---------- tables ---------- */
+.ov-table { position: absolute; left: 120px; width: 1680px; border-collapse: collapse; font-variant-numeric: tabular-nums; table-layout: fixed; }
+.ov-chapters thead th:first-child { width: 460px; }
+.ov-chapters thead th.ov-chapters__total { width: 220px; }
+.ov-stats thead th:first-child { width: 420px; }
+.ov-table th, .ov-table td { padding: 0; }
+.ov-chapters { top: 360px; animation: ov-rise 700ms 250ms both; }
+.ov-chapters thead th { padding: 0 10px 16px; text-align: center; vertical-align: bottom; border-bottom: 2px solid var(--border-strong); }
+.ov-chapters__n { display: block; font: 400 44px var(--font-display); color: var(--bone); }
+.ov-chapters__map { display: block; font: 500 18px var(--font-label); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); max-width: 230px; margin: 0 auto; }
+.ov-chapters thead th.is-now .ov-chapters__n { color: var(--accent); }
+.ov-chapters tbody tr { background: var(--panel); border-left: 10px solid var(--c); }
+.ov-chapters tbody tr + tr { border-top: 2px solid #000; }
+.ov-chapters td { text-align: center; font: 400 64px var(--font-display); color: var(--bone); height: 150px; position: relative; }
+.ov-chapters td.is-now { background: rgba(222, 78, 64, 0.08); }
+.ov-chapters__team { text-align: left; padding: 0 30px !important; }
+.ov-chapters__team > * { vertical-align: middle; }
+.ov-chapters__team span { margin-left: 20px; font: 400 46px var(--font-display); text-transform: uppercase; color: var(--bone); }
+.ov-chapters__total { font: 400 72px var(--font-display) !important; color: var(--accent) !important; background: rgba(0,0,0,0.35); width: 210px; }
+.ov-chapters thead .ov-chapters__total { font: 500 22px var(--font-label) !important; letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-muted) !important; background: none; }
+.ov-chapters__first {
+  display: inline-block; width: 30px; height: 30px; line-height: 30px; text-align: center; vertical-align: middle;
+  background: var(--win); color: #0b0908; font: 600 18px var(--font-label);
+}
+.ov-chapters td .ov-chapters__first { position: absolute; right: 12px; top: 12px; }
+.ov-chapters td .ov-dim { font: 500 22px var(--font-label); letter-spacing: 0.2em; text-transform: uppercase; color: var(--accent); }
+
+.ov-lineups { position: absolute; left: 120px; right: 120px; top: 320px; display: grid; grid-template-columns: 1fr 1fr; gap: 60px; }
+.ov-lineups__head { display: flex; align-items: center; gap: 18px; margin-bottom: 18px; animation: ov-rise 600ms 150ms both; }
+.ov-lineups__head h2 { font: 400 52px var(--font-display); text-transform: uppercase; color: var(--bone); border-bottom: 5px solid var(--c); line-height: 1.05; }
+.ov-card {
+  display: grid; grid-template-columns: 84px 1fr auto; align-items: center; gap: 22px;
+  height: 112px; padding: 0 22px 0 0; margin-bottom: 14px; background: var(--panel); border-left: 8px solid var(--c);
+  animation: ov-rise 600ms both;
+}
+.ov-card__avatar { width: 84px; height: 84px; margin-left: 16px; object-fit: cover; background: #000; }
+.ov-card__avatar--none { display: block; background: var(--surface-2); }
+.ov-card__body { display: flex; flex-direction: column; min-width: 0; padding-left: 10px; }
+.ov-card__name { font: 400 40px var(--font-display); color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: none; }
+.ov-card__line { font: 500 20px var(--font-label); letter-spacing: 0.06em; color: var(--text-muted); }
+.ov-card__line b { color: var(--rating); margin-right: 12px; font-weight: 600; }
+.ov-card__stats { display: flex; gap: 22px; }
+.ov-card__stats div { text-align: center; min-width: 74px; }
+.ov-card__stats dt { font: 500 15px var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted); }
+.ov-card__stats dd { font: 400 36px var(--font-display); color: var(--bone); }
+
+.ov-stats { top: 330px; animation: ov-rise 700ms 250ms both; }
+.ov-stats thead th { font: 500 18px var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted); padding: 0 8px 12px; text-align: right; }
+.ov-stats tbody { border-left: 8px solid var(--c); }
+.ov-stats tbody + tbody { border-top: 12px solid transparent; }
+.ov-stats__team th { text-align: left; padding: 6px 18px; background: color-mix(in oklab, var(--c) 30%, #0b0908); font: 400 28px var(--font-display); text-transform: uppercase; color: var(--bone); }
+.ov-stats__score { float: right; color: var(--bone); }
+.ov-stats tr:not(.ov-stats__team) { background: var(--panel); }
+.ov-stats tr:not(.ov-stats__team) + tr { border-top: 1px solid rgba(255,255,255,0.05); }
+.ov-stats td { text-align: right; padding: 6px 18px; font: 400 28px var(--font-display); color: var(--text); }
+.ov-stats td.is-top { color: var(--rating); }
+.ov-stats__name { text-align: left; padding: 6px 18px !important; font: 500 24px var(--font-body); color: var(--bone); max-width: 380px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- winner ---------- */
+.ov-winner { gap: 18px; }
+.ov-winner .ov-title__eyebrow { animation: ov-fade 700ms both; }
+.ov-winner .ov-logo { animation: ov-rise 800ms 200ms both; }
+.ov-winner__name { font-size: 170px; color: var(--c); animation: ov-rise 900ms 350ms cubic-bezier(.2,.7,.2,1) both; }
+.ov-winner__wins { font: 500 30px var(--font-label); letter-spacing: 0.34em; text-transform: uppercase; color: var(--bone); animation: ov-fade 800ms 800ms both; }
+.ov-winner__score { display: flex; gap: 28px; font: 400 72px var(--font-display); margin-top: 18px; animation: ov-rise 700ms 1000ms both; }
+
+/* ---------- lower third: bottom centre, clear of the HUD corners ---------- */
+.ov-lt {
+  position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%);
+  min-width: 560px; max-width: 900px; padding: 14px 28px 16px; background: var(--panel);
+  border-left: 8px solid var(--accent); box-shadow: 0 14px 40px rgba(0,0,0,0.5);
+  display: flex; flex-direction: column; animation: ov-wipe 500ms cubic-bezier(.2,.7,.2,1) both;
+}
+.ov-lt__title { font: 400 38px var(--font-display); text-transform: uppercase; color: var(--bone); letter-spacing: 0.02em; }
+.ov-lt__text { font: 400 24px var(--font-body); color: var(--text); }
+
+/* ---------- gameplay: top centre column x 640-1280 ---------- */
+.ov-game { position: absolute; inset: 0; }
+.ov-game__col { position: absolute; left: 640px; width: 640px; top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.ov-game--bottom .ov-game__col { top: auto; bottom: 14px; flex-direction: column-reverse; }
+
+.ov-bug { animation: ov-drop 500ms cubic-bezier(.2,.7,.2,1) both; filter: drop-shadow(0 6px 18px rgba(0,0,0,0.55)); }
+.ov-game--bottom .ov-bug, .ov-bug--bottom { animation-name: ov-rise; }
+.ov-bug__row { display: grid; grid-template-columns: 1fr 210px 1fr; height: 76px; background: var(--panel); border-bottom: 3px solid var(--accent); }
+.ov-bug--bottom .ov-bug__row { border-bottom: 0; border-top: 3px solid var(--accent); }
+.ov-bug__team { display: flex; align-items: stretch; --c: var(--team-a); }
+.ov-bug__team--r { flex-direction: row-reverse; }
+.ov-bug__stripe { width: 12px; background: var(--c); }
+.ov-bug__ident { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 14px; gap: 2px; }
+.ov-bug__team--r .ov-bug__ident { align-items: flex-end; }
+.ov-bug__tag { font: 400 34px var(--font-display); color: var(--bone); letter-spacing: 0.04em; line-height: 1; }
+.ov-bug__side { font: 600 13px var(--font-label); letter-spacing: 0.2em; text-transform: uppercase; height: 16px; }
+.ov-bug__side--survivor { color: var(--win); }
+.ov-bug__side--infected { color: var(--loss); }
+.ov-bug__score {
+  min-width: 96px; display: flex; align-items: center; justify-content: center; padding: 0 12px;
+  font: 400 44px var(--font-display); color: var(--bone); font-variant-numeric: tabular-nums;
+  background: color-mix(in oklab, var(--c) 22%, rgba(0,0,0,0.55));
+}
+.ov-bug__mid { display: flex; flex-direction: column; align-items: center; justify-content: center; border-inline: 1px solid var(--border); padding: 0 6px; }
+.ov-bug__map { font: 600 13px var(--font-label); letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-muted); }
+.ov-bug__chapter { font: 400 22px var(--font-display); text-transform: uppercase; color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 198px; letter-spacing: 0.02em; }
+.ov-bug__status { font: 600 12px var(--font-label); letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-muted); }
+.ov-bug__status.is-paused { color: var(--accent); animation: ov-breathe 1.4s ease-in-out infinite; }
+.ov-bug__bosses {
+  display: flex; justify-content: center; gap: 28px; width: 300px; margin: 0 auto; padding: 4px 0 5px;
+  background: var(--panel-2); font: 500 16px var(--font-label); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text);
+}
+.ov-bug__bosses b { color: var(--accent); font-weight: 600; margin-right: 6px; }
+
+.ov-round { display: flex; flex-direction: column; gap: 6px; }
+.ov-game--bottom .ov-round { flex-direction: column-reverse; }
+.ov-round__row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; animation: ov-fade 400ms both; }
+
+.ov-tank {
+  display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 12px;
+  height: 40px; padding: 0 12px; position: relative; overflow: hidden;
+  background: var(--panel); animation: ov-wipe 450ms both;
+}
+.ov-tank::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 4px;
+  background: repeating-linear-gradient(-45deg, var(--hazard) 0 14px, #0b0908 14px 28px);
+  animation: ov-tape 1.2s linear infinite;
+}
+.ov-tank__label { display: flex; align-items: center; gap: 6px; font: 400 22px var(--font-display); text-transform: uppercase; color: var(--accent); }
+.ov-tank__label .ov-picto { width: 22px; height: 22px; fill: var(--accent); }
+.ov-tank__who { font: 500 16px var(--font-label); color: var(--bone); letter-spacing: 0.04em; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.ov-tank__bar { height: 12px; background: rgba(255,255,255,0.08); position: relative; }
+.ov-tank__fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); transition: width 600ms linear; }
+.ov-tank__hp { font: 400 22px var(--font-display); color: var(--bone); font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
+
+.ov-surv, .ov-inf {
+  display: flex; align-items: center; gap: 8px; height: 50px; padding: 0 8px 0 0; background: var(--panel);
+  border-top: 3px solid var(--c); min-width: 0;
+}
+.ov-surv__face { width: 44px; height: 44px; object-fit: cover; margin-left: 3px; flex: none; }
+.ov-surv__body, .ov-inf__body { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 2px; }
+.ov-surv__name, .ov-inf__name { font: 500 14px var(--font-label); color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.02em; }
+.ov-surv__bar { position: relative; height: 6px; background: rgba(255,255,255,0.08); }
+.ov-surv__perm { position: absolute; left: 0; top: 0; bottom: 0; background: var(--win); transition: width 500ms linear; }
+.ov-surv__temp { position: absolute; top: 0; bottom: 0; background: #c2d9a7; opacity: 0.7; transition: width 500ms linear, left 500ms linear; }
+.ov-surv__line, .ov-inf__line { font: 500 12px var(--font-label); color: var(--text-muted); letter-spacing: 0.06em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; }
+.ov-surv__line em { font-style: normal; color: var(--text); margin-left: 4px; text-transform: none; }
+.ov-surv--low .ov-surv__perm { background: var(--rating); }
+.ov-surv--down .ov-surv__perm { background: var(--accent); }
+.ov-surv--down .ov-surv__line { color: var(--accent); }
+.ov-surv--dead { opacity: 0.45; }
+.ov-picto { width: 30px; height: 30px; fill: var(--bone); flex: none; margin-left: 8px; }
+.ov-picto--none { display: inline-block; }
+.ov-inf--ghost { opacity: 0.6; }
+.ov-inf--ghost .ov-picto { fill: none; stroke: var(--bone); stroke-width: 1; }
+.ov-inf--dead { opacity: 0.35; }
+
+/* Highlight callout: the free top-left corner, clear of voice icons. */
+.ov-callout {
+  position: absolute; left: 48px; top: 150px; width: 470px; padding: 18px 22px 18px 26px;
+  background: var(--panel); border-left: 10px solid var(--c); overflow: hidden;
+  display: flex; flex-direction: column; gap: 4px; box-shadow: 0 16px 44px rgba(0,0,0,0.55);
+  animation: ov-wipe 420ms cubic-bezier(.2,.7,.2,1) both, ov-fade 400ms 7500ms reverse both;
+}
+.ov-callout__tape {
+  position: absolute; left: 0; right: 0; top: 0; height: 8px;
+  background: repeating-linear-gradient(-45deg, var(--hazard) 0 14px, #0b0908 14px 28px);
+  animation: ov-tape 1s linear infinite;
+}
+.ov-callout__title { font: 400 54px var(--stencil); text-transform: uppercase; color: var(--accent); line-height: 1; margin-top: 6px; }
+.ov-callout__text { font: 500 26px var(--font-body); color: var(--bone); }
+.ov-callout__team { font: 600 16px var(--font-label); letter-spacing: 0.2em; text-transform: uppercase; color: var(--c); }
+
+.ov-card__avatar--none { display: flex; align-items: center; justify-content: center; font: 400 44px var(--font-display); color: var(--text-muted); }

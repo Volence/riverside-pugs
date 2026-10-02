@@ -188,7 +188,7 @@ export interface CastMatchView {
   teams: { a: CastTeam; b: CastTeam };
   chapters: CastChapter[];
   /** Newest first. */
-  events: { kind: string; actor: string; target: string | null; value: number }[];
+  events: { seq: number; kind: string; actor: string; actorTeam: 'a' | 'b' | null; target: string | null; value: number }[];
   /** For a followed booking: which game of how many. */
   game: { number: number; of: number } | null;
 }

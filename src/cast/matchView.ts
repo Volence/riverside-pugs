@@ -204,10 +204,12 @@ export function buildMatchView(
 
   const phase = completed ? null : phaseFor(db, matchId);
   const nameOf = new Map(ps.map((p) => [p.steamid, p.name]));
+  const teamOf = new Map(ps.map((p) => [p.steamid, p.team]));
   const events = completed ? [] : (db.prepare(
-    'SELECT kind, actor, target, value FROM match_live_events WHERE match_id = ? ORDER BY seq DESC LIMIT 12',
-  ).all(matchId) as { kind: string; actor: string; target: string | null; value: number }[]).map((e) => ({
-    kind: e.kind, actor: nameOf.get(e.actor) ?? e.actor, target: e.target ? nameOf.get(e.target) ?? e.target : null, value: e.value,
+    'SELECT seq, kind, actor, target, value FROM match_live_events WHERE match_id = ? ORDER BY seq DESC LIMIT 12',
+  ).all(matchId) as { seq: number; kind: string; actor: string; target: string | null; value: number }[]).map((e) => ({
+    seq: e.seq, kind: e.kind, actor: nameOf.get(e.actor) ?? e.actor, actorTeam: teamOf.get(e.actor) ?? null,
+    target: e.target ? nameOf.get(e.target) ?? e.target : null, value: e.value,
   }));
 
   return {

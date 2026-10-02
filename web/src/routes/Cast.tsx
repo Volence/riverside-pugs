@@ -52,6 +52,7 @@ export function Cast() {
   return (
     <div class="page page--list">
       <PageHeader eyebrow="Casting" title="Cast a match">
+        <p class="cast__studio"><a class="btn btn--sm" href="/cast/studio">Open the caster studio</a> overlays and scenes for OBS</p>
         <p class="muted cast__rules">
           Join and stay on Spectators. Do not pick a team: anyone on a side when the match goes
           live is rostered and scored. Each match has its own password, and the site records who
