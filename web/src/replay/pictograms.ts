@@ -26,6 +26,18 @@ export function pictogramFor(cls: number): PictogramName | null {
   return name && name in PICTOGRAMS ? (name as PictogramName) : null;
 }
 
+/** The game HUD's own icon for a class (vgui/hud/zombieteamimage_*; the
+ *  witch, which has none, from its achievement art), as exported by
+ *  scripts/export-cast-art.py. Medallions draw this when it has loaded and
+ *  fall back to the path figure until then. */
+export function classIconUrl(name: string): string | null {
+  if (name === 'witch') return '/cast-art/witch.png';
+  return name in PICTOGRAMS ? `/cast-art/si-${name}.png` : null;
+}
+
+export const CLASS_ICON_URLS: readonly string[] = (Object.keys(PICTOGRAMS) as PictogramName[])
+  .map((n) => classIconUrl(n)!);
+
 let cache = new Map<string, Path2D>();
 
 /** For tests: happy-dom has no Path2D, so tests install a stub and must be

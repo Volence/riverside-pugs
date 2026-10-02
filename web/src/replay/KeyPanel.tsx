@@ -2,7 +2,7 @@ import { useEffect } from 'preact/hooks';
 import { ENTITY_KIND } from '../../../src/replayFormat';
 import { GHOST_COLOR, SLOT_COLORS, entityStyle, slotLabel } from './draw';
 import { DEAD_COLOR, STATE_RINGS } from './stateRing';
-import { PICTOGRAMS, type PictogramName } from './pictograms';
+import { classIconUrl, PICTOGRAMS, type PictogramName } from './pictograms';
 import { MARKER_KINDS } from './markers';
 
 function Swatch({ color, ring }: { color: string; ring?: boolean }) {
@@ -11,7 +11,7 @@ function Swatch({ color, ring }: { color: string; ring?: boolean }) {
 
 function Pict({ name }: { name: PictogramName }) {
   return (
-    <svg class="key__pict" viewBox="0 0 20 20" aria-hidden="true"><path d={PICTOGRAMS[name]} fill="currentColor" /></svg>
+    <img class="key__pict" src={classIconUrl(name) ?? ''} alt="" aria-hidden="true" />
   );
 }
 

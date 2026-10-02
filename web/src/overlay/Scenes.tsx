@@ -11,7 +11,7 @@ import {
  * which follows the producer.
  *
  * The look is the site's poster style with L4D touches (plan ruling 16):
- * stencil lettering, the safe room arrow, hazard tape for infected moments,
+ * stencil lettering, the safe room arrow, thin accent rules,
  * campaign tints. Gameplay layers keep to the screen regions the game HUD
  * leaves free (plan ruling 15).
  */
@@ -697,7 +697,7 @@ function Callout({ studio, match, now }: { studio: StudioState; match: CastMatch
   const team = c.team ? match.teams[c.team] : null;
   return (
     <div class="ov-callout" key={c.at} style={{ '--c': team ? `var(--team-${team.key})` : 'var(--accent)' } as Record<string, string>}>
-      <span class="ov-callout__tape" />
+      <span class="ov-callout__rule" />
       <span class="ov-callout__title">{c.title}</span>
       {c.text && <span class="ov-callout__text">{c.text}</span>}
       {team && <span class="ov-callout__team">{team.name}</span>}

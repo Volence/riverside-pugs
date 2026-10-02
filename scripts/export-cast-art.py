@@ -28,12 +28,13 @@ from srctools.vtf import VTF
 PAK = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/pak01_dir.vpk')
 OUT = os.path.join(os.path.dirname(__file__), '..', 'web', 'public', 'cast-art')
 
-# (x, y, size) of the face in each 256x256 select portrait, picked by eye.
+# (x, y, size) of a square centred on the face in each 256x256 select
+# portrait, measured so the face sits in the middle of a round medallion.
 FACES = {
-    'bill': (44, 26, 88),
-    'zoey': (88, 24, 92),
-    'francis': (84, 18, 96),
-    'louis': (92, 18, 96),
+    'bill': (80, 36, 72),
+    'zoey': (75, 27, 72),
+    'francis': (78, 19, 72),
+    'louis': (82, 24, 72),
 }
 
 

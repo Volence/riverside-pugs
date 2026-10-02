@@ -742,11 +742,25 @@ describe('drawScene', () => {
       players: [player({ slot: 0, cls: 2, infected: false, state: STATE.PRESENT | STATE.ALIVE, health: 100 })],
       entities: [], show: { ci: true, entities: true, names: false },
       width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
-      followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(), portraits: { '/portraits/francis.png': img }, version: 2,
+      followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(), portraits: { '/cast-art/survivor-francis.png': img }, version: 2,
     });
     const draw = calls.find((c) => c.fn === 'drawImage');
     expect(draw?.raw[0]).toBe(img);
     expect(calls.some((c) => c.fn === 'clip')).toBe(true);
+  });
+
+  it("draws an infected player's class as the game HUD icon once it has loaded", () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    const icon = { width: 64, height: 64 } as HTMLImageElement;
+    drawScene(ctx, {
+      transform, view, backdrop: null, trail: [],
+      players: [player({ slot: 4, cls: 3, infected: true, state: STATE.PRESENT | STATE.ALIVE, health: 250 })],
+      entities: [], show: { ci: true, entities: true, names: false },
+      width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
+      followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(), portraits: { '/cast-art/si-hunter.png': icon }, version: 3,
+    });
+    expect(calls.find((c) => c.fn === 'drawImage')?.raw[0]).toBe(icon);
   });
 
   it('draws the silhouette, not a face, for a format 1 survivor', () => {
@@ -759,7 +773,7 @@ describe('drawScene', () => {
       players: [player({ slot: 0, cls: 2, infected: false, state: STATE.PRESENT | STATE.ALIVE, health: 100 })],
       entities: [], show: { ci: true, entities: true, names: false },
       width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
-      followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(), portraits: { '/portraits/francis.png': face, '/portraits/unknown.png': unknown }, version: 1,
+      followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(), portraits: { '/cast-art/survivor-francis.png': face, '/portraits/unknown.png': unknown }, version: 1,
     });
     expect(calls.find((c) => c.fn === 'drawImage')?.raw[0]).toBe(unknown);
   });

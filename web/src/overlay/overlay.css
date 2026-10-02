@@ -4,7 +4,7 @@
  *
  * A fixed 1920x1080 stage on a transparent page: OBS composites it over the
  * game. The site's poster tokens, plus L4D touches (ruling 16): stencil
- * lettering, the safe room arrow, hazard tape. Gameplay layers keep to the
+ * lettering, the safe room arrow, thin accent rules. Gameplay layers keep to the
  * free regions of the game HUD (ruling 15): top centre x 640-1280. */
 
 /* Scoped to .ov so the producer panel can draw the same scenes inline as its
@@ -19,7 +19,6 @@
   line-height: 1.5;
   --bone: #efe2c4;
   --stencil: "Saira Stencil One", "Anton", Impact, sans-serif;
-  --hazard: #c9a45c;
   --panel: rgba(11, 9, 8, 0.9);
   --panel-2: rgba(28, 23, 19, 0.92);
 }
@@ -46,7 +45,6 @@
 @keyframes ov-spray { from { opacity: 0; filter: blur(6px); transform: scale(1.06); } to { opacity: 0.92; filter: none; transform: none; } }
 @keyframes ov-breathe { 0%, 100% { opacity: 0.85; } 50% { opacity: 1; } }
 @keyframes ov-drift { from { transform: scale(1.08) translateX(-1.5%); } to { transform: scale(1.08) translateX(1.5%); } }
-@keyframes ov-tape { from { background-position: 0 0; } to { background-position: 56px 0; } }
 @keyframes ov-flicker { 0%, 100% { opacity: 1; } 92% { opacity: 1; } 93% { opacity: 0.6; } 94% { opacity: 1; } 97% { opacity: 0.75; } }
 
 /* ---------- full-frame scenes ---------- */
@@ -302,11 +300,7 @@
   height: 40px; padding: 0 12px; position: relative; overflow: hidden;
   background: var(--panel); animation: ov-wipe 450ms both;
 }
-.ov-tank::before {
-  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 4px;
-  background: repeating-linear-gradient(-45deg, var(--hazard) 0 14px, #0b0908 14px 28px);
-  animation: ov-tape 1.2s linear infinite;
-}
+.ov-tank::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--accent); }
 .ov-tank__label { display: flex; align-items: center; gap: 6px; font: 400 22px var(--font-display); text-transform: uppercase; color: var(--accent); }
 .ov-tank__who { font: 500 16px var(--font-label); color: var(--bone); letter-spacing: 0.04em; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .ov-tank__bar { height: 12px; background: rgba(255,255,255,0.08); position: relative; }
@@ -340,11 +334,7 @@
   display: flex; flex-direction: column; gap: 4px; box-shadow: 0 16px 44px rgba(0,0,0,0.55);
   animation: ov-wipe 420ms cubic-bezier(.2,.7,.2,1) both, ov-fade 400ms 7500ms reverse both;
 }
-.ov-callout__tape {
-  position: absolute; left: 0; right: 0; top: 0; height: 8px;
-  background: repeating-linear-gradient(-45deg, var(--hazard) 0 14px, #0b0908 14px 28px);
-  animation: ov-tape 1s linear infinite;
-}
+.ov-callout__rule { position: absolute; left: 0; right: 0; top: 0; height: 3px; background: linear-gradient(90deg, var(--accent), transparent 85%); }
 .ov-callout__title { font: 400 54px var(--stencil); text-transform: uppercase; color: var(--accent); line-height: 1; margin-top: 6px; }
 .ov-callout__text { font: 500 26px var(--font-body); color: var(--bone); }
 .ov-callout__team { font: 600 16px var(--font-label); letter-spacing: 0.2em; text-transform: uppercase; color: var(--c); }
@@ -392,9 +382,10 @@
 
 /* A medallion with its words beside it (plate stacks, rail rows). */
 .ov-mrow { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.ov-mrow__text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.ov-mrow__text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; gap: 1px; }
 .ov-mrow__name { font: 500 19px var(--font-label); color: var(--bone); letter-spacing: 0.02em; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ov-mrow__line { display: flex; align-items: center; gap: 8px; min-height: 20px; }
+.ov-mrow__line { display: flex; align-items: center; gap: 8px; min-height: 20px; white-space: nowrap; }
+.ov-mrow__line > * { flex: none; }
 .ov-mrow__hp { font: 400 20px var(--font-display); color: var(--bone); font-variant-numeric: tabular-nums; line-height: 1; }
 .ov-mrow__state { font: 600 13px var(--font-label); letter-spacing: 0.16em; text-transform: uppercase; color: var(--text); }
 .ov-mrow.is-down .ov-mrow__state { color: #de4e40; }
@@ -422,23 +413,18 @@
 .ov-pg__track { position: relative; height: 7px; background: rgba(255, 255, 255, 0.1); }
 .ov-pg__fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--c); transition: width 1.5s linear, height 1.5s linear; box-shadow: 0 0 10px color-mix(in oklab, var(--c) 60%, transparent); }
 .ov-pg__tick { position: absolute; top: -2px; bottom: -2px; width: 1px; background: rgba(0, 0, 0, 0.75); }
-.ov-pg__pin {
-  position: absolute; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 3px;
-  padding: 1px 6px 1px 2px; background: #0b0908; border: 1px solid currentColor; white-space: nowrap;
-  font: 600 13px var(--font-label); line-height: 18px;
-}
-.ov-pg__pin .ov-ci { width: 22px; height: 22px; }
+.ov-pg__pin { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: currentColor; }
+.ov-pg__pin .ov-ci { position: absolute; bottom: calc(100% + 2px); left: 50%; width: 16px; height: 16px; margin-left: -8px; }
+.ov-pg__pin b { position: absolute; bottom: calc(100% + 4px); left: 10px; font: 600 11px/12px var(--font-label); letter-spacing: 0.04em; white-space: nowrap; }
 .ov-pg__pin--witch .ov-ci { border-radius: 2px; }
 .ov-pg__pin--tank { color: var(--accent); }
 .ov-pg__pin--witch { color: #c7a3e8; }
-.ov-pg__pin.is-passed { color: var(--text-muted); }
-.ov-pg__pin.is-passed .ov-ci { opacity: 0.5; }
+.ov-pg__pin.is-passed { opacity: 0.5; }
 .ov-pg__pct { font: 400 21px var(--font-display); color: var(--bone); text-align: right; font-variant-numeric: tabular-nums; }
 .ov-pg__note { position: absolute; right: 70px; top: -16px; font: 600 11px var(--font-label); letter-spacing: 0.16em; text-transform: uppercase; color: #c7a3e8; }
 /* The opponent's mark: a ghost line at how far the other team got here. */
-.ov-pg__rival { position: absolute; top: -14px; bottom: -4px; width: 0; border-left: 2px dashed var(--c); z-index: 1; }
-.ov-pg__rival b { position: absolute; bottom: 100%; left: 0; transform: translateX(-50%); padding: 0 6px; background: var(--c);
-  font: 600 11px/15px var(--font-label); letter-spacing: 0.08em; color: #0b0908; white-space: nowrap; }
+.ov-pg__rival { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 2px dashed var(--c); z-index: 1; }
+.ov-pg__rival b { position: absolute; top: 100%; left: 4px; margin-top: 1px; font: 600 10px/12px var(--font-label); letter-spacing: 0.06em; color: var(--c); white-space: nowrap; }
 /* Survivor dots: each survivor's own progress, a small face under the track. */
 .ov-pg__dot { position: absolute; top: 100%; margin-top: 4px; transform: translateX(-50%); width: 18px; height: 18px; border-radius: 50%; overflow: hidden; border: 1px solid var(--c); background: #000; z-index: 0; }
 .ov-pg__dot .ov-face { width: 100%; height: 100%; }
@@ -449,7 +435,7 @@
   display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 12px; height: 42px; padding: 0 14px 0 8px;
   background: rgba(11, 9, 8, 0.92); position: relative; overflow: hidden; animation: ov-wipe 450ms both;
 }
-.ov-tc::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 4px; background: repeating-linear-gradient(-45deg, var(--hazard) 0 12px, #0b0908 12px 24px); animation: ov-tape 1.2s linear infinite; }
+.ov-tc::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--accent); }
 .ov-tc__icon { width: 30px; height: 30px; }
 .ov-tc__words { display: flex; flex-direction: column; line-height: 1; gap: 2px; }
 .ov-tc__words b { font: 400 18px/1 var(--stencil); text-transform: uppercase; color: var(--accent); }
@@ -481,12 +467,13 @@
 .ov-plate__meta { font: 500 12px var(--font-label); letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-muted); white-space: nowrap; }
 .ov-plate .ov-pg { width: 560px; margin: 0 auto; background: rgba(11, 9, 8, 0.88); clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 14px 100%); padding: 0 26px; }
 .ov-plate__tank { width: 520px; margin: 6px auto 0; }
-.ov-stack { position: absolute; top: 340px; width: 300px; display: flex; flex-direction: column; gap: 10px; }
+.ov-stack { position: absolute; top: 340px; width: 330px; display: flex; flex-direction: column; gap: 10px; }
 .ov-stack--l { left: 0; padding-left: 20px; }
 .ov-stack--r { right: 0; padding-right: 20px; align-items: flex-end; }
-.ov-stack .ov-mrow { width: 280px; padding: 6px 12px 6px 6px; background: linear-gradient(90deg, rgba(11,9,8,0.9), rgba(11,9,8,0.55)); border-left: 4px solid var(--c); animation: ov-rise 400ms both; }
+.ov-stack .ov-mrow { width: 310px; padding: 6px 12px 6px 6px; background: linear-gradient(90deg, rgba(11,9,8,0.9), rgba(11,9,8,0.55)); border-left: 4px solid var(--c); animation: ov-rise 400ms both; }
 .ov-stack--r .ov-mrow { flex-direction: row-reverse; padding: 6px 6px 6px 12px; border-left: 0; border-right: 4px solid var(--c); background: linear-gradient(270deg, rgba(11,9,8,0.9), rgba(11,9,8,0.55)); }
-.ov-stack--r .ov-mrow__text { align-items: flex-end; }
+.ov-stack--r .ov-mrow__text { align-items: flex-end; text-align: right; }
+.ov-stack--r .ov-mrow__name { max-width: 100%; }
 .ov-stack--r .ov-mrow__line { flex-direction: row-reverse; }
 .ov-game--plate .ov-callout { top: 120px; }
 
@@ -500,7 +487,7 @@
   border-top: 5px solid var(--c);
 }
 .ov-corner--r .ov-corner__plate { flex-direction: row-reverse; padding: 0 18px 0 20px; background: linear-gradient(260deg, color-mix(in oklab, var(--c) 34%, #0b0908) 0%, rgba(11,9,8,0.94) 70%); }
-.ov-corner__plate::after { content: ''; position: absolute; left: 0; right: 0; bottom: -6px; height: 6px; background: repeating-linear-gradient(-45deg, var(--hazard) 0 12px, #0b0908 12px 24px); opacity: 0.9; }
+.ov-corner__plate::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, var(--c), transparent 80%); }
 .ov-corner__ident { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
 .ov-corner--r .ov-corner__ident { align-items: flex-end; }
 .ov-corner__name { font: 400 34px var(--stencil); text-transform: uppercase; color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; line-height: 1.05; }
@@ -522,7 +509,7 @@
 .ov-rail .ov-pg__label { display: none; }
 .ov-rail__board { width: 310px; background: rgba(11, 9, 8, 0.93); border-left: 1px solid rgba(255,255,255,0.06); display: flex; flex-direction: column; }
 .ov-rail__top { padding: 12px 18px 12px; border-top: 5px solid var(--accent); position: relative; }
-.ov-rail__top::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: repeating-linear-gradient(-45deg, var(--hazard) 0 10px, #0b0908 10px 20px); opacity: 0.85; }
+.ov-rail__top::after { content: ''; position: absolute; left: 18px; right: 18px; bottom: 0; height: 1px; background: rgba(255,255,255,0.12); }
 .ov-rail__event { display: block; font: 600 11px var(--font-label); letter-spacing: 0.3em; text-transform: uppercase; color: var(--text-muted); }
 .ov-rail__map { display: block; font: 400 30px var(--stencil); text-transform: uppercase; color: var(--accent); line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ov-rail__meta { display: block; font: 500 12px var(--font-label); letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-muted); }
@@ -554,7 +541,7 @@
  * rest. Rects come from the studio state (defaults are a guess until the
  * in-game probe sets them). */
 .ov-frame { position: absolute; border: 3px solid var(--c); box-shadow: 0 0 0 1px rgba(0,0,0,0.6), 0 12px 30px rgba(0,0,0,0.35); animation: ov-fade 500ms both; }
-.ov-frame::before { content: ''; position: absolute; left: -3px; right: -3px; bottom: -9px; height: 6px; background: repeating-linear-gradient(-45deg, var(--hazard) 0 12px, #0b0908 12px 24px); }
+.ov-frame::before { content: ''; position: absolute; left: -3px; right: -3px; bottom: -6px; height: 2px; background: var(--accent); opacity: 0.8; }
 .ov-frame__tab {
   position: absolute; top: 100%; margin-top: 9px; display: flex; align-items: center; gap: 10px; padding: 4px 14px 5px;
   background: rgba(11, 9, 8, 0.93); border-left: 5px solid var(--c); white-space: nowrap;
@@ -589,3 +576,4 @@
 .ov-recap__bar span { position: absolute; left: 0; top: 0; bottom: 0; background: var(--win); }
 .ov-recap__dmg { font: 400 21px var(--font-display); color: var(--bone); text-align: right; font-variant-numeric: tabular-nums; }
 .ov-recap__pct { font: 600 14px var(--font-label); color: var(--text-muted); text-align: right; }
+.ov-corner--r .ov-corner__plate::after { background: linear-gradient(270deg, var(--c), transparent 80%); }

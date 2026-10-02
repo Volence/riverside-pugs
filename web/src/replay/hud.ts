@@ -31,7 +31,9 @@ export function statusFlags(state: number): string[] {
 export function portraitFor(cls: number, version: number, survivor: boolean): string {
   if (!survivor || version < 2) return '/portraits/unknown.png';
   const name = SURVIVOR_CHARACTERS[cls];
-  return name ? `/portraits/${name}.png` : '/portraits/unknown.png';
+  // The released character-select faces (scripts/export-cast-art.py), the
+  // same art as the caster overlays; /portraits held the beta ones.
+  return name ? `/cast-art/survivor-${name}.png` : '/portraits/unknown.png';
 }
 
 /**

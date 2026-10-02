@@ -21,7 +21,8 @@ if (!DB_PATH || DB_PATH.includes('data/pug.db')) throw new Error('Set DB_PATH to
 const db = openDb(DB_PATH);
 
 export const CASTER = '76561198000009001';
-const NAMES = ['Volence', 'Psicodelica', 'Harry Potter', 'mayhem', 'gabe', 'wasd', 'mira', 'Visceral'];
+// One long name on each team, so clipping shows up in screenshots.
+const NAMES = ['Volence', 'Psicodelica', 'Harry Potter the Third', 'mayhem', 'gabe', 'wasd', 'mira', 'Visceral the Unkillable'];
 const IDS = NAMES.map((_, i) => `7656119800000910${i}`);
 const TOKEN = 'a1'.repeat(16);
 
@@ -94,7 +95,9 @@ if (LIVE_DIR) {
     slots: [...IDS.slice(4), ...IDS.slice(0, 4)], infectedMask: 0xf0, sidesKnown: true, losKnown: false,
   }));
   const s = (slot: number, p: Partial<PlayerSample>): PlayerSample => ({
-    slot, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, state: STATE.PRESENT | STATE.ALIVE, health: 100, temp: 1, cls: 0, weapon: 0, clip: 0, reserve: 0, ...p,
+    // Spread around the middle of the Dead Air 2 overview, so the live viewer
+    // has medallions to draw.
+    slot, x: 5800 + slot * 330, y: 4250 + (slot % 2) * 260, z: 100, yaw: 0, pitch: 0, state: STATE.PRESENT | STATE.ALIVE, health: 100, temp: 1, cls: 0, weapon: 0, clip: 0, reserve: 0, ...p,
   });
   let t = 180_000;
   const tick = () => {
@@ -105,9 +108,9 @@ if (LIVE_DIR) {
       entities: [{ ref: 7, kind: 2, state: 1, x: 0, y: 0, z: 0, health: 1000 }],
       players: [
         s(0, { cls: 0, health: 71, temp: 1, weapon: 4 }),
-        s(1, { cls: 1, health: 38, temp: 22, weapon: 5 }),
+        s(1, { cls: 1, state: STATE.PRESENT | STATE.ALIVE | STATE.PINNED, health: 38, temp: 22, weapon: 5 }),
         s(2, { cls: 2, state: STATE.PRESENT | STATE.ALIVE | STATE.INCAP, health: 210, weapon: 1 }),
-        s(3, { cls: 3, health: 100, temp: 1, weapon: 3 }),
+        s(3, { cls: 3, state: STATE.PRESENT | STATE.ALIVE | STATE.INCAP | STATE.LEDGED, health: 250, weapon: 3 }),
         s(4, { cls: 3, health: 250 }),
         s(5, { cls: 5, health: tank }),
         s(6, { cls: 1, state: STATE.PRESENT | STATE.ALIVE | STATE.GHOST, health: 250 }),
