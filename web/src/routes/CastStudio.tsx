@@ -237,7 +237,7 @@ export default function CastStudio() {
           <LowerThirdBox state={state} update={update} />
           <CountdownBox state={state} update={update} />
           <TeamsBox state={state} update={update} match={match} />
-          <CastersBox state={state} update={update} />
+          <CastersBox state={state} update={update} avatars={feed?.casterAvatars ?? []} />
           <ShowBox state={state} update={update} />
         </div>
         <div class="studio__col studio__col--side">
@@ -638,23 +638,36 @@ function TeamsBox({ state, update, match }: { state: StudioState; update: Update
   );
 }
 
-function CastersBox({ state, update }: { state: StudioState; update: Update }) {
+function CastersBox({ state, update, avatars }: { state: StudioState; update: Update; avatars: (string | null)[] }) {
   const set = (i: number, patch: Partial<StudioState['casters'][number]>) =>
     update((s) => ({ ...s, casters: s.casters.map((c, j) => (j === i ? { ...c, ...patch } : c)) }));
   return (
     <section class="panel">
       <h3>Casters</h3>
-      <p class="muted studio__hint">A cam link (VDO.Ninja view link or similar) is placed in its frame by the OBS scene collection.</p>
+      <p class="muted studio__hint">
+        A cam link (VDO.Ninja view link or similar) is placed in its frame by the OBS scene collection. No camera? Leave the link
+        empty and the frame shows the caster's avatar, matched to their site account by Twitch handle or name. Tick Cam in OBS
+        if you add their camera to OBS yourself.
+      </p>
       {state.casters.map((c, i) => (
         <div key={i} class="studio__form studio__caster">
           <input value={c.name} maxLength={40} placeholder="Name" aria-label={`Caster ${i + 1} name`} onInput={(e) => set(i, { name: e.currentTarget.value })} />
           <input value={c.handle} maxLength={40} placeholder="@handle" aria-label={`Caster ${i + 1} handle`} onInput={(e) => set(i, { handle: e.currentTarget.value })} />
           <input value={c.camUrl} maxLength={500} placeholder="Cam link (optional)" aria-label={`Caster ${i + 1} cam link`} onInput={(e) => set(i, { camUrl: e.currentTarget.value })} />
+          <label class="studio__toggle studio__toggle--inline studio__owncam">
+            <input type="checkbox" checked={c.ownCam} onChange={(e) => { const on = e.currentTarget.checked; set(i, { ownCam: on }); }} />
+            <span><b>Cam in OBS</b></span>
+          </label>
+          {!c.camUrl && !c.ownCam && c.name && (
+            <span class="studio__nocam muted">
+              {avatars[i] ? <><img src={avatars[i]!} alt="" referrerpolicy="no-referrer" /> No camera: avatar shown</> : 'No camera: no account matched, initial shown'}
+            </span>
+          )}
           <button type="button" class="btn btn--ghost btn--sm" onClick={() => update((s) => ({ ...s, casters: s.casters.filter((_, j) => j !== i) }), true)}>Remove</button>
         </div>
       ))}
       {state.casters.length < MAX_CASTERS && (
-        <button type="button" class="btn btn--ghost btn--sm" onClick={() => update((s) => ({ ...s, casters: [...s.casters, { name: '', handle: '', camUrl: '' }] }), true)}>Add caster</button>
+        <button type="button" class="btn btn--ghost btn--sm" onClick={() => update((s) => ({ ...s, casters: [...s.casters, { name: '', handle: '', camUrl: '', ownCam: false }] }), true)}>Add caster</button>
       )}
     </section>
   );

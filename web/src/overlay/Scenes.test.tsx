@@ -25,7 +25,7 @@ const live: OverlayFeed['live'] = {
   hud: { progress: 41, tank: 70, witch: 30, rivalReach: 74 },
 };
 const feed = (patch: Partial<ReturnType<typeof defaultStudioState>> = {}): OverlayFeed => ({
-  rev: 1, serverNow: Date.now(), studio: { ...defaultStudioState(), ...patch }, match, live, tankRecap: null, witchRecap: null,
+  rev: 1, serverNow: Date.now(), studio: { ...defaultStudioState(), ...patch }, match, live, tankRecap: null, witchRecap: null, casterAvatars: [],
 });
 
 const allOn = { survivors: true, infected: true, tank: true, bosses: true, progress: true, tankRecap: true, witchRecap: true, rival: true, dots: true };
@@ -184,6 +184,24 @@ describe('overlay basics', () => {
     expect(container.querySelector('.ov-callout')).toBeNull();
     rerender(<Overlay which="gameplay" feed={at([dp, { ...dp, seq: 4 }])} now={t + 500} />);
     expect(container.textContent).toContain('carl pounced stew for 25');
+  });
+
+  it('casters: a cam link or Cam in OBS keeps the window open; no camera shows the avatar or the initial', () => {
+    const casters = [
+      { name: 'Cam Person', handle: '', camUrl: 'https://vdo.ninja/?view=x', ownCam: false },
+      { name: 'Avatar Person', handle: '', camUrl: '', ownCam: false },
+      { name: 'zed', handle: '', camUrl: '', ownCam: false },
+    ];
+    const f = { ...feed({ casters }), casterAvatars: [null, 'https://a/av.jpg', null] };
+    const { container } = render(<Overlay which="casters" feed={f} now={Date.now()} />);
+    expect(container.querySelectorAll('mask rect[fill="black"]')).toHaveLength(1);
+    expect(container.querySelectorAll('.ov-cam--none')).toHaveLength(2);
+    expect(container.querySelector('img.ov-nocam__face')?.getAttribute('src')).toBe('https://a/av.jpg');
+    expect(container.querySelector('.ov-nocam__face--letter')?.textContent).toBe('Z');
+    const own = { ...feed({ casters: casters.map((c) => ({ ...c, ownCam: true })) }), casterAvatars: [] };
+    const all = render(<Overlay which="casters" feed={own} now={Date.now()} />).container;
+    expect(all.querySelectorAll('mask rect[fill="black"]')).toHaveLength(3);
+    expect(all.querySelector('.ov-cam--none')).toBeNull();
   });
 
   it('program follows the producer scene', () => {

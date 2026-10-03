@@ -84,7 +84,7 @@ function cleanCasters(v: unknown): CasterLine[] {
   if (!Array.isArray(v)) return [];
   return v.slice(0, MAX_CASTERS).map((c) => {
     const o = (c && typeof c === 'object' ? c : {}) as Record<string, unknown>;
-    return { name: str(o.name, 40), handle: str(o.handle, 40), camUrl: camUrl(o.camUrl) };
+    return { name: str(o.name, 40), handle: str(o.handle, 40), camUrl: camUrl(o.camUrl), ownCam: o.ownCam === true };
   });
 }
 

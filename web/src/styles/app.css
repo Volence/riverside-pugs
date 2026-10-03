@@ -3542,6 +3542,8 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .studio__toggle em { font-style: normal; color: var(--text-muted); font-size: 0.8125rem; }
 .studio__form label.studio__toggle--inline { flex-direction: row; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
 .studio__form label.studio__toggle--inline input { width: auto; padding: 0; margin: 0; }
+.studio__nocam { flex: 1 1 100%; display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-dense); }
+.studio__nocam img { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
 .studio__kinds { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin: var(--sp-2) 0 var(--sp-3); }
 .studio__kind { display: inline-flex; align-items: center; gap: 6px; padding: 3px var(--sp-2); background: var(--surface-2); border: 1px solid var(--border); font-size: var(--fs-dense); color: var(--text-muted); cursor: pointer; }
 .studio__kind input { accent-color: var(--accent); margin: 0; }

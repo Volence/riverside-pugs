@@ -59,7 +59,7 @@ function SceneBody({ scene, feed, now, auto }: { scene: OverlayKey; feed: Overla
   const { studio, match, live } = feed;
   switch (scene) {
     case 'starting': return <Starting studio={studio} match={match} now={now} />;
-    case 'casters': return <Casters studio={studio} match={match} />;
+    case 'casters': return <Casters studio={studio} match={match} avatars={feed.casterAvatars ?? []} />;
     case 'gameplay': return <Gameplay studio={studio} match={match} live={live} now={now} auto={auto} feed={feed} />;
     case 'scorebug': return match ? <Scorebug studio={studio} match={match} live={live} /> : null;
     case 'roundhud': return <RoundHud studio={studio} match={match} live={live} force />;
@@ -196,9 +196,12 @@ function Starting({ studio, match, now }: { studio: StudioState; match: CastMatc
   );
 }
 
-function Casters({ studio, match }: { studio: StudioState; match: CastMatchView | null }) {
-  const people = studio.casters.filter((c) => c.name);
+function Casters({ studio, match, avatars }: { studio: StudioState; match: CastMatchView | null; avatars: (string | null)[] }) {
+  const people = studio.casters.map((c, i) => ({ ...c, avatar: avatars[i] ?? null })).filter((c) => c.name);
   const slots = camSlots(Math.max(people.length, 1));
+  // A frame with no camera behind it (no cam link, not added in OBS by hand)
+  // is not cut out: it gets the no-camera tile instead of a black hole.
+  const hasCam = (i: number): boolean => { const c = people[i]; return !c || !!c.camUrl || c.ownCam; };
   return (
     <div class="ov-full ov-full--holes">
       {/* The backdrop with each cam frame cut out, so the cam sources OBS
@@ -207,7 +210,7 @@ function Casters({ studio, match }: { studio: StudioState; match: CastMatchView 
         <defs>
           <mask id="ov-holes-mask">
             <rect width="1920" height="1080" fill="white" />
-            {slots.map((s, i) => <rect key={i} x={s.x} y={s.y} width={s.w} height={s.h} fill="black" />)}
+            {slots.map((s, i) => hasCam(i) && <rect key={i} x={s.x} y={s.y} width={s.w} height={s.h} fill="black" />)}
           </mask>
           <radialGradient id="ov-holes-wash" cx="50%" cy="0%" r="70%">
             <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.28" />
@@ -226,7 +229,8 @@ function Casters({ studio, match }: { studio: StudioState; match: CastMatchView 
       {slots.map((s, i) => {
         const c = people[i];
         return (
-          <div class="ov-cam" key={i} style={{ left: `${s.x}px`, top: `${s.y}px`, width: `${s.w}px`, height: `${s.h}px` }}>
+          <div class={`ov-cam${hasCam(i) ? '' : ' ov-cam--none'}`} key={i} style={{ left: `${s.x}px`, top: `${s.y}px`, width: `${s.w}px`, height: `${s.h}px` }}>
+            {!hasCam(i) && c && <NoCamTile name={c.name} avatar={c.avatar} />}
             <div class="ov-cam__plate">
               <span class="ov-cam__name">{c?.name ?? 'Caster'}</span>
               {c?.handle && <span class="ov-cam__handle">{c.handle}</span>}
@@ -236,6 +240,28 @@ function Casters({ studio, match }: { studio: StudioState; match: CastMatchView 
       })}
       {match && <div class="ov-casters__bottom"><MatchRibbon match={match} /></div>}
     </div>
+  );
+}
+
+/** A caster with no camera: their avatar large in the frame, or their
+ *  initial on a tint, over the campaign wash, so the frame never sits black. */
+function NoCamTile({ name, avatar }: { name: string; avatar: string | null }) {
+  return (
+    <div class="ov-nocam" aria-hidden="true">
+      {avatar && <div class="ov-nocam__blur" style={{ backgroundImage: `url(${JSON.stringify(avatar)})` }} />}
+      {avatar
+        ? <img class="ov-nocam__face" src={avatar} alt="" referrerpolicy="no-referrer" />
+        : <span class="ov-nocam__face ov-nocam__face--letter">{[...name][0]?.toUpperCase() ?? '?'}</span>}
+      <span class="ov-nocam__mic"><MicIcon /></span>
+    </div>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+      <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z" />
+    </svg>
   );
 }
 

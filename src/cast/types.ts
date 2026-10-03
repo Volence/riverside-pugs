@@ -41,6 +41,10 @@ export interface CasterLine {
   /** A browser-source URL for this caster's camera (VDO.Ninja and the like).
    *  Only the OBS scene collection uses it; overlays draw the frame. */
   camUrl: string;
+  /** The producer adds this caster's camera to OBS by hand (a local webcam
+   *  source): keep the cam window open though there is no cam link. Without
+   *  either, the Casters scene shows the no-camera tile (avatar and name). */
+  ownCam: boolean;
 }
 
 export interface TeamOverride {
@@ -417,4 +421,7 @@ export interface OverlayFeed {
   tankRecap: TankRecap | null;
   /** For a few seconds after a witch dies (pug-match 0.3.21 WITCHDONE). */
   witchRecap: WitchRecap | null;
+  /** One per studio.casters line: the matched site account's avatar for the
+   *  no-camera tile, or null (src/cast/casterAvatars.ts). */
+  casterAvatars: (string | null)[];
 }

@@ -54,5 +54,5 @@ export function sampleFeed(studio: StudioState, now: number): OverlayFeed {
     witches: 1,
     hud: { progress: 52, tank: 74, witch: 31, rivalReach: 61 },
   };
-  return { rev: 0, serverNow: now, studio, match, live, tankRecap: null, witchRecap: null };
+  return { rev: 0, serverNow: now, studio, match, live, tankRecap: null, witchRecap: null, casterAvatars: studio.casters.map(() => null) };
 }
