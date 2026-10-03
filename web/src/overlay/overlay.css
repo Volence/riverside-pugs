@@ -338,15 +338,15 @@
 .ov-callout__title { font: 400 54px var(--stencil); text-transform: uppercase; color: var(--accent); line-height: 1; margin-top: 6px; }
 .ov-callout__text { font: 500 26px var(--font-body); color: var(--bone); }
 .ov-callout__team { font: 600 16px var(--font-label); letter-spacing: 0.2em; text-transform: uppercase; color: var(--c); }
-/* Compact (the default size): one slim line, title then the play, about
+/* Compact (the default size): one slim line (a long play wraps), title then the play, about
    60% of the big card; the team shows only as the colour edge. */
 .ov-callout--compact {
-  width: auto; max-width: 560px; padding: 9px 16px 9px 16px; border-left-width: 6px;
+  width: auto; max-width: 640px; padding: 9px 16px 9px 16px; border-left-width: 6px;
   flex-direction: row; align-items: baseline; gap: 12px;
 }
 .ov-callout--compact .ov-callout__rule { height: 2px; }
 .ov-callout--compact .ov-callout__title { font-size: 28px; margin-top: 0; flex: none; }
-.ov-callout--compact .ov-callout__text { font-size: 19px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-callout--compact .ov-callout__text { font-size: 19px; min-width: 0; }
 .ov-callout--compact .ov-callout__team { display: none; }
 
 .ov-card__avatar--none { display: flex; align-items: center; justify-content: center; font: 400 44px var(--font-display); color: var(--text-muted); }
