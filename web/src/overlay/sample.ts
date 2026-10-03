@@ -30,7 +30,7 @@ export function sampleFeed(studio: StudioState, now: number): OverlayFeed {
       { number: 3, map: 'l4d_vs_airport03_garage', a: null, b: null, firstSurvivor: null, state: 'next' },
       { number: 4, map: 'l4d_vs_airport04_terminal', a: null, b: null, firstSurvivor: null, state: 'next' },
     ],
-    events: [], game: null,
+    events: [], game: null, lastRound: null,
   };
   const s = (i: number, character: string, health: number, temp: number, extra: Partial<CastLiveRound['survivors'][number]> = {}) => ({
     slot: i, steamid: a.players[i]!.steamid, name: a.players[i]!.name, character, health, temp, alive: true,
@@ -53,6 +53,12 @@ export function sampleFeed(studio: StudioState, now: number): OverlayFeed {
     tank: { health: 4200, maxHealth: 6000, controller: b.players[1]!.name },
     witches: 1,
     hud: { progress: 52, tank: 74, witch: 31, rivalReach: 61 },
+  };
+  match.lastRound = {
+    mapNumber: 2, map: 'l4d_vs_airport02_offices', half: 1,
+    halves: [{ half: 1, survTeam: 'a', score: 412, alive: 3, seconds: 371 }],
+    players: [...a.players.map((p, i) => ({ steamid: p.steamid, name: p.name, team: 'a' as const, stats: { sidmg: [930, 610, 420, 300][i] ?? 0, sikill: [9, 6, 4, 3][i] ?? 0, ck: [88, 71, 52, 40][i] ?? 0, skeets: [2, 0, 1, 0][i] ?? 0 } })),
+      ...b.players.map((p, i) => ({ steamid: p.steamid, name: p.name, team: 'b' as const, stats: { damage_as_si: [212, 180, 96, 60][i] ?? 0, dps_landed: [1, 0, 0, 0][i] ?? 0, survivors_biled: [0, 3, 0, 1][i] ?? 0, dmg_as_tank: [0, 0, 240, 0][i] ?? 0 } }))],
   };
   return { rev: 0, serverNow: now, studio, match, live, tankRecap: null, witchRecap: null, casterAvatars: studio.casters.map(() => null) };
 }

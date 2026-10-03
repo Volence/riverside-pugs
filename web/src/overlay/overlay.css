@@ -183,6 +183,31 @@
 .ov-nocam__mic { position: absolute; right: 18px; top: 16px; display: flex; color: var(--text-muted); opacity: 0.8; }
 .ov-casters__bottom { position: absolute; left: 0; right: 0; bottom: 56px; display: flex; justify-content: center; animation: ov-rise 700ms 700ms both; }
 
+/* ---------- round results ---------- */
+.ov-results { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding-top: 70px; }
+.ov-results__title { font-size: 92px; margin: 6px 0 0; animation: ov-drop 700ms both; }
+.ov-results__map { font: 500 26px var(--font-label); letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-muted); margin: 6px 0 0; }
+.ov-results__halves { display: flex; gap: 28px; margin-top: 30px; animation: ov-rise 600ms 200ms both; }
+.ov-half { width: 420px; padding: 18px 24px 16px; background: var(--panel); border-top: 6px solid var(--c); display: flex; flex-direction: column; gap: 4px; }
+.ov-half.is-win { box-shadow: 0 0 0 2px var(--c), 0 18px 50px rgba(0,0,0,0.5); }
+.ov-half--next { background: color-mix(in srgb, var(--panel) 70%, transparent); border-top-style: dashed; }
+.ov-half__label { font: 600 14px var(--font-label); letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-muted); }
+.ov-half__team { display: flex; align-items: center; gap: 12px; font: 400 30px var(--font-display); text-transform: uppercase; color: var(--bone); }
+.ov-half__score { font-size: 96px; line-height: 1; color: var(--c); }
+.ov-half__facts { display: flex; gap: 18px; font: 500 20px var(--font-label); color: var(--bone); }
+.ov-results__verdict { margin: 22px 0 0; font: 500 28px var(--font-body); color: var(--bone); }
+.ov-results__verdict span { color: var(--text-muted); }
+.ov-results__boxes { display: flex; gap: 28px; margin-top: 28px; animation: ov-rise 600ms 400ms both; }
+.ov-table.ov-rbox { position: static; width: 820px; border-left: 8px solid var(--c); background: var(--panel); }
+.ov-rbox thead th { font: 500 16px var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted); padding: 10px 12px; text-align: right; }
+.ov-rbox thead th:first-child { width: 340px; text-align: left; font: 400 26px var(--font-display); letter-spacing: 0.02em; color: var(--bone); }
+.ov-rbox__head .ov-side { margin-right: 10px; vertical-align: middle; }
+.ov-rbox tbody tr { border-top: 1px solid var(--border); }
+.ov-rbox tbody th { text-align: left; padding: 8px 12px; font: 500 22px var(--font-label); color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-rbox tbody td { text-align: right; padding: 8px 12px; font: 400 26px var(--font-display); color: var(--bone); }
+.ov-rbox tbody td.is-top { color: var(--rating); }
+.ov-rbox tbody td.ov-rbox__empty { text-align: left; font: 500 18px var(--font-label); letter-spacing: 0.08em; color: var(--text-muted); padding: 14px 12px; }
+
 /* ---------- map intro ---------- */
 .ov-intro__eyebrow { font: 500 30px var(--font-label); letter-spacing: 0.4em; text-transform: uppercase; color: var(--text); animation: ov-fade 700ms both; }
 .ov-intro__chapter { margin-top: 18px; font: 400 44px var(--font-display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); animation: ov-fade 700ms 200ms both; }

@@ -11,7 +11,7 @@ const match: CastMatchView = {
   id: 7, kind: 'pug', state: 'live', campaign: 'dead_air', campaignName: 'Dead Air', currentMap: 'l4d_vs_airport02_offices',
   mapNumber: 2, mapCount: 4, half: 1, phase: 'live', phaseSinceMs: 0, winner: null,
   teams: { a: team('a', 'survivor'), b: team('b', 'infected') },
-  chapters: [], events: [], game: null,
+  chapters: [], events: [], game: null, lastRound: null,
 };
 const live: OverlayFeed['live'] = {
   ordinal: 1, half: 1, map: 'l4d_vs_airport02_offices', tMs: 1000, ageMs: 100,
@@ -202,6 +202,22 @@ describe('overlay basics', () => {
     const all = render(<Overlay which="casters" feed={own} now={Date.now()} />).container;
     expect(all.querySelectorAll('mask rect[fill="black"]')).toHaveLength(3);
     expect(all.querySelector('.ov-cam--none')).toBeNull();
+  });
+
+  it('round results: half time shows the score to beat; a finished map shows who took it and by how much', () => {
+    const players: NonNullable<CastMatchView['lastRound']>['players'] = [
+      { steamid: '1', name: 'Gunner', team: 'a' as const, stats: { sidmg: 900, skeets: 1, team_skeets: 1 } },
+      { steamid: '2', name: 'Spitter', team: 'b' as const, stats: { damage_as_si: 150, dps_landed: 1 } },
+    ];
+    const half = { mapNumber: 2, map: 'l4d_vs_airport02_offices', half: 1 as const, halves: [{ half: 1 as const, survTeam: 'a' as const, score: 412, alive: 3, seconds: 371 }], players };
+    const one = render(<Overlay which="results" feed={{ ...feed(), match: { ...match, lastRound: half } }} now={Date.now()} />).container.textContent ?? '';
+    for (const x of ['Half time', '412', '3 of 4 made it', '6:11', 'To beat', '413', 'Gunner', '900', 'Spitter']) expect(one).toContain(x);
+    const done = { ...half, half: 2 as const, halves: [...half.halves, { half: 2 as const, survTeam: 'b' as const, score: 380, alive: 0, seconds: 290 }] };
+    const two = render(<Overlay which="results" feed={{ ...feed(), match: { ...match, lastRound: done } }} now={Date.now()} />).container.textContent ?? '';
+    for (const x of ['done', 'Wiped', 'Map to', 'Rats', 'by 32', 'Campaign']) expect(two).toContain(x);
+    expect(two).not.toContain('To beat');
+    const none = render(<Overlay which="results" feed={feed()} now={Date.now()} />).container.textContent ?? '';
+    expect(none).toContain('Round results');
   });
 
   it('program follows the producer scene', () => {
