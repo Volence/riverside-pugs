@@ -10,7 +10,6 @@ import { Matches } from './routes/Matches';
 import { BalanceNotes } from './routes/BalanceNotes';
 import { GameValues } from './routes/balance/GameValues';
 import { Live } from './routes/Live';
-import { Cast } from './routes/Cast';
 import { Streams } from './routes/Streams';
 import { MatchDetail } from './routes/MatchDetail';
 import { MapDetail } from './routes/MapDetail';
@@ -76,6 +75,8 @@ function NotFound() {
 /** The ban list lives on the People desk now. Declared once rather than
  *  inline, so the router is not handed a new component type every render. */
 const BansMoved = () => <Redirect to="/admin/people/bans" />;
+// The connect lines now live in the studio's On air box.
+const CastMoved = () => <Redirect to="/cast/studio" />;
 
 /**
  * Every URL the site answers, in one place.
@@ -100,7 +101,7 @@ export function AppRoutes(
       <Route path="/balance" component={BalanceNotes} />
       <Route path="/balance/values" component={GameValues} />
       <Route path="/live" component={Live} me={me} />
-      <Route path="/cast" component={Cast} />
+      <Route path="/cast" component={CastMoved} />
       <Route path="/cast/studio" component={CastStudio} />
       <Route path="/streams" component={Streams} />
       <Route path="/match/:id" component={MatchDetail} me={me} staff={staff} />

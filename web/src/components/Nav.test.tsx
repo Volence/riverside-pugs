@@ -115,7 +115,7 @@ describe('Nav', () => {
     const { unmount } = render(
       <LocationProvider><Nav session={{ kind: 'active', me: caster }} state={null} /></LocationProvider>,
     );
-    expect((screen.getByRole('link', { name: 'Cast' }) as HTMLAnchorElement).getAttribute('href')).toBe('/cast');
+    expect((screen.getByRole('link', { name: 'Cast' }) as HTMLAnchorElement).getAttribute('href')).toBe('/cast/studio');
     unmount();
     const admin = { steamid: '2', name: 'boss', avatar: null, status: 'active', isAdmin: true, isCaster: true };
     const second = render(<LocationProvider><Nav session={{ kind: 'active', me: admin }} state={null} /></LocationProvider>);
