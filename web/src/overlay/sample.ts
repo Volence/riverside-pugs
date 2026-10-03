@@ -53,7 +53,6 @@ export function sampleFeed(studio: StudioState, now: number): OverlayFeed {
     tank: { health: 4200, maxHealth: 6000, controller: b.players[1]!.name },
     witches: 1,
     hud: { progress: 52, tank: 74, witch: 31, rivalReach: 61 },
-    tankRecap: null,
   };
-  return { rev: 0, serverNow: now, studio, match, live };
+  return { rev: 0, serverNow: now, studio, match, live, tankRecap: null, witchRecap: null };
 }

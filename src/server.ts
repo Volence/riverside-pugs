@@ -1270,6 +1270,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             liveHudStore.recordTank(ev.token, ev.recap);
             return;
           }
+          else if (ev.kind === 'witch_done') {
+            liveHudStore.recordWitch(ev.token, ev.recap);
+            return;
+          }
           else if (ev.kind === 'live_hud') {
             // Caster studio only, in memory (src/cast/liveHud.ts). Every 2 s
             // per live match, and nothing public changed: no broadcast.

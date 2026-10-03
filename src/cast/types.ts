@@ -166,6 +166,8 @@ export interface LiveElements {
   progress: boolean;
   /** The tank damage card for a few seconds after a tank dies. */
   tankRecap: boolean;
+  /** The witch card: each survivor's damage to her, crown or not, who startled her. */
+  witchRecap: boolean;
   /** On the progress strip in the second half: how far the other team got
    *  on this map in the first half. */
   rival: boolean;
@@ -175,7 +177,7 @@ export interface LiveElements {
 }
 
 export function defaultElements(): LiveElements {
-  return { survivors: false, infected: true, tank: true, bosses: true, progress: true, tankRecap: true, rival: true, dots: true };
+  return { survivors: false, infected: true, tank: true, bosses: true, progress: true, tankRecap: true, witchRecap: true, rival: true, dots: true };
 }
 
 export const MAX_CASTERS = 3;
@@ -374,10 +376,6 @@ export interface CastLiveRound {
   /** Null on a server without pug-match 0.3.20, or when its last LIVEHUD is
    *  older than a few seconds. */
   hud: LiveHud | null;
-  /** For a few seconds after a tank dies (pug-match 0.3.20 TANKDONE): each
-   *  survivor's damage to it from pug-match's own hook, exact, and the
-   *  tank's own line. */
-  tankRecap: TankRecap | null;
 }
 
 export interface TankRecap {
@@ -389,7 +387,21 @@ export interface TankRecap {
   /** More than 1: overlapping tanks in one combined recap. */
   tanks: number;
   passes: number;
+  /** dead, or the round ended with it up: wipe (every survivor down) or safe. */
+  end: 'dead' | 'wipe' | 'safe';
   /** Highest first; share is of the survivors' total damage to this tank. */
+  players: { name: string; dmg: number; share: number }[];
+}
+
+export interface WitchRecap {
+  agoMs: number;
+  /** Seconds from the startle to her death, null when never startled. */
+  aliveS: number | null;
+  startled: string | null;
+  killer: string | null;
+  crown: boolean;
+  incaps: number;
+  /** Highest first; share is of the survivors' total damage to her. */
   players: { name: string; dmg: number; share: number }[];
 }
 
@@ -399,4 +411,10 @@ export interface OverlayFeed {
   studio: StudioState;
   match: CastMatchView | null;
   live: CastLiveRound | null;
+  /** For a few seconds after a tank's window closes (pug-match TANKDONE):
+   *  each survivor's damage to it, exact, and the tank's own line. On the
+   *  feed, not the live round, because a wipe ends the round it belongs to. */
+  tankRecap: TankRecap | null;
+  /** For a few seconds after a witch dies (pug-match 0.3.21 WITCHDONE). */
+  witchRecap: WitchRecap | null;
 }

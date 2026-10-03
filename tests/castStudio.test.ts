@@ -14,7 +14,7 @@ import { camSlots } from '../src/cast/layout.js';
 import { encodeFrame, encodeHeader, STATE, VERSION, type Frame, type PlayerSample } from '../src/replayFormat.js';
 import { findFrameBoundary, LiveRoundReader } from '../src/cast/liveRound.js';
 import { tagFrom } from '../src/cast/matchView.js';
-import { LIVE_HUD_FRESH_MS, LiveHudStore, liveHudStore, TANK_RECAP_MS, type LiveHudLine } from '../src/cast/liveHud.js';
+import { LIVE_HUD_FRESH_MS, LiveHudStore, liveHudStore, TANK_RECAP_MS, WITCH_RECAP_MS, type LiveHudLine } from '../src/cast/liveHud.js';
 import { ITEM } from '../src/cast/types.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000700${i}`);
@@ -382,9 +382,16 @@ describe('LIVEHUD', () => {
 
   it('keeps a tank recap for its card window only', () => {
     const store = new LiveHudStore();
-    store.recordTank(TOKEN, { aliveS: 80, controller: null, dealt: 200, tanks: 1, passes: 0, players: [] }, 1000);
+    store.recordTank(TOKEN, { aliveS: 80, controller: null, dealt: 200, tanks: 1, passes: 0, end: 'dead', players: [] }, 1000);
     expect(store.tank(TOKEN, 1000 + TANK_RECAP_MS)?.recap.aliveS).toBe(80);
     expect(store.tank(TOKEN, 1001 + TANK_RECAP_MS)).toBeNull();
+  });
+
+  it('keeps a witch recap for its card window only', () => {
+    const store = new LiveHudStore();
+    store.recordWitch(TOKEN, { aliveS: null, startled: null, killer: null, crown: true, incaps: 0, players: [] }, 1000);
+    expect(store.witch(TOKEN, 1000 + WITCH_RECAP_MS)?.recap.crown).toBe(true);
+    expect(store.witch(TOKEN, 1001 + WITCH_RECAP_MS)).toBeNull();
   });
 
   it('puts a tank recap on the feed with names and shares, then drops it', async () => {
@@ -399,12 +406,17 @@ describe('LIVEHUD', () => {
     const fr = (tMs: number): Frame => ({ tMs, offset: 0, entities: [], players: [0, 1, 2, 3, 4, 5, 6, 7].map(p) });
     writeFileSync(join(liveDir, `pug_${TOKEN}_0_1.rpl`), Buffer.concat([h, encodeFrame(fr(100)), encodeFrame(fr(200))]));
     await call('PUT', '/api/cast/studio', CASTER, { matchId });
-    liveHudStore.recordTank(TOKEN, { aliveS: 84, controller: IDS[4]!, dealt: 312, tanks: 1, passes: 1, players: [{ steamid: IDS[0]!, dmg: 1500 }, { steamid: IDS[1]!, dmg: 4500 }] });
+    liveHudStore.recordTank(TOKEN, { aliveS: 84, controller: IDS[4]!, dealt: 312, tanks: 1, passes: 1, end: 'wipe', players: [{ steamid: IDS[0]!, dmg: 1500 }, { steamid: IDS[1]!, dmg: 4500 }] });
+    liveHudStore.recordWitch(TOKEN, { aliveS: 9, startled: IDS[2]!, killer: IDS[0]!, crown: false, incaps: 1, players: [{ steamid: IDS[0]!, dmg: 600 }, { steamid: IDS[2]!, dmg: 400 }] });
     const f = (await feed(await keyOf(CASTER))).json();
     const name = (id: string) => (db.prepare('SELECT name FROM players WHERE steamid = ?').get(id) as { name: string }).name;
-    expect(f.live.tankRecap).toMatchObject({
-      aliveS: 84, dealt: 312, controller: name(IDS[4]!), tanks: 1, passes: 1,
+    expect(f.tankRecap).toMatchObject({
+      aliveS: 84, dealt: 312, controller: name(IDS[4]!), tanks: 1, passes: 1, end: 'wipe',
       players: [{ name: name(IDS[1]!), dmg: 4500, share: 75 }, { name: name(IDS[0]!), dmg: 1500, share: 25 }],
+    });
+    expect(f.witchRecap).toMatchObject({
+      aliveS: 9, startled: name(IDS[2]!), killer: name(IDS[0]!), crown: false, incaps: 1,
+      players: [{ name: name(IDS[0]!), dmg: 600, share: 60 }, { name: name(IDS[2]!), dmg: 400, share: 40 }],
     });
   });
 

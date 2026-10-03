@@ -47,7 +47,8 @@ const ELEMENT_INFO: { key: keyof LiveElements; label: string; help: string }[] =
   { key: 'dots', label: 'Survivor dots', help: "Each survivor's own progress on the strip: who is rushing or lagging." },
   { key: 'bosses', label: 'Tank and witch %', help: 'On the progress strip (bar) or under the scorebug.' },
   { key: 'tank', label: 'Tank health', help: 'On by default: a spectator never sees the tank\'s health.' },
-  { key: 'tankRecap', label: 'Tank damage card', help: "After a tank dies: each survivor's damage to it and their share, who played it, how long it lived." },
+  { key: 'tankRecap', label: 'Tank damage card', help: "After a tank dies, or the round ends with it up (a wipe, or the survivors made it): each survivor's damage to it and their share, who played it, how long it lived." },
+  { key: 'witchRecap', label: 'Witch card', help: "After a witch dies: crowned or not, who startled her and who killed her, each survivor's damage to her." },
 ];
 
 function useInterval(fn: () => void, ms: number) {

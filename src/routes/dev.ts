@@ -8,7 +8,7 @@ import { QUEUE_SIZE } from '../queue.js';
 import type { Hub } from '../ws.js';
 import { completeMatch } from '../matchResult.js';
 import type { Dump } from '../dumpParse.js';
-import { liveHudStore, type LiveHudLine, type TankDone } from '../cast/liveHud.js';
+import { liveHudStore, type LiveHudLine, type TankDone, type WitchDone } from '../cast/liveHud.js';
 
 export interface DevRouteOpts {
   config: Config;
@@ -42,12 +42,13 @@ export async function devRoutes(app: FastifyInstance, opts: DevRouteOpts): Promi
    *  for a match token, as the plugin would (the caster studio's
    *  screenshots; no game server in dev). */
   app.post('/api/dev/livehud', async (req, reply) => {
-    const { token, line, round, tank } = (req.body ?? {}) as {
-      token?: string; line?: LiveHudLine; round?: { ordinal: number; half: number }; tank?: TankDone;
+    const { token, line, round, tank, witch } = (req.body ?? {}) as {
+      token?: string; line?: LiveHudLine; round?: { ordinal: number; half: number }; tank?: TankDone; witch?: WitchDone;
     };
     if (!token || !/^[0-9a-f]{32}$/.test(token)) return reply.code(400).send({ error: 'token' });
     if (line && Array.isArray(line.players)) liveHudStore.record(token, line, Date.now(), round ?? null);
-    if (tank && Array.isArray(tank.players)) liveHudStore.recordTank(token, { ...tank, tanks: tank.tanks ?? 1, passes: tank.passes ?? 0 });
+    if (tank && Array.isArray(tank.players)) liveHudStore.recordTank(token, { ...tank, tanks: tank.tanks ?? 1, passes: tank.passes ?? 0, end: tank.end ?? 'dead' });
+    if (witch && Array.isArray(witch.players)) liveHudStore.recordWitch(token, witch);
     return { ok: true };
   });
 
