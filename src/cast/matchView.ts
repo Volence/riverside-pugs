@@ -12,7 +12,7 @@ import { statDef } from '../statKeys.js';
 import { STREAK_MIN, streakRuns } from '../skeetStreaks.js';
 import { boomerRate } from './types.js';
 import type {
-  CastChapter, CastEvent, CastMatchView, CastPlayer, CastRole, CastSide, CastTeam, StudioState, TeamOverride,
+  CastChapter, CastEvent, CastMatchView, CastRoundResult, CastPlayer, CastRole, CastSide, CastTeam, StudioState, TeamOverride,
 } from './types.js';
 
 /**
@@ -251,7 +251,42 @@ export function buildMatchView(
     winner: completed ? m.winner : null,
     teams: { a: team('a'), b: team('b') },
     chapters, events, game,
+    lastRound: lastRoundResult(db, matchId, planned, scored, nameOf, teamOf),
   };
+}
+
+/** The newest finished round (ended_at set) and the halves of its map. */
+function lastRoundResult(
+  db: DB, matchId: number, planned: string[], scored: { ordinal: number; map: string }[],
+  nameOf: Map<string, string>, teamOf: Map<string, 'a' | 'b'>,
+): CastRoundResult | null {
+  type R = { ordinal: number; half: number; survTeam: 'a' | 'b'; score: number; alive: number | null; startedAt: string | null; endedAt: string | null };
+  const cols = `ordinal, half, surv_team AS survTeam, score, survivors_alive AS alive, started_at AS startedAt, ended_at AS endedAt`;
+  const last = db.prepare(`SELECT ${cols} FROM match_rounds WHERE match_id = ? AND ended_at IS NOT NULL ORDER BY ordinal DESC, half DESC LIMIT 1`)
+    .get(matchId) as R | undefined;
+  if (!last || (last.half !== 1 && last.half !== 2)) return null;
+  const halves = (db.prepare(`SELECT ${cols} FROM match_rounds WHERE match_id = ? AND ordinal = ? AND ended_at IS NOT NULL AND half <= ? ORDER BY half`)
+    .all(matchId, last.ordinal, last.half) as R[])
+    .filter((r) => r.half === 1 || r.half === 2)
+    .map((r) => {
+      const a = r.startedAt ? Date.parse(`${r.startedAt.replace(' ', 'T')}Z`) : NaN;
+      const b = r.endedAt ? Date.parse(`${r.endedAt.replace(' ', 'T')}Z`) : NaN;
+      const seconds = Number.isFinite(a) && Number.isFinite(b) && b >= a ? Math.round((b - a) / 1000) : null;
+      return { half: r.half as 1 | 2, survTeam: r.survTeam, score: r.score, alive: r.alive, seconds };
+    });
+  const bags = new Map<string, Record<string, number>>();
+  for (const row of db.prepare('SELECT player_id, stat, value FROM match_round_stats WHERE match_id = ? AND ordinal = ? AND half = ?')
+    .all(matchId, last.ordinal, last.half) as { player_id: string; stat: string; value: number }[]) {
+    const bag = bags.get(row.player_id) ?? {};
+    bag[row.stat] = row.value;
+    bags.set(row.player_id, bag);
+  }
+  const players = [...bags].flatMap(([steamid, stats]) => {
+    const team = teamOf.get(steamid);
+    return team ? [{ steamid, name: nameOf.get(steamid) ?? steamid, team, stats }] : [];
+  });
+  const map = scored.find((s) => s.ordinal === last.ordinal)?.map ?? planned[last.ordinal] ?? '';
+  return { mapNumber: last.ordinal + 1, map, half: last.half as 1 | 2, halves, players };
 }
 
 /** Newest-first events for the highlight list, with skeets folded into runs

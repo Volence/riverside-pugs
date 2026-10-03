@@ -10,7 +10,7 @@ import { sampleFeed } from '../overlay/sample';
 import { CALLOUT_KINDS, sideOfEvent } from '../overlay/callouts';
 import '../overlay/overlay.css';
 import {
-  CALLOUT_KIND_LABELS, DEFAULT_INFECTED_RECT, HUD_STYLES, LAYERS, MAX_CASTERS, SCENES, SCENE_LABELS, THEMES,
+  CALLOUT_KIND_LABELS, DEFAULT_INFECTED_RECT, HUD_STYLES, LAYERS, MAX_CASTERS, SCENE_HOTKEYS, SCENES, SCENE_LABELS, THEMES,
   type CastMatchView, type LiveElements, type LiveHud, type OverlayFeed, type SceneKey, type StudioState, type TeamOverride,
 } from '../../../src/cast/types';
 
@@ -187,8 +187,8 @@ export default function CastStudio() {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const i = e.key === '0' ? 9 : Number(e.key) - 1;
-      if (Number.isInteger(i) && i >= 0 && i < SCENES.length) { e.preventDefault(); goScene(SCENES[i]!); }
+      const s = SCENES.find((x) => SCENE_HOTKEYS[x] === e.key.toUpperCase());
+      if (s) { e.preventDefault(); goScene(s); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -386,12 +386,12 @@ function ScenePad({ state, goScene, obsProgram, obsScenes }: {
     <section class="panel">
       <h3>Scenes</h3>
       <div class="studio__scenes">
-        {SCENES.map((s, i) => {
+        {SCENES.map((s) => {
           const on = state.scene === s;
           const inObs = obsProgram && obsScenes[s] === obsProgram;
           return (
             <button key={s} type="button" class={`studio__scene${on ? ' is-on' : ''}`} onClick={() => goScene(s)} aria-pressed={on}>
-              <kbd>{i === 9 ? 0 : i + 1}</kbd>
+              <kbd>{SCENE_HOTKEYS[s]}</kbd>
               <span>{SCENE_LABELS[s]}</span>
               {inObs && <em>OBS</em>}
             </button>
@@ -658,12 +658,12 @@ function CastersBox({ state, update, avatars }: { state: StudioState; update: Up
             <input type="checkbox" checked={c.ownCam} onChange={(e) => { const on = e.currentTarget.checked; set(i, { ownCam: on }); }} />
             <span><b>Cam in OBS</b></span>
           </label>
+          <button type="button" class="btn btn--ghost btn--sm" onClick={() => update((s) => ({ ...s, casters: s.casters.filter((_, j) => j !== i) }), true)}>Remove</button>
           {!c.camUrl && !c.ownCam && c.name && (
             <span class="studio__nocam muted">
               {avatars[i] ? <><img src={avatars[i]!} alt="" referrerpolicy="no-referrer" /> No camera: avatar shown</> : 'No camera: no account matched, initial shown'}
             </span>
           )}
-          <button type="button" class="btn btn--ghost btn--sm" onClick={() => update((s) => ({ ...s, casters: s.casters.filter((_, j) => j !== i) }), true)}>Remove</button>
         </div>
       ))}
       {state.casters.length < MAX_CASTERS && (
@@ -850,7 +850,7 @@ function RunOfShow() {
         <li><kbd>6</kbd> Lineups, talk through the rosters (prep sheet)</li>
         <li><kbd>4</kbd> Map intro before each chapter</li>
         <li><kbd>3</kbd> Gameplay; fire highlights as they happen</li>
-        <li><kbd>5</kbd> Chapter scores between maps</li>
+        <li><kbd>R</kbd> Round results between halves and maps, then <kbd>5</kbd> Chapter scores</li>
         <li><kbd>8</kbd> Be right back for pauses</li>
         <li><kbd>7</kbd> Match stats, then <kbd>9</kbd> Winner</li>
         <li><kbd>0</kbd> Ending</li>

@@ -236,6 +236,30 @@ describe('overlay feed', () => {
     expect(f.match.teams.a.players[0].sr).not.toBeUndefined();
   });
 
+  it('carries the newest finished round: its halves, alive counts, length and the half\'s box score', async () => {
+    await call('PUT', '/api/cast/studio', CASTER, { matchId });
+    const round = db.prepare(`INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, survivors_alive, started_at, ended_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+    round.run(matchId, 0, 1, 'b', 380, 2, '2026-10-02 20:00:00', '2026-10-02 20:06:11');
+    // Not finished yet: never the "last round".
+    round.run(matchId, 0, 2, 'a', 0, null, '2026-10-02 20:07:00', null);
+    const stat = db.prepare('INSERT INTO match_round_stats (match_id, ordinal, half, player_id, stat, value) VALUES (?, 0, 1, ?, ?, ?)');
+    stat.run(matchId, IDS[4], 'sidmg', 930);
+    stat.run(matchId, IDS[0], 'damage_as_si', 212);
+    let f = (await feed(await keyOf(CASTER))).json();
+    expect(f.match.lastRound).toMatchObject({
+      mapNumber: 1, half: 1, halves: [{ half: 1, survTeam: 'b', score: 380, alive: 2, seconds: 371 }],
+    });
+    expect(f.match.lastRound.players).toEqual(expect.arrayContaining([
+      expect.objectContaining({ steamid: IDS[4], team: 'b', stats: { sidmg: 930 } }),
+      expect.objectContaining({ steamid: IDS[0], team: 'a', stats: { damage_as_si: 212 } }),
+    ]));
+    db.prepare("UPDATE match_rounds SET score = 412, survivors_alive = 3, ended_at = '2026-10-02 20:12:00' WHERE match_id = ? AND ordinal = 0 AND half = 2").run(matchId);
+    db.prepare("UPDATE cast_studios SET rev = rev + 1").run();
+    f = (await feed(await keyOf(CASTER))).json();
+    expect(f.match.lastRound).toMatchObject({ half: 2, halves: [{ half: 1, score: 380 }, { half: 2, survTeam: 'a', score: 412, alive: 3, seconds: 300 }], players: [] });
+  });
+
   it('kills old URLs on a new key, on staff revoke, and when the flag goes', async () => {
     const k1 = await keyOf(CASTER);
     expect((await call('POST', '/api/cast/studio/key', CASTER)).statusCode).toBe(200);

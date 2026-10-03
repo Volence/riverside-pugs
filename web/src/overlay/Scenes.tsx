@@ -3,7 +3,7 @@ import { useRef } from 'preact/hooks';
 import { camSlots } from '../../../src/cast/layout';
 import { emptyQueue, stepAuto, type AutoCard } from './callouts';
 import {
-  boomerRate, CALLOUT_MS, ITEM, skeetTotal, type CastChapter, type TankRecap, type WitchRecap, type CastInfected, type CastLiveRound, type CastMatchView, type CastPlayer,
+  boomerRate, CALLOUT_MS, ITEM, skeetTotal, type CastChapter, type CastRoundResult, type TankRecap, type WitchRecap, type CastInfected, type CastLiveRound, type CastMatchView, type CastPlayer,
   type CastSurvivor, type CastTeam, type OverlayFeed, type OverlayKey, type StudioState,
 } from '../../../src/cast/types';
 
@@ -65,6 +65,7 @@ function SceneBody({ scene, feed, now, auto }: { scene: OverlayKey; feed: Overla
     case 'roundhud': return <RoundHud studio={studio} match={match} live={live} force />;
     case 'lowerthird': return studio.lowerThird.show ? <LowerThird studio={studio} /> : null;
     case 'mapintro': return <MapIntro studio={studio} match={match} />;
+    case 'results': return <Results studio={studio} match={match} />;
     case 'maps': return <Chapters studio={studio} match={match} />;
     case 'lineups': return <Lineups studio={studio} match={match} />;
     case 'stats': return <Stats studio={studio} match={match} />;
@@ -288,6 +289,116 @@ function MapIntro({ studio, match }: { studio: StudioState; match: CastMatchView
         </div>
       </div>
       <div class="ov-full__foot"><MatchRibbon match={match} /></div>
+    </div>
+  );
+}
+
+/* ---------- round results (between rounds and maps) ---------- */
+
+type RoundCol = { key: string; label: string; get: (s: Record<string, number>) => number };
+const ROUND_SURV_COLS: RoundCol[] = [
+  { key: 'sidmg', label: 'SI dmg', get: (s) => s.sidmg ?? 0 },
+  { key: 'sikill', label: 'SI kills', get: (s) => s.sikill ?? 0 },
+  { key: 'ck', label: 'Commons', get: (s) => s.ck ?? 0 },
+  { key: 'skeets', label: 'Skeets', get: (s) => (s.skeets ?? 0) + (s.team_skeets ?? 0) },
+  { key: 'tank_damage', label: 'Tank', get: (s) => s.tank_damage ?? 0 },
+];
+const ROUND_INF_COLS: RoundCol[] = [
+  { key: 'damage_as_si', label: 'Damage', get: (s) => s.damage_as_si ?? 0 },
+  { key: 'dps_landed', label: 'DPs', get: (s) => s.dps_landed ?? 0 },
+  { key: 'survivors_biled', label: 'Biled', get: (s) => s.survivors_biled ?? 0 },
+  { key: 'dmg_as_tank', label: 'As tank', get: (s) => s.dmg_as_tank ?? 0 },
+];
+
+/** One side's box score for the half that just ended, best in gold. */
+function RoundBox({ team, side, cols, players }: { team: CastTeam; side: 'survivor' | 'infected'; cols: RoundCol[]; players: CastRoundResult['players'] }) {
+  const rows = players.filter((p) => p.team === team.key).sort((x, y) => cols[0]!.get(y.stats) - cols[0]!.get(x.stats));
+  const best = new Map(cols.map((c) => [c.key, Math.max(0, ...rows.map((p) => c.get(p.stats)))]));
+  return (
+    <table class="ov-table ov-rbox" style={{ '--c': `var(--team-${team.key})` } as Record<string, string>}>
+      <thead>
+        <tr class="ov-rbox__head">
+          <th><span class={`ov-side ov-side--${side}`}>{side === 'survivor' ? 'Survivors' : 'Infected'}</span> {team.name}</th>
+          {cols.map((c) => <th key={c.key} class={c.key === 'dps_landed' ? 'ov-keepcase' : ''}>{c.label}</th>)}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((p) => (
+          <tr key={p.steamid}>
+            <th class="ov-stats__name">{p.name}</th>
+            {cols.map((c) => {
+              const v = c.get(p.stats);
+              return <td key={c.key} class={v > 0 && v === best.get(c.key) ? 'is-top' : ''}>{v.toLocaleString('en-US')}</td>;
+            })}
+          </tr>
+        ))}
+        {rows.length === 0 && <tr><td colSpan={cols.length + 1} class="ov-rbox__empty">No stats for this half</td></tr>}
+      </tbody>
+    </table>
+  );
+}
+
+/** A half's score block: the survivor team, its score, how many made it. */
+function HalfScore({ match, h, win }: { match: CastMatchView; h: CastRoundResult['halves'][number]; win?: boolean }) {
+  const t = match.teams[h.survTeam];
+  return (
+    <div class={`ov-half${win ? ' is-win' : ''}`} style={{ '--c': `var(--team-${t.key})` } as Record<string, string>}>
+      <span class="ov-half__label">{h.half === 1 ? 'First half' : 'Second half'}</span>
+      <span class="ov-half__team"><Logo team={t} size={44} />{t.name}</span>
+      <span class="ov-stencil ov-half__score">{h.score}</span>
+      <span class="ov-half__facts">
+        {h.alive !== null && <span>{h.alive === 0 ? 'Wiped' : `${h.alive} of 4 made it`}</span>}
+        {h.seconds !== null && <span>{fmtAlive(h.seconds)}</span>}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Between rounds and maps: the round that just ended. After a first half,
+ * the survivor team's score and the number the other team has to beat;
+ * after a second half, both halves, who took the map and by how much. The
+ * box score below is the half that just ended (per-round stats).
+ */
+function Results({ studio, match }: { studio: StudioState; match: CastMatchView | null }) {
+  const r = match?.lastRound;
+  if (!match || !r) return <div class="ov-full"><Backdrop /><Title studio={studio} fallback="Round results" /></div>;
+  const last = r.halves[r.halves.length - 1]!;
+  const survT = match.teams[last.survTeam];
+  const infT = match.teams[last.survTeam === 'a' ? 'b' : 'a'];
+  const first = r.halves.find((h) => h.half === 1);
+  const second = r.halves.find((h) => h.half === 2);
+  const mapDone = r.half === 2 && !!first && !!second;
+  const winner = mapDone ? (first!.score === second!.score ? null : first!.score > second!.score ? first! : second!) : null;
+  return (
+    <div class="ov-full">
+      <Backdrop art="survivor-hilltop" />
+      <div class="ov-results">
+        <p class="ov-intro__eyebrow">{match.campaignName} · Chapter {r.mapNumber}{match.mapCount && match.mapCount >= r.mapNumber ? ` of ${match.mapCount}` : ''}</p>
+        <h1 class="ov-stencil ov-results__title">{mapDone ? `${mapName(r.map) || 'Map'} done` : 'Half time'}</h1>
+        {!mapDone && <p class="ov-results__map">{mapName(r.map)}</p>}
+        <div class="ov-results__halves">
+          {r.halves.map((h) => <HalfScore key={h.half} match={match} h={h} win={winner === h} />)}
+          {!mapDone && (
+            <div class="ov-half ov-half--next" style={{ '--c': `var(--team-${infT.key})` } as Record<string, string>}>
+              <span class="ov-half__label">To beat</span>
+              <span class="ov-half__team"><Logo team={infT} size={44} />{infT.name}</span>
+              <span class="ov-stencil ov-half__score">{last.score + 1}</span>
+              <span class="ov-half__facts"><span>to take the map</span></span>
+            </div>
+          )}
+        </div>
+        {mapDone && (
+          <p class="ov-results__verdict">
+            {winner ? <>Map to <b style={{ color: `var(--team-${winner.survTeam})` }}>{match.teams[winner.survTeam].name}</b> by {Math.abs(first!.score - second!.score)}</> : 'The map is a draw'}
+            <span> · Campaign {match.teams.a.tag} {match.teams.a.score} · {match.teams.b.score} {match.teams.b.tag}</span>
+          </p>
+        )}
+        <div class="ov-results__boxes">
+          <RoundBox team={survT} side="survivor" cols={ROUND_SURV_COLS} players={r.players} />
+          <RoundBox team={infT} side="infected" cols={ROUND_INF_COLS} players={r.players} />
+        </div>
+      </div>
     </div>
   );
 }

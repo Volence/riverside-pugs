@@ -4,8 +4,14 @@
  */
 
 export const SCENES = [
-  'starting', 'casters', 'gameplay', 'mapintro', 'maps', 'lineups', 'stats', 'brb', 'winner', 'ending',
+  'starting', 'casters', 'gameplay', 'mapintro', 'maps', 'lineups', 'stats', 'brb', 'winner', 'ending', 'results',
 ] as const;
+
+/** The panel's hotkey for each scene: 1-9 and 0 in order (the run of show
+ *  casters learned), then letters for scenes added later. */
+export const SCENE_HOTKEYS: Record<SceneKey, string> = Object.fromEntries(
+  SCENES.map((s, i) => [s, s === 'results' ? 'R' : i === 9 ? '0' : String(i + 1)]),
+) as Record<SceneKey, string>;
 export type SceneKey = (typeof SCENES)[number];
 
 /** Layers: overlays that are never a scene of their own on the program feed,
@@ -20,6 +26,7 @@ export const SCENE_LABELS: Record<SceneKey | LayerKey, string> = {
   casters: 'Casters',
   gameplay: 'Gameplay',
   mapintro: 'Map intro',
+  results: 'Round results',
   maps: 'Chapter scores',
   lineups: 'Lineups',
   stats: 'Match stats',
@@ -273,6 +280,21 @@ export interface CastTeam {
   side: CastSide | null;
 }
 
+/** The newest finished round, for the Round results scene: after a first
+ *  half, that half and the score to beat; after a second half, the map. */
+export interface CastRoundResult {
+  /** 1-based chapter number and its map. */
+  mapNumber: number;
+  map: string;
+  /** The half that just ended: 1, or 2 (the map is done). */
+  half: 1 | 2;
+  /** Each half of that map played so far, in order. `alive` is how many
+   *  survivors made it, `seconds` the round's length, null when unknown. */
+  halves: { half: 1 | 2; survTeam: 'a' | 'b'; score: number; alive: number | null; seconds: number | null }[];
+  /** Each player's stats in the half that just ended (match_round_stats). */
+  players: { steamid: string; name: string; team: 'a' | 'b'; stats: Record<string, number> }[];
+}
+
 export interface CastChapter {
   number: number;
   map: string;
@@ -311,6 +333,8 @@ export interface CastMatchView {
   chapters: CastChapter[];
   /** Newest first. */
   events: CastEvent[];
+  /** The newest finished round, or null before the first one ends. */
+  lastRound: CastRoundResult | null;
   /** For a followed booking: which game of how many. */
   game: { number: number; of: number } | null;
 }
