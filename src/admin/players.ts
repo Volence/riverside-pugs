@@ -22,9 +22,11 @@ export type { BanRow } from './banTypes.js';
 const toBan = (r: {
   id: number; reason: string; created_by: string; created_at: string; expires_at: string | null;
   lifted_by: string | null; lifted_at: string | null; created_by_name?: string | null; lifted_by_name?: string | null;
+  kind?: string;
 }): BanRow => ({
   id: r.id, reason: r.reason, createdBy: r.created_by, createdAt: r.created_at, expiresAt: r.expires_at,
   liftedBy: r.lifted_by, liftedAt: r.lifted_at, createdByName: r.created_by_name ?? null, liftedByName: r.lifted_by_name ?? null,
+  kind: r.kind === 'alt_hold' ? 'alt_hold' : 'ban',
 });
 
 const BAN_SELECT = `SELECT b.*, pc.name AS created_by_name, pl.name AS lifted_by_name FROM bans b
@@ -48,10 +50,11 @@ export function activeBan(db: DB, steamid: string, now = new Date()): BanRow | n
  *  an sm_unban. */
 export function insertBan(
   db: DB, steamid: string, by: string, reason: string, minutes: number | null, now = new Date(),
-): void {
+  kind: 'ban' | 'alt_hold' = 'ban',
+): number {
   const expires = minutes ? new Date(now.getTime() + minutes * 60 * 1000).toISOString() : null;
-  db.prepare('INSERT INTO bans (player_id, reason, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?)')
-    .run(steamid, reason, by, now.toISOString(), expires);
+  const id = Number(db.prepare('INSERT INTO bans (player_id, reason, created_by, created_at, expires_at, kind) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(steamid, reason, by, now.toISOString(), expires, kind).lastInsertRowid);
   // Remember what the ban is interrupting, so its end can put that back. A
   // second ban on an account that is already banned keeps the first memory:
   // what it interrupts is a ban, and "banned" is never what to restore to.
@@ -67,6 +70,7 @@ export function insertBan(
        session_epoch = session_epoch + 1
      WHERE steamid = ?`,
   ).run(steamid);
+  return id;
 }
 
 /**
@@ -87,7 +91,7 @@ export function insertBan(
  * players. A match started in game proves nothing: that path rosters whoever
  * is on the server.
  */
-function restoreStatus(db: DB, steamid: string): void {
+export function restoreStatus(db: DB, steamid: string): void {
   const row = db.prepare('SELECT status, status_before_ban, discord_id, is_admin FROM players WHERE steamid = ?')
     .get(steamid) as
     | { status: string; status_before_ban: string | null; discord_id: string | null; is_admin: number } | undefined;
@@ -148,6 +152,7 @@ export function liftExpiredBans(db: DB, now = new Date()): string[] {
 export function banMessage(db: DB, steamid: string): string {
   const ban = activeBan(db, steamid);
   if (!ban) return 'You are banned from the PUG.';
+  if (ban.kind === 'alt_hold') return `Your account is on hold. ${ban.reason}.`;
   const until = ban.expiresAt ? ` It ends <t:${Math.floor(Date.parse(ban.expiresAt) / 1000)}:R>.` : '';
   return `You are banned from the PUG: ${ban.reason}.${until}`;
 }
@@ -337,7 +342,8 @@ export function publicBans(db: DB, viewer: string, q = '', now = new Date()): Pu
        LEFT JOIN players p  ON p.steamid  = b.player_id
        LEFT JOIN players pc ON pc.steamid = b.created_by
        LEFT JOIN players pl ON pl.steamid = b.lifted_by
-      WHERE (? = '' OR b.player_id = ? OR LOWER(COALESCE(p.name, '')) LIKE ?)
+      WHERE b.kind != 'alt_hold'
+        AND (? = '' OR b.player_id = ? OR LOWER(COALESCE(p.name, '')) LIKE ?)
       ORDER BY b.id DESC
       LIMIT 500`,
   ).all(q.trim(), q.trim(), like) as (Omit<PublicBan, 'permanent' | 'active'> & { name: string | null; ticketId: number | null })[];

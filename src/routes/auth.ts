@@ -138,7 +138,8 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
       twitch: player.twitch_id ? { id: player.twitch_id, name: player.twitch_name ?? '' } : null,
       ban: player.status === 'banned' ? (() => {
         const b = activeBan(db, steamid);
-        return b ? { reason: b.reason, expiresAt: b.expiresAt } : null;
+        // hold: an alt hold, which the play page words as a hold, not a ban.
+        return b ? { reason: b.reason, expiresAt: b.expiresAt, hold: b.kind === 'alt_hold' } : null;
       })() : null,
       // null: not linked, or the member list is not loaded yet.
       discordMember: player.discord_id ? opts.membership?.isMember(player.discord_id) ?? null : null,

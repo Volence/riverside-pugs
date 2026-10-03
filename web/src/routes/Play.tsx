@@ -25,6 +25,22 @@ export function Play(
 ) {
   if (session.kind === 'loading') return <div class="page page--play" />;
   if (session.kind === 'anonymous') return <SignIn />;
+  if (session.kind === 'pending' && session.me.status === 'banned' && session.me.ban?.hold) {
+    // An alt hold (src/altHolds.ts): not a ban, and not on the public list.
+    return (
+      <div class="page page--play">
+        <Panel>
+          <p class="eyebrow">On hold</p>
+          <h2>Your account is on hold</h2>
+          <p>{session.me.ban.reason}.</p>
+          <p class="muted">
+            If you moved to a new Steam account or lost your old one, message a moderator in the Discord
+            and tell them what happened. They can lift the hold.
+          </p>
+        </Panel>
+      </div>
+    );
+  }
   if (session.kind === 'pending' && session.me.status === 'banned') {
     return (
       <div class="page page--play">

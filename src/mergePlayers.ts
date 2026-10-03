@@ -4,6 +4,8 @@ import { recomputeSeasonRatings } from './rating.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { foldTicket, hasStaffFlag, holdFeedAbout, reseedOrphanedTickets } from './tickets/store.js';
 import { publishTicketSignal } from './tickets/signals.js';
+import { closeHoldsForMerge } from './altHolds.js';
+import { publishBanChange } from './banEvents.js';
 
 /**
  * Fold one Steam account into another, as if the second had always been the
@@ -281,7 +283,12 @@ export function mergePlayers(
 
   const owners = opts.adminSteamIds ?? [];
   let orphaned = 0;
+  let unheld: string[] = [];
   db.transaction(() => {
+    // 0. An alt hold between these two accounts is answered by this merge.
+    //    Closed before bans move, or the alt's hold would land on the
+    //    survivor and lock the main out.
+    unheld = closeHoldsForMerge(db, from, into, opts.by ?? 'merge');
     // 1. Matches both accounts were rostered in: add the figures together and
     //    keep one row. Summing is right even though one row is usually a ghost
     //    that scored nothing, because which row that is varies: in match 65 it
@@ -477,6 +484,7 @@ export function mergePlayers(
   // Tickets may have been folded, and a Discord link may have moved: let the
   // reconciler look at everything.
   publishTicketSignal({ kind: 'staff' });
+  for (const steamid of unheld) publishBanChange({ kind: 'unban', steamid });
 
   // Outside the transaction above because it opens its own.
   for (const season of seasons) recomputeSeasonRatings(db, season);

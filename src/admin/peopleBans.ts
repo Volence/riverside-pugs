@@ -25,12 +25,14 @@ export interface PeopleBanRow {
    *  a moderator is given, since the rest are dropped; an admin opens all of
    *  them. Kept so the UI asks rather than assumes. */
   canOpen: boolean;
+  /** An alt hold (src/altHolds.ts), not a ban staff issued. */
+  hold: boolean;
 }
 
 interface Row {
   id: number; player_id: string; name: string | null; reason: string; created_at: string;
   expires_at: string | null; created_by_name: string | null; lifted_at: string | null;
-  lifted_by_name: string | null; ticket_id: number | null;
+  lifted_by_name: string | null; ticket_id: number | null; kind: string;
 }
 
 /**
@@ -56,7 +58,7 @@ export function peopleBans(
   const like = `%${q.toLowerCase()}%`;
   const rows = db.prepare(
     `SELECT b.id, b.player_id, p.name, b.reason, b.created_at, b.expires_at,
-            pc.name AS created_by_name, b.lifted_at, pl.name AS lifted_by_name, b.ticket_id
+            pc.name AS created_by_name, b.lifted_at, pl.name AS lifted_by_name, b.ticket_id, b.kind
      FROM bans b
      LEFT JOIN players p  ON p.steamid  = b.player_id
      LEFT JOIN players pc ON pc.steamid = b.created_by
@@ -87,6 +89,7 @@ export function peopleBans(
       ticketId: withheld ? null : r.ticket_id,
       withheld,
       canOpen: canOpenFile(db, viewer, r.player_id),
+      hold: r.kind === 'alt_hold',
     };
   }).filter((b) => (filter === 'all' ? true : filter === 'active' ? b.active : !b.active));
 }

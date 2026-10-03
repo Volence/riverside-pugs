@@ -11,4 +11,6 @@ export interface BanRow {
   liftedAt: string | null;
   createdByName?: string | null;
   liftedByName?: string | null;
+  /** 'alt_hold' for an alt hold (src/altHolds.ts), else 'ban'. */
+  kind?: 'ban' | 'alt_hold';
 }

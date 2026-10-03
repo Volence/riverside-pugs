@@ -1691,6 +1691,25 @@ export function openDb(path: string): DB {
   // The ticket a ban was issued from, so the ban list and the ticket point at
   // each other. Null for every ban issued from the Players tab.
   ensureColumn(db, 'bans', 'ticket_id', 'INTEGER');
+  // 'alt_hold': placed by src/altHolds.ts when a Discord account arrives from
+  // another Steam account. It blocks exactly like a ban (every check reads
+  // the bans table) but stays off the public ban list until staff decide.
+  ensureColumn(db, 'bans', 'kind', "TEXT NOT NULL DEFAULT 'ban'");
+  // One row per alt hold: who was held, which account the Discord came from,
+  // and how staff settled it. A 'cleared' pair is never held again.
+  db.exec(`CREATE TABLE IF NOT EXISTS alt_holds (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    steamid       TEXT NOT NULL,
+    other_steamid TEXT NOT NULL,
+    discord_id    TEXT NOT NULL,
+    discord_name  TEXT NOT NULL DEFAULT '',
+    ban_id        INTEGER NOT NULL,
+    created_at    TEXT NOT NULL,
+    resolved_at   TEXT,
+    resolved_by   TEXT,
+    resolution    TEXT CHECK (resolution IN ('cleared', 'banned', 'merged'))
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_alt_holds_steamid ON alt_holds (steamid)');
   // "Somebody has looked at this file." What takes a player off the Needs a
   // look list, and what puts them back when something newer arrives.
   //

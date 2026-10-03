@@ -29,7 +29,8 @@ export interface Me {
   /** False when the server has no Twitch app configured: hide every Twitch control. */
   twitchEnabled?: boolean;
   twitch?: { id: string; name: string } | null;
-  ban?: { reason: string; expiresAt: string | null } | null;
+  /** hold: an alt hold (src/altHolds.ts), worded as a hold, not a ban. */
+  ban?: { reason: string; expiresAt: string | null; hold?: boolean } | null;
   /** Show Teams: the competitive switch lets this viewer in. */
   teams?: boolean;
 }
@@ -1476,6 +1477,8 @@ export interface PlayerFileData {
       /** Every name played under in a match, most played first. Optional
        *  only for a browser holding new JS against an older server. */
       names?: NameHistoryRow[];
+      /** Alt holds naming this account on either side. Optional for an older server. */
+      altHolds?: AltHold[];
     };
     standing: {
       activeBan: AdminBan | null;
@@ -1530,6 +1533,8 @@ export interface PeopleBan {
   createdAt: string; expiresAt: string | null; createdByName: string | null;
   liftedAt: string | null; liftedByName: string | null; active: boolean;
   ticketId: number | null; withheld: boolean; canOpen: boolean;
+  /** An alt hold rather than a ban staff issued. Optional for an older server. */
+  hold?: boolean;
 }
 
 /** The People desk. Moderators may call all of it; the admin-only actions a
@@ -1551,7 +1556,39 @@ export const peopleApi = {
     post<{ ok: true; review: FileReview }>(`/api/admin/people/${encodeURIComponent(steamid)}/looked-at`, { note }),
   chat: (matchId: number, signal?: AbortSignal) =>
     get<{ lines: StaffChatLine[] }>(`/api/admin/people/chat/${matchId}`, signal),
+  alts: (signal?: AbortSignal) =>
+    get<{ open: AltHold[]; settled: AltHold[]; clusters: AltCluster[] }>('/api/admin/people/alts', signal),
+  liftHold: (id: number) => post<{ ok: true }>(`/api/admin/people/alts/${id}/lift`),
+  banFromHold: (id: number, reason: string) => post<{ ok: true }>(`/api/admin/people/alts/${id}/ban`, { reason }),
 };
+
+/** An alt hold: `steamid` was held because its Discord came from
+ *  `otherSteamid`. See src/altHolds.ts. */
+export interface AltHold {
+  id: number;
+  steamid: string;
+  name: string;
+  otherSteamid: string;
+  otherName: string;
+  otherBanned: boolean;
+  discordId: string;
+  discordName: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolvedByName: string | null;
+  resolution: 'cleared' | 'banned' | 'merged' | null;
+}
+
+export type AltSignal = 'discord' | 'merged' | 'lender' | 'connection';
+
+/** Accounts tied together by something the site has seen. */
+export interface AltCluster {
+  members: { steamid: string; name: string; banned: boolean; held: boolean; lastSeen: string | null }[];
+  edges: { a: string; b: string; signal: AltSignal; detail: string; at: string | null }[];
+  latest: string | null;
+  hasOpenHold: boolean;
+  strong: boolean;
+}
 
 /** One chat line of a finished match, as staff see it. `half` is -1 before
  *  the first round of a map; `tMs` is -1 when no round clock was running
