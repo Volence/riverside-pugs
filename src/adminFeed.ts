@@ -85,7 +85,16 @@ export type AdminEvent =
   // a match under a name new to them since the last one, with their names in
   // the order first used. One post for the day rather than one per rename,
   // because people rename for fun and staff only need to keep up.
-  | { kind: 'rename_digest'; players: { steamid: string; chain: string[]; earlier: number }[] };
+  | { kind: 'rename_digest'; players: { steamid: string; chain: string[]; earlier: number }[] }
+  // A Discord account arrived from a different Steam account (src/altHolds.ts).
+  // 'hold': the new account is on an alt hold until staff look. 'moved': the
+  // same, but no hold was placed (staff cleared this pair before, or the
+  // account is staff). 'discord_swap': a Steam account took a different
+  // Discord than the one it had, which is reported and nothing more.
+  | {
+    kind: 'alt'; steamid: string; discordName: string;
+    what: 'hold' | 'moved' | 'discord_swap'; otherSteamid?: string; previousDiscordName?: string;
+  };
 
 /** The settings toggle that silences each kind in the admin channel. */
 export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
@@ -106,6 +115,7 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   sourcetv_watch: 'admin_feed_problems',
   staff_message: 'admin_feed_staff_messages',
   rename_digest: 'admin_feed_renames',
+  alt: 'admin_feed_problems',
 };
 
 type Listener = (e: AdminEvent) => void;

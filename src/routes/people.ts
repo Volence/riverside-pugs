@@ -13,6 +13,7 @@ import { playerFile } from '../admin/playerFile.js';
 import { markLookedAt } from '../admin/reviews.js';
 import { getPlayer } from '../players.js';
 import { resolveAlias } from '../aliases.js';
+import { altClusters, altHolds, banFromHold, holdById, liftAltHold } from '../altHolds.js';
 
 export interface PeopleRouteOpts {
   db: DB;
@@ -121,6 +122,59 @@ export async function peopleRoutes(app: FastifyInstance, opts: PeopleRouteOpts):
     const { filter, q } = req.query as { filter?: string; q?: string };
     const chosen = filter === 'active' || filter === 'expired' ? filter : 'all';
     return { bans: peopleBans(db, fileViewer(db, me), { filter: chosen, q: String(q ?? '').slice(0, 64) }) };
+  });
+
+  /**
+   * Alts: open alt holds, recently settled ones, and every group of accounts
+   * tied together by a Discord, a merge, a lent copy of the game or a shared
+   * connection. Moderators lift holds (owner ruling 2026-10-03: the player
+   * appeals, a moderator lets them back). Turning a hold into a public ban
+   * is an admin's call, like every other ban outside a ticket.
+   */
+  app.get('/api/admin/people/alts', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const viewer = fileViewer(db, me);
+    return { ...altHolds(db, viewer), clusters: altClusters(db, viewer) };
+  });
+
+  /** Staff, then an open hold on a file this viewer may act on. */
+  const onHold = (req: FastifyRequest, reply: FastifyReply, action: FileAction) => {
+    const me = requireMod(req, reply);
+    if (!me) return null;
+    const viewer = fileViewer(db, me);
+    const hold = holdById(db, Number((req.params as { id: string }).id));
+    if (!hold || !canDo(db, viewer, hold.steamid, action)) {
+      reply.code(404).send({ error: 'no such hold' });
+      return null;
+    }
+    if (hold.resolvedAt) {
+      reply.code(409).send({ error: 'that hold has already been settled' });
+      return null;
+    }
+    return { me, hold };
+  };
+
+  app.post('/api/admin/people/alts/:id/lift', async (req, reply) => {
+    const t = onHold(req, reply, 'looked_at');
+    if (!t) return reply;
+    liftAltHold(db, t.hold.id, t.me);
+    logAdmin(db, t.me, 'alt_lift', t.hold.steamid, { holdId: t.hold.id, other: t.hold.otherSteamid });
+    return { ok: true };
+  });
+
+  app.post('/api/admin/people/alts/:id/ban', async (req, reply) => {
+    const t = onHold(req, reply, 'ban');
+    if (!t) return reply;
+    const { reason } = (req.body ?? {}) as { reason?: unknown };
+    if (reason !== undefined && (typeof reason !== 'string' || reason.length > 500)) {
+      return reply.code(400).send({ error: 'a reason is up to 500 characters' });
+    }
+    const other = getPlayer(db, t.hold.otherSteamid)?.name ?? t.hold.otherSteamid;
+    const text = (typeof reason === 'string' && reason.trim()) || `Alt account of ${other}`;
+    banFromHold(db, t.hold.id, t.me, text);
+    logAdmin(db, t.me, 'alt_ban', t.hold.steamid, { holdId: t.hold.id, other: t.hold.otherSteamid, reason: text });
+    return { ok: true };
   });
 
   app.get('/api/admin/people/:steamid', async (req, reply) => {

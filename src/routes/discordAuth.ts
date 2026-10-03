@@ -7,9 +7,10 @@ import { applyGate } from '../discord/gate.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { getSession } from '../session.js';
 import {
-  consumeLinkCode, getPlayer, linkDiscord, peekLinkCode, unlinkDiscord, type LinkResult,
+  consumeLinkCode, getPlayer, linkDiscord, peekLinkCode, unlinkDiscord,
 } from '../players.js';
 import { hasActiveBan } from '../banState.js';
+import { placeAltHold, previousDiscordOf, previousSteamOf } from '../altHolds.js';
 import { activeTimeout } from '../penalties.js';
 
 export interface DiscordAuthOpts {
@@ -59,15 +60,22 @@ export async function discordAuthRoutes(app: FastifyInstance, opts: DiscordAuthO
     return steamid;
   };
 
-  /** What every successful link does next, whichever way it was made. */
-  const announceLink = (steamid: string, discordName: string, linked: Extract<LinkResult, { ok: true }>): void => {
+  /** What every successful link does next, whichever way it was made.
+   *
+   *  A Discord that arrives from a different Steam account puts the new one
+   *  on an alt hold (src/altHolds.ts) until staff look. A Steam account that
+   *  swaps to a different Discord is only reported: it adds no second
+   *  player, and the link rules already stop one Discord vouching for two. */
+  const announceLink = (steamid: string, discordId: string, discordName: string): void => {
     publishAdminEvent({ kind: 'account', steamid, what: 'linked', discordName });
-    if (linked.movedFrom) {
-      const was = getPlayer(db, linked.movedFrom.steamid);
-      publishAdminEvent({
-        kind: 'problem',
-        text: `Discord account ${discordName} was linked to ${getPlayer(db, steamid)?.name ?? steamid} (${steamid}), and until ${linked.movedFrom.unlinkedAt} it was linked to a different Steam account, ${was?.name ?? 'unknown'} (${linked.movedFrom.steamid}). One Discord account moving between Steam accounts is what an alt looks like.`,
-      });
+    const other = previousSteamOf(db, discordId, steamid);
+    if (other) {
+      const holdId = placeAltHold(db, steamid, other, discordId, discordName);
+      publishAdminEvent({ kind: 'alt', what: holdId ? 'hold' : 'moved', steamid, otherSteamid: other, discordName });
+    }
+    const before = previousDiscordOf(db, steamid, discordId);
+    if (before) {
+      publishAdminEvent({ kind: 'alt', what: 'discord_swap', steamid, discordName, previousDiscordName: before.name });
     }
   };
 
@@ -124,7 +132,7 @@ export async function discordAuthRoutes(app: FastifyInstance, opts: DiscordAuthO
     }
     const linked = linkDiscord(db, steamid, user.id, user.globalName ?? user.username, { adminSteamIds: config.adminSteamIds });
     if (!linked.ok) return back(linked.error === 'discord_taken' ? 'taken' : linked.error);
-    announceLink(steamid, user.globalName ?? user.username, linked);
+    announceLink(steamid, user.id, user.globalName ?? user.username);
     await applyGate(db, api!, steamid);
     return back('linked');
   });
@@ -156,7 +164,7 @@ export async function discordAuthRoutes(app: FastifyInstance, opts: DiscordAuthO
     const linked = linkDiscord(db, steamid, spent.discordId, spent.discordName, { adminSteamIds: config.adminSteamIds });
     if (!linked.ok) return reply.code(409).send({ error: linked.error });
     consumeLinkCode(db, code);
-    announceLink(steamid, spent.discordName, linked);
+    announceLink(steamid, spent.discordId, spent.discordName);
     const active = await applyGate(db, api!, steamid);
     return { ok: true, active, discordName: spent.discordName };
   });

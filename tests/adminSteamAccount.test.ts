@@ -272,6 +272,9 @@ describe('steam account over HTTP', () => {
       'src/db.ts', 'src/server.ts', 'src/admin/timeline/steam.ts',
       'src/admin/playerFile.ts', 'src/admin/playerFileSummary.ts', 'src/routes/people.ts',
       'src/routes/tickets.ts',
+      // The Family Sharing lender as one edge on the Alts tab, served only
+      // behind requireMod by src/routes/people.ts.
+      'src/altHolds.ts',
     ]);
     const root = join(dirname(fileURLToPath(import.meta.url)), '..');
     const walk = (dir: string): string[] => readdirSync(join(root, dir), { withFileTypes: true })

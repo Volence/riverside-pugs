@@ -40,6 +40,26 @@ export function IdentitySection(
     <Panel class="file-section">
       <h3 id="identity">Identity</h3>
 
+      {(id.altHolds?.length ?? 0) > 0 && (
+        <>
+          <p><strong>Alt holds:</strong> <a href="/admin/people/alts">review on Alts</a></p>
+          <ul class="admin-list">
+            {id.altHolds!.map((h) => (
+              <li key={h.id}>
+                {h.steamid === d.steamid
+                  ? <>Held because Discord {h.discordName || h.discordId} came from <a href={fileUrl(h.otherSteamid)}>{h.otherName}</a></>
+                  : <>Discord {h.discordName || h.discordId} moved from here to <a href={fileUrl(h.steamid)}>{h.name}</a>, which was held</>}
+                {' '}
+                <span class="muted">
+                  {fmtTime(h.createdAt)}
+                  {h.resolution ? `, ${h.resolution === 'cleared' ? 'lifted' : h.resolution} ${fmtTime(h.resolvedAt)}${h.resolvedByName ? ` by ${h.resolvedByName}` : ''}` : ', still on hold'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
       {(id.names?.length ?? 0) > 0 && (
         <>
           <p><strong>Names played under:</strong></p>

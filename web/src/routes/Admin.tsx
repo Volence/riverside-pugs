@@ -21,6 +21,7 @@ import { AdminCampaigns } from './admin/AdminCampaigns';
 import { PeopleSearch } from './admin/PeopleSearch';
 import { NeedsALook } from './admin/NeedsALook';
 import { PeopleBans } from './admin/PeopleBans';
+import { PeopleAlts } from './admin/PeopleAlts';
 import { PlayerFile } from './admin/file/PlayerFile';
 import { EventsDesk } from './admin/events/EventsDesk';
 import { EventEditor } from './admin/events/EventEditor';
@@ -117,6 +118,7 @@ export function Admin({ session }: { session: Session }) {
         {r.desk === 'people' && r.section === 'file' && <PlayerFile steamid={r.param!} me={me} />}
         {r.desk === 'people' && r.section === 'review' && <NeedsALook isAdmin={isAdmin} />}
         {r.desk === 'people' && r.section === 'bans' && <PeopleBans />}
+        {r.desk === 'people' && r.section === 'alts' && <PeopleAlts isAdmin={isAdmin} />}
         {r.desk === 'people' && r.section === 'tickets' && <AdminTickets onOpen={(id) => route(ticketUrl(id))} />}
         {r.desk === 'people' && r.section === 'calls' && <AdminCalls />}
         {r.desk === 'people' && r.section === 'ticket' && (

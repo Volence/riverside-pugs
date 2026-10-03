@@ -261,6 +261,28 @@ export class AdminFeedPoster {
           color: COLOR.account,
         };
       }
+      case 'alt': {
+        const desk = `${this.deps.publicUrl}/admin/people/alts`;
+        const discord = `**${escapeName(e.discordName)}**`;
+        if (e.what === 'discord_swap') {
+          return {
+            text: `🔁 ${this.name(e.steamid)} swapped Discord accounts, from **${escapeName(e.previousDiscordName ?? 'unknown')}** to ${discord}. `
+              + `Reported only, nothing was held. [File](${this.file(e.steamid)}) · [Alts](${desk})`,
+            color: COLOR.account,
+          };
+        }
+        const other = e.otherSteamid!;
+        const moved = `Discord ${discord} moved to ${this.name(e.steamid)} from ${this.name(other)} ([file](${this.file(other)}))`;
+        return e.what === 'hold'
+          ? {
+            text: `🔒 ${moved}. The new account is **on hold** and cannot queue or play until a moderator lifts it. [Review on Alts](${desk})`,
+            color: COLOR.problem,
+          }
+          : {
+            text: `🔒 ${moved}. No hold was placed (this pair was cleared before, or the account is staff). [Alts](${desk})`,
+            color: COLOR.problem,
+          };
+      }
       case 'rename_digest': {
         // One embed for the day. Discord caps a description at 4096
         // characters, so the lines stop short of that and the rest are
@@ -317,6 +339,8 @@ export class AdminFeedPoster {
     switch (e.action) {
       case 'ban': return `${who} banned ${target}: ${escapeName(String(d.reason ?? ''))} (${d.minutes ? fmtMinutes(Number(d.minutes)) : 'permanent'})`;
       case 'unban': return `${who} unbanned ${target}`;
+      case 'alt_lift': return `${who} lifted the alt hold on ${target}`;
+      case 'alt_ban': return `${who} turned the alt hold on ${target} into a ban: ${escapeName(String(d.reason ?? ''))}`;
       case 'activate': return `${who} activated ${target}`;
       case 'set_admin': return `${who} ${d.isAdmin ? 'made' : 'removed'} ${target} ${d.isAdmin ? 'an admin' : 'as admin'}`;
       case 'set_mod': return `${who} ${d.isMod ? 'made' : 'removed'} ${target} ${d.isMod ? 'a moderator' : 'as moderator'}`;

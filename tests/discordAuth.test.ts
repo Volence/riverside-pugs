@@ -265,14 +265,14 @@ describe('discord auth, configured', () => {
     expect(getPlayer(db, P1)?.discord_id).toBeNull();
   });
 
-  it('tells the admin feed when a Discord moves to a different Steam account inside 30 days', async () => {
+  it('a Discord moving to a different Steam account holds the new one and tells the admin feed', async () => {
     const { subscribeAdminEvents } = await import('../src/adminFeed.js');
     const { unlinkDiscord } = await import('../src/players.js');
     upsertPlayer(db, { steamid: P2, name: 'bob', avatar: null }, []);
     linkDiscord(db, P2, '111', 'Alice');
     unlinkDiscord(db, P2);
-    const seen: string[] = [];
-    const off = subscribeAdminEvents((e) => { if (e.kind === 'problem') seen.push(e.text); });
+    const seen: unknown[] = [];
+    const off = subscribeAdminEvents((e) => { if (e.kind === 'alt') seen.push(e); });
     try {
       const cookies = authedCookie(app, db, P1, { active: false });
       const code = createLinkCode(db, '111', 'Alice');
@@ -280,10 +280,7 @@ describe('discord auth, configured', () => {
     } finally {
       off();
     }
-    expect(seen).toHaveLength(1);
-    expect(seen[0]).toContain(P1);
-    expect(seen[0]).toContain(P2);
-    expect(seen[0]).toContain('Alice');
+    expect(seen).toEqual([{ kind: 'alt', what: 'hold', steamid: P1, otherSteamid: P2, discordName: 'Alice' }]);
   });
 
   it('/api/me carries the link', async () => {
