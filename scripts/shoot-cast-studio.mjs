@@ -136,7 +136,7 @@ try {
   await go(`${BASE}/cast/studio`);
   await sleep(2500);
   await shot('panel-1440-empty');
-  await api('PUT', '/api/cast/studio', { ...state, scene: 'gameplay' });
+  await api('PUT', '/api/cast/studio', { ...state, scene: 'gameplay', autoCallouts: { on: true, kinds: ['skeet', 'dp', 'boom', 'tank_spawn', 'witch_killed', 'death', 'car_alarm'] } });
   for (const [w, h, mobile] of [[1440, 900, false], [390, 844, true]]) {
     await size(w, h, mobile);
     await go(`${BASE}/cast/studio`);
