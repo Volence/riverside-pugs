@@ -23,13 +23,12 @@ const live: OverlayFeed['live'] = {
   tank: { health: 3000, maxHealth: 6000, controller: 'Tank Guy' },
   witches: 0,
   hud: { progress: 41, tank: 70, witch: 30, rivalReach: 74 },
-  tankRecap: null,
 };
 const feed = (patch: Partial<ReturnType<typeof defaultStudioState>> = {}): OverlayFeed => ({
-  rev: 1, serverNow: Date.now(), studio: { ...defaultStudioState(), ...patch }, match, live,
+  rev: 1, serverNow: Date.now(), studio: { ...defaultStudioState(), ...patch }, match, live, tankRecap: null, witchRecap: null,
 });
 
-const allOn = { survivors: true, infected: true, tank: true, bosses: true, progress: true, tankRecap: true, rival: true, dots: true };
+const allOn = { survivors: true, infected: true, tank: true, bosses: true, progress: true, tankRecap: true, witchRecap: true, rival: true, dots: true };
 
 describe('gameplay overlay: the broadcast looks', () => {
   it('by default (plate) shows only what a spectator never sees: infected yes, survivors no', () => {
@@ -87,15 +86,36 @@ describe('gameplay overlay: the broadcast looks', () => {
   });
 
   it('shows the tank damage card with shares after a tank dies', () => {
-    const r = { agoMs: 500, aliveS: 84, controller: 'Tank Guy', dealt: 312, tanks: 1, passes: 1, players: [{ name: 'Survivor One', dmg: 4200, share: 70 }, { name: 'Two', dmg: 1800, share: 30 }] };
-    const { container } = render(<Overlay which="gameplay" feed={{ ...feed(), live: { ...live!, tankRecap: r } }} now={Date.now()} />);
+    const r = { agoMs: 500, aliveS: 84, controller: 'Tank Guy', dealt: 312, tanks: 1, passes: 1, end: 'dead' as const, players: [{ name: 'Survivor One', dmg: 4200, share: 70 }, { name: 'Two', dmg: 1800, share: 30 }] };
+    const { container } = render(<Overlay which="gameplay" feed={{ ...feed(), tankRecap: r }} now={Date.now()} />);
     const t = container.querySelector('.ov-recap')!.textContent ?? '';
     for (const x of ['Tank down', 'Tank Guy', '1:24', '312', 'Passed once', 'Survivor One', '4,200', '70%', '30%']) expect(t).toContain(x);
-    const two = render(<Overlay which="gameplay" feed={{ ...feed(), live: { ...live!, tankRecap: { ...r, tanks: 2, passes: 0 } } }} now={Date.now()} />).container.querySelector('.ov-recap')!.textContent ?? '';
+    const two = render(<Overlay which="gameplay" feed={{ ...feed(), tankRecap: { ...r, tanks: 2, passes: 0 } }} now={Date.now()} />).container.querySelector('.ov-recap')!.textContent ?? '';
     expect(two).toContain('Tanks down');
     expect(two).toContain('2 tanks, combined');
     expect(two).not.toContain('Passed');
-    const off = render(<Overlay which="gameplay" feed={{ ...feed({ elements: { ...allOn, tankRecap: false } }), live: { ...live!, tankRecap: r } }} now={Date.now()} />).container;
+    const off = render(<Overlay which="gameplay" feed={{ ...feed({ elements: { ...allOn, tankRecap: false } }), tankRecap: r }} now={Date.now()} />).container;
+    expect(off.querySelector('.ov-recap')).toBeNull();
+    // A wipe ends the round, so the card must not need a live round.
+    const wipe = render(<Overlay which="gameplay" feed={{ ...feed(), live: null, tankRecap: { ...r, end: 'wipe' } }} now={Date.now()} />).container.querySelector('.ov-recap')!.textContent ?? '';
+    expect(wipe).toContain('Team wiped');
+    expect(wipe).toContain('4,200');
+    const safe = render(<Overlay which="gameplay" feed={{ ...feed(), tankRecap: { ...r, end: 'safe' } }} now={Date.now()} />).container.querySelector('.ov-recap')!.textContent ?? '';
+    expect(safe).toContain('Tank still up');
+  });
+
+  it('shows the witch card, and the tank card wins when both are up', () => {
+    const w = { agoMs: 300, aliveS: null, startled: null, killer: 'Survivor One', crown: true, incaps: 0, players: [{ name: 'Survivor One', dmg: 1000, share: 100 }] };
+    const t = render(<Overlay which="gameplay" feed={{ ...feed(), witchRecap: w }} now={Date.now()} />).container.querySelector('.ov-recap--witch')!.textContent ?? '';
+    for (const x of ['Witch crowned', 'Survivor One', 'Startled', 'No', '1,000', '100%']) expect(t).toContain(x);
+    expect(t).not.toContain('Lasted');
+    const down = render(<Overlay which="gameplay" feed={{ ...feed(), witchRecap: { ...w, crown: false, startled: 'Two', aliveS: 14, incaps: 2 } }} now={Date.now()} />).container.textContent ?? '';
+    for (const x of ['Witch down', 'Two', '0:14', 'Incaps2']) expect(down.replace(/\s+/g, '')).toContain(x.replace(/\s+/g, ''));
+    const tank = { agoMs: 0, aliveS: 10, controller: null, dealt: 0, tanks: 1, passes: 0, end: 'dead' as const, players: [] };
+    const both = render(<Overlay which="gameplay" feed={{ ...feed(), witchRecap: w, tankRecap: tank }} now={Date.now()} />).container;
+    expect(both.querySelectorAll('.ov-recap')).toHaveLength(1);
+    expect(both.querySelector('.ov-recap--witch')).toBeNull();
+    const off = render(<Overlay which="gameplay" feed={{ ...feed({ elements: { ...allOn, witchRecap: false } }), witchRecap: w }} now={Date.now()} />).container;
     expect(off.querySelector('.ov-recap')).toBeNull();
   });
 

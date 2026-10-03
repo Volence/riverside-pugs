@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.20"
+#define PLUGIN_VERSION "0.3.21"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -572,6 +572,13 @@ No config exec and no restart: it tracks the game already being played. Implies 
 		LogMessage("pug-match: event 'triggered_car_alarm' does not exist on this engine; car_alarm capture will be silently absent.");
 	if (!HookEventEx("tank_spawn", Event_TankSpawn))
 		LogMessage("pug-match: event 'tank_spawn' does not exist on this engine; tank_spawn capture will be silently absent.");
+	// Witch recap (caster studio). infected_hurt is a "local" event (not
+	// networked) but still raised server side; l4d2_skill_detect hooks it the
+	// same way for crowns.
+	if (!HookEventEx("witch_spawn", Event_WitchSpawn))
+		LogMessage("pug-match: event 'witch_spawn' does not exist on this engine; the witch recap will be silently absent.");
+	if (!HookEventEx("infected_hurt", Event_InfectedHurt))
+		LogMessage("pug-match: event 'infected_hurt' does not exist on this engine; the witch recap will have no damage.");
 	// Tank control passing goes through a bot swap on this engine: a human
 	// losing the tank fires player_bot_replace, a human taking over a bot
 	// tank fires bot_player_replace. Verified against l4d_tank_pass.sp and
@@ -3272,6 +3279,26 @@ void TankRecapEnd(int tank)
 {
 	if (g_fTankSpawnedAt <= 0.0 || !StatsActive()) { g_fTankSpawnedAt = 0.0; return; }
 	if (TanksAlive(tank) > 0) return;     // another tank still up: the last one reports
+	TankRecapEmit(tank, "dead");
+}
+
+/** The round ended with a tank still up: the same recap, so a team that
+ *  wiped to the tank (end=wipe) or walked into the saferoom past it
+ *  (end=safe) still gets its damage card. Called from round_end BEFORE the
+ *  round-ended latch, while StatsActive() is still true. */
+void TankRecapRoundEnd()
+{
+	if (g_fTankSpawnedAt <= 0.0 || !StatsActive()) return;
+	int tank = 0;
+	for (int c = 1; c <= MaxClients && tank == 0; c++)
+		if (IsClientInGame(c) && IsTankClient(c) && IsPlayerAlive(c)) tank = c;
+	if (tank == 0) return;                // it died this tick: player_death reports it
+	TankRecapEmit(tank, CountAliveSurvivors() > 0 ? "safe" : "wipe");
+}
+
+/**    TANKDONE alive=<s> controller=<steamid|0> dealt=<dmg to survivors> tanks=<n> passes=<n> end=<dead|wipe|safe> p=<steamid>:<dmg>,... */
+void TankRecapEmit(int tank, const char[] end)
+{
 	int alive = RoundToFloor(GetGameTime() - g_fTankSpawnedAt);
 	g_fTankSpawnedAt = 0.0;
 	int dealt = 0;
@@ -3288,8 +3315,115 @@ void TankRecapEnd(int tank)
 	char controller[32] = "0";
 	if (tank >= 1 && tank <= MaxClients && !IsFakeClient(tank) && g_iClientRoster[tank] >= 0)
 		strcopy(controller, sizeof(controller), g_sRosterId[g_iClientRoster[tank]]);
-	EmitPug("TANKDONE alive=%d controller=%s dealt=%d tanks=%d passes=%d p=%s",
-		alive, controller, dealt, g_iTanksInWindow, g_iTankPasses, list);
+	EmitPug("TANKDONE alive=%d controller=%s dealt=%d tanks=%d passes=%d end=%s p=%s",
+		alive, controller, dealt, g_iTanksInWindow, g_iTankPasses, end, list);
+}
+
+// ---------- witch recap (caster studio) ----------
+// Each survivor's damage to a witch from infected_hurt, who startled her,
+// who killed her, whether it was a crown (witch_killed oneshot) and how many
+// survivors she put down. Sent when she dies:
+//
+//   WITCHDONE alive=<s from startle, -1 never startled> startled=<steamid|0> killer=<steamid|0> crown=<0|1> incaps=<n> p=<steamid>:<dmg>,...
+//
+// Witches are tracked by entity reference from witch_spawn, a few at a time
+// (a witch party map can hold several), and forgotten at each half's start.
+#define WITCH_SLOTS 8
+int g_iWitchRef[WITCH_SLOTS];             // EntIndexToEntRef, 0 = free
+int g_iWitchDmg[WITCH_SLOTS][MAX_ROSTER];
+int g_iWitchStartler[WITCH_SLOTS];        // roster slot, -1 = not startled yet
+float g_fWitchStartledAt[WITCH_SLOTS];
+int g_iWitchIncaps[WITCH_SLOTS];
+
+/** A half going live: forget last half's witches, then take in any already
+ *  standing (a witch spawned during ready-up is still crownable this half). */
+void WitchRecapReset()
+{
+	for (int w = 0; w < WITCH_SLOTS; w++) g_iWitchRef[w] = 0;
+	int e = -1;
+	while ((e = FindEntityByClassname(e, "witch")) != -1) WitchSlot(e, true);
+}
+
+/** The slot tracking `entity`, or -1. With `create`, a new slot for it (a
+ *  free one, else one whose witch is gone). */
+int WitchSlot(int entity, bool create)
+{
+	if (entity <= MaxClients || !IsValidEntity(entity)) return -1;
+	int ref = EntIndexToEntRef(entity);
+	for (int w = 0; w < WITCH_SLOTS; w++) if (g_iWitchRef[w] == ref) return w;
+	if (!create) return -1;
+	for (int w = 0; w < WITCH_SLOTS; w++)
+	{
+		if (g_iWitchRef[w] != 0 && EntRefToEntIndex(g_iWitchRef[w]) != INVALID_ENT_REFERENCE) continue;
+		g_iWitchRef[w] = ref;
+		for (int i = 0; i < MAX_ROSTER; i++) g_iWitchDmg[w][i] = 0;
+		g_iWitchStartler[w] = -1;
+		g_fWitchStartledAt[w] = 0.0;
+		g_iWitchIncaps[w] = 0;
+		return w;
+	}
+	return -1;
+}
+
+public void Event_WitchSpawn(Event event, const char[] name, bool dontBroadcast)
+{
+	// Not gated on StatsActive: damage and the recap are, and a witch from
+	// ready-up must already be known when the half goes live.
+	WitchSlot(event.GetInt("witchid"), true);
+}
+
+/** Fires for every common hit too, so the witch check is the slot lookup
+ *  (a few integer compares), never a classname read. */
+public void Event_InfectedHurt(Event event, const char[] name, bool dontBroadcast)
+{
+	if (!StatsActive()) return;
+	int w = WitchSlot(event.GetInt("entityid"), false);
+	if (w == -1) return;
+	int attacker = GetClientOfUserId(event.GetInt("attacker"));
+	if (attacker < 1 || attacker > MaxClients || g_iClientRoster[attacker] < 0 || GetClientTeam(attacker) != TEAM_SURVIVOR) return;
+	int amount = event.GetInt("amount");
+	// Raised after the damage is applied: a killing blow's overkill (a crown
+	// shotgun blast does far more than her health) is not damage done.
+	int health = GetEntProp(event.GetInt("entityid"), Prop_Data, "m_iHealth");
+	if (health < 0) amount += health;
+	if (amount > 0) g_iWitchDmg[w][g_iClientRoster[attacker]] += amount;
+}
+
+void WitchStartled(int witch, int client)
+{
+	if (!StatsActive()) return;
+	int w = WitchSlot(witch, true);
+	if (w == -1 || g_iWitchStartler[w] != -1) return;
+	if (client >= 1 && client <= MaxClients && g_iClientRoster[client] >= 0) g_iWitchStartler[w] = g_iClientRoster[client];
+	g_fWitchStartledAt[w] = GetGameTime();
+}
+
+void WitchIncapped(int witch)
+{
+	int w = WitchSlot(witch, false);
+	if (w != -1) g_iWitchIncaps[w]++;
+}
+
+void WitchRecapEnd(int witch, int killer, bool crown)
+{
+	int w = WitchSlot(witch, false);
+	if (w == -1) return;
+	g_iWitchRef[w] = 0;
+	if (!StatsActive()) return;
+	int alive = g_fWitchStartledAt[w] > 0.0 ? RoundToFloor(GetGameTime() - g_fWitchStartledAt[w]) : -1;
+	char list[600];
+	list[0] = '\0';
+	for (int i = 0; i < g_iRosterCount; i++)
+	{
+		if (g_iWitchDmg[w][i] <= 0) continue;
+		Format(list, sizeof(list), "%s%s%s:%d", list, list[0] == '\0' ? "" : ",", g_sRosterId[i], g_iWitchDmg[w][i]);
+	}
+	char startled[32] = "0";
+	if (g_iWitchStartler[w] >= 0) strcopy(startled, sizeof(startled), g_sRosterId[g_iWitchStartler[w]]);
+	char killedBy[32] = "0";
+	if (killer >= 1 && killer <= MaxClients && g_iClientRoster[killer] >= 0) strcopy(killedBy, sizeof(killedBy), g_sRosterId[g_iClientRoster[killer]]);
+	EmitPug("WITCHDONE alive=%d startled=%s killer=%s crown=%d incaps=%d p=%s",
+		alive, startled, killedBy, crown ? 1 : 0, g_iWitchIncaps[w], list);
 }
 
 /** Survivor items as LIVEHUD bits: 1 kit, 2 pills, 4 pipe bomb, 8 molotov. */
@@ -4017,6 +4151,7 @@ public void OnRoundIsLive()
 		g_fTankSpawnedAt = 0.0;    // a tank from the half before is never this half's
 		g_iTankPasses = 0;
 		g_iTanksInWindow = 0;
+		WitchRecapReset();
 
 		RosterLateJoiners();
 		CheckRosterMismatch();
@@ -4129,6 +4264,9 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 	// or times_quadded was recorded on any server. It must also precede
 	// EmitRoundStats, so the quad lands in this round's ROUND_STAT delta.
 	QuadSettle();
+	// The same window for a tank still up at round end (a wipe, or the
+	// survivors made it past it): its recap goes out while StatsActive().
+	TankRecapRoundEnd();
 	g_bRoundEnded = true;
 	bool second = view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound"));
 	int survPug = ObserveSurvivorPugTeam();
@@ -4989,6 +5127,7 @@ public void Event_Incap(Event event, const char[] name, bool dontBroadcast)
 {
 	int victim = GetClientOfUserId(event.GetInt("userid"));
 	int attacker = GetClientOfUserId(event.GetInt("attacker"));
+	if (attacker == 0 && StatsActive()) WitchIncapped(event.GetInt("attackerentid"));
 	if (victim > 0 && victim <= MaxClients)
 	{
 		// A hard forget, not a recorded release: someone who has gone down was
@@ -5003,12 +5142,16 @@ public void Event_Incap(Event event, const char[] name, bool dontBroadcast)
 
 public void Event_WitchAggro(Event event, const char[] name, bool dontBroadcast)
 {
-	EmitClientEvent("witch_aggro", GetClientOfUserId(event.GetInt("userid")), 0, 0);
+	int client = GetClientOfUserId(event.GetInt("userid"));
+	WitchStartled(event.GetInt("witchid"), client);
+	EmitClientEvent("witch_aggro", client, 0, 0);
 }
 
 public void Event_WitchKilled(Event event, const char[] name, bool dontBroadcast)
 {
-	EmitClientEvent("witch_killed", GetClientOfUserId(event.GetInt("userid")), 0, 0);
+	int client = GetClientOfUserId(event.GetInt("userid"));
+	WitchRecapEnd(event.GetInt("witchid"), client, event.GetBool("oneshot"));
+	EmitClientEvent("witch_killed", client, 0, 0);
 }
 
 /** triggered_car_alarm: userid may be absent or 0 when the director trips an

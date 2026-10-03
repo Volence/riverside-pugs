@@ -100,7 +100,7 @@ function cleanElements(v: unknown): LiveElements {
   const pick = (k: keyof LiveElements): boolean => (typeof o[k] === 'boolean' ? o[k] as boolean : d[k]);
   return {
     survivors: pick('survivors'), infected: pick('infected'), tank: pick('tank'), bosses: pick('bosses'), progress: pick('progress'),
-    tankRecap: pick('tankRecap'), rival: pick('rival'), dots: pick('dots'),
+    tankRecap: pick('tankRecap'), witchRecap: pick('witchRecap'), rival: pick('rival'), dots: pick('dots'),
   };
 }
 

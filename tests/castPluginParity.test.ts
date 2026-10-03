@@ -46,11 +46,41 @@ describe('caster studio plugin lines', () => {
   it('TANKDONE as the plugin formats it parses into every field', () => {
     const fmt = format('TANKDONE');
     expect(fmt).not.toBe('');
-    const line = fill(fmt, [84, '76561198030413993', 312, 2, 1, '76561198030413994:4200']);
+    const line = fill(fmt, [84, '76561198030413993', 312, 2, 1, 'wipe', '76561198030413994:4200']);
     expect(parseLogDatagram(datagram(line))).toEqual({
       kind: 'tank_done', token: TOKEN,
-      recap: { aliveS: 84, controller: '76561198030413993', dealt: 312, tanks: 2, passes: 1, players: [{ steamid: '76561198030413994', dmg: 4200 }] },
+      recap: { aliveS: 84, controller: '76561198030413993', dealt: 312, tanks: 2, passes: 1, end: 'wipe', players: [{ steamid: '76561198030413994', dmg: 4200 }] },
     });
+  });
+
+  it('a 0.3.20 TANKDONE (no end=) reads as a tank that died', () => {
+    const line = 'TANKDONE alive=84 controller=0 dealt=312 tanks=1 passes=0 p=76561198030413994:4200';
+    expect(parseLogDatagram(datagram(line))).toMatchObject({ kind: 'tank_done', recap: { end: 'dead', controller: null } });
+  });
+
+  it('WITCHDONE as the plugin formats it parses into every field', () => {
+    const fmt = format('WITCHDONE');
+    expect(fmt).not.toBe('');
+    const line = fill(fmt, [14, '76561198030413993', '76561198030413994', 1, 2, '76561198030413994:900,76561198030413993:100']);
+    expect(parseLogDatagram(datagram(line))).toEqual({
+      kind: 'witch_done', token: TOKEN,
+      recap: {
+        aliveS: 14, startled: '76561198030413993', killer: '76561198030413994', crown: true, incaps: 2,
+        players: [{ steamid: '76561198030413994', dmg: 900 }, { steamid: '76561198030413993', dmg: 100 }],
+      },
+    });
+    // Never startled, nobody rostered killed her.
+    expect(parseLogDatagram(datagram(fill(fmt, [-1, '0', '0', 0, 0, ''])))).toMatchObject({
+      kind: 'witch_done', recap: { aliveS: null, startled: null, killer: null, crown: false, players: [] },
+    });
+  });
+
+  it('sends the round-end tank recap before the round-ended latch (StatsActive gate)', () => {
+    const body = src.slice(src.indexOf('public void Event_RoundEnd('));
+    const recap = body.indexOf('TankRecapRoundEnd();');
+    const latch = body.indexOf('g_bRoundEnded = true;');
+    expect(recap).toBeGreaterThan(0);
+    expect(recap).toBeLessThan(latch);
   });
 
   it('ends a tank recap before the player_death handler returns on a missing attacker', () => {

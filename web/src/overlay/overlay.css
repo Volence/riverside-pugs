@@ -575,6 +575,8 @@
 .ov-game--corners .ov-recap { top: 160px; }
 .ov-game--rail .ov-recap { top: 124px; }
 .ov-game--scorebug .ov-recap { top: auto; bottom: 160px; }
+/* The witch card lives WITCH_RECAP_MS (10 s), the tank card TANK_RECAP_MS (12 s). */
+.ov-recap--witch { animation-duration: 10s; }
 .ov-recap__head { display: flex; align-items: center; gap: 10px; }
 .ov-recap__icon { width: 34px; height: 34px; }
 .ov-recap__title { font: 400 30px var(--stencil); text-transform: uppercase; color: var(--accent); line-height: 1; }

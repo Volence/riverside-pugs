@@ -42,8 +42,29 @@ export interface TankDone {
   tanks: number;
   /** How many times the tank was passed (frustration or handoff). */
   passes: number;
+  /** How the window closed (pug-match 0.3.21): the tank died, the round
+   *  ended with it up and every survivor down (`wipe`), or the survivors made
+   *  the saferoom past it (`safe`). 0.3.20 sends none, which reads as dead. */
+  end: 'dead' | 'wipe' | 'safe';
   players: { steamid: string; dmg: number }[];
 }
+
+/** A witch's recap (WITCHDONE, pug-match 0.3.21): each survivor's damage to
+ *  her, who startled her, who killed her. */
+export interface WitchDone {
+  /** Seconds from the startle to her death, null when she was never startled. */
+  aliveS: number | null;
+  startled: string | null;
+  killer: string | null;
+  /** Killed with one shot (witch_killed oneshot). */
+  crown: boolean;
+  /** Survivors she put down. */
+  incaps: number;
+  players: { steamid: string; dmg: number }[];
+}
+
+/** How long the witch card stays up. */
+export const WITCH_RECAP_MS = 10_000;
 
 /** How long the recap card stays up after a tank dies. */
 export const TANK_RECAP_MS = 12_000;
@@ -57,6 +78,19 @@ const FORGET_MS = 10 * 60_000;
 export class LiveHudStore {
   private byToken = new Map<string, { at: number; line: LiveHudLine; reach: Map<string, number> }>();
   private tanks = new Map<string, { at: number; recap: TankDone }>();
+  private witches = new Map<string, { at: number; recap: WitchDone }>();
+
+  recordWitch(token: string, recap: WitchDone, nowMs = Date.now()): void {
+    this.witches.set(token, { at: nowMs, recap });
+    if (this.witches.size > 64) for (const [k, v] of this.witches) if (nowMs - v.at > FORGET_MS) this.witches.delete(k);
+  }
+
+  /** The last witch's recap while it is still worth showing. */
+  witch(token: string, nowMs = Date.now()): { recap: WitchDone; agoMs: number } | null {
+    const t = this.witches.get(token);
+    if (!t || nowMs - t.at > WITCH_RECAP_MS || nowMs < t.at - 1000) return null;
+    return { recap: t.recap, agoMs: Math.max(0, nowMs - t.at) };
+  }
 
   recordTank(token: string, recap: TankDone, nowMs = Date.now()): void {
     this.tanks.set(token, { at: nowMs, recap });

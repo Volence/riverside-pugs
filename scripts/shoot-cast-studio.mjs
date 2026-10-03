@@ -121,6 +121,24 @@ try {
   await sleep(2400);
   await shot('gameplay-plate-tank-recap');
 
+  // A wipe to the tank (round over with the tank up), then the witch card.
+  await api('POST', '/api/dev/livehud', { token: 'a1'.repeat(16), tank: { aliveS: 51, controller: '76561198000009101', dealt: 1180, end: 'wipe', players: [
+    { steamid: '76561198000009104', dmg: 1210 }, { steamid: '76561198000009105', dmg: 640 },
+  ] } });
+  await go(`${BASE}/overlay/gameplay?k=${encodeURIComponent(key)}`);
+  await ev(`document.documentElement.style.background = ${JSON.stringify(BG)}`);
+  await sleep(2400);
+  await shot('gameplay-plate-tank-wipe');
+  await api('POST', '/api/dev/livehud', { token: 'a1'.repeat(16), tank: { aliveS: 0, controller: null, dealt: 0, end: 'dead', players: [] } });
+  await sleep(13_000); // let that tank card expire
+  await api('POST', '/api/dev/livehud', { token: 'a1'.repeat(16), witch: { aliveS: 9, startled: '76561198000009106', killer: '76561198000009104', crown: false, incaps: 1, players: [
+    { steamid: '76561198000009104', dmg: 610 }, { steamid: '76561198000009105', dmg: 270 }, { steamid: '76561198000009106', dmg: 120 },
+  ] } });
+  await go(`${BASE}/overlay/gameplay?k=${encodeURIComponent(key)}`);
+  await ev(`document.documentElement.style.background = ${JSON.stringify(BG)}`);
+  await sleep(2400);
+  await shot('gameplay-plate-witch');
+
   // Nothing on air: the OBS page is transparent (shot over the still).
   await api('PUT', '/api/cast/studio', { ...state, matchId: null, lowerThird: { ...state.lowerThird, show: false } });
   await go(`${BASE}/overlay/gameplay?k=${encodeURIComponent(key)}`);

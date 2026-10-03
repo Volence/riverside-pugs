@@ -1,4 +1,4 @@
-import type { LiveHudLine, TankDone } from './cast/liveHud.js';
+import type { LiveHudLine, TankDone, WitchDone } from './cast/liveHud.js';
 import { steamId64Of } from './steamId.js';
 import { MAX_HOLDS, decodeIntervals } from './inputStats.js';
 
@@ -129,6 +129,7 @@ export type LogEvent =
   // A tank died: each survivor's damage to it, its controller, how long it
   // lived and what it dealt (pug-match 0.3.20). Caster studio only, memory.
   | { kind: 'tank_done'; token: string; recap: TankDone }
+  | { kind: 'witch_done'; token: string; recap: WitchDone }
   // One half of one map. Emitted at OnRoundIsLive and again at round_end.
   // The END value of `surv` is authoritative: the plugin's orientation
   // mapping is unreliable early in a round, which is exactly why that
@@ -952,7 +953,24 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       // tanks reported as one combined recap; passes counts tank passes.
       const tanks = Math.max(1, intOf(rest.tanks) ?? 1);
       const passes = Math.max(0, intOf(rest.passes) ?? 0);
-      return { kind: 'tank_done', token, recap: { aliveS: alive, controller, dealt, tanks, passes, players: players.slice(0, 12) } };
+      // Optional (0.3.21): how the window closed; anything else is a death.
+      const end = rest.end === 'wipe' || rest.end === 'safe' ? rest.end : 'dead';
+      return { kind: 'tank_done', token, recap: { aliveS: alive, controller, dealt, tanks, passes, end, players: players.slice(0, 12) } };
+    }
+    case 'WITCHDONE': {
+      const alive = intOf(rest.alive);
+      const incaps = intOf(rest.incaps);
+      if (alive === null || alive < -1 || incaps === null || incaps < 0) return null;
+      const id = (v: string | undefined): string | null => (/^\d{17}$/.test(v ?? '') ? v! : null);
+      const players: WitchDone['players'] = [];
+      for (const part of (rest.p ?? '').split(',')) {
+        const m = /^(\d{17}):(\d{1,6})$/.exec(part);
+        if (m) players.push({ steamid: m[1]!, dmg: Number(m[2]) });
+      }
+      return {
+        kind: 'witch_done', token,
+        recap: { aliveS: alive < 0 ? null : alive, startled: id(rest.startled), killer: id(rest.killer), crown: rest.crown === '1', incaps, players: players.slice(0, 12) },
+      };
     }
     case 'ROUND_START': {
       const half = halfOf(rest.half);

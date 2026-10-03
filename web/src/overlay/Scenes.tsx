@@ -3,7 +3,7 @@ import { useRef } from 'preact/hooks';
 import { camSlots } from '../../../src/cast/layout';
 import { emptyQueue, stepAuto, type AutoCard } from './callouts';
 import {
-  boomerRate, CALLOUT_MS, ITEM, skeetTotal, type CastChapter, type TankRecap, type CastInfected, type CastLiveRound, type CastMatchView, type CastPlayer,
+  boomerRate, CALLOUT_MS, ITEM, skeetTotal, type CastChapter, type TankRecap, type WitchRecap, type CastInfected, type CastLiveRound, type CastMatchView, type CastPlayer,
   type CastSurvivor, type CastTeam, type OverlayFeed, type OverlayKey, type StudioState,
 } from '../../../src/cast/types';
 
@@ -60,7 +60,7 @@ function SceneBody({ scene, feed, now, auto }: { scene: OverlayKey; feed: Overla
   switch (scene) {
     case 'starting': return <Starting studio={studio} match={match} now={now} />;
     case 'casters': return <Casters studio={studio} match={match} />;
-    case 'gameplay': return <Gameplay studio={studio} match={match} live={live} now={now} auto={auto} />;
+    case 'gameplay': return <Gameplay studio={studio} match={match} live={live} now={now} auto={auto} feed={feed} />;
     case 'scorebug': return match ? <Scorebug studio={studio} match={match} live={live} /> : null;
     case 'roundhud': return <RoundHud studio={studio} match={match} live={live} force />;
     case 'lowerthird': return studio.lowerThird.show ? <LowerThird studio={studio} /> : null;
@@ -524,8 +524,8 @@ function LowerThird({ studio }: { studio: StudioState }) {
 
 /* ---------- gameplay ---------- */
 
-function Gameplay({ studio, match, live, now, auto }: {
-  studio: StudioState; match: CastMatchView | null; live: CastLiveRound | null; now: number; auto: AutoCard | null;
+function Gameplay({ studio, match, live, now, auto, feed }: {
+  studio: StudioState; match: CastMatchView | null; live: CastLiveRound | null; now: number; auto: AutoCard | null; feed: OverlayFeed;
 }) {
   // Nothing on air: OBS gets a transparent frame, never a placeholder on
   // stream (the producer panel's preview shows a labelled sample instead).
@@ -536,7 +536,7 @@ function Gameplay({ studio, match, live, now, auto }: {
     return (
       <div class={`ov-game ov-game--${studio.hudStyle}${rows ? ' has-rows' : ''}`}>
         <Hud studio={studio} match={match} live={live} />
-        {studio.elements.tankRecap && live?.tankRecap && <TankRecapCard r={live.tankRecap} />}
+        <Recap studio={studio} feed={feed} />
         <Callout studio={studio} match={match} now={now} auto={auto} />
       </div>
     );
@@ -547,7 +547,7 @@ function Gameplay({ studio, match, live, now, auto }: {
         <Scorebug studio={studio} match={match} live={live} />
         <RoundHud studio={studio} match={match} live={live} />
       </div>
-      {studio.elements.tankRecap && live?.tankRecap && <TankRecapCard r={live.tankRecap} />}
+      <Recap studio={studio} feed={feed} />
       <Callout studio={studio} match={match} now={now} auto={auto} />
     </div>
   );
@@ -1106,12 +1106,26 @@ const fmtAlive = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart
  * it, how long it lived, what it dealt). The numbers are pug-match's own
  * hook totals between the tank's spawn and its death, so they are exact.
  */
+/** The recap card spot: a tank's beats a witch's when both are up. */
+function Recap({ studio, feed }: { studio: StudioState; feed: OverlayFeed }) {
+  if (studio.elements.tankRecap && feed.tankRecap) return <TankRecapCard r={feed.tankRecap} />;
+  if (studio.elements.witchRecap && feed.witchRecap) return <WitchRecapCard r={feed.witchRecap} />;
+  return null;
+}
+
+const TANK_END_TITLE: Record<TankRecap['end'], [string, string]> = {
+  dead: ['Tank down', 'Tanks down'],
+  wipe: ['Team wiped', 'Team wiped'],
+  safe: ['Tank still up', 'Tanks still up'],
+};
+
 function TankRecapCard({ r }: { r: TankRecap }) {
+  const [one, many] = TANK_END_TITLE[r.end] ?? TANK_END_TITLE.dead;
   return (
-    <div class="ov-recap" key={`${r.aliveS}:${r.dealt}`}>
+    <div class={`ov-recap ov-recap--${r.end}`} key={`${r.aliveS}:${r.dealt}:${r.end}`}>
       <div class="ov-recap__head">
         <ClassIcon cls="tank" class="ov-recap__icon" />
-        <span class="ov-recap__title">{r.tanks > 1 ? 'Tanks down' : 'Tank down'}</span>
+        <span class="ov-recap__title">{r.tanks > 1 ? many : one}</span>
         <span class="ov-recap__who">{r.tanks > 1 ? `${r.tanks} tanks, combined` : r.controller ?? 'AI tank'}</span>
       </div>
       <div class="ov-recap__facts">
@@ -1129,6 +1143,40 @@ function TankRecapCard({ r }: { r: TankRecap }) {
           </li>
         ))}
       </ol>
+    </div>
+  );
+}
+
+/**
+ * After a witch dies: crowned or not, who startled her and who killed her,
+ * anyone she put down, and each survivor's damage to her (pug-match 0.3.21,
+ * infected_hurt totals with a killing blow's overkill left out).
+ */
+function WitchRecapCard({ r }: { r: WitchRecap }) {
+  return (
+    <div class="ov-recap ov-recap--witch" key={`${r.killer}:${r.aliveS}:${r.players.length}`}>
+      <div class="ov-recap__head">
+        <ClassIcon cls="witch" class="ov-recap__icon" />
+        <span class="ov-recap__title">{r.crown ? 'Witch crowned' : 'Witch down'}</span>
+        {r.killer && <span class="ov-recap__who">{r.killer}</span>}
+      </div>
+      <div class="ov-recap__facts">
+        <span><em>Startled</em> {r.startled ?? 'No'}</span>
+        {r.aliveS !== null && <span><em>Lasted</em> {fmtAlive(r.aliveS)}</span>}
+        <span><em>Incaps</em> {r.incaps}</span>
+      </div>
+      {r.players.length > 0 && (
+        <ol class="ov-recap__rows">
+          {r.players.map((p) => (
+            <li key={p.name}>
+              <span class="ov-recap__name">{p.name}</span>
+              <span class="ov-recap__bar"><span style={{ width: `${p.share}%` }} /></span>
+              <span class="ov-recap__dmg">{p.dmg.toLocaleString('en-US')}</span>
+              <span class="ov-recap__pct">{p.share}%</span>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
