@@ -7,9 +7,10 @@ import { campaignTint } from '../format';
 import { connectObs, type ObsClient, type ObsStatus } from '../cast/obs';
 import { Overlay, setOverlayKey } from '../overlay/Scenes';
 import { sampleFeed } from '../overlay/sample';
+import { CALLOUT_KINDS, sideOfEvent } from '../overlay/callouts';
 import '../overlay/overlay.css';
 import {
-  DEFAULT_INFECTED_RECT, HUD_STYLES, LAYERS, MAX_CASTERS, SCENES, SCENE_LABELS, THEMES,
+  CALLOUT_KIND_LABELS, DEFAULT_INFECTED_RECT, HUD_STYLES, LAYERS, MAX_CASTERS, SCENES, SCENE_LABELS, THEMES,
   type CastMatchView, type LiveElements, type LiveHud, type OverlayFeed, type SceneKey, type StudioState, type TeamOverride,
 } from '../../../src/cast/types';
 
@@ -48,48 +49,6 @@ const ELEMENT_INFO: { key: keyof LiveElements; label: string; help: string }[] =
   { key: 'tank', label: 'Tank health', help: 'On by default: a spectator never sees the tank\'s health.' },
   { key: 'tankRecap', label: 'Tank damage card', help: "After a tank dies: each survivor's damage to it and their share, who played it, how long it lived." },
 ];
-
-/** Live events worth a callout, with the card title each gets. */
-const CALLOUT_KINDS: Record<string, (e: CastMatchView['events'][number]) => { title: string; text: string }> = {
-  skeet: (e) => skeetCallout(e),
-  dp: (e) => ({ title: 'DP', text: `${e.actor} pounced ${e.target ?? 'a survivor'} for ${e.value}` }),
-  tank_death: (e) => ({ title: 'Tank down', text: `${e.actor} finished the tank` }),
-  tank_spawn: (e) => ({ title: 'Tank', text: `${e.actor} is on the tank` }),
-  witch_killed: (e) => ({ title: 'Witch down', text: `${e.actor} killed the witch` }),
-  witch_aggro: (e) => ({ title: 'Witch!', text: `${e.actor} startled the witch` }),
-  death: (e) => ({ title: 'Survivor down', text: `${e.actor} was killed by ${e.target ?? 'the infected'}` }),
-  incap: (e) => ({ title: 'Incapped', text: `${e.actor} went down to ${e.target ?? 'the infected'}` }),
-  boom: (e) => bileCallout(e),
-  car_alarm: (e) => ({ title: 'Car alarm', text: `${e.actor} set off a car alarm` }),
-};
-
-/** One card per skeet run (the feed folds a run into its newest skeet):
- *  Skeet, then Double / Triple / Quad skeet as the same player keeps going,
- *  counted by the Discord streak rules. */
-const STREAK_TITLES = ['Skeet', 'Double skeet', 'Triple skeet', 'Quad skeet'];
-const BILE_TITLES = ['Boomed', 'Double bile', 'Triple bile', 'Quad bile'];
-
-const listOf = (names: string[]): string =>
-  names.length <= 1 ? names[0] ?? '' : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-
-/** One card per bile: every survivor one boomer caught (a vomit or a pop). */
-export function bileCallout(e: CastMatchView['events'][number]): { title: string; text: string } {
-  const n = e.streak?.count ?? 1;
-  const targets = e.streak?.targets.length ? e.streak.targets : e.target ? [e.target] : [];
-  return { title: BILE_TITLES[n - 1] ?? 'Quad bile', text: `${e.actor} boomed ${targets.length ? listOf(targets) : 'the survivors'}` };
-}
-export function skeetCallout(e: CastMatchView['events'][number]): { title: string; text: string } {
-  const n = e.streak?.count ?? 1;
-  const title = STREAK_TITLES[n - 1] ?? `${n}x skeet`;
-  const targets = e.streak?.targets.length ? e.streak.targets : e.target ? [e.target] : [];
-  const who = targets.length === 0 ? (n > 1 ? `${n} hunters` : 'a hunter')
-    : targets.length === 1 ? targets[0] : `${targets.slice(0, -1).join(', ')} and ${targets[targets.length - 1]}`;
-  return { title, text: `${e.actor} skeeted ${who}` };
-}
-
-function sideOfEvent(kind: string): 'survivor' | 'infected' {
-  return ['skeet', 'tank_death', 'witch_killed', 'witch_aggro', 'death', 'incap', 'car_alarm'].includes(kind) ? 'survivor' : 'infected';
-}
 
 function useInterval(fn: () => void, ms: number) {
   const ref = useRef(fn);
@@ -262,7 +221,7 @@ export default function CastStudio() {
         <div class="studio__col">
           <OnAir panel={panel} state={state} update={update} onAirId={match?.id ?? state.matchId} connects={connects} />
           <ScenePad state={state} goScene={goScene} obsProgram={obsProgram} obsScenes={panel.obsScenes} />
-          <Highlights state={state} match={match} onFire={async (c) => {
+          <Highlights state={state} match={match} update={update} onFire={async (c) => {
             try {
               const r = await studioApi.callout(c);
               setState((s) => (s ? { ...s, callout: r.studio.callout } : s));
@@ -444,8 +403,8 @@ function ScenePad({ state, goScene, obsProgram, obsScenes }: {
 
 /* ---------- highlights ---------- */
 
-function Highlights({ state, match, onFire, onClear }: {
-  state: StudioState; match: CastMatchView | null;
+function Highlights({ state, match, update, onFire, onClear }: {
+  state: StudioState; match: CastMatchView | null; update: Update;
   onFire: (c: { title: string; text: string; team: 'a' | 'b' | null }) => void; onClear: () => void;
 }) {
   const [title, setTitle] = useState('');
@@ -456,7 +415,38 @@ function Highlights({ state, match, onFire, onClear }: {
   return (
     <section class="panel">
       <h3>Highlights</h3>
-      <p class="muted studio__hint">Fire a card on the gameplay scene for eight seconds. Newest plays first.</p>
+      <p class="muted studio__hint">
+        A card on the gameplay scene for eight seconds. Fire one by hand, or switch on auto-fire and the overlay fires the
+        kinds ticked below as they happen, one at a time (skeets and biles wait five seconds so a run goes up once, at its final
+        count). A card you fire by hand always goes first.
+      </p>
+      <div class="studio__form studio__row3">
+        <label class="studio__toggle studio__toggle--inline">
+          <input type="checkbox" checked={state.autoCallouts.on}
+            onChange={(e) => { const on = e.currentTarget.checked; update((s) => ({ ...s, autoCallouts: { ...s.autoCallouts, on } }), true); }} />
+          <span><b>Auto-fire</b></span>
+        </label>
+        <label>Card size
+          <select value={state.calloutSize} onChange={(e) => { const v = e.currentTarget.value === 'normal' ? 'normal' : 'compact'; update((s) => ({ ...s, calloutSize: v }), true); }}>
+            <option value="compact">Compact</option>
+            <option value="normal">Big</option>
+          </select>
+        </label>
+      </div>
+      {state.autoCallouts.on && (
+        <div class="studio__kinds" role="group" aria-label="Kinds auto-fire fires">
+          {Object.entries(CALLOUT_KIND_LABELS).map(([k, label]) => (
+            <label key={k} class={`studio__kind${state.autoCallouts.kinds.includes(k) ? ' is-on' : ''}`}>
+              <input type="checkbox" checked={state.autoCallouts.kinds.includes(k)}
+                onChange={(e) => {
+                  const on = e.currentTarget.checked;
+                  update((s) => ({ ...s, autoCallouts: { ...s.autoCallouts, kinds: on ? [...s.autoCallouts.kinds.filter((x) => x !== k), k] : s.autoCallouts.kinds.filter((x) => x !== k) } }), true);
+                }} />
+              {label}
+            </label>
+          ))}
+        </div>
+      )}
       {events.length > 0 ? (
         <ul class="studio__events">
           {events.slice(0, 8).map((e) => {

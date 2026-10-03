@@ -100,6 +100,18 @@ describe('studio state', () => {
     expect(cleanState({ hudStyle: 'bar' }).hudStyle).toBe('plate');
   });
 
+  it('auto-fire is off and the card compact until the producer says otherwise; only known kinds are kept', () => {
+    const d = cleanState({});
+    expect(d.autoCallouts.on).toBe(false);
+    expect(d.autoCallouts.kinds).toContain('skeet');
+    expect(d.autoCallouts.kinds).not.toContain('tank_death');
+    expect(d.calloutSize).toBe('compact');
+    const s = cleanState({ autoCallouts: { on: true, kinds: ['dp', 'dp', 'nonsense', 7] }, calloutSize: 'normal' });
+    expect(s.autoCallouts).toEqual({ on: true, kinds: ['dp'] });
+    expect(s.calloutSize).toBe('normal');
+    expect(cleanState({ calloutSize: 'huge' }).calloutSize).toBe('compact');
+  });
+
   it('keeps frame rects on the canvas', () => {
     const f = cleanState({ frame: { survivor: { x: 1800, y: -5, w: 400, h: 2 }, infected: { x: 'a' } } }).frame;
     expect(f.survivor).toEqual({ x: 1800, y: 0, w: 120, h: 20 });

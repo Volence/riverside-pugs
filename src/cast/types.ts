@@ -90,6 +90,13 @@ export interface StudioState {
   frame: FrameRects;
   /** A highlight card fired by the producer, shown for CALLOUT_MS from `at`. */
   callout: Callout | null;
+  /** Highlight cards the overlay fires by itself from the live event feed.
+   *  Off until the producer turns it on; `kinds` are event kinds
+   *  (CALLOUT_KIND_LABELS). A card the producer fires by hand goes first. */
+  autoCallouts: { on: boolean; kinds: string[] };
+  /** The on-screen highlight card: `compact` (the default) is a slim
+   *  one-line card, `normal` the original big stencil card. */
+  calloutSize: 'compact' | 'normal';
 }
 
 export const HUD_STYLES = ['plate', 'corners', 'rail', 'frame', 'scorebug'] as const;
@@ -121,6 +128,25 @@ export interface Callout {
 }
 
 export const CALLOUT_MS = 8000;
+
+/** Event kinds a highlight card can be made from, in the panel's order. */
+export const CALLOUT_KIND_LABELS: Record<string, string> = {
+  skeet: 'Skeets',
+  dp: 'DPs',
+  boom: 'Biles',
+  tank_spawn: 'Tank spawns',
+  tank_death: 'Tank down',
+  witch_aggro: 'Witch startled',
+  witch_killed: 'Witch down',
+  death: 'Survivor deaths',
+  incap: 'Incaps',
+  car_alarm: 'Car alarms',
+};
+
+/** Auto-fire's starting set: the plays, not the everyday incaps, and not
+ *  who finished the tank (owner: not worth seeing; the tank damage card
+ *  covers a tank's death). */
+export const DEFAULT_AUTO_KINDS = ['skeet', 'dp', 'boom', 'tank_spawn', 'witch_killed', 'death', 'car_alarm'];
 
 export interface LiveElements {
   /** Survivor rows (health, status, items). Off by default: a spectator
@@ -173,6 +199,8 @@ export function defaultStudioState(): StudioState {
     hudStyle: 'plate',
     frame: defaultFrameRects(),
     callout: null,
+    autoCallouts: { on: false, kinds: [...DEFAULT_AUTO_KINDS] },
+    calloutSize: 'compact',
   };
 }
 

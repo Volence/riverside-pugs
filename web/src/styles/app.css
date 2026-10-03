@@ -3540,6 +3540,12 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .studio__toggle span { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-dense); }
 .studio__toggle b { font-family: var(--font-label); font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-bright); }
 .studio__toggle em { font-style: normal; color: var(--text-muted); font-size: 0.8125rem; }
+.studio__toggle--inline { align-items: center; align-self: end; }
+.studio__toggle--inline input { margin-top: 0; }
+.studio__kinds { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin: 0 0 var(--sp-3); }
+.studio__kind { display: inline-flex; align-items: center; gap: 6px; padding: 3px var(--sp-2); background: var(--surface-2); border: 1px solid var(--border); font-size: var(--fs-dense); color: var(--text-muted); cursor: pointer; }
+.studio__kind input { accent-color: var(--accent); margin: 0; }
+.studio__kind.is-on { color: var(--text-bright); border-color: var(--accent); }
 .studio__toggle--small { background: none; border: 0; padding: var(--sp-2) 0 0; }
 
 .studio__chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
