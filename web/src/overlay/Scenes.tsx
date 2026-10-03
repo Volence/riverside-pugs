@@ -1,5 +1,7 @@
 import { campaignTint, mapName } from '../format';
+import { useRef } from 'preact/hooks';
 import { camSlots } from '../../../src/cast/layout';
+import { emptyQueue, stepAuto, type AutoCard } from './callouts';
 import {
   boomerRate, CALLOUT_MS, ITEM, skeetTotal, type CastChapter, type TankRecap, type CastInfected, type CastLiveRound, type CastMatchView, type CastPlayer,
   type CastSurvivor, type CastTeam, type OverlayFeed, type OverlayKey, type StudioState,
@@ -20,6 +22,7 @@ interface Props { which: OverlayKey; feed: OverlayFeed; now: number }
 
 export function Overlay({ which, feed, now }: Props) {
   const { studio, match } = feed;
+  const auto = useAutoCallout(studio, match, now);
   const scene: OverlayKey = which === 'program' ? studio.scene : which;
   const tint = match ? campaignTint(match.campaign) : 'var(--c-blood-harvest)';
   const style = {
@@ -31,19 +34,33 @@ export function Overlay({ which, feed, now }: Props) {
     <div class={`ov ov--${scene} theme--${studio.theme}`} style={style} data-scene={scene}>
       {/* Keyed on the scene and match so entrance animations replay on a cut. */}
       <div class="ov__scene" key={`${scene}:${match?.id ?? 0}`}>
-        <SceneBody scene={scene} feed={feed} now={now} />
+        <SceneBody scene={scene} feed={feed} now={now} auto={auto} />
       </div>
       {which === 'program' && studio.lowerThird.show && <LowerThird studio={studio} />}
     </div>
   );
 }
 
-function SceneBody({ scene, feed, now }: { scene: OverlayKey; feed: OverlayFeed; now: number }) {
+/** Auto-fire (studio.autoCallouts): this overlay's own queue of highlight
+ *  cards from the live events. Held here, above the scene, so a cut between
+ *  scenes keeps its place; every overlay runs the same queue off the same
+ *  feed, so OBS sources agree. */
+function useAutoCallout(studio: StudioState, match: CastMatchView | null, now: number): AutoCard | null {
+  const q = useRef(emptyQueue());
+  const manualUntil = studio.callout ? Date.parse(studio.callout.at) + CALLOUT_MS : 0;
+  q.current = stepAuto(q.current, {
+    matchId: match?.id ?? null, events: match?.events ?? [], on: studio.autoCallouts.on, kinds: studio.autoCallouts.kinds,
+    manualUntil, now,
+  });
+  return q.current.showing;
+}
+
+function SceneBody({ scene, feed, now, auto }: { scene: OverlayKey; feed: OverlayFeed; now: number; auto: AutoCard | null }) {
   const { studio, match, live } = feed;
   switch (scene) {
     case 'starting': return <Starting studio={studio} match={match} now={now} />;
     case 'casters': return <Casters studio={studio} match={match} />;
-    case 'gameplay': return <Gameplay studio={studio} match={match} live={live} now={now} />;
+    case 'gameplay': return <Gameplay studio={studio} match={match} live={live} now={now} auto={auto} />;
     case 'scorebug': return match ? <Scorebug studio={studio} match={match} live={live} /> : null;
     case 'roundhud': return <RoundHud studio={studio} match={match} live={live} force />;
     case 'lowerthird': return studio.lowerThird.show ? <LowerThird studio={studio} /> : null;
@@ -507,7 +524,9 @@ function LowerThird({ studio }: { studio: StudioState }) {
 
 /* ---------- gameplay ---------- */
 
-function Gameplay({ studio, match, live, now }: { studio: StudioState; match: CastMatchView | null; live: CastLiveRound | null; now: number }) {
+function Gameplay({ studio, match, live, now, auto }: {
+  studio: StudioState; match: CastMatchView | null; live: CastLiveRound | null; now: number; auto: AutoCard | null;
+}) {
   // Nothing on air: OBS gets a transparent frame, never a placeholder on
   // stream (the producer panel's preview shows a labelled sample instead).
   if (!match) return null;
@@ -518,7 +537,7 @@ function Gameplay({ studio, match, live, now }: { studio: StudioState; match: Ca
       <div class={`ov-game ov-game--${studio.hudStyle}${rows ? ' has-rows' : ''}`}>
         <Hud studio={studio} match={match} live={live} />
         {studio.elements.tankRecap && live?.tankRecap && <TankRecapCard r={live.tankRecap} />}
-        <Callout studio={studio} match={match} now={now} />
+        <Callout studio={studio} match={match} now={now} auto={auto} />
       </div>
     );
   }
@@ -529,7 +548,7 @@ function Gameplay({ studio, match, live, now }: { studio: StudioState; match: Ca
         <RoundHud studio={studio} match={match} live={live} />
       </div>
       {studio.elements.tankRecap && live?.tankRecap && <TankRecapCard r={live.tankRecap} />}
-      <Callout studio={studio} match={match} now={now} />
+      <Callout studio={studio} match={match} now={now} auto={auto} />
     </div>
   );
 }
@@ -689,14 +708,15 @@ function InfectedCard({ i }: { i: CastInfected }) {
   );
 }
 
-function Callout({ studio, match, now }: { studio: StudioState; match: CastMatchView; now: number }) {
-  const c = studio.callout;
+/** The highlight card: the producer's own while it is up, else auto-fire's. */
+function Callout({ studio, match, now, auto }: { studio: StudioState; match: CastMatchView; now: number; auto: AutoCard | null }) {
+  const m = studio.callout;
+  const age = m ? now - Date.parse(m.at) : -1;
+  const c = m && age >= 0 && age <= CALLOUT_MS ? { ...m, key: m.at } : auto;
   if (!c) return null;
-  const age = now - Date.parse(c.at);
-  if (age < 0 || age > CALLOUT_MS) return null;
   const team = c.team ? match.teams[c.team] : null;
   return (
-    <div class="ov-callout" key={c.at} style={{ '--c': team ? `var(--team-${team.key})` : 'var(--accent)' } as Record<string, string>}>
+    <div class={`ov-callout ov-callout--${studio.calloutSize}`} key={c.key} style={{ '--c': team ? `var(--team-${team.key})` : 'var(--accent)' } as Record<string, string>}>
       <span class="ov-callout__rule" />
       <span class="ov-callout__title">{c.title}</span>
       {c.text && <span class="ov-callout__text">{c.text}</span>}

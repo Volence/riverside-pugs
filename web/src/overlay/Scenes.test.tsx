@@ -146,6 +146,26 @@ describe('overlay basics', () => {
     expect(render(<Overlay which="gameplay" feed={f} now={Date.parse(at) + 9000} />).container.textContent).not.toContain('Skeet');
   });
 
+  it('the card is compact by default and big when asked', () => {
+    const at = new Date().toISOString();
+    const c = { title: 'Skeet', text: 'nice', team: 'a' as const, at };
+    const compact = render(<Overlay which="gameplay" feed={feed({ callout: c })} now={Date.parse(at) + 1000} />).container;
+    expect(compact.querySelector('.ov-callout--compact')).not.toBeNull();
+    const big = render(<Overlay which="gameplay" feed={feed({ callout: c, calloutSize: 'normal' })} now={Date.parse(at) + 1000} />).container;
+    expect(big.querySelector('.ov-callout--normal')).not.toBeNull();
+  });
+
+  it('auto-fire shows a new live event as a card, never the backlog', () => {
+    const on = { autoCallouts: { on: true, kinds: ['dp'] } };
+    const dp = { seq: 5, kind: 'dp', actor: 'carl', actorTeam: 'b' as const, target: 'stew', value: 25 };
+    const at = (events: CastMatchView['events']): OverlayFeed => ({ ...feed(on), match: { ...match, events } });
+    const t = Date.now();
+    const { container, rerender } = render(<Overlay which="gameplay" feed={at([{ ...dp, seq: 4 }])} now={t} />);
+    expect(container.querySelector('.ov-callout')).toBeNull();
+    rerender(<Overlay which="gameplay" feed={at([dp, { ...dp, seq: 4 }])} now={t + 500} />);
+    expect(container.textContent).toContain('carl pounced stew for 25');
+  });
+
   it('program follows the producer scene', () => {
     const { container } = render(<Overlay which="program" feed={feed({ scene: 'brb' })} now={Date.now()} />);
     expect(container.querySelector('[data-scene="brb"]')).not.toBeNull();

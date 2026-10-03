@@ -1,6 +1,6 @@
 import type { DB } from '../db.js';
 import {
-  DEFAULT_INFECTED_RECT, defaultElements, defaultFrameRects, defaultStudioState, HUD_STYLES, MAX_CASTERS, SCENES, TEXT_MAX, THEMES,
+  CALLOUT_KIND_LABELS, DEFAULT_INFECTED_RECT, defaultElements, defaultFrameRects, defaultStudioState, HUD_STYLES, MAX_CASTERS, SCENES, TEXT_MAX, THEMES,
   type Callout, type CasterLine, type HudStyle, type Rect, type LiveElements, type SceneKey, type StudioState, type TeamOverride, type ThemeKey,
 } from './types.js';
 
@@ -155,5 +155,13 @@ export function cleanState(v: unknown): StudioState {
       };
     })(),
     callout: cleanCallout(o.callout),
+    autoCallouts: (() => {
+      const a = (o.autoCallouts && typeof o.autoCallouts === 'object' ? o.autoCallouts : {}) as Record<string, unknown>;
+      const kinds = Array.isArray(a.kinds)
+        ? [...new Set(a.kinds.filter((k): k is string => typeof k === 'string' && k in CALLOUT_KIND_LABELS))]
+        : d.autoCallouts.kinds;
+      return { on: a.on === true, kinds };
+    })(),
+    calloutSize: o.calloutSize === 'normal' ? 'normal' : 'compact',
   };
 }
