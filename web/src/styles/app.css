@@ -3568,6 +3568,8 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
   border-left: 3px solid var(--rating); background: color-mix(in oklab, var(--rating) 10%, transparent);
 }
 .studio__pickme b { color: var(--rating); font-weight: 600; }
+.studio__join { margin: 0 0 var(--sp-3); }
+.studio__join .cast__connect { margin-top: var(--sp-1); }
 .studio__obs-ok { margin: 0 0 var(--sp-2); font-size: var(--fs-dense); }
 .studio__obs-ok b { color: var(--win); font-weight: 500; }
 .studio__dl { margin: var(--sp-3) 0 var(--sp-1); }

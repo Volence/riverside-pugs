@@ -92,7 +92,7 @@ export function Nav(
         {/* Casters get their page; admins reach it by URL rather than
             carrying one more nav entry. */}
         {me?.isCaster && !me.isAdmin && (
-          <a href="/cast" aria-current={path === '/cast' || path === '/cast/studio' ? 'page' : undefined}>Cast</a>
+          <a href="/cast/studio" aria-current={path === '/cast' || path === '/cast/studio' ? 'page' : undefined}>Cast</a>
         )}
         {(me?.isAdmin || me?.isMod) && (
           <a href="/admin" aria-current={path.startsWith('/admin') ? 'page' : undefined}>

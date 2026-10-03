@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { ApiError, studioApi, type PrepSheet, type StudioPanel } from '../api';
+import { ApiError, castApi, studioApi, type CastMatch, type PrepSheet, type StudioPanel } from '../api';
+import { CastConnect } from './Cast';
 import { PageHeader } from '../components/PageHeader';
 import { Empty } from '../components/bits';
 import { campaignTint } from '../format';
@@ -138,6 +139,17 @@ export default function CastStudio() {
   }, FEED_POLL_MS);
   useEffect(() => { void studioApi.feed().then(setFeed).catch(() => {}); }, []);
 
+  // Connect lines for joining a live match as an in-game spectator: the same
+  // /api/cast the old Cast page used, so who read a password is still logged.
+  const [connects, setConnects] = useState<CastMatch[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => castApi.list().then((r) => { if (!cancelled) setConnects(r.matches); }).catch(() => {});
+    void load();
+    const t = setInterval(load, PANEL_POLL_MS);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+
   const flush = useCallback(async () => {
     const next = pending.current;
     if (!next) return;
@@ -241,14 +253,14 @@ export default function CastStudio() {
       <PageHeader eyebrow="Casting" title="Caster studio">
         <p class="muted studio__lede">
           Pick what is on air, cut scenes with the number keys, and point OBS at your overlay links.
-          Overlays follow this page within a second. <a href="/cast">Connect lines for spectating</a>
+          Overlays follow this page within a second. The server connect line for the match on air is under On air.
         </p>
       </PageHeader>
       {error && <p class="studio__error" role="alert">{error}</p>}
-      <Preflight state={state} feed={feed} obsStatus={obsStatus} />
+      <Preflight state={state} feed={feed} obsStatus={obsStatus} panel={panel} />
       <div class="studio__grid">
         <div class="studio__col">
-          <OnAir panel={panel} state={state} update={update} />
+          <OnAir panel={panel} state={state} update={update} onAirId={match?.id ?? state.matchId} connects={connects} />
           <ScenePad state={state} goScene={goScene} obsProgram={obsProgram} obsScenes={panel.obsScenes} />
           <Highlights state={state} match={match} onFire={async (c) => {
             try {
@@ -298,12 +310,15 @@ type Update = (fn: (s: StudioState) => StudioState, now?: boolean) => void;
 
 /* ---------- pre-flight ---------- */
 
-function Preflight({ state, feed, obsStatus }: { state: StudioState; feed: OverlayFeed | null; obsStatus: ObsStatus }) {
+function Preflight({ state, feed, obsStatus, panel }: { state: StudioState; feed: OverlayFeed | null; obsStatus: ObsStatus; panel: StudioPanel }) {
   const match = feed?.match ?? null;
   const picked = state.matchId !== null || state.bookingId !== null;
+  const loading = !match && state.bookingId === null && panel.matches.some((m) => m.id === state.matchId);
   const liveOk = match?.state === 'live' ? (feed?.live ? feed.live.ageMs < 5000 : null) : undefined;
   const items: { label: string; ok: boolean | null; note: string }[] = [
-    { label: 'Match on air', ok: picked && !!match, note: !picked ? 'Pick one below' : match ? `#${match.id}` : state.bookingId ? 'Waiting for the first game' : 'Not visible to you' },
+    { label: 'Match on air', ok: match ? true : loading ? null : false, note: !picked ? 'Pick one below' : match ? `#${match.id}` : state.bookingId ? 'Waiting for the first game'
+      // Just picked: the feed catches up within a couple of seconds.
+      : loading ? 'Loading' : 'Not visible to you' },
     {
       label: 'Live round data', ok: liveOk === undefined ? null : liveOk,
       note: liveOk === undefined ? 'Only while a match is live' : liveOk ? 'Arriving' : 'None yet: between rounds, or the push is off on that server',
@@ -331,7 +346,10 @@ function Preflight({ state, feed, obsStatus }: { state: StudioState; feed: Overl
 
 /* ---------- on air ---------- */
 
-function OnAir({ panel, state, update }: { panel: StudioPanel; state: StudioState; update: Update }) {
+function OnAir({ panel, state, update, onAirId, connects }: {
+  panel: StudioPanel; state: StudioState; update: Update; onAirId: number | null; connects: CastMatch[];
+}) {
+  const join = onAirId !== null ? connects.find((c) => c.id === onAirId) ?? null : null;
   const live = panel.matches.filter((m) => m.state === 'live' || m.state === 'configuring');
   const recent = panel.matches.filter((m) => m.state === 'completed');
   const pickMatch = (id: number | null) => update((s) => ({ ...s, matchId: id, bookingId: null, overrides: { a: {}, b: {} }, bosses: { tank: null, witch: null, map: null } }), true);
@@ -357,6 +375,13 @@ function OnAir({ panel, state, update }: { panel: StudioPanel; state: StudioStat
   return (
     <section class={`panel${state.matchId === null && state.bookingId === null ? ' studio__onair--empty' : ''}`}>
       <h3>On air</h3>
+      {join && (
+        <div class="studio__join">
+          <p class="eyebrow">Join #{join.id} as a spectator{join.serverName && <> · {join.serverName}</>}</p>
+          <CastConnect m={join} />
+          <p class="muted cast__hint">Stay on Spectators: anyone on a side when the match goes live is rostered and scored.</p>
+        </div>
+      )}
       {state.matchId === null && state.bookingId === null && (
         <p class="studio__pickme" role="status">
           <b>No match on air.</b> Pick one below. Until you do, the overlays have nothing to show and the gameplay scene stays empty.
