@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { casterAvatars } from '../cast/casterAvatars.js';
 import type { DB } from '../db.js';
 import type { Config } from '../config.js';
 import type { CommunityStore } from '../community/store.js';
@@ -78,6 +79,7 @@ export async function castStudioRoutes(
         agoMs: tank.agoMs, aliveS: tank.recap.aliveS, dealt: tank.recap.dealt, tanks: tank.recap.tanks, passes: tank.recap.passes,
         end: tank.recap.end, controller: nameOf(tank.recap.controller), players: rows(tank.recap.players),
       } : null,
+      casterAvatars: casterAvatars(db, studio.state.casters),
       witchRecap: witch ? {
         agoMs: witch.agoMs, aliveS: witch.recap.aliveS, crown: witch.recap.crown, incaps: witch.recap.incaps,
         startled: nameOf(witch.recap.startled), killer: nameOf(witch.recap.killer), players: rows(witch.recap.players),
