@@ -16,6 +16,7 @@ const scope = self as unknown as { onconnect: ((e: MessageEvent) => void) | null
 
 const POLL_MS = 1000;
 const QUIET_MS = 15000;
+const FETCH_TIMEOUT_MS = 8000;
 
 interface Listener { port: MessagePort; seenAt: number }
 interface Poll { listeners: Set<Listener>; timer: ReturnType<typeof setTimeout> | null; busy: boolean }
@@ -32,7 +33,9 @@ async function tick(key: string): Promise<void> {
     poll.busy = true;
     let msg: unknown;
     try {
-      const res = await fetch(`/api/overlay/feed?k=${encodeURIComponent(key)}`, { cache: 'no-store' });
+      // A request that never settles would hold `busy` for ever and stop the
+      // poll; give up on it and try again next tick.
+      const res = await fetch(`/api/overlay/feed?k=${encodeURIComponent(key)}`, { cache: 'no-store', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
       msg = res.ok ? { ok: true, feed: await res.json(), at: Date.now() } : { ok: false, status: res.status, error: (await res.json().catch(() => ({}))).error ?? '' };
     } catch {
       msg = { ok: false, status: 0, error: '' };
@@ -43,25 +46,35 @@ async function tick(key: string): Promise<void> {
   poll.timer = setTimeout(() => void tick(key), POLL_MS);
 }
 
+/** Put a page on a key's poll, starting the poll if nobody else listens. */
+function attach(key: string, listener: Listener): void {
+  let poll = polls.get(key);
+  if (!poll) {
+    poll = { listeners: new Set(), timer: null, busy: false };
+    polls.set(key, poll);
+    poll.listeners.add(listener);
+    void tick(key);
+  } else {
+    poll.listeners.add(listener);
+  }
+}
+
 scope.onconnect = (e: MessageEvent) => {
   const port = e.ports[0]!;
   let listener: Listener | null = null;
   port.onmessage = (m: MessageEvent<{ type: 'watch' | 'alive'; key: string }>) => {
-    if (m.data.type === 'watch') {
-      let poll = polls.get(m.data.key);
-      if (!poll) {
-        poll = { listeners: new Set(), timer: null, busy: false };
-        polls.set(m.data.key, poll);
-        listener = { port, seenAt: Date.now() };
-        poll.listeners.add(listener);
-        void tick(m.data.key);
-      } else {
-        listener = { port, seenAt: Date.now() };
-        poll.listeners.add(listener);
-      }
-    } else if (listener) {
-      listener.seenAt = Date.now();
+    if (m.data.type === 'watch' || !listener) {
+      listener = { port, seenAt: Date.now() };
+      attach(m.data.key, listener);
+      return;
     }
+    listener.seenAt = Date.now();
+    // OBS throttles the timers of a source that is not on screen, so its
+    // alive pings can lapse past QUIET_MS and the page gets dropped. The
+    // page itself keeps running, still showing the last feed it had; put it
+    // back on the poll the moment it speaks again, or it freezes on a match
+    // that is long over.
+    if (!polls.get(m.data.key)?.listeners.has(listener)) attach(m.data.key, listener);
   };
   port.start();
 };

@@ -43,7 +43,7 @@ export function useFeed(key: string): FeedState {
       let timer: ReturnType<typeof setTimeout> | null = null;
       const poll = async () => {
         try {
-          const res = await fetch(`/api/overlay/feed?k=${encodeURIComponent(key)}`, { cache: 'no-store' });
+          const res = await fetch(`/api/overlay/feed?k=${encodeURIComponent(key)}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
           if (res.ok) onMsg({ ok: true, feed: await res.json() as OverlayFeed, at: Date.now() });
           else onMsg({ ok: false, status: res.status, error: (await res.json().catch(() => ({})) as { error?: string }).error ?? '' });
         } catch { /* keep the last good feed */ }
