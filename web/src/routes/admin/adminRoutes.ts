@@ -36,6 +36,7 @@ export const PEOPLE_TABS: { key: string; label: string; path: string }[] = [
   { key: 'alts', label: 'Alts', path: '/admin/people/alts' },
   { key: 'tickets', label: 'Tickets', path: '/admin/people/tickets' },
   { key: 'calls', label: 'In-game calls', path: '/admin/people/calls' },
+  { key: 'guide', label: 'Guide', path: '/admin/people/guide' },
 ];
 
 /** Setup holds what the old flat tabs held, until the Setup plan regroups it
@@ -69,6 +70,7 @@ export const BALANCE_TABS: { key: string; label: string; path: string }[] = [
 export const ADMIN_ROUTE_PATHS: readonly string[] = ['/admin', '/admin/*'];
 
 export const landingFor = (_isAdmin: boolean): string => '/admin/live';
+export const guideUrl = (anchor?: string): string => `/admin/people/guide${anchor ? `#${anchor}` : ''}`;
 export const fileUrl = (steamid: string): string => `/admin/people/${encodeURIComponent(steamid)}`;
 export const ticketUrl = (id: number | string): string => `/admin/people/tickets/${id}`;
 export const eventAdminUrl = (id: number | string): string => `/admin/events/${id}`;
@@ -104,6 +106,7 @@ export function parseAdminPath(path: string, opts: { isAdmin: boolean }): AdminR
     if (a === 'review') return { desk: 'people', section: 'review', param: null };
     if (a === 'bans') return { desk: 'people', section: 'bans', param: null };
     if (a === 'alts') return { desk: 'people', section: 'alts', param: null };
+    if (a === 'guide' && b === '') return { desk: 'people', section: 'guide', param: null };
     if (a === 'calls' && b === '') return { desk: 'people', section: 'calls', param: null };
     if (a === 'tickets') {
       if (b === '') return { desk: 'people', section: 'tickets', param: null };

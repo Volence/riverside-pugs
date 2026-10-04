@@ -7,6 +7,7 @@ import { BALANCE_TABS, PEOPLE_TABS, SETUP_TABS, deskItems, legacyRedirect, parse
 import { AdminLive } from './admin/AdminLive';
 import { AdminTickets } from './admin/AdminTickets';
 import { AdminCalls } from './admin/AdminCalls';
+import { StaffGuide } from './admin/StaffGuide';
 import { AdminTicket } from './admin/AdminTicket';
 import { AdminSettings } from './admin/AdminSettings';
 import { AdminAudit } from './admin/AdminAudit';
@@ -121,6 +122,7 @@ export function Admin({ session }: { session: Session }) {
         {r.desk === 'people' && r.section === 'alts' && <PeopleAlts isAdmin={isAdmin} />}
         {r.desk === 'people' && r.section === 'tickets' && <AdminTickets onOpen={(id) => route(ticketUrl(id))} />}
         {r.desk === 'people' && r.section === 'calls' && <AdminCalls />}
+        {r.desk === 'people' && r.section === 'guide' && <StaffGuide />}
         {r.desk === 'people' && r.section === 'ticket' && (
           <AdminTicket
             key={r.param}

@@ -13,6 +13,8 @@ describe('the panel URL parser', () => {
     expect(parseAdminPath('/admin/people/tickets', asAdmin)).toEqual({ desk: 'people', section: 'tickets', param: null });
     expect(parseAdminPath('/admin/people/calls', asMod)).toEqual({ desk: 'people', section: 'calls', param: null });
     expect(parseAdminPath('/admin/people/calls/3', asAdmin)).toEqual({ desk: 'people', section: 'unknown', param: null });
+    expect(parseAdminPath('/admin/people/guide', asMod)).toEqual({ desk: 'people', section: 'guide', param: null });
+    expect(parseAdminPath('/admin/people/guide/x', asMod)).toEqual({ desk: 'people', section: 'unknown', param: null });
     expect(parseAdminPath('/admin/people/tickets/12', asAdmin)).toEqual({ desk: 'people', section: 'ticket', param: '12' });
     expect(parseAdminPath('/admin/people/76561199000000001', asAdmin))
       .toEqual({ desk: 'people', section: 'file', param: '76561199000000001' });
