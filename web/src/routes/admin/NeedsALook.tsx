@@ -3,7 +3,7 @@ import { peopleApi, type AnalyzerRank } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction } from './useAction';
-import { fileUrl } from './adminRoutes';
+import { fileUrl, guideUrl } from './adminRoutes';
 import { SOURCE_LABEL } from './file/GlanceRow';
 import { AnalysisPanel } from './AnalysisPanel';
 
@@ -80,7 +80,8 @@ export function NeedsALook({ isAdmin }: { isAdmin: boolean }) {
         <Panel class="panel--table">
           <p class="muted">
             Players with something new on their file that nobody has read yet, newest first. Marking one
-            looked at takes it off this list until something else arrives.
+            looked at takes it off this list until something else arrives. What each line means is in
+            the <a href={guideUrl()}>Guide</a>.
           </p>
           {data && players.length === 0 && <Empty>Nothing is waiting to be looked at.</Empty>}
           {players.length > 0 && (
