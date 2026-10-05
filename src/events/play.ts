@@ -180,7 +180,9 @@ export function recordResult(
 }
 
 /** The next Swiss or Swiss-paired league round (Ruling 6), once every match
- *  of the stage has a result. Always the engine. */
+ *  of the stage has a result. Refused with no pairs and no bye (fewer than 2
+ *  entrants left to pair), so an empty round is never written; the caller
+ *  ends the stage instead. Always the engine. */
 export function addRound(db: DB, o: { stageId: number; round: NewRound; now?: Date }): V.Checked<null> {
   const at = iso(o.now);
   return db.transaction((): V.Checked<null> => {
@@ -193,6 +195,7 @@ export function addRound(db: DB, o: { stageId: number; round: NewRound; now?: Da
     if (o.round.round !== last + 1 || ms.some((m) => !RESOLVED.has(m.status))) return V.fail('changed');
     const total = totalRounds(stage);
     if (total === null || o.round.round > total) return V.fail('wrong_status');
+    if (o.round.pairs.length === 0 && o.round.bye === null) return V.fail('changed');
     insertRound(db, ev.id, stage.id, o.round, at);
     E.logEvent(db, ev.id, null, 'round_paired', at, { stageId: stage.id, round: o.round.round, pairs: o.round.pairs.length, bye: o.round.bye });
     return V.ok(null);
