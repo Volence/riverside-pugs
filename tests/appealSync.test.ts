@@ -5,7 +5,7 @@ import { upsertPlayer, linkDiscord } from '../src/players.js';
 import { insertBan } from '../src/admin/players.js';
 import { appellantFromSteam } from '../src/appeals/rules.js';
 import { askQuestion, fileAppeal, getAppeal, recordDecision } from '../src/appeals/store.js';
-import { AppealSync } from '../src/discord/appealSync.js';
+import { appealCard, AppealSync } from '../src/discord/appealSync.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
 const P = '76561198000000001';
@@ -84,5 +84,31 @@ describe('AppealSync', () => {
     t.dmsClosed.delete('700');
     await sync.reconcile();
     expect(t.dms).toEqual([]);
+  });
+
+  it('escapes markdown in the appellant name shown in the card title', async () => {
+    const ban = insertBan(db, P, MOD, 'griefing', null);
+    const who = { steamids: [P], discordId: '700', name: '[x](http://e) *bold*' };
+    const id = (fileAppeal(db, who, { ref: { kind: 'ban', id: ban }, whatHappened: 'lag', whyLift: 'router', source: 'site' }) as { id: number }).id;
+    const row = getAppeal(db, id)!;
+    const card = appealCard(db, row, 'https://pug.test');
+    expect(card.embeds[0].title).toBe('Appeal #1: \\[x\\]\\(http://e\\) \\*bold\\*');
+  });
+
+  it('one appeal failing to reach the forum does not stop the next one in the same pass', async () => {
+    const id1 = file();
+    const id2 = file();
+    askQuestion(db, id1, MOD, 'Q1');
+    askQuestion(db, id2, MOD, 'Q2');
+    // Consumes exactly the first thread operation of the pass: id1's
+    // createForumPost. id2's createForumPost is unaffected.
+    t.failThreadOps = 1;
+    await sync.reconcile();
+    expect(getAppeal(db, id1)!.forum_thread_id).toBeNull();
+    expect(getAppeal(db, id2)!.forum_thread_id).not.toBeNull();
+    expect(t.threadsIn(FORUM)).toHaveLength(1);
+    expect(t.dms.map((d) => d.payload.content)).toEqual(
+      expect.arrayContaining([expect.stringContaining('Q1'), expect.stringContaining('Q2')]),
+    );
   });
 });
