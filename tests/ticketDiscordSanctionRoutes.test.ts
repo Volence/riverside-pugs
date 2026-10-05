@@ -284,32 +284,60 @@ describe('Discord sanctions over HTTP', () => {
         serverCleaner: async () => {}, serverExec: async () => {}, discordModeration: fake.moderation,
         discordDm: async (userId, payload) => { dms.push({ userId, payload }); },
       });
-      setSetting(db, 'appeals_enabled', '1');
-      const cookies = authedCookie(dmApp, db, MOD);
-      const r = await dmApp.inject({
-        method: 'POST', url: `/api/mod/tickets/${ticketId}/discord-sanction`, cookies, payload: { kind: 'timeout', minutes: 60, reason: 'spam' },
-      });
-      expect(r.statusCode).toBe(200);
-      expect(dms).toHaveLength(1);
-      expect(dms[0].userId).toBe('990');
-      expect(dms[0].payload.content).toContain('/appeal');
-      await dmApp.close();
+      try {
+        setSetting(db, 'appeals_enabled', '1');
+        const cookies = authedCookie(dmApp, db, MOD);
+        const r = await dmApp.inject({
+          method: 'POST', url: `/api/mod/tickets/${ticketId}/discord-sanction`, cookies, payload: { kind: 'timeout', minutes: 60, reason: 'spam' },
+        });
+        expect(r.statusCode).toBe(200);
+        expect(dms).toHaveLength(1);
+        expect(dms[0].userId).toBe('990');
+        expect(dms[0].payload.content).toContain('/appeal');
+      } finally {
+        await dmApp.close();
+      }
     });
 
-    it('with appeals off, the DM says nothing about appealing', async () => {
+    // Ruling: with appeals off there is nowhere to send the sanctioned
+    // person to contest it, so the dark-ship DM ("we banned you" and
+    // nothing else) is not sent at all, not even without the appeal line.
+    it('with appeals off, no DM is sent at all', async () => {
       const dms: { userId: string; payload: MessagePayload }[] = [];
       const dmApp = await buildServer({
         config: loadConfig({ ADMIN_STEAMIDS: OWNER, PUBLIC_URL: 'https://pug.test' }), db, orchestrator: stubOrchestrator(),
         serverCleaner: async () => {}, serverExec: async () => {}, discordModeration: fake.moderation,
         discordDm: async (userId, payload) => { dms.push({ userId, payload }); },
       });
-      const cookies = authedCookie(dmApp, db, MOD);
-      const r = await dmApp.inject({
-        method: 'POST', url: `/api/mod/tickets/${ticketId}/discord-sanction`, cookies, payload: { kind: 'timeout', minutes: 60, reason: 'spam' },
+      try {
+        const cookies = authedCookie(dmApp, db, MOD);
+        const r = await dmApp.inject({
+          method: 'POST', url: `/api/mod/tickets/${ticketId}/discord-sanction`, cookies, payload: { kind: 'timeout', minutes: 60, reason: 'spam' },
+        });
+        expect(r.statusCode).toBe(200);
+        expect(dms).toHaveLength(0);
+      } finally {
+        await dmApp.close();
+      }
+    });
+
+    it('with appeals off, a ban DM is also not sent', async () => {
+      const dms: { userId: string; payload: MessagePayload }[] = [];
+      const dmApp = await buildServer({
+        config: loadConfig({ ADMIN_STEAMIDS: OWNER, PUBLIC_URL: 'https://pug.test' }), db, orchestrator: stubOrchestrator(),
+        serverCleaner: async () => {}, serverExec: async () => {}, discordModeration: fake.moderation,
+        discordDm: async (userId, payload) => { dms.push({ userId, payload }); },
       });
-      expect(r.statusCode).toBe(200);
-      expect(dms).toHaveLength(1);
-      expect(dms[0].payload.content).not.toContain('/appeal');
+      try {
+        const cookies = authedCookie(dmApp, db, ADMIN);
+        const r = await dmApp.inject({
+          method: 'POST', url: `/api/mod/tickets/${ticketId}/discord-sanction`, cookies, payload: { kind: 'ban', reason: 'spam' },
+        });
+        expect(r.statusCode).toBe(200);
+        expect(dms).toHaveLength(0);
+      } finally {
+        await dmApp.close();
+      }
     });
   });
 });
