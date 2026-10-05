@@ -72,3 +72,32 @@ export function rulesSummary(r: MatchRules): string {
     : r.pause.limit === 0 ? 'No pauses' : `${r.pause.limit} pause${r.pause.limit === 1 ? '' : 's'}${each}`;
   return `${pauses} · ${SIDE_SHORT[r.sideRule]} · ${r.noShowGraceMinutes} min no-show grace`;
 }
+
+/** What a round is called on the event page (plan T2). lastRound is the
+ *  highest round number in the same group. */
+export function roundLabel(type: StageType, config: StageConfig, grp: number, round: number, lastRound: number): string {
+  switch (type) {
+    case 'single_elim': {
+      if (grp === 2) return 'Third place';
+      const left = lastRound - round;
+      return left === 0 ? 'Final' : left === 1 ? 'Semifinals' : left === 2 ? 'Quarterfinals' : `Round ${round}`;
+    }
+    case 'double_elim':
+      if (grp === 3) return round === 1 ? 'Grand final' : 'Grand final reset';
+      return `${grp === 1 ? 'Upper' : 'Lower'} ${round === lastRound ? 'final' : `round ${round}`}`;
+    case 'league': {
+      const per = (config as StageConfigs['league']).matchesPerWeek;
+      const week = Math.floor((round - 1) / per) + 1;
+      return per === 1 ? `Week ${week}` : `Week ${week}, match ${((round - 1) % per) + 1}`;
+    }
+    default:
+      return `Round ${round}`;
+  }
+}
+
+export function groupLabel(type: StageType, grp: number): string {
+  if (type === 'round_robin') return `Group ${String.fromCharCode(64 + grp)}`;
+  if (type === 'single_elim') return grp === 2 ? 'Third place' : 'Bracket';
+  if (type === 'double_elim') return grp === 1 ? 'Upper bracket' : grp === 2 ? 'Lower bracket' : 'Grand final';
+  return 'Rounds';
+}

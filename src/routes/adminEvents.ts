@@ -8,9 +8,12 @@ import { getPlayer } from '../players.js';
 import { campaignRegistry } from '../campaignRegistry.js';
 import * as E from '../events/events.js';
 import * as N from '../events/entries.js';
+import * as P from '../events/play.js';
 import * as V from '../events/validate.js';
+import { recordResultFlow, settleEvent, startEventFlow } from '../events/flow.js';
 import { stageSummary } from '../events/format.js';
 import { adminEntryViews } from '../events/views.js';
+import { stagePlayViews, type StagePlayView } from '../events/playViews.js';
 import { rulesetOptions } from '../rulesetStore.js';
 import type { Notifier } from '../notify/notify.js';
 import { tellCheckinOpen, tellDropped, tellRosterAdded } from '../events/notices.js';
@@ -25,6 +28,7 @@ export interface AdminEventDetail {
   stages: AdminEventStage[];
   log: { at: string; actorName: string | null; action: string; detail: Record<string, unknown> }[];
 }
+export interface AdminEventPlay { status: V.EventStatus; lockedAt: string | null; startsAt: string; seeded: number; stages: StagePlayView[] }
 export interface AdminEventOptions {
   campaigns: { slug: string; name: string }[]; defaultPool: string[];
   rulesets: { id: number; name: string; summary: string }[]; defaultRulesetId: number | null;
@@ -302,8 +306,51 @@ export async function adminEventRoutes(
       default: return refuse(reply, 'bad_request');
     }
     if (!r.ok) return refuseWith(reply, r);
+    if (p.action === 'disqualify' && E.getEvent(db, ev.id)?.status === 'live') await settleEvent(db, { eventId: ev.id });
     logAdmin(db, me, action, ev.id, { entryId: entry.id, name: entry.name, ...(p.action === 'disqualify' ? { reason: body.reason } : {}) });
     tellRosterAdded(opts, ev.id, entry.id, me, added);
+    return {};
+  });
+
+  /**
+   * Play (tournaments plan T2): staff read the stages that have started with
+   * every match; admins start the event early once its list is final and
+   * enter or correct a result. Every rule is in src/events/flow.ts and
+   * play.ts; the route maps a refusal to its sentence and adds logAdmin.
+   */
+  app.get('/api/admin/events/:id/play', async (req, reply) => {
+    if (!requireStaff(req, reply)) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    const out: AdminEventPlay = {
+      status: ev.status, lockedAt: ev.locked_at, startsAt: ev.starts_at, seeded: P.activeSeeded(db, ev.id).length, stages: stagePlayViews(db, ev),
+    };
+    return out;
+  });
+
+  app.post('/api/admin/events/:id/start', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    const r = await startEventFlow(db, { eventId: ev.id, by: me });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'event_start', ev.id, { slug: ev.slug });
+    return {};
+  });
+
+  app.post('/api/admin/events/:id/matches/:matchId/result', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const p = req.params as { id: string; matchId: string };
+    const ev = eventOf(p.id);
+    const matchId = idOf(p.matchId);
+    if (!ev || matchId === null) return refuse(reply, 'match_not_found');
+    const r = await recordResultFlow(db, { eventId: ev.id, matchId, by: me, result: req.body ?? {} });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'event_result', ev.id, {
+      matchId, winner: r.value.winner_entry, scoreA: r.value.score_a, scoreB: r.value.score_b, source: r.value.result_source,
+    });
     return {};
   });
 }
