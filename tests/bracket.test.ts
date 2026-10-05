@@ -94,4 +94,46 @@ describe('bracket', () => {
     expect(new Set(bracketGroups(d).values()).size).toBe(2);
     await expect(createBracket('single_elim', { thirdPlace: false }, [1])).rejects.toMatchObject({ code: 'too_few' });
   });
+
+  it('refuses a correction that would silently rewrite an already-played loser bracket match', async () => {
+    let d = await createBracket('double_elim', { grandFinalReset: true }, [1, 2, 3, 4, 5]);
+    for (let i = 0; i < 64 && ready(d).some((m) => m.a !== 1 && m.b !== 1); i++) {
+      for (const m of ready(d).filter((x) => x.a !== 1 && x.b !== 1)) d = await reportResult(d, m.bmId, aWins);
+    }
+    const gameOne = bracketMatches(d).find((m) => m.a === 4 && m.b === 5)!;
+    expect(gameOne.state).toBe('done');
+    const loserRoundTwo = bracketMatches(d).find((m) => m.a === 3 && m.b === 5)!;
+    expect(loserRoundTwo.state).toBe('done');
+    const before = JSON.stringify(d);
+    await expect(reportResult(d, gameOne.bmId, bWins)).rejects.toMatchObject({ code: 'locked' });
+    expect(JSON.stringify(d)).toBe(before);
+  });
+
+  it('refuses a result for the hidden grand final reset while the upper side still holds the title', async () => {
+    const d = await playAll(await createBracket('double_elim', { grandFinalReset: true }, [1, 2, 3, 4]), () => aWins);
+    const shown = new Set(bracketMatches(d).map((m) => m.bmId));
+    const hidden = (d.tables.match as { id: number; status: number }[]).find((m) => !shown.has(m.id) && m.status === 2)!;
+    await expect(reportResult(d, hidden.id, aWins)).rejects.toMatchObject({ code: 'not_ready' });
+  });
+
+  it('a correction from a scored result to a forfeit replaces the score with the forfeit flag', async () => {
+    const d = await createBracket('single_elim', { thirdPlace: false }, [1, 2]);
+    const m = ready(d)[0]!;
+    let after = await reportResult(d, m.bmId, aWins);
+    after = await reportResult(after, m.bmId, { winner: 'b', scoreA: null, scoreB: null, forfeit: true });
+    expect(bracketMatches(after)[0]).toMatchObject({ state: 'done', winner: 2, forfeit: true, scoreA: null, scoreB: null });
+  });
+
+  it('correcting grand final 1 from the upper side to the lower side brings back the reset, and correcting it back hides it again', async () => {
+    let d = await playAll(await createBracket('double_elim', { grandFinalReset: true }, [1, 2, 3, 4]), () => aWins);
+    expect(bracketMatches(d).filter((m) => m.group === 3)).toHaveLength(1);
+    expect(bracketComplete(d)).toBe(true);
+    const gf1 = bracketMatches(d).find((m) => m.group === 3)!;
+    d = await reportResult(d, gf1.bmId, bWins);
+    expect(bracketMatches(d).filter((m) => m.group === 3).map((m) => [m.round, m.state])).toEqual([[1, 'done'], [2, 'ready']]);
+    expect(bracketComplete(d)).toBe(false);
+    d = await reportResult(d, gf1.bmId, aWins);
+    expect(bracketMatches(d).filter((m) => m.group === 3)).toHaveLength(1);
+    expect(bracketComplete(d)).toBe(true);
+  });
 });

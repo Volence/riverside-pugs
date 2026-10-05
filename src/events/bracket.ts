@@ -49,6 +49,41 @@ function open(data: BracketData | null): { store: InMemoryDatabase; manager: Bra
 const tablesOf = (store: InMemoryDatabase): Tables => (store as unknown as { data: Tables }).data;
 const snapshot = (store: InMemoryDatabase): BracketData => ({ v: 1, tables: structuredClone(tablesOf(store)) as unknown as Record<string, unknown[]> });
 
+/**
+ * The double elimination grand final reset (group 3, round 2) is created by
+ * the library with both opponents set and status "ready" the moment grand
+ * final 1 is played, whether or not it is actually needed: it is only a
+ * real match once the lower bracket side won grand final 1. Shared by
+ * bracketMatches (to hide it) and reportResult (to refuse a result for it).
+ */
+function isHiddenGrandFinalReset(t: Tables, m: BmMatch): boolean {
+  if (t.stage[0]?.type !== 'double_elimination') return false;
+  const groupNo = new Map(t.group.map((g) => [g.id, g.number]));
+  const roundNo = new Map(t.round.map((r) => [r.id, r.number]));
+  if (groupNo.get(m.group_id) !== 3 || roundNo.get(m.round_id) !== 2) return false;
+  const first = t.match.find((x) => x.group_id === m.group_id && roundNo.get(x.round_id) === 1);
+  return first?.opponent2?.result !== 'win';
+}
+
+/**
+ * A snapshot of every already-decided match but `exceptId`, keyed by id, as
+ * a string of its opponents. brackets-manager's own lock check (reset.js)
+ * only looks at the direct next matches of the one being corrected, and
+ * misses one that a bye carried a result past (a winner bracket round 1
+ * loser can drop straight onto a loser bracket bye and land in a later
+ * loser bracket match in one step). When that later match was already
+ * played, the library accepts the correction and silently overwrites that
+ * match's opponent instead of refusing it. Comparing this snapshot before
+ * and after the write is how reportResult catches that and refuses it too.
+ */
+function doneElsewhere(t: Tables, exceptId: number): Map<number, string> {
+  const out = new Map<number, string>();
+  for (const m of t.match) {
+    if (m.id !== exceptId && m.status >= DONE) out.set(m.id, JSON.stringify({ opponent1: m.opponent1, opponent2: m.opponent2 }));
+  }
+  return out;
+}
+
 export async function createBracket(type: BracketType, config: StageConfigs[BracketType], seeded: number[]): Promise<BracketData> {
   if (seeded.length < 2) throw new BracketError('too_few');
   const { store, manager } = open(null);
@@ -72,8 +107,11 @@ export async function createBracket(type: BracketType, config: StageConfigs[Brac
 
 export async function reportResult(data: BracketData, bmId: number, r: ResultInput): Promise<BracketData> {
   const { store, manager } = open(data);
-  const cur = tablesOf(store).match.find((m) => m.id === bmId);
+  const tables = tablesOf(store);
+  const cur = tables.match.find((m) => m.id === bmId);
   if (!cur || cur.opponent1?.id == null || cur.opponent2?.id == null) throw new BracketError('not_ready');
+  if (isHiddenGrandFinalReset(tables, cur)) throw new BracketError('not_ready');
+  const before = doneElsewhere(tables, bmId);
   const side = (me: 'a' | 'b', score: number | null) => {
     const won = r.winner === me;
     if (r.forfeit) return won ? {} : { forfeit: true };
@@ -86,6 +124,11 @@ export async function reportResult(data: BracketData, bmId: number, r: ResultInp
     if (err instanceof Error && /locked/i.test(err.message)) throw new BracketError('locked');
     throw err;
   }
+  const after = doneElsewhere(tables, bmId);
+  for (const [id, snap] of before) {
+    const now = after.get(id);
+    if (now !== undefined && now !== snap) throw new BracketError('locked');
+  }
   return snapshot(store);
 }
 
@@ -94,16 +137,12 @@ export function bracketMatches(data: BracketData): BracketMatch[] {
   const entryOf = new Map(t.participant.map((p) => [p.id, Number(p.name)]));
   const groupNo = new Map(t.group.map((g) => [g.id, g.number]));
   const roundNo = new Map(t.round.map((r) => [r.id, r.number]));
-  const double = t.stage[0]?.type === 'double_elimination';
   const out: BracketMatch[] = [];
   for (const m of t.match) {
     if (m.opponent1 === null || m.opponent2 === null) continue;
+    if (isHiddenGrandFinalReset(t, m)) continue;
     const group = groupNo.get(m.group_id)!;
     const round = roundNo.get(m.round_id)!;
-    if (double && group === 3 && round === 2) {
-      const first = t.match.find((x) => x.group_id === m.group_id && roundNo.get(x.round_id) === 1);
-      if (first?.opponent2?.result !== 'win') continue;
-    }
     const a = m.opponent1.id === null ? null : entryOf.get(m.opponent1.id) ?? null;
     const b = m.opponent2.id === null ? null : entryOf.get(m.opponent2.id) ?? null;
     const done = m.status >= DONE;
