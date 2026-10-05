@@ -224,6 +224,8 @@ export interface MatchSummary {
   teamAScore: number;
   teamBScore: number;
   winner: Winner;
+  /** The team that forfeited with !gg, null when the match was played out. */
+  forfeitTeam?: 'a' | 'b' | null;
 }
 
 export interface MatchPlayerStats {

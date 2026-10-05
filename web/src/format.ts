@@ -81,6 +81,12 @@ export function winnerLabel(winner: Winner): string {
   return winner === 'draw' ? 'Draw' : `Team ${winner.toUpperCase()}`;
 }
 
+/** The result with the forfeit noted: "Team A (B forfeited)". */
+export function resultLabel(winner: Winner, forfeitTeam?: 'a' | 'b' | null): string {
+  const w = winnerLabel(winner);
+  return forfeitTeam ? `${w} (${forfeitTeam.toUpperCase()} forfeited)` : w;
+}
+
 /** `2026-09-06T04:12:33.000Z` → `2026-09-06 04:12`. Matches the previous
  *  frontend's formatting exactly: these are already local-ish strings from
  *  SQLite and are not re-zoned here. */

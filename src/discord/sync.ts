@@ -70,6 +70,7 @@ interface MatchRow {
   campaign: string;
   server_id: number | null;
   winner: 'a' | 'b' | 'draw' | null;
+  forfeit_team: 'a' | 'b' | null;
   team_a_score: number;
   team_b_score: number;
 }
@@ -224,7 +225,7 @@ export class DiscordSync {
       if (m.ref.startsWith('lob_')) continue;
       const matchId = Number(m.ref);
       const row = db.prepare(
-        'SELECT id, state, abort_cause, campaign, server_id, winner, team_a_score, team_b_score FROM matches WHERE id = ?',
+        'SELECT id, state, abort_cause, campaign, server_id, winner, forfeit_team, team_a_score, team_b_score FROM matches WHERE id = ?',
       ).get(matchId) as MatchRow | undefined;
       if (!row) {
         setMessageState(db, 'match', m.ref, 'done');
@@ -281,6 +282,7 @@ export class DiscordSync {
             scoreA: row.team_a_score,
             scoreB: row.team_b_score,
             winner: row.winner,
+            forfeit: row.forfeit_team,
             teamA: teamA.map((p) => this.resultPlayer(p, matchId)),
             teamB: teamB.map((p) => this.resultPlayer(p, matchId)),
           }));

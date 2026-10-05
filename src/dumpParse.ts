@@ -45,6 +45,9 @@ export interface Dump {
   /** The plugin's match state when it answered: `ended` is the only one a
    *  result may be taken from. Null whenever `nonce` is. */
   state?: DumpState | null;
+  /** The pug team that forfeited with !gg (pug-match 0.3.22), or null. Only
+   *  ever the losing side: a forfeit naming the winner is dropped. */
+  forfeit?: 'a' | 'b' | null;
 }
 
 /** StateName() in pug-match.sp, less `none`: with no match configured
@@ -129,7 +132,7 @@ export function parseDump(body: string, opts: ParseDumpOpts = {}): Dump | null {
   const maps: DumpMap[] = [];
   const players: DumpPlayer[] = [];
   const skills: DumpSkill[] = [];
-  let end: { winner: 'a' | 'b' | 'draw'; totalA: number; totalB: number } | null = null;
+  let end: { winner: 'a' | 'b' | 'draw'; totalA: number; totalB: number; forfeit: 'a' | 'b' | null } | null = null;
 
   for (const line of lines.slice(start + 1)) {
     const parts = line.split(/\s+/);
@@ -167,11 +170,16 @@ export function parseDump(body: string, opts: ParseDumpOpts = {}): Dump | null {
       // The END line closes the block only if it is the same answer: a block
       // that opens with our nonce and ends without it was spliced.
       if (nonce !== null && (rest.nonce !== nonce || rest.state !== state)) return null;
-      end = { winner: rest.winner, totalA: a, totalB: b };
+      // A forfeit is believed only when it names the side that lost: the
+      // plugin opens !gg to the trailing team alone, so anything else is not
+      // a forfeit this plugin wrote, and the plain result stands.
+      const forfeit = (rest.forfeit === 'a' || rest.forfeit === 'b') && rest.winner !== 'draw' && rest.forfeit !== rest.winner
+        ? rest.forfeit : null;
+      end = { winner: rest.winner, totalA: a, totalB: b, forfeit };
       break;
     }
   }
 
   if (!end) return null;
-  return { matchId, maps, players, skillDetect, skills, winner: end.winner, totalA: end.totalA, totalB: end.totalB, nonce, state };
+  return { matchId, maps, players, skillDetect, skills, winner: end.winner, totalA: end.totalA, totalB: end.totalB, nonce, state, forfeit: end.forfeit };
 }
