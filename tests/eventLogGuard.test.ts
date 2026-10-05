@@ -6,7 +6,7 @@ import * as E from '../src/events/events.js';
 import * as N from '../src/events/entries.js';
 import * as P from '../src/events/play.js';
 import * as V from '../src/events/validate.js';
-import { createBracket } from '../src/events/bracket.js';
+import { createBracket, reportResult } from '../src/events/bracket.js';
 import { ADMIN, NOW, START, eventFixture, stageBody, type Fixture } from './eventFixture.js';
 import { A, entryFixture, rosterA, type EntryFixture } from './entryFixture.js';
 import { SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
@@ -338,6 +338,21 @@ describe('event_log guard', () => {
       f.db.exec("CREATE TRIGGER bracket_log_down BEFORE INSERT ON event_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
       expect(() => P.startEvent(f.db, { eventId: f.eventId, by: ADMIN, plan: { stageId: f.stages[0]!, entrants: f.entries, bracket, rounds: [] }, now: NOW })).toThrow(/audit down/);
       expect(rows(f)).toBe(before);
+
+      // Same for recordResult's bracket branch: start for real (no trigger),
+      // report one ready match's result through the library, then let the
+      // audit row fail and check that the write (match row, bracket_json and
+      // bracket_rev on event_stages included) never lands.
+      const g = playFixture({ stages: [SE()], entries: 4 });
+      const gBracket = await createBracket('single_elim', { thirdPlace: false }, g.entries);
+      ok(P.startEvent(g.db, { eventId: g.eventId, by: ADMIN, plan: { stageId: g.stages[0]!, entrants: g.entries, bracket: gBracket, rounds: [] }, now: NOW }));
+      const ready = P.matchesOf(g.db, g.stages[0]!).find((m) => m.status === 'waiting')!;
+      const reported = await reportResult(gBracket, ready.bm_match_id!, aWins);
+      const baseRev = E.getStage(g.db, g.stages[0]!)!.bracket_rev;
+      const beforeResult = rows(g);
+      g.db.exec("CREATE TRIGGER bracket_result_log_down BEFORE INSERT ON event_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
+      expect(() => P.recordResult(g.db, { matchId: ready.id, by: ADMIN, result: aWins, bracket: { data: reported, baseRev }, now: NOW })).toThrow(/audit down/);
+      expect(rows(g)).toBe(beforeResult);
     });
   });
 });

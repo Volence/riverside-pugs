@@ -136,9 +136,15 @@ function laterRound(db: DB, stageId: number, round: number): boolean {
   return !!db.prepare('SELECT 1 FROM event_matches WHERE stage_id = ? AND round > ? LIMIT 1').get(stageId, round);
 }
 
-/** A result or a correction (Rulings 1 and 8). For a bracket match, bracket
- *  is the stage's bracket after the library took the result, built on
- *  baseRev. by null is the engine (a disqualification forfeit, Ruling 9). */
+/** A result or a correction (Rulings 1 and 8). A correction to a table match
+ *  (no bracket) is locked once a later round exists, but only for a stage
+ *  that pairs as it goes (Swiss, or a league with Swiss pairing;
+ *  totalRounds returns a round count there). A round robin league writes
+ *  every round at the start instead, so a later round's row existing never
+ *  means anything there depends on this one's result, and the lock does not
+ *  apply. For a bracket match, bracket is the stage's bracket after the
+ *  library took the result, built on baseRev. by null is the engine (a
+ *  disqualification forfeit, Ruling 9). */
 export function recordResult(
   db: DB, o: { matchId: number; by: string | null; result: V.ResultInput; bracket: { data: BracketData; baseRev: number } | null; now?: Date },
 ): V.Checked<MatchRow> {
@@ -154,7 +160,7 @@ export function recordResult(
     }
     if ((m.bm_match_id === null) !== (o.bracket === null)) return V.fail('bad_request');
     const correction = m.status !== 'waiting';
-    if (correction && m.bm_match_id === null && laterRound(db, stage.id, m.round)) return V.fail('result_locked');
+    if (correction && m.bm_match_id === null && totalRounds(stage) !== null && laterRound(db, stage.id, m.round)) return V.fail('result_locked');
     const winner = o.result.winner === 'a' ? m.entry_a : m.entry_b;
     if (o.bracket) {
       if (stage.bracket_rev !== o.bracket.baseRev) return V.fail('changed');
