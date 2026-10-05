@@ -2069,8 +2069,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     dm: () => { const transport = bot?.transport; return transport ? (userId, payload) => transport.dm(userId, payload) : null; },
   });
 
-  // Events (tournaments plan T1a): read only, behind the competitive switch.
-  await app.register(eventRoutes, { db: deps.db, store: getCommunityStore });
+  // Events (tournaments plan T1a/T1b): the public pages and entry routes,
+  // behind the competitive switch.
+  await app.register(eventRoutes, { db: deps.db, store: getCommunityStore, notifier, publicUrl: deps.config.publicUrl });
   // Caster studio: the producer panel and the OBS overlay feed.
   await app.register(castStudioRoutes, { db: deps.db, config: deps.config, store: getCommunityStore });
 
