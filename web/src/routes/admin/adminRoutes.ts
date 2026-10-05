@@ -35,6 +35,7 @@ export const PEOPLE_TABS: { key: string; label: string; path: string }[] = [
   { key: 'bans', label: 'Bans', path: '/admin/people/bans' },
   { key: 'alts', label: 'Alts', path: '/admin/people/alts' },
   { key: 'tickets', label: 'Tickets', path: '/admin/people/tickets' },
+  { key: 'appeals', label: 'Appeals', path: '/admin/people/appeals' },
   { key: 'calls', label: 'In-game calls', path: '/admin/people/calls' },
   { key: 'guide', label: 'Guide', path: '/admin/people/guide' },
 ];
@@ -73,6 +74,7 @@ export const landingFor = (_isAdmin: boolean): string => '/admin/live';
 export const guideUrl = (anchor?: string): string => `/admin/people/guide${anchor ? `#${anchor}` : ''}`;
 export const fileUrl = (steamid: string): string => `/admin/people/${encodeURIComponent(steamid)}`;
 export const ticketUrl = (id: number | string): string => `/admin/people/tickets/${id}`;
+export const appealUrl = (id: number | string): string => `/admin/people/appeals/${id}`;
 export const eventAdminUrl = (id: number | string): string => `/admin/events/${id}`;
 
 /** The desk strip: a moderator has Live and People (owner ruling 2026-09-28),
@@ -113,6 +115,10 @@ export function parseAdminPath(path: string, opts: { isAdmin: boolean }): AdminR
       // The ticket page fetches by id, so a param that is not one is a bad
       // link rather than a page asking the API about NaN.
       return TICKET.test(b) ? { desk: 'people', section: 'ticket', param: b } : { ...NOWHERE, desk: 'people' };
+    }
+    if (a === 'appeals') {
+      if (b === '') return { desk: 'people', section: 'appeals', param: null };
+      return TICKET.test(b) ? { desk: 'people', section: 'appeal', param: b } : { ...NOWHERE, desk: 'people' };
     }
     if (STEAMID.test(a)) return { desk: 'people', section: 'file', param: a };
     return { ...NOWHERE, desk: 'people' };

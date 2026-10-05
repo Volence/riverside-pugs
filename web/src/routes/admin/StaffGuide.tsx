@@ -23,6 +23,7 @@ export function StaffGuide() {
           <li><a href="#steam">Steam</a></li>
           <li><a href="#drops">Connect drops</a></li>
           <li><a href="#slurs">Slurs</a></li>
+          <li><a href="#appeals">Appeals</a></li>
         </ul>
       </nav>
 
@@ -237,6 +238,25 @@ export function StaffGuide() {
         <p>
           Shown as <code>slurs: N chat lines, N names</code>. A slur typed in chat or used as a player name.
           The file shows the exact text, so you can judge it directly and handle it under the conduct rules.
+        </p>
+      </Panel>
+
+      <Panel id="appeals">
+        <h3>Appeals</h3>
+        <p>
+          Banned, held and Discord-sanctioned people can appeal from the site, the Appeal button beside Report a player,
+          or riversidepug.com/appeal. Each ban gets one appeal at a time and two in total; after a denial they wait seven
+          days. Bans shorter than a day cannot be appealed (holds always can).
+        </p>
+        <p>
+          You may ask <strong>one</strong> question. They have 72 hours to answer; no answer closes the appeal as denied.
+          Then Accept (the ban is lifted), Shorten (pick a new end; website bans only) or Deny. The player only ever sees
+          a fixed sentence for the outcome, so there is nothing to argue with.
+        </p>
+        <p>
+          Anyone at the issuer's rank or above decides, including whoever issued the ban: an admin's ban needs an admin.
+          An appeal containing a slur is denied automatically and still shown here. Appeals by staff, or about a ban from
+          a restricted ticket, have no forum post. An admin can mark a ban "No more appeals".
         </p>
       </Panel>
     </div>

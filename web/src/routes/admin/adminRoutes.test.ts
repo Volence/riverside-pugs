@@ -21,6 +21,12 @@ describe('the panel URL parser', () => {
     expect(parseAdminPath('/admin/people/nonsense', asAdmin)).toEqual({ desk: 'people', section: 'unknown', param: null });
   });
 
+  it('routes the appeals list and one appeal', () => {
+    expect(parseAdminPath('/admin/people/appeals', { isAdmin: false })).toEqual({ desk: 'people', section: 'appeals', param: null });
+    expect(parseAdminPath('/admin/people/appeals/12', { isAdmin: false })).toEqual({ desk: 'people', section: 'appeal', param: '12' });
+    expect(parseAdminPath('/admin/people/appeals/x', { isAdmin: false }).section).toBe('unknown');
+  });
+
   // Each of these used to render something wrong: a desk nobody asked for,
   // a ticket page fetching NaN, or a URIError that white-screened the site,
   // since a bad escape in the path throws in decodeURIComponent.
