@@ -652,6 +652,7 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
               <h3>
                 Map {mp.ordinal + 1} · <a href={`/map/${encodeURIComponent(mp.map)}`}>{mapName(mp.map)}</a>
                 <span class="muted"> · {mapScoreLabel(mp)}</span>
+                {mp.look && <span class="muted match__look" title="The time of day and weather night mode gave this map"> · {mp.look}</span>}
                 {demo && <> · <a href={`/api/matches/${match.id}/demos/${demo.ordinal}`} download>
                   demo {fmtBytes(demo.bytes)}
                 </a></>}

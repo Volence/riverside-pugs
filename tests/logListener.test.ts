@@ -158,6 +158,28 @@ describe('LogListener: token-less lines are admitted by source address alone', (
     ]);
   });
 
+  it('delivers a nightmode look line from an allowed source and drops it from anywhere else', async () => {
+    const line = '[nightmode] look "Storm" preset "storm" time=night weather=storm moon=none event=none power=on';
+    const allowed: LogEvent[] = [];
+    listener = new LogListener((ev) => allowed.push(ev));
+    let port = await listener.listen(0, '127.0.0.1');
+    listener.allowMatchCreateFrom('127.0.0.1');
+    await send(port, line);
+    await settle();
+    expect(allowed).toEqual([{
+      kind: 'look', title: 'Storm', preset: 'storm',
+      layers: { time: 'night', weather: 'storm', moon: 'none', event: 'none', power: 'on' },
+    }]);
+
+    await listener.close();
+    const denied: LogEvent[] = [];
+    listener = new LogListener((ev) => denied.push(ev));
+    port = await listener.listen(0, '127.0.0.1');
+    await send(port, line);
+    await settle();
+    expect(denied).toEqual([]);
+  });
+
   // PUGNET is emitted for every human connect, match or not, so it has no
   // token to gate on and the sender's address is the only thing admitting it.
   it('delivers PUGNET from an allowed source and drops it from anywhere else', async () => {

@@ -382,6 +382,10 @@ export interface MatchDetail {
      *  scoreline. Optional only for an older server that predates the flag,
      *  which is read as recorded. */
     recorded?: boolean;
+    /** The look (time of day, weather) night mode had on this map, such as
+     *  "Midnight" or "Storm"; "A / B" when its two halves differed. Null or
+     *  absent for a match played before the plugin logged looks. */
+    look?: string | null;
   }[];
   players: MatchPlayerStats[];
   events?: LiveEvent[];
@@ -1038,6 +1042,18 @@ export interface GameValueView {
   /** Admin view only: the value's condition does not hold, so the public page leaves it out. */
   conditionOff?: true;
 }
+/** One campaign x look row of /api/admin/balance/looks (src/mapLooks.ts). */
+export interface LookStatRow {
+  campaign: string;
+  title: string;
+  matches: number;
+  rounds: number;
+  avgScore: number;
+  finishRate: number | null;
+  avgAlive: number | null;
+}
+export interface LookStats { days: number; since: string; rows: LookStatRow[] }
+
 export interface GameValues {
   /** Admin view only. */
   asOf?: { patchId: number; number: number } | null;
@@ -2303,6 +2319,7 @@ export const adminApi = {
     del<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}`),
   balancePatches: (signal?: AbortSignal) => get<{ patches: PatchSummary[] }>('/api/admin/balance/patches', signal),
   gameValues: (signal?: AbortSignal) => get<GameValues>('/api/admin/balance/values', signal),
+  looks: (days: number, signal?: AbortSignal) => get<LookStats>(`/api/admin/balance/looks?days=${days}`, signal),
   balancePatch: (id: number, signal?: AbortSignal) => get<PatchDetail>(`/api/admin/balance/patches/${id}`, signal),
   balanceDrift: (signal?: AbortSignal) => get<{ servers: DriftRow[] }>('/api/admin/balance/drift', signal),
   editBalancePatch: (id: number, body: { name?: string | null; notes?: string; reviewed?: boolean }) =>

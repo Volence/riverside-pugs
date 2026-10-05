@@ -718,3 +718,28 @@ describe('PUGBOOK parsing', () => {
     ))).toBeNull();
   });
 });
+
+describe('parseLogDatagram: l4d_nightmode look lines', () => {
+  const framed = (body: string) => Buffer.from(`L 10/05/2026 - 03:41:30: ${body}`);
+
+  it('parses a rolled look with its five layers', () => {
+    const ev = parseLogDatagram(framed('[nightmode] look "Midnight" preset "midnight" time=midnight weather=clear moon=pale event=none power=on'));
+    expect(ev).toEqual({
+      kind: 'look', title: 'Midnight', preset: 'midnight',
+      layers: { time: 'midnight', weather: 'clear', moon: 'pale', event: 'none', power: 'on' },
+    });
+  });
+
+  it('parses a stock map, which has no layers, and a title with an apostrophe', () => {
+    expect(parseLogDatagram(framed('[nightmode] look "default" preset "default"')))
+      .toEqual({ kind: 'look', title: 'default', preset: 'default', layers: null });
+    expect(parseLogDatagram(framed('[nightmode] look "Hallow\'s Eve" preset "hallows" time=night weather=clear moon=harvest event=hallows power=on')))
+      .toMatchObject({ kind: 'look', title: "Hallow's Eve", preset: 'hallows' });
+  });
+
+  it('refuses a look line that is not the plugin\'s shape, and one a player typed', () => {
+    expect(parseLogDatagram(framed('[nightmode] look "Midnight"'))).toBeNull();
+    expect(parseLogDatagram(framed('[nightmode] look "Midnight" preset "midnight" time=midnight weather=clear'))).toBeNull();
+    expect(parseLogDatagram(framed('"x<1><STEAM_1:0:1><>" say "[nightmode] look \"Day\" preset \"day\""'))).toBeNull();
+  });
+});

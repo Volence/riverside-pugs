@@ -677,6 +677,23 @@ CREATE TABLE IF NOT EXISTS server_chat (
   delivered  INTEGER
 );
 CREATE INDEX IF NOT EXISTS server_chat_by_server ON server_chat (server_id, id);
+-- The look (time of day, weather, moon, event, power) l4d_nightmode had on a
+-- map when a round went live, one row per "[nightmode] look" log line
+-- (src/mapLooks.ts). match_id is the match the server was setting up or
+-- playing at the time; a round is matched to its look by time, since the
+-- line names no map and no round. This is what lets a match page say which
+-- look each map had and survival be compared by look (owner ask 2026-10-04).
+-- layers is the five-layer JSON, NULL when the plugin left the map stock.
+CREATE TABLE IF NOT EXISTS map_looks (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  server_id INTEGER NOT NULL,
+  at        INTEGER NOT NULL,
+  title     TEXT    NOT NULL,
+  preset    TEXT    NOT NULL,
+  layers    TEXT,
+  match_id  INTEGER
+);
+CREATE INDEX IF NOT EXISTS map_looks_by_match ON map_looks (match_id, at);
 CREATE TABLE IF NOT EXISTS match_demos (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   ordinal  INTEGER NOT NULL,

@@ -224,6 +224,13 @@ export type LogEvent =
   | { kind: 'input_cap'; steamid: string; burstKind: 'fire' | 'pounce' | 'bhop'; serverTick: number }
   // The engine's own `"name<uid><STEAM_1:Y:Z><>" entered the game` line.
   | { kind: 'entered'; steamid: string }
+  // The look (time of day, weather, moon, event, power) l4d_nightmode is
+  // running on the map, from that plugin's own "[nightmode] look" line, sent
+  // when a round goes live. Token-less and unsigned like "entered the game":
+  // l4d_nightmode is not pug-match and cannot sign, so the sender's address
+  // is the only gate (src/logListener.ts) and src/logAuth.ts never holds it
+  // to a signature. `layers` is null when the plugin left the map stock.
+  | { kind: 'look'; title: string; preset: string; layers: LookLayers | null }
   // Where a client connected from, emitted for EVERY human that joins the box
   // whether or not a match is being tracked and whether or not they are on a
   // roster: an account nobody expected is exactly the one worth correlating.
@@ -472,6 +479,14 @@ const MAX_TICK_COUNTER = 100000;
 const LILAC_CHEAT_MAX = 11;
 
 const ENTERED_RE = /^".*<\d+><(STEAM_\d:[01]:\d{1,10})><[^<>"]*>" entered the game$/;
+
+export interface LookLayers { time: string; weather: string; moon: string; event: string; power: string }
+// l4d_nightmode 0.8: `[nightmode] look "Midnight" preset "midnight" time=midnight
+// weather=clear moon=pale event=none power=on`, or `look "default" preset "default"`
+// with no layers for a map it left stock. The title is the plugin's own display
+// string (it can hold an apostrophe: "Hallow's Eve"); nothing on the line is
+// player text.
+const LOOK_RE = /^\[nightmode\] look "([^"]{1,64})" preset "([^"]{1,64})"(?: time=([a-z0-9_-]{1,32}) weather=([a-z0-9_-]{1,32}) moon=([a-z0-9_-]{1,32}) event=([a-z0-9_-]{1,32}) power=([a-z0-9_-]{1,32}))?$/;
 
 /**
  * The token-less lines: `L4DC SIGNON_DROP ...` from l4d_consistency.smx and the
@@ -799,6 +814,13 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return null;
     const cc = (fields.cc ?? '').toUpperCase();
     return { kind: 'sourcetv', event: 'join', slot, ip, country: /^[A-Z]{2}$/.test(cc) ? cc : null, name };
+  }
+
+  const look = LOOK_RE.exec(body);
+  if (look) {
+    const [, title, preset, time, weather, moon, event, power] = look;
+    const layers = time !== undefined ? { time, weather, moon, event, power } : null;
+    return { kind: 'look', title, preset, layers };
   }
 
   const entered = ENTERED_RE.exec(body);
