@@ -1,5 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import Fastify, { type FastifyInstance } from 'fastify';
+import cookie from '@fastify/cookie';
+import type { Notifier } from '../src/notify/notify.js';
+import { adminEventRoutes } from '../src/routes/adminEvents.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +12,7 @@ import { upsertPlayer } from '../src/players.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import * as E from '../src/events/events.js';
 import * as N from '../src/events/entries.js';
+import * as V from '../src/events/validate.js';
 import { ADMIN } from './eventFixture.js';
 import { A, B, OUTSIDER, entryFixture, rosterA, rosterB, type EntryFixture } from './entryFixture.js';
 
@@ -77,5 +81,73 @@ describe('desk entries', () => {
 
   it('answers an entry of another event as not found', async () => {
     expect((await post(`/api/admin/events/${f.eventId + 99}/entries/${ea}/restore`, ADMIN)).statusCode).toBe(404);
+  });
+});
+
+describe('desk notices (final review)', () => {
+  let desk: FastifyInstance;
+  let send: ReturnType<typeof vi.fn>;
+  const deskApp = async (notifier: Notifier) => {
+    const a = Fastify();
+    await a.register(cookie, { secret: 'x'.repeat(32) });
+    await a.register(adminEventRoutes, { db: f.db, store: () => { throw new Error('no store'); }, notifier, publicUrl: 'https://x' });
+    await a.ready();
+    return a;
+  };
+  beforeEach(async () => {
+    send = vi.fn(() => 1);
+    desk = await deskApp({ send } as unknown as Notifier);
+  });
+  afterEach(async () => { await desk.close(); });
+  const deskPost = (a: FastifyInstance, url: string, body: object = {}) =>
+    a.inject({ method: 'POST', url, cookies: authedCookie(a, f.db, ADMIN), payload: body });
+  const calls = () => send.mock.calls.map(([to, type, payload]) => ({ to: [...(to as string[])].sort(), type, content: (payload as { content: string }).content }));
+
+  it('open-checkin tells the managers of every active entry', async () => {
+    expect((await deskPost(desk, `/api/admin/events/${f.eventId}/open-checkin`)).statusCode).toBe(200);
+    expect(calls().map((c) => [c.to, c.type])).toEqual([
+      [[A[0], A[1]].sort(), 'event_checkin_open'],
+      [[B[0]], 'event_checkin_open'],
+    ]);
+  });
+
+  it('lock-entries tells each dropped entry why', async () => {
+    E.openCheckin(f.db, { eventId: f.eventId, by: null });
+    N.checkInEntry(f.db, { entryId: eb, by: B[0] });
+    expect((await deskPost(desk, `/api/admin/events/${f.eventId}/lock-entries`)).statusCode).toBe(200);
+    const c = calls();
+    expect(c.map((x) => [x.to, x.type])).toEqual([[[A[0], A[1]].sort(), 'event_dropped']]);
+    expect(c[0]!.content).toContain('Rats');
+  });
+
+  it('a staff roster edit tells the players it added', async () => {
+    expect((await deskPost(desk, `/api/admin/events/${f.eventId}/entries/${ea}/roster`, { roster: rosterA({ coach: OUTSIDER }) })).statusCode).toBe(200);
+    expect(calls().map((x) => [x.to, x.type])).toEqual([[[OUTSIDER], 'event_roster_added']]);
+  });
+
+  it('a failing notifier never fails the request', async () => {
+    const broken = await deskApp({ send: () => { throw new Error('discord down'); } } as unknown as Notifier);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect((await deskPost(broken, `/api/admin/events/${f.eventId}/open-checkin`)).statusCode).toBe(200);
+      N.checkInEntry(f.db, { entryId: eb, by: B[0] });
+      expect((await deskPost(broken, `/api/admin/events/${f.eventId}/lock-entries`)).statusCode).toBe(200);
+    } finally {
+      warn.mockRestore();
+      await broken.close();
+    }
+  });
+});
+
+describe('desk restore (final review)', () => {
+  it('refuses to restore an entry while the team holds another, disqualified, entry', async () => {
+    N.withdrawEntry(f.db, { entryId: ea, by: A[0] });
+    const r = N.registerEntry(f.db, { eventId: f.eventId, teamId: f.teamA, by: A[0], roster: rosterA() });
+    if (!r.ok) throw new Error(r.error);
+    expect((await post(`/api/admin/events/${f.eventId}/entries/${r.value.entry.id}/disqualify`, ADMIN, { reason: 'Ringer' })).statusCode).toBe(200);
+    const res = await post(`/api/admin/events/${f.eventId}/entries/${ea}/restore`, ADMIN);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe(V.EVENT_ERRORS.already_entered.text);
+    expect(N.getEntry(f.db, ea)!.status).toBe('dropped');
   });
 });

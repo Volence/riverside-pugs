@@ -12,6 +12,8 @@ import * as V from '../events/validate.js';
 import { stageSummary } from '../events/format.js';
 import { adminEntryViews } from '../events/views.js';
 import { rulesetOptions } from '../rulesetStore.js';
+import type { Notifier } from '../notify/notify.js';
+import { tellCheckinOpen, tellDropped, tellRosterAdded } from '../events/notices.js';
 
 export interface AdminEventRow {
   id: number; slug: string; name: string; status: V.EventStatus; entryKind: V.EntryKind; startsAt: string; stages: number; updatedAt: string;
@@ -52,9 +54,13 @@ export function adminEventDetail(db: DB, ev: E.EventRow): AdminEventDetail {
  * so events can be prepared while the switch is off. Every rule lives in
  * src/events/events.ts; a route maps the refusal to its status and sentence,
  * and on success adds logAdmin (Ruling 10) after the event's own transaction
- * has committed its event_log row.
+ * has committed its event_log row. The entry steps send the same DMs as the
+ * clock and the public routes do (src/events/notices.ts), never failing the
+ * request over one.
  */
-export async function adminEventRoutes(app: FastifyInstance, opts: { db: DB; store: () => CommunityStore }): Promise<void> {
+export async function adminEventRoutes(
+  app: FastifyInstance, opts: { db: DB; store: () => CommunityStore; notifier?: Notifier; publicUrl?: string },
+): Promise<void> {
   const { db } = opts;
   const requireAdmin = makeRequireAdmin(db);
   const requireStaff = makeRequireMod(db);
@@ -247,6 +253,7 @@ export async function adminEventRoutes(app: FastifyInstance, opts: { db: DB; sto
     const r = E.openCheckin(db, { eventId: ev.id, by: me });
     if (!r.ok) return refuse(reply, r.error);
     logAdmin(db, me, 'event_open_checkin', ev.id, { slug: ev.slug });
+    tellCheckinOpen(opts, ev.id);
     return {};
   });
 
@@ -258,6 +265,7 @@ export async function adminEventRoutes(app: FastifyInstance, opts: { db: DB; sto
     const r = N.lockEntries(db, { eventId: ev.id, by: me });
     if (!r.ok) return refuse(reply, r.error);
     logAdmin(db, me, 'event_lock_entries', ev.id, { slug: ev.slug, kept: r.value.kept.length, dropped: r.value.dropped.length });
+    tellDropped(opts, ev.id, r.value.dropped);
     return r.value;
   });
 
@@ -282,14 +290,20 @@ export async function adminEventRoutes(app: FastifyInstance, opts: { db: DB; sto
     const body = (req.body ?? {}) as { roster?: unknown; reason?: unknown };
     let r: V.Checked<unknown>;
     let action: string;
+    let added: N.Added = [];
     switch (p.action) {
-      case 'roster': r = N.setEntryRoster(db, { entryId: entry.id, by: me, roster: body.roster, staff: true }); action = 'event_entry_roster'; break;
+      case 'roster': {
+        const s = N.setEntryRoster(db, { entryId: entry.id, by: me, roster: body.roster, staff: true });
+        if (s.ok) added = s.value.added;
+        r = s; action = 'event_entry_roster'; break;
+      }
       case 'disqualify': r = N.disqualifyEntry(db, { entryId: entry.id, by: me, reason: body.reason }); action = 'event_entry_disqualify'; break;
       case 'restore': r = N.restoreEntry(db, { entryId: entry.id, by: me }); action = 'event_entry_restore'; break;
       default: return refuse(reply, 'bad_request');
     }
     if (!r.ok) return refuseWith(reply, r);
     logAdmin(db, me, action, ev.id, { entryId: entry.id, name: entry.name, ...(p.action === 'disqualify' ? { reason: body.reason } : {}) });
+    tellRosterAdded(opts, ev.id, entry.id, me, added);
     return {};
   });
 }

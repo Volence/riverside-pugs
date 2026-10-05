@@ -2040,7 +2040,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(adminBookingRoutes, { db: deps.db, runner: bookingRunner });
 
   // The Events desk (tournaments plan T1a): staff read, admins write, not behind the switch.
-  await app.register(adminEventRoutes, { db: deps.db, store: getCommunityStore });
+  await app.register(adminEventRoutes, { db: deps.db, store: getCommunityStore, notifier, publicUrl: deps.config.publicUrl });
 
   // Setup > Rulesets and Game configs (rulesets editor plan): admins only.
   await app.register(adminRulesetRoutes, { db: deps.db });

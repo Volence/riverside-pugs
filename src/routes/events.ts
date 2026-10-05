@@ -10,7 +10,7 @@ import { getEventBySlug } from '../events/events.js';
 import * as N from '../events/entries.js';
 import * as V from '../events/validate.js';
 import { eventListItems, eventView, myEventView } from '../events/views.js';
-import { eventMessage } from '../events/messages.js';
+import { tellRosterAdded } from '../events/notices.js';
 import type { Notifier } from '../notify/notify.js';
 
 const NOT_FOUND = { error: 'not found' };
@@ -62,19 +62,7 @@ export async function eventRoutes(
     return e && e.event_id === ev.id ? e : undefined;
   };
   /** Ruling 11: tell players someone else put on a roster. Never fails the request. */
-  const tellAdded = (ev: E.EventRow, entryId: number, by: string, added: N.Added) => {
-    const notifier = opts.notifier;
-    if (!notifier) return;
-    for (const p of added) {
-      if (p.steamid === by) continue;
-      try {
-        const msg = eventMessage(db, opts.publicUrl ?? '', ev.id, 'event_roster_added', { entryId, by, role: p.role });
-        if (msg) notifier.send([p.steamid], 'event_roster_added', msg);
-      } catch (err) {
-        console.warn('[events] roster DM failed:', err instanceof Error ? err.message : err);
-      }
-    }
-  };
+  const tellAdded = (ev: E.EventRow, entryId: number, by: string, added: N.Added) => tellRosterAdded(opts, ev.id, entryId, by, added);
   type SlugId = { slug: string; id: string };
 
   app.get('/api/events', async (req, reply) => {

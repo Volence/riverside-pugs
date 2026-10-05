@@ -4,7 +4,7 @@ import { getTeam } from '../teams/teams.js';
 import * as E from './events.js';
 import * as N from './entries.js';
 import * as R from './entryRules.js';
-import { eventMessage, type EventNotifyType } from './messages.js';
+import { tellCheckinOpen, tellDropped } from './notices.js';
 
 export const TICK_MS = 60_000;
 
@@ -62,9 +62,7 @@ export class EventRunner {
     if (f.checkin.enabled) {
       const { opensAt, closesAt } = R.checkinTimes(ev.starts_at, f.checkin);
       if (ev.status === 'registration' && at >= opensAt) {
-        if (E.openCheckin(db, { eventId: ev.id, by: null, now }).ok) {
-          for (const e of N.entriesOf(db, ev.id).filter(N.isActive)) this.tell(N.managersOf(db, e.team_id), ev.id, 'event_checkin_open', { entryId: e.id });
-        }
+        if (E.openCheckin(db, { eventId: ev.id, by: null, now }).ok) tellCheckinOpen(this.deps, ev.id);
         return;
       }
       if (ev.status === 'checkin' && at >= closesAt) this.lock(ev, now);
@@ -75,21 +73,6 @@ export class EventRunner {
 
   private lock(ev: E.EventRow, now: Date): void {
     const r = N.lockEntries(this.deps.db, { eventId: ev.id, by: null, now });
-    if (!r.ok) return;
-    for (const d of r.value.dropped) {
-      const entry = N.getEntry(this.deps.db, d.entryId);
-      if (entry) this.tell(N.managersOf(this.deps.db, entry.team_id), ev.id, 'event_dropped', { entryId: d.entryId, reason: d.reason });
-    }
-  }
-
-  /** A failure to word or send one notice must not stop the rest. */
-  private tell(to: string[], eventId: number, type: EventNotifyType, extra: Parameters<typeof eventMessage>[4]): void {
-    if (to.length === 0) return;
-    try {
-      const payload = eventMessage(this.deps.db, this.deps.publicUrl, eventId, type, extra);
-      if (payload) this.deps.notifier.send(to, type, payload);
-    } catch (err) {
-      console.warn(`[events] ${type} notice for event ${eventId} failed:`, err instanceof Error ? err.message : err);
-    }
+    if (r.ok) tellDropped(this.deps, ev.id, r.value.dropped);
   }
 }

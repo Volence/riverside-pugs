@@ -8,6 +8,7 @@ import { buildServer } from '../src/server.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import * as E from '../src/events/events.js';
 import * as N from '../src/events/entries.js';
+import { ADMIN } from './eventFixture.js';
 import { A, B, OUTSIDER, entryFixture, rosterA, rosterB, type EntryFixture } from './entryFixture.js';
 
 let f: EntryFixture;
@@ -23,7 +24,7 @@ beforeEach(async () => {
   app = await buildServer({
     config: { ...loadConfig({}), communityDir }, db: f.db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {},
   });
-  for (const s of [...A, ...B, OUTSIDER]) cookies[s] = authedCookie(app, f.db, s);
+  for (const s of [...A, ...B, OUTSIDER, ADMIN]) cookies[s] = authedCookie(app, f.db, s);
   slug = E.getEvent(f.db, f.eventId)!.slug;
 });
 afterEach(async () => { await app.close(); });
@@ -81,6 +82,18 @@ describe('registration over HTTP', () => {
     expect((await app.inject({ method: 'POST', url: `/api/events/${slug}/entries`, payload: {} })).statusCode).toBe(404);
     f.db.prepare("UPDATE settings SET value = 'off' WHERE key = 'competitive_enabled'").run();
     expect((await get(`/api/events/${slug}/mine`, A[0])).statusCode).toBe(404);
+  });
+});
+
+describe('drafts over HTTP', () => {
+  it('answers a draft with 404 to a player on /mine and on register, and lets an admin read /mine', async () => {
+    f.db.prepare("UPDATE events SET status = 'draft' WHERE id = ?").run(f.eventId);
+    expect((await get(`/api/events/${slug}/mine`, A[0])).statusCode).toBe(404);
+    expect((await post(`/api/events/${slug}/entries`, A[0], { teamId: f.teamA, roster: rosterA() })).statusCode).toBe(404);
+    expect(N.entryOfTeam(f.db, f.eventId, f.teamA)).toBeUndefined();
+    const admin = await get(`/api/events/${slug}/mine`, ADMIN);
+    expect(admin.statusCode).toBe(200);
+    expect(admin.json()).toMatchObject({ entries: [], register: [] });
   });
 });
 
