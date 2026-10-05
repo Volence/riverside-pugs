@@ -15,8 +15,8 @@
 - Team events only (`entry_kind = 'team'`). Draft events never reach `live` in T2.
 - Results are entered by admins (mods read only) until rollout plan 3. A result is a winner plus both campaign scores with the winner strictly ahead, or a forfeit with no scores. There are no draws (spec section 3: ties are replayed).
 - Swiss (spec section 3): win 1 point, loss 0. Round 1 pairs the top half of seeds against the bottom half (1 v N/2+1). Later rounds pair by points from the top, never repeating an opponent while any repeat-free pairing exists. With an odd count, the bye (a win) goes to the lowest-ranked entry without one. Standings order: points, Buchholz (median Buchholz from 5 rounds up), campaign score difference, head-to-head, seed.
-- League (spec section 3): pairing is Swiss by record or a full round robin (the stage's `pairing`). Standings order: wins, head-to-head, campaign score difference, Buchholz, seed.
-- Round robin stages use the league order inside each group.
+- League (spec section 3, reshaped by the owner 2026-10-05): a season is a number of rounds, one result per team per round (`matches`, 1 to 40, picked per event), at 1 to 3 a week from an optional season start date. Pairing is Swiss by record or a repeating round robin (the stage's `pairing`). With an odd number of teams, one team a round gets a bye, which counts as a win as in Swiss (and as on FACEIT). League standings order: wins, head-to-head, campaign score difference, Buchholz, seed.
+- Round robin stages use the order wins, head-to-head, campaign score difference, Buchholz, seed inside each group.
 - Elimination and round robin structure come from brackets-manager.js. Swiss and league are in-house pure modules.
 - Every write to `events`, `event_stages`, `event_log`, `event_entries` and the new `event_matches` is in `src/events/events.ts`, `src/events/entries.ts` or `src/events/play.ts`, plus the account merge's own lines in `src/mergePlayers.ts`. Only `play.ts` writes `event_matches`. Every mutation in those files is one transaction that writes exactly one `event_log` row on success and nothing on refusal (`tests/eventLogGuard.test.ts`). Admin routes also `logAdmin`.
 - Public routes follow `competitive_enabled` exactly as T1a's do. A draft is a 404 to anyone but staff.
@@ -31,8 +31,11 @@
 3. **Round robin groups split the advance count evenly.** With 2 groups and "top 4 advance", the top 2 of each group go through. The next stage is seeded group winners first, then runners-up, and so on. Within a band the order is wins, then campaign score difference, then the earlier seed. A stage whose advance count does not divide by its groups is refused with `bad_group_advance`.
 4. **Each stage is seeded by the rank in the stage before it.** Stage 1 uses the event seeds (T1b: SR, reordered by staff).
 5. **The clock starts the event.** At `starts_at`, an event whose entry list is final and that has at least 2 active entries goes `live` by itself. With check-in off, the list is finalised in the same minute and the event starts on that tick. An admin may press Start earlier once the list is final. With fewer than 2 entries the event waits; staff cancel it.
-6. **Everything after the start moves by itself.** A Swiss or league round pairs once every match of the round before has a result. A stage finishes once every match has one, and the next stage starts at once. Dates and windows are rollout plan 4, so in T2 a league is played as back-to-back rounds labelled "Week N".
-7. **A round robin league needs enough weeks.** If `weeks x matchesPerWeek` is less than the rounds a full round robin of the entrants needs, starting that stage is refused (`league_too_short`). A schedule that needs fewer rounds simply ends early.
+6. **Everything after the start moves by itself.** A Swiss or Swiss-paired league round pairs once every match of the round before has a result. A stage finishes once every match has one, and the next stage starts at once. Proposing and enforcing match times is rollout plan 4, so in T2 a league's weeks are labels with dates: a match can be played any time and an admin enters it.
+7. **A league season is a match count, not a length (owner, 2026-10-05).** The organizer picks matches per team (the FACEIT Overwatch league uses 16), matches a week, and optionally the season start date. The season is `matches` rounds whatever the team count, and `weeks = ceil(matches / matchesPerWeek)`. Round robin pairing repeats the full round robin, sides swapped each cycle, until the rounds are used up, so opponents come as evenly as the count allows. Swiss pairing pairs by record and never repeats while a fresh opponent is left.
+18. **League byes count as wins (owner, 2026-10-05, as FACEIT does).** With an odd number of teams, one team sits out each round and is given the win. Every team ends the season with exactly `matches` results, played or bye. Byes rotate (fewest byes first, as in Swiss). When `matches` is not a multiple of the team count, some teams get one bye more than others, which is worth about half a win on average. The calculator says so, so the organizer can pick a count that splits evenly.
+19. **Season dates.** Week 1 starts on the season start date, or on the day the stage starts if none is set. Each week is 7 days, and the event page shows each week's dates next to its label ("Week 3 · Oct 26 to Nov 1"); they are calendar days, shown as written, not shifted by time zone. In T2 the dates are information only; rollout plan 4 turns them into windows with a deadline.
+20. **A season calculator in the stage editor.** It works both ways. Matches per team plus matches a week gives the number of weeks and, with a start date, the end date. A start and an end date give the matches a week needed, and it says so when even 3 a week does not fit. Given an expected team count (default the team cap), it also gives the byes per team: "7 teams: 2 or 3 byes each; 14 or 21 matches gives everyone the same". It writes only the stage's own fields (matches, matches a week, start date); nothing is stored that it computed.
 8. **Corrections.** An admin may change a result while its stage is live and nothing depends on it yet: in a bracket, the next match is not yet played (brackets-manager refuses otherwise); in Swiss or a league, the next round is not yet paired. Otherwise the answer is `result_locked`. Replays and deeper repairs are rollout plan 3 desk tools.
 9. **A team disqualified mid-event forfeits its open matches.** On the next settle, the engine records each open match as a forfeit win for the opponent (`result_source = 'forfeit'`, actor null). A match where both sides are out stays open for staff. Past results stand. A disqualified team never advances, gets no placement, and is listed last in standings. Pairings skip it.
 10. **Byes.** A Swiss bye is a win: 1 point, 0 Buchholz, 0 score difference. It goes to the lowest-ranked entry with the fewest byes. In brackets, the field is padded to a power of two and the padding byes go to the top seeds, as standard.
@@ -68,11 +71,12 @@
 |---|---|
 | `package.json`, `package-lock.json` | `brackets-manager` 1.11.1, `brackets-memory-db` 1.0.6. |
 | `src/db.ts` | `event_matches` table; `event_stages.entrants_json`, `bracket_json`, `bracket_rev`, `started_at`, `finished_at`; `events.live_at`. |
-| `src/events/validate.ts` | New error codes, `parseResult`, `ResultInput`, `registration/checkin -> live -> finished`, elimination-last chain rule, even group advance. |
-| `src/events/events.ts` | Row types gain the new columns; `chainOf` passes stage types. |
+| `src/events/validate.ts` | New error codes, `parseResult`, `ResultInput`, `registration/checkin -> live -> finished`, elimination-last chain rule, even group advance, league config as matches per team and a season start. |
+| `src/events/events.ts` | Row types gain the new columns; `chainOf` passes stage types; `stageSettingsOf` reads T1a league rows (weeks) as matches. |
 | `src/events/standings.ts` | Pure: rank a table stage. |
 | `src/events/swiss.ts` | Pure: pair a Swiss round. |
 | `src/events/roundRobin.ts` | Pure: circle schedule. |
+| `src/events/league.ts` | Pure: the league season (repeating round robin, weeks, week dates, matches a week between dates, byes); shared with the web editor. |
 | `src/events/bracket.ts` | brackets-manager over the in-memory store: create, report, read matches, completeness, ranks, groups. |
 | `src/events/play.ts` | Writer for `event_matches`, the stage moves and the event's `live`/`finished`. |
 | `src/events/flow.ts` | Async orchestration: plan a stage, start an event, record a result, settle. Per-event chain. |
@@ -85,11 +89,12 @@
 | `tests/eventLogGuard.test.ts` | Widened to `play.ts` and `event_matches`. |
 | `tests/playFixture.ts` | A published event with a final entry list of N entries. |
 | `web/src/api.ts` | Play types, `EventView.play`, entry placement, desk calls. |
-| `web/src/eventFormat.ts` | `placementText`. |
+| `web/src/eventFormat.ts` | `placementText`, `weekRangeText`. |
 | `web/src/routes/event/StagePlay.tsx`, `Bracket.tsx` | Bracket, standings, rounds. |
 | `web/src/routes/Event.tsx` | Mounts the stage panels; refetches while live; placement marks. |
 | `web/src/routes/admin/events/PlayPanel.tsx` | Start, the matches, result forms. |
-| `web/src/routes/admin/events/EventEditor.tsx` | Mounts `PlayPanel`. |
+| `web/src/routes/admin/events/EventEditor.tsx` | Mounts `PlayPanel`; passes the team cap to `StageForm`. |
+| `web/src/routes/admin/events/StageForm.tsx`, `stageDraft.ts`, `SeasonCalc.tsx` | League fields (matches per team, matches a week, season start, pairing) and the season calculator. |
 | `web/src/styles/app.css` | `.bracket*`, `.playtable`, `.playround*`. |
 
 ---
@@ -105,7 +110,8 @@
 
 **Interfaces:**
 - Produces: table `event_matches`; columns `event_stages.entrants_json TEXT`, `bracket_json TEXT`, `bracket_rev INTEGER NOT NULL DEFAULT 0`, `started_at TEXT`, `finished_at TEXT`, `events.live_at TEXT`.
-- Produces in `validate.ts`: `interface ResultInput { winner: 'a' | 'b'; scoreA: number | null; scoreB: number | null; forfeit: boolean }`; `parseResult(raw: unknown): Checked<ResultInput>`; `SCORE_MAX = 100000`; error keys `list_not_final`, `too_few_entries`, `not_live`, `match_not_found`, `match_not_open`, `bad_result`, `result_locked`, `changed`, `league_too_short`, `elim_not_last`, `bad_group_advance`; `nextStatusAllowed` adds `registration -> live`, `checkin -> live`, `live -> finished`; `checkChain(stages: { type?: StageType; advanceCount: number | null }[], o)`.
+- Produces in `validate.ts`: `interface ResultInput { winner: 'a' | 'b'; scoreA: number | null; scoreB: number | null; forfeit: boolean }`; `parseResult(raw: unknown): Checked<ResultInput>`; `SCORE_MAX = 100000`; error keys `list_not_final`, `too_few_entries`, `not_live`, `match_not_found`, `match_not_open`, `bad_result`, `result_locked`, `changed`, `elim_not_last`, `bad_group_advance`; `nextStatusAllowed` adds `registration -> live`, `checkin -> live`, `live -> finished`; `checkChain(stages: { type?: StageType; advanceCount: number | null }[], o)`; `StageConfigs['league']` becomes `{ matches: number; matchesPerWeek: number; pairing: 'swiss' | 'round_robin'; seasonStart: string | null }` (`matches` 1 to 40, default 16; `seasonStart` a `YYYY-MM-DD` date or null); `LEAGUE_MATCHES_MAX = 40`.
+- Produces in `events.ts`: `stageSettingsOf` reads a league stage stored in the T1a shape (`weeks`, no `matches`) as `matches = weeks x matchesPerWeek`, `seasonStart: null`, so nothing else ever sees `weeks`.
 - Produces in `events.ts`: `EventRow.live_at: string | null`; `StageRow` gains `entrants_json: string | null; bracket_json: string | null; bracket_rev: number; started_at: string | null; finished_at: string | null`.
 
 - [ ] **Step 1: Add the dependencies**
@@ -270,6 +276,37 @@ Add to the `parseStage` tests in the same file (reuse that file's existing conte
 
 (If that file names its context `context` or its Standard Cup ruleset id differently, use its names; do not add a second context helper.)
 
+Replace the existing league default test line (`expect(V.parseStageConfig('league', {})).toEqual({ ok: true, value: { weeks: 6, ... } })`) and add league cases:
+
+```ts
+  it('a league season is a match count, matches a week, a pairing and an optional start date (plan T2)', () => {
+    expect(V.parseStageConfig('league', {})).toEqual({ ok: true, value: { matches: 16, matchesPerWeek: 1, pairing: 'swiss', seasonStart: null } });
+    expect(V.parseStageConfig('league', { matches: 14, matchesPerWeek: 2, pairing: 'round_robin', seasonStart: '2026-10-12' }))
+      .toEqual({ ok: true, value: { matches: 14, matchesPerWeek: 2, pairing: 'round_robin', seasonStart: '2026-10-12' } });
+    for (const bad of [{ matches: 0 }, { matches: V.LEAGUE_MATCHES_MAX + 1 }, { matchesPerWeek: 4 }, { seasonStart: '2026-13-01' },
+      { seasonStart: '12/10/2026' }, { seasonStart: '2026-02-30' }, { seasonStart: 5 }]) {
+      expect(V.parseStageConfig('league', bad), JSON.stringify(bad)).toEqual({ ok: false, error: 'bad_stage_config' });
+    }
+  });
+```
+
+And in `tests/events.test.ts`, add:
+
+```ts
+  it('reads a league stage stored with weeks as matches = weeks x matches a week (plan T2)', () => {
+    const f = eventFixture('draft');
+    f.db.prepare("UPDATE event_stages SET type = 'league', config_json = ? WHERE id = ?")
+      .run(JSON.stringify({ weeks: 6, matchesPerWeek: 2, pairing: 'swiss' }), f.s1);
+    expect(E.stageSettingsOf(E.getStage(f.db, f.s1)!).config).toEqual({ matches: 12, matchesPerWeek: 2, pairing: 'swiss', seasonStart: null });
+  });
+```
+
+In `tests/eventFormat.test.ts`, change the league `stageSummary` case to:
+
+```ts
+    expect(stageSummary('league', { matches: 16, matchesPerWeek: 2, pairing: 'swiss', seasonStart: null }, 4)).toBe('League, 16 matches, 2 a week, top 4 advance');
+```
+
 - [ ] **Step 7: Run them to make sure they fail**
 
 Run: `npx vitest run tests/eventsValidate.test.ts`
@@ -288,7 +325,6 @@ In `src/events/validate.ts`, add to `EVENT_ERRORS` (before the closing `} as con
   bad_result: { status: 400, text: 'A result names the winner and gives both campaign scores with the winner ahead, or is a forfeit.' },
   result_locked: { status: 409, text: 'Later matches already depend on this result, so it can no longer be changed here.' },
   changed: { status: 409, text: 'The event changed while this was being saved. Reload and try again.' },
-  league_too_short: { status: 409, text: 'This league has fewer rounds than a full round robin of its teams needs. Add weeks or matches a week.' },
   elim_not_last: { status: 400, text: 'An elimination bracket is always the last stage.' },
   bad_group_advance: { status: 400, text: 'With groups, the advance count has to split evenly across the groups.' },
 ```
@@ -345,6 +381,67 @@ export function nextStatusAllowed(from: EventStatus, to: EventStatus): boolean {
 }
 ```
 
+Change the league config (owner, 2026-10-05: a season is a match count). In `StageConfigs`:
+
+```ts
+  league: { matches: number; matchesPerWeek: number; pairing: 'swiss' | 'round_robin'; seasonStart: string | null };
+```
+
+Add `export const LEAGUE_MATCHES_MAX = 40;` next to `POOL_MAX`, and replace the `league` case of `parseStageConfig`:
+
+```ts
+    case 'league': {
+      const matches = c.matches ?? 16;
+      const matchesPerWeek = c.matchesPerWeek ?? 1;
+      const pairing = c.pairing ?? 'swiss';
+      const seasonStart = c.seasonStart ?? null;
+      return isInt(matches, 1, LEAGUE_MATCHES_MAX) && isInt(matchesPerWeek, 1, 3) && oneOf(['swiss', 'round_robin'] as const, pairing)
+        && (seasonStart === null || isDay(seasonStart))
+        ? ok({ matches, matchesPerWeek, pairing, seasonStart: seasonStart as string | null })
+        : fail('bad_stage_config');
+    }
+```
+
+with, above `parseStageConfig`:
+
+```ts
+/** A real calendar day written YYYY-MM-DD. Day 30 of February parses but
+ *  rolls over to March, so the round trip refuses it; month 13 does not
+ *  parse at all. Never throws. */
+function isDay(v: unknown): boolean {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const t = Date.parse(`${v}T00:00:00.000Z`);
+  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === v;
+}
+```
+
+In `src/events/format.ts` `stageSummary`, the league line becomes:
+
+```ts
+  if (type === 'league') parts.push(`${c.matches} matches`, `${c.matchesPerWeek} a week`);
+```
+
+In `src/events/events.ts` `stageSettingsOf`, read old league rows in the new shape:
+
+```ts
+export function stageSettingsOf(s: StageRow): V.StageSettings {
+  let config = JSON.parse(s.config_json) as V.StageConfig;
+  if (s.type === 'league') {
+    // T1a stored weeks; plan T2 counts matches (owner, 2026-10-05).
+    const c = config as Partial<V.StageConfigs['league']> & { weeks?: number };
+    config = {
+      matches: c.matches ?? (c.weeks !== undefined ? c.weeks * (c.matchesPerWeek ?? 1) : 16), matchesPerWeek: c.matchesPerWeek ?? 1,
+      pairing: c.pairing ?? 'swiss', seasonStart: c.seasonStart ?? null,
+    };
+  }
+  return {
+    type: s.type, config, rulesetId: s.ruleset_id, gameConfig: s.game_config,
+    campaignPool: JSON.parse(s.campaign_pool_json) as string[], vetoType: s.veto_type, chapters: s.chapters,
+    scheduling: s.scheduling, advanceCount: s.advance_count,
+  };
+}
+```
+
 In `src/events/events.ts` `chainOf`, pass the type:
 
 ```ts
@@ -359,7 +456,7 @@ Expected: PASS. If an existing `events.test.ts` case builds an elimination stage
 - [ ] **Step 10: Commit**
 
 ```bash
-git add package.json package-lock.json src/db.ts src/events/validate.ts src/events/events.ts tests/eventsSchema.test.ts tests/eventsValidate.test.ts tests/events.test.ts
+git add package.json package-lock.json src/db.ts src/events/validate.ts src/events/events.ts src/events/format.ts tests/eventsSchema.test.ts tests/eventsValidate.test.ts tests/events.test.ts tests/eventFormat.test.ts
 git commit -m "Tournaments T2: brackets-manager, the event_matches table, stage bracket columns, result parsing, elimination-last and even group advance rules"
 ```
 
@@ -545,17 +642,24 @@ git commit -m "Tournaments T2: standings for Swiss, league and round robin with 
 
 ---
 
-### Task 3: Swiss pairing and the round robin circle
+### Task 3: Swiss pairing, the round robin circle and the league season
 
 **Files:**
-- Create: `src/events/swiss.ts`, `src/events/roundRobin.ts`
-- Test: `tests/swiss.test.ts`, `tests/roundRobin.test.ts`
+- Create: `src/events/swiss.ts`, `src/events/roundRobin.ts`, `src/events/league.ts`
+- Test: `tests/swiss.test.ts`, `tests/roundRobin.test.ts`, `tests/league.test.ts`
 
 **Interfaces:**
 - Consumes: `standings`, `TableResult` from Task 2.
 - Produces:
   - `swiss.ts`: `interface Pairing { pairs: [number, number][]; bye: number | null }`; `pairSwiss(entries: { id: number; seed: number }[], results: TableResult[], rounds: number): Pairing`. `entries` are the entries still in (never out ones); `results` are this stage's results so far; the first id of a pair is the higher ranked.
   - `roundRobin.ts`: `circleRounds(ids: number[]): Pairing[]`, giving `n - 1` rounds for even `n` and `n` rounds for odd `n` (one bye each), every pair meeting once.
+  - `league.ts` (pure, also imported by the web stage editor in Task 11, so it imports nothing but `./roundRobin.js` and `./swiss.js` types):
+    - `repeatedRoundRobin(ids: number[], rounds: number): Pairing[]`: full round robins back to back, sides swapped every other cycle, cut at `rounds`
+    - `leagueWeeks(matches: number, perWeek: number): number`
+    - `weekOfRound(round: number, perWeek: number): number`
+    - `weekDates(seasonStart: string, week: number): { from: string; to: string }` (`YYYY-MM-DD`, 7 days, inclusive)
+    - `perWeekFor(matches: number, from: string, to: string): number | null`: the fewest matches a week that fit between the two days (inclusive), or null when more than 3 would be needed or `to` is before `from`
+    - `byeSpread(matches: number, teams: number): { min: number; max: number; even: number[] } | null`: byes per team for an odd team count (null for even), and the nearest match counts at or around `matches` that give everyone the same number of byes
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -679,9 +783,63 @@ describe('circleRounds', () => {
 });
 ```
 
+Create `tests/league.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { byeSpread, leagueWeeks, perWeekFor, repeatedRoundRobin, weekDates, weekOfRound } from '../src/events/league.js';
+
+describe('league season', () => {
+  it('repeats the round robin, swapping sides, until the rounds are used', () => {
+    const ids = [1, 2, 3, 4];
+    const rounds = repeatedRoundRobin(ids, 7);
+    expect(rounds).toHaveLength(7);
+    const meetings = new Map<string, number>();
+    for (const r of rounds) for (const [a, b] of r.pairs) {
+      const k = a < b ? `${a}:${b}` : `${b}:${a}`;
+      meetings.set(k, (meetings.get(k) ?? 0) + 1);
+    }
+    // 7 rounds of 4 teams = two full cycles (6 rounds) plus one: every pair twice, two pairs three times.
+    expect([...meetings.values()].sort()).toEqual([2, 2, 2, 2, 3, 3]);
+    // Cycle 2 plays cycle 1's first round with sides swapped.
+    expect(rounds[3]!.pairs).toEqual(rounds[0]!.pairs.map(([a, b]) => [b, a]));
+  });
+
+  it('gives each team of an odd field one bye per cycle', () => {
+    const rounds = repeatedRoundRobin([1, 2, 3, 4, 5], 10);
+    const byes = new Map<number, number>();
+    for (const r of rounds) byes.set(r.bye!, (byes.get(r.bye!) ?? 0) + 1);
+    expect([...byes.values()]).toEqual([2, 2, 2, 2, 2]);
+  });
+
+  it('weeks, the week of a round and its dates', () => {
+    expect(leagueWeeks(16, 2)).toBe(8);
+    expect(leagueWeeks(16, 3)).toBe(6);
+    expect([1, 2, 3, 4, 5].map((r) => weekOfRound(r, 2))).toEqual([1, 1, 2, 2, 3]);
+    expect(weekDates('2026-10-12', 1)).toEqual({ from: '2026-10-12', to: '2026-10-18' });
+    expect(weekDates('2026-10-12', 8)).toEqual({ from: '2026-11-30', to: '2026-12-06' });
+  });
+
+  it('works out matches a week from two dates', () => {
+    // Oct 12 to Nov 29 inclusive is exactly 7 weeks: 16 matches need 3 a week.
+    expect(perWeekFor(16, '2026-10-12', '2026-11-29')).toBe(3);
+    expect(perWeekFor(16, '2026-10-12', '2026-12-06')).toBe(2);
+    expect(perWeekFor(16, '2026-10-12', '2026-10-25')).toBeNull();
+    expect(perWeekFor(16, '2026-10-12', '2026-10-01')).toBeNull();
+  });
+
+  it('says how byes fall for an odd field and which counts split them evenly', () => {
+    expect(byeSpread(16, 8)).toBeNull();
+    expect(byeSpread(16, 7)).toEqual({ min: 2, max: 3, even: [14, 21] });
+    expect(byeSpread(14, 7)).toEqual({ min: 2, max: 2, even: [14] });
+    expect(byeSpread(3, 5)).toEqual({ min: 0, max: 1, even: [5] });
+  });
+});
+```
+
 - [ ] **Step 2: Run them to make sure they fail**
 
-Run: `npx vitest run tests/swiss.test.ts tests/roundRobin.test.ts`
+Run: `npx vitest run tests/swiss.test.ts tests/roundRobin.test.ts tests/league.test.ts`
 Expected: FAIL (modules not found).
 
 - [ ] **Step 3: Implement**
@@ -794,16 +952,81 @@ export function circleRounds(ids: number[]): Pairing[] {
 
 Note: `seats[i]!` keeps `null` (the `!` only drops `undefined` for the compiler). If the compiler objects, type the reads as `const x = seats[i] as number | null;`.
 
+Create `src/events/league.ts`:
+
+```ts
+import { circleRounds } from './roundRobin.js';
+import type { Pairing } from './swiss.js';
+
+/**
+ * A league season (plan T2 Rulings 7, 18 to 20; owner 2026-10-05): a number
+ * of rounds, one result per team per round, played some a week from a start
+ * day. Pure, and imported by the web stage editor's season calculator, so it
+ * must not import anything that reaches the database or node.
+ */
+
+/** Mirrors src/events/validate.ts LEAGUE_MATCHES_MAX (not imported: the web
+ *  bundle must not pull in the validator). */
+const MATCHES_MAX = 40;
+const DAY = 86_400_000;
+
+/** Full round robins back to back, every other one with sides swapped, cut
+ *  at `rounds`. An odd field sits each team out once per cycle. */
+export function repeatedRoundRobin(ids: number[], rounds: number): Pairing[] {
+  const cycle = circleRounds(ids);
+  const out: Pairing[] = [];
+  for (let c = 0; out.length < rounds && cycle.length > 0; c++) {
+    for (const r of cycle) {
+      if (out.length >= rounds) break;
+      out.push(c % 2 === 0 ? r : { pairs: r.pairs.map(([a, b]): [number, number] => [b, a]), bye: r.bye });
+    }
+  }
+  return out;
+}
+
+export const leagueWeeks = (matches: number, perWeek: number): number => Math.ceil(matches / perWeek);
+export const weekOfRound = (round: number, perWeek: number): number => Math.floor((round - 1) / perWeek) + 1;
+
+const day = (iso: string): number => Date.parse(`${iso}T00:00:00.000Z`);
+const ymd = (t: number): string => new Date(t).toISOString().slice(0, 10);
+
+/** Week N runs 7 days from seasonStart + 7 x (N - 1), both ends inclusive. */
+export function weekDates(seasonStart: string, week: number): { from: string; to: string } {
+  const from = day(seasonStart) + 7 * (week - 1) * DAY;
+  return { from: ymd(from), to: ymd(from + 6 * DAY) };
+}
+
+/** The fewest matches a week that fit `matches` into the full weeks from
+ *  `from` to `to` (both inclusive), or null past 3 a week. */
+export function perWeekFor(matches: number, from: string, to: string): number | null {
+  const weeks = Math.floor((day(to) - day(from) + DAY) / (7 * DAY));
+  if (weeks < 1) return null;
+  const per = Math.ceil(matches / weeks);
+  return per <= 3 ? per : null;
+}
+
+/** Byes per team over `matches` rounds with an odd field (each team sits
+ *  once per `teams` rounds), and the match counts nearest `matches` at
+ *  which everyone gets the same number. Null for an even field. */
+export function byeSpread(matches: number, teams: number): { min: number; max: number; even: number[] } | null {
+  if (teams % 2 === 0) return null;
+  const min = Math.floor(matches / teams);
+  const max = Math.ceil(matches / teams);
+  const even = [...new Set([min * teams, max * teams])].filter((n) => n >= 1 && n <= MATCHES_MAX);
+  return { min, max, even };
+}
+```
+
 - [ ] **Step 4: Run the tests**
 
-Run: `npx vitest run tests/swiss.test.ts tests/roundRobin.test.ts`
+Run: `npx vitest run tests/swiss.test.ts tests/roundRobin.test.ts tests/league.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/events/swiss.ts src/events/roundRobin.ts tests/swiss.test.ts tests/roundRobin.test.ts
-git commit -m "Tournaments T2: Swiss pairing with bye rotation and rematch avoidance, and the round robin circle"
+git add src/events/swiss.ts src/events/roundRobin.ts src/events/league.ts tests/swiss.test.ts tests/roundRobin.test.ts tests/league.test.ts
+git commit -m "Tournaments T2: Swiss pairing with bye rotation and rematch avoidance, the round robin circle, and the league season (repeating round robin, weeks, dates, byes)"
 ```
 
 ---
@@ -1117,7 +1340,7 @@ git commit -m "Tournaments T2: brackets-manager wrapper over the in-memory store
   - `interface StagePlan { stageId: number; entrants: number[]; bracket: BracketData | null; rounds: NewRound[] }`
   - `interface StageOutcome { ranks: { entryId: number; rank: number }[]; advance: number[] }`
   - `RESOLVED: ReadonlySet<MatchStatus>` (`done`, `forfeit`, `bye`)
-  - reads: `getMatch(db, id)`, `matchesOf(db, stageId)`, `stageEntrants(stage): number[]`, `stageBracket(stage): BracketData | null`, `activeSeeded(db, eventId): number[]`, `totalRounds(stage): number | null` (Swiss: `rounds`; league with Swiss pairing: `weeks * matchesPerWeek`; otherwise null)
+  - reads: `getMatch(db, id)`, `matchesOf(db, stageId)`, `stageEntrants(stage): number[]`, `stageBracket(stage): BracketData | null`, `activeSeeded(db, eventId): number[]`, `totalRounds(stage): number | null` (Swiss: `rounds`; league with Swiss pairing: `matches`; otherwise null, because those stages write every match at the start)
   - mutations (each returns `V.Checked<...>`, one transaction, one `event_log` row):
     - `startEvent(db, { eventId, by: string | null, plan: StagePlan, now?: Date }): Checked<E.EventRow>`, logging `event_started`
     - `recordResult(db, { matchId, by: string | null, result: ResultInput, bracket: { data: BracketData; baseRev: number } | null, now?: Date }): Checked<MatchRow>`, logging `result_recorded`
@@ -1163,8 +1386,8 @@ export const SWISS = (rounds: number, advanceCount: number | null) => ({ type: '
 export const SE = (thirdPlace = false) => ({ type: 'single_elim', config: { thirdPlace }, advanceCount: null });
 export const DE = (grandFinalReset = true) => ({ type: 'double_elim', config: { grandFinalReset }, advanceCount: null });
 export const RR = (groups: number, advanceCount: number | null) => ({ type: 'round_robin', config: { groups }, advanceCount });
-export const LEAGUE = (weeks: number, matchesPerWeek: number, pairing: 'swiss' | 'round_robin', advanceCount: number | null) =>
-  ({ type: 'league', config: { weeks, matchesPerWeek, pairing }, scheduling: 'window', advanceCount });
+export const LEAGUE = (matches: number, matchesPerWeek: number, pairing: 'swiss' | 'round_robin', advanceCount: number | null, seasonStart: string | null = null) =>
+  ({ type: 'league', config: { matches, matchesPerWeek, pairing, seasonStart }, scheduling: 'window', advanceCount });
 ```
 
 - [ ] **Step 2: Write the failing writer tests**
@@ -1364,7 +1587,7 @@ export function totalRounds(stage: E.StageRow): number | null {
   if (s.type === 'swiss') return (s.config as V.StageConfigs['swiss']).rounds;
   if (s.type === 'league') {
     const c = s.config as V.StageConfigs['league'];
-    return c.pairing === 'swiss' ? c.weeks * c.matchesPerWeek : null;
+    return c.pairing === 'swiss' ? c.matches : null;
   }
   return null;
 }
@@ -1741,14 +1964,28 @@ describe('event flow', () => {
     expect(new Set(carried.slice(0, 2).map((id) => groupOf.get(id)!.group)).size).toBe(2);
   });
 
-  it('a round robin league with too few weeks is refused at the start', async () => {
-    const f = playFixture({ stages: [LEAGUE(2, 1, 'round_robin', null)], entries: 4 });
-    expect(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW })).toEqual({ ok: false, error: 'league_too_short' });
-    expect(E.getEvent(f.db, f.eventId)!.status).toBe('checkin');
+  it('a round robin league of 5 teams plays its full match count: every round written at the start, byes as wins, every team on 7 results', async () => {
+    const f = playFixture({ stages: [LEAGUE(7, 2, 'round_robin', null)], entries: 5 });
+    ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
+    const s = E.stagesOf(f.db, f.eventId)[0]!;
+    expect(new Set(P.matchesOf(f.db, s.id).map((m) => m.round)).size).toBe(7);
+    await playOut(f);
+    expect(E.getEvent(f.db, f.eventId)!.status).toBe('finished');
+    const table = F.stageTable(f.db, E.getStage(f.db, s.id)!);
+    expect(table.every((r) => r.played + r.byes === 7)).toBe(true);
+    expect(table.map((r) => r.byes).sort()).toEqual([1, 1, 1, 2, 2]);
   });
 
-  it('a Swiss-paired league plays weeks x matches a week rounds', async () => {
-    const f = playFixture({ stages: [LEAGUE(2, 2, 'swiss', null)], entries: 6 });
+  it('a 4-team round robin league of 7 matches meets every pair twice and two pairs a third time', async () => {
+    const f = playFixture({ stages: [LEAGUE(7, 1, 'round_robin', null)], entries: 4 });
+    ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
+    const ms = P.matchesOf(f.db, E.stagesOf(f.db, f.eventId)[0]!.id);
+    expect(ms).toHaveLength(14);
+    expect(ms.every((m) => m.status === 'waiting')).toBe(true);
+  });
+
+  it('a Swiss-paired league plays its match count in rounds', async () => {
+    const f = playFixture({ stages: [LEAGUE(4, 2, 'swiss', null)], entries: 6 });
     ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
     await playOut(f);
     const s = E.stagesOf(f.db, f.eventId)[0]!;
@@ -1853,7 +2090,7 @@ import { BracketError, bracketComplete, bracketGroups, bracketRanks, createBrack
 import * as E from './events.js';
 import * as N from './entries.js';
 import * as P from './play.js';
-import { circleRounds } from './roundRobin.js';
+import { repeatedRoundRobin } from './league.js';
 import { standings, type StandingRow, type TableResult } from './standings.js';
 import { pairSwiss } from './swiss.js';
 import * as V from './validate.js';
@@ -1899,9 +2136,7 @@ export async function planStage(stage: E.StageRow, entrants: number[]): Promise<
     return V.ok({ stageId: stage.id, entrants, bracket: await createBracket(s.type, s.config as V.StageConfigs[BracketType], entrants), rounds: [] });
   }
   if (s.type === 'league' && (s.config as V.StageConfigs['league']).pairing === 'round_robin') {
-    const c = s.config as V.StageConfigs['league'];
-    const rounds = circleRounds(entrants);
-    if (rounds.length > c.weeks * c.matchesPerWeek) return V.fail('league_too_short');
+    const rounds = repeatedRoundRobin(entrants, (s.config as V.StageConfigs['league']).matches);
     return V.ok({ stageId: stage.id, entrants, bracket: null, rounds: rounds.map((r, i) => ({ round: i + 1, ...r })) });
   }
   const seeds = entrants.map((id, i) => ({ id, seed: i + 1 }));
@@ -2241,7 +2476,7 @@ export interface PlayMatch {
   id: number; group: number; round: number; slot: number; a: PlayEntry | null; b: PlayEntry | null; status: string;
   winner: 'a' | 'b' | null; scoreA: number | null; scoreB: number | null; forfeit: boolean; bye: boolean;
 }
-export interface PlayRound { group: number; round: number; label: string; matches: PlayMatch[] }
+export interface PlayRound { group: number; round: number; label: string; dates: { from: string; to: string } | null; matches: PlayMatch[] }
 export interface PlayStanding {
   entry: PlayEntry; group: number; rank: number; groupRank: number; played: number; wins: number; losses: number;
   points: number; buchholz: number; scoreDiff: number;
@@ -2273,8 +2508,8 @@ describe('round and group labels (plan T2)', () => {
   it('names table rounds and league weeks', () => {
     expect(roundLabel('swiss', { rounds: 4 }, 1, 2, 4)).toBe('Round 2');
     expect(roundLabel('round_robin', { groups: 2 }, 2, 3, 3)).toBe('Round 3');
-    expect(roundLabel('league', { weeks: 4, matchesPerWeek: 1, pairing: 'swiss' }, 1, 3, 4)).toBe('Week 3');
-    expect(roundLabel('league', { weeks: 4, matchesPerWeek: 2, pairing: 'swiss' }, 1, 3, 8)).toBe('Week 2, match 1');
+    expect(roundLabel('league', { matches: 4, matchesPerWeek: 1, pairing: 'swiss', seasonStart: null }, 1, 3, 4)).toBe('Week 3');
+    expect(roundLabel('league', { matches: 8, matchesPerWeek: 2, pairing: 'swiss', seasonStart: null }, 1, 3, 8)).toBe('Week 2, match 1');
   });
   it('names groups', () => {
     expect(groupLabel('round_robin', 1)).toBe('Group A');
@@ -2335,6 +2570,7 @@ import * as N from './entries.js';
 import * as P from './play.js';
 import { stageTable } from './flow.js';
 import { groupLabel, roundLabel } from './format.js';
+import { weekDates, weekOfRound } from './league.js';
 import type * as V from './validate.js';
 
 /** Brackets, standings and rounds of the stages that have started (plan T2),
@@ -2345,7 +2581,9 @@ export interface PlayMatch {
   id: number; group: number; round: number; slot: number; a: PlayEntry | null; b: PlayEntry | null; status: string;
   winner: 'a' | 'b' | null; scoreA: number | null; scoreB: number | null; forfeit: boolean; bye: boolean;
 }
-export interface PlayRound { group: number; round: number; label: string; matches: PlayMatch[] }
+/** dates: a league round's week, first and last day (YYYY-MM-DD); null for
+ *  every other stage type. */
+export interface PlayRound { group: number; round: number; label: string; dates: { from: string; to: string } | null; matches: PlayMatch[] }
 export interface PlayStanding {
   entry: PlayEntry; group: number; rank: number; groupRank: number; played: number; wins: number; losses: number;
   points: number; buchholz: number; scoreDiff: number;
@@ -2364,13 +2602,17 @@ export function stagePlayViews(db: DB, ev: E.EventRow): StagePlayView[] {
     const st = E.stageSettingsOf(s);
     const elim = st.type === 'single_elim' || st.type === 'double_elim';
     const ms = P.matchesOf(db, s.id);
+    // Ruling 19: week 1 starts on the season start, or the day the stage started.
+    const league = st.type === 'league' ? st.config as V.StageConfigs['league'] : null;
+    const seasonStart = league ? league.seasonStart ?? (s.started_at ?? ev.starts_at).slice(0, 10) : null;
+    const leagueDates = (round: number) => (league && seasonStart ? weekDates(seasonStart, weekOfRound(round, league.matchesPerWeek)) : null);
     const last = new Map<number, number>();
     for (const m of ms) last.set(m.grp, Math.max(last.get(m.grp) ?? 0, m.round));
     const rounds: PlayRound[] = [];
     for (const m of ms) {
       let r = rounds.find((x) => x.group === m.grp && x.round === m.round);
       if (!r) {
-        r = { group: m.grp, round: m.round, label: roundLabel(st.type, st.config, m.grp, m.round, last.get(m.grp)!), matches: [] };
+        r = { group: m.grp, round: m.round, label: roundLabel(st.type, st.config, m.grp, m.round, last.get(m.grp)!), dates: leagueDates(m.round), matches: [] };
         rounds.push(r);
       }
       const resolved = P.RESOLVED.has(m.status);
@@ -2415,7 +2657,9 @@ import { authedCookie, stubOrchestrator } from './helpers.js';
 import * as E from '../src/events/events.js';
 import * as P from '../src/events/play.js';
 import { ADMIN } from './eventFixture.js';
-import { SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
+import { startEventFlow } from '../src/events/flow.js';
+import { stagePlayViews } from '../src/events/playViews.js';
+import { LEAGUE, SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
 
 const MOD = '76561199000000830';
 let f: PlayFixture;
@@ -2483,6 +2727,17 @@ describe('event play routes', () => {
     const r = await post(`/api/admin/events/${f.eventId}/entries/${m.entry_a}/disqualify`, ADMIN, { reason: 'left' });
     expect(r.statusCode).toBe(200);
     expect(P.getMatch(f.db, m.id)).toMatchObject({ status: 'forfeit', winner_entry: m.entry_b });
+  });
+
+  it('a league round carries its week\'s dates from the season start', async () => {
+    const g = playFixture({ stages: [LEAGUE(4, 2, 'round_robin', null, '2026-10-12')], entries: 4 });
+    const r = await startEventFlow(g.db, { eventId: g.eventId, by: ADMIN });
+    expect(r.ok).toBe(true);
+    const rounds = stagePlayViews(g.db, E.getEvent(g.db, g.eventId)!)[0]!.rounds;
+    expect(rounds.map((x) => [x.label, x.dates])).toEqual([
+      ['Week 1, match 1', { from: '2026-10-12', to: '2026-10-18' }], ['Week 1, match 2', { from: '2026-10-12', to: '2026-10-18' }],
+      ['Week 2, match 1', { from: '2026-10-19', to: '2026-10-25' }], ['Week 2, match 2', { from: '2026-10-19', to: '2026-10-25' }],
+    ]);
   });
 
   it('the public page is a 404 while the switch is closed to the viewer, as before', async () => {
@@ -2616,8 +2871,8 @@ describe('StagePlay', () => {
     const stage: StagePlayView = {
       ordinal: 2, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null,
       rounds: [
-        { group: 1, round: 1, label: 'Semifinals', matches: [match({ status: 'done', winner: 'a', scoreA: 1200, scoreB: 900 }), match({ id: 2, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'forfeit', winner: 'b', forfeit: true })] },
-        { group: 1, round: 2, label: 'Final', matches: [match({ id: 3, a: team(1, 'Rats'), b: null, status: 'pending' })] },
+        { group: 1, round: 1, label: 'Semifinals', dates: null, matches: [match({ status: 'done', winner: 'a', scoreA: 1200, scoreB: 900 }), match({ id: 2, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'forfeit', winner: 'b', forfeit: true })] },
+        { group: 1, round: 2, label: 'Final', dates: null, matches: [match({ id: 3, a: team(1, 'Rats'), b: null, status: 'pending' })] },
       ],
     };
     render(<StagePlay stage={stage} />);
@@ -2639,7 +2894,7 @@ describe('StagePlay', () => {
         { entry: team(3, 'Cats'), group: 1, rank: 2, groupRank: 2, played: 0, wins: 1, losses: 0, points: 1, buchholz: 0, scoreDiff: 0 },
         { entry: team(2, 'Bats', true), group: 1, rank: 3, groupRank: 3, played: 1, wins: 0, losses: 1, points: 0, buchholz: 1, scoreDiff: -300 },
       ],
-      rounds: [{ group: 1, round: 1, label: 'Round 1', matches: [
+      rounds: [{ group: 1, round: 1, label: 'Round 1', dates: null, matches: [
         match({ status: 'done', winner: 'a', scoreA: 1200, scoreB: 900 }),
         match({ id: 2, slot: 2, a: team(3, 'Cats'), b: null, status: 'bye', winner: 'a', bye: true }),
       ] }],
@@ -2652,6 +2907,14 @@ describe('StagePlay', () => {
     expect(screen.getByText('Top 2 advance')).toBeTruthy();
     expect(screen.getByText('Bye')).toBeTruthy();
     expect(screen.getByText('Round 1')).toBeTruthy();
+  });
+
+  it('shows a league round\'s week dates next to its label', () => {
+    render(<StagePlay stage={{
+      ordinal: 1, type: 'league', status: 'live', layout: 'table', advanceCount: null, standings: [], groups: [{ number: 1, label: 'Rounds' }],
+      rounds: [{ group: 1, round: 3, label: 'Week 3', dates: { from: '2026-10-26', to: '2026-11-01' }, matches: [] }],
+    }} />);
+    expect(screen.getByText('Week 3 · Oct 26 to Nov 1')).toBeTruthy();
   });
 
   it('shows one table per round robin group', () => {
@@ -2685,7 +2948,7 @@ export interface PlayMatch {
   id: number; group: number; round: number; slot: number; a: PlayEntry | null; b: PlayEntry | null; status: string;
   winner: 'a' | 'b' | null; scoreA: number | null; scoreB: number | null; forfeit: boolean; bye: boolean;
 }
-export interface PlayRound { group: number; round: number; label: string; matches: PlayMatch[] }
+export interface PlayRound { group: number; round: number; label: string; dates: { from: string; to: string } | null; matches: PlayMatch[] }
 export interface PlayStanding {
   entry: PlayEntry; group: number; rank: number; groupRank: number; played: number; wins: number; losses: number;
   points: number; buchholz: number; scoreDiff: number;
@@ -2701,6 +2964,13 @@ Add `placement: number | null` to `EventEntryView`, and `play: StagePlayView[];`
 In `web/src/eventFormat.ts`:
 
 ```ts
+/** "Oct 26 to Nov 1" for a league week. The days are calendar days, so they
+ *  are read and shown in UTC and never shift with the viewer's time zone. */
+export function weekRangeText(from: string, to: string): string {
+  const f = (d: string) => new Date(`${d}T00:00:00.000Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  return `${f(from)} to ${f(to)}`;
+}
+
 /** 1st, 2nd, 3rd, 4th ... 11th, 12th, 13th, 21st. */
 export function placementText(n: number): string {
   const teen = n % 100 >= 11 && n % 100 <= 13;
@@ -2764,6 +3034,7 @@ Create `web/src/routes/event/StagePlay.tsx`:
 ```tsx
 import type { PlayStanding, StagePlayView } from '../../api';
 import { Panel } from '../../components/bits';
+import { weekRangeText } from '../../eventFormat';
 import { Bracket, MatchCard } from './Bracket';
 
 const signed = (n: number) => (n > 0 ? `+${n}` : String(n));
@@ -2815,7 +3086,9 @@ export function StagePlay({ stage }: { stage: StagePlayView }) {
           ))}
           {stage.rounds.slice().reverse().map((r) => (
             <section key={`${r.group}-${r.round}`} class="playround">
-              <span class="eyebrow">{stage.groups.length > 1 ? `${stage.groups.find((g) => g.number === r.group)?.label}, ` : ''}{r.label}</span>
+              <span class="eyebrow">
+                {`${stage.groups.length > 1 ? `${stage.groups.find((g) => g.number === r.group)?.label}, ` : ''}${r.label}${r.dates ? ` · ${weekRangeText(r.dates.from, r.dates.to)}` : ''}`}
+              </span>
               <div class="playround__matches">{r.matches.map((m) => <MatchCard key={m.id} m={m} />)}</div>
             </section>
           ))}
@@ -2855,7 +3128,7 @@ Add an Event test case to `web/src/routes/Event.test.tsx`:
       status: 'finished',
       entries: [{ id: 1, name: 'Rats', tag: 'RAT', logoKey: null, seed: 1, status: 'placed', waitlist: null, placement: 1 }],
       play: [{ ordinal: 1, type: 'single_elim', status: 'finished', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null,
-        rounds: [{ group: 1, round: 1, label: 'Final', matches: [] }] }],
+        rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [] }] }],
     }));
     render(<EventPage slug="riverside-cup" session={session} />);
     expect(await screen.findByText(/Stage 1: bracket/)).toBeTruthy();
@@ -2939,7 +3212,7 @@ const m = (over: Partial<PlayMatch> = {}): PlayMatch => ({
 const play = (over: Partial<AdminEventPlay> = {}): AdminEventPlay => ({
   status: 'live', lockedAt: 'x', startsAt: '2026-10-10T20:00:00.000Z', seeded: 2, ...over,
   stages: over.stages ?? [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null,
-    rounds: [{ group: 1, round: 1, label: 'Final', matches: [m()] }] }],
+    rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [m()] }] }],
 });
 
 describe('PlayPanel', () => {
@@ -2971,7 +3244,7 @@ describe('PlayPanel', () => {
 
   it('records a forfeit without scores, and offers Correct on a finished match', async () => {
     mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'swiss', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null,
-      rounds: [{ group: 1, round: 1, label: 'Round 1', matches: [m(), m({ id: 8, slot: 2, status: 'done', winner: 'b', scoreA: 1, scoreB: 2 })] }] }] }));
+      rounds: [{ group: 1, round: 1, label: 'Round 1', dates: null, matches: [m(), m({ id: 8, slot: 2, status: 'done', winner: 'b', scoreA: 1, scoreB: 2 })] }] }] }));
     mockAdmin.recordEventResult.mockResolvedValue({});
     render(<PlayPanel eventId={9} canEdit />);
     const forfeit = (await screen.findAllByLabelText('Forfeit'))[0]!;
@@ -3147,7 +3420,230 @@ git commit -m "Tournaments T2: the desk's Play section, start the event, enter, 
 
 ---
 
-### Task 11: Whole-branch check
+### Task 11: League settings and the season calculator in the stage editor
+
+**Files:**
+- Modify: `web/src/api.ts` (`StageConfigs['league']`), `web/src/routes/admin/events/stageDraft.ts`, `web/src/routes/admin/events/StageForm.tsx`, `web/src/routes/admin/events/EventEditor.tsx`
+- Create: `web/src/routes/admin/events/SeasonCalc.tsx`, `web/src/routes/admin/events/SeasonCalc.test.tsx`
+- Test: `web/src/routes/admin/events/StageForm.test.tsx`
+
+**Interfaces:**
+- Consumes: `leagueWeeks`, `weekDates`, `perWeekFor`, `byeSpread` from `src/events/league.ts` (Task 3), imported as `../../../../../src/events/league` like `web/src/api.ts` already imports from `../../src/...`.
+- Produces:
+  - `api.ts`: `StageConfigs['league'] = { matches: number; matchesPerWeek: number; pairing: 'swiss' | 'round_robin'; seasonStart: string | null }`
+  - `StageDraft` replaces `weeks` with `matches: number` and adds `seasonStart: string | null`
+  - `StageForm` takes a new optional prop `teamCap?: number | null`
+  - `SeasonCalc({ matches, perWeek, seasonStart, teamCap, onUsePerWeek })`: `matches`, `perWeek` are numbers or null while the typed value is not a whole number; `onUsePerWeek(n: number)` sets the form's matches a week.
+
+- [ ] **Step 1: Write the failing calculator tests**
+
+Create `web/src/routes/admin/events/SeasonCalc.test.tsx`:
+
+```tsx
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/preact';
+import { SeasonCalc } from './SeasonCalc';
+
+afterEach(cleanup);
+
+describe('SeasonCalc', () => {
+  it('turns matches and matches a week into weeks, and with a start date into an end date', () => {
+    render(<SeasonCalc matches={16} perWeek={2} seasonStart="2026-10-12" teamCap={8} onUsePerWeek={() => {}} />);
+    expect(screen.getByText('16 matches at 2 a week: 8 weeks, Oct 12 to Dec 6.')).toBeTruthy();
+  });
+
+  it('without a start date says the season starts with the stage', () => {
+    render(<SeasonCalc matches={16} perWeek={3} seasonStart={null} teamCap={null} onUsePerWeek={() => {}} />);
+    expect(screen.getByText('16 matches at 3 a week: 6 weeks from the day the stage starts.')).toBeTruthy();
+  });
+
+  it('from an end date, offers the matches a week that fit, or says nothing fits', () => {
+    const use = vi.fn();
+    render(<SeasonCalc matches={16} perWeek={1} seasonStart="2026-10-12" teamCap={8} onUsePerWeek={use} />);
+    fireEvent.input(screen.getByLabelText('Season ends by'), { target: { value: '2026-11-29' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Use 3 a week' }));
+    expect(use).toHaveBeenCalledWith(3);
+    fireEvent.input(screen.getByLabelText('Season ends by'), { target: { value: '2026-10-25' } });
+    expect(screen.getByText('16 matches do not fit by then, even at 3 a week.')).toBeTruthy();
+  });
+
+  it('with an odd team count says how byes fall and which counts split them evenly', () => {
+    render(<SeasonCalc matches={16} perWeek={2} seasonStart={null} teamCap={8} onUsePerWeek={() => {}} />);
+    fireEvent.input(screen.getByLabelText('Expected teams'), { target: { value: '7' } });
+    expect(screen.getByText('With 7 teams each team gets 2 or 3 byes (a bye is a win). 14 or 21 matches gives everyone the same.')).toBeTruthy();
+    fireEvent.input(screen.getByLabelText('Expected teams'), { target: { value: '8' } });
+    expect(screen.queryByText(/byes/)).toBeNull();
+  });
+
+  it('says nothing while matches or matches a week is not a whole number', () => {
+    const { container } = render(<SeasonCalc matches={null} perWeek={2} seasonStart={null} teamCap={8} onUsePerWeek={() => {}} />);
+    expect(container.querySelector('.seasoncalc__line')).toBeNull();
+  });
+});
+```
+
+Add to `web/src/routes/admin/events/StageForm.test.tsx`:
+
+```tsx
+describe('StageForm league', () => {
+  it('saves matches, matches a week, pairing and the season start', () => {
+    const onSave = vi.fn();
+    render(<StageForm options={OPTIONS} initial={null} busy={false} onSave={onSave} onCancel={() => {}} teamCap={8} />);
+    fireEvent.change(screen.getByLabelText('Stage type'), { target: { value: 'league' } });
+    fireEvent.input(screen.getByLabelText('Matches per team'), { target: { value: '14' } });
+    fireEvent.input(screen.getByLabelText('Matches a week'), { target: { value: '2' } });
+    fireEvent.input(screen.getByLabelText('Season start'), { target: { value: '2026-10-12' } });
+    expect(screen.getByText('14 matches at 2 a week: 7 weeks, Oct 12 to Nov 29.')).toBeTruthy();
+    fireEvent.submit(screen.getByLabelText('Matches per team').closest('form')!);
+    expect(onSave.mock.calls[0]![0].config).toEqual({ matches: 14, matchesPerWeek: 2, pairing: 'swiss', seasonStart: '2026-10-12' });
+  });
+});
+```
+
+(Add `vi` to that file's vitest import. If the type select's accessible name is not `Stage type`, use the label the form already gives it; do not rename it.)
+
+- [ ] **Step 2: Run them to make sure they fail**
+
+Run: `npx vitest run web/src/routes/admin/events/SeasonCalc.test.tsx web/src/routes/admin/events/StageForm.test.tsx`
+Expected: FAIL.
+
+- [ ] **Step 3: Implement**
+
+In `web/src/api.ts`, change the league line of `StageConfigs`:
+
+```ts
+  league: { matches: number; matchesPerWeek: number; pairing: 'swiss' | 'round_robin'; seasonStart: string | null };
+```
+
+In `stageDraft.ts`: in `StageDraft`, replace `weeks: number;` with `matches: number; seasonStart: string | null;`. In `draftFrom`, replace `weeks: c.weeks ?? 6,` with `matches: c.matches ?? 16, seasonStart: c.seasonStart ?? null,`. In `configOf`:
+
+```ts
+    case 'league': return { matches: d.matches, matchesPerWeek: d.matchesPerWeek, pairing: d.pairing, seasonStart: d.seasonStart };
+```
+
+Create `web/src/routes/admin/events/SeasonCalc.tsx`:
+
+```tsx
+import { useState } from 'preact/hooks';
+import { byeSpread, leagueWeeks, perWeekFor, weekDates } from '../../../../../src/events/league';
+import { weekRangeText } from '../../../eventFormat';
+
+/**
+ * The season calculator under a league stage's settings (plan T2 Ruling 20).
+ * It only reads the form's values and suggests; it stores nothing. The
+ * expected team count and the end date are its own inputs, used for the
+ * bye line and the matches-a-week suggestion.
+ */
+export function SeasonCalc({ matches, perWeek, seasonStart, teamCap, onUsePerWeek }: {
+  matches: number | null; perWeek: number | null; seasonStart: string | null; teamCap: number | null | undefined;
+  onUsePerWeek: (n: number) => void;
+}) {
+  const [teams, setTeams] = useState(String(teamCap ?? 8));
+  const [endBy, setEndBy] = useState('');
+  if (matches === null || perWeek === null || matches < 1 || perWeek < 1) return null;
+  const weeks = leagueWeeks(matches, perWeek);
+  const span = seasonStart
+    ? `, ${weekRangeText(seasonStart, weekDates(seasonStart, weeks).to)}.`
+    : ' from the day the stage starts.';
+  const n = Number(teams);
+  const byes = Number.isInteger(n) && n >= 2 ? byeSpread(matches, n) : null;
+  const fit = seasonStart && /^\d{4}-\d{2}-\d{2}$/.test(endBy) ? perWeekFor(matches, seasonStart, endBy) : undefined;
+  return (
+    <div class="seasoncalc">
+      <p class="seasoncalc__line">{`${matches} matches at ${perWeek} a week: ${weeks} week${weeks === 1 ? '' : 's'}${span}`}</p>
+      <div class="inlinerow">
+        <label>Expected teams <input type="number" min={2} aria-label="Expected teams" value={teams} onInput={(e) => setTeams((e.target as HTMLInputElement).value)} /></label>
+        {seasonStart && (
+          <label>Season ends by <input type="date" aria-label="Season ends by" value={endBy} onInput={(e) => setEndBy((e.target as HTMLInputElement).value)} /></label>
+        )}
+      </div>
+      {byes && (
+        <p class="seasoncalc__line muted">
+          {`With ${n} teams each team gets ${byes.min === byes.max ? byes.min : `${byes.min} or ${byes.max}`} bye${byes.max === 1 ? '' : 's'} (a bye is a win).`}
+          {byes.min !== byes.max && byes.even.length > 0 ? ` ${byes.even.join(' or ')} matches gives everyone the same.` : ''}
+        </p>
+      )}
+      {fit === null && <p class="seasoncalc__line warning">{`${matches} matches do not fit by then, even at 3 a week.`}</p>}
+      {typeof fit === 'number' && fit !== perWeek && (
+        <button type="button" class="btn btn--ghost" onClick={() => onUsePerWeek(fit)}>{`Use ${fit} a week`}</button>
+      )}
+    </div>
+  );
+}
+```
+
+The bye test expects the two sentences as one text node. If `getByText` sees two nodes, build the whole sentence as one template string and render it once.
+
+In `StageForm.tsx`:
+- `NumKey`: replace `'weeks'` with `'matches'`; in `NUM_LABEL` replace `weeks: 'Weeks'` with `matches: 'Matches per team'`; in `typedOf` replace `weeks: String(d.weeks)` with `matches: String(d.matches)`; in `usedNums` replace `'weeks' as const` with `'matches' as const`.
+- Add the prop: `{ options, initial, busy, onSave, onCancel, teamCap }` with `teamCap?: number | null` in its type.
+- Replace the league block with:
+
+```tsx
+        {d.type === 'league' && (
+          <>
+            <FormRow label="Matches per team" help="(1 to 40; a bye counts as one)" for={id('matches')}>
+              <input id={id('matches')} aria-label="Matches per team" type="number" min={1} max={40} value={typed.matches} onInput={typeInto('matches')} />
+            </FormRow>
+            <FormRow label="Matches a week" help="(1 to 3)" for={id('mpw')}>
+              <input id={id('mpw')} aria-label="Matches a week" type="number" min={1} max={3} value={typed.matchesPerWeek} onInput={typeInto('matchesPerWeek')} />
+            </FormRow>
+            <FormRow label="Season start" help="Week 1 starts this day. Empty: the day the stage starts." for={id('season')}>
+              <input id={id('season')} aria-label="Season start" type="date" value={d.seasonStart ?? ''}
+                onInput={(e) => set({ seasonStart: val(e) === '' ? null : val(e) })} />
+            </FormRow>
+            <FormRow label="Pairing" for={id('pairing')}>
+              <select id={id('pairing')} aria-label="League pairing" value={d.pairing} onChange={(e) => set({ pairing: pick(e) as 'swiss' | 'round_robin' })}>
+                <option value="swiss">Swiss by record</option>
+                <option value="round_robin">Round robin, repeated until the season is played</option>
+              </select>
+            </FormRow>
+            <SeasonCalc
+              matches={wholeOrNull(typed.matches)} perWeek={wholeOrNull(typed.matchesPerWeek)} seasonStart={d.seasonStart} teamCap={teamCap}
+              onUsePerWeek={(n) => setTyped((x) => ({ ...x, matchesPerWeek: String(n) }))}
+            />
+          </>
+        )}
+```
+
+with, near `val`:
+
+```ts
+/** A typed field as a whole number for the live calculator, or null. */
+const wholeOrNull = (s: string): number | null => (/^\d+$/.test(s.trim()) ? Number(s) : null);
+```
+
+and `import { SeasonCalc } from './SeasonCalc';`.
+
+In `EventEditor.tsx`, pass `teamCap={ev.fields.teamCap}` to both `<StageForm ...>` uses.
+
+Append to `web/src/styles/app.css`:
+
+```css
+/* Plan T2: the league season calculator. */
+.seasoncalc { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 8px; }
+.seasoncalc input[type='number'] { width: 5em; }
+```
+
+- [ ] **Step 4: Run the tests, typecheck and build**
+
+Run: `npx vitest run web/src/routes/admin/events/ && npm run typecheck && npm run build`
+Expected: PASS. `npm run build` also proves the web bundle can take `src/events/league.ts` (it imports only `roundRobin.ts` and a type from `swiss.ts`). If vite pulls more than that in, stop and report; do not loosen the import.
+
+- [ ] **Step 5: Look at it at phone width**
+
+On the scratch dev server, open a league stage in the editor at 390 px. Type 16 matches, 2 a week and a start date, then try an end date and an odd team count. Check that the lines wrap and nothing scrolls sideways.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add web/src/api.ts web/src/routes/admin/events/stageDraft.ts web/src/routes/admin/events/StageForm.tsx web/src/routes/admin/events/StageForm.test.tsx web/src/routes/admin/events/SeasonCalc.tsx web/src/routes/admin/events/SeasonCalc.test.tsx web/src/routes/admin/events/EventEditor.tsx web/src/styles/app.css
+git commit -m "Tournaments T2: league stages set matches per team and a season start, with a season calculator for weeks, end date, matches a week and byes"
+```
+
+---
+
+### Task 12: Whole-branch check
 
 - [ ] **Step 1: Full suite, typecheck, build**
 
@@ -3181,6 +3677,6 @@ In the final report, list what of spec section 3 and Rollout item 2 is done, wha
 
 ## Self-review notes (for the reviewer of this plan)
 
-- Spec section 3 elimination and round robin: Task 4 (library), Task 5 (rows), Task 6 (flow). Swiss: Tasks 2, 3, 6. League: Tasks 3 (circle), 6 (both pairings), 8 (week labels). Standings tiebreakers: Task 2. Brackets-manager errors (spec Error handling) surface as `result_locked` / `match_not_open` refusals that write nothing (Task 6). The spec's "leave the match in confirming and alert staff" belongs to the automatic flow of plan 3.
+- Spec section 3 elimination and round robin: Task 4 (library), Task 5 (rows), Task 6 (flow). Swiss: Tasks 2, 3, 6. League: Task 1 (settings), Task 3 (circle, season), Task 6 (both pairings, byes), Task 8 (week labels and dates), Task 11 (editor and calculator). Standings tiebreakers: Task 2. Brackets-manager errors (spec Error handling) surface as `result_locked` / `match_not_open` refusals that write nothing (Task 6). The spec's "leave the match in confirming and alert staff" belongs to the automatic flow of plan 3.
 - Spec Testing: "brackets-manager adapter: round-trip of single elim, double elim with reset, round robin; result propagation" is Task 4. "Swiss: unit tests against known tables and edge cases (odd counts, forced repeats, late drops)" is Task 3, plus Task 6 for late drops.
 - `event_matches` columns follow spec section 4, plus `grp`, `score_a`, `score_b`, which spec section 4 implies (campaign score difference, per-group brackets) but does not list.
