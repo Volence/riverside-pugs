@@ -64,6 +64,7 @@ import { backfillPersonas } from './personaBackfill.js';
 import { handleConduct } from './conductFlags.js';
 import { noteInGameName, takeRenameDigest } from './playerNames.js';
 import { handleServerChatEvent, isActiveStaff } from './serverChat.js';
+import { recordLook } from './mapLooks.js';
 import { handleModCall } from './modCalls.js';
 import { ModCallPoster } from './discord/modCallPoster.js';
 import { WeeklyPoster } from './discord/weeklyPoster.js';
@@ -83,7 +84,8 @@ import { cheatName, cvarActOf, liveMatchOf, recordIntegrityFlag } from './integr
 import { lilacReasonDetail } from './logParse.js';
 import { inputThresholds, recordInputBurst, recordInputCap } from './inputBursts.js';
 import { resolveServerBySource, isKnownServerAddress, type ServerRow } from './serverPool.js';
-import { abortCommand, resetMap, problemText } from './matchTeardown.js';
+import { resetMap, problemText } from './matchTeardown.js';
+import { makeServerCleaner } from './serverCleaner.js';
 import { PendingMatches } from './pendingMatches.js';
 import { SideGames } from './sideGames.js';
 import { RconClient as RealRcon } from './rcon.js';
@@ -691,60 +693,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     holds: serverHolds, onFreed: () => holdFreed(),
   });
 
-  const releaser = new ServerReleaser(deps.db, deps.serverCleaner ?? (async (server, token, opts) => {
-    const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
-    try {
-      await rcon.connect();
-      // Both halves on the one connection, and each guarded on its own so a
-      // failure of either still lets the other run. Freeing the row while the
-      // plugin still held the match was the gap: after a no-show abort the box
-      // was advertised as claimable, players stayed connected, and the plugin
-      // went on enforcing a roster and a token the backend had already binned.
-      // A stale or unknown token just draws a PUGERR, which is a no-op.
-      // pug_match.cfg unloads l4d2_spec_stays_spec for the match; casual play
-      // wants it back. Loading an already-loaded plugin is a no-op.
-      try {
-        await rcon.exec('sm plugins load_unlock; sm plugins load l4d2_spec_stays_spec.smx; sm plugins load_lock');
-      } catch (err) {
-        console.error(`[serverRelease] spec_stays_spec reload failed on ${server.name} (non-fatal):`, err);
-      }
-      if (token) {
-        try {
-          // With teardown the plugin announces, waits for an unpause, kicks
-          // everyone and changes to the reset map itself. One command rather
-          // than five because exec secrets.cfg below drops the session and
-          // each extra command is another thing that can time out first.
-          await rcon.exec(abortCommand(token, opts.teardown, resetMap(deps.db)));
-        } catch (err) {
-          console.error(`[serverRelease] sm_pug_abort failed on ${server.name} (non-fatal):`, err);
-        }
-      }
-      // RESTORE the configured password, never blank it. This box carries a
-      // standing sv_password from secrets.cfg (exec'd by local.cfg) which is
-      // how strangers are kept off it; local.cfg's own comment records them
-      // walking in when it was not being enforced. Blanking it here, which is
-      // what this line did when it only had to undo a per-match password,
-      // would have left the server open to the internet the first time any
-      // match was released, including an ordinary in-game one.
-      //
-      // exec is the right shape rather than setting a literal: secrets.cfg is
-      // the single source of truth, it lives on the box, it is gitignored, and
-      // the backend has no business knowing the value. Re-exec is idempotent
-      // and only re-asserts rcon_password to what it already is.
-      //
-      // And it goes LAST. secrets.cfg re-sets rcon_password, and on 2026-09-17
-      // this exec timed out on every release and took the sm_pug_abort queued
-      // behind it on the same connection down with it. The likeliest cause is
-      // srcds dropping rcon sessions when rcon_password is set, so nothing may
-      // follow it on this connection.
-      try {
-        await rcon.exec('exec secrets.cfg');
-      } catch (err) {
-        console.error(`[serverRelease] sv_password restore failed on ${server.name} (non-fatal):`, err);
-      }
-    } finally {
-      rcon.close();
-    }
+  // The rcon side of a release lives in src/serverCleaner.ts, where it can be
+  // tested against a fake rcon; this only hands it a real client.
+  const releaser = new ServerReleaser(deps.db, deps.serverCleaner ?? makeServerCleaner({
+    rcon: (server) => new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password }),
+    resetMap: () => resetMap(deps.db),
   }), restarter, deps.config.devMode ? null : async (server) => {
     await balanceWriter.writeForRelease(server.id);
     await watchWriter.writeForRelease(server.id);
@@ -1137,6 +1090,18 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             signonDrops?.onEntered(ev.steamid);
           } catch (err) {
             console.error('[consistency] failed to record an entry:', err);
+          }
+          return;
+        }
+        if (ev.kind === 'look') {
+          // l4d_nightmode's look for the round (src/mapLooks.ts). Same guard
+          // as the chat lines: an unknown source must not take down the
+          // listener that also carries match_end.
+          try {
+            const sid = serverOf(source, meta);
+            if (sid !== null) recordLook(deps.db, sid, ev);
+          } catch (err) {
+            console.error('[looks] failed to record a look:', err);
           }
           return;
         }
