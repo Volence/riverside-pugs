@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as F from '../src/events/flow.js';
 import * as P from '../src/events/play.js';
 import * as E from '../src/events/events.js';
@@ -161,10 +161,96 @@ describe('event flow', () => {
   it('settle is idempotent: a second call changes nothing', async () => {
     const f = playFixture({ stages: [SWISS(2, null)], entries: 5 });
     ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
+    // Seed 1 (entries[0]) is in round 1's first real match (seed 5 gets the
+    // opening bye with 5 entrants), so disqualifying it gives settle a real
+    // forfeit to make before the idempotence check below.
+    ok(N.disqualifyEntry(f.db, { entryId: f.entries[0]!, by: ADMIN, reason: 'left', now: NOW }));
     await F.settleEvent(f.db, { eventId: f.eventId, now: NOW });
+    // The disqualification actually did work: it forfeited the entry's
+    // open match before the snapshot below, so the second call below is a
+    // real no-op, not a settle that never had anything to do.
+    expect(E.eventLog(f.db, f.eventId).some((l) => l.action === 'result_recorded' && l.actor === null)).toBe(true);
     const snap = JSON.stringify(f.db.prepare('SELECT * FROM event_log ORDER BY id').all());
     await F.settleEvent(f.db, { eventId: f.eventId, now: NOW });
     expect(JSON.stringify(f.db.prepare('SELECT * FROM event_log ORDER BY id').all())).toBe(snap);
+  });
+
+  it('a Swiss stage finishes once staff forfeit both round-1 matches of an all-disqualified field, instead of looping empty round-pairing', async () => {
+    // The repro: with both sides of a match disqualified, settle's own
+    // forfeit step never touches it (it only resolves a match with exactly
+    // one side out), so it is staff who forfeit each match by hand.
+    const f = playFixture({ stages: [SWISS(2, null)], entries: 4 });
+    ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
+    for (const id of f.entries) ok(N.disqualifyEntry(f.db, { entryId: id, by: ADMIN, reason: 'left', now: NOW }));
+    const s = E.stagesOf(f.db, f.eventId)[0]!;
+    const r1 = P.matchesOf(f.db, s.id).filter((m) => m.status === 'waiting');
+    expect(r1).toHaveLength(2);
+    for (const m of r1) ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: m.id, by: ADMIN, now: NOW, result: { winner: 'a', forfeit: true } }));
+    const log = E.eventLog(f.db, f.eventId);
+    expect(log.filter((l) => l.action === 'result_recorded')).toHaveLength(2);
+    expect(log.filter((l) => l.action === 'round_paired')).toHaveLength(0);
+    expect(E.getEvent(f.db, f.eventId)!.status).toBe('finished');
+    const snap = JSON.stringify(f.db.prepare('SELECT * FROM event_log ORDER BY id').all());
+    await F.settleEvent(f.db, { eventId: f.eventId, now: NOW });
+    expect(JSON.stringify(f.db.prepare('SELECT * FROM event_log ORDER BY id').all())).toBe(snap);
+  });
+
+  it('a Swiss of 3 finishes once disqualification leaves one entrant, instead of pairing more bye-only rounds', async () => {
+    const f = playFixture({ stages: [SWISS(3, null)], entries: 3 });
+    ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
+    const s = E.stagesOf(f.db, f.eventId)[0]!;
+    // Round 1 has one real match (the third entrant gets the opening bye);
+    // playing it out also pairs round 2, since all three are still active.
+    const r1 = open(f)[0]!;
+    ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: r1.id, by: ADMIN, now: NOW, result: { winner: 'a', scoreA: 10, scoreB: 5 } }));
+    const r2 = P.matchesOf(f.db, s.id).find((m) => m.round === 2 && m.status === 'waiting')!;
+    const r2Bye = P.matchesOf(f.db, s.id).find((m) => m.round === 2 && m.status === 'bye')!.entry_a!;
+    // Disqualify round 2's bye recipient and one side of round 2's real
+    // match, leaving exactly one entrant (the other side of that match) in.
+    ok(N.disqualifyEntry(f.db, { entryId: r2Bye, by: ADMIN, reason: 'left', now: NOW }));
+    ok(N.disqualifyEntry(f.db, { entryId: r2.entry_b!, by: ADMIN, reason: 'left', now: NOW }));
+    await F.settleEvent(f.db, { eventId: f.eventId, now: NOW });
+    // round 2 was paired once (before the disqualifications); round 3 (and
+    // any further bye-only round) is never paired once one entrant is left.
+    expect(E.eventLog(f.db, f.eventId).filter((l) => l.action === 'round_paired')).toHaveLength(1);
+    expect(P.matchesOf(f.db, s.id).some((m) => m.round > 2)).toBe(false);
+    expect(E.getEvent(f.db, f.eventId)!.status).toBe('finished');
+  });
+
+  it('a single settle forfeits every eligible disqualification match in one pass, not one per call', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const f = playFixture({ stages: [LEAGUE(40, 3, 'round_robin', null)], entries: 20 });
+    ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
+    const s = E.stagesOf(f.db, f.eventId)[0]!;
+    const disqualified = new Set(f.entries.slice(0, 10));
+    for (const id of disqualified) ok(N.disqualifyEntry(f.db, { entryId: id, by: ADMIN, reason: 'left', now: NOW }));
+    await F.settleEvent(f.db, { eventId: f.eventId, now: NOW });
+    const stillOneSidedOut = P.matchesOf(f.db, s.id).filter((m) =>
+      m.status === 'waiting' && m.entry_a !== null && m.entry_b !== null && (disqualified.has(m.entry_a) !== disqualified.has(m.entry_b)));
+    expect(stillOneSidedOut).toHaveLength(0);
+    expect(errSpy.mock.calls.some((args) => typeof args[0] === 'string' && args[0].includes('did not come to rest'))).toBe(false);
+    errSpy.mockRestore();
+  });
+
+  it('a throw inside settle after a result is caught, logged, and leaves the already-saved result in place', async () => {
+    const f = playFixture({ stages: [SWISS(1, 2), SE()], entries: 4 });
+    ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
+    const s1 = E.stagesOf(f.db, f.eventId)[0]!;
+    const s2 = E.stagesOf(f.db, f.eventId)[1]!;
+    const ms = P.matchesOf(f.db, s1.id).filter((m) => m.status === 'waiting');
+    expect(ms).toHaveLength(2);
+    ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: ms[0]!.id, by: ADMIN, now: NOW, result: { winner: 'a', scoreA: 10, scoreB: 5 } }));
+    // Corrupt stage 2's settings so planStage's read of them throws once
+    // stage 1 finishes and settle tries to start it: a genuine throw from
+    // inside settle, not a mock, is what recordResultFlow must survive.
+    f.db.prepare("UPDATE event_stages SET config_json = 'not json' WHERE id = ?").run(s2.id);
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const last = ms[1]!;
+    const r = await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: last.id, by: ADMIN, now: NOW, result: { winner: 'a', scoreA: 10, scoreB: 5 } });
+    expect(r.ok).toBe(true);
+    expect(P.getMatch(f.db, last.id)).toMatchObject({ status: 'done', winner_entry: last.entry_a });
+    expect(errSpy.mock.calls.some((args) => typeof args[0] === 'string' && args[0].includes('settle after a result'))).toBe(true);
+    errSpy.mockRestore();
   });
 
   it('serialize runs one event in call order and lets other events through', async () => {

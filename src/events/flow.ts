@@ -109,6 +109,14 @@ function stageComplete(db: DB, stage: E.StageRow): boolean {
   if (ms.length === 0 || ms.some((m) => !P.RESOLVED.has(m.status))) return false;
   const bracket = P.stageBracket(stage);
   if (bracket) return bracketComplete(bracket);
+  // A table stage with fewer than 2 entrants still in is done: there is
+  // nobody left to pair, whatever the round count says (Ruling 1, fix
+  // round 1). Without this, a Swiss or Swiss-paired league with 0 or 1
+  // active entrants left either writes nothing (addRound now refuses an
+  // empty round) or keeps pairing single-entrant bye rounds until the
+  // configured round count, neither of which ends the stage.
+  const entrants = P.stageEntrants(stage);
+  if (entrants.filter((id) => !outOf(db, entrants).has(id)).length < 2) return true;
   const total = P.totalRounds(stage);
   return total === null || Math.max(...ms.map((m) => m.round)) >= total;
 }
@@ -154,7 +162,17 @@ export async function recordResultFlow(
     if (!m || m.event_id !== o.eventId) return V.fail('match_not_found');
     return report(db, m, o.by, parsed.value, o.now);
   });
-  if (r.ok) await settleEvent(db, { eventId: o.eventId, now: o.now });
+  if (r.ok) {
+    try {
+      await settleEvent(db, { eventId: o.eventId, now: o.now });
+    } catch (err) {
+      // The result is already committed; a settle failure after it (bad
+      // stage data, a library throw) must not turn a saved result into a
+      // rejected call, which a route would answer with a 500 and a retry
+      // would then read as a correction (Ruling 3, fix round 1).
+      console.error(`[events] settle after a result of event ${o.eventId} failed:`, err instanceof Error ? err.message : err);
+    }
+  }
   return r;
 }
 
@@ -174,13 +192,26 @@ async function settleOnce(db: DB, eventId: number, now?: Date): Promise<boolean>
   const entrants = P.stageEntrants(stage);
   const out = outOf(db, entrants);
 
-  for (const m of P.matchesOf(db, stage.id)) {
-    if (m.status !== 'waiting' || m.entry_a === null || m.entry_b === null) continue;
+  // Forfeit every eligible waiting match in this pass, not just the first
+  // (Ruling 2, fix round 1): a round robin league of any size can have many
+  // one-side-disqualified matches waiting at once, and settleEvent's own
+  // retry cap is for the stage/round steps below, not a budget for how many
+  // forfeits one call may make. Each match is re-read right before it is
+  // reported, since an earlier forfeit in this same pass can have changed a
+  // later one's row (a bracket forfeit can resolve or drop a row further
+  // down the bracket).
+  let forfeited = false;
+  for (const snap of P.matchesOf(db, stage.id)) {
+    if (snap.status !== 'waiting' || snap.entry_a === null || snap.entry_b === null) continue;
+    const m = P.getMatch(db, snap.id);
+    if (!m || m.status !== 'waiting' || m.entry_a === null || m.entry_b === null) continue;
     const aOut = out.has(m.entry_a);
     if (aOut === out.has(m.entry_b)) continue;
     const r = await report(db, m, null, { winner: aOut ? 'b' : 'a', scoreA: null, scoreB: null, forfeit: true }, now);
-    if (r.ok) return true;
+    if (r.ok) forfeited = true;
+    else console.error(`[events] disqualification forfeit of match ${m.id} refused: ${r.error}`);
   }
+  if (forfeited) return true;
 
   if (stageComplete(db, stage)) {
     const outcome = await stageOutcome(db, stage);
