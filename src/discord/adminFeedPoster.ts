@@ -413,6 +413,19 @@ export class AdminFeedPoster {
           default: return `${who} ended ${target}'s reconnect time in ${where}`;
         }
       }
+      case 'appeal_ask': case 'appeal_accept': case 'appeal_shorten': case 'appeal_deny':
+      case 'appeal_final': case 'appeal_unfinal': {
+        const appealId = Number(d.appealId ?? e.target);
+        const link = `[#${appealId}](${this.deps.publicUrl}/admin/people/appeals/${appealId})`;
+        switch (e.action) {
+          case 'appeal_ask': return `${who} asked a question on appeal ${link}`;
+          case 'appeal_accept': return `${who} accepted appeal ${link}`;
+          case 'appeal_shorten': return `${who} shortened appeal ${link}`;
+          case 'appeal_deny': return `${who} denied appeal ${link}`;
+          case 'appeal_final': return `${who} marked the ban on appeal ${link} final`;
+          default: return `${who} allowed appeals again on appeal ${link}`;
+        }
+      }
       case 'ticket_open': case 'ticket_claim': case 'ticket_restrict': case 'ticket_access':
       case 'ticket_close': case 'ticket_reopen': case 'ticket_ban': case 'ticket_remove':
       case 'ticket_discord_sanction': case 'ticket_discord_sanction_lift':

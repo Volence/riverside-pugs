@@ -440,4 +440,22 @@ describe('admin feed', () => {
     expect(text(0)).not.toContain('****');
     expect(text(1)).not.toContain('****');
   });
+
+  it('appeal actions read as sentences linking the appeal, not the default fallback', async () => {
+    logAdmin(db, ADMIN, 'appeal_ask', IDS[2], { appealId: 7 });
+    logAdmin(db, ADMIN, 'appeal_accept', IDS[2], { appealId: 7 });
+    logAdmin(db, ADMIN, 'appeal_shorten', IDS[2], { appealId: 7, endsAt: '2026-10-10T00:00:00.000Z' });
+    logAdmin(db, ADMIN, 'appeal_deny', IDS[2], { appealId: 7 });
+    logAdmin(db, ADMIN, 'appeal_final', IDS[2], { appealId: 7 });
+    logAdmin(db, ADMIN, 'appeal_unfinal', IDS[2], { appealId: 7 });
+    await settled();
+    const lines = inFeed().map((m) => JSON.stringify(m.payload));
+    expect(lines[0]).toContain('asked a question on appeal [#7](https://pug.test/admin/people/appeals/7)');
+    expect(lines[1]).toContain('accepted appeal [#7](https://pug.test/admin/people/appeals/7)');
+    expect(lines[2]).toContain('shortened appeal [#7](https://pug.test/admin/people/appeals/7)');
+    expect(lines[3]).toContain('denied appeal [#7](https://pug.test/admin/people/appeals/7)');
+    expect(lines[4]).toContain('marked the ban on appeal [#7](https://pug.test/admin/people/appeals/7) final');
+    expect(lines[5]).toContain('allowed appeals again on appeal [#7](https://pug.test/admin/people/appeals/7)');
+    for (const l of lines) expect(l).not.toMatch(/appeal (ask|accept|shorten|deny|final|unfinal) /);
+  });
 });
