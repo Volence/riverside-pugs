@@ -23,8 +23,8 @@ const SEEDS_CLOSED: readonly string[] = ['live', 'finished', 'cancelled'];
 
 /** One entry's row. Its own component so the Disqualify reason box is this
  *  row's state alone, never shared with any other row's box or send. */
-function EntryRow({ e, canEdit, locked, showMove, busy, active, onMove, onDisqualify, onRestore }: {
-  e: AdminEntryView; canEdit: boolean; locked: boolean; showMove: boolean; busy: boolean; active: boolean;
+function EntryRow({ e, canEdit, locked, showMove, canRestore, busy, active, onMove, onDisqualify, onRestore }: {
+  e: AdminEntryView; canEdit: boolean; locked: boolean; showMove: boolean; canRestore: boolean; busy: boolean; active: boolean;
   onMove: (id: number, by: -1 | 1) => void; onDisqualify: (id: number, name: string, reason: string) => void; onRestore: (id: number, name: string) => void;
 }) {
   const [reason, setReason] = useState('');
@@ -51,7 +51,7 @@ function EntryRow({ e, canEdit, locked, showMove, busy, active, onMove, onDisqua
               <button class="btn btn--ghost" disabled={busy} onClick={() => onDisqualify(e.id, e.name, reason)}>Disqualify</button>
             </>
           )}
-          {!active && !locked && (
+          {!active && canRestore && (
             <button class="btn btn--ghost" disabled={busy} onClick={() => onRestore(e.id, e.name)}>Restore</button>
           )}
         </div>
@@ -61,14 +61,21 @@ function EntryRow({ e, canEdit, locked, showMove, busy, active, onMove, onDisqua
 }
 
 /** The Entries section of an event on the desk (plan T1b Ruling 10). A mod
- *  (canEdit false) reads the same list with no control. */
-export function EntriesPanel({ eventId, status, canEdit }: { eventId: number; status: string; canEdit: boolean }) {
+ *  (canEdit false) reads the same list with no control. Each button shows
+ *  only where the server would take it: Open check-in in registration with
+ *  check-in on; Close the list in the phase the clock would close it from
+ *  (check-in, or registration with check-in off); Restore before the list is
+ *  final in registration or check-in. */
+export function EntriesPanel({ eventId, status, checkin, canEdit }: { eventId: number; status: string; checkin: boolean; canEdit: boolean }) {
   const { data, error: loadError, reload } = useFetch((s) => adminApi.eventEntries(eventId, s), [eventId]);
   const { busy, error, run } = useAction(reload);
   if (loadError) return <Panel><h3>Entries</h3><p class="error">Could not load the entries.</p></Panel>;
   if (!data) return <Panel><h3>Entries</h3></Panel>;
   const locked = data.lockedAt !== null;
   const showMove = !SEEDS_CLOSED.includes(status);
+  const canOpenCheckin = checkin && status === 'registration';
+  const canClose = status === (checkin ? 'checkin' : 'registration');
+  const canRestore = !locked && (status === 'registration' || status === 'checkin');
   const seeded = data.entries.filter((e) => e.seed !== null && (e.status === 'registered' || e.status === 'checked_in'))
     .sort((a, b) => (a.seed ?? 0) - (b.seed ?? 0));
   const move = (id: number, by: -1 | 1) => {
@@ -87,10 +94,10 @@ export function EntriesPanel({ eventId, status, canEdit }: { eventId: number; st
       <h3>Entries</h3>
       {canEdit && !locked && (
         <div class="inlinerow">
-          {status === 'registration' && (
+          {canOpenCheckin && (
             <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => adminApi.openEventCheckin(eventId), 'Open check-in now?')}>Open check-in now</button>
           )}
-          {(status === 'registration' || status === 'checkin') && (
+          {canClose && (
             <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => adminApi.lockEventEntries(eventId), {
               title: 'Close the entry list now?', body: 'Entries that are not ready are dropped, the waitlist is cut at the cap, and seeds are set by SR.',
             })}>Close the entry list now</button>
@@ -102,7 +109,7 @@ export function EntriesPanel({ eventId, status, canEdit }: { eventId: number; st
       {data.entries.length === 0 ? <Empty>No entries yet.</Empty> : (
         <ul class="admin-list">
           {data.entries.map((e) => (
-            <EntryRow key={e.id} e={e} canEdit={canEdit} locked={locked} showMove={showMove} busy={busy} active={active(e)}
+            <EntryRow key={e.id} e={e} canEdit={canEdit} locked={locked} showMove={showMove} canRestore={canRestore} busy={busy} active={active(e)}
               onMove={move} onDisqualify={disqualify} onRestore={restore} />
           ))}
         </ul>

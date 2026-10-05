@@ -23,7 +23,7 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 describe('EntriesPanel', () => {
   it('shows each entry with SR, problems and waitlist, and no controls for a mod', async () => {
     mockAdmin.eventEntries.mockResolvedValue({ lockedAt: null, entries: [entry(), entry({ id: 2, name: 'Bats', waitlist: 1 })] });
-    render(<EntriesPanel eventId={9} status="registration" canEdit={false} />);
+    render(<EntriesPanel eventId={9} status="registration" checkin canEdit={false} />);
     expect(await screen.findByText('Rats')).toBeTruthy();
     expect(screen.getAllByText(/SR 1500/)).toHaveLength(2);
     // Both entries share the same default roster (and so the same problem text);
@@ -36,14 +36,14 @@ describe('EntriesPanel', () => {
   it('lets an admin close the entry list early and move a seed up', async () => {
     mockAdmin.eventEntries.mockResolvedValue({ lockedAt: null, entries: [entry()] });
     mockAdmin.lockEventEntries.mockResolvedValue({});
-    render(<EntriesPanel eventId={9} status="checkin" canEdit />);
+    render(<EntriesPanel eventId={9} status="checkin" checkin canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Close the entry list now' }));
     await waitFor(() => expect(mockAdmin.lockEventEntries).toHaveBeenCalledWith(9));
 
     cleanup();
     mockAdmin.eventEntries.mockResolvedValue({ lockedAt: 'x', entries: [entry({ seed: 1 }), entry({ id: 2, name: 'Bats', seed: 2 })] });
     mockAdmin.reorderEventSeeds.mockResolvedValue({});
-    render(<EntriesPanel eventId={9} status="checkin" canEdit />);
+    render(<EntriesPanel eventId={9} status="checkin" checkin canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Move Bats up' }));
     await waitFor(() => expect(mockAdmin.reorderEventSeeds).toHaveBeenCalledWith(9, [2, 1]));
   });
@@ -51,7 +51,7 @@ describe('EntriesPanel', () => {
   it('keeps each row\'s Disqualify reason separate from every other row', async () => {
     mockAdmin.eventEntries.mockResolvedValue({ lockedAt: null, entries: [entry(), entry({ id: 2, name: 'Bats' })] });
     mockAdmin.disqualifyEventEntry.mockResolvedValue({});
-    render(<EntriesPanel eventId={9} status="checkin" canEdit />);
+    render(<EntriesPanel eventId={9} status="checkin" checkin canEdit />);
     await screen.findByText('Rats');
     const [firstReason, secondReason] = screen.getAllByPlaceholderText('Reason');
     fireEvent.input(firstReason, { target: { value: 'Roster stacked' } });
@@ -63,9 +63,40 @@ describe('EntriesPanel', () => {
 
   it('hides the seed Up/Down controls once the event is live', async () => {
     mockAdmin.eventEntries.mockResolvedValue({ lockedAt: 'x', entries: [entry({ seed: 1 }), entry({ id: 2, name: 'Bats', seed: 2 })] });
-    render(<EntriesPanel eventId={9} status="live" canEdit />);
+    render(<EntriesPanel eventId={9} status="live" checkin canEdit />);
     await screen.findByText(/Rats/);
     expect(screen.queryByRole('button', { name: 'Move Bats up' })).toBeNull();
     expect(screen.queryByRole('button', { name: /Move .* down/ })).toBeNull();
+  });
+
+  const buttons = async (status: string, checkin: boolean, lockedAt: string | null = null, entries = [entry()]) => {
+    mockAdmin.eventEntries.mockResolvedValue({ lockedAt, entries });
+    render(<EntriesPanel eventId={9} status={status} checkin={checkin} canEdit />);
+    await screen.findByText(/Rats/);
+    const names = screen.queryAllByRole('button').map((b) => b.textContent);
+    cleanup();
+    return names;
+  };
+
+  it('offers Open check-in only in registration with check-in on', async () => {
+    expect(await buttons('registration', true)).toContain('Open check-in now');
+    expect(await buttons('registration', false)).not.toContain('Open check-in now');
+    expect(await buttons('checkin', true)).not.toContain('Open check-in now');
+  });
+
+  it('offers Close the entry list only in the phase that ends with it', async () => {
+    expect(await buttons('registration', true)).not.toContain('Close the entry list now');
+    expect(await buttons('checkin', true)).toContain('Close the entry list now');
+    expect(await buttons('registration', false)).toContain('Close the entry list now');
+    expect(await buttons('registration', false, 'x')).not.toContain('Close the entry list now');
+  });
+
+  it('offers Restore only before the list is final in registration or check-in', async () => {
+    const out = [entry({ status: 'disqualified' })];
+    expect(await buttons('registration', true, null, out)).toContain('Restore');
+    expect(await buttons('checkin', true, null, out)).toContain('Restore');
+    expect(await buttons('live', true, null, out)).not.toContain('Restore');
+    expect(await buttons('cancelled', true, null, out)).not.toContain('Restore');
+    expect(await buttons('checkin', true, 'x', out)).not.toContain('Restore');
   });
 });

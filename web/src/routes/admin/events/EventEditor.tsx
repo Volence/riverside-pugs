@@ -178,7 +178,7 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
             onSave={(st) => saveStage(() => adminApi.addStage(id, st))} />
         )}
       </Panel>
-      {ev.status !== 'draft' && ev.status !== 'announced' && <EntriesPanel eventId={ev.id} status={ev.status} canEdit={canEdit} />}
+      {ev.status !== 'draft' && ev.status !== 'announced' && <EntriesPanel eventId={ev.id} status={ev.status} checkin={ev.fields.checkin.enabled} canEdit={canEdit} />}
       <Panel>
         <h3>History</h3>
         <ul class="admin-list">
