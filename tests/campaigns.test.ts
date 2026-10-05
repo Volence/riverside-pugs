@@ -69,6 +69,13 @@ describe('campaignForMap', () => {
     expect(campaignForMap(map)).toBe(expected);
   });
 
+  // Crash Center plays Crash Course's Alleys as chapter 4.
+  it('maps Alleys to crash_center and leaves Dead Air\'s garage alone', () => {
+    expect(campaignForMap('l4d_garage01_alleys')).toBe('crash_center');
+    expect(campaignForMap('l4d_vs_airport03_garage')).toBe('dead_air');
+    expect(campaignForMap('l4d_airport03_garage')).toBe('dead_air');
+  });
+
   it('is case insensitive for dlc4 names too', () => {
     expect(campaignForMap('C1M1_HOTEL')).toBe('dead_center');
   });

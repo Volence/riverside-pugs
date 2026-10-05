@@ -31,7 +31,7 @@ const publish = (slug = 'dbd') => {
 };
 
 describe('campaignRegistry', () => {
-  it('contains the twelve stock campaigns with no custom ones present', () => {
+  it('contains the thirteen stock campaigns with no custom ones present', () => {
     expect([...campaignRegistry(db).keys()])
       .toEqual([
         'no_mercy',
@@ -46,6 +46,7 @@ describe('campaignRegistry', () => {
         'the_passing',
         'cold_stream',
         'the_last_stand',
+        'crash_center',
       ]);
   });
 
@@ -260,11 +261,11 @@ describe('stock chapter lists', () => {
 });
 
 describe('dlc4 campaigns in the registry', () => {
-  it('lists all twelve campaigns with no missions directory configured', () => {
+  it('lists all thirteen campaigns with no missions directory configured', () => {
     setMissionsDirs([]);
     invalidateCampaignCache();
     const reg = campaignRegistry(db);
-    expect(reg.size).toBe(12);
+    expect(reg.size).toBe(13);
     // Chapter lists come from mission files, so they are empty here. The
     // campaign still exists, which is what makes the pool gate meaningful
     // even when the paths are unset.

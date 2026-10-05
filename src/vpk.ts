@@ -299,14 +299,19 @@ export function missionFromVpk(vpkPath: string): Mission | null {
 }
 
 /**
- * The mission in a large single-file VPK, reading only its directory and the
- * mission's own bytes. missionFromVpk reads the whole file, which is fine for
+ * Every mission in a large single-file VPK, reading only its directory and the
+ * missions' own bytes. missionFromVpk reads the whole file, which is fine for
  * an upload but not for the L4D2 pack's campaign VPKs (up to 330 MB each) at
- * every boot. Null for anything that is not a VPK or holds no inline mission.
+ * every boot. Empty for anything that is not a VPK or holds no inline mission.
+ *
+ * All of them, not the first: the c01 pack VPK carries two (deadcenter.txt and
+ * the Crash Center garage.txt, see deploy/deadcenter/missions/), and the caller
+ * decides which campaign each one is.
  */
-export function missionFromLargeVpk(vpkPath: string): Mission | null {
+export function missionsFromLargeVpk(vpkPath: string): Mission[] {
   let fd: number;
-  try { fd = openSync(vpkPath, 'r'); } catch { return null; }
+  try { fd = openSync(vpkPath, 'r'); } catch { return []; }
+  const found: Mission[] = [];
   try {
     const read = (pos: number, len: number): Buffer => {
       const b = Buffer.alloc(len);
@@ -315,13 +320,13 @@ export function missionFromLargeVpk(vpkPath: string): Mission | null {
       return b;
     };
     const head = read(0, 12);
-    if (head.readUInt32LE(0) !== VPK_MAGIC) return null;
+    if (head.readUInt32LE(0) !== VPK_MAGIC) return found;
     const version = head.readUInt32LE(4);
     const treeLength = head.readUInt32LE(8);
     const treeStart = version === 2 ? 28 : 12;
     // A directory tree this size is not something our packs produce; refuse
     // rather than allocate whatever a corrupt header claims.
-    if (treeLength > 64 * 1024 * 1024) return null;
+    if (treeLength > 64 * 1024 * 1024) return found;
     const tree = read(treeStart, treeLength);
     const dataStart = treeStart + treeLength;
     let p = 0;
@@ -349,16 +354,17 @@ export function missionFromLargeVpk(vpkPath: string): Mission | null {
           const preload = tree.subarray(p, p + preloadBytes);
           p += preloadBytes;
           if (ext === 'txt' && dir.toLowerCase() === 'missions') {
-            if (archiveIndex !== 0x7fff && length > 0) return null;
+            if (archiveIndex !== 0x7fff && length > 0) continue;
             const body = length > 0 ? read(dataStart + offset, length) : Buffer.alloc(0);
-            return parseMission(Buffer.concat([preload, body]).toString('utf8'));
+            const mission = parseMission(Buffer.concat([preload, body]).toString('utf8'));
+            if (mission) found.push(mission);
           }
         }
       }
     }
-    return null;
+    return found;
   } catch {
-    return null;
+    return found;
   } finally {
     closeSync(fd);
   }

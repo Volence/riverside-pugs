@@ -11,7 +11,16 @@ export const CAMPAIGNS: Record<string, { name: string }> = {
   the_passing: { name: 'Passifice' },
   cold_stream: { name: 'Cold Stream' },
   the_last_stand: { name: 'The Last Stand' },
+  // Dead Center's first three chapters, then Crash Course's Alleys. Its own
+  // mission is deploy/deadcenter/missions/garage.txt; see slugOf in
+  // stockMissions.ts for why it is the garage file.
+  crash_center: { name: 'Crash Center' },
 };
+
+/** Where Crash Center starts. Shared with Dead Center: the two differ only in
+ *  where the site stops them (Dead Center after Mall, Crash Center after
+ *  Alleys), because the game itself can give each map only one mission. */
+export const CRASH_CENTER_FIRST_MAP = 'c1m1_hotel';
 
 /**
  * Names shown ONLY in the campaign vote (site tiles and Discord buttons), for
@@ -58,7 +67,7 @@ export const isMapName = (s: string): boolean => MAP_NAME_RE.test(s);
  */
 export const DLC4_CAMPAIGNS: ReadonlySet<string> = new Set([
   'dead_center', 'dark_carnival', 'swamp_fever', 'hard_rain',
-  'the_parish', 'the_passing', 'cold_stream', 'the_last_stand',
+  'the_parish', 'the_passing', 'cold_stream', 'the_last_stand', 'crash_center',
 ]);
 
 /**
@@ -91,6 +100,15 @@ const CAMPAIGN_BY_MAP_WORD: Record<string, string> = {
   // Passifice in this rotation, and losing attribution on the common case to
   // stay literal about the rare one would be the worse bargain.
   river: 'the_passing',
+  // Crash Course's first map, which this site only plays as Crash Center's
+  // chapter 4 (Hotel, Streets, Mall, Alleys). Crash Course itself is not a
+  // site campaign, so nothing else can claim the word. Dead Air's
+  // `l4d_vs_airport03_garage` is unaffected: its campaign word is `airport`.
+  //
+  // Crash Center's first three maps still read as dead_center here: a bare
+  // map name cannot tell the two apart. A site-started match carries its own
+  // campaign, so this only matters for a match started in game.
+  garage: 'crash_center',
 };
 
 /**
