@@ -43,4 +43,10 @@ describe('AppealBox', () => {
     expect(await screen.findByText('This ban cannot be appealed.')).toBeTruthy();
     expect(screen.queryByText('Appeal this ban')).toBeNull();
   });
+
+  it('falls back to the old line when the fetch fails', async () => {
+    mock.mine.mockRejectedValue(new Error('boom'));
+    render(<AppealBox fallback="To appeal, message an admin in the Discord." />);
+    expect(await screen.findByText('To appeal, message an admin in the Discord.')).toBeTruthy();
+  });
 });
