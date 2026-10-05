@@ -7,6 +7,7 @@ import { activeTimeout, penaltyHistory, recentOffenses } from '../penalties.js';
 import { signonDropSummary } from '../signonDrops.js';
 import { capsForPlayer, detectionsForPlayer } from '../inputBursts.js';
 import { publishBanChange } from '../banEvents.js';
+import { getSetting } from '../settings.js';
 import { steamAccountView } from './steamAccount.js';
 import { ticketsAbout } from '../tickets/views.js';
 import type { BanRow } from './banTypes.js';
@@ -173,13 +174,15 @@ export function liftExpiredBans(db: DB, now = new Date()): string[] {
   return lifted;
 }
 
-/** What a banned player is told (Discord uses <t:> timestamps). */
-export function banMessage(db: DB, steamid: string): string {
+/** What a banned player is told (Discord uses <t:> timestamps). With
+ *  appeals on, it says where to appeal. */
+export function banMessage(db: DB, steamid: string, publicUrl?: string): string {
   const ban = activeBan(db, steamid);
-  if (!ban) return 'You are banned from the PUG.';
-  if (ban.kind === 'alt_hold') return `Your account is on hold. ${ban.reason}.`;
+  const appeal = publicUrl && getSetting(db, 'appeals_enabled') === '1' ? `\nTo appeal: ${publicUrl}/appeal` : '';
+  if (!ban) return `You are banned from the PUG.${appeal}`;
+  if (ban.kind === 'alt_hold') return `Your account is on hold. ${ban.reason}.${appeal}`;
   const until = ban.expiresAt ? ` It ends <t:${Math.floor(Date.parse(ban.expiresAt) / 1000)}:R>.` : '';
-  return `You are banned from the PUG: ${ban.reason}.${until}`;
+  return `You are banned from the PUG: ${ban.reason}.${until}${appeal}`;
 }
 
 export interface AdminPlayerRow {

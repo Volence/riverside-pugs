@@ -32,7 +32,9 @@ import { adminBalanceKnobRoutes } from './routes/adminBalanceKnobs.js';
 import { adminBalancePatchRoutes } from './routes/adminBalancePatches.js';
 import { isWheel } from './inputStats.js';
 import { peopleRoutes } from './routes/people.js';
+import { appealRoutes } from './routes/appeals.js';
 import { banMessage, liftExpiredBans } from './admin/players.js';
+import { sweepAppeals } from './appeals/store.js';
 import { botEnabled, startBot, type RunningBot } from './discord/index.js';
 import { createDjsTransport } from './discord/djsTransport.js';
 import { VoiceChannels } from './discord/voice.js';
@@ -1592,6 +1594,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       console.error('[admin] ban expiry sweep failed:', err);
     }
     try {
+      sweepAppeals(deps.db);
+    } catch (err) {
+      console.error('[appeals] sweep failed:', err);
+    }
+    try {
       reapNoShowMatches(deps.db, releaser);
     } catch (err) {
       console.error('[noShow] reaper failed:', err);
@@ -1745,7 +1752,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       hub,
       connect: () => createDjsTransport(deps.config.discord!),
       controller: {
-        banMessage: (steamid) => banMessage(deps.db, steamid),
+        banMessage: (steamid) => banMessage(deps.db, steamid, deps.config.publicUrl),
         queueBlock: (steamid) => {
           const t = activeTimeout(deps.db, steamid);
           return t
@@ -1835,7 +1842,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         defs: COMMAND_DEFS,
         handle: (i) => handleCommand({
           db: deps.db, matchmaker, publicUrl: deps.config.publicUrl,
-          banMessage: (steamid) => banMessage(deps.db, steamid),
+          banMessage: (steamid) => banMessage(deps.db, steamid, deps.config.publicUrl),
           adminSteamIds: deps.config.adminSteamIds,
         }, i),
       },
@@ -1938,6 +1945,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(adminBalancePatchRoutes, { db: deps.db, knobs: panelKnobs });
   await app.register(adminBalanceKnobRoutes, { db: deps.db, knobs: panelKnobs, writer: deps.config.devMode ? undefined : balanceWriter });
   await app.register(peopleRoutes, { db: deps.db });
+  await app.register(appealRoutes, {
+    db: deps.db,
+    moderation: () => deps.discordModeration ?? bot?.transport.moderation ?? null,
+  });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(weeklyRoutes, { db: deps.db });
   await app.register(balancePublicRoutes, { db: deps.db, knobsPath: deps.balanceKnobsPath });
