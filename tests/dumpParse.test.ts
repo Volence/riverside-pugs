@@ -11,6 +11,23 @@ const SAMPLE = [
 ].join('\n');
 
 describe('parseDump', () => {
+  it('reads a forfeit only when it names the losing side', () => {
+    expect(parseDump(SAMPLE)!.forfeit).toBeNull();
+    const lost = SAMPLE.replace('END winner=a a=645 b=610', 'END winner=a a=645 b=610 forfeit=b');
+    expect(parseDump(lost)!.forfeit).toBe('b');
+    const won = SAMPLE.replace('END winner=a a=645 b=610', 'END winner=a a=645 b=610 forfeit=a');
+    expect(parseDump(won)!.forfeit).toBeNull();
+    const junk = SAMPLE.replace('END winner=a a=645 b=610', 'END winner=a a=645 b=610 forfeit=x');
+    expect(parseDump(junk)!.forfeit).toBeNull();
+  });
+
+  it('keeps the nonce check with a forfeit on the END line', () => {
+    const body = ['DUMP match=42 skilldetect=0 nonce=n1 state=ended', 'END winner=a a=5 b=1 forfeit=b nonce=n1 state=ended'].join('\n');
+    const d = parseDump(body, { nonce: 'n1' })!;
+    expect(d.forfeit).toBe('b');
+    expect(d.state).toBe('ended');
+  });
+
   it('parses a full dump', () => {
     const d = parseDump(SAMPLE)!;
     expect(d.matchId).toBe(42);

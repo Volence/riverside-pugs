@@ -226,6 +226,13 @@ describe('renderResult', () => {
     expect(buttons(p)).toContainEqual(expect.objectContaining({ url: `${URL_}/match/42` }));
   });
 
+  it('a forfeit names the side that forfeited', () => {
+    const p = renderResult({
+      matchId: 9, campaignName: 'No Mercy', publicUrl: URL_, scoreA: 300, scoreB: 2100, winner: 'b', forfeit: 'a', teamA: [], teamB: [],
+    });
+    expect(text(p)).toContain('Team B wins, Team A forfeited');
+  });
+
   it('a draw says draw', () => {
     const p = renderResult({
       matchId: 1, campaignName: 'No Mercy', publicUrl: URL_, scoreA: 5, scoreB: 5, winner: 'draw', teamA: [], teamB: [],

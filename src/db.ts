@@ -678,6 +678,23 @@ CREATE TABLE IF NOT EXISTS server_chat (
   delivered  INTEGER
 );
 CREATE INDEX IF NOT EXISTS server_chat_by_server ON server_chat (server_id, id);
+-- The look (time of day, weather, moon, event, power) l4d_nightmode had on a
+-- map when a round went live, one row per "[nightmode] look" log line
+-- (src/mapLooks.ts). match_id is the match the server was setting up or
+-- playing at the time; a round is matched to its look by time, since the
+-- line names no map and no round. This is what lets a match page say which
+-- look each map had and survival be compared by look (owner ask 2026-10-04).
+-- layers is the five-layer JSON, NULL when the plugin left the map stock.
+CREATE TABLE IF NOT EXISTS map_looks (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  server_id INTEGER NOT NULL,
+  at        INTEGER NOT NULL,
+  title     TEXT    NOT NULL,
+  preset    TEXT    NOT NULL,
+  layers    TEXT,
+  match_id  INTEGER
+);
+CREATE INDEX IF NOT EXISTS map_looks_by_match ON map_looks (match_id, at);
 CREATE TABLE IF NOT EXISTS match_demos (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   ordinal  INTEGER NOT NULL,
@@ -2169,11 +2186,34 @@ export function openDb(path: string): DB {
   // booking made before this column has null and is not counted.
   ensureColumn(db, 'rulesets', 'based_on', 'INTEGER REFERENCES rulesets(id)');
   ensureColumn(db, 'bookings', 'ruleset_id', 'INTEGER REFERENCES rulesets(id)');
+  // !gg: the pug team that forfeited ('a' or 'b'), null for a match played
+  // out. Rated like any other result; the column only drives the FF tag.
+  ensureColumn(db, 'matches', 'forfeit_team', 'TEXT');
   db.prepare(
     "INSERT OR IGNORE INTO game_configs (key, label, cfg) VALUES ('standard', 'Standard (Rotoblin PUG 4v4)', 'pug_match')",
   ).run();
   // PUG, Standard Cup and Casual Scrim: see src/rulesets.ts for what each sets.
   seedRulesetTemplates(db);
+  // !gg: one row per step of a forfeit vote (start, agree, pass, fail,
+  // dropped, refused), from the plugin's GG lines. A record for staff and the
+  // profile's attempt count; the forfeit itself is matches.forfeit_team.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS match_gg_votes (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      match_id  INTEGER NOT NULL REFERENCES matches(id),
+      event     TEXT    NOT NULL,
+      team      TEXT    NOT NULL CHECK (team IN ('a','b')),
+      player_id TEXT,
+      reason    TEXT,
+      gap       INTEGER,
+      best      INTEGER,
+      yes       INTEGER NOT NULL DEFAULT 0,
+      need      INTEGER NOT NULL DEFAULT 0,
+      at        TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS match_gg_votes_match ON match_gg_votes (match_id);
+    CREATE INDEX IF NOT EXISTS match_gg_votes_player ON match_gg_votes (player_id, event);
+  `);
   // One row per rostered player per aborted match: the notice on their Play
   // page, whether they were at fault, and whether they went back in the queue.
   db.exec(`

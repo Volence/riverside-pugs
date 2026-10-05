@@ -453,6 +453,9 @@ describe('chapterOrdinal', () => {
     ['l4d_vs_airport02_offices', 2],
     ['l4d_hospital05_rooftop', 5],
     ['rombu03', 3],
+    ['l4d_river01_docks', 3],
+    ['l4d_river03_port', 5],
+    ['l4d_garage01_alleys', 4],
   ])('reads %s as chapter %s', (map, expected) => {
     expect(chapterOrdinal(map)).toBe(expected);
   });
@@ -468,6 +471,8 @@ describe('qualifiedMapName', () => {
     expect(qualifiedMapName('c1m2_streets', 'Dead Center')).toBe('Dead Center 2 · Streets');
     expect(qualifiedMapName('l4d_vs_farm01_hilltop', 'Blood Harvest'))
       .toBe('Blood Harvest 1 · The Woods');
+    expect(qualifiedMapName('l4d_garage01_alleys', 'Dead Center'))
+      .toBe('Dead Center 4 · The Alleys');
   });
 
   it('omits the number when the map name has none', () => {

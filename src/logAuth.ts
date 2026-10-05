@@ -160,8 +160,10 @@ export class LogAuth {
 
   check(input: LogAuthInput): LogAuthResult {
     const { ev, trailer, address, port } = input;
-    // Not signable: the engine writes it, no plugin does. See the header.
-    if (ev.kind === 'entered') return { accept: true, verified: false, serverId: null };
+    // Not signable: the engine writes "entered the game", and l4d_nightmode
+    // (not pug-match, which holds the secret) writes its look line. See the
+    // header. Both are informational and gated by source address instead.
+    if (ev.kind === 'entered' || ev.kind === 'look') return { accept: true, verified: false, serverId: null };
 
     const servers = this.servers();
     // A line that carries a match token answers to the server that match is

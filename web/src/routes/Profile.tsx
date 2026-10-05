@@ -84,6 +84,8 @@ export function Profile(
             { label: 'Record', value: `${rating.wins}W ${rating.losses}L` },
             { label: 'Peak', value: peak ?? 'n/a' },
             { label: 'Matches', value: totals.games },
+            // Shown at zero too: forfeiting is allowed, and seen.
+            { label: 'Forfeits', value: data.forfeits?.forfeits ?? 0 },
           ] : []}
         />
 

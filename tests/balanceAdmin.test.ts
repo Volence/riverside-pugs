@@ -53,6 +53,25 @@ describe('balance admin API', () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'edit_patch'").get()).toEqual({ n: 1 });
   });
 
+  it('reports survival by look per campaign over the asked window, admin only', async () => {
+    const { a, cookies } = await app();
+    const m = Number(db.prepare("INSERT INTO matches (season_id, state, campaign, server_id, created_at) VALUES (1, 'live', 'death_toll', 1, datetime('now'))").run().lastInsertRowid);
+    const now = Date.now();
+    db.prepare('INSERT INTO map_looks (server_id, at, title, preset, layers, match_id) VALUES (1, ?, ?, ?, NULL, ?)').run(now - 60_000, 'Storm', 'storm', m);
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, started_at, survivors_alive) VALUES (?, 0, 1, 'a', 300, 1, datetime('now'), 2)").run(m);
+    db.prepare("UPDATE matches SET state = 'completed' WHERE id = ?").run(m);
+    const res = await a.inject({ method: 'GET', url: '/api/admin/balance/looks?days=7', cookies });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      days: 7,
+      rows: [{ campaign: 'death_toll', title: 'Storm', matches: 1, rounds: 1, avgScore: 300, finishRate: 1, avgAlive: 2 }],
+    });
+    // A silly window falls back to the default, a huge one is capped.
+    expect((await a.inject({ method: 'GET', url: '/api/admin/balance/looks?days=abc', cookies })).json().days).toBe(30);
+    expect((await a.inject({ method: 'GET', url: '/api/admin/balance/looks?days=9999', cookies })).json().days).toBe(365);
+    expect((await a.inject({ method: 'GET', url: '/api/admin/balance/looks' })).statusCode).toBe(401);
+  });
+
   it('refuses a non-admin', async () => {
     const a = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {} });
     const cookies = await authedCookie(a, db, '76561198000000010');

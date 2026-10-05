@@ -180,6 +180,39 @@ export class RconClient {
     });
   }
 
+  /**
+   * Write a command and do not wait for its answer. For the one command whose
+   * answer never comes: `exec secrets.cfg` re-sets rcon_password, and srcds
+   * drops the session on that before replying, so `exec` sat out its full
+   * timeout on every match release from 2026-09-17 to 2026-10-05 and logged
+   * it as a failure although the cfg had run. Resolves once the bytes are
+   * handed to the kernel; whoever needs proof the command took reads the
+   * result back on a fresh connection.
+   */
+  send(cmd: string): Promise<void> {
+    if (!this.sock) return Promise.reject(new Error('rcon not connected'));
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      this.sock!.write(encodePacket(id, SERVERDATA_EXECCOMMAND, cmd), (err) => (err ? reject(err) : resolve()));
+    });
+  }
+
+  /** Resolves true when the server has closed the connection, false after
+   *  `ms`. Used after `send`: closing our end while the command is still in
+   *  flight could reset it before srcds reads it, so the caller waits for the
+   *  drop that `exec secrets.cfg` itself causes, or briefly, before closing. */
+  waitClosed(ms: number): Promise<boolean> {
+    const sock = this.sock;
+    if (!sock || sock.destroyed) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const done = (closed: boolean) => { clearTimeout(timer); sock.off('close', onClose); sock.off('end', onClose); resolve(closed); };
+      const onClose = () => done(true);
+      const timer = setTimeout(() => done(false), ms);
+      sock.once('close', onClose);
+      sock.once('end', onClose);
+    });
+  }
+
   close(): void {
     this.sock?.destroy();
     this.sock = null;

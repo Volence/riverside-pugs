@@ -81,6 +81,12 @@ export function winnerLabel(winner: Winner): string {
   return winner === 'draw' ? 'Draw' : `Team ${winner.toUpperCase()}`;
 }
 
+/** The result with the forfeit noted: "Team A (B forfeited)". */
+export function resultLabel(winner: Winner, forfeitTeam?: 'a' | 'b' | null): string {
+  const w = winnerLabel(winner);
+  return forfeitTeam ? `${w} (${forfeitTeam.toUpperCase()} forfeited)` : w;
+}
+
 /** `2026-09-06T04:12:33.000Z` → `2026-09-06 04:12`. Matches the previous
  *  frontend's formatting exactly: these are already local-ish strings from
  *  SQLite and are not re-zoned here. */
@@ -480,6 +486,8 @@ export const MAP_NAMES: Record<string, string> = {
   river01_docks: 'The Docks',
   river02_barge: 'The Barge',
   river03_port: 'Port Finale',
+  // Crash Course, played only as Dead Center's chapter 4
+  garage01_alleys: 'The Alleys',
 };
 
 /** dlc4 map names, which carry no `l4d_` prefix at all: they are L4D2-style
@@ -558,6 +566,19 @@ export function mapName(map: string): string {
 }
 
 /**
+ * Maps whose name carries the wrong chapter because a mission file chains them
+ * into another campaign: Passifice plays The Sacrifice's river maps as chapters
+ * 3 to 5, Dead Center plays Crash Course's Alleys as chapter 4. Mirrors the
+ * mission files in deploy/passifice and deploy/deadcenter.
+ */
+const CHAINED_CHAPTER: Record<string, number> = {
+  l4d_river01_docks: 3,
+  l4d_river02_barge: 4,
+  l4d_river03_port: 5,
+  l4d_garage01_alleys: 4,
+};
+
+/**
  * Which chapter of its campaign a map is, read off the map name.
  *
  * Three shapes, because three naming schemes are in play: dlc4's `c1m3_mall`,
@@ -568,6 +589,7 @@ export function mapName(map: string): string {
 export function chapterOrdinal(map: string): number | null {
   if (!map) return null;
   const lower = map.toLowerCase();
+  if (CHAINED_CHAPTER[lower] !== undefined) return CHAINED_CHAPTER[lower];
   const dlc4 = /^c\d+m(\d+)/.exec(lower);
   if (dlc4) return Number(dlc4[1]);
   // A custom campaign's own map name can carry digits before the chapter

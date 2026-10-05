@@ -962,7 +962,7 @@ a.ctile { text-decoration: none; }
 }
 .headliner__unrated { color: var(--text-muted); font-size: var(--fs-dense); }
 .headliner__delta { align-self: center; }
-.headliner__stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); margin-top: var(--sp-4); }
+.headliner__stats { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--sp-3); margin-top: var(--sp-4); }
 .headliner__stats p { margin: 0; }
 .headliner__stat-value { font-family: var(--font-display); font-size: var(--fs-h3); line-height: 1.1; color: var(--text-bright); }
 .headliner__stat-value--win { color: var(--win); }

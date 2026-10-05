@@ -372,6 +372,25 @@ describe('stats routes', () => {
     expect(list.matches).toHaveLength(0);
   });
 
+  it('names the look each map was played under, from night mode\'s log lines paired to the rounds by time', async () => {
+    const matchId = playCompletedMatch(db, 'b');
+    const t0 = Date.UTC(2026, 9, 5, 3, 41, 30);
+    const iso = (ms: number) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+    const look = db.prepare('INSERT INTO map_looks (server_id, at, title, preset, layers, match_id) VALUES (1, ?, ?, ?, NULL, ?)');
+    look.run(t0, 'Storm', 'storm', matchId);            // the load before setup reloaded the map
+    look.run(t0 + 7_000, 'Midnight', 'midnight', matchId);
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, started_at) VALUES (?, 0, 1, 'a', 500, 1, ?)").run(matchId, iso(t0 + 300_000));
+    look.run(t0 + 600_000, 'Midnight', 'midnight', matchId);
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, started_at) VALUES (?, 0, 2, 'b', 400, 1, ?)").run(matchId, iso(t0 + 700_000));
+    const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+    expect(body.maps[0].look).toBe('Midnight');
+
+    // A match with no look lines says so with null, not a missing key.
+    const other = playCompletedMatch(db, 'a');
+    const none = (await app.inject({ method: 'GET', url: `/api/matches/${other}` })).json();
+    expect(none.maps[0].look).toBeNull();
+  });
+
   it('lists demos only for maps the match actually has', async () => {
     // The recorder opens a demo on every map load under the match token,
     // including the post-finale map the server rolls to after the match
