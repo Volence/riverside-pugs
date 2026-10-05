@@ -21,7 +21,11 @@ as little surface as possible: no free intake, no conversation, no free text fro
    any mod or admin; an admin's ban: admins only). Every decision is audited with its decider.
 3. **Limits** (all in Settings, tunable without a deploy): see "Rules" below.
 4. **Discord-banned people** appeal through a public page, `/appeal`, signed in with Discord.
-5. The appeal channel is a plain text channel with one standing bot message, not a forum.
+5. The appeal button lives in the SAME public channel as the Report a player button
+   (`discord_report_channel_id`, the old `#tickets`, to be renamed by the owner, e.g.
+   `#reports-and-appeals`), as its own standing message so the live report message is not
+   touched. There is no separate appeal channel setting. Staff discussion is in the staff
+   forum. Staff alert lines go to the new mod channel (`2026-10-04-mod-channel-split-design.md`).
 6. The owner has no Discord-banned test account; the `/appeal` Discord-only path is proven on
    a local site with a seeded `discord_sanctions` row instead.
 
@@ -130,8 +134,9 @@ the request body.
    button, or the `canAppeal` refusal line, or the state of the current appeal ("Under
    review", the one question with an answer box, or the outcome template). Data comes from
    `/api/me` (`ban.appeal`).
-2. **Discord button.** Setting `discord_appeal_channel_id` (empty = off). The bot keeps one
-   standing message with an **Appeal** button in that text channel, stored in an
+2. **Discord button.** In the Report button's channel (`discord_report_channel_id`), shown
+   while `appeals_enabled` is on. The bot keeps a second standing message there with an
+   **Appeal** button, stored in an
    `appeal_message` singleton table (the `report_message` pattern). Pressing it runs
    `canAppeal` for the presser's linked Steam account (and their Discord id), then opens a
    modal or replies ephemerally with the refusal. If one Discord account owns several
@@ -233,8 +238,8 @@ Discord id is known (DM failure is logged, never retried in a loop):
 ## Rollout
 
 - Web only; no plugin change.
-- Everything off until `appeals_enabled` is turned on; the Discord button stays off until
-  `discord_appeal_channel_id` is set.
+- Everything off until `appeals_enabled` is turned on; the Discord button also needs
+  `discord_report_channel_id` set (it already is in production).
 - Web deploys may go out during live matches (2026-09-26 rule).
 - Owner live checklist (only what the fake cannot prove): the standing message posts in the
   channel; the modal opens; the outcome DM arrives. The Discord-banned path is covered by the
