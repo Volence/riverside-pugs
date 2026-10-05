@@ -617,6 +617,9 @@ export interface Profile {
   };
   social: SocialLink[];
   rating: { sr: number; mu: number; sigma: number; wins: number; losses: number } | null;
+  /** Matches this player's team forfeited with !gg, and !gg votes they started.
+   *  Optional so a response from before the field still renders. */
+  forfeits?: { forfeits: number; ggStarted: number };
   totals: {
     games: number;
     siDamage: number;

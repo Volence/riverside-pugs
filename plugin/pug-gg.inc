@@ -293,23 +293,38 @@ bool Gg_TeamCeiling(int team, int &best, char[] why, int whyLen)
 /** Whether `team` may forfeit now. On false, msg says why for the player. */
 bool Gg_Allowed(int team, char[] msg, int msgLen)
 {
+	char code[16];
+	int gap, best;
+	return Gg_Judge(team, msg, msgLen, code, sizeof(code), gap, best);
+}
+
+/** Gg_Allowed with the reason as a short code (for the GG line) and the gap
+ *  and ceiling it was judged on (-1 when never worked out). */
+bool Gg_Judge(int team, char[] msg, int msgLen, char[] code, int codeLen, int &gapOut, int &bestOut)
+{
+	gapOut = -1;
+	bestOut = -1;
 	if (!g_cvGgEnable.BoolValue)
 	{
 		strcopy(msg, msgLen, "Forfeiting is turned off on this server.");
+		strcopy(code, codeLen, "off");
 		return false;
 	}
 	if (g_State != MS_Live)
 	{
 		strcopy(msg, msgLen, "There is no live match to forfeit.");
+		strcopy(code, codeLen, "not_live");
 		return false;
 	}
 	int a, b;
 	Gg_Totals(a, b);
 	int mine = (team == 1) ? a : b;
 	int theirs = (team == 1) ? b : a;
+	gapOut = theirs - mine;
 	if (mine >= theirs)
 	{
 		Format(msg, msgLen, "Your team is not behind (%d to %d).", mine, theirs);
+		strcopy(code, codeLen, "not_behind");
 		return false;
 	}
 	int best;
@@ -317,14 +332,18 @@ bool Gg_Allowed(int team, char[] msg, int msgLen)
 	if (!Gg_TeamCeiling(team, best, why, sizeof(why)))
 	{
 		Format(msg, msgLen, "Can't check the score right now: %s.", why);
+		strcopy(code, codeLen, "unknown");
 		return false;
 	}
+	bestOut = best;
 	int gap = theirs - mine;
 	if (gap <= best)
 	{
 		Format(msg, msgLen, "Still winnable: you are down %d and can score up to about %d. !gg opens when you are down more than that.", gap, best);
+		strcopy(code, codeLen, "winnable");
 		return false;
 	}
+	strcopy(code, codeLen, "ok");
 	return true;
 }
 
@@ -344,14 +363,17 @@ public Action Cmd_Gg(int client, int args)
 
 	if (g_iGgTeam != 0 && g_iGgTeam != team)
 	{
+		Gg_Emit("refused", team, slot, "other_team", -1, -1);
 		ReplyToCommand(client, "[PUG] The other team is voting to forfeit.");
 		return Plugin_Handled;
 	}
 
-	char msg[192];
-	if (!Gg_Allowed(team, msg, sizeof(msg)))
+	char msg[192], code[16];
+	int gap, best;
+	if (!Gg_Judge(team, msg, sizeof(msg), code, sizeof(code), gap, best))
 	{
 		if (g_iGgTeam == team) Gg_CancelVote();
+		Gg_Emit("refused", team, slot, code, gap, best);
 		ReplyToCommand(client, "[PUG] %s", msg);
 		return Plugin_Handled;
 	}
@@ -361,20 +383,26 @@ public Action Cmd_Gg(int client, int args)
 		int wait = g_iGgFailedAt[team] + GG_COOLDOWN - GetTime();
 		if (wait > 0)
 		{
+			Gg_Emit("refused", team, slot, "cooldown", gap, best);
 			ReplyToCommand(client, "[PUG] Your team's last forfeit vote failed. Try again in %d s.", wait);
 			return Plugin_Handled;
 		}
 		g_iGgTeam = team;
 		for (int i = 1; i <= MaxClients; i++) g_bGgYes[i] = false;
 		g_hGgTimer = CreateTimer(GG_VOTE_TIME, Timer_GgExpire);
+		g_bGgYes[client] = true;
+		Gg_Emit("start", team, slot, "", gap, best);
 	}
-
-	if (g_bGgYes[client])
+	else if (!g_bGgYes[client])
+	{
+		g_bGgYes[client] = true;
+		Gg_Emit("agree", team, slot, "", gap, best);
+	}
+	else
 	{
 		ReplyToCommand(client, "[PUG] You already voted to forfeit.");
 		return Plugin_Handled;
 	}
-	g_bGgYes[client] = true;
 
 	int yes, need;
 	Gg_Count(yes, need);
@@ -408,16 +436,19 @@ void Gg_TryPass()
 	if (need == 0 || yes < need) return;
 
 	int team = g_iGgTeam;
-	char msg[192];
+	char msg[192], code[16];
+	int gap, best;
 	// Judged again at the moment it passes: a round may have been scored
 	// since the first !gg.
-	if (!Gg_Allowed(team, msg, sizeof(msg)))
+	if (!Gg_Judge(team, msg, sizeof(msg), code, sizeof(code), gap, best))
 	{
 		Gg_CancelVote();
+		Gg_Emit("dropped", team, -1, code, gap, best, yes, need);
 		PrintToChatAll("[PUG] Forfeit vote dropped: %s", msg);
 		return;
 	}
 	Gg_CancelVote();
+	Gg_Emit("pass", team, -1, "", gap, best, yes, need);
 	Gg_Forfeit(team);
 }
 
@@ -428,6 +459,7 @@ public Action Timer_GgExpire(Handle timer)
 	int yes, need;
 	Gg_Count(yes, need);
 	PrintToChatAll("[PUG] Forfeit vote failed (%d/%d agreed). The match goes on.", yes, need);
+	Gg_Emit("fail", g_iGgTeam, -1, "timeout", -1, -1, yes, need);
 	g_iGgFailedAt[g_iGgTeam] = GetTime();
 	g_iGgTeam = 0;
 	return Plugin_Stop;
@@ -469,4 +501,29 @@ void Gg_ForfeitTail(char[] out, int maxlen)
 int Gg_ForfeitTeam()
 {
 	return g_iForfeitTeam;
+}
+
+/** One GG line per step of a vote, for the site's record of who tried to
+ *  forfeit and how it went:
+ *
+ *    GG event=<start|agree|pass|fail|dropped|refused> team=<a|b>
+ *       [steamid=<64>] [reason=<code>] gap=<n> best=<n> yes=<n> need=<n>
+ *
+ *  steamid is the player who typed !gg (start, agree, refused) and absent on
+ *  the team-wide outcomes. gap/best are -1 when they were never worked out.
+ *  yes/need are counted now when not passed in. */
+void Gg_Emit(const char[] ev, int team, int slot, const char[] reason, int gap, int best, int yes = -1, int need = -1)
+{
+	if (yes < 0 || need < 0)
+	{
+		if (g_iGgTeam != 0) Gg_Count(yes, need);
+		else { yes = 0; need = 0; }
+	}
+	char who[32], why[32];
+	if (slot >= 0) Format(who, sizeof(who), " steamid=%s", g_sRosterId[slot]);
+	else who[0] = '\0';
+	if (reason[0] != '\0') Format(why, sizeof(why), " reason=%s", reason);
+	else why[0] = '\0';
+	EmitPug("GG event=%s team=%s%s%s gap=%d best=%d yes=%d need=%d",
+		ev, team == 1 ? "a" : "b", who, why, gap, best, yes, need);
 }

@@ -1,3 +1,4 @@
+import { GG_EVENTS, type GgEvent, type GgLine } from './ggVotes.js';
 import type { LiveHudLine, TankDone, WitchDone } from './cast/liveHud.js';
 import { steamId64Of } from './steamId.js';
 import { MAX_HOLDS, decodeIntervals } from './inputStats.js';
@@ -105,6 +106,8 @@ export type LogEvent =
   | { kind: 'return'; token: string; steamid: string; remaining: number }
   | { kind: 'abandon'; token: string; steamid: string }
   | { kind: 'problem'; token: string; code: string }
+  // One step of an in-game !gg forfeit vote (pug-match 0.3.22, pug-gg.inc).
+  | ({ kind: 'gg' } & GgLine)
   | { kind: 'player'; token: string; steamid: string; event: 'connect' | 'disconnect' }
   | { kind: 'match_end'; token: string; a: number; b: number; winner: 'a' | 'b' | 'draw' }
   // Emitted by !load_4v4p for a match started in-game rather than by us. The
@@ -900,6 +903,19 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       // the backend owns the wording (matchTeardown.ts problemText).
       if (!/^[a-z_]{1,40}$/.test(rest.code ?? '')) return null;
       return { kind: 'problem', token, code: rest.code };
+    case 'GG': {
+      if (!(GG_EVENTS as readonly string[]).includes(rest.event ?? '')) return null;
+      if (rest.team !== 'a' && rest.team !== 'b') return null;
+      const steamid = rest.steamid === undefined ? null : rest.steamid;
+      if (steamid !== null && !/^\d{17}$/.test(steamid)) return null;
+      const reason = rest.reason === undefined ? null : rest.reason;
+      if (reason !== null && !/^[a-z_]{1,20}$/.test(reason)) return null;
+      const num = (v: string | undefined) => { const n = intOf(v); return n === null || n < 0 ? null : n; };
+      return {
+        kind: 'gg', token, event: rest.event as GgEvent, team: rest.team, steamid, reason,
+        gap: num(rest.gap), best: num(rest.best), yes: num(rest.yes) ?? 0, need: num(rest.need) ?? 0,
+      };
+    }
     case 'PLAYER': {
       if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
       if (rest.event !== 'connect' && rest.event !== 'disconnect') return null;

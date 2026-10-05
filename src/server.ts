@@ -57,6 +57,7 @@ import { BalanceRolloutWriter } from './balanceWriter.js';
 import { BalanceWatchWriter, renderWatchFile } from './balanceWatch.js';
 import { loadCatalogue, watchKnobs as watchKnobsWithCatalogue, type Catalogue } from './balanceCatalogue.js';
 import { FleetReader } from './fleetReader.js';
+import { recordGgLine } from './ggVotes.js';
 import { adminFleetRoutes } from './routes/adminFleet.js';
 import type { AddonsTransport } from './addonsTransport.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
@@ -1137,6 +1138,17 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             }
           } catch (err) {
             console.error('[presence] failed to record', ev.kind, err);
+          }
+          return;
+        }
+        if (ev.kind === 'gg') {
+          // A record of !gg attempts. Never on the result path: the forfeit
+          // itself arrives as MATCH_END like any other end.
+          try {
+            const { kind: _k, ...line } = ev;
+            recordGgLine(deps.db, line);
+          } catch (err) {
+            console.error('[gg] failed to record a vote line:', err);
           }
           return;
         }
