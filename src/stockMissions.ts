@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { missionFromLargeVpk, parseMission } from './vpk.js';
-import { campaignForMap } from './campaigns.js';
+import { missionsFromLargeVpk, parseMission, type Mission } from './vpk.js';
+import { campaignForMap, CRASH_CENTER_FIRST_MAP } from './campaigns.js';
 
 /**
  * The stock campaigns' chapter lists, read off disk.
@@ -47,23 +47,47 @@ export function readStockMissions(dirs: string[]): Map<string, StockChapter[]> {
       continue;
     }
     for (const name of names) {
-      let mission;
+      let missions: Mission[];
       try {
-        mission = PACK_VPK.test(name)
-          ? missionFromLargeVpk(join(dir, name))
-          : parseMission(readFileSync(join(dir, name), 'utf8'));
+        if (PACK_VPK.test(name)) {
+          missions = missionsFromLargeVpk(join(dir, name));
+        } else {
+          const one = parseMission(readFileSync(join(dir, name), 'utf8'));
+          missions = one ? [one] : [];
+        }
       } catch {
         continue;
       }
-      if (!mission || mission.chapters.length === 0) continue;
-      // Keyed by the SITE's slug, not the mission's own Name. A mission calls
-      // itself "airport" where this site says "dead_air", and campaignForMap
-      // already knows that mapping from the campaign word embedded in every
-      // stock map name. Deriving it from the first chapter avoids a second
-      // lookup table that would have to be kept in step with the first.
-      const slug = campaignForMap(mission.chapters[0].map);
-      if (slug) out.set(slug, mission.chapters);
+      for (const mission of missions) {
+        if (mission.chapters.length === 0) continue;
+        const slug = slugOf(mission);
+        if (slug) out.set(slug, mission.chapters);
+      }
     }
   }
   return out;
+}
+
+/**
+ * The site's slug for a mission. Keyed by the SITE's slug, not the mission's
+ * own Name: a mission calls itself "airport" where this site says "dead_air",
+ * and campaignForMap already knows that mapping from the campaign word embedded
+ * in every stock map name. Deriving it from the first chapter avoids a second
+ * lookup table that would have to be kept in step with the first.
+ *
+ * One exception. Crash Center (Hotel, Streets, Mall, Alleys, Atrium) lives in
+ * Crash Course's own garage.txt, because L4D1 resolves a map to the first
+ * mission that lists it and garage.txt loads before the pack's deadcenter.txt
+ * (deploy/deadcenter/missions/). Its first chapter is Dead Center's, so the
+ * first-chapter rule would file it under dead_center and overwrite Dead
+ * Center's own list. It is told apart by its Name. The base game's stock
+ * garage.txt (Alleys, Lots) carries the same Name and is not a site campaign,
+ * so it is only Crash Center when it starts where Crash Center starts.
+ */
+function slugOf(mission: Mission): string | null {
+  const first = mission.chapters[0].map;
+  if (mission.name.toLowerCase() === 'garage') {
+    return first.toLowerCase() === CRASH_CENTER_FIRST_MAP ? 'crash_center' : null;
+  }
+  return campaignForMap(first);
 }
