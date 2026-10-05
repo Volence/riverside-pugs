@@ -24,6 +24,7 @@ import { PeopleSearch } from './admin/PeopleSearch';
 import { NeedsALook } from './admin/NeedsALook';
 import { PeopleBans } from './admin/PeopleBans';
 import { PeopleAlts } from './admin/PeopleAlts';
+import { PeoplePings } from './admin/PeoplePings';
 import { PeopleAppeals } from './admin/PeopleAppeals';
 import { AdminAppeal } from './admin/AdminAppeal';
 import { PlayerFile } from './admin/file/PlayerFile';
@@ -123,6 +124,7 @@ export function Admin({ session }: { session: Session }) {
         {r.desk === 'people' && r.section === 'review' && <NeedsALook isAdmin={isAdmin} />}
         {r.desk === 'people' && r.section === 'bans' && <PeopleBans />}
         {r.desk === 'people' && r.section === 'alts' && <PeopleAlts isAdmin={isAdmin} />}
+        {r.desk === 'people' && r.section === 'pings' && <PeoplePings />}
         {r.desk === 'people' && r.section === 'tickets' && <AdminTickets onOpen={(id) => route(ticketUrl(id))} />}
         {r.desk === 'people' && r.section === 'calls' && <AdminCalls />}
         {r.desk === 'people' && r.section === 'appeals' && <PeopleAppeals />}

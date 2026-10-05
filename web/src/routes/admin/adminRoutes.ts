@@ -34,6 +34,7 @@ export const PEOPLE_TABS: { key: string; label: string; path: string }[] = [
   { key: 'review', label: 'Needs a look', path: '/admin/people/review' },
   { key: 'bans', label: 'Bans', path: '/admin/people/bans' },
   { key: 'alts', label: 'Alts', path: '/admin/people/alts' },
+  { key: 'pings', label: 'Pings', path: '/admin/people/pings' },
   { key: 'tickets', label: 'Tickets', path: '/admin/people/tickets' },
   { key: 'appeals', label: 'Appeals', path: '/admin/people/appeals' },
   { key: 'calls', label: 'In-game calls', path: '/admin/people/calls' },
@@ -109,6 +110,7 @@ export function parseAdminPath(path: string, opts: { isAdmin: boolean }): AdminR
     if (a === 'review') return { desk: 'people', section: 'review', param: null };
     if (a === 'bans') return { desk: 'people', section: 'bans', param: null };
     if (a === 'alts') return { desk: 'people', section: 'alts', param: null };
+    if (a === 'pings' && b === '') return { desk: 'people', section: 'pings', param: null };
     if (a === 'guide' && b === '') return { desk: 'people', section: 'guide', param: null };
     if (a === 'calls' && b === '') return { desk: 'people', section: 'calls', param: null };
     if (a === 'tickets') {

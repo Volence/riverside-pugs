@@ -215,6 +215,14 @@ describe('POST /api/admin/live/:matchId/players/:steamid/leave', () => {
     expect((await audit()).some((a: { action: string }) => a.action === 'server_move')).toBe(true);
   });
 
+  it('staff see the ping table, a player does not', async () => {
+    const get = (who: string) => app.inject({ method: 'GET', url: '/api/admin/people/pings', cookies: cookies[who] });
+    const res = await get(MOD);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ hosts: [], players: [], pickByPing: false });
+    expect((await get(PLAYER)).statusCode).toBe(403);
+  });
+
   it('a plain player is still refused the board', async () => {
     expect((await app.inject({ method: 'GET', url: '/api/admin/live', cookies: cookies[PLAYER] })).statusCode).toBe(403);
     expect((await act({ action: 'hold' }, PLAYER)).statusCode).toBe(403);
