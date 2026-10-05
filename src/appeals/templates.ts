@@ -1,0 +1,55 @@
+import type { DB } from '../db.js';
+import { appealSettings, nextAppealAt } from './rules.js';
+import { refOf, type AppealRow, type AppealState } from './types.js';
+
+export const STATE_LABEL: Record<AppealState, string> = {
+  open: 'Waiting for staff',
+  asked: 'Question asked',
+  answered: 'Answered, waiting for staff',
+  accepted: 'Accepted',
+  shortened: 'Shortened',
+  denied: 'Denied',
+  auto_denied: 'Denied automatically',
+  lapsed: 'No answer in time',
+  moot: 'Closed, the ban ended',
+};
+
+const fmt = (iso: string) => new Date(iso).toUTCString().replace(/:\d\d GMT$/, ' UTC');
+const answerBy = (db: DB, row: AppealRow) => new Date(Date.parse(row.asked_at!) + appealSettings(db).answerHours * 3600_000).toISOString();
+
+function again(db: DB, row: AppealRow, now: Date): string {
+  const at = nextAppealAt(db, refOf(row), now);
+  return at ? ` You can appeal again after ${fmt(at)}.` : '';
+}
+
+/** What the appellant reads on the site. Fixed sentences only: staff never
+ *  add their own words to an outcome. */
+export function playerLine(db: DB, row: AppealRow, now = new Date()): string | null {
+  switch (row.state) {
+    case 'open': case 'answered': return 'Your appeal was received. Staff will review it.';
+    case 'asked': return `Staff have one question about your appeal. Answer it by ${fmt(answerBy(db, row))}.`;
+    case 'accepted': return 'Your appeal was accepted. The ban has been lifted.';
+    case 'shortened': return `Your appeal was reviewed. The ban now ends ${fmt(row.new_expires_at!)}.`;
+    case 'denied': case 'auto_denied': case 'lapsed': return `Your appeal was reviewed and the ban stands.${again(db, row, now)}`;
+    case 'moot': return null;
+  }
+}
+
+/** The DM for a state, or null when that state sends none ('open' and
+ *  'answered' are the appellant's own doing; 'moot' needs no word). */
+export function dmText(db: DB, row: AppealRow, publicUrl: string, now = new Date()): string | null {
+  const link = `${publicUrl}/appeal`;
+  switch (row.state) {
+    case 'open': case 'answered': case 'moot': return null;
+    case 'asked': return `Staff have one question about your appeal:\n> ${row.question!.replace(/\n/g, '\n> ')}\nAnswer it at ${link} by <t:${Math.floor(Date.parse(answerBy(db, row)) / 1000)}:f>.`;
+    default: return `${playerLine(db, row, now)} (${link})`;
+  }
+}
+
+/** Sent to a Discord member when the bot times them out or bans them. */
+export function sanctionDmText(kind: 'timeout' | 'ban', until: string | null, reason: string, appealUrl: string | null): string {
+  const what = kind === 'ban'
+    ? 'You have been banned from the Riverside Discord'
+    : `You have been timed out in the Riverside Discord until <t:${Math.floor(Date.parse(until!) / 1000)}:f>`;
+  return `${what}. Reason: ${reason}.${appealUrl ? `\nIf you think this was a mistake, you can appeal at ${appealUrl}` : ''}`;
+}
