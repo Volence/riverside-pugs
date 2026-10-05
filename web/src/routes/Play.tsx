@@ -7,6 +7,7 @@ import { Countdown, useSecondsLeft } from '../components/Countdown';
 import { QUEUE_SIZE } from '../queueSize';
 import { Empty, Panel, PlayerLink } from '../components/bits';
 import { useFetch } from '../hooks/useFetch';
+import { AppealBox } from '../components/AppealBox';
 import { CampaignTiles } from '../components/CampaignTiles';
 import { ConnectPanel } from '../components/ConnectPanel';
 import { SpectatePanel } from '../components/SpectatePanel';
@@ -33,10 +34,7 @@ export function Play(
           <p class="eyebrow">On hold</p>
           <h2>Your account is on hold</h2>
           <p>{session.me.ban.reason}.</p>
-          <p class="muted">
-            If you moved to a new Steam account or lost your old one, message a moderator in the Discord
-            and tell them what happened. They can lift the hold.
-          </p>
+          <AppealBox fallback="If you moved to a new Steam account or lost your old one, message a moderator in the Discord and tell them what happened. They can lift the hold." />
         </Panel>
       </div>
     );
@@ -49,7 +47,7 @@ export function Play(
           <h2>You are banned from the PUG</h2>
           {session.me.ban && <p>Reason: <strong>{session.me.ban.reason}</strong></p>}
           {session.me.ban?.expiresAt && <p>Ends {new Date(session.me.ban.expiresAt).toLocaleString()}.</p>}
-          <p class="muted">To appeal, message an admin in the Discord.</p>
+          <AppealBox fallback="To appeal, message an admin in the Discord." />
         </Panel>
       </div>
     );

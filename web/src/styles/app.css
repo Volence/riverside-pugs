@@ -609,6 +609,13 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 
 .stack { display: flex; flex-direction: column; gap: var(--sp-5); }
 
+/* One ban, hold or Discord sanction inside AppealBox (web/src/components/AppealBox.tsx).
+ * Several can sit in the same .stack on /appeal; a top rule separates them
+ * the way .hud__tbrow + .hud__tbrow does. */
+.appeal-item + .appeal-item { border-top: 1px solid var(--border); padding-top: var(--sp-5); }
+.appeal-item label { display: block; margin-top: var(--sp-3); }
+.appeal-item textarea { width: 100%; margin-top: var(--sp-2); min-height: 6rem; resize: vertical; box-sizing: border-box; font: inherit; }
+
 .muted { color: var(--text-muted); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8em; overflow-wrap: anywhere; }
 .empty { color: var(--text-muted); font-size: var(--fs-dense); margin: 0; }

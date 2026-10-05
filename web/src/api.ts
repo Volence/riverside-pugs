@@ -1562,6 +1562,27 @@ export const peopleApi = {
   banFromHold: (id: number, reason: string) => post<{ ok: true }>(`/api/admin/people/alts/${id}/ban`, { reason }),
 };
 
+/** The state machine behind an appeal (src/appeals/types.ts). */
+export type AppealState = 'open' | 'asked' | 'answered' | 'accepted' | 'shortened' | 'denied' | 'auto_denied' | 'lapsed' | 'moot';
+/** Which ban or sanction an appeal is about. A body names this; the server
+ *  only accepts it if it is among the signed-in identity's own active ones. */
+export interface AppealRef { kind: 'ban' | 'sanction'; id: number }
+/** One ban, hold or Discord sanction as seen by the person it was issued to. */
+export interface PlayerAppealItem {
+  ref: AppealRef; hold: boolean; sanctionKind: 'timeout' | 'ban' | null; reason: string; endsAt: string | null;
+  canAppeal: boolean; refusal: string | null;
+  appeal: { id: number; state: AppealState; question: string | null; answerBy: string | null; line: string | null; filedAt: string } | null;
+}
+export interface MyAppeals { enabled: boolean; signedInAs: 'steam' | 'discord'; name: string; textMax: number; answerMax: number; items: PlayerAppealItem[] }
+
+export const appealApi = {
+  mine: (signal?: AbortSignal) => get<MyAppeals>('/api/appeals/mine', signal),
+  file: (ref: AppealRef, whatHappened: string, whyLift: string) =>
+    post<{ ok: true; id: number; state: AppealState }>('/api/appeals', { kind: ref.kind, id: ref.id, whatHappened, whyLift }),
+  answer: (id: number, answer: string) => post<{ ok: true }>(`/api/appeals/${id}/answer`, { answer }),
+  signOut: () => post<{ ok: true }>('/api/appeals/sign-out'),
+};
+
 /** An alt hold: `steamid` was held because its Discord came from
  *  `otherSteamid`. See src/altHolds.ts. */
 export interface AltHold {
