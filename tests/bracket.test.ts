@@ -14,9 +14,9 @@ async function playAll(d: BracketData, pick: (m: ReturnType<typeof bracketMatche
 }
 
 describe('bracket', () => {
-  it('single elimination of 5 gives the top 3 seeds byes and shows no bye matches', async () => {
+  it('single elimination of 5 gives the top 3 seeds byes, shows no bye matches, and readies every match whose two teams are known', async () => {
     const d = await createBracket('single_elim', { thirdPlace: false }, [101, 102, 103, 104, 105]);
-    expect(ready(d).map((m) => [m.a, m.b])).toEqual([[104, 105]]);
+    expect(ready(d).map((m) => [m.a, m.b]).sort()).toEqual([[102, 103], [104, 105]]);
     expect(bracketMatches(d).every((m) => m.a !== null || m.state === 'pending')).toBe(true);
     const done = await playAll(d, () => aWins);
     expect(bracketComplete(done)).toBe(true);

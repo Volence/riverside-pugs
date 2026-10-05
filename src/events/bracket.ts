@@ -89,49 +89,12 @@ export async function reportResult(data: BracketData, bmId: number, r: ResultInp
   return snapshot(store);
 }
 
-/** A bye, or a match already decided: nothing further has to happen before
- *  dependent rounds can be exposed. */
-const settledForGating = (m: BmMatch): boolean => m.opponent1 === null || m.opponent2 === null || m.status >= DONE;
-
-/**
- * Elimination rounds are presented one at a time within a group: a round is
- * only exposed once every match of the round before it (in the same group)
- * is settled. Without this, a field that is not a power of two gives some
- * seeds a bye straight into round 2, and if both round-2 slots are filled by
- * byes that match is immediately "ready" by the library's own status even
- * though the round 1 match that is actually being played has not finished.
- * Round robin has no such chain (every match in a group is independent), so
- * this only runs for single and double elimination.
- */
-function unlockedRounds(t: Tables, roundNo: Map<number, number>): Set<number> {
-  const byGroup = new Map<number, Map<number, BmMatch[]>>();
-  for (const m of t.match) {
-    if (!byGroup.has(m.group_id)) byGroup.set(m.group_id, new Map());
-    const rounds = byGroup.get(m.group_id)!;
-    if (!rounds.has(m.round_id)) rounds.set(m.round_id, []);
-    rounds.get(m.round_id)!.push(m);
-  }
-  const unlocked = new Set<number>();
-  for (const rounds of byGroup.values()) {
-    const roundIds = [...rounds.keys()].sort((x, y) => roundNo.get(x)! - roundNo.get(y)!);
-    let priorSettled = true;
-    for (const rid of roundIds) {
-      if (priorSettled) unlocked.add(rid);
-      else break;
-      priorSettled = rounds.get(rid)!.every(settledForGating);
-    }
-  }
-  return unlocked;
-}
-
 export function bracketMatches(data: BracketData): BracketMatch[] {
   const t = data.tables as unknown as Tables;
   const entryOf = new Map(t.participant.map((p) => [p.id, Number(p.name)]));
   const groupNo = new Map(t.group.map((g) => [g.id, g.number]));
   const roundNo = new Map(t.round.map((r) => [r.id, r.number]));
   const double = t.stage[0]?.type === 'double_elimination';
-  const roundRobin = t.stage[0]?.type === 'round_robin';
-  const unlocked = roundRobin ? null : unlockedRounds(t, roundNo);
   const out: BracketMatch[] = [];
   for (const m of t.match) {
     if (m.opponent1 === null || m.opponent2 === null) continue;
@@ -144,11 +107,10 @@ export function bracketMatches(data: BracketData): BracketMatch[] {
     const a = m.opponent1.id === null ? null : entryOf.get(m.opponent1.id) ?? null;
     const b = m.opponent2.id === null ? null : entryOf.get(m.opponent2.id) ?? null;
     const done = m.status >= DONE;
-    const roundReady = unlocked === null || unlocked.has(m.round_id);
     const winner = m.opponent1.result === 'win' ? a : m.opponent2.result === 'win' ? b : null;
     out.push({
       bmId: m.id, group, round, number: m.number, a, b,
-      state: done ? 'done' : a !== null && b !== null && roundReady ? 'ready' : 'pending',
+      state: done ? 'done' : a !== null && b !== null ? 'ready' : 'pending',
       winner: done ? winner : null,
       scoreA: done ? m.opponent1.score ?? null : null, scoreB: done ? m.opponent2.score ?? null : null,
       forfeit: done && (m.opponent1.forfeit === true || m.opponent2.forfeit === true),
