@@ -70,15 +70,18 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
   const requireActive = makeRequireActive(db);
   const requireMod = makeRequireMod(db);
   const filing = { adminSteamIds };
-  /** Tell the person, with where to appeal while appeals are on. Never fails
-   *  the action: a closed DM is ordinary. */
+  /** Tell the person where to appeal, while appeals are on. With appeals
+   *  off there is nowhere to send them, so nothing goes out at all: a DM
+   *  that only ever said "we banned you" with no way to contest it is the
+   *  dark-ship bug this guards against. Never fails the action otherwise: a
+   *  closed DM is ordinary. */
   const tellSanctioned = async (discordId: string, kind: 'timeout' | 'ban', minutes: number | null, reason: string) => {
+    if (getSetting(db, 'appeals_enabled') !== '1') return;
     const send = dm();
     if (!send) return;
     const until = kind === 'timeout' && minutes ? new Date(Date.now() + minutes * 60_000).toISOString() : null;
-    const appealUrl = getSetting(db, 'appeals_enabled') === '1' ? `${publicUrl}/appeal` : null;
     try {
-      await send(discordId, { content: sanctionDmText(kind, until, reason, appealUrl), embeds: [], components: [] });
+      await send(discordId, { content: sanctionDmText(kind, until, reason, `${publicUrl}/appeal`), embeds: [], components: [] });
     } catch (err) {
       console.log('[tickets] could not DM a sanctioned member:', String(err));
     }
@@ -345,7 +348,6 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     const sanctionQuiet = quiet(id);
     try {
       recordDiscordSanction(db, plan, me);
-      if (plan.kind === 'timeout') await tellSanctioned(plan.discordId, 'timeout', plan.minutes, plan.reason);
     } catch (err) {
       // The admin feed reaches everyone with feed access, wider than a
       // restricted ticket's own list, so a quiet ticket's problem event must
@@ -360,6 +362,9 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
       });
       return reply.code(500).send({ error: 'Discord applied it, but recording it failed; an admin has been told' });
     }
+    // Only now the write has committed: a timeout DM that went out before
+    // the record landed would be sent even if the write below then failed.
+    if (plan.kind === 'timeout') await tellSanctioned(plan.discordId, 'timeout', plan.minutes, plan.reason);
     // The reason is not in the audit detail, as with removals: it is on the
     // ticket (recordDiscordSanction put it in a ticket_events row), and an
     // audit detail is read by more people than that.
