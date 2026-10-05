@@ -158,26 +158,21 @@ describe('campaignVoteName', () => {
   // The Parish plays with night mode on, and only its vote name says so.
   it('gives The Parish its easter-egg name in the vote only', async () => {
     const { campaignDisplayName, campaignVoteName } = await import('../src/campaignRegistry.js');
-    const name = campaignVoteName(db, 'the_parish');
-    // Glitch text: The Parish??? under stacked combining marks.
-    expect(name.normalize('NFD').replace(/[\u0300-\u036f]/g, '')).toBe('The Parish???');
-    expect(name).not.toBe('The Parish???');
-    // A Discord button label holds 80, and the vote count follows the name.
-    expect(`${name} (12)`.length).toBeLessThanOrEqual(80);
+    expect(campaignVoteName(db, 'the_parish')).toBe('The Parish???');
     expect(campaignDisplayName(db, 'the_parish')).toBe('The Parish');
   });
 
-  // Dead Center, Dark Carnival and Hard Rain went into the pool at night too.
+  // The other night campaigns too, in plain text (the glitch marks came off
+  // 2026-10-05).
   it.each([
     ['dead_center', 'Dead Center'],
     ['dark_carnival', 'Dark Carnival'],
     ['hard_rain', 'Hard Rain'],
-  ])('glitches %s in the vote only', async (slug, plain) => {
+    ['swamp_fever', 'Swamp Fever'],
+    ['the_passing', 'Passifice'],
+  ])('adds ??? to %s in the vote only', async (slug, plain) => {
     const { campaignDisplayName, campaignVoteName } = await import('../src/campaignRegistry.js');
-    const name = campaignVoteName(db, slug);
-    expect(name.normalize('NFD').replace(/[\u0300-\u036f]/g, '')).toBe(`${plain}???`);
-    expect(name).not.toBe(`${plain}???`);
-    expect(`${name} (12)`.length).toBeLessThanOrEqual(80);
+    expect(campaignVoteName(db, slug)).toBe(`${plain}???`);
     expect(campaignDisplayName(db, slug)).toBe(plain);
   });
 
