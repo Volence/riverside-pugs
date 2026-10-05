@@ -97,6 +97,16 @@ describe('the live board', () => {
     expect((await row('frank')).textContent).toContain('2:20 of reconnect time left');
   });
 
+  it('names the night mode look on the server, its layers on hover', async () => {
+    mockAdmin.live.mockResolvedValue(board({ look: {
+      title: 'Storm', preset: 'storm', at: '2026-09-21T20:05:00.000Z',
+      layers: { time: 'night', weather: 'storm', moon: 'none', event: 'none', power: 'on' },
+    } }));
+    render(<AdminLive isAdmin />);
+    const tag = await screen.findByText('Storm');
+    expect(tag.getAttribute('title')).toContain('weather storm');
+  });
+
   it('holds a dropped player\'s clock in one click, with no dialog in the way', async () => {
     render(<><AdminLive isAdmin /><ConfirmHost /></>);
     fireEvent.click(within(await row('bob')).getByRole('button', { name: 'Hold' }));

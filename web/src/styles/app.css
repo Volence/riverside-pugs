@@ -2316,6 +2316,7 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .live-card.is-target { border-color: var(--accent); }
 .live-card__line { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: baseline; }
 .live-card__line h3 { margin: 0; }
+.live-card__look { border: 1px solid var(--border-strong); padding: 0 var(--sp-2); font-size: 0.85em; letter-spacing: 0.04em; text-transform: uppercase; color: var(--rating); }
 .live-card__clocks { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin: var(--sp-2) 0 var(--sp-3); font-size: var(--fs-dense); }
 .live-clock.is-low { color: var(--loss); }
 .live-clock.is-held { color: var(--rating); }
