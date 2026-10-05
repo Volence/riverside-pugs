@@ -9,6 +9,7 @@ import { upsertPlayer } from '../src/players.js';
 import { insertBan, banMessage } from '../src/admin/players.js';
 import { APPEAL_COOKIE } from '../src/appeals/appealSession.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
+import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 
 export const P = '76561198000000001';
 export const Q = '76561198000000002';
@@ -128,6 +129,44 @@ describe('staff appeal routes', () => {
     expect(r.statusCode).toBe(200);
     expect(fake.moderationCalls).toMatchObject([{ op: 'removeTimeout', userId: '901' }]);
     expect(db.prepare('SELECT lifted_by FROM discord_sanctions WHERE id = ?').get(sid)).toEqual({ lifted_by: MOD });
+  });
+
+  // Discord is lifted before recordDecision writes: if that write then
+  // loses (somebody else decided first, or the sweep mooted it), the lift
+  // already happened for real and must still be recorded, not left
+  // dangling with discord_sanctions saying "active".
+  it('a decision that loses the race to an earlier one still records the Discord lift, and reports a quiet problem', async () => {
+    const { mod } = staff();
+    const sid = Number(db.prepare(`INSERT INTO discord_sanctions (discord_id, kind, until, reason, created_by, created_at)
+      VALUES ('901', 'timeout', ?, 'spam', ?, ?)`).run(new Date(Date.now() + 7 * 86400_000).toISOString(), MOD, new Date().toISOString()).lastInsertRowid);
+    const id = await fileAs(discordCookie('901'), 'sanction', sid);
+    const removeTimeout = fake.moderation.removeTimeout;
+    // Stands in for the race: between this request's decideCheck and its
+    // recordDecision write, another request (or the sweep) decides first.
+    fake.moderation.removeTimeout = async (userId, reason) => {
+      db.prepare("UPDATE appeals SET state = 'denied', decided_by = ?, decided_at = ? WHERE id = ?").run(ADMIN, new Date().toISOString(), id);
+      return removeTimeout(userId, reason);
+    };
+    try {
+      const seen: AdminEvent[] = [];
+      const off = subscribeAdminEvents((e) => seen.push(e));
+      const r = await app.inject({ method: 'POST', url: `/api/mod/appeals/${id}/decide`, cookies: mod, payload: { outcome: 'accept' } });
+      off();
+      expect(r.statusCode).toBe(409);
+      expect(r.json().error).toBe('this appeal has already been decided');
+      // Discord really did lift it, so the row must say so despite the race.
+      expect(db.prepare('SELECT lifted_at IS NOT NULL AS lifted, lifted_by FROM discord_sanctions WHERE id = ?').get(sid))
+        .toEqual({ lifted: 1, lifted_by: MOD });
+      const problems = seen.filter((e) => e.kind === 'problem');
+      expect(problems).toHaveLength(1);
+      const text = (problems[0] as Extract<AdminEvent, { kind: 'problem' }>).text;
+      expect(text).toContain(`Appeal #${id}`);
+      expect(text).toContain('already been decided');
+      // No Discord id or name leaks into the admin feed problem line.
+      expect(text).not.toContain('901');
+    } finally {
+      fake.moderation.removeTimeout = removeTimeout;
+    }
   });
 
   it('only an admin marks a ban final', async () => {
