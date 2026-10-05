@@ -4,9 +4,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as E from '../src/events/events.js';
 import * as N from '../src/events/entries.js';
+import * as P from '../src/events/play.js';
 import * as V from '../src/events/validate.js';
+import { createBracket } from '../src/events/bracket.js';
 import { ADMIN, NOW, START, eventFixture, stageBody, type Fixture } from './eventFixture.js';
 import { A, entryFixture, rosterA, type EntryFixture } from './entryFixture.js';
+import { SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
 
 /**
  * Spec, Error handling: every event state change is one transaction with an
@@ -27,7 +30,7 @@ import { A, entryFixture, rosterA, type EntryFixture } from './entryFixture.js';
 
 const WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:events|event_stages|event_log)\b/gi;
 const ENTRY_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:event_entries|event_entry_players)\b/gi;
-const ENGINE = new Set(['src/events/events.ts', 'src/events/entries.ts']);
+const ENGINE = new Set(['src/events/events.ts', 'src/events/entries.ts', 'src/events/play.ts']);
 const READS = new Set(['getEvent', 'getEventBySlug', 'getStage', 'stagesOf', 'eventLog', 'fieldsOf', 'stageSettingsOf', 'stageContext']);
 /** Exported for entries.ts to write its own audit row; never a mutation itself. */
 const HELPERS = new Set(['logEvent']);
@@ -64,7 +67,7 @@ const walk = (dir: string): string[] => readdirSync(join(root, dir), { withFileT
   .flatMap((e) => (e.isDirectory() ? walk(`${dir}/${e.name}`) : e.name.endsWith('.ts') ? [`${dir}/${e.name}`] : []));
 
 describe('event_log guard', () => {
-  it('only src/events/events.ts and src/events/entries.ts write the event tables', () => {
+  it('only src/events/events.ts, entries.ts and play.ts write the event tables', () => {
     const offenders = walk('src')
       .filter((f) => !ENGINE.has(f))
       .filter((f) => (readFileSync(join(root, f), 'utf8').match(WRITERS) ?? []).length > 0);
@@ -75,7 +78,7 @@ describe('event_log guard', () => {
 
   it('only src/events/entries.ts (and the account merge) writes the entry tables', () => {
     const offenders = walk('src')
-      .filter((f) => f !== 'src/events/entries.ts' && f !== 'src/mergePlayers.ts')
+      .filter((f) => f !== 'src/events/entries.ts' && f !== 'src/events/play.ts' && f !== 'src/mergePlayers.ts')
       .filter((f) => (readFileSync(join(root, f), 'utf8').match(ENTRY_WRITERS) ?? []).length > 0);
     expect(offenders).toEqual([]);
   });
@@ -260,5 +263,81 @@ describe('event_log guard', () => {
         expect(entryRows(f)).toBe(before);
       });
     }
+  });
+
+  /** Plan T2: src/events/play.ts is the only writer of event_matches, and
+   *  its mutations follow the same one-row rule. */
+  describe('play guard (src/events/play.ts)', () => {
+    const MATCH_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+event_matches\b/gi;
+    const PLAY_READS = new Set(['getMatch', 'matchesOf', 'stageEntrants', 'stageBracket', 'activeSeeded', 'totalRounds']);
+    const aWins = { winner: 'a' as const, scoreA: 10, scoreB: 5, forfeit: false };
+    const ok = <T>(r: V.Checked<T>): T => { if (!r.ok) throw new Error(r.error); return r.value; };
+    const plan = (f: PlayFixture): P.StagePlan => ({
+      stageId: f.stages[0]!, entrants: f.entries, bracket: null,
+      rounds: [{ round: 1, pairs: [[f.entries[0]!, f.entries[2]!], [f.entries[1]!, f.entries[3]!]], bye: null }],
+    });
+    const started = (f: PlayFixture) => ok(P.startEvent(f.db, { eventId: f.eventId, by: ADMIN, plan: plan(f), now: NOW }));
+    const allPlayed = (f: PlayFixture) => {
+      for (const m of P.matchesOf(f.db, f.stages[0]!)) if (m.status === 'waiting') ok(P.recordResult(f.db, { matchId: m.id, by: ADMIN, result: aWins, bracket: null, now: NOW }));
+    };
+    const PLAY_MUTATIONS: Record<string, { action: string; actor: string | null; setup: (f: PlayFixture) => void; run: (f: PlayFixture) => V.Checked<unknown> }> = {
+      startEvent: { action: 'event_started', actor: ADMIN, setup: () => {}, run: (f) => P.startEvent(f.db, { eventId: f.eventId, by: ADMIN, plan: plan(f), now: NOW }) },
+      recordResult: {
+        action: 'result_recorded', actor: ADMIN, setup: started,
+        run: (f) => P.recordResult(f.db, { matchId: P.matchesOf(f.db, f.stages[0]!)[0]!.id, by: ADMIN, result: aWins, bracket: null, now: NOW }),
+      },
+      addRound: {
+        action: 'round_paired', actor: null, setup: (f) => { started(f); allPlayed(f); },
+        run: (f) => P.addRound(f.db, { stageId: f.stages[0]!, round: { round: 2, pairs: [[f.entries[0]!, f.entries[1]!], [f.entries[2]!, f.entries[3]!]], bye: null }, now: NOW }),
+      },
+      finishStage: {
+        action: 'stage_finished', actor: null, setup: (f) => { started(f); allPlayed(f); },
+        run: (f) => P.finishStage(f.db, { stageId: f.stages[0]!, outcome: { ranks: f.entries.map((entryId, i) => ({ entryId, rank: i + 1 })), advance: [] }, next: null, now: NOW }),
+      },
+    };
+    const fixture = () => playFixture({ stages: [SWISS(2, null)], entries: 4 });
+    const rows = (f: PlayFixture) => JSON.stringify(['events', 'event_stages', 'event_entries', 'event_matches']
+      .map((t) => f.db.prepare(`SELECT * FROM ${t} ORDER BY id`).all()));
+
+    it('only src/events/play.ts writes event_matches', () => {
+      const offenders = walk('src').filter((f) => f !== 'src/events/play.ts')
+        .filter((f) => (readFileSync(join(root, f), 'utf8').match(MATCH_WRITERS) ?? []).length > 0);
+      expect(offenders).toEqual([]);
+    });
+
+    it('every exported function of play.ts is a known read or a guarded mutation', () => {
+      const fns = Object.entries(P).filter(([, v]) => typeof v === 'function').map(([k]) => k);
+      expect(fns.filter((k) => !PLAY_READS.has(k)).sort()).toEqual(Object.keys(PLAY_MUTATIONS).sort());
+    });
+
+    for (const [name, m] of Object.entries(PLAY_MUTATIONS)) {
+      it(`${name} writes exactly one event_log row, ${m.action}`, () => {
+        const f = fixture();
+        m.setup(f);
+        const before = logCount(f);
+        const r = m.run(f);
+        expect(r.ok, r.ok ? '' : r.error).toBe(true);
+        expect(logCount(f)).toBe(before + 1);
+        expect(f.db.prepare('SELECT action, actor FROM event_log ORDER BY id DESC LIMIT 1').get()).toEqual({ action: m.action, actor: m.actor });
+      });
+
+      it(`${name} writes nothing when its event_log row cannot be written`, () => {
+        const f = fixture();
+        m.setup(f);
+        const before = rows(f);
+        f.db.exec(`CREATE TRIGGER play_log_down_${name} BEFORE INSERT ON event_log WHEN NEW.action = '${m.action}' BEGIN SELECT RAISE(ABORT, 'audit down'); END`);
+        expect(() => m.run(f)).toThrow(/audit down/);
+        expect(rows(f)).toBe(before);
+      });
+    }
+
+    it('a bracket start and result write nothing either when the audit row fails', async () => {
+      const f = playFixture({ stages: [SE()], entries: 4 });
+      const bracket = await createBracket('single_elim', { thirdPlace: false }, f.entries);
+      const before = rows(f);
+      f.db.exec("CREATE TRIGGER bracket_log_down BEFORE INSERT ON event_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
+      expect(() => P.startEvent(f.db, { eventId: f.eventId, by: ADMIN, plan: { stageId: f.stages[0]!, entrants: f.entries, bracket, rounds: [] }, now: NOW })).toThrow(/audit down/);
+      expect(rows(f)).toBe(before);
+    });
   });
 });
