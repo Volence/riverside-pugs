@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { mapLooksFor } from '../mapLooks.js';
 import type { DB } from '../db.js';
 import { createReadStream } from 'node:fs';
 import { makeOptionalViewer, makeRequireActive } from './guards.js';
@@ -220,10 +221,13 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // plugin could not attribute or read), and the page must say "not
     // recorded" instead of 0 to 0. See unrecordedOrdinals for the rule.
     const unrecorded = unrecordedOrdinals(db, id);
+    // The look (time of day, weather) l4d_nightmode had on each map, from its
+    // log lines; null for a match played before the plugin logged one.
+    const looks = mapLooksFor(db, id);
     const maps = (db.prepare(
       'SELECT ordinal, map, team_a_score AS teamAScore, team_b_score AS teamBScore FROM match_maps WHERE match_id = ? ORDER BY ordinal',
     ).all(id) as { ordinal: number }[]).map((mp) => ({
-      ...mp, stats: byMap.get(mp.ordinal) ?? {}, recorded: !unrecorded.has(mp.ordinal),
+      ...mp, stats: byMap.get(mp.ordinal) ?? {}, recorded: !unrecorded.has(mp.ordinal), look: looks.get(mp.ordinal) ?? null,
     }));
     const statRows = db.prepare(
       'SELECT player_id, stat, value FROM match_player_stats WHERE match_id = ?',

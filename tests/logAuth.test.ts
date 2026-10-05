@@ -171,6 +171,13 @@ describe('LogAuth', () => {
     expect(auth.counters(chicago).missing).toBe(0);
   });
 
+  it('cannot sign l4d_nightmode\'s look line either (not pug-match), so lets it through unverified', () => {
+    setLogAuthMode(db, chicago, 'enforce');
+    const look = plain('[nightmode] look "Midnight" preset "midnight" time=midnight weather=clear moon=pale event=none power=on');
+    expect(check(look)).toMatchObject({ accept: true, verified: false });
+    expect(auth.counters(chicago).missing).toBe(0);
+  });
+
   it('treats a server with a mode but no secret as off: there is nothing to check against', () => {
     db.prepare("UPDATE servers SET log_secret = NULL, log_auth = 'enforce' WHERE id = ?").run(chicago);
     expect(check(plain(LILAC)).accept).toBe(true);

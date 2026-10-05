@@ -4,6 +4,7 @@ import { hasStaffFlag } from '../tickets/store.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { makeRequireAdmin, makeRequireMod } from './guards.js';
 import { queueActivity } from '../queueActivity.js';
+import { lookStats } from '../mapLooks.js';
 import type { ServerReleaser } from '../serverRelease.js';
 import { getServer, listServers, serversMissingDlc4, setEnabled, setHasDlc4, setRestartAfterMatch, type ServerRow } from '../serverPool.js';
 import { serverHasDlc4 } from '../dlc4.js';
@@ -916,6 +917,18 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
       if (result.ms > 2000) console.warn(`[balance] compare took ${result.ms} ms for ${key}`);
       return result;
     });
+  });
+
+  // Survival by look (src/mapLooks.ts): how survivors fared under each look
+  // l4d_nightmode rolled, per campaign, so the storm and midnight arguments
+  // can be settled with rounds rather than chat.
+  app.get('/api/admin/balance/looks', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    const q = req.query as Record<string, unknown>;
+    const asked = Number(q.days);
+    const days = Number.isFinite(asked) && asked >= 1 ? Math.min(365, Math.floor(asked)) : 30;
+    const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 19).replace('T', ' ');
+    return { days, since, rows: lookStats(db, since) };
   });
 
   app.get('/api/admin/balance/metric', async (req, reply) => {
