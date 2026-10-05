@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { setSetting } from '../src/settings.js';
-import { upsertPlayer } from '../src/players.js';
+import { linkDiscord, upsertPlayer } from '../src/players.js';
 import { insertBan } from '../src/admin/players.js';
 import { appellantFromSteam } from '../src/appeals/rules.js';
 import {
@@ -114,6 +114,24 @@ describe('decisions and the sweep', () => {
     expect(getAppeal(db, asked)!.state).toBe('lapsed');
     expect(getAppeal(db, waiting)!.state).toBe('moot');
   });
+
+  // Ruling: a player cannot see their own appeal with the feature off, so
+  // they cannot know a question was asked, let alone answer it in time.
+  // Turning appeals off must not be a way to cost them a strike they never
+  // saw; moot keeps running, since a ban ending has nothing to do with
+  // whether the feature is on.
+  it('skips the lapse while appeals are off, but moot still runs', () => {
+    const a = insertBan(db, P, 'admin', 'toxic', null, NOW);
+    const asked = (file(a) as { id: number }).id;
+    askQuestion(db, asked, MOD, 'Which match?', NOW);
+    const b = insertBan(db, P, 'system', 'abandon', 48 * 60, NOW);
+    const waiting = (file(b) as { id: number }).id;
+    setSetting(db, 'appeals_enabled', '0');
+    const later = new Date(NOW.getTime() + 73 * 3600_000);
+    expect(sweepAppeals(db, later)).toEqual({ lapsed: [], moot: [waiting] });
+    expect(getAppeal(db, asked)!.state).toBe('asked');
+    expect(getAppeal(db, waiting)!.state).toBe('moot');
+  });
 });
 
 describe('access', () => {
@@ -126,5 +144,23 @@ describe('access', () => {
     expect(decideCheck(db, fileViewer(db, ADMIN), row)).toEqual({ ok: true });
     db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(P);
     expect(canSeeAppeal(db, fileViewer(db, MOD), row)).toBe(false);
+  });
+
+  // Owner ruling: the appellant through a linked identity, not just the
+  // same steamid, is still the appellant. An admin whose own Discord
+  // happens to be the one a sanction appeal is about must not decide it.
+  it('an admin whose Discord id matches the appeal cannot decide it, even though they can see it', () => {
+    linkDiscord(db, ADMIN, '700', 'admin-discord');
+    const sid = Number(db.prepare(`INSERT INTO discord_sanctions (discord_id, kind, until, reason, created_by, created_at)
+      VALUES ('700', 'timeout', ?, 'spam', ?, ?)`).run(new Date(NOW.getTime() + 7 * 86400_000).toISOString(), MOD, NOW.toISOString()).lastInsertRowid);
+    const r = fileAppeal(db, { steamids: [], discordId: '700', name: 'stranger' }, { ref: { kind: 'sanction', id: sid }, whatHappened: 'a', whyLift: 'b', source: 'appeal_page' }, NOW);
+    const row = getAppeal(db, (r as { id: number }).id)!;
+    expect(canSeeAppeal(db, fileViewer(db, ADMIN), row)).toBe(true);
+    expect(decideCheck(db, fileViewer(db, ADMIN), row)).toEqual({ ok: false, status: 404, error: 'no such appeal' });
+    // A different admin, unaffected, may still decide it.
+    const other = '76561198000000099';
+    upsertPlayer(db, { steamid: other, name: 'other', avatar: null }, []);
+    db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(other);
+    expect(decideCheck(db, fileViewer(db, other), row)).toEqual({ ok: true });
   });
 });

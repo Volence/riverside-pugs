@@ -1,6 +1,7 @@
 import type { DB } from '../db.js';
 import { canOpenFile, type FileViewer } from '../admin/fileAccess.js';
 import { banIsWithheld } from '../admin/banRedaction.js';
+import { resolveAlias } from '../aliases.js';
 import { canSeeTicket, getTicketRow, hasStaffFlag } from '../tickets/store.js';
 import { OPEN_STATES, type AppealRow } from './types.js';
 
@@ -39,10 +40,33 @@ export function canSeeAppeal(db: DB, viewer: FileViewer, row: AppealRow): boolea
   return !!t && canSeeTicket(db, t, viewer.steamid);
 }
 
+/** A moderator's own discord_id (null if unlinked or unknown). */
+function discordOf(db: DB, steamid: string): string | null {
+  return (db.prepare('SELECT discord_id FROM players WHERE steamid = ?').get(steamid) as { discord_id: string | null } | undefined)
+    ?.discord_id ?? null;
+}
+
+/** Owner ruling (2026-10-04): the viewer is the appellant through a linked
+ *  identity, not just the same steamid. Caught here, before anything else,
+ *  so a self-decision is refused the same 404 as "no such appeal" rather
+ *  than a 403 that would confirm the appeal exists. Covers: a second Steam
+ *  account aliased to the appellant's (or vice versa), and the viewer's own
+ *  linked Discord matching either the sanction's discord_id or the
+ *  appellant's current linked Discord. */
+function isAppellant(db: DB, viewer: FileViewer, row: AppealRow): boolean {
+  if (row.steamid !== null && resolveAlias(db, row.steamid) === resolveAlias(db, viewer.steamid)) return true;
+  const viewerDiscord = discordOf(db, viewer.steamid);
+  if (viewerDiscord === null) return false;
+  if (row.discord_id !== null && viewerDiscord === row.discord_id) return true;
+  if (row.steamid !== null && discordOf(db, row.steamid) === viewerDiscord) return true;
+  return false;
+}
+
 /** Owner ruling 2 (2026-10-04): anyone at the issuer's rank or above,
  *  the issuer included. */
 export function decideCheck(db: DB, viewer: FileViewer, row: AppealRow): { ok: true } | Fail {
   if (!canSeeAppeal(db, viewer, row)) return { ok: false, status: 404, error: 'no such appeal' };
+  if (isAppellant(db, viewer, row)) return { ok: false, status: 404, error: 'no such appeal' };
   if (!OPEN_STATES.includes(row.state)) return { ok: false, status: 409, error: 'this appeal has already been decided' };
   if (!viewer.isAdmin && issuerIsAdmin(db, issuerOf(db, row))) {
     return { ok: false, status: 403, error: 'only an admin can decide an appeal against an admin\'s ban' };
