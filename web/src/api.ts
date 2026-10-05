@@ -2236,6 +2236,13 @@ export interface AdminEventOptions {
   defaults: { eligibility: EventEligibility; checkin: EventCheckin; roster: EventRoster };
 }
 
+/** The Entries section of the desk (plan T1b Ruling 10). Mirrors
+ *  src/events/views.ts AdminEntryView. */
+export interface AdminEntryView {
+  id: number; teamSlug: string | null; name: string; tag: string; status: string; dropReason: string | null; seed: number | null;
+  waitlist: number | null; sr: number; checkedInAt: string | null; createdAt: string; registeredByName: string; roster: RosterPlaceView[];
+}
+
 /** A ruleset a picker offers, with its one-line summary (src/events/format.ts rulesSummary). */
 export interface RulesetOption { id: number; name: string; summary: string }
 
@@ -2348,6 +2355,14 @@ export const adminApi = {
   removeEventBanner: (id: number) => post(`/api/admin/events/${id}/banner/remove`),
   /** Drafts only: a draft is deleted, never cancelled. */
   deleteEvent: (id: number) => post(`/api/admin/events/${id}/delete`),
+  /** The Entries section (plan T1b Ruling 10). */
+  eventEntries: (id: number, signal?: AbortSignal) => get<{ lockedAt: string | null; entries: AdminEntryView[] }>(`/api/admin/events/${id}/entries`, signal),
+  openEventCheckin: (id: number) => post(`/api/admin/events/${id}/open-checkin`),
+  lockEventEntries: (id: number) => post(`/api/admin/events/${id}/lock-entries`),
+  reorderEventSeeds: (id: number, order: number[]) => post(`/api/admin/events/${id}/seeds`, { order }),
+  setEventEntryRoster: (id: number, entryId: number, roster: EntryRoster) => post(`/api/admin/events/${id}/entries/${entryId}/roster`, { roster }),
+  disqualifyEventEntry: (id: number, entryId: number, reason: string) => post(`/api/admin/events/${id}/entries/${entryId}/disqualify`, { reason }),
+  restoreEventEntry: (id: number, entryId: number) => post(`/api/admin/events/${id}/entries/${entryId}/restore`),
   /** Setup > Rulesets and Game configs (rulesets editor plan). */
   rulesets: (signal?: AbortSignal) => get<{ rulesets: AdminRuleset[] }>('/api/admin/rulesets', signal),
   createRuleset: (copyFrom: number, name: string) => post<{ id: number }>('/api/admin/rulesets', { copyFrom, name }),

@@ -6,7 +6,7 @@ const { mockAdmin, mockConfirm } = vi.hoisted(() => ({
   mockAdmin: {
     event: vi.fn(), eventOptions: vi.fn(), updateEvent: vi.fn(), addStage: vi.fn(), updateStage: vi.fn(), removeStage: vi.fn(),
     reorderStages: vi.fn(), publishEvent: vi.fn(), openEventRegistration: vi.fn(), cancelEvent: vi.fn(),
-    setEventBanner: vi.fn(), removeEventBanner: vi.fn(), deleteEvent: vi.fn(),
+    setEventBanner: vi.fn(), removeEventBanner: vi.fn(), deleteEvent: vi.fn(), eventEntries: vi.fn(),
   },
   mockConfirm: vi.fn(),
 }));
@@ -55,6 +55,7 @@ afterEach(() => { cleanup(); history.replaceState(null, '', '/'); });
 beforeEach(() => {
   for (const f of [...Object.values(mockAdmin), mockConfirm]) f.mockReset();
   mockAdmin.eventOptions.mockResolvedValue(OPTIONS);
+  mockAdmin.eventEntries.mockResolvedValue({ lockedAt: null, entries: [] });
   mockConfirm.mockResolvedValue(true);
   for (const f of [mockAdmin.updateEvent, mockAdmin.addStage, mockAdmin.updateStage, mockAdmin.removeStage, mockAdmin.reorderStages,
     mockAdmin.publishEvent, mockAdmin.openEventRegistration, mockAdmin.cancelEvent, mockAdmin.setEventBanner,

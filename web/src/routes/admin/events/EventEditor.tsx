@@ -9,6 +9,7 @@ import { toBannerImage } from '../../../eventBanner';
 import { fmtTime, useAction } from '../useAction';
 import { EventFieldsForm } from './EventFieldsForm';
 import { StageForm } from './StageForm';
+import { EntriesPanel } from './EntriesPanel';
 import { DESKS } from '../adminRoutes';
 
 const DESK_URL = DESKS.find((d) => d.key === 'events')!.path;
@@ -20,6 +21,9 @@ const ACTION_TEXT: Record<string, string> = {
   created: 'Created', edited: 'Edited', stage_added: 'Stage added', stage_edited: 'Stage edited', stage_removed: 'Stage removed',
   stages_reordered: 'Stages reordered', published: 'Published', registration_opened: 'Registration opened', cancelled: 'Cancelled',
   banner_set: 'Banner set', banner_removed: 'Banner removed',
+  checkin_opened: 'Check-in opened', entry_registered: 'Team registered', roster_changed: 'Roster changed', roster_left: 'Player left a roster',
+  entry_withdrawn: 'Team withdrew', entry_checked_in: 'Team checked in', entries_locked: 'Entry list closed', entry_dropped: 'Entry dropped',
+  entry_disqualified: 'Entry disqualified', entry_restored: 'Entry restored', seeds_reordered: 'Seeds reordered',
 };
 
 /** What a mod reads in place of the form (Ruling 2). */
@@ -174,10 +178,11 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
             onSave={(st) => saveStage(() => adminApi.addStage(id, st))} />
         )}
       </Panel>
+      {ev.status !== 'draft' && ev.status !== 'announced' && <EntriesPanel eventId={ev.id} status={ev.status} canEdit={canEdit} />}
       <Panel>
         <h3>History</h3>
         <ul class="admin-list">
-          {ev.log.map((l, i) => <li key={i}>{fmtTime(l.at)} · {l.actorName ?? 'the site'} · {ACTION_TEXT[l.action] ?? l.action}</li>)}
+          {ev.log.map((l, i) => <li key={i}>{fmtTime(l.at)} · {l.actorName ?? 'the clock'} · {ACTION_TEXT[l.action] ?? l.action}</li>)}
         </ul>
       </Panel>
     </div>
