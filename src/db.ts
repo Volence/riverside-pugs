@@ -2174,6 +2174,26 @@ export function openDb(path: string): DB {
   ).run();
   // PUG, Standard Cup and Casual Scrim: see src/rulesets.ts for what each sets.
   seedRulesetTemplates(db);
+  // !gg: one row per step of a forfeit vote (start, agree, pass, fail,
+  // dropped, refused), from the plugin's GG lines. A record for staff and the
+  // profile's attempt count; the forfeit itself is matches.forfeit_team.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS match_gg_votes (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      match_id  INTEGER NOT NULL REFERENCES matches(id),
+      event     TEXT    NOT NULL,
+      team      TEXT    NOT NULL CHECK (team IN ('a','b')),
+      player_id TEXT,
+      reason    TEXT,
+      gap       INTEGER,
+      best      INTEGER,
+      yes       INTEGER NOT NULL DEFAULT 0,
+      need      INTEGER NOT NULL DEFAULT 0,
+      at        TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS match_gg_votes_match ON match_gg_votes (match_id);
+    CREATE INDEX IF NOT EXISTS match_gg_votes_player ON match_gg_votes (player_id, event);
+  `);
   // One row per rostered player per aborted match: the notice on their Play
   // page, whether they were at fault, and whether they went back in the queue.
   db.exec(`
