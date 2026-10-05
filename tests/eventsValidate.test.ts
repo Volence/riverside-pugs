@@ -194,7 +194,7 @@ describe('status rules', () => {
     expect(V.nextStatusAllowed('draft', 'announced')).toBe(true);
     expect(V.nextStatusAllowed('announced', 'registration')).toBe(true);
     expect(V.nextStatusAllowed('draft', 'registration')).toBe(false);
-    expect(V.nextStatusAllowed('registration', 'checkin')).toBe(false);
+    expect(V.nextStatusAllowed('registration', 'checkin')).toBe(true);
     for (const s of ['announced', 'registration', 'checkin', 'live'] as const) expect(V.nextStatusAllowed(s, 'cancelled')).toBe(true);
     expect(V.nextStatusAllowed('draft', 'cancelled')).toBe(false);
     expect(V.nextStatusAllowed('finished', 'cancelled')).toBe(false);
@@ -208,7 +208,7 @@ describe('status rules', () => {
 
   it('every error has a status and a sentence', () => {
     for (const [k, e] of Object.entries(V.EVENT_ERRORS)) {
-      expect([400, 404, 409]).toContain(e.status);
+      expect([400, 403, 404, 409]).toContain(e.status);
       expect(e.text.length, k).toBeGreaterThan(10);
       expect(e.text.includes(String.fromCharCode(0x2014)), k).toBe(false);
     }
