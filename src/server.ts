@@ -161,6 +161,7 @@ import { adminBookingRoutes } from './routes/adminBookings.js';
 import { adminEventRoutes } from './routes/adminEvents.js';
 import { adminRulesetRoutes } from './routes/adminRulesets.js';
 import { ScrimBoard, TICK_MS as SCRIM_TICK_MS } from './scrims/board.js';
+import { EventRunner, TICK_MS as EVENT_TICK_MS } from './events/runner.js';
 import { ScrimPoster } from './scrims/poster.js';
 import { scrimRoutes } from './routes/scrims.js';
 import { settingNumber } from './settings.js';
@@ -1872,6 +1873,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     practiceLeases.stop();
     clearInterval(bookingTick);
     clearInterval(scrimTick);
+    clearInterval(eventTick);
     clearInterval(presenceSweep);
     clearInterval(renameDigestTimer);
     clearInterval(pruneTimer);
@@ -2055,6 +2057,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const scrimTick = setInterval(() => { void scrimBoard.tick(); }, SCRIM_TICK_MS);
   scrimTick.unref();
   await app.register(scrimRoutes, { db: deps.db, runner: bookingRunner, notifier, publicUrl: deps.config.publicUrl });
+
+  // Events (tournaments plan T1b): check-in opens and the entry list closes on the clock.
+  const eventRunner = new EventRunner({ db: deps.db, notifier, publicUrl: deps.config.publicUrl });
+  const eventTick = setInterval(() => { void eventRunner.tick(); }, EVENT_TICK_MS);
+  eventTick.unref();
 
   await app.register(teamRoutes, {
     db: deps.db, store: getCommunityStore, publicUrl: deps.config.publicUrl,
