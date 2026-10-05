@@ -27,12 +27,12 @@ export function AdminAppeal({ id }: { id: number }) {
         </p>
         {a.earlier.length > 0 && <p class="muted">Earlier appeals on this ban: {a.earlier.map((e) => `#${e.id} ${e.state}`).join(', ')}</p>}
         <h4>What happened</h4>
-        <blockquote>{a.whatHappened}</blockquote>
+        <blockquote class="appeal-text">{a.whatHappened}</blockquote>
         <h4>Why it should be lifted or shortened</h4>
-        <blockquote>{a.whyLift}</blockquote>
-        {a.question && <><h4>Question from {a.askedByName}</h4><blockquote>{a.question}</blockquote></>}
+        <blockquote class="appeal-text">{a.whyLift}</blockquote>
+        {a.question && <><h4>Question from {a.askedByName}</h4><blockquote class="appeal-text">{a.question}</blockquote></>}
         {a.state === 'asked' && a.answerBy && <p class="muted">Waiting for an answer until {fmtTime(a.answerBy)}.</p>}
-        {a.answer && <><h4>Answer</h4><blockquote>{a.answer}</blockquote></>}
+        {a.answer && <><h4>Answer</h4><blockquote class="appeal-text">{a.answer}</blockquote></>}
         {a.slurs.length > 0 && <p class="error">Denied automatically: {a.slurs.join(', ')}.</p>}
         {!open && <p><strong>{a.state}</strong>{a.decidedByName ? ` by ${a.decidedByName}` : ''}{a.decidedAt ? `, ${fmtTime(a.decidedAt)}` : ''}{a.newExpiresAt ? `; now ends ${fmtTime(a.newExpiresAt)}` : ''}</p>}
       </Panel>
