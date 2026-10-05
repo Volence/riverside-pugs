@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.21"
+#define PLUGIN_VERSION "0.3.22"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -236,6 +236,7 @@ int g_iHalf;                             // 1 or 2 within the current map, DERIV
 float g_fRoundLiveAt;                    // GetGameTime() when this half went live; 0 = not live
 bool g_bRoundEnded;                      // round_end latch (round_end can fire more than once)
 bool g_bHalfWasLive;                     // set by OnRoundIsLive; guards ready-up restarts
+bool g_bScoreReadPending;               // Timer_ReadScore chain in flight: a half has ended but its score is not credited yet
 bool g_bPendingFinalize;                 // set when 2nd-half round_end fires; cleared by FinalizeMap.
                                           // OnMapStart failsafe: if still set at changelevel, finalize
                                           // with whatever half scores were accumulated so far so the
@@ -537,6 +538,7 @@ No config exec and no restart: it tracks the game already being played. Implies 
 	PauseInit();
 	ModCall_Init();
 	StaffChat_Init();
+	Gg_Init();
 	HookEvent("player_spawn", Event_PlayerSpawn);
 	HookEvent("player_now_it", Event_PlayerBoomed);
 
@@ -2405,11 +2407,14 @@ void EndMatchNow(const char[] why)
 	TotalScores(a, b);
 	char winner[8];
 	WinnerOf(a, b, winner, sizeof(winner));
-	EmitPug("MATCH_END a=%d b=%d winner=%s", a, b, winner);
+	char ff[16];
+	Gg_ForfeitTail(ff, sizeof(ff));
+	EmitPug("MATCH_END a=%d b=%d winner=%s%s", a, b, winner, ff);
 	PugDebug("ended (%s): a=%d b=%d winner=%s", why, a, b, winner);
 
-	char teamName[16];
+	char teamName[32];
 	if (StrEqual(winner, "draw")) strcopy(teamName, sizeof(teamName), "Draw");
+	else if (Gg_ForfeitTeam() != 0) Format(teamName, sizeof(teamName), "Team %s wins by forfeit", winner[0] == 'a' ? "A" : "B");
 	else Format(teamName, sizeof(teamName), "Team %s wins", winner[0] == 'a' ? "A" : "B");
 
 	// Held in a global because the timer fires after this frame and cannot be
@@ -3066,6 +3071,8 @@ void ResetMatchState()
 	g_sCampaign[0] = '\0';
 	g_sStopAfterMap[0] = '\0';
 	g_sEndResult[0] = '\0';
+	g_bScoreReadPending = false;
+	Gg_Reset();
 	g_iRosterCount = 0;
 	g_bSelfStarted = false;
 	g_bResumed = false;
@@ -3578,6 +3585,7 @@ public void OnClientPostAdminCheck(int client)
 public void OnClientDisconnect(int client)
 {
 	ModCall_OnDisconnect(client);
+	Gg_OnDisconnect(client);
 	StaffChat_OnDisconnect(client);
 	int slot = g_iClientRoster[client];
 	g_iClientRoster[client] = -1;
@@ -3933,6 +3941,10 @@ public void OnMapStart()
 	g_iRound1Logical = 0;
 	g_iRound1SurvPug = 0;
 	g_bRoundEnded = false;
+	// Timer_ReadScore is NO_MAPCHANGE: a chain still pending died with the map.
+	g_bScoreReadPending = false;
+	// After g_sCurrentMap is set: reads the mission file holding this map.
+	Gg_OnMapStart();
 	g_bHalfWasLive = false;
 
 	// New map of a running match: autorecord has just opened its own file for
@@ -4304,6 +4316,7 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 		return;
 	}
 
+	g_bScoreReadPending = true;
 	DataPack pack;
 	CreateDataTimer(2.0, Timer_ReadScore, pack, TIMER_FLAG_NO_MAPCHANGE);
 	pack.WriteCell(second ? 1 : 0);
@@ -4436,7 +4449,7 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 	int alive = pack.ReadCell();
 	char survEnd[2];
 	pack.ReadString(survEnd, sizeof(survEnd));
-	if (g_State != MS_Live) return Plugin_Stop;
+	if (g_State != MS_Live) { g_bScoreReadPending = false; return Plugin_Stop; }
 
 	int score = TryReadRoundScore(second);
 	if (score < 0)
@@ -4455,6 +4468,7 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 		else
 		{
 			LogError("[pug] could not read round score after retries (half %d)", second ? 2 : 1);
+			g_bScoreReadPending = false;
 			// Finalize now (prompt MAP_RESULT) if the map hasn't changed yet.
 			// If it HAS already changed, this TIMER_FLAG_NO_MAPCHANGE timer never
 			// runs at all. g_bPendingFinalize is still set in that case, so the
@@ -4476,6 +4490,7 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 	}
 
 	AttributeScore(survPug, score, second);
+	g_bScoreReadPending = false;
 	int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
 	EmitRoundEnd(half, survEnd, mine, alive);
 	if (second) FinishSecondHalf();
@@ -5218,7 +5233,9 @@ void WriteDump(const char[] nonce)
 	TotalScores(a, b);
 	char winner[8];
 	WinnerOf(a, b, winner, sizeof(winner));
-	DumpLine("END winner=%s a=%d b=%d%s", winner, a, b, tail);
+	char ff[16];
+	Gg_ForfeitTail(ff, sizeof(ff));
+	DumpLine("END winner=%s a=%d b=%d%s%s", winner, a, b, ff, tail);
 }
 
 /** choke_start: the smoker has stopped dragging and started choking. The
@@ -5259,3 +5276,4 @@ public void Event_PounceStopped(Event event, const char[] name, bool dontBroadca
 #include "pug-pause.inc"
 #include "pug-modcall.inc"
 #include "pug-staffchat.inc"
+#include "pug-gg.inc"

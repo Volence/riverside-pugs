@@ -2166,6 +2166,9 @@ export function openDb(path: string): DB {
   // booking made before this column has null and is not counted.
   ensureColumn(db, 'rulesets', 'based_on', 'INTEGER REFERENCES rulesets(id)');
   ensureColumn(db, 'bookings', 'ruleset_id', 'INTEGER REFERENCES rulesets(id)');
+  // !gg: the pug team that forfeited ('a' or 'b'), null for a match played
+  // out. Rated like any other result; the column only drives the FF tag.
+  ensureColumn(db, 'matches', 'forfeit_team', 'TEXT');
   db.prepare(
     "INSERT OR IGNORE INTO game_configs (key, label, cfg) VALUES ('standard', 'Standard (Rotoblin PUG 4v4)', 'pug_match')",
   ).run();

@@ -1,6 +1,6 @@
 import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, campaignTint, fmtDate, winnerLabel } from '../format';
+import { campaignName, campaignTint, fmtDate, resultLabel } from '../format';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 
@@ -59,7 +59,7 @@ export function Matches() {
                       <span class="muted match-id"> #{m.id}</span>
                     </td>
                     <td class="num">{m.teamAScore} - {m.teamBScore}</td>
-                    <td>{winnerLabel(m.winner)}</td>
+                    <td>{resultLabel(m.winner, m.forfeitTeam)}</td>
                     <td class="num muted">{fmtDate(m.endedAt)}</td>
                   </tr>
                 ))}
