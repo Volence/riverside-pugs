@@ -69,12 +69,36 @@ export const EVENT_ERRORS = {
   kind_locked: { status: 409, text: 'The entry kind can only change while the event is a draft.' },
   draft_signups_later: { status: 409, text: 'Signups for a draft event arrive with the draft plan.' },
   has_entries: { status: 409, text: 'This draft has entries, so it cannot be deleted.' },
+  bad_entry_roster: { status: 400, text: 'A roster is exactly 4 starters, no more subs than the event allows and at most one coach, each player once.' },
+  not_registration: { status: 409, text: 'Registration is not open for this event.' },
+  team_not_found: { status: 404, text: 'No such team.' },
+  not_manager: { status: 403, text: 'Only the team captain or a co-captain can do that.' },
+  already_entered: { status: 409, text: 'This team already has an entry in this event.' },
+  not_on_team: { status: 400, text: 'Everyone added to the roster has to be on the team.' },
+  player_ineligible: { status: 409, text: 'Someone on the roster does not meet the entry rules.' },
+  player_entered: { status: 409, text: 'Someone on the roster is already on another entry in this event.' },
+  entry_not_found: { status: 404, text: 'No such entry in this event.' },
+  entry_out: { status: 409, text: 'This entry is no longer in the event.' },
+  roster_locked: { status: 409, text: 'Rosters are locked for this event; ask staff to change yours.' },
+  additions_used: { status: 409, text: 'This entry has used all the roster additions the event allows.' },
+  not_on_entry: { status: 400, text: 'You are not on this roster.' },
+  entries_locked: { status: 409, text: 'The entry list is final now.' },
+  no_checkin: { status: 409, text: 'This event has no check-in.' },
+  not_checkin: { status: 409, text: 'Check-in is not open.' },
+  need_starters: { status: 409, text: 'Check-in needs 4 starters on the roster.' },
+  seeds_locked: { status: 409, text: 'Seeds can change only once the entry list is final and before the event goes live.' },
+  bad_seed_order: { status: 400, text: 'The new seed order must list every seeded entry once.' },
+  not_restorable: { status: 409, text: 'Only a dropped or disqualified entry can be restored, before the entry list is final.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type EventError = keyof typeof EVENT_ERRORS;
 
-export type Checked<T> = { ok: true; value: T } | { ok: false; error: EventError };
+/** One player a roster refusal is about, with the sentences of what is wrong
+ *  (src/events/entryRules.ts problemText). The routes add the player's name. */
+export interface EntryProblem { steamid: string; problems: string[] }
+export type Checked<T> = { ok: true; value: T } | { ok: false; error: EventError; detail?: EntryProblem[] };
 export const ok = <T>(value: T): Checked<T> => ({ ok: true, value });
-export const fail = (error: EventError): { ok: false; error: EventError } => ({ ok: false, error });
+export const fail = (error: EventError, detail?: EntryProblem[]): { ok: false; error: EventError; detail?: EntryProblem[] } =>
+  (detail ? { ok: false, error, detail } : { ok: false, error });
 
 export interface Eligibility { minPugs: number; requireDiscord: boolean; srFloor: number | null; srCeiling: number | null }
 export interface Checkin { enabled: boolean; opensMinutes: number; closesMinutes: number }
@@ -380,8 +404,10 @@ export const STAGES_LOCKED: ReadonlySet<EventStatus> = new Set<EventStatus>(['li
  *  cancelled event is public under Past. */
 const CANCELLABLE: ReadonlySet<EventStatus> = new Set<EventStatus>(['announced', 'registration', 'checkin', 'live']);
 
-/** The moves T1a makes (Ruling 3); check-in, live and finished come later. */
+/** The moves made so far: T1a's publish, open registration and cancel, and
+ *  T1b's open check-in. Live and finished come with rollout plan 2. */
 export function nextStatusAllowed(from: EventStatus, to: EventStatus): boolean {
   if (to === 'cancelled') return CANCELLABLE.has(from);
-  return (from === 'draft' && to === 'announced') || (from === 'announced' && to === 'registration');
+  return (from === 'draft' && to === 'announced') || (from === 'announced' && to === 'registration')
+    || (from === 'registration' && to === 'checkin');
 }
