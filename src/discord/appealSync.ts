@@ -31,7 +31,7 @@ export function appealCard(db: DB, row: AppealRow, publicUrl: string): MessagePa
   if (row.decided_by) fields.push({ name: 'Decided by', value: escapeName(nameOf(db, row.decided_by)), inline: true });
   return {
     embeds: [{
-      title: clip(`Appeal #${row.id}: ${row.appellant_name}`, 250),
+      title: clip(`Appeal #${row.id}: ${escapeName(row.appellant_name)}`, 250),
       url: `${publicUrl}/admin/people/appeals/${row.id}`,
       description: `**What happened**\n${clip(escapeName(row.what_happened), 1800)}\n\n**Why it should be lifted**\n${clip(escapeName(row.why_lift), 1800)}`,
       fields,
@@ -91,11 +91,18 @@ export class AppealSync {
       'SELECT id FROM appeals WHERE dm_state IS NOT state OR forum_state IS NOT state ORDER BY id',
     ).all() as { id: number }[]).map((r) => r.id);
     for (const id of ids) {
-      const row = getAppeal(this.deps.db, id);
-      if (!row) continue;
-      await this.dm(row);
-      const run = () => this.forum(row.id);
-      await (this.deps.serialise ? this.deps.serialise(run) : run());
+      // Never throwing, so one broken appeal cannot starve the rest (as
+      // TicketSync.one does for tickets): rows run in id order, and a
+      // persistently failing one must not block every later appeal forever.
+      try {
+        const row = getAppeal(this.deps.db, id);
+        if (!row) continue;
+        await this.dm(row);
+        const run = () => this.forum(row.id);
+        await (this.deps.serialise ? this.deps.serialise(run) : run());
+      } catch (err) {
+        console.error(`[discord] appeal #${id} sync failed:`, err);
+      }
     }
   }
 
