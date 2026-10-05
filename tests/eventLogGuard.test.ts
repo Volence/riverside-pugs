@@ -32,7 +32,7 @@ const READS = new Set(['getEvent', 'getEventBySlug', 'getStage', 'stagesOf', 'ev
 /** Exported for entries.ts to write its own audit row; never a mutation itself. */
 const HELPERS = new Set(['logEvent']);
 
-const MUTATIONS: Record<string, { from: 'draft' | 'announced'; action: string; run: (f: Fixture) => E.EventResult<unknown> }> = {
+const MUTATIONS: Record<string, { from: 'draft' | 'announced' | 'registration'; action: string; run: (f: Fixture) => E.EventResult<unknown> }> = {
   createEvent: { from: 'draft', action: 'created', run: ({ db }) => E.createEvent(db, { by: ADMIN, fields: { name: 'Second Cup', startsAt: START, entryKind: 'team' }, now: NOW }) },
   updateEvent: { from: 'draft', action: 'edited', run: ({ db, eventId }) => E.updateEvent(db, { eventId, by: ADMIN, fields: { name: 'Renamed Cup' }, now: NOW }) },
   addStage: { from: 'draft', action: 'stage_added', run: ({ db, eventId }) => E.addStage(db, { eventId, by: ADMIN, stage: stageBody(db), now: NOW }) },
@@ -46,6 +46,7 @@ const MUTATIONS: Record<string, { from: 'draft' | 'announced'; action: string; r
   openRegistration: { from: 'announced', action: 'registration_opened', run: ({ db, eventId }) => E.openRegistration(db, { eventId, by: ADMIN, now: NOW }) },
   cancelEvent: { from: 'announced', action: 'cancelled', run: ({ db, eventId }) => E.cancelEvent(db, { eventId, by: ADMIN, reason: 'Not enough teams', now: NOW }) },
   setEventBanner: { from: 'announced', action: 'banner_set', run: ({ db, eventId }) => E.setEventBanner(db, { eventId, by: ADMIN, bannerKey: 'a'.repeat(64), now: NOW }) },
+  openCheckin: { from: 'registration', action: 'checkin_opened', run: ({ db, eventId }) => E.openCheckin(db, { eventId, by: ADMIN, now: NOW }) },
 };
 
 const SPECIAL = new Set(['deleteDraftEvent']);
@@ -166,7 +167,34 @@ describe('event_log guard', () => {
       registeredCache.set(f, id);
       return id;
     };
-    const ENTRY_MUTATIONS: Record<string, { action: string; needsEntry: boolean; run: (f: EntryFixture) => V.Checked<unknown> }> = {
+    // Same reasoning as registeredCache: restoreEntry's and reorderSeeds'
+    // run() each do real, committing entries-table writes (disqualify; or
+    // check-in + lock) beyond plain registration. Without memoizing those
+    // too, the "writes nothing" test's needsEntry pre-step (which only
+    // replays registered(f)) would leave the "before" snapshot stale, and
+    // run()'s own replay of those steps would commit for real before the
+    // final (blocked) call, so entryRows would no longer match "before".
+    const disqualifiedCache = new WeakMap<EntryFixture, number>();
+    const disqualified = (f: EntryFixture): number => {
+      const cached = disqualifiedCache.get(f);
+      if (cached !== undefined) return cached;
+      const id = registered(f);
+      must(N.disqualifyEntry(f.db, { entryId: id, by: A[0], reason: null, now: NOW }));
+      disqualifiedCache.set(f, id);
+      return id;
+    };
+    const lockedCache = new WeakMap<EntryFixture, number>();
+    const lockedIn = (f: EntryFixture): number => {
+      const cached = lockedCache.get(f);
+      if (cached !== undefined) return cached;
+      const id = registered(f);
+      must(E.openCheckin(f.db, { eventId: f.eventId, by: null, now: NOW }));
+      must(N.checkInEntry(f.db, { entryId: id, by: A[0], now: NOW }));
+      must(N.lockEntries(f.db, { eventId: f.eventId, by: null, now: NOW }));
+      lockedCache.set(f, id);
+      return id;
+    };
+    const ENTRY_MUTATIONS: Record<string, { action: string; needsEntry: boolean; setup?: (f: EntryFixture) => void; run: (f: EntryFixture) => V.Checked<unknown> }> = {
       registerEntry: {
         action: 'entry_registered', needsEntry: false,
         run: (f) => N.registerEntry(f.db, { eventId: f.eventId, teamId: f.teamA, by: A[0], roster: rosterA(), now: NOW }),
@@ -182,6 +210,18 @@ describe('event_log guard', () => {
       withdrawEntry: {
         action: 'entry_withdrawn', needsEntry: true,
         run: (f) => N.withdrawEntry(f.db, { entryId: registered(f), by: A[0], now: NOW }),
+      },
+      checkInEntry: { action: 'entry_checked_in', needsEntry: true, run: (f) => { const id = registered(f); must(E.openCheckin(f.db, { eventId: f.eventId, by: null, now: NOW })); return N.checkInEntry(f.db, { entryId: id, by: A[0], now: NOW }); } },
+      lockEntries: { action: 'entries_locked', needsEntry: true, run: (f) => { registered(f); must(E.openCheckin(f.db, { eventId: f.eventId, by: null, now: NOW })); return N.lockEntries(f.db, { eventId: f.eventId, by: null, now: NOW }); } },
+      dropDisbandedEntry: { action: 'entry_dropped', needsEntry: true, run: (f) => { const id = registered(f); f.db.prepare('UPDATE teams SET disbanded_at = ? WHERE id = ?').run(NOW.toISOString(), f.teamA); return N.dropDisbandedEntry(f.db, { entryId: id, now: NOW }); } },
+      disqualifyEntry: { action: 'entry_disqualified', needsEntry: true, run: (f) => N.disqualifyEntry(f.db, { entryId: registered(f), by: A[0], reason: 'x', now: NOW }) },
+      restoreEntry: {
+        action: 'entry_restored', needsEntry: true, setup: (f) => { disqualified(f); },
+        run: (f) => { const id = disqualified(f); return N.restoreEntry(f.db, { entryId: id, by: A[0], now: NOW }); },
+      },
+      reorderSeeds: {
+        action: 'seeds_reordered', needsEntry: true, setup: (f) => { lockedIn(f); },
+        run: (f) => { const id = lockedIn(f); return N.reorderSeeds(f.db, { eventId: f.eventId, by: A[0], order: [id], now: NOW }); },
       },
     };
     const entryRows = (f: EntryFixture) => JSON.stringify([
@@ -210,6 +250,7 @@ describe('event_log guard', () => {
       it(`${name} writes nothing when its event_log row cannot be written`, () => {
         const f = entryFixture();
         if (m.needsEntry) registered(f);
+        m.setup?.(f);
         const before = entryRows(f);
         f.db.exec(
           `CREATE TRIGGER entry_log_down_${name} BEFORE INSERT ON event_log WHEN NEW.action = '${m.action}'

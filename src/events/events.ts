@@ -325,6 +325,21 @@ export function openRegistration(db: DB, o: { eventId: number; by: string; now?:
   })();
 }
 
+/** registration -> checkin (T1b Ruling 4): the runner calls it at
+ *  starts_at - opensMinutes with by null; an admin may call it early. */
+export function openCheckin(db: DB, o: { eventId: number; by: string | null; now?: Date }): EventResult<EventRow> {
+  const at = iso(o.now);
+  return db.transaction((): EventResult<EventRow> => {
+    const ev = getEvent(db, o.eventId);
+    if (!ev) return V.fail('not_found');
+    if (!fieldsOf(ev).checkin.enabled) return V.fail('no_checkin');
+    if (!V.nextStatusAllowed(ev.status, 'checkin') || ev.locked_at !== null) return V.fail('wrong_status');
+    db.prepare("UPDATE events SET status = 'checkin', updated_at = ? WHERE id = ?").run(at, ev.id);
+    logEvent(db, ev.id, o.by, 'checkin_opened', at);
+    return V.ok(getEvent(db, ev.id)!);
+  })();
+}
+
 export function cancelEvent(db: DB, o: { eventId: number; by: string; reason: unknown; now?: Date }): EventResult<EventRow> {
   const at = iso(o.now);
   const reason = V.normalizeReason(o.reason);
