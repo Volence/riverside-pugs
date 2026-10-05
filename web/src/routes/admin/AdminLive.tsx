@@ -154,6 +154,7 @@ function MatchCard({ match: m, elapsedS, holdMaxMinutes, lowAlertSeconds, reload
         <h3><a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)}</h3>
         {m.server && <button type="button" class="chip" onClick={() => onChat(m.server!.id)}>Chat</button>}
         <span class="muted">{m.map ? mapName(m.map) : 'no map yet'}</span>
+        {m.look && <LookTag look={m.look} />}
         <span class={`admin-status admin-status--${m.state === 'live' ? 'idle' : 'reserved'}`}>
           {m.state === 'waiting' ? 'waiting for a server' : m.state}
         </span>
@@ -216,6 +217,15 @@ function MatchCard({ match: m, elapsedS, holdMaxMinutes, lowAlertSeconds, reload
       </div>
     </section>
   );
+}
+
+/** The night mode look on the server, layers on hover. "default" is the
+ *  plugin leaving the map stock. */
+function LookTag({ look }: { look: NonNullable<LiveBoardMatch['look']> }) {
+  const l = look.layers;
+  const tip = (l ? `time ${l.time}, weather ${l.weather}, moon ${l.moon}, event ${l.event}, power ${l.power}. ` : '')
+    + `Preset ${look.preset}, rolled ${new Date(look.at).toLocaleTimeString()}`;
+  return <span class="live-card__look" title={tip}>{look.title === 'default' ? 'Stock look' : look.title}</span>;
 }
 
 function PlayerRow({ match: m, player: p, elapsedS, holdMaxMinutes, lowAlertSeconds, busy, run, blocked }: {

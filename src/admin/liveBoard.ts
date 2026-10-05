@@ -4,6 +4,7 @@ import { phaseFor } from '../liveView.js';
 import { spectateFor, type SpectateInfo } from '../spectate.js';
 import { holdMaxSeconds, lowAlertSeconds, remainingNow, type PresenceRow } from '../presence.js';
 import { noShowClock, signonDropsSincePop, toMs, type NoShowClock } from '../noShow.js';
+import type { LookLayers } from '../logParse.js';
 
 /**
  * The admin live board: every ongoing match, who is missing from it, and the
@@ -65,6 +66,11 @@ export interface BoardMatch {
   /** The booking this game belongs to (plan 4b), or null for a PUG. Abort
    *  says the booking carries on, and offers no leave-out boxes, for one. */
   bookingId: number | null;
+  /** The l4d_nightmode look (time of day, weather...) the server last rolled
+   *  for this match, from map_looks (src/mapLooks.ts). The plugin logs one on
+   *  every round_start, so this is the map being played now. Null before the
+   *  first line arrives, or on a box whose plugin logs none. */
+  look: { title: string; preset: string; layers: LookLayers | null; at: string } | null;
 }
 
 export interface LiveBoard {
@@ -116,6 +122,9 @@ export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: 
      JOIN players p ON p.steamid = mp.player_id
      LEFT JOIN match_presence pr ON pr.match_id = mp.match_id AND pr.steamid = mp.player_id
      WHERE mp.match_id = ? ORDER BY mp.team, p.name`,
+  );
+  const lookOf = db.prepare(
+    'SELECT title, preset, layers, at FROM map_looks WHERE match_id = ? ORDER BY at DESC, id DESC LIMIT 1',
   );
   const scoreOf = db.prepare(
     'SELECT COALESCE(SUM(team_a_score), 0) AS a, COALESCE(SUM(team_b_score), 0) AS b FROM match_live_maps WHERE match_id = ?',
@@ -201,7 +210,17 @@ export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: 
         clocks,
         noShow,
         bookingId: m.bookingId,
+        look: lookFrom(lookOf.get(m.id) as LookRow | undefined),
       };
     }),
   };
+}
+
+interface LookRow { title: string; preset: string; layers: string | null; at: number }
+
+function lookFrom(r: LookRow | undefined): BoardMatch['look'] {
+  if (!r) return null;
+  let layers: LookLayers | null = null;
+  try { layers = r.layers ? JSON.parse(r.layers) as LookLayers : null; } catch { /* a bad row reads as no layers */ }
+  return { title: r.title, preset: r.preset, layers, at: new Date(r.at).toISOString() };
 }

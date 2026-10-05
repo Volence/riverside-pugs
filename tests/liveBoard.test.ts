@@ -69,6 +69,18 @@ describe('the match line', () => {
     expect(board().matches[0]).toMatchObject({ state: 'waiting', server: null });
   });
 
+  it('shows the look the server last rolled for this match, none before the first line', () => {
+    expect(board().matches[0].look).toBeNull();
+    const ins = db.prepare('INSERT INTO map_looks (server_id, at, title, preset, layers, match_id) VALUES (1, ?, ?, ?, ?, ?)');
+    ins.run(at(1).getTime(), 'Midnight', 'midnight', JSON.stringify({ time: 'midnight', weather: 'clear', moon: 'pale', event: 'none', power: 'on' }), matchId);
+    ins.run(at(3).getTime(), 'Storm', 'storm', JSON.stringify({ time: 'night', weather: 'storm', moon: 'none', event: 'none', power: 'on' }), matchId);
+    ins.run(at(5).getTime(), 'Blood Moon', 'blood', null, null); // another match's, or between matches
+    expect(board().matches[0].look).toEqual({
+      title: 'Storm', preset: 'storm', at: at(3).toISOString(),
+      layers: { time: 'night', weather: 'storm', moon: 'none', event: 'none', power: 'on' },
+    });
+  });
+
   it('reports what is known about the plugin', () => {
     db.prepare('UPDATE matches SET leave_control = 0 WHERE id = ?').run(matchId);
     expect(board().matches[0].leaveControl).toBe('old_plugin');

@@ -961,6 +961,10 @@ export interface LiveBoardMatch {
   /** The booking this game belongs to, or null for a PUG. Optional only for
    *  a browser holding new JS against an older server. */
   bookingId?: number | null;
+  /** The night mode look the server last rolled for this match (title like
+   *  "Storm", layers from the plugin's log line). Null before the first line;
+   *  optional only for a browser holding new JS against an older server. */
+  look?: { title: string; preset: string; layers: { time: string; weather: string; moon: string; event: string; power: string } | null; at: string } | null;
 }
 export interface LiveBoard {
   now: string;
