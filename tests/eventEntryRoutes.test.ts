@@ -44,7 +44,7 @@ describe('registration over HTTP', () => {
     expect(after.register).toEqual([]);
     expect(after.entries[0]).toMatchObject({ name: 'Rats', manage: true, onRoster: true, status: 'registered', waitlist: null });
     const pub = (await get(`/api/events/${slug}`)).json();
-    expect(pub.entries).toEqual([{ id: after.entries[0].id, name: 'Rats', tag: 'RAT', logoKey: null, seed: null, status: 'registered', waitlist: null }]);
+    expect(pub.entries).toEqual([{ id: after.entries[0].id, name: 'Rats', tag: 'RAT', logoKey: null, seed: null, status: 'registered', waitlist: null, placement: null }]);
   });
 
   it('answers a refusal with the players and their problems by name', async () => {

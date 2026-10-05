@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chaptersLabel, rulesLines, rulesSummary, stageSummary } from '../src/events/format.js';
+import { chaptersLabel, groupLabel, roundLabel, rulesLines, rulesSummary, stageSummary } from '../src/events/format.js';
 import { TEMPLATES } from '../src/rulesets.js';
 
 describe('stage summary', () => {
@@ -61,5 +61,33 @@ describe('rules summary', () => {
     expect(rulesSummary(none)).toBe('No pauses · coin toss for sides · 10 min no-show grace');
     const long = { ...TEMPLATES.PUG, pause: { ...TEMPLATES.PUG.pause, limit: null, seconds: 60 } };
     expect(rulesSummary(long)).toBe('Unlimited pauses of 60 s · coin toss for sides · 10 min no-show grace');
+  });
+});
+
+describe('round and group labels (plan T2)', () => {
+  it('names elimination rounds from the end', () => {
+    expect(roundLabel('single_elim', { thirdPlace: true }, 1, 3, 3)).toBe('Final');
+    expect(roundLabel('single_elim', { thirdPlace: true }, 1, 2, 3)).toBe('Semifinals');
+    expect(roundLabel('single_elim', { thirdPlace: true }, 1, 2, 4)).toBe('Quarterfinals');
+    expect(roundLabel('single_elim', { thirdPlace: true }, 1, 1, 5)).toBe('Round 1');
+    expect(roundLabel('single_elim', { thirdPlace: true }, 2, 1, 1)).toBe('Third place');
+    expect(roundLabel('double_elim', { grandFinalReset: true }, 1, 2, 3)).toBe('Upper round 2');
+    expect(roundLabel('double_elim', { grandFinalReset: true }, 1, 3, 3)).toBe('Upper final');
+    expect(roundLabel('double_elim', { grandFinalReset: true }, 2, 4, 4)).toBe('Lower final');
+    expect(roundLabel('double_elim', { grandFinalReset: true }, 3, 1, 2)).toBe('Grand final');
+    expect(roundLabel('double_elim', { grandFinalReset: true }, 3, 2, 2)).toBe('Grand final reset');
+  });
+  it('names table rounds and league weeks', () => {
+    expect(roundLabel('swiss', { rounds: 4 }, 1, 2, 4)).toBe('Round 2');
+    expect(roundLabel('round_robin', { groups: 2 }, 2, 3, 3)).toBe('Round 3');
+    expect(roundLabel('league', { matches: 4, matchesPerWeek: 1, pairing: 'swiss', seasonStart: null }, 1, 3, 4)).toBe('Week 3');
+    expect(roundLabel('league', { matches: 8, matchesPerWeek: 2, pairing: 'swiss', seasonStart: null }, 1, 3, 8)).toBe('Week 2, match 1');
+  });
+  it('names groups', () => {
+    expect(groupLabel('round_robin', 1)).toBe('Group A');
+    expect(groupLabel('round_robin', 3)).toBe('Group C');
+    expect(groupLabel('double_elim', 2)).toBe('Lower bracket');
+    expect(groupLabel('single_elim', 1)).toBe('Bracket');
+    expect(groupLabel('swiss', 1)).toBe('Rounds');
   });
 });

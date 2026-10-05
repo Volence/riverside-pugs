@@ -8,6 +8,7 @@ import * as N from './entries.js';
 import * as R from './entryRules.js';
 import type * as V from './validate.js';
 import { STAGE_LABEL, VETO_LABEL, chaptersLabel, rulesLines, stageSummary } from './format.js';
+import { stagePlayViews, type StagePlayView } from './playViews.js';
 
 /** What the public event list and event page show (spec section 7). */
 
@@ -19,12 +20,12 @@ export interface EventStageView {
   ordinal: number; type: V.StageType; summary: string; veto: string; chapters: string; scheduling: V.Scheduling;
   rulesetName: string | null; rules: string[]; gameConfig: string; campaigns: { slug: string; name: string }[];
 }
-export interface EventEntryView { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; status: string; waitlist: number | null }
+export interface EventEntryView { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; status: string; waitlist: number | null; placement: number | null }
 export interface EventView {
   slug: string; name: string; status: V.EventStatus; entryKind: V.EntryKind; official: boolean; organizerName: string | null;
   bannerKey: string | null; startsAt: string; description: string; teamCap: number | null;
   eligibility: V.Eligibility; checkin: V.Checkin; roster: V.RosterRules;
-  stages: EventStageView[]; entries: EventEntryView[];
+  stages: EventStageView[]; entries: EventEntryView[]; play: StagePlayView[];
   finishedAt: string | null; cancelledAt: string | null; cancelReason: string | null;
   lockedAt: string | null; checkinOpensAt: string | null; checkinClosesAt: string | null;
 }
@@ -71,7 +72,10 @@ function entryViews(db: DB, ev: E.EventRow): EventEntryView[] {
   if (ev.locked_at !== null) rows.sort((a, b) => (a.seed ?? 1e9) - (b.seed ?? 1e9) || a.id - b.id);
   return rows.map((e) => {
     const w = place.waitlist.indexOf(e.id);
-    return { id: e.id, name: e.name, tag: e.tag, logoKey: e.logo_key, seed: ev.locked_at !== null ? e.seed : null, status: e.status, waitlist: w >= 0 ? w + 1 : null };
+    return {
+      id: e.id, name: e.name, tag: e.tag, logoKey: e.logo_key, seed: ev.locked_at !== null ? e.seed : null, status: e.status,
+      waitlist: w >= 0 ? w + 1 : null, placement: e.placement,
+    };
   });
 }
 
@@ -97,6 +101,7 @@ export function eventView(db: DB, ev: E.EventRow): EventView {
       };
     }),
     entries: entryViews(db, ev),
+    play: stagePlayViews(db, ev),
     finishedAt: ev.finished_at, cancelledAt: ev.cancelled_at, cancelReason: ev.cancel_reason,
     lockedAt: ev.locked_at,
     ...(f.checkin.enabled
