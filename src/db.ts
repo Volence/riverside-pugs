@@ -2033,6 +2033,17 @@ export function openDb(path: string): DB {
   // linked player. Rows handled before this column existed keep only
   // handled_by_discord_id, which the card and the site still fall back to.
   ensureColumn(db, 'mod_calls', 'handled_by_steamid', 'TEXT');
+  // The channel a call's card was posted in. Cards are edited later (folds,
+  // Mark handled), and since the mod channel split the setting can point
+  // somewhere else by then. Cards posted before this column were all in the
+  // admin channel, so that is what they get.
+  const modCallChannelIsNew = !(db.prepare('PRAGMA table_info(mod_calls)').all() as { name: string }[])
+    .some((c) => c.name === 'discord_channel_id');
+  ensureColumn(db, 'mod_calls', 'discord_channel_id', 'TEXT');
+  if (modCallChannelIsNew) {
+    db.exec(`UPDATE mod_calls SET discord_channel_id = (SELECT value FROM settings WHERE key = 'discord_admin_channel_id')
+             WHERE discord_message_id IS NOT NULL`);
+  }
   // start/stop of the SourceTV relay itself, so a run of dropped sessions can
   // be told apart from the relay simply not running.
   db.exec(`

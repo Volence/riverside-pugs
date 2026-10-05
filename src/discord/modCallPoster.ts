@@ -3,6 +3,7 @@ import { getModCall, markModCallHandled, onModCall, onModCallHandled } from '../
 import { playerByDiscordId } from '../players.js';
 import { getSetting } from '../settings.js';
 import { inGoodStanding } from '../standing.js';
+import { modChannelOrAdmin } from './feedRouting.js';
 import { handlerLabel, renderModCallCard } from './modCallCard.js';
 import type { BotInteraction, BotTransport, InteractionReply } from './transport.js';
 
@@ -104,12 +105,13 @@ export class ModCallPoster {
       return;
     }
     // Blank channel: left pending. The site's banner says calls are not
-    // reaching Discord, and the retry pass posts it once the channel is set.
-    const channelId = getSetting(db, 'discord_admin_channel_id') ?? '';
+    // reaching Discord, and the retry pass posts it once a channel is set.
+    const channelId = modChannelOrAdmin(db);
     if (!channelId) return;
     try {
       const messageId = await transport.send(channelId, renderModCallCard(db, row, publicUrl));
-      db.prepare("UPDATE mod_calls SET discord_message_id = ?, post_state = 'posted' WHERE id = ?").run(messageId, id);
+      db.prepare("UPDATE mod_calls SET discord_message_id = ?, discord_channel_id = ?, post_state = 'posted' WHERE id = ?")
+        .run(messageId, channelId, id);
     } catch (err) {
       console.error('[modcall] post failed:', err);
     }
@@ -121,7 +123,8 @@ export class ModCallPoster {
     const { db, transport, publicUrl } = this.deps;
     const parent = getModCall(db, parentId);
     if (!parent?.discord_message_id) return;
-    const channelId = getSetting(db, 'discord_admin_channel_id') ?? '';
+    // Where the card IS, not where the setting points now.
+    const channelId = parent.discord_channel_id ?? '';
     if (!channelId) return;
     try {
       await transport.edit(channelId, parent.discord_message_id, renderModCallCard(db, parent, publicUrl));
