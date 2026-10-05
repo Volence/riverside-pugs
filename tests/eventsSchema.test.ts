@@ -70,3 +70,22 @@ describe('event schema', () => {
       .toEqual({ actor: null, action: 'created', detail: '{}' });
   });
 });
+
+describe('T1b columns', () => {
+  it('adds the lock, check-in and drop columns', () => {
+    const cols = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
+    expect(cols('events')).toContain('locked_at');
+    expect(cols('event_entries')).toEqual(expect.arrayContaining(['checked_in_at', 'checked_in_by', 'dropped_at', 'drop_reason', 'additions']));
+  });
+
+  it('allows one active entry per team per event, and another once the first is dropped', () => {
+    const id = event();
+    db.prepare("INSERT INTO teams (name, name_key, tag, tag_key, slug, captain_steamid, created_by, created_at) VALUES ('Rats', 'rats', 'RAT', 'RAT', 'rats', ?, ?, '2026-10-01')").run(A, A);
+    const team = (db.prepare("SELECT id FROM teams WHERE slug = 'rats'").get() as { id: number }).id;
+    const add = () => db.prepare("INSERT INTO event_entries (event_id, team_id, name, registered_by, created_at) VALUES (?, ?, 'Rats', ?, '2026-10-01')").run(id, team, A);
+    add();
+    expect(add).toThrow(/UNIQUE/);
+    db.prepare("UPDATE event_entries SET status = 'dropped' WHERE event_id = ?").run(id);
+    expect(add).not.toThrow();
+  });
+});

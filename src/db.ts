@@ -429,6 +429,10 @@ CREATE TABLE IF NOT EXISTS event_entries (
   created_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS event_entries_event ON event_entries (event_id);
+-- One active entry per team per event (plan T1b). A dropped entry frees the
+-- team to register again; a disqualified one does not.
+CREATE UNIQUE INDEX IF NOT EXISTS event_entries_team_active ON event_entries (event_id, team_id)
+  WHERE team_id IS NOT NULL AND status <> 'dropped';
 CREATE TABLE IF NOT EXISTS event_entry_players (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   entry_id   INTEGER NOT NULL REFERENCES event_entries(id),
@@ -1720,6 +1724,17 @@ export function openDb(path: string): DB {
   // Why a membership ended, where it matters: 'kicked' keeps that player
   // from rejoining through the team's join link (src/teams/teams.ts).
   ensureColumn(db, 'team_members', 'left_reason', 'TEXT');
+  // Tournaments plan T1b. locked_at: when the event's entry list became
+  // final (check-in closed, or the start with check-in off). An entry's
+  // check-in, its drop, and how many players were added after registration
+  // (the event's maxAdditions). drop_reason is one of src/events/entryRules.ts
+  // DROP_REASONS.
+  ensureColumn(db, 'events', 'locked_at', 'TEXT');
+  ensureColumn(db, 'event_entries', 'checked_in_at', 'TEXT');
+  ensureColumn(db, 'event_entries', 'checked_in_by', 'TEXT');
+  ensureColumn(db, 'event_entries', 'dropped_at', 'TEXT');
+  ensureColumn(db, 'event_entries', 'drop_reason', 'TEXT');
+  ensureColumn(db, 'event_entries', 'additions', 'INTEGER NOT NULL DEFAULT 0');
   // Moderators: may work tickets and nothing else. Deliberately not read by
   // serverAdmins.ts, so the flag grants nothing on a game server.
   ensureColumn(db, 'players', 'is_mod', 'INTEGER NOT NULL DEFAULT 0');

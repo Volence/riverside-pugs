@@ -533,6 +533,24 @@ describe('mergePlayers', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM event_entry_players WHERE steamid = ?').get(ALT)).toEqual({ n: 0 });
   });
 
+  it('moves event_entries.checked_in_by to the surviving account', () => {
+    const ev = Number(db.prepare(
+      `INSERT INTO events (slug, name, organizer_steamid, entry_kind, starts_at, eligibility_json, checkin_json, roster_json, created_at, updated_at)
+       VALUES ('cup', 'Cup', ?, 'team', '2026-10-10T20:00:00.000Z', '{}', '{}', '{}', 'x', 'x')`,
+    ).run(ALT).lastInsertRowid);
+    db.prepare("INSERT INTO event_log (event_id, at, actor, action) VALUES (?, 'x', ?, 'created')").run(ev, ALT);
+    const entryId = Number(db.prepare("INSERT INTO event_entries (event_id, name, tag, registered_by, created_at) VALUES (?, 'Rats', 'RR', ?, 'x')")
+      .run(ev, ALT).lastInsertRowid);
+    const add = db.prepare("INSERT INTO event_entry_players (entry_id, steamid, role, added_at) VALUES (?, ?, ?, 'x')");
+    add.run(entryId, ALT, 'starter');
+    add.run(entryId, MAIN, 'sub');
+    db.prepare('UPDATE event_entries SET checked_in_by = ? WHERE id = ?').run(ALT, entryId);
+
+    mergePlayers(db, { from: ALT, into: MAIN });
+
+    expect((db.prepare('SELECT checked_in_by AS v FROM event_entries WHERE id = ?').get(entryId) as { v: string }).v).toBe(MAIN);
+  });
+
   it('moves booking rows, keeping one place per booking when both accounts were in it', () => {
     const b = Number(db.prepare(
       `INSERT INTO bookings (purpose, starts_at, ends_at, password, tv_password, game_config, rules_json, playlist_json, created_by, created_at)

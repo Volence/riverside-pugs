@@ -8,6 +8,18 @@ export function displaySr(mu: number, sigma: number): number {
   return Math.max(0, Math.round((mu - 2 * sigma) * 100));
 }
 
+/** The SR a player with no rating row yet shows: openskill's own defaults,
+ *  the ones ensureRating (src/players.ts) would write for them. */
+export const UNRATED_SR = displaySr(rating().mu, rating().sigma);
+
+/** A player's display SR in a season, read without writing a rating row.
+ *  Scrim sides and event seeding both use it. */
+export function seasonSr(db: DB, steamid: string, seasonId: number): number {
+  const row = db.prepare('SELECT mu, sigma FROM player_ratings WHERE player_id = ? AND season_id = ?')
+    .get(steamid, seasonId) as { mu: number; sigma: number } | undefined;
+  return row ? displaySr(row.mu, row.sigma) : UNRATED_SR;
+}
+
 interface MpRow { player_id: string; team: 'a' | 'b'; joined_map: number }
 
 /** What the ratings said about a match before it was played. */
