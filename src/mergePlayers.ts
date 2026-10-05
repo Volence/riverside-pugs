@@ -130,6 +130,7 @@ const PLAIN: [table: string, column: string][] = [
   // place on an entry's roster. Where both accounts hold a live place on one
   // entry, the alt's is closed first (below), as for team_members.
   ['event_entries', 'registered_by'],
+  ['event_entries', 'checked_in_by'],
   ['event_entry_players', 'steamid'],
 ];
 

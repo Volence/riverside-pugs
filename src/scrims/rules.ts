@@ -1,6 +1,5 @@
-import { rating } from 'openskill';
 import type { DB } from '../db.js';
-import { displaySr } from '../rating.js';
+import { seasonSr, UNRATED_SR } from '../rating.js';
 import { currentSeasonId } from '../players.js';
 import { getSetting } from '../settings.js';
 import { activeMembers } from '../teams/teams.js';
@@ -20,18 +19,6 @@ import { bookingLimits, capacityProblem, estimateMinutes, STEP_MINUTES, iso } fr
  *  it does not otherwise need. */
 export type ScrimSide = { teamId: number } | { captain: string };
 
-/** The SR a player with no rating row yet is treated as: openskill's own
- *  defaults (mu 25, sigma 25/3), the same ones ensureRating (src/players.ts)
- *  would write for them. Read here without writing anything, since this
- *  module never touches the database. */
-const UNRATED_SR = displaySr(rating().mu, rating().sigma);
-
-function srOf(db: DB, steamid: string, seasonId: number): number {
-  const row = db.prepare('SELECT mu, sigma FROM player_ratings WHERE player_id = ? AND season_id = ?')
-    .get(steamid, seasonId) as { mu: number; sigma: number } | undefined;
-  return row ? displaySr(row.mu, row.sigma) : UNRATED_SR;
-}
-
 /**
  * Ruling 1: a side's SR is the average current-season display SR of a team's
  * active members, or of the pickup captain alone. A player with no rating
@@ -43,10 +30,10 @@ export function sideSr(db: DB, side: ScrimSide): number {
   if ('teamId' in side) {
     const members = activeMembers(db, side.teamId);
     if (members.length === 0) return UNRATED_SR;
-    const total = members.reduce((sum, m) => sum + srOf(db, m.steamid, season), 0);
+    const total = members.reduce((sum, m) => sum + seasonSr(db, m.steamid, season), 0);
     return Math.round(total / members.length);
   }
-  return srOf(db, side.captain, season);
+  return seasonSr(db, side.captain, season);
 }
 
 /** Whether scrims show SR at all (scrim_show_sr). Off, SR is left out of
