@@ -3,7 +3,10 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as E from '../src/events/events.js';
+import * as N from '../src/events/entries.js';
+import * as V from '../src/events/validate.js';
 import { ADMIN, NOW, START, eventFixture, stageBody, type Fixture } from './eventFixture.js';
+import { A, entryFixture, rosterA, type EntryFixture } from './entryFixture.js';
 
 /**
  * Spec, Error handling: every event state change is one transaction with an
@@ -23,7 +26,11 @@ import { ADMIN, NOW, START, eventFixture, stageBody, type Fixture } from './even
  */
 
 const WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:events|event_stages|event_log)\b/gi;
+const ENTRY_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:event_entries|event_entry_players)\b/gi;
+const ENGINE = new Set(['src/events/events.ts', 'src/events/entries.ts']);
 const READS = new Set(['getEvent', 'getEventBySlug', 'getStage', 'stagesOf', 'eventLog', 'fieldsOf', 'stageSettingsOf', 'stageContext']);
+/** Exported for entries.ts to write its own audit row; never a mutation itself. */
+const HELPERS = new Set(['logEvent']);
 
 const MUTATIONS: Record<string, { from: 'draft' | 'announced'; action: string; run: (f: Fixture) => E.EventResult<unknown> }> = {
   createEvent: { from: 'draft', action: 'created', run: ({ db }) => E.createEvent(db, { by: ADMIN, fields: { name: 'Second Cup', startsAt: START, entryKind: 'team' }, now: NOW }) },
@@ -43,29 +50,40 @@ const MUTATIONS: Record<string, { from: 'draft' | 'announced'; action: string; r
 
 const SPECIAL = new Set(['deleteDraftEvent']);
 
-const logCount = (f: Fixture) => (f.db.prepare('SELECT COUNT(*) AS n FROM event_log').get() as { n: number }).n;
+const logCount = (f: { db: Fixture['db'] }) => (f.db.prepare('SELECT COUNT(*) AS n FROM event_log').get() as { n: number }).n;
+const actionCount = (f: { db: Fixture['db'] }, action: string) =>
+  (f.db.prepare('SELECT COUNT(*) AS n FROM event_log WHERE action = ?').get(action) as { n: number }).n;
 const snapshot = (f: Fixture) => JSON.stringify([
   f.db.prepare('SELECT * FROM events ORDER BY id').all(),
   f.db.prepare('SELECT * FROM event_stages ORDER BY id').all(),
 ]);
 
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const walk = (dir: string): string[] => readdirSync(join(root, dir), { withFileTypes: true })
+  .flatMap((e) => (e.isDirectory() ? walk(`${dir}/${e.name}`) : e.name.endsWith('.ts') ? [`${dir}/${e.name}`] : []));
+
 describe('event_log guard', () => {
-  it('only src/events/events.ts writes the event tables', () => {
-    const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-    const walk = (dir: string): string[] => readdirSync(join(root, dir), { withFileTypes: true })
-      .flatMap((e) => (e.isDirectory() ? walk(`${dir}/${e.name}`) : e.name.endsWith('.ts') ? [`${dir}/${e.name}`] : []));
+  it('only src/events/events.ts and src/events/entries.ts write the event tables', () => {
     const offenders = walk('src')
-      .filter((f) => f !== 'src/events/events.ts')
+      .filter((f) => !ENGINE.has(f))
       .filter((f) => (readFileSync(join(root, f), 'utf8').match(WRITERS) ?? []).length > 0);
     expect(offenders).toEqual([]);
     // Lower case SQL counts as a write too.
     expect('delete from event_log where 1'.match(WRITERS)).toHaveLength(1);
   });
 
-  it('every exported function of events.ts is a known read or a guarded mutation', () => {
+  it('only src/events/entries.ts (and the account merge) writes the entry tables', () => {
+    const offenders = walk('src')
+      .filter((f) => f !== 'src/events/entries.ts' && f !== 'src/mergePlayers.ts')
+      .filter((f) => (readFileSync(join(root, f), 'utf8').match(ENTRY_WRITERS) ?? []).length > 0);
+    expect(offenders).toEqual([]);
+  });
+
+  it('every exported function of events.ts is a known read, helper, or a guarded mutation', () => {
     const fns = Object.entries(E).filter(([, v]) => typeof v === 'function').map(([k]) => k);
-    expect(fns.filter((k) => !READS.has(k) && !SPECIAL.has(k)).sort()).toEqual(Object.keys(MUTATIONS).sort());
+    expect(fns.filter((k) => !READS.has(k) && !SPECIAL.has(k) && !HELPERS.has(k)).sort()).toEqual(Object.keys(MUTATIONS).sort());
     expect(fns.filter((k) => SPECIAL.has(k)).sort()).toEqual([...SPECIAL].sort());
+    expect(fns.filter((k) => HELPERS.has(k)).sort()).toEqual([...HELPERS].sort());
   });
 
   for (const [name, m] of Object.entries(MUTATIONS)) {
@@ -121,6 +139,84 @@ describe('event_log guard', () => {
         f.db.exec(`CREATE TRIGGER ${table}_down BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT, '${table} down'); END`);
         expect(() => E.deleteDraftEvent(f.db, { eventId: f.eventId, by: ADMIN })).toThrow(new RegExp(`${table} down`));
         expect(allRows(f)).toBe(before);
+      });
+    }
+  });
+
+  /** Same two guards as above, over src/events/entries.ts (tournaments plan
+   *  T1b). Task 4 adds openCheckin to the events table here and the rest of
+   *  entries' mutations to ENTRY_MUTATIONS. */
+  describe('entries guard (src/events/entries.ts)', () => {
+    const must = <T>(r: V.Checked<T>): T => {
+      if (!r.ok) throw new Error(`expected ok, got ${r.error}`);
+      return r.value;
+    };
+    const ENTRY_READS = new Set([
+      'getEntry', 'entriesOf', 'placesOf', 'rosterOf', 'entryOfTeam', 'entryOfPlayer',
+      'placementOf', 'managersOf', 'playerFacts', 'entrySr', 'isActive',
+    ]);
+    // Cached per fixture so a test that pre-registers to snapshot "after
+    // setup, before the mutation" does not make the mutation's own internal
+    // registered(f) call register the team a second time.
+    const registeredCache = new WeakMap<EntryFixture, number>();
+    const registered = (f: EntryFixture): number => {
+      const cached = registeredCache.get(f);
+      if (cached !== undefined) return cached;
+      const id = must(N.registerEntry(f.db, { eventId: f.eventId, teamId: f.teamA, by: A[0], roster: rosterA(), now: NOW })).entry.id;
+      registeredCache.set(f, id);
+      return id;
+    };
+    const ENTRY_MUTATIONS: Record<string, { action: string; needsEntry: boolean; run: (f: EntryFixture) => V.Checked<unknown> }> = {
+      registerEntry: {
+        action: 'entry_registered', needsEntry: false,
+        run: (f) => N.registerEntry(f.db, { eventId: f.eventId, teamId: f.teamA, by: A[0], roster: rosterA(), now: NOW }),
+      },
+      setEntryRoster: {
+        action: 'roster_changed', needsEntry: true,
+        run: (f) => N.setEntryRoster(f.db, { entryId: registered(f), by: A[0], roster: rosterA({ subs: [] }), now: NOW }),
+      },
+      leaveEntry: {
+        action: 'roster_left', needsEntry: true,
+        run: (f) => N.leaveEntry(f.db, { entryId: registered(f), steamid: A[4], now: NOW }),
+      },
+      withdrawEntry: {
+        action: 'entry_withdrawn', needsEntry: true,
+        run: (f) => N.withdrawEntry(f.db, { entryId: registered(f), by: A[0], now: NOW }),
+      },
+    };
+    const entryRows = (f: EntryFixture) => JSON.stringify([
+      f.db.prepare('SELECT * FROM event_entries ORDER BY id').all(),
+      f.db.prepare('SELECT * FROM event_entry_players ORDER BY id').all(),
+    ]);
+
+    it('every exported function of entries.ts is a known read or a guarded mutation', () => {
+      const fns = Object.entries(N).filter(([, v]) => typeof v === 'function').map(([k]) => k);
+      expect(fns.filter((k) => !ENTRY_READS.has(k)).sort()).toEqual(Object.keys(ENTRY_MUTATIONS).sort());
+    });
+
+    for (const [name, m] of Object.entries(ENTRY_MUTATIONS)) {
+      it(`${name} writes exactly one event_log row, ${m.action}`, () => {
+        const f = entryFixture();
+        const beforeAction = actionCount(f, m.action);
+        const beforeTotal = logCount(f);
+        const r = m.run(f);
+        expect(r.ok, r.ok ? '' : r.error).toBe(true);
+        expect(actionCount(f, m.action)).toBe(beforeAction + 1);
+        // registerEntry has no setup of its own; for the others, the setup
+        // (registered(f)) also logs its own entry_registered row first.
+        if (name === 'registerEntry') expect(logCount(f)).toBe(beforeTotal + 1);
+      });
+
+      it(`${name} writes nothing when its event_log row cannot be written`, () => {
+        const f = entryFixture();
+        if (m.needsEntry) registered(f);
+        const before = entryRows(f);
+        f.db.exec(
+          `CREATE TRIGGER entry_log_down_${name} BEFORE INSERT ON event_log WHEN NEW.action = '${m.action}'
+           BEGIN SELECT RAISE(ABORT, 'audit down'); END`,
+        );
+        expect(() => m.run(f)).toThrow(/audit down/);
+        expect(entryRows(f)).toBe(before);
       });
     }
   });
