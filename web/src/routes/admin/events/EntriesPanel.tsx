@@ -16,15 +16,59 @@ function statusText(e: AdminEntryView): string {
   return e.waitlist !== null ? `Waitlist ${e.waitlist}` : 'Registered';
 }
 
+/** The event is past seeding entirely once it is live, finished or
+ *  cancelled; the server's reorderSeeds already refuses those with
+ *  `seeds_locked`, so the Up/Down controls are not offered then either. */
+const SEEDS_CLOSED: readonly string[] = ['live', 'finished', 'cancelled'];
+
+/** One entry's row. Its own component so the Disqualify reason box is this
+ *  row's state alone, never shared with any other row's box or send. */
+function EntryRow({ e, canEdit, locked, showMove, busy, active, onMove, onDisqualify, onRestore }: {
+  e: AdminEntryView; canEdit: boolean; locked: boolean; showMove: boolean; busy: boolean; active: boolean;
+  onMove: (id: number, by: -1 | 1) => void; onDisqualify: (id: number, name: string, reason: string) => void; onRestore: (id: number, name: string) => void;
+}) {
+  const [reason, setReason] = useState('');
+  return (
+    <li class={active ? '' : 'muted'}>
+      <strong>{e.seed !== null && active ? `#${e.seed} ` : ''}{e.name}</strong> <span class="muted">[{e.tag}]</span>
+      {' '}· {statusText(e)} · SR {e.sr} · by {e.registeredByName}
+      <ul class="entrypanel__roster">
+        {e.roster.map((p) => (
+          <li key={p.steamid}><span class="chip">{ROLE[p.role]}</span> {p.name}{p.problems.map((x) => <span key={x} class="rosterpick__why">{x}</span>)}</li>
+        ))}
+      </ul>
+      {canEdit && (
+        <div class="inlinerow">
+          {showMove && locked && active && e.seed !== null && (
+            <>
+              <button class="btn btn--ghost" aria-label={`Move ${e.name} up`} disabled={busy} onClick={() => onMove(e.id, -1)}>Up</button>
+              <button class="btn btn--ghost" aria-label={`Move ${e.name} down`} disabled={busy} onClick={() => onMove(e.id, 1)}>Down</button>
+            </>
+          )}
+          {active && (
+            <>
+              <input type="text" placeholder="Reason" value={reason} onInput={(ev) => setReason((ev.target as HTMLInputElement).value)} />
+              <button class="btn btn--ghost" disabled={busy} onClick={() => onDisqualify(e.id, e.name, reason)}>Disqualify</button>
+            </>
+          )}
+          {!active && !locked && (
+            <button class="btn btn--ghost" disabled={busy} onClick={() => onRestore(e.id, e.name)}>Restore</button>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
 /** The Entries section of an event on the desk (plan T1b Ruling 10). A mod
  *  (canEdit false) reads the same list with no control. */
 export function EntriesPanel({ eventId, status, canEdit }: { eventId: number; status: string; canEdit: boolean }) {
   const { data, error: loadError, reload } = useFetch((s) => adminApi.eventEntries(eventId, s), [eventId]);
   const { busy, error, run } = useAction(reload);
-  const [reason, setReason] = useState('');
   if (loadError) return <Panel><h3>Entries</h3><p class="error">Could not load the entries.</p></Panel>;
   if (!data) return <Panel><h3>Entries</h3></Panel>;
   const locked = data.lockedAt !== null;
+  const showMove = !SEEDS_CLOSED.includes(status);
   const seeded = data.entries.filter((e) => e.seed !== null && (e.status === 'registered' || e.status === 'checked_in'))
     .sort((a, b) => (a.seed ?? 0) - (b.seed ?? 0));
   const move = (id: number, by: -1 | 1) => {
@@ -35,6 +79,8 @@ export function EntriesPanel({ eventId, status, canEdit }: { eventId: number; st
     [order[i], order[j]] = [order[j]!, order[i]!];
     void run(() => adminApi.reorderEventSeeds(eventId, order));
   };
+  const disqualify = (id: number, name: string, reason: string) => void run(() => adminApi.disqualifyEventEntry(eventId, id, reason), `Disqualify ${name}?`);
+  const restore = (id: number, name: string) => void run(() => adminApi.restoreEventEntry(eventId, id), `Restore ${name}?`);
   const active = (e: AdminEntryView) => e.status !== 'dropped' && e.status !== 'disqualified';
   return (
     <Panel>
@@ -56,34 +102,8 @@ export function EntriesPanel({ eventId, status, canEdit }: { eventId: number; st
       {data.entries.length === 0 ? <Empty>No entries yet.</Empty> : (
         <ul class="admin-list">
           {data.entries.map((e) => (
-            <li key={e.id} class={active(e) ? '' : 'muted'}>
-              <strong>{e.seed !== null && active(e) ? `#${e.seed} ` : ''}{e.name}</strong> <span class="muted">[{e.tag}]</span>
-              {' '}· {statusText(e)} · SR {e.sr} · by {e.registeredByName}
-              <ul class="entrypanel__roster">
-                {e.roster.map((p) => (
-                  <li key={p.steamid}><span class="chip">{ROLE[p.role]}</span> {p.name}{p.problems.map((x) => <span key={x} class="rosterpick__why">{x}</span>)}</li>
-                ))}
-              </ul>
-              {canEdit && (
-                <div class="inlinerow">
-                  {locked && active(e) && e.seed !== null && (
-                    <>
-                      <button class="btn btn--ghost" aria-label={`Move ${e.name} up`} disabled={busy} onClick={() => move(e.id, -1)}>Up</button>
-                      <button class="btn btn--ghost" aria-label={`Move ${e.name} down`} disabled={busy} onClick={() => move(e.id, 1)}>Down</button>
-                    </>
-                  )}
-                  {active(e) && (
-                    <>
-                      <input type="text" placeholder="Reason" value={reason} onInput={(ev) => setReason((ev.target as HTMLInputElement).value)} />
-                      <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => adminApi.disqualifyEventEntry(eventId, e.id, reason), `Disqualify ${e.name}?`)}>Disqualify</button>
-                    </>
-                  )}
-                  {!active(e) && !locked && (
-                    <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => adminApi.restoreEventEntry(eventId, e.id), `Restore ${e.name}?`)}>Restore</button>
-                  )}
-                </div>
-              )}
-            </li>
+            <EntryRow key={e.id} e={e} canEdit={canEdit} locked={locked} showMove={showMove} busy={busy} active={active(e)}
+              onMove={move} onDisqualify={disqualify} onRestore={restore} />
           ))}
         </ul>
       )}

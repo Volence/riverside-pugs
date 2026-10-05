@@ -47,4 +47,25 @@ describe('EntriesPanel', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Move Bats up' }));
     await waitFor(() => expect(mockAdmin.reorderEventSeeds).toHaveBeenCalledWith(9, [2, 1]));
   });
+
+  it('keeps each row\'s Disqualify reason separate from every other row', async () => {
+    mockAdmin.eventEntries.mockResolvedValue({ lockedAt: null, entries: [entry(), entry({ id: 2, name: 'Bats' })] });
+    mockAdmin.disqualifyEventEntry.mockResolvedValue({});
+    render(<EntriesPanel eventId={9} status="checkin" canEdit />);
+    await screen.findByText('Rats');
+    const [firstReason, secondReason] = screen.getAllByPlaceholderText('Reason');
+    fireEvent.input(firstReason, { target: { value: 'Roster stacked' } });
+    const [firstDisqualify] = screen.getAllByRole('button', { name: 'Disqualify' });
+    fireEvent.click(firstDisqualify);
+    await waitFor(() => expect(mockAdmin.disqualifyEventEntry).toHaveBeenCalledWith(9, 1, 'Roster stacked'));
+    expect((secondReason as HTMLInputElement).value).toBe('');
+  });
+
+  it('hides the seed Up/Down controls once the event is live', async () => {
+    mockAdmin.eventEntries.mockResolvedValue({ lockedAt: 'x', entries: [entry({ seed: 1 }), entry({ id: 2, name: 'Bats', seed: 2 })] });
+    render(<EntriesPanel eventId={9} status="live" canEdit />);
+    await screen.findByText(/Rats/);
+    expect(screen.queryByRole('button', { name: 'Move Bats up' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Move .* down/ })).toBeNull();
+  });
 });
