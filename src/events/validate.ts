@@ -26,6 +26,7 @@ export const NAME_MAX = 60;
 export const DESCRIPTION_MAX = 4000;
 export const CANCEL_REASON_MAX = 300;
 export const POOL_MAX = 12;
+export const LEAGUE_MATCHES_MAX = 40;
 export const STAGES_MAX = 5;
 /** ban, ban, pick, pick, ban, ban, decider (spec section 4, pick_ban). */
 export const PICK_BAN_POOL = 7;
@@ -89,6 +90,16 @@ export const EVENT_ERRORS = {
   seeds_locked: { status: 409, text: 'Seeds can change only once the entry list is final and before the event goes live.' },
   bad_seed_order: { status: 400, text: 'The new seed order must list every seeded entry once.' },
   not_restorable: { status: 409, text: 'Only a dropped or disqualified entry can be restored, before the entry list is final.' },
+  list_not_final: { status: 409, text: 'The entry list is not final yet.' },
+  too_few_entries: { status: 409, text: 'A stage needs at least 2 teams to start.' },
+  not_live: { status: 409, text: 'That stage is not being played.' },
+  match_not_found: { status: 404, text: 'No such match in this event.' },
+  match_not_open: { status: 409, text: 'That match does not have two teams to report on yet.' },
+  bad_result: { status: 400, text: 'A result names the winner and gives both campaign scores with the winner ahead, or is a forfeit.' },
+  result_locked: { status: 409, text: 'Later matches already depend on this result, so it can no longer be changed here.' },
+  changed: { status: 409, text: 'The event changed while this was being saved. Reload and try again.' },
+  elim_not_last: { status: 400, text: 'An elimination bracket is always the last stage.' },
+  bad_group_advance: { status: 400, text: 'With groups, the advance count has to split evenly across the groups.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type EventError = keyof typeof EVENT_ERRORS;
 
@@ -110,7 +121,7 @@ export interface StageConfigs {
   double_elim: { grandFinalReset: boolean };
   round_robin: { groups: number };
   swiss: { rounds: number };
-  league: { weeks: number; matchesPerWeek: number; pairing: 'swiss' | 'round_robin' };
+  league: { matches: number; matchesPerWeek: number; pairing: 'swiss' | 'round_robin'; seasonStart: string | null };
 }
 export type StageConfig = StageConfigs[StageType];
 
@@ -127,12 +138,30 @@ export interface EventFields {
   eligibility: Eligibility; checkin: Checkin; roster: RosterRules;
 }
 
+export const SCORE_MAX = 100000;
+/** A match result as an admin enters it (plan T2 Ruling 1). */
+export interface ResultInput { winner: 'a' | 'b'; scoreA: number | null; scoreB: number | null; forfeit: boolean }
+
 export const defaultEligibility = (): Eligibility => ({ minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: null });
 export const defaultCheckin = (): Checkin => ({ enabled: true, opensMinutes: 60, closesMinutes: 15 });
 export const defaultRoster = (): RosterRules => ({ starters: 4, maxSubs: 2, lock: { kind: 'none' }, maxAdditions: null });
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isInt = (v: unknown, min: number, max: number): v is number => Number.isInteger(v) && (v as number) >= min && (v as number) <= max;
+
+/** Winner a or b. A forfeit carries no scores (any sent are dropped);
+ *  otherwise both scores are integers 0..SCORE_MAX with the winner strictly
+ *  ahead, as ties are replayed (spec section 3). */
+export function parseResult(raw: unknown): Checked<ResultInput> {
+  if (!isObj(raw) || (raw.winner !== 'a' && raw.winner !== 'b')) return fail('bad_result');
+  const forfeit = raw.forfeit ?? false;
+  if (typeof forfeit !== 'boolean') return fail('bad_result');
+  if (forfeit) return ok({ winner: raw.winner, scoreA: null, scoreB: null, forfeit: true });
+  if (!isInt(raw.scoreA, 0, SCORE_MAX) || !isInt(raw.scoreB, 0, SCORE_MAX)) return fail('bad_result');
+  const ahead = raw.winner === 'a' ? raw.scoreA > raw.scoreB : raw.scoreB > raw.scoreA;
+  return ahead ? ok({ winner: raw.winner, scoreA: raw.scoreA, scoreB: raw.scoreB, forfeit: false }) : fail('bad_result');
+}
+
 /** null (or absent) is null; an integer in range is itself; anything else undefined. */
 const intOrNull = (v: unknown, min: number, max: number): number | null | undefined =>
   v === null || v === undefined ? null : isInt(v, min, max) ? v : undefined;
@@ -300,6 +329,15 @@ export function parseEventFields(raw: unknown, base: EventFields | null): Checke
   return ok(out);
 }
 
+/** A real calendar day written YYYY-MM-DD. Day 30 of February parses but
+ *  rolls over to March, so the round trip refuses it; month 13 does not
+ *  parse at all. Never throws. */
+function isDay(v: unknown): boolean {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const t = Date.parse(`${v}T00:00:00.000Z`);
+  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === v;
+}
+
 export function parseStageConfig(type: StageType, raw: unknown): Checked<StageConfig> {
   const c = raw === undefined ? {} : raw;
   if (!isObj(c)) return fail('bad_stage_config');
@@ -321,11 +359,13 @@ export function parseStageConfig(type: StageType, raw: unknown): Checked<StageCo
       return isInt(rounds, 1, 9) ? ok({ rounds }) : fail('bad_stage_config');
     }
     case 'league': {
-      const weeks = c.weeks ?? 6;
+      const matches = c.matches ?? 16;
       const matchesPerWeek = c.matchesPerWeek ?? 1;
       const pairing = c.pairing ?? 'swiss';
-      return isInt(weeks, 1, 12) && isInt(matchesPerWeek, 1, 3) && oneOf(['swiss', 'round_robin'] as const, pairing)
-        ? ok({ weeks, matchesPerWeek, pairing })
+      const seasonStart = c.seasonStart ?? null;
+      return isInt(matches, 1, LEAGUE_MATCHES_MAX) && isInt(matchesPerWeek, 1, 3) && oneOf(['swiss', 'round_robin'] as const, pairing)
+        && (seasonStart === null || isDay(seasonStart))
+        ? ok({ matches, matchesPerWeek, pairing, seasonStart: seasonStart as string | null })
         : fail('bad_stage_config');
     }
   }
@@ -371,6 +411,9 @@ export function parseStage(raw: unknown, ctx: StageContext): Checked<StageSettin
   if (type === 'league' && scheduling !== 'window') return fail('league_needs_window');
   const advanceCount = intOrNull(raw.advanceCount, 2, 128);
   if (advanceCount === undefined) return fail('bad_advance');
+  if (type === 'round_robin' && advanceCount !== null && advanceCount % (config.value as StageConfigs['round_robin']).groups !== 0) {
+    return fail('bad_group_advance');
+  }
   return ok({
     type, config: config.value, rulesetId: rulesetId as number, gameConfig, campaignPool: pool.value,
     vetoType, chapters, scheduling, advanceCount,
@@ -379,9 +422,11 @@ export function parseStage(raw: unknown, ctx: StageContext): Checked<StageSettin
 
 /** The chain of stages as a whole (Ruling 16): checked at publish and at
  *  open registration, not on every edit. */
-export function checkChain(stages: { advanceCount: number | null }[], o: { teamCap: number | null; roster: RosterRules }): Checked<null> {
+export function checkChain(stages: { type?: StageType; advanceCount: number | null }[], o: { teamCap: number | null; roster: RosterRules }): Checked<null> {
   if (stages.length === 0) return fail('no_stages');
   for (let i = 0; i < stages.length; i++) {
+    const t = stages[i].type;
+    if (i < stages.length - 1 && (t === 'single_elim' || t === 'double_elim')) return fail('elim_not_last');
     const a = stages[i].advanceCount;
     if (i === stages.length - 1) {
       if (a !== null) return fail('bad_chain');
@@ -404,10 +449,13 @@ export const STAGES_LOCKED: ReadonlySet<EventStatus> = new Set<EventStatus>(['li
  *  cancelled event is public under Past. */
 const CANCELLABLE: ReadonlySet<EventStatus> = new Set<EventStatus>(['announced', 'registration', 'checkin', 'live']);
 
-/** The moves made so far: T1a's publish, open registration and cancel, and
- *  T1b's open check-in. Live and finished come with rollout plan 2. */
+/** The moves made so far: T1a's publish, open registration and cancel,
+ *  T1b's open check-in, and T2's going live from registration or check-in
+ *  and finishing once live. */
 export function nextStatusAllowed(from: EventStatus, to: EventStatus): boolean {
   if (to === 'cancelled') return CANCELLABLE.has(from);
   return (from === 'draft' && to === 'announced') || (from === 'announced' && to === 'registration')
-    || (from === 'registration' && to === 'checkin');
+    || (from === 'registration' && to === 'checkin')
+    || ((from === 'registration' || from === 'checkin') && to === 'live')
+    || (from === 'live' && to === 'finished');
 }

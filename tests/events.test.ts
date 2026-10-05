@@ -104,6 +104,13 @@ describe('stages', () => {
     expect(err(E.addStage(f.db, { eventId: f.eventId, by: ADMIN, stage: stageBody(f.db, { rulesetId: pugId(f.db) }), now: NOW }))).toBe('pug_ruleset');
   });
 
+  it('reads a league stage stored with weeks as matches = weeks x matches a week (plan T2)', () => {
+    const f = eventFixture('draft');
+    f.db.prepare("UPDATE event_stages SET type = 'league', config_json = ? WHERE id = ?")
+      .run(JSON.stringify({ weeks: 6, matchesPerWeek: 2, pairing: 'swiss' }), f.s1);
+    expect(E.stageSettingsOf(E.getStage(f.db, f.s1)!).config).toEqual({ matches: 12, matchesPerWeek: 2, pairing: 'swiss', seasonStart: null });
+  });
+
   it('locks every stage change once the event is live', () => {
     const f = eventFixture();
     for (const status of ['live', 'finished', 'cancelled']) {

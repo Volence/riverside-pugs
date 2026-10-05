@@ -455,6 +455,43 @@ CREATE TABLE IF NOT EXISTS event_log (
   detail   TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS event_log_event ON event_log (event_id, id);
+-- Tournament matches (spec part 2 section 4; plan T2). One row per pairing of
+-- a stage. Swiss and league rows are written by src/events/play.ts from
+-- src/events/swiss.ts and roundRobin.ts. Elimination and round robin rows
+-- mirror the stage's brackets-manager data (event_stages.bracket_json) by
+-- bm_match_id. grp is 1 for Swiss and league, and the brackets-manager group
+-- number otherwise: single elimination 1 main and 2 third place; double
+-- elimination 1 upper, 2 lower, 3 grand final; round robin one per group.
+-- The status CHECK holds every state of the match flow (rollout plan 3) now,
+-- because widening it means rebuilding the table. T2 uses pending, waiting,
+-- done, forfeit and bye. Only src/events/play.ts writes this table.
+CREATE TABLE IF NOT EXISTS event_matches (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id      INTEGER NOT NULL REFERENCES events(id),
+  stage_id      INTEGER NOT NULL REFERENCES event_stages(id),
+  grp           INTEGER NOT NULL DEFAULT 1,
+  round         INTEGER NOT NULL,
+  slot          INTEGER NOT NULL,
+  bm_match_id   INTEGER,
+  entry_a       INTEGER REFERENCES event_entries(id),
+  entry_b       INTEGER REFERENCES event_entries(id),
+  status        TEXT NOT NULL
+                CHECK (status IN ('pending','waiting','veto','lineup','booking','connect','live','confirming','done','forfeit','bye','admin_hold')),
+  best_of       INTEGER NOT NULL DEFAULT 1,
+  not_before    TEXT,
+  scheduled_at  TEXT,
+  window_start  TEXT,
+  window_end    TEXT,
+  booking_id    INTEGER REFERENCES bookings(id),
+  winner_entry  INTEGER REFERENCES event_entries(id),
+  score_a       INTEGER,
+  score_b       INTEGER,
+  result_source TEXT CHECK (result_source IN ('auto','admin','forfeit')),
+  created_at    TEXT NOT NULL,
+  finished_at   TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS event_matches_slot ON event_matches (stage_id, grp, round, slot);
+CREATE UNIQUE INDEX IF NOT EXISTS event_matches_bm ON event_matches (stage_id, bm_match_id) WHERE bm_match_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS match_players (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   player_id TEXT NOT NULL REFERENCES players(steamid),
@@ -1735,6 +1772,16 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'event_entries', 'dropped_at', 'TEXT');
   ensureColumn(db, 'event_entries', 'drop_reason', 'TEXT');
   ensureColumn(db, 'event_entries', 'additions', 'INTEGER NOT NULL DEFAULT 0');
+  // Tournaments plan T2. A stage's entrants in its own seed order (set when
+  // it starts), its brackets-manager data as one JSON value with a revision
+  // that refuses a write built on an older copy, and when it started and
+  // finished. live_at: when the event went live.
+  ensureColumn(db, 'event_stages', 'entrants_json', 'TEXT');
+  ensureColumn(db, 'event_stages', 'bracket_json', 'TEXT');
+  ensureColumn(db, 'event_stages', 'bracket_rev', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'event_stages', 'started_at', 'TEXT');
+  ensureColumn(db, 'event_stages', 'finished_at', 'TEXT');
+  ensureColumn(db, 'events', 'live_at', 'TEXT');
   // Moderators: may work tickets and nothing else. Deliberately not read by
   // serverAdmins.ts, so the flag grants nothing on a game server.
   ensureColumn(db, 'players', 'is_mod', 'INTEGER NOT NULL DEFAULT 0');

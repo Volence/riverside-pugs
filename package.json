@@ -20,6 +20,8 @@
     "@fastify/websocket": "^11.3.0",
     "basic-ftp": "^6.2.1",
     "better-sqlite3": "^13.0.2",
+    "brackets-manager": "1.11.1",
+    "brackets-memory-db": "1.0.6",
     "discord.js": "^14.27.0",
     "fastify": "^5.11.0",
     "openskill": "^5.0.1",
