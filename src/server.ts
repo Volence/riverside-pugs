@@ -15,6 +15,7 @@ import { ReporterChats } from './discord/reporterChats.js';
 import { AttachmentStore, httpFetcher } from './tickets/attachments.js';
 import { handleTicketButton, handleTicketModal, opensTicketModal } from './discord/ticketButtons.js';
 import { ReportButton, handleReportButton, handleReportModal, opensReportModal } from './discord/reportButton.js';
+import { AppealButton, handleAppealButton, handleAppealModal, opensAppealModal } from './discord/appealButton.js';
 import { handleRemoveCommand, REMOVE_COMMAND } from './discord/ticketRemove.js';
 import { purgeRemovedFiles } from './tickets/removal.js';
 import { playerByDiscordId } from './players.js';
@@ -1719,6 +1720,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   let ticketMirror: TicketMirror | null = null;
   let reportButton: ReportButton | null = null;
   let appealSync: AppealSync | null = null;
+  let appealButton: AppealButton | null = null;
   let reporterChats: ReporterChats | null = null;
   let scrimPoster: ScrimPoster | null = null;
   // Only where a real listener exists to feed it. `bot` is read per drop,
@@ -1822,6 +1824,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           serialise: (fn) => (ticketSync ? ticketSync.serialise(fn) : fn()),
         });
         appealSync.start();
+        appealButton = new AppealButton({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
+        appealButton.start();
         reporterChats = new ReporterChats({
           db: deps.db, transport: t, publicUrl: deps.config.publicUrl, guildId: deps.config.discord!.guildId,
           isMember: (id) => membership.isMember(id),
@@ -1834,14 +1838,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         'r:': (i) => adminFeed!.handleButton(i),
         't:': (i) => handleTicketButton({ db: deps.db, publicUrl: deps.config.publicUrl, chats: () => deps.reporterChats ?? reporterChats }, i),
         'rp:': (i) => handleReportButton({ db: deps.db, adminSteamIds: deps.config.adminSteamIds, chats: () => deps.reporterChats ?? reporterChats }, i),
+        'ap:': (i) => handleAppealButton({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
         [MOD_CALL_PREFIX]: (i) => modCalls!.handleButton(i),
         [TEAM_BUTTON_PREFIX]: (i) => handleTeamButton({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
       },
       extraModals: {
         't:': (i) => handleTicketModal({ db: deps.db, publicUrl: deps.config.publicUrl, chats: () => deps.reporterChats ?? reporterChats }, i),
         'rp:': (i) => handleReportModal({ db: deps.db, adminSteamIds: deps.config.adminSteamIds, chats: () => deps.reporterChats ?? reporterChats }, i),
+        'ap:': (i) => handleAppealModal({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
       },
-      opensModal: (id) => opensTicketModal(id) || opensReportModal(id),
+      opensModal: (id) => opensTicketModal(id) || opensReportModal(id) || opensAppealModal(id),
       messageCommands: {
         [REMOVE_COMMAND]: (i) => handleRemoveCommand({
           db: deps.db, attachmentsDir: deps.config.ticketAttachmentsDir, mirror: () => ticketMirror,
@@ -1863,6 +1869,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   app.addHook('onClose', async () => {
     reportButton?.stop();
     appealSync?.stop();
+    appealButton?.stop();
     ticketMirror?.stop();
     ticketSync?.stop();
     offTicketNudge();
