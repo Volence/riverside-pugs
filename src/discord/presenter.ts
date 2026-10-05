@@ -335,6 +335,8 @@ export interface ResultView {
   scoreA: number;
   scoreB: number;
   winner: 'a' | 'b' | 'draw';
+  /** The team that forfeited with !gg, null when the match was played out. */
+  forfeit?: 'a' | 'b' | null;
   teamA: ResultPlayer[];
   teamB: ResultPlayer[];
 }
@@ -347,7 +349,9 @@ function srChange(p: ResultPlayer): string {
 }
 
 export function renderResult(v: ResultView): MessagePayload {
-  const headline = v.winner === 'draw' ? 'Draw' : `Team ${v.winner.toUpperCase()} wins`;
+  const headline = v.winner === 'draw' ? 'Draw'
+    : v.forfeit ? `Team ${v.winner.toUpperCase()} wins, Team ${v.forfeit.toUpperCase()} forfeited`
+      : `Team ${v.winner.toUpperCase()} wins`;
   return {
     embeds: [{
       title: `PUG #${v.matchId} result: ${v.campaignName}`,

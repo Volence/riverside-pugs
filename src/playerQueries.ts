@@ -1,3 +1,4 @@
+import { forfeitRecord } from './ggVotes.js';
 import type { DB } from './db.js';
 import { alsoKnownAs } from './playerNames.js';
 import { playerMapBreakdown } from './playerStats.js';
@@ -163,6 +164,8 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
     alsoKnownAs: alsoKnownAs(db, steamid, player.name),
     social: socialLinks(db, steamid),
     rating: r ? { sr: displaySr(r.mu, r.sigma), mu: r.mu, sigma: r.sigma, wins: r.wins, losses: r.losses } : null,
+    // Public on purpose: the owner wants forfeiting allowed but visible.
+    forfeits: forfeitRecord(db, steamid, completedPug('m')),
     totals, matches, history,
     statTotals,
     // Top-5 places this season, per match, among ranked players. Keyed like

@@ -58,6 +58,7 @@ export const BALANCE_TABS: { key: string; label: string; path: string }[] = [
   { key: 'patches', label: 'Patches', path: '/admin/balance/patches' },
   { key: 'knobs', label: 'Knobs', path: '/admin/balance/knobs' },
   { key: 'values', label: 'Values', path: '/admin/balance/values' },
+  { key: 'looks', label: 'Looks', path: '/admin/balance/looks' },
 ];
 
 /**

@@ -50,6 +50,7 @@ describe('campaigns', () => {
       'the_passing',
       'cold_stream',
       'the_last_stand',
+      'crash_center',
     ]);
   });
 });

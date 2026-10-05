@@ -80,6 +80,41 @@ const DEAD_CENTER = `"mission"
 }
 `;
 
+// Crash Center: Crash Course's garage.txt rewritten to start on Dead Center's
+// maps (deploy/deadcenter/missions/garage.txt), shipped beside deadcenter.txt.
+const CRASH_CENTER = `"mission"
+{
+  "Name" "Garage"
+  "DisplayTitle" "Dead Center"
+  "modes"
+  {
+    "versus"
+    {
+      "1" { "Map" "c1m1_hotel" "DisplayName" "Hotel (VS)" }
+      "2" { "Map" "c1m2_streets" "DisplayName" "Streets (VS)" }
+      "3" { "Map" "c1m3_mall" "DisplayName" "Mall (VS)" }
+      "4" { "Map" "l4d_garage01_alleys" "DisplayName" "#L4D360UI_Chapter_Alleys" }
+      "5" { "Map" "c1m4_atrium" "DisplayName" "Atrium (VS)" }
+    }
+  }
+}
+`;
+
+// The base game's own garage.txt: same Name, not a site campaign.
+const CRASH_COURSE = `"mission"
+{
+  "Name" "Garage"
+  "modes"
+  {
+    "versus"
+    {
+      "1" { "Map" "l4d_garage01_alleys" }
+      "2" { "Map" "l4d_garage02_lots" }
+    }
+  }
+}
+`;
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'missions-'));
   mkdirSync(dir, { recursive: true });
@@ -174,6 +209,27 @@ describe('readStockMissions', () => {
     writeFileSync(join(dir, 'city17.vpk'), vpkWith({ 'missions/deadcenter.txt': DEAD_CENTER }));
     writeFileSync(join(dir, 'zz_l4d2maps_assets_1.vpk'), vpkWith({ 'missions/deadcenter.txt': DEAD_CENTER }));
     expect(readStockMissions([dir]).has('dead_center')).toBe(false);
+  });
+
+  // Two missions in one pack VPK, both starting on c1m1_hotel. Each must land
+  // on its own campaign: reading only the first, or keying both by first map,
+  // would leave one of them stopping on the wrong map.
+  it('reads Crash Center and Dead Center out of the same c01 VPK', () => {
+    writeFileSync(join(dir, 'zz_l4d2maps_c01_deadcenter.vpk'), vpkWith({
+      'missions/deadcenter.txt': DEAD_CENTER, 'missions/garage.txt': CRASH_CENTER, 'addoninfo.txt': 'x',
+    }));
+    const got = readStockMissions([dir]);
+    expect(got.get('dead_center')?.map((c) => c.map)).toEqual([
+      'c1m1_hotel', 'c1m2_streets', 'c1m3_mall', 'c1m4_atrium',
+    ]);
+    expect(got.get('crash_center')?.map((c) => c.map)).toEqual([
+      'c1m1_hotel', 'c1m2_streets', 'c1m3_mall', 'l4d_garage01_alleys', 'c1m4_atrium',
+    ]);
+  });
+
+  it('does not take the stock Crash Course garage.txt for Crash Center', () => {
+    writeFileSync(join(dir, 'garage.txt'), CRASH_COURSE);
+    expect(readStockMissions([dir]).has('crash_center')).toBe(false);
   });
 
   it('skips a pack VPK that is not a VPK', () => {

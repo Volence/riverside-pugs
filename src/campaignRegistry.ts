@@ -56,6 +56,7 @@ const STOCK_FIRST: Record<string, string> = {
   the_passing: 'c6m1_riverbank',
   cold_stream: 'c13m1_alpinecreek',
   the_last_stand: 'c14m1_junkyard',
+  crash_center: 'c1m1_hotel',
 };
 
 let cache: {

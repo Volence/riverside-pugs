@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { mapLooksFor } from '../mapLooks.js';
 import type { DB } from '../db.js';
 import { createReadStream } from 'node:fs';
 import { makeOptionalViewer, makeRequireActive } from './guards.js';
@@ -171,7 +172,8 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     const v = viewerFor(db, viewerOf(req));
     const vis = visibleMatchesSql(v, 'm');
     const matches = db.prepare(
-      `SELECT m.id, m.campaign, m.ended_at AS endedAt, m.team_a_score AS teamAScore, m.team_b_score AS teamBScore, m.winner
+      `SELECT m.id, m.campaign, m.ended_at AS endedAt, m.team_a_score AS teamAScore, m.team_b_score AS teamBScore, m.winner,
+              m.forfeit_team AS forfeitTeam
        FROM matches m WHERE m.state = 'completed' AND ${vis.sql} ORDER BY m.id DESC LIMIT ?`,
     ).all(...vis.params, RECENT_MATCH_LIMIT);
     return { matches };
@@ -208,7 +210,8 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // reason rides along for the page to say so.
     const match = db.prepare(
       `SELECT id, campaign, state, ended_at AS endedAt, team_a_score AS teamAScore, team_b_score AS teamBScore,
-              winner, voided_at AS voidedAt, void_reason AS voidReason, restored_at_map AS restoredAtMap
+              winner, voided_at AS voidedAt, void_reason AS voidReason, restored_at_map AS restoredAtMap,
+              forfeit_team AS forfeitTeam
        FROM matches WHERE id = ? AND state IN ('completed', 'aborted')`,
     ).get(id);
     if (!match) return reply.code(404).send({ error: 'no such match' });
@@ -220,10 +223,13 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // plugin could not attribute or read), and the page must say "not
     // recorded" instead of 0 to 0. See unrecordedOrdinals for the rule.
     const unrecorded = unrecordedOrdinals(db, id);
+    // The look (time of day, weather) l4d_nightmode had on each map, from its
+    // log lines; null for a match played before the plugin logged one.
+    const looks = mapLooksFor(db, id);
     const maps = (db.prepare(
       'SELECT ordinal, map, team_a_score AS teamAScore, team_b_score AS teamBScore FROM match_maps WHERE match_id = ? ORDER BY ordinal',
     ).all(id) as { ordinal: number }[]).map((mp) => ({
-      ...mp, stats: byMap.get(mp.ordinal) ?? {}, recorded: !unrecorded.has(mp.ordinal),
+      ...mp, stats: byMap.get(mp.ordinal) ?? {}, recorded: !unrecorded.has(mp.ordinal), look: looks.get(mp.ordinal) ?? null,
     }));
     const statRows = db.prepare(
       'SELECT player_id, stat, value FROM match_player_stats WHERE match_id = ?',

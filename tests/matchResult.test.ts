@@ -41,6 +41,14 @@ describe('completeMatch', () => {
   let matchId: number;
   beforeEach(() => { db = openDb(':memory:'); matchId = seedLiveMatch(db); });
 
+  it('stores the forfeiting team, and null for a match played out', () => {
+    expect(completeMatch(db, matchId, { ...dumpFor(matchId), forfeit: 'a' })).toBe(true);
+    expect((db.prepare('SELECT forfeit_team FROM matches WHERE id = ?').get(matchId) as any).forfeit_team).toBe('a');
+    const other = seedLiveMatch(db);
+    expect(completeMatch(db, other, dumpFor(other))).toBe(true);
+    expect((db.prepare('SELECT forfeit_team FROM matches WHERE id = ?').get(other) as any).forfeit_team).toBeNull();
+  });
+
   it('persists match result, per-map scores, per-player stats, and ratings in one go', () => {
     expect(completeMatch(db, matchId, dumpFor(matchId))).toBe(true);
     const m = db.prepare('SELECT * FROM matches WHERE id = ?').get(matchId) as any;

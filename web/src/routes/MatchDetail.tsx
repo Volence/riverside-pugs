@@ -2,7 +2,7 @@ import { Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { api, type MatchDetail as MatchDetailData, type MatchOngoing, type MatchPlayerStats, type ReportMoment, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, deriveLiveStats, fmtBytes, fmtDate, fmtLatency, mapName, orderStatKeysBySide, statGroupStarts, winnerLabel } from '../format';
+import { campaignName, deriveLiveStats, fmtBytes, fmtDate, fmtLatency, mapName, orderStatKeysBySide, statGroupStarts, resultLabel, winnerLabel } from '../format';
 import { clearLatencyByPlayer } from '../clearLatency';
 import { Empty, Panel, PageSkeleton, PlayerLink } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
@@ -511,7 +511,7 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
   );
   const outcome = voided ? `${winnerLabel(match.winner!)} · voided`
     : aborted ? 'Aborted'
-      : winnerLabel(match.winner!);
+      : resultLabel(match.winner!, match.forfeitTeam);
 
   // An admin integrity clip links here with `?ordinal=&half=&t=`, computed
   // once: it names the round the link was ABOUT, not whatever round is on
@@ -652,6 +652,7 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
               <h3>
                 Map {mp.ordinal + 1} · <a href={`/map/${encodeURIComponent(mp.map)}`}>{mapName(mp.map)}</a>
                 <span class="muted"> · {mapScoreLabel(mp)}</span>
+                {mp.look && <span class="muted match__look" title="The time of day and weather night mode gave this map"> · {mp.look}</span>}
                 {demo && <> · <a href={`/api/matches/${match.id}/demos/${demo.ordinal}`} download>
                   demo {fmtBytes(demo.bytes)}
                 </a></>}
