@@ -3,8 +3,9 @@ import * as P from '../src/events/play.js';
 import * as E from '../src/events/events.js';
 import * as N from '../src/events/entries.js';
 import { createBracket, bracketMatches } from '../src/events/bracket.js';
+import { repeatedRoundRobin } from '../src/events/league.js';
 import { ADMIN, NOW } from './eventFixture.js';
-import { SE, SWISS, playFixture } from './playFixture.js';
+import { LEAGUE, SE, SWISS, playFixture } from './playFixture.js';
 
 const ok = <T>(r: { ok: true; value: T } | { ok: false; error: string }): T => {
   if (!r.ok) throw new Error(`expected ok, got ${r.error}`);
@@ -82,6 +83,19 @@ describe('play writer', () => {
     const [only] = P.matchesOf(g.db, g.stages[0]!);
     expect(P.recordResult(g.db, { matchId: only!.id, by: ADMIN, result: aWins, bracket: { data: bracket, baseRev: 0 }, now: NOW }))
       .toEqual({ ok: false, error: 'changed' });
+  });
+
+  it('recordResult allows a round 1 correction in a round robin league even once later rounds exist (every round is written at the start)', () => {
+    const f = playFixture({ stages: [LEAGUE(4, 1, 'round_robin', null)], entries: 4 });
+    const pairings = repeatedRoundRobin(f.entries, 4);
+    const rounds: P.NewRound[] = pairings.map((p, i) => ({ round: i + 1, pairs: p.pairs, bye: p.bye }));
+    const plan: P.StagePlan = { stageId: f.stages[0]!, entrants: f.entries, bracket: null, rounds };
+    ok(P.startEvent(f.db, { eventId: f.eventId, by: ADMIN, plan, now: NOW }));
+    const [m1] = P.matchesOf(f.db, f.stages[0]!).filter((m) => m.round === 1);
+    ok(P.recordResult(f.db, { matchId: m1!.id, by: ADMIN, result: aWins, bracket: null, now: NOW }));
+    const fixed = ok(P.recordResult(f.db, { matchId: m1!.id, by: ADMIN, result: aWins, bracket: null, now: NOW }));
+    expect(fixed.status).toBe('done');
+    expect(JSON.parse(E.eventLog(f.db, f.eventId).at(-1)!.detail)).toMatchObject({ matchId: m1!.id, correction: true });
   });
 
   it('addRound refuses a round while one is open, a skipped number, or one past the last', () => {
