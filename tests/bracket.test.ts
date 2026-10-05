@@ -109,6 +109,13 @@ describe('bracket', () => {
     expect(JSON.stringify(d)).toBe(before);
   });
 
+  it('accepts a correction to a winner bracket round 1 match before any loser bracket match is played, even though it changes who drops onto a bye', async () => {
+    const d = await createBracket('double_elim', { grandFinalReset: true }, [1, 2, 3, 4, 5]);
+    const first = ready(d)[0]!;
+    const after = await reportResult(d, first.bmId, bWins);
+    expect(bracketMatches(after).find((m) => m.bmId === first.bmId)!.winner).toBe(first.b);
+  });
+
   it('refuses a result for the hidden grand final reset while the upper side still holds the title', async () => {
     const d = await playAll(await createBracket('double_elim', { grandFinalReset: true }, [1, 2, 3, 4]), () => aWins);
     const shown = new Set(bracketMatches(d).map((m) => m.bmId));

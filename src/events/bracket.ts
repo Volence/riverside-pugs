@@ -66,20 +66,25 @@ function isHiddenGrandFinalReset(t: Tables, m: BmMatch): boolean {
 }
 
 /**
- * A snapshot of every already-decided match but `exceptId`, keyed by id, as
- * a string of its opponents. brackets-manager's own lock check (reset.js)
- * only looks at the direct next matches of the one being corrected, and
- * misses one that a bye carried a result past (a winner bracket round 1
- * loser can drop straight onto a loser bracket bye and land in a later
- * loser bracket match in one step). When that later match was already
- * played, the library accepts the correction and silently overwrites that
- * match's opponent instead of refusing it. Comparing this snapshot before
- * and after the write is how reportResult catches that and refuses it too.
+ * A snapshot of every already-decided REAL match but `exceptId` (both
+ * opponents present; a bye, where one opponent is null, is left out since
+ * the library resolves and re-resolves those itself whenever a correction
+ * legitimately changes who drops onto one), keyed by id, as a string of its
+ * opponents. brackets-manager's own lock check (reset.js) only looks at the
+ * direct next matches of the one being corrected, and misses one that a bye
+ * carried a result past (a winner bracket round 1 loser can drop straight
+ * onto a loser bracket bye and land in a later loser bracket match in one
+ * step). When that later match was already played, the library accepts the
+ * correction and silently overwrites that match's opponent instead of
+ * refusing it. Comparing this snapshot before and after the write is how
+ * reportResult catches that and refuses it too.
  */
 function doneElsewhere(t: Tables, exceptId: number): Map<number, string> {
   const out = new Map<number, string>();
   for (const m of t.match) {
-    if (m.id !== exceptId && m.status >= DONE) out.set(m.id, JSON.stringify({ opponent1: m.opponent1, opponent2: m.opponent2 }));
+    if (m.id !== exceptId && m.status >= DONE && m.opponent1 !== null && m.opponent2 !== null) {
+      out.set(m.id, JSON.stringify({ opponent1: m.opponent1, opponent2: m.opponent2 }));
+    }
   }
   return out;
 }
