@@ -7,8 +7,10 @@ import { logAdmin } from '../admin/audit.js';
 import { getPlayer } from '../players.js';
 import { campaignRegistry } from '../campaignRegistry.js';
 import * as E from '../events/events.js';
+import * as N from '../events/entries.js';
 import * as V from '../events/validate.js';
 import { stageSummary } from '../events/format.js';
+import { adminEntryViews } from '../events/views.js';
 import { rulesetOptions } from '../rulesetStore.js';
 
 export interface AdminEventRow {
@@ -211,4 +213,83 @@ export async function adminEventRoutes(app: FastifyInstance, opts: { db: DB; sto
 
   action('/api/admin/events/:id/banner/remove', 'event_banner_remove',
     (me, id) => E.setEventBanner(db, { eventId: id, by: me, bannerKey: null }));
+
+  const eventOf = (raw: unknown): E.EventRow | undefined => { const id = idOf(raw); return id ? E.getEvent(db, id) : undefined; };
+  const entryOf = (ev: E.EventRow, raw: unknown): N.EntryRow | undefined => {
+    const id = idOf(raw);
+    const e = id ? N.getEntry(db, id) : undefined;
+    return e && e.event_id === ev.id ? e : undefined;
+  };
+  const refuseWith = (reply: FastifyReply, r: { error: V.EventError; detail?: V.EntryProblem[] }) =>
+    reply.code(V.EVENT_ERRORS[r.error].status).send({
+      error: V.EVENT_ERRORS[r.error].text,
+      ...(r.detail ? { problems: r.detail.map((p) => ({ steamid: p.steamid, name: getPlayer(db, p.steamid)?.name ?? p.steamid, problems: p.problems })) } : {}),
+    });
+
+  /**
+   * The desk's entries view and staff actions (tournaments plan T1b): staff
+   * read the list with rosters, SR and eligibility problems; admins open
+   * check-in, finalise the list, reorder seeds, and edit a roster,
+   * disqualify or restore one entry as staff.
+   */
+  app.get('/api/admin/events/:id/entries', async (req, reply) => {
+    if (!requireStaff(req, reply)) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    return { lockedAt: ev.locked_at, entries: adminEntryViews(db, ev) };
+  });
+
+  app.post('/api/admin/events/:id/open-checkin', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    const r = E.openCheckin(db, { eventId: ev.id, by: me });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'event_open_checkin', ev.id, { slug: ev.slug });
+    return {};
+  });
+
+  app.post('/api/admin/events/:id/lock-entries', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    const r = N.lockEntries(db, { eventId: ev.id, by: me });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'event_lock_entries', ev.id, { slug: ev.slug, kept: r.value.kept.length, dropped: r.value.dropped.length });
+    return r.value;
+  });
+
+  app.post('/api/admin/events/:id/seeds', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    const r = N.reorderSeeds(db, { eventId: ev.id, by: me, order: ((req.body ?? {}) as { order?: unknown }).order });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'event_seeds', ev.id, { order: r.value });
+    return {};
+  });
+
+  app.post('/api/admin/events/:id/entries/:entryId/:action', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const p = req.params as { id: string; entryId: string; action: string };
+    const ev = eventOf(p.id);
+    const entry = ev && entryOf(ev, p.entryId);
+    if (!ev || !entry) return refuse(reply, 'entry_not_found');
+    const body = (req.body ?? {}) as { roster?: unknown; reason?: unknown };
+    let r: V.Checked<unknown>;
+    let action: string;
+    switch (p.action) {
+      case 'roster': r = N.setEntryRoster(db, { entryId: entry.id, by: me, roster: body.roster, staff: true }); action = 'event_entry_roster'; break;
+      case 'disqualify': r = N.disqualifyEntry(db, { entryId: entry.id, by: me, reason: body.reason }); action = 'event_entry_disqualify'; break;
+      case 'restore': r = N.restoreEntry(db, { entryId: entry.id, by: me }); action = 'event_entry_restore'; break;
+      default: return refuse(reply, 'bad_request');
+    }
+    if (!r.ok) return refuseWith(reply, r);
+    logAdmin(db, me, action, ev.id, { entryId: entry.id, name: entry.name, ...(p.action === 'disqualify' ? { reason: body.reason } : {}) });
+    return {};
+  });
 }

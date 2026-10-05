@@ -2,7 +2,7 @@ import type { DB } from '../db.js';
 import { getPlayer } from '../players.js';
 import { campaignDisplayName } from '../campaignRegistry.js';
 import { parseRules, rulesForKind, type MatchRules } from '../rulesets.js';
-import { activeMembers, myTeams } from '../teams/teams.js';
+import { activeMembers, getTeam, myTeams } from '../teams/teams.js';
 import * as E from './events.js';
 import * as N from './entries.js';
 import * as R from './entryRules.js';
@@ -165,4 +165,34 @@ export function myEventView(db: DB, ev: E.EventRow, viewer: string, now = new Da
       .map((t) => ({ teamId: t.id, name: t.name, tag: t.tag, logoKey: t.logo_key, members: memberOptions(t.id, null) }))
     : [];
   return { entries, register, canRegister };
+}
+
+export interface AdminEntryView {
+  id: number; teamSlug: string | null; name: string; tag: string; status: string; dropReason: string | null; seed: number | null;
+  waitlist: number | null; sr: number; checkedInAt: string | null; createdAt: string; registeredByName: string; roster: RosterPlaceView[];
+}
+
+/** The desk's list (Ruling 10): every entry, dropped and disqualified ones
+ *  after the rest, with average starter SR, which the public never sees. */
+export function adminEntryViews(db: DB, ev: E.EventRow): AdminEntryView[] {
+  const f = E.fieldsOf(ev);
+  const place = N.placementOf(db, ev);
+  const rows = N.entriesOf(db, ev.id);
+  const ordered = [...rows.filter(N.isActive), ...rows.filter((e) => !N.isActive(e))];
+  return ordered.map((e) => {
+    const w = place.waitlist.indexOf(e.id);
+    return {
+      id: e.id, teamSlug: e.team_id !== null ? getTeam(db, e.team_id)?.slug ?? null : null, name: e.name, tag: e.tag, status: e.status,
+      dropReason: e.drop_reason, seed: e.seed, waitlist: w >= 0 ? w + 1 : null, sr: N.entrySr(db, e.id), checkedInAt: e.checked_in_at,
+      createdAt: e.created_at, registeredByName: getPlayer(db, e.registered_by)?.name ?? e.registered_by,
+      roster: N.placesOf(db, e.id).map((p) => {
+        const facts = N.playerFacts(db, p.steamid);
+        const pl = getPlayer(db, p.steamid);
+        return {
+          steamid: p.steamid, name: pl?.name ?? p.steamid, avatar: pl?.avatar ?? null, role: p.role,
+          problems: R.problemsOf(f.eligibility, facts, p.role).map((k) => R.problemText(k, f.eligibility, facts)),
+        };
+      }),
+    };
+  });
 }
