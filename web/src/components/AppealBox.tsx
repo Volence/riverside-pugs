@@ -16,7 +16,7 @@ const what = (it: PlayerAppealItem) => (it.hold ? 'Account hold'
 export function AppealBox({ fallback }: { fallback: string }) {
   const fetched = useFetch((s) => appealApi.mine(s), []);
   const data = fetched.data;
-  if (!data) return null;
+  if (!data) return fetched.error ? <p class="muted">{fallback}</p> : null;
   if (!data.enabled) return <p class="muted">{fallback}</p>;
   if (data.items.length === 0) return <p class="muted">You have nothing to appeal.</p>;
   return <div class="stack">{data.items.map((it) => <Item key={`${it.ref.kind}:${it.ref.id}`} it={it} data={data} reload={fetched.reload} />)}</div>;
