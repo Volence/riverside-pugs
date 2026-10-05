@@ -4,13 +4,15 @@ import { getTeam } from '../teams/teams.js';
 import * as E from './events.js';
 import * as N from './entries.js';
 import * as R from './entryRules.js';
+import { settleEvent, startEventFlow } from './flow.js';
 import { tellCheckinOpen, tellDropped } from './notices.js';
 
 export const TICK_MS = 60_000;
 
 /**
- * The events minute tick (plan T1b Ruling 4). For every team event in
- * registration or check-in whose list is not final: drop entries of
+ * The events minute tick (plan T1b Ruling 4), and, from plan T2, start
+ * events at their start time and settle live ones (play). For every team
+ * event in registration or check-in whose list is not final: drop entries of
  * disbanded teams, open check-in when its window starts, and make the list
  * final when check-in closes (or at the start with check-in off). One step
  * per event per tick: an event found past both thresholds after downtime
@@ -29,11 +31,41 @@ export class EventRunner {
     if (this.ticking) return;
     this.ticking = true;
     try {
-      this.step(new Date(this.now()));
+      const now = new Date(this.now());
+      this.step(now);
+      await this.play(now);
     } catch (err) {
       console.error('[events] tick failed:', err instanceof Error ? err.message : err);
     } finally {
       this.ticking = false;
+    }
+  }
+
+  /**
+   * Plan T2 Rulings 5 and 6: start every team event whose list is final and
+   * whose start time has come (one with fewer than 2 entries just waits), then
+   * settle every live event. Each event is caught on its own.
+   */
+  async play(now: Date): Promise<void> {
+    const { db } = this.deps;
+    const due = db.prepare(
+      `SELECT id FROM events WHERE entry_kind = 'team' AND status IN ('registration','checkin')
+       AND locked_at IS NOT NULL AND starts_at <= ? ORDER BY id`,
+    ).all(now.toISOString()) as { id: number }[];
+    for (const { id } of due) {
+      try {
+        await startEventFlow(db, { eventId: id, by: null, now });
+      } catch (err) {
+        console.error(`[events] start of event ${id} failed:`, err instanceof Error ? err.message : err);
+      }
+    }
+    const live = db.prepare("SELECT id FROM events WHERE status = 'live' ORDER BY id").all() as { id: number }[];
+    for (const { id } of live) {
+      try {
+        await settleEvent(db, { eventId: id, now });
+      } catch (err) {
+        console.error(`[events] settle of event ${id} failed:`, err instanceof Error ? err.message : err);
+      }
     }
   }
 

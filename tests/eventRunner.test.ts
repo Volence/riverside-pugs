@@ -1,12 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
 import * as E from '../src/events/events.js';
 import * as N from '../src/events/entries.js';
+import * as P from '../src/events/play.js';
 import * as T from '../src/teams/teams.js';
 import { EventRunner } from '../src/events/runner.js';
 import { eventMessage } from '../src/events/messages.js';
 import type { Notifier } from '../src/notify/notify.js';
-import { NOW, START } from './eventFixture.js';
+import type { DB } from '../src/db.js';
+import { upsertPlayer } from '../src/players.js';
+import { NOW, START, ADMIN } from './eventFixture.js';
 import { A, B, entryFixture, rosterA, rosterB } from './entryFixture.js';
+import { playFixture, SWISS, SE } from './playFixture.js';
 
 const must = <T>(r: { ok: true; value: T } | { ok: false; error: string }): T => {
   if (!r.ok) throw new Error(`expected ok, got ${r.error}`);
@@ -95,5 +99,60 @@ describe('eventMessage', () => {
       .toBe('Rats is out of Riverside Cup: it did not check in in time.');
     expect(eventMessage(f.db, 'https://x', f.eventId, 'event_roster_added', { entryId: entry.id, by: A[0], role: 'sub' })!.content)
       .toContain("put you on Rats's roster for Riverside Cup as a sub");
+  });
+});
+
+describe('EventRunner.play (plan T2)', () => {
+  const runner = (db: DB) => new EventRunner({ db, notifier: { notify: () => {} } as never, publicUrl: 'http://x' });
+  const START_AT = new Date('2026-10-10T20:00:00.000Z');
+
+  it('starts a final event at its start time, not before', async () => {
+    const f = playFixture({ stages: [SWISS(2, 2), SE()], entries: 4 });
+    const r = runner(f.db);
+    await r.play(new Date(START_AT.getTime() - 60_000));
+    expect(E.getEvent(f.db, f.eventId)!.status).toBe('checkin');
+    await r.play(START_AT);
+    expect(E.getEvent(f.db, f.eventId)!.status).toBe('live');
+    expect(E.eventLog(f.db, f.eventId).at(-1)).toMatchObject({ action: 'event_started', actor: null });
+  });
+
+  it('leaves an event with fewer than 2 entries waiting, writing nothing', async () => {
+    const f = playFixture({ stages: [SE()], entries: 1 });
+    const logs = E.eventLog(f.db, f.eventId).length;
+    await runner(f.db).play(START_AT);
+    expect(E.getEvent(f.db, f.eventId)!.status).toBe('checkin');
+    expect(E.eventLog(f.db, f.eventId)).toHaveLength(logs);
+  });
+
+  it('with check-in off, closes the list and starts in the same tick', async () => {
+    const f = playFixture({ stages: [SE()], entries: 2 });
+    f.db.prepare("UPDATE events SET status = 'registration', locked_at = NULL, checkin_json = ? WHERE id = ?")
+      .run(JSON.stringify({ enabled: false, opensMinutes: 60, closesMinutes: 15 }), f.eventId);
+    f.db.prepare("UPDATE event_entries SET status = 'registered'").run();
+    // The entries were inserted directly, so they have no starters; give each 4 so the list keeps them.
+    const add = f.db.prepare("INSERT INTO event_entry_players (entry_id, steamid, role, added_at) VALUES (?, ?, 'starter', ?)");
+    let n = 900;
+    for (const id of f.entries) for (let i = 0; i < 4; i++) {
+      const sid = `76561199000000${n++}`;
+      upsertPlayer(f.db, { steamid: sid, name: sid, avatar: null }, []);
+      add.run(id, sid, START_AT.toISOString());
+    }
+    const r = runner(f.db);
+    r.step(START_AT);
+    await r.play(START_AT);
+    expect(E.getEvent(f.db, f.eventId)!.status).toBe('live');
+  });
+
+  it('settles live events: a disqualification on the desk becomes a forfeit on the next tick, and a second tick changes nothing', async () => {
+    const f = playFixture({ stages: [SWISS(2, null)], entries: 4 });
+    const r = runner(f.db);
+    await r.play(START_AT);
+    N.disqualifyEntry(f.db, { entryId: f.entries[3]!, by: ADMIN, reason: 'gone', now: START_AT });
+    await r.play(START_AT);
+    const s = E.stagesOf(f.db, f.eventId)[0]!;
+    expect(P.matchesOf(f.db, s.id).some((m) => m.status === 'forfeit')).toBe(true);
+    const snap = JSON.stringify(f.db.prepare('SELECT * FROM event_log ORDER BY id').all());
+    await r.play(START_AT);
+    expect(JSON.stringify(f.db.prepare('SELECT * FROM event_log ORDER BY id').all())).toBe(snap);
   });
 });
