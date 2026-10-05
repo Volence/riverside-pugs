@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'preact/hooks';
-import { ApiError, bannerUrl, eventsApi, type EventView } from '../api';
+import { ApiError, bannerUrl, entryLogoUrl, eventsApi, type EventView, type MyEventView } from '../api';
 import { RichText } from '../components/RichText';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 import { STATUS_LABEL, untilText, whenText } from '../eventFormat';
+import { EntryPanel } from './event/EntryPanel';
 
 const BEFORE_START = new Set(['draft', 'announced', 'registration', 'checkin']);
 
@@ -41,9 +42,12 @@ function entryLines(ev: EventView): string[] {
  *  format strip, rules and pools per stage, who may enter, entries. */
 export function EventPage({ slug, session }: { slug: string; session: Session }) {
   const [ev, setEv] = useState<EventView | null>(null);
+  const [mine, setMine] = useState<MyEventView | null>(null);
   const [missing, setMissing] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [gen, setGen] = useState(0);
   const now = useNow();
+  const bump = () => setGen((g) => g + 1);
 
   useEffect(() => {
     const ctl = new AbortController();
@@ -55,8 +59,13 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
       if (e instanceof ApiError && e.status === 404) setMissing(true);
       else setFailed(true);
     });
+    if (session.kind === 'active') {
+      eventsApi.mine(slug, ctl.signal).then(setMine, () => { /* the panel just stays hidden */ });
+    } else {
+      setMine(null);
+    }
     return () => ctl.abort();
-  }, [slug, session.kind]);
+  }, [slug, session.kind, gen]);
 
   if (missing) return <main class="page page--profile"><PageHeader title="Event" /><Empty>No such event, or events are not open yet.</Empty></main>;
   if (failed) return <main class="page page--profile"><PageHeader title="Event" /><p class="error" role="alert">Could not load this event. Try again in a moment.</p></main>;
@@ -106,7 +115,12 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
         <h3>Entry</h3>
         {ev.entryKind === 'draft' && <p>Draft event: individual signups open later.</p>}
         <ul class="eventrules">{entryLines(ev).map((l) => <li key={l}>{l}</li>)}</ul>
+        {ev.checkinOpensAt && BEFORE_START.has(ev.status) && (
+          <p class="muted">Check-in {whenText(ev.checkinOpensAt)} to {whenText(ev.checkinClosesAt!)}</p>
+        )}
+        {ev.lockedAt && <p class="muted">The entry list is final.</p>}
       </Panel>
+      {mine && <EntryPanel slug={ev.slug} view={mine} maxSubs={ev.roster.maxSubs} onChange={bump} />}
       <Panel>
         <h3>{ev.entryKind === 'team' ? 'Teams' : 'Entries'}</h3>
         {ev.entries.length === 0
@@ -114,8 +128,12 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
           : (
             <ul class="eventlist">
               {ev.entries.map((e) => (
-                <li key={`${e.seed ?? ''}-${e.name}`}>
+                <li key={e.id} class="evententry">
+                  {e.logoKey ? <img class="evententry__logo" src={entryLogoUrl(e.logoKey)} alt="" width={28} height={28} /> : <span class="evententry__logo evententry__logo--none" aria-hidden="true">{e.name.slice(0, 1).toUpperCase()}</span>}
                   {e.seed !== null && <span class="muted">#{e.seed} </span>}{e.name}{e.tag && <span class="muted"> [{e.tag}]</span>}
+                  {e.status === 'checked_in' && <span class="chip chip--ok">Checked in</span>}
+                  {e.waitlist !== null && <span class="chip">Waitlist {e.waitlist}</span>}
+                  {e.status === 'disqualified' && <span class="chip chip--bad">Disqualified</span>}
                 </li>
               ))}
             </ul>
