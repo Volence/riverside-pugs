@@ -6,6 +6,9 @@ import { fileReport } from '../src/tickets/filing.js';
 import { claimTicket, closeTicket, reopenTicket } from '../src/tickets/actions.js';
 import { staffThread, threadsInState } from '../src/tickets/threads.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
+import { insertBan } from '../src/admin/players.js';
+import { appellantFromSteam } from '../src/appeals/rules.js';
+import { fileAppeal } from '../src/appeals/store.js';
 import { TicketSync } from '../src/discord/ticketSync.js';
 import type { MessagePayload } from '../src/discord/transport.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
@@ -243,6 +246,17 @@ describe('the staff forum post', () => {
     expect(t.threadsById.get(theirs)!.deleted).toBe(false);
     // The post made in this very pass has a row, so it stands.
     expect(t.threadsById.get(staffThread(db, id)!.thread_id)!.deleted).toBe(false);
+  });
+
+  it('spares a forum post that belongs to an appeal', async () => {
+    setSetting(db, 'appeals_enabled', '1');
+    const banId = insertBan(db, IDS[0], MOD, 'afk', null);
+    const appealId = (fileAppeal(db, appellantFromSteam(db, IDS[0]), { ref: { kind: 'ban', id: banId }, whatHappened: 'lag', whyLift: 'router', source: 'site' }) as { id: number }).id;
+    const post = (await t.threads.createForumPost('forum1', { name: 'appeal post', message: card, tags: ['Appeal'] })).threadId;
+    db.prepare('UPDATE appeals SET forum_thread_id = ? WHERE id = ?').run(post, appealId);
+    sync.start();
+    await sync.idle();
+    expect(t.threadsById.get(post)!.deleted).toBe(false);
   });
 
   it('lets nobody into the forum until that sweep has worked once', async () => {
