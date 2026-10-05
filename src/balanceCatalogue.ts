@@ -16,6 +16,13 @@ export interface CatalogueValue {
   /** Shown publicly only while this holds (e.g. hunting rifle stats only while
    *  the rifle can be picked up). Same shape as a rule's `when`. */
   when?: CatalogueRule['when'];
+  /** Shown multiplied by this other value (both live and vanilla), e.g. tank
+   *  health times the versus multiplier, so the row reads as what players get. */
+  times?: string;
+  /** The game never reads it: shown, but never marked as differing from vanilla. */
+  noEffect?: boolean;
+  /** Fine tuning most players do not need: the page folds it under each group's details. */
+  detail?: boolean;
 }
 export interface CatalogueRule {
   id: string; group: string; text: string;
@@ -69,6 +76,9 @@ export function loadCatalogue(path: string = CATALOGUE_PATH, raw?: unknown): Cat
     else if (v.source !== 'cvar' && v.source !== 'weapon') throw new Error(`catalogue: ${v.id} has unknown source`);
     if (typeof v.label !== 'string' || !v.label.trim()) throw new Error(`catalogue: ${v.id} needs a label`);
     if (v.when !== undefined && !validWhen(v.when)) throw new Error(`catalogue: ${v.id} has a bad when: needs plugin, or cvar with equals or notEquals`);
+  }
+  for (const v of c.values) {
+    if (v.times !== undefined && (!ids.has(v.times) || v.times === v.id)) throw new Error(`catalogue: ${v.id} times ${v.times}, which is not another catalogue value`);
   }
   const ruleIds = new Set<string>();
   for (const r of c.rules) {
