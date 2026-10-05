@@ -23,6 +23,7 @@ export interface EventRow {
   official: number; entry_kind: V.EntryKind; status: V.EventStatus; starts_at: string; description: string;
   eligibility_json: string; team_cap: number | null; checkin_json: string; roster_json: string;
   created_at: string; updated_at: string; finished_at: string | null; cancelled_at: string | null; cancel_reason: string | null;
+  locked_at: string | null;
 }
 export interface StageRow {
   id: number; event_id: number; ordinal: number; type: V.StageType; config_json: string; ruleset_id: number;
@@ -87,8 +88,10 @@ export function stageContext(db: DB): V.StageContext {
 
 const iso = (now?: Date): string => (now ?? new Date()).toISOString();
 
-/** Inside the caller's transaction, always. */
-function logEvent(db: DB, eventId: number, actor: string | null, action: string, at: string, detail: object = {}): void {
+/** Inside the caller's transaction, always. Exported for src/events/entries.ts
+ *  only: tests/eventLogGuard.test.ts holds every caller to one row per
+ *  successful mutation. */
+export function logEvent(db: DB, eventId: number, actor: string | null, action: string, at: string, detail: object = {}): void {
   db.prepare('INSERT INTO event_log (event_id, at, actor, action, detail) VALUES (?, ?, ?, ?, ?)')
     .run(eventId, at, actor, action, JSON.stringify(detail));
 }
