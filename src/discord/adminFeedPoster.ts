@@ -1,6 +1,7 @@
 import type { DB } from '../db.js';
-import { FEED_SETTING, subscribeAdminEvents, type AdminEvent } from '../adminFeed.js';
+import { subscribeAdminEvents, type AdminEvent } from '../adminFeed.js';
 import { getSetting } from '../settings.js';
+import { feedChannel } from './feedRouting.js';
 import { getPlayer } from '../players.js';
 import { resolveAlias } from '../aliases.js';
 import { activeTimeout } from '../penalties.js';
@@ -47,12 +48,6 @@ export class AdminFeedPoster {
     return this.chain;
   }
 
-  private channel(kind: AdminEvent['kind']): string | null {
-    const id = getSetting(this.deps.db, 'discord_admin_channel_id') ?? '';
-    if (!id) return null;
-    return getSetting(this.deps.db, FEED_SETTING[kind]) === '0' ? null : id;
-  }
-
   /** Steam name and linked Discord side by side, bolded, so a line reads the
    *  same whether the admin recognises the game name or the voice channel. */
   private name(steamid: string): string {
@@ -71,7 +66,7 @@ export class AdminFeedPoster {
   }
 
   private async deliver(e: AdminEvent): Promise<void> {
-    const channelId = this.channel(e.kind);
+    const channelId = feedChannel(this.deps.db, e);
     if (!channelId) return;
     const line = this.line(e);
     if (!line) return;

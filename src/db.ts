@@ -1200,6 +1200,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // Empty is the off state: no role is let into the team voice channels.
   discord_staff_role_id: '',
   discord_admin_channel_id: '',
+  discord_mod_channel_id: '',
   // Where match results are posted. Empty keeps them in the queue channel.
   discord_results_channel_id: '',
   discord_tickets_forum_id: '',
