@@ -21,7 +21,9 @@ describe('AdminAppeal', () => {
   it('shows both answers and every control a deciding moderator has', async () => {
     mock.get.mockResolvedValue(detail);
     render(<AdminAppeal id={3} />);
-    expect(await screen.findByText('lag')).toBeTruthy();
+    const whatHappened = await screen.findByText('lag');
+    expect(whatHappened).toBeTruthy();
+    expect(whatHappened.className).toContain('appeal-text');
     for (const label of ['Ask one question', 'Accept', 'Shorten', 'Deny']) expect(screen.getByText(label)).toBeTruthy();
     expect(screen.queryByText('No more appeals on this ban')).toBeNull();
   });

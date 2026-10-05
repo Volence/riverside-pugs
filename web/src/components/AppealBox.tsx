@@ -40,7 +40,7 @@ function Item({ it, data, reload }: { it: PlayerAppealItem; data: MyAppeals; rel
       {ap && (!it.canAppeal || ap.state === 'asked') && ap.line && <p>{ap.line}</p>}
       {ap && ap.state === 'asked' && ap.question && (
         <>
-          <blockquote>{ap.question}</blockquote>
+          <blockquote class="appeal-text">{ap.question}</blockquote>
           <label>Your answer
             <textarea maxLength={data.answerMax} value={answer} onInput={(e) => setAnswer((e.target as HTMLTextAreaElement).value)} />
           </label>
