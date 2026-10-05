@@ -23,6 +23,8 @@ import { PeopleSearch } from './admin/PeopleSearch';
 import { NeedsALook } from './admin/NeedsALook';
 import { PeopleBans } from './admin/PeopleBans';
 import { PeopleAlts } from './admin/PeopleAlts';
+import { PeopleAppeals } from './admin/PeopleAppeals';
+import { AdminAppeal } from './admin/AdminAppeal';
 import { PlayerFile } from './admin/file/PlayerFile';
 import { EventsDesk } from './admin/events/EventsDesk';
 import { EventEditor } from './admin/events/EventEditor';
@@ -102,7 +104,7 @@ export function Admin({ session }: { session: Session }) {
   const sections = r.desk === 'people' ? PEOPLE_TABS : r.desk === 'setup' ? SETUP_TABS : r.desk === 'balance' ? BALANCE_TABS : [];
   // A file belongs under Players and a ticket under Tickets, so the strip
   // keeps a highlight while you are inside one.
-  const activeSection = r.section === 'file' ? 'search' : r.section === 'ticket' ? 'tickets' : r.section;
+  const activeSection = r.section === 'file' ? 'search' : r.section === 'ticket' ? 'tickets' : r.section === 'appeal' ? 'appeals' : r.section;
 
   return (
     <div class="page page--admin">
@@ -122,6 +124,8 @@ export function Admin({ session }: { session: Session }) {
         {r.desk === 'people' && r.section === 'alts' && <PeopleAlts isAdmin={isAdmin} />}
         {r.desk === 'people' && r.section === 'tickets' && <AdminTickets onOpen={(id) => route(ticketUrl(id))} />}
         {r.desk === 'people' && r.section === 'calls' && <AdminCalls />}
+        {r.desk === 'people' && r.section === 'appeals' && <PeopleAppeals />}
+        {r.desk === 'people' && r.section === 'appeal' && <AdminAppeal key={r.param} id={Number(r.param)} />}
         {r.desk === 'people' && r.section === 'guide' && <StaffGuide />}
         {r.desk === 'people' && r.section === 'ticket' && (
           <AdminTicket

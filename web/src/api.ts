@@ -1583,6 +1583,30 @@ export const appealApi = {
   signOut: () => post<{ ok: true }>('/api/appeals/sign-out'),
 };
 
+/** One appeal as seen on the staff list (src/appeals/views.ts). */
+export interface StaffAppealRow {
+  id: number; state: AppealState; name: string; steamid: string | null; discordId: string | null;
+  about: 'ban' | 'hold' | 'timeout' | 'discord ban'; filedAt: string; decidedAt: string | null;
+}
+/** One appeal in full, as seen on its own staff page. */
+export interface StaffAppealDetail extends StaffAppealRow {
+  whatHappened: string; whyLift: string;
+  question: string | null; askedByName: string | null; askedAt: string | null;
+  answer: string | null; answeredAt: string | null; answerBy: string | null;
+  decidedByName: string | null; newExpiresAt: string | null; slurs: string[];
+  target: { reason: string; createdByName: string; createdAt: string; endsAt: string | null; ticketId: number | null; noAppeal: boolean; inForce: boolean };
+  earlier: { id: number; state: AppealState; decidedAt: string | null }[];
+  canDecide: boolean; canShorten: boolean; canMarkFinal: boolean;
+}
+export const appealStaffApi = {
+  list: (which: 'open' | 'closed', signal?: AbortSignal) => get<{ appeals: StaffAppealRow[] }>(`/api/mod/appeals?state=${which}`, signal),
+  get: (id: number, signal?: AbortSignal) => get<StaffAppealDetail>(`/api/mod/appeals/${id}`, signal),
+  ask: (id: number, question: string) => post<{ ok: true }>(`/api/mod/appeals/${id}/ask`, { question }),
+  decide: (id: number, outcome: 'accept' | 'shorten' | 'deny', endsAt?: string) =>
+    post<{ ok: true }>(`/api/mod/appeals/${id}/decide`, { outcome, endsAt }),
+  markFinal: (id: number, on: boolean) => post<{ ok: true }>(`/api/admin/appeals/${id}/final`, { on }),
+};
+
 /** An alt hold: `steamid` was held because its Discord came from
  *  `otherSteamid`. See src/altHolds.ts. */
 export interface AltHold {
