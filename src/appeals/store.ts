@@ -137,15 +137,24 @@ export function targetInForce(db: DB, row: AppealRow, now = new Date()): boolean
 
 /** Runs on the 60 s reaper. An unanswered question past its time closes as
  *  lapsed (counts as a denial); an appeal whose ban has ended any other way
- *  closes as moot (counts for nothing). */
+ *  closes as moot (counts for nothing).
+ *
+ *  Ruling: the lapse step is skipped while appeals are turned off. A player
+ *  cannot see their own appeal with the feature off (the whole box is
+ *  hidden), so they cannot know a question was asked, let alone answer it;
+ *  turning appeals off must not be a way to cost them a strike they never
+ *  saw. Moot still runs: a ban that ended on its own, or by hand, should
+ *  close the appeal either way. */
 export function sweepAppeals(db: DB, now = new Date()): { lapsed: number[]; moot: number[] } {
   const s = appealSettings(db);
   const cutoff = new Date(now.getTime() - s.answerHours * 3600_000).toISOString();
   const lapsed: number[] = [];
-  for (const { id } of db.prepare("SELECT id FROM appeals WHERE state = 'asked' AND asked_at <= ?").all(cutoff) as { id: number }[]) {
-    const changed = db.prepare("UPDATE appeals SET state = 'lapsed', decided_by = 'system', decided_at = ? WHERE id = ? AND state = 'asked'")
-      .run(now.toISOString(), id).changes > 0;
-    if (changed) { lapsed.push(id); publishAppealSignal(id); }
+  if (s.enabled) {
+    for (const { id } of db.prepare("SELECT id FROM appeals WHERE state = 'asked' AND asked_at <= ?").all(cutoff) as { id: number }[]) {
+      const changed = db.prepare("UPDATE appeals SET state = 'lapsed', decided_by = 'system', decided_at = ? WHERE id = ? AND state = 'asked'")
+        .run(now.toISOString(), id).changes > 0;
+      if (changed) { lapsed.push(id); publishAppealSignal(id); }
+    }
   }
   const moot: number[] = [];
   for (const row of db.prepare(`SELECT * FROM appeals WHERE state IN (${OPEN_SQL})`).all() as AppealRow[]) {
