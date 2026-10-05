@@ -145,12 +145,28 @@ export async function appealRoutes(app: FastifyInstance, opts: AppealRouteOpts):
     if (!result.ok && !(s.kind === 'timeout' && result.why === 'not_member')) {
       return reply.code(409).send({ error: `Discord refused: ${result.detail}` });
     }
-    if (!recordDecision(db, a.id, me, 'accepted', null)) return reply.code(409).send({ error: 'this appeal has already been decided' });
-    try {
-      recordLift(db, { sanctionId: s.id, discordId: s.discord_id, kind: s.kind, ticketId: s.ticket_id, restricted: false }, me);
-    } catch (err) {
-      publishAdminEvent({ kind: 'problem', text: `Appeal #${a.id}: Discord lifted the ${s.kind}, but recording the lift failed: ${String(err)}` });
+    // Discord already has this lifted, whatever happens next: a failure to
+    // record that must never leave discord_sanctions saying "active".
+    const lift = () => {
+      try {
+        recordLift(db, { sanctionId: s.id, discordId: s.discord_id, kind: s.kind, ticketId: s.ticket_id, restricted: false }, me);
+      } catch (err) {
+        publishAdminEvent({ kind: 'problem', text: `Appeal #${a.id}: Discord lifted the ${s.kind}, but recording the lift failed: ${String(err)}` });
+      }
+    };
+    if (!recordDecision(db, a.id, me, 'accepted', null)) {
+      // Lost the race: somebody else decided this appeal (or the sweep
+      // mooted it) between the check above and now. Discord has still done
+      // the lift for real, so it is recorded anyway, with no Discord id or
+      // name in the problem text (same rule as the other sanction routes).
+      lift();
+      publishAdminEvent({
+        kind: 'problem',
+        text: `Appeal #${a.id}: Discord lifted the ${s.kind} but the appeal had already been decided; the lift was recorded.`,
+      });
+      return reply.code(409).send({ error: 'this appeal has already been decided' });
     }
+    lift();
     audit(me, 'appeal_accept', a);
     return { ok: true };
   });
