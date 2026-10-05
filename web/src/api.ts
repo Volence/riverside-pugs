@@ -1064,6 +1064,10 @@ export interface GameValueView {
   lastChange: { at: string; patch: { id: number; number: number; name: string } | null } | null;
   /** Admin view only: the value's condition does not hold, so the public page leaves it out. */
   conditionOff?: true;
+  /** The game never reads it: shown with a tag, never marked as differing. */
+  noEffect?: true;
+  /** Fine tuning: folded under the group's details. */
+  detail?: true;
 }
 /** One campaign x look row of /api/admin/balance/looks (src/mapLooks.ts). */
 export interface LookStatRow {

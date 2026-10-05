@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/preact';
-import type { GameValues as GV } from '../../api';
+import type { GameValues as GV, GameValueView } from '../../api';
 
 const { mockApi, mockAdmin } = vi.hoisted(() => ({ mockApi: { gameValues: vi.fn() }, mockAdmin: { gameValues: vi.fn() } }));
 vi.mock('../../api', async (importOriginal) => {
@@ -38,14 +38,14 @@ describe('GameValues', () => {
     expect(screen.getByText('Fire damage to the tank is capped.')).toBeTruthy();
   });
 
-  it('a value equal to vanilla shows its number once, in the Vanilla column with the unit', async () => {
+  it('a value equal to vanilla still shows its number, muted, in both columns', async () => {
     const same = { id: 'survivor_revive_duration', label: 'Revive time', unit: 's', note: null, value: '5.0', vanilla: '5',
       differsFromVanilla: false, status: 'reported' as const, lastChange: null };
     mockApi.gameValues.mockResolvedValue({ ...data, groups: [{ id: 'survivors', label: 'Survivors', values: [same], rules: [] }] });
     const { container } = render(<GameValues />);
     await screen.findByText('Revive time');
     const row = container.querySelector('table.values-table tbody tr')!;
-    expect(row.querySelector('[data-label="Ours"]')!.textContent).toBe('-');
+    expect(row.querySelector('[data-label="Ours"]')!.textContent).toBe('5.0 s');
     expect(row.querySelector('[title="Same as vanilla"]')).toBeTruthy();
     expect(row.querySelector('[data-label="Vanilla"]')!.textContent).toBe('5 s');
     expect(row.className).not.toContain('values-differs');
@@ -76,6 +76,47 @@ describe('GameValues', () => {
     const cells = [...container.querySelectorAll('table.values-table tbody td')];
     expect(cells.length).toBeGreaterThan(0);
     expect(cells.every((td) => td.getAttribute('data-label'))).toBe(true);
+  });
+
+  it('lists changes first, our own settings next, then the rest under Same as vanilla; fine tuning folds away', async () => {
+    const v = (id: string, extra: Partial<GameValueView>): GameValueView => ({ id, label: id, unit: null, note: null, value: '1', vanilla: '1',
+      differsFromVanilla: false, status: 'reported', lastChange: null, ...extra });
+    mockApi.gameValues.mockResolvedValue({ reviewing: false, groups: [{ id: 'hunter', label: 'Hunter', rules: [], values: [
+      v('same', {}), v('ours', { vanilla: null }), v('changed', { value: '2', differsFromVanilla: true }),
+      v('inert', { value: '150', vanilla: '300', noEffect: true }), v('tuning', { vanilla: null, detail: true }),
+    ] }] });
+    const { container } = render(<GameValues />);
+    await screen.findByText('changed');
+    const main = container.querySelector('.values-panel > .table-wrap table')!;
+    expect([...main.querySelectorAll('tbody tr')].map((r) => r.querySelector('td')!.textContent))
+      .toEqual(['changed', 'ours', 'Same as vanilla', 'same', 'inert']);
+    expect(screen.getByText('no effect')).toBeTruthy();
+    const details = container.querySelector('details.values-details')!;
+    expect(details.querySelector('summary')!.textContent).toBe('Fine tuning (1)');
+    expect(details.textContent).toContain('tuning');
+  });
+
+  it('search filters every group by setting name, note and rule text, and unfolds matching fine tuning', async () => {
+    mockApi.gameValues.mockResolvedValue({ ...data, groups: [
+      ...data.groups,
+      { id: 'hunter', label: 'Hunter', rules: [{ id: 'dp', text: 'Damage pounces grow with distance.', active: true, draft: false }], values: [
+        { id: 'pounce_bonus', label: 'Pounce bonus', unit: null, note: null, value: '34', vanilla: '24', differsFromVanilla: true, status: 'reported', lastChange: null, detail: true },
+      ] },
+    ] });
+    const { container } = render(<GameValues />);
+    await screen.findByText('Tank health');
+    expect(container.querySelectorAll('.values-jump .chip')).toHaveLength(3);
+    const box = screen.getByLabelText('Search game values') as HTMLInputElement;
+    box.value = 'POUNCE';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    await screen.findByText('Damage pounces grow with distance.');
+    expect(screen.queryByText('Tank health')).toBeNull();
+    expect(container.querySelector('details')).toBeNull();
+    expect(screen.getByText('Pounce bonus').closest('.values-panel > .table-wrap')).toBeTruthy();
+    expect(container.querySelectorAll('.values-jump .chip')).toHaveLength(1);
+    box.value = 'zzz';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(await screen.findByText('Nothing matches "zzz".')).toBeTruthy();
   });
 
   it('the admin preview tags draft and inactive rules and shows a hidden value\'s note', async () => {

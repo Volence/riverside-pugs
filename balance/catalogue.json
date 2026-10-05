@@ -236,7 +236,8 @@
       "group": "common",
       "label": "Anti-bait: progress that counts as moving",
       "source": "cvar",
-      "note": "Share of the map survivors must cover to reset the anti-bait countdown."
+      "note": "Share of the map survivors must cover to reset the anti-bait countdown.",
+      "detail": true
     },
     {
       "id": "z_brawl_chance",
@@ -258,11 +259,12 @@
     {
       "id": "z_tank_health",
       "group": "tank",
-      "label": "Tank health",
+      "label": "Tank health in versus",
       "source": "cvar",
       "unit": "HP",
-      "vanilla": "6000",
-      "note": "Versus multiplies this by the tank health multiplier below. Vanilla versus is 4000 x 1.5 = 6000."
+      "vanilla": "4000",
+      "note": "The tank health setting times the versus multiplier (in the details below). Vanilla versus is 4000 x 1.5 = 6000.",
+      "times": "versus_tank_bonus_health"
     },
     {
       "id": "versus_tank_bonus_health",
@@ -271,7 +273,8 @@
       "source": "cvar",
       "unit": "x",
       "vanilla": "1.5",
-      "note": "Versus tank health is the tank health above times this. 1 means no bonus."
+      "note": "Versus multiplies the tank health setting by this. 1 means no bonus, so ours is the setting itself.",
+      "detail": true
     },
     {
       "id": "z_tank_speed_vs",
@@ -329,7 +332,8 @@
       "group": "tank",
       "label": "Rotoblin tank rotation off",
       "source": "cvar",
-      "note": "1 means the game's own random lottery picks the tank player, as in vanilla. 0 switches on Rotoblin's rotation, where every infected player takes a turn."
+      "note": "1 means the game's own random lottery picks the tank player, as in vanilla. 0 switches on Rotoblin's rotation, where every infected player takes a turn.",
+      "detail": true
     },
     {
       "id": "z_witch_health",
@@ -388,7 +392,8 @@
       "group": "witch",
       "label": "Witch unstuck mode",
       "source": "cvar",
-      "note": "Our fix for witches that freeze on a corner mid-chase. 0 off, 1 logs only, 2 moves her past the snag."
+      "note": "Our fix for witches that freeze on a corner mid-chase. 0 off, 1 logs only, 2 moves her past the snag.",
+      "detail": true
     },
     {
       "id": "z_pounce_damage",
@@ -423,7 +428,8 @@
       "label": "Maximum DP (damage pounce) damage",
       "source": "cvar",
       "unit": "HP",
-      "note": "Most damage a pounce can do on landing, including the base. Also moves the full damage distance."
+      "note": "Most damage a pounce can do on landing: 1 for the hit plus the distance bonus. Vanilla is 1 + 24 = 25. Also moves the full damage distance.",
+      "vanilla": "25"
     },
     {
       "id": "z_hunter_max_pounce_bonus_damage",
@@ -432,7 +438,8 @@
       "source": "cvar",
       "unit": "HP",
       "vanilla": "24",
-      "note": "Extra damage a full distance pounce adds on top of the base. Set by the max DP damage plugin to one less than the max."
+      "note": "The distance bonus alone, on top of the 1 damage hit. Set by the max DP damage plugin to one less than the max DP above.",
+      "detail": true
     },
     {
       "id": "z_pounce_stumble_radius",
@@ -499,14 +506,16 @@
       "group": "hunter",
       "label": "Sky pounce fix on",
       "source": "cvar",
-      "note": "Our limit on hunters pouncing off the sky ceiling for extra height and distance."
+      "note": "Our limit on hunters pouncing off the sky ceiling for extra height and distance.",
+      "detail": true
     },
     {
       "id": "l4d_skypounce_mode",
       "group": "hunter",
       "label": "Sky pounce fix mode",
       "source": "cvar",
-      "note": "1 copies Zen's rule (a pounce started at the ceiling-skimming angle gets a short no-attack time). 2 limits only pounces that push off the sky."
+      "note": "1 copies Zen's rule (a pounce started at the ceiling-skimming angle gets a short no-attack time). 2 limits only pounces that push off the sky.",
+      "detail": true
     },
     {
       "id": "tongue_hit_delay",
@@ -613,7 +622,8 @@
       "source": "cvar",
       "unit": "units",
       "vanilla": "300",
-      "note": "Does nothing in L4D1: the only game code that reads it is never called. How far vomit flies comes from its speed and lifetime, not this value."
+      "note": "Does nothing in L4D1: the only game code that reads it is never called. How far vomit flies comes from its speed and lifetime, not this value.",
+      "noEffect": true
     },
     {
       "id": "z_exploding_shove_min",
@@ -713,14 +723,16 @@
       "group": "items",
       "label": "Health item style",
       "source": "cvar",
-      "note": "Where health items come from. 0 map default, 1 kits become pills, 2 same but finale kits stay, 3 finale kits become pills and every other pill or kit is removed, 4 kits become pills and only saferoom kits are removed."
+      "note": "Where health items come from. 0 map default, 1 kits become pills, 2 same but finale kits stay, 3 finale kits become pills and every other pill or kit is removed, 4 kits become pills and only saferoom kits are removed.",
+      "detail": true
     },
     {
       "id": "rotoblin_weapon_style",
       "group": "items",
       "label": "Weapon style",
       "source": "cvar",
-      "note": "1 replaces rifles with Uzis and auto shotguns with pump shotguns. Hunting rifles stay on the map, see the limit below."
+      "note": "1 replaces rifles with Uzis and auto shotguns with pump shotguns. Hunting rifles stay on the map, see the limit below.",
+      "detail": true
     },
     {
       "id": "rotoblin_enable_throwables",
@@ -1280,14 +1292,16 @@
       "group": "survivors",
       "label": "Extra common protection applies after (1 hunter, 2 smoker, 4 revive)",
       "source": "cvar",
-      "note": "Which releases get the extra common protection. Add up: 1 hunter, 2 smoker, 4 revive."
+      "note": "Which releases get the extra common protection. Add up: 1 hunter, 2 smoker, 4 revive.",
+      "detail": true
     },
     {
       "id": "gfc_FF_zc_flags",
       "group": "survivors",
       "label": "Extra friendly-fire protection applies after (1 hunter, 2 smoker, 4 revive)",
       "source": "cvar",
-      "note": "Which releases get the extra friendly fire protection. Add up: 1 hunter, 2 smoker, 4 revive."
+      "note": "Which releases get the extra friendly fire protection. Add up: 1 hunter, 2 smoker, 4 revive.",
+      "detail": true
     },
     {
       "id": "gfc_hittable_override",
@@ -1355,7 +1369,8 @@
       "label": "Sky pounce: angle from",
       "source": "cvar",
       "unit": "deg",
-      "note": "Mode 1: the pounce has to start with the view angled down at least this much."
+      "note": "Mode 1: the pounce has to start with the view angled down at least this much.",
+      "detail": true
     },
     {
       "id": "l4d_skypounce_pitch_max",
@@ -1363,14 +1378,16 @@
       "label": "Sky pounce: angle to",
       "source": "cvar",
       "unit": "deg",
-      "note": "Mode 1: and at most this much."
+      "note": "Mode 1: and at most this much.",
+      "detail": true
     },
     {
       "id": "l4d_skypounce_allow",
       "group": "hunter",
       "label": "Sky pounce: pounces off the sky per flight (mode 2)",
       "source": "cvar",
-      "note": "Mode 2: pounces off the sky a hunter gets per flight."
+      "note": "Mode 2: pounces off the sky a hunter gets per flight.",
+      "detail": true
     },
     {
       "id": "l4d_tongue_delay_survivor",
@@ -1411,7 +1428,8 @@
       "group": "tank",
       "label": "Rocks use a shootable hitbox",
       "source": "cvar",
-      "note": "1 means you break a rock by shooting a sphere around it, lag compensated. A rock has 100 HP and closer shots do more damage to it."
+      "note": "1 means you break a rock by shooting a sphere around it, lag compensated. A rock has 100 HP and closer shots do more damage to it.",
+      "detail": true
     },
     {
       "id": "sm_rock_hitbox_radius",
@@ -1419,7 +1437,8 @@
       "label": "Shootable rock size",
       "source": "cvar",
       "unit": "units",
-      "note": "Radius of that sphere."
+      "note": "Radius of that sphere.",
+      "detail": true
     },
     {
       "id": "sm_rock_godframes",
@@ -1434,7 +1453,8 @@
       "group": "tank",
       "label": "Rock lag compensation",
       "source": "cvar",
-      "note": "1 means shots at a flying rock are lag compensated, so shooting a rock down works at any ping."
+      "note": "1 means shots at a flying rock are lag compensated, so shooting a rock down works at any ping.",
+      "detail": true
     },
     {
       "id": "tank_punch_getup_scale",
@@ -1593,7 +1613,8 @@
       "label": "Unstuck: seconds without progress",
       "source": "cvar",
       "unit": "s",
-      "note": "A chasing witch that makes no progress for this long counts as stuck."
+      "note": "A chasing witch that makes no progress for this long counts as stuck.",
+      "detail": true
     },
     {
       "id": "l4d_witch_unstuck_progress",
@@ -1601,7 +1622,8 @@
       "label": "Unstuck: progress that counts as moving",
       "source": "cvar",
       "unit": "units",
-      "note": "Distance she must close on her target in that time to count as moving."
+      "note": "Distance she must close on her target in that time to count as moving.",
+      "detail": true
     },
     {
       "id": "l4d_witch_unstuck_hop",
@@ -1609,7 +1631,8 @@
       "label": "Unstuck: longest hop",
       "source": "cvar",
       "unit": "units",
-      "note": "Farthest the fix will move a stuck witch sideways in one hop."
+      "note": "Farthest the fix will move a stuck witch sideways in one hop.",
+      "detail": true
     },
     {
       "id": "l4d_saferoom_lock_tank",

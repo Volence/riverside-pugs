@@ -24,6 +24,10 @@ export interface ValueView {
   lastChange: { at: string; patch: { id: number; number: number; name: string } | null } | null;
   /** Admin view only: its `when` does not hold, so the public page leaves it out. */
   conditionOff?: true;
+  /** The game never reads it, so it is never marked as differing. */
+  noEffect?: true;
+  /** Fine tuning: folded under the group's details. */
+  detail?: true;
 }
 export interface RuleView {
   id: string; text: string; active: boolean; draft: boolean;
@@ -47,6 +51,15 @@ const keyOf = (v: CatalogueValue) => (v.source === 'weapon' ? `w:${v.id}` : `c:$
 const same = (a: string, b: string) => {
   const x = Number(a), y = Number(b);
   return a.trim() !== '' && b.trim() !== '' && Number.isFinite(x) && Number.isFinite(y) ? x === y : a === b;
+};
+
+/** "300.000000" -> "300", "0.500000" -> "0.5": cvars report floats padded. */
+export const tidyNumber = (s: string) => (/^-?\d+\.\d+$/.test(s.trim()) ? s.trim().replace(/\.?0+$/, '') : s);
+/** a x b as a short number, or undefined unless both are numbers. */
+const multiply = (a: string | undefined, b: string | undefined): string | undefined => {
+  if (a === undefined || b === undefined || !a.trim() || !b.trim()) return undefined;
+  const x = Number(a) * Number(b);
+  return Number.isFinite(x) ? String(Math.round(x * 1000) / 1000) : undefined;
 };
 
 interface PatchRow { id: number; inputs_json: string | null; name: string | null; published_at: string | null; triage: string }
@@ -114,24 +127,36 @@ export function gameValues(db: DB, cat: Catalogue, opts: { admin: boolean }): Ga
     return raw !== undefined && v.source === 'weapon' && raw === 'default' ? v.vanilla ?? 'game default' : raw;
   };
 
+  const byId = new Map(cat.values.map((v) => [v.id, v]));
+  /** What the row shows from one inventory: the value itself, or times its multiplier. */
+  const shown = (v: CatalogueValue, i: Inventory): string | undefined => {
+    const own = readValue(v, i);
+    const by = v.times ? byId.get(v.times) : undefined;
+    return by ? multiply(own, readValue(by, i)) : own;
+  };
+
   const valueView = (v: CatalogueValue): ValueView => {
     let changed: { at: string; id: number } | null = null;
     let prev: string | undefined;
     for (const r of runs) {
-      const val = readValue(v, r.inv);
+      const val = shown(v, r.inv);
       if (val === undefined) continue;
       if (prev !== undefined && !same(prev, val)) changed = { at: r.at, id: r.patchId };
       prev = val;
     }
     // Resolved once, for the last change only.
     const lastChange: ValueView['lastChange'] = changed ? { at: changed.at, patch: patchView(changed.id) } : null;
-    const raw = readValue(v, inv);
+    const raw = shown(v, inv);
     const status: ValueView['status'] = v.hideLive ? 'hidden' : raw === undefined ? 'not_reported' : 'reported';
-    const value = status === 'reported' ? raw! : null;
+    const value = status === 'reported' ? tidyNumber(raw!) : null;
+    const by = v.times ? byId.get(v.times) : undefined;
+    const vanilla = by ? multiply(v.vanilla, by.vanilla) ?? null : v.vanilla !== undefined ? tidyNumber(v.vanilla) : null;
     return {
-      id: v.id, label: v.label, unit: v.unit ?? null, note: v.note ?? null, value, vanilla: v.vanilla ?? null,
-      differsFromVanilla: value !== null && v.vanilla !== undefined && !same(value, v.vanilla),
+      id: v.id, label: v.label, unit: v.unit ?? null, note: v.note ?? null, value, vanilla,
+      differsFromVanilla: !v.noEffect && value !== null && vanilla !== null && !same(value, vanilla),
       status, lastChange,
+      ...(v.noEffect ? { noEffect: true as const } : {}),
+      ...(v.detail ? { detail: true as const } : {}),
     };
   };
 
@@ -142,15 +167,14 @@ export function gameValues(db: DB, cat: Catalogue, opts: { admin: boolean }): Ga
     if (v === undefined) return false;
     return 'equals' in w ? same(v, w.equals) : !same(v, w.notEquals);
   };
-  const byValueId = new Map(cat.values.map((v) => [v.id, v]));
   /** Fill {id} placeholders from the reported values; the ids it could not fill. */
   const render = (text: string): { text: string; missing: string[] } => {
     const missing: string[] = [];
     const out = text.replace(/\{([^{}]+)\}/g, (_m, id: string) => {
-      const v = byValueId.get(id);
+      const v = byId.get(id);
       const raw = v ? inv[keyOf(v)] : undefined;
       if (raw === undefined || raw === 'default') { missing.push(id); return '?'; }
-      return raw;
+      return tidyNumber(raw);
     });
     return { text: out, missing };
   };

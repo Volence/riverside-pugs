@@ -12,6 +12,10 @@ const CAT: Catalogue = {
     { id: 'z_tank_health', group: 'tank', label: 'Tank health', source: 'cvar', unit: 'HP', vanilla: '4000' },
     { id: 'z_new_thing', group: 'tank', label: 'New thing', source: 'cvar' },
     { id: 'tongue_drag_damage_amount', group: 'hunter', label: 'Drag', source: 'cvar', note: 'plugin', hideLive: true },
+    { id: 'z_hp', group: 'hunter', label: 'Versus health', source: 'cvar', vanilla: '4000', times: 'vs_bonus' },
+    { id: 'vs_bonus', group: 'hunter', label: 'Versus multiplier', source: 'cvar', vanilla: '1.5', detail: true },
+    { id: 'z_vomit_range', group: 'hunter', label: 'Vomit range', source: 'cvar', vanilla: '300', noEffect: true },
+    { id: 'z_pad', group: 'hunter', label: 'Padded', source: 'cvar', vanilla: '300.0' },
     { id: 'weapon_smg.Damage', group: 'weapons', label: 'Uzi damage', source: 'weapon', vanilla: '20' },
     { id: 'weapon_smg.SpreadPerShot', group: 'weapons', label: 'Uzi spread', source: 'weapon', vanilla: '0.32' },
     { id: 'hr_dmg', group: 'weapons', label: 'Rifle damage', source: 'cvar', when: { cvar: 'hr_limit', notEquals: '0' } },
@@ -39,6 +43,7 @@ describe('loadCatalogue', () => {
     expect(bad({ values: [{ id: 'weapon_smg', group: 'weapons', label: 'X', source: 'weapon' }] })).toThrow(/bad weapon/);
     expect(bad({ rules: [{ id: 'r', group: 'tank', text: 't', when: { cvar: 'x' } as never, reviewed: true }] })).toThrow(/when/);
     expect(bad({ values: [{ id: 'x', group: 'tank', label: 'X', source: 'cvar', when: { cvar: 'y' } as never }] })).toThrow(/bad when/);
+    expect(bad({ values: [...CAT.values, { id: 'x', group: 'tank', label: 'X', source: 'cvar', times: 'nope' }] })).toThrow(/times/);
     expect(bad({ rules: [{ id: 'r', group: 'tank', text: 'uses {nope}', when: { plugin: 'a.smx' }, reviewed: true }] })).toThrow(/not a catalogue value/);
   });
 });
@@ -58,7 +63,8 @@ describe('gameValues', () => {
   let s1: number;
   const INV = (tank: string, extra: Record<string, string> = {}) => ({
     'c:z_tank_health': tank, 'c:tongue_drag_damage_amount': '0', 'p:optional/l4d_skypounce.smx': '1.a',
-    'w:weapon_smg.Damage': 'default', 'w:weapon_smg.SpreadPerShot': '0.22', ...extra,
+    'w:weapon_smg.Damage': 'default', 'w:weapon_smg.SpreadPerShot': '0.22',
+    'c:z_hp': '8000', 'c:vs_bonus': '1.000000', 'c:z_vomit_range': '150', 'c:z_pad': '300.000000', ...extra,
   });
   beforeEach(() => {
     db = openDb(':memory:');
@@ -80,6 +86,16 @@ describe('gameValues', () => {
     const w = g.groups.find((x) => x.id === 'weapons')!;
     expect(w.values[0]).toMatchObject({ value: '20', differsFromVanilla: false });
     expect(w.values[1]).toMatchObject({ value: '0.22', differsFromVanilla: true });
+  });
+
+  it('multiplies a times value, never marks a no-effect value as differing, tags detail rows, and trims padded floats', () => {
+    const hunter = gameValues(db, CAT, { admin: false }).groups.find((x) => x.id === 'hunter')!.values;
+    const by = (id: string) => hunter.find((v) => v.id === id)!;
+    expect(by('z_hp')).toMatchObject({ value: '8000', vanilla: '6000', differsFromVanilla: true, lastChange: null });
+    expect(by('vs_bonus')).toMatchObject({ value: '1', detail: true, differsFromVanilla: true });
+    expect(by('z_vomit_range')).toMatchObject({ value: '150', vanilla: '300', differsFromVanilla: false, noEffect: true });
+    expect(by('z_pad')).toMatchObject({ value: '300', vanilla: '300', differsFromVanilla: false });
+    expect(by('z_pad')).not.toHaveProperty('detail');
   });
 
   it('dates the last change and names it only when published (public)', () => {
