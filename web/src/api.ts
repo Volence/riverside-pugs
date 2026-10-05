@@ -673,9 +673,16 @@ export interface Standing { rank: number; of: number }
  *  "not logged in" (401/403) and "no such thing" (404) apart from a real fault.
  *  `nearestSlot` carries the scrim confirm route's `no_capacity` refusal
  *  (src/routes/scrims.ts's `refuse`), which rides alongside `error` in the
- *  body; undefined for every other response. */
+ *  body; undefined for every other response. `problems` carries a tournament
+ *  entry refusal (src/events/entries.ts), one row per named player who fails
+ *  the entry rules; undefined for every other response. */
 export class ApiError extends Error {
-  constructor(readonly status: number, message: string, readonly nearestSlot?: string | null) {
+  constructor(
+    readonly status: number,
+    message: string,
+    readonly nearestSlot?: string | null,
+    readonly problems?: { steamid: string; name: string; problems: string[] }[],
+  ) {
     super(message);
     this.name = 'ApiError';
   }
@@ -705,7 +712,10 @@ async function post<T = unknown>(path: string, body?: unknown): Promise<T> {
   const parsed = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = (parsed as { error?: string }).error ?? `POST ${path} → ${res.status}`;
-    throw new ApiError(res.status, msg, (parsed as { nearestSlot?: string | null }).nearestSlot);
+    throw new ApiError(
+      res.status, msg, (parsed as { nearestSlot?: string | null }).nearestSlot,
+      (parsed as { problems?: { steamid: string; name: string; problems: string[] }[] }).problems,
+    );
   }
   return parsed as T;
 }
@@ -1913,13 +1923,14 @@ export interface EventStageView {
   ordinal: number; type: StageType; summary: string; veto: string; chapters: string; scheduling: Scheduling;
   rulesetName: string | null; rules: string[]; gameConfig: string; campaigns: { slug: string; name: string }[];
 }
-export interface EventEntryView { name: string; tag: string; seed: number | null; status: string }
+export interface EventEntryView { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; status: string; waitlist: number | null }
 export interface EventView {
   slug: string; name: string; status: EventStatus; entryKind: EntryKind; official: boolean; organizerName: string | null;
   bannerKey: string | null; startsAt: string; description: string; teamCap: number | null;
   eligibility: EventEligibility; checkin: EventCheckin; roster: EventRoster;
   stages: EventStageView[]; entries: EventEntryView[];
   finishedAt: string | null; cancelledAt: string | null; cancelReason: string | null;
+  lockedAt: string | null; checkinOpensAt: string | null; checkinClosesAt: string | null;
 }
 
 export const bannerUrl = (key: string): string => `/api/events/banners/${key}`;
@@ -1927,9 +1938,32 @@ export const bannerUrl = (key: string): string => `/api/events/banners/${key}`;
  *  behind the competitive switch. The key only busts the cache on a new one. */
 export const adminBannerUrl = (eventId: number, key: string): string => `/api/admin/events/${eventId}/banner?k=${key}`;
 
+/** A player's role on a tournament entry's roster, and the roster itself:
+ *  exactly 4 starters, 0 to the event's maxSubs subs, 0 or 1 coach (plan
+ *  T1b, global constraints). Mirrors src/events/views.ts. */
+export type EntryRole = 'starter' | 'sub' | 'coach';
+export interface EntryRoster { starters: string[]; subs: string[]; coach: string | null }
+export interface RosterPlaceView { steamid: string; name: string; avatar: string | null; role: EntryRole; problems: string[] }
+export interface MemberOptionView { steamid: string; name: string; avatar: string | null; problems: string[]; elsewhere: string | null }
+export interface MyEntryView {
+  id: number; name: string; tag: string; logoKey: string | null; status: string; seed: number | null; waitlist: number | null;
+  checkedInAt: string | null; manage: boolean; onRoster: boolean; roster: RosterPlaceView[];
+  rosterLocked: boolean; additionsLeft: number | null;
+  canEditRoster: boolean; canCheckIn: boolean; canWithdraw: boolean; canLeave: boolean; members: MemberOptionView[];
+}
+export interface RegisterOptionView { teamId: number; name: string; tag: string; logoKey: string | null; members: MemberOptionView[] }
+export interface MyEventView { entries: MyEntryView[]; register: RegisterOptionView[]; canRegister: boolean }
+export const entryLogoUrl = (key: string): string => `/api/events/logos/${key}.png`;
+
 export const eventsApi = {
   list: (signal?: AbortSignal) => get<{ events: EventListItem[] }>('/api/events', signal),
   get: (slug: string, signal?: AbortSignal) => get<EventView>(`/api/events/${enc(slug)}`, signal),
+  mine: (slug: string, signal?: AbortSignal) => get<MyEventView>(`/api/events/${enc(slug)}/mine`, signal),
+  register: (slug: string, teamId: number, roster: EntryRoster) => post<{ id: number }>(`/api/events/${enc(slug)}/entries`, { teamId, roster }),
+  setRoster: (slug: string, entryId: number, roster: EntryRoster) => post(`/api/events/${enc(slug)}/entries/${entryId}/roster`, { roster }),
+  withdraw: (slug: string, entryId: number) => post(`/api/events/${enc(slug)}/entries/${entryId}/withdraw`),
+  checkIn: (slug: string, entryId: number) => post(`/api/events/${enc(slug)}/entries/${entryId}/checkin`),
+  leave: (slug: string, entryId: number) => post(`/api/events/${enc(slug)}/entries/${entryId}/leave`),
 };
 
 export interface TeamScrim {

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/preact';
 import type { EventView } from '../api';
 
-const { mockEvents } = vi.hoisted(() => ({ mockEvents: { list: vi.fn(), get: vi.fn() } }));
+const { mockEvents } = vi.hoisted(() => ({ mockEvents: { list: vi.fn(), get: vi.fn(), mine: vi.fn() } }));
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
   return { ...actual, eventsApi: mockEvents };
@@ -29,12 +29,17 @@ const view = (over: Partial<EventView> = {}): EventView => ({
     },
   ],
   entries: [], finishedAt: null, cancelledAt: null, cancelReason: null,
+  lockedAt: null, checkinOpensAt: null, checkinClosesAt: null,
   ...over,
 });
 const session = { kind: 'anonymous' } as const;
 
 afterEach(cleanup);
-beforeEach(() => { mockEvents.get.mockReset(); });
+beforeEach(() => {
+  mockEvents.get.mockReset();
+  mockEvents.mine.mockReset();
+  mockEvents.mine.mockResolvedValue({ entries: [], register: [], canRegister: false });
+});
 
 describe('EventPage', () => {
   it('shows the status, the countdown, the format strip, rules and pools, entry rules and no teams yet', async () => {
@@ -107,5 +112,21 @@ describe('EventPage', () => {
     mockEvents.get.mockRejectedValue(new ApiError(500, 'boom'));
     render(<EventPage slug="riverside-cup" session={session} />);
     expect((await screen.findByRole('alert')).textContent).toBe('Could not load this event. Try again in a moment.');
+  });
+
+  it('marks a waitlisted entry', async () => {
+    mockEvents.get.mockResolvedValue(view({
+      entries: [{ id: 1, name: 'Rats', tag: 'RAT', logoKey: null, seed: null, status: 'registered', waitlist: 2 }],
+    }));
+    render(<EventPage slug="riverside-cup" session={session} />);
+    expect(await screen.findByText('Waitlist 2')).toBeTruthy();
+  });
+
+  it('marks a checked-in entry', async () => {
+    mockEvents.get.mockResolvedValue(view({
+      entries: [{ id: 1, name: 'Rats', tag: 'RAT', logoKey: null, seed: null, status: 'checked_in', waitlist: null }],
+    }));
+    render(<EventPage slug="riverside-cup" session={session} />);
+    expect(await screen.findByText('Checked in')).toBeTruthy();
   });
 });
