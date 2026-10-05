@@ -6,7 +6,8 @@ import {
   SERVERDATA_EXECCOMMAND, SERVERDATA_RESPONSE_VALUE,
 } from '../src/rconPacket.js';
 
-function fakeServer(password = 'secret'): Promise<{ port: number; close: () => Promise<void> }> {
+function fakeServer(password = 'secret'): Promise<{ port: number; close: () => Promise<void>; seen: string[] }> {
+  const seen: string[] = [];
   return new Promise((resolve) => {
     const server = net.createServer((sock) => {
       let buf: Buffer = Buffer.alloc(0);
@@ -20,7 +21,12 @@ function fakeServer(password = 'secret'): Promise<{ port: number; close: () => P
             sock.write(encodePacket(0, SERVERDATA_RESPONSE_VALUE, ''));
             sock.write(encodePacket(ok ? p.id : -1, SERVERDATA_AUTH_RESPONSE, ''));
           } else if (p.type === SERVERDATA_EXECCOMMAND) {
-            if (p.body === 'bigcmd') {
+            seen.push(p.body);
+            if (p.body === 'dropcmd') {
+              // What `exec secrets.cfg` does on srcds: the cfg runs, then the
+              // rcon_password it sets drops every session, so no reply ever comes.
+              sock.destroy();
+            } else if (p.body === 'bigcmd') {
               // What srcds does past about 4 KB: the body arrives as several
               // RESPONSE_VALUE packets with the command's id and no end marker.
               sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, 'x'.repeat(4000)));
@@ -43,7 +49,7 @@ function fakeServer(password = 'secret'): Promise<{ port: number; close: () => P
     server.listen(0, '127.0.0.1', () => {
       const port = (server.address() as net.AddressInfo).port;
       resolve({
-        port,
+        port, seen,
         close: () => new Promise((r) => server.close(() => r())),
       });
     });
@@ -62,6 +68,36 @@ describe('RconClient', () => {
     expect(await client.exec('status')).toBe('ran:status');
     expect(await client.exec('dumpcmd')).toBe('DUMPBODY');
     client.close();
+  });
+
+  it('send writes a command without waiting for an answer, and waitClosed sees the server drop the session', async () => {
+    const srv = await fakeServer();
+    stop = srv.close;
+    const client = new RconClient({ host: '127.0.0.1', port: srv.port, password: 'secret', timeoutMs: 300 });
+    await client.connect();
+    // The command whose answer never comes: exec would sit out its timeout.
+    await expect(client.exec('dropcmd')).rejects.toThrow('rcon exec timeout: dropcmd');
+    client.close();
+
+    const again = new RconClient({ host: '127.0.0.1', port: srv.port, password: 'secret', timeoutMs: 300 });
+    await again.connect();
+    await again.send('dropcmd');
+    expect(await again.waitClosed(2000)).toBe(true);
+    again.close();
+    expect(srv.seen).toEqual(['dropcmd', 'dropcmd']);
+  });
+
+  it('waitClosed gives up after its wait when the server keeps the session', async () => {
+    const srv = await fakeServer();
+    stop = srv.close;
+    const client = new RconClient({ host: '127.0.0.1', port: srv.port, password: 'secret' });
+    await client.connect();
+    await client.send('status');
+    expect(await client.waitClosed(50)).toBe(false);
+    // The connection is intact: a real command still answers after a send.
+    expect(await client.exec('status')).toBe('ran:status');
+    client.close();
+    expect(srv.seen).toEqual(['status', 'status']);
   });
 
   it('reassembles a response that arrives in several packets', async () => {
