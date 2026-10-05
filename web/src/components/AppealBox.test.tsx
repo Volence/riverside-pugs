@@ -44,6 +44,24 @@ describe('AppealBox', () => {
     expect(screen.queryByText('Appeal this ban')).toBeNull();
   });
 
+  // After a denial in cooldown, the status line and the refusal both say
+  // "You can appeal again after X": showing both is a double-up of the same
+  // fact, not two different ones.
+  it('does not also show the refusal once the status line already says when they can appeal again', async () => {
+    const cooldownLine = 'Your appeal was reviewed and the ban stands. You can appeal again after Mon, 10 Oct 2026 12:00:00 UTC.';
+    mock.mine.mockResolvedValue({
+      ...base,
+      items: [{
+        ...ban, canAppeal: false,
+        refusal: 'Your last appeal for this was turned down. You can appeal again after Mon, 10 Oct 2026 12:00:00 UTC.',
+        appeal: { id: 9, state: 'denied', question: null, answerBy: null, line: cooldownLine, filedAt: '' },
+      }],
+    });
+    render(<AppealBox fallback="" />);
+    expect(await screen.findByText(cooldownLine)).toBeTruthy();
+    expect(screen.queryByText(/Your last appeal for this was turned down/)).toBeNull();
+  });
+
   it('falls back to the old line when the fetch fails', async () => {
     mock.mine.mockRejectedValue(new Error('boom'));
     render(<AppealBox fallback="To appeal, message an admin in the Discord." />);
