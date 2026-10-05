@@ -15,8 +15,12 @@ import { authedCookie } from './helpers.js';
 const P = Array.from({ length: 8 }, (_, i) => `765611990000010${String(i).padStart(2, '0')}`);
 const ADMIN = '76561199000001090';
 const MOD = '76561199000001091';
-const START = '2026-10-02T20:00:00.000Z';
-const NOW = new Date('2026-10-01T12:00:00.000Z');
+// Relative to the wall clock, which the routes validate against: a fixed
+// 2026-10-02 start had every post refused as "in the past" from the evening of
+// 2026-10-02 on. A round hour three days out, with NOW a day and a bit before it.
+const START_MS = Math.ceil(Date.now() / 3_600_000) * 3_600_000 + 3 * 86_400_000;
+const START = new Date(START_MS).toISOString();
+const NOW = new Date(START_MS - 32 * 3_600_000);
 const PUBLIC_URL = 'https://riversidepug.com';
 
 let db: DB;
@@ -353,7 +357,7 @@ describe('repost (plan 2, Task 3)', () => {
     expect((await call('POST', '/api/scrims/repost/not-a-number', P[0])).statusCode).toBe(404);
 
     const plain = await call('POST', '/api/bookings', P[3], {
-      opponent: { steamid: P[4] }, startsAt: '2026-10-03T20:00:00.000Z', minutes: 90, playlist: ['no_mercy'],
+      opponent: { steamid: P[4] }, startsAt: new Date(START_MS + 86_400_000).toISOString(), minutes: 90, playlist: ['no_mercy'],
     });
     const plainId = plain.json().id as number;
     await call('POST', `/api/bookings/${plainId}/cancel`, P[3], { reason: '' });

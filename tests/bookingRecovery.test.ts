@@ -291,7 +291,10 @@ function liveGame(id: number): number {
   ).run(currentSeasonId(db), id).lastInsertRowid);
   db.prepare("INSERT INTO match_players (match_id, player_id, team, source) VALUES (?, ?, 'a', 'udp'), (?, ?, 'b', 'udp')").run(m, P[0], m, P[1]);
   db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, 0, 1, 'a', 400, 'x'), (?, 0, 2, 'b', 300, 'x'), (?, 1, 1, 'b', 50, NULL)").run(m, m, m);
-  db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (?, 'l4d_vs_hospital02_subway', datetime('now'))").run(m);
+  // The heartbeat clock is the test's fake `now`, never the wall clock: with a
+  // real datetime('now') these rows went stale against the fixed START the day
+  // after it was written (the box-gone tests failed from 2026-10-02 20:00 UTC on).
+  db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (?, 'l4d_vs_hospital02_subway', datetime(?, 'unixepoch'))").run(m, Math.floor(now / 1000));
   return m;
 }
 
@@ -513,7 +516,7 @@ describe('box gone', () => {
     runner = build({ a2s: async () => null });
     const id = await running();
     const m = liveGame(id);
-    db.prepare("UPDATE match_live SET last_seen = datetime('now', '-10 minutes') WHERE match_id = ?").run(m);
+    db.prepare("UPDATE match_live SET last_seen = datetime(?, 'unixepoch') WHERE match_id = ?").run(Math.floor((now - 10 * MIN) / 1000), m);
     kill();
     for (let i = 0; i < 3; i++) {
       await runner.tick(); await runner.idle();
@@ -631,7 +634,7 @@ describe('box gone', () => {
     runner = build({ a2s: async () => null });
     const id = await running();
     const m = liveGame(id);
-    db.prepare("UPDATE match_live SET last_seen = datetime('now', '-30 minutes') WHERE match_id = ?").run(m);
+    db.prepare("UPDATE match_live SET last_seen = datetime(?, 'unixepoch') WHERE match_id = ?").run(Math.floor((now - 30 * MIN) / 1000), m);
     db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 2)").run();
     kill();
     await tickOut();
@@ -705,7 +708,7 @@ describe('box gone', () => {
     runner = r;
     const id = await running();
     const m = liveGame(id);
-    db.prepare("UPDATE match_live SET last_seen = datetime('now', '-30 minutes') WHERE match_id = ?").run(m);
+    db.prepare("UPDATE match_live SET last_seen = datetime(?, 'unixepoch') WHERE match_id = ?").run(Math.floor((now - 30 * MIN) / 1000), m);
     db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 2)").run();
     kill();
     await tickOut();
