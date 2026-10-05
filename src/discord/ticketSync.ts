@@ -412,8 +412,12 @@ export class TicketSync {
     // No forum: nothing to sweep, and nothing for syncAccess to do either.
     // Left unswept on purpose, so configuring one later still gets a sweep.
     if (!forumId) return;
-    const known = new Set((db.prepare("SELECT thread_id FROM ticket_threads WHERE surface = 'forum'")
-      .all() as { thread_id: string }[]).map((r) => r.thread_id));
+    // Appeal posts live in the same forum (src/discord/appealSync.ts) and are
+    // not orphans: their ids are on the appeals rows.
+    const known = new Set((db.prepare(
+      `SELECT thread_id FROM ticket_threads WHERE surface = 'forum'
+       UNION SELECT forum_thread_id FROM appeals WHERE forum_thread_id IS NOT NULL`,
+    ).all() as { thread_id: string }[]).map((r) => r.thread_id));
     let posts: { threadId: string; ownerId: string | null }[];
     try {
       posts = await transport.threads.listThreads(forumId);

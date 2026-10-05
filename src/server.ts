@@ -8,6 +8,7 @@ import { IntegrityJobs, matchInFlight, pendingRoundCount } from './integrity/job
 import { reaperRoundLimit, runMetricsPass } from './metrics/job.js';
 import { handleAbandon } from './abandon.js';
 import { AdminFeedPoster } from './discord/adminFeedPoster.js';
+import { AppealSync } from './discord/appealSync.js';
 import { TicketSync } from './discord/ticketSync.js';
 import { TicketMirror } from './discord/ticketMirror.js';
 import { ReporterChats } from './discord/reporterChats.js';
@@ -1717,6 +1718,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   let ticketSync: TicketSync | null = null;
   let ticketMirror: TicketMirror | null = null;
   let reportButton: ReportButton | null = null;
+  let appealSync: AppealSync | null = null;
   let reporterChats: ReporterChats | null = null;
   let scrimPoster: ScrimPoster | null = null;
   // Only where a real listener exists to feed it. `bot` is read per drop,
@@ -1815,6 +1817,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         mirror.start();
         reportButton = new ReportButton({ db: deps.db, transport: t });
         reportButton.start();
+        appealSync = new AppealSync({
+          db: deps.db, transport: t, publicUrl: deps.config.publicUrl,
+          serialise: (fn) => (ticketSync ? ticketSync.serialise(fn) : fn()),
+        });
+        appealSync.start();
         reporterChats = new ReporterChats({
           db: deps.db, transport: t, publicUrl: deps.config.publicUrl, guildId: deps.config.discord!.guildId,
           isMember: (id) => membership.isMember(id),
@@ -1855,6 +1862,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   app.addHook('onClose', async () => {
     reportButton?.stop();
+    appealSync?.stop();
     ticketMirror?.stop();
     ticketSync?.stop();
     offTicketNudge();
