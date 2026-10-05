@@ -3,7 +3,9 @@ import * as E from '../src/events/events.js';
 import * as N from '../src/events/entries.js';
 import * as T from '../src/teams/teams.js';
 import { NOW } from './eventFixture.js';
-import { A, B, OUTSIDER, entryFixture, rosterA, rosterB } from './entryFixture.js';
+import { A, B, OUTSIDER, addTeamC, entryFixture, rosterA, rosterB, rosterC } from './entryFixture.js';
+import { eventView } from '../src/events/views.js';
+import { ADMIN } from './eventFixture.js';
 
 const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
 const must = <T>(r: { ok: true; value: T } | { ok: false; error: string }): T => {
@@ -136,5 +138,32 @@ describe('staff fixes and the tick helpers', () => {
     const f = entryFixture();
     const { entry } = must(N.registerEntry(f.db, { eventId: f.eventId, teamId: f.teamA, by: A[0], roster: rosterA(), now: NOW }));
     expect(N.setEntryRoster(f.db, { entryId: entry.id, by: 'staff', staff: true, roster: rosterA({ subs: [OUTSIDER] }), now: NOW }).ok).toBe(true);
+  });
+});
+
+describe('final review fixes', () => {
+  it('clears the seed on disqualify, so a reorder never shows a seed twice', () => {
+    const f = entryFixture({ checkin: false });
+    const teamC = addTeamC(f);
+    const ea = must(N.registerEntry(f.db, { eventId: f.eventId, teamId: f.teamA, by: A[0], roster: rosterA(), now: NOW })).entry;
+    const eb = must(N.registerEntry(f.db, { eventId: f.eventId, teamId: f.teamB, by: B[0], roster: rosterB(), now: at(1) })).entry;
+    const ec = must(N.registerEntry(f.db, { eventId: f.eventId, teamId: teamC, by: '76561199000000821', roster: rosterC(), now: at(2) })).entry;
+    const kept = must(N.lockEntries(f.db, { eventId: f.eventId, by: null, now: at(4) })).kept;
+    expect(kept).toHaveLength(3);
+    const second = kept[1]!;
+    expect(must(N.disqualifyEntry(f.db, { entryId: second, by: 'staff', reason: 'Ringer', now: at(5) })).seed).toBeNull();
+    const rest = kept.filter((id) => id !== second);
+    must(N.reorderSeeds(f.db, { eventId: f.eventId, by: 'staff', order: [rest[1], rest[0]], now: at(6) }));
+    const seeds = eventView(f.db, E.getEvent(f.db, f.eventId)!).entries.map((e) => e.seed).filter((s) => s !== null);
+    expect(seeds.sort()).toEqual([1, 2]);
+    expect([ea.id, eb.id, ec.id]).toEqual(expect.arrayContaining(kept));
+  });
+
+  it('refuses an event edit once the list is final, even while still in registration', () => {
+    const f = entryFixture({ checkin: false });
+    must(N.registerEntry(f.db, { eventId: f.eventId, teamId: f.teamA, by: A[0], roster: rosterA(), now: NOW }));
+    must(N.lockEntries(f.db, { eventId: f.eventId, by: null, now: at(4) }));
+    expect(status(f.db, f.eventId)).toBe('registration');
+    expect(E.updateEvent(f.db, { eventId: f.eventId, by: ADMIN, fields: { teamCap: 64 }, now: at(5) })).toEqual({ ok: false, error: 'entries_locked' });
   });
 });

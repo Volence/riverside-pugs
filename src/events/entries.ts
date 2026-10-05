@@ -68,8 +68,9 @@ export function entryOfTeam(db: DB, eventId: number, teamId: number): EntryRow |
  *  see it. registerEntry and restoreEntry check this so a disqualified
  *  team's slot gives a clean already_entered instead of a raw unique
  *  constraint error. exceptEntryId lets restoreEntry ignore the entry it is
- *  restoring (which may itself be the disqualified one). */
-function disqualifiedSlotHeld(db: DB, eventId: number, teamId: number, exceptEntryId: number | null): boolean {
+ *  restoring (which may itself be the disqualified one). myEventView uses
+ *  it too, so such a team is not offered Register. */
+export function disqualifiedSlotHeld(db: DB, eventId: number, teamId: number, exceptEntryId: number | null): boolean {
   return !!db.prepare(
     "SELECT 1 FROM event_entries WHERE event_id = ? AND team_id = ? AND status = 'disqualified' AND id IS NOT ?",
   ).get(eventId, teamId, exceptEntryId);
@@ -220,7 +221,10 @@ export function setEntryRoster(
   })();
 }
 
-/** Ruling 7. A starter leaving a checked-in entry undoes the check-in. */
+/** Ruling 7. Before the list is final, a starter leaving a checked-in entry
+ *  undoes the check-in. Once it is final a starter cannot leave (staff take
+ *  them off instead), so a final list never loses a check-in; a sub or the
+ *  coach still can. */
 export function leaveEntry(db: DB, o: { entryId: number; steamid: string; now?: Date }): V.Checked<EntryRow> {
   const at = iso(o.now);
   return db.transaction((): V.Checked<EntryRow> => {
@@ -231,6 +235,7 @@ export function leaveEntry(db: DB, o: { entryId: number; steamid: string; now?: 
     if (!LEAVE_OPEN.has(ev.status)) return V.fail('wrong_status');
     const place = placesOf(db, entry.id).find((p) => p.steamid === o.steamid);
     if (!place) return V.fail('not_on_entry');
+    if (place.role === 'starter' && ev.locked_at !== null) return V.fail('entries_locked');
     db.prepare('UPDATE event_entry_players SET removed_at = ? WHERE id = ?').run(at, place.id);
     if (place.role === 'starter' && entry.status === 'checked_in') {
       db.prepare("UPDATE event_entries SET status = 'registered', checked_in_at = NULL, checked_in_by = NULL WHERE id = ?").run(entry.id);
@@ -339,7 +344,8 @@ export function dropDisbandedEntry(db: DB, o: { entryId: number; now?: Date }): 
   })();
 }
 
-/** Ruling 10. The reason is kept in event_log only. */
+/** Ruling 10. The reason is kept in event_log only. The seed goes with the
+ *  entry, so a reorder of the rest never shows a number twice. */
 export function disqualifyEntry(db: DB, o: { entryId: number; by: string; reason: unknown; now?: Date }): V.Checked<EntryRow> {
   const at = iso(o.now);
   const reason = V.normalizeReason(o.reason);
@@ -350,7 +356,7 @@ export function disqualifyEntry(db: DB, o: { entryId: number; by: string; reason
     if (!isActive(entry)) return V.fail('entry_out');
     const ev = E.getEvent(db, entry.event_id)!;
     if (ev.status === 'finished' || ev.status === 'cancelled') return V.fail('wrong_status');
-    db.prepare("UPDATE event_entries SET status = 'disqualified', dropped_at = ? WHERE id = ?").run(at, entry.id);
+    db.prepare("UPDATE event_entries SET status = 'disqualified', dropped_at = ?, seed = NULL WHERE id = ?").run(at, entry.id);
     E.logEvent(db, ev.id, o.by, 'entry_disqualified', at, { entryId: entry.id, reason: reason.value });
     return V.ok(getEntry(db, entry.id)!);
   })();

@@ -186,6 +186,9 @@ export function updateEvent(db: DB, o: { eventId: number; by: string; fields: un
     const ev = getEvent(db, o.eventId);
     if (!ev) return V.fail('not_found');
     if (!V.EVENT_EDITABLE.has(ev.status)) return V.fail('wrong_status');
+    // With check-in off an event stays in registration after its list is
+    // final; the cap, rules and start must not move under a final list.
+    if (ev.locked_at !== null) return V.fail('entries_locked');
     const before = fieldsOf(ev);
     const parsed = V.parseEventFields(o.fields, before);
     if (!parsed.ok) return parsed;

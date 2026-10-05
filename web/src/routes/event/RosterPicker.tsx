@@ -3,7 +3,9 @@ import type { EntryRole, EntryRoster, MemberOptionView } from '../../api';
 const ROLE_LABEL: Record<EntryRole | 'out', string> = { starter: 'Starter', sub: 'Sub', coach: 'Coach', out: 'Not playing' };
 
 /** A role per player: starter, sub, coach or not playing. The counts live
- *  under the list; the server checks the rest and names who fails. */
+ *  under the list; the server checks the rest and names who fails. A
+ *  roster player who left the team is listed and marked, so they can be
+ *  set to Not playing. */
 export function RosterPicker({ members, roster, maxSubs, onChange }: {
   members: MemberOptionView[]; roster: EntryRoster; maxSubs: number; onChange: (r: EntryRoster) => void;
 }) {
@@ -22,11 +24,12 @@ export function RosterPicker({ members, roster, maxSubs, onChange }: {
     <div class="rosterpick">
       <ul class="rosterpick__list">
         {members.map((m) => (
-          <li key={m.steamid} class={`rosterpick__row${m.problems.length || m.elsewhere ? ' rosterpick__row--warn' : ''}`}>
+          <li key={m.steamid} class={`rosterpick__row${m.problems.length || m.elsewhere || !m.onTeam ? ' rosterpick__row--warn' : ''}`}>
             <span class="rosterpick__name">{m.name}</span>
             <select aria-label={`Role for ${m.name}`} value={roleOf(m.steamid)} onChange={(e) => set(m.steamid, (e.target as HTMLSelectElement).value as EntryRole | 'out')}>
               {(['starter', 'sub', 'coach', 'out'] as const).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
             </select>
+            {!m.onTeam && <span class="rosterpick__why">No longer on the team</span>}
             {m.elsewhere && <span class="rosterpick__why">Already on {m.elsewhere}'s roster</span>}
             {m.problems.map((p) => <span key={p} class="rosterpick__why">{p}</span>)}
           </li>

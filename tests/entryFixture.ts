@@ -66,3 +66,24 @@ export function entryFixture(o: { checkin?: boolean; teamCap?: number | null; el
 
 export const rosterA = (over: object = {}) => ({ starters: A.slice(0, 4), subs: [A[4]], coach: null, ...over });
 export const rosterB = (over: object = {}) => ({ starters: B.slice(0, 4), subs: [], coach: null, ...over });
+
+/** A third team of four fresh eligible players (captain first), for tests
+ *  that need more than two entries. */
+export const C = ['821', '822', '823', '824'].map((n) => `76561199000000${n}`);
+export function addTeamC(f: EntryFixture): number {
+  C.forEach((s, i) => {
+    upsertPlayer(f.db, { steamid: s, name: `c${i}`, avatar: null }, []);
+    activatePlayer(f.db, s);
+    f.db.prepare('UPDATE players SET discord_id = ? WHERE steamid = ?').run(`dc${i}`, s);
+  });
+  const t = T.createTeam(f.db, { creator: C[0], name: 'Cats', tag: 'CAT', now: NOW });
+  if (!t.ok) throw new Error(t.error);
+  const link = T.setJoinLink(f.db, { teamId: t.value.id, by: C[0], on: true });
+  if (!link.ok || !link.value.token) throw new Error('no join link');
+  for (const m of C.slice(1)) {
+    const j = T.joinByLink(f.db, { token: link.value.token, steamid: m, now: NOW });
+    if (!j.ok) throw new Error(j.error);
+  }
+  return t.value.id;
+}
+export const rosterC = () => ({ starters: [...C], subs: [], coach: null });

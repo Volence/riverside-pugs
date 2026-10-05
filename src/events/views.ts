@@ -106,13 +106,18 @@ export function eventView(db: DB, ev: E.EventRow): EventView {
 }
 
 export interface RosterPlaceView { steamid: string; name: string; avatar: string | null; role: R.Role; problems: string[] }
-export interface MemberOptionView { steamid: string; name: string; avatar: string | null; problems: string[]; elsewhere: string | null }
+/** onTeam is false for a roster player who has since left the team: the
+ *  editor still lists them so a manager can take them off. */
+export interface MemberOptionView { steamid: string; name: string; avatar: string | null; problems: string[]; elsewhere: string | null; onTeam: boolean }
 export interface MyEntryView {
   id: number; name: string; tag: string; logoKey: string | null; status: string; seed: number | null; waitlist: number | null;
   checkedInAt: string | null; manage: boolean; onRoster: boolean; roster: RosterPlaceView[];
   rosterLocked: boolean; additionsLeft: number | null;
   canEditRoster: boolean; canCheckIn: boolean; canWithdraw: boolean; canLeave: boolean;
-  /** The team's current members, for the roster editor; managers only. */
+  /** The viewer is a starter and the list is final: leaving goes through staff. */
+  leaveNeedsStaff: boolean;
+  /** The roster editor's rows, managers only: the team's current members,
+   *  then any roster player no longer on the team (onTeam false). */
   members: MemberOptionView[];
 }
 export interface RegisterOptionView { teamId: number; name: string; tag: string; logoKey: string | null; members: MemberOptionView[] }
@@ -131,10 +136,15 @@ export function myEventView(db: DB, ev: E.EventRow, viewer: string, now = new Da
     return R.problemsOf(f.eligibility, facts, role).map((p) => R.problemText(p, f.eligibility, facts));
   };
   const person = (steamid: string) => { const p = getPlayer(db, steamid); return { name: p?.name ?? steamid, avatar: p?.avatar ?? null }; };
-  const memberOptions = (teamId: number, entryId: number | null): MemberOptionView[] => activeMembers(db, teamId).map((m) => {
-    const other = N.entryOfPlayer(db, ev.id, m.steamid);
-    return { steamid: m.steamid, ...person(m.steamid), problems: problems(m.steamid, 'starter'), elsewhere: other && other.id !== entryId ? other.name : null };
-  });
+  const option = (steamid: string, role: R.Role, onTeam: boolean, entryId: number | null): MemberOptionView => {
+    const other = N.entryOfPlayer(db, ev.id, steamid);
+    return { steamid, ...person(steamid), problems: problems(steamid, role), elsewhere: other && other.id !== entryId ? other.name : null, onTeam };
+  };
+  const memberOptions = (teamId: number, entryId: number | null, places: N.PlaceRow[] = []): MemberOptionView[] => {
+    const current = activeMembers(db, teamId).map((m) => option(m.steamid, 'starter', true, entryId));
+    const on = new Set(current.map((m) => m.steamid));
+    return [...current, ...places.filter((p) => !on.has(p.steamid)).map((p) => option(p.steamid, p.role, false, entryId))];
+  };
   const rosterOpen = ev.status === 'registration' || ev.status === 'checkin' || ev.status === 'live';
   const locked = R.rosterLocked(f.roster.lock, at);
   const preFinal = ev.locked_at === null && (ev.status === 'registration' || ev.status === 'checkin');
@@ -145,6 +155,9 @@ export function myEventView(db: DB, ev: E.EventRow, viewer: string, now = new Da
     const manage = N.managersOf(db, e.team_id).includes(viewer);
     const places = N.placesOf(db, e.id);
     const w = place.waitlist.indexOf(e.id);
+    const mine = places.find((p) => p.steamid === viewer);
+    const leaveOpen = !!mine && (ev.status === 'registration' || ev.status === 'checkin');
+    const starterLocked = mine?.role === 'starter' && ev.locked_at !== null;
     return {
       id: e.id, name: e.name, tag: e.tag, logoKey: e.logo_key, status: e.status, seed: ev.locked_at !== null ? e.seed : null,
       waitlist: w >= 0 ? w + 1 : null, checkedInAt: e.checked_in_at, manage, onRoster: places.some((p) => p.steamid === viewer),
@@ -154,14 +167,16 @@ export function myEventView(db: DB, ev: E.EventRow, viewer: string, now = new Da
       canEditRoster: manage && rosterOpen && !locked,
       canCheckIn: manage && ev.status === 'checkin' && ev.locked_at === null && e.status === 'registered',
       canWithdraw: manage && preFinal,
-      canLeave: places.some((p) => p.steamid === viewer) && (ev.status === 'registration' || ev.status === 'checkin'),
-      members: manage && e.team_id !== null ? memberOptions(e.team_id, e.id) : [],
+      canLeave: leaveOpen && !starterLocked,
+      leaveNeedsStaff: leaveOpen && starterLocked,
+      members: manage && e.team_id !== null ? memberOptions(e.team_id, e.id, places) : [],
     };
   });
 
   const canRegister = ev.entry_kind === 'team' && ev.status === 'registration' && ev.locked_at === null && at < ev.starts_at;
   const register: RegisterOptionView[] = canRegister
-    ? myTeams(db, viewer).filter((t) => (t.role === 'captain' || t.role === 'cocaptain') && !N.entryOfTeam(db, ev.id, t.id))
+    ? myTeams(db, viewer).filter((t) => (t.role === 'captain' || t.role === 'cocaptain')
+      && !N.entryOfTeam(db, ev.id, t.id) && !N.disqualifiedSlotHeld(db, ev.id, t.id, null))
       .map((t) => ({ teamId: t.id, name: t.name, tag: t.tag, logoKey: t.logo_key, members: memberOptions(t.id, null) }))
     : [];
   return { entries, register, canRegister };

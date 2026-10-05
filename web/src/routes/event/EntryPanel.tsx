@@ -48,7 +48,7 @@ function Register({ slug, team, maxSubs, onChange }: { slug: string; team: Regis
 }
 
 function statusLine(e: MyEntryView): string {
-  if (e.status === 'checked_in') return 'Checked in';
+  if (e.status === 'checked_in') return e.waitlist !== null ? `Checked in, waitlist number ${e.waitlist}` : 'Checked in';
   if (e.waitlist !== null) return `Waitlist, number ${e.waitlist}`;
   if (e.seed !== null) return `Seed ${e.seed}`;
   return 'Registered';
@@ -78,6 +78,7 @@ function MyEntry({ slug, entry, maxSubs, onChange }: { slug: string; entry: MyEn
         </ul>
       )}
       {entry.rosterLocked && <p class="muted">Rosters are locked; staff can still change yours.</p>}
+      {entry.leaveNeedsStaff && <p class="muted">The entry list is final. To leave the starting four now, ask staff.</p>}
       {entry.additionsLeft !== null && <p class="muted">{entry.additionsLeft} roster addition{entry.additionsLeft === 1 ? '' : 's'} left.</p>}
       <Errors lines={error} />
       <div class="inlinerow">
