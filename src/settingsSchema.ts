@@ -21,7 +21,7 @@ export interface SettingDef {
   key: string;
   label: string;
   help: string;
-  group: 'Queue' | 'Match' | 'Stats' | 'Discord' | 'Admin feed' | 'Penalties' | 'Replays' | 'Community' | 'Practice' | 'Competitive';
+  group: 'Queue' | 'Match' | 'Stats' | 'Discord' | 'Admin feed' | 'Penalties' | 'Replays' | 'Community' | 'Practice' | 'Competitive' | 'Appeals';
   type: SettingType;
   /** Masked in the panel until revealed, and never written to the audit log. */
   secret?: boolean;
