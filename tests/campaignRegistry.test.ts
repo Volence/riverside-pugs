@@ -155,25 +155,18 @@ describe('campaignDisplayName', () => {
 });
 
 describe('campaignVoteName', () => {
-  // The Parish plays with night mode on, and only its vote name says so.
-  it('gives The Parish its easter-egg name in the vote only', async () => {
-    const { campaignDisplayName, campaignVoteName } = await import('../src/campaignRegistry.js');
-    expect(campaignVoteName(db, 'the_parish')).toBe('The Parish???');
-    expect(campaignDisplayName(db, 'the_parish')).toBe('The Parish');
-  });
-
-  // The other night campaigns too, in plain text (the glitch marks came off
-  // 2026-10-05).
+  // The night campaigns vote under their plain names since 2026-10-05
+  // (owner): first the glitch marks came off, then the "???".
   it.each([
+    ['the_parish', 'The Parish'],
     ['dead_center', 'Dead Center'],
     ['dark_carnival', 'Dark Carnival'],
     ['hard_rain', 'Hard Rain'],
     ['swamp_fever', 'Swamp Fever'],
     ['the_passing', 'Passifice'],
-  ])('adds ??? to %s in the vote only', async (slug, plain) => {
-    const { campaignDisplayName, campaignVoteName } = await import('../src/campaignRegistry.js');
-    expect(campaignVoteName(db, slug)).toBe(`${plain}???`);
-    expect(campaignDisplayName(db, slug)).toBe(plain);
+  ])('votes %s under its plain name', async (slug, plain) => {
+    const { campaignVoteName } = await import('../src/campaignRegistry.js');
+    expect(campaignVoteName(db, slug)).toBe(plain);
   });
 
   it('is the display name for every other campaign', async () => {
