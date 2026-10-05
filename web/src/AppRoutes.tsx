@@ -22,6 +22,7 @@ import { LinkDiscord } from './routes/LinkDiscord';
 import { Admin } from './routes/Admin';
 import { ADMIN_ROUTE_PATHS } from './routes/admin/adminRoutes';
 import { HowToPlay } from './routes/HowToPlay';
+import { Appeal } from './routes/Appeal';
 import { HelpConsistency } from './routes/HelpConsistency';
 import { Practice } from './routes/Practice';
 
@@ -122,6 +123,7 @@ export function AppRoutes(
       {/* The ban list moved into the panel; the old URL is in bookmarks. */}
       <Route path="/bans" component={BansMoved} />
       <Route path="/how-to-play" component={HowToPlay} session={session} />
+      <Route path="/appeal" component={Appeal} />
       <Route path="/help/consistency" component={HelpConsistency} />
       <Route path="/link/discord" component={LinkDiscord} session={session} refresh={refresh} />
       <Route path="/teams" component={Teams} session={session} />
