@@ -3433,8 +3433,9 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .rosterpick__row--warn { border-left: 2px solid var(--accent); padding-left: var(--sp-2); }
 .rosterpick__name { overflow-wrap: anywhere; }
 .rosterpick__why { grid-column: 1 / -1; color: var(--loss); font-size: var(--fs-dense); }
-.evententry { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) 0; }
+.evententry { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); padding: var(--sp-1) 0; }
 .evententry__logo { width: 28px; height: 28px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
+.evententry__name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .evententry__logo--none {
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--surface-2); color: var(--text-muted); font-weight: 600; font-size: var(--fs-dense);

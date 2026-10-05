@@ -130,7 +130,7 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
               {ev.entries.map((e) => (
                 <li key={e.id} class="evententry">
                   {e.logoKey ? <img class="evententry__logo" src={entryLogoUrl(e.logoKey)} alt="" width={28} height={28} /> : <span class="evententry__logo evententry__logo--none" aria-hidden="true">{e.name.slice(0, 1).toUpperCase()}</span>}
-                  {e.seed !== null && <span class="muted">#{e.seed} </span>}{e.name}{e.tag && <span class="muted"> [{e.tag}]</span>}
+                  <span class="evententry__name">{e.seed !== null && <span class="muted">#{e.seed} </span>}{e.name}{e.tag && <span class="muted"> [{e.tag}]</span>}</span>
                   {e.status === 'checked_in' && <span class="chip chip--ok">Checked in</span>}
                   {e.waitlist !== null && <span class="chip">Waitlist {e.waitlist}</span>}
                   {e.status === 'disqualified' && <span class="chip chip--bad">Disqualified</span>}
