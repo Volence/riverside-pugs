@@ -69,6 +69,24 @@ describe('event schema', () => {
     expect(db.prepare('SELECT actor, action, detail FROM event_log WHERE event_id = ?').get(id))
       .toEqual({ actor: null, action: 'created', detail: '{}' });
   });
+
+  it('has event_matches with every match-flow status and the stage bracket columns (plan T2)', () => {
+    const db = openDb(':memory:');
+    const cols = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
+    expect(cols('event_matches')).toEqual([
+      'id', 'event_id', 'stage_id', 'grp', 'round', 'slot', 'bm_match_id', 'entry_a', 'entry_b', 'status', 'best_of',
+      'not_before', 'scheduled_at', 'window_start', 'window_end', 'booking_id', 'winner_entry', 'score_a', 'score_b',
+      'result_source', 'created_at', 'finished_at',
+    ]);
+    expect(cols('event_stages')).toEqual(expect.arrayContaining(['entrants_json', 'bracket_json', 'bracket_rev', 'started_at', 'finished_at']));
+    expect(cols('events')).toContain('live_at');
+    const sql = (db.prepare("SELECT sql FROM sqlite_master WHERE name = 'event_matches'").get() as { sql: string }).sql;
+    for (const s of ['pending', 'waiting', 'veto', 'lineup', 'booking', 'connect', 'live', 'confirming', 'done', 'forfeit', 'bye', 'admin_hold']) {
+      expect(sql).toContain(`'${s}'`);
+    }
+    const idx = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'event_matches'").all() as { name: string }[]).map((r) => r.name);
+    expect(idx).toEqual(expect.arrayContaining(['event_matches_slot', 'event_matches_bm']));
+  });
 });
 
 describe('T1b columns', () => {

@@ -10,7 +10,7 @@ describe('stage summary', () => {
     expect(stageSummary('double_elim', { grandFinalReset: false }, null)).toBe('Double elimination, no grand final reset');
     expect(stageSummary('round_robin', { groups: 1 }, 4)).toBe('Round robin, top 4 advance');
     expect(stageSummary('round_robin', { groups: 2 }, 4)).toBe('Round robin, 2 groups, top 4 advance');
-    expect(stageSummary('league', { weeks: 6, matchesPerWeek: 2, pairing: 'swiss' }, 4)).toBe('League, 6 weeks, 2 a week, top 4 advance');
+    expect(stageSummary('league', { matches: 16, matchesPerWeek: 2, pairing: 'swiss', seasonStart: null }, 4)).toBe('League, 16 matches, 2 a week, top 4 advance');
   });
 
   it('labels chapters', () => {

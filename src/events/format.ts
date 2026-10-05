@@ -19,7 +19,7 @@ export function stageSummary(type: StageType, config: StageConfig, advanceCount:
   if (type === 'double_elim') parts.push(c.grandFinalReset ? 'grand final reset' : 'no grand final reset');
   if (type === 'round_robin' && (c.groups ?? 1) > 1) parts.push(`${c.groups} groups`);
   if (type === 'swiss') parts.push(`${c.rounds} rounds`);
-  if (type === 'league') parts.push(`${c.weeks} weeks`, `${c.matchesPerWeek} a week`);
+  if (type === 'league') parts.push(`${c.matches} matches`, `${c.matchesPerWeek} a week`);
   if (advanceCount !== null) parts.push(`top ${advanceCount} advance`);
   return parts.join(', ');
 }

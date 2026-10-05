@@ -24,12 +24,14 @@ export interface EventRow {
   eligibility_json: string; team_cap: number | null; checkin_json: string; roster_json: string;
   created_at: string; updated_at: string; finished_at: string | null; cancelled_at: string | null; cancel_reason: string | null;
   locked_at: string | null;
+  live_at: string | null;
 }
 export interface StageRow {
   id: number; event_id: number; ordinal: number; type: V.StageType; config_json: string; ruleset_id: number;
   rules_json: string | null; game_config: string; campaign_pool_json: string; veto_type: V.VetoType;
   chapters: number | null; scheduling: V.Scheduling; advance_count: number | null; status: 'pending' | 'live' | 'finished';
   created_at: string; updated_at: string;
+  entrants_json: string | null; bracket_json: string | null; bracket_rev: number; started_at: string | null; finished_at: string | null;
 }
 export interface EventLogRow { id: number; event_id: number; at: string; actor: string | null; action: string; detail: string }
 export type EventResult<T> = V.Checked<T>;
@@ -62,8 +64,17 @@ export function fieldsOf(ev: EventRow): V.EventFields {
 }
 
 export function stageSettingsOf(s: StageRow): V.StageSettings {
+  let config = JSON.parse(s.config_json) as V.StageConfig;
+  if (s.type === 'league') {
+    // T1a stored weeks; plan T2 counts matches (owner, 2026-10-05).
+    const c = config as Partial<V.StageConfigs['league']> & { weeks?: number };
+    config = {
+      matches: c.matches ?? (c.weeks !== undefined ? c.weeks * (c.matchesPerWeek ?? 1) : 16), matchesPerWeek: c.matchesPerWeek ?? 1,
+      pairing: c.pairing ?? 'swiss', seasonStart: c.seasonStart ?? null,
+    };
+  }
   return {
-    type: s.type, config: JSON.parse(s.config_json) as V.StageConfig, rulesetId: s.ruleset_id, gameConfig: s.game_config,
+    type: s.type, config, rulesetId: s.ruleset_id, gameConfig: s.game_config,
     campaignPool: JSON.parse(s.campaign_pool_json) as string[], vetoType: s.veto_type, chapters: s.chapters,
     scheduling: s.scheduling, advanceCount: s.advance_count,
   };
@@ -159,7 +170,7 @@ function writeStage(db: DB, id: number, s: V.StageSettings, rules: string | null
 /** The stage chain as it stands, for publish and open registration (Ruling 16). */
 function chainOf(db: DB, ev: EventRow): V.Checked<null> {
   const f = fieldsOf(ev);
-  return V.checkChain(stagesOf(db, ev.id).map((s) => ({ advanceCount: s.advance_count })), { teamCap: f.teamCap, roster: f.roster });
+  return V.checkChain(stagesOf(db, ev.id).map((s) => ({ type: s.type, advanceCount: s.advance_count })), { teamCap: f.teamCap, roster: f.roster });
 }
 
 export function createEvent(db: DB, o: { by: string; fields: unknown; now?: Date }): EventResult<EventRow> {

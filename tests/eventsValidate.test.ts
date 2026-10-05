@@ -129,8 +129,17 @@ describe('stages', () => {
       },
     });
     expect(V.parseStageConfig('double_elim', undefined)).toEqual({ ok: true, value: { grandFinalReset: true } });
-    expect(V.parseStageConfig('league', {})).toEqual({ ok: true, value: { weeks: 6, matchesPerWeek: 1, pairing: 'swiss' } });
     expect(V.parseStageConfig('round_robin', { groups: 2 })).toEqual({ ok: true, value: { groups: 2 } });
+  });
+
+  it('a league season is a match count, matches a week, a pairing and an optional start date (plan T2)', () => {
+    expect(V.parseStageConfig('league', {})).toEqual({ ok: true, value: { matches: 16, matchesPerWeek: 1, pairing: 'swiss', seasonStart: null } });
+    expect(V.parseStageConfig('league', { matches: 14, matchesPerWeek: 2, pairing: 'round_robin', seasonStart: '2026-10-12' }))
+      .toEqual({ ok: true, value: { matches: 14, matchesPerWeek: 2, pairing: 'round_robin', seasonStart: '2026-10-12' } });
+    for (const bad of [{ matches: 0 }, { matches: V.LEAGUE_MATCHES_MAX + 1 }, { matchesPerWeek: 4 }, { seasonStart: '2026-13-01' },
+      { seasonStart: '12/10/2026' }, { seasonStart: '2026-02-30' }, { seasonStart: 5 }]) {
+      expect(V.parseStageConfig('league', bad), JSON.stringify(bad)).toEqual({ ok: false, error: 'bad_stage_config' });
+    }
   });
 
   it('holds each type config to its range', () => {
@@ -167,6 +176,13 @@ describe('stages', () => {
     expect(r.ok && r.value.scheduling).toBe('window');
     expect(bad(V.parseStage(stage({ type: 'league', config: {}, scheduling: 'rolling' }), CTX))).toBe('league_needs_window');
     expect(bad(V.parseStage(stage({ scheduling: 'weekly' }), CTX))).toBe('bad_scheduling');
+  });
+
+  it('refuses a group advance count that does not split evenly (plan T2)', () => {
+    const base = { type: 'round_robin', rulesetId: 2, campaignPool: ['no_mercy'], advanceCount: 6, config: { groups: 4 } };
+    expect(V.parseStage(base, CTX)).toEqual({ ok: false, error: 'bad_group_advance' });
+    expect(V.parseStage({ ...base, advanceCount: 8 }, CTX).ok).toBe(true);
+    expect(V.parseStage({ ...base, advanceCount: null }, CTX).ok).toBe(true);
   });
 });
 
@@ -211,6 +227,40 @@ describe('status rules', () => {
       expect([400, 403, 404, 409]).toContain(e.status);
       expect(e.text.length, k).toBeGreaterThan(10);
       expect(e.text.includes(String.fromCharCode(0x2014)), k).toBe(false);
+    }
+  });
+});
+
+describe('plan T2 rules', () => {
+  const roster = V.defaultRoster();
+  it('refuses an elimination bracket anywhere but last', () => {
+    expect(V.checkChain([{ type: 'single_elim', advanceCount: 4 }, { type: 'swiss', advanceCount: null }], { teamCap: null, roster }))
+      .toEqual({ ok: false, error: 'elim_not_last' });
+    expect(V.checkChain([{ type: 'double_elim', advanceCount: 4 }, { type: 'single_elim', advanceCount: null }], { teamCap: null, roster }))
+      .toEqual({ ok: false, error: 'elim_not_last' });
+    expect(V.checkChain([{ type: 'swiss', advanceCount: 8 }, { type: 'double_elim', advanceCount: null }], { teamCap: null, roster }).ok).toBe(true);
+    // Callers that pass no type (older call sites) are unchanged.
+    expect(V.checkChain([{ advanceCount: 8 }, { advanceCount: null }], { teamCap: null, roster }).ok).toBe(true);
+  });
+
+  it('allows live from registration or checkin, and finished from live only', () => {
+    expect(V.nextStatusAllowed('registration', 'live')).toBe(true);
+    expect(V.nextStatusAllowed('checkin', 'live')).toBe(true);
+    expect(V.nextStatusAllowed('live', 'finished')).toBe(true);
+    expect(V.nextStatusAllowed('announced', 'live')).toBe(false);
+    expect(V.nextStatusAllowed('checkin', 'finished')).toBe(false);
+  });
+
+  it('parses a result: winner ahead on scores, or a forfeit without scores', () => {
+    expect(V.parseResult({ winner: 'a', scoreA: 1200, scoreB: 900 })).toEqual({ ok: true, value: { winner: 'a', scoreA: 1200, scoreB: 900, forfeit: false } });
+    expect(V.parseResult({ winner: 'b', forfeit: true })).toEqual({ ok: true, value: { winner: 'b', scoreA: null, scoreB: null, forfeit: true } });
+    expect(V.parseResult({ winner: 'b', forfeit: true, scoreA: 5, scoreB: 1 })).toEqual({ ok: true, value: { winner: 'b', scoreA: null, scoreB: null, forfeit: true } });
+    for (const bad of [
+      null, {}, { winner: 'c', scoreA: 1, scoreB: 0 }, { winner: 'a', scoreA: 900, scoreB: 900 }, { winner: 'a', scoreA: 800, scoreB: 900 },
+      { winner: 'a', scoreA: -1, scoreB: -2 }, { winner: 'a', scoreA: 1.5, scoreB: 0 }, { winner: 'a', scoreA: V.SCORE_MAX + 1, scoreB: 0 },
+      { winner: 'a', scoreA: '10', scoreB: 0 }, { winner: 'a', forfeit: 'yes' },
+    ]) {
+      expect(V.parseResult(bad), JSON.stringify(bad)).toEqual({ ok: false, error: 'bad_result' });
     }
   });
 });
