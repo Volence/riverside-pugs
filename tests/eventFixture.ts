@@ -27,7 +27,7 @@ export function must<T>(r: E.EventResult<T>): T {
 
 export interface Fixture { db: DB; eventId: number; s1: number; s2: number }
 
-export function eventFixture(status: 'draft' | 'announced' = 'draft'): Fixture {
+export function eventFixture(status: 'draft' | 'announced' | 'registration' = 'draft'): Fixture {
   const db = openDb(':memory:');
   upsertPlayer(db, { steamid: ADMIN, name: 'boss', avatar: null }, []);
   const ev = must(E.createEvent(db, { by: ADMIN, fields: { name: 'Riverside Cup', startsAt: START, entryKind: 'team' }, now: NOW }));
@@ -35,6 +35,7 @@ export function eventFixture(status: 'draft' | 'announced' = 'draft'): Fixture {
   const s2 = must(E.addStage(db, {
     eventId: ev.id, by: ADMIN, stage: stageBody(db, { type: 'single_elim', config: { thirdPlace: true }, advanceCount: null }), now: NOW,
   }));
-  if (status === 'announced') must(E.publishEvent(db, { eventId: ev.id, by: ADMIN, now: NOW }));
+  if (status === 'announced' || status === 'registration') must(E.publishEvent(db, { eventId: ev.id, by: ADMIN, now: NOW }));
+  if (status === 'registration') must(E.openRegistration(db, { eventId: ev.id, by: ADMIN, now: NOW }));
   return { db, eventId: ev.id, s1: s1.id, s2: s2.id };
 }

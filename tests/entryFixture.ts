@@ -47,12 +47,17 @@ export function entryFixture(o: { checkin?: boolean; teamCap?: number | null; el
   const ev = must(E.createEvent(db, {
     by: ADMIN, now: NOW,
     fields: {
-      name: 'Riverside Cup', startsAt: o.startsAt ?? START, entryKind: 'team', teamCap: o.teamCap ?? null,
+      name: 'Riverside Cup', startsAt: o.startsAt ?? START, entryKind: 'team', teamCap: null,
       eligibility: o.eligibility ?? { minPugs: 0, requireDiscord: true },
       checkin: { enabled: o.checkin ?? true, opensMinutes: 60, closesMinutes: 15 },
       roster: o.roster ?? { maxSubs: 2 },
     },
   }));
+  // createEvent validates teamCap at 2..256 (a real event always has room to
+  // wait-list someone); a few lockEntries tests want a cap of 1 to see the
+  // waitlist with just two entries, so it is set directly here, past that
+  // user-facing rule, for test setup only.
+  if (o.teamCap !== undefined && o.teamCap !== null) db.prepare('UPDATE events SET team_cap = ? WHERE id = ?').run(o.teamCap, ev.id);
   must(E.addStage(db, { eventId: ev.id, by: ADMIN, stage: stageBody(db, { advanceCount: null }), now: NOW }));
   must(E.publishEvent(db, { eventId: ev.id, by: ADMIN, now: NOW }));
   must(E.openRegistration(db, { eventId: ev.id, by: ADMIN, now: NOW }));
