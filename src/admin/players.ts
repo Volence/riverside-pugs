@@ -127,6 +127,31 @@ export function unbanPlayer(db: DB, steamid: string, by: string, now = new Date(
   publishBanChange({ kind: 'unban', steamid });
 }
 
+/**
+ * Lift one ban by id, the way an accepted appeal does. Unlike unbanPlayer,
+ * which lifts every open ban, a player under a second ban stays banned:
+ * an appeal is about one ban. Status is restored, and the game servers told,
+ * only once nothing else holds the player. False when the ban was already
+ * lifted (or never existed), so a racing second caller changes nothing.
+ */
+export function liftOneBan(db: DB, banId: number, by: string, now = new Date()): boolean {
+  const row = db.prepare('SELECT player_id FROM bans WHERE id = ? AND lifted_at IS NULL').get(banId) as
+    | { player_id: string } | undefined;
+  if (!row) return false;
+  let lifted = false;
+  let freed = false;
+  db.transaction(() => {
+    lifted = db.prepare('UPDATE bans SET lifted_by = ?, lifted_at = ? WHERE id = ? AND lifted_at IS NULL')
+      .run(by, now.toISOString(), banId).changes > 0;
+    if (lifted && !activeBan(db, row.player_id, now)) {
+      restoreStatus(db, row.player_id);
+      freed = true;
+    }
+  })();
+  if (freed) publishBanChange({ kind: 'unban', steamid: row.player_id });
+  return lifted;
+}
+
 /** Runs on the 60 s reaper. A banned player whose every ban has run out goes
  *  back to what they were before it; one still under another open ban stays
  *  banned. */
