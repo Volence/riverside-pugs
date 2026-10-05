@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import * as N from '../src/events/entries.js';
 import * as T from '../src/teams/teams.js';
+import * as E from '../src/events/events.js';
+import { myEventView } from '../src/events/views.js';
 import { NOW } from './eventFixture.js';
 import { A, B, OUTSIDER, entryFixture, rosterA, rosterB } from './entryFixture.js';
 
@@ -140,5 +142,55 @@ describe('placementOf', () => {
     expect(N.placementOf(f.db, ev())).toEqual({ placed: [ea.id], waitlist: [eb.id] });
     must(N.withdrawEntry(f.db, { entryId: ea.id, by: A[0], now: later(2) }));
     expect(N.placementOf(f.db, ev())).toEqual({ placed: [eb.id], waitlist: [] });
+  });
+});
+
+describe('final review fixes', () => {
+  it('refuses a starter leaving once the list is final, but lets a sub and the coach go', () => {
+    const f = entryFixture();
+    const { entry } = must(N.registerEntry(f.db, { eventId: f.eventId, teamId: f.teamA, by: A[0], roster: rosterA({ coach: A[5] }), now: NOW }));
+    must(E.openCheckin(f.db, { eventId: f.eventId, by: null, now: later(1) }));
+    must(N.checkInEntry(f.db, { entryId: entry.id, by: A[0], now: later(2) }));
+    must(N.lockEntries(f.db, { eventId: f.eventId, by: null, now: later(3) }));
+    expect(N.leaveEntry(f.db, { entryId: entry.id, steamid: A[2], now: later(4) })).toEqual({ ok: false, error: 'entries_locked' });
+    expect(N.getEntry(f.db, entry.id)).toMatchObject({ status: 'checked_in' });
+    expect(N.rosterOf(f.db, entry.id).starters).toContain(A[2]);
+    expect(must(N.leaveEntry(f.db, { entryId: entry.id, steamid: A[4], now: later(4) })).status).toBe('checked_in');
+    expect(must(N.leaveEntry(f.db, { entryId: entry.id, steamid: A[5], now: later(4) })).status).toBe('checked_in');
+  });
+
+  it('offers Leave to a starter only before the list is final, and says to ask staff after', () => {
+    const f = entryFixture();
+    const { entry } = must(N.registerEntry(f.db, { eventId: f.eventId, teamId: f.teamA, by: A[0], roster: rosterA(), now: NOW }));
+    const view = (s: string) => myEventView(f.db, E.getEvent(f.db, f.eventId)!, s, later(4)).entries[0]!;
+    expect(view(A[2])).toMatchObject({ canLeave: true, leaveNeedsStaff: false });
+    must(E.openCheckin(f.db, { eventId: f.eventId, by: null, now: later(1) }));
+    must(N.checkInEntry(f.db, { entryId: entry.id, by: A[0], now: later(2) }));
+    must(N.lockEntries(f.db, { eventId: f.eventId, by: null, now: later(3) }));
+    expect(view(A[2])).toMatchObject({ canLeave: false, leaveNeedsStaff: true });
+    expect(view(A[4])).toMatchObject({ canLeave: true, leaveNeedsStaff: false });
+  });
+
+  it('gives managers a roster editor row for a roster player who left the team', () => {
+    const f = entryFixture();
+    must(N.registerEntry(f.db, { eventId: f.eventId, teamId: f.teamA, by: A[0], roster: rosterA(), now: NOW }));
+    must(T.leaveTeam(f.db, { teamId: f.teamA, steamid: A[3], now: later(1) }));
+    const members = myEventView(f.db, E.getEvent(f.db, f.eventId)!, A[0], later(2)).entries[0]!.members;
+    expect(members.find((m) => m.steamid === A[3])).toMatchObject({ onTeam: false });
+    expect(members.filter((m) => m.onTeam).map((m) => m.steamid).sort()).toEqual([A[0], A[1], A[2], A[4], A[5]].sort());
+    expect(members.filter((m) => m.steamid === A[3])).toHaveLength(1);
+    // The manager can save a roster without them.
+    expect(N.setEntryRoster(f.db, {
+      entryId: N.entryOfTeam(f.db, f.eventId, f.teamA)!.id, by: A[0], roster: rosterA({ starters: [A[0], A[1], A[2], A[4]], subs: [] }), now: later(3),
+    }).ok).toBe(true);
+  });
+
+  it('does not offer Register to a team whose entry is disqualified', () => {
+    const f = entryFixture();
+    const { entry } = must(N.registerEntry(f.db, { eventId: f.eventId, teamId: f.teamA, by: A[0], roster: rosterA(), now: NOW }));
+    must(N.disqualifyEntry(f.db, { entryId: entry.id, by: 'staff', reason: 'Ringer', now: later(1) }));
+    const v = myEventView(f.db, E.getEvent(f.db, f.eventId)!, A[0], later(2));
+    expect(v.canRegister).toBe(true);
+    expect(v.register).toEqual([]);
   });
 });

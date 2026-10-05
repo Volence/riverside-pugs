@@ -1944,12 +1944,13 @@ export const adminBannerUrl = (eventId: number, key: string): string => `/api/ad
 export type EntryRole = 'starter' | 'sub' | 'coach';
 export interface EntryRoster { starters: string[]; subs: string[]; coach: string | null }
 export interface RosterPlaceView { steamid: string; name: string; avatar: string | null; role: EntryRole; problems: string[] }
-export interface MemberOptionView { steamid: string; name: string; avatar: string | null; problems: string[]; elsewhere: string | null }
+/** onTeam is false for a roster player who has since left the team. */
+export interface MemberOptionView { steamid: string; name: string; avatar: string | null; problems: string[]; elsewhere: string | null; onTeam: boolean }
 export interface MyEntryView {
   id: number; name: string; tag: string; logoKey: string | null; status: string; seed: number | null; waitlist: number | null;
   checkedInAt: string | null; manage: boolean; onRoster: boolean; roster: RosterPlaceView[];
   rosterLocked: boolean; additionsLeft: number | null;
-  canEditRoster: boolean; canCheckIn: boolean; canWithdraw: boolean; canLeave: boolean; members: MemberOptionView[];
+  canEditRoster: boolean; canCheckIn: boolean; canWithdraw: boolean; canLeave: boolean; leaveNeedsStaff: boolean; members: MemberOptionView[];
 }
 export interface RegisterOptionView { teamId: number; name: string; tag: string; logoKey: string | null; members: MemberOptionView[] }
 export interface MyEventView { entries: MyEntryView[]; register: RegisterOptionView[]; canRegister: boolean }
