@@ -36,7 +36,13 @@ export interface ServerRow {
   deploy_slug: string | null;
   /** Which region the box counts toward for bookings (default 'na'). */
   region: string;
+  /** Where the box sits in the claim order, lowest first (PICK_ORDER_SQL). */
+  pick_order: number | null;
 }
+
+/** The order boxes are claimed in: the admin-set pick order, then id. A row
+ *  with no pick order yet (inserted around addServer) sorts by its id. */
+export const PICK_ORDER_SQL = 'COALESCE(pick_order, id), id';
 
 export function addServer(
   db: DB,
@@ -47,8 +53,8 @@ export function addServer(
 ): number {
   const info = db
     .prepare(
-      `INSERT INTO servers (name, host, port, rcon_port, rcon_password, status, deploy_slug)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO servers (name, host, port, rcon_port, rcon_password, status, deploy_slug, pick_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(COALESCE(pick_order, id)), 0) + 1 FROM servers))`,
     )
     .run(s.name, s.host, s.port, s.rconPort, s.rconPassword, s.status ?? 'idle', deploySlug(s.name));
   return Number(info.lastInsertRowid);
@@ -58,11 +64,12 @@ export function getServer(db: DB, id: number): ServerRow | undefined {
   return db.prepare('SELECT * FROM servers WHERE id = ?').get(id) as ServerRow | undefined;
 }
 
-/** Idle, enabled boxes that nothing holds (src/serverHolds.ts), lowest id
- *  first: what the queue could take right now. claimIdle takes the first;
- *  a practice lease picks from the other end. */
+/** Idle, enabled boxes that nothing holds (src/serverHolds.ts), in pick
+ *  order: what the queue could take right now. claimIdle takes the first
+ *  (or the best by ping, src/serverPick.ts); a practice lease picks from the
+ *  other end. */
 export function claimableServers(db: DB): ServerRow[] {
-  return db.prepare(`SELECT * FROM servers WHERE status = 'idle' AND enabled = 1 AND ${NOT_HELD_SQL} ORDER BY id`)
+  return db.prepare(`SELECT * FROM servers WHERE status = 'idle' AND enabled = 1 AND ${NOT_HELD_SQL} ORDER BY ${PICK_ORDER_SQL}`)
     .all() as ServerRow[];
 }
 
@@ -76,11 +83,15 @@ export function claimableServers(db: DB): ServerRow[] {
  *  here. One idle box is also kept back for each confirmed booking without a
  *  box that starts within booking_protect_minutes (src/bookings/rules.ts), so
  *  a PUG started now is not still running when the booking needs the box. */
-export function claimIdle(db: DB, nowMs: number = Date.now()): ServerRow | null {
+export function claimIdle(
+  db: DB,
+  nowMs: number = Date.now(),
+  choose: (free: ServerRow[]) => ServerRow = (free) => free[0],
+): ServerRow | null {
   return db.transaction(() => {
     const free = claimableServers(db);
     if (free.length <= bookingsDue(db, nowMs, bookingLimits(db).protectMinutes)) return null;
-    const row = free[0];
+    const row = choose(free);
     db.prepare("UPDATE servers SET status = 'reserved' WHERE id = ?").run(row.id);
     return { ...row, status: 'reserved' as const };
   })();
@@ -198,6 +209,25 @@ export function setEnabled(db: DB, id: number, enabled: boolean): void {
 /** Every server, for the admin panel. Ordered by id so the list is stable. */
 export function listServers(db: DB): ServerRow[] {
   return db.prepare('SELECT * FROM servers ORDER BY id').all() as ServerRow[];
+}
+
+/** Move a server one place earlier (-1) or later (+1) in the claim order,
+ *  swapping it with its neighbour. Every row is renumbered 1..n on the way,
+ *  so ties and gaps (a NULL row, a deleted server) never survive a move.
+ *  Disabled boxes keep their place: putting one back puts it where it was.
+ *  False when there is no such server or it is already at that end. */
+export function moveServer(db: DB, id: number, dir: -1 | 1): boolean {
+  return db.transaction(() => {
+    const ids = (db.prepare(`SELECT id FROM servers ORDER BY ${PICK_ORDER_SQL}`).all() as { id: number }[])
+      .map((r) => r.id);
+    const at = ids.indexOf(id);
+    const to = at + dir;
+    if (at < 0 || to < 0 || to >= ids.length) return false;
+    [ids[at], ids[to]] = [ids[to], ids[at]];
+    const set = db.prepare('UPDATE servers SET pick_order = ? WHERE id = ?');
+    ids.forEach((sid, i) => set.run(i + 1, sid));
+    return true;
+  })();
 }
 
 /** Records the result of probing a server for the dlc4 mappack (Task 4). */

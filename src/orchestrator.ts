@@ -9,6 +9,7 @@ import type { LogListener } from './logListener.js';
 import { newToken, serverPasswordFor } from './matchToken.js';
 import { parseDump, type Dump } from './dumpParse.js';
 import { claimIdle, markLive, getServer, type ServerRow } from './serverPool.js';
+import { pingChooser, pingPickEnabled } from './serverPick.js';
 import type { ServerReleaser } from './serverRelease.js';
 import { completeMatch } from './matchResult.js';
 import { recordMatchDemos } from './demos.js';
@@ -159,6 +160,19 @@ export class RealOrchestrator implements Orchestrator {
     return client;
   }
 
+  /** claimIdle's chooser when server_pick_by_ping is on (src/serverPick.ts),
+   *  undefined (first in pick order) when it is off. The decision is kept on
+   *  the match row, so the live board can say why this box. */
+  private pingChooserFor(matchId: number): ((free: ServerRow[]) => ServerRow) | undefined {
+    if (!pingPickEnabled(this.db)) return undefined;
+    const steamids = (this.db.prepare('SELECT player_id FROM match_players WHERE match_id = ?')
+      .all(matchId) as { player_id: string }[]).map((r) => r.player_id);
+    return pingChooser(this.db, steamids, (c) => {
+      console.log(`[orchestrator] match ${matchId} server by ping: ${c.reason}`);
+      this.db.prepare('UPDATE matches SET server_pick_note = ? WHERE id = ?').run(c.reason, matchId);
+    });
+  }
+
   async setupMatch(matchId: number): Promise<void> {
     const match = this.db.prepare('SELECT id, campaign FROM matches WHERE id = ?').get(matchId) as
       | { id: number; campaign: string }
@@ -185,7 +199,7 @@ export class RealOrchestrator implements Orchestrator {
         rcon = null;
       }
     }
-    const server = heldServer ?? claimIdle(this.db);
+    const server = heldServer ?? claimIdle(this.db, Date.now(), this.pingChooserFor(matchId));
     if (held && !heldServer) this.releaser.release(held.server.id, FORCED_RESTART);
     if (!server) {
       // Wait, do not abort. The match stays 'configuring' and the pending list

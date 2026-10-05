@@ -1322,6 +1322,11 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   practice_max_leases: '2',
   sidegames_enabled: '0',
   sidegames_min_players: '4',
+  // Pick a match's server by the players' measured ping (src/serverPick.ts).
+  // Off by default: with it off, the admin-set pick order alone decides.
+  server_pick_by_ping: '0',
+  server_pick_ping_margin_ms: '15',
+  server_pick_ping_min_players: '4',
   // Competitive platform (teams, later bookings and events): off | admins |
   // everyone. Off hides every team page and route.
   competitive_enabled: 'off',
@@ -1653,6 +1658,14 @@ export function openDb(path: string): DB {
   // gone until someone opens its host's control panel, so this is not a
   // switch to flip for four servers at once. See src/serverRestart.ts.
   ensureColumn(db, 'servers', 'restart_after_match', 'INTEGER NOT NULL DEFAULT 0');
+  // The order claimIdle tries idle boxes in, lowest first, set from the
+  // admin server table. Seeded from id so upgrading changes nothing: id order
+  // is exactly what claimIdle used before this column existed.
+  // Why a match got its server when the ping chooser ran (src/serverPick.ts),
+  // NULL when it did not.
+  ensureColumn(db, 'matches', 'server_pick_note', 'TEXT');
+  ensureColumn(db, 'servers', 'pick_order', 'INTEGER');
+  db.exec('UPDATE servers SET pick_order = id WHERE pick_order IS NULL');
   // Which boxes/<slug>/ folder of the deploy repo is this box's own layer.
   // Its own column, not derived from the name on every staging: a rename
   // would otherwise drop the box's local.cfg and server.cfg from what it
@@ -2311,6 +2324,28 @@ export function openDb(path: string): DB {
       rev            INTEGER NOT NULL DEFAULT 0,
       updated_at     TEXT NOT NULL
     );
+  `);
+
+  // Each rostered player's average ping for one round on one match server,
+  // from pug-match's PING line (src/serverPick.ts). host, not server_id, is
+  // what a ping measures: two srcds on one box share a route, so lookups go
+  // by host and a sample on one counts for its neighbour. Keyed like
+  // match_round_stats so a duplicated datagram upserts instead of adding.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS player_pings (
+      match_id  INTEGER NOT NULL REFERENCES matches(id),
+      ordinal   INTEGER NOT NULL,
+      half      INTEGER NOT NULL,
+      steamid   TEXT    NOT NULL,
+      server_id INTEGER NOT NULL REFERENCES servers(id),
+      host      TEXT    NOT NULL,
+      ms        INTEGER NOT NULL,
+      loss      INTEGER NOT NULL,
+      samples   INTEGER NOT NULL,
+      at        TEXT    NOT NULL,
+      PRIMARY KEY (match_id, ordinal, half, steamid)
+    );
+    CREATE INDEX IF NOT EXISTS player_pings_lookup ON player_pings (steamid, host, at);
   `);
 
   // Everything besides a match that holds a box out of the pool: one row per

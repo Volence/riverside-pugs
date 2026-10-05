@@ -188,6 +188,7 @@ describe('POST /api/admin/live/:matchId/players/:steamid/leave', () => {
       [`/api/admin/servers/${serverId}/enabled`, { enabled: false }],
       [`/api/admin/servers/${serverId}/idle`, undefined],
       [`/api/admin/servers/${serverId}/restart-after-match`, { on: true }],
+      [`/api/admin/servers/${serverId}/move`, { dir: 'down' }],
       [`/api/admin/servers/${serverId}/log-secret`, undefined],
       [`/api/admin/servers/${serverId}/log-auth`, { mode: 'off' }],
       [`/api/admin/servers/${serverId}/sourcetv`, { enabled: true }],
@@ -197,6 +198,21 @@ describe('POST /api/admin/live/:matchId/players/:steamid/leave', () => {
       expect((await post(url, body)).statusCode, url).toBe(403);
     }
     expect((await app.inject({ method: 'GET', url: '/api/admin/settings', cookies: cookies[MOD] })).statusCode).toBe(403);
+  });
+
+  it('an admin reorders servers and the overview lists them in pick order', async () => {
+    const first = (db.prepare('SELECT id FROM servers LIMIT 1').get() as { id: number }).id;
+    const second = addServer(db, { name: 'Chicago', host: '5.6.7.8', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    const move = (id: number, dir: string) =>
+      app.inject({ method: 'POST', url: `/api/admin/servers/${id}/move`, cookies: cookies[ADMIN], payload: { dir } });
+    const order = async () => ((await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: cookies[ADMIN] })).json()
+      .servers as { id: number }[]).map((s) => s.id);
+    expect(await order()).toEqual([first, second]);
+    expect((await move(second, 'up')).statusCode).toBe(200);
+    expect(await order()).toEqual([second, first]);
+    expect((await move(second, 'up')).statusCode).toBe(409);
+    expect((await move(second, 'sideways')).statusCode).toBe(400);
+    expect((await audit()).some((a: { action: string }) => a.action === 'server_move')).toBe(true);
   });
 
   it('a plain player is still refused the board', async () => {

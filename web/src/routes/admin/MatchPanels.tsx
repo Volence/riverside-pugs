@@ -78,10 +78,23 @@ export function AdminServersPanel({ servers, busy, run, health, canManage = true
       {servers.length === 0 ? <Empty>No servers.</Empty> : (
         <div class="table-wrap">
         <table class="admin-table admin-table--servers">
-          <thead><tr><th>Server</th><th>Status</th><th>In pool</th><th>Restart after match</th><th>SourceTV</th><th>Log signing</th><th /></tr></thead>
+          <thead><tr><th title="Free servers are claimed top first">Pick order</th><th>Server</th><th>Status</th><th>In pool</th><th>Restart after match</th><th>SourceTV</th><th>Log signing</th><th /></tr></thead>
           <tbody>
-            {servers.map((s) => (
+            {servers.map((s, i) => (
               <tr key={s.id} class={s.enabled === 1 ? undefined : 'is-dim'}>
+                {/* Rows arrive in pick order: the order free servers are
+                    claimed in, top first (src/serverPool.ts PICK_ORDER_SQL). */}
+                <td class="num">
+                  {i + 1}
+                  {canManage && (
+                    <>
+                      {' '}<button type="button" class="chip" aria-label={`Move ${s.name} up`} disabled={busy || i === 0}
+                        onClick={() => run(() => adminApi.serverMove(s.id, 'up'))}>↑</button>
+                      <button type="button" class="chip" aria-label={`Move ${s.name} down`} disabled={busy || i === servers.length - 1}
+                        onClick={() => run(() => adminApi.serverMove(s.id, 'down'))}>↓</button>
+                    </>
+                  )}
+                </td>
                 <td>{s.name} <span class="muted mono">{s.host}:{s.port}</span>{' '}<button type="button" class="chip" onClick={() => onChat(s.id)}>Chat</button></td>
                 <td>
                   {/* A leased box is 'idle' in status only (a lease is a
@@ -216,7 +229,8 @@ export function OpenMatchesPanel({ open, busy, run }: { open: AdminOverview['ope
                 <tr key={m.id}>
                   <td><a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)}</td>
                   <td>{m.state}{m.state === 'configuring' && m.serverId === null ? ' (waiting for a server)' : ''}</td>
-                  <td>{m.serverId ?? <span class="muted">none</span>}</td>
+                  <td>{m.serverId ?? <span class="muted">none</span>}
+                    {m.serverPickNote && <div class="muted">by ping: {m.serverPickNote}</div>}</td>
                   <td class="num">{m.connected}/{m.rostered}</td>
                   <td><Odds f={m.forecast} /></td>
                   {/* The real game server, not SourceTV. An admin watching a

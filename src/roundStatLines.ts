@@ -23,7 +23,7 @@ type Ev<K extends LogEvent['kind']> = Extract<LogEvent, { kind: K }>;
  *  a half-2 row, they reordered behind that map's MAP_RESULT and belong there
  *  instead. Only when neither holds (a genuinely new match or map with no
  *  round recorded anywhere yet) does currentOrdinal apply on its own. */
-function roundOrdinal(db: DB, matchId: number, half: number): number {
+export function roundOrdinal(db: DB, matchId: number, half: number): number {
   const c = currentOrdinal(db, matchId);
   if (half === 1) return c;
   const hasRow = (ordinal: number, h: number): boolean =>

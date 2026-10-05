@@ -228,9 +228,9 @@ export type PickResult =
 /**
  * Which server a new lease may take, or why none.
  *
- * The highest id that qualifies, the reverse of the order matches claim
- * boxes in (claimIdle takes the lowest id), so the box lent out is the one a
- * PUG would reach for last. Any enabled, idle, unleased box qualifies, as
+ * The last in pick order that qualifies, the reverse of the order matches
+ * claim boxes in (claimIdle takes the first), so the box lent out is the one
+ * a PUG would reach for last. Any enabled, idle, unleased box qualifies, as
  * long as taking it still leaves `practice_reserve_idle` other claimable
  * boxes for the queue. Whether the box restarts after matches does not
  * matter here: ending a lease restarts srcds regardless (owner, 2026-09-28).

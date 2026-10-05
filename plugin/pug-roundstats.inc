@@ -20,6 +20,11 @@ char g_sRoundCoreKey[5][8] = { "ck", "sidmg", "sikill", "ff", "rev" };
 int g_iSkillAtLive[MAX_ROSTER][PS_MAX];
 int g_iCoreAtLive[MAX_ROSTER][5];      // ck, sidmg, sikill, ff, rev
 int g_iRoundWpn[MAX_ROSTER][WPN_COUNT][WS_MAX];
+// Ping and loss summed over this round's samples (PingSample), for the PING
+// line the backend picks servers by (src/serverPick.ts).
+int g_iPingSum[MAX_ROSTER];
+int g_iLossSum[MAX_ROSTER];
+int g_iPingN[MAX_ROSTER];
 
 static int WpnIndex(const char[] raw)
 {
@@ -43,6 +48,26 @@ void RoundStatsBegin()
 		g_iCoreAtLive[r][3] = g_iStatFf[r];
 		g_iCoreAtLive[r][4] = g_iStatRev[r];
 		for (int w = 0; w < WPN_COUNT; w++) for (int k = 0; k < WS_MAX; k++) g_iRoundWpn[r][w][k] = 0;
+		g_iPingSum[r] = 0;
+		g_iLossSum[r] = 0;
+		g_iPingN[r] = 0;
+	}
+}
+
+/** One ping and loss read per connected rostered player, while a round is
+ *  in play (ready-up and map loads stall the net channel and would read
+ *  high). Called from Timer_LiveStats, so every 10 s. Outgoing latency is the
+ *  round trip the server measures, the number the scoreboard shows. */
+void PingSample()
+{
+	if (!StatsActive()) return;
+	for (int r = 0; r < g_iRosterCount; r++)
+	{
+		int client = ClientOfSlot(r);
+		if (client == -1 || IsFakeClient(client)) continue;
+		g_iPingSum[r] += RoundToNearest(GetClientAvgLatency(client, NetFlow_Outgoing) * 1000.0);
+		g_iLossSum[r] += RoundToNearest(GetClientAvgLoss(client, NetFlow_Both) * 100.0);
+		g_iPingN[r]++;
 	}
 }
 
@@ -117,6 +142,11 @@ void EmitRoundStats(int half)
 		}
 		if (strlen(line) > strlen(prefix)) EmitPug("%s", line);
 		players++;
+		if (g_iPingN[r] > 0)
+		{
+			EmitPug("PING half=%d steamid=%s ms=%d loss=%d n=%d", half, g_sRosterId[r],
+				g_iPingSum[r] / g_iPingN[r], g_iLossSum[r] / g_iPingN[r], g_iPingN[r]);
+		}
 	}
 	EmitPug("ROUND_STATS_END half=%d players=%d sd=%d", half, players, g_bSkillDetect ? 1 : 0);
 }
