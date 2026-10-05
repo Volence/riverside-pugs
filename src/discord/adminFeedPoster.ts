@@ -93,6 +93,16 @@ export class AdminFeedPoster {
           color: COLOR.report,
         };
       }
+      case 'appeal': {
+        const link = `[#${e.appealId}](${this.deps.publicUrl}/admin/people/appeals/${e.appealId})`;
+        // Like a report: with a staff forum, the appeal's own post is the
+        // announcement. An automatic denial always posts: nobody else will.
+        if (e.what === 'filed') {
+          if (getSetting(this.deps.db, 'discord_tickets_forum_id')) return null;
+          return { text: `📨 New appeal ${link} from ${escapeName(e.name)}.`, color: COLOR.report };
+        }
+        return { text: `📨 Appeal ${link} from ${escapeName(e.name)} was denied automatically: ${e.slurs.join(', ')}.`, color: COLOR.problem };
+      }
       case 'admin_action': return { text: this.actionText(e), color: COLOR.action };
       case 'penalty': {
         const t = activeTimeout(this.deps.db, e.steamid);

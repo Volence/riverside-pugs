@@ -94,7 +94,10 @@ export type AdminEvent =
   | {
     kind: 'alt'; steamid: string; discordName: string;
     what: 'hold' | 'moved' | 'discord_swap'; otherSteamid?: string; previousDiscordName?: string;
-  };
+  }
+  /** A ban appeal was filed, or denied at once for a slur. Quiet appeals
+   *  (by staff, or from a restricted ticket) never publish this. */
+  | { kind: 'appeal'; appealId: number; what: 'filed' | 'auto_denied'; name: string; slurs: string[] };
 
 /** The settings toggle that silences each kind in the admin channel. */
 export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
@@ -116,6 +119,7 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   staff_message: 'admin_feed_staff_messages',
   rename_digest: 'admin_feed_renames',
   alt: 'admin_feed_problems',
+  appeal: 'admin_feed_reports',
 };
 
 type Listener = (e: AdminEvent) => void;
