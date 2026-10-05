@@ -249,4 +249,22 @@ describe('ModCallPoster', () => {
     expect(desc).toContain(`**player0** ([Steam](https://steamcommunity.com/profiles/${IDS[0]}))`);
     expect(desc).toContain(`**player5** ([Steam](https://steamcommunity.com/profiles/${IDS[5]}))`);
   });
+
+  it('posts to the mod channel when one is set', async () => {
+    setSetting(db, 'discord_mod_channel_id', 'mods');
+    call(); await poster.idle();
+    expect(t.live().filter((m) => m.channelId === 'mods')).toHaveLength(1);
+    expect(inAdmin()).toHaveLength(0);
+  });
+
+  it('a later edit goes to the channel the card was posted in, even after the setting changes', async () => {
+    setSetting(db, 'discord_mod_channel_id', 'mods');
+    const row = call(); await poster.idle();
+    setSetting(db, 'discord_mod_channel_id', 'elsewhere');
+    markModCallHandled(db, row.id, { steamid: IDS[7], discordId: '907' });
+    await poster.idle();
+    const card = t.live().find((m) => m.channelId === 'mods')!;
+    expect(card.payload.embeds[0].description).toContain('Handled by <@907>');
+    expect(getModCall(db, row.id)!.discord_channel_id).toBe('mods');
+  });
 });

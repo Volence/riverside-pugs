@@ -93,6 +93,12 @@ describe('GET /api/mod/calls', () => {
     expect((await get(MOD, '/api/mod/calls')).json().discordReady).toBe(false);
   });
 
+  it('discordReady is also true from the mod channel alone', async () => {
+    setSetting(db, 'discord_admin_channel_id', '');
+    setSetting(db, 'discord_mod_channel_id', 'mods');
+    expect((await get(MOD, '/api/mod/calls')).json().discordReady).toBe(true);
+  });
+
   it('names a team or general target without a player', async () => {
     call({ target_kind: 'team', target_steamid: null });
     const [c] = (await get(MOD, '/api/mod/calls')).json().calls;

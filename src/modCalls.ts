@@ -38,6 +38,7 @@ export interface ModCallRow {
   target_kind: 'player' | 'team' | 'general' | 'none'; target_steamid: string | null; reason: ModCallReason; text: string;
   via: 'game' | 'tv'; ticket_id: number | null; folded_into: number | null; pinged: number;
   post_state: 'pending' | 'posted' | 'skipped' | 'folded'; note: string; discord_message_id: string | null;
+  discord_channel_id: string | null;
   handled_by_discord_id: string | null; handled_by_steamid: string | null; handled_at: string | null;
 }
 

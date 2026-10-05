@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { resolveAlias } from '../aliases.js';
 import type { DB } from '../db.js';
+import { modChannelOrAdmin } from '../discord/feedRouting.js';
 import { identityOf, plainLabel } from '../identity.js';
 import { foldedCalls, markModCallHandled, REASON_LABELS, type ModCallRow } from '../modCalls.js';
 import { getPlayer } from '../players.js';
@@ -91,7 +92,7 @@ export async function modCallRoutes(app: FastifyInstance, opts: { db: DB }): Pro
     const shown = (c: ModCallRow) => !aboutViewer(me, c);
     const calls = parents.filter(shown)
       .map((p) => view(me, p, foldedCalls(db, p.id).filter(shown).map((c) => view(me, c, []))));
-    const discordReady = (getSetting(db, 'discord_admin_channel_id') ?? '') !== ''
+    const discordReady = modChannelOrAdmin(db) !== ''
       && getSetting(db, 'mod_calls_enabled') === '1';
     return { calls, discordReady };
   });
