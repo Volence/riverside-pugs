@@ -31,14 +31,7 @@ export function campaignName(slug: string): string {
 
 /** Easter-egg names shown only in the campaign vote. Mirrors VOTE_NAMES in
  *  src/campaigns.ts; every other page keeps campaignName. */
-const VOTE_NAMES: Record<string, string> = {
-  dead_center: 'Dead Center???',
-  dark_carnival: 'Dark Carnival???',
-  hard_rain: 'Hard Rain???',
-  the_parish: 'The Parish???',
-  swamp_fever: 'Swamp Fever???',
-  the_passing: 'Passifice???',
-};
+const VOTE_NAMES: Record<string, string> = {};
 
 export function campaignVoteName(slug: string): string {
   return VOTE_NAMES[slug] ?? campaignName(slug);

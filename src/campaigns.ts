@@ -32,14 +32,8 @@ export const CRASH_CENTER_FIRST_MAP = 'c1m1_hotel';
  * Mirrored in web/src/format.ts.
  */
 export const VOTE_NAMES: Record<string, string> = {
-  // Plain text: the glitch (Zalgo) marks these carried from 2026-10-02 were
-  // taken off on 2026-10-05 (owner), leaving only the "???".
-  dead_center: 'Dead Center???',
-  dark_carnival: 'Dark Carnival???',
-  hard_rain: 'Hard Rain???',
-  the_parish: 'The Parish???',
-  swamp_fever: 'Swamp Fever???',
-  the_passing: 'Passifice???',
+  // Empty since 2026-10-05 (owner): the glitch marks came off first, then
+  // the "???", so the night campaigns vote under their plain names.
 };
 
 /**
