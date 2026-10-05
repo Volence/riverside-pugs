@@ -7,6 +7,7 @@ import { migrateLegacyReports } from './tickets/migrate.js';
 import { widenTicketIdentity } from './tickets/identityMigration.js';
 import { deploySlug } from './releaseStage.js';
 import { seedRulesetTemplates } from './rulesets.js';
+import { ensureAppealSchema } from './appeals/schema.js';
 
 export type DB = Database.Database;
 
@@ -1222,6 +1223,13 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   discord_weekly_channel_id: '',
   admin_feed_reports: '1',
   ticket_mod_ban_max_minutes: '10080',
+  appeals_enabled: '0',
+  appeal_min_ban_hours: '24',
+  appeal_cooldown_days: '7',
+  appeal_max_per_ban: '2',
+  appeal_text_max: '1500',
+  appeal_answer_max: '800',
+  appeal_answer_hours: '72',
   ticket_reports_per_day: '5',
   ticket_store_attachments: '1',
   ticket_attachment_max_mb: '25',
@@ -2262,6 +2270,9 @@ export function openDb(path: string): DB {
   // (lower first). A new kind of hold is a new UNION ALL arm here and a new
   // HoldKind, nothing else.
   ensureServerHoldsView(db);
+
+  // Ban appeals. Last, after widenTicketIdentity has created discord_sanctions.
+  ensureAppealSchema(db);
 
   seed(db);
   return db;
