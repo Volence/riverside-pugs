@@ -34,10 +34,15 @@ function Item({ it, data, reload }: { it: PlayerAppealItem; data: MyAppeals; rel
     try { await fn(); setOpen(false); reload(); } catch (err) { setError(err instanceof ApiError ? err.message : 'Something went wrong.'); } finally { setBusy(false); }
   };
   const ap = it.appeal;
+  // The status line and the refusal say the same thing after a denial in
+  // cooldown ("You can appeal again after X"): showing both is a double-up,
+  // not two pieces of information, so the refusal is suppressed whenever
+  // the status line is already on screen.
+  const statusShown = !!(ap && (!it.canAppeal || ap.state === 'asked') && ap.line);
   return (
     <div class="appeal-item">
       <p><strong>{what(it)}</strong>: {it.reason}{it.endsAt ? `, ends ${new Date(it.endsAt).toLocaleString()}` : ''}</p>
-      {ap && (!it.canAppeal || ap.state === 'asked') && ap.line && <p>{ap.line}</p>}
+      {statusShown && <p>{ap!.line}</p>}
       {ap && ap.state === 'asked' && ap.question && (
         <>
           <blockquote class="appeal-text">{ap.question}</blockquote>
@@ -47,7 +52,7 @@ function Item({ it, data, reload }: { it: PlayerAppealItem; data: MyAppeals; rel
           <button class="btn" disabled={busy || !answer.trim()} onClick={() => send(() => appealApi.answer(ap.id, answer))}>Send answer</button>
         </>
       )}
-      {it.refusal && <p class="muted">{it.refusal}</p>}
+      {it.refusal && !statusShown && <p class="muted">{it.refusal}</p>}
       {it.canAppeal && !open && <button class="btn" onClick={() => setOpen(true)}>Appeal this ban</button>}
       {it.canAppeal && open && (
         <>
