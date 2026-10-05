@@ -88,7 +88,7 @@ import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRe
 import { cheatName, cvarActOf, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
 import { lilacReasonDetail } from './logParse.js';
 import { inputThresholds, recordInputBurst, recordInputCap } from './inputBursts.js';
-import { resolveServerBySource, isKnownServerAddress, type ServerRow } from './serverPool.js';
+import { getServer, resolveServerBySource, isKnownServerAddress, type ServerRow } from './serverPool.js';
 import { resetMap, problemText } from './matchTeardown.js';
 import { makeServerCleaner } from './serverCleaner.js';
 import { PendingMatches } from './pendingMatches.js';
@@ -122,7 +122,8 @@ import { recordBalanceSighting, refingerprintPatches } from './balancePatches.js
 import { effectiveIgnored } from './balanceIgnore.js';
 import { linkReleaseSighting } from './releaseBalance.js';
 import { expectedPatchFor, confirmOnSighting } from './balanceRollouts.js';
-import { recordRoundMark, recordRoundStat, recordRoundStatsEnd, resetRoundLines } from './roundStatLines.js';
+import { recordRoundMark, recordRoundStat, recordRoundStatsEnd, resetRoundLines, roundOrdinal } from './roundStatLines.js';
+import { recordPing } from './serverPick.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
 import { noteMatchAborted, subscribeMatchAborts } from './matchAborts.js';
 import { recordPresenceLine, sweepPresence } from './presence.js';
@@ -1306,6 +1307,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             if (ev.kind === 'round_stat') recordRoundStat(deps.db, m.id, ev);
             else if (ev.kind === 'round_stats_end') recordRoundStatsEnd(deps.db, m.id, ev);
             else recordRoundMark(deps.db, m.id, ev);
+            return;
+          }
+          else if (ev.kind === 'ping') {
+            // The match's own server, never the source address: the sample is
+            // about the route to the box this match is on.
+            const m = liveMatchRow(ev.token);
+            const server = m?.server_id != null ? getServer(deps.db, m.server_id) : undefined;
+            if (!m || !server) return;
+            recordPing(deps.db, m.id, roundOrdinal(deps.db, m.id, ev.half), server, ev);
             return;
           }
           else if (ev.kind === 'round_end') {

@@ -885,7 +885,11 @@ export interface AdminOverview {
      *  server with it, so the abort dialog reads this to say so and skip
      *  the leave-out boxes. Optional for an older server. */
     bookingId?: number | null;
+    /** Why the ping chooser gave this match its server (src/serverPick.ts);
+     *  null when it did not run. Optional for an older server. */
+    serverPickNote?: string | null;
   }[];
+  /** In pick order: the order free servers are claimed in, first first. */
   servers: {
     id: number; name: string; host: string; port: number; status: string; enabled: number;
     tvPort: number | null; tvPassword: string | null; tvEnabled: number; restartAfterMatch?: number;
@@ -2262,6 +2266,8 @@ export const adminApi = {
   settings: (signal?: AbortSignal) =>
     get<{ settings: AdminSetting[]; campaigns: { slug: string; name: string }[]; serversMissingDlc4: string[] }>('/api/admin/settings', signal),
   saveSetting: (key: string, value: unknown) => put<{ ok: true; value: string }>(`/api/admin/settings/${key}`, { value }),
+  serverMove: (id: number, dir: 'up' | 'down') =>
+    post(`/api/admin/servers/${id}/move`, { dir }),
   serverRestartAfterMatch: (id: number, on: boolean) =>
     post(`/api/admin/servers/${id}/restart-after-match`, { on }),
   serverLogSecret: (id: number, rotate = false) =>

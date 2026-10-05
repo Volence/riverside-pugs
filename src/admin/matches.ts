@@ -4,7 +4,7 @@ import type { ServerReleaser } from '../serverRelease.js';
 import { pausesFor, readyupsFor, slowToReady } from '../liveView.js';
 import { archiveAborted } from '../matchArchive.js';
 import { matchForecast, recomputeSeasonRatings } from '../rating.js';
-import { getServer } from '../serverPool.js';
+import { getServer, PICK_ORDER_SQL } from '../serverPool.js';
 import type { LogAuth } from '../logAuth.js';
 import { serverPasswordFor } from '../matchToken.js';
 import { noteMatchAborted } from '../matchAborts.js';
@@ -17,7 +17,7 @@ export function adminOverview(db: DB, logAuth?: LogAuth) {
   );
   const openRows = db.prepare(
     `SELECT m.id, m.campaign, m.state, m.server_id AS serverId, m.token, m.created_at AS createdAt,
-            m.went_live_at AS wentLiveAt, m.booking_id AS bookingId,
+            m.went_live_at AS wentLiveAt, m.booking_id AS bookingId, m.server_pick_note AS serverPickNote,
             (SELECT COUNT(*) FROM match_players mp WHERE mp.match_id = m.id AND mp.connected_at IS NOT NULL) AS connected,
             (SELECT COUNT(*) FROM match_players mp WHERE mp.match_id = m.id) AS rostered
      FROM matches m WHERE m.state IN ('configuring', 'live') ORDER BY m.id DESC`,
@@ -57,7 +57,7 @@ export function adminOverview(db: DB, logAuth?: LogAuth) {
     `SELECT id, name, host, port, status, enabled, tv_port AS tvPort,
             tv_password AS tvPassword, tv_enabled AS tvEnabled, restart_after_match AS restartAfterMatch,
             log_auth AS logMode, log_secret IS NOT NULL AS hasLogSecret
-     FROM servers ORDER BY id`,
+     FROM servers ORDER BY ${PICK_ORDER_SQL}`,
   ).all() as ({ id: number; logMode: string; hasLogSecret: number } & Record<string, unknown>)[])
     .map(({ logMode, hasLogSecret, ...s }) => ({
       ...s,

@@ -160,6 +160,9 @@ export type LogEvent =
    *  file or its compiled fallback; absent from older plugins. */
   | { kind: 'balance_end'; token: string; half: 1 | 2; parts: number; items: number; watch?: 'file' | 'builtin' }
   | { kind: 'round_stat'; token: string; half: 1 | 2; steamid: string; stats: Record<string, number> }
+  /** One rostered player's average ping (ms) and loss (percent) over a round,
+   *  from `samples` reads 10 s apart. See src/serverPick.ts. */
+  | { kind: 'ping'; token: string; half: 1 | 2; steamid: string; ms: number; loss: number; samples: number }
   | { kind: 'round_stats_end'; token: string; half: 1 | 2; players: number; skillDetect: boolean }
   | { kind: 'round_mark'; token: string; half: 1 | 2; mark: 'panic' | 'finale_start' | 'finale_radio'; tMs: number }
   // One discrete thing that happened, for the live feed. Generic on purpose:
@@ -1124,6 +1127,15 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
         if (n !== null) stats[k] = n;
       }
       return { kind: 'round_stat', token, half: half as 1 | 2, steamid: rest.steamid, stats };
+    }
+    case 'PING': {
+      const half = halfOf(rest.half);
+      const ms = intOf(rest.ms);
+      const loss = intOf(rest.loss);
+      const samples = intOf(rest.n);
+      if (half === null || !/^\d{17}$/.test(rest.steamid ?? '')) return null;
+      if (ms === null || loss === null || samples === null || ms < 0 || ms > 2000 || loss < 0 || loss > 100 || samples < 1) return null;
+      return { kind: 'ping', token, half: half as 1 | 2, steamid: rest.steamid, ms, loss, samples };
     }
     case 'ROUND_STATS_END': {
       const half = halfOf(rest.half);

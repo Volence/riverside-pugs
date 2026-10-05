@@ -6,7 +6,7 @@ import { makeRequireAdmin, makeRequireMod } from './guards.js';
 import { queueActivity } from '../queueActivity.js';
 import { lookStats } from '../mapLooks.js';
 import type { ServerReleaser } from '../serverRelease.js';
-import { getServer, listServers, serversMissingDlc4, setEnabled, setHasDlc4, setRestartAfterMatch, type ServerRow } from '../serverPool.js';
+import { getServer, listServers, serversMissingDlc4, setEnabled, setHasDlc4, setRestartAfterMatch, moveServer, type ServerRow } from '../serverPool.js';
 import { serverHasDlc4 } from '../dlc4.js';
 import { abortMatch, adminOverview, clearNoShowsOf, voidMatch, type BookingGameAborter } from '../admin/matches.js';
 import { holdFor } from '../serverHolds.js';
@@ -568,6 +568,22 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     // one, so re-enabling an idle server left it sitting there unclaimed.
     if (enabled) releaser.wake();
     logAdmin(db, adminId, enabled ? 'server_enable' : 'server_disable', id);
+    broadcast('refresh');
+    return { ok: true };
+  });
+
+  /** Move a server one place up or down the order free servers are claimed
+   *  in (claimIdle takes the first; with server_pick_by_ping on, the order
+   *  is the fallback and the tie break). */
+  app.post('/api/admin/servers/:id/move', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const id = Number((req.params as { id: string }).id);
+    if (!getServer(db, id)) return reply.code(404).send({ error: 'no such server' });
+    const { dir } = (req.body ?? {}) as { dir?: unknown };
+    if (dir !== 'up' && dir !== 'down') return reply.code(400).send({ error: 'dir must be up or down' });
+    if (!moveServer(db, id, dir === 'up' ? -1 : 1)) return reply.code(409).send({ error: `already at the ${dir === 'up' ? 'top' : 'bottom'}` });
+    logAdmin(db, adminId, 'server_move', id, { dir });
     broadcast('refresh');
     return { ok: true };
   });

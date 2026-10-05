@@ -237,7 +237,8 @@ export class SideGames {
   private maybeOpen(cands: string[]): void {
     if (!this.enabled() || cands.length < this.minPlayers()) return;
     if (this.now() < this.retryAfter || matchesWaiting(this.deps.db) > 0) return;
-    // The lowest id claimable box: the one claimIdle would give the match.
+    // The first claimable box in pick order: the one claimIdle would give the
+    // match (unless ping picks another, src/serverPick.ts).
     // A box that recently refused is skipped (refusedUntil).
     const now = this.now();
     for (const [id, until] of this.refusedUntil) if (until <= now) this.refusedUntil.delete(id);

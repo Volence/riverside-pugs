@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.22"
+#define PLUGIN_VERSION "0.3.23"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -3161,6 +3161,7 @@ public Action Timer_Heartbeat(Handle timer)
 public Action Timer_LiveStats(Handle timer)
 {
 	if (g_State != MS_Live) return Plugin_Continue;
+	PingSample();
 
 	for (int i = 0; i < g_iRosterCount; i++)
 	{

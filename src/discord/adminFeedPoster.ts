@@ -371,6 +371,7 @@ export class AdminFeedPoster {
       case 'new_season': return `${who} started a new season: **${escapeName(String(d.name ?? ''))}**. Everyone's rating starts fresh.`;
       case 'rename_season': return `${who} renamed season ${e.target} to **${escapeName(String(d.name ?? ''))}**`;
       case 'server_idle': return `${who} set server ${e.target} idle`;
+      case 'server_move': return `${who} moved server ${e.target} ${d.dir === 'up' ? 'up' : 'down'} the pick order`;
       case 'server_restart_after_match':
         return `${who} turned ${d.on ? 'on' : 'off'} restart-after-match for server ${e.target}`;
       case 'server_log_secret':

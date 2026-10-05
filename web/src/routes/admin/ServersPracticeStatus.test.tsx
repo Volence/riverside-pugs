@@ -39,3 +39,19 @@ describe('AdminServersPanel and practice leases', () => {
     expect(screen.getByText('idle')).toBeTruthy();
   });
 });
+
+describe('AdminServersPanel pick order', () => {
+  const two = [server({ id: 1, name: 'Dallas' }), server({ id: 4, name: 'Riverside #4' })];
+
+  it('numbers rows in pick order and only offers the moves that exist', () => {
+    render(<AdminServersPanel busy={false} run={async () => {}} servers={two} />);
+    expect((screen.getByRole('button', { name: 'Move Dallas up' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Move Dallas down' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: 'Move Riverside #4 down' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('a moderator sees the order but cannot change it', () => {
+    render(<AdminServersPanel busy={false} run={async () => {}} servers={two} canManage={false} />);
+    expect(screen.queryByRole('button', { name: /^Move / })).toBeNull();
+  });
+});
