@@ -40,7 +40,7 @@ import { createDjsTransport } from './discord/djsTransport.js';
 import { VoiceChannels } from './discord/voice.js';
 import { COMMAND_DEFS, handleCommand } from './discord/commands.js';
 import { fetchDiscordApi, type DiscordApi } from './discord/api.js';
-import type { ModerationOps } from './discord/transport.js';
+import type { MessagePayload, ModerationOps } from './discord/transport.js';
 import { discordAuthRoutes } from './routes/discordAuth.js';
 import { twitchAuthRoutes } from './routes/twitchAuth.js';
 import { makeTwitchApi, type TwitchApi } from './twitch/api.js';
@@ -234,6 +234,8 @@ export interface ServerDeps {
   /** Test seam: stands in for the running bot's reporter chats, so the
    *  chat routes can be tested without a real bot. Wins when set. */
   reporterChats?: ReporterChats;
+  /** Tests: what the routes use to DM a Discord member. Production uses the bot. */
+  discordDm?: (userId: string, payload: MessagePayload) => Promise<void>;
   /** Overrides where balance knobs are read from. Injected in tests to
    *  exercise a missing or invalid balance/knobs.json without touching the
    *  checked-in file; production reads BALANCE_KNOBS_PATH otherwise. */
@@ -1894,9 +1896,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     db: deps.db, matchmaker, broadcast: (e) => hub.broadcast(e), adminSteamIds: deps.config.adminSteamIds,
     guildId: deps.config.discord?.guildId ?? null,
     attachmentsDir: deps.config.ticketAttachmentsDir,
+    publicUrl: deps.config.publicUrl,
     afterRemove: () => { void ticketMirror?.sweepRemovals(); },
     moderation: () => deps.discordModeration ?? bot?.transport.moderation ?? null,
     chats: () => deps.reporterChats ?? reporterChats,
+    dm: () => deps.discordDm ?? (bot ? (userId: string, payload: MessagePayload) => bot!.transport.dm(userId, payload) : null),
   });
   await app.register(modCallRoutes, { db: deps.db });
   await app.register(serverChatRoutes, {

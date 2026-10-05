@@ -86,3 +86,56 @@ describe('player appeal routes', () => {
     expect(banMessage(db, P, 'https://pug.test')).not.toContain('/appeal');
   });
 });
+
+describe('staff appeal routes', () => {
+  const staff = () => {
+    const mod = authedCookie(app, db, MOD);
+    db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
+    const admin = authedCookie(app, db, ADMIN);
+    db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
+    return { mod, admin };
+  };
+  const fileAs = async (cookies: Record<string, string>, kind: 'ban' | 'sanction', id: number) =>
+    (await app.inject({ method: 'POST', url: '/api/appeals', cookies, payload: { kind, id, whatHappened: 'a', whyLift: 'b' } })).json().id as number;
+
+  it('a moderator lists, asks once, and denies; the audit row names the decider', async () => {
+    const { mod } = staff();
+    const { ban, cookies } = bannedCookie(P);
+    const id = await fileAs(cookies, 'ban', ban);
+    const list = await app.inject({ method: 'GET', url: '/api/mod/appeals?state=open', cookies: mod });
+    expect(list.json().appeals.map((a: { id: number }) => a.id)).toEqual([id]);
+    expect((await app.inject({ method: 'POST', url: `/api/mod/appeals/${id}/ask`, cookies: mod, payload: { question: 'Which map?' } })).statusCode).toBe(200);
+    const deny = await app.inject({ method: 'POST', url: `/api/mod/appeals/${id}/decide`, cookies: mod, payload: { outcome: 'deny' } });
+    expect(deny.statusCode).toBe(200);
+    expect(db.prepare("SELECT admin_id, action FROM admin_actions WHERE action LIKE 'appeal_%'").all())
+      .toEqual([{ admin_id: MOD, action: 'appeal_ask' }, { admin_id: MOD, action: 'appeal_deny' }]);
+  });
+
+  it('a moderator cannot decide an appeal against an admin\'s ban', async () => {
+    const { mod } = staff();
+    const { ban, cookies } = bannedCookie(P, null, ADMIN);
+    const id = await fileAs(cookies, 'ban', ban);
+    const r = await app.inject({ method: 'POST', url: `/api/mod/appeals/${id}/decide`, cookies: mod, payload: { outcome: 'accept' } });
+    expect(r.statusCode).toBe(403);
+  });
+
+  it('accepting a moderator-issued Discord timeout lifts it in Discord, records the lift, and a moderator may do it', async () => {
+    const { mod } = staff();
+    const sid = Number(db.prepare(`INSERT INTO discord_sanctions (discord_id, kind, until, reason, created_by, created_at)
+      VALUES ('901', 'timeout', ?, 'spam', ?, ?)`).run(new Date(Date.now() + 7 * 86400_000).toISOString(), MOD, new Date().toISOString()).lastInsertRowid);
+    const id = await fileAs(discordCookie('901'), 'sanction', sid);
+    const r = await app.inject({ method: 'POST', url: `/api/mod/appeals/${id}/decide`, cookies: mod, payload: { outcome: 'accept' } });
+    expect(r.statusCode).toBe(200);
+    expect(fake.moderationCalls).toMatchObject([{ op: 'removeTimeout', userId: '901' }]);
+    expect(db.prepare('SELECT lifted_by FROM discord_sanctions WHERE id = ?').get(sid)).toEqual({ lifted_by: MOD });
+  });
+
+  it('only an admin marks a ban final', async () => {
+    const { mod, admin } = staff();
+    const { ban, cookies } = bannedCookie(P);
+    const id = await fileAs(cookies, 'ban', ban);
+    expect((await app.inject({ method: 'POST', url: `/api/admin/appeals/${id}/final`, cookies: mod, payload: { on: true } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: `/api/admin/appeals/${id}/final`, cookies: admin, payload: { on: true } })).statusCode).toBe(200);
+    expect(db.prepare('SELECT no_appeal FROM bans WHERE id = ?').get(ban)).toEqual({ no_appeal: 1 });
+  });
+});

@@ -17,9 +17,11 @@ import { checkChatStaff, checkContactReporter, checkReporterChat, reporterDiscor
 import { caseFile } from '../tickets/caseFile.js';
 import { fileViewer } from '../admin/fileAccess.js';
 import { playerFileSummary } from '../admin/playerFileSummary.js';
-import type { ModerationOps } from '../discord/transport.js';
+import type { MessagePayload, ModerationOps } from '../discord/transport.js';
 import type { ReporterChats } from '../discord/reporterChats.js';
 import type { ThreadRow } from '../tickets/threads.js';
+import { sanctionDmText } from '../appeals/templates.js';
+import { getSetting } from '../settings.js';
 
 /** Why Discord said no, in the words the site shows, for APPLYING a
  *  sanction. Lifting a timeout has its own wording for not_member (see the
@@ -53,16 +55,34 @@ export interface TicketRouteOpts {
   /** The running bot's reporter chats, or null when Discord is not
    *  connected. Read per call, like moderation. */
   chats: () => ReporterChats | null;
+  /** config.publicUrl, for the sanction DM's appeal link. */
+  publicUrl: string;
+  /** What the routes use to DM a Discord member. Read per call, like
+   *  moderation: production has it only once the bot has logged in. */
+  dm: () => ((userId: string, payload: MessagePayload) => Promise<void>) | null;
 }
 
 /** Filing under /api/reports for any active player; everything under
  *  /api/mod for staff. Each mutation ends with logAdmin, quiet when the
  *  ticket is restricted or about staff (ticketIsQuiet). */
 export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts): Promise<void> {
-  const { db, matchmaker, broadcast, adminSteamIds, guildId, attachmentsDir, afterRemove, moderation, chats } = opts;
+  const { db, matchmaker, broadcast, adminSteamIds, guildId, attachmentsDir, afterRemove, moderation, chats, publicUrl, dm } = opts;
   const requireActive = makeRequireActive(db);
   const requireMod = makeRequireMod(db);
   const filing = { adminSteamIds };
+  /** Tell the person, with where to appeal while appeals are on. Never fails
+   *  the action: a closed DM is ordinary. */
+  const tellSanctioned = async (discordId: string, kind: 'timeout' | 'ban', minutes: number | null, reason: string) => {
+    const send = dm();
+    if (!send) return;
+    const until = kind === 'timeout' && minutes ? new Date(Date.now() + minutes * 60_000).toISOString() : null;
+    const appealUrl = getSetting(db, 'appeals_enabled') === '1' ? `${publicUrl}/appeal` : null;
+    try {
+      await send(discordId, { content: sanctionDmText(kind, until, reason, appealUrl), embeds: [], components: [] });
+    } catch (err) {
+      console.log('[tickets] could not DM a sanctioned member:', String(err));
+    }
+  };
   /** Whether a ticket action's audit row stays off the admin feed. A ticket
    *  that has gone by the time the row is written (folded away mid-request)
    *  counts as quiet: this fails closed. */
@@ -311,6 +331,10 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     const mod = moderation();
     if (!mod) return reply.code(503).send({ error: 'the Discord bot is not running' });
     const { plan } = c;
+    // A ban's DM goes out BEFORE Discord carries it out: afterwards the bot
+    // shares no server with them and the DM cannot arrive. A timeout's DM
+    // waits until the record is written, below.
+    if (plan.kind === 'ban') await tellSanctioned(plan.discordId, 'ban', null, plan.reason);
     const result = plan.kind === 'timeout'
       ? await mod.timeout(plan.discordId, plan.minutes as number, plan.reason)
       : await mod.ban(plan.discordId, plan.reason);
@@ -321,6 +345,7 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     const sanctionQuiet = quiet(id);
     try {
       recordDiscordSanction(db, plan, me);
+      if (plan.kind === 'timeout') await tellSanctioned(plan.discordId, 'timeout', plan.minutes, plan.reason);
     } catch (err) {
       // The admin feed reaches everyone with feed access, wider than a
       // restricted ticket's own list, so a quiet ticket's problem event must

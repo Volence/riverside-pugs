@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { DB } from '../db.js';
@@ -12,6 +12,7 @@ import {
 import { hasActiveBan } from '../banState.js';
 import { placeAltHold, previousDiscordOf, previousSteamOf } from '../altHolds.js';
 import { activeTimeout } from '../penalties.js';
+import { setAppealSession } from '../appeals/appealSession.js';
 
 export interface DiscordAuthOpts {
   config: Config;
@@ -101,6 +102,47 @@ export async function discordAuthRoutes(app: FastifyInstance, opts: DiscordAuthO
     return inMatch ? 'you cannot disconnect Discord while you are in a match' : null;
   };
 
+  /**
+   * Sign in for /appeal, with no Steam session: the way in for somebody the
+   * bot banned from the Discord, who cannot use the Appeal button. The state
+   * is bound to a random nonce in a cookie on this browser, so a link
+   * started by somebody else cannot sign this browser in as them.
+   */
+  const APPEAL_STATE = 'appeal.';
+  const NONCE_COOKIE = 'pug_appeal_nonce';
+  const secure = config.publicUrl.startsWith('https://');
+
+  app.get('/auth/discord/appeal', async (_req, reply) => {
+    if (!discord || !api) return reply.code(404).send({ error: 'not found' });
+    const nonce = randomBytes(16).toString('hex');
+    reply.setCookie(NONCE_COOKIE, nonce, { path: '/auth/discord', httpOnly: true, signed: true, sameSite: 'lax', secure, maxAge: 10 * 60 });
+    const params = new URLSearchParams({
+      client_id: discord.clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'identify',
+      state: `${APPEAL_STATE}${signState(config.cookieSecret, `appeal:${nonce}`, Date.now())}`,
+    });
+    return reply.redirect(`https://discord.com/oauth2/authorize?${params}`);
+  });
+
+  const appealCallback = async (req: FastifyRequest, reply: FastifyReply, code: string | undefined, state: string) => {
+    const failed = () => reply.redirect('/appeal?signin=failed');
+    const raw = req.cookies[NONCE_COOKIE];
+    const nonce = raw ? req.unsignCookie(raw) : null;
+    reply.clearCookie(NONCE_COOKIE, { path: '/auth/discord' });
+    if (!code || !nonce?.valid || !nonce.value || !verifyState(config.cookieSecret, `appeal:${nonce.value}`, state)) return failed();
+    try {
+      const { accessToken } = await api!.exchangeCode(code, redirectUri);
+      const user = await api!.getCurrentUser(accessToken);
+      setAppealSession(reply, user.id, user.globalName ?? user.username, secure);
+    } catch (err) {
+      console.error('[discord] appeal sign-in failed:', err);
+      return failed();
+    }
+    return reply.redirect('/appeal');
+  };
+
   app.get('/auth/discord', async (req, reply) => {
     const steamid = guard(req, reply);
     if (!steamid) return reply;
@@ -115,6 +157,11 @@ export async function discordAuthRoutes(app: FastifyInstance, opts: DiscordAuthO
   });
 
   app.get('/auth/discord/callback', async (req, reply) => {
+    const q = req.query as { code?: string; state?: string };
+    if (typeof q.state === 'string' && q.state.startsWith(APPEAL_STATE)) {
+      if (!discord || !api) return reply.code(404).send({ error: 'not found' });
+      return appealCallback(req, reply, q.code, q.state.slice(APPEAL_STATE.length));
+    }
     const steamid = guard(req, reply);
     if (!steamid) return reply;
     const { code, state } = req.query as { code?: string; state?: string };
