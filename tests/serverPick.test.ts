@@ -5,7 +5,7 @@ import { openDb, type DB } from '../src/db.js';
 import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
 import { addServer, claimableServers, claimIdle, moveServer, type ServerRow } from '../src/serverPool.js';
-import { choosePing, pingChooser, pingTo, recordPing } from '../src/serverPick.js';
+import { choosePing, pingChooser, pingTable, pingTo, recordPing } from '../src/serverPick.js';
 import { parseLogDatagram } from '../src/logParse.js';
 import { setSetting } from '../src/settings.js';
 
@@ -191,5 +191,33 @@ describe('PING end to end', () => {
     await new Promise((r) => setTimeout(r, 80));
     expect(db.prepare('SELECT server_id, host, ms, samples FROM player_pings').get())
       .toEqual({ server_id: sid, host: '127.0.0.1', ms: 52, samples: 14 });
+  });
+});
+
+describe('pingTable', () => {
+  it('one column per host in pick order, medians per player, old hosts last', () => {
+    const r3 = box('Riverside #3', 'rhost', 27015);
+    box('Riverside #4', 'rhost', 27016);
+    const dal = box('Dallas', 'dal');
+    moveServer(db, dal, -1);
+    moveServer(db, dal, -1);
+    db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
+    db.prepare("INSERT INTO matches (id, season_id, state, campaign) VALUES (1, 1, 'completed', 'x')").run();
+    db.prepare("INSERT INTO players (steamid, name, status) VALUES ('76561198000000001', 'zed', 'active'), ('76561198000000002', 'amy', 'active')").run();
+    const at = new Date(NOW).toISOString();
+    const rec = (ord: number, half: 1 | 2, sid: string, srv: { id: number; host: string }, ms: number, loss = 0) =>
+      recordPing(db, 1, ord, srv, { half, steamid: sid, ms, loss, samples: 9 }, at);
+    rec(1, 1, '76561198000000001', { id: r3, host: 'rhost' }, 40, 2);
+    rec(1, 2, '76561198000000001', { id: r3, host: 'rhost' }, 60, 0);
+    rec(2, 1, '76561198000000001', { id: dal, host: 'dal' }, 30);
+    rec(2, 1, '76561198000000002', { id: r3, host: 'gone' }, 70);
+    const t = pingTable(db, NOW);
+    expect(t.hosts).toEqual([
+      { host: 'dal', label: 'Dallas' },
+      { host: 'rhost', label: 'Riverside #3 / Riverside #4' },
+      { host: 'gone', label: 'gone' },
+    ]);
+    expect(t.players.map((p) => p.name)).toEqual(['amy', 'zed']);
+    expect(t.players[1].cells).toEqual({ rhost: { ms: 50, rounds: 2, loss: 1 }, dal: { ms: 30, rounds: 1, loss: 0 } });
   });
 });

@@ -123,3 +123,56 @@ export function pingChooser(
     return choice.server;
   };
 }
+
+export interface PingCell { ms: number; rounds: number; loss: number }
+export interface PingTable {
+  /** One column per host, in pick order; `label` names the servers on it. */
+  hosts: { host: string; label: string }[];
+  players: { steamid: string; name: string; cells: Record<string, PingCell> }[];
+}
+
+/**
+ * Every player's typical ping to every host, for the staff Pings page: the
+ * same numbers the chooser uses (median of the most recent rounds, within
+ * PING_MAX_AGE_DAYS), plus how many rounds it is from and the average loss.
+ */
+export function pingTable(db: DB, nowMs: number = Date.now()): PingTable {
+  const since = new Date(nowMs - PING_MAX_AGE_DAYS * 86_400_000).toISOString();
+  const rows = db.prepare(
+    `SELECT pp.steamid, pp.host, pp.ms, pp.loss, COALESCE(p.name, pp.steamid) AS name
+     FROM player_pings pp LEFT JOIN players p ON p.steamid = pp.steamid
+     WHERE pp.at >= ? ORDER BY pp.at DESC`,
+  ).all(since) as { steamid: string; host: string; ms: number; loss: number; name: string }[];
+
+  const byPlayer = new Map<string, { name: string; byHost: Map<string, { ms: number[]; loss: number[] }> }>();
+  for (const r of rows) {
+    let p = byPlayer.get(r.steamid);
+    if (!p) byPlayer.set(r.steamid, p = { name: r.name, byHost: new Map() });
+    let h = p.byHost.get(r.host);
+    if (!h) p.byHost.set(r.host, h = { ms: [], loss: [] });
+    if (h.ms.length < PING_RECENT_ROUNDS) { h.ms.push(r.ms); h.loss.push(r.loss); }
+  }
+
+  // Columns: hosts of today's servers in pick order, then any host only old
+  // samples name (a box since moved or retired), labelled by its address.
+  const servers = db.prepare('SELECT name, host FROM servers ORDER BY COALESCE(pick_order, id), id')
+    .all() as { name: string; host: string }[];
+  const labels = new Map<string, string[]>();
+  for (const s of servers) labels.set(s.host, [...(labels.get(s.host) ?? []), s.name]);
+  const seen = new Set(rows.map((r) => r.host));
+  const hosts = [
+    ...[...labels].filter(([h]) => seen.has(h)).map(([host, names]) => ({ host, label: names.join(' / ') })),
+    ...[...seen].filter((h) => !labels.has(h)).sort().map((host) => ({ host, label: host })),
+  ];
+
+  const players = [...byPlayer].map(([steamid, p]) => ({
+    steamid,
+    name: p.name,
+    cells: Object.fromEntries([...p.byHost].map(([host, h]) => [host, {
+      ms: Math.round(median(h.ms)),
+      rounds: h.ms.length,
+      loss: Math.round(h.loss.reduce((a, b) => a + b, 0) / h.loss.length),
+    }])),
+  })).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  return { hosts, players };
+}

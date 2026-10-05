@@ -1585,7 +1585,17 @@ export const peopleApi = {
     get<{ open: AltHold[]; settled: AltHold[]; clusters: AltCluster[] }>('/api/admin/people/alts', signal),
   liftHold: (id: number) => post<{ ok: true }>(`/api/admin/people/alts/${id}/lift`),
   banFromHold: (id: number, reason: string) => post<{ ok: true }>(`/api/admin/people/alts/${id}/ban`, { reason }),
+  pings: (signal?: AbortSignal) => get<PingTable>('/api/admin/people/pings', signal),
 };
+
+/** Each player's typical ping to each server host (src/serverPick.ts). */
+export interface PingTable {
+  /** In pick order; `label` names the servers on that host. */
+  hosts: { host: string; label: string }[];
+  /** Keyed by host; a host with no recent rounds is absent. */
+  players: { steamid: string; name: string; cells: Record<string, { ms: number; rounds: number; loss: number }> }[];
+  pickByPing: boolean;
+}
 
 /** The state machine behind an appeal (src/appeals/types.ts). */
 export type AppealState = 'open' | 'asked' | 'answered' | 'accepted' | 'shortened' | 'denied' | 'auto_denied' | 'lapsed' | 'moot';

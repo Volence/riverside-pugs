@@ -13,6 +13,7 @@ import { playerFile } from '../admin/playerFile.js';
 import { markLookedAt } from '../admin/reviews.js';
 import { getPlayer } from '../players.js';
 import { resolveAlias } from '../aliases.js';
+import { pingPickEnabled, pingTable } from '../serverPick.js';
 import { altClusters, altHolds, banFromHold, holdById, liftAltHold } from '../altHolds.js';
 
 export interface PeopleRouteOpts {
@@ -136,6 +137,13 @@ export async function peopleRoutes(app: FastifyInstance, opts: PeopleRouteOpts):
     if (!me) return reply;
     const viewer = fileViewer(db, me);
     return { ...altHolds(db, viewer), clusters: altClusters(db, viewer) };
+  });
+
+  /** Every player's typical ping to every server host, the numbers the
+   *  ping chooser picks match servers with (src/serverPick.ts). Staff. */
+  app.get('/api/admin/people/pings', async (req, reply) => {
+    if (!requireMod(req, reply)) return reply;
+    return { ...pingTable(db), pickByPing: pingPickEnabled(db) };
   });
 
   /** Staff, then an open hold on a file this viewer may act on. */
