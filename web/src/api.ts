@@ -1949,6 +1949,9 @@ export interface StagePlayView {
   ordinal: number; type: string; status: 'live' | 'finished'; layout: 'bracket' | 'table';
   groups: { number: number; label: string }[]; rounds: PlayRound[]; standings: PlayStanding[]; advanceCount: number | null;
 }
+/** The Play section of the desk (plan T2 Ruling 17). Mirrors
+ *  src/routes/adminEvents.ts AdminEventPlay. */
+export interface AdminEventPlay { status: string; lockedAt: string | null; startsAt: string; seeded: number; stages: StagePlayView[] }
 export interface EventView {
   slug: string; name: string; status: EventStatus; entryKind: EntryKind; official: boolean; organizerName: string | null;
   bannerKey: string | null; startsAt: string; description: string; teamCap: number | null;
@@ -2389,6 +2392,11 @@ export const adminApi = {
   setEventEntryRoster: (id: number, entryId: number, roster: EntryRoster) => post(`/api/admin/events/${id}/entries/${entryId}/roster`, { roster }),
   disqualifyEventEntry: (id: number, entryId: number, reason: string) => post(`/api/admin/events/${id}/entries/${entryId}/disqualify`, { reason }),
   restoreEventEntry: (id: number, entryId: number) => post(`/api/admin/events/${id}/entries/${entryId}/restore`),
+  /** The Play section (plan T2 Ruling 17). */
+  eventPlay: (id: number, signal?: AbortSignal) => get<AdminEventPlay>(`/api/admin/events/${id}/play`, signal),
+  startEvent: (id: number) => post(`/api/admin/events/${id}/start`),
+  recordEventResult: (id: number, matchId: number, body: { winner: 'a' | 'b'; scoreA?: number; scoreB?: number; forfeit?: boolean }) =>
+    post(`/api/admin/events/${id}/matches/${matchId}/result`, body),
   /** Setup > Rulesets and Game configs (rulesets editor plan). */
   rulesets: (signal?: AbortSignal) => get<{ rulesets: AdminRuleset[] }>('/api/admin/rulesets', signal),
   createRuleset: (copyFrom: number, name: string) => post<{ id: number }>('/api/admin/rulesets', { copyFrom, name }),
