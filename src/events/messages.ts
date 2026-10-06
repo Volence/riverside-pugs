@@ -17,13 +17,23 @@ import { campaignDisplayName } from '../campaignRegistry.js';
  *  T3a Ruling 2). Every player-chosen name goes through escapeName, as in
  *  src/bookings/messages.ts. */
 export type EventNotifyType = 'event_checkin_open' | 'event_dropped' | 'event_roster_added' | 'event_match_room' | 'event_match_forfeit'
-  | 'event_match_connect' | 'event_match_result';
+  | 'event_match_connect' | 'event_match_result' | 'event_match_staff';
+
+/** What staff did on the desk (plan T3c Ruling 17), one sentence each. */
+export type StaffAction = 'ready' | 'veto' | 'lineup' | 'veto_reopened' | 'chapter_replayed' | 'server_moved' | 'grace_extended' | 'hold_released' | 'frozen' | 'unfrozen';
+const STAFF_TEXT: Record<StaffAction, string> = {
+  ready: 'pressed Ready for a team', veto: 'took a veto step for a team', lineup: 'locked a lineup for a team',
+  veto_reopened: 'reopened the veto; the room starts again from the first step',
+  chapter_replayed: 'had a chapter replayed from its start', server_moved: 'moved the match to another server; a new connect line follows',
+  grace_extended: 'extended the time to connect', hold_released: 'released the hold on the match',
+  frozen: 'froze the game; only staff can unfreeze it', unfrozen: 'unfroze the game',
+};
 
 const ROLE_TEXT: Record<R.Role, string> = { starter: 'a starter', sub: 'a sub', coach: 'the coach' };
 
 export function eventMessage(
   db: DB, publicUrl: string, eventId: number, type: EventNotifyType,
-  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' } = {},
+  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server'; what?: StaffAction; detail?: string } = {},
 ): MessagePayload | null {
   const ev = E.getEvent(db, eventId);
   if (!ev) return null;
@@ -46,12 +56,16 @@ export function eventMessage(
       break;
     }
     case 'event_match_connect':
-    case 'event_match_result': {
+    case 'event_match_result':
+    case 'event_match_staff': {
       const m = extra.matchId !== undefined ? P.getMatch(db, extra.matchId) : undefined;
       if (!m || m.entry_a === null || m.entry_b === null) return null;
       const a = escapeName(getEntry(db, m.entry_a)?.name ?? 'Team A');
       const b = escapeName(getEntry(db, m.entry_b)?.name ?? 'Team B');
-      if (type === 'event_match_connect') {
+      if (type === 'event_match_staff') {
+        const detail = extra.detail ? ` (${escapeName(extra.detail)})` : '';
+        content = `${a} vs ${b} in ${event}: staff ${STAFF_TEXT[extra.what ?? 'hold_released']}${detail}.`;
+      } else if (type === 'event_match_connect') {
         const bk = m.booking_id !== null ? getBooking(db, m.booking_id) : undefined;
         const s = bk && bk.server_id !== null ? getServer(db, bk.server_id) : undefined;
         if (!bk || !s) return null;

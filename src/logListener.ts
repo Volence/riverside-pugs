@@ -84,6 +84,15 @@ export class LogListener {
           return;
         }
         if (this.tokens.has(ev.token)) return this.onEvent(ev, rinfo.address, meta);
+        // Plan T3c: when the plugin drops an ended match (the next game's
+        // sm_pug_match, a teardown) it lifts the staff freeze and says so
+        // with that match's token, which was unregistered when the game
+        // ended. Only that one line, only from a game server: it can clear
+        // a freeze and never set one (the series engine also checks the
+        // token is a tournament game's).
+        if (ev.kind === 'admin_pause' && !ev.on && ev.cause === 'reset' && fromGameServer()) {
+          return this.onEvent(ev, rinfo.address, meta);
+        }
         // MATCH_CREATE is the first line that can cause database writes.
         // Admission is therefore pinned to the configured game server's address.
         if (SELF_START_KINDS.has(ev.kind) && fromGameServer()) {

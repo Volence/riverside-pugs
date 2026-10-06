@@ -88,6 +88,11 @@ export interface LilacReason {
   ltarget_team?: number; ltarget_class?: number; ltarget_ghost?: number; lself_team?: number;
 }
 
+/** Why the staff freeze changed on a tournament box (plan T3c Ruling 9): a
+ *  player's !admin, staff (the desk or !lift), the plugin's match reset, or
+ *  an admin's !forceunpause while frozen. */
+export type AdminPauseCause = 'call' | 'staff' | 'reset' | 'forced';
+
 export type LogEvent =
   | { kind: 'match_start'; token: string; map: string }
   | { kind: 'map_result'; token: string; map: string; a: number; b: number }
@@ -115,7 +120,8 @@ export type LogEvent =
   | { kind: 'sub_request'; token: string; by: string; out: string; in: string; map: number }
   // The staff freeze of a tournament box changed (plan T3c). by is null for
   // the site's own command.
-  | { kind: 'admin_pause'; token: string; on: boolean; by: string | null; cause: 'call' | 'staff' | 'reset' }
+  // cause 'forced' (pug-match 0.3.25): an admin's !forceunpause lifted the freeze.
+  | { kind: 'admin_pause'; token: string; on: boolean; by: string | null; cause: AdminPauseCause }
   | { kind: 'player'; token: string; steamid: string; event: 'connect' | 'disconnect' }
   | { kind: 'match_end'; token: string; a: number; b: number; winner: 'a' | 'b' | 'draw' }
   // Emitted by !load_4v4p for a match started in-game rather than by us. The
@@ -922,7 +928,7 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       if (rest.state !== 'on' && rest.state !== 'off') return null;
       const by = rest.by === 'site' || rest.by === undefined ? null : steamId64Of(rest.by);
       if (rest.by !== undefined && rest.by !== 'site' && !by) return null;
-      const cause = rest.cause === 'call' || rest.cause === 'reset' ? rest.cause : 'staff';
+      const cause = rest.cause === 'call' || rest.cause === 'reset' || rest.cause === 'forced' ? rest.cause : 'staff';
       return { kind: 'admin_pause', token, on: rest.state === 'on', by, cause };
     }
     case 'PROBLEM':

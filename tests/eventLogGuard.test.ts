@@ -484,6 +484,11 @@ describe('event_log guard', () => {
         action: 'player_subbed', actor: A[0]!, setup: playing,
         run: (f) => R.subPlayer(f.db, { matchId: f.matchId, by: A[0]!, outId: A[3]!, inId: A[4]!, limit: 2, gameId: game1(f).id, now: at(20) }),
       },
+      revertSub: {
+        action: 'sub_reverted', actor: null,
+        setup: (f) => { playing(f); must(R.subPlayer(f.db, { matchId: f.matchId, by: A[0]!, outId: A[3]!, inId: A[4]!, limit: 2, gameId: game1(f).id, now: at(20) })); },
+        run: (f) => R.revertSub(f.db, { matchId: f.matchId, outId: A[3]!, inId: A[4]!, now: at(21) }),
+      },
       setAdminPause: { action: 'match_frozen', actor: ADMIN, setup: playing, run: (f) => R.setAdminPause(f.db, { matchId: f.matchId, on: true, by: ADMIN, cause: 'staff', now: at(20) }) },
       reopenVeto: { action: 'veto_reopened', actor: ADMIN, setup: toLineups, run: (f) => R.reopenVeto(f.db, { matchId: f.matchId, by: ADMIN, timers: TIMERS, now: at(5) }) },
       extendGrace: { action: 'grace_extended', actor: ADMIN, setup: connecting, run: (f) => R.extendGrace(f.db, { matchId: f.matchId, by: ADMIN, minutes: 5, now: at(6) }) },

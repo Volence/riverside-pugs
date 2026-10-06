@@ -23,6 +23,17 @@ import { ServerReleaser } from '../src/serverRelease.js';
 import { claimIdle, claimableServers } from '../src/serverPool.js';
 import { isHeld } from '../src/serverHolds.js';
 import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistry.js';
+import { EVENT_ERRORS } from '../src/events/validate.js';
+import { adminPauseTook, parseSubReply } from '../src/events/series.js';
+import { recordPresenceLine } from '../src/presence.js';
+
+// addTournamentSub returns null for a game that is not a tournament one; the
+// engine's token lookup cannot reach that, so a test forces it (plan T3c ledger).
+const subHook = vi.hoisted(() => ({ nullNext: false }));
+vi.mock('../src/bookings/tournamentGames.js', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('../src/bookings/tournamentGames.js')>();
+  return { ...orig, addTournamentSub: (...a: Parameters<typeof orig.addTournamentSub>) => (subHook.nullNext ? null : orig.addTournamentSub(...a)) };
+});
 
 let f: SeriesFixture;
 afterEach(() => f?.close());
@@ -893,5 +904,259 @@ describe('BookingRunner on a tournament box (plan T3c)', () => {
     await f.runner.idle();
     expect(f.booking()).toMatchObject({ server_id: old, recovering_at: null, waiting_since: null });
     expect(f.db.prepare('SELECT state FROM matches WHERE id = ?').get(g1)).toEqual({ state: 'live' });
+  });
+});
+
+describe('SeriesEngine: subs from the box (plan T3c)', () => {
+  const live = async () => {
+    f = await seriesFixture();
+    await f.tick();
+    f.box.humans = [...A.slice(0, 4), ...BATS.slice(0, 4), A[4]!];
+    f.goLive(f.gameOf(1).match_id!);
+    return f.liveGameToken();
+  };
+  it('puts a registered member in for a locked player: lineup, booking people, the game roster, the box, a chat line', async () => {
+    const token = await live();
+    const g1 = f.gameOf(1).match_id!;
+    f.sent.length = 0;
+    await f.line(`PUG ${token} SUB by=${A[1]} out=${A[3]} in=${A[4]} map=0`);
+    expect(R.lineupFour(f.db, f.matchId, f.entryA)).toEqual([A[0], A[1], A[2], A[4]]);
+    expect(B.peopleOf(f.db, f.booking().id).filter((p) => p.side === 'a').map((p) => [p.steamid, p.role]).sort()).toEqual([[A[0], 'player'], [A[1], 'player'], [A[2], 'player'], [A[3], 'spectator'], [A[4], 'player']].sort());
+    expect(f.db.prepare('SELECT team, joined_map, source FROM match_players WHERE match_id = ? AND player_id = ?').get(g1, A[4]!)).toEqual({ team: 'b', joined_map: 0, source: 'web' });
+    expect(f.sent).toContain(`sm_pug_sub ${token} ${A[3]} ${A[4]}`);
+    expect(f.sent.some((c) => /^say \[Match\] .+ is in for .+ \(Rats, sub 1 of 2\)\.$/.test(c))).toBe(true);
+    expect(f.pushes).toContain(f.matchId);
+    expect(f.send).not.toHaveBeenCalledWith(expect.anything(), 'event_match_staff', expect.anything());
+    // Later games are rostered with the sub.
+    f.endGame(g1, [{ map: 'm1', a: 100, b: 900 }]);
+    expect(f.match().status).toBe('confirming');
+  });
+
+  it('refuses on the box with the site\'s sentence, and re-sends a sub the box did not take', async () => {
+    const token = await live();
+    f.sent.length = 0;
+    await f.line(`PUG ${token} SUB by=${BATS[0]} out=${A[3]} in=${A[4]} map=0`);
+    expect(f.sent.some((c) => c.startsWith(`say [Match] Sub refused: ${EVENT_ERRORS.not_manager.text}`))).toBe(true);
+    expect(R.lineupFour(f.db, f.matchId, f.entryA)).toEqual(A.slice(0, 4));
+    await f.line(`PUG ${token} SUB by=${A[0]} out=${A[3]} in=${BATS[0]} map=0`);
+    expect(f.sent.some((c) => c.startsWith(`say [Match] Sub refused: ${EVENT_ERRORS.sub_not_member.text}`))).toBe(true);
+    f.box.subOk = false;
+    await f.line(`PUG ${token} SUB by=${A[0]} out=${A[3]} in=${A[4]} map=0`);
+    expect(R.lineupFour(f.db, f.matchId, f.entryA)).toEqual([A[0], A[1], A[2], A[4]]);
+    expect(f.sent.some((c) => c.includes('the server did not take it'))).toBe(true);
+    f.box.subOk = true;
+    f.sent.length = 0;
+    await f.line(`PUG ${token} SUB by=${A[0]} out=${A[3]} in=${A[4]} map=0`);
+    expect(f.sent).toContain(`sm_pug_sub ${token} ${A[3]} ${A[4]}`);
+    expect(R.subsUsed(f.db, f.match(), 'a')).toBe(1);
+  });
+
+  it('counts the stage\'s limit and refuses the third sub of a side', async () => {
+    const token = await live();
+    await f.line(`PUG ${token} SUB by=${A[0]} out=${A[3]} in=${A[4]} map=0`);
+    await f.line(`PUG ${token} SUB by=${A[0]} out=${A[4]} in=${A[3]} map=0`);
+    f.sent.length = 0;
+    await f.line(`PUG ${token} SUB by=${A[0]} out=${A[3]} in=${A[4]} map=0`);
+    expect(f.sent.some((c) => c.startsWith(`say [Match] Sub refused: ${EVENT_ERRORS.sub_limit.text}`))).toBe(true);
+  });
+
+  it('refuses a ringer the booking accepted but the entry never registered, and leaves the booking alone (ledger)', async () => {
+    const token = await live();
+    const b = f.booking().id;
+    f.db.prepare("INSERT INTO booking_people (booking_id, side, steamid, role, status, added_by, added_at) VALUES (?, 'a', ?, 'ringer', 'accepted', ?, ?)")
+      .run(b, A[5]!, A[0]!, new Date(f.t.t).toISOString());
+    const people = B.peopleOf(f.db, b);
+    f.sent.length = 0;
+    await f.line(`PUG ${token} SUB by=${A[0]} out=${A[3]} in=${A[5]} map=0`);
+    expect(f.sent.some((c) => c.startsWith(`say [Match] Sub refused: ${EVENT_ERRORS.sub_not_member.text}`))).toBe(true);
+    expect(f.sent.some((c) => c.startsWith('sm_pug_sub '))).toBe(false);
+    expect(B.peopleOf(f.db, b)).toEqual(people);
+    expect(R.lineupFour(f.db, f.matchId, f.entryA)).toEqual(A.slice(0, 4));
+  });
+
+  it('undoes a sub the box refuses because a chapter is being played, and tells the captain (ledger)', async () => {
+    const token = await live();
+    const g1 = f.gameOf(1).match_id!;
+    const people = B.peopleOf(f.db, f.booking().id);
+    f.box.subOk = false;
+    f.box.subErr = 'not between chapters';
+    f.sent.length = 0;
+    await f.line(`PUG ${token} SUB by=${A[0]} out=${A[3]} in=${A[4]} map=0`);
+    expect(f.sent).toContain(`sm_pug_sub ${token} ${A[3]} ${A[4]}`);
+    expect(f.sent.some((c) => c.startsWith('say [Match] Sub refused: subs are made between chapters'))).toBe(true);
+    expect(R.lineupFour(f.db, f.matchId, f.entryA)).toEqual(A.slice(0, 4));
+    expect(R.subsUsed(f.db, f.match(), 'a')).toBe(0);
+    expect(B.peopleOf(f.db, f.booking().id)).toEqual(people);
+    expect(f.db.prepare('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?').get(g1, A[4]!)).toBeUndefined();
+    // At the next ready-up the same !sub goes through, as the first of two.
+    f.box.subOk = true;
+    f.sent.length = 0;
+    await f.line(`PUG ${token} SUB by=${A[0]} out=${A[3]} in=${A[4]} map=0`);
+    expect(R.lineupFour(f.db, f.matchId, f.entryA)).toEqual([A[0], A[1], A[2], A[4]]);
+    expect(f.sent.some((c) => /\(Rats, sub 1 of 2\)\.$/.test(c))).toBe(true);
+    expect(R.subsUsed(f.db, f.match(), 'a')).toBe(1);
+  });
+
+  it('keeps a recorded sub the box has not taken yet when a re-send meets a chapter in play', async () => {
+    const token = await live();
+    f.box.subOk = false;
+    await f.line(`PUG ${token} SUB by=${A[0]} out=${A[3]} in=${A[4]} map=0`);
+    f.box.subErr = 'not between chapters';
+    f.sent.length = 0;
+    await f.line(`PUG ${token} SUB by=${A[0]} out=${A[3]} in=${A[4]} map=0`);
+    expect(f.sent.some((c) => c.includes('but a chapter is being played. Type the !sub again at the next ready-up.'))).toBe(true);
+    expect(R.lineupFour(f.db, f.matchId, f.entryA)).toEqual([A[0], A[1], A[2], A[4]]);
+    expect(R.subsUsed(f.db, f.match(), 'a')).toBe(1);
+  });
+
+  it('lets the sub stand when the game has no tournament roster row to add (addTournamentSub null, ledger)', async () => {
+    const token = await live();
+    const g1 = f.gameOf(1).match_id!;
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let logged: unknown[][] = [];
+    subHook.nullNext = true;
+    try {
+      await f.line(`PUG ${token} SUB by=${A[0]} out=${A[3]} in=${A[4]} map=0`);
+      logged = [...err.mock.calls];
+    } finally {
+      subHook.nullNext = false;
+      err.mockRestore();
+    }
+    expect(logged.some((c) => String(c[0]).includes(`got no roster row for ${A[4]}`))).toBe(true);
+    expect(R.lineupFour(f.db, f.matchId, f.entryA)).toEqual([A[0], A[1], A[2], A[4]]);
+    expect(f.db.prepare('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?').get(g1, A[4]!)).toBeUndefined();
+    expect(f.sent).toContain(`sm_pug_sub ${token} ${A[3]} ${A[4]}`);
+  });
+
+  it('ignores the subbed-out player\'s PLAYER disconnect: no drop, no hold, the match plays on (ledger)', async () => {
+    const token = await live();
+    await f.line(`PUG ${token} PLAYER event=connect steamid=${A[3]}`);
+    await f.line(`PUG ${token} SUB by=${A[0]} out=${A[3]} in=${A[4]} map=0`);
+    const presence = () => f.db.prepare('SELECT state FROM match_presence WHERE steamid = ?').get(A[3]!);
+    expect(presence()).toEqual({ state: 'connected' });
+    await f.line(`PUG ${token} PLAYER event=disconnect steamid=${A[3]}`);
+    expect(recordPresenceLine(f.db, { kind: 'player', token, steamid: A[3]!, event: 'disconnect' })).toBeNull();
+    f.box.humans = f.box.humans.filter((s) => s !== A[3]);
+    f.t.t += MIN;
+    await f.tick();
+    expect(presence()).toEqual({ state: 'connected' });
+    expect(f.match().status).toBe('live');
+    expect(f.alerts.filter((a) => a.kind === 'problem' || a.kind === 'abandon')).toEqual([]);
+    expect(f.db.prepare('SELECT state FROM matches WHERE id = ?').get(f.gameOf(1).match_id!)).toEqual({ state: 'live' });
+  });
+});
+
+describe('SeriesEngine: the staff freeze (plan T3c)', () => {
+  const live = async () => {
+    f = await seriesFixture();
+    await f.tick();
+    f.goLive(f.gameOf(1).match_id!);
+    return f.liveGameToken();
+  };
+  it('mirrors the box\'s ADMINPAUSE lines, alerting staff on a call', async () => {
+    const token = await live();
+    await f.line(`PUG ${token} ADMINPAUSE state=on by=${A[2]} cause=call`);
+    expect(f.match()).toMatchObject({ admin_pause_at: new Date(f.t.t).toISOString(), admin_pause_by: A[2] });
+    expect(f.alerts.filter((a) => a.kind === 'problem' && a.text.includes('called staff from the server'))).toHaveLength(1);
+    await f.line(`PUG ${token} ADMINPAUSE state=on by=${A[2]} cause=call`);
+    expect(f.alerts.filter((a) => a.kind === 'problem' && a.text.includes('called staff'))).toHaveLength(1);
+    await f.line(`PUG ${token} ADMINPAUSE state=off by=site cause=reset`);
+    expect(f.match().admin_pause_at).toBeNull();
+    await f.line(`PUG ${'0'.repeat(32)} ADMINPAUSE state=on by=site cause=staff`);
+    expect(f.match().admin_pause_at).toBeNull();
+  });
+
+  it('freezes and unfreezes from the desk through the box, telling both rosters', async () => {
+    const token = await live();
+    f.sent.length = 0;
+    const r = await f.series.freeze(f.matchId, ADMIN, true);
+    expect(r.ok).toBe(true);
+    expect(f.sent.find((c) => c.startsWith('sm_pug_adminpause '))).toBe(`sm_pug_adminpause ${token} on "boss"`);
+    expect(f.match().admin_pause_by).toBe(ADMIN);
+    expect(f.send).toHaveBeenCalledWith(expect.arrayContaining([A[0], BATS[0]]), 'event_match_staff', expect.objectContaining({ content: expect.stringContaining('staff froze the game') }));
+    expect(await f.series.freeze(f.matchId, ADMIN, true)).toEqual({ ok: false, error: 'already_frozen' });
+    // The box's own line for the same change is a no-op.
+    await f.line(`PUG ${token} ADMINPAUSE state=on by=site cause=staff`);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM event_log WHERE action = 'match_frozen'").get()).toEqual({ n: 1 });
+    f.box.down = true;
+    expect(await f.series.freeze(f.matchId, ADMIN, false)).toEqual({ ok: false, error: 'no_box' });
+    f.box.down = false;
+    expect((await f.series.freeze(f.matchId, ADMIN, false)).ok).toBe(true);
+    expect(f.match().admin_pause_at).toBeNull();
+    f.endGame(f.gameOf(1).match_id!, [{ map: 'm1', a: 100, b: 900 }]);
+    expect(await f.series.freeze(f.matchId, ADMIN, true)).toEqual({ ok: false, error: 'not_live_phase' });
+  });
+
+  it('records nothing when the box refuses the freeze', async () => {
+    await live();
+    f.box.freezeOk = false;
+    expect(await f.series.freeze(f.matchId, ADMIN, true)).toEqual({ ok: false, error: 'no_box' });
+    expect(f.match().admin_pause_at).toBeNull();
+    expect(f.send).not.toHaveBeenCalledWith(expect.anything(), 'event_match_staff', expect.anything());
+  });
+
+  it('keeps cause forced: an admin\'s !forceunpause lifts the freeze, logged and shown to staff as forced (ledger)', async () => {
+    const token = await live();
+    await f.line(`PUG ${token} ADMINPAUSE state=on by=${A[2]} cause=call`);
+    await f.line(`PUG ${token} ADMINPAUSE state=off by=${ADMIN} cause=forced`);
+    expect(f.match().admin_pause_at).toBeNull();
+    const row = f.db.prepare("SELECT actor, json_extract(detail, '$.cause') AS cause FROM event_log WHERE action = 'match_unfrozen'").get();
+    expect(row).toEqual({ actor: ADMIN, cause: 'forced' });
+    expect(f.alerts.filter((a) => a.kind === 'problem' && a.text.includes('boss lifted the staff freeze in game with !forceunpause (forced)'))).toHaveLength(1);
+  });
+
+  it('takes the reset line an ended game\'s token carries, and never lets it lift a later game\'s freeze (ledger)', async () => {
+    const t1 = await live();
+    const g1 = f.gameOf(1).match_id!;
+    await f.line(`PUG ${t1} ADMINPAUSE state=on by=${A[2]} cause=call`);
+    // The game is aborted under the freeze (staff, the reaper): the match is held and the token is old.
+    f.db.prepare("UPDATE matches SET state = 'aborted', abort_cause = 'admin', ended_at = datetime('now') WHERE id = ?").run(g1);
+    await f.tick();
+    expect(f.match()).toMatchObject({ status: 'admin_hold' });
+    await f.line(`PUG ${t1} ADMINPAUSE state=off by=site cause=reset`);
+    expect(f.match().admin_pause_at).toBeNull();
+  });
+
+  it('a late reset from game 1 leaves the tiebreak\'s freeze alone', async () => {
+    const t1 = await live();
+    const g1 = f.gameOf(1);
+    f.endGame(g1.match_id!, [{ map: 'l4d_vs_hospital02_subway', a: 200, b: 200 }]);
+    f.t.t += MIN;
+    await f.tick();
+    const tb = R.gamesOf(f.db, f.matchId).find((g) => g.tiebreak_of === g1.id)!;
+    expect(tb.match_id).not.toBeNull();
+    f.goLive(tb.match_id!);
+    const t2 = f.liveGameToken();
+    expect(t2).not.toBe(t1);
+    await f.line(`PUG ${t2} ADMINPAUSE state=on by=${A[2]} cause=call`);
+    await f.line(`PUG ${t1} ADMINPAUSE state=off by=site cause=reset`);
+    expect(f.match().admin_pause_by).toBe(A[2]);
+    // The tiebreak's own reset lifts it.
+    await f.line(`PUG ${t2} ADMINPAUSE state=off by=site cause=reset`);
+    expect(f.match().admin_pause_at).toBeNull();
+  });
+});
+
+describe('pug-match 0.3.25 rcon answers (plugin/pug-tourney.inc)', () => {
+  const OUT = '76561199000000804';
+  const IN = '76561199000000805';
+  it('reads sm_pug_sub\'s answers', () => {
+    expect(parseSubReply(`PUGOK sub out=${OUT} in=${IN} slot=8`, OUT, IN)).toEqual({ ok: true, already: false });
+    expect(parseSubReply('PUGOK sub already', OUT, IN)).toEqual({ ok: true, already: true });
+    expect(parseSubReply('PUGERR not between chapters', OUT, IN)).toEqual({ ok: false, error: 'not between chapters' });
+    expect(parseSubReply('PUGERR already rostered\n', OUT, IN)).toEqual({ ok: false, error: 'already rostered' });
+    expect(parseSubReply(`L 10/07/2026 - 20:00:00: noise\nPUGOK sub out=${OUT} in=${IN} slot=3\n`, OUT, IN)).toEqual({ ok: true, already: false });
+    expect(parseSubReply(`PUGOK sub out=${IN} in=${OUT} slot=3`, OUT, IN)).toEqual({ ok: false, error: 'other players' });
+    expect(parseSubReply('Unknown command "sm_pug_sub"', OUT, IN)).toBeNull();
+    expect(parseSubReply('', OUT, IN)).toBeNull();
+    expect(parseSubReply(undefined, OUT, IN)).toBeNull();
+  });
+  it('reads sm_pug_adminpause\'s answers', () => {
+    expect(adminPauseTook('PUGOK adminpause=on frozen=1', true)).toBe(true);
+    expect(adminPauseTook('PUGOK adminpause=off frozen=0\n', false)).toBe(true);
+    expect(adminPauseTook('PUGOK adminpause=on frozen=0', true)).toBe(false);
+    expect(adminPauseTook('PUGOK adminpause=off frozen=0', true)).toBe(false);
+    expect(adminPauseTook('PUGERR bad token', true)).toBe(false);
+    expect(adminPauseTook(null, false)).toBe(false);
   });
 });
