@@ -50,7 +50,7 @@ export function RulesetForm({ ruleset, rules, busy, error, onSave, onCancel }: {
         </FormRow>
         <ToggleRow label="Both teams unpause" help="Unpausing needs both teams to type !unpause." checked={d.pause.mutualUnpause}
           onChange={() => set({ pause: { ...d.pause, mutualUnpause: !d.pause.mutualUnpause } })} />
-        <FormRow label="Technical pauses" help="A separate allowance per team. (0 to 5)" for={id('tech')}>
+        <FormRow label="Technical pauses" help="Technical pauses (!tech) each team may call per game. 0 turns them off. (0 to 5)" for={id('tech')}>
           <input id={id('tech')} aria-label="Technical pauses" type="number" min={0} max={5} value={typed.techPauses} onInput={type('techPauses')} />
         </FormRow>
       </FormGroup>
@@ -79,6 +79,31 @@ export function RulesetForm({ ruleset, rules, busy, error, onSave, onCancel }: {
         </FormRow>
         <ToggleRow label="Side-locked spectating" help="Team spectators see only their own side." checked={d.spectate.sideLocked}
           onChange={() => set({ spectate: { sideLocked: !d.spectate.sideLocked } })} />
+      </FormGroup>
+      <FormGroup title="Tournament play">
+        <p class="muted">These apply on tournament servers only. PUGs and scrims never use them.</p>
+        <FormRow label="Technical time" help="Seconds each team has per game for !tech pauses. Past it a pause uses the team's tactical pauses, then the game unpauses. (60 to 1800)" for={id('techSeconds')}>
+          <input id={id('techSeconds')} aria-label="Technical time" type="number" min={60} max={1800} value={typed.techSeconds} onInput={type('techSeconds')} />
+        </FormRow>
+        <FormRow label="Reconnect time" help="Seconds per team per game while a player is disconnected (the game is paused). At zero the team forfeits the game. (60 to 3600)" for={id('reconnect')}>
+          <input id={id('reconnect')} aria-label="Reconnect time" type="number" min={60} max={3600} value={typed.reconnect} onInput={type('reconnect')} />
+        </FormRow>
+        <FormRow label="Subs per match" help="Substitutions each team may make in a match. (0 to 4)" for={id('subs')}>
+          <input id={id('subs')} aria-label="Subs per match" type="number" min={0} max={4} value={typed.subs} onInput={type('subs')} />
+        </FormRow>
+        <ToggleRow label="Emergency subs" help="While the game is paused for a disconnected player, a captain may !sub a bench player into that slot mid-chapter. It uses one of the match's subs." checked={d.subs.emergency}
+          onChange={() => set({ subs: { ...d.subs, emergency: !d.subs.emergency } })} />
+        {d.subs.emergency && (
+          <FormRow label="Emergency sub cost" help="Seconds of the team's reconnect time an emergency sub uses. 0 for none. (0 to 600)" for={id('subCharge')}>
+            <input id={id('subCharge')} aria-label="Emergency sub cost" type="number" min={0} max={600} value={typed.subCharge} onInput={type('subCharge')} />
+          </FormRow>
+        )}
+        <FormRow label="!admin cooldown" help="Seconds before the same player can call staff with !admin again. (30 to 600)" for={id('cooldown')}>
+          <input id={id('cooldown')} aria-label="!admin cooldown" type="number" min={30} max={600} value={typed.cooldown} onInput={type('cooldown')} />
+        </FormRow>
+        <FormRow label="Next game after" help="Seconds between two games of a series. The server loads the next game on its next minute pass after this. (30 to 600)" for={id('nextGame')}>
+          <input id={id('nextGame')} aria-label="Next game after" type="number" min={30} max={600} value={typed.nextGame} onInput={type('nextGame')} />
+        </FormRow>
       </FormGroup>
       <div class="eventform__actions">
         <button class="btn" type="submit" disabled={busy}>Save ruleset</button>

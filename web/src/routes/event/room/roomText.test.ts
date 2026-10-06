@@ -7,7 +7,7 @@ const v = (over: Partial<MatchRoomView>): MatchRoomView => ({
   a: { id: 1, name: 'Rats', tag: 'RAT', logoKey: null, seed: 1, out: false }, b: { id: 2, name: 'Bats', tag: 'BAT', logoKey: null, seed: 2, out: false },
   phase: 'veto', higher: 'a', deadline: null, serverNow: '2026-10-06T00:00:00.000Z', ready: { a: true, b: true }, vetoSummary: '',
   pool: [], log: [], games: [], next: null, lineups: { a: null, b: null, aLocked: false, bLocked: false }, holdReason: null, result: null, me: null,
-  series: null, server: null, confirm: null, dispute: null, frozen: false, schedule: null,
+  series: null, server: null, confirm: null, dispute: null, frozen: false, schedule: null, pauses: [],
   ...over,
 });
 

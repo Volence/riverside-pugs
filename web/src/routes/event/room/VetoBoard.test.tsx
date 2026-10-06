@@ -14,7 +14,7 @@ const base = (over: Partial<MatchRoomView>): MatchRoomView => ({
   ],
   log: [], games: [], next: { kind: 'ban', by: 'a', game: null, step: 2 }, lineups: { a: null, b: null, aLocked: false, bLocked: false },
   holdReason: null, result: null, me: { side: 'a', manager: true, playable: [], defaultFour: null },
-  series: null, server: null, confirm: null, dispute: null, frozen: false, schedule: null, ...over,
+  series: null, server: null, confirm: null, dispute: null, frozen: false, schedule: null, pauses: [], ...over,
 });
 
 describe('VetoBoard', () => {

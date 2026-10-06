@@ -14,7 +14,7 @@ const view = (over: Partial<MatchRoomView>): MatchRoomView => ({
   pool: [], log: [], games: [], next: null, lineups: { a: null, b: null, aLocked: true, bLocked: true }, holdReason: null, result: null,
   me: { side: 'b', manager: true, playable: [], defaultFour: null },
   series: { bestOf: 3, totalScore: false, winsA: 2, winsB: 1, totalA: 0, totalB: 0, over: true, winner: 'a' }, server: null,
-  confirm: { deadline: '2026-10-06T00:15:00.000Z', a: true, b: false }, dispute: null, frozen: false, schedule: null, ...over,
+  confirm: { deadline: '2026-10-06T00:15:00.000Z', a: true, b: false }, dispute: null, frozen: false, schedule: null, pauses: [], ...over,
 });
 const NOW = Date.parse('2026-10-06T00:05:00.000Z');
 

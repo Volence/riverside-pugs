@@ -12,6 +12,7 @@ import { ServerPanel } from './event/room/ServerPanel';
 import { SeriesPanel } from './event/room/SeriesPanel';
 import { ConfirmPanel } from './event/room/ConfirmPanel';
 import { SchedulePanel } from './event/room/SchedulePanel';
+import { PausePanel } from './event/room/PausePanel';
 
 /** Phases the page refetches in every 10 s. A result can close a room
  *  (server, hold) and a reset can reopen one (waiting) with no push. */
@@ -114,6 +115,12 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
         <Panel>
           <h3>Server</h3>
           <ServerPanel v={v} now={now + offset} />
+        </Panel>
+      )}
+      {v.pauses.length > 0 && (
+        <Panel>
+          <h3>Technical pauses</h3>
+          <PausePanel v={v} />
         </Panel>
       )}
       {v.phase === 'ready' && v.a && v.b && (

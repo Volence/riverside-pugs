@@ -15,14 +15,16 @@ const { AdminRulesets } = await import('./AdminRulesets');
 const { ApiError } = await import('../../../api');
 
 const PUG_RULES: MatchRules = {
-  rated: true, pause: { limit: 3, seconds: 120, mutualUnpause: false, techPauses: 0 }, teamLock: true, playerMapControl: false,
+  rated: true, pause: { limit: 3, seconds: 120, mutualUnpause: false, techPauses: 0, techSeconds: 300 }, teamLock: true, playerMapControl: false,
   restartHalf: { allowed: false, lockAfterDamage: false }, noShowGraceMinutes: 10, penalties: true, bosses: 'random_published',
   sideRule: 'coin', spectate: { sideLocked: false },
+  subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 }, disconnect: { teamSeconds: 600 }, staffCall: { cooldownSeconds: 180 }, series: { nextGameSeconds: 60 },
 };
 const SCRIM_RULES: MatchRules = {
-  rated: false, pause: { limit: null, seconds: null, mutualUnpause: true, techPauses: 0 }, teamLock: true, playerMapControl: true,
+  rated: false, pause: { limit: null, seconds: null, mutualUnpause: true, techPauses: 0, techSeconds: 300 }, teamLock: true, playerMapControl: true,
   restartHalf: { allowed: true, lockAfterDamage: false }, noShowGraceMinutes: 15, penalties: false, bosses: 'random_published',
   sideRule: 'non_picker_chooses', spectate: { sideLocked: false },
+  subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 }, disconnect: { teamSeconds: 600 }, staffCall: { cooldownSeconds: 180 }, series: { nextGameSeconds: 60 },
 };
 const none = { bookings: 0, events: 0 };
 const ROWS: AdminRuleset[] = [
@@ -100,9 +102,10 @@ describe('AdminRulesets', () => {
     const [id, name, rules] = mockAdmin.updateRuleset.mock.calls[0];
     expect([id, name]).toEqual([4, 'Later Night']);
     expect(rules).toEqual({
-      pause: { limit: 2, seconds: null, mutualUnpause: true, techPauses: 0 }, teamLock: true, playerMapControl: true,
+      pause: { limit: 2, seconds: null, mutualUnpause: true, techPauses: 0, techSeconds: 300 }, teamLock: true, playerMapControl: true,
       restartHalf: { allowed: true, lockAfterDamage: true }, noShowGraceMinutes: 20, bosses: 'random_published', sideRule: 'coin',
       spectate: { sideLocked: false },
+      subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 }, disconnect: { teamSeconds: 600 }, staffCall: { cooldownSeconds: 180 }, series: { nextGameSeconds: 60 },
     });
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Save ruleset' })).toBeNull());
   });
@@ -166,5 +169,20 @@ describe('AdminRulesets', () => {
     expect(rowOf('Late Night').contains(message)).toBe(false);
     await waitFor(() => expect(scrolled).toHaveBeenCalled());
     scrolled.mockRestore();
+  });
+
+  it('edits the Tournament play numbers and sends them with the rest (plan T5)', async () => {
+    render(<AdminRulesets />);
+    await screen.findByText('Late Night', { selector: 'strong' });
+    fireEvent.click(within(rowOf('Late Night')).button('Edit')!);
+    expect(await screen.findByText('Tournament play')).toBeTruthy();
+    fireEvent.input(screen.getByLabelText('Reconnect time'), { target: { value: '900' } });
+    fireEvent.input(screen.getByLabelText('Technical time'), { target: { value: '240' } });
+    fireEvent.click(screen.getByLabelText('Emergency subs'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save ruleset' }));
+    await waitFor(() => expect(mockAdmin.updateRuleset).toHaveBeenCalledWith(4, 'Late Night', expect.objectContaining({
+      pause: expect.objectContaining({ techSeconds: 240 }), disconnect: { teamSeconds: 900 }, subs: expect.objectContaining({ emergency: false }),
+    })));
+    expect(screen.queryByLabelText('Emergency sub cost')).toBeNull();
   });
 });

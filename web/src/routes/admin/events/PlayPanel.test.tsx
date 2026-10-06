@@ -10,7 +10,7 @@ const { mockAdmin } = vi.hoisted(() => ({
     openEventRoom: vi.fn(), resetEventRoom: vi.fn(), holdEventMatch: vi.fn(),
     actForTeam: vi.fn(), reopenEventVeto: vi.fn(), replayEventChapter: vi.fn(), moveEventServer: vi.fn(),
     extendEventGrace: vi.fn(), releaseEventHold: vi.fn(), freezeEventMatch: vi.fn(), unfreezeEventMatch: vi.fn(),
-    setEventMatchTime: vi.fn(),
+    setEventMatchTime: vi.fn(), techPenaltyEventMatch: vi.fn(),
   },
 }));
 vi.mock('../../../api', async (importOriginal) => {
@@ -240,7 +240,7 @@ describe('PlayPanel', () => {
   });
 
   const desk = (over: Partial<NonNullable<PlayMatch['desk']>> = {}): NonNullable<PlayMatch['desk']> => ({
-    holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 }, schedule: null, ...over,
+    holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 }, schedule: null, pauses: [], ...over,
   });
 
   it('shows the hold reason, the dispute and the freeze on the desk (plan T3c)', async () => {
@@ -367,7 +367,7 @@ describe('PlayPanel', () => {
 
   it('shows a window match\'s time, window and open proposal, and sets a time (plan T4)', async () => {
     const desk2 = {
-      holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 },
+      holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 }, pauses: [],
       schedule: { windowStart: '2026-10-12T00:00:00.000Z', windowEnd: '2026-10-18T23:59:59.000Z', proposal: { side: 'b' as const, byName: 'bob', time: '2026-10-16T20:00:00.000Z', autoAcceptAt: null }, proposals: 2 },
     };
     mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false,
@@ -385,7 +385,7 @@ describe('PlayPanel', () => {
 
   it('shows "1 proposal" in the singular (plan T4 review)', async () => {
     const desk2 = {
-      holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 },
+      holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 }, pauses: [],
       schedule: { windowStart: '2026-10-12T00:00:00.000Z', windowEnd: '2026-10-18T23:59:59.000Z', proposal: { side: 'b' as const, byName: 'bob', time: '2026-10-16T20:00:00.000Z', autoAcceptAt: null }, proposals: 1 },
     };
     mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false,
@@ -397,7 +397,7 @@ describe('PlayPanel', () => {
 
   it('offers Set time on a match held at its window end, and says a release leaves it waiting for a time (final review)', async () => {
     const desk2 = {
-      holdReason: 'window_expired', holdFrom: 'waiting', dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 },
+      holdReason: 'window_expired', holdFrom: 'waiting', dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 }, pauses: [],
       schedule: { windowStart: '2026-10-12T00:00:00.000Z', windowEnd: '2026-10-18T23:59:59.000Z', proposal: null, proposals: 1 },
     };
     mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false,
@@ -415,7 +415,7 @@ describe('PlayPanel', () => {
 
   it('does not clear the Set time input when the save fails', async () => {
     const desk2 = {
-      holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 },
+      holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 }, pauses: [],
       schedule: { windowStart: '2026-10-12T00:00:00.000Z', windowEnd: '2026-10-18T23:59:59.000Z', proposal: null, proposals: 0 },
     };
     mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false,
@@ -427,5 +427,38 @@ describe('PlayPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Set time' }));
     await waitFor(() => expect(mockAdmin.setEventMatchTime).toHaveBeenCalled());
     expect((screen.getByLabelText('Match time') as HTMLInputElement).value).toBe('2026-10-17T21:00');
+  });
+
+  it('warns over a technical pause, and offers Forfeit the game only for the game being played (plan T5)', async () => {
+    const p = { id: 31, game: 1, tiebreak: false, side: 'a' as const, cause: 'call' as const, reason: 'router', startedAt: '2026-10-10T21:00:00.000Z', endedAt: null,
+      usedS: 40, budgetS: 300, overrun: false, flagged: true, flagNote: 'looks fake', penalty: null, byName: 'Ann', flaggedBy: 'Bob', penaltyNote: null, live: true };
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [
+      m({ status: 'live', phase: 'live', desk: desk({ pauses: [p, { ...p, id: 32, live: false, flagged: false, flaggedBy: null }] }) }),
+    ] }] }] }));
+    for (const fn of Object.values(mockAdmin)) if (fn !== mockAdmin.eventPlay) (fn as Mock).mockResolvedValue({});
+    render(<PlayPanel eventId={9} canEdit />);
+    fireEvent.click(await screen.findByText('Staff tools: Rats vs Bats'));
+    expect(screen.getByText(/Game 1, Rats, technical: "router" by Ann, flagged by Bob/)).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Forfeit the game' })).toHaveLength(1);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Warn' })[1]!);
+    await waitFor(() => expect(mockAdmin.techPenaltyEventMatch).toHaveBeenCalledWith(9, 7, 32, 'warning'));
+    fireEvent.click(screen.getByRole('button', { name: 'Forfeit the game' }));
+    await waitFor(() => expect(mockAdmin.techPenaltyEventMatch).toHaveBeenCalledWith(9, 7, 31, 'forfeit'));
+    expect(confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows a refused penalty in plain words and a ruled pause without buttons (plan T5)', async () => {
+    const p = { id: 31, game: 1, tiebreak: false, side: 'b' as const, cause: 'disconnect' as const, reason: null, startedAt: '2026-10-10T21:00:00.000Z', endedAt: null,
+      usedS: 40, budgetS: 600, overrun: false, flagged: false, flagNote: null, penalty: null, byName: null, flaggedBy: null, penaltyNote: null, live: true };
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [
+      m({ status: 'live', phase: 'live', desk: desk({ pauses: [p, { ...p, id: 32, penalty: 'warning', penaltyNote: 'second time' }] }) }),
+    ] }] }] }));
+    mockAdmin.techPenaltyEventMatch.mockRejectedValue(new ApiError(409, 'This match has no running server to send that to.'));
+    render(<PlayPanel eventId={9} canEdit />);
+    fireEvent.click(await screen.findByText('Staff tools: Rats vs Bats'));
+    expect(screen.getByText(/Game 1, Bats, disconnect \(warned: second time\)/)).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Warn' })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Forfeit the game' }));
+    expect(await screen.findByText('This match has no running server to send that to.')).toBeTruthy();
   });
 });

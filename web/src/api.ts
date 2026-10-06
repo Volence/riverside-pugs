@@ -1960,6 +1960,8 @@ export interface PlayMatchDesk {
   subs: { a: number; b: number };
   /** Plan T4: a window stage's match only. */
   schedule: { windowStart: string | null; windowEnd: string | null; proposal: { side: 'a' | 'b'; byName: string; time: string; autoAcceptAt: string | null } | null; proposals: number } | null;
+  /** Plan T5: the match's technical pauses with who called, flagged and ruled. */
+  pauses: DeskPause[];
 }
 /** dates: a league round's week, first and last day (YYYY-MM-DD); null for
  *  every other stage type. defaultAt: a window round's default time or a
@@ -2078,7 +2080,17 @@ export interface MatchRoomView {
   frozen: boolean;
   /** Plan T4: null on a rolling stage. */
   schedule: RoomSchedule | null;
+  /** Plan T5: every technical pause of the match. */
+  pauses: RoomPause[];
 }
+/** Mirrors src/events/pauseViews.ts RoomPause and DeskPause (plan T5). reason
+ *  and flagNote are null unless the viewer is on either team or staff. */
+export interface RoomPause {
+  id: number; game: number; tiebreak: boolean; side: 'a' | 'b'; cause: 'call' | 'disconnect';
+  reason: string | null; startedAt: string; endedAt: string | null; usedS: number; budgetS: number;
+  overrun: boolean; flagged: boolean; flagNote: string | null; penalty: 'warning' | 'forfeit' | null;
+}
+export interface DeskPause extends RoomPause { byName: string | null; flaggedBy: string | null; penaltyNote: string | null; live: boolean }
 export interface PrefsView {
   entryId: number; defaultFour: string[] | null; side: 'survivors' | 'infected' | null; roster: RoomPlayer[];
   stages: { stageId: number; ordinal: number; pool: { slug: string; name: string }[]; order: string[] }[];
@@ -2405,7 +2417,7 @@ export interface RulesetOption { id: number; name: string; summary: string }
 /** Mirrors src/rulesets.ts MatchRules. */
 export interface MatchRules {
   rated: boolean;
-  pause: { limit: number | null; seconds: number | null; mutualUnpause: boolean; techPauses: number };
+  pause: { limit: number | null; seconds: number | null; mutualUnpause: boolean; techPauses: number; techSeconds: number };
   teamLock: boolean;
   playerMapControl: boolean;
   restartHalf: { allowed: boolean; lockAfterDamage: boolean };
@@ -2414,6 +2426,10 @@ export interface MatchRules {
   bosses: 'random_published' | 'fixed' | 'voteboss';
   sideRule: 'higher_seed_chooses' | 'non_picker_chooses' | 'coin';
   spectate: { sideLocked: boolean };
+  subs: { perMatch: number; emergency: boolean; emergencyChargeSeconds: number };
+  disconnect: { teamSeconds: number };
+  staffCall: { cooldownSeconds: number };
+  series: { nextGameSeconds: number };
 }
 /** What the Rulesets editor sends: everything but rated and penalties,
  *  which the server sets to false on every ruleset but PUG. */
@@ -2539,6 +2555,8 @@ export const adminApi = {
   releaseEventHold: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/release-hold`),
   freezeEventMatch: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/freeze`),
   unfreezeEventMatch: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/unfreeze`),
+  techPenaltyEventMatch: (id: number, matchId: number, pauseId: number, penalty: 'warning' | 'forfeit') =>
+    post(`/api/admin/events/${id}/matches/${matchId}/tech-penalty`, { pauseId, penalty }),
   /** Plan T4: a stage's round schedule, and a match's time set by staff. */
   setRoundSchedule: (id: number, stageId: number, rounds: RoundSchedule[]) => post<{ stamped: number }>(`/api/admin/events/${id}/stages/${stageId}/schedule`, { rounds }),
   setEventMatchTime: (id: number, matchId: number, time: string) => post(`/api/admin/events/${id}/matches/${matchId}/set-time`, { time }),
