@@ -4,7 +4,7 @@ import * as E from './events.js';
 import * as N from './entries.js';
 import * as P from './play.js';
 import * as V from './validate.js';
-import { isHumanStep, vetoState, type Side, type VetoAction, type VetoInput, type VetoState } from './veto.js';
+import { applyVeto, isHumanStep, vetoState, type Side, type VetoAction, type VetoActionKind, type VetoInput, type VetoState } from './veto.js';
 
 /**
  * The match room (tournaments plan T3a): the only writer of the room
@@ -25,8 +25,9 @@ export interface LineupRow { id: number; event_match_id: number; game: number; e
 
 const iso = (now?: Date): string => (now ?? new Date()).toISOString();
 const plus = (now: Date, ms: number): string => new Date(now.getTime() + ms).toISOString();
-/** Statuses where an entry counts as busy for opening another room. */
-const BUSY_SQL = "('veto','lineup','booking','connect','live','confirming','admin_hold')";
+/** Statuses where an entry counts as busy for opening another room, built
+ *  from P.ROOM_OPEN so the two cannot drift apart. */
+const BUSY_SQL = `(${[...P.ROOM_OPEN].map((s) => `'${s}'`).join(',')})`;
 
 export function roomTimers(db: DB): RoomTimers {
   return {
@@ -170,8 +171,9 @@ export function holdMatch(db: DB, o: { matchId: number; by: string | null; reaso
     const m = P.getMatch(db, o.matchId);
     if (!m) return V.fail('match_not_found');
     if (!HOLDABLE.has(m.status)) return V.fail('wrong_status');
-    db.prepare("UPDATE event_matches SET status = 'admin_hold', hold_reason = ?, deadline = NULL WHERE id = ?").run(o.reason.slice(0, 300), m.id);
-    E.logEvent(db, m.event_id, o.by, 'match_held', at, { matchId: m.id, reason: o.reason.slice(0, 300) });
+    const reason = o.reason.slice(0, 300);
+    db.prepare("UPDATE event_matches SET status = 'admin_hold', hold_reason = ?, deadline = NULL WHERE id = ?").run(reason, m.id);
+    E.logEvent(db, m.event_id, o.by, 'match_held', at, { matchId: m.id, reason });
     return V.ok(P.getMatch(db, m.id)!);
   })();
 }
@@ -209,5 +211,144 @@ export function resumeDeadline(db: DB, o: { matchId: number; timers: RoomTimers;
     db.prepare('UPDATE event_matches SET deadline = ? WHERE id = ?').run(plus(now, ms), m.id);
     E.logEvent(db, m.event_id, null, 'room_resumed', at, { matchId: m.id, was: m.deadline });
     return V.ok(P.getMatch(db, m.id)!);
+  })();
+}
+
+const ACTIONS: ReadonlySet<string> = new Set(['first', 'second', 'ban', 'pick', 'survivors', 'infected']);
+
+export function actVeto(
+  db: DB, o: { matchId: number; steamid: string | null; step: number; action: unknown; campaign: unknown; timers: RoomTimers; now?: Date },
+): V.Checked<P.MatchRow> {
+  const now = o.now ?? new Date();
+  const at = iso(now);
+  return db.transaction((): V.Checked<P.MatchRow> => {
+    const c = liveMatch(db, o.matchId);
+    if (!c.ok) return c;
+    const { m, ev } = c.value;
+    if (m.status !== 'veto' || m.ready_a_at === null || m.ready_b_at === null) return V.fail('not_veto_phase');
+    const inp = vetoInput(db, m);
+    const st = vetoState(inp);
+    if (o.step !== inp.actions.length || !isHumanStep(st.next)) return V.fail('step_taken');
+    let side: Side;
+    if (o.steamid === null) {
+      side = st.next.by;
+    } else {
+      const s = sideOf(db, m, o.steamid);
+      if (!s) return V.fail('not_manager');
+      side = s;
+    }
+    if (typeof o.action !== 'string' || !ACTIONS.has(o.action) || !(o.campaign === null || o.campaign === undefined || typeof o.campaign === 'string')) {
+      return V.fail('bad_veto_action');
+    }
+    const a: VetoAction = { side, action: o.action as VetoActionKind, campaign: (o.campaign as string | null | undefined) ?? null, auto: o.steamid === null };
+    const r = applyVeto(inp, a);
+    if (!r.ok) return V.fail(r.code);
+    db.prepare(
+      `INSERT INTO event_vetoes (event_match_id, step, side, entry_id, action, campaign, by_steamid, auto, at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(m.id, o.step, side, entryOn(m, side), a.action, a.campaign, o.steamid, a.auto ? 1 : 0, at);
+    advance(db, m.id, o.timers, now);
+    E.logEvent(db, ev.id, o.steamid, 'veto_action', at, { matchId: m.id, step: o.step, side, action: a.action, campaign: a.campaign, auto: a.auto });
+    return V.ok(P.getMatch(db, m.id)!);
+  })();
+}
+
+/** Exactly four different players from the playable list, or null. */
+function readFour(raw: unknown, playable: string[]): string[] | null {
+  if (!Array.isArray(raw) || raw.length !== 4 || new Set(raw).size !== 4) return null;
+  return raw.every((s) => typeof s === 'string' && playable.includes(s)) ? (raw as string[]) : null;
+}
+
+export function lastFour(db: DB, entryId: number): string[] | null {
+  const row = db.prepare('SELECT steamids FROM event_lineups WHERE entry_id = ? ORDER BY locked_at DESC, id DESC LIMIT 1').get(entryId) as
+    { steamids: string } | undefined;
+  return row ? JSON.parse(row.steamids) as string[] : null;
+}
+
+/** Ruling 9: the default four, else the last four, else the roster order.
+ *  May return fewer than four when the roster is short; lockLineup then
+ *  refuses it and the clock holds the match. */
+export function autoFour(o: { defaultFour: string[] | null; lastFour: string[] | null; playable: string[] }): string[] {
+  for (const four of [o.defaultFour, o.lastFour]) if (four && four.length === 4 && four.every((s) => o.playable.includes(s))) return four;
+  return o.playable.slice(0, 4);
+}
+
+export function lockLineup(
+  db: DB, o: { matchId: number; steamid: string | null; side?: Side; steamids: unknown; timers: RoomTimers; now?: Date },
+): V.Checked<P.MatchRow> {
+  const at = iso(o.now);
+  return db.transaction((): V.Checked<P.MatchRow> => {
+    const c = liveMatch(db, o.matchId);
+    if (!c.ok) return c;
+    const { m, ev } = c.value;
+    if (m.status !== 'lineup') return V.fail('not_lineup_phase');
+    const side = o.steamid === null ? o.side ?? null : sideOf(db, m, o.steamid);
+    if (!side) return V.fail('not_manager');
+    const entryId = entryOn(m, side);
+    if (lineupsOf(db, m.id).some((l) => l.game === 1 && l.entry_id === entryId)) return V.fail('lineup_locked');
+    const four = readFour(o.steamids, playableOf(db, entryId));
+    if (!four) return V.fail('bad_lineup');
+    db.prepare('INSERT INTO event_lineups (event_match_id, game, entry_id, steamids, locked_by, auto, locked_at) VALUES (?, 1, ?, ?, ?, ?, ?)')
+      .run(m.id, entryId, JSON.stringify(four), o.steamid, o.steamid === null ? 1 : 0, at);
+    if (lineupsOf(db, m.id).filter((l) => l.game === 1).length === 2) {
+      db.prepare("UPDATE event_matches SET status = 'booking', deadline = NULL WHERE id = ?").run(m.id);
+    }
+    E.logEvent(db, ev.id, o.steamid, 'lineup_locked', at, { matchId: m.id, side, auto: o.steamid === null });
+    return V.ok(P.getMatch(db, m.id)!);
+  })();
+}
+
+export function entryPrefs(db: DB, entryId: number): { defaultFour: string[] | null; side: 'survivors' | 'infected' | null } {
+  const row = db.prepare('SELECT default_four, side FROM event_entry_prefs WHERE entry_id = ?').get(entryId) as
+    { default_four: string | null; side: 'survivors' | 'infected' | null } | undefined;
+  return { defaultFour: row?.default_four ? JSON.parse(row.default_four) as string[] : null, side: row?.side ?? null };
+}
+export function campaignPrefs(db: DB, entryId: number, stageId: number): string[] {
+  const row = db.prepare('SELECT campaigns FROM event_campaign_prefs WHERE entry_id = ? AND stage_id = ?').get(entryId, stageId) as
+    { campaigns: string } | undefined;
+  return row ? JSON.parse(row.campaigns) as string[] : [];
+}
+
+const PREFS_OPEN: ReadonlySet<string> = new Set(['announced', 'registration', 'checkin', 'live']);
+
+/** A team's managers (or staff) save what the timers act from. Stages not
+ *  named keep their saved order. */
+export function savePrefs(db: DB, o: { entryId: number; by: string; staff: boolean; prefs: unknown; now?: Date }): V.Checked<null> {
+  const at = iso(o.now);
+  return db.transaction((): V.Checked<null> => {
+    const entry = N.getEntry(db, o.entryId);
+    if (!entry) return V.fail('entry_not_found');
+    const ev = E.getEvent(db, entry.event_id)!;
+    if (!PREFS_OPEN.has(ev.status) || !N.isActive(entry)) return V.fail('entry_out');
+    if (!o.staff && !N.managersOf(db, entry.team_id).includes(o.by)) return V.fail('not_manager');
+    const p = o.prefs as { defaultFour?: unknown; side?: unknown; campaigns?: unknown } | null;
+    if (typeof p !== 'object' || p === null) return V.fail('bad_prefs');
+    const four = p.defaultFour === null || p.defaultFour === undefined ? null : readFour(p.defaultFour, playableOf(db, entry.id));
+    if (four === null && p.defaultFour !== null && p.defaultFour !== undefined) return V.fail('bad_prefs');
+    const side = p.side ?? null;
+    if (side !== null && side !== 'survivors' && side !== 'infected') return V.fail('bad_prefs');
+    const campaigns = p.campaigns ?? {};
+    if (typeof campaigns !== 'object' || campaigns === null || Array.isArray(campaigns)) return V.fail('bad_prefs');
+    const stages = new Map(E.stagesOf(db, ev.id).map((s) => [String(s.id), E.stageSettingsOf(s).campaignPool]));
+    const orders: [number, string[]][] = [];
+    for (const [key, list] of Object.entries(campaigns as Record<string, unknown>)) {
+      const pool = stages.get(key);
+      if (!pool || !Array.isArray(list) || new Set(list).size !== list.length || !list.every((c) => typeof c === 'string' && pool.includes(c))) {
+        return V.fail('bad_prefs');
+      }
+      orders.push([Number(key), list as string[]]);
+    }
+    db.prepare(
+      `INSERT INTO event_entry_prefs (entry_id, default_four, side, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (entry_id) DO UPDATE SET default_four = excluded.default_four, side = excluded.side,
+         updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+    ).run(entry.id, four ? JSON.stringify(four) : null, side, o.by, at);
+    const up = db.prepare(
+      `INSERT INTO event_campaign_prefs (entry_id, stage_id, campaigns, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (entry_id, stage_id) DO UPDATE SET campaigns = excluded.campaigns, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+    );
+    for (const [stageId, list] of orders) up.run(entry.id, stageId, JSON.stringify(list), o.by, at);
+    E.logEvent(db, ev.id, o.by, 'prefs_saved', at, { entryId: entry.id, stages: orders.map(([s]) => s) });
+    return V.ok(null);
   })();
 }
