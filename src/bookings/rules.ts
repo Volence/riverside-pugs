@@ -13,6 +13,21 @@ import type { BookingRow } from './bookings.js';
  */
 
 export type BookingState = 'scheduled' | 'held' | 'setup' | 'ready' | 'active' | 'ended' | 'cancelled' | 'no_show';
+
+export type BookingPurpose = 'scrim' | 'tournament';
+
+/** Who gets the next free box among bookings (server priority, Ruling 2):
+ *  a tournament match before a scrim, then the earlier start, then the
+ *  older row. The runner walks its queue in this order; the holds view
+ *  (src/serverHolds.ts) keeps one rank for every booking. */
+export const PURPOSE_RANK: Record<BookingPurpose, number> = { tournament: 0, scrim: 1 };
+
+export function byPriority(a: Pick<BookingRow, 'purpose' | 'starts_at' | 'id'>, b: Pick<BookingRow, 'purpose' | 'starts_at' | 'id'>): number {
+  return PURPOSE_RANK[a.purpose] - PURPOSE_RANK[b.purpose]
+    || (a.starts_at < b.starts_at ? -1 : a.starts_at > b.starts_at ? 1 : 0)
+    || a.id - b.id;
+}
+
 /** States that still take up a slot of capacity. A row whose end has
  *  started (ending_at set) does not, whatever its state says. */
 export const OPEN_STATES_SQL = "('scheduled','held','setup','ready','active')";
@@ -37,7 +52,7 @@ export const iso = (ms: number): string => new Date(ms).toISOString();
 
 export interface BookingLimits {
   minMinutes: number; daysAhead: number; playlistMax: number; maxUpcoming: number;
-  reserve: number; holdLeadMinutes: number; protectMinutes: number; idleEndMinutes: number;
+  reserve: number; scrimMax: number; holdLeadMinutes: number; protectMinutes: number; idleEndMinutes: number;
   goneMinutes: number; recoverWaitMinutes: number;
 }
 
@@ -55,6 +70,7 @@ export function bookingLimits(db: DB): BookingLimits {
     playlistMax: n('booking_playlist_max', 4, 1, 8),
     maxUpcoming: n('booking_max_upcoming', 4, 1, 20),
     reserve: n('pug_reserve_servers', 2, 0, 10),
+    scrimMax: n('scrim_max_servers', 2, 0, 10),
     holdLeadMinutes,
     // Never shorter than the lead: a box kept back must still be kept at T-lead.
     protectMinutes: Math.max(holdLeadMinutes, n('booking_protect_minutes', 75, 5, 180)),
@@ -70,32 +86,48 @@ function enabledServers(db: DB, region: string): number {
 
 /**
  * The capacity rule: at every moment of [startMs, endMs), enabled servers in
- * the region minus overlapping bookings stays at or above pug_reserve_servers.
- * Null when the new booking fits; otherwise the first moment it would not.
+ * the region minus overlapping bookings stays at or above pug_reserve_servers,
+ * and for a scrim (the default purpose) the scrims running at once stay at or
+ * under scrim_max_servers (server priority, Ruling 3). Null when the new
+ * booking fits; otherwise the first moment it would not.
  *
  * Overlap is half-open, so back-to-back bookings never overlap. The number of
  * bookings running at once only rises at a booking's start, so checking the
- * new booking's own start and every other start inside it is enough.
+ * new booking's own start and every other start inside it is enough. A
+ * tournament booking and a scheduled match count toward the room but never
+ * toward the scrim cap.
  */
-export function capacityProblem(db: DB, o: { region: string; startMs: number; endMs: number; exceptId?: number }): number | null {
-  const room = enabledServers(db, o.region) - bookingLimits(db).reserve;
+export function capacityProblem(db: DB, o: { region: string; startMs: number; endMs: number; exceptId?: number; purpose?: BookingPurpose }): number | null {
+  const limits = bookingLimits(db);
+  const room = enabledServers(db, o.region) - limits.reserve;
   if (room < 1) return o.startMs;
+  const scrim = (o.purpose ?? 'scrim') === 'scrim';
+  if (scrim && limits.scrimMax < 1) return o.startMs;
   const rows = [
     ...(db.prepare(
-      `SELECT starts_at, ends_at FROM bookings
+      `SELECT starts_at, ends_at, purpose FROM bookings
         WHERE region = ? AND state IN ${OPEN_STATES_SQL} AND ending_at IS NULL AND id != ?
           AND starts_at < ? AND ends_at > ?`,
-    ).all(o.region, o.exceptId ?? 0, iso(o.endMs), iso(o.startMs)) as { starts_at: string; ends_at: string }[])
-      .map((r) => ({ s: Date.parse(r.starts_at), e: Date.parse(r.ends_at) })),
+    ).all(o.region, o.exceptId ?? 0, iso(o.endMs), iso(o.startMs)) as { starts_at: string; ends_at: string; purpose: BookingPurpose }[])
+      .map((r) => ({ s: Date.parse(r.starts_at), e: Date.parse(r.ends_at), scrim: r.purpose === 'scrim' })),
     // Plan T4 Ruling 5: a scheduled tournament match holds a box before it is booked.
-    ...scheduledMatchSlots(db, o.region, o.startMs, o.endMs),
+    ...scheduledMatchSlots(db, o.region, o.startMs, o.endMs).map((r) => ({ ...r, scrim: false })),
   ];
   const points = [o.startMs, ...rows.map((r) => r.s).filter((s) => s > o.startMs)].sort((x, y) => x - y);
   for (const t of points) {
-    const running = rows.filter((r) => r.s <= t && r.e > t).length;
-    if (running + 1 > room) return t;
+    const running = rows.filter((r) => r.s <= t && r.e > t);
+    if (running.length + 1 > room) return t;
+    if (scrim && running.filter((r) => r.scrim).length + 1 > limits.scrimMax) return t;
   }
   return null;
+}
+
+/** Boxes scrims hold right now, from the hold to the end of the wind-down
+ *  (the Live board's "N of max", Ruling 9). With a region, that region only. */
+export function scrimsHolding(db: DB, region: string | null = null): number {
+  return (db.prepare(
+    "SELECT COUNT(*) AS n FROM bookings WHERE purpose = 'scrim' AND server_id IS NOT NULL AND ended_at IS NULL AND (? IS NULL OR region = ?)",
+  ).get(region, region) as { n: number }).n;
 }
 
 /** Who an allowance belongs to: a team, or the captain of a pickup group

@@ -1470,6 +1470,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   booking_allow_block_minutes: '30',
   booking_gone_minutes: '3',
   booking_recover_wait_minutes: '20',
+  // Server priority (owner, 2026-10-07): how many scrims may overlap at any
+  // moment, so tournament matches keep room beside the PUG reserve.
+  scrim_max_servers: '2',
   // Tournaments plan T3a: the match room's timers.
   event_ready_minutes: '10',
   event_veto_step_seconds: '60',

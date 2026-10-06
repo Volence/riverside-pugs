@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import {
-  addCampaignMinutes, allowance, bookingLimits, bookingsDue, capacityProblem, estimateMinutes, playlistMinutes, recentNoShows,
-  typicalCampaignMinutes, upcomingCount, DEFAULT_CAMPAIGN_MINUTES, scheduledMatchSlots, EVENT_SLOT_MINUTES,
+  addCampaignMinutes, allowance, bookingLimits, bookingsDue, byPriority, capacityProblem, estimateMinutes, playlistMinutes, recentNoShows,
+  scrimsHolding, typicalCampaignMinutes, upcomingCount, DEFAULT_CAMPAIGN_MINUTES, scheduledMatchSlots, EVENT_SLOT_MINUTES,
 } from '../src/bookings/rules.js';
 
 const A = '76561199000000501';
@@ -22,11 +22,11 @@ const servers = (n: number, region = 'na') => {
       .run(`s${i}`, 27015 + i, region);
   }
 };
-const book = (startMs: number, endMs: number, o: { state?: string; captain?: string; teamId?: number | null; bConfirmed?: boolean; serverId?: number | null } = {}) => {
+const book = (startMs: number, endMs: number, o: { state?: string; captain?: string; teamId?: number | null; bConfirmed?: boolean; serverId?: number | null; purpose?: 'scrim' | 'tournament' } = {}) => {
   const id = Number(db.prepare(
     `INSERT INTO bookings (purpose, starts_at, ends_at, state, server_id, password, tv_password, game_config, rules_json, playlist_json, created_by, created_at)
-     VALUES ('scrim', ?, ?, ?, ?, 'p', 't', 'standard', '{}', '[]', ?, 'x')`,
-  ).run(new Date(startMs).toISOString(), new Date(endMs).toISOString(), o.state ?? 'scheduled', o.serverId ?? null, o.captain ?? A).lastInsertRowid);
+     VALUES (?, ?, ?, ?, ?, 'p', 't', 'standard', '{}', '[]', ?, 'x')`,
+  ).run(o.purpose ?? 'scrim', new Date(startMs).toISOString(), new Date(endMs).toISOString(), o.state ?? 'scheduled', o.serverId ?? null, o.captain ?? A).lastInsertRowid);
   db.prepare("INSERT INTO booking_sides (booking_id, side, team_id, captain_steamid, confirmed_at) VALUES (?, 'a', ?, ?, 'x')")
     .run(id, o.teamId ?? null, o.captain ?? A);
   db.prepare("INSERT INTO booking_sides (booking_id, side, captain_steamid, confirmed_at) VALUES (?, 'b', ?, ?)")
@@ -34,6 +34,7 @@ const book = (startMs: number, endMs: number, o: { state?: string; captain?: str
   return id;
 };
 const setReserve = (n: number) => db.prepare("UPDATE settings SET value = ? WHERE key = 'pug_reserve_servers'").run(String(n));
+const setScrimMax = (n: number) => db.prepare("UPDATE settings SET value = ? WHERE key = 'scrim_max_servers'").run(String(n));
 
 describe('capacity', () => {
   it('fits while enabled minus overlapping bookings stays at or above the reserve', () => {
@@ -153,6 +154,37 @@ describe('capacity', () => {
     expect(count()).toBe(5);
     expect(bookingsDue(db, T0 - H, 75)).toBe(5);
   });
+
+  it('caps the scrims that overlap at scrim_max_servers; a tournament booking or a scheduled match is never capped by it (server priority Ruling 3)', () => {
+    servers(6); // reserve 2: room for 4 bookings at once
+    setScrimMax(2);
+    book(T0, T0 + H);
+    book(T0 + H / 2, T0 + 2 * H);
+    // A third scrim over the two is refused at the first moment both run, not at its start.
+    expect(capacityProblem(db, { region: 'na', startMs: T0, endMs: T0 + H })).toBe(T0 + H / 2);
+    expect(capacityProblem(db, { region: 'na', startMs: T0, endMs: T0 + H, purpose: 'scrim' })).toBe(T0 + H / 2);
+    // Tournament bookings count toward the room but not toward the scrim cap, in either direction.
+    expect(capacityProblem(db, { region: 'na', startMs: T0, endMs: T0 + H, purpose: 'tournament' })).toBeNull();
+    book(T0, T0 + H, { purpose: 'tournament' });
+    book(T0, T0 + H, { purpose: 'tournament' });
+    // Room is 4 and four bookings run at 20:30: full for anyone.
+    expect(capacityProblem(db, { region: 'na', startMs: T0, endMs: T0 + H, purpose: 'tournament' })).toBe(T0 + H / 2);
+    // From 21:00 only the second scrim runs: one more scrim fits.
+    expect(capacityProblem(db, { region: 'na', startMs: T0 + H, endMs: T0 + 2 * H })).toBeNull();
+    setScrimMax(0);
+    expect(capacityProblem(db, { region: 'na', startMs: T0 + 3 * H, endMs: T0 + 4 * H })).toBe(T0 + 3 * H);
+    expect(capacityProblem(db, { region: 'na', startMs: T0 + 3 * H, endMs: T0 + 4 * H, purpose: 'tournament' })).toBeNull();
+  });
+
+  it('the booking itself and scheduled tournament matches never count as scrims toward the cap', () => {
+    servers(6);
+    setScrimMax(1);
+    const mine = book(T0, T0 + H);
+    expect(capacityProblem(db, { region: 'na', startMs: T0, endMs: T0 + H, exceptId: mine })).toBeNull();
+    expect(capacityProblem(db, { region: 'na', startMs: T0, endMs: T0 + H })).toBe(T0);
+    db.prepare("UPDATE bookings SET ending_at = 'x' WHERE id = ?").run(mine);
+    expect(capacityProblem(db, { region: 'na', startMs: T0, endMs: T0 + H })).toBeNull();
+  });
 });
 
 describe('allowance', () => {
@@ -253,9 +285,39 @@ describe('bookings due', () => {
 
   it('reads the limits from settings', () => {
     expect(bookingLimits(db)).toEqual({
-      minMinutes: 60, daysAhead: 14, playlistMax: 4, maxUpcoming: 4, reserve: 2,
+      minMinutes: 60, daysAhead: 14, playlistMax: 4, maxUpcoming: 4, reserve: 2, scrimMax: 2,
       holdLeadMinutes: 15, protectMinutes: 75, idleEndMinutes: 10,
       goneMinutes: 3, recoverWaitMinutes: 20,
     });
+  });
+});
+
+describe('server priority', () => {
+  it('orders a tournament match before a scrim, then the earlier start, then the older row (Ruling 2)', () => {
+    const row = (purpose: 'scrim' | 'tournament', starts_at: string, id: number) => ({ purpose, starts_at, id });
+    const rows = [
+      row('scrim', '2026-10-02T20:00:00.000Z', 1), row('tournament', '2026-10-02T20:30:00.000Z', 2), row('scrim', '2026-10-02T19:00:00.000Z', 3),
+      row('tournament', '2026-10-02T20:30:00.000Z', 4), row('scrim', '2026-10-02T19:00:00.000Z', 5),
+    ];
+    expect([...rows].sort(byPriority).map((r) => r.id)).toEqual([2, 4, 3, 5, 1]);
+  });
+
+  it('reads scrim_max_servers (default 2) into the limits', () => {
+    expect(db.prepare("SELECT value FROM settings WHERE key = 'scrim_max_servers'").get()).toEqual({ value: '2' });
+    expect(bookingLimits(db).scrimMax).toBe(2);
+    setScrimMax(5);
+    expect(bookingLimits(db).scrimMax).toBe(5);
+  });
+
+  it('counts the boxes scrims hold right now; tournaments and released ones are left out, and a region can be asked for', () => {
+    servers(3);
+    book(T0, T0 + H, { serverId: 1, state: 'ready' });
+    book(T0, T0 + H, { serverId: 2, state: 'active', purpose: 'tournament' });
+    const gone = book(T0, T0 + H, { serverId: 3, state: 'ended' });
+    expect(scrimsHolding(db)).toBe(2);
+    db.prepare("UPDATE bookings SET ending_at = 'x', ended_at = 'x' WHERE id = ?").run(gone);
+    expect(scrimsHolding(db)).toBe(1);
+    expect(scrimsHolding(db, 'na')).toBe(1);
+    expect(scrimsHolding(db, 'eu')).toBe(0);
   });
 });

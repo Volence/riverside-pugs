@@ -268,6 +268,8 @@ describe('cancel, extend, end, no-show', () => {
     expect(addCampaign(db, { bookingId: id, by: P[9], staff: true, now: NOW })).toEqual({ ok: false, error: 'no_campaign_room' });
     expect(getBooking(db, id)).toMatchObject({ games_allowed: 2, ends_at: '2026-10-02T23:00:00.000Z' });
     setSetting(db, 'pug_reserve_servers', '1');
+    // Three scrims overlap once this one is extended; raise the scrim cap too (server priority Ruling 3).
+    setSetting(db, 'scrim_max_servers', '3');
     // No campaign named: 60 + 10, up to 90.
     expect(addCampaign(db, { bookingId: id, by: P[9], staff: true, now: NOW }))
       .toEqual({ ok: true, value: { gamesAllowed: 3, endsAt: '2026-10-03T00:30:00.000Z', campaign: null } });

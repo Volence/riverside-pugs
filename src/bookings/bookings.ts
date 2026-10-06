@@ -435,7 +435,7 @@ export function confirmBooking(db: DB, o: { bookingId: number; by: string; now?:
     // A scrim invite sent before a block cannot then be taken up.
     if (b.purpose === 'scrim' && blocked(db, partyOf(sideRow(db, b.id, 'a')!), party)) return fail('not_available');
     if (upcomingCount(db, party) >= allowance(db, party, now.getTime())) return fail('allowance');
-    if (capacityProblem(db, { region: b.region, startMs: Date.parse(b.starts_at), endMs: Date.parse(b.ends_at), exceptId: b.id }) !== null) {
+    if (capacityProblem(db, { region: b.region, startMs: Date.parse(b.starts_at), endMs: Date.parse(b.ends_at), exceptId: b.id, purpose: b.purpose }) !== null) {
       return fail('no_capacity');
     }
     db.prepare("UPDATE booking_sides SET confirmed_at = ? WHERE booking_id = ? AND side = 'b'").run(now.toISOString(), b.id);
@@ -738,7 +738,7 @@ export function addCampaign(db: DB, o: {
     if (campaign !== null && !isPoolCampaign(db, campaign)) return fail('bad_campaign');
     const minutes = addCampaignMinutes(db, campaign);
     const from = Date.parse(b.ends_at);
-    if (capacityProblem(db, { region: b.region, startMs: from, endMs: from + minutes * 60_000, exceptId: b.id }) !== null) {
+    if (capacityProblem(db, { region: b.region, startMs: from, endMs: from + minutes * 60_000, exceptId: b.id, purpose: b.purpose }) !== null) {
       return fail('no_campaign_room');
     }
     const endsAt = iso(from + minutes * 60_000);
