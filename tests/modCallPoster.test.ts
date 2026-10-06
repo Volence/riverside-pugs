@@ -267,4 +267,22 @@ describe('ModCallPoster', () => {
     expect(card.payload.embeds[0].description).toContain('Handled by <@907>');
     expect(getModCall(db, row.id)!.discord_channel_id).toBe('mods');
   });
+
+  it('titles an admin call and links the match room when the game is a tournament game (plan T3c)', async () => {
+    // The NOT NULL columns of events and event_stages as src/db.ts declares them (checked 2026-10-07); the JSON blobs are never read by the card.
+    const eventId = Number(db.prepare(
+      `INSERT INTO events (slug, name, organizer_steamid, entry_kind, status, starts_at, eligibility_json, checkin_json, roster_json, created_at, updated_at)
+       VALUES ('cup', 'Cup', ?, 'team', 'live', '2026-10-10T20:00:00.000Z', '{}', '{}', '{}', '2026-10-01', '2026-10-01')`,
+    ).run(IDS[7]).lastInsertRowid);
+    const stageId = Number(db.prepare(
+      `INSERT INTO event_stages (event_id, ordinal, type, config_json, ruleset_id, campaign_pool_json, veto_type, scheduling, status, created_at, updated_at)
+       VALUES (?, 1, 'swiss', '{}', 1, '[]', 'ban_to_one', 'rolling', 'live', '2026-10-01', '2026-10-01')`,
+    ).run(eventId).lastInsertRowid);
+    const emId = Number(db.prepare("INSERT INTO event_matches (event_id, stage_id, round, slot, status, created_at) VALUES (?, ?, 1, 1, 'live', '2026-10-01')").run(eventId, stageId).lastInsertRowid);
+    db.prepare("INSERT INTO event_games (event_match_id, ordinal, campaign, match_id, created_at) VALUES (?, 1, 'no_mercy', ?, '2026-10-01')").run(emId, matchId);
+    call({ reason: 'admin', target: 'none', text: 'need a ref' }); await poster.idle();
+    const card = renderModCallCard(db, getModCall(db, 1)!, 'https://pug.test');
+    expect(card.embeds[0]!.title).toBe('In-game call: Tournament: admin needed');
+    expect(card.components[0]).toContainEqual({ kind: 'link', label: 'Match room', url: `https://pug.test/event/cup/match/${emId}` });
+  });
 });

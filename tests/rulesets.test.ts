@@ -36,4 +36,13 @@ describe('rulesets', () => {
     expect(() => parseRules(JSON.stringify({ ...TEMPLATES.PUG, bosses: 'sometimes' }))).toThrow(/invalid rules: bosses/);
     expect(() => parseRules('not json')).toThrow(/invalid rules/);
   });
+
+  it('reads subs.perMatch and defaults it to 2 for rules saved before the field (plan T3c)', () => {
+    const old = JSON.stringify({ ...TEMPLATES['Standard Cup'], subs: undefined });
+    expect(parseRules(old).subs).toEqual({ perMatch: 2 });
+    expect(parseRules(JSON.stringify({ ...TEMPLATES['Standard Cup'], subs: { perMatch: 1 } })).subs).toEqual({ perMatch: 1 });
+    expect(() => parseRules(JSON.stringify({ ...TEMPLATES['Standard Cup'], subs: { perMatch: 9 } }))).toThrow('invalid rules: subs.perMatch');
+    expect(() => parseRules(JSON.stringify({ ...TEMPLATES['Standard Cup'], subs: { perMatch: 'two' } }))).toThrow('invalid rules: subs.perMatch');
+    for (const t of Object.values(TEMPLATES)) expect(t.subs).toEqual({ perMatch: 2 });
+  });
 });

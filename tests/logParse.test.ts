@@ -742,4 +742,29 @@ describe('parseLogDatagram: l4d_nightmode look lines', () => {
     expect(parseLogDatagram(framed('[nightmode] look "Midnight" preset "midnight" time=midnight weather=clear'))).toBeNull();
     expect(parseLogDatagram(framed('"x<1><STEAM_1:0:1><>" say "[nightmode] look \"Day\" preset \"day\""'))).toBeNull();
   });
+
+  it('parses a SUB request and an ADMINPAUSE change (plan T3c)', () => {
+    const P = '76561199048276493';
+    const Q = '76561199122132251';
+    const BY = '76561199000000801';
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} SUB by=${BY} out=${P} in=${Q} map=2`)))
+      .toEqual({ kind: 'sub_request', token: TOKEN, by: BY, out: P, in: Q, map: 2 });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} SUB by=${BY} out=${P} in=nobody map=2`))).toBeNull();
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} SUB by=${BY} out=${P} in=${Q} map=x`))).toBeNull();
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ADMINPAUSE state=on by=${BY} cause=call`)))
+      .toEqual({ kind: 'admin_pause', token: TOKEN, on: true, by: BY, cause: 'call' });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ADMINPAUSE state=off by=site cause=staff`)))
+      .toEqual({ kind: 'admin_pause', token: TOKEN, on: false, by: null, cause: 'staff' });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ADMINPAUSE state=off by=site cause=whatever`)))
+      .toEqual({ kind: 'admin_pause', token: TOKEN, on: false, by: null, cause: 'staff' });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ADMINPAUSE state=maybe by=site cause=call`))).toBeNull();
+  });
+
+  it('reads admin=1 on a paused phase (plan T3c)', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} PHASE state=paused team=0 limit=0 leave=0 admin=1`));
+    expect(ev).toMatchObject({ kind: 'phase', phase: { state: 'paused', team: null, admin: true } });
+    const plain = parseLogDatagram(framed(`PUG ${TOKEN} PHASE state=paused team=1 limit=120 leave=0`));
+    expect(plain).toMatchObject({ kind: 'phase', phase: { state: 'paused', team: 'a' } });
+    expect((plain as { phase: { admin?: boolean } }).phase.admin).toBeUndefined();
+  });
 });

@@ -85,6 +85,18 @@ function joinLineFor(db: DB, serverId: number | null): string | null {
   return live ? `password ${serverPasswordFor(live.token)}; ${connect}` : connect;
 }
 
+/** The match room of the tournament match this game belongs to (plan T3c),
+ *  or null for any other game. The path only; the caller adds publicUrl. */
+export function roomLinkFor(db: DB, matchId: number | null): string | null {
+  if (matchId === null) return null;
+  const row = db.prepare(
+    `SELECT e.slug AS slug, m.id AS id FROM event_games g
+       JOIN event_matches m ON m.id = g.event_match_id JOIN events e ON e.id = m.event_id
+      WHERE g.match_id = ? LIMIT 1`,
+  ).get(matchId) as { slug: string; id: number } | undefined;
+  return row ? `/event/${row.slug}/match/${row.id}` : null;
+}
+
 /**
  * The admin channel card for one in-game call and every call folded into it.
  *
@@ -152,6 +164,8 @@ export function renderModCallCard(db: DB, call: ModCallRow, publicUrl: string): 
       url: `${publicUrl}/match/${call.match_id}?ordinal=${call.map_ordinal}&half=${call.half}&t=${call.t_ms}`,
     });
   }
+  const room = roomLinkFor(db, call.match_id);
+  if (room) row.push({ kind: 'link', label: 'Match room', url: `${publicUrl}${room}` });
   if (ticketUrl) row.push({ kind: 'link', label: 'Ticket', url: ticketUrl });
   if (call.server_id !== null) {
     row.push({ kind: 'link', label: 'Server chat', url: `${publicUrl}/admin/live?chat=${call.server_id}` });

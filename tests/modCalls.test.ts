@@ -141,6 +141,14 @@ describe('handleModCall', () => {
     off();
     expect(seen).toEqual([row.id]);
   });
+
+  it('stores an admin call with no ticket and no target, folding a second one within the window (plan T3c)', () => {
+    const row = call({ reason: 'admin', target: IDS[5], text: 'the tank is stuck' });
+    expect(row).toMatchObject({ reason: 'admin', target_kind: 'none', target_steamid: null, ticket_id: null, pinged: 1, post_state: 'pending' });
+    expect(db.prepare('SELECT COUNT(*) n FROM ticket_reports').get()).toEqual({ n: 0 });
+    const again = call({ reason: 'admin', target: 'none', steamid: IDS[1] }, 60_000);
+    expect(again.folded_into).toBe(row.id);
+  });
 });
 
 describe('markModCallHandled', () => {
