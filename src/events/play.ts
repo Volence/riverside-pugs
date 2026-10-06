@@ -91,8 +91,11 @@ export function roundTimes(stage: E.StageRow, round: number, fallbackStart: stri
 
 interface Stamp { not_before: string | null; scheduled_at: string | null; source: 'default' | null; from: string | null; to: string | null }
 
+const NO_STAMP: Stamp = { not_before: null, scheduled_at: null, source: null, from: null, to: null };
+
 /** A window stage's match carries the default time and the window; a
- *  rolling stage's match carries the date as not_before (Ruling 3). */
+ *  rolling stage's match carries the date as not_before (Ruling 3). A bye
+ *  or a row written already resolved is never played, so it gets NO_STAMP. */
 function stampOf(db: DB, stageId: number, round: number, at: string): Stamp {
   const stage = E.getStage(db, stageId)!;
   const t = roundTimes(stage, round, at);
@@ -109,7 +112,7 @@ function insertRound(db: DB, eventId: number, stageId: number, r: NewRound, at: 
   );
   const s = stampOf(db, stageId, r.round, at);
   r.pairs.forEach(([a, b], i) => ins.run(eventId, stageId, r.round, i + 1, a, b, 'waiting', null, at, null, s.not_before, s.scheduled_at, s.source, s.from, s.to));
-  if (r.bye !== null) ins.run(eventId, stageId, r.round, r.pairs.length + 1, r.bye, null, 'bye', r.bye, at, at, s.not_before, s.scheduled_at, s.source, s.from, s.to);
+  if (r.bye !== null) ins.run(eventId, stageId, r.round, r.pairs.length + 1, r.bye, null, 'bye', r.bye, at, at, null, null, null, null, null);
 }
 
 /** Brings the stage's rows in line with its bracket: inserts new matches,
@@ -135,7 +138,7 @@ function syncBracket(db: DB, eventId: number, stageId: number, data: BracketData
     const resolved = b.state === 'done';
     const row = rows.get(b.bmId);
     if (!row) {
-      const s = stampOf(db, stageId, b.round, at);
+      const s = resolved ? NO_STAMP : stampOf(db, stageId, b.round, at);
       ins.run(eventId, stageId, b.group, b.round, b.number, b.bmId, b.a, b.b, status, b.winner, b.scoreA, b.scoreB, at, resolved ? at : null,
         s.not_before, s.scheduled_at, s.source, s.from, s.to);
       continue;
@@ -321,7 +324,7 @@ export function applySchedule(db: DB, o: { stageId: number; by: string | null; n
   return db.transaction((): V.Checked<{ stamped: number }> => {
     const stage = E.getStage(db, o.stageId);
     if (!stage) return V.fail('stage_not_found');
-    if (stage.status === 'finished') return V.fail('schedule_locked');
+    if (E.SCHEDULE_LOCKED.has(E.getEvent(db, stage.event_id)!.status) || stage.status === 'finished') return V.fail('schedule_locked');
     const upd = db.prepare(
       `UPDATE event_matches SET not_before = ?, window_start = ?, window_end = ?,
          scheduled_at = CASE WHEN schedule_source IN ('agreed', 'staff') THEN scheduled_at ELSE ? END,

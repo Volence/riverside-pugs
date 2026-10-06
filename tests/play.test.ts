@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as P from '../src/events/play.js';
 import * as E from '../src/events/events.js';
 import * as N from '../src/events/entries.js';
-import { createBracket, bracketMatches } from '../src/events/bracket.js';
+import { createBracket, bracketMatches, reportResult } from '../src/events/bracket.js';
 import { repeatedRoundRobin } from '../src/events/league.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { LEAGUE, SE, SWISS, playFixture } from './playFixture.js';
@@ -205,5 +205,34 @@ describe('play writer', () => {
     expect(ms.find((m) => m.round === 2)).toMatchObject({ not_before: '2026-10-24T21:00:00.000Z', scheduled_at: null, window_start: null, window_end: null, schedule_source: null });
     expect(P.roundTimes(E.getStage(f.db, f.stages[0]!)!, 2, NOW.toISOString())).toEqual({ at: '2026-10-24T21:00:00.000Z', from: null, to: null });
     expect(P.applySchedule(f.db, { stageId: 999, by: ADMIN, now: NOW })).toEqual({ ok: false, error: 'stage_not_found' });
+  });
+
+  it('applySchedule refuses on a cancelled or a finished event, as setRoundSchedule does (plan T4 Task 2 review)', async () => {
+    const f = playFixture({ stages: [LEAGUE(4, 2, 'round_robin', null, '2026-10-12')], entries: 4 });
+    await startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW });
+    const logs = E.eventLog(f.db, f.eventId).length;
+    for (const status of ['cancelled', 'finished']) {
+      f.db.prepare('UPDATE events SET status = ? WHERE id = ?').run(status, f.eventId);
+      expect(P.applySchedule(f.db, { stageId: f.stages[0]!, by: ADMIN, now: NOW })).toEqual({ ok: false, error: 'schedule_locked' });
+    }
+    expect(E.eventLog(f.db, f.eventId)).toHaveLength(logs);
+  });
+
+  it('never stamps a schedule onto a bye row or a row written already resolved (plan T4 Task 2 review)', async () => {
+    const at = '2026-10-24T21:00:00.000Z';
+    const f = playFixture({ stages: [SWISS(2, null)], entries: 3 });
+    ok(E.setRoundSchedule(f.db, { eventId: f.eventId, stageId: f.stages[0]!, by: ADMIN, rounds: [{ round: 1, at }], now: NOW }));
+    const [e1, e2, e3] = f.entries as [number, number, number];
+    ok(P.startEvent(f.db, { eventId: f.eventId, by: ADMIN, plan: { stageId: f.stages[0]!, entrants: f.entries, bracket: null, rounds: [{ round: 1, pairs: [[e1, e2]], bye: e3 }] }, now: NOW }));
+    expect(P.matchesOf(f.db, f.stages[0]!).map((m) => [m.status, m.not_before])).toEqual([['waiting', at], ['bye', null]]);
+
+    const g = playFixture({ stages: [SE()], entries: 4 });
+    ok(E.setRoundSchedule(g.db, { eventId: g.eventId, stageId: g.stages[0]!, by: ADMIN, rounds: [{ round: 1, at }], now: NOW }));
+    let bracket = await createBracket('single_elim', { thirdPlace: false }, g.entries);
+    const first = bracketMatches(bracket).find((b) => b.round === 1 && b.state === 'ready')!;
+    bracket = await reportResult(bracket, first.bmId, aWins);
+    ok(P.startEvent(g.db, { eventId: g.eventId, by: ADMIN, plan: { stageId: g.stages[0]!, entrants: g.entries, bracket, rounds: [] }, now: NOW }));
+    const r1 = P.matchesOf(g.db, g.stages[0]!).filter((m) => m.round === 1);
+    expect(r1.map((m) => [m.bm_match_id === first.bmId, m.status, m.not_before])).toEqual([[true, 'done', null], [false, 'waiting', at]]);
   });
 });

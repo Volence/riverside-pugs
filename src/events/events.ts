@@ -311,8 +311,9 @@ export function reorderStages(db: DB, o: { eventId: number; by: string; order: u
  *  Swiss round paired later), so this is not behind STAGES_LOCKED: only a
  *  finished or cancelled event, or a finished stage, refuses it. The rows
  *  are stamped onto matches by src/events/play.ts (insertRound for rounds
- *  written later, applySchedule for the ones that exist). */
-const SCHEDULE_LOCKED: ReadonlySet<V.EventStatus> = new Set<V.EventStatus>(['finished', 'cancelled']);
+ *  written later, applySchedule for the ones that exist), which refuses on
+ *  the same event statuses. */
+export const SCHEDULE_LOCKED: ReadonlySet<V.EventStatus> = new Set<V.EventStatus>(['finished', 'cancelled']);
 
 export function setRoundSchedule(db: DB, o: { eventId: number; stageId: number; by: string; rounds: unknown; now?: Date }): EventResult<StageRow> {
   const at = iso(o.now);
