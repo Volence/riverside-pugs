@@ -135,7 +135,7 @@ describe('EventPage', () => {
       status: 'finished',
       entries: [{ id: 1, name: 'Rats', tag: 'RAT', logoKey: null, seed: 1, status: 'placed', waitlist: null, placement: 1 }],
       play: [{ ordinal: 1, type: 'single_elim', status: 'finished', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
-        rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [] }] }],
+        rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [] }] }],
     }));
     render(<EventPage slug="riverside-cup" session={session} />);
     expect(await screen.findByText(/Stage 1: bracket/)).toBeTruthy();

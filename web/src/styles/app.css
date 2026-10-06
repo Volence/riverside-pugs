@@ -3561,6 +3561,8 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
   display: inline-block; padding: 1px var(--sp-1); border: 1px solid var(--border-strong); background: var(--surface);
   font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted);
 }
+/* Plan T4: a match's own time, shown only when it differs from its round's default. */
+.matchcard__when { display: block; padding: 0 var(--sp-2) var(--sp-1); font-size: var(--fs-dense); color: var(--text-muted); }
 .playtable { width: 100%; border-collapse: collapse; }
 .playtable th, .playtable td { padding: var(--sp-1) var(--sp-2); text-align: left; font-variant-numeric: tabular-nums; }
 .playround { margin-top: var(--sp-3); }
@@ -3579,6 +3581,8 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .roomteam { display: inline-flex; align-items: center; gap: var(--sp-1); vertical-align: middle; }
 .room__games { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
 .room__log { margin: 0; padding-left: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); color: var(--text-muted); }
+/* Plan T4: the Schedule panel's open proposal. */
+.roomschedule__proposal { margin: var(--sp-2) 0; padding: var(--sp-2); border: 1px solid var(--border); border-radius: 6px; }
 /* Reuses the event status chip's border/colour roles: ready and veto read
    as live, lineup as checkin, server and hold as a warning, done as finished.
    Plan T3b: connect and live (the between-game pick step) read as live too;

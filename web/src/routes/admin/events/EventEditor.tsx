@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { adminApi, adminBannerUrl, ApiError, type AdminEventDetail } from '../../../api';
+import { adminApi, adminBannerUrl, ApiError, type AdminEventDetail, type StageConfigs } from '../../../api';
 import { useFetch } from '../../../hooks/useFetch';
 import { Empty, Panel } from '../../../components/bits';
 import { RichText } from '../../../components/RichText';
@@ -9,6 +9,7 @@ import { toBannerImage } from '../../../eventBanner';
 import { fmtTime, useAction } from '../useAction';
 import { EventFieldsForm } from './EventFieldsForm';
 import { StageForm } from './StageForm';
+import { RoundScheduleForm } from './RoundScheduleForm';
 import { EntriesPanel } from './EntriesPanel';
 import { PlayPanel } from './PlayPanel';
 import { DESKS } from '../adminRoutes';
@@ -25,6 +26,10 @@ const ACTION_TEXT: Record<string, string> = {
   checkin_opened: 'Check-in opened', entry_registered: 'Team registered', roster_changed: 'Roster changed', roster_left: 'Player left a roster',
   entry_withdrawn: 'Team withdrew', entry_checked_in: 'Team checked in', entries_locked: 'Entry list closed', entry_dropped: 'Entry dropped',
   entry_disqualified: 'Entry disqualified', entry_restored: 'Entry restored', seeds_reordered: 'Seeds reordered',
+  schedule_set: 'set a round schedule', schedule_applied: 'applied the schedule to the matches', reschedule_proposed: 'proposed a match time',
+  reschedule_accepted: 'accepted a proposed time', reschedule_declined: 'declined a proposed time', reschedule_countered: 'countered a proposed time',
+  reschedule_withdrawn: 'withdrew a proposed time', reschedule_auto_accepted: 'locked an unanswered proposal',
+  reschedule_reminded: 'reminded a team of a proposal', reschedule_expired: 'expired a proposal', match_time_set: 'set a match time',
 };
 
 /** What a mod reads in place of the form (Ruling 2). */
@@ -49,6 +54,7 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
   const { data: options } = useFetch((s) => adminApi.eventOptions(s), []);
   const { busy, error, run } = useAction(reload);
   const [editing, setEditing] = useState<number | 'new' | null>(null);
+  const [scheduling, setScheduling] = useState<number | null>(null);
   const [reason, setReason] = useState('');
   const { route } = useLocation();
   /** The fields form is keyed by the event id plus this, and it moves only
@@ -169,10 +175,22 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
                         onClick={() => void run(() => adminApi.removeStage(id, s.id), `Remove stage ${s.ordinal}?`)}>Remove</button>
                     </span>
                   )}
+                  {canEdit && !over && (
+                    <button class="btn btn--ghost btn--sm" aria-label={`Schedule stage ${s.ordinal}`} disabled={busy} onClick={() => setScheduling(scheduling === s.id ? null : s.id)}>Schedule</button>
+                  )}
                 </div>
                 {editing === s.id && (
                   <StageForm options={options} initial={s.settings} busy={busy} onCancel={() => setEditing(null)} teamCap={ev.fields.teamCap}
                     onSave={(st) => saveStage(() => adminApi.updateStage(id, s.id, st))} />
+                )}
+                {scheduling === s.id && (
+                  <RoundScheduleForm
+                    scheduling={s.settings.scheduling}
+                    league={s.settings.type === 'league' ? { matches: (s.settings.config as StageConfigs['league']).matches, matchesPerWeek: (s.settings.config as StageConfigs['league']).matchesPerWeek } : null}
+                    seasonStart={s.settings.type === 'league' ? (s.settings.config as StageConfigs['league']).seasonStart : null}
+                    roundsKnown={s.roundsKnown} initial={s.schedule} busy={busy}
+                    onSave={(rounds) => void run(async () => { await adminApi.setRoundSchedule(id, s.id, rounds); setScheduling(null); })}
+                  />
                 )}
               </li>
             ))}

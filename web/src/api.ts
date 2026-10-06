@@ -1919,6 +1919,8 @@ export interface StageConfigs {
   league: { matches: number; matchesPerWeek: number; pairing: 'swiss' | 'round_robin'; seasonStart: string | null };
 }
 export type StageConfig = StageConfigs[StageType];
+/** Mirrors src/events/validate.ts RoundSchedule (plan T4). */
+export interface RoundSchedule { round: number; at: string | null; from: string | null; to: string | null }
 export interface StageSettings {
   type: StageType; config: StageConfig; rulesetId: number; gameConfig: string; campaignPool: string[];
   vetoType: VetoType; veto: VetoConfig; chapters: number | null; scheduling: Scheduling; advanceCount: number | null;
@@ -1943,6 +1945,8 @@ export type RoomPhase = 'pending' | 'waiting' | 'ready' | 'veto' | 'lineup' | 's
 export interface PlayMatch {
   id: number; group: number; round: number; slot: number; a: PlayEntry | null; b: PlayEntry | null; status: string;
   winner: 'a' | 'b' | null; scoreA: number | null; scoreB: number | null; forfeit: boolean; bye: boolean; phase: RoomPhase;
+  /** Plan T4: the match's time (UTC ISO) and where it came from; null with no time. */
+  scheduledAt: string | null; scheduleSource: 'default' | 'agreed' | 'staff' | null;
   /** Staff only (plan T3c Ruling 16). */
   desk?: PlayMatchDesk;
 }
@@ -1954,8 +1958,17 @@ export interface PlayMatchDesk {
   booking: { id: number; state: string; serverName: string | null; recovering: boolean } | null;
   liveGame: { matchId: number; campaign: string; chapters: { ordinal: number; map: string }[] } | null;
   subs: { a: number; b: number };
+  /** Plan T4: a window stage's match only. */
+  schedule: { windowStart: string | null; windowEnd: string | null; proposal: { side: 'a' | 'b'; byName: string; time: string; autoAcceptAt: string | null } | null; proposals: number } | null;
 }
-export interface PlayRound { group: number; round: number; label: string; dates: { from: string; to: string } | null; matches: PlayMatch[] }
+/** dates: a league round's week, first and last day (YYYY-MM-DD); null for
+ *  every other stage type. defaultAt: a window round's default time or a
+ *  rolling round's date (plan T4 Rulings 2 and 3); window: the round's
+ *  window on a window stage. */
+export interface PlayRound {
+  group: number; round: number; label: string; dates: { from: string; to: string } | null;
+  defaultAt: string | null; window: { from: string; to: string } | null; matches: PlayMatch[];
+}
 export interface PlayStanding {
   entry: PlayEntry; group: number; rank: number; groupRank: number; played: number; wins: number; losses: number;
   points: number; buchholz: number; scoreDiff: number;
@@ -2026,6 +2039,26 @@ export interface RoomServer {
   connect: { host: string; port: number; password: string } | null; present: { a: number; b: number } | null; graceEndsAt: string | null;
 }
 export interface RoomPlayer { steamid: string; name: string }
+/** Plan T4 (mirrors src/events/roomViews.ts). */
+export type RescheduleStatus = 'open' | 'accepted' | 'auto_accepted' | 'declined' | 'countered' | 'withdrawn' | 'expired';
+/** One reschedule proposal as the room page lists it (plan T4). */
+export interface RoomProposal {
+  id: number; side: 'a' | 'b'; byName: string; time: string; note: string; createdAt: string; autoAcceptAt: string | null;
+  status: RescheduleStatus; respondedByName: string | null; respondedAt: string | null;
+}
+/** The schedule of a window-stage match (plan T4 Ruling 12); null on a
+ *  rolling stage. Everything is public like the veto log (Global
+ *  Constraint): the locked time, the window, the open proposal and the log
+ *  of closed ones. Only the can* flags depend on the viewer. A proposal
+ *  staff closed from the desk names its responder as Staff to everyone but
+ *  staff. */
+export interface RoomSchedule {
+  scheduledAt: string | null; source: 'default' | 'agreed' | 'staff' | null; windowStart: string | null; windowEnd: string | null;
+  /** scheduledAt minus the lead: when the room opens on its own. */
+  opensAt: string | null; leadMinutes: number;
+  proposal: RoomProposal | null; log: RoomProposal[];
+  canPropose: boolean; canAnswer: boolean; canWithdraw: boolean;
+}
 /** a and b are null only while a bracket match still waits for its teams. */
 export interface MatchRoomView {
   id: number; eventSlug: string; eventName: string; roundLabel: string; a: PlayEntry | null; b: PlayEntry | null; phase: RoomPhase;
@@ -2041,6 +2074,8 @@ export interface MatchRoomView {
   confirm: { deadline: string | null; a: boolean; b: boolean } | null;
   dispute: { side: 'a' | 'b'; byName: string; reason: string; at: string } | null;
   frozen: boolean;
+  /** Plan T4: null on a rolling stage. */
+  schedule: RoomSchedule | null;
 }
 export interface PrefsView {
   entryId: number; defaultFour: string[] | null; side: 'survivors' | 'infected' | null; roster: RoomPlayer[];
@@ -2064,6 +2099,13 @@ export const eventsApi = {
   lineup: (slug: string, id: number, steamids: string[]) => post(`/api/events/${enc(slug)}/matches/${id}/lineup`, { steamids }),
   confirmResult: (slug: string, id: number) => post(`/api/events/${enc(slug)}/matches/${id}/confirm`),
   dispute: (slug: string, id: number, reason: string) => post(`/api/events/${enc(slug)}/matches/${id}/dispute`, { reason }),
+  /** Reschedule proposals (plan T4). */
+  propose: (slug: string, id: number, time: string, note: string) => post(`/api/events/${enc(slug)}/matches/${id}/propose`, { time, note }),
+  respond: (slug: string, id: number, accept: boolean) => post(`/api/events/${enc(slug)}/matches/${id}/respond`, { accept }),
+  counter: (slug: string, id: number, time: string, note: string) => post(`/api/events/${enc(slug)}/matches/${id}/counter`, { time, note }),
+  /** Named withdrawProposal, not withdraw: eventsApi.withdraw already means
+   *  withdrawing an entry (a different route entirely). */
+  withdrawProposal: (slug: string, id: number) => post(`/api/events/${enc(slug)}/matches/${id}/withdraw`),
   prefs: (slug: string, entryId: number, signal?: AbortSignal) => get<PrefsView>(`/api/events/${enc(slug)}/entries/${entryId}/prefs`, signal),
   savePrefs: (slug: string, entryId: number, body: { defaultFour: string[] | null; side: 'survivors' | 'infected' | null; campaigns: Record<string, string[]> }) =>
     post(`/api/events/${enc(slug)}/entries/${entryId}/prefs`, body),
@@ -2325,7 +2367,11 @@ export interface AdminBookingRow {
 export interface AdminEventRow {
   id: number; slug: string; name: string; status: EventStatus; entryKind: EntryKind; startsAt: string; stages: number; updatedAt: string;
 }
-export interface AdminEventStage { id: number; ordinal: number; summary: string; settings: StageSettings; rulesSnapshotted: boolean }
+export interface AdminEventStage {
+  id: number; ordinal: number; summary: string; settings: StageSettings; rulesSnapshotted: boolean;
+  /** Plan T4: the stage's round schedule rows, and how many rounds it will have when known. */
+  schedule: RoundSchedule[]; roundsKnown: number | null;
+}
 export interface AdminEventDetail {
   id: number; slug: string; status: EventStatus; fields: EventFields; bannerKey: string | null;
   cancelReason: string | null; createdAt: string; updatedAt: string;
@@ -2486,6 +2532,9 @@ export const adminApi = {
   releaseEventHold: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/release-hold`),
   freezeEventMatch: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/freeze`),
   unfreezeEventMatch: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/unfreeze`),
+  /** Plan T4: a stage's round schedule, and a match's time set by staff. */
+  setRoundSchedule: (id: number, stageId: number, rounds: RoundSchedule[]) => post<{ stamped: number }>(`/api/admin/events/${id}/stages/${stageId}/schedule`, { rounds }),
+  setEventMatchTime: (id: number, matchId: number, time: string) => post(`/api/admin/events/${id}/matches/${matchId}/set-time`, { time }),
   /** Setup > Rulesets and Game configs (rulesets editor plan). */
   rulesets: (signal?: AbortSignal) => get<{ rulesets: AdminRuleset[] }>('/api/admin/rulesets', signal),
   createRuleset: (copyFrom: number, name: string) => post<{ id: number }>('/api/admin/rulesets', { copyFrom, name }),
