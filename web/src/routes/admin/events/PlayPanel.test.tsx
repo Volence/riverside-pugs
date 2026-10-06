@@ -461,4 +461,21 @@ describe('PlayPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Forfeit the game' }));
     expect(await screen.findByText('This match has no running server to send that to.')).toBeTruthy();
   });
+
+  it('keeps a finished match\'s technical pauses listed without Warn or Forfeit the game (final review)', async () => {
+    const p = { id: 31, game: 1, tiebreak: false, side: 'a' as const, cause: 'call' as const, reason: 'router', startedAt: '2026-10-10T21:00:00.000Z', endedAt: '2026-10-10T21:02:00.000Z',
+      usedS: 120, budgetS: 300, overrun: false, flagged: false, flagNote: null, penalty: null, byName: 'Ann', flaggedBy: null, penaltyNote: null, live: false };
+    for (const status of ['done', 'forfeit', 'bye']) {
+      mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [
+        m({ status, phase: 'done', desk: desk({ pauses: [p, { ...p, id: 32, live: true }] }) }),
+      ] }] }] }));
+      const { unmount } = render(<PlayPanel eventId={9} canEdit />);
+      fireEvent.click(await screen.findByText('Staff tools: Rats vs Bats'));
+      expect(screen.getAllByText(/Game 1, Rats, technical: "router" by Ann/)).toHaveLength(2);
+      expect(screen.queryByRole('button', { name: 'Warn' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Forfeit the game' })).toBeNull();
+      unmount();
+    }
+  });
 });
+
