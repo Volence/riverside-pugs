@@ -9,8 +9,9 @@ import type { Side } from './veto.js';
 
 /**
  * Reschedule proposals (tournaments plan T4, spec section 5): the only
- * writer of event_reschedules and of a match's agreed time (scheduled_at,
- * schedule_source). Same shape as room.ts: each mutation is one
+ * writer of event_reschedules (the account merge apart, which moves its
+ * steamids) and of a match's agreed time (scheduled_at, schedule_source).
+ * Same shape as room.ts: each mutation is one
  * transaction that re-reads, checks, writes and adds exactly one event_log
  * row; a refusal writes nothing (tests/eventLogGuard.test.ts, the schedule
  * guard). The window and the round default are stamped by play.ts; this

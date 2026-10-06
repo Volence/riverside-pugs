@@ -132,6 +132,12 @@ const PLAIN: [table: string, column: string][] = [
   ['event_entries', 'registered_by'],
   ['event_entries', 'checked_in_by'],
   ['event_entry_players', 'steamid'],
+  // Reschedule proposals (tournaments plan T4, src/events/schedule.ts): the
+  // captain who proposed a time and the one who answered it, like event_log's
+  // actor. responded_by has no foreign key (staff answer too) but follows the
+  // person the same way.
+  ['event_reschedules', 'proposed_by'],
+  ['event_reschedules', 'responded_by'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`

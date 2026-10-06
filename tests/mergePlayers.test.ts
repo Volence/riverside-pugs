@@ -533,6 +533,29 @@ describe('mergePlayers', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM event_entry_players WHERE steamid = ?').get(ALT)).toEqual({ n: 0 });
   });
 
+  it('moves reschedule proposals (proposer and responder) to the surviving account (plan T4)', () => {
+    const ev = Number(db.prepare(
+      `INSERT INTO events (slug, name, organizer_steamid, entry_kind, starts_at, eligibility_json, checkin_json, roster_json, created_at, updated_at)
+       VALUES ('cup', 'Cup', ?, 'team', '2026-10-10T20:00:00.000Z', '{}', '{}', '{}', 'x', 'x')`,
+    ).run(MAIN).lastInsertRowid);
+    const stage = Number(db.prepare(
+      `INSERT INTO event_stages (event_id, ordinal, type, config_json, ruleset_id, campaign_pool_json, veto_type, scheduling, created_at, updated_at)
+       VALUES (?, 1, 'league', '{}', (SELECT MIN(id) FROM rulesets), '[]', 'ban_to_one', 'window', 'x', 'x')`,
+    ).run(ev).lastInsertRowid);
+    const m = Number(db.prepare("INSERT INTO event_matches (event_id, stage_id, round, slot, status, created_at) VALUES (?, ?, 1, 1, 'waiting', 'x')")
+      .run(ev, stage).lastInsertRowid);
+    const ins = db.prepare(
+      "INSERT INTO event_reschedules (event_match_id, side, proposed_by, proposed_time, created_at, status, responded_by) VALUES (?, ?, ?, 'x', 'x', ?, ?)",
+    );
+    ins.run(m, 'a', ALT, 'declined', MAIN);
+    ins.run(m, 'b', MAIN, 'countered', ALT);
+
+    mergePlayers(db, { from: ALT, into: MAIN });
+
+    expect(db.prepare('SELECT proposed_by, responded_by FROM event_reschedules ORDER BY id').all())
+      .toEqual([{ proposed_by: MAIN, responded_by: MAIN }, { proposed_by: MAIN, responded_by: MAIN }]);
+  });
+
   it('moves event_entries.checked_in_by to the surviving account', () => {
     const ev = Number(db.prepare(
       `INSERT INTO events (slug, name, organizer_steamid, entry_kind, starts_at, eligibility_json, checkin_json, roster_json, created_at, updated_at)
