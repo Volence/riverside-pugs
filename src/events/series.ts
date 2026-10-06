@@ -13,7 +13,8 @@ import type { TournamentHooks } from '../bookings/runner.js';
 import { settingNumber } from '../settings.js';
 import { addTournamentSub, createTournamentGame, gameLinesOf, isPendingGame, isUnstartedGame } from '../bookings/tournamentGames.js';
 import { replayableChapters, restoreSnapshot, type RestoreSnapshot } from '../bookings/restore.js';
-import type { AdminPauseCause } from '../logParse.js';
+import type { AdminPauseCause, LogEvent } from '../logParse.js';
+import type { ForfeitWhy } from '../dumpParse.js';
 import { getServer } from '../serverPool.js';
 import { consoleText, quoted } from '../serverSetup.js';
 import * as E from './events.js';
@@ -124,6 +125,19 @@ export function adminPauseTook(reply: string | null | undefined, on: boolean): b
   }
   return false;
 }
+/** A TECH line from a tournament box (pug-match 0.3.26, plan T5). */
+export type TechLine = Extract<LogEvent, { kind: 'tech' }>;
+
+/** True when pug-match answered `sm_pug_forfeit <token> <team>` with `PUGOK
+ *  forfeit team=<team>` (or `... already`, a re-send): Cmd_PugForfeit, 0.3.26. */
+export function forfeitTook(reply: string | null | undefined, team: 'a' | 'b'): boolean {
+  for (const raw of (reply ?? '').split(/\r?\n/)) {
+    const m = /^PUGOK forfeit team=(a|b)( already)?$/.exec(raw.trim());
+    if (m) return m[1] === team;
+  }
+  return false;
+}
+const clock = (s: number): string => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.max(0, s) % 60).padStart(2, '0')}`;
 /** The sm_pug_sub refusal that means "not now": a chapter is being played. */
 export const SUB_NOT_BETWEEN = 'not between chapters';
 /** How long after a replay or a move the box's reset line for it is still
@@ -494,8 +508,8 @@ export class SeriesEngine {
     const game = R.gamesOf(this.db, m.id).find((g) => g.match_id === gameMatchId);
     if (!game) return;
     if (game.ended_at === null) {
-      const row = this.db.prepare('SELECT state, team_a_score, team_b_score, forfeit_team, booking_side_a FROM matches WHERE id = ?').get(gameMatchId) as
-        { state: string; team_a_score: number | null; team_b_score: number | null; forfeit_team: string | null; booking_side_a: Side | null } | undefined;
+      const row = this.db.prepare('SELECT state, team_a_score, team_b_score, forfeit_team, forfeit_why, booking_side_a FROM matches WHERE id = ?').get(gameMatchId) as
+        { state: string; team_a_score: number | null; team_b_score: number | null; forfeit_team: string | null; forfeit_why: ForfeitWhy | null; booking_side_a: Side | null } | undefined;
       if (!row || row.state !== 'completed') return;
       // Booking side a is entry_a; match team a is booking side booking_side_a.
       const flip = row.booking_side_a === 'b';
@@ -503,7 +517,7 @@ export class SeriesEngine {
       const scoreA = flip ? row.team_b_score : row.team_a_score;
       const scoreB = flip ? row.team_a_score : row.team_b_score;
       const forfeit = row.forfeit_team === 'a' || row.forfeit_team === 'b' ? toSide(row.forfeit_team) : null;
-      const rec = R.recordGame(this.db, { matchId: m.id, gameId: game.id, scoreA, scoreB, forfeit, now, held });
+      const rec = R.recordGame(this.db, { matchId: m.id, gameId: game.id, scoreA, scoreB, forfeit, forfeitWhy: forfeit ? row.forfeit_why ?? 'gg' : null, now, held });
       if (!rec.ok) {
         console.error(`[series] match ${m.id}: game ${game.ordinal} (match ${gameMatchId}) could not be recorded (${rec.error})`);
         return;
@@ -533,8 +547,11 @@ export class SeriesEngine {
   private scoreline(m: P.MatchRow, v: ReturnType<typeof seriesVerdict>): string {
     const w = v.winner!;
     const l = other(w);
+    // Plan T5 Ruling 9: the forfeited game says why.
+    const why = v.forfeit === null ? null : R.gamesOf(this.db, m.id).filter((g) => g.forfeit_side === v.forfeit).at(-1)?.forfeit_why ?? 'gg';
+    const how = why === 'disconnect' ? 'ran out of reconnect time' : why === 'staff' ? 'forfeited by staff ruling' : 'typed !gg';
     const line = v.forfeit !== null
-      ? `by forfeit (${this.name(m, v.forfeit)} typed !gg)`
+      ? `by forfeit (${this.name(m, v.forfeit)} ${how})`
       : v.totalScore
       ? `${w === 'a' ? v.totalA : v.totalB} to ${w === 'a' ? v.totalB : v.totalA} on total score`
       : winsLine(w === 'a' ? v.winsA : v.winsB, w === 'a' ? v.winsB : v.winsA);
@@ -743,7 +760,7 @@ export class SeriesEngine {
    *  Focus 2). The box refusing because a chapter is being played undoes a
    *  fresh sub (the captain asks again at the next ready-up); the booking's
    *  people and the game's roster follow only a sub that stands. */
-  async subRequested(token: string, by: string, outId: string, inId: string): Promise<void> {
+  async subRequested(token: string, by: string, outId: string, inId: string, emergency = false): Promise<void> {
     const found = this.matchOfToken(token);
     if (!found) return;
     const { m, game, gameMatchId } = found;
@@ -773,7 +790,13 @@ export class SeriesEngine {
         return;
       }
     } else {
-      const r = R.subPlayer(this.db, { matchId: m.id, by, outId, inId, limit, gameId: game.id, now });
+      // Plan T5 Ruling 10: the box only sends emergency=1 when its cvar is on;
+      // the stage's snapshot is the rule.
+      if (emergency && !stageRules(this.db, E.getStage(this.db, m.stage_id)!).subs.emergency) {
+        say(`Sub refused: ${V.EVENT_ERRORS.emergency_off.text}`);
+        return;
+      }
+      const r = R.subPlayer(this.db, { matchId: m.id, by, outId, inId, limit, gameId: game.id, emergency, now });
       if (!r.ok) {
         say(`Sub refused: ${V.EVENT_ERRORS[r.error].text}`);
         return;
@@ -812,7 +835,7 @@ export class SeriesEngine {
     }
     const took = reply?.ok === true;
     if (stuck) say(`The site has ${this.playerName(inId)} in for ${this.playerName(outId)}, but a chapter is being played and the server did not take it. Staff were told; type the !sub again at the next ready-up.`);
-    else if (took) say(`${this.playerName(inId)} is in for ${this.playerName(outId)} (${this.name(m, side)}, sub ${used} of ${limit}).`);
+    else if (took) say(`${this.playerName(inId)} is in for ${this.playerName(outId)} (${this.name(m, side)}, ${emergency ? 'emergency sub' : 'sub'} ${used} of ${limit}).`);
     else say(`The site put ${this.playerName(inId)} in for ${this.playerName(outId)}, but the server did not take it. Type the !sub again.`);
     console.log(`[series] match ${m.id}: ${inId} in for ${outId} on side ${side} (game ${game.ordinal}; the box ${took ? 'took it' : `did not take it: ${reply && !reply.ok ? reply.error : 'no answer'}`})`);
     this.push(m.id);
@@ -869,6 +892,96 @@ export class SeriesEngine {
       this.alert(m, `${who ?? 'an admin'} lifted the staff freeze in game with !forceunpause (forced).`);
     }
     this.push(m.id);
+  }
+
+  // ---------- technical pauses and staff penalties (plan T5) ----------
+
+  /** The room side of a game's pug team: pug team a is the game's booking_side_a (Ruling 17). */
+  private sideOfPugTeam(gameMatchId: number, team: 'a' | 'b'): Side {
+    const sideA = (this.db.prepare('SELECT booking_side_a FROM matches WHERE id = ?').get(gameMatchId) as { booking_side_a: Side | null } | undefined)?.booking_side_a ?? 'a';
+    return team === 'a' ? sideA : other(sideA);
+  }
+  private pugTeamOf(gameMatchId: number, side: Side): 'a' | 'b' {
+    return this.sideOfPugTeam(gameMatchId, 'a') === side ? 'a' : 'b';
+  }
+  private gameLabelOf(m: P.MatchRow, gameMatchId: number): string {
+    const g = R.gamesOf(this.db, m.id).find((x) => x.match_id === gameMatchId);
+    return g ? this.gameLabel(m, g) : 'a game';
+  }
+
+  /** The box's TECH line (Rulings 5 to 7, 11, 14): recorded on the match
+   *  log; a start and an overrun tell staff on the feed (a flag reaches them
+   *  through the mod-call card). A repeat or a line for a game this match
+   *  does not hold changes nothing. On an overrun, tactical N >= 0 means the
+   *  pause ran on as a tactical one with N left, -1 none left and the game
+   *  unpaused, null ran on with tactical pauses unlimited. */
+  techLine(token: string, ev: TechLine): void {
+    const found = this.matchOfToken(token);
+    if (!found) return;
+    const { m, gameMatchId } = found;
+    const side = this.sideOfPugTeam(gameMatchId, ev.team);
+    const r = R.noteTech(this.db, {
+      matchId: m.id, gameMatchId, event: ev.event, techId: ev.id, side, cause: ev.cause, by: ev.by,
+      used: ev.used, budget: ev.budget, tactical: ev.tactical, text: ev.text, now: new Date(this.now()),
+    });
+    if (!r.ok) {
+      if (r.error !== 'changed') console.warn(`[series] match ${m.id}: a TECH ${ev.event} line was not recorded (${r.error})`);
+      return;
+    }
+    const team = this.name(m, side);
+    const where = this.gameLabelOf(m, gameMatchId);
+    if (ev.event === 'start') {
+      this.alert(m, ev.cause === 'disconnect'
+        ? `${team} is paused for a disconnect (${ev.by ? this.playerName(ev.by) : 'a player'}) in ${where}; ${clock(ev.budget - ev.used)} of reconnect time left.`
+        : `${team} called a technical pause in ${where}: "${r.value.pause.reason}" (${clock(ev.budget - ev.used)} of technical time left).`);
+    } else if (ev.event === 'over') {
+      this.alert(m, ev.tactical === null
+        ? `${team} ran out of technical time; the pause now uses a tactical pause (tactical pauses are unlimited).`
+        : ev.tactical < 0
+        ? `${team} ran out of technical time with no tactical pause left; the game was unpaused.`
+        : `${team} ran out of technical time; the pause now uses a tactical pause (${ev.tactical} left).`);
+    }
+    this.push(m.id);
+  }
+
+  /** The desk's ruling on a technical pause (Ruling 12). A forfeit needs the
+   *  pause's own game to be the one being played, and the box to take
+   *  sm_pug_forfeit for the pausing team's pug team (oriented through the
+   *  game's booking_side_a); the game then ends through the result path
+   *  with forfeit_why=staff. Nothing is written until the box answered. The
+   *  game end can land while the answer is awaited and even resolve the
+   *  match: room.ts techPenalty still takes a forfeit ruling on a match
+   *  that this very forfeit resolved, so the ruling is not lost. */
+  async techPenalty(matchId: number, by: string, pauseId: unknown, penalty: unknown, note: unknown): Promise<V.Checked<P.MatchRow>> {
+    const m = P.getMatch(this.db, matchId);
+    if (!m) return V.fail('match_not_found');
+    if (penalty !== 'warning' && penalty !== 'forfeit') return V.fail('bad_penalty');
+    const n = V.normalizeReason(note);
+    if (!n.ok) return n;
+    const pause = R.techPausesOf(this.db, m).find((p) => p.id === pauseId);
+    if (!pause) return V.fail('pause_not_found');
+    if (pause.penalty !== null) return V.fail('already_penalized');
+    if (penalty === 'forfeit') {
+      const live = this.liveGameOf(m);
+      if (!live || live.game.match_id !== pause.gameMatchId) return V.fail('no_live_game');
+      const b = this.runningBooking(m);
+      if (!b) return V.fail('no_box');
+      const team = this.pugTeamOf(pause.gameMatchId, pause.side);
+      const replies = await this.deps.runner.send(b.id, [`sm_pug_forfeit ${live.token} ${team}`], 'the forfeit');
+      if (!forfeitTook(replies?.[0], team)) return V.fail('no_box');
+    }
+    const r = R.techPenalty(this.db, { matchId, pauseId, by, penalty, note, now: new Date(this.now()) });
+    if (!r.ok) {
+      if (penalty === 'forfeit') {
+        console.error(`[series] match ${matchId}: the box took the forfeit but the penalty was not recorded (${r.error})`);
+        this.alert(m, `the server took the staff forfeit over a technical pause but the site did not record the ruling (${r.error}). Check the match log on the Events desk.`);
+      }
+      return r;
+    }
+    tellStaffAction(this.deps, m.event_id, m.id, penalty === 'forfeit' ? 'tech_forfeit' : 'tech_warning',
+      `${this.name(m, pause.side)}, ${this.gameLabelOf(m, pause.gameMatchId)}: "${pause.reason}"`);
+    this.push(m.id);
+    return V.ok(r.value.m);
   }
 
   /** The desk's Freeze and Unfreeze (Ruling 9): the box first, then the

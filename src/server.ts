@@ -1170,11 +1170,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         }
         if (ev.kind === 'sub_request') {
           // A captain's !sub on a tournament box (plan T3c): the series engine decides and answers on the box.
-          seriesRef?.subRequested(ev.token, ev.by, ev.out, ev.in).catch((err) => { console.error('[series] sub request failed:', err); });
+          seriesRef?.subRequested(ev.token, ev.by, ev.out, ev.in, ev.emergency === true).catch((err) => { console.error('[series] sub request failed:', err); });
           return;
         }
         if (ev.kind === 'admin_pause') {
           try { seriesRef?.adminPauseLine(ev.token, ev.on, ev.by, ev.cause); } catch (err) { console.error('[series] admin pause line failed:', err); }
+          return;
+        }
+        if (ev.kind === 'tech') {
+          // A technical pause on a tournament box (plan T5): the match log, the room, the desk.
+          try { seriesRef?.techLine(ev.token, ev); } catch (err) { console.error('[series] TECH line failed:', err); }
           return;
         }
         if (ev.kind === 'problem') {
