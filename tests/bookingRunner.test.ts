@@ -7,7 +7,7 @@ import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { Notifier } from '../src/notify/notify.js';
 import {
   addPerson, cancelBooking, confirmBooking, createBooking, addCampaign, getBooking, holdBox, markSetup, respondPerson, sideRow,
-  createTournamentBooking, setNext, markActive, recordPresence,
+  createTournamentBooking, setNext, markActive, recordPresence, beginRecovery, dropBox,
 } from '../src/bookings/bookings.js';
 import { BookingRunner, CLEAR_LINES, allowLines, bookingLines } from '../src/bookings/runner.js';
 import { BookingVoice } from '../src/bookings/voice.js';
@@ -2330,5 +2330,182 @@ describe('server priority (owner, 2026-10-07)', () => {
     runner.allocate();
     expect(getBooking(db, first)).toMatchObject({ state: 'cancelled', end_reason: 'bumped' });
     expect(getBooking(db, second)!.state).toBe('scheduled');
+  });
+  describe('final review fixes', () => {
+    const bumpedCount = () => (db.prepare("SELECT COUNT(*) AS n FROM booking_events WHERE event = 'bumped'").get() as { n: number }).n;
+
+    it('a box mid-restart in the region counts as coming: no held scrim is bumped while it returns, and the match takes it once back (Important 1)', async () => {
+      const restarting = new Set<number>();
+      runner = build({ releasing: (id) => restarting.has(id) });
+      const scrim = await heldScrim();
+      db.prepare("UPDATE servers SET status = 'live' WHERE id = 1").run();
+      db.prepare("UPDATE servers SET status = 'offline' WHERE id = 2").run();
+      restarting.add(2);
+      dms = [];
+      const match = tournament();
+      runner.allocate();
+      runner.allocate();
+      expect(getBooking(db, scrim)).toMatchObject({ state: 'ready', server_id: 3, ending_at: null });
+      expect(getBooking(db, match)!.state).toBe('scheduled');
+      expect(dms).toEqual([]);
+      expect(bumpedCount()).toBe(0);
+      restarting.delete(2);
+      db.prepare("UPDATE servers SET status = 'idle' WHERE id = 2").run();
+      runner.allocate();
+      await runner.idle();
+      expect(getBooking(db, match)).toMatchObject({ state: 'ready', server_id: 2 });
+      expect(getBooking(db, scrim)).toMatchObject({ state: 'ready', server_id: 3 });
+    });
+
+    it('a box mid-restart also holds off the boxless bump of a scrim past its start (Important 1, Ruling 6)', () => {
+      const restarting = new Set<number>([2]);
+      runner = build({ releasing: (id) => restarting.has(id) });
+      const scrim = book();
+      db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 3)").run();
+      db.prepare("UPDATE servers SET status = 'offline' WHERE id = 2").run();
+      now = START + 2 * MIN;
+      tournament();
+      runner.allocate();
+      expect(getBooking(db, scrim)).toMatchObject({ state: 'scheduled', ending_at: null });
+      expect(bumpedCount()).toBe(0);
+    });
+
+    it('a gone box mid-restart is not coming back: it never holds off a bump (Important 1)', () => {
+      runner = build({ releasing: () => true });
+      const scrim = book();
+      db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 3)").run();
+      db.prepare("UPDATE servers SET status = 'offline', gone_since = '2026-10-02T19:00:00.000Z' WHERE id = 2").run();
+      now = START + 2 * MIN;
+      tournament();
+      runner.allocate();
+      expect(getBooking(db, scrim)).toMatchObject({ state: 'cancelled', end_reason: 'bumped' });
+    });
+
+    it('the waiting match takes the bumped box as soon as it is released, with no further allocate (Important 3)', async () => {
+      const scrim = await heldScrim();
+      db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 2)").run();
+      const match = tournament();
+      runner.allocate();
+      expect(getBooking(db, scrim)).toMatchObject({ end_reason: 'bumped' });
+      await runner.idle();
+      expect(getBooking(db, scrim)!.ended_at).not.toBeNull();
+      expect(getBooking(db, match)).toMatchObject({ state: 'ready', server_id: 3 });
+    });
+
+    it('a tournament match whose box died bumps an unstarted scrim, its people are told, and the match recovers onto that box after the wind-down (Important 2)', async () => {
+      const events: AdminEvent[] = [];
+      const scrim = await heldScrim();
+      db.prepare("UPDATE servers SET status = 'live' WHERE id = 1").run();
+      const match = tournament();
+      runner.allocate();
+      await runner.idle();
+      expect(getBooking(db, match)).toMatchObject({ state: 'ready', server_id: 2 });
+      expect(beginRecovery(db, match, 'gone', new Date(now))).toBe(true);
+      expect(dropBox(db, match, new Date(now))).toBe(2);
+      dms = []; released = [];
+      const unsubscribe = subscribeAdminEvents((e) => events.push(e));
+      runner.allocate();
+      runner.allocate();
+      unsubscribe();
+      expect(getBooking(db, scrim)).toMatchObject({ state: 'cancelled', end_reason: 'bumped', server_id: 3 });
+      expect(bumpedCount()).toBe(1);
+      expect(dms.filter((d) => d.content.includes('was bumped: a tournament match needed the server')).map((d) => d.to).sort()).toEqual(['d0', 'd1']);
+      expect(events.some((e) => e.kind === 'problem' && e.text.includes(`was bumped by tournament match booking ${match}`))).toBe(true);
+      await runner.idle();
+      expect(released).toEqual([3]);
+      expect(getBooking(db, match)).toMatchObject({ state: 'ready', server_id: 3, recovering_at: null, waiting_since: null });
+    });
+
+    it('a recovering match never takes a scrim whose players are on its box, nor one that started (Important 2)', async () => {
+      const scrim = await heldScrim();
+      db.prepare("UPDATE servers SET status = 'live' WHERE id = 1").run();
+      const match = tournament();
+      runner.allocate();
+      await runner.idle();
+      recordPresence(db, scrim, { a: 1, b: 0 }, true, new Date(now));
+      beginRecovery(db, match, 'gone', new Date(now));
+      dropBox(db, match, new Date(now));
+      dms = [];
+      runner.allocate();
+      runner.allocate();
+      await runner.idle();
+      expect(getBooking(db, scrim)).toMatchObject({ state: 'ready', server_id: 3, ending_at: null });
+      expect(getBooking(db, match)).toMatchObject({ server_id: null });
+      expect(getBooking(db, match)!.waiting_since).not.toBeNull();
+      expect(dms).toEqual([]);
+      expect(bumpedCount()).toBe(0);
+    });
+
+    it('a second scrim bumped for the same match (the first box did not come back) says so to staff, and a failed bump is logged', async () => {
+      const first = book();
+      const second = book();
+      now = START - 15 * MIN;
+      runner.allocate();
+      await runner.idle();
+      expect(getBooking(db, first)).toMatchObject({ state: 'ready', server_id: 3 });
+      expect(getBooking(db, second)).toMatchObject({ state: 'ready', server_id: 2 });
+      let fails = 1;
+      runner = build({
+        release: async (id) => {
+          released.push(id);
+          if (fails-- > 0) { db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(id); return false; }
+          db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id);
+          return true;
+        },
+      });
+      db.prepare("UPDATE servers SET status = 'live' WHERE id = 1").run();
+      const events: AdminEvent[] = [];
+      const unsubscribe = subscribeAdminEvents((e) => events.push(e));
+      const match = tournament();
+      runner.allocate();
+      expect(getBooking(db, second)).toMatchObject({ end_reason: 'bumped' });
+      await runner.idle();
+      unsubscribe();
+      expect(getBooking(db, first)).toMatchObject({ state: 'cancelled', end_reason: 'bumped' });
+      const texts = events.flatMap((e) => (e.kind === 'problem' && e.text.includes('was bumped') ? [e.text] : []));
+      expect(texts).toHaveLength(2);
+      expect(texts[0]).not.toContain('second scrim');
+      expect(texts[1]).toContain(`It is the second scrim bumped for match booking ${match}: the server the earlier bump freed did not come back.`);
+      expect(getBooking(db, match)).toMatchObject({ state: 'ready', server_id: 3 });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      (runner as unknown as { bump: (v: unknown, f: unknown, n: number) => void }).bump(getBooking(db, first), getBooking(db, match), now);
+      expect(warn.mock.calls.some((c) => String(c[0]).includes(`bumping booking ${first} for ${match} refused: wrong_state`))).toBe(true);
+      warn.mockRestore();
+    });
+
+    it('two waiting matches and one held scrim: the scrim goes once, the first match takes its box, the second waits (deferred Task 3 minor)', async () => {
+      const scrim = await heldScrim();
+      db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 2)").run();
+      const m1 = tournament();
+      const m2 = tournament();
+      runner.allocate();
+      runner.allocate();
+      expect(getBooking(db, scrim)).toMatchObject({ end_reason: 'bumped' });
+      expect(bumpedCount()).toBe(1);
+      await runner.idle();
+      runner.allocate();
+      await runner.idle();
+      expect(getBooking(db, m1)).toMatchObject({ state: 'ready', server_id: 3 });
+      expect(getBooking(db, m2)).toMatchObject({ state: 'scheduled', server_id: null });
+      expect(bumpedCount()).toBe(1);
+    });
+
+    it('two waiting matches, one held scrim and one boxless scrim past its start: each match takes one scrim, never two for one (deferred Task 3 minor)', async () => {
+      const held = await heldScrim();
+      const boxless = book();
+      db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 2)").run();
+      now = START + 2 * MIN;
+      const m1 = tournament();
+      const m2 = tournament();
+      runner.allocate();
+      runner.allocate();
+      expect(getBooking(db, held)).toMatchObject({ end_reason: 'bumped' });
+      expect(getBooking(db, boxless)).toMatchObject({ end_reason: 'bumped', server_id: null });
+      const by = db.prepare("SELECT booking_id, json_extract(detail, '$.byBookingId') AS by FROM booking_events WHERE event = 'bumped' ORDER BY id").all();
+      expect(by).toEqual([{ booking_id: held, by: m1 }, { booking_id: boxless, by: m2 }]);
+      await runner.idle();
+      expect(getBooking(db, m1)).toMatchObject({ state: 'ready', server_id: 3 });
+      expect(getBooking(db, m2)!.server_id).toBeNull();
+    });
   });
 });

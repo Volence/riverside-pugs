@@ -1,4 +1,4 @@
-import { adminApi, type AdminBookingRow } from '../../api';
+import { adminApi, type AdminBookingPriority, type AdminBookingRow } from '../../api';
 import { Panel } from '../../components/bits';
 import { useFetch } from '../../hooks/useFetch';
 import { localLabel } from '../../bookingTime';
@@ -14,6 +14,19 @@ const PURPOSE_LABEL: Record<AdminBookingRow['purpose'], string> = { tournament: 
 /** The state cell: a bumped scrim says what bumped it (server priority Ruling 9). */
 const stateText = (b: AdminBookingRow): string =>
   `${STATE_LABEL[b.state]}${b.endReason === 'bumped' ? ' (bumped by a match)' : b.endReason ? ` (${b.endReason})` : ''}`;
+
+/** How many of the scrim cap's servers scrims hold. The cap is per region:
+ *  with one region (every box today is NA) the line names none, as nothing
+ *  else on the site shows a region while only one exists; with more, each
+ *  region gets its own count. */
+const scrimLine = (p: AdminBookingPriority): string => {
+  const of = `of ${p.scrimMax} server${p.scrimMax === 1 ? '' : 's'}`;
+  const [first, ...rest] = p.regions;
+  if (!first) return `Scrims hold 0 ${of} they may hold at once`;
+  if (rest.length === 0) return `Scrims hold ${first.scrimsHolding} ${of} they may hold at once`;
+  return `Scrims hold ${first.scrimsHolding} ${of} they may hold at once in ${first.region.toUpperCase()}, `
+    + rest.map((r) => `${r.scrimsHolding} of ${p.scrimMax} in ${r.region.toUpperCase()}`).join(', ');
+};
 
 /**
  * Booked servers on the live board (plan 4a; the spec's "calendar of bookings
@@ -33,7 +46,7 @@ export function BookingsPanel({ nudge }: { nudge: number }) {
       <h3>Booked servers</h3>
       {priority && (
         <p class="muted" data-testid="booking-priority">
-          Priority: Match, then Scrim, then PUG, then practice and side games. Scrims hold {priority.scrimsHolding} of {priority.scrimMax} server{priority.scrimMax === 1 ? '' : 's'} they may hold at once; {priority.pugReserve} always left for PUGs. A match with no free server bumps a scrim that has not started.
+          Priority: Match, then Scrim, then PUG, then practice and side games. {scrimLine(priority)}; {priority.pugReserve} always left for PUGs. A match with no free server bumps a scrim that has not started.
         </p>
       )}
       {error && <p class="error" role="alert">{error}</p>}

@@ -15,8 +15,11 @@ export interface AdminBookingRow {
   toxic: { a: boolean; b: boolean };
 }
 
-/** Server priority (Ruling 9): the scrim cap, how much of it is in use, and the PUG reserve. */
-export interface AdminBookingPriority { scrimMax: number; scrimsHolding: number; pugReserve: number }
+/** Server priority (Ruling 9): the scrim cap and the PUG reserve, both per
+ *  region, and the scrims holding a box in each region with an enabled
+ *  server or a scrim holding one (final review: the cap is per region, so
+ *  is the count). */
+export interface AdminBookingPriority { scrimMax: number; pugReserve: number; regions: { region: string; scrimsHolding: number }[] }
 
 /**
  * The staff side of bookings (plan 4a): every open booking and those that
@@ -49,7 +52,12 @@ export async function adminBookingRoutes(app: FastifyInstance, opts: { db: DB; r
       };
     });
     const limits = bookingLimits(db);
-    return { bookings, priority: { scrimMax: limits.scrimMax, scrimsHolding: scrimsHolding(db), pugReserve: limits.reserve } satisfies AdminBookingPriority };
+    const regions = (db.prepare(
+      `SELECT region FROM servers WHERE enabled = 1
+        UNION SELECT region FROM bookings WHERE purpose = 'scrim' AND server_id IS NOT NULL AND ended_at IS NULL
+        ORDER BY region`,
+    ).all() as { region: string }[]).map(({ region }) => ({ region, scrimsHolding: scrimsHolding(db, region) }));
+    return { bookings, priority: { scrimMax: limits.scrimMax, pugReserve: limits.reserve, regions } satisfies AdminBookingPriority };
   });
 
   app.post('/api/admin/bookings/:id/cancel', async (req, reply) => {
