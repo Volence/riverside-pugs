@@ -39,7 +39,8 @@ export async function seriesFixture(o: { veto?: object; pool?: string[]; drive?:
   const f = await roomFixture({ veto: o.veto, pool: o.pool });
   (o.drive ?? driveToBooking)(f);
   const serverId = addServer(f.db, { name: 'box', host: '10.0.0.1', port: 27015, rconPort: 1, rconPassword: 'x' });
-  f.db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(serverId);
+  // dlc4: POOL7 carries L4D2 campaigns (dark_carnival, dead_center, swamp_fever).
+  f.db.prepare("UPDATE servers SET status = 'idle', has_dlc4 = 1 WHERE id = ?").run(serverId);
   const t = { t: NOW.getTime() + 10 * MIN };
   const sent: string[] = [];
   const box = { map: 'l4d_vs_hospital01_apartment', humans: [] as string[], down: false, marker: '', type: 'Rotoblin Pub VS' };

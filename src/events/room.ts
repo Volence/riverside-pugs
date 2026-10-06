@@ -406,7 +406,9 @@ export function openPick(db: DB, o: { matchId: number; timers: RoomTimers; now?:
     const c = liveMatch(db, o.matchId);
     if (!c.ok) return c;
     const { m, ev } = c.value;
-    if (m.status !== 'live' || m.deadline !== null) return V.fail('not_live_phase');
+    if (m.status !== 'live') return V.fail('not_live_phase');
+    // A pick already open (its deadline running) is not opened again.
+    if (m.deadline !== null) return V.fail('changed');
     const st = roomState(db, m);
     if (!isHumanStep(st.next)) return V.fail('changed');
     db.prepare('UPDATE event_matches SET deadline = ? WHERE id = ?').run(plus(now, o.timers.stepSeconds * 1000), m.id);
@@ -415,7 +417,8 @@ export function openPick(db: DB, o: { matchId: number; timers: RoomTimers; now?:
   })();
 }
 
-/** The series is over: the confirm window opens (Ruling 9). */
+/** The series is over: the confirm window opens (Ruling 9). Refused as
+ *  'changed' while the recorded games do not make a finished series. */
 export function startConfirm(db: DB, o: { matchId: number; timers: RoomTimers; now?: Date }): V.Checked<P.MatchRow> {
   const now = o.now ?? new Date();
   const at = iso(now);
@@ -424,6 +427,7 @@ export function startConfirm(db: DB, o: { matchId: number; timers: RoomTimers; n
     if (!c.ok) return c;
     const { m, ev } = c.value;
     if (m.status !== 'live') return V.fail('not_live_phase');
+    if (!seriesVerdict(E.stageSettingsOf(E.getStage(db, m.stage_id)!).veto, seriesGames(db, m)).over) return V.fail('changed');
     db.prepare("UPDATE event_matches SET status = 'confirming', deadline = ?, confirm_a_at = NULL, confirm_b_at = NULL WHERE id = ?")
       .run(plus(now, o.timers.confirmMinutes * 60_000), m.id);
     E.logEvent(db, ev.id, null, 'match_confirming', at, { matchId: m.id });
@@ -461,7 +465,7 @@ export function disputeMatch(db: DB, o: { matchId: number; steamid: string; reas
     if (!c.ok) return c;
     const { m, ev } = c.value;
     if (m.status !== 'confirming') return V.fail('not_confirm_phase');
-    if (m.deadline !== null && at >= m.deadline) return V.fail('room_closed');
+    if (m.deadline !== null && at >= m.deadline) return V.fail('confirm_closed');
     const side = sideOf(db, m, o.steamid);
     if (!side) return V.fail('not_manager');
     const nr = V.normalizeReason(o.reason);

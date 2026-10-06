@@ -93,7 +93,9 @@ describe('RoomClock: deadlines', () => {
     t.t = at(10);
     await clock.tick();
     expect(match(f)).toMatchObject({ status: 'forfeit', winner_entry: f.entryB, result_source: 'forfeit' });
-    expect(send).toHaveBeenCalledWith(expect.arrayContaining([A[0], B[0]]), 'event_match_forfeit', expect.anything());
+    expect(send).toHaveBeenCalledWith(expect.arrayContaining([A[0], B[0]]), 'event_match_forfeit', expect.objectContaining({
+      content: expect.stringMatching(/is a forfeit win for Bats: Rats did not press Ready in the match room in time\.$/),
+    }));
   });
 
   it('holds a match nobody readied up for', async () => {

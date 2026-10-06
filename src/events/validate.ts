@@ -117,6 +117,7 @@ export const EVENT_ERRORS = {
   not_connect_phase: { status: 409, text: 'This match is not waiting for the teams to connect.' },
   not_live_phase: { status: 409, text: 'This match is not being played.' },
   not_confirm_phase: { status: 409, text: 'This match is not in its confirm window.' },
+  confirm_closed: { status: 409, text: 'The confirm window for this match has closed.' },
   game_not_found: { status: 404, text: 'No such game in this match.' },
   already_confirmed: { status: 409, text: 'Your team has already confirmed the result.' },
 } as const satisfies Record<string, { status: number; text: string }>;
