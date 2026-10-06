@@ -1,0 +1,79 @@
+import { describe, it, expect, afterEach } from 'vitest';
+import { cleanup, render, screen, within } from '@testing-library/preact';
+import type { PlayEntry, PlayMatch, StagePlayView } from '../../api';
+import { StagePlay } from './StagePlay';
+import { placementText } from '../../eventFormat';
+
+afterEach(cleanup);
+
+const team = (id: number, name: string, out = false): PlayEntry => ({ id, name, tag: name.slice(0, 3).toUpperCase(), logoKey: null, seed: id, out });
+const match = (over: Partial<PlayMatch>): PlayMatch => ({
+  id: 1, group: 1, round: 1, slot: 1, a: team(1, 'Rats'), b: team(2, 'Bats'), status: 'waiting', winner: null,
+  scoreA: null, scoreB: null, forfeit: false, bye: false, ...over,
+});
+
+describe('StagePlay', () => {
+  it('draws a bracket: one column per round, scores, the winner marked, TBD for unknown teams', () => {
+    const stage: StagePlayView = {
+      ordinal: 2, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null,
+      rounds: [
+        { group: 1, round: 1, label: 'Semifinals', dates: null, matches: [match({ status: 'done', winner: 'a', scoreA: 1200, scoreB: 900 }), match({ id: 2, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'forfeit', winner: 'b', forfeit: true })] },
+        { group: 1, round: 2, label: 'Final', dates: null, matches: [match({ id: 3, a: team(1, 'Rats'), b: null, status: 'pending' })] },
+      ],
+    };
+    render(<StagePlay stage={stage} />);
+    expect(screen.getByRole('heading', { name: /Stage 2/ })).toBeTruthy();
+    const cols = document.querySelectorAll('.bracket__round');
+    expect(cols).toHaveLength(2);
+    expect(within(cols[0] as HTMLElement).getByText('Semifinals')).toBeTruthy();
+    expect(screen.getByText('1200')).toBeTruthy();
+    expect(screen.getByText('FF')).toBeTruthy();
+    expect(screen.getByText('TBD')).toBeTruthy();
+    expect(document.querySelectorAll('.matchcard__side--won')).toHaveLength(2);
+  });
+
+  it('draws a table stage: standings with Swiss columns, then the rounds; a bye and an out team are marked', () => {
+    const stage: StagePlayView = {
+      ordinal: 1, type: 'swiss', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], advanceCount: 2,
+      standings: [
+        { entry: team(1, 'Rats'), group: 1, rank: 1, groupRank: 1, played: 1, wins: 1, losses: 0, points: 1, buchholz: 0, scoreDiff: 300 },
+        { entry: team(3, 'Cats'), group: 1, rank: 2, groupRank: 2, played: 0, wins: 1, losses: 0, points: 1, buchholz: 0, scoreDiff: 0 },
+        { entry: team(2, 'Bats', true), group: 1, rank: 3, groupRank: 3, played: 1, wins: 0, losses: 1, points: 0, buchholz: 1, scoreDiff: -300 },
+      ],
+      rounds: [{ group: 1, round: 1, label: 'Round 1', dates: null, matches: [
+        match({ status: 'done', winner: 'a', scoreA: 1200, scoreB: 900 }),
+        match({ id: 2, slot: 2, a: team(3, 'Cats'), b: null, status: 'bye', winner: 'a', bye: true }),
+      ] }],
+    };
+    render(<StagePlay stage={stage} />);
+    const table = screen.getByRole('table');
+    expect(within(table).getByText('Buchholz')).toBeTruthy();
+    expect(within(table).getByText('+300')).toBeTruthy();
+    expect(within(table).getByText('Disqualified')).toBeTruthy();
+    expect(screen.getByText('Top 2 advance')).toBeTruthy();
+    expect(screen.getByText('Bye')).toBeTruthy();
+    expect(screen.getByText('Round 1')).toBeTruthy();
+  });
+
+  it('shows a league round\'s week dates next to its label', () => {
+    render(<StagePlay stage={{
+      ordinal: 1, type: 'league', status: 'live', layout: 'table', advanceCount: null, standings: [], groups: [{ number: 1, label: 'Rounds' }],
+      rounds: [{ group: 1, round: 3, label: 'Week 3', dates: { from: '2026-10-26', to: '2026-11-01' }, matches: [] }],
+    }} />);
+    expect(screen.getByText('Week 3 · Oct 26 to Nov 1')).toBeTruthy();
+  });
+
+  it('shows one table per round robin group', () => {
+    const s = (id: number, name: string, group: number) => ({ entry: team(id, name), group, rank: id, groupRank: 1, played: 0, wins: 0, losses: 0, points: 0, buchholz: 0, scoreDiff: 0 });
+    render(<StagePlay stage={{
+      ordinal: 1, type: 'round_robin', status: 'live', layout: 'table', advanceCount: null, rounds: [],
+      groups: [{ number: 1, label: 'Group A' }, { number: 2, label: 'Group B' }], standings: [s(1, 'Rats', 1), s(2, 'Bats', 2)],
+    }} />);
+    expect(screen.getAllByRole('table')).toHaveLength(2);
+    expect(screen.getByText('Group B')).toBeTruthy();
+  });
+
+  it('placementText', () => {
+    expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 23].map(placementText)).toEqual(['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '23rd']);
+  });
+});

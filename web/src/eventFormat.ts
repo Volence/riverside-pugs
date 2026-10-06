@@ -41,3 +41,17 @@ export function fromLocalInput(value: string): string | null {
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
+
+/** "Oct 26 to Nov 1" for a league week. The days are calendar days, so they
+ *  are read and shown in UTC and never shift with the viewer's time zone. */
+export function weekRangeText(from: string, to: string): string {
+  const f = (d: string) => new Date(`${d}T00:00:00.000Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  return `${f(from)} to ${f(to)}`;
+}
+
+/** 1st, 2nd, 3rd, 4th ... 11th, 12th, 13th, 21st. */
+export function placementText(n: number): string {
+  const teen = n % 100 >= 11 && n % 100 <= 13;
+  const suffix = teen ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th';
+  return `${n}${suffix}`;
+}
