@@ -1915,7 +1915,7 @@ export interface StageConfigs {
   double_elim: { grandFinalReset: boolean };
   round_robin: { groups: number };
   swiss: { rounds: number };
-  league: { weeks: number; matchesPerWeek: number; pairing: 'swiss' | 'round_robin' };
+  league: { matches: number; matchesPerWeek: number; pairing: 'swiss' | 'round_robin'; seasonStart: string | null };
 }
 export type StageConfig = StageConfigs[StageType];
 export interface StageSettings {

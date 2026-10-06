@@ -9,7 +9,7 @@ import type { AdminEventOptions, Scheduling, StageConfig, StageConfigs, StageSet
 export interface StageDraft {
   type: StageType;
   thirdPlace: boolean; grandFinalReset: boolean; groups: number; rounds: number;
-  weeks: number; matchesPerWeek: number; pairing: 'swiss' | 'round_robin';
+  matches: number; seasonStart: string | null; matchesPerWeek: number; pairing: 'swiss' | 'round_robin';
   rulesetId: number; gameConfig: string; campaignPool: string[]; vetoType: VetoType;
   chapters: number | null; scheduling: Scheduling; advanceCount: number | null;
 }
@@ -21,7 +21,7 @@ export function draftFrom(s: StageSettings | null, o: AdminEventOptions): StageD
   return {
     type: s?.type ?? 'single_elim',
     thirdPlace: c.thirdPlace ?? false, grandFinalReset: c.grandFinalReset ?? true, groups: c.groups ?? 1, rounds: c.rounds ?? 4,
-    weeks: c.weeks ?? 6, matchesPerWeek: c.matchesPerWeek ?? 1, pairing: c.pairing ?? 'swiss',
+    matches: c.matches ?? 16, seasonStart: c.seasonStart ?? null, matchesPerWeek: c.matchesPerWeek ?? 1, pairing: c.pairing ?? 'swiss',
     rulesetId: s?.rulesetId ?? o.defaultRulesetId ?? o.rulesets[0]?.id ?? 0,
     gameConfig: s?.gameConfig ?? 'standard',
     campaignPool: s ? [...s.campaignPool] : [...o.defaultPool],
@@ -38,7 +38,7 @@ export function configOf(d: StageDraft): StageConfig {
     case 'double_elim': return { grandFinalReset: d.grandFinalReset };
     case 'round_robin': return { groups: d.groups };
     case 'swiss': return { rounds: d.rounds };
-    case 'league': return { weeks: d.weeks, matchesPerWeek: d.matchesPerWeek, pairing: d.pairing };
+    case 'league': return { matches: d.matches, matchesPerWeek: d.matchesPerWeek, pairing: d.pairing, seasonStart: d.seasonStart };
   }
 }
 

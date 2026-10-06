@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/preact';
 import type { AdminEventOptions, StageSettings } from '../../../api';
 import { StageForm } from './StageForm';
@@ -38,5 +38,19 @@ describe('StageForm pickers', () => {
     });
     expect(screen.queryByText(CUP)).toBeNull();
     expect(screen.queryByText(SCRIM)).toBeNull();
+  });
+});
+
+describe('StageForm league', () => {
+  it('saves matches, matches a week, pairing and the season start', () => {
+    const onSave = vi.fn();
+    render(<StageForm options={OPTIONS} initial={null} busy={false} onSave={onSave} onCancel={() => {}} teamCap={8} />);
+    fireEvent.change(screen.getByLabelText('Stage type'), { target: { value: 'league' } });
+    fireEvent.input(screen.getByLabelText('Matches per team'), { target: { value: '14' } });
+    fireEvent.input(screen.getByLabelText('Matches a week'), { target: { value: '2' } });
+    fireEvent.input(screen.getByLabelText('Season start'), { target: { value: '2026-10-12' } });
+    expect(screen.getByText('14 matches at 2 a week: 7 weeks, Oct 12 to Nov 29.')).toBeTruthy();
+    fireEvent.submit(screen.getByLabelText('Matches per team').closest('form')!);
+    expect(onSave.mock.calls[0]![0].config).toEqual({ matches: 14, matchesPerWeek: 2, pairing: 'swiss', seasonStart: '2026-10-12' });
   });
 });

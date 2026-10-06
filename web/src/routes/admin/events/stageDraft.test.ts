@@ -26,7 +26,7 @@ describe('stage drafts', () => {
 
   it('round-trips a saved stage, and sends only the chosen type settings', () => {
     const league: StageSettings = {
-      type: 'league', config: { weeks: 8, matchesPerWeek: 2, pairing: 'round_robin' }, rulesetId: 1, gameConfig: 'standard',
+      type: 'league', config: { matches: 16, matchesPerWeek: 2, pairing: 'round_robin', seasonStart: '2026-10-12' }, rulesetId: 1, gameConfig: 'standard',
       campaignPool: ['dead_air'], vetoType: 'home_away', chapters: 3, scheduling: 'window', advanceCount: 4,
     };
     expect(settingsFrom(draftFrom(league, OPTIONS))).toEqual(league);

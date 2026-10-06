@@ -3,6 +3,7 @@ import type { AdminEventOptions, Scheduling, StageSettings, StageType, VetoType 
 import { draftFrom, settingsFrom, staleValues, type StageDraft } from './stageDraft';
 import { readWhole } from './wholeNumber';
 import { FormGroup, FormRow, ToggleRow } from './FormRow';
+import { SeasonCalc } from './SeasonCalc';
 
 const TYPES: [StageType, string][] = [
   ['single_elim', 'Single elimination'], ['double_elim', 'Double elimination'], ['round_robin', 'Round robin'], ['swiss', 'Swiss'], ['league', 'League'],
@@ -14,27 +15,30 @@ const val = (e: Event): string => (e.target as HTMLInputElement).value;
 const STALE = ' (no longer available)';
 
 /** The number fields, kept as typed and read only at Save (wholeNumber.ts). */
-type NumKey = 'groups' | 'rounds' | 'weeks' | 'matchesPerWeek' | 'chapters' | 'advanceCount';
+type NumKey = 'groups' | 'rounds' | 'matches' | 'matchesPerWeek' | 'chapters' | 'advanceCount';
 const NUM_LABEL: Record<NumKey, string> = {
-  groups: 'Groups', rounds: 'Rounds', weeks: 'Weeks', matchesPerWeek: 'Matches a week', chapters: 'Chapters', advanceCount: 'Advance count',
+  groups: 'Groups', rounds: 'Rounds', matches: 'Matches per team', matchesPerWeek: 'Matches a week', chapters: 'Chapters', advanceCount: 'Advance count',
 };
 const typedOf = (d: StageDraft): Record<NumKey, string> => ({
-  groups: String(d.groups), rounds: String(d.rounds), weeks: String(d.weeks), matchesPerWeek: String(d.matchesPerWeek),
+  groups: String(d.groups), rounds: String(d.rounds), matches: String(d.matches), matchesPerWeek: String(d.matchesPerWeek),
   chapters: String(d.chapters ?? 3), advanceCount: d.advanceCount === null ? '' : String(d.advanceCount),
 });
 /** Which number fields the chosen settings use. */
 const usedNums = (d: StageDraft): NumKey[] => [
   ...(d.type === 'round_robin' ? ['groups' as const] : []),
   ...(d.type === 'swiss' ? ['rounds' as const] : []),
-  ...(d.type === 'league' ? ['weeks' as const, 'matchesPerWeek' as const] : []),
+  ...(d.type === 'league' ? ['matches' as const, 'matchesPerWeek' as const] : []),
   ...(d.chapters !== null ? ['chapters' as const] : []),
   'advanceCount',
 ];
 const pick = (e: Event): string => (e.target as HTMLSelectElement).value;
+/** A typed field as a whole number for the live calculator, or null. */
+const wholeOrNull = (s: string): number | null => (/^\d+$/.test(s.trim()) ? Number(s) : null);
 
 /** One stage's settings. Saving hands the settings up; the editor sends them. */
-export function StageForm({ options, initial, busy, onSave, onCancel }: {
+export function StageForm({ options, initial, busy, onSave, onCancel, teamCap }: {
   options: AdminEventOptions; initial: StageSettings | null; busy: boolean; onSave: (s: StageSettings) => void; onCancel: () => void;
+  teamCap?: number | null;
 }) {
   const [d, setD] = useState<StageDraft>(() => draftFrom(initial, options));
   const [stale] = useState(() => staleValues(initial, options));
@@ -90,18 +94,26 @@ export function StageForm({ options, initial, busy, onSave, onCancel }: {
         )}
         {d.type === 'league' && (
           <>
-            <FormRow label="Weeks" help="(1 to 12)" for={id('weeks')}>
-              <input id={id('weeks')} aria-label="Weeks" type="number" min={1} max={12} value={typed.weeks} onInput={typeInto('weeks')} />
+            <FormRow label="Matches per team" help="(1 to 40; a bye counts as one)" for={id('matches')}>
+              <input id={id('matches')} aria-label="Matches per team" type="number" min={1} max={40} value={typed.matches} onInput={typeInto('matches')} />
             </FormRow>
             <FormRow label="Matches a week" help="(1 to 3)" for={id('mpw')}>
               <input id={id('mpw')} aria-label="Matches a week" type="number" min={1} max={3} value={typed.matchesPerWeek} onInput={typeInto('matchesPerWeek')} />
             </FormRow>
+            <FormRow label="Season start" help="Week 1 starts this day. Empty: the day the stage starts." for={id('season')}>
+              <input id={id('season')} aria-label="Season start" type="date" value={d.seasonStart ?? ''}
+                onInput={(e) => set({ seasonStart: val(e) === '' ? null : val(e) })} />
+            </FormRow>
             <FormRow label="Pairing" for={id('pairing')}>
               <select id={id('pairing')} aria-label="League pairing" value={d.pairing} onChange={(e) => set({ pairing: pick(e) as 'swiss' | 'round_robin' })}>
                 <option value="swiss">Swiss by record</option>
-                <option value="round_robin">Full round robin over the weeks</option>
+                <option value="round_robin">Round robin, repeated until the season is played</option>
               </select>
             </FormRow>
+            <SeasonCalc
+              matches={wholeOrNull(typed.matches)} perWeek={wholeOrNull(typed.matchesPerWeek)} seasonStart={d.seasonStart} teamCap={teamCap}
+              onUsePerWeek={(n) => setTyped((x) => ({ ...x, matchesPerWeek: String(n) }))}
+            />
           </>
         )}
       </FormGroup>

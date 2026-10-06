@@ -3695,3 +3695,7 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .studio__frames { margin-bottom: var(--sp-3); }
 .studio__rect { display: grid; grid-template-columns: 7rem repeat(4, minmax(0, 1fr)); align-items: end; gap: var(--sp-2); margin-top: var(--sp-2); }
 @media (max-width: 600px) { .studio__rect { grid-template-columns: repeat(4, minmax(0, 1fr)); } .studio__rect .eyebrow { grid-column: 1 / -1; } }
+
+/* Plan T2: the league season calculator. */
+.seasoncalc { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 8px; }
+.seasoncalc input[type='number'] { width: 5em; }

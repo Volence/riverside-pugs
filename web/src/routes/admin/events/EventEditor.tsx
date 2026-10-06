@@ -166,7 +166,7 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
                   )}
                 </div>
                 {editing === s.id && (
-                  <StageForm options={options} initial={s.settings} busy={busy} onCancel={() => setEditing(null)}
+                  <StageForm options={options} initial={s.settings} busy={busy} onCancel={() => setEditing(null)} teamCap={ev.fields.teamCap}
                     onSave={(st) => saveStage(() => adminApi.updateStage(id, s.id, st))} />
                 )}
               </li>
@@ -175,7 +175,7 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
         )}
         {stagesOpen && editing === null && <button class="btn" onClick={() => setEditing('new')}>Add stage</button>}
         {editing === 'new' && (
-          <StageForm options={options} initial={null} busy={busy} onCancel={() => setEditing(null)}
+          <StageForm options={options} initial={null} busy={busy} onCancel={() => setEditing(null)} teamCap={ev.fields.teamCap}
             onSave={(st) => saveStage(() => adminApi.addStage(id, st))} />
         )}
       </Panel>
