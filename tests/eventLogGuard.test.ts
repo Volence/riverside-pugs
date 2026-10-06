@@ -7,11 +7,12 @@ import * as N from '../src/events/entries.js';
 import * as P from '../src/events/play.js';
 import * as V from '../src/events/validate.js';
 import * as R from '../src/events/room.js';
+import * as S from '../src/events/schedule.js';
 import { createBracket, reportResult } from '../src/events/bracket.js';
 import { ADMIN, NOW, START, eventFixture, stageBody, type Fixture } from './eventFixture.js';
 import { A, B, entryFixture, rosterA, type EntryFixture } from './entryFixture.js';
 import { SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
-import { POOL7, TIMERS, driveToBooking, fakeBooking, fakeMatch, roomFixture, type RoomFixture } from './roomFixture.js';
+import { POOL7, TIMERS, driveToBooking, fakeBooking, fakeMatch, roomFixture, windowFixture, type RoomFixture } from './roomFixture.js';
 import { presetConfig } from '../src/events/vetoConfig.js';
 
 /**
@@ -310,8 +311,8 @@ describe('event_log guard', () => {
     const rows = (f: PlayFixture) => JSON.stringify(['events', 'event_stages', 'event_entries', 'event_matches']
       .map((t) => f.db.prepare(`SELECT * FROM ${t} ORDER BY id`).all()));
 
-    it('only src/events/play.ts and src/events/room.ts write event_matches', () => {
-      const offenders = walk('src').filter((f) => f !== 'src/events/play.ts' && f !== 'src/events/room.ts')
+    it('only src/events/play.ts, room.ts and schedule.ts write event_matches', () => {
+      const offenders = walk('src').filter((f) => f !== 'src/events/play.ts' && f !== 'src/events/room.ts' && f !== 'src/events/schedule.ts')
         .filter((f) => (readFileSync(join(root, f), 'utf8').match(MATCH_WRITERS) ?? []).length > 0);
       expect(offenders).toEqual([]);
     });
@@ -584,5 +585,66 @@ describe('event_log guard', () => {
       expect(P.getMatch(f.db, f.matchId)!.status).toBe('lineup');
       expect(rows(f)).not.toBe(before);
     });
+  });
+
+  /** Plan T4: src/events/schedule.ts is the only writer of event_reschedules,
+   *  and its mutations follow the same one-row rule. */
+  describe('schedule guard (src/events/schedule.ts)', () => {
+    const SCHEDULE_TABLE = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+event_reschedules\b/gi;
+    const SCHEDULE_READS = new Set([
+      'scheduleRules', 'proposalsOf', 'openProposal', 'getProposal', 'autoAcceptAt', 'reminderAt', 'silentSide',
+      'autoAcceptDue', 'remindersDue', 'staleProposals', 'expiredWindows',
+    ]);
+    const RULES: S.ScheduleRules = { autoAcceptHours: 24, leadMinutes: 20 };
+    const at = (h: number) => new Date(NOW.getTime() + h * 3_600_000);
+    const must = <T>(r: V.Checked<T>): T => { if (!r.ok) throw new Error(r.error); return r.value; };
+    const proposed = (f: RoomFixture) => must(S.proposeTime(f.db, { matchId: f.matchId, by: A[0]!, time: at(72).toISOString(), rules: RULES, now: NOW }));
+    const SCHEDULE_MUTATIONS: Record<string, { action: string; actor: string | null; setup: (f: RoomFixture) => void; run: (f: RoomFixture) => V.Checked<unknown> }> = {
+      proposeTime: { action: 'reschedule_proposed', actor: A[0]!, setup: () => {}, run: (f) => S.proposeTime(f.db, { matchId: f.matchId, by: A[0]!, time: at(72).toISOString(), rules: RULES, now: NOW }) },
+      respondProposal: { action: 'reschedule_accepted', actor: B[0]!, setup: proposed, run: (f) => S.respondProposal(f.db, { matchId: f.matchId, by: B[0]!, accept: true, now: at(1) }) },
+      counterProposal: { action: 'reschedule_countered', actor: B[0]!, setup: proposed, run: (f) => S.counterProposal(f.db, { matchId: f.matchId, by: B[0]!, time: at(80).toISOString(), rules: RULES, now: at(1) }) },
+      withdrawProposal: { action: 'reschedule_withdrawn', actor: A[0]!, setup: proposed, run: (f) => S.withdrawProposal(f.db, { matchId: f.matchId, by: A[0]!, now: at(1) }) },
+      staffSetTime: { action: 'match_time_set', actor: ADMIN, setup: proposed, run: (f) => S.staffSetTime(f.db, { matchId: f.matchId, by: ADMIN, time: at(90).toISOString(), now: at(1) }) },
+      autoAccept: { action: 'reschedule_auto_accepted', actor: null, setup: proposed, run: (f) => S.autoAccept(f.db, { proposalId: S.openProposal(f.db, f.matchId)!.id, now: at(24) }) },
+      noteReminded: {
+        action: 'reschedule_reminded', actor: null,
+        setup: (f) => must(S.proposeTime(f.db, { matchId: f.matchId, by: A[0]!, time: at(100).toISOString(), rules: { autoAcceptHours: 48, leadMinutes: 20 }, now: NOW })),
+        run: (f) => S.noteReminded(f.db, { proposalId: S.openProposal(f.db, f.matchId)!.id, now: at(24) }),
+      },
+      expireProposal: { action: 'reschedule_expired', actor: null, setup: proposed, run: (f) => S.expireProposal(f.db, { proposalId: S.openProposal(f.db, f.matchId)!.id, reason: 'time_passed', now: at(72) }) },
+    };
+    const rows = (f: RoomFixture) => JSON.stringify(['event_matches', 'event_reschedules'].map((t) => f.db.prepare(`SELECT * FROM ${t} ORDER BY id`).all()));
+
+    it('only src/events/schedule.ts writes event_reschedules', () => {
+      const offenders = walk('src').filter((f) => f !== 'src/events/schedule.ts')
+        .filter((f) => (readFileSync(join(root, f), 'utf8').match(SCHEDULE_TABLE) ?? []).length > 0);
+      expect(offenders).toEqual([]);
+    });
+
+    it('every exported function of schedule.ts is a known read or a guarded mutation', () => {
+      const fns = Object.entries(S).filter(([, v]) => typeof v === 'function').map(([k]) => k);
+      expect(fns.filter((k) => !SCHEDULE_READS.has(k)).sort()).toEqual(Object.keys(SCHEDULE_MUTATIONS).sort());
+    });
+
+    for (const [name, m] of Object.entries(SCHEDULE_MUTATIONS)) {
+      it(`${name} writes exactly one event_log row, ${m.action}`, async () => {
+        const f = await windowFixture();
+        m.setup(f);
+        const before = logCount(f);
+        const r = m.run(f);
+        expect(r.ok, r.ok ? '' : r.error).toBe(true);
+        expect(logCount(f)).toBe(before + 1);
+        expect(f.db.prepare('SELECT action, actor FROM event_log ORDER BY id DESC LIMIT 1').get()).toEqual({ action: m.action, actor: m.actor });
+      });
+
+      it(`${name} writes nothing when its event_log row cannot be written`, async () => {
+        const f = await windowFixture();
+        m.setup(f);
+        const before = rows(f);
+        f.db.exec(`CREATE TRIGGER schedule_log_down_${name} BEFORE INSERT ON event_log WHEN NEW.action = '${m.action}' BEGIN SELECT RAISE(ABORT, 'audit down'); END`);
+        expect(() => m.run(f)).toThrow(/audit down/);
+        expect(rows(f)).toBe(before);
+      });
+    }
   });
 });

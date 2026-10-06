@@ -207,8 +207,9 @@ export function readyUp(db: DB, o: { matchId: number; steamid: string | null; st
   })();
 }
 
-/** Plan T3c: holdMatch records the status held in hold_from, releaseHold reads it. */
-const HOLDABLE: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['veto', 'lineup', 'booking', 'connect', 'live', 'confirming']);
+/** Plan T3c: holdMatch records the status held in hold_from, releaseHold
+ *  reads it. waiting is the window end's hold (plan T4 Ruling 8). */
+const HOLDABLE: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['waiting', 'veto', 'lineup', 'booking', 'connect', 'live', 'confirming']);
 
 export function holdMatch(db: DB, o: { matchId: number; by: string | null; reason: string; now?: Date }): V.Checked<P.MatchRow> {
   const at = iso(o.now);
@@ -649,7 +650,10 @@ export function extendGrace(db: DB, o: { matchId: number; by: string; minutes: u
 }
 
 /** Ruling 15: back to the phase the hold came from, with that phase's full
- *  deadline from now; the dispute columns are cleared into the log row. */
+ *  deadline from now; the dispute columns are cleared into the log row.
+ *  A hold from waiting (the window end, plan T4) goes back to waiting with
+ *  no deadline; the clock opens its room again at its locked time, or staff
+ *  set one. */
 export function releaseHold(
   db: DB, o: { matchId: number; by: string; timers: RoomTimers; graceMinutes: number; now?: Date },
 ): V.Checked<P.MatchRow> {
