@@ -1264,41 +1264,58 @@ export class BookingRunner {
    *  on the same box, through the plugin's restore: the match is dropped and
    *  rebuilt from the snapshot, then the chapter loads from its start. The
    *  site's rows for the dropped chapters go only once the plugin took the
-   *  resume. A refused resume aborts the game as server_lost (the engine
-   *  holds the match through gameLost), as a failed recovery does. 'busy'
-   *  touches nothing: the booking is busy, not running, or not running this game. */
-  async replayGame(bookingId: number, gameMatchId: number, snap: RestoreSnapshot): Promise<'ok' | 'refused' | 'busy'> {
+   *  resume. A resume the box answered and refused aborts the game as
+   *  server_lost (the engine holds the match through gameLost), as a failed
+   *  recovery does, and the dropped chapters' rows stay. 'error' is a box
+   *  that did not answer (the abort or the resume burst failed in rcon, or
+   *  the replay threw): nothing is aborted or dropped on the site and the
+   *  game stays live, for staff to try again or move the match (plan T3c
+   *  Task 4 ruling). 'busy' touches nothing: the booking is busy, not
+   *  running, or not running this game. */
+  async replayGame(bookingId: number, gameMatchId: number, snap: RestoreSnapshot): Promise<'ok' | 'refused' | 'busy' | 'error'> {
     const live = liveBookingGame(this.db, bookingId);
     if (this.busy.has(bookingId) || !this.running(bookingId) || !live || live.id !== gameMatchId || live.token !== snap.token) return 'busy';
-    let result: 'ok' | 'refused' = 'refused';
-    this.track(bookingId, async () => { result = (await this.replayOnce(bookingId, gameMatchId, snap)) ? 'ok' : 'refused'; });
+    let result: 'ok' | 'refused' | 'busy' | 'error' = 'error';
+    this.track(bookingId, async () => {
+      try {
+        result = await this.replayOnce(bookingId, gameMatchId, snap);
+      } catch (err) {
+        console.error(`[booking] ${bookingId}: the replay of game #${gameMatchId} failed:`, redactSecrets(err instanceof Error ? err.message : String(err), [snap.token]));
+        result = 'error';
+      }
+    });
     await this.busy.get(bookingId);
     return result;
   }
 
-  /** True once the plugin took the resume (the replay is on its way); false
-   *  when it refused, in which case the game has been aborted. */
-  private async replayOnce(id: number, gameMatchId: number, snap: RestoreSnapshot): Promise<boolean> {
+  /** 'ok' once the plugin took the resume (the replay is on its way);
+   *  'refused' when it answered and refused, in which case the game has been
+   *  aborted; 'error' when the box did not answer the abort or the resume. */
+  private async replayOnce(id: number, gameMatchId: number, snap: RestoreSnapshot): Promise<'ok' | 'refused' | 'busy' | 'error'> {
     const b = this.running(id);
     const server = b ? getServer(this.db, b.server_id!) : undefined;
-    if (!b || !server) return false;
+    if (!b || !server) return 'busy';
     const live = liveBookingGame(this.db, id);
-    if (!live || live.id !== gameMatchId || live.token !== snap.token) return false;
+    if (!live || live.id !== gameMatchId || live.token !== snap.token) return 'busy';
     const resume = resumeLines(snap);
     let replies: string[];
+    let step = 'abort';
     try {
       await this.deps.rcon(server, [`sm_pug_abort ${snap.token}`]);
+      step = 'resume';
       replies = await this.deps.rcon(server, resume);
     } catch (err) {
-      console.warn(`[booking] ${id}: the replay burst on ${server.name} failed:`, redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret, snap.token]));
-      replies = [];
+      const why = redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret, snap.token]);
+      console.warn(`[booking] ${id}: the replay's ${step} on ${server.name} failed:`, why);
+      publishAdminEvent({ kind: 'problem', matchId: live.id, text: `Booking ${id}: ${server.name} did not answer the ${step} of a chapter replay of game #${live.id}. Nothing was aborted on the site; replay again or move the match.` });
+      return 'error';
     }
     if (!(replies[resume.length - 1] ?? '').trim().startsWith('PUGOK resumed')) {
       const token = abortBookingGame(this.db, live.id, new Date(this.now()), 'server_lost');
       if (token) this.forgetToken(id, token);
       if (token && b.purpose === 'tournament') this.hook(id, 'gameLost', () => this.deps.tournament?.gameLost?.(id, live.id));
       publishAdminEvent({ kind: 'problem', matchId: live.id, text: `Booking ${id}: game #${live.id} could not be rebuilt on ${server.name} for a chapter replay (pug-match did not take sm_pug_resume). It is aborted.` });
-      return false;
+      return 'refused';
     }
     prepareRestore(this.db, snap);
     try {
@@ -1316,7 +1333,7 @@ export class BookingRunner {
     }
     if (onMap !== snap.map) {
       publishAdminEvent({ kind: 'problem', matchId: live.id, text: `Booking ${id}: ${server.name} was sent ${snap.map} for a chapter replay but is on ${onMap ?? 'no map'}. The game is rebuilt on the box; load the map by hand or replay again.` });
-      return true;
+      return 'ok';
     }
     const fresh = this.running(id);
     if (fresh) {
@@ -1327,7 +1344,7 @@ export class BookingRunner {
       ], 'the replay lines');
     }
     console.log(`[booking] ${id}: game #${live.id} replays ${snap.map} on ${server.name}`);
-    return true;
+    return 'ok';
   }
 
   /** Staff move a running booking to another box (plan T3c Ruling 13): the

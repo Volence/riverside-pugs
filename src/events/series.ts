@@ -11,8 +11,9 @@ import { gamesPlayed } from '../bookings/games.js';
 import { SHOWN_MIN } from '../bookings/rules.js';
 import { CLOSE_GRACE_MS, NEXT_DELAY_MS, type TournamentHooks } from '../bookings/runner.js';
 import { addTournamentSub, createTournamentGame, gameLinesOf, isPendingGame, isUnstartedGame } from '../bookings/tournamentGames.js';
-import type { RestoreSnapshot } from '../bookings/restore.js';
+import { replayableChapters, restoreSnapshot, type RestoreSnapshot } from '../bookings/restore.js';
 import type { AdminPauseCause } from '../logParse.js';
+import { getServer } from '../serverPool.js';
 import { consoleText, quoted } from '../serverSetup.js';
 import * as E from './events.js';
 import * as N from './entries.js';
@@ -47,7 +48,7 @@ export interface SeriesRunner {
   onCancelled(bookingId: number, by: string | null, reason: string | null): void;
   /** Plan T3c: one burst with the replies, a chapter replay, a move. */
   send(bookingId: number, lines: string[], what: string): Promise<string[] | null>;
-  replayGame(bookingId: number, gameMatchId: number, snap: RestoreSnapshot): Promise<'ok' | 'refused' | 'busy'>;
+  replayGame(bookingId: number, gameMatchId: number, snap: RestoreSnapshot): Promise<'ok' | 'refused' | 'busy' | 'error'>;
   moveBooking(bookingId: number): Promise<number | null>;
 }
 export interface SeriesDeps {
@@ -106,6 +107,9 @@ export function adminPauseTook(reply: string | null | undefined, on: boolean): b
 }
 /** The sm_pug_sub refusal that means "not now": a chapter is being played. */
 export const SUB_NOT_BETWEEN = 'not between chapters';
+/** How long after a replay or a move the box's reset line for it is still
+ *  expected (UDP log lines arrive within moments or never). */
+export const RESET_EXPECT_MS = 2 * 60_000;
 
 const LIVE_OR_BEFORE: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['booking', 'connect', 'live']);
 
@@ -119,6 +123,18 @@ export class SeriesEngine {
   private readonly bookAlerted = new Set<number>();
   /** Matches that could not be booked for want of teams or lineups, logged once per process (same retry). */
   private readonly bookLogged = new Set<number>();
+  /** Desk freezes and unfreezes in flight, by match: the box's own `by=site
+   *  cause=staff` line for one can land before the rcon reply, and is then
+   *  recorded under the staff member who asked (Task 6 ledger). */
+  private readonly deskFreezes = new Map<number, { on: boolean; by: string }>();
+  /** A replay or a move of a frozen game (Task 7 ledger): the box lifts the
+   *  freeze as it drops its match (sm_pug_abort) and says so with a reset
+   *  line under the game's own token, which staleReset cannot tell from a
+   *  later reset of the same game. The first such line is this one: it lifts
+   *  the freeze only while the freeze it was sent for still stands (the same
+   *  match_frozen row, `frozenId`), never one set after. Until `until`; null
+   *  while the work runs. */
+  private readonly expectedResets = new Map<number, { gameMatchId: number; frozenId: number; until: number | null }>();
 
   constructor(private readonly deps: SeriesDeps) {
     this.db = deps.db;
@@ -149,6 +165,12 @@ export class SeriesEngine {
   }
   private alert(m: P.MatchRow, text: string): void {
     publishAdminEvent({ kind: 'problem', text: `Tournament match ${this.title(m)}: ${text}`, link: this.roomLink(m) });
+  }
+  /** The match's booking while it runs on a box (not recovering, not ending), or null. */
+  private runningBooking(m: P.MatchRow): B.BookingRow | null {
+    if (m.booking_id === null) return null;
+    const b = B.getBooking(this.db, m.booking_id);
+    return b && b.ending_at === null && b.server_id !== null && b.recovering_at === null && (b.state === 'ready' || b.state === 'active') ? b : null;
   }
 
   // ---------- the clock's duties ----------
@@ -697,6 +719,14 @@ export class SeriesEngine {
     if (standing) {
       side = recorded!.side;
       used = recorded!.used;
+      // A re-send is still the room's decision (Task 6 ledger): the match in a
+      // sub phase and the asker a manager of that side, as subPlayer checks.
+      const refusal: V.EventError | null = m.status !== 'connect' && m.status !== 'live' ? 'not_live_phase'
+        : !N.managersOf(this.db, N.getEntry(this.db, R.entryOn(m, side))?.team_id ?? null).includes(by) ? 'not_manager' : null;
+      if (refusal) {
+        say(`Sub refused: ${V.EVENT_ERRORS[refusal].text}`);
+        return;
+      }
     } else {
       const r = R.subPlayer(this.db, { matchId: m.id, by, outId, inId, limit, gameId: game.id, now });
       if (!r.ok) {
@@ -708,17 +738,21 @@ export class SeriesEngine {
     }
     const replies = await this.deps.runner.send(b.id, [`sm_pug_sub ${token} ${outId} ${inId}`], 'the sub');
     const reply = parseSubReply(replies?.[0], outId, inId);
+    // The box refused and the site could not undo the sub: it stands on the
+    // site, so the booking and the game roster follow it below (Task 6 ledger).
+    let stuck = false;
     if (reply && !reply.ok && reply.error === SUB_NOT_BETWEEN) {
-      if (!standing) {
-        const rv = R.revertSub(this.db, { matchId: m.id, outId, inId, now: new Date(this.now()) });
-        if (!rv.ok) console.error(`[series] match ${m.id}: undoing the sub of ${inId} for ${outId} failed (${rv.error})`);
-        say('Sub refused: subs are made between chapters and a chapter is being played. Type the !sub again at the next ready-up.');
-      } else {
-        say(`The site has ${this.playerName(inId)} in for ${this.playerName(outId)}, but a chapter is being played. Type the !sub again at the next ready-up.`);
+      const rv = standing ? null : R.revertSub(this.db, { matchId: m.id, outId, inId, now: new Date(this.now()) });
+      if (rv === null || rv.ok) {
+        if (rv) say('Sub refused: subs are made between chapters and a chapter is being played. Type the !sub again at the next ready-up.');
+        else say(`The site has ${this.playerName(inId)} in for ${this.playerName(outId)}, but a chapter is being played. Type the !sub again at the next ready-up.`);
+        console.log(`[series] match ${m.id}: the box refused ${inId} in for ${outId} (not between chapters)${standing ? '' : '; the sub was undone'}`);
+        this.push(m.id);
+        return;
       }
-      console.log(`[series] match ${m.id}: the box refused ${inId} in for ${outId} (not between chapters)${standing ? '' : '; the sub was undone'}`);
-      this.push(m.id);
-      return;
+      console.error(`[series] match ${m.id}: undoing the sub of ${inId} for ${outId} failed (${rv.error})`);
+      this.alert(m, `the server refused ${this.playerName(inId)} in for ${this.playerName(outId)} (a chapter is being played) and the sub could not be undone on the site (${rv.error}). The site's lineup has the sub and the server does not; check it on the Events desk.`);
+      stuck = true;
     }
     if (!standing) {
       const swapped = B.swapPlayer(this.db, { bookingId: b.id, side, outId, inId, now });
@@ -728,7 +762,8 @@ export class SeriesEngine {
       if (!added) console.error(`[series] match ${m.id}: game match ${gameMatchId} got no roster row for ${inId} (${team ? 'not a tournament game' : `${outId} is not on its roster`})`);
     }
     const took = reply?.ok === true;
-    if (took) say(`${this.playerName(inId)} is in for ${this.playerName(outId)} (${this.name(m, side)}, sub ${used} of ${limit}).`);
+    if (stuck) say(`The site has ${this.playerName(inId)} in for ${this.playerName(outId)}, but a chapter is being played and the server did not take it. Staff were told; type the !sub again at the next ready-up.`);
+    else if (took) say(`${this.playerName(inId)} is in for ${this.playerName(outId)} (${this.name(m, side)}, sub ${used} of ${limit}).`);
     else say(`The site put ${this.playerName(inId)} in for ${this.playerName(outId)}, but the server did not take it. Type the !sub again.`);
     console.log(`[series] match ${m.id}: ${inId} in for ${outId} on side ${side} (game ${game.ordinal}; the box ${took ? 'took it' : `did not take it: ${reply && !reply.ok ? reply.error : 'no answer'}`})`);
     this.push(m.id);
@@ -756,11 +791,27 @@ export class SeriesEngine {
     const found = this.matchOfToken(token);
     if (!found) return;
     const { m, gameMatchId } = found;
-    if (!on && cause === 'reset' && this.staleReset(m, gameMatchId)) {
-      console.log(`[series] match ${m.id}: a reset line from game match ${gameMatchId} left the later game's freeze alone`);
-      return;
+    if (!on && cause === 'reset') {
+      const exp = this.expectedResets.get(m.id);
+      if (exp && exp.gameMatchId === gameMatchId && (exp.until === null || this.now() <= exp.until)) {
+        // The line a replay's or a move's abort sends: once, and only for the freeze it lifted.
+        this.expectedResets.delete(m.id);
+        if (this.standingFreeze(m) !== exp.frozenId) {
+          console.log(`[series] match ${m.id}: the reset line of a replay or move of game match ${gameMatchId} left the freeze set after it alone`);
+          return;
+        }
+      } else if (exp && (exp.until !== null && this.now() > exp.until)) {
+        this.expectedResets.delete(m.id);
+      }
+      if (this.staleReset(m, gameMatchId)) {
+        console.log(`[series] match ${m.id}: a reset line from game match ${gameMatchId} left the later game's freeze alone`);
+        return;
+      }
     }
-    const r = R.setAdminPause(this.db, { matchId: m.id, on, by, cause, now: new Date(this.now()) });
+    // The box's own line for a desk freeze in flight: the staff member who asked, not the box's null.
+    const desk = cause === 'staff' && by === null ? this.deskFreezes.get(m.id) : undefined;
+    const actor = desk && desk.on === on ? desk.by : by;
+    const r = R.setAdminPause(this.db, { matchId: m.id, on, by: actor, cause, now: new Date(this.now()) });
     if (!r.ok) return;
     const who = by ? getPlayer(this.db, by)?.name ?? by : null;
     if (on && cause === 'call') {
@@ -784,13 +835,174 @@ export class SeriesEngine {
     const b = m.booking_id !== null ? B.getBooking(this.db, m.booking_id) : undefined;
     if (!b || b.server_id === null || !B.isOpen(b)) return V.fail('no_box');
     const who = consoleText(getPlayer(this.db, by)?.name ?? 'Staff', 40);
-    const replies = await this.deps.runner.send(b.id, [`sm_pug_adminpause ${live.token} ${on ? 'on' : 'off'} ${quoted(who)}`], on ? 'the freeze' : 'the unfreeze');
+    this.deskFreezes.set(m.id, { on, by });
+    let replies: string[] | null;
+    try {
+      replies = await this.deps.runner.send(b.id, [`sm_pug_adminpause ${live.token} ${on ? 'on' : 'off'} ${quoted(who)}`], on ? 'the freeze' : 'the unfreeze');
+    } finally {
+      this.deskFreezes.delete(m.id);
+    }
     if (!adminPauseTook(replies?.[0], on)) return V.fail('no_box');
     const r = R.setAdminPause(this.db, { matchId: m.id, on, by, cause: 'staff', now: new Date(this.now()) });
     if (!r.ok && r.error !== 'already_frozen' && r.error !== 'not_frozen') return r;
     tellStaffAction(this.deps, m.event_id, m.id, on ? 'frozen' : 'unfrozen');
     this.push(m.id);
     return V.ok(P.getMatch(this.db, m.id)!);
+  }
+
+  // ---------- the desk tools (plan T3c Task 7) ----------
+
+  /** Before a replay or a move: a frozen game's box lifts the freeze as it
+   *  drops its match, and its reset line is expected (Task 7 ledger). */
+  private expectReset(m: P.MatchRow, gameMatchId: number): void {
+    const frozenId = this.standingFreeze(m);
+    if (frozenId === null) this.expectedResets.delete(m.id);
+    else this.expectedResets.set(m.id, { gameMatchId, frozenId, until: null });
+  }
+
+  /** The match_frozen row of the freeze standing now, or null when not frozen
+   *  (a row id, since two freezes in the same millisecond share a timestamp). */
+  private standingFreeze(m: P.MatchRow): number | null {
+    const fresh = P.getMatch(this.db, m.id);
+    if (!fresh || fresh.admin_pause_at === null) return null;
+    return (this.db.prepare(
+      "SELECT MAX(id) AS id FROM event_log WHERE event_id = ? AND action = 'match_frozen' AND json_extract(detail, '$.matchId') = ?",
+    ).get(fresh.event_id, fresh.id) as { id: number | null }).id;
+  }
+
+  /** After it. 'lifted': the box dropped the match (a replay it answered, or
+   *  a move: the new box starts unfrozen), so the freeze is recorded as lifted
+   *  now if its line has not come yet, and a late line is still matched for a
+   *  while. 'unknown': the box may or may not have dropped it; only the
+   *  expectation is kept a while. 'none': nothing was sent. */
+  private afterReset(matchId: number, what: 'lifted' | 'unknown' | 'none'): void {
+    const exp = this.expectedResets.get(matchId);
+    if (!exp) return;
+    if (what === 'none') {
+      this.expectedResets.delete(matchId);
+      return;
+    }
+    exp.until = this.now() + RESET_EXPECT_MS;
+    const m = P.getMatch(this.db, matchId);
+    if (what !== 'lifted' || !m || this.standingFreeze(m) !== exp.frozenId) return;
+    const r = R.setAdminPause(this.db, { matchId, on: false, by: null, cause: 'reset', now: new Date(this.now()) });
+    if (!r.ok) console.error(`[series] match ${matchId}: recording the freeze the box dropped failed (${r.error})`);
+  }
+
+  /** The chapters the desk may replay (Ruling 12): empty unless a game is live. */
+  replayable(matchId: number): { ordinal: number; map: string }[] {
+    const m = P.getMatch(this.db, matchId);
+    if (!m || m.status !== 'live') return [];
+    const live = this.liveGameOf(m);
+    return live ? replayableChapters(this.db, live.game.match_id!) : [];
+  }
+
+  /** Ruling 12: the live game is rebuilt on its box from the chapters before
+   *  `ordinal` and that chapter loads from its start. A resume the box
+   *  refused has aborted the game and the gameLost hook has held the match
+   *  by the time this answers replay_failed; a box that did not answer
+   *  leaves the game live and the match as it was (replay_no_answer). */
+  async replayChapter(matchId: number, by: string, ordinal: unknown): Promise<V.Checked<{ map: string }>> {
+    const m = P.getMatch(this.db, matchId);
+    if (!m) return V.fail('match_not_found');
+    if (m.status !== 'live') return V.fail('not_live_phase');
+    const live = this.liveGameOf(m);
+    if (!live) return V.fail('no_live_game');
+    const b = this.runningBooking(m);
+    if (!b) return V.fail('no_box');
+    if (!Number.isInteger(ordinal) || (ordinal as number) < 0) return V.fail('chapter_not_replayable');
+    const gameMatchId = live.game.match_id!;
+    const snap = restoreSnapshot(this.db, gameMatchId, { replayFrom: ordinal as number });
+    if (!snap) return V.fail('chapter_not_replayable');
+    this.expectReset(m, gameMatchId);
+    const r = await this.deps.runner.replayGame(b.id, gameMatchId, snap);
+    this.afterReset(m.id, r === 'busy' ? 'none' : r === 'error' ? 'unknown' : 'lifted');
+    if (r === 'busy') return V.fail('changed');
+    if (r === 'error') return V.fail('replay_no_answer');
+    if (r === 'refused') {
+      this.push(m.id);
+      return V.fail('replay_failed');
+    }
+    const noted = R.noteReplay(this.db, { matchId: m.id, by, gameId: live.game.id, ordinal: snap.maps.length, map: snap.map, now: new Date(this.now()) });
+    if (!noted.ok) console.error(`[series] match ${m.id}: the replay of ${snap.map} was not noted (${noted.error})`);
+    tellStaffAction(this.deps, m.event_id, m.id, 'chapter_replayed', `chapter ${snap.maps.length + 1} of ${campaignDisplayName(this.db, snap.campaign)}`);
+    console.log(`[series] match ${m.id}: staff ${by} replayed ${snap.map} of game ${live.game.ordinal}`);
+    this.push(m.id);
+    return V.ok({ map: snap.map });
+  }
+
+  /** Ruling 13: the booking lets go of its box and takes the first idle one
+   *  through the runner's recovery; the game is restored there. */
+  async moveServer(matchId: number, by: string): Promise<V.Checked<P.MatchRow>> {
+    const m = P.getMatch(this.db, matchId);
+    if (!m) return V.fail('match_not_found');
+    if (m.status !== 'connect' && m.status !== 'live') return V.fail('not_live_phase');
+    const b = this.runningBooking(m);
+    if (!b) return V.fail('no_box');
+    const live = this.liveGameOf(m);
+    if (live) this.expectReset(m, live.game.match_id!);
+    const old = await this.deps.runner.moveBooking(b.id);
+    if (live) this.afterReset(m.id, old === null ? 'none' : 'lifted');
+    if (old === null) return V.fail('no_box');
+    const r = R.noteMove(this.db, { matchId: m.id, by, fromServerId: old, now: new Date(this.now()) });
+    if (!r.ok) return r;
+    this.alert(m, `staff moved it off ${getServer(this.db, old)?.name ?? `server ${old}`}. It takes the first idle box in its region and the game is restored there; with none free it waits, then is held.`);
+    tellStaffAction(this.deps, m.event_id, m.id, 'server_moved');
+    this.push(m.id);
+    return V.ok(P.getMatch(this.db, m.id)!);
+  }
+
+  /** Ruling 14. */
+  extendGrace(matchId: number, by: string, minutes: unknown): V.Checked<P.MatchRow> {
+    const r = R.extendGrace(this.db, { matchId, by, minutes, now: new Date(this.now()) });
+    if (!r.ok) return r;
+    const m = r.value;
+    if (m.booking_id !== null) this.deps.runner.announce(m.booking_id, `Staff gave both teams ${minutes as number} more minutes to connect (until ${m.deadline!.slice(11, 16)} UTC).`);
+    tellStaffAction(this.deps, m.event_id, m.id, 'grace_extended', `${minutes as number} minutes`);
+    this.push(m.id);
+    return r;
+  }
+
+  /** Ruling 15: the grace of a released connect hold is the booking's. */
+  releaseHold(matchId: number, by: string): V.Checked<P.MatchRow> {
+    const m = P.getMatch(this.db, matchId);
+    if (!m) return V.fail('match_not_found');
+    const b = m.booking_id !== null ? B.getBooking(this.db, m.booking_id) : undefined;
+    const grace = b ? B.bookingRules(b)?.noShowGraceMinutes ?? 15 : 15;
+    const r = R.releaseHold(this.db, { matchId, by, timers: R.roomTimers(this.db), graceMinutes: grace, now: new Date(this.now()) });
+    if (!r.ok) return r;
+    if (b && B.isOpen(b) && (r.value.status === 'connect' || r.value.status === 'live')) this.deps.runner.announce(b.id, 'Staff released the hold on this match. Play on.');
+    tellStaffAction(this.deps, m.event_id, m.id, 'hold_released');
+    this.push(m.id);
+    return r;
+  }
+
+  /** Ruling 11: a booking made meanwhile is cancelled first, as a reset does;
+   *  the room's own refusals are checked before anything is cancelled. */
+  reopenVeto(matchId: number, by: string): V.Checked<P.MatchRow> {
+    const m = P.getMatch(this.db, matchId);
+    if (!m) return V.fail('match_not_found');
+    // The same checks room.ts makes, in the same order, before any booking is cancelled.
+    if (R.gamesOf(this.db, m.id).some((g) => g.match_id !== null)) return V.fail('game_started');
+    const from = m.status === 'admin_hold' ? m.hold_from : m.status;
+    if (from !== 'veto' && from !== 'lineup' && from !== 'booking') return V.fail('wrong_status');
+    if (m.ready_a_at === null || m.ready_b_at === null) return V.fail('not_ready_phase');
+    const now = new Date(this.now());
+    let cancelled: number | null = null;
+    if (m.booking_id !== null) {
+      const b = B.getBooking(this.db, m.booking_id);
+      if (b && B.isOpen(b)) {
+        const c = B.cancelBooking(this.db, { bookingId: b.id, by, staff: true, reason: 'The veto was reopened', now });
+        if (!c.ok) return V.fail('booking_open');
+        cancelled = b.id;
+      }
+    }
+    const r = R.reopenVeto(this.db, { matchId, by, timers: R.roomTimers(this.db), now });
+    if (cancelled !== null) this.deps.runner.onCancelled(cancelled, by, 'The veto was reopened');
+    if (!r.ok) return r;
+    tellStaffAction(this.deps, m.event_id, m.id, 'veto_reopened');
+    this.push(m.id);
+    return r;
   }
 
   /** Ruling 14: the booking is cancelled before the room resets, so no box is orphaned and no hold is raised. */

@@ -131,6 +131,7 @@ export const EVENT_ERRORS = {
   chapter_not_replayable: { status: 409, text: 'That chapter cannot be replayed (the finale, or a chapter this game has not reached).' },
   no_box: { status: 409, text: 'This match has no running server to send that to.' },
   replay_failed: { status: 502, text: 'The server did not take the replay. The game was aborted and the match is on hold.' },
+  replay_no_answer: { status: 502, text: 'The server did not answer the replay. Nothing was aborted and the game is still live on the site; try again, or move the match to another server.' },
   not_frozen: { status: 409, text: 'The game is not frozen.' },
   already_frozen: { status: 409, text: 'The game is already frozen.' },
   bad_side: { status: 400, text: 'A side is a or b.' },

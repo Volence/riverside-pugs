@@ -2,6 +2,9 @@ import { describe, it, expect, afterEach } from 'vitest';
 import dgram from 'node:dgram';
 import { LogListener } from '../src/logListener.js';
 import type { LogEvent } from '../src/logParse.js';
+import { openDb } from '../src/db.js';
+import { addServer } from '../src/serverPool.js';
+import { LogAuth, macOf, newLogSecret, setLogAuthMode, setLogSecret } from '../src/logAuth.js';
 
 const TOKEN = '0123456789abcdef0123456789abcdef';
 const OTHER = 'ffffffffffffffffffffffffffffffff';
@@ -407,5 +410,41 @@ describe('LogListener: the reset line of an ended tournament game (plan T3c)', (
     await send(port, `PUG ${OTHER} ADMINPAUSE state=off by=site cause=reset`);
     await settle();
     expect(got).toEqual([]);
+  });
+});
+
+describe('LogListener: the reset line of an ended tournament game under log signing (plan T3c Task 6 ledger)', () => {
+  const settle = () => new Promise((r) => setTimeout(r, 60));
+  const BOOT = Math.floor(Date.now() / 1000) - 3600;
+  const sign = (secret: string, body: string, seq: number): string => {
+    const withSeq = `${body} lseq=${BOOT}.${seq}`;
+    return `${withSeq} mac=${macOf(secret, Buffer.from(withSeq, 'utf8'))}`;
+  };
+  it('drops a badly signed reset under an old token when the box enforces signing, and admits the signed one', async () => {
+    const db = openDb(':memory:');
+    const box = addServer(db, { name: 'dallas', host: '127.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    const secret = newLogSecret();
+    setLogSecret(db, box, secret);
+    setLogAuthMode(db, box, 'enforce');
+    // The ended game the old token belongs to (its token is no longer registered).
+    db.prepare("INSERT INTO matches (season_id, state, campaign, server_id, token) VALUES (1, 'completed', 'dead_air', ?, ?)").run(box, OTHER);
+    const auth = new LogAuth(db, 'feed.invalid');
+    const got: LogEvent[] = [];
+    listener = new LogListener((ev) => got.push(ev));
+    listener.setAuthenticator((input) => auth.check(input));
+    const port = await listener.listen(0, '127.0.0.1');
+    listener.allowMatchCreateFrom('127.0.0.1');
+    const RESET = `PUG ${OTHER} ADMINPAUSE state=off by=site cause=reset`;
+    await send(port, RESET);
+    await send(port, sign('f'.repeat(32), RESET, 1));
+    await settle();
+    expect(got).toEqual([]);
+    await send(port, sign(secret, RESET, 2));
+    await settle();
+    expect(got).toEqual([{ kind: 'admin_pause', token: OTHER, on: false, by: null, cause: 'reset' }]);
+    // Captured off the wire and sent again: refused.
+    await send(port, sign(secret, RESET, 2));
+    await settle();
+    expect(got).toHaveLength(1);
   });
 });
