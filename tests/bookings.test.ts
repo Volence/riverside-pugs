@@ -5,10 +5,13 @@ import { setSetting } from '../src/settings.js';
 import { createTeam, invitePlayer, respondInvite, setRole, transferCaptain } from '../src/teams/teams.js';
 import { currentSeasonId } from '../src/players.js';
 import {
-  BOOKING_ERRORS, addPerson, allowInGame, allowList, bookingView, cancelBooking, claimNoShow, closeBooking, confirmBooking, createBooking, declineBooking,
+  BOOKING_ERRORS, addPerson, allowInGame, allowList, bookingView, bumpBooking, bumpReason, cancelBooking, claimNoShow, closeBooking, confirmBooking,
+  createBooking, createTournamentBooking, declineBooking,
   addCampaign, endBooking, expireUnconfirmed, getBooking, holdBox, markActive, markReady, markReleased, markSetup,
   myBookings, peopleOf, recordPresence, removePerson, respondPerson, sideRow,
 } from '../src/bookings/bookings.js';
+import { isLateCancel } from '../src/bookings/rules.js';
+import { bookingMessage } from '../src/bookings/messages.js';
 import { acceptPost, confirmAccept, createPost } from '../src/scrims/scrims.js';
 import { blockTarget } from '../src/scrims/blocks.js';
 
@@ -680,5 +683,62 @@ describe('blocks', () => {
     const id = create();
     block(P[1], { captain: P[1] }, { steamid: P[0] });
     expect(confirmBooking(db, { bookingId: id, by: P[1], now: NOW })).toEqual({ ok: false, error: 'not_available' });
+  });
+});
+
+describe('bumped by a tournament match (server priority Rulings 5 and 7)', () => {
+  const tournament = (now: Date) => {
+    const r = createTournamentBooking(db, {
+      region: 'na', campaign: 'no_mercy', rulesJson: '{}', rulesetId: null, gameConfig: 'standard', createdBy: P[13],
+      sides: [{ teamId: null, captain: P[4], players: P.slice(4, 8), spectators: [] }, { teamId: null, captain: P[8], players: P.slice(8, 12), spectators: [] }], now,
+    });
+    if (!r.ok) throw new Error(r.error);
+    return r.value.id;
+  };
+
+  it('closes an unstarted scrim as bumped, a side of nobody, with the nearest free slot in its reason and its event', () => {
+    setSetting(db, 'pug_reserve_servers', '3'); // 4 boxes: room for 1 booking at a time
+    const id = create();
+    confirmBooking(db, { bookingId: id, by: P[1], now: NOW });
+    const now = at(START, -10);
+    const match = tournament(now); // 19:50 to 21:20
+    const r = bumpBooking(db, { bookingId: id, byBookingId: match, now });
+    // The scrim's own 3 hour slot overlaps the match at 20:00, 20:30 and 21:00 and fits from 21:30.
+    expect(r).toEqual({ ok: true, value: { hadServer: false, nearestSlot: at(START, 90).toISOString() } });
+    const b = getBooking(db, id)!;
+    expect(b).toMatchObject({ state: 'cancelled', end_reason: 'bumped', cancel_side: null, cancelled_by: null, ending_at: now.toISOString(), ended_at: now.toISOString() });
+    expect(b.cancel_reason).toBe('A tournament match needed the server. The nearest free slot is 2026-10-02 21:30 UTC.');
+    expect(bumpReason(null)).toBe('A tournament match needed the server. No other slot is free within 3 hours of the start.');
+    expect(isLateCancel(db, b)).toBe(false);
+    expect(db.prepare("SELECT detail FROM booking_events WHERE booking_id = ? AND event = 'bumped'").get(id))
+      .toEqual({ detail: JSON.stringify({ byBookingId: match, nearestSlot: at(START, 90).toISOString() }) });
+    const v = bookingView(db, id, { steamid: P[0], staff: false }, now.getTime())!;
+    expect(v.cancel).toEqual({ side: null, reason: b.cancel_reason });
+    expect(v.sides.every((s) => !s.lateCancel)).toBe(true);
+    expect(bumpBooking(db, { bookingId: id, byBookingId: match, now })).toEqual({ ok: false, error: 'wrong_state' });
+  });
+
+  it('keeps the box for the runner to give back, and refuses a tournament booking, an active scrim or a live game', () => {
+    const id = create();
+    confirmBooking(db, { bookingId: id, by: P[1], now: NOW });
+    expect(holdBox(db, id, servers[0]!, at(START, -15))).toBe(true);
+    const match = tournament(at(START, -14));
+    expect(bumpBooking(db, { bookingId: match, byBookingId: id, now: at(START, -14) })).toEqual({ ok: false, error: 'wrong_state' });
+    const r = bumpBooking(db, { bookingId: id, byBookingId: match, now: at(START, -14) });
+    expect(r.ok && r.value.hadServer).toBe(true);
+    expect(getBooking(db, id)).toMatchObject({ state: 'cancelled', end_reason: 'bumped', server_id: servers[0], ended_at: null });
+    const active = create({ startsAt: at(START, 240).toISOString() });
+    confirmBooking(db, { bookingId: active, by: P[1], now: NOW });
+    db.prepare("UPDATE bookings SET state = 'active', server_id = ? WHERE id = ?").run(servers[1], active);
+    expect(bumpBooking(db, { bookingId: active, byBookingId: match, now: at(START, 240) })).toEqual({ ok: false, error: 'wrong_state' });
+    expect(bumpBooking(db, { bookingId: 999, byBookingId: match })).toEqual({ ok: false, error: 'not_found' });
+  });
+
+  it('the DM names both sides, the slot and the booking page', () => {
+    const id = create();
+    const m = bookingMessage(db, 'https://riversidepug.com', id, 'booking_bumped', { slot: at(START, 90).toISOString() })!;
+    expect(m.content).toBe("**p0's group** vs **p1's group** on 2026-10-02 20:00 UTC was bumped: a tournament match needed the server. The nearest free slot is 2026-10-02 21:30 UTC: book it again from the booking page, or leave it. It counts against neither side.");
+    expect(m.components).toEqual([[{ kind: 'link', url: `https://riversidepug.com/booking/${id}`, label: 'Open the booking' }]]);
+    expect(bookingMessage(db, 'https://riversidepug.com', id, 'booking_bumped', { slot: null })!.content).toContain('No other slot is free within 3 hours of the start: book another time from the booking page, or leave it.');
   });
 });
