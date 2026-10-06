@@ -2436,6 +2436,36 @@ describe('server priority (owner, 2026-10-07)', () => {
       expect(bumpedCount()).toBe(0);
     });
 
+    it('a match staff moved with no free box waits and bumps no scrim; a match whose box died still does (controller ruling)', async () => {
+      runner = build({ release: async (id) => { released.push(id); db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(id); return true; } });
+      const scrim = await heldScrim();
+      db.prepare("UPDATE servers SET status = 'live' WHERE id = 1").run();
+      const match = tournament();
+      runner.allocate();
+      await runner.idle();
+      expect(getBooking(db, match)).toMatchObject({ state: 'ready', server_id: 2 });
+      dms = [];
+      expect(await runner.moveBooking(match)).toBe(2);
+      runner.allocate();
+      runner.allocate();
+      await runner.idle();
+      expect(getBooking(db, scrim)).toMatchObject({ state: 'ready', server_id: 3, ending_at: null });
+      expect(getBooking(db, match)!.server_id).toBeNull();
+      expect(getBooking(db, match)!.waiting_since).not.toBeNull();
+      expect(bumpedCount()).toBe(0);
+      expect(dms).toEqual([]);
+      // The moved match then lands on box 2 again, and that box dies: now it bumps.
+      db.prepare("UPDATE servers SET status = 'idle' WHERE id = 2").run();
+      runner.allocate();
+      await runner.idle();
+      expect(getBooking(db, match)).toMatchObject({ server_id: 2, recovering_at: null });
+      expect(beginRecovery(db, match, 'gone', new Date(now))).toBe(true);
+      expect(dropBox(db, match, new Date(now))).toBe(2);
+      runner.allocate();
+      expect(getBooking(db, scrim)).toMatchObject({ state: 'cancelled', end_reason: 'bumped' });
+      expect(bumpedCount()).toBe(1);
+    });
+
     it('a second scrim bumped for the same match (the first box did not come back) says so to staff, and a failed bump is logged', async () => {
       const first = book();
       const second = book();
