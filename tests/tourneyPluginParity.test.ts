@@ -84,12 +84,17 @@ describe('pug-tourney.inc log lines', () => {
     expect(tourneySrc).toContain('Tourney_Lift(id, "staff", name);');     // !lift / sm_pug_lift (id, or "site" unverified)
     expect(tourneySrc).toContain('Tourney_Lift("site", "reset", "");');   // ResetMatchState
     expect(matchSrc).toContain('Tourney_Lift("site", "reset", "");');     // sm_pug_abort
+    expect(tourneySrc).toContain('Tourney_Lift(id, "forced", name, false);'); // an admin's !forceunpause while frozen
     const cases: [string, string, string, { on: boolean; by: string | null; cause: string }][] = [
       ['on', CAPTAIN, 'call', { on: true, by: CAPTAIN, cause: 'call' }],
       ['on', 'site', 'staff', { on: true, by: null, cause: 'staff' }],
       ['off', 'site', 'staff', { on: false, by: null, cause: 'staff' }],
       ['off', STAFF, 'staff', { on: false, by: STAFF, cause: 'staff' }],
       ['off', 'site', 'reset', { on: false, by: null, cause: 'reset' }],
+      // cause=forced (an admin's !forceunpause) reads as a staff lift: the
+      // parser keeps call and reset and files every other cause under staff.
+      ['off', STAFF, 'forced', { on: false, by: STAFF, cause: 'staff' }],
+      ['off', 'site', 'forced', { on: false, by: null, cause: 'staff' }],
     ];
     for (const [state, by, cause, want] of cases) {
       expect(parseLogDatagram(emitPug(fmt, state, by, cause))).toEqual({ kind: 'admin_pause', token: TOKEN, ...want });

@@ -180,6 +180,8 @@ public Action Listener_PugPause(int client, const char[] command, int argc)
 public Action Timer_PauseClock(Handle timer)
 {
 	PauseClockTick();
+	// A staff freeze that did not land is tried again (pug-tourney.inc).
+	Tourney_Tick();
 	// Rides the same clock: finds pauses by game time standing still, so it
 	// covers every kind of pause, not only the ones this file charges.
 	DemoShiftTick();
@@ -249,16 +251,17 @@ static void PauseClockTick()
 
 	// Paused, and we have seen it before: run the ceiling.
 	int ceiling = g_cvPauseSeconds.IntValue;
-	// A team's pause held by the staff freeze does not run out under it (the
-	// expiry path would call LeaveUnpauseNow, which the freeze refuses, say
-	// "Unpausing." and emit PAUSE_EXPIRED for nothing); the freeze decides when
-	// the game resumes, and the clock picks up again once it is lifted.
-	if (ceiling <= 0 || g_iPauseOwner == 0 || TourneyFrozen()) return;
+	if (ceiling <= 0 || g_iPauseOwner == 0) return;
 
 	// The clock does not run while a rostered player is actually away. A
 	// player pause that a disconnect lands in the middle of must not expire
 	// under someone who is still loading back in.
-	if (LeaveAnyAbsent())
+	// Nor while the staff freeze holds a team's pause (plan T3c): the expiry
+	// path would call LeaveUnpauseNow, which the freeze refuses, say
+	// "Unpausing." and emit PAUSE_EXPIRED for nothing. The frozen seconds are
+	// held like an absence, so the team's clock picks up where it was once the
+	// freeze is lifted instead of expiring the moment it is.
+	if (LeaveAnyAbsent() || TourneyFrozen())
 	{
 		g_fPauseHeld += 1.0;
 		return;
@@ -374,6 +377,8 @@ static void PhaseUnready(char[] out, int len)
 		if (!IsClientInGame(c) || IsFakeClient(c)) continue;
 		int slot = g_iClientRoster[c];
 		if (slot < 0 || g_sRosterId[slot][0] == '\0') continue;
+		// A subbed-out player (pug-tourney.inc) watches from spectators and is never waited on.
+		if (Tourney_SlotOut(slot)) continue;
 		if (IsReady(c)) continue;
 		if (out[0] != '\0') StrCat(out, len, ",");
 		StrCat(out, len, g_sRosterId[slot]);
