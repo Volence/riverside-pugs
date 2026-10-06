@@ -994,7 +994,10 @@ export function noteTech(db: DB, o: {
  *  (the series engine sends sm_pug_forfeit first). That forfeit can end the
  *  game, and with it the match (or its stage), before the box's answer is
  *  read: a forfeit ruling is still taken then, when the pause's own game
- *  carries the pausing side's staff forfeit (plan T5 Task 8). */
+ *  carries the pausing side's staff forfeit (plan T5 Task 8). The same
+ *  relaxation covers every refusal of the usual gate: a resolved match, and
+ *  a liveMatch refusal (not_live once the stage or event finished,
+ *  entry_out, match_not_open), but never a match that does not exist. */
 export function techPenalty(db: DB, o: { matchId: number; pauseId: unknown; by: string; penalty: unknown; note: unknown; now?: Date }): V.Checked<{ m: P.MatchRow; pause: TechPause }> {
   const at = iso(o.now);
   return db.transaction((): V.Checked<{ m: P.MatchRow; pause: TechPause }> => {

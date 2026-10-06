@@ -816,7 +816,8 @@ void Tourney_Forfeit(int team, const char[] why)
 
 /** sm_pug_forfeit <token> <a|b>: the desk's Forfeit the game (plan T5
  *  Ruling 12). Answers PUGOK forfeit team=<x>, PUGOK forfeit team=<x>
- *  already for a forfeit of that team already in place, or PUGERR. */
+ *  already for a staff forfeit of that team already in place, or PUGERR
+ *  (any other forfeit in place answers PUGERR already forfeited). */
 public Action Cmd_PugForfeit(int args)
 {
 	if (!TokenArgOk(args)) return Plugin_Handled;
@@ -840,7 +841,9 @@ public Action Cmd_PugForfeit(int args)
 	}
 	if (g_iForfeitTeam != 0)
 	{
-		if (g_iForfeitTeam == team) PrintToServer("PUGOK forfeit team=%s already", t);
+		// Only a staff ruling already in place is this command's re-send: a
+		// !gg or a disconnect forfeit of the same team is not a staff ruling.
+		if (g_iForfeitTeam == team && StrEqual(g_sForfeitWhy, "staff")) PrintToServer("PUGOK forfeit team=%s already", t);
 		else PrintToServer("PUGERR already forfeited");
 		return Plugin_Handled;
 	}

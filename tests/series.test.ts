@@ -527,6 +527,7 @@ describe('SeriesEngine: the end of a series and the box (T3b ledger rulings)', (
     f.endGame(g1.match_id!, [{ map: 'l4d_vs_hospital01_apartment', a: 400, b: 100 }]);
     expect(f.gameOf(1)).toMatchObject({ score_a: 100, score_b: 400, forfeit_side: 'b', winner: f.entryA });
     expect(f.gameOf(1).forfeit_why).toBe('gg');
+    expect(f.sent.some((c) => c.startsWith('say [Match] Series over: Rats beat Bats 1 game to 0 (game 1 by forfeit: Bats typed !gg).'))).toBe(true);
     const log = JSON.parse(f.db.prepare("SELECT detail FROM event_log WHERE action = 'game_recorded'").pluck().get() as string);
     expect(log).toMatchObject({ scoreA: 100, scoreB: 400, forfeit: 'b', winner: 'a' });
     expect(f.match().status).toBe('confirming');
