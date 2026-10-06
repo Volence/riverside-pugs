@@ -115,7 +115,9 @@ describe('T1b columns', () => {
     expect(cols('event_vetoes')).toEqual(['id', 'event_match_id', 'step', 'side', 'entry_id', 'action', 'campaign', 'by_steamid', 'auto', 'at']);
     expect(cols('event_games')).toEqual(['id', 'event_match_id', 'ordinal', 'campaign', 'picked_by', 'side_by', 'first_survivors', 'match_id', 'tiebreak_of', 'created_at',
       // plan T3b's columns follow
-      'score_a', 'score_b', 'forfeit_side', 'winner', 'map', 'ended_at']);
+      'score_a', 'score_b', 'forfeit_side', 'winner', 'map', 'ended_at',
+      // plan T5's column follows
+      'forfeit_why']);
     expect(cols('event_lineups')).toEqual(['id', 'event_match_id', 'game', 'entry_id', 'steamids', 'locked_by', 'auto', 'locked_at']);
     expect(cols('event_entry_prefs')).toEqual(['entry_id', 'default_four', 'side', 'updated_by', 'updated_at']);
     expect(cols('event_campaign_prefs')).toEqual(['entry_id', 'stage_id', 'campaigns', 'updated_by', 'updated_at']);

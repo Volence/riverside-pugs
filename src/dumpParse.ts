@@ -1,5 +1,8 @@
 import { isKnownStat } from './statKeys.js';
 
+/** Why a game was forfeited (plan T5): a !gg, the reconnect pool running out, or a staff ruling. */
+export type ForfeitWhy = 'gg' | 'disconnect' | 'staff';
+
 export interface DumpMap {
   map: string;
   a: number;
@@ -48,6 +51,9 @@ export interface Dump {
   /** The pug team that forfeited with !gg (pug-match 0.3.22), or null. Only
    *  ever the losing side: a forfeit naming the winner is dropped. */
   forfeit?: 'a' | 'b' | null;
+  /** Plan T5 (pug-match 0.3.26): why, null without a forfeit. A forfeit with
+   *  no forfeit_why= (every !gg, and any older plugin) is a !gg. */
+  forfeitWhy?: ForfeitWhy | null;
 }
 
 /** StateName() in pug-match.sp, less `none`: with no match configured
@@ -132,7 +138,7 @@ export function parseDump(body: string, opts: ParseDumpOpts = {}): Dump | null {
   const maps: DumpMap[] = [];
   const players: DumpPlayer[] = [];
   const skills: DumpSkill[] = [];
-  let end: { winner: 'a' | 'b' | 'draw'; totalA: number; totalB: number; forfeit: 'a' | 'b' | null } | null = null;
+  let end: { winner: 'a' | 'b' | 'draw'; totalA: number; totalB: number; forfeit: 'a' | 'b' | null; forfeitWhy: ForfeitWhy | null } | null = null;
 
   for (const line of lines.slice(start + 1)) {
     const parts = line.split(/\s+/);
@@ -175,11 +181,13 @@ export function parseDump(body: string, opts: ParseDumpOpts = {}): Dump | null {
       // a forfeit this plugin wrote, and the plain result stands.
       const forfeit = (rest.forfeit === 'a' || rest.forfeit === 'b') && rest.winner !== 'draw' && rest.forfeit !== rest.winner
         ? rest.forfeit : null;
-      end = { winner: rest.winner, totalA: a, totalB: b, forfeit };
+      const forfeitWhy: ForfeitWhy | null = forfeit === null ? null
+        : rest.forfeit_why === 'disconnect' || rest.forfeit_why === 'staff' ? rest.forfeit_why : 'gg';
+      end = { winner: rest.winner, totalA: a, totalB: b, forfeit, forfeitWhy };
       break;
     }
   }
 
   if (!end) return null;
-  return { matchId, maps, players, skillDetect, skills, winner: end.winner, totalA: end.totalA, totalB: end.totalB, nonce, state, forfeit: end.forfeit };
+  return { matchId, maps, players, skillDetect, skills, winner: end.winner, totalA: end.totalA, totalB: end.totalB, nonce, state, forfeit: end.forfeit, forfeitWhy: end.forfeitWhy };
 }

@@ -762,6 +762,37 @@ describe('parseLogDatagram: l4d_nightmode look lines', () => {
     expect(parseLogDatagram(framed(`PUG ${TOKEN} ADMINPAUSE state=maybe by=site cause=call`))).toBeNull();
   });
 
+  it('parses a TECH line with its free text last, and SUB emergency=1 (plan T5)', () => {
+    const BY = '76561199000000801';
+    const P = '76561199048276493';
+    const Q = '76561199122132251';
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} TECH event=start id=1791000000 team=b cause=call by=${BY} used=0 budget=300 text=my router restarted, sorry`)))
+      .toEqual({ kind: 'tech', token: TOKEN, event: 'start', id: 1791000000, team: 'b', cause: 'call', by: BY, used: 0, budget: 300, tactical: null, text: 'my router restarted, sorry' });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} TECH event=over id=1791000000 team=b cause=call by=${BY} used=300 budget=300 tactical=-1 text=`)))
+      .toMatchObject({ event: 'over', tactical: -1, text: '' });
+    // An overrun that ran on as a tactical pause: N left, or no key when the
+    // tactical budget is unlimited (plugin/README.md TECH).
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} TECH event=over id=1791000000 team=b cause=call by=${BY} used=300 budget=300 tactical=0 text=`)))
+      .toMatchObject({ event: 'over', tactical: 0 });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} TECH event=over id=1791000000 team=b cause=call by=${BY} used=300 budget=300 text=`)))
+      .toMatchObject({ event: 'over', tactical: null });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} TECH event=start id=1791000100 team=a cause=disconnect by=${P} used=40 budget=600 text=disconnected`)))
+      .toMatchObject({ event: 'start', cause: 'disconnect', by: P, used: 40, budget: 600 });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} TECH event=end id=1791000100 team=a cause=disconnect by=none used=70 budget=600 text=`)))
+      .toMatchObject({ event: 'end', by: null });
+    // A key this parser cannot read costs the line: it writes the match log.
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} TECH event=pause id=1 team=a cause=call by=none used=0 budget=300 text=x`))).toBeNull();
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} TECH event=start id=0 team=a cause=call by=none used=0 budget=300 text=x`))).toBeNull();
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} TECH event=start id=5 team=c cause=call by=none used=0 budget=300 text=x`))).toBeNull();
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} TECH event=start id=5 team=a cause=lag by=none used=0 budget=300 text=x`))).toBeNull();
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} TECH event=start id=5 team=a cause=call by=bob used=0 budget=300 text=x`))).toBeNull();
+    // text= keys inside the free text are text, not keys.
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} TECH event=flag id=5 team=a cause=call by=${BY} used=10 budget=300 text=team=b used=999`)))
+      .toMatchObject({ team: 'a', used: 10, text: 'team=b used=999' });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} SUB by=${BY} out=${P} in=${Q} map=2 emergency=1`)))
+      .toEqual({ kind: 'sub_request', token: TOKEN, by: BY, out: P, in: Q, map: 2, emergency: true });
+  });
+
   it('reads admin=1 on a paused phase (plan T3c)', () => {
     const ev = parseLogDatagram(framed(`PUG ${TOKEN} PHASE state=paused team=0 limit=0 leave=0 admin=1`));
     expect(ev).toMatchObject({ kind: 'phase', phase: { state: 'paused', team: null, admin: true } });

@@ -62,6 +62,19 @@ describe('parseDump', () => {
     const bad = SAMPLE.replace('sidmg=1240', 'sidmg=oops');
     expect(parseDump(bad)).toBeNull();
   });
+
+  it('reads why a forfeit that is not a !gg happened, and calls a bare forfeit a !gg (plan T5)', () => {
+    expect(parseDump(SAMPLE)!.forfeitWhy).toBeNull();
+    const gg = SAMPLE.replace('END winner=a a=645 b=610', 'END winner=a a=645 b=610 forfeit=b');
+    expect(parseDump(gg)!.forfeitWhy).toBe('gg');
+    // The disconnect pool ran out for team a while it led: the plugin names b the winner.
+    const dc = SAMPLE.replace('END winner=a a=645 b=610', 'END winner=b a=645 b=610 forfeit=a forfeit_why=disconnect');
+    expect(parseDump(dc)).toMatchObject({ winner: 'b', forfeit: 'a', forfeitWhy: 'disconnect' });
+    const staff = SAMPLE.replace('END winner=a a=645 b=610', 'END winner=a a=645 b=610 forfeit=b forfeit_why=staff');
+    expect(parseDump(staff)!.forfeitWhy).toBe('staff');
+    const odd = SAMPLE.replace('END winner=a a=645 b=610', 'END winner=a a=645 b=610 forfeit=b forfeit_why=lag');
+    expect(parseDump(odd)!.forfeitWhy).toBe('gg');
+  });
 });
 
 const SKILL_SAMPLE = [

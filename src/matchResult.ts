@@ -38,8 +38,8 @@ export function completeMatch(db: DB, matchId: number, rawDump: Dump): boolean {
   let outcome: RatingOutcome | null = null;
   db.transaction(() => {
     db.prepare(
-      "UPDATE matches SET state = 'completed', team_a_score = ?, team_b_score = ?, winner = ?, forfeit_team = ?, ended_at = datetime('now') WHERE id = ?",
-    ).run(d.totalA, d.totalB, d.winner, d.forfeit ?? null, matchId);
+      "UPDATE matches SET state = 'completed', team_a_score = ?, team_b_score = ?, winner = ?, forfeit_team = ?, forfeit_why = ?, ended_at = datetime('now') WHERE id = ?",
+    ).run(d.totalA, d.totalB, d.winner, d.forfeit ?? null, d.forfeit ? d.forfeitWhy ?? 'gg' : null, matchId);
     const insMap = db.prepare(
       'INSERT INTO match_maps (match_id, ordinal, map, team_a_score, team_b_score) VALUES (?, ?, ?, ?, ?)',
     );
