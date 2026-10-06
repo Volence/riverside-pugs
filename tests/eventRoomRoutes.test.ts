@@ -12,7 +12,8 @@ import * as E from '../src/events/events.js';
 import { RoomClock } from '../src/events/roomClock.js';
 import { ADMIN, must, stageBody } from './eventFixture.js';
 import { A, B, OUTSIDER } from './entryFixture.js';
-import { TIMERS, roomFixture, type RoomFixture } from './roomFixture.js';
+import { TIMERS, driveToBooking, roomFixture, type RoomFixture } from './roomFixture.js';
+import { createTournamentBooking, getBooking } from '../src/bookings/bookings.js';
 
 let f: RoomFixture;
 let app: FastifyInstance;
@@ -133,5 +134,42 @@ describe('final review: rooms follow results, disqualifications and cancels', ()
     const reset = f.db.prepare("SELECT actor FROM event_log WHERE action = 'room_reset'").all();
     expect(reset).toEqual([{ actor: ADMIN }]);
     expect(push).toHaveBeenCalledWith(f.matchId);
+  });
+});
+
+describe('confirm, dispute and reset over HTTP (plan T3b)', () => {
+  const booked = () => {
+    driveToBooking(f);
+    const r = createTournamentBooking(f.db, {
+      region: 'na', campaign: 'no_mercy', rulesJson: '{}', rulesetId: null, gameConfig: 'standard', createdBy: ADMIN,
+      sides: [{ teamId: null, captain: A[0]!, players: A.slice(0, 4), spectators: [] }, { teamId: null, captain: B[0]!, players: B.slice(0, 4), spectators: [] }],
+    });
+    if (!r.ok) throw new Error(r.error);
+    if (!R.attachBooking(f.db, { matchId: f.matchId, bookingId: r.value.id }).ok) throw new Error('attach');
+    return r.value.id;
+  };
+
+  it('confirms and disputes in the window, for managers only', async () => {
+    booked();
+    R.startConnect(f.db, { matchId: f.matchId, graceMinutes: 15 });
+    R.startLive(f.db, { matchId: f.matchId });
+    expect((await post(`${room()}/confirm`, A[0])).json()).toEqual({ error: 'This match is not in its confirm window.' });
+    // startConfirm needs the series over (T3b Task 2 ruling): game 1 is seeded as played.
+    f.db.prepare('UPDATE event_games SET score_a = 400, score_b = 300 WHERE event_match_id = ?').run(f.matchId);
+    expect(R.startConfirm(f.db, { matchId: f.matchId, timers: TIMERS }).ok).toBe(true);
+    expect((await post(`${room()}/confirm`, OUTSIDER)).statusCode).toBe(403);
+    expect((await post(`${room()}/confirm`, A[1])).statusCode).toBe(200);
+    expect(P.getMatch(f.db, f.matchId)!.confirm_a_at).not.toBeNull();
+    expect((await post(`${room()}/dispute`, B[0], { reason: 'no' })).json()).toEqual({ error: expect.stringContaining('A reason is') });
+    expect((await post(`${room()}/dispute`, B[0], { reason: 'Rats had five on map 2' })).statusCode).toBe(200);
+    expect(P.getMatch(f.db, f.matchId)).toMatchObject({ status: 'admin_hold', hold_reason: 'dispute', dispute_side: 'b' });
+    expect((await get(room(), OUTSIDER)).json().dispute).toMatchObject({ side: 'b', reason: 'Rats had five on map 2' });
+  });
+
+  it('resets a booked room through the engine, cancelling the booking', async () => {
+    const bookingId = booked();
+    expect((await post(`/api/admin/events/${f.eventId}/matches/${f.matchId}/reset-room`, ADMIN)).statusCode).toBe(200);
+    expect(P.getMatch(f.db, f.matchId)).toMatchObject({ status: 'waiting', booking_id: null });
+    expect(getBooking(f.db, bookingId)).toMatchObject({ state: 'cancelled', end_reason: 'staff' });
   });
 });

@@ -213,7 +213,7 @@ describe('RoomClock: deadlines', () => {
 
 describe('RoomClock with the series (plan T3b)', () => {
   let f: SeriesFixture;
-  afterEach(() => f?.close());
+  afterEach(() => { vi.restoreAllMocks(); f?.close(); });
 
   it('resumes an overdue pick step with its full length, leaves a connect deadline alone, and acts on the pick when it passes', async () => {
     f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
@@ -253,6 +253,55 @@ describe('RoomClock with the series (plan T3b)', () => {
     f.t.t += 15 * MIN;
     await f.clock.tick();
     expect(f.match()).toMatchObject({ status: 'done', result_source: 'auto', winner_entry: f.entryA });
+  });
+
+  it('finalize says whether it changed the match; the clock pushes only on a change and logs a refused result once (Task 7 review)', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    const g1 = f.gameOf(1);
+    f.goLive(g1.match_id!);
+    f.endGame(g1.match_id!, [{ map: 'm1', a: 100, b: 500 }]);
+    expect(await f.series.finalize(f.matchId, new Date(f.t.t))).toBe(false);
+    f.t.t += 15 * MIN;
+    const finalize = vi.spyOn(f.series, 'finalize').mockResolvedValue(false);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    f.pushes.length = 0;
+    await f.clock.tick();
+    await f.clock.tick();
+    expect(finalize).toHaveBeenCalledTimes(2);
+    expect(f.pushes).not.toContain(f.matchId);
+    expect(err.mock.calls.filter((c) => String(c[0]).includes('confirm window passed'))).toHaveLength(1);
+    finalize.mockRestore();
+    err.mockRestore();
+    expect(await f.series.finalize(f.matchId, new Date(f.t.t))).toBe(true);
+    expect(f.match().status).toBe('done');
+    expect(await f.series.finalize(f.matchId, new Date(f.t.t))).toBe(false);
+  });
+
+  it('checks a timed-out pick\'s result before handing it to the engine, and logs a refusal once (Task 7 review)', async () => {
+    f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
+    await f.tick();
+    const g1 = f.gameOf(1);
+    f.goLive(g1.match_id!);
+    f.endGame(g1.match_id!, [{ map: 'm1', a: 100, b: 500 }]);
+    expect(R.roomState(f.db, f.match()).next).toEqual({ kind: 'pick', by: 'b', game: 2 });
+    f.t.t += 2 * MIN;
+    const act = vi.spyOn(R, 'actVeto').mockReturnValue({ ok: false, error: 'step_taken' });
+    const afterPick = vi.spyOn(f.series, 'afterPick');
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    f.pushes.length = 0;
+    await f.clock.tick();
+    await f.clock.tick();
+    expect(act).toHaveBeenCalledTimes(2);
+    expect(afterPick).not.toHaveBeenCalled();
+    expect(f.pushes).not.toContain(f.matchId);
+    expect(err.mock.calls.filter((c) => String(c[0]).includes('was refused (step_taken)'))).toHaveLength(1);
+    act.mockRestore();
+    err.mockRestore();
+    await f.clock.tick();
+    expect(f.gameOf(2)).toMatchObject({ picked_by: f.entryB });
+    expect(afterPick).toHaveBeenCalledWith(f.matchId);
+    expect(f.pushes).toContain(f.matchId);
   });
 
   it('books through the series engine on its own tick, with no separate series tick', async () => {

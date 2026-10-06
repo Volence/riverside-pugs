@@ -76,11 +76,14 @@ function earliestOf(db: DB, stageId: number, entryId: number): number | undefine
 export class RoomClock {
   private ticking = false;
   private readonly now: () => number;
+  /** Matches whose overdue action was refused, keyed by kind and id: the
+   *  clock retries every tick, so a refusal is logged once until it clears. */
+  private readonly refused = new Set<string>();
 
   constructor(private readonly deps: {
     db: DB; notifier?: Notifier; publicUrl?: string; push?: (matchId: number) => void; now?: () => number; seed?: () => number;
     /** The series engine (plan T3b). */
-    series?: { tick(now: Date): void; afterPick(matchId: number): void; finalize(matchId: number, now: Date): Promise<void> };
+    series?: { tick(now: Date): void; afterPick(matchId: number): void; finalize(matchId: number, now: Date): Promise<boolean> };
   }) {
     this.now = deps.now ?? Date.now;
   }
@@ -89,6 +92,13 @@ export class RoomClock {
    *  same way after a person acts (Task 6). Never throws. */
   pushChange(matchId: number): void {
     try { this.deps.push?.(matchId); } catch (err) { console.warn('[rooms] push failed:', err instanceof Error ? err.message : err); }
+  }
+
+  private refusedOnce(kind: string, matchId: number, line: string): void {
+    const key = `${kind}:${matchId}`;
+    if (this.refused.has(key)) return;
+    this.refused.add(key);
+    console.error(line);
   }
 
   /** Ruling 16, once at start. */
@@ -160,8 +170,11 @@ export class RoomClock {
     const timers = R.roomTimers(db);
     if (m.status === 'confirming') {
       // T3b Ruling 9: the window passed with no dispute.
-      await this.deps.series?.finalize(m.id, now);
-      this.pushChange(m.id);
+      if (!this.deps.series) return;
+      if (await this.deps.series.finalize(m.id, now)) {
+        this.refused.delete(`confirm:${m.id}`);
+        this.pushChange(m.id);
+      } else this.refusedOnce('confirm', m.id, `[rooms] match ${m.id}: its confirm window passed but no result was recorded; retrying every tick`);
       return;
     }
     if (m.status === 'veto' && (m.ready_a_at === null || m.ready_b_at === null)) {
@@ -186,9 +199,14 @@ export class RoomClock {
       const entryId = R.entryOn(m, st.next.by);
       const pool = E.stageSettingsOf(stage).campaignPool;
       const a = autoAction(st, pool, { campaigns: R.campaignPrefs(db, entryId, stage.id), side: R.entryPrefs(db, entryId).side });
-      R.actVeto(db, { matchId: m.id, steamid: null, step: st.used, action: a.action, campaign: a.campaign, timers, now });
+      const r = R.actVeto(db, { matchId: m.id, steamid: null, step: st.used, action: a.action, campaign: a.campaign, timers, now });
+      if (!r.ok) {
+        this.refusedOnce('veto', m.id, `[rooms] match ${m.id}: the timed-out ${a.action} at step ${st.used} was refused (${r.error}); retrying every tick`);
+        return;
+      }
+      this.refused.delete(`veto:${m.id}`);
       // T3b Ruling 4: a timed-out between-game pick; once nothing human is left the game is scheduled.
-      if (m.status === 'live') this.deps.series?.afterPick(m.id);
+      if (r.value.status === 'live') this.deps.series?.afterPick(m.id);
       this.pushChange(m.id);
       return;
     }
