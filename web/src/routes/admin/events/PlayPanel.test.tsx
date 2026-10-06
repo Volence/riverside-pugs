@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { Mock } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 import type { AdminEventPlay, PlayMatch } from '../../../api';
 import { ApiError } from '../../../api';
 
@@ -302,5 +302,36 @@ describe('PlayPanel', () => {
     fireEvent.input(screen.getByLabelText('Four SteamID64s'), { target: { value: '76561199000000821 76561199000000822, 76561199000000823 76561199000000824' } });
     fireEvent.click(screen.getByRole('button', { name: 'Lock the lineup' }));
     await waitFor(() => expect(mockAdmin.actForTeam).toHaveBeenCalledWith(9, 9, { kind: 'lineup', side: 'a', steamids: ['76561199000000821', '76561199000000822', '76561199000000823', '76561199000000824'] }));
+  });
+  it('shows no staff tools on a match where none applies, as one being confirmed (plan T3c Task 9 review)', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [
+      m({ status: 'confirming', phase: 'confirming', desk: desk() }),
+    ] }] }] }));
+    render(<PlayPanel eventId={9} canEdit />);
+    expect(await screen.findByRole('button', { name: 'Reset room: Rats vs Bats' })).toBeTruthy();
+    expect(screen.queryByText(/Staff tools/)).toBeNull();
+  });
+
+  it('keeps one match\'s tools open per panel, leaving another panel\'s open tools alone (plan T3c Task 9 review)', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [
+      m({ status: 'live', phase: 'live', desk: desk() }),
+      m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'connect', phase: 'connect', desk: desk() }),
+    ] }] }] }));
+    const one = render(<PlayPanel eventId={9} canEdit />).container as HTMLElement;
+    const two = render(<PlayPanel eventId={9} canEdit />).container as HTMLElement;
+    const summary = async (root: HTMLElement, text: string) => within(root).findByText(text);
+    const details = (el: HTMLElement) => el.closest('details') as HTMLDetailsElement;
+    const twoRats = await summary(two, 'Staff tools: Rats vs Bats');
+    details(twoRats).open = true;
+    fireEvent(details(twoRats), new Event('toggle'));
+    const oneRats = await summary(one, 'Staff tools: Rats vs Bats');
+    details(oneRats).open = true;
+    fireEvent(details(oneRats), new Event('toggle'));
+    const oneCats = await summary(one, 'Staff tools: Cats vs Dogs');
+    details(oneCats).open = true;
+    fireEvent(details(oneCats), new Event('toggle'));
+    await waitFor(() => expect(details(oneRats).open).toBe(false));
+    expect(details(oneCats).open).toBe(true);
+    expect(details(twoRats).open).toBe(true);
   });
 });

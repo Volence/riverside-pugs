@@ -20,6 +20,7 @@ import { A, B as BATS } from './entryFixture.js';
 import { POOL7, TIMERS, type RoomFixture } from './roomFixture.js';
 import { MIN, driveLoserPicks, seriesFixture, type SeriesFixture } from './seriesFixture.js';
 import { ServerReleaser } from '../src/serverRelease.js';
+import { reapOrphanedMatches } from '../src/liveView.js';
 import { claimIdle, claimableServers } from '../src/serverPool.js';
 import { isHeld } from '../src/serverHolds.js';
 import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistry.js';
@@ -1290,18 +1291,44 @@ describe('BookingRunner.replayGame answers (plan T3c Task 4 ledger)', () => {
     expect(f.sent.some((c) => c.startsWith('sm_pug_resume') || c.startsWith('changelevel'))).toBe(false);
   });
 
-  it('dropped: the resume burst failed after the abort was answered: the game stays live on the site for staff to try again', async () => {
+  it('dropped once: the replay tries again inside the same work, re-sending the abort and the resume, and lands', async () => {
     const { g1, rounds } = await liveOnSubway();
     f.box.resumeOk = true;
     f.box.failOn = 'sm_pug_resume_commit';
-    expect(await f.runner.replayGame(f.booking().id, g1, restoreSnapshot(f.db, g1, { replayFrom: 1 })!)).toBe('dropped');
-    expect(f.alerts.some((a) => a.kind === 'problem' && a.text.includes('dropped the game') && a.text.includes('replay again now'))).toBe(true);
-    expect(state(g1)).toEqual({ state: 'live', abort_cause: null });
-    expect(f.match().status).toBe('live');
-    expect(rounds()).toBe(3);
-    // Staff try again once the box answers.
-    f.box.failOn = null;
+    f.box.failLeft = 1;
+    f.sent.length = 0;
     expect(await f.runner.replayGame(f.booking().id, g1, restoreSnapshot(f.db, g1, { replayFrom: 1 })!)).toBe('ok');
+    expect(f.sent.filter((c) => c.startsWith('sm_pug_abort')).length).toBe(2);
+    expect(f.booking().recovering_at).toBeNull();
+    expect(state(g1)).toEqual({ state: 'live', abort_cause: null });
+    expect(rounds()).toBe(2);
+  });
+
+  it('dropped every try: the booking goes to crash recovery, the orphan reaper leaves the game alone, and the game is back at its current chapter', async () => {
+    const { g1, rounds } = await liveOnSubway();
+    f.box.resumeOk = true;
+    f.box.failOn = 'sm_pug_resume_commit';
+    f.box.failLeft = 3;
+    f.sent.length = 0;
+    let open!: () => void;
+    const gate = new Promise<void>((r) => { open = r; });
+    // Once the third try failed, the recovery's rcon waits until the reaper has looked.
+    f.box.onFailsDone = () => { f.box.gate = gate; };
+    expect(await f.runner.replayGame(f.booking().id, g1, restoreSnapshot(f.db, g1, { replayFrom: 1 })!)).toBe('dropped');
+    expect(f.sent.filter((c) => c.startsWith('sm_pug_abort')).length).toBe(3);
+    expect(f.booking().recovering_at).not.toBeNull();
+    expect(f.alerts.some((a) => a.kind === 'problem' && a.text.includes('dropped the game') && a.text.includes('being restored at its current chapter') && a.text.includes('the freeze was lifted'))).toBe(true);
+    expect(state(g1)).toEqual({ state: 'live', abort_cause: null });
+    f.db.prepare("UPDATE match_live SET last_seen = datetime('now', '-1 hour') WHERE match_id = ?").run(g1);
+    expect(reapOrphanedMatches(f.db, new ServerReleaser(f.db, async () => {}))).toEqual([]);
+    f.box.gate = null;
+    open();
+    await f.runner.idle();
+    expect(f.booking().recovering_at).toBeNull();
+    expect(f.booking().ended_at).toBeNull();
+    expect(state(g1)).toEqual({ state: 'live', abort_cause: null });
+    expect(f.box.map).toBe('l4d_vs_hospital02_subway');
+    expect(f.sent.filter((c) => c === 'sm_pug_resume_commit').length).toBe(1);
     expect(rounds()).toBe(2);
   });
 
@@ -1422,17 +1449,19 @@ describe('SeriesEngine: the desk tools, Task 7 review folded into Task 8', () =>
     expect(f.match().admin_pause_by).toBe(ADMIN);
   });
 
-  it('a replay whose resume burst failed after the abort tells staff the server dropped the game and records the freeze lifted', async () => {
+  it('a replay whose resume burst failed after the abort on every try tells staff the game is being restored and records the freeze lifted', async () => {
     const { g1, token } = await liveOnSubway();
     await f.line(`PUG ${token} ADMINPAUSE state=on by=${A[2]} cause=call`);
     f.box.resumeOk = true;
     f.box.failOn = 'sm_pug_resume_commit';
+    f.box.failLeft = 3;
     expect(await f.series.replayChapter(f.matchId, ADMIN, 1)).toEqual({ ok: false, error: 'replay_dropped' });
-    expect(EVENT_ERRORS.replay_dropped.text).toBe('The server dropped the game while replaying; replay again now.');
+    expect(EVENT_ERRORS.replay_dropped.text).toBe('The server dropped the game while replaying; it is being restored at its current chapter, and the freeze was lifted. Replay the chapter again once it is back.');
     expect(f.match()).toMatchObject({ status: 'live', admin_pause_at: null });
     expect(f.db.prepare('SELECT state FROM matches WHERE id = ?').get(g1)).toEqual({ state: 'live' });
-    // Replay again now: the box answers this time.
-    f.box.failOn = null;
+    // Replay again once it is back: the recovery restored it at its current chapter.
+    await f.runner.idle();
+    expect(f.booking().recovering_at).toBeNull();
     expect((await f.series.replayChapter(f.matchId, ADMIN, 1)).ok).toBe(true);
   });
 
@@ -1454,7 +1483,7 @@ describe('SeriesEngine: the desk tools, Task 7 review folded into Task 8', () =>
     await f.line(`PUG ${token} ADMINPAUSE state=on by=${A[2]} cause=call`);
     expect((await f.series.moveServer(f.matchId, ADMIN)).ok).toBe(true);
     await f.runner.idle();
-    expect(f.alerts.some((a) => a.kind === 'problem' && a.text.includes('staff moved it off') && a.text.includes('The staff freeze is lifted') && a.text.includes('freeze it again from the Events desk'))).toBe(true);
+    expect(f.alerts.some((a) => a.kind === 'problem' && a.text.includes('staff moved it off') && a.text.includes('The freeze is lifted') && a.text.includes('freeze it again from the Events desk'))).toBe(true);
   });
 
   it('the sub phases are the room\'s, and the grace fallback is 15 minutes', () => {

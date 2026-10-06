@@ -15,7 +15,7 @@ import { activeMembers } from '../teams/teams.js';
 import type { Notifier } from '../notify/notify.js';
 import { bookingMessage, reviewAskMessage, type BookingNotifyType } from './messages.js';
 import { claimReviewAsk } from '../scrims/reviews.js';
-import { bookingLimits, isLateCancel } from './rules.js';
+import { DEFAULT_GRACE_MINUTES, bookingLimits, isLateCancel } from './rules.js';
 import {
   acceptedPeople, actingSides, advancePlaylist, allowInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
   markReady, markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setCloseAt, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
@@ -29,6 +29,7 @@ import { abortBookingGame, bookingGames, bookingOnServer, gamesPlayed, liveBooki
 import { TOURNAMENT_LINES, boxNeedsGame } from './tournamentGames.js';
 import type { BookingVoice } from './voice.js';
 import type { BookingCmd } from '../logParse.js';
+import { EVENT_ERRORS } from '../events/validate.js';
 
 /**
  * The part of bookings that talks to game servers (spec part 1 section 3;
@@ -50,6 +51,10 @@ export const CFG_TRIES = 3;
 export const SETUP_SETTLE_MS = 15_000;
 /** After `changelevel`: the map loads and its configs run. */
 export const MAP_SETTLE_MS = 20_000;
+/** Tries at a chapter replay whose resume got no answer after the abort
+ *  (plan T3c Task 8 ruling), before the booking goes to crash recovery. */
+export const REPLAY_TRIES = 3;
+export type ReplayResult = 'ok' | 'refused' | 'busy' | 'error' | 'dropped';
 export const GOODBYE_MS = 3_000;
 /** Minutes left on the slot at which the box says so in chat, once, and
  *  only between games (bookings by campaign, Ruling 4). */
@@ -641,7 +646,7 @@ export class BookingRunner {
       if (b.purpose === 'tournament') continue;
       if (b.state !== 'scheduled' || b.server_id !== null || b.ending_at !== null) continue;
       if (sidesOf(this.db, b.id).some((s) => s.confirmed_at === null)) continue;
-      const grace = (bookingRules(b)?.noShowGraceMinutes ?? 15) * 60_000;
+      const grace = (bookingRules(b)?.noShowGraceMinutes ?? DEFAULT_GRACE_MINUTES) * 60_000;
       if (now.getTime() < Date.parse(b.starts_at) + grace) continue;
       if (!closeBooking(this.db, b.id, 'cancelled', 'no_server', now)) continue;
       console.warn(`[booking] ${b.id}: no server was free by ${b.starts_at}; cancelled`);
@@ -756,7 +761,7 @@ export class BookingRunner {
     const dueNow = this.dueEnd(fresh, nowMs);
     if (dueNow) { this.endNow(b.id, dueNow, now); return; }
     const limits = bookingLimits(this.db);
-    const grace = (bookingRules(fresh)?.noShowGraceMinutes ?? 15) * 60_000;
+    const grace = (bookingRules(fresh)?.noShowGraceMinutes ?? DEFAULT_GRACE_MINUTES) * 60_000;
     const idleFrom = Math.max(fresh.last_human_at ? Date.parse(fresh.last_human_at) : 0, Date.parse(fresh.starts_at) + grace);
     if (humans.length === 0 && nowMs - idleFrom >= limits.idleEndMinutes * 60_000) { this.endNow(b.id, 'idle', now); return; }
     const empties = humans.length === 0 ? (this.emptyWatches.get(b.id) ?? 0) + 1 : 0;
@@ -1271,30 +1276,53 @@ export class BookingRunner {
    *  the game. 'dropped' is a resume burst that failed in rcon after the
    *  abort was answered: the box has dropped its match (and any freeze with
    *  it). Either way nothing is aborted or dropped on the site and the game
-   *  stays live, for staff to try again or move the match (plan T3c Task 4
-   *  ruling, split in Task 8). 'busy' touches nothing: the booking is busy, not
-   *  running, or not running this game. */
-  async replayGame(bookingId: number, gameMatchId: number, snap: RestoreSnapshot): Promise<'ok' | 'refused' | 'busy' | 'error' | 'dropped'> {
+   *  stays live, for staff to try again (once a drop is restored) or move the match (plan T3c Task 4
+   *  ruling, split in Task 8). A drop is tried again REPLAY_TRIES - 1 more
+   *  times inside the same work (each try re-sends the abort, then the
+   *  resume); still dropped, the booking goes to crash recovery as a restarted
+   *  box does, which restores the game at its current chapter (plan T3c Task 8
+   *  ruling), so a drop never decays into an aborted game through the orphan
+   *  reaper. 'busy' touches nothing: the booking is busy, not running, or not
+   *  running this game. */
+  async replayGame(bookingId: number, gameMatchId: number, snap: RestoreSnapshot): Promise<ReplayResult> {
     const live = liveBookingGame(this.db, bookingId);
     if (this.busy.has(bookingId) || !this.running(bookingId) || !live || live.id !== gameMatchId || live.token !== snap.token) return 'busy';
-    let result: 'ok' | 'refused' | 'busy' | 'error' | 'dropped' = 'error';
+    let result: ReplayResult = 'error';
     this.track(bookingId, async () => {
-      try {
-        result = await this.replayOnce(bookingId, gameMatchId, snap);
-      } catch (err) {
-        console.error(`[booking] ${bookingId}: the replay of game #${gameMatchId} failed:`, redactSecrets(err instanceof Error ? err.message : String(err), [snap.token]));
-        result = 'error';
+      for (let attempt = 1; attempt <= REPLAY_TRIES; attempt++) {
+        const retry = attempt > 1;
+        if (retry) await this.sleep(MAP_SETTLE_MS);
+        let r: ReplayResult;
+        try {
+          r = await this.replayOnce(bookingId, gameMatchId, snap, retry);
+        } catch (err) {
+          console.error(`[booking] ${bookingId}: the replay of game #${gameMatchId} failed:`, redactSecrets(err instanceof Error ? err.message : String(err), [snap.token]));
+          r = 'error';
+        }
+        // After a drop the box has already let go of its match: a retry whose
+        // abort got no answer is still a dropped game, not a running one.
+        result = retry && r === 'error' ? 'dropped' : r;
+        if (result !== 'dropped') break;
       }
     });
     await this.busy.get(bookingId);
-    return result;
+    // Set inside the tracked work, which TS's narrowing cannot see.
+    const final = result as ReplayResult;
+    if (final === 'dropped') {
+      const b = this.running(bookingId);
+      const server = b ? getServer(this.db, b.server_id!) : undefined;
+      const now = new Date(this.now());
+      publishAdminEvent({ kind: 'problem', matchId: gameMatchId, text: `Booking ${bookingId}: ${server?.name ?? 'its server'} dropped game #${gameMatchId} while replaying (the resume got no answer after the abort, ${REPLAY_TRIES} tries). ${EVENT_ERRORS.replay_dropped.text}` });
+      if (b && beginRecovery(this.db, bookingId, 'restart', now)) this.track(bookingId, () => this.recover(bookingId));
+    }
+    return final;
   }
 
   /** 'ok' once the plugin took the resume (the replay is on its way);
    *  'refused' when it answered and refused, in which case the game has been
    *  aborted; 'error' when the box did not answer the abort, 'dropped' when
    *  it answered the abort but not the resume. */
-  private async replayOnce(id: number, gameMatchId: number, snap: RestoreSnapshot): Promise<'ok' | 'refused' | 'busy' | 'error' | 'dropped'> {
+  private async replayOnce(id: number, gameMatchId: number, snap: RestoreSnapshot, retry = false): Promise<ReplayResult> {
     const b = this.running(id);
     const server = b ? getServer(this.db, b.server_id!) : undefined;
     if (!b || !server) return 'busy';
@@ -1311,10 +1339,11 @@ export class BookingRunner {
       const why = redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret, snap.token]);
       console.warn(`[booking] ${id}: the replay's ${step} on ${server.name} failed:`, why);
       if (step === 'abort') {
-        publishAdminEvent({ kind: 'problem', matchId: live.id, text: `Booking ${id}: ${server.name} did not answer the abort of a chapter replay of game #${live.id}. Nothing was aborted on the site; replay again or move the match.` });
+        // A retry's abort follows a drop: replayGame reports that, not this.
+        if (!retry) publishAdminEvent({ kind: 'problem', matchId: live.id, text: `Booking ${id}: ${server.name} did not answer the abort of a chapter replay of game #${live.id}. Nothing was aborted on the site; replay again or move the match.` });
         return 'error';
       }
-      publishAdminEvent({ kind: 'problem', matchId: live.id, text: `Booking ${id}: ${server.name} dropped the game while replaying game #${live.id} (the resume got no answer after the abort); replay again now. Nothing was aborted on the site.` });
+      // replayGame tries again, then reports a drop that stuck.
       return 'dropped';
     }
     if (!(replies[resume.length - 1] ?? '').trim().startsWith('PUGOK resumed')) {

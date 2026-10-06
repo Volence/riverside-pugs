@@ -27,8 +27,11 @@ export interface SeriesFixture extends RoomFixture {
   t: { t: number }; runner: BookingRunner; series: SeriesEngine; clock: RoomClock;
   sent: string[];
   /** subOk / freezeOk: pug-match takes sm_pug_sub / sm_pug_adminpause (else it answers PUGERR subErr / PUGERR no match configured).
-   *  failOn: an rcon burst with a command starting with this throws (the connection dropped on it), as `down` does for every burst. */
-  box: { map: string; humans: string[]; down: boolean; resumeOk: boolean; subOk: boolean; subErr: string; freezeOk: boolean; failOn: string | null; pug: { state: string; match: number } }; send: MockInstance; alerts: AdminEvent[]; pushes: number[];
+   *  failOn: an rcon burst with a command starting with this throws (the connection dropped on it), as `down` does for every burst.
+   *  failLeft: when set, failOn throws only this many more times, then clears itself.
+   *  onFailsDone: called once failLeft runs out.
+   *  gate: when set, every rcon burst waits on it before answering (holds tracked work mid-flight). */
+  box: { map: string; humans: string[]; down: boolean; resumeOk: boolean; subOk: boolean; subErr: string; freezeOk: boolean; failOn: string | null; failLeft: number | null; onFailsDone: (() => void) | null; gate: Promise<void> | null; pug: { state: string; match: number } }; send: MockInstance; alerts: AdminEvent[]; pushes: number[];
   /** The room clock (which ticks the series engine), then the runner's
    *  minute pass, then any tracked work. */
   tick(): Promise<void>;
@@ -64,16 +67,20 @@ export async function seriesFixture(o: {
   f.db.prepare("UPDATE servers SET status = 'idle', has_dlc4 = 1 WHERE id = ?").run(serverId);
   const t = { t: NOW.getTime() + 10 * MIN };
   const sent: string[] = [];
-  const box = { map: 'l4d_vs_hospital01_apartment', humans: [] as string[], down: false, resumeOk: false, subOk: true, subErr: 'not rostered', freezeOk: true, failOn: null as string | null, marker: '', type: 'Rotoblin Pub VS', pug: { state: 'none', match: 0 } };
+  const box = { map: 'l4d_vs_hospital01_apartment', humans: [] as string[], down: false, resumeOk: false, subOk: true, subErr: 'not rostered', freezeOk: true, failOn: null as string | null, failLeft: null as number | null, onFailsDone: null as (() => void) | null, gate: null as Promise<void> | null, marker: '', type: 'Rotoblin Pub VS', pug: { state: 'none', match: 0 } };
   const status = () => [
     'hostname: test', `map     : ${box.map} at: 0 x, 0 y, 0 z`, `players : ${box.humans.length} humans, 0 bots (31 max)`,
     '# userid name uniqueid connected ping loss state rate adr',
     ...box.humans.map((sid, i) => `#  ${i + 2} ${i + 1} "h${i}" ${steam2(sid)} 01:12 33 0 active 128000 10.0.0.${i}:27005`),
   ].join('\n');
   const rcon = async (_s: ServerRow, cmds: string[]): Promise<string[]> => {
+    if (box.gate) await box.gate;
     if (box.down) throw new Error('rcon connect timeout');
     const failOn = box.failOn;
-    if (failOn !== null && cmds.some((c) => c.startsWith(failOn))) throw new Error('rcon read timeout');
+    if (failOn !== null && cmds.some((c) => c.startsWith(failOn))) {
+      if (box.failLeft !== null && --box.failLeft <= 0) { box.failOn = null; box.failLeft = null; box.onFailsDone?.(); box.onFailsDone = null; }
+      throw new Error('rcon read timeout');
+    }
     return cmds.map((c) => {
       sent.push(c);
       if (c === 'status') return status();
