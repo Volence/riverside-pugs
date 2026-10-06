@@ -10,7 +10,7 @@ import * as B from '../bookings/bookings.js';
 import { gamesPlayed } from '../bookings/games.js';
 import { SHOWN_MIN } from '../bookings/rules.js';
 import { CLOSE_GRACE_MS, NEXT_DELAY_MS, type TournamentHooks } from '../bookings/runner.js';
-import { createTournamentGame, gameLinesOf, isPendingGame } from '../bookings/tournamentGames.js';
+import { createTournamentGame, gameLinesOf, isPendingGame, isUnstartedGame } from '../bookings/tournamentGames.js';
 import * as E from './events.js';
 import * as N from './entries.js';
 import * as P from './play.js';
@@ -136,6 +136,7 @@ export class SeriesEngine {
         console.error(`[series] server alert for match ${m.id} failed:`, err instanceof Error ? err.message : err);
       }
     }
+    this.sweepAborted(now);
     // Only rooms of a live event and stage, like every other clock query (a cancelled event's rooms never tick).
     const stale = this.db.prepare(`SELECT m.* FROM event_matches m WHERE ${R.ROOM_LIVE_SQL} AND m.status = 'connect' AND m.deadline IS NOT NULL AND m.deadline <= ?`)
       .all(new Date(now.getTime() - PRESENCE_FALLBACK_MS).toISOString()) as P.MatchRow[];
@@ -149,6 +150,31 @@ export class SeriesEngine {
         this.push(m.id);
       } catch (err) {
         console.error(`[series] presence fallback for match ${m.id} failed:`, err instanceof Error ? err.message : err);
+      }
+    }
+  }
+
+  /** T3b final review: a game aborted by anything but crash recovery (the
+   *  staff Abort on the match page, the orphan reaper, an abandon) never
+   *  reaches the engine, so the series would wait on it for ever. A connect
+   *  or live match whose running game's row is aborted is held for staff
+   *  once, as gameLost does (a held match is not swept again). */
+  private sweepAborted(now: Date): void {
+    const rows = this.db.prepare(
+      `SELECT m.id AS matchId, g.id AS gameId, g.match_id AS gameMatchId, x.abort_cause AS cause FROM event_matches m
+       JOIN event_games g ON g.event_match_id = m.id AND g.match_id IS NOT NULL AND g.ended_at IS NULL
+       JOIN matches x ON x.id = g.match_id AND x.state = 'aborted'
+       WHERE ${R.ROOM_LIVE_SQL} AND m.status IN ('connect', 'live') ORDER BY m.id`,
+    ).all() as { matchId: number; gameId: number; gameMatchId: number; cause: string | null }[];
+    for (const r of rows) {
+      try {
+        const m = P.getMatch(this.db, r.matchId)!;
+        const g = R.gamesOf(this.db, m.id).find((x) => x.id === r.gameId)!;
+        if (!R.holdMatch(this.db, { matchId: m.id, by: null, reason: 'game_aborted', now }).ok) continue;
+        this.alert(m, `${this.gameLabel(m, g)} (match ${r.gameMatchId}) was aborted${r.cause ? ` (${r.cause})` : ''} before it finished. It is on hold; replay it or enter the result on the Events desk.`);
+        this.push(m.id);
+      } catch (err) {
+        console.error(`[series] holding match ${r.matchId} after its game was aborted failed:`, err instanceof Error ? err.message : err);
       }
     }
   }
@@ -236,8 +262,16 @@ export class SeriesEngine {
     if (!m || !LIVE_OR_BEFORE.has(m.status)) return [];
     const b = B.getBooking(this.db, bookingId);
     if (!b || b.server_id === null) return [];
-    const pending = this.pendingLines(bookingId);
-    if (pending.length > 0) return pending;
+    // A game already linked that never started (no MATCH_START: current_map
+    // is still null, a heartbeat does not set it) is the one this load is
+    // for: a setup retry or a recovery restarted the box under it, so its
+    // burst goes again (T3b final review). The minute re-push keeps the
+    // narrower rule (pendingLines: no heartbeat yet).
+    const unstarted = R.gamesOf(this.db, m.id).find((g) => g.match_id !== null && g.ended_at === null && isUnstartedGame(this.db, g.match_id));
+    if (unstarted) {
+      if (unstarted.campaign !== campaign) throw new Error(`match ${m.id}: the box is loading ${campaign} but game ${unstarted.ordinal} (not started yet) is on ${unstarted.campaign}`);
+      return this.linesFor(m, unstarted, unstarted.match_id!);
+    }
     const rows = R.gamesOf(this.db, m.id);
     const due = playOrder(R.seriesGames(this.db, m)).map((s) => rows.find((g) => g.id === s.id)!).find((g) => g.match_id === null);
     if (!due || due.first_survivors === null) throw new Error(`match ${m.id}: no game is ready to start`);
@@ -355,7 +389,10 @@ export class SeriesEngine {
     // A lost MATCH_START: the result proves the game was played.
     if (m.status === 'connect') R.startLive(this.db, { matchId: m.id, now });
     const fresh = P.getMatch(this.db, m.id)!;
-    if (fresh.status !== 'live') return;
+    // A match staff held while this game ran still gets the game's result
+    // (T3b final review); the series then waits for staff.
+    const held = fresh.status === 'admin_hold';
+    if (fresh.status !== 'live' && !held) return;
     const game = R.gamesOf(this.db, m.id).find((g) => g.match_id === gameMatchId);
     if (!game) return;
     if (game.ended_at === null) {
@@ -368,13 +405,15 @@ export class SeriesEngine {
       const scoreA = flip ? row.team_b_score : row.team_a_score;
       const scoreB = flip ? row.team_a_score : row.team_b_score;
       const forfeit = row.forfeit_team === 'a' || row.forfeit_team === 'b' ? toSide(row.forfeit_team) : null;
-      const rec = R.recordGame(this.db, { matchId: m.id, gameId: game.id, scoreA, scoreB, forfeit, now });
+      const rec = R.recordGame(this.db, { matchId: m.id, gameId: game.id, scoreA, scoreB, forfeit, now, held });
       if (!rec.ok) {
         console.error(`[series] match ${m.id}: game ${game.ordinal} (match ${gameMatchId}) could not be recorded (${rec.error})`);
         return;
       }
-      console.log(`[series] match ${m.id}: game ${game.ordinal} recorded ${scoreA ?? '-'} to ${scoreB ?? '-'}${forfeit ? `, forfeited by ${forfeit}` : ''}`);
+      console.log(`[series] match ${m.id}: game ${game.ordinal} recorded ${scoreA ?? '-'} to ${scoreB ?? '-'}${forfeit ? `, forfeited by ${forfeit}` : ''}${held ? ' (match on hold)' : ''}`);
+      if (held) this.push(m.id);
     }
+    if (held) return;
     this.continueSeries(m.id);
   }
 
@@ -439,7 +478,15 @@ export class SeriesEngine {
     if (v.tiebreakOf) {
       const parent = rows.find((g) => g.id === v.tiebreakOf!.id)!;
       // A tiebreak not yet played (waiting for the box, or being played now) is the one this tie gets.
-      if (rows.some((g) => g.tiebreak_of === parent.id && g.score_a === null && g.forfeit_side === null)) return;
+      const waiting = rows.find((g) => g.tiebreak_of === parent.id && g.score_a === null && g.forfeit_side === null);
+      if (waiting) {
+        // Its load failed before it was linked (loadNext cleared next_campaign): schedule it again.
+        if (waiting.match_id === null && waiting.map !== null && b.next_campaign === null && this.schedule(m, b, rows, parent.campaign, waiting.map, now)) {
+          this.deps.runner.announce(b.id, `The tiebreak of game ${parent.ordinal} is loaded again in about a minute.`);
+          this.push(m.id);
+        }
+        return;
+      }
       const played = playOrder(series).map((x) => rows.find((g) => g.id === x.id)!)
         .filter((g) => (g.id === parent.id || g.tiebreak_of === parent.id) && g.match_id !== null).at(-1)!;
       const chapter = this.lastChapter(m, played);
@@ -459,8 +506,7 @@ export class SeriesEngine {
         }
         return;
       }
-      B.appendTournamentGame(this.db, { bookingId: b.id, campaign: parent.campaign, map: chapter.map, now });
-      B.setNext(this.db, b.id, parent.campaign, new Date(now.getTime() + NEXT_DELAY_MS).toISOString(), now, null, chapter.map);
+      this.schedule(m, b, R.gamesOf(this.db, m.id), parent.campaign, chapter.map, now);
       this.deps.runner.announce(b.id, `Game ${parent.ordinal} is tied ${played.score_a} to ${played.score_b}: its last chapter is replayed as a tiebreaker in about a minute. ${this.name(m, chapter.firstSurvivors)} start as survivors.`);
       this.push(m.id);
       return;
@@ -479,11 +525,24 @@ export class SeriesEngine {
     // game due next is scheduled once its row has its sides.
     const next = v.nextGame === null ? undefined : rows.find((g) => g.tiebreak_of === null && g.ordinal === v.nextGame && g.match_id === null);
     if (!next || next.first_survivors === null || b.next_campaign !== null) return;
-    B.appendTournamentGame(this.db, { bookingId: b.id, campaign: next.campaign, map: null, now });
-    B.setNext(this.db, b.id, next.campaign, new Date(now.getTime() + NEXT_DELAY_MS).toISOString(), now);
+    this.schedule(m, b, rows, next.campaign, null, now);
     const first = this.sideOfEntry(m, next.first_survivors)!;
     this.deps.runner.announce(b.id, `Next: game ${next.ordinal}, ${campaignDisplayName(this.db, next.campaign)}, in about a minute. ${this.name(m, first)} start as survivors.`);
     this.push(m.id);
+  }
+
+  /** The next game on the box in a minute: appended to the booking unless
+   *  an earlier try already appended it and its load then failed (loadNext
+   *  clears next_campaign when the burst cannot be built), which shows as
+   *  more games allowed than games linked; appending it again would leave
+   *  games_allowed ahead for ever and block the close (T3b final review). */
+  private schedule(m: P.MatchRow, b: B.BookingRow, rows: R.GameRow[], campaign: string, map: string | null, now: Date): boolean {
+    const linked = rows.filter((g) => g.match_id !== null).length;
+    if (b.games_allowed <= linked) {
+      const r = B.appendTournamentGame(this.db, { bookingId: b.id, campaign, map, now });
+      if (!r.ok) console.error(`[series] match ${m.id}: appending ${campaign} to booking ${b.id} failed (${r.error})`);
+    }
+    return B.setNext(this.db, b.id, campaign, new Date(now.getTime() + NEXT_DELAY_MS).toISOString(), now, null, map);
   }
 
   /** A pick or side choice landed on a live match (a route or the clock). */

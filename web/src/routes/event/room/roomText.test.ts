@@ -35,7 +35,7 @@ describe('roomText', () => {
   it('titles games and tiebreaks, writes a game line with scores, and the series and result lines', () => {
     const g = (over: Partial<RoomGame>): RoomGame => ({
       id: 1, game: 1, ordinal: 1, tiebreak: false, campaign: 'no_mercy', campaignName: 'No Mercy', map: null, pickedBy: null, sideBy: 'b', firstSurvivors: 'b',
-      matchId: null, state: 'upcoming', scoreA: null, scoreB: null, winner: null, live: null, ...over,
+      matchId: null, state: 'upcoming', scoreA: null, scoreB: null, winner: null, forfeit: null, live: null, ...over,
     });
     const view = v({ series: { bestOf: 3, totalScore: false, winsA: 1, winsB: 1, totalA: 900, totalB: 900, over: false, winner: null } });
     expect(gameTitle(g({}))).toBe('Game 1');
@@ -44,6 +44,9 @@ describe('roomText', () => {
     expect(gameLine(view, g({ state: 'live', matchId: 7, live: { map: 'l4d_vs_hospital03_sewers', scoreA: 80, scoreB: 120 } }))).toBe('Game 1 · No Mercy · live on l4d_vs_hospital03_sewers · Rats 80 - 120 Bats');
     expect(gameLine(view, g({ state: 'done', scoreA: 600, scoreB: 400, winner: 'a' }))).toBe('Game 1 · No Mercy · Rats 600 - 400 Bats');
     expect(gameLine(view, g({ tiebreak: true, ordinal: 11, map: 'l4d_vs_hospital04_interior', state: 'done', scoreA: 20, scoreB: 50, winner: 'b' }))).toBe('Tiebreak of game 1 · No Mercy, l4d_vs_hospital04_interior · Rats 20 - 50 Bats');
+    // A !gg: the side ahead on score forfeited, so the line names the forfeit and who won (T3b final review).
+    expect(gameLine(view, g({ state: 'done', scoreA: 600, scoreB: 400, winner: 'b', forfeit: 'a' }))).toBe('Game 1 · No Mercy · Rats 600 - 400 Bats · FF: Rats forfeited, Bats win');
+    expect(gameLine(view, g({ state: 'done', scoreA: null, scoreB: null, winner: 'a', forfeit: 'b' }))).toBe('Game 1 · No Mercy · FF: Bats forfeited, Rats win');
     expect(seriesLine(view)).toBe('Best of 3 · Rats 1 - 1 Bats');
     expect(seriesLine(v({ series: { bestOf: 2, totalScore: true, winsA: 0, winsB: 0, totalA: 1000, totalB: 1050, over: true, winner: 'b' } }))).toBe('Two games, total score · Rats 1000 - 1050 Bats');
     expect(resultLine(v({ series: { bestOf: 3, totalScore: false, winsA: 2, winsB: 1, totalA: 0, totalB: 0, over: true, winner: 'a' } }))).toBe('Rats beat Bats 2 games to 1.');

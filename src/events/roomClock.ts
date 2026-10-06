@@ -151,6 +151,11 @@ export class RoomClock {
       `SELECT m.* FROM event_matches m WHERE ${R.ROOM_LIVE_SQL} AND m.status IN ('veto','lineup','live','confirming') AND m.deadline IS NOT NULL AND m.deadline <= ?
        ORDER BY m.deadline, m.id`,
     ).all(now.toISOString()) as P.MatchRow[];
+    // A refusal is forgotten once its match is no longer overdue, however it
+    // left (a staff hold, a captain's step, a result): the set stays as small
+    // as the overdue list, and a later refusal is logged again (T3b final review).
+    const overdue = new Set(rows.map((m) => m.id));
+    for (const key of this.refused) if (!overdue.has(Number(key.slice(key.indexOf(':') + 1)))) this.refused.delete(key);
     for (const m of rows) {
       try {
         await this.expireOne(m, now);

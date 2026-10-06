@@ -26,6 +26,7 @@ import { classifyBox } from './recovery.js';
 import { prepareRestore, restoreSnapshot, resumeLines } from './restore.js';
 import type { A2sFn } from '../a2s.js';
 import { abortBookingGame, bookingGames, bookingOnServer, gamesPlayed, liveBookingGame } from './games.js';
+import { TOURNAMENT_LINES, boxNeedsGame } from './tournamentGames.js';
 import type { BookingVoice } from './voice.js';
 import type { BookingCmd } from '../logParse.js';
 
@@ -91,6 +92,8 @@ export const CLEAR_LINES: readonly string[] = [
   'l4d_booking_password ""', 'l4d_booking_tv_password ""', 'l4d_booking_notice ""',
   `sm_pug_pause_limit ${TEMPLATES.PUG.pause.limit ?? 0}`, `sm_pug_pause_seconds ${TEMPLATES.PUG.pause.seconds ?? 0}`,
   'sm_pug_auto_min_players 8',
+  // A tournament box sets it to 0 (TOURNAMENT_LINES); the plugin default is 1.
+  'sm_pug_end_kick 1',
 ];
 
 /** The series engine's hand on a tournament booking (tournaments plan T3b). */
@@ -191,6 +194,7 @@ export function gameLines(db: DB, b: BookingRow, server: ServerRow, logAddress?:
     `sm_pug_pause_limit ${Math.max(0, Math.trunc(pause?.limit ?? 0))}`,
     `sm_pug_pause_seconds ${Math.max(0, Math.trunc(pause?.seconds ?? 0))}`,
     `l4d_booking_captains ${quoted(captains.join(','))}`,
+    ...(b.purpose === 'tournament' ? TOURNAMENT_LINES : []),
   ];
   if (logAddress && /^[A-Za-z0-9.-]+:\d{1,5}$/.test(logAddress)) {
     lines.push(`logaddress_add ${logAddress}`);
@@ -735,7 +739,7 @@ export class BookingRunner {
       // A burst the box never got goes again until the game heartbeats (T3b Ruling 3).
       let pending: string[] = [];
       this.hook(b.id, 'pendingLines', () => { pending = this.deps.tournament?.pendingLines(b.id) ?? []; });
-      if (pending.length > 0) await this.push(b.id, server, () => pending, 'the pending game burst');
+      if (pending.length > 0 && await this.boxLacksGame(b.id, server, pending)) await this.push(b.id, server, () => pending, 'the pending game burst');
     }
     if (b.state === 'ready' && present.a + present.b > 0 && markActive(this.db, b.id, now)) {
       // The first campaign was loaded by setup, before anyone was on: its
@@ -1190,6 +1194,25 @@ export class BookingRunner {
   private campaignStartLines(campaign: string): string[] {
     const name = consoleText(campaignRegistry(this.db).get(campaign)?.name ?? campaign, 60);
     return [`say [Booking] ${name}: !nextmap, !stay, !end and !addcampaign are yours, captains.`];
+  }
+
+  /** T3b final review: the pending burst goes again only to a box whose
+   *  pug-match does not hold that game (sm_pug_status). A game the box holds
+   *  (pending, live or ended) is never reset by a re-push, which is what a
+   *  lost MATCH_START datagram would otherwise cause; another match live on
+   *  it is left alone too. No answer, or one that cannot be read: nothing is
+   *  sent (the next minute asks again). */
+  private async boxLacksGame(id: number, server: ServerRow, pending: string[]): Promise<boolean> {
+    const matchId = Number(/^sm_pug_match (\d+) /.exec(pending.find((l) => l.startsWith('sm_pug_match ')) ?? '')?.[1] ?? NaN);
+    if (!Number.isInteger(matchId)) return false;
+    let body: string;
+    try {
+      [body = ''] = await this.deps.rcon(server, ['sm_pug_status']);
+    } catch (err) {
+      console.warn(`[booking] ${id}: sm_pug_status on ${server.name} failed; the pending game burst waits:`, err instanceof Error ? err.message : err);
+      return false;
+    }
+    return boxNeedsGame(body, matchId);
   }
 
   /** The series engine's burst for the game due on a tournament booking; nothing for a scrim. May throw (TournamentHooks). */

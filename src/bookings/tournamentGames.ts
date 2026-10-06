@@ -41,6 +41,14 @@ export function createTournamentGame(db: DB, o: {
   return { matchId, token };
 }
 
+/** On a tournament box only (T3b final review), in the booking lines (so the
+ *  minute re-push keeps them) and in every game burst: a player who drops
+ *  for five minutes must not end a series game as a PUG abandon (0 turns
+ *  the plugin's leave tracking off), and the plugin must not kick everyone
+ *  eight seconds after each game of the series (sm_pug_end_kick, pug-match
+ *  0.3.24; an older plugin answers "unknown command" and kicks anyway). */
+export const TOURNAMENT_LINES: readonly string[] = ['sm_pug_leave_budget 0', 'sm_pug_end_kick 0'];
+
 /** The burst for a game whose rows exist (so a lost burst can be sent again). */
 export function gameLinesOf(db: DB, o: { matchId: number; stopAfterMap: string | null; notice: string }): string[] {
   const m = db.prepare('SELECT token, campaign FROM matches WHERE id = ?').get(o.matchId) as { token: string | null; campaign: string } | undefined;
@@ -50,6 +58,8 @@ export function gameLinesOf(db: DB, o: { matchId: number; stopAfterMap: string |
   if (o.stopAfterMap !== null && !isMapName(o.stopAfterMap)) throw new Error(`stop map ${JSON.stringify(o.stopAfterMap)} is not a valid map name`);
   const roster = db.prepare('SELECT player_id, team FROM match_players WHERE match_id = ? ORDER BY team, rowid').all(o.matchId) as { player_id: string; team: 'a' | 'b' }[];
   return [
+    // Before the match line, so the plugin has them when the game goes live (TOURNAMENT_LINES).
+    ...TOURNAMENT_LINES,
     `sm_pug_match ${o.matchId} ${m.token} ${m.campaign}${o.stopAfterMap ? ` "${o.stopAfterMap}"` : ''}`,
     // Quoted: the console splits an unquoted argument on ':' (orchestrator.ts).
     ...roster.filter((r) => /^\d{17}$/.test(r.player_id)).map((r) => `sm_pug_roster "${r.player_id}:${r.team}"`),
@@ -57,7 +67,29 @@ export function gameLinesOf(db: DB, o: { matchId: number; stopAfterMap: string |
   ];
 }
 
+/** Pushed but never started: live, and no MATCH_START (or round start)
+ *  has named a map for it. A heartbeat alone leaves current_map null
+ *  (liveView touch COALESCEs), so a game the box only heartbeated in
+ *  ready-up still counts (T3b final review). */
+export function isUnstartedGame(db: DB, matchId: number): boolean {
+  return !!db.prepare(
+    "SELECT 1 FROM matches m WHERE m.id = ? AND m.state = 'live' AND NOT EXISTS (SELECT 1 FROM match_live l WHERE l.match_id = m.id AND l.current_map IS NOT NULL)",
+  ).get(matchId);
+}
+
 /** Pushed but not yet heard from: live with no heartbeat row. */
 export function isPendingGame(db: DB, matchId: number): boolean {
   return !!db.prepare("SELECT 1 FROM matches m WHERE m.id = ? AND m.state = 'live' AND NOT EXISTS (SELECT 1 FROM match_live l WHERE l.match_id = m.id)").get(matchId);
+}
+
+/** Whether a box's sm_pug_status (pug-match Cmd_Status, first line
+ *  `STATUS state=<none|pending|live|ended> match=<id> ...`) shows it needs
+ *  the burst of game `matchId` again (T3b final review): it holds no match,
+ *  or an older one that is not live. A box holding this game in any state,
+ *  or another game live, does not; nor does a body that cannot be read. */
+export function boxNeedsGame(statusBody: string, matchId: number): boolean {
+  const m = /^STATUS state=(\w+) match=(-?\d+)/m.exec(statusBody);
+  if (!m) return false;
+  if (Number(m[2]) === matchId) return false;
+  return m[1] !== 'live';
 }

@@ -91,6 +91,17 @@ describe('seriesVerdict for total score (Bo2)', () => {
     expect(seriesResult(broken)).toEqual({ winner: 'a', scoreA: 1070, scoreB: 1030, forfeit: false });
   });
 
+  it('takes the first forfeit in play order, not in row order (T3b final review)', () => {
+    const g1 = forfeited(1, 'b');
+    const g2 = forfeited(2, 'a');
+    // Rows read in any order (a later game first): game 1's !gg ended the series.
+    expect(seriesVerdict(bo2, [g2, g1])).toMatchObject({ over: true, winner: 'a', forfeit: 'b' });
+    const g1t = played(1, 500, 500);
+    const tb = forfeited(11, 'a', { tiebreakOf: g1t.id });
+    const g2b = forfeited(2, 'b');
+    expect(seriesVerdict(bo2, [g2b, g1t, tb])).toMatchObject({ over: true, winner: 'b', forfeit: 'a' });
+  });
+
   it('never feeds the veto engine a winner (loser picks is refused for Bo2)', () => {
     expect(seriesVerdict(bo2, [played(1, 1, 0), played(2, 1, 0)]).decided).toEqual([]);
   });

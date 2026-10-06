@@ -40,6 +40,8 @@ export interface AbandonDeps {
 }
 
 const inFlight = new Set<string>();
+/** Booked games whose ABANDON was refused, logged once each (the plugin repeats the line every heartbeat). */
+const bookedLogged = new Set<string>();
 
 /** Whether an sm_pug_status body names `steamid` as the match's abandoner. */
 export function statusShowsAbandoner(body: string, steamid: string): boolean {
@@ -58,9 +60,20 @@ export function statusShowsAbandoner(body: string, steamid: string): boolean {
 export async function handleAbandon(deps: AbandonDeps, token: string, steamid: string): Promise<number | null> {
   const { db } = deps;
   const match = db.prepare(
-    "SELECT id, server_id FROM matches WHERE token = ? AND state IN ('configuring', 'live')",
-  ).get(token) as { id: number; server_id: number | null } | undefined;
+    "SELECT id, server_id, booking_id FROM matches WHERE token = ? AND state IN ('configuring', 'live')",
+  ).get(token) as { id: number; server_id: number | null; booking_id: number | null } | undefined;
   if (!match || match.server_id === null) return null;
+  // A booked game (a scrim, or a tournament game the series engine started)
+  // is never ended as an abandon: no abort, no ban, no requeue. A tournament
+  // box is pushed sm_pug_leave_budget 0 so the plugin never sends this; an
+  // older box or a lost push must still not stall a series (T3b final review).
+  if (match.booking_id !== null) {
+    if (!bookedLogged.has(token)) {
+      bookedLogged.add(token);
+      console.warn(`[abandon] ignored ABANDON of ${steamid} on match ${match.id}: it is a booked game (booking ${match.booking_id})`);
+    }
+    return null;
+  }
   if (!db.prepare('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?').get(match.id, steamid)) return null;
   if (inFlight.has(token)) return null;
   inFlight.add(token);

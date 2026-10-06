@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { addServer } from '../src/serverPool.js';
 import { appendTournamentGame, createTournamentBooking, getBooking, peopleOf, recordPresence, setNext, sidesOf, advancePlaylist } from '../src/bookings/bookings.js';
-import { createTournamentGame, gameLinesOf, isPendingGame } from '../src/bookings/tournamentGames.js';
+import { boxNeedsGame, createTournamentGame, gameLinesOf, isPendingGame } from '../src/bookings/tournamentGames.js';
 
 const P = Array.from({ length: 10 }, (_, i) => `765611990000009${String(i).padStart(2, '0')}`);
 const NOW = new Date('2026-10-07T20:00:00.000Z');
@@ -78,14 +78,30 @@ describe('createTournamentGame and gameLinesOf', () => {
     const players = db.prepare('SELECT player_id, team, source FROM match_players WHERE match_id = ? ORDER BY team, player_id').all(g.matchId);
     expect(players).toEqual([...P.slice(4, 8).map((s) => ({ player_id: s, team: 'a', source: 'web' })), ...P.slice(0, 4).map((s) => ({ player_id: s, team: 'b', source: 'web' }))]);
     expect(isPendingGame(db, g.matchId)).toBe(true);
-    const lines = gameLinesOf(db, { matchId: g.matchId, stopAfterMap: 'l4d_vs_hospital04_interior', notice: 'Riverside Cup: Rats vs Bats, game 1' });
+    const all = gameLinesOf(db, { matchId: g.matchId, stopAfterMap: 'l4d_vs_hospital04_interior', notice: 'Riverside Cup: Rats vs Bats, game 1' });
+    // T3b final review: no PUG abandon, no end kick, set before the match line.
+    expect(all.slice(0, 2)).toEqual(['sm_pug_leave_budget 0', 'sm_pug_end_kick 0']);
+    const lines = all.slice(2);
     expect(lines[0]).toBe(`sm_pug_match ${g.matchId} ${g.token} no_mercy "l4d_vs_hospital04_interior"`);
     expect(lines.slice(1, 9)).toEqual([...P.slice(4, 8).map((s) => `sm_pug_roster "${s}:a"`), ...P.slice(0, 4).map((s) => `sm_pug_roster "${s}:b"`)]);
     expect(lines[9]).toBe('l4d_ready_league_notice "Riverside Cup: Rats vs Bats, game 1"');
-    expect(gameLinesOf(db, { matchId: g.matchId, stopAfterMap: null, notice: 'x' })[0]).toBe(`sm_pug_match ${g.matchId} ${g.token} no_mercy`);
+    expect(gameLinesOf(db, { matchId: g.matchId, stopAfterMap: null, notice: 'x' })[2]).toBe(`sm_pug_match ${g.matchId} ${g.token} no_mercy`);
     expect(() => gameLinesOf(db, { matchId: g.matchId, stopAfterMap: 'bad map;quit', notice: 'x' })).toThrow();
     db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (?, 'l4d_vs_hospital01_apartment', datetime('now'))").run(g.matchId);
     expect(isPendingGame(db, g.matchId)).toBe(false);
     expect((db.prepare("SELECT COUNT(*) AS n FROM booking_events WHERE booking_id = ? AND event = 'game_started'").get(r.value.id) as { n: number }).n).toBe(1);
+  });
+});
+
+describe('boxNeedsGame (T3b final review)', () => {
+  const body = (state: string, match: number) => `STATUS state=${state} match=${match} token=abc campaign=no_mercy map=x stopAfterMap=(none)\nSTATUS orient a=survivor b=infected\nSTATUS end`;
+  it('wants the burst again only on a box that holds neither this game nor another live one', () => {
+    expect(boxNeedsGame(body('none', 0), 5)).toBe(true);
+    expect(boxNeedsGame(body('ended', 4), 5)).toBe(true);
+    expect(boxNeedsGame(body('pending', 4), 5)).toBe(true);
+    for (const s of ['pending', 'live', 'ended']) expect(boxNeedsGame(body(s, 5), 5)).toBe(false);
+    expect(boxNeedsGame(body('live', 4), 5)).toBe(false);
+    expect(boxNeedsGame('', 5)).toBe(false);
+    expect(boxNeedsGame('Unknown command "sm_pug_status"', 5)).toBe(false);
   });
 });

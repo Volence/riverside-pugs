@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.23"
+#define PLUGIN_VERSION "0.3.24"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -428,6 +428,7 @@ ConVar g_cvRosterAtLive;                 // 1 = !load_4v4p records the roster at
 ConVar g_cvAutoTrack;                    // 1 = track any campaign that goes live with enough humans, no command needed
 ConVar g_cvAutoMinPlayers;               // humans on teams needed for auto-track to start a match
 ConVar g_cvRecordDemos;                  // 1 = record a named demo per map during a match
+ConVar g_cvEndKick;                      // 0 = no kick after a backend match ends (a tournament box, 0.3.24)
 
 public Plugin myinfo =
 {
@@ -477,6 +478,10 @@ orientation threshold. Changing this changes the rules under every rating earned
 		FCVAR_NOTIFY);
 	g_cvRecordDemos = CreateConVar("sm_pug_record_demos", "1",
 		"1 = stop autorecord and record a named pug_<token>_<ordinal>_<map> demo for each map of a match.",
+		FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	g_cvEndKick = CreateConVar("sm_pug_end_kick", "1",
+		"1 = kick everyone a few seconds after a backend match ends (a queue PUG). 0 = keep everyone on: \
+a tournament box plays its next game on the same server, and the site pushes 0 there.",
 		FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	g_cvTeamLock = CreateConVar("sm_pug_team_lock", "1",
 		"1 = move rostered players back to their team's side every two seconds. 0 lets people \
@@ -2441,6 +2446,11 @@ void EndMatchNow(const char[] why)
 	// those eight go back and requeue. Nobody asked an in-game night to be
 	// ejected from its own server.
 	if (g_bSelfStarted) return;
+
+	// A tournament series plays its next game on this box with the same
+	// people (the site pushes sm_pug_end_kick 0 there), so nobody is kicked;
+	// the site closes the box itself once the series is over.
+	if (!g_cvEndKick.BoolValue) return;
 
 	// Everyone, spectators included, so the box is empty and ready for the next
 	// queue pop. Delayed so the score can be read in game first rather than

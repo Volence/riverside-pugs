@@ -105,6 +105,10 @@ describe('matchRoomView with a server and a series (plan T3b)', () => {
     expect(sview(OUTSIDER).server!.connect).toBeNull();
     expect(sview(B[4]).server!.connect).toBeNull();
     expect(sview('76561199000000700', true).server!.connect).not.toBeNull();
+    // Signed out, with the box ready: no connect line, and the password nowhere in the view (T3b final review).
+    const out = sview(null);
+    expect(out.server).toMatchObject({ state: 'ready', connect: null });
+    expect(JSON.stringify(out)).not.toContain(b.password);
     expect(mine.games).toEqual([expect.objectContaining({ game: 1, ordinal: 1, tiebreak: false, state: 'live', scoreA: null, matchId: f.gameOf(1).match_id, live: null })]);
     expect(mine.series).toEqual({ bestOf: 1, totalScore: false, winsA: 0, winsB: 0, totalA: 0, totalB: 0, over: false, winner: null });
   });

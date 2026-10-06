@@ -21,7 +21,7 @@ const PUB = 'Rotoblin Pub VS';
 let db: DB;
 let now: number;
 let sent: { server: string; cmds: string[] }[];
-let box: Record<string, { type: string; plugin: boolean; map: string; humans: string[]; down: boolean; execs: number; failExec: number; marker: string; bookingPlugin: string }>;
+let box: Record<string, { type: string; plugin: boolean; map: string; humans: string[]; down: boolean; execs: number; failExec: number; marker: string; bookingPlugin: string; pug: string }>;
 let released: number[];
 let restarted: string[];
 let dms: { to: string; content: string }[];
@@ -43,6 +43,7 @@ const fakeRcon = async (server: ServerRow, cmds: string[]): Promise<string[]> =>
   sent.push({ server: server.name, cmds });
   return cmds.map((c) => {
     if (c === 'status') return status(b);
+    if (c === 'sm_pug_status') return `STATUS ${b.pug} token=(none) campaign=(none) map=${b.map} stopAfterMap=(none)\nSTATUS end`;
     if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${b.type}" ( def. "" )`;
     if (c === 'l4d_booking_version') return b.plugin ? '"l4d_booking_version" = "1.0.0" ( def. "1.0.0" )' : 'Unknown command "l4d_booking_version"';
     if (c === 'l4d_booking_id') return b.bookingPlugin >= '1.4.0' ? `"l4d_booking_id" = "${b.marker}" ( def. "" )` : 'Unknown command "l4d_booking_id"';
@@ -82,7 +83,7 @@ beforeEach(() => {
   for (const n of ['a', 'bb', 'ccc']) {
     const id = addServer(db, { name: n, host: '10.0.0.1', port: 27014 + n.length, rconPort: 1, rconPassword: 'x' });
     db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id);
-    box[n] = { type: PUB, plugin: true, map: 'l4d_vs_hospital01_apartment', humans: [], down: false, execs: 0, failExec: 0, marker: '', bookingPlugin: '1.4.0' };
+    box[n] = { type: PUB, plugin: true, map: 'l4d_vs_hospital01_apartment', humans: [], down: false, execs: 0, failExec: 0, marker: '', bookingPlugin: '1.4.0', pug: 'state=none match=0' };
   }
   runner = build();
 });
@@ -520,6 +521,8 @@ describe('fix wave (final review)', () => {
       'l4d_booking_id ""',
       'l4d_booking_password ""', 'l4d_booking_tv_password ""', 'l4d_booking_notice ""',
       'sm_pug_pause_limit 3', 'sm_pug_pause_seconds 120', 'sm_pug_auto_min_players 8',
+      // A tournament box turned the end kick off (T3b final review): a PUG after a skipped restart gets it back.
+      'sm_pug_end_kick 1',
     ]);
     expect(cmds.indexOf('l4d_booking_password ""')).toBeGreaterThan(cmds.indexOf('sm_kick @humans "The booking is over. Thanks for playing."'));
 
@@ -626,6 +629,8 @@ describe('booked games (plan 4b)', () => {
     expect(c).toContain('sm_pug_pause_seconds 0');
     expect(c.indexOf('sm_pug_auto_track 1')).toBeGreaterThan(c.indexOf(`l4d_booking_password "${getBooking(db, id)!.password}"`));
     expect(c.some((x) => x.startsWith('logaddress_add') || x.startsWith('sm_pug_log_secret'))).toBe(false);
+    // Tournament-only lines (T3b final review): a scrim keeps the plugin's own leave rules and end kick.
+    expect(c.some((x) => x.startsWith('sm_pug_leave_budget') || x.startsWith('sm_pug_end_kick'))).toBe(false);
   });
 
   it('setup follows the booking_game_min_players setting', async () => {
@@ -1994,6 +1999,14 @@ describe('tournament bookings (plan T3b)', () => {
     expect(h.gameLines).toHaveBeenCalledWith(id, 'no_mercy');
     expect(h.ready).toHaveBeenCalledWith(id);
     expect(dms).toEqual([]);
+    // T3b final review: the booking lines (re-pushed every minute) turn off PUG leave tracking and the end kick.
+    expect(cmds()).toContain('sm_pug_leave_budget 0');
+    expect(cmds()).toContain('sm_pug_end_kick 0');
+    sent = [];
+    now = START + MIN;
+    await runner.tick();
+    expect(cmds()).toContain('sm_pug_leave_budget 0');
+    expect(cmds()).toContain('sm_pug_end_kick 0');
   });
 
   it('hands presence and a finished game to the engine, re-pushes a pending burst, never schedules or ends on time itself, and refuses captain commands', async () => {
@@ -2010,6 +2023,22 @@ describe('tournament bookings (plan T3b)', () => {
     await runner.tick();
     expect(h.presence).toHaveBeenCalledWith(id, new Set([...P.slice(0, 4), ...P.slice(4, 7)]), new Date(now));
     expect(sideRow(db, id, 'a')!.present_now).toBe(4);
+    expect(cmds()).toContain('sm_pug_match 1 tok no_mercy');
+    // T3b final review: the re-push asks the box first; a box that already holds the game (its MATCH_START lost) is left alone.
+    expect(cmds().indexOf('sm_pug_status')).toBeLessThan(cmds().indexOf('sm_pug_match 1 tok no_mercy'));
+    for (const held of ['state=live match=1', 'state=pending match=1', 'state=ended match=1', 'state=live match=7']) {
+      box.ccc.pug = held;
+      sent = [];
+      now += MIN;
+      await runner.tick();
+      expect(cmds()).toContain('sm_pug_status');
+      expect(cmds()).not.toContain('sm_pug_match 1 tok no_mercy');
+    }
+    // A box holding an older game that has ended, or none, gets the burst again.
+    box.ccc.pug = 'state=ended match=7';
+    sent = [];
+    now += MIN;
+    await runner.tick();
     expect(cmds()).toContain('sm_pug_match 1 tok no_mercy');
     const matchId = Number(db.prepare(
       "INSERT INTO matches (season_id, state, campaign, server_id, token, kind, booking_id, booking_side_a, team_a_score, team_b_score, winner, ended_at) VALUES (?, 'completed', 'no_mercy', 3, 't1', 'tournament', ?, 'a', 500, 400, 'a', datetime('now'))",

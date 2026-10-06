@@ -2002,6 +2002,8 @@ export interface RoomGame {
   id: number; game: number; ordinal: number; tiebreak: boolean; campaign: string; campaignName: string; map: string | null;
   pickedBy: 'a' | 'b' | null; sideBy: 'a' | 'b' | null; firstSurvivors: 'a' | 'b' | null;
   matchId: number | null; state: 'upcoming' | 'live' | 'done'; scoreA: number | null; scoreB: number | null; winner: 'a' | 'b' | null;
+  /** The side that typed !gg on this game (it lost the game whatever the score), or null. */
+  forfeit: 'a' | 'b' | null;
   live: { map: string | null; scoreA: number; scoreB: number } | null;
 }
 export interface RoomSeries { bestOf: number; totalScore: boolean; winsA: number; winsB: number; totalA: number; totalB: number; over: boolean; winner: 'a' | 'b' | null }

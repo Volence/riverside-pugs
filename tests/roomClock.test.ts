@@ -278,6 +278,29 @@ describe('RoomClock with the series (plan T3b)', () => {
     expect(await f.series.finalize(f.matchId, new Date(f.t.t))).toBe(false);
   });
 
+  it('forgets a refusal once the match leaves the overdue state another way (T3b final review)', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    const g1 = f.gameOf(1);
+    f.goLive(g1.match_id!);
+    f.endGame(g1.match_id!, [{ map: 'm1', a: 100, b: 500 }]);
+    f.t.t += 15 * MIN;
+    const finalize = vi.spyOn(f.series, 'finalize').mockResolvedValue(false);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await f.clock.tick();
+      // Staff hold it (not through the clock), then it is back in an overdue confirm window.
+      expect(R.holdMatch(f.db, { matchId: f.matchId, by: null, reason: 'look', now: new Date(f.t.t) }).ok).toBe(true);
+      await f.clock.tick();
+      f.db.prepare("UPDATE event_matches SET status = 'confirming', deadline = ? WHERE id = ?").run(new Date(f.t.t - MIN).toISOString(), f.matchId);
+      await f.clock.tick();
+      expect(err.mock.calls.filter((c) => String(c[0]).includes('confirm window passed'))).toHaveLength(2);
+    } finally {
+      finalize.mockRestore();
+      err.mockRestore();
+    }
+  });
+
   it('checks a timed-out pick\'s result before handing it to the engine, and logs a refusal once (Task 7 review)', async () => {
     f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
     await f.tick();
