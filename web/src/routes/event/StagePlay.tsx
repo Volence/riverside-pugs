@@ -1,6 +1,6 @@
 import type { PlayStanding, StagePlayView } from '../../api';
 import { Panel } from '../../components/bits';
-import { weekRangeText } from '../../eventFormat';
+import { groupPrefix, weekRangeText } from '../../eventFormat';
 import { Bracket, MatchCard } from './Bracket';
 
 const signed = (n: number) => (n > 0 ? `+${n}` : String(n));
@@ -53,7 +53,7 @@ export function StagePlay({ stage }: { stage: StagePlayView }) {
           {stage.rounds.slice().reverse().map((r) => (
             <section key={`${r.group}-${r.round}`} class="playround">
               <span class="eyebrow">
-                {`${stage.groups.length > 1 ? `${stage.groups.find((g) => g.number === r.group)?.label}, ` : ''}${r.label}${r.dates ? ` · ${weekRangeText(r.dates.from, r.dates.to)}` : ''}`}
+                {`${groupPrefix(stage, r)}${r.label}${r.dates ? ` · ${weekRangeText(r.dates.from, r.dates.to)}` : ''}`}
               </span>
               <div class="playround__matches">{r.matches.map((m) => <MatchCard key={m.id} m={m} />)}</div>
             </section>

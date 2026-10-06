@@ -25,6 +25,9 @@ export interface PlayStanding {
 export interface StagePlayView {
   ordinal: number; type: V.StageType; status: 'live' | 'finished'; layout: 'bracket' | 'table';
   groups: { number: number; label: string }[]; rounds: PlayRound[]; standings: PlayStanding[]; advanceCount: number | null;
+  /** Swiss, or a league paired Swiss: a later round's existence locks a
+   *  table match's result (play.ts recordResult). */
+  pairsAsItGoes: boolean;
 }
 
 export function stagePlayViews(db: DB, ev: E.EventRow): StagePlayView[] {
@@ -36,6 +39,8 @@ export function stagePlayViews(db: DB, ev: E.EventRow): StagePlayView[] {
     const st = E.stageSettingsOf(s);
     const elim = st.type === 'single_elim' || st.type === 'double_elim';
     const ms = P.matchesOf(db, s.id);
+    // A double elimination of 2 is played as a single final (bracket.ts createBracket).
+    const labelType: V.StageType = st.type === 'double_elim' && ms.every((m) => m.grp === 1) ? 'single_elim' : st.type;
     // Ruling 19: week 1 starts on the season start, or the day the stage started.
     const league = st.type === 'league' ? st.config as V.StageConfigs['league'] : null;
     const seasonStart = league ? league.seasonStart ?? (s.started_at ?? ev.starts_at).slice(0, 10) : null;
@@ -46,7 +51,7 @@ export function stagePlayViews(db: DB, ev: E.EventRow): StagePlayView[] {
     for (const m of ms) {
       let r = rounds.find((x) => x.group === m.grp && x.round === m.round);
       if (!r) {
-        r = { group: m.grp, round: m.round, label: roundLabel(st.type, st.config, m.grp, m.round, last.get(m.grp)!), dates: leagueDates(m.round), matches: [] };
+        r = { group: m.grp, round: m.round, label: roundLabel(labelType, st.config, m.grp, m.round, last.get(m.grp)!), dates: leagueDates(m.round), matches: [] };
         rounds.push(r);
       }
       const resolved = P.RESOLVED.has(m.status);
@@ -56,14 +61,14 @@ export function stagePlayViews(db: DB, ev: E.EventRow): StagePlayView[] {
         scoreA: m.score_a, scoreB: m.score_b, forfeit: m.status === 'forfeit', bye: m.status === 'bye',
       });
     }
-    const groups = [...new Set(ms.map((m) => m.grp))].sort((x, y) => x - y).map((n) => ({ number: n, label: groupLabel(st.type, n) }));
+    const groups = [...new Set(ms.map((m) => m.grp))].sort((x, y) => x - y).map((n) => ({ number: n, label: groupLabel(labelType, n) }));
     const standings = elim ? [] : stageTable(db, s).map((t): PlayStanding => ({
       entry: entry(t.entryId)!, group: t.group, rank: t.rank, groupRank: t.groupRank, played: t.played, wins: t.wins, losses: t.losses,
       points: t.points, buchholz: t.buchholz, scoreDiff: t.scoreDiff,
     }));
     return {
       ordinal: s.ordinal, type: st.type, status: s.status as 'live' | 'finished', layout: elim ? 'bracket' : 'table',
-      groups, rounds, standings, advanceCount: st.advanceCount,
+      groups, rounds, standings, advanceCount: st.advanceCount, pairsAsItGoes: P.totalRounds(s) !== null,
     };
   });
 }

@@ -1,8 +1,9 @@
 import { useState } from 'preact/hooks';
-import { adminApi, type PlayMatch } from '../../../api';
+import { adminApi, type PlayMatch, type StagePlayView } from '../../../api';
 import { useFetch } from '../../../hooks/useFetch';
 import { Empty, Panel } from '../../../components/bits';
 import { useAction, type Run } from '../useAction';
+import { groupPrefix } from '../../../eventFormat';
 
 const OPEN = new Set(['waiting']);
 const CORRECTABLE = new Set(['done', 'forfeit']);
@@ -31,12 +32,13 @@ function ResultForm({ eventId, m, run, busy, correcting, onSaved }: { eventId: n
   const save = () => {
     if (!canSave) return;
     const body = forfeit ? { winner, forfeit: true } : { winner, scoreA: Number(scoreA), scoreB: Number(scoreB), forfeit: false };
+    const title = `${winner === 'a' ? a : b} wins ${forfeit ? 'by forfeit' : `${Number(scoreA)} : ${Number(scoreB)}`}?`;
     void run(async () => {
       await adminApi.recordEventResult(eventId, m.id, body);
       onSaved?.();
     }, correcting
-      ? { title: `Change the result of ${a} vs ${b}?`, body: 'Later matches move with it. A result that later matches already depend on is refused.' }
-      : undefined);
+      ? { title, body: `This changes the result of ${a} vs ${b}. Later matches move with it. A result that later matches already depend on is refused.` }
+      : { title });
   };
   return (
     <div class="inlinerow">
@@ -49,8 +51,8 @@ function ResultForm({ eventId, m, run, busy, correcting, onSaved }: { eventId: n
       </label>
       {!forfeit && (
         <>
-          <input type="number" min={0} aria-label={`${a} score`} value={scoreA} onInput={(e) => setScoreA((e.target as HTMLInputElement).value)} />
-          <input type="number" min={0} aria-label={`${b} score`} value={scoreB} onInput={(e) => setScoreB((e.target as HTMLInputElement).value)} />
+          <input type="number" min={0} aria-label={`${a} score`} placeholder={a} value={scoreA} onInput={(e) => setScoreA((e.target as HTMLInputElement).value)} />
+          <input type="number" min={0} aria-label={`${b} score`} placeholder={b} value={scoreB} onInput={(e) => setScoreB((e.target as HTMLInputElement).value)} />
         </>
       )}
       <label><input type="checkbox" aria-label="Forfeit" checked={forfeit} onChange={(e) => setForfeit((e.target as HTMLInputElement).checked)} /> Forfeit</label>
@@ -59,9 +61,21 @@ function ResultForm({ eventId, m, run, busy, correcting, onSaved }: { eventId: n
   );
 }
 
-function MatchRow({ eventId, m, canEdit, live, run, busy }: { eventId: number; m: PlayMatch; canEdit: boolean; live: boolean; run: Run; busy: boolean }) {
+/** Where the server refuses a correction anyway (play.ts recordResult), so
+ *  Correct is not offered: a match of a stage that pairs as it goes once a
+ *  later round exists, and a forfeit whose loser is out of the event while
+ *  the winner is still in (the out team could never be made the winner). */
+function correctionRefused(s: StagePlayView, m: PlayMatch): boolean {
+  if (s.layout === 'table' && s.pairsAsItGoes && s.rounds.some((r) => r.round > m.round)) return true;
+  const loser = m.winner === 'a' ? m.b : m.a;
+  const winner = m.winner === 'a' ? m.a : m.b;
+  return m.forfeit && loser !== null && loser.out && winner !== null && !winner.out;
+}
+
+function MatchRow({ eventId, s, m, canEdit, run, busy }: { eventId: number; s: StagePlayView; m: PlayMatch; canEdit: boolean; run: Run; busy: boolean }) {
   const [correcting, setCorrecting] = useState(false);
-  const editable = canEdit && live && m.a !== null && m.b !== null;
+  const editable = canEdit && s.status === 'live' && m.a !== null && m.b !== null;
+  const correctable = editable && CORRECTABLE.has(m.status) && !correctionRefused(s, m);
   return (
     <li>
       <strong>{m.a?.name ?? 'TBD'}</strong> vs <strong>{m.bye ? 'Bye' : m.b?.name ?? 'TBD'}</strong>
@@ -69,10 +83,10 @@ function MatchRow({ eventId, m, canEdit, live, run, busy }: { eventId: number; m
         {m.forfeit ? ` · forfeit, ${(m.winner === 'a' ? m.a : m.b)?.name ?? ''} wins` : m.scoreA !== null && m.scoreB !== null ? ` · ${m.scoreA} : ${m.scoreB}` : ''}
       </span>
       {editable && OPEN.has(m.status) && <ResultForm eventId={eventId} m={m} run={run} busy={busy} correcting={false} />}
-      {editable && CORRECTABLE.has(m.status) && !correcting && (
+      {correctable && !correcting && (
         <button class="btn btn--ghost" disabled={busy} onClick={() => setCorrecting(true)}>Correct</button>
       )}
-      {editable && CORRECTABLE.has(m.status) && correcting && (
+      {correctable && correcting && (
         <ResultForm eventId={eventId} m={m} run={run} busy={busy} correcting onSaved={() => setCorrecting(false)} />
       )}
     </li>
@@ -83,8 +97,8 @@ function MatchRow({ eventId, m, canEdit, live, run, busy }: { eventId: number; m
  *  the list is final; each started stage's matches by round with a result
  *  form on open ones and Correct on finished ones while the stage is live. A
  *  mod (canEdit false) reads the same list with no control. */
-export function PlayPanel({ eventId, canEdit }: { eventId: number; canEdit: boolean }) {
-  const { data, error: loadError, reload } = useFetch((s) => adminApi.eventPlay(eventId, s), [eventId]);
+export function PlayPanel({ eventId, canEdit, gen = 0, onChange }: { eventId: number; canEdit: boolean; gen?: number; onChange?: () => void }) {
+  const { data, error: loadError, reload } = useFetch((s) => adminApi.eventPlay(eventId, s), [eventId, gen]);
   const { busy, error, run } = useAction(reload);
   if (loadError) return <Panel><h3>Play</h3><p class="error">Could not load the matches.</p></Panel>;
   if (!data) return <Panel><h3>Play</h3></Panel>;
@@ -97,7 +111,7 @@ export function PlayPanel({ eventId, canEdit }: { eventId: number; canEdit: bool
         <>
           <p class="muted">{data.seeded} teams are seeded. The event starts by itself at the start time{data.seeded < 2 ? ' once it has 2 teams' : ''}.</p>
           {canEdit && data.seeded >= 2 && (
-            <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => adminApi.startEvent(eventId), {
+            <button class="btn btn--ghost" disabled={busy} onClick={() => run(async () => { await adminApi.startEvent(eventId); onChange?.(); }, {
               title: 'Start the event now?', body: 'Stage 1 is drawn from the current seeds, and seeds can no longer change.',
             })}>Start the event now</button>
           )}
@@ -110,9 +124,9 @@ export function PlayPanel({ eventId, canEdit }: { eventId: number; canEdit: bool
           <h4>Stage {s.ordinal}{s.status === 'finished' ? ' (finished)' : ''}</h4>
           {s.rounds.map((r) => (
             <div key={`${r.group}-${r.round}`}>
-              <span class="eyebrow">{s.groups.length > 1 ? `${s.groups.find((g) => g.number === r.group)?.label}, ` : ''}{r.label}</span>
+              <span class="eyebrow">{groupPrefix(s, r)}{r.label}</span>
               <ul class="admin-list">
-                {r.matches.map((m) => <MatchRow key={m.id} eventId={eventId} m={m} canEdit={canEdit} live={s.status === 'live'} run={run} busy={busy} />)}
+                {r.matches.map((m) => <MatchRow key={m.id} eventId={eventId} s={s} m={m} canEdit={canEdit} run={run} busy={busy} />)}
               </ul>
             </div>
           ))}
