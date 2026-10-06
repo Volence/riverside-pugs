@@ -770,7 +770,7 @@ public Action Listener_TourneyUnpause(int client, const char[] command, int argc
 	if (!g_bTourneyFrozen && TourneyOn() && g_iTechOwner != 0)
 	{
 		int team = Tourney_TeamOf(client);
-		if (team != 0 && Tech_OwnerReady(team)) return Plugin_Handled;
+		if (team != 0 && Tech_OwnerReady(client, team)) return Plugin_Handled;
 	}
 	if (!g_bTourneyFrozen) return Plugin_Continue;
 	if (client < 1 || client > MaxClients || !IsClientInGame(client)) return Plugin_Continue;

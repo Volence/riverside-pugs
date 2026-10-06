@@ -194,3 +194,36 @@ describe('pug-tourney.inc rcon answers', () => {
     expect(adminPauseTook('PUGERR adminpause state is on or off', true)).toBe(false);
   });
 });
+
+describe('pug-pause.inc technical pause end (plan T5 fix rounds 1 and 2)', () => {
+  /** The body of one SourcePawn function, from its signature to the closing brace at column 0. */
+  const body = (src: string, sig: string): string => {
+    const start = src.indexOf(sig);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const end = src.indexOf('\n}\n', start);
+    expect(end).toBeGreaterThan(start);
+    return src.slice(start, end);
+  };
+
+  it('the calling team ends its technical pause only on a tournament box, unfrozen, still technical and with nobody away', () => {
+    const fn = body(pauseSrc, 'bool Tech_OwnerReady(int client, int team)');
+    expect(fn).toMatch(/!TourneyOn\(\)/);
+    expect(fn).toMatch(/TourneyFrozen\(\)/);
+    expect(fn).toMatch(/g_bPauseConverted\) return false;/);
+    expect(fn).toMatch(/if \(LeaveAnyAbsent\(\)\)\s*\{[^}]*return false;/);
+    expect(fn).toContain('g_bTechReleased || ');
+    expect(fn).toContain('LeaveUnpauseNow();');
+  });
+
+  it('the ready listener is hooked and hands the owner team to Tech_OwnerReady', () => {
+    expect(tourneySrc).toContain('AddCommandListener(Listener_TourneyUnpause, "sm_ready");');
+    const fn = body(tourneySrc, 'public Action Listener_TourneyUnpause(int client, const char[] command, int argc)');
+    expect(fn).toContain('Tech_OwnerReady(client, team)');
+  });
+
+  it('a released technical pause is not charged or run over during the countdown', () => {
+    const fn = body(pauseSrc, 'static void Tech_Tick()');
+    expect(fn.indexOf('if (g_bTechReleased) return;')).toBeGreaterThan(-1);
+    expect(fn.indexOf('if (g_bTechReleased) return;')).toBeLessThan(fn.indexOf('g_fTechUsed[team] += 1.0;'));
+  });
+});
