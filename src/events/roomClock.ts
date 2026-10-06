@@ -17,7 +17,7 @@ export const ROOM_TICK_MS = 5_000;
  * ready check (forfeit or hold), a veto step (from the team's saved order,
  * Ruling 7), the lineups (Ruling 9). resume() runs once at start (Ruling
  * 16). Each match is caught on its own, so one bad row never stops the rest;
- * every change is pushed so the room page refetches.
+ * every change it makes is pushed so the room page refetches.
  */
 
 /** Ruling 5: the better stage seed in a bracket, the better standing (then
@@ -138,8 +138,13 @@ export class RoomClock {
     }
   }
 
-  private async expireOne(m: P.MatchRow, now: Date): Promise<void> {
+  /** snap is the row as expire() selected it, possibly several awaits ago:
+   *  a captain may have taken the overdue step (and reset the deadline) in
+   *  between, so the row is re-read and acted on only if still overdue. */
+  private async expireOne(snap: P.MatchRow, now: Date): Promise<void> {
     const { db } = this.deps;
+    const m = P.getMatch(db, snap.id);
+    if (!m || (m.status !== 'veto' && m.status !== 'lineup') || m.deadline === null || m.deadline > now.toISOString()) return;
     const timers = R.roomTimers(db);
     if (m.status === 'veto' && (m.ready_a_at === null || m.ready_b_at === null)) {
       const a = m.ready_a_at !== null;
