@@ -31,7 +31,7 @@ export interface SeriesFixture extends RoomFixture {
    *  failLeft: when set, failOn throws only this many more times, then clears itself.
    *  onFailsDone: called once failLeft runs out.
    *  gate: when set, every rcon burst waits on it before answering (holds tracked work mid-flight). */
-  box: { map: string; humans: string[]; down: boolean; resumeOk: boolean; subOk: boolean; subErr: string; freezeOk: boolean; failOn: string | null; failLeft: number | null; onFailsDone: (() => void) | null; gate: Promise<void> | null; pug: { state: string; match: number } }; send: MockInstance; alerts: AdminEvent[]; pushes: number[];
+  box: { map: string; humans: string[]; down: boolean; resumeOk: boolean; subOk: boolean; subErr: string; freezeOk: boolean; failOn: string | null; failLeft: number | null; onFailsDone: (() => void) | null; gate: Promise<void> | null; marker: string; pug: { state: string; match: number } }; send: MockInstance; alerts: AdminEvent[]; pushes: number[];
   /** The room clock (which ticks the series engine), then the runner's
    *  minute pass, then any tracked work. */
   tick(): Promise<void>;

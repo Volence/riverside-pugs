@@ -60,7 +60,7 @@ export function gameLinesOf(db: DB, o: { matchId: number; stopAfterMap: string |
   if (!/^[A-Za-z0-9]+$/.test(m.token)) throw new Error('match token has unexpected characters');
   if (!/^[a-z0-9_]+$/.test(m.campaign)) throw new Error(`campaign ${JSON.stringify(m.campaign)} has unexpected characters`);
   if (o.stopAfterMap !== null && !isMapName(o.stopAfterMap)) throw new Error(`stop map ${JSON.stringify(o.stopAfterMap)} is not a valid map name`);
-  const roster = db.prepare('SELECT player_id, team FROM match_players WHERE match_id = ? ORDER BY team, rowid').all(o.matchId) as { player_id: string; team: 'a' | 'b' }[];
+  const roster = (tournamentRoster(db, o.matchId) ?? matchPlayersRoster(db, o.matchId)).map((r) => ({ player_id: r.steamid, team: r.team }));
   return [
     // Before the match line, so the plugin has them when the game goes live (TOURNAMENT_LINES).
     ...TOURNAMENT_LINES,
@@ -68,6 +68,48 @@ export function gameLinesOf(db: DB, o: { matchId: number; stopAfterMap: string |
     // Quoted: the console splits an unquoted argument on ':' (orchestrator.ts).
     ...roster.filter((r) => /^\d{17}$/.test(r.player_id)).map((r) => `sm_pug_roster "${r.player_id}:${r.team}"`),
     `l4d_ready_league_notice ${quoted(consoleText(o.notice, 60))}`,
+  ];
+}
+
+export interface RosterLine { steamid: string; team: 'a' | 'b'; joinedMap: number }
+
+/** Every match_players row: the roster of a game that is not a series game. */
+export function matchPlayersRoster(db: DB, matchId: number): RosterLine[] {
+  return (db.prepare('SELECT player_id, team, joined_map FROM match_players WHERE match_id = ? ORDER BY team, rowid').all(matchId) as
+    { player_id: string; team: 'a' | 'b'; joined_map: number }[]).map((r) => ({ steamid: r.player_id, team: r.team, joinedMap: r.joined_map }));
+}
+
+/** The roster of a tournament game as the box must hold it now (plan T3c
+ *  final review): each side's current four from the event lineup (game 1
+ *  carries the series and a sub rewrites it), never every match_players
+ *  row, which keeps a subbed-out player for his stats. A replay, a move, a
+ *  crash recovery or a re-push sends this, so a sub survives them (the
+ *  plugin's ResetMatchState forgets the slot-out flag). Pug team a is the
+ *  room side named by matches.booking_side_a. A player's joined map is his
+ *  match_players row's (a sub's is the maps finished when he came in), 0
+ *  without one. Null for a game that is not a series game, or whose room
+ *  no longer holds its booking or both lineups: the caller falls back to
+ *  match_players. */
+export function tournamentRoster(db: DB, matchId: number): RosterLine[] | null {
+  const row = db.prepare(
+    `SELECT m.kind, m.booking_side_a, em.id AS em_id, em.entry_a, em.entry_b FROM matches m
+       JOIN event_matches em ON em.booking_id = m.booking_id WHERE m.id = ?`,
+  ).get(matchId) as { kind: string; booking_side_a: Side | null; em_id: number; entry_a: number | null; entry_b: number | null } | undefined;
+  if (!row || row.kind !== 'tournament') return null;
+  const four = (entryId: number | null): string[] | null => {
+    if (entryId === null) return null;
+    const l = db.prepare('SELECT steamids FROM event_lineups WHERE event_match_id = ? AND game = 1 AND entry_id = ?').get(row.em_id, entryId) as { steamids: string } | undefined;
+    return l ? JSON.parse(l.steamids) as string[] : null;
+  };
+  const sideA: Side = row.booking_side_a ?? 'a';
+  const teamA = four(sideA === 'a' ? row.entry_a : row.entry_b);
+  const teamB = four(sideA === 'a' ? row.entry_b : row.entry_a);
+  if (!teamA || !teamB) return null;
+  const joined = new Map((db.prepare('SELECT player_id, joined_map FROM match_players WHERE match_id = ?').all(matchId) as
+    { player_id: string; joined_map: number }[]).map((r) => [r.player_id, r.joined_map] as const));
+  return [
+    ...teamA.map((s) => ({ steamid: s, team: 'a' as const, joinedMap: joined.get(s) ?? 0 })),
+    ...teamB.map((s) => ({ steamid: s, team: 'b' as const, joinedMap: joined.get(s) ?? 0 })),
   ];
 }
 

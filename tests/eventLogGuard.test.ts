@@ -366,7 +366,7 @@ describe('event_log guard', () => {
     const ROOM_TABLES = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:event_vetoes|event_games|event_lineups|event_entry_prefs|event_campaign_prefs)\b/gi;
     const ROOM_READS = new Set([
       'roomTimers', 'vetoActions', 'vetoInput', 'roomState', 'gamesOf', 'lineupsOf', 'sideOf', 'entryOn', 'playableOf', 'busyEntries', 'isParticipant',
-      'entryPrefs', 'campaignPrefs', 'lastFour', 'autoFour', 'seriesGames', 'lineupFour', 'matchOfBooking', 'subsUsed',
+      'entryPrefs', 'campaignPrefs', 'lastFour', 'autoFour', 'seriesGames', 'lineupFour', 'matchOfBooking', 'subsUsed', 'hasDeadGame',
     ]);
     const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
     const open = (f: RoomFixture) => {

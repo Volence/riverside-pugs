@@ -79,7 +79,8 @@ export async function adminEventRoutes(
       staffResult(matchId: number, by: string): void;
       /** Plan T3c: the desk tools. */
       freeze(matchId: number, by: string, on: boolean): Promise<V.Checked<unknown>>;
-      replayChapter(matchId: number, by: string, ordinal: unknown): Promise<V.Checked<unknown>>;
+      replayCheck(matchId: number, ordinal: unknown): V.Checked<unknown>;
+      replayInBackground(matchId: number, by: string, ordinal: unknown): Promise<void>;
       moveServer(matchId: number, by: string): Promise<V.Checked<unknown>>;
       extendGrace(matchId: number, by: string, minutes: unknown): V.Checked<unknown>;
       releaseHold(matchId: number, by: string): V.Checked<unknown>;
@@ -500,7 +501,7 @@ export async function adminEventRoutes(
    *  the series engine, which tells both rosters itself. Without the engine
    *  the routes answer 404, as confirm and dispute do. */
   const deskTool = (
-    action: 'reopen-veto' | 'replay-chapter' | 'move-server' | 'extend-grace' | 'release-hold' | 'freeze' | 'unfreeze', audit: string,
+    action: 'reopen-veto' | 'move-server' | 'extend-grace' | 'release-hold' | 'freeze' | 'unfreeze', audit: string,
     call: (s: NonNullable<typeof opts.series>, matchId: number, me: string, body: Record<string, unknown>) => Promise<V.Checked<unknown>> | V.Checked<unknown>,
     detail: (body: Record<string, unknown>) => object = () => ({}),
   ) =>
@@ -521,7 +522,26 @@ export async function adminEventRoutes(
       return {};
     });
   deskTool('reopen-veto', 'event_veto_reopen', (s, id, me) => s.reopenVeto(id, me));
-  deskTool('replay-chapter', 'event_chapter_replay', (s, id, me, body) => s.replayChapter(id, me, body.ordinal), (body) => ({ ordinal: body.ordinal }));
+  // Plan T3c final review: a replay can take a minute or more (a dropped one
+  // is tried three times), so the route answers once the quick refusals are
+  // past, audits first, and the outcome reaches staff on the admin feed.
+  app.post('/api/admin/events/:id/matches/:matchId/replay-chapter', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const p = req.params as { id: string; matchId: string };
+    const ev = eventOf(p.id);
+    const matchId = idOf(p.matchId);
+    const m = ev && matchId !== null ? P.getMatch(db, matchId) : undefined;
+    if (!ev || !m || m.event_id !== ev.id) return refuse(reply, 'match_not_found');
+    if (!opts.series) return reply.code(404).send({ error: 'not found' });
+    const ordinal = ((req.body ?? {}) as Record<string, unknown>).ordinal;
+    const c = opts.series.replayCheck(m.id, ordinal);
+    if (!c.ok) return refuse(reply, c.error);
+    logAdmin(db, me, 'event_chapter_replay', ev.id, { matchId: m.id, ordinal });
+    const rooms = opts.rooms;
+    void opts.series.replayInBackground(m.id, me, ordinal).then(() => rooms?.pushChange(m.id));
+    return { started: true };
+  });
   deskTool('move-server', 'event_server_move', (s, id, me) => s.moveServer(id, me));
   deskTool('extend-grace', 'event_grace_extend', (s, id, me, body) => s.extendGrace(id, me, body.minutes), (body) => ({ minutes: body.minutes }));
   deskTool('release-hold', 'event_hold_release', (s, id, me) => s.releaseHold(id, me));

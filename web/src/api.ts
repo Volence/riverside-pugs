@@ -2479,7 +2479,8 @@ export const adminApi = {
   actForTeam: (id: number, matchId: number, body: { kind: 'ready' | 'veto' | 'lineup'; side: 'a' | 'b'; step?: number; action?: string; campaign?: string | null; steamids?: string[] }) =>
     post(`/api/admin/events/${id}/matches/${matchId}/act`, body),
   reopenEventVeto: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/reopen-veto`),
-  replayEventChapter: (id: number, matchId: number, ordinal: number) => post(`/api/admin/events/${id}/matches/${matchId}/replay-chapter`, { ordinal }),
+  /** Answers once the replay has started; its outcome reaches the staff feed (plan T3c final review). */
+  replayEventChapter: (id: number, matchId: number, ordinal: number) => post<{ started: true }>(`/api/admin/events/${id}/matches/${matchId}/replay-chapter`, { ordinal }),
   moveEventServer: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/move-server`),
   extendEventGrace: (id: number, matchId: number, minutes: number) => post(`/api/admin/events/${id}/matches/${matchId}/extend-grace`, { minutes }),
   releaseEventHold: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/release-hold`),

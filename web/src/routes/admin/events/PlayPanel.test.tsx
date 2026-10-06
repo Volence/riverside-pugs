@@ -267,6 +267,7 @@ describe('PlayPanel', () => {
     fireEvent.change(screen.getByLabelText('Chapter to replay'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Replay chapter' }));
     await waitFor(() => expect(mockAdmin.replayEventChapter).toHaveBeenCalledWith(9, 7, 1));
+    expect(await screen.findByText('Replay started; the result will appear in the staff feed.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Move server' }));
     await waitFor(() => expect(mockAdmin.moveEventServer).toHaveBeenCalledWith(9, 7));
     fireEvent.change(screen.getByLabelText('Act as'), { target: { value: 'b' } });
@@ -303,6 +304,34 @@ describe('PlayPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Lock the lineup' }));
     await waitFor(() => expect(mockAdmin.actForTeam).toHaveBeenCalledWith(9, 9, { kind: 'lineup', side: 'a', steamids: ['76561199000000821', '76561199000000822', '76561199000000823', '76561199000000824'] }));
   });
+  it('points a hold over an aborted or lost game at the result or a reset, with no Release hold (plan T3c final review)', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [
+      m({ status: 'admin_hold', phase: 'hold', desk: desk({ holdReason: 'game_aborted', holdFrom: 'live' }) }),
+      m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'admin_hold', phase: 'hold', desk: desk({ holdReason: 'game_lost', holdFrom: 'live' }) }),
+    ] }] }] }));
+    render(<PlayPanel eventId={9} canEdit />);
+    fireEvent.click(await screen.findByText('Staff tools: Rats vs Bats'));
+    expect(screen.getByText(/The game on the server was aborted or lost: enter the result, or reset the room/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Release hold' })).toBeNull();
+    fireEvent.click(screen.getByText('Staff tools: Cats vs Dogs'));
+    expect(screen.queryByRole('button', { name: 'Release hold' })).toBeNull();
+  });
+
+  it('says a freeze in ready-up lands when the next half goes live (plan T3c final review)', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [
+      m({ status: 'connect', phase: 'connect', desk: desk() }),
+      m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'live', phase: 'live', desk: desk() }),
+    ] }] }] }));
+    mockAdmin.freezeEventMatch.mockResolvedValue({});
+    render(<PlayPanel eventId={9} canEdit />);
+    fireEvent.click(await screen.findByText('Staff tools: Rats vs Bats'));
+    fireEvent.click(screen.getByRole('button', { name: 'Freeze' }));
+    await waitFor(() => expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ body: expect.stringContaining('the pause lands when the next half goes live') })));
+    fireEvent.click(screen.getByText('Staff tools: Cats vs Dogs'));
+    fireEvent.click(screen.getByRole('button', { name: 'Freeze' }));
+    await waitFor(() => expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ body: expect.not.stringContaining('next half') })));
+  });
+
   it('shows no staff tools on a match where none applies, as one being confirmed (plan T3c Task 9 review)', async () => {
     mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [
       m({ status: 'confirming', phase: 'confirming', desk: desk() }),
