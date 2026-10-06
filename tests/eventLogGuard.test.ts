@@ -375,7 +375,7 @@ describe('event_log guard', () => {
     const ROOM_TABLES = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:event_vetoes|event_games|event_lineups|event_entry_prefs|event_campaign_prefs)\b/gi;
     const ROOM_READS = new Set([
       'roomTimers', 'vetoActions', 'vetoInput', 'roomState', 'gamesOf', 'lineupsOf', 'sideOf', 'entryOn', 'playableOf', 'busyEntries', 'isParticipant',
-      'entryPrefs', 'campaignPrefs', 'lastFour', 'autoFour', 'seriesGames', 'lineupFour', 'matchOfBooking', 'subsUsed', 'hasDeadGame',
+      'entryPrefs', 'campaignPrefs', 'lastFour', 'autoFour', 'seriesGames', 'lineupFour', 'matchOfBooking', 'subsUsed', 'hasDeadGame', 'techPausesOf',
     ]);
     const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
     const open = (f: RoomFixture) => {
@@ -509,6 +509,15 @@ describe('event_log guard', () => {
       noteReplay: {
         action: 'chapter_replayed', actor: ADMIN, setup: playing,
         run: (f) => R.noteReplay(f.db, { matchId: f.matchId, by: ADMIN, gameId: game1(f).id, ordinal: 1, map: 'l4d_vs_hospital02_subway', now: at(20) }),
+      },
+      noteTech: {
+        action: 'tech_pause', actor: A[0]!, setup: linked,
+        run: (f) => R.noteTech(f.db, { matchId: f.matchId, gameMatchId: game1(f).match_id!, event: 'start', techId: 1_791_000_000, side: 'a', cause: 'call', by: A[0]!, used: 0, budget: 300, tactical: null, text: 'router', now: at(20) }),
+      },
+      techPenalty: {
+        action: 'tech_penalty', actor: ADMIN,
+        setup: (f) => { linked(f); must(R.noteTech(f.db, { matchId: f.matchId, gameMatchId: game1(f).match_id!, event: 'start', techId: 1_791_000_000, side: 'a', cause: 'call', by: A[0]!, used: 0, budget: 300, tactical: null, text: 'router', now: at(20) })); },
+        run: (f) => R.techPenalty(f.db, { matchId: f.matchId, pauseId: R.techPausesOf(f.db, P.getMatch(f.db, f.matchId)!)[0]!.id, by: ADMIN, penalty: 'warning', note: null, now: at(21) }),
       },
       noteMove: { action: 'server_moved', actor: ADMIN, setup: connecting, run: (f) => R.noteMove(f.db, { matchId: f.matchId, by: ADMIN, fromServerId: 1, now: at(6) }) },
     };

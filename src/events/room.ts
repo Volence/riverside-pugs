@@ -1,5 +1,6 @@
 import type { DB } from '../db.js';
-import type { AdminPauseCause } from '../logParse.js';
+import type { AdminPauseCause, TechEventKind } from '../logParse.js';
+import type { ForfeitWhy } from '../dumpParse.js';
 import { settingNumber } from '../settings.js';
 import * as E from './events.js';
 import * as N from './entries.js';
@@ -31,6 +32,8 @@ export interface GameRow {
    *  (an entry id) is derived from it or the scores when the game is
    *  recorded, a convenience for views only. */
   score_a: number | null; score_b: number | null; forfeit_side: Side | null; winner: number | null; map: string | null; ended_at: string | null;
+  /** Plan T5: why it was forfeited, null when it was played out. */
+  forfeit_why: ForfeitWhy | null;
 }
 export interface LineupRow { id: number; event_match_id: number; game: number; entry_id: number; steamids: string; locked_by: string | null; auto: number; locked_at: string }
 
@@ -365,6 +368,8 @@ export function recordGame(
     matchId: number; gameId: number; scoreA: number | null; scoreB: number | null; forfeit: Side | null; now?: Date;
     /** T3b final review: also on a match staff held while the game ran (the series moves no further). */
     held?: boolean;
+    /** Plan T5: why the box forfeited the game ('gg' when not given). Ignored without a forfeit. */
+    forfeitWhy?: ForfeitWhy | null;
   },
 ): V.Checked<P.MatchRow> {
   const at = iso(o.now);
@@ -379,10 +384,11 @@ export function recordGame(
     const score = (n: number | null) => n === null || (Number.isInteger(n) && n >= 0);
     if (!score(o.scoreA) || !score(o.scoreB) || (o.forfeit === null && (o.scoreA === null || o.scoreB === null))) return V.fail('bad_request');
     const winner = winnerOf({ id: g.id, ordinal: g.ordinal, tiebreakOf: g.tiebreak_of, scoreA: o.scoreA, scoreB: o.scoreB, forfeit: o.forfeit, started: true });
-    db.prepare('UPDATE event_games SET score_a = ?, score_b = ?, forfeit_side = ?, winner = ?, ended_at = ? WHERE id = ?')
-      .run(o.scoreA, o.scoreB, o.forfeit, winner === null ? null : entryOn(m, winner), at, g.id);
+    const why = o.forfeit === null ? null : o.forfeitWhy ?? 'gg';
+    db.prepare('UPDATE event_games SET score_a = ?, score_b = ?, forfeit_side = ?, forfeit_why = ?, winner = ?, ended_at = ? WHERE id = ?')
+      .run(o.scoreA, o.scoreB, o.forfeit, why, winner === null ? null : entryOn(m, winner), at, g.id);
     E.logEvent(db, ev.id, null, 'game_recorded', at, {
-      matchId: m.id, gameId: g.id, ordinal: g.ordinal, scoreA: o.scoreA, scoreB: o.scoreB, forfeit: o.forfeit, winner,
+      matchId: m.id, gameId: g.id, ordinal: g.ordinal, scoreA: o.scoreA, scoreB: o.scoreB, forfeit: o.forfeit, why, winner,
     });
     return V.ok(P.getMatch(db, m.id)!);
   })();
@@ -500,6 +506,8 @@ export function disputeMatch(db: DB, o: { matchId: number; steamid: string; reas
 export const SUB_PHASES: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['connect', 'live']);
 /** Phases that need a running box: a hold from them is released only while the booking runs (Ruling 15). */
 const BOX_PHASES: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['connect', 'live', 'confirming']);
+/** A box phase, or a hold taken from one (setAdminPause, noteTech). */
+const inBoxPhase = (m: P.MatchRow): boolean => SUB_PHASES.has(m.status) || (m.status === 'admin_hold' && m.hold_from !== null && SUB_PHASES.has(m.hold_from));
 const REOPENABLE: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['veto', 'lineup', 'booking']);
 
 /** Subs a side has made in this match (Ruling 4): its player_subbed log
@@ -517,7 +525,11 @@ export function subsUsed(db: DB, m: P.MatchRow, side: Side): number {
  *  rewritten so every later game follows. The engine does the booking,
  *  matches and plugin halves around this. */
 export function subPlayer(
-  db: DB, o: { matchId: number; by: string; outId: string; inId: string; limit: number; gameId: number | null; now?: Date },
+  db: DB, o: {
+    matchId: number; by: string; outId: string; inId: string; limit: number; gameId: number | null; now?: Date;
+    /** Plan T5: made mid-chapter under the event's emergency rule (marked in the log only). */
+    emergency?: boolean;
+  },
 ): V.Checked<{ m: P.MatchRow; side: Side; entryId: number; four: string[]; used: number }> {
   const at = iso(o.now);
   return db.transaction((): V.Checked<{ m: P.MatchRow; side: Side; entryId: number; four: string[]; used: number }> => {
@@ -536,7 +548,9 @@ export function subPlayer(
     if (used >= o.limit) return V.fail('sub_limit');
     const next = four.map((s) => (s === o.outId ? o.inId : s));
     db.prepare('UPDATE event_lineups SET steamids = ? WHERE id = ?').run(JSON.stringify(next), row.id);
-    E.logEvent(db, ev.id, o.by, 'player_subbed', at, { matchId: m.id, side, out: o.outId, in: o.inId, gameId: o.gameId, used: used + 1, limit: o.limit });
+    E.logEvent(db, ev.id, o.by, 'player_subbed', at, {
+      matchId: m.id, side, out: o.outId, in: o.inId, gameId: o.gameId, used: used + 1, limit: o.limit, ...(o.emergency ? { emergency: true } : {}),
+    });
     return V.ok({ m: P.getMatch(db, m.id)!, side, entryId: entry.id, four: next, used: used + 1 });
   })();
 }
@@ -588,8 +602,7 @@ export function setAdminPause(
     if (!c.ok) return c;
     const { m, ev } = c.value;
     // A hold taken from a box phase still records the box's freeze (fix round 1): it is the truth about the box.
-    const boxPhase = SUB_PHASES.has(m.status) || (m.status === 'admin_hold' && m.hold_from !== null && SUB_PHASES.has(m.hold_from));
-    if (!boxPhase) return V.fail('not_live_phase');
+    if (!inBoxPhase(m)) return V.fail('not_live_phase');
     if (o.on === (m.admin_pause_at !== null)) return V.fail(o.on ? 'already_frozen' : 'not_frozen');
     db.prepare('UPDATE event_matches SET admin_pause_at = ?, admin_pause_by = ? WHERE id = ?').run(o.on ? at : null, o.on ? o.by : null, m.id);
     E.logEvent(db, ev.id, o.by, o.on ? 'match_frozen' : 'match_unfrozen', at, { matchId: m.id, cause: o.cause });
@@ -877,5 +890,124 @@ export function savePrefs(db: DB, o: { entryId: number; by: string; staff: boole
     for (const [stageId, list] of orders) up.run(entry.id, stageId, JSON.stringify(list), o.by, at);
     E.logEvent(db, ev.id, o.by, 'prefs_saved', at, { entryId: entry.id, stages: orders.map(([s]) => s) });
     return V.ok(null);
+  })();
+}
+
+// ---------- the technical pause ledger and staff penalties (plan T5) ----------
+
+export type TechCause = 'call' | 'disconnect';
+export type TechPenaltyKind = 'warning' | 'forfeit';
+/** One technical pause of a match, built from its event_log rows (the
+ *  match log is the ledger: Rulings 5, 11, 12 and 19). id is the start
+ *  row's; techId is the box's id= (the unix second it began), unique within
+ *  a game. ordinal is the event game's. side is the room's side, oriented
+ *  by the caller through booking_side_a. A 'disconnect' pause is charged to
+ *  the reconnect pool only (Ruling 7); used and budget are what the box
+ *  reported. overrun.tactical is the box's: -1 no tactical pause left and
+ *  the game unpaused, N >= 0 ran on as tactical with N left, null ran on
+ *  with tactical pauses unlimited. */
+export interface TechPause {
+  id: number; gameMatchId: number; ordinal: number; techId: number; side: Side; cause: TechCause; by: string | null; reason: string;
+  startedAt: string; endedAt: string | null; used: number; budget: number;
+  overrun: { at: string; tactical: number | null } | null;
+  flagged: { by: string | null; note: string; at: string } | null;
+  penalty: { kind: TechPenaltyKind; by: string | null; note: string | null; at: string } | null;
+}
+
+const TECH_ACTION: Record<TechEventKind, string> = { start: 'tech_pause', end: 'tech_pause_ended', over: 'tech_overrun', flag: 'tech_flagged' };
+/** A reason or a note as stored: one line, at most this long. */
+export const TECH_TEXT_MAX = 160;
+
+export function techPausesOf(db: DB, m: P.MatchRow): TechPause[] {
+  const rows = db.prepare(
+    `SELECT id, action, actor, at, detail FROM event_log
+      WHERE event_id = ? AND action IN ('tech_pause', 'tech_pause_ended', 'tech_overrun', 'tech_flagged', 'tech_penalty')
+        AND json_extract(detail, '$.matchId') = ? ORDER BY id`,
+  ).all(m.event_id, m.id) as { id: number; action: string; actor: string | null; at: string; detail: string }[];
+  const games = gamesOf(db, m.id);
+  const out: TechPause[] = [];
+  const byKey = new Map<string, TechPause>();
+  for (const r of rows) {
+    const d = JSON.parse(r.detail) as Record<string, unknown>;
+    if (r.action === 'tech_pause') {
+      const p: TechPause = {
+        id: r.id, gameMatchId: d.gameMatchId as number, ordinal: games.find((g) => g.match_id === d.gameMatchId)?.ordinal ?? 0,
+        techId: d.techId as number, side: d.side as Side, cause: d.cause as TechCause, by: (d.by as string | null) ?? null,
+        reason: (d.reason as string | undefined) ?? '', startedAt: r.at, endedAt: null, used: d.used as number, budget: d.budget as number,
+        overrun: null, flagged: null, penalty: null,
+      };
+      out.push(p);
+      byKey.set(`${p.gameMatchId}:${p.techId}`, p);
+      continue;
+    }
+    if (r.action === 'tech_penalty') {
+      const p = out.find((x) => x.id === d.pauseId);
+      if (p) p.penalty = { kind: d.penalty as TechPenaltyKind, by: r.actor, note: (d.note as string | null) ?? null, at: r.at };
+      continue;
+    }
+    const p = byKey.get(`${d.gameMatchId as number}:${d.techId as number}`);
+    if (!p) continue;
+    if (r.action === 'tech_pause_ended') { p.endedAt = r.at; p.used = d.used as number; }
+    else if (r.action === 'tech_overrun') { p.overrun = { at: r.at, tactical: (d.tactical as number | null) ?? null }; p.used = d.used as number; }
+    else p.flagged = { by: r.actor, note: (d.note as string | undefined) ?? '', at: r.at };
+  }
+  return out;
+}
+
+/** The box's TECH line, oriented to the room's side by the engine (Ruling
+ *  17). Once per event of each pause: a repeat is 'changed', a line about
+ *  a pause the site never saw start is 'pause_not_found'. The match must be
+ *  in a box phase (or held from one) and the game one of its linked games. */
+export function noteTech(db: DB, o: {
+  matchId: number; gameMatchId: number; event: TechEventKind; techId: number; side: Side; cause: TechCause;
+  by: string | null; used: number; budget: number; tactical: number | null; text: string; now?: Date;
+}): V.Checked<{ m: P.MatchRow; pause: TechPause }> {
+  const at = iso(o.now);
+  return db.transaction((): V.Checked<{ m: P.MatchRow; pause: TechPause }> => {
+    const c = liveMatch(db, o.matchId);
+    if (!c.ok) return c;
+    const { m, ev } = c.value;
+    if (!inBoxPhase(m)) return V.fail('not_live_phase');
+    if (!gamesOf(db, m.id).some((g) => g.match_id === o.gameMatchId)) return V.fail('game_not_found');
+    const known = techPausesOf(db, m).find((p) => p.gameMatchId === o.gameMatchId && p.techId === o.techId);
+    if (o.event === 'start' && known) return V.fail('changed');
+    if (o.event !== 'start' && !known) return V.fail('pause_not_found');
+    if (known && ((o.event === 'end' && known.endedAt !== null) || (o.event === 'over' && known.overrun !== null) || (o.event === 'flag' && known.flagged !== null))) {
+      return V.fail('changed');
+    }
+    const text = o.text.replace(/\s+/g, ' ').trim().slice(0, TECH_TEXT_MAX);
+    const base = { matchId: m.id, gameMatchId: o.gameMatchId, techId: o.techId, side: o.side };
+    const detail = o.event === 'start' ? { ...base, cause: o.cause, by: o.by, reason: text, used: o.used, budget: o.budget }
+      : o.event === 'flag' ? { ...base, note: text }
+        : o.event === 'over' ? { ...base, used: o.used, tactical: o.tactical }
+          : { ...base, used: o.used };
+    // The actor is the player who called it or flagged it; a disconnect, an end and an overrun are nobody's.
+    const actor = o.event === 'flag' || (o.event === 'start' && o.cause === 'call') ? o.by : null;
+    E.logEvent(db, ev.id, actor, TECH_ACTION[o.event], at, detail);
+    const pause = techPausesOf(db, m).find((p) => p.gameMatchId === o.gameMatchId && p.techId === o.techId)!;
+    return V.ok({ m: P.getMatch(db, m.id)!, pause });
+  })();
+}
+
+/** Staff rule on a technical pause (Ruling 12): one penalty per pause, before
+ *  the match is resolved. A forfeit is recorded here once the box took it
+ *  (the series engine sends sm_pug_forfeit first). */
+export function techPenalty(db: DB, o: { matchId: number; pauseId: unknown; by: string; penalty: unknown; note: unknown; now?: Date }): V.Checked<{ m: P.MatchRow; pause: TechPause }> {
+  const at = iso(o.now);
+  return db.transaction((): V.Checked<{ m: P.MatchRow; pause: TechPause }> => {
+    const c = liveMatch(db, o.matchId);
+    if (!c.ok) return c;
+    const { m, ev } = c.value;
+    if (P.RESOLVED.has(m.status)) return V.fail('wrong_status');
+    if (o.penalty !== 'warning' && o.penalty !== 'forfeit') return V.fail('bad_penalty');
+    const note = V.normalizeReason(o.note);
+    if (!note.ok) return note;
+    const pause = Number.isInteger(o.pauseId) ? techPausesOf(db, m).find((p) => p.id === o.pauseId) : undefined;
+    if (!pause) return V.fail('pause_not_found');
+    if (pause.penalty !== null) return V.fail('already_penalized');
+    E.logEvent(db, ev.id, o.by, 'tech_penalty', at, {
+      matchId: m.id, pauseId: pause.id, gameMatchId: pause.gameMatchId, side: pause.side, penalty: o.penalty, note: note.value,
+    });
+    return V.ok({ m: P.getMatch(db, m.id)!, pause: techPausesOf(db, m).find((p) => p.id === pause.id)! });
   })();
 }
