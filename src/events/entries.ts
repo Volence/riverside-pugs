@@ -356,7 +356,7 @@ export function disqualifyEntry(db: DB, o: { entryId: number; by: string; reason
     if (!isActive(entry)) return V.fail('entry_out');
     const ev = E.getEvent(db, entry.event_id)!;
     if (ev.status === 'finished' || ev.status === 'cancelled') return V.fail('wrong_status');
-    db.prepare("UPDATE event_entries SET status = 'disqualified', dropped_at = ?, seed = NULL WHERE id = ?").run(at, entry.id);
+    db.prepare("UPDATE event_entries SET status = 'disqualified', dropped_at = ?, seed = NULL, placement = NULL WHERE id = ?").run(at, entry.id);
     E.logEvent(db, ev.id, o.by, 'entry_disqualified', at, { entryId: entry.id, reason: reason.value });
     return V.ok(getEntry(db, entry.id)!);
   })();

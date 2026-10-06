@@ -262,3 +262,83 @@ describe('event flow', () => {
     expect(await F.serialize(3, async () => 'after')).toBe('after');
   });
 });
+
+describe('event flow, final review fixes', () => {
+  const places = (f: PlayFixture) => N.entriesOf(f.db, f.eventId).filter((e) => e.status === 'placed')
+    .sort((x, y) => x.id - y.id).map((e) => e.placement);
+
+  it('a double elimination stage of 2 is played as one final, finishes, and places 1 and 2', async () => {
+    for (const reset of [true, false]) {
+      const f = playFixture({ stages: [DE(reset)], entries: 2 });
+      ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
+      expect(open(f)).toHaveLength(1);
+      await playOut(f, () => 'b');
+      expect(E.getEvent(f.db, f.eventId)!.status).toBe('finished');
+      expect(places(f)).toEqual([2, 1]);
+    }
+  });
+
+  it('Swiss and a league advancing 2 into double elimination both finish', async () => {
+    for (const first of [SWISS(2, 2), LEAGUE(3, 1, 'swiss', 2), LEAGUE(3, 1, 'round_robin', 2)]) {
+      const f = playFixture({ stages: [first, DE(true)], entries: 4 });
+      ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
+      await playOut(f);
+      expect(E.getEvent(f.db, f.eventId)!.status).toBe('finished');
+      expect(N.entriesOf(f.db, f.eventId).map((e) => e.placement).sort()).toEqual([1, 2, 3, 4]);
+    }
+  });
+
+  it('elimination places are standard competition ranks: SE of 8 is 1,2,3,3,5,5,5,5 and DE of 8 is 1,2,3,4,5,5,7,7', async () => {
+    const se = playFixture({ stages: [SE(false)], entries: 8 });
+    ok(await F.startEventFlow(se.db, { eventId: se.eventId, by: ADMIN, now: NOW }));
+    await playOut(se);
+    expect(places(se)).toEqual([1, 2, 3, 3, 5, 5, 5, 5]);
+    const de = playFixture({ stages: [DE(true)], entries: 8 });
+    ok(await F.startEventFlow(de.db, { eventId: de.eventId, by: ADMIN, now: NOW }));
+    await playOut(de);
+    expect(places(de)).toEqual([1, 2, 3, 4, 5, 5, 7, 7]);
+  });
+
+  it('a finalist disqualified before the final leaves places 1, 2, 2', async () => {
+    const f = playFixture({ stages: [SE(false)], entries: 4 });
+    ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
+    for (const m of open(f)) {
+      ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: m.id, by: ADMIN, now: NOW, result: { winner: 'a', scoreA: 2, scoreB: 1 } }));
+    }
+    const final = open(f)[0]!;
+    ok(N.disqualifyEntry(f.db, { entryId: final.entry_b!, by: ADMIN, reason: 'left', now: NOW }));
+    await F.settleEvent(f.db, { eventId: f.eventId, now: NOW });
+    expect(E.getEvent(f.db, f.eventId)!.status).toBe('finished');
+    expect(N.getEntry(f.db, final.entry_a!)!.placement).toBe(1);
+    expect(N.getEntry(f.db, final.entry_b!)).toMatchObject({ status: 'disqualified', placement: null });
+    expect(N.entriesOf(f.db, f.eventId).filter((e) => e.status === 'placed').map((e) => e.placement).sort()).toEqual([1, 2, 2]);
+  });
+
+  it('a disqualification after a stage placed the entry clears its placement', async () => {
+    const f = playFixture({ stages: [SWISS(1, 2), SE()], entries: 4 });
+    ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
+    for (const m of open(f)) ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: m.id, by: ADMIN, now: NOW, result: { winner: 'a', scoreA: 2, scoreB: 1 } }));
+    const gone = N.entriesOf(f.db, f.eventId).find((e) => e.status === 'eliminated')!;
+    expect(gone.placement).not.toBeNull();
+    expect(ok(N.disqualifyEntry(f.db, { entryId: gone.id, by: ADMIN, reason: 'abuse', now: NOW }))).toMatchObject({ status: 'disqualified', placement: null });
+  });
+
+  it('a correction that would make a disqualified team beat one still in is refused and writes nothing; with both out it is allowed', async () => {
+    const f = playFixture({ stages: [SWISS(2, null)], entries: 4 });
+    ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
+    const [m1, m2] = open(f) as [P.MatchRow, P.MatchRow];
+    ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: m1.id, by: ADMIN, now: NOW, result: { winner: 'a', scoreA: 2, scoreB: 1 } }));
+    ok(N.disqualifyEntry(f.db, { entryId: m1.entry_b!, by: ADMIN, reason: 'left', now: NOW }));
+    const snap = JSON.stringify([f.db.prepare('SELECT * FROM event_matches ORDER BY id').all(), f.db.prepare('SELECT * FROM event_log ORDER BY id').all()]);
+    expect(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: m1.id, by: ADMIN, now: NOW, result: { winner: 'b', forfeit: true } }))
+      .toEqual({ ok: false, error: 'winner_out' });
+    expect(JSON.stringify([f.db.prepare('SELECT * FROM event_matches ORDER BY id').all(), f.db.prepare('SELECT * FROM event_log ORDER BY id').all()])).toBe(snap);
+    // Same winner, new score: still fine.
+    ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: m1.id, by: ADMIN, now: NOW, result: { winner: 'a', scoreA: 3, scoreB: 1 } }));
+    // Both sides out: staff may resolve it either way (Ruling 9).
+    ok(N.disqualifyEntry(f.db, { entryId: m2.entry_a!, by: ADMIN, reason: 'left', now: NOW }));
+    ok(N.disqualifyEntry(f.db, { entryId: m2.entry_b!, by: ADMIN, reason: 'left', now: NOW }));
+    expect(P.getMatch(f.db, m2.id)!.status).toBe('waiting');
+    ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: m2.id, by: ADMIN, now: NOW, result: { winner: 'b', forfeit: true } }));
+  });
+});

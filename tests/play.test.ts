@@ -136,4 +136,40 @@ describe('play writer', () => {
     f.db.prepare("UPDATE event_entries SET status = 'disqualified', seed = NULL WHERE id = ?").run(f.entries[1]);
     expect(P.activeSeeded(f.db, f.eventId)).toEqual([f.entries[0], f.entries[2]]);
   });
+
+  it('startEvent re-checks the stage chain: elimination moved ahead of Swiss after registration is refused, and nothing is written', async () => {
+    const f = playFixture({ stages: [SWISS(2, 2), SE()], entries: 4 });
+    ok(E.reorderStages(f.db, { eventId: f.eventId, by: ADMIN, order: [f.stages[1], f.stages[0]], now: NOW }));
+    const [first] = E.stagesOf(f.db, f.eventId);
+    expect(E.stageSettingsOf(first!).type).toBe('single_elim');
+    const snap = () => JSON.stringify(['events', 'event_stages', 'event_matches', 'event_log'].map((t) => f.db.prepare(`SELECT * FROM ${t} ORDER BY id`).all()));
+    const before = snap();
+    const bracket = await createBracket('single_elim', { thirdPlace: false }, f.entries);
+    expect(P.startEvent(f.db, { eventId: f.eventId, by: ADMIN, plan: { stageId: first!.id, entrants: f.entries, bracket, rounds: [] }, now: NOW }))
+      .toEqual({ ok: false, error: 'elim_not_last' });
+    expect(snap()).toBe(before);
+  });
+
+  it('startEvent refuses a draft-entry event', () => {
+    const f = playFixture({ stages: [SWISS(2, 2), SE()], entries: 4 });
+    f.db.prepare("UPDATE events SET entry_kind = 'draft' WHERE id = ?").run(f.eventId);
+    expect(P.startEvent(f.db, { eventId: f.eventId, by: ADMIN, plan: swissPlan(f.stages[0]!, f.entries), now: NOW }))
+      .toEqual({ ok: false, error: 'wrong_status' });
+    expect(E.getEvent(f.db, f.eventId)!.status).toBe('checkin');
+  });
+
+  it('recordResult refuses a winner who is out while the other side is in, and lets staff pick either side when both are out', () => {
+    const f = playFixture({ stages: [SWISS(2, 2), SE()], entries: 4 });
+    ok(P.startEvent(f.db, { eventId: f.eventId, by: ADMIN, plan: swissPlan(f.stages[0]!, f.entries), now: NOW }));
+    const [m1] = P.matchesOf(f.db, f.stages[0]!);
+    ok(P.recordResult(f.db, { matchId: m1!.id, by: ADMIN, result: aWins, bracket: null, now: NOW }));
+    ok(N.disqualifyEntry(f.db, { entryId: m1!.entry_b!, by: ADMIN, reason: 'left', now: NOW }));
+    const logs = E.eventLog(f.db, f.eventId).length;
+    const bWins = { winner: 'b' as const, scoreA: 5, scoreB: 10, forfeit: false };
+    expect(P.recordResult(f.db, { matchId: m1!.id, by: ADMIN, result: bWins, bracket: null, now: NOW })).toEqual({ ok: false, error: 'winner_out' });
+    expect(P.getMatch(f.db, m1!.id)!.winner_entry).toBe(m1!.entry_a);
+    expect(E.eventLog(f.db, f.eventId)).toHaveLength(logs);
+    ok(N.disqualifyEntry(f.db, { entryId: m1!.entry_a!, by: ADMIN, reason: 'left', now: NOW }));
+    expect(ok(P.recordResult(f.db, { matchId: m1!.id, by: ADMIN, result: bWins, bracket: null, now: NOW })).winner_entry).toBe(m1!.entry_b);
+  });
 });

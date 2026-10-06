@@ -31,7 +31,7 @@ import { SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
 const WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:events|event_stages|event_log)\b/gi;
 const ENTRY_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:event_entries|event_entry_players)\b/gi;
 const ENGINE = new Set(['src/events/events.ts', 'src/events/entries.ts', 'src/events/play.ts']);
-const READS = new Set(['getEvent', 'getEventBySlug', 'getStage', 'stagesOf', 'eventLog', 'fieldsOf', 'stageSettingsOf', 'stageContext']);
+const READS = new Set(['getEvent', 'getEventBySlug', 'getStage', 'stagesOf', 'eventLog', 'fieldsOf', 'stageSettingsOf', 'stageContext', 'chainOf']);
 /** Exported for entries.ts to write its own audit row; never a mutation itself. */
 const HELPERS = new Set(['logEvent']);
 
