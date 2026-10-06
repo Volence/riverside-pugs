@@ -101,7 +101,7 @@ export function RulesetForm({ ruleset, rules, busy, error, onSave, onCancel }: {
         <FormRow label="!admin cooldown" help="Seconds before the same player can call staff with !admin again. (30 to 600)" for={id('cooldown')}>
           <input id={id('cooldown')} aria-label="!admin cooldown" type="number" min={30} max={600} value={typed.cooldown} onInput={type('cooldown')} />
         </FormRow>
-        <FormRow label="Next game after" help="Seconds between two games of a series. The server loads the next game on its next minute pass after this. (30 to 600)" for={id('nextGame')}>
+        <FormRow label="Next game after" help="Seconds between two games of a series. The server loads it within about a minute after this. (30 to 600)" for={id('nextGame')}>
           <input id={id('nextGame')} aria-label="Next game after" type="number" min={30} max={600} value={typed.nextGame} onInput={type('nextGame')} />
         </FormRow>
       </FormGroup>
