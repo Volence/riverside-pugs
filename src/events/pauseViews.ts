@@ -28,9 +28,11 @@ function viewOf(db: DB, m: P.MatchRow, raw: R.TechPause[], insider: boolean): Ro
   return raw.map((p) => {
     const g = games.find((x) => x.match_id === p.gameMatchId);
     const sg = g ? series.find((x) => x.id === g.id) : undefined;
+    // A pause the box never closed (no TECH end line reached the site) ended
+    // no later than its game did, so it is not shown as still running.
     return {
       id: p.id, game: sg ? gameNumberOf(sg, series) : p.ordinal, tiebreak: g ? g.tiebreak_of !== null : false, side: p.side, cause: p.cause,
-      reason: insider ? p.reason : null, startedAt: p.startedAt, endedAt: p.endedAt, usedS: p.used, budgetS: p.budget,
+      reason: insider ? p.reason : null, startedAt: p.startedAt, endedAt: p.endedAt ?? g?.ended_at ?? null, usedS: p.used, budgetS: p.budget,
       overrun: p.overrun !== null, flagged: p.flagged !== null, flagNote: insider && p.flagged ? p.flagged.note : null,
       penalty: p.penalty?.kind ?? null,
     };
