@@ -8,6 +8,7 @@ import * as N from './entries.js';
 import * as P from './play.js';
 import * as R from './room.js';
 import { matchLabel, phaseOf, playEntriesOf, type PlayEntry, type RoomPhase } from './playViews.js';
+import { roomPauses, type RoomPause } from './pauseViews.js';
 import { gameNumberOf, playOrder, seriesVerdict } from './seriesRules.js';
 import { vetoSummary } from './vetoConfig.js';
 import { isHumanStep, type VetoActionKind } from './veto.js';
@@ -80,6 +81,8 @@ export interface MatchRoomView {
   frozen: boolean;
   /** Plan T4: null on a rolling stage. */
   schedule: RoomSchedule | null;
+  /** Plan T5: the technical pauses (Ruling 13); the reason and the flag note for the two rosters and staff only. */
+  pauses: RoomPause[];
 }
 export interface PrefsView {
   entryId: number; defaultFour: string[] | null; side: 'survivors' | 'infected' | null; roster: RoomPlayer[];
@@ -228,6 +231,7 @@ export function matchRoomView(db: DB, ev: E.EventRow, m: P.MatchRow, viewer: str
     dispute: m.dispute_side !== null ? { side: m.dispute_side, byName: getPlayer(db, m.dispute_by ?? '')?.name ?? 'a captain', reason: m.dispute_reason ?? '', at: m.disputed_at ?? '' } : null,
     frozen: m.admin_pause_at !== null,
     schedule,
+    pauses: roomPauses(db, m, staff || mySide !== null),
   };
 }
 

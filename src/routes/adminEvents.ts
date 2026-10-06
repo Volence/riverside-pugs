@@ -99,6 +99,8 @@ export async function adminEventRoutes(
       extendGrace(matchId: number, by: string, minutes: unknown): V.Checked<unknown>;
       releaseHold(matchId: number, by: string): V.Checked<unknown>;
       reopenVeto(matchId: number, by: string): V.Checked<unknown>;
+      /** Plan T5 Ruling 12: a warning, or a forfeit of the game sent to the box first. */
+      techPenalty(matchId: number, by: string, pauseId: unknown, penalty: unknown, note: unknown): Promise<V.Checked<unknown>>;
     };
   },
 ): Promise<void> {
@@ -573,7 +575,7 @@ export async function adminEventRoutes(
    *  the series engine, which tells both rosters itself. Without the engine
    *  the routes answer 404, as confirm and dispute do. */
   const deskTool = (
-    action: 'reopen-veto' | 'move-server' | 'extend-grace' | 'release-hold' | 'freeze' | 'unfreeze', audit: string,
+    action: 'reopen-veto' | 'move-server' | 'extend-grace' | 'release-hold' | 'freeze' | 'unfreeze' | 'tech-penalty', audit: string,
     call: (s: NonNullable<typeof opts.series>, matchId: number, me: string, body: Record<string, unknown>) => Promise<V.Checked<unknown>> | V.Checked<unknown>,
     detail: (body: Record<string, unknown>) => object = () => ({}),
   ) =>
@@ -619,4 +621,8 @@ export async function adminEventRoutes(
   deskTool('release-hold', 'event_hold_release', (s, id, me) => s.releaseHold(id, me));
   deskTool('freeze', 'event_freeze', (s, id, me) => s.freeze(id, me, true));
   deskTool('unfreeze', 'event_unfreeze', (s, id, me) => s.freeze(id, me, false));
+  // Plan T5 Ruling 12: a warning or a forfeit of the game over a technical
+  // pause, through the series engine so a forfeit reaches the box first.
+  deskTool('tech-penalty', 'event_tech_penalty', (s, id, me, body) => s.techPenalty(id, me, body.pauseId, body.penalty, body.note),
+    (body) => ({ pauseId: body.pauseId, penalty: body.penalty }));
 }
