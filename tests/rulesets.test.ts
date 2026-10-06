@@ -69,6 +69,16 @@ describe('rulesets', () => {
     }
   });
 
+  it('refuses a techPauses that is not a whole number from 0 to 5, like the editor (final review)', () => {
+    const cup = TEMPLATES['Standard Cup'];
+    for (const techPauses of [0, 5]) {
+      expect(parseRules(JSON.stringify({ ...cup, pause: { ...cup.pause, techPauses } })).pause.techPauses).toBe(techPauses);
+    }
+    for (const techPauses of [-1, 6, 1.5, '2']) {
+      expect(() => parseRules(JSON.stringify({ ...cup, pause: { ...cup.pause, techPauses } }))).toThrow('invalid rules: pause.techPauses');
+    }
+  });
+
   it('gives every template the defaults, PUG included, and keeps PUG\'s own values (plan T5 Ruling 3)', () => {
     for (const t of Object.values(TEMPLATES)) {
       expect(t.pause.techSeconds).toBe(300);

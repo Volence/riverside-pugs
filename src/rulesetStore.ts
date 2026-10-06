@@ -119,7 +119,7 @@ export function readEditableRules(raw: unknown): RulesetResult<EditableRules> {
     || typeof spectate !== 'object' || spectate === null) return fail('bad_rules');
   if (pause.limit !== null && !whole(pause.limit, 0, 10)) return fail('bad_pause_limit');
   if (pause.seconds !== null && !whole(pause.seconds, 30, 600)) return fail('bad_pause_seconds');
-  if (!whole(pause.techPauses, 0, 5)) return fail('bad_tech_pauses');
+  if (!whole(pause.techPauses, ...RULE_RANGES.techPauses)) return fail('bad_tech_pauses');
   if (!whole(r.noShowGraceMinutes, 5, 60)) return fail('bad_grace');
   if (!BOSSES.includes(r.bosses as MatchRules['bosses']) || !SIDE_RULES.includes(r.sideRule as MatchRules['sideRule'])) return fail('bad_choice');
   for (const b of [pause.mutualUnpause, r.teamLock, r.playerMapControl, restartHalf.allowed, restartHalf.lockAfterDamage, spectate.sideLocked]) {
