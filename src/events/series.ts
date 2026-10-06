@@ -8,8 +8,9 @@ import { getTeam } from '../teams/teams.js';
 import { getPlayer } from '../players.js';
 import * as B from '../bookings/bookings.js';
 import { gamesPlayed } from '../bookings/games.js';
-import { DEFAULT_GRACE_MINUTES, SHOWN_MIN } from '../bookings/rules.js';
-import { CLOSE_GRACE_MS, NEXT_DELAY_MS, type TournamentHooks } from '../bookings/runner.js';
+import { DEFAULT_GRACE_MINUTES, SHOWN_MIN, bookingLimits } from '../bookings/rules.js';
+import { NEXT_DELAY_MS, type TournamentHooks } from '../bookings/runner.js';
+import { settingNumber } from '../settings.js';
 import { addTournamentSub, createTournamentGame, gameLinesOf, isPendingGame, isUnstartedGame } from '../bookings/tournamentGames.js';
 import { replayableChapters, restoreSnapshot, type RestoreSnapshot } from '../bookings/restore.js';
 import type { AdminPauseCause } from '../logParse.js';
@@ -37,10 +38,19 @@ import { isHumanStep, other, type Side } from './veto.js';
  * twice: the state in the database decides what is left to do.
  */
 
-/** Ten minutes without a box: staff are told once (Ruling 8). */
+/** The seeded default of event_server_alert_minutes (plan T5 Ruling 2). */
 export const SERVER_ALERT_MS = 10 * 60_000;
-/** A connect deadline nobody could watch for this long is held, not guessed (Ruling 7). */
+/** The seeded default of event_presence_fallback_minutes (plan T5 Ruling 2). */
 export const PRESENCE_FALLBACK_MS = 3 * 60_000;
+
+/** The engine's operational waits, from the Competitive settings (plan T5 Ruling 2). */
+export function seriesTimings(db: DB): { serverAlertMs: number; presenceFallbackMs: number; closeGraceMs: number } {
+  return {
+    serverAlertMs: settingNumber(db, 'event_server_alert_minutes', SERVER_ALERT_MS / 60_000, { integer: true, min: 2, max: 60 }) * 60_000,
+    presenceFallbackMs: settingNumber(db, 'event_presence_fallback_minutes', PRESENCE_FALLBACK_MS / 60_000, { integer: true, min: 1, max: 15 }) * 60_000,
+    closeGraceMs: bookingLimits(db).closeGraceMinutes * 60_000,
+  };
+}
 
 export interface SeriesRunner {
   announce(bookingId: number, text: string): void;
@@ -183,6 +193,7 @@ export class SeriesEngine {
 
   /** Every 5 seconds from the room clock: book, alert on a long wait, hold a connect deadline nobody could watch. */
   tick(now: Date): void {
+    const timing = seriesTimings(this.db);
     const unbooked = this.db.prepare(`SELECT m.* FROM event_matches m WHERE ${R.ROOM_LIVE_SQL} AND m.status = 'booking' AND m.booking_id IS NULL ORDER BY m.id`)
       .all() as P.MatchRow[];
     for (const m of unbooked) {
@@ -192,11 +203,11 @@ export class SeriesEngine {
       `SELECT m.* FROM event_matches m JOIN bookings b ON b.id = m.booking_id
        WHERE m.status = 'booking' AND m.server_alerted_at IS NULL AND m.booked_at <= ?
          AND b.server_id IS NULL AND b.state = 'scheduled' AND b.ending_at IS NULL`,
-    ).all(new Date(now.getTime() - SERVER_ALERT_MS).toISOString()) as P.MatchRow[];
+    ).all(new Date(now.getTime() - timing.serverAlertMs).toISOString()) as P.MatchRow[];
     for (const m of waiting) {
       try {
         if (!R.noteServerAlert(this.db, { matchId: m.id, now }).ok) continue;
-        this.alert(m, 'has waited 10 minutes for a server (no idle box in its region can take it). It keeps waiting; free a box, or reset the room or enter the result on the Events desk.');
+        this.alert(m, `has waited ${Math.round(timing.serverAlertMs / 60_000)} minutes for a server (no idle box in its region can take it). It keeps waiting; free a box, or reset the room or enter the result on the Events desk.`);
         this.push(m.id);
       } catch (err) {
         console.error(`[series] server alert for match ${m.id} failed:`, err instanceof Error ? err.message : err);
@@ -205,10 +216,10 @@ export class SeriesEngine {
     this.sweepAborted(now);
     // Only rooms of a live event and stage, like every other clock query (a cancelled event's rooms never tick).
     const stale = this.db.prepare(`SELECT m.* FROM event_matches m WHERE ${R.ROOM_LIVE_SQL} AND m.status = 'connect' AND m.deadline IS NOT NULL AND m.deadline <= ?`)
-      .all(new Date(now.getTime() - PRESENCE_FALLBACK_MS).toISOString()) as P.MatchRow[];
+      .all(new Date(now.getTime() - timing.presenceFallbackMs).toISOString()) as P.MatchRow[];
     for (const m of stale) {
       const last = m.booking_id !== null ? this.watched.get(m.booking_id) ?? this.bootMs : this.bootMs;
-      if (now.getTime() - last < PRESENCE_FALLBACK_MS) continue;
+      if (now.getTime() - last < timing.presenceFallbackMs) continue;
       try {
         const r = R.holdMatch(this.db, { matchId: m.id, by: null, reason: 'no_presence', now });
         if (!r.ok) continue;
@@ -545,8 +556,10 @@ export class SeriesEngine {
       if (!R.startConfirm(this.db, { matchId: m.id, timers, now }).ok) return;
       if (b && open) {
         // The box closes after the usual grace (the idle end covers a refused close).
-        const closing = B.setCloseAt(this.db, b.id, gamesPlayed(this.db, b.id), new Date(now.getTime() + CLOSE_GRACE_MS).toISOString(), now);
-        this.deps.runner.announce(b.id, `Series over: ${this.scoreline(m, v)}. Captains confirm or dispute on the site within ${timers.confirmMinutes} minutes.${closing ? ' The server closes in 5 minutes.' : ''}`);
+        const graceMs = seriesTimings(this.db).closeGraceMs;
+        const closing = B.setCloseAt(this.db, b.id, gamesPlayed(this.db, b.id), new Date(now.getTime() + graceMs).toISOString(), now);
+        const mins = Math.round(graceMs / 60_000);
+        this.deps.runner.announce(b.id, `Series over: ${this.scoreline(m, v)}. Captains confirm or dispute on the site within ${timers.confirmMinutes} minutes.${closing ? ` The server closes in ${mins} minute${mins === 1 ? '' : 's'}.` : ''}`);
       }
       tellSeriesResult(this.deps, m.event_id, m.id);
       console.log(`[series] match ${m.id}: series over, confirm window open`);

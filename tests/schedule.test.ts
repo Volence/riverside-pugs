@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as P from '../src/events/play.js';
 import * as R from '../src/events/room.js';
 import * as S from '../src/events/schedule.js';
+import { setSetting } from '../src/settings.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { A, B, OUTSIDER } from './entryFixture.js';
 import { TIMERS, windowFixture, type RoomFixture } from './roomFixture.js';
@@ -29,6 +30,17 @@ describe('autoAcceptAt and reminderAt', () => {
     expect(S.autoAcceptAt(NOW.getTime(), at(50).getTime(), 72)).toBe(at(26).toISOString());
     expect(S.autoAcceptAt(NOW.getTime(), at(48).getTime(), 72)).toBe(at(24).toISOString());
     expect(S.autoAcceptAt(NOW.getTime(), at(200).getTime(), 72)).toBe(at(72).toISOString());
+  });
+
+  it('reads the reschedule margins from the Competitive settings (plan T5 Ruling 2)', async () => {
+    const f = await windowFixture();
+    expect(S.scheduleRules(f.db)).toEqual({ autoAcceptHours: 24, leadMinutes: 20, minAheadMinutes: 60, autoAcceptMinAheadHours: 48, reminderHours: 24 });
+    setSetting(f.db, 'reschedule_autoaccept_min_ahead_hours', '72');
+    setSetting(f.db, 'reschedule_reminder_hours', '12');
+    expect(S.scheduleRules(f.db)).toMatchObject({ autoAcceptMinAheadHours: 72, reminderHours: 12 });
+    expect(S.autoAcceptAt(NOW.getTime(), at(60).getTime(), 24, null, 72 * 3_600_000)).toBeNull();
+    expect(S.autoAcceptAt(NOW.getTime(), at(80).getTime(), 24, null, 72 * 3_600_000)).toBe(at(24).toISOString());
+    expect(S.reminderAt(NOW.getTime(), at(24).toISOString(), 12 * 3_600_000)).toBe(at(12).toISOString());
   });
 });
 

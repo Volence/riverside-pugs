@@ -23,20 +23,28 @@ export interface RescheduleRow {
   id: number; event_match_id: number; side: Side; proposed_by: string; proposed_time: string; note: string; created_at: string;
   auto_accept_at: string | null; reminded_at: string | null; status: RescheduleStatus; responded_by: string | null; responded_at: string | null;
 }
-export interface ScheduleRules { autoAcceptHours: number; leadMinutes: number }
+/** The three plan T5 margins are optional so a hand-built ScheduleRules
+ *  (tests) keeps compiling; scheduleRules(db) always fills them. */
+export interface ScheduleRules { autoAcceptHours: number; leadMinutes: number; minAheadMinutes?: number; autoAcceptMinAheadHours?: number; reminderHours?: number }
 
-/** A proposal locks on its own only when made this long before its time (Ruling 6). */
+/** The seeded default of reschedule_autoaccept_min_ahead_hours: a proposal
+ *  locks on its own only when made this long before its time (Ruling 6). */
 export const AUTO_ACCEPT_MIN_AHEAD_MS = 48 * 3_600_000;
-/** A proposed time is at least this far ahead (the room opens 20 minutes before it). */
+/** The seeded default of reschedule_min_ahead_minutes: a proposed time is at
+ *  least this far ahead (the room opens 20 minutes before it). */
 export const PROPOSE_MIN_AHEAD_MS = 60 * 60_000;
-/** A proposal never locks later than this before its own time, so a large
- *  reschedule_autoaccept_hours setting shortens the wait instead of letting
- *  the lock fall after the time (review fix). With AUTO_ACCEPT_MIN_AHEAD_MS
- *  at 48 h the lock is always at least 24 h after the proposal. */
+/** Structural (plan T5 Ruling 2): a guard derived from the two settings, not
+ *  a policy. A proposal never locks later than this before its own time, so
+ *  a large reschedule_autoaccept_hours setting shortens the wait instead of
+ *  letting the lock fall after the time (review fix). With
+ *  AUTO_ACCEPT_MIN_AHEAD_MS at 48 h the lock is always at least 24 h after
+ *  the proposal. */
 export const AUTO_ACCEPT_LOCK_BEFORE_MS = 24 * 3_600_000;
-/** The reminder goes out this long before the lock ... */
+/** The seeded default of reschedule_reminder_hours: the reminder goes out this long before the lock ... */
 export const REMINDER_BEFORE_MS = 24 * 3_600_000;
-/** ... but only when that is at least this long after the proposal (else the arrival DM says it all). */
+/** Structural (plan T5 Ruling 2): a guard derived from the two settings, not
+ *  a policy. ... but only when that is at least this long after the
+ *  proposal (else the arrival DM says it all). */
 export const REMINDER_MIN_GAP_MS = 60 * 60_000;
 
 const iso = (now?: Date): string => (now ?? new Date()).toISOString();
@@ -45,6 +53,9 @@ export function scheduleRules(db: DB): ScheduleRules {
   return {
     autoAcceptHours: settingNumber(db, 'reschedule_autoaccept_hours', 24, { min: 1, max: 72, integer: true }),
     leadMinutes: settingNumber(db, 'event_window_lead_minutes', 20, { min: 5, max: 60, integer: true }),
+    minAheadMinutes: settingNumber(db, 'reschedule_min_ahead_minutes', PROPOSE_MIN_AHEAD_MS / 60_000, { min: 60, max: 1440, integer: true }),
+    autoAcceptMinAheadHours: settingNumber(db, 'reschedule_autoaccept_min_ahead_hours', AUTO_ACCEPT_MIN_AHEAD_MS / 3_600_000, { min: 25, max: 168, integer: true }),
+    reminderHours: settingNumber(db, 'reschedule_reminder_hours', REMINDER_BEFORE_MS / 3_600_000, { min: 1, max: 48, integer: true }),
   };
 }
 
@@ -64,16 +75,16 @@ export function getProposal(db: DB, id: number): RescheduleRow | undefined {
  *  at the time the match carries now (its scheduled_at minus the lead), or
  *  null with no time set: a lock that would fall after it needs an answer
  *  instead, since the room opens at the old time first (final review). */
-export function autoAcceptAt(createdMs: number, proposedMs: number, hours: number, roomOpensMs: number | null = null): string | null {
-  if (proposedMs - createdMs < AUTO_ACCEPT_MIN_AHEAD_MS) return null;
+export function autoAcceptAt(createdMs: number, proposedMs: number, hours: number, roomOpensMs: number | null = null, minAheadMs: number = AUTO_ACCEPT_MIN_AHEAD_MS): string | null {
+  if (proposedMs - createdMs < minAheadMs) return null;
   const lock = Math.min(createdMs + hours * 3_600_000, proposedMs - AUTO_ACCEPT_LOCK_BEFORE_MS);
   if (roomOpensMs !== null && lock > roomOpensMs) return null;
   return new Date(lock).toISOString();
 }
-/** When the 24-hour reminder goes out, or null when the arrival DM carries the lock time already. */
-export function reminderAt(createdMs: number, autoAcceptIso: string | null): string | null {
+/** When the reminder goes out, or null when the arrival DM carries the lock time already. */
+export function reminderAt(createdMs: number, autoAcceptIso: string | null, beforeMs: number = REMINDER_BEFORE_MS): string | null {
   if (autoAcceptIso === null) return null;
-  const t = Date.parse(autoAcceptIso) - REMINDER_BEFORE_MS;
+  const t = Date.parse(autoAcceptIso) - beforeMs;
   return t >= createdMs + REMINDER_MIN_GAP_MS ? new Date(t).toISOString() : null;
 }
 
@@ -96,16 +107,16 @@ export function schedulable(db: DB, matchId: number, at: string): V.Checked<{ m:
 /** The window still holds this time (staff may have moved it since the proposal). */
 const inWindow = (m: P.MatchRow, t: string): boolean => m.window_start !== null && m.window_end !== null && t >= m.window_start && t <= m.window_end;
 
-/** A proposed time: inside the window, at least an hour ahead, not the time already set (Ruling 7). */
-function timeIn(m: P.MatchRow, raw: unknown, at: string): string | null {
+/** A proposed time: inside the window, at least the margin ahead, not the time already set (Ruling 7). */
+function timeIn(m: P.MatchRow, raw: unknown, at: string, minAheadMs: number): string | null {
   const t = V.parseTime(raw);
   if (!t || t < m.window_start! || t > m.window_end! || t === m.scheduled_at) return null;
-  return Date.parse(t) - Date.parse(at) >= PROPOSE_MIN_AHEAD_MS ? t : null;
+  return Date.parse(t) - Date.parse(at) >= minAheadMs ? t : null;
 }
 
 function insertProposal(db: DB, m: P.MatchRow, side: Side, by: string, time: string, note: string, at: string, rules: ScheduleRules): number {
   const opens = m.scheduled_at === null ? null : Date.parse(m.scheduled_at) - rules.leadMinutes * 60_000;
-  const auto = autoAcceptAt(Date.parse(at), Date.parse(time), rules.autoAcceptHours, opens);
+  const auto = autoAcceptAt(Date.parse(at), Date.parse(time), rules.autoAcceptHours, opens, (rules.autoAcceptMinAheadHours ?? 48) * 3_600_000);
   return Number(db.prepare(
     'INSERT INTO event_reschedules (event_match_id, side, proposed_by, proposed_time, note, created_at, auto_accept_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
   ).run(m.id, side, by, time, note, at, auto).lastInsertRowid);
@@ -128,7 +139,7 @@ export function proposeTime(
     const side = sideOf(db, m, o.by);
     if (!side) return V.fail('not_manager');
     if (openProposal(db, m.id)) return V.fail('proposal_open');
-    const time = timeIn(m, o.time, at);
+    const time = timeIn(m, o.time, at, (o.rules.minAheadMinutes ?? 60) * 60_000);
     if (!time) return V.fail('bad_time');
     const nr = V.normalizeReason(o.note);
     if (!nr.ok) return nr;
@@ -174,7 +185,7 @@ export function counterProposal(
     const p = openProposal(db, m.id);
     if (!p) return V.fail('no_proposal');
     if (p.side === side) return V.fail('own_proposal');
-    const time = timeIn(m, o.time, at);
+    const time = timeIn(m, o.time, at, (o.rules.minAheadMinutes ?? 60) * 60_000);
     // A counter at the open proposal's own time is an accept, not a counter (final review).
     if (!time || time === p.proposed_time) return V.fail('bad_time');
     const nr = V.normalizeReason(o.note);
@@ -267,8 +278,9 @@ export function autoAccept(db: DB, o: { proposalId: number; now?: Date }): V.Che
 export function remindersDue(db: DB, now: Date): RescheduleRow[] {
   // A lock already due goes out on its own: no reminder after downtime (final review).
   const at = now.toISOString();
+  const before = (scheduleRules(db).reminderHours ?? 24) * 3_600_000;
   const rows = db.prepare(`${OPEN_SQL} AND r.reminded_at IS NULL AND r.auto_accept_at IS NOT NULL AND r.auto_accept_at > ? ORDER BY r.id`).all(at) as RescheduleRow[];
-  return rows.filter((r) => { const t = reminderAt(Date.parse(r.created_at), r.auto_accept_at); return t !== null && t <= at; });
+  return rows.filter((r) => { const t = reminderAt(Date.parse(r.created_at), r.auto_accept_at, before); return t !== null && t <= at; });
 }
 
 export function noteReminded(db: DB, o: { proposalId: number; now?: Date }): V.Checked<RescheduleRow> {
