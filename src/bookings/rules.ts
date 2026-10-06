@@ -53,7 +53,7 @@ export const iso = (ms: number): string => new Date(ms).toISOString();
 export interface BookingLimits {
   minMinutes: number; daysAhead: number; playlistMax: number; maxUpcoming: number;
   reserve: number; scrimMax: number; holdLeadMinutes: number; protectMinutes: number; idleEndMinutes: number;
-  goneMinutes: number; recoverWaitMinutes: number;
+  goneMinutes: number; recoverWaitMinutes: number; closeGraceMinutes: number;
 }
 
 export function bookingLimits(db: DB): BookingLimits {
@@ -77,6 +77,7 @@ export function bookingLimits(db: DB): BookingLimits {
     idleEndMinutes: n('booking_idle_end_minutes', 10, 5, 60),
     goneMinutes: bounded('booking_gone_minutes', 3, 2, 15),
     recoverWaitMinutes: bounded('booking_recover_wait_minutes', 20, 5, 60),
+    closeGraceMinutes: n('booking_close_grace_minutes', 5, 1, 30),
   };
 }
 
@@ -241,9 +242,8 @@ export function addCampaignMinutes(db: DB, campaign: string | null): number {
   return upToStep((campaign ? typicalCampaignMinutes(db, campaign) : DEFAULT_CAMPAIGN_MINUTES) + ESTIMATE_SLACK_MINUTES);
 }
 
-/** A scheduled tournament match holds a box this long from its time
- *  (tournaments plan T4 Ruling 5): a Bo1 with setup, the grace to connect
- *  and a possible tiebreak. */
+/** The seeded default of event_slot_minutes (plan T5 Ruling 2): a Bo1 with
+ *  setup, the grace to connect and a possible tiebreak. */
 export const EVENT_SLOT_MINUTES = 120;
 
 /** The match statuses a scheduled tournament match can hold before its
@@ -265,7 +265,7 @@ const UNBOOKED_MATCH_SQL = "('pending','waiting','veto','lineup','booking')";
  * region's events only. Only slots overlapping [fromMs, toMs) come back.
  */
 export function scheduledMatchSlots(db: DB, region: string | null, fromMs: number, toMs: number): { s: number; e: number }[] {
-  const slot = EVENT_SLOT_MINUTES * 60_000;
+  const slot = settingNumber(db, 'event_slot_minutes', EVENT_SLOT_MINUTES, { integer: true, min: 60, max: 360 }) * 60_000;
   return (db.prepare(
     `SELECT m.scheduled_at FROM event_matches m
        JOIN event_stages s ON s.id = m.stage_id JOIN events e ON e.id = m.event_id

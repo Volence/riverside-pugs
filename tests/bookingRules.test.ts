@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
+import { setSetting } from '../src/settings.js';
 import {
   addCampaignMinutes, allowance, bookingLimits, bookingsDue, byPriority, capacityProblem, estimateMinutes, playlistMinutes, recentNoShows,
   scrimsHolding, typicalCampaignMinutes, upcomingCount, DEFAULT_CAMPAIGN_MINUTES, scheduledMatchSlots, EVENT_SLOT_MINUTES,
@@ -106,6 +107,10 @@ describe('capacity', () => {
     expect(bookingsDue(db, T0 - 76 * 60_000, 75)).toBe(0);
     expect(bookingsDue(db, T0 + H, 75)).toBe(1);
     expect(bookingsDue(db, T0 + 2 * H, 75)).toBe(0);
+    // Plan T5 Ruling 2: the slot length is a setting.
+    setSetting(db, 'event_slot_minutes', '180');
+    expect(scheduledMatchSlots(db, 'na', T0 - H, T0 + 4 * H)).toEqual([{ s: T0, e: T0 + 180 * 60_000 }]);
+    setSetting(db, 'event_slot_minutes', '120');
     // Booked: the booking row counts, the match no longer does.
     const bookingId = book(T0, T0 + H);
     db.prepare('UPDATE event_matches SET booking_id = ? WHERE id = ?').run(bookingId, matchId);
@@ -184,6 +189,12 @@ describe('capacity', () => {
     expect(capacityProblem(db, { region: 'na', startMs: T0, endMs: T0 + H })).toBe(T0);
     db.prepare("UPDATE bookings SET ending_at = 'x' WHERE id = ?").run(mine);
     expect(capacityProblem(db, { region: 'na', startMs: T0, endMs: T0 + H })).toBeNull();
+  });
+
+  it('reads the close grace from booking_close_grace_minutes (plan T5 Ruling 2)', () => {
+    expect(bookingLimits(db).closeGraceMinutes).toBe(5);
+    setSetting(db, 'booking_close_grace_minutes', '12');
+    expect(bookingLimits(db).closeGraceMinutes).toBe(12);
   });
 });
 
@@ -287,7 +298,7 @@ describe('bookings due', () => {
     expect(bookingLimits(db)).toEqual({
       minMinutes: 60, daysAhead: 14, playlistMax: 4, maxUpcoming: 4, reserve: 2, scrimMax: 2,
       holdLeadMinutes: 15, protectMinutes: 75, idleEndMinutes: 10,
-      goneMinutes: 3, recoverWaitMinutes: 20,
+      goneMinutes: 3, recoverWaitMinutes: 20, closeGraceMinutes: 5,
     });
   });
 });

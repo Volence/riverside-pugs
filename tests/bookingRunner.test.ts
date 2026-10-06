@@ -739,6 +739,16 @@ describe('booked games (plan 4b)', () => {
     expect(getBooking(db, id)).toMatchObject({ next_campaign: null, next_at: null, close_at: new Date(now + 5 * MIN).toISOString() });
   });
 
+  it('closes after booking_close_grace_minutes and says so (plan T5 Ruling 2)', async () => {
+    setSetting(db, 'booking_close_grace_minutes', '7');
+    const id = await running(['no_mercy']);
+    now = START + 60 * MIN;
+    runner.onGameEnded(insertGame(id, { state: 'completed', endedAt: now }));
+    await flush();
+    expect(cmds()).toContain('say [Booking] That was campaign 1 of 1. Type !addcampaign to play one more, or the server closes in 7 minutes.');
+    expect(getBooking(db, id)).toMatchObject({ next_campaign: null, close_at: new Date(now + 7 * MIN).toISOString() });
+  });
+
   it('onGameEnded does nothing for a booking that is ending', async () => {
     const id = await running();
     const game = insertGame(id, { state: 'completed', endedAt: now });

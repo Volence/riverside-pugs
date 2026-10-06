@@ -59,8 +59,7 @@ export const GOODBYE_MS = 3_000;
 /** Minutes left on the slot at which the box says so in chat, once, and
  *  only between games (bookings by campaign, Ruling 4). */
 export const WARN_MINUTES = 10;
-/** After the last booked campaign, how long before the box closes unless a
- *  campaign is added (bookings by campaign, Ruling 3). */
+/** The seeded default of booking_close_grace_minutes (plan T5 Ruling 2). */
 export const CLOSE_GRACE_MS = 5 * 60_000;
 /** After a game, how long the box waits before loading the next campaign. */
 export const NEXT_DELAY_MS = 60_000;
@@ -1687,11 +1686,13 @@ export class BookingRunner {
     if (played >= b.games_allowed) {
       // Nothing loads during the grace: a campaign added in it is announced by onExtended.
       if (b.next_campaign !== null) setNext(this.db, b.id, null, null, new Date(nowMs));
-      if (!setCloseAt(this.db, b.id, played, new Date(nowMs + CLOSE_GRACE_MS).toISOString(), new Date(nowMs))) return;
+      const graceMin = bookingLimits(this.db).closeGraceMinutes;
+      if (!setCloseAt(this.db, b.id, played, new Date(nowMs + graceMin * 60_000).toISOString(), new Date(nowMs))) return;
+      const closes = `or the server closes in ${graceMin} minute${graceMin === 1 ? '' : 's'}.`;
       // A game started inside an earlier grace can take played past the count.
       line = played > b.games_allowed
-        ? 'say [Booking] That was past the last booked campaign. Type !addcampaign to play one more, or the server closes in 5 minutes.'
-        : `say [Booking] That was campaign ${b.games_allowed} of ${b.games_allowed}. Type !addcampaign to play one more, or the server closes in 5 minutes.`;
+        ? `say [Booking] That was past the last booked campaign. Type !addcampaign to play one more, ${closes}`
+        : `say [Booking] That was campaign ${b.games_allowed} of ${b.games_allowed}. Type !addcampaign to play one more, ${closes}`;
     } else if (nowMs >= Date.parse(b.ends_at)) {
       return;
     } else {

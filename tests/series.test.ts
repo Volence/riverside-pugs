@@ -9,7 +9,8 @@ import { recordResultFlow } from '../src/events/flow.js';
 import * as R from '../src/events/room.js';
 import * as E from '../src/events/events.js';
 import { matchRoomView } from '../src/events/roomViews.js';
-import { SERVER_ALERT_MS, PRESENCE_FALLBACK_MS, DEFAULT_GRACE_MINUTES } from '../src/events/series.js';
+import { SERVER_ALERT_MS, PRESENCE_FALLBACK_MS, DEFAULT_GRACE_MINUTES, seriesTimings } from '../src/events/series.js';
+import { setSetting } from '../src/settings.js';
 import { presetConfig } from '../src/events/vetoConfig.js';
 import { adminEventRoutes } from '../src/routes/adminEvents.js';
 import { eventRoutes } from '../src/routes/events.js';
@@ -118,6 +119,19 @@ describe('SeriesEngine: booking, the game burst and connect', () => {
     f.db.prepare("UPDATE servers SET status = 'idle'").run();
     await f.tick();
     expect(f.match().status).toBe('connect');
+  });
+
+  it('alerts staff after event_server_alert_minutes, not a fixed ten (plan T5 Ruling 2)', async () => {
+    f = await seriesFixture();
+    setSetting(f.db, 'event_server_alert_minutes', '4');
+    f.db.prepare("UPDATE servers SET status = 'live'").run();
+    await f.tick();
+    expect(f.match()).toMatchObject({ status: 'booking', server_alerted_at: null });
+    f.t.t += 4 * MIN;
+    await f.tick();
+    await f.tick();
+    expect(f.alerts.filter((a) => a.kind === 'problem' && a.text.includes('has waited 4 minutes for a server'))).toHaveLength(1);
+    expect(seriesTimings(f.db)).toEqual({ serverAlertMs: 4 * MIN, presenceFallbackMs: 3 * MIN, closeGraceMs: 5 * MIN });
   });
 
   it('re-pushes the game burst each minute until the game heartbeats, only to a box that lost it', async () => {

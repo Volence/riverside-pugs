@@ -390,7 +390,7 @@ describe('RoomClock: window stages (plan T4)', () => {
     const f = await windowFixture();
     f.db.prepare("UPDATE settings SET value = '48' WHERE key = 'reschedule_autoaccept_hours'").run();
     const rules = S.scheduleRules(f.db);
-    expect(rules).toEqual({ autoAcceptHours: 48, leadMinutes: 20 });
+    expect(rules).toEqual({ autoAcceptHours: 48, leadMinutes: 20, minAheadMinutes: 60, autoAcceptMinAheadHours: 48, reminderHours: 24 });
     const p = S.proposeTime(f.db, { matchId: f.matchId, by: A[0], time: new Date(hours(100)).toISOString(), rules, now: NOW });
     expect(p.ok).toBe(true);
     const t = { t: hours(24) };

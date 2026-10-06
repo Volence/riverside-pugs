@@ -1483,6 +1483,17 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // before it locks (spec section 5), and how early a scheduled match's room opens.
   reschedule_autoaccept_hours: '24',
   event_window_lead_minutes: '20',
+  // Tournaments plan T5 Ruling 2: the operational waits of T3a to T4, once
+  // constants (CLOSE_GRACE_MS, SERVER_ALERT_MS, PRESENCE_FALLBACK_MS,
+  // EVENT_SLOT_MINUTES and the reschedule margins), now settings with the
+  // same values.
+  booking_close_grace_minutes: '5',
+  event_server_alert_minutes: '10',
+  event_presence_fallback_minutes: '3',
+  event_slot_minutes: '120',
+  reschedule_min_ahead_minutes: '60',
+  reschedule_autoaccept_min_ahead_hours: '48',
+  reschedule_reminder_hours: '24',
   // Scrim board plan 1: campaigns the accepting captain may add on top of the
   // poster's list.
   scrim_accept_campaigns_max: '2',
