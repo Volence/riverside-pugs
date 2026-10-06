@@ -56,6 +56,11 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
    *  the form then shows what the server stored. Any other reload (a banner,
    *  a stage) leaves unsaved typing alone. */
   const [formGen, setFormGen] = useState(0);
+  /** Moves when the Entries or Play panel starts the event, closes the list
+   *  or opens check-in: the editor reloads (header, stages, history) and both
+   *  panels fetch again, so neither shows the step before. */
+  const [panelGen, setPanelGen] = useState(0);
+  const panelsChanged = () => { reload(); setPanelGen((g) => g + 1); };
   const [resetForm, setResetForm] = useState(false);
   useEffect(() => {
     if (!resetForm) return;
@@ -179,8 +184,8 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
             onSave={(st) => saveStage(() => adminApi.addStage(id, st))} />
         )}
       </Panel>
-      {ev.status !== 'draft' && ev.status !== 'announced' && <EntriesPanel eventId={ev.id} status={ev.status} checkin={ev.fields.checkin.enabled} canEdit={canEdit} />}
-      {['registration', 'checkin', 'live', 'finished'].includes(ev.status) && <PlayPanel eventId={ev.id} canEdit={canEdit} />}
+      {ev.status !== 'draft' && ev.status !== 'announced' && <EntriesPanel eventId={ev.id} status={ev.status} checkin={ev.fields.checkin.enabled} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} />}
+      {['registration', 'checkin', 'live', 'finished'].includes(ev.status) && <PlayPanel eventId={ev.id} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} />}
       <Panel>
         <h3>History</h3>
         <ul class="admin-list">

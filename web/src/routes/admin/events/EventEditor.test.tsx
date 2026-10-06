@@ -6,7 +6,7 @@ const { mockAdmin, mockConfirm } = vi.hoisted(() => ({
   mockAdmin: {
     event: vi.fn(), eventOptions: vi.fn(), updateEvent: vi.fn(), addStage: vi.fn(), updateStage: vi.fn(), removeStage: vi.fn(),
     reorderStages: vi.fn(), publishEvent: vi.fn(), openEventRegistration: vi.fn(), cancelEvent: vi.fn(),
-    setEventBanner: vi.fn(), removeEventBanner: vi.fn(), deleteEvent: vi.fn(), eventEntries: vi.fn(),
+    setEventBanner: vi.fn(), removeEventBanner: vi.fn(), deleteEvent: vi.fn(), eventEntries: vi.fn(), eventPlay: vi.fn(), startEvent: vi.fn(),
   },
   mockConfirm: vi.fn(),
 }));
@@ -56,6 +56,7 @@ beforeEach(() => {
   for (const f of [...Object.values(mockAdmin), mockConfirm]) f.mockReset();
   mockAdmin.eventOptions.mockResolvedValue(OPTIONS);
   mockAdmin.eventEntries.mockResolvedValue({ lockedAt: null, entries: [] });
+  mockAdmin.eventPlay.mockResolvedValue({ status: 'registration', lockedAt: null, startsAt: FIELDS.startsAt, seeded: 0, stages: [] });
   mockConfirm.mockResolvedValue(true);
   for (const f of [mockAdmin.updateEvent, mockAdmin.addStage, mockAdmin.updateStage, mockAdmin.removeStage, mockAdmin.reorderStages,
     mockAdmin.publishEvent, mockAdmin.openEventRegistration, mockAdmin.cancelEvent, mockAdmin.setEventBanner,
@@ -158,6 +159,18 @@ describe('EventEditor', () => {
     expect(screen.queryByRole('button', { name: 'Move stage 2 up' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Save event' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Cancel event' })).toBeTruthy();
+  });
+
+  it('starting the event from the Play panel reloads the editor and the Entries panel', async () => {
+    mockAdmin.event.mockResolvedValue(detail({ status: 'checkin' }));
+    mockAdmin.eventEntries.mockResolvedValue({ lockedAt: 'x', entries: [] });
+    mockAdmin.eventPlay.mockResolvedValue({ status: 'checkin', lockedAt: 'x', startsAt: FIELDS.startsAt, seeded: 2, stages: [] });
+    mockAdmin.startEvent.mockResolvedValue({});
+    render(<EventEditor id={3} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Start the event now' }));
+    await waitFor(() => expect(mockAdmin.startEvent).toHaveBeenCalledWith(3));
+    await waitFor(() => expect(mockAdmin.event).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockAdmin.eventEntries).toHaveBeenCalledTimes(2));
   });
 
   it('a cancelled event shows its reason and nothing to press', async () => {
