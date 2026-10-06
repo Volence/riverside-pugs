@@ -39,6 +39,37 @@ export function weekDates(seasonStart: string, week: number): { from: string; to
   return { from: ymd(from), to: ymd(from + 6 * DAY) };
 }
 
+/** A league week as a scheduling window (plan T4 Ruling 4): the first day's
+ *  midnight to the last second of the last day, UTC. */
+export function weekWindow(seasonStart: string, round: number, perWeek: number): { from: string; to: string } {
+  const w = weekDates(seasonStart, weekOfRound(round, perWeek));
+  return { from: `${w.from}T00:00:00.000Z`, to: `${w.to}T23:59:59.000Z` };
+}
+
+/** A weekly pattern: the k-th match of every week on this weekday (0 Sunday
+ *  to 6 Saturday) at this UTC time. */
+export interface WeeklySlot { day: number; time: string }
+
+/** The desk's "fill from a weekly pattern" (plan T4 Ruling 2): one row per
+ *  round, its window the week, its default time the slot's weekday on or
+ *  after the week's first day. A missing or unreadable slot leaves the
+ *  round with no default. */
+export function weeklyRoundTimes(o: { seasonStart: string; matches: number; perWeek: number; slots: WeeklySlot[] }): { round: number; at: string | null; from: string; to: string }[] {
+  const out: { round: number; at: string | null; from: string; to: string }[] = [];
+  for (let round = 1; round <= o.matches; round++) {
+    const w = weekWindow(o.seasonStart, round, o.perWeek);
+    const slot = o.slots[(round - 1) % o.perWeek];
+    let at: string | null = null;
+    if (slot && Number.isInteger(slot.day) && slot.day >= 0 && slot.day <= 6 && /^([01]\d|2[0-3]):[0-5]\d$/.test(slot.time)) {
+      const start = Date.parse(w.from);
+      const offset = (slot.day - new Date(start).getUTCDay() + 7) % 7;
+      at = new Date(start + offset * DAY + Number(slot.time.slice(0, 2)) * 3_600_000 + Number(slot.time.slice(3)) * 60_000).toISOString();
+    }
+    out.push({ round, at, from: w.from, to: w.to });
+  }
+  return out;
+}
+
 /** The fewest matches a week that fit `matches` into the full weeks from
  *  `from` to `to` (both inclusive), or null past 3 a week. */
 export function perWeekFor(matches: number, from: string, to: string): number | null {

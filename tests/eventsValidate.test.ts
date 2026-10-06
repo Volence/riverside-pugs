@@ -287,4 +287,29 @@ describe('plan T2 rules', () => {
       expect(V.parseResult(bad), JSON.stringify(bad)).toEqual({ ok: false, error: 'bad_result' });
     }
   });
+
+  it('reads a round schedule: UTC times, a window around the default on a window stage, a date only on a rolling one (plan T4)', () => {
+    const rows = [
+      { round: 2, at: '2026-10-21T21:00:00+00:00', from: '2026-10-19T00:00:00Z', to: '2026-10-25T23:59:59Z' },
+      { round: 1, at: null, from: '2026-10-12T00:00:00Z', to: '2026-10-18T23:59:59Z' },
+      { round: 3, at: null, from: null, to: null },
+    ];
+    expect(V.parseRoundSchedule(rows, 'window')).toEqual({ ok: true, value: [
+      { round: 1, at: null, from: '2026-10-12T00:00:00.000Z', to: '2026-10-18T23:59:59.000Z' },
+      { round: 2, at: '2026-10-21T21:00:00.000Z', from: '2026-10-19T00:00:00.000Z', to: '2026-10-25T23:59:59.000Z' },
+    ] });
+    expect(V.parseRoundSchedule([{ round: 1, at: '2026-10-24T21:00:00Z' }], 'rolling')).toEqual({ ok: true, value: [{ round: 1, at: '2026-10-24T21:00:00.000Z', from: null, to: null }] });
+    expect(V.parseRoundSchedule([], 'window')).toEqual({ ok: true, value: [] });
+    for (const bad of [
+      'x', [{ round: 0, at: null }], [{ round: 1, at: '2026-10-24 21:00' }], [{ round: 1, at: '2026-10-24T21:00' }],
+      [{ round: 1, at: null, from: '2026-10-12T00:00:00Z' }], [{ round: 1, at: null, from: '2026-10-18T00:00:00Z', to: '2026-10-12T00:00:00Z' }],
+      [{ round: 1, at: '2026-10-26T21:00:00Z', from: '2026-10-12T00:00:00Z', to: '2026-10-18T23:59:59Z' }],
+      [{ round: 1, at: null }, { round: 1, at: null }], Array.from({ length: V.SCHEDULE_ROUNDS_MAX + 1 }, (_, i) => ({ round: i + 1, at: null })),
+    ]) expect(V.parseRoundSchedule(bad, 'window'), JSON.stringify(bad)).toEqual({ ok: false, error: 'bad_schedule' });
+    expect(V.parseRoundSchedule([{ round: 1, at: '2026-10-24T21:00:00Z', from: '2026-10-19T00:00:00Z', to: '2026-10-25T23:59:59Z' }], 'rolling'))
+      .toEqual({ ok: false, error: 'bad_schedule' });
+    for (const k of ['bad_schedule', 'schedule_locked', 'not_schedulable', 'bad_time', 'proposal_open', 'no_proposal', 'own_proposal', 'not_your_proposal'] as const) {
+      expect(V.EVENT_ERRORS[k].text.length).toBeGreaterThan(10);
+    }
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { byeSpread, leagueWeeks, perWeekFor, repeatedRoundRobin, weekDates, weekOfRound } from '../src/events/league.js';
+import { byeSpread, leagueWeeks, perWeekFor, repeatedRoundRobin, weekDates, weekOfRound, weekWindow, weeklyRoundTimes } from '../src/events/league.js';
 
 describe('league season', () => {
   it('repeats the round robin, swapping sides, until the rounds are used', () => {
@@ -45,5 +45,24 @@ describe('league season', () => {
     expect(byeSpread(16, 7)).toEqual({ min: 2, max: 3, even: [14, 21] });
     expect(byeSpread(14, 7)).toEqual({ min: 2, max: 2, even: [14] });
     expect(byeSpread(3, 5)).toEqual({ min: 0, max: 1, even: [5] });
+  });
+
+  it('turns a week into a UTC window, and a weekly pattern into round times (plan T4)', () => {
+    expect(weekWindow('2026-10-12', 1, 2)).toEqual({ from: '2026-10-12T00:00:00.000Z', to: '2026-10-18T23:59:59.000Z' });
+    expect(weekWindow('2026-10-12', 3, 2)).toEqual({ from: '2026-10-19T00:00:00.000Z', to: '2026-10-25T23:59:59.000Z' });
+    // Season start Monday Oct 12; match 1 of each week on Wednesday 21:00, match 2 on Sunday 19:30.
+    const rows = weeklyRoundTimes({ seasonStart: '2026-10-12', matches: 3, perWeek: 2, slots: [{ day: 3, time: '21:00' }, { day: 0, time: '19:30' }] });
+    expect(rows).toEqual([
+      { round: 1, at: '2026-10-14T21:00:00.000Z', from: '2026-10-12T00:00:00.000Z', to: '2026-10-18T23:59:59.000Z' },
+      { round: 2, at: '2026-10-18T19:30:00.000Z', from: '2026-10-12T00:00:00.000Z', to: '2026-10-18T23:59:59.000Z' },
+      { round: 3, at: '2026-10-21T21:00:00.000Z', from: '2026-10-19T00:00:00.000Z', to: '2026-10-25T23:59:59.000Z' },
+    ]);
+    // A season starting on a Wednesday: the Wednesday slot is that very day; a missing or bad slot leaves the round with no default.
+    expect(weeklyRoundTimes({ seasonStart: '2026-10-14', matches: 2, perWeek: 2, slots: [{ day: 3, time: '21:00' }] })).toEqual([
+      { round: 1, at: '2026-10-14T21:00:00.000Z', from: '2026-10-14T00:00:00.000Z', to: '2026-10-20T23:59:59.000Z' },
+      { round: 2, at: null, from: '2026-10-14T00:00:00.000Z', to: '2026-10-20T23:59:59.000Z' },
+    ]);
+    expect(weeklyRoundTimes({ seasonStart: '2026-10-12', matches: 1, perWeek: 1, slots: [{ day: 9, time: '21:00' }] })[0]!.at).toBeNull();
+    expect(weeklyRoundTimes({ seasonStart: '2026-10-12', matches: 1, perWeek: 1, slots: [{ day: 1, time: '9pm' }] })[0]!.at).toBeNull();
   });
 });

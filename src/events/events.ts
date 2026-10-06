@@ -33,6 +33,8 @@ export interface StageRow {
   chapters: number | null; scheduling: V.Scheduling; advance_count: number | null; status: 'pending' | 'live' | 'finished';
   created_at: string; updated_at: string;
   entrants_json: string | null; bracket_json: string | null; bracket_rev: number; started_at: string | null; finished_at: string | null;
+  /** Plan T4: the per-round schedule (validate.ts RoundSchedule rows), or null. */
+  schedule_json: string | null;
 }
 export interface EventLogRow { id: number; event_id: number; at: string; actor: string | null; action: string; detail: string }
 export type EventResult<T> = V.Checked<T>;
