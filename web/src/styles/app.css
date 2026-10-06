@@ -2282,6 +2282,12 @@ h3.values-rules-head {
 tbody tr.is-lifted td { opacity: 0.55; }
 .admin-list { list-style: none; margin: var(--sp-2) 0 0; padding: 0; font-size: var(--fs-dense); }
 .admin-list li { padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+/* The desk's staff tools (plan T3c): collapsed behind a details disclosure
+   so a room-phase row stays short until an admin opens it. */
+.desktools { margin-top: var(--sp-2); }
+.desktools summary { cursor: pointer; }
+.desktools__group { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin: var(--sp-1) 0; }
+.desk-line { font-size: var(--fs-dense); }
 
 /* Clips nested inside one player-round. The round is the reviewable unit, so
    the clips inside it read as a list of moments and not as separate rows with

@@ -39,6 +39,7 @@ export function ServerPanel({ v, now }: { v: MatchRoomView; now: number }) {
   const grace = s.graceEndsAt ? Date.parse(s.graceEndsAt) - now : null;
   return (
     <div class="roomserver">
+      {v.frozen && <p class="warning">Staff have frozen the game. Only staff can unfreeze it.</p>}
       {line ? (
         <p class="roomserver__connect">
           <code>{line}</code>

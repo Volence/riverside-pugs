@@ -12,7 +12,7 @@ const v = (over: Partial<MatchRoomView>): MatchRoomView => ({
   phase: 'lineup', higher: 'a', deadline: null, serverNow: '', ready: { a: true, b: true }, vetoSummary: '', pool: [], log: [], games: [], next: null,
   lineups: { a: null, b: null, aLocked: false, bLocked: true }, holdReason: null, result: null,
   me: { side: 'a', manager: true, playable: players, defaultFour: ['p2', 'p3', 'p4', 'p5'] },
-  series: null, server: null, confirm: null, dispute: null, ...over,
+  series: null, server: null, confirm: null, dispute: null, frozen: false, ...over,
 });
 
 describe('LineupPanel', () => {

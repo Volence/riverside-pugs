@@ -22,7 +22,7 @@ const view = (over: Partial<MatchRoomView> = {}): MatchRoomView => ({
   phase: 'veto', higher: 'a', deadline: null, serverNow: '2026-10-06T00:00:00.000Z', ready: { a: true, b: true }, vetoSummary: '',
   pool: [], log: [], games: [], next: null, lineups: { a: null, b: null, aLocked: false, bLocked: false }, holdReason: null, result: null,
   me: { side: 'a', manager: true, playable: [], defaultFour: null },
-  series: null, server: null, confirm: null, dispute: null, ...over,
+  series: null, server: null, confirm: null, dispute: null, frozen: false, ...over,
 });
 
 describe('EventMatchPage', () => {

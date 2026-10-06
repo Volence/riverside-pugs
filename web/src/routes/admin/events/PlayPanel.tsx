@@ -1,4 +1,4 @@
-import { useState } from 'preact/hooks';
+import { useRef, useState } from 'preact/hooks';
 import { adminApi, type PlayMatch, type RoomPhase, type StagePlayView } from '../../../api';
 import { useFetch } from '../../../hooks/useFetch';
 import { Empty, Panel } from '../../../components/bits';
@@ -106,6 +106,136 @@ function correctionRefused(s: StagePlayView, m: PlayMatch): boolean {
   return m.forfeit && loser !== null && loser.out && winner !== null && !winner.out;
 }
 
+/** The desk's line under a match in a room phase (plan T3c Ruling 16). */
+function DeskLine({ m }: { m: PlayMatch }) {
+  const d = m.desk;
+  if (!d) return null;
+  const a = m.a?.name ?? 'TBD';
+  const b = m.b?.name ?? 'TBD';
+  const parts: string[] = [];
+  if (d.holdReason !== null) parts.push(`On hold (${d.holdReason}${d.holdFrom ? `, from ${PHASE_TEXT[d.holdFrom === 'veto' ? 'veto' : d.holdFrom === 'booking' ? 'server' : d.holdFrom as RoomPhase] ?? d.holdFrom}` : ''})`);
+  if (d.dispute) parts.push(`Disputed by ${d.dispute.byName} for ${d.dispute.side === 'a' ? a : b}: ${d.dispute.reason}`);
+  if (d.frozen) parts.push('Frozen by staff');
+  if (d.booking) parts.push(`Server: ${d.booking.serverName ?? 'none yet'}${d.booking.recovering ? ' (recovering)' : ''}`);
+  if (d.subs.a + d.subs.b > 0) parts.push(`Subs: ${a} ${d.subs.a}, ${b} ${d.subs.b}`);
+  if (parts.length === 0) return null;
+  return <p class="muted desk-line">{parts.join(' · ')}</p>;
+}
+
+const STEP_ACTIONS = ['first', 'second', 'ban', 'pick', 'survivors', 'infected'] as const;
+const FOUR_RE = /^\d{17}$/;
+
+/** The staff tools (plan T3c Rulings 10 to 15 and 9), each behind a confirm. */
+function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; run: Run; busy: boolean }) {
+  const [side, setSide] = useState<'a' | 'b'>('a');
+  const [step, setStep] = useState('');
+  const [action, setAction] = useState<(typeof STEP_ACTIONS)[number]>('ban');
+  const [campaign, setCampaign] = useState('');
+  const [four, setFour] = useState('');
+  const [minutes, setMinutes] = useState('5');
+  const [chapter, setChapter] = useState('');
+  const d = m.desk!;
+  const names = `${m.a?.name ?? 'TBD'} vs ${m.b?.name ?? 'TBD'}`;
+  const teamName = side === 'a' ? m.a?.name ?? 'team A' : m.b?.name ?? 'team B';
+  const phase = m.phase;
+  const canAct = phase === 'ready' || phase === 'veto' || phase === 'lineup' || phase === 'live';
+  const canReopen = phase === 'ready' || phase === 'veto' || phase === 'lineup' || phase === 'server' || phase === 'hold';
+  const canBox = phase === 'connect' || phase === 'live';
+  const chapters = d.liveGame?.chapters ?? [];
+  const fourIds = four.split(/[\s,]+/).filter(Boolean);
+  const chapterLabel = (c: { ordinal: number; map: string }) => `Chapter ${c.ordinal + 1}: ${c.map}`;
+  const detailsRef = useRef<HTMLDetailsElement | null>(null);
+  const [open, setOpen] = useState(false);
+  // Only one match's tools stay open at a time: on a list of several rooms,
+  // an admin opening a second row should not leave a stale first one's
+  // buttons (acting on an already-handled match) reachable underneath. The
+  // open state is read back from the element itself (not just toggled)
+  // because the browser also closes OTHER <details> here when one opens.
+  const onToggle = () => {
+    const el = detailsRef.current;
+    if (!el) return;
+    setOpen(el.open);
+    if (!el.open) return;
+    el.ownerDocument.querySelectorAll<HTMLDetailsElement>('details.desktools').forEach((other) => {
+      if (other !== el) other.open = false;
+    });
+  };
+  return (
+    <details class="desktools" ref={detailsRef} open={open} onToggle={onToggle}>
+      <summary>{`Staff tools: ${names}`}</summary>
+      {open && canAct && (
+        <div class="desktools__group">
+          <label>Act as
+            <select aria-label="Act as" value={side} onChange={(e) => setSide((e.target as HTMLSelectElement).value as 'a' | 'b')}>
+              <option value="a">{m.a?.name ?? 'Team A'}</option>
+              <option value="b">{m.b?.name ?? 'Team B'}</option>
+            </select>
+          </label>
+          {phase === 'ready' && (
+            <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.actForTeam(eventId, m.id, { kind: 'ready', side }), { title: `Press Ready for ${teamName}?` })}>Press Ready</button>
+          )}
+          {(phase === 'veto' || phase === 'live') && (
+            <div class="inlinerow">
+              <input type="number" min={0} aria-label="Veto step" placeholder="step" value={step} onChange={(e) => setStep((e.target as HTMLInputElement).value)} />
+              <select aria-label="Veto action" value={action} onChange={(e) => setAction((e.target as HTMLSelectElement).value as (typeof STEP_ACTIONS)[number])}>
+                {STEP_ACTIONS.map((x) => <option key={x} value={x}>{x}</option>)}
+              </select>
+              <input type="text" aria-label="Campaign" placeholder="campaign slug (ban or pick)" value={campaign} onInput={(e) => setCampaign((e.target as HTMLInputElement).value)} />
+              <button class="btn btn--ghost btn--sm" disabled={busy || !/^\d+$/.test(step)} onClick={() => void run(
+                () => adminApi.actForTeam(eventId, m.id, { kind: 'veto', side, step: Number(step), action, campaign: campaign.trim() === '' ? null : campaign.trim() }),
+                { title: `Take step ${step} (${action}${campaign.trim() ? ` ${campaign.trim()}` : ''}) for ${teamName}?`, body: 'The room page shows the step number of the pending step.' },
+              )}>Take the veto step</button>
+            </div>
+          )}
+          {phase === 'lineup' && (
+            <div class="inlinerow">
+              <input type="text" aria-label="Four SteamID64s" placeholder="four SteamID64s, space or comma separated" value={four} onInput={(e) => setFour((e.target as HTMLInputElement).value)} />
+              <button class="btn btn--ghost btn--sm" disabled={busy || fourIds.length !== 4 || !fourIds.every((x) => FOUR_RE.test(x))} onClick={() => void run(
+                () => adminApi.actForTeam(eventId, m.id, { kind: 'lineup', side, steamids: fourIds }),
+                { title: `Lock this lineup for ${teamName}?`, body: 'The four must be starters or subs of the entry.' },
+              )}>Lock the lineup</button>
+            </div>
+          )}
+        </div>
+      )}
+      {open && <div class="desktools__group">
+        {canReopen && (
+          <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.reopenEventVeto(eventId, m.id),
+            { title: 'Reopen the veto?', body: 'The veto, games and lineups are cleared and the room starts again from the first step with both teams still ready. A booking made meanwhile is cancelled.' })}>Reopen veto</button>
+        )}
+        {phase === 'connect' && (
+          <>
+            <input type="number" min={1} max={60} aria-label="Minutes" value={minutes} onInput={(e) => setMinutes((e.target as HTMLInputElement).value)} />
+            <button class="btn btn--ghost btn--sm" disabled={busy || !/^\d+$/.test(minutes)} onClick={() => void run(() => adminApi.extendEventGrace(eventId, m.id, Number(minutes)),
+              { title: `Give both teams ${minutes} more minutes to connect?` })}>Extend grace</button>
+          </>
+        )}
+        {phase === 'hold' && (
+          <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.releaseEventHold(eventId, m.id),
+            { title: 'Release the hold?', body: `The match goes back to ${d.holdFrom ?? 'where it was'} with a fresh deadline. A dispute is cleared.` })}>Release hold</button>
+        )}
+        {canBox && (d.frozen
+          ? <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.unfreezeEventMatch(eventId, m.id), { title: 'Unfreeze the game?' })}>Unfreeze</button>
+          : <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.freezeEventMatch(eventId, m.id), { title: 'Freeze the game?', body: 'The game pauses and only staff can unpause it (here, or !lift in game).' })}>Freeze</button>)}
+        {canBox && (
+          <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.moveEventServer(eventId, m.id),
+            { title: 'Move the match to another server?', body: 'The current server goes back to the pool. The match takes the first idle server in its region, is set up again and the live game is restored from the site\'s record; with no server free it waits, then is held.' })}>Move server</button>
+        )}
+        {phase === 'live' && chapters.length > 0 && (
+          <div class="inlinerow">
+            <select aria-label="Chapter to replay" value={chapter} onChange={(e) => setChapter((e.target as HTMLSelectElement).value)}>
+              <option value="">Pick a chapter</option>
+              {chapters.map((c) => <option key={c.ordinal} value={String(c.ordinal)}>{chapterLabel(c)}</option>)}
+            </select>
+            <button class="btn btn--ghost btn--sm" disabled={busy || chapter === ''} onClick={() => void run(() => adminApi.replayEventChapter(eventId, m.id, Number(chapter)),
+              { title: `Replay ${chapterLabel(chapters.find((c) => String(c.ordinal) === chapter)!)} from its start?`, body: 'That chapter and anything after it are played again; earlier chapters keep their scores. The finale cannot be replayed.' })}>Replay chapter</button>
+          </div>
+        )}
+      </div>}
+    </details>
+  );
+}
+
 function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number; s: StagePlayView; m: PlayMatch; canEdit: boolean; run: Run; busy: boolean; slug?: string }) {
   const [correcting, setCorrecting] = useState(false);
   const [holding, setHolding] = useState(false);
@@ -118,6 +248,7 @@ function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number
       <span class="muted"> · {matchLabel(m)}
         {m.forfeit ? ` · forfeit, ${(m.winner === 'a' ? m.a : m.b)?.name ?? ''} wins` : m.scoreA !== null && m.scoreB !== null ? ` · ${m.scoreA} : ${m.scoreB}` : ''}
       </span>
+      <DeskLine m={m} />
       {m.a && m.b && slug && <a class="btn btn--sm" href={`/event/${slug}/match/${m.id}`}>Open the room</a>}
       {editable && OPEN.has(m.status) && <ResultForm eventId={eventId} m={m} run={run} busy={busy} correcting={false} />}
       {correctable && !correcting && (
@@ -142,6 +273,7 @@ function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number
           )}
         </>
       )}
+      {editable && m.desk && ROOM_LIVE.has(m.phase) && <DeskTools eventId={eventId} m={m} run={run} busy={busy} />}
     </li>
   );
 }

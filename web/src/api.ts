@@ -1943,6 +1943,17 @@ export type RoomPhase = 'pending' | 'waiting' | 'ready' | 'veto' | 'lineup' | 's
 export interface PlayMatch {
   id: number; group: number; round: number; slot: number; a: PlayEntry | null; b: PlayEntry | null; status: string;
   winner: 'a' | 'b' | null; scoreA: number | null; scoreB: number | null; forfeit: boolean; bye: boolean; phase: RoomPhase;
+  /** Staff only (plan T3c Ruling 16). */
+  desk?: PlayMatchDesk;
+}
+/** What only the Events desk sees of a match (mirrors src/events/playViews.ts PlayMatchDesk, plan T3c). */
+export interface PlayMatchDesk {
+  holdReason: string | null; holdFrom: string | null;
+  dispute: { side: 'a' | 'b'; byName: string; reason: string; at: string } | null;
+  frozen: boolean; graceEndsAt: string | null;
+  booking: { id: number; state: string; serverName: string | null; recovering: boolean } | null;
+  liveGame: { matchId: number; campaign: string; chapters: { ordinal: number; map: string }[] } | null;
+  subs: { a: number; b: number };
 }
 export interface PlayRound { group: number; round: number; label: string; dates: { from: string; to: string } | null; matches: PlayMatch[] }
 export interface PlayStanding {
@@ -2029,6 +2040,7 @@ export interface MatchRoomView {
   server: RoomServer | null;
   confirm: { deadline: string | null; a: boolean; b: boolean } | null;
   dispute: { side: 'a' | 'b'; byName: string; reason: string; at: string } | null;
+  frozen: boolean;
 }
 export interface PrefsView {
   entryId: number; defaultFour: string[] | null; side: 'survivors' | 'infected' | null; roster: RoomPlayer[];
@@ -2463,6 +2475,16 @@ export const adminApi = {
   openEventRoom: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/open-room`),
   resetEventRoom: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/reset-room`),
   holdEventMatch: (id: number, matchId: number, reason: string) => post(`/api/admin/events/${id}/matches/${matchId}/hold`, { reason }),
+  /** The desk tools (plan T3c). */
+  actForTeam: (id: number, matchId: number, body: { kind: 'ready' | 'veto' | 'lineup'; side: 'a' | 'b'; step?: number; action?: string; campaign?: string | null; steamids?: string[] }) =>
+    post(`/api/admin/events/${id}/matches/${matchId}/act`, body),
+  reopenEventVeto: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/reopen-veto`),
+  replayEventChapter: (id: number, matchId: number, ordinal: number) => post(`/api/admin/events/${id}/matches/${matchId}/replay-chapter`, { ordinal }),
+  moveEventServer: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/move-server`),
+  extendEventGrace: (id: number, matchId: number, minutes: number) => post(`/api/admin/events/${id}/matches/${matchId}/extend-grace`, { minutes }),
+  releaseEventHold: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/release-hold`),
+  freezeEventMatch: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/freeze`),
+  unfreezeEventMatch: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/unfreeze`),
   /** Setup > Rulesets and Game configs (rulesets editor plan). */
   rulesets: (signal?: AbortSignal) => get<{ rulesets: AdminRuleset[] }>('/api/admin/rulesets', signal),
   createRuleset: (copyFrom: number, name: string) => post<{ id: number }>('/api/admin/rulesets', { copyFrom, name }),

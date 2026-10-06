@@ -8,6 +8,8 @@ const { mockAdmin } = vi.hoisted(() => ({
   mockAdmin: {
     eventPlay: vi.fn(), startEvent: vi.fn(), recordEventResult: vi.fn(),
     openEventRoom: vi.fn(), resetEventRoom: vi.fn(), holdEventMatch: vi.fn(),
+    actForTeam: vi.fn(), reopenEventVeto: vi.fn(), replayEventChapter: vi.fn(), moveEventServer: vi.fn(),
+    extendEventGrace: vi.fn(), releaseEventHold: vi.fn(), freezeEventMatch: vi.fn(), unfreezeEventMatch: vi.fn(),
   },
 }));
 vi.mock('../../../api', async (importOriginal) => {
@@ -234,5 +236,71 @@ describe('PlayPanel', () => {
     expect(screen.getByLabelText('Emus score')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Reset room: Cats vs Dogs' }));
     await waitFor(() => expect(ask).toHaveBeenLastCalledWith(expect.objectContaining({ body: expect.stringContaining('Ready, veto and lineups are cleared') })));
+  });
+
+  const desk = (over: Partial<NonNullable<PlayMatch['desk']>> = {}): NonNullable<PlayMatch['desk']> => ({
+    holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 }, ...over,
+  });
+
+  it('shows the hold reason, the dispute and the freeze on the desk (plan T3c)', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [
+      m({ status: 'admin_hold', phase: 'hold', desk: desk({ holdReason: 'dispute', holdFrom: 'confirming', dispute: { side: 'b', byName: 'Bob', reason: 'They had five', at: '2026-10-10T21:00:00.000Z' } }) }),
+      m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'live', phase: 'live', desk: desk({ frozen: true, subs: { a: 1, b: 0 } }) }),
+    ] }] }] }));
+    render(<PlayPanel eventId={9} canEdit={false} />);
+    expect(await screen.findByText(/On hold \(dispute, from Confirming\)/)).toBeTruthy();
+    expect(screen.getByText(/Disputed by Bob for Bats: They had five/)).toBeTruthy();
+    expect(screen.getByText(/Frozen by staff/)).toBeTruthy();
+    expect(screen.getByText(/Subs: Cats 1, Dogs 0/)).toBeTruthy();
+    expect(screen.queryByText(/Staff tools/)).toBeNull();
+  });
+
+  it('offers the tools an admin may use in each phase and calls the right routes (plan T3c)', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [
+      m({ status: 'live', phase: 'live', desk: desk({ liveGame: { matchId: 44, campaign: 'no_mercy', chapters: [{ ordinal: 0, map: 'l4d_vs_hospital01_apartment' }, { ordinal: 1, map: 'l4d_vs_hospital02_subway' }] } }) }),
+    ] }] }] }));
+    for (const fn of Object.values(mockAdmin)) if (fn !== mockAdmin.eventPlay) (fn as Mock).mockResolvedValue({});
+    render(<PlayPanel eventId={9} canEdit />);
+    fireEvent.click(await screen.findByText('Staff tools: Rats vs Bats'));
+    fireEvent.click(screen.getByRole('button', { name: 'Freeze' }));
+    await waitFor(() => expect(mockAdmin.freezeEventMatch).toHaveBeenCalledWith(9, 7));
+    fireEvent.change(screen.getByLabelText('Chapter to replay'), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Replay chapter' }));
+    await waitFor(() => expect(mockAdmin.replayEventChapter).toHaveBeenCalledWith(9, 7, 1));
+    fireEvent.click(screen.getByRole('button', { name: 'Move server' }));
+    await waitFor(() => expect(mockAdmin.moveEventServer).toHaveBeenCalledWith(9, 7));
+    fireEvent.change(screen.getByLabelText('Act as'), { target: { value: 'b' } });
+    fireEvent.change(screen.getByLabelText('Veto step'), { target: { value: '7' } });
+    fireEvent.change(screen.getByLabelText('Veto action'), { target: { value: 'pick' } });
+    fireEvent.input(screen.getByLabelText('Campaign'), { target: { value: 'dead_air' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Take the veto step' }));
+    await waitFor(() => expect(mockAdmin.actForTeam).toHaveBeenCalledWith(9, 7, { kind: 'veto', side: 'b', step: 7, action: 'pick', campaign: 'dead_air' }));
+    expect(screen.queryByRole('button', { name: 'Extend grace' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Release hold' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reopen veto' })).toBeNull();
+    expect(confirm).toHaveBeenCalled();
+  });
+
+  it('offers Extend grace in connect, Release hold on a hold, and Reopen veto before a game (plan T3c)', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [
+      m({ status: 'connect', phase: 'connect', desk: desk({ graceEndsAt: '2026-10-10T21:00:00.000Z' }) }),
+      m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'admin_hold', phase: 'hold', desk: desk({ holdReason: 'no_show_both', holdFrom: 'connect' }) }),
+      m({ id: 9, slot: 3, a: team(5, 'Emus'), b: team(6, 'Foxes'), status: 'lineup', phase: 'lineup', desk: desk() }),
+    ] }] }] }));
+    for (const fn of Object.values(mockAdmin)) if (fn !== mockAdmin.eventPlay) (fn as Mock).mockResolvedValue({});
+    render(<PlayPanel eventId={9} canEdit />);
+    fireEvent.click(await screen.findByText('Staff tools: Rats vs Bats'));
+    fireEvent.input(screen.getByLabelText('Minutes'), { target: { value: '10' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Extend grace' }));
+    await waitFor(() => expect(mockAdmin.extendEventGrace).toHaveBeenCalledWith(9, 7, 10));
+    fireEvent.click(screen.getByText('Staff tools: Cats vs Dogs'));
+    fireEvent.click(screen.getByRole('button', { name: 'Release hold' }));
+    await waitFor(() => expect(mockAdmin.releaseEventHold).toHaveBeenCalledWith(9, 8));
+    fireEvent.click(screen.getByText('Staff tools: Emus vs Foxes'));
+    fireEvent.click(screen.getByRole('button', { name: 'Reopen veto' }));
+    await waitFor(() => expect(mockAdmin.reopenEventVeto).toHaveBeenCalledWith(9, 9));
+    fireEvent.input(screen.getByLabelText('Four SteamID64s'), { target: { value: '76561199000000821 76561199000000822, 76561199000000823 76561199000000824' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Lock the lineup' }));
+    await waitFor(() => expect(mockAdmin.actForTeam).toHaveBeenCalledWith(9, 9, { kind: 'lineup', side: 'a', steamids: ['76561199000000821', '76561199000000822', '76561199000000823', '76561199000000824'] }));
   });
 });
