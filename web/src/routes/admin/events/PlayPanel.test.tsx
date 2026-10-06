@@ -3,7 +3,12 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/pr
 import type { AdminEventPlay, PlayMatch } from '../../../api';
 import { ApiError } from '../../../api';
 
-const { mockAdmin } = vi.hoisted(() => ({ mockAdmin: { eventPlay: vi.fn(), startEvent: vi.fn(), recordEventResult: vi.fn() } }));
+const { mockAdmin } = vi.hoisted(() => ({
+  mockAdmin: {
+    eventPlay: vi.fn(), startEvent: vi.fn(), recordEventResult: vi.fn(),
+    openEventRoom: vi.fn(), resetEventRoom: vi.fn(), holdEventMatch: vi.fn(),
+  },
+}));
 vi.mock('../../../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api')>();
   return { ...actual, adminApi: { ...actual.adminApi, ...mockAdmin } };
@@ -23,6 +28,14 @@ const play = (over: Partial<AdminEventPlay> = {}): AdminEventPlay => ({
   status: 'live', lockedAt: 'x', startsAt: '2026-10-10T20:00:00.000Z', seeded: 2, ...over,
   stages: over.stages ?? [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
     rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [m()] }] }],
+});
+
+const twoMatches = () => play({
+  stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+    rounds: [{ group: 1, round: 1, label: 'Semifinals', dates: null, matches: [
+      m(),
+      m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'lineup', phase: 'lineup' }),
+    ] }] }],
 });
 
 describe('PlayPanel', () => {
@@ -177,5 +190,29 @@ describe('PlayPanel', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Start the event now' }));
     expect(await screen.findByText('An elimination bracket is always the last stage.')).toBeTruthy();
     expect(quiet).not.toHaveBeenCalled();
+  });
+
+  it('opens a waiting match\'s room, and resets or holds an open one (plan T3a)', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(twoMatches());
+    for (const f of [mockAdmin.openEventRoom, mockAdmin.resetEventRoom, mockAdmin.holdEventMatch]) f.mockResolvedValue({});
+    render(<PlayPanel eventId={9} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open room: Rats vs Bats' }));
+    await waitFor(() => expect(mockAdmin.openEventRoom).toHaveBeenCalledWith(9, 7));
+    fireEvent.click(await screen.findByRole('button', { name: 'Reset room: Cats vs Dogs' }));
+    await waitFor(() => expect(mockAdmin.resetEventRoom).toHaveBeenCalledWith(9, 8));
+    fireEvent.click(await screen.findByRole('button', { name: 'Hold: Cats vs Dogs' }));
+    fireEvent.input(screen.getByRole('textbox', { name: 'Hold reason' }), { target: { value: 'Server trouble' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Put on hold' }));
+    await waitFor(() => expect(mockAdmin.holdEventMatch).toHaveBeenCalledWith(9, 8, 'Server trouble'));
+  });
+
+  it('offers the result form on a match in a room phase, and no room buttons to a mod (plan T3a)', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(twoMatches());
+    render(<PlayPanel eventId={9} canEdit />);
+    expect(await screen.findByLabelText('Cats score')).toBeTruthy();
+    cleanup();
+    render(<PlayPanel eventId={9} canEdit={false} />);
+    await screen.findByText('Semifinals');
+    expect(screen.queryByRole('button', { name: /Open room|Reset room|Hold:/ })).toBeNull();
   });
 });

@@ -10,6 +10,17 @@ import { LineupPanel } from './event/room/LineupPanel';
 
 const LIVE = new Set(['ready', 'veto', 'lineup']);
 
+/** A team's logo (only once it has one) next to its name, used in the room
+ *  header and the ready check so both read the same way. */
+function Team({ name, logoKey }: { name: string; logoKey: string | null | undefined }) {
+  return (
+    <span class="roomteam">
+      {logoKey && <img class="evententry__logo" src={entryLogoUrl(logoKey)} alt="" width={28} height={28} />}
+      <span>{name}</span>
+    </span>
+  );
+}
+
 /** One tournament match's room (plan T3a): ready check, veto, lineups. */
 export function EventMatchPage({ slug, id, session: _session }: { slug: string; id: string; session: Session }) {
   const matchId = Number(id);
@@ -59,7 +70,7 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
   return (
     <main class="page page--profile room">
       <PageHeader
-        title={`${v.a?.name ?? 'TBD'} vs ${v.b?.name ?? 'TBD'}`}
+        title={<><Team name={v.a?.name ?? 'TBD'} logoKey={v.a?.logoKey} /> vs <Team name={v.b?.name ?? 'TBD'} logoKey={v.b?.logoKey} /></>}
         aside={<span class={`teamchip roomphase roomphase--${v.phase}`}>{PHASE_TEXT[v.phase]}</span>}
       >
         <p class="room__sub">
@@ -86,13 +97,16 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
         <Panel>
           <h3>Veto</h3>
           <VetoBoard v={v} busy={busy} onAct={(step, action, campaign) => { void run(() => eventsApi.veto(slug, matchId, step, action, campaign)); }} />
-          {v.games.length > 0 && (
-            <ul class="room__games">
-              {v.games.map((g) => (
-                <li key={g.game}>{`Game ${g.game}: ${g.campaignName}${g.firstSurvivors ? ` · ${g.firstSurvivors === 'a' ? v.a?.name : v.b?.name} start as survivors` : ''}`}</li>
-              ))}
-            </ul>
-          )}
+        </Panel>
+      )}
+      {v.games.length > 0 && (
+        <Panel>
+          <h3>Games</h3>
+          <ul class="room__games">
+            {v.games.map((g) => (
+              <li key={g.game}>{`Game ${g.game}: ${g.campaignName}${g.firstSurvivors ? ` · ${g.firstSurvivors === 'a' ? v.a?.name : v.b?.name} start as survivors` : ''}`}</li>
+            ))}
+          </ul>
         </Panel>
       )}
       {showLineups && v.a && v.b && (

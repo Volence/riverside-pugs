@@ -98,7 +98,7 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
       {ev.status === 'draft' && <p class="warning">Draft: only staff can see this page.</p>}
       {ev.status === 'cancelled' && <p class="warning">This event was cancelled{ev.cancelReason ? `: ${ev.cancelReason}` : '.'}</p>}
       {ev.description && <Panel><RichText class="eventdesc" text={ev.description} /></Panel>}
-      {ev.play.map((s) => <StagePlay key={s.ordinal} stage={s} />)}
+      {ev.play.map((s) => <StagePlay key={s.ordinal} stage={s} slug={ev.slug} />)}
       <Panel>
         <h3>Format</h3>
         {ev.stages.length === 0 ? <Empty>The format is not set yet.</Empty> : (
