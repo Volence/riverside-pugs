@@ -7,6 +7,7 @@ import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { Notifier } from '../src/notify/notify.js';
 import {
   addPerson, cancelBooking, confirmBooking, createBooking, addCampaign, getBooking, holdBox, markSetup, respondPerson, sideRow,
+  createTournamentBooking, setNext,
 } from '../src/bookings/bookings.js';
 import { BookingRunner, CLEAR_LINES, allowLines, bookingLines } from '../src/bookings/runner.js';
 import { BookingVoice } from '../src/bookings/voice.js';
@@ -1959,5 +1960,98 @@ describe('booking voice (plan 4c)', () => {
     err.mockRestore();
     expect(released).toEqual([3]);
     expect(getBooking(db, id)!.ended_at).not.toBeNull();
+  });
+});
+
+describe('tournament bookings (plan T3b)', () => {
+  const hooks = () => ({
+    gameLines: vi.fn((_id: number, campaign: string) => [`sm_pug_match 1 tok ${campaign}`, 'say [Match] Game 1']),
+    pendingLines: vi.fn(() => [] as string[]),
+    ready: vi.fn(), presence: vi.fn(), gameEnded: vi.fn(), ended: vi.fn(),
+  });
+  const bookTournament = () => {
+    const r = createTournamentBooking(db, {
+      region: 'na', campaign: 'no_mercy', rulesJson: '{}', rulesetId: null, gameConfig: 'standard', createdBy: P[9]!,
+      sides: [{ teamId: null, captain: P[0]!, players: P.slice(0, 4), spectators: [P[8]!] }, { teamId: null, captain: P[4]!, players: P.slice(4, 8), spectators: [] }],
+      now: new Date(now),
+    });
+    if (!r.ok) throw new Error(r.error);
+    return r.value.id;
+  };
+  const cmds = () => sent.filter((s) => s.server === 'ccc').flatMap((s) => s.cmds);
+
+  it('sets the box up with auto-track off and the game burst before the first changelevel, and tells the engine instead of DMing the connect line', async () => {
+    const h = hooks();
+    runner = build({ tournament: h });
+    now = START;
+    const id = bookTournament();
+    runner.allocate();
+    await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ state: 'ready', server_id: 3 });
+    expect(cmds()).toContain('sm_pug_auto_track 0');
+    expect(cmds()).not.toContain('sm_pug_auto_track 1');
+    expect(cmds().indexOf('sm_pug_match 1 tok no_mercy')).toBeLessThan(cmds().indexOf('changelevel l4d_vs_hospital01_apartment'));
+    expect(h.gameLines).toHaveBeenCalledWith(id, 'no_mercy');
+    expect(h.ready).toHaveBeenCalledWith(id);
+    expect(dms).toEqual([]);
+  });
+
+  it('hands presence and a finished game to the engine, re-pushes a pending burst, never schedules or ends on time itself, and refuses captain commands', async () => {
+    const h = hooks();
+    h.pendingLines.mockReturnValue(['sm_pug_match 1 tok no_mercy']);
+    runner = build({ tournament: h });
+    now = START;
+    const id = bookTournament();
+    runner.allocate();
+    await runner.idle();
+    box.ccc.humans = [...P.slice(0, 4), ...P.slice(4, 7)];
+    sent = [];
+    now = START + MIN;
+    await runner.tick();
+    expect(h.presence).toHaveBeenCalledWith(id, new Set([...P.slice(0, 4), ...P.slice(4, 7)]), new Date(now));
+    expect(sideRow(db, id, 'a')!.present_now).toBe(4);
+    expect(cmds()).toContain('sm_pug_match 1 tok no_mercy');
+    const matchId = Number(db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, server_id, token, kind, booking_id, booking_side_a, team_a_score, team_b_score, winner, ended_at) VALUES (?, 'completed', 'no_mercy', 3, 't1', 'tournament', ?, 'a', 500, 400, 'a', datetime('now'))",
+    ).run(currentSeasonId(db), id).lastInsertRowid);
+    sent = [];
+    runner.onGameEnded(matchId);
+    expect(h.gameEnded).toHaveBeenCalledWith(id, matchId);
+    expect(getBooking(db, id)!.next_campaign).toBeNull();
+    expect(cmds().some((c) => c.startsWith('say [Booking]'))).toBe(false);
+    now = Date.parse(getBooking(db, id)!.ends_at) + MIN;
+    await runner.tick();
+    expect(getBooking(db, id)).toMatchObject({ state: 'active', ending_at: null });
+    sent = [];
+    runner.onCommand(3, P[0]!, 'nextmap', 'dead_air');
+    runner.onCommand(3, P[0]!, 'end', '');
+    await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ next_campaign: null, ending_at: null });
+    expect(cmds().filter((c) => c === 'say [Match] The site runs this tournament match: it picks the campaigns and closes the server.')).toHaveLength(2);
+  });
+
+  it('loads a tiebreak chapter straight after the game burst, and tells the engine when the booking ends', async () => {
+    const h = hooks();
+    runner = build({ tournament: h });
+    now = START;
+    const id = bookTournament();
+    runner.allocate();
+    await runner.idle();
+    db.prepare("UPDATE bookings SET state = 'active' WHERE id = ?").run(id);
+    setNext(db, id, 'no_mercy', new Date(now).toISOString(), new Date(now), null, 'l4d_vs_hospital04_interior');
+    sent = [];
+    now += MIN;
+    await runner.tick();
+    await runner.idle();
+    expect(cmds().indexOf('sm_pug_match 1 tok no_mercy')).toBeLessThan(cmds().indexOf('changelevel l4d_vs_hospital04_interior'));
+    expect(cmds()).not.toContain('changelevel l4d_vs_hospital01_apartment');
+    expect(getBooking(db, id)).toMatchObject({ next_campaign: null, next_map: null, playlist_pos: 0 });
+    runner.announce(id, 'Series over: Rats beat Bats 2 games to 1.');
+    await runner.idle();
+    expect(cmds()).toContain('say [Match] Series over: Rats beat Bats 2 games to 1.');
+    cancelBooking(db, { bookingId: id, by: P[9]!, staff: true, now: new Date(now) });
+    runner.settle(id);
+    await runner.idle();
+    expect(h.ended).toHaveBeenCalledWith(id, 'staff');
   });
 });
