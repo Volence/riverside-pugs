@@ -11,6 +11,7 @@ import { matchLabel, phaseOf, playEntriesOf, type PlayEntry, type RoomPhase } fr
 import { gameNumberOf, playOrder, seriesVerdict } from './seriesRules.js';
 import { vetoSummary } from './vetoConfig.js';
 import { isHumanStep, type VetoActionKind } from './veto.js';
+import { openProposal, proposalsOf, schedulable, scheduleRules, type RescheduleRow, type RescheduleStatus } from './schedule.js';
 
 /** What the match room page shows (tournaments plan T3a). Lineups stay
  *  secret until both are locked, and preferences never appear here
@@ -40,6 +41,21 @@ export interface RoomServer {
   connect: { host: string; port: number; password: string } | null; present: { a: number; b: number } | null; graceEndsAt: string | null;
 }
 export interface RoomPlayer { steamid: string; name: string }
+/** One reschedule proposal as the room page lists it (plan T4). */
+export interface RoomProposal {
+  id: number; side: 'a' | 'b'; byName: string; time: string; note: string; createdAt: string; autoAcceptAt: string | null;
+  status: RescheduleStatus; respondedByName: string | null; respondedAt: string | null;
+}
+/** The schedule of a window-stage match (plan T4 Ruling 12); null on a
+ *  rolling stage. Everyone sees the locked time and the window; the open
+ *  proposal and the log of closed ones only both teams' rosters and staff. */
+export interface RoomSchedule {
+  scheduledAt: string | null; source: 'default' | 'agreed' | 'staff' | null; windowStart: string | null; windowEnd: string | null;
+  /** scheduledAt minus the lead: when the room opens on its own. */
+  opensAt: string | null; leadMinutes: number;
+  proposal: RoomProposal | null; log: RoomProposal[];
+  canPropose: boolean; canAnswer: boolean; canWithdraw: boolean;
+}
 /** a and b are null only while a bracket match still waits for its teams. */
 export interface MatchRoomView {
   id: number; eventSlug: string; eventName: string; roundLabel: string; a: PlayEntry | null; b: PlayEntry | null; phase: RoomPhase;
@@ -56,6 +72,8 @@ export interface MatchRoomView {
   dispute: { side: 'a' | 'b'; byName: string; reason: string; at: string } | null;
   /** Plan T3c: staff froze the game (the in-game admin pause). */
   frozen: boolean;
+  /** Plan T4: null on a rolling stage. */
+  schedule: RoomSchedule | null;
 }
 export interface PrefsView {
   entryId: number; defaultFour: string[] | null; side: 'survivors' | 'infected' | null; roster: RoomPlayer[];
@@ -150,6 +168,29 @@ export function matchRoomView(db: DB, ev: E.EventRow, m: P.MatchRow, viewer: str
       graceEndsAt: m.status === 'connect' ? m.deadline : null,
     };
   }
+  let schedule: RoomSchedule | null = null;
+  if (settings.scheduling === 'window') {
+    const lead = scheduleRules(db).leadMinutes;
+    const toView = (p: RescheduleRow): RoomProposal => ({
+      id: p.id, side: p.side, byName: getPlayer(db, p.proposed_by)?.name ?? 'a captain', time: p.proposed_time, note: p.note, createdAt: p.created_at,
+      autoAcceptAt: p.auto_accept_at, status: p.status,
+      respondedByName: p.responded_by === null ? null : getPlayer(db, p.responded_by)?.name ?? 'a captain', respondedAt: p.responded_at,
+    });
+    // Proposals are the two teams' business: their rosters and staff see them, outsiders only the locked time.
+    const insider = staff || mySide !== null;
+    const open = openProposal(db, m.id);
+    const managed = viewer !== null ? R.sideOf(db, m, viewer) : null;
+    const can = managed !== null && schedulable(db, m.id, now.toISOString()).ok;
+    schedule = {
+      scheduledAt: m.scheduled_at, source: m.schedule_source, windowStart: m.window_start, windowEnd: m.window_end,
+      opensAt: m.scheduled_at === null ? null : new Date(Date.parse(m.scheduled_at) - lead * 60_000).toISOString(), leadMinutes: lead,
+      proposal: insider && open ? toView(open) : null,
+      log: insider ? proposalsOf(db, m.id).filter((p) => p.status !== 'open').map(toView) : [],
+      canPropose: can && !open,
+      canAnswer: can && !!open && open.side !== managed,
+      canWithdraw: can && !!open && open.side === managed,
+    };
+  }
   return {
     id: m.id, eventSlug: ev.slug, eventName: ev.name, roundLabel: matchLabel(db, ev, m), a: entry(m.entry_a), b: entry(m.entry_b), phase: phaseOf(m),
     higher: m.room_higher, deadline: m.deadline, serverNow: now.toISOString(), ready: { a: m.ready_a_at !== null, b: m.ready_b_at !== null },
@@ -175,6 +216,7 @@ export function matchRoomView(db: DB, ev: E.EventRow, m: P.MatchRow, viewer: str
     confirm: m.status === 'confirming' ? { deadline: m.deadline, a: m.confirm_a_at !== null, b: m.confirm_b_at !== null } : null,
     dispute: m.dispute_side !== null ? { side: m.dispute_side, byName: getPlayer(db, m.dispute_by ?? '')?.name ?? 'a captain', reason: m.dispute_reason ?? '', at: m.disputed_at ?? '' } : null,
     frozen: m.admin_pause_at !== null,
+    schedule,
   };
 }
 

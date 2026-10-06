@@ -25,7 +25,11 @@ import { higherSide, type RoomClock } from '../events/roomClock.js';
 export interface AdminEventRow {
   id: number; slug: string; name: string; status: V.EventStatus; entryKind: V.EntryKind; startsAt: string; stages: number; updatedAt: string;
 }
-export interface AdminEventStage { id: number; ordinal: number; summary: string; settings: V.StageSettings; rulesSnapshotted: boolean }
+export interface AdminEventStage {
+  id: number; ordinal: number; summary: string; settings: V.StageSettings; rulesSnapshotted: boolean;
+  /** Plan T4: the stage's round schedule rows, and how many rounds it will have when known. */
+  schedule: V.RoundSchedule[]; roundsKnown: number | null;
+}
 export interface AdminEventDetail {
   id: number; slug: string; status: V.EventStatus; fields: V.EventFields; bannerKey: string | null;
   cancelReason: string | null; createdAt: string; updatedAt: string;
@@ -46,7 +50,14 @@ export function adminEventDetail(db: DB, ev: E.EventRow): AdminEventDetail {
     createdAt: ev.created_at, updatedAt: ev.updated_at,
     stages: E.stagesOf(db, ev.id).map((s) => {
       const settings = E.stageSettingsOf(s);
-      return { id: s.id, ordinal: s.ordinal, summary: stageSummary(settings.type, settings.config, settings.advanceCount), settings, rulesSnapshotted: s.rules_json !== null };
+      const ms = P.matchesOf(db, s.id);
+      // Swiss rounds or a league's matches; else the highest round played so far, or unknown.
+      const known = P.totalRounds(s) ?? (settings.type === 'league' ? (settings.config as V.StageConfigs['league']).matches : null)
+        ?? (ms.length > 0 ? Math.max(...ms.map((m) => m.round)) : null);
+      return {
+        id: s.id, ordinal: s.ordinal, summary: stageSummary(settings.type, settings.config, settings.advanceCount), settings, rulesSnapshotted: s.rules_json !== null,
+        schedule: E.scheduleOf(s), roundsKnown: known,
+      };
     }),
     log: E.eventLog(db, ev.id).map((l) => ({
       at: l.at, actorName: l.actor ? getPlayer(db, l.actor)?.name ?? l.actor : null, action: l.action,

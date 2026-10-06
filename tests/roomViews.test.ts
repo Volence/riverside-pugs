@@ -5,7 +5,8 @@ import * as R from '../src/events/room.js';
 import { matchRoomView, phaseOf, prefsView } from '../src/events/roomViews.js';
 import { NOW } from './eventFixture.js';
 import { A, B, OUTSIDER } from './entryFixture.js';
-import { TIMERS, roomFixture, type RoomFixture } from './roomFixture.js';
+import { TIMERS, roomFixture, windowFixture, type RoomFixture } from './roomFixture.js';
+import * as S from '../src/events/schedule.js';
 import { seriesFixture, type SeriesFixture, MIN } from './seriesFixture.js';
 
 const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
@@ -65,6 +66,36 @@ describe('matchRoomView', () => {
     expect(view(f, A[1]).me).toMatchObject({ side: 'a', manager: true, defaultFour: [A[1], A[2], A[3], A[4]] });
     expect(view(f, A[1]).me!.playable.map((p) => p.steamid)).toEqual(A.slice(0, 5));
     expect(view(f, A[3]).me).toEqual({ side: 'a', manager: false, playable: [], defaultFour: null });
+  });
+
+  it('shows the schedule of a window match to everyone, and what the viewer may do (plan T4)', async () => {
+    const f = await windowFixture();
+    const time = at(72 * 60).toISOString();
+    expect(view(f, null).schedule).toMatchObject({ scheduledAt: null, source: null, windowStart: NOW.toISOString(), opensAt: null, leadMinutes: 20, proposal: null, log: [], canPropose: false, canAnswer: false, canWithdraw: false });
+    expect(view(f, A[0]).schedule).toMatchObject({ canPropose: true, canAnswer: false, canWithdraw: false });
+    expect(view(f, A[3]).schedule!.canPropose).toBe(false);
+    const p = S.proposeTime(f.db, { matchId: f.matchId, by: A[0], time, note: 'late', rules: { autoAcceptHours: 24, leadMinutes: 20 }, now: NOW });
+    if (!p.ok) throw new Error(p.error);
+    const a = view(f, A[0]).schedule!;
+    expect(a.proposal).toMatchObject({ id: p.value.id, side: 'a', time, note: 'late', autoAcceptAt: at(24 * 60).toISOString(), status: 'open', respondedByName: null });
+    expect(a.proposal!.byName).toBe((await import('../src/players.js')).getPlayer(f.db, A[0])!.name);
+    expect([a.canPropose, a.canAnswer, a.canWithdraw]).toEqual([false, false, true]);
+    const b = view(f, B[0]).schedule!;
+    expect([b.canPropose, b.canAnswer, b.canWithdraw]).toEqual([false, true, false]);
+    S.respondProposal(f.db, { matchId: f.matchId, by: B[0], accept: true, now: at(1) });
+    const after = view(f, A[3]).schedule!;
+    expect(after).toMatchObject({ scheduledAt: time, source: 'agreed', opensAt: at(72 * 60 - 20).toISOString(), proposal: null });
+    expect(after.log.map((l) => [l.status, l.respondedByName !== null])).toEqual([['accepted', true]]);
+    // Outsiders see the locked time and the window, never the proposals; staff see them all.
+    expect(view(f, null).schedule).toMatchObject({ scheduledAt: time, source: 'agreed', windowStart: NOW.toISOString(), proposal: null, log: [] });
+    expect(view(f, OUTSIDER).schedule!.log).toEqual([]);
+    expect(view(f, null, true).schedule!.log).toHaveLength(1);
+    S.proposeTime(f.db, { matchId: f.matchId, by: B[0], time: at(96 * 60).toISOString(), rules: { autoAcceptHours: 24, leadMinutes: 20 }, now: at(2) });
+    expect(view(f, OUTSIDER).schedule!.proposal).toBeNull();
+    expect(view(f, A[3]).schedule!.proposal).toMatchObject({ side: 'b' });
+    expect(view(f, null, true).schedule).toMatchObject({ proposal: { side: 'b' }, canPropose: false, canAnswer: false, canWithdraw: false });
+    const g = await roomFixture();
+    expect(view(g, A[0]).schedule).toBeNull();
   });
 
   it('maps every status to a phase', () => {

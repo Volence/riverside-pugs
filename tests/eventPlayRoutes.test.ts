@@ -10,7 +10,7 @@ import { authedCookie, stubOrchestrator } from './helpers.js';
 import * as E from '../src/events/events.js';
 import * as N from '../src/events/entries.js';
 import * as P from '../src/events/play.js';
-import { ADMIN } from './eventFixture.js';
+import { ADMIN, NOW } from './eventFixture.js';
 import { startEventFlow } from '../src/events/flow.js';
 import { stagePlayViews, type PlayMatch } from '../src/events/playViews.js';
 import { DE, LEAGUE, SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
@@ -66,7 +66,7 @@ describe('event play routes', () => {
     // Never SR: the entry and match shapes carry exactly their declared
     // fields, nothing extra (a positive check, not a leak-pattern guess).
     expect(Object.keys(page.play[0].standings[0].entry).sort()).toEqual(['id', 'logoKey', 'name', 'out', 'seed', 'tag']);
-    const matchKeys: (keyof PlayMatch)[] = ['id', 'group', 'round', 'slot', 'a', 'b', 'status', 'winner', 'scoreA', 'scoreB', 'forfeit', 'bye', 'phase'];
+    const matchKeys: (keyof PlayMatch)[] = ['id', 'group', 'round', 'slot', 'a', 'b', 'status', 'winner', 'scoreA', 'scoreB', 'forfeit', 'bye', 'phase', 'scheduledAt', 'scheduleSource'];
     expect(Object.keys(page.play[0].rounds[0].matches[0]).sort()).toEqual([...matchKeys].sort());
     expect((await post(`/api/admin/events/${f.eventId}/start`, ADMIN)).statusCode).toBe(409);
   });
@@ -152,6 +152,28 @@ describe('event play routes', () => {
     const v = stagePlayViews(g.db, E.getEvent(g.db, g.eventId)!)[0]!;
     expect(v.groups).toEqual([{ number: 1, label: 'Bracket' }]);
     expect(v.rounds.map((r) => r.label)).toEqual(['Final']);
+  });
+
+  it('carries round times, windows and each match\'s time on the public play view and the desk (plan T4)', async () => {
+    const f = playFixture({ stages: [LEAGUE(2, 1, 'round_robin', null, '2026-10-12')], entries: 2 });
+    await startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW });
+    E.setRoundSchedule(f.db, { eventId: f.eventId, stageId: f.stages[0]!, by: ADMIN, rounds: [{ round: 1, at: '2026-10-14T21:00:00Z', from: '2026-10-12T00:00:00Z', to: '2026-10-18T23:59:59Z' }], now: NOW });
+    P.applySchedule(f.db, { stageId: f.stages[0]!, by: ADMIN, now: NOW });
+    const ev = E.getEvent(f.db, f.eventId)!;
+    const views = stagePlayViews(f.db, ev);
+    expect(views[0]!.rounds[0]).toMatchObject({ round: 1, defaultAt: '2026-10-14T21:00:00.000Z', window: { from: '2026-10-12T00:00:00.000Z', to: '2026-10-18T23:59:59.000Z' } });
+    expect(views[0]!.rounds[0]!.matches[0]).toMatchObject({ scheduledAt: '2026-10-14T21:00:00.000Z', scheduleSource: 'default' });
+    expect(views[0]!.rounds[1]).toMatchObject({ round: 2, defaultAt: null, window: { from: '2026-10-19T00:00:00.000Z', to: '2026-10-25T23:59:59.000Z' } });
+    expect(views[0]!.rounds[0]!.matches[0]!.desk).toBeUndefined();
+    const desk = stagePlayViews(f.db, ev, { staff: true })[0]!.rounds[0]!.matches[0]!.desk!;
+    expect(desk.schedule).toEqual({ windowStart: '2026-10-12T00:00:00.000Z', windowEnd: '2026-10-18T23:59:59.000Z', proposal: null, proposals: 0 });
+    const se = playFixture({ stages: [SE()], entries: 4 });
+    E.setRoundSchedule(se.db, { eventId: se.eventId, stageId: se.stages[0]!, by: ADMIN, rounds: [{ round: 2, at: '2026-10-24T21:00:00Z' }], now: NOW });
+    await startEventFlow(se.db, { eventId: se.eventId, by: ADMIN, now: NOW });
+    const bracket = stagePlayViews(se.db, E.getEvent(se.db, se.eventId)!)[0]!;
+    expect(bracket.rounds.find((r) => r.round === 2)).toMatchObject({ defaultAt: '2026-10-24T21:00:00.000Z', window: null });
+    expect(bracket.rounds.find((r) => r.round === 2)!.matches[0]!.scheduledAt).toBeNull();
+    expect(stagePlayViews(se.db, E.getEvent(se.db, se.eventId)!, { staff: true })[0]!.rounds[0]!.matches[0]!.desk!.schedule).toBeNull();
   });
 
   it('the public page is a 404 while the switch is closed to the viewer, as before', async () => {

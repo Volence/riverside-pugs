@@ -592,7 +592,7 @@ describe('event_log guard', () => {
   describe('schedule guard (src/events/schedule.ts)', () => {
     const SCHEDULE_TABLE = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+event_reschedules\b/gi;
     const SCHEDULE_READS = new Set([
-      'scheduleRules', 'proposalsOf', 'openProposal', 'getProposal', 'autoAcceptAt', 'reminderAt', 'silentSide',
+      'scheduleRules', 'proposalsOf', 'openProposal', 'getProposal', 'autoAcceptAt', 'reminderAt', 'silentSide', 'schedulable',
       'autoAcceptDue', 'remindersDue', 'staleProposals', 'expiredWindows',
     ]);
     const RULES: S.ScheduleRules = { autoAcceptHours: 24, leadMinutes: 20 };
