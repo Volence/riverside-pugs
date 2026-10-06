@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import type { AdminEventPlay, PlayMatch } from '../../../api';
+import { ApiError } from '../../../api';
 
 const { mockAdmin } = vi.hoisted(() => ({ mockAdmin: { eventPlay: vi.fn(), startEvent: vi.fn(), recordEventResult: vi.fn() } }));
 vi.mock('../../../api', async (importOriginal) => {
@@ -9,6 +10,7 @@ vi.mock('../../../api', async (importOriginal) => {
 });
 vi.mock('../../../components/Confirm', () => ({ confirm: vi.fn(async () => true) }));
 const { PlayPanel } = await import('./PlayPanel');
+const { confirm } = await import('../../../components/Confirm');
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -39,7 +41,7 @@ describe('PlayPanel', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 
-  it('records a scored result for an open match', async () => {
+  it('records a scored result for an open match, with no confirm for a first result', async () => {
     mockAdmin.eventPlay.mockResolvedValue(play());
     mockAdmin.recordEventResult.mockResolvedValue({});
     render(<PlayPanel eventId={9} canEdit />);
@@ -48,6 +50,20 @@ describe('PlayPanel', () => {
     fireEvent.change(screen.getByLabelText('Winner'), { target: { value: 'a' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save result' }));
     await waitFor(() => expect(mockAdmin.recordEventResult).toHaveBeenCalledWith(9, 7, { winner: 'a', scoreA: 1200, scoreB: 900, forfeit: false }));
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('disables Save until both scores are filled with a winner picked', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(play());
+    render(<PlayPanel eventId={9} canEdit />);
+    fireEvent.change(await screen.findByLabelText('Winner'), { target: { value: 'a' } });
+    fireEvent.input(screen.getByLabelText('Rats score'), { target: { value: '1200' } });
+    const save = screen.getByRole('button', { name: 'Save result' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.click(save);
+    expect(mockAdmin.recordEventResult).not.toHaveBeenCalled();
+    fireEvent.input(screen.getByLabelText('Bats score'), { target: { value: '900' } });
+    expect(save.disabled).toBe(false);
   });
 
   it('records a forfeit without scores, and offers Correct on a finished match', async () => {
@@ -61,6 +77,38 @@ describe('PlayPanel', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Save result' })[0]!);
     await waitFor(() => expect(mockAdmin.recordEventResult).toHaveBeenCalledWith(9, 7, { winner: 'b', forfeit: true }));
     expect(screen.getByRole('button', { name: 'Correct' })).toBeTruthy();
+  });
+
+  it('closes the correction form and brings Correct back once a correction succeeds, with its own confirm', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null,
+      rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [m({ status: 'done', winner: 'a', scoreA: 2, scoreB: 1 })] }] }] }));
+    mockAdmin.recordEventResult.mockResolvedValue({});
+    render(<PlayPanel eventId={9} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Correct' }));
+    fireEvent.change(screen.getByLabelText('Winner'), { target: { value: 'b' } });
+    fireEvent.input(screen.getByLabelText('Rats score'), { target: { value: '1' } });
+    fireEvent.input(screen.getByLabelText('Bats score'), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save result' }));
+    await waitFor(() => expect(mockAdmin.recordEventResult).toHaveBeenCalledWith(9, 7, { winner: 'b', scoreA: 1, scoreB: 2, forfeit: false }));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Correct' })).toBeTruthy();
+    expect(screen.queryByLabelText('Winner')).toBeNull();
+  });
+
+  it('keeps the correction form open with what was typed when the save fails', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null,
+      rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [m({ status: 'done', winner: 'a', scoreA: 2, scoreB: 1 })] }] }] }));
+    mockAdmin.recordEventResult.mockRejectedValue(new ApiError(409, 'A result that later matches already depend on is refused.'));
+    render(<PlayPanel eventId={9} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Correct' }));
+    fireEvent.change(screen.getByLabelText('Winner'), { target: { value: 'b' } });
+    fireEvent.input(screen.getByLabelText('Rats score'), { target: { value: '1' } });
+    fireEvent.input(screen.getByLabelText('Bats score'), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save result' }));
+    await waitFor(() => expect(mockAdmin.recordEventResult).toHaveBeenCalled());
+    expect(await screen.findByText('A result that later matches already depend on is refused.')).toBeTruthy();
+    expect(screen.getByLabelText('Winner')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Correct' })).toBeNull();
   });
 
   it('a mod reads matches with no controls', async () => {

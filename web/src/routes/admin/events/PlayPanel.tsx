@@ -8,18 +8,33 @@ const OPEN = new Set(['waiting']);
 const CORRECTABLE = new Set(['done', 'forfeit']);
 const STATUS: Record<string, string> = { pending: 'Waiting for teams', waiting: 'To play', done: 'Done', forfeit: 'Forfeit', bye: 'Bye' };
 
-/** One match's result form: its own state, so two rows never share inputs. */
-function ResultForm({ eventId, m, run, busy, correcting }: { eventId: number; m: PlayMatch; run: Run; busy: boolean; correcting: boolean }) {
+/** A whole number 0 to 100000, with no stray characters: a blank or
+ *  partly-typed score must never slip through as `Number('') === 0`. */
+const SCORE_RE = /^\d+$/;
+const validScore = (s: string): boolean => {
+  const t = s.trim();
+  return SCORE_RE.test(t) && Number(t) <= 100000;
+};
+
+/** One match's result form: its own state, so two rows never share inputs.
+ *  `onSaved` fires only once the server actually took the result (it runs
+ *  after `recordEventResult` resolves, inside the function `run` awaits, so
+ *  a refused or failed save leaves the form open with what was typed). */
+function ResultForm({ eventId, m, run, busy, correcting, onSaved }: { eventId: number; m: PlayMatch; run: Run; busy: boolean; correcting: boolean; onSaved?: () => void }) {
   const [winner, setWinner] = useState<'' | 'a' | 'b'>('');
   const [scoreA, setScoreA] = useState('');
   const [scoreB, setScoreB] = useState('');
   const [forfeit, setForfeit] = useState(false);
   const a = m.a!.name;
   const b = m.b!.name;
+  const canSave = winner !== '' && (forfeit || (validScore(scoreA) && validScore(scoreB)));
   const save = () => {
-    if (!winner) return;
+    if (!canSave) return;
     const body = forfeit ? { winner, forfeit: true } : { winner, scoreA: Number(scoreA), scoreB: Number(scoreB), forfeit: false };
-    void run(() => adminApi.recordEventResult(eventId, m.id, body), correcting
+    void run(async () => {
+      await adminApi.recordEventResult(eventId, m.id, body);
+      onSaved?.();
+    }, correcting
       ? { title: `Change the result of ${a} vs ${b}?`, body: 'Later matches move with it. A result that later matches already depend on is refused.' }
       : undefined);
   };
@@ -39,7 +54,7 @@ function ResultForm({ eventId, m, run, busy, correcting }: { eventId: number; m:
         </>
       )}
       <label><input type="checkbox" aria-label="Forfeit" checked={forfeit} onChange={(e) => setForfeit((e.target as HTMLInputElement).checked)} /> Forfeit</label>
-      <button class="btn btn--ghost" disabled={busy || !winner} onClick={save}>Save result</button>
+      <button class="btn btn--ghost" disabled={busy || !canSave} onClick={save}>Save result</button>
     </div>
   );
 }
@@ -57,7 +72,9 @@ function MatchRow({ eventId, m, canEdit, live, run, busy }: { eventId: number; m
       {editable && CORRECTABLE.has(m.status) && !correcting && (
         <button class="btn btn--ghost" disabled={busy} onClick={() => setCorrecting(true)}>Correct</button>
       )}
-      {editable && CORRECTABLE.has(m.status) && correcting && <ResultForm eventId={eventId} m={m} run={run} busy={busy} correcting />}
+      {editable && CORRECTABLE.has(m.status) && correcting && (
+        <ResultForm eventId={eventId} m={m} run={run} busy={busy} correcting onSaved={() => setCorrecting(false)} />
+      )}
     </li>
   );
 }
