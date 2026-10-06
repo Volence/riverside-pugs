@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/preact';
 import type { AdminEventOptions, StageSettings } from '../../../api';
+import { presetConfig } from '../../../../../src/events/vetoConfig';
 import { StageForm } from './StageForm';
 
 const CUP = '3 pauses of 120 s · higher seed picks sides · 15 min no-show grace';
@@ -40,6 +41,23 @@ describe('StageForm pickers', () => {
     });
     expect(screen.queryByText(CUP)).toBeNull();
     expect(screen.queryByText(SCRIM)).toBeNull();
+  });
+});
+
+describe('StageForm veto', () => {
+  it('saves a preset veto chosen once the pool is large enough for it', () => {
+    const onSave = vi.fn();
+    const multi: AdminEventOptions = {
+      ...OPTIONS,
+      campaigns: [{ slug: 'no_mercy', name: 'No Mercy' }, { slug: 'dead_air', name: 'Dead Air' }, { slug: 'death_toll', name: 'Death Toll' }],
+      defaultPool: ['no_mercy'],
+    };
+    render(<StageForm options={multi} initial={null} busy={false} onSave={onSave} onCancel={() => {}} />);
+    fireEvent.click(screen.getByLabelText('Dead Air'));
+    fireEvent.click(screen.getByLabelText('Death Toll'));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Veto format' }), { target: { value: 'loser_picks' } });
+    fireEvent.submit(screen.getByLabelText('Veto format').closest('form')!);
+    expect(onSave.mock.calls[0]![0].veto).toEqual(presetConfig('loser_picks', 3));
   });
 });
 

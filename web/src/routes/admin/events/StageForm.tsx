@@ -1,15 +1,14 @@
 import { useId, useState } from 'preact/hooks';
-import type { AdminEventOptions, Scheduling, StageSettings, StageType, VetoType } from '../../../api';
+import type { AdminEventOptions, Scheduling, StageSettings, StageType } from '../../../api';
+import { presetConfig, presetOf } from '../../../../../src/events/vetoConfig';
 import { draftFrom, settingsFrom, staleValues, type StageDraft } from './stageDraft';
 import { readWhole } from './wholeNumber';
 import { FormGroup, FormRow, ToggleRow } from './FormRow';
 import { SeasonCalc } from './SeasonCalc';
+import { VetoFields } from './VetoFields';
 
 const TYPES: [StageType, string][] = [
   ['single_elim', 'Single elimination'], ['double_elim', 'Double elimination'], ['round_robin', 'Round robin'], ['swiss', 'Swiss'], ['league', 'League'],
-];
-const VETOES: [VetoType, string][] = [
-  ['ban_to_one', 'Ban to one (Bo1)'], ['home_away', 'Home and away (Bo2 aggregate)'], ['pick_ban', 'Pick and ban (Bo3, exactly 7 campaigns)'],
 ];
 const val = (e: Event): string => (e.target as HTMLInputElement).value;
 const STALE = ' (no longer available)';
@@ -61,8 +60,11 @@ export function StageForm({ options, initial, busy, onSave, onCancel, teamCap }:
   };
   // The chosen ruleset in one line; an archived one (no longer offered) has none.
   const summary = options.rulesets.find((r) => r.id === d.rulesetId)?.summary ?? '';
-  const toggle = (slug: string) =>
-    set({ campaignPool: d.campaignPool.includes(slug) ? d.campaignPool.filter((s) => s !== slug) : [...d.campaignPool, slug] });
+  const toggle = (slug: string) => {
+    const pool = d.campaignPool.includes(slug) ? d.campaignPool.filter((s) => s !== slug) : [...d.campaignPool, slug];
+    const was = presetOf(d.veto, d.campaignPool.length);
+    set({ campaignPool: pool, veto: was === 'custom' ? d.veto : presetConfig(was, pool.length) });
+  };
 
   return (
     <form class="eventform eventform--stage" onSubmit={submit}>
@@ -130,11 +132,7 @@ export function StageForm({ options, initial, busy, onSave, onCancel, teamCap }:
             {options.gameConfigs.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
           </select>
         </FormRow>
-        <FormRow label="Veto" help="How the two teams settle the campaign." for={id('veto')}>
-          <select id={id('veto')} aria-label="Veto" value={d.vetoType} onChange={(e) => set({ vetoType: pick(e) as VetoType })}>
-            {VETOES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-        </FormRow>
+        <VetoFields value={d.veto} poolSize={d.campaignPool.length} onChange={(veto) => set({ veto })} />
       </FormGroup>
       <FormGroup title="Maps">
         <FormRow label="Campaign pool" help={`${d.campaignPool.length} picked, up to 12.`}>

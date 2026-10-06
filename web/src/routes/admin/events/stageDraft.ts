@@ -1,5 +1,5 @@
-import type { AdminEventOptions, Scheduling, StageConfig, StageConfigs, StageSettings, StageType, VetoType } from '../../../api';
-import { presetConfig } from '../../../../../src/events/vetoConfig';
+import type { AdminEventOptions, Scheduling, StageConfig, StageConfigs, StageSettings, StageType } from '../../../api';
+import { presetConfig, vetoFamily, type VetoConfig } from '../../../../../src/events/vetoConfig';
 
 /**
  * The stage form's own state: every type's settings at once, so switching the
@@ -11,7 +11,7 @@ export interface StageDraft {
   type: StageType;
   thirdPlace: boolean; grandFinalReset: boolean; groups: number; rounds: number;
   matches: number; seasonStart: string | null; matchesPerWeek: number; pairing: 'swiss' | 'round_robin';
-  rulesetId: number; gameConfig: string; campaignPool: string[]; vetoType: VetoType;
+  rulesetId: number; gameConfig: string; campaignPool: string[]; veto: VetoConfig;
   chapters: number | null; scheduling: Scheduling; advanceCount: number | null;
 }
 
@@ -19,14 +19,15 @@ type AnyConfig = Partial<StageConfigs['single_elim'] & StageConfigs['double_elim
 
 export function draftFrom(s: StageSettings | null, o: AdminEventOptions): StageDraft {
   const c = (s?.config ?? {}) as AnyConfig;
+  const pool = s ? [...s.campaignPool] : [...o.defaultPool];
   return {
     type: s?.type ?? 'single_elim',
     thirdPlace: c.thirdPlace ?? false, grandFinalReset: c.grandFinalReset ?? true, groups: c.groups ?? 1, rounds: c.rounds ?? 4,
     matches: c.matches ?? 16, seasonStart: c.seasonStart ?? null, matchesPerWeek: c.matchesPerWeek ?? 1, pairing: c.pairing ?? 'swiss',
     rulesetId: s?.rulesetId ?? o.defaultRulesetId ?? o.rulesets[0]?.id ?? 0,
     gameConfig: s?.gameConfig ?? 'standard',
-    campaignPool: s ? [...s.campaignPool] : [...o.defaultPool],
-    vetoType: s?.vetoType ?? 'ban_to_one',
+    campaignPool: pool,
+    veto: s?.veto ?? presetConfig('ban_to_one', pool.length),
     chapters: s?.chapters ?? null,
     scheduling: s?.scheduling ?? 'rolling',
     advanceCount: s?.advanceCount ?? null,
@@ -46,10 +47,11 @@ export function configOf(d: StageDraft): StageConfig {
 export function settingsFrom(d: StageDraft): StageSettings {
   return {
     type: d.type, config: configOf(d), rulesetId: d.rulesetId, gameConfig: d.gameConfig, campaignPool: d.campaignPool,
-    // The form only offers the three presets today, so the full veto knobs
-    // are just that preset applied to the chosen pool size; the server
-    // would derive the same thing from vetoType alone if veto were left out.
-    vetoType: d.vetoType, veto: presetConfig(d.vetoType, d.campaignPool.length),
+    // The web StageSettings type still carries vetoType (the event_stages
+    // CHECK column's three families); the server derives it itself from veto
+    // and ignores what is sent here, but it is required on the type so we
+    // send the family that veto actually plays as.
+    vetoType: vetoFamily(d.veto), veto: d.veto,
     chapters: d.chapters, scheduling: d.type === 'league' ? 'window' : d.scheduling, advanceCount: d.advanceCount,
   };
 }
