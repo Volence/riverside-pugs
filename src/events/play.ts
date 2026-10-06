@@ -27,6 +27,8 @@ export interface MatchRow {
   ready_b_at: string | null; deadline: string | null; hold_reason: string | null;
   booked_at: string | null; server_alerted_at: string | null; confirm_a_at: string | null; confirm_b_at: string | null;
   dispute_side: 'a' | 'b' | null; dispute_by: string | null; dispute_reason: string | null; disputed_at: string | null;
+  /** Plan T3c: the status a hold came from, and the staff freeze mirrored from the box. */
+  hold_from: MatchStatus | null; admin_pause_at: string | null; admin_pause_by: string | null;
 }
 export interface NewRound { round: number; pairs: [number, number][]; bye: number | null }
 export interface StagePlan { stageId: number; entrants: number[]; bracket: BracketData | null; rounds: NewRound[] }

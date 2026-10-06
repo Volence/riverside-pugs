@@ -384,3 +384,157 @@ describe('series writer (plan T3b)', () => {
     expect(ok(R.resumeDeadline(f.db, { matchId: f.matchId, timers: TIMERS, now: at(120) })).deadline).toBe(at(135).toISOString());
   });
 });
+
+describe('staff act for a team (plan T3c)', () => {
+  it('readies, takes the veto step and locks a lineup as a team, logged as the admin and never automatic', async () => {
+    const f = await roomFixture();
+    open(f);
+    expect(R.readyUp(f.db, { matchId: f.matchId, steamid: null, timers: TIMERS, now: at(1) })).toEqual({ ok: false, error: 'bad_request' });
+    ok(R.readyUp(f.db, { matchId: f.matchId, steamid: null, staff: { by: ADMIN, side: 'a' }, timers: TIMERS, now: at(1) }));
+    expect(lastAction(f)).toEqual({ action: 'room_ready', actor: ADMIN });
+    ok(R.readyUp(f.db, { matchId: f.matchId, steamid: B[0]!, timers: TIMERS, now: at(1) }));
+    expect(R.actVeto(f.db, { matchId: f.matchId, steamid: null, staff: { by: ADMIN, side: 'b' }, step: 0, action: 'first', campaign: null, timers: TIMERS, now: at(2) })).toEqual({ ok: false, error: 'not_your_turn' });
+    ok(R.actVeto(f.db, { matchId: f.matchId, steamid: null, staff: { by: ADMIN, side: 'a' }, step: 0, action: 'first', campaign: null, timers: TIMERS, now: at(2) }));
+    expect(f.db.prepare('SELECT by_steamid, auto FROM event_vetoes WHERE event_match_id = ? AND step = 0').get(f.matchId)).toEqual({ by_steamid: ADMIN, auto: 0 });
+    ok(R.actVeto(f.db, { matchId: f.matchId, steamid: A[0]!, step: 1, action: 'ban', campaign: 'dead_air', timers: TIMERS, now: at(2) }));
+    ok(R.actVeto(f.db, { matchId: f.matchId, steamid: B[0]!, step: 2, action: 'survivors', campaign: null, timers: TIMERS, now: at(2) }));
+    const m = ok(R.lockLineup(f.db, { matchId: f.matchId, steamid: null, staff: { by: ADMIN, side: 'b' }, steamids: B.slice(0, 4), timers: TIMERS, now: at(4) }));
+    expect(m.status).toBe('lineup');
+    expect(R.lineupsOf(f.db, f.matchId).map((l) => [l.entry_id, l.locked_by, l.auto])).toEqual([[f.entryB, ADMIN, 0]]);
+    expect(lastAction(f)).toEqual({ action: 'lineup_locked', actor: ADMIN });
+  });
+});
+
+describe('subs (plan T3c)', () => {
+  const live = async () => {
+    const f = await toBooking();
+    ok(R.attachBooking(f.db, { matchId: f.matchId, bookingId: fakeBooking(f, at(5)), now: at(5) }));
+    ok(R.startConnect(f.db, { matchId: f.matchId, graceMinutes: 15, now: at(5) }));
+    ok(R.linkGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, gameMatchId: fakeMatch(f), now: at(6) }));
+    ok(R.startLive(f.db, { matchId: f.matchId, now: at(7) }));
+    return f;
+  };
+  it('swaps a locked player for a registered member of the entry, counted per side against the limit', async () => {
+    const f = await live();
+    const sub = (by: string, outId: string, inId: string, limit = 2) => R.subPlayer(f.db, { matchId: f.matchId, by, outId, inId, limit, gameId: game(f, 1).id, now: at(20) });
+    expect(sub(B[0]!, A[3]!, A[4]!)).toEqual({ ok: false, error: 'not_manager' });
+    expect(sub(A[0]!, A[4]!, A[3]!)).toEqual({ ok: false, error: 'not_in_lineup' });
+    expect(sub(A[0]!, A[3]!, B[4]!)).toEqual({ ok: false, error: 'sub_not_member' });
+    expect(sub(A[0]!, A[3]!, A[2]!)).toEqual({ ok: false, error: 'sub_not_member' });
+    expect(sub(A[0]!, A[3]!, A[4]!, 0)).toEqual({ ok: false, error: 'sub_limit' });
+    const r = ok(sub(A[1]!, A[3]!, A[4]!));
+    expect(r).toMatchObject({ side: 'a', entryId: f.entryA, four: [A[0], A[1], A[2], A[4]], used: 1 });
+    expect(R.lineupFour(f.db, f.matchId, f.entryA)).toEqual([A[0], A[1], A[2], A[4]]);
+    expect(lastAction(f)).toEqual({ action: 'player_subbed', actor: A[1] });
+    expect(R.subsUsed(f.db, P.getMatch(f.db, f.matchId)!, 'a')).toBe(1);
+    expect(R.subsUsed(f.db, P.getMatch(f.db, f.matchId)!, 'b')).toBe(0);
+    // The replaced player is a registered member: they may come back as a sub, within the limit.
+    expect(sub(A[0]!, A[4]!, A[3]!, 1)).toEqual({ ok: false, error: 'sub_limit' });
+    expect(ok(sub(A[0]!, A[4]!, A[3]!, 2)).used).toBe(2);
+  });
+
+  it('freezes and unfreezes a live match once each way, from a call or staff', async () => {
+    const f = await live();
+    expect(R.setAdminPause(f.db, { matchId: f.matchId, on: false, by: null, cause: 'staff', now: at(8) })).toEqual({ ok: false, error: 'not_frozen' });
+    const m = ok(R.setAdminPause(f.db, { matchId: f.matchId, on: true, by: A[2]!, cause: 'call', now: at(8) }));
+    expect(m).toMatchObject({ admin_pause_at: at(8).toISOString(), admin_pause_by: A[2] });
+    expect(lastAction(f)).toEqual({ action: 'match_frozen', actor: A[2] });
+    expect(R.setAdminPause(f.db, { matchId: f.matchId, on: true, by: ADMIN, cause: 'staff', now: at(9) })).toEqual({ ok: false, error: 'already_frozen' });
+    expect(ok(R.setAdminPause(f.db, { matchId: f.matchId, on: false, by: ADMIN, cause: 'staff', now: at(9) })).admin_pause_at).toBeNull();
+    expect(lastAction(f)).toEqual({ action: 'match_unfrozen', actor: ADMIN });
+  });
+});
+
+describe('desk tools on the room (plan T3c)', () => {
+  it('extends the grace to connect by whole minutes from the later of now and the deadline', async () => {
+    const f = await toBooking();
+    ok(R.attachBooking(f.db, { matchId: f.matchId, bookingId: fakeBooking(f, at(5)), now: at(5) }));
+    expect(R.extendGrace(f.db, { matchId: f.matchId, by: ADMIN, minutes: 5, now: at(5) })).toEqual({ ok: false, error: 'not_connect_phase' });
+    ok(R.startConnect(f.db, { matchId: f.matchId, graceMinutes: 15, now: at(5) }));
+    for (const bad of [0, 61, 2.5, '5', null]) expect(R.extendGrace(f.db, { matchId: f.matchId, by: ADMIN, minutes: bad, now: at(6) })).toEqual({ ok: false, error: 'bad_minutes' });
+    expect(ok(R.extendGrace(f.db, { matchId: f.matchId, by: ADMIN, minutes: 5, now: at(6) })).deadline).toBe(at(25).toISOString());
+    expect(ok(R.extendGrace(f.db, { matchId: f.matchId, by: ADMIN, minutes: 10, now: at(40) })).deadline).toBe(at(50).toISOString());
+    expect(lastAction(f)).toEqual({ action: 'grace_extended', actor: ADMIN });
+  });
+
+  it('remembers where a hold came from and releases it there with a fresh deadline', async () => {
+    const f = await roomFixture();
+    open(f);
+    ok(R.holdMatch(f.db, { matchId: f.matchId, by: ADMIN, reason: 'Checking', now: at(3) }));
+    expect(P.getMatch(f.db, f.matchId)).toMatchObject({ status: 'admin_hold', hold_from: 'veto' });
+    expect(R.extendGrace(f.db, { matchId: f.matchId, by: ADMIN, minutes: 5, now: at(4) })).toEqual({ ok: false, error: 'not_connect_phase' });
+    const back = ok(R.releaseHold(f.db, { matchId: f.matchId, by: ADMIN, timers: TIMERS, graceMinutes: 15, now: at(30) }));
+    expect(back).toMatchObject({ status: 'veto', hold_reason: null, hold_from: null, deadline: at(40).toISOString() });
+    expect(lastAction(f)).toEqual({ action: 'hold_released', actor: ADMIN });
+    expect(R.releaseHold(f.db, { matchId: f.matchId, by: ADMIN, timers: TIMERS, graceMinutes: 15, now: at(31) })).toEqual({ ok: false, error: 'not_held' });
+    // A veto step: the step length again (the room is open already, so ready up by hand).
+    for (const steamid of [A[0]!, B[0]!]) ok(R.readyUp(f.db, { matchId: f.matchId, steamid, timers: TIMERS, now: at(31) }));
+    ok(R.holdMatch(f.db, { matchId: f.matchId, by: ADMIN, reason: 'Checking', now: at(35) }));
+    expect(ok(R.releaseHold(f.db, { matchId: f.matchId, by: ADMIN, timers: TIMERS, graceMinutes: 15, now: at(36) })).deadline).toBe(new Date(at(36).getTime() + 60_000).toISOString());
+    // A hold whose origin is unknown is not releasable.
+    ok(R.holdMatch(f.db, { matchId: f.matchId, by: ADMIN, reason: 'Checking', now: at(37) }));
+    f.db.prepare('UPDATE event_matches SET hold_from = NULL WHERE id = ?').run(f.matchId);
+    expect(R.releaseHold(f.db, { matchId: f.matchId, by: ADMIN, timers: TIMERS, graceMinutes: 15, now: at(38) })).toEqual({ ok: false, error: 'hold_not_releasable' });
+  });
+
+  it('releases a connect hold to a fresh grace only while the booking runs, and a dispute hold back to a fresh confirm window', async () => {
+    const f = await toBooking();
+    const bookingId = fakeBooking(f, at(5));
+    ok(R.attachBooking(f.db, { matchId: f.matchId, bookingId, now: at(5) }));
+    ok(R.startConnect(f.db, { matchId: f.matchId, graceMinutes: 15, now: at(5) }));
+    ok(R.holdMatch(f.db, { matchId: f.matchId, by: null, reason: 'no_show_both', now: at(20) }));
+    // fakeBooking rows are 'scheduled': not running.
+    expect(R.releaseHold(f.db, { matchId: f.matchId, by: ADMIN, timers: TIMERS, graceMinutes: 15, now: at(21) })).toEqual({ ok: false, error: 'hold_not_releasable' });
+    f.db.prepare("UPDATE bookings SET state = 'active' WHERE id = ?").run(bookingId);
+    expect(ok(R.releaseHold(f.db, { matchId: f.matchId, by: ADMIN, timers: TIMERS, graceMinutes: 10, now: at(21) }))).toMatchObject({ status: 'connect', deadline: at(31).toISOString() });
+    ok(R.linkGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, gameMatchId: fakeMatch(f), now: at(22) }));
+    ok(R.startLive(f.db, { matchId: f.matchId, now: at(23) }));
+    ok(R.recordGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, scoreA: 400, scoreB: 900, forfeit: null, now: at(60) }));
+    ok(R.startConfirm(f.db, { matchId: f.matchId, timers: TIMERS, now: at(61) }));
+    ok(R.disputeMatch(f.db, { matchId: f.matchId, steamid: A[0]!, reason: 'They had five', now: at(62) }));
+    expect(P.getMatch(f.db, f.matchId)).toMatchObject({ status: 'admin_hold', hold_reason: 'dispute', hold_from: 'confirming', dispute_side: 'a' });
+    const back = ok(R.releaseHold(f.db, { matchId: f.matchId, by: ADMIN, timers: TIMERS, graceMinutes: 15, now: at(70) }));
+    expect(back).toMatchObject({ status: 'confirming', deadline: at(85).toISOString(), dispute_side: null, dispute_reason: null, hold_from: null });
+    const row = f.db.prepare("SELECT detail FROM event_log WHERE action = 'hold_released' ORDER BY id DESC LIMIT 1").get() as { detail: string };
+    expect(JSON.parse(row.detail)).toMatchObject({ to: 'confirming', reason: 'dispute', dispute: { side: 'a', by: A[0], reason: 'They had five' } });
+  });
+
+  it('reopens the veto before any game started, keeping both ready, and refuses once a game was pushed', async () => {
+    const f = await roomFixture();
+    bothReady(f);
+    ok(veto(f, A[0]!, 0, 'first'));
+    ok(veto(f, A[0]!, 1, 'ban', 'dead_air'));
+    const m = ok(R.reopenVeto(f.db, { matchId: f.matchId, by: ADMIN, timers: TIMERS, now: at(5) }));
+    expect(m).toMatchObject({ status: 'veto', deadline: new Date(at(5).getTime() + 60_000).toISOString() });
+    expect(m.ready_a_at).not.toBeNull();
+    expect(R.vetoActions(f.db, f.matchId)).toEqual([]);
+    expect(R.gamesOf(f.db, f.matchId)).toEqual([]);
+    expect(lastAction(f)).toEqual({ action: 'veto_reopened', actor: ADMIN });
+    // From a hold taken in the lineup phase too.
+    ok(veto(f, A[0]!, 0, 'first', null, 6));
+    ok(veto(f, A[0]!, 1, 'ban', 'dead_air', 6));
+    ok(veto(f, B[0]!, 2, 'survivors', null, 6));
+    ok(R.holdMatch(f.db, { matchId: f.matchId, by: ADMIN, reason: 'Checking', now: at(7) }));
+    expect(ok(R.reopenVeto(f.db, { matchId: f.matchId, by: ADMIN, timers: TIMERS, now: at(8) })).status).toBe('veto');
+    // A pushed game closes the door.
+    const g = await toBooking();
+    ok(R.attachBooking(g.db, { matchId: g.matchId, bookingId: fakeBooking(g, at(5)), now: at(5) }));
+    expect(R.reopenVeto(g.db, { matchId: g.matchId, by: ADMIN, timers: TIMERS, now: at(6) })).toEqual({ ok: false, error: 'booking_open' });
+    g.db.prepare("UPDATE bookings SET ending_at = ?").run(at(6).toISOString());
+    ok(R.linkGame(g.db, { matchId: g.matchId, gameId: game(g, 1).id, gameMatchId: fakeMatch(g), now: at(6) }));
+    expect(R.reopenVeto(g.db, { matchId: g.matchId, by: ADMIN, timers: TIMERS, now: at(7) })).toEqual({ ok: false, error: 'game_started' });
+  });
+
+  it('notes a replay and a move with one log row each', async () => {
+    const f = await toBooking();
+    ok(R.attachBooking(f.db, { matchId: f.matchId, bookingId: fakeBooking(f, at(5)), now: at(5) }));
+    ok(R.startConnect(f.db, { matchId: f.matchId, graceMinutes: 15, now: at(5) }));
+    expect(R.noteReplay(f.db, { matchId: f.matchId, by: ADMIN, gameId: game(f, 1).id, ordinal: 1, map: 'l4d_vs_hospital02_subway', now: at(6) })).toEqual({ ok: false, error: 'not_live_phase' });
+    expect(ok(R.noteMove(f.db, { matchId: f.matchId, by: ADMIN, fromServerId: 3, now: at(6) })).status).toBe('connect');
+    expect(lastAction(f)).toEqual({ action: 'server_moved', actor: ADMIN });
+    ok(R.linkGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, gameMatchId: fakeMatch(f), now: at(6) }));
+    ok(R.startLive(f.db, { matchId: f.matchId, now: at(7) }));
+    ok(R.noteReplay(f.db, { matchId: f.matchId, by: ADMIN, gameId: game(f, 1).id, ordinal: 1, map: 'l4d_vs_hospital02_subway', now: at(8) }));
+    expect(lastAction(f)).toEqual({ action: 'chapter_replayed', actor: ADMIN });
+  });
+});

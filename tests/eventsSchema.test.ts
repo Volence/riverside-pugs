@@ -132,4 +132,10 @@ describe('T1b columns', () => {
     expect(cols('booking_sides')).toContain('present_now');
     expect((db.prepare("SELECT value FROM settings WHERE key = 'event_confirm_minutes'").get() as { value: string }).value).toBe('15');
   });
+
+  it('has the hold origin and the staff freeze columns (plan T3c)', () => {
+    const db = openDb(':memory:');
+    const cols = (db.prepare('PRAGMA table_info(event_matches)').all() as { name: string }[]).map((c) => c.name);
+    expect(cols).toEqual(expect.arrayContaining(['hold_from', 'admin_pause_at', 'admin_pause_by']));
+  });
 });

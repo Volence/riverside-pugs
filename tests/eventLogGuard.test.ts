@@ -366,7 +366,7 @@ describe('event_log guard', () => {
     const ROOM_TABLES = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:event_vetoes|event_games|event_lineups|event_entry_prefs|event_campaign_prefs)\b/gi;
     const ROOM_READS = new Set([
       'roomTimers', 'vetoActions', 'vetoInput', 'roomState', 'gamesOf', 'lineupsOf', 'sideOf', 'entryOn', 'playableOf', 'busyEntries', 'isParticipant',
-      'entryPrefs', 'campaignPrefs', 'lastFour', 'autoFour', 'seriesGames', 'lineupFour', 'matchOfBooking',
+      'entryPrefs', 'campaignPrefs', 'lastFour', 'autoFour', 'seriesGames', 'lineupFour', 'matchOfBooking', 'subsUsed',
     ]);
     const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
     const open = (f: RoomFixture) => {
@@ -480,6 +480,23 @@ describe('event_log guard', () => {
         action: 'match_disputed', actor: B[0]!, setup: confirming,
         run: (f) => R.disputeMatch(f.db, { matchId: f.matchId, steamid: B[0]!, reason: 'They had five', now: at(61) }),
       },
+      subPlayer: {
+        action: 'player_subbed', actor: A[0]!, setup: playing,
+        run: (f) => R.subPlayer(f.db, { matchId: f.matchId, by: A[0]!, outId: A[3]!, inId: A[4]!, limit: 2, gameId: game1(f).id, now: at(20) }),
+      },
+      setAdminPause: { action: 'match_frozen', actor: ADMIN, setup: playing, run: (f) => R.setAdminPause(f.db, { matchId: f.matchId, on: true, by: ADMIN, cause: 'staff', now: at(20) }) },
+      reopenVeto: { action: 'veto_reopened', actor: ADMIN, setup: toLineups, run: (f) => R.reopenVeto(f.db, { matchId: f.matchId, by: ADMIN, timers: TIMERS, now: at(5) }) },
+      extendGrace: { action: 'grace_extended', actor: ADMIN, setup: connecting, run: (f) => R.extendGrace(f.db, { matchId: f.matchId, by: ADMIN, minutes: 5, now: at(6) }) },
+      releaseHold: {
+        action: 'hold_released', actor: ADMIN,
+        setup: (f) => { open(f); must(R.holdMatch(f.db, { matchId: f.matchId, by: ADMIN, reason: 'Checking', now: at(3) })); },
+        run: (f) => R.releaseHold(f.db, { matchId: f.matchId, by: ADMIN, timers: TIMERS, graceMinutes: 15, now: at(4) }),
+      },
+      noteReplay: {
+        action: 'chapter_replayed', actor: ADMIN, setup: playing,
+        run: (f) => R.noteReplay(f.db, { matchId: f.matchId, by: ADMIN, gameId: game1(f).id, ordinal: 1, map: 'l4d_vs_hospital02_subway', now: at(20) }),
+      },
+      noteMove: { action: 'server_moved', actor: ADMIN, setup: connecting, run: (f) => R.noteMove(f.db, { matchId: f.matchId, by: ADMIN, fromServerId: 1, now: at(6) }) },
     };
     const rows = (f: RoomFixture) => JSON.stringify(['event_matches', 'event_vetoes', 'event_games', 'event_lineups', 'event_entry_prefs', 'event_campaign_prefs']
       .map((t) => f.db.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()));

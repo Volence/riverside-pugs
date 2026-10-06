@@ -247,7 +247,8 @@ describe('status rules', () => {
 
   it('every error has a status and a sentence', () => {
     for (const [k, e] of Object.entries(V.EVENT_ERRORS)) {
-      expect([400, 403, 404, 409]).toContain(e.status);
+      // 502: the game server did not take a desk command (plan T3c replay_failed).
+      expect([400, 403, 404, 409, 502]).toContain(e.status);
       expect(e.text.length, k).toBeGreaterThan(10);
       expect(e.text.includes(String.fromCharCode(0x2014)), k).toBe(false);
     }
