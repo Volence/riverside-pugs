@@ -54,6 +54,8 @@ export interface MatchRoomView {
   server: RoomServer | null;
   confirm: { deadline: string | null; a: boolean; b: boolean } | null;
   dispute: { side: 'a' | 'b'; byName: string; reason: string; at: string } | null;
+  /** Plan T3c: staff froze the game (the in-game admin pause). */
+  frozen: boolean;
 }
 export interface PrefsView {
   entryId: number; defaultFour: string[] | null; side: 'survivors' | 'infected' | null; roster: RoomPlayer[];
@@ -172,6 +174,7 @@ export function matchRoomView(db: DB, ev: E.EventRow, m: P.MatchRow, viewer: str
     server,
     confirm: m.status === 'confirming' ? { deadline: m.deadline, a: m.confirm_a_at !== null, b: m.confirm_b_at !== null } : null,
     dispute: m.dispute_side !== null ? { side: m.dispute_side, byName: getPlayer(db, m.dispute_by ?? '')?.name ?? 'a captain', reason: m.dispute_reason ?? '', at: m.disputed_at ?? '' } : null,
+    frozen: m.admin_pause_at !== null,
   };
 }
 

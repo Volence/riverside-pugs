@@ -120,6 +120,20 @@ export const EVENT_ERRORS = {
   confirm_closed: { status: 409, text: 'The confirm window for this match has closed.' },
   game_not_found: { status: 404, text: 'No such game in this match.' },
   already_confirmed: { status: 409, text: 'Your team has already confirmed the result.' },
+  game_started: { status: 409, text: 'A game of this match was already sent to a server; reset the room or enter the result instead.' },
+  hold_not_releasable: { status: 409, text: 'This hold cannot be released to where it came from (the server is gone, or the hold predates release). Reset the room or enter the result.' },
+  not_held: { status: 409, text: 'This match is not on hold.' },
+  not_in_lineup: { status: 400, text: 'That player is not in a locked lineup of this match.' },
+  sub_not_member: { status: 400, text: 'A sub must be a starter or sub of the same entry who is not already playing.' },
+  sub_limit: { status: 409, text: 'That team has used every substitution the rules allow for this match.' },
+  bad_minutes: { status: 400, text: 'Minutes is a whole number from 1 to 60.' },
+  no_live_game: { status: 409, text: 'No game of this match is being played right now.' },
+  chapter_not_replayable: { status: 409, text: 'That chapter cannot be replayed (the finale, or a chapter this game has not reached).' },
+  no_box: { status: 409, text: 'This match has no running server to send that to.' },
+  replay_failed: { status: 502, text: 'The server did not take the replay. The game was aborted and the match is on hold.' },
+  not_frozen: { status: 409, text: 'The game is not frozen.' },
+  already_frozen: { status: 409, text: 'The game is already frozen.' },
+  bad_side: { status: 400, text: 'A side is a or b.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type EventError = keyof typeof EVENT_ERRORS;
 

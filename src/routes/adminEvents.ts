@@ -380,7 +380,7 @@ export async function adminEventRoutes(
     const ev = eventOf((req.params as { id: string }).id);
     if (!ev) return refuse(reply, 'not_found');
     const out: AdminEventPlay = {
-      status: ev.status, lockedAt: ev.locked_at, startsAt: ev.starts_at, seeded: P.activeSeeded(db, ev.id).length, stages: stagePlayViews(db, ev),
+      status: ev.status, lockedAt: ev.locked_at, startsAt: ev.starts_at, seeded: P.activeSeeded(db, ev.id).length, stages: stagePlayViews(db, ev, { staff: true }),
     };
     return out;
   });

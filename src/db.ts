@@ -1885,6 +1885,11 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'event_games', 'winner', 'INTEGER REFERENCES event_entries(id)');
   ensureColumn(db, 'event_games', 'map', 'TEXT');
   ensureColumn(db, 'event_games', 'ended_at', 'TEXT');
+  // Tournaments plan T3c: where a hold came from (releaseHold puts the match
+  // back there) and the staff freeze mirrored from the box.
+  ensureColumn(db, 'event_matches', 'hold_from', 'TEXT');
+  ensureColumn(db, 'event_matches', 'admin_pause_at', 'TEXT');
+  ensureColumn(db, 'event_matches', 'admin_pause_by', 'TEXT');
   // Moderators: may work tickets and nothing else. Deliberately not read by
   // serverAdmins.ts, so the flag grants nothing on a game server.
   ensureColumn(db, 'players', 'is_mod', 'INTEGER NOT NULL DEFAULT 0');

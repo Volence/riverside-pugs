@@ -1,7 +1,12 @@
 import type { DB } from '../db.js';
+import { getPlayer } from '../players.js';
+import { getServer } from '../serverPool.js';
+import * as B from '../bookings/bookings.js';
+import { replayableChapters } from '../bookings/restore.js';
 import * as E from './events.js';
 import * as N from './entries.js';
 import * as P from './play.js';
+import * as R from './room.js';
 import { stageTable } from './flow.js';
 import { groupLabel, roundLabel } from './format.js';
 import { weekDates, weekOfRound } from './league.js';
@@ -33,6 +38,17 @@ export interface PlayEntry { id: number; name: string; tag: string; logoKey: str
 export interface PlayMatch {
   id: number; group: number; round: number; slot: number; a: PlayEntry | null; b: PlayEntry | null; status: string;
   winner: 'a' | 'b' | null; scoreA: number | null; scoreB: number | null; forfeit: boolean; bye: boolean; phase: RoomPhase;
+  /** Staff only (plan T3c Ruling 16): filled by stagePlayViews with staff: true. */
+  desk?: PlayMatchDesk;
+}
+/** What only the Events desk sees of a match (plan T3c Ruling 16). */
+export interface PlayMatchDesk {
+  holdReason: string | null; holdFrom: string | null;
+  dispute: { side: 'a' | 'b'; byName: string; reason: string; at: string } | null;
+  frozen: boolean; graceEndsAt: string | null;
+  booking: { id: number; state: string; serverName: string | null; recovering: boolean } | null;
+  liveGame: { matchId: number; campaign: string; chapters: { ordinal: number; map: string }[] } | null;
+  subs: { a: number; b: number };
 }
 /** dates: a league round's week, first and last day (YYYY-MM-DD); null for
  *  every other stage type. */
@@ -78,7 +94,24 @@ export function matchLabel(db: DB, ev: E.EventRow, m: P.MatchRow): string {
   return stageLabels(ev, E.getStage(db, m.stage_id)!, P.matchesOf(db, m.stage_id)).label(m.grp, m.round);
 }
 
-export function stagePlayViews(db: DB, ev: E.EventRow): StagePlayView[] {
+function deskOf(db: DB, m: P.MatchRow): PlayMatchDesk {
+  const booking = m.booking_id !== null ? B.getBooking(db, m.booking_id) : undefined;
+  const server = booking && booking.server_id !== null ? getServer(db, booking.server_id) : undefined;
+  const live = m.status === 'live' ? R.gamesOf(db, m.id).find((g) => g.match_id !== null && g.ended_at === null
+    && !!db.prepare("SELECT 1 FROM matches WHERE id = ? AND state = 'live'").get(g.match_id)) : undefined;
+  return {
+    holdReason: m.status === 'admin_hold' ? m.hold_reason : null, holdFrom: m.status === 'admin_hold' ? m.hold_from : null,
+    dispute: m.dispute_side !== null ? { side: m.dispute_side, byName: getPlayer(db, m.dispute_by ?? '')?.name ?? 'a captain', reason: m.dispute_reason ?? '', at: m.disputed_at ?? '' } : null,
+    frozen: m.admin_pause_at !== null,
+    graceEndsAt: m.status === 'connect' ? m.deadline : null,
+    booking: booking ? { id: booking.id, state: B.isOpen(booking) ? booking.state : 'ended', serverName: server?.name ?? null, recovering: booking.recovering_at !== null } : null,
+    liveGame: live ? { matchId: live.match_id!, campaign: live.campaign, chapters: replayableChapters(db, live.match_id!) } : null,
+    subs: { a: R.subsUsed(db, m, 'a'), b: R.subsUsed(db, m, 'b') },
+  };
+}
+
+/** opts.staff (plan T3c Ruling 16): each match also carries its desk block. */
+export function stagePlayViews(db: DB, ev: E.EventRow, opts: { staff?: boolean } = {}): StagePlayView[] {
   const entries = playEntriesOf(db, ev);
   const entry = (id: number | null) => (id === null ? null : entries.get(id) ?? null);
   return E.stagesOf(db, ev.id).filter((s) => s.status !== 'pending').map((s) => {
@@ -94,11 +127,13 @@ export function stagePlayViews(db: DB, ev: E.EventRow): StagePlayView[] {
         rounds.push(r);
       }
       const resolved = P.RESOLVED.has(m.status);
-      r.matches.push({
+      const row: PlayMatch = {
         id: m.id, group: m.grp, round: m.round, slot: m.slot, a: entry(m.entry_a), b: entry(m.entry_b), status: m.status,
         winner: !resolved || m.winner_entry === null ? null : m.winner_entry === m.entry_a ? 'a' : 'b',
         scoreA: m.score_a, scoreB: m.score_b, forfeit: m.status === 'forfeit', bye: m.status === 'bye', phase: phaseOf(m),
-      });
+      };
+      if (opts.staff) row.desk = deskOf(db, m);
+      r.matches.push(row);
     }
     const groups = [...new Set(ms.map((m) => m.grp))].sort((x, y) => x - y).map((n) => ({ number: n, label: groupLabel(labelType, n) }));
     const standings = elim ? [] : stageTable(db, s).map((t): PlayStanding => ({

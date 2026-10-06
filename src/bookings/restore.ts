@@ -28,7 +28,10 @@ export interface RestoreSnapshot {
   nextSeq: number;
 }
 
-export function restoreSnapshot(db: DB, matchId: number): RestoreSnapshot | null {
+/** opts.replayFrom (plan T3c Ruling 12): the ordinal of a chapter to replay
+ *  from its start. Task 3 gives it the real cut; for now only the current
+ *  chapter (done.length) is accepted. */
+export function restoreSnapshot(db: DB, matchId: number, opts: { replayFrom?: number } = {}): RestoreSnapshot | null {
   const m = db.prepare("SELECT id, campaign, token FROM matches WHERE id = ? AND state = 'live'").get(matchId) as
     { id: number; campaign: string; token: string | null } | undefined;
   if (!m || !m.token) return null;
@@ -55,6 +58,7 @@ export function restoreSnapshot(db: DB, matchId: number): RestoreSnapshot | null
   const firstMap = inCampaign(liveMaps.get(0)) ? liveMaps.get(0)!
     : done.length === 0 && inCampaign(current) ? current : entry.maps[0];
   const start = entry.maps.indexOf(firstMap);
+  if (opts.replayFrom !== undefined && opts.replayFrom !== done.length) return null;
   const maps = done.map((d, i) => ({ map: inCampaign(liveMaps.get(i)) ? liveMaps.get(i)! : entry.maps[start + i], a: d.a, b: d.b }));
   const finished = new Set(maps.map((x) => x.map));
   const map = inCampaign(current) && !finished.has(current) ? current : entry.maps[start + done.length];
@@ -75,6 +79,19 @@ export function restoreSnapshot(db: DB, matchId: number): RestoreSnapshot | null
   const maxSeq = (db.prepare('SELECT MAX(seq) AS s FROM match_live_events WHERE match_id = ?').get(matchId) as { s: number | null }).s ?? 0;
 
   return { matchId, token: m.token, campaign: m.campaign, firstMap, maps, map, firstSurv, roster, nextSeq: maxSeq + 1 };
+}
+
+/** The chapters of a live game that may be replayed from their start
+ *  (plan T3c Ruling 12): every finished one and the one being played, the
+ *  finale never (restoreSnapshot refuses it). In order. */
+export function replayableChapters(db: DB, matchId: number): { ordinal: number; map: string }[] {
+  const out: { ordinal: number; map: string }[] = [];
+  for (let k = 0; k < 16; k++) {
+    const s = restoreSnapshot(db, matchId, { replayFrom: k });
+    if (!s) break;
+    out.push({ ordinal: k, map: s.map });
+  }
+  return out;
 }
 
 /** The plugin lines that resume it (pug-match 0.3.19, Task 5). */

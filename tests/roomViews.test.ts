@@ -139,6 +139,15 @@ describe('matchRoomView with a server and a series (plan T3b)', () => {
     expect(sview(null)).toMatchObject({ phase: 'hold', holdReason: 'dispute', dispute: { side: 'b', byName: expect.any(String), reason: 'Rats had five' } });
   });
 
+  it('says when staff froze the game (plan T3c)', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    f.goLive(f.gameOf(1).match_id!);
+    expect(sview(null).frozen).toBe(false);
+    R.setAdminPause(f.db, { matchId: f.matchId, on: true, by: A[0]!, cause: 'call', now: new Date(f.t.t) });
+    expect(sview(A[3]).frozen).toBe(true);
+  });
+
   it('maps the series statuses to phases', () => {
     const m = (status: P.MatchStatus) => ({ status, ready_a_at: 'x', ready_b_at: 'y' }) as P.MatchRow;
     expect(['booking', 'connect', 'live', 'confirming'].map((s) => phaseOf(m(s as P.MatchStatus)))).toEqual(['server', 'connect', 'live', 'confirming']);
