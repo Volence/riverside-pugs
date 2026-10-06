@@ -308,6 +308,9 @@ describe('plan T2 rules', () => {
     ]) expect(V.parseRoundSchedule(bad, 'window'), JSON.stringify(bad)).toEqual({ ok: false, error: 'bad_schedule' });
     expect(V.parseRoundSchedule([{ round: 1, at: '2026-10-24T21:00:00Z', from: '2026-10-19T00:00:00Z', to: '2026-10-25T23:59:59Z' }], 'rolling'))
       .toEqual({ ok: false, error: 'bad_schedule' });
+    // A window stage needs the window with a default time, except a league, whose week is the window (final review).
+    expect(V.parseRoundSchedule([{ round: 1, at: '2026-10-24T21:00:00Z' }], 'window')).toEqual({ ok: false, error: 'bad_schedule' });
+    expect(V.parseRoundSchedule([{ round: 1, at: '2026-10-24T21:00:00Z' }], 'window', { league: true })).toEqual({ ok: true, value: [{ round: 1, at: '2026-10-24T21:00:00.000Z', from: null, to: null }] });
     for (const k of ['bad_schedule', 'schedule_locked', 'not_schedulable', 'bad_time', 'proposal_open', 'no_proposal', 'own_proposal', 'not_your_proposal'] as const) {
       expect(V.EVENT_ERRORS[k].text.length).toBeGreaterThan(10);
     }

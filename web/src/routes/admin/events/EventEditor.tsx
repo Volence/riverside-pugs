@@ -26,10 +26,10 @@ const ACTION_TEXT: Record<string, string> = {
   checkin_opened: 'Check-in opened', entry_registered: 'Team registered', roster_changed: 'Roster changed', roster_left: 'Player left a roster',
   entry_withdrawn: 'Team withdrew', entry_checked_in: 'Team checked in', entries_locked: 'Entry list closed', entry_dropped: 'Entry dropped',
   entry_disqualified: 'Entry disqualified', entry_restored: 'Entry restored', seeds_reordered: 'Seeds reordered',
-  schedule_set: 'set a round schedule', schedule_applied: 'applied the schedule to the matches', reschedule_proposed: 'proposed a match time',
-  reschedule_accepted: 'accepted a proposed time', reschedule_declined: 'declined a proposed time', reschedule_countered: 'countered a proposed time',
-  reschedule_withdrawn: 'withdrew a proposed time', reschedule_auto_accepted: 'locked an unanswered proposal',
-  reschedule_reminded: 'reminded a team of a proposal', reschedule_expired: 'expired a proposal', match_time_set: 'set a match time',
+  schedule_set: 'Round schedule set', schedule_applied: 'Schedule applied to the matches', reschedule_proposed: 'Match time proposed',
+  reschedule_accepted: 'Proposed time accepted', reschedule_declined: 'Proposed time declined', reschedule_countered: 'Proposed time countered',
+  reschedule_withdrawn: 'Proposed time withdrawn', reschedule_auto_accepted: 'Unanswered proposal locked',
+  reschedule_reminded: 'Proposal reminder sent', reschedule_expired: 'Proposal expired', match_time_set: 'Match time set',
 };
 
 /** What a mod reads in place of the form (Ruling 2). */
@@ -175,7 +175,7 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
                         onClick={() => void run(() => adminApi.removeStage(id, s.id), `Remove stage ${s.ordinal}?`)}>Remove</button>
                     </span>
                   )}
-                  {canEdit && !over && (
+                  {canEdit && !over && s.status !== 'finished' && (
                     <button class="btn btn--ghost btn--sm" aria-label={`Schedule stage ${s.ordinal}`} disabled={busy} onClick={() => setScheduling(scheduling === s.id ? null : s.id)}>Schedule</button>
                   )}
                 </div>

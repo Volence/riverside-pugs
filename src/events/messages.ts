@@ -77,7 +77,8 @@ export function eventMessage(
         const otherTeam = p.side === 'a' ? b : a;
         const by = escapeName(getPlayer(db, p.proposed_by)?.name ?? 'A captain');
         const note = p.note ? ` ("${escapeName(p.note)}")` : '';
-        const lock = p.auto_accept_at ? ` Unanswered, it locks on ${discordTime(p.auto_accept_at)}.` : '';
+        // A proposal with no lock time needs an answer (made too close to its time, or to the room opening at the time set now).
+        const lock = p.auto_accept_at ? ` Unanswered, it locks on ${discordTime(p.auto_accept_at)}.` : ' It needs an answer: it does not lock on its own.';
         const what = extra.what ?? 'proposed';
         content = what === 'proposed' || what === 'countered'
           ? `${by} of ${who} ${what === 'countered' ? 'counters with' : 'proposes'} ${discordTime(p.proposed_time)} for ${a} vs ${b} in ${event}${note}. A captain or co-captain accepts, declines or counters on the match page.${lock}`

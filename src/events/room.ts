@@ -653,7 +653,9 @@ export function extendGrace(db: DB, o: { matchId: number; by: string; minutes: u
  *  deadline from now; the dispute columns are cleared into the log row.
  *  A hold from waiting (the window end, plan T4) goes back to waiting with
  *  no deadline; the clock opens its room again at its locked time, or staff
- *  set one. */
+ *  set one. If that window has already ended, its end is cleared: the match
+ *  then has no window (staff set its time) and the clock never holds it
+ *  again for the same window end (final review). */
 export function releaseHold(
   db: DB, o: { matchId: number; by: string; timers: RoomTimers; graceMinutes: number; now?: Date },
 ): V.Checked<P.MatchRow> {
@@ -690,10 +692,12 @@ export function releaseHold(
       `UPDATE event_matches SET status = ?, deadline = ?, hold_reason = NULL, hold_from = NULL,
          dispute_side = NULL, dispute_by = NULL, dispute_reason = NULL, disputed_at = NULL WHERE id = ?`,
     ).run(to, deadline, m.id);
+    const windowCleared = to === 'waiting' && m.window_end !== null && m.window_end <= at;
+    if (windowCleared) db.prepare('UPDATE event_matches SET window_end = NULL WHERE id = ?').run(m.id);
     if (moveOn) advance(db, m.id, o.timers, now);
     // A hold from 'booking' goes back with no deadline: the series engine rebooks it.
     E.logEvent(db, ev.id, o.by, 'hold_released', at, {
-      matchId: m.id, to, reason: m.hold_reason,
+      matchId: m.id, to, reason: m.hold_reason, ...(windowCleared ? { windowEnded: m.window_end } : {}),
       dispute: m.dispute_side === null ? null : { side: m.dispute_side, by: m.dispute_by, reason: m.dispute_reason, at: m.disputed_at },
     });
     return V.ok(P.getMatch(db, m.id)!);

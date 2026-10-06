@@ -2043,7 +2043,9 @@ export interface RoomPlayer { steamid: string; name: string }
 export type RescheduleStatus = 'open' | 'accepted' | 'auto_accepted' | 'declined' | 'countered' | 'withdrawn' | 'expired';
 /** One reschedule proposal as the room page lists it (plan T4). */
 export interface RoomProposal {
-  id: number; side: 'a' | 'b'; byName: string; time: string; note: string; createdAt: string; autoAcceptAt: string | null;
+  id: number; side: 'a' | 'b'; byName: string; time: string; createdAt: string; autoAcceptAt: string | null;
+  /** Present only for the two rosters and staff (final review). */
+  note?: string;
   status: RescheduleStatus; respondedByName: string | null; respondedAt: string | null;
 }
 /** The schedule of a window-stage match (plan T4 Ruling 12); null on a
@@ -2371,6 +2373,8 @@ export interface AdminEventStage {
   id: number; ordinal: number; summary: string; settings: StageSettings; rulesSnapshotted: boolean;
   /** Plan T4: the stage's round schedule rows, and how many rounds it will have when known. */
   schedule: RoundSchedule[]; roundsKnown: number | null;
+  /** Final review: a finished stage's schedule cannot change, so the desk hides Schedule. */
+  status: 'pending' | 'live' | 'finished';
 }
 export interface AdminEventDetail {
   id: number; slug: string; status: EventStatus; fields: EventFields; bannerKey: string | null;

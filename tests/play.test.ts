@@ -196,6 +196,25 @@ describe('play writer', () => {
     expect(f.db.prepare('SELECT action, detail FROM event_log ORDER BY id DESC LIMIT 1').get()).toMatchObject({ action: 'schedule_applied' });
   });
 
+  it('a league with no season start takes its weeks from the stage start, and a schedule row with a default time but no window takes the week (final review)', async () => {
+    const f = playFixture({ stages: [LEAGUE(3, 1, 'round_robin', null)], entries: 4 });
+    // Round 2 has a default time only: the desk's league form never sends that, a hand-made row could.
+    ok(E.setRoundSchedule(f.db, { eventId: f.eventId, stageId: f.stages[0]!, by: ADMIN, rounds: [{ round: 2, at: '2026-10-10T21:00:00Z' }], now: NOW }));
+    await startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW });
+    const ms = P.matchesOf(f.db, f.stages[0]!);
+    expect(ms.filter((m) => m.round === 1).map((m) => [m.scheduled_at, m.window_start, m.window_end]))
+      .toEqual([[null, '2026-10-01T00:00:00.000Z', '2026-10-07T23:59:59.000Z'], [null, '2026-10-01T00:00:00.000Z', '2026-10-07T23:59:59.000Z']]);
+    expect(ms.filter((m) => m.round === 2).map((m) => [m.scheduled_at, m.schedule_source, m.window_start, m.window_end]))
+      .toEqual([['2026-10-10T21:00:00.000Z', 'default', '2026-10-08T00:00:00.000Z', '2026-10-14T23:59:59.000Z'], ['2026-10-10T21:00:00.000Z', 'default', '2026-10-08T00:00:00.000Z', '2026-10-14T23:59:59.000Z']]);
+    expect(P.roundTimes(E.getStage(f.db, f.stages[0]!)!, 3, NOW.toISOString())).toEqual({ at: null, from: '2026-10-15T00:00:00.000Z', to: '2026-10-21T23:59:59.000Z' });
+  });
+
+  it('a window stage that is not a league refuses a default time without a window (final review)', () => {
+    const f = playFixture({ stages: [{ ...SWISS(2, null), scheduling: 'window' }], entries: 4 });
+    expect(E.setRoundSchedule(f.db, { eventId: f.eventId, stageId: f.stages[0]!, by: ADMIN, rounds: [{ round: 1, at: '2026-10-10T21:00:00Z' }], now: NOW })).toEqual({ ok: false, error: 'bad_schedule' });
+    ok(E.setRoundSchedule(f.db, { eventId: f.eventId, stageId: f.stages[0]!, by: ADMIN, rounds: [{ round: 1, at: '2026-10-10T21:00:00Z', from: '2026-10-08T00:00:00Z', to: '2026-10-14T23:59:59Z' }], now: NOW }));
+  });
+
   it('stamps a rolling bracket round\'s date as not_before and never a window (plan T4 Ruling 3)', async () => {
     const f = playFixture({ stages: [SE()], entries: 4 });
     expect(E.setRoundSchedule(f.db, { eventId: f.eventId, stageId: f.stages[0]!, by: ADMIN, rounds: [{ round: 2, at: '2026-10-24T21:00:00Z' }], now: NOW }).ok).toBe(true);

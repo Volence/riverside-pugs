@@ -433,8 +433,10 @@ export function parsePool(raw: unknown, allowed: ReadonlySet<string>): Checked<s
 }
 
 /** A stage's round schedule as the desk sends it. A row with nothing set
- *  clears that round and is dropped; rounds come back sorted. */
-export function parseRoundSchedule(raw: unknown, scheduling: Scheduling): Checked<RoundSchedule[]> {
+ *  clears that round and is dropped; rounds come back sorted. On a window
+ *  stage a default time comes with its window, except on a league, whose
+ *  week is the window when a row names none (play.ts roundTimes). */
+export function parseRoundSchedule(raw: unknown, scheduling: Scheduling, o: { league?: boolean } = {}): Checked<RoundSchedule[]> {
   if (!Array.isArray(raw) || raw.length > SCHEDULE_ROUNDS_MAX) return fail('bad_schedule');
   const time = (v: unknown): string | null | undefined => (v === null || v === undefined ? null : parseTime(v) ?? undefined);
   const out: RoundSchedule[] = [];
@@ -448,6 +450,7 @@ export function parseRoundSchedule(raw: unknown, scheduling: Scheduling): Checke
     if (at === undefined || from === undefined || to === undefined) return fail('bad_schedule');
     if (scheduling === 'rolling' && (from !== null || to !== null)) return fail('bad_schedule');
     if ((from === null) !== (to === null)) return fail('bad_schedule');
+    if (scheduling === 'window' && !o.league && at !== null && from === null) return fail('bad_schedule');
     if (from !== null && to !== null && (from >= to || (at !== null && (at < from || at > to)))) return fail('bad_schedule');
     if (at === null && from === null) continue;
     out.push({ round: row.round, at, from, to });

@@ -21,7 +21,7 @@ import { rulesetOptions } from '../rulesetStore.js';
 import type { Notifier } from '../notify/notify.js';
 import { tellCheckinOpen, tellDropped, tellRoomOpen, tellRosterAdded, tellStaffAction, tellTimeLocked } from '../events/notices.js';
 import type { StaffAction } from '../events/messages.js';
-import { higherSide, type RoomClock } from '../events/roomClock.js';
+import { higherSide, openMatchRoom, type RoomClock } from '../events/roomClock.js';
 
 export interface AdminEventRow {
   id: number; slug: string; name: string; status: V.EventStatus; entryKind: V.EntryKind; startsAt: string; stages: number; updatedAt: string;
@@ -30,6 +30,8 @@ export interface AdminEventStage {
   id: number; ordinal: number; summary: string; settings: V.StageSettings; rulesSnapshotted: boolean;
   /** Plan T4: the stage's round schedule rows, and how many rounds it will have when known. */
   schedule: V.RoundSchedule[]; roundsKnown: number | null;
+  /** Final review: the desk hides Schedule on a finished stage (setRoundSchedule refuses it). */
+  status: E.StageRow['status'];
 }
 export interface AdminEventDetail {
   id: number; slug: string; status: V.EventStatus; fields: V.EventFields; bannerKey: string | null;
@@ -57,7 +59,7 @@ export function adminEventDetail(db: DB, ev: E.EventRow): AdminEventDetail {
         ?? (ms.length > 0 ? Math.max(...ms.map((m) => m.round)) : null);
       return {
         id: s.id, ordinal: s.ordinal, summary: stageSummary(settings.type, settings.config, settings.advanceCount), settings, rulesSnapshotted: s.rules_json !== null,
-        schedule: E.scheduleOf(s), roundsKnown: known,
+        schedule: E.scheduleOf(s), roundsKnown: known, status: s.status,
       };
     }),
     log: E.eventLog(db, ev.id).map((l) => ({
@@ -454,7 +456,7 @@ export async function adminEventRoutes(
       const reason = nr.ok ? nr.value ?? '' : '';
       if (action === 'hold' && reason.length < 3) return refuse(reply, 'bad_reason');
       const r = action === 'open-room'
-        ? R.openRoom(db, { matchId: m.id, by: me, higher: higherSide(db, m), seed: randomInt(2 ** 31), timers: R.roomTimers(db) })
+        ? openMatchRoom(db, { matchId: m.id, by: me, higher: higherSide(db, m), seed: randomInt(2 ** 31), timers: R.roomTimers(db) })
         : action === 'reset-room' ? (opts.series ? opts.series.reset(m.id, me) : R.resetRoom(db, { matchId: m.id, by: me })) : R.holdMatch(db, { matchId: m.id, by: me, reason });
       if (!r.ok) return refuse(reply, r.error);
       if (action === 'open-room') tellRoomOpen(opts, ev.id, m.id);

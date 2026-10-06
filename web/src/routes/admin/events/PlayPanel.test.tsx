@@ -395,6 +395,24 @@ describe('PlayPanel', () => {
     expect((await screen.findByText(/Proposal open: bob \(Bats\)/)).textContent).not.toContain('1 proposals');
   });
 
+  it('offers Set time on a match held at its window end, and says a release leaves it waiting for a time (final review)', async () => {
+    const desk2 = {
+      holdReason: 'window_expired', holdFrom: 'waiting', dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 },
+      schedule: { windowStart: '2026-10-12T00:00:00.000Z', windowEnd: '2026-10-18T23:59:59.000Z', proposal: null, proposals: 1 },
+    };
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+      rounds: [{ group: 1, round: 1, label: 'Week 1', dates: null, defaultAt: null, window: null, matches: [m({ status: 'admin_hold', phase: 'hold', desk: desk2 })] }] }] }));
+    mockAdmin.setEventMatchTime.mockResolvedValue({});
+    render(<PlayPanel eventId={9} canEdit slug="cup" />);
+    fireEvent.click(await screen.findByText('Staff tools: Rats vs Bats'));
+    fireEvent.input(screen.getByLabelText('Match time'), { target: { value: '2026-10-20T21:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Set time' }));
+    await waitFor(() => expect(mockAdmin.setEventMatchTime).toHaveBeenCalledWith(9, 7, new Date('2026-10-20T21:00').toISOString()));
+    expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ body: expect.stringContaining('hold is released') }));
+    fireEvent.click(screen.getByRole('button', { name: 'Release hold' }));
+    await waitFor(() => expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ body: expect.stringContaining('set a time') })));
+  });
+
   it('does not clear the Set time input when the save fails', async () => {
     const desk2 = {
       holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 },

@@ -149,8 +149,11 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
   const canAct = phase === 'ready' || phase === 'veto' || phase === 'lineup' || phase === 'live';
   const canReopen = phase === 'ready' || phase === 'veto' || phase === 'lineup' || phase === 'server' || phase === 'hold';
   const canBox = phase === 'connect' || phase === 'live';
-  /** Plan T4: a window-stage match still waiting for its room may have its time set outright. */
-  const canTime = phase === 'waiting' && d.schedule !== null;
+  /** Plan T4: a window-stage match still waiting for its room may have its
+   *  time set outright, and so may one held at its window end (the server
+   *  releases that hold with the time, final review). */
+  const heldFromWaiting = phase === 'hold' && d.holdFrom === 'waiting';
+  const canTime = (phase === 'waiting' || heldFromWaiting) && d.schedule !== null;
   const chapters = d.liveGame?.chapters ?? [];
   const fourIds = four.split(/[\s,]+/).filter(Boolean);
   const chapterLabel = (c: { ordinal: number; map: string }) => `Chapter ${c.ordinal + 1}: ${c.map}`;
@@ -229,7 +232,9 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
         )}
         {phase === 'hold' && !GAME_GONE.has(d.holdReason ?? '') && (
           <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.releaseEventHold(eventId, m.id),
-            { title: 'Release the hold?', body: `The match goes back to ${d.holdFrom ?? 'where it was'} with a fresh deadline. A dispute is cleared.` })}>Release hold</button>
+            { title: 'Release the hold?', body: heldFromWaiting
+              ? 'The match goes back to waiting. If its window has ended it keeps no window, so set a time for it here (Set time also releases the hold).'
+              : `The match goes back to ${d.holdFrom ?? 'where it was'} with a fresh deadline. A dispute is cleared.` })}>Release hold</button>
         )}
         {canBox && (d.frozen
           ? <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.unfreezeEventMatch(eventId, m.id), { title: 'Unfreeze the game?' })}>Unfreeze</button>
@@ -262,7 +267,7 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
           <button class="btn btn--ghost btn--sm" disabled={busy || !fromLocalInput(time)} onClick={() => void run(async () => {
             await adminApi.setEventMatchTime(eventId, m.id, fromLocalInput(time)!);
             setTime('');
-          }, { title: `Set ${names} for ${whenText(fromLocalInput(time)!)}?`, body: 'Both rosters are told. An open proposal expires. The room opens before the time on its own.' })}>Set time</button>
+          }, { title: `Set ${names} for ${whenText(fromLocalInput(time)!)}?`, body: `Both rosters are told. An open proposal expires. The room opens before the time on its own.${heldFromWaiting ? ' The hold is released with it.' : ''}` })}>Set time</button>
         </div>
       )}
     </details>
