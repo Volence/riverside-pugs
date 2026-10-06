@@ -48,12 +48,25 @@ bool g_bTourneyFrozen;                 // the staff freeze holds (applied, or wa
 bool g_bTourneySlotOut[MAX_ROSTER];    // the slot was subbed out: no lock, no leave clock, no !gg vote
 float g_fTourneyLastAdmin[MAXPLAYERS + 1];
 float g_fTourneyApplyAt;               // engine time of the last sm_pause issued for the freeze; 0.0 = none pending
+ConVar g_cvSubEmergency;   // plan T5: a mid-chapter sub for a disconnected player
+ConVar g_cvSubCharge;      // plan T5: what that costs the team's reconnect time
+ConVar g_cvAdminCooldown;  // plan T5: seconds between two !admin calls of one player
 
 void Tourney_Init()
 {
 	g_cvTournament = CreateConVar("sm_pug_tournament", "0",
 		"1 = a tournament box (the site's booking runner sets it): !sub, !admin, !lift and the staff freeze are on.",
 		FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	g_cvSubEmergency = CreateConVar("sm_pug_sub_emergency", "0",
+		"Tournament box: 1 = a captain may !sub a disconnected player mid-chapter while the game is paused for them.",
+		FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	g_cvSubCharge = CreateConVar("sm_pug_sub_charge", "0",
+		"Tournament box: seconds of the team's reconnect time an emergency sub costs.",
+		FCVAR_NOTIFY, true, 0.0, true, 600.0);
+	g_cvAdminCooldown = CreateConVar("sm_pug_admin_cooldown", "180",
+		"Tournament box: seconds before the same player can call staff with !admin again.",
+		FCVAR_NOTIFY, true, 30.0, true, 600.0);
+	RegServerCmd("sm_pug_forfeit", Cmd_PugForfeit, "sm_pug_forfeit <token> <a|b> - staff ruled that this team forfeits the game (tournament box)");
 	RegServerCmd("sm_pug_sub", Cmd_PugSub, "sm_pug_sub <token> <out64> <in64> - the site approved a substitution");
 	RegServerCmd("sm_pug_adminpause", Cmd_AdminPause, "sm_pug_adminpause <token> on|off [\"by\"] - the staff freeze, from the site");
 	RegAdminCmd("sm_pug_lift", Cmd_Lift, ADMFLAG_GENERIC, "Lift the staff freeze (chat: !lift)");
@@ -111,6 +124,7 @@ void Tourney_OnDisconnect(int client)
 void Tourney_Status()
 {
 	PrintToServer("tourney on=%d frozen=%d", TourneyOn() ? 1 : 0, g_bTourneyFrozen ? 1 : 0);
+	PrintToServer("tourney rules emergency=%d charge=%d cooldown=%d", g_cvSubEmergency.IntValue, g_cvSubCharge.IntValue, g_cvAdminCooldown.IntValue);
 }
 
 // ---------- between chapters ----------
@@ -127,6 +141,15 @@ bool Tourney_BetweenChapters()
 	if (g_State != MS_Live) return false;
 	if (!g_bHalfWasLive) return !view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound"));
 	return g_bRoundEnded && g_iHalf == 2;
+}
+
+/** Plan T5 Ruling 10: mid-chapter, a sub may replace a rostered player who
+ *  is disconnected now while the game is paused, on a tournament box with
+ *  team reconnect time and emergency subs on. */
+bool Tourney_EmergencyOk(int slot)
+{
+	return g_cvSubEmergency.BoolValue && LeaveTeamMode() && slot >= 0 && slot < MAX_ROSTER
+		&& g_fAbsentSince[slot] > 0.0 && LeaveRotoblinPaused();
 }
 
 // ---------- the say hook ----------
@@ -190,11 +213,6 @@ void Tourney_Sub(int client, const char[] args)
 		PrintToChat(client, "[Match] Usage: !sub <player out> <player in>. Between chapters only; the sub connects first.");
 		return;
 	}
-	if (!Tourney_BetweenChapters())
-	{
-		PrintToChat(client, "[Match] Subs are made between chapters, not during one. Try again at the next ready-up.");
-		return;
-	}
 	char by[24];
 	if (!ModCall_AuthId(client, by, sizeof(by)))
 	{
@@ -229,7 +247,15 @@ void Tourney_Sub(int client, const char[] args)
 		PrintToChat(client, "[Match] That is the same player.");
 		return;
 	}
-	EmitPug("SUB by=%s out=%s in=%s map=%d", by, outId, inId, g_iMapCount);
+	// Between chapters, or (plan T5) mid-chapter for a player the game is paused for.
+	bool emergency = !Tourney_BetweenChapters() && Tourney_EmergencyOk(outSlot);
+	if (!Tourney_BetweenChapters() && !emergency)
+	{
+		if (g_cvSubEmergency.BoolValue) PrintToChat(client, "[Match] Mid-chapter, a sub can only replace a player who disconnected, while the game is paused for them. Otherwise wait for the next ready-up.");
+		else PrintToChat(client, "[Match] Subs are made between chapters, not during one. Try again at the next ready-up.");
+		return;
+	}
+	EmitPug("SUB by=%s out=%s in=%s map=%d%s", by, outId, inId, g_iMapCount, emergency ? " emergency=1" : "");
 	PrintToChat(client, "[Match] Asking the site to put %N in. It answers in chat.", inClient);
 }
 
@@ -319,8 +345,9 @@ public Action Cmd_PugSub(int args)
 		return Plugin_Handled;
 	}
 	// The site checked the moment when the captain asked; the game may have
-	// gone live since (a slow answer, or a re-sent one).
-	if (!Tourney_BetweenChapters())
+	// gone live since, or the dropped player may be back (plan T5).
+	bool emergency = !Tourney_BetweenChapters() && Tourney_EmergencyOk(outSlot);
+	if (!Tourney_BetweenChapters() && !emergency)
 	{
 		PrintToServer("PUGERR not between chapters");
 		return Plugin_Handled;
@@ -347,6 +374,7 @@ public Action Cmd_PugSub(int args)
 	g_iRosterTeam[inSlot] = team;
 	g_bTourneySlotOut[outSlot] = true;
 	LeaveForget(outSlot);
+	if (emergency) LeaveCharge(team, g_cvSubCharge.IntValue);
 	int outClient = -1, inClient = -1;
 	char sid[24];
 	for (int c = 1; c <= MaxClients; c++)
@@ -372,8 +400,8 @@ public Action Cmd_PugSub(int args)
 	{
 		LeaveNameOf(outSlot, outName, sizeof(outName));
 	}
-	if (inClient != -1) PrintToChatAll("\x04[Match]\x01 %N replaces %s for Team %s.", inClient, outName, team == 1 ? "A" : "B");
-	else PrintToChatAll("\x04[Match]\x01 A sub replaces %s for Team %s; they are placed when they connect.", outName, team == 1 ? "A" : "B");
+	if (inClient != -1) PrintToChatAll("\x04[Match]\x01 %N replaces %s for Team %s%s.", inClient, outName, team == 1 ? "A" : "B", emergency ? " (emergency sub)" : "");
+	else PrintToChatAll("\x04[Match]\x01 A sub replaces %s for Team %s%s; they are placed when they connect.", outName, team == 1 ? "A" : "B", emergency ? " (emergency sub)" : "");
 	LogMessage("[tourney] sub: %s out, %s in (team %s, slot %d, map %d)", outId, inId, team == 1 ? "a" : "b", inSlot, g_iMapCount);
 	PrintToServer("PUGOK sub out=%s in=%s slot=%d", outId, inId, inSlot);
 	return Plugin_Handled;
@@ -393,11 +421,12 @@ void Tourney_AdminCall(int client, const char[] details)
 		PrintToChat(client, "[PUG] Your Steam ID is not verified yet, try again in a moment.");
 		return;
 	}
-	// The same cooldown as /mod, in the same map, so the two cannot be used in turn.
+	// The per-account timestamp is the one /mod writes, so the two cannot be used in turn.
 	int last;
 	if (g_smCooldown.GetValue(id, last))
 	{
-		int left = MODCALL_COOLDOWN - (GetTime() - last);
+		// Plan T5 Ruling 15: the ruleset's cooldown (/mod keeps MODCALL_COOLDOWN).
+		int left = g_cvAdminCooldown.IntValue - (GetTime() - last);
 		if (left > 0)
 		{
 			PrintToChat(client, "[Match] You can call staff again in %d:%02d.%s", left / 60, left % 60, g_bTourneyFrozen ? " The game is already frozen." : "");
@@ -615,4 +644,61 @@ public Action Listener_TourneyForceUnpause(int client, const char[] command, int
 	GetClientName(client, name, sizeof(name));
 	Tourney_Lift(id, "forced", name, false);
 	return Plugin_Continue;
+}
+
+// ---------- forfeits that are not a !gg (plan T5) ----------
+
+/** The reconnect pool ran out ("disconnect") or staff ruled it ("staff"):
+ *  the game ends as a !gg does, with the why on MATCH_END and the dump. A
+ *  freeze is lifted first (its line goes out while the token stands) but the
+ *  game is not unpaused: the next game's load ends the pause. Once only. */
+void Tourney_Forfeit(int team, const char[] why)
+{
+	if (team != 1 && team != 2) return;
+	if (g_iForfeitTeam != 0) return;
+	if (g_State != MS_Live && g_State != MS_Pending) return;
+	if (g_bTourneyFrozen) Tourney_Lift("site", "reset", "", false);
+	Gg_CancelVote();
+	Gg_ForfeitAs(team, why);
+}
+
+/** sm_pug_forfeit <token> <a|b>: the desk's Forfeit the game (plan T5
+ *  Ruling 12). Answers PUGOK forfeit team=<x>, PUGOK forfeit team=<x>
+ *  already for a forfeit of that team already in place, or PUGERR. */
+public Action Cmd_PugForfeit(int args)
+{
+	if (!TokenArgOk(args)) return Plugin_Handled;
+	if (args < 2)
+	{
+		PrintToServer("PUGERR usage: sm_pug_forfeit <token> <a|b>");
+		return Plugin_Handled;
+	}
+	if (!TourneyOn())
+	{
+		PrintToServer("PUGERR not a tournament box");
+		return Plugin_Handled;
+	}
+	char t[4];
+	GetCmdArg(2, t, sizeof(t));
+	int team = StrEqual(t, "a") ? 1 : StrEqual(t, "b") ? 2 : 0;
+	if (team == 0)
+	{
+		PrintToServer("PUGERR team is a or b");
+		return Plugin_Handled;
+	}
+	if (g_iForfeitTeam != 0)
+	{
+		if (g_iForfeitTeam == team) PrintToServer("PUGOK forfeit team=%s already", t);
+		else PrintToServer("PUGERR already forfeited");
+		return Plugin_Handled;
+	}
+	if (g_State != MS_Live && g_State != MS_Pending)
+	{
+		PrintToServer("PUGERR no live match");
+		return Plugin_Handled;
+	}
+	PrintToServer("PUGOK forfeit team=%s", t);
+	PrintToChatAll("\x04[Match]\x01 Staff ruled that Team %s forfeits this game.", team == 1 ? "A" : "B");
+	Tourney_Forfeit(team, "staff");
+	return Plugin_Handled;
 }

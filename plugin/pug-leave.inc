@@ -21,6 +21,11 @@ native bool IsInPause();   // rotoblin-az, optional
 ConVar g_cvLeaveBudget;
 ConVar g_cvLeaveAutoUnpause;
 ConVar g_cvLeaveHoldMax;
+ConVar g_cvDcTeamSeconds;
+
+// Plan T5: on a tournament box the reconnect time is the team's, per game.
+float g_fTeamDcUsed[3];             // [1] pug team a, [2] pug team b: seconds spent this game
+int g_iTeamDcWarned[3];             // the last warning threshold announced, per team
 
 float g_fAbsentSince[MAX_ROSTER];   // engine time they left; 0.0 = present
 float g_fAbsentUsed[MAX_ROSTER];    // seconds of allowance already spent
@@ -56,6 +61,13 @@ void LeaveInit()
 	g_cvLeaveHoldMax = CreateConVar("sm_pug_leave_hold_max", "1800",
 		"Longest an admin hold may freeze one player's reconnect allowance, in seconds. The hold releases itself after this.",
 		FCVAR_NOTIFY, true, 10.0, true, 7200.0);
+	// Plan T5 Ruling 8: the site pushes this from the ruleset to a tournament
+	// box only. 0, the default, leaves tracking to sm_pug_leave_budget, which
+	// the site pushes as 0 there, so a box that predates this cvar keeps leave
+	// tracking off exactly as before.
+	g_cvDcTeamSeconds = CreateConVar("sm_pug_dc_team_seconds", "0",
+		"Tournament box: reconnect seconds each team has per game while a rostered player is disconnected; at zero the team forfeits the game. 0 = off.",
+		FCVAR_NOTIFY, true, 0.0, true, 3600.0);
 	HookEvent("player_disconnect", Event_LeaveDisconnect, EventHookMode_Pre);
 	CreateTimer(1.0, Timer_LeaveClock, _, TIMER_REPEAT);
 }
@@ -73,6 +85,11 @@ void LeaveReset()
 		g_iLeaveWarned[i] = 0;
 		g_sLeaveName[i][0] = '\0';
 	}
+	for (int t = 0; t < 3; t++)
+	{
+		g_fTeamDcUsed[t] = 0.0;
+		g_iTeamDcWarned[t] = 0;
+	}
 	g_bLeavePaused = false;
 	g_bLeaveUnpausing = false;
 	g_sAbandoner[0] = '\0';
@@ -83,11 +100,58 @@ bool LeaveTracking()
 	return (g_State == MS_Pending || g_State == MS_Live)
 		&& !g_bSelfStarted
 		&& g_sAbandoner[0] == '\0'
-		&& g_cvLeaveBudget.IntValue > 0;
+		&& (LeaveTeamMode() || g_cvLeaveBudget.IntValue > 0);
+}
+
+/** A tournament box with team reconnect time (plan T5): the pool replaces
+ *  the per-player allowance and a forfeit replaces the abandon. */
+bool LeaveTeamMode()
+{
+	return TourneyOn() && g_cvDcTeamSeconds != null && g_cvDcTeamSeconds.IntValue > 0;
+}
+
+int LeaveTeamUsed(int team)
+{
+	if (team != 1 && team != 2) return 0;
+	return RoundToFloor(g_fTeamDcUsed[team]);
+}
+
+int LeaveTeamLeft(int team)
+{
+	if (team != 1 && team != 2) return 0;
+	int left = g_cvDcTeamSeconds.IntValue - LeaveTeamUsed(team);
+	return left < 0 ? 0 : left;
+}
+
+/** The first rostered slot that is disconnected now, or -1. Stock until
+ *  Task 5's caller lands, so the build stays free of a new warning. */
+stock int LeaveFirstAbsent()
+{
+	for (int i = 0; i < g_iRosterCount; i++)
+	{
+		if (g_fAbsentSince[i] > 0.0) return i;
+	}
+	return -1;
+}
+
+/** An emergency sub's cost (plan T5 Ruling 10): never takes the pool to
+ *  zero by itself, so the charge alone forfeits nothing. */
+void LeaveCharge(int team, int secs)
+{
+	if (!LeaveTeamMode() || secs <= 0 || (team != 1 && team != 2)) return;
+	float cap = float(g_cvDcTeamSeconds.IntValue - 1);
+	float next = g_fTeamDcUsed[team] + float(secs);
+	if (next > cap) next = g_fTeamDcUsed[team] > cap ? g_fTeamDcUsed[team] : cap;
+	g_fTeamDcUsed[team] = next;
+	int left = LeaveTeamLeft(team);
+	PrintToChatAll("\x04[Match]\x01 The emergency sub costs Team %s %d seconds of reconnect time (\x05%d:%02d\x01 left).",
+		team == 1 ? "A" : "B", secs, left / 60, left % 60);
 }
 
 int LeaveRemaining(int slot)
 {
+	// Plan T5: the team's pool on a tournament box.
+	if (LeaveTeamMode()) return LeaveTeamLeft(g_iRosterTeam[slot]);
 	float used = g_fAbsentUsed[slot];
 	// A held slot spends nothing: LeaveHold banked what had been used, and
 	// LeaveRelease restarts the running span from the moment of the release.
@@ -119,8 +183,12 @@ public Action Event_LeaveDisconnect(Event event, const char[] name, bool dontBro
 	GetClientName(client, g_sLeaveName[slot], sizeof(g_sLeaveName[]));
 	g_iLeaveWarned[slot] = 0;
 	int left = LeaveRemaining(slot);
-	PrintToChatAll("\x04[PUG]\x01 %s disconnected. They have \x05%d:%02d\x01 of reconnect time left for this match.",
-		g_sLeaveName[slot], left / 60, left % 60);
+	if (LeaveTeamMode())
+		PrintToChatAll("\x04[Match]\x01 %s disconnected. Team %s has \x05%d:%02d\x01 of reconnect time left this game; the game pauses for them.",
+			g_sLeaveName[slot], g_iRosterTeam[slot] == 1 ? "A" : "B", left / 60, left % 60);
+	else
+		PrintToChatAll("\x04[PUG]\x01 %s disconnected. They have \x05%d:%02d\x01 of reconnect time left for this match.",
+			g_sLeaveName[slot], left / 60, left % 60);
 	EmitPug("LEAVE steamid=%s remaining=%d", g_sRosterId[slot], left);
 	g_bLeaveUnpausing = false;
 	LeaveTryPause();
@@ -172,6 +240,13 @@ public Action Timer_LeaveClock(Handle timer)
 	// nothing to pause), so keep trying until a round is live.
 	if (!g_bLeavePaused) LeaveTryPause();
 
+	// Plan T5: the team's pool, and a forfeit instead of an abandon.
+	if (LeaveTeamMode())
+	{
+		LeaveTeamTick();
+		return Plugin_Continue;
+	}
+
 	for (int i = 0; i < g_iRosterCount; i++)
 	{
 		if (g_fAbsentSince[i] <= 0.0) continue;
@@ -203,6 +278,65 @@ public Action Timer_LeaveClock(Handle timer)
 		}
 	}
 	return Plugin_Continue;
+}
+
+/** Once a second while someone is away on a tournament box (plan T5 Ruling
+ *  8): a team whose rostered player is disconnected and not held spends one
+ *  second, however many of its players are away. A hold still ends at
+ *  sm_pug_leave_hold_max, as for a PUG. */
+static void LeaveTeamTick()
+{
+	bool spending[3];
+	for (int i = 0; i < g_iRosterCount; i++)
+	{
+		if (g_fAbsentSince[i] <= 0.0) continue;
+		if (g_fHoldSince[i] > 0.0)
+		{
+			if (GetEngineTime() - g_fHoldSince[i] < g_cvLeaveHoldMax.FloatValue) continue;
+			LeaveRelease(i);
+			char held[MAX_NAME_LENGTH];
+			LeaveNameOf(i, held, sizeof(held));
+			PrintToChatAll("\x04[PUG]\x01 The hold on %s's reconnect time ran out. Their clock is running again.", held);
+			LeaveEmitState(i, true);
+		}
+		int team = g_iRosterTeam[i];
+		if (team == 1 || team == 2) spending[team] = true;
+	}
+	for (int team = 1; team <= 2; team++)
+	{
+		if (!spending[team]) continue;
+		g_fTeamDcUsed[team] += 1.0;
+		int left = LeaveTeamLeft(team);
+		if (left <= 0)
+		{
+			LeaveTeamForfeit(team);
+			return;
+		}
+		int threshold = left <= 10 ? 10 : left <= 30 ? 30 : left <= 60 ? 60 : 0;
+		if (threshold != 0 && g_iTeamDcWarned[team] != threshold)
+		{
+			g_iTeamDcWarned[team] = threshold;
+			PrintToChatAll("\x04[Match]\x01 Team %s has \x05%d seconds\x01 of reconnect time left. At zero it forfeits this game.", team == 1 ? "A" : "B", left);
+		}
+	}
+}
+
+/** The pool ran out (plan T5 Ruling 9): the team forfeits this game. No
+ *  ABANDON, no abort, no ban; the absences are forgotten so nothing waits on
+ *  anyone any more. */
+static void LeaveTeamForfeit(int team)
+{
+	g_fTeamDcUsed[team] = float(g_cvDcTeamSeconds.IntValue);
+	for (int i = 0; i < g_iRosterCount; i++)
+	{
+		g_fAbsentSince[i] = 0.0;
+		g_fHoldSince[i] = 0.0;
+	}
+	g_bLeavePaused = false;
+	g_bLeaveUnpausing = false;
+	PrintToChatAll("\x04[Match]\x01 Team %s ran out of reconnect time and forfeits this game.", team == 1 ? "A" : "B");
+	LogMessage("pug-match: team %s ran out of reconnect time in match %d", team == 1 ? "a" : "b", g_iMatchId);
+	Tourney_Forfeit(team, "disconnect");
 }
 
 void LeaveAbandon(int slot)
@@ -462,7 +596,9 @@ public Action Cmd_Leave(int args)
 			return Plugin_Handled;
 		}
 		if (secs > room) secs = room;
-		g_fAbsentUsed[slot] -= float(secs);
+		// Plan T5: on a tournament box the time is the team's.
+		if (LeaveTeamMode()) g_fTeamDcUsed[g_iRosterTeam[slot]] -= float(secs);
+		else g_fAbsentUsed[slot] -= float(secs);
 		g_iLeaveWarned[slot] = 0;
 		int left = LeaveRemaining(slot);
 		PrintToChatAll("\x04[PUG]\x01 An admin gave %s more reconnect time (\x05%d:%02d\x01 left).", name, left / 60, left % 60);
@@ -475,7 +611,8 @@ public Action Cmd_Leave(int args)
 			return Plugin_Handled;
 		}
 		g_fHoldSince[slot] = 0.0;
-		g_fAbsentUsed[slot] = float(g_cvLeaveBudget.IntValue);
+		if (LeaveTeamMode()) g_fTeamDcUsed[g_iRosterTeam[slot]] = float(g_cvDcTeamSeconds.IntValue);
+		else g_fAbsentUsed[slot] = float(g_cvLeaveBudget.IntValue);
 		g_fAbsentSince[slot] = GetEngineTime();
 		PrintToChatAll("\x04[PUG]\x01 An admin ended %s's reconnect time.", name);
 	}
@@ -506,4 +643,7 @@ void LeaveStatus()
 			i, g_sRosterId[i], g_fAbsentSince[i] > 0.0 ? 1 : 0, LeaveRemaining(i),
 			g_fHoldSince[i] > 0.0 ? 1 : 0, LeaveHoldLeft(i));
 	}
+	// Plan T5. Not "STATUS leave abandoner=", which src/abandon.ts reads.
+	DumpLine("STATUS leave team mode=%d seconds=%d used_a=%d used_b=%d",
+		LeaveTeamMode() ? 1 : 0, g_cvDcTeamSeconds.IntValue, LeaveTeamUsed(1), LeaveTeamUsed(2));
 }

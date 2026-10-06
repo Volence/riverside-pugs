@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.25"
+#define PLUGIN_VERSION "0.3.26"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -2414,7 +2414,8 @@ void EndMatchNow(const char[] why)
 	TotalScores(a, b);
 	char winner[8];
 	WinnerOf(a, b, winner, sizeof(winner));
-	char ff[16];
+	Gg_ForfeitWinner(winner, sizeof(winner));
+	char ff[48];
 	Gg_ForfeitTail(ff, sizeof(ff));
 	EmitPug("MATCH_END a=%d b=%d winner=%s%s", a, b, winner, ff);
 	PugDebug("ended (%s): a=%d b=%d winner=%s", why, a, b, winner);
@@ -5263,7 +5264,8 @@ void WriteDump(const char[] nonce)
 	TotalScores(a, b);
 	char winner[8];
 	WinnerOf(a, b, winner, sizeof(winner));
-	char ff[16];
+	Gg_ForfeitWinner(winner, sizeof(winner));
+	char ff[48];
 	Gg_ForfeitTail(ff, sizeof(ff));
 	DumpLine("END winner=%s a=%d b=%d%s%s", winner, a, b, ff, tail);
 }
