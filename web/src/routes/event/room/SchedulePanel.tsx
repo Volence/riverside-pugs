@@ -28,7 +28,9 @@ function TimeForm({ label, busy, onSubmit, onCancel }: { label: string; busy: bo
  *  Times are shown in the viewer's zone and entered in it. */
 export function SchedulePanel({ v, busy, onPropose, onRespond, onCounter, onWithdraw }: {
   v: MatchRoomView; busy: boolean;
-  onPropose: (time: string, note: string) => void; onRespond: (accept: boolean) => void; onCounter: (time: string, note: string) => void; onWithdraw: () => void;
+  onPropose: (time: string, note: string) => void; onRespond: (accept: boolean) => void;
+  /** May return a success flag, so the counter form only closes once the request actually went through. */
+  onCounter: (time: string, note: string) => void | Promise<boolean>; onWithdraw: () => void;
 }) {
   const s = v.schedule;
   const [countering, setCountering] = useState(false);
@@ -40,7 +42,7 @@ export function SchedulePanel({ v, busy, onPropose, onRespond, onCounter, onWith
     <div class="roomschedule">
       {s.scheduledAt
         ? <p><strong>{whenText(s.scheduledAt)}</strong> <span class="muted">({source}; the room opens {s.leadMinutes} minutes before)</span></p>
-        : <p>No time is set yet. {s.windowEnd ? 'A captain or co-captain proposes one below.' : "Staff set the round's window first."}</p>}
+        : <p>No time is set yet.{s.windowEnd ? (s.canPropose ? ' A captain or co-captain proposes one below.' : '') : " Staff set the round's window first."}</p>}
       {s.windowStart && s.windowEnd && <p class="muted">{`Window: ${whenText(s.windowStart)} to ${whenText(s.windowEnd)}`}</p>}
       {p && (
         <div class="roomschedule__proposal">
@@ -54,7 +56,25 @@ export function SchedulePanel({ v, busy, onPropose, onRespond, onCounter, onWith
               <button class="btn btn--ghost btn--sm" type="button" disabled={busy} onClick={() => setCountering(true)}>Counter</button>
             </div>
           )}
-          {s.canAnswer && countering && <TimeForm label="Counter with this time" busy={busy} onSubmit={(t, n) => { setCountering(false); onCounter(t, n); }} onCancel={() => setCountering(false)} />}
+          {s.canAnswer && countering && (
+            <TimeForm
+              label="Counter with this time" busy={busy}
+              onSubmit={(t, n) => {
+                const result = onCounter(t, n);
+                // A real caller returns a promise that resolves to whether the
+                // request went through; the form stays open on a rejection or a
+                // false so a captain's typed time and note are not lost. A bare
+                // void return (no promise, as a test's plain mock gives back)
+                // closes it at once, matching the old behaviour.
+                if (result && typeof (result as Promise<boolean>).then === 'function') {
+                  void (result as Promise<boolean>).then((ok) => { if (ok) setCountering(false); });
+                } else {
+                  setCountering(false);
+                }
+              }}
+              onCancel={() => setCountering(false)}
+            />
+          )}
           {s.canWithdraw && <button class="btn btn--ghost btn--sm" type="button" disabled={busy} onClick={onWithdraw}>Withdraw</button>}
         </div>
       )}

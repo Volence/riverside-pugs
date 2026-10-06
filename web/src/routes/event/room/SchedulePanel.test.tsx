@@ -1,8 +1,16 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import type { MatchRoomView, RoomSchedule } from '../../../api';
 import { SchedulePanel } from './SchedulePanel';
 import { whenText } from '../../../eventFormat';
+
+/** A promise plus the function that settles it, for a handler whose result
+ *  the test controls across more than one render. */
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((res) => { resolve = res; });
+  return { promise, resolve };
+}
 
 afterEach(cleanup);
 
@@ -58,5 +66,40 @@ describe('SchedulePanel', () => {
     expect(h.onWithdraw).toHaveBeenCalled();
     expect(screen.getByText(/declined by alice/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+  });
+
+  it('does not invite an outsider to propose, since they have no form to propose in (plan T4 review)', () => {
+    const h = handlers();
+    render(<SchedulePanel v={view(schedule({ canPropose: false }))} busy={false} {...h} />);
+    expect(screen.getByText(/No time is set yet/)).toBeTruthy();
+    expect(screen.queryByText(/proposes one below/)).toBeNull();
+    expect(screen.queryByLabelText('Proposed time')).toBeNull();
+  });
+
+  it('still tells an outsider staff must set the window first, with no window at all', () => {
+    const h = handlers();
+    render(<SchedulePanel v={view(schedule({ canPropose: false, windowStart: null, windowEnd: null }))} busy={false} {...h} />);
+    expect(screen.getByText(/window first/)).toBeTruthy();
+  });
+
+  it('keeps the counter form open on a rejection or a false, closing only once the request resolves true (plan T4 review)', async () => {
+    const h = handlers();
+    const p = { id: 5, side: 'a' as const, byName: 'alice', time: TIME, note: '', createdAt: '2026-10-10T10:00:00.000Z', autoAcceptAt: null, status: 'open' as const, respondedByName: null, respondedAt: null };
+    const first = deferred<boolean>();
+    h.onCounter.mockReturnValueOnce(first.promise);
+    render(<SchedulePanel v={view(schedule({ proposal: p, canAnswer: true }))} busy={false} {...h} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Counter' }));
+    fireEvent.input(screen.getByLabelText('Proposed time'), { target: { value: '2026-10-15T21:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Counter with this time' }));
+    expect(h.onCounter).toHaveBeenCalledTimes(1);
+    first.resolve(false);
+    await waitFor(() => expect(screen.getByLabelText('Proposed time')).toBeTruthy());
+
+    const second = deferred<boolean>();
+    h.onCounter.mockReturnValueOnce(second.promise);
+    fireEvent.click(screen.getByRole('button', { name: 'Counter with this time' }));
+    expect(h.onCounter).toHaveBeenCalledTimes(2);
+    second.resolve(true);
+    await waitFor(() => expect(screen.queryByLabelText('Proposed time')).toBeNull());
   });
 });

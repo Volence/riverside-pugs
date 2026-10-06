@@ -3,7 +3,10 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import type { MatchRoomView } from '../api';
 
 const { mockEvents } = vi.hoisted(() => ({
-  mockEvents: { room: vi.fn(), ready: vi.fn(), veto: vi.fn(), lineup: vi.fn(), confirmResult: vi.fn(), dispute: vi.fn() },
+  mockEvents: {
+    room: vi.fn(), ready: vi.fn(), veto: vi.fn(), lineup: vi.fn(), confirmResult: vi.fn(), dispute: vi.fn(),
+    propose: vi.fn(), respond: vi.fn(), counter: vi.fn(), withdrawProposal: vi.fn(),
+  },
 }));
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
@@ -133,5 +136,21 @@ describe('EventMatchPage', () => {
     fireEvent.input(screen.getByRole('textbox', { name: 'Why you dispute the result' }), { target: { value: 'They had five' } });
     fireEvent.click(screen.getByRole('button', { name: 'Dispute the result' }));
     await waitFor(() => expect(mockEvents.dispute).toHaveBeenCalledWith('cup', 1, 'They had five'));
+  });
+
+  it('mounts the Schedule panel on a window-stage match and withdraws a proposal (plan T4 review)', async () => {
+    const p = { id: 5, side: 'a' as const, byName: 'alice', time: '2026-10-14T21:00:00.000Z', note: '', createdAt: '2026-10-10T10:00:00.000Z', autoAcceptAt: null, status: 'open' as const, respondedByName: null, respondedAt: null };
+    mockEvents.room.mockResolvedValue(view({
+      phase: 'waiting',
+      schedule: {
+        scheduledAt: null, source: null, windowStart: '2026-10-12T00:00:00.000Z', windowEnd: '2026-10-18T23:59:59.000Z', opensAt: null, leadMinutes: 20,
+        proposal: p, log: [], canPropose: false, canAnswer: false, canWithdraw: true,
+      },
+    }));
+    mockEvents.withdrawProposal.mockResolvedValue({});
+    render(<EventMatchPage slug="cup" id="1" session={{ kind: 'active' } as never} />);
+    expect(await screen.findByRole('heading', { name: 'Schedule' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Withdraw' }));
+    await waitFor(() => expect(mockEvents.withdrawProposal).toHaveBeenCalledWith('cup', 1));
   });
 });

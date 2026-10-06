@@ -380,5 +380,34 @@ describe('PlayPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Set time' }));
     await waitFor(() => expect(mockAdmin.setEventMatchTime).toHaveBeenCalledWith(9, 7, new Date('2026-10-17T21:00').toISOString()));
     expect(confirm).toHaveBeenCalled();
+    await waitFor(() => expect((screen.getByLabelText('Match time') as HTMLInputElement).value).toBe(''));
+  });
+
+  it('shows "1 proposal" in the singular (plan T4 review)', async () => {
+    const desk2 = {
+      holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 },
+      schedule: { windowStart: '2026-10-12T00:00:00.000Z', windowEnd: '2026-10-18T23:59:59.000Z', proposal: { side: 'b' as const, byName: 'bob', time: '2026-10-16T20:00:00.000Z', autoAcceptAt: null }, proposals: 1 },
+    };
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+      rounds: [{ group: 1, round: 1, label: 'Week 1', dates: null, defaultAt: null, window: null, matches: [m({ desk: desk2 })] }] }] }));
+    render(<PlayPanel eventId={9} canEdit slug="cup" />);
+    expect((await screen.findByText(/Proposal open: bob \(Bats\)/)).textContent).toContain('1 proposal');
+    expect((await screen.findByText(/Proposal open: bob \(Bats\)/)).textContent).not.toContain('1 proposals');
+  });
+
+  it('does not clear the Set time input when the save fails', async () => {
+    const desk2 = {
+      holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 },
+      schedule: { windowStart: '2026-10-12T00:00:00.000Z', windowEnd: '2026-10-18T23:59:59.000Z', proposal: null, proposals: 0 },
+    };
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+      rounds: [{ group: 1, round: 1, label: 'Week 1', dates: null, defaultAt: null, window: null, matches: [m({ desk: desk2 })] }] }] }));
+    mockAdmin.setEventMatchTime.mockRejectedValue(new ApiError(409, 'Refused.'));
+    render(<PlayPanel eventId={9} canEdit slug="cup" />);
+    fireEvent.click(await screen.findByText('Staff tools: Rats vs Bats'));
+    fireEvent.input(screen.getByLabelText('Match time'), { target: { value: '2026-10-17T21:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Set time' }));
+    await waitFor(() => expect(mockAdmin.setEventMatchTime).toHaveBeenCalled());
+    expect((screen.getByLabelText('Match time') as HTMLInputElement).value).toBe('2026-10-17T21:00');
   });
 });
