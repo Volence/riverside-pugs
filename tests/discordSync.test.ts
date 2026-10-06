@@ -8,6 +8,8 @@ import { getMessage, saveMessage } from '../src/discord/messageStore.js';
 import { setSetting } from '../src/settings.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 import type { Scheduler } from '../src/lobby.js';
+import { noteMatchAborted } from '../src/matchAborts.js';
+import { recordPenalty } from '../src/penalties.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119800000000${i + 1}`);
 const CH = 'queue-here';
@@ -337,6 +339,39 @@ describe('DiscordSync', () => {
     // A second pass must not post a duplicate.
     await sync.pass();
     expect(t.messages.filter((m) => m.channelId === 'admin-chan' && !m.deleted)).toHaveLength(1);
+  });
+
+  // Owner, 2026-10-05: "6 connected" alone sent staff to the match page to
+  // find out who was missing and whether they were penalised.
+  it('the admin copy of a no-show abort says why, who never got in, their side and what it cost', async () => {
+    setSetting(db, 'discord_admin_channel_id', 'admin-chan');
+    await build().start();
+    const matchId = await toLive();
+    const roster = db.prepare('SELECT player_id, team FROM match_players WHERE match_id = ? ORDER BY rowid').all(matchId) as
+      { player_id: string; team: string }[];
+    const [noShow, turnedAway] = roster;
+    db.prepare("UPDATE matches SET state = 'aborted', abort_cause = 'no_show' WHERE id = ?").run(matchId);
+    noteMatchAborted(db, { matchId, cause: 'no_show', culprits: [noShow.player_id], fileCheck: [turnedAway.player_id], requeue: false });
+    recordPenalty(db, noShow.player_id, 'no_show', matchId);
+    await sync.pass();
+    await sync.pass();
+
+    const text = JSON.stringify(t.messages.filter((m) => m.channelId === 'admin-chan' && !m.deleted)[0].payload);
+    expect(text).toContain('Why: not enough players connected in time.');
+    const nameOf = (id: string) => (db.prepare('SELECT name FROM players WHERE steamid = ?').get(id) as { name: string }).name;
+    expect(text).toContain(`**${nameOf(noShow.player_id)}** (Team ${noShow.team.toUpperCase()}) never connected: 1 h queue timeout (1st no-show in 7 days)`);
+    expect(text).toContain(`**${nameOf(turnedAway.player_id)}** (Team ${turnedAway.team.toUpperCase()}) never got in: rejected by the file check, so no penalty`);
+  });
+
+  it('with no admin channel an aborted card stays public and names nobody at fault', async () => {
+    await build().start();
+    const matchId = await toLive();
+    const [noShow] = db.prepare('SELECT player_id FROM match_players WHERE match_id = ? ORDER BY rowid').all(matchId) as { player_id: string }[];
+    db.prepare("UPDATE matches SET state = 'aborted', abort_cause = 'no_show' WHERE id = ?").run(matchId);
+    noteMatchAborted(db, { matchId, cause: 'no_show', culprits: [noShow.player_id], requeue: false });
+    await sync.pass();
+    const card = getMessage(db, 'match', String(matchId))!.message_id;
+    expect(JSON.stringify(t.byId(card)!.payload)).not.toContain('never connected');
   });
 
   it('an aborted match with a cause gets one neutral line in the queue channel, naming nobody and pinging nobody', async () => {

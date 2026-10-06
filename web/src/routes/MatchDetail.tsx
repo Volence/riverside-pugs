@@ -11,6 +11,7 @@ import { StaffChatLog } from './StaffChatLog';
 import { StatTable, EventFeed, DemoPlaybackHint, type StatRow } from '../components/StatTable';
 import { ReportPlayer } from '../components/ReportPlayer';
 import { EndorsePanel } from '../components/EndorsePanel';
+import { AbortPartyList } from '../components/AbortPartyList';
 import { sideTotals } from '../matchTotals';
 import { Viewer } from '../replay/Viewer';
 import { DrillThis } from '../replay/DrillThis';
@@ -566,6 +567,12 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
               : `This match was voided by an admin${match.voidReason ? `: ${match.voidReason}` : ''}. `
                 + 'It no longer counts anywhere, and the season\u2019s ratings were rebuilt without it.'}
           </p>
+          {aborted && data.abortWho && (
+            <>
+              {data.abortWho.reason && <p class="muted">Staff only. Why it ended: {data.abortWho.reason}.</p>}
+              <AbortPartyList parties={data.abortWho.parties} />
+            </>
+          )}
         </Panel>
       )}
 

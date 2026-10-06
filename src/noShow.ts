@@ -4,6 +4,7 @@ import type { ServerReleaser } from './serverRelease.js';
 import { recordPenalty } from './penalties.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { noteMatchAborted } from './matchAborts.js';
+import { escapeName } from './identity.js';
 
 /** Minutes staff may add to one match's no-show deadline, in total. Enough to
  *  wait out a slow download or a Steam hiccup; past that the match is not
@@ -125,9 +126,18 @@ export function reapNoShowMatches(db: DB, releaser: ServerReleaser): number[] {
       culprits = absent.filter((p) => !rejected.includes(p));
       for (const p of culprits) recordPenalty(db, p, 'no_show', r.id);
     }
-    const spared = rejected.length === 0 ? ''
-      : ` ${rejected.length === 1 ? 'One player was' : `${rejected.length} players were`} rejected by the file check, `
-        + `so ${rejected.length === 1 ? 'they tried' : 'they all tried'} to connect and got no no-show penalty.`;
+    // Named, with their side: "6 connected" alone sent staff to the match
+    // page to find out who was missing (owner, 2026-10-05).
+    const named = (ids: string[]) => ids.map((p) => {
+      const row = db.prepare(
+        'SELECT COALESCE(p.name, mp.player_id) AS name, mp.team FROM match_players mp LEFT JOIN players p ON p.steamid = mp.player_id WHERE mp.match_id = ? AND mp.player_id = ?',
+      ).get(r.id, p) as { name: string; team: string } | undefined;
+      return `**${escapeName(row?.name ?? p)}** (Team ${(row?.team ?? '?').toUpperCase()})`;
+    }).join(', ');
+    const spared = (culprits.length === 0 ? ''
+      : ` Never connected: ${named(culprits)}.`)
+      + (rejected.length === 0 ? ''
+        : ` Rejected by the file check, so they did try and got no penalty: ${named(rejected)}.`);
     publishAdminEvent({
       kind: 'problem', matchId: r.id,
       text: !noShowRule

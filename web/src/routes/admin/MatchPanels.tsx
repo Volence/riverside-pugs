@@ -7,6 +7,7 @@ import { formatTime } from '../../replay/ReplayControls';
 import { SlowToReadyTable } from './SlowToReady';
 import type { ConfirmChoice } from '../../components/Confirm';
 import type { MatchPause, MatchReadyup } from '../../api';
+import { AbortPartyList } from '../../components/AbortPartyList';
 
 /**
  * The panels of the Live desk: open matches, the servers, the queue and the
@@ -373,7 +374,7 @@ export function RecentResultsPanel({ data, busy, run }: { data: AdminOverview; b
             {data.aborted.map((m) => (
               <li key={m.id}>
                 <a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)} {m.teamAScore} - {m.teamBScore}
-                {m.abandonedBy ? <> · left: {m.abandonedBy}</> : null}
+                {m.abandonedBy && !(m.parties ?? []).length ? <> · left: {m.abandonedBy}</> : null}
                 {' '}<span class="muted">({fmtTime(m.endedAt)})</span>
                 {(m.noShows ?? 0) > 0 && (
                   <>
@@ -385,6 +386,7 @@ export function RecentResultsPanel({ data, busy, run }: { data: AdminOverview; b
                       })}>Clear {m.noShows} no-show{m.noShows === 1 ? '' : 's'}</button>
                   </>
                 )}
+                <AbortPartyList parties={m.parties ?? []} />
               </li>
             ))}
           </ul>

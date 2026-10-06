@@ -109,6 +109,28 @@ export function clearMatchNoShows(db: DB, matchId: number, by: string, now = new
   return rows.map((r) => r.player_id);
 }
 
+/**
+ * The queue timeout one recorded offense handed out when it was recorded:
+ * its rung on its own ladder, counted the way ladderTimeout counts, over the
+ * window up to and including it. Null for no such row. Cleared rows still
+ * answer, with `cleared` set, so a record can say what was taken back.
+ */
+export function offenseTimeout(db: DB, penaltyId: number):
+  { minutes: number; offense: number; windowDays: number; cleared: boolean } | null {
+  const row = db.prepare('SELECT player_id, kind, created_at, cleared_at FROM penalties WHERE id = ?').get(penaltyId) as
+    { player_id: string; kind: PenaltyKind; created_at: string; cleared_at: string | null } | undefined;
+  if (!row) return null;
+  const since = new Date(Date.parse(row.created_at) - windowDays(db) * 24 * 60 * 60 * 1000).toISOString();
+  // Offenses cleared since are left out, as ladderTimeout leaves them out:
+  // what this one costs now, which is what staff act on.
+  const n = (db.prepare(
+    `SELECT COUNT(*) AS n FROM penalties WHERE player_id = ? AND kind = ? AND created_at >= ? AND created_at <= ?
+       AND (cleared_at IS NULL OR id = ?)`,
+  ).get(row.player_id, row.kind, since, row.created_at, penaltyId) as { n: number }).n;
+  const steps = ladder(db, row.kind);
+  return { minutes: steps[Math.min(n, steps.length) - 1], offense: n, windowDays: windowDays(db), cleared: row.cleared_at !== null };
+}
+
 export interface PenaltyRow {
   id: number;
   kind: PenaltyKind;

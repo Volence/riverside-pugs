@@ -279,6 +279,9 @@ export interface MatchView {
   unlinked: string[];
   /** True when the match's server has SourceTV, so anyone can watch it. */
   canSpectate?: boolean;
+  /** For the admin channel's copy of an aborted card only: why, and who
+   *  never got in or walked, with what it cost them. */
+  abort?: { reason: string | null; parties: { name: string; team: 'a' | 'b' | null; what: string; outcome: string }[] };
 }
 
 const STATE_LINE: Record<MatchCardState, string> = {
@@ -296,6 +299,13 @@ export function renderMatch(v: MatchView): MessagePayload {
     extra.push(`Voice: Team A <#${v.voice.teamAId}>, Team B <#${v.voice.teamBId}>`);
     if (v.unlinked.length) {
       extra.push(`Discord not linked, so not moved: ${v.unlinked.map(escapeName).join(', ')}`);
+    }
+  }
+  if (v.state === 'aborted' && v.abort) {
+    if (v.abort.reason) extra.push(`Why: ${v.abort.reason}.`);
+    for (const p of v.abort.parties) {
+      const team = p.team ? ` (Team ${p.team.toUpperCase()})` : '';
+      extra.push(`**${escapeName(p.name)}**${team} ${p.what}: ${p.outcome}`);
     }
   }
   const open = v.state === 'configuring' || v.state === 'waiting' || v.state === 'live';

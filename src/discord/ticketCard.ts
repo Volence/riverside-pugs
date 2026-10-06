@@ -49,21 +49,39 @@ function matchLinks(r: ReportBit, publicUrl: string): string {
   return `${match} · [replay moment](${publicUrl}/match/${r.match_id}?ordinal=${r.map_ordinal}&half=${r.half}&t=${r.t_ms})`;
 }
 
+/** Which team a player was on in a match, as staff read it, or null when they
+ *  were not on its roster (a spectator, a Discord-only person). */
+function teamIn(db: DB, matchId: number | null, steamid: string | null): string | null {
+  if (matchId === null || steamid === null) return null;
+  const row = db.prepare('SELECT team FROM match_players WHERE match_id = ? AND player_id = ?').get(matchId, steamid) as
+    { team: 'a' | 'b' } | undefined;
+  return row ? `Team ${row.team.toUpperCase()}` : null;
+}
+
+/** A match line on the card: the links, then the side the accused played. */
+function matchLine(db: DB, r: ReportBit, targetId: string | null, publicUrl: string): string {
+  const side = teamIn(db, r.match_id, targetId);
+  return `${matchLinks(r, publicUrl)}${side ? ` · accused on ${side}` : ''}`;
+}
+
 /**
  * One report as staff read it: who filed it, the category, where, and what
  * they wrote. The name and the words are escaped and the name is plain text,
  * never anchor text (see the Accused field). The text is quoted line by line
  * and clipped; the ticket page has all of it.
  */
-function reportBlock(db: DB, r: ReportBit, publicUrl: string): string {
+function reportBlock(db: DB, r: ReportBit, targetId: string | null, publicUrl: string): string {
   const who = escapeName(reporterLabel(db, r.ticket_id, { reporterId: r.reporter_id, reporterDiscordId: r.reporter_discord_id }));
-  const where = r.match_id === null ? '' : ` · ${matchLinks(r, publicUrl)}`;
+  // Teammate or opponent of the accused changes how a report reads, so each
+  // side is named: the reporter's here, the accused's on the match line.
+  const side = teamIn(db, r.match_id, r.reporter_id);
+  const where = r.match_id === null ? '' : ` · ${matchLine(db, r, targetId, publicUrl)}`;
   const text = r.text.trim();
   // By code point, so a clip never splits an emoji into a lone surrogate.
   const chars = Array.from(text);
   const clipped = chars.length > TEXT_MAX ? `${chars.slice(0, TEXT_MAX).join('')}...` : text;
   const quote = clipped === '' ? [] : clipped.split('\n').map((l) => `> ${escapeName(l)}`);
-  return [`**${who}** · ${escapeName(r.category)}${where}`, ...quote].join('\n');
+  return [`**${who}**${side ? ` (${side})` : ''} · ${escapeName(r.category)}${where}`, ...quote].join('\n');
 }
 
 /** The reports, newest last, with as many of the newest as fit under
@@ -125,7 +143,7 @@ export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketC
     { name: 'Reports', value: reports.length === 0 ? 'None. Opened by staff.' : `${reports.length} from ${people(reporters)}: ${categories.join(', ')}` },
   ];
   const withMatch = reports.filter((r) => r.match_id !== null).slice(-5);
-  if (withMatch.length > 0) fields.push({ name: 'Matches', value: withMatch.map((r) => matchLinks(r, publicUrl)).join('\n') });
+  if (withMatch.length > 0) fields.push({ name: 'Matches', value: withMatch.map((r) => matchLine(db, r, t.target_id, publicUrl)).join('\n') });
 
   // Row one: Claim, Close, the link. Row two, while open: Contact reporter
   // when anyone reported, and Join and End while a chat is open.
@@ -152,7 +170,7 @@ export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketC
         ? 'Bans are issued on the ticket page.'
         : t.restricted === 1
           ? 'Who reported and what they wrote is on the ticket page. Bans are issued there too.'
-          : reportsText(reports.map((r) => reportBlock(db, r, publicUrl)), 'Bans are issued on the ticket page.'),
+          : reportsText(reports.map((r) => reportBlock(db, r, t.target_id, publicUrl)), 'Bans are issued on the ticket page.'),
       color: COLOR[status],
       fields,
       footer: t.restricted === 1
@@ -179,11 +197,14 @@ export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketC
  *  category and where. */
 export function reportLine(db: DB, reportId: number, publicUrl: string): MessagePayload {
   const r = db.prepare(`SELECT ${REPORT_COLS} FROM ticket_reports WHERE id = ?`).get(reportId) as ReportBit;
-  const restricted = (db.prepare('SELECT restricted FROM tickets WHERE id = ?').get(r.ticket_id) as { restricted: number } | undefined)?.restricted === 1;
+  const t = db.prepare('SELECT restricted, target_id FROM tickets WHERE id = ?').get(r.ticket_id) as
+    { restricted: number; target_id: string | null } | undefined;
+  const restricted = t?.restricted === 1;
+  const targetId = t?.target_id ?? null;
   // A restricted ticket's thread names nobody who reported (see ticketCard).
   const description = restricted
-    ? `**${escapeName(r.category)}**${r.match_id === null ? '' : ` · ${matchLinks(r, publicUrl)}`}`
-    : reportBlock(db, r, publicUrl);
+    ? `**${escapeName(r.category)}**${r.match_id === null ? '' : ` · ${matchLine(db, r, targetId, publicUrl)}`}`
+    : reportBlock(db, r, targetId, publicUrl);
   return {
     embeds: [{ title: 'Another report', description, color: COLOR.open }],
     components: [],

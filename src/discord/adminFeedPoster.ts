@@ -419,7 +419,14 @@ export class AdminFeedPoster {
         const appealId = Number(d.appealId ?? e.target);
         const link = `[#${appealId}](${this.deps.publicUrl}/admin/people/appeals/${appealId})`;
         switch (e.action) {
-          case 'appeal_ask': return `${who} asked a question on appeal ${link}`;
+          case 'appeal_ask': {
+            // Asked once and never edited, so the row holds exactly what was
+            // sent; askQuestion caps it at 500 characters. Quoted like a note.
+            const q = ((this.deps.db.prepare('SELECT question FROM appeals WHERE id = ?').get(appealId) as
+              { question: string | null } | undefined)?.question ?? '').trim();
+            const quote = q === '' ? '' : `:\n${q.split('\n').map((l) => `> ${escapeName(l)}`).join('\n')}`;
+            return `${who} asked a question on appeal ${link}${quote}`;
+          }
           case 'appeal_accept': return `${who} accepted appeal ${link}`;
           case 'appeal_shorten': return `${who} shortened appeal ${link}`;
           case 'appeal_deny': return `${who} denied appeal ${link}`;

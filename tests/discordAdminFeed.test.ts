@@ -441,6 +441,21 @@ describe('admin feed', () => {
     expect(text(1)).not.toContain('****');
   });
 
+  it('a question asked on an appeal is quoted under the line', async () => {
+    const ban = db.prepare(
+      "INSERT INTO bans (player_id, reason, created_by, created_at) VALUES (?, 'x', ?, datetime('now'))",
+    ).run(IDS[2], ADMIN).lastInsertRowid;
+    db.prepare(
+      `INSERT INTO appeals (id, ban_id, steamid, what_happened, why_lift, state, question, asked_by, asked_at, source, created_at)
+       VALUES (8, ?, ?, 'a', 'b', 'asked', ?, ?, datetime('now'), 'site', datetime('now'))`,
+    ).run(ban, IDS[2], 'Why were you in\n*their* saferoom?', ADMIN);
+    logAdmin(db, ADMIN, 'appeal_ask', IDS[2], { appealId: 8 });
+    await settled();
+    const line = JSON.stringify(inFeed()[0].payload);
+    expect(line).toContain('asked a question on appeal [#8](https://pug.test/admin/people/appeals/8):');
+    expect(line).toContain('> Why were you in\\n> \\\\*their\\\\* saferoom?');
+  });
+
   it('appeal actions read as sentences linking the appeal, not the default fallback', async () => {
     logAdmin(db, ADMIN, 'appeal_ask', IDS[2], { appealId: 7 });
     logAdmin(db, ADMIN, 'appeal_accept', IDS[2], { appealId: 7 });
