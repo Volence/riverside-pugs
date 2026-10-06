@@ -349,9 +349,6 @@ export class BookingRunner {
     const nowMs = this.now();
     const lead = bookingLimits(this.db).holdLeadMinutes * 60_000;
     let preempt = false;
-    // Boxes tournament matches in each region still wait for in this pass
-    // (Ruling 6): one scrim past its start is bumped for each, no more.
-    const owed = new Map<string, number>();
     for (const b of this.queue()) {
       if (b.state !== 'scheduled' || b.server_id !== null || b.ending_at !== null) continue;
       if (Date.parse(b.starts_at) - lead > nowMs) continue;
@@ -372,9 +369,9 @@ export class BookingRunner {
             if (b.purpose === 'tournament') {
               this.bumpFor(b, nowMs);
             } else if (nowMs >= Date.parse(b.starts_at)) {
-              const left = owed.get(b.region) ?? this.tournamentsOwed(b.region);
-              const match = left > 0 ? this.waitingTournament(b.region) : null;
-              owed.set(b.region, match ? left - 1 : left);
+              // One scrim per waiting match, across passes: a match any scrim
+              // was already bumped for is not offered again (waitingTournament).
+              const match = this.waitingTournament(b.region);
               if (match) { this.bump(b, match, nowMs); continue; }
             }
           }
@@ -449,23 +446,30 @@ export class BookingRunner {
   }
 
   /** The tournament booking in the region waiting for a box that a scrim
-   *  past its start gives way to (Ruling 6): the first in queue order. */
+   *  past its start gives way to (Ruling 6): the first in queue order that
+   *  no scrim has been bumped for yet. A bump writes a 'bumped' event naming
+   *  the match (byBookingId), so one waiting match takes at most one scrim
+   *  however many passes it waits through, and a match a held scrim's box is
+   *  already winding down for takes no second one. */
   private waitingTournament(region: string): BookingRow | null {
     const rows = this.db.prepare(
-      "SELECT * FROM bookings WHERE purpose = 'tournament' AND region = ? AND state = 'scheduled' AND server_id IS NULL AND ending_at IS NULL",
+      `SELECT * FROM bookings t WHERE purpose = 'tournament' AND region = ? AND state = 'scheduled' AND server_id IS NULL AND ending_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM booking_events e WHERE e.event = 'bumped' AND json_extract(e.detail, '$.byBookingId') = t.id)`,
     ).all(region) as BookingRow[];
     return rows.sort(byPriority)[0] ?? null;
   }
 
   /** The scrim a tournament match may bump (Ruling 4): open, holding a box
    *  in the match's region, not started (never active, no live game, not in
-   *  crash recovery), on a box that loads the match's campaign. The latest
+   *  crash recovery, nobody seen on its box yet: last_human_at is written
+   *  only by recordPresence and finishRecovery), on a box that loads the
+   *  match's campaign. The latest
    *  start first, then the newest row: the scrim with the most time to
    *  rebook gives way. */
   private bumpable(forB: BookingRow): BookingRow | null {
     const rows = this.db.prepare(
       `SELECT * FROM bookings WHERE purpose = 'scrim' AND region = ? AND server_id IS NOT NULL AND ending_at IS NULL
-         AND recovering_at IS NULL AND state IN ('held', 'setup', 'ready') ORDER BY starts_at DESC, id DESC`,
+         AND recovering_at IS NULL AND last_human_at IS NULL AND state IN ('held', 'setup', 'ready') ORDER BY starts_at DESC, id DESC`,
     ).all(forB.region) as BookingRow[];
     for (const v of rows) {
       if (liveBookingGame(this.db, v.id)) continue;

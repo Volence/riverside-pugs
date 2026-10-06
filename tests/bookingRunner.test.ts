@@ -7,7 +7,7 @@ import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { Notifier } from '../src/notify/notify.js';
 import {
   addPerson, cancelBooking, confirmBooking, createBooking, addCampaign, getBooking, holdBox, markSetup, respondPerson, sideRow,
-  createTournamentBooking, setNext, markActive,
+  createTournamentBooking, setNext, markActive, recordPresence,
 } from '../src/bookings/bookings.js';
 import { BookingRunner, CLEAR_LINES, allowLines, bookingLines } from '../src/bookings/runner.js';
 import { BookingVoice } from '../src/bookings/voice.js';
@@ -2230,6 +2230,34 @@ describe('server priority (owner, 2026-10-07)', () => {
     await runner.idle();
     expect(getBooking(db, match)).toMatchObject({ state: 'ready', server_id: 2 });
     expect(getBooking(db, first)).toMatchObject({ state: 'ready', server_id: 3 });
+  });
+
+  it('one waiting match bumps at most one boxless scrim past its start, however many passes it waits through (Ruling 6)', () => {
+    const first = book();
+    const second = book();
+    db.prepare("UPDATE servers SET status = 'live'").run();
+    now = START + 2 * MIN;
+    const match = tournament();
+    runner.allocate();
+    runner.allocate();
+    runner.allocate();
+    expect(getBooking(db, first)).toMatchObject({ state: 'cancelled', end_reason: 'bumped', server_id: null });
+    expect(getBooking(db, second)).toMatchObject({ state: 'scheduled', server_id: null, ending_at: null });
+    expect(getBooking(db, match)!.state).toBe('scheduled');
+    expect((db.prepare("SELECT COUNT(*) AS n FROM booking_events WHERE event = 'bumped'").get() as { n: number }).n).toBe(1);
+  });
+
+  it('never bumps a held scrim whose players are already on its box (Ruling 4)', async () => {
+    const scrim = await heldScrim();
+    recordPresence(db, scrim, { a: 1, b: 0 }, true, new Date(now));
+    db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 2)").run();
+    dms = [];
+    const match = tournament();
+    runner.allocate();
+    runner.allocate();
+    expect(getBooking(db, scrim)).toMatchObject({ state: 'ready', server_id: 3, ending_at: null });
+    expect(getBooking(db, match)!.state).toBe('scheduled');
+    expect(dms).toEqual([]);
   });
 
   it('a box that frees up goes to the tournament match before a scrim that has waited longer (Ruling 2)', async () => {
