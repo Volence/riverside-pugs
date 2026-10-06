@@ -20,7 +20,10 @@ import type { DB } from './db.js';
  */
 
 /** A kind of database hold; one arm of open_server_holds each. A booking
- *  (rank 0) outranks a practice lease (1) and a side game (2). */
+ *  (rank 0) outranks a practice lease (1) and a side game (2). Between two
+ *  bookings the view never chooses: which booking gets the next free box is
+ *  the runner's queue order (src/bookings/rules.ts byPriority, a tournament
+ *  match before a scrim), and two bookings never hold one box. */
 export type HoldKind = 'booking' | 'practice' | 'side';
 
 export interface Hold {
