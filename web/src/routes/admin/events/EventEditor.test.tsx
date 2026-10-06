@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
-import type { AdminEventDetail, AdminEventOptions, AdminEventStage, EventFields } from '../../../api';
+import type { AdminEventDetail, AdminEventOptions, AdminEventStage, EventFields, VetoConfig } from '../../../api';
+
+const BAN_TO_ONE: VetoConfig = { games: 1, banTo: 1, firstBan: 'higher_chooses', firstPick: 'first', laterPicks: 'alternate', lateBans: 0, sides: 'non_picker' };
 
 const { mockAdmin, mockConfirm } = vi.hoisted(() => ({
   mockAdmin: {
@@ -40,7 +42,7 @@ const stage = (id: number, ordinal: number, swiss: boolean): AdminEventStage => 
   summary: swiss ? 'Swiss, 4 rounds, top 8 advance' : 'Single elimination',
   settings: {
     type: swiss ? 'swiss' : 'single_elim', config: swiss ? { rounds: 4 } : { thirdPlace: false }, rulesetId: 2, gameConfig: 'standard',
-    campaignPool: ['no_mercy', 'dead_air'], vetoType: 'ban_to_one', chapters: null, scheduling: 'rolling', advanceCount: swiss ? 8 : null,
+    campaignPool: ['no_mercy', 'dead_air'], vetoType: 'ban_to_one', veto: BAN_TO_ONE, chapters: null, scheduling: 'rolling', advanceCount: swiss ? 8 : null,
   },
 });
 const detail = (over: Partial<AdminEventDetail> = {}): AdminEventDetail => ({
@@ -105,7 +107,7 @@ describe('EventEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save stage' }));
     await waitFor(() => expect(mockAdmin.addStage).toHaveBeenCalledWith(3, {
       type: 'swiss', config: { rounds: 5 }, rulesetId: 2, gameConfig: 'standard', campaignPool: ['no_mercy', 'dead_air', 'death_toll'],
-      vetoType: 'ban_to_one', chapters: null, scheduling: 'rolling', advanceCount: 4,
+      vetoType: 'ban_to_one', veto: BAN_TO_ONE, chapters: null, scheduling: 'rolling', advanceCount: 4,
     }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Save stage' })).toBeNull());
   });

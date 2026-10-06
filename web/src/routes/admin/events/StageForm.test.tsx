@@ -34,7 +34,9 @@ describe('StageForm pickers', () => {
   it('a saved ruleset no longer offered has no summary line', () => {
     show({
       type: 'single_elim', config: { thirdPlace: false }, rulesetId: 9, gameConfig: 'standard', campaignPool: ['no_mercy'],
-      vetoType: 'ban_to_one', chapters: null, scheduling: 'rolling', advanceCount: null,
+      vetoType: 'ban_to_one',
+      veto: { games: 1, banTo: 1, firstBan: 'higher_chooses', firstPick: 'first', laterPicks: 'alternate', lateBans: 0, sides: 'non_picker' },
+      chapters: null, scheduling: 'rolling', advanceCount: null,
     });
     expect(screen.queryByText(CUP)).toBeNull();
     expect(screen.queryByText(SCRIM)).toBeNull();

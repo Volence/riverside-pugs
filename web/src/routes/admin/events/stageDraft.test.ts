@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import type { AdminEventOptions, StageSettings } from '../../../api';
+import type { AdminEventOptions, StageSettings, VetoConfig } from '../../../api';
 import { configOf, draftFrom, settingsFrom, staleValues } from './stageDraft';
+
+const BAN_TO_ONE: VetoConfig = { games: 1, banTo: 1, firstBan: 'higher_chooses', firstPick: 'first', laterPicks: 'alternate', lateBans: 0, sides: 'non_picker' };
 
 const OPTIONS: AdminEventOptions = {
   campaigns: [{ slug: 'no_mercy', name: 'No Mercy' }, { slug: 'dead_air', name: 'Dead Air' }],
@@ -20,14 +22,14 @@ describe('stage drafts', () => {
   it('a new stage starts as single elimination on the default ruleset and the site pool', () => {
     expect(settingsFrom(draftFrom(null, OPTIONS))).toEqual({
       type: 'single_elim', config: { thirdPlace: false }, rulesetId: 2, gameConfig: 'standard', campaignPool: ['no_mercy', 'dead_air'],
-      vetoType: 'ban_to_one', chapters: null, scheduling: 'rolling', advanceCount: null,
+      vetoType: 'ban_to_one', veto: BAN_TO_ONE, chapters: null, scheduling: 'rolling', advanceCount: null,
     });
   });
 
   it('round-trips a saved stage, and sends only the chosen type settings', () => {
     const league: StageSettings = {
       type: 'league', config: { matches: 16, matchesPerWeek: 2, pairing: 'round_robin', seasonStart: '2026-10-12' }, rulesetId: 1, gameConfig: 'standard',
-      campaignPool: ['dead_air'], vetoType: 'home_away', chapters: 3, scheduling: 'window', advanceCount: 4,
+      campaignPool: ['dead_air'], vetoType: 'home_away', veto: { ...BAN_TO_ONE, games: 2, banTo: 1 }, chapters: 3, scheduling: 'window', advanceCount: 4,
     };
     expect(settingsFrom(draftFrom(league, OPTIONS))).toEqual(league);
     const d = { ...draftFrom(league, OPTIONS), type: 'swiss' as const, scheduling: 'rolling' as const };
@@ -42,7 +44,7 @@ describe('stage drafts', () => {
   it('names the saved values that are no longer offered, so the form can show them to be cleared', () => {
     const old: StageSettings = {
       type: 'swiss', config: { rounds: 4 }, rulesetId: 9, gameConfig: 'retired', campaignPool: ['no_mercy', 'hard_rain'],
-      vetoType: 'ban_to_one', chapters: null, scheduling: 'rolling', advanceCount: 8,
+      vetoType: 'ban_to_one', veto: BAN_TO_ONE, chapters: null, scheduling: 'rolling', advanceCount: 8,
     };
     expect(staleValues(old, OPTIONS)).toEqual({ rulesetId: 9, gameConfig: 'retired', campaigns: ['hard_rain'] });
     expect(staleValues({ ...old, rulesetId: 2, gameConfig: 'standard', campaignPool: ['dead_air'] }, OPTIONS))

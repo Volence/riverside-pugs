@@ -9,7 +9,7 @@ afterEach(cleanup);
 const team = (id: number, name: string, out = false): PlayEntry => ({ id, name, tag: name.slice(0, 3).toUpperCase(), logoKey: null, seed: id, out });
 const match = (over: Partial<PlayMatch>): PlayMatch => ({
   id: 1, group: 1, round: 1, slot: 1, a: team(1, 'Rats'), b: team(2, 'Bats'), status: 'waiting', winner: null,
-  scoreA: null, scoreB: null, forfeit: false, bye: false, ...over,
+  scoreA: null, scoreB: null, forfeit: false, bye: false, phase: 'waiting', ...over,
 });
 
 describe('StagePlay', () => {
