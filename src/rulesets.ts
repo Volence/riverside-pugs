@@ -44,7 +44,7 @@ export const MATCH_PLAY_DEFAULTS = {
 } as const;
 /** Inclusive ranges, shared by parseRules and the editor (rulesetStore.ts). */
 export const RULE_RANGES = {
-  techSeconds: [60, 1800], teamSeconds: [60, 3600], emergencyChargeSeconds: [0, 600], cooldownSeconds: [30, 600], nextGameSeconds: [30, 600],
+  techPauses: [0, 5], techSeconds: [60, 1800], teamSeconds: [60, 3600], emergencyChargeSeconds: [0, 600], cooldownSeconds: [30, 600], nextGameSeconds: [30, 600],
 } as const satisfies Record<string, readonly [number, number]>;
 
 const BOSSES: MatchRules['bosses'][] = ['random_published', 'fixed', 'voteboss'];
@@ -140,8 +140,9 @@ export function parseRules(json: string): MatchRules {
   const pauseLimit = numberOrNull(pause.limit, 'pause.limit');
   const pauseSeconds = numberOrNull(pause.seconds, 'pause.seconds');
   if (typeof pause.mutualUnpause !== 'boolean') fail('pause.mutualUnpause');
-  if (typeof pause.techPauses !== 'number') fail('pause.techPauses');
   const inRange = (v: unknown, range: readonly [number, number]): v is number => Number.isInteger(v) && (v as number) >= range[0] && (v as number) <= range[1];
+  // The editor's limit (rulesetStore.ts); the plugin cvar would clamp anything past it.
+  if (!inRange(pause.techPauses, RULE_RANGES.techPauses)) fail('pause.techPauses');
   // Plan T5: absent in every ruleset and snapshot saved before the field.
   if (pause.techSeconds !== undefined && !inRange(pause.techSeconds, RULE_RANGES.techSeconds)) fail('pause.techSeconds');
 
