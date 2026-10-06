@@ -6,6 +6,7 @@ import type { TimelineEntry } from './replay/timeline';
 import type { DemoSync } from './replay/demoTick';
 import type { DrillSpec } from '../../src/drillSpec';
 import type { OverlayFeed, StudioState } from '../../src/cast/types';
+import type { VetoConfig } from '../../src/events/vetoConfig';
 
 export type Team = 'a' | 'b';
 export type Winner = Team | 'draw';
@@ -1920,8 +1921,9 @@ export interface StageConfigs {
 export type StageConfig = StageConfigs[StageType];
 export interface StageSettings {
   type: StageType; config: StageConfig; rulesetId: number; gameConfig: string; campaignPool: string[];
-  vetoType: VetoType; chapters: number | null; scheduling: Scheduling; advanceCount: number | null;
+  vetoType: VetoType; veto?: VetoConfig; chapters: number | null; scheduling: Scheduling; advanceCount: number | null;
 }
+export type { VetoConfig };
 export interface EventFields {
   name: string; startsAt: string; entryKind: EntryKind; official: boolean; teamCap: number | null; description: string;
   eligibility: EventEligibility; checkin: EventCheckin; roster: EventRoster;

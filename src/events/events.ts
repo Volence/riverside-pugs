@@ -3,6 +3,7 @@ import { getCampaignPool } from '../settings.js';
 import { poolableCampaigns } from '../campaignRegistry.js';
 import { parseRules, rulesForKind } from '../rulesets.js';
 import { isPug } from '../rulesetStore.js';
+import { presetConfig, type VetoConfig } from './vetoConfig.js';
 import * as V from './validate.js';
 
 /**
@@ -28,7 +29,7 @@ export interface EventRow {
 }
 export interface StageRow {
   id: number; event_id: number; ordinal: number; type: V.StageType; config_json: string; ruleset_id: number;
-  rules_json: string | null; game_config: string; campaign_pool_json: string; veto_type: V.VetoType;
+  rules_json: string | null; game_config: string; campaign_pool_json: string; veto_type: V.VetoType; veto_json: string | null;
   chapters: number | null; scheduling: V.Scheduling; advance_count: number | null; status: 'pending' | 'live' | 'finished';
   created_at: string; updated_at: string;
   entrants_json: string | null; bracket_json: string | null; bracket_rev: number; started_at: string | null; finished_at: string | null;
@@ -73,9 +74,12 @@ export function stageSettingsOf(s: StageRow): V.StageSettings {
       pairing: c.pairing ?? 'swiss', seasonStart: c.seasonStart ?? null,
     };
   }
+  const pool = JSON.parse(s.campaign_pool_json) as string[];
+  // Stages made before plan T3a have no veto_json: their veto_type names a preset.
+  const veto: VetoConfig = s.veto_json ? JSON.parse(s.veto_json) as VetoConfig : presetConfig(s.veto_type, pool.length);
   return {
     type: s.type, config, rulesetId: s.ruleset_id, gameConfig: s.game_config,
-    campaignPool: JSON.parse(s.campaign_pool_json) as string[], vetoType: s.veto_type, chapters: s.chapters,
+    campaignPool: pool, vetoType: s.veto_type, veto, chapters: s.chapters,
     scheduling: s.scheduling, advanceCount: s.advance_count,
   };
 }
@@ -153,18 +157,18 @@ function ownStage(db: DB, eventId: number, stageId: number): StageRow | undefine
 function insertStage(db: DB, eventId: number, ordinal: number, s: V.StageSettings, rules: string | null, at: string): number {
   return Number(db.prepare(
     `INSERT INTO event_stages (event_id, ordinal, type, config_json, ruleset_id, rules_json, game_config, campaign_pool_json,
-       veto_type, chapters, scheduling, advance_count, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       veto_type, veto_json, chapters, scheduling, advance_count, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(eventId, ordinal, s.type, JSON.stringify(s.config), s.rulesetId, rules, s.gameConfig, JSON.stringify(s.campaignPool),
-    s.vetoType, s.chapters, s.scheduling, s.advanceCount, at, at).lastInsertRowid);
+    s.vetoType, JSON.stringify(s.veto), s.chapters, s.scheduling, s.advanceCount, at, at).lastInsertRowid);
 }
 
 function writeStage(db: DB, id: number, s: V.StageSettings, rules: string | null, at: string): void {
   db.prepare(
     `UPDATE event_stages SET type = ?, config_json = ?, ruleset_id = ?, rules_json = ?, game_config = ?, campaign_pool_json = ?,
-       veto_type = ?, chapters = ?, scheduling = ?, advance_count = ?, updated_at = ? WHERE id = ?`,
+       veto_type = ?, veto_json = ?, chapters = ?, scheduling = ?, advance_count = ?, updated_at = ? WHERE id = ?`,
   ).run(s.type, JSON.stringify(s.config), s.rulesetId, rules, s.gameConfig, JSON.stringify(s.campaignPool),
-    s.vetoType, s.chapters, s.scheduling, s.advanceCount, at, id);
+    s.vetoType, JSON.stringify(s.veto), s.chapters, s.scheduling, s.advanceCount, at, id);
 }
 
 /** The stage chain as it stands, for publish and open registration (Ruling 16). */

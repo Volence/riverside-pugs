@@ -111,6 +111,18 @@ describe('stages', () => {
     expect(E.stageSettingsOf(E.getStage(f.db, f.s1)!).config).toEqual({ matches: 12, matchesPerWeek: 2, pairing: 'swiss', seasonStart: null });
   });
 
+  it('stores a stage veto and reads an older stage (no veto_json) from its veto_type (plan T3a)', () => {
+    const f = eventFixture();
+    const knobs = { games: 1, banTo: 2, firstBan: 'coin', firstPick: 'lower', laterPicks: 'alternate', lateBans: 0, sides: 'higher' };
+    must(E.updateStage(f.db, { eventId: f.eventId, stageId: f.s1, by: ADMIN, stage: stageBody(f.db, { veto: knobs }), now: NOW }));
+    const s = E.getStage(f.db, f.s1)!;
+    expect(JSON.parse(s.veto_json!)).toEqual(knobs);
+    expect(s.veto_type).toBe('ban_to_one');
+    expect(E.stageSettingsOf(s).veto).toEqual(knobs);
+    f.db.prepare("UPDATE event_stages SET veto_json = NULL, veto_type = 'home_away' WHERE id = ?").run(f.s1);
+    expect(E.stageSettingsOf(E.getStage(f.db, f.s1)!).veto).toMatchObject({ games: 2, banTo: 2 });
+  });
+
   it('locks every stage change once the event is live', () => {
     const f = eventFixture();
     for (const status of ['live', 'finished', 'cancelled']) {
