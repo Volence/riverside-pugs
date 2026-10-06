@@ -206,7 +206,10 @@ export class RoomClock {
       }
       this.refused.delete(`veto:${m.id}`);
       // T3b Ruling 4: a timed-out between-game pick; once nothing human is left the game is scheduled.
-      if (r.value.status === 'live') this.deps.series?.afterPick(m.id);
+      // The pick is committed, so a throw is logged and the push still goes out.
+      if (r.value.status === 'live') {
+        try { this.deps.series?.afterPick(m.id); } catch (err) { console.error(`[rooms] scheduling match ${m.id} after the timed-out pick failed:`, err instanceof Error ? err.message : err); }
+      }
       this.pushChange(m.id);
       return;
     }

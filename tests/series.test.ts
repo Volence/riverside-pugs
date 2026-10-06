@@ -130,6 +130,17 @@ describe('SeriesEngine: no-show on the server', () => {
     expect(f.match()).toMatchObject({ status: 'admin_hold', hold_reason: 'no_presence' });
   });
 
+  it('leaves a stale connect match alone once its stage is no longer live', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    const grace = B.bookingRules(f.booking())!.noShowGraceMinutes;
+    f.box.down = true;
+    f.db.prepare("UPDATE event_stages SET status = 'finished' WHERE id = ?").run(f.match().stage_id);
+    f.t.t += grace * MIN + PRESENCE_FALLBACK_MS + MIN;
+    f.series.tick(new Date(f.t.t));
+    expect(f.match().status).toBe('connect');
+  });
+
   it('holds a match whose booking ends mid-series and alerts staff', async () => {
     f = await seriesFixture();
     await f.tick();

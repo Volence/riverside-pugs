@@ -10,6 +10,7 @@ import * as P from '../src/events/play.js';
 import * as R from '../src/events/room.js';
 import * as E from '../src/events/events.js';
 import { RoomClock } from '../src/events/roomClock.js';
+import { SeriesEngine } from '../src/events/series.js';
 import { ADMIN, must, stageBody } from './eventFixture.js';
 import { A, B, OUTSIDER } from './entryFixture.js';
 import { TIMERS, driveToBooking, roomFixture, type RoomFixture } from './roomFixture.js';
@@ -171,5 +172,28 @@ describe('confirm, dispute and reset over HTTP (plan T3b)', () => {
     expect((await post(`/api/admin/events/${f.eventId}/matches/${f.matchId}/reset-room`, ADMIN)).statusCode).toBe(200);
     expect(P.getMatch(f.db, f.matchId)).toMatchObject({ status: 'waiting', booking_id: null });
     expect(getBooking(f.db, bookingId)).toMatchObject({ state: 'cancelled', end_reason: 'staff' });
+  });
+
+  it('cancelling the event resets a live booked room through the engine, cancelling its booking', async () => {
+    const bookingId = booked();
+    R.startConnect(f.db, { matchId: f.matchId, graceMinutes: 15 });
+    R.startLive(f.db, { matchId: f.matchId });
+    expect(P.getMatch(f.db, f.matchId)!.status).toBe('live');
+    expect((await post(`/api/admin/events/${f.eventId}/cancel`, ADMIN, { reason: 'Called off' })).statusCode).toBe(200);
+    expect(P.getMatch(f.db, f.matchId)).toMatchObject({ status: 'waiting', booking_id: null });
+    expect(['cancelled', 'ending']).toContain(getBooking(f.db, bookingId)!.state);
+  });
+
+  it('answers 200 for a committed pick on a live match even when the engine throws after it', async () => {
+    booked();
+    f.db.prepare("UPDATE event_matches SET status = 'live' WHERE id = ?").run(f.matchId);
+    const act = vi.spyOn(R, 'actVeto').mockReturnValue({ ok: true, value: P.getMatch(f.db, f.matchId)! });
+    const after = vi.spyOn(SeriesEngine.prototype, 'afterPick').mockImplementation(() => { throw new Error('boom'); });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await post(`${room()}/veto`, A[0]!, { step: 3, action: 'pick', campaign: 'no_mercy' });
+    expect(res.statusCode).toBe(200);
+    expect(act).toHaveBeenCalled();
+    expect(after).toHaveBeenCalledWith(f.matchId);
+    expect(err.mock.calls.some((c) => String(c[0]).includes('after the pick'))).toBe(true);
   });
 });
