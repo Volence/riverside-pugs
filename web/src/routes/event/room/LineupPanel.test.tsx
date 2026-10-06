@@ -11,7 +11,8 @@ const v = (over: Partial<MatchRoomView>): MatchRoomView => ({
   a: { id: 1, name: 'Rats', tag: 'RAT', logoKey: null, seed: 1, out: false }, b: { id: 2, name: 'Bats', tag: 'BAT', logoKey: null, seed: 2, out: false },
   phase: 'lineup', higher: 'a', deadline: null, serverNow: '', ready: { a: true, b: true }, vetoSummary: '', pool: [], log: [], games: [], next: null,
   lineups: { a: null, b: null, aLocked: false, bLocked: true }, holdReason: null, result: null,
-  me: { side: 'a', manager: true, playable: players, defaultFour: ['p2', 'p3', 'p4', 'p5'] }, ...over,
+  me: { side: 'a', manager: true, playable: players, defaultFour: ['p2', 'p3', 'p4', 'p5'] },
+  series: null, server: null, confirm: null, dispute: null, ...over,
 });
 
 describe('LineupPanel', () => {

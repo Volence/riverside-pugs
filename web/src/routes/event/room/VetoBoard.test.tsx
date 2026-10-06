@@ -13,7 +13,8 @@ const base = (over: Partial<MatchRoomView>): MatchRoomView => ({
     { slug: 'dead_air', name: 'Dead Air', state: 'banned', by: 'b', game: null },
   ],
   log: [], games: [], next: { kind: 'ban', by: 'a', game: null, step: 2 }, lineups: { a: null, b: null, aLocked: false, bLocked: false },
-  holdReason: null, result: null, me: { side: 'a', manager: true, playable: [], defaultFour: null }, ...over,
+  holdReason: null, result: null, me: { side: 'a', manager: true, playable: [], defaultFour: null },
+  series: null, server: null, confirm: null, dispute: null, ...over,
 });
 
 describe('VetoBoard', () => {

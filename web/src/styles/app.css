@@ -3574,9 +3574,11 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .room__games { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
 .room__log { margin: 0; padding-left: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); color: var(--text-muted); }
 /* Reuses the event status chip's border/colour roles: ready and veto read
-   as live, lineup as checkin, server and hold as a warning, done as finished. */
-.roomphase--ready, .roomphase--veto { border-color: var(--rule); color: var(--accent); }
-.roomphase--lineup { border-color: var(--border-strong); color: var(--text); }
+   as live, lineup as checkin, server and hold as a warning, done as finished.
+   Plan T3b: connect and live (the between-game pick step) read as live too;
+   confirming reads as checkin, the same role as lineup. */
+.roomphase--ready, .roomphase--veto, .roomphase--connect, .roomphase--live { border-color: var(--rule); color: var(--accent); }
+.roomphase--lineup, .roomphase--confirming { border-color: var(--border-strong); color: var(--text); }
 .roomphase--server, .roomphase--hold { color: var(--accent); }
 .roomphase--done { color: var(--win); }
 .roomphase--pending, .roomphase--waiting { color: var(--text-muted); }
@@ -3598,6 +3600,32 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .lineup--hidden { color: var(--text-muted); font-size: var(--fs-dense); }
 .lineup--pick { display: flex; flex-direction: column; gap: var(--sp-1); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--border); }
 .lineup--pick label { display: flex; align-items: center; gap: var(--sp-2); }
+
+/* Plan T3b: the booked server (ServerPanel), the series (SeriesPanel) and
+   the confirm window (ConfirmPanel). Same 390 px, no sideways scroll rule
+   as the rest of the room. */
+.roomserver { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.roomserver__connect { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0; min-width: 0; }
+.roomserver__connect code { overflow-wrap: anywhere; min-width: 0; }
+.roomserver__grace { margin: 0; color: var(--accent); font-size: var(--fs-dense); }
+
+.roomseries { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.roomseries__score { margin: 0; font-weight: 600; }
+.roomseries__games { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.roomseries__game { overflow-wrap: anywhere; }
+.roomseries__game--live { padding-left: var(--sp-2); border-left: 2px solid var(--accent); }
+.roomseries__game--done { color: var(--text-muted); }
+
+.roomconfirm { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.roomconfirm__result { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.roomconfirm__actions { display: flex; flex-direction: column; gap: var(--sp-2); }
+.roomconfirm__reason { display: flex; flex-direction: column; gap: var(--sp-1); }
+.roomconfirm__reason textarea {
+  width: 100%; box-sizing: border-box; min-height: 4.5rem; resize: vertical;
+  padding: var(--sp-2); border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  font-family: var(--font-body); font-size: var(--fs-body);
+}
+.roomconfirm__reason textarea:focus { border-color: var(--accent); }
 
 /* Setup > Rulesets and Game configs (rulesets editor plan): rows in the
    admin-list look, a summary line under the name, the row's buttons below. */
