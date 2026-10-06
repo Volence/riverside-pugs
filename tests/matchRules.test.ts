@@ -171,9 +171,8 @@ describe('technical pauses from the box (series.ts)', () => {
     f.runner.onGameEnded(g1);
     expect(f.gameOf(1)).toMatchObject({ score_a: 400, score_b: 100, forfeit_side: 'a', forfeit_why: 'disconnect', winner: f.entryB });
     expect(f.match().status).toBe('confirming');
-    // A games-won series counts a forfeited game as a loss like any other
-    // (seriesRules); the total-score wording is pinned in tests/series.test.ts.
-    expect(f.sent.some((c) => c.startsWith('say [Match] Series over: Bats beat Rats 1 game to 0.'))).toBe(true);
+    // A games-won series counts a forfeited game as a loss; the deciding game's forfeit is named.
+    expect(f.sent.some((c) => c.startsWith('say [Match] Series over: Bats beat Rats 1 game to 0 (game 1 by forfeit: Rats ran out of reconnect time).'))).toBe(true);
   });
 });
 
@@ -222,6 +221,20 @@ describe('staff penalties (series.ts)', () => {
     f.box.gate = null;
     open();
     expect((await ruling).ok).toBe(true);
+    expect(R.techPausesOf(f.db, f.match())[0]!.penalty).toMatchObject({ kind: 'forfeit', by: ADMIN, note: 'fake pause' });
+  });
+
+  it('records a retried forfeit ruling the box already took without asking the box again', async () => {
+    const { id } = await paused();
+    const g1 = f.gameOf(1).match_id!;
+    // The first try's reply was lost; the box forfeited Rats (pug team b) on the staff ruling and the game ended.
+    f.db.prepare("UPDATE matches SET state = 'completed', team_a_score = 400, team_b_score = 100, winner = 'a', forfeit_team = 'b', forfeit_why = 'staff', ended_at = datetime('now') WHERE id = ?").run(g1);
+    f.runner.onGameEnded(g1);
+    expect(f.sent.some((c) => c.includes('(game 1 by forfeit: Rats forfeited by staff ruling).'))).toBe(true);
+    f.box.forfeitOk = false;
+    f.sent.length = 0;
+    expect((await f.series.techPenalty(f.matchId, ADMIN, id, 'forfeit', 'fake pause')).ok).toBe(true);
+    expect(f.sent.some((c) => c.startsWith('sm_pug_forfeit '))).toBe(false);
     expect(R.techPausesOf(f.db, f.match())[0]!.penalty).toMatchObject({ kind: 'forfeit', by: ADMIN, note: 'fake pause' });
   });
 

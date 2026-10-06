@@ -137,6 +137,10 @@ export function forfeitTook(reply: string | null | undefined, team: 'a' | 'b'): 
   }
   return false;
 }
+/** Why a game was forfeited, as the series line says it (plan T5 Ruling 9). */
+export function forfeitHow(why: ForfeitWhy): string {
+  return why === 'disconnect' ? 'ran out of reconnect time' : why === 'staff' ? 'forfeited by staff ruling' : 'typed !gg';
+}
 const clock = (s: number): string => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.max(0, s) % 60).padStart(2, '0')}`;
 /** The sm_pug_sub refusal that means "not now": a chapter is being played. */
 export const SUB_NOT_BETWEEN = 'not between chapters';
@@ -538,24 +542,27 @@ export class SeriesEngine {
     const last = this.db.prepare('SELECT ordinal, map FROM match_maps WHERE match_id = ? ORDER BY ordinal DESC LIMIT 1').get(g.match_id) as { ordinal: number; map: string } | undefined;
     if (!last) return null;
     const half1 = this.db.prepare('SELECT surv_team FROM match_rounds WHERE match_id = ? AND ordinal = ? AND half = 1').get(g.match_id, last.ordinal) as { surv_team: 'a' | 'b' } | undefined;
-    const sideA = (this.db.prepare('SELECT booking_side_a FROM matches WHERE id = ?').get(g.match_id) as { booking_side_a: Side | null } | undefined)?.booking_side_a ?? 'a';
-    const toEntry = (team: 'a' | 'b'): Side => ((team === 'a') === (sideA === 'a') ? 'a' : 'b');
-    const half1Entry: Side = half1 ? toEntry(half1.surv_team) : this.sideOfEntry(m, g.first_survivors) ?? 'a';
+    const half1Entry: Side = half1 ? this.sideOfPugTeam(g.match_id, half1.surv_team) : this.sideOfEntry(m, g.first_survivors) ?? 'a';
     return { map: last.map, firstSurvivors: tiebreakFirstSurvivors(half1Entry) };
   }
 
   private scoreline(m: P.MatchRow, v: ReturnType<typeof seriesVerdict>): string {
     const w = v.winner!;
     const l = other(w);
-    // Plan T5 Ruling 9: the forfeited game says why.
-    const why = v.forfeit === null ? null : R.gamesOf(this.db, m.id).filter((g) => g.forfeit_side === v.forfeit).at(-1)?.forfeit_why ?? 'gg';
-    const how = why === 'disconnect' ? 'ran out of reconnect time' : why === 'staff' ? 'forfeited by staff ruling' : 'typed !gg';
-    const line = v.forfeit !== null
-      ? `by forfeit (${this.name(m, v.forfeit)} ${how})`
-      : v.totalScore
-      ? `${w === 'a' ? v.totalA : v.totalB} to ${w === 'a' ? v.totalB : v.totalA} on total score`
-      : winsLine(w === 'a' ? v.winsA : v.winsB, w === 'a' ? v.winsB : v.winsA);
-    return `${this.name(m, w)} beat ${this.name(m, l)} ${line}`;
+    const rows = R.gamesOf(this.db, m.id);
+    // Plan T5 Ruling 9: a forfeit that ends the series says why.
+    if (v.forfeit !== null) {
+      const why = rows.filter((g) => g.forfeit_side === v.forfeit).at(-1)?.forfeit_why ?? 'gg';
+      return `${this.name(m, w)} beat ${this.name(m, l)} by forfeit (${this.name(m, v.forfeit)} ${forfeitHow(why)})`;
+    }
+    if (v.totalScore) return `${this.name(m, w)} beat ${this.name(m, l)} ${w === 'a' ? v.totalA : v.totalB} to ${w === 'a' ? v.totalB : v.totalA} on total score`;
+    const line = `${this.name(m, w)} beat ${this.name(m, l)} ${winsLine(w === 'a' ? v.winsA : v.winsB, w === 'a' ? v.winsB : v.winsA)}`;
+    // In a games-won series a forfeited game is a counted loss; when it was
+    // the deciding game (the last one to end), the line still names why.
+    const last = rows.filter((g) => g.ended_at !== null)
+      .sort((x, y) => x.ended_at!.localeCompare(y.ended_at!) || x.id - y.id).at(-1);
+    if (!last || last.forfeit_side === null) return line;
+    return `${line} (${this.gameLabel(m, last)} by forfeit: ${this.name(m, last.forfeit_side)} ${forfeitHow(last.forfeit_why ?? 'gg')})`;
   }
 
   /** After a recorded game or a settled pick: a tiebreak, the confirm window,
@@ -961,7 +968,11 @@ export class SeriesEngine {
     const pause = R.techPausesOf(this.db, m).find((p) => p.id === pauseId);
     if (!pause) return V.fail('pause_not_found');
     if (pause.penalty !== null) return V.fail('already_penalized');
-    if (penalty === 'forfeit') {
+    // The box already took this ruling (a retry after a lost rcon reply, or
+    // the game end landed first): the same condition room.ts relaxes on.
+    const game = R.gamesOf(this.db, m.id).find((g) => g.match_id === pause.gameMatchId);
+    const taken = game !== undefined && game.forfeit_side === pause.side && game.forfeit_why === 'staff';
+    if (penalty === 'forfeit' && !taken) {
       const live = this.liveGameOf(m);
       if (!live || live.game.match_id !== pause.gameMatchId) return V.fail('no_live_game');
       const b = this.runningBooking(m);
