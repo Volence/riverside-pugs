@@ -1939,7 +1939,7 @@ export interface EventStageView {
 export interface EventEntryView { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; status: string; waitlist: number | null; placement: number | null }
 export interface PlayEntry { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; out: boolean }
 /** Mirrors src/events/playViews.ts's RoomPhase. */
-export type RoomPhase = 'pending' | 'waiting' | 'ready' | 'veto' | 'lineup' | 'server' | 'hold' | 'done';
+export type RoomPhase = 'pending' | 'waiting' | 'ready' | 'veto' | 'lineup' | 'server' | 'connect' | 'live' | 'confirming' | 'hold' | 'done';
 export interface PlayMatch {
   id: number; group: number; round: number; slot: number; a: PlayEntry | null; b: PlayEntry | null; status: string;
   winner: 'a' | 'b' | null; scoreA: number | null; scoreB: number | null; forfeit: boolean; bye: boolean; phase: RoomPhase;
@@ -1995,7 +1995,23 @@ export const entryLogoUrl = (key: string): string => `/api/events/logos/${key}.p
 export interface RoomCampaign { slug: string; name: string; state: 'open' | 'banned' | 'picked' | 'decider'; by: 'a' | 'b' | null; game: number | null }
 export type VetoActionKind = 'first' | 'second' | 'ban' | 'pick' | 'survivors' | 'infected';
 export interface RoomLogLine { step: number; side: 'a' | 'b'; action: VetoActionKind; campaign: string | null; campaignName: string | null; auto: boolean; at: string }
-export interface RoomGame { game: number; campaign: string; campaignName: string; pickedBy: 'a' | 'b' | null; sideBy: 'a' | 'b' | null; firstSurvivors: 'a' | 'b' | null }
+/** One row of the series in play order (a tiebreak right after its game),
+ *  with its score once recorded and the running score while it is live
+ *  (plan T3b). game is the series game a tiebreak stands in for. */
+export interface RoomGame {
+  id: number; game: number; ordinal: number; tiebreak: boolean; campaign: string; campaignName: string; map: string | null;
+  pickedBy: 'a' | 'b' | null; sideBy: 'a' | 'b' | null; firstSurvivors: 'a' | 'b' | null;
+  matchId: number | null; state: 'upcoming' | 'live' | 'done'; scoreA: number | null; scoreB: number | null; winner: 'a' | 'b' | null;
+  live: { map: string | null; scoreA: number; scoreB: number } | null;
+}
+export interface RoomSeries { bestOf: number; totalScore: boolean; winsA: number; winsB: number; totalA: number; totalB: number; over: boolean; winner: 'a' | 'b' | null }
+/** The match's booked server (plan T3b). connect is shown only to staff and
+ *  the booking's accepted people; present is each side's locked four on the
+ *  box at the last minute watch. */
+export interface RoomServer {
+  state: 'waiting' | 'setup' | 'ready' | 'ended'; name: string | null; since: string;
+  connect: { host: string; port: number; password: string } | null; present: { a: number; b: number } | null; graceEndsAt: string | null;
+}
 export interface RoomPlayer { steamid: string; name: string }
 /** a and b are null only while a bracket match still waits for its teams. */
 export interface MatchRoomView {
@@ -2007,6 +2023,10 @@ export interface MatchRoomView {
   holdReason: string | null;
   result: { winner: 'a' | 'b'; scoreA: number | null; scoreB: number | null; forfeit: boolean } | null;
   me: { side: 'a' | 'b'; manager: boolean; playable: RoomPlayer[]; defaultFour: string[] | null } | null;
+  series: RoomSeries | null;
+  server: RoomServer | null;
+  confirm: { deadline: string | null; a: boolean; b: boolean } | null;
+  dispute: { side: 'a' | 'b'; byName: string; reason: string; at: string } | null;
 }
 export interface PrefsView {
   entryId: number; defaultFour: string[] | null; side: 'survivors' | 'infected' | null; roster: RoomPlayer[];
@@ -2028,6 +2048,8 @@ export const eventsApi = {
   veto: (slug: string, id: number, step: number, action: string, campaign: string | null = null) =>
     post(`/api/events/${enc(slug)}/matches/${id}/veto`, { step, action, campaign }),
   lineup: (slug: string, id: number, steamids: string[]) => post(`/api/events/${enc(slug)}/matches/${id}/lineup`, { steamids }),
+  confirmResult: (slug: string, id: number) => post(`/api/events/${enc(slug)}/matches/${id}/confirm`),
+  dispute: (slug: string, id: number, reason: string) => post(`/api/events/${enc(slug)}/matches/${id}/dispute`, { reason }),
   prefs: (slug: string, entryId: number, signal?: AbortSignal) => get<PrefsView>(`/api/events/${enc(slug)}/entries/${entryId}/prefs`, signal),
   savePrefs: (slug: string, entryId: number, body: { defaultFour: string[] | null; side: 'survivors' | 'infected' | null; campaigns: Record<string, string[]> }) =>
     post(`/api/events/${enc(slug)}/entries/${entryId}/prefs`, body),

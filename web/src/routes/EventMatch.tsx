@@ -4,13 +4,16 @@ import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { useHubEvent } from '../hooks/useHubEvent';
 import type { Session } from '../hooks/useLiveState';
-import { PHASE_TEXT, clockText, logText } from './event/room/roomText';
+import { PHASE_TEXT, clockText, logText, resultLine } from './event/room/roomText';
 import { VetoBoard } from './event/room/VetoBoard';
 import { LineupPanel } from './event/room/LineupPanel';
+import { ServerPanel } from './event/room/ServerPanel';
+import { SeriesPanel } from './event/room/SeriesPanel';
+import { ConfirmPanel } from './event/room/ConfirmPanel';
 
 /** Phases the page refetches in every 10 s. A result can close a room
  *  (server, hold) and a reset can reopen one (waiting) with no push. */
-const POLLED = new Set(['waiting', 'ready', 'veto', 'lineup', 'server', 'hold']);
+const POLLED = new Set(['waiting', 'ready', 'veto', 'lineup', 'server', 'connect', 'live', 'confirming', 'hold']);
 
 /** A team's logo (only once it has one) next to its name, used in the room
  *  header and the ready check so both read the same way. */
@@ -86,6 +89,12 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
         </p>
       </PageHeader>
       {problem && <p class="error" role="alert">{problem}</p>}
+      {(v.phase === 'server' || v.phase === 'connect' || v.phase === 'live' || v.phase === 'confirming') && (
+        <Panel>
+          <h3>Server</h3>
+          <ServerPanel v={v} now={now + offset} />
+        </Panel>
+      )}
       {v.phase === 'ready' && v.a && v.b && (
         <Panel>
           <h3>Ready check</h3>
@@ -103,7 +112,7 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
           <VetoBoard v={v} busy={busy} onAct={(step, action, campaign) => { void run(() => eventsApi.veto(slug, matchId, step, action, campaign)); }} />
         </Panel>
       )}
-      {v.games.length > 0 && (
+      {!v.series && v.games.length > 0 && (
         <Panel>
           <h3>Games</h3>
           <ul class="room__games">
@@ -113,20 +122,42 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
           </ul>
         </Panel>
       )}
+      {v.series && (
+        <Panel>
+          <h3>Series</h3>
+          <SeriesPanel v={v} />
+        </Panel>
+      )}
       {showLineups && v.a && v.b && (
         <Panel>
           <h3>Lineups</h3>
           <LineupPanel v={v} busy={busy} onLock={(ids) => run(() => eventsApi.lineup(slug, matchId, ids))} />
         </Panel>
       )}
-      {v.phase === 'server' && <Panel><p>Lineups locked. Staff are setting up the server; the connect details come from them.</p></Panel>}
-      {v.phase === 'hold' && <Panel><p class="warning">{`On hold: staff are looking at this match.${v.holdReason ? ` (${v.holdReason})` : ''}`}</p></Panel>}
+      {v.phase === 'confirming' && (
+        <Panel>
+          <h3>Result</h3>
+          <ConfirmPanel
+            v={v} now={now + offset} busy={busy}
+            onConfirm={() => { void run(() => eventsApi.confirmResult(slug, matchId)); }}
+            onDispute={(reason) => { void run(() => eventsApi.dispute(slug, matchId, reason)); }}
+          />
+        </Panel>
+      )}
+      {v.phase === 'hold' && (
+        <Panel>
+          <p class="warning">{`On hold: staff are looking at this match.${v.holdReason && v.holdReason !== 'dispute' ? ` (${v.holdReason})` : ''}`}</p>
+          {v.dispute && <p>{`Disputed by ${v.dispute.byName} for ${v.dispute.side === 'a' ? v.a?.name ?? 'TBD' : v.b?.name ?? 'TBD'}: ${v.dispute.reason}`}</p>}
+        </Panel>
+      )}
       {v.phase === 'done' && (
         <Panel>
           <p>{v.result
             ? (v.result.forfeit
               ? `Forfeit win for ${v.result.winner === 'a' ? v.a?.name : v.b?.name}.`
-              : `${v.result.winner === 'a' ? v.a?.name : v.b?.name} won ${v.result.scoreA} to ${v.result.scoreB}.`)
+              : v.series?.over
+                ? resultLine(v)
+                : `${v.result.winner === 'a' ? v.a?.name : v.b?.name} won ${v.result.scoreA} to ${v.result.scoreB}.`)
             : 'This match is finished.'}
           </p>
         </Panel>
