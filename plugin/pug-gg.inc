@@ -496,6 +496,9 @@ void Gg_ForfeitAs(int team, const char[] why)
 	if (!g_bPendingFinalize && !Gg_CurrentMapFinalized() && g_iRound1SurvPug != 0) FinalizeMap();
 	strcopy(g_sForfeitWhy, sizeof(g_sForfeitWhy), why);
 	g_iForfeitTeam = team;
+	// Final review I-1: close any technical pause first, so its TECH end line
+	// precedes MATCH_END and no technical clock runs on in the ended game.
+	Tech_CloseForForfeit();
 	EndMatchNow("forfeit");
 }
 
