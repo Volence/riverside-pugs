@@ -76,13 +76,16 @@ describe('StagePlay', () => {
   it('links a match with both teams to its room and shows the room phase', () => {
     const stage: StagePlayView = {
       ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
-      rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [match({ id: 7, status: 'veto', phase: 'veto' }), match({ id: 8, b: null, status: 'pending', phase: 'pending' })] }],
+      rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [match({ id: 7, status: 'veto', phase: 'veto' }), match({ id: 8, b: null, status: 'pending', phase: 'pending' }),
+        match({ id: 9, slot: 2, status: 'live', phase: 'live' })] }],
     };
     render(<StagePlay stage={stage} slug="cup" />);
-    const link = screen.getByRole('link', { name: /Rats.*Bats/ });
-    expect(link.getAttribute('href')).toBe('/event/cup/match/7');
-    expect(within(link).getByText('Veto')).toBeTruthy();
-    expect(screen.getAllByRole('link')).toHaveLength(1);
+    const [link, live] = screen.getAllByRole('link', { name: /Rats.*Bats/ });
+    expect(link!.getAttribute('href')).toBe('/event/cup/match/7');
+    expect(within(link!).getByText('Veto')).toBeTruthy();
+    expect(live!.getAttribute('href')).toBe('/event/cup/match/9');
+    expect(within(live!).getByText('Live')).toBeTruthy();
+    expect(screen.getAllByRole('link')).toHaveLength(2);
   });
 
   it('placementText', () => {
