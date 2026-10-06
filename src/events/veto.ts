@@ -106,20 +106,17 @@ export function vetoState(inp: VetoInput): VetoState {
         campaign = take({ kind: 'pick', by: picker, game: g }).campaign!;
         pickedBy = picker;
       }
-      let firstSurvivors: Side | null = null;
-      let sideBy: Side | null = null;
-      if (c.sides === 'coin') {
-        firstSurvivors = coin(inp.seed, 2 + g);
-      } else {
-        // Ruling 6: the non-picker; for a decider, the team that did not make
-        // the last ban; with no bans at all, the higher seed.
-        const by: Side = c.sides === 'higher' ? higher : pickedBy ? other(pickedBy) : lastBanner ? other(lastBanner) : higher;
-        sideBy = by;
-        firstSurvivors = take({ kind: 'side', by, game: g }).action === 'survivors' ? by : other(by);
-      }
       st.remaining = st.remaining.filter((x) => x !== campaign);
-      const slot: GameSlot = { game: g, campaign, pickedBy, sideBy, firstSurvivors };
+      // Ruling 6: the non-picker; for a decider, the team that did not make
+      // the last ban; with no bans at all, the higher seed.
+      const by: Side = c.sides === 'higher' ? higher : pickedBy ? other(pickedBy) : lastBanner ? other(lastBanner) : higher;
+      const slot: GameSlot = { game: g, campaign, pickedBy, sideBy: c.sides === 'coin' ? null : by, firstSurvivors: null };
       st.games.push(slot);
+      if (c.sides === 'coin') {
+        slot.firstSurvivors = coin(inp.seed, 2 + g);
+      } else {
+        slot.firstSurvivors = take({ kind: 'side', by, game: g }).action === 'survivors' ? by : other(by);
+      }
     }
     st.next = { kind: 'done' };
   } catch (err) {

@@ -20,7 +20,8 @@ describe('ban to one (Bo1)', () => {
     const bans: Side[] = ['b', 'a', 'b', 'a', 'b', 'a'];
     bans.forEach((s, i) => actions.push(act(s, 'ban', POOL[i]!)));
     st = vetoState(input(cfg, actions));
-    expect(st.remaining).toEqual(['c7']);
+    expect(st.remaining).toEqual([]);
+    expect(st.games).toEqual([{ game: 1, campaign: 'c7', pickedBy: null, sideBy: 'b', firstSurvivors: null }]);
     // a made the last ban, so b chooses sides for the decider.
     expect(st.next).toEqual({ kind: 'side', by: 'b', game: 1 });
     actions.push(act('b', 'infected'));
@@ -55,7 +56,10 @@ describe('ban to three, loser picks (Bo3, the owner\'s format)', () => {
     let st = vetoState(input(cfg, actions));
     expect(st.remaining).toEqual(['c5', 'c6', 'c7']);
     expect(st.next).toEqual({ kind: 'pick', by: 'a', game: 1 });
-    actions.push(act('a', 'pick', 'c6'), act('b', 'survivors'));
+    actions.push(act('a', 'pick', 'c6'));
+    st = vetoState(input(cfg, actions));
+    expect(st.games).toEqual([{ game: 1, campaign: 'c6', pickedBy: 'a', sideBy: 'b', firstSurvivors: null }]);
+    actions.push(act('b', 'survivors'));
     st = vetoState(input(cfg, actions));
     expect(st.games[0]).toEqual({ game: 1, campaign: 'c6', pickedBy: 'a', sideBy: 'b', firstSurvivors: 'b' });
     expect(st.next).toEqual({ kind: 'wait', game: 2 });
