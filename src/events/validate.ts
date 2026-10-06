@@ -137,6 +137,14 @@ export const EVENT_ERRORS = {
   not_frozen: { status: 409, text: 'The game is not frozen.' },
   already_frozen: { status: 409, text: 'The game is already frozen.' },
   bad_side: { status: 400, text: 'A side is a or b.' },
+  bad_schedule: { status: 400, text: 'A round schedule lists rounds, each with a default time and, on a window stage, a window that starts before it ends and holds the default time; a rolling stage takes a date only.' },
+  schedule_locked: { status: 409, text: 'The schedule of a finished stage or event cannot change.' },
+  not_schedulable: { status: 409, text: 'This match cannot be rescheduled now: it is not waiting in a window stage with a scheduling window, or its window has passed.' },
+  bad_time: { status: 400, text: 'A proposed time is a date and time inside the match window, at least an hour ahead, and not the time already set.' },
+  proposal_open: { status: 409, text: 'A proposal is already open for this match. Answer it or withdraw it first.' },
+  no_proposal: { status: 409, text: 'There is no open proposal for this match.' },
+  own_proposal: { status: 409, text: 'The other team answers your proposal. You can withdraw it.' },
+  not_your_proposal: { status: 409, text: 'Only the team that made the proposal can withdraw it.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type EventError = keyof typeof EVENT_ERRORS;
 
@@ -166,6 +174,12 @@ export interface StageSettings {
   type: StageType; config: StageConfig; rulesetId: number; gameConfig: string; campaignPool: string[];
   vetoType: VetoType; veto: VetoConfig; chapters: number | null; scheduling: Scheduling; advanceCount: number | null;
 }
+
+/** One round's schedule (plan T4 Ruling 2): the default time, and on a
+ *  window stage the window it sits in; on a rolling stage a date only,
+ *  stamped as the round's not_before (Ruling 3). ISO UTC strings. */
+export interface RoundSchedule { round: number; at: string | null; from: string | null; to: string | null }
+export const SCHEDULE_ROUNDS_MAX = 60;
 export interface StageContext {
   campaigns: ReadonlySet<string>; rulesetIds: ReadonlySet<number>; pugRulesetId: number | null;
   gameConfigs: ReadonlySet<string>; defaultPool: string[];
@@ -416,6 +430,29 @@ export function parsePool(raw: unknown, allowed: ReadonlySet<string>): Checked<s
     out.push(c);
   }
   return ok(out);
+}
+
+/** A stage's round schedule as the desk sends it. A row with nothing set
+ *  clears that round and is dropped; rounds come back sorted. */
+export function parseRoundSchedule(raw: unknown, scheduling: Scheduling): Checked<RoundSchedule[]> {
+  if (!Array.isArray(raw) || raw.length > SCHEDULE_ROUNDS_MAX) return fail('bad_schedule');
+  const time = (v: unknown): string | null | undefined => (v === null || v === undefined ? null : parseTime(v) ?? undefined);
+  const out: RoundSchedule[] = [];
+  const seen = new Set<number>();
+  for (const row of raw) {
+    if (!isObj(row) || !isInt(row.round, 1, 999) || seen.has(row.round)) return fail('bad_schedule');
+    seen.add(row.round);
+    const at = time(row.at);
+    const from = time(row.from);
+    const to = time(row.to);
+    if (at === undefined || from === undefined || to === undefined) return fail('bad_schedule');
+    if (scheduling === 'rolling' && (from !== null || to !== null)) return fail('bad_schedule');
+    if ((from === null) !== (to === null)) return fail('bad_schedule');
+    if (from !== null && to !== null && (from >= to || (at !== null && (at < from || at > to)))) return fail('bad_schedule');
+    if (at === null && from === null) continue;
+    out.push({ round: row.round, at, from, to });
+  }
+  return ok(out.sort((x, y) => x.round - y.round));
 }
 
 export function parseStage(raw: unknown, ctx: StageContext): Checked<StageSettings> {

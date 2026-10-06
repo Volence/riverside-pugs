@@ -138,4 +138,32 @@ describe('T1b columns', () => {
     const cols = (db.prepare('PRAGMA table_info(event_matches)').all() as { name: string }[]).map((c) => c.name);
     expect(cols).toEqual(expect.arrayContaining(['hold_from', 'admin_pause_at', 'admin_pause_by']));
   });
+
+  it('holds one open reschedule proposal per match, with the statuses and the schedule columns of plan T4', () => {
+    const id = event();
+    stage(id, 1);
+    const stageId = (db.prepare('SELECT id FROM event_stages WHERE event_id = ?').get(id) as { id: number }).id;
+    const matchId = Number(db.prepare(
+      "INSERT INTO event_matches (event_id, stage_id, round, slot, status, created_at) VALUES (?, ?, 1, 1, 'waiting', 'x')",
+    ).run(id, stageId).lastInsertRowid);
+    expect(db.prepare('SELECT schedule_source, scheduled_at, window_start, window_end FROM event_matches WHERE id = ?').get(matchId))
+      .toEqual({ schedule_source: null, scheduled_at: null, window_start: null, window_end: null });
+    expect(() => db.prepare("UPDATE event_matches SET schedule_source = 'guess' WHERE id = ?").run(matchId)).toThrow(/CHECK/);
+    db.prepare("UPDATE event_matches SET schedule_source = 'agreed', scheduled_at = '2026-10-14T21:00:00.000Z' WHERE id = ?").run(matchId);
+    db.prepare("UPDATE event_stages SET schedule_json = '[]' WHERE id = ?").run(stageId);
+    const propose = db.prepare(
+      "INSERT INTO event_reschedules (event_match_id, side, proposed_by, proposed_time, created_at) VALUES (?, 'a', ?, '2026-10-15T21:00:00.000Z', 'x')",
+    );
+    const first = Number(propose.run(matchId, A).lastInsertRowid);
+    expect(db.prepare('SELECT status, note, auto_accept_at, reminded_at, responded_by, responded_at FROM event_reschedules WHERE id = ?').get(first))
+      .toEqual({ status: 'open', note: '', auto_accept_at: null, reminded_at: null, responded_by: null, responded_at: null });
+    expect(() => propose.run(matchId, A)).toThrow(/UNIQUE/);
+    db.prepare("UPDATE event_reschedules SET status = 'countered' WHERE id = ?").run(first);
+    propose.run(matchId, A);
+    for (const s of ['accepted', 'auto_accepted', 'declined', 'withdrawn', 'expired']) db.prepare('UPDATE event_reschedules SET status = ? WHERE id = ?').run(s, first);
+    expect(() => db.prepare("UPDATE event_reschedules SET status = 'maybe' WHERE id = ?").run(first)).toThrow(/CHECK/);
+    expect(() => db.prepare("UPDATE event_reschedules SET side = 'c' WHERE id = ?").run(first)).toThrow(/CHECK/);
+    expect(db.prepare("SELECT value FROM settings WHERE key = 'reschedule_autoaccept_hours'").get()).toEqual({ value: '24' });
+    expect(db.prepare("SELECT value FROM settings WHERE key = 'event_window_lead_minutes'").get()).toEqual({ value: '20' });
+  });
 });

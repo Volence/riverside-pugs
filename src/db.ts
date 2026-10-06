@@ -552,6 +552,27 @@ CREATE TABLE IF NOT EXISTS event_campaign_prefs (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (entry_id, stage_id)
 );
+-- Reschedule proposals (tournaments plan T4, spec section 5). Only
+-- src/events/schedule.ts writes this table. One open proposal per match;
+-- auto_accept_at is null when the proposal needs an answer (made less than
+-- 48 hours before its time); reminded_at records the 24-hour DM.
+CREATE TABLE IF NOT EXISTS event_reschedules (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_match_id INTEGER NOT NULL REFERENCES event_matches(id),
+  side           TEXT NOT NULL CHECK (side IN ('a','b')),
+  proposed_by    TEXT NOT NULL REFERENCES players(steamid),
+  proposed_time  TEXT NOT NULL,
+  note           TEXT NOT NULL DEFAULT '',
+  created_at     TEXT NOT NULL,
+  auto_accept_at TEXT,
+  reminded_at    TEXT,
+  status         TEXT NOT NULL DEFAULT 'open'
+                 CHECK (status IN ('open','accepted','auto_accepted','declined','countered','withdrawn','expired')),
+  responded_by   TEXT,
+  responded_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS event_reschedules_match ON event_reschedules (event_match_id, id);
+CREATE UNIQUE INDEX IF NOT EXISTS event_reschedules_open ON event_reschedules (event_match_id) WHERE status = 'open';
 CREATE TABLE IF NOT EXISTS match_players (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   player_id TEXT NOT NULL REFERENCES players(steamid),
@@ -1454,6 +1475,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   event_lineup_minutes: '5',
   // Tournaments plan T3b: the confirm window after a series' last game.
   event_confirm_minutes: '15',
+  // Tournaments plan T4: how long an unanswered reschedule proposal waits
+  // before it locks (spec section 5), and how early a scheduled match's room opens.
+  reschedule_autoaccept_hours: '24',
+  event_window_lead_minutes: '20',
   // Scrim board plan 1: campaigns the accepting captain may add on top of the
   // poster's list.
   scrim_accept_campaigns_max: '2',
@@ -1890,6 +1915,12 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'event_matches', 'hold_from', 'TEXT');
   ensureColumn(db, 'event_matches', 'admin_pause_at', 'TEXT');
   ensureColumn(db, 'event_matches', 'admin_pause_by', 'TEXT');
+  // Tournaments plan T4: the per-round schedule of a stage (src/events/
+  // validate.ts RoundSchedule rows, written by events.ts setRoundSchedule)
+  // and where a match's scheduled_at came from: the round default, an
+  // agreed proposal, or staff. The time columns themselves date from T2.
+  ensureColumn(db, 'event_stages', 'schedule_json', 'TEXT');
+  ensureColumn(db, 'event_matches', 'schedule_source', "TEXT CHECK (schedule_source IN ('default','agreed','staff'))");
   // Moderators: may work tickets and nothing else. Deliberately not read by
   // serverAdmins.ts, so the flag grants nothing on a game server.
   ensureColumn(db, 'players', 'is_mod', 'INTEGER NOT NULL DEFAULT 0');
