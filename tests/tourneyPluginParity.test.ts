@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { parseLogDatagram } from '../src/logParse.js';
 import { SUB_NOT_BETWEEN, adminPauseTook, parseSubReply } from '../src/events/series.js';
+import { TOURNAMENT_RULE_CLEAR } from '../src/bookings/tournamentGames.js';
 
 /** The plugin half of plan T3c's in-game lines (plugin/pug-tourney.inc,
  *  pug-match 0.3.25). Nothing here can run SourcePawn, so like the other
@@ -252,5 +253,27 @@ describe('a forfeit closes the technical pause (final review I-1)', () => {
     expect(fn).toMatch(/if \(g_bPauseConverted\)\s*\{\s*g_bPauseConverted = false;\s*g_iPauseOwner = 0;\s*\}/);
     expect(fn).toContain('g_iTechPendingTeam = 0;');
     expect(fn).toContain('g_bTechReleased = false;');
+  });
+});
+
+describe('TOURNAMENT_RULE_CLEAR puts every rule cvar back to the plugin default', () => {
+  const sources = ['pug-pause.inc', 'pug-leave.inc', 'pug-tourney.inc']
+    .map((f) => readFileSync(join(__dirname, '../plugin', f), 'utf8'));
+  const defaults = new Map<string, string>();
+  for (const src of sources) {
+    for (const m of src.matchAll(/CreateConVar\("(sm_pug_[a-z_]+)",\s*"([^"]*)"/g)) defaults.set(m[1], m[2]);
+  }
+
+  it('finds the cvars it compares', () => {
+    expect(defaults.size).toBeGreaterThanOrEqual(TOURNAMENT_RULE_CLEAR.length);
+  });
+
+  it('each clear line names a plugin cvar and its CreateConVar default', () => {
+    for (const line of TOURNAMENT_RULE_CLEAR) {
+      const [name, value, ...rest] = line.split(' ');
+      expect(rest).toEqual([]);
+      expect(defaults.has(name), `${name} is not created in the plugin`).toBe(true);
+      expect(value, name).toBe(defaults.get(name));
+    }
   });
 });
