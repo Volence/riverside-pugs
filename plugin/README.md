@@ -146,9 +146,10 @@ PUGCALL ... reason=tech target=none ...
 - `TECH` (0.3.26, tournament box): a technical pause of pug team `team`
   (`cause=disconnect`: the leave module's pause, and `used`/`budget` are the
   team's reconnect time; else technical time). `over`: technical time ran out;
-  `tactical` is the team's tactical pauses left after the charge, `-1` when it
-  had none and the game unpaused, and also `-1` when the tactical budget is off
-  (`sm_pug_pause_limit 0`, unlimited) and the pause ran on as a tactical pause. `flag`: `by` flagged it, `text` is their
+  `tactical` is the team's tactical pauses left after the charge (the pause ran
+  on as a tactical pause), `-1` when it had none and the game unpaused; the key
+  is absent when the tactical budget is off (`sm_pug_pause_limit 0`, unlimited)
+  and the pause ran on as a tactical pause. `flag`: `by` flagged it, `text` is their
   note. `text=` runs to the end of the line.
 - `SUB ... emergency=1` (0.3.26): a mid-chapter sub for a disconnected player.
 - `MATCH_END ... forfeit=<a|b> forfeit_why=<...>` and the dump's

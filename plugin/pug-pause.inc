@@ -77,6 +77,17 @@ char g_sTechPendingBy[24];
 char g_sTechPendingReason[160];
 bool g_bPauseConverted;       // technical time ran out: this pause is the owner's tactical pause(s) now
 
+/** Set while Tech_OwnerReady forces the unpause: LeaveUnpauseNow issues
+ *  sm_ready from a client of each side, which comes back through the ready
+ *  listener and must not be taken for the owner readying again. */
+bool g_bTechForcing;
+
+/** The calling team readied and the unpause is on Rotoblin's countdown: the
+ *  technical clock no longer runs over into a tactical pause, and a further
+ *  ready from that team goes to Rotoblin as an ordinary one. Cleared when the
+ *  record ends, a new one begins, or the match resets. */
+bool g_bTechReleased;
+
 int g_iPauseUsed[3];          // [1] pug team a, [2] pug team b
 int g_iPausePendingTeam;      // team whose sm_pause we allowed and have not yet seen take effect
 int g_iPauseOwner;            // team charged for the pause in progress; 0 = none or not chargeable
@@ -140,6 +151,7 @@ void PauseReset()
 	g_iTechCause = 0;
 	g_iTechId = 0;
 	g_bTechFlagged = false;
+	g_bTechReleased = false;
 	g_iTechWarned = 0;
 	g_sTechBy[0] = '\0';
 	g_sTechReason[0] = '\0';
@@ -204,6 +216,7 @@ static void Tech_Begin()
 	g_iTechId = GetTime();
 	g_iTechCount[team]++;
 	g_bTechFlagged = false;
+	g_bTechReleased = false;
 	g_iTechWarned = 0;
 	strcopy(g_sTechBy, sizeof(g_sTechBy), g_sTechPendingBy);
 	strcopy(g_sTechReason, sizeof(g_sTechReason), g_sTechPendingReason);
@@ -245,29 +258,37 @@ static void Tech_End()
 		dc ? g_cvDcTeamSeconds.IntValue : g_cvTechSeconds.IntValue, -2, "");
 	g_iTechOpen = 0;
 	g_iTechOwner = 0;
+	g_bTechReleased = false;
 	g_iTechCause = 0;
 	g_bTechFlagged = false;
 	g_sTechBy[0] = '\0';
 	g_sTechReason[0] = '\0';
 }
 
-/** Set while Tech_OwnerReady forces the unpause: LeaveUnpauseNow issues
- *  sm_ready from a client of each side, which comes back through the ready
- *  listener and must not be taken for the owner readying again. */
-bool g_bTechForcing;
-
 /** Fix round 1 ruling: the team that called a technical pause owns its end.
- *  `team` (a pug team) readied while its technical pause still runs (not a
- *  disconnect record, not yet converted to tactical): both sides are readied
- *  the way Tech_Overrun's out-of-pauses branch does, so the other team cannot
- *  hold the game and drain the caller's technical and tactical time. True when
- *  it forced the unpause. The clock keeps running until the game is seen
- *  unpaused, so a countdown that is cancelled leaves the pause on its budget. */
-bool Tech_OwnerReady(int team)
+ *  `client` of pug team `team` readied while its technical pause still runs
+ *  (not a disconnect record, not yet converted to tactical): both sides are
+ *  readied the way Tech_Overrun's out-of-pauses branch does, so the other team
+ *  cannot hold the game and drain the caller's technical and tactical time.
+ *  True when it forced the unpause. Rotoblin then counts down a few seconds and
+ *  unpauses; g_bTechReleased keeps that countdown from being charged as an
+ *  overrun, and the record ends on the unpause the clock sees. Once both
+ *  sides are ready the countdown is not cancelled in practice; if it ever
+ *  were, the pause would stay with the technical clock stopped until both
+ *  teams ready again in Rotoblin's ordinary way. */
+bool Tech_OwnerReady(int client, int team)
 {
-	if (g_bTechForcing || !TourneyOn() || TourneyFrozen()) return false;
+	if (g_bTechForcing || g_bTechReleased || !TourneyOn() || TourneyFrozen()) return false;
 	if (g_iTechOwner == 0 || g_iTechOwner != team || g_bPauseConverted) return false;
 	if (!LeaveRotoblinPaused()) return false;
+	// Fix round 2: never while someone is away, or the calling team could
+	// force play on and push the other team toward a disconnect forfeit.
+	if (LeaveAnyAbsent())
+	{
+		PrintToChat(client, "[Match] A player is still reconnecting, so your ready does not end the technical pause on its own. It holds until they return or their team's reconnect time runs out.");
+		return false;
+	}
+	g_bTechReleased = true;
 	char name[16];
 	PauseTeamName(team, name, sizeof(name));
 	PrintToChatAll("\x04[Match]\x01 %s called the technical pause and is ready, so play resumes.", name);
@@ -282,6 +303,9 @@ static void Tech_Tick()
 {
 	if (LeaveAnyAbsent() || TourneyFrozen()) return;
 	int team = g_iTechOwner;
+	// The calling team readied: Rotoblin's countdown is running, so neither
+	// charge the seconds nor run over into a tactical pause.
+	if (g_bTechReleased) return;
 	g_fTechUsed[team] += 1.0;
 	int left = Tech_Left(team);
 	if (left <= 0)
@@ -324,8 +348,8 @@ static void Tech_Overrun()
 	int left = PauseLimit() > 0 ? PauseRemaining(team) : -1;
 	if (left >= 0) PrintToChatAll("\x04[Match]\x01 %s is out of technical time: this pause now uses one of their tactical pauses (\x05%d\x01 left).", name, left);
 	else PrintToChatAll("\x04[Match]\x01 %s is out of technical time: this pause is now a tactical pause.", name);
-	// tactical=-1 also when the budget is off (unlimited tactical pauses).
-	Tech_Emit("over", team, g_sTechBy, used, g_cvTechSeconds.IntValue, left, "");
+	// The budget off (unlimited tactical pauses): the tactical key is left out (-2).
+	Tech_Emit("over", team, g_sTechBy, used, g_cvTechSeconds.IntValue, left < 0 ? -2 : left, "");
 	EmitPug("PAUSE team=%d used=%d limit=%d", team, g_iPauseUsed[team], PauseLimit());
 }
 
