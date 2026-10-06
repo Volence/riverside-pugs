@@ -93,6 +93,22 @@ export const CLEAR_LINES: readonly string[] = [
   'sm_pug_auto_min_players 8',
 ];
 
+/** The series engine's hand on a tournament booking (tournaments plan T3b). */
+export interface TournamentHooks {
+  /** The burst that starts the game due on this campaign (sm_pug_match, the
+   *  roster, the ready notice, a chat line), pushed before every changelevel
+   *  of a tournament booking. May throw: a setup try then fails, and a
+   *  between-game load alerts staff. */
+  gameLines(bookingId: number, campaign: string): string[];
+  /** The burst of a game already pushed that the box has not reported yet
+   *  (no heartbeat), re-sent on the minute watch; [] otherwise. */
+  pendingLines(bookingId: number): string[];
+  ready(bookingId: number): void;
+  presence(bookingId: number, on: ReadonlySet<string>, now: Date): void;
+  gameEnded(bookingId: number, matchId: number): void;
+  ended(bookingId: number, reason: string | null): void;
+}
+
 export interface BookingRunnerDeps {
   db: DB;
   rcon: BoxRcon;
@@ -128,6 +144,8 @@ export interface BookingRunnerDeps {
   /** A2S_INFO, asked only once rcon has failed for booking_gone_minutes
    *  (plan 5). Absent, it is treated as never answering. */
   a2s?: A2sFn;
+  /** Tournaments plan T3b: the series engine's hooks on a tournament booking. Absent, tournament bookings behave as scrims. */
+  tournament?: TournamentHooks;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }
@@ -162,7 +180,8 @@ export function gameLines(db: DB, b: BookingRow, server: ServerRow, logAddress?:
   const pause = bookingRules(b)?.pause;
   const captains = [...new Set(sidesOf(db, b.id).filter((s) => s.confirmed_at !== null).flatMap((s) => sideManagers(db, s)))];
   const lines = [
-    'sm_pug_auto_track 1',
+    // A tournament box adopts nothing: the site starts every game (T3b Ruling 3).
+    `sm_pug_auto_track ${b.purpose === 'tournament' ? 0 : 1}`,
     `sm_pug_auto_min_players ${settingNumber(db, 'booking_game_min_players', 6, { min: 2, max: 8, integer: true })}`,
     `sm_pug_pause_limit ${Math.max(0, Math.trunc(pause?.limit ?? 0))}`,
     `sm_pug_pause_seconds ${Math.max(0, Math.trunc(pause?.seconds ?? 0))}`,
@@ -313,7 +332,7 @@ export class BookingRunner {
         // box at all; an idle box that cannot load the playlist (dlc4, a
         // custom campaign) would not be helped by emptying another one.
         if (this.freeBoxes(b.region) === 0) preempt = true;
-        if (nowMs >= Date.parse(b.starts_at) && !this.latePublished.has(b.id)) {
+        if (b.purpose !== 'tournament' && nowMs >= Date.parse(b.starts_at) && !this.latePublished.has(b.id)) {
           this.latePublished.add(b.id);
           publishAdminEvent({
             kind: 'problem',
@@ -395,7 +414,10 @@ export class BookingRunner {
     const playlist = JSON.parse(b.playlist_json) as string[];
     const firstMap = firstMapOf(this.db, playlist[0]);
     if (!isMapName(firstMap)) throw new Error(`${playlist[0]} starts on ${JSON.stringify(firstMap)}, which is not a valid map name`);
-    await this.deps.rcon(server, [...lines, markerLine(b.id)]);
+    // T3b Ruling 3: the game burst goes before the first changelevel, as the
+    // orchestrator's queue path sends it; a throw here fails this setup try.
+    const game = this.gameLinesFor(b, playlist[0]!);
+    await this.deps.rcon(server, [...lines, markerLine(b.id), ...game]);
     try {
       await this.deps.rcon(server, [`changelevel ${firstMap}`]);
     } catch {
@@ -407,7 +429,8 @@ export class BookingRunner {
     if (parseStatusMap(st) !== firstMap) throw new Error(`${firstMap} did not load (the box is on ${parseStatusMap(st) ?? 'no map'})`);
     if (!markReady(this.db, id, new Date(this.now()))) return;
     console.log(`[booking] ${id} ready on ${server.name}`);
-    this.tell(id, acceptedPeople(this.db, id).map((p) => p.steamid), 'booking_ready');
+    if (b.purpose === 'tournament') this.hook(id, 'ready', () => this.deps.tournament?.ready(id));
+    else this.tell(id, acceptedPeople(this.db, id).map((p) => p.steamid), 'booking_ready');
     await this.voiceStep(id, 'ensure');
   }
 
@@ -451,6 +474,8 @@ export class BookingRunner {
   private async windDown(id: number, sayGoodbye: boolean): Promise<void> {
     const b = getBooking(this.db, id);
     if (!b || b.ended_at !== null) return;
+    // T3b Ruling 11: the series engine holds a match whose box goes away mid-series.
+    if (b.purpose === 'tournament') this.hook(id, 'ended', () => this.deps.tournament?.ended(id, b.end_reason));
     // Whatever the end (time, idle, everyone left, a cancel, staff, !end), a
     // live game of this booking is aborted first. Left 'live', the orphan
     // reaper would later release the box it names, which by then may be
@@ -600,6 +625,8 @@ export class BookingRunner {
    *  start has passed, so it neither waits for ever nor keeps a box back. */
   private closeServerless(now: Date): void {
     for (const b of openBookings(this.db)) {
+      // T3b Ruling 8: a tournament booking waits; the series engine alerts.
+      if (b.purpose === 'tournament') continue;
       if (b.state !== 'scheduled' || b.server_id !== null || b.ending_at !== null) continue;
       if (sidesOf(this.db, b.id).some((s) => s.confirmed_at === null)) continue;
       const grace = (bookingRules(b)?.noShowGraceMinutes ?? 15) * 60_000;
@@ -642,7 +669,8 @@ export class BookingRunner {
     if (liveBookingGame(this.db, b.id)) return null;
     const closeMs = b.close_at !== null ? Date.parse(b.close_at) : null;
     if (closeMs !== null && nowMs >= closeMs && gamesPlayed(this.db, b.id) >= b.games_allowed) return 'done';
-    if (nowMs >= Date.parse(b.ends_at) && (closeMs === null || nowMs >= closeMs)) return 'time';
+    // A tournament booking never ends on time: the series engine closes it (T3b Ruling 11).
+    if (b.purpose !== 'tournament' && nowMs >= Date.parse(b.ends_at) && (closeMs === null || nowMs >= closeMs)) return 'time';
     return null;
   }
 
@@ -696,11 +724,18 @@ export class BookingRunner {
     const players = people.filter((p) => p.role === 'player' && on.has(p.steamid));
     const playersNow = { a: players.filter((p) => p.side === 'a').length, b: players.filter((p) => p.side === 'b').length };
     recordPresence(this.db, b.id, present, humans.length > 0, now, playersNow);
+    if (b.purpose === 'tournament') {
+      this.hook(b.id, 'presence', () => this.deps.tournament?.presence(b.id, on, now));
+      // A burst the box never got goes again until the game heartbeats (T3b Ruling 3).
+      let pending: string[] = [];
+      this.hook(b.id, 'pendingLines', () => { pending = this.deps.tournament?.pendingLines(b.id) ?? []; });
+      if (pending.length > 0) await this.push(b.id, server, () => pending, 'the pending game burst');
+    }
     if (b.state === 'ready' && present.a + present.b > 0 && markActive(this.db, b.id, now)) {
       // The first campaign was loaded by setup, before anyone was on: its
       // start lines are said once, when the booking goes active.
       const first = (JSON.parse(b.playlist_json) as string[])[b.playlist_pos];
-      if (first && !this.announced.has(b.id)) await this.push(b.id, server, () => this.campaignStartLines(first), 'the campaign start lines');
+      if (first && !this.announced.has(b.id)) await this.push(b.id, server, () => this.startLinesFor(b, first), 'the campaign start lines');
     }
 
     const fresh = getBooking(this.db, b.id)!;
@@ -714,7 +749,7 @@ export class BookingRunner {
     if (humans.length === 0 && nowMs - idleFrom >= limits.idleEndMinutes * 60_000) { this.endNow(b.id, 'idle', now); return; }
     const empties = humans.length === 0 ? (this.emptyWatches.get(b.id) ?? 0) + 1 : 0;
     this.emptyWatches.set(b.id, empties);
-    if (empties >= EMPTY_WATCHES_TO_END && this.everyoneLeftAfterGame(b.id, nowMs)) { this.endNow(b.id, 'done', now); return; }
+    if (b.purpose !== 'tournament' && empties >= EMPTY_WATCHES_TO_END && this.everyoneLeftAfterGame(b.id, nowMs)) { this.endNow(b.id, 'done', now); return; }
 
     if (fresh.next_campaign !== null && fresh.next_at !== null && Date.parse(fresh.next_at) <= nowMs && !liveBookingGame(this.db, b.id)) {
       this.track(b.id, () => this.loadNext(b.id));
@@ -725,7 +760,7 @@ export class BookingRunner {
     // warned_minutes, so a moved slot end is warned about again.
     const leftMin = (endsMs - nowMs) / 60_000;
     if (leftMin <= WARN_MINUTES && (fresh.warned_minutes === null || fresh.warned_minutes > WARN_MINUTES)
-      && fresh.close_at === null && !liveBookingGame(this.db, b.id)) {
+      && fresh.close_at === null && fresh.purpose !== 'tournament' && !liveBookingGame(this.db, b.id)) {
       setWarned(this.db, b.id, WARN_MINUTES);
       try {
         await this.deps.rcon(server, [`say [Booking] About ${Math.max(1, Math.round(leftMin))} minutes of the booked slot left (until ${fresh.ends_at.slice(11, 16)} UTC).`]);
@@ -940,7 +975,7 @@ export class BookingRunner {
     const snap = live ? restoreSnapshot(this.db, live.id) : null;
     const resume = snap ? resumeLines(snap) : [];
     const lines = [...bookingLines(this.db, b), ...gameLines(this.db, b, server, this.deps.logPublicAddress), markerLine(b.id)];
-    // No sm_pug_auto_track 0 ahead of the resume: gameLines sets it to 1 in
+    // No sm_pug_auto_track 0 ahead of the resume: gameLines sets it to 1 (0 on a tournament box) in
     // this same burst, so it never kept auto-track from adopting anything.
     // What does is the plugin's state (sm_pug_resume leaves it Pending with a
     // match, which auto-track never adopts over) and the site guards
@@ -961,7 +996,7 @@ export class BookingRunner {
     const fresh = getBooking(this.db, b.id)!;
     const playlist = JSON.parse(fresh.playlist_json) as string[];
     const campaign = fresh.next_campaign ?? playlist[fresh.playlist_pos];
-    const map = resumed ? snap!.map : firstMapOf(this.db, campaign);
+    const map = resumed ? snap!.map : fresh.next_map ?? firstMapOf(this.db, campaign);
     if (!isMapName(map)) throw new Error(`${campaign} starts on ${JSON.stringify(map)}, which is not a valid map name`);
     // The campaign a captain had picked is loaded here, so it is moved on as
     // loadNext does (next cleared, position advanced, campaign_loaded logged):
@@ -971,6 +1006,9 @@ export class BookingRunner {
       const at = playlist.indexOf(campaign);
       advancePlaylist(this.db, b.id, at >= 0 ? at : fresh.playlist_pos, new Date(this.now()));
     }
+    // T3b: the game burst for a game the crash caught before its load.
+    const game = loadedNext ? this.gameLinesFor(fresh, campaign) : [];
+    if (game.length > 0) await this.deps.rcon(server, game);
     try {
       await this.deps.rcon(server, [`changelevel ${map}`]);
     } catch {
@@ -985,7 +1023,7 @@ export class BookingRunner {
     this.announced.delete(b.id);
     if (loadedNext) {
       this.announced.add(b.id);
-      await this.push(b.id, server, () => this.campaignStartLines(campaign), 'the campaign start lines');
+      await this.push(b.id, server, () => this.startLinesFor(fresh, campaign), 'the campaign start lines');
     }
     let restored: string | null = null;
     let adminTail = '';
@@ -1075,7 +1113,8 @@ export class BookingRunner {
     const server = getServer(this.db, b.server_id!);
     if (!server) return;
     const campaign = b.next_campaign;
-    const map = firstMapOf(this.db, campaign);
+    // A tiebreak chapter loads straight (T3b Ruling 5).
+    const map = b.next_map ?? firstMapOf(this.db, campaign);
     if (!isMapName(map)) {
       console.warn(`[booking] ${id}: ${campaign} starts on ${JSON.stringify(map)}, which is not a valid map name; not loading it`);
       setNext(this.db, id, null, null, new Date(this.now()));
@@ -1083,6 +1122,17 @@ export class BookingRunner {
     }
     const playlist = JSON.parse(b.playlist_json) as string[];
     const at = playlist.indexOf(campaign);
+    let game: string[];
+    try {
+      game = this.gameLinesFor(b, campaign);
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err);
+      console.error(`[booking] ${id}: the game for ${campaign} could not be started: ${why}`);
+      publishAdminEvent({ kind: 'problem', text: `Booking ${id}: the tournament game on ${campaign} could not be started (${why}). Nothing was loaded; look at the match room.` });
+      setNext(this.db, id, null, null, new Date(this.now()));
+      return;
+    }
+    if (game.length > 0) await this.push(id, server, () => game, 'the game burst');
     // Moved on first: a box that does not take the changelevel is not sent it
     // again every minute; a captain can pick the campaign again.
     advancePlaylist(this.db, id, at >= 0 ? at : b.playlist_pos, new Date(this.now()));
@@ -1114,7 +1164,7 @@ export class BookingRunner {
         if (after) {
           this.announced.add(id);
           await this.push(id, server, () => [
-            ...bookingLines(this.db, after), ...gameLines(this.db, after, server, this.deps.logPublicAddress), ...this.campaignStartLines(campaign),
+            ...bookingLines(this.db, after), ...gameLines(this.db, after, server, this.deps.logPublicAddress), ...this.startLinesFor(after, campaign),
           ], 'the campaign start lines');
         }
       }
@@ -1130,6 +1180,32 @@ export class BookingRunner {
   private campaignStartLines(campaign: string): string[] {
     const name = consoleText(campaignRegistry(this.db).get(campaign)?.name ?? campaign, 60);
     return [`say [Booking] ${name}: !nextmap, !stay, !end and !addcampaign are yours, captains.`];
+  }
+
+  /** The series engine's burst for the game due on a tournament booking; nothing for a scrim. May throw (TournamentHooks). */
+  private gameLinesFor(b: BookingRow, campaign: string): string[] {
+    if (b.purpose !== 'tournament' || !this.deps.tournament) return [];
+    return this.deps.tournament.gameLines(b.id, campaign);
+  }
+
+  /** A guarded hook call: the engine's failure is logged and never stops the runner. */
+  private hook(id: number, what: string, fn: () => void): void {
+    try {
+      fn();
+    } catch (err) {
+      console.error(`[booking] ${id}: tournament ${what} hook failed:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  /** The chat lines said once a campaign is up: the captains' commands on a
+   *  scrim; nothing on a tournament box, whose burst says its own. */
+  private startLinesFor(b: BookingRow, campaign: string): string[] {
+    return b.purpose === 'tournament' ? [] : this.campaignStartLines(campaign);
+  }
+
+  /** One best-effort line on a tournament box (the series engine's). */
+  announce(bookingId: number, text: string): void {
+    this.say(bookingId, `say [Match] ${consoleText(text, 200)}`, 'the series line');
   }
 
   /** A best-effort burst. A failure is logged with the log secret and the
@@ -1160,6 +1236,11 @@ export class BookingRunner {
     if (!m || m.booking_id === null) return;
     const b = this.running(m.booking_id);
     if (!b) return;
+    if (b.purpose === 'tournament') {
+      // The series engine records the game and schedules what follows (T3b).
+      this.hook(b.id, 'gameEnded', () => this.deps.tournament?.gameEnded(b.id, matchId));
+      return;
+    }
     const played = gamesPlayed(this.db, b.id);
     const nowMs = this.now();
     let line: string;
@@ -1291,6 +1372,11 @@ export class BookingRunner {
     if (actingSides(this.db, b.id, steamid).length === 0) {
       console.log(`[booking] ${b.id}: onCommand: ${who} does not manage a confirmed side (server ${serverId}, cmd ${cmd})`);
       if (cmd === 'allow') this.refuseAllow(b.id, serverId, arg, BOOKING_ERRORS.not_manager.text);
+      return;
+    }
+    if (b.purpose === 'tournament' && cmd !== 'allow') {
+      // T3b Ruling 10: the series engine picks the campaigns and closes the box.
+      this.say(b.id, 'say [Match] The site runs this tournament match: it picks the campaigns and closes the server.', 'the tournament refusal');
       return;
     }
     let error: string | null = null;
