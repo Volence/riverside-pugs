@@ -8,7 +8,9 @@ import { PHASE_TEXT, clockText, logText } from './event/room/roomText';
 import { VetoBoard } from './event/room/VetoBoard';
 import { LineupPanel } from './event/room/LineupPanel';
 
-const LIVE = new Set(['ready', 'veto', 'lineup']);
+/** Phases the page refetches in every 10 s. A result can close a room
+ *  (server, hold) and a reset can reopen one (waiting) with no push. */
+const POLLED = new Set(['waiting', 'ready', 'veto', 'lineup', 'server', 'hold']);
 
 /** A team's logo (only once it has one) next to its name, used in the room
  *  header and the ready check so both read the same way. */
@@ -39,12 +41,17 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
   useEffect(() => { void load(); }, [slug, id]);
   useHubEvent(['event_room'], () => { void load(); });
   useEffect(() => {
-    if (!v || !LIVE.has(v.phase)) return undefined;
+    if (!v || !POLLED.has(v.phase)) return undefined;
     const poll = setInterval(() => { void load(); }, 10_000);
-    const clock = setInterval(() => setNow(Date.now()), 1000);
-    return () => { clearInterval(poll); clearInterval(clock); };
+    return () => clearInterval(poll);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [v?.phase]);
+  const hasDeadline = !!v?.deadline;
+  useEffect(() => {
+    if (!hasDeadline) return undefined;
+    const clock = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(clock);
+  }, [hasDeadline]);
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -84,10 +91,7 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
           <h3>Ready check</h3>
           <ul class="room__ready">
             {(['a', 'b'] as const).map((s) => (
-              <li key={s}>
-                {v[s]?.logoKey ? <img class="evententry__logo" src={entryLogoUrl(v[s]!.logoKey!)} alt="" width={28} height={28} /> : null}
-                <span>{`${v[s]?.name ?? 'TBD'}: ${v.ready[s] ? 'ready' : 'waiting'}`}</span>
-              </li>
+              <li key={s}><Team name={`${v[s]?.name ?? 'TBD'}: ${v.ready[s] ? 'ready' : 'waiting'}`} logoKey={v[s]?.logoKey} /></li>
             ))}
           </ul>
           {me?.manager && !myReady && <button class="btn" type="button" disabled={busy} onClick={() => run(() => eventsApi.ready(slug, matchId))}>Ready</button>}

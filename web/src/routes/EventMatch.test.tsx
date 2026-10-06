@@ -63,4 +63,43 @@ describe('EventMatchPage', () => {
     const heading = await screen.findByRole('heading', { name: 'Rats vs Bats' });
     expect(within(heading).getAllByRole('img')).toHaveLength(1);
   });
+
+  it.each(['waiting', 'server', 'hold'] as const)('refetches every 10 s in the %s phase, since a result can close the room with no push', async (phase) => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      mockEvents.room.mockResolvedValue(view({ phase, holdReason: null }));
+      render(<EventMatchPage slug="cup" id="1" session={{ kind: 'guest' } as never} />);
+      await screen.findByRole('heading', { name: 'Rats vs Bats' });
+      expect(mockEvents.room).toHaveBeenCalledTimes(1);
+      // Preact runs effects after paint (real timers), so advance until the poll is set.
+      await vi.waitFor(() => {
+        vi.advanceTimersByTime(10_000);
+        expect(mockEvents.room).toHaveBeenCalledTimes(2);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops refetching once the match is done', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      mockEvents.room.mockResolvedValue(view({ phase: 'done' }));
+      render(<EventMatchPage slug="cup" id="1" session={{ kind: 'guest' } as never} />);
+      await screen.findByRole('heading', { name: 'Rats vs Bats' });
+      await new Promise((r) => setTimeout(r, 100));
+      vi.advanceTimersByTime(30_000);
+      expect(mockEvents.room).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows a team logo in the ready check the same way as in the header', async () => {
+    mockEvents.room.mockResolvedValue(view({ phase: 'ready', ready: { a: false, b: true }, a: { id: 1, name: 'Rats', tag: 'RAT', logoKey: 'abc', seed: 1, out: false } }));
+    render(<EventMatchPage slug="cup" id="1" session={{ kind: 'guest' } as never} />);
+    const ready = (await screen.findByText('Rats: waiting')).closest('li')!;
+    expect(ready.querySelector('.roomteam img')).toBeTruthy();
+    expect(screen.getByText('Bats: ready').closest('.roomteam')).toBeTruthy();
+  });
 });

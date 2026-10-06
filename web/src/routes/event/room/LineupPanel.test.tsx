@@ -36,4 +36,10 @@ describe('LineupPanel', () => {
     render(<LineupPanel v={v({ me: null, phase: 'server', lineups: { a: players.slice(0, 4), b: players.slice(1), aLocked: true, bLocked: true } })} busy={false} onLock={async () => {}} />);
     expect(screen.getAllByText('P2')).toHaveLength(2);
   });
+
+  it('ignores a default four that names someone off the roster', () => {
+    render(<LineupPanel v={v({ me: { side: 'a', manager: true, playable: players, defaultFour: ['p2', 'p3', 'p4', 'gone'] } })} busy={false} onLock={async () => {}} />);
+    expect(screen.getByText('Pick your four (3 of 4)')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Lock lineup' }) as HTMLButtonElement).disabled).toBe(true);
+  });
 });
