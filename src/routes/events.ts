@@ -206,7 +206,10 @@ export async function eventRoutes(
       } else r = R.lockLineup(db, { matchId: m.id, steamid: me, steamids: body.steamids, timers });
       if (!r.ok) return refuse(reply, r);
       // T3b Ruling 4: a pick on a live match may have settled the next game.
-      if (action === 'veto' && P.getMatch(db, m.id)?.status === 'live') opts.series?.afterPick(m.id);
+      // The pick is committed by now, so a throw here is logged, never a 500.
+      if (action === 'veto' && P.getMatch(db, m.id)?.status === 'live') {
+        try { opts.series?.afterPick(m.id); } catch (err) { console.error(`[events] scheduling match ${m.id} after the pick failed:`, err instanceof Error ? err.message : err); }
+      }
       opts.rooms?.pushChange(m.id);
       return {};
     });

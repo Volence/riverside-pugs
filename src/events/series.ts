@@ -136,7 +136,8 @@ export class SeriesEngine {
         console.error(`[series] server alert for match ${m.id} failed:`, err instanceof Error ? err.message : err);
       }
     }
-    const stale = this.db.prepare("SELECT * FROM event_matches WHERE status = 'connect' AND deadline IS NOT NULL AND deadline <= ?")
+    // Only rooms of a live event and stage, like every other clock query (a cancelled event's rooms never tick).
+    const stale = this.db.prepare(`SELECT m.* FROM event_matches m WHERE ${R.ROOM_LIVE_SQL} AND m.status = 'connect' AND m.deadline IS NOT NULL AND m.deadline <= ?`)
       .all(new Date(now.getTime() - PRESENCE_FALLBACK_MS).toISOString()) as P.MatchRow[];
     for (const m of stale) {
       const last = m.booking_id !== null ? this.watched.get(m.booking_id) ?? this.bootMs : this.bootMs;

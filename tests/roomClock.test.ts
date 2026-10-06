@@ -304,6 +304,23 @@ describe('RoomClock with the series (plan T3b)', () => {
     expect(f.pushes).toContain(f.matchId);
   });
 
+  it('still pushes a timed-out pick when the engine throws after it (Task 8 review)', async () => {
+    f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
+    await f.tick();
+    const g1 = f.gameOf(1);
+    f.goLive(g1.match_id!);
+    f.endGame(g1.match_id!, [{ map: 'm1', a: 100, b: 500 }]);
+    f.t.t += 2 * MIN;
+    vi.spyOn(f.series, 'afterPick').mockImplementation(() => { throw new Error('boom'); });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    f.pushes.length = 0;
+    await f.clock.tick();
+    expect(f.gameOf(2)).toMatchObject({ picked_by: f.entryB });
+    expect(f.pushes).toContain(f.matchId);
+    expect(err.mock.calls.some((c) => String(c[0]).includes('after the timed-out pick failed'))).toBe(true);
+    err.mockRestore();
+  });
+
   it('books through the series engine on its own tick, with no separate series tick', async () => {
     f = await seriesFixture();
     expect(f.match()).toMatchObject({ status: 'booking', booking_id: null });

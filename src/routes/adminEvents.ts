@@ -208,11 +208,18 @@ export async function adminEventRoutes(
     // cancelEvent writes only the event (room.ts owns the room columns), so
     // every open room goes back to waiting here and is pushed: its clock
     // stopped with the event (final review).
+    // A room holding a server goes through the series engine when it is
+    // wired, which cancels the running booking first (plan T3b). The push
+    // is sent here either way, as the reset-room route does.
     (me, id) => {
       for (const m of roomMatches(id)) {
-        const r = R.resetRoom(db, { matchId: m.id, by: me });
-        if (r.ok) opts.rooms?.pushChange(m.id);
-        else console.error(`[events] room reset of match ${m.id} after cancelling event ${id} refused: ${r.error}`);
+        try {
+          const r = opts.series ? opts.series.reset(m.id, me) : R.resetRoom(db, { matchId: m.id, by: me });
+          if (r.ok) opts.rooms?.pushChange(m.id);
+          else console.error(`[events] room reset of match ${m.id} after cancelling event ${id} refused: ${r.error}`);
+        } catch (err) {
+          console.error(`[events] room reset of match ${m.id} after cancelling event ${id} failed:`, err instanceof Error ? err.message : err);
+        }
       }
     });
 
