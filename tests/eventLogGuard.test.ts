@@ -9,7 +9,7 @@ import * as V from '../src/events/validate.js';
 import * as R from '../src/events/room.js';
 import { createBracket, reportResult } from '../src/events/bracket.js';
 import { ADMIN, NOW, START, eventFixture, stageBody, type Fixture } from './eventFixture.js';
-import { A, entryFixture, rosterA, type EntryFixture } from './entryFixture.js';
+import { A, B, entryFixture, rosterA, type EntryFixture } from './entryFixture.js';
 import { SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
 import { TIMERS, roomFixture, type RoomFixture } from './roomFixture.js';
 
@@ -363,11 +363,30 @@ describe('event_log guard', () => {
    *  lockLineup and savePrefs to ROOM_MUTATIONS and its reads to ROOM_READS. */
   describe('room guard (src/events/room.ts)', () => {
     const ROOM_TABLES = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:event_vetoes|event_games|event_lineups|event_entry_prefs|event_campaign_prefs)\b/gi;
-    const ROOM_READS = new Set(['roomTimers', 'vetoActions', 'vetoInput', 'roomState', 'gamesOf', 'lineupsOf', 'sideOf', 'entryOn', 'playableOf', 'busyEntries', 'isParticipant']);
+    const ROOM_READS = new Set([
+      'roomTimers', 'vetoActions', 'vetoInput', 'roomState', 'gamesOf', 'lineupsOf', 'sideOf', 'entryOn', 'playableOf', 'busyEntries', 'isParticipant',
+      'entryPrefs', 'campaignPrefs', 'lastFour', 'autoFour',
+    ]);
     const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
     const open = (f: RoomFixture) => {
       const r = R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW });
       if (!r.ok) throw new Error(r.error);
+    };
+    const bothReady = (f: RoomFixture) => {
+      open(f);
+      for (const steamid of [A[0]!, B[0]!]) {
+        const r = R.readyUp(f.db, { matchId: f.matchId, steamid, timers: TIMERS, now: at(1) });
+        if (!r.ok) throw new Error(r.error);
+      }
+    };
+    // The same ban-to-one veto as room.test.ts's actVeto tests, to reach lineups.
+    const toLineups = (f: RoomFixture) => {
+      bothReady(f);
+      const steps: [string, number, string, string | null][] = [[A[0]!, 0, 'first', null], [A[0]!, 1, 'ban', 'dead_air'], [B[0]!, 2, 'survivors', null]];
+      for (const [steamid, step, action, campaign] of steps) {
+        const r = R.actVeto(f.db, { matchId: f.matchId, steamid, step, action, campaign, timers: TIMERS, now: at(2) });
+        if (!r.ok) throw new Error(r.error);
+      }
     };
     const ROOM_MUTATIONS: Record<string, { action: string; actor: string | null; setup: (f: RoomFixture) => void; run: (f: RoomFixture) => V.Checked<unknown> }> = {
       openRoom: { action: 'room_opened', actor: null, setup: () => {}, run: (f) => R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW }) },
@@ -375,6 +394,18 @@ describe('event_log guard', () => {
       holdMatch: { action: 'match_held', actor: null, setup: open, run: (f) => R.holdMatch(f.db, { matchId: f.matchId, by: null, reason: 'nobody_ready', now: at(10) }) },
       resetRoom: { action: 'room_reset', actor: ADMIN, setup: open, run: (f) => R.resetRoom(f.db, { matchId: f.matchId, by: ADMIN, now: at(1) }) },
       resumeDeadline: { action: 'room_resumed', actor: null, setup: open, run: (f) => R.resumeDeadline(f.db, { matchId: f.matchId, timers: TIMERS, now: at(30) }) },
+      actVeto: {
+        action: 'veto_action', actor: A[0]!, setup: bothReady,
+        run: (f) => R.actVeto(f.db, { matchId: f.matchId, steamid: A[0]!, step: 0, action: 'first', campaign: null, timers: TIMERS, now: at(2) }),
+      },
+      lockLineup: {
+        action: 'lineup_locked', actor: A[0]!, setup: toLineups,
+        run: (f) => R.lockLineup(f.db, { matchId: f.matchId, steamid: A[0]!, steamids: [A[1]!, A[2]!, A[3]!, A[4]!], timers: TIMERS, now: at(4) }),
+      },
+      savePrefs: {
+        action: 'prefs_saved', actor: A[0]!, setup: () => {},
+        run: (f) => R.savePrefs(f.db, { entryId: f.entryA, by: A[0]!, staff: false, prefs: { defaultFour: null, side: 'survivors', campaigns: {} }, now: at(0) }),
+      },
     };
     const rows = (f: RoomFixture) => JSON.stringify(['event_matches', 'event_vetoes', 'event_games', 'event_lineups', 'event_entry_prefs', 'event_campaign_prefs']
       .map((t) => f.db.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()));
@@ -412,5 +443,21 @@ describe('event_log guard', () => {
         expect(rows(f)).toBe(before);
       });
     }
+
+    // readyUp's own case above is the first Ready, which only sets a column
+    // and never reaches advance(). This second case is the Ready that makes
+    // both sides ready, so readyUp also runs advance() (an event_games
+    // upsert and the status/deadline change) before its audit row; proves
+    // that path writes nothing either when the audit row fails.
+    it('readyUp (the second ready, which also runs advance) writes nothing when its event_log row cannot be written', async () => {
+      const f = await roomFixture();
+      open(f);
+      const first = R.readyUp(f.db, { matchId: f.matchId, steamid: B[0]!, timers: TIMERS, now: at(1) });
+      if (!first.ok) throw new Error(first.error);
+      const before = rows(f);
+      f.db.exec("CREATE TRIGGER room_log_down_readyUp2 BEFORE INSERT ON event_log WHEN NEW.action = 'room_ready' BEGIN SELECT RAISE(ABORT, 'audit down'); END");
+      expect(() => R.readyUp(f.db, { matchId: f.matchId, steamid: A[0]!, timers: TIMERS, now: at(1) })).toThrow(/audit down/);
+      expect(rows(f)).toBe(before);
+    });
   });
 });
