@@ -276,6 +276,22 @@ describe('the desk tools (plan T3c)', () => {
     expect((await get(room(), B[1])).json().pauses[0].reason).toBe('router');
     expect((await get(room(), OUTSIDER)).json().pauses[0].reason).toBeNull();
   });
+
+  it('shows a pause the box never closed as ended when its game ended (final review)', async () => {
+    R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS });
+    const gameMatchId = Number(f.db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'completed', 'dead_air')").run().lastInsertRowid);
+    const endedAt = '2026-10-07T21:30:00.000Z';
+    f.db.prepare("INSERT INTO event_games (event_match_id, ordinal, campaign, match_id, created_at, ended_at) VALUES (?, 1, 'dead_air', ?, ?, ?)")
+      .run(f.matchId, gameMatchId, '2026-10-07T20:00:00.000Z', endedAt);
+    E.logEvent(f.db, f.eventId, A[0]!, 'tech_pause', '2026-10-07T21:20:00.000Z',
+      { matchId: f.matchId, gameMatchId, techId: 1_791_000_000, side: 'a', cause: 'call', by: A[0], reason: 'router', used: 0, budget: 300 });
+    E.logEvent(f.db, f.eventId, B[0]!, 'tech_pause', '2026-10-07T21:25:00.000Z',
+      { matchId: f.matchId, gameMatchId: 0, techId: 1_791_000_100, side: 'b', cause: 'call', by: B[0], reason: 'mouse', used: 0, budget: 300 });
+    const pauses = (await get(room())).json().pauses as { side: string; endedAt: string | null }[];
+    expect(pauses.find((p) => p.side === 'a')!.endedAt).toBe(endedAt);
+    // A pause of a game still running (or not recorded yet) stays open.
+    expect(pauses.find((p) => p.side === 'b')!.endedAt).toBeNull();
+  });
 });
 
 describe('reschedules over HTTP (plan T4)', () => {
