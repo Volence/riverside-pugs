@@ -113,6 +113,12 @@ export const EVENT_ERRORS = {
   bad_lineup: { status: 400, text: 'A lineup is exactly four different players from your starters and subs.' },
   bad_prefs: { status: 400, text: 'Preferences: a default four from your starters and subs (or none), a side, and campaigns from each stage\'s pool, each once.' },
   room_open_downstream: { status: 409, text: 'A later match already has its match room open; reset that room first.' },
+  booking_open: { status: 409, text: 'This match still holds a server booking. Cancel it first (Reset room does).' },
+  not_connect_phase: { status: 409, text: 'This match is not waiting for the teams to connect.' },
+  not_live_phase: { status: 409, text: 'This match is not being played.' },
+  not_confirm_phase: { status: 409, text: 'This match is not in its confirm window.' },
+  game_not_found: { status: 404, text: 'No such game in this match.' },
+  already_confirmed: { status: 409, text: 'Your team has already confirmed the result.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type EventError = keyof typeof EVENT_ERRORS;
 
