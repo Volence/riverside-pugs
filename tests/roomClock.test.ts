@@ -12,7 +12,8 @@ import { presetConfig } from '../src/events/vetoConfig.js';
 import { RR, SE, SWISS, playFixture } from './playFixture.js';
 import { autoAction } from '../src/events/veto.js';
 import * as E from '../src/events/events.js';
-import { recordResultFlow, stageTable } from '../src/events/flow.js';
+import { recordResultFlow, serialize, stageTable } from '../src/events/flow.js';
+import { tellReschedule } from '../src/events/notices.js';
 
 const at = (min: number) => NOW.getTime() + min * 60_000;
 const clockAt = (f: RoomFixture, ms: { t: number }) => {
@@ -444,5 +445,128 @@ describe('RoomClock: window stages (plan T4)', () => {
       expect(match(g).status).toBe('admin_hold');
       expect(alerts.filter((x) => /window/.test(x))).toHaveLength(1);
     } finally { off(); }
+  });
+});
+
+describe('RoomClock: window stages, review follow-ups (plan T4 Task 4 ruling)', () => {
+  const hours = (h: number) => at(h * 60);
+  const reasons = (f: RoomFixture) => (f.db.prepare("SELECT detail FROM event_log WHERE action = 'reschedule_expired' ORDER BY id").all() as { detail: string }[])
+    .map((r) => (JSON.parse(r.detail) as { reason: string }).reason);
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('a proposal still open at the window end is closed with reason window_ended, not time_passed', async () => {
+    const f = await windowFixture({ to: new Date(hours(48)) });
+    expect(S.proposeTime(f.db, { matchId: f.matchId, by: B[0], time: new Date(hours(48)).toISOString(), rules: S.scheduleRules(f.db), now: NOW }).ok).toBe(true);
+    const { clock } = clockAt(f, { t: hours(48) });
+    await clock.tick();
+    expect(reasons(f)).toEqual(['window_ended']);
+    expect(match(f)).toMatchObject({ status: 'forfeit', winner_entry: f.entryB });
+  });
+
+  it('a fault in the proposals pass never stops rooms opening', async () => {
+    const f = await windowFixture();
+    f.db.prepare("UPDATE event_matches SET scheduled_at = ?, schedule_source = 'default' WHERE id = ?").run(new Date(hours(2)).toISOString(), f.matchId);
+    vi.spyOn(S, 'remindersDue').mockImplementation(() => { throw new Error('boom'); });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { clock } = clockAt(f, { t: hours(2) });
+    await clock.tick();
+    expect(match(f).status).toBe('veto');
+    expect(err.mock.calls.some((c) => String(c[0]).includes('schedule'))).toBe(true);
+  });
+
+  it('logs a refused auto-accept once and retries it until it goes through', async () => {
+    const f = await windowFixture();
+    f.db.prepare("UPDATE settings SET value = '48' WHERE key = 'reschedule_autoaccept_hours'").run();
+    const p = S.proposeTime(f.db, { matchId: f.matchId, by: A[0], time: new Date(hours(100)).toISOString(), rules: S.scheduleRules(f.db), now: NOW });
+    expect(p.ok).toBe(true);
+    const end = match(f).window_end;
+    // The window moved off the proposed time (staff re-applied the schedule): refused as 'changed'.
+    f.db.prepare('UPDATE event_matches SET window_end = ? WHERE id = ?').run(new Date(hours(99)).toISOString(), f.matchId);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const t = { t: hours(48) };
+    const { clock, send } = clockAt(f, t);
+    await clock.tick();
+    t.t = hours(49);
+    await clock.tick();
+    const refusals = () => warn.mock.calls.filter((c) => String(c[0]).includes('refused')).length;
+    expect(refusals()).toBe(1);
+    expect(S.openProposal(f.db, f.matchId)).toBeDefined();
+    f.db.prepare('UPDATE event_matches SET window_end = ? WHERE id = ?').run(end, f.matchId);
+    t.t = hours(50);
+    await clock.tick();
+    expect(match(f)).toMatchObject({ scheduled_at: new Date(hours(100)).toISOString(), schedule_source: 'agreed' });
+    expect(send).toHaveBeenCalledWith(expect.arrayContaining([A[0], B[0]]), 'event_match_time', expect.anything());
+    expect(refusals()).toBe(1);
+  });
+
+  it('refuses the window-end forfeit when the time locks between the clock\'s check and the event chain', async () => {
+    const f = await windowFixture({ to: new Date(hours(48)) });
+    S.proposeTime(f.db, { matchId: f.matchId, by: B[0], time: new Date(hours(30)).toISOString(), rules: S.scheduleRules(f.db), now: NOW });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const held = serialize(f.eventId, () => gate);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { clock, send } = clockAt(f, { t: hours(48) });
+    const ticking = clock.tick();
+    await new Promise((r) => setTimeout(r, 10));
+    // Staff set a time while the forfeit waited on the chain.
+    f.db.prepare("UPDATE event_matches SET scheduled_at = ?, schedule_source = 'staff' WHERE id = ?").run(new Date(hours(60)).toISOString(), f.matchId);
+    release();
+    await held;
+    await ticking;
+    expect(match(f)).toMatchObject({ status: 'waiting', winner_entry: null });
+    expect(send).not.toHaveBeenCalledWith(expect.anything(), 'event_match_forfeit', expect.anything());
+    expect(err.mock.calls.filter((c) => String(c[0]).includes('window end')).length).toBe(1);
+  });
+
+  it('refuses the window-end forfeit when the window moved past now inside the chain, logs the refusal once, and forfeits once the window has really ended', async () => {
+    const f = await windowFixture({ to: new Date(hours(48)) });
+    S.proposeTime(f.db, { matchId: f.matchId, by: B[0], time: new Date(hours(30)).toISOString(), rules: S.scheduleRules(f.db), now: NOW });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const t = { t: hours(48) };
+    const { clock } = clockAt(f, t);
+    const moveInsideChain = async () => {
+      let release!: () => void;
+      const gate = new Promise<void>((r) => { release = r; });
+      const held = serialize(f.eventId, () => gate);
+      const ticking = clock.tick();
+      await new Promise((r) => setTimeout(r, 10));
+      f.db.prepare('UPDATE event_matches SET window_end = ? WHERE id = ?').run(new Date(hours(72)).toISOString(), f.matchId);
+      release();
+      await held;
+      await ticking;
+      expect(match(f).status).toBe('waiting');
+      f.db.prepare('UPDATE event_matches SET window_end = ? WHERE id = ?').run(new Date(hours(48)).toISOString(), f.matchId);
+    };
+    await moveInsideChain();
+    t.t = hours(49);
+    await moveInsideChain();
+    expect(err.mock.calls.filter((c) => String(c[0]).includes('window end')).length).toBe(1);
+    t.t = hours(50);
+    await clock.tick();
+    expect(match(f)).toMatchObject({ status: 'forfeit', winner_entry: f.entryB });
+  });
+
+  it('logs a refused window-end hold once', async () => {
+    const f = await windowFixture({ to: new Date(hours(48)) });
+    vi.spyOn(R, 'holdMatch').mockReturnValue({ ok: false, error: 'not_live' });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const t = { t: hours(48) };
+    const { clock } = clockAt(f, t);
+    await clock.tick();
+    t.t = hours(49);
+    await clock.tick();
+    expect(err.mock.calls.filter((c) => String(c[0]).includes('window end')).length).toBe(1);
+  });
+
+  it('a withdrawn proposal DMs the managers of both teams', async () => {
+    const f = await windowFixture();
+    const p = S.proposeTime(f.db, { matchId: f.matchId, by: A[0], time: new Date(hours(30)).toISOString(), rules: S.scheduleRules(f.db), now: NOW });
+    expect(p.ok).toBe(true);
+    expect(S.withdrawProposal(f.db, { matchId: f.matchId, by: A[0], now: NOW }).ok).toBe(true);
+    const send = vi.fn(() => 1);
+    tellReschedule({ db: f.db, notifier: { send } as unknown as Notifier, publicUrl: 'https://x' }, f.eventId, f.matchId, 'withdrawn', p.ok ? p.value.id : 0);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(expect.arrayContaining([A[0], B[0]]), 'event_reschedule', expect.objectContaining({ content: expect.stringContaining('withdrew') }));
   });
 });

@@ -80,15 +80,18 @@ export function tellStaffAction(d: NoticeDeps, eventId: number, matchId: number,
 }
 /** A proposal moved (plan T4 Ruling 11): the managers of the side that
  *  must act. A proposal, a counter and the reminder go to the other side;
- *  a decline or a withdrawal to the side that proposed. */
+ *  a decline to the side that proposed; a withdrawal to both, since the
+ *  other side was waiting on it (Task 4 ruling). */
 export function tellReschedule(d: NoticeDeps, eventId: number, matchId: number, what: RescheduleNotice, proposalId: number): void {
   const m = P.getMatch(d.db, matchId);
   const p = getProposal(d.db, proposalId);
   if (!m || !p || m.entry_a === null || m.entry_b === null) return;
-  const toSide = what === 'declined' || what === 'withdrawn' ? p.side : p.side === 'a' ? 'b' : 'a';
-  const entry = N.getEntry(d.db, toSide === 'a' ? m.entry_a : m.entry_b);
-  if (!entry) return;
-  tell(d, N.managersOf(d.db, entry.team_id), eventId, 'event_reschedule', { matchId, what, proposalId });
+  const sides: ('a' | 'b')[] = what === 'withdrawn' ? ['a', 'b'] : [what === 'declined' ? p.side : p.side === 'a' ? 'b' : 'a'];
+  const to = sides.flatMap((side) => {
+    const entry = N.getEntry(d.db, side === 'a' ? m.entry_a! : m.entry_b!);
+    return entry ? N.managersOf(d.db, entry.team_id) : [];
+  });
+  tell(d, [...new Set(to)], eventId, 'event_reschedule', { matchId, what, proposalId });
 }
 /** A time locked (accepted, auto-accepted or set by staff): both rosters. */
 export function tellTimeLocked(d: NoticeDeps, eventId: number, matchId: number, staff = false): void {
