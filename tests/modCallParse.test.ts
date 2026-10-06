@@ -56,6 +56,10 @@ describe('PUGCALL parsing', () => {
     expect(parse(`"zero<22><STEAM_1:1:544005382><Infected>" say "${full()}"`)).toBeNull();
   });
 
+  it('reads the admin reason of a tournament box call (plan T3c)', () => {
+    expect(parse(full().replace('reason=cheating', 'reason=admin').replace(`target=${T}`, 'target=none'))).toMatchObject({ reason: 'admin', target: 'none', steamid: P });
+  });
+
   it.each([
     `PUGCALL steamid=123 target=team tteam=2 reason=other match=0 ord=0 half=0 tms=-1 via=game text=`,
     `PUGCALL steamid=${P} target=bob tteam=2 reason=other match=0 ord=0 half=0 tms=-1 via=game text=`,

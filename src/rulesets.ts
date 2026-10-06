@@ -22,6 +22,8 @@ export interface MatchRules {
   bosses: 'random_published' | 'fixed' | 'voteboss';
   sideRule: 'higher_seed_chooses' | 'non_picker_chooses' | 'coin';
   spectate: { sideLocked: boolean };
+  /** Tournaments plan T3c: substitutions a side may make per match (in-game !sub between chapters). */
+  subs: { perMatch: number };
 }
 
 const BOSSES: MatchRules['bosses'][] = ['random_published', 'fixed', 'voteboss'];
@@ -44,6 +46,7 @@ export const TEMPLATES: Record<'PUG' | 'Standard Cup' | 'Casual Scrim', MatchRul
     bosses: 'random_published',
     sideRule: 'coin',
     spectate: { sideLocked: false },
+    subs: { perMatch: 2 },
   },
   'Standard Cup': {
     rated: false,
@@ -56,6 +59,7 @@ export const TEMPLATES: Record<'PUG' | 'Standard Cup' | 'Casual Scrim', MatchRul
     bosses: 'random_published',
     sideRule: 'higher_seed_chooses',
     spectate: { sideLocked: true },
+    subs: { perMatch: 2 },
   },
   'Casual Scrim': {
     rated: false,
@@ -68,6 +72,7 @@ export const TEMPLATES: Record<'PUG' | 'Standard Cup' | 'Casual Scrim', MatchRul
     bosses: 'random_published',
     sideRule: 'non_picker_chooses',
     spectate: { sideLocked: false },
+    subs: { perMatch: 2 },
   },
 };
 
@@ -123,6 +128,16 @@ export function parseRules(json: string): MatchRules {
   const spectate = r.spectate as Record<string, unknown>;
   if (typeof spectate.sideLocked !== 'boolean') fail('spectate.sideLocked');
 
+  // Tournaments plan T3c. Absent in every ruleset and stage snapshot saved
+  // before the field existed: read as the default rather than failing them.
+  let subsPerMatch = 2;
+  if (r.subs !== undefined) {
+    if (typeof r.subs !== 'object' || r.subs === null) fail('subs');
+    const subs = r.subs as Record<string, unknown>;
+    if (!Number.isInteger(subs.perMatch) || (subs.perMatch as number) < 0 || (subs.perMatch as number) > 4) fail('subs.perMatch');
+    subsPerMatch = subs.perMatch as number;
+  }
+
   return {
     rated: r.rated,
     pause: { limit: pauseLimit, seconds: pauseSeconds, mutualUnpause: pause.mutualUnpause, techPauses: pause.techPauses },
@@ -134,6 +149,7 @@ export function parseRules(json: string): MatchRules {
     bosses: r.bosses as MatchRules['bosses'],
     sideRule: r.sideRule as MatchRules['sideRule'],
     spectate: { sideLocked: spectate.sideLocked },
+    subs: { perMatch: subsPerMatch },
   };
 }
 

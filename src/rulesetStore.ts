@@ -119,6 +119,10 @@ export function readEditableRules(raw: unknown): RulesetResult<EditableRules> {
   for (const b of [pause.mutualUnpause, r.teamLock, r.playerMapControl, restartHalf.allowed, restartHalf.lockAfterDamage, spectate.sideLocked]) {
     if (typeof b !== 'boolean') return fail('bad_rules');
   }
+  // Tournaments plan T3c: the editor has no field for subs yet, so a body
+  // without them reads as the default; one with them is range-checked.
+  const subs = r.subs as Record<string, unknown> | null | undefined;
+  if (subs !== undefined && (typeof subs !== 'object' || subs === null || !whole(subs.perMatch, 0, 4))) return fail('bad_rules');
   return ok({
     pause: { limit: pause.limit as number | null, seconds: pause.seconds as number | null, mutualUnpause: pause.mutualUnpause as boolean, techPauses: pause.techPauses as number },
     teamLock: r.teamLock as boolean,
@@ -128,6 +132,7 @@ export function readEditableRules(raw: unknown): RulesetResult<EditableRules> {
     bosses: r.bosses as MatchRules['bosses'],
     sideRule: r.sideRule as MatchRules['sideRule'],
     spectate: { sideLocked: spectate.sideLocked as boolean },
+    subs: { perMatch: subs ? (subs.perMatch as number) : 2 },
   });
 }
 
@@ -137,6 +142,7 @@ export function unratedRules(e: EditableRules): MatchRules {
   return {
     rated: false, pause: e.pause, teamLock: e.teamLock, playerMapControl: e.playerMapControl, restartHalf: e.restartHalf,
     noShowGraceMinutes: e.noShowGraceMinutes, penalties: false, bosses: e.bosses, sideRule: e.sideRule, spectate: e.spectate,
+    subs: e.subs,
   };
 }
 
@@ -178,7 +184,10 @@ export function updateRuleset(db: DB, o: { by: string; id: number; name: unknown
     if (!name) return fail('bad_name');
     if (row.template === 1 && name !== row.name) return fail('template_locked');
     if (nameTaken(db, name, row.id)) return fail('name_taken');
-    const edited = readEditableRules(o.rules);
+    // A body without subs keeps the ruleset's stored value (the editor sends none, plan T3c).
+    const stored = rulesOf(row)?.subs;
+    const body = typeof o.rules === 'object' && o.rules !== null && !('subs' in o.rules) && stored ? { ...(o.rules as object), subs: stored } : o.rules;
+    const edited = readEditableRules(body);
     if (!edited.ok) return edited;
     const json = JSON.stringify(unratedRules(edited.value));
     db.prepare('UPDATE rulesets SET name = ?, rules_json = ? WHERE id = ?').run(name, json, row.id);

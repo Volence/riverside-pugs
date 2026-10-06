@@ -16,9 +16,9 @@ export type WatchedCvar = typeof WATCHED_CVARS[number];
  *  sends no act; it only ever reported, so it reads as `live`. */
 export const CVAR_ACTS = ['held', 'fixed', 'live'] as const;
 export type CvarAct = typeof CVAR_ACTS[number];
-/** Reasons an in-game /mod call (src/modCalls.ts) can give. Anything else on
- *  a PUGCALL line is refused. */
-export const MOD_CALL_REASONS = ['cheating', 'toxicity', 'griefing', 'afk', 'english', 'broke', 'other'] as const;
+/** Reasons an in-game /mod call (src/modCalls.ts) can give. `admin` is a
+ *  tournament box's `!admin`. Anything else on a PUGCALL line is refused. */
+export const MOD_CALL_REASONS = ['cheating', 'toxicity', 'griefing', 'afk', 'english', 'broke', 'other', 'admin'] as const;
 export type ModCallReason = (typeof MOD_CALL_REASONS)[number];
 /** Events emitted by the queue side games plugin (pug-sidegame.sp). */
 export const SIDE_EVENTS = ['join', 'part', 'ready', 'vote', 'mapstart', 'mapend'] as const;
@@ -46,6 +46,8 @@ export interface Phase {
   /** Who typed !pause, when the plugin knows (pug-match 0.3.5 on). Absent,
    *  never guessed, for older plugins, disconnect pauses and admins. */
   by?: string;
+  /** The staff freeze of a tournament box holds this pause (pug-match 0.3.25, plan T3c). */
+  admin?: boolean;
 }
 
 /** Where a round sits in its map's SourceTV demo (pug-match 0.3.12 on).
@@ -108,6 +110,12 @@ export type LogEvent =
   | { kind: 'problem'; token: string; code: string }
   // One step of an in-game !gg forfeit vote (pug-match 0.3.22, pug-gg.inc).
   | ({ kind: 'gg' } & GgLine)
+  // A captain's !sub on a tournament box (pug-match 0.3.25, plan T3c): the
+  // plugin resolved the names and judged the moment; the site decides.
+  | { kind: 'sub_request'; token: string; by: string; out: string; in: string; map: number }
+  // The staff freeze of a tournament box changed (plan T3c). by is null for
+  // the site's own command.
+  | { kind: 'admin_pause'; token: string; on: boolean; by: string | null; cause: 'call' | 'staff' | 'reset' }
   | { kind: 'player'; token: string; steamid: string; event: 'connect' | 'disconnect' }
   | { kind: 'match_end'; token: string; a: number; b: number; winner: 'a' | 'b' | 'draw' }
   // Emitted by !load_4v4p for a match started in-game rather than by us. The
@@ -302,6 +310,7 @@ function phaseOf(state: string | undefined, rest: Record<string, string>): Phase
   const unready = (rest.unready ?? '').split(',').filter((id) => /^\d{17}$/.test(id));
   const phase: Phase = { state: state as PhaseState, team, limit: limit < 0 ? 0 : limit, leave: rest.leave === '1', unready };
   if (state === 'paused' && /^\d{17}$/.test(rest.by ?? '')) phase.by = rest.by;
+  if (state === 'paused' && rest.admin === '1') phase.admin = true;
   return phase;
 }
 
@@ -901,6 +910,21 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
     case 'ABANDON':
       if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
       return { kind: 'abandon', token, steamid: rest.steamid };
+    case 'SUB': {
+      const by = steamId64Of(rest.by ?? '');
+      const out = steamId64Of(rest.out ?? '');
+      const inId = steamId64Of(rest.in ?? '');
+      const map = intOf(rest.map);
+      if (!by || !out || !inId || map === null || map < 0) return null;
+      return { kind: 'sub_request', token, by, out, in: inId, map };
+    }
+    case 'ADMINPAUSE': {
+      if (rest.state !== 'on' && rest.state !== 'off') return null;
+      const by = rest.by === 'site' || rest.by === undefined ? null : steamId64Of(rest.by);
+      if (rest.by !== undefined && rest.by !== 'site' && !by) return null;
+      const cause = rest.cause === 'call' || rest.cause === 'reset' ? rest.cause : 'staff';
+      return { kind: 'admin_pause', token, on: rest.state === 'on', by, cause };
+    }
     case 'PROBLEM':
       // A short machine code, never free text: kv() splits on whitespace and
       // the backend owns the wording (matchTeardown.ts problemText).

@@ -24,12 +24,15 @@ const HOUR_MS = 60 * 60_000;
 export const REASON_LABELS: Record<ModCallReason, string> = {
   cheating: 'Cheating', toxicity: 'Toxic / team fighting', griefing: 'Griefing / throwing',
   afk: 'AFK / no comms', english: 'Not speaking English', broke: 'Something broke', other: 'Other',
+  admin: 'Tournament: admin needed',
 };
 
-/** The ticket category a call files under. `broke` is about the server, not
- *  a person, so it never files. */
+/** The ticket category a call files under. `broke` is about the server and
+ *  `admin` about the match (a tournament box's !admin), neither a person, so
+ *  neither ever files. */
 const CATEGORY: Record<ModCallReason, ReportCategory | null> = {
   cheating: 'cheating', toxicity: 'toxicity', griefing: 'griefing', afk: 'afk', english: 'other', other: 'other', broke: null,
+  admin: null,
 };
 
 export interface ModCallRow {
@@ -104,9 +107,9 @@ export function handleModCall(
   const now = deps.now ?? new Date();
   const nowIso = now.toISOString();
   const caller = resolveAlias(db, ev.steamid);
-  // `broke` is about the server: whoever the line named is not the subject,
-  // and keeping them would fold it in with calls about that player.
-  const targetKind: ModCallRow['target_kind'] = ev.reason === 'broke'
+  // `broke` is about the server and `admin` (a tournament box's !admin,
+  // plan T3c) about the match: whoever the line named is not the subject.
+  const targetKind: ModCallRow['target_kind'] = ev.reason === 'broke' || ev.reason === 'admin'
     ? 'none'
     : ev.target === 'team' || ev.target === 'general' || ev.target === 'none' ? ev.target : 'player';
   const target = targetKind === 'player' ? resolveAlias(db, ev.target) : null;
