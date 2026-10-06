@@ -96,7 +96,11 @@ export async function stageOutcome(db: DB, stage: E.StageRow): Promise<P.StageOu
   const out = outOf(db, entrants);
   const type = E.stageSettingsOf(stage).type;
   if (type === 'single_elim' || type === 'double_elim') {
-    const ranks = (await bracketRanks(P.stageBracket(stage)!)).filter((r) => !out.has(r.entryId));
+    // brackets-manager ranks densely (an SE of 8 is 1,2,3,3,4,4,4,4); places
+    // are standard competition ranks (1,2,3,3,5,5,5,5), counted over the
+    // teams still in, so a disqualified finalist leaves 1, 2, ... behind.
+    const lib = (await bracketRanks(P.stageBracket(stage)!)).filter((r) => !out.has(r.entryId));
+    const ranks = lib.map((r) => ({ entryId: r.entryId, rank: 1 + lib.filter((x) => x.rank < r.rank).length }));
     return { ranks, advance: [] };
   }
   const ranked = stageTable(db, stage).filter((r) => !r.out);

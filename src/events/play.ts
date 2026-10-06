@@ -118,8 +118,12 @@ export function startEvent(db: DB, o: { eventId: number; by: string | null; plan
   return db.transaction((): V.Checked<E.EventRow> => {
     const ev = E.getEvent(db, o.eventId);
     if (!ev) return V.fail('not_found');
-    if (!V.nextStatusAllowed(ev.status, 'live')) return V.fail('wrong_status');
+    if (ev.entry_kind !== 'team' || !V.nextStatusAllowed(ev.status, 'live')) return V.fail('wrong_status');
     if (ev.locked_at === null) return V.fail('list_not_final');
+    // Stages can still be edited or reordered after registration opens, so
+    // the chain checked at publish may no longer hold (final review fix 3).
+    const chain = E.chainOf(db, ev);
+    if (!chain.ok) return chain;
     const first = E.stagesOf(db, ev.id)[0];
     if (!first || first.status !== 'pending') return V.fail('wrong_status');
     const seeded = activeSeeded(db, ev.id);
@@ -162,6 +166,11 @@ export function recordResult(
     const correction = m.status !== 'waiting';
     if (correction && m.bm_match_id === null && totalRounds(stage) !== null && laterRound(db, stage.id, m.round)) return V.fail('result_locked');
     const winner = o.result.winner === 'a' ? m.entry_a : m.entry_b;
+    // A dropped or disqualified team never beats one still in, even by a
+    // correction; with both sides out, staff may resolve it either way (Ruling 9).
+    const loser = winner === m.entry_a ? m.entry_b : m.entry_a;
+    const isOut = (id: number) => !N.isActive(N.getEntry(db, id)!);
+    if (isOut(winner) && !isOut(loser)) return V.fail('winner_out');
     if (o.bracket) {
       if (stage.bracket_rev !== o.bracket.baseRev) return V.fail('changed');
       db.prepare('UPDATE event_stages SET bracket_json = ?, bracket_rev = bracket_rev + 1, updated_at = ? WHERE id = ?')

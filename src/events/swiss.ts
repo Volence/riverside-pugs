@@ -18,6 +18,7 @@ const STEP_CAP = 200_000;
 export function pairSwiss(entries: { id: number; seed: number }[], results: TableResult[], rounds: number): Pairing {
   if (entries.length === 0) return { pairs: [], bye: null };
   const ids = new Set(entries.map((e) => e.id));
+  // Keeps results against opponents no longer in the field: the match happened, and a removed opponent adds 0 Buchholz.
   const mine = results.filter((r) => ids.has(r.a) || (r.b !== null && ids.has(r.b)));
   const first = mine.length === 0;
   const order = first

@@ -168,7 +168,9 @@ function writeStage(db: DB, id: number, s: V.StageSettings, rules: string | null
 }
 
 /** The stage chain as it stands, for publish and open registration (Ruling 16). */
-function chainOf(db: DB, ev: EventRow): V.Checked<null> {
+/** The stage chain as it stands now (Ruling 16); also re-checked when play
+ *  starts, since stages can change after registration opens. */
+export function chainOf(db: DB, ev: EventRow): V.Checked<null> {
   const f = fieldsOf(ev);
   return V.checkChain(stagesOf(db, ev.id).map((s) => ({ type: s.type, advanceCount: s.advance_count })), { teamCap: f.teamCap, roster: f.roster });
 }

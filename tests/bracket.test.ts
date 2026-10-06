@@ -143,4 +143,14 @@ describe('bracket', () => {
     expect(bracketMatches(d).filter((m) => m.group === 3)).toHaveLength(1);
     expect(bracketComplete(d)).toBe(true);
   });
+
+  it('double elimination of 2 is built as one final with no third place, completes, and ranks 1 and 2', async () => {
+    for (const grandFinalReset of [true, false]) {
+      const d = await createBracket('double_elim', { grandFinalReset }, [11, 22]);
+      expect(bracketMatches(d).map((m) => [m.group, m.round, m.a, m.b])).toEqual([[1, 1, 11, 22]]);
+      const done = await reportResult(d, ready(d)[0]!.bmId, bWins);
+      expect(bracketComplete(done)).toBe(true);
+      expect(await bracketRanks(done)).toEqual([{ entryId: 22, rank: 1 }, { entryId: 11, rank: 2 }]);
+    }
+  });
 });

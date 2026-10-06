@@ -99,8 +99,11 @@ export async function createBracket(type: BracketType, config: StageConfigs[Brac
   } else {
     const size = 2 ** Math.ceil(Math.log2(seeded.length));
     const seeding = [...names, ...Array<null>(size - names.length).fill(null)];
-    if (type === 'single_elim') {
-      const thirdPlace = (config as StageConfigs['single_elim']).thirdPlace && seeded.length >= 4;
+    // A double elimination of 2 is built as a single final: the library's
+    // double elimination of 2 never reports final standings, so the stage
+    // could never finish (final review fix 1).
+    if (type === 'single_elim' || seeded.length < 3) {
+      const thirdPlace = type === 'single_elim' && (config as StageConfigs['single_elim']).thirdPlace && seeded.length >= 4;
       await manager.create.stage({ tournamentId: 0, name: 'stage', type: 'single_elimination', seeding, settings: { consolationFinal: thirdPlace } });
     } else {
       const reset = (config as StageConfigs['double_elim']).grandFinalReset;

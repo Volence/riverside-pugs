@@ -97,6 +97,7 @@ export const EVENT_ERRORS = {
   match_not_open: { status: 409, text: 'That match does not have two teams to report on yet.' },
   bad_result: { status: 400, text: 'A result names the winner and gives both campaign scores with the winner ahead, or is a forfeit.' },
   result_locked: { status: 409, text: 'Later matches already depend on this result, so it can no longer be changed here.' },
+  winner_out: { status: 409, text: 'That team is out of the event, so it cannot win a match.' },
   changed: { status: 409, text: 'The event changed while this was being saved. Reload and try again.' },
   elim_not_last: { status: 400, text: 'An elimination bracket is always the last stage.' },
   bad_group_advance: { status: 400, text: 'With groups, the advance count has to split evenly across the groups.' },
