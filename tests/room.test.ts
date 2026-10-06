@@ -5,7 +5,8 @@ import { recordResultFlow } from '../src/events/flow.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { A, B } from './entryFixture.js';
 import { playFixture, SWISS } from './playFixture.js';
-import { TIMERS, roomFixture, type RoomFixture } from './roomFixture.js';
+import { presetConfig } from '../src/events/vetoConfig.js';
+import { POOL7, TIMERS, fakeBooking, fakeMatch, roomFixture, type RoomFixture } from './roomFixture.js';
 
 const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
 const ok = <T>(r: { ok: true; value: T } | { ok: false; error: string }): T => { if (!r.ok) throw new Error(r.error); return r.value; };
@@ -208,5 +209,156 @@ describe('results and the room (play.ts)', () => {
     expect(r.ok && r.value).toMatchObject({ status: 'done', result_source: 'admin', deadline: null });
     const log = f.db.prepare("SELECT detail FROM event_log WHERE action = 'result_recorded'").get() as { detail: string };
     expect(JSON.parse(log.detail).correction).toBe(false);
+  });
+});
+
+/** Ban to one, both lineups locked: status booking, game 1 no_mercy, Rats survive first. */
+const toBooking = async (f?: RoomFixture) => {
+  f ??= await roomFixture();
+  bothReady(f);
+  ok(veto(f, A[0], 0, 'first'));
+  ok(veto(f, A[0], 1, 'ban', 'dead_air'));
+  ok(veto(f, B[0], 2, 'survivors'));
+  ok(R.lockLineup(f.db, { matchId: f.matchId, steamid: A[0], steamids: A.slice(0, 4), timers: TIMERS, now: at(4) }));
+  ok(R.lockLineup(f.db, { matchId: f.matchId, steamid: B[0], steamids: B.slice(0, 4), timers: TIMERS, now: at(4) }));
+  return f;
+};
+const game = (f: RoomFixture, ordinal: number) => R.gamesOf(f.db, f.matchId).find((g) => g.ordinal === ordinal)!;
+const toLive = async () => {
+  const f = await toBooking();
+  ok(R.attachBooking(f.db, { matchId: f.matchId, bookingId: fakeBooking(f, at(5)), now: at(5) }));
+  ok(R.startConnect(f.db, { matchId: f.matchId, graceMinutes: 15, now: at(5) }));
+  ok(R.startLive(f.db, { matchId: f.matchId, now: at(6) }));
+  return f;
+};
+
+describe('series writer (plan T3b)', () => {
+  it('walks booking, connect, live, a recorded game and the confirm window, one log row each', async () => {
+    const f = await toBooking();
+    const bookingId = fakeBooking(f, at(5));
+    expect(ok(R.attachBooking(f.db, { matchId: f.matchId, bookingId, now: at(5) }))).toMatchObject({ status: 'booking', booking_id: bookingId, booked_at: at(5).toISOString() });
+    expect(lastAction(f)).toEqual({ action: 'match_booked', actor: null });
+    expect(R.matchOfBooking(f.db, bookingId)?.id).toBe(f.matchId);
+    expect(R.lineupFour(f.db, f.matchId, f.entryB)).toEqual(B.slice(0, 4));
+    expect(ok(R.noteServerAlert(f.db, { matchId: f.matchId, now: at(15) })).server_alerted_at).toBe(at(15).toISOString());
+    expect(R.noteServerAlert(f.db, { matchId: f.matchId, now: at(16) })).toEqual({ ok: false, error: 'changed' });
+    expect(ok(R.startConnect(f.db, { matchId: f.matchId, graceMinutes: 15, now: at(20) }))).toMatchObject({ status: 'connect', deadline: at(35).toISOString() });
+    expect(R.startConnect(f.db, { matchId: f.matchId, graceMinutes: 15, now: at(20) })).toEqual({ ok: false, error: 'wrong_status' });
+    const gameMatchId = fakeMatch(f);
+    expect(ok(R.linkGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, gameMatchId, now: at(21) })).status).toBe('connect');
+    expect(game(f, 1).match_id).toBe(gameMatchId);
+    expect(R.linkGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, gameMatchId: fakeMatch(f), now: at(21) })).toEqual({ ok: false, error: 'changed' });
+    expect(ok(R.startLive(f.db, { matchId: f.matchId, now: at(25) }))).toMatchObject({ status: 'live', deadline: null });
+    expect(R.startLive(f.db, { matchId: f.matchId, now: at(25) })).toEqual({ ok: false, error: 'not_connect_phase' });
+    ok(R.recordGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, scoreA: 400, scoreB: 900, forfeit: null, now: at(60) }));
+    expect(game(f, 1)).toMatchObject({ score_a: 400, score_b: 900, forfeit_side: null, winner: f.entryB, ended_at: at(60).toISOString() });
+    expect(R.recordGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, scoreA: 1, scoreB: 0, forfeit: null, now: at(61) })).toEqual({ ok: false, error: 'changed' });
+    expect(R.seriesGames(f.db, P.getMatch(f.db, f.matchId)!)).toEqual([{ id: game(f, 1).id, ordinal: 1, tiebreakOf: null, scoreA: 400, scoreB: 900, forfeit: null, started: true }]);
+    expect(ok(R.startConfirm(f.db, { matchId: f.matchId, timers: TIMERS, now: at(61) }))).toMatchObject({ status: 'confirming', deadline: at(76).toISOString() });
+    expect(R.confirmResult(f.db, { matchId: f.matchId, steamid: A[3], now: at(62) })).toEqual({ ok: false, error: 'not_manager' });
+    expect(ok(R.confirmResult(f.db, { matchId: f.matchId, steamid: A[1], now: at(62) })).confirm_a_at).toBe(at(62).toISOString());
+    expect(R.confirmResult(f.db, { matchId: f.matchId, steamid: A[0], now: at(63) })).toEqual({ ok: false, error: 'already_confirmed' });
+    expect(lastAction(f)).toEqual({ action: 'result_confirmed', actor: A[1] });
+  });
+
+  it('records a forfeited game (a !gg) with its side, no scores needed, the other side winning', async () => {
+    const f = await toLive();
+    ok(R.linkGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, gameMatchId: fakeMatch(f), now: at(7) }));
+    expect(R.recordGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, scoreA: 100, scoreB: null, forfeit: null, now: at(30) })).toEqual({ ok: false, error: 'bad_request' });
+    ok(R.recordGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, scoreA: null, scoreB: null, forfeit: 'a', now: at(30) }));
+    expect(game(f, 1)).toMatchObject({ score_a: null, score_b: null, forfeit_side: 'a', winner: f.entryB, ended_at: at(30).toISOString() });
+    expect(R.seriesGames(f.db, P.getMatch(f.db, f.matchId)!)[0]).toMatchObject({ scoreA: null, scoreB: null, forfeit: 'a' });
+    expect(R.recordGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, scoreA: null, scoreB: null, forfeit: 'b', now: at(31) })).toEqual({ ok: false, error: 'changed' });
+    // A tied game stores no winner.
+    const f2 = await toLive();
+    ok(R.linkGame(f2.db, { matchId: f2.matchId, gameId: game(f2, 1).id, gameMatchId: fakeMatch(f2), now: at(7) }));
+    ok(R.recordGame(f2.db, { matchId: f2.matchId, gameId: game(f2, 1).id, scoreA: 500, scoreB: 500, forfeit: null, now: at(30) }));
+    expect(game(f2, 1)).toMatchObject({ score_a: 500, score_b: 500, winner: null });
+  });
+
+  it('files a dispute with a reason, from a manager, before the deadline, and nowhere else', async () => {
+    const f = await toLive();
+    expect(R.disputeMatch(f.db, { matchId: f.matchId, steamid: B[0], reason: 'They had five', now: at(7) })).toEqual({ ok: false, error: 'not_confirm_phase' });
+    ok(R.startConfirm(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) }));
+    expect(R.disputeMatch(f.db, { matchId: f.matchId, steamid: B[0], reason: 'no', now: at(61) })).toEqual({ ok: false, error: 'bad_reason' });
+    expect(R.disputeMatch(f.db, { matchId: f.matchId, steamid: B[2], reason: 'They had five', now: at(61) })).toEqual({ ok: false, error: 'not_manager' });
+    expect(R.disputeMatch(f.db, { matchId: f.matchId, steamid: B[0], reason: 'They had five', now: at(75) })).toEqual({ ok: false, error: 'room_closed' });
+    const m = ok(R.disputeMatch(f.db, { matchId: f.matchId, steamid: B[0], reason: 'They had five on map 3', now: at(70) }));
+    expect(m).toMatchObject({ status: 'admin_hold', hold_reason: 'dispute', dispute_side: 'b', dispute_by: B[0], dispute_reason: 'They had five on map 3', disputed_at: at(70).toISOString(), deadline: null });
+    expect(lastAction(f)).toEqual({ action: 'match_disputed', actor: B[0] });
+  });
+
+  it('adds a tiebreak game under its series game with the replayed map and the sides, nine at most', async () => {
+    const f = await toLive();
+    const g1 = game(f, 1);
+    const tb = ok(R.addTiebreak(f.db, { matchId: f.matchId, ofGameId: g1.id, map: 'l4d_vs_hospital04_interior', firstSurvivors: 'a', now: at(50) }));
+    expect(tb).toMatchObject({ ordinal: 11, campaign: 'no_mercy', tiebreak_of: g1.id, map: 'l4d_vs_hospital04_interior', first_survivors: f.entryA, picked_by: null, side_by: null, match_id: null });
+    const tb2 = ok(R.addTiebreak(f.db, { matchId: f.matchId, ofGameId: g1.id, map: 'l4d_vs_hospital04_interior', firstSurvivors: 'b', now: at(90) }));
+    expect(tb2.ordinal).toBe(12);
+    expect(R.addTiebreak(f.db, { matchId: f.matchId, ofGameId: 999, map: 'x', firstSurvivors: 'a', now: at(91) })).toEqual({ ok: false, error: 'game_not_found' });
+    expect(R.addTiebreak(f.db, { matchId: f.matchId, ofGameId: tb.id, map: 'x', firstSurvivors: 'a', now: at(91) })).toEqual({ ok: false, error: 'game_not_found' });
+    for (let k = 3; k <= 9; k++) ok(R.addTiebreak(f.db, { matchId: f.matchId, ofGameId: g1.id, map: 'm', firstSurvivors: 'a', now: at(91) }));
+    expect(game(f, 19).tiebreak_of).toBe(g1.id);
+    expect(R.addTiebreak(f.db, { matchId: f.matchId, ofGameId: g1.id, map: 'm', firstSurvivors: 'a', now: at(92) })).toEqual({ ok: false, error: 'changed' });
+  });
+
+  it('runs the loser\'s pick and the side choice on a live match, then clears the deadline', async () => {
+    const f = await roomFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7) });
+    bothReady(f);
+    const opening: [string, number, string, string | null][] = [[A[0], 0, 'first', null], [A[0], 1, 'ban', POOL7[0]!], [B[0], 2, 'ban', POOL7[1]!], [A[0], 3, 'ban', POOL7[2]!], [B[0], 4, 'ban', POOL7[3]!], [A[0], 5, 'pick', POOL7[5]!], [B[0], 6, 'survivors', null]];
+    for (const [who, step, action, campaign] of opening) ok(veto(f, who, step, action, campaign));
+    ok(R.lockLineup(f.db, { matchId: f.matchId, steamid: A[0], steamids: A.slice(0, 4), timers: TIMERS, now: at(4) }));
+    ok(R.lockLineup(f.db, { matchId: f.matchId, steamid: B[0], steamids: B.slice(0, 4), timers: TIMERS, now: at(4) }));
+    ok(R.attachBooking(f.db, { matchId: f.matchId, bookingId: fakeBooking(f, at(5)), now: at(5) }));
+    ok(R.startConnect(f.db, { matchId: f.matchId, graceMinutes: 15, now: at(5) }));
+    ok(R.startLive(f.db, { matchId: f.matchId, now: at(6) }));
+    ok(R.linkGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, gameMatchId: fakeMatch(f), now: at(6) }));
+    // Before game 1 has a result the engine is waiting, and a pick is refused.
+    expect(veto(f, A[0], 7, 'pick', POOL7[4]!)).toEqual({ ok: false, error: 'step_taken' });
+    expect(R.openPick(f.db, { matchId: f.matchId, timers: TIMERS, now: at(30) })).toEqual({ ok: false, error: 'changed' });
+    ok(R.recordGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, scoreA: 300, scoreB: 700, forfeit: null, now: at(60) }));
+    const st = R.roomState(f.db, P.getMatch(f.db, f.matchId)!);
+    expect(st.next).toEqual({ kind: 'pick', by: 'a', game: 2 });
+    expect(ok(R.openPick(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) }))).toMatchObject({ status: 'live', deadline: new Date(at(60).getTime() + 60_000).toISOString() });
+    expect(R.openPick(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) })).toEqual({ ok: false, error: 'not_live_phase' });
+    expect(veto(f, B[0], 7, 'pick', POOL7[4]!, 61)).toEqual({ ok: false, error: 'not_your_turn' });
+    const picked = ok(veto(f, A[0], 7, 'pick', POOL7[4]!, 61));
+    expect(picked).toMatchObject({ status: 'live', deadline: new Date(at(61).getTime() + 60_000).toISOString() });
+    const sided = ok(veto(f, B[0], 8, 'infected', null, 62));
+    expect(sided).toMatchObject({ status: 'live', deadline: null });
+    expect(game(f, 2)).toMatchObject({ campaign: POOL7[4], picked_by: f.entryA, side_by: f.entryB, first_survivors: f.entryA, match_id: null });
+  });
+
+  it('holds and resets a booked room only once its booking is ending', async () => {
+    const f = await toBooking();
+    const bookingId = fakeBooking(f, at(5));
+    ok(R.attachBooking(f.db, { matchId: f.matchId, bookingId, now: at(5) }));
+    ok(R.startConnect(f.db, { matchId: f.matchId, graceMinutes: 15, now: at(5) }));
+    expect(ok(R.holdMatch(f.db, { matchId: f.matchId, by: null, reason: 'no_show_both', now: at(20) })).status).toBe('admin_hold');
+    expect(R.resetRoom(f.db, { matchId: f.matchId, by: ADMIN, now: at(21) })).toEqual({ ok: false, error: 'booking_open' });
+    f.db.prepare('UPDATE bookings SET ending_at = ? WHERE id = ?').run(at(21).toISOString(), bookingId);
+    const m = ok(R.resetRoom(f.db, { matchId: f.matchId, by: ADMIN, now: at(22) }));
+    expect(m).toMatchObject({ status: 'waiting', booking_id: null, booked_at: null, confirm_a_at: null, dispute_reason: null });
+    expect(R.gamesOf(f.db, f.matchId)).toEqual([]);
+  });
+
+  it('holds a live match and a confirm window', async () => {
+    const f = await toLive();
+    expect(ok(R.holdMatch(f.db, { matchId: f.matchId, by: ADMIN, reason: 'crash', now: at(20) })).status).toBe('admin_hold');
+    const g = await toLive();
+    ok(R.startConfirm(g.db, { matchId: g.matchId, timers: TIMERS, now: at(60) }));
+    expect(ok(R.holdMatch(g.db, { matchId: g.matchId, by: ADMIN, reason: 'look', now: at(61) }))).toMatchObject({ status: 'admin_hold', deadline: null });
+  });
+
+  it('resumes a live pick step and a confirm window, and leaves a connect deadline alone', async () => {
+    const f = await toBooking();
+    ok(R.attachBooking(f.db, { matchId: f.matchId, bookingId: fakeBooking(f, at(5)), now: at(5) }));
+    ok(R.startConnect(f.db, { matchId: f.matchId, graceMinutes: 15, now: at(5) }));
+    expect(R.resumeDeadline(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) })).toEqual({ ok: false, error: 'changed' });
+    ok(R.startLive(f.db, { matchId: f.matchId, now: at(6) }));
+    f.db.prepare('UPDATE event_matches SET deadline = ? WHERE id = ?').run(at(7).toISOString(), f.matchId);
+    expect(ok(R.resumeDeadline(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) })).deadline).toBe(new Date(at(60).getTime() + 60_000).toISOString());
+    ok(R.startConfirm(f.db, { matchId: f.matchId, timers: TIMERS, now: at(61) }));
+    expect(ok(R.resumeDeadline(f.db, { matchId: f.matchId, timers: TIMERS, now: at(120) })).deadline).toBe(at(135).toISOString());
   });
 });

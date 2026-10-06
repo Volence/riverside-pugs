@@ -1452,6 +1452,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   event_ready_minutes: '10',
   event_veto_step_seconds: '60',
   event_lineup_minutes: '5',
+  // Tournaments plan T3b: the confirm window after a series' last game.
+  event_confirm_minutes: '15',
   // Scrim board plan 1: campaigns the accepting captain may add on top of the
   // poster's list.
   scrim_accept_campaigns_max: '2',
@@ -1860,6 +1862,29 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'event_matches', 'ready_b_at', 'TEXT');
   ensureColumn(db, 'event_matches', 'deadline', 'TEXT');
   ensureColumn(db, 'event_matches', 'hold_reason', 'TEXT');
+  // Tournaments plan T3b: the series. booked_at is when the engine made the
+  // match's booking (the 10 minute "waiting for a server" alert counts from
+  // it, server_alerted_at says it went out); the confirm window and a
+  // dispute live on the match. A game's scores, the side that forfeited it
+  // by !gg (forfeit_side, no scores needed then), the one chapter a
+  // tiebreak replays and when it ended live on event_games. winner (an
+  // entry id) is only a convenience for views, written with the scores by
+  // room.ts recordGame from the same rule seriesRules.ts uses (forfeit,
+  // else the higher score, else null); the series arithmetic never reads it.
+  ensureColumn(db, 'event_matches', 'booked_at', 'TEXT');
+  ensureColumn(db, 'event_matches', 'server_alerted_at', 'TEXT');
+  ensureColumn(db, 'event_matches', 'confirm_a_at', 'TEXT');
+  ensureColumn(db, 'event_matches', 'confirm_b_at', 'TEXT');
+  ensureColumn(db, 'event_matches', 'dispute_side', "TEXT CHECK (dispute_side IN ('a','b'))");
+  ensureColumn(db, 'event_matches', 'dispute_by', 'TEXT');
+  ensureColumn(db, 'event_matches', 'dispute_reason', 'TEXT');
+  ensureColumn(db, 'event_matches', 'disputed_at', 'TEXT');
+  ensureColumn(db, 'event_games', 'score_a', 'INTEGER');
+  ensureColumn(db, 'event_games', 'score_b', 'INTEGER');
+  ensureColumn(db, 'event_games', 'forfeit_side', "TEXT CHECK (forfeit_side IN ('a','b'))");
+  ensureColumn(db, 'event_games', 'winner', 'INTEGER REFERENCES event_entries(id)');
+  ensureColumn(db, 'event_games', 'map', 'TEXT');
+  ensureColumn(db, 'event_games', 'ended_at', 'TEXT');
   // Moderators: may work tickets and nothing else. Deliberately not read by
   // serverAdmins.ts, so the flag grants nothing on a game server.
   ensureColumn(db, 'players', 'is_mod', 'INTEGER NOT NULL DEFAULT 0');
@@ -2332,6 +2357,11 @@ export function openDb(path: string): DB {
   // which is never 0 (a playlist has at least one campaign).
   ensureColumn(db, 'bookings', 'games_allowed', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'bookings', 'close_at', 'TEXT');
+  // Tournaments plan T3b: a tiebreak game is one chapter, so the runner is
+  // told which map to load rather than the campaign's first (loadNext);
+  // present_now is who was on the box at the last minute watch, per side.
+  ensureColumn(db, 'bookings', 'next_map', 'TEXT');
+  ensureColumn(db, 'booking_sides', 'present_now', 'INTEGER NOT NULL DEFAULT 0');
   db.prepare('UPDATE bookings SET games_allowed = json_array_length(playlist_json) WHERE games_allowed = 0').run();
   // Rulesets editor: the ruleset a copy was made from (null for the three
   // templates and for rows from before the editor), and the ruleset a booking

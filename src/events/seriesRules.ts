@@ -50,8 +50,9 @@ const scored = (g: SeriesGame): boolean => g.scoreA !== null && g.scoreB !== nul
 const isSeriesGame = (g: SeriesGame): boolean => g.tiebreakOf === null;
 
 /** The winner of one row, derived from its forfeit or its scores; null
- *  while tied or unplayed. */
-function winnerOf(g: SeriesGame): Side | null {
+ *  while tied or unplayed. room.ts recordGame writes event_games.winner
+ *  (a convenience for views) from this, so the two never disagree. */
+export function winnerOf(g: SeriesGame): Side | null {
   if (g.forfeit !== null) return other(g.forfeit);
   if (g.scoreA !== null && g.scoreB !== null && g.scoreA !== g.scoreB) return g.scoreA > g.scoreB ? 'a' : 'b';
   return null;

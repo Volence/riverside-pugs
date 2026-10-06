@@ -127,8 +127,10 @@ function stageComplete(db: DB, stage: E.StageRow): boolean {
 }
 
 /** Inside serialize only. */
-async function report(db: DB, m: P.MatchRow, by: string | null, result: V.ResultInput, now?: Date): Promise<V.Checked<P.MatchRow>> {
-  if (m.bm_match_id === null) return P.recordResult(db, { matchId: m.id, by, result, bracket: null, now });
+async function report(
+  db: DB, m: P.MatchRow, by: string | null, result: V.ResultInput, now?: Date, source: 'auto' | 'admin' = 'admin',
+): Promise<V.Checked<P.MatchRow>> {
+  if (m.bm_match_id === null) return P.recordResult(db, { matchId: m.id, by, result, bracket: null, now, source });
   const stage = E.getStage(db, m.stage_id)!;
   if (stage.status !== 'live') return V.fail('not_live');
   const base = P.stageBracket(stage);
@@ -141,7 +143,7 @@ async function report(db: DB, m: P.MatchRow, by: string | null, result: V.Result
     throw err;
   }
   const moved = movedRooms(db, stage, m.id, data);
-  const record = () => P.recordResult(db, { matchId: m.id, by, result, bracket: { data, baseRev: stage.bracket_rev }, now });
+  const record = () => P.recordResult(db, { matchId: m.id, by, result, bracket: { data, baseRev: stage.bracket_rev }, now, source });
   if (moved.length === 0 || moved.some((row) => R.vetoActions(db, row.id).length > 0 || R.lineupsOf(db, row.id).length > 0)) return record();
   // Every room the new bracket would change is still in its ready check:
   // reset each (the clock reopens it with the corrected teams) and record,
@@ -232,6 +234,30 @@ export async function forfeitMatch(
       await settleEvent(db, { eventId: o.eventId, now: o.now });
     } catch (err) {
       console.error(`[events] settle after a forfeit in event ${o.eventId} failed:`, err instanceof Error ? err.message : err);
+    }
+  }
+  return r;
+}
+
+/** The series engine's result (plan T3b Ruling 9): the clock recorded it, so
+ *  by is null and result_source is 'auto' (or 'forfeit' for a Bo2 ended by
+ *  a !gg). expect re-checks the match inside the event's chain (a dispute or
+ *  an admin result that landed first wins), then the event settles as after
+ *  any result. */
+export async function autoResultFlow(
+  db: DB, o: { eventId: number; matchId: number; result: V.ResultInput; expect: (m: P.MatchRow) => boolean; now?: Date },
+): Promise<V.Checked<P.MatchRow>> {
+  const r = await serialize(o.eventId, async (): Promise<V.Checked<P.MatchRow>> => {
+    const m = P.getMatch(db, o.matchId);
+    if (!m || m.event_id !== o.eventId) return V.fail('match_not_found');
+    if (!o.expect(m)) return V.fail('changed');
+    return report(db, m, null, o.result, o.now, 'auto');
+  });
+  if (r.ok) {
+    try {
+      await settleEvent(db, { eventId: o.eventId, now: o.now });
+    } catch (err) {
+      console.error(`[events] settle after an automatic result in event ${o.eventId} failed:`, err instanceof Error ? err.message : err);
     }
   }
   return r;

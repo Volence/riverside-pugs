@@ -25,6 +25,8 @@ export interface MatchRow {
   created_at: string; finished_at: string | null;
   room_opened_at: string | null; room_higher: 'a' | 'b' | null; room_seed: number | null; ready_a_at: string | null;
   ready_b_at: string | null; deadline: string | null; hold_reason: string | null;
+  booked_at: string | null; server_alerted_at: string | null; confirm_a_at: string | null; confirm_b_at: string | null;
+  dispute_side: 'a' | 'b' | null; dispute_by: string | null; dispute_reason: string | null; disputed_at: string | null;
 }
 export interface NewRound { round: number; pairs: [number, number][]; bye: number | null }
 export interface StagePlan { stageId: number; entrants: number[]; bracket: BracketData | null; rounds: NewRound[] }
@@ -159,9 +161,14 @@ function laterRound(db: DB, stageId: number, round: number): boolean {
  *  library took the result, built on baseRev. by null is the engine (a
  *  disqualification forfeit, Ruling 9). */
 export function recordResult(
-  db: DB, o: { matchId: number; by: string | null; result: V.ResultInput; bracket: { data: BracketData; baseRev: number } | null; now?: Date },
+  db: DB, o: {
+    matchId: number; by: string | null; result: V.ResultInput; bracket: { data: BracketData; baseRev: number } | null; now?: Date;
+    /** 'auto' is the series engine's result (plan T3b); a forfeit is always 'forfeit'. */
+    source?: 'auto' | 'admin';
+  },
 ): V.Checked<MatchRow> {
   const at = iso(o.now);
+  const source = o.result.forfeit ? 'forfeit' : o.source ?? 'admin';
   return db.transaction((): V.Checked<MatchRow> => {
     const m = getMatch(db, o.matchId);
     if (!m) return V.fail('match_not_found');
@@ -197,9 +204,9 @@ export function recordResult(
     }
     db.prepare(
       'UPDATE event_matches SET status = ?, winner_entry = ?, score_a = ?, score_b = ?, result_source = ?, finished_at = ?, deadline = NULL WHERE id = ?',
-    ).run(o.result.forfeit ? 'forfeit' : 'done', winner, o.result.scoreA, o.result.scoreB, o.result.forfeit ? 'forfeit' : 'admin', at, m.id);
+    ).run(o.result.forfeit ? 'forfeit' : 'done', winner, o.result.scoreA, o.result.scoreB, source, at, m.id);
     E.logEvent(db, ev.id, o.by, 'result_recorded', at, {
-      matchId: m.id, winner, scoreA: o.result.scoreA, scoreB: o.result.scoreB, forfeit: o.result.forfeit, correction,
+      matchId: m.id, winner, scoreA: o.result.scoreA, scoreB: o.result.scoreB, forfeit: o.result.forfeit, correction, source,
     });
     return V.ok(getMatch(db, m.id)!);
   })();

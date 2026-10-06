@@ -415,4 +415,27 @@ describe('event flow, final review fixes', () => {
     await F.settleEvent(f.db, { eventId: f.eventId, now: NOW });
     expect(P.getMatch(f.db, f.matchId)).toMatchObject({ status: 'forfeit', winner_entry: f.entryA });
   });
+
+  it('autoResultFlow records a result with result_source auto, only while expect holds (plan T3b)', async () => {
+    const f = await roomFixture();
+    ok(R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW }));
+    const early = await F.autoResultFlow(f.db, { eventId: f.eventId, matchId: f.matchId, result: { winner: 'b', scoreA: 1, scoreB: 2, forfeit: false }, expect: (m) => m.status === 'confirming', now: NOW });
+    expect(early).toEqual({ ok: false, error: 'changed' });
+    // Test setup only: startConfirm needs a live match.
+    f.db.prepare("UPDATE event_matches SET status = 'confirming' WHERE id = ?").run(f.matchId);
+    const r = await F.autoResultFlow(f.db, { eventId: f.eventId, matchId: f.matchId, result: { winner: 'b', scoreA: 1, scoreB: 2, forfeit: false }, expect: (m) => m.status === 'confirming', now: NOW });
+    expect(r.ok && r.value).toMatchObject({ status: 'done', winner_entry: f.entryB, score_a: 1, score_b: 2, result_source: 'auto', deadline: null });
+    const log = f.db.prepare("SELECT actor, detail FROM event_log WHERE action = 'result_recorded'").get() as { actor: string | null; detail: string };
+    expect(log.actor).toBeNull();
+    expect(JSON.parse(log.detail)).toMatchObject({ correction: false, source: 'auto' });
+  });
+
+  it('autoResultFlow takes a series-ending forfeit (a Bo2 !gg) as result_source forfeit (plan T3b)', async () => {
+    const f = await roomFixture();
+    ok(R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW }));
+    const r = await F.autoResultFlow(f.db, { eventId: f.eventId, matchId: f.matchId, result: { winner: 'a', scoreA: null, scoreB: null, forfeit: true }, expect: () => true, now: NOW });
+    expect(r.ok && r.value).toMatchObject({ status: 'forfeit', winner_entry: f.entryA, result_source: 'forfeit' });
+    const log = f.db.prepare("SELECT detail FROM event_log WHERE action = 'result_recorded'").get() as { detail: string };
+    expect(JSON.parse(log.detail)).toMatchObject({ source: 'forfeit' });
+  });
 });

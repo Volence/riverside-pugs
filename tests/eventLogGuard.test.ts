@@ -11,7 +11,8 @@ import { createBracket, reportResult } from '../src/events/bracket.js';
 import { ADMIN, NOW, START, eventFixture, stageBody, type Fixture } from './eventFixture.js';
 import { A, B, entryFixture, rosterA, type EntryFixture } from './entryFixture.js';
 import { SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
-import { TIMERS, roomFixture, type RoomFixture } from './roomFixture.js';
+import { POOL7, TIMERS, driveToBooking, fakeBooking, fakeMatch, roomFixture, type RoomFixture } from './roomFixture.js';
+import { presetConfig } from '../src/events/vetoConfig.js';
 
 /**
  * Spec, Error handling: every event state change is one transaction with an
@@ -365,7 +366,7 @@ describe('event_log guard', () => {
     const ROOM_TABLES = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:event_vetoes|event_games|event_lineups|event_entry_prefs|event_campaign_prefs)\b/gi;
     const ROOM_READS = new Set([
       'roomTimers', 'vetoActions', 'vetoInput', 'roomState', 'gamesOf', 'lineupsOf', 'sideOf', 'entryOn', 'playableOf', 'busyEntries', 'isParticipant',
-      'entryPrefs', 'campaignPrefs', 'lastFour', 'autoFour',
+      'entryPrefs', 'campaignPrefs', 'lastFour', 'autoFour', 'seriesGames', 'lineupFour', 'matchOfBooking',
     ]);
     const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
     const open = (f: RoomFixture) => {
@@ -388,6 +389,48 @@ describe('event_log guard', () => {
         if (!r.ok) throw new Error(r.error);
       }
     };
+    // Plan T3b: the series. Every step past lockLineup, from the booking on.
+    const must = <T>(r: V.Checked<T>): T => { if (!r.ok) throw new Error(r.error); return r.value; };
+    const game1 = (f: RoomFixture) => R.gamesOf(f.db, f.matchId).find((g) => g.ordinal === 1)!;
+    const booked = (f: RoomFixture) => {
+      driveToBooking(f);
+      must(R.attachBooking(f.db, { matchId: f.matchId, bookingId: fakeBooking(f, at(5)), now: at(5) }));
+    };
+    const connecting = (f: RoomFixture) => {
+      booked(f);
+      must(R.startConnect(f.db, { matchId: f.matchId, graceMinutes: 15, now: at(5) }));
+    };
+    const playing = (f: RoomFixture) => {
+      connecting(f);
+      must(R.startLive(f.db, { matchId: f.matchId, now: at(6) }));
+    };
+    const linked = (f: RoomFixture) => {
+      playing(f);
+      must(R.linkGame(f.db, { matchId: f.matchId, gameId: game1(f).id, gameMatchId: fakeMatch(f), now: at(6) }));
+    };
+    const confirming = (f: RoomFixture) => {
+      playing(f);
+      must(R.startConfirm(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) }));
+    };
+    // room.test.ts's loser picks opening, driven to a recorded game 1 (the
+    // stage is rewritten before the room opens: test setup only).
+    const pickDue = (f: RoomFixture) => {
+      f.db.prepare('UPDATE event_stages SET campaign_pool_json = ?, veto_json = ? WHERE id = ?')
+        .run(JSON.stringify(POOL7), JSON.stringify(presetConfig('loser_picks', 7)), f.stageId);
+      bothReady(f);
+      const opening: [string, number, string, string | null][] = [[A[0]!, 0, 'first', null], [A[0]!, 1, 'ban', POOL7[0]!], [B[0]!, 2, 'ban', POOL7[1]!],
+        [A[0]!, 3, 'ban', POOL7[2]!], [B[0]!, 4, 'ban', POOL7[3]!], [A[0]!, 5, 'pick', POOL7[5]!], [B[0]!, 6, 'survivors', null]];
+      for (const [steamid, step, action, campaign] of opening) {
+        must(R.actVeto(f.db, { matchId: f.matchId, steamid, step, action, campaign, timers: TIMERS, now: at(2) }));
+      }
+      must(R.lockLineup(f.db, { matchId: f.matchId, steamid: A[0]!, steamids: A.slice(0, 4), timers: TIMERS, now: at(4) }));
+      must(R.lockLineup(f.db, { matchId: f.matchId, steamid: B[0]!, steamids: B.slice(0, 4), timers: TIMERS, now: at(4) }));
+      must(R.attachBooking(f.db, { matchId: f.matchId, bookingId: fakeBooking(f, at(5)), now: at(5) }));
+      must(R.startConnect(f.db, { matchId: f.matchId, graceMinutes: 15, now: at(5) }));
+      must(R.startLive(f.db, { matchId: f.matchId, now: at(6) }));
+      must(R.linkGame(f.db, { matchId: f.matchId, gameId: game1(f).id, gameMatchId: fakeMatch(f), now: at(6) }));
+      must(R.recordGame(f.db, { matchId: f.matchId, gameId: game1(f).id, scoreA: 300, scoreB: 700, forfeit: null, now: at(30) }));
+    };
     const ROOM_MUTATIONS: Record<string, { action: string; actor: string | null; setup: (f: RoomFixture) => void; run: (f: RoomFixture) => V.Checked<unknown> }> = {
       openRoom: { action: 'room_opened', actor: null, setup: () => {}, run: (f) => R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW }) },
       readyUp: { action: 'room_ready', actor: A[0]!, setup: open, run: (f) => R.readyUp(f.db, { matchId: f.matchId, steamid: A[0]!, timers: TIMERS, now: at(1) }) },
@@ -405,6 +448,32 @@ describe('event_log guard', () => {
       savePrefs: {
         action: 'prefs_saved', actor: A[0]!, setup: () => {},
         run: (f) => R.savePrefs(f.db, { entryId: f.entryA, by: A[0]!, staff: false, prefs: { defaultFour: null, side: 'survivors', campaigns: {} }, now: at(0) }),
+      },
+      attachBooking: {
+        action: 'match_booked', actor: null, setup: driveToBooking,
+        run: (f) => R.attachBooking(f.db, { matchId: f.matchId, bookingId: fakeBooking(f, at(5)), now: at(5) }),
+      },
+      noteServerAlert: { action: 'server_wait_alerted', actor: null, setup: booked, run: (f) => R.noteServerAlert(f.db, { matchId: f.matchId, now: at(15) }) },
+      startConnect: { action: 'match_connect', actor: null, setup: booked, run: (f) => R.startConnect(f.db, { matchId: f.matchId, graceMinutes: 15, now: at(5) }) },
+      startLive: { action: 'match_live', actor: null, setup: connecting, run: (f) => R.startLive(f.db, { matchId: f.matchId, now: at(6) }) },
+      linkGame: {
+        action: 'game_started', actor: null, setup: connecting,
+        run: (f) => R.linkGame(f.db, { matchId: f.matchId, gameId: game1(f).id, gameMatchId: fakeMatch(f), now: at(6) }),
+      },
+      recordGame: {
+        action: 'game_recorded', actor: null, setup: linked,
+        run: (f) => R.recordGame(f.db, { matchId: f.matchId, gameId: game1(f).id, scoreA: 1, scoreB: 2, forfeit: null, now: at(30) }),
+      },
+      addTiebreak: {
+        action: 'tiebreak_added', actor: null, setup: playing,
+        run: (f) => R.addTiebreak(f.db, { matchId: f.matchId, ofGameId: game1(f).id, map: 'l4d_vs_hospital05_rooftop', firstSurvivors: 'a', now: at(30) }),
+      },
+      openPick: { action: 'pick_opened', actor: null, setup: pickDue, run: (f) => R.openPick(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) }) },
+      startConfirm: { action: 'match_confirming', actor: null, setup: playing, run: (f) => R.startConfirm(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) }) },
+      confirmResult: { action: 'result_confirmed', actor: A[0]!, setup: confirming, run: (f) => R.confirmResult(f.db, { matchId: f.matchId, steamid: A[0]!, now: at(61) }) },
+      disputeMatch: {
+        action: 'match_disputed', actor: B[0]!, setup: confirming,
+        run: (f) => R.disputeMatch(f.db, { matchId: f.matchId, steamid: B[0]!, reason: 'They had five', now: at(61) }),
       },
     };
     const rows = (f: RoomFixture) => JSON.stringify(['event_matches', 'event_vetoes', 'event_games', 'event_lineups', 'event_entry_prefs', 'event_campaign_prefs']

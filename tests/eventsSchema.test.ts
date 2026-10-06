@@ -113,11 +113,23 @@ describe('T1b columns', () => {
     const cols = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
     expect(cols('event_matches')).toEqual(expect.arrayContaining(['room_opened_at', 'room_higher', 'room_seed', 'ready_a_at', 'ready_b_at', 'deadline', 'hold_reason']));
     expect(cols('event_vetoes')).toEqual(['id', 'event_match_id', 'step', 'side', 'entry_id', 'action', 'campaign', 'by_steamid', 'auto', 'at']);
-    expect(cols('event_games')).toEqual(['id', 'event_match_id', 'ordinal', 'campaign', 'picked_by', 'side_by', 'first_survivors', 'match_id', 'tiebreak_of', 'created_at']);
+    expect(cols('event_games')).toEqual(['id', 'event_match_id', 'ordinal', 'campaign', 'picked_by', 'side_by', 'first_survivors', 'match_id', 'tiebreak_of', 'created_at',
+      // plan T3b's columns follow
+      'score_a', 'score_b', 'forfeit_side', 'winner', 'map', 'ended_at']);
     expect(cols('event_lineups')).toEqual(['id', 'event_match_id', 'game', 'entry_id', 'steamids', 'locked_by', 'auto', 'locked_at']);
     expect(cols('event_entry_prefs')).toEqual(['entry_id', 'default_four', 'side', 'updated_by', 'updated_at']);
     expect(cols('event_campaign_prefs')).toEqual(['entry_id', 'stage_id', 'campaigns', 'updated_by', 'updated_at']);
     const setting = (k: string) => (db.prepare('SELECT value FROM settings WHERE key = ?').get(k) as { value: string }).value;
     expect([setting('event_ready_minutes'), setting('event_veto_step_seconds'), setting('event_lineup_minutes')]).toEqual(['10', '60', '5']);
+  });
+
+  it('has the series columns and the confirm window setting (plan T3b)', () => {
+    const db = openDb(':memory:');
+    const cols = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
+    expect(cols('event_matches')).toEqual(expect.arrayContaining(['booked_at', 'server_alerted_at', 'confirm_a_at', 'confirm_b_at', 'dispute_side', 'dispute_by', 'dispute_reason', 'disputed_at']));
+    expect(cols('event_games')).toEqual(expect.arrayContaining(['score_a', 'score_b', 'forfeit_side', 'winner', 'map', 'ended_at']));
+    expect(cols('bookings')).toContain('next_map');
+    expect(cols('booking_sides')).toContain('present_now');
+    expect((db.prepare("SELECT value FROM settings WHERE key = 'event_confirm_minutes'").get() as { value: string }).value).toBe('15');
   });
 });
