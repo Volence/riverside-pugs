@@ -133,6 +133,23 @@ describe('stages', () => {
       expect(err(E.reorderStages(f.db, { eventId: f.eventId, by: ADMIN, order: [f.s2, f.s1], now: NOW }))).toBe('stages_locked');
     }
   });
+
+  it('stores a round schedule on a stage at any status but finished or cancelled, sorted, and logs it (plan T4)', () => {
+    const f = eventFixture('draft');
+    const rows = [{ round: 2, at: '2026-10-21T21:00:00Z', from: '2026-10-19T00:00:00Z', to: '2026-10-25T23:59:59Z' }, { round: 1, at: '2026-10-14T21:00:00Z', from: '2026-10-12T00:00:00Z', to: '2026-10-18T23:59:59Z' }];
+    f.db.prepare("UPDATE event_stages SET scheduling = 'window' WHERE id = ?").run(f.s1);
+    const r = E.setRoundSchedule(f.db, { eventId: f.eventId, stageId: f.s1, by: ADMIN, rounds: rows, now: NOW });
+    expect(r.ok).toBe(true);
+    expect(E.scheduleOf(E.getStage(f.db, f.s1)!).map((x) => x.round)).toEqual([1, 2]);
+    expect(f.db.prepare('SELECT action, actor, detail FROM event_log ORDER BY id DESC LIMIT 1').get()).toMatchObject({ action: 'schedule_set', actor: ADMIN });
+    expect(E.setRoundSchedule(f.db, { eventId: f.eventId, stageId: f.s2, by: ADMIN, rounds: rows, now: NOW })).toEqual({ ok: false, error: 'bad_schedule' });
+    expect(E.setRoundSchedule(f.db, { eventId: f.eventId, stageId: f.s2, by: ADMIN, rounds: [{ round: 1, at: '2026-10-24T21:00:00Z' }], now: NOW }).ok).toBe(true);
+    expect(E.setRoundSchedule(f.db, { eventId: f.eventId, stageId: 999, by: ADMIN, rounds: [], now: NOW })).toEqual({ ok: false, error: 'stage_not_found' });
+    f.db.prepare("UPDATE event_stages SET status = 'finished' WHERE id = ?").run(f.s1);
+    expect(E.setRoundSchedule(f.db, { eventId: f.eventId, stageId: f.s1, by: ADMIN, rounds: [], now: NOW })).toEqual({ ok: false, error: 'schedule_locked' });
+    f.db.prepare("UPDATE events SET status = 'cancelled' WHERE id = ?").run(f.eventId);
+    expect(E.setRoundSchedule(f.db, { eventId: f.eventId, stageId: f.s2, by: ADMIN, rounds: [], now: NOW })).toEqual({ ok: false, error: 'schedule_locked' });
+  });
 });
 
 describe('publishEvent', () => {

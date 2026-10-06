@@ -86,6 +86,11 @@ export function stageSettingsOf(s: StageRow): V.StageSettings {
   };
 }
 
+/** The per-round schedule (plan T4 Ruling 2), empty when none was set. */
+export function scheduleOf(s: StageRow): V.RoundSchedule[] {
+  return s.schedule_json ? JSON.parse(s.schedule_json) as V.RoundSchedule[] : [];
+}
+
 /** The lists a stage is checked against, read now (Ruling 20). PUG is left
  *  out of rulesetIds (it is for PUGs, not events) and named separately so a
  *  stage that picks it gets its own refusal, not a generic "no such ruleset". */
@@ -299,6 +304,31 @@ export function reorderStages(db: DB, o: { eventId: number; by: string; order: u
     touch(db, ev.id, at);
     logEvent(db, ev.id, o.by, 'stages_reordered', at, { order });
     return V.ok(stagesOf(db, ev.id));
+  })();
+}
+
+/** A schedule may change while the event runs (a league's later weeks, a
+ *  Swiss round paired later), so this is not behind STAGES_LOCKED: only a
+ *  finished or cancelled event, or a finished stage, refuses it. The rows
+ *  are stamped onto matches by src/events/play.ts (insertRound for rounds
+ *  written later, applySchedule for the ones that exist). */
+const SCHEDULE_LOCKED: ReadonlySet<V.EventStatus> = new Set<V.EventStatus>(['finished', 'cancelled']);
+
+export function setRoundSchedule(db: DB, o: { eventId: number; stageId: number; by: string; rounds: unknown; now?: Date }): EventResult<StageRow> {
+  const at = iso(o.now);
+  return db.transaction((): EventResult<StageRow> => {
+    const ev = getEvent(db, o.eventId);
+    if (!ev) return V.fail('not_found');
+    if (SCHEDULE_LOCKED.has(ev.status)) return V.fail('schedule_locked');
+    const s = ownStage(db, ev.id, o.stageId);
+    if (!s) return V.fail('stage_not_found');
+    if (s.status === 'finished') return V.fail('schedule_locked');
+    const p = V.parseRoundSchedule(o.rounds, s.scheduling);
+    if (!p.ok) return p;
+    db.prepare('UPDATE event_stages SET schedule_json = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(p.value), at, s.id);
+    touch(db, ev.id, at);
+    logEvent(db, ev.id, o.by, 'schedule_set', at, { stageId: s.id, ordinal: s.ordinal, rounds: p.value.map((r) => r.round) });
+    return V.ok(getStage(db, s.id)!);
   })();
 }
 
